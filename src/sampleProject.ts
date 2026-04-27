@@ -5,6 +5,11 @@ export const sampleProject: ProjectManifest = {
   name: "Agentic Motion Primer",
   resolution: { width: 1920, height: 1080 },
   assetsPath: "clipper/projects/prj_v01_sample/assets",
+  assets: [
+    { id: "ast_folder_media", name: "media", kind: "folder", children: [{ id: "ast_grid_ref", name: "grid-reference.png", kind: "file", path: "clipper/projects/prj_v01_sample/assets/media/grid-reference.png" }] },
+    { id: "ast_folder_audio", name: "audio", kind: "folder", children: [] },
+    { id: "ast_brand", name: "brand-palette.json", kind: "file", path: "clipper/projects/prj_v01_sample/assets/brand-palette.json" },
+  ],
   scenes: [
     {
       id: "scn_opening",
@@ -15,13 +20,12 @@ export const sampleProject: ProjectManifest = {
           name: "Grid Reveal",
           filePath: "clipper/projects/prj_v01_sample/scn_opening/prt_grid_reveal.ts",
           duration: 7,
-          kind: "frame",
           frame: { width: 1920, height: 1080, style: { background: "#050505" } },
           background: { id: "background", name: "Background", style: { background: "#050505" }, elements: [] },
           snapshot: [
-            { at: "00:01", description: "Blue drafting lines establish the fixed 1920x1080 frame." },
+            { at: "00:01", description: "Off-white drafting lines establish the fixed 1920x1080 frame." },
             { at: "00:04", description: "The title block slides into the left third while metadata cards queue up." },
-            { at: "00:07", description: "Ending with the hero object ready for a shared-id transition." },
+            { at: "00:07", description: "Ending with the hero object ready for a shared-id pan." },
           ],
           zoomMarkers: [
             { id: "zom_title", start: 2.2, duration: 2.4, focus: { x: 580, y: 438 }, scale: 1.5 },
@@ -44,7 +48,7 @@ export const sampleProject: ProjectManifest = {
               type: "rect",
               selector: "[data-object-id='hero-panel']",
               bounds: { x: 1240, y: 190, width: 430, height: 570 },
-              style: { background: "#0099ff", borderRadius: 34, boxShadow: "0 28px 80px rgba(0,153,255,0.24)" },
+              style: { background: "var(--clipper-accent)", borderRadius: 34, boxShadow: "0 28px 80px rgb(var(--clipper-accent-rgb) / 0.24)" },
               motion: { y: [-72, 0], rotate: [-3, 0], delay: 0.45, duration: 1.25, ease: "circOut" },
             },
             {
@@ -61,13 +65,12 @@ export const sampleProject: ProjectManifest = {
         },
         {
           id: "prt_blank_pause",
-          name: "Black Spacer",
+          name: "Black Pause",
           filePath: "clipper/projects/prj_v01_sample/scn_opening/prt_blank_pause.ts",
           duration: 3,
-          kind: "blank",
           frame: { width: 1920, height: 1080, style: { background: "#000000" } },
           background: { id: "background", name: "Background", style: { background: "#000000" }, elements: [] },
-          snapshot: [{ at: "00:03", description: "A quiet black spacer keeps the linear timeline readable." }],
+          snapshot: [{ at: "00:03", description: "A quiet black empty composition keeps the linear timeline readable." }],
           zoomMarkers: [],
           translationMarkers: [],
           objects: [],
@@ -77,7 +80,6 @@ export const sampleProject: ProjectManifest = {
           name: "Animated Dot Template",
           filePath: "clipper/projects/prj_v01_sample/scn_opening/prt_animated_dot.ts",
           duration: 5,
-          kind: "frame",
           frame: { width: 1920, height: 1080, style: { background: "#06070b" } },
           background: {
             id: "background",
@@ -85,15 +87,16 @@ export const sampleProject: ProjectManifest = {
             style: {
               background: "#06070b",
             },
+            stretchToElements: true,
             elements: [
               {
                 id: "const-dot-field",
                 name: "Constant Dot Field",
                 type: "rect",
                 selector: "[data-object-id='const-dot-field']",
-                bounds: { x: -160, y: -120, width: 2240, height: 1320 },
+                bounds: { x: -1100, y: -600, width: 4200, height: 2280 },
                 style: {
-                  backgroundImage: "radial-gradient(circle, rgba(0,153,255,0.68) 0 3px, transparent 4px)",
+                  backgroundImage: "radial-gradient(circle, rgb(var(--clipper-accent-rgb) / 0.68) 0 3px, transparent 4px)",
                   backgroundSize: "96px 96px",
                   opacity: 0.45,
                 },
@@ -105,7 +108,7 @@ export const sampleProject: ProjectManifest = {
                 type: "rect",
                 selector: "[data-object-id='hero-dot']",
                 bounds: { x: 860, y: 460, width: 200, height: 200 },
-                style: { background: "#0099ff", borderRadius: 999, boxShadow: "0 0 90px rgba(0,153,255,0.55)" },
+                style: { background: "var(--clipper-accent)", borderRadius: 999, boxShadow: "0 0 90px rgb(var(--clipper-accent-rgb) / 0.55)" },
                 motion: { x: [-220, 220], y: [120, -80], duration: 5, ease: "easeInOut", loop: true },
               },
             ],
@@ -123,11 +126,10 @@ export const sampleProject: ProjectManifest = {
           name: "Editor Surface",
           filePath: "clipper/projects/prj_v01_sample/scn_opening/prt_editor_surface.ts",
           duration: 8,
-          kind: "frame",
           frame: { width: 1920, height: 1080, style: { background: "#050505" } },
           background: { id: "background", name: "Background", style: { background: "#050505" }, elements: [] },
           snapshot: [
-            { at: "00:02", description: "The shared hero-title id transitions into an editor annotation." },
+            { at: "00:02", description: "The shared hero-title id pans into an editor annotation." },
             { at: "00:05", description: "Inspector and screenshot selector metadata are emphasized." },
             { at: "00:08", description: "Ending with zoom row and main timeline aligned." },
           ],
@@ -142,7 +144,7 @@ export const sampleProject: ProjectManifest = {
               type: "text",
               selector: "[data-object-id='hero-title']",
               bounds: { x: 120, y: 130, width: 650, height: 110 },
-              content: "Shared IDs unlock hero transitions",
+              content: "Shared IDs unlock hero pans",
               style: { color: "#ffffff", fontSize: 48, fontWeight: 720, letterSpacing: -1.5 },
               layoutId: "hero-title",
               motion: { opacity: [0, 1], duration: 0.7, ease: "easeInOut" },
@@ -153,7 +155,7 @@ export const sampleProject: ProjectManifest = {
               type: "rect",
               selector: "[data-object-id='inspector-card']",
               bounds: { x: 1290, y: 210, width: 420, height: 520 },
-              style: { background: "#111820", border: "2px solid #0099ff", borderRadius: 26 },
+              style: { background: "#111820", border: "2px solid var(--clipper-accent)", borderRadius: 26 },
               motion: { opacity: [0, 1], x: [60, 0], duration: 0.6, ease: "easeOut" },
             },
             {
@@ -162,7 +164,7 @@ export const sampleProject: ProjectManifest = {
               type: "rect",
               selector: "[data-object-id='selector-box-demo']",
               bounds: { x: 350, y: 430, width: 690, height: 330 },
-              style: { background: "rgba(0,153,255,0.12)", border: "3px dashed #0099ff", borderRadius: 8 },
+              style: { background: "rgb(var(--clipper-accent-rgb) / 0.12)", border: "3px dashed var(--clipper-accent)", borderRadius: 8 },
               motion: { opacity: [0, 1], duration: 1, ease: "linear" },
             },
           ],

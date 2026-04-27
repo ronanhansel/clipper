@@ -2,14 +2,22 @@
 
 @layer base {
   :root {
+    --clipper-accent: #f4efe4;
+    --clipper-accent-rgb: 244 239 228;
+    --clipper-accent-strong: #fff8ea;
+    --clipper-accent-hover: #fffaf0;
+    --clipper-accent-foreground: #17120a;
+    --clipper-accent-muted-surface: #2b2925;
+    --clipper-accent-badge: #6e6251;
+
     color: #f7f7f8;
-    background: #08090c;
+    background: #12141a;
     font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     user-select: none;
   }
 
   body {
-    @apply m-0 min-w-[1280px] overflow-hidden bg-[#08090c];
+    @apply m-0 min-w-[1280px] overflow-hidden bg-[#12141a];
   }
 
   button,
@@ -114,5 +122,59 @@
   to {
     opacity: 0;
     transform: translateY(2px) scale(0.98);
+  }
+}
+
+@keyframes clipper-dialog-overlay-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes clipper-dialog-overlay-out {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes clipper-dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.96);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes clipper-dialog-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+}
+
+@keyframes clipper-export-fade-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
   }
 }

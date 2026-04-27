@@ -19,8 +19,8 @@ The payload includes:
 - Treat `clipper/` as the runtime application root. Generated projects and user assets live under `clipper/projects/` and are ignored by git.
 - Keep part durations between `0` and `10` seconds.
 - Keep scene timelines linear; parts are queued by manifest order and must not overlap.
-- Use blank parts as timeline spacers instead of timeline gaps.
-- Preserve shared object ids across adjacent parts when a hero transition is intended.
+- Use empty parts when the timeline needs a quiet pause instead of introducing a separate gap model.
+- Preserve shared object ids across adjacent parts when a hero pan is intended.
 - Treat Motion code in `FrameObject.motion` as editable TypeScript animation intent.
 
 ## Future Codex Adapter

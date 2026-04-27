@@ -14,7 +14,7 @@ export const SelectTrigger = forwardRef<
   <SelectPrimitive.Trigger
     ref={ref}
     className={cn(
-      "flex h-8 w-full items-center justify-between gap-2 rounded-[8px] border border-[#2d313b] bg-[#0d0f14] px-2 py-1.5 text-xs font-semibold text-white outline-none transition placeholder:text-[#69707f] focus:border-[#0099ff] focus:ring-2 focus:ring-[#0099ff]/20 disabled:cursor-not-allowed disabled:opacity-50 [&>span]:truncate",
+      "flex h-8 w-full cursor-pointer items-center justify-between gap-2 rounded-[8px] border border-[#2d313b] bg-[#171920] px-2 py-1.5 text-xs font-semibold text-white outline-none transition placeholder:text-[#69707f] focus:border-[var(--clipper-accent)] focus:ring-2 focus:ring-[rgb(var(--clipper-accent-rgb)/0.2)] disabled:cursor-not-allowed disabled:opacity-50 [&>span]:truncate",
       className,
     )}
     {...props}
@@ -31,7 +31,7 @@ export const SelectScrollUpButton = forwardRef<
   ElementRef<typeof SelectPrimitive.ScrollUpButton>,
   ComponentPropsWithoutRef<typeof SelectPrimitive.ScrollUpButton>
 >(({ className, ...props }, ref) => (
-  <SelectPrimitive.ScrollUpButton ref={ref} className={cn("flex cursor-default items-center justify-center py-1", className)} {...props}>
+  <SelectPrimitive.ScrollUpButton ref={ref} className={cn("flex cursor-pointer items-center justify-center py-1", className)} {...props}>
     <ChevronUp className="size-4" />
   </SelectPrimitive.ScrollUpButton>
 ));
@@ -41,7 +41,7 @@ export const SelectScrollDownButton = forwardRef<
   ElementRef<typeof SelectPrimitive.ScrollDownButton>,
   ComponentPropsWithoutRef<typeof SelectPrimitive.ScrollDownButton>
 >(({ className, ...props }, ref) => (
-  <SelectPrimitive.ScrollDownButton ref={ref} className={cn("flex cursor-default items-center justify-center py-1", className)} {...props}>
+  <SelectPrimitive.ScrollDownButton ref={ref} className={cn("flex cursor-pointer items-center justify-center py-1", className)} {...props}>
     <ChevronDown className="size-4" />
   </SelectPrimitive.ScrollDownButton>
 ));
@@ -55,7 +55,7 @@ export const SelectContent = forwardRef<
     <SelectPrimitive.Content
       ref={ref}
       className={cn(
-        "relative z-50 max-h-96 min-w-[8rem] overflow-hidden rounded-[10px] border border-[#2d313b] bg-[#11141a] text-[#f7f7f8] shadow-[0_18px_60px_rgba(0,0,0,0.42)] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
+        "relative z-50 max-h-96 min-w-[8rem] cursor-pointer overflow-hidden rounded-[10px] border border-[#2d313b] bg-[#11141a] text-[#f7f7f8] shadow-[0_18px_60px_rgba(0,0,0,0.42)] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
         position === "popper" && "data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1",
         className,
       )}
@@ -77,14 +77,14 @@ export const SelectItem = forwardRef<
   <SelectPrimitive.Item
     ref={ref}
     className={cn(
-        "relative flex w-full cursor-default select-none items-center rounded-[7px] py-1.5 pl-7 pr-2 text-xs font-semibold outline-none transition focus:bg-[#20232c] focus:text-white data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+        "relative flex w-full cursor-pointer select-none items-center rounded-[7px] py-1.5 pl-7 pr-2 text-xs font-semibold outline-none transition focus:bg-[#20232c] focus:text-white data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
       className,
     )}
     {...props}
   >
     <span className="absolute left-2 flex size-4 items-center justify-center">
       <SelectPrimitive.ItemIndicator>
-        <Check className="size-4 text-[#0099ff]" />
+        <Check className="size-4 text-[var(--clipper-accent)]" />
       </SelectPrimitive.ItemIndicator>
     </span>
     <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>

@@ -10,22 +10,22 @@ const scene: Scene = {
   id: "scene_test",
   name: "Test Scene",
   parts: [
-    { id: "a", name: "A", filePath: "a.ts", duration: 4, kind: "frame", frame, background, objects: [], snapshot: [], zoomMarkers: [], translationMarkers: [] },
-    { id: "b", name: "B", filePath: "b.ts", duration: 6, kind: "blank", frame, background, objects: [], snapshot: [], zoomMarkers: [], translationMarkers: [] },
+    { id: "a", name: "A", filePath: "a.ts", duration: 4, frame, background, objects: [], snapshot: [], zoomMarkers: [], translationMarkers: [] },
+    { id: "b", name: "B", filePath: "b.ts", duration: 6, frame, background, objects: [], snapshot: [], zoomMarkers: [], translationMarkers: [] },
   ],
 };
 
 describe("timeline model", () => {
-  it("queues parts linearly without overlap", () => {
+  it("queues compositions linearly without overlap", () => {
     expect(buildLinearTimeline(scene).map((part) => [part.id, part.start, part.end])).toEqual([
       ["a", 0, 4],
       ["b", 4, 10],
     ]);
   });
 
-  it("flags parts longer than ten seconds", () => {
-    expect(validateScene({ ...scene, parts: [{ ...scene.parts[0], duration: 11 }] })).toContain(
-      "Part A is 11s and exceeds the 10 second limit.",
+  it("flags compositions longer than one minute", () => {
+    expect(validateScene({ ...scene, parts: [{ ...scene.parts[0], duration: 61 }] })).toContain(
+      "Composition A is 61s and exceeds the 1 minute limit.",
     );
   });
 

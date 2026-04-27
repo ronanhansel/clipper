@@ -6,6 +6,7 @@ type SourceObject = {
   kind: FrameObjectType;
   bounds: FrameObject["bounds"];
   content?: string;
+  richText?: FrameObject["richText"];
   style: FrameObject["style"];
   motion?: FrameObject["motion"];
   layoutId?: string;
@@ -23,6 +24,7 @@ type SourcePart = {
     id?: string;
     name?: string;
     style?: BackgroundLayer["style"];
+    stretchToElements?: boolean;
     motion?: BackgroundLayer["motion"];
     elements?: SourceObject[];
   };
@@ -38,13 +40,12 @@ export async function partFromSource(basePart: Part, source: string): Promise<Pa
   const sourcePart = await evaluatePartSource(source);
 
   if (sourcePart.id !== basePart.id) {
-    throw new Error(`Source part id ${sourcePart.id} does not match manifest part id ${basePart.id}.`);
+    throw new Error(`Source composition id ${sourcePart.id} does not match manifest composition id ${basePart.id}.`);
   }
 
   return {
     ...basePart,
     duration: sourcePart.duration,
-    kind: sourcePart.objects.length > 0 || (basePart.kind === "frame" && sourcePart.background) || Boolean(sourcePart.background?.elements?.length) ? "frame" : "blank",
     frame: sourceFrameToPartFrame(sourcePart.frame),
     background: sourceBackgroundToLayer(sourcePart.background),
     objects: sourcePart.objects.map(sourceObjectToFrameObject),
@@ -64,6 +65,7 @@ function sourceBackgroundToLayer(background: SourcePart["background"]): Backgrou
     id: background?.id ?? "background",
     name: background?.name ?? "Background",
     style: background?.style ?? { background: "transparent" },
+    stretchToElements: background?.stretchToElements || undefined,
     motion: background?.motion,
     elements: background?.elements?.map(sourceObjectToFrameObject) ?? [],
   };
@@ -77,6 +79,40 @@ function sourceObjectToFrameObject(object: SourceObject): FrameObject {
     selector: `[data-object-id='${object.id}']`,
     bounds: object.bounds,
     content: object.content,
+    richText: object.richText,
+    style: object.style,
+    motion: object.motion,
+    layoutId: object.layoutId,
+  };
+}
+
+export function partToSource(part: Part) {
+  const sourcePart = {
+    id: part.id,
+    duration: part.duration,
+    frame: part.frame,
+    background: {
+      id: part.background.id,
+      name: part.background.name,
+      style: part.background.style,
+      stretchToElements: part.background.stretchToElements,
+      motion: part.background.motion,
+      elements: part.background.elements.map(frameObjectToSourceObject),
+    },
+    objects: part.objects.map(frameObjectToSourceObject),
+  };
+
+  return `import { definePart } from "@clipper/part-api";\n\nexport const part = definePart(${JSON.stringify(sourcePart, null, 2)});\n`;
+}
+
+function frameObjectToSourceObject(object: FrameObject): SourceObject {
+  return {
+    id: object.id,
+    name: object.name,
+    kind: object.type,
+    bounds: object.bounds,
+    content: object.content,
+    richText: object.richText,
     style: object.style,
     motion: object.motion,
     layoutId: object.layoutId,
@@ -102,13 +138,13 @@ async function evaluatePartSource(source: string): Promise<SourcePart> {
 }
 
 function assertSourcePart(value: unknown): SourcePart {
-  if (!value || typeof value !== "object") throw new Error("Part source must export a part object.");
+  if (!value || typeof value !== "object") throw new Error("Composition source must export a composition object.");
   const part = value as Partial<SourcePart>;
 
-  if (typeof part.id !== "string") throw new Error("Part source is missing string id.");
-  if (typeof part.duration !== "number") throw new Error(`Part ${part.id} is missing numeric duration.`);
-  if (!part.frame || part.frame.width !== FRAME_WIDTH || part.frame.height !== FRAME_HEIGHT) throw new Error(`Part ${part.id} must use a 1920x1080 frame.`);
-  if (!Array.isArray(part.objects)) throw new Error(`Part ${part.id} is missing objects array.`);
+  if (typeof part.id !== "string") throw new Error("Composition source is missing string id.");
+  if (typeof part.duration !== "number") throw new Error(`Composition ${part.id} is missing numeric duration.`);
+  if (!part.frame || part.frame.width !== FRAME_WIDTH || part.frame.height !== FRAME_HEIGHT) throw new Error(`Composition ${part.id} must use a 1920x1080 frame.`);
+  if (!Array.isArray(part.objects)) throw new Error(`Composition ${part.id} is missing objects array.`);
 
   return part as SourcePart;
 }

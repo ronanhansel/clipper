@@ -14,7 +14,7 @@
 - Added migration normalization so loaded project manifests without `translationMarkers` receive empty arrays.
 - Added translation playback smoothing using the same ramp-in/ramp-out easing as zoom markers.
 - Updated camera transform to combine active zoom focus/scale with active translation offset.
-- Added translation marker creation, selection, deletion, dragging/resizing, inspector editing, and in-frame point picking.
+- Added pan marker creation, selection, deletion, dragging/resizing, inspector editing, and in-frame point picking.
 - Added a third timeline lane for Translate, converted timeline content to a pixel-width scroll area, and added +/- horizontal timeline zoom controls.
 - Moved timeline zoom controls to the left, added a grey range slider, constrained the timeline viewport to horizontal overflow, increased footer height, and edge-aligned first/last tick labels to prevent clipping.
 - Reserved extra bottom gutter for the horizontal scrollbar so timeline zooming no longer overlays the parts row.

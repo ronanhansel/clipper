@@ -1,6 +1,6 @@
 export const FRAME_WIDTH = 1920;
 export const FRAME_HEIGHT = 1080;
-export const MAX_PART_DURATION_SECONDS = 10;
+export const MAX_PART_DURATION_SECONDS = 60;
 export const MAX_SCENE_DURATION_SECONDS = 30 * 60;
 
 export type Bounds = {
@@ -18,6 +18,13 @@ export type Point = {
 export type FrameObjectType = "rect" | "text" | "image" | "svg" | "html";
 
 export type MotionEase = "linear" | "easeIn" | "easeOut" | "easeInOut" | "circOut";
+
+export type RichTextSegment = {
+  text: string;
+  bold: boolean;
+  italic: boolean;
+  underline: boolean;
+};
 
 export type MotionTrack = {
   delay?: number;
@@ -37,6 +44,7 @@ export type FrameObject = {
   selector: string;
   bounds: Bounds;
   content?: string;
+  richText?: RichTextSegment[];
   style: Record<string, string | number>;
   motion?: MotionTrack;
   layoutId?: string;
@@ -52,6 +60,7 @@ export type BackgroundLayer = {
   id: string;
   name: string;
   style: Record<string, string | number>;
+  stretchToElements?: boolean;
   motion?: MotionTrack;
   elements: FrameObject[];
 };
@@ -66,9 +75,12 @@ export type ZoomMarker = {
   start: number;
   duration: number;
   focus: Point;
-  scale: 1.25 | 1.5 | 1.8 | 2.2 | 3.5 | 5;
+  scale: number;
+  ease?: MotionEase;
   snapIn?: boolean;
   snapOut?: boolean;
+  middleTransition?: "transition";
+  middleEase?: MotionEase;
 };
 
 export type TranslationMarker = {
@@ -76,8 +88,11 @@ export type TranslationMarker = {
   start: number;
   duration: number;
   position: Point;
+  ease?: MotionEase;
   snapIn?: boolean;
   snapOut?: boolean;
+  middleTransition?: "transition";
+  middleEase?: MotionEase;
 };
 
 export type Part = {
@@ -85,7 +100,6 @@ export type Part = {
   name: string;
   filePath: string;
   duration: number;
-  kind: "frame" | "blank";
   frame: PartFrame;
   background: BackgroundLayer;
   objects: FrameObject[];
@@ -105,8 +119,19 @@ export type TimelineViewportState = {
   zoom: number;
 };
 
+export type TimelineMode = "edit" | "composition";
+
 export type EditorState = {
   timeline: TimelineViewportState;
+  timelineMode: TimelineMode;
+};
+
+export type AssetItem = {
+  id: string;
+  name: string;
+  kind: "file" | "folder";
+  path?: string;
+  children?: AssetItem[];
 };
 
 export type ProjectManifest = {
@@ -118,6 +143,7 @@ export type ProjectManifest = {
   };
   scenes: Scene[];
   assetsPath: string;
+  assets?: AssetItem[];
   editorState?: EditorState;
 };
 

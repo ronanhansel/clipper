@@ -24,11 +24,11 @@ export function validateScene(scene: Scene): string[] {
 
   scene.parts.forEach((part) => {
     if (part.duration <= 0) {
-      errors.push(`Part ${part.name} must have a positive duration.`);
+      errors.push(`Composition ${part.name} must have a positive duration.`);
     }
 
     if (part.duration > MAX_PART_DURATION_SECONDS) {
-      errors.push(`Part ${part.name} is ${part.duration}s and exceeds the 10 second limit.`);
+      errors.push(`Composition ${part.name} is ${part.duration}s and exceeds the 1 minute limit.`);
     }
   });
 

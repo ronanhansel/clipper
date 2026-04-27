@@ -19,7 +19,6 @@ export function createAgentContext(project: ProjectManifest, scene: Scene, part:
         filePath: timelinePart.filePath,
         start: timelinePart.start,
         end: timelinePart.end,
-        kind: timelinePart.kind,
       })),
     },
     part: {
@@ -29,7 +28,7 @@ export function createAgentContext(project: ProjectManifest, scene: Scene, part:
       duration: part.duration,
       objects: part.objects,
       zoomMarkers: part.zoomMarkers,
-      translationMarkers: part.translationMarkers,
+      panMarkers: part.translationMarkers,
       snapshot: part.snapshot,
     },
     selection,

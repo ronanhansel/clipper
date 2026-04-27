@@ -1,7 +1,7 @@
 # Shift Snap Block Moves
 
 ## Goal
-- Make timeline block movement for zoom and translation markers snap while Shift is held, matching the temporary magnetic scrub behavior.
+- Make timeline block movement for zoom and pan markers snap while Shift is held, matching the temporary magnetic scrub behavior.
 
 ## Notes
 - Timeline interactions live in `src/App.tsx`, primarily inside `TimelinePanel`.

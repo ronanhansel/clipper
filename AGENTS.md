@@ -3,7 +3,7 @@
 ## External Memory
 
 - Always start project work with an external memory file at `build/[version number]/memory/[id]-feature-name.md`.
-- Example: `build/v0.1/memory/001-init-editor.md`.
+- Example: `build/v0.2/memory/001-init-editor.md`.
 - After every major added feature, major update, rework, rewrite, or feature addition, populate or update the relevant memory files so future agents can pick up the work.
 
 ## Version Planning
@@ -28,3 +28,4 @@
 - Keep code modularizable.
 - The app currently supports desktop only, using Electron and Vite at the latest versions.
 - Follow the current open-source project structure to maintain a professional, ready-to-publish organization.
+- For drag/pointer-move interactions, avoid project writes and broad React state updates during movement; use rAF plus transient/imperative previews, then commit once on release.

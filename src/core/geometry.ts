@@ -21,7 +21,7 @@ export function normalizeBounds(start: Point, end: Point): Bounds {
 }
 
 export function intersects(a: Bounds, b: Bounds) {
-  return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+  return a.x <= b.x + b.width && a.x + a.width >= b.x && a.y <= b.y + b.height && a.y + a.height >= b.y;
 }
 
 export function createSelectionPayload(selectionBox: Bounds, objects: FrameObject[]): SelectionPayload {
