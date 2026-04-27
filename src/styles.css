@@ -1,0 +1,118 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    color: #f7f7f8;
+    background: #08090c;
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    user-select: none;
+  }
+
+  body {
+    @apply m-0 min-w-[1280px] overflow-hidden bg-[#08090c];
+  }
+
+  button,
+  input,
+  textarea {
+    font: inherit;
+  }
+
+  input,
+  textarea,
+  select,
+  [contenteditable="true"],
+  .monaco-editor,
+  .monaco-editor * {
+    user-select: text;
+  }
+
+  button {
+    @apply cursor-pointer border-0 text-inherit;
+  }
+
+  button:focus,
+  button:focus-visible,
+  [role="button"]:focus,
+  [role="button"]:focus-visible {
+    outline: none;
+    box-shadow: none;
+  }
+
+  * {
+    scrollbar-color: rgba(155, 157, 167, 0.48) transparent;
+  }
+
+  *::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
+  }
+
+  *::-webkit-scrollbar-track,
+  *::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    border: 3px solid transparent;
+    border-radius: 999px;
+    background: rgba(155, 157, 167, 0.48);
+    background-clip: padding-box;
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background: rgba(217, 219, 225, 0.58);
+    background-clip: padding-box;
+  }
+
+  .timeline-scrollbar::-webkit-scrollbar {
+    height: 14px;
+  }
+
+  .timeline-scrollbar::-webkit-scrollbar-thumb {
+    border: 4px solid transparent;
+    background: rgba(217, 219, 225, 0.56);
+    background-clip: padding-box;
+  }
+
+  .timeline-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgba(247, 247, 248, 0.74);
+    background-clip: padding-box;
+  }
+}
+
+@keyframes clipper-zoom-boundary-in {
+  from {
+    opacity: 0;
+    transform: scaleY(0.45);
+  }
+
+  to {
+    opacity: 1;
+    transform: scaleY(1);
+  }
+}
+
+@keyframes clipper-tooltip-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.96);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes clipper-tooltip-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateY(2px) scale(0.98);
+  }
+}

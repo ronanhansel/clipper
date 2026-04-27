@@ -17,8 +17,11 @@
 
 - Always inspect current UI elements before creating a new one.
 - Reuse existing components as much as possible.
-- If a needed component does not exist, use shadcn as the base for fundamentals such as checkboxes, text fields, sidebars, and similar primitives.
+- Always use shared, themed primitives for UI fundamentals such as checkboxes, dropdowns/selects, text fields, textareas, dialogs, sidebars, popovers, switches, and similar controls.
+- If a needed primitive does not exist yet, add it using shadcn as the base, theme it to match Clipper, and then reuse that primitive instead of styling one-off controls inline.
 - Do not fall back to default browser components for fundamental UI elements.
+- Always use Tailwind CSS utility classes for component styling and layout instead of grouping component styles in a centralized CSS file. Keep CSS files limited to Tailwind imports and minimal global/base rules.
+- When the user requests app-wide/global behavior or styling, implement it in the global CSS file instead of repeating Tailwind utilities across components.
 
 ## Architecture
 

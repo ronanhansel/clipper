@@ -1,0 +1,6 @@
+.temp/
+clipper/
+node_modules/
+dist/
+dist-electron/
+coverage/

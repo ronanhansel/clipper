@@ -25,6 +25,14 @@ Clipper's design system is a love letter to motion design. Clean black-and-white
 
 ## Components
 
+### Implementation Rules
+- Use `lucide-react` for all interface icons. Do not create custom SVG/icon components unless a required product glyph is unavailable in Lucide.
+- Use shared, themed primitives for UI fundamentals: checkboxes, dropdowns/selects, text fields, textareas, dialogs, sidebars, popovers, switches, and similar controls.
+- When a primitive is missing, add it from a shadcn base, theme it for Clipper's dark surfaces and blue accent, and reuse it everywhere instead of creating one-off inline controls.
+- Existing ad hoc/default controls should be migrated to the shared primitive when touched.
+- Style component layout and visuals with Tailwind CSS utility classes rather than centralized component CSS.
+- Put app-wide/global behavior and styling in `src/styles.css` instead of repeating utilities across components.
+
 ### Canvas
 - Infinite pan/zoom workspace
 - Grid overlay with snap points
