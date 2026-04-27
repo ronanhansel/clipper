@@ -1,0 +1,27 @@
+# Agent Instructions
+
+## External Memory
+
+- Always start project work with an external memory file at `build/[version number]/memory/[id]-feature-name.md`.
+- Example: `build/v0.1/memory/001-init-editor.md`.
+- After every major added feature, major update, rework, rewrite, or feature addition, populate or update the relevant memory files so future agents can pick up the work.
+
+## Version Planning
+
+- When the user starts a new version with a vision, document it in `build/[version]/PLAN.md`.
+- The plan should highlight the focus of the current version, its progress, and the big overarching goals.
+- For smaller edits or smaller user commands, do not edit the plan. `PLAN.md` is reserved for tracking progress on major updates.
+- When the user bumps the version, update the project and all `AGENTS.md` instructions to create and use a new version folder under `build/`.
+
+## UI And Components
+
+- Always inspect current UI elements before creating a new one.
+- Reuse existing components as much as possible.
+- If a needed component does not exist, use shadcn as the base for fundamentals such as checkboxes, text fields, sidebars, and similar primitives.
+- Do not fall back to default browser components for fundamental UI elements.
+
+## Architecture
+
+- Keep code modularizable.
+- The app currently supports desktop only, using Electron and Vite at the latest versions.
+- Follow the current open-source project structure to maintain a professional, ready-to-publish organization.
