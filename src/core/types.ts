@@ -88,6 +88,7 @@ export type PartSnapshotLine = {
 
 export type ZoomMarker = {
   id: string;
+  layerId?: string;
   start: number;
   duration: number;
   focus: Point;
@@ -101,10 +102,13 @@ export type ZoomMarker = {
 
 export type TranslationMarker = {
   id: string;
+  layerId?: string;
   start: number;
   duration: number;
+  kind?: "pan" | "rotate";
   followId?: string;
   position: Point;
+  rotation?: number;
   ease?: MotionEase;
   snapIn?: boolean;
   snapOut?: boolean;
@@ -179,6 +183,24 @@ export type TimelineViewportState = {
   zoom: number;
 };
 
+export type TimelineMotionLayerKind = "empty" | "pan" | "zoom" | "rotate";
+
+export type TimelineMotionLayerState = {
+  id: string;
+  kind: TimelineMotionLayerKind;
+  name: string;
+  hidden?: boolean;
+};
+
+export type TimelineLayerState = {
+  compName?: string;
+  compHidden?: boolean;
+  adjustName?: string;
+  adjustHidden?: boolean;
+  motionLayers?: TimelineMotionLayerState[];
+  rowHeights?: Record<string, number>;
+};
+
 export type TimelineMode = "edit" | "composition";
 
 export type PreviewViewportState = {
@@ -195,6 +217,7 @@ export type CodeViewportState = {
 
 export type EditorState = {
   timeline: TimelineViewportState;
+  timelineLayers?: TimelineLayerState;
   timelineMode: TimelineMode;
   mode?: "interactive" | "code";
   leftPanelTab?: "assets" | "tools";

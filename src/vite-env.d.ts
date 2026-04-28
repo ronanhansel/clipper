@@ -33,8 +33,11 @@ interface Window {
     cancelVideoExport: (sessionId: string) => Promise<void>;
     renderVideoExport: (exportId: string, defaultFileName: string, project: unknown, scene: unknown, frameRate: number) => Promise<string | null>;
     cancelRenderVideoExport: (exportId: string) => Promise<void>;
+    setWindowFullscreen: (fullscreen: boolean) => Promise<boolean>;
+    toggleWindowFullscreen: () => Promise<boolean>;
     onVideoExportProgress: (callback: (exportId: string, progress: { frame: number; totalFrames: number; percent: number; status: string }) => void) => () => void;
     onModeShortcut: (callback: (key: "1" | "2" | "3" | "4") => void) => () => void;
     onSettingsShortcut: (callback: () => void) => () => void;
+    onWindowFullscreenChange: (callback: (fullscreen: boolean) => void) => () => void;
   };
 }

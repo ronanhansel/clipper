@@ -794,7 +794,7 @@ export function ZoomInspector({ marker, part, selectedMarkerCount, selectedSnapI
   );
 }
 
-export function TranslationInspector({ marker, part, selectedMarkerCount, selectedSnapInActive, selectedSnapOutActive, middleSnapActive, middleTransitionMode, pickingPosition, canSnapMiddle, onChange, onChangeSelectedSnap, onChangeMiddleTransition, onChangeMiddleEase, onDelete, onPickPosition, onSnapMiddle }: { marker: TranslationMarker; part: Part; selectedMarkerCount: number; selectedSnapInActive: boolean; selectedSnapOutActive: boolean; middleSnapActive: boolean; middleTransitionMode: "instant" | "transition"; pickingPosition: boolean; canSnapMiddle: boolean; onChange: (updater: (marker: TranslationMarker, part: Part) => TranslationMarker) => void; onChangeSelectedSnap: (key: "snapIn" | "snapOut", enabled: boolean) => void; onChangeMiddleTransition: (mode: "instant" | "transition") => void; onChangeMiddleEase: (ease: MotionEase | undefined) => void; onDelete: () => void; onPickPosition: () => void; onSnapMiddle: () => void }) {
+export function TranslationInspector({ marker, part, selectedMarkerCount, selectedSnapInActive, selectedSnapOutActive, middleSnapActive, middleTransitionMode, pickingPosition, pickingTracker, canSnapMiddle, onChange, onChangeSelectedSnap, onChangeMiddleTransition, onChangeMiddleEase, onDelete, onPickPosition, onPickTracker, onSnapMiddle }: { marker: TranslationMarker; part: Part; selectedMarkerCount: number; selectedSnapInActive: boolean; selectedSnapOutActive: boolean; middleSnapActive: boolean; middleTransitionMode: "instant" | "transition"; pickingPosition: boolean; pickingTracker: boolean; canSnapMiddle: boolean; onChange: (updater: (marker: TranslationMarker, part: Part) => TranslationMarker) => void; onChangeSelectedSnap: (key: "snapIn" | "snapOut", enabled: boolean) => void; onChangeMiddleTransition: (mode: "instant" | "transition") => void; onChangeMiddleEase: (ease: MotionEase | undefined) => void; onDelete: () => void; onPickPosition: () => void; onPickTracker: () => void; onSnapMiddle: () => void }) {
   const isMultiSelection = selectedMarkerCount > 1;
   const snapInActive = isMultiSelection ? selectedSnapInActive : Boolean(marker.snapIn);
   const snapOutActive = isMultiSelection ? selectedSnapOutActive : Boolean(marker.snapOut);
@@ -810,6 +810,10 @@ export function TranslationInspector({ marker, part, selectedMarkerCount, select
   function updatePosition(key: keyof Point, value: string) {
     const numeric = Number(value) || 0;
     onChange((current) => ({ ...current, position: { ...current.position, [key]: Math.round(numeric) } }));
+  }
+
+  function updateRotation(value: string) {
+    onChange((current) => ({ ...current, rotation: Math.round(Number(value) || 0) }));
   }
 
   function updateFollowId(value: string) {
@@ -848,16 +852,16 @@ export function TranslationInspector({ marker, part, selectedMarkerCount, select
       <div className="grid grid-cols-2 gap-2">
         <label className={`grid gap-1.5 ${mutedCaps}`}>Start<Input type="number" min={0} max={part.duration - marker.duration} step={0.1} value={marker.start} onChange={(event) => updateNumber("start", event.target.value)} /></label>
         <label className={`grid gap-1.5 ${mutedCaps}`}>Duration<Input type="number" min={minimumZoomDuration} max={part.duration - marker.start} step={0.1} value={marker.duration} onChange={(event) => updateNumber("duration", event.target.value)} /></label>
-        <label className={`grid gap-1.5 ${mutedCaps}`}>X<Input type="number" step={1} value={marker.position.x} onChange={(event) => updatePosition("x", event.target.value)} /></label>
-        <div className="grid gap-1.5">
+        {marker.kind === "rotate" ? <label className={`grid gap-1.5 ${mutedCaps}`}>Rotation<Input type="number" step={1} value={marker.rotation ?? 0} onChange={(event) => updateRotation(event.target.value)} /></label> : <label className={`grid gap-1.5 ${mutedCaps}`}>X<Input type="number" step={1} value={marker.position.x} onChange={(event) => updatePosition("x", event.target.value)} /></label>}
+        {marker.kind === "rotate" ? null : <div className="grid gap-1.5">
           <span className={mutedCaps}>Y</span>
           <div className="grid grid-cols-[1fr_40px] gap-2">
             <Input type="number" step={1} value={marker.position.y} onChange={(event) => updatePosition("y", event.target.value)} />
             <button className={`grid place-items-center rounded-[9px] border px-2 ${pickingPosition ? "border-[#37d6c2] bg-[#12312d] text-white" : "border-[#2d313b] bg-[#171920] text-[#d9dbe1] hover:border-[#37d6c2]"}`} title="Pick pan target from frame" onClick={onPickPosition}><Crosshair size={16} /></button>
           </div>
-        </div>
+        </div>}
       </div>
-      <label className={`grid gap-1.5 ${mutedCaps}`}>Tracker<Input value={marker.followId ?? ""} placeholder="object-id" onChange={(event) => updateFollowId(event.target.value)} /></label>
+      {marker.kind !== "rotate" ? <label className={`grid gap-1.5 ${mutedCaps}`}>Tracker<div className="grid grid-cols-[1fr_40px] gap-2"><Input value={marker.followId ?? ""} placeholder="object-id" onChange={(event) => updateFollowId(event.target.value)} /><button className={`grid place-items-center rounded-[9px] border px-2 ${pickingTracker ? "border-[#37d6c2] bg-[#12312d] text-white" : "border-[#2d313b] bg-[#171920] text-[#d9dbe1] hover:border-[#37d6c2]"}`} title="Pick tracker target from frame" type="button" onClick={onPickTracker}><Crosshair size={16} /></button></div></label> : null}
       <label className={`grid gap-1.5 ${mutedCaps}`}>Ease<Select value={marker.ease ?? "default"} onValueChange={updateEase}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectGroup><SelectItem value="default">Ease in-out</SelectItem><SelectItem value="linear">Linear</SelectItem><SelectItem value="easeIn">Ease in</SelectItem><SelectItem value="easeOut">Ease out</SelectItem><SelectItem value="easeInOut">Ease in-out</SelectItem><SelectItem value="circOut">Circ out</SelectItem></SelectGroup></SelectContent></Select></label>
       <div className="grid gap-2">
         <span className={mutedCaps}>Snap</span>

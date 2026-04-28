@@ -3,7 +3,7 @@
 ## External Memory
 
 - Always start project work with an external memory file at `build/[version number]/memory/[id]-feature-name.md`.
-- Example: `build/v0.2.5/memory/001-init-editor.md`.
+- Example: `build/v0.2.6/memory/001-init-editor.md`.
 - After every major added feature, major update, rework, rewrite, or feature addition, populate or update the relevant memory files so future agents can pick up the work.
 
 ## Version Planning
@@ -50,4 +50,4 @@
 - Prefer imperative DOM/CSS previews (`transform`, `translate3d`, opacity, width/height variables, targeted refs). Commit canonical app/project state once on release, pointer up/cancel, blur, pause, or another explicit finalization event.
 - Do not call project-mutating callbacks from every pointer-move frame unless unavoidable. If unavoidable, throttle, deduplicate, and keep changed state narrow.
 - Preserve existing drag constraints while optimizing previews: snapping, clamping, no-overlap rules, selection semantics, mended marker chains, and final committed positions/sizes must still be computed from the same canonical logic.
-- For live render, camera, motion, effect, or animation previews, use `src/core` helpers to compute deterministic preview values, then apply only the affected DOM/CSS property with rAF. Keep labels/readouts local and reuse `build/v0.2.5/memory/023-zoom-scale-slider-preview.md` for camera/effect sliders.
+- For live render, camera, motion, effect, or animation previews, use `src/core` helpers to compute deterministic preview values, then apply only the affected DOM/CSS property with rAF. Keep labels/readouts local and reuse `build/v0.2.6/memory/001-motion-timeline-layers.md` for timeline motion layer patterns.

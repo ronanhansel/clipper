@@ -11,3 +11,15 @@ Focus follow-up: outside pointer clicks now clear Arborist's internal tree focus
 Style follow-up: File Manager rows and the marquee selection rectangle now use square corners instead of rounded borders.
 
 Empty-space focus follow-up: clicking blank space inside the File Manager now clears Arborist selection/focus as well. The marquee pointer-down path clears first, then rebuilds selection only if the pointer moves far enough to become a marquee drag.
+
+Cursor follow-up: File Manager rows now use a pointer cursor while preserving the existing double-click folder expand/collapse handler.
+
+Double-click fix: File Manager now supplies a custom Arborist row renderer so click and double-click handling live on the same row wrapper. This avoids duplicate/default click handling and keeps folder double-click expand/collapse reliable while item contents still render through `UnifiedTreeNode`.
+
+Double-click drag-handle follow-up: folder expand/collapse now runs from the second mouse-down captured by the rendered item itself. This fires before Arborist's drag handle can swallow the later double-click event, while ignoring the explicit chevron button so it does not double-toggle.
+
+Collapse follow-up: the second mouse-down handler now reads Arborist's live `tree.isOpen(node.id)` state and explicitly calls `tree.close` or `tree.open`, so double-clicking an already-open folder collapses it again.
+
+Blank-space focus follow-up: blank File Manager clicks now defer the clear until after the current click/focus cycle. Arborist can focus its tree container during the same pointer sequence, so the deferred clear prevents empty-space clicks from leaving the prior row focused. Marquee drags keep their final selection and only non-drag blank clicks clear.
+
+Isolation follow-up: the outside-click handler no longer calls `document.activeElement.blur()`. It only clears File Manager Arborist selection/focus state, so switching to or interacting with the Effects tab is not affected by a global DOM blur.

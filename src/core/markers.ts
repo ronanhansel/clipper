@@ -1,10 +1,21 @@
 import { roundTenth } from "./math";
 import type { Point, ZoomMarker } from "./types";
 
-type MendedMarker = { id: string; start: number; duration: number; snapIn?: boolean; snapOut?: boolean };
+type MendedMarker = { id: string; layerId?: string; start: number; duration: number; snapIn?: boolean; snapOut?: boolean };
+
+function getMendedMarkerLayerId(marker: MendedMarker) {
+  return marker.layerId ?? "motion_zoom";
+}
+
+function getMendedMarkerLayer(markers: MendedMarker[], markerId: string) {
+  const targetMarker = markers.find((marker) => marker.id === markerId);
+  if (!targetMarker) return [];
+  const layerId = getMendedMarkerLayerId(targetMarker);
+  return markers.filter((marker) => getMendedMarkerLayerId(marker) === layerId).sort((left, right) => left.start - right.start);
+}
 
 export function isZoomMarkerMended(markers: MendedMarker[], markerId: string) {
-  const sortedMarkers = [...markers].sort((left, right) => left.start - right.start);
+  const sortedMarkers = getMendedMarkerLayer(markers, markerId);
 
   for (let index = 0; index < sortedMarkers.length; index += 1) {
     const marker = sortedMarkers[index];
@@ -21,7 +32,7 @@ export function isZoomMarkerMended(markers: MendedMarker[], markerId: string) {
 }
 
 export function getMendedMarkerIds(markers: MendedMarker[], markerId: string) {
-  const sortedMarkers = [...markers].sort((left, right) => left.start - right.start);
+  const sortedMarkers = getMendedMarkerLayer(markers, markerId);
   const markerIndex = sortedMarkers.findIndex((marker) => marker.id === markerId);
   if (markerIndex < 0) return new Set([markerId]);
 
@@ -46,16 +57,19 @@ export function getMendedMarkerIds(markers: MendedMarker[], markerId: string) {
 }
 
 export function normalizeMendedZoomMarkerFocus(markers: ZoomMarker[]) {
-  const sortedMarkers = [...markers].sort((left, right) => left.start - right.start);
   const focusById = new Map<string, Point>();
-  let sharedFocus: Point | null = null;
 
-  for (let index = 0; index < sortedMarkers.length; index += 1) {
-    const marker = sortedMarkers[index];
-    const previous = sortedMarkers[index - 1];
-    const mendedToPrevious = Boolean(previous?.snapOut && marker.snapIn && roundTenth(previous.start + previous.duration) === roundTenth(marker.start));
-    if (!mendedToPrevious) sharedFocus = marker.focus;
-    if (sharedFocus) focusById.set(marker.id, sharedFocus);
+  for (const layerId of new Set(markers.map(getMendedMarkerLayerId))) {
+    const sortedMarkers = markers.filter((marker) => getMendedMarkerLayerId(marker) === layerId).sort((left, right) => left.start - right.start);
+    let sharedFocus: Point | null = null;
+
+    for (let index = 0; index < sortedMarkers.length; index += 1) {
+      const marker = sortedMarkers[index];
+      const previous = sortedMarkers[index - 1];
+      const mendedToPrevious = Boolean(previous?.snapOut && marker.snapIn && roundTenth(previous.start + previous.duration) === roundTenth(marker.start));
+      if (!mendedToPrevious) sharedFocus = marker.focus;
+      if (sharedFocus) focusById.set(marker.id, sharedFocus);
+    }
   }
 
   return markers.map((marker) => {

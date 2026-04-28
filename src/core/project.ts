@@ -1,11 +1,19 @@
 import { roundTwo, sanitizeProjectNumbers } from "./math";
 import { normalizeMendedZoomMarkerFocus } from "./markers";
 import { compositionToSource } from "./compositionSource";
-import type { AdjustmentLayer, AssetItem, CodeViewportState, CompositionClip, CompositionDocument, FileManagerState, PreviewViewportState, ProjectManifest, Scene, TimelineClip, TimelineDocument, TimelineMode, TimelineViewportState } from "./types";
+import type { AdjustmentLayer, AssetItem, CodeViewportState, CompositionClip, CompositionDocument, FileManagerState, PreviewViewportState, ProjectManifest, Scene, TimelineClip, TimelineDocument, TimelineLayerState, TimelineMode, TimelineMotionLayerKind, TimelineViewportState } from "./types";
 
 export const defaultTimelineViewportState: TimelineViewportState = { displacement: 0, zoom: 1 };
 export const defaultTimelineMode: TimelineMode = "edit";
 export const defaultPreviewViewportState: PreviewViewportState = { scale: 0.5, scrollLeft: 0, scrollTop: 0, zoomBarOpen: false };
+export const defaultTimelineLayerState: TimelineLayerState = {
+  compName: "Comp",
+  adjustName: "Adjust",
+  motionLayers: [
+    { id: "motion_pan", kind: "pan", name: "MOTION" },
+    { id: "motion_zoom", kind: "zoom", name: "MOTION" },
+  ],
+};
 
 function normalizeRightPanelTab(tab: unknown) {
   return tab === "motion" || tab === "agent" ? tab : "video";
@@ -21,6 +29,31 @@ function normalizeCodeViewportState(state: CodeViewportState | undefined): CodeV
 function normalizeCodeViewportStates(states: Record<string, CodeViewportState> | undefined) {
   if (!states) return {};
   return Object.fromEntries(Object.entries(states).map(([filePath, state]) => [filePath, normalizeCodeViewportState(state)]));
+}
+
+function normalizeTimelineLayerState(state: TimelineLayerState | undefined): TimelineLayerState {
+  const motionLayers = state?.motionLayers?.filter((layer) => layer.kind === "empty" || layer.kind === "pan" || layer.kind === "zoom" || layer.kind === "rotate") ?? defaultTimelineLayerState.motionLayers!;
+  const rowHeights = normalizeTimelineLayerRowHeights(state?.rowHeights);
+  return {
+    compName: state?.compName?.trim() || defaultTimelineLayerState.compName,
+    compHidden: state?.compHidden || undefined,
+    adjustName: state?.adjustName?.trim() || defaultTimelineLayerState.adjustName,
+    adjustHidden: state?.adjustHidden || undefined,
+    motionLayers: motionLayers.map((layer) => ({ ...layer, name: layer.name.trim() || formatDefaultMotionLayerName(layer.kind), hidden: layer.hidden || undefined })),
+    rowHeights: Object.keys(rowHeights).length ? rowHeights : undefined,
+  };
+}
+
+function normalizeTimelineLayerRowHeights(rowHeights: Record<string, number> | undefined) {
+  if (!rowHeights) return {};
+  return Object.fromEntries(Object.entries(rowHeights).flatMap(([key, value]) => {
+    if (typeof value !== "number" || !Number.isFinite(value)) return [];
+    return [[key, Math.round(Math.min(Math.max(value, 42), 140))]];
+  }));
+}
+
+function formatDefaultMotionLayerName(kind: TimelineMotionLayerKind) {
+  return kind === "empty" ? "New Motion" : "MOTION";
 }
 
 export const defaultAssets: AssetItem[] = [];
@@ -192,8 +225,9 @@ export function normalizeProject(project: ProjectManifest): ProjectManifest {
       ...project.editorState,
       timeline: {
         displacement: roundTwo(Math.max(timelineState.displacement, 0)),
-        zoom: roundTwo(Math.min(Math.max(timelineState.zoom, 0.5), 4)),
+        zoom: roundTwo(Math.min(Math.max(timelineState.zoom, 0.01), 4)),
       },
+      timelineLayers: normalizeTimelineLayerState(project.editorState?.timelineLayers),
       timelineMode,
       mode: project.editorState?.mode === "code" ? "code" : "interactive",
       leftPanelTab: project.editorState?.leftPanelTab === "tools" ? "tools" : "assets",

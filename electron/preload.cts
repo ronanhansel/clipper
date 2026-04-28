@@ -14,6 +14,8 @@ contextBridge.exposeInMainWorld("clipper", {
   findProjectFileByName: (directoryPath: string, fileName: string) => ipcRenderer.invoke("clipper:find-project-file-by-name", directoryPath, fileName) as Promise<string | null>,
   openCompositionFile: (directoryPath: string) => ipcRenderer.invoke("clipper:open-composition-file", directoryPath) as Promise<string | null>,
   listSystemFonts: () => ipcRenderer.invoke("clipper:list-system-fonts") as Promise<string[]>,
+  setWindowFullscreen: (fullscreen: boolean) => ipcRenderer.invoke("clipper:set-window-fullscreen", fullscreen) as Promise<boolean>,
+  toggleWindowFullscreen: () => ipcRenderer.invoke("clipper:toggle-window-fullscreen") as Promise<boolean>,
   watchTextFiles: (relativePaths: string[]) => ipcRenderer.invoke("clipper:watch-text-files", relativePaths) as Promise<void>,
   watchProjectFiles: (watchPaths: { files: string[]; directories: string[] }) => ipcRenderer.invoke("clipper:watch-project-files", watchPaths) as Promise<void>,
   openProjectManifest: () => ipcRenderer.invoke("clipper:open-project-manifest") as Promise<string | null>,
@@ -49,5 +51,10 @@ contextBridge.exposeInMainWorld("clipper", {
     const listener = () => callback();
     ipcRenderer.on("clipper:settings-shortcut", listener);
     return () => ipcRenderer.removeListener("clipper:settings-shortcut", listener);
+  },
+  onWindowFullscreenChange: (callback: (fullscreen: boolean) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, fullscreen: boolean) => callback(fullscreen);
+    ipcRenderer.on("clipper:window-fullscreen-changed", listener);
+    return () => ipcRenderer.removeListener("clipper:window-fullscreen-changed", listener);
   },
 });

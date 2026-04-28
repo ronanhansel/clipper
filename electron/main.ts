@@ -209,6 +209,20 @@ ipcMain.handle("clipper:list-system-fonts", async () => {
   return listSystemFontFamilies();
 });
 
+ipcMain.handle("clipper:set-window-fullscreen", (event, fullscreen: boolean) => {
+  const window = BrowserWindow.fromWebContents(event.sender);
+  if (!window) return false;
+  window.setFullScreen(fullscreen);
+  return window.isFullScreen();
+});
+
+ipcMain.handle("clipper:toggle-window-fullscreen", (event) => {
+  const window = BrowserWindow.fromWebContents(event.sender);
+  if (!window) return false;
+  window.setFullScreen(!window.isFullScreen());
+  return window.isFullScreen();
+});
+
 ipcMain.handle("clipper:watch-text-files", (event, relativePaths: string[]) => {
   const senderId = event.sender.id;
   textFileWatchers.get(senderId)?.forEach((watcher) => watcher.close());
@@ -468,7 +482,7 @@ async function renderSceneToVideo(_project: ProjectManifest, scene: Scene, outpu
       const timelinePart = getTimelinePartAtTime(timeline, adjustedSceneTime) ?? timeline[0];
       if (!timelinePart) throw new Error("The current scene has no compositions to render.");
       const previewTime = clamp(adjustedSceneTime - timelinePart.start, 0, timelinePart.duration);
-      const frameHtml = buildFrameBody(timelinePart, previewTime, getActiveZoom(timelinePart.zoomMarkers, previewTime), getActiveTranslation(timelinePart.translationMarkers, previewTime));
+      const frameHtml = buildFrameBody(timelinePart, previewTime, getActiveZoom(timelinePart.zoomMarkers, previewTime), getActiveTranslation(timelinePart.translationMarkers, previewTime), getActiveRotation(timelinePart.translationMarkers, previewTime));
 
       await renderFrameHtml(rendererWindow, frameHtml);
       const image = await rendererWindow.webContents.capturePage({ x: 0, y: 0, width: frameWidth, height: frameHeight });
@@ -511,7 +525,7 @@ type FrameTemplate = { kind: "html"; source: string; static?: boolean };
 type FrameObject = { id: string; name: string; type: string; selector: string; bounds: { x: number; y: number; width: number; height: number }; content?: string; template?: FrameTemplate; richText?: Array<{ text: string; bold: boolean; italic: boolean; underline: boolean }>; style: Record<string, string | number>; motion?: MotionTrack };
 type BackgroundLayer = { id: string; name: string; style: Record<string, string | number>; stretchToElements?: boolean; motion?: MotionTrack; elements: FrameObject[] };
 type ZoomMarker = { id: string; start: number; duration: number; focus: { x: number; y: number }; scale: number; ease?: MotionEase; snapIn?: boolean; snapOut?: boolean; middleTransition?: "transition"; middleEase?: MotionEase };
-type TranslationMarker = { id: string; start: number; duration: number; position: { x: number; y: number }; ease?: MotionEase; snapIn?: boolean; snapOut?: boolean; middleTransition?: "transition"; middleEase?: MotionEase };
+type TranslationMarker = { id: string; start: number; duration: number; kind?: "pan" | "rotate"; position: { x: number; y: number }; rotation?: number; ease?: MotionEase; snapIn?: boolean; snapOut?: boolean; middleTransition?: "transition"; middleEase?: MotionEase };
 type AdjustmentLayer = { id: string; name: string; start: number; duration: number; effect: { kind: "frameSkip"; every: number } };
 type CompositionClip = { id: string; name: string; filePath: string; sourceMissing?: boolean; duration: number; frame: { width: number; height: number; style: Record<string, string | number> }; background: BackgroundLayer; objects: FrameObject[]; snapshot: unknown[]; zoomMarkers: ZoomMarker[]; translationMarkers: TranslationMarker[] };
 type Scene = { id: string; name: string; compositions: CompositionClip[]; adjustmentLayers?: AdjustmentLayer[] };
@@ -551,7 +565,7 @@ function buildFrameShell() {
   return `<!doctype html><html><head><meta charset="utf-8"><style>*{box-sizing:border-box}html,body{margin:0;width:${frameWidth}px;height:${frameHeight}px;overflow:hidden;background:#000}</style></head><body><div id="clipper-frame-root"></div><script>window.__clipperSetFrame=function(html){document.getElementById("clipper-frame-root").innerHTML=html;return new Promise(function(resolve){requestAnimationFrame(function(){requestAnimationFrame(resolve);});});};</script></body></html>`;
 }
 
-function buildFrameBody(part: CompositionClip, previewTime: number, activeZoom: ZoomMarker | null, activeTranslation: TranslationMarker | null) {
+function buildFrameBody(part: CompositionClip, previewTime: number, activeZoom: ZoomMarker | null, activeTranslation: TranslationMarker | null, activeRotation: TranslationMarker | null) {
   if (part.sourceMissing) return `<div style="${cssStyle({ position: "relative", width: frameWidth, height: frameHeight, overflow: "hidden", background: "#000" })}"></div>`;
 
   const scale = activeZoom?.scale ?? 1;
@@ -559,7 +573,8 @@ function buildFrameBody(part: CompositionClip, previewTime: number, activeZoom: 
   const x = (frameWidth / 2 - focus.x) * (scale - 1) + (activeTranslation?.position.x ?? 0);
   const y = (frameHeight / 2 - focus.y) * (scale - 1) + (activeTranslation?.position.y ?? 0);
   const frameStyle = cssStyle({ ...part.frame.style, position: "relative", width: frameWidth, height: frameHeight, overflow: "hidden" });
-  const cameraStyle = `position:absolute;inset:0;transform-origin:center;transform:translate(${x}px,${y}px) scale(${scale});`;
+  const rotation = activeRotation?.rotation ?? 0;
+  const cameraStyle = `position:absolute;inset:0;transform-origin:center;transform:translate3d(${x}px,${y}px,0) rotate(${rotation}deg) scale(${scale});`;
   return `<div style="${frameStyle}"><div style="${cameraStyle}">${backgroundLayerHtml(part.background, previewTime, part.duration)}${part.objects.map((object) => frameObjectHtml(object, previewTime, part.duration)).join("")}</div></div>`;
 }
 
@@ -659,13 +674,23 @@ function getActiveZoom(markers: ZoomMarker[], time: number) {
 }
 
 function getActiveTranslation(markers: TranslationMarker[], time: number) {
-  const marker = markers.find((item) => time >= item.start && time <= item.start + item.duration);
+  const marker = markers.find((item) => (item.kind ?? "pan") === "pan" && time >= item.start && time <= item.start + item.duration);
   if (!marker) return null;
   const progress = (time - marker.start) / marker.duration;
   const rampIn = marker.snapIn ? 1 : progress / 0.22;
   const rampOut = marker.snapOut ? 1 : (1 - progress) / 0.22;
   const eased = easeProgress(clamp(Math.min(rampIn, rampOut, 1), 0, 1), marker.ease ?? "easeInOut");
   return { ...marker, position: { x: Math.round(marker.position.x * eased), y: Math.round(marker.position.y * eased) } };
+}
+
+function getActiveRotation(markers: TranslationMarker[], time: number) {
+  const marker = markers.find((item) => item.kind === "rotate" && time >= item.start && time <= item.start + item.duration);
+  if (!marker) return null;
+  const progress = (time - marker.start) / marker.duration;
+  const rampIn = marker.snapIn ? 1 : progress / 0.22;
+  const rampOut = marker.snapOut ? 1 : (1 - progress) / 0.22;
+  const eased = easeProgress(clamp(Math.min(rampIn, rampOut, 1), 0, 1), marker.ease ?? "easeInOut");
+  return { ...marker, rotation: (marker.rotation ?? 0) * eased };
 }
 
 function interpolate(range: readonly [number, number], progress: number) {
@@ -706,6 +731,9 @@ async function createWindow() {
   window.webContents.session.setPermissionRequestHandler((_webContents, permission, callback) => {
     callback(String(permission) === "local-fonts");
   });
+
+  window.on("enter-full-screen", () => window.webContents.send("clipper:window-fullscreen-changed", true));
+  window.on("leave-full-screen", () => window.webContents.send("clipper:window-fullscreen-changed", false));
 
   window.webContents.on("before-input-event", (event, input) => {
     if (!(input.control || input.meta)) return;
