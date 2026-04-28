@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createSelectionPayload } from "./geometry";
-import { buildLinearTimeline, validateScene } from "./timeline";
+import { buildLinearTimeline, getAdjustmentPlacement, validateScene } from "./timeline";
 import type { Scene } from "./types";
 
 const frame = { width: 1920, height: 1080, style: { background: "#000000" } } as const;
@@ -9,7 +9,7 @@ const background = { id: "background", name: "Background", style: { background: 
 const scene: Scene = {
   id: "scene_test",
   name: "Test Scene",
-  parts: [
+  compositions: [
     { id: "a", name: "A", filePath: "a.ts", duration: 4, frame, background, objects: [], snapshot: [], zoomMarkers: [], translationMarkers: [] },
     { id: "b", name: "B", filePath: "b.ts", duration: 6, frame, background, objects: [], snapshot: [], zoomMarkers: [], translationMarkers: [] },
   ],
@@ -24,9 +24,19 @@ describe("timeline model", () => {
   });
 
   it("flags compositions longer than one minute", () => {
-    expect(validateScene({ ...scene, parts: [{ ...scene.parts[0], duration: 61 }] })).toContain(
+    expect(validateScene({ ...scene, compositions: [{ ...scene.compositions[0], duration: 61 }] })).toContain(
       "Composition A is 61s and exceeds the 1 minute limit.",
     );
+  });
+
+  it("validates adjustment layers against scene bounds", () => {
+    expect(validateScene({ ...scene, adjustmentLayers: [{ id: "adj", name: "Skip", start: 9, duration: 2, effect: { kind: "frameSkip", every: 2 } }] })).toContain(
+      "Adjustment Skip extends past the scene end.",
+    );
+  });
+
+  it("places adjustment layers inside scene duration", () => {
+    expect(getAdjustmentPlacement([], 10, 9)).toEqual({ start: 7, duration: 3 });
   });
 
   it("returns objects intersecting a screenshot selection", () => {

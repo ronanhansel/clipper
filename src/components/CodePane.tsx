@@ -1,9 +1,15 @@
 import Editor, { type BeforeMount, type OnMount } from "@monaco-editor/react";
 import { useEffect, useRef, useState } from "react";
-import partApiSource from "../../clipper/projects/part-api.ts?raw";
+import compositionApiSource from "../../clipper/projects/composition-api.ts?raw";
 import { monacoOptions } from "../app/config";
 import { projectPersistenceService } from "../app/services/projectPersistenceService";
-import type { Part } from "../core/types";
+import type { CodeViewportState, Part } from "../core/types";
+
+type MonacoEditor = Parameters<OnMount>[0];
+type MonacoViewState = NonNullable<ReturnType<MonacoEditor["saveViewState"]>>;
+
+const codeViewportStateCache = new Map<string, CodeViewportState>();
+const codeMonacoViewStateCache = new Map<string, MonacoViewState>();
 
 function getClipperCssVariable(name: string) {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -19,11 +25,19 @@ function getClipperAccent() {
   };
 }
 
-export function CodePane({ part, source: externalSource, onSaveAll, onSourceChange, onSourceLoad }: { part: Part; source: string | undefined; onSaveAll: () => Promise<void>; onSourceChange: (source: string) => Promise<void>; onSourceLoad: (source: string) => void }) {
+export function CodePane({ part, source: externalSource, viewportState, active = true, isStale = false, onRefreshSource, onSaveAll, onSourceChange, onSourceLoad, onViewportStateChange }: { part: Part; source: string | undefined; viewportState?: CodeViewportState; active?: boolean; isStale?: boolean; onRefreshSource?: () => void; onSaveAll: () => Promise<void>; onSourceChange: (source: string) => Promise<void>; onSourceLoad: (source: string) => void; onViewportStateChange: (filePath: string, state: CodeViewportState) => void }) {
   const [source, setSource] = useState(externalSource ?? "");
   const [error, setError] = useState("");
   const saveAllRef = useRef<() => Promise<void>>(onSaveAll);
   const applySourceChangeRef = useRef(onSourceChange);
+  const editorRef = useRef<MonacoEditor | null>(null);
+  const restoreScrollFrameRef = useRef(0);
+  const saveScrollFrameRef = useRef(0);
+  const restoreScrollTimersRef = useRef<number[]>([]);
+  const viewportStateChangeRef = useRef(onViewportStateChange);
+  const filePathRef = useRef(part.filePath);
+  const activeRef = useRef(active);
+  const latestViewportStateRef = useRef<CodeViewportState>(codeViewportStateCache.get(part.filePath) ?? viewportState ?? { scrollLeft: 0, scrollTop: 0 });
 
   useEffect(() => {
     saveAllRef.current = onSaveAll;
@@ -32,6 +46,54 @@ export function CodePane({ part, source: externalSource, onSaveAll, onSourceChan
   useEffect(() => {
     applySourceChangeRef.current = onSourceChange;
   }, [onSourceChange]);
+
+  useEffect(() => {
+    viewportStateChangeRef.current = onViewportStateChange;
+  }, [onViewportStateChange]);
+
+  useEffect(() => {
+    filePathRef.current = part.filePath;
+    latestViewportStateRef.current = codeViewportStateCache.get(part.filePath) ?? viewportState ?? { scrollLeft: 0, scrollTop: 0 };
+  }, [part.filePath]);
+
+  useEffect(() => {
+    activeRef.current = active;
+  }, [active]);
+
+  useEffect(() => () => {
+    const viewState = editorRef.current?.saveViewState();
+    if (viewState) codeMonacoViewStateCache.set(filePathRef.current, viewState);
+    codeViewportStateCache.set(filePathRef.current, latestViewportStateRef.current);
+    viewportStateChangeRef.current(filePathRef.current, latestViewportStateRef.current);
+    window.cancelAnimationFrame(restoreScrollFrameRef.current);
+    window.cancelAnimationFrame(saveScrollFrameRef.current);
+    restoreScrollTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+  }, []);
+
+  function restoreScrollPosition() {
+    const editor = editorRef.current;
+    if (!editor) return;
+    editor.layout();
+    const viewState = codeMonacoViewStateCache.get(filePathRef.current);
+    if (viewState) editor.restoreViewState(viewState);
+    editor.setScrollPosition(latestViewportStateRef.current);
+  }
+
+  useEffect(() => {
+    latestViewportStateRef.current = codeViewportStateCache.get(part.filePath) ?? viewportState ?? { scrollLeft: 0, scrollTop: 0 };
+    window.cancelAnimationFrame(restoreScrollFrameRef.current);
+    restoreScrollTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+    restoreScrollTimersRef.current = [];
+    restoreScrollPosition();
+    restoreScrollFrameRef.current = requestAnimationFrame(() => {
+      restoreScrollPosition();
+      restoreScrollTimersRef.current = [
+        window.setTimeout(restoreScrollPosition, 0),
+        window.setTimeout(restoreScrollPosition, 50),
+        window.setTimeout(restoreScrollPosition, 150),
+      ];
+    });
+  }, [active, part.filePath]);
 
   const configureMonaco: BeforeMount = (monaco) => {
     const { accent, alpha: accentAlpha } = getClipperAccent();
@@ -101,7 +163,7 @@ export function CodePane({ part, source: externalSource, onSaveAll, onSourceChan
       strict: true,
       target: monaco.languages.typescript.ScriptTarget.ES2022,
     });
-    monaco.languages.typescript.typescriptDefaults.addExtraLib(partApiSource, "file:///clipper/projects/part-api.ts");
+    monaco.languages.typescript.typescriptDefaults.addExtraLib(compositionApiSource, "file:///clipper/projects/composition-api.ts");
     monaco.languages.typescript.typescriptDefaults.setDiagnosticsOptions({
       noSemanticValidation: false,
       noSyntaxValidation: false,
@@ -117,7 +179,7 @@ export function CodePane({ part, source: externalSource, onSaveAll, onSourceChan
       return () => { cancelled = true; };
     }
 
-    projectPersistenceService.loadPartSource(part).then(({ source, error }) => {
+    projectPersistenceService.loadCompositionSource(part).then(({ source, error }) => {
       if (cancelled) return;
       setSource(source);
       onSourceLoad(source);
@@ -135,10 +197,36 @@ export function CodePane({ part, source: externalSource, onSaveAll, onSourceChan
   }
 
   const onEditorMount: OnMount = (editor, monaco) => {
+    editorRef.current = editor;
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
       void saveAllRef.current();
     });
+    editor.onDidScrollChange(() => {
+      if (!activeRef.current) return;
+      latestViewportStateRef.current = {
+        scrollLeft: Math.max(Math.round(editor.getScrollLeft()), 0),
+        scrollTop: Math.max(Math.round(editor.getScrollTop()), 0),
+      };
+      const viewState = editor.saveViewState();
+      if (viewState) codeMonacoViewStateCache.set(filePathRef.current, viewState);
+      codeViewportStateCache.set(filePathRef.current, latestViewportStateRef.current);
+      if (saveScrollFrameRef.current) return;
+      saveScrollFrameRef.current = requestAnimationFrame(() => {
+        saveScrollFrameRef.current = 0;
+        viewportStateChangeRef.current(filePathRef.current, latestViewportStateRef.current);
+      });
+    });
+    editor.onDidContentSizeChange(() => {
+      if (activeRef.current) restoreScrollPosition();
+    });
+    editor.onDidChangeCursorPosition(() => {
+      const viewState = editor.saveViewState();
+      if (viewState) codeMonacoViewStateCache.set(filePathRef.current, viewState);
+    });
+    restoreScrollPosition();
   };
 
-  return <div className={`grid h-full min-h-0 w-full ${error ? "grid-rows-[auto_minmax(0,1fr)_auto]" : "grid-rows-[auto_minmax(0,1fr)]"} overflow-hidden bg-[#12141a]`}><div className="flex min-w-0 items-center border-b border-[#2d313b] bg-[#171920] px-3.5 py-3 text-xs text-[var(--clipper-accent)]"><span className="min-w-0 break-words">{part.filePath}</span></div><div className="min-h-0 border-y border-[#20232c] bg-[#12141a] shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]"><Editor beforeMount={configureMonaco} language="typescript" onMount={onEditorMount} options={monacoOptions} path={`file:///${part.filePath}`} theme="clipper-dark" value={source} onChange={(value) => updateSource(value ?? "")} /></div>{error ? <div className="border-t border-[#3b2a2a] bg-[#1a0f10] px-3.5 py-2 text-xs text-[#ffb4b4] break-words">{error}</div> : null}</div>;
+  const gridTemplateRows = `auto ${isStale ? "auto " : ""}minmax(0,1fr)${error ? " auto" : ""}`;
+
+  return <div className="grid h-full min-h-0 w-full overflow-hidden bg-[#12141a]" style={{ gridTemplateRows }}><div className="flex min-w-0 items-center border-b border-[#2d313b] bg-[#171920] px-3.5 py-3 text-xs text-[var(--clipper-accent)]"><span className="min-w-0 break-words">{part.filePath}</span></div>{isStale ? <div className="flex items-center justify-between gap-3 border-b border-[#4a3a20] bg-[#211808] px-3.5 py-2 text-xs font-bold text-[#ffd58a]"><span>This file changed on disk. Refresh to load the external changes.</span><button className="rounded-md border border-[#7a5a22] bg-[#32230a] px-2 py-1 text-[#ffe4ad] transition hover:border-[#d39835]" onClick={onRefreshSource}>Refresh</button></div> : null}<div className="min-h-0 border-y border-[#20232c] bg-[#12141a] shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]"><Editor beforeMount={configureMonaco} language="typescript" onMount={onEditorMount} options={monacoOptions} path={`file:///${part.filePath}`} theme="clipper-dark" value={source} onChange={(value) => updateSource(value ?? "")} /></div>{error ? <div className="border-t border-[#3b2a2a] bg-[#1a0f10] px-3.5 py-2 text-xs text-[#ffb4b4] break-words">{error}</div> : null}</div>;
 }

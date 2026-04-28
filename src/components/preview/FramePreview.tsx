@@ -1,33 +1,35 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent, type RefObject, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { mutedCaps, selectorBlue, selectorHandleSizePx, selectorOffsetPx } from "../../app/config";
 import { getRenderableTextSegments, getSelectionFormatState, normalizeEditableFormatting, renderRichTextSegments, richTextSegmentsFromElement, shouldPersistRichText, textSegmentsToEditableNodes } from "../../app/richText";
+import { applyAdjustmentLayersToSceneTime } from "../../core/adjustments";
 import { boundsToViewport, getActiveTranslation, getActiveZoom, getCameraPreviewTransform, type CameraPreviewTransform } from "../../core/camera";
 import { generateChartObjects, type ChartGeneratedObject } from "../../core/chart";
 import { getBoundsUnion, insetBounds, isVisibleMarqueeBounds, updateDragSelectionBoxElement, type ResizeHandle } from "../../core/frameInteraction";
 import { clamp } from "../../core/math";
 import { evaluateBackgroundLayer, evaluateFrameObject, isTimeSensitiveFrameObject, type EvaluatedFrameObject } from "../../core/renderRuntime";
-import { FRAME_HEIGHT, FRAME_WIDTH, type BackgroundLayer, type Bounds, type FrameObject, type MotionEase, type Part, type Point, type RichTextSegment, type SelectionPayload, type TimelineMode, type TranslationMarker, type ZoomMarker } from "../../core/types";
+import { FRAME_HEIGHT, FRAME_WIDTH, type AdjustmentLayer, type BackgroundLayer, type Bounds, type FrameObject, type MotionEase, type Part, type Point, type RichTextSegment, type SelectionPayload, type TimelineMode, type TranslationMarker, type ZoomMarker } from "../../core/types";
 import type { PlaybackClock } from "../../app/types";
 
-export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dragSelectionBoxRef, framePickPoint, focusPicking, canSelectObjects, cameraTransform, frameViewportRef, frameScale, isPlaying, part, partStart, playbackClock, previewTime, timelineMode, zoomMarkers, pickingTranslationPosition, pickingZoomFocus, selectedObjects, marqueeDragging, editingTextObjectId, onFramePointerCancel, onFramePointerDown, onFramePointerDownCapture, onFramePointerMove, onFramePointerUp, onObjectPointerDown, onObjectResizePointerDown, onTextEditCommit, onTextObjectDoubleClick }: { cameraRef: RefObject<HTMLDivElement | null>; dragBox: Bounds | null; dragSelectionBoxRef: RefObject<HTMLDivElement | null>; framePickPoint: Point | null; focusPicking: boolean; canSelectObjects: boolean; cameraTransform: CameraPreviewTransform; frameViewportRef: RefObject<HTMLDivElement | null>; frameScale: number; isPlaying: boolean; part: Part; partStart: number; playbackClock: PlaybackClock; previewTime: number; timelineMode: TimelineMode; zoomMarkers: ZoomMarker[]; pickingTranslationPosition: boolean; pickingZoomFocus: boolean; selectedObjects: SelectionPayload["objects"]; marqueeDragging: boolean; editingTextObjectId: string | null; onFramePointerCancel: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerDown: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerDownCapture: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerMove: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerUp: (event: PointerEvent<HTMLDivElement>) => void; onObjectPointerDown: (event: PointerEvent<HTMLDivElement>, object: FrameObject) => void; onObjectResizePointerDown: (event: PointerEvent<HTMLDivElement>, handle: ResizeHandle, objectId?: string) => void; onTextEditCommit: (objectId: string, content: string, richText?: RichTextSegment[]) => void; onTextObjectDoubleClick: (event: ReactMouseEvent<HTMLDivElement>, object: FrameObject) => void }) {
+export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dragSelectionBoxRef, framePickPoint, focusPicking, canSelectObjects, cameraTransform, frameViewportRef, frameScale, isPlaying, part, partStart, adjustmentLayers, playbackClock, previewTime, timelineMode, zoomMarkers, pickingTranslationPosition, pickingZoomFocus, selectedObjects, marqueeDragging, editingTextObjectId, onFramePointerCancel, onFramePointerDown, onFramePointerDownCapture, onFramePointerMove, onFramePointerUp, onObjectPointerDown, onObjectResizePointerDown, onTextEditCommit, onTextObjectDoubleClick }: { cameraRef: RefObject<HTMLDivElement | null>; dragBox: Bounds | null; dragSelectionBoxRef: RefObject<HTMLDivElement | null>; framePickPoint: Point | null; focusPicking: boolean; canSelectObjects: boolean; cameraTransform: CameraPreviewTransform; frameViewportRef: RefObject<HTMLDivElement | null>; frameScale: number; isPlaying: boolean; part: Part; partStart: number; adjustmentLayers?: AdjustmentLayer[]; playbackClock: PlaybackClock; previewTime: number; timelineMode: TimelineMode; zoomMarkers: ZoomMarker[]; pickingTranslationPosition: boolean; pickingZoomFocus: boolean; selectedObjects: SelectionPayload["objects"]; marqueeDragging: boolean; editingTextObjectId: string | null; onFramePointerCancel: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerDown: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerDownCapture: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerMove: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerUp: (event: PointerEvent<HTMLDivElement>) => void; onObjectPointerDown: (event: PointerEvent<HTMLDivElement>, object: FrameObject) => void; onObjectResizePointerDown: (event: PointerEvent<HTMLDivElement>, handle: ResizeHandle, objectId?: string) => void; onTextEditCommit: (objectId: string, content: string, richText?: RichTextSegment[]) => void; onTextObjectDoubleClick: (event: ReactMouseEvent<HTMLDivElement>, object: FrameObject) => void }) {
   const frameStyle = useMemo(() => ({ ...part.frame.style, width: FRAME_WIDTH, height: FRAME_HEIGHT, transform: `scale(${frameScale})` }) as CSSProperties, [frameScale, part.frame.style]);
   const viewportStyle = useMemo(() => ({ width: FRAME_WIDTH * frameScale, height: FRAME_HEIGHT * frameScale }) as CSSProperties, [frameScale]);
-  const timeSensitive = isPlaybackTimeSensitivePart(part, timelineMode);
+  const animationsEnabled = timelineMode !== "edit";
+  const timeSensitive = isPlaybackTimeSensitivePart(part, timelineMode, adjustmentLayers, animationsEnabled);
   const [livePreviewTime, setLivePreviewTime] = useState(previewTime);
   const displayPreviewTime = isPlaying && playbackClock && timeSensitive ? livePreviewTime : previewTime;
   const liveCameraTransform = useMemo(() => {
     if (timelineMode !== "composition") return cameraTransform;
     const activeZoom = pickingZoomFocus ? null : getActiveZoom(zoomMarkers, displayPreviewTime);
-    const activeTranslation = pickingTranslationPosition ? null : getActiveTranslation(part.translationMarkers, displayPreviewTime);
+    const activeTranslation = pickingTranslationPosition ? null : getActiveTranslation(part.translationMarkers, displayPreviewTime, part);
     return getCameraPreviewTransform(activeZoom, activeTranslation);
-  }, [cameraTransform, displayPreviewTime, part.translationMarkers, pickingTranslationPosition, pickingZoomFocus, timelineMode, zoomMarkers]);
+  }, [cameraTransform, displayPreviewTime, part, part.translationMarkers, pickingTranslationPosition, pickingZoomFocus, timelineMode, zoomMarkers]);
   const selectedBounds = useMemo(() => selectedObjects.length > 0 ? getBoundsUnion(selectedObjects.map((object) => object.bounds)) : null, [selectedObjects]);
   const selectedViewportBounds = useMemo(() => selectedBounds ? insetBounds(boundsToViewport(selectedBounds, liveCameraTransform, frameScale), -selectorOffsetPx) : null, [frameScale, liveCameraTransform, selectedBounds]);
   const [selectorHover, setSelectorHover] = useState(false);
   const selectorHoverRef = useRef(false);
   const showDragBox = dragBox && isVisibleMarqueeBounds(dragBox, frameScale);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (isPlaying && playbackClock && timeSensitive) return;
     setLivePreviewTime(previewTime);
   }, [isPlaying, playbackClock, previewTime, timeSensitive]);
@@ -39,13 +41,13 @@ export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dra
 
     function tick(now: number) {
       const nextSceneTime = clock.startedFrom + (now - clock.startedAt) / 1000;
-      setLivePreviewTime(clamp(nextSceneTime - partStart, 0, part.duration));
+      setLivePreviewTime(clamp(applyAdjustmentLayersToSceneTime(nextSceneTime, adjustmentLayers) - partStart, 0, part.duration));
       frame = requestAnimationFrame(tick);
     }
 
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [isPlaying, part.duration, partStart, playbackClock, timeSensitive]);
+  }, [adjustmentLayers, isPlaying, part.duration, partStart, playbackClock, timeSensitive]);
 
   useEffect(() => {
     if (!cameraRef.current) return;
@@ -87,9 +89,9 @@ export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dra
       <div ref={frameViewportRef} className={`relative overflow-hidden bg-black shadow-[0_22px_70px_rgba(0,0,0,0.44)] ${focusPicking ? "cursor-crosshair ring-2 ring-[#37d6c2]" : ""}`} style={viewportStyle} onPointerDownCapture={onFramePointerDownCapture} onPointerDown={onFramePointerDown} onPointerMove={handleFramePointerMove} onPointerUp={onFramePointerUp} onPointerCancel={onFramePointerCancel} onPointerLeave={clearSelectorHover}>
         <div className="absolute left-0 top-0 origin-top-left overflow-hidden" style={frameStyle}>
           <div className="absolute inset-0 origin-center" ref={cameraRef}>
-            <BackgroundLayerView background={part.background} duration={part.duration} previewTime={displayPreviewTime} />
+            <BackgroundLayerView animationsEnabled={animationsEnabled} background={part.background} duration={part.duration} previewTime={displayPreviewTime} />
             {part.objects.map((object) => (
-              <FrameObjectView key={object.id} object={object} canSelect={canSelectObjects} duration={part.duration} editing={editingTextObjectId === object.id} focusPicking={focusPicking} previewTime={displayPreviewTime} onDoubleClick={(event) => onTextObjectDoubleClick(event, object)} onPointerDown={(event) => onObjectPointerDown(event, object)} onTextEditCommit={(content, richText) => onTextEditCommit(object.id, content, richText)} />
+              <FrameObjectView key={object.id} animationsEnabled={animationsEnabled} object={object} canSelect={canSelectObjects} duration={part.duration} editing={editingTextObjectId === object.id} focusPicking={focusPicking} previewTime={displayPreviewTime} onDoubleClick={(event) => onTextObjectDoubleClick(event, object)} onPointerDown={(event) => onObjectPointerDown(event, object)} onTextEditCommit={(content, richText) => onTextEditCommit(object.id, content, richText)} />
             ))}
           </div>
         </div>
@@ -109,8 +111,8 @@ export function FramePickPointOverlay({ point, frameScale }: { point: Point; fra
   );
 }
 
-export const FrameObjectView = memo(function FrameObjectView({ object, canSelect, duration, editing, focusPicking, previewTime, onDoubleClick, onPointerDown, onTextEditCommit }: { object: FrameObject; canSelect: boolean; duration: number; editing: boolean; focusPicking: boolean; previewTime: number; onDoubleClick: (event: ReactMouseEvent<HTMLDivElement>) => void; onPointerDown: (event: PointerEvent<HTMLDivElement>) => void; onTextEditCommit: (content: string, richText?: RichTextSegment[]) => void }) {
-  const evaluatedObject = useMemo(() => evaluateObjectForPreview(object, previewTime, duration), [duration, object, previewTime]);
+export const FrameObjectView = memo(function FrameObjectView({ animationsEnabled, object, canSelect, duration, editing, focusPicking, previewTime, onDoubleClick, onPointerDown, onTextEditCommit }: { animationsEnabled: boolean; object: FrameObject; canSelect: boolean; duration: number; editing: boolean; focusPicking: boolean; previewTime: number; onDoubleClick: (event: ReactMouseEvent<HTMLDivElement>) => void; onPointerDown: (event: PointerEvent<HTMLDivElement>) => void; onTextEditCommit: (content: string, richText?: RichTextSegment[]) => void }) {
+  const evaluatedObject = useMemo(() => evaluateObjectForPreview(object, previewTime, duration, animationsEnabled), [animationsEnabled, duration, object, previewTime]);
   const animation = { style: evaluatedObject.renderStyle, content: evaluatedObject.renderContent };
   const editableRef = useRef<HTMLDivElement | null>(null);
   const objectTransform = typeof object.style.transform === "string" ? object.style.transform : undefined;
@@ -200,7 +202,7 @@ export const FrameObjectView = memo(function FrameObjectView({ object, canSelect
     <div className={`absolute flex touch-none select-none flex-col justify-center whitespace-pre-line ${object.type === "chart" ? "overflow-visible" : "overflow-hidden"} ${focusPicking ? "cursor-crosshair" : editing ? "cursor-text" : "cursor-default"} ${editing ? "select-text" : ""}`} data-object-id={canSelect ? object.id : undefined} style={style} onDoubleClick={onDoubleClick} onPointerDown={onPointerDown}>
       {object.type === "text" && editing ? <div ref={editableRef} className="min-h-0 w-full whitespace-pre-wrap outline-none" contentEditable suppressContentEditableWarning onBlur={commitTextEdit} onKeyDown={onTextEditKeyDown} onPointerDown={(event) => event.stopPropagation()} /> : null}
       {object.type === "text" && !editing ? <div className="min-h-0 w-full whitespace-pre-wrap">{renderRichTextSegments(textSegments, Boolean(richText))}</div> : null}
-      {object.type === "chart" && object.chart ? <ChartObjectView object={object} duration={duration} previewTime={previewTime} /> : null}
+      {object.type === "chart" && object.chart ? <ChartObjectView animationsEnabled={animationsEnabled} object={object} duration={duration} previewTime={previewTime} /> : null}
       {object.type === "svg" && content ? <div className="h-full w-full" dangerouslySetInnerHTML={{ __html: content }} /> : null}
       {(object.type === "html" || object.type === "template") && content ? <div className="h-full w-full" dangerouslySetInnerHTML={{ __html: content }} /> : null}
       {object.type !== "text" && object.type !== "svg" && object.type !== "html" && object.type !== "template" && object.type !== "chart" && content ? content : null}
@@ -208,18 +210,18 @@ export const FrameObjectView = memo(function FrameObjectView({ object, canSelect
   );
 }, areFrameObjectPropsEqual);
 
-function ChartObjectView({ object, duration, previewTime }: { object: FrameObject; duration: number; previewTime: number }) {
+function ChartObjectView({ animationsEnabled, object, duration, previewTime }: { animationsEnabled: boolean; object: FrameObject; duration: number; previewTime: number }) {
   const chartObjects = useMemo(() => object.chart ? generateChartObjects({ ...object.chart, bounds: object.bounds }) : [], [object.bounds, object.chart]);
   return (
     <div className="pointer-events-none absolute inset-0 overflow-visible" aria-hidden="true">
-      {chartObjects.map((chartObject) => <GeneratedChartObjectView key={chartObject.id} chartObject={chartObject} chartBounds={object.bounds} duration={duration} previewTime={previewTime} />)}
+      {chartObjects.map((chartObject) => <GeneratedChartObjectView key={chartObject.id} animationsEnabled={animationsEnabled} chartObject={chartObject} chartBounds={object.bounds} duration={duration} previewTime={previewTime} />)}
     </div>
   );
 }
 
-function GeneratedChartObjectView({ chartObject, chartBounds, duration, previewTime }: { chartObject: ChartGeneratedObject; chartBounds: Bounds; duration: number; previewTime: number }) {
+function GeneratedChartObjectView({ animationsEnabled, chartObject, chartBounds, duration, previewTime }: { animationsEnabled: boolean; chartObject: ChartGeneratedObject; chartBounds: Bounds; duration: number; previewTime: number }) {
   const object = useMemo<FrameObject>(() => chartGeneratedObjectToFrameObject(chartObject), [chartObject]);
-  const evaluatedObject = useMemo(() => evaluateObjectForPreview(object, previewTime, duration), [duration, object, previewTime]);
+  const evaluatedObject = useMemo(() => evaluateObjectForPreview(object, previewTime, duration, animationsEnabled), [animationsEnabled, duration, object, previewTime]);
   const animationTransform = typeof evaluatedObject.renderStyle.transform === "string" ? evaluatedObject.renderStyle.transform : undefined;
   const objectTransform = typeof object.style.transform === "string" ? object.style.transform : undefined;
   const style = {
@@ -259,18 +261,19 @@ function chartGeneratedObjectToFrameObject(object: ChartGeneratedObject): FrameO
   };
 }
 
-function areFrameObjectPropsEqual(previous: { object: FrameObject; canSelect: boolean; duration: number; editing: boolean; focusPicking: boolean; previewTime: number }, next: { object: FrameObject; canSelect: boolean; duration: number; editing: boolean; focusPicking: boolean; previewTime: number }) {
+function areFrameObjectPropsEqual(previous: { animationsEnabled: boolean; object: FrameObject; canSelect: boolean; duration: number; editing: boolean; focusPicking: boolean; previewTime: number }, next: { animationsEnabled: boolean; object: FrameObject; canSelect: boolean; duration: number; editing: boolean; focusPicking: boolean; previewTime: number }) {
   return previous.object === next.object
+    && previous.animationsEnabled === next.animationsEnabled
     && previous.canSelect === next.canSelect
     && previous.duration === next.duration
     && previous.editing === next.editing
     && previous.focusPicking === next.focusPicking
-    && (!isPreviewTimeSensitiveObject(next.object) || previous.previewTime === next.previewTime);
+    && (!next.animationsEnabled || !isPreviewTimeSensitiveObject(next.object) || previous.previewTime === next.previewTime);
 }
 
-function areBackgroundLayerPropsEqual(previous: { background: BackgroundLayer; duration: number; previewTime: number }, next: { background: BackgroundLayer; duration: number; previewTime: number }) {
+function areBackgroundLayerPropsEqual(previous: { animationsEnabled: boolean; background: BackgroundLayer; duration: number; previewTime: number }, next: { animationsEnabled: boolean; background: BackgroundLayer; duration: number; previewTime: number }) {
   const timeSensitive = Boolean(next.background.motion) || next.background.elements.some(isPreviewTimeSensitiveObject);
-  return previous.background === next.background && previous.duration === next.duration && (!timeSensitive || previous.previewTime === next.previewTime);
+  return previous.animationsEnabled === next.animationsEnabled && previous.background === next.background && previous.duration === next.duration && (!next.animationsEnabled || !timeSensitive || previous.previewTime === next.previewTime);
 }
 
 function areBackgroundElementPropsEqual(previous: { duration: number; element: EvaluatedFrameObject; previewTime: number }, next: { duration: number; element: EvaluatedFrameObject; previewTime: number }) {
@@ -281,10 +284,11 @@ function isPreviewTimeSensitiveObject(object: FrameObject) {
   return isTimeSensitiveFrameObject(object) || isAnimatedGraphObject(object.id);
 }
 
-function isPlaybackTimeSensitivePart(part: Part, timelineMode: TimelineMode) {
-  return Boolean(part.background.motion)
+function isPlaybackTimeSensitivePart(part: Part, timelineMode: TimelineMode, adjustmentLayers: AdjustmentLayer[] | undefined, animationsEnabled: boolean) {
+  return (animationsEnabled && (Boolean(part.background.motion)
     || part.background.elements.some(isPreviewTimeSensitiveObject)
-    || part.objects.some(isPreviewTimeSensitiveObject)
+    || part.objects.some(isPreviewTimeSensitiveObject)))
+    || (animationsEnabled && Boolean(adjustmentLayers?.length))
     || (timelineMode === "composition" && (part.zoomMarkers.length > 0 || part.translationMarkers.length > 0));
 }
 
@@ -327,8 +331,8 @@ export function DragSelectionBox({ ref, bounds, frameScale, visible }: { ref: Re
   return <div ref={ref} className="pointer-events-none absolute left-0 top-0 border bg-[#159dff]/10 opacity-100 shadow-[0_0_0_1px_rgba(21,157,255,0.18)] will-change-transform" style={{ borderColor: selectorBlue, zIndex: 69 }} />;
 }
 
-export const BackgroundLayerView = memo(function BackgroundLayerView({ background, duration, previewTime }: { background: BackgroundLayer; duration: number; previewTime: number }) {
-  const evaluatedBackground = useMemo(() => evaluateBackgroundLayer(background, previewTime, duration), [background, duration, previewTime]);
+export const BackgroundLayerView = memo(function BackgroundLayerView({ animationsEnabled, background, duration, previewTime }: { animationsEnabled: boolean; background: BackgroundLayer; duration: number; previewTime: number }) {
+  const evaluatedBackground = useMemo(() => evaluateBackgroundLayer(background, previewTime, duration, { animations: animationsEnabled }), [animationsEnabled, background, duration, previewTime]);
   const layerStyle = evaluatedBackground.renderStyle as CSSProperties;
   const fillStyle = evaluatedBackground.fillStyle as CSSProperties;
 
@@ -363,9 +367,9 @@ export const BackgroundElementView = memo(function BackgroundElementView({ eleme
   );
 }, areBackgroundElementPropsEqual);
 
-function evaluateObjectForPreview(object: FrameObject, time: number, duration: number): EvaluatedFrameObject {
-  const evaluatedObject = evaluateFrameObject(object, time, duration);
-  const legacyAnimation = object.motion ? { style: {} as CSSProperties } : getObjectPreviewAnimation(object, time);
+function evaluateObjectForPreview(object: FrameObject, time: number, duration: number, animationsEnabled: boolean): EvaluatedFrameObject {
+  const evaluatedObject = evaluateFrameObject(object, time, duration, { animations: animationsEnabled });
+  const legacyAnimation = animationsEnabled && !object.motion ? getObjectPreviewAnimation(object, time) : { style: {} as CSSProperties };
 
   return {
     ...evaluatedObject,
@@ -375,7 +379,7 @@ function evaluateObjectForPreview(object: FrameObject, time: number, duration: n
       ...evaluatedObject.renderStyle,
       ...legacyAnimation.style,
     },
-    timeSensitive: evaluatedObject.timeSensitive || isAnimatedGraphObject(object.id) || Boolean(legacyAnimation.content),
+    timeSensitive: animationsEnabled && (evaluatedObject.timeSensitive || isAnimatedGraphObject(object.id) || Boolean(legacyAnimation.content)),
   };
 }
 

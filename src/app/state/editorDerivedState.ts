@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { createAgentContext } from "../../core/agentContext";
+import { applyAdjustmentLayersToSceneTime } from "../../core/adjustments";
 import { cameraTranslationToFramePoint, getActiveTranslation, getActiveZoom, getCameraPreviewTransform } from "../../core/camera";
 import { clamp } from "../../core/math";
 import { defaultAssets } from "../../core/project";
@@ -13,12 +14,13 @@ export function useEditorDerivedState({
   focusPickZoomMarker,
   framePickPreviewPoint,
   liveZoomScalePreview,
-  partSources,
+  compositionSources,
   positionPickTranslationMarker,
   project,
-  savedPartSourcesSnapshot,
+  savedCompositionSourcesSnapshot,
   savedProjectSnapshot,
   selectedObjectId,
+  selectedAdjustmentLayerId,
   selectedPartId,
   selectedSceneId,
   selectedTranslationMarker,
@@ -32,12 +34,13 @@ export function useEditorDerivedState({
   focusPickZoomMarker: { partId: string; markerId: string } | null;
   framePickPreviewPoint: ReturnType<typeof cameraTranslationToFramePoint> | null;
   liveZoomScalePreview: { partId: string; markerId: string; scale: number } | null;
-  partSources: Record<string, string>;
+  compositionSources: Record<string, string>;
   positionPickTranslationMarker: { partId: string; markerId: string } | null;
   project: ProjectManifest;
-  savedPartSourcesSnapshot: string;
+  savedCompositionSourcesSnapshot: string;
   savedProjectSnapshot: string;
   selectedObjectId: string | null;
+  selectedAdjustmentLayerId: string | null;
   selectedPartId: string;
   selectedSceneId: string;
   selectedTranslationMarker: { partId: string; markerId: string } | null;
@@ -51,22 +54,24 @@ export function useEditorDerivedState({
   const assets = project.assets ?? defaultAssets;
   const timeline = useMemo(() => buildLinearTimeline(scene), [scene]);
   const sceneDurationSeconds = timeline.at(-1)?.end ?? 0;
-  const activeTimelinePart = getTimelinePartAtTime(timeline, currentSceneTime) ?? timeline.find((item) => item.id === selectedPartId) ?? timeline[0];
-  const part = scene.parts.find((item) => item.id === activeTimelinePart?.id) ?? scene.parts[0];
-  const previewTime = clamp(currentSceneTime - (activeTimelinePart?.start ?? 0), 0, part.duration);
+  const adjustedSceneTime = applyAdjustmentLayersToSceneTime(currentSceneTime, scene.adjustmentLayers);
+  const activeTimelinePart = getTimelinePartAtTime(timeline, adjustedSceneTime) ?? timeline.find((item) => item.id === selectedPartId) ?? timeline[0];
+  const part = scene.compositions.find((item) => item.id === activeTimelinePart?.id) ?? scene.compositions[0];
+  const previewTime = clamp(adjustedSceneTime - (activeTimelinePart?.start ?? 0), 0, part.duration);
+  const selectedAdjustmentLayer = scene.adjustmentLayers?.find((layer) => layer.id === selectedAdjustmentLayerId) ?? null;
   const selectedObject = part.objects.find((object) => object.id === selectedObjectId) ?? null;
-  const selectedZoomPart = scene.parts.find((item) => item.id === selectedZoomMarker?.partId) ?? null;
+  const selectedZoomPart = scene.compositions.find((item) => item.id === selectedZoomMarker?.partId) ?? null;
   const selectedZoom = selectedZoomPart?.zoomMarkers.find((marker) => marker.id === selectedZoomMarker?.markerId) ?? null;
-  const selectedTranslationPart = scene.parts.find((item) => item.id === selectedTranslationMarker?.partId) ?? null;
+  const selectedTranslationPart = scene.compositions.find((item) => item.id === selectedTranslationMarker?.partId) ?? null;
   const selectedTranslation = selectedTranslationPart?.translationMarkers.find((marker) => marker.id === selectedTranslationMarker?.markerId) ?? null;
-  const selectedPart = scene.parts.find((item) => item.id === selectedPartId) ?? null;
+  const selectedPart = scene.compositions.find((item) => item.id === selectedPartId) ?? null;
   const validationErrors = useMemo(() => validateScene(scene), [scene]);
   const agentContext = useMemo(() => createAgentContext(project, scene, part, selectionPayload), [project, scene, part, selectionPayload]);
   const projectSnapshot = useMemo(() => getProjectContentSnapshot(project), [project]);
   const editorStateSnapshot = useMemo(() => JSON.stringify(project.editorState), [project.editorState]);
-  const partSourcesSnapshot = useMemo(() => JSON.stringify(partSources), [partSources]);
+  const compositionSourcesSnapshot = useMemo(() => JSON.stringify(compositionSources), [compositionSources]);
   const hasUnsavedProjectChanges = projectSnapshot !== savedProjectSnapshot;
-  const hasUnsavedSourceChanges = partSourcesSnapshot !== savedPartSourcesSnapshot;
+  const hasUnsavedSourceChanges = compositionSourcesSnapshot !== savedCompositionSourcesSnapshot;
   const hasUnsavedChanges = hasUnsavedProjectChanges || hasUnsavedSourceChanges;
   const isPickingZoomFocus = Boolean(focusPickZoomMarker);
   const isPickingTranslationPosition = Boolean(positionPickTranslationMarker);
@@ -77,15 +82,15 @@ export function useEditorDerivedState({
   }, [liveZoomScalePreview, part.id, part.zoomMarkers]);
   const persistedFramePickPoint = isPickingZoomFocus && selectedZoom ? selectedZoom.focus : isPickingTranslationPosition && selectedTranslation ? cameraTranslationToFramePoint(selectedTranslation.position) : null;
   const framePickPoint = framePickPreviewPoint ?? persistedFramePickPoint;
-  const cameraPreviewTransform = useMemo(() => getCameraPreviewTransform(timelineMode === "composition" && !isPickingZoomFocus ? getActiveZoom(previewZoomMarkers, previewTime) : null, timelineMode === "composition" && !isPickingTranslationPosition ? getActiveTranslation(part.translationMarkers, previewTime) : null), [isPickingTranslationPosition, isPickingZoomFocus, part.translationMarkers, previewTime, previewZoomMarkers, timelineMode]);
+  const cameraPreviewTransform = useMemo(() => getCameraPreviewTransform(timelineMode === "composition" && !isPickingZoomFocus ? getActiveZoom(previewZoomMarkers, previewTime) : null, timelineMode === "composition" && !isPickingTranslationPosition ? getActiveTranslation(part.translationMarkers, previewTime, part) : null), [isPickingTranslationPosition, isPickingZoomFocus, part, part.translationMarkers, previewTime, previewZoomMarkers, timelineMode]);
   const zoomScale = cameraPreviewTransform.scale;
   const currentPartSelectedZoomIds = useMemo(() => selectedZoomMarkers.filter((selection) => selection.partId === part.id).map((selection) => selection.markerId), [part.id, selectedZoomMarkers]);
   const selectedZoomPartSelectedZoomIds = useMemo(() => selectedZoomPart ? selectedZoomMarkers.filter((selection) => selection.partId === selectedZoomPart.id).map((selection) => selection.markerId) : [], [selectedZoomMarkers, selectedZoomPart]);
   const selectedZoomSnapMarkers = useMemo(() => selectedZoomMarkers.flatMap((selection) => {
-    const zoomPart = scene.parts.find((item) => item.id === selection.partId);
+    const zoomPart = scene.compositions.find((item) => item.id === selection.partId);
     const zoomMarker = zoomPart?.zoomMarkers.find((item) => item.id === selection.markerId);
     return zoomMarker ? [zoomMarker] : [];
-  }), [scene.parts, selectedZoomMarkers]);
+  }), [scene.compositions, selectedZoomMarkers]);
   const selectedZoomSnapInActive = selectedZoomSnapMarkers.length > 1 ? selectedZoomSnapMarkers.every((marker) => marker.snapIn) : Boolean(selectedZoom?.snapIn);
   const selectedZoomSnapOutActive = selectedZoomSnapMarkers.length > 1 ? selectedZoomSnapMarkers.every((marker) => marker.snapOut) : Boolean(selectedZoom?.snapOut);
   const selectedZoomMiddleSnap = getSelectedActiveMiddleMend(part.zoomMarkers, currentPartSelectedZoomIds) ?? getSelectedZoomMiddleSnap(part.zoomMarkers, currentPartSelectedZoomIds);
@@ -97,10 +102,10 @@ export function useEditorDerivedState({
   const currentPartSelectedTranslationIds = useMemo(() => selectedTranslationMarkers.filter((selection) => selection.partId === part.id).map((selection) => selection.markerId), [part.id, selectedTranslationMarkers]);
   const selectedTranslationPartSelectedTranslationIds = useMemo(() => selectedTranslationPart ? selectedTranslationMarkers.filter((selection) => selection.partId === selectedTranslationPart.id).map((selection) => selection.markerId) : [], [selectedTranslationMarkers, selectedTranslationPart]);
   const selectedTranslationSnapMarkers = useMemo(() => selectedTranslationMarkers.flatMap((selection) => {
-    const translationPart = scene.parts.find((item) => item.id === selection.partId);
+    const translationPart = scene.compositions.find((item) => item.id === selection.partId);
     const translationMarker = translationPart?.translationMarkers.find((item) => item.id === selection.markerId);
     return translationMarker ? [translationMarker] : [];
-  }), [scene.parts, selectedTranslationMarkers]);
+  }), [scene.compositions, selectedTranslationMarkers]);
   const selectedTranslationSnapInActive = selectedTranslationSnapMarkers.length > 1 ? selectedTranslationSnapMarkers.every((marker) => marker.snapIn) : Boolean(selectedTranslation?.snapIn);
   const selectedTranslationSnapOutActive = selectedTranslationSnapMarkers.length > 1 ? selectedTranslationSnapMarkers.every((marker) => marker.snapOut) : Boolean(selectedTranslation?.snapOut);
   const selectedTranslationMiddleSnap = getSelectedActiveMiddleMend(part.translationMarkers, currentPartSelectedTranslationIds) ?? getSelectedZoomMiddleSnap(part.translationMarkers, currentPartSelectedTranslationIds);
@@ -124,12 +129,13 @@ export function useEditorDerivedState({
     isPickingTranslationPosition,
     isPickingZoomFocus,
     part,
-    partSourcesSnapshot,
+    compositionSourcesSnapshot,
     previewTime,
     previewZoomMarkers,
     scene,
     sceneDurationSeconds,
     selectedObject,
+    selectedAdjustmentLayer,
     selectedPart,
     selectedTranslation,
     selectedTranslationPart,

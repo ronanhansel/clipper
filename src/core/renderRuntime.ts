@@ -1,4 +1,4 @@
-import { FRAME_HEIGHT, FRAME_WIDTH, type BackgroundLayer, type FrameObject, type FrameTemplate, type MotionEase } from "./types";
+import { FRAME_HEIGHT, FRAME_WIDTH, type BackgroundLayer, type FrameObject, type FrameTemplate, type MotionEase, type MotionTrack, type Point } from "./types";
 
 export type RenderStyle = Record<string, string | number | undefined>;
 
@@ -26,10 +26,15 @@ export type EvaluatedBackgroundLayer = Omit<BackgroundLayer, "elements"> & {
   timeSensitive: boolean;
 };
 
+export type RenderEvaluationOptions = {
+  animations?: boolean;
+};
+
 const templateCache = new Map<string, (context: TemplateRenderContext) => TemplateRenderResult>();
 
-export function evaluateFrameObject(object: FrameObject, time: number, duration: number): EvaluatedFrameObject {
-  const motionStyle = getMotionPreviewAnimation(object.motion, time);
+export function evaluateFrameObject(object: FrameObject, time: number, duration: number, options: RenderEvaluationOptions = {}): EvaluatedFrameObject {
+  const animationsEnabled = options.animations ?? true;
+  const motionStyle = animationsEnabled ? getMotionPreviewAnimation(object.motion, time) : {};
   const templateRender = object.template ? renderFrameTemplate(object.template, object, time, duration) : null;
   const motionTransform = typeof motionStyle.transform === "string" ? motionStyle.transform : "";
   const templateTransform = typeof templateRender?.style?.transform === "string" ? templateRender.style.transform : "";
@@ -46,14 +51,15 @@ export function evaluateFrameObject(object: FrameObject, time: number, duration:
     renderContent,
     renderRichText,
     renderStyle,
-    timeSensitive: isTimeSensitiveFrameObject(object),
+    timeSensitive: animationsEnabled && isTimeSensitiveFrameObject(object),
   };
 }
 
-export function evaluateBackgroundLayer(background: BackgroundLayer, time: number, duration: number): EvaluatedBackgroundLayer {
+export function evaluateBackgroundLayer(background: BackgroundLayer, time: number, duration: number, options: RenderEvaluationOptions = {}): EvaluatedBackgroundLayer {
+  const animationsEnabled = options.animations ?? true;
   const fillBounds = getBackgroundLayerFillBounds(background);
-  const elements = background.elements.map((element) => evaluateFrameObject(element, time, duration));
-  const layerMotion = getMotionPreviewAnimation(background.motion, time);
+  const elements = background.elements.map((element) => evaluateFrameObject(element, time, duration, options));
+  const layerMotion = animationsEnabled ? getMotionPreviewAnimation(background.motion, time) : {};
 
   return {
     ...background,
@@ -66,7 +72,7 @@ export function evaluateBackgroundLayer(background: BackgroundLayer, time: numbe
       width: fillBounds.width,
       height: fillBounds.height,
     },
-    timeSensitive: Boolean(background.motion) || elements.some((element) => element.timeSensitive),
+    timeSensitive: animationsEnabled && (Boolean(background.motion) || elements.some((element) => element.timeSensitive)),
   };
 }
 
@@ -118,20 +124,73 @@ function escapeTemplateError(value: string) {
 
 export function getMotionPreviewAnimation(motion: FrameObject["motion"] | BackgroundLayer["motion"] | undefined, time: number): RenderStyle {
   if (!motion) return {};
-  const delay = motion.delay ?? 0;
-  const elapsed = Math.max(time - delay, 0);
-  const cycleTime = motion.loop && motion.duration > 0 ? elapsed % motion.duration : elapsed;
-  const progress = easeProgress(clamp(cycleTime / motion.duration, 0, 1), motion.ease);
+  const progress = getMotionProgress(motion, time);
   const transforms: string[] = [];
+  const pathPosition = getMotionPathPosition(motion, progress);
 
+  if (pathPosition) transforms.push(`translate(${Math.round(pathPosition.x)}px, ${Math.round(pathPosition.y)}px)`);
   if (motion.x) transforms.push(`translateX(${Math.round(interpolate(motion.x, progress))}px)`);
   if (motion.y) transforms.push(`translateY(${Math.round(interpolate(motion.y, progress))}px)`);
   if (motion.rotate) transforms.push(`rotate(${interpolate(motion.rotate, progress).toFixed(2)}deg)`);
+  if (motion.skewX) transforms.push(`skewX(${interpolate(motion.skewX, progress).toFixed(2)}deg)`);
+  if (motion.skewY) transforms.push(`skewY(${interpolate(motion.skewY, progress).toFixed(2)}deg)`);
+  if (motion.scale) transforms.push(`scale(${interpolate(motion.scale, progress).toFixed(4)})`);
+  if (motion.scaleX) transforms.push(`scaleX(${interpolate(motion.scaleX, progress).toFixed(4)})`);
+  if (motion.scaleY) transforms.push(`scaleY(${interpolate(motion.scaleY, progress).toFixed(4)})`);
 
   return {
     opacity: motion.opacity ? interpolate(motion.opacity, progress) : undefined,
     transform: transforms.length > 0 ? transforms.join(" ") : undefined,
   };
+}
+
+export function getMotionTranslation(motion: MotionTrack | undefined, time: number): Point {
+  if (!motion) return { x: 0, y: 0 };
+  const progress = getMotionProgress(motion, time);
+  const pathPosition = getMotionPathPosition(motion, progress) ?? { x: 0, y: 0 };
+  return {
+    x: pathPosition.x + (motion.x ? interpolate(motion.x, progress) : 0),
+    y: pathPosition.y + (motion.y ? interpolate(motion.y, progress) : 0),
+  };
+}
+
+function getMotionProgress(motion: MotionTrack, time: number) {
+  const delay = motion.delay ?? 0;
+  const elapsed = Math.max(time - delay, 0);
+  const cycleTime = motion.loop && motion.duration > 0 ? elapsed % motion.duration : elapsed;
+  return easeProgress(clamp(motion.duration > 0 ? cycleTime / motion.duration : 1, 0, 1), motion.ease);
+}
+
+function getMotionPathPosition(motion: MotionTrack, progress: number): Point | null {
+  const points = motion.path;
+  if (!points?.length) return null;
+  if (points.length === 1) return points[0];
+
+  const closed = Boolean(motion.loop && points.length > 2);
+  const segmentCount = closed ? points.length : points.length - 1;
+  const scaled = clamp(progress, 0, 1) * segmentCount;
+  const segmentIndex = Math.min(Math.floor(scaled), segmentCount - 1);
+  const t = scaled - segmentIndex;
+  const current = getPathPoint(points, segmentIndex, closed);
+  const next = getPathPoint(points, segmentIndex + 1, closed);
+  const previous = getPathPoint(points, segmentIndex - 1, closed) ?? current;
+  const afterNext = getPathPoint(points, segmentIndex + 2, closed) ?? next;
+
+  return {
+    x: catmullRom(previous.x, current.x, next.x, afterNext.x, t),
+    y: catmullRom(previous.y, current.y, next.y, afterNext.y, t),
+  };
+}
+
+function getPathPoint(points: readonly Point[], index: number, closed: boolean) {
+  if (closed) return points[(index + points.length) % points.length];
+  return points[Math.min(Math.max(index, 0), points.length - 1)];
+}
+
+function catmullRom(previous: number, current: number, next: number, afterNext: number, t: number) {
+  const t2 = t * t;
+  const t3 = t2 * t;
+  return 0.5 * ((2 * current) + (-previous + next) * t + (2 * previous - 5 * current + 4 * next - afterNext) * t2 + (-previous + 3 * current - 3 * next + afterNext) * t3);
 }
 
 export function getBackgroundLayerFillBounds(background: BackgroundLayer) {

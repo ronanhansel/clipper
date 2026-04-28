@@ -8,15 +8,15 @@ type Setter<T> = T | ((current: T) => T);
 export type ProjectStoreState = {
   project: ProjectManifest;
   savedProjectSnapshot: string;
-  partSources: Record<string, string>;
-  savedPartSourcesSnapshot: string;
+  compositionSources: Record<string, string>;
+  savedCompositionSourcesSnapshot: string;
 };
 
 export type ProjectStoreActions = {
   setProject: (project: Setter<ProjectManifest>) => void;
   setSavedProjectSnapshot: (snapshot: Setter<string>) => void;
-  setPartSources: (sources: Setter<Record<string, string>>) => void;
-  setSavedPartSourcesSnapshot: (snapshot: Setter<string>) => void;
+  setCompositionSources: (sources: Setter<Record<string, string>>) => void;
+  setSavedCompositionSourcesSnapshot: (snapshot: Setter<string>) => void;
 };
 
 export type ProjectStore = ProjectStoreState & ProjectStoreActions;
@@ -37,24 +37,24 @@ export function getProjectContentSnapshot(project: ProjectManifest) {
   return JSON.stringify(contentProject);
 }
 
-export function createProjectStore(initialProject: ProjectManifest, initialPartSources: Record<string, string> = {}) {
+export function createProjectStore(initialProject: ProjectManifest, initialCompositionSources: Record<string, string> = {}) {
   return createStore<ProjectStore>((set) => ({
     project: initialProject,
     savedProjectSnapshot: getProjectContentSnapshot(initialProject),
-    partSources: initialPartSources,
-    savedPartSourcesSnapshot: JSON.stringify(initialPartSources),
+    compositionSources: initialCompositionSources,
+    savedCompositionSourcesSnapshot: JSON.stringify(initialCompositionSources),
     setProject: createFieldSetter(set, "project"),
     setSavedProjectSnapshot: createFieldSetter(set, "savedProjectSnapshot"),
-    setPartSources: createFieldSetter(set, "partSources"),
-    setSavedPartSourcesSnapshot: createFieldSetter(set, "savedPartSourcesSnapshot"),
+    setCompositionSources: createFieldSetter(set, "compositionSources"),
+    setSavedCompositionSourcesSnapshot: createFieldSetter(set, "savedCompositionSourcesSnapshot"),
   }));
 }
 
 const ProjectStoreContext = createContext<StoreApi<ProjectStore> | null>(null);
 
-export function ProjectStoreProvider({ children, partSources = {}, project }: PropsWithChildren<{ partSources?: Record<string, string>; project: ProjectManifest }>) {
+export function ProjectStoreProvider({ children, compositionSources = {}, project }: PropsWithChildren<{ compositionSources?: Record<string, string>; project: ProjectManifest }>) {
   const storeRef = useRef<StoreApi<ProjectStore> | null>(null);
-  if (!storeRef.current) storeRef.current = createProjectStore(project, partSources);
+  if (!storeRef.current) storeRef.current = createProjectStore(project, compositionSources);
   return <ProjectStoreContext.Provider value={storeRef.current}>{children}</ProjectStoreContext.Provider>;
 }
 
@@ -70,9 +70,9 @@ export function useProjectDocumentState() {
     setProject: state.setProject,
     savedProjectSnapshot: state.savedProjectSnapshot,
     setSavedProjectSnapshot: state.setSavedProjectSnapshot,
-    partSources: state.partSources,
-    setPartSources: state.setPartSources,
-    savedPartSourcesSnapshot: state.savedPartSourcesSnapshot,
-    setSavedPartSourcesSnapshot: state.setSavedPartSourcesSnapshot,
+    compositionSources: state.compositionSources,
+    setCompositionSources: state.setCompositionSources,
+    savedCompositionSourcesSnapshot: state.savedCompositionSourcesSnapshot,
+    setSavedCompositionSourcesSnapshot: state.setSavedCompositionSourcesSnapshot,
   })));
 }

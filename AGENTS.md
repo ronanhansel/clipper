@@ -3,7 +3,7 @@
 ## External Memory
 
 - Always start project work with an external memory file at `build/[version number]/memory/[id]-feature-name.md`.
-- Example: `build/v0.2.1/memory/001-init-editor.md`.
+- Example: `build/v0.2.5/memory/001-init-editor.md`.
 - After every major added feature, major update, rework, rewrite, or feature addition, populate or update the relevant memory files so future agents can pick up the work.
 
 ## Version Planning
@@ -26,6 +26,10 @@
 ## Architecture
 
 - Keep code modularizable.
+- Composition source files must use component-oriented TypeScript authoring: `new Composition({ render() { return [...] } })` with renderable classes such as `Component`, `Group`, `Rect`, `Text`, and `Chart`.
+- Composition source should be organized with named `Component` classes, shared constants where useful, and a top-level `Composition` whose `render()` returns those components.
+- Do not reintroduce `defineComposition`, `definePart`, `objects`, or `components` as public authoring APIs. The normalized `CompositionClip.objects` array is internal editor/runtime state only, not source authoring style.
+- Do not regenerate component-authored source into JSON-style or object-list source. If source generation is unavoidable, emit class/render-based TypeScript.
 - The app currently supports desktop only, using Electron and Vite at the latest versions.
 - Follow the current open-source project structure to maintain a professional, ready-to-publish organization.
 - Prefer small cohesive modules over long mixed-responsibility files. If a file starts combining UI rendering, platform I/O, project mutation, derived calculations, and constants, extract stable seams into `src/app`, `src/core`, `src/components`, or `src/lib` before adding more behavior.

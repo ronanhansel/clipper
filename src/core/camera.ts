@@ -1,5 +1,6 @@
 import { roundTenth } from "./math";
-import { FRAME_HEIGHT, FRAME_WIDTH, type Bounds, type MotionEase, type Point, type TranslationMarker, type ZoomMarker } from "./types";
+import { getMotionTranslation } from "./renderRuntime";
+import { FRAME_HEIGHT, FRAME_WIDTH, type Bounds, type FrameObject, type MotionEase, type Part, type Point, type TranslationMarker, type ZoomMarker } from "./types";
 
 export type CameraPreviewTransform = { x: number; y: number; scale: number };
 
@@ -74,21 +75,23 @@ export function getActiveZoom(markers: ZoomMarker[], time: number) {
   return { ...marker, scale: 1 + (marker.scale - 1) * eased };
 }
 
-export function getActiveTranslation(markers: TranslationMarker[], time: number) {
+export function getActiveTranslation(markers: TranslationMarker[], time: number, part?: Part) {
   const sortedMarkers = [...markers].sort((left, right) => left.start - right.start);
   const markerIndex = sortedMarkers.findIndex((item) => time >= item.start && time <= item.start + item.duration);
   const marker = markerIndex >= 0 ? sortedMarkers[markerIndex] : null;
   if (!marker) return null;
   const progress = (time - marker.start) / marker.duration;
   const previousMarker = sortedMarkers[markerIndex - 1];
+  const targetPosition = getTranslationMarkerPosition(marker, time, part);
+  const previousPosition = previousMarker ? getTranslationMarkerPosition(previousMarker, time, part) : null;
   const middleTransitionFrom = marker.middleTransition === "transition" && marker.snapIn && previousMarker?.snapOut && roundTenth(previousMarker.start + previousMarker.duration) === roundTenth(marker.start)
-    ? previousMarker.position
+    ? previousPosition
     : null;
   if (middleTransitionFrom) {
     const easedIn = cameraEaseProgress(clamp(progress / 0.22, 0, 1), marker.middleEase);
     const position = {
-      x: Math.round(interpolate([middleTransitionFrom.x, marker.position.x] as const, easedIn)),
-      y: Math.round(interpolate([middleTransitionFrom.y, marker.position.y] as const, easedIn)),
+      x: Math.round(interpolate([middleTransitionFrom.x, targetPosition.x] as const, easedIn)),
+      y: Math.round(interpolate([middleTransitionFrom.y, targetPosition.y] as const, easedIn)),
     };
     if (marker.snapOut) return { ...marker, position };
     const rampOut = cameraEaseProgress(clamp((1 - progress) / 0.22, 0, 1), marker.ease);
@@ -98,7 +101,22 @@ export function getActiveTranslation(markers: TranslationMarker[], time: number)
   const rampOut = marker.snapOut ? 1 : (1 - progress) / 0.22;
   const ramp = Math.min(rampIn, rampOut, 1);
   const eased = cameraEaseProgress(clamp(ramp, 0, 1), marker.ease);
-  return { ...marker, position: { x: Math.round(marker.position.x * eased), y: Math.round(marker.position.y * eased) } };
+  return { ...marker, position: { x: Math.round(targetPosition.x * eased), y: Math.round(targetPosition.y * eased) } };
+}
+
+function getTranslationMarkerPosition(marker: TranslationMarker, time: number, part: Part | undefined): Point {
+  if (!marker.followId || !part) return marker.position;
+  const object = findFollowObject(part, marker.followId);
+  if (!object) return marker.position;
+  const motion = getMotionTranslation(object.motion, time);
+  return framePointToCameraTranslation({
+    x: object.bounds.x + object.bounds.width / 2 + motion.x,
+    y: object.bounds.y + object.bounds.height / 2 + motion.y,
+  });
+}
+
+function findFollowObject(part: Part, id: string): FrameObject | undefined {
+  return part.objects.find((object) => object.id === id) ?? part.background.elements.find((object) => object.id === id);
 }
 
 function interpolate(range: readonly [number, number], progress: number) {

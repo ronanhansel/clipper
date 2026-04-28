@@ -23,6 +23,7 @@ export type EditorStoreState = {
   selectedTranslationMarker: MarkerSelection;
   selectedTranslationMarkers: TranslationMarkerSelection[];
   positionPickTranslationMarker: MarkerSelection;
+  selectedAdjustmentLayerId: string | null;
   selectionPayload: SelectionPayload | null;
   framePickPreviewPoint: Point | null;
   dragStart: Point | null;
@@ -68,6 +69,7 @@ export type EditorStoreActions = {
   setSelectedTranslationMarker: (selection: Setter<MarkerSelection>) => void;
   setSelectedTranslationMarkers: (selection: Setter<TranslationMarkerSelection[]>) => void;
   setPositionPickTranslationMarker: (selection: Setter<MarkerSelection>) => void;
+  setSelectedAdjustmentLayerId: (id: Setter<string | null>) => void;
   setSelectionPayload: (payload: Setter<SelectionPayload | null>) => void;
   setFramePickPreviewPoint: (point: Setter<Point | null>) => void;
   setDragStart: (point: Setter<Point | null>) => void;
@@ -131,6 +133,7 @@ function getInitialState(project: ProjectManifest): EditorStoreState {
     selectedTranslationMarker: null,
     selectedTranslationMarkers: [],
     positionPickTranslationMarker: null,
+    selectedAdjustmentLayerId: null,
     selectionPayload: null,
     framePickPreviewPoint: null,
     dragStart: null,
@@ -179,6 +182,7 @@ export function createEditorStore(project: ProjectManifest) {
     setSelectedTranslationMarker: createFieldSetter(set, "selectedTranslationMarker"),
     setSelectedTranslationMarkers: createFieldSetter(set, "selectedTranslationMarkers"),
     setPositionPickTranslationMarker: createFieldSetter(set, "positionPickTranslationMarker"),
+    setSelectedAdjustmentLayerId: createFieldSetter(set, "selectedAdjustmentLayerId"),
     setSelectionPayload: createFieldSetter(set, "selectionPayload"),
     setFramePickPreviewPoint: createFieldSetter(set, "framePickPreviewPoint"),
     setDragStart: createFieldSetter(set, "dragStart"),
@@ -239,6 +243,7 @@ export function createEditorStore(project: ProjectManifest) {
       selectedTranslationMarker: null,
       selectedTranslationMarkers: [],
       positionPickTranslationMarker: null,
+      selectedAdjustmentLayerId: null,
       framePickPreviewPoint: null,
     }),
   }));
@@ -290,6 +295,8 @@ export function useAppEditorState() {
     setSelectedTranslationMarkers: state.setSelectedTranslationMarkers,
     positionPickTranslationMarker: state.positionPickTranslationMarker,
     setPositionPickTranslationMarker: state.setPositionPickTranslationMarker,
+    selectedAdjustmentLayerId: state.selectedAdjustmentLayerId,
+    setSelectedAdjustmentLayerId: state.setSelectedAdjustmentLayerId,
     selectionPayload: state.selectionPayload,
     setSelectionPayload: state.setSelectionPayload,
     framePickPreviewPoint: state.framePickPreviewPoint,

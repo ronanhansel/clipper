@@ -3,7 +3,7 @@ import "@glideapps/glide-data-grid/dist/index.css";
 import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, Crosshair, Database, Italic, Strikethrough, Trash2, Underline } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { chartTypes, formatChartTypeLabel, type ChartDatum, type ChartSpec, type ChartStyle, type ChartType } from "../../core/chart";
-import { MAX_PART_DURATION_SECONDS, FRAME_HEIGHT, FRAME_WIDTH, type BackgroundLayer, type Bounds, type FrameObject, type MotionEase, type Part, type PartFrame, type Point, type TranslationMarker, type ZoomMarker } from "../../core/types";
+import { MAX_PART_DURATION_SECONDS, FRAME_HEIGHT, FRAME_WIDTH, type AdjustmentLayer, type BackgroundLayer, type Bounds, type FrameObject, type MotionEase, type Part, type PartFrame, type Point, type TranslationMarker, type ZoomMarker } from "../../core/types";
 import { clamp, roundTenth, roundTwo } from "../../core/math";
 import { minimumZoomDuration, mutedCaps, panelCard } from "../../app/config";
 import { Checkbox } from "../ui/checkbox";
@@ -12,15 +12,34 @@ import { Input } from "../ui/input";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Textarea } from "../ui/textarea";
 import { ColorSelector, formatStyleLabel, getEditableColorStyleEntries, isHexColor } from "../ColorSelector";
+import { clipperHost } from "../../app/clipperHost";
 
 const defaultFontFamily = "Inter, ui-sans-serif, system-ui, sans-serif";
-const fontOptions = [
-  { value: defaultFontFamily, label: "Inter / System" },
-  { value: "Arial, Helvetica, sans-serif", label: "Arial" },
-  { value: "Georgia, serif", label: "Georgia" },
-  { value: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace", label: "Monospace" },
-  { value: "Impact, Haettenschweiler, 'Arial Narrow Bold', sans-serif", label: "Impact" },
-];
+const defaultFontOption = { value: defaultFontFamily, label: "Inter / System" };
+
+type FontOption = { value: string; label: string };
+
+let cachedSystemFontOptions: FontOption[] | null = null;
+let systemFontOptionsRequest: Promise<FontOption[]> | null = null;
+
+function loadSystemFontOptions() {
+  if (cachedSystemFontOptions) return Promise.resolve(cachedSystemFontOptions);
+  systemFontOptionsRequest ??= clipperHost.listSystemFonts()
+    .then((fonts) => fonts.map((font) => ({ value: font, label: font })))
+    .catch((error) => {
+      console.warn("Unable to load system fonts.", error);
+      return [];
+    });
+  return systemFontOptionsRequest.then((options) => {
+    cachedSystemFontOptions = options;
+    return options;
+  });
+}
+
+function formatFontValueLabel(value: string) {
+  if (value === defaultFontFamily) return defaultFontOption.label;
+  return value.split(",")[0]?.trim().replace(/^['"]|['"]$/g, "") || value;
+}
 
 export function FrameInspector({ part, onDurationChange, onFrameChange, onBackgroundChange }: { part: Part; onDurationChange: (duration: number) => void; onFrameChange: (updater: (frame: PartFrame) => PartFrame) => void; onBackgroundChange: (updater: (background: BackgroundLayer) => BackgroundLayer) => void }) {
   const markerEnd = Math.max(0, ...part.zoomMarkers.map((marker) => marker.start + marker.duration), ...part.translationMarkers.map((marker) => marker.start + marker.duration));
@@ -496,10 +515,28 @@ function getRelevantChartSettings(type: ChartType): {
 }
 
 function FontSelector({ value, onChange }: { value: string; onChange: (value: string) => void }) {
-  const normalizedValue = fontOptions.some((option) => option.value === value) ? value : defaultFontFamily;
+  const [systemFontOptions, setSystemFontOptions] = useState<FontOption[]>(cachedSystemFontOptions ?? []);
+  const fontOptions = useMemo(() => {
+    const merged = [defaultFontOption, ...systemFontOptions];
+    if (value && !merged.some((option) => option.value === value)) {
+      merged.splice(1, 0, { value, label: formatFontValueLabel(value) });
+    }
+    return merged;
+  }, [systemFontOptions, value]);
+
+  useEffect(() => {
+    let active = true;
+    void loadSystemFontOptions().then((options) => {
+      if (active) setSystemFontOptions(options);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
   return (
     <label className={`grid gap-1.5 ${mutedCaps}`}>Font
-      <Select value={normalizedValue} onValueChange={onChange}>
+      <Select value={value} onValueChange={onChange}>
         <SelectTrigger><SelectValue /></SelectTrigger>
         <SelectContent>
           <SelectGroup>
@@ -619,12 +656,48 @@ export function ObjectInspector({ object, onChange }: { object: FrameObject; onC
   );
 }
 
+export function AdjustmentInspector({ layer, sceneDuration, onChange, onDelete }: { layer: AdjustmentLayer; sceneDuration: number; onChange: (updater: (layer: AdjustmentLayer) => AdjustmentLayer) => void; onDelete: () => void }) {
+  function updateText(key: "name", value: string) {
+    onChange((current) => ({ ...current, [key]: value }));
+  }
+
+  function updateNumber(key: "start" | "duration", value: string) {
+    const numeric = Number(value) || 0;
+    onChange((current) => {
+      if (key === "start") return { ...current, start: roundTenth(clamp(numeric, 0, Math.max(sceneDuration - current.duration, 0))) };
+      return { ...current, duration: roundTenth(clamp(numeric, 0.1, Math.max(sceneDuration - current.start, 0.1))) };
+    });
+  }
+
+  function updateFrameStep(value: string) {
+    const every = Math.max(1, Math.round(Number(value) || 1));
+    onChange((current) => ({ ...current, effect: { kind: "frameSkip", every } }));
+  }
+
+  return (
+    <div className="grid gap-3">
+      <div className={panelCard}>
+        <span>Adjustment Node</span>
+        <strong className="text-[13px]">Frame Skip</strong>
+        <small className="text-[#9b9da7]">Behaves like a timeline node and quantizes animation time beneath it.</small>
+      </div>
+      <label className={`grid gap-1.5 ${mutedCaps}`}>Name<Input value={layer.name} onChange={(event) => updateText("name", event.target.value)} /></label>
+      <div className="grid grid-cols-2 gap-2">
+        <label className={`grid gap-1.5 ${mutedCaps}`}>Start<Input type="number" min={0} max={sceneDuration - layer.duration} step={0.1} value={layer.start} onChange={(event) => updateNumber("start", event.target.value)} /></label>
+        <label className={`grid gap-1.5 ${mutedCaps}`}>Duration<Input type="number" min={0.1} max={sceneDuration - layer.start} step={0.1} value={layer.duration} onChange={(event) => updateNumber("duration", event.target.value)} /></label>
+      </div>
+      <label className={`grid gap-1.5 ${mutedCaps}`}>Frame Step<Input type="number" min={1} step={1} value={layer.effect.every} onChange={(event) => updateFrameStep(event.target.value)} /></label>
+      <button className="flex items-center justify-center gap-2 rounded-[10px] border border-[#3b2a2a] bg-[#231516] px-[13px] py-[9px] text-sm font-medium text-[#ffb4b4] transition hover:border-[#6b3838] hover:bg-[#301b1d]" onClick={onDelete}><Trash2 size={15} />Delete</button>
+    </div>
+  );
+}
+
 export function EmptyInspector() {
   return (
     <div className={panelCard}>
       <span>No selection</span>
       <strong className="text-[13px]">Nothing selected</strong>
-      <small className="text-[#9b9da7]">Select a part, marker, or object to edit its settings.</small>
+      <small className="text-[#9b9da7]">Select a composition, marker, or object to edit its settings.</small>
     </div>
   );
 }
@@ -739,6 +812,11 @@ export function TranslationInspector({ marker, part, selectedMarkerCount, select
     onChange((current) => ({ ...current, position: { ...current.position, [key]: Math.round(numeric) } }));
   }
 
+  function updateFollowId(value: string) {
+    const followId = value.trim();
+    onChange((current) => ({ ...current, followId: followId || undefined }));
+  }
+
   function updateEase(value: string) {
     onChange((current) => ({ ...current, ease: value === "default" ? undefined : value as MotionEase }));
   }
@@ -779,6 +857,7 @@ export function TranslationInspector({ marker, part, selectedMarkerCount, select
           </div>
         </div>
       </div>
+      <label className={`grid gap-1.5 ${mutedCaps}`}>Tracker<Input value={marker.followId ?? ""} placeholder="object-id" onChange={(event) => updateFollowId(event.target.value)} /></label>
       <label className={`grid gap-1.5 ${mutedCaps}`}>Ease<Select value={marker.ease ?? "default"} onValueChange={updateEase}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectGroup><SelectItem value="default">Ease in-out</SelectItem><SelectItem value="linear">Linear</SelectItem><SelectItem value="easeIn">Ease in</SelectItem><SelectItem value="easeOut">Ease out</SelectItem><SelectItem value="easeInOut">Ease in-out</SelectItem><SelectItem value="circOut">Circ out</SelectItem></SelectGroup></SelectContent></Select></label>
       <div className="grid gap-2">
         <span className={mutedCaps}>Snap</span>

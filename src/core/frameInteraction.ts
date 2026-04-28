@@ -53,6 +53,11 @@ export function getDraggedObjects(drag: ObjectDrag, delta: Point) {
   }));
 }
 
+export function constrainDragDeltaToDominantAxis(delta: Point, constrained: boolean): Point {
+  if (!constrained) return delta;
+  return Math.abs(delta.x) >= Math.abs(delta.y) ? { x: delta.x, y: 0 } : { x: 0, y: delta.y };
+}
+
 export function getResizedObjects(resize: ObjectResize, delta: Point) {
   const nextSelectionBox = getResizedBounds(resize.selectionBox, resize.handle, delta);
   const scaleX = resize.selectionBox.width === 0 ? 1 : nextSelectionBox.width / resize.selectionBox.width;

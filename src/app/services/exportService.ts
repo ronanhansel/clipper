@@ -1,5 +1,5 @@
 import { defaultAssets } from "../../core/project";
-import { partToSource } from "../../core/partSource";
+import { compositionToSource } from "../../core/compositionSource";
 import { buildLinearTimeline, validateScene } from "../../core/timeline";
 import type { ProjectManifest } from "../../core/types";
 import type { ProjectExportFormat } from "../types";
@@ -12,7 +12,7 @@ type ExportProjectInput = {
   sceneId: string;
   format: ProjectExportFormat;
   includeSources: boolean;
-  partSources: Record<string, string>;
+  compositionSources: Record<string, string>;
 };
 
 type PrepareRenderedMediaInput = {
@@ -21,7 +21,7 @@ type PrepareRenderedMediaInput = {
 };
 
 class ExportService {
-  async exportProject({ project, sceneId, format, includeSources, partSources }: ExportProjectInput) {
+  async exportProject({ project, sceneId, format, includeSources, compositionSources }: ExportProjectInput) {
     const scene = getScene(project, sceneId);
     const timeline = buildLinearTimeline(scene);
     const payload = format === "scene-json"
@@ -35,12 +35,12 @@ class ExportService {
           media: {
             resolution: project.resolution,
             durationSeconds: timeline.at(-1)?.end ?? 0,
-            parts: timeline.map((item) => ({ id: item.id, name: item.name, filePath: item.filePath, start: item.start, end: item.end, duration: item.duration })),
+            compositions: timeline.map((item) => ({ id: item.id, name: item.name, filePath: item.filePath, start: item.start, end: item.end, duration: item.duration })),
             assetsPath: project.assetsPath,
             assets: project.assets ?? defaultAssets,
           },
           validation: validateScene(scene),
-          sources: includeSources ? Object.fromEntries(scene.parts.map((item) => [item.filePath, partSources[item.filePath] ?? partToSource(item)])) : undefined,
+          sources: includeSources ? Object.fromEntries(scene.compositions.map((item) => [item.filePath, compositionSources[item.filePath] ?? compositionToSource(item)])) : undefined,
         };
     const content = `${JSON.stringify(payload, null, 2)}\n`;
     const defaultFileName = `${slugifyFileName(project.name)}-${slugifyFileName(scene.name)}.${format === "scene-json" ? "scene" : "project"}.json`;

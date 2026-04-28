@@ -1,10 +1,8 @@
 /// <reference types="node" />
 
 import { describe, expect, it } from "vitest";
-import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
-import { defineChart, type ChartType } from "../../clipper/projects/part-api";
-import { partFromSource } from "./partSource";
+import { defineChart, type ChartType } from "../../clipper/projects/composition-api";
+import { compositionFromSource, compositionToSource } from "./compositionSource";
 import type { Part } from "./types";
 
 const chartTypes: ChartType[] = ["line", "area", "bar", "horizontalBar", "groupedBar", "stackedBar", "scatter", "bubble", "pie", "donut", "radar", "radialBar", "gauge", "heatmap", "waterfall"];
@@ -46,8 +44,8 @@ describe("defineChart", () => {
       translationMarkers: [],
     };
 
-    const part = await partFromSource(basePart, `
-      import { defineChart, definePart } from "@clipper/part-api";
+    const part = await compositionFromSource(basePart, `
+      import { Chart, Composition, defineChart } from "@clipper/composition-api";
 
       const chart = defineChart({
         id: "eval-chart",
@@ -56,11 +54,13 @@ describe("defineChart", () => {
         data: [{ label: "A", value: 10 }, { label: "B", value: 30 }],
       });
 
-      export const part = definePart({
+      export const composition = new Composition({
         id: "prt_chart_eval",
         duration: 4,
         frame: { width: 1920, height: 1080, style: { background: "#000" } },
-        objects: chart.objects,
+        render() {
+          return [new Chart({ id: chart.object.id, bounds: chart.object.bounds, chart: chart.object.chart, style: chart.object.style })];
+        },
       });
     `);
 
@@ -68,26 +68,130 @@ describe("defineChart", () => {
     expect(part.objects.find((object) => object.id === "eval-chart")?.chart?.type).toBe("bar");
   });
 
-  it("hydrates the chart showcase source into first-class chart objects", async () => {
-    const source = await readFile(resolve("clipper/projects/prj_v01_sample/scn_opening/prt_chart_showcase.ts"), "utf8");
+  it("hydrates class-based component compositions into first-class objects", async () => {
     const basePart: Part = {
-      id: "prt_chart_showcase",
-      name: "Chart Template Showcase",
-      filePath: "clipper/projects/prj_v01_sample/scn_opening/prt_chart_showcase.ts",
-      duration: 12,
-      frame: { width: 1920, height: 1080, style: { background: "#06111c" } },
-      background: { id: "background", name: "Background", style: { background: "#06111c" }, elements: [] },
+      id: "prt_component_eval",
+      name: "Component Eval",
+      filePath: "clipper/projects/test/prt_component_eval.ts",
+      duration: 4,
+      frame: { width: 1920, height: 1080, style: { background: "#000" } },
+      background: { id: "background", name: "Background", style: { background: "#000" }, elements: [] },
       objects: [],
       snapshot: [],
       zoomMarkers: [],
       translationMarkers: [],
     };
 
-    const part = await partFromSource(basePart, source);
+    const part = await compositionFromSource(basePart, `
+      import { Component, Composition, Group, Rect, Text } from "@clipper/composition-api";
 
-    expect(part.objects.filter((object) => object.type === "chart")).toHaveLength(12);
-    expect(part.objects.some((object) => object.id === "tpl-line" && object.chart?.type === "line")).toBe(true);
-    expect(part.objects.some((object) => object.id === "tpl-donut" && object.chart?.type === "donut")).toBe(true);
-    expect(part.objects.some((object) => object.id === "tpl-gauge" && object.chart?.type === "gauge")).toBe(true);
+      class HeroTitle extends Component {
+        render(ctx) {
+          return [
+            new Text({
+              id: "hero-title",
+              bounds: { x: 100, y: 120, width: 800, height: 160 },
+              text: "Component Title",
+              transform: { x: 12, y: 20, rotate: 3, scale: 1.2 },
+              style: { color: "#fff", fontSize: 72 },
+            }),
+          ];
+        }
+      }
+
+      export const composition = new Composition({
+        id: "prt_component_eval",
+        duration: 4,
+        frame: { width: 1920, height: 1080, style: { background: "#000" } },
+        render() {
+          return [
+            new Group({ transform: { scale: 0.9 }, children: [
+              new Rect({ id: "panel", bounds: { x: 80, y: 90, width: 880, height: 240 }, style: { background: "#111" } }),
+              new HeroTitle(),
+            ] }),
+          ];
+        },
+      });
+    `);
+
+    expect(part.objects.map((object) => object.id)).toEqual(["panel", "hero-title"]);
+    expect(part.objects.find((object) => object.id === "hero-title")?.type).toBe("text");
+    expect(part.objects.find((object) => object.id === "hero-title")?.style.transform).toBe("scale(0.9) translate3d(12px, 20px, 0px) rotate(3deg) scale(1.2)");
+  });
+
+  it("rejects legacy part exports", async () => {
+    const basePart: Part = {
+      id: "prt_legacy_eval",
+      name: "Legacy Eval",
+      filePath: "clipper/projects/test/prt_legacy_eval.ts",
+      duration: 4,
+      frame: { width: 1920, height: 1080, style: { background: "#000" } },
+      background: { id: "background", name: "Background", style: { background: "#000" }, elements: [] },
+      objects: [],
+      snapshot: [],
+      zoomMarkers: [],
+      translationMarkers: [],
+    };
+
+    await expect(compositionFromSource(basePart, `
+      import { Composition } from "@clipper/composition-api";
+
+      export const part = new Composition({
+        id: "prt_legacy_eval",
+        duration: 4,
+        frame: { width: 1920, height: 1080, style: { background: "#000" } },
+        render() { return []; },
+      });
+    `)).rejects.toThrow("Composition source must export a composition object");
+  });
+
+  it("rejects plain object renderables", async () => {
+    const basePart: Part = {
+      id: "prt_plain_object_eval",
+      name: "Plain Object Eval",
+      filePath: "clipper/projects/test/prt_plain_object_eval.ts",
+      duration: 4,
+      frame: { width: 1920, height: 1080, style: { background: "#000" } },
+      background: { id: "background", name: "Background", style: { background: "#000" }, elements: [] },
+      objects: [],
+      snapshot: [],
+      zoomMarkers: [],
+      translationMarkers: [],
+    };
+
+    await expect(compositionFromSource(basePart, `
+      import { Composition } from "@clipper/composition-api";
+
+      export const composition = new Composition({
+        id: "prt_plain_object_eval",
+        duration: 4,
+        frame: { width: 1920, height: 1080, style: { background: "#000" } },
+        render() {
+          return [{ id: "legacy-object", kind: "rect", bounds: { x: 0, y: 0, width: 100, height: 100 }, style: {} }];
+        },
+      });
+    `)).rejects.toThrow("Plain object renderables are no longer supported");
+  });
+
+  it("generates component-authored fallback source", () => {
+    const source = compositionToSource({
+      id: "prt_generated_eval",
+      name: "Generated Eval",
+      filePath: "clipper/projects/test/prt_generated_eval.ts",
+      duration: 4,
+      frame: { width: 1920, height: 1080, style: { background: "#000" } },
+      background: { id: "background", name: "Background", style: { background: "#000" }, elements: [] },
+      objects: [
+        { id: "generated-panel", name: "Generated Panel", type: "rect", selector: "[data-object-id='generated-panel']", bounds: { x: 0, y: 0, width: 100, height: 100 }, style: { background: "#111" } },
+      ],
+      snapshot: [],
+      zoomMarkers: [],
+      translationMarkers: [],
+    });
+
+    expect(source).toContain("class GeneratedCompositionObjects extends Component");
+    expect(source).toContain("return [new GeneratedCompositionObjects()]");
+    expect(source).not.toContain("defineComposition");
+    expect(source).not.toContain('"id":');
   });
 });

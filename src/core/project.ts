@@ -1,6 +1,6 @@
 import { roundTwo, sanitizeProjectNumbers } from "./math";
 import { normalizeMendedZoomMarkerFocus } from "./markers";
-import type { AssetItem, Part, PreviewViewportState, ProjectManifest, TimelineMode, TimelineViewportState } from "./types";
+import type { AssetItem, CodeViewportState, CompositionClip, PreviewViewportState, ProjectManifest, Scene, TimelineMode, TimelineViewportState } from "./types";
 
 export const defaultTimelineViewportState: TimelineViewportState = { displacement: 0, zoom: 1 };
 export const defaultTimelineMode: TimelineMode = "edit";
@@ -10,20 +10,37 @@ function normalizeRightPanelTab(tab: unknown) {
   return tab === "motion" || tab === "agent" ? tab : "video";
 }
 
+function normalizeCodeViewportState(state: CodeViewportState | undefined): CodeViewportState {
+  return {
+    scrollLeft: roundTwo(Math.max(state?.scrollLeft ?? 0, 0)),
+    scrollTop: roundTwo(Math.max(state?.scrollTop ?? 0, 0)),
+  };
+}
+
+function normalizeCodeViewportStates(states: Record<string, CodeViewportState> | undefined) {
+  if (!states) return {};
+  return Object.fromEntries(Object.entries(states).map(([filePath, state]) => [filePath, normalizeCodeViewportState(state)]));
+}
+
 export const defaultAssets: AssetItem[] = [
-  { id: "ast_folder_media", name: "media", kind: "folder", children: [{ id: "ast_grid_ref", name: "grid-reference.png", kind: "file", path: "clipper/projects/prj_v01_sample/assets/media/grid-reference.png" }] },
+  { id: "ast_folder_media", name: "media", kind: "folder", children: [] },
   { id: "ast_folder_audio", name: "audio", kind: "folder", children: [] },
-  { id: "ast_brand", name: "brand-palette.json", kind: "file", path: "clipper/projects/prj_v01_sample/assets/brand-palette.json" },
 ];
 
-export function replacePartInProject(project: ProjectManifest, partId: string, updater: (part: Part) => Part): ProjectManifest {
+export function replacePartInProject(project: ProjectManifest, compositionId: string, updater: (composition: CompositionClip) => CompositionClip): ProjectManifest {
   return {
     ...project,
     scenes: project.scenes.map((currentScene) => ({
       ...currentScene,
-      parts: currentScene.parts.map((currentPart) => (currentPart.id === partId ? updater(currentPart) : currentPart)),
+      compositions: currentScene.compositions.map((currentComposition) => (currentComposition.id === compositionId ? updater(currentComposition) : currentComposition)),
     })),
   };
+}
+
+type LegacyScene = Omit<Scene, "compositions"> & { parts?: CompositionClip[]; compositions?: CompositionClip[] };
+
+function getSceneCompositions(scene: Scene | LegacyScene): CompositionClip[] {
+  return scene.compositions ?? ("parts" in scene ? scene.parts ?? [] : []);
 }
 
 export function normalizeProject(project: ProjectManifest): ProjectManifest {
@@ -51,18 +68,25 @@ export function normalizeProject(project: ProjectManifest): ProjectManifest {
         scrollTop: roundTwo(Math.max(previewState.scrollTop, 0)),
         zoomBarOpen: Boolean(previewState.zoomBarOpen),
       },
+      code: normalizeCodeViewportStates(project.editorState?.code),
     },
     scenes: project.scenes.map((scene) => ({
       ...scene,
-      parts: scene.parts.map((part) => ({
-        ...part,
+      adjustmentLayers: (scene.adjustmentLayers ?? []).map((layer) => ({
+        ...layer,
+        start: roundTwo(Math.max(layer.start, 0)),
+        duration: roundTwo(Math.max(layer.duration, 0.1)),
+        effect: layer.effect.kind === "frameSkip" ? { kind: "frameSkip", every: Math.max(1, Math.round(layer.effect.every || 1)) } : layer.effect,
+      })),
+      compositions: getSceneCompositions(scene).map((composition) => ({
+        ...composition,
         background: {
-          ...part.background,
-          stretchToElements: part.background.stretchToElements || undefined,
-          elements: part.background.elements ?? [],
+          ...composition.background,
+          stretchToElements: composition.background.stretchToElements || undefined,
+          elements: composition.background.elements ?? [],
         },
-        zoomMarkers: normalizeMendedZoomMarkerFocus(part.zoomMarkers ?? []),
-        translationMarkers: part.translationMarkers ?? [],
+        zoomMarkers: normalizeMendedZoomMarkerFocus(composition.zoomMarkers ?? []),
+        translationMarkers: composition.translationMarkers ?? [],
       })),
     })),
     assets: project.assets ?? defaultAssets,

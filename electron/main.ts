@@ -1,5 +1,6 @@
 import { app, BrowserWindow, Menu, dialog, ipcMain } from "electron";
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { watch, type FSWatcher } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -12,9 +13,69 @@ const ffmpegPath = require("ffmpeg-static") as string | null;
 const isDev = process.env.VITE_DEV_SERVER_URL || !app.isPackaged;
 const videoExportSessions = new Map<string, { process: ChildProcessWithoutNullStreams; outputPath: string; closePromise: Promise<string | null> }>();
 const cancelledVideoRenders = new Set<string>();
+const textFileWatchers = new Map<number, FSWatcher[]>();
 const frameWidth = 1920;
 const frameHeight = 1080;
 let hardwareEncoderSupport: Set<string> | null = null;
+let systemFontFamilies: string[] | null = null;
+
+type ProjectWatchPaths = {
+  files: string[];
+  directories: string[];
+};
+
+type MacFontProfile = {
+  SPFontsDataType?: Array<{
+    enabled?: string;
+    valid?: string;
+    typefaces?: Array<{
+      enabled?: string;
+      family?: string;
+    }>;
+  }>;
+};
+
+async function listSystemFontFamilies() {
+  if (systemFontFamilies) return systemFontFamilies;
+  if (process.platform !== "darwin") return [];
+
+  const output = await readCommandOutput("/usr/sbin/system_profiler", ["SPFontsDataType", "-json"]);
+
+  try {
+    const profile = JSON.parse(output) as MacFontProfile;
+    const families = new Set<string>();
+    for (const font of profile.SPFontsDataType ?? []) {
+      if (font.enabled === "no" || font.valid === "no") continue;
+      for (const typeface of font.typefaces ?? []) {
+        if (typeface.enabled === "no") continue;
+        const family = typeface.family?.trim();
+        if (family) families.add(family);
+      }
+    }
+    systemFontFamilies = [...families].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+    return systemFontFamilies;
+  } catch {
+    return [];
+  }
+}
+
+function readCommandOutput(command: string, args: string[]) {
+  return new Promise<string>((resolve) => {
+    const child = spawn(command, args, { stdio: ["ignore", "pipe", "ignore"] });
+    const chunks: Buffer[] = [];
+    let byteLength = 0;
+
+    child.stdout.on("data", (chunk: Buffer) => {
+      byteLength += chunk.byteLength;
+      if (byteLength <= 128 * 1024 * 1024) chunks.push(chunk);
+    });
+    child.once("error", () => resolve("{}"));
+    child.once("close", (code) => {
+      if (code !== 0 || byteLength > 128 * 1024 * 1024) resolve("{}");
+      else resolve(Buffer.concat(chunks).toString("utf8"));
+    });
+  });
+}
 
 function getSupportedHardwareEncoders() {
   if (hardwareEncoderSupport) return hardwareEncoderSupport;
@@ -77,6 +138,75 @@ ipcMain.handle("clipper:read-text-file", async (_event, relativePath: string) =>
 
 ipcMain.handle("clipper:write-text-file", async (_event, relativePath: string, content: string) => {
   await fs.writeFile(resolveClipperFile(relativePath), content, "utf8");
+});
+
+ipcMain.handle("clipper:list-system-fonts", async () => {
+  return listSystemFontFamilies();
+});
+
+ipcMain.handle("clipper:watch-text-files", (event, relativePaths: string[]) => {
+  const senderId = event.sender.id;
+  textFileWatchers.get(senderId)?.forEach((watcher) => watcher.close());
+
+  const watchedPaths = [...new Set(relativePaths)].filter((relativePath) => relativePath.startsWith("clipper/"));
+  const watchers = watchedPaths.flatMap((relativePath) => {
+    try {
+      const resolvedPath = resolveClipperFile(relativePath);
+      const watcher = watch(resolvedPath, { persistent: false }, () => {
+        if (!event.sender.isDestroyed()) event.sender.send("clipper:text-file-changed", relativePath);
+      });
+      return [watcher];
+    } catch {
+      return [];
+    }
+  });
+
+  textFileWatchers.set(senderId, watchers);
+  event.sender.once("destroyed", () => {
+    textFileWatchers.get(senderId)?.forEach((watcher) => watcher.close());
+    textFileWatchers.delete(senderId);
+  });
+});
+
+ipcMain.handle("clipper:watch-project-files", (event, watchPaths: ProjectWatchPaths) => {
+  const senderId = event.sender.id;
+  textFileWatchers.get(senderId)?.forEach((watcher) => watcher.close());
+
+  const watchedFiles = [...new Set(watchPaths.files)].filter((relativePath) => relativePath.startsWith("clipper/"));
+  const watchedDirectories = [...new Set(watchPaths.directories)].filter((relativePath) => relativePath.startsWith("clipper/"));
+  const fileWatchers = watchedFiles.flatMap((relativePath) => {
+    try {
+      const resolvedPath = resolveClipperFile(relativePath);
+      const watcher = watch(resolvedPath, { persistent: false }, () => {
+        if (!event.sender.isDestroyed()) event.sender.send("clipper:project-file-changed", relativePath);
+      });
+      return [watcher];
+    } catch {
+      return [];
+    }
+  });
+  const directoryWatchers = watchedDirectories.flatMap((relativePath) => {
+    try {
+      const resolvedPath = resolveClipperFile(relativePath);
+      const watcher = watch(resolvedPath, { persistent: false, recursive: true }, (_eventType, fileName) => {
+        try {
+          const changedPath = fileName ? getClipperRelativePath(path.join(resolvedPath, fileName.toString())) : relativePath;
+          if (!event.sender.isDestroyed()) event.sender.send("clipper:project-file-changed", changedPath);
+        } catch {
+          if (!event.sender.isDestroyed()) event.sender.send("clipper:project-file-changed", relativePath);
+        }
+      });
+      return [watcher];
+    } catch {
+      return [];
+    }
+  });
+
+  textFileWatchers.set(senderId, [...fileWatchers, ...directoryWatchers]);
+  event.sender.once("destroyed", () => {
+    textFileWatchers.get(senderId)?.forEach((watcher) => watcher.close());
+    textFileWatchers.delete(senderId);
+  });
 });
 
 ipcMain.handle("clipper:open-project-manifest", async () => {
@@ -269,9 +399,10 @@ async function renderSceneToVideo(_project: ProjectManifest, scene: Scene, outpu
     for (let frameIndex = 0; frameIndex < totalFrames; frameIndex += 1) {
       if (exportId && cancelledVideoRenders.has(exportId)) throw new Error("Video export cancelled.");
       const sceneTime = Math.min(frameIndex / frameRate, Math.max(durationSeconds - 0.001, 0));
-      const timelinePart = getTimelinePartAtTime(timeline, sceneTime) ?? timeline[0];
-      if (!timelinePart) throw new Error("The current scene has no parts to render.");
-      const previewTime = clamp(sceneTime - timelinePart.start, 0, timelinePart.duration);
+      const adjustedSceneTime = applyAdjustmentLayersToSceneTime(sceneTime, scene.adjustmentLayers, frameRate);
+      const timelinePart = getTimelinePartAtTime(timeline, adjustedSceneTime) ?? timeline[0];
+      if (!timelinePart) throw new Error("The current scene has no compositions to render.");
+      const previewTime = clamp(adjustedSceneTime - timelinePart.start, 0, timelinePart.duration);
       const frameHtml = buildFrameBody(timelinePart, previewTime, getActiveZoom(timelinePart.zoomMarkers, previewTime), getActiveTranslation(timelinePart.translationMarkers, previewTime));
 
       await renderFrameHtml(rendererWindow, frameHtml);
@@ -310,21 +441,22 @@ async function writeProcessInput(process: ChildProcessWithoutNullStreams, chunk:
 
 type MotionEase = "linear" | "easeIn" | "easeOut" | "easeInOut" | "circOut";
 type VideoExportProgress = { frame: number; totalFrames: number; percent: number; status: string };
-type MotionTrack = { delay?: number; duration: number; ease?: MotionEase; loop?: boolean; opacity?: readonly [number, number]; rotate?: readonly [number, number]; x?: readonly [number, number]; y?: readonly [number, number] };
+type MotionTrack = { delay?: number; duration: number; ease?: MotionEase; loop?: boolean; opacity?: readonly [number, number]; rotate?: readonly [number, number]; scale?: readonly [number, number]; scaleX?: readonly [number, number]; scaleY?: readonly [number, number]; skewX?: readonly [number, number]; skewY?: readonly [number, number]; x?: readonly [number, number]; y?: readonly [number, number] };
 type FrameTemplate = { kind: "html"; source: string; static?: boolean };
 type FrameObject = { id: string; name: string; type: string; selector: string; bounds: { x: number; y: number; width: number; height: number }; content?: string; template?: FrameTemplate; richText?: Array<{ text: string; bold: boolean; italic: boolean; underline: boolean }>; style: Record<string, string | number>; motion?: MotionTrack };
 type BackgroundLayer = { id: string; name: string; style: Record<string, string | number>; stretchToElements?: boolean; motion?: MotionTrack; elements: FrameObject[] };
 type ZoomMarker = { id: string; start: number; duration: number; focus: { x: number; y: number }; scale: number; ease?: MotionEase; snapIn?: boolean; snapOut?: boolean; middleTransition?: "transition"; middleEase?: MotionEase };
 type TranslationMarker = { id: string; start: number; duration: number; position: { x: number; y: number }; ease?: MotionEase; snapIn?: boolean; snapOut?: boolean; middleTransition?: "transition"; middleEase?: MotionEase };
-type Part = { id: string; name: string; filePath: string; duration: number; frame: { width: number; height: number; style: Record<string, string | number> }; background: BackgroundLayer; objects: FrameObject[]; snapshot: unknown[]; zoomMarkers: ZoomMarker[]; translationMarkers: TranslationMarker[] };
-type Scene = { id: string; name: string; parts: Part[] };
+type AdjustmentLayer = { id: string; name: string; start: number; duration: number; effect: { kind: "frameSkip"; every: number } };
+type CompositionClip = { id: string; name: string; filePath: string; duration: number; frame: { width: number; height: number; style: Record<string, string | number> }; background: BackgroundLayer; objects: FrameObject[]; snapshot: unknown[]; zoomMarkers: ZoomMarker[]; translationMarkers: TranslationMarker[] };
+type Scene = { id: string; name: string; compositions: CompositionClip[]; adjustmentLayers?: AdjustmentLayer[] };
 type ProjectManifest = { id: string; name: string; resolution: { width: number; height: number }; scenes: Scene[]; assetsPath: string };
-type TimelinePart = Part & { start: number; end: number };
+type TimelinePart = CompositionClip & { start: number; end: number };
 const templateCache = new Map<string, (context: unknown) => unknown>();
 
 function buildLinearTimeline(scene: Scene): TimelinePart[] {
   let cursor = 0;
-  return scene.parts.map((part) => {
+  return scene.compositions.map((part) => {
     const start = cursor;
     const end = start + part.duration;
     cursor = end;
@@ -338,11 +470,23 @@ function getTimelinePartAtTime(timeline: TimelinePart[], time: number) {
   return timeline.find((item) => time >= item.start && time < item.end) ?? timeline[0] ?? null;
 }
 
+function applyAdjustmentLayersToSceneTime(sceneTime: number, layers: AdjustmentLayer[] | undefined, frameRate: number) {
+  return (layers ?? []).reduce((time, layer) => {
+    if (time < layer.start || time >= layer.start + layer.duration) return time;
+    if (layer.effect.kind !== "frameSkip") return time;
+    const frameStep = Math.max(1, Math.round(layer.effect.every));
+    if (frameStep <= 1 || frameRate <= 0) return time;
+    const elapsedFrames = Math.max(0, Math.floor((time - layer.start) * frameRate));
+    const heldFrame = Math.floor(elapsedFrames / frameStep) * frameStep;
+    return layer.start + heldFrame / frameRate;
+  }, sceneTime);
+}
+
 function buildFrameShell() {
   return `<!doctype html><html><head><meta charset="utf-8"><style>*{box-sizing:border-box}html,body{margin:0;width:${frameWidth}px;height:${frameHeight}px;overflow:hidden;background:#000}</style></head><body><div id="clipper-frame-root"></div><script>window.__clipperSetFrame=function(html){document.getElementById("clipper-frame-root").innerHTML=html;return new Promise(function(resolve){requestAnimationFrame(function(){requestAnimationFrame(resolve);});});};</script></body></html>`;
 }
 
-function buildFrameBody(part: Part, previewTime: number, activeZoom: ZoomMarker | null, activeTranslation: TranslationMarker | null) {
+function buildFrameBody(part: CompositionClip, previewTime: number, activeZoom: ZoomMarker | null, activeTranslation: TranslationMarker | null) {
   const scale = activeZoom?.scale ?? 1;
   const focus = activeZoom?.focus ?? { x: frameWidth / 2, y: frameHeight / 2 };
   const x = (frameWidth / 2 - focus.x) * (scale - 1) + (activeTranslation?.position.x ?? 0);
@@ -429,6 +573,11 @@ function getMotionPreviewAnimation(motion: MotionTrack | undefined, time: number
   if (motion.x) transforms.push(`translateX(${Math.round(interpolate(motion.x, progress))}px)`);
   if (motion.y) transforms.push(`translateY(${Math.round(interpolate(motion.y, progress))}px)`);
   if (motion.rotate) transforms.push(`rotate(${interpolate(motion.rotate, progress).toFixed(2)}deg)`);
+  if (motion.skewX) transforms.push(`skewX(${interpolate(motion.skewX, progress).toFixed(2)}deg)`);
+  if (motion.skewY) transforms.push(`skewY(${interpolate(motion.skewY, progress).toFixed(2)}deg)`);
+  if (motion.scale) transforms.push(`scale(${interpolate(motion.scale, progress).toFixed(4)})`);
+  if (motion.scaleX) transforms.push(`scaleX(${interpolate(motion.scaleX, progress).toFixed(4)})`);
+  if (motion.scaleY) transforms.push(`scaleY(${interpolate(motion.scaleY, progress).toFixed(4)})`);
   return { opacity: motion.opacity ? interpolate(motion.opacity, progress) : undefined, transform: transforms.length > 0 ? transforms.join(" ") : undefined };
 }
 
@@ -484,6 +633,13 @@ async function createWindow() {
     },
   });
 
+  window.webContents.session.setPermissionCheckHandler((_webContents, permission) => {
+    return String(permission) === "local-fonts";
+  });
+  window.webContents.session.setPermissionRequestHandler((_webContents, permission, callback) => {
+    callback(String(permission) === "local-fonts");
+  });
+
   window.webContents.on("before-input-event", (event, input) => {
     if (!(input.control || input.meta)) return;
     if (input.key === ",") {
@@ -536,9 +692,10 @@ async function renderVideoFromCommand() {
   const renderArgIndex = process.argv.indexOf("--render-video");
   if (renderArgIndex < 0) return false;
 
-  const projectPath = process.argv[renderArgIndex + 1] ?? "clipper/projects/prj_v01_sample/project.json";
-  const sceneId = process.argv[renderArgIndex + 2] ?? "scn_opening";
+  const projectPath = process.argv[renderArgIndex + 1];
+  const sceneId = process.argv[renderArgIndex + 2];
   const outputPathArg = process.argv[renderArgIndex + 3] ?? "clipper/exports/command-render.mp4";
+  if (!projectPath || !sceneId) throw new Error("Usage: electron . --render-video <project.json> <scene-id> [output.mp4]");
   const appRoot = path.resolve(__dirname, "..");
   const resolvedProjectPath = path.resolve(appRoot, projectPath);
   const resolvedOutputPath = path.resolve(appRoot, outputPathArg);

@@ -1,6 +1,6 @@
 {
   "name": "clipper",
-  "version": "0.2.1",
+  "version": "0.2.5",
   "description": "Agentic video editor framework for TypeScript-authored motion graphics.",
   "license": "MIT",
   "type": "module",
@@ -9,7 +9,6 @@
     "dev": "npm run electron:dev",
     "renderer:dev": "vite --host 127.0.0.1 --port 5173 --strictPort",
     "electron:dev": "concurrently -k \"tsc -p tsconfig.node.json --watch\" \"npm:renderer:dev\" \"wait-on tcp:5173 dist-electron/main.js && VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",
-    "render:sample": "tsc -p tsconfig.node.json && electron . --render-video clipper/projects/prj_v01_sample/project.json scn_opening clipper/exports/command-render.mp4",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.node.json --noEmit",
     "test": "vitest run",
     "build": "npm run typecheck && vite build && tsc -p tsconfig.node.json"

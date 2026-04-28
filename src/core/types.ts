@@ -40,7 +40,13 @@ export type MotionTrack = {
   ease?: MotionEase;
   loop?: boolean;
   opacity?: readonly [number, number];
+  path?: readonly Point[];
   rotate?: readonly [number, number];
+  scale?: readonly [number, number];
+  scaleX?: readonly [number, number];
+  scaleY?: readonly [number, number];
+  skewX?: readonly [number, number];
+  skewY?: readonly [number, number];
   x?: readonly [number, number];
   y?: readonly [number, number];
 };
@@ -97,6 +103,7 @@ export type TranslationMarker = {
   id: string;
   start: number;
   duration: number;
+  followId?: string;
   position: Point;
   ease?: MotionEase;
   snapIn?: boolean;
@@ -105,7 +112,20 @@ export type TranslationMarker = {
   middleEase?: MotionEase;
 };
 
-export type Part = {
+export type AdjustmentEffect = {
+  kind: "frameSkip";
+  every: number;
+};
+
+export type AdjustmentLayer = {
+  id: string;
+  name: string;
+  start: number;
+  duration: number;
+  effect: AdjustmentEffect;
+};
+
+export type CompositionClip = {
   id: string;
   name: string;
   filePath: string;
@@ -118,10 +138,14 @@ export type Part = {
   translationMarkers: TranslationMarker[];
 };
 
+/** @deprecated Use CompositionClip. */
+export type Part = CompositionClip;
+
 export type Scene = {
   id: string;
   name: string;
-  parts: Part[];
+  compositions: CompositionClip[];
+  adjustmentLayers?: AdjustmentLayer[];
 };
 
 export type TimelineViewportState = {
@@ -138,6 +162,11 @@ export type PreviewViewportState = {
   zoomBarOpen: boolean;
 };
 
+export type CodeViewportState = {
+  scrollLeft: number;
+  scrollTop: number;
+};
+
 export type EditorState = {
   timeline: TimelineViewportState;
   timelineMode: TimelineMode;
@@ -147,6 +176,7 @@ export type EditorState = {
   selectedSceneId?: string;
   currentSceneTime?: number;
   preview?: PreviewViewportState;
+  code?: Record<string, CodeViewportState>;
 };
 
 export type AssetItem = {
@@ -170,10 +200,13 @@ export type ProjectManifest = {
   editorState?: EditorState;
 };
 
-export type TimelinePart = Part & {
+export type TimelineComposition = CompositionClip & {
   start: number;
   end: number;
 };
+
+/** @deprecated Use TimelineComposition. */
+export type TimelinePart = TimelineComposition;
 
 export type SelectionPayload = {
   selectionBox: Bounds;

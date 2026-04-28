@@ -1,4 +1,4 @@
-import { loadPartsFromSource, partToSource } from "../../core/partSource";
+import { compositionToSource, loadCompositionsFromSource } from "../../core/compositionSource";
 import { normalizeProject } from "../../core/project";
 import type { EditorState, Part, ProjectManifest } from "../../core/types";
 import { clipperHost } from "../clipperHost";
@@ -11,7 +11,7 @@ type LoadProjectInput = {
 type SaveProjectInput = {
   manifestPath: string;
   project: ProjectManifest;
-  partSources: Record<string, string>;
+  compositionSources: Record<string, string>;
 };
 
 class ProjectPersistenceService {
@@ -23,7 +23,7 @@ class ProjectPersistenceService {
         ...manifestProject,
         scenes: await Promise.all(manifestProject.scenes.map(async (scene) => ({
           ...scene,
-          parts: await loadPartsFromSource(scene.parts, (relativePath) => clipperHost.readTextFile(relativePath)),
+          compositions: await loadCompositionsFromSource(scene.compositions, (relativePath) => clipperHost.readTextFile(relativePath)),
         }))),
       });
 
@@ -42,12 +42,12 @@ class ProjectPersistenceService {
     }
   }
 
-  async saveProject({ manifestPath, project, partSources }: SaveProjectInput) {
+  async saveProject({ manifestPath, project, compositionSources }: SaveProjectInput) {
     await clipperHost.writeTextFile(manifestPath, `${JSON.stringify(project, null, 2)}\n`);
-    await Promise.all(project.scenes.flatMap((scene) => scene.parts).map((part) => clipperHost.writeTextFile(part.filePath, partSources[part.filePath] ?? partToSource(part))));
+    await Promise.all(project.scenes.flatMap((scene) => scene.compositions).map((part) => clipperHost.writeTextFile(part.filePath, compositionSources[part.filePath] ?? compositionToSource(part))));
     return {
       projectSnapshot: JSON.stringify(project),
-      partSourcesSnapshot: JSON.stringify(partSources),
+      compositionSourcesSnapshot: JSON.stringify(compositionSources),
       sourceStatus: "Project and composition sources saved.",
     };
   }
@@ -58,12 +58,12 @@ class ProjectPersistenceService {
     await clipperHost.writeTextFile(manifestPath, `${JSON.stringify({ ...manifestProject, editorState }, null, 2)}\n`);
   }
 
-  async loadPartSource(part: Part) {
+  async loadCompositionSource(part: Part) {
     try {
       return { source: await clipperHost.readTextFile(part.filePath), error: null as string | null };
     } catch (error) {
       return {
-        source: partToSource(part),
+        source: compositionToSource(part),
         error: error instanceof Error ? error.message : "Unable to load composition file.",
       };
     }

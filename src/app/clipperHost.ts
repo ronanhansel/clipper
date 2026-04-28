@@ -26,6 +26,43 @@ class ClipperHostService {
     if (!response.ok) throw new Error((await response.text()) || "Unable to save composition file.");
   }
 
+  async watchTextFiles(relativePaths: string[]) {
+    await window.clipper?.watchTextFiles?.(relativePaths);
+  }
+
+  async listSystemFonts() {
+    const browserFonts = await this.listBrowserLocalFonts();
+    if (browserFonts.length > 0) return browserFonts;
+    return window.clipper?.listSystemFonts?.() ?? [];
+  }
+
+  private async listBrowserLocalFonts() {
+    if (!window.queryLocalFonts) return [];
+    try {
+      const fonts = await window.queryLocalFonts();
+      const families = new Set<string>();
+      for (const font of fonts) {
+        const family = font.family.trim();
+        if (family) families.add(family);
+      }
+      return [...families].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+    } catch {
+      return [];
+    }
+  }
+
+  async watchProjectFiles(watchPaths: { files: string[]; directories: string[] }) {
+    await window.clipper?.watchProjectFiles?.(watchPaths);
+  }
+
+  onTextFileChanged(callback: (relativePath: string) => void) {
+    return window.clipper?.onTextFileChanged?.(callback) ?? (() => {});
+  }
+
+  onProjectFileChanged(callback: (relativePath: string) => void) {
+    return window.clipper?.onProjectFileChanged?.(callback) ?? (() => {});
+  }
+
   async openProjectManifest() {
     if (!window.clipper?.openProjectManifest) return null;
     return window.clipper.openProjectManifest();

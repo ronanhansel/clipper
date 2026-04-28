@@ -1,19 +1,19 @@
 import { defaultZoomDuration, minimumZoomDuration } from "./editorConstants";
-import { MAX_PART_DURATION_SECONDS, MAX_SCENE_DURATION_SECONDS, type Part, type Scene, type TimelinePart, type TranslationMarker, type ZoomMarker } from "./types";
+import { MAX_PART_DURATION_SECONDS, MAX_SCENE_DURATION_SECONDS, type AdjustmentLayer, type CompositionClip, type Scene, type TimelineComposition, type TimelinePart, type TranslationMarker, type ZoomMarker } from "./types";
 import { clamp, roundTenth } from "./math";
 
-export function buildLinearTimeline(scene: Scene): TimelinePart[] {
+export function buildLinearTimeline(scene: Scene): TimelineComposition[] {
   let cursor = 0;
-  return scene.parts.map((part) => {
+  return scene.compositions.map((composition) => {
     const start = cursor;
-    const end = start + part.duration;
+    const end = start + composition.duration;
     cursor = end;
-    return { ...part, start, end };
+    return { ...composition, start, end };
   });
 }
 
 export function sceneDuration(scene: Scene) {
-  return scene.parts.reduce((total, part) => total + part.duration, 0);
+  return scene.compositions.reduce((total, composition) => total + composition.duration, 0);
 }
 
 export function validateScene(scene: Scene): string[] {
@@ -24,17 +24,29 @@ export function validateScene(scene: Scene): string[] {
     errors.push(`Scene ${scene.name} is ${duration}s and exceeds the 30 minute limit.`);
   }
 
-  scene.parts.forEach((part) => {
-    if (part.duration <= 0) {
-      errors.push(`Composition ${part.name} must have a positive duration.`);
+  scene.compositions.forEach((composition) => {
+    if (composition.duration <= 0) {
+      errors.push(`Composition ${composition.name} must have a positive duration.`);
     }
 
-    if (part.duration > MAX_PART_DURATION_SECONDS) {
-      errors.push(`Composition ${part.name} is ${part.duration}s and exceeds the 1 minute limit.`);
+    if (composition.duration > MAX_PART_DURATION_SECONDS) {
+      errors.push(`Composition ${composition.name} is ${composition.duration}s and exceeds the 1 minute limit.`);
     }
   });
 
+  (scene.adjustmentLayers ?? []).forEach((layer) => {
+    if (layer.duration <= 0) errors.push(`Adjustment ${layer.name} must have a positive duration.`);
+    if (layer.start < 0) errors.push(`Adjustment ${layer.name} cannot start before the scene.`);
+    if (layer.start + layer.duration > duration) errors.push(`Adjustment ${layer.name} extends past the scene end.`);
+    if (layer.effect.kind === "frameSkip" && layer.effect.every < 1) errors.push(`Adjustment ${layer.name} must skip at least 1 frame.`);
+  });
+
   return errors;
+}
+
+export function getAdjustmentPlacement(layers: AdjustmentLayer[] | undefined, sceneDuration: number, sceneTime: number) {
+  const duration = Math.min(3, Math.max(sceneDuration, 0.1));
+  return { start: roundTenth(clamp(sceneTime, 0, Math.max(sceneDuration - duration, 0))), duration };
 }
 
 export function formatTime(seconds: number) {
@@ -43,15 +55,18 @@ export function formatTime(seconds: number) {
   return `${minutes}:${secs}`;
 }
 
-export function updatePartObject(parts: Part[], partId: string, objectId: string, updater: (part: Part["objects"][number]) => Part["objects"][number]) {
-  return parts.map((part) => {
-    if (part.id !== partId) return part;
+export function updateCompositionObject(compositions: CompositionClip[], compositionId: string, objectId: string, updater: (composition: CompositionClip["objects"][number]) => CompositionClip["objects"][number]) {
+  return compositions.map((composition) => {
+    if (composition.id !== compositionId) return composition;
     return {
-      ...part,
-      objects: part.objects.map((object) => (object.id === objectId ? updater(object) : object)),
+      ...composition,
+      objects: composition.objects.map((object) => (object.id === objectId ? updater(object) : object)),
     };
   });
 }
+
+/** @deprecated Use updateCompositionObject. */
+export const updatePartObject = updateCompositionObject;
 
 export type TimelineMarkerKind = "zoom" | "translation";
 export type TimelineMarkerMove = { sourcePartId: string; markerId: string; targetPartId: string; start: number };
@@ -83,7 +98,9 @@ export function getTimelinePartAtTime(timeline: TimelinePart[], time: number) {
   return timeline[0] ?? null;
 }
 
-export function getTopTimelineItemAtTime(timeline: TimelinePart[], time: number): { kind: "translation"; part: TimelinePart; marker: TranslationMarker } | { kind: "zoom"; part: TimelinePart; marker: ZoomMarker } | { kind: "part"; part: TimelinePart } | null {
+export function getTopTimelineItemAtTime(timeline: TimelineComposition[], time: number, adjustmentLayers: AdjustmentLayer[] = []): { kind: "adjustment"; layer: AdjustmentLayer } | { kind: "translation"; part: TimelineComposition; marker: TranslationMarker } | { kind: "zoom"; part: TimelineComposition; marker: ZoomMarker } | { kind: "part"; part: TimelineComposition } | null {
+  const adjustmentLayer = [...adjustmentLayers].reverse().find((layer) => time >= layer.start && time <= layer.start + layer.duration);
+  if (adjustmentLayer) return { kind: "adjustment", layer: adjustmentLayer };
   const timelinePart = getTimelinePartAtTime(timeline, time > 0 ? time - 0.000001 : time);
   if (!timelinePart) return null;
   const translationMarker = [...timelinePart.translationMarkers].reverse().find((marker) => isMarkerAtSceneTime(timelinePart, marker, time));
@@ -93,7 +110,7 @@ export function getTopTimelineItemAtTime(timeline: TimelinePart[], time: number)
   return { kind: "part", part: timelinePart };
 }
 
-export function isMarkerAtSceneTime(part: TimelinePart, marker: { start: number; duration: number }, time: number) {
+export function isMarkerAtSceneTime(part: TimelineComposition, marker: { start: number; duration: number }, time: number) {
   const markerStart = part.start + marker.start;
   return time >= markerStart && time <= markerStart + marker.duration;
 }
@@ -122,13 +139,13 @@ export function snapScrubTimeToBoundary(time: number, boundaries: number[], snap
   return nearest;
 }
 
-export function getScrubSnapBoundaries(timeline: TimelinePart[]) {
+export function getScrubSnapBoundaries(timeline: TimelinePart[], adjustmentLayers: AdjustmentLayer[] = []) {
   return Array.from(new Set(timeline.flatMap((part) => [
     part.start,
     part.end,
     ...part.zoomMarkers.flatMap((marker) => [part.start + marker.start, part.start + marker.start + marker.duration]),
     ...part.translationMarkers.flatMap((marker) => [part.start + marker.start, part.start + marker.start + marker.duration]),
-  ]))).sort((left, right) => left - right);
+  ]).concat(adjustmentLayers.flatMap((layer) => [layer.start, layer.start + layer.duration])))).sort((left, right) => left - right);
 }
 
 export function getMarkerSnapBoundaries(timeline: TimelinePart[], exclude: { kind: TimelineMarkerKind; partId: string; markerId: string }) {
