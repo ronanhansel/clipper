@@ -12,6 +12,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./comp
 import { createAgentContext } from "./core/agentContext";
 import { boundsToPoints, createSelectionPayload, framePointFromClient, normalizeBounds } from "./core/geometry";
 import { loadPartsFromSource, partFromSource, partToSource } from "./core/partSource";
+import { evaluateBackgroundLayer, evaluateFrameObject, isTimeSensitiveFrameObject, type EvaluatedFrameObject } from "./core/renderRuntime";
 import { buildLinearTimeline, formatTime, updatePartObject, validateScene } from "./core/timeline";
 import { FRAME_HEIGHT, FRAME_WIDTH, type AssetItem, type BackgroundLayer, type Bounds, type FrameObject, type MotionEase, type Part, type PartFrame, type Point, type ProjectManifest, type RichTextSegment, type SelectionPayload, type TimelineMode, type TimelinePart, type TimelineViewportState, type TranslationMarker, type ZoomMarker } from "./core/types";
 import { sampleProject } from "./sampleProject";
@@ -87,8 +88,9 @@ const appDragRegion = "[-webkit-app-region:drag] select-none";
 const appNoDragRegion = "[-webkit-app-region:no-drag]";
 const buttonBase = "rounded-[8px] border border-transparent bg-[#171920] px-2.5 py-1.5 text-sm text-[#f7f7f8] transition hover:-translate-y-px hover:border-[#3b4150] hover:bg-[#20232c]";
 const appBarButtonBase = "rounded-[7px] border border-transparent bg-[#171920] px-2 py-1 text-xs text-[#f7f7f8] transition hover:-translate-y-px hover:border-[#3b4150] hover:bg-[#20232c]";
-const appBarSaveButtonEnabled = "rounded-[7px] border border-[var(--clipper-accent-strong)] bg-[var(--clipper-accent)] px-2 py-1 text-xs font-extrabold text-[var(--clipper-accent-foreground)] transition hover:bg-[var(--clipper-accent-hover)]";
-const appBarSaveButtonDisabled = "cursor-not-allowed rounded-[7px] border border-[#2d313b] bg-[#171920] px-2 py-1 text-xs font-extrabold text-[#737884] opacity-70";
+const appBarActionButtonBase = `${appBarButtonBase} w-[70px]`;
+const appBarSaveButtonEnabled = "w-[70px] rounded-[7px] border border-[var(--clipper-accent-strong)] bg-[var(--clipper-accent)] px-2 py-1 text-xs font-extrabold text-[var(--clipper-accent-foreground)] transition hover:bg-[var(--clipper-accent-hover)]";
+const appBarSaveButtonDisabled = "w-[70px] cursor-not-allowed rounded-[7px] border border-[#2d313b] bg-[#171920] px-2 py-1 text-xs font-extrabold text-[#737884] opacity-70";
 const defaultZoomDuration = 2.2;
 const minimumZoomDuration = 1;
 const marqueeSelectionThresholdPx = 10;
@@ -97,6 +99,7 @@ const selectorHandleSizePx = 8;
 const selectorBlue = "#159dff";
 const minimumObjectResizeSide = 6;
 const defaultTimelinePixelsPerSecond = 126;
+const defaultScrubCommitThrottleMs = 75;
 const maxProjectHistoryActions = 1000;
 const projectHistoryCoalesceMs = 700;
 const defaultTimelineViewportState: TimelineViewportState = { displacement: 0, zoom: 1 };
@@ -211,6 +214,7 @@ type TranslationMarkerSelection = { partId: string; markerId: string };
 type TimelineMarkerMove = { sourcePartId: string; markerId: string; targetPartId: string; start: number };
 type TimelineSelectionDrag = { startX: number; currentX: number };
 type CameraPreviewTransform = { x: number; y: number; scale: number };
+type PlaybackClock = { startedAt: number; startedFrom: number } | null;
 
 function selectionObjectFromFrameObject(object: FrameObject): SelectionPayload["objects"][number] {
   return {
@@ -254,10 +258,12 @@ export function App() {
   const [marqueeDragging, setMarqueeDragging] = useState(false);
   const [currentSceneTime, setCurrentSceneTime] = useState(2.6);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [playbackClock, setPlaybackClock] = useState<PlaybackClock>(null);
   const [frameZoomBarOpen, setFrameZoomBarOpen] = useState(false);
   const [framePreviewScale, setFramePreviewScale] = useState(defaultFramePreviewScale);
   const [liveZoomScalePreview, setLiveZoomScalePreview] = useState<{ partId: string; markerId: string; scale: number } | null>(null);
   const [scrubSnapEnabled, setScrubSnapEnabled] = useState(false);
+  const [scrubCommitThrottleMs, setScrubCommitThrottleMs] = useState(defaultScrubCommitThrottleMs);
   const [fastSelectEnabled, setFastSelectEnabled] = useState(false);
   const [leftPanelTab, setLeftPanelTab] = useState<LeftPanelTab>("assets");
   const [rightPanelTab, setRightPanelTab] = useState<RightPanelTab>("video");
@@ -284,6 +290,12 @@ export function App() {
   const saveAllChangesRef = useRef<(() => Promise<void>) | null>(null);
   const videoExportIdRef = useRef<string | null>(null);
   const currentSceneTimeRef = useRef(currentSceneTime);
+  const isPlayingRef = useRef(isPlaying);
+  const playbackClockRef = useRef<PlaybackClock>(null);
+  const wasPlayingRef = useRef(false);
+  const timelineScrubbingRef = useRef(false);
+  const playbackTimeLabelRef = useRef<HTMLSpanElement | null>(null);
+  const playbackPlayheadRef = useRef<HTMLDivElement | null>(null);
   const pendingScrubTimeRef = useRef<number | null>(null);
   const scrubFrameRef = useRef(0);
   const pendingFramePickPointRef = useRef<Point | null>(null);
@@ -330,12 +342,10 @@ export function App() {
   const isPickingTranslationPosition = Boolean(positionPickTranslationMarker);
   const canSelectFrameObjects = timelineMode === "edit";
   const previewZoomMarkers = liveZoomScalePreview?.partId === part.id ? part.zoomMarkers.map((marker) => (marker.id === liveZoomScalePreview.markerId ? { ...marker, scale: liveZoomScalePreview.scale } : marker)) : part.zoomMarkers;
-  const activeZoom = timelineMode === "composition" && !isPickingZoomFocus ? getActiveZoom(previewZoomMarkers, previewTime) : null;
-  const activeTranslation = timelineMode === "composition" && !isPickingTranslationPosition ? getActiveTranslation(part.translationMarkers, previewTime) : null;
   const persistedFramePickPoint = isPickingZoomFocus && selectedZoom ? selectedZoom.focus : isPickingTranslationPosition && selectedTranslation ? cameraTranslationToFramePoint(selectedTranslation.position) : null;
   const framePickPoint = framePickPreviewPoint ?? persistedFramePickPoint;
-  const zoomScale = activeZoom?.scale ?? 1;
-  const cameraPreviewTransform = useMemo(() => getCameraPreviewTransform(activeZoom, activeTranslation), [activeTranslation, activeZoom]);
+  const cameraPreviewTransform = useMemo(() => getCameraPreviewTransform(timelineMode === "composition" && !isPickingZoomFocus ? getActiveZoom(previewZoomMarkers, previewTime) : null, timelineMode === "composition" && !isPickingTranslationPosition ? getActiveTranslation(part.translationMarkers, previewTime) : null), [isPickingTranslationPosition, isPickingZoomFocus, part.translationMarkers, previewTime, previewZoomMarkers, timelineMode]);
+  const zoomScale = cameraPreviewTransform.scale;
   const currentPartSelectedZoomIds = selectedZoomMarkers.filter((selection) => selection.partId === part.id).map((selection) => selection.markerId);
   const selectedZoomPartSelectedZoomIds = selectedZoomPart ? selectedZoomMarkers.filter((selection) => selection.partId === selectedZoomPart.id).map((selection) => selection.markerId) : [];
   const selectedZoomSnapMarkers = selectedZoomMarkers.flatMap((selection) => {
@@ -447,6 +457,17 @@ export function App() {
     syncPartSourcesFromProject(nextProject, currentProject);
   }
 
+  function syncPlaybackDom(time: number) {
+    if (playbackTimeLabelRef.current) playbackTimeLabelRef.current.textContent = formatTime(time);
+    if (playbackPlayheadRef.current) playbackPlayheadRef.current.style.setProperty("--clipper-playhead-left", `${sceneDurationSeconds > 0 ? (time / sceneDurationSeconds) * 100 : 0}%`);
+    if (playbackPlayheadRef.current) playbackPlayheadRef.current.style.removeProperty("--clipper-playhead-x");
+  }
+
+  function updatePlaybackClock(nextClock: PlaybackClock) {
+    playbackClockRef.current = nextClock;
+    setPlaybackClock(nextClock);
+  }
+
   useEffect(() => {
     projectRef.current = project;
   }, [project]);
@@ -459,8 +480,24 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    isPlayingRef.current = isPlaying;
+    if (isPlaying) {
+      wasPlayingRef.current = true;
+      return;
+    }
+
+    if (wasPlayingRef.current) {
+      wasPlayingRef.current = false;
+      const settledTime = currentSceneTimeRef.current;
+      syncPlaybackDom(settledTime);
+      if (Math.abs(settledTime - currentSceneTime) >= 0.001) setCurrentSceneTime(settledTime);
+      return;
+    }
+
     currentSceneTimeRef.current = currentSceneTime;
-  }, [currentSceneTime]);
+    if (timelineScrubbingRef.current) return;
+    syncPlaybackDom(currentSceneTime);
+  }, [currentSceneTime, isPlaying]);
 
   useEffect(() => {
     function openSettingsShortcut(event: KeyboardEvent) {
@@ -601,31 +638,43 @@ export function App() {
 
   useEffect(() => {
     if (!isPlaying) return;
-    let previousTime = performance.now();
+    let lastCommittedPartId = getTimelinePartAtTime(timeline, currentSceneTimeRef.current)?.id ?? activeTimelinePart?.id ?? "";
     let frame = 0;
 
     function tick(now: number) {
-      const deltaSeconds = (now - previousTime) / 1000;
-      previousTime = now;
-      setCurrentSceneTime((current) => Math.min(current + deltaSeconds, sceneDurationSeconds));
+      const clock = playbackClockRef.current ?? { startedAt: now, startedFrom: currentSceneTimeRef.current };
+      playbackClockRef.current = clock;
+      const nextTime = Math.min(clock.startedFrom + (now - clock.startedAt) / 1000, sceneDurationSeconds);
+      const nextTimelinePart = getTimelinePartAtTime(timeline, nextTime);
+      const partChanged = Boolean(nextTimelinePart?.id && nextTimelinePart.id !== lastCommittedPartId);
+      const shouldSyncReact = partChanged || nextTime >= sceneDurationSeconds;
+
+      currentSceneTimeRef.current = nextTime;
+      syncPlaybackDom(nextTime);
+
+      if (shouldSyncReact) {
+        lastCommittedPartId = nextTimelinePart?.id ?? lastCommittedPartId;
+        setCurrentSceneTime(nextTime);
+      }
+
+      if (nextTime >= sceneDurationSeconds) {
+        updatePlaybackClock(null);
+        setIsPlaying(false);
+        return;
+      }
+
       frame = requestAnimationFrame(tick);
     }
 
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [isPlaying, sceneDurationSeconds]);
+  }, [isPlaying, sceneDurationSeconds, timeline]);
 
   useEffect(() => {
     if (isPlaying && currentSceneTime >= sceneDurationSeconds) {
       setIsPlaying(false);
     }
   }, [currentSceneTime, isPlaying, sceneDurationSeconds]);
-
-  useEffect(() => {
-    if (!cameraRef.current) return;
-    const nextTransform = `translate(${cameraPreviewTransform.x}px, ${cameraPreviewTransform.y}px) scale(${cameraPreviewTransform.scale})`;
-    cameraRef.current.style.transform = nextTransform;
-  }, [cameraPreviewTransform]);
 
   useEffect(() => {
     function switchModeShortcut(key: "1" | "2" | "3" | "4") {
@@ -692,7 +741,7 @@ export function App() {
           marqueeSpacePanningRef.current = true;
           return;
         }
-        setIsPlaying((current) => !current);
+        togglePlayback();
         return;
       }
 
@@ -768,7 +817,7 @@ export function App() {
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
     };
-  }, [selectedTranslationMarker, selectedZoomMarker]);
+  }, [isPlaying, sceneDurationSeconds, selectedTranslationMarker, selectedZoomMarker]);
 
   function updateCurrentPart(nextPart: Part) {
     updateProject((current) => ({
@@ -1089,22 +1138,47 @@ export function App() {
   }
 
   function scrubToSceneTime(time: number) {
-    pendingScrubTimeRef.current = clamp(time, 0, sceneDurationSeconds);
+    const nextTime = clamp(time, 0, sceneDurationSeconds);
+    if (Math.abs(nextTime - currentSceneTimeRef.current) < 0.001) return;
+
+    currentSceneTimeRef.current = nextTime;
+    if (isPlayingRef.current) updatePlaybackClock({ startedAt: performance.now(), startedFrom: nextTime });
+    if (!timelineScrubbingRef.current) syncPlaybackDom(nextTime);
+
+    pendingScrubTimeRef.current = nextTime;
     if (scrubFrameRef.current) return;
 
     scrubFrameRef.current = requestAnimationFrame(() => {
       scrubFrameRef.current = 0;
-      const nextTime = pendingScrubTimeRef.current;
+      const committedTime = pendingScrubTimeRef.current;
       pendingScrubTimeRef.current = null;
-      if (nextTime === null || Math.abs(nextTime - currentSceneTimeRef.current) < 0.001) return;
-      currentSceneTimeRef.current = nextTime;
-      setCurrentSceneTime(nextTime);
+      if (committedTime === null) return;
+      startTransition(() => setCurrentSceneTime(committedTime));
     });
+  }
+
+  function togglePlayback() {
+    if (isPlayingRef.current) {
+      isPlayingRef.current = false;
+      updatePlaybackClock(null);
+      setIsPlaying(false);
+      return;
+    }
+
+    if (currentSceneTimeRef.current >= sceneDurationSeconds) {
+      currentSceneTimeRef.current = 0;
+      syncPlaybackDom(0);
+      setCurrentSceneTime(0);
+    }
+
+    updatePlaybackClock({ startedAt: performance.now(), startedFrom: currentSceneTimeRef.current });
+    isPlayingRef.current = true;
+    setIsPlaying(true);
   }
 
   function stepSceneTime(delta: number) {
     setIsPlaying(false);
-    scrubToSceneTime(currentSceneTime + delta);
+    scrubToSceneTime(currentSceneTimeRef.current + delta);
   }
 
   function jumpToStart() {
@@ -1114,7 +1188,7 @@ export function App() {
 
   function jumpToNextPart() {
     setIsPlaying(false);
-    const nextPart = timeline.find((item) => item.start > currentSceneTime + 0.001);
+    const nextPart = timeline.find((item) => item.start > currentSceneTimeRef.current + 0.001);
     scrubToSceneTime(nextPart?.start ?? sceneDurationSeconds);
   }
 
@@ -2150,8 +2224,8 @@ export function App() {
           {!renamingProject ? <span className="truncate text-xs text-[#9b9da7]">{scene.name} / {part.name}</span> : null}
         </div>
         <div className={`${appNoDragRegion} flex justify-end gap-1.5`}>
-          <button className={appBarButtonBase} title="Settings (Cmd/Ctrl+,)" onClick={() => setSettingsOpen(true)}>Settings</button>
-          <button className={appBarButtonBase} onClick={() => setExportDialogOpen(true)}>Export</button>
+          <button className={appBarActionButtonBase} title="Settings (Cmd/Ctrl+,)" onClick={() => setSettingsOpen(true)}>Settings</button>
+          <button className={appBarActionButtonBase} onClick={() => setExportDialogOpen(true)}>Export</button>
           <button className={appBarSaveButtonClass(hasUnsavedChanges)} disabled={!hasUnsavedChanges} title="Save every project, timeline, inspector, and active code change (Ctrl+S or Cmd+S)" onClick={() => void saveAllChanges()}>Save</button>
         </div>
       </header>
@@ -2180,6 +2254,7 @@ export function App() {
           <div ref={centerPreviewScrollRef} className={`timeline-scrollbar grid min-h-0 ${mode === "interactive" ? "place-items-center overflow-auto p-[22px] [scrollbar-gutter:stable]" : "items-stretch overflow-hidden"}`}>
             {mode === "interactive" ? (
               <FramePreview
+                key={part.id}
                 cameraRef={cameraRef}
                 dragBox={dragBox}
                 dragSelectionBoxRef={dragSelectionBoxRef}
@@ -2189,8 +2264,15 @@ export function App() {
                 cameraTransform={cameraPreviewTransform}
                 frameViewportRef={frameViewportRef}
                 frameScale={framePreviewScale}
+                isPlaying={isPlaying}
                 part={part}
+                partStart={activeTimelinePart?.start ?? 0}
+                playbackClock={playbackClock}
                 previewTime={previewTime}
+                timelineMode={timelineMode}
+                zoomMarkers={previewZoomMarkers}
+                pickingTranslationPosition={isPickingTranslationPosition}
+                pickingZoomFocus={isPickingZoomFocus}
                 selectedObjects={selectionPayload?.objects ?? []}
                 marqueeDragging={marqueeDragging}
                 editingTextObjectId={editingTextObjectId}
@@ -2210,11 +2292,11 @@ export function App() {
           </div>
 
           <div className="grid grid-cols-[1fr_auto_1fr] items-center border-t border-[#2d313b] bg-[#171920] px-7">
-            <span className="justify-self-start text-[#9b9da7] tabular-nums">{formatTime(currentSceneTime)}</span>
+            <span ref={playbackTimeLabelRef} className="justify-self-start text-[#9b9da7] tabular-nums">{formatTime(currentSceneTime)}</span>
             <div className="flex items-center justify-center gap-3">
               <QuickAccessTooltip name="Jump to start" description="Move the scrubber to the first frame of the scene." shortcut="Home"><button aria-label="Jump to start" className="grid h-[34px] w-[34px] place-items-center rounded-full text-[#e9e9ec] hover:bg-[#1d212b]" onClick={jumpToStart}><SkipBack size={17} /></button></QuickAccessTooltip>
               <QuickAccessTooltip name="Back one second" description="Move the scrubber back by one second." shortcut="Left Arrow"><button aria-label="Back one second" className="grid h-[34px] w-[34px] place-items-center rounded-full text-[#e9e9ec] hover:bg-[#1d212b]" onClick={() => stepSceneTime(-1)}><StepBack size={17} /></button></QuickAccessTooltip>
-              <QuickAccessTooltip name={isPlaying ? "Pause" : "Play"} description={isPlaying ? "Pause timeline playback." : "Start timeline playback from the scrubber."} shortcut="Space"><button aria-label={isPlaying ? "Pause" : "Play"} className="grid h-[42px] w-[42px] place-items-center rounded-full bg-[#1d212b] text-[#e9e9ec] hover:bg-[#252a36]" onClick={() => setIsPlaying((current) => !current)}>{isPlaying ? <Pause size={18} /> : <Play size={18} />}</button></QuickAccessTooltip>
+              <QuickAccessTooltip name={isPlaying ? "Pause" : "Play"} description={isPlaying ? "Pause timeline playback." : "Start timeline playback from the scrubber."} shortcut="Space"><button aria-label={isPlaying ? "Pause" : "Play"} className="grid h-[42px] w-[42px] place-items-center rounded-full bg-[#1d212b] text-[#e9e9ec] hover:bg-[#252a36]" onClick={togglePlayback}>{isPlaying ? <Pause size={18} /> : <Play size={18} />}</button></QuickAccessTooltip>
               <QuickAccessTooltip name="Next composition" description="Jump the scrubber to the start of the next composition." shortcut="Right Arrow"><button aria-label="Next composition" className="grid h-[34px] w-[34px] place-items-center rounded-full text-[#e9e9ec] hover:bg-[#1d212b]" onClick={jumpToNextPart}><StepForward size={17} /></button></QuickAccessTooltip>
               <QuickAccessTooltip name="Jump to end" description="Move the scrubber to the end of the scene." shortcut="End"><button aria-label="Jump to end" className="grid h-[34px] w-[34px] place-items-center rounded-full text-[#e9e9ec] hover:bg-[#1d212b]" onClick={jumpToEnd}><SkipForward size={17} /></button></QuickAccessTooltip>
             </div>
@@ -2245,7 +2327,11 @@ export function App() {
 
       <TimelinePanel
         currentSceneTime={currentSceneTime}
+        isPlaying={isPlaying}
+        playbackPlayheadRef={playbackPlayheadRef}
+        scrubbingRef={timelineScrubbingRef}
         fastSelectEnabled={fastSelectEnabled}
+        scrubCommitThrottleMs={scrubCommitThrottleMs}
         scrubSnapEnabled={scrubSnapEnabled}
         sceneDuration={sceneDurationSeconds}
         selectedPartId={selectedPartId}
@@ -2299,8 +2385,10 @@ export function App() {
     <SettingsDialog
       activeSection={settingsSection}
       open={settingsOpen}
+      scrubCommitThrottleMs={scrubCommitThrottleMs}
       onActiveSectionChange={setSettingsSection}
       onOpenChange={setSettingsOpen}
+      onScrubCommitThrottleMsChange={setScrubCommitThrottleMs}
     />
     {videoExportProgress ? <VideoExportOverlay cancelling={videoExportCancelling} progress={videoExportProgress} onCancel={() => void stopVideoExport()} /> : null}
     <AppContextMenu menu={appContextMenu} onClose={() => setAppContextMenu(null)} />
@@ -2341,13 +2429,20 @@ function FrameZoomBar({ scale, onScaleChange }: { scale: number; onScaleChange: 
   );
 }
 
-function SettingsDialog({ activeSection, open, onActiveSectionChange, onOpenChange }: { activeSection: SettingsSection; open: boolean; onActiveSectionChange: (section: SettingsSection) => void; onOpenChange: (open: boolean) => void }) {
+function SettingsDialog({ activeSection, open, scrubCommitThrottleMs, onActiveSectionChange, onOpenChange, onScrubCommitThrottleMsChange }: { activeSection: SettingsSection; open: boolean; scrubCommitThrottleMs: number; onActiveSectionChange: (section: SettingsSection) => void; onOpenChange: (open: boolean) => void; onScrubCommitThrottleMsChange: (value: number) => void }) {
   const navItems: Array<{ id: SettingsSection; label: string }> = [
     { id: "playback", label: "Playback" },
     { id: "timeline", label: "Timeline" },
     { id: "export", label: "Export" },
     { id: "advanced", label: "Advanced" },
   ];
+
+  function updateScrubCommitThrottle(value: string) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return;
+    onScrubCommitThrottleMsChange(Math.round(clamp(parsed, 16, 500)));
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="h-[min(680px,calc(100vh-56px))] w-[min(980px,calc(100vw-42px))] gap-0 overflow-hidden p-0" showCloseButton={false}>
@@ -2366,18 +2461,34 @@ function SettingsDialog({ activeSection, open, onActiveSectionChange, onOpenChan
             <header className="flex items-center justify-between border-b border-[#14161c] px-5">
               <div>
                 <h2 className="text-sm font-extrabold text-white">{navItems.find((item) => item.id === activeSection)?.label}</h2>
-                <p className="mt-1 text-xs text-[#8f939d]">Settings for this section will be added as the editor grows.</p>
+                <p className="mt-1 text-xs text-[#8f939d]">{activeSection === "timeline" ? "Tune timeline interaction responsiveness." : "Settings for this section will be added as the editor grows."}</p>
               </div>
               <button className={`${appBarButtonBase} px-3 py-1.5`} onClick={() => onOpenChange(false)}>Close</button>
             </header>
 
             <div className="settings-scrollbar min-h-0 overflow-y-auto overflow-x-hidden p-5 [scrollbar-gutter:stable]">
-              <div className="grid h-full place-items-center rounded-xl border border-dashed border-[#363b47] bg-[#1b1e26] text-center">
+              {activeSection === "timeline" ? (
+                <div className="grid gap-4 rounded-xl border border-[#363b47] bg-[#1b1e26] p-4">
+                  <div className="grid gap-1.5">
+                    <strong className="text-sm text-white">Scrub commit throttle</strong>
+                    <p className="text-xs leading-5 text-[#8f939d]">Controls how often timeline scrubbing commits editor state while dragging. The playhead still follows the cursor immediately.</p>
+                  </div>
+                  <label className="grid max-w-[260px] gap-1.5 text-xs font-bold text-[#dfe2ea]" htmlFor="scrub-commit-throttle">
+                    Commit interval (ms)
+                    <span className="relative">
+                      <Input id="scrub-commit-throttle" className="pr-10" min={16} max={500} step={10} type="number" value={scrubCommitThrottleMs} onChange={(event) => updateScrubCommitThrottle(event.target.value)} />
+                      <button aria-label={`Reset scrub commit throttle to ${defaultScrubCommitThrottleMs}ms`} className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-md text-[#8f939d] transition hover:bg-[#252a34] hover:text-white" type="button" onClick={() => onScrubCommitThrottleMsChange(defaultScrubCommitThrottleMs)}>
+                        <RotateCcw size={14} />
+                      </button>
+                    </span>
+                  </label>
+                </div>
+              ) : <div className="grid h-full place-items-center rounded-xl border border-dashed border-[#363b47] bg-[#1b1e26] text-center">
                 <div className="max-w-[320px] px-6">
                   <strong className="text-sm text-white">No controls yet</strong>
                   <p className="mt-2 text-xs leading-5 text-[#8f939d]">Preview caching controls were removed. This settings shell is ready for future editor, export, and diagnostic preferences.</p>
                 </div>
-              </div>
+              </div>}
             </div>
 
             <footer className="flex items-center justify-between border-t border-[#14161c] bg-[#202229] px-5">
@@ -2494,14 +2605,48 @@ function VideoExportOverlay({ cancelling, progress, onCancel }: { cancelling: bo
   );
 }
 
-const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dragSelectionBoxRef, framePickPoint, focusPicking, canSelectObjects, cameraTransform, frameViewportRef, frameScale, part, previewTime, selectedObjects, marqueeDragging, editingTextObjectId, onFramePointerCancel, onFramePointerDown, onFramePointerDownCapture, onFramePointerMove, onFramePointerUp, onObjectPointerDown, onObjectResizePointerDown, onTextEditCommit, onTextObjectDoubleClick }: { cameraRef: RefObject<HTMLDivElement | null>; dragBox: Bounds | null; dragSelectionBoxRef: RefObject<HTMLDivElement | null>; framePickPoint: Point | null; focusPicking: boolean; canSelectObjects: boolean; cameraTransform: CameraPreviewTransform; frameViewportRef: RefObject<HTMLDivElement | null>; frameScale: number; part: Part; previewTime: number; selectedObjects: SelectionPayload["objects"]; marqueeDragging: boolean; editingTextObjectId: string | null; onFramePointerCancel: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerDown: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerDownCapture: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerMove: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerUp: (event: PointerEvent<HTMLDivElement>) => void; onObjectPointerDown: (event: PointerEvent<HTMLDivElement>, object: FrameObject) => void; onObjectResizePointerDown: (event: PointerEvent<HTMLDivElement>, handle: ResizeHandle, objectId?: string) => void; onTextEditCommit: (objectId: string, content: string, richText?: RichTextSegment[]) => void; onTextObjectDoubleClick: (event: ReactMouseEvent<HTMLDivElement>, object: FrameObject) => void }) {
+const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dragSelectionBoxRef, framePickPoint, focusPicking, canSelectObjects, cameraTransform, frameViewportRef, frameScale, isPlaying, part, partStart, playbackClock, previewTime, timelineMode, zoomMarkers, pickingTranslationPosition, pickingZoomFocus, selectedObjects, marqueeDragging, editingTextObjectId, onFramePointerCancel, onFramePointerDown, onFramePointerDownCapture, onFramePointerMove, onFramePointerUp, onObjectPointerDown, onObjectResizePointerDown, onTextEditCommit, onTextObjectDoubleClick }: { cameraRef: RefObject<HTMLDivElement | null>; dragBox: Bounds | null; dragSelectionBoxRef: RefObject<HTMLDivElement | null>; framePickPoint: Point | null; focusPicking: boolean; canSelectObjects: boolean; cameraTransform: CameraPreviewTransform; frameViewportRef: RefObject<HTMLDivElement | null>; frameScale: number; isPlaying: boolean; part: Part; partStart: number; playbackClock: PlaybackClock; previewTime: number; timelineMode: TimelineMode; zoomMarkers: ZoomMarker[]; pickingTranslationPosition: boolean; pickingZoomFocus: boolean; selectedObjects: SelectionPayload["objects"]; marqueeDragging: boolean; editingTextObjectId: string | null; onFramePointerCancel: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerDown: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerDownCapture: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerMove: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerUp: (event: PointerEvent<HTMLDivElement>) => void; onObjectPointerDown: (event: PointerEvent<HTMLDivElement>, object: FrameObject) => void; onObjectResizePointerDown: (event: PointerEvent<HTMLDivElement>, handle: ResizeHandle, objectId?: string) => void; onTextEditCommit: (objectId: string, content: string, richText?: RichTextSegment[]) => void; onTextObjectDoubleClick: (event: ReactMouseEvent<HTMLDivElement>, object: FrameObject) => void }) {
   const frameStyle = useMemo(() => ({ ...part.frame.style, width: FRAME_WIDTH, height: FRAME_HEIGHT, transform: `scale(${frameScale})` }) as CSSProperties, [frameScale, part.frame.style]);
   const viewportStyle = useMemo(() => ({ width: FRAME_WIDTH * frameScale, height: FRAME_HEIGHT * frameScale }) as CSSProperties, [frameScale]);
+  const timeSensitive = isPlaybackTimeSensitivePart(part, timelineMode);
+  const [livePreviewTime, setLivePreviewTime] = useState(previewTime);
+  const displayPreviewTime = isPlaying && playbackClock && timeSensitive ? livePreviewTime : previewTime;
+  const liveCameraTransform = useMemo(() => {
+    if (timelineMode !== "composition") return cameraTransform;
+    const activeZoom = pickingZoomFocus ? null : getActiveZoom(zoomMarkers, displayPreviewTime);
+    const activeTranslation = pickingTranslationPosition ? null : getActiveTranslation(part.translationMarkers, displayPreviewTime);
+    return getCameraPreviewTransform(activeZoom, activeTranslation);
+  }, [cameraTransform, displayPreviewTime, part.translationMarkers, pickingTranslationPosition, pickingZoomFocus, timelineMode, zoomMarkers]);
   const selectedBounds = useMemo(() => selectedObjects.length > 0 ? getBoundsUnion(selectedObjects.map((object) => object.bounds)) : null, [selectedObjects]);
-  const selectedViewportBounds = useMemo(() => selectedBounds ? insetBounds(boundsToViewport(selectedBounds, cameraTransform, frameScale), -selectorOffsetPx) : null, [cameraTransform, frameScale, selectedBounds]);
+  const selectedViewportBounds = useMemo(() => selectedBounds ? insetBounds(boundsToViewport(selectedBounds, liveCameraTransform, frameScale), -selectorOffsetPx) : null, [frameScale, liveCameraTransform, selectedBounds]);
   const [selectorHover, setSelectorHover] = useState(false);
   const selectorHoverRef = useRef(false);
   const showDragBox = dragBox && isVisibleMarqueeBounds(dragBox, frameScale);
+
+  useEffect(() => {
+    if (isPlaying && playbackClock && timeSensitive) return;
+    setLivePreviewTime(previewTime);
+  }, [isPlaying, playbackClock, previewTime, timeSensitive]);
+
+  useEffect(() => {
+    if (!isPlaying || !playbackClock || !timeSensitive) return;
+    const clock = playbackClock;
+    let frame = 0;
+
+    function tick(now: number) {
+      const nextSceneTime = clock.startedFrom + (now - clock.startedAt) / 1000;
+      setLivePreviewTime(clamp(nextSceneTime - partStart, 0, part.duration));
+      frame = requestAnimationFrame(tick);
+    }
+
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [isPlaying, part.duration, partStart, playbackClock, timeSensitive]);
+
+  useEffect(() => {
+    if (!cameraRef.current) return;
+    cameraRef.current.style.transform = `translate(${liveCameraTransform.x}px, ${liveCameraTransform.y}px) scale(${liveCameraTransform.scale})`;
+  }, [cameraRef, liveCameraTransform]);
 
   function updateSelectorHover(event: PointerEvent<HTMLDivElement>) {
     if (!selectedViewportBounds || marqueeDragging) {
@@ -2538,13 +2683,13 @@ const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dragSelect
       <div ref={frameViewportRef} className={`relative overflow-hidden bg-black shadow-[0_22px_70px_rgba(0,0,0,0.44)] ${focusPicking ? "cursor-crosshair ring-2 ring-[#37d6c2]" : ""}`} style={viewportStyle} onPointerDownCapture={onFramePointerDownCapture} onPointerDown={onFramePointerDown} onPointerMove={handleFramePointerMove} onPointerUp={onFramePointerUp} onPointerCancel={onFramePointerCancel} onPointerLeave={clearSelectorHover}>
         <div className="absolute left-0 top-0 origin-top-left overflow-hidden" style={frameStyle}>
           <div className="absolute inset-0 origin-center" ref={cameraRef}>
-            <BackgroundLayerView background={part.background} previewTime={previewTime} />
+            <BackgroundLayerView background={part.background} duration={part.duration} previewTime={displayPreviewTime} />
             {part.objects.map((object) => (
-              <FrameObjectView key={object.id} object={object} canSelect={canSelectObjects} editing={editingTextObjectId === object.id} focusPicking={focusPicking} previewTime={previewTime} onDoubleClick={(event) => onTextObjectDoubleClick(event, object)} onPointerDown={(event) => onObjectPointerDown(event, object)} onTextEditCommit={(content, richText) => onTextEditCommit(object.id, content, richText)} />
+              <FrameObjectView key={object.id} object={object} canSelect={canSelectObjects} duration={part.duration} editing={editingTextObjectId === object.id} focusPicking={focusPicking} previewTime={displayPreviewTime} onDoubleClick={(event) => onTextObjectDoubleClick(event, object)} onPointerDown={(event) => onObjectPointerDown(event, object)} onTextEditCommit={(content, richText) => onTextEditCommit(object.id, content, richText)} />
             ))}
           </div>
         </div>
-        {canSelectObjects ? selectedObjects.map((object) => <SelectionOverlayBox key={object.id} objectId={object.id} bounds={object.bounds} cameraTransform={cameraTransform} frameScale={frameScale} highlighted={selectorHover} interactive={!marqueeDragging} onResizePointerDown={(event, handle) => onObjectResizePointerDown(event, handle, object.id)} />) : null}
+        {canSelectObjects ? selectedObjects.map((object) => <SelectionOverlayBox key={object.id} objectId={object.id} bounds={object.bounds} cameraTransform={liveCameraTransform} frameScale={frameScale} highlighted={selectorHover} interactive={!marqueeDragging} onResizePointerDown={(event, handle) => onObjectResizePointerDown(event, handle, object.id)} />) : null}
         {dragBox ? <DragSelectionBox ref={dragSelectionBoxRef} bounds={dragBox} frameScale={frameScale} visible={Boolean(showDragBox)} /> : null}
         {focusPicking && framePickPoint ? <FramePickPointOverlay point={framePickPoint} frameScale={frameScale} /> : null}
       </div>
@@ -2560,8 +2705,9 @@ function FramePickPointOverlay({ point, frameScale }: { point: Point; frameScale
   );
 }
 
-const FrameObjectView = memo(function FrameObjectView({ object, canSelect, editing, focusPicking, previewTime, onDoubleClick, onPointerDown, onTextEditCommit }: { object: FrameObject; canSelect: boolean; editing: boolean; focusPicking: boolean; previewTime: number; onDoubleClick: (event: ReactMouseEvent<HTMLDivElement>) => void; onPointerDown: (event: PointerEvent<HTMLDivElement>) => void; onTextEditCommit: (content: string, richText?: RichTextSegment[]) => void }) {
-  const animation = getObjectPreviewAnimation(object, previewTime);
+const FrameObjectView = memo(function FrameObjectView({ object, canSelect, duration, editing, focusPicking, previewTime, onDoubleClick, onPointerDown, onTextEditCommit }: { object: FrameObject; canSelect: boolean; duration: number; editing: boolean; focusPicking: boolean; previewTime: number; onDoubleClick: (event: ReactMouseEvent<HTMLDivElement>) => void; onPointerDown: (event: PointerEvent<HTMLDivElement>) => void; onTextEditCommit: (content: string, richText?: RichTextSegment[]) => void }) {
+  const evaluatedObject = useMemo(() => evaluateObjectForPreview(object, previewTime, duration), [duration, object, previewTime]);
+  const animation = { style: evaluatedObject.renderStyle, content: evaluatedObject.renderContent };
   const editableRef = useRef<HTMLDivElement | null>(null);
   const objectTransform = typeof object.style.transform === "string" ? object.style.transform : undefined;
   const animationTransform = typeof animation.style.transform === "string" ? animation.style.transform : undefined;
@@ -2576,7 +2722,7 @@ const FrameObjectView = memo(function FrameObjectView({ object, canSelect, editi
     willChange: "transform",
   } as CSSProperties;
   const content = animation.content ?? object.content;
-  const richText = animation.content ? undefined : object.richText;
+  const richText = evaluatedObject.renderRichText;
   const textSegments = useMemo(() => getRenderableTextSegments(content ?? "", richText), [content, richText]);
 
   useEffect(() => {
@@ -2651,31 +2797,39 @@ const FrameObjectView = memo(function FrameObjectView({ object, canSelect, editi
       {object.type === "text" && editing ? <div ref={editableRef} className="min-h-0 w-full whitespace-pre-wrap outline-none" contentEditable suppressContentEditableWarning onBlur={commitTextEdit} onKeyDown={onTextEditKeyDown} onPointerDown={(event) => event.stopPropagation()} /> : null}
       {object.type === "text" && !editing ? <div className="min-h-0 w-full whitespace-pre-wrap">{renderRichTextSegments(textSegments, Boolean(richText))}</div> : null}
       {object.type === "svg" && content ? <div className="h-full w-full" dangerouslySetInnerHTML={{ __html: content }} /> : null}
-      {object.type === "html" && content ? <div className="h-full w-full" dangerouslySetInnerHTML={{ __html: content }} /> : null}
-      {object.type !== "text" && object.type !== "svg" && object.type !== "html" && content ? content : null}
+      {(object.type === "html" || object.type === "template") && content ? <div className="h-full w-full" dangerouslySetInnerHTML={{ __html: content }} /> : null}
+      {object.type !== "text" && object.type !== "svg" && object.type !== "html" && object.type !== "template" && content ? content : null}
     </div>
   );
 }, areFrameObjectPropsEqual);
 
-function areFrameObjectPropsEqual(previous: { object: FrameObject; canSelect: boolean; editing: boolean; focusPicking: boolean; previewTime: number }, next: { object: FrameObject; canSelect: boolean; editing: boolean; focusPicking: boolean; previewTime: number }) {
+function areFrameObjectPropsEqual(previous: { object: FrameObject; canSelect: boolean; duration: number; editing: boolean; focusPicking: boolean; previewTime: number }, next: { object: FrameObject; canSelect: boolean; duration: number; editing: boolean; focusPicking: boolean; previewTime: number }) {
   return previous.object === next.object
     && previous.canSelect === next.canSelect
+    && previous.duration === next.duration
     && previous.editing === next.editing
     && previous.focusPicking === next.focusPicking
     && (!isPreviewTimeSensitiveObject(next.object) || previous.previewTime === next.previewTime);
 }
 
-function areBackgroundLayerPropsEqual(previous: { background: BackgroundLayer; previewTime: number }, next: { background: BackgroundLayer; previewTime: number }) {
+function areBackgroundLayerPropsEqual(previous: { background: BackgroundLayer; duration: number; previewTime: number }, next: { background: BackgroundLayer; duration: number; previewTime: number }) {
   const timeSensitive = Boolean(next.background.motion) || next.background.elements.some(isPreviewTimeSensitiveObject);
-  return previous.background === next.background && (!timeSensitive || previous.previewTime === next.previewTime);
+  return previous.background === next.background && previous.duration === next.duration && (!timeSensitive || previous.previewTime === next.previewTime);
 }
 
-function areBackgroundElementPropsEqual(previous: { element: FrameObject; previewTime: number }, next: { element: FrameObject; previewTime: number }) {
-  return previous.element === next.element && (!isPreviewTimeSensitiveObject(next.element) || previous.previewTime === next.previewTime);
+function areBackgroundElementPropsEqual(previous: { duration: number; element: EvaluatedFrameObject; previewTime: number }, next: { duration: number; element: EvaluatedFrameObject; previewTime: number }) {
+  return previous.element === next.element && previous.duration === next.duration && (!next.element.timeSensitive || previous.previewTime === next.previewTime);
 }
 
 function isPreviewTimeSensitiveObject(object: FrameObject) {
-  return Boolean(object.motion) || isAnimatedGraphObject(object.id);
+  return isTimeSensitiveFrameObject(object) || isAnimatedGraphObject(object.id);
+}
+
+function isPlaybackTimeSensitivePart(part: Part, timelineMode: TimelineMode) {
+  return Boolean(part.background.motion)
+    || part.background.elements.some(isPreviewTimeSensitiveObject)
+    || part.objects.some(isPreviewTimeSensitiveObject)
+    || (timelineMode === "composition" && (part.zoomMarkers.length > 0 || part.translationMarkers.length > 0));
 }
 
 function SelectionOverlayBox({ objectId, bounds, cameraTransform, frameScale, highlighted, interactive, onResizePointerDown }: { objectId: string; bounds: Bounds; cameraTransform: CameraPreviewTransform; frameScale: number; highlighted: boolean; interactive: boolean; onResizePointerDown: (event: PointerEvent<HTMLDivElement>, handle: ResizeHandle) => void }) {
@@ -3211,29 +3365,21 @@ function ColorSelector({ value, onChange }: { value: string; onChange: (value: s
   return <div className="relative"><div className="grid grid-cols-[1fr_38px] gap-2"><button className="flex w-full items-center justify-between gap-2 rounded-[10px] border border-[#2d313b] bg-[#171920] px-3 py-2 text-xs font-bold text-[#dfe2ea] transition hover:border-[var(--clipper-accent)]" onClick={togglePicker}><span className="flex items-center gap-2"><span className="h-5 w-5 rounded-md border border-white/20" style={{ background: draft }} /><Palette size={14} />{draft}</span></button><button className="grid place-items-center rounded-[10px] border border-[#2d313b] bg-[#171920] text-[#dfe2ea] transition hover:border-[#37d6c2] hover:text-white" title="Sample colour from screen" onClick={() => void pickFromScreen()}><Pipette size={15} /></button></div>{open ? <div className="absolute left-0 top-[calc(100%+8px)] z-50 grid w-[246px] gap-3 rounded-2xl border border-[#2d313b] bg-[#101116] p-3 shadow-[0_20px_70px_rgba(0,0,0,0.48)]"><div className="relative h-[146px] cursor-crosshair overflow-hidden rounded-xl" style={{ background: `linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, transparent), hsl(${hue} 100% 50%)` }} onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); pickFromBoard(event); }} onPointerMove={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) pickFromBoard(event); }}><span className="pointer-events-none absolute h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow-[0_0_0_1px_rgba(0,0,0,0.65)]" style={{ left: `${hsv.s * 100}%`, top: `${(1 - hsv.v) * 100}%` }} /></div><div className="relative h-4 cursor-ew-resize rounded-full bg-[linear-gradient(to_right,red,yellow,lime,cyan,blue,magenta,red)]" onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); pickHue(event); }} onPointerMove={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) pickHue(event); }}><span className="pointer-events-none absolute top-1/2 h-5 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white bg-black/40" style={{ left: `${hue / 360 * 100}%` }} /></div><Input value={draft} onChange={(event) => scheduleChange(normalizeHexColor(event.target.value))} /></div> : null}</div>;
 }
 
-const BackgroundLayerView = memo(function BackgroundLayerView({ background, previewTime }: { background: BackgroundLayer; previewTime: number }) {
-  const layerStyle = {
-    ...getMotionPreviewAnimation(background.motion, previewTime),
-  } as CSSProperties;
-  const fillBounds = getBackgroundLayerFillBounds(background);
-  const fillStyle = {
-    ...background.style,
-    left: fillBounds.x,
-    top: fillBounds.y,
-    width: fillBounds.width,
-    height: fillBounds.height,
-  } as CSSProperties;
+const BackgroundLayerView = memo(function BackgroundLayerView({ background, duration, previewTime }: { background: BackgroundLayer; duration: number; previewTime: number }) {
+  const evaluatedBackground = useMemo(() => evaluateBackgroundLayer(background, previewTime, duration), [background, duration, previewTime]);
+  const layerStyle = evaluatedBackground.renderStyle as CSSProperties;
+  const fillStyle = evaluatedBackground.fillStyle as CSSProperties;
 
   return (
     <div className={`pointer-events-none absolute inset-0 ${background.stretchToElements ? "overflow-visible" : "overflow-hidden"}`} data-layer-id={background.id} style={layerStyle}>
       <div className="absolute" style={fillStyle} />
-      {background.elements.map((element) => <BackgroundElementView element={element} key={element.id} previewTime={previewTime} />)}
+      {evaluatedBackground.elements.map((element) => <BackgroundElementView duration={duration} element={element} key={element.id} previewTime={previewTime} />)}
     </div>
   );
 }, areBackgroundLayerPropsEqual);
 
-const BackgroundElementView = memo(function BackgroundElementView({ element, previewTime }: { element: FrameObject; previewTime: number }) {
-  const animation = getObjectPreviewAnimation(element, previewTime);
+const BackgroundElementView = memo(function BackgroundElementView({ element }: { duration: number; element: EvaluatedFrameObject; previewTime: number }) {
+  const animation = { style: element.renderStyle, content: element.renderContent };
   const style = {
     left: element.bounds.x,
     top: element.bounds.y,
@@ -3249,8 +3395,8 @@ const BackgroundElementView = memo(function BackgroundElementView({ element, pre
     <div className="absolute flex select-none flex-col justify-center overflow-hidden whitespace-pre-line" data-background-element-id={element.id} style={style}>
       {element.type === "text" ? textLines.map((line, index) => <span key={`${line}-${index}`}>{line}</span>) : null}
       {element.type === "svg" && content ? <div className="h-full w-full" dangerouslySetInnerHTML={{ __html: content }} /> : null}
-      {element.type === "html" && content ? <div className="h-full w-full" dangerouslySetInnerHTML={{ __html: content }} /> : null}
-      {element.type !== "text" && element.type !== "svg" && element.type !== "html" && content ? content : null}
+      {(element.type === "html" || element.type === "template") && content ? <div className="h-full w-full" dangerouslySetInnerHTML={{ __html: content }} /> : null}
+      {element.type !== "text" && element.type !== "svg" && element.type !== "html" && element.type !== "template" && content ? content : null}
     </div>
   );
 }, areBackgroundElementPropsEqual);
@@ -3727,7 +3873,11 @@ type TimelinePanelProps = {
   selectedTranslationMarkers: TranslationMarkerSelection[];
   sceneDuration: number;
   currentSceneTime: number;
+  isPlaying: boolean;
+  playbackPlayheadRef: RefObject<HTMLDivElement | null>;
+  scrubbingRef: RefObject<boolean>;
   fastSelectEnabled: boolean;
+  scrubCommitThrottleMs: number;
   scrubSnapEnabled: boolean;
   onScrub: (time: number) => void;
   onModeChange: (mode: TimelineMode) => void;
@@ -3746,7 +3896,7 @@ type TimelinePanelProps = {
   onUpdateTranslationMarkers: (partId: string, updater: (markers: TranslationMarker[], part: Part) => TranslationMarker[]) => void;
 };
 
-function TimelinePanel({ timeline, timelineViewportState, mode, selectedPartId, selectedZoomMarkerPartId, selectedZoomMarkerId, selectedZoomMarkers, selectedTranslationMarkerPartId, selectedTranslationMarkerId, selectedTranslationMarkers, sceneDuration, currentSceneTime, fastSelectEnabled, scrubSnapEnabled, onScrub, onModeChange, onTimelineViewportStateChange, onSelectPart, onSelectZoomMarker, onSelectZoomMarkers, onSelectTranslationMarker, onSelectTranslationMarkers, onReorderPart, onMoveZoomMarker, onMoveZoomMarkers, onMoveTranslationMarker, onMoveTranslationMarkers, onUpdateZoomMarkers, onUpdateTranslationMarkers }: TimelinePanelProps) {
+function TimelinePanel({ timeline, timelineViewportState, mode, selectedPartId, selectedZoomMarkerPartId, selectedZoomMarkerId, selectedZoomMarkers, selectedTranslationMarkerPartId, selectedTranslationMarkerId, selectedTranslationMarkers, sceneDuration, currentSceneTime, isPlaying, playbackPlayheadRef, scrubbingRef, fastSelectEnabled, scrubCommitThrottleMs, scrubSnapEnabled, onScrub, onModeChange, onTimelineViewportStateChange, onSelectPart, onSelectZoomMarker, onSelectZoomMarkers, onSelectTranslationMarker, onSelectTranslationMarkers, onReorderPart, onMoveZoomMarker, onMoveZoomMarkers, onMoveTranslationMarker, onMoveTranslationMarkers, onUpdateZoomMarkers, onUpdateTranslationMarkers }: TimelinePanelProps) {
   const ticks = useMemo(() => getTimelineTicks(sceneDuration), [sceneDuration]);
   const timelineRef = useRef<HTMLDivElement | null>(null);
   const timelineViewportRef = useRef<HTMLDivElement | null>(null);
@@ -3766,6 +3916,11 @@ function TimelinePanel({ timeline, timelineViewportState, mode, selectedPartId, 
   const scrubClientXRef = useRef<number | null>(null);
   const scrubSnapRef = useRef(false);
   const scrubAutoScrollFrameRef = useRef(0);
+  const scrubPreviewFrameRef = useRef(0);
+  const pendingScrubPreviewRef = useRef<{ clientX: number; snap: boolean; commit: "throttled" | "immediate" } | null>(null);
+  const pendingScrubCommitRef = useRef<number | null>(null);
+  const scrubCommitTimeoutRef = useRef(0);
+  const lastScrubCommitAtRef = useRef(0);
   const [shiftSnapActive, setShiftSnapActive] = useState(false);
   const [timelineZoom, setTimelineZoom] = useState(timelineViewportState.zoom);
   const restoredTimelineDisplacementRef = useRef<number | null>(null);
@@ -3777,7 +3932,7 @@ function TimelinePanel({ timeline, timelineViewportState, mode, selectedPartId, 
   const contentWidth = Math.max(sceneDuration * defaultTimelinePixelsPerSecond * timelineZoom, 760);
   const isCompositionMode = mode === "composition";
   const laneRows = isCompositionMode ? "grid-rows-[38px_58px_58px_58px]" : "grid-rows-[38px_58px]";
-  const playheadHeight = isCompositionMode ? 192 : 76;
+  const playheadHeight = isCompositionMode ? 198 : 82;
 
   useEffect(() => {
     setTimelineZoom(timelineViewportState.zoom);
@@ -3786,6 +3941,8 @@ function TimelinePanel({ timeline, timelineViewportState, mode, selectedPartId, 
   useEffect(() => () => {
     if (zoomSelectionFrameRef.current) window.cancelAnimationFrame(zoomSelectionFrameRef.current);
     if (translationSelectionFrameRef.current) window.cancelAnimationFrame(translationSelectionFrameRef.current);
+    if (scrubPreviewFrameRef.current) window.cancelAnimationFrame(scrubPreviewFrameRef.current);
+    if (scrubCommitTimeoutRef.current) window.clearTimeout(scrubCommitTimeoutRef.current);
   }, []);
 
   useEffect(() => {
@@ -3799,7 +3956,7 @@ function TimelinePanel({ timeline, timelineViewportState, mode, selectedPartId, 
 
   useEffect(() => {
     const viewport = timelineViewportRef.current;
-    if (!viewport || sceneDuration <= 0 || scrubClientXRef.current !== null || restoredTimelineDisplacementRef.current !== timelineViewportState.displacement) return;
+    if (isPlaying || !viewport || sceneDuration <= 0 || scrubClientXRef.current !== null || restoredTimelineDisplacementRef.current !== timelineViewportState.displacement) return;
 
     if (skipNextTimelineAutoScrollRef.current) {
       skipNextTimelineAutoScrollRef.current = false;
@@ -3813,7 +3970,7 @@ function TimelinePanel({ timeline, timelineViewportState, mode, selectedPartId, 
 
     if (playheadX < visibleLeft + margin) viewport.scrollLeft = Math.max(playheadX - margin, 0);
     if (playheadX > visibleRight - margin) viewport.scrollLeft = playheadX - viewport.clientWidth + margin;
-  }, [contentWidth, currentSceneTime, sceneDuration, timelineViewportState.displacement]);
+  }, [contentWidth, currentSceneTime, isPlaying, sceneDuration, timelineViewportState.displacement]);
 
   function updateTimelineZoom(nextZoom: number) {
     const zoom = clamp(nextZoom, 0.5, 4);
@@ -3845,10 +4002,62 @@ function TimelinePanel({ timeline, timelineViewportState, mode, selectedPartId, 
     return clamp(clientX, rect.left, rect.right);
   }
 
-  function updateScrubFromClientX(clientX: number, snap: boolean) {
+  function previewScrubTime(time: number) {
+    const playhead = playbackPlayheadRef.current;
+    if (!playhead) return;
+    playhead.style.setProperty("--clipper-playhead-left", "0px");
+    playhead.style.setProperty("--clipper-playhead-x", `${sceneDuration > 0 ? (time / sceneDuration) * contentWidth : 0}px`);
+  }
+
+  function commitPendingScrub() {
+    if (scrubCommitTimeoutRef.current) {
+      window.clearTimeout(scrubCommitTimeoutRef.current);
+      scrubCommitTimeoutRef.current = 0;
+    }
+
+    const nextTime = pendingScrubCommitRef.current;
+    pendingScrubCommitRef.current = null;
+    if (nextTime === null) return;
+    lastScrubCommitAtRef.current = performance.now();
+    if (fastSelectEnabled) selectTimelineItemAtTime(nextTime);
+    onScrub(nextTime);
+  }
+
+  function scheduleScrubCommit(time: number) {
+    pendingScrubCommitRef.current = time;
+    const elapsed = performance.now() - lastScrubCommitAtRef.current;
+    if (elapsed >= scrubCommitThrottleMs) {
+      commitPendingScrub();
+      return;
+    }
+
+    if (scrubCommitTimeoutRef.current) return;
+    scrubCommitTimeoutRef.current = window.setTimeout(commitPendingScrub, scrubCommitThrottleMs - elapsed);
+  }
+
+  function updateScrubFromClientX(clientX: number, snap: boolean, commit: "throttled" | "immediate" = "throttled") {
     const time = timeFromClientX(visibleScrubClientX(clientX), snap);
-    if (fastSelectEnabled) selectTimelineItemAtTime(time);
-    onScrub(time);
+    previewScrubTime(time);
+    if (commit === "immediate") {
+      pendingScrubCommitRef.current = time;
+      commitPendingScrub();
+      return;
+    }
+
+    scheduleScrubCommit(time);
+  }
+
+  function scheduleScrubFromClientX(clientX: number, snap: boolean, commit: "throttled" | "immediate" = "throttled") {
+    pendingScrubPreviewRef.current = { clientX, snap, commit };
+    if (scrubPreviewFrameRef.current) return;
+
+    scrubPreviewFrameRef.current = window.requestAnimationFrame(() => {
+      scrubPreviewFrameRef.current = 0;
+      const next = pendingScrubPreviewRef.current;
+      pendingScrubPreviewRef.current = null;
+      if (!next) return;
+      updateScrubFromClientX(next.clientX, next.snap, next.commit);
+    });
   }
 
   function selectTimelineItemAtTime(time: number) {
@@ -3892,7 +4101,7 @@ function TimelinePanel({ timeline, timelineViewportState, mode, selectedPartId, 
       if (scrollDelta !== 0) {
         const previousScrollLeft = viewport.scrollLeft;
         viewport.scrollLeft += scrollDelta;
-        if (viewport.scrollLeft !== previousScrollLeft) updateScrubFromClientX(clientX, scrubSnapRef.current);
+        if (viewport.scrollLeft !== previousScrollLeft) scheduleScrubFromClientX(clientX, scrubSnapRef.current);
       }
 
       scrubAutoScrollFrameRef.current = window.requestAnimationFrame(tick);
@@ -3906,7 +4115,7 @@ function TimelinePanel({ timeline, timelineViewportState, mode, selectedPartId, 
     scrubClientXRef.current = event.clientX;
     scrubSnapRef.current = snap;
     setShiftSnapActive((current) => (current === event.shiftKey ? current : event.shiftKey));
-    updateScrubFromClientX(event.clientX, snap);
+    scheduleScrubFromClientX(event.clientX, snap);
     scheduleScrubAutoScroll();
   }
 
@@ -3914,6 +4123,7 @@ function TimelinePanel({ timeline, timelineViewportState, mode, selectedPartId, 
     const target = event.target as HTMLElement;
     if (target.closest("[data-timeline-control]")) return;
     event.preventDefault();
+    scrubbingRef.current = true;
     event.currentTarget.setPointerCapture(event.pointerId);
     scrubFromPointer(event);
   }
@@ -3924,7 +4134,14 @@ function TimelinePanel({ timeline, timelineViewportState, mode, selectedPartId, 
   }
 
   function endScrub(event: PointerEvent<HTMLDivElement>) {
+    if (scrubPreviewFrameRef.current) {
+      window.cancelAnimationFrame(scrubPreviewFrameRef.current);
+      scrubPreviewFrameRef.current = 0;
+      pendingScrubPreviewRef.current = null;
+    }
+    if (scrubClientXRef.current !== null) updateScrubFromClientX(scrubClientXRef.current, scrubSnapRef.current, "immediate");
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    scrubbingRef.current = false;
     setShiftSnapActive(false);
     stopScrubAutoScroll();
   }
@@ -4376,7 +4593,6 @@ function TimelinePanel({ timeline, timelineViewportState, mode, selectedPartId, 
   }
 
   const playheadColor = isScrubSnapActive ? "#37d6c2" : "var(--clipper-accent)";
-  const playheadHalo = isScrubSnapActive ? "0 0 0 4px rgba(55,214,194,0.22)" : "0 0 0 4px rgb(var(--clipper-accent-rgb)/0.2)";
 
   return (
     <footer className="grid min-h-0 select-none grid-rows-[34px_minmax(0,1fr)] gap-1.5 border-t border-[#1d2028] bg-[#141821] px-[22px] pb-[18px] pt-2.5">
@@ -4410,7 +4626,7 @@ function TimelinePanel({ timeline, timelineViewportState, mode, selectedPartId, 
                 const labelAlign = isStart ? "translate-x-0 text-left after:left-0" : isEnd ? "-translate-x-full text-right after:left-full" : "-translate-x-1/2 text-center after:left-1/2";
                 return <span className={`absolute bottom-0 ${labelAlign} after:absolute after:bottom-[-9px] after:h-[7px] after:w-px after:bg-[#3a3f4d] after:content-['']`} key={tick} style={{ left: `${(tick / sceneDuration) * 100}%` }}>{formatTime(tick)}</span>;
               })}
-              <div className="pointer-events-none absolute top-[14px] z-30 w-px" style={{ left: `${(currentSceneTime / sceneDuration) * 100}%`, height: playheadHeight, backgroundColor: playheadColor }}><div className="absolute left-1/2 top-[-10px] h-5 w-5 -translate-x-1/2 rounded-full" style={{ backgroundColor: playheadColor, boxShadow: playheadHalo }} /></div>
+              <div ref={playbackPlayheadRef} className="pointer-events-none absolute top-[14px] z-30 w-px will-change-transform" style={{ left: `var(--clipper-playhead-left, ${(currentSceneTime / sceneDuration) * 100}%)`, height: playheadHeight, backgroundColor: playheadColor, transform: "translate3d(var(--clipper-playhead-x, 0px), 0, 0)" }}><div className="absolute left-1/2 top-[-8px] h-3 w-2.5 -translate-x-1/2 rounded-[2px]" style={{ backgroundColor: playheadColor, clipPath: "polygon(0 0, 100% 0, 100% 68%, 50% 100%, 0 68%)" }} /></div>
             </div>
             {isCompositionMode ? <div className="relative block overflow-hidden border border-[#2d313b] bg-[#111319] transition" onPointerDown={startTranslationSelection} onPointerMove={continueTranslationSelection} onPointerUp={endTranslationSelection} onPointerCancel={endTranslationSelection}>
               {draggingTranslationMarkerId ? timeline.slice(1).map((part) => <div className="pointer-events-none absolute top-0 z-20 h-full w-px origin-top bg-[rgb(var(--clipper-accent-rgb)/0.9)] shadow-[0_0_10px_rgb(var(--clipper-accent-rgb)/0.42)] animate-[clipper-zoom-boundary-in_180ms_ease-out_both]" key={`translation-boundary-${part.id}`} style={{ left: `${(part.start / sceneDuration) * 100}%` }} />) : null}
@@ -5292,6 +5508,22 @@ function downloadTextFile(fileName: string, content: string) {
   link.download = fileName;
   link.click();
   URL.revokeObjectURL(url);
+}
+
+function evaluateObjectForPreview(object: FrameObject, time: number, duration: number): EvaluatedFrameObject {
+  const evaluatedObject = evaluateFrameObject(object, time, duration);
+  const legacyAnimation = object.motion ? { style: {} as CSSProperties } : getObjectPreviewAnimation(object, time);
+
+  return {
+    ...evaluatedObject,
+    renderContent: legacyAnimation.content ?? evaluatedObject.renderContent,
+    renderRichText: legacyAnimation.content ? undefined : evaluatedObject.renderRichText,
+    renderStyle: {
+      ...evaluatedObject.renderStyle,
+      ...legacyAnimation.style,
+    },
+    timeSensitive: evaluatedObject.timeSensitive || isAnimatedGraphObject(object.id) || Boolean(legacyAnimation.content),
+  };
 }
 
 function getObjectPreviewAnimation(object: FrameObject, time: number): { style: CSSProperties; content?: string } {

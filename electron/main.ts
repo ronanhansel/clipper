@@ -239,15 +239,17 @@ async function renderSceneToVideo(_project: ProjectManifest, scene: Scene, outpu
   });
 
   try {
+    await rendererWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(buildFrameShell())}`);
+
     for (let frameIndex = 0; frameIndex < totalFrames; frameIndex += 1) {
       if (exportId && cancelledVideoRenders.has(exportId)) throw new Error("Video export cancelled.");
       const sceneTime = Math.min(frameIndex / frameRate, Math.max(durationSeconds - 0.001, 0));
       const timelinePart = getTimelinePartAtTime(timeline, sceneTime) ?? timeline[0];
       if (!timelinePart) throw new Error("The current scene has no parts to render.");
       const previewTime = clamp(sceneTime - timelinePart.start, 0, timelinePart.duration);
-      const html = buildFrameDocument(timelinePart, previewTime, getActiveZoom(timelinePart.zoomMarkers, previewTime), getActiveTranslation(timelinePart.translationMarkers, previewTime));
+      const frameHtml = buildFrameBody(timelinePart, previewTime, getActiveZoom(timelinePart.zoomMarkers, previewTime), getActiveTranslation(timelinePart.translationMarkers, previewTime));
 
-      await rendererWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+      await renderFrameHtml(rendererWindow, frameHtml);
       const image = await rendererWindow.webContents.capturePage({ x: 0, y: 0, width: frameWidth, height: frameHeight });
       await writeProcessInput(ffmpeg, image.toPNG());
       onProgress?.({ frame: frameIndex + 1, totalFrames, percent: Math.round(((frameIndex + 1) / totalFrames) * 100), status: `Rendering frame ${frameIndex + 1} of ${totalFrames} with ${encoder.label}` });
@@ -269,6 +271,10 @@ async function renderSceneToVideo(_project: ProjectManifest, scene: Scene, outpu
   onProgress?.({ frame: totalFrames, totalFrames, percent: 100, status: "Finalizing video..." });
 }
 
+async function renderFrameHtml(window: BrowserWindow, frameHtml: string) {
+  await window.webContents.executeJavaScript(`window.__clipperSetFrame(${JSON.stringify(frameHtml)})`, true);
+}
+
 async function writeProcessInput(process: ChildProcessWithoutNullStreams, chunk: Buffer) {
   if (process.stdin.write(chunk)) return;
   await new Promise<void>((resolve, reject) => {
@@ -280,7 +286,8 @@ async function writeProcessInput(process: ChildProcessWithoutNullStreams, chunk:
 type MotionEase = "linear" | "easeIn" | "easeOut" | "easeInOut" | "circOut";
 type VideoExportProgress = { frame: number; totalFrames: number; percent: number; status: string };
 type MotionTrack = { delay?: number; duration: number; ease?: MotionEase; loop?: boolean; opacity?: readonly [number, number]; rotate?: readonly [number, number]; x?: readonly [number, number]; y?: readonly [number, number] };
-type FrameObject = { id: string; name: string; type: string; selector: string; bounds: { x: number; y: number; width: number; height: number }; content?: string; richText?: Array<{ text: string; bold: boolean; italic: boolean; underline: boolean }>; style: Record<string, string | number>; motion?: MotionTrack };
+type FrameTemplate = { kind: "html"; source: string; static?: boolean };
+type FrameObject = { id: string; name: string; type: string; selector: string; bounds: { x: number; y: number; width: number; height: number }; content?: string; template?: FrameTemplate; richText?: Array<{ text: string; bold: boolean; italic: boolean; underline: boolean }>; style: Record<string, string | number>; motion?: MotionTrack };
 type BackgroundLayer = { id: string; name: string; style: Record<string, string | number>; stretchToElements?: boolean; motion?: MotionTrack; elements: FrameObject[] };
 type ZoomMarker = { id: string; start: number; duration: number; focus: { x: number; y: number }; scale: number; ease?: MotionEase; snapIn?: boolean; snapOut?: boolean; middleTransition?: "transition"; middleEase?: MotionEase };
 type TranslationMarker = { id: string; start: number; duration: number; position: { x: number; y: number }; ease?: MotionEase; snapIn?: boolean; snapOut?: boolean; middleTransition?: "transition"; middleEase?: MotionEase };
@@ -288,6 +295,7 @@ type Part = { id: string; name: string; filePath: string; duration: number; fram
 type Scene = { id: string; name: string; parts: Part[] };
 type ProjectManifest = { id: string; name: string; resolution: { width: number; height: number }; scenes: Scene[]; assetsPath: string };
 type TimelinePart = Part & { start: number; end: number };
+const templateCache = new Map<string, (context: unknown) => unknown>();
 
 function buildLinearTimeline(scene: Scene): TimelinePart[] {
   let cursor = 0;
@@ -305,28 +313,70 @@ function getTimelinePartAtTime(timeline: TimelinePart[], time: number) {
   return timeline.find((item) => time >= item.start && time < item.end) ?? timeline[0] ?? null;
 }
 
-function buildFrameDocument(part: Part, previewTime: number, activeZoom: ZoomMarker | null, activeTranslation: TranslationMarker | null) {
+function buildFrameShell() {
+  return `<!doctype html><html><head><meta charset="utf-8"><style>*{box-sizing:border-box}html,body{margin:0;width:${frameWidth}px;height:${frameHeight}px;overflow:hidden;background:#000}</style></head><body><div id="clipper-frame-root"></div><script>window.__clipperSetFrame=function(html){document.getElementById("clipper-frame-root").innerHTML=html;return new Promise(function(resolve){requestAnimationFrame(function(){requestAnimationFrame(resolve);});});};</script></body></html>`;
+}
+
+function buildFrameBody(part: Part, previewTime: number, activeZoom: ZoomMarker | null, activeTranslation: TranslationMarker | null) {
   const scale = activeZoom?.scale ?? 1;
   const focus = activeZoom?.focus ?? { x: frameWidth / 2, y: frameHeight / 2 };
   const x = (frameWidth / 2 - focus.x) * (scale - 1) + (activeTranslation?.position.x ?? 0);
   const y = (frameHeight / 2 - focus.y) * (scale - 1) + (activeTranslation?.position.y ?? 0);
   const frameStyle = cssStyle({ ...part.frame.style, position: "relative", width: frameWidth, height: frameHeight, overflow: "hidden" });
   const cameraStyle = `position:absolute;inset:0;transform-origin:center;transform:translate(${x}px,${y}px) scale(${scale});`;
-  return `<!doctype html><html><head><meta charset="utf-8"><style>*{box-sizing:border-box}html,body{margin:0;width:${frameWidth}px;height:${frameHeight}px;overflow:hidden;background:#000}</style></head><body><div style="${frameStyle}"><div style="${cameraStyle}">${backgroundLayerHtml(part.background, previewTime)}${part.objects.map((object) => frameObjectHtml(object, previewTime)).join("")}</div></div></body></html>`;
+  return `<div style="${frameStyle}"><div style="${cameraStyle}">${backgroundLayerHtml(part.background, previewTime, part.duration)}${part.objects.map((object) => frameObjectHtml(object, previewTime, part.duration)).join("")}</div></div>`;
 }
 
-function backgroundLayerHtml(background: BackgroundLayer, previewTime: number) {
+function backgroundLayerHtml(background: BackgroundLayer, previewTime: number, duration: number) {
   const layerStyle = cssStyle({ position: "absolute", inset: 0, overflow: background.stretchToElements ? "visible" : "hidden", ...getMotionPreviewAnimation(background.motion, previewTime) });
-  const fillStyle = cssStyle({ position: "absolute", inset: 0, ...background.style });
-  return `<div style="${layerStyle}"><div style="${fillStyle}"></div>${background.elements.map((element) => frameObjectHtml(element, previewTime)).join("")}</div>`;
+  const fillBounds = getBackgroundLayerFillBounds(background);
+  const fillStyle = cssStyle({ position: "absolute", left: fillBounds.x, top: fillBounds.y, width: fillBounds.width, height: fillBounds.height, ...background.style });
+  return `<div style="${layerStyle}"><div style="${fillStyle}"></div>${background.elements.map((element) => frameObjectHtml(element, previewTime, duration)).join("")}</div>`;
 }
 
-function frameObjectHtml(object: FrameObject, previewTime: number) {
+function frameObjectHtml(object: FrameObject, previewTime: number, duration: number) {
   const animation = getMotionPreviewAnimation(object.motion, previewTime);
+  const templateRender = object.template ? renderFrameTemplate(object.template, object, previewTime, duration) : null;
   const objectTransform = typeof object.style.transform === "string" ? object.style.transform : "";
   const animationTransform = typeof animation.transform === "string" ? animation.transform : "";
-  const style = cssStyle({ position: "absolute", display: "flex", flexDirection: "column", justifyContent: "center", overflow: "hidden", whiteSpace: "pre-line", left: object.bounds.x, top: object.bounds.y, width: object.bounds.width, height: object.bounds.height, ...object.style, ...animation, transform: `${animationTransform || objectTransform}`.trim() || undefined });
-  return `<div style="${style}">${escapeHtml(object.content ?? "").replace(/\n/g, "<br />")}</div>`;
+  const templateTransform = typeof templateRender?.style?.transform === "string" ? templateRender.style.transform : "";
+  const style = cssStyle({ position: "absolute", display: "flex", flexDirection: "column", justifyContent: "center", overflow: "hidden", whiteSpace: "pre-line", left: object.bounds.x, top: object.bounds.y, width: object.bounds.width, height: object.bounds.height, ...object.style, ...animation, ...templateRender?.style, transform: `${animationTransform || objectTransform} ${templateTransform}`.trim() || undefined });
+  const content = templateRender?.content ?? object.content ?? "";
+  const html = object.type === "html" || object.type === "svg" || object.type === "template" ? content : escapeHtml(content).replace(/\n/g, "<br />");
+  return `<div style="${style}">${html}</div>`;
+}
+
+function renderFrameTemplate(template: FrameTemplate, object: FrameObject, time: number, duration: number): { content?: string; style?: Record<string, string | number | undefined> } {
+  const renderer = compileFrameTemplate(template.source);
+  const result = renderer({
+    time,
+    duration,
+    progress: clamp(duration > 0 ? time / duration : 0, 0, 1),
+    frame: { width: frameWidth, height: frameHeight },
+    object: { id: object.id, name: object.name, bounds: object.bounds, style: object.style, content: object.content },
+  });
+
+  if (typeof result === "string") return { content: result };
+  if (!result || typeof result !== "object") return { content: "" };
+  const rendered = result as { content?: string; style?: Record<string, string | number | undefined> };
+  return { content: rendered.content, style: rendered.style ?? {} };
+}
+
+function compileFrameTemplate(source: string) {
+  const cached = templateCache.get(source);
+  if (cached) return cached;
+  const renderer = Function(`"use strict"; const template = (${source}); if (typeof template !== "function") throw new Error("Frame template source must evaluate to a function."); return template;`)() as (context: unknown) => unknown;
+  templateCache.set(source, renderer);
+  return renderer;
+}
+
+function getBackgroundLayerFillBounds(background: BackgroundLayer) {
+  if (!background.stretchToElements || background.elements.length === 0) return { x: 0, y: 0, width: frameWidth, height: frameHeight };
+  const left = Math.min(0, ...background.elements.map((element) => element.bounds.x));
+  const top = Math.min(0, ...background.elements.map((element) => element.bounds.y));
+  const right = Math.max(frameWidth, ...background.elements.map((element) => element.bounds.x + element.bounds.width));
+  const bottom = Math.max(frameHeight, ...background.elements.map((element) => element.bounds.y + element.bounds.height));
+  return { x: left, y: top, width: right - left, height: bottom - top };
 }
 
 function cssStyle(style: Record<string, unknown>) {

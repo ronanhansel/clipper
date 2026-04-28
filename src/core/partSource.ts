@@ -1,5 +1,5 @@
 import { defineChart } from "../../clipper/projects/part-api";
-import { FRAME_HEIGHT, FRAME_WIDTH, type BackgroundLayer, type FrameObject, type FrameObjectType, type Part, type PartFrame } from "./types";
+import { FRAME_HEIGHT, FRAME_WIDTH, type BackgroundLayer, type FrameObject, type FrameObjectType, type FrameTemplate, type Part, type PartFrame } from "./types";
 
 type SourceObject = {
   id: string;
@@ -7,6 +7,7 @@ type SourceObject = {
   kind: FrameObjectType;
   bounds: FrameObject["bounds"];
   content?: string;
+  template?: FrameTemplate;
   richText?: FrameObject["richText"];
   style: FrameObject["style"];
   motion?: FrameObject["motion"];
@@ -80,6 +81,7 @@ function sourceObjectToFrameObject(object: SourceObject): FrameObject {
     selector: `[data-object-id='${object.id}']`,
     bounds: object.bounds,
     content: object.content,
+    template: object.template,
     richText: object.richText,
     style: object.style,
     motion: object.motion,
@@ -113,6 +115,7 @@ function frameObjectToSourceObject(object: FrameObject): SourceObject {
     kind: object.type,
     bounds: object.bounds,
     content: object.content,
+    template: object.template,
     richText: object.richText,
     style: object.style,
     motion: object.motion,

@@ -61,6 +61,19 @@ export const sampleProject: ProjectManifest = {
               style: { color: "#aeb8c2", fontSize: 30, lineHeight: 1.2, letterSpacing: -0.4 },
               motion: { opacity: [0, 1], duration: 2.1, delay: 1.15, ease: "linear" },
             },
+            {
+              id: "deterministic-template-clock",
+              name: "Deterministic Template Clock",
+              type: "template",
+              selector: "[data-object-id='deterministic-template-clock']",
+              bounds: { x: 1236, y: 502, width: 360, height: 142 },
+              style: { fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" },
+              template: {
+                kind: "html",
+                source: "({ time, progress }) => { const pct = Math.round(progress * 100); const seconds = time.toFixed(2).padStart(5, '0'); return { content: `<div style=\"display:grid;gap:14px;width:100%;height:100%;padding:22px;border:1px solid rgba(255,255,255,0.18);border-radius:26px;background:rgba(5,5,5,0.32);backdrop-filter:blur(14px);color:white;\"><span style=\"font-size:13px;letter-spacing:0.18em;text-transform:uppercase;color:rgba(255,255,255,0.58);\">Template time</span><strong style=\"font-size:42px;line-height:1;\">${seconds}s</strong><span style=\"height:6px;border-radius:999px;background:rgba(255,255,255,0.14);overflow:hidden;\"><span style=\"display:block;width:${pct}%;height:100%;border-radius:999px;background:#ffffff;\"></span></span></div>` }; }",
+              },
+              motion: { opacity: [0, 1], duration: 0.7, delay: 0.8, ease: "easeOut" },
+            },
           ],
         },
         {

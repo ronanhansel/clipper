@@ -15,7 +15,7 @@ export type Point = {
   y: number;
 };
 
-export type FrameObjectType = "rect" | "text" | "image" | "svg" | "html";
+export type FrameObjectType = "rect" | "text" | "image" | "svg" | "html" | "template";
 
 export type MotionEase = "linear" | "easeIn" | "easeOut" | "easeInOut" | "circOut";
 
@@ -24,6 +24,12 @@ export type RichTextSegment = {
   bold: boolean;
   italic: boolean;
   underline: boolean;
+};
+
+export type FrameTemplate = {
+  kind: "html";
+  source: string;
+  static?: boolean;
 };
 
 export type MotionTrack = {
@@ -44,6 +50,7 @@ export type FrameObject = {
   selector: string;
   bounds: Bounds;
   content?: string;
+  template?: FrameTemplate;
   richText?: RichTextSegment[];
   style: Record<string, string | number>;
   motion?: MotionTrack;
