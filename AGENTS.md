@@ -3,7 +3,7 @@
 ## External Memory
 
 - Always start project work with an external memory file at `build/[version number]/memory/[id]-feature-name.md`.
-- Example: `build/v0.2/memory/001-init-editor.md`.
+- Example: `build/v0.3/memory/001-init-renderer.md`.
 - After every major added feature, major update, rework, rewrite, or feature addition, populate or update the relevant memory files so future agents can pick up the work.
 
 ## Version Planning

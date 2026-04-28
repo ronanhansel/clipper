@@ -21,7 +21,29 @@ export const sampleProject: ProjectManifest = {
           filePath: "clipper/projects/prj_v01_sample/scn_opening/prt_grid_reveal.ts",
           duration: 7,
           frame: { width: 1920, height: 1080, style: { background: "#050505" } },
-          background: { id: "background", name: "Background", style: { background: "#050505" }, elements: [] },
+          background: {
+            id: "background",
+            name: "Background",
+            style: { background: "#050505" },
+            elements: [
+              ...[240, 480, 720, 960, 1200, 1440, 1680].map((x) => ({
+                id: `grid-reveal-vertical-${x}`,
+                name: "Drafting Vertical Rule",
+                type: "rect" as const,
+                selector: `[data-object-id='grid-reveal-vertical-${x}']`,
+                bounds: { x, y: 116, width: 1, height: 848 },
+                style: { background: "rgba(255,255,255,0.11)" },
+              })),
+              ...[180, 360, 540, 720, 900].map((y) => ({
+                id: `grid-reveal-horizontal-${y}`,
+                name: "Drafting Horizontal Rule",
+                type: "rect" as const,
+                selector: `[data-object-id='grid-reveal-horizontal-${y}']`,
+                bounds: { x: 104, y, width: 1712, height: 1 },
+                style: { background: "rgba(255,255,255,0.10)" },
+              })),
+            ],
+          },
           snapshot: [
             { at: "00:01", description: "Off-white drafting lines establish the fixed 1920x1080 frame." },
             { at: "00:04", description: "The title block slides into the left third while metadata cards queue up." },

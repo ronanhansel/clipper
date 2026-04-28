@@ -1,6 +1,7 @@
 import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, ChevronDown, ChevronRight, Copy, Crosshair, Download, File as FileIcon, Folder, FolderPlus, Italic, Magnet, Minus, Palette, Pipette, Play, Plus, Pause, RotateCcw, Scissors, Search, Signpost, SkipBack, SkipForward, Sparkles, StepBack, StepForward, Strikethrough, Trash2, Underline } from "lucide-react";
 import Editor, { type BeforeMount, type OnMount } from "@monaco-editor/react";
 import { memo, startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent, type ReactElement, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import toast, { Toaster } from "react-hot-toast";
 import partApiSource from "../clipper/projects/part-api.ts?raw";
 import { Checkbox } from "./components/ui/checkbox";
@@ -99,6 +100,7 @@ const minimumObjectResizeSide = 6;
 const defaultTimelinePixelsPerSecond = 126;
 const maxProjectHistoryActions = 1000;
 const projectHistoryCoalesceMs = 700;
+const forcedCursorStyleId = "clipper-forced-cursor";
 const defaultTimelineViewportState: TimelineViewportState = { displacement: 0, zoom: 1 };
 const defaultTimelineMode: TimelineMode = "edit";
 const defaultAssets: AssetItem[] = [
@@ -204,6 +206,27 @@ function getClipperAccent() {
     accent,
     alpha: (opacity: number) => `rgba(${rgb},${opacity})`,
   };
+}
+
+function setForcedCursor(cursor: string | null) {
+  const current = document.getElementById(forcedCursorStyleId);
+  if (!cursor) {
+    document.documentElement.removeAttribute("data-clipper-forced-cursor");
+    document.documentElement.style.removeProperty("--clipper-forced-cursor");
+    return;
+  }
+
+  const style = current ?? document.createElement("style");
+  style.id = forcedCursorStyleId;
+  style.textContent = `html[data-clipper-forced-cursor] body,
+html[data-clipper-forced-cursor] body *,
+html[data-clipper-forced-cursor] [data-frame-selection-box],
+html[data-clipper-forced-cursor] [data-frame-selection-box] * {
+  cursor: var(--clipper-forced-cursor) !important;
+}`;
+  if (!current) document.head.appendChild(style);
+  document.documentElement.style.setProperty("--clipper-forced-cursor", cursor);
+  document.documentElement.setAttribute("data-clipper-forced-cursor", "true");
 }
 
 type ZoomMarkerSelection = { partId: string; markerId: string };
@@ -1760,7 +1783,7 @@ export function App() {
       const nextDragBox = pendingDragBoxRef.current;
       if (nextDragBox && dragSelectionBoxRef.current) updateDragSelectionBoxElement(dragSelectionBoxRef.current, nextDragBox, framePreviewScale);
       if (!nextDragBox || !isVisibleMarqueeBounds(nextDragBox, framePreviewScale)) return;
-      const payload = createSelectionPayload(nextDragBox, part.objects);
+      const payload = createSelectionPayload(nextDragBox, part.objects.filter(isCanvasNativeObject));
       const nextSelectionIds = payload.objects.map((object) => object.id).join("|");
       if (nextSelectionIds === liveDragSelectionIdsRef.current) return;
       liveDragSelectionIdsRef.current = nextSelectionIds;
@@ -1814,7 +1837,7 @@ export function App() {
   }
 
   function onFramePointerDown(event: PointerEvent<HTMLDivElement>) {
-    if (mode !== "interactive" || !cameraRef.current || objectDragRef.current || objectResizeRef.current) return;
+    if (mode !== "interactive" || objectDragRef.current || objectResizeRef.current) return;
     if (focusPickZoomMarker) {
       startFramePickDrag(event);
       return;
@@ -1950,7 +1973,7 @@ export function App() {
       clearDragBox();
       return;
     }
-    const payload = createSelectionPayload(finalDragBox, part.objects);
+    const payload = createSelectionPayload(finalDragBox, part.objects.filter(isCanvasNativeObject));
     if (payload.objects.length === 0) {
       clearNodeSelection();
     } else {
@@ -2178,7 +2201,7 @@ export function App() {
           </div>
 
           <div ref={centerPreviewScrollRef} className={`timeline-scrollbar grid min-h-0 ${mode === "interactive" ? "place-items-center overflow-auto p-[22px] [scrollbar-gutter:stable]" : "items-stretch overflow-hidden"}`}>
-            {mode === "interactive" ? (
+            {mode === "interactive" ? editingTextObjectId ? (
               <FramePreview
                 cameraRef={cameraRef}
                 dragBox={dragBox}
@@ -2202,6 +2225,27 @@ export function App() {
                 onObjectPointerDown={startObjectDrag}
                 onObjectResizePointerDown={startObjectResize}
                 onTextEditCommit={updateTextObjectContent}
+                onTextObjectDoubleClick={startTextObjectEdit}
+              />
+            ) : (
+              <FrameCanvasPreview
+                dragBox={dragBox}
+                framePickPoint={framePickPoint}
+                focusPicking={isPickingZoomFocus || isPickingTranslationPosition}
+                canSelectObjects={canSelectFrameObjects}
+                cameraTransform={cameraPreviewTransform}
+                frameViewportRef={frameViewportRef}
+                frameScale={framePreviewScale}
+                part={part}
+                previewTime={previewTime}
+                selectedObjects={selectionPayload?.objects ?? []}
+                marqueeDragging={marqueeDragging}
+                onFramePointerCancel={onFramePointerCancel}
+                onFramePointerDown={onFramePointerDown}
+                onFramePointerMove={onFramePointerMove}
+                onFramePointerUp={onFramePointerUp}
+                onObjectPointerDown={startObjectDrag}
+                onObjectResizePointerDown={startObjectResize}
                 onTextObjectDoubleClick={startTextObjectEdit}
               />
             ) : (
@@ -2494,6 +2538,655 @@ function VideoExportOverlay({ cancelling, progress, onCancel }: { cancelling: bo
   );
 }
 
+type CanvasInteraction =
+  | { kind: "marquee"; start: Point; current: Point }
+  | { kind: "drag"; origin: Point; objects: SelectionPayload["objects"]; delta: Point }
+  | { kind: "resize"; origin: Point; handle: ResizeHandle; selectionBox: Bounds; objects: SelectionPayload["objects"]; delta: Point }
+  | null;
+
+type CanvasRasterImage = HTMLImageElement | ImageBitmap;
+type CanvasDrawableObject = { object: FrameObject; animation: { style: CSSProperties; content?: string }; selectable: boolean };
+type CanvasScene = { background: BackgroundLayer; backgroundElements: CanvasDrawableObject[]; objects: CanvasDrawableObject[]; lockedRasterNeeded: boolean };
+
+const canvasRasterMinFrameSeconds = 1 / 30;
+
+const FrameCanvasPreview = memo(function FrameCanvasPreview({ dragBox, framePickPoint, focusPicking, canSelectObjects, cameraTransform, frameViewportRef, frameScale, part, previewTime, selectedObjects, marqueeDragging, onFramePointerCancel, onFramePointerDown, onFramePointerMove, onFramePointerUp, onObjectPointerDown, onObjectResizePointerDown, onTextObjectDoubleClick }: { dragBox: Bounds | null; framePickPoint: Point | null; focusPicking: boolean; canSelectObjects: boolean; cameraTransform: CameraPreviewTransform; frameViewportRef: RefObject<HTMLDivElement | null>; frameScale: number; part: Part; previewTime: number; selectedObjects: SelectionPayload["objects"]; marqueeDragging: boolean; onFramePointerCancel: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerDown: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerMove: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerUp: (event: PointerEvent<HTMLDivElement>) => void; onObjectPointerDown: (event: PointerEvent<HTMLDivElement>, object: FrameObject) => void; onObjectResizePointerDown: (event: PointerEvent<HTMLDivElement>, handle: ResizeHandle, objectId?: string) => void; onTextObjectDoubleClick: (event: ReactMouseEvent<HTMLDivElement>, object: FrameObject) => void }) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const rasterCameraRef = useRef<HTMLDivElement | null>(null);
+  const rasterSourceRef = useRef<HTMLDivElement | null>(null);
+  const rasterImageRef = useRef<CanvasRasterImage | null>(null);
+  const rasterFrameRef = useRef(0);
+  const drawFrameRef = useRef(0);
+  const rasterRunRef = useRef(0);
+  const lastRasterPreviewTimeRef = useRef<number | null>(null);
+  const interactionRef = useRef<CanvasInteraction>(null);
+  const selectorHoverRef = useRef(false);
+  const [rasterSourceMounted, setRasterSourceMounted] = useState(true);
+  const scene = useMemo(() => createCanvasScene(part, previewTime), [part, previewTime]);
+  const hasTimeSensitiveRasterContent = scene.lockedRasterNeeded && (isUnsupportedCanvasBackground(part.background) || [...part.background.elements, ...part.objects].some((object) => !isCanvasNativeObject(object) && isPreviewTimeSensitiveObject(object)));
+  const rasterHost = useMemo(() => document.createElement("div"), []);
+  const frameStyle = useMemo(() => ({ ...part.frame.style, position: "relative", width: FRAME_WIDTH, height: FRAME_HEIGHT, overflow: "hidden" }) as CSSProperties, [part.frame.style]);
+  const cameraStyle = useMemo(() => ({ position: "absolute", inset: 0, transformOrigin: "center" }) as CSSProperties, []);
+  const viewportStyle = useMemo(() => ({ width: FRAME_WIDTH * frameScale, height: FRAME_HEIGHT * frameScale }) as CSSProperties, [frameScale]);
+  const noopTextCommit = useMemo(() => () => undefined, []);
+
+  function drawCanvas() {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    drawFrameCanvas(canvas, rasterImageRef.current, {
+      cameraTransform,
+      dragBox,
+      framePickPoint,
+      frameScale,
+      interaction: interactionRef.current,
+      scene,
+      selectedObjects,
+      selectorHover: selectorHoverRef.current && !marqueeDragging,
+    });
+  }
+
+  function scheduleDraw() {
+    if (drawFrameRef.current) return;
+    drawFrameRef.current = requestAnimationFrame(() => {
+      drawFrameRef.current = 0;
+      drawCanvas();
+    });
+  }
+
+  function scheduleRaster(time: number) {
+    setRasterSourceMounted(true);
+    if (rasterFrameRef.current) cancelAnimationFrame(rasterFrameRef.current);
+    rasterFrameRef.current = requestAnimationFrame(() => {
+      rasterFrameRef.current = 0;
+      void rasterFrameFromDom(time);
+    });
+  }
+
+  useLayoutEffect(() => {
+    rasterHost.style.position = "fixed";
+    rasterHost.style.left = "-100000px";
+    rasterHost.style.top = "0";
+    rasterHost.style.width = `${FRAME_WIDTH}px`;
+    rasterHost.style.height = `${FRAME_HEIGHT}px`;
+    rasterHost.style.overflow = "hidden";
+    rasterHost.style.pointerEvents = "none";
+    rasterHost.style.contain = "layout paint style size";
+    rasterHost.setAttribute("aria-hidden", "true");
+    rasterHost.dataset.clipperRasterHost = "true";
+    document.body.appendChild(rasterHost);
+    return () => rasterHost.remove();
+  }, [rasterHost]);
+
+  async function rasterFrameFromDom(time: number) {
+    const source = rasterSourceRef.current;
+    if (!source) {
+      setRasterSourceMounted(true);
+      rasterFrameRef.current = requestAnimationFrame(() => {
+        rasterFrameRef.current = 0;
+        void rasterFrameFromDom(time);
+      });
+      return;
+    }
+    const run = rasterRunRef.current + 1;
+    rasterRunRef.current = run;
+    const clone = source.cloneNode(true) as HTMLElement;
+    clone.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
+    const serialized = new XMLSerializer().serializeToString(clone);
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${FRAME_WIDTH}" height="${FRAME_HEIGHT}" viewBox="0 0 ${FRAME_WIDTH} ${FRAME_HEIGHT}"><foreignObject width="100%" height="100%">${serialized}</foreignObject></svg>`;
+    const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
+
+    if ("createImageBitmap" in window) {
+      try {
+        const image = await createImageBitmap(blob);
+        if (rasterRunRef.current !== run) {
+          image.close();
+          return;
+        }
+        closeCanvasRasterImage(rasterImageRef.current);
+        rasterImageRef.current = image;
+        lastRasterPreviewTimeRef.current = time;
+        setRasterSourceMounted(false);
+        drawCanvas();
+        return;
+      } catch {
+        // Fall back to HTMLImageElement decoding for SVG foreignObject edge cases.
+      }
+    }
+
+    const url = URL.createObjectURL(blob);
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(url);
+      if (rasterRunRef.current !== run) return;
+      closeCanvasRasterImage(rasterImageRef.current);
+      rasterImageRef.current = image;
+      lastRasterPreviewTimeRef.current = time;
+      setRasterSourceMounted(false);
+      drawCanvas();
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      setRasterSourceMounted(false);
+      if (rasterRunRef.current === run) drawCanvas();
+    };
+    image.src = url;
+  }
+
+  useLayoutEffect(() => {
+    const lastRasterPreviewTime = lastRasterPreviewTimeRef.current;
+    if (hasTimeSensitiveRasterContent && rasterImageRef.current && lastRasterPreviewTime !== null && Math.abs(previewTime - lastRasterPreviewTime) < canvasRasterMinFrameSeconds) {
+      scheduleDraw();
+      return;
+    }
+    if (scene.lockedRasterNeeded) scheduleRaster(previewTime);
+    else {
+      closeCanvasRasterImage(rasterImageRef.current);
+      rasterImageRef.current = null;
+      lastRasterPreviewTimeRef.current = previewTime;
+      setRasterSourceMounted(false);
+      scheduleDraw();
+    }
+  }, [part, frameScale, scene, hasTimeSensitiveRasterContent ? previewTime : null]);
+
+  useLayoutEffect(() => {
+    scheduleDraw();
+  }, [cameraTransform, dragBox, framePickPoint, frameScale, marqueeDragging, selectedObjects]);
+
+  useEffect(() => () => {
+    if (rasterFrameRef.current) cancelAnimationFrame(rasterFrameRef.current);
+    if (drawFrameRef.current) cancelAnimationFrame(drawFrameRef.current);
+    rasterRunRef.current += 1;
+    closeCanvasRasterImage(rasterImageRef.current);
+  }, []);
+
+  function updateSelectorHover(event: PointerEvent<HTMLCanvasElement>) {
+    if (marqueeDragging || !canSelectObjects) {
+      if (selectorHoverRef.current) {
+        selectorHoverRef.current = false;
+        scheduleDraw();
+      }
+      return;
+    }
+
+    const point = viewportPointFromCanvasEvent(event);
+    const hovering = Boolean(getCanvasResizeHit(point, getSelectableCanvasObjects(selectedObjects, scene), cameraTransform, frameScale));
+    if (hovering === selectorHoverRef.current) return;
+    selectorHoverRef.current = hovering;
+    scheduleDraw();
+  }
+
+  function clearSelectorHover() {
+    if (!selectorHoverRef.current) return;
+    selectorHoverRef.current = false;
+    scheduleDraw();
+  }
+
+  function startCanvasInteraction(event: PointerEvent<HTMLCanvasElement>) {
+    if (focusPicking || !canSelectObjects) return;
+    const point = viewportPointFromCanvasEvent(event);
+    const selectableSelection = getSelectableCanvasObjects(selectedObjects, scene);
+    const resizeHit = getCanvasResizeHit(point, selectableSelection, cameraTransform, frameScale);
+    if (resizeHit && selectedObjects.length > 0) {
+      const resizedObjects = selectableSelection.filter((object) => object.id === resizeHit.objectId);
+      const selectionBox = getBoundsUnion((resizedObjects.length > 0 ? resizedObjects : selectableSelection).map((object) => object.bounds));
+      interactionRef.current = { kind: "resize", origin: { x: event.clientX, y: event.clientY }, handle: resizeHit.handle, selectionBox, objects: resizedObjects.length > 0 ? resizedObjects : selectableSelection, delta: { x: 0, y: 0 } };
+      onObjectResizePointerDown(event as unknown as PointerEvent<HTMLDivElement>, resizeHit.handle, resizeHit.objectId);
+      scheduleDraw();
+      return;
+    }
+
+    const object = getCanvasObjectHit(point, scene.objects.filter((node) => node.selectable).map((node) => node.object), cameraTransform, frameScale);
+    if (object) {
+      const selectedObjectIds = new Set(selectableSelection.map((item) => item.id));
+      const nextObjects = selectedObjectIds.has(object.id) ? part.objects.filter((item) => selectedObjectIds.has(item.id)).map(selectionObjectFromFrameObject) : [selectionObjectFromFrameObject(object)];
+      interactionRef.current = { kind: "drag", origin: { x: event.clientX, y: event.clientY }, objects: nextObjects, delta: { x: 0, y: 0 } };
+      onObjectPointerDown(event as unknown as PointerEvent<HTMLDivElement>, object);
+      scheduleDraw();
+      return;
+    }
+
+    const framePoint = framePointFromClient(event.nativeEvent, event.currentTarget);
+    interactionRef.current = { kind: "marquee", start: framePoint, current: framePoint };
+  }
+
+  function updateCanvasInteraction(event: PointerEvent<HTMLCanvasElement>) {
+    const interaction = interactionRef.current;
+    if (!interaction) return;
+    if (interaction.kind === "marquee") {
+      interaction.current = framePointFromClient(event.nativeEvent, event.currentTarget);
+      scheduleDraw();
+      return;
+    }
+    if (interaction.kind === "drag") {
+      interaction.delta = {
+        x: (event.clientX - interaction.origin.x) / (frameScale * cameraTransform.scale),
+        y: (event.clientY - interaction.origin.y) / (frameScale * cameraTransform.scale),
+      };
+      scheduleDraw();
+      return;
+    }
+    interaction.delta = {
+      x: (event.clientX - interaction.origin.x) / (frameScale * cameraTransform.scale),
+      y: (event.clientY - interaction.origin.y) / (frameScale * cameraTransform.scale),
+    };
+    scheduleDraw();
+  }
+
+  function handlePointerDown(event: PointerEvent<HTMLCanvasElement>) {
+    startCanvasInteraction(event);
+    if (!interactionRef.current || interactionRef.current.kind === "marquee" || focusPicking) onFramePointerDown(event as unknown as PointerEvent<HTMLDivElement>);
+  }
+
+  function handlePointerMove(event: PointerEvent<HTMLCanvasElement>) {
+    updateSelectorHover(event);
+    updateCanvasInteraction(event);
+    onFramePointerMove(event as unknown as PointerEvent<HTMLDivElement>);
+  }
+
+  function handlePointerUp(event: PointerEvent<HTMLCanvasElement>) {
+    onFramePointerUp(event as unknown as PointerEvent<HTMLDivElement>);
+    interactionRef.current = null;
+    if (scene.lockedRasterNeeded) scheduleRaster(previewTime);
+    scheduleDraw();
+  }
+
+  function handlePointerCancel(event: PointerEvent<HTMLCanvasElement>) {
+    onFramePointerCancel(event as unknown as PointerEvent<HTMLDivElement>);
+    interactionRef.current = null;
+    scheduleDraw();
+  }
+
+  function handleDoubleClick(event: ReactMouseEvent<HTMLCanvasElement>) {
+    if (!canSelectObjects) return;
+    const point = viewportPointFromMouseEvent(event);
+    const object = getCanvasObjectHit(point, scene.objects.filter((node) => node.selectable).map((node) => node.object), cameraTransform, frameScale);
+    if (object?.type === "text") onTextObjectDoubleClick(event as unknown as ReactMouseEvent<HTMLDivElement>, object);
+  }
+
+  const rasterPortal = rasterSourceMounted ? createPortal(
+    <div ref={rasterSourceRef} aria-hidden style={{ ...frameStyle, background: "transparent" }}>
+      <div ref={rasterCameraRef} style={cameraStyle}>
+        {isUnsupportedCanvasBackground(part.background) ? <BackgroundLayerView background={part.background} previewTime={previewTime} /> : null}
+        {part.background.elements.filter((object) => !isCanvasNativeObject(object)).map((object) => (
+          <FrameObjectView key={object.id} object={object} canSelect={false} editing={false} focusPicking={focusPicking} previewTime={previewTime} onDoubleClick={() => undefined} onPointerDown={() => undefined} onTextEditCommit={noopTextCommit} />
+        ))}
+        {part.objects.filter((object) => !isCanvasNativeObject(object)).map((object) => (
+          <FrameObjectView key={object.id} object={object} canSelect={false} editing={false} focusPicking={focusPicking} previewTime={previewTime} onDoubleClick={() => undefined} onPointerDown={() => undefined} onTextEditCommit={noopTextCommit} />
+        ))}
+      </div>
+    </div>,
+    rasterHost,
+  ) : null;
+
+  return (
+    <div className="grid gap-3">
+      <div className="flex items-baseline justify-between text-[#dfe2ea]"><span className={mutedCaps}>{part.name}</span><strong className="text-[13px]">{FRAME_WIDTH} x {FRAME_HEIGHT}</strong></div>
+      <div ref={frameViewportRef} className={`relative overflow-hidden bg-black shadow-[0_22px_70px_rgba(0,0,0,0.44)] ${focusPicking ? "cursor-crosshair ring-2 ring-[#37d6c2]" : ""}`} style={viewportStyle}>
+        <canvas ref={canvasRef} className={`absolute inset-0 z-10 h-full w-full touch-none select-none ${focusPicking ? "cursor-crosshair" : "cursor-default"}`} onDoubleClick={handleDoubleClick} onPointerCancel={handlePointerCancel} onPointerDown={handlePointerDown} onPointerLeave={clearSelectorHover} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} />
+      </div>
+      {rasterPortal}
+    </div>
+  );
+});
+
+function drawFrameCanvas(canvas: HTMLCanvasElement, image: CanvasRasterImage | null, options: { cameraTransform: CameraPreviewTransform; dragBox: Bounds | null; framePickPoint: Point | null; frameScale: number; interaction: CanvasInteraction; scene: CanvasScene; selectedObjects: SelectionPayload["objects"]; selectorHover: boolean }) {
+  const cssWidth = FRAME_WIDTH * options.frameScale;
+  const cssHeight = FRAME_HEIGHT * options.frameScale;
+  const dpr = window.devicePixelRatio || 1;
+  const bitmapWidth = Math.max(1, Math.round(cssWidth * dpr));
+  const bitmapHeight = Math.max(1, Math.round(cssHeight * dpr));
+  if (canvas.width !== bitmapWidth) canvas.width = bitmapWidth;
+  if (canvas.height !== bitmapHeight) canvas.height = bitmapHeight;
+
+  const context = canvas.getContext("2d");
+  if (!context) return;
+  context.setTransform(dpr, 0, 0, dpr, 0, 0);
+  context.clearRect(0, 0, cssWidth, cssHeight);
+  drawCanvasFrameBackground(context, options.scene.background, cssWidth, cssHeight, options.frameScale);
+  context.save();
+  context.translate(cssWidth / 2 + options.cameraTransform.x * options.frameScale, cssHeight / 2 + options.cameraTransform.y * options.frameScale);
+  context.scale(options.cameraTransform.scale * options.frameScale, options.cameraTransform.scale * options.frameScale);
+  context.translate(-FRAME_WIDTH / 2, -FRAME_HEIGHT / 2);
+  if (isDrawableCanvasRasterImage(image)) context.drawImage(image, 0, 0, FRAME_WIDTH, FRAME_HEIGHT);
+  for (const node of options.scene.backgroundElements) drawCanvasObjectNode(context, node);
+  for (const node of options.scene.objects) drawCanvasObjectNode(context, node);
+  context.restore();
+
+  drawCanvasDragBox(context, getCanvasMarqueeBounds(options.interaction) ?? options.dragBox, options.frameScale);
+  drawCanvasSelection(context, getSelectableCanvasObjects(options.selectedObjects, options.scene), options.interaction, options.cameraTransform, options.frameScale, options.selectorHover);
+  drawCanvasPickPoint(context, options.framePickPoint, options.frameScale);
+}
+
+function isDrawableCanvasRasterImage(image: CanvasRasterImage | null): image is CanvasRasterImage {
+  if (!image) return false;
+  if (image instanceof ImageBitmap) return image.width > 0 && image.height > 0;
+  return image.complete && image.naturalWidth > 0;
+}
+
+function closeCanvasRasterImage(image: CanvasRasterImage | null) {
+  if (image instanceof ImageBitmap) image.close();
+}
+
+function createCanvasScene(part: Part, previewTime: number): CanvasScene {
+  const backgroundElements = part.background.elements.filter(isCanvasNativeObject).map((object) => ({ object, animation: getObjectPreviewAnimation(object, previewTime), selectable: false }));
+  const objects = part.objects.filter(isCanvasNativeObject).map((object) => ({ object, animation: getObjectPreviewAnimation(object, previewTime), selectable: true }));
+  const lockedRasterNeeded = isUnsupportedCanvasBackground(part.background) || part.background.elements.some((object) => !isCanvasNativeObject(object)) || part.objects.some((object) => !isCanvasNativeObject(object));
+  return { background: part.background, backgroundElements, objects, lockedRasterNeeded };
+}
+
+function isCanvasNativeObject(object: FrameObject) {
+  if (object.type !== "rect" && object.type !== "text") return false;
+  const style = object.style;
+  if (typeof style.backgroundImage === "string" || typeof style.backdropFilter === "string" || typeof style.filter === "string") return false;
+  if (typeof style.background === "string" && isUnsupportedCanvasPaint(style.background)) return false;
+  if (typeof style.backgroundColor === "string" && isUnsupportedCanvasPaint(style.backgroundColor)) return false;
+  return true;
+}
+
+function isUnsupportedCanvasBackground(background: BackgroundLayer) {
+  const value = background.style.background ?? background.style.backgroundColor;
+  return typeof value === "string" && isUnsupportedCanvasPaint(value);
+}
+
+function isUnsupportedCanvasPaint(value: string) {
+  return value.includes("gradient") || value.includes("url(");
+}
+
+function getSelectableCanvasObjects(selectedObjects: SelectionPayload["objects"], scene: CanvasScene) {
+  const selectableIds = new Set(scene.objects.filter((node) => node.selectable).map((node) => node.object.id));
+  return selectedObjects.filter((object) => selectableIds.has(object.id));
+}
+
+function drawCanvasFrameBackground(context: CanvasRenderingContext2D, background: BackgroundLayer, width: number, height: number, frameScale: number) {
+  const fallback = "#000";
+  const paint = canvasColor(background.style.background ?? background.style.backgroundColor ?? fallback) ?? fallback;
+  context.fillStyle = paint;
+  context.fillRect(0, 0, width, height);
+}
+
+function drawCanvasObjectNode(context: CanvasRenderingContext2D, node: CanvasDrawableObject) {
+  const object = node.object;
+  const animationStyle = node.animation.style;
+  const bounds = object.bounds;
+  const opacity = numberStyle(animationStyle.opacity ?? object.style.opacity, 1);
+  if (opacity <= 0) return;
+
+  context.save();
+  context.globalAlpha *= clamp(opacity, 0, 1);
+  applyCanvasObjectTransform(context, bounds, object.style.transform, animationStyle.transform);
+
+  if (object.type === "rect") drawCanvasRectObject(context, object, animationStyle);
+  if (object.type === "text") drawCanvasTextObject(context, object, node.animation.content ?? object.content ?? "", animationStyle);
+  context.restore();
+}
+
+function applyCanvasObjectTransform(context: CanvasRenderingContext2D, bounds: Bounds, objectTransform: unknown, animationTransform: unknown) {
+  const transform = typeof animationTransform === "string" && animationTransform ? animationTransform : typeof objectTransform === "string" ? objectTransform : "";
+  if (!transform) return;
+  const center = centerOf(bounds);
+  context.translate(center.x, center.y);
+  const translateX = /translateX\((-?[\d.]+)px\)/.exec(transform)?.[1];
+  const translateY = /translateY\((-?[\d.]+)px\)/.exec(transform)?.[1];
+  const translate = /translate\((-?[\d.]+)px(?:,\s*(-?[\d.]+)px)?\)/.exec(transform);
+  const rotate = /rotate\((-?[\d.]+)deg\)/.exec(transform)?.[1];
+  const scale = /scale\((-?[\d.]+)\)/.exec(transform)?.[1];
+  const scaleX = /scaleX\((-?[\d.]+)\)/.exec(transform)?.[1];
+  if (translate) context.translate(Number(translate[1]), Number(translate[2] ?? 0));
+  if (translateX) context.translate(Number(translateX), 0);
+  if (translateY) context.translate(0, Number(translateY));
+  if (rotate) context.rotate((Number(rotate) * Math.PI) / 180);
+  if (scale) context.scale(Number(scale), Number(scale));
+  if (scaleX) context.scale(Number(scaleX), 1);
+  context.translate(-center.x, -center.y);
+}
+
+function drawCanvasRectObject(context: CanvasRenderingContext2D, object: FrameObject, animationStyle: CSSProperties) {
+  const bounds = object.bounds;
+  const style = { ...object.style, ...animationStyle } as Record<string, unknown>;
+  const radius = numberStyle(style.borderRadius, 0);
+  const fill = canvasColor(style.background ?? style.backgroundColor) ?? "transparent";
+  const shadow = parseCanvasShadow(style.boxShadow);
+  if (shadow) {
+    context.shadowColor = shadow.color;
+    context.shadowBlur = shadow.blur;
+    context.shadowOffsetX = shadow.x;
+    context.shadowOffsetY = shadow.y;
+  }
+  context.fillStyle = fill;
+  roundedRectPath(context, bounds, radius);
+  context.fill();
+  context.shadowColor = "transparent";
+  const border = parseCanvasBorder(style.border);
+  if (border) {
+    context.strokeStyle = border.color;
+    context.lineWidth = border.width;
+    roundedRectPath(context, insetBounds(bounds, border.width / 2), Math.max(0, radius - border.width / 2));
+    context.stroke();
+  }
+}
+
+function drawCanvasTextObject(context: CanvasRenderingContext2D, object: FrameObject, content: string, animationStyle: CSSProperties) {
+  const style = { ...object.style, ...animationStyle } as Record<string, unknown>;
+  const bounds = object.bounds;
+  const fontSize = numberStyle(style.fontSize, 16);
+  const lineHeight = numberStyle(style.lineHeight, 1.2) * fontSize;
+  const fontWeight = String(style.fontWeight ?? 400);
+  const fontFamily = String(style.fontFamily ?? "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif");
+  const align = String(style.textAlign ?? "left") as CanvasTextAlign;
+  const lines = content.split("\n");
+  const totalHeight = lines.length * lineHeight;
+  const startY = bounds.y + (bounds.height - totalHeight) / 2 + fontSize * 0.82;
+  const x = align === "center" ? bounds.x + bounds.width / 2 : align === "right" ? bounds.x + bounds.width : bounds.x;
+  context.fillStyle = canvasColor(style.color) ?? "#fff";
+  context.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
+  context.textAlign = align;
+  context.textBaseline = "alphabetic";
+  for (const [index, line] of lines.entries()) {
+    drawCanvasTextWithLetterSpacing(context, line, x, startY + index * lineHeight, numberStyle(style.letterSpacing, 0), align);
+  }
+}
+
+function drawCanvasTextWithLetterSpacing(context: CanvasRenderingContext2D, text: string, x: number, y: number, letterSpacing: number, align: CanvasTextAlign) {
+  if (!letterSpacing || text.length <= 1) {
+    context.fillText(text, x, y);
+    return;
+  }
+  const widths = Array.from(text).map((char) => context.measureText(char).width);
+  const totalWidth = widths.reduce((sum, width) => sum + width, 0) + letterSpacing * (text.length - 1);
+  let cursor = align === "center" ? x - totalWidth / 2 : align === "right" ? x - totalWidth : x;
+  context.textAlign = "left";
+  Array.from(text).forEach((char, index) => {
+    context.fillText(char, cursor, y);
+    cursor += widths[index] + letterSpacing;
+  });
+  context.textAlign = align;
+}
+
+function roundedRectPath(context: CanvasRenderingContext2D, bounds: Bounds, radius: number) {
+  const r = Math.min(radius, bounds.width / 2, bounds.height / 2);
+  context.beginPath();
+  context.moveTo(bounds.x + r, bounds.y);
+  context.lineTo(bounds.x + bounds.width - r, bounds.y);
+  context.quadraticCurveTo(bounds.x + bounds.width, bounds.y, bounds.x + bounds.width, bounds.y + r);
+  context.lineTo(bounds.x + bounds.width, bounds.y + bounds.height - r);
+  context.quadraticCurveTo(bounds.x + bounds.width, bounds.y + bounds.height, bounds.x + bounds.width - r, bounds.y + bounds.height);
+  context.lineTo(bounds.x + r, bounds.y + bounds.height);
+  context.quadraticCurveTo(bounds.x, bounds.y + bounds.height, bounds.x, bounds.y + bounds.height - r);
+  context.lineTo(bounds.x, bounds.y + r);
+  context.quadraticCurveTo(bounds.x, bounds.y, bounds.x + r, bounds.y);
+  context.closePath();
+}
+
+function canvasColor(value: unknown) {
+  if (typeof value !== "string") return null;
+  if (value === "var(--clipper-accent)") return getClipperCssVariable("--clipper-accent");
+  return value.replace(/rgb\(var\(--clipper-accent-rgb\)\s*\/\s*([^)]+)\)/g, (_match, alpha) => `rgb(${getClipperCssVariable("--clipper-accent-rgb")} / ${alpha})`);
+}
+
+function numberStyle(value: unknown, fallback: number) {
+  if (typeof value === "number") return value;
+  if (typeof value === "string") {
+    const parsed = Number.parseFloat(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return fallback;
+}
+
+function parseCanvasBorder(value: unknown) {
+  if (typeof value !== "string") return null;
+  const match = /([\d.]+)px\s+\w+\s+(.+)/.exec(value);
+  if (!match) return null;
+  return { width: Number(match[1]), color: canvasColor(match[2]) ?? match[2] };
+}
+
+function parseCanvasShadow(value: unknown) {
+  if (typeof value !== "string") return null;
+  const match = /(-?[\d.]+)px\s+(-?[\d.]+)px\s+([\d.]+)px\s+(.+)/.exec(value);
+  if (!match) return null;
+  return { x: Number(match[1]), y: Number(match[2]), blur: Number(match[3]), color: canvasColor(match[4]) ?? match[4] };
+}
+
+function drawCanvasSelection(context: CanvasRenderingContext2D, selectedObjects: SelectionPayload["objects"], interaction: CanvasInteraction, cameraTransform: CameraPreviewTransform, frameScale: number, highlighted: boolean) {
+  const previewObjects = getCanvasPreviewSelectionObjects(selectedObjects, interaction);
+  for (const object of previewObjects) {
+    const viewportBounds = insetBounds(boundsToViewport(object.bounds, cameraTransform, frameScale), -selectorOffsetPx);
+    drawCanvasSelectionBox(context, viewportBounds, highlighted);
+  }
+}
+
+function drawCanvasSelectionBox(context: CanvasRenderingContext2D, bounds: Bounds, highlighted: boolean) {
+  context.save();
+  context.strokeStyle = selectorBlue;
+  context.lineWidth = highlighted ? 2 : 1;
+  context.strokeRect(bounds.x, bounds.y, bounds.width, bounds.height);
+
+  const halfHandle = selectorHandleSizePx / 2;
+  const handles = [
+    { x: bounds.x, y: bounds.y },
+    { x: bounds.x + bounds.width, y: bounds.y },
+    { x: bounds.x + bounds.width, y: bounds.y + bounds.height },
+    { x: bounds.x, y: bounds.y + bounds.height },
+  ];
+  context.fillStyle = "#ffffff";
+  context.strokeStyle = selectorBlue;
+  context.lineWidth = 2;
+  for (const handle of handles) {
+    context.fillRect(handle.x - halfHandle, handle.y - halfHandle, selectorHandleSizePx, selectorHandleSizePx);
+    context.strokeRect(handle.x - halfHandle, handle.y - halfHandle, selectorHandleSizePx, selectorHandleSizePx);
+  }
+  context.restore();
+}
+
+function drawCanvasDragBox(context: CanvasRenderingContext2D, bounds: Bounds | null, frameScale: number) {
+  if (!bounds || !isVisibleMarqueeBounds(bounds, frameScale)) return;
+  context.save();
+  context.fillStyle = "rgba(21, 157, 255, 0.10)";
+  context.strokeStyle = selectorBlue;
+  context.lineWidth = 1;
+  const viewportBounds = { x: bounds.x * frameScale, y: bounds.y * frameScale, width: bounds.width * frameScale, height: bounds.height * frameScale };
+  context.fillRect(viewportBounds.x, viewportBounds.y, viewportBounds.width, viewportBounds.height);
+  context.strokeRect(viewportBounds.x, viewportBounds.y, viewportBounds.width, viewportBounds.height);
+  context.restore();
+}
+
+function drawCanvasPickPoint(context: CanvasRenderingContext2D, point: Point | null, frameScale: number) {
+  if (!point) return;
+  const x = point.x * frameScale;
+  const y = point.y * frameScale;
+  context.save();
+  context.fillStyle = "#37d6c2";
+  context.strokeStyle = "rgba(255,255,255,0.82)";
+  context.lineWidth = 1;
+  context.beginPath();
+  context.arc(x, y, 6, 0, Math.PI * 2);
+  context.fill();
+  context.stroke();
+  context.restore();
+}
+
+function getCanvasPreviewSelectionObjects(selectedObjects: SelectionPayload["objects"], interaction: CanvasInteraction) {
+  if (interaction?.kind === "drag") return interaction.objects.map((object) => ({ ...object, bounds: moveBounds(object.bounds, interaction.delta) }));
+  if (interaction?.kind === "resize") {
+    const resizedObjects = getCanvasResizedObjects(interaction);
+    const resizedBoundsById = new Map(resizedObjects.map((object) => [object.id, object.bounds]));
+    const baseObjects = selectedObjects.length > 0 ? selectedObjects : interaction.objects;
+    return baseObjects.map((object) => ({ ...object, bounds: resizedBoundsById.get(object.id) ?? object.bounds }));
+  }
+  return selectedObjects;
+}
+
+function getCanvasResizedObjects(resize: Extract<CanvasInteraction, { kind: "resize" }>) {
+  const nextSelectionBox = getResizedBounds(resize.selectionBox, resize.handle, resize.delta);
+  const scaleX = resize.selectionBox.width === 0 ? 1 : nextSelectionBox.width / resize.selectionBox.width;
+  const scaleY = resize.selectionBox.height === 0 ? 1 : nextSelectionBox.height / resize.selectionBox.height;
+  return resize.objects.map((object) => ({
+    ...object,
+    bounds: {
+      x: Math.round(nextSelectionBox.x + (object.bounds.x - resize.selectionBox.x) * scaleX),
+      y: Math.round(nextSelectionBox.y + (object.bounds.y - resize.selectionBox.y) * scaleY),
+      width: Math.max(minimumObjectResizeSide, Math.round(object.bounds.width * scaleX)),
+      height: Math.max(minimumObjectResizeSide, Math.round(object.bounds.height * scaleY)),
+    },
+  }));
+}
+
+function getCanvasMarqueeBounds(interaction: CanvasInteraction) {
+  return interaction?.kind === "marquee" ? normalizeBounds(interaction.start, interaction.current) : null;
+}
+
+function viewportPointFromCanvasEvent(event: PointerEvent<HTMLCanvasElement>): Point {
+  return viewportPointFromMouseEvent(event);
+}
+
+function viewportPointFromMouseEvent(event: Pick<ReactMouseEvent<HTMLElement>, "clientX" | "clientY" | "currentTarget">): Point {
+  const rect = event.currentTarget.getBoundingClientRect();
+  return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+}
+
+function getCanvasObjectHit(point: Point, objects: FrameObject[], cameraTransform: CameraPreviewTransform, frameScale: number) {
+  for (let index = objects.length - 1; index >= 0; index -= 1) {
+    const object = objects[index];
+    const bounds = boundsToViewport(object.bounds, cameraTransform, frameScale);
+    if (point.x >= bounds.x && point.x <= bounds.x + bounds.width && point.y >= bounds.y && point.y <= bounds.y + bounds.height) return object;
+  }
+  return null;
+}
+
+function getCanvasResizeHit(point: Point, selectedObjects: SelectionPayload["objects"], cameraTransform: CameraPreviewTransform, frameScale: number): { handle: ResizeHandle; objectId: string } | null {
+  const hitSize = Math.max(selectorHandleSizePx + 10, 18);
+  for (let index = selectedObjects.length - 1; index >= 0; index -= 1) {
+    const object = selectedObjects[index];
+    const bounds = insetBounds(boundsToViewport(object.bounds, cameraTransform, frameScale), -selectorOffsetPx);
+    const right = bounds.x + bounds.width;
+    const bottom = bounds.y + bounds.height;
+    const cornerHits: Array<{ handle: ResizeHandle; x: number; y: number }> = [
+      { handle: "top-left", x: bounds.x, y: bounds.y },
+      { handle: "top-right", x: right, y: bounds.y },
+      { handle: "bottom-right", x: right, y: bottom },
+      { handle: "bottom-left", x: bounds.x, y: bottom },
+    ];
+    for (const hit of cornerHits) {
+      if (Math.abs(point.x - hit.x) <= hitSize / 2 && Math.abs(point.y - hit.y) <= hitSize / 2) return { handle: hit.handle, objectId: object.id };
+    }
+    if (point.x >= bounds.x && point.x <= right) {
+      if (Math.abs(point.y - bounds.y) <= hitSize / 2) return { handle: "top", objectId: object.id };
+      if (Math.abs(point.y - bottom) <= hitSize / 2) return { handle: "bottom", objectId: object.id };
+    }
+    if (point.y >= bounds.y && point.y <= bottom) {
+      if (Math.abs(point.x - bounds.x) <= hitSize / 2) return { handle: "left", objectId: object.id };
+      if (Math.abs(point.x - right) <= hitSize / 2) return { handle: "right", objectId: object.id };
+    }
+  }
+  return null;
+}
+
+function resizeHandleCursor(handle: ResizeHandle) {
+  if (handle === "top" || handle === "bottom") return "ns-resize";
+  if (handle === "left" || handle === "right") return "ew-resize";
+  if (handle === "top-left" || handle === "bottom-right") return "nwse-resize";
+  return "nesw-resize";
+}
+
 const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dragSelectionBoxRef, framePickPoint, focusPicking, canSelectObjects, cameraTransform, frameViewportRef, frameScale, part, previewTime, selectedObjects, marqueeDragging, editingTextObjectId, onFramePointerCancel, onFramePointerDown, onFramePointerDownCapture, onFramePointerMove, onFramePointerUp, onObjectPointerDown, onObjectResizePointerDown, onTextEditCommit, onTextObjectDoubleClick }: { cameraRef: RefObject<HTMLDivElement | null>; dragBox: Bounds | null; dragSelectionBoxRef: RefObject<HTMLDivElement | null>; framePickPoint: Point | null; focusPicking: boolean; canSelectObjects: boolean; cameraTransform: CameraPreviewTransform; frameViewportRef: RefObject<HTMLDivElement | null>; frameScale: number; part: Part; previewTime: number; selectedObjects: SelectionPayload["objects"]; marqueeDragging: boolean; editingTextObjectId: string | null; onFramePointerCancel: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerDown: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerDownCapture: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerMove: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerUp: (event: PointerEvent<HTMLDivElement>) => void; onObjectPointerDown: (event: PointerEvent<HTMLDivElement>, object: FrameObject) => void; onObjectResizePointerDown: (event: PointerEvent<HTMLDivElement>, handle: ResizeHandle, objectId?: string) => void; onTextEditCommit: (objectId: string, content: string, richText?: RichTextSegment[]) => void; onTextObjectDoubleClick: (event: ReactMouseEvent<HTMLDivElement>, object: FrameObject) => void }) {
   const frameStyle = useMemo(() => ({ ...part.frame.style, width: FRAME_WIDTH, height: FRAME_HEIGHT, transform: `scale(${frameScale})` }) as CSSProperties, [frameScale, part.frame.style]);
   const viewportStyle = useMemo(() => ({ width: FRAME_WIDTH * frameScale, height: FRAME_HEIGHT * frameScale }) as CSSProperties, [frameScale]);
@@ -2501,10 +3194,23 @@ const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dragSelect
   const selectedViewportBounds = useMemo(() => selectedBounds ? insetBounds(boundsToViewport(selectedBounds, cameraTransform, frameScale), -selectorOffsetPx) : null, [cameraTransform, frameScale, selectedBounds]);
   const [selectorHover, setSelectorHover] = useState(false);
   const selectorHoverRef = useRef(false);
+  const forcedCursorRef = useRef<string | null>(null);
   const showDragBox = dragBox && isVisibleMarqueeBounds(dragBox, frameScale);
+
+  useEffect(() => {
+    return () => setForcedCursor(null);
+  }, []);
+
+  function updateForcedCursor(cursor: string | null) {
+    if (forcedCursorRef.current === cursor) return;
+    forcedCursorRef.current = cursor;
+    setForcedCursor(cursor);
+    if (frameViewportRef.current) frameViewportRef.current.style.cursor = cursor ?? "";
+  }
 
   function updateSelectorHover(event: PointerEvent<HTMLDivElement>) {
     if (!selectedViewportBounds || marqueeDragging) {
+      updateForcedCursor(null);
       if (selectorHoverRef.current) {
         selectorHoverRef.current = false;
         setSelectorHover(false);
@@ -2515,6 +3221,8 @@ const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dragSelect
     const rect = event.currentTarget.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
+    const resizeHit = focusPicking ? null : getCanvasResizeHit({ x, y }, selectedObjects, cameraTransform, frameScale);
+    updateForcedCursor(resizeHit ? resizeHandleCursor(resizeHit.handle) : null);
     const hovering = x >= selectedViewportBounds.x && x <= selectedViewportBounds.x + selectedViewportBounds.width && y >= selectedViewportBounds.y && y <= selectedViewportBounds.y + selectedViewportBounds.height;
     if (hovering === selectorHoverRef.current) return;
     selectorHoverRef.current = hovering;
@@ -2526,7 +3234,13 @@ const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dragSelect
     onFramePointerMove(event);
   }
 
+  function handleFramePointerCancel(event: PointerEvent<HTMLDivElement>) {
+    clearSelectorHover();
+    onFramePointerCancel(event);
+  }
+
   function clearSelectorHover() {
+    updateForcedCursor(null);
     if (!selectorHoverRef.current) return;
     selectorHoverRef.current = false;
     setSelectorHover(false);
@@ -2535,7 +3249,7 @@ const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dragSelect
   return (
     <div className="grid gap-3">
       <div className="flex items-baseline justify-between text-[#dfe2ea]"><span className={mutedCaps}>{part.name}</span><strong className="text-[13px]">{FRAME_WIDTH} x {FRAME_HEIGHT}</strong></div>
-      <div ref={frameViewportRef} className={`relative overflow-hidden bg-black shadow-[0_22px_70px_rgba(0,0,0,0.44)] ${focusPicking ? "cursor-crosshair ring-2 ring-[#37d6c2]" : ""}`} style={viewportStyle} onPointerDownCapture={onFramePointerDownCapture} onPointerDown={onFramePointerDown} onPointerMove={handleFramePointerMove} onPointerUp={onFramePointerUp} onPointerCancel={onFramePointerCancel} onPointerLeave={clearSelectorHover}>
+      <div ref={frameViewportRef} className={`relative overflow-hidden bg-black shadow-[0_22px_70px_rgba(0,0,0,0.44)] ${focusPicking ? "cursor-crosshair ring-2 ring-[#37d6c2]" : ""}`} style={viewportStyle} onPointerDownCapture={onFramePointerDownCapture} onPointerDown={onFramePointerDown} onPointerMove={handleFramePointerMove} onPointerUp={onFramePointerUp} onPointerCancel={handleFramePointerCancel} onPointerLeave={clearSelectorHover}>
         <div className="absolute left-0 top-0 origin-top-left overflow-hidden" style={frameStyle}>
           <div className="absolute inset-0 origin-center" ref={cameraRef}>
             <BackgroundLayerView background={part.background} previewTime={previewTime} />
@@ -2570,6 +3284,12 @@ const FrameObjectView = memo(function FrameObjectView({ object, canSelect, editi
     top: object.bounds.y,
     width: object.bounds.width,
     height: object.bounds.height,
+    display: "flex",
+    flexDirection: "column",
+    justifyContent: "center",
+    overflow: "hidden",
+    position: "absolute",
+    whiteSpace: "pre-line",
     ...object.style,
     ...animation.style,
     transform: `translate(var(--clipper-drag-x, 0px), var(--clipper-drag-y, 0px)) ${animationTransform ?? objectTransform ?? ""}`.trim(),
@@ -2649,9 +3369,9 @@ const FrameObjectView = memo(function FrameObjectView({ object, canSelect, editi
   return (
     <div className={`absolute flex touch-none select-none flex-col justify-center overflow-hidden whitespace-pre-line ${focusPicking ? "cursor-crosshair" : editing ? "cursor-text" : "cursor-default"} ${editing ? "select-text" : ""}`} data-object-id={canSelect ? object.id : undefined} style={style} onDoubleClick={onDoubleClick} onPointerDown={onPointerDown}>
       {object.type === "text" && editing ? <div ref={editableRef} className="min-h-0 w-full whitespace-pre-wrap outline-none" contentEditable suppressContentEditableWarning onBlur={commitTextEdit} onKeyDown={onTextEditKeyDown} onPointerDown={(event) => event.stopPropagation()} /> : null}
-      {object.type === "text" && !editing ? <div className="min-h-0 w-full whitespace-pre-wrap">{renderRichTextSegments(textSegments, Boolean(richText))}</div> : null}
-      {object.type === "svg" && content ? <div className="h-full w-full" dangerouslySetInnerHTML={{ __html: content }} /> : null}
-      {object.type === "html" && content ? <div className="h-full w-full" dangerouslySetInnerHTML={{ __html: content }} /> : null}
+      {object.type === "text" && !editing ? <div className="min-h-0 w-full whitespace-pre-wrap" style={{ width: "100%", whiteSpace: "pre-wrap" }}>{renderRichTextSegments(textSegments, Boolean(richText))}</div> : null}
+      {object.type === "svg" && content ? <div className="h-full w-full" style={{ height: "100%", width: "100%" }} dangerouslySetInnerHTML={{ __html: content }} /> : null}
+      {object.type === "html" && content ? <div className="h-full w-full" style={{ height: "100%", width: "100%" }} dangerouslySetInnerHTML={{ __html: content }} /> : null}
       {object.type !== "text" && object.type !== "svg" && object.type !== "html" && content ? content : null}
     </div>
   );
@@ -2666,8 +3386,7 @@ function areFrameObjectPropsEqual(previous: { object: FrameObject; canSelect: bo
 }
 
 function areBackgroundLayerPropsEqual(previous: { background: BackgroundLayer; previewTime: number }, next: { background: BackgroundLayer; previewTime: number }) {
-  const timeSensitive = Boolean(next.background.motion) || next.background.elements.some(isPreviewTimeSensitiveObject);
-  return previous.background === next.background && (!timeSensitive || previous.previewTime === next.previewTime);
+  return previous.background === next.background && (!isPreviewTimeSensitiveBackground(next.background) || previous.previewTime === next.previewTime);
 }
 
 function areBackgroundElementPropsEqual(previous: { element: FrameObject; previewTime: number }, next: { element: FrameObject; previewTime: number }) {
@@ -2678,33 +3397,46 @@ function isPreviewTimeSensitiveObject(object: FrameObject) {
   return Boolean(object.motion) || isAnimatedGraphObject(object.id);
 }
 
+function isPreviewTimeSensitiveBackground(background: BackgroundLayer) {
+  return Boolean(background.motion) || background.elements.some(isPreviewTimeSensitiveObject);
+}
+
 function SelectionOverlayBox({ objectId, bounds, cameraTransform, frameScale, highlighted, interactive, onResizePointerDown }: { objectId: string; bounds: Bounds; cameraTransform: CameraPreviewTransform; frameScale: number; highlighted: boolean; interactive: boolean; onResizePointerDown: (event: PointerEvent<HTMLDivElement>, handle: ResizeHandle) => void }) {
   const viewportBounds = insetBounds(boundsToViewport(bounds, cameraTransform, frameScale), -selectorOffsetPx);
-  const horizontalEdgeClass = `${interactive ? "pointer-events-auto" : "pointer-events-none"} absolute left-0 w-full cursor-ns-resize opacity-95 ${highlighted ? "h-0.5" : "h-px"}`;
-  const verticalEdgeClass = `${interactive ? "pointer-events-auto" : "pointer-events-none"} absolute top-0 h-full cursor-ew-resize opacity-95 ${highlighted ? "w-0.5" : "w-px"}`;
+  const horizontalEdgeClass = `pointer-events-none absolute left-0 w-full opacity-95 ${highlighted ? "h-0.5" : "h-px"}`;
+  const verticalEdgeClass = `pointer-events-none absolute top-0 h-full opacity-95 ${highlighted ? "w-0.5" : "w-px"}`;
+  const hitZoneClass = `${interactive ? "pointer-events-auto" : "pointer-events-none"} absolute bg-transparent`;
   const edgeStyle = { backgroundColor: selectorBlue };
-  const handleClass = `${interactive ? "pointer-events-auto" : "pointer-events-none"} absolute border-2 bg-white shadow-[0_1px_4px_rgba(0,0,0,0.24)]`;
+  const handleClass = `${interactive ? "pointer-events-auto" : "pointer-events-none"} absolute grid place-items-center bg-transparent`;
+  const handleVisualClass = "pointer-events-none border-2 bg-white shadow-[0_1px_4px_rgba(0,0,0,0.24)]";
   const handleStyle = { width: selectorHandleSizePx, height: selectorHandleSizePx };
   const handleStyleWithColor = { ...handleStyle, borderColor: selectorBlue };
+  const edgeHitSize = 12;
+  const handleHitSize = 18;
   const handleInset = selectorHandleSizePx / 2;
   const keepLeftHandleInside = viewportBounds.x < handleInset;
   const keepTopHandleInside = viewportBounds.y < handleInset;
   const keepRightHandleInside = viewportBounds.x + viewportBounds.width > FRAME_WIDTH * frameScale - handleInset;
   const keepBottomHandleInside = viewportBounds.y + viewportBounds.height > FRAME_HEIGHT * frameScale - handleInset;
-  const topLeftHandleClass = `${handleClass} left-0 top-0 ${keepLeftHandleInside ? "" : "-translate-x-1/2"} ${keepTopHandleInside ? "" : "-translate-y-1/2"} cursor-nwse-resize`;
-  const topRightHandleClass = `${handleClass} right-0 top-0 ${keepRightHandleInside ? "" : "translate-x-1/2"} ${keepTopHandleInside ? "" : "-translate-y-1/2"} cursor-nesw-resize`;
-  const bottomRightHandleClass = `${handleClass} bottom-0 right-0 ${keepRightHandleInside ? "" : "translate-x-1/2"} ${keepBottomHandleInside ? "" : "translate-y-1/2"} cursor-nwse-resize`;
-  const bottomLeftHandleClass = `${handleClass} bottom-0 left-0 ${keepLeftHandleInside ? "" : "-translate-x-1/2"} ${keepBottomHandleInside ? "" : "translate-y-1/2"} cursor-nesw-resize`;
+  const topLeftHandleClass = `${handleClass} left-0 top-0 ${keepLeftHandleInside ? "" : "-translate-x-1/2"} ${keepTopHandleInside ? "" : "-translate-y-1/2"}`;
+  const topRightHandleClass = `${handleClass} right-0 top-0 ${keepRightHandleInside ? "" : "translate-x-1/2"} ${keepTopHandleInside ? "" : "-translate-y-1/2"}`;
+  const bottomRightHandleClass = `${handleClass} bottom-0 right-0 ${keepRightHandleInside ? "" : "translate-x-1/2"} ${keepBottomHandleInside ? "" : "translate-y-1/2"}`;
+  const bottomLeftHandleClass = `${handleClass} bottom-0 left-0 ${keepLeftHandleInside ? "" : "-translate-x-1/2"} ${keepBottomHandleInside ? "" : "translate-y-1/2"}`;
+  const handleHitStyle = { width: handleHitSize, height: handleHitSize };
   return (
     <div data-frame-selection-box={objectId} className="pointer-events-none absolute bg-transparent" style={{ left: viewportBounds.x, top: viewportBounds.y, width: viewportBounds.width, height: viewportBounds.height, transform: "translate(var(--clipper-drag-x, 0px), var(--clipper-drag-y, 0px))", zIndex: 2147483647 }}>
-      <div className={`${horizontalEdgeClass} top-0`} style={edgeStyle} onPointerDown={(event) => onResizePointerDown(event, "top")} />
-      <div className={`${horizontalEdgeClass} bottom-0`} style={edgeStyle} onPointerDown={(event) => onResizePointerDown(event, "bottom")} />
-      <div className={`${verticalEdgeClass} left-0`} style={edgeStyle} onPointerDown={(event) => onResizePointerDown(event, "left")} />
-      <div className={`${verticalEdgeClass} right-0`} style={edgeStyle} onPointerDown={(event) => onResizePointerDown(event, "right")} />
-      <div className={topLeftHandleClass} style={handleStyleWithColor} onPointerDown={(event) => onResizePointerDown(event, "top-left")} />
-      <div className={topRightHandleClass} style={handleStyleWithColor} onPointerDown={(event) => onResizePointerDown(event, "top-right")} />
-      <div className={bottomRightHandleClass} style={handleStyleWithColor} onPointerDown={(event) => onResizePointerDown(event, "bottom-right")} />
-      <div className={bottomLeftHandleClass} style={handleStyleWithColor} onPointerDown={(event) => onResizePointerDown(event, "bottom-left")} />
+      <div className={`${horizontalEdgeClass} top-0`} style={edgeStyle} />
+      <div className={`${horizontalEdgeClass} bottom-0`} style={edgeStyle} />
+      <div className={`${verticalEdgeClass} left-0`} style={edgeStyle} />
+      <div className={`${verticalEdgeClass} right-0`} style={edgeStyle} />
+      <div className={`${hitZoneClass} left-0 w-full`} style={{ top: -edgeHitSize / 2, height: edgeHitSize, cursor: "ns-resize" }} onPointerDown={(event) => onResizePointerDown(event, "top")} />
+      <div className={`${hitZoneClass} bottom-0 left-0 w-full`} style={{ height: edgeHitSize, transform: "translateY(50%)", cursor: "ns-resize" }} onPointerDown={(event) => onResizePointerDown(event, "bottom")} />
+      <div className={`${hitZoneClass} top-0 h-full`} style={{ left: -edgeHitSize / 2, width: edgeHitSize, cursor: "ew-resize" }} onPointerDown={(event) => onResizePointerDown(event, "left")} />
+      <div className={`${hitZoneClass} right-0 top-0 h-full`} style={{ width: edgeHitSize, transform: "translateX(50%)", cursor: "ew-resize" }} onPointerDown={(event) => onResizePointerDown(event, "right")} />
+      <div className={topLeftHandleClass} style={{ ...handleHitStyle, cursor: "nwse-resize" }} onPointerDown={(event) => onResizePointerDown(event, "top-left")}><span className={handleVisualClass} style={handleStyleWithColor} /></div>
+      <div className={topRightHandleClass} style={{ ...handleHitStyle, cursor: "nesw-resize" }} onPointerDown={(event) => onResizePointerDown(event, "top-right")}><span className={handleVisualClass} style={handleStyleWithColor} /></div>
+      <div className={bottomRightHandleClass} style={{ ...handleHitStyle, cursor: "nwse-resize" }} onPointerDown={(event) => onResizePointerDown(event, "bottom-right")}><span className={handleVisualClass} style={handleStyleWithColor} /></div>
+      <div className={bottomLeftHandleClass} style={{ ...handleHitStyle, cursor: "nesw-resize" }} onPointerDown={(event) => onResizePointerDown(event, "bottom-left")}><span className={handleVisualClass} style={handleStyleWithColor} /></div>
     </div>
   );
 }
@@ -3213,10 +3945,14 @@ function ColorSelector({ value, onChange }: { value: string; onChange: (value: s
 
 const BackgroundLayerView = memo(function BackgroundLayerView({ background, previewTime }: { background: BackgroundLayer; previewTime: number }) {
   const layerStyle = {
+    position: "absolute",
+    inset: 0,
+    overflow: background.stretchToElements ? "visible" : "hidden",
     ...getMotionPreviewAnimation(background.motion, previewTime),
   } as CSSProperties;
   const fillBounds = getBackgroundLayerFillBounds(background);
   const fillStyle = {
+    position: "absolute",
     ...background.style,
     left: fillBounds.x,
     top: fillBounds.y,
@@ -3239,6 +3975,12 @@ const BackgroundElementView = memo(function BackgroundElementView({ element, pre
     top: element.bounds.y,
     width: element.bounds.width,
     height: element.bounds.height,
+    display: "flex",
+    flexDirection: "column",
+    justifyContent: "center",
+    overflow: "hidden",
+    position: "absolute",
+    whiteSpace: "pre-line",
     ...element.style,
     ...animation.style,
   } as CSSProperties;
@@ -3248,8 +3990,8 @@ const BackgroundElementView = memo(function BackgroundElementView({ element, pre
   return (
     <div className="absolute flex select-none flex-col justify-center overflow-hidden whitespace-pre-line" data-background-element-id={element.id} style={style}>
       {element.type === "text" ? textLines.map((line, index) => <span key={`${line}-${index}`}>{line}</span>) : null}
-      {element.type === "svg" && content ? <div className="h-full w-full" dangerouslySetInnerHTML={{ __html: content }} /> : null}
-      {element.type === "html" && content ? <div className="h-full w-full" dangerouslySetInnerHTML={{ __html: content }} /> : null}
+      {element.type === "svg" && content ? <div className="h-full w-full" style={{ height: "100%", width: "100%" }} dangerouslySetInnerHTML={{ __html: content }} /> : null}
+      {element.type === "html" && content ? <div className="h-full w-full" style={{ height: "100%", width: "100%" }} dangerouslySetInnerHTML={{ __html: content }} /> : null}
       {element.type !== "text" && element.type !== "svg" && element.type !== "html" && content ? content : null}
     </div>
   );
