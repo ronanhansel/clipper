@@ -1,3 +1,5 @@
+import type { ChartSpec } from "./chart";
+
 export const FRAME_WIDTH = 1920;
 export const FRAME_HEIGHT = 1080;
 export const MAX_PART_DURATION_SECONDS = 60;
@@ -15,7 +17,7 @@ export type Point = {
   y: number;
 };
 
-export type FrameObjectType = "rect" | "text" | "image" | "svg" | "html" | "template";
+export type FrameObjectType = "rect" | "text" | "image" | "svg" | "html" | "template" | "chart";
 
 export type MotionEase = "linear" | "easeIn" | "easeOut" | "easeInOut" | "circOut";
 
@@ -50,6 +52,7 @@ export type FrameObject = {
   selector: string;
   bounds: Bounds;
   content?: string;
+  chart?: ChartSpec;
   template?: FrameTemplate;
   richText?: RichTextSegment[];
   style: Record<string, string | number>;

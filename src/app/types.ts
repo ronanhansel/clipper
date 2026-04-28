@@ -10,3 +10,7 @@ export type ContextMenuState = { x: number; y: number; items: ContextMenuItem[] 
 export type ContextMenuItem = { label: string; action?: () => void; children?: ContextMenuItem[]; danger?: boolean; disabled?: boolean };
 export type VideoExportProgress = { frame: number; totalFrames: number; percent: number; status: string };
 export type SettingsSection = "playback" | "timeline" | "export" | "advanced";
+export type ZoomMarkerSelection = { partId: string; markerId: string };
+export type TranslationMarkerSelection = { partId: string; markerId: string };
+export type TimelineSelectionDrag = { startX: number; currentX: number };
+export type PlaybackClock = { startedAt: number; startedFrom: number } | null;

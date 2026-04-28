@@ -16,3 +16,4 @@ Future editor-only state should be added to `EditorState` and written through th
 - `App.tsx` excludes `editorState` from the dirty comparison, so editor-only state does not light up the save button.
 - `projectPersistenceService.saveEditorState` updates only the manifest metadata so implicit editor persistence does not write unsaved composition/content changes.
 - The preview zoom button only toggles the controls and no longer resets preview zoom or scroll when pressed again.
+- Playhead time is explicitly committed to editor state when scrubbing settles, playback pauses, and playback reaches the end, so the restored player head follows the last visible position.

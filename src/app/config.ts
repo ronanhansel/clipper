@@ -1,12 +1,10 @@
+export { defaultZoomDuration, marqueeSelectionThresholdPx, minimumObjectResizeSide, minimumZoomDuration } from "../core/editorConstants";
+
 export const videoExportFrameRate = 30;
 export const defaultFramePreviewScale = 0.5;
-export const defaultZoomDuration = 2.2;
-export const minimumZoomDuration = 1;
-export const marqueeSelectionThresholdPx = 10;
 export const selectorOffsetPx = 4;
 export const selectorHandleSizePx = 8;
 export const selectorBlue = "#159dff";
-export const minimumObjectResizeSide = 6;
 export const defaultTimelinePixelsPerSecond = 126;
 export const defaultScrubCommitThrottleMs = 75;
 export const maxProjectHistoryActions = 1000;

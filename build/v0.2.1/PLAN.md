@@ -18,6 +18,9 @@ Clipper v0.2.1 is a maintainability pass. The focus is reducing large-file coupl
 - Shared app constants moved into `src/app/config.ts`.
 - App workflow types moved into `src/app/types.ts`.
 - Future-agent maintainability guidance added to `AGENTS.md`.
+- Zustand scoped providers now own shared project/editor state under `src/app/state`.
+- `App.tsx` is being reduced toward orchestration/layout only, with reusable components and derived editor models extracted into domain modules.
+- High-frequency scrub/playback state remains globally shareable, but must be consumed through narrow subscriptions and render caches rather than broad root-store subscriptions.
 
 ## Testing Scenarios
 
@@ -25,3 +28,4 @@ Clipper v0.2.1 is a maintainability pass. The focus is reducing large-file coupl
 - Project load/save continues using the same manifest and part source paths.
 - Video export still routes through the desktop host bridge.
 - Editor UI remains visually unchanged after constants/type extraction.
+- Timeline scrubbing remains smooth after state-store changes; avoid broad subscriptions to `currentSceneTime` or other high-frequency editor fields.

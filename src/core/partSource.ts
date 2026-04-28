@@ -1,4 +1,4 @@
-import { defineChart } from "../../clipper/projects/part-api";
+import { defineChart, type ChartSpec } from "../../clipper/projects/part-api";
 import { FRAME_HEIGHT, FRAME_WIDTH, type BackgroundLayer, type FrameObject, type FrameObjectType, type FrameTemplate, type Part, type PartFrame } from "./types";
 
 type SourceObject = {
@@ -7,6 +7,7 @@ type SourceObject = {
   kind: FrameObjectType;
   bounds: FrameObject["bounds"];
   content?: string;
+  chart?: ChartSpec;
   template?: FrameTemplate;
   richText?: FrameObject["richText"];
   style: FrameObject["style"];
@@ -81,6 +82,7 @@ function sourceObjectToFrameObject(object: SourceObject): FrameObject {
     selector: `[data-object-id='${object.id}']`,
     bounds: object.bounds,
     content: object.content,
+    chart: object.chart,
     template: object.template,
     richText: object.richText,
     style: object.style,
@@ -115,6 +117,7 @@ function frameObjectToSourceObject(object: FrameObject): SourceObject {
     kind: object.type,
     bounds: object.bounds,
     content: object.content,
+    chart: object.chart,
     template: object.template,
     richText: object.richText,
     style: object.style,

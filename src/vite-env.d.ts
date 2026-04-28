@@ -5,6 +5,7 @@ interface Window {
     platform: string;
     readTextFile: (relativePath: string) => Promise<string>;
     writeTextFile: (relativePath: string, content: string) => Promise<void>;
+    openProjectManifest: () => Promise<string | null>;
     exportMediaFile: (defaultFileName: string, content: string) => Promise<string | null>;
     exportBinaryFile: (defaultFileName: string, base64Content: string) => Promise<string | null>;
     startVideoExport: (defaultFileName: string, frameRate: number, width: number, height: number) => Promise<{ sessionId: string; filePath: string } | null>;

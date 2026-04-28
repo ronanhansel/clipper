@@ -20,6 +20,22 @@ Clipper is a desktop-first Electron and Vite editor for TypeScript-authored moti
 - Use shared UI primitives for fundamentals instead of one-off browser controls or inline control implementations.
 - Prefer small named modules over large files with unrelated constants, state mutation, rendering, and platform I/O.
 
+## State Management
+
+- Canonical app/editor/project state that is shared across panels belongs in scoped Zustand providers under `src/app/state`, not in root component state just to avoid wiring.
+- Use provider-scoped stores rather than module-singleton stores so Electron windows, tests, and future embedded editors can mount isolated state instances.
+- Subscribe through narrow selector hooks. Root shells must not subscribe to whole stores because scrub/playback/selection updates can be high frequency.
+- Keep high-frequency semantic state global when other app areas need it, but bridge it into render-heavy components through narrow subscriptions and `startTransition` render caches when needed.
+- Keep pointer/rAF implementation details local to the interaction owner. Examples include pending pointer positions, animation-frame ids, DOM refs, live CSS-variable previews, drag deltas, and auto-scroll loops.
+- Suppress no-op store writes with equality checks and prefer semantic actions over repeated raw setter batches.
+- Move derived editor models, inspector inputs, marker selection summaries, and camera preview inputs into named hooks/helpers in `src/app/state` or pure `src/core` modules instead of rebuilding large derived trees inline in `App.tsx`.
+
+Current examples:
+
+- `src/app/state/editorStore.tsx` owns editor/session state and exposes scoped selector hooks.
+- `src/app/state/projectStore.tsx` owns the active project document, loaded sources, and saved snapshots.
+- `src/app/state/editorDerivedState.ts` derives active scene/part/timeline, selection summaries, camera preview inputs, and unsaved-change flags for the app shell.
+
 ## OOP Guidance
 
 Use classes for stateful boundaries where object identity and lifecycle matter, such as host services, export controllers, or long-lived adapters. Keep pure calculations as functions so they remain easy to test, reuse, and reason about.
@@ -39,3 +55,5 @@ Current example:
 ## Performance Workflow
 
 For pointer-heavy interactions, use transient previews during movement and commit canonical project state on release. Avoid persistence writes, project-wide derivations, or broad React state updates on every pointer frame unless the interaction cannot be represented another way.
+
+For scrub/playback specifically, preserve the split between imperative visual feedback and canonical global editor state. The playhead can move via rAF and CSS variables during active movement, while shared scrub time remains in the editor store behind narrow subscriptions.

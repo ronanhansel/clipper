@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld("clipper", {
   platform: process.platform,
   readTextFile: (relativePath: string) => ipcRenderer.invoke("clipper:read-text-file", relativePath) as Promise<string>,
   writeTextFile: (relativePath: string, content: string) => ipcRenderer.invoke("clipper:write-text-file", relativePath, content) as Promise<void>,
+  openProjectManifest: () => ipcRenderer.invoke("clipper:open-project-manifest") as Promise<string | null>,
   exportMediaFile: (defaultFileName: string, content: string) => ipcRenderer.invoke("clipper:export-media-file", defaultFileName, content) as Promise<string | null>,
   exportBinaryFile: (defaultFileName: string, base64Content: string) => ipcRenderer.invoke("clipper:export-binary-file", defaultFileName, base64Content) as Promise<string | null>,
   startVideoExport: (defaultFileName: string, frameRate: number, width: number, height: number) => ipcRenderer.invoke("clipper:start-video-export", defaultFileName, frameRate, width, height) as Promise<{ sessionId: string; filePath: string } | null>,

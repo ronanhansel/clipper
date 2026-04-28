@@ -25,8 +25,10 @@ describe("defineChart", () => {
         valueDomain: [0, 80],
       });
 
-      expect(chart.objects.length, type).toBeGreaterThan(0);
-      expect(chart.objects.every((object) => object.id.startsWith(`chart-${type}`))).toBe(true);
+      expect(chart.object.kind, type).toBe("chart");
+      expect(chart.objects).toEqual([chart.object]);
+      expect(chart.generatedObjects.length, type).toBeGreaterThan(0);
+      expect(chart.generatedObjects.every((object) => object.id.startsWith(`chart-${type}`))).toBe(true);
     }
   });
 
@@ -62,10 +64,11 @@ describe("defineChart", () => {
       });
     `);
 
-    expect(part.objects.some((object) => object.id === "eval-chart-bar-0")).toBe(true);
+    expect(part.objects.some((object) => object.id === "eval-chart" && object.type === "chart")).toBe(true);
+    expect(part.objects.find((object) => object.id === "eval-chart")?.chart?.type).toBe("bar");
   });
 
-  it("hydrates the chart showcase source into generated objects", async () => {
+  it("hydrates the chart showcase source into first-class chart objects", async () => {
     const source = await readFile(resolve("clipper/projects/prj_v01_sample/scn_opening/prt_chart_showcase.ts"), "utf8");
     const basePart: Part = {
       id: "prt_chart_showcase",
@@ -82,9 +85,9 @@ describe("defineChart", () => {
 
     const part = await partFromSource(basePart, source);
 
-    expect(part.objects.length).toBeGreaterThan(100);
-    expect(part.objects.some((object) => object.id === "tpl-line-line")).toBe(true);
-    expect(part.objects.some((object) => object.id === "tpl-donut-donut-0")).toBe(true);
-    expect(part.objects.some((object) => object.id === "tpl-gauge-gauge-track")).toBe(true);
+    expect(part.objects.filter((object) => object.type === "chart")).toHaveLength(12);
+    expect(part.objects.some((object) => object.id === "tpl-line" && object.chart?.type === "line")).toBe(true);
+    expect(part.objects.some((object) => object.id === "tpl-donut" && object.chart?.type === "donut")).toBe(true);
+    expect(part.objects.some((object) => object.id === "tpl-gauge" && object.chart?.type === "gauge")).toBe(true);
   });
 });

@@ -59,12 +59,37 @@ function resolveClipperFile(relativePath: string) {
   return resolved;
 }
 
+function getClipperRelativePath(filePath: string) {
+  const appRoot = path.resolve(__dirname, "..");
+  const clipperRoot = path.join(appRoot, "clipper");
+  const resolved = path.resolve(filePath);
+
+  if (resolved !== clipperRoot && !resolved.startsWith(`${clipperRoot}${path.sep}`)) {
+    throw new Error("Project files must be inside the clipper directory.");
+  }
+
+  return path.relative(appRoot, resolved).split(path.sep).join("/");
+}
+
 ipcMain.handle("clipper:read-text-file", async (_event, relativePath: string) => {
   return fs.readFile(resolveClipperFile(relativePath), "utf8");
 });
 
 ipcMain.handle("clipper:write-text-file", async (_event, relativePath: string, content: string) => {
   await fs.writeFile(resolveClipperFile(relativePath), content, "utf8");
+});
+
+ipcMain.handle("clipper:open-project-manifest", async () => {
+  const appRoot = path.resolve(__dirname, "..");
+  const { canceled, filePaths } = await dialog.showOpenDialog({
+    title: "Open Clipper project",
+    defaultPath: path.join(appRoot, "clipper", "projects"),
+    properties: ["openFile"],
+    filters: [{ name: "Clipper Project", extensions: ["json"] }],
+  });
+
+  if (canceled || !filePaths[0]) return null;
+  return getClipperRelativePath(filePaths[0]);
 });
 
 ipcMain.handle("clipper:export-media-file", async (_event, defaultFileName: string, content: string) => {
