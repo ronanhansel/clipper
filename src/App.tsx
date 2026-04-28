@@ -1,184 +1,36 @@
-import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, ChevronDown, ChevronRight, Copy, Crosshair, Download, File as FileIcon, Folder, FolderPlus, Italic, Magnet, Minus, Palette, Pipette, Play, Plus, Pause, RotateCcw, Scissors, Search, Signpost, SkipBack, SkipForward, Sparkles, StepBack, StepForward, Strikethrough, Trash2, Underline } from "lucide-react";
+import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, Copy, Crosshair, Download, Folder, FolderPlus, Italic, Magnet, Minus, Palette, Pipette, Play, Plus, Pause, RotateCcw, Scissors, Search, Signpost, SkipBack, SkipForward, Sparkles, StepBack, StepForward, Strikethrough, Trash2, Underline } from "lucide-react";
 import Editor, { type BeforeMount, type OnMount } from "@monaco-editor/react";
 import { memo, startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent, type ReactElement, type RefObject } from "react";
 import toast, { Toaster } from "react-hot-toast";
 import partApiSource from "../clipper/projects/part-api.ts?raw";
 import { Checkbox } from "./components/ui/checkbox";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "./components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./components/ui/dialog";
 import { Input } from "./components/ui/input";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "./components/ui/select";
 import { Textarea } from "./components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./components/ui/tooltip";
+import { AppContextMenu } from "./components/AppContextMenu";
+import { AssetManager } from "./components/AssetManager";
+import { ExportMediaDialog, VideoExportOverlay } from "./components/export/ExportMediaDialog";
+import { appBarActionButtonBase, appBarButtonBase, appBarSaveButtonClass, appDragRegion, appNoDragRegion, buttonBase, defaultFramePreviewScale, defaultScrubCommitThrottleMs, defaultTimelinePixelsPerSecond, defaultZoomDuration, marqueeSelectionThresholdPx, maxProjectHistoryActions, minimumObjectResizeSide, minimumZoomDuration, monacoOptions, mutedCaps, panelCard, projectHistoryCoalesceMs, sectionTitle, segmentedTabActive, segmentedTabBase, segmentedTabInactive, selectorBlue, selectorHandleSizePx, selectorOffsetPx } from "./app/config";
+import { getRenderableTextSegments, getSelectionFormatState, normalizeEditableFormatting, renderRichTextSegments, richTextSegmentsFromElement, shouldPersistRichText, textSegmentsToEditableNodes } from "./app/richText";
+import { exportService, truncateMiddle } from "./app/services/exportService";
+import { projectPersistenceService } from "./app/services/projectPersistenceService";
+import type { ContextMenuState, ExportDialogTab, LeftPanelTab, Mode, ProjectExportFormat, ProjectUpdater, RightPanelTab, SettingsSection, VideoExportProgress } from "./app/types";
 import { createAgentContext } from "./core/agentContext";
+import { appendAssetsToFolder, duplicateAssetTree, getAssetPath, moveAssetTree, removeAsset, sortAssetsInParent, updateAssetTree, type AssetDropIntent, type AssetSortMode } from "./core/assetTree";
 import { boundsToPoints, createSelectionPayload, framePointFromClient, normalizeBounds } from "./core/geometry";
-import { loadPartsFromSource, partFromSource, partToSource } from "./core/partSource";
+import { getMendedMarkerIds, normalizeMendedZoomMarkerFocus } from "./core/markers";
+import { clamp, roundTenth, roundTwo } from "./core/math";
+import { partFromSource, partToSource } from "./core/partSource";
+import { defaultAssets, defaultPreviewViewportState, defaultTimelineMode, defaultTimelineViewportState, normalizeProject, replacePartInProject } from "./core/project";
 import { evaluateBackgroundLayer, evaluateFrameObject, isTimeSensitiveFrameObject, type EvaluatedFrameObject } from "./core/renderRuntime";
 import { buildLinearTimeline, formatTime, updatePartObject, validateScene } from "./core/timeline";
-import { FRAME_HEIGHT, FRAME_WIDTH, type AssetItem, type BackgroundLayer, type Bounds, type FrameObject, type MotionEase, type Part, type PartFrame, type Point, type ProjectManifest, type RichTextSegment, type SelectionPayload, type TimelineMode, type TimelinePart, type TimelineViewportState, type TranslationMarker, type ZoomMarker } from "./core/types";
+import { FRAME_HEIGHT, FRAME_WIDTH, MAX_PART_DURATION_SECONDS, type AssetItem, type BackgroundLayer, type Bounds, type EditorState, type FrameObject, type MotionEase, type Part, type PartFrame, type Point, type ProjectManifest, type RichTextSegment, type SelectionPayload, type TimelineMode, type TimelinePart, type TimelineViewportState, type TranslationMarker, type ZoomMarker } from "./core/types";
 import { sampleProject } from "./sampleProject";
 
-type Mode = "interactive" | "code";
-type LeftPanelTab = "assets" | "tools";
-type RightPanelTab = "video" | "motion" | "agent";
-type ProjectUpdater = ProjectManifest | ((current: ProjectManifest) => ProjectManifest);
-type AssetSortMode = "folders-first" | "name-asc" | "name-desc";
-type ExportDialogTab = "media" | "project";
-type ProjectExportFormat = "project-package" | "scene-json";
-type AssetDropIntent = { targetId: string; action: "before" | "after" | "inside" };
-type ContextMenuState = { x: number; y: number; items: ContextMenuItem[] } | null;
-type ContextMenuItem = { label: string; action?: () => void; children?: ContextMenuItem[]; danger?: boolean; disabled?: boolean };
-type VideoExportProgress = { frame: number; totalFrames: number; percent: number; status: string };
-type SettingsSection = "playback" | "timeline" | "export" | "advanced";
 const projectManifestPath = `clipper/projects/${sampleProject.id}/project.json`;
-const videoExportFrameRate = 30;
-
-async function readTextFile(relativePath: string) {
-  if (window.clipper) return window.clipper.readTextFile(relativePath);
-
-  const response = await fetch(`/__clipper_fs/read?path=${encodeURIComponent(relativePath)}`);
-  if (!response.ok) throw new Error(await response.text() || "Unable to load composition file.");
-  return response.text();
-}
-
-async function writeTextFile(relativePath: string, content: string) {
-  if (window.clipper) {
-    await window.clipper.writeTextFile(relativePath, content);
-    return;
-  }
-
-  const response = await fetch(`/__clipper_fs/write?path=${encodeURIComponent(relativePath)}`, {
-    method: "POST",
-    headers: { "Content-Type": "text/plain; charset=utf-8" },
-    body: content,
-  });
-
-  if (!response.ok) throw new Error(await response.text() || "Unable to save composition file.");
-}
-
-async function startVideoExport(defaultFileName: string, frameRate: number, width: number, height: number) {
-  if (!window.clipper?.startVideoExport) throw new Error("Video export requires the Clipper desktop app. Restart the app if this was just updated.");
-  return window.clipper.startVideoExport(defaultFileName, frameRate, width, height);
-}
-
-async function renderVideoExport(exportId: string, defaultFileName: string, project: ProjectManifest, scene: ProjectManifest["scenes"][number], frameRate: number) {
-  if (!window.clipper?.renderVideoExport) throw new Error("Video export requires the Clipper desktop app. Restart the app if this was just updated.");
-  return window.clipper.renderVideoExport(exportId, defaultFileName, project, scene, frameRate);
-}
-
-async function cancelRenderVideoExport(exportId: string) {
-  await window.clipper?.cancelRenderVideoExport?.(exportId);
-}
-
-async function writeVideoFrame(sessionId: string, frameData: Uint8ClampedArray) {
-  if (!window.clipper?.writeVideoFrame) throw new Error("Video export session is unavailable.");
-  await window.clipper.writeVideoFrame(sessionId, frameData);
-}
-
-async function finishVideoExport(sessionId: string) {
-  if (!window.clipper?.finishVideoExport) throw new Error("Video export session is unavailable.");
-  return window.clipper.finishVideoExport(sessionId);
-}
-
-async function cancelVideoExport(sessionId: string) {
-  await window.clipper?.cancelVideoExport?.(sessionId);
-}
-
-const defaultFramePreviewScale = 0.5;
-const appDragRegion = "[-webkit-app-region:drag] select-none";
-const appNoDragRegion = "[-webkit-app-region:no-drag]";
-const buttonBase = "rounded-[8px] border border-transparent bg-[#171920] px-2.5 py-1.5 text-sm text-[#f7f7f8] transition hover:-translate-y-px hover:border-[#3b4150] hover:bg-[#20232c]";
-const appBarButtonBase = "rounded-[7px] border border-transparent bg-[#171920] px-2 py-1 text-xs text-[#f7f7f8] transition hover:-translate-y-px hover:border-[#3b4150] hover:bg-[#20232c]";
-const appBarActionButtonBase = `${appBarButtonBase} w-[70px]`;
-const appBarSaveButtonEnabled = "w-[70px] rounded-[7px] border border-[var(--clipper-accent-strong)] bg-[var(--clipper-accent)] px-2 py-1 text-xs font-extrabold text-[var(--clipper-accent-foreground)] transition hover:bg-[var(--clipper-accent-hover)]";
-const appBarSaveButtonDisabled = "w-[70px] cursor-not-allowed rounded-[7px] border border-[#2d313b] bg-[#171920] px-2 py-1 text-xs font-extrabold text-[#737884] opacity-70";
-const defaultZoomDuration = 2.2;
-const minimumZoomDuration = 1;
-const marqueeSelectionThresholdPx = 10;
-const selectorOffsetPx = 4;
-const selectorHandleSizePx = 8;
-const selectorBlue = "#159dff";
-const minimumObjectResizeSide = 6;
-const defaultTimelinePixelsPerSecond = 126;
-const defaultScrubCommitThrottleMs = 75;
-const maxProjectHistoryActions = 1000;
-const projectHistoryCoalesceMs = 700;
-const defaultTimelineViewportState: TimelineViewportState = { displacement: 0, zoom: 1 };
-const defaultTimelineMode: TimelineMode = "edit";
-const defaultAssets: AssetItem[] = [
-  { id: "ast_folder_media", name: "media", kind: "folder", children: [{ id: "ast_grid_ref", name: "grid-reference.png", kind: "file", path: "clipper/projects/prj_v01_sample/assets/media/grid-reference.png" }] },
-  { id: "ast_folder_audio", name: "audio", kind: "folder", children: [] },
-  { id: "ast_brand", name: "brand-palette.json", kind: "file", path: "clipper/projects/prj_v01_sample/assets/brand-palette.json" },
-];
-const sectionTitle = "m-0 text-[11px] font-semibold uppercase tracking-[0.11em] text-[#d9dbe1]";
-const mutedCaps = "text-[11px] uppercase tracking-[0.11em] text-[#9b9da7]";
-const panelCard = "grid gap-[5px] rounded-xl border border-[#2d313b] bg-[#171920] p-3 text-[13px] text-[#dfe2ea]";
-const segmentedTabBase = "rounded-[8px] px-2 py-1.5 text-sm font-bold transition";
-const segmentedTabActive = "bg-[#272b36] text-white";
-const segmentedTabInactive = "bg-[#191c24] text-[#9b9da7] hover:text-white";
-const monacoOptions = {
-  automaticLayout: true,
-  bracketPairColorization: { enabled: true },
-  cursorBlinking: "smooth",
-  cursorSmoothCaretAnimation: "on",
-  foldingHighlight: false,
-  fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-  fontSize: 12,
-  glyphMargin: false,
-  hideCursorInOverviewRuler: true,
-  lineDecorationsWidth: 10,
-  lineNumbersMinChars: 3,
-  minimap: { enabled: false },
-  overviewRulerBorder: false,
-  padding: { top: 14, bottom: 14 },
-  renderLineHighlight: "all",
-  scrollBeyondLastLine: false,
-  tabSize: 2,
-  wordWrap: "on",
-} as const;
-function appBarSaveButtonClass(enabled: boolean) {
-  return enabled ? appBarSaveButtonEnabled : appBarSaveButtonDisabled;
-}
-
-function replacePartInProject(project: ProjectManifest, partId: string, updater: (part: Part) => Part): ProjectManifest {
-  return {
-    ...project,
-    scenes: project.scenes.map((currentScene) => ({
-      ...currentScene,
-      parts: currentScene.parts.map((currentPart) => (currentPart.id === partId ? updater(currentPart) : currentPart)),
-    })),
-  };
-}
-
-function normalizeProject(project: ProjectManifest): ProjectManifest {
-  const timelineState = project.editorState?.timeline ?? defaultTimelineViewportState;
-  const timelineMode = project.editorState?.timelineMode === "composition" ? "composition" : defaultTimelineMode;
-
-  return sanitizeProjectNumbers({
-    ...project,
-    editorState: {
-      ...project.editorState,
-      timeline: {
-        displacement: roundTwo(Math.max(timelineState.displacement, 0)),
-        zoom: roundTwo(Math.min(Math.max(timelineState.zoom, 0.5), 4)),
-      },
-      timelineMode,
-    },
-    scenes: project.scenes.map((scene) => ({
-      ...scene,
-      parts: scene.parts.map((part) => ({
-        ...part,
-        background: {
-          ...part.background,
-          stretchToElements: part.background.stretchToElements || undefined,
-          elements: part.background.elements ?? [],
-        },
-        zoomMarkers: normalizeMendedZoomMarkerFocus(part.zoomMarkers ?? []),
-        translationMarkers: part.translationMarkers ?? [],
-      })),
-    })),
-    assets: project.assets ?? defaultAssets,
-  }) as ProjectManifest;
-}
+const initialProject = normalizeProject(sampleProject);
 
 type ObjectDrag = {
   origin: Point;
@@ -216,6 +68,11 @@ type TimelineSelectionDrag = { startX: number; currentX: number };
 type CameraPreviewTransform = { x: number; y: number; scale: number };
 type PlaybackClock = { startedAt: number; startedFrom: number } | null;
 
+function getProjectContentSnapshot(project: ProjectManifest) {
+  const { editorState: _editorState, ...contentProject } = project;
+  return JSON.stringify(contentProject);
+}
+
 function selectionObjectFromFrameObject(object: FrameObject): SelectionPayload["objects"][number] {
   return {
     id: object.id,
@@ -235,13 +92,13 @@ function getBoundsUnion(bounds: Bounds[]): Bounds {
 }
 
 export function App() {
-  const [project, setProject] = useState(() => normalizeProject(sampleProject));
-  const [savedProjectSnapshot, setSavedProjectSnapshot] = useState(() => JSON.stringify(normalizeProject(sampleProject)));
+  const [project, setProject] = useState(() => initialProject);
+  const [savedProjectSnapshot, setSavedProjectSnapshot] = useState(() => getProjectContentSnapshot(initialProject));
   const [partSources, setPartSources] = useState<Record<string, string>>({});
   const [savedPartSourcesSnapshot, setSavedPartSourcesSnapshot] = useState("{}");
-  const [mode, setMode] = useState<Mode>("interactive");
-  const [timelineMode, setTimelineMode] = useState<TimelineMode>(() => normalizeProject(sampleProject).editorState?.timelineMode ?? defaultTimelineMode);
-  const [selectedSceneId, setSelectedSceneId] = useState(project.scenes[0].id);
+  const [mode, setMode] = useState<Mode>(() => initialProject.editorState?.mode ?? "interactive");
+  const [timelineMode, setTimelineMode] = useState<TimelineMode>(() => initialProject.editorState?.timelineMode ?? defaultTimelineMode);
+  const [selectedSceneId, setSelectedSceneId] = useState(initialProject.editorState?.selectedSceneId ?? initialProject.scenes[0].id);
   const [selectedPartId, setSelectedPartId] = useState("");
   const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
   const [editingTextObjectId, setEditingTextObjectId] = useState<string | null>(null);
@@ -256,17 +113,17 @@ export function App() {
   const [dragStart, setDragStart] = useState<Point | null>(null);
   const [dragBox, setDragBox] = useState<Bounds | null>(null);
   const [marqueeDragging, setMarqueeDragging] = useState(false);
-  const [currentSceneTime, setCurrentSceneTime] = useState(2.6);
+  const [currentSceneTime, setCurrentSceneTime] = useState(initialProject.editorState?.currentSceneTime ?? 2.6);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackClock, setPlaybackClock] = useState<PlaybackClock>(null);
-  const [frameZoomBarOpen, setFrameZoomBarOpen] = useState(false);
-  const [framePreviewScale, setFramePreviewScale] = useState(defaultFramePreviewScale);
+  const [frameZoomBarOpen, setFrameZoomBarOpen] = useState(initialProject.editorState?.preview?.zoomBarOpen ?? defaultPreviewViewportState.zoomBarOpen);
+  const [framePreviewScale, setFramePreviewScale] = useState(initialProject.editorState?.preview?.scale ?? defaultFramePreviewScale);
   const [liveZoomScalePreview, setLiveZoomScalePreview] = useState<{ partId: string; markerId: string; scale: number } | null>(null);
   const [scrubSnapEnabled, setScrubSnapEnabled] = useState(false);
   const [scrubCommitThrottleMs, setScrubCommitThrottleMs] = useState(defaultScrubCommitThrottleMs);
   const [fastSelectEnabled, setFastSelectEnabled] = useState(false);
-  const [leftPanelTab, setLeftPanelTab] = useState<LeftPanelTab>("assets");
-  const [rightPanelTab, setRightPanelTab] = useState<RightPanelTab>("video");
+  const [leftPanelTab, setLeftPanelTab] = useState<LeftPanelTab>(() => initialProject.editorState?.leftPanelTab ?? "assets");
+  const [rightPanelTab, setRightPanelTab] = useState<RightPanelTab>(() => initialProject.editorState?.rightPanelTab ?? "video");
   const [sourceStatus, setSourceStatus] = useState("Loading TypeScript composition sources...");
   const [appContextMenu, setAppContextMenu] = useState<ContextMenuState>(null);
   const [renamingProject, setRenamingProject] = useState(false);
@@ -314,6 +171,7 @@ export function App() {
   const objectResizeFrameRef = useRef(0);
   const objectResizeDeltaRef = useRef<Point>({ x: 0, y: 0 });
   const centerPreviewScrollRef = useRef<HTMLDivElement | null>(null);
+  const centerPreviewScrollFrameRef = useRef(0);
   const projectRenameCancelledRef = useRef(false);
   const pendingZoomScalePreviewRef = useRef<{ partId: string; markerId: string; scale: number } | null>(null);
   const zoomScalePreviewFrameRef = useRef(0);
@@ -333,7 +191,8 @@ export function App() {
   const selectedPart = scene.parts.find((item) => item.id === selectedPartId) ?? null;
   const validationErrors = useMemo(() => validateScene(scene), [scene]);
   const agentContext = useMemo(() => createAgentContext(project, scene, part, selectionPayload), [project, scene, part, selectionPayload]);
-  const projectSnapshot = useMemo(() => JSON.stringify(project), [project]);
+  const projectSnapshot = useMemo(() => getProjectContentSnapshot(project), [project]);
+  const editorStateSnapshot = useMemo(() => JSON.stringify(project.editorState), [project.editorState]);
   const partSourcesSnapshot = useMemo(() => JSON.stringify(partSources), [partSources]);
   const hasUnsavedProjectChanges = projectSnapshot !== savedProjectSnapshot;
   const hasUnsavedSourceChanges = partSourcesSnapshot !== savedPartSourcesSnapshot;
@@ -396,6 +255,35 @@ export function App() {
     setProject(normalizedProject);
     setTimelineMode(normalizedProject.editorState?.timelineMode ?? defaultTimelineMode);
     if (options.syncSources !== false) syncPartSourcesFromProject(normalizedProject, currentProject);
+  }
+
+  function applyEditorState(editorState: EditorState) {
+    setMode(editorState.mode ?? "interactive");
+    setTimelineMode(editorState.timelineMode ?? defaultTimelineMode);
+    setSelectedSceneId(editorState.selectedSceneId ?? projectRef.current.scenes[0].id);
+    setCurrentSceneTime(editorState.currentSceneTime ?? 2.6);
+    setFrameZoomBarOpen(editorState.preview?.zoomBarOpen ?? defaultPreviewViewportState.zoomBarOpen);
+    setFramePreviewScale(editorState.preview?.scale ?? defaultFramePreviewScale);
+    setLeftPanelTab(editorState.leftPanelTab ?? "assets");
+    setRightPanelTab(editorState.rightPanelTab ?? "video");
+
+    requestAnimationFrame(() => {
+      const viewport = centerPreviewScrollRef.current;
+      if (!viewport) return;
+      viewport.scrollLeft = editorState.preview?.scrollLeft ?? 0;
+      viewport.scrollTop = editorState.preview?.scrollTop ?? 0;
+    });
+  }
+
+  function updateEditorState(updater: (state: EditorState) => EditorState) {
+    const current = projectRef.current;
+    const nextProject = normalizeProject({
+      ...current,
+      editorState: updater(current.editorState ?? initialProject.editorState!),
+    });
+    if (JSON.stringify(nextProject.editorState) === JSON.stringify(current.editorState)) return;
+    projectRef.current = nextProject;
+    setProject(nextProject);
   }
 
   function updateProject(updater: ProjectUpdater, options?: { history?: boolean }) {
@@ -500,6 +388,32 @@ export function App() {
   }, [currentSceneTime, isPlaying]);
 
   useEffect(() => {
+    updateEditorState((state) => ({
+      ...state,
+      mode,
+      timelineMode,
+      leftPanelTab,
+      rightPanelTab,
+      selectedSceneId,
+      currentSceneTime,
+      preview: {
+        ...(state.preview ?? defaultPreviewViewportState),
+        scale: framePreviewScale,
+        zoomBarOpen: frameZoomBarOpen,
+      },
+    }));
+  }, [currentSceneTime, framePreviewScale, frameZoomBarOpen, leftPanelTab, mode, rightPanelTab, selectedSceneId, timelineMode]);
+
+  useEffect(() => {
+    const editorState = project.editorState;
+    if (!editorState) return;
+    const timeout = window.setTimeout(() => {
+      projectPersistenceService.saveEditorState(projectManifestPath, editorState).catch(() => undefined);
+    }, 250);
+    return () => window.clearTimeout(timeout);
+  }, [editorStateSnapshot, project.editorState]);
+
+  useEffect(() => {
     function openSettingsShortcut(event: KeyboardEvent) {
       if (!(event.ctrlKey || event.metaKey) || event.key !== ",") return;
       event.preventDefault();
@@ -519,33 +433,19 @@ export function App() {
     if (framePickFrameRef.current) cancelAnimationFrame(framePickFrameRef.current);
     if (dragBoxFrameRef.current) cancelAnimationFrame(dragBoxFrameRef.current);
     if (objectDragFrameRef.current) cancelAnimationFrame(objectDragFrameRef.current);
+    if (centerPreviewScrollFrameRef.current) cancelAnimationFrame(centerPreviewScrollFrameRef.current);
   }, []);
 
   useEffect(() => {
     let cancelled = false;
 
-    readTextFile(projectManifestPath).then(async (content) => {
-      if (cancelled) return;
-      const manifestProject = normalizeProject(JSON.parse(content) as ProjectManifest);
-      const loadedProject = normalizeProject({
-        ...manifestProject,
-        scenes: await Promise.all(manifestProject.scenes.map(async (scene) => ({
-          ...scene,
-          parts: await loadPartsFromSource(scene.parts, readTextFile),
-        }))),
-      });
+    projectPersistenceService.loadProject({ manifestPath: projectManifestPath, fallbackProject: sampleProject }).then(({ project: loadedProject, sourceStatus: nextSourceStatus }) => {
       if (cancelled) return;
       resetProjectHistory();
       replaceProject(loadedProject, { history: false });
-      setSavedProjectSnapshot(JSON.stringify(loadedProject));
-      setSourceStatus(`Project loaded from ${projectManifestPath}.`);
-    }).catch((error: unknown) => {
-      if (cancelled) return;
-      const fallbackProject = normalizeProject(sampleProject);
-      resetProjectHistory();
-      replaceProject(fallbackProject, { history: false });
-      setSavedProjectSnapshot(JSON.stringify(fallbackProject));
-      setSourceStatus(error instanceof Error ? `Using bundled sample project. ${error.message}` : "Using bundled sample project.");
+      applyEditorState(normalizeProject(loadedProject).editorState!);
+      setSavedProjectSnapshot(getProjectContentSnapshot(normalizeProject(loadedProject)));
+      setSourceStatus(nextSourceStatus);
     });
 
     return () => { cancelled = true; };
@@ -837,34 +737,12 @@ export function App() {
   }
 
   function updateTimelineViewportState(updater: (state: TimelineViewportState) => TimelineViewportState) {
-    updateProject((current) => {
-      const currentTimelineState = current.editorState?.timeline ?? defaultTimelineViewportState;
-      const nextTimelineState = updater(currentTimelineState);
-
-      if (currentTimelineState.displacement === nextTimelineState.displacement && currentTimelineState.zoom === nextTimelineState.zoom) return current;
-
-      const nextProject = {
-        ...current,
-        editorState: {
-          ...current.editorState,
-          timeline: nextTimelineState,
-          timelineMode: current.editorState?.timelineMode ?? timelineMode,
-        },
-      };
-      return nextProject;
-    }, { history: false });
+    updateEditorState((state) => ({ ...state, timeline: updater(state.timeline ?? defaultTimelineViewportState), timelineMode }));
   }
 
   function updateTimelineMode(nextMode: TimelineMode) {
     setTimelineMode(nextMode);
-    updateProject((current) => ({
-      ...current,
-      editorState: {
-        ...current.editorState,
-        timeline: current.editorState?.timeline ?? defaultTimelineViewportState,
-        timelineMode: nextMode,
-      },
-    }), { history: false });
+    updateEditorState((state) => ({ ...state, timelineMode: nextMode }));
   }
 
   function updateObject(objectId: string, updater: (object: FrameObject) => FrameObject) {
@@ -888,6 +766,11 @@ export function App() {
 
   function updatePartFrame(updater: (frame: PartFrame) => PartFrame) {
     updateCurrentPart({ ...part, frame: updater(part.frame) });
+  }
+
+  function updateSelectedPartDuration(duration: number) {
+    if (!selectedPart) return;
+    updateSceneParts((parts) => parts.map((item) => (item.id === selectedPart.id ? { ...item, duration } : item)));
   }
 
   function updatePartBackground(updater: (background: BackgroundLayer) => BackgroundLayer) {
@@ -934,14 +817,13 @@ export function App() {
   }
 
   async function saveProject(projectToSave = projectRef.current) {
-    const snapshot = JSON.stringify(projectToSave);
+    const snapshot = getProjectContentSnapshot(projectToSave);
 
     try {
-      await writeTextFile(projectManifestPath, `${JSON.stringify(projectToSave, null, 2)}\n`);
-      await Promise.all(projectToSave.scenes.flatMap((item) => item.parts).map((item) => writeTextFile(item.filePath, partSources[item.filePath] ?? partToSource(item))));
-      setSavedProjectSnapshot(snapshot);
-      setSavedPartSourcesSnapshot(JSON.stringify(partSources));
-      setSourceStatus(`Project and composition sources saved.`);
+      const result = await projectPersistenceService.saveProject({ manifestPath: projectManifestPath, project: projectToSave, partSources });
+      setSavedProjectSnapshot(result.projectSnapshot ? getProjectContentSnapshot(JSON.parse(result.projectSnapshot) as ProjectManifest) : snapshot);
+      setSavedPartSourcesSnapshot(result.partSourcesSnapshot);
+      setSourceStatus(result.sourceStatus);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Unable to save project.");
     }
@@ -956,38 +838,16 @@ export function App() {
     setIsExporting(true);
 
     try {
-      const currentProject = projectRef.current;
-      const currentScene = currentProject.scenes.find((item) => item.id === selectedSceneId) ?? currentProject.scenes[0];
-      const currentTimeline = buildLinearTimeline(currentScene);
-      const exportPayload = projectExportFormat === "scene-json"
-        ? currentScene
-        : {
-            kind: "clipper-project-package",
-            version: currentProject.id,
-            exportedAt: new Date().toISOString(),
-            project: currentProject,
-            scene: currentScene,
-            media: {
-              resolution: currentProject.resolution,
-              durationSeconds: currentTimeline.at(-1)?.end ?? 0,
-              parts: currentTimeline.map((item) => ({ id: item.id, name: item.name, filePath: item.filePath, start: item.start, end: item.end, duration: item.duration })),
-              assetsPath: currentProject.assetsPath,
-              assets: currentProject.assets ?? defaultAssets,
-            },
-            validation: validateScene(currentScene),
-            sources: exportIncludeSources ? Object.fromEntries(currentScene.parts.map((item) => [item.filePath, partSources[item.filePath] ?? partToSource(item)])) : undefined,
-          };
-      const content = `${JSON.stringify(exportPayload, null, 2)}\n`;
-      const defaultFileName = `${slugifyFileName(currentProject.name)}-${slugifyFileName(currentScene.name)}.${projectExportFormat === "scene-json" ? "scene" : "project"}.json`;
+      const result = await exportService.exportProject({
+        project: projectRef.current,
+        sceneId: selectedSceneId,
+        format: projectExportFormat,
+        includeSources: exportIncludeSources,
+        partSources,
+      });
 
-      if (window.clipper?.exportMediaFile) {
-        const exportPath = await window.clipper.exportMediaFile(defaultFileName, content);
-        if (!exportPath) return;
-        toast.success(`Exported to ${truncateMiddle(exportPath, 58)}`);
-      } else {
-        downloadTextFile(defaultFileName, content);
-        toast.success("Export downloaded");
-      }
+      if (result.kind === "host") toast.success(`Exported to ${truncateMiddle(result.path, 58)}`);
+      else toast.success("Export downloaded");
 
       setExportDialogOpen(false);
     } catch (error) {
@@ -1006,15 +866,11 @@ export function App() {
 
     try {
       const currentProject = projectRef.current;
-      const currentScene = currentProject.scenes.find((item) => item.id === selectedSceneId) ?? currentProject.scenes[0];
-      const currentTimeline = buildLinearTimeline(currentScene);
-      const durationSeconds = currentTimeline.at(-1)?.end ?? 0;
-      const totalFrames = Math.max(1, Math.ceil(durationSeconds * videoExportFrameRate));
-      const defaultFileName = `${slugifyFileName(currentProject.name)}-${slugifyFileName(currentScene.name)}.mp4`;
+      const { scene: currentScene, totalFrames, defaultFileName } = exportService.prepareRenderedMediaExport({ project: currentProject, sceneId: selectedSceneId });
       setExportDialogOpen(false);
       setExportProgress(`Rendering ${totalFrames} frames`);
       setVideoExportProgress({ frame: 0, totalFrames, percent: 0, status: "Preparing export..." });
-      const exportPath = await renderVideoExport(exportId, defaultFileName, currentProject, currentScene, videoExportFrameRate);
+      const exportPath = await exportService.renderVideoExport(exportId, defaultFileName, currentProject, currentScene);
       if (!exportPath) return;
       toast.success(`Rendered video to ${truncateMiddle(exportPath, 58)}`);
     } catch (error) {
@@ -1033,7 +889,7 @@ export function App() {
     const exportId = videoExportIdRef.current;
     if (!exportId) return;
     setVideoExportCancelling(true);
-    await cancelRenderVideoExport(exportId);
+    await exportService.cancelVideoExport(exportId);
   }
 
   useEffect(() => {
@@ -2204,12 +2060,23 @@ export function App() {
   }
 
   function toggleFrameZoomBar() {
-    setFrameZoomBarOpen((current) => {
-      if (current) {
-        setFramePreviewScale(defaultFramePreviewScale);
-        centerPreviewScrollRef.current?.scrollTo({ left: 0, top: 0 });
-      }
-      return !current;
+    setFrameZoomBarOpen((current) => !current);
+  }
+
+  function saveCenterPreviewScroll() {
+    if (centerPreviewScrollFrameRef.current) return;
+    centerPreviewScrollFrameRef.current = requestAnimationFrame(() => {
+      centerPreviewScrollFrameRef.current = 0;
+      const viewport = centerPreviewScrollRef.current;
+      if (!viewport) return;
+      updateEditorState((state) => ({
+        ...state,
+        preview: {
+          ...(state.preview ?? defaultPreviewViewportState),
+          scrollLeft: Math.max(Math.round(viewport.scrollLeft), 0),
+          scrollTop: Math.max(Math.round(viewport.scrollTop), 0),
+        },
+      }));
     });
   }
 
@@ -2251,7 +2118,7 @@ export function App() {
             </div>
           </div>
 
-          <div ref={centerPreviewScrollRef} className={`timeline-scrollbar grid min-h-0 ${mode === "interactive" ? "place-items-center overflow-auto p-[22px] [scrollbar-gutter:stable]" : "items-stretch overflow-hidden"}`}>
+          <div ref={centerPreviewScrollRef} className={`timeline-scrollbar grid min-h-0 ${mode === "interactive" ? "place-items-center overflow-auto p-[22px] [scrollbar-gutter:stable]" : "items-stretch overflow-hidden"}`} onScroll={saveCenterPreviewScroll}>
             {mode === "interactive" ? (
               <FramePreview
                 key={part.id}
@@ -2319,7 +2186,7 @@ export function App() {
              <div className="grid grid-cols-3 gap-1">{(["video", "motion", "agent"] as const).map((tab) => <button className={`${segmentedTabBase} capitalize ${rightPanelTab === tab ? segmentedTabActive : segmentedTabInactive}`} key={tab} onClick={() => setRightPanelTab(tab)}>{tab}</button>)}</div>
           </section>
           <section className="mb-5 grid gap-2.5">
-            {rightPanelTab === "agent" ? <AgentPanel part={part} sourceStatus={sourceStatus} agentContext={agentContext} /> : selectedZoom && selectedZoomPart ? <ZoomInspector marker={selectedZoom} part={selectedZoomPart} selectedMarkerCount={selectedZoomSnapMarkers.length} selectedSnapInActive={selectedZoomSnapInActive} selectedSnapOutActive={selectedZoomSnapOutActive} middleSnapActive={selectedZoomPartMiddleSnapActive} middleTransitionMode={selectedZoomPartMiddleTransitionMode} pickingFocus={focusPickZoomMarker?.partId === selectedZoomPart.id && focusPickZoomMarker.markerId === selectedZoom.id} canSnapMiddle={Boolean(inspectorZoomMiddleSnap)} onChange={(updater) => updateZoomMarker(selectedZoomPart.id, selectedZoom.id, updater)} onScalePreview={(scale) => previewZoomScale(selectedZoomPart.id, selectedZoom.id, scale)} onScalePreviewEnd={clearZoomScalePreview} onChangeFocus={(focus) => updateZoomMarkerFocusGroup(selectedZoomPart.id, selectedZoom.id, focus)} onChangeSelectedSnap={updateSelectedZoomSnap} onChangeMiddleTransition={(mode) => updateZoomMiddleTransition(selectedZoomPart, mode)} onChangeMiddleEase={(ease) => updateZoomMiddleEase(selectedZoomPart, ease)} onDelete={() => deleteZoomMarker(selectedZoomPart.id, selectedZoom.id)} onPickFocus={() => startZoomFocusPick(selectedZoomPart.id, selectedZoom.id)} onSnapMiddle={() => snapZoomMiddle(selectedZoomPart)} /> : selectedTranslation && selectedTranslationPart ? <TranslationInspector marker={selectedTranslation} part={selectedTranslationPart} selectedMarkerCount={selectedTranslationSnapMarkers.length} selectedSnapInActive={selectedTranslationSnapInActive} selectedSnapOutActive={selectedTranslationSnapOutActive} middleSnapActive={selectedTranslationPartMiddleSnapActive} middleTransitionMode={selectedTranslationPartMiddleTransitionMode} pickingPosition={positionPickTranslationMarker?.partId === selectedTranslationPart.id && positionPickTranslationMarker.markerId === selectedTranslation.id} canSnapMiddle={Boolean(inspectorTranslationMiddleSnap)} onChange={(updater) => updateTranslationMarker(selectedTranslationPart.id, selectedTranslation.id, updater)} onChangeSelectedSnap={updateSelectedTranslationSnap} onChangeMiddleTransition={(mode) => updateTranslationMiddleTransition(selectedTranslationPart, mode)} onChangeMiddleEase={(ease) => updateTranslationMiddleEase(selectedTranslationPart, ease)} onDelete={() => deleteTranslationMarker(selectedTranslationPart.id, selectedTranslation.id)} onPickPosition={() => startTranslationPositionPick(selectedTranslationPart.id, selectedTranslation.id)} onSnapMiddle={() => snapTranslationMiddle(selectedTranslationPart)} /> : selectedObject ? <ObjectInspector object={selectedObject} onChange={updateSelectedObject} /> : selectedPart ? <FrameInspector part={selectedPart} onFrameChange={updatePartFrame} onBackgroundChange={updatePartBackground} /> : <EmptyInspector />}
+            {rightPanelTab === "agent" ? <AgentPanel part={part} sourceStatus={sourceStatus} agentContext={agentContext} /> : selectedZoom && selectedZoomPart ? <ZoomInspector marker={selectedZoom} part={selectedZoomPart} selectedMarkerCount={selectedZoomSnapMarkers.length} selectedSnapInActive={selectedZoomSnapInActive} selectedSnapOutActive={selectedZoomSnapOutActive} middleSnapActive={selectedZoomPartMiddleSnapActive} middleTransitionMode={selectedZoomPartMiddleTransitionMode} pickingFocus={focusPickZoomMarker?.partId === selectedZoomPart.id && focusPickZoomMarker.markerId === selectedZoom.id} canSnapMiddle={Boolean(inspectorZoomMiddleSnap)} onChange={(updater) => updateZoomMarker(selectedZoomPart.id, selectedZoom.id, updater)} onScalePreview={(scale) => previewZoomScale(selectedZoomPart.id, selectedZoom.id, scale)} onScalePreviewEnd={clearZoomScalePreview} onChangeFocus={(focus) => updateZoomMarkerFocusGroup(selectedZoomPart.id, selectedZoom.id, focus)} onChangeSelectedSnap={updateSelectedZoomSnap} onChangeMiddleTransition={(mode) => updateZoomMiddleTransition(selectedZoomPart, mode)} onChangeMiddleEase={(ease) => updateZoomMiddleEase(selectedZoomPart, ease)} onDelete={() => deleteZoomMarker(selectedZoomPart.id, selectedZoom.id)} onPickFocus={() => startZoomFocusPick(selectedZoomPart.id, selectedZoom.id)} onSnapMiddle={() => snapZoomMiddle(selectedZoomPart)} /> : selectedTranslation && selectedTranslationPart ? <TranslationInspector marker={selectedTranslation} part={selectedTranslationPart} selectedMarkerCount={selectedTranslationSnapMarkers.length} selectedSnapInActive={selectedTranslationSnapInActive} selectedSnapOutActive={selectedTranslationSnapOutActive} middleSnapActive={selectedTranslationPartMiddleSnapActive} middleTransitionMode={selectedTranslationPartMiddleTransitionMode} pickingPosition={positionPickTranslationMarker?.partId === selectedTranslationPart.id && positionPickTranslationMarker.markerId === selectedTranslation.id} canSnapMiddle={Boolean(inspectorTranslationMiddleSnap)} onChange={(updater) => updateTranslationMarker(selectedTranslationPart.id, selectedTranslation.id, updater)} onChangeSelectedSnap={updateSelectedTranslationSnap} onChangeMiddleTransition={(mode) => updateTranslationMiddleTransition(selectedTranslationPart, mode)} onChangeMiddleEase={(ease) => updateTranslationMiddleEase(selectedTranslationPart, ease)} onDelete={() => deleteTranslationMarker(selectedTranslationPart.id, selectedTranslation.id)} onPickPosition={() => startTranslationPositionPick(selectedTranslationPart.id, selectedTranslation.id)} onSnapMiddle={() => snapTranslationMiddle(selectedTranslationPart)} /> : selectedObject ? <ObjectInspector object={selectedObject} onChange={updateSelectedObject} /> : selectedPart ? <FrameInspector part={selectedPart} onDurationChange={updateSelectedPartDuration} onFrameChange={updatePartFrame} onBackgroundChange={updatePartBackground} /> : <EmptyInspector />}
           </section>
           {validationErrors.length > 0 ? <section className="mb-5 grid gap-2.5 text-[#ffbf66]"><h2 className={sectionTitle}>Validation</h2>{validationErrors.map((error) => <p key={error}>{error}</p>)}</section> : null}
         </aside>
@@ -2364,7 +2231,6 @@ export function App() {
     <ExportMediaDialog
       activeTab={exportDialogTab}
       durationSeconds={sceneDurationSeconds}
-      currentTime={currentSceneTime}
       includeSources={exportIncludeSources}
       open={exportDialogOpen}
       partCount={scene.parts.length}
@@ -2499,109 +2365,6 @@ function SettingsDialog({ activeSection, open, scrubCommitThrottleMs, onActiveSe
         </div>
       </DialogContent>
     </Dialog>
-  );
-}
-
-function ExportMediaDialog({ activeTab, durationSeconds, exporting, includeSources, open, partCount, progress, projectFormat, projectName, resolution, sceneName, validationErrorCount, onIncludeSourcesChange, onMediaExport, onOpenChange, onProjectExport, onProjectFormatChange, onTabChange }: { activeTab: ExportDialogTab; currentTime: number; durationSeconds: number; exporting: boolean; includeSources: boolean; open: boolean; partCount: number; progress: string | null; projectFormat: ProjectExportFormat; projectName: string; resolution: ProjectManifest["resolution"]; sceneName: string; validationErrorCount: number; onIncludeSourcesChange: (includeSources: boolean) => void; onMediaExport: () => void; onOpenChange: (open: boolean) => void; onProjectExport: () => void; onProjectFormatChange: (format: ProjectExportFormat) => void; onTabChange: (tab: ExportDialogTab) => void }) {
-  const tabButtonClass = (tab: ExportDialogTab) => `rounded-[8px] px-3 py-1.5 text-xs font-extrabold transition ${activeTab === tab ? "bg-[#202b37] text-white shadow-[inset_0_0_0_1px_#2d4052]" : "text-[#9b9da7] hover:bg-[#20232c] hover:text-white"}`;
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Export</DialogTitle>
-          <DialogDescription>
-            Render an MP4 video or export editable project data.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="grid gap-4">
-          <div className="grid grid-cols-2 gap-1 rounded-[10px] border border-[#2d313b] bg-[#15171e] p-1">
-            <button className={tabButtonClass("media")} onClick={() => onTabChange("media")}>Render video</button>
-            <button className={tabButtonClass("project")} onClick={() => onTabChange("project")}>Export project</button>
-          </div>
-
-          <div className="grid grid-cols-3 gap-2 rounded-xl border border-[#2d313b] bg-[#171920] p-3">
-            <ExportStat label="Project" value={projectName} />
-            <ExportStat label="Scene" value={sceneName} />
-            <ExportStat label="Duration" value={formatTime(durationSeconds)} />
-            <ExportStat label="Resolution" value={`${resolution.width} x ${resolution.height}`} />
-            <ExportStat label={activeTab === "media" ? "Frame rate" : "Compositions"} value={activeTab === "media" ? `${videoExportFrameRate} fps` : `${partCount}`} />
-            <ExportStat label="Validation" value={validationErrorCount === 0 ? "Ready" : `${validationErrorCount} issue${validationErrorCount === 1 ? "" : "s"}`} warning={validationErrorCount > 0} />
-          </div>
-
-          {activeTab === "media" ? (
-            <div className="grid gap-3 rounded-xl border border-[#2d313b] bg-[#171920] p-3 text-sm text-[#dfe2ea]">
-              <strong className="text-white">Rendered MP4 video</strong>
-              <span className="text-xs leading-5 text-[#9b9da7]">Renders the full scene at 1920 x 1080 using the project timeline, motion, zoom, and pan markers. Export uses bundled ffmpeg so the MP4 works out of the box.</span>
-              {progress ? <span className="rounded-lg bg-[#10131a] px-3 py-2 text-xs font-bold text-[var(--clipper-accent-strong)]">{progress}</span> : null}
-            </div>
-          ) : (
-            <>
-              <label className="grid gap-1.5 text-xs font-bold text-[#dfe2ea]" htmlFor="export-format">
-                Format
-                <Select value={projectFormat} onValueChange={(value) => onProjectFormatChange(value as ProjectExportFormat)}>
-                  <SelectTrigger id="export-format" className="h-9">
-                    <SelectValue placeholder="Choose export format" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectGroup>
-                      <SelectItem value="project-package">Clipper project package (.project.json)</SelectItem>
-                      <SelectItem value="scene-json">Scene JSON only (.scene.json)</SelectItem>
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-              </label>
-
-              <label className="flex items-start gap-3 rounded-xl border border-[#2d313b] bg-[#171920] p-3 text-sm text-[#dfe2ea]">
-                <Checkbox checked={projectFormat === "project-package" && includeSources} disabled={projectFormat === "scene-json"} onCheckedChange={(checked) => onIncludeSourcesChange(checked === true)} />
-                <span className="grid gap-1 leading-5">
-                  <span className="font-bold text-white">Include TypeScript part sources</span>
-                  <span className="text-xs text-[#9b9da7]">Embeds source text for each composition part so exports can be audited or regenerated later.</span>
-                </span>
-              </label>
-            </>
-          )}
-        </div>
-
-        <DialogFooter>
-          <button className={`${appBarButtonBase} w-[96px] px-3 py-2 text-sm`} disabled={exporting} onClick={() => onOpenChange(false)}>Cancel</button>
-          <button className="inline-flex w-[112px] items-center justify-center rounded-[9px] border border-[var(--clipper-accent)] bg-[var(--clipper-accent)] px-3 py-2 text-sm font-extrabold text-[var(--clipper-accent-foreground)] transition hover:bg-[var(--clipper-accent-hover)] disabled:cursor-not-allowed disabled:opacity-60" disabled={exporting} onClick={activeTab === "media" ? onMediaExport : onProjectExport}>
-            {exporting ? "Working" : activeTab === "media" ? "Render" : "Export"}
-          </button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function ExportStat({ label, value, warning = false }: { label: string; value: string; warning?: boolean }) {
-  return (
-    <div className="min-w-0 rounded-lg bg-[#12141a] p-2">
-      <span className={mutedCaps}>{label}</span>
-      <strong className={`mt-1 block truncate text-sm ${warning ? "text-[#ffbf66]" : "text-white"}`}>{value}</strong>
-    </div>
-  );
-}
-
-function VideoExportOverlay({ cancelling, progress, onCancel }: { cancelling: boolean; progress: VideoExportProgress; onCancel: () => void }) {
-  const percent = clamp(progress.percent, 0, 100);
-
-  return (
-    <div className="fixed inset-0 z-[100] grid place-items-center bg-[#050609]/95 backdrop-blur-[3px] animate-[clipper-export-fade-in_180ms_ease-out_both]">
-      <div className="grid w-[min(300px,calc(100vw-48px))] justify-items-center gap-3 text-center">
-        <div className="grid w-full gap-2.5">
-          <h2 className="m-0 text-[17px] font-extrabold tracking-[-0.03em] text-white">Exporting video • {percent}%</h2>
-          <div className="h-1 w-full overflow-hidden rounded-full bg-[#242936]">
-            <div className="h-full rounded-full bg-white transition-[width] duration-200 ease-out" style={{ width: `${percent}%` }} />
-          </div>
-          <span className="text-xs font-semibold text-[#8e929d]">{cancelling ? "Stopping export..." : progress.status}</span>
-        </div>
-        <button className="mt-5 rounded-[8px] border border-[#20242d] bg-[#0c0e13] px-4 py-2 text-xs font-semibold text-white transition hover:border-[#343a47] hover:bg-[#11141b] disabled:cursor-not-allowed disabled:opacity-55" disabled={cancelling} onClick={onCancel}>
-          {cancelling ? "Stopping" : "Stop export"}
-        </button>
-      </div>
-    </div>
   );
 }
 
@@ -2871,128 +2634,6 @@ function DragSelectionBox({ ref, bounds, frameScale, visible }: { ref: RefObject
   return <div ref={ref} className="pointer-events-none absolute left-0 top-0 border bg-[#159dff]/10 opacity-100 shadow-[0_0_0_1px_rgba(21,157,255,0.18)] will-change-transform" style={{ borderColor: selectorBlue, zIndex: 2147483646 }} />;
 }
 
-function getRenderableTextSegments(content: string, richText: RichTextSegment[] | undefined) {
-  if (richText && richText.map((segment) => segment.text).join("") === content) return richText;
-  return [{ text: content, bold: false, italic: false, underline: false }];
-}
-
-function renderRichTextSegments(segments: RichTextSegment[], explicitFormatting: boolean) {
-  const nodes: ReactElement[] = [];
-  segments.forEach((segment, segmentIndex) => {
-    const parts = segment.text.split("\n");
-    parts.forEach((part, partIndex) => {
-      if (part) nodes.push(<span key={`${segmentIndex}-${partIndex}-${part}`} style={inlineTextSegmentStyle(segment, explicitFormatting)}>{part}</span>);
-      if (partIndex < parts.length - 1) nodes.push(<br key={`${segmentIndex}-${partIndex}-br`} />);
-    });
-  });
-  return nodes;
-}
-
-function textSegmentsToEditableNodes(segments: RichTextSegment[], explicitFormatting: boolean) {
-  const nodes: Node[] = [];
-  segments.forEach((segment) => {
-    const parts = segment.text.split("\n");
-    parts.forEach((part, partIndex) => {
-      if (part) {
-        const span = document.createElement("span");
-        const style = inlineTextSegmentStyle(segment, explicitFormatting);
-        if (style.fontWeight) span.style.fontWeight = String(style.fontWeight);
-        if (style.fontStyle) span.style.fontStyle = String(style.fontStyle);
-        if (style.textDecorationLine) span.style.textDecorationLine = String(style.textDecorationLine);
-        span.textContent = part;
-        nodes.push(span);
-      }
-      if (partIndex < parts.length - 1) nodes.push(document.createElement("br"));
-    });
-  });
-  return nodes.length > 0 ? nodes : [document.createTextNode("")];
-}
-
-function normalizeEditableFormatting(element: HTMLElement) {
-  element.querySelectorAll("span, b, strong, i, em, u").forEach((node) => {
-    if (!(node instanceof HTMLElement)) return;
-    const style = window.getComputedStyle(node);
-    node.dataset.clipperBold = Number(style.fontWeight) >= 700 ? "true" : "false";
-    node.dataset.clipperItalic = style.fontStyle === "italic" ? "true" : "false";
-    node.dataset.clipperUnderline = style.textDecorationLine.includes("underline") ? "true" : "false";
-  });
-}
-
-function getSelectionFormatState(selection: Selection, format: "bold" | "italic" | "underline") {
-  const node = selection.anchorNode;
-  const element = node instanceof HTMLElement ? node : node?.parentElement;
-  if (!element) return false;
-  const style = window.getComputedStyle(element);
-  if (format === "bold") return Number(style.fontWeight) >= 700;
-  if (format === "italic") return style.fontStyle === "italic";
-  return style.textDecorationLine.includes("underline");
-}
-
-function richTextSegmentsFromElement(element: HTMLElement, baseStyle: Record<string, string | number>) {
-  const segments: RichTextSegment[] = [];
-  const baseFormat = getBaseRichTextFormat(baseStyle);
-
-  function visit(node: Node, format: Omit<RichTextSegment, "text">) {
-    if (node.nodeType === Node.TEXT_NODE) {
-      if (node.textContent) segments.push({ text: node.textContent, ...format });
-      return;
-    }
-    if (node.nodeName === "BR") {
-      segments.push({ text: "\n", ...format });
-      return;
-    }
-    if (!(node instanceof HTMLElement)) return;
-
-    if ((node.nodeName === "DIV" || node.nodeName === "P") && segments.length > 0) segments.push({ text: "\n", ...format });
-
-    const explicitBold = node.dataset.clipperBold;
-    const explicitItalic = node.dataset.clipperItalic;
-    const explicitUnderline = node.dataset.clipperUnderline;
-    const nextFormat = {
-      bold: explicitBold ? explicitBold === "true" : node.nodeName === "B" || node.nodeName === "STRONG" ? true : format.bold,
-      italic: explicitItalic ? explicitItalic === "true" : node.nodeName === "I" || node.nodeName === "EM" ? true : format.italic,
-      underline: explicitUnderline ? explicitUnderline === "true" : node.nodeName === "U" ? true : format.underline,
-    };
-    node.childNodes.forEach((child) => visit(child, nextFormat));
-  }
-
-  element.childNodes.forEach((node) => visit(node, baseFormat));
-  return mergeAdjacentRichTextSegments(segments);
-}
-
-function getBaseRichTextFormat(baseStyle: Record<string, string | number>) {
-  return {
-    bold: Number(baseStyle.fontWeight ?? 400) >= 700,
-    italic: String(baseStyle.fontStyle ?? "normal") === "italic",
-    underline: String(baseStyle.textDecoration ?? "none").split(" ").includes("underline"),
-  };
-}
-
-function mergeAdjacentRichTextSegments(segments: RichTextSegment[]) {
-  return segments.reduce<RichTextSegment[]>((merged, segment) => {
-    const previous = merged.at(-1);
-    if (previous && previous.bold === segment.bold && previous.italic === segment.italic && previous.underline === segment.underline) {
-      previous.text += segment.text;
-      return merged;
-    }
-    merged.push({ ...segment });
-    return merged;
-  }, []);
-}
-
-function shouldPersistRichText(segments: RichTextSegment[], baseStyle: Record<string, string | number>) {
-  const baseFormat = getBaseRichTextFormat(baseStyle);
-  return segments.some((segment) => segment.bold !== baseFormat.bold || segment.italic !== baseFormat.italic || segment.underline !== baseFormat.underline);
-}
-
-function inlineTextSegmentStyle(segment: RichTextSegment, explicitFormatting: boolean): CSSProperties {
-  return {
-    fontWeight: segment.bold ? 700 : explicitFormatting ? 400 : undefined,
-    fontStyle: segment.italic ? "italic" : explicitFormatting ? "normal" : undefined,
-    textDecorationLine: segment.underline ? "underline" : explicitFormatting ? "none" : undefined,
-  };
-}
-
 function QuickAccessTooltip({ name, description, shortcut, children }: { name: string; description: string; shortcut: string; children: ReactElement }) {
   return (
     <Tooltip>
@@ -3006,252 +2647,6 @@ function QuickAccessTooltip({ name, description, shortcut, children }: { name: s
       </TooltipContent>
     </Tooltip>
   );
-}
-
-function AssetManager({ assets, onCopyAsset, onCreateFolder, onDeleteAsset, onDropFiles, onDuplicateAsset, onMoveAsset, onRenameAsset, onSortAssets }: { assets: AssetItem[]; onCopyAsset: (assetId: string) => void; onCreateFolder: (parentFolderId?: string) => void; onDeleteAsset: (assetId: string) => void; onDropFiles: (files: FileList, targetFolderId?: string) => void; onDuplicateAsset: (assetId: string) => void; onMoveAsset: (sourceId: string, intent: AssetDropIntent) => void; onRenameAsset: (assetId: string, name: string) => void; onSortAssets: (parentFolderId: string | null, mode: AssetSortMode) => void }) {
-  const [draggedAssetId, setDraggedAssetId] = useState<string | null>(null);
-  const [dropIntent, setDropIntent] = useState<AssetDropIntent | null>(null);
-  const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
-  const [renamingAssetId, setRenamingAssetId] = useState<string | null>(null);
-  const [renameDraft, setRenameDraft] = useState("");
-  const [collapsedFolderIds, setCollapsedFolderIds] = useState<Record<string, true>>({});
-  const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
-  const assetManagerRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    function clearSelectionOnOutsidePointer(event: globalThis.PointerEvent) {
-      if (assetManagerRef.current?.contains(event.target as Node)) return;
-      setSelectedAssetId(null);
-    }
-
-    window.addEventListener("pointerdown", clearSelectionOnOutsidePointer);
-    return () => window.removeEventListener("pointerdown", clearSelectionOnOutsidePointer);
-  }, []);
-
-  function handleDrop(event: DragEvent<HTMLDivElement>) {
-    event.preventDefault();
-    setDropIntent(null);
-    if (event.dataTransfer.files.length > 0) onDropFiles(event.dataTransfer.files);
-  }
-
-  function openAssetMenu(event: ReactMouseEvent<HTMLDivElement>, item: AssetItem) {
-    event.preventDefault();
-    event.stopPropagation();
-    const parentFolderId = item.kind === "folder" ? item.id : getParentAssetId(assets, item.id);
-    setSelectedAssetId(item.id);
-    setContextMenu({
-      x: event.clientX,
-      y: event.clientY,
-      items: [
-        { label: "Rename", action: () => startRename(item) },
-        { label: "Copy path", action: () => onCopyAsset(item.id) },
-        { label: "Duplicate", action: () => onDuplicateAsset(item.id) },
-        { label: "New folder", action: () => createFolder(parentFolderId ?? undefined) },
-        { label: "Sort by", children: getAssetSortMenuItems(parentFolderId, onSortAssets) },
-        { label: "Delete", action: () => onDeleteAsset(item.id), danger: true },
-      ],
-    });
-  }
-
-  function openEmptyMenu(event: ReactMouseEvent<HTMLDivElement>) {
-    if (event.currentTarget !== event.target) return;
-    event.preventDefault();
-    setContextMenu({
-      x: event.clientX,
-      y: event.clientY,
-      items: [
-        { label: "New folder", action: () => createFolder() },
-        { label: "Sort by", children: getAssetSortMenuItems(null, onSortAssets) },
-      ],
-    });
-  }
-
-  function createFolder(parentFolderId?: string) {
-    if (parentFolderId) expandFolder(parentFolderId);
-    onCreateFolder(parentFolderId);
-  }
-
-  function dropFiles(files: FileList, targetFolderId?: string) {
-    if (targetFolderId) expandFolder(targetFolderId);
-    onDropFiles(files, targetFolderId);
-  }
-
-  function moveAsset(sourceId: string, intent: AssetDropIntent) {
-    if (intent.action === "inside") expandFolder(intent.targetId);
-    onMoveAsset(sourceId, intent);
-  }
-
-  function expandFolder(folderId: string) {
-    setCollapsedFolderIds((current) => {
-      if (!current[folderId]) return current;
-      const { [folderId]: _removed, ...next } = current;
-      return next;
-    });
-  }
-
-  function toggleFolder(folderId: string) {
-    setCollapsedFolderIds((current) => {
-      if (!current[folderId]) return { ...current, [folderId]: true };
-      const { [folderId]: _removed, ...next } = current;
-      return next;
-    });
-  }
-
-  function startRename(item: AssetItem) {
-    setRenamingAssetId(item.id);
-    setRenameDraft(item.name);
-  }
-
-  function commitRename() {
-    if (!renamingAssetId) return;
-    onRenameAsset(renamingAssetId, renameDraft);
-    setRenamingAssetId(null);
-  }
-
-  return (
-    <section ref={assetManagerRef} className="grid min-h-0 gap-2.5" onDragOver={(event) => event.preventDefault()} onDrop={handleDrop}>
-      <div className="max-h-[420px] min-h-[190px] min-w-0 overflow-auto rounded-[10px] border border-dashed border-[#2d313b] bg-[#151821] p-1.5" onClick={(event) => { if (event.currentTarget === event.target) setSelectedAssetId(null); }} onContextMenu={openEmptyMenu} onDragLeave={(event) => { if (event.currentTarget === event.target) setDropIntent(null); }}>
-        <AssetTree collapsedFolderIds={collapsedFolderIds} items={assets} depth={0} draggedAssetId={draggedAssetId} dropIntent={dropIntent} parentFolderId={null} renameDraft={renameDraft} renamingAssetId={renamingAssetId} selectedAssetId={selectedAssetId} onCommitRename={commitRename} onDragAsset={setDraggedAssetId} onDropFiles={dropFiles} onDropIntentChange={setDropIntent} onMoveAsset={moveAsset} onOpenMenu={openAssetMenu} onRenameDraftChange={setRenameDraft} onSelectAsset={setSelectedAssetId} onToggleFolder={toggleFolder} />
-      </div>
-      <AppContextMenu menu={contextMenu} onClose={() => setContextMenu(null)} />
-    </section>
-  );
-}
-
-function AssetTree({ collapsedFolderIds, items, depth, draggedAssetId, dropIntent, parentFolderId, renameDraft, renamingAssetId, selectedAssetId, onCommitRename, onDragAsset, onDropFiles, onDropIntentChange, onMoveAsset, onOpenMenu, onRenameDraftChange, onSelectAsset, onToggleFolder }: { collapsedFolderIds: Record<string, true>; items: AssetItem[]; depth: number; draggedAssetId: string | null; dropIntent: AssetDropIntent | null; parentFolderId: string | null; renameDraft: string; renamingAssetId: string | null; selectedAssetId: string | null; onCommitRename: () => void; onDragAsset: (assetId: string | null) => void; onDropFiles: (files: FileList, targetFolderId?: string) => void; onDropIntentChange: (intent: AssetDropIntent | null) => void; onMoveAsset: (sourceId: string, intent: AssetDropIntent) => void; onOpenMenu: (event: ReactMouseEvent<HTMLDivElement>, item: AssetItem) => void; onRenameDraftChange: (value: string) => void; onSelectAsset: (assetId: string) => void; onToggleFolder: (folderId: string) => void }) {
-  return (
-    <div className="grid min-w-0 gap-0.5">
-      {items.map((item) => {
-        const isFolder = item.kind === "folder";
-        const isCollapsed = Boolean(collapsedFolderIds[item.id]);
-        return <div className="min-w-0" key={item.id}>
-          <div
-            className={`relative grid min-w-0 grid-cols-[14px_16px_minmax(0,1fr)] items-center gap-1.5 rounded-[6px] border py-0.5 pl-1.5 pr-1 transition ${draggedAssetId === item.id ? "border-[var(--clipper-accent)] bg-[var(--clipper-accent-muted-surface)]" : dropIntent?.targetId === item.id && dropIntent.action === "inside" ? "border-[var(--clipper-accent)] bg-[var(--clipper-accent)] text-[var(--clipper-accent-foreground)]" : selectedAssetId === item.id ? "border-[var(--clipper-accent)] bg-[var(--clipper-accent)] text-[var(--clipper-accent-foreground)]" : "border-transparent bg-transparent hover:bg-[#20232c]"}`}
-            draggable
-            onClick={() => onSelectAsset(item.id)}
-            onContextMenu={(event) => onOpenMenu(event, item)}
-            onDragStart={(event) => {
-              event.dataTransfer.effectAllowed = "move";
-              event.dataTransfer.setData("text/plain", item.id);
-              onDragAsset(item.id);
-            }}
-            onDragEnd={() => {
-              onDragAsset(null);
-              onDropIntentChange(null);
-            }}
-            onDragOver={(event) => {
-              event.preventDefault();
-              const intent = getAssetDropIntent(event, item, parentFolderId);
-              event.dataTransfer.dropEffect = event.dataTransfer.files.length > 0 && intent.action === "inside" ? "copy" : "move";
-              onDropIntentChange(intent);
-            }}
-            onDrop={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              const intent = getAssetDropIntent(event, item, parentFolderId);
-              onDropIntentChange(null);
-              if (event.dataTransfer.files.length > 0) {
-                onDropFiles(event.dataTransfer.files, intent.action === "inside" ? item.id : undefined);
-                return;
-              }
-              const sourceId = draggedAssetId ?? event.dataTransfer.getData("text/plain");
-              if (sourceId) onMoveAsset(sourceId, intent);
-            }}
-            style={{ paddingLeft: 8 + depth * 12 }}
-          >
-            {isFolder ? <button className="grid h-4 w-4 place-items-center rounded text-current hover:bg-black/15" aria-label={`${isCollapsed ? "Expand" : "Collapse"} ${item.name}`} onClick={(event) => { event.stopPropagation(); onToggleFolder(item.id); }} type="button">{isCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}</button> : <span />}
-            {isFolder ? <Folder size={15} className="text-current" /> : <FileIcon size={14} className="text-current" />}
-            {renamingAssetId === item.id ? <Input autoFocus className="h-6 min-w-0 border-[var(--clipper-accent)] bg-[#171920] px-1 py-0 text-xs font-bold" value={renameDraft} onBlur={onCommitRename} onChange={(event) => onRenameDraftChange(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") onCommitRename(); }} /> : <span className="min-w-0 select-none overflow-hidden text-ellipsis whitespace-nowrap px-1 text-xs font-bold">{item.name}</span>}
-            {dropIntent?.targetId === item.id && dropIntent.action === "before" ? <span className="pointer-events-none absolute inset-x-1 -top-px h-0.5 rounded-full bg-[var(--clipper-accent)] shadow-[0_0_0_2px_rgb(var(--clipper-accent-rgb)/0.18)]" /> : null}
-            {dropIntent?.targetId === item.id && dropIntent.action === "after" ? <span className="pointer-events-none absolute inset-x-1 -bottom-px h-0.5 rounded-full bg-[var(--clipper-accent)] shadow-[0_0_0_2px_rgb(var(--clipper-accent-rgb)/0.18)]" /> : null}
-          </div>
-          {item.children?.length && !isCollapsed ? <AssetTree collapsedFolderIds={collapsedFolderIds} items={item.children} depth={depth + 1} draggedAssetId={draggedAssetId} dropIntent={dropIntent} parentFolderId={item.id} renameDraft={renameDraft} renamingAssetId={renamingAssetId} selectedAssetId={selectedAssetId} onCommitRename={onCommitRename} onDragAsset={onDragAsset} onDropFiles={onDropFiles} onDropIntentChange={onDropIntentChange} onMoveAsset={onMoveAsset} onOpenMenu={onOpenMenu} onRenameDraftChange={onRenameDraftChange} onSelectAsset={onSelectAsset} onToggleFolder={onToggleFolder} /> : null}
-        </div>
-      })}
-    </div>
-  );
-}
-
-function AppContextMenu({ menu, onClose }: { menu: ContextMenuState; onClose: () => void }) {
-  useEffect(() => {
-    if (!menu) return;
-    function close() {
-      onClose();
-    }
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
-    }
-    window.addEventListener("click", close);
-    window.addEventListener("keydown", onKeyDown);
-    return () => {
-      window.removeEventListener("click", close);
-      window.removeEventListener("keydown", onKeyDown);
-    };
-  }, [menu, onClose]);
-
-  if (!menu) return null;
-
-  return <ContextMenuPanel items={menu.items} position={{ x: menu.x, y: menu.y }} onClose={onClose} />;
-}
-
-function ContextMenuPanel({ items, position, anchorRect, onClose }: { items: ContextMenuItem[]; position?: { x: number; y: number }; anchorRect?: DOMRect; onClose: () => void }) {
-  const ref = useRef<HTMLDivElement | null>(null);
-  const [resolvedPosition, setResolvedPosition] = useState(position ?? { x: 0, y: 0 });
-
-  useLayoutEffect(() => {
-    const rect = ref.current?.getBoundingClientRect();
-    if (!rect) return;
-
-    const gap = 6;
-    const margin = 8;
-    let x = position?.x ?? (anchorRect ? anchorRect.right + gap : 0);
-    let y = position?.y ?? (anchorRect ? anchorRect.top : 0);
-
-    if (anchorRect && x + rect.width > window.innerWidth - margin) x = anchorRect.left - rect.width - gap;
-    if (x + rect.width > window.innerWidth - margin) x = window.innerWidth - rect.width - margin;
-    if (y + rect.height > window.innerHeight - margin) y = window.innerHeight - rect.height - margin;
-
-    setResolvedPosition({ x: Math.max(margin, x), y: Math.max(margin, y) });
-  }, [anchorRect, items, position]);
-
-  return (
-    <div ref={ref} className={`${appNoDragRegion} fixed z-50 min-w-[160px] rounded-lg border border-[#2d313b] bg-[#15171e] p-1 shadow-[0_18px_60px_rgba(0,0,0,0.45)]`} style={{ left: resolvedPosition.x, top: resolvedPosition.y }} onClick={(event) => event.stopPropagation()}>
-      {items.map((item) => <ContextMenuRow item={item} key={item.label} onClose={onClose} />)}
-    </div>
-  );
-}
-
-function ContextMenuRow({ item, onClose }: { item: ContextMenuItem; onClose: () => void }) {
-  const rowRef = useRef<HTMLDivElement | null>(null);
-  const [open, setOpen] = useState(false);
-  const hasChildren = Boolean(item.children?.length);
-
-  return (
-    <div ref={rowRef} className="relative" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
-      <button className={`flex w-full items-center justify-between gap-5 rounded-md px-2.5 py-1.5 text-left text-xs font-bold ${item.danger ? "text-[#ffb4b4] hover:bg-[#301b1d]" : "text-[#dfe2ea] hover:bg-[#20232c]"} disabled:pointer-events-none disabled:opacity-50`} disabled={item.disabled} onClick={() => { if (hasChildren) return; item.action?.(); onClose(); }}>
-        <span>{item.label}</span>
-        {hasChildren ? <span className="text-[#737884]">›</span> : null}
-      </button>
-      {hasChildren && open && rowRef.current ? <ContextMenuPanel anchorRect={rowRef.current.getBoundingClientRect()} items={item.children ?? []} onClose={onClose} /> : null}
-    </div>
-  );
-}
-
-function getAssetSortMenuItems(parentFolderId: string | null, onSortAssets: (parentFolderId: string | null, mode: AssetSortMode) => void): ContextMenuItem[] {
-  return [
-    { label: "Folders first", action: () => onSortAssets(parentFolderId, "folders-first") },
-    { label: "A to Z", action: () => onSortAssets(parentFolderId, "name-asc") },
-    { label: "Z to A", action: () => onSortAssets(parentFolderId, "name-desc") },
-  ];
-}
-
-function getAssetDropIntent(event: DragEvent<HTMLDivElement>, item: AssetItem, parentFolderId: string | null): AssetDropIntent {
-  if (parentFolderId) return { targetId: parentFolderId, action: "inside" };
-
-  const rect = event.currentTarget.getBoundingClientRect();
-  const y = (event.clientY - rect.top) / rect.height;
-  if (item.kind === "folder" && y > 0.25 && y < 0.75) return { targetId: item.id, action: "inside" };
-  return { targetId: item.id, action: y < 0.5 ? "before" : "after" };
 }
 
 function ToolsPanel({ timelineMode, canSnapMiddle, onAddTranslationMarker, onAddZoomMarker, onSnapMiddle }: { timelineMode: TimelineMode; canSnapMiddle: boolean; onAddTranslationMarker: () => void; onAddZoomMarker: () => void; onSnapMiddle: () => void }) {
@@ -3401,7 +2796,16 @@ const BackgroundElementView = memo(function BackgroundElementView({ element }: {
   );
 }, areBackgroundElementPropsEqual);
 
-function FrameInspector({ part, onFrameChange, onBackgroundChange }: { part: Part; onFrameChange: (updater: (frame: PartFrame) => PartFrame) => void; onBackgroundChange: (updater: (background: BackgroundLayer) => BackgroundLayer) => void }) {
+function FrameInspector({ part, onDurationChange, onFrameChange, onBackgroundChange }: { part: Part; onDurationChange: (duration: number) => void; onFrameChange: (updater: (frame: PartFrame) => PartFrame) => void; onBackgroundChange: (updater: (background: BackgroundLayer) => BackgroundLayer) => void }) {
+  const markerEnd = Math.max(0, ...part.zoomMarkers.map((marker) => marker.start + marker.duration), ...part.translationMarkers.map((marker) => marker.start + marker.duration));
+  const minimumDuration = roundTenth(Math.max(0.1, markerEnd));
+
+  function updateDuration(value: string) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return;
+    onDurationChange(roundTenth(clamp(numeric, minimumDuration, MAX_PART_DURATION_SECONDS)));
+  }
+
   function updateFrameBackground(value: string) {
     onFrameChange((frame) => ({ ...frame, style: { ...frame.style, background: value } }));
   }
@@ -3434,6 +2838,7 @@ function FrameInspector({ part, onFrameChange, onBackgroundChange }: { part: Par
 
   return (
     <div className="grid gap-3">
+      <label className={`grid gap-1.5 ${mutedCaps}`}>Duration<Input type="number" min={minimumDuration} max={MAX_PART_DURATION_SECONDS} step={0.1} value={part.duration} onChange={(event) => updateDuration(event.target.value)} /></label>
       <label className={`grid gap-1.5 ${mutedCaps}`}>Frame BG Color<ColorSelector value={String(part.frame.style.background ?? "#000000")} onChange={updateFrameBackground} /></label>
       {isHexColor(String(part.background.style.background ?? "")) ? <label className={`grid gap-1.5 ${mutedCaps}`}>Layer BG Color<ColorSelector value={String(part.background.style.background)} onChange={updateBackgroundColor} /></label> : null}
       <label className="flex cursor-pointer items-center gap-3 rounded-[10px] border border-[#2d313b] bg-[#171920] p-3 text-sm font-bold text-[#dfe2ea] transition hover:border-[var(--clipper-accent)] hover:bg-[#20232c]">
@@ -3757,24 +3162,35 @@ function CodePane({ part, source: externalSource, onSaveAll, onSourceChange, onS
         { token: "string", foreground: "93e6b4" },
         { token: "type", foreground: "9bdcff" },
         { token: "delimiter.bracket", foreground: "d9dbe1" },
+        { token: "invalid", foreground: "ffb4b4", background: "1a1d26" },
+        { token: "invalid.illegal", foreground: "ffb4b4", background: "1a1d26" },
+        { token: "invalid.deprecated", foreground: "c8ccd6", background: "1a1d26" },
       ],
       colors: {
         "editor.background": "#12141a",
         "editor.foreground": accent,
         "editor.lineHighlightBackground": "#1a1d26",
         "editor.lineHighlightBorder": "#20232c",
-        "editor.selectionBackground": accentAlpha(0.25),
-        "editor.inactiveSelectionBackground": "#2d313b66",
+        "editor.selectionBackground": "#263142cc",
+        "editor.inactiveSelectionBackground": "#20232c99",
+        "editor.selectionHighlightBackground": "#2d3a4c66",
         "editorCursor.foreground": accent,
+        "editorError.background": "#00000000",
+        "editorError.foreground": "#ff8f8f",
+        "editorWarning.background": "#00000000",
+        "editorWarning.foreground": "#d9a35f",
         "editorLineNumber.foreground": "#4a5060",
         "editorLineNumber.activeForeground": "#d9dbe1",
         "editorIndentGuide.background1": "#20232c",
         "editorIndentGuide.activeBackground1": "#3b4150",
-        "editorBracketHighlight.foreground1": accent,
-        "editorBracketHighlight.foreground2": "#f0b35c",
-        "editorBracketHighlight.foreground3": "#93e6b4",
-        "editorBracketMatch.background": accentAlpha(0.14),
-        "editorBracketMatch.border": accent,
+        "editorBracketHighlight.foreground1": "#9bdcff",
+        "editorBracketHighlight.foreground2": "#d9a35f",
+        "editorBracketHighlight.foreground3": "#a7d39d",
+        "editorBracketHighlight.foreground4": "#b7a7e8",
+        "editorBracketHighlight.foreground5": "#80b8e8",
+        "editorBracketHighlight.foreground6": "#c8ccd6",
+        "editorBracketMatch.background": "#26314299",
+        "editorBracketMatch.border": "#80b8e8",
         "editorGutter.background": "#151821",
         "editorWidget.background": "#11141a",
         "editorWidget.border": "#2d313b",
@@ -3817,16 +3233,11 @@ function CodePane({ part, source: externalSource, onSaveAll, onSourceChange, onS
       return () => { cancelled = true; };
     }
 
-    readTextFile(part.filePath).then((content) => {
+    projectPersistenceService.loadPartSource(part).then(({ source, error }) => {
       if (cancelled) return;
-      setSource(content);
-      onSourceLoad(content);
-    }).catch((error: unknown) => {
-      if (cancelled) return;
-      const fallbackSource = partToSource(part);
-      setSource(fallbackSource);
-      onSourceLoad(fallbackSource);
-      setError(error instanceof Error ? error.message : "Unable to load composition file.");
+      setSource(source);
+      onSourceLoad(source);
+      if (error) setError(error);
     });
 
     return () => { cancelled = true; };
@@ -4061,6 +3472,12 @@ function TimelinePanel({ timeline, timelineViewportState, mode, selectedPartId, 
   }
 
   function selectTimelineItemAtTime(time: number) {
+    if (!isCompositionMode) {
+      const part = getTimelinePartAtTime(timeline, time > 0 ? time - 0.000001 : time);
+      if (part) onSelectPart(part.id);
+      return;
+    }
+
     const item = getTopTimelineItemAtTime(timeline, time);
     if (!item) return;
     if (item.kind === "translation") {
@@ -4592,7 +4009,7 @@ function TimelinePanel({ timeline, timelineViewportState, mode, selectedPartId, 
     window.addEventListener("pointerup", up, { once: true });
   }
 
-  const playheadColor = isScrubSnapActive ? "#37d6c2" : "var(--clipper-accent)";
+  const playheadColor = "#ff3b30";
 
   return (
     <footer className="grid min-h-0 select-none grid-rows-[34px_minmax(0,1fr)] gap-1.5 border-t border-[#1d2028] bg-[#141821] px-[22px] pb-[18px] pt-2.5">
@@ -4787,21 +4204,6 @@ function cameraTranslationToFramePoint(position: Point): Point {
   };
 }
 
-function clamp(value: number, min: number, max: number) {
-  return Math.min(Math.max(value, min), max);
-}
-
-function roundTwo(value: number) {
-  return Math.round(value * 100) / 100;
-}
-
-function sanitizeProjectNumbers(value: unknown): unknown {
-  if (typeof value === "number") return Number.isInteger(value) ? value : roundTwo(value);
-  if (Array.isArray(value)) return value.map(sanitizeProjectNumbers);
-  if (!value || typeof value !== "object") return value;
-  return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, sanitizeProjectNumbers(entry)]));
-}
-
 function getTopTimelineItemAtTime(timeline: TimelinePart[], time: number): { kind: "translation"; part: TimelinePart; marker: TranslationMarker } | { kind: "zoom"; part: TimelinePart; marker: ZoomMarker } | { kind: "part"; part: TimelinePart } | null {
   const timelinePart = getTimelinePartAtTime(timeline, time > 0 ? time - 0.000001 : time);
   if (!timelinePart) return null;
@@ -4815,145 +4217,6 @@ function getTopTimelineItemAtTime(timeline: TimelinePart[], time: number): { kin
 function isMarkerAtSceneTime(part: TimelinePart, marker: { start: number; duration: number }, time: number) {
   const markerStart = part.start + marker.start;
   return time >= markerStart && time <= markerStart + marker.duration;
-}
-
-function updateAssetTree(items: AssetItem[], assetId: string, updater: (item: AssetItem) => AssetItem): AssetItem[] {
-  return items.map((item) => {
-    if (item.id === assetId) return updater(item);
-    if (!item.children) return item;
-    return { ...item, children: updateAssetTree(item.children, assetId, updater) };
-  });
-}
-
-function getAssetPath(items: AssetItem[], assetId: string, basePath: string, parents: string[] = []): string | null {
-  for (const item of items) {
-    const path = [...parents, item.name];
-    if (item.id === assetId) return item.path ?? [basePath, ...path].join("/");
-    if (item.children) {
-      const childPath = getAssetPath(item.children, assetId, basePath, path);
-      if (childPath) return childPath;
-    }
-  }
-  return null;
-}
-
-function getParentAssetId(items: AssetItem[], assetId: string, parentId: string | null = null): string | null {
-  for (const item of items) {
-    if (item.id === assetId) return parentId;
-    if (item.children) {
-      const foundParentId = getParentAssetId(item.children, assetId, item.id);
-      if (foundParentId !== null) return foundParentId;
-    }
-  }
-  return null;
-}
-
-function duplicateAssetTree(items: AssetItem[], assetId: string): AssetItem[] {
-  return items.flatMap((item) => {
-    const nextItem = item.children ? { ...item, children: duplicateAssetTree(item.children, assetId) } : item;
-    if (item.id !== assetId) return [nextItem];
-    return [nextItem, duplicateAssetItem(item)];
-  });
-}
-
-function duplicateAssetItem(item: AssetItem): AssetItem {
-  const suffix = Date.now().toString(36);
-  return {
-    ...item,
-    id: `${item.id}_copy_${suffix}`,
-    name: `${item.name} copy`,
-    children: item.children?.map(duplicateAssetItem),
-  };
-}
-
-function appendAssetsToFolder(items: AssetItem[], folderId: string, assets: AssetItem[]): AssetItem[] {
-  return items.map((item) => {
-    if (item.id === folderId && item.kind === "folder") return { ...item, children: [...(item.children ?? []), ...assets] };
-    if (!item.children) return item;
-    return { ...item, children: appendAssetsToFolder(item.children, folderId, assets) };
-  });
-}
-
-function moveAssetTree(items: AssetItem[], sourceId: string, intent: AssetDropIntent): AssetItem[] {
-  if (sourceId === intent.targetId || assetContainsId(items, sourceId, intent.targetId)) return items;
-
-  const removed = removeAsset(items, sourceId);
-  if (!removed.removed) return items;
-  if (intent.action === "inside") return appendAssetsToFolder(removed.items, intent.targetId, [removed.removed]);
-
-  const inserted = insertAssetNear(removed.items, intent.targetId, removed.removed, intent.action);
-  return inserted.inserted ? inserted.items : [...inserted.items, removed.removed];
-}
-
-function sortAssetsInParent(items: AssetItem[], parentFolderId: string | null, mode: AssetSortMode): AssetItem[] {
-  if (!parentFolderId) return sortAssetItems(items, mode);
-  return items.map((item) => {
-    if (item.id === parentFolderId && item.kind === "folder") return { ...item, children: sortAssetItems(item.children ?? [], mode) };
-    if (!item.children) return item;
-    return { ...item, children: sortAssetsInParent(item.children, parentFolderId, mode) };
-  });
-}
-
-function sortAssetItems(items: AssetItem[], mode: AssetSortMode): AssetItem[] {
-  return [...items].sort((a, b) => {
-    if (mode === "folders-first" && a.kind !== b.kind) return a.kind === "folder" ? -1 : 1;
-    const comparison = a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" });
-    return mode === "name-desc" ? -comparison : comparison;
-  });
-}
-
-function assetContainsId(items: AssetItem[], sourceId: string, targetId: string): boolean {
-  const source = findAsset(items, sourceId);
-  return source?.children ? Boolean(findAsset(source.children, targetId)) : false;
-}
-
-function findAsset(items: AssetItem[], assetId: string): AssetItem | null {
-  for (const item of items) {
-    if (item.id === assetId) return item;
-    if (item.children) {
-      const found = findAsset(item.children, assetId);
-      if (found) return found;
-    }
-  }
-  return null;
-}
-
-function removeAsset(items: AssetItem[], assetId: string): { items: AssetItem[]; removed: AssetItem | null } {
-  let removed: AssetItem | null = null;
-  const nextItems = items.flatMap((item) => {
-    if (item.id === assetId) {
-      removed = item;
-      return [];
-    }
-    if (!item.children) return [item];
-    const next = removeAsset(item.children, assetId);
-    if (next.removed) removed = next.removed;
-    return [{ ...item, children: next.items }];
-  });
-  return { items: nextItems, removed };
-}
-
-function insertAssetNear(items: AssetItem[], targetId: string, asset: AssetItem, action: "before" | "after"): { items: AssetItem[]; inserted: boolean } {
-  const nextItems: AssetItem[] = [];
-  let inserted = false;
-  for (const item of items) {
-    if (item.id === targetId && action === "before") {
-      nextItems.push(asset);
-      inserted = true;
-    }
-    if (item.children) {
-      const next = insertAssetNear(item.children, targetId, asset, action);
-      inserted = inserted || next.inserted;
-      nextItems.push({ ...item, children: next.items });
-    } else {
-      nextItems.push(item);
-    }
-    if (item.id === targetId && action === "after") {
-      nextItems.push(asset);
-      inserted = true;
-    }
-  }
-  return { items: nextItems, inserted };
 }
 
 function normalizeHexColor(value: string) {
@@ -5221,10 +4484,6 @@ function getMendedMarkerDragItems(timeline: TimelinePart[], part: TimelinePart, 
   }));
 }
 
-function roundTenth(value: number) {
-  return Math.round(value * 10) / 10;
-}
-
 function getAvailableZoomPlacement(markers: Array<{ start: number; duration: number }>, partDuration: number, preferredTime: number) {
   if (partDuration < minimumZoomDuration) return null;
 
@@ -5348,48 +4607,6 @@ function isZoomMiddleSnapActive(markers: Array<{ id: string; start: number; dura
   });
 }
 
-function isZoomMarkerMended(markers: Array<{ id: string; start: number; duration: number; snapIn?: boolean; snapOut?: boolean }>, markerId: string) {
-  const sortedMarkers = [...markers].sort((left, right) => left.start - right.start);
-
-  for (let index = 0; index < sortedMarkers.length; index += 1) {
-    const marker = sortedMarkers[index];
-    if (marker.id !== markerId) continue;
-
-    const previous = sortedMarkers[index - 1];
-    const next = sortedMarkers[index + 1];
-    const mendedToPrevious = Boolean(previous?.snapOut && marker.snapIn && roundTenth(previous.start + previous.duration) === roundTenth(marker.start));
-    const mendedToNext = Boolean(marker.snapOut && next?.snapIn && roundTenth(marker.start + marker.duration) === roundTenth(next.start));
-    return mendedToPrevious || mendedToNext;
-  }
-
-  return false;
-}
-
-function getMendedMarkerIds(markers: Array<{ id: string; start: number; duration: number; snapIn?: boolean; snapOut?: boolean }>, markerId: string) {
-  const sortedMarkers = [...markers].sort((left, right) => left.start - right.start);
-  const markerIndex = sortedMarkers.findIndex((marker) => marker.id === markerId);
-  if (markerIndex < 0) return new Set([markerId]);
-
-  let firstIndex = markerIndex;
-  let lastIndex = markerIndex;
-
-  while (firstIndex > 0) {
-    const previous = sortedMarkers[firstIndex - 1];
-    const current = sortedMarkers[firstIndex];
-    if (!previous.snapOut || !current.snapIn || roundTenth(previous.start + previous.duration) !== roundTenth(current.start)) break;
-    firstIndex -= 1;
-  }
-
-  while (lastIndex < sortedMarkers.length - 1) {
-    const current = sortedMarkers[lastIndex];
-    const next = sortedMarkers[lastIndex + 1];
-    if (!current.snapOut || !next.snapIn || roundTenth(current.start + current.duration) !== roundTenth(next.start)) break;
-    lastIndex += 1;
-  }
-
-  return new Set(sortedMarkers.slice(firstIndex, lastIndex + 1).map((marker) => marker.id));
-}
-
 function resizeTimelineMarkersWithPush<T extends { id: string; start: number; duration: number; snapIn?: boolean; snapOut?: boolean }>(markers: T[], markerId: string, action: "start" | "end", rawDelta: number, partDuration: number): T[] {
   const sortedMarkers = [...markers].sort((left, right) => left.start - right.start);
   const markerIndex = sortedMarkers.findIndex((marker) => marker.id === markerId);
@@ -5465,49 +4682,10 @@ function applyMarkerBounds<T extends { id: string; start: number; duration: numb
   });
 }
 
-function normalizeMendedZoomMarkerFocus(markers: ZoomMarker[]) {
-  const sortedMarkers = [...markers].sort((left, right) => left.start - right.start);
-  const focusById = new Map<string, Point>();
-  let sharedFocus: Point | null = null;
-
-  for (let index = 0; index < sortedMarkers.length; index += 1) {
-    const marker = sortedMarkers[index];
-    const previous = sortedMarkers[index - 1];
-    const mendedToPrevious = Boolean(previous?.snapOut && marker.snapIn && roundTenth(previous.start + previous.duration) === roundTenth(marker.start));
-    if (!mendedToPrevious) sharedFocus = marker.focus;
-    if (sharedFocus) focusById.set(marker.id, sharedFocus);
-  }
-
-  return markers.map((marker) => {
-    if (!isZoomMarkerMended(markers, marker.id)) return marker;
-    const focus = focusById.get(marker.id);
-    return focus && (marker.focus.x !== focus.x || marker.focus.y !== focus.y) ? { ...marker, focus } : marker;
-  });
-}
-
 function getMiddleTransitionMode(markers: Array<{ id: string; middleTransition?: "transition" }>, snap: { pairs: Array<{ nextId: string }> } | null): "instant" | "transition" {
   if (!snap) return "instant";
   const markersById = new Map(markers.map((marker) => [marker.id, marker]));
   return snap.pairs.every((pair) => markersById.get(pair.nextId)?.middleTransition === "transition") ? "transition" : "instant";
-}
-
-function truncateMiddle(value: string, maxLength = 34) {
-  if (value.length <= maxLength) return value;
-  const edgeLength = Math.floor((maxLength - 3) / 2);
-  return `${value.slice(0, edgeLength)}...${value.slice(value.length - edgeLength)}`;
-}
-
-function slugifyFileName(value: string) {
-  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "clipper-export";
-}
-
-function downloadTextFile(fileName: string, content: string) {
-  const url = URL.createObjectURL(new Blob([content], { type: "application/json;charset=utf-8" }));
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = fileName;
-  link.click();
-  URL.revokeObjectURL(url);
 }
 
 function evaluateObjectForPreview(object: FrameObject, time: number, duration: number): EvaluatedFrameObject {

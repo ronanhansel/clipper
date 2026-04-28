@@ -128,9 +128,22 @@ export type TimelineViewportState = {
 
 export type TimelineMode = "edit" | "composition";
 
+export type PreviewViewportState = {
+  scale: number;
+  scrollLeft: number;
+  scrollTop: number;
+  zoomBarOpen: boolean;
+};
+
 export type EditorState = {
   timeline: TimelineViewportState;
   timelineMode: TimelineMode;
+  mode?: "interactive" | "code";
+  leftPanelTab?: "assets" | "tools";
+  rightPanelTab?: "video" | "motion" | "agent";
+  selectedSceneId?: string;
+  currentSceneTime?: number;
+  preview?: PreviewViewportState;
 };
 
 export type AssetItem = {
