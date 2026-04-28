@@ -38,11 +38,12 @@ export function getProjectContentSnapshot(project: ProjectManifest) {
 }
 
 export function createProjectStore(initialProject: ProjectManifest, initialCompositionSources: Record<string, string> = {}) {
+  const compositionSources = initialProject.compositionSources ?? initialCompositionSources;
   return createStore<ProjectStore>((set) => ({
     project: initialProject,
     savedProjectSnapshot: getProjectContentSnapshot(initialProject),
-    compositionSources: initialCompositionSources,
-    savedCompositionSourcesSnapshot: JSON.stringify(initialCompositionSources),
+    compositionSources,
+    savedCompositionSourcesSnapshot: JSON.stringify(compositionSources),
     setProject: createFieldSetter(set, "project"),
     setSavedProjectSnapshot: createFieldSetter(set, "savedProjectSnapshot"),
     setCompositionSources: createFieldSetter(set, "compositionSources"),

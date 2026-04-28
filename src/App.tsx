@@ -1,11 +1,11 @@
 import { Folder, Magnet, Pause, Play, RotateCcw, Scissors, Search, Signpost, SkipBack, SkipForward, Sparkles, StepBack, StepForward } from "lucide-react";
+import { nanoid } from "nanoid";
 import { startTransition, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent } from "react";
 import toast, { Toaster } from "react-hot-toast";
 import { Input } from "./components/ui/input";
-import { TooltipProvider } from "./components/ui/tooltip";
 import { AgentPanel } from "./components/AgentPanel";
 import { AppContextMenu } from "./components/AppContextMenu";
-import { AssetManager } from "./components/AssetManager";
+import { FileManager, type FileManagerProps, type FileManagerTreeSnapshot } from "./components/FileManager";
 import { CodePane } from "./components/CodePane";
 import { ExportMediaDialog, VideoExportOverlay } from "./components/export/ExportMediaDialog";
 import { FrameZoomBar } from "./components/FrameZoomBar";
@@ -22,24 +22,28 @@ import { projectPersistenceService } from "./app/services/projectPersistenceServ
 import { useEditorDerivedState } from "./app/state/editorDerivedState";
 import { EditorStoreProvider, useAppEditorState, useEditorStoreApi } from "./app/state/editorStore";
 import { getProjectContentSnapshot, ProjectStoreProvider, useProjectDocumentState } from "./app/state/projectStore";
-import type { ContextMenuState, ExportDialogTab, LeftPanelTab, Mode, PlaybackClock, ProjectExportFormat, ProjectUpdater, RightPanelTab, SettingsSection, TimelineNodeContextTarget, TranslationMarkerSelection, VideoExportProgress, ZoomMarkerSelection } from "./app/types";
+import type { AdjustmentLayerSelection, ContextMenuState, ExportDialogTab, LeftPanelTab, Mode, PlaybackClock, ProjectExportFormat, ProjectUpdater, RightPanelTab, SettingsSection, TimelineNodeContextTarget, TranslationMarkerSelection, VideoExportProgress, ZoomMarkerSelection } from "./app/types";
 import { applyAdjustmentLayersToSceneTime } from "./core/adjustments";
 import { appendAssetsToFolder, duplicateAssetTree, getAssetPath, moveAssetTree, removeAsset, sortAssetsInParent, updateAssetTree, type AssetDropIntent, type AssetSortMode } from "./core/assetTree";
-import { boundsToViewport, framePointToCameraTranslation } from "./core/camera";
+import { boundsToViewport, framePointToCameraTranslation, getActiveTranslation, getActiveZoom, getCameraPreviewTransform, type CameraPreviewTransform } from "./core/camera";
 import { centerOf, constrainDragDeltaToDominantAxis, getBoundsUnion, getDraggedObjects, getResizedObjects, insetBounds, isVisibleMarqueeBounds, moveBounds, selectionObjectFromFrameObject, selectionPayloadFromObjects, updateDragSelectionBoxElement, type ObjectDrag, type ObjectResize, type ResizeHandle } from "./core/frameInteraction";
 import { boundsToPoints, createSelectionPayload, framePointFromClient, normalizeBounds } from "./core/geometry";
 import { getMendedMarkerIds, normalizeMendedZoomMarkerFocus } from "./core/markers";
 import { clamp, roundTenth, roundTwo } from "./core/math";
 import { compositionFromSource, compositionToSource } from "./core/compositionSource";
-import { defaultAssets, defaultPreviewViewportState, defaultTimelineMode, defaultTimelineViewportState, normalizeProject, replacePartInProject } from "./core/project";
+import { defaultAssets, defaultPreviewViewportState, defaultTimelineMode, defaultTimelineViewportState, deleteCompositionFromProject, normalizeProject, replacePartInProject } from "./core/project";
 import { formatTime, getAdjustmentPlacement, getAvailableZoomPlacement, getSelectedActiveMiddleMend, getSelectedZoomMiddleSnap, getTimelinePartAtTime, getZoomMiddleSnap, isZoomMiddleSnapActive, updatePartObject, type TimelineMarkerMove } from "./core/timeline";
-import { FRAME_HEIGHT, FRAME_WIDTH, type AdjustmentLayer, type BackgroundLayer, type Bounds, type CodeViewportState, type EditorState, type FrameObject, type MotionEase, type Part, type PartFrame, type Point, type ProjectManifest, type RichTextSegment, type SelectionPayload, type TimelineMode, type TimelineViewportState, type TranslationMarker, type ZoomMarker } from "./core/types";
+import { FRAME_HEIGHT, FRAME_WIDTH, type AdjustmentLayer, type BackgroundLayer, type Bounds, type CodeViewportState, type CompositionClip, type EditorState, type FrameObject, type MotionEase, type Part, type PartFrame, type Point, type ProjectManifest, type RichTextSegment, type SelectionPayload, type TimelineMode, type TimelineViewportState, type TranslationMarker, type ZoomMarker } from "./core/types";
 import { fallbackProject } from "./fallbackProject";
 
-const fallbackProjectManifestPath = "clipper/untitled-project/project.json";
+const fallbackProjectManifestPath = "clipper/untitled-project.clipper";
 const activeProjectManifestStorageKey = "clipper.activeProjectManifestPath";
 const appStatePath = "clipper/app-state.json";
 const initialProject = normalizeProject(fallbackProject);
+
+function createCompositionId() {
+  return nanoid(8);
+}
 
 function PathToastMessage({ action, path }: { action: string; path: string }) {
   const suffixLength = Math.min(32, Math.max(12, Math.floor(path.length / 3)));
@@ -69,7 +73,9 @@ type TimelineNodeClipboard =
   | { kind: "zoom"; nodes: Array<{ absoluteStart: number; partId: string; marker: ZoomMarker }> };
 
 function getProjectCompositionSources(project: ProjectManifest) {
-  return Object.fromEntries(project.scenes.flatMap((scene) => scene.compositions.map((part) => [part.filePath, compositionToSource(part)])));
+  const compositions = Array.from(new Map([...(project.compositionLibrary ?? []), ...project.scenes.flatMap((scene) => scene.compositions)].map((part) => [part.filePath, part])).values()).filter((part) => !part.sourceMissing);
+  const embeddedSources = project.compositionSources ?? {};
+  return Object.fromEntries(compositions.map((part) => [part.filePath, embeddedSources[part.filePath] ?? compositionToSource(part)]));
 }
 
 function getDirectoryPath(relativePath: string) {
@@ -77,15 +83,12 @@ function getDirectoryPath(relativePath: string) {
   return lastSlashIndex > 0 ? relativePath.slice(0, lastSlashIndex) : relativePath;
 }
 
-async function getProjectCompositionSourcesFromFiles(project: ProjectManifest) {
-  const entries = await Promise.all(project.scenes.flatMap((scene) => scene.compositions).map(async (part) => {
-    try {
-      return [part.filePath, await clipperHost.readTextFile(part.filePath)] as const;
-    } catch {
-      return [part.filePath, compositionToSource(part)] as const;
-    }
-  }));
-  return Object.fromEntries(entries);
+function reorderByIntent<T>(items: T[], sourceIndex: number, targetIndex: number, action: "before" | "after") {
+  const next = [...items];
+  const [moved] = next.splice(sourceIndex, 1);
+  const adjustedTargetIndex = sourceIndex < targetIndex ? targetIndex - 1 : targetIndex;
+  next.splice(action === "after" ? adjustedTargetIndex + 1 : adjustedTargetIndex, 0, moved);
+  return next;
 }
 
 async function readStoredActiveProjectManifestPath() {
@@ -104,11 +107,15 @@ async function writeStoredActiveProjectManifestPath(manifestPath: string) {
   await clipperHost.writeTextFile(appStatePath, `${JSON.stringify({ activeProjectManifestPath: manifestPath }, null, 2)}\n`);
 }
 
+function clipperContainerPath(manifestPath: string) {
+  return manifestPath.endsWith(".clipper") ? manifestPath : manifestPath.replace(/(?:\/project)?\.json$/, ".clipper");
+}
+
 async function loadBootProject(): Promise<BootProject> {
   const manifestPath = await readStoredActiveProjectManifestPath();
   const { project, sourceStatus, usedFallback } = await projectPersistenceService.loadProject({ manifestPath, fallbackProject });
   const normalizedProject = normalizeProject(project);
-  const activeManifestPath = usedFallback ? fallbackProjectManifestPath : manifestPath;
+  const activeManifestPath = usedFallback ? fallbackProjectManifestPath : clipperContainerPath(manifestPath);
 
   try {
     await writeStoredActiveProjectManifestPath(activeManifestPath);
@@ -120,7 +127,7 @@ async function loadBootProject(): Promise<BootProject> {
       manifestPath: activeManifestPath,
       project: normalizedProject,
       sourceStatus: usedFallback ? sourceStatus : `Project loaded from ${activeManifestPath}.`,
-      compositionSources: await getProjectCompositionSourcesFromFiles(normalizedProject),
+      compositionSources: getProjectCompositionSources(normalizedProject),
     };
 }
 
@@ -162,8 +169,6 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   const editorStore = useEditorStoreApi();
   const [currentSceneTime, setRenderCurrentSceneTime] = useState(() => editorStore.getState().currentSceneTime);
   const [activeProjectManifestPath, setActiveProjectManifestPath] = useState(initialProjectManifestPath);
-  const [staleCompositionSources, setStaleCompositionSources] = useState<Record<string, string>>({});
-  const [projectReloadPending, setProjectReloadPending] = useState(false);
   const {
     mode, setMode,
     timelineMode, setTimelineMode,
@@ -178,6 +183,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     selectedTranslationMarkers, setSelectedTranslationMarkers,
     positionPickTranslationMarker, setPositionPickTranslationMarker,
     selectedAdjustmentLayerId, setSelectedAdjustmentLayerId,
+    selectedAdjustmentLayers, setSelectedAdjustmentLayers,
     selectionPayload, setSelectionPayload,
     framePickPreviewPoint, setFramePickPreviewPoint,
     dragStart, setDragStart,
@@ -187,7 +193,6 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     playbackClock, setPlaybackClock,
     frameZoomBarOpen, setFrameZoomBarOpen,
     framePreviewScale, setFramePreviewScale,
-    liveZoomScalePreview, setLiveZoomScalePreview,
     scrubSnapEnabled, setScrubSnapEnabled,
     scrubCommitThrottleMs, setScrubCommitThrottleMs,
     fastSelectEnabled, setFastSelectEnabled,
@@ -222,14 +227,12 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   const savedProjectSnapshotRef = useRef(savedProjectSnapshot);
   const savedCompositionSourcesSnapshotRef = useRef(savedCompositionSourcesSnapshot);
   const hasUnsavedChangesRef = useRef(false);
-  const watchedPartFilePathsRef = useRef("");
-  const watchedProjectDirectoryRef = useRef("");
   const timelineNodeClipboardRef = useRef<TimelineNodeClipboard | null>(null);
   const modeRef = useRef(mode);
   const activePartFilePathRef = useRef("");
-  const projectReloadTimerRef = useRef(0);
   const projectHistoryRef = useRef<{ past: ProjectManifest[]; future: ProjectManifest[] }>({ past: [], future: [] });
   const lastProjectHistoryAtRef = useRef(0);
+  const implicitFileOperationSaveTimeoutRef = useRef(0);
   const saveAllChangesRef = useRef<(() => Promise<void>) | null>(null);
   const videoExportIdRef = useRef<string | null>(null);
   const currentSceneTimeRef = useRef(currentSceneTime);
@@ -259,7 +262,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   const centerPreviewScrollRef = useRef<HTMLDivElement | null>(null);
   const centerPreviewScrollFrameRef = useRef(0);
   const projectRenameCancelledRef = useRef(false);
-  const pendingZoomScalePreviewRef = useRef<{ partId: string; markerId: string; scale: number } | null>(null);
+  const pendingZoomScalePreviewRef = useRef<CameraPreviewTransform | null>(null);
   const zoomScalePreviewFrameRef = useRef(0);
 
   const {
@@ -278,7 +281,6 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     part,
     compositionSourcesSnapshot,
     previewTime,
-    previewZoomMarkers,
     scene,
     sceneDurationSeconds,
     selectedObject,
@@ -306,7 +308,6 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     currentSceneTime,
     focusPickZoomMarker,
     framePickPreviewPoint,
-    liveZoomScalePreview,
     compositionSources,
     positionPickTranslationMarker,
     project,
@@ -323,11 +324,18 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     selectionPayload,
     timelineMode,
   });
-  const watchedPartFilePaths = project.scenes.flatMap((projectScene) => projectScene.compositions.map((projectPart) => projectPart.filePath)).join("\n");
   const watchedProjectDirectory = getDirectoryPath(activeProjectManifestPath);
+  const compositionLibrary = project.compositionLibrary ?? [];
+  const timelines = project.timelines ?? [];
+  const timelineCompositionIds = new Set(scene.compositions.map((composition) => composition.id));
   function replaceProject(nextProject: ProjectManifest, options: { history?: boolean; syncSources?: boolean } = {}) {
-    const normalizedProject = normalizeProject(nextProject);
+    let normalizedProject = normalizeProject(nextProject);
     const currentProject = projectRef.current;
+    let nextCompositionSources = normalizedProject.compositionSources ?? getProjectCompositionSources(normalizedProject);
+    if (options.syncSources !== false) {
+      nextCompositionSources = getSyncedCompositionSources(normalizedProject, currentProject, compositionSourcesRef.current);
+      normalizedProject = normalizeProject({ ...normalizedProject, compositionSources: nextCompositionSources });
+    }
     if (JSON.stringify(normalizedProject) === JSON.stringify(currentProject)) return;
 
     if (options.history !== false) {
@@ -344,7 +352,8 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     projectRef.current = normalizedProject;
     setProject(normalizedProject);
     setTimelineMode(normalizedProject.editorState?.timelineMode ?? defaultTimelineMode);
-    if (options.syncSources !== false) syncCompositionSourcesFromProject(normalizedProject, currentProject);
+    compositionSourcesRef.current = nextCompositionSources;
+    setCompositionSources(nextCompositionSources);
   }
 
   function applyEditorState(editorState: EditorState) {
@@ -369,26 +378,38 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     setProject(nextProject);
   }
 
-  function updateProject(updater: ProjectUpdater, options?: { history?: boolean }) {
+  function updateProject(updater: ProjectUpdater, options?: { history?: boolean; syncSources?: boolean }) {
     const nextProject = typeof updater === "function" ? updater(projectRef.current) : updater;
     replaceProject(nextProject, options);
   }
 
-  function syncCompositionSourcesFromProject(nextProject: ProjectManifest, previousProject?: ProjectManifest) {
-    setCompositionSources((currentSources) => {
-      let changed = false;
-      const nextSources = { ...currentSources };
-      for (const nextScene of nextProject.scenes) {
-        const previousScene = previousProject?.scenes.find((item) => item.id === nextScene.id);
-        for (const nextPart of nextScene.compositions) {
-          const previousPart = previousScene?.compositions.find((item) => item.id === nextPart.id);
-          if (previousPart && JSON.stringify(previousPart) === JSON.stringify(nextPart)) continue;
-          nextSources[nextPart.filePath] = compositionToSource(nextPart);
-          changed = true;
-        }
-      }
-      return changed ? nextSources : currentSources;
-    });
+  function getSyncedCompositionSources(nextProject: ProjectManifest, previousProject: ProjectManifest | undefined, currentSources: Record<string, string>) {
+    let changed = false;
+    const nextSources = { ...currentSources };
+    const nextParts = Array.from(new Map([...(nextProject.compositionLibrary ?? []), ...nextProject.scenes.flatMap((item) => item.compositions)].map((item) => [item.filePath, item])).values());
+    const previousPartsByPath = new Map([...(previousProject?.compositionLibrary ?? []), ...(previousProject?.scenes.flatMap((item) => item.compositions) ?? [])].map((item) => [item.filePath, item]));
+    for (const nextPart of nextParts) {
+      if (nextPart.sourceMissing) continue;
+      const previousPart = previousPartsByPath.get(nextPart.filePath);
+      if (previousPart && JSON.stringify(previousPart) === JSON.stringify(nextPart)) continue;
+      nextSources[nextPart.filePath] = compositionToSource(nextPart);
+      changed = true;
+    }
+
+    const livePaths = new Set(nextParts.filter((part) => !part.sourceMissing).map((part) => part.filePath));
+    for (const filePath of Object.keys(nextSources)) {
+      if (livePaths.has(filePath)) continue;
+      delete nextSources[filePath];
+      changed = true;
+    }
+
+    return changed ? nextSources : currentSources;
+  }
+
+  function syncCompositionSourcesFromProject(nextProject: ProjectManifest) {
+    const nextSources = getProjectCompositionSources(nextProject);
+    compositionSourcesRef.current = nextSources;
+    setCompositionSources(nextSources);
   }
 
   function resetProjectHistory() {
@@ -408,19 +429,18 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   async function loadProjectFromManifest(manifestPath: string) {
     const { project: loadedProject, sourceStatus: nextSourceStatus } = await projectPersistenceService.loadProject({ manifestPath, fallbackProject });
     const normalizedProject = normalizeProject(loadedProject);
-    const loadedCompositionSources = await getProjectCompositionSourcesFromFiles(normalizedProject);
+    const activeManifestPath = clipperContainerPath(manifestPath);
+    const loadedCompositionSources = getProjectCompositionSources(normalizedProject);
 
-    await storeActiveProjectManifestPath(manifestPath);
-    setActiveProjectManifestPath(manifestPath);
+    await storeActiveProjectManifestPath(activeManifestPath);
+    setActiveProjectManifestPath(activeManifestPath);
     resetProjectHistory();
     replaceProject(normalizedProject, { history: false, syncSources: false });
     applyEditorState(normalizedProject.editorState!);
     setCompositionSources(loadedCompositionSources);
     setSavedProjectSnapshot(getProjectContentSnapshot(normalizedProject));
     setSavedCompositionSourcesSnapshot(JSON.stringify(loadedCompositionSources));
-    setProjectReloadPending(false);
-    setStaleCompositionSources({});
-    setSourceStatus(nextSourceStatus);
+    setSourceStatus(manifestPath === activeManifestPath ? nextSourceStatus : `Migrated ${manifestPath} to ${activeManifestPath}. Save to write the .clipper container.`);
   }
 
   async function openProjectManifest() {
@@ -443,11 +463,10 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
       future: [projectRef.current, ...projectHistoryRef.current.future].slice(0, maxProjectHistoryActions),
     };
     lastProjectHistoryAtRef.current = 0;
-    const currentProject = projectRef.current;
     projectRef.current = previousProject;
     setProject(previousProject);
     setTimelineMode(previousProject.editorState?.timelineMode ?? defaultTimelineMode);
-    syncCompositionSourcesFromProject(previousProject, currentProject);
+    syncCompositionSourcesFromProject(previousProject);
   }
 
   function redoProjectChange() {
@@ -459,11 +478,10 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
       future: projectHistoryRef.current.future.slice(1),
     };
     lastProjectHistoryAtRef.current = 0;
-    const currentProject = projectRef.current;
     projectRef.current = nextProject;
     setProject(nextProject);
     setTimelineMode(nextProject.editorState?.timelineMode ?? defaultTimelineMode);
-    syncCompositionSourcesFromProject(nextProject, currentProject);
+    syncCompositionSourcesFromProject(nextProject);
   }
 
   function syncPlaybackDom(time: number) {
@@ -512,32 +530,12 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   }, [hasUnsavedChanges]);
 
   useEffect(() => {
-    watchedPartFilePathsRef.current = watchedPartFilePaths;
-    watchedProjectDirectoryRef.current = watchedProjectDirectory;
-  }, [watchedPartFilePaths, watchedProjectDirectory]);
-
-  useEffect(() => {
     modeRef.current = mode;
   }, [mode]);
 
   useEffect(() => {
     activePartFilePathRef.current = part.filePath;
   }, [part.filePath]);
-
-  useEffect(() => {
-    void clipperHost.watchProjectFiles({
-      files: [activeProjectManifestPath, ...watchedPartFilePaths.split("\n").filter(Boolean)],
-      directories: [watchedProjectDirectory],
-    });
-  }, [activeProjectManifestPath, watchedPartFilePaths, watchedProjectDirectory]);
-
-  useEffect(() => {
-    return clipperHost.onProjectFileChanged((filePath) => {
-      handleWatchedProjectFileChanged(filePath);
-    });
-  }, []);
-
-  useEffect(() => () => window.clearTimeout(projectReloadTimerRef.current), []);
 
   useEffect(() => {
     return window.clipper?.onVideoExportProgress?.((exportId, progress) => {
@@ -625,10 +623,12 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   }, []);
 
   useEffect(() => () => {
+    window.clearTimeout(implicitFileOperationSaveTimeoutRef.current);
     if (scrubFrameRef.current) cancelAnimationFrame(scrubFrameRef.current);
     if (framePickFrameRef.current) cancelAnimationFrame(framePickFrameRef.current);
     if (dragBoxFrameRef.current) cancelAnimationFrame(dragBoxFrameRef.current);
     if (objectDragFrameRef.current) cancelAnimationFrame(objectDragFrameRef.current);
+    if (zoomScalePreviewFrameRef.current) cancelAnimationFrame(zoomScalePreviewFrameRef.current);
     if (centerPreviewScrollFrameRef.current) cancelAnimationFrame(centerPreviewScrollFrameRef.current);
   }, []);
 
@@ -906,6 +906,19 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
       if ((event.key === "Backspace" || event.key === "Delete") && selectedTranslationMarker) {
         event.preventDefault();
         deleteTranslationMarker(selectedTranslationMarker.partId, selectedTranslationMarker.markerId);
+        return;
+      }
+
+      if ((event.key === "Backspace" || event.key === "Delete") && (selectedAdjustmentLayers.length > 0 || selectedAdjustmentLayer)) {
+        event.preventDefault();
+        const layerIds = selectedAdjustmentLayers.length > 0 ? selectedAdjustmentLayers.map((selection) => selection.layerId) : selectedAdjustmentLayer ? [selectedAdjustmentLayer.id] : [];
+        deleteTimelineClipboardNodes({ kind: "adjustment", nodes: (scene.adjustmentLayers ?? []).filter((layer) => layerIds.includes(layer.id)).map((layer) => ({ absoluteStart: layer.start, layer })) });
+        return;
+      }
+
+      if ((event.key === "Backspace" || event.key === "Delete") && selectedPartId) {
+        event.preventDefault();
+        deleteCompositionFromTimeline(selectedPartId);
       }
     }
 
@@ -921,7 +934,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
     };
-  }, [isPlaying, sceneDurationSeconds, selectedAdjustmentLayer, selectedPartId, selectedTranslationMarker, selectedTranslationMarkers, selectedZoomMarker, selectedZoomMarkers, timeline]);
+  }, [isPlaying, scene, sceneDurationSeconds, selectedAdjustmentLayer, selectedAdjustmentLayers, selectedPartId, selectedTranslationMarker, selectedTranslationMarkers, selectedZoomMarker, selectedZoomMarkers, timeline]);
 
   function updateCurrentPart(nextPart: Part) {
     updateProject((current) => ({
@@ -1012,9 +1025,11 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   }
 
   async function updateCompositionFromSource(basePart: Part, source: string, options: { syncSource?: boolean; history?: boolean } = {}) {
-    setCompositionSources((current) => ({ ...current, [basePart.filePath]: source }));
+    const nextSources = { ...compositionSourcesRef.current, [basePart.filePath]: source };
+    compositionSourcesRef.current = nextSources;
+    setCompositionSources(nextSources);
     const nextPart = await compositionFromSource(basePart, source);
-    const nextProject = replacePartInProject(projectRef.current, basePart.id, (currentPart) => ({
+    const nextProject = replacePartInProject({ ...projectRef.current, compositionSources: nextSources }, basePart.id, (currentPart) => ({
       ...nextPart,
       zoomMarkers: currentPart.zoomMarkers,
       translationMarkers: currentPart.translationMarkers,
@@ -1026,127 +1041,12 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     setSourceStatus(`Preview updated from ${nextPart.filePath}.`);
   }
 
-  function recordLoadedCompositionSource(filePath: string, source: string) {
-    const nextSources = { ...compositionSources, [filePath]: source };
-    setCompositionSources(nextSources);
-    setSavedCompositionSourcesSnapshot(JSON.stringify(nextSources));
-  }
-
-  async function applyExternalCompositionSource(filePath: string, source: string) {
-    const currentProject = projectRef.current;
-    const basePart = currentProject.scenes.flatMap((projectScene) => projectScene.compositions).find((projectPart) => projectPart.filePath === filePath);
-    if (!basePart) return;
-
-    const nextPart = await compositionFromSource(basePart, source);
-    const nextProject = normalizeProject(replacePartInProject(currentProject, basePart.id, (currentPart) => ({
-      ...nextPart,
-      zoomMarkers: currentPart.zoomMarkers,
-      translationMarkers: currentPart.translationMarkers,
-      snapshot: currentPart.snapshot,
-    })));
-    const nextSources = { ...compositionSourcesRef.current, [filePath]: source };
-
-    compositionSourcesRef.current = nextSources;
-    setCompositionSources(nextSources);
-    replaceProject(nextProject, { history: false, syncSources: false });
-    setSavedProjectSnapshot(getProjectContentSnapshot(nextProject));
-    setSavedCompositionSourcesSnapshot(JSON.stringify(nextSources));
-    setStaleCompositionSources((current) => {
-      if (!(filePath in current)) return current;
-      const { [filePath]: _staleSource, ...rest } = current;
-      return rest;
-    });
-    setSourceStatus(`Reloaded external changes from ${filePath}.`);
-  }
-
-  async function reloadProjectFromDisk(status = `Reloaded project from ${activeProjectManifestPathRef.current}.`) {
-    const manifestPath = activeProjectManifestPathRef.current;
-    const { project: loadedProject } = await projectPersistenceService.loadProject({ manifestPath, fallbackProject });
-    const normalizedProject = normalizeProject(loadedProject);
-    const loadedCompositionSources = await getProjectCompositionSourcesFromFiles(normalizedProject);
-    const loadedProjectSnapshot = getProjectContentSnapshot(normalizedProject);
-    const loadedCompositionSourcesSnapshot = JSON.stringify(loadedCompositionSources);
-
-    if (loadedProjectSnapshot === savedProjectSnapshotRef.current && loadedCompositionSourcesSnapshot === savedCompositionSourcesSnapshotRef.current) return;
-
-    resetProjectHistory();
-    replaceProject(normalizedProject, { history: false, syncSources: false });
-    applyEditorState(normalizedProject.editorState!);
-    compositionSourcesRef.current = loadedCompositionSources;
-    setCompositionSources(loadedCompositionSources);
-    setSavedProjectSnapshot(loadedProjectSnapshot);
-    setSavedCompositionSourcesSnapshot(loadedCompositionSourcesSnapshot);
-    setProjectReloadPending(false);
-    setStaleCompositionSources({});
-    setSourceStatus(status);
-  }
-
-  function scheduleProjectReload(reasonPath: string) {
-    window.clearTimeout(projectReloadTimerRef.current);
-    projectReloadTimerRef.current = window.setTimeout(() => {
-      if (hasUnsavedChangesRef.current) {
-        setProjectReloadPending(true);
-        setSourceStatus(`${reasonPath} changed on disk. Refresh the project to load external changes.`);
-        return;
-      }
-
-      void reloadProjectFromDisk(`Reloaded external project changes from ${reasonPath}.`).catch((error: unknown) => {
-        setSourceStatus(error instanceof Error ? error.message : `Unable to reload ${reasonPath}.`);
-      });
-    }, 120);
-  }
-
-  function handleWatchedProjectFileChanged(filePath: string) {
-    const watchedParts = new Set(watchedPartFilePathsRef.current.split("\n").filter(Boolean));
-    if (filePath === activeProjectManifestPathRef.current || filePath === watchedProjectDirectoryRef.current || !watchedParts.has(filePath)) {
-      scheduleProjectReload(filePath);
-      return;
-    }
-
-    void handleWatchedCompositionSourceChanged(filePath);
-  }
-
-  async function handleWatchedCompositionSourceChanged(filePath: string) {
-    try {
-      const source = await clipperHost.readTextFile(filePath);
-      if (compositionSourcesRef.current[filePath] === source) return;
-
-      if (modeRef.current === "code" && activePartFilePathRef.current === filePath) {
-        setStaleCompositionSources((current) => ({ ...current, [filePath]: source }));
-        setSourceStatus(`${filePath} changed on disk. Refresh the code editor to load it.`);
-        return;
-      }
-
-      await applyExternalCompositionSource(filePath, source);
-    } catch (error) {
-      setSourceStatus(error instanceof Error ? error.message : `Unable to reload ${filePath}.`);
-    }
-  }
-
-  async function refreshStaleCompositionSource(filePath: string) {
-    const source = staleCompositionSources[filePath];
-    if (source === undefined) return;
-
-    try {
-      await applyExternalCompositionSource(filePath, source);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Unable to refresh external changes.");
-    }
-  }
-
-  async function refreshExternalProjectChanges() {
-    try {
-      await reloadProjectFromDisk();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Unable to refresh project changes.");
-    }
-  }
-
   async function saveProject(projectToSave = projectRef.current) {
-    const snapshot = getProjectContentSnapshot(projectToSave);
+    const embeddedProject = normalizeProject({ ...projectToSave, compositionSources: compositionSourcesRef.current });
+    const snapshot = getProjectContentSnapshot(embeddedProject);
 
     try {
-      const result = await projectPersistenceService.saveProject({ manifestPath: activeProjectManifestPath, project: projectToSave, compositionSources });
+      const result = await projectPersistenceService.saveProject({ manifestPath: activeProjectManifestPath, project: embeddedProject });
       setSavedProjectSnapshot(result.projectSnapshot ? getProjectContentSnapshot(JSON.parse(result.projectSnapshot) as ProjectManifest) : snapshot);
       setSavedCompositionSourcesSnapshot(result.compositionSourcesSnapshot);
       setSourceStatus(result.sourceStatus);
@@ -1158,6 +1058,30 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   async function saveAllChanges() {
     if (!hasUnsavedChanges) return;
     await saveProject(projectRef.current);
+  }
+
+  function scheduleImplicitFileOperationSave() {
+    const projectToSave = normalizeProject({ ...projectRef.current, compositionSources: compositionSourcesRef.current });
+    const projectSnapshot = getProjectContentSnapshot(projectToSave);
+    const compositionSourcesSnapshot = JSON.stringify(projectToSave.compositionSources ?? {});
+    setSavedProjectSnapshot(projectSnapshot);
+    setSavedCompositionSourcesSnapshot(compositionSourcesSnapshot);
+    savedProjectSnapshotRef.current = projectSnapshot;
+    savedCompositionSourcesSnapshotRef.current = compositionSourcesSnapshot;
+
+    window.clearTimeout(implicitFileOperationSaveTimeoutRef.current);
+    implicitFileOperationSaveTimeoutRef.current = window.setTimeout(() => {
+      projectPersistenceService.saveProject({ manifestPath: activeProjectManifestPathRef.current, project: projectToSave })
+        .then((result) => setSourceStatus(result.sourceStatus))
+        .catch((error) => toast.error(error instanceof Error ? error.message : "Unable to save file operation."));
+    }, 150);
+  }
+
+  function implicitFileOperation<T extends unknown[]>(operation: (...args: T) => void) {
+    return (...args: T) => {
+      operation(...args);
+      scheduleImplicitFileOperationSave();
+    };
   }
 
   async function exportProject() {
@@ -1225,6 +1149,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   function selectPart(partId: string) {
     setSelectedPartId(partId);
     setSelectedAdjustmentLayerId(null);
+    setSelectedAdjustmentLayers([]);
     setSelectedObjectId(null);
     clearMarkerSelection();
     setSelectionPayload(null);
@@ -1234,6 +1159,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   function selectZoomMarker(partId: string, markerId: string) {
     setSelectedPartId(partId);
     setSelectedAdjustmentLayerId(null);
+    setSelectedAdjustmentLayers([]);
     setSelectedZoomMarker({ partId, markerId });
     setSelectedZoomMarkers([{ partId, markerId }]);
     setSelectedTranslationMarker(null);
@@ -1246,6 +1172,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
 
   function selectZoomMarkers(selection: ZoomMarkerSelection[]) {
     setSelectedAdjustmentLayerId(null);
+    setSelectedAdjustmentLayers([]);
     setSelectedZoomMarkers(selection);
     const primarySelection = selection.at(-1) ?? null;
     setSelectedZoomMarker(primarySelection);
@@ -1281,6 +1208,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   function selectTranslationMarker(partId: string, markerId: string) {
     setSelectedPartId(partId);
     setSelectedAdjustmentLayerId(null);
+    setSelectedAdjustmentLayers([]);
     setSelectedTranslationMarker({ partId, markerId });
     setSelectedTranslationMarkers([{ partId, markerId }]);
     setSelectedZoomMarker(null);
@@ -1293,6 +1221,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
 
   function selectTranslationMarkers(selection: TranslationMarkerSelection[]) {
     setSelectedAdjustmentLayerId(null);
+    setSelectedAdjustmentLayers([]);
     setSelectedTranslationMarkers(selection);
     const primarySelection = selection.at(-1) ?? null;
     setSelectedTranslationMarker(primarySelection);
@@ -1307,6 +1236,18 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
 
   function selectAdjustmentLayer(layerId: string) {
     setSelectedAdjustmentLayerId(layerId);
+    setSelectedAdjustmentLayers(layerId ? [{ layerId }] : []);
+    setSelectedPartId("");
+    setSelectedObjectId(null);
+    setSelectionPayload(null);
+    clearMarkerSelection();
+    if (rightPanelTab === "agent") setRightPanelTab("motion");
+    setIsPlaying(false);
+  }
+
+  function selectAdjustmentLayers(selection: AdjustmentLayerSelection[]) {
+    setSelectedAdjustmentLayers(selection);
+    setSelectedAdjustmentLayerId(selection.at(-1)?.layerId ?? null);
     setSelectedPartId("");
     setSelectedObjectId(null);
     setSelectionPayload(null);
@@ -1329,6 +1270,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   function moveAdjustmentLayer(layerId: string, start: number) {
     updateAdjustmentLayer(layerId, (layer) => ({ ...layer, start: roundTenth(clamp(start, 0, Math.max(sceneDurationSeconds - layer.duration, 0))) }));
     setSelectedAdjustmentLayerId(layerId);
+    setSelectedAdjustmentLayers([{ layerId }]);
     setSelectedPartId("");
   }
 
@@ -1348,6 +1290,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   function deleteAdjustmentLayer(layerId: string) {
     updateSceneAdjustmentLayers((layers) => layers.filter((layer) => layer.id !== layerId));
     setSelectedAdjustmentLayerId(null);
+    setSelectedAdjustmentLayers([]);
   }
 
   function startTranslationPositionPick(partId: string, markerId: string) {
@@ -1451,6 +1394,38 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     });
   }
 
+  function deleteCompositionFromTimeline(compositionId: string) {
+    if (scene.compositions.length <= 1) {
+      toast.error("A timeline needs at least one composition.");
+      return;
+    }
+
+    const deletedIndex = scene.compositions.findIndex((composition) => composition.id === compositionId);
+    if (deletedIndex < 0) return;
+    const nextSelection = scene.compositions[deletedIndex + 1]?.id ?? scene.compositions[deletedIndex - 1]?.id ?? "";
+    updateSceneParts((parts) => parts.filter((composition) => composition.id !== compositionId));
+    setSelectedPartId(nextSelection);
+    setSelectedObjectId(null);
+    setSelectionPayload(null);
+    clearMarkerSelection();
+    toast.success("Composition removed from timeline. The project composition is still available in Assets.");
+  }
+
+  function addCompositionFromLibrary(compositionId: string) {
+    const libraryComposition = compositionLibrary.find((composition) => composition.id === compositionId);
+    if (!libraryComposition) return;
+    if (scene.compositions.some((composition) => composition.id === compositionId)) {
+      toast.error("That composition is already on the timeline.");
+      return;
+    }
+
+    updateSceneParts((parts) => [...parts, libraryComposition]);
+    setSelectedPartId(libraryComposition.id);
+    clearNodeSelection();
+    setSelectedPartId(libraryComposition.id);
+    toast.success("Composition added to timeline.");
+  }
+
   function updateZoomMarker(partId: string, markerId: string, updater: (marker: ZoomMarker, part: Part) => ZoomMarker) {
     updateSceneParts((parts) => parts.map((item) => {
       if (item.id !== partId) return item;
@@ -1460,11 +1435,19 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   }
 
   function previewZoomScale(partId: string, markerId: string, scale: number) {
-    pendingZoomScalePreviewRef.current = { partId, markerId, scale };
+    if (timelineMode !== "composition" || isPickingZoomFocus) return;
+    const previewPart = scene.compositions.find((item) => item.id === partId);
+    if (!previewPart || previewPart.id !== part.id) return;
+    const previewZoomMarkers = previewPart.zoomMarkers.map((marker) => (marker.id === markerId ? { ...marker, scale } : marker));
+    const activeZoom = getActiveZoom(previewZoomMarkers, previewTime);
+    const activeTranslation = isPickingTranslationPosition ? null : getActiveTranslation(previewPart.translationMarkers, previewTime, previewPart);
+    pendingZoomScalePreviewRef.current = getCameraPreviewTransform(activeZoom, activeTranslation);
     if (zoomScalePreviewFrameRef.current) return;
     zoomScalePreviewFrameRef.current = requestAnimationFrame(() => {
       zoomScalePreviewFrameRef.current = 0;
-      setLiveZoomScalePreview(pendingZoomScalePreviewRef.current);
+      const transform = pendingZoomScalePreviewRef.current;
+      if (!transform || !cameraRef.current) return;
+      cameraRef.current.style.transform = `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`;
     });
   }
 
@@ -1474,7 +1457,6 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
       cancelAnimationFrame(zoomScalePreviewFrameRef.current);
       zoomScalePreviewFrameRef.current = 0;
     }
-    setLiveZoomScalePreview(null);
   }
 
   function updateZoomMarkers(partId: string, updater: (markers: ZoomMarker[], part: Part) => ZoomMarker[]) {
@@ -1705,6 +1687,14 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   }
 
   function getSelectedTimelineNodeClipboard(showToast = false): TimelineNodeClipboard | null {
+    if (selectedAdjustmentLayers.length > 0) {
+      const nodes = selectedAdjustmentLayers.flatMap((selection) => {
+        const layer = scene.adjustmentLayers?.find((item) => item.id === selection.layerId);
+        return layer ? [{ absoluteStart: layer.start, layer }] : [];
+      });
+      if (nodes.length > 0) return { kind: "adjustment", nodes };
+    }
+
     if (selectedAdjustmentLayer) {
       return { kind: "adjustment", nodes: [{ absoluteStart: selectedAdjustmentLayer.start, layer: selectedAdjustmentLayer }] };
     }
@@ -1730,6 +1720,8 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   }
 
   function getTimelineNodeClipboardForTarget(target: TimelineNodeContextTarget): TimelineNodeClipboard | null {
+    if (target.kind === "part") return null;
+
     if (target.kind === "adjustment") {
       const layer = scene.adjustmentLayers?.find((item) => item.id === target.layerId);
       return layer ? { kind: "adjustment", nodes: [{ absoluteStart: layer.start, layer }] } : null;
@@ -1752,6 +1744,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
       const layerIds = new Set(clipboard.nodes.map((node) => node.layer.id));
       updateSceneAdjustmentLayers((layers) => layers.filter((layer) => !layerIds.has(layer.id)));
       setSelectedAdjustmentLayerId(null);
+      setSelectedAdjustmentLayers([]);
       return;
     }
 
@@ -1871,14 +1864,17 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   function openTimelineNodeContextMenu(event: ReactMouseEvent<HTMLElement>, target: TimelineNodeContextTarget) {
     event.preventDefault();
     event.stopPropagation();
-    const targetKey = `${"partId" in target ? target.partId : ""}:${"markerId" in target ? target.markerId : target.layerId}`;
+    const targetKey = `${"partId" in target ? target.partId : ""}:${"markerId" in target ? target.markerId : "layerId" in target ? target.layerId : ""}`;
     const targetAlreadySelected = target.kind === "adjustment"
-      ? selectedAdjustmentLayerId === target.layerId
-      : target.kind === "zoom"
+      ? selectedAdjustmentLayers.some((selection) => selection.layerId === target.layerId) || selectedAdjustmentLayerId === target.layerId
+      : target.kind === "part"
+        ? selectedPartId === target.partId && !selectedZoomMarker && !selectedTranslationMarker
+        : target.kind === "zoom"
         ? selectedZoomMarkers.some((selection) => `${selection.partId}:${selection.markerId}` === targetKey) || (selectedZoomMarker?.partId === target.partId && selectedZoomMarker.markerId === target.markerId)
         : selectedTranslationMarkers.some((selection) => `${selection.partId}:${selection.markerId}` === targetKey) || (selectedTranslationMarker?.partId === target.partId && selectedTranslationMarker.markerId === target.markerId);
     const menuClipboard = targetAlreadySelected ? getSelectedTimelineNodeClipboard() : getTimelineNodeClipboardForTarget(target);
     if (target.kind === "adjustment") selectAdjustmentLayer(target.layerId);
+    if (target.kind === "part") selectPart(target.partId);
     if (target.kind === "zoom") selectZoomMarker(target.partId, target.markerId);
     if (target.kind === "translation") selectTranslationMarker(target.partId, target.markerId);
     setAppContextMenu({
@@ -1898,9 +1894,8 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
         } },
         { label: "Paste", action: pasteTimelineNodesWithToast, disabled: !timelineNodeClipboardRef.current },
         { label: "Delete", danger: true, action: () => {
-          if (target.kind === "adjustment") deleteAdjustmentLayer(target.layerId);
-          if (target.kind === "zoom") deleteZoomMarker(target.partId, target.markerId);
-          if (target.kind === "translation") deleteTranslationMarker(target.partId, target.markerId);
+          if (target.kind === "part") deleteCompositionFromTimeline(target.partId);
+          if (target.kind !== "part" && menuClipboard) deleteTimelineClipboardNodes(menuClipboard);
         } },
       ],
     });
@@ -2568,6 +2563,327 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     }
   }
 
+  async function copyCompositionPath(compositionId: string) {
+    const composition = compositionLibrary.find((item) => item.id === compositionId);
+    if (!composition) return;
+
+    try {
+      await navigator.clipboard.writeText(composition.filePath);
+      toast.success("Composition path copied");
+    } catch {
+      toast.error("Unable to copy composition path");
+    }
+  }
+
+  function revealComposition(compositionId?: string) {
+    const composition = compositionId ? compositionLibrary.find((item) => item.id === compositionId) : null;
+    void clipperHost.revealFile(composition?.filePath ?? watchedProjectDirectory).catch(() => toast.error("Unable to reveal in Finder."));
+  }
+
+  function revealAssetRoot() {
+    void clipperHost.revealFile(project.assetsPath).catch(() => toast.error("Unable to reveal in Finder."));
+  }
+
+  function createComposition(folderPath = watchedProjectDirectory) {
+    const compositionId = createCompositionId();
+    const composition: Part = {
+      ...part,
+      id: compositionId,
+      name: "New Composition",
+      filePath: `${folderPath}/${compositionId}.ts`,
+      duration: 3,
+      objects: [],
+      snapshot: [],
+      zoomMarkers: [],
+      translationMarkers: [],
+    };
+    const source = compositionToSource(composition);
+    const nextSources = { ...compositionSourcesRef.current, [composition.filePath]: source };
+    compositionSourcesRef.current = nextSources;
+    setCompositionSources(nextSources);
+    updateProject((current) => ({
+      ...current,
+      compositionSources: nextSources,
+      compositionLibrary: [...(current.compositionLibrary ?? []), composition],
+      compositionFolders: Array.from(new Set([...(current.compositionFolders ?? []), folderPath])),
+    }), { syncSources: false });
+    toast.success("Composition added to the library.");
+  }
+
+  function createCompositionFolder(parentFolderPath = watchedProjectDirectory) {
+    const folderPath = `${parentFolderPath}/new-folder-${Date.now().toString(36)}`;
+    updateProject((current) => ({ ...current, compositionFolders: Array.from(new Set([...(current.compositionFolders ?? []), folderPath])) }));
+  }
+
+  function createTimeline() {
+    const timelineId = `tl_${nanoid(8)}`;
+    const firstComposition = compositionLibrary[0];
+    updateProject((current) => ({
+      ...current,
+      scenes: [...current.scenes, {
+        id: timelineId,
+        name: `Timeline ${(current.timelines?.length ?? current.scenes.length) + 1}`,
+        compositions: firstComposition ? [firstComposition] : [],
+        adjustmentLayers: [],
+      }],
+      timelines: [...(current.timelines ?? []), {
+        id: timelineId,
+        name: `Timeline ${(current.timelines?.length ?? current.scenes.length) + 1}`,
+        filePath: `${watchedProjectDirectory}/${timelineId}.timeline.json`,
+        clips: firstComposition ? [{ id: firstComposition.id, compositionId: firstComposition.id, zoomMarkers: [], translationMarkers: [] }] : [],
+        adjustmentLayers: [],
+        settings: {},
+      }],
+    }));
+    setSelectedSceneId(timelineId);
+    updateEditorState((state) => ({ ...state, selectedSceneId: timelineId, selectedTimelineId: timelineId, currentSceneTime: 0 }));
+    clearNodeSelection();
+  }
+
+  function selectTimeline(timelineId: string) {
+    setSelectedSceneId(timelineId);
+    updateEditorState((state) => ({ ...state, selectedSceneId: timelineId, selectedTimelineId: timelineId, currentSceneTime: 0 }));
+    clearNodeSelection();
+    setSelectedPartId("");
+    setCurrentSceneTime(0);
+  }
+
+  function renameTimeline(timelineId: string, name: string) {
+    const nextName = name.trim();
+    if (!nextName) return;
+    updateProject((current) => ({
+      ...current,
+      scenes: current.scenes.map((scene) => scene.id === timelineId ? { ...scene, name: nextName } : scene),
+      timelines: (current.timelines ?? []).map((timeline) => timeline.id === timelineId ? { ...timeline, name: nextName } : timeline),
+    }));
+  }
+
+  function reorderTimeline(sourceTimelineId: string, targetTimelineId: string, action: "before" | "after") {
+    if (sourceTimelineId === targetTimelineId) return;
+    updateProject((current) => {
+      const timelines = current.timelines ?? [];
+      const scenes = current.scenes;
+      const sourceTimelineIndex = timelines.findIndex((timeline) => timeline.id === sourceTimelineId);
+      const targetTimelineIndex = timelines.findIndex((timeline) => timeline.id === targetTimelineId);
+      const sourceSceneIndex = scenes.findIndex((scene) => scene.id === sourceTimelineId);
+      const targetSceneIndex = scenes.findIndex((scene) => scene.id === targetTimelineId);
+      if (sourceTimelineIndex < 0 || targetTimelineIndex < 0 || sourceSceneIndex < 0 || targetSceneIndex < 0) return current;
+
+      return {
+        ...current,
+        timelines: reorderByIntent(timelines, sourceTimelineIndex, targetTimelineIndex, action),
+        scenes: reorderByIntent(scenes, sourceSceneIndex, targetSceneIndex, action),
+      };
+    });
+  }
+
+  function reorderComposition(sourceCompositionId: string, targetCompositionId: string, action: "before" | "after") {
+    if (sourceCompositionId === targetCompositionId) return;
+    updateProject((current) => {
+      const library = current.compositionLibrary ?? compositionLibrary;
+      const sourceIndex = library.findIndex((composition) => composition.id === sourceCompositionId);
+      const targetIndex = library.findIndex((composition) => composition.id === targetCompositionId);
+      if (sourceIndex < 0 || targetIndex < 0) return current;
+      return { ...current, compositionLibrary: reorderByIntent(library, sourceIndex, targetIndex, action) };
+    });
+  }
+
+  function reorderCompositionFolder(sourceFolderPath: string, targetFolderPath: string, action: "before" | "after") {
+    if (sourceFolderPath === targetFolderPath) return;
+    updateProject((current) => {
+      const folders = current.compositionFolders ?? [];
+      const sourceIndex = folders.indexOf(sourceFolderPath);
+      const targetIndex = folders.indexOf(targetFolderPath);
+      if (sourceIndex < 0 || targetIndex < 0) return current;
+      return { ...current, compositionFolders: reorderByIntent(folders, sourceIndex, targetIndex, action) };
+    });
+  }
+
+  function moveTimeline(timelineId: string, folderPath: string) {
+    updateProject((current) => ({
+      ...current,
+      compositionFolders: Array.from(new Set([...(current.compositionFolders ?? []), folderPath])),
+      timelines: (current.timelines ?? []).map((timeline) => timeline.id === timelineId ? { ...timeline, filePath: `${folderPath}/${timeline.id}.timeline.json` } : timeline),
+    }));
+  }
+
+  function deleteTimeline(timelineId: string) {
+    if ((project.timelines?.length ?? 0) <= 1) {
+      toast.error("A project needs at least one timeline.");
+      return;
+    }
+    const remainingTimelines = (project.timelines ?? []).filter((timeline) => timeline.id !== timelineId);
+    const nextTimelineId = remainingTimelines[0]?.id ?? selectedSceneId;
+    updateProject((current) => ({ ...current, scenes: current.scenes.filter((scene) => scene.id !== timelineId), timelines: (current.timelines ?? []).filter((timeline) => timeline.id !== timelineId) }));
+    if (timelineId === selectedSceneId) selectTimeline(nextTimelineId);
+  }
+
+  function compositionFilePathWithName(composition: Part, name: string) {
+    const directory = getDirectoryPath(composition.filePath);
+    const extensionIndex = composition.filePath.lastIndexOf(".");
+    const extension = extensionIndex > composition.filePath.lastIndexOf("/") ? composition.filePath.slice(extensionIndex) : ".ts";
+    const slug = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || composition.id;
+    return `${directory}/${slug}${extension}`;
+  }
+
+  function renameComposition(compositionId: string, name: string) {
+    const composition = compositionLibrary.find((item) => item.id === compositionId);
+    const nextName = name.trim();
+    if (!composition || !nextName) return;
+    const nextFilePath = compositionFilePathWithName(composition, nextName);
+    const source = compositionSourcesRef.current[composition.filePath];
+    const { [composition.filePath]: _removed, ...rest } = compositionSourcesRef.current;
+    const nextSources = source === undefined ? rest : { ...rest, [nextFilePath]: source };
+    compositionSourcesRef.current = nextSources;
+    setCompositionSources(nextSources);
+    updateProject((current) => replacePartInProject({
+      ...current,
+      compositionSources: nextSources,
+      compositionLibrary: current.compositionLibrary ?? compositionLibrary,
+    }, compositionId, (item) => ({ ...item, name: nextName, filePath: nextFilePath })), { syncSources: false });
+  }
+
+  function updateCompositionFilePath(currentProject: ProjectManifest, compositionId: string, nextFilePath: string) {
+    return replacePartInProject({ ...currentProject, compositionLibrary: currentProject.compositionLibrary ?? compositionLibrary }, compositionId, (item) => ({ ...item, filePath: nextFilePath }));
+  }
+
+  function moveComposition(compositionId: string, folderPath: string) {
+    const composition = compositionLibrary.find((item) => item.id === compositionId);
+    if (!composition || getDirectoryPath(composition.filePath) === folderPath) return;
+    const fileName = composition.filePath.slice(composition.filePath.lastIndexOf("/") + 1);
+    const nextFilePath = `${folderPath}/${fileName}`;
+    const source = compositionSourcesRef.current[composition.filePath];
+    const { [composition.filePath]: _removed, ...rest } = compositionSourcesRef.current;
+    const nextSources = source === undefined ? rest : { ...rest, [nextFilePath]: source };
+    compositionSourcesRef.current = nextSources;
+    setCompositionSources(nextSources);
+    updateProject((current) => ({ ...updateCompositionFilePath({ ...current, compositionSources: nextSources }, compositionId, nextFilePath), compositionFolders: Array.from(new Set([...(current.compositionFolders ?? []), folderPath])) }), { syncSources: false });
+  }
+
+  function renameCompositionFolder(folderPath: string, name: string) {
+    const nextName = name.trim().replace(/[/\\]/g, "-");
+    if (!nextName) return;
+    const parentPath = getDirectoryPath(folderPath);
+    const nextFolderPath = parentPath ? `${parentPath}/${nextName}` : nextName;
+    const nextSources = Object.fromEntries(Object.entries(compositionSourcesRef.current).map(([path, source]) => [path.startsWith(`${folderPath}/`) ? `${nextFolderPath}${path.slice(folderPath.length)}` : path, source]));
+    compositionSourcesRef.current = nextSources;
+    setCompositionSources(nextSources);
+    updateProject((current) => ({
+      ...current,
+      compositionSources: nextSources,
+      compositionFolders: (current.compositionFolders ?? []).map((path) => path === folderPath || path.startsWith(`${folderPath}/`) ? `${nextFolderPath}${path.slice(folderPath.length)}` : path),
+      compositionLibrary: (current.compositionLibrary ?? compositionLibrary).map((item) => item.filePath.startsWith(`${folderPath}/`) ? { ...item, filePath: `${nextFolderPath}${item.filePath.slice(folderPath.length)}` } : item),
+      scenes: current.scenes.map((currentScene) => ({ ...currentScene, compositions: currentScene.compositions.map((item) => item.filePath.startsWith(`${folderPath}/`) ? { ...item, filePath: `${nextFolderPath}${item.filePath.slice(folderPath.length)}` } : item) })),
+    }), { syncSources: false });
+  }
+
+  function moveCompositionFolder(folderPath: string, parentFolderPath: string) {
+    if (parentFolderPath === folderPath || parentFolderPath.startsWith(`${folderPath}/`)) return;
+    const folderName = folderPath.slice(folderPath.lastIndexOf("/") + 1);
+    const nextFolderPath = parentFolderPath ? `${parentFolderPath}/${folderName}` : folderName;
+    if (nextFolderPath === folderPath) return;
+
+    const nextSources = Object.fromEntries(Object.entries(compositionSourcesRef.current).map(([path, source]) => [path.startsWith(`${folderPath}/`) ? `${nextFolderPath}${path.slice(folderPath.length)}` : path, source]));
+    compositionSourcesRef.current = nextSources;
+    setCompositionSources(nextSources);
+    updateProject((current) => ({
+      ...current,
+      compositionSources: nextSources,
+      compositionFolders: Array.from(new Set((current.compositionFolders ?? []).map((path) => path === folderPath || path.startsWith(`${folderPath}/`) ? `${nextFolderPath}${path.slice(folderPath.length)}` : path))),
+      compositionLibrary: (current.compositionLibrary ?? compositionLibrary).map((item) => item.filePath.startsWith(`${folderPath}/`) ? { ...item, filePath: `${nextFolderPath}${item.filePath.slice(folderPath.length)}` } : item),
+      scenes: current.scenes.map((currentScene) => ({
+        ...currentScene,
+        compositions: currentScene.compositions.map((item) => item.filePath.startsWith(`${folderPath}/`) ? { ...item, filePath: `${nextFolderPath}${item.filePath.slice(folderPath.length)}` } : item),
+      })),
+    }), { syncSources: false });
+  }
+
+  function applyFileManagerTreeSnapshot(snapshot: FileManagerTreeSnapshot) {
+    updateProject((current) => {
+      const library = current.compositionLibrary ?? compositionLibrary;
+      const timelines = current.timelines ?? [];
+      const currentSources = compositionSourcesRef.current;
+      let nextSources = currentSources;
+
+      for (const composition of library) {
+        const nextFilePath = snapshot.compositionFilePaths[composition.id];
+        if (!nextFilePath || nextFilePath === composition.filePath) continue;
+        const source = nextSources[composition.filePath];
+        const { [composition.filePath]: _removed, ...rest } = nextSources;
+        nextSources = source === undefined ? rest : { ...rest, [nextFilePath]: source };
+      }
+
+      if (nextSources !== currentSources) {
+        compositionSourcesRef.current = nextSources;
+        setCompositionSources(nextSources);
+      }
+
+      const nextCompositionById = new Map(library.map((composition) => [composition.id, { ...composition, filePath: snapshot.compositionFilePaths[composition.id] ?? composition.filePath }]));
+      const orderedCompositionIds = new Set(snapshot.compositionOrder);
+      const nextTimelineById = new Map(timelines.map((timeline) => [timeline.id, { ...timeline, filePath: snapshot.timelineFilePaths[timeline.id] ?? timeline.filePath }]));
+      const orderedTimelineIds = new Set(snapshot.timelineOrder);
+      const nextSceneById = new Map(current.scenes.map((currentScene) => [currentScene.id, {
+        ...currentScene,
+        compositions: currentScene.compositions.map((composition) => ({ ...composition, filePath: snapshot.compositionFilePaths[composition.id] ?? composition.filePath })),
+      }]));
+
+      return {
+        ...current,
+        assets: snapshot.assets,
+        compositionSources: nextSources,
+        compositionFolders: snapshot.compositionFolders,
+        editorState: { ...(current.editorState ?? initialProject.editorState!), fileManagerState: snapshot.fileManagerState },
+        compositionLibrary: [...snapshot.compositionOrder.flatMap((id) => nextCompositionById.get(id) ?? []), ...library.filter((composition) => !orderedCompositionIds.has(composition.id)).map((composition) => nextCompositionById.get(composition.id) ?? composition)],
+        timelines: [...snapshot.timelineOrder.flatMap((id) => nextTimelineById.get(id) ?? []), ...timelines.filter((timeline) => !orderedTimelineIds.has(timeline.id)).map((timeline) => nextTimelineById.get(timeline.id) ?? timeline)],
+        scenes: [...snapshot.timelineOrder.flatMap((id) => nextSceneById.get(id) ?? []), ...current.scenes.filter((currentScene) => !orderedTimelineIds.has(currentScene.id)).map((currentScene) => nextSceneById.get(currentScene.id) ?? currentScene)],
+      };
+    }, { syncSources: false });
+  }
+
+  function updateFileManagerState(fileManagerState: EditorState["fileManagerState"]) {
+    updateEditorState((state) => ({ ...state, fileManagerState }));
+  }
+
+  function deleteCompositionFolder(folderPath: string) {
+    const affectedCompositions = compositionLibrary.filter((item) => item.filePath.startsWith(`${folderPath}/`));
+    const affectedIds = new Set(affectedCompositions.map((item) => item.id));
+    const nextSources = Object.fromEntries(Object.entries(compositionSourcesRef.current).filter(([path]) => !path.startsWith(`${folderPath}/`)));
+    compositionSourcesRef.current = nextSources;
+    setCompositionSources(nextSources);
+    updateProject((current) => ({
+      ...current,
+      compositionSources: nextSources,
+      compositionFolders: (current.compositionFolders ?? []).filter((path) => path !== folderPath && !path.startsWith(`${folderPath}/`)),
+      compositionLibrary: (current.compositionLibrary ?? compositionLibrary).filter((item) => !affectedIds.has(item.id)),
+      scenes: current.scenes.map((currentScene) => ({ ...currentScene, compositions: currentScene.compositions.filter((item) => !affectedIds.has(item.id)) })),
+    }), { syncSources: false });
+  }
+
+  function revealCompositionFolder(folderPath: string) {
+    void clipperHost.revealFile(folderPath).catch(() => toast.error("Unable to reveal in Finder."));
+  }
+
+  function duplicateComposition(compositionId: string) {
+    const composition = compositionLibrary.find((item) => item.id === compositionId);
+    if (!composition) return;
+    const duplicateId = createCompositionId();
+    const duplicate: Part = { ...composition, id: duplicateId, name: `${composition.name} copy`, filePath: `${getDirectoryPath(composition.filePath)}/${duplicateId}.ts`, zoomMarkers: [], translationMarkers: [], snapshot: [] };
+    const source = compositionToSource(duplicate);
+    const nextSources = { ...compositionSourcesRef.current, [duplicate.filePath]: source };
+    compositionSourcesRef.current = nextSources;
+    setCompositionSources(nextSources);
+    updateProject((current) => ({ ...current, compositionSources: nextSources, compositionLibrary: [...(current.compositionLibrary ?? compositionLibrary), duplicate] }), { syncSources: false });
+  }
+
+  function deleteCompositionFile(compositionId: string) {
+    const composition = compositionLibrary.find((item) => item.id === compositionId);
+    if (!composition) return;
+    const { [composition.filePath]: _removed, ...nextSources } = compositionSourcesRef.current;
+    compositionSourcesRef.current = nextSources;
+    setCompositionSources(nextSources);
+    updateProject((current) => deleteCompositionFromProject({ ...current, compositionSources: nextSources }, compositionId), { syncSources: false });
+  }
+
   function duplicateAsset(assetId: string) {
     updateProject((current) => ({ ...current, assets: duplicateAssetTree(current.assets ?? defaultAssets, assetId) }));
   }
@@ -2643,8 +2959,45 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     });
   }
 
+  const fileManagerProps: FileManagerProps = {
+    assets,
+    compositions: compositionLibrary,
+    compositionFolders: project.compositionFolders ?? [],
+    compositionRootPath: watchedProjectDirectory,
+    fileManagerState: project.editorState?.fileManagerState,
+    timelines,
+    timelineCompositionIds,
+    onAddComposition: addCompositionFromLibrary,
+    onApplyTreeSnapshot: implicitFileOperation(applyFileManagerTreeSnapshot),
+    onCopyAsset: copyAssetPath,
+    onCopyCompositionPath: copyCompositionPath,
+    onCreateComposition: implicitFileOperation(createComposition),
+    onCreateCompositionFolder: implicitFileOperation(createCompositionFolder),
+    onCreateFolder: implicitFileOperation(createAssetFolder),
+    onCreateTimeline: implicitFileOperation(createTimeline),
+    onDeleteAsset: implicitFileOperation(deleteAsset),
+    onDeleteComposition: implicitFileOperation(deleteCompositionFile),
+    onDeleteCompositionFolder: implicitFileOperation(deleteCompositionFolder),
+    onDeleteTimeline: implicitFileOperation(deleteTimeline),
+    onDropFiles: implicitFileOperation(importDroppedAssets),
+    onDuplicateAsset: implicitFileOperation(duplicateAsset),
+    onDuplicateComposition: implicitFileOperation(duplicateComposition),
+    onFileManagerStateChange: updateFileManagerState,
+    onMoveComposition: implicitFileOperation(moveComposition),
+    onMoveTimeline: implicitFileOperation(moveTimeline),
+    onRenameAsset: implicitFileOperation(renameAsset),
+    onRenameComposition: implicitFileOperation(renameComposition),
+    onRenameCompositionFolder: implicitFileOperation(renameCompositionFolder),
+    onRenameTimeline: implicitFileOperation(renameTimeline),
+    onRevealAssetRoot: revealAssetRoot,
+    onRevealComposition: revealComposition,
+    onRevealCompositionFolder: revealCompositionFolder,
+    onSelectTimeline: selectTimeline,
+    onSortAssets: implicitFileOperation(sortAssets),
+  };
+
   return (
-    <TooltipProvider delayDuration={650} skipDelayDuration={250}>
+    <>
     <main className="grid h-screen grid-rows-[48px_minmax(0,1fr)_340px] bg-[#12141a] text-[#f7f7f8]">
       <header className={`${appDragRegion} grid grid-cols-[220px_1fr_430px] items-center gap-[18px] border-b border-[#2d313b] bg-[rgba(22,24,31,0.98)] px-[22px]`}>
         <div />
@@ -2654,8 +3007,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
           {!renamingProject ? <span className="truncate text-xs text-[#9b9da7]">{scene.name} / {part.name}</span> : null}
         </div>
         <div className={`${appNoDragRegion} flex justify-end gap-1.5`}>
-          <button className={appBarActionButtonBase} title="Open a Clipper project.json" onClick={() => void openProjectManifest()}>Open</button>
-          {projectReloadPending ? <button className={appBarActionButtonBase} title="Refresh external project changes from disk" onClick={() => void refreshExternalProjectChanges()}>Refresh</button> : null}
+          <button className={appBarActionButtonBase} title="Open a Clipper .clipper project" onClick={() => void openProjectManifest()}>Open</button>
           <button className={appBarActionButtonBase} title="Settings (Cmd/Ctrl+,)" onClick={() => setSettingsOpen(true)}>Settings</button>
           <button className={appBarActionButtonBase} onClick={() => setExportDialogOpen(true)}>Export</button>
           <button className={appBarSaveButtonClass(hasUnsavedChanges)} disabled={!hasUnsavedChanges} title="Save every project, timeline, inspector, and active code change (Ctrl+S or Cmd+S)" onClick={() => void saveAllChanges()}>Save</button>
@@ -2669,7 +3021,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
             <button className={`${segmentedTabBase} flex items-center justify-center gap-1.5 ${leftPanelTab === "tools" ? segmentedTabActive : segmentedTabInactive}`} onClick={() => setLeftPanelTab("tools")}><Sparkles size={14} />Effects</button>
           </div>
           {leftPanelTab === "assets" ? (
-            <AssetManager assets={assets} onCopyAsset={copyAssetPath} onCreateFolder={createAssetFolder} onDeleteAsset={deleteAsset} onDropFiles={importDroppedAssets} onDuplicateAsset={duplicateAsset} onMoveAsset={moveAsset} onRenameAsset={renameAsset} onSortAssets={sortAssets} />
+            <FileManager {...fileManagerProps} />
           ) : (
             <ToolsPanel timelineMode={timelineMode} canSnapMiddle={Boolean(zoomMiddleSnap)} onAddAdjustmentLayer={addAdjustmentLayer} onAddTranslationMarker={addTranslationMarker} onAddZoomMarker={addZoomMarker} onSnapMiddle={() => snapZoomMiddle()} />
           )}
@@ -2703,7 +3055,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
                 playbackClock={playbackClock}
                 previewTime={previewTime}
                 timelineMode={timelineMode}
-                zoomMarkers={previewZoomMarkers}
+                zoomMarkers={part.zoomMarkers}
                 pickingTranslationPosition={isPickingTranslationPosition}
                 pickingZoomFocus={isPickingZoomFocus}
                 selectedObjects={selectionPayload?.objects ?? []}
@@ -2720,9 +3072,11 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
                 onTextObjectDoubleClick={startTextObjectEdit}
               />
             ) : null}
-            <div className={mode === "code" ? "min-h-0 h-full w-full" : "pointer-events-none invisible absolute inset-0 h-full w-full overflow-hidden"}>
-              <CodePane key={part.filePath} part={part} source={compositionSources[part.filePath]} viewportState={project.editorState?.code?.[part.filePath]} active={mode === "code"} isStale={staleCompositionSources[part.filePath] !== undefined} onRefreshSource={() => void refreshStaleCompositionSource(part.filePath)} onSaveAll={saveAllChanges} onSourceChange={(source) => updateCompositionFromSource(part, source, { history: false, syncSource: false })} onSourceLoad={(source) => recordLoadedCompositionSource(part.filePath, source)} onViewportStateChange={updateCodeViewportState} />
-            </div>
+            {mode === "code" ? (
+              <div className="min-h-0 h-full w-full">
+                <CodePane key={part.id} part={part} source={compositionSources[part.filePath]} viewportState={project.editorState?.code?.[part.id]} onSaveAll={saveAllChanges} onSourceChange={(source) => updateCompositionFromSource(part, source, { history: false, syncSource: false })} onViewportStateChange={updateCodeViewportState} />
+              </div>
+            ) : null}
           </div>
 
           <div className="grid grid-cols-[1fr_auto_1fr] items-center border-t border-[#2d313b] bg-[#171920] px-7">
@@ -2776,6 +3130,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
         selectedTranslationMarkerId={selectedTranslationMarker?.markerId ?? null}
         selectedTranslationMarkers={selectedTranslationMarkers}
         selectedAdjustmentLayerId={selectedAdjustmentLayerId}
+        selectedAdjustmentLayers={selectedAdjustmentLayers}
         mode={timelineMode}
         timelineViewportState={project.editorState?.timeline ?? defaultTimelineViewportState}
         timeline={timeline}
@@ -2788,6 +3143,8 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
         onSelectTranslationMarker={selectTranslationMarker}
         onSelectTranslationMarkers={selectTranslationMarkers}
         onSelectAdjustmentLayer={selectAdjustmentLayer}
+        onSelectAdjustmentLayers={selectAdjustmentLayers}
+        onClearTimelineSelection={clearNodeSelection}
         onOpenNodeContextMenu={openTimelineNodeContextMenu}
         onMoveAdjustmentLayer={moveAdjustmentLayer}
         onUpdateAdjustmentLayer={updateAdjustmentLayer}
@@ -2799,6 +3156,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
         onScrub={scrubToSceneTime}
         onUpdateZoomMarkers={updateZoomMarkers}
         onUpdateTranslationMarkers={updateTranslationMarkers}
+        onAddComposition={addCompositionFromLibrary}
       />
     </main>
     <ExportMediaDialog
@@ -2851,7 +3209,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
         },
       }}
     />
-    </TooltipProvider>
+    </>
   );
 }
 

@@ -11,6 +11,15 @@ class ClipperHostService {
     return response.text();
   }
 
+  async readBinaryFile(relativePath: string) {
+    if (window.clipper?.readBinaryFile) return window.clipper.readBinaryFile(relativePath);
+
+    const response = await fetch(`/__clipper_fs/read?path=${encodeURIComponent(relativePath)}`);
+    if (!response.ok) throw new Error((await response.text()) || "Unable to load binary file.");
+    const buffer = await response.arrayBuffer();
+    return arrayBufferToBase64(buffer);
+  }
+
   async writeTextFile(relativePath: string, content: string) {
     if (window.clipper) {
       await window.clipper.writeTextFile(relativePath, content);
@@ -26,8 +35,39 @@ class ClipperHostService {
     if (!response.ok) throw new Error((await response.text()) || "Unable to save composition file.");
   }
 
-  async watchTextFiles(relativePaths: string[]) {
-    await window.clipper?.watchTextFiles?.(relativePaths);
+  async writeBinaryFile(relativePath: string, base64Content: string) {
+    if (window.clipper?.writeBinaryFile) {
+      await window.clipper.writeBinaryFile(relativePath, base64Content);
+      return;
+    }
+
+    const response = await fetch(`/__clipper_fs/write?path=${encodeURIComponent(relativePath)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream" },
+      body: base64ToUint8Array(base64Content),
+    });
+
+    if (!response.ok) throw new Error((await response.text()) || "Unable to save binary file.");
+  }
+
+  async createDirectory(relativePath: string) {
+    await window.clipper?.createDirectory?.(relativePath);
+  }
+
+  async revealFile(relativePath: string) {
+    await window.clipper?.revealFile?.(relativePath);
+  }
+
+  async trashFile(relativePath: string) {
+    await window.clipper?.trashFile?.(relativePath);
+  }
+
+  async renameFile(relativePath: string, nextRelativePath: string) {
+    await window.clipper?.renameFile?.(relativePath, nextRelativePath);
+  }
+
+  async copyFile(relativePath: string, nextRelativePath: string) {
+    await window.clipper?.copyFile?.(relativePath, nextRelativePath);
   }
 
   async listSystemFonts() {
@@ -51,18 +91,6 @@ class ClipperHostService {
     }
   }
 
-  async watchProjectFiles(watchPaths: { files: string[]; directories: string[] }) {
-    await window.clipper?.watchProjectFiles?.(watchPaths);
-  }
-
-  onTextFileChanged(callback: (relativePath: string) => void) {
-    return window.clipper?.onTextFileChanged?.(callback) ?? (() => {});
-  }
-
-  onProjectFileChanged(callback: (relativePath: string) => void) {
-    return window.clipper?.onProjectFileChanged?.(callback) ?? (() => {});
-  }
-
   async openProjectManifest() {
     if (!window.clipper?.openProjectManifest) return null;
     return window.clipper.openProjectManifest();
@@ -81,6 +109,20 @@ class ClipperHostService {
   async cancelRenderVideoExport(exportId: string) {
     await window.clipper?.cancelRenderVideoExport?.(exportId);
   }
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer) {
+  let binary = "";
+  const bytes = new Uint8Array(buffer);
+  for (let index = 0; index < bytes.byteLength; index += 1) binary += String.fromCharCode(bytes[index]);
+  return btoa(binary);
+}
+
+function base64ToUint8Array(value: string) {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return bytes;
 }
 
 export const clipperHost = new ClipperHostService();

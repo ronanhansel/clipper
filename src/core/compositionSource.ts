@@ -56,6 +56,7 @@ export async function compositionFromSource(baseComposition: Part, source: strin
 
   return {
     ...baseComposition,
+    sourceMissing: undefined,
     duration: sourceComposition.duration,
     frame: sourceFrameToCompositionFrame(sourceComposition.frame),
     background: sourceBackgroundToLayer(sourceComposition.background),

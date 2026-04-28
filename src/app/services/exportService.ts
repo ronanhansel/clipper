@@ -40,7 +40,7 @@ class ExportService {
             assets: project.assets ?? defaultAssets,
           },
           validation: validateScene(scene),
-          sources: includeSources ? Object.fromEntries(scene.compositions.map((item) => [item.filePath, compositionSources[item.filePath] ?? compositionToSource(item)])) : undefined,
+          sources: includeSources ? Object.fromEntries(scene.compositions.flatMap((item) => item.sourceMissing ? [] : [[item.filePath, compositionSources[item.filePath] ?? compositionToSource(item)]])) : undefined,
         };
     const content = `${JSON.stringify(payload, null, 2)}\n`;
     const defaultFileName = `${slugifyFileName(project.name)}-${slugifyFileName(scene.name)}.${format === "scene-json" ? "scene" : "project"}.json`;

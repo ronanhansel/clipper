@@ -2,7 +2,7 @@ import { createContext, useContext, useRef, type PropsWithChildren } from "react
 import { createStore, useStore, type StoreApi } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import { defaultFramePreviewScale, defaultScrubCommitThrottleMs } from "../config";
-import type { ContextMenuState, ExportDialogTab, LeftPanelTab, Mode, PlaybackClock, ProjectExportFormat, RightPanelTab, SettingsSection, TranslationMarkerSelection, VideoExportProgress, ZoomMarkerSelection } from "../types";
+import type { AdjustmentLayerSelection, ContextMenuState, ExportDialogTab, LeftPanelTab, Mode, PlaybackClock, ProjectExportFormat, RightPanelTab, SettingsSection, TranslationMarkerSelection, VideoExportProgress, ZoomMarkerSelection } from "../types";
 import { defaultPreviewViewportState, defaultTimelineMode } from "../../core/project";
 import type { Bounds, EditorState, Point, ProjectManifest, SelectionPayload, TimelineMode } from "../../core/types";
 
@@ -24,6 +24,7 @@ export type EditorStoreState = {
   selectedTranslationMarkers: TranslationMarkerSelection[];
   positionPickTranslationMarker: MarkerSelection;
   selectedAdjustmentLayerId: string | null;
+  selectedAdjustmentLayers: AdjustmentLayerSelection[];
   selectionPayload: SelectionPayload | null;
   framePickPreviewPoint: Point | null;
   dragStart: Point | null;
@@ -34,7 +35,6 @@ export type EditorStoreState = {
   playbackClock: PlaybackClock;
   frameZoomBarOpen: boolean;
   framePreviewScale: number;
-  liveZoomScalePreview: { partId: string; markerId: string; scale: number } | null;
   scrubSnapEnabled: boolean;
   scrubCommitThrottleMs: number;
   fastSelectEnabled: boolean;
@@ -70,6 +70,7 @@ export type EditorStoreActions = {
   setSelectedTranslationMarkers: (selection: Setter<TranslationMarkerSelection[]>) => void;
   setPositionPickTranslationMarker: (selection: Setter<MarkerSelection>) => void;
   setSelectedAdjustmentLayerId: (id: Setter<string | null>) => void;
+  setSelectedAdjustmentLayers: (selection: Setter<AdjustmentLayerSelection[]>) => void;
   setSelectionPayload: (payload: Setter<SelectionPayload | null>) => void;
   setFramePickPreviewPoint: (point: Setter<Point | null>) => void;
   setDragStart: (point: Setter<Point | null>) => void;
@@ -80,7 +81,6 @@ export type EditorStoreActions = {
   setPlaybackClock: (clock: Setter<PlaybackClock>) => void;
   setFrameZoomBarOpen: (open: Setter<boolean>) => void;
   setFramePreviewScale: (scale: Setter<number>) => void;
-  setLiveZoomScalePreview: (preview: Setter<EditorStoreState["liveZoomScalePreview"]>) => void;
   setScrubSnapEnabled: (enabled: Setter<boolean>) => void;
   setScrubCommitThrottleMs: (ms: Setter<number>) => void;
   setFastSelectEnabled: (enabled: Setter<boolean>) => void;
@@ -134,6 +134,7 @@ function getInitialState(project: ProjectManifest): EditorStoreState {
     selectedTranslationMarkers: [],
     positionPickTranslationMarker: null,
     selectedAdjustmentLayerId: null,
+    selectedAdjustmentLayers: [],
     selectionPayload: null,
     framePickPreviewPoint: null,
     dragStart: null,
@@ -144,7 +145,6 @@ function getInitialState(project: ProjectManifest): EditorStoreState {
     playbackClock: null,
     frameZoomBarOpen: editorState?.preview?.zoomBarOpen ?? defaultPreviewViewportState.zoomBarOpen,
     framePreviewScale: editorState?.preview?.scale ?? defaultFramePreviewScale,
-    liveZoomScalePreview: null,
     scrubSnapEnabled: false,
     scrubCommitThrottleMs: defaultScrubCommitThrottleMs,
     fastSelectEnabled: false,
@@ -183,6 +183,7 @@ export function createEditorStore(project: ProjectManifest) {
     setSelectedTranslationMarkers: createFieldSetter(set, "selectedTranslationMarkers"),
     setPositionPickTranslationMarker: createFieldSetter(set, "positionPickTranslationMarker"),
     setSelectedAdjustmentLayerId: createFieldSetter(set, "selectedAdjustmentLayerId"),
+    setSelectedAdjustmentLayers: createFieldSetter(set, "selectedAdjustmentLayers"),
     setSelectionPayload: createFieldSetter(set, "selectionPayload"),
     setFramePickPreviewPoint: createFieldSetter(set, "framePickPreviewPoint"),
     setDragStart: createFieldSetter(set, "dragStart"),
@@ -193,7 +194,6 @@ export function createEditorStore(project: ProjectManifest) {
     setPlaybackClock: createFieldSetter(set, "playbackClock"),
     setFrameZoomBarOpen: createFieldSetter(set, "frameZoomBarOpen"),
     setFramePreviewScale: createFieldSetter(set, "framePreviewScale"),
-    setLiveZoomScalePreview: createFieldSetter(set, "liveZoomScalePreview"),
     setScrubSnapEnabled: createFieldSetter(set, "scrubSnapEnabled"),
     setScrubCommitThrottleMs: createFieldSetter(set, "scrubCommitThrottleMs"),
     setFastSelectEnabled: createFieldSetter(set, "fastSelectEnabled"),
@@ -244,6 +244,7 @@ export function createEditorStore(project: ProjectManifest) {
       selectedTranslationMarkers: [],
       positionPickTranslationMarker: null,
       selectedAdjustmentLayerId: null,
+      selectedAdjustmentLayers: [],
       framePickPreviewPoint: null,
     }),
   }));
@@ -297,6 +298,8 @@ export function useAppEditorState() {
     setPositionPickTranslationMarker: state.setPositionPickTranslationMarker,
     selectedAdjustmentLayerId: state.selectedAdjustmentLayerId,
     setSelectedAdjustmentLayerId: state.setSelectedAdjustmentLayerId,
+    selectedAdjustmentLayers: state.selectedAdjustmentLayers,
+    setSelectedAdjustmentLayers: state.setSelectedAdjustmentLayers,
     selectionPayload: state.selectionPayload,
     setSelectionPayload: state.setSelectionPayload,
     framePickPreviewPoint: state.framePickPreviewPoint,
@@ -315,8 +318,6 @@ export function useAppEditorState() {
     setFrameZoomBarOpen: state.setFrameZoomBarOpen,
     framePreviewScale: state.framePreviewScale,
     setFramePreviewScale: state.setFramePreviewScale,
-    liveZoomScalePreview: state.liveZoomScalePreview,
-    setLiveZoomScalePreview: state.setLiveZoomScalePreview,
     scrubSnapEnabled: state.scrubSnapEnabled,
     setScrubSnapEnabled: state.setScrubSnapEnabled,
     scrubCommitThrottleMs: state.scrubCommitThrottleMs,

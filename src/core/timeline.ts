@@ -157,6 +157,15 @@ export function getMarkerSnapBoundaries(timeline: TimelinePart[], exclude: { kin
   ]))).sort((left, right) => left - right);
 }
 
+export function getTimelineMarkerDragSnapBoundaries(timeline: TimelinePart[], movingKind: TimelineMarkerKind, movingKeys: Set<string>) {
+  return Array.from(new Set(timeline.flatMap((part) => [
+    part.start,
+    part.end,
+    ...part.zoomMarkers.flatMap((marker) => (movingKind === "zoom" && movingKeys.has(`${part.id}:${marker.id}`) ? [] : [part.start + marker.start, part.start + marker.start + marker.duration])),
+    ...part.translationMarkers.flatMap((marker) => (movingKind === "translation" && movingKeys.has(`${part.id}:${marker.id}`) ? [] : [part.start + marker.start, part.start + marker.start + marker.duration])),
+  ]))).sort((left, right) => left - right);
+}
+
 export function getMarkerPlacement(timeline: TimelinePart[], absoluteStart: number, duration: number, snapThresholdSeconds: number, snap: boolean, exclude: { kind: TimelineMarkerKind; partId: string; markerId: string }) {
   const sceneDuration = timeline.at(-1)?.end ?? 0;
   let snappedStart = clamp(absoluteStart, 0, Math.max(sceneDuration - duration, 0));

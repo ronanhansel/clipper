@@ -27,6 +27,7 @@
 
 - Keep code modularizable.
 - Composition source files must use component-oriented TypeScript authoring: `new Composition({ render() { return [...] } })` with renderable classes such as `Component`, `Group`, `Rect`, `Text`, and `Chart`.
+- Composition source code is project-owned: look in `project.compositionSources` and the project state/persistence flow, not sidecar `.ts` files. The unified File Manager UI is implemented in `src/components/FileManager.tsx`.
 - Composition source should be organized with named `Component` classes, shared constants where useful, and a top-level `Composition` whose `render()` returns those components.
 - Do not reintroduce `defineComposition`, `definePart`, `objects`, or `components` as public authoring APIs. The normalized `CompositionClip.objects` array is internal editor/runtime state only, not source authoring style.
 - Do not regenerate component-authored source into JSON-style or object-list source. If source generation is unavoidable, emit class/render-based TypeScript.
@@ -35,6 +36,7 @@
 - Prefer small cohesive modules over long mixed-responsibility files. If a file starts combining UI rendering, platform I/O, project mutation, derived calculations, and constants, extract stable seams into `src/app`, `src/core`, `src/components`, or `src/lib` before adding more behavior.
 - Keep React components focused on rendering and local orchestration. Move reusable domain logic, project transformations, timeline math, render/runtime behavior, and host/Electron adapters into named modules with narrow public APIs.
 - Use scoped Zustand stores/providers for canonical app/editor/project state that must be shared across the app. Do not keep shareable state in `App.tsx` just to avoid store updates; optimize subscriptions instead.
+- Avoid deeply nested prop chains for shared feature state/actions. If callbacks or state must pass through multiple unrelated component layers, move them into a scoped Zustand store/provider or a focused controller hook with narrow selector hooks instead of adding more threaded props.
 - Prefer narrow selector hooks over broad store subscriptions. Never subscribe a root component to an entire Zustand store when high-frequency state such as scrub time, playback time, drag state, or selection previews can change.
 - Suppress no-op store writes and keep store actions semantic where possible. Prefer commands such as `applyEditorState`, `clearMarkerSelection`, or `clearNodeSelection` over repeated raw field updates when behavior has domain meaning.
 - Keep transient pointer/rAF machinery local to the owning interaction component or controller, but keep canonical semantic state global when it needs to be shared. If a global high-frequency value needs a render cache, subscribe narrowly and update the cache with `startTransition` rather than making the state local and unshareable.
@@ -44,8 +46,8 @@
 - Prefer explicit names and exported types at module boundaries. Avoid anonymous object bags for cross-module workflows when a named type would document intent.
 - New feature work should include a short architecture note in the version memory file describing where the feature lives, why those module boundaries were chosen, and what should be reused next time.
 - When touching legacy large files, leave them smaller or better partitioned when feasible. At minimum, do not make them significantly larger without documenting why extraction is unsafe.
-- For drag, resize, scrub, marquee, slider, picker, and pointer-move interactions, default to non-continuous state updates: avoid project writes, persistence writes, expensive derivations, and broad React state updates during movement.
-- Use rAF-throttled transient previews during movement. Prefer imperative DOM/CSS-variable previews such as `transform`, `translate3d`, width/height variables, or refs for high-frequency visual feedback.
-- Commit canonical app/project state once on release, pointer up/cancel, blur, or another explicit finalization event. Keep any live state updates minimal, deduplicated, and only for semantic changes the user must see during the drag.
-- Do not repeatedly call callbacks that mutate project state from every pointer-move frame unless there is a concrete reason that cannot be represented as a transient preview. If unavoidable, throttle, deduplicate by value, and keep the changed state as narrow as possible.
+- For drag, resize, scrub, marquee, slider, picker, and pointer-move interactions, default to rAF-throttled transient previews. Avoid project writes, persistence writes, expensive derivations, and broad React/Zustand updates during movement.
+- Prefer imperative DOM/CSS previews (`transform`, `translate3d`, opacity, width/height variables, targeted refs). Commit canonical app/project state once on release, pointer up/cancel, blur, pause, or another explicit finalization event.
+- Do not call project-mutating callbacks from every pointer-move frame unless unavoidable. If unavoidable, throttle, deduplicate, and keep changed state narrow.
 - Preserve existing drag constraints while optimizing previews: snapping, clamping, no-overlap rules, selection semantics, mended marker chains, and final committed positions/sizes must still be computed from the same canonical logic.
+- For live render, camera, motion, effect, or animation previews, use `src/core` helpers to compute deterministic preview values, then apply only the affected DOM/CSS property with rAF. Keep labels/readouts local and reuse `build/v0.2.5/memory/023-zoom-scale-slider-preview.md` for camera/effect sliders.

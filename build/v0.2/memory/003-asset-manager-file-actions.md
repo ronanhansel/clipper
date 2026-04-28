@@ -1,10 +1,10 @@
-# Asset Manager File Actions
+# File Manager File Actions
 
-Started v0.2 work to fix asset manager file ordering overflow and improve asset file operations. Goals: inspect existing asset manager UI, keep current visual language, reuse project primitives/plugins where available, and add practical drag/drop plus copy/duplicate support without large rewrites.
+Started v0.2 work to fix file manager file ordering overflow and improve asset file operations. Goals: inspect existing file manager UI, keep current visual language, reuse project primitives/plugins where available, and add practical drag/drop plus copy/duplicate support without large rewrites.
 
 Implemented in `src/App.tsx`:
 - Left sidebar tabs now share the same segmented tab constants/styles as the inspector tabs.
-- Removed verbose Asset Manager and Tools title cards; asset path is now a compact truncated line above the New Folder action.
+- Removed verbose File Manager and Tools title cards; asset path is now a compact truncated line above the New Folder action.
 - Asset tree rows use internal depth padding and `minmax(0, 1fr)` to avoid row overflow in the narrow left sidebar.
 - Asset drop zone is content-sized with a bounded scroll area (`min-h-[220px]`, `max-h-[460px]`) instead of filling the full sidebar height, so its bottom edge remains visible.
 - Row actions are absolutely positioned and only appear on hover/focus, so hidden actions no longer permanently consume filename width.

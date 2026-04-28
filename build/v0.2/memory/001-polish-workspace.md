@@ -16,7 +16,7 @@
 - Added `build/v0.2/PLAN.md` and updated the root `AGENTS.md` example memory path to use `v0.2`.
 - Reworked snap selector logic through `getTopTimelineItemAtTime`, matching the visual timeline stack: Pan, Zoom, then Parts.
 - Added recursive numeric sanitization in `normalizeProject` so persisted project floating point numbers are rounded to at most two decimal places.
-- Replaced the old left sidebar with two tabs: an Asset Manager with drag import, inline rename, reorder, and folder creation; and a Tools tab for timeline actions.
+- Replaced the old left sidebar with two tabs: a File Manager with drag import, inline rename, reorder, and folder creation; and a Tools tab for timeline actions.
 - Removed the duplicate top-center tools row and centered a smaller rounded Interactive/Code switcher with smoother transitions.
 - Added right inspector tab state and moved Snapshot plus Agent Context into the Agent tab.
 - Removed the redundant `3 visible timelines` footer badge.

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, dialog, ipcMain } from "electron";
+import { app, BrowserWindow, Menu, dialog, ipcMain, shell } from "electron";
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { watch, type FSWatcher } from "node:fs";
 import fs from "node:fs/promises";
@@ -34,6 +34,19 @@ type MacFontProfile = {
     }>;
   }>;
 };
+
+async function findFileByName(directoryPath: string, fileName: string): Promise<string | null> {
+  const entries = await fs.readdir(directoryPath, { withFileTypes: true });
+  for (const entry of entries) {
+    const entryPath = path.join(directoryPath, entry.name);
+    if (entry.isFile() && entry.name === fileName) return entryPath;
+    if (entry.isDirectory()) {
+      const matchedPath = await findFileByName(entryPath, fileName);
+      if (matchedPath) return matchedPath;
+    }
+  }
+  return null;
+}
 
 async function listSystemFontFamilies() {
   if (systemFontFamilies) return systemFontFamilies;
@@ -136,8 +149,60 @@ ipcMain.handle("clipper:read-text-file", async (_event, relativePath: string) =>
   return fs.readFile(resolveClipperFile(relativePath), "utf8");
 });
 
+ipcMain.handle("clipper:read-binary-file", async (_event, relativePath: string) => {
+  return (await fs.readFile(resolveClipperFile(relativePath))).toString("base64");
+});
+
 ipcMain.handle("clipper:write-text-file", async (_event, relativePath: string, content: string) => {
-  await fs.writeFile(resolveClipperFile(relativePath), content, "utf8");
+  const filePath = resolveClipperFile(relativePath);
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.writeFile(filePath, content, "utf8");
+});
+
+ipcMain.handle("clipper:write-binary-file", async (_event, relativePath: string, base64Content: string) => {
+  const filePath = resolveClipperFile(relativePath);
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.writeFile(filePath, Buffer.from(base64Content, "base64"));
+});
+
+ipcMain.handle("clipper:create-directory", async (_event, relativePath: string) => {
+  await fs.mkdir(resolveClipperFile(relativePath), { recursive: true });
+});
+
+ipcMain.handle("clipper:reveal-file", async (_event, relativePath: string) => {
+  shell.showItemInFolder(resolveClipperFile(relativePath));
+});
+
+ipcMain.handle("clipper:trash-file", async (_event, relativePath: string) => {
+  await shell.trashItem(resolveClipperFile(relativePath));
+});
+
+ipcMain.handle("clipper:rename-file", async (_event, relativePath: string, nextRelativePath: string) => {
+  await fs.rename(resolveClipperFile(relativePath), resolveClipperFile(nextRelativePath));
+});
+
+ipcMain.handle("clipper:copy-file", async (_event, relativePath: string, nextRelativePath: string) => {
+  const source = resolveClipperFile(relativePath);
+  const target = resolveClipperFile(nextRelativePath);
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  await fs.copyFile(source, target);
+});
+
+ipcMain.handle("clipper:find-project-file-by-name", async (_event, directoryPath: string, fileName: string) => {
+  const matchedPath = await findFileByName(resolveClipperFile(directoryPath), fileName);
+  return matchedPath ? getClipperRelativePath(matchedPath) : null;
+});
+
+ipcMain.handle("clipper:open-composition-file", async (_event, directoryPath: string) => {
+  const { canceled, filePaths } = await dialog.showOpenDialog({
+    title: "Select composition file",
+    defaultPath: resolveClipperFile(directoryPath),
+    properties: ["openFile"],
+    filters: [{ name: "Composition Source", extensions: ["ts", "tsx", "js", "jsx"] }],
+  });
+
+  if (canceled || !filePaths[0]) return null;
+  return getClipperRelativePath(filePaths[0]);
 });
 
 ipcMain.handle("clipper:list-system-fonts", async () => {
@@ -215,7 +280,7 @@ ipcMain.handle("clipper:open-project-manifest", async () => {
     title: "Open Clipper project",
     defaultPath: path.join(appRoot, "clipper", "projects"),
     properties: ["openFile"],
-    filters: [{ name: "Clipper Project", extensions: ["json"] }],
+    filters: [{ name: "Clipper Project", extensions: ["clipper"] }],
   });
 
   if (canceled || !filePaths[0]) return null;
@@ -448,7 +513,7 @@ type BackgroundLayer = { id: string; name: string; style: Record<string, string 
 type ZoomMarker = { id: string; start: number; duration: number; focus: { x: number; y: number }; scale: number; ease?: MotionEase; snapIn?: boolean; snapOut?: boolean; middleTransition?: "transition"; middleEase?: MotionEase };
 type TranslationMarker = { id: string; start: number; duration: number; position: { x: number; y: number }; ease?: MotionEase; snapIn?: boolean; snapOut?: boolean; middleTransition?: "transition"; middleEase?: MotionEase };
 type AdjustmentLayer = { id: string; name: string; start: number; duration: number; effect: { kind: "frameSkip"; every: number } };
-type CompositionClip = { id: string; name: string; filePath: string; duration: number; frame: { width: number; height: number; style: Record<string, string | number> }; background: BackgroundLayer; objects: FrameObject[]; snapshot: unknown[]; zoomMarkers: ZoomMarker[]; translationMarkers: TranslationMarker[] };
+type CompositionClip = { id: string; name: string; filePath: string; sourceMissing?: boolean; duration: number; frame: { width: number; height: number; style: Record<string, string | number> }; background: BackgroundLayer; objects: FrameObject[]; snapshot: unknown[]; zoomMarkers: ZoomMarker[]; translationMarkers: TranslationMarker[] };
 type Scene = { id: string; name: string; compositions: CompositionClip[]; adjustmentLayers?: AdjustmentLayer[] };
 type ProjectManifest = { id: string; name: string; resolution: { width: number; height: number }; scenes: Scene[]; assetsPath: string };
 type TimelinePart = CompositionClip & { start: number; end: number };
@@ -487,6 +552,8 @@ function buildFrameShell() {
 }
 
 function buildFrameBody(part: CompositionClip, previewTime: number, activeZoom: ZoomMarker | null, activeTranslation: TranslationMarker | null) {
+  if (part.sourceMissing) return `<div style="${cssStyle({ position: "relative", width: frameWidth, height: frameHeight, overflow: "hidden", background: "#000" })}"></div>`;
+
   const scale = activeZoom?.scale ?? 1;
   const focus = activeZoom?.focus ?? { x: frameWidth / 2, y: frameHeight / 2 };
   const x = (frameWidth / 2 - focus.x) * (scale - 1) + (activeTranslation?.position.x ?? 0);

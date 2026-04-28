@@ -28,6 +28,7 @@ export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dra
   const [selectorHover, setSelectorHover] = useState(false);
   const selectorHoverRef = useRef(false);
   const showDragBox = dragBox && isVisibleMarqueeBounds(dragBox, frameScale);
+  const isUnlinkedPart = Boolean(part.sourceMissing);
 
   useLayoutEffect(() => {
     if (isPlaying && playbackClock && timeSensitive) return;
@@ -88,14 +89,14 @@ export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dra
       <div className="flex items-baseline justify-between text-[#dfe2ea]"><span className={mutedCaps}>{part.name}</span><strong className="text-[13px]">{FRAME_WIDTH} x {FRAME_HEIGHT}</strong></div>
       <div ref={frameViewportRef} className={`relative overflow-hidden bg-black shadow-[0_22px_70px_rgba(0,0,0,0.44)] ${focusPicking ? "cursor-crosshair ring-2 ring-[#37d6c2]" : ""}`} style={viewportStyle} onPointerDownCapture={onFramePointerDownCapture} onPointerDown={onFramePointerDown} onPointerMove={handleFramePointerMove} onPointerUp={onFramePointerUp} onPointerCancel={onFramePointerCancel} onPointerLeave={clearSelectorHover}>
         <div className="absolute left-0 top-0 origin-top-left overflow-hidden" style={frameStyle}>
-          <div className="absolute inset-0 origin-center" ref={cameraRef}>
+          {isUnlinkedPart ? <div className="absolute inset-0 bg-black" ref={cameraRef} /> : <div className="absolute inset-0 origin-center" ref={cameraRef}>
             <BackgroundLayerView animationsEnabled={animationsEnabled} background={part.background} duration={part.duration} previewTime={displayPreviewTime} />
             {part.objects.map((object) => (
               <FrameObjectView key={object.id} animationsEnabled={animationsEnabled} object={object} canSelect={canSelectObjects} duration={part.duration} editing={editingTextObjectId === object.id} focusPicking={focusPicking} previewTime={displayPreviewTime} onDoubleClick={(event) => onTextObjectDoubleClick(event, object)} onPointerDown={(event) => onObjectPointerDown(event, object)} onTextEditCommit={(content, richText) => onTextEditCommit(object.id, content, richText)} />
             ))}
-          </div>
+          </div>}
         </div>
-        {canSelectObjects ? selectedObjects.map((object) => <SelectionOverlayBox key={object.id} objectId={object.id} bounds={object.bounds} cameraTransform={liveCameraTransform} frameScale={frameScale} highlighted={selectorHover} interactive={!marqueeDragging} onResizePointerDown={(event, handle) => onObjectResizePointerDown(event, handle, object.id)} />) : null}
+        {canSelectObjects && !isUnlinkedPart ? selectedObjects.map((object) => <SelectionOverlayBox key={object.id} objectId={object.id} bounds={object.bounds} cameraTransform={liveCameraTransform} frameScale={frameScale} highlighted={selectorHover} interactive={!marqueeDragging} onResizePointerDown={(event, handle) => onObjectResizePointerDown(event, handle, object.id)} />) : null}
         {dragBox ? <DragSelectionBox ref={dragSelectionBoxRef} bounds={dragBox} frameScale={frameScale} visible={Boolean(showDragBox)} /> : null}
         {focusPicking && framePickPoint ? <FramePickPointOverlay point={framePickPoint} frameScale={frameScale} /> : null}
       </div>
@@ -281,7 +282,7 @@ function areBackgroundElementPropsEqual(previous: { duration: number; element: E
 }
 
 function isPreviewTimeSensitiveObject(object: FrameObject) {
-  return isTimeSensitiveFrameObject(object) || isAnimatedGraphObject(object.id);
+  return isTimeSensitiveFrameObject(object) || object.type === "chart" || isAnimatedGraphObject(object.id);
 }
 
 function isPlaybackTimeSensitivePart(part: Part, timelineMode: TimelineMode, adjustmentLayers: AdjustmentLayer[] | undefined, animationsEnabled: boolean) {

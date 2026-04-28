@@ -19,7 +19,7 @@ Start the v0.2.1 maintainability pass by separating stable infrastructure, confi
 - Added `src/core/assetTree.ts` for asset-tree transforms, lookup, movement, sorting, and drag/drop intent types.
 - Added `src/core/markers.ts` for mended marker chain and zoom focus normalization logic.
 - Added `src/core/project.ts` for project defaults, project normalization, and project-part replacement.
-- Added `src/components/AppContextMenu.tsx` and `src/components/AssetManager.tsx` so asset UI and context menu behavior are reusable component modules instead of inline `App.tsx` sections.
+- Added `src/components/AppContextMenu.tsx` and `src/components/FileManager.tsx` so file UI and context menu behavior are reusable component modules instead of inline `App.tsx` sections.
 - Added `src/app/richText.tsx` for rich text render/edit conversion helpers used by frame object editing.
 - Added `src/app/services/exportService.ts` for project-package export, rendered-media preparation, video render/cancel delegation, export filenames, and host/browser export fallback handling.
 - Added `src/app/services/projectPersistenceService.ts` for manifest loading, part-source loading, fallback sample loading, manifest/source saving, and source status messages.

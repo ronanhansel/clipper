@@ -129,6 +129,8 @@ export type CompositionClip = {
   id: string;
   name: string;
   filePath: string;
+  source?: string;
+  sourceMissing?: boolean;
   duration: number;
   frame: PartFrame;
   background: BackgroundLayer;
@@ -146,6 +148,30 @@ export type Scene = {
   name: string;
   compositions: CompositionClip[];
   adjustmentLayers?: AdjustmentLayer[];
+};
+
+export type CompositionDocument = CompositionClip & {
+  source: string;
+};
+
+export type TimelineClip = {
+  id: string;
+  compositionId: string;
+  zoomMarkers: ZoomMarker[];
+  translationMarkers: TranslationMarker[];
+};
+
+export type TimelineSettings = {
+  frameRate?: number;
+};
+
+export type TimelineDocument = {
+  id: string;
+  name: string;
+  filePath?: string;
+  clips: TimelineClip[];
+  adjustmentLayers?: AdjustmentLayer[];
+  settings?: TimelineSettings;
 };
 
 export type TimelineViewportState = {
@@ -174,9 +200,11 @@ export type EditorState = {
   leftPanelTab?: "assets" | "tools";
   rightPanelTab?: "video" | "motion" | "agent";
   selectedSceneId?: string;
+  selectedTimelineId?: string;
   currentSceneTime?: number;
   preview?: PreviewViewportState;
   code?: Record<string, CodeViewportState>;
+  fileManagerState?: FileManagerState;
 };
 
 export type AssetItem = {
@@ -187,6 +215,16 @@ export type AssetItem = {
   children?: AssetItem[];
 };
 
+export type FileManagerStateNode = {
+  id: string;
+  children?: FileManagerStateNode[];
+};
+
+export type FileManagerState = {
+  tree?: FileManagerStateNode[];
+  openState?: Record<string, boolean>;
+};
+
 export type ProjectManifest = {
   id: string;
   name: string;
@@ -195,6 +233,13 @@ export type ProjectManifest = {
     height: typeof FRAME_HEIGHT;
   };
   scenes: Scene[];
+  timelines?: TimelineDocument[];
+  timelineOrder?: string[];
+  compositions?: CompositionDocument[];
+  compositionOrder?: string[];
+  compositionLibrary?: CompositionClip[];
+  compositionFolders?: string[];
+  compositionSources?: Record<string, string>;
   assetsPath: string;
   assets?: AssetItem[];
   editorState?: EditorState;

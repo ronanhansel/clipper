@@ -8,7 +8,7 @@ Clipper v0.2 polishes the editor into a complete desktop authoring experience. T
 
 - Make timeline interactions consistent with the visual stack so the top-most block is selected first.
 - Clamp persisted and displayed numeric floating point values to at most two decimal places.
-- Replace the left utility sidebar with an asset manager and a dedicated tools tab.
+- Replace the left utility sidebar with a file manager and a dedicated tools tab.
 - Move agent-facing snapshot and context into the right-side Agent tab.
 - Introduce reusable polished controls, starting with a throttled floating color selector.
 

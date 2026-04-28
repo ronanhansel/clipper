@@ -49,11 +49,14 @@
     @apply cursor-pointer border-0 text-inherit;
   }
 
+  :where(*):focus,
+  :where(*):focus-visible,
   button:focus,
   button:focus-visible,
   [role="button"]:focus,
   [role="button"]:focus-visible {
     outline: none;
+    outline-offset: 0;
     box-shadow: none;
   }
 
