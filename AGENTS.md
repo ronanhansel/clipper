@@ -28,4 +28,8 @@
 - Keep code modularizable.
 - The app currently supports desktop only, using Electron and Vite at the latest versions.
 - Follow the current open-source project structure to maintain a professional, ready-to-publish organization.
-- For drag/pointer-move interactions, avoid project writes and broad React state updates during movement; use rAF plus transient/imperative previews, then commit once on release.
+- For drag, resize, scrub, marquee, slider, picker, and pointer-move interactions, default to non-continuous state updates: avoid project writes, persistence writes, expensive derivations, and broad React state updates during movement.
+- Use rAF-throttled transient previews during movement. Prefer imperative DOM/CSS-variable previews such as `transform`, `translate3d`, width/height variables, or refs for high-frequency visual feedback.
+- Commit canonical app/project state once on release, pointer up/cancel, blur, or another explicit finalization event. Keep any live state updates minimal, deduplicated, and only for semantic changes the user must see during the drag.
+- Do not repeatedly call callbacks that mutate project state from every pointer-move frame unless there is a concrete reason that cannot be represented as a transient preview. If unavoidable, throttle, deduplicate by value, and keep the changed state as narrow as possible.
+- Preserve existing drag constraints while optimizing previews: snapping, clamping, no-overlap rules, selection semantics, mended marker chains, and final committed positions/sizes must still be computed from the same canonical logic.

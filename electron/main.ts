@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { app, BrowserWindow, Menu, dialog, ipcMain } from "electron";
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -411,6 +411,12 @@ async function createWindow() {
 
   window.webContents.on("before-input-event", (event, input) => {
     if (!(input.control || input.meta)) return;
+    if (input.key === ",") {
+      event.preventDefault();
+      window.webContents.send("clipper:settings-shortcut");
+      return;
+    }
+
     if (!["1", "2", "3", "4"].includes(input.key)) return;
 
     event.preventDefault();
@@ -424,6 +430,31 @@ async function createWindow() {
   }
 
   await window.loadFile(path.join(__dirname, "../dist/index.html"));
+}
+
+function installAppMenu() {
+  const isMac = process.platform === "darwin";
+  const template: Electron.MenuItemConstructorOptions[] = [
+    ...(isMac ? [{ label: app.name, submenu: [{ role: "about" as const }, { type: "separator" as const }, { role: "services" as const }, { type: "separator" as const }, { role: "hide" as const }, { role: "hideOthers" as const }, { role: "unhide" as const }, { type: "separator" as const }, { role: "quit" as const }] }] : []),
+    {
+      label: "File",
+      submenu: [
+        {
+          label: "Settings...",
+          accelerator: "CommandOrControl+,",
+          click: (_menuItem, browserWindow) => {
+            if (browserWindow instanceof BrowserWindow) browserWindow.webContents.send("clipper:settings-shortcut");
+          },
+        },
+        { type: "separator" },
+        isMac ? { role: "close" } : { role: "quit" },
+      ],
+    },
+    { label: "Edit", submenu: [{ role: "undo" }, { role: "redo" }, { type: "separator" }, { role: "cut" }, { role: "copy" }, { role: "paste" }, { role: "selectAll" }] },
+    { label: "View", submenu: [{ role: "reload" }, { role: "toggleDevTools" }, { type: "separator" }, { role: "togglefullscreen" }] },
+  ];
+
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
 async function renderVideoFromCommand() {
@@ -446,6 +477,8 @@ async function renderVideoFromCommand() {
 }
 
 app.whenReady().then(async () => {
+  installAppMenu();
+
   if (await renderVideoFromCommand()) {
     app.quit();
     return;

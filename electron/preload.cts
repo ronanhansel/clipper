@@ -22,4 +22,9 @@ contextBridge.exposeInMainWorld("clipper", {
     ipcRenderer.on("clipper:mode-shortcut", listener);
     return () => ipcRenderer.removeListener("clipper:mode-shortcut", listener);
   },
+  onSettingsShortcut: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on("clipper:settings-shortcut", listener);
+    return () => ipcRenderer.removeListener("clipper:settings-shortcut", listener);
+  },
 });

@@ -14,7 +14,7 @@ export const SelectTrigger = forwardRef<
   <SelectPrimitive.Trigger
     ref={ref}
     className={cn(
-      "flex h-8 w-full cursor-pointer items-center justify-between gap-2 rounded-[8px] border border-[#2d313b] bg-[#171920] px-2 py-1.5 text-xs font-semibold text-white outline-none transition placeholder:text-[#69707f] focus:border-[var(--clipper-accent)] focus:ring-2 focus:ring-[rgb(var(--clipper-accent-rgb)/0.2)] disabled:cursor-not-allowed disabled:opacity-50 [&>span]:truncate",
+      "flex h-8 w-full cursor-pointer items-center justify-between gap-2 rounded-[8px] border border-[#2d313b] bg-[#171920] px-2 py-1.5 text-xs font-semibold normal-case tracking-normal text-white outline-none transition placeholder:text-[#69707f] focus:border-[var(--clipper-accent)] focus:ring-2 focus:ring-[rgb(var(--clipper-accent-rgb)/0.2)] disabled:cursor-not-allowed disabled:opacity-50 [&>span]:truncate",
       className,
     )}
     {...props}
@@ -77,7 +77,7 @@ export const SelectItem = forwardRef<
   <SelectPrimitive.Item
     ref={ref}
     className={cn(
-        "relative flex w-full cursor-pointer select-none items-center rounded-[7px] py-1.5 pl-7 pr-2 text-xs font-semibold outline-none transition focus:bg-[#20232c] focus:text-white data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+        "relative flex w-full cursor-pointer select-none items-center rounded-[7px] py-1.5 pl-7 pr-2 text-xs font-semibold normal-case tracking-normal outline-none transition focus:bg-[#20232c] focus:text-white data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
       className,
     )}
     {...props}

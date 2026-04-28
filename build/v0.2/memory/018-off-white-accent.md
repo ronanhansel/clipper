@@ -8,3 +8,4 @@
 ## Notes
 - Kept non-brand timeline category colors such as green, yellow, and teal/cyan where they communicate distinct editing states.
 - Accent colors now live in `src/styles.css` as CSS variables (`--clipper-accent`, `--clipper-accent-rgb`, `--clipper-accent-foreground`, and related hover/strong/badge variants) so future palette changes are centralized.
+- Timeline selected marker halos, including zoom markers, use `--clipper-accent` so pan, zoom, and composition selections stay visually consistent.

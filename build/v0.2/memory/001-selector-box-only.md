@@ -41,3 +41,6 @@
 - Moved the active frame selector out of the selected object element and into an independent overlay layer in `FramePreview`.
 - Removed selected-object outline styling from `FrameObjectView`, so object-level opacity/filter styles no longer affect the selector box.
 - The active selector box has no transition and appears immediately; object drag previews imperatively translate the selector overlay alongside selected objects until commit.
+- Marquee selection no longer updates selected-object React state during pointer movement; it only previews the raw drag rectangle and commits selected objects on release. This avoids lag and prevents ghost/double selectors while dragging.
+- Added an active marquee ref guard plus window-level pointer release fallback so pending rAF drag updates cannot restore the raw drag rectangle after release.
+- The committed selection overlay now renders each selected object's own bounds instead of the union `selectionBox`, so releasing a marquee shows object bounding boxes rather than a marquee-sized frame. Object-drag preview transform application now targets all rendered selection boxes.

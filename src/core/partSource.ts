@@ -1,3 +1,4 @@
+import { defineChart } from "../../clipper/projects/part-api";
 import { FRAME_HEIGHT, FRAME_WIDTH, type BackgroundLayer, type FrameObject, type FrameObjectType, type Part, type PartFrame } from "./types";
 
 type SourceObject = {
@@ -132,7 +133,7 @@ async function evaluatePartSource(source: string): Promise<SourcePart> {
   const exports = {} as { part?: unknown };
   const definePart = <T>(part: T) => part;
 
-  Function("exports", "definePart", `${transpiled}\nreturn exports;`)(exports, definePart);
+  Function("exports", "definePart", "defineChart", `${transpiled}\nreturn exports;`)(exports, definePart, defineChart);
 
   return assertSourcePart(exports.part);
 }

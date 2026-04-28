@@ -1,6 +1,6 @@
-import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, Copy, Crosshair, Download, File as FileIcon, Folder, FolderPlus, Italic, Magnet, Minus, Palette, Pipette, Plus, Pause, Play, RotateCcw, Scissors, Search, Signpost, SkipBack, SkipForward, Sparkles, StepBack, StepForward, Strikethrough, Trash2, Underline } from "lucide-react";
+import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, ChevronDown, ChevronRight, Copy, Crosshair, Download, File as FileIcon, Folder, FolderPlus, Italic, Magnet, Minus, Palette, Pipette, Play, Plus, Pause, RotateCcw, Scissors, Search, Signpost, SkipBack, SkipForward, Sparkles, StepBack, StepForward, Strikethrough, Trash2, Underline } from "lucide-react";
 import Editor, { type BeforeMount, type OnMount } from "@monaco-editor/react";
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent, type ReactElement, type RefObject } from "react";
+import { memo, startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent, type ReactElement, type RefObject } from "react";
 import toast, { Toaster } from "react-hot-toast";
 import partApiSource from "../clipper/projects/part-api.ts?raw";
 import { Checkbox } from "./components/ui/checkbox";
@@ -11,7 +11,7 @@ import { Textarea } from "./components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./components/ui/tooltip";
 import { createAgentContext } from "./core/agentContext";
 import { boundsToPoints, createSelectionPayload, framePointFromClient, normalizeBounds } from "./core/geometry";
-import { partFromSource, partToSource } from "./core/partSource";
+import { loadPartsFromSource, partFromSource, partToSource } from "./core/partSource";
 import { buildLinearTimeline, formatTime, updatePartObject, validateScene } from "./core/timeline";
 import { FRAME_HEIGHT, FRAME_WIDTH, type AssetItem, type BackgroundLayer, type Bounds, type FrameObject, type MotionEase, type Part, type PartFrame, type Point, type ProjectManifest, type RichTextSegment, type SelectionPayload, type TimelineMode, type TimelinePart, type TimelineViewportState, type TranslationMarker, type ZoomMarker } from "./core/types";
 import { sampleProject } from "./sampleProject";
@@ -27,7 +27,7 @@ type AssetDropIntent = { targetId: string; action: "before" | "after" | "inside"
 type ContextMenuState = { x: number; y: number; items: ContextMenuItem[] } | null;
 type ContextMenuItem = { label: string; action?: () => void; children?: ContextMenuItem[]; danger?: boolean; disabled?: boolean };
 type VideoExportProgress = { frame: number; totalFrames: number; percent: number; status: string };
-
+type SettingsSection = "playback" | "timeline" | "export" | "advanced";
 const projectManifestPath = `clipper/projects/${sampleProject.id}/project.json`;
 const videoExportFrameRate = 30;
 
@@ -91,6 +91,11 @@ const appBarSaveButtonEnabled = "rounded-[7px] border border-[var(--clipper-acce
 const appBarSaveButtonDisabled = "cursor-not-allowed rounded-[7px] border border-[#2d313b] bg-[#171920] px-2 py-1 text-xs font-extrabold text-[#737884] opacity-70";
 const defaultZoomDuration = 2.2;
 const minimumZoomDuration = 1;
+const marqueeSelectionThresholdPx = 10;
+const selectorOffsetPx = 4;
+const selectorHandleSizePx = 8;
+const selectorBlue = "#159dff";
+const minimumObjectResizeSide = 6;
 const defaultTimelinePixelsPerSecond = 126;
 const maxProjectHistoryActions = 1000;
 const projectHistoryCoalesceMs = 700;
@@ -177,14 +182,23 @@ type ObjectDrag = {
   partId: string;
   objects: SelectionPayload["objects"];
 };
+type ResizeHandle = "top-left" | "top" | "top-right" | "right" | "bottom-right" | "bottom" | "bottom-left" | "left";
+type ObjectResize = {
+  origin: Point;
+  handle: ResizeHandle;
+  partId: string;
+  selectionBox: Bounds;
+  objects: SelectionPayload["objects"];
+  preservedObjects: SelectionPayload["objects"];
+};
 
-function getClipperCssVariable(name: string, fallback: string) {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+function getClipperCssVariable(name: string) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
 
 function getClipperAccent() {
-  const accent = getClipperCssVariable("--clipper-accent", "var(--clipper-accent)");
-  const rgb = getClipperCssVariable("--clipper-accent-rgb", "244 239 228").trim().split(/\s+/).join(",");
+  const accent = getClipperCssVariable("--clipper-accent");
+  const rgb = getClipperCssVariable("--clipper-accent-rgb").split(/\s+/).join(",");
 
   return {
     accent,
@@ -195,6 +209,8 @@ function getClipperAccent() {
 type ZoomMarkerSelection = { partId: string; markerId: string };
 type TranslationMarkerSelection = { partId: string; markerId: string };
 type TimelineMarkerMove = { sourcePartId: string; markerId: string; targetPartId: string; start: number };
+type TimelineSelectionDrag = { startX: number; currentX: number };
+type CameraPreviewTransform = { x: number; y: number; scale: number };
 
 function selectionObjectFromFrameObject(object: FrameObject): SelectionPayload["objects"][number] {
   return {
@@ -235,10 +251,12 @@ export function App() {
   const [framePickPreviewPoint, setFramePickPreviewPoint] = useState<Point | null>(null);
   const [dragStart, setDragStart] = useState<Point | null>(null);
   const [dragBox, setDragBox] = useState<Bounds | null>(null);
+  const [marqueeDragging, setMarqueeDragging] = useState(false);
   const [currentSceneTime, setCurrentSceneTime] = useState(2.6);
   const [isPlaying, setIsPlaying] = useState(false);
   const [frameZoomBarOpen, setFrameZoomBarOpen] = useState(false);
   const [framePreviewScale, setFramePreviewScale] = useState(defaultFramePreviewScale);
+  const [liveZoomScalePreview, setLiveZoomScalePreview] = useState<{ partId: string; markerId: string; scale: number } | null>(null);
   const [scrubSnapEnabled, setScrubSnapEnabled] = useState(false);
   const [fastSelectEnabled, setFastSelectEnabled] = useState(false);
   const [leftPanelTab, setLeftPanelTab] = useState<LeftPanelTab>("assets");
@@ -255,8 +273,11 @@ export function App() {
   const [exportProgress, setExportProgress] = useState<string | null>(null);
   const [videoExportProgress, setVideoExportProgress] = useState<VideoExportProgress | null>(null);
   const [videoExportCancelling, setVideoExportCancelling] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>("playback");
   const cameraRef = useRef<HTMLDivElement | null>(null);
   const frameViewportRef = useRef<HTMLDivElement | null>(null);
+  const dragSelectionBoxRef = useRef<HTMLDivElement | null>(null);
   const projectRef = useRef(project);
   const projectHistoryRef = useRef<{ past: ProjectManifest[]; future: ProjectManifest[] }>({ past: [], future: [] });
   const lastProjectHistoryAtRef = useRef(0);
@@ -270,12 +291,20 @@ export function App() {
   const dragStartRef = useRef<Point | null>(null);
   const pendingDragBoxRef = useRef<Bounds | null>(null);
   const dragBoxFrameRef = useRef(0);
+  const marqueeDraggingRef = useRef(false);
+  const marqueeLastPointRef = useRef<Point | null>(null);
+  const marqueeSpacePanningRef = useRef(false);
   const liveDragSelectionIdsRef = useRef("");
   const objectDragRef = useRef<ObjectDrag | null>(null);
   const objectDragFrameRef = useRef(0);
   const objectDragDeltaRef = useRef<Point>({ x: 0, y: 0 });
+  const objectResizeRef = useRef<ObjectResize | null>(null);
+  const objectResizeFrameRef = useRef(0);
+  const objectResizeDeltaRef = useRef<Point>({ x: 0, y: 0 });
   const centerPreviewScrollRef = useRef<HTMLDivElement | null>(null);
   const projectRenameCancelledRef = useRef(false);
+  const pendingZoomScalePreviewRef = useRef<{ partId: string; markerId: string; scale: number } | null>(null);
+  const zoomScalePreviewFrameRef = useRef(0);
 
   const scene = project.scenes.find((item) => item.id === selectedSceneId) ?? project.scenes[0];
   const assets = project.assets ?? defaultAssets;
@@ -300,11 +329,13 @@ export function App() {
   const isPickingZoomFocus = Boolean(focusPickZoomMarker);
   const isPickingTranslationPosition = Boolean(positionPickTranslationMarker);
   const canSelectFrameObjects = timelineMode === "edit";
-  const activeZoom = timelineMode === "composition" && !isPickingZoomFocus ? getActiveZoom(part.zoomMarkers, previewTime) : null;
+  const previewZoomMarkers = liveZoomScalePreview?.partId === part.id ? part.zoomMarkers.map((marker) => (marker.id === liveZoomScalePreview.markerId ? { ...marker, scale: liveZoomScalePreview.scale } : marker)) : part.zoomMarkers;
+  const activeZoom = timelineMode === "composition" && !isPickingZoomFocus ? getActiveZoom(previewZoomMarkers, previewTime) : null;
   const activeTranslation = timelineMode === "composition" && !isPickingTranslationPosition ? getActiveTranslation(part.translationMarkers, previewTime) : null;
   const persistedFramePickPoint = isPickingZoomFocus && selectedZoom ? selectedZoom.focus : isPickingTranslationPosition && selectedTranslation ? cameraTranslationToFramePoint(selectedTranslation.position) : null;
   const framePickPoint = framePickPreviewPoint ?? persistedFramePickPoint;
   const zoomScale = activeZoom?.scale ?? 1;
+  const cameraPreviewTransform = useMemo(() => getCameraPreviewTransform(activeZoom, activeTranslation), [activeTranslation, activeZoom]);
   const currentPartSelectedZoomIds = selectedZoomMarkers.filter((selection) => selection.partId === part.id).map((selection) => selection.markerId);
   const selectedZoomPartSelectedZoomIds = selectedZoomPart ? selectedZoomMarkers.filter((selection) => selection.partId === selectedZoomPart.id).map((selection) => selection.markerId) : [];
   const selectedZoomSnapMarkers = selectedZoomMarkers.flatMap((selection) => {
@@ -431,6 +462,21 @@ export function App() {
     currentSceneTimeRef.current = currentSceneTime;
   }, [currentSceneTime]);
 
+  useEffect(() => {
+    function openSettingsShortcut(event: KeyboardEvent) {
+      if (!(event.ctrlKey || event.metaKey) || event.key !== ",") return;
+      event.preventDefault();
+      setSettingsOpen(true);
+    }
+
+    window.addEventListener("keydown", openSettingsShortcut);
+    const unsubscribeSettingsShortcut = window.clipper?.onSettingsShortcut?.(() => setSettingsOpen(true));
+    return () => {
+      window.removeEventListener("keydown", openSettingsShortcut);
+      unsubscribeSettingsShortcut?.();
+    };
+  }, []);
+
   useEffect(() => () => {
     if (scrubFrameRef.current) cancelAnimationFrame(scrubFrameRef.current);
     if (framePickFrameRef.current) cancelAnimationFrame(framePickFrameRef.current);
@@ -441,9 +487,17 @@ export function App() {
   useEffect(() => {
     let cancelled = false;
 
-    readTextFile(projectManifestPath).then((content) => {
+    readTextFile(projectManifestPath).then(async (content) => {
       if (cancelled) return;
-      const loadedProject = normalizeProject(JSON.parse(content) as ProjectManifest);
+      const manifestProject = normalizeProject(JSON.parse(content) as ProjectManifest);
+      const loadedProject = normalizeProject({
+        ...manifestProject,
+        scenes: await Promise.all(manifestProject.scenes.map(async (scene) => ({
+          ...scene,
+          parts: await loadPartsFromSource(scene.parts, readTextFile),
+        }))),
+      });
+      if (cancelled) return;
       resetProjectHistory();
       replaceProject(loadedProject, { history: false });
       setSavedProjectSnapshot(JSON.stringify(loadedProject));
@@ -480,6 +534,41 @@ export function App() {
   }, [timelineMode]);
 
   useEffect(() => {
+    let selectedObjectMissing = false;
+
+    setSelectionPayload((current) => {
+      if (!current?.objects.length) return current;
+      const nextObjects = current.objects.flatMap((selected) => {
+        const object = part.objects.find((item) => item.id === selected.id);
+        return object ? [selectionObjectFromFrameObject(object)] : [];
+      });
+
+      if (nextObjects.length !== current.objects.length) {
+        selectedObjectMissing = true;
+        return null;
+      }
+
+      const unchanged = nextObjects.every((object, index) => {
+        const previous = current.objects[index];
+        return object.id === previous.id
+          && object.name === previous.name
+          && object.selector === previous.selector
+          && object.type === previous.type
+          && object.bounds.x === previous.bounds.x
+          && object.bounds.y === previous.bounds.y
+          && object.bounds.width === previous.bounds.width
+          && object.bounds.height === previous.bounds.height;
+      });
+      if (unchanged) return current;
+
+      const selectionBox = getBoundsUnion(nextObjects.map((object) => object.bounds));
+      return { selectionBox, coordinates: boundsToPoints(selectionBox), objects: nextObjects };
+    });
+
+    if (selectedObjectMissing) setSelectedObjectId(null);
+  }, [part.objects]);
+
+  useEffect(() => {
     function clearFrameSelectionOnOutsidePointer(event: globalThis.PointerEvent) {
       const target = event.target as HTMLElement | null;
       if (isCodeEditorTarget(target) || isInspectorTarget(target) || isSelectPopoverTarget(target)) return;
@@ -494,6 +583,21 @@ export function App() {
     window.addEventListener("pointerdown", clearFrameSelectionOnOutsidePointer);
     return () => window.removeEventListener("pointerdown", clearFrameSelectionOnOutsidePointer);
   }, []);
+
+  useEffect(() => {
+    if (!marqueeDragging) return;
+
+    function clearMarqueeAfterPointerRelease() {
+      requestAnimationFrame(() => clearDragBox());
+    }
+
+    window.addEventListener("pointerup", clearMarqueeAfterPointerRelease);
+    window.addEventListener("pointercancel", clearMarqueeAfterPointerRelease);
+    return () => {
+      window.removeEventListener("pointerup", clearMarqueeAfterPointerRelease);
+      window.removeEventListener("pointercancel", clearMarqueeAfterPointerRelease);
+    };
+  }, [marqueeDragging]);
 
   useEffect(() => {
     if (!isPlaying) return;
@@ -519,13 +623,9 @@ export function App() {
 
   useEffect(() => {
     if (!cameraRef.current) return;
-    const scale = activeZoom?.scale ?? 1;
-    const focus = activeZoom?.focus ?? { x: FRAME_WIDTH / 2, y: FRAME_HEIGHT / 2 };
-    const x = (FRAME_WIDTH / 2 - focus.x) * (scale - 1) + (activeTranslation?.position.x ?? 0);
-    const y = (FRAME_HEIGHT / 2 - focus.y) * (scale - 1) + (activeTranslation?.position.y ?? 0);
-    const nextTransform = `translate(${x}px, ${y}px) scale(${scale})`;
+    const nextTransform = `translate(${cameraPreviewTransform.x}px, ${cameraPreviewTransform.y}px) scale(${cameraPreviewTransform.scale})`;
     cameraRef.current.style.transform = nextTransform;
-  }, [activeTranslation, activeZoom]);
+  }, [cameraPreviewTransform]);
 
   useEffect(() => {
     function switchModeShortcut(key: "1" | "2" | "3" | "4") {
@@ -588,6 +688,10 @@ export function App() {
 
       if (event.code === "Space") {
         event.preventDefault();
+        if (marqueeDraggingRef.current) {
+          marqueeSpacePanningRef.current = true;
+          return;
+        }
         setIsPlaying((current) => !current);
         return;
       }
@@ -652,11 +756,17 @@ export function App() {
       }
     }
 
+    function onKeyUp(event: KeyboardEvent) {
+      if (event.code === "Space") marqueeSpacePanningRef.current = false;
+    }
+
     const unsubscribeModeShortcut = window.clipper?.onModeShortcut(switchModeShortcut);
     window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
     return () => {
       unsubscribeModeShortcut?.();
       window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
     };
   }, [selectedTranslationMarker, selectedZoomMarker]);
 
@@ -1032,6 +1142,24 @@ export function App() {
       const zoomMarkers = item.zoomMarkers.map((marker) => (marker.id === markerId ? updater(marker, item) : marker));
       return { ...item, zoomMarkers: normalizeMendedZoomMarkerFocus(zoomMarkers) };
     }));
+  }
+
+  function previewZoomScale(partId: string, markerId: string, scale: number) {
+    pendingZoomScalePreviewRef.current = { partId, markerId, scale };
+    if (zoomScalePreviewFrameRef.current) return;
+    zoomScalePreviewFrameRef.current = requestAnimationFrame(() => {
+      zoomScalePreviewFrameRef.current = 0;
+      setLiveZoomScalePreview(pendingZoomScalePreviewRef.current);
+    });
+  }
+
+  function clearZoomScalePreview() {
+    pendingZoomScalePreviewRef.current = null;
+    if (zoomScalePreviewFrameRef.current) {
+      cancelAnimationFrame(zoomScalePreviewFrameRef.current);
+      zoomScalePreviewFrameRef.current = 0;
+    }
+    setLiveZoomScalePreview(null);
   }
 
   function updateZoomMarkers(partId: string, updater: (markers: ZoomMarker[], part: Part) => ZoomMarker[]) {
@@ -1453,6 +1581,22 @@ export function App() {
     }));
   }
 
+  function getResizedObjects(resize: ObjectResize, delta: Point) {
+    const nextSelectionBox = getResizedBounds(resize.selectionBox, resize.handle, delta);
+    const scaleX = resize.selectionBox.width === 0 ? 1 : nextSelectionBox.width / resize.selectionBox.width;
+    const scaleY = resize.selectionBox.height === 0 ? 1 : nextSelectionBox.height / resize.selectionBox.height;
+
+    return resize.objects.map((object) => ({
+      ...object,
+      bounds: {
+        x: Math.round(nextSelectionBox.x + (object.bounds.x - resize.selectionBox.x) * scaleX),
+        y: Math.round(nextSelectionBox.y + (object.bounds.y - resize.selectionBox.y) * scaleY),
+        width: Math.max(minimumObjectResizeSide, Math.round(object.bounds.width * scaleX)),
+        height: Math.max(minimumObjectResizeSide, Math.round(object.bounds.height * scaleY)),
+      },
+    }));
+  }
+
   function updateObjectDragSelection(nextObjects: SelectionPayload["objects"]) {
     const selectionBox = getBoundsUnion(nextObjects.map((object) => object.bounds));
     setSelectionPayload({ selectionBox, coordinates: boundsToPoints(selectionBox), objects: nextObjects });
@@ -1462,22 +1606,26 @@ export function App() {
     return frameViewportRef.current?.querySelector<HTMLElement>(`[data-object-id="${CSS.escape(objectId)}"]`) ?? null;
   }
 
-  function getFrameSelectionBoxElement() {
-    return frameViewportRef.current?.querySelector<HTMLElement>("[data-frame-selection-box]") ?? null;
+  function getFrameSelectionBoxElements() {
+    return Array.from(frameViewportRef.current?.querySelectorAll<HTMLElement>("[data-frame-selection-box]") ?? []);
+  }
+
+  function getFrameSelectionBoxElement(objectId: string) {
+    return frameViewportRef.current?.querySelector<HTMLElement>(`[data-frame-selection-box="${CSS.escape(objectId)}"]`) ?? null;
   }
 
   function setFrameSelectionBoxDragTransform(delta: Point) {
-    const element = getFrameSelectionBoxElement();
-    if (!element) return;
-    element.style.setProperty("--clipper-drag-x", `${delta.x}px`);
-    element.style.setProperty("--clipper-drag-y", `${delta.y}px`);
+    for (const element of getFrameSelectionBoxElements()) {
+      element.style.setProperty("--clipper-drag-x", `${delta.x * framePreviewScale * zoomScale}px`);
+      element.style.setProperty("--clipper-drag-y", `${delta.y * framePreviewScale * zoomScale}px`);
+    }
   }
 
   function clearFrameSelectionBoxDragTransform() {
-    const element = getFrameSelectionBoxElement();
-    if (!element) return;
-    element.style.removeProperty("--clipper-drag-x");
-    element.style.removeProperty("--clipper-drag-y");
+    for (const element of getFrameSelectionBoxElements()) {
+      element.style.removeProperty("--clipper-drag-x");
+      element.style.removeProperty("--clipper-drag-y");
+    }
   }
 
   function setObjectDragTransform(objectId: string, delta: Point) {
@@ -1487,6 +1635,45 @@ export function App() {
     element.style.setProperty("--clipper-drag-y", `${delta.y}px`);
   }
 
+  function setObjectResizePreview(objectId: string, bounds: Bounds) {
+    const element = getFrameObjectElement(objectId);
+    if (!element) return;
+    element.style.left = `${bounds.x}px`;
+    element.style.top = `${bounds.y}px`;
+    element.style.width = `${bounds.width}px`;
+    element.style.height = `${bounds.height}px`;
+  }
+
+  function clearObjectResizePreviews(objects: SelectionPayload["objects"]) {
+    for (const object of objects) {
+      const element = getFrameObjectElement(object.id);
+      if (!element) continue;
+      element.style.removeProperty("left");
+      element.style.removeProperty("top");
+      element.style.removeProperty("width");
+      element.style.removeProperty("height");
+    }
+  }
+
+  function setFrameSelectionBoxResizePreview(objectId: string, bounds: Bounds) {
+    const viewportBounds = insetBounds(boundsToViewport(bounds, cameraPreviewTransform, framePreviewScale), -selectorOffsetPx);
+    const element = getFrameSelectionBoxElement(objectId);
+    if (!element) return;
+    element.style.left = `${viewportBounds.x}px`;
+    element.style.top = `${viewportBounds.y}px`;
+    element.style.width = `${viewportBounds.width}px`;
+    element.style.height = `${viewportBounds.height}px`;
+  }
+
+  function clearFrameSelectionBoxResizePreview() {
+    for (const element of getFrameSelectionBoxElements()) {
+      element.style.removeProperty("left");
+      element.style.removeProperty("top");
+      element.style.removeProperty("width");
+      element.style.removeProperty("height");
+    }
+  }
+
   function clearObjectDragTransforms(objects: SelectionPayload["objects"]) {
     for (const object of objects) {
       const element = getFrameObjectElement(object.id);
@@ -1494,6 +1681,39 @@ export function App() {
       element.style.removeProperty("--clipper-drag-x");
       element.style.removeProperty("--clipper-drag-y");
     }
+  }
+
+  function scheduleObjectResizePreview(delta: Point) {
+    objectResizeDeltaRef.current = delta;
+    if (objectResizeFrameRef.current) return;
+
+    objectResizeFrameRef.current = requestAnimationFrame(() => {
+      objectResizeFrameRef.current = 0;
+      const resize = objectResizeRef.current;
+      if (!resize) return;
+
+      const nextObjects = getResizedObjects(resize, objectResizeDeltaRef.current);
+      for (const object of nextObjects) {
+        setObjectResizePreview(object.id, object.bounds);
+        setFrameSelectionBoxResizePreview(object.id, object.bounds);
+      }
+    });
+  }
+
+  function clearObjectResize() {
+    if (objectResizeFrameRef.current) {
+      cancelAnimationFrame(objectResizeFrameRef.current);
+      objectResizeFrameRef.current = 0;
+    }
+    if (objectResizeRef.current) clearObjectResizePreviews(objectResizeRef.current.objects);
+    clearFrameSelectionBoxResizePreview();
+    objectResizeRef.current = null;
+    objectResizeDeltaRef.current = { x: 0, y: 0 };
+  }
+
+  function finishCommittedObjectResize() {
+    objectResizeRef.current = null;
+    objectResizeDeltaRef.current = { x: 0, y: 0 };
   }
 
   function scheduleObjectDragPreview(delta: Point) {
@@ -1536,28 +1756,34 @@ export function App() {
 
     dragBoxFrameRef.current = requestAnimationFrame(() => {
       dragBoxFrameRef.current = 0;
+      if (!marqueeDraggingRef.current) return;
       const nextDragBox = pendingDragBoxRef.current;
-      setDragBox(nextDragBox);
-      if (!nextDragBox) return;
-
+      if (nextDragBox && dragSelectionBoxRef.current) updateDragSelectionBoxElement(dragSelectionBoxRef.current, nextDragBox, framePreviewScale);
+      if (!nextDragBox || !isVisibleMarqueeBounds(nextDragBox, framePreviewScale)) return;
       const payload = createSelectionPayload(nextDragBox, part.objects);
       const nextSelectionIds = payload.objects.map((object) => object.id).join("|");
       if (nextSelectionIds === liveDragSelectionIdsRef.current) return;
-
       liveDragSelectionIdsRef.current = nextSelectionIds;
-      setSelectionPayload(payload.objects.length > 0 ? payload : null);
-      setSelectedObjectId(payload.objects[0]?.id ?? null);
+      startTransition(() => {
+        setSelectionPayload(payload.objects.length > 0 ? payload : null);
+        setSelectedObjectId(payload.objects[0]?.id ?? null);
+      });
     });
   }
 
   function clearDragBox() {
+    marqueeDraggingRef.current = false;
     if (dragBoxFrameRef.current) {
       cancelAnimationFrame(dragBoxFrameRef.current);
       dragBoxFrameRef.current = 0;
     }
     dragStartRef.current = null;
     pendingDragBoxRef.current = null;
+    marqueeLastPointRef.current = null;
+    marqueeSpacePanningRef.current = false;
     liveDragSelectionIdsRef.current = "";
+    if (dragSelectionBoxRef.current) dragSelectionBoxRef.current.style.display = "none";
+    setMarqueeDragging(false);
     setDragStart(null);
     setDragBox(null);
   }
@@ -1588,7 +1814,7 @@ export function App() {
   }
 
   function onFramePointerDown(event: PointerEvent<HTMLDivElement>) {
-    if (mode !== "interactive" || !cameraRef.current || objectDragRef.current) return;
+    if (mode !== "interactive" || !cameraRef.current || objectDragRef.current || objectResizeRef.current) return;
     if (focusPickZoomMarker) {
       startFramePickDrag(event);
       return;
@@ -1602,8 +1828,11 @@ export function App() {
     event.currentTarget.setPointerCapture(event.pointerId);
     const point = framePointFromClient(event.nativeEvent, event.currentTarget);
     dragStartRef.current = point;
+    marqueeLastPointRef.current = point;
     pendingDragBoxRef.current = { x: point.x, y: point.y, width: 0, height: 0 };
     liveDragSelectionIdsRef.current = "";
+    marqueeDraggingRef.current = true;
+    setMarqueeDragging(true);
     setDragStart(point);
     setDragBox({ x: point.x, y: point.y, width: 0, height: 0 });
     clearNodeSelection();
@@ -1676,9 +1905,25 @@ export function App() {
       return;
     }
 
+    const activeObjectResize = objectResizeRef.current;
+    if (activeObjectResize && canSelectFrameObjects) {
+      const dx = (event.clientX - activeObjectResize.origin.x) / (framePreviewScale * cameraPreviewTransform.scale);
+      const dy = (event.clientY - activeObjectResize.origin.y) / (framePreviewScale * cameraPreviewTransform.scale);
+      scheduleObjectResizePreview({ x: dx, y: dy });
+      return;
+    }
+
     const currentDragStart = dragStartRef.current ?? dragStart;
     if (!currentDragStart || !canSelectFrameObjects) return;
     const point = framePointFromClient(event.nativeEvent, event.currentTarget);
+    if (marqueeSpacePanningRef.current && pendingDragBoxRef.current && marqueeLastPointRef.current) {
+      const delta = { x: point.x - marqueeLastPointRef.current.x, y: point.y - marqueeLastPointRef.current.y };
+      dragStartRef.current = { x: currentDragStart.x + delta.x, y: currentDragStart.y + delta.y };
+      marqueeLastPointRef.current = point;
+      scheduleDragBox(moveBounds(pendingDragBoxRef.current, delta));
+      return;
+    }
+    marqueeLastPointRef.current = point;
     scheduleDragBox(normalizeBounds(currentDragStart, point));
   }
 
@@ -1695,8 +1940,16 @@ export function App() {
       return;
     }
 
+    if (objectResizeRef.current) {
+      commitObjectResize();
+      return;
+    }
+
     const finalDragBox = pendingDragBoxRef.current ?? dragBox;
-    if (!finalDragBox || !canSelectFrameObjects) return;
+    if (!finalDragBox || !canSelectFrameObjects || !isVisibleMarqueeBounds(finalDragBox, framePreviewScale)) {
+      clearDragBox();
+      return;
+    }
     const payload = createSelectionPayload(finalDragBox, part.objects);
     if (payload.objects.length === 0) {
       clearNodeSelection();
@@ -1712,6 +1965,7 @@ export function App() {
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
     cancelFramePickPreview();
     clearObjectDrag();
+    clearObjectResize();
     clearDragBox();
   }
 
@@ -1734,6 +1988,47 @@ export function App() {
     objectDragRef.current = nextDrag;
     objectDragDeltaRef.current = { x: 0, y: 0 };
     for (const item of nextSelectionObjects) setObjectDragTransform(item.id, { x: 0, y: 0 });
+  }
+
+  function startObjectResize(event: PointerEvent<HTMLDivElement>, handle: ResizeHandle, objectId?: string) {
+    if (mode !== "interactive" || !canSelectFrameObjects || !selectionPayload?.objects.length) return;
+    if (focusPickZoomMarker || positionPickTranslationMarker) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const preservedObjects = part.objects.filter((item) => selectionPayload.objects.some((selected) => selected.id === item.id)).map(selectionObjectFromFrameObject);
+    const resizedObjects = objectId ? preservedObjects.filter((item) => item.id === objectId) : preservedObjects;
+    if (resizedObjects.length === 0 || preservedObjects.length === 0) return;
+    const selectionBox = getBoundsUnion(resizedObjects.map((item) => item.bounds));
+    objectResizeRef.current = { origin: { x: event.clientX, y: event.clientY }, handle, partId: part.id, selectionBox, objects: resizedObjects, preservedObjects };
+    objectResizeDeltaRef.current = { x: 0, y: 0 };
+  }
+
+  function commitObjectResize() {
+    const resize = objectResizeRef.current;
+    if (!resize) return;
+
+    if (objectResizeFrameRef.current) {
+      cancelAnimationFrame(objectResizeFrameRef.current);
+      objectResizeFrameRef.current = 0;
+    }
+
+    const nextObjects = getResizedObjects(resize, objectResizeDeltaRef.current);
+    const nextBoundsById = new Map(nextObjects.map((object) => [object.id, object.bounds]));
+    updateSceneParts((parts) => parts.map((item) => {
+      if (item.id !== resize.partId) return item;
+      return {
+        ...item,
+        objects: item.objects.map((object) => {
+          const nextBounds = nextBoundsById.get(object.id);
+          return nextBounds ? { ...object, bounds: nextBounds } : object;
+        }),
+      };
+    }));
+    const nextObjectsById = new Map(nextObjects.map((object) => [object.id, object]));
+    const nextSelectionObjects = resize.preservedObjects.map((object) => nextObjectsById.get(object.id) ?? object);
+    updateObjectDragSelection(nextSelectionObjects);
+    finishCommittedObjectResize();
   }
 
   function startTextObjectEdit(event: ReactMouseEvent<HTMLDivElement>, object: FrameObject) {
@@ -1855,8 +2150,7 @@ export function App() {
           {!renamingProject ? <span className="truncate text-xs text-[#9b9da7]">{scene.name} / {part.name}</span> : null}
         </div>
         <div className={`${appNoDragRegion} flex justify-end gap-1.5`}>
-          <button className={appBarButtonBase}>Presets</button>
-          <button className={appBarButtonBase}>Preview</button>
+          <button className={appBarButtonBase} title="Settings (Cmd/Ctrl+,)" onClick={() => setSettingsOpen(true)}>Settings</button>
           <button className={appBarButtonBase} onClick={() => setExportDialogOpen(true)}>Export</button>
           <button className={appBarSaveButtonClass(hasUnsavedChanges)} disabled={!hasUnsavedChanges} title="Save every project, timeline, inspector, and active code change (Ctrl+S or Cmd+S)" onClick={() => void saveAllChanges()}>Save</button>
         </div>
@@ -1869,7 +2163,7 @@ export function App() {
             <button className={`${segmentedTabBase} flex items-center justify-center gap-1.5 ${leftPanelTab === "tools" ? segmentedTabActive : segmentedTabInactive}`} onClick={() => setLeftPanelTab("tools")}><Sparkles size={14} />Effects</button>
           </div>
           {leftPanelTab === "assets" ? (
-            <AssetManager assets={assets} assetsPath={project.assetsPath} onCopyAsset={copyAssetPath} onCreateFolder={createAssetFolder} onDeleteAsset={deleteAsset} onDropFiles={importDroppedAssets} onDuplicateAsset={duplicateAsset} onMoveAsset={moveAsset} onRenameAsset={renameAsset} onSortAssets={sortAssets} />
+            <AssetManager assets={assets} onCopyAsset={copyAssetPath} onCreateFolder={createAssetFolder} onDeleteAsset={deleteAsset} onDropFiles={importDroppedAssets} onDuplicateAsset={duplicateAsset} onMoveAsset={moveAsset} onRenameAsset={renameAsset} onSortAssets={sortAssets} />
           ) : (
             <ToolsPanel timelineMode={timelineMode} canSnapMiddle={Boolean(zoomMiddleSnap)} onAddTranslationMarker={addTranslationMarker} onAddZoomMarker={addZoomMarker} onSnapMiddle={() => snapZoomMiddle()} />
           )}
@@ -1888,14 +2182,17 @@ export function App() {
               <FramePreview
                 cameraRef={cameraRef}
                 dragBox={dragBox}
+                dragSelectionBoxRef={dragSelectionBoxRef}
                 framePickPoint={framePickPoint}
                 focusPicking={isPickingZoomFocus || isPickingTranslationPosition}
                 canSelectObjects={canSelectFrameObjects}
+                cameraTransform={cameraPreviewTransform}
                 frameViewportRef={frameViewportRef}
                 frameScale={framePreviewScale}
                 part={part}
                 previewTime={previewTime}
-                selectionBox={selectionPayload?.selectionBox ?? null}
+                selectedObjects={selectionPayload?.objects ?? []}
+                marqueeDragging={marqueeDragging}
                 editingTextObjectId={editingTextObjectId}
                 onFramePointerCancel={onFramePointerCancel}
                 onFramePointerDown={onFramePointerDown}
@@ -1903,6 +2200,7 @@ export function App() {
                 onFramePointerMove={onFramePointerMove}
                 onFramePointerUp={onFramePointerUp}
                 onObjectPointerDown={startObjectDrag}
+                onObjectResizePointerDown={startObjectResize}
                 onTextEditCommit={updateTextObjectContent}
                 onTextObjectDoubleClick={startTextObjectEdit}
               />
@@ -1939,7 +2237,7 @@ export function App() {
              <div className="grid grid-cols-3 gap-1">{(["video", "motion", "agent"] as const).map((tab) => <button className={`${segmentedTabBase} capitalize ${rightPanelTab === tab ? segmentedTabActive : segmentedTabInactive}`} key={tab} onClick={() => setRightPanelTab(tab)}>{tab}</button>)}</div>
           </section>
           <section className="mb-5 grid gap-2.5">
-            {rightPanelTab === "agent" ? <AgentPanel part={part} sourceStatus={sourceStatus} agentContext={agentContext} /> : selectedZoom && selectedZoomPart ? <ZoomInspector marker={selectedZoom} part={selectedZoomPart} selectedMarkerCount={selectedZoomSnapMarkers.length} selectedSnapInActive={selectedZoomSnapInActive} selectedSnapOutActive={selectedZoomSnapOutActive} middleSnapActive={selectedZoomPartMiddleSnapActive} middleTransitionMode={selectedZoomPartMiddleTransitionMode} pickingFocus={focusPickZoomMarker?.partId === selectedZoomPart.id && focusPickZoomMarker.markerId === selectedZoom.id} canSnapMiddle={Boolean(inspectorZoomMiddleSnap)} onChange={(updater) => updateZoomMarker(selectedZoomPart.id, selectedZoom.id, updater)} onChangeFocus={(focus) => updateZoomMarkerFocusGroup(selectedZoomPart.id, selectedZoom.id, focus)} onChangeSelectedSnap={updateSelectedZoomSnap} onChangeMiddleTransition={(mode) => updateZoomMiddleTransition(selectedZoomPart, mode)} onChangeMiddleEase={(ease) => updateZoomMiddleEase(selectedZoomPart, ease)} onDelete={() => deleteZoomMarker(selectedZoomPart.id, selectedZoom.id)} onPickFocus={() => startZoomFocusPick(selectedZoomPart.id, selectedZoom.id)} onSnapMiddle={() => snapZoomMiddle(selectedZoomPart)} /> : selectedTranslation && selectedTranslationPart ? <TranslationInspector marker={selectedTranslation} part={selectedTranslationPart} selectedMarkerCount={selectedTranslationSnapMarkers.length} selectedSnapInActive={selectedTranslationSnapInActive} selectedSnapOutActive={selectedTranslationSnapOutActive} middleSnapActive={selectedTranslationPartMiddleSnapActive} middleTransitionMode={selectedTranslationPartMiddleTransitionMode} pickingPosition={positionPickTranslationMarker?.partId === selectedTranslationPart.id && positionPickTranslationMarker.markerId === selectedTranslation.id} canSnapMiddle={Boolean(inspectorTranslationMiddleSnap)} onChange={(updater) => updateTranslationMarker(selectedTranslationPart.id, selectedTranslation.id, updater)} onChangeSelectedSnap={updateSelectedTranslationSnap} onChangeMiddleTransition={(mode) => updateTranslationMiddleTransition(selectedTranslationPart, mode)} onChangeMiddleEase={(ease) => updateTranslationMiddleEase(selectedTranslationPart, ease)} onDelete={() => deleteTranslationMarker(selectedTranslationPart.id, selectedTranslation.id)} onPickPosition={() => startTranslationPositionPick(selectedTranslationPart.id, selectedTranslation.id)} onSnapMiddle={() => snapTranslationMiddle(selectedTranslationPart)} /> : selectedObject ? <ObjectInspector object={selectedObject} onChange={updateSelectedObject} /> : selectedPart ? <FrameInspector part={selectedPart} onFrameChange={updatePartFrame} onBackgroundChange={updatePartBackground} /> : <EmptyInspector />}
+            {rightPanelTab === "agent" ? <AgentPanel part={part} sourceStatus={sourceStatus} agentContext={agentContext} /> : selectedZoom && selectedZoomPart ? <ZoomInspector marker={selectedZoom} part={selectedZoomPart} selectedMarkerCount={selectedZoomSnapMarkers.length} selectedSnapInActive={selectedZoomSnapInActive} selectedSnapOutActive={selectedZoomSnapOutActive} middleSnapActive={selectedZoomPartMiddleSnapActive} middleTransitionMode={selectedZoomPartMiddleTransitionMode} pickingFocus={focusPickZoomMarker?.partId === selectedZoomPart.id && focusPickZoomMarker.markerId === selectedZoom.id} canSnapMiddle={Boolean(inspectorZoomMiddleSnap)} onChange={(updater) => updateZoomMarker(selectedZoomPart.id, selectedZoom.id, updater)} onScalePreview={(scale) => previewZoomScale(selectedZoomPart.id, selectedZoom.id, scale)} onScalePreviewEnd={clearZoomScalePreview} onChangeFocus={(focus) => updateZoomMarkerFocusGroup(selectedZoomPart.id, selectedZoom.id, focus)} onChangeSelectedSnap={updateSelectedZoomSnap} onChangeMiddleTransition={(mode) => updateZoomMiddleTransition(selectedZoomPart, mode)} onChangeMiddleEase={(ease) => updateZoomMiddleEase(selectedZoomPart, ease)} onDelete={() => deleteZoomMarker(selectedZoomPart.id, selectedZoom.id)} onPickFocus={() => startZoomFocusPick(selectedZoomPart.id, selectedZoom.id)} onSnapMiddle={() => snapZoomMiddle(selectedZoomPart)} /> : selectedTranslation && selectedTranslationPart ? <TranslationInspector marker={selectedTranslation} part={selectedTranslationPart} selectedMarkerCount={selectedTranslationSnapMarkers.length} selectedSnapInActive={selectedTranslationSnapInActive} selectedSnapOutActive={selectedTranslationSnapOutActive} middleSnapActive={selectedTranslationPartMiddleSnapActive} middleTransitionMode={selectedTranslationPartMiddleTransitionMode} pickingPosition={positionPickTranslationMarker?.partId === selectedTranslationPart.id && positionPickTranslationMarker.markerId === selectedTranslation.id} canSnapMiddle={Boolean(inspectorTranslationMiddleSnap)} onChange={(updater) => updateTranslationMarker(selectedTranslationPart.id, selectedTranslation.id, updater)} onChangeSelectedSnap={updateSelectedTranslationSnap} onChangeMiddleTransition={(mode) => updateTranslationMiddleTransition(selectedTranslationPart, mode)} onChangeMiddleEase={(ease) => updateTranslationMiddleEase(selectedTranslationPart, ease)} onDelete={() => deleteTranslationMarker(selectedTranslationPart.id, selectedTranslation.id)} onPickPosition={() => startTranslationPositionPick(selectedTranslationPart.id, selectedTranslation.id)} onSnapMiddle={() => snapTranslationMiddle(selectedTranslationPart)} /> : selectedObject ? <ObjectInspector object={selectedObject} onChange={updateSelectedObject} /> : selectedPart ? <FrameInspector part={selectedPart} onFrameChange={updatePartFrame} onBackgroundChange={updatePartBackground} /> : <EmptyInspector />}
           </section>
           {validationErrors.length > 0 ? <section className="mb-5 grid gap-2.5 text-[#ffbf66]"><h2 className={sectionTitle}>Validation</h2>{validationErrors.map((error) => <p key={error}>{error}</p>)}</section> : null}
         </aside>
@@ -1998,6 +2296,12 @@ export function App() {
       onOpenChange={setExportDialogOpen}
       onTabChange={setExportDialogTab}
     />
+    <SettingsDialog
+      activeSection={settingsSection}
+      open={settingsOpen}
+      onActiveSectionChange={setSettingsSection}
+      onOpenChange={setSettingsOpen}
+    />
     {videoExportProgress ? <VideoExportOverlay cancelling={videoExportCancelling} progress={videoExportProgress} onCancel={() => void stopVideoExport()} /> : null}
     <AppContextMenu menu={appContextMenu} onClose={() => setAppContextMenu(null)} />
     <Toaster
@@ -2037,6 +2341,56 @@ function FrameZoomBar({ scale, onScaleChange }: { scale: number; onScaleChange: 
   );
 }
 
+function SettingsDialog({ activeSection, open, onActiveSectionChange, onOpenChange }: { activeSection: SettingsSection; open: boolean; onActiveSectionChange: (section: SettingsSection) => void; onOpenChange: (open: boolean) => void }) {
+  const navItems: Array<{ id: SettingsSection; label: string }> = [
+    { id: "playback", label: "Playback" },
+    { id: "timeline", label: "Timeline" },
+    { id: "export", label: "Export" },
+    { id: "advanced", label: "Advanced" },
+  ];
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="h-[min(680px,calc(100vh-56px))] w-[min(980px,calc(100vw-42px))] gap-0 overflow-hidden p-0" showCloseButton={false}>
+        <div className="grid h-full min-h-0 grid-cols-[210px_minmax(0,1fr)] bg-[#101116]">
+          <aside className="border-r border-[#2d313b] bg-[#15171e] p-3">
+            <nav className="grid gap-1" aria-label="Settings sections">
+              {navItems.map((item) => (
+                <button key={item.id} className={`rounded-[9px] px-3 py-2.5 text-left text-xs font-extrabold transition ${activeSection === item.id ? "bg-[#0f1117] text-white" : "text-[#9297a3] hover:bg-[#1e222c] hover:text-[#dfe2ea]"}`} onClick={() => onActiveSectionChange(item.id)}>
+                  <span className="text-xs font-extrabold">{item.label}</span>
+                </button>
+              ))}
+            </nav>
+          </aside>
+
+          <section className="grid min-h-0 grid-rows-[58px_minmax(0,1fr)_58px] bg-[#202229]">
+            <header className="flex items-center justify-between border-b border-[#14161c] px-5">
+              <div>
+                <h2 className="text-sm font-extrabold text-white">{navItems.find((item) => item.id === activeSection)?.label}</h2>
+                <p className="mt-1 text-xs text-[#8f939d]">Settings for this section will be added as the editor grows.</p>
+              </div>
+              <button className={`${appBarButtonBase} px-3 py-1.5`} onClick={() => onOpenChange(false)}>Close</button>
+            </header>
+
+            <div className="settings-scrollbar min-h-0 overflow-y-auto overflow-x-hidden p-5 [scrollbar-gutter:stable]">
+              <div className="grid h-full place-items-center rounded-xl border border-dashed border-[#363b47] bg-[#1b1e26] text-center">
+                <div className="max-w-[320px] px-6">
+                  <strong className="text-sm text-white">No controls yet</strong>
+                  <p className="mt-2 text-xs leading-5 text-[#8f939d]">Preview caching controls were removed. This settings shell is ready for future editor, export, and diagnostic preferences.</p>
+                </div>
+              </div>
+            </div>
+
+            <footer className="flex items-center justify-between border-t border-[#14161c] bg-[#202229] px-5">
+              <span className="text-xs text-[#7f8490]">Shortcut: Cmd/Ctrl + ,</span>
+              <button className="rounded-[9px] border border-[var(--clipper-accent)] bg-[var(--clipper-accent)] px-4 py-2 text-sm font-extrabold text-[var(--clipper-accent-foreground)] transition hover:bg-[var(--clipper-accent-hover)]" onClick={() => onOpenChange(false)}>Save</button>
+            </footer>
+          </section>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function ExportMediaDialog({ activeTab, durationSeconds, exporting, includeSources, open, partCount, progress, projectFormat, projectName, resolution, sceneName, validationErrorCount, onIncludeSourcesChange, onMediaExport, onOpenChange, onProjectExport, onProjectFormatChange, onTabChange }: { activeTab: ExportDialogTab; currentTime: number; durationSeconds: number; exporting: boolean; includeSources: boolean; open: boolean; partCount: number; progress: string | null; projectFormat: ProjectExportFormat; projectName: string; resolution: ProjectManifest["resolution"]; sceneName: string; validationErrorCount: number; onIncludeSourcesChange: (includeSources: boolean) => void; onMediaExport: () => void; onOpenChange: (open: boolean) => void; onProjectExport: () => void; onProjectFormatChange: (format: ProjectExportFormat) => void; onTabChange: (tab: ExportDialogTab) => void }) {
   const tabButtonClass = (tab: ExportDialogTab) => `rounded-[8px] px-3 py-1.5 text-xs font-extrabold transition ${activeTab === tab ? "bg-[#202b37] text-white shadow-[inset_0_0_0_1px_#2d4052]" : "text-[#9b9da7] hover:bg-[#20232c] hover:text-white"}`;
 
@@ -2061,7 +2415,7 @@ function ExportMediaDialog({ activeTab, durationSeconds, exporting, includeSourc
             <ExportStat label="Scene" value={sceneName} />
             <ExportStat label="Duration" value={formatTime(durationSeconds)} />
             <ExportStat label="Resolution" value={`${resolution.width} x ${resolution.height}`} />
-            <ExportStat label={activeTab === "media" ? "Frame rate" : "Parts"} value={activeTab === "media" ? `${videoExportFrameRate} fps` : `${partCount}`} />
+            <ExportStat label={activeTab === "media" ? "Frame rate" : "Compositions"} value={activeTab === "media" ? `${videoExportFrameRate} fps` : `${partCount}`} />
             <ExportStat label="Validation" value={validationErrorCount === 0 ? "Ready" : `${validationErrorCount} issue${validationErrorCount === 1 ? "" : "s"}`} warning={validationErrorCount > 0} />
           </div>
 
@@ -2140,24 +2494,58 @@ function VideoExportOverlay({ cancelling, progress, onCancel }: { cancelling: bo
   );
 }
 
-const FramePreview = memo(function FramePreview({ cameraRef, dragBox, framePickPoint, focusPicking, canSelectObjects, frameViewportRef, frameScale, part, previewTime, selectionBox, editingTextObjectId, onFramePointerCancel, onFramePointerDown, onFramePointerDownCapture, onFramePointerMove, onFramePointerUp, onObjectPointerDown, onTextEditCommit, onTextObjectDoubleClick }: { cameraRef: RefObject<HTMLDivElement | null>; dragBox: Bounds | null; framePickPoint: Point | null; focusPicking: boolean; canSelectObjects: boolean; frameViewportRef: RefObject<HTMLDivElement | null>; frameScale: number; part: Part; previewTime: number; selectionBox: Bounds | null; editingTextObjectId: string | null; onFramePointerCancel: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerDown: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerDownCapture: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerMove: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerUp: (event: PointerEvent<HTMLDivElement>) => void; onObjectPointerDown: (event: PointerEvent<HTMLDivElement>, object: FrameObject) => void; onTextEditCommit: (objectId: string, content: string, richText?: RichTextSegment[]) => void; onTextObjectDoubleClick: (event: ReactMouseEvent<HTMLDivElement>, object: FrameObject) => void }) {
+const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dragSelectionBoxRef, framePickPoint, focusPicking, canSelectObjects, cameraTransform, frameViewportRef, frameScale, part, previewTime, selectedObjects, marqueeDragging, editingTextObjectId, onFramePointerCancel, onFramePointerDown, onFramePointerDownCapture, onFramePointerMove, onFramePointerUp, onObjectPointerDown, onObjectResizePointerDown, onTextEditCommit, onTextObjectDoubleClick }: { cameraRef: RefObject<HTMLDivElement | null>; dragBox: Bounds | null; dragSelectionBoxRef: RefObject<HTMLDivElement | null>; framePickPoint: Point | null; focusPicking: boolean; canSelectObjects: boolean; cameraTransform: CameraPreviewTransform; frameViewportRef: RefObject<HTMLDivElement | null>; frameScale: number; part: Part; previewTime: number; selectedObjects: SelectionPayload["objects"]; marqueeDragging: boolean; editingTextObjectId: string | null; onFramePointerCancel: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerDown: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerDownCapture: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerMove: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerUp: (event: PointerEvent<HTMLDivElement>) => void; onObjectPointerDown: (event: PointerEvent<HTMLDivElement>, object: FrameObject) => void; onObjectResizePointerDown: (event: PointerEvent<HTMLDivElement>, handle: ResizeHandle, objectId?: string) => void; onTextEditCommit: (objectId: string, content: string, richText?: RichTextSegment[]) => void; onTextObjectDoubleClick: (event: ReactMouseEvent<HTMLDivElement>, object: FrameObject) => void }) {
   const frameStyle = useMemo(() => ({ ...part.frame.style, width: FRAME_WIDTH, height: FRAME_HEIGHT, transform: `scale(${frameScale})` }) as CSSProperties, [frameScale, part.frame.style]);
   const viewportStyle = useMemo(() => ({ width: FRAME_WIDTH * frameScale, height: FRAME_HEIGHT * frameScale }) as CSSProperties, [frameScale]);
+  const selectedBounds = useMemo(() => selectedObjects.length > 0 ? getBoundsUnion(selectedObjects.map((object) => object.bounds)) : null, [selectedObjects]);
+  const selectedViewportBounds = useMemo(() => selectedBounds ? insetBounds(boundsToViewport(selectedBounds, cameraTransform, frameScale), -selectorOffsetPx) : null, [cameraTransform, frameScale, selectedBounds]);
+  const [selectorHover, setSelectorHover] = useState(false);
+  const selectorHoverRef = useRef(false);
+  const showDragBox = dragBox && isVisibleMarqueeBounds(dragBox, frameScale);
+
+  function updateSelectorHover(event: PointerEvent<HTMLDivElement>) {
+    if (!selectedViewportBounds || marqueeDragging) {
+      if (selectorHoverRef.current) {
+        selectorHoverRef.current = false;
+        setSelectorHover(false);
+      }
+      return;
+    }
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    const hovering = x >= selectedViewportBounds.x && x <= selectedViewportBounds.x + selectedViewportBounds.width && y >= selectedViewportBounds.y && y <= selectedViewportBounds.y + selectedViewportBounds.height;
+    if (hovering === selectorHoverRef.current) return;
+    selectorHoverRef.current = hovering;
+    setSelectorHover(hovering);
+  }
+
+  function handleFramePointerMove(event: PointerEvent<HTMLDivElement>) {
+    updateSelectorHover(event);
+    onFramePointerMove(event);
+  }
+
+  function clearSelectorHover() {
+    if (!selectorHoverRef.current) return;
+    selectorHoverRef.current = false;
+    setSelectorHover(false);
+  }
 
   return (
     <div className="grid gap-3">
       <div className="flex items-baseline justify-between text-[#dfe2ea]"><span className={mutedCaps}>{part.name}</span><strong className="text-[13px]">{FRAME_WIDTH} x {FRAME_HEIGHT}</strong></div>
-      <div ref={frameViewportRef} className={`relative overflow-hidden bg-black shadow-[0_22px_70px_rgba(0,0,0,0.44)] ${focusPicking ? "cursor-crosshair ring-2 ring-[#37d6c2]" : ""}`} style={viewportStyle} onPointerDownCapture={onFramePointerDownCapture} onPointerDown={onFramePointerDown} onPointerMove={onFramePointerMove} onPointerUp={onFramePointerUp} onPointerCancel={onFramePointerCancel}>
+      <div ref={frameViewportRef} className={`relative overflow-hidden bg-black shadow-[0_22px_70px_rgba(0,0,0,0.44)] ${focusPicking ? "cursor-crosshair ring-2 ring-[#37d6c2]" : ""}`} style={viewportStyle} onPointerDownCapture={onFramePointerDownCapture} onPointerDown={onFramePointerDown} onPointerMove={handleFramePointerMove} onPointerUp={onFramePointerUp} onPointerCancel={onFramePointerCancel} onPointerLeave={clearSelectorHover}>
         <div className="absolute left-0 top-0 origin-top-left overflow-hidden" style={frameStyle}>
           <div className="absolute inset-0 origin-center" ref={cameraRef}>
             <BackgroundLayerView background={part.background} previewTime={previewTime} />
             {part.objects.map((object) => (
               <FrameObjectView key={object.id} object={object} canSelect={canSelectObjects} editing={editingTextObjectId === object.id} focusPicking={focusPicking} previewTime={previewTime} onDoubleClick={(event) => onTextObjectDoubleClick(event, object)} onPointerDown={(event) => onObjectPointerDown(event, object)} onTextEditCommit={(content, richText) => onTextEditCommit(object.id, content, richText)} />
             ))}
-            {canSelectObjects && selectionBox ? <SelectionBox bounds={selectionBox} /> : null}
           </div>
         </div>
-        {dragBox ? <DragSelectionBox bounds={dragBox} frameScale={frameScale} /> : null}
+        {canSelectObjects ? selectedObjects.map((object) => <SelectionOverlayBox key={object.id} objectId={object.id} bounds={object.bounds} cameraTransform={cameraTransform} frameScale={frameScale} highlighted={selectorHover} interactive={!marqueeDragging} onResizePointerDown={(event, handle) => onObjectResizePointerDown(event, handle, object.id)} />) : null}
+        {dragBox ? <DragSelectionBox ref={dragSelectionBoxRef} bounds={dragBox} frameScale={frameScale} visible={Boolean(showDragBox)} /> : null}
         {focusPicking && framePickPoint ? <FramePickPointOverlay point={framePickPoint} frameScale={frameScale} /> : null}
       </div>
     </div>
@@ -2262,7 +2650,9 @@ const FrameObjectView = memo(function FrameObjectView({ object, canSelect, editi
     <div className={`absolute flex touch-none select-none flex-col justify-center overflow-hidden whitespace-pre-line ${focusPicking ? "cursor-crosshair" : editing ? "cursor-text" : "cursor-default"} ${editing ? "select-text" : ""}`} data-object-id={canSelect ? object.id : undefined} style={style} onDoubleClick={onDoubleClick} onPointerDown={onPointerDown}>
       {object.type === "text" && editing ? <div ref={editableRef} className="min-h-0 w-full whitespace-pre-wrap outline-none" contentEditable suppressContentEditableWarning onBlur={commitTextEdit} onKeyDown={onTextEditKeyDown} onPointerDown={(event) => event.stopPropagation()} /> : null}
       {object.type === "text" && !editing ? <div className="min-h-0 w-full whitespace-pre-wrap">{renderRichTextSegments(textSegments, Boolean(richText))}</div> : null}
-      {object.type !== "text" && content ? content : null}
+      {object.type === "svg" && content ? <div className="h-full w-full" dangerouslySetInnerHTML={{ __html: content }} /> : null}
+      {object.type === "html" && content ? <div className="h-full w-full" dangerouslySetInnerHTML={{ __html: content }} /> : null}
+      {object.type !== "text" && object.type !== "svg" && object.type !== "html" && content ? content : null}
     </div>
   );
 }, areFrameObjectPropsEqual);
@@ -2285,15 +2675,46 @@ function areBackgroundElementPropsEqual(previous: { element: FrameObject; previe
 }
 
 function isPreviewTimeSensitiveObject(object: FrameObject) {
-  return Boolean(object.motion);
+  return Boolean(object.motion) || isAnimatedGraphObject(object.id);
 }
 
-function SelectionBox({ bounds }: { bounds: Bounds }) {
-  return <div data-frame-selection-box className="pointer-events-none absolute border border-[var(--clipper-accent)] bg-transparent opacity-100" style={{ left: bounds.x, top: bounds.y, width: bounds.width, height: bounds.height, transform: "translate(var(--clipper-drag-x, 0px), var(--clipper-drag-y, 0px))", zIndex: 2147483647 }} />;
+function SelectionOverlayBox({ objectId, bounds, cameraTransform, frameScale, highlighted, interactive, onResizePointerDown }: { objectId: string; bounds: Bounds; cameraTransform: CameraPreviewTransform; frameScale: number; highlighted: boolean; interactive: boolean; onResizePointerDown: (event: PointerEvent<HTMLDivElement>, handle: ResizeHandle) => void }) {
+  const viewportBounds = insetBounds(boundsToViewport(bounds, cameraTransform, frameScale), -selectorOffsetPx);
+  const horizontalEdgeClass = `${interactive ? "pointer-events-auto" : "pointer-events-none"} absolute left-0 w-full cursor-ns-resize opacity-95 ${highlighted ? "h-0.5" : "h-px"}`;
+  const verticalEdgeClass = `${interactive ? "pointer-events-auto" : "pointer-events-none"} absolute top-0 h-full cursor-ew-resize opacity-95 ${highlighted ? "w-0.5" : "w-px"}`;
+  const edgeStyle = { backgroundColor: selectorBlue };
+  const handleClass = `${interactive ? "pointer-events-auto" : "pointer-events-none"} absolute border-2 bg-white shadow-[0_1px_4px_rgba(0,0,0,0.24)]`;
+  const handleStyle = { width: selectorHandleSizePx, height: selectorHandleSizePx };
+  const handleStyleWithColor = { ...handleStyle, borderColor: selectorBlue };
+  const handleInset = selectorHandleSizePx / 2;
+  const keepLeftHandleInside = viewportBounds.x < handleInset;
+  const keepTopHandleInside = viewportBounds.y < handleInset;
+  const keepRightHandleInside = viewportBounds.x + viewportBounds.width > FRAME_WIDTH * frameScale - handleInset;
+  const keepBottomHandleInside = viewportBounds.y + viewportBounds.height > FRAME_HEIGHT * frameScale - handleInset;
+  const topLeftHandleClass = `${handleClass} left-0 top-0 ${keepLeftHandleInside ? "" : "-translate-x-1/2"} ${keepTopHandleInside ? "" : "-translate-y-1/2"} cursor-nwse-resize`;
+  const topRightHandleClass = `${handleClass} right-0 top-0 ${keepRightHandleInside ? "" : "translate-x-1/2"} ${keepTopHandleInside ? "" : "-translate-y-1/2"} cursor-nesw-resize`;
+  const bottomRightHandleClass = `${handleClass} bottom-0 right-0 ${keepRightHandleInside ? "" : "translate-x-1/2"} ${keepBottomHandleInside ? "" : "translate-y-1/2"} cursor-nwse-resize`;
+  const bottomLeftHandleClass = `${handleClass} bottom-0 left-0 ${keepLeftHandleInside ? "" : "-translate-x-1/2"} ${keepBottomHandleInside ? "" : "translate-y-1/2"} cursor-nesw-resize`;
+  return (
+    <div data-frame-selection-box={objectId} className="pointer-events-none absolute bg-transparent" style={{ left: viewportBounds.x, top: viewportBounds.y, width: viewportBounds.width, height: viewportBounds.height, transform: "translate(var(--clipper-drag-x, 0px), var(--clipper-drag-y, 0px))", zIndex: 2147483647 }}>
+      <div className={`${horizontalEdgeClass} top-0`} style={edgeStyle} onPointerDown={(event) => onResizePointerDown(event, "top")} />
+      <div className={`${horizontalEdgeClass} bottom-0`} style={edgeStyle} onPointerDown={(event) => onResizePointerDown(event, "bottom")} />
+      <div className={`${verticalEdgeClass} left-0`} style={edgeStyle} onPointerDown={(event) => onResizePointerDown(event, "left")} />
+      <div className={`${verticalEdgeClass} right-0`} style={edgeStyle} onPointerDown={(event) => onResizePointerDown(event, "right")} />
+      <div className={topLeftHandleClass} style={handleStyleWithColor} onPointerDown={(event) => onResizePointerDown(event, "top-left")} />
+      <div className={topRightHandleClass} style={handleStyleWithColor} onPointerDown={(event) => onResizePointerDown(event, "top-right")} />
+      <div className={bottomRightHandleClass} style={handleStyleWithColor} onPointerDown={(event) => onResizePointerDown(event, "bottom-right")} />
+      <div className={bottomLeftHandleClass} style={handleStyleWithColor} onPointerDown={(event) => onResizePointerDown(event, "bottom-left")} />
+    </div>
+  );
 }
 
-function DragSelectionBox({ bounds, frameScale }: { bounds: Bounds; frameScale: number }) {
-  return <div className="pointer-events-none absolute border border-[var(--clipper-accent)] bg-[rgb(var(--clipper-accent-rgb)/0.10)] opacity-100" style={{ left: bounds.x * frameScale, top: bounds.y * frameScale, width: bounds.width * frameScale, height: bounds.height * frameScale }} />;
+function DragSelectionBox({ ref, bounds, frameScale, visible }: { ref: RefObject<HTMLDivElement | null>; bounds: Bounds; frameScale: number; visible: boolean }) {
+  useLayoutEffect(() => {
+    if (ref.current) updateDragSelectionBoxElement(ref.current, bounds, frameScale, visible);
+  }, [bounds, frameScale, ref, visible]);
+
+  return <div ref={ref} className="pointer-events-none absolute left-0 top-0 border bg-[#159dff]/10 opacity-100 shadow-[0_0_0_1px_rgba(21,157,255,0.18)] will-change-transform" style={{ borderColor: selectorBlue, zIndex: 2147483646 }} />;
 }
 
 function getRenderableTextSegments(content: string, richText: RichTextSegment[] | undefined) {
@@ -2433,12 +2854,13 @@ function QuickAccessTooltip({ name, description, shortcut, children }: { name: s
   );
 }
 
-function AssetManager({ assets, assetsPath, onCopyAsset, onCreateFolder, onDeleteAsset, onDropFiles, onDuplicateAsset, onMoveAsset, onRenameAsset, onSortAssets }: { assets: AssetItem[]; assetsPath: string; onCopyAsset: (assetId: string) => void; onCreateFolder: (parentFolderId?: string) => void; onDeleteAsset: (assetId: string) => void; onDropFiles: (files: FileList, targetFolderId?: string) => void; onDuplicateAsset: (assetId: string) => void; onMoveAsset: (sourceId: string, intent: AssetDropIntent) => void; onRenameAsset: (assetId: string, name: string) => void; onSortAssets: (parentFolderId: string | null, mode: AssetSortMode) => void }) {
+function AssetManager({ assets, onCopyAsset, onCreateFolder, onDeleteAsset, onDropFiles, onDuplicateAsset, onMoveAsset, onRenameAsset, onSortAssets }: { assets: AssetItem[]; onCopyAsset: (assetId: string) => void; onCreateFolder: (parentFolderId?: string) => void; onDeleteAsset: (assetId: string) => void; onDropFiles: (files: FileList, targetFolderId?: string) => void; onDuplicateAsset: (assetId: string) => void; onMoveAsset: (sourceId: string, intent: AssetDropIntent) => void; onRenameAsset: (assetId: string, name: string) => void; onSortAssets: (parentFolderId: string | null, mode: AssetSortMode) => void }) {
   const [draggedAssetId, setDraggedAssetId] = useState<string | null>(null);
   const [dropIntent, setDropIntent] = useState<AssetDropIntent | null>(null);
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
   const [renamingAssetId, setRenamingAssetId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
+  const [collapsedFolderIds, setCollapsedFolderIds] = useState<Record<string, true>>({});
   const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
   const assetManagerRef = useRef<HTMLDivElement | null>(null);
 
@@ -2470,7 +2892,7 @@ function AssetManager({ assets, assetsPath, onCopyAsset, onCreateFolder, onDelet
         { label: "Rename", action: () => startRename(item) },
         { label: "Copy path", action: () => onCopyAsset(item.id) },
         { label: "Duplicate", action: () => onDuplicateAsset(item.id) },
-        { label: "New folder", action: () => onCreateFolder(parentFolderId ?? undefined) },
+        { label: "New folder", action: () => createFolder(parentFolderId ?? undefined) },
         { label: "Sort by", children: getAssetSortMenuItems(parentFolderId, onSortAssets) },
         { label: "Delete", action: () => onDeleteAsset(item.id), danger: true },
       ],
@@ -2484,9 +2906,40 @@ function AssetManager({ assets, assetsPath, onCopyAsset, onCreateFolder, onDelet
       x: event.clientX,
       y: event.clientY,
       items: [
-        { label: "New folder", action: () => onCreateFolder() },
+        { label: "New folder", action: () => createFolder() },
         { label: "Sort by", children: getAssetSortMenuItems(null, onSortAssets) },
       ],
+    });
+  }
+
+  function createFolder(parentFolderId?: string) {
+    if (parentFolderId) expandFolder(parentFolderId);
+    onCreateFolder(parentFolderId);
+  }
+
+  function dropFiles(files: FileList, targetFolderId?: string) {
+    if (targetFolderId) expandFolder(targetFolderId);
+    onDropFiles(files, targetFolderId);
+  }
+
+  function moveAsset(sourceId: string, intent: AssetDropIntent) {
+    if (intent.action === "inside") expandFolder(intent.targetId);
+    onMoveAsset(sourceId, intent);
+  }
+
+  function expandFolder(folderId: string) {
+    setCollapsedFolderIds((current) => {
+      if (!current[folderId]) return current;
+      const { [folderId]: _removed, ...next } = current;
+      return next;
+    });
+  }
+
+  function toggleFolder(folderId: string) {
+    setCollapsedFolderIds((current) => {
+      if (!current[folderId]) return { ...current, [folderId]: true };
+      const { [folderId]: _removed, ...next } = current;
+      return next;
     });
   }
 
@@ -2503,22 +2956,23 @@ function AssetManager({ assets, assetsPath, onCopyAsset, onCreateFolder, onDelet
 
   return (
     <section ref={assetManagerRef} className="grid min-h-0 gap-2.5" onDragOver={(event) => event.preventDefault()} onDrop={handleDrop}>
-      <small className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap px-1 text-[11px] font-semibold text-[#8c929f]" title={assetsPath}>{assetsPath}</small>
       <div className="max-h-[420px] min-h-[190px] min-w-0 overflow-auto rounded-[10px] border border-dashed border-[#2d313b] bg-[#151821] p-1.5" onClick={(event) => { if (event.currentTarget === event.target) setSelectedAssetId(null); }} onContextMenu={openEmptyMenu} onDragLeave={(event) => { if (event.currentTarget === event.target) setDropIntent(null); }}>
-        <AssetTree items={assets} depth={0} draggedAssetId={draggedAssetId} dropIntent={dropIntent} parentFolderId={null} renameDraft={renameDraft} renamingAssetId={renamingAssetId} selectedAssetId={selectedAssetId} onCommitRename={commitRename} onDragAsset={setDraggedAssetId} onDropFiles={onDropFiles} onDropIntentChange={setDropIntent} onMoveAsset={onMoveAsset} onOpenMenu={openAssetMenu} onRenameDraftChange={setRenameDraft} onSelectAsset={setSelectedAssetId} />
+        <AssetTree collapsedFolderIds={collapsedFolderIds} items={assets} depth={0} draggedAssetId={draggedAssetId} dropIntent={dropIntent} parentFolderId={null} renameDraft={renameDraft} renamingAssetId={renamingAssetId} selectedAssetId={selectedAssetId} onCommitRename={commitRename} onDragAsset={setDraggedAssetId} onDropFiles={dropFiles} onDropIntentChange={setDropIntent} onMoveAsset={moveAsset} onOpenMenu={openAssetMenu} onRenameDraftChange={setRenameDraft} onSelectAsset={setSelectedAssetId} onToggleFolder={toggleFolder} />
       </div>
       <AppContextMenu menu={contextMenu} onClose={() => setContextMenu(null)} />
     </section>
   );
 }
 
-function AssetTree({ items, depth, draggedAssetId, dropIntent, parentFolderId, renameDraft, renamingAssetId, selectedAssetId, onCommitRename, onDragAsset, onDropFiles, onDropIntentChange, onMoveAsset, onOpenMenu, onRenameDraftChange, onSelectAsset }: { items: AssetItem[]; depth: number; draggedAssetId: string | null; dropIntent: AssetDropIntent | null; parentFolderId: string | null; renameDraft: string; renamingAssetId: string | null; selectedAssetId: string | null; onCommitRename: () => void; onDragAsset: (assetId: string | null) => void; onDropFiles: (files: FileList, targetFolderId?: string) => void; onDropIntentChange: (intent: AssetDropIntent | null) => void; onMoveAsset: (sourceId: string, intent: AssetDropIntent) => void; onOpenMenu: (event: ReactMouseEvent<HTMLDivElement>, item: AssetItem) => void; onRenameDraftChange: (value: string) => void; onSelectAsset: (assetId: string) => void }) {
+function AssetTree({ collapsedFolderIds, items, depth, draggedAssetId, dropIntent, parentFolderId, renameDraft, renamingAssetId, selectedAssetId, onCommitRename, onDragAsset, onDropFiles, onDropIntentChange, onMoveAsset, onOpenMenu, onRenameDraftChange, onSelectAsset, onToggleFolder }: { collapsedFolderIds: Record<string, true>; items: AssetItem[]; depth: number; draggedAssetId: string | null; dropIntent: AssetDropIntent | null; parentFolderId: string | null; renameDraft: string; renamingAssetId: string | null; selectedAssetId: string | null; onCommitRename: () => void; onDragAsset: (assetId: string | null) => void; onDropFiles: (files: FileList, targetFolderId?: string) => void; onDropIntentChange: (intent: AssetDropIntent | null) => void; onMoveAsset: (sourceId: string, intent: AssetDropIntent) => void; onOpenMenu: (event: ReactMouseEvent<HTMLDivElement>, item: AssetItem) => void; onRenameDraftChange: (value: string) => void; onSelectAsset: (assetId: string) => void; onToggleFolder: (folderId: string) => void }) {
   return (
     <div className="grid min-w-0 gap-0.5">
-      {items.map((item) => (
-        <div className="min-w-0" key={item.id}>
+      {items.map((item) => {
+        const isFolder = item.kind === "folder";
+        const isCollapsed = Boolean(collapsedFolderIds[item.id]);
+        return <div className="min-w-0" key={item.id}>
           <div
-            className={`relative grid min-w-0 grid-cols-[16px_minmax(0,1fr)] items-center gap-1.5 rounded-[6px] border py-0.5 pl-1.5 pr-1 transition ${draggedAssetId === item.id ? "border-[var(--clipper-accent)] bg-[var(--clipper-accent-muted-surface)]" : dropIntent?.targetId === item.id && dropIntent.action === "inside" ? "border-[var(--clipper-accent)] bg-[var(--clipper-accent)] text-[var(--clipper-accent-foreground)]" : selectedAssetId === item.id ? "border-[var(--clipper-accent)] bg-[var(--clipper-accent)] text-[var(--clipper-accent-foreground)]" : "border-transparent bg-transparent hover:bg-[#20232c]"}`}
+            className={`relative grid min-w-0 grid-cols-[14px_16px_minmax(0,1fr)] items-center gap-1.5 rounded-[6px] border py-0.5 pl-1.5 pr-1 transition ${draggedAssetId === item.id ? "border-[var(--clipper-accent)] bg-[var(--clipper-accent-muted-surface)]" : dropIntent?.targetId === item.id && dropIntent.action === "inside" ? "border-[var(--clipper-accent)] bg-[var(--clipper-accent)] text-[var(--clipper-accent-foreground)]" : selectedAssetId === item.id ? "border-[var(--clipper-accent)] bg-[var(--clipper-accent)] text-[var(--clipper-accent-foreground)]" : "border-transparent bg-transparent hover:bg-[#20232c]"}`}
             draggable
             onClick={() => onSelectAsset(item.id)}
             onContextMenu={(event) => onOpenMenu(event, item)}
@@ -2551,15 +3005,15 @@ function AssetTree({ items, depth, draggedAssetId, dropIntent, parentFolderId, r
             }}
             style={{ paddingLeft: 8 + depth * 12 }}
           >
-            {item.kind === "folder" ? <Folder size={15} className="text-current" /> : <FileIcon size={14} className="text-current" />}
+            {isFolder ? <button className="grid h-4 w-4 place-items-center rounded text-current hover:bg-black/15" aria-label={`${isCollapsed ? "Expand" : "Collapse"} ${item.name}`} onClick={(event) => { event.stopPropagation(); onToggleFolder(item.id); }} type="button">{isCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}</button> : <span />}
+            {isFolder ? <Folder size={15} className="text-current" /> : <FileIcon size={14} className="text-current" />}
             {renamingAssetId === item.id ? <Input autoFocus className="h-6 min-w-0 border-[var(--clipper-accent)] bg-[#171920] px-1 py-0 text-xs font-bold" value={renameDraft} onBlur={onCommitRename} onChange={(event) => onRenameDraftChange(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") onCommitRename(); }} /> : <span className="min-w-0 select-none overflow-hidden text-ellipsis whitespace-nowrap px-1 text-xs font-bold">{item.name}</span>}
-            {dropIntent?.targetId === item.id && dropIntent.action === "inside" ? <span className="pointer-events-none absolute right-1 top-1/2 -translate-y-1/2 rounded bg-[var(--clipper-accent-badge)] px-1.5 py-0.5 text-[9px] font-bold text-[var(--clipper-accent-strong)]">Drop into folder</span> : null}
             {dropIntent?.targetId === item.id && dropIntent.action === "before" ? <span className="pointer-events-none absolute inset-x-1 -top-px h-0.5 rounded-full bg-[var(--clipper-accent)] shadow-[0_0_0_2px_rgb(var(--clipper-accent-rgb)/0.18)]" /> : null}
             {dropIntent?.targetId === item.id && dropIntent.action === "after" ? <span className="pointer-events-none absolute inset-x-1 -bottom-px h-0.5 rounded-full bg-[var(--clipper-accent)] shadow-[0_0_0_2px_rgb(var(--clipper-accent-rgb)/0.18)]" /> : null}
           </div>
-          {item.children?.length ? <AssetTree items={item.children} depth={depth + 1} draggedAssetId={draggedAssetId} dropIntent={dropIntent} parentFolderId={item.id} renameDraft={renameDraft} renamingAssetId={renamingAssetId} selectedAssetId={selectedAssetId} onCommitRename={onCommitRename} onDragAsset={onDragAsset} onDropFiles={onDropFiles} onDropIntentChange={onDropIntentChange} onMoveAsset={onMoveAsset} onOpenMenu={onOpenMenu} onRenameDraftChange={onRenameDraftChange} onSelectAsset={onSelectAsset} /> : null}
+          {item.children?.length && !isCollapsed ? <AssetTree collapsedFolderIds={collapsedFolderIds} items={item.children} depth={depth + 1} draggedAssetId={draggedAssetId} dropIntent={dropIntent} parentFolderId={item.id} renameDraft={renameDraft} renamingAssetId={renamingAssetId} selectedAssetId={selectedAssetId} onCommitRename={onCommitRename} onDragAsset={onDragAsset} onDropFiles={onDropFiles} onDropIntentChange={onDropIntentChange} onMoveAsset={onMoveAsset} onOpenMenu={onOpenMenu} onRenameDraftChange={onRenameDraftChange} onSelectAsset={onSelectAsset} onToggleFolder={onToggleFolder} /> : null}
         </div>
-      ))}
+      })}
     </div>
   );
 }
@@ -2794,7 +3248,9 @@ const BackgroundElementView = memo(function BackgroundElementView({ element, pre
   return (
     <div className="absolute flex select-none flex-col justify-center overflow-hidden whitespace-pre-line" data-background-element-id={element.id} style={style}>
       {element.type === "text" ? textLines.map((line, index) => <span key={`${line}-${index}`}>{line}</span>) : null}
-      {element.type !== "text" && content ? content : null}
+      {element.type === "svg" && content ? <div className="h-full w-full" dangerouslySetInnerHTML={{ __html: content }} /> : null}
+      {element.type === "html" && content ? <div className="h-full w-full" dangerouslySetInnerHTML={{ __html: content }} /> : null}
+      {element.type !== "text" && element.type !== "svg" && element.type !== "html" && content ? content : null}
     </div>
   );
 }, areBackgroundElementPropsEqual);
@@ -2963,7 +3419,7 @@ function EmptyInspector() {
   );
 }
 
-function ZoomInspector({ marker, part, selectedMarkerCount, selectedSnapInActive, selectedSnapOutActive, middleSnapActive, middleTransitionMode, pickingFocus, canSnapMiddle, onChange, onChangeFocus, onChangeSelectedSnap, onChangeMiddleTransition, onChangeMiddleEase, onDelete, onPickFocus, onSnapMiddle }: { marker: ZoomMarker; part: Part; selectedMarkerCount: number; selectedSnapInActive: boolean; selectedSnapOutActive: boolean; middleSnapActive: boolean; middleTransitionMode: "instant" | "transition"; pickingFocus: boolean; canSnapMiddle: boolean; onChange: (updater: (marker: ZoomMarker, part: Part) => ZoomMarker) => void; onChangeFocus: (focus: Point) => void; onChangeSelectedSnap: (key: "snapIn" | "snapOut", enabled: boolean) => void; onChangeMiddleTransition: (mode: "instant" | "transition") => void; onChangeMiddleEase: (ease: MotionEase | undefined) => void; onDelete: () => void; onPickFocus: () => void; onSnapMiddle: () => void }) {
+function ZoomInspector({ marker, part, selectedMarkerCount, selectedSnapInActive, selectedSnapOutActive, middleSnapActive, middleTransitionMode, pickingFocus, canSnapMiddle, onChange, onScalePreview, onScalePreviewEnd, onChangeFocus, onChangeSelectedSnap, onChangeMiddleTransition, onChangeMiddleEase, onDelete, onPickFocus, onSnapMiddle }: { marker: ZoomMarker; part: Part; selectedMarkerCount: number; selectedSnapInActive: boolean; selectedSnapOutActive: boolean; middleSnapActive: boolean; middleTransitionMode: "instant" | "transition"; pickingFocus: boolean; canSnapMiddle: boolean; onChange: (updater: (marker: ZoomMarker, part: Part) => ZoomMarker) => void; onScalePreview: (scale: number) => void; onScalePreviewEnd: () => void; onChangeFocus: (focus: Point) => void; onChangeSelectedSnap: (key: "snapIn" | "snapOut", enabled: boolean) => void; onChangeMiddleTransition: (mode: "instant" | "transition") => void; onChangeMiddleEase: (ease: MotionEase | undefined) => void; onDelete: () => void; onPickFocus: () => void; onSnapMiddle: () => void }) {
   const isMultiSelection = selectedMarkerCount > 1;
   const snapInActive = isMultiSelection ? selectedSnapInActive : Boolean(marker.snapIn);
   const snapOutActive = isMultiSelection ? selectedSnapOutActive : Boolean(marker.snapOut);
@@ -2988,8 +3444,15 @@ function ZoomInspector({ marker, part, selectedMarkerCount, selectedSnapInActive
   function commitScale(value = draftScale) {
     const nextScale = roundTwo(clamp(value, 1, 5));
     setDraftScale(nextScale);
+    onScalePreviewEnd();
     if (nextScale === roundTwo(marker.scale)) return;
     onChange((current) => ({ ...current, scale: nextScale }));
+  }
+
+  function updateDraftScale(value: string) {
+    const nextScale = roundTwo(clamp(Number(value) || 1, 1, 5));
+    setDraftScale(nextScale);
+    onScalePreview(nextScale);
   }
 
   function updateEase(value: string) {
@@ -3032,7 +3495,7 @@ function ZoomInspector({ marker, part, selectedMarkerCount, selectedSnapInActive
           </div>
         </div>
       </div>
-      <label className={`grid gap-1.5 ${mutedCaps}`}>Scale<div className="grid grid-cols-[1fr_52px] items-center gap-2 rounded-[10px] border border-[#2d313b] bg-[#171920] px-2.5 py-2"><input aria-label="Zoom scale" className="h-1.5 min-w-0 accent-[#37d6c2] [appearance:none] rounded-full bg-[#2d313b] [&::-webkit-slider-runnable-track]:h-1.5 [&::-webkit-slider-runnable-track]:rounded-full [&::-webkit-slider-runnable-track]:bg-[#2d313b] [&::-webkit-slider-thumb]:mt-[-5px] [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border [&::-webkit-slider-thumb]:border-[#37d6c2] [&::-webkit-slider-thumb]:bg-[var(--clipper-accent)] [&::-moz-range-track]:h-1.5 [&::-moz-range-track]:rounded-full [&::-moz-range-track]:bg-[#2d313b] [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border [&::-moz-range-thumb]:border-[#37d6c2] [&::-moz-range-thumb]:bg-[var(--clipper-accent)]" type="range" min={1} max={5} step={0.01} value={draftScale} onChange={(event) => setDraftScale(roundTwo(Number(event.target.value) || 1))} onPointerUp={() => commitScale()} onKeyUp={() => commitScale()} onBlur={() => commitScale()} /><span className="text-right text-xs font-extrabold normal-case tracking-normal text-[#dfe2ea] tabular-nums">{draftScale.toFixed(2)}</span></div></label>
+      <label className={`grid gap-1.5 ${mutedCaps}`}>Scale<div className="grid grid-cols-[1fr_52px] items-center gap-2 rounded-[10px] border border-[#2d313b] bg-[#171920] px-2.5 py-2"><input aria-label="Zoom scale" className="h-1.5 min-w-0 accent-[#37d6c2] [appearance:none] rounded-full bg-[#2d313b] [&::-webkit-slider-runnable-track]:h-1.5 [&::-webkit-slider-runnable-track]:rounded-full [&::-webkit-slider-runnable-track]:bg-[#2d313b] [&::-webkit-slider-thumb]:mt-[-5px] [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border [&::-webkit-slider-thumb]:border-[#37d6c2] [&::-webkit-slider-thumb]:bg-[var(--clipper-accent)] [&::-moz-range-track]:h-1.5 [&::-moz-range-track]:rounded-full [&::-moz-range-track]:bg-[#2d313b] [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border [&::-moz-range-thumb]:border-[#37d6c2] [&::-moz-range-thumb]:bg-[var(--clipper-accent)]" type="range" min={1} max={5} step={0.01} value={draftScale} onChange={(event) => updateDraftScale(event.target.value)} onPointerUp={() => commitScale()} onKeyUp={() => commitScale()} onBlur={() => commitScale()} /><span className="text-right text-xs font-extrabold normal-case tracking-normal text-[#dfe2ea] tabular-nums">{draftScale.toFixed(2)}</span></div></label>
       <label className={`grid gap-1.5 ${mutedCaps}`}>Ease<Select value={marker.ease ?? "easeInOut"} onValueChange={updateEase}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectGroup><SelectItem value="easeIn">Ease in</SelectItem><SelectItem value="easeOut">Ease out</SelectItem><SelectItem value="easeInOut">Ease in-out</SelectItem><SelectItem value="circOut">Circ out</SelectItem></SelectGroup></SelectContent></Select></label>
       <div className="grid gap-2">
         <span className={mutedCaps}>Snap</span>
@@ -3290,8 +3753,16 @@ function TimelinePanel({ timeline, timelineViewportState, mode, selectedPartId, 
   const [draggedPartId, setDraggedPartId] = useState<string | null>(null);
   const [draggingZoomMarkerId, setDraggingZoomMarkerId] = useState<string | null>(null);
   const [draggingTranslationMarkerId, setDraggingTranslationMarkerId] = useState<string | null>(null);
-  const [zoomSelectionDrag, setZoomSelectionDrag] = useState<{ startX: number; currentX: number } | null>(null);
-  const [translationSelectionDrag, setTranslationSelectionDrag] = useState<{ startX: number; currentX: number } | null>(null);
+  const [zoomSelectionDrag, setZoomSelectionDrag] = useState<TimelineSelectionDrag | null>(null);
+  const [translationSelectionDrag, setTranslationSelectionDrag] = useState<TimelineSelectionDrag | null>(null);
+  const zoomSelectionDragRef = useRef<TimelineSelectionDrag | null>(null);
+  const translationSelectionDragRef = useRef<TimelineSelectionDrag | null>(null);
+  const zoomSelectionBoxRef = useRef<HTMLDivElement | null>(null);
+  const translationSelectionBoxRef = useRef<HTMLDivElement | null>(null);
+  const zoomSelectionFrameRef = useRef(0);
+  const translationSelectionFrameRef = useRef(0);
+  const liveZoomSelectionIdsRef = useRef("");
+  const liveTranslationSelectionIdsRef = useRef("");
   const scrubClientXRef = useRef<number | null>(null);
   const scrubSnapRef = useRef(false);
   const scrubAutoScrollFrameRef = useRef(0);
@@ -3305,12 +3776,17 @@ function TimelinePanel({ timeline, timelineViewportState, mode, selectedPartId, 
   const scrubSnapBoundaries = useMemo(() => getScrubSnapBoundaries(timeline), [timeline]);
   const contentWidth = Math.max(sceneDuration * defaultTimelinePixelsPerSecond * timelineZoom, 760);
   const isCompositionMode = mode === "composition";
-  const laneRows = isCompositionMode ? "grid-rows-[56px_58px_58px_58px]" : "grid-rows-[56px_58px]";
-  const playheadHeight = isCompositionMode ? 210 : 94;
+  const laneRows = isCompositionMode ? "grid-rows-[38px_58px_58px_58px]" : "grid-rows-[38px_58px]";
+  const playheadHeight = isCompositionMode ? 192 : 76;
 
   useEffect(() => {
     setTimelineZoom(timelineViewportState.zoom);
   }, [timelineViewportState.zoom]);
+
+  useEffect(() => () => {
+    if (zoomSelectionFrameRef.current) window.cancelAnimationFrame(zoomSelectionFrameRef.current);
+    if (translationSelectionFrameRef.current) window.cancelAnimationFrame(translationSelectionFrameRef.current);
+  }, []);
 
   useEffect(() => {
     const viewport = timelineViewportRef.current;
@@ -3459,10 +3935,13 @@ function TimelinePanel({ timeline, timelineViewportState, mode, selectedPartId, 
 
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
-    setZoomSelectionDrag({ startX: event.clientX, currentX: event.clientX });
+    const next = { startX: event.clientX, currentX: event.clientX };
+    zoomSelectionDragRef.current = next;
+    liveZoomSelectionIdsRef.current = "";
+    setZoomSelectionDrag(next);
   }
 
-  function zoomSelectionFromDrag(selectionDrag: { startX: number; currentX: number }, rect: DOMRect) {
+  function zoomSelectionFromDrag(selectionDrag: TimelineSelectionDrag, rect: DOMRect) {
     const start = clamp(((Math.min(selectionDrag.startX, selectionDrag.currentX) - rect.left) / rect.width) * sceneDuration, 0, sceneDuration);
     const end = clamp(((Math.max(selectionDrag.startX, selectionDrag.currentX) - rect.left) / rect.width) * sceneDuration, 0, sceneDuration);
     return timeline.flatMap((timelinePart) => timelinePart.zoomMarkers
@@ -3472,18 +3951,37 @@ function TimelinePanel({ timeline, timelineViewportState, mode, selectedPartId, 
 
   function continueZoomSelection(event: PointerEvent<HTMLDivElement>) {
     if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
-    if (!zoomSelectionDrag) return;
-    const next = { ...zoomSelectionDrag, currentX: event.clientX };
-    setZoomSelectionDrag(next);
-    if (Math.abs(next.currentX - next.startX) >= 4) {
-      const selection = zoomSelectionFromDrag(next, event.currentTarget.getBoundingClientRect());
-      if (selection.length > 0) onSelectZoomMarkers(selection);
-    }
+    const current = zoomSelectionDragRef.current;
+    if (!current) return;
+    const next = { ...current, currentX: event.clientX };
+    zoomSelectionDragRef.current = next;
+    if (zoomSelectionFrameRef.current) return;
+    const element = event.currentTarget;
+    zoomSelectionFrameRef.current = window.requestAnimationFrame(() => {
+      zoomSelectionFrameRef.current = 0;
+      const drag = zoomSelectionDragRef.current;
+      if (!drag) return;
+      const rect = element.getBoundingClientRect();
+      if (zoomSelectionBoxRef.current) updateTimelineSelectionBoxElement(zoomSelectionBoxRef.current, drag, rect);
+      if (Math.abs(drag.currentX - drag.startX) < 4) return;
+      const selection = zoomSelectionFromDrag(drag, rect);
+      const nextSelectionIds = selection.map((item) => `${item.partId}:${item.markerId}`).join("|");
+      if (nextSelectionIds === liveZoomSelectionIdsRef.current) return;
+      liveZoomSelectionIdsRef.current = nextSelectionIds;
+      if (selection.length > 0) startTransition(() => onSelectZoomMarkers(selection));
+    });
   }
 
   function endZoomSelection(event: PointerEvent<HTMLDivElement>) {
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-    const selectionDrag = zoomSelectionDrag;
+    if (zoomSelectionFrameRef.current) {
+      window.cancelAnimationFrame(zoomSelectionFrameRef.current);
+      zoomSelectionFrameRef.current = 0;
+    }
+    const selectionDrag = zoomSelectionDragRef.current;
+    zoomSelectionDragRef.current = null;
+    liveZoomSelectionIdsRef.current = "";
+    if (zoomSelectionBoxRef.current) zoomSelectionBoxRef.current.style.display = "none";
     setZoomSelectionDrag(null);
     if (!selectionDrag) return;
 
@@ -3507,10 +4005,13 @@ function TimelinePanel({ timeline, timelineViewportState, mode, selectedPartId, 
 
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
-    setTranslationSelectionDrag({ startX: event.clientX, currentX: event.clientX });
+    const next = { startX: event.clientX, currentX: event.clientX };
+    translationSelectionDragRef.current = next;
+    liveTranslationSelectionIdsRef.current = "";
+    setTranslationSelectionDrag(next);
   }
 
-  function translationSelectionFromDrag(selectionDrag: { startX: number; currentX: number }, rect: DOMRect) {
+  function translationSelectionFromDrag(selectionDrag: TimelineSelectionDrag, rect: DOMRect) {
     const start = clamp(((Math.min(selectionDrag.startX, selectionDrag.currentX) - rect.left) / rect.width) * sceneDuration, 0, sceneDuration);
     const end = clamp(((Math.max(selectionDrag.startX, selectionDrag.currentX) - rect.left) / rect.width) * sceneDuration, 0, sceneDuration);
     return timeline.flatMap((timelinePart) => timelinePart.translationMarkers
@@ -3520,18 +4021,37 @@ function TimelinePanel({ timeline, timelineViewportState, mode, selectedPartId, 
 
   function continueTranslationSelection(event: PointerEvent<HTMLDivElement>) {
     if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
-    if (!translationSelectionDrag) return;
-    const next = { ...translationSelectionDrag, currentX: event.clientX };
-    setTranslationSelectionDrag(next);
-    if (Math.abs(next.currentX - next.startX) >= 4) {
-      const selection = translationSelectionFromDrag(next, event.currentTarget.getBoundingClientRect());
-      if (selection.length > 0) onSelectTranslationMarkers(selection);
-    }
+    const current = translationSelectionDragRef.current;
+    if (!current) return;
+    const next = { ...current, currentX: event.clientX };
+    translationSelectionDragRef.current = next;
+    if (translationSelectionFrameRef.current) return;
+    const element = event.currentTarget;
+    translationSelectionFrameRef.current = window.requestAnimationFrame(() => {
+      translationSelectionFrameRef.current = 0;
+      const drag = translationSelectionDragRef.current;
+      if (!drag) return;
+      const rect = element.getBoundingClientRect();
+      if (translationSelectionBoxRef.current) updateTimelineSelectionBoxElement(translationSelectionBoxRef.current, drag, rect);
+      if (Math.abs(drag.currentX - drag.startX) < 4) return;
+      const selection = translationSelectionFromDrag(drag, rect);
+      const nextSelectionIds = selection.map((item) => `${item.partId}:${item.markerId}`).join("|");
+      if (nextSelectionIds === liveTranslationSelectionIdsRef.current) return;
+      liveTranslationSelectionIdsRef.current = nextSelectionIds;
+      if (selection.length > 0) startTransition(() => onSelectTranslationMarkers(selection));
+    });
   }
 
   function endTranslationSelection(event: PointerEvent<HTMLDivElement>) {
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-    const selectionDrag = translationSelectionDrag;
+    if (translationSelectionFrameRef.current) {
+      window.cancelAnimationFrame(translationSelectionFrameRef.current);
+      translationSelectionFrameRef.current = 0;
+    }
+    const selectionDrag = translationSelectionDragRef.current;
+    translationSelectionDragRef.current = null;
+    liveTranslationSelectionIdsRef.current = "";
+    if (translationSelectionBoxRef.current) translationSelectionBoxRef.current.style.display = "none";
     setTranslationSelectionDrag(null);
     if (!selectionDrag) return;
 
@@ -3625,9 +4145,52 @@ function TimelinePanel({ timeline, timelineViewportState, mode, selectedPartId, 
     }, Math.abs(nextDelta - deltaIntervals[0].start) < Math.abs(nextDelta - deltaIntervals[0].end) ? deltaIntervals[0].start : deltaIntervals[0].end);
   }
 
-  function exactMarkerPlacement(absoluteStart: number, duration: number) {
-    const targetPart = timeline.find((timelinePart) => duration <= timelinePart.duration && absoluteStart >= timelinePart.start && absoluteStart + duration <= timelinePart.end);
-    return targetPart ? { partId: targetPart.id, start: absoluteStart - targetPart.start } : null;
+  function getTimelineMarkerElement(kind: "zoom" | "translation", partId: string, markerId: string) {
+    return timelineViewportRef.current?.querySelector<HTMLElement>(`[data-timeline-marker-kind="${kind}"][data-timeline-marker-part-id="${CSS.escape(partId)}"][data-timeline-marker-id="${CSS.escape(markerId)}"]`) ?? null;
+  }
+
+  function setTimelineMarkerDragTransforms(kind: "zoom" | "translation", items: TimelineMarkerDragItem[], deltaPixels: number) {
+    for (const item of items) {
+      const element = getTimelineMarkerElement(kind, item.partId, item.markerId);
+      if (!element) continue;
+      element.style.transform = `translate3d(${deltaPixels}px, 0, 0)`;
+      element.style.willChange = "transform";
+      element.style.zIndex = "25";
+    }
+  }
+
+  function clearTimelineMarkerDragTransforms(kind: "zoom" | "translation", items: TimelineMarkerDragItem[]) {
+    for (const item of items) {
+      const element = getTimelineMarkerElement(kind, item.partId, item.markerId);
+      if (!element) continue;
+      element.style.removeProperty("transform");
+      element.style.removeProperty("will-change");
+      element.style.removeProperty("z-index");
+    }
+  }
+
+  function setTimelineMarkerResizePreviews<T extends { id: string; start: number; duration: number }>(kind: "zoom" | "translation", partId: string, initialMarkers: T[], nextMarkers: T[], pixelsPerSecond: number) {
+    for (const initialMarker of initialMarkers) {
+      const nextMarker = nextMarkers.find((item) => item.id === initialMarker.id);
+      if (!nextMarker || (nextMarker.start === initialMarker.start && nextMarker.duration === initialMarker.duration)) continue;
+      const element = getTimelineMarkerElement(kind, partId, initialMarker.id);
+      if (!element) continue;
+      element.style.transform = `translate3d(${(nextMarker.start - initialMarker.start) * pixelsPerSecond}px, 0, 0)`;
+      element.style.setProperty("--clipper-timeline-resize-width", `${(nextMarker.duration - initialMarker.duration) * pixelsPerSecond}px`);
+      element.style.willChange = "transform, width";
+      element.style.zIndex = "25";
+    }
+  }
+
+  function clearTimelineMarkerResizePreviews<T extends { id: string }>(kind: "zoom" | "translation", partId: string, markers: T[]) {
+    for (const marker of markers) {
+      const element = getTimelineMarkerElement(kind, partId, marker.id);
+      if (!element) continue;
+      element.style.removeProperty("transform");
+      element.style.removeProperty("--clipper-timeline-resize-width");
+      element.style.removeProperty("will-change");
+      element.style.removeProperty("z-index");
+    }
   }
 
   function updateZoomFromPointer(event: PointerEvent<HTMLDivElement>, part: TimelinePart, marker: ZoomMarker, action: "move" | "start" | "end") {
@@ -3636,40 +4199,55 @@ function TimelinePanel({ timeline, timelineViewportState, mode, selectedPartId, 
     const dragItems = selectedZoomDragItems(part, marker);
     const isSelectionMove = action === "move" && dragItems.length > 1;
     if (!isSelectionMove) onSelectZoomMarker(part.id, marker.id);
-    setDraggingZoomMarkerId(marker.id);
     const initialClientX = event.clientX;
-    const initialStart = action === "move" ? part.start + marker.start : marker.start;
-    const initialDuration = marker.duration;
     const initialZoomMarkers = part.zoomMarkers;
     const pixelsPerSecond = (timelineRef.current?.getBoundingClientRect().width ?? 1) / Math.max(sceneDuration, 1);
     const snapThresholdSeconds = Math.max(0.08, 8 / pixelsPerSecond);
-    let activePartId = part.id;
     const activePartIds = new Map(dragItems.map((item) => [item.markerId, item.partId]));
     let pendingClientX = event.clientX;
     let pendingSnap = event.shiftKey;
     let animationFrame = 0;
+    let hasDragged = false;
+
+    function getMoveDragState(clientX: number, snap: boolean) {
+      const deltaSeconds = (clientX - initialClientX) / pixelsPerSecond;
+      const blockDeltaSeconds = blockDeltaForTimelineDrag(dragItems, deltaSeconds, snapThresholdSeconds, snap, "zoom");
+      const moves = getTimelineMarkerMoves(timeline, dragItems, blockDeltaSeconds, "zoom", activePartIds, snapThresholdSeconds);
+      return { blockDeltaSeconds, moves };
+    }
+
+    function commitMoveDrag(clientX: number, snap: boolean) {
+      const { moves } = getMoveDragState(clientX, snap);
+      if (dragItems.length > 1) {
+        onMoveZoomMarkers(moves);
+        return;
+      }
+
+      const move = moves[0];
+      if (move) onMoveZoomMarker(move.sourcePartId, move.markerId, move.targetPartId, move.start);
+    }
+
+    function getResizeDragState(clientX: number) {
+      const deltaSeconds = (clientX - initialClientX) / pixelsPerSecond;
+      return resizeTimelineMarkersWithPush(initialZoomMarkers, marker.id, action as "start" | "end", deltaSeconds, part.duration);
+    }
+
+    function commitResizeDrag(clientX: number) {
+      const nextMarkers = getResizeDragState(clientX);
+      onUpdateZoomMarkers(part.id, () => nextMarkers);
+    }
 
     function applyDrag(clientX: number, snap: boolean) {
       const deltaSeconds = (clientX - initialClientX) / pixelsPerSecond;
       if (action === "move") {
-        if (dragItems.length > 1) {
-          const blockDeltaSeconds = blockDeltaForTimelineDrag(dragItems, deltaSeconds, snapThresholdSeconds, snap, "zoom");
-          const moves = getTimelineMarkerMoves(timeline, dragItems, blockDeltaSeconds, "zoom", activePartIds, snapThresholdSeconds);
-          onMoveZoomMarkers(moves);
-          for (const move of moves) activePartIds.set(move.markerId, move.targetPartId);
-          return;
-        }
-
-        const blockDeltaSeconds = blockDeltaForTimelineDrag(dragItems, deltaSeconds, snapThresholdSeconds, snap, "zoom");
-        const nextPlacement = exactMarkerPlacement(initialStart + blockDeltaSeconds, initialDuration)
-          ?? getMarkerPlacement(timeline, initialStart + blockDeltaSeconds, initialDuration, snapThresholdSeconds, false, { kind: "zoom", partId: part.id, markerId: marker.id });
-        onMoveZoomMarker(activePartId, marker.id, nextPlacement.partId, nextPlacement.start);
-        activePartId = nextPlacement.partId;
+        const { blockDeltaSeconds } = getMoveDragState(clientX, snap);
+        setTimelineMarkerDragTransforms("zoom", dragItems, blockDeltaSeconds * pixelsPerSecond);
         return;
       }
 
       if (action === "start" || action === "end") {
-        onUpdateZoomMarkers(part.id, (_markers, currentPart) => resizeTimelineMarkersWithPush(initialZoomMarkers, marker.id, action, deltaSeconds, currentPart.duration));
+        const nextMarkers = resizeTimelineMarkersWithPush(initialZoomMarkers, marker.id, action, deltaSeconds, part.duration);
+        setTimelineMarkerResizePreviews("zoom", part.id, initialZoomMarkers, nextMarkers, pixelsPerSecond);
         return;
       }
     }
@@ -3677,6 +4255,11 @@ function TimelinePanel({ timeline, timelineViewportState, mode, selectedPartId, 
     function move(pointerEvent: globalThis.PointerEvent) {
       pendingClientX = pointerEvent.clientX;
       pendingSnap = pointerEvent.shiftKey;
+      if (!hasDragged && Math.abs(pendingClientX - initialClientX) < 4) return;
+      if (!hasDragged) {
+        hasDragged = true;
+        setDraggingZoomMarkerId(marker.id);
+      }
       if (animationFrame) return;
       animationFrame = window.requestAnimationFrame(() => {
         animationFrame = 0;
@@ -3686,10 +4269,15 @@ function TimelinePanel({ timeline, timelineViewportState, mode, selectedPartId, 
 
     function up(pointerEvent: globalThis.PointerEvent) {
       if (animationFrame) window.cancelAnimationFrame(animationFrame);
-      applyDrag(pendingClientX, pointerEvent.shiftKey);
+      if (hasDragged) {
+        if (action === "move") commitMoveDrag(pendingClientX, pointerEvent.shiftKey);
+        else commitResizeDrag(pendingClientX);
+      }
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       setDraggingZoomMarkerId(null);
+      if (action === "move") window.requestAnimationFrame(() => clearTimelineMarkerDragTransforms("zoom", dragItems));
+      if (action !== "move") window.requestAnimationFrame(() => clearTimelineMarkerResizePreviews("zoom", part.id, initialZoomMarkers));
     }
 
     window.addEventListener("pointermove", move);
@@ -3702,40 +4290,55 @@ function TimelinePanel({ timeline, timelineViewportState, mode, selectedPartId, 
     const dragItems = selectedTranslationDragItems(part, marker);
     const isSelectionMove = action === "move" && dragItems.length > 1;
     if (!isSelectionMove) onSelectTranslationMarker(part.id, marker.id);
-    setDraggingTranslationMarkerId(marker.id);
     const initialClientX = event.clientX;
-    const initialStart = action === "move" ? part.start + marker.start : marker.start;
-    const initialDuration = marker.duration;
     const initialTranslationMarkers = part.translationMarkers;
     const pixelsPerSecond = (timelineRef.current?.getBoundingClientRect().width ?? 1) / Math.max(sceneDuration, 1);
     const snapThresholdSeconds = Math.max(0.08, 8 / pixelsPerSecond);
-    let activePartId = part.id;
     const activePartIds = new Map(dragItems.map((item) => [item.markerId, item.partId]));
     let pendingClientX = event.clientX;
     let pendingSnap = event.shiftKey;
     let animationFrame = 0;
+    let hasDragged = false;
+
+    function getMoveDragState(clientX: number, snap: boolean) {
+      const deltaSeconds = (clientX - initialClientX) / pixelsPerSecond;
+      const blockDeltaSeconds = blockDeltaForTimelineDrag(dragItems, deltaSeconds, snapThresholdSeconds, snap, "translation");
+      const moves = getTimelineMarkerMoves(timeline, dragItems, blockDeltaSeconds, "translation", activePartIds, snapThresholdSeconds);
+      return { blockDeltaSeconds, moves };
+    }
+
+    function commitMoveDrag(clientX: number, snap: boolean) {
+      const { moves } = getMoveDragState(clientX, snap);
+      if (dragItems.length > 1) {
+        onMoveTranslationMarkers(moves);
+        return;
+      }
+
+      const move = moves[0];
+      if (move) onMoveTranslationMarker(move.sourcePartId, move.markerId, move.targetPartId, move.start);
+    }
+
+    function getResizeDragState(clientX: number) {
+      const deltaSeconds = (clientX - initialClientX) / pixelsPerSecond;
+      return resizeTimelineMarkersWithPush(initialTranslationMarkers, marker.id, action as "start" | "end", deltaSeconds, part.duration);
+    }
+
+    function commitResizeDrag(clientX: number) {
+      const nextMarkers = getResizeDragState(clientX);
+      onUpdateTranslationMarkers(part.id, () => nextMarkers);
+    }
 
     function applyDrag(clientX: number, snap: boolean) {
       const deltaSeconds = (clientX - initialClientX) / pixelsPerSecond;
       if (action === "move") {
-        if (dragItems.length > 1) {
-          const blockDeltaSeconds = blockDeltaForTimelineDrag(dragItems, deltaSeconds, snapThresholdSeconds, snap, "translation");
-          const moves = getTimelineMarkerMoves(timeline, dragItems, blockDeltaSeconds, "translation", activePartIds, snapThresholdSeconds);
-          onMoveTranslationMarkers(moves);
-          for (const move of moves) activePartIds.set(move.markerId, move.targetPartId);
-          return;
-        }
-
-        const blockDeltaSeconds = blockDeltaForTimelineDrag(dragItems, deltaSeconds, snapThresholdSeconds, snap, "translation");
-        const nextPlacement = exactMarkerPlacement(initialStart + blockDeltaSeconds, initialDuration)
-          ?? getMarkerPlacement(timeline, initialStart + blockDeltaSeconds, initialDuration, snapThresholdSeconds, false, { kind: "translation", partId: part.id, markerId: marker.id });
-        onMoveTranslationMarker(activePartId, marker.id, nextPlacement.partId, nextPlacement.start);
-        activePartId = nextPlacement.partId;
+        const { blockDeltaSeconds } = getMoveDragState(clientX, snap);
+        setTimelineMarkerDragTransforms("translation", dragItems, blockDeltaSeconds * pixelsPerSecond);
         return;
       }
 
       if (action === "start" || action === "end") {
-        onUpdateTranslationMarkers(part.id, (_markers, currentPart) => resizeTimelineMarkersWithPush(initialTranslationMarkers, marker.id, action, deltaSeconds, currentPart.duration));
+        const nextMarkers = resizeTimelineMarkersWithPush(initialTranslationMarkers, marker.id, action, deltaSeconds, part.duration);
+        setTimelineMarkerResizePreviews("translation", part.id, initialTranslationMarkers, nextMarkers, pixelsPerSecond);
         return;
       }
     }
@@ -3743,6 +4346,11 @@ function TimelinePanel({ timeline, timelineViewportState, mode, selectedPartId, 
     function move(pointerEvent: globalThis.PointerEvent) {
       pendingClientX = pointerEvent.clientX;
       pendingSnap = pointerEvent.shiftKey;
+      if (!hasDragged && Math.abs(pendingClientX - initialClientX) < 4) return;
+      if (!hasDragged) {
+        hasDragged = true;
+        setDraggingTranslationMarkerId(marker.id);
+      }
       if (animationFrame) return;
       animationFrame = window.requestAnimationFrame(() => {
         animationFrame = 0;
@@ -3752,10 +4360,15 @@ function TimelinePanel({ timeline, timelineViewportState, mode, selectedPartId, 
 
     function up(pointerEvent: globalThis.PointerEvent) {
       if (animationFrame) window.cancelAnimationFrame(animationFrame);
-      applyDrag(pendingClientX, pointerEvent.shiftKey);
+      if (hasDragged) {
+        if (action === "move") commitMoveDrag(pendingClientX, pointerEvent.shiftKey);
+        else commitResizeDrag(pendingClientX);
+      }
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       setDraggingTranslationMarkerId(null);
+      if (action === "move") window.requestAnimationFrame(() => clearTimelineMarkerDragTransforms("translation", dragItems));
+      if (action !== "move") window.requestAnimationFrame(() => clearTimelineMarkerResizePreviews("translation", part.id, initialTranslationMarkers));
     }
 
     window.addEventListener("pointermove", move);
@@ -3766,7 +4379,7 @@ function TimelinePanel({ timeline, timelineViewportState, mode, selectedPartId, 
   const playheadHalo = isScrubSnapActive ? "0 0 0 4px rgba(55,214,194,0.22)" : "0 0 0 4px rgb(var(--clipper-accent-rgb)/0.2)";
 
   return (
-    <footer className="grid min-h-0 select-none grid-rows-[34px_minmax(0,1fr)] gap-3 border-t border-[#1d2028] bg-[#141821] px-[22px] pb-[18px] pt-3.5">
+    <footer className="grid min-h-0 select-none grid-rows-[34px_minmax(0,1fr)] gap-1.5 border-t border-[#1d2028] bg-[#141821] px-[22px] pb-[18px] pt-2.5">
       <div className="grid grid-cols-[auto_1fr_auto] items-center gap-4 text-[11px] uppercase tracking-[0.11em] text-[#9b9da7]">
         <div className="flex rounded-full border border-[#2d313b] bg-[#111319] p-1 normal-case tracking-normal" aria-label="Timeline mode">
           <button className={`rounded-full px-3 py-1 text-xs font-extrabold transition ${mode === "edit" ? "bg-[var(--clipper-accent)] text-[var(--clipper-accent-foreground)]" : "text-[#9b9da7] hover:text-white"}`} onClick={() => onModeChange("edit")}>Edit</button>
@@ -3789,21 +4402,21 @@ function TimelinePanel({ timeline, timelineViewportState, mode, selectedPartId, 
         </div>
         <div ref={timelineViewportRef} className="timeline-scrollbar min-h-0 overflow-x-scroll overflow-y-hidden px-3 [scrollbar-gutter:stable]" onScroll={saveTimelineDisplacement}>
           <div className={`grid ${laneRows}`} style={{ width: contentWidth }}>
-            <div ref={timelineRef} className="relative h-[42px] pt-3.5 text-xs text-[#777b86] tabular-nums">
-              <div className="absolute inset-x-0 top-0 z-20 h-[51px]" onPointerDown={startScrub} onPointerMove={continueScrub} onPointerUp={endScrub} onPointerCancel={endScrub} />
+            <div ref={timelineRef} className="relative h-[32px] pt-1.5 text-xs text-[#777b86] tabular-nums">
+              <div className="absolute inset-x-0 top-0 z-20 h-[38px]" onPointerDown={startScrub} onPointerMove={continueScrub} onPointerUp={endScrub} onPointerCancel={endScrub} />
               {ticks.map((tick) => {
                 const isStart = tick === 0;
                 const isEnd = tick === sceneDuration;
                 const labelAlign = isStart ? "translate-x-0 text-left after:left-0" : isEnd ? "-translate-x-full text-right after:left-full" : "-translate-x-1/2 text-center after:left-1/2";
                 return <span className={`absolute bottom-0 ${labelAlign} after:absolute after:bottom-[-9px] after:h-[7px] after:w-px after:bg-[#3a3f4d] after:content-['']`} key={tick} style={{ left: `${(tick / sceneDuration) * 100}%` }}>{formatTime(tick)}</span>;
               })}
-              <div className="pointer-events-none absolute top-[20px] z-30 w-px" style={{ left: `${(currentSceneTime / sceneDuration) * 100}%`, height: playheadHeight, backgroundColor: playheadColor }}><div className="absolute left-1/2 top-[-10px] h-5 w-5 -translate-x-1/2 rounded-full" style={{ backgroundColor: playheadColor, boxShadow: playheadHalo }} /></div>
+              <div className="pointer-events-none absolute top-[14px] z-30 w-px" style={{ left: `${(currentSceneTime / sceneDuration) * 100}%`, height: playheadHeight, backgroundColor: playheadColor }}><div className="absolute left-1/2 top-[-10px] h-5 w-5 -translate-x-1/2 rounded-full" style={{ backgroundColor: playheadColor, boxShadow: playheadHalo }} /></div>
             </div>
             {isCompositionMode ? <div className="relative block overflow-hidden border border-[#2d313b] bg-[#111319] transition" onPointerDown={startTranslationSelection} onPointerMove={continueTranslationSelection} onPointerUp={endTranslationSelection} onPointerCancel={endTranslationSelection}>
               {draggingTranslationMarkerId ? timeline.slice(1).map((part) => <div className="pointer-events-none absolute top-0 z-20 h-full w-px origin-top bg-[rgb(var(--clipper-accent-rgb)/0.9)] shadow-[0_0_10px_rgb(var(--clipper-accent-rgb)/0.42)] animate-[clipper-zoom-boundary-in_180ms_ease-out_both]" key={`translation-boundary-${part.id}`} style={{ left: `${(part.start / sceneDuration) * 100}%` }} />) : null}
-              {translationSelectionDrag ? <div className="pointer-events-none absolute top-[6px] z-10 h-[46px] rounded-[10px] border border-[var(--clipper-accent-strong)] bg-[rgb(var(--clipper-accent-rgb)/0.13)]" style={{ left: `${(clamp((Math.min(translationSelectionDrag.startX, translationSelectionDrag.currentX) - (timelineRef.current?.getBoundingClientRect().left ?? 0)) / (timelineRef.current?.getBoundingClientRect().width ?? 1), 0, 1)) * 100}%`, width: `${Math.abs(translationSelectionDrag.currentX - translationSelectionDrag.startX) / (timelineRef.current?.getBoundingClientRect().width ?? 1) * 100}%` }} /> : null}
+              {translationSelectionDrag ? <TimelineSelectionBox ref={translationSelectionBoxRef} drag={translationSelectionDrag} /> : null}
               {timeline.flatMap((timelinePart) => timelinePart.translationMarkers.map((marker) => (
-                <div data-timeline-control className={`absolute top-[11px] h-[34px] min-w-[18px] cursor-default overflow-hidden rounded-[11px] ring-1 ring-inset ring-black/55 bg-[linear-gradient(180deg,#24b7c9,#127c8d)] px-3 py-2 text-xs font-bold text-white ${marker.snapIn ? "rounded-l-none" : ""} ${marker.snapOut ? "rounded-r-none" : ""} ${selectedTranslationKeys.has(`${timelinePart.id}:${marker.id}`) ? "opacity-100 outline outline-2 outline-[var(--clipper-accent)]" : marker.id === selectedTranslationMarkerId && timelinePart.id === selectedTranslationMarkerPartId ? "opacity-100 outline outline-2 outline-[var(--clipper-accent)]" : "opacity-80"}`} key={`${timelinePart.id}-${marker.id}`} style={{ left: `${((timelinePart.start + marker.start) / sceneDuration) * 100}%`, width: `${(marker.duration / sceneDuration) * 100}%` }} onClick={() => onSelectTranslationMarker(timelinePart.id, marker.id)} onPointerDown={(event) => updateTranslationFromPointer(event, timelinePart, marker, "move")}>
+                <div data-timeline-control data-timeline-marker-kind="translation" data-timeline-marker-part-id={timelinePart.id} data-timeline-marker-id={marker.id} className={`absolute top-[11px] h-[34px] min-w-[18px] cursor-default overflow-hidden rounded-[11px] ring-1 ring-inset ring-black/55 bg-[linear-gradient(180deg,#24b7c9,#127c8d)] px-3 py-2 text-xs font-bold text-white ${marker.snapIn ? "rounded-l-none" : ""} ${marker.snapOut ? "rounded-r-none" : ""} ${selectedTranslationKeys.has(`${timelinePart.id}:${marker.id}`) ? "opacity-100 outline outline-2 outline-[var(--clipper-accent)]" : marker.id === selectedTranslationMarkerId && timelinePart.id === selectedTranslationMarkerPartId ? "opacity-100 outline outline-2 outline-[var(--clipper-accent)]" : "opacity-80"}`} key={`${timelinePart.id}-${marker.id}`} style={{ left: `${((timelinePart.start + marker.start) / sceneDuration) * 100}%`, width: `calc(${(marker.duration / sceneDuration) * 100}% + var(--clipper-timeline-resize-width, 0px))` }} onClick={() => onSelectTranslationMarker(timelinePart.id, marker.id)} onPointerDown={(event) => updateTranslationFromPointer(event, timelinePart, marker, "move")}>
                   <span className="pointer-events-none block overflow-hidden text-ellipsis whitespace-nowrap">Pan {marker.position.x}, {marker.position.y}</span>
                   <div className={`absolute left-0 top-1 bottom-1 w-1 cursor-ew-resize ${marker.snapIn ? "bg-[#37d6c2]" : "rounded-l-[11px] bg-white/15"}`} onPointerDown={(event) => updateTranslationFromPointer(event, timelinePart, marker, "start")} />
                   <div className={`absolute right-0 top-1 bottom-1 w-1 cursor-ew-resize ${marker.snapOut ? "bg-[#37d6c2]" : "rounded-r-[11px] bg-white/15"}`} onPointerDown={(event) => updateTranslationFromPointer(event, timelinePart, marker, "end")} />
@@ -3812,9 +4425,9 @@ function TimelinePanel({ timeline, timelineViewportState, mode, selectedPartId, 
             </div> : null}
             {isCompositionMode ? <div className="relative block overflow-hidden border-x border-b border-[#2d313b] bg-[#111319] transition" onPointerDown={startZoomSelection} onPointerMove={continueZoomSelection} onPointerUp={endZoomSelection} onPointerCancel={endZoomSelection}>
               {draggingZoomMarkerId ? timeline.slice(1).map((part) => <div className="pointer-events-none absolute top-0 z-20 h-full w-px origin-top bg-[rgb(var(--clipper-accent-rgb)/0.9)] shadow-[0_0_10px_rgb(var(--clipper-accent-rgb)/0.42)] animate-[clipper-zoom-boundary-in_180ms_ease-out_both]" key={`zoom-boundary-${part.id}`} style={{ left: `${(part.start / sceneDuration) * 100}%` }} />) : null}
-              {zoomSelectionDrag ? <div className="pointer-events-none absolute top-[6px] z-10 h-[46px] rounded-[10px] border border-[var(--clipper-accent-strong)] bg-[rgb(var(--clipper-accent-rgb)/0.13)]" style={{ left: `${(clamp((Math.min(zoomSelectionDrag.startX, zoomSelectionDrag.currentX) - (timelineRef.current?.getBoundingClientRect().left ?? 0)) / (timelineRef.current?.getBoundingClientRect().width ?? 1), 0, 1)) * 100}%`, width: `${Math.abs(zoomSelectionDrag.currentX - zoomSelectionDrag.startX) / (timelineRef.current?.getBoundingClientRect().width ?? 1) * 100}%` }} /> : null}
+              {zoomSelectionDrag ? <TimelineSelectionBox ref={zoomSelectionBoxRef} drag={zoomSelectionDrag} /> : null}
               {timeline.flatMap((timelinePart) => timelinePart.zoomMarkers.map((marker) => (
-                <div data-timeline-control className={`absolute top-[11px] h-[34px] min-w-[18px] cursor-default overflow-hidden rounded-[11px] ring-1 ring-inset ring-black/55 bg-[linear-gradient(180deg,#f0c95a,#b88312)] px-3 py-2 text-xs font-bold text-[#1a1202] ${marker.snapIn ? "rounded-l-none" : ""} ${marker.snapOut ? "rounded-r-none" : ""} ${selectedZoomKeys.has(`${timelinePart.id}:${marker.id}`) ? "opacity-100 outline outline-2 outline-[#37d6c2]" : marker.id === selectedZoomMarkerId && timelinePart.id === selectedZoomMarkerPartId ? "opacity-100 outline outline-2 outline-[#37d6c2]" : "opacity-85"}`} key={`${timelinePart.id}-${marker.id}`} style={{ left: `${((timelinePart.start + marker.start) / sceneDuration) * 100}%`, width: `${(marker.duration / sceneDuration) * 100}%` }} onClick={() => onSelectZoomMarker(timelinePart.id, marker.id)} onPointerDown={(event) => updateZoomFromPointer(event, timelinePart, marker, "move")}>
+                <div data-timeline-control data-timeline-marker-kind="zoom" data-timeline-marker-part-id={timelinePart.id} data-timeline-marker-id={marker.id} className={`absolute top-[11px] h-[34px] min-w-[18px] cursor-default overflow-hidden rounded-[11px] ring-1 ring-inset ring-black/55 bg-[linear-gradient(180deg,#f0c95a,#b88312)] px-3 py-2 text-xs font-bold text-[#1a1202] ${marker.snapIn ? "rounded-l-none" : ""} ${marker.snapOut ? "rounded-r-none" : ""} ${selectedZoomKeys.has(`${timelinePart.id}:${marker.id}`) ? "opacity-100 outline outline-2 outline-[var(--clipper-accent)]" : marker.id === selectedZoomMarkerId && timelinePart.id === selectedZoomMarkerPartId ? "opacity-100 outline outline-2 outline-[var(--clipper-accent)]" : "opacity-85"}`} key={`${timelinePart.id}-${marker.id}`} style={{ left: `${((timelinePart.start + marker.start) / sceneDuration) * 100}%`, width: `calc(${(marker.duration / sceneDuration) * 100}% + var(--clipper-timeline-resize-width, 0px))` }} onClick={() => onSelectZoomMarker(timelinePart.id, marker.id)} onPointerDown={(event) => updateZoomFromPointer(event, timelinePart, marker, "move")}>
                   <span className="pointer-events-none block overflow-hidden text-ellipsis whitespace-nowrap">Zoom {marker.scale}x</span>
                   <div className={`absolute left-0 top-1 bottom-1 w-1 cursor-ew-resize ${marker.snapIn ? "bg-[#37d6c2]" : "rounded-l-[11px] bg-white/15"}`} onPointerDown={(event) => updateZoomFromPointer(event, timelinePart, marker, "start")} />
                   <div className={`absolute right-0 top-1 bottom-1 w-1 cursor-ew-resize ${marker.snapOut ? "bg-[#37d6c2]" : "rounded-r-[11px] bg-white/15"}`} onPointerDown={(event) => updateZoomFromPointer(event, timelinePart, marker, "end")} />
@@ -3838,8 +4451,105 @@ function TimelinePanel({ timeline, timelineViewportState, mode, selectedPartId, 
   );
 }
 
+function TimelineSelectionBox({ ref, drag }: { ref: RefObject<HTMLDivElement | null>; drag: TimelineSelectionDrag }) {
+  useLayoutEffect(() => {
+    const element = ref.current;
+    const rect = element?.parentElement?.getBoundingClientRect();
+    if (element && rect) updateTimelineSelectionBoxElement(element, drag, rect);
+  }, [drag, ref]);
+
+  return <div ref={ref} className="pointer-events-none absolute top-[6px] z-10 h-[46px] rounded-[10px] border border-[var(--clipper-accent-strong)] bg-[rgb(var(--clipper-accent-rgb)/0.13)] will-change-transform" />;
+}
+
+function updateTimelineSelectionBoxElement(element: HTMLDivElement, drag: TimelineSelectionDrag, rect: DOMRect) {
+  const startX = clamp(drag.startX - rect.left, 0, rect.width);
+  const currentX = clamp(drag.currentX - rect.left, 0, rect.width);
+  element.style.display = Math.abs(currentX - startX) >= 4 ? "block" : "none";
+  element.style.transform = `translate3d(${Math.min(startX, currentX)}px, 0, 0)`;
+  element.style.width = `${Math.abs(currentX - startX)}px`;
+}
+
 function centerOf(bounds: Bounds): Point {
   return { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
+}
+
+function getCameraPreviewTransform(activeZoom: ZoomMarker | null, activeTranslation: TranslationMarker | null): CameraPreviewTransform {
+  const scale = activeZoom?.scale ?? 1;
+  const focus = activeZoom?.focus ?? { x: FRAME_WIDTH / 2, y: FRAME_HEIGHT / 2 };
+  return {
+    x: (FRAME_WIDTH / 2 - focus.x) * (scale - 1) + (activeTranslation?.position.x ?? 0),
+    y: (FRAME_HEIGHT / 2 - focus.y) * (scale - 1) + (activeTranslation?.position.y ?? 0),
+    scale,
+  };
+}
+
+function boundsToViewport(bounds: Bounds, cameraTransform: CameraPreviewTransform, frameScale: number): Bounds {
+  const x = FRAME_WIDTH / 2 + cameraTransform.x + (bounds.x - FRAME_WIDTH / 2) * cameraTransform.scale;
+  const y = FRAME_HEIGHT / 2 + cameraTransform.y + (bounds.y - FRAME_HEIGHT / 2) * cameraTransform.scale;
+  return {
+    x: x * frameScale,
+    y: y * frameScale,
+    width: bounds.width * cameraTransform.scale * frameScale,
+    height: bounds.height * cameraTransform.scale * frameScale,
+  };
+}
+
+function insetBounds(bounds: Bounds, inset: number): Bounds {
+  return {
+    x: bounds.x + inset,
+    y: bounds.y + inset,
+    width: Math.max(0, bounds.width - inset * 2),
+    height: Math.max(0, bounds.height - inset * 2),
+  };
+}
+
+function getResizedBounds(bounds: Bounds, handle: ResizeHandle, delta: Point): Bounds {
+  const leftAnchored = handle.includes("left");
+  const rightAnchored = handle.includes("right");
+  const topAnchored = handle.includes("top");
+  const bottomAnchored = handle.includes("bottom");
+  const right = bounds.x + bounds.width;
+  const bottom = bounds.y + bounds.height;
+  let nextLeft = leftAnchored ? bounds.x + delta.x : bounds.x;
+  let nextRight = rightAnchored ? right + delta.x : right;
+  let nextTop = topAnchored ? bounds.y + delta.y : bounds.y;
+  let nextBottom = bottomAnchored ? bottom + delta.y : bottom;
+
+  if (nextRight - nextLeft < minimumObjectResizeSide) {
+    if (leftAnchored) nextLeft = nextRight - minimumObjectResizeSide;
+    else nextRight = nextLeft + minimumObjectResizeSide;
+  }
+  if (nextBottom - nextTop < minimumObjectResizeSide) {
+    if (topAnchored) nextTop = nextBottom - minimumObjectResizeSide;
+    else nextBottom = nextTop + minimumObjectResizeSide;
+  }
+
+  nextLeft = clamp(nextLeft, -FRAME_WIDTH, FRAME_WIDTH * 2);
+  nextRight = clamp(nextRight, -FRAME_WIDTH, FRAME_WIDTH * 2);
+  nextTop = clamp(nextTop, -FRAME_HEIGHT, FRAME_HEIGHT * 2);
+  nextBottom = clamp(nextBottom, -FRAME_HEIGHT, FRAME_HEIGHT * 2);
+
+  return {
+    x: Math.round(Math.min(nextLeft, nextRight - minimumObjectResizeSide)),
+    y: Math.round(Math.min(nextTop, nextBottom - minimumObjectResizeSide)),
+    width: Math.round(Math.max(minimumObjectResizeSide, Math.abs(nextRight - nextLeft))),
+    height: Math.round(Math.max(minimumObjectResizeSide, Math.abs(nextBottom - nextTop))),
+  };
+}
+
+function isVisibleMarqueeBounds(bounds: Bounds, frameScale: number) {
+  return bounds.width * frameScale >= marqueeSelectionThresholdPx || bounds.height * frameScale >= marqueeSelectionThresholdPx;
+}
+
+function updateDragSelectionBoxElement(element: HTMLDivElement, bounds: Bounds, frameScale: number, visible = isVisibleMarqueeBounds(bounds, frameScale)) {
+  element.style.display = visible ? "block" : "none";
+  element.style.transform = `translate3d(${bounds.x * frameScale}px, ${bounds.y * frameScale}px, 0)`;
+  element.style.width = `${bounds.width * frameScale}px`;
+  element.style.height = `${bounds.height * frameScale}px`;
+}
+
+function moveBounds(bounds: Bounds, delta: Point): Bounds {
+  return { ...bounds, x: bounds.x + delta.x, y: bounds.y + delta.y };
 }
 
 function getBackgroundLayerFillBounds(background: BackgroundLayer): Bounds {
@@ -4584,122 +5294,10 @@ function downloadTextFile(fileName: string, content: string) {
   URL.revokeObjectURL(url);
 }
 
-function downloadBlobFile(fileName: string, blob: Blob) {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = fileName;
-  link.click();
-  URL.revokeObjectURL(url);
-}
-
-async function blobToBase64(blob: Blob) {
-  const buffer = await blob.arrayBuffer();
-  let binary = "";
-  const bytes = new Uint8Array(buffer);
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary);
-}
-
-async function renderPartFrameToCanvas(part: Part, previewTime: number, activeZoom: ZoomMarker | null, activeTranslation: TranslationMarker | null) {
-  const svg = buildFrameSvg(part, previewTime, activeZoom, activeTranslation);
-  const image = new Image();
-  const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml;charset=utf-8" }));
-
-  try {
-    await new Promise<void>((resolve, reject) => {
-      image.onload = () => resolve();
-      image.onerror = () => reject(new Error("Unable to render frame SVG."));
-      image.src = url;
-    });
-
-    const canvas = document.createElement("canvas");
-    canvas.width = FRAME_WIDTH;
-    canvas.height = FRAME_HEIGHT;
-    const context = canvas.getContext("2d");
-    if (!context) throw new Error("Canvas rendering is unavailable.");
-    context.drawImage(image, 0, 0);
-    return canvas;
-  } finally {
-    URL.revokeObjectURL(url);
-  }
-}
-
-async function nextAnimationFrame() {
-  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-}
-
-function buildFrameSvg(part: Part, previewTime: number, activeZoom: ZoomMarker | null, activeTranslation: TranslationMarker | null) {
-  const scale = activeZoom?.scale ?? 1;
-  const focus = activeZoom?.focus ?? { x: FRAME_WIDTH / 2, y: FRAME_HEIGHT / 2 };
-  const x = (FRAME_WIDTH / 2 - focus.x) * (scale - 1) + (activeTranslation?.position.x ?? 0);
-  const y = (FRAME_HEIGHT / 2 - focus.y) * (scale - 1) + (activeTranslation?.position.y ?? 0);
-  const cameraStyle = `position:absolute;inset:0;transform-origin:center;transform:translate(${x}px,${y}px) scale(${scale});`;
-  const frameStyle = cssStyle({ ...part.frame.style, position: "relative", width: FRAME_WIDTH, height: FRAME_HEIGHT, overflow: "hidden" });
-
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${FRAME_WIDTH}" height="${FRAME_HEIGHT}" viewBox="0 0 ${FRAME_WIDTH} ${FRAME_HEIGHT}"><foreignObject width="100%" height="100%"><div xmlns="http://www.w3.org/1999/xhtml" style="${frameStyle}"><div style="${cameraStyle}">${backgroundLayerHtml(part.background, previewTime)}${part.objects.map((object) => frameObjectHtml(object, previewTime)).join("")}</div></div></foreignObject></svg>`;
-}
-
-function backgroundLayerHtml(background: BackgroundLayer, previewTime: number) {
-  const layerStyle = cssStyle({ position: "absolute", inset: 0, overflow: background.stretchToElements ? "visible" : "hidden", ...getMotionPreviewAnimation(background.motion, previewTime) });
-  const fillBounds = getBackgroundLayerFillBounds(background);
-  const fillStyle = cssStyle({ position: "absolute", ...background.style, left: fillBounds.x, top: fillBounds.y, width: fillBounds.width, height: fillBounds.height });
-  return `<div style="${layerStyle}"><div style="${fillStyle}"></div>${background.elements.map((element) => frameObjectHtml(element, previewTime)).join("")}</div>`;
-}
-
-function frameObjectHtml(object: FrameObject, previewTime: number) {
-  const animation = getObjectPreviewAnimation(object, previewTime);
-  const objectTransform = typeof object.style.transform === "string" ? object.style.transform : "";
-  const animationTransform = typeof animation.style.transform === "string" ? animation.style.transform : "";
-  const content = animation.content ?? object.content ?? "";
-  const style = cssStyle({
-    position: "absolute",
-    display: "flex",
-    flexDirection: "column",
-    justifyContent: "center",
-    overflow: "hidden",
-    whiteSpace: "pre-line",
-    left: object.bounds.x,
-    top: object.bounds.y,
-    width: object.bounds.width,
-    height: object.bounds.height,
-    ...object.style,
-    ...animation.style,
-    transform: `${animationTransform || objectTransform}`.trim() || undefined,
-  });
-
-  if (object.type === "text") return `<div style="${style}">${richTextHtml(getRenderableTextSegments(content, animation.content ? undefined : object.richText), Boolean(!animation.content && object.richText))}</div>`;
-  return `<div style="${style}">${escapeHtml(content)}</div>`;
-}
-
-function richTextHtml(segments: RichTextSegment[], explicitFormatting: boolean) {
-  return segments.map((segment) => escapeHtml(segment.text).replace(/\n/g, "<br />").replace(/^(.+)$/s, `<span style="${cssStyle({ ...inlineTextSegmentStyle(segment, explicitFormatting) })}">$1</span>`)).join("");
-}
-
-function cssStyle(style: Record<string, unknown>) {
-  return Object.entries(style)
-    .filter(([, value]) => value !== undefined && value !== null && value !== "")
-    .map(([key, value]) => `${camelToKebab(key)}:${cssValue(key, value)};`)
-    .join("");
-}
-
-function cssValue(key: string, value: unknown) {
-  if (typeof value !== "number") return escapeHtml(String(value));
-  if (unitlessCssProperties.has(key)) return String(value);
-  return `${value}px`;
-}
-
-const unitlessCssProperties = new Set(["fontWeight", "lineHeight", "opacity", "zIndex", "flex", "flexGrow", "flexShrink", "order"]);
-
-function camelToKebab(value: string) {
-  return value.replace(/[A-Z]/g, (match) => `-${match.toLowerCase()}`);
-}
-
-function escapeHtml(value: string) {
-  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
-
 function getObjectPreviewAnimation(object: FrameObject, time: number): { style: CSSProperties; content?: string } {
+  const graphAnimation = getAnimatedGraphPreviewAnimation(object.id, time);
+  if (graphAnimation) return graphAnimation;
+
   if (object.motion) {
     return { style: getMotionPreviewAnimation(object.motion, time) };
   }
@@ -4756,6 +5354,57 @@ function getObjectPreviewAnimation(object: FrameObject, time: number): { style: 
   }
 
   return { style: {} };
+}
+
+const animatedGraphLineSegments: Record<string, { delay: number; duration: number; rotate: number }> = {
+  "graph-line-1": { delay: 1.66, duration: 0.88, rotate: -25.3 },
+  "graph-line-2": { delay: 2.54, duration: 0.88, rotate: -27.9 },
+  "graph-line-3": { delay: 3.42, duration: 0.88, rotate: -20.7 },
+};
+
+function isAnimatedGraphObject(id: string) {
+  return id in animatedGraphLineSegments || id === "graph-line" || id === "graph-value-primary" || id === "graph-value-secondary";
+}
+
+function getAnimatedGraphPreviewAnimation(id: string, time: number): { style: CSSProperties; content?: string } | null {
+  const lineSegment = animatedGraphLineSegments[id];
+  if (lineSegment) {
+    const progress = easeOutCubic(clamp((time - lineSegment.delay) / lineSegment.duration, 0, 1));
+    return {
+      style: {
+        opacity: progress > 0 ? 1 : 0,
+        transform: `rotate(${lineSegment.rotate}deg) scaleX(${progress.toFixed(3)})`,
+      },
+    };
+  }
+
+  if (id === "graph-line") {
+    const progress = easeOutCubic(clamp((time - 1.66) / 2.64, 0, 1));
+    return {
+      style: {
+        opacity: progress > 0 ? 1 : 0,
+        transform: `scaleX(${progress.toFixed(3)})`,
+        transformOrigin: "left center",
+      },
+    };
+  }
+
+  const valueProgress = easeOutCubic(clamp((time - 1.66) / 2.64, 0, 1));
+  if (id === "graph-value-primary") {
+    return {
+      content: `$${Math.round(interpolate([18, 96] as const, valueProgress))}k`,
+      style: { opacity: clamp((time - 1.45) / 0.35, 0, 1) },
+    };
+  }
+
+  if (id === "graph-value-secondary") {
+    return {
+      content: `+${Math.round(interpolate([12, 148] as const, valueProgress))}%`,
+      style: { opacity: clamp((time - 1.72) / 0.35, 0, 1) },
+    };
+  }
+
+  return null;
 }
 
 function getMotionPreviewAnimation(motion: FrameObject["motion"] | BackgroundLayer["motion"] | undefined, time: number): CSSProperties {

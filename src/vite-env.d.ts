@@ -15,5 +15,6 @@ interface Window {
     cancelRenderVideoExport: (exportId: string) => Promise<void>;
     onVideoExportProgress: (callback: (exportId: string, progress: { frame: number; totalFrames: number; percent: number; status: string }) => void) => () => void;
     onModeShortcut: (callback: (key: "1" | "2" | "3" | "4") => void) => () => void;
+    onSettingsShortcut: (callback: () => void) => () => void;
   };
 }
