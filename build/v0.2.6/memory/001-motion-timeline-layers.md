@@ -27,6 +27,10 @@ Implemented the first v0.2.6 motion timeline layer pass.
 - Revised layer controls so labels show only right-edge eye and ellipsis buttons. The ellipsis opens a local menu for adding a motion layer before/after the current motion layer and removing motion layers.
 - New motion layer display names default to `MOTION` regardless of the underlying motion kind.
 - Lane category accents are colored borders: Adjust purple, Motion cyan/blue, Comp green. Labels use a right-edge colored border and lane bodies use a left-edge colored border.
+- Motion marker drag/drop now only magnet-snaps while Shift is held. The timeline no longer clamps motion moves or new motion effects to empty gaps; committed edits use overwrite semantics instead.
+- Marker overwrite behavior is shared in `src/core/timelineOverwrite.ts`: inserted/moved markers trim, remove, or split existing same-layer markers, similar to Premiere/DaVinci overwrite edits. Reuse this for every timeline marker type; marker-specific code should only provide IDs, layer IDs, content, and persistence shape.
+- Motion markers that land across composition boundaries are split into per-composition marker segments during add and move commits. Adjustment markers use the same overwrite helper for same-row replacement. `src/core/timeline.ts` preserves cross-part absolute placement in `getTimelineMarkerMoves`, while `TimelinePanel` remains responsible for rAF drag previews and Shift-only snap previews.
+- Shift snapping is universal across timeline layer types. Motion marker move/resize previews use composition edges, motion marker edges, adjustment marker edges, and the playhead as one shared boundary set.
 
 ## Follow-Up
 

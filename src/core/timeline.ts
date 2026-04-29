@@ -1,5 +1,7 @@
 import { defaultZoomDuration, minimumZoomDuration } from "./editorConstants";
-import { MAX_PART_DURATION_SECONDS, MAX_SCENE_DURATION_SECONDS, type AdjustmentLayer, type CompositionClip, type Scene, type TimelineComposition, type TimelineMotionLayerKind, type TimelineMotionLayerState, type TimelinePart, type TranslationMarker, type ZoomMarker } from "./types";
+import { getAdjustmentEffectPackage } from "./effects/registry";
+import { getMotionBlockEffectKind } from "./motionEffects";
+import { MAX_PART_DURATION_SECONDS, MAX_SCENE_DURATION_SECONDS, type AdjustmentLayer, type CompositionClip, type MotionEffectKind, type Scene, type TimelineComposition, type TimelineMotionLayerKind, type TimelineMotionLayerState, type TimelinePart, type TranslationMarker, type ZoomMarker } from "./types";
 import { clamp, roundTenth } from "./math";
 
 export function buildLinearTimeline(scene: Scene): TimelineComposition[] {
@@ -38,7 +40,8 @@ export function validateScene(scene: Scene): string[] {
     if (layer.duration <= 0) errors.push(`Adjustment ${layer.name} must have a positive duration.`);
     if (layer.start < 0) errors.push(`Adjustment ${layer.name} cannot start before the scene.`);
     if (layer.start + layer.duration > duration) errors.push(`Adjustment ${layer.name} extends past the scene end.`);
-    if (layer.effect.kind === "frameSkip" && layer.effect.every < 1) errors.push(`Adjustment ${layer.name} must skip at least 1 frame.`);
+    const validationError = getAdjustmentEffectPackage(layer.effect.effectId)?.validate?.(layer);
+    if (validationError) errors.push(validationError);
   });
 
   return errors;
@@ -101,8 +104,10 @@ export function getTimelinePartAtTime(timeline: TimelinePart[], time: number) {
   return timeline[0] ?? null;
 }
 
-export function getTopTimelineItemAtTime(timeline: TimelineComposition[], time: number, adjustmentLayers: AdjustmentLayer[] = [], motionLayers: TimelineMotionLayerState[] = []): TopTimelineItem | null {
-  const adjustmentLayer = [...adjustmentLayers].reverse().find((layer) => isTimelineItemAtSelectionTime(layer.start, layer.duration, time));
+export function getTopTimelineItemAtTime(timeline: TimelineComposition[], time: number, adjustmentLayers: AdjustmentLayer[] = [], motionLayers: TimelineMotionLayerState[] = [], adjustmentRowIds: string[] = []): TopTimelineItem | null {
+  const adjustmentLayer = adjustmentRowIds.length > 0
+    ? adjustmentRowIds.flatMap((rowId) => [...adjustmentLayers].reverse().filter((layer) => getAdjustmentLayerRowId(layer) === rowId)).find((layer) => isTimelineItemAtSelectionTime(layer.start, layer.duration, time))
+    : [...adjustmentLayers].reverse().find((layer) => isTimelineItemAtSelectionTime(layer.start, layer.duration, time));
   if (adjustmentLayer) return { kind: "adjustment", layer: adjustmentLayer };
   const timelinePart = getTimelinePartAtTime(timeline, time > 0 ? time - 0.000001 : time);
   if (!timelinePart) return null;
@@ -111,7 +116,7 @@ export function getTopTimelineItemAtTime(timeline: TimelineComposition[], time: 
     for (const layer of motionLayers) {
       const zoomMarker = [...timelinePart.zoomMarkers].reverse().find((marker) => getZoomMarkerLayerId(marker) === layer.id && isMarkerAtSelectionTime(timelinePart, marker, time));
       const translationMarker = [...timelinePart.translationMarkers].reverse().find((marker) => getTranslationMarkerLayerId(marker) === layer.id && isMarkerAtSelectionTime(timelinePart, marker, time));
-      if (layer.kind === "pan" || layer.kind === "rotate") {
+      if (isMotionLayerKind(layer.kind)) {
         if (translationMarker) return { kind: "translation", part: timelinePart, marker: translationMarker };
         if (zoomMarker) return { kind: "zoom", part: timelinePart, marker: zoomMarker };
       } else {
@@ -130,23 +135,26 @@ export function getTopTimelineItemAtTime(timeline: TimelineComposition[], time: 
   return { kind: "part", part: timelinePart };
 }
 
-export function getTranslationMarkerLayerKind(marker: Pick<TranslationMarker, "kind">): "pan" | "rotate" {
-  return marker.kind === "rotate" ? "rotate" : "pan";
+export function getTranslationMarkerLayerKind(marker: Pick<TranslationMarker, "effectId" | "kind">): Exclude<MotionEffectKind, "zoom"> {
+  const effectKind = getMotionBlockEffectKind(marker);
+  if (effectKind === "rotate") return "rotate";
+  if (effectKind === "perspective") return "perspective";
+  return "pan";
 }
 
 export function getZoomMarkerLayerId(marker: Pick<ZoomMarker, "layerId">) {
-  return marker.layerId ?? "motion_zoom";
+  return marker.layerId ?? "";
 }
 
-export function getTranslationMarkerLayerId(marker: Pick<TranslationMarker, "kind" | "layerId">) {
-  return marker.layerId ?? (getTranslationMarkerLayerKind(marker) === "rotate" ? "motion_rotate" : "motion_pan");
+export function getTranslationMarkerLayerId(marker: Pick<TranslationMarker, "effectId" | "kind" | "layerId">) {
+  return marker.layerId ?? "";
 }
 
 export function getZoomMarkerMendKey(marker: Pick<ZoomMarker, "layerId">) {
   return `zoom:${getZoomMarkerLayerId(marker)}`;
 }
 
-export function getTranslationMarkerMendKey(marker: Pick<TranslationMarker, "kind" | "layerId">) {
+export function getTranslationMarkerMendKey(marker: Pick<TranslationMarker, "effectId" | "kind" | "layerId">) {
   return `${getTranslationMarkerLayerKind(marker)}:${getTranslationMarkerLayerId(marker)}`;
 }
 
@@ -154,18 +162,31 @@ export function getTimelineMotionLayersWithMarkers(layers: TimelineMotionLayerSt
   const nextLayers = [...layers];
   const knownLayerIds = new Set(nextLayers.map((layer) => layer.id));
 
-  function addMarkerLayer(layerId: string, kind: Exclude<TimelineMotionLayerKind, "empty">) {
+  function addMarkerLayer(layerId: string) {
+    if (!layerId) return;
     if (knownLayerIds.has(layerId)) return;
     knownLayerIds.add(layerId);
-    nextLayers.push({ id: layerId, kind, name: "MOTION" });
+    nextLayers.push({ id: layerId, kind: "motion", name: "MOTION" });
   }
 
   for (const timelinePart of timeline) {
-    for (const marker of timelinePart.zoomMarkers) addMarkerLayer(getZoomMarkerLayerId(marker), "zoom");
-    for (const marker of timelinePart.translationMarkers) addMarkerLayer(getTranslationMarkerLayerId(marker), getTranslationMarkerLayerKind(marker));
+    for (const marker of timelinePart.zoomMarkers) addMarkerLayer(getZoomMarkerLayerId(marker));
+    for (const marker of timelinePart.translationMarkers) addMarkerLayer(getTranslationMarkerLayerId(marker));
   }
 
   return nextLayers;
+}
+
+export function getAdjustmentLayerRowId(layer: Pick<AdjustmentLayer, "effect" | "layerId">) {
+  return layer.layerId ?? layer.effect.effectId;
+}
+
+export function removeTimelineAdjustmentLayerMarkers(layers: AdjustmentLayer[], layerId: string) {
+  return layers.filter((layer) => getAdjustmentLayerRowId(layer) !== layerId);
+}
+
+export function isMotionLayerKind(kind: TimelineMotionLayerKind) {
+  return kind !== "empty";
 }
 
 export function removeTimelineMotionLayerMarkers<T extends { zoomMarkers: ZoomMarker[]; translationMarkers: TranslationMarker[] }>(timeline: T[], layerId: string): T[] {
@@ -325,7 +346,7 @@ export function getTimelineMarkerMoves(timeline: TimelinePart[], items: Timeline
 
   for (const item of items) {
     if (!item.groupId) {
-      const nextPlacement = exactMarkerPlacementInTimeline(timeline, item.absoluteStart + delta, item.duration)
+      const nextPlacement = getCrossPartMarkerPlacement(timeline, item.absoluteStart + delta, item.duration)
         ?? getMarkerPlacement(timeline, item.absoluteStart + delta, item.duration, snapThresholdSeconds, false, { kind, partId: item.partId, markerId: item.markerId });
       moves.push({ sourcePartId: activePartIds.get(item.markerId) ?? item.partId, markerId: item.markerId, targetPartId: nextPlacement.partId, start: nextPlacement.start });
       continue;
@@ -339,7 +360,7 @@ export function getTimelineMarkerMoves(timeline: TimelinePart[], items: Timeline
     const groupEnd = Math.max(...groupItems.map((item) => item.absoluteStart + item.duration));
     const groupDuration = groupEnd - groupStart;
     const firstItem = groupItems[0];
-    const nextPlacement = exactMarkerPlacementInTimeline(timeline, groupStart + delta, groupDuration)
+    const nextPlacement = getCrossPartMarkerPlacement(timeline, groupStart + delta, groupDuration)
       ?? getMarkerPlacement(timeline, groupStart + delta, groupDuration, snapThresholdSeconds, false, { kind, partId: firstItem.partId, markerId: firstItem.markerId });
 
     for (const item of groupItems) {
@@ -353,6 +374,13 @@ export function getTimelineMarkerMoves(timeline: TimelinePart[], items: Timeline
   }
 
   return moves;
+}
+
+function getCrossPartMarkerPlacement(timeline: TimelinePart[], absoluteStart: number, duration: number) {
+  const sceneEnd = timeline.at(-1)?.end ?? 0;
+  const center = clamp(absoluteStart + duration / 2, 0, sceneEnd > 0 ? sceneEnd - 0.000001 : 0);
+  const targetPart = getTimelinePartAtTime(timeline, center);
+  return targetPart ? { partId: targetPart.id, start: absoluteStart - targetPart.start } : null;
 }
 
 export function exactMarkerPlacementInTimeline(timeline: TimelinePart[], absoluteStart: number, duration: number) {

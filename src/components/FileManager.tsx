@@ -309,7 +309,7 @@ function UnifiedFileManagerTree() {
     if (event.button !== 0) return;
     const target = event.target;
     if (!(target instanceof HTMLElement)) return;
-    if (target.closest("button,input,textarea,select,[contenteditable='true'],[data-file-manager-row='true']")) return;
+    if (isFileManagerInteractiveTarget(target)) return;
     const rect = treeRef.current?.getBoundingClientRect();
     if (!rect) return;
     const startX = event.clientX - rect.left;
@@ -319,6 +319,13 @@ function UnifiedFileManagerTree() {
     onSelectNodes([]);
     marqueeSelectionRef.current = { startX, startY, pointerId: event.pointerId, active: false };
     event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function suppressEmptyTreePointerFocus(event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.button !== 0) return;
+    const target = event.target;
+    if (!(target instanceof HTMLElement) || isFileManagerInteractiveTarget(target)) return;
+    event.preventDefault();
   }
 
   function handleMarqueePointerMove(event: ReactPointerEvent<HTMLDivElement>) {
@@ -414,7 +421,11 @@ function UnifiedFileManagerTree() {
     return disabled;
   }
 
-  return <div ref={treeRef} className="relative" onPointerDown={handleMarqueePointerDown} onPointerMove={handleMarqueePointerMove} onPointerUp={finishMarquee} onPointerCancel={finishMarquee}>{marquee ? <FileManagerMarquee marquee={marquee} /> : null}<Tree<FileManagerTreeNode> ref={arboristTreeRef} data={tree} disableDrop={disableDrop} height={treeHeight} idAccessor="id" indent={FILE_MANAGER_INDENT} initialOpenState={initialOpenState} onActivate={handleActivate} onMove={handleMove} onRename={handleRename} onSelect={handleSelect} onToggle={handleToggle} openByDefault={!fileManagerState?.openState} overscanCount={4} paddingBottom={FILE_MANAGER_BOTTOM_DROP_PADDING} paddingTop={FILE_MANAGER_TOP_DROP_PADDING} rowHeight={FILE_MANAGER_ROW_HEIGHT} width="100%" renderCursor={(cursorProps) => <ProjectTreeCursor {...cursorProps} hidden={!dropCursorVisible || dropPointerY === null || Math.abs(cursorProps.top - dropPointerY) > FILE_MANAGER_ROW_HEIGHT / 2} />} renderDragPreview={(previewProps) => <UnifiedTreeDragPreview {...previewProps} nodes={tree} onDragPositionChange={updateDragPosition} />} renderRow={(rowProps) => <FileManagerTreeRow {...rowProps} />}>{(nodeProps) => <UnifiedTreeNode {...nodeProps} />}</Tree></div>;
+  return <div ref={treeRef} className="relative" onPointerDownCapture={suppressEmptyTreePointerFocus} onPointerDown={handleMarqueePointerDown} onPointerMove={handleMarqueePointerMove} onPointerUp={finishMarquee} onPointerCancel={finishMarquee}>{marquee ? <FileManagerMarquee marquee={marquee} /> : null}<Tree<FileManagerTreeNode> ref={arboristTreeRef} data={tree} disableDrop={disableDrop} height={treeHeight} idAccessor="id" indent={FILE_MANAGER_INDENT} initialOpenState={initialOpenState} onActivate={handleActivate} onMove={handleMove} onRename={handleRename} onSelect={handleSelect} onToggle={handleToggle} openByDefault={!fileManagerState?.openState} overscanCount={4} paddingBottom={FILE_MANAGER_BOTTOM_DROP_PADDING} paddingTop={FILE_MANAGER_TOP_DROP_PADDING} rowHeight={FILE_MANAGER_ROW_HEIGHT} width="100%" renderCursor={(cursorProps) => <ProjectTreeCursor {...cursorProps} hidden={!dropCursorVisible || dropPointerY === null || Math.abs(cursorProps.top - dropPointerY) > FILE_MANAGER_ROW_HEIGHT / 2} />} renderDragPreview={(previewProps) => <UnifiedTreeDragPreview {...previewProps} nodes={tree} onDragPositionChange={updateDragPosition} />} renderRow={(rowProps) => <FileManagerTreeRow {...rowProps} />}>{(nodeProps) => <UnifiedTreeNode {...nodeProps} />}</Tree></div>;
+}
+
+function isFileManagerInteractiveTarget(target: HTMLElement) {
+  return Boolean(target.closest("button,input,textarea,select,[contenteditable='true'],[data-file-manager-row='true']"));
 }
 
 function FileManagerTreeRow({ attrs, children, innerRef, node }: RowRendererProps<FileManagerTreeNode>) {
@@ -479,7 +490,7 @@ function UnifiedTreeNode({ dragHandle, node, style }: NodeRendererProps<FileMana
   const Icon = data.kind === "asset-file" ? FileIcon : data.kind === "timeline" ? ChartNoAxesGantt : data.kind === "composition" ? Clapperboard : Folder;
   const label = data.kind === "timeline" ? `${data.name}.timeline` : data.name;
 
-  return <div ref={dragHandle} data-file-manager-row="true" style={style} className={`relative box-border grid h-full min-w-0 cursor-pointer grid-cols-[16px_18px_minmax(0,1fr)_auto] items-center gap-1.5 border px-1.5 text-[13px] font-bold ${node.isDragging ? "border-[var(--clipper-accent)] bg-[var(--clipper-accent-muted-surface)] opacity-60" : node.willReceiveDrop ? "border-[var(--clipper-accent)] bg-[var(--clipper-accent-muted-surface)]" : node.isSelected || node.isFocused ? "border-transparent bg-[#242733]" : "border-transparent hover:bg-[#20232c]"}`} onMouseDownCapture={(event) => { if (event.detail !== 2 || !isFileTreeFolderNode(data) || (event.target instanceof HTMLElement && event.target.closest("button"))) return; event.preventDefault(); event.stopPropagation(); if (node.tree.isOpen(node.id)) node.tree.close(node.id); else node.tree.open(node.id); }} onContextMenu={openMenu}>
+  return <div ref={dragHandle} data-file-manager-row="true" style={style} className={`relative box-border grid h-full min-w-0 cursor-pointer grid-cols-[16px_18px_minmax(0,1fr)_auto] items-center gap-1.5 border px-1.5 text-[13px] font-bold ${node.isDragging ? "border-[var(--clipper-accent)] bg-[var(--clipper-accent-muted-surface)] opacity-60" : node.willReceiveDrop ? "border-[var(--clipper-accent)] bg-[var(--clipper-accent-muted-surface)]" : node.isSelected || (node.isFocused && node.tree.hasFocus) ? "border-transparent bg-[#242733]" : "border-transparent hover:bg-[#20232c]"}`} onMouseDownCapture={(event) => { if (event.detail !== 2 || !isFileTreeFolderNode(data) || (event.target instanceof HTMLElement && event.target.closest("button"))) return; event.preventDefault(); event.stopPropagation(); if (node.tree.isOpen(node.id)) node.tree.close(node.id); else node.tree.open(node.id); }} onContextMenu={openMenu}>
     {node.isInternal ? <button className="grid h-4 w-4 place-items-center rounded text-current hover:bg-black/15" aria-label={`${node.isOpen ? "Collapse" : "Expand"} ${data.name}`} onClick={(event) => { event.stopPropagation(); node.toggle(); }} onDoubleClick={(event) => event.stopPropagation()} type="button">{node.isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</button> : <span />}
     <Icon size={data.kind === "asset-file" || data.kind === "composition" || data.kind === "timeline" ? 16 : 17} className="text-current" />
     {node.isEditing ? <Input autoFocus className="h-7 min-w-0 border-[var(--clipper-accent)] bg-[#171920] px-1 py-0 text-[13px] font-bold" value={editDraft} onBlur={submitEdit} onChange={(event) => setEditDraft(event.target.value)} onClick={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === "Enter") submitEdit(); if (event.key === "Escape") node.reset(); }} /> : <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap px-1">{label}</span>}

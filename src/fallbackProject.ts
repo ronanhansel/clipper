@@ -56,6 +56,7 @@ export const composition = new Composition({
           background: { id: "background", name: "Background", style: { background: "#050505" }, elements: [] },
           objects: [],
           snapshot: [],
+          motionBlocks: [],
           zoomMarkers: [],
           translationMarkers: [],
         },

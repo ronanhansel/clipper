@@ -1,8 +1,23 @@
 import { roundTenth } from "./math";
+import { getMotionBlockEffectKind } from "./motionEffects";
 import { getMotionTranslation } from "./renderRuntime";
-import { FRAME_HEIGHT, FRAME_WIDTH, type Bounds, type FrameObject, type MotionEase, type Part, type Point, type TimelineMotionLayerState, type TranslationMarker, type ZoomMarker } from "./types";
+import { FRAME_HEIGHT, FRAME_WIDTH, type Bounds, type FrameObject, type MotionEase, type Part, type PerspectiveSettings, type Point, type TimelineMotionLayerState, type TranslationMarker, type ZoomMarker } from "./types";
 
-export type CameraPreviewTransform = { x: number; y: number; scale: number; rotation: number };
+export const CAMERA_PERSPECTIVE = 1800;
+
+export type CameraPreviewTransform = { x: number; y: number; z: number; scale: number; rotation: number; rotateX: number; rotateY: number; perspective: number };
+
+export function formatCameraPreviewTransform(transform: CameraPreviewTransform) {
+  const coverScale = getPerspectiveCoverScale(transform);
+  return `translate3d(${transform.x}px, ${transform.y}px, ${transform.z}px) rotateX(${transform.rotateX}deg) rotateY(${transform.rotateY}deg) rotate(${transform.rotation}deg) scale(${transform.scale * coverScale})`;
+}
+
+function getPerspectiveCoverScale(transform: CameraPreviewTransform) {
+  const tilt = Math.max(Math.abs(transform.rotateX), Math.abs(transform.rotateY));
+  if (tilt <= 0) return 1;
+  const radians = Math.min(tilt, 72) * Math.PI / 180;
+  return Math.min(2.4, 1 / Math.max(Math.cos(radians), 0.42));
+}
 
 export function getCameraPreviewTransform(activeZoom: ZoomMarker | null, activeTranslation: TranslationMarker | null, activeRotation: TranslationMarker | null = null): CameraPreviewTransform {
   const scale = activeZoom?.scale ?? 1;
@@ -10,40 +25,45 @@ export function getCameraPreviewTransform(activeZoom: ZoomMarker | null, activeT
   return {
     x: (FRAME_WIDTH / 2 - focus.x) * (scale - 1) + (activeTranslation?.position.x ?? 0),
     y: (FRAME_HEIGHT / 2 - focus.y) * (scale - 1) + (activeTranslation?.position.y ?? 0),
+    z: 0,
     scale,
     rotation: activeRotation?.rotation ?? 0,
+    rotateX: 0,
+    rotateY: 0,
+    perspective: CAMERA_PERSPECTIVE,
   };
 }
 
 export function getLayeredCameraPreviewTransform(part: Part, layers: TimelineMotionLayerState[], time: number, options: { hiddenLayerIds?: Set<string>; pickingTranslationPosition?: boolean; pickingZoomFocus?: boolean } = {}): CameraPreviewTransform {
-  const transform: CameraPreviewTransform = { x: 0, y: 0, scale: 1, rotation: 0 };
+  const transform: CameraPreviewTransform = { x: 0, y: 0, z: 0, scale: 1, rotation: 0, rotateX: 0, rotateY: 0, perspective: CAMERA_PERSPECTIVE };
 
   for (const layer of layers) {
     if (options.hiddenLayerIds?.has(layer.id) || layer.kind === "empty") continue;
 
-    if (layer.kind === "zoom") {
-      if (options.pickingZoomFocus) continue;
+    if (!options.pickingZoomFocus) {
       const activeZoom = getActiveZoom(part.zoomMarkers.filter((marker) => isMarkerOnMotionLayer(marker, layer)), time);
-      if (!activeZoom) continue;
-      const zoomTransform = getCameraPreviewTransform(activeZoom, null, null);
-      transform.x += zoomTransform.x;
-      transform.y += zoomTransform.y;
-      transform.scale *= zoomTransform.scale;
-      continue;
+      if (activeZoom) {
+        const zoomTransform = getCameraPreviewTransform(activeZoom, null, null);
+        transform.x += zoomTransform.x;
+        transform.y += zoomTransform.y;
+        transform.scale *= zoomTransform.scale;
+      }
     }
 
     const markers = part.translationMarkers.filter((marker) => isMarkerOnMotionLayer(marker, layer));
-    if (layer.kind === "pan") {
-      if (options.pickingTranslationPosition) continue;
-      const activeTranslation = getActiveTranslation(markers, time, part);
-      transform.x += activeTranslation?.position.x ?? 0;
-      transform.y += activeTranslation?.position.y ?? 0;
-      continue;
-    }
-
     if (options.pickingTranslationPosition) continue;
+
+    const activeTranslation = getActiveTranslation(markers, time, part);
+    transform.x += activeTranslation?.position.x ?? 0;
+    transform.y += activeTranslation?.position.y ?? 0;
+
     const activeRotation = getActiveRotation(markers, time);
     transform.rotation += activeRotation?.rotation ?? 0;
+
+    const activePerspective = getActivePerspective(markers, time);
+    transform.z += activePerspective.z;
+    transform.rotateX += activePerspective.rotateX;
+    transform.rotateY += activePerspective.rotateY;
   }
 
   return transform;
@@ -51,8 +71,11 @@ export function getLayeredCameraPreviewTransform(part: Part, layers: TimelineMot
 
 export function isMarkerOnMotionLayer(marker: ZoomMarker | TranslationMarker, layer: TimelineMotionLayerState) {
   if (marker.layerId) return marker.layerId === layer.id;
-  if (layer.id === "motion_zoom") return "scale" in marker;
-  if (layer.id === "motion_pan") return !("scale" in marker) && (marker.kind ?? "pan") === "pan";
+  const effectKind = getMotionBlockEffectKind(marker) ?? ("scale" in marker ? "zoom" : marker.kind ?? "pan");
+  if (layer.id === "clipper.motion.zoom" || layer.id === "motion_zoom") return effectKind === "zoom";
+  if (layer.id === "clipper.motion.pan" || layer.id === "motion_pan") return effectKind === "pan";
+  if (layer.id === "clipper.motion.rotate" || layer.id === "motion_rotate") return effectKind === "rotate";
+  if (layer.id === "clipper.motion.perspective" || layer.id === "motion_perspective") return effectKind === "perspective";
   return false;
 }
 
@@ -118,11 +141,21 @@ export function getActiveZoom(markers: ZoomMarker[], time: number) {
 }
 
 export function getActiveTranslation(markers: TranslationMarker[], time: number, part?: Part) {
-  return getActiveTranslationMarker(markers.filter((marker) => (marker.kind ?? "pan") === "pan"), time, part);
+  return getActiveTranslationMarker(markers.filter((marker) => getMotionBlockEffectKind(marker) === "pan"), time, part);
 }
 
 export function getActiveRotation(markers: TranslationMarker[], time: number) {
-  return getActiveTranslationMarker(markers.filter((marker) => marker.kind === "rotate"), time);
+  return getActiveTranslationMarker(markers.filter((marker) => getMotionBlockEffectKind(marker) === "rotate"), time);
+}
+
+export function getActivePerspective(markers: TranslationMarker[], time: number): Required<PerspectiveSettings> {
+  const active = getActiveTranslationMarker(markers.filter((marker) => getMotionBlockEffectKind(marker) === "perspective"), time);
+  const settings = active?.perspective;
+  return {
+    z: settings?.z ?? 0,
+    rotateX: settings?.rotateX ?? 0,
+    rotateY: settings?.rotateY ?? 0,
+  };
 }
 
 function getActiveTranslationMarker(markers: TranslationMarker[], time: number, part?: Part) {
@@ -144,15 +177,41 @@ function getActiveTranslationMarker(markers: TranslationMarker[], time: number, 
       y: Math.round(interpolate([middleTransitionFrom.y, targetPosition.y] as const, easedIn)),
     };
     const rotation = interpolateRotation(previousMarker, marker, easedIn);
-    if (marker.snapOut) return { ...marker, position, rotation };
+    const perspective = interpolatePerspective(previousMarker, marker, easedIn);
+    if (marker.snapOut) return { ...marker, position, rotation, perspective };
     const rampOut = cameraEaseProgress(clamp((1 - progress) / 0.22, 0, 1), marker.ease);
-    return { ...marker, position: { x: Math.round(position.x * rampOut), y: Math.round(position.y * rampOut) }, rotation: rotation * rampOut };
+    return { ...marker, position: scalePoint(position, rampOut), rotation: rotation * rampOut, perspective: scalePerspective(perspective, rampOut) };
   }
   const rampIn = marker.snapIn ? 1 : progress / 0.22;
   const rampOut = marker.snapOut ? 1 : (1 - progress) / 0.22;
   const ramp = Math.min(rampIn, rampOut, 1);
   const eased = cameraEaseProgress(clamp(ramp, 0, 1), marker.ease);
-  return { ...marker, position: { x: Math.round(targetPosition.x * eased), y: Math.round(targetPosition.y * eased) }, rotation: (marker.rotation ?? 0) * eased };
+  return { ...marker, position: scalePoint(targetPosition, eased), rotation: (marker.rotation ?? 0) * eased, perspective: scalePerspective(marker.perspective, eased) };
+}
+
+function scalePoint(point: Point, scale: number): Point {
+  return {
+    x: Math.round(point.x * scale),
+    y: Math.round(point.y * scale),
+  };
+}
+
+function interpolatePerspective(previousMarker: TranslationMarker | undefined, marker: TranslationMarker, progress: number): PerspectiveSettings | undefined {
+  if (!previousMarker?.perspective && !marker.perspective) return undefined;
+  return {
+    z: interpolate([previousMarker?.perspective?.z ?? 0, marker.perspective?.z ?? 0] as const, progress),
+    rotateX: interpolate([previousMarker?.perspective?.rotateX ?? 0, marker.perspective?.rotateX ?? 0] as const, progress),
+    rotateY: interpolate([previousMarker?.perspective?.rotateY ?? 0, marker.perspective?.rotateY ?? 0] as const, progress),
+  };
+}
+
+function scalePerspective(perspective: PerspectiveSettings | undefined, scale: number): PerspectiveSettings | undefined {
+  if (!perspective) return undefined;
+  return {
+    z: (perspective.z ?? 0) * scale,
+    rotateX: (perspective.rotateX ?? 0) * scale,
+    rotateY: (perspective.rotateY ?? 0) * scale,
+  };
 }
 
 function getActiveTranslationMarkerIndex(sortedMarkers: TranslationMarker[], time: number) {
@@ -177,10 +236,11 @@ function getTranslationMarkerPosition(marker: TranslationMarker, time: number, p
   const object = findFollowObject(part, marker.followId);
   if (!object) return marker.position;
   const motion = getMotionTranslation(object.motion, time);
-  return framePointToCameraTranslation({
+  const position = framePointToCameraTranslation({
     x: object.bounds.x + object.bounds.width / 2 + motion.x,
     y: object.bounds.y + object.bounds.height / 2 + motion.y,
   });
+  return position;
 }
 
 function findFollowObject(part: Part, id: string): FrameObject | undefined {

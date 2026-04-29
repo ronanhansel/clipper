@@ -4,7 +4,7 @@ import type { Point, ZoomMarker } from "./types";
 type MendedMarker = { id: string; layerId?: string; start: number; duration: number; snapIn?: boolean; snapOut?: boolean };
 
 function getMendedMarkerLayerId(marker: MendedMarker) {
-  return marker.layerId ?? "motion_zoom";
+  return marker.layerId ?? "";
 }
 
 function getMendedMarkerLayer(markers: MendedMarker[], markerId: string) {

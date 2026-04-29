@@ -17,6 +17,12 @@ export type Point = {
   y: number;
 };
 
+export type PerspectiveSettings = {
+  z?: number;
+  rotateX?: number;
+  rotateY?: number;
+};
+
 export type FrameObjectType = "rect" | "text" | "image" | "svg" | "html" | "template" | "chart";
 
 export type MotionEase = "linear" | "easeIn" | "easeOut" | "easeInOut" | "circOut";
@@ -86,43 +92,96 @@ export type PartSnapshotLine = {
   description: string;
 };
 
-export type ZoomMarker = {
+export type EffectCategory = "motion" | "adjustment";
+
+export type EffectId = `${string}.${string}`;
+
+export type MotionEffectId = EffectId;
+
+export type AdjustmentEffectId = EffectId;
+
+export type MotionBlockParams = Record<string, unknown> & {
+  ease?: MotionEase;
+  focus?: Point;
+  followId?: string;
+  middleEase?: MotionEase;
+  middleTransition?: "transition";
+  perspective?: PerspectiveSettings;
+  position?: Point;
+  rotation?: number;
+  scale?: number;
+  snapIn?: boolean;
+  snapOut?: boolean;
+};
+
+export type MotionBlock = {
   id: string;
   layerId?: string;
+  effectId?: MotionEffectId;
   start: number;
   duration: number;
+  params?: MotionBlockParams;
+  ease?: MotionEase;
+  focus?: Point;
+  followId?: string;
+  middleEase?: MotionEase;
+  middleTransition?: "transition";
+  perspective?: PerspectiveSettings;
+  position?: Point;
+  rotation?: number;
+  scale?: number;
+  snapIn?: boolean;
+  snapOut?: boolean;
+};
+
+export type ZoomMarker = MotionBlock & {
+  effectId?: "clipper.motion.zoom";
   focus: Point;
   scale: number;
-  ease?: MotionEase;
-  snapIn?: boolean;
-  snapOut?: boolean;
-  middleTransition?: "transition";
-  middleEase?: MotionEase;
 };
 
-export type TranslationMarker = {
-  id: string;
-  layerId?: string;
-  start: number;
-  duration: number;
-  kind?: "pan" | "rotate";
-  followId?: string;
+export type TranslationMarker = MotionBlock & {
+  effectId?: "clipper.motion.pan" | "clipper.motion.rotate" | "clipper.motion.perspective";
+  kind?: "pan" | "rotate" | "perspective";
   position: Point;
-  rotation?: number;
-  ease?: MotionEase;
-  snapIn?: boolean;
-  snapOut?: boolean;
-  middleTransition?: "transition";
-  middleEase?: MotionEase;
 };
+
+export type MotionBlockEffectKind = "pan" | "zoom" | "rotate" | "perspective";
+
+export type MotionEffectDefinition = {
+  id: MotionEffectId;
+  category: "motion";
+  kind: MotionBlockEffectKind;
+  name: string;
+  label: string;
+  accent: string;
+  defaultDuration: number;
+};
+
+export type AdjustmentEffectParams = Record<string, unknown> & {
+  every?: number;
+};
+
+export type AdjustmentEffectDefinition = {
+  id: AdjustmentEffectId;
+  category: "adjustment";
+  name: string;
+  label: string;
+  accent: string;
+  defaultDuration: number;
+  defaultParams: AdjustmentEffectParams;
+};
+
+export type EffectDefinition = MotionEffectDefinition | AdjustmentEffectDefinition;
 
 export type AdjustmentEffect = {
-  kind: "frameSkip";
-  every: number;
+  effectId: AdjustmentEffectId;
+  params?: AdjustmentEffectParams;
 };
 
 export type AdjustmentLayer = {
   id: string;
+  layerId?: string;
   name: string;
   start: number;
   duration: number;
@@ -140,6 +199,7 @@ export type CompositionClip = {
   background: BackgroundLayer;
   objects: FrameObject[];
   snapshot: PartSnapshotLine[];
+  motionBlocks?: MotionBlock[];
   zoomMarkers: ZoomMarker[];
   translationMarkers: TranslationMarker[];
 };
@@ -161,6 +221,7 @@ export type CompositionDocument = CompositionClip & {
 export type TimelineClip = {
   id: string;
   compositionId: string;
+  motionBlocks?: MotionBlock[];
   zoomMarkers: ZoomMarker[];
   translationMarkers: TranslationMarker[];
 };
@@ -183,7 +244,10 @@ export type TimelineViewportState = {
   zoom: number;
 };
 
-export type TimelineMotionLayerKind = "empty" | "pan" | "zoom" | "rotate";
+export type MotionEffectKind = MotionBlockEffectKind;
+
+/** @deprecated Motion layers are generic; effect identity lives on MotionBlock.effectId. */
+export type TimelineMotionLayerKind = "empty" | "motion";
 
 export type TimelineMotionLayerState = {
   id: string;
@@ -192,11 +256,16 @@ export type TimelineMotionLayerState = {
   hidden?: boolean;
 };
 
+export type TimelineAdjustmentLayerState = {
+  id: string;
+  name: string;
+  hidden?: boolean;
+};
+
 export type TimelineLayerState = {
   compName?: string;
   compHidden?: boolean;
-  adjustName?: string;
-  adjustHidden?: boolean;
+  adjustmentLayers?: TimelineAdjustmentLayerState[];
   motionLayers?: TimelineMotionLayerState[];
   rowHeights?: Record<string, number>;
 };
@@ -224,6 +293,9 @@ export type EditorState = {
   rightPanelTab?: "video" | "motion" | "agent";
   selectedSceneId?: string;
   selectedTimelineId?: string;
+  selectedPartId?: string;
+  selectedZoomMarker?: { partId: string; markerId: string } | null;
+  selectedTranslationMarker?: { partId: string; markerId: string } | null;
   currentSceneTime?: number;
   preview?: PreviewViewportState;
   code?: Record<string, CodeViewportState>;

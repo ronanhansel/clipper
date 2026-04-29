@@ -30,7 +30,7 @@ describe("timeline model", () => {
   });
 
   it("validates adjustment layers against scene bounds", () => {
-    expect(validateScene({ ...scene, adjustmentLayers: [{ id: "adj", name: "Skip", start: 9, duration: 2, effect: { kind: "frameSkip", every: 2 } }] })).toContain(
+    expect(validateScene({ ...scene, adjustmentLayers: [{ id: "adj", name: "Skip", start: 9, duration: 2, effect: { effectId: "clipper.adjustment.frameSkip", params: { every: 2 } } }] })).toContain(
       "Adjustment Skip extends past the scene end.",
     );
   });
@@ -92,8 +92,8 @@ describe("timeline model", () => {
     }];
 
     expect(getTimelineMotionLayersWithMarkers([], timeline)).toEqual([
-      { id: "zoom_recovered", kind: "zoom", name: "MOTION" },
-      { id: "pan_recovered", kind: "pan", name: "MOTION" },
+      { id: "zoom_recovered", kind: "motion", name: "MOTION" },
+      { id: "pan_recovered", kind: "motion", name: "MOTION" },
     ]);
   });
 
@@ -112,8 +112,8 @@ describe("timeline model", () => {
     }];
 
     const item = getTopTimelineItemAtTime(timeline, 6, [], [
-      { id: "zoom", kind: "zoom", name: "Zoom" },
-      { id: "lower_pan", kind: "pan", name: "MOTION" },
+      { id: "zoom", kind: "motion", name: "Zoom" },
+      { id: "lower_pan", kind: "motion", name: "MOTION" },
     ]);
 
     expect(item?.kind).toBe("zoom");
@@ -144,9 +144,9 @@ describe("timeline model", () => {
 
   it("detects middle mend candidates within the marker layer", () => {
     const markers = [
-      { id: "first", layerId: "motion_zoom", start: 0, duration: 2, focus: { x: 0.5, y: 0.5 }, scale: 1.5 },
+      { id: "first", layerId: "clipper.motion.zoom", start: 0, duration: 2, focus: { x: 0.5, y: 0.5 }, scale: 1.5 },
       { id: "other-layer", layerId: "zoom_2", start: 1, duration: 4, focus: { x: 0.5, y: 0.5 }, scale: 1.5 },
-      { id: "second", layerId: "motion_zoom", start: 4, duration: 2, focus: { x: 0.5, y: 0.5 }, scale: 1.5 },
+      { id: "second", layerId: "clipper.motion.zoom", start: 4, duration: 2, focus: { x: 0.5, y: 0.5 }, scale: 1.5 },
     ];
 
     expect(getSelectedZoomMiddleSnap(markers, ["first", "second"], getZoomMarkerMendKey)).toEqual({
@@ -159,8 +159,8 @@ describe("timeline model", () => {
 
   it("does not detect middle mend candidates across translation effect kinds", () => {
     const markers = [
-      { id: "pan", layerId: "shared", start: 0, duration: 2, position: { x: 0, y: 0 } },
-      { id: "rotate", layerId: "shared", kind: "rotate" as const, start: 4, duration: 2, position: { x: 0, y: 0 }, rotation: 12 },
+      { id: "pan", effectId: "clipper.motion.pan" as const, layerId: "shared", start: 0, duration: 2, position: { x: 0, y: 0 } },
+      { id: "rotate", effectId: "clipper.motion.rotate" as const, layerId: "shared", start: 4, duration: 2, position: { x: 0, y: 0 }, rotation: 12 },
     ];
 
     expect(getSelectedZoomMiddleSnap(markers, ["pan", "rotate"], getTranslationMarkerMendKey)).toBeNull();

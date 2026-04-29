@@ -1,21 +1,39 @@
 import DataEditor, { GridCellKind, type EditableGridCell, type GridCell, type GridColumn, type Item } from "@glideapps/glide-data-grid";
 import "@glideapps/glide-data-grid/dist/index.css";
 import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, Crosshair, Database, Italic, Strikethrough, Trash2, Underline } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { chartTypes, formatChartTypeLabel, type ChartDatum, type ChartSpec, type ChartStyle, type ChartType } from "../../core/chart";
 import { MAX_PART_DURATION_SECONDS, FRAME_HEIGHT, FRAME_WIDTH, type AdjustmentLayer, type BackgroundLayer, type Bounds, type FrameObject, type MotionEase, type Part, type PartFrame, type Point, type TranslationMarker, type ZoomMarker } from "../../core/types";
 import { clamp, roundTenth, roundTwo } from "../../core/math";
+import { getFrameSkipEvery } from "../../core/effects/adjustments";
+import { getAdjustmentEffectPackage } from "../../core/effects/registry";
+import { getMotionBlockEffectKind } from "../../core/motionEffects";
 import { minimumZoomDuration, mutedCaps, panelCard } from "../../app/config";
 import { Checkbox } from "../ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../ui/dialog";
 import { Input } from "../ui/input";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
 import { Textarea } from "../ui/textarea";
 import { ColorSelector, formatStyleLabel, getEditableColorStyleEntries, isHexColor } from "../ColorSelector";
 import { clipperHost } from "../../app/clipperHost";
 
 const defaultFontFamily = "Inter, ui-sans-serif, system-ui, sans-serif";
 const defaultFontOption = { value: defaultFontFamily, label: "Inter / System" };
+const defaultMotionEaseSelectValue = "default";
+const easePreviewHoverDelayMs = 600;
+const easePreviewSkipDelayMs = 900;
+const easePreviewDuration = "1.45s";
+const easePreviewItems = [
+  { value: defaultMotionEaseSelectValue, label: "Ease in-out", ease: "easeInOut" as const },
+  { value: "linear", label: "Linear", ease: "linear" as const },
+  { value: "easeIn", label: "Ease in", ease: "easeIn" as const },
+  { value: "easeOut", label: "Ease out", ease: "easeOut" as const },
+  { value: "circOut", label: "Circ out", ease: "circOut" as const },
+];
+const explicitEasePreviewItems = easePreviewItems.map((item) => item.ease === "easeInOut" ? { ...item, value: "easeInOut" } : item);
+
+let lastEasePreviewOpenTime = 0;
 
 type FontOption = { value: string; label: string };
 
@@ -39,6 +57,115 @@ function loadSystemFontOptions() {
 function formatFontValueLabel(value: string) {
   if (value === defaultFontFamily) return defaultFontOption.label;
   return value.split(",")[0]?.trim().replace(/^['"]|['"]$/g, "") || value;
+}
+
+function motionEaseSelectValue(ease: MotionEase | undefined) {
+  return ease && ease !== "easeInOut" ? ease : defaultMotionEaseSelectValue;
+}
+
+function easePreviewProgress(value: number, ease: MotionEase) {
+  if (ease === "easeOut" || ease === "circOut") return 1 - Math.pow(1 - value, 3);
+  if (ease === "easeIn") return value * value * value;
+  if (ease === "easeInOut") return value < 0.5 ? 4 * value * value * value : 1 - Math.pow(-2 * value + 2, 3) / 2;
+  return value;
+}
+
+function easePreviewPath(ease: MotionEase) {
+  const width = 132;
+  const height = 72;
+  const segments = 96;
+  return Array.from({ length: segments + 1 }, (_, index) => {
+    const x = index / segments;
+    const y = 1 - easePreviewProgress(x, ease);
+    return `${index === 0 ? "M" : "L"} ${(x * width).toFixed(2)} ${(y * height).toFixed(2)}`;
+  }).join(" ");
+}
+
+function easePreviewSampleValues(ease: MotionEase, map: (time: number, progress: number) => number) {
+  const segments = 80;
+  return Array.from({ length: segments + 1 }, (_, index) => {
+    const time = index / segments;
+    return map(time, easePreviewProgress(time, ease)).toFixed(2);
+  }).join(";");
+}
+
+function easePreviewKeyTimes() {
+  const segments = 80;
+  return Array.from({ length: segments + 1 }, (_, index) => (index / segments).toFixed(3)).join(";");
+}
+
+function EaseSelectItem({ value, label, ease }: { value: string; label: string; ease: MotionEase }) {
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const path = easePreviewPath(ease);
+  const graphKeyTimes = easePreviewKeyTimes();
+  const graphXValues = easePreviewSampleValues(ease, (time) => time * 132);
+  const graphYValues = easePreviewSampleValues(ease, (_time, progress) => (1 - progress) * 72);
+  const railXValues = easePreviewSampleValues(ease, (_time, progress) => 6 + progress * 142);
+
+  function clearPreviewTimer() {
+    if (!previewTimerRef.current) return;
+    clearTimeout(previewTimerRef.current);
+    previewTimerRef.current = null;
+  }
+
+  function openPreviewAfterDelay() {
+    clearPreviewTimer();
+    if (Date.now() - lastEasePreviewOpenTime <= easePreviewSkipDelayMs) {
+      setPreviewOpen(true);
+      lastEasePreviewOpenTime = Date.now();
+      return;
+    }
+
+    previewTimerRef.current = setTimeout(() => {
+      setPreviewOpen(true);
+      lastEasePreviewOpenTime = Date.now();
+      previewTimerRef.current = null;
+    }, easePreviewHoverDelayMs);
+  }
+
+  function closePreview() {
+    clearPreviewTimer();
+    setPreviewOpen(false);
+  }
+
+  useEffect(() => closePreview, []);
+
+  return (
+    <Tooltip open={previewOpen}>
+      <TooltipTrigger asChild>
+        <SelectItem value={value} onPointerEnter={openPreviewAfterDelay} onPointerLeave={closePreview} onPointerDown={closePreview}>{label}</SelectItem>
+      </TooltipTrigger>
+      <TooltipContent side="right" align="center" sideOffset={16} className="w-[190px] max-w-none overflow-hidden rounded-[8px] border-[#343946] bg-[#10131a] p-0 shadow-[0_22px_70px_rgba(0,0,0,0.54)] data-[state=instant-open]:animate-[clipper-tooltip-in_160ms_cubic-bezier(0.16,1,0.3,1)_forwards]">
+        <div className="border-b border-[#252a35] bg-[radial-gradient(circle_at_72%_0%,rgb(var(--clipper-accent-rgb)/0.18),transparent_42%),linear-gradient(180deg,#171b24,#10131a)] px-3 py-2">
+          <strong className="block text-[11px] font-extrabold text-white">{label}</strong>
+          <span className="mt-0.5 block text-[9px] font-bold uppercase tracking-[0.18em] text-[#8d94a3]">Timing preview</span>
+        </div>
+        <div className="grid gap-3 px-3 py-3">
+          <svg viewBox="0 0 132 72" className="h-[82px] w-full overflow-visible" aria-hidden="true">
+            <path d="M 0 72 L 132 0" stroke="#2d3340" strokeDasharray="3 5" strokeWidth="1.2" />
+            <path d="M 0 72 L 0 0 M 0 72 L 132 72" stroke="#3a404c" strokeWidth="1" />
+            <path d={path} fill="none" stroke="var(--clipper-accent)" strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" />
+            <circle r="4.5" fill="#37d6c2" filter="drop-shadow(0 0 8px rgba(55,214,194,0.75))">
+              <animate attributeName="cx" dur={easePreviewDuration} repeatCount="indefinite" keyTimes={graphKeyTimes} values={graphXValues} />
+              <animate attributeName="cy" dur={easePreviewDuration} repeatCount="indefinite" keyTimes={graphKeyTimes} values={graphYValues} />
+            </circle>
+          </svg>
+          <svg viewBox="0 0 154 12" className="h-3 w-full overflow-visible" aria-hidden="true">
+            <line x1="6" y1="6" x2="148" y2="6" stroke="#252a35" strokeLinecap="round" strokeWidth="4" />
+            <circle cx="6" cy="6" r="6" fill="var(--clipper-accent)" filter="drop-shadow(0 0 10px rgb(var(--clipper-accent-rgb)/0.45))">
+              <animate attributeName="cx" dur={easePreviewDuration} repeatCount="indefinite" keyTimes={graphKeyTimes} values={railXValues} />
+            </circle>
+          </svg>
+        </div>
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+function EaseSelectItems({ includeLinear = true, defaultInOut = false }: { includeLinear?: boolean; defaultInOut?: boolean }) {
+  const items = defaultInOut ? easePreviewItems : explicitEasePreviewItems;
+  return <>{items.filter((item) => includeLinear || item.value !== "linear").map((item) => <EaseSelectItem key={item.value} {...item} />)}</>;
 }
 
 export function FrameInspector({ part, onDurationChange, onFrameChange, onBackgroundChange }: { part: Part; onDurationChange: (duration: number) => void; onFrameChange: (updater: (frame: PartFrame) => PartFrame) => void; onBackgroundChange: (updater: (background: BackgroundLayer) => BackgroundLayer) => void }) {
@@ -657,6 +784,8 @@ export function ObjectInspector({ object, onChange }: { object: FrameObject; onC
 }
 
 export function AdjustmentInspector({ layer, sceneDuration, onChange, onDelete }: { layer: AdjustmentLayer; sceneDuration: number; onChange: (updater: (layer: AdjustmentLayer) => AdjustmentLayer) => void; onDelete: () => void }) {
+  const effect = getAdjustmentEffectPackage(layer.effect.effectId);
+
   function updateText(key: "name", value: string) {
     onChange((current) => ({ ...current, [key]: value }));
   }
@@ -671,22 +800,18 @@ export function AdjustmentInspector({ layer, sceneDuration, onChange, onDelete }
 
   function updateFrameStep(value: string) {
     const every = Math.max(1, Math.round(Number(value) || 1));
-    onChange((current) => ({ ...current, effect: { kind: "frameSkip", every } }));
+    onChange((current) => ({ ...current, effect: { ...current.effect, params: { ...current.effect.params, every } } }));
   }
 
   return (
     <div className="grid gap-3">
-      <div className={panelCard}>
-        <span>Adjustment Node</span>
-        <strong className="text-[13px]">Frame Skip</strong>
-        <small className="text-[#9b9da7]">Behaves like a timeline node and quantizes animation time beneath it.</small>
-      </div>
       <label className={`grid gap-1.5 ${mutedCaps}`}>Name<Input value={layer.name} onChange={(event) => updateText("name", event.target.value)} /></label>
       <div className="grid grid-cols-2 gap-2">
         <label className={`grid gap-1.5 ${mutedCaps}`}>Start<Input type="number" min={0} max={sceneDuration - layer.duration} step={0.1} value={layer.start} onChange={(event) => updateNumber("start", event.target.value)} /></label>
         <label className={`grid gap-1.5 ${mutedCaps}`}>Duration<Input type="number" min={0.1} max={sceneDuration - layer.start} step={0.1} value={layer.duration} onChange={(event) => updateNumber("duration", event.target.value)} /></label>
       </div>
-      <label className={`grid gap-1.5 ${mutedCaps}`}>Frame Step<Input type="number" min={1} step={1} value={layer.effect.every} onChange={(event) => updateFrameStep(event.target.value)} /></label>
+      <label className={`grid gap-1.5 ${mutedCaps}`}>Effect<Input value={effect?.label ?? layer.effect.effectId} readOnly /></label>
+      {layer.effect.effectId === "clipper.adjustment.frameSkip" ? <label className={`grid gap-1.5 ${mutedCaps}`}>Frame Step<Input type="number" min={1} step={1} value={getFrameSkipEvery(layer)} onChange={(event) => updateFrameStep(event.target.value)} /></label> : null}
       <button className="flex items-center justify-center gap-2 rounded-[10px] border border-[#3b2a2a] bg-[#231516] px-[13px] py-[9px] text-sm font-medium text-[#ffb4b4] transition hover:border-[#6b3838] hover:bg-[#301b1d]" onClick={onDelete}><Trash2 size={15} />Delete</button>
     </div>
   );
@@ -767,19 +892,19 @@ export function ZoomInspector({ marker, part, selectedMarkerCount, selectedSnapI
   return (
     <div className="grid gap-3">
       <div className="grid grid-cols-2 gap-2">
-        <label className={`grid gap-1.5 ${mutedCaps}`}>Start<Input type="number" min={0} max={part.duration - marker.duration} step={0.1} value={marker.start} onChange={(event) => updateNumber("start", event.target.value)} /></label>
-        <label className={`grid gap-1.5 ${mutedCaps}`}>Duration<Input type="number" min={minimumZoomDuration} max={part.duration - marker.start} step={0.1} value={marker.duration} onChange={(event) => updateNumber("duration", event.target.value)} /></label>
-        <label className={`grid gap-1.5 ${mutedCaps}`}>Focus X<Input type="number" min={0} max={FRAME_WIDTH} step={1} value={marker.focus.x} onChange={(event) => updateFocus("x", event.target.value)} /></label>
+        <label className={`grid gap-1.5 ${mutedCaps}`}>Start<Input type="number" min={0} max={part.duration - marker.duration} resetValue={0} step={0.1} value={marker.start} onChange={(event) => updateNumber("start", event.target.value)} /></label>
+        <label className={`grid gap-1.5 ${mutedCaps}`}>Duration<Input type="number" min={minimumZoomDuration} max={part.duration - marker.start} resetValue={1} step={0.1} value={marker.duration} onChange={(event) => updateNumber("duration", event.target.value)} /></label>
+        <label className={`grid gap-1.5 ${mutedCaps}`}>Focus X<Input type="number" min={0} max={FRAME_WIDTH} resetValue={FRAME_WIDTH / 2} step={1} value={marker.focus.x} onChange={(event) => updateFocus("x", event.target.value)} /></label>
         <div className="grid gap-1.5">
           <span className={mutedCaps}>Focus Y</span>
           <div className="grid grid-cols-[1fr_40px] gap-2">
-            <Input type="number" min={0} max={FRAME_HEIGHT} step={1} value={marker.focus.y} onChange={(event) => updateFocus("y", event.target.value)} />
+            <Input type="number" min={0} max={FRAME_HEIGHT} resetValue={FRAME_HEIGHT / 2} step={1} value={marker.focus.y} onChange={(event) => updateFocus("y", event.target.value)} />
             <button className={`grid place-items-center rounded-[9px] border px-2 ${pickingFocus ? "border-[#37d6c2] bg-[#12312d] text-white" : "border-[#2d313b] bg-[#171920] text-[#d9dbe1] hover:border-[#37d6c2]"}`} title="Pick focus from frame" onClick={onPickFocus}><Crosshair size={16} /></button>
           </div>
         </div>
       </div>
       <label className={`grid gap-1.5 ${mutedCaps}`}>Scale<div className="grid grid-cols-[1fr_52px] items-center gap-2 rounded-[10px] border border-[#2d313b] bg-[#171920] px-2.5 py-2"><input aria-label="Zoom scale" className="h-1.5 min-w-0 accent-[#37d6c2] [appearance:none] rounded-full bg-[#2d313b] [&::-webkit-slider-runnable-track]:h-1.5 [&::-webkit-slider-runnable-track]:rounded-full [&::-webkit-slider-runnable-track]:bg-[#2d313b] [&::-webkit-slider-thumb]:mt-[-5px] [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border [&::-webkit-slider-thumb]:border-[#37d6c2] [&::-webkit-slider-thumb]:bg-[var(--clipper-accent)] [&::-moz-range-track]:h-1.5 [&::-moz-range-track]:rounded-full [&::-moz-range-track]:bg-[#2d313b] [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border [&::-moz-range-thumb]:border-[#37d6c2] [&::-moz-range-thumb]:bg-[var(--clipper-accent)]" type="range" min={1} max={5} step={0.01} value={draftScale} onChange={(event) => updateDraftScale(event.target.value)} onPointerUp={() => commitScale()} onKeyUp={() => commitScale()} onBlur={() => commitScale()} /><span className="text-right text-xs font-extrabold normal-case tracking-normal text-[#dfe2ea] tabular-nums">{draftScale.toFixed(2)}</span></div></label>
-      <label className={`grid gap-1.5 ${mutedCaps}`}>Ease<Select value={marker.ease ?? "easeInOut"} onValueChange={updateEase}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectGroup><SelectItem value="easeIn">Ease in</SelectItem><SelectItem value="easeOut">Ease out</SelectItem><SelectItem value="easeInOut">Ease in-out</SelectItem><SelectItem value="circOut">Circ out</SelectItem></SelectGroup></SelectContent></Select></label>
+      <label className={`grid gap-1.5 ${mutedCaps}`}>Ease<Select value={marker.ease ?? "easeInOut"} onValueChange={updateEase}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><TooltipProvider delayDuration={1000} skipDelayDuration={0}><SelectGroup><EaseSelectItems includeLinear={false} /></SelectGroup></TooltipProvider></SelectContent></Select></label>
       <div className="grid gap-2">
         <span className={mutedCaps}>Snap</span>
         <div className="grid grid-cols-3 gap-2">
@@ -787,7 +912,7 @@ export function ZoomInspector({ marker, part, selectedMarkerCount, selectedSnapI
           <button className={snapButtonClass(middleSnapActive, canSnapMiddle)} disabled={!canSnapMiddle} title={middleSnapActive ? "Unmend the neighboring zoom edges" : "Mend the neighboring zoom edges"} aria-pressed={middleSnapActive} onClick={onSnapMiddle}>{middleSnapActive ? "Unmend" : "Mend"}</button>
           <button className={snapButtonClass(snapOutActive)} aria-pressed={snapOutActive} onClick={() => updateSnap("snapOut", !snapOutActive)}>Out</button>
         </div>
-        {middleSnapActive ? <div className="grid gap-1.5"><span className={mutedCaps}>Mend handoff</span><div className="grid grid-cols-2 gap-2"><button className={middleTransitionButtonClass(middleTransitionMode === "instant")} aria-pressed={middleTransitionMode === "instant"} onClick={() => onChangeMiddleTransition("instant")}>Instant</button><button className={middleTransitionButtonClass(middleTransitionMode === "transition")} aria-pressed={middleTransitionMode === "transition"} onClick={() => onChangeMiddleTransition("transition")}>Transition</button></div><label className={`grid gap-1.5 ${mutedCaps}`}>Mend ease<Select value={marker.middleEase ?? "easeInOut"} onValueChange={updateMiddleEase}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectGroup><SelectItem value="easeIn">Ease in</SelectItem><SelectItem value="easeOut">Ease out</SelectItem><SelectItem value="easeInOut">Ease in-out</SelectItem><SelectItem value="circOut">Circ out</SelectItem></SelectGroup></SelectContent></Select></label></div> : null}
+        {middleSnapActive ? <div className="grid gap-1.5"><span className={mutedCaps}>Mend handoff</span><div className="grid grid-cols-2 gap-2"><button className={middleTransitionButtonClass(middleTransitionMode === "instant")} aria-pressed={middleTransitionMode === "instant"} onClick={() => onChangeMiddleTransition("instant")}>Instant</button><button className={middleTransitionButtonClass(middleTransitionMode === "transition")} aria-pressed={middleTransitionMode === "transition"} onClick={() => onChangeMiddleTransition("transition")}>Transition</button></div><label className={`grid gap-1.5 ${mutedCaps}`}>Mend ease<Select value={marker.middleEase ?? "easeInOut"} onValueChange={updateMiddleEase}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><TooltipProvider delayDuration={1000} skipDelayDuration={0}><SelectGroup><EaseSelectItems includeLinear={false} /></SelectGroup></TooltipProvider></SelectContent></Select></label></div> : null}
       </div>
       <button className="flex items-center justify-center gap-2 rounded-[10px] border border-[#3b2a2a] bg-[#231516] px-[13px] py-[9px] text-sm font-medium text-[#ffb4b4] transition hover:border-[#6b3838] hover:bg-[#301b1d]" onClick={onDelete}><Trash2 size={15} />Delete</button>
     </div>
@@ -796,6 +921,7 @@ export function ZoomInspector({ marker, part, selectedMarkerCount, selectedSnapI
 
 export function TranslationInspector({ marker, part, selectedMarkerCount, selectedSnapInActive, selectedSnapOutActive, middleSnapActive, middleTransitionMode, pickingPosition, pickingTracker, canSnapMiddle, onChange, onChangeSelectedSnap, onChangeMiddleTransition, onChangeMiddleEase, onDelete, onPickPosition, onPickTracker, onSnapMiddle }: { marker: TranslationMarker; part: Part; selectedMarkerCount: number; selectedSnapInActive: boolean; selectedSnapOutActive: boolean; middleSnapActive: boolean; middleTransitionMode: "instant" | "transition"; pickingPosition: boolean; pickingTracker: boolean; canSnapMiddle: boolean; onChange: (updater: (marker: TranslationMarker, part: Part) => TranslationMarker) => void; onChangeSelectedSnap: (key: "snapIn" | "snapOut", enabled: boolean) => void; onChangeMiddleTransition: (mode: "instant" | "transition") => void; onChangeMiddleEase: (ease: MotionEase | undefined) => void; onDelete: () => void; onPickPosition: () => void; onPickTracker: () => void; onSnapMiddle: () => void }) {
   const isMultiSelection = selectedMarkerCount > 1;
+  const markerKind = getMotionBlockEffectKind(marker);
   const snapInActive = isMultiSelection ? selectedSnapInActive : Boolean(marker.snapIn);
   const snapOutActive = isMultiSelection ? selectedSnapOutActive : Boolean(marker.snapOut);
 
@@ -816,17 +942,25 @@ export function TranslationInspector({ marker, part, selectedMarkerCount, select
     onChange((current) => ({ ...current, rotation: Math.round(Number(value) || 0) }));
   }
 
+  function updatePerspective(key: "z" | "rotateX" | "rotateY", value: string) {
+    const numeric = Number(value) || 0;
+    onChange((current) => {
+      const perspective = { ...current.perspective, [key]: Math.round(numeric) };
+      return { ...current, perspective, params: { ...current.params, perspective } };
+    });
+  }
+
   function updateFollowId(value: string) {
     const followId = value.trim();
     onChange((current) => ({ ...current, followId: followId || undefined }));
   }
 
   function updateEase(value: string) {
-    onChange((current) => ({ ...current, ease: value === "default" ? undefined : value as MotionEase }));
+    onChange((current) => ({ ...current, ease: value === defaultMotionEaseSelectValue ? undefined : value as MotionEase }));
   }
 
   function updateMiddleEase(value: string) {
-    onChangeMiddleEase(value === "default" ? undefined : value as MotionEase);
+    onChangeMiddleEase(value === defaultMotionEaseSelectValue ? undefined : value as MotionEase);
   }
 
   function updateSnap(key: "snapIn" | "snapOut", enabled: boolean) {
@@ -850,19 +984,20 @@ export function TranslationInspector({ marker, part, selectedMarkerCount, select
   return (
     <div className="grid gap-3">
       <div className="grid grid-cols-2 gap-2">
-        <label className={`grid gap-1.5 ${mutedCaps}`}>Start<Input type="number" min={0} max={part.duration - marker.duration} step={0.1} value={marker.start} onChange={(event) => updateNumber("start", event.target.value)} /></label>
-        <label className={`grid gap-1.5 ${mutedCaps}`}>Duration<Input type="number" min={minimumZoomDuration} max={part.duration - marker.start} step={0.1} value={marker.duration} onChange={(event) => updateNumber("duration", event.target.value)} /></label>
-        {marker.kind === "rotate" ? <label className={`grid gap-1.5 ${mutedCaps}`}>Rotation<Input type="number" step={1} value={marker.rotation ?? 0} onChange={(event) => updateRotation(event.target.value)} /></label> : <label className={`grid gap-1.5 ${mutedCaps}`}>X<Input type="number" step={1} value={marker.position.x} onChange={(event) => updatePosition("x", event.target.value)} /></label>}
-        {marker.kind === "rotate" ? null : <div className="grid gap-1.5">
+        <label className={`grid gap-1.5 ${mutedCaps}`}>Start<Input type="number" min={0} max={part.duration - marker.duration} resetValue={0} step={0.1} value={marker.start} onChange={(event) => updateNumber("start", event.target.value)} /></label>
+        <label className={`grid gap-1.5 ${mutedCaps}`}>Duration<Input type="number" min={minimumZoomDuration} max={part.duration - marker.start} resetValue={1} step={0.1} value={marker.duration} onChange={(event) => updateNumber("duration", event.target.value)} /></label>
+        {markerKind === "rotate" ? <label className={`grid gap-1.5 ${mutedCaps}`}>Rotation<Input type="number" resetValue={15} step={1} value={marker.rotation ?? 0} onChange={(event) => updateRotation(event.target.value)} /></label> : markerKind === "perspective" ? <label className={`grid gap-1.5 ${mutedCaps}`}>Z<Input type="number" numberScrubMode="continuous" numberScrubCommitThrottleMs={16} resetValue={0} step={1} value={marker.perspective?.z ?? 0} onChange={(event) => updatePerspective("z", event.target.value)} /></label> : <label className={`grid gap-1.5 ${mutedCaps}`}>X<Input type="number" resetValue={0} step={1} value={marker.position.x} onChange={(event) => updatePosition("x", event.target.value)} /></label>}
+        {markerKind === "rotate" ? null : markerKind === "perspective" ? <label className={`grid gap-1.5 ${mutedCaps}`}>Tilt X<Input type="number" numberScrubMode="continuous" numberScrubCommitThrottleMs={16} resetValue={8} step={1} value={marker.perspective?.rotateX ?? 0} onChange={(event) => updatePerspective("rotateX", event.target.value)} /></label> : <div className="grid gap-1.5">
           <span className={mutedCaps}>Y</span>
           <div className="grid grid-cols-[1fr_40px] gap-2">
-            <Input type="number" step={1} value={marker.position.y} onChange={(event) => updatePosition("y", event.target.value)} />
+            <Input type="number" resetValue={0} step={1} value={marker.position.y} onChange={(event) => updatePosition("y", event.target.value)} />
             <button className={`grid place-items-center rounded-[9px] border px-2 ${pickingPosition ? "border-[#37d6c2] bg-[#12312d] text-white" : "border-[#2d313b] bg-[#171920] text-[#d9dbe1] hover:border-[#37d6c2]"}`} title="Pick pan target from frame" onClick={onPickPosition}><Crosshair size={16} /></button>
           </div>
         </div>}
       </div>
-      {marker.kind !== "rotate" ? <label className={`grid gap-1.5 ${mutedCaps}`}>Tracker<div className="grid grid-cols-[1fr_40px] gap-2"><Input value={marker.followId ?? ""} placeholder="object-id" onChange={(event) => updateFollowId(event.target.value)} /><button className={`grid place-items-center rounded-[9px] border px-2 ${pickingTracker ? "border-[#37d6c2] bg-[#12312d] text-white" : "border-[#2d313b] bg-[#171920] text-[#d9dbe1] hover:border-[#37d6c2]"}`} title="Pick tracker target from frame" type="button" onClick={onPickTracker}><Crosshair size={16} /></button></div></label> : null}
-      <label className={`grid gap-1.5 ${mutedCaps}`}>Ease<Select value={marker.ease ?? "default"} onValueChange={updateEase}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectGroup><SelectItem value="default">Ease in-out</SelectItem><SelectItem value="linear">Linear</SelectItem><SelectItem value="easeIn">Ease in</SelectItem><SelectItem value="easeOut">Ease out</SelectItem><SelectItem value="easeInOut">Ease in-out</SelectItem><SelectItem value="circOut">Circ out</SelectItem></SelectGroup></SelectContent></Select></label>
+      {markerKind === "perspective" ? <label className={`grid gap-1.5 ${mutedCaps}`}>Tilt Y<Input type="number" numberScrubMode="continuous" numberScrubCommitThrottleMs={16} resetValue={0} step={1} value={marker.perspective?.rotateY ?? 0} onChange={(event) => updatePerspective("rotateY", event.target.value)} /></label> : null}
+      {markerKind !== "rotate" && markerKind !== "perspective" ? <label className={`grid gap-1.5 ${mutedCaps}`}>Tracker<div className="grid grid-cols-[1fr_40px] gap-2"><Input value={marker.followId ?? ""} placeholder="object-id" onChange={(event) => updateFollowId(event.target.value)} /><button className={`grid place-items-center rounded-[9px] border px-2 ${pickingTracker ? "border-[#37d6c2] bg-[#12312d] text-white" : "border-[#2d313b] bg-[#171920] text-[#d9dbe1] hover:border-[#37d6c2]"}`} title="Pick tracker target from frame" type="button" onClick={onPickTracker}><Crosshair size={16} /></button></div></label> : null}
+      <label className={`grid gap-1.5 ${mutedCaps}`}>Ease<Select value={motionEaseSelectValue(marker.ease)} onValueChange={updateEase}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><TooltipProvider delayDuration={1000} skipDelayDuration={0}><SelectGroup><EaseSelectItems defaultInOut /></SelectGroup></TooltipProvider></SelectContent></Select></label>
       <div className="grid gap-2">
         <span className={mutedCaps}>Snap</span>
         <div className="grid grid-cols-3 gap-2">
@@ -870,7 +1005,7 @@ export function TranslationInspector({ marker, part, selectedMarkerCount, select
           <button className={snapButtonClass(middleSnapActive, canSnapMiddle)} disabled={!canSnapMiddle} title={middleSnapActive ? "Unmend the neighboring pan edges" : "Mend the neighboring pan edges"} aria-pressed={middleSnapActive} onClick={onSnapMiddle}>{middleSnapActive ? "Unmend" : "Mend"}</button>
           <button className={snapButtonClass(snapOutActive)} aria-pressed={snapOutActive} onClick={() => updateSnap("snapOut", !snapOutActive)}>Out</button>
         </div>
-        {middleSnapActive ? <div className="grid gap-1.5"><span className={mutedCaps}>Mend handoff</span><div className="grid grid-cols-2 gap-2"><button className={middleTransitionButtonClass(middleTransitionMode === "instant")} aria-pressed={middleTransitionMode === "instant"} onClick={() => onChangeMiddleTransition("instant")}>Instant</button><button className={middleTransitionButtonClass(middleTransitionMode === "transition")} aria-pressed={middleTransitionMode === "transition"} onClick={() => onChangeMiddleTransition("transition")}>Transition</button></div><label className={`grid gap-1.5 ${mutedCaps}`}>Mend ease<Select value={marker.middleEase ?? "default"} onValueChange={updateMiddleEase}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectGroup><SelectItem value="default">Ease in-out</SelectItem><SelectItem value="linear">Linear</SelectItem><SelectItem value="easeIn">Ease in</SelectItem><SelectItem value="easeOut">Ease out</SelectItem><SelectItem value="easeInOut">Ease in-out</SelectItem><SelectItem value="circOut">Circ out</SelectItem></SelectGroup></SelectContent></Select></label></div> : null}
+        {middleSnapActive ? <div className="grid gap-1.5"><span className={mutedCaps}>Mend handoff</span><div className="grid grid-cols-2 gap-2"><button className={middleTransitionButtonClass(middleTransitionMode === "instant")} aria-pressed={middleTransitionMode === "instant"} onClick={() => onChangeMiddleTransition("instant")}>Instant</button><button className={middleTransitionButtonClass(middleTransitionMode === "transition")} aria-pressed={middleTransitionMode === "transition"} onClick={() => onChangeMiddleTransition("transition")}>Transition</button></div><label className={`grid gap-1.5 ${mutedCaps}`}>Mend ease<Select value={motionEaseSelectValue(marker.middleEase)} onValueChange={updateMiddleEase}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><TooltipProvider delayDuration={1000} skipDelayDuration={0}><SelectGroup><EaseSelectItems defaultInOut /></SelectGroup></TooltipProvider></SelectContent></Select></label></div> : null}
       </div>
       <button className="flex items-center justify-center gap-2 rounded-[10px] border border-[#3b2a2a] bg-[#231516] px-[13px] py-[9px] text-sm font-medium text-[#ffb4b4] transition hover:border-[#6b3838] hover:bg-[#301b1d]" onClick={onDelete}><Trash2 size={15} />Delete</button>
     </div>

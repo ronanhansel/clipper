@@ -1,4 +1,4 @@
-import { defaultAssets } from "../../core/project";
+import { defaultAssets, serializeProjectForSave, stripLegacyMotionMarkers } from "../../core/project";
 import { compositionToSource } from "../../core/compositionSource";
 import { buildLinearTimeline, validateScene } from "../../core/timeline";
 import type { ProjectManifest } from "../../core/types";
@@ -22,7 +22,8 @@ type PrepareRenderedMediaInput = {
 
 class ExportService {
   async exportProject({ project, sceneId, format, includeSources, compositionSources }: ExportProjectInput) {
-    const scene = getScene(project, sceneId);
+    const exportProject = serializeProjectForSave(project);
+    const scene = getScene(exportProject, sceneId);
     const timeline = buildLinearTimeline(scene);
     const payload = format === "scene-json"
       ? scene
@@ -30,7 +31,7 @@ class ExportService {
           kind: "clipper-project-package",
           version: project.id,
           exportedAt: new Date().toISOString(),
-          project,
+          project: exportProject,
           scene,
           media: {
             resolution: project.resolution,
@@ -63,7 +64,7 @@ class ExportService {
   }
 
   renderVideoExport(exportId: string, defaultFileName: string, project: ProjectManifest, scene: ProjectManifest["scenes"][number]) {
-    return clipperHost.renderVideoExport(exportId, defaultFileName, project, scene, videoExportFrameRate);
+    return clipperHost.renderVideoExport(exportId, defaultFileName, serializeProjectForSave(project), stripLegacyMotionMarkers(scene), videoExportFrameRate);
   }
 
   cancelVideoExport(exportId: string) {

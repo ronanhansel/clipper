@@ -14,7 +14,7 @@ const baseObject: FrameObject = {
 
 describe("render runtime", () => {
   it("quantizes scene time for frame-skip adjustment layers", () => {
-    const layers = [{ id: "adj", name: "Skip", start: 1, duration: 4, effect: { kind: "frameSkip" as const, every: 3 } }];
+    const layers = [{ id: "adj", name: "Skip", start: 1, duration: 4, effect: { effectId: "clipper.adjustment.frameSkip" as const, params: { every: 3 } } }];
 
     expect(applyAdjustmentLayersToSceneTime(1.11, layers, 30)).toBe(1.1);
     expect(applyAdjustmentLayersToSceneTime(0.9, layers, 30)).toBe(0.9);

@@ -1,6 +1,7 @@
 import { createContext, useContext, useRef, type PropsWithChildren } from "react";
 import { createStore, useStore, type StoreApi } from "zustand";
 import { useShallow } from "zustand/react/shallow";
+import { stripLegacyMotionMarkers } from "../../core/project";
 import type { ProjectManifest } from "../../core/types";
 
 type Setter<T> = T | ((current: T) => T);
@@ -34,7 +35,7 @@ function createFieldSetter<T extends keyof ProjectStoreState>(set: StoreApi<Proj
 
 export function getProjectContentSnapshot(project: ProjectManifest) {
   const { editorState: _editorState, ...contentProject } = project;
-  return JSON.stringify(contentProject);
+  return JSON.stringify(stripLegacyMotionMarkers(contentProject));
 }
 
 export function createProjectStore(initialProject: ProjectManifest, initialCompositionSources: Record<string, string> = {}) {

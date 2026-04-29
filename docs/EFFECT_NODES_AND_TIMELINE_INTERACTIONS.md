@@ -16,7 +16,7 @@ This guide explains how to add new effect nodes while keeping timeline behavior 
 2. Add normalization/defaulting in `src/core/project.ts` if the new data can come from older project files.
 3. Add deterministic math in `src/core`, not directly in React. Examples include placement, snapping, active-effect lookup, interpolation, and render/runtime evaluation.
 4. Add editor mutation commands in the app/project state layer. Do not mutate project data from timeline components directly.
-5. Add creation UI in the tools panel or relevant inspector.
+5. Add creation UI in the tools panel or relevant inspector. If the node is draggable from the tools panel, add its label and accent color to the source drag-image mapping so the native drag ghost appears immediately and matches the timeline block family.
 6. Add timeline rendering in `src/components/timeline/TimelinePanel.tsx` or extract a focused lane component if the logic grows.
 7. Add preview/export support in the render/camera/runtime path if the effect changes output frames.
 8. Add inspector controls for effect-specific fields.
@@ -33,6 +33,11 @@ This guide explains how to add new effect nodes while keeping timeline behavior 
 
 ## Drag And Resize Rules
 
+- Effect drags from the tools panel should use pointer-driven custom drags rather than native HTML `draggable` where immediate release cleanup matters. Keep the source ghost in `src/components/ToolsPanel.tsx` and keep lane placement previews in `src/components/timeline/TimelinePanel.tsx`.
+- Timeline effect previews should follow the current cursor-derived scene time on each `dragover`, then apply snapping and lane gap constraints. Do not preserve the first timeline-enter offset for external effect drags because it makes the preview feel detached from the cursor.
+- New draggable effects must define a reproducible drag label and accent alongside the tool button, using the same color family as the eventual timeline block.
+- Pointer-driven source drags should communicate with the timeline through the `clipper:effect-pointer-drag` event and should clear the source ghost synchronously on pointer release/cancel.
+- The source ghost should hide only while a timeline preview node is active. If the pointer leaves a valid timeline drop row before release, the preview deactivates and the source ghost should reappear under the cursor.
 - Use rAF-throttled transient previews during pointer movement.
 - Prefer imperative DOM previews with `transform`, `translate3d`, CSS variables, opacity, width, and height.
 - Commit canonical project state once on pointer up/cancel, blur, or another explicit finalization event.

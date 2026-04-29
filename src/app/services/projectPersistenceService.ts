@@ -1,6 +1,6 @@
 import JSZip from "jszip";
 import { compositionToSource, loadCompositionsFromSource } from "../../core/compositionSource";
-import { normalizeProject } from "../../core/project";
+import { normalizeProject, serializeProjectForSave, stripLegacyMotionMarkers } from "../../core/project";
 import { FRAME_HEIGHT, FRAME_WIDTH, type CompositionDocument, type EditorState, type Part, type ProjectManifest, type TimelineDocument } from "../../core/types";
 import { clipperHost } from "../clipperHost";
 
@@ -27,7 +27,7 @@ class ProjectPersistenceService {
       }
 
       const content = await clipperHost.readTextFile(manifestPath);
-      const manifestProject = normalizeProject(JSON.parse(content) as ProjectManifest);
+      const manifestProject = normalizeProject(stripLegacyMotionMarkers(JSON.parse(content) as ProjectManifest));
       const migratedSources = { ...(manifestProject.compositionSources ?? {}) };
       const loadedLibrary = await Promise.all((manifestProject.compositionLibrary ?? []).map(async (composition) => {
         const embeddedSource = migratedSources[composition.filePath];
@@ -53,7 +53,7 @@ class ProjectPersistenceService {
           ...scene,
           compositions: scene.compositions.map((composition) => {
             const libraryComposition = loadedLibraryByPath.get(composition.filePath);
-            return libraryComposition ? { ...libraryComposition, zoomMarkers: composition.zoomMarkers, translationMarkers: composition.translationMarkers, snapshot: composition.snapshot } : composition;
+            return libraryComposition ? { ...libraryComposition, motionBlocks: composition.motionBlocks, zoomMarkers: composition.zoomMarkers, translationMarkers: composition.translationMarkers, snapshot: composition.snapshot } : composition;
           }),
         }))),
       });
@@ -74,11 +74,12 @@ class ProjectPersistenceService {
   }
 
   async saveProject({ manifestPath, project }: SaveProjectInput) {
-    if (manifestPath.endsWith(".clipper")) await saveZipProject(manifestPath, project);
-    else await clipperHost.writeTextFile(manifestPath, `${JSON.stringify(project, null, 2)}\n`);
+    const saveProject = serializeProjectForSave(project);
+    if (manifestPath.endsWith(".clipper")) await saveZipProject(manifestPath, saveProject);
+    else await clipperHost.writeTextFile(manifestPath, `${JSON.stringify(saveProject, null, 2)}\n`);
     return {
-      projectSnapshot: JSON.stringify(project),
-      compositionSourcesSnapshot: JSON.stringify(project.compositionSources ?? {}),
+      projectSnapshot: JSON.stringify(saveProject),
+      compositionSourcesSnapshot: JSON.stringify(saveProject.compositionSources ?? {}),
       sourceStatus: "Project and composition sources saved.",
     };
   }
@@ -110,7 +111,7 @@ async function loadZipProject(manifestPath: string) {
   const timelines = await loadZipTimelines(zip);
   const compositions = await loadZipCompositions(zip);
   return normalizeProject({
-    ...manifestProject,
+    ...stripLegacyMotionMarkers(manifestProject),
     timelines,
     compositions,
     compositionLibrary: compositions,
@@ -140,7 +141,7 @@ async function loadZipCompositions(zip: JSZip) {
 }
 
 async function saveZipProject(manifestPath: string, project: ProjectManifest) {
-  const normalized = normalizeProject(project);
+  const normalized = serializeProjectForSave(project);
   const zip = new JSZip();
   const metadataProject = {
     id: normalized.id,
@@ -183,6 +184,7 @@ function createBaseComposition(id: string, filePath: string, source: string): Co
     background: { id: "background", name: "Background", style: { background: "#050505" }, elements: [] },
     objects: [],
     snapshot: [],
+    motionBlocks: [],
     zoomMarkers: [],
     translationMarkers: [],
   };

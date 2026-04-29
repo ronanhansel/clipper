@@ -1,15 +1,19 @@
-import { useEffect, useRef, type ChangeEvent, type ComponentProps, type FocusEvent, type KeyboardEvent, type PointerEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type ComponentProps, type FocusEvent, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent } from "react";
 import { cn } from "../../lib/utils";
 
 const pixelsPerScrubStep = 4;
 const numberScrubActivationDistance = 3;
 const defaultNumberScrubCommitThrottleMs = 80;
 
+export const numberInputScrubStartEvent = "clipper:number-input-scrub-start";
+export const numberInputScrubEndEvent = "clipper:number-input-scrub-end";
+
 type NumberScrubMode = "commit" | "continuous";
 
 type InputProps = ComponentProps<"input"> & {
   numberScrubMode?: NumberScrubMode;
   numberScrubCommitThrottleMs?: number;
+  resetValue?: string | number;
 };
 
 type NumberScrubState = {
@@ -32,10 +36,14 @@ type PendingNumberScrubState = Omit<NumberScrubState, "initialBodyCursor" | "ini
   originY: number;
 };
 
-export function Input({ className, type = "text", numberScrubMode = "commit", numberScrubCommitThrottleMs = defaultNumberScrubCommitThrottleMs, onBlur, onChange, onFocus, onKeyDown, onPointerDown, ...props }: InputProps) {
+export function Input({ className, type = "text", numberScrubMode = "commit", numberScrubCommitThrottleMs = defaultNumberScrubCommitThrottleMs, onBlur, onChange, onDoubleClick, onFocus, onKeyDown, onPointerDown, ...props }: InputProps) {
   const scrubRef = useRef<NumberScrubState | null>(null);
   const pendingScrubRef = useRef<PendingNumberScrubState | null>(null);
   const focusedValueRef = useRef<string | null>(null);
+  const [focused, setFocused] = useState(false);
+  const { resetValue, ...inputProps } = props;
+  const hasReset = resetValue !== undefined;
+  const canReset = resetValue !== undefined && String(props.value ?? "") !== String(resetValue);
 
   useEffect(() => {
     if (type !== "number") return;
@@ -54,12 +62,15 @@ export function Input({ className, type = "text", numberScrubMode = "commit", nu
       else if (commit) commitInputValue(scrub.input);
       scrubRef.current = null;
       if (document.pointerLockElement === scrub.input) document.exitPointerLock();
+      window.dispatchEvent(new Event(numberInputScrubEndEvent));
     }
 
     function startScrub(pending: PendingNumberScrubState, initialRemainder = 0) {
       const { input } = pending;
       const initialInputCursor = input.style.cursor;
       const initialBodyCursor = document.body.style.cursor;
+      input.blur();
+      window.getSelection()?.removeAllRanges();
       input.style.cursor = "ew-resize";
       document.body.style.cursor = "ew-resize";
       scrubRef.current = {
@@ -70,7 +81,8 @@ export function Input({ className, type = "text", numberScrubMode = "commit", nu
         remainder: initialRemainder,
       };
       pendingScrubRef.current = null;
-      input.requestPointerLock?.();
+      window.dispatchEvent(new Event(numberInputScrubStartEvent));
+      requestPointerLockSafely(input);
     }
 
     function updateScrub(event: MouseEvent) {
@@ -163,8 +175,6 @@ export function Input({ className, type = "text", numberScrubMode = "commit", nu
     const value = Number(input.value);
     if (!Number.isFinite(value)) return;
 
-    input.focus();
-
     const step = getInputStep(input);
     pendingScrubRef.current = {
       decimals: getStepDecimals(step),
@@ -187,31 +197,72 @@ export function Input({ className, type = "text", numberScrubMode = "commit", nu
     event.currentTarget.blur();
   }
 
+  function selectNumberOnDoubleClick(event: ReactMouseEvent<HTMLInputElement>) {
+    onDoubleClick?.(event);
+    if (event.defaultPrevented || type !== "number") return;
+
+    event.currentTarget.select();
+  }
+
   function rememberFocusedValue(event: FocusEvent<HTMLInputElement>) {
+    setFocused(true);
     focusedValueRef.current = event.currentTarget.value;
     onFocus?.(event);
   }
 
   function clearFocusedValue(event: FocusEvent<HTMLInputElement>) {
+    if (type === "number") clampAndCommitInputValue(event.currentTarget, onChange);
     onBlur?.(event);
+    setFocused(false);
     focusedValueRef.current = null;
   }
 
+  function resetInputValue() {
+    const input = inputRef.current;
+    if (!input || resetValue === undefined) return;
+    restoreInputValue(input, String(resetValue), onChange);
+    input.focus();
+  }
+
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
   return (
-    <input
-      type={type}
-      className={cn(
-        "flex h-8 w-full rounded-[8px] border border-[#2d313b] bg-[#171920] px-2 py-1.5 text-xs font-semibold normal-case tracking-normal text-white outline-none transition placeholder:text-[#69707f] focus:border-[var(--clipper-accent)] focus:ring-2 focus:ring-[rgb(var(--clipper-accent-rgb)/0.2)] disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-[#ff6b6b] aria-invalid:ring-[#ff6b6b]/20",
-        className,
-      )}
-      onBlur={clearFocusedValue}
-      onKeyDown={blurOnConfirmKey}
-      onChange={onChange}
-      onFocus={rememberFocusedValue}
-      onPointerDown={startNumberScrub}
-      {...props}
-    />
+    <span className="relative block w-full">
+      <input
+        ref={inputRef}
+        type={type}
+        className={cn(
+          "flex h-8 w-full rounded-[8px] border border-[#2d313b] bg-[#171920] px-2 py-1.5 text-xs font-semibold normal-case tracking-normal text-white outline-none transition placeholder:text-[#69707f] focus:border-[var(--clipper-accent)] focus:ring-2 focus:ring-[rgb(var(--clipper-accent-rgb)/0.2)] disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-[#ff6b6b] aria-invalid:ring-[#ff6b6b]/20",
+          canReset ? "pr-8" : "",
+          className,
+        )}
+        onBlur={clearFocusedValue}
+        onDoubleClick={selectNumberOnDoubleClick}
+        onKeyDown={blurOnConfirmKey}
+        onChange={onChange}
+        onFocus={rememberFocusedValue}
+        onPointerDown={startNumberScrub}
+        {...inputProps}
+      />
+      {focused && hasReset ? <button aria-label="Reset field" className={cn("absolute right-1 top-1/2 grid h-5 w-5 -translate-y-1/2 place-items-center rounded-[6px] text-[#9da3b2] transition", canReset ? "hover:bg-[#252936] hover:text-white" : "cursor-default opacity-45")} disabled={!canReset} type="button" onMouseDown={(event) => event.preventDefault()} onClick={resetInputValue}>
+        <svg aria-hidden="true" className="h-3 w-3" fill="none" viewBox="0 0 16 16">
+          <path d="M4.2 5.2A4.5 4.5 0 1 1 3.5 10" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
+          <path d="M4.2 2.5v2.7h2.7" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
+        </svg>
+      </button> : null}
+    </span>
   );
+}
+
+function requestPointerLockSafely(input: HTMLInputElement) {
+  try {
+    const lockRequest = input.requestPointerLock?.();
+    void Promise.resolve(lockRequest).catch(() => {
+      // Pointer lock is optional; number scrubbing still works without it.
+    });
+  } catch {
+    // Some embedded documents reject pointer lock synchronously.
+  }
 }
 
 function getInputStep(input: HTMLInputElement) {
@@ -243,6 +294,16 @@ function setNativeInputValue(input: HTMLInputElement, value: string) {
 
 function commitInputValue(input: HTMLInputElement) {
   input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+function clampAndCommitInputValue(input: HTMLInputElement, onChange?: ComponentProps<"input">["onChange"]) {
+  const value = Number(input.value);
+  if (!Number.isFinite(value)) return;
+  const clamped = clampInputValue(input, value);
+  if (clamped === value) return;
+  setNativeInputValue(input, formatScrubValue(clamped, getStepDecimals(getInputStep(input))));
+  commitInputValue(input);
+  onChange?.({ target: input, currentTarget: input } as ChangeEvent<HTMLInputElement>);
 }
 
 function restoreInputValue(input: HTMLInputElement, value: string | null, onChange?: ComponentProps<"input">["onChange"]) {
