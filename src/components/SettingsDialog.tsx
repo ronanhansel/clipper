@@ -1,11 +1,11 @@
 import { RotateCcw } from "lucide-react";
-import { appBarButtonBase, defaultScrubCommitThrottleMs } from "../app/config";
+import { appBarButtonBase, defaultNewMarkerDurationSeconds, defaultScrubCommitThrottleMs } from "../app/config";
 import type { SettingsSection } from "../app/types";
 import { clamp } from "../core/math";
 import { Dialog, DialogContent } from "./ui/dialog";
 import { Input } from "./ui/input";
 
-export function SettingsDialog({ activeSection, open, scrubCommitThrottleMs, onActiveSectionChange, onOpenChange, onScrubCommitThrottleMsChange }: { activeSection: SettingsSection; open: boolean; scrubCommitThrottleMs: number; onActiveSectionChange: (section: SettingsSection) => void; onOpenChange: (open: boolean) => void; onScrubCommitThrottleMsChange: (value: number) => void }) {
+export function SettingsDialog({ activeSection, open, scrubCommitThrottleMs, defaultNewMarkerDurationSeconds: markerDurationSeconds, onActiveSectionChange, onOpenChange, onScrubCommitThrottleMsChange, onDefaultNewMarkerDurationSecondsChange }: { activeSection: SettingsSection; open: boolean; scrubCommitThrottleMs: number; defaultNewMarkerDurationSeconds: number; onActiveSectionChange: (section: SettingsSection) => void; onOpenChange: (open: boolean) => void; onScrubCommitThrottleMsChange: (value: number) => void; onDefaultNewMarkerDurationSecondsChange: (value: number) => void }) {
   const navItems: Array<{ id: SettingsSection; label: string }> = [
     { id: "playback", label: "Playback" },
     { id: "timeline", label: "Timeline" },
@@ -17,6 +17,12 @@ export function SettingsDialog({ activeSection, open, scrubCommitThrottleMs, onA
     const parsed = Number(value);
     if (!Number.isFinite(parsed)) return;
     onScrubCommitThrottleMsChange(Math.round(clamp(parsed, 16, 500)));
+  }
+
+  function updateMarkerDuration(value: string) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return;
+    onDefaultNewMarkerDurationSecondsChange(Math.round(clamp(parsed, 0.1, 60) * 10) / 10);
   }
 
   return (
@@ -45,6 +51,20 @@ export function SettingsDialog({ activeSection, open, scrubCommitThrottleMs, onA
             <div className="settings-scrollbar min-h-0 overflow-y-auto overflow-x-hidden p-5 [scrollbar-gutter:stable]">
               {activeSection === "timeline" ? (
                 <div className="grid gap-4 rounded-xl border border-[#363b47] bg-[#1b1e26] p-4">
+                  <div className="grid gap-1.5">
+                    <strong className="text-sm text-white">New marker duration</strong>
+                    <p className="text-xs leading-5 text-[#8f939d]">Sets the default length for new motion markers dragged onto the timeline.</p>
+                  </div>
+                  <label className="grid max-w-[260px] gap-1.5 text-xs font-bold text-[#dfe2ea]" htmlFor="new-marker-duration">
+                    Duration (seconds)
+                    <span className="relative">
+                      <Input id="new-marker-duration" className="pr-10" min={0.1} max={60} step={0.1} type="number" value={markerDurationSeconds} onChange={(event) => updateMarkerDuration(event.target.value)} />
+                      <button aria-label={`Reset new marker duration to ${defaultNewMarkerDurationSeconds}s`} className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-md text-[#8f939d] transition hover:bg-[#252a34] hover:text-white" type="button" onClick={() => onDefaultNewMarkerDurationSecondsChange(defaultNewMarkerDurationSeconds)}>
+                        <RotateCcw size={14} />
+                      </button>
+                    </span>
+                  </label>
+                  <div className="h-px bg-[#363b47]" />
                   <div className="grid gap-1.5">
                     <strong className="text-sm text-white">Scrub commit throttle</strong>
                     <p className="text-xs leading-5 text-[#8f939d]">Controls how often timeline scrubbing commits editor state while dragging. The playhead still follows the cursor immediately.</p>

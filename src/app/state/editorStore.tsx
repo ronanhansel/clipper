@@ -1,7 +1,7 @@
 import { createContext, useContext, useRef, type PropsWithChildren } from "react";
 import { createStore, useStore, type StoreApi } from "zustand";
 import { useShallow } from "zustand/react/shallow";
-import { defaultFramePreviewScale, defaultScrubCommitThrottleMs } from "../config";
+import { defaultFramePreviewScale, defaultNewMarkerDurationSeconds, defaultScrubCommitThrottleMs } from "../config";
 import type { AdjustmentLayerSelection, ContextMenuState, ExportDialogTab, LeftPanelTab, Mode, PlaybackClock, ProjectExportFormat, RightPanelTab, SettingsSection, TranslationMarkerSelection, VideoExportProgress, ZoomMarkerSelection } from "../types";
 import { defaultPreviewViewportState, defaultTimelineMode } from "../../core/project";
 import type { Bounds, EditorState, Point, ProjectManifest, SelectionPayload, TimelineMode } from "../../core/types";
@@ -37,6 +37,7 @@ export type EditorStoreState = {
   framePreviewScale: number;
   scrubSnapEnabled: boolean;
   scrubCommitThrottleMs: number;
+  defaultNewMarkerDurationSeconds: number;
   fastSelectEnabled: boolean;
   leftPanelTab: LeftPanelTab;
   rightPanelTab: RightPanelTab;
@@ -83,6 +84,7 @@ export type EditorStoreActions = {
   setFramePreviewScale: (scale: Setter<number>) => void;
   setScrubSnapEnabled: (enabled: Setter<boolean>) => void;
   setScrubCommitThrottleMs: (ms: Setter<number>) => void;
+  setDefaultNewMarkerDurationSeconds: (seconds: Setter<number>) => void;
   setFastSelectEnabled: (enabled: Setter<boolean>) => void;
   setLeftPanelTab: (tab: Setter<LeftPanelTab>) => void;
   setRightPanelTab: (tab: Setter<RightPanelTab>) => void;
@@ -147,6 +149,7 @@ function getInitialState(project: ProjectManifest): EditorStoreState {
     framePreviewScale: editorState?.preview?.scale ?? defaultFramePreviewScale,
     scrubSnapEnabled: false,
     scrubCommitThrottleMs: defaultScrubCommitThrottleMs,
+    defaultNewMarkerDurationSeconds: editorState?.defaultNewMarkerDurationSeconds ?? defaultNewMarkerDurationSeconds,
     fastSelectEnabled: false,
     leftPanelTab: editorState?.leftPanelTab ?? "assets",
     rightPanelTab: editorState?.rightPanelTab ?? "video",
@@ -196,6 +199,7 @@ export function createEditorStore(project: ProjectManifest) {
     setFramePreviewScale: createFieldSetter(set, "framePreviewScale"),
     setScrubSnapEnabled: createFieldSetter(set, "scrubSnapEnabled"),
     setScrubCommitThrottleMs: createFieldSetter(set, "scrubCommitThrottleMs"),
+    setDefaultNewMarkerDurationSeconds: createFieldSetter(set, "defaultNewMarkerDurationSeconds"),
     setFastSelectEnabled: createFieldSetter(set, "fastSelectEnabled"),
     setLeftPanelTab: createFieldSetter(set, "leftPanelTab"),
     setRightPanelTab: createFieldSetter(set, "rightPanelTab"),
@@ -228,6 +232,7 @@ export function createEditorStore(project: ProjectManifest) {
       selectedAdjustmentLayers: [],
       selectionPayload: null,
       currentSceneTime: editorState.currentSceneTime ?? 2.6,
+      defaultNewMarkerDurationSeconds: editorState.defaultNewMarkerDurationSeconds ?? defaultNewMarkerDurationSeconds,
       frameZoomBarOpen: editorState.preview?.zoomBarOpen ?? defaultPreviewViewportState.zoomBarOpen,
       framePreviewScale: editorState.preview?.scale ?? defaultFramePreviewScale,
       leftPanelTab: editorState.leftPanelTab ?? "assets",
@@ -332,6 +337,8 @@ export function useAppEditorState() {
     setScrubSnapEnabled: state.setScrubSnapEnabled,
     scrubCommitThrottleMs: state.scrubCommitThrottleMs,
     setScrubCommitThrottleMs: state.setScrubCommitThrottleMs,
+    defaultNewMarkerDurationSeconds: state.defaultNewMarkerDurationSeconds,
+    setDefaultNewMarkerDurationSeconds: state.setDefaultNewMarkerDurationSeconds,
     fastSelectEnabled: state.fastSelectEnabled,
     setFastSelectEnabled: state.setFastSelectEnabled,
     leftPanelTab: state.leftPanelTab,

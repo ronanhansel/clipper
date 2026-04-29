@@ -2,7 +2,7 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSPr
 import { mutedCaps, selectorBlue, selectorHandleSizePx, selectorOffsetPx } from "../../app/config";
 import { getRenderableTextSegments, getSelectionFormatState, normalizeEditableFormatting, renderRichTextSegments, richTextSegmentsFromElement, shouldPersistRichText, textSegmentsToEditableNodes } from "../../app/richText";
 import { applyAdjustmentLayersToSceneTime } from "../../core/adjustments";
-import { CAMERA_PERSPECTIVE, boundsToViewport, formatCameraPreviewTransform, getLayeredCameraPreviewTransform, type CameraPreviewTransform } from "../../core/camera";
+import { boundsToViewport, formatCameraPreviewTransform, getLayeredCameraPreviewTransform, type CameraPreviewTransform } from "../../core/camera";
 import { generateChartObjects, type ChartGeneratedObject } from "../../core/chart";
 import { getBoundsUnion, insetBounds, isVisibleMarqueeBounds, updateDragSelectionBoxElement, type ResizeHandle } from "../../core/frameInteraction";
 import { clamp } from "../../core/math";
@@ -12,20 +12,19 @@ import type { PlaybackClock } from "../../app/types";
 
 export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dragSelectionBoxRef, framePickPoint, focusPicking, trackerPicking, canSelectObjects, cameraTransform, frameViewportRef, frameScale, isPlaying, part, partStart, adjustmentLayers, playbackClock, previewTime, timelineMode, motionLayers, hiddenMotionLayerIds, pickingTranslationPosition, pickingZoomFocus, compHidden, selectedObjects, marqueeDragging, editingTextObjectId, onFramePointerCancel, onFramePointerDown, onFramePointerDownCapture, onFramePointerMove, onFramePointerUp, onObjectPointerDown, onObjectResizePointerDown, onTextEditCommit, onTextObjectDoubleClick, onTrackerTargetPick }: { cameraRef: RefObject<HTMLDivElement | null>; dragBox: Bounds | null; dragSelectionBoxRef: RefObject<HTMLDivElement | null>; framePickPoint: Point | null; focusPicking: boolean; trackerPicking: boolean; canSelectObjects: boolean; cameraTransform: CameraPreviewTransform; frameViewportRef: RefObject<HTMLDivElement | null>; frameScale: number; isPlaying: boolean; part: Part; partStart: number; adjustmentLayers?: AdjustmentLayer[]; playbackClock: PlaybackClock; previewTime: number; timelineMode: TimelineMode; motionLayers: TimelineMotionLayerState[]; hiddenMotionLayerIds?: Set<string>; pickingTranslationPosition: boolean; pickingZoomFocus: boolean; compHidden?: boolean; selectedObjects: SelectionPayload["objects"]; marqueeDragging: boolean; editingTextObjectId: string | null; onFramePointerCancel: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerDown: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerDownCapture: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerMove: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerUp: (event: PointerEvent<HTMLDivElement>) => void; onObjectPointerDown: (event: PointerEvent<HTMLDivElement>, object: FrameObject) => void; onObjectResizePointerDown: (event: PointerEvent<HTMLDivElement>, handle: ResizeHandle, objectId?: string) => void; onTextEditCommit: (objectId: string, content: string, richText?: RichTextSegment[]) => void; onTextObjectDoubleClick: (event: ReactMouseEvent<HTMLDivElement>, object: FrameObject) => void; onTrackerTargetPick: (objectId: string) => void }) {
   const viewportStyle = useMemo(() => ({ width: FRAME_WIDTH * frameScale, height: FRAME_HEIGHT * frameScale }) as CSSProperties, [frameScale]);
-  const animationsEnabled = timelineMode !== "edit" && !trackerPicking;
+  const animationsEnabled = timelineMode !== "edit";
   const timeSensitive = isPlaybackTimeSensitivePart(part, timelineMode, adjustmentLayers, animationsEnabled);
   const [livePreviewTime, setLivePreviewTime] = useState(previewTime);
   const displayPreviewTime = isPlaying && playbackClock && timeSensitive ? livePreviewTime : previewTime;
   const liveCameraTransform = useMemo(() => {
-    if (trackerPicking) return { x: 0, y: 0, z: 0, scale: 1, rotation: 0, rotateX: 0, rotateY: 0, perspective: CAMERA_PERSPECTIVE };
     if (timelineMode !== "composition") return cameraTransform;
-    return getLayeredCameraPreviewTransform(part, motionLayers, displayPreviewTime, { hiddenLayerIds: hiddenMotionLayerIds, pickingTranslationPosition, pickingZoomFocus });
+    return getLayeredCameraPreviewTransform(part, motionLayers, displayPreviewTime, { hiddenLayerIds: hiddenMotionLayerIds, pickingTranslationPosition, pickingZoomFocus, resetMotionEffects: trackerPicking });
   }, [cameraTransform, displayPreviewTime, hiddenMotionLayerIds, motionLayers, part, pickingTranslationPosition, pickingZoomFocus, timelineMode, trackerPicking]);
   const frameStyle = useMemo(() => ({ ...part.frame.style, width: FRAME_WIDTH, height: FRAME_HEIGHT, transform: `scale(${frameScale})` }) as CSSProperties, [frameScale, part.frame.style]);
   const perspectiveStageStyle = useMemo(() => ({ perspective: `${liveCameraTransform.perspective}px`, perspectiveOrigin: "center", transformStyle: "preserve-3d" }) as CSSProperties, [liveCameraTransform.perspective]);
   const selectedBounds = useMemo(() => selectedObjects.length > 0 ? getBoundsUnion(selectedObjects.map((object) => object.bounds)) : null, [selectedObjects]);
   const selectedViewportBounds = useMemo(() => selectedBounds ? insetBounds(boundsToViewport(selectedBounds, liveCameraTransform, frameScale), -selectorOffsetPx) : null, [frameScale, liveCameraTransform, selectedBounds]);
-  const [trackerHoverTarget, setTrackerHoverTarget] = useState<{ id: string; bounds: Bounds } | null>(null);
+  const [trackerHoverTarget, setTrackerHoverTarget] = useState<{ id: string; viewportBounds: Bounds } | null>(null);
   const [selectorHover, setSelectorHover] = useState(false);
   const selectorHoverRef = useRef(false);
   const showDragBox = dragBox && isVisibleMarqueeBounds(dragBox, frameScale);
@@ -98,19 +97,30 @@ export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dra
 
   function updateTrackerHover(event: PointerEvent<HTMLDivElement>) {
     const target = getTrackerTargetFromPoint(event);
-    setTrackerHoverTarget(target.id && target.bounds ? { id: target.id, bounds: target.bounds } : null);
+    setTrackerHoverTarget(target.id && target.viewportBounds ? { id: target.id, viewportBounds: target.viewportBounds } : null);
   }
 
   function getTrackerTargetFromPoint(event: PointerEvent<HTMLDivElement>) {
+    const frameRect = frameViewportRef.current?.getBoundingClientRect();
+    if (!frameRect) return { id: "", viewportBounds: null };
+
     for (const element of document.elementsFromPoint(event.clientX, event.clientY)) {
       const target = element instanceof HTMLElement ? element.closest<HTMLElement>("[data-object-id],[data-background-element-id]") : null;
       const id = target?.dataset.objectId ?? target?.dataset.backgroundElementId;
-      if (!id) continue;
-      const object = part.objects.find((item) => item.id === id) ?? part.background.elements.find((item) => item.id === id);
-      return { id, bounds: object?.bounds ?? null };
+      if (!target || !id) continue;
+      const targetRect = target.getBoundingClientRect();
+      return {
+        id,
+        viewportBounds: {
+          x: targetRect.left - frameRect.left,
+          y: targetRect.top - frameRect.top,
+          width: targetRect.width,
+          height: targetRect.height,
+        },
+      };
     }
 
-    return { id: "", bounds: null };
+    return { id: "", viewportBounds: null };
   }
 
   function clearSelectorHover() {
@@ -136,7 +146,7 @@ export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dra
           </div>
         </div>
         {canSelectObjects && !isUnlinkedPart ? selectedObjects.map((object) => <SelectionOverlayBox key={object.id} objectId={object.id} bounds={object.bounds} cameraTransform={liveCameraTransform} frameScale={frameScale} highlighted={selectorHover} interactive={!marqueeDragging} onResizePointerDown={(event, handle) => onObjectResizePointerDown(event, handle, object.id)} />) : null}
-        {trackerPicking && trackerHoverTarget ? <TrackerTargetOverlay target={trackerHoverTarget} cameraTransform={liveCameraTransform} frameScale={frameScale} /> : null}
+        {trackerPicking && trackerHoverTarget ? <TrackerTargetOverlay target={trackerHoverTarget} /> : null}
         {dragBox ? <DragSelectionBox ref={dragSelectionBoxRef} bounds={dragBox} frameScale={frameScale} visible={Boolean(showDragBox)} /> : null}
         {focusPicking && framePickPoint ? <FramePickPointOverlay point={framePickPoint} frameScale={frameScale} /> : null}
       </div>
@@ -144,8 +154,8 @@ export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dra
   );
 });
 
-function TrackerTargetOverlay({ target, cameraTransform, frameScale }: { target: { id: string; bounds: Bounds }; cameraTransform: CameraPreviewTransform; frameScale: number }) {
-  const viewportBounds = insetBounds(boundsToViewport(target.bounds, cameraTransform, frameScale), -selectorOffsetPx);
+function TrackerTargetOverlay({ target }: { target: { id: string; viewportBounds: Bounds } }) {
+  const viewportBounds = insetBounds(target.viewportBounds, -selectorOffsetPx);
 
   return (
     <div className="pointer-events-none absolute border bg-[#159dff]/10 shadow-[0_0_0_1px_rgba(21,157,255,0.18)]" style={{ borderColor: selectorBlue, left: viewportBounds.x, top: viewportBounds.y, width: viewportBounds.width, height: viewportBounds.height, zIndex: 72 }}>

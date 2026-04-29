@@ -34,8 +34,9 @@ export function getCameraPreviewTransform(activeZoom: ZoomMarker | null, activeT
   };
 }
 
-export function getLayeredCameraPreviewTransform(part: Part, layers: TimelineMotionLayerState[], time: number, options: { hiddenLayerIds?: Set<string>; pickingTranslationPosition?: boolean; pickingZoomFocus?: boolean } = {}): CameraPreviewTransform {
+export function getLayeredCameraPreviewTransform(part: Part, layers: TimelineMotionLayerState[], time: number, options: { hiddenLayerIds?: Set<string>; pickingTranslationPosition?: boolean; pickingZoomFocus?: boolean; resetMotionEffects?: boolean } = {}): CameraPreviewTransform {
   const transform: CameraPreviewTransform = { x: 0, y: 0, z: 0, scale: 1, rotation: 0, rotateX: 0, rotateY: 0, perspective: CAMERA_PERSPECTIVE };
+  if (options.resetMotionEffects) return transform;
 
   for (const layer of layers) {
     if (options.hiddenLayerIds?.has(layer.id) || layer.kind === "empty") continue;

@@ -146,7 +146,7 @@ export function ToolsPanel({ timelineMode, canSnapMiddle, onAddAdjustmentLayer, 
       {isCompositionMode ? <div className="grid gap-2 rounded-xl border border-[#2d313b] bg-[#111319] p-3">
         <span className={mutedCaps}>Motion</span>
         {motionEffectPackages.map((definition) => <button className={`${buttonBase} w-full cursor-grab text-left active:cursor-grabbing`} key={definition.id} onPointerDown={(event) => startEffectDrag(event, definition.id)}>{definition.label}</button>)}
-        {canSnapMiddle ? <button className={`${buttonBase} w-full border-[var(--clipper-accent-strong)] text-left text-[var(--clipper-accent)]`} title="Mend the neighboring zoom edges to the playhead" onClick={onSnapMiddle}>Mend</button> : null}
+        {canSnapMiddle ? <button className={`${buttonBase} w-full border-[var(--clipper-accent-strong)] text-left text-[var(--clipper-accent)]`} title="Mend neighboring similar motion edges" onClick={onSnapMiddle}>Mend</button> : null}
       </div> : null}
       {!isCompositionMode ? <div className={panelCard}><span>Edit mode</span><small className="text-[#9b9da7]">Scene element selection is enabled and motion lanes are hidden.</small></div> : null}
     </section>

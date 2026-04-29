@@ -297,6 +297,7 @@ export type EditorState = {
   selectedZoomMarker?: { partId: string; markerId: string } | null;
   selectedTranslationMarker?: { partId: string; markerId: string } | null;
   currentSceneTime?: number;
+  defaultNewMarkerDurationSeconds?: number;
   preview?: PreviewViewportState;
   code?: Record<string, CodeViewportState>;
   fileManagerState?: FileManagerState;

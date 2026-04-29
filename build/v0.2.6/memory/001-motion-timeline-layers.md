@@ -29,8 +29,10 @@ Implemented the first v0.2.6 motion timeline layer pass.
 - Lane category accents are colored borders: Adjust purple, Motion cyan/blue, Comp green. Labels use a right-edge colored border and lane bodies use a left-edge colored border.
 - Motion marker drag/drop now only magnet-snaps while Shift is held. The timeline no longer clamps motion moves or new motion effects to empty gaps; committed edits use overwrite semantics instead.
 - Marker overwrite behavior is shared in `src/core/timelineOverwrite.ts`: inserted/moved markers trim, remove, or split existing same-layer markers, similar to Premiere/DaVinci overwrite edits. Reuse this for every timeline marker type; marker-specific code should only provide IDs, layer IDs, content, and persistence shape.
-- Motion markers that land across composition boundaries are split into per-composition marker segments during add and move commits. Adjustment markers use the same overwrite helper for same-row replacement. `src/core/timeline.ts` preserves cross-part absolute placement in `getTimelineMarkerMoves`, while `TimelinePanel` remains responsible for rAF drag previews and Shift-only snap previews.
+- Motion markers that land across composition boundaries are kept as single blocks, matching adjustment block behavior. They are stored on one owning composition with a relative start that may extend outside that composition, while timeline rendering and preview derive scene-absolute timing from the owning composition start.
 - Shift snapping is universal across timeline layer types. Motion marker move/resize previews use composition edges, motion marker edges, adjustment marker edges, and the playhead as one shared boundary set.
+- Timeline paste anchors the copied selection's earliest marker at the current playhead and preserves each copied marker's original layer ID. Pasted motion markers are no longer clipped to the composition where their pasted start lands; they remain single scene-spanning blocks bounded only by scene duration.
+- Tracker target picking resets camera motion effects in the frame preview while picking, so zoom/pan/rotate/perspective layers do not distort hit-testing or the object view. This is a transient preview option in `getLayeredCameraPreviewTransform`, not a project mutation.
 
 ## Follow-Up
 

@@ -157,6 +157,17 @@ describe("timeline model", () => {
     });
   });
 
+  it("detects a mend candidate from a single selected block", () => {
+    const markers = [
+      { id: "first", layerId: "clipper.motion.zoom", start: 0, duration: 2, focus: { x: 0.5, y: 0.5 }, scale: 1.5 },
+      { id: "second", layerId: "clipper.motion.zoom", start: 4, duration: 2, focus: { x: 0.5, y: 0.5 }, scale: 1.5 },
+    ];
+
+    expect(getSelectedZoomMiddleSnap(markers, ["second"], getZoomMarkerMendKey)).toEqual({
+      pairs: [{ previousId: "first", nextId: "second", time: 3 }],
+    });
+  });
+
   it("does not detect middle mend candidates across translation effect kinds", () => {
     const markers = [
       { id: "pan", effectId: "clipper.motion.pan" as const, layerId: "shared", start: 0, duration: 2, position: { x: 0, y: 0 } },
@@ -165,6 +176,15 @@ describe("timeline model", () => {
 
     expect(getSelectedZoomMiddleSnap(markers, ["pan", "rotate"], getTranslationMarkerMendKey)).toBeNull();
     expect(getZoomMiddleSnap(markers, 3, getTranslationMarkerMendKey)).toBeNull();
+  });
+
+  it("does not detect a single-selected mend across translation effect kinds", () => {
+    const markers = [
+      { id: "pan", effectId: "clipper.motion.pan" as const, layerId: "shared", start: 0, duration: 2, position: { x: 0, y: 0 } },
+      { id: "rotate", effectId: "clipper.motion.rotate" as const, layerId: "shared", start: 4, duration: 2, position: { x: 0, y: 0 }, rotation: 12 },
+    ];
+
+    expect(getSelectedZoomMiddleSnap(markers, ["rotate"], getTranslationMarkerMendKey)).toBeNull();
   });
 
   it("returns objects intersecting a screenshot selection", () => {

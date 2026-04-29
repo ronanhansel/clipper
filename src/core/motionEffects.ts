@@ -39,7 +39,7 @@ export function normalizeMotionBlocks(blocks: MotionBlock[] | undefined): Motion
     return [{
       ...block,
       layerId: block.layerId || definition.id,
-      start: roundTwo(Math.max(block.start, 0)),
+      start: roundTwo(block.start),
       duration: roundTwo(Math.max(block.duration, 0.1)),
       params,
       ease: block.ease ?? params.ease,

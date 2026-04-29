@@ -80,9 +80,17 @@ export function useEditorDerivedState({
   const canSelectFrameObjects = timelineMode === "edit";
   const persistedFramePickPoint = isPickingZoomFocus && selectedZoom ? selectedZoom.focus : isPickingTranslationPosition && selectedTranslation ? cameraTranslationToFramePoint(selectedTranslation.position) : null;
   const framePickPoint = framePickPreviewPoint ?? persistedFramePickPoint;
+  const sceneMotionPart = useMemo(() => {
+    const partStart = activeTimelinePart?.start ?? 0;
+    return {
+      ...part,
+      zoomMarkers: timeline.flatMap((timelinePart) => timelinePart.zoomMarkers.map((marker) => ({ ...marker, start: timelinePart.start + marker.start - partStart }))),
+      translationMarkers: timeline.flatMap((timelinePart) => timelinePart.translationMarkers.map((marker) => ({ ...marker, start: timelinePart.start + marker.start - partStart }))),
+    };
+  }, [activeTimelinePart?.start, part, timeline]);
   const cameraPreviewTransform = useMemo(() => timelineMode === "composition"
-    ? getLayeredCameraPreviewTransform(part, motionLayers, previewTime, { hiddenLayerIds: hiddenMotionLayerIds, pickingTranslationPosition: isPickingTranslationPosition, pickingZoomFocus: isPickingZoomFocus })
-    : getCameraPreviewTransform(null, null), [hiddenMotionLayerIds, isPickingTranslationPosition, isPickingZoomFocus, motionLayers, part, previewTime, timelineMode]);
+    ? getLayeredCameraPreviewTransform(sceneMotionPart, motionLayers, previewTime, { hiddenLayerIds: hiddenMotionLayerIds, pickingTranslationPosition: isPickingTranslationPosition, pickingZoomFocus: isPickingZoomFocus })
+    : getCameraPreviewTransform(null, null), [hiddenMotionLayerIds, isPickingTranslationPosition, isPickingZoomFocus, motionLayers, previewTime, sceneMotionPart, timelineMode]);
   const zoomScale = cameraPreviewTransform.scale;
   const currentPartSelectedZoomIds = useMemo(() => selectedZoomMarkers.filter((selection) => selection.partId === part.id).map((selection) => selection.markerId), [part.id, selectedZoomMarkers]);
   const selectedZoomPartSelectedZoomIds = useMemo(() => selectedZoomPart ? selectedZoomMarkers.filter((selection) => selection.partId === selectedZoomPart.id).map((selection) => selection.markerId) : [], [selectedZoomMarkers, selectedZoomPart]);
@@ -151,6 +159,7 @@ export function useEditorDerivedState({
     selectedZoomSnapMarkers,
     selectedZoomSnapOutActive,
     timeline,
+    translationMiddleSnap,
     validationErrors,
     zoomMiddleSnap,
     zoomScale,

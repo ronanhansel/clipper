@@ -34,8 +34,8 @@ import { defaultAdjustmentEffectPackage, getAdjustmentEffectPackage, getMotionEf
 import { createDefaultMotionBlockByEffectId, motionBlocksToTranslationMarkers, motionBlocksToZoomMarkers } from "./core/motionEffects";
 import { compositionFromSource, compositionToSource } from "./core/compositionSource";
 import { defaultAssets, defaultPreviewViewportState, defaultTimelineLayerState, defaultTimelineMode, defaultTimelineViewportState, deleteCompositionFromProject, normalizeProject, replacePartInProject } from "./core/project";
-import { buildLinearTimeline, formatTime, getAdjustmentLayerRowId, getAdjustmentPlacement, getAvailableZoomPlacement, getSelectedActiveMiddleMend, getSelectedZoomMiddleSnap, getTimelineMotionLayersWithMarkers, getTimelinePartAtTime, getTranslationMarkerLayerId, getTranslationMarkerMendKey, getZoomMarkerLayerId, getZoomMarkerMendKey, getZoomMiddleSnap, isZoomMiddleSnapActive, removeTimelineAdjustmentLayerMarkers, removeTimelineMotionLayerMarkers, updatePartObject, type TimelineMarkerMove } from "./core/timeline";
-import { getInsertedOverwriteRanges, overwriteTimelineMarkers, splitMarkerAcrossTimelineRanges, type TimelineOverwriteRange } from "./core/timelineOverwrite";
+import { buildLinearTimeline, formatTime, getAdjustmentLayerRowId, getAdjustmentPlacement, getAvailableZoomPlacement, getSelectedActiveMiddleMend, getSelectedZoomMiddleSnap, getTimelineMotionLayersWithMarkers, getTimelinePartAtTime, getTranslationMarkerLayerId, getTranslationMarkerMendKey, getZoomMarkerLayerId, getZoomMarkerMendKey, getZoomMiddleSnap, isZoomMiddleSnapActive, removeTimelineAdjustmentLayerMarkers, removeTimelineMotionLayerMarkers, updatePartObject, type TimelineMarkerMove, type TimelineMarkerResize } from "./core/timeline";
+import { getInsertedOverwriteRanges, overwriteTimelineMarkers, type TimelineOverwriteRange } from "./core/timelineOverwrite";
 import { FRAME_HEIGHT, FRAME_WIDTH, type AdjustmentEffectId, type AdjustmentLayer, type BackgroundLayer, type Bounds, type CodeViewportState, type CompositionClip, type EditorState, type FrameObject, type MotionBlock, type MotionEase, type MotionEffectId, type MotionEffectKind, type Part, type PartFrame, type Point, type ProjectManifest, type RichTextSegment, type SelectionPayload, type TimelineLayerState, type TimelineMode, type TimelineMotionLayerKind, type TimelineViewportState, type TranslationMarker, type ZoomMarker } from "./core/types";
 import { fallbackProject } from "./fallbackProject";
 
@@ -205,6 +205,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     framePreviewScale, setFramePreviewScale,
     scrubSnapEnabled, setScrubSnapEnabled,
     scrubCommitThrottleMs, setScrubCommitThrottleMs,
+    defaultNewMarkerDurationSeconds: markerDurationSeconds, setDefaultNewMarkerDurationSeconds,
     fastSelectEnabled, setFastSelectEnabled,
     leftPanelTab, setLeftPanelTab,
     rightPanelTab, setRightPanelTab,
@@ -280,6 +281,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   const projectRenameCancelledRef = useRef(false);
   const pendingZoomScalePreviewRef = useRef<CameraPreviewTransform | null>(null);
   const zoomScalePreviewFrameRef = useRef(0);
+  const timelineModeRef = useRef(timelineMode);
 
   const {
     activeTimelinePart,
@@ -317,6 +319,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     selectedZoomSnapMarkers,
     selectedZoomSnapOutActive,
     timeline,
+    translationMiddleSnap,
     validationErrors,
     zoomMiddleSnap,
     zoomScale,
@@ -445,6 +448,18 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     lastProjectHistoryAtRef.current = 0;
   }
 
+  function preserveCurrentPageMode(historyProject: ProjectManifest) {
+    const currentEditorState = projectRef.current.editorState ?? initialProject.editorState!;
+    return normalizeProject({
+      ...historyProject,
+      editorState: {
+        ...(historyProject.editorState ?? currentEditorState),
+        mode: modeRef.current,
+        timelineMode: timelineModeRef.current,
+      },
+    });
+  }
+
   async function storeActiveProjectManifestPath(manifestPath: string) {
     localStorage.setItem(activeProjectManifestStorageKey, manifestPath);
     try {
@@ -485,31 +500,33 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   function undoProjectChange() {
     const previousProject = projectHistoryRef.current.past.at(-1);
     if (!previousProject) return;
+    const restoredProject = preserveCurrentPageMode(previousProject);
 
     projectHistoryRef.current = {
       past: projectHistoryRef.current.past.slice(0, -1),
       future: [projectRef.current, ...projectHistoryRef.current.future].slice(0, maxProjectHistoryActions),
     };
     lastProjectHistoryAtRef.current = 0;
-    projectRef.current = previousProject;
-    setProject(previousProject);
-    setTimelineMode(previousProject.editorState?.timelineMode ?? defaultTimelineMode);
-    syncCompositionSourcesFromProject(previousProject);
+    projectRef.current = restoredProject;
+    setProject(restoredProject);
+    setTimelineMode(timelineModeRef.current);
+    syncCompositionSourcesFromProject(restoredProject);
   }
 
   function redoProjectChange() {
     const nextProject = projectHistoryRef.current.future[0];
     if (!nextProject) return;
+    const restoredProject = preserveCurrentPageMode(nextProject);
 
     projectHistoryRef.current = {
       past: [...projectHistoryRef.current.past, projectRef.current].slice(-maxProjectHistoryActions),
       future: projectHistoryRef.current.future.slice(1),
     };
     lastProjectHistoryAtRef.current = 0;
-    projectRef.current = nextProject;
-    setProject(nextProject);
-    setTimelineMode(nextProject.editorState?.timelineMode ?? defaultTimelineMode);
-    syncCompositionSourcesFromProject(nextProject);
+    projectRef.current = restoredProject;
+    setProject(restoredProject);
+    setTimelineMode(timelineModeRef.current);
+    syncCompositionSourcesFromProject(restoredProject);
   }
 
   function syncPlaybackDom(time: number) {
@@ -560,6 +577,10 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   useEffect(() => {
     modeRef.current = mode;
   }, [mode]);
+
+  useEffect(() => {
+    timelineModeRef.current = timelineMode;
+  }, [timelineMode]);
 
   useEffect(() => {
     activePartFilePathRef.current = part.filePath;
@@ -636,13 +657,14 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
       selectedPartId: selectedZoomMarker || selectedTranslationMarker ? (selectedZoomMarker?.partId ?? selectedTranslationMarker?.partId) : selectedPartId || undefined,
       selectedZoomMarker,
       selectedTranslationMarker: selectedZoomMarker ? null : selectedTranslationMarker,
+      defaultNewMarkerDurationSeconds: markerDurationSeconds,
       preview: {
         ...(state.preview ?? defaultPreviewViewportState),
         scale: framePreviewScale,
         zoomBarOpen: frameZoomBarOpen,
       },
     }));
-  }, [framePreviewScale, frameZoomBarOpen, leftPanelTab, mode, rightPanelTab, selectedPartId, selectedSceneId, selectedTranslationMarker, selectedZoomMarker, timelineMode]);
+  }, [framePreviewScale, frameZoomBarOpen, leftPanelTab, markerDurationSeconds, mode, rightPanelTab, selectedPartId, selectedSceneId, selectedTranslationMarker, selectedZoomMarker, timelineMode]);
 
   useEffect(() => {
     if (!frameZoomBarOpen) return;
@@ -877,8 +899,8 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
 
   useEffect(() => {
     function switchModeShortcut(key: "1" | "2" | "3" | "4") {
-      if (key === "1") setMode("interactive");
-      if (key === "2") setMode("code");
+      if (key === "1") updateMode("interactive");
+      if (key === "2") updateMode("code");
       if (key === "3") updateTimelineMode("edit");
       if (key === "4") updateTimelineMode("composition");
     }
@@ -1205,8 +1227,15 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   }
 
   function updateTimelineMode(nextMode: TimelineMode) {
+    timelineModeRef.current = nextMode;
     setTimelineMode(nextMode);
     updateEditorState((state) => ({ ...state, timelineMode: nextMode }));
+  }
+
+  function updateMode(nextMode: Mode) {
+    modeRef.current = nextMode;
+    setMode(nextMode);
+    updateEditorState((state) => ({ ...state, mode: nextMode }));
   }
 
   function commitPlayheadEditorState(time: number) {
@@ -1610,7 +1639,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     setFramePickPreviewPoint(null);
     setSelectedObjectId(null);
     setSelectionPayload(null);
-    setIsPlaying(false);
+    pausePlaybackAtCurrentTime();
     setTrackerPickTranslationMarker({ partId, markerId });
   }
 
@@ -1627,6 +1656,11 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   function commitTranslationTrackerPick(objectId: string) {
     const pick = trackerPickTranslationMarker;
     if (!pick) return;
+
+    if (!objectId) {
+      setTrackerPickTranslationMarker(null);
+      return;
+    }
 
     updateTranslationMarker(pick.partId, pick.markerId, (marker) => ({ ...marker, followId: objectId || undefined }));
     setTrackerPickTranslationMarker(null);
@@ -1889,12 +1923,19 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     };
   }
 
-  function splitMotionMarkerAcrossTimeline<T extends ZoomMarker | TranslationMarker>(marker: T, absoluteStart: number, timelineParts: Array<Part & { start: number; end: number }>, targetLayerId?: string) {
-    const splitIdSuffix = Date.now().toString(36);
-    return splitMarkerAcrossTimelineRanges(marker, absoluteStart, timelineParts.map((timelinePart) => ({ id: timelinePart.id, start: timelinePart.start, end: timelinePart.end })), {
-      layerId: targetLayerId,
-      createId: (item, segmentIndex) => `${item.id}_split_${splitIdSuffix}_${segmentIndex.toString(36)}`,
-    }).map((segment) => ({ partId: segment.rangeId, marker: segment.marker }));
+  function placeMotionMarkerOnTimeline<T extends ZoomMarker | TranslationMarker>(marker: T, absoluteStart: number, timelineParts: Array<Part & { start: number; end: number }>, targetLayerId?: string, preferredPartId?: string) {
+    const timelinePart = timelineParts.find((item) => item.id === preferredPartId)
+      ?? getTimelinePartAtTime(timelineParts, absoluteStart)
+      ?? timelineParts[0];
+    if (!timelinePart) return [];
+    return [{
+      partId: timelinePart.id,
+      marker: {
+        ...marker,
+        layerId: targetLayerId ?? marker.layerId,
+        start: roundTwo(absoluteStart - timelinePart.start),
+      },
+    }];
   }
 
   function applyMotionMarkerOverwrite(item: Part, zoomMarkers: ZoomMarker[], translationMarkers: TranslationMarker[], insertedIds: Set<string>) {
@@ -1926,7 +1967,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
       const targetTimelinePart = timelineParts.find((item) => item.id === targetPartId);
       const marker = sourcePart?.zoomMarkers.find((item) => item.id === markerId);
       if (!sourcePart || !targetTimelinePart || !marker) return parts;
-      const segments = splitMotionMarkerAcrossTimeline(marker, targetTimelinePart.start + start, timelineParts, targetLayerId);
+      const segments = placeMotionMarkerOnTimeline(marker, targetTimelinePart.start + start, timelineParts, targetLayerId, targetPartId);
       const insertedIds = new Set(segments.map((segment) => segment.marker.id));
 
       return parts.map((item) => {
@@ -1956,7 +1997,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
         const marker = sourcePart?.zoomMarkers.find((item) => item.id === move.markerId);
         if (!sourcePart || !targetPart || !targetTimelinePart || !marker) continue;
 
-        const segments = splitMotionMarkerAcrossTimeline(marker, targetTimelinePart.start + move.start, timelineParts, move.targetLayerId);
+        const segments = placeMotionMarkerOnTimeline(marker, targetTimelinePart.start + move.start, timelineParts, move.targetLayerId, move.targetPartId);
         movedMarkers.set(move.markerId, segments[0]?.marker ?? marker);
         movedSegments.set(move.markerId, segments);
         for (const segment of segments) targetMovesByPart.set(segment.partId, [...(targetMovesByPart.get(segment.partId) ?? []), move]);
@@ -2008,7 +2049,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
       const targetTimelinePart = timelineParts.find((item) => item.id === targetPartId);
       const marker = sourcePart?.translationMarkers.find((item) => item.id === markerId);
       if (!sourcePart || !targetTimelinePart || !marker) return parts;
-      const segments = splitMotionMarkerAcrossTimeline(marker, targetTimelinePart.start + start, timelineParts, targetLayerId);
+      const segments = placeMotionMarkerOnTimeline(marker, targetTimelinePart.start + start, timelineParts, targetLayerId, targetPartId);
       const insertedIds = new Set(segments.map((segment) => segment.marker.id));
 
       return parts.map((item) => {
@@ -2041,7 +2082,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
         const marker = sourcePart?.translationMarkers.find((item) => item.id === move.markerId);
         if (!sourcePart || !targetPart || !targetTimelinePart || !marker) continue;
 
-        const segments = splitMotionMarkerAcrossTimeline(marker, targetTimelinePart.start + move.start, timelineParts, move.targetLayerId);
+        const segments = placeMotionMarkerOnTimeline(marker, targetTimelinePart.start + move.start, timelineParts, move.targetLayerId, move.targetPartId);
         movedMarkers.set(move.markerId, segments[0]?.marker ?? marker);
         movedSegments.set(move.markerId, segments);
         for (const segment of segments) targetMovesByPart.set(segment.partId, [...(targetMovesByPart.get(segment.partId) ?? []), move]);
@@ -2076,6 +2117,74 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     } else if (moves.length === 1) {
       setSelectedTranslationMarker({ partId: moves[0].targetPartId, markerId: moves[0].markerId });
     }
+  }
+
+  function resizeZoomMarkers(resizes: TimelineMarkerResize[]) {
+    updateSceneParts((parts) => {
+      const timelineParts = buildLinearTimeline({ ...scene, compositions: parts });
+      const resizedSegments = new Map<string, Array<{ partId: string; marker: ZoomMarker }>>();
+      const targetResizesByPart = new Map<string, TimelineMarkerResize[]>();
+      const removeKeysByPart = new Map<string, Set<string>>();
+
+      for (const resize of resizes) {
+        const sourcePart = parts.find((item) => item.id === resize.sourcePartId);
+        const marker = sourcePart?.zoomMarkers.find((item) => item.id === resize.markerId);
+        if (!sourcePart || !marker) continue;
+        const segments = placeMotionMarkerOnTimeline({ ...marker, duration: resize.duration }, resize.absoluteStart, timelineParts, undefined, resize.sourcePartId);
+        resizedSegments.set(resize.markerId, segments);
+        for (const segment of segments) targetResizesByPart.set(segment.partId, [...(targetResizesByPart.get(segment.partId) ?? []), resize]);
+        removeKeysByPart.set(resize.sourcePartId, (removeKeysByPart.get(resize.sourcePartId) ?? new Set()).add(resize.markerId));
+      }
+
+      return parts.map((item) => {
+        const removeKeys = removeKeysByPart.get(item.id);
+        const targetResizes = targetResizesByPart.get(item.id) ?? [];
+        const insertedIds = new Set<string>();
+        let zoomMarkers = removeKeys ? item.zoomMarkers.filter((marker) => !removeKeys.has(marker.id)) : item.zoomMarkers;
+
+        for (const resize of targetResizes) {
+          const segments = resizedSegments.get(resize.markerId)?.filter((segment) => segment.partId === item.id) ?? [];
+          for (const segment of segments) insertedIds.add(segment.marker.id);
+          zoomMarkers = [...zoomMarkers.filter((marker) => marker.id !== resize.markerId), ...segments.map((segment) => segment.marker)];
+        }
+
+        return zoomMarkers === item.zoomMarkers ? item : applyMotionMarkerOverwrite(item, zoomMarkers, item.translationMarkers, insertedIds);
+      });
+    });
+  }
+
+  function resizeTranslationMarkers(resizes: TimelineMarkerResize[]) {
+    updateSceneParts((parts) => {
+      const timelineParts = buildLinearTimeline({ ...scene, compositions: parts });
+      const resizedSegments = new Map<string, Array<{ partId: string; marker: TranslationMarker }>>();
+      const targetResizesByPart = new Map<string, TimelineMarkerResize[]>();
+      const removeKeysByPart = new Map<string, Set<string>>();
+
+      for (const resize of resizes) {
+        const sourcePart = parts.find((item) => item.id === resize.sourcePartId);
+        const marker = sourcePart?.translationMarkers.find((item) => item.id === resize.markerId);
+        if (!sourcePart || !marker) continue;
+        const segments = placeMotionMarkerOnTimeline({ ...marker, duration: resize.duration }, resize.absoluteStart, timelineParts, undefined, resize.sourcePartId);
+        resizedSegments.set(resize.markerId, segments);
+        for (const segment of segments) targetResizesByPart.set(segment.partId, [...(targetResizesByPart.get(segment.partId) ?? []), resize]);
+        removeKeysByPart.set(resize.sourcePartId, (removeKeysByPart.get(resize.sourcePartId) ?? new Set()).add(resize.markerId));
+      }
+
+      return parts.map((item) => {
+        const removeKeys = removeKeysByPart.get(item.id);
+        const targetResizes = targetResizesByPart.get(item.id) ?? [];
+        const insertedIds = new Set<string>();
+        let translationMarkers = removeKeys ? item.translationMarkers.filter((marker) => !removeKeys.has(marker.id)) : item.translationMarkers;
+
+        for (const resize of targetResizes) {
+          const segments = resizedSegments.get(resize.markerId)?.filter((segment) => segment.partId === item.id) ?? [];
+          for (const segment of segments) insertedIds.add(segment.marker.id);
+          translationMarkers = [...translationMarkers.filter((marker) => marker.id !== resize.markerId), ...segments.map((segment) => segment.marker)];
+        }
+
+        return translationMarkers === item.translationMarkers ? item : applyMotionMarkerOverwrite(item, item.zoomMarkers, translationMarkers, insertedIds);
+      });
+    });
   }
 
   function deleteZoomMarker(partId: string, markerId: string) {
@@ -2243,47 +2352,49 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
         const start = clamp(pasteStart + node.absoluteStart - sourceStart, 0, Math.max(sceneDurationSeconds - node.layer.duration, 0));
         return { ...node.layer, id: pastedTimelineNodeId("adj", index), name: `${node.layer.name} copy`, start: roundTenth(start) };
       });
-      updateSceneAdjustmentLayers((layers) => [...layers, ...pastedLayers]);
+      updateSceneAdjustmentLayers((layers) => overwriteAdjustmentLayers([...layers, ...pastedLayers], new Set(pastedLayers.map((layer) => layer.id))));
       selectAdjustmentLayer(pastedLayers.at(-1)?.id ?? "");
       return true;
     }
 
     if (clipboard.kind === "zoom") {
       const pastedSelections: ZoomMarkerSelection[] = [];
-      updateSceneParts((parts) => parts.map((item) => {
-        const timelinePart = timeline.find((partItem) => partItem.id === item.id);
-        if (!timelinePart) return item;
-        const pastedMarkers = clipboard.nodes.flatMap((node, index) => {
-          const absoluteStart = pasteStart + node.absoluteStart - sourceStart;
-          if (absoluteStart < timelinePart.start || absoluteStart > timelinePart.start + item.duration) return [];
-          const start = clamp(absoluteStart - timelinePart.start, 0, Math.max(item.duration - node.marker.duration, 0));
-          if (start + node.marker.duration > item.duration + 0.001) return [];
-          const marker = { ...node.marker, id: pastedTimelineNodeId("zom", index), start: roundTenth(start) };
-          pastedSelections.push({ partId: item.id, markerId: marker.id });
-          return [marker];
+      updateSceneParts((parts) => {
+        const timelineParts = buildLinearTimeline({ ...scene, compositions: parts });
+        const pastedSegments = clipboard.nodes.flatMap((node, index) => {
+          const absoluteStart = clamp(pasteStart + node.absoluteStart - sourceStart, 0, Math.max(sceneDurationSeconds - node.marker.duration, 0));
+          const marker = { ...node.marker, id: pastedTimelineNodeId("zom", index) };
+          return placeMotionMarkerOnTimeline(marker, absoluteStart, timelineParts);
         });
-        return pastedMarkers.length > 0 ? { ...item, zoomMarkers: normalizeMendedZoomMarkerFocus([...item.zoomMarkers, ...pastedMarkers]) } : item;
-      }));
+        const insertedIds = new Set(pastedSegments.map((segment) => segment.marker.id));
+        pastedSelections.push(...pastedSegments.map((segment) => ({ partId: segment.partId, markerId: segment.marker.id })));
+
+        return parts.map((item) => {
+          const itemSegments = pastedSegments.filter((segment) => segment.partId === item.id).map((segment) => segment.marker);
+          return itemSegments.length > 0 ? applyMotionMarkerOverwrite(item, [...item.zoomMarkers, ...itemSegments], item.translationMarkers, insertedIds) : item;
+        });
+      });
       if (pastedSelections.length === 0) return false;
       selectZoomMarkers(pastedSelections);
       return true;
     }
 
     const pastedSelections: TranslationMarkerSelection[] = [];
-    updateSceneParts((parts) => parts.map((item) => {
-      const timelinePart = timeline.find((partItem) => partItem.id === item.id);
-      if (!timelinePart) return item;
-      const pastedMarkers = clipboard.nodes.flatMap((node, index) => {
-        const absoluteStart = pasteStart + node.absoluteStart - sourceStart;
-        if (absoluteStart < timelinePart.start || absoluteStart > timelinePart.start + item.duration) return [];
-        const start = clamp(absoluteStart - timelinePart.start, 0, Math.max(item.duration - node.marker.duration, 0));
-        if (start + node.marker.duration > item.duration + 0.001) return [];
-        const marker = { ...node.marker, id: pastedTimelineNodeId("trn", index), start: roundTenth(start) };
-        pastedSelections.push({ partId: item.id, markerId: marker.id });
-        return [marker];
+    updateSceneParts((parts) => {
+      const timelineParts = buildLinearTimeline({ ...scene, compositions: parts });
+      const pastedSegments = clipboard.nodes.flatMap((node, index) => {
+        const absoluteStart = clamp(pasteStart + node.absoluteStart - sourceStart, 0, Math.max(sceneDurationSeconds - node.marker.duration, 0));
+        const marker = { ...node.marker, id: pastedTimelineNodeId("trn", index) };
+        return placeMotionMarkerOnTimeline(marker, absoluteStart, timelineParts);
       });
-      return pastedMarkers.length > 0 ? { ...item, translationMarkers: [...item.translationMarkers, ...pastedMarkers] } : item;
-    }));
+      const insertedIds = new Set(pastedSegments.map((segment) => segment.marker.id));
+      pastedSelections.push(...pastedSegments.map((segment) => ({ partId: segment.partId, markerId: segment.marker.id })));
+
+      return parts.map((item) => {
+        const itemSegments = pastedSegments.filter((segment) => segment.partId === item.id).map((segment) => segment.marker);
+        return itemSegments.length > 0 ? applyMotionMarkerOverwrite(item, item.zoomMarkers, [...item.translationMarkers, ...itemSegments], insertedIds) : item;
+      });
+    });
     if (pastedSelections.length === 0) return false;
     selectTranslationMarkers(pastedSelections);
     return true;
@@ -2421,7 +2532,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     const targetPart = scene.compositions.find((item) => item.id === timelinePart?.id);
     if (!timelinePart || !targetPart) return;
 
-    const duration = Math.min(1, Math.max(sceneDurationSeconds, 0.1));
+    const duration = Math.min(markerDurationSeconds, Math.max(sceneDurationSeconds, 0.1));
     const absoluteStart = roundTenth(clamp(sceneTime - duration / 2, 0, Math.max(sceneDurationSeconds - duration, 0)));
     const markerIdPrefix = kind === "zoom" ? "zom" : kind === "rotate" ? "rot" : kind === "perspective" ? "prs" : "trn";
     const marker = createDefaultMotionBlockByEffectId(effect.id, {
@@ -2437,7 +2548,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     if (kind === "zoom") {
       const zoomMarker = motionBlocksToZoomMarkers([marker])[0];
       if (!zoomMarker) return;
-      const zoomSegments = splitMotionMarkerAcrossTimeline(zoomMarker, absoluteStart, timelineParts, layerId);
+      const zoomSegments = placeMotionMarkerOnTimeline(zoomMarker, absoluteStart, timelineParts, layerId, timelinePart.id);
       const insertedIds = new Set(zoomSegments.map((segment) => segment.marker.id));
       updateSceneParts((parts) => parts.map((item) => {
         const itemSegments = zoomSegments.filter((segment) => segment.partId === item.id).map((segment) => segment.marker);
@@ -2453,7 +2564,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
 
     const translationMarker = motionBlocksToTranslationMarkers([marker])[0];
     if (!translationMarker) return;
-    const translationSegments = splitMotionMarkerAcrossTimeline(translationMarker, absoluteStart, timelineParts, layerId);
+    const translationSegments = placeMotionMarkerOnTimeline(translationMarker, absoluteStart, timelineParts, layerId, timelinePart.id);
     const insertedIds = new Set(translationSegments.map((segment) => segment.marker.id));
     updateSceneParts((parts) => parts.map((item) => {
       const itemSegments = translationSegments.filter((segment) => segment.partId === item.id).map((segment) => segment.marker);
@@ -2493,14 +2604,12 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
 
     updateSceneParts((parts) => parts.map((currentPart) => {
       if (currentPart.id !== targetPart.id) return currentPart;
-      return {
-        ...currentPart,
-        zoomMarkers: currentPart.zoomMarkers.map((marker) => {
-          const bounds = nextBounds.get(marker.id);
-          if (!bounds) return marker;
-          return { ...marker, start: roundTenth(bounds.start), duration: roundTenth(bounds.end - bounds.start), focus: !middleSnapActive && sharedFocus && mendedIds.has(marker.id) ? sharedFocus : marker.focus, snapIn: bounds.snapIn, snapOut: bounds.snapOut };
-        }),
-      };
+      const zoomMarkers = currentPart.zoomMarkers.map((marker) => {
+        const bounds = nextBounds.get(marker.id);
+        if (!bounds) return marker;
+        return { ...marker, start: roundTenth(bounds.start), duration: roundTenth(bounds.end - bounds.start), focus: !middleSnapActive && sharedFocus && mendedIds.has(marker.id) ? sharedFocus : marker.focus, snapIn: bounds.snapIn, snapOut: bounds.snapOut };
+      });
+      return withMotionMarkers(currentPart, zoomMarkers, currentPart.translationMarkers);
     }));
     setSelectedZoomMarker(nextSelection.at(-1) ?? null);
     setSelectedZoomMarkers(nextSelection);
@@ -2514,10 +2623,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
 
     updateSceneParts((parts) => parts.map((currentPart) => {
       if (currentPart.id !== targetPart.id) return currentPart;
-      return {
-        ...currentPart,
-        zoomMarkers: currentPart.zoomMarkers.map((marker) => (nextMarkerIds.has(marker.id) ? { ...marker, middleTransition: mode === "transition" ? "transition" : undefined } : marker)),
-      };
+      return withMotionMarkers(currentPart, currentPart.zoomMarkers.map((marker) => (nextMarkerIds.has(marker.id) ? { ...marker, middleTransition: mode === "transition" ? "transition" : undefined } : marker)), currentPart.translationMarkers);
     }));
   }
 
@@ -2529,10 +2635,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
 
     updateSceneParts((parts) => parts.map((currentPart) => {
       if (currentPart.id !== targetPart.id) return currentPart;
-      return {
-        ...currentPart,
-        zoomMarkers: currentPart.zoomMarkers.map((marker) => (nextMarkerIds.has(marker.id) ? { ...marker, middleEase: ease } : marker)),
-      };
+      return withMotionMarkers(currentPart, currentPart.zoomMarkers.map((marker) => (nextMarkerIds.has(marker.id) ? { ...marker, middleEase: ease } : marker)), currentPart.translationMarkers);
     }));
   }
 
@@ -2561,14 +2664,12 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
 
     updateSceneParts((parts) => parts.map((currentPart) => {
       if (currentPart.id !== targetPart.id) return currentPart;
-      return {
-        ...currentPart,
-        translationMarkers: currentPart.translationMarkers.map((marker) => {
-          const bounds = nextBounds.get(marker.id);
-          if (!bounds) return marker;
-          return { ...marker, start: roundTenth(bounds.start), duration: roundTenth(bounds.end - bounds.start), snapIn: bounds.snapIn, snapOut: bounds.snapOut };
-        }),
-      };
+      const translationMarkers = currentPart.translationMarkers.map((marker) => {
+        const bounds = nextBounds.get(marker.id);
+        if (!bounds) return marker;
+        return { ...marker, start: roundTenth(bounds.start), duration: roundTenth(bounds.end - bounds.start), snapIn: bounds.snapIn, snapOut: bounds.snapOut };
+      });
+      return withMotionMarkers(currentPart, currentPart.zoomMarkers, translationMarkers);
     }));
     setSelectedTranslationMarker(nextSelection.at(-1) ?? null);
     setSelectedTranslationMarkers(nextSelection);
@@ -2582,10 +2683,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
 
     updateSceneParts((parts) => parts.map((currentPart) => {
       if (currentPart.id !== targetPart.id) return currentPart;
-      return {
-        ...currentPart,
-        translationMarkers: currentPart.translationMarkers.map((marker) => (nextMarkerIds.has(marker.id) ? { ...marker, middleTransition: mode === "transition" ? "transition" : undefined } : marker)),
-      };
+      return withMotionMarkers(currentPart, currentPart.zoomMarkers, currentPart.translationMarkers.map((marker) => (nextMarkerIds.has(marker.id) ? { ...marker, middleTransition: mode === "transition" ? "transition" : undefined } : marker)));
     }));
   }
 
@@ -2597,10 +2695,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
 
     updateSceneParts((parts) => parts.map((currentPart) => {
       if (currentPart.id !== targetPart.id) return currentPart;
-      return {
-        ...currentPart,
-        translationMarkers: currentPart.translationMarkers.map((marker) => (nextMarkerIds.has(marker.id) ? { ...marker, middleEase: ease } : marker)),
-      };
+      return withMotionMarkers(currentPart, currentPart.zoomMarkers, currentPart.translationMarkers.map((marker) => (nextMarkerIds.has(marker.id) ? { ...marker, middleEase: ease } : marker)));
     }));
   }
 
@@ -3458,14 +3553,14 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   }
 
   async function enterFrameFullscreen() {
-    setMode("interactive");
+    updateMode("interactive");
     setPresentationMode("frame");
     showPresentationControls();
     await setElectronWindowFullscreen(true);
   }
 
   function enterTheaterMode() {
-    setMode("interactive");
+    updateMode("interactive");
     setPresentationMode("theater");
     showPresentationControls();
   }
@@ -3567,6 +3662,22 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   const presentationTime = presentationMode ? presentationDisplayTime : currentSceneTime;
   const presentationProgress = sceneDurationSeconds > 0 ? `${clamp(presentationTime / sceneDurationSeconds, 0, 1) * 100}%` : "0%";
   const presentationScrubberStyle = { "--clipper-presentation-progress": presentationProgress } as CSSProperties;
+  const toolsPanelMiddleSnap = selectedTranslation ? inspectorTranslationMiddleSnap : selectedZoom ? inspectorZoomMiddleSnap : zoomMiddleSnap ?? translationMiddleSnap;
+
+  function snapCurrentMotionMiddle() {
+    if (selectedTranslation && inspectorTranslationMiddleSnap) {
+      snapTranslationMiddle(selectedTranslationPart ?? part);
+      return;
+    }
+
+    if (selectedZoom && inspectorZoomMiddleSnap) {
+      snapZoomMiddle(selectedZoomPart ?? part);
+      return;
+    }
+
+    if (zoomMiddleSnap) snapZoomMiddle();
+    else if (translationMiddleSnap) snapTranslationMiddle();
+  }
 
   return (
     <>
@@ -3595,15 +3706,15 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
           {leftPanelTab === "assets" ? (
             <FileManager {...fileManagerProps} />
           ) : (
-            <ToolsPanel timelineMode={timelineMode} canSnapMiddle={Boolean(zoomMiddleSnap)} onAddAdjustmentLayer={addAdjustmentLayer} onAddRotationMarker={addRotationMarker} onAddTranslationMarker={addTranslationMarker} onAddZoomMarker={addZoomMarker} onSnapMiddle={() => snapZoomMiddle()} />
+            <ToolsPanel timelineMode={timelineMode} canSnapMiddle={Boolean(toolsPanelMiddleSnap)} onAddAdjustmentLayer={addAdjustmentLayer} onAddRotationMarker={addRotationMarker} onAddTranslationMarker={addTranslationMarker} onAddZoomMarker={addZoomMarker} onSnapMiddle={snapCurrentMotionMiddle} />
           )}
         </aside>
 
         <section className="grid min-h-0 min-w-0 grid-rows-[58px_minmax(0,1fr)_58px] bg-[radial-gradient(circle_at_50%_45%,rgb(var(--clipper-accent-rgb)/0.10),transparent_30%),#141821]" data-clipper-preview-column>
           <div className="grid place-items-center border-b border-[#2d313b] px-[18px]" data-clipper-preview-toolbar>
             <div className="flex rounded-full border border-[#2d313b] bg-[#15171e] p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]" aria-label="Editor mode">
-              <button className={`rounded-full px-3 py-1 text-xs font-extrabold transition-all duration-200 ${mode === "interactive" ? "bg-[var(--clipper-accent)] text-[var(--clipper-accent-foreground)]" : "bg-transparent text-[#9b9da7] hover:text-white"}`} onClick={() => setMode("interactive")}>Interactive</button>
-              <button className={`rounded-full px-3 py-1 text-xs font-extrabold transition-all duration-200 ${mode === "code" ? "bg-[var(--clipper-accent)] text-[var(--clipper-accent-foreground)]" : "bg-transparent text-[#9b9da7] hover:text-white"}`} onClick={() => setMode("code")}>Code</button>
+              <button className={`rounded-full px-3 py-1 text-xs font-extrabold transition-all duration-200 ${mode === "interactive" ? "bg-[var(--clipper-accent)] text-[var(--clipper-accent-foreground)]" : "bg-transparent text-[#9b9da7] hover:text-white"}`} onClick={() => updateMode("interactive")}>Interactive</button>
+              <button className={`rounded-full px-3 py-1 text-xs font-extrabold transition-all duration-200 ${mode === "code" ? "bg-[var(--clipper-accent)] text-[var(--clipper-accent-foreground)]" : "bg-transparent text-[#9b9da7] hover:text-white"}`} onClick={() => updateMode("code")}>Code</button>
             </div>
           </div>
 
@@ -3714,6 +3825,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
         scrubbingRef={timelineScrubbingRef}
         fastSelectEnabled={fastSelectEnabled}
         scrubCommitThrottleMs={scrubCommitThrottleMs}
+        defaultNewMarkerDurationSeconds={markerDurationSeconds}
         scrubSnapEnabled={scrubSnapEnabled}
         sceneDuration={sceneDurationSeconds}
         selectedPartId={selectedPartId}
@@ -3759,6 +3871,8 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
         onScrubEnd={resumePlaybackAfterTimelineScrub}
         onUpdateZoomMarkers={updateZoomMarkers}
         onUpdateTranslationMarkers={updateTranslationMarkers}
+        onResizeZoomMarkers={resizeZoomMarkers}
+        onResizeTranslationMarkers={resizeTranslationMarkers}
         onAddComposition={addCompositionFromLibrary}
         onAddAdjustmentEffect={addAdjustmentLayerAt}
         onAddMotionEffect={addMotionEffect}
@@ -3788,9 +3902,11 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
       activeSection={settingsSection}
       open={settingsOpen}
       scrubCommitThrottleMs={scrubCommitThrottleMs}
+      defaultNewMarkerDurationSeconds={markerDurationSeconds}
       onActiveSectionChange={setSettingsSection}
       onOpenChange={setSettingsOpen}
       onScrubCommitThrottleMsChange={setScrubCommitThrottleMs}
+      onDefaultNewMarkerDurationSecondsChange={setDefaultNewMarkerDurationSeconds}
     />
     {videoExportProgress ? <VideoExportOverlay cancelling={videoExportCancelling} progress={videoExportProgress} onCancel={() => void stopVideoExport()} /> : null}
     <AppContextMenu menu={appContextMenu} onClose={() => setAppContextMenu(null)} />
