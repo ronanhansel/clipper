@@ -165,7 +165,7 @@ function chartStyle(style: ChartStyle | undefined) {
     fill: style?.fill ?? "rgba(90,214,255,0.22)",
     positive: style?.positive ?? "#72f0b3",
     negative: style?.negative ?? "#ff6b7a",
-    fontFamily: style?.fontFamily ?? "Inter, ui-sans-serif, system-ui, sans-serif",
+    fontFamily: style?.fontFamily ?? "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
   };
 }
 

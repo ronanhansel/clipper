@@ -1,0 +1,18 @@
+id: clipper.adjustment.loopStutter
+category: adjustment
+name: Loop / Stutter
+label: Loop / Stutter
+group: Timing
+accent: "#ffb44f"
+previewColor: "#8f65f2"
+timelineGradient: {"from":"#a77cff","to":"#5f35c6","text":"#ffffff"}
+defaultDuration: 3
+defaultParams: {"window":0.5}
+paramControls:
+  - key: window
+    label: Loop Window
+    type: number
+    min: 0.05
+    max: 10
+    step: 0.05
+    defaultValue: 0.5

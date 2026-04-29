@@ -110,7 +110,6 @@ export function CodePane({ part, source: externalSource, viewportState, active =
         { token: "delimiter.bracket", foreground: "d9dbe1" },
         { token: "invalid", foreground: "ffb4b4", background: "1a1d26" },
         { token: "invalid.illegal", foreground: "ffb4b4", background: "1a1d26" },
-        { token: "invalid.deprecated", foreground: "c8ccd6", background: "1a1d26" },
       ],
       colors: {
         "editor.background": "#12141a",

@@ -106,6 +106,8 @@ export type MotionBlockParams = Record<string, unknown> & {
   followId?: string;
   middleEase?: MotionEase;
   middleTransition?: "transition";
+  mendInId?: string;
+  mendOutId?: string;
   perspective?: PerspectiveSettings;
   position?: Point;
   rotation?: number;
@@ -116,6 +118,7 @@ export type MotionBlockParams = Record<string, unknown> & {
 
 export type MotionBlock = {
   id: string;
+  name?: string;
   layerId?: string;
   effectId?: MotionEffectId;
   start: number;
@@ -126,6 +129,8 @@ export type MotionBlock = {
   followId?: string;
   middleEase?: MotionEase;
   middleTransition?: "transition";
+  mendInId?: string;
+  mendOutId?: string;
   perspective?: PerspectiveSettings;
   position?: Point;
   rotation?: number;
@@ -154,12 +159,38 @@ export type MotionEffectDefinition = {
   kind: MotionBlockEffectKind;
   name: string;
   label: string;
-  accent: string;
+  group: string;
+  accent?: string;
+  previewColor?: string;
+  timelineGradient?: EffectTimelineGradient;
   defaultDuration: number;
 };
 
+export type EffectTimelineGradient = {
+  from: string;
+  to: string;
+  text?: string;
+};
+
 export type AdjustmentEffectParams = Record<string, unknown> & {
+  amount?: number;
+  brightness?: number;
+  contrast?: number;
+  density?: number;
+  drift?: number;
+  degrees?: number;
   every?: number;
+  focusX?: number;
+  focusY?: number;
+  hue?: number;
+  intensity?: number;
+  softness?: number;
+  radius?: number;
+  saturation?: number;
+  speed?: number;
+  target?: "frame" | "camera";
+  warmth?: number;
+  window?: number;
 };
 
 export type AdjustmentEffectDefinition = {
@@ -167,7 +198,10 @@ export type AdjustmentEffectDefinition = {
   category: "adjustment";
   name: string;
   label: string;
-  accent: string;
+  group: string;
+  accent?: string;
+  previewColor?: string;
+  timelineGradient?: EffectTimelineGradient;
   defaultDuration: number;
   defaultParams: AdjustmentEffectParams;
 };
@@ -190,10 +224,13 @@ export type AdjustmentLayer = {
 
 export type CompositionClip = {
   id: string;
+  compositionId?: string;
   name: string;
   filePath: string;
   source?: string;
   sourceMissing?: boolean;
+  start?: number;
+  layerId?: string;
   duration: number;
   frame: PartFrame;
   background: BackgroundLayer;
@@ -204,7 +241,6 @@ export type CompositionClip = {
   translationMarkers: TranslationMarker[];
 };
 
-/** @deprecated Use CompositionClip. */
 export type Part = CompositionClip;
 
 export type Scene = {
@@ -212,6 +248,8 @@ export type Scene = {
   name: string;
   compositions: CompositionClip[];
   adjustmentLayers?: AdjustmentLayer[];
+  zoomMarkers?: ZoomMarker[];
+  translationMarkers?: TranslationMarker[];
 };
 
 export type CompositionDocument = CompositionClip & {
@@ -221,6 +259,9 @@ export type CompositionDocument = CompositionClip & {
 export type TimelineClip = {
   id: string;
   compositionId: string;
+  start?: number;
+  layerId?: string;
+  duration?: number;
   motionBlocks?: MotionBlock[];
   zoomMarkers: ZoomMarker[];
   translationMarkers: TranslationMarker[];
@@ -236,6 +277,8 @@ export type TimelineDocument = {
   filePath?: string;
   clips: TimelineClip[];
   adjustmentLayers?: AdjustmentLayer[];
+  zoomMarkers?: ZoomMarker[];
+  translationMarkers?: TranslationMarker[];
   settings?: TimelineSettings;
 };
 
@@ -246,7 +289,6 @@ export type TimelineViewportState = {
 
 export type MotionEffectKind = MotionBlockEffectKind;
 
-/** @deprecated Motion layers are generic; effect identity lives on MotionBlock.effectId. */
 export type TimelineMotionLayerKind = "empty" | "motion";
 
 export type TimelineMotionLayerState = {
@@ -262,9 +304,16 @@ export type TimelineAdjustmentLayerState = {
   hidden?: boolean;
 };
 
+export type TimelineCompositionLayerState = {
+  id: string;
+  name: string;
+  hidden?: boolean;
+};
+
 export type TimelineLayerState = {
   compName?: string;
   compHidden?: boolean;
+  compositionLayers?: TimelineCompositionLayerState[];
   adjustmentLayers?: TimelineAdjustmentLayerState[];
   motionLayers?: TimelineMotionLayerState[];
   rowHeights?: Record<string, number>;
@@ -284,6 +333,10 @@ export type CodeViewportState = {
   scrollTop: number;
 };
 
+export type EffectsPanelState = {
+  openGroups?: Record<string, boolean>;
+};
+
 export type EditorState = {
   timeline: TimelineViewportState;
   timelineLayers?: TimelineLayerState;
@@ -298,9 +351,11 @@ export type EditorState = {
   selectedTranslationMarker?: { partId: string; markerId: string } | null;
   currentSceneTime?: number;
   defaultNewMarkerDurationSeconds?: number;
+  timelineEndPaddingFraction?: number;
   preview?: PreviewViewportState;
   code?: Record<string, CodeViewportState>;
   fileManagerState?: FileManagerState;
+  effectsPanelState?: EffectsPanelState;
 };
 
 export type AssetItem = {
@@ -346,7 +401,6 @@ export type TimelineComposition = CompositionClip & {
   end: number;
 };
 
-/** @deprecated Use TimelineComposition. */
 export type TimelinePart = TimelineComposition;
 
 export type SelectionPayload = {

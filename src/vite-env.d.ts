@@ -1,5 +1,10 @@
 /// <reference types="vite/client" />
 
+declare module "*.yml?raw" {
+  const source: string;
+  export default source;
+}
+
 type LocalFontData = {
   family: string;
   fullName: string;

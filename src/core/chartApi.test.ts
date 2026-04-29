@@ -119,11 +119,11 @@ describe("defineChart", () => {
     expect(part.objects.find((object) => object.id === "hero-title")?.style.transform).toBe("scale(0.9) translate3d(12px, 20px, 0px) rotate(3deg) scale(1.2)");
   });
 
-  it("rejects legacy part exports", async () => {
+  it("rejects non-current part exports", async () => {
     const basePart: Part = {
-      id: "prt_legacy_eval",
-      name: "Legacy Eval",
-      filePath: "clipper/projects/test/prt_legacy_eval.ts",
+      id: "prt_invalid_export_eval",
+      name: "Invalid Export Eval",
+      filePath: "clipper/projects/test/prt_invalid_export_eval.ts",
       duration: 4,
       frame: { width: 1920, height: 1080, style: { background: "#000" } },
       background: { id: "background", name: "Background", style: { background: "#000" }, elements: [] },
@@ -137,7 +137,7 @@ describe("defineChart", () => {
       import { Composition } from "@clipper/composition-api";
 
       export const part = new Composition({
-        id: "prt_legacy_eval",
+        id: "prt_invalid_export_eval",
         duration: 4,
         frame: { width: 1920, height: 1080, style: { background: "#000" } },
         render() { return []; },
@@ -167,13 +167,13 @@ describe("defineChart", () => {
         duration: 4,
         frame: { width: 1920, height: 1080, style: { background: "#000" } },
         render() {
-          return [{ id: "legacy-object", kind: "rect", bounds: { x: 0, y: 0, width: 100, height: 100 }, style: {} }];
+          return [{ id: "plain-object", kind: "rect", bounds: { x: 0, y: 0, width: 100, height: 100 }, style: {} }];
         },
       });
     `)).rejects.toThrow("Plain object renderables are no longer supported");
   });
 
-  it("generates component-authored fallback source", () => {
+  it("generates component-authored source", () => {
     const source = compositionToSource({
       id: "prt_generated_eval",
       name: "Generated Eval",

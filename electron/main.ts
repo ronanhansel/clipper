@@ -478,11 +478,12 @@ async function renderSceneToVideo(_project: ProjectManifest, scene: Scene, outpu
     for (let frameIndex = 0; frameIndex < totalFrames; frameIndex += 1) {
       if (exportId && cancelledVideoRenders.has(exportId)) throw new Error("Video export cancelled.");
       const sceneTime = Math.min(frameIndex / frameRate, Math.max(durationSeconds - 0.001, 0));
+      const visualAdjustmentStyle = applyAdjustmentLayersToVisualStyle(sceneTime, scene.adjustmentLayers);
       const adjustedSceneTime = applyAdjustmentLayersToSceneTime(sceneTime, scene.adjustmentLayers, frameRate);
       const timelinePart = getTimelinePartAtTime(timeline, adjustedSceneTime) ?? timeline[0];
       if (!timelinePart) throw new Error("The current scene has no compositions to render.");
       const previewTime = clamp(adjustedSceneTime - timelinePart.start, 0, timelinePart.duration);
-      const frameHtml = buildFrameBody(timelinePart, previewTime, getActiveZoom(timelinePart.zoomMarkers, previewTime), getActiveTranslation(timelinePart.translationMarkers, previewTime), getActiveRotation(timelinePart.translationMarkers, previewTime));
+      const frameHtml = buildFrameBody(timelinePart, previewTime, visualAdjustmentStyle, getActiveZoom(timelinePart.zoomMarkers, previewTime), getActiveTranslation(timelinePart.translationMarkers, previewTime), getActiveRotation(timelinePart.translationMarkers, previewTime));
 
       await renderFrameHtml(rendererWindow, frameHtml);
       const image = await rendererWindow.webContents.capturePage({ x: 0, y: 0, width: frameWidth, height: frameHeight });
@@ -526,11 +527,13 @@ type FrameObject = { id: string; name: string; type: string; selector: string; b
 type BackgroundLayer = { id: string; name: string; style: Record<string, string | number>; stretchToElements?: boolean; motion?: MotionTrack; elements: FrameObject[] };
 type ZoomMarker = { id: string; start: number; duration: number; focus: { x: number; y: number }; scale: number; ease?: MotionEase; snapIn?: boolean; snapOut?: boolean; middleTransition?: "transition"; middleEase?: MotionEase };
 type TranslationMarker = { id: string; start: number; duration: number; kind?: "pan" | "rotate"; position: { x: number; y: number }; rotation?: number; ease?: MotionEase; snapIn?: boolean; snapOut?: boolean; middleTransition?: "transition"; middleEase?: MotionEase };
-type AdjustmentLayer = { id: string; name: string; start: number; duration: number; effect: { kind: "frameSkip"; every: number } };
+type AdjustmentLayer = { id: string; name: string; start: number; duration: number; effect: { kind?: "frameSkip"; every?: number; effectId?: string; params?: Record<string, unknown> } };
 type CompositionClip = { id: string; name: string; filePath: string; sourceMissing?: boolean; duration: number; frame: { width: number; height: number; style: Record<string, string | number> }; background: BackgroundLayer; objects: FrameObject[]; snapshot: unknown[]; zoomMarkers: ZoomMarker[]; translationMarkers: TranslationMarker[] };
 type Scene = { id: string; name: string; compositions: CompositionClip[]; adjustmentLayers?: AdjustmentLayer[] };
 type ProjectManifest = { id: string; name: string; resolution: { width: number; height: number }; scenes: Scene[]; assetsPath: string };
 type TimelinePart = CompositionClip & { start: number; end: number };
+type AdjustmentVisualOverlay = { id: string; target?: "frame" | "camera"; style: Record<string, string | number> };
+type AdjustmentVisualStyle = { filter?: string; overlays?: AdjustmentVisualOverlay[] };
 const templateCache = new Map<string, (context: unknown) => unknown>();
 
 function buildLinearTimeline(scene: Scene): TimelinePart[] {
@@ -552,20 +555,124 @@ function getTimelinePartAtTime(timeline: TimelinePart[], time: number) {
 function applyAdjustmentLayersToSceneTime(sceneTime: number, layers: AdjustmentLayer[] | undefined, frameRate: number) {
   return (layers ?? []).reduce((time, layer) => {
     if (time < layer.start || time >= layer.start + layer.duration) return time;
-    if (layer.effect.kind !== "frameSkip") return time;
-    const frameStep = Math.max(1, Math.round(layer.effect.every));
-    if (frameStep <= 1 || frameRate <= 0) return time;
-    const elapsedFrames = Math.max(0, Math.floor((time - layer.start) * frameRate));
-    const heldFrame = Math.floor(elapsedFrames / frameStep) * frameStep;
-    return layer.start + heldFrame / frameRate;
+    const effectId = getAdjustmentEffectId(layer);
+    if (effectId === "clipper.adjustment.frameSkip" || layer.effect.kind === "frameSkip") return quantizeFrameSkipTime(time, layer.start, getNumberParam(layer, "every", layer.effect.every ?? 2), frameRate);
+    if (effectId === "clipper.adjustment.freezeFrame") return layer.start;
+    if (effectId === "clipper.adjustment.speedChange") {
+      const speed = Math.max(0.05, getNumberParam(layer, "speed", 0.5));
+      const maxTime = layer.start + Math.max(0, layer.duration - frameDuration(frameRate));
+      return clamp(layer.start + Math.max(0, time - layer.start) * speed, layer.start, maxTime);
+    }
+    if (effectId === "clipper.adjustment.loopStutter") return layer.start + positiveModulo(Math.max(0, time - layer.start), Math.max(0.05, getNumberParam(layer, "window", 0.5)));
+    if (effectId === "clipper.adjustment.reverse") return clamp(layer.start + layer.duration - frameDuration(frameRate) - Math.max(0, time - layer.start), layer.start, layer.start + layer.duration);
+    if (effectId === "clipper.adjustment.boomerang") {
+      const elapsed = Math.max(0, time - layer.start);
+      const halfDuration = Math.max(layer.duration / 2, frameDuration(frameRate));
+      const maxTime = layer.start + Math.max(0, layer.duration - frameDuration(frameRate));
+      const mapped = elapsed <= halfDuration ? layer.start + elapsed * 2 : maxTime - (elapsed - halfDuration) * 2;
+      return clamp(mapped, layer.start, maxTime);
+    }
+    return time;
   }, sceneTime);
+}
+
+function applyAdjustmentLayersToVisualStyle(sceneTime: number, layers: AdjustmentLayer[] | undefined): AdjustmentVisualStyle {
+  const filters: string[] = [];
+  const overlays: AdjustmentVisualOverlay[] = [];
+  for (const layer of layers ?? []) {
+    if (sceneTime < layer.start || sceneTime >= layer.start + layer.duration) continue;
+    const effectId = getAdjustmentEffectId(layer);
+    if (effectId === "clipper.adjustment.colourGrade") {
+      filters.push(`brightness(${clamp(getNumberParam(layer, "brightness", 1), 0, 3)})`);
+      filters.push(`contrast(${clamp(getNumberParam(layer, "contrast", 1), 0, 3)})`);
+      filters.push(`saturate(${clamp(getNumberParam(layer, "saturation", 1), 0, 3)})`);
+      filters.push(`hue-rotate(${clamp(getNumberParam(layer, "hue", 0), -180, 180)}deg)`);
+    }
+    if (effectId === "clipper.adjustment.brightness") filters.push(`brightness(${clamp(getNumberParam(layer, "amount", 1.15), 0, 3)})`);
+    if (effectId === "clipper.adjustment.contrast") filters.push(`contrast(${clamp(getNumberParam(layer, "amount", 1.2), 0, 3)})`);
+    if (effectId === "clipper.adjustment.saturation") filters.push(`saturate(${clamp(getNumberParam(layer, "amount", 1.25), 0, 3)})`);
+    if (effectId === "clipper.adjustment.hueRotate") filters.push(`hue-rotate(${clamp(getNumberParam(layer, "degrees", 30), -180, 180)}deg)`);
+    if (effectId === "clipper.adjustment.blur") filters.push(`blur(${clamp(getNumberParam(layer, "radius", 6), 0, 20)}px)`);
+    overlays.push(...getAdjustmentVisualOverlays(effectId, layer, sceneTime));
+  }
+  return { filter: filters.join(" ") || undefined, overlays: overlays.length > 0 ? overlays : undefined };
+}
+
+function getAdjustmentVisualOverlays(effectId: string, layer: AdjustmentLayer, sceneTime: number): AdjustmentVisualOverlay[] {
+  if (effectId === "clipper.adjustment.filmDust") {
+    const intensity = clamp(getNumberParam(layer, "intensity", 0.28), 0, 1);
+    const density = clamp(getNumberParam(layer, "density", 1), 0.25, 3);
+    const drift = clamp(getNumberParam(layer, "drift", 1), 0, 4);
+    const offsetX = Math.round(sceneTime * 41 * drift) % 97;
+    const offsetY = Math.round(sceneTime * 67 * drift) % 113;
+    const scale = Math.max(1, 38 / density);
+    return [{ id: `${layer.id}:film-dust`, target: getOverlayTarget(layer), style: { backgroundImage: ["radial-gradient(circle at 14% 18%, rgba(255,255,255,0.95) 0 0.9px, transparent 1.4px)", "radial-gradient(circle at 72% 36%, rgba(255,255,255,0.75) 0 0.7px, transparent 1.2px)", "radial-gradient(circle at 42% 78%, rgba(0,0,0,0.5) 0 0.8px, transparent 1.5px)"].join(","), backgroundPosition: `${offsetX}px ${offsetY}px, ${-offsetY}px ${offsetX}px, ${offsetY / 2}px ${-offsetX / 2}px`, backgroundSize: `${scale}px ${scale}px, ${scale * 1.7}px ${scale * 1.7}px, ${scale * 2.3}px ${scale * 2.3}px`, mixBlendMode: "screen", opacity: intensity } }];
+  }
+  if (effectId === "clipper.adjustment.filmScratches") {
+    const intensity = clamp(getNumberParam(layer, "intensity", 0.24), 0, 1);
+    const density = clamp(getNumberParam(layer, "density", 1), 0.25, 3);
+    const drift = clamp(getNumberParam(layer, "drift", 1), 0, 4);
+    const jitter = Math.round(Math.sin(sceneTime * 37) * 18 * drift);
+    const spacing = Math.max(72, 180 / density);
+    return [{ id: `${layer.id}:film-scratches`, target: getOverlayTarget(layer), style: { backgroundImage: ["repeating-linear-gradient(90deg, transparent 0 92px, rgba(255,255,255,0.78) 94px 95px, transparent 97px 178px)", "repeating-linear-gradient(90deg, transparent 0 154px, rgba(0,0,0,0.34) 157px 158px, transparent 160px 246px)"].join(","), backgroundPosition: `${jitter}px 0, ${-jitter * 1.7}px 0`, backgroundSize: `${spacing}px 100%, ${spacing * 1.45}px 100%`, mixBlendMode: "screen", opacity: intensity } }];
+  }
+  if (effectId === "clipper.adjustment.vignette") {
+    const intensity = clamp(getNumberParam(layer, "intensity", 0.42), 0, 1);
+    const softness = clamp(getNumberParam(layer, "softness", 0.64), 0.2, 1);
+    const focusX = clamp(getNumberParam(layer, "focusX", 50), 0, 100);
+    const focusY = clamp(getNumberParam(layer, "focusY", 50), 0, 100);
+    const clearStop = Math.round(softness * 62);
+    return [{ id: `${layer.id}:vignette`, target: getOverlayTarget(layer), style: { backgroundImage: `radial-gradient(ellipse at ${focusX}% ${focusY}%, transparent 0 ${clearStop}%, rgba(0,0,0,0.88) 100%)`, mixBlendMode: "multiply", opacity: intensity } }];
+  }
+  if (effectId === "clipper.adjustment.lightLeak") {
+    const intensity = clamp(getNumberParam(layer, "intensity", 0.34), 0, 1);
+    const warmth = clamp(getNumberParam(layer, "warmth", 1), 0, 2);
+    const drift = clamp(getNumberParam(layer, "drift", 0.8), 0, 4);
+    const focusX = clamp(getNumberParam(layer, "focusX", 12), 0, 100);
+    const focusY = clamp(getNumberParam(layer, "focusY", 28), 0, 100);
+    const centerX = focusX + Math.sin(sceneTime * 0.8 * drift) * 8 * drift;
+    const centerY = focusY + Math.cos(sceneTime * 0.6 * drift) * 18 * drift;
+    const green = Math.round(105 + warmth * 45);
+    const blue = Math.round(36 + warmth * 26);
+    return [{ id: `${layer.id}:light-leak`, target: getOverlayTarget(layer), style: { backgroundImage: [`radial-gradient(circle at ${centerX}% ${centerY}%, rgba(255,${green},${blue},0.95) 0, rgba(255,${green},${blue},0.42) 18%, transparent 46%)`, "linear-gradient(90deg, rgba(255,226,143,0.58), transparent 28%)"].join(","), mixBlendMode: "screen", opacity: intensity } }];
+  }
+  return [];
+}
+
+function getOverlayTarget(layer: AdjustmentLayer) {
+  return layer.effect.params?.target === "frame" ? "frame" : "camera";
+}
+
+function getAdjustmentEffectId(layer: AdjustmentLayer) {
+  return layer.effect.effectId ?? (layer.effect.kind === "frameSkip" ? "clipper.adjustment.frameSkip" : "");
+}
+
+function getNumberParam(layer: AdjustmentLayer, key: string, fallback: number) {
+  const value = Number(layer.effect.params?.[key] ?? layer.effect[key as keyof AdjustmentLayer["effect"]] ?? fallback);
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function quantizeFrameSkipTime(sceneTime: number, start: number, every: number, frameRate: number) {
+  const frameStep = Math.max(1, Math.round(every));
+  if (frameStep <= 1 || frameRate <= 0) return sceneTime;
+  const elapsedFrames = Math.max(0, Math.floor((sceneTime - start) * frameRate));
+  const heldFrame = Math.floor(elapsedFrames / frameStep) * frameStep;
+  return start + heldFrame / frameRate;
+}
+
+function frameDuration(frameRate: number) {
+  return frameRate > 0 ? 1 / frameRate : 0;
+}
+
+function positiveModulo(value: number, divisor: number) {
+  return ((value % divisor) + divisor) % divisor;
 }
 
 function buildFrameShell() {
   return `<!doctype html><html><head><meta charset="utf-8"><style>*{box-sizing:border-box}html,body{margin:0;width:${frameWidth}px;height:${frameHeight}px;overflow:hidden;background:#000}</style></head><body><div id="clipper-frame-root"></div><script>window.__clipperSetFrame=function(html){document.getElementById("clipper-frame-root").innerHTML=html;return new Promise(function(resolve){requestAnimationFrame(function(){requestAnimationFrame(resolve);});});};</script></body></html>`;
 }
 
-function buildFrameBody(part: CompositionClip, previewTime: number, activeZoom: ZoomMarker | null, activeTranslation: TranslationMarker | null, activeRotation: TranslationMarker | null) {
+function buildFrameBody(part: CompositionClip, previewTime: number, visualAdjustmentStyle: AdjustmentVisualStyle, activeZoom: ZoomMarker | null, activeTranslation: TranslationMarker | null, activeRotation: TranslationMarker | null) {
   if (part.sourceMissing) return `<div style="${cssStyle({ position: "relative", width: frameWidth, height: frameHeight, overflow: "hidden", background: "#000" })}"></div>`;
 
   const scale = activeZoom?.scale ?? 1;
@@ -575,7 +682,14 @@ function buildFrameBody(part: CompositionClip, previewTime: number, activeZoom: 
   const frameStyle = cssStyle({ ...part.frame.style, position: "relative", width: frameWidth, height: frameHeight, overflow: "hidden" });
   const rotation = activeRotation?.rotation ?? 0;
   const cameraStyle = `position:absolute;inset:0;transform-origin:center;transform:translate3d(${x}px,${y}px,0) rotate(${rotation}deg) scale(${scale});`;
-  return `<div style="${frameStyle}"><div style="${cameraStyle}">${backgroundLayerHtml(part.background, previewTime, part.duration)}${part.objects.map((object) => frameObjectHtml(object, previewTime, part.duration)).join("")}</div></div>`;
+  const visualStyle = cssStyle({ position: "absolute", inset: 0, filter: visualAdjustmentStyle.filter });
+  const frameOverlayHtml = adjustmentOverlayHtml(visualAdjustmentStyle.overlays?.filter((overlay) => overlay.target === "frame"));
+  const cameraOverlayHtml = adjustmentOverlayHtml(visualAdjustmentStyle.overlays?.filter((overlay) => (overlay.target ?? "camera") === "camera"));
+  return `<div style="${frameStyle}"><div style="${cameraStyle}"><div style="${visualStyle}">${backgroundLayerHtml(part.background, previewTime, part.duration)}${part.objects.map((object) => frameObjectHtml(object, previewTime, part.duration)).join("")}${frameOverlayHtml}</div></div>${cameraOverlayHtml}</div>`;
+}
+
+function adjustmentOverlayHtml(overlays: AdjustmentVisualOverlay[] | undefined) {
+  return (overlays ?? []).map((overlay) => `<div style="${cssStyle({ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 2147483647, ...overlay.style })}"></div>`).join("");
 }
 
 function backgroundLayerHtml(background: BackgroundLayer, previewTime: number, duration: number) {

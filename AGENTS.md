@@ -3,7 +3,7 @@
 ## External Memory
 
 - Always start project work with an external memory file at `build/[version number]/memory/[id]-feature-name.md`.
-- Example: `build/v0.2.6/memory/001-init-editor.md`.
+- Example: `build/v0.2.7/memory/001-init-editor.md`.
 - After every major added feature, major update, rework, rewrite, or feature addition, populate or update the relevant memory files so future agents can pick up the work.
 
 ## Version Planning
@@ -36,6 +36,7 @@
 - Prefer small cohesive modules over long mixed-responsibility files. If a file starts combining UI rendering, platform I/O, project mutation, derived calculations, and constants, extract stable seams into `src/app`, `src/core`, `src/components`, or `src/lib` before adding more behavior.
 - Keep React components focused on rendering and local orchestration. Move reusable domain logic, project transformations, timeline math, render/runtime behavior, and host/Electron adapters into named modules with narrow public APIs.
 - Use scoped Zustand stores/providers for canonical app/editor/project state that must be shared across the app. Do not keep shareable state in `App.tsx` just to avoid store updates; optimize subscriptions instead.
+- During major refactors, never call `useProjectStore`, `useProjectDocumentState`, `useEditorStore`, or similar scoped-store hooks above/outside their matching provider. Keep provider wrappers mounted above any component using those hooks, or split a provider component from the hook-using content component.
 - Avoid deeply nested prop chains for shared feature state/actions. If callbacks or state must pass through multiple unrelated component layers, move them into a scoped Zustand store/provider or a focused controller hook with narrow selector hooks instead of adding more threaded props.
 - Prefer narrow selector hooks over broad store subscriptions. Never subscribe a root component to an entire Zustand store when high-frequency state such as scrub time, playback time, drag state, or selection previews can change.
 - Suppress no-op store writes and keep store actions semantic where possible. Prefer commands such as `applyEditorState`, `clearMarkerSelection`, or `clearNodeSelection` over repeated raw field updates when behavior has domain meaning.
@@ -50,4 +51,4 @@
 - Prefer imperative DOM/CSS previews (`transform`, `translate3d`, opacity, width/height variables, targeted refs). Commit canonical app/project state once on release, pointer up/cancel, blur, pause, or another explicit finalization event.
 - Do not call project-mutating callbacks from every pointer-move frame unless unavoidable. If unavoidable, throttle, deduplicate, and keep changed state narrow.
 - Preserve existing drag constraints while optimizing previews: snapping, clamping, no-overlap rules, selection semantics, mended marker chains, and final committed positions/sizes must still be computed from the same canonical logic.
-- For live render, camera, motion, effect, or animation previews, use `src/core` helpers to compute deterministic preview values, then apply only the affected DOM/CSS property with rAF. Keep labels/readouts local and reuse `build/v0.2.6/memory/001-motion-timeline-layers.md` for timeline motion layer patterns.
+- For live render, camera, motion, effect, or animation previews, use `src/core` helpers to compute deterministic preview values, then apply only the affected DOM/CSS property with rAF. Keep labels/readouts local and reuse `build/v0.2.7/memory/001-adjustment-effect-packages.md` for effect package patterns.

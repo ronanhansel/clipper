@@ -1,0 +1,45 @@
+id: clipper.adjustment.lightLeak
+category: adjustment
+name: Light Leak
+label: Light Leak
+group: Overlay
+accent: "#ff9d5c"
+previewColor: "#8f65f2"
+timelineGradient: {"from":"#a77cff","to":"#5f35c6","text":"#ffffff"}
+defaultDuration: 3
+defaultParams: {"intensity":0.34,"warmth":1,"drift":0.8,"focusX":12,"focusY":28,"target":"camera"}
+paramControls:
+  - key: target
+    label: Target
+    type: select
+    defaultValue: camera
+    options: [{"value":"camera","label":"Camera"},{"value":"frame","label":"Frame"}]
+  - key: intensity
+    label: Intensity
+    type: number
+    min: 0
+    max: 1
+    step: 0.01
+    defaultValue: 0.34
+  - key: warmth
+    label: Warmth
+    type: number
+    min: 0
+    max: 2
+    step: 0.05
+    defaultValue: 1
+  - key: drift
+    label: Drift
+    type: number
+    min: 0
+    max: 4
+    step: 0.05
+    defaultValue: 0.8
+pointControls:
+  - label: Focus
+    xKey: focusX
+    yKey: focusY
+    xDefault: 12
+    yDefault: 28
+    coordinateSpace: percent
+    pickLabel: Pick Focus

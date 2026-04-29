@@ -22,7 +22,17 @@ function projectWithComposition(): ProjectManifest {
     name: "Test Project",
     resolution: { width: 1920, height: 1080 },
     assetsPath: "assets",
-    scenes: [{ id: "tl_main", name: "Main", compositions: [composition], adjustmentLayers: [] }],
+    scenes: [],
+    timelines: [{
+      id: "tl_main",
+      name: "Main",
+      filePath: "timelines/tl_main.timeline.json",
+      clips: [{ id: composition.id, compositionId: composition.id, duration: composition.duration, motionBlocks: composition.motionBlocks, zoomMarkers: [], translationMarkers: [] }],
+      adjustmentLayers: [],
+      settings: {},
+    }],
+    compositions: [{ ...composition, source: "export const composition = { id: 'cmp_intro' };" }],
+    compositionLibrary: [composition],
     compositionSources: {
       [composition.filePath]: "export const composition = { id: 'cmp_intro' };",
     },
@@ -30,7 +40,7 @@ function projectWithComposition(): ProjectManifest {
 }
 
 describe("project normalization", () => {
-  it("migrates legacy scenes into timelines and composition documents", () => {
+  it("normalizes timeline clips and composition documents", () => {
     const normalized = normalizeProject(projectWithComposition());
 
     expect(normalized.timelines).toHaveLength(1);
@@ -47,7 +57,7 @@ describe("project normalization", () => {
         id: "tl_main",
         name: "Main",
         filePath: "compositions/folder/tl_main.timeline.json",
-        clips: [],
+        clips: [{ id: composition.id, compositionId: composition.id, duration: composition.duration, motionBlocks: composition.motionBlocks, zoomMarkers: [], translationMarkers: [] }],
         adjustmentLayers: [],
         settings: { frameRate: 30 },
       }],
@@ -58,13 +68,75 @@ describe("project normalization", () => {
     expect(normalized.timelines?.[0].clips[0].motionBlocks?.[0]).toMatchObject({ id: "zoom_1", effectId: "clipper.motion.zoom" });
   });
 
-  it("serializes motion blocks without legacy marker contents", () => {
+  it("preserves an intentionally empty timeline instead of restoring old clips", () => {
+    const normalized = normalizeProject({
+      ...projectWithComposition(),
+      timelines: [{
+        id: "tl_main",
+        name: "Main",
+        filePath: "timelines/tl_main.timeline.json",
+        clips: [],
+        adjustmentLayers: [],
+        settings: {},
+      }],
+    });
+
+    expect(normalized.timelines?.[0].clips).toEqual([]);
+    expect(normalized.scenes[0].compositions).toEqual([]);
+  });
+
+  it("serializes motion block contents", () => {
     const serialized = serializeProjectForSave(projectWithComposition());
-    const content = JSON.stringify(serialized);
 
     expect(serialized.timelines?.[0].clips[0].motionBlocks?.[0]).toMatchObject({ id: "zoom_1", effectId: "clipper.motion.zoom" });
-    expect(content).not.toContain("zoomMarkers");
-    expect(content).not.toContain("translationMarkers");
+  });
+
+  it("serializes timeline-level motion markers independently of compositions", () => {
+    const serialized = serializeProjectForSave({
+      ...projectWithComposition(),
+      timelines: [{
+        id: "tl_main",
+        name: "Main",
+        filePath: "timelines/tl_main.timeline.json",
+        clips: [],
+        adjustmentLayers: [],
+        zoomMarkers: [{ id: "scene_zoom", layerId: "motion", start: 2, duration: 1, focus: { x: 0.5, y: 0.5 }, scale: 1.5 }],
+        translationMarkers: [],
+        settings: {},
+      }],
+    });
+
+    expect(serialized.timelines?.[0].zoomMarkers?.[0]).toMatchObject({ id: "scene_zoom", layerId: "motion" });
+    expect(serialized.scenes[0].zoomMarkers?.[0]).toMatchObject({ id: "scene_zoom", layerId: "motion" });
+  });
+
+  it("drops stale adjustment blocks that no longer belong to a timeline row on save", () => {
+    const serialized = serializeProjectForSave({
+      ...projectWithComposition(),
+      editorState: {
+        timeline: { displacement: 0, zoom: 1 },
+        timelineMode: "composition",
+        timelineLayers: {
+          compositionLayers: [{ id: "comp", name: "Composition" }],
+          adjustmentLayers: [{ id: "adjust", name: "Adjust" }],
+          motionLayers: [{ id: "motion", kind: "empty", name: "Motion" }],
+        },
+      },
+      timelines: [{
+        id: "tl_main",
+        name: "Main",
+        filePath: "timelines/tl_main.timeline.json",
+        clips: [{ id: composition.id, compositionId: composition.id, duration: composition.duration, motionBlocks: composition.motionBlocks, zoomMarkers: [], translationMarkers: [] }],
+        adjustmentLayers: [
+          { id: "live", name: "Live", layerId: "adjust", start: 0, duration: 1, effect: { effectId: "clipper.adjustment.colourGrade", params: {} } },
+          { id: "stale", name: "Stale", layerId: "removed_row", start: 0, duration: 10, effect: { effectId: "clipper.adjustment.colourGrade", params: {} } },
+        ],
+        settings: {},
+      }],
+    });
+
+    expect(serialized.timelines?.[0]?.adjustmentLayers?.map((layer) => layer.id)).toEqual(["live"]);
+    expect(normalizeProject(serialized).scenes[0].adjustmentLayers!.map((layer) => layer.id)).toEqual(["live"]);
   });
 
   it("deletes a composition and removes all timeline clips that reference it", () => {
@@ -75,5 +147,13 @@ describe("project normalization", () => {
     expect(deleted.compositionLibrary).toEqual([]);
     expect(deleted.timelines?.[0].clips).toEqual([]);
     expect(deleted.scenes[0].compositions).toEqual([]);
+  });
+
+  it("creates one blank default row for each timeline category", () => {
+    const normalized = normalizeProject(projectWithComposition());
+
+    expect(normalized.editorState?.timelineLayers?.compositionLayers).toEqual([{ id: "comp", name: "Composition", hidden: undefined }]);
+    expect(normalized.editorState?.timelineLayers?.adjustmentLayers).toEqual([{ id: "adjust", name: "Adjust", hidden: undefined }]);
+    expect(normalized.editorState?.timelineLayers?.motionLayers).toEqual([{ id: "motion", kind: "empty", name: "Motion", hidden: undefined }]);
   });
 });

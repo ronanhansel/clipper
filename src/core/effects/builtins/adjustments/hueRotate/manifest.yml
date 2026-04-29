@@ -1,0 +1,18 @@
+id: clipper.adjustment.hueRotate
+category: adjustment
+name: Hue Rotate
+label: Hue Rotate
+group: Visual
+accent: "#42d9e8"
+previewColor: "#8f65f2"
+timelineGradient: {"from":"#9b8cff","to":"#e246b8","text":"#ffffff"}
+defaultDuration: 3
+defaultParams: {"degrees":30}
+paramControls:
+  - key: degrees
+    label: Degrees
+    type: number
+    min: -180
+    max: 180
+    step: 1
+    defaultValue: 30

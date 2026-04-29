@@ -1,7 +1,6 @@
-import { roundTenth } from "./math";
 import type { Point, ZoomMarker } from "./types";
 
-type MendedMarker = { id: string; layerId?: string; start: number; duration: number; snapIn?: boolean; snapOut?: boolean };
+type MendedMarker = { id: string; layerId?: string; start: number; duration: number; snapIn?: boolean; snapOut?: boolean; mendInId?: string; mendOutId?: string };
 
 function getMendedMarkerLayerId(marker: MendedMarker) {
   return marker.layerId ?? "";
@@ -14,6 +13,10 @@ function getMendedMarkerLayer(markers: MendedMarker[], markerId: string) {
   return markers.filter((marker) => getMendedMarkerLayerId(marker) === layerId).sort((left, right) => left.start - right.start);
 }
 
+function isExplicitMendedPair(previous: MendedMarker, next: MendedMarker) {
+  return Boolean(previous.snapOut && next.snapIn && previous.mendOutId === next.id && next.mendInId === previous.id);
+}
+
 export function isZoomMarkerMended(markers: MendedMarker[], markerId: string) {
   const sortedMarkers = getMendedMarkerLayer(markers, markerId);
 
@@ -23,8 +26,8 @@ export function isZoomMarkerMended(markers: MendedMarker[], markerId: string) {
 
     const previous = sortedMarkers[index - 1];
     const next = sortedMarkers[index + 1];
-    const mendedToPrevious = Boolean(previous?.snapOut && marker.snapIn && roundTenth(previous.start + previous.duration) === roundTenth(marker.start));
-    const mendedToNext = Boolean(marker.snapOut && next?.snapIn && roundTenth(marker.start + marker.duration) === roundTenth(next.start));
+    const mendedToPrevious = Boolean(previous && isExplicitMendedPair(previous, marker));
+    const mendedToNext = Boolean(next && isExplicitMendedPair(marker, next));
     return mendedToPrevious || mendedToNext;
   }
 
@@ -42,14 +45,14 @@ export function getMendedMarkerIds(markers: MendedMarker[], markerId: string) {
   while (firstIndex > 0) {
     const previous = sortedMarkers[firstIndex - 1];
     const current = sortedMarkers[firstIndex];
-    if (!previous.snapOut || !current.snapIn || roundTenth(previous.start + previous.duration) !== roundTenth(current.start)) break;
+    if (!isExplicitMendedPair(previous, current)) break;
     firstIndex -= 1;
   }
 
   while (lastIndex < sortedMarkers.length - 1) {
     const current = sortedMarkers[lastIndex];
     const next = sortedMarkers[lastIndex + 1];
-    if (!current.snapOut || !next.snapIn || roundTenth(current.start + current.duration) !== roundTenth(next.start)) break;
+    if (!isExplicitMendedPair(current, next)) break;
     lastIndex += 1;
   }
 
@@ -66,7 +69,7 @@ export function normalizeMendedZoomMarkerFocus(markers: ZoomMarker[]) {
     for (let index = 0; index < sortedMarkers.length; index += 1) {
       const marker = sortedMarkers[index];
       const previous = sortedMarkers[index - 1];
-      const mendedToPrevious = Boolean(previous?.snapOut && marker.snapIn && roundTenth(previous.start + previous.duration) === roundTenth(marker.start));
+      const mendedToPrevious = Boolean(previous && isExplicitMendedPair(previous, marker));
       if (!mendedToPrevious) sharedFocus = marker.focus;
       if (sharedFocus) focusById.set(marker.id, sharedFocus);
     }

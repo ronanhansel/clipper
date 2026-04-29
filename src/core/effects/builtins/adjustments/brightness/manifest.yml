@@ -1,0 +1,18 @@
+id: clipper.adjustment.brightness
+category: adjustment
+name: Brightness
+label: Brightness
+group: Visual
+accent: "#ffd166"
+previewColor: "#8f65f2"
+timelineGradient: {"from":"#ffe08a","to":"#d89200","text":"#241800"}
+defaultDuration: 3
+defaultParams: {"amount":1.15}
+paramControls:
+  - key: amount
+    label: Amount
+    type: number
+    min: 0
+    max: 3
+    step: 0.05
+    defaultValue: 1.15

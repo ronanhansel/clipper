@@ -38,6 +38,7 @@ export function normalizeMotionBlocks(blocks: MotionBlock[] | undefined): Motion
     const params = normalizeMotionBlockParams(block);
     return [{
       ...block,
+      name: normalizeOptionalString(block.name),
       layerId: block.layerId || definition.id,
       start: roundTwo(block.start),
       duration: roundTwo(Math.max(block.duration, 0.1)),
@@ -45,6 +46,8 @@ export function normalizeMotionBlocks(blocks: MotionBlock[] | undefined): Motion
       ease: block.ease ?? params.ease,
       focus: normalizePoint(block.focus) ?? params.focus,
       followId: block.followId ?? params.followId,
+      mendInId: block.mendInId ?? params.mendInId,
+      mendOutId: block.mendOutId ?? params.mendOutId,
       middleEase: block.middleEase ?? params.middleEase,
       middleTransition: block.middleTransition ?? params.middleTransition,
       perspective: normalizePerspective(block.perspective) ?? params.perspective,
@@ -111,6 +114,10 @@ function normalizePoint(value: unknown): Point | undefined {
 function normalizeOptionalNumber(value: unknown) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? roundTwo(numeric) : undefined;
+}
+
+function normalizeOptionalString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 function normalizePerspective(value: unknown): PerspectiveSettings | undefined {

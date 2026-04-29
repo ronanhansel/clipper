@@ -4,6 +4,7 @@ import { SimpleTree, Tree, type CursorProps, type DragPreviewProps, type MoveHan
 import type { ContextMenuItem, ContextMenuState } from "../app/types";
 import { getParentAssetId, type AssetSortMode } from "../core/assetTree";
 import type { AssetItem, CompositionClip, FileManagerState, FileManagerStateNode, TimelineDocument } from "../core/types";
+import { compositionDragPreviewEvent, compositionPointerDragEvent, startClipperPointerDrag } from "../lib/pointerDrag";
 import { AppContextMenu } from "./AppContextMenu";
 import { Input } from "./ui/input";
 
@@ -18,6 +19,8 @@ type FileManagerTreeNode =
   | { id: string; kind: "timeline"; name: string; timeline: TimelineDocument }
   | { id: string; kind: "asset-folder"; asset: AssetItem; name: string; children: FileManagerTreeNode[] }
   | { id: string; kind: "asset-file"; asset: AssetItem; name: string };
+
+type FileManagerDropTarget = { dragIds: string[]; parentId: string | null; index: number };
 
 export type FileManagerTreeSnapshot = {
   assets: AssetItem[];
@@ -204,7 +207,7 @@ function FileManagerPanel() {
   return (
     <section ref={managerRef} className="min-h-0 min-w-0 overflow-auto rounded-[14px] border border-dashed border-[#303646] bg-[#151821] p-3" onContextMenu={openProjectMenu} onDragOver={handleProjectDragOver} onDrop={handleProjectDrop} onKeyDown={handleFileManagerKeyDown} onPointerDown={handleFileManagerPointerDown}>
       <div className="mb-2 flex items-center justify-between px-0.5">
-        <h3 className="text-[11px] font-extrabold uppercase tracking-[0.24em] text-[#aeb3c1]">File Manager</h3>
+        <h3 className="text-[13px] font-semibold text-[#aeb3c1]">File Manager</h3>
         <button className="grid h-7 w-7 place-items-center rounded-md text-[#dfe2ea] hover:bg-[#20232c]" aria-label="Create file manager item" onClick={openCreateMenu} type="button"><Plus size={17} /></button>
       </div>
       <UnifiedFileManagerTree />
@@ -230,7 +233,7 @@ function UnifiedFileManagerTree() {
   const nativeMoveCompletedRef = useRef(false);
   const fallbackDropAppliedRef = useRef(false);
   const fallbackDragIdRef = useRef<string | null>(null);
-  const fallbackDropRef = useRef<{ dragIds: string[]; parentId: string | null; index: number } | null>(null);
+  const fallbackDropRef = useRef<FileManagerDropTarget | null>(null);
   const marqueeSelectionRef = useRef<{ startX: number; startY: number; pointerId: number; active: boolean } | null>(null);
   const [dropCursorVisible, setDropCursorVisible] = useState(false);
   const [dropPointerY, setDropPointerY] = useState<number | null>(null);
@@ -253,8 +256,9 @@ function UnifiedFileManagerTree() {
     const localX = mouse.x - rect.left;
     const localY = mouse.y - rect.top;
     setDropPointerY(localY);
-    const destination = arboristTreeRef.current?.state.dnd;
-    fallbackDropRef.current = destination?.dragIds.includes(node.id) && destination.index !== null ? { dragIds: destination.dragIds, parentId: destination.parentId === "__REACT_ARBORIST_INTERNAL_ROOT__" ? null : destination.parentId, index: destination.index } : null;
+    const api = arboristTreeRef.current;
+    const dragIds = api?.state.dnd.dragIds.includes(node.id) ? api.state.dnd.dragIds : [node.id];
+    fallbackDropRef.current = api ? getPointerFileTreeDrop(api, latestTreeRef.current, dragIds, localX, localY, rect.width) ?? getArboristFileTreeDrop(api, latestTreeRef.current, node.id, localX, localY, rect.width, treeHeight) : null;
     setDropCursorVisible(localX >= 0 && localX <= rect.width && localY >= FILE_MANAGER_TOP_DROP_PADDING && localY <= rowDropHeight && visibleRowCount > 0);
   }, [rowDropHeight, tree.length, treeHeight, visibleRowCount]);
 
@@ -431,7 +435,11 @@ function isFileManagerInteractiveTarget(target: HTMLElement) {
 function FileManagerTreeRow({ attrs, children, innerRef, node }: RowRendererProps<FileManagerTreeNode>) {
   const { onSelectTimeline } = useFileManager();
 
-  return <div {...attrs} ref={innerRef} onFocus={(event) => event.stopPropagation()} onClick={(event) => { node.handleClick(event); if (node.data.kind === "timeline" && !event.metaKey && !event.shiftKey) onSelectTimeline(node.data.timeline.id); }}>
+  return <div {...attrs} ref={innerRef} onFocus={(event) => event.stopPropagation()} onClick={(event) => {
+    node.handleClick(event);
+    if (!event.metaKey && !event.shiftKey && isFileTreeFolderNode(node.data)) node.toggle();
+    if (node.data.kind === "timeline" && !event.metaKey && !event.shiftKey) onSelectTimeline(node.data.timeline.id);
+  }}>
     {children}
   </div>;
 }
@@ -490,7 +498,20 @@ function UnifiedTreeNode({ dragHandle, node, style }: NodeRendererProps<FileMana
   const Icon = data.kind === "asset-file" ? FileIcon : data.kind === "timeline" ? ChartNoAxesGantt : data.kind === "composition" ? Clapperboard : Folder;
   const label = data.kind === "timeline" ? `${data.name}.timeline` : data.name;
 
-  return <div ref={dragHandle} data-file-manager-row="true" style={style} className={`relative box-border grid h-full min-w-0 cursor-pointer grid-cols-[16px_18px_minmax(0,1fr)_auto] items-center gap-1.5 border px-1.5 text-[13px] font-bold ${node.isDragging ? "border-[var(--clipper-accent)] bg-[var(--clipper-accent-muted-surface)] opacity-60" : node.willReceiveDrop ? "border-[var(--clipper-accent)] bg-[var(--clipper-accent-muted-surface)]" : node.isSelected || (node.isFocused && node.tree.hasFocus) ? "border-transparent bg-[#242733]" : "border-transparent hover:bg-[#20232c]"}`} onMouseDownCapture={(event) => { if (event.detail !== 2 || !isFileTreeFolderNode(data) || (event.target instanceof HTMLElement && event.target.closest("button"))) return; event.preventDefault(); event.stopPropagation(); if (node.tree.isOpen(node.id)) node.tree.close(node.id); else node.tree.open(node.id); }} onContextMenu={openMenu}>
+  function startCompositionDrag(event: ReactPointerEvent<HTMLDivElement>) {
+    if (data.kind !== "composition" || node.isEditing) return;
+    event.stopPropagation();
+    startClipperPointerDrag({
+      accent: "#38a86d",
+      eventName: compositionPointerDragEvent,
+      label: data.name,
+      payload: { compositionId: data.composition.id, duration: data.composition.duration, label: data.name },
+      pointerEvent: event,
+      previewEventName: compositionDragPreviewEvent,
+    });
+  }
+
+  return <div ref={dragHandle} data-file-manager-row="true" style={style} className={`relative box-border grid h-full min-w-0 cursor-pointer grid-cols-[16px_18px_minmax(0,1fr)_auto] items-center gap-1.5 border px-1.5 text-[13px] font-bold ${node.isDragging ? "border-[var(--clipper-accent)] bg-[var(--clipper-accent-muted-surface)] opacity-60" : node.willReceiveDrop ? "border-[var(--clipper-accent)] bg-[var(--clipper-accent-muted-surface)]" : node.isSelected || (node.isFocused && node.tree.hasFocus) ? "border-transparent bg-[#242733]" : "border-transparent hover:bg-[#20232c]"}`} onContextMenu={openMenu} onPointerDown={startCompositionDrag}>
     {node.isInternal ? <button className="grid h-4 w-4 place-items-center rounded text-current hover:bg-black/15" aria-label={`${node.isOpen ? "Collapse" : "Expand"} ${data.name}`} onClick={(event) => { event.stopPropagation(); node.toggle(); }} onDoubleClick={(event) => event.stopPropagation()} type="button">{node.isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</button> : <span />}
     <Icon size={data.kind === "asset-file" || data.kind === "composition" || data.kind === "timeline" ? 16 : 17} className="text-current" />
     {node.isEditing ? <Input autoFocus className="h-7 min-w-0 border-[var(--clipper-accent)] bg-[#171920] px-1 py-0 text-[13px] font-bold" value={editDraft} onBlur={submitEdit} onChange={(event) => setEditDraft(event.target.value)} onClick={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === "Enter") submitEdit(); if (event.key === "Escape") node.reset(); }} /> : <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap px-1">{label}</span>}
@@ -696,6 +717,77 @@ function canDropFileTreeNode(draggedNode: FileManagerTreeNode, parentNode: FileM
 
   if (parentNode && parentNode.kind !== "project-folder") return false;
   return true;
+}
+
+function getPointerFileTreeDrop(api: TreeApi<FileManagerTreeNode>, tree: FileManagerTreeNode[], dragIds: string[], localX: number, localY: number, width: number): FileManagerDropTarget | null {
+  const visibleNodes = api.visibleNodes;
+  if (!visibleNodes.length || localX < 0 || localX > width || localY < FILE_MANAGER_TOP_DROP_PADDING || localY > FILE_MANAGER_TOP_DROP_PADDING + visibleNodes.length * FILE_MANAGER_ROW_HEIGHT) return null;
+
+  const rowIndex = Math.max(0, Math.min(visibleNodes.length - 1, Math.floor((localY - FILE_MANAGER_TOP_DROP_PADDING) / FILE_MANAGER_ROW_HEIGHT)));
+  const node = visibleNodes[rowIndex];
+  if (!node) return null;
+
+  const yInRow = localY - FILE_MANAGER_TOP_DROP_PADDING - rowIndex * FILE_MANAGER_ROW_HEIGHT;
+  const inTopHalf = yInRow < FILE_MANAGER_ROW_HEIGHT / 2;
+  const inMiddle = yInRow > FILE_MANAGER_ROW_HEIGHT / 4 && yInRow < FILE_MANAGER_ROW_HEIGHT * 0.75;
+  const atTop = !inMiddle && inTopHalf;
+  const hoverLevel = Math.round(Math.max(0, localX - FILE_MANAGER_INDENT) / FILE_MANAGER_INDENT);
+  const drop = getNodePointerDropTarget(node, hoverLevel, inTopHalf, inMiddle, atTop);
+  return drop && canDropFileTreeTarget(tree, dragIds, drop.parentId, drop.index) ? { ...drop, dragIds } : null;
+}
+
+function getArboristFileTreeDrop(api: TreeApi<FileManagerTreeNode>, tree: FileManagerTreeNode[], draggedId: string, localX: number, localY: number, width: number, height: number): FileManagerDropTarget | null {
+  const destination = api.state.dnd;
+  if (localX < 0 || localX > width || localY < FILE_MANAGER_TOP_DROP_PADDING || localY > height || !destination.dragIds.includes(draggedId) || destination.index === null) return null;
+  const parentId = destination.parentId === "__REACT_ARBORIST_INTERNAL_ROOT__" ? null : destination.parentId;
+  return canDropFileTreeTarget(tree, destination.dragIds, parentId, destination.index) ? { dragIds: destination.dragIds, parentId, index: destination.index } : null;
+}
+
+function getNodePointerDropTarget(node: NodeApi<FileManagerTreeNode>, hoverLevel: number, inTopHalf: boolean, inMiddle: boolean, atTop: boolean): Omit<FileManagerDropTarget, "dragIds"> | null {
+  if (node.isInternal && inMiddle) return { parentId: node.id, index: 0 };
+
+  const [above, below] = getFileTreeNodesAroundCursor(node, inTopHalf, inMiddle, atTop);
+  if (!above) return { parentId: fileTreeNodeParentId(below), index: 0 };
+  if (above.isLeaf || above.isClosed) return walkFileTreeDropUpFrom(above, clampFileTreeLevel(hoverLevel, below?.level ?? 0, above.level));
+  if (above.isOpen && !above.children?.length) {
+    const level = clampFileTreeLevel(hoverLevel, 0, above.level + 1);
+    return level > above.level ? { parentId: above.id, index: 0 } : walkFileTreeDropUpFrom(above, level);
+  }
+  return { parentId: above.id, index: 0 };
+}
+
+function getFileTreeNodesAroundCursor(node: NodeApi<FileManagerTreeNode>, inTopHalf: boolean, inMiddle: boolean, atTop: boolean): [NodeApi<FileManagerTreeNode> | null, NodeApi<FileManagerTreeNode> | null] {
+  if (node.isInternal) {
+    if (atTop) return [node.prev, node];
+    if (inMiddle) return [node, node];
+    return [node, node.next];
+  }
+  return inTopHalf ? [node.prev, node] : [node, node.next];
+}
+
+function walkFileTreeDropUpFrom(node: NodeApi<FileManagerTreeNode>, level: number): Omit<FileManagerDropTarget, "dragIds"> {
+  let drop = node;
+  while (drop.parent && drop.level > level) drop = drop.parent;
+  return { parentId: fileTreeNodeParentId(drop.parent), index: drop.childIndex + 1 };
+}
+
+function fileTreeNodeParentId(node: NodeApi<FileManagerTreeNode> | null | undefined) {
+  return node && !node.isRoot ? node.id : null;
+}
+
+function clampFileTreeLevel(level: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, level));
+}
+
+function canDropFileTreeTarget(tree: FileManagerTreeNode[], dragIds: string[], parentId: string | null, index: number) {
+  const draggedNodes = dragIds.flatMap((id) => {
+    const node = findFileTreeNode(tree, id);
+    return node ? [node] : [];
+  });
+  const parentNode = parentId ? findFileTreeNode(tree, parentId) : null;
+  const draggedIdSet = new Set(dragIds);
+  const siblings = getFileTreeChildren(tree, parentId).filter((node) => !draggedIdSet.has(node.id));
+  return draggedNodes.length === dragIds.length && draggedNodes.every((draggedNode) => canDropFileTreeNode(draggedNode, parentNode, siblings, index));
 }
 
 function createFileManagerTreeSnapshot(nodes: FileManagerTreeNode[], rootPath: string, openState?: Record<string, boolean>): FileManagerTreeSnapshot {

@@ -1,4 +1,8 @@
+import type { TimelineAdjustmentLayerState, TimelineCompositionLayerState, TimelineLayerState, TimelineMotionLayerState } from "./types";
+
 export type TimelineLayerCategory = "adjust" | "motion" | "comp";
+export type TimelineLayerStateKey = "compositionLayers" | "adjustmentLayers" | "motionLayers";
+export type TimelineLayerStateItem = TimelineCompositionLayerState | TimelineAdjustmentLayerState | TimelineMotionLayerState;
 
 export type TimelineLayerRow = {
   key: string;
@@ -41,4 +45,75 @@ export function getTimelineLayerDragPreview(layout: TimelineLayerLayout, sourceL
     deltaY: layout.starts[targetIndex] - layout.starts[sourceIndex],
     height: layout.heights[targetIndex],
   };
+}
+
+export function getTimelineLayerStateKey(category: TimelineLayerCategory): TimelineLayerStateKey {
+  if (category === "comp") return "compositionLayers";
+  if (category === "adjust") return "adjustmentLayers";
+  return "motionLayers";
+}
+
+export function getTimelineStateLayers(state: TimelineLayerState, category: TimelineLayerCategory, defaults: TimelineLayerState): TimelineLayerStateItem[] {
+  const key = getTimelineLayerStateKey(category);
+  return state[key]?.length ? state[key]! : defaults[key] ?? [];
+}
+
+export function insertTimelineStateLayer<T extends TimelineLayerStateItem>(layers: T[], layer: T, targetLayerId?: string, placement: "before" | "after" = "after") {
+  const targetIndex = targetLayerId ? layers.findIndex((item) => item.id === targetLayerId) : -1;
+  if (targetIndex < 0) return [...layers, layer];
+  const next = [...layers];
+  next.splice(placement === "before" ? targetIndex : targetIndex + 1, 0, layer);
+  return next;
+}
+
+export function renameTimelineStateLayer(state: TimelineLayerState, category: TimelineLayerCategory, layerId: string, name: string, defaults: TimelineLayerState): TimelineLayerState {
+  const key = getTimelineLayerStateKey(category);
+  return { ...state, [key]: getTimelineStateLayers(state, category, defaults).map((layer) => (layer.id === layerId ? { ...layer, name } : layer)) };
+}
+
+export function toggleTimelineStateLayerHidden(state: TimelineLayerState, category: TimelineLayerCategory, layerId: string, defaults: TimelineLayerState): TimelineLayerState {
+  const key = getTimelineLayerStateKey(category);
+  return { ...state, [key]: getTimelineStateLayers(state, category, defaults).map((layer) => (layer.id === layerId ? { ...layer, hidden: !layer.hidden || undefined } : layer)) };
+}
+
+export function moveTimelineStateLayer(state: TimelineLayerState, category: TimelineLayerCategory, layerId: string, direction: "up" | "down", defaults: TimelineLayerState): TimelineLayerState {
+  const key = getTimelineLayerStateKey(category);
+  const layers = getTimelineStateLayers(state, category, defaults);
+  const index = layers.findIndex((layer) => layer.id === layerId);
+  const targetIndex = direction === "up" ? index - 1 : index + 1;
+  if (index < 0 || targetIndex < 0 || targetIndex >= layers.length) return state;
+  const nextLayers = [...layers];
+  [nextLayers[index], nextLayers[targetIndex]] = [nextLayers[targetIndex], nextLayers[index]];
+  return { ...state, [key]: nextLayers };
+}
+
+export function removeTimelineStateLayer(state: TimelineLayerState, category: TimelineLayerCategory, layerId: string, defaults: TimelineLayerState): TimelineLayerState {
+  const key = getTimelineLayerStateKey(category);
+  const layers = getTimelineStateLayers(state, category, defaults);
+  if (layers.length <= 1) return state;
+  return { ...state, [key]: layers.filter((layer) => layer.id !== layerId) };
+}
+
+export function getTimelineBlockLayerPreview(layout: TimelineLayerLayout, category: TimelineLayerCategory, sourceLayerId: string | undefined, clientY: number, containerRect: Pick<DOMRect, "top"> | null | undefined) {
+  const targetLayerId = getTimelineLayerRowAtClientY(layout, containerRect, clientY, category)?.row.key;
+  return getTimelineLayerDragPreview(layout, sourceLayerId, targetLayerId);
+}
+
+export function applyTimelineBlockPreview(element: HTMLElement, options: { deltaX: number; deltaY?: number; widthDelta?: number; height?: number; resizeProperty?: string }) {
+  element.style.transform = `translate3d(${options.deltaX}px, ${options.deltaY ?? 0}px, 0)`;
+  if (options.widthDelta !== undefined) element.style.setProperty(options.resizeProperty ?? "--clipper-timeline-resize-width", `${options.widthDelta}px`);
+  if (options.height !== undefined) element.style.height = `${options.height}px`;
+  else element.style.removeProperty("height");
+  element.style.willChange = options.widthDelta !== undefined ? "transform, width" : "transform";
+  element.style.zIndex = "25";
+  element.parentElement?.style.setProperty("overflow", "visible");
+}
+
+export function clearTimelineBlockPreview(element: HTMLElement, resizeProperty = "--clipper-timeline-resize-width") {
+  element.style.removeProperty("transform");
+  element.style.removeProperty(resizeProperty);
+  element.style.removeProperty("height");
+  element.style.removeProperty("will-change");
+  element.style.removeProperty("z-index");
+  element.parentElement?.style.removeProperty("overflow");
 }

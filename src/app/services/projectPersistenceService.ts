@@ -1,12 +1,11 @@
 import JSZip from "jszip";
-import { compositionToSource, loadCompositionsFromSource } from "../../core/compositionSource";
-import { normalizeProject, serializeProjectForSave, stripLegacyMotionMarkers } from "../../core/project";
-import { FRAME_HEIGHT, FRAME_WIDTH, type CompositionDocument, type EditorState, type Part, type ProjectManifest, type TimelineDocument } from "../../core/types";
+import { loadCompositionsFromSource } from "../../core/compositionSource";
+import { normalizeProject, serializeProjectForSave } from "../../core/project";
+import { FRAME_HEIGHT, FRAME_WIDTH, type CompositionClip, type CompositionDocument, type EditorState, type ProjectManifest, type TimelineDocument } from "../../core/types";
 import { clipperHost } from "../clipperHost";
 
 type LoadProjectInput = {
   manifestPath: string;
-  fallbackProject: ProjectManifest;
 };
 
 type SaveProjectInput = {
@@ -15,62 +14,21 @@ type SaveProjectInput = {
 };
 
 class ProjectPersistenceService {
-  async loadProject({ manifestPath, fallbackProject }: LoadProjectInput) {
-    try {
-      if (manifestPath.endsWith(".clipper")) {
-        const project = await loadZipProject(manifestPath);
-        return {
-          project,
-          sourceStatus: `Project loaded from ${manifestPath}.`,
-          usedFallback: false,
-        };
-      }
-
-      const content = await clipperHost.readTextFile(manifestPath);
-      const manifestProject = normalizeProject(stripLegacyMotionMarkers(JSON.parse(content) as ProjectManifest));
-      const migratedSources = { ...(manifestProject.compositionSources ?? {}) };
-      const loadedLibrary = await Promise.all((manifestProject.compositionLibrary ?? []).map(async (composition) => {
-        const embeddedSource = migratedSources[composition.filePath];
-        if (embeddedSource === undefined) {
-          migratedSources[composition.filePath] = compositionToSource(composition);
-          return composition;
-        }
-
-        try {
-          return await compositionFromEmbeddedSource(composition, embeddedSource);
-        } catch {
-          const fallbackSource = compositionToSource(composition);
-          migratedSources[composition.filePath] = fallbackSource;
-          return composition;
-        }
-      }));
-      const loadedLibraryByPath = new Map(loadedLibrary.map((composition) => [composition.filePath, composition]));
-      const project = normalizeProject({
-        ...manifestProject,
-        compositionSources: migratedSources,
-        compositionLibrary: loadedLibrary,
-        scenes: await Promise.all(manifestProject.scenes.map(async (scene) => ({
-          ...scene,
-          compositions: scene.compositions.map((composition) => {
-            const libraryComposition = loadedLibraryByPath.get(composition.filePath);
-            return libraryComposition ? { ...libraryComposition, motionBlocks: composition.motionBlocks, zoomMarkers: composition.zoomMarkers, translationMarkers: composition.translationMarkers, snapshot: composition.snapshot } : composition;
-          }),
-        }))),
-      });
-
+  async loadProject({ manifestPath }: LoadProjectInput) {
+    if (manifestPath.endsWith(".clipper")) {
+      const project = await loadZipProject(manifestPath);
       return {
         project,
         sourceStatus: `Project loaded from ${manifestPath}.`,
-        usedFallback: false,
-      };
-    } catch (error) {
-      const project = normalizeProject(fallbackProject);
-      return {
-        project,
-        sourceStatus: error instanceof Error ? `Using bundled sample project. ${error.message}` : "Using bundled sample project.",
-        usedFallback: true,
       };
     }
+
+    const content = await clipperHost.readTextFile(manifestPath);
+    const project = normalizeProject(JSON.parse(content) as ProjectManifest);
+    return {
+      project,
+      sourceStatus: `Project loaded from ${manifestPath}.`,
+    };
   }
 
   async saveProject({ manifestPath, project }: SaveProjectInput) {
@@ -111,12 +69,12 @@ async function loadZipProject(manifestPath: string) {
   const timelines = await loadZipTimelines(zip);
   const compositions = await loadZipCompositions(zip);
   return normalizeProject({
-    ...stripLegacyMotionMarkers(manifestProject),
+    ...manifestProject,
     timelines,
     compositions,
     compositionLibrary: compositions,
     compositionSources: Object.fromEntries(compositions.map((composition) => [composition.filePath, composition.source])),
-    scenes: manifestProject.scenes?.length ? manifestProject.scenes : timelines.map((timeline) => ({ id: timeline.id, name: timeline.name, adjustmentLayers: timeline.adjustmentLayers, compositions: [] })),
+    scenes: manifestProject.scenes ?? [],
   });
 }
 
@@ -132,11 +90,7 @@ async function loadZipCompositions(zip: JSZip) {
     const source = await file.async("string");
     const id = getSourceCompositionId(source) ?? file.name.replace(/^compositions\//, "").replace(/\.ts$/, "");
     const baseComposition = createBaseComposition(id, file.name, source);
-    try {
-      return { ...(await compositionFromEmbeddedSource(baseComposition, source)), source } as CompositionDocument;
-    } catch {
-      return baseComposition;
-    }
+    return { ...(await compositionFromEmbeddedSource(baseComposition, source)), source } as CompositionDocument;
   }));
 }
 
@@ -162,7 +116,9 @@ async function saveZipProject(manifestPath: string, project: ProjectManifest) {
   }
 
   for (const composition of normalized.compositions ?? []) {
-    zip.file(`compositions/${safeZipName(composition.id)}.ts`, composition.source ?? normalized.compositionSources?.[composition.filePath] ?? compositionToSource(composition));
+    const source = composition.source ?? normalized.compositionSources?.[composition.filePath];
+    if (source === undefined) throw new Error(`Composition ${composition.filePath} is missing source.`);
+    zip.file(`compositions/${safeZipName(composition.id)}.ts`, source);
   }
 
   await clipperHost.writeBinaryFile(manifestPath, await zip.generateAsync({ type: "base64", compression: "DEFLATE" }));
@@ -204,7 +160,7 @@ function safeTimelinePath(timeline: TimelineDocument) {
   return `timelines/${safeZipName(timeline.id)}.timeline.json`;
 }
 
-async function compositionFromEmbeddedSource(composition: Part, source: string) {
+async function compositionFromEmbeddedSource(composition: CompositionClip, source: string) {
   return (await loadCompositionsFromSource([composition], async () => source))[0];
 }
 

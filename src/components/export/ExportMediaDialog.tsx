@@ -96,7 +96,7 @@ export function VideoExportOverlay({ cancelling, progress, onCancel }: { cancell
     <div className="fixed inset-0 z-[100] grid place-items-center bg-[#050609]/95 backdrop-blur-[3px] animate-[clipper-export-fade-in_180ms_ease-out_both]">
       <div className="grid w-[min(300px,calc(100vw-48px))] justify-items-center gap-3 text-center">
         <div className="grid w-full gap-2.5">
-          <h2 className="m-0 text-[17px] font-extrabold tracking-[-0.03em] text-white">Exporting video • {percent}%</h2>
+          <h2 className="m-0 text-[17px] font-extrabold text-white">Exporting video • {percent}%</h2>
           <div className="h-1 w-full overflow-hidden rounded-full bg-[#242936]">
             <div className="h-full rounded-full bg-white transition-[width] duration-200 ease-out" style={{ width: `${percent}%` }} />
           </div>

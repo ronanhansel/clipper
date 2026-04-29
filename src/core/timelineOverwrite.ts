@@ -55,10 +55,11 @@ export function getInsertedOverwriteRanges(markers: TimelineOverwriteMarker[], i
 export function overwriteTimelineMarkers<T extends TimelineOverwriteMarker>(markers: T[], overwriteRanges: TimelineOverwriteRange[], options: { createSplitId: (marker: T, range: TimelineOverwriteRange, index: number) => string }) {
   let splitIndex = 0;
   let nextMarkers = markers;
+  const insertedIds = new Set(overwriteRanges.map((range) => range.id));
 
   for (const range of overwriteRanges) {
     nextMarkers = nextMarkers.flatMap((marker) => {
-      if (marker.id === range.id || (marker.layerId ?? "") !== range.layerId) return [marker];
+      if (insertedIds.has(marker.id) || (marker.layerId ?? "") !== range.layerId) return [marker];
       splitIndex += 1;
       return trimMarkerForOverwrite(marker, range.start, range.end, options.createSplitId(marker, range, splitIndex));
     });

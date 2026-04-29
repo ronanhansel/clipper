@@ -1,0 +1,39 @@
+id: clipper.adjustment.colourGrade
+category: adjustment
+name: Colour Grade
+label: Colour Grade
+group: Visual
+accent: "#ffd166"
+previewColor: "#8f65f2"
+timelineGradient: {"from":"#a77cff","to":"#5f35c6","text":"#ffffff"}
+defaultDuration: 3
+defaultParams: {"brightness":0,"contrast":0,"saturation":0,"hue":0}
+paramControls:
+  - key: brightness
+    label: Brightness
+    type: number
+    min: -100
+    max: 100
+    step: 1
+    defaultValue: 0
+  - key: contrast
+    label: Contrast
+    type: number
+    min: -100
+    max: 100
+    step: 1
+    defaultValue: 0
+  - key: saturation
+    label: Saturation
+    type: number
+    min: -100
+    max: 100
+    step: 1
+    defaultValue: 0
+  - key: hue
+    label: Hue
+    type: number
+    min: -180
+    max: 180
+    step: 1
+    defaultValue: 0

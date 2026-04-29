@@ -57,7 +57,7 @@ export function DialogFooter({ className, ...props }: ComponentPropsWithoutRef<"
 export const DialogTitle = forwardRef<
   ElementRef<typeof DialogPrimitive.Title>,
   ComponentPropsWithoutRef<typeof DialogPrimitive.Title>
->(({ className, ...props }, ref) => <DialogPrimitive.Title ref={ref} className={cn("text-base font-extrabold tracking-[-0.01em] text-white", className)} {...props} />);
+>(({ className, ...props }, ref) => <DialogPrimitive.Title ref={ref} className={cn("text-base font-extrabold text-white", className)} {...props} />);
 DialogTitle.displayName = DialogPrimitive.Title.displayName;
 
 export const DialogDescription = forwardRef<

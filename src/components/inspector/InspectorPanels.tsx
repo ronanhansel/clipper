@@ -5,8 +5,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { chartTypes, formatChartTypeLabel, type ChartDatum, type ChartSpec, type ChartStyle, type ChartType } from "../../core/chart";
 import { MAX_PART_DURATION_SECONDS, FRAME_HEIGHT, FRAME_WIDTH, type AdjustmentLayer, type BackgroundLayer, type Bounds, type FrameObject, type MotionEase, type Part, type PartFrame, type Point, type TranslationMarker, type ZoomMarker } from "../../core/types";
 import { clamp, roundTenth, roundTwo } from "../../core/math";
-import { getFrameSkipEvery } from "../../core/effects/adjustments";
-import { getAdjustmentEffectPackage } from "../../core/effects/registry";
+import { getAdjustmentEffectPackage, getMotionEffectPackage } from "../../core/effects/registry";
+import type { AdjustmentEffectDisableCondition, AdjustmentEffectParamControl, AdjustmentEffectPointControl } from "../../core/effects/types";
 import { getMotionBlockEffectKind } from "../../core/motionEffects";
 import { minimumZoomDuration, mutedCaps, panelCard } from "../../app/config";
 import { Checkbox } from "../ui/checkbox";
@@ -18,8 +18,8 @@ import { Textarea } from "../ui/textarea";
 import { ColorSelector, formatStyleLabel, getEditableColorStyleEntries, isHexColor } from "../ColorSelector";
 import { clipperHost } from "../../app/clipperHost";
 
-const defaultFontFamily = "Inter, ui-sans-serif, system-ui, sans-serif";
-const defaultFontOption = { value: defaultFontFamily, label: "Inter / System" };
+const defaultFontFamily = "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+const defaultFontOption = { value: defaultFontFamily, label: "System" };
 const defaultMotionEaseSelectValue = "default";
 const easePreviewHoverDelayMs = 600;
 const easePreviewSkipDelayMs = 900;
@@ -139,7 +139,7 @@ function EaseSelectItem({ value, label, ease }: { value: string; label: string; 
       <TooltipContent side="right" align="center" sideOffset={16} className="w-[190px] max-w-none overflow-hidden rounded-[8px] border-[#343946] bg-[#10131a] p-0 shadow-[0_22px_70px_rgba(0,0,0,0.54)] data-[state=instant-open]:animate-[clipper-tooltip-in_160ms_cubic-bezier(0.16,1,0.3,1)_forwards]">
         <div className="border-b border-[#252a35] bg-[radial-gradient(circle_at_72%_0%,rgb(var(--clipper-accent-rgb)/0.18),transparent_42%),linear-gradient(180deg,#171b24,#10131a)] px-3 py-2">
           <strong className="block text-[11px] font-extrabold text-white">{label}</strong>
-          <span className="mt-0.5 block text-[9px] font-bold uppercase tracking-[0.18em] text-[#8d94a3]">Timing preview</span>
+          <span className="mt-0.5 block text-[10px] font-medium text-[#8d94a3]">Timing preview</span>
         </div>
         <div className="grid gap-3 px-3 py-3">
           <svg viewBox="0 0 132 72" className="h-[82px] w-full overflow-visible" aria-hidden="true">
@@ -211,14 +211,14 @@ export function FrameInspector({ part, onDurationChange, onFrameChange, onBackgr
   return (
     <div className="grid gap-3">
       <label className={`grid gap-1.5 ${mutedCaps}`}>Duration<Input type="number" min={minimumDuration} max={MAX_PART_DURATION_SECONDS} step={0.1} value={part.duration} onChange={(event) => updateDuration(event.target.value)} /></label>
-      <label className={`grid gap-1.5 ${mutedCaps}`}>Frame BG Color<ColorSelector value={String(part.frame.style.background ?? "#000000")} onChange={updateFrameBackground} /></label>
-      {isHexColor(String(part.background.style.background ?? "")) ? <label className={`grid gap-1.5 ${mutedCaps}`}>Layer BG Color<ColorSelector value={String(part.background.style.background)} onChange={updateBackgroundColor} /></label> : null}
+      <label className={`grid gap-1.5 ${mutedCaps}`}>Frame background color<ColorSelector value={String(part.frame.style.background ?? "#000000")} onChange={updateFrameBackground} /></label>
+      {isHexColor(String(part.background.style.background ?? "")) ? <label className={`grid gap-1.5 ${mutedCaps}`}>Layer background color<ColorSelector value={String(part.background.style.background)} onChange={updateBackgroundColor} /></label> : null}
       <label className="flex cursor-pointer items-center gap-3 rounded-[10px] border border-[#2d313b] bg-[#171920] p-3 text-sm font-bold text-[#dfe2ea] transition hover:border-[var(--clipper-accent)] hover:bg-[#20232c]">
         <Checkbox checked={Boolean(part.background.stretchToElements)} onCheckedChange={(checked) => updateBackgroundStretch(checked === true)} />
-        <span>Stretch BG</span>
+        <span>Stretch background</span>
       </label>
-      <label className={`grid gap-1.5 ${mutedCaps}`}>Background Style JSON<Textarea className="min-h-[120px] resize-y font-mono normal-case tracking-normal" value={JSON.stringify(part.background.style, null, 2)} onChange={(event) => updateBackgroundStyle(event.target.value)} /></label>
-      <label className={`grid gap-1.5 ${mutedCaps}`}>Background Motion JSON<Textarea className="min-h-[92px] resize-y font-mono normal-case tracking-normal" value={part.background.motion ? JSON.stringify(part.background.motion, null, 2) : ""} onChange={(event) => updateBackgroundMotion(event.target.value)} /></label>
+      <label className={`grid gap-1.5 ${mutedCaps}`}>Background style JSON<Textarea className="min-h-[120px] resize-y font-mono" value={JSON.stringify(part.background.style, null, 2)} onChange={(event) => updateBackgroundStyle(event.target.value)} /></label>
+      <label className={`grid gap-1.5 ${mutedCaps}`}>Background motion JSON<Textarea className="min-h-[92px] resize-y font-mono" value={part.background.motion ? JSON.stringify(part.background.motion, null, 2) : ""} onChange={(event) => updateBackgroundMotion(event.target.value)} /></label>
       <div className={panelCard}><span>Constant Elements</span><strong className="text-[13px]">{part.background.elements.length}</strong><small className="text-[#9b9da7]">Edit these in the composition code as background.elements.</small></div>
     </div>
   );
@@ -328,7 +328,7 @@ export function ChartInspector({ object, onChange }: { object: FrameObject; onCh
         {relevant.domains.includes("yDomain") ? <label className={`grid gap-1.5 ${mutedCaps}`}>Y Domain<Input value={chart.yDomain ? JSON.stringify(chart.yDomain) : ""} placeholder="[0, 100]" onChange={(event) => updateDomain("yDomain", event.target.value)} /></label> : null}
         {relevant.domains.includes("valueDomain") ? <label className={`grid gap-1.5 ${mutedCaps}`}>Value<Input value={chart.valueDomain ? JSON.stringify(chart.valueDomain) : ""} placeholder="[0, 100]" onChange={(event) => updateDomain("valueDomain", event.target.value)} /></label> : null}
       </div> : null}
-      <label className={`grid gap-1.5 ${mutedCaps}`}>Animation JSON<Textarea className="min-h-[92px] resize-y font-mono normal-case tracking-normal" value={chart.animation ? JSON.stringify(chart.animation, null, 2) : ""} onChange={(event) => updateAnimation(event.target.value)} /></label>
+      <label className={`grid gap-1.5 ${mutedCaps}`}>Animation JSON<Textarea className="min-h-[92px] resize-y font-mono" value={chart.animation ? JSON.stringify(chart.animation, null, 2) : ""} onChange={(event) => updateAnimation(event.target.value)} /></label>
       <ChartDataDialog chart={chart} open={dataEditorOpen} onOpenChange={setDataEditorOpen} onDataChange={updateData} />
     </div>
   );
@@ -404,12 +404,12 @@ function ChartDataDialog({ chart, open, onOpenChange, onDataChange }: { chart: C
                 textMedium: "#dfe2ea",
                 textLight: "#9b9da7",
                 textHeader: "#dfe2ea",
-                fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif",
+                fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
               }}
             />
           </div>
           <div className="flex items-center justify-between gap-3">
-            <span className="text-xs font-bold uppercase tracking-[0.12em] text-[#737884]">{chart.data.length} data rows</span>
+            <span className="text-xs font-medium text-[#737884]">{chart.data.length} data rows</span>
             <span className="text-xs font-semibold text-[#737884]">Empty rows are ignored automatically.</span>
           </div>
         </div>
@@ -755,7 +755,7 @@ export function ObjectInspector({ object, onChange }: { object: FrameObject; onC
         {(["x", "y", "width", "height"] as const).map((key) => <label className={`grid gap-1.5 ${mutedCaps}`} key={key}>{key}<Input type="number" value={object.bounds[key]} onChange={(event) => updateBounds(key, event.target.value)} /></label>)}
       </div>
       {isText ? <>
-        <label className={`grid gap-1.5 ${mutedCaps}`}>Content<Textarea className="min-h-[104px] resize-y normal-case tracking-normal" value={object.content ?? ""} onChange={(event) => updateTextContent(event.target.value)} /></label>
+        <label className={`grid gap-1.5 ${mutedCaps}`}>Content<Textarea className="min-h-[104px] resize-y" value={object.content ?? ""} onChange={(event) => updateTextContent(event.target.value)} /></label>
         <label className={`grid gap-1.5 ${mutedCaps}`}>Colour<ColorSelector value={textColor} onChange={(value) => updateStyleValue("color", value)} /></label>
         <FontSelector value={fontFamily} onChange={(value) => updateStyleValue("fontFamily", value)} />
         <div className="grid grid-cols-2 gap-2">
@@ -778,12 +778,12 @@ export function ObjectInspector({ object, onChange }: { object: FrameObject; onC
         </div></div>
       </> : null}
       {colorStyleEntries.length > 0 ? <div className="grid gap-2"><span className={mutedCaps}>Colours</span><div className="grid gap-2">{colorStyleEntries.map(([key, value]) => <label className={`grid gap-1.5 ${mutedCaps}`} key={key}>{formatStyleLabel(key)}<ColorSelector value={value} onChange={(nextValue) => updateStyleColor(key, nextValue)} /></label>)}</div></div> : null}
-      <label className={`grid gap-1.5 ${mutedCaps}`}>Motion JSON<Textarea className="min-h-[92px] resize-y font-mono normal-case tracking-normal" value={object.motion ? JSON.stringify(object.motion, null, 2) : ""} onChange={(event) => updateMotion(event.target.value)} /></label>
+      <label className={`grid gap-1.5 ${mutedCaps}`}>Motion JSON<Textarea className="min-h-[92px] resize-y font-mono" value={object.motion ? JSON.stringify(object.motion, null, 2) : ""} onChange={(event) => updateMotion(event.target.value)} /></label>
     </div>
   );
 }
 
-export function AdjustmentInspector({ layer, sceneDuration, onChange, onDelete }: { layer: AdjustmentLayer; sceneDuration: number; onChange: (updater: (layer: AdjustmentLayer) => AdjustmentLayer) => void; onDelete: () => void }) {
+export function AdjustmentInspector({ layer, sceneDuration, pickingPointKey, onChange, onDelete, onPickPoint }: { layer: AdjustmentLayer; sceneDuration: number; pickingPointKey?: string | null; onChange: (updater: (layer: AdjustmentLayer) => AdjustmentLayer) => void; onDelete: () => void; onPickPoint?: (control: AdjustmentEffectPointControl) => void }) {
   const effect = getAdjustmentEffectPackage(layer.effect.effectId);
 
   function updateText(key: "name", value: string) {
@@ -798,9 +798,42 @@ export function AdjustmentInspector({ layer, sceneDuration, onChange, onDelete }
     });
   }
 
-  function updateFrameStep(value: string) {
-    const every = Math.max(1, Math.round(Number(value) || 1));
-    onChange((current) => ({ ...current, effect: { ...current.effect, params: { ...current.effect.params, every } } }));
+  function getParamValue(control: AdjustmentEffectParamControl) {
+    const value = layer.effect.params?.[control.key];
+    if (control.type === "select") return typeof value === "string" ? value : control.defaultValue;
+    return typeof value === "number" && Number.isFinite(value) ? value : control.defaultValue;
+  }
+
+  function updateParam(control: AdjustmentEffectParamControl, value: string) {
+    if (isAdjustmentControlDisabled(layer, control.disabledWhen)) return;
+    if (control.type === "select") {
+      onChange((current) => ({ ...current, effect: { ...current.effect, params: { ...current.effect.params, [control.key]: value } } }));
+      return;
+    }
+
+    const fallback = control.defaultValue;
+    let numeric = Number(value);
+    if (!Number.isFinite(numeric)) numeric = fallback;
+    if (typeof control.min === "number") numeric = Math.max(control.min, numeric);
+    if (typeof control.max === "number") numeric = Math.min(control.max, numeric);
+    if (control.step && Number.isInteger(control.step)) numeric = Math.round(numeric);
+    onChange((current) => ({ ...current, effect: { ...current.effect, params: { ...current.effect.params, [control.key]: numeric } } }));
+  }
+
+  function getPointValue(control: AdjustmentEffectPointControl, axis: "x" | "y") {
+    const key = axis === "x" ? control.xKey : control.yKey;
+    const fallback = axis === "x" ? control.xDefault : control.yDefault;
+    const value = Number(layer.effect.params?.[key]);
+    return Number.isFinite(value) ? value : fallback;
+  }
+
+  function updatePointParam(control: AdjustmentEffectPointControl, axis: "x" | "y", value: string) {
+    if (isAdjustmentControlDisabled(layer, control.disabledWhen)) return;
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return;
+    const key = axis === "x" ? control.xKey : control.yKey;
+    const max = control.coordinateSpace === "percent" ? 100 : axis === "x" ? FRAME_WIDTH : FRAME_HEIGHT;
+    onChange((current) => ({ ...current, effect: { ...current.effect, params: { ...current.effect.params, [key]: roundTwo(clamp(numeric, 0, max)) } } }));
   }
 
   return (
@@ -811,10 +844,41 @@ export function AdjustmentInspector({ layer, sceneDuration, onChange, onDelete }
         <label className={`grid gap-1.5 ${mutedCaps}`}>Duration<Input type="number" min={0.1} max={sceneDuration - layer.start} step={0.1} value={layer.duration} onChange={(event) => updateNumber("duration", event.target.value)} /></label>
       </div>
       <label className={`grid gap-1.5 ${mutedCaps}`}>Effect<Input value={effect?.label ?? layer.effect.effectId} readOnly /></label>
-      {layer.effect.effectId === "clipper.adjustment.frameSkip" ? <label className={`grid gap-1.5 ${mutedCaps}`}>Frame Step<Input type="number" min={1} step={1} value={getFrameSkipEvery(layer)} onChange={(event) => updateFrameStep(event.target.value)} /></label> : null}
+      {effect?.paramControls?.map((control) => {
+        const disabledReason = getAdjustmentControlDisabledReason(layer, control.disabledWhen);
+        return <label className={`grid gap-1.5 ${mutedCaps} ${disabledReason ? "opacity-50" : ""}`} key={control.key} title={disabledReason}>{control.label}{control.type === "select" ? <Select value={String(getParamValue(control))} onValueChange={(value) => updateParam(control, value)} disabled={Boolean(disabledReason)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectGroup>{control.options.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectGroup></SelectContent></Select> : <Input type={control.type} min={control.min} max={control.max} step={control.step} value={getParamValue(control)} resetValue={control.defaultValue} numberScrubMode="continuous" numberScrubCommitThrottleMs={16} disabled={Boolean(disabledReason)} onChange={(event) => updateParam(control, event.target.value)} />}</label>;
+      })}
+      {effect?.pointControls?.map((control) => <AdjustmentPointControlField control={control} disabledReason={getAdjustmentControlDisabledReason(layer, control.disabledWhen)} key={`${control.xKey}:${control.yKey}`} picking={pickingPointKey === `${control.xKey}:${control.yKey}`} xValue={getPointValue(control, "x")} yValue={getPointValue(control, "y")} onPick={() => onPickPoint?.(control)} onValueChange={(axis, value) => updatePointParam(control, axis, value)} />)}
       <button className="flex items-center justify-center gap-2 rounded-[10px] border border-[#3b2a2a] bg-[#231516] px-[13px] py-[9px] text-sm font-medium text-[#ffb4b4] transition hover:border-[#6b3838] hover:bg-[#301b1d]" onClick={onDelete}><Trash2 size={15} />Delete</button>
     </div>
   );
+}
+
+function AdjustmentPointControlField({ control, disabledReason, picking, xValue, yValue, onPick, onValueChange }: { control: AdjustmentEffectPointControl; disabledReason?: string; picking: boolean; xValue: number; yValue: number; onPick: () => void; onValueChange: (axis: "x" | "y", value: string) => void }) {
+  const percentSpace = control.coordinateSpace === "percent";
+  const disabled = Boolean(disabledReason);
+
+  return (
+    <div className={`grid gap-1.5 ${disabled ? "opacity-50" : ""}`} title={disabledReason}>
+      <span className={mutedCaps}>{control.label}</span>
+      <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_40px] items-end gap-2">
+        <label className={`grid gap-1 ${mutedCaps}`}>{control.xLabel ?? "X"}<Input type="number" min={0} max={percentSpace ? 100 : FRAME_WIDTH} step={percentSpace ? 0.5 : 1} value={xValue} resetValue={control.xDefault} numberScrubMode="continuous" numberScrubCommitThrottleMs={16} aria-label={control.xLabel ?? `${control.label} X`} disabled={disabled} onChange={(event) => onValueChange("x", event.target.value)} /></label>
+        <label className={`grid gap-1 ${mutedCaps}`}>{control.yLabel ?? "Y"}<Input type="number" min={0} max={percentSpace ? 100 : FRAME_HEIGHT} step={percentSpace ? 0.5 : 1} value={yValue} resetValue={control.yDefault} numberScrubMode="continuous" numberScrubCommitThrottleMs={16} aria-label={control.yLabel ?? `${control.label} Y`} disabled={disabled} onChange={(event) => onValueChange("y", event.target.value)} /></label>
+        <button className={`grid h-8 w-10 place-items-center rounded-[9px] border ${disabled ? "cursor-not-allowed border-[#2d313b] bg-[#171920] text-[#6f7480]" : picking ? "border-[#37d6c2] bg-[#12312d] text-white" : "border-[#2d313b] bg-[#171920] text-[#d9dbe1] hover:border-[#37d6c2]"}`} disabled={disabled} title={disabledReason ?? control.pickLabel ?? `Pick ${control.label.toLowerCase()} from frame`} type="button" onClick={onPick}><Crosshair size={16} /></button>
+      </div>
+    </div>
+  );
+}
+
+function getAdjustmentControlDisabledReason(layer: AdjustmentLayer, condition: AdjustmentEffectDisableCondition | undefined) {
+  if (!condition) return undefined;
+  const value = layer.effect.params?.[condition.key];
+  const disabled = "equals" in condition ? value === condition.equals : condition.truthy ? Boolean(value) : !value;
+  return disabled ? condition.reason ?? "Disabled by current settings." : undefined;
+}
+
+function isAdjustmentControlDisabled(layer: AdjustmentLayer, condition: AdjustmentEffectDisableCondition | undefined) {
+  return Boolean(getAdjustmentControlDisabledReason(layer, condition));
 }
 
 export function EmptyInspector() {
@@ -829,6 +893,7 @@ export function EmptyInspector() {
 
 export function ZoomInspector({ marker, part, selectedMarkerCount, selectedSnapInActive, selectedSnapOutActive, middleSnapActive, middleTransitionMode, pickingFocus, canSnapMiddle, onChange, onScalePreview, onScalePreviewEnd, onChangeFocus, onChangeSelectedSnap, onChangeMiddleTransition, onChangeMiddleEase, onDelete, onPickFocus, onSnapMiddle }: { marker: ZoomMarker; part: Part; selectedMarkerCount: number; selectedSnapInActive: boolean; selectedSnapOutActive: boolean; middleSnapActive: boolean; middleTransitionMode: "instant" | "transition"; pickingFocus: boolean; canSnapMiddle: boolean; onChange: (updater: (marker: ZoomMarker, part: Part) => ZoomMarker) => void; onScalePreview: (scale: number) => void; onScalePreviewEnd: () => void; onChangeFocus: (focus: Point) => void; onChangeSelectedSnap: (key: "snapIn" | "snapOut", enabled: boolean) => void; onChangeMiddleTransition: (mode: "instant" | "transition") => void; onChangeMiddleEase: (ease: MotionEase | undefined) => void; onDelete: () => void; onPickFocus: () => void; onSnapMiddle: () => void }) {
   const isMultiSelection = selectedMarkerCount > 1;
+  const defaultName = getMotionEffectPackage(marker.effectId ?? "clipper.motion.zoom")?.label ?? "Zoom";
   const snapInActive = isMultiSelection ? selectedSnapInActive : Boolean(marker.snapIn);
   const snapOutActive = isMultiSelection ? selectedSnapOutActive : Boolean(marker.snapOut);
   const [draftScale, setDraftScale] = useState(() => roundTwo(clamp(marker.scale, 1, 5)));
@@ -842,6 +907,10 @@ export function ZoomInspector({ marker, part, selectedMarkerCount, selectedSnapI
       if (key === "start") return { ...current, start: roundTenth(clamp(numeric, 0, Math.max(currentPart.duration - current.duration, 0))) };
       return { ...current, duration: roundTenth(clamp(numeric, minimumZoomDuration, currentPart.duration - current.start)) };
     });
+  }
+
+  function updateName(value: string) {
+    onChange((current) => ({ ...current, name: value.trim() || undefined }));
   }
 
   function updateFocus(key: keyof Point, value: string) {
@@ -891,6 +960,7 @@ export function ZoomInspector({ marker, part, selectedMarkerCount, selectedSnapI
 
   return (
     <div className="grid gap-3">
+      <label className={`grid gap-1.5 ${mutedCaps}`}>Name<Input value={marker.name ?? ""} placeholder={defaultName} disabled={isMultiSelection} title={isMultiSelection ? "Rename one selected marker at a time." : undefined} onChange={(event) => updateName(event.target.value)} /></label>
       <div className="grid grid-cols-2 gap-2">
         <label className={`grid gap-1.5 ${mutedCaps}`}>Start<Input type="number" min={0} max={part.duration - marker.duration} resetValue={0} step={0.1} value={marker.start} onChange={(event) => updateNumber("start", event.target.value)} /></label>
         <label className={`grid gap-1.5 ${mutedCaps}`}>Duration<Input type="number" min={minimumZoomDuration} max={part.duration - marker.start} resetValue={1} step={0.1} value={marker.duration} onChange={(event) => updateNumber("duration", event.target.value)} /></label>
@@ -903,7 +973,7 @@ export function ZoomInspector({ marker, part, selectedMarkerCount, selectedSnapI
           </div>
         </div>
       </div>
-      <label className={`grid gap-1.5 ${mutedCaps}`}>Scale<div className="grid grid-cols-[1fr_52px] items-center gap-2 rounded-[10px] border border-[#2d313b] bg-[#171920] px-2.5 py-2"><input aria-label="Zoom scale" className="h-1.5 min-w-0 accent-[#37d6c2] [appearance:none] rounded-full bg-[#2d313b] [&::-webkit-slider-runnable-track]:h-1.5 [&::-webkit-slider-runnable-track]:rounded-full [&::-webkit-slider-runnable-track]:bg-[#2d313b] [&::-webkit-slider-thumb]:mt-[-5px] [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border [&::-webkit-slider-thumb]:border-[#37d6c2] [&::-webkit-slider-thumb]:bg-[var(--clipper-accent)] [&::-moz-range-track]:h-1.5 [&::-moz-range-track]:rounded-full [&::-moz-range-track]:bg-[#2d313b] [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border [&::-moz-range-thumb]:border-[#37d6c2] [&::-moz-range-thumb]:bg-[var(--clipper-accent)]" type="range" min={1} max={5} step={0.01} value={draftScale} onChange={(event) => updateDraftScale(event.target.value)} onPointerUp={() => commitScale()} onKeyUp={() => commitScale()} onBlur={() => commitScale()} /><span className="text-right text-xs font-extrabold normal-case tracking-normal text-[#dfe2ea] tabular-nums">{draftScale.toFixed(2)}</span></div></label>
+      <label className={`grid gap-1.5 ${mutedCaps}`}>Scale<div className="grid grid-cols-[1fr_52px] items-center gap-2 rounded-[10px] border border-[#2d313b] bg-[#171920] px-2.5 py-2"><input aria-label="Zoom scale" className="h-1.5 min-w-0 accent-[#37d6c2] [appearance:none] rounded-full bg-[#2d313b] [&::-webkit-slider-runnable-track]:h-1.5 [&::-webkit-slider-runnable-track]:rounded-full [&::-webkit-slider-runnable-track]:bg-[#2d313b] [&::-webkit-slider-thumb]:mt-[-5px] [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border [&::-webkit-slider-thumb]:border-[#37d6c2] [&::-webkit-slider-thumb]:bg-[var(--clipper-accent)] [&::-moz-range-track]:h-1.5 [&::-moz-range-track]:rounded-full [&::-moz-range-track]:bg-[#2d313b] [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border [&::-moz-range-thumb]:border-[#37d6c2] [&::-moz-range-thumb]:bg-[var(--clipper-accent)]" type="range" min={1} max={5} step={0.01} value={draftScale} onChange={(event) => updateDraftScale(event.target.value)} onPointerUp={() => commitScale()} onKeyUp={() => commitScale()} onBlur={() => commitScale()} /><span className="text-right text-xs font-extrabold text-[#dfe2ea] tabular-nums">{draftScale.toFixed(2)}</span></div></label>
       <label className={`grid gap-1.5 ${mutedCaps}`}>Ease<Select value={marker.ease ?? "easeInOut"} onValueChange={updateEase}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><TooltipProvider delayDuration={1000} skipDelayDuration={0}><SelectGroup><EaseSelectItems includeLinear={false} /></SelectGroup></TooltipProvider></SelectContent></Select></label>
       <div className="grid gap-2">
         <span className={mutedCaps}>Snap</span>
@@ -922,8 +992,11 @@ export function ZoomInspector({ marker, part, selectedMarkerCount, selectedSnapI
 export function TranslationInspector({ marker, part, selectedMarkerCount, selectedSnapInActive, selectedSnapOutActive, middleSnapActive, middleTransitionMode, pickingPosition, pickingTracker, canSnapMiddle, onChange, onChangeSelectedSnap, onChangeMiddleTransition, onChangeMiddleEase, onDelete, onPickPosition, onPickTracker, onSnapMiddle }: { marker: TranslationMarker; part: Part; selectedMarkerCount: number; selectedSnapInActive: boolean; selectedSnapOutActive: boolean; middleSnapActive: boolean; middleTransitionMode: "instant" | "transition"; pickingPosition: boolean; pickingTracker: boolean; canSnapMiddle: boolean; onChange: (updater: (marker: TranslationMarker, part: Part) => TranslationMarker) => void; onChangeSelectedSnap: (key: "snapIn" | "snapOut", enabled: boolean) => void; onChangeMiddleTransition: (mode: "instant" | "transition") => void; onChangeMiddleEase: (ease: MotionEase | undefined) => void; onDelete: () => void; onPickPosition: () => void; onPickTracker: () => void; onSnapMiddle: () => void }) {
   const isMultiSelection = selectedMarkerCount > 1;
   const markerKind = getMotionBlockEffectKind(marker);
+  const effectId = marker.effectId ?? (markerKind === "rotate" ? "clipper.motion.rotate" : markerKind === "perspective" ? "clipper.motion.perspective" : "clipper.motion.pan");
+  const defaultName = getMotionEffectPackage(effectId)?.label ?? "Motion";
   const snapInActive = isMultiSelection ? selectedSnapInActive : Boolean(marker.snapIn);
   const snapOutActive = isMultiSelection ? selectedSnapOutActive : Boolean(marker.snapOut);
+  const positionDisabledReason = marker.followId ? "Pan position is controlled by the tracker." : undefined;
 
   function updateNumber(key: "start" | "duration", value: string) {
     const numeric = Number(value) || 0;
@@ -931,6 +1004,10 @@ export function TranslationInspector({ marker, part, selectedMarkerCount, select
       if (key === "start") return { ...current, start: roundTenth(clamp(numeric, 0, Math.max(currentPart.duration - current.duration, 0))) };
       return { ...current, duration: roundTenth(clamp(numeric, minimumZoomDuration, currentPart.duration - current.start)) };
     });
+  }
+
+  function updateName(value: string) {
+    onChange((current) => ({ ...current, name: value.trim() || undefined }));
   }
 
   function updatePosition(key: keyof Point, value: string) {
@@ -983,15 +1060,16 @@ export function TranslationInspector({ marker, part, selectedMarkerCount, select
 
   return (
     <div className="grid gap-3">
+      <label className={`grid gap-1.5 ${mutedCaps}`}>Name<Input value={marker.name ?? ""} placeholder={defaultName} disabled={isMultiSelection} title={isMultiSelection ? "Rename one selected marker at a time." : undefined} onChange={(event) => updateName(event.target.value)} /></label>
       <div className="grid grid-cols-2 gap-2">
         <label className={`grid gap-1.5 ${mutedCaps}`}>Start<Input type="number" min={0} max={part.duration - marker.duration} resetValue={0} step={0.1} value={marker.start} onChange={(event) => updateNumber("start", event.target.value)} /></label>
         <label className={`grid gap-1.5 ${mutedCaps}`}>Duration<Input type="number" min={minimumZoomDuration} max={part.duration - marker.start} resetValue={1} step={0.1} value={marker.duration} onChange={(event) => updateNumber("duration", event.target.value)} /></label>
-        {markerKind === "rotate" ? <label className={`grid gap-1.5 ${mutedCaps}`}>Rotation<Input type="number" resetValue={15} step={1} value={marker.rotation ?? 0} onChange={(event) => updateRotation(event.target.value)} /></label> : markerKind === "perspective" ? <label className={`grid gap-1.5 ${mutedCaps}`}>Z<Input type="number" numberScrubMode="continuous" numberScrubCommitThrottleMs={16} resetValue={0} step={1} value={marker.perspective?.z ?? 0} onChange={(event) => updatePerspective("z", event.target.value)} /></label> : <label className={`grid gap-1.5 ${mutedCaps}`}>X<Input type="number" resetValue={0} step={1} value={marker.position.x} onChange={(event) => updatePosition("x", event.target.value)} /></label>}
-        {markerKind === "rotate" ? null : markerKind === "perspective" ? <label className={`grid gap-1.5 ${mutedCaps}`}>Tilt X<Input type="number" numberScrubMode="continuous" numberScrubCommitThrottleMs={16} resetValue={8} step={1} value={marker.perspective?.rotateX ?? 0} onChange={(event) => updatePerspective("rotateX", event.target.value)} /></label> : <div className="grid gap-1.5">
+        {markerKind === "rotate" ? <label className={`grid gap-1.5 ${mutedCaps}`}>Rotation<Input type="number" resetValue={15} step={1} value={marker.rotation ?? 0} onChange={(event) => updateRotation(event.target.value)} /></label> : markerKind === "perspective" ? <label className={`grid gap-1.5 ${mutedCaps}`}>Z<Input type="number" numberScrubMode="continuous" numberScrubCommitThrottleMs={16} resetValue={0} step={1} value={marker.perspective?.z ?? 0} onChange={(event) => updatePerspective("z", event.target.value)} /></label> : <label className={`grid gap-1.5 ${mutedCaps} ${positionDisabledReason ? "opacity-50" : ""}`} title={positionDisabledReason}>X<Input type="number" resetValue={0} step={1} value={marker.position.x} disabled={Boolean(positionDisabledReason)} onChange={(event) => updatePosition("x", event.target.value)} /></label>}
+        {markerKind === "rotate" ? null : markerKind === "perspective" ? <label className={`grid gap-1.5 ${mutedCaps}`}>Tilt X<Input type="number" numberScrubMode="continuous" numberScrubCommitThrottleMs={16} resetValue={8} step={1} value={marker.perspective?.rotateX ?? 0} onChange={(event) => updatePerspective("rotateX", event.target.value)} /></label> : <div className={`grid gap-1.5 ${positionDisabledReason ? "opacity-50" : ""}`} title={positionDisabledReason}>
           <span className={mutedCaps}>Y</span>
           <div className="grid grid-cols-[1fr_40px] gap-2">
-            <Input type="number" resetValue={0} step={1} value={marker.position.y} onChange={(event) => updatePosition("y", event.target.value)} />
-            <button className={`grid place-items-center rounded-[9px] border px-2 ${pickingPosition ? "border-[#37d6c2] bg-[#12312d] text-white" : "border-[#2d313b] bg-[#171920] text-[#d9dbe1] hover:border-[#37d6c2]"}`} title="Pick pan target from frame" onClick={onPickPosition}><Crosshair size={16} /></button>
+            <Input type="number" resetValue={0} step={1} value={marker.position.y} disabled={Boolean(positionDisabledReason)} onChange={(event) => updatePosition("y", event.target.value)} />
+            <button className={`grid place-items-center rounded-[9px] border px-2 ${positionDisabledReason ? "cursor-not-allowed border-[#2d313b] bg-[#171920] text-[#6f7480]" : pickingPosition ? "border-[#37d6c2] bg-[#12312d] text-white" : "border-[#2d313b] bg-[#171920] text-[#d9dbe1] hover:border-[#37d6c2]"}`} disabled={Boolean(positionDisabledReason)} title={positionDisabledReason ?? "Pick pan target from frame"} onClick={onPickPosition}><Crosshair size={16} /></button>
           </div>
         </div>}
       </div>

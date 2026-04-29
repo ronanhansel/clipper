@@ -1,0 +1,10 @@
+id: clipper.motion.perspective
+category: motion
+kind: perspective
+name: Perspective
+label: Perspective
+group: Disposition
+accent: "#24b7c9"
+previewColor: "#24b7c9"
+timelineGradient: {"from":"#24b7c9","to":"#127c8d","text":"#ffffff"}
+defaultDuration: 1

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { evaluateBackgroundLayer, evaluateFrameObject, getMotionTranslation } from "./renderRuntime";
-import { applyAdjustmentLayersToSceneTime } from "./adjustments";
-import type { BackgroundLayer, FrameObject } from "./types";
+import { advanceTimeSensitiveSceneTime, applyAdjustmentLayersToSceneTime, applyAdjustmentLayersToVisualStyle, getSceneTimeForTimeSensitiveDisplayTime, getTimeSensitiveDisplayDuration, getTimeSensitiveDisplayTime } from "./adjustments";
+import { installedEffectPackages } from "./effects/registry";
+import type { AdjustmentLayer, BackgroundLayer, FrameObject } from "./types";
 
 const baseObject: FrameObject = {
   id: "template-object",
@@ -13,11 +14,116 @@ const baseObject: FrameObject = {
 };
 
 describe("render runtime", () => {
+  it("requires installed effect packages to declare folder groups", () => {
+    expect(installedEffectPackages.every((effect) => effect.group.split("/").every((part) => part.trim().length > 0))).toBe(true);
+  });
+
   it("quantizes scene time for frame-skip adjustment layers", () => {
     const layers = [{ id: "adj", name: "Skip", start: 1, duration: 4, effect: { effectId: "clipper.adjustment.frameSkip" as const, params: { every: 3 } } }];
 
     expect(applyAdjustmentLayersToSceneTime(1.11, layers, 30)).toBe(1.1);
     expect(applyAdjustmentLayersToSceneTime(0.9, layers, 30)).toBe(0.9);
+  });
+
+  it("freezes scene time at the adjustment layer start", () => {
+    const layers = [{ id: "adj", name: "Freeze", start: 2, duration: 3, effect: { effectId: "clipper.adjustment.freezeFrame" as const, params: {} } }];
+
+    expect(applyAdjustmentLayersToSceneTime(2.75, layers, 30)).toBe(2);
+    expect(applyAdjustmentLayersToSceneTime(1.75, layers, 30)).toBe(1.75);
+  });
+
+  it("remaps scene time by speed relative to the layer start", () => {
+    const layers = [{ id: "adj", name: "Speed", start: 2, duration: 3, effect: { effectId: "clipper.adjustment.speedChange" as const, params: { speed: 0.5 } } }];
+
+    expect(applyAdjustmentLayersToSceneTime(3, layers, 30)).toBe(2.5);
+  });
+
+  it("keeps speed changes inside the adjusted layer window", () => {
+    const layers = [{ id: "adj", name: "Speed", start: 2, duration: 3, effect: { effectId: "clipper.adjustment.speedChange" as const, params: { speed: 4 } } }];
+
+    expect(applyAdjustmentLayersToSceneTime(3, layers, 30)).toBeCloseTo(4.9666667);
+  });
+
+  it("expands player display time and duration for time-sensitive speed changes", () => {
+    const layers = [{ id: "adj", name: "Speed", start: 5, duration: 5, effect: { effectId: "clipper.adjustment.speedChange" as const, params: { speed: 0.5 } } }];
+
+    expect(getTimeSensitiveDisplayTime(4, layers, 30)).toBe(4);
+    expect(getTimeSensitiveDisplayTime(7, layers, 30)).toBe(9);
+    expect(getTimeSensitiveDisplayTime(12, layers, 30)).toBe(17);
+    expect(getTimeSensitiveDisplayDuration(23, layers, 30)).toBe(28);
+  });
+
+  it("converts speed-adjusted display time back to slowed scene time", () => {
+    const layers = [{ id: "adj", name: "Speed", start: 5, duration: 5, effect: { effectId: "clipper.adjustment.speedChange" as const, params: { speed: 0.5 } } }];
+
+    expect(getSceneTimeForTimeSensitiveDisplayTime(7, 23, layers, 30)).toBe(6);
+    expect(advanceTimeSensitiveSceneTime(5, 2, 23, layers, 30)).toBe(6);
+  });
+
+  it("does not expand player display time for non-time-sensitive adjustments", () => {
+    const layers = [{ id: "adj", name: "Freeze", start: 5, duration: 5, effect: { effectId: "clipper.adjustment.freezeFrame" as const, params: {} } }];
+
+    expect(getTimeSensitiveDisplayTime(7, layers, 30)).toBe(7);
+    expect(getTimeSensitiveDisplayDuration(23, layers, 30)).toBe(23);
+  });
+
+  it("loops scene time through the configured stutter window", () => {
+    const layers = [{ id: "adj", name: "Loop", start: 2, duration: 3, effect: { effectId: "clipper.adjustment.loopStutter" as const, params: { window: 0.5 } } }];
+
+    expect(applyAdjustmentLayersToSceneTime(2.4, layers, 30)).toBeCloseTo(2.4);
+    expect(applyAdjustmentLayersToSceneTime(2.6, layers, 30)).toBeCloseTo(2.1);
+  });
+
+  it("reverses scene time within the adjustment layer", () => {
+    const layers = [{ id: "adj", name: "Reverse", start: 2, duration: 3, effect: { effectId: "clipper.adjustment.reverse" as const, params: {} } }];
+
+    expect(applyAdjustmentLayersToSceneTime(2, layers, 30)).toBeCloseTo(4.9666667);
+    expect(applyAdjustmentLayersToSceneTime(3, layers, 30)).toBeCloseTo(3.9666667);
+  });
+
+  it("boomerangs scene time forward then backward", () => {
+    const layers = [{ id: "adj", name: "Boomerang", start: 2, duration: 4, effect: { effectId: "clipper.adjustment.boomerang" as const, params: {} } }];
+
+    expect(applyAdjustmentLayersToSceneTime(3, layers, 30)).toBe(4);
+    expect(applyAdjustmentLayersToSceneTime(5, layers, 30)).toBeCloseTo(3.9666667);
+  });
+
+  it("composes visual adjustment filters from active layers", () => {
+    const layers: AdjustmentLayer[] = [
+      { id: "grade", name: "Colour Grade", start: 1, duration: 4, effect: { effectId: "clipper.adjustment.colourGrade" as const, params: { brightness: 40, contrast: 10, saturation: 80, hue: 12 } } },
+      { id: "blur", name: "Blur", start: 6, duration: 2, effect: { effectId: "clipper.adjustment.blur" as const, params: { radius: 6 } } },
+    ];
+
+    expect(applyAdjustmentLayersToVisualStyle(2.5, layers, 30).filter).toBe("brightness(1.4) contrast(1.1) saturate(1.8) hue-rotate(12deg)");
+    expect(applyAdjustmentLayersToVisualStyle(5.5, layers, 30).filter).toBeUndefined();
+  });
+
+  it("composes visual adjustment overlays from active layers", () => {
+    const layers: AdjustmentLayer[] = [
+      { id: "dust", name: "Film Dust", start: 1, duration: 4, effect: { effectId: "clipper.adjustment.filmDust" as const, params: { intensity: 0.3, density: 1, drift: 0, target: "camera" } } },
+      { id: "vignette", name: "Vignette", start: 1, duration: 4, effect: { effectId: "clipper.adjustment.vignette" as const, params: { intensity: 0.5, softness: 0.6 } } },
+      { id: "leak", name: "Light Leak", start: 6, duration: 2, effect: { effectId: "clipper.adjustment.lightLeak" as const, params: { intensity: 0.4 } } },
+    ];
+
+    const active = applyAdjustmentLayersToVisualStyle(2.5, layers, 30).overlays;
+    expect(active?.map((overlay) => overlay.id)).toEqual(["dust:film-dust", "vignette:vignette"]);
+    expect(active?.map((overlay) => overlay.target ?? "camera")).toEqual(["camera", "camera"]);
+    expect(active?.[0].style.opacity).toBe(0.3);
+    expect(applyAdjustmentLayersToVisualStyle(5.5, layers, 30).overlays).toBeUndefined();
+  });
+
+  it("uses package-owned point params for light leak focus", () => {
+    const layers: AdjustmentLayer[] = [
+      { id: "leak", name: "Light Leak", start: 1, duration: 4, effect: { effectId: "clipper.adjustment.lightLeak" as const, params: { focusX: 64, focusY: 22, drift: 0 } } },
+    ];
+
+    expect(String(applyAdjustmentLayersToVisualStyle(2.5, layers, 30).overlays?.[0].style.backgroundImage)).toContain("circle at 64% 22%");
+  });
+
+  it("leaves scene time unchanged for visual-only adjustments", () => {
+    const layers = [{ id: "grade", name: "Colour Grade", start: 1, duration: 4, effect: { effectId: "clipper.adjustment.colourGrade" as const, params: { contrast: 1.4 } } }];
+
+    expect(applyAdjustmentLayersToSceneTime(2, layers, 30)).toBe(2);
   });
 
   it("evaluates code-backed templates from explicit time", () => {

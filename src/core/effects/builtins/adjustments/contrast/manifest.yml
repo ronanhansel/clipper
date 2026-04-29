@@ -1,0 +1,18 @@
+id: clipper.adjustment.contrast
+category: adjustment
+name: Contrast
+label: Contrast
+group: Visual
+accent: "#ef476f"
+previewColor: "#8f65f2"
+timelineGradient: {"from":"#ff7896","to":"#b91d45","text":"#ffffff"}
+defaultDuration: 3
+defaultParams: {"amount":1.2}
+paramControls:
+  - key: amount
+    label: Amount
+    type: number
+    min: 0
+    max: 3
+    step: 0.05
+    defaultValue: 1.2

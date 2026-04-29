@@ -1,21 +1,28 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent, type RefObject, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { mutedCaps, selectorBlue, selectorHandleSizePx, selectorOffsetPx } from "../../app/config";
 import { getRenderableTextSegments, getSelectionFormatState, normalizeEditableFormatting, renderRichTextSegments, richTextSegmentsFromElement, shouldPersistRichText, textSegmentsToEditableNodes } from "../../app/richText";
-import { applyAdjustmentLayersToSceneTime } from "../../core/adjustments";
+import { advanceTimeSensitiveSceneTime, applyAdjustmentLayersToSceneTime, applyAdjustmentLayersToVisualStyle } from "../../core/adjustments";
 import { boundsToViewport, formatCameraPreviewTransform, getLayeredCameraPreviewTransform, type CameraPreviewTransform } from "../../core/camera";
 import { generateChartObjects, type ChartGeneratedObject } from "../../core/chart";
 import { getBoundsUnion, insetBounds, isVisibleMarqueeBounds, updateDragSelectionBoxElement, type ResizeHandle } from "../../core/frameInteraction";
 import { clamp } from "../../core/math";
 import { evaluateBackgroundLayer, evaluateFrameObject, isTimeSensitiveFrameObject, type EvaluatedFrameObject } from "../../core/renderRuntime";
-import { FRAME_HEIGHT, FRAME_WIDTH, type AdjustmentLayer, type BackgroundLayer, type Bounds, type FrameObject, type MotionEase, type Part, type Point, type RichTextSegment, type SelectionPayload, type TimelineMode, type TimelineMotionLayerState, type TranslationMarker } from "../../core/types";
+import { FRAME_HEIGHT, FRAME_WIDTH, type AdjustmentLayer, type BackgroundLayer, type Bounds, type FrameObject, type Part, type Point, type RichTextSegment, type SelectionPayload, type TimelineMode, type TimelineMotionLayerState, type TranslationMarker } from "../../core/types";
+import type { AdjustmentVisualOverlay } from "../../core/effects/types";
 import type { PlaybackClock } from "../../app/types";
 
-export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dragSelectionBoxRef, framePickPoint, focusPicking, trackerPicking, canSelectObjects, cameraTransform, frameViewportRef, frameScale, isPlaying, part, partStart, adjustmentLayers, playbackClock, previewTime, timelineMode, motionLayers, hiddenMotionLayerIds, pickingTranslationPosition, pickingZoomFocus, compHidden, selectedObjects, marqueeDragging, editingTextObjectId, onFramePointerCancel, onFramePointerDown, onFramePointerDownCapture, onFramePointerMove, onFramePointerUp, onObjectPointerDown, onObjectResizePointerDown, onTextEditCommit, onTextObjectDoubleClick, onTrackerTargetPick }: { cameraRef: RefObject<HTMLDivElement | null>; dragBox: Bounds | null; dragSelectionBoxRef: RefObject<HTMLDivElement | null>; framePickPoint: Point | null; focusPicking: boolean; trackerPicking: boolean; canSelectObjects: boolean; cameraTransform: CameraPreviewTransform; frameViewportRef: RefObject<HTMLDivElement | null>; frameScale: number; isPlaying: boolean; part: Part; partStart: number; adjustmentLayers?: AdjustmentLayer[]; playbackClock: PlaybackClock; previewTime: number; timelineMode: TimelineMode; motionLayers: TimelineMotionLayerState[]; hiddenMotionLayerIds?: Set<string>; pickingTranslationPosition: boolean; pickingZoomFocus: boolean; compHidden?: boolean; selectedObjects: SelectionPayload["objects"]; marqueeDragging: boolean; editingTextObjectId: string | null; onFramePointerCancel: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerDown: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerDownCapture: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerMove: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerUp: (event: PointerEvent<HTMLDivElement>) => void; onObjectPointerDown: (event: PointerEvent<HTMLDivElement>, object: FrameObject) => void; onObjectResizePointerDown: (event: PointerEvent<HTMLDivElement>, handle: ResizeHandle, objectId?: string) => void; onTextEditCommit: (objectId: string, content: string, richText?: RichTextSegment[]) => void; onTextObjectDoubleClick: (event: ReactMouseEvent<HTMLDivElement>, object: FrameObject) => void; onTrackerTargetPick: (objectId: string) => void }) {
+export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dragSelectionBoxRef, framePickPoint, focusPicking, trackerPicking, canSelectObjects, cameraTransform, frameViewportRef, frameScale, isPlaying, part, partStart, adjustmentLayers, playbackClock, previewTime, sceneTime, timelineMode, motionLayers, hiddenMotionLayerIds, pickingTranslationPosition, pickingZoomFocus, compHidden, selectedObjects, marqueeDragging, editingTextObjectId, onFramePointerCancel, onFramePointerDown, onFramePointerDownCapture, onFramePointerMove, onFramePointerUp, onObjectPointerDown, onObjectResizePointerDown, onTextEditCommit, onTextObjectDoubleClick, onTrackerTargetPick }: { cameraRef: RefObject<HTMLDivElement | null>; dragBox: Bounds | null; dragSelectionBoxRef: RefObject<HTMLDivElement | null>; framePickPoint: Point | null; focusPicking: boolean; trackerPicking: boolean; canSelectObjects: boolean; cameraTransform: CameraPreviewTransform; frameViewportRef: RefObject<HTMLDivElement | null>; frameScale: number; isPlaying: boolean; part: Part; partStart: number; adjustmentLayers?: AdjustmentLayer[]; playbackClock: PlaybackClock; previewTime: number; sceneTime: number; timelineMode: TimelineMode; motionLayers: TimelineMotionLayerState[]; hiddenMotionLayerIds?: Set<string>; pickingTranslationPosition: boolean; pickingZoomFocus: boolean; compHidden?: boolean; selectedObjects: SelectionPayload["objects"]; marqueeDragging: boolean; editingTextObjectId: string | null; onFramePointerCancel: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerDown: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerDownCapture: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerMove: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerUp: (event: PointerEvent<HTMLDivElement>) => void; onObjectPointerDown: (event: PointerEvent<HTMLDivElement>, object: FrameObject) => void; onObjectResizePointerDown: (event: PointerEvent<HTMLDivElement>, handle: ResizeHandle, objectId?: string) => void; onTextEditCommit: (objectId: string, content: string, richText?: RichTextSegment[]) => void; onTextObjectDoubleClick: (event: ReactMouseEvent<HTMLDivElement>, object: FrameObject) => void; onTrackerTargetPick: (objectId: string) => void }) {
   const viewportStyle = useMemo(() => ({ width: FRAME_WIDTH * frameScale, height: FRAME_HEIGHT * frameScale }) as CSSProperties, [frameScale]);
   const animationsEnabled = timelineMode !== "edit";
   const timeSensitive = isPlaybackTimeSensitivePart(part, timelineMode, adjustmentLayers, animationsEnabled);
   const [livePreviewTime, setLivePreviewTime] = useState(previewTime);
+  const [liveSceneTime, setLiveSceneTime] = useState(sceneTime);
   const displayPreviewTime = isPlaying && playbackClock && timeSensitive ? livePreviewTime : previewTime;
+  const displaySceneTime = isPlaying && playbackClock && timeSensitive ? liveSceneTime : sceneTime;
+  const visualAdjustment = useMemo(() => applyAdjustmentLayersToVisualStyle(displaySceneTime, adjustmentLayers), [adjustmentLayers, displaySceneTime]);
+  const visualAdjustmentStyle = useMemo(() => ({ filter: visualAdjustment.filter }) as CSSProperties, [visualAdjustment.filter]);
+  const frameVisualAdjustmentOverlaysRef = useRef<HTMLDivElement | null>(null);
+  const cameraVisualAdjustmentOverlaysRef = useRef<HTMLDivElement | null>(null);
   const liveCameraTransform = useMemo(() => {
     if (timelineMode !== "composition") return cameraTransform;
     return getLayeredCameraPreviewTransform(part, motionLayers, displayPreviewTime, { hiddenLayerIds: hiddenMotionLayerIds, pickingTranslationPosition, pickingZoomFocus, resetMotionEffects: trackerPicking });
@@ -33,7 +40,8 @@ export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dra
   useLayoutEffect(() => {
     if (isPlaying && playbackClock && timeSensitive) return;
     setLivePreviewTime(previewTime);
-  }, [isPlaying, playbackClock, previewTime, timeSensitive]);
+    setLiveSceneTime(sceneTime);
+  }, [isPlaying, playbackClock, previewTime, sceneTime, timeSensitive]);
 
   useEffect(() => {
     if (!isPlaying || !playbackClock || !timeSensitive) return;
@@ -41,7 +49,8 @@ export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dra
     let frame = 0;
 
     function tick(now: number) {
-      const nextSceneTime = clock.startedFrom + (now - clock.startedAt) / 1000;
+      const nextSceneTime = advanceTimeSensitiveSceneTime(clock.startedFrom, (now - clock.startedAt) / 1000, partStart + part.duration, adjustmentLayers);
+      setLiveSceneTime(nextSceneTime);
       setLivePreviewTime(clamp(applyAdjustmentLayersToSceneTime(nextSceneTime, adjustmentLayers) - partStart, 0, part.duration));
       frame = requestAnimationFrame(tick);
     }
@@ -54,6 +63,11 @@ export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dra
     if (!cameraRef.current) return;
     cameraRef.current.style.transform = formatCameraPreviewTransform(liveCameraTransform);
   }, [cameraRef, liveCameraTransform]);
+
+  useLayoutEffect(() => {
+    syncVisualAdjustmentOverlays(frameVisualAdjustmentOverlaysRef.current, visualAdjustment.overlays?.filter((overlay) => overlay.target === "frame"));
+    syncVisualAdjustmentOverlays(cameraVisualAdjustmentOverlaysRef.current, visualAdjustment.overlays?.filter((overlay) => (overlay.target ?? "camera") === "camera"));
+  }, [visualAdjustment.overlays]);
 
   useEffect(() => {
     if (!trackerPicking) setTrackerHoverTarget(null);
@@ -78,12 +92,14 @@ export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dra
   }
 
   function handleFramePointerMove(event: PointerEvent<HTMLDivElement>) {
+    if (isPlaying) return;
     if (trackerPicking) updateTrackerHover(event);
     updateSelectorHover(event);
     onFramePointerMove(event);
   }
 
   function handleFramePointerDownCapture(event: PointerEvent<HTMLDivElement>) {
+    if (isPlaying) return;
     if (!trackerPicking) {
       onFramePointerDownCapture(event);
       return;
@@ -134,16 +150,20 @@ export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dra
   return (
     <div className="grid gap-3" data-clipper-frame-preview-wrapper>
       <div className="flex items-baseline justify-between text-[#dfe2ea]"><span className={mutedCaps}>{part.name}</span><strong className="text-[13px]">{FRAME_WIDTH} x {FRAME_HEIGHT}</strong></div>
-      <div ref={frameViewportRef} className={`relative overflow-hidden bg-black shadow-[0_22px_70px_rgba(0,0,0,0.44)] ${focusPicking || trackerPicking ? "cursor-crosshair ring-2 ring-[#37d6c2]" : ""}`} data-clipper-frame-preview style={viewportStyle} onPointerDownCapture={handleFramePointerDownCapture} onPointerDown={onFramePointerDown} onPointerMove={handleFramePointerMove} onPointerUp={onFramePointerUp} onPointerCancel={onFramePointerCancel} onPointerLeave={clearSelectorHover}>
+      <div ref={frameViewportRef} className={`relative overflow-hidden bg-black shadow-[0_22px_70px_rgba(0,0,0,0.44)] ${!isPlaying && (focusPicking || trackerPicking) ? "cursor-crosshair ring-2 ring-[#37d6c2]" : ""}`} data-clipper-frame-preview style={viewportStyle} onPointerDownCapture={handleFramePointerDownCapture} onPointerDown={isPlaying ? undefined : onFramePointerDown} onPointerMove={handleFramePointerMove} onPointerUp={isPlaying ? undefined : onFramePointerUp} onPointerCancel={isPlaying ? undefined : onFramePointerCancel} onPointerLeave={clearSelectorHover}>
         <div className="absolute left-0 top-0 origin-top-left overflow-hidden" data-clipper-frame-content style={frameStyle}>
           <div className="absolute inset-0" data-clipper-perspective-stage style={perspectiveStageStyle}>
             {isUnlinkedPart || compHidden ? <div className="absolute inset-0 bg-black" ref={cameraRef} /> : <div className="absolute inset-0 origin-center" ref={cameraRef} style={{ transformStyle: "preserve-3d" }}>
-              <BackgroundLayerView animationsEnabled={animationsEnabled} background={part.background} duration={part.duration} previewTime={displayPreviewTime} />
-              {part.objects.map((object) => (
-                <FrameObjectView key={object.id} animationsEnabled={animationsEnabled} object={object} canSelect={canSelectObjects || trackerPicking} duration={part.duration} editing={editingTextObjectId === object.id} focusPicking={focusPicking || trackerPicking} previewTime={displayPreviewTime} onDoubleClick={(event) => onTextObjectDoubleClick(event, object)} onPointerDown={(event) => onObjectPointerDown(event, object)} onTextEditCommit={(content, richText) => onTextEditCommit(object.id, content, richText)} />
-              ))}
+              <div className="absolute inset-0" data-clipper-visual-adjustments style={visualAdjustmentStyle}>
+                <BackgroundLayerView animationsEnabled={animationsEnabled} background={part.background} duration={part.duration} previewTime={displayPreviewTime} />
+                {part.objects.map((object) => (
+                  <FrameObjectView key={object.id} animationsEnabled={animationsEnabled} object={object} canSelect={!isPlaying && (canSelectObjects || trackerPicking)} duration={part.duration} editing={!isPlaying && editingTextObjectId === object.id} focusPicking={!isPlaying && (focusPicking || trackerPicking)} previewTime={displayPreviewTime} onDoubleClick={(event) => { if (!isPlaying) onTextObjectDoubleClick(event, object); }} onPointerDown={(event) => { if (!isPlaying) onObjectPointerDown(event, object); }} onTextEditCommit={(content, richText) => onTextEditCommit(object.id, content, richText)} />
+                ))}
+                <div ref={frameVisualAdjustmentOverlaysRef} className="pointer-events-none absolute inset-0" data-clipper-visual-adjustment-overlays="frame" style={{ zIndex: 2147483647 }} />
+              </div>
             </div>}
           </div>
+          <div ref={cameraVisualAdjustmentOverlaysRef} className="pointer-events-none absolute inset-0" data-clipper-visual-adjustment-overlays="camera" style={{ zIndex: 2147483647 }} />
         </div>
         {canSelectObjects && !isUnlinkedPart ? selectedObjects.map((object) => <SelectionOverlayBox key={object.id} objectId={object.id} bounds={object.bounds} cameraTransform={liveCameraTransform} frameScale={frameScale} highlighted={selectorHover} interactive={!marqueeDragging} onResizePointerDown={(event, handle) => onObjectResizePointerDown(event, handle, object.id)} />) : null}
         {trackerPicking && trackerHoverTarget ? <TrackerTargetOverlay target={trackerHoverTarget} /> : null}
@@ -153,6 +173,17 @@ export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dra
     </div>
   );
 });
+
+function syncVisualAdjustmentOverlays(container: HTMLElement | null, overlays: AdjustmentVisualOverlay[] | undefined) {
+  if (!container) return;
+  container.replaceChildren(...(overlays ?? []).map((overlay) => {
+    const element = document.createElement("div");
+    element.className = "pointer-events-none absolute inset-0";
+    element.style.zIndex = "2147483647";
+    Object.assign(element.style, overlay.style);
+    return element;
+  }));
+}
 
 function TrackerTargetOverlay({ target }: { target: { id: string; viewportBounds: Bounds } }) {
   const viewportBounds = insetBounds(target.viewportBounds, -selectorOffsetPx);
@@ -342,7 +373,7 @@ function areBackgroundElementPropsEqual(previous: { duration: number; element: E
 }
 
 function isPreviewTimeSensitiveObject(object: FrameObject) {
-  return isTimeSensitiveFrameObject(object) || object.type === "chart" || isAnimatedGraphObject(object.id);
+  return isTimeSensitiveFrameObject(object) || object.type === "chart";
 }
 
 function isPlaybackTimeSensitivePart(part: Part, timelineMode: TimelineMode, adjustmentLayers: AdjustmentLayer[] | undefined, animationsEnabled: boolean) {
@@ -429,171 +460,5 @@ export const BackgroundElementView = memo(function BackgroundElementView({ eleme
 }, areBackgroundElementPropsEqual);
 
 function evaluateObjectForPreview(object: FrameObject, time: number, duration: number, animationsEnabled: boolean): EvaluatedFrameObject {
-  const evaluatedObject = evaluateFrameObject(object, time, duration, { animations: animationsEnabled });
-  const legacyAnimation = animationsEnabled && !object.motion ? getObjectPreviewAnimation(object, time) : { style: {} as CSSProperties };
-
-  return {
-    ...evaluatedObject,
-    renderContent: legacyAnimation.content ?? evaluatedObject.renderContent,
-    renderRichText: legacyAnimation.content ? undefined : evaluatedObject.renderRichText,
-    renderStyle: {
-      ...evaluatedObject.renderStyle,
-      ...legacyAnimation.style,
-    },
-    timeSensitive: animationsEnabled && (evaluatedObject.timeSensitive || isAnimatedGraphObject(object.id) || Boolean(legacyAnimation.content)),
-  };
-}
-
-function getObjectPreviewAnimation(object: FrameObject, time: number): { style: CSSProperties; content?: string } {
-  const graphAnimation = getAnimatedGraphPreviewAnimation(object.id, time);
-  if (graphAnimation) return graphAnimation;
-
-  if (object.motion) {
-    return { style: getMotionPreviewAnimation(object.motion, time) };
-  }
-
-  if (object.id === "hero-title") {
-    const progress = easeOutCubic(clamp(time / 0.9, 0, 1));
-    return {
-      style: {
-        opacity: progress,
-        transform: `translateY(${Math.round((1 - progress) * 46)}px)`,
-      },
-    };
-  }
-
-  if (object.id === "hero-panel") {
-    const progress = easeOutCubic(clamp((time - 0.45) / 1.25, 0, 1));
-    const drift = Math.sin(Math.max(time - 1.7, 0) * 1.8) * 10;
-    return {
-      style: {
-        opacity: clamp((time - 0.25) / 0.45, 0, 1),
-        transform: `translateY(${Math.round((1 - progress) * -72 + drift)}px) rotate(${(-3 + progress * 3).toFixed(2)}deg)`,
-      },
-    };
-  }
-
-  if (object.id === "object-rule" && object.content) {
-    const progress = clamp((time - 1.15) / 2.1, 0, 1);
-    const visibleCharacters = Math.floor(object.content.length * progress);
-    const cursor = progress < 1 && Math.floor(time * 4) % 2 === 0 ? "|" : "";
-    return {
-      content: `${object.content.slice(0, visibleCharacters)}${cursor}`,
-      style: { opacity: time < 1.05 ? 0 : 1 },
-    };
-  }
-
-  if (object.id === "inspector-card") {
-    const progress = easeOutCubic(clamp((time - 0.6) / 0.6, 0, 1));
-    return {
-      style: {
-        opacity: progress,
-        transform: `translateX(${Math.round((1 - progress) * 60)}px)`,
-      },
-    };
-  }
-
-  if (object.id === "selector-box-demo") {
-    const progress = clamp((time - 1) / 1, 0, 1);
-    return {
-      style: {
-        opacity: progress,
-        transform: `scale(${(0.98 + progress * 0.02).toFixed(3)})`,
-      },
-    };
-  }
-
-  return { style: {} };
-}
-
-const animatedGraphLineSegments: Record<string, { delay: number; duration: number; rotate: number }> = {
-  "graph-line-1": { delay: 1.66, duration: 0.88, rotate: -25.3 },
-  "graph-line-2": { delay: 2.54, duration: 0.88, rotate: -27.9 },
-  "graph-line-3": { delay: 3.42, duration: 0.88, rotate: -20.7 },
-};
-
-function isAnimatedGraphObject(id: string) {
-  return id in animatedGraphLineSegments || id === "graph-line" || id === "graph-value-primary" || id === "graph-value-secondary";
-}
-
-function getAnimatedGraphPreviewAnimation(id: string, time: number): { style: CSSProperties; content?: string } | null {
-  const lineSegment = animatedGraphLineSegments[id];
-  if (lineSegment) {
-    const progress = easeOutCubic(clamp((time - lineSegment.delay) / lineSegment.duration, 0, 1));
-    return {
-      style: {
-        opacity: progress > 0 ? 1 : 0,
-        transform: `rotate(${lineSegment.rotate}deg) scaleX(${progress.toFixed(3)})`,
-      },
-    };
-  }
-
-  if (id === "graph-line") {
-    const progress = easeOutCubic(clamp((time - 1.66) / 2.64, 0, 1));
-    return {
-      style: {
-        opacity: progress > 0 ? 1 : 0,
-        transform: `scaleX(${progress.toFixed(3)})`,
-        transformOrigin: "left center",
-      },
-    };
-  }
-
-  const valueProgress = easeOutCubic(clamp((time - 1.66) / 2.64, 0, 1));
-  if (id === "graph-value-primary") {
-    return {
-      content: `$${Math.round(interpolate([18, 96] as const, valueProgress))}k`,
-      style: { opacity: clamp((time - 1.45) / 0.35, 0, 1) },
-    };
-  }
-
-  if (id === "graph-value-secondary") {
-    return {
-      content: `+${Math.round(interpolate([12, 148] as const, valueProgress))}%`,
-      style: { opacity: clamp((time - 1.72) / 0.35, 0, 1) },
-    };
-  }
-
-  return null;
-}
-
-function getMotionPreviewAnimation(motion: FrameObject["motion"] | BackgroundLayer["motion"] | undefined, time: number): CSSProperties {
-  if (!motion) return {};
-  const delay = motion.delay ?? 0;
-  const elapsed = Math.max(time - delay, 0);
-  const cycleTime = motion.loop && motion.duration > 0 ? elapsed % motion.duration : elapsed;
-  const progress = easeProgress(clamp(cycleTime / motion.duration, 0, 1), motion.ease);
-  const transforms: string[] = [];
-
-  if (motion.x) transforms.push(`translateX(${Math.round(interpolate(motion.x, progress))}px)`);
-  if (motion.y) transforms.push(`translateY(${Math.round(interpolate(motion.y, progress))}px)`);
-  if (motion.rotate) transforms.push(`rotate(${interpolate(motion.rotate, progress).toFixed(2)}deg)`);
-
-  return {
-    opacity: motion.opacity ? interpolate(motion.opacity, progress) : undefined,
-    transform: transforms.length > 0 ? transforms.join(" ") : undefined,
-  };
-}
-
-function interpolate(range: readonly [number, number], progress: number) {
-  return range[0] + (range[1] - range[0]) * progress;
-}
-
-function easeProgress(value: number, ease: MotionEase | undefined) {
-  if (ease === "easeOut" || ease === "circOut") return easeOutCubic(value);
-  if (ease === "easeIn") return value * value * value;
-  if (ease === "easeInOut") return easeInOutCubic(value);
-  return value;
-}
-
-function cameraEaseProgress(value: number, ease: MotionEase | undefined) {
-  return easeProgress(value, ease ?? "easeInOut");
-}
-
-function easeOutCubic(value: number) {
-  return 1 - Math.pow(1 - value, 3);
-}
-
-function easeInOutCubic(value: number) {
-  return value < 0.5 ? 4 * value * value * value : 1 - Math.pow(-2 * value + 2, 3) / 2;
+  return evaluateFrameObject(object, time, duration, { animations: animationsEnabled });
 }

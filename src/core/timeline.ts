@@ -1,21 +1,63 @@
 import { defaultZoomDuration, minimumZoomDuration } from "./editorConstants";
 import { getAdjustmentEffectPackage } from "./effects/registry";
 import { getMotionBlockEffectKind } from "./motionEffects";
-import { MAX_PART_DURATION_SECONDS, MAX_SCENE_DURATION_SECONDS, type AdjustmentLayer, type CompositionClip, type MotionEffectKind, type Scene, type TimelineComposition, type TimelineMotionLayerKind, type TimelineMotionLayerState, type TimelinePart, type TranslationMarker, type ZoomMarker } from "./types";
+import { FRAME_HEIGHT, FRAME_WIDTH, MAX_PART_DURATION_SECONDS, MAX_SCENE_DURATION_SECONDS, type AdjustmentLayer, type CompositionClip, type MotionEffectKind, type Scene, type TimelineComposition, type TimelineLayerState, type TimelineMotionLayerKind, type TimelineMotionLayerState, type TimelinePart, type TranslationMarker, type ZoomMarker } from "./types";
 import { clamp, roundTenth, roundTwo } from "./math";
+
+export const sceneMotionPartId = "__scene_motion__";
 
 export function buildLinearTimeline(scene: Scene): TimelineComposition[] {
   let cursor = 0;
-  return scene.compositions.map((composition) => {
-    const start = cursor;
+  const compositions = scene.compositions.map((composition) => {
+    const start = composition.start ?? cursor;
     const end = start + composition.duration;
-    cursor = end;
+    cursor = composition.start === undefined ? end : Math.max(cursor, end);
     return { ...composition, start, end };
   });
+  const sceneZoomMarkers = scene.zoomMarkers ?? [];
+  const sceneTranslationMarkers = scene.translationMarkers ?? [];
+  if (sceneZoomMarkers.length === 0 && sceneTranslationMarkers.length === 0) return compositions;
+  const motionEnd = Math.max(
+    0.1,
+    ...sceneZoomMarkers.map((marker) => marker.start + marker.duration),
+    ...sceneTranslationMarkers.map((marker) => marker.start + marker.duration),
+  );
+  return [...compositions, {
+    id: sceneMotionPartId,
+    name: "Scene Motion",
+    filePath: "",
+    layerId: sceneMotionPartId,
+    duration: motionEnd,
+    start: 0,
+    end: motionEnd,
+    frame: { width: FRAME_WIDTH, height: FRAME_HEIGHT, style: {} },
+    background: { id: "background", name: "Background", style: {}, elements: [] },
+    objects: [],
+    snapshot: [],
+    zoomMarkers: sceneZoomMarkers,
+    translationMarkers: sceneTranslationMarkers,
+  }];
 }
 
 export function sceneDuration(scene: Scene) {
-  return scene.compositions.reduce((total, composition) => total + composition.duration, 0);
+  return buildLinearTimeline(scene).reduce((total, composition) => Math.max(
+    total,
+    composition.end,
+    ...composition.zoomMarkers.map((marker) => composition.start + marker.start + marker.duration),
+    ...composition.translationMarkers.map((marker) => composition.start + marker.start + marker.duration),
+  ), Math.max(
+    (scene.adjustmentLayers ?? []).reduce((total, layer) => Math.max(total, layer.start + layer.duration), 0),
+    ...(scene.zoomMarkers ?? []).map((marker) => marker.start + marker.duration),
+    ...(scene.translationMarkers ?? []).map((marker) => marker.start + marker.duration),
+  ));
+}
+
+export function timelineDuration(timeline: TimelinePart[]) {
+  return timeline.reduce((total, composition) => Math.max(total, composition.end), 0);
+}
+
+export function timelineDisplayDuration(duration: number, endPaddingFraction = 0.5) {
+  return duration > 0 ? roundTenth(duration * (1 + clamp(endPaddingFraction, 0, 2))) : 10;
 }
 
 export function validateScene(scene: Scene): string[] {
@@ -27,8 +69,13 @@ export function validateScene(scene: Scene): string[] {
   }
 
   scene.compositions.forEach((composition) => {
+    const compositionStart = composition.start ?? 0;
     if (composition.duration <= 0) {
       errors.push(`Composition ${composition.name} must have a positive duration.`);
+    }
+
+    if (compositionStart < 0) {
+      errors.push(`Composition ${composition.name} cannot start before the timeline.`);
     }
 
     if (composition.duration > MAX_PART_DURATION_SECONDS) {
@@ -47,9 +94,15 @@ export function validateScene(scene: Scene): string[] {
   return errors;
 }
 
+export function getExecutableAdjustmentLayers(layers: AdjustmentLayer[] | undefined, timelineLayers: TimelineLayerState | undefined, options: { includeHiddenRows?: boolean } = {}) {
+  const rowIds = new Set((timelineLayers?.adjustmentLayers ?? []).filter((layer) => options.includeHiddenRows || !layer.hidden).map((layer) => layer.id));
+  if (rowIds.size === 0) return [];
+  return (layers ?? []).filter((layer) => rowIds.has(getAdjustmentLayerRowId(layer)));
+}
+
 export function getAdjustmentPlacement(layers: AdjustmentLayer[] | undefined, sceneDuration: number, sceneTime: number) {
   const duration = Math.min(3, Math.max(sceneDuration, 0.1));
-  return { start: roundTenth(clamp(sceneTime, 0, Math.max(sceneDuration - duration, 0))), duration };
+  return { start: roundTenth(Math.max(sceneTime, 0)), duration };
 }
 
 export function formatTime(seconds: number) {
@@ -68,15 +121,24 @@ export function updateCompositionObject(compositions: CompositionClip[], composi
   });
 }
 
-/** @deprecated Use updateCompositionObject. */
-export const updatePartObject = updateCompositionObject;
+export function rebaseCompositionTimelineMarkers<T extends CompositionClip>(composition: T, previousStart: number, nextStart: number): T {
+  const delta = roundTwo(previousStart - nextStart);
+  if (delta === 0) return composition;
+  const rebaseMarker = <Marker extends ZoomMarker | TranslationMarker>(marker: Marker): Marker => ({ ...marker, start: roundTwo(marker.start + delta) });
+  return {
+    ...composition,
+    zoomMarkers: composition.zoomMarkers.map(rebaseMarker),
+    translationMarkers: composition.translationMarkers.map(rebaseMarker),
+    motionBlocks: composition.motionBlocks?.map((marker) => ({ ...marker, start: roundTwo(marker.start + delta) })),
+  };
+}
 
 export type TimelineMarkerKind = "zoom" | "translation";
 export type TimelineMarkerMove = { sourcePartId: string; markerId: string; targetPartId: string; start: number; targetLayerId?: string };
 export type TimelineMarkerResize = { sourcePartId: string; markerId: string; absoluteStart: number; duration: number };
 export type TimelineMarkerDragItem = { partId: string; markerId: string; absoluteStart: number; duration: number; groupId?: string };
-type TopTimelineItem = { kind: "adjustment"; layer: AdjustmentLayer } | { kind: "translation"; part: TimelineComposition; marker: TranslationMarker } | { kind: "zoom"; part: TimelineComposition; marker: ZoomMarker } | { kind: "part"; part: TimelineComposition };
-type MiddleSnapMarker = { id: string; start: number; duration: number; layerId?: string; snapIn?: boolean; snapOut?: boolean };
+type TopTimelineItem = { kind: "adjustment"; layer: AdjustmentLayer } | { kind: "motion"; motionKind: TimelineMarkerKind; part: TimelineComposition; marker: TranslationMarker | ZoomMarker } | { kind: "part"; part: TimelineComposition };
+type MiddleSnapMarker = { id: string; start: number; duration: number; layerId?: string; snapIn?: boolean; snapOut?: boolean; mendInId?: string; mendOutId?: string };
 type MiddleSnapLayerResolver<T extends MiddleSnapMarker> = (marker: T) => string;
 
 export function getTimelineTicks(duration: number) {
@@ -89,20 +151,8 @@ export function getTimelineTicks(duration: number) {
 
 export function getTimelinePartAtTime(timeline: TimelinePart[], time: number) {
   if (timeline.length === 0) return null;
-  if (time >= timeline[timeline.length - 1].end) return timeline[timeline.length - 1];
-
-  let low = 0;
-  let high = timeline.length - 1;
-
-  while (low <= high) {
-    const middle = Math.floor((low + high) / 2);
-    const item = timeline[middle];
-    if (time < item.start) high = middle - 1;
-    else if (time >= item.end) low = middle + 1;
-    else return item;
-  }
-
-  return timeline[0] ?? null;
+  const active = [...timeline].reverse().find((item) => time >= item.start && time < item.end);
+  return active ?? null;
 }
 
 export function getTopTimelineItemAtTime(timeline: TimelineComposition[], time: number, adjustmentLayers: AdjustmentLayer[] = [], motionLayers: TimelineMotionLayerState[] = [], adjustmentRowIds: string[] = []): TopTimelineItem | null {
@@ -118,11 +168,11 @@ export function getTopTimelineItemAtTime(timeline: TimelineComposition[], time: 
       const zoomMarker = [...timeline].reverse().flatMap((part) => [...part.zoomMarkers].reverse().map((marker) => ({ part, marker }))).find((item) => getZoomMarkerLayerId(item.marker) === layer.id && isMarkerAtSelectionTime(item.part, item.marker, time));
       const translationMarker = [...timeline].reverse().flatMap((part) => [...part.translationMarkers].reverse().map((marker) => ({ part, marker }))).find((item) => getTranslationMarkerLayerId(item.marker) === layer.id && isMarkerAtSelectionTime(item.part, item.marker, time));
       if (isMotionLayerKind(layer.kind)) {
-        if (translationMarker) return { kind: "translation", part: translationMarker.part, marker: translationMarker.marker };
-        if (zoomMarker) return { kind: "zoom", part: zoomMarker.part, marker: zoomMarker.marker };
+        if (translationMarker) return { kind: "motion", motionKind: "translation", part: translationMarker.part, marker: translationMarker.marker };
+        if (zoomMarker) return { kind: "motion", motionKind: "zoom", part: zoomMarker.part, marker: zoomMarker.marker };
       } else {
-        if (zoomMarker) return { kind: "zoom", part: zoomMarker.part, marker: zoomMarker.marker };
-        if (translationMarker) return { kind: "translation", part: translationMarker.part, marker: translationMarker.marker };
+        if (zoomMarker) return { kind: "motion", motionKind: "zoom", part: zoomMarker.part, marker: zoomMarker.marker };
+        if (translationMarker) return { kind: "motion", motionKind: "translation", part: translationMarker.part, marker: translationMarker.marker };
       }
     }
 
@@ -130,9 +180,9 @@ export function getTopTimelineItemAtTime(timeline: TimelineComposition[], time: 
   }
 
   const translationMarker = [...timeline].reverse().flatMap((part) => [...part.translationMarkers].reverse().map((marker) => ({ part, marker }))).find((item) => isMarkerAtSelectionTime(item.part, item.marker, time));
-  if (translationMarker) return { kind: "translation", part: translationMarker.part, marker: translationMarker.marker };
+  if (translationMarker) return { kind: "motion", motionKind: "translation", part: translationMarker.part, marker: translationMarker.marker };
   const zoomMarker = [...timeline].reverse().flatMap((part) => [...part.zoomMarkers].reverse().map((marker) => ({ part, marker }))).find((item) => isMarkerAtSelectionTime(item.part, item.marker, time));
-  if (zoomMarker) return { kind: "zoom", part: zoomMarker.part, marker: zoomMarker.marker };
+  if (zoomMarker) return { kind: "motion", motionKind: "zoom", part: zoomMarker.part, marker: zoomMarker.marker };
   return { kind: "part", part: timelinePart };
 }
 
@@ -160,22 +210,50 @@ export function getTranslationMarkerMendKey(marker: Pick<TranslationMarker, "eff
 }
 
 export function getTimelineMotionLayersWithMarkers(layers: TimelineMotionLayerState[], timeline: TimelinePart[]): TimelineMotionLayerState[] {
-  const nextLayers = [...layers];
-  const knownLayerIds = new Set(nextLayers.map((layer) => layer.id));
+  void timeline;
+  return layers;
+}
 
-  function addMarkerLayer(layerId: string) {
-    if (!layerId) return;
-    if (knownLayerIds.has(layerId)) return;
-    knownLayerIds.add(layerId);
-    nextLayers.push({ id: layerId, kind: "motion", name: "MOTION" });
+function markerIdentityKeys(marker: { id: string; partId?: string; sourcePartId?: string }) {
+  const partId = marker.partId ?? marker.sourcePartId;
+  return new Set(partId ? [marker.id, `${partId}:${marker.id}`] : [marker.id]);
+}
+
+export function isExplicitTimelineMarkerMend(previous: { id: string; start: number; duration: number; snapOut?: boolean; mendOutId?: string; partId?: string; sourcePartId?: string }, next: { id: string; start: number; snapIn?: boolean; mendInId?: string; partId?: string; sourcePartId?: string }) {
+  return hasExplicitTimelineMarkerMendReference(previous, next);
+}
+
+function hasExplicitTimelineMarkerMendReference(previous: { id: string; snapOut?: boolean; mendOutId?: string; partId?: string; sourcePartId?: string }, next: { id: string; snapIn?: boolean; mendInId?: string; partId?: string; sourcePartId?: string }) {
+  return Boolean(
+    previous.snapOut
+      && next.snapIn
+      && previous.mendOutId
+      && next.mendInId
+      && markerIdentityKeys(next).has(previous.mendOutId)
+      && markerIdentityKeys(previous).has(next.mendInId),
+  );
+}
+
+export function expandExplicitTimelineMarkerMendIds<T extends { id: string; start: number; snapIn?: boolean; snapOut?: boolean; mendInId?: string; mendOutId?: string; partId?: string; sourcePartId?: string }>(markers: T[], seedIds: Set<string>, partId?: string) {
+  const expandedIds = new Set(seedIds);
+  const normalizedMarkers = markers.map((marker) => ({ ...marker, partId: marker.partId ?? marker.sourcePartId ?? partId }));
+  let changed = true;
+
+  while (changed) {
+    changed = false;
+    for (const previous of normalizedMarkers) {
+      for (const next of normalizedMarkers) {
+        if (previous === next || !hasExplicitTimelineMarkerMendReference(previous, next)) continue;
+        if (!expandedIds.has(previous.id) && !expandedIds.has(next.id)) continue;
+        const size = expandedIds.size;
+        expandedIds.add(previous.id);
+        expandedIds.add(next.id);
+        changed ||= expandedIds.size !== size;
+      }
+    }
   }
 
-  for (const timelinePart of timeline) {
-    for (const marker of timelinePart.zoomMarkers) addMarkerLayer(getZoomMarkerLayerId(marker));
-    for (const marker of timelinePart.translationMarkers) addMarkerLayer(getTranslationMarkerLayerId(marker));
-  }
-
-  return nextLayers;
+  return expandedIds;
 }
 
 export function getAdjustmentLayerRowId(layer: Pick<AdjustmentLayer, "effect" | "layerId">) {
@@ -192,11 +270,15 @@ export function isMotionLayerKind(kind: TimelineMotionLayerKind) {
 
 export function removeTimelineMotionLayerMarkers<T extends { zoomMarkers: ZoomMarker[]; translationMarkers: TranslationMarker[] }>(timeline: T[], layerId: string): T[] {
   return timeline.map((timelinePart) => {
-    const zoomMarkers = timelinePart.zoomMarkers.filter((marker) => getZoomMarkerLayerId(marker) !== layerId);
-    const translationMarkers = timelinePart.translationMarkers.filter((marker) => getTranslationMarkerLayerId(marker) !== layerId);
+    const zoomMarkers = timelinePart.zoomMarkers.filter((marker) => !isMotionMarkerOnLayerId(marker, layerId));
+    const translationMarkers = timelinePart.translationMarkers.filter((marker) => !isMotionMarkerOnLayerId(marker, layerId));
     if (zoomMarkers.length === timelinePart.zoomMarkers.length && translationMarkers.length === timelinePart.translationMarkers.length) return timelinePart;
     return { ...timelinePart, zoomMarkers, translationMarkers };
   });
+}
+
+export function isMotionMarkerOnLayerId(marker: ZoomMarker | TranslationMarker, layerId: string) {
+  return marker.layerId === layerId;
 }
 
 export function isMarkerAtSceneTime(part: TimelineComposition, marker: { start: number; duration: number }, time: number) {
@@ -236,6 +318,17 @@ export function snapScrubTimeToBoundary(time: number, boundaries: number[], snap
   return nearest;
 }
 
+export function snapTimelineBlockStartToBoundary(start: number, duration: number, boundaries: number[], snapThresholdSeconds: number) {
+  let nextStart = start;
+
+  for (const boundary of boundaries) {
+    if (Math.abs(nextStart - boundary) <= snapThresholdSeconds) nextStart = boundary;
+    if (Math.abs(nextStart + duration - boundary) <= snapThresholdSeconds) nextStart = boundary - duration;
+  }
+
+  return nextStart;
+}
+
 export function getScrubSnapBoundaries(timeline: TimelinePart[], adjustmentLayers: AdjustmentLayer[] = []) {
   return Array.from(new Set(timeline.flatMap((part) => [
     part.start,
@@ -264,7 +357,7 @@ export function getTimelineMarkerDragSnapBoundaries(timeline: TimelinePart[], mo
 }
 
 export function getMarkerPlacement(timeline: TimelinePart[], absoluteStart: number, duration: number, snapThresholdSeconds: number, snap: boolean, exclude: { kind: TimelineMarkerKind; partId: string; markerId: string }) {
-  const sceneDuration = timeline.at(-1)?.end ?? 0;
+  const sceneDuration = timelineDuration(timeline);
   let snappedStart = clamp(absoluteStart, 0, Math.max(sceneDuration - duration, 0));
 
   if (snap) {
@@ -349,7 +442,7 @@ export function getTimelineMarkerMoves(timeline: TimelinePart[], items: Timeline
     if (!item.groupId) {
       const nextPlacement = getCrossPartMarkerPlacement(timeline, item.absoluteStart + delta, item.duration)
         ?? getMarkerPlacement(timeline, item.absoluteStart + delta, item.duration, snapThresholdSeconds, false, { kind, partId: item.partId, markerId: item.markerId });
-      moves.push({ sourcePartId: activePartIds.get(item.markerId) ?? item.partId, markerId: item.markerId, targetPartId: nextPlacement.partId, start: nextPlacement.start });
+      moves.push({ sourcePartId: activePartIds.get(`${item.partId}:${item.markerId}`) ?? activePartIds.get(item.markerId) ?? item.partId, markerId: item.markerId, targetPartId: nextPlacement.partId, start: nextPlacement.start });
       continue;
     }
 
@@ -366,7 +459,7 @@ export function getTimelineMarkerMoves(timeline: TimelinePart[], items: Timeline
 
     for (const item of groupItems) {
       moves.push({
-        sourcePartId: activePartIds.get(item.markerId) ?? item.partId,
+        sourcePartId: activePartIds.get(`${item.partId}:${item.markerId}`) ?? activePartIds.get(item.markerId) ?? item.partId,
         markerId: item.markerId,
         targetPartId: nextPlacement.partId,
         start: nextPlacement.start + item.absoluteStart - groupStart,
@@ -378,7 +471,7 @@ export function getTimelineMarkerMoves(timeline: TimelinePart[], items: Timeline
 }
 
 function getCrossPartMarkerPlacement(timeline: TimelinePart[], absoluteStart: number, duration: number) {
-  const sceneEnd = timeline.at(-1)?.end ?? 0;
+  const sceneEnd = timelineDuration(timeline);
   const center = clamp(absoluteStart + duration / 2, 0, sceneEnd > 0 ? sceneEnd - 0.000001 : 0);
   const targetPart = getTimelinePartAtTime(timeline, center);
   return targetPart ? { partId: targetPart.id, start: absoluteStart - targetPart.start } : null;
@@ -394,9 +487,11 @@ export function getMendedMarkerDragItems(timeline: TimelinePart[], part: Timelin
   const targetMarker = sourceMarkers.find((marker) => marker.id === markerId);
   if (!targetMarker) return [];
   const targetMendKey = kind === "zoom" ? getZoomMarkerMendKey(targetMarker as ZoomMarker) : getTranslationMarkerMendKey(targetMarker as TranslationMarker);
-  const markers = sourceMarkers.filter((marker) => (kind === "zoom" ? getZoomMarkerMendKey(marker as ZoomMarker) : getTranslationMarkerMendKey(marker as TranslationMarker)) === targetMendKey);
-  const sortedMarkers = [...markers].sort((left, right) => left.start - right.start);
-  const markerIndex = sortedMarkers.findIndex((marker) => marker.id === markerId);
+  const markers = timeline.flatMap((timelinePart) => (kind === "zoom" ? timelinePart.zoomMarkers : timelinePart.translationMarkers)
+    .filter((marker) => (kind === "zoom" ? getZoomMarkerMendKey(marker as ZoomMarker) : getTranslationMarkerMendKey(marker as TranslationMarker)) === targetMendKey)
+    .map((marker) => ({ partId: timelinePart.id, marker, absoluteStart: timelinePart.start + marker.start })));
+  const sortedMarkers = [...markers].sort((left, right) => left.absoluteStart - right.absoluteStart);
+  const markerIndex = sortedMarkers.findIndex((item) => item.partId === part.id && item.marker.id === markerId);
   if (markerIndex < 0) return [];
 
   let firstIndex = markerIndex;
@@ -405,24 +500,24 @@ export function getMendedMarkerDragItems(timeline: TimelinePart[], part: Timelin
   while (firstIndex > 0) {
     const previous = sortedMarkers[firstIndex - 1];
     const current = sortedMarkers[firstIndex];
-    if (!previous.snapOut || !current.snapIn || roundTenth(previous.start + previous.duration) !== roundTenth(current.start)) break;
+    if (!isExplicitTimelineMarkerMend({ ...previous.marker, partId: previous.partId, start: previous.absoluteStart }, { ...current.marker, partId: current.partId, start: current.absoluteStart })) break;
     firstIndex -= 1;
   }
 
   while (lastIndex < sortedMarkers.length - 1) {
     const current = sortedMarkers[lastIndex];
     const next = sortedMarkers[lastIndex + 1];
-    if (!current.snapOut || !next.snapIn || roundTenth(current.start + current.duration) !== roundTenth(next.start)) break;
+    if (!isExplicitTimelineMarkerMend({ ...current.marker, partId: current.partId, start: current.absoluteStart }, { ...next.marker, partId: next.partId, start: next.absoluteStart })) break;
     lastIndex += 1;
   }
 
-  const groupId = firstIndex === lastIndex ? undefined : `${kind}:${part.id}:${sortedMarkers[firstIndex].id}:${sortedMarkers[lastIndex].id}`;
+  const groupId = firstIndex === lastIndex ? undefined : `${kind}:${sortedMarkers[firstIndex].partId}:${sortedMarkers[firstIndex].marker.id}:${sortedMarkers[lastIndex].partId}:${sortedMarkers[lastIndex].marker.id}`;
 
-  return sortedMarkers.slice(firstIndex, lastIndex + 1).map((marker) => ({
-    partId: part.id,
-    markerId: marker.id,
-    absoluteStart: part.start + marker.start,
-    duration: marker.duration,
+  return sortedMarkers.slice(firstIndex, lastIndex + 1).map((item) => ({
+    partId: item.partId,
+    markerId: item.marker.id,
+    absoluteStart: item.absoluteStart,
+    duration: item.marker.duration,
     groupId,
   }));
 }
@@ -575,9 +670,8 @@ export function getSelectedActiveMiddleMend<T extends MiddleSnapMarker>(markers:
       const previous = sortedMarkers[index];
       const next = sortedMarkers[index + 1];
       if (!selectedIds.has(previous.id) && !selectedIds.has(next.id)) continue;
-      if (!previous.snapOut || !next.snapIn) continue;
+      if (!isExplicitTimelineMarkerMend(previous, next)) continue;
       const time = roundTenth(previous.start + previous.duration);
-      if (time !== roundTenth(next.start)) continue;
       pairs.push({ previousId: previous.id, nextId: next.id, time });
     }
   }
@@ -593,35 +687,84 @@ export function isZoomMiddleSnapActive(markers: MiddleSnapMarker[], snap: { pair
     const previous = markersById.get(pair.previousId);
     const next = markersById.get(pair.nextId);
     if (!previous || !next) return false;
-    return Boolean(previous.snapOut && next.snapIn && roundTenth(previous.start + previous.duration) === roundTenth(next.start));
+    return isExplicitTimelineMarkerMend(previous, next);
   });
 }
 
-export function resizeTimelineMarkersWithPush<T extends { id: string; start: number; duration: number; snapIn?: boolean; snapOut?: boolean }>(markers: T[], markerId: string, action: "start" | "end", rawDelta: number, maxEnd: number, minStart = 0): T[] {
+export function resizeTimelineMarkersWithPush<T extends { id: string; start: number; duration: number; snapIn?: boolean; snapOut?: boolean; mendInId?: string; mendOutId?: string; partId?: string; sourcePartId?: string }>(markers: T[], markerId: string, action: "start" | "end", rawDelta: number, maxEnd: number, minStart = 0, sourcePartId?: string): T[] {
   const sortedMarkers = [...markers].sort((left, right) => left.start - right.start);
-  const markerIndex = sortedMarkers.findIndex((marker) => marker.id === markerId);
+  const markerIndex = sortedMarkers.findIndex((marker) => marker.id === markerId && (sourcePartId === undefined || (marker.sourcePartId ?? marker.partId) === sourcePartId));
   const targetMarker = sortedMarkers[markerIndex];
   if (!targetMarker) return markers;
 
-  if (action === "end") {
-    const minDelta = minimumZoomDuration - targetMarker.duration;
-    let delta = Math.max(rawDelta, minDelta);
-    let layout = layoutMarkersAfterEndResize(sortedMarkers, markerIndex, delta);
-    if (layout.end > maxEnd) {
-      delta -= layout.end - maxEnd;
-      layout = layoutMarkersAfterEndResize(sortedMarkers, markerIndex, Math.max(delta, minDelta));
+  const bounds = new Map<string, { start: number; duration: number }>();
+  const chain = getExplicitTimelineMarkerMendChain(sortedMarkers, markerIndex);
+  if (chain.firstIndex !== chain.lastIndex) {
+    const firstMarker = sortedMarkers[chain.firstIndex];
+    const lastMarker = sortedMarkers[chain.lastIndex];
+    const chainStart = firstMarker.start;
+    const chainEnd = lastMarker.start + lastMarker.duration;
+    if (action === "start") {
+      if (markerIndex !== chain.firstIndex) {
+        const previousMarker = sortedMarkers[markerIndex - 1];
+        if (!previousMarker || !isExplicitTimelineMarkerMend(previousMarker, targetMarker)) return markers;
+        const markerEnd = targetMarker.start + targetMarker.duration;
+        const seamOffset = targetMarker.start - (previousMarker.start + previousMarker.duration);
+        const nextStart = clamp(targetMarker.start + rawDelta, previousMarker.start + minimumZoomDuration + seamOffset, markerEnd - minimumZoomDuration);
+        const previousEnd = nextStart - seamOffset;
+        const roundedPreviousDuration = roundTwo(previousEnd - previousMarker.start);
+        const roundedNextStart = roundTwo(previousMarker.start + roundedPreviousDuration + seamOffset);
+        bounds.set(timelineMarkerBoundsKey(previousMarker), { start: previousMarker.start, duration: roundedPreviousDuration });
+        bounds.set(timelineMarkerBoundsKey(targetMarker), { start: roundedNextStart, duration: roundTwo(markerEnd - roundedNextStart) });
+        return applyMarkerBounds(markers, bounds);
+      }
+      const fixedEnd = firstMarker.start + firstMarker.duration;
+      const nextStart = clamp(chainStart + rawDelta, minStart, fixedEnd - minimumZoomDuration);
+      const roundedStart = roundTwo(nextStart);
+      bounds.set(timelineMarkerBoundsKey(firstMarker), { start: roundedStart, duration: roundTwo(fixedEnd - roundedStart) });
+      return applyMarkerBounds(markers, bounds);
     }
-    return applyMarkerBounds(markers, layout.bounds);
+
+    if (markerIndex !== chain.lastIndex) {
+      const nextMarker = sortedMarkers[markerIndex + 1];
+      if (!nextMarker || !isExplicitTimelineMarkerMend(targetMarker, nextMarker)) return markers;
+      const markerStart = targetMarker.start;
+      const markerEnd = targetMarker.start + targetMarker.duration;
+      const nextMarkerEnd = nextMarker.start + nextMarker.duration;
+      const seamOffset = nextMarker.start - markerEnd;
+      const nextEnd = clamp(markerEnd + rawDelta, markerStart + minimumZoomDuration, nextMarkerEnd - seamOffset - minimumZoomDuration);
+      const nextMarkerStart = nextEnd + seamOffset;
+      bounds.set(timelineMarkerBoundsKey(targetMarker), { start: markerStart, duration: roundTwo(nextEnd - markerStart) });
+      bounds.set(timelineMarkerBoundsKey(nextMarker), { start: roundTwo(nextMarkerStart), duration: roundTwo(nextMarkerEnd - nextMarkerStart) });
+      return applyMarkerBounds(markers, bounds);
+    }
+    const nextEnd = clamp(chainEnd + rawDelta, chainStart + minimumZoomDuration, maxEnd);
+    bounds.set(timelineMarkerBoundsKey(lastMarker), { start: lastMarker.start, duration: roundTwo(nextEnd - lastMarker.start) });
+    return applyMarkerBounds(markers, bounds);
   }
 
-  const maxDelta = targetMarker.duration - minimumZoomDuration;
-  let delta = Math.min(rawDelta, maxDelta);
-  let layout = layoutMarkersAfterStartResize(sortedMarkers, markerIndex, delta);
-  if (layout.start < minStart) {
-    delta -= layout.start - minStart;
-    layout = layoutMarkersAfterStartResize(sortedMarkers, markerIndex, Math.min(delta, maxDelta));
+  const markerStart = targetMarker.start;
+  const markerEnd = targetMarker.start + targetMarker.duration;
+  if (action === "end") {
+    const nextEnd = clamp(markerEnd + rawDelta, markerStart + minimumZoomDuration, maxEnd);
+    bounds.set(timelineMarkerBoundsKey(targetMarker), { start: markerStart, duration: roundTwo(nextEnd - markerStart) });
+    return applyMarkerBounds(markers, bounds);
   }
-  return applyMarkerBounds(markers, layout.bounds);
+
+  const nextStart = clamp(markerStart + rawDelta, minStart, markerEnd - minimumZoomDuration);
+  const roundedStart = roundTwo(nextStart);
+  bounds.set(timelineMarkerBoundsKey(targetMarker), { start: roundedStart, duration: roundTwo(markerEnd - roundedStart) });
+  return applyMarkerBounds(markers, bounds);
+}
+
+function getExplicitTimelineMarkerMendChain<T extends { id: string; start: number; duration: number; snapIn?: boolean; snapOut?: boolean; mendInId?: string; mendOutId?: string; partId?: string; sourcePartId?: string }>(sortedMarkers: T[], markerIndex: number) {
+  let firstIndex = markerIndex;
+  let lastIndex = markerIndex;
+
+  while (firstIndex > 0 && isExplicitTimelineMarkerMend(sortedMarkers[firstIndex - 1], sortedMarkers[firstIndex])) firstIndex -= 1;
+  while (lastIndex < sortedMarkers.length - 1 && isExplicitTimelineMarkerMend(sortedMarkers[lastIndex], sortedMarkers[lastIndex + 1])) lastIndex += 1;
+
+  return { firstIndex, lastIndex };
 }
 
 export function resizeTimelineMarkerFreely<T extends { id: string; start: number; duration: number }>(markers: T[], markerId: string, action: "start" | "end", rawDelta: number, maxEnd: number, minStart = 0): T[] {
@@ -640,50 +783,13 @@ export function resizeTimelineMarkerFreely<T extends { id: string; start: number
   });
 }
 
-function layoutMarkersAfterEndResize<T extends { id: string; start: number; duration: number; snapIn?: boolean; snapOut?: boolean }>(sortedMarkers: T[], markerIndex: number, delta: number) {
-  const targetMarker = sortedMarkers[markerIndex];
-  const bounds = new Map<string, { start: number; duration: number }>([[targetMarker.id, { start: targetMarker.start, duration: targetMarker.duration + delta }]]);
-  let previousStart = targetMarker.start;
-  let previousEnd = targetMarker.start + targetMarker.duration + delta;
-
-  for (let index = markerIndex + 1; index < sortedMarkers.length; index += 1) {
-    const previous = sortedMarkers[index - 1];
-    const current = sortedMarkers[index];
-    const mended = Boolean(previous.snapOut && current.snapIn && roundTenth(previous.start + previous.duration) === roundTenth(current.start));
-    const nextStart = mended || current.start < previousEnd ? previousEnd : current.start;
-    bounds.set(current.id, { start: nextStart, duration: current.duration });
-    previousStart = nextStart;
-    previousEnd = nextStart + current.duration;
-
-    if (!mended && nextStart === current.start) break;
-  }
-
-  return { bounds, end: Math.max(previousEnd, previousStart) };
-}
-
-function layoutMarkersAfterStartResize<T extends { id: string; start: number; duration: number; snapIn?: boolean; snapOut?: boolean }>(sortedMarkers: T[], markerIndex: number, delta: number) {
-  const targetMarker = sortedMarkers[markerIndex];
-  const bounds = new Map<string, { start: number; duration: number }>([[targetMarker.id, { start: targetMarker.start + delta, duration: targetMarker.duration - delta }]]);
-  let nextStart = targetMarker.start + delta;
-
-  for (let index = markerIndex - 1; index >= 0; index -= 1) {
-    const current = sortedMarkers[index];
-    const next = sortedMarkers[index + 1];
-    const mended = Boolean(current.snapOut && next.snapIn && roundTenth(current.start + current.duration) === roundTenth(next.start));
-    const currentEnd = current.start + current.duration;
-    const currentStart = mended || currentEnd > nextStart ? nextStart - current.duration : current.start;
-    bounds.set(current.id, { start: currentStart, duration: current.duration });
-    nextStart = currentStart;
-
-    if (!mended && currentStart === current.start) break;
-  }
-
-  return { bounds, start: nextStart };
+function timelineMarkerBoundsKey(marker: { id: string; partId?: string; sourcePartId?: string }) {
+  return `${marker.sourcePartId ?? marker.partId ?? ""}:${marker.id}`;
 }
 
 function applyMarkerBounds<T extends { id: string; start: number; duration: number }>(markers: T[], bounds: Map<string, { start: number; duration: number }>): T[] {
   return markers.map((marker) => {
-    const nextBounds = bounds.get(marker.id);
+    const nextBounds = bounds.get(timelineMarkerBoundsKey(marker));
     return nextBounds ? { ...marker, start: nextBounds.start, duration: nextBounds.duration } : marker;
   });
 }

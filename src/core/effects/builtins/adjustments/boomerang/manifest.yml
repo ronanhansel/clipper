@@ -1,0 +1,10 @@
+id: clipper.adjustment.boomerang
+category: adjustment
+name: Boomerang
+label: Boomerang
+group: Timing
+accent: "#42d9e8"
+previewColor: "#8f65f2"
+timelineGradient: {"from":"#a77cff","to":"#5f35c6","text":"#ffffff"}
+defaultDuration: 3
+defaultParams: {}

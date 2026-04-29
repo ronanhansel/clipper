@@ -3,14 +3,13 @@ import { startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState,
 import { createPortal } from "react-dom";
 import { defaultTimelinePixelsPerSecond } from "../../app/config";
 import type { AdjustmentLayerSelection, TimelineNodeContextTarget, TimelineSelectionDrag, TranslationMarkerSelection, ZoomMarkerSelection } from "../../app/types";
-import { clamp, roundTenth } from "../../core/math";
-import { buildLinearTimeline, formatTime, getAdjustmentLayerRowId, getAdjustmentPlacement, getMendedMarkerDragItems, getScrubSnapBoundaries, getTimelineDragConstraintItems, getTimelineMarkerDragSnapBoundaries, getTimelineMarkerMoves, getTimelineMotionLayersWithMarkers, getTimelinePartAtTime, getTimelineTicks, getTopTimelineItemAtTime, getTranslationMarkerLayerId, getTranslationMarkerLayerKind, getZoomMarkerLayerId, resizeTimelineMarkerFreely, snapScrubTimeToBoundary, uniqueTimelineDragItems, type TimelineMarkerDragItem, type TimelineMarkerMove, type TimelineMarkerResize } from "../../core/timeline";
+import { clamp, roundTenth, roundTwo } from "../../core/math";
+import { buildLinearTimeline, formatTime, getAdjustmentLayerRowId, getAdjustmentPlacement, getMendedMarkerDragItems, getScrubSnapBoundaries, getTimelineDragConstraintItems, getTimelineMarkerDragSnapBoundaries, getTimelineMarkerMoves, getTimelinePartAtTime, getTimelineTicks, getTopTimelineItemAtTime, getTranslationMarkerLayerId, getTranslationMarkerLayerKind, getZoomMarkerLayerId, isExplicitTimelineMarkerMend, resizeTimelineMarkersWithPush, snapScrubTimeToBoundary, snapTimelineBlockStartToBoundary, timelineDisplayDuration as getTimelineDisplayDuration, uniqueTimelineDragItems, type TimelineMarkerDragItem, type TimelineMarkerMove, type TimelineMarkerResize } from "../../core/timeline";
 import { defaultTimelineLayerState } from "../../core/project";
 import { getAdjustmentEffectPackage, getEffectDragType, getEffectPackage, getMotionEffectPackage, installedEffectPackages } from "../../core/effects/registry";
-import { getFrameSkipEvery } from "../../core/effects/adjustments";
-import { getTimelineLayerDragPreview, getTimelineLayerRowAtClientY, type TimelineLayerCategory, type TimelineLayerLayout } from "../../core/timelineLayers";
-import type { AdjustmentEffectId, AdjustmentLayer, MotionEffectId, MotionEffectKind, Part, TimelineLayerState, TimelineMode, TimelineMotionLayerKind, TimelinePart, TimelineViewportState, TranslationMarker, ZoomMarker } from "../../core/types";
-import type { EffectPointerDragDetail } from "../ToolsPanel";
+import { applyTimelineBlockPreview, clearTimelineBlockPreview, getTimelineBlockLayerPreview, getTimelineLayerRowAtClientY, moveTimelineStateLayer, renameTimelineStateLayer, toggleTimelineStateLayerHidden, type TimelineLayerCategory, type TimelineLayerLayout } from "../../core/timelineLayers";
+import type { AdjustmentEffectId, AdjustmentLayer, EffectTimelineGradient, MotionEffectId, MotionEffectKind, Part, TimelineLayerState, TimelineMode, TimelineMotionLayerKind, TimelinePart, TimelineViewportState, TranslationMarker, ZoomMarker } from "../../core/types";
+import { compositionDragPreviewEvent, compositionPointerDragEvent, effectDragPreviewEvent, effectPointerDragEvent, setClipperPointerDragPreview, type CompositionPointerDragDetail, type EffectPointerDragDetail } from "../../lib/pointerDrag";
 
 export type TimelinePanelProps = {
   timelineName: string;
@@ -36,6 +35,7 @@ export type TimelinePanelProps = {
   fastSelectEnabled: boolean;
   scrubCommitThrottleMs: number;
   defaultNewMarkerDurationSeconds: number;
+  timelineEndPaddingFraction: number;
   scrubSnapEnabled: boolean;
   onScrub: (time: number) => void;
   onScrubStart: () => void;
@@ -43,6 +43,8 @@ export type TimelinePanelProps = {
   onModeChange: (mode: TimelineMode) => void;
   onTimelineViewportStateChange: (updater: (state: TimelineViewportState) => TimelineViewportState) => void;
   onTimelineLayersChange: (updater: (state: TimelineLayerState) => TimelineLayerState, options?: { history?: boolean }) => void;
+  onAddCompositionLayer: (targetLayerId?: string, placement?: "before" | "after") => void;
+  onRemoveCompositionLayer: (layerId: string) => void;
   onAddAdjustmentLayer: (targetLayerId?: string, placement?: "before" | "after") => void;
   onRemoveAdjustmentLayer: (layerId: string) => void;
   onAddMotionLayer: (kind?: TimelineMotionLayerKind, targetLayerId?: string, placement?: "before" | "after") => void;
@@ -60,6 +62,8 @@ export type TimelinePanelProps = {
   onMoveAdjustmentLayer: (layerId: string, start: number, targetLayerId?: string) => void;
   onUpdateAdjustmentLayer: (layerId: string, updater: (layer: AdjustmentLayer) => AdjustmentLayer) => void;
   onReorderPart: (sourcePartId: string, targetPartId: string) => void;
+  onMoveComposition: (compositionId: string, start: number, targetLayerId?: string) => void;
+  onUpdateComposition: (compositionId: string, updater: (composition: Part) => Part) => void;
   onMoveZoomMarker: (sourcePartId: string, markerId: string, targetPartId: string, start: number, targetLayerId?: string) => void;
   onMoveZoomMarkers: (moves: TimelineMarkerMove[]) => void;
   onMoveTranslationMarker: (sourcePartId: string, markerId: string, targetPartId: string, start: number, targetLayerId?: string) => void;
@@ -68,16 +72,17 @@ export type TimelinePanelProps = {
   onUpdateTranslationMarkers: (partId: string, updater: (markers: TranslationMarker[], part: Part) => TranslationMarker[]) => void;
   onResizeZoomMarkers: (resizes: TimelineMarkerResize[]) => void;
   onResizeTranslationMarkers: (resizes: TimelineMarkerResize[]) => void;
-  onAddComposition: (compositionId: string) => void;
+  onAddComposition: (compositionId: string, targetLayerId?: string, start?: number) => void;
   onAddAdjustmentEffect: (effectId: AdjustmentEffectId, sceneTime: number, layerId?: string) => void;
   onAddMotionEffect: (effectId: MotionEffectId, layerId: string, sceneTime: number) => void;
 };
 
 type EffectDragPreview = {
-  category: "adjustment" | "motion";
-  effectId: string;
+  category: "adjustment" | "motion" | "composition";
+  effectId?: string;
   kind?: MotionEffectKind;
   layerKey: string;
+  label?: string;
   start: number;
   duration: number;
   initialClientX: number;
@@ -89,17 +94,17 @@ type AbsoluteTimelineMarker<T extends { id: string; start: number; duration: num
   sourcePartStart: number;
 };
 
-export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustmentLayers, timelineViewportState, mode, selectedPartId, selectedZoomMarkerPartId, selectedZoomMarkerId, selectedZoomMarkers, selectedTranslationMarkerPartId, selectedTranslationMarkerId, selectedTranslationMarkers, selectedAdjustmentLayerId, selectedAdjustmentLayers, sceneDuration, currentSceneTime, isPlaying, playbackPlayheadRef, scrubbingRef, fastSelectEnabled, scrubCommitThrottleMs, defaultNewMarkerDurationSeconds, scrubSnapEnabled, onScrub, onScrubStart, onScrubEnd, onModeChange, onTimelineViewportStateChange, onTimelineLayersChange, onAddAdjustmentLayer, onRemoveAdjustmentLayer, onAddMotionLayer, onRemoveMotionLayer, onSelectPart, onSelectZoomMarker, onSelectZoomMarkers, onSelectTranslationMarker, onSelectTranslationMarkers, onSelectAdjustmentLayer, onSelectAdjustmentLayers, onSelectTimelineNodes, onClearTimelineSelection, onOpenNodeContextMenu, onMoveAdjustmentLayer, onUpdateAdjustmentLayer, onReorderPart, onMoveZoomMarker, onMoveZoomMarkers, onMoveTranslationMarker, onMoveTranslationMarkers, onUpdateZoomMarkers, onUpdateTranslationMarkers, onResizeZoomMarkers, onResizeTranslationMarkers, onAddComposition, onAddAdjustmentEffect, onAddMotionEffect }: TimelinePanelProps) {
-  const ticks = useMemo(() => getTimelineTicks(sceneDuration), [sceneDuration]);
+export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustmentLayers, timelineViewportState, mode, selectedPartId, selectedZoomMarkerPartId, selectedZoomMarkerId, selectedZoomMarkers, selectedTranslationMarkerPartId, selectedTranslationMarkerId, selectedTranslationMarkers, selectedAdjustmentLayerId, selectedAdjustmentLayers, sceneDuration, currentSceneTime, isPlaying, playbackPlayheadRef, scrubbingRef, fastSelectEnabled, scrubCommitThrottleMs, defaultNewMarkerDurationSeconds, timelineEndPaddingFraction, scrubSnapEnabled, onScrub, onScrubStart, onScrubEnd, onModeChange, onTimelineViewportStateChange, onTimelineLayersChange, onAddCompositionLayer, onRemoveCompositionLayer, onAddAdjustmentLayer, onRemoveAdjustmentLayer, onAddMotionLayer, onRemoveMotionLayer, onSelectPart, onSelectZoomMarker, onSelectZoomMarkers, onSelectTranslationMarker, onSelectTranslationMarkers, onSelectAdjustmentLayer, onSelectAdjustmentLayers, onSelectTimelineNodes, onClearTimelineSelection, onOpenNodeContextMenu, onMoveAdjustmentLayer, onUpdateAdjustmentLayer, onReorderPart, onMoveComposition, onUpdateComposition, onMoveZoomMarker, onMoveZoomMarkers, onMoveTranslationMarker, onMoveTranslationMarkers, onUpdateZoomMarkers, onUpdateTranslationMarkers, onResizeZoomMarkers, onResizeTranslationMarkers, onAddComposition, onAddAdjustmentEffect, onAddMotionEffect }: TimelinePanelProps) {
+  const timelineDisplayDuration = getTimelineDisplayDuration(sceneDuration, timelineEndPaddingFraction);
+  const ticks = useMemo(() => getTimelineTicks(timelineDisplayDuration), [timelineDisplayDuration]);
   const timelineRef = useRef<HTMLDivElement | null>(null);
   const timelinePanelRef = useRef<HTMLElement | null>(null);
   const timelineViewportRef = useRef<HTMLDivElement | null>(null);
   const timelineRulerViewportRef = useRef<HTMLDivElement | null>(null);
   const timelineLayerRailRef = useRef<HTMLDivElement | null>(null);
+  const timelineSnapGuideRef = useRef<HTMLDivElement | null>(null);
   const [draggedPartId, setDraggedPartId] = useState<string | null>(null);
-  const [draggingAdjustmentLayerId, setDraggingAdjustmentLayerId] = useState<string | null>(null);
-  const [draggingZoomMarkerId, setDraggingZoomMarkerId] = useState<string | null>(null);
-  const [draggingTranslationMarkerId, setDraggingTranslationMarkerId] = useState<string | null>(null);
+  const [draggingTimelineBlockCategory, setDraggingTimelineBlockCategory] = useState<TimelineLayerCategory | null>(null);
   const [adjustmentSelectionDrag, setAdjustmentSelectionDrag] = useState<TimelineSelectionDrag | null>(null);
   const [zoomSelectionDrag, setZoomSelectionDrag] = useState<TimelineSelectionDrag | null>(null);
   const [translationSelectionDrag, setTranslationSelectionDrag] = useState<TimelineSelectionDrag | null>(null);
@@ -131,6 +136,9 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
   const scrubClientXRef = useRef<number | null>(null);
   const scrubSnapRef = useRef(false);
   const scrubAutoScrollFrameRef = useRef(0);
+  const timelineDragClientXRef = useRef<number | null>(null);
+  const timelineDragAutoScrollFrameRef = useRef(0);
+  const timelineDragAutoScrollCallbackRef = useRef<(() => void) | null>(null);
   const scrubPreviewFrameRef = useRef(0);
   const pendingScrubPreviewRef = useRef<{ clientX: number; snap: boolean; commit: "throttled" | "immediate" } | null>(null);
   const pendingScrubCommitRef = useRef<number | null>(null);
@@ -146,40 +154,61 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
   const selectedZoomKeys = useMemo(() => new Set(selectedZoomMarkers.map((selection) => `${selection.partId}:${selection.markerId}`)), [selectedZoomMarkers]);
   const selectedTranslationKeys = useMemo(() => new Set(selectedTranslationMarkers.map((selection) => `${selection.partId}:${selection.markerId}`)), [selectedTranslationMarkers]);
   const scrubSnapBoundaries = useMemo(() => getScrubSnapBoundaries(timeline, adjustmentLayers), [adjustmentLayers, timeline]);
-  const contentWidth = Math.max(sceneDuration * defaultTimelinePixelsPerSecond * timelineZoom, 160);
+  const contentWidth = Math.max(timelineDisplayDuration * defaultTimelinePixelsPerSecond * timelineZoom, 160);
   const isCompositionMode = mode === "composition";
   const baseMotionLayers = timelineLayers.motionLayers?.length ? timelineLayers.motionLayers : defaultTimelineLayerState.motionLayers!;
-  const motionLayers = useMemo(() => getTimelineMotionLayersWithMarkers(baseMotionLayers, timeline), [baseMotionLayers, timeline]);
+  const compositionRows = timelineLayers.compositionLayers?.length ? timelineLayers.compositionLayers : defaultTimelineLayerState.compositionLayers!;
+  const motionLayers = baseMotionLayers;
   const adjustmentRows = (timelineLayers.adjustmentLayers?.length ? timelineLayers.adjustmentLayers : defaultTimelineLayerState.adjustmentLayers!).map((layer) => {
     const effect = getAdjustmentEffectPackage(layer.id);
     return { key: layer.id, accent: effect?.accent ?? "#8f65f2", name: layer.name, hidden: Boolean(layer.hidden), effect };
   });
   const [resizePreviewRowHeights, setResizePreviewRowHeights] = useState<Record<string, number> | null>(null);
+  const [timelineLaneViewportHeight, setTimelineLaneViewportHeight] = useState(0);
   const rowHeights = resizePreviewRowHeights ?? timelineLayers.rowHeights ?? {};
   const layerRows = isCompositionMode
-    ? [...adjustmentRows.map((row) => ({ key: row.key, category: "adjust" as const, accent: row.accent })), ...motionLayers.map((layer) => ({ key: layer.id, category: "motion" as const, accent: "#24b7c9" })), { key: "comp", category: "comp" as const, accent: "#38a86d" }]
-    : [{ key: "comp", category: "comp" as const, accent: "#38a86d" }];
-  const layerRowHeights = layerRows.map((row) => getTimelineLayerRowHeight(rowHeights, row.key));
+    ? [...adjustmentRows.map((row) => ({ key: row.key, category: "adjust" as const, accent: row.accent })), ...motionLayers.map((layer) => ({ key: layer.id, category: "motion" as const, accent: "#24b7c9" })), ...compositionRows.map((layer) => ({ key: layer.id, category: "comp" as const, accent: "#38a86d" }))]
+    : compositionRows.map((layer) => ({ key: layer.id, category: "comp" as const, accent: "#38a86d" }));
+  const baseLayerRowHeights = layerRows.map((row) => getTimelineLayerRowHeight(rowHeights, row.key));
+  const baseLaneContentHeight = baseLayerRowHeights.reduce((total, height) => total + height, 0);
+  const laneFillHeight = Math.max(timelineLaneViewportHeight - baseLaneContentHeight, 0);
+  const layerRowHeights = baseLayerRowHeights.map((height, index) => (index === baseLayerRowHeights.length - 1 ? height + laneFillHeight : height));
   const layerRowStarts = layerRowHeights.reduce<number[]>((starts, height, index) => [...starts, index === 0 ? 0 : starts[index - 1] + layerRowHeights[index - 1]], []);
   const layerLayout: TimelineLayerLayout = { rows: layerRows, starts: layerRowStarts, heights: layerRowHeights };
   const laneRowsStyle = { gridTemplateRows: layerRowHeights.map((height) => `${height}px`).join(" ") };
   const laneContentHeight = layerRowHeights.reduce((total, height) => total + height, 0);
   const layerRailWidth = 260;
-  const isDraggingAdjustmentLayer = Boolean(draggingAdjustmentLayerId);
-  const isDraggingMotionMarker = Boolean(draggingZoomMarkerId || draggingTranslationMarkerId);
-  const showTimelineBoundaryGuides = isDraggingAdjustmentLayer || isDraggingMotionMarker || Boolean(effectDragPreview);
+  const isDraggingAdjustmentLayer = draggingTimelineBlockCategory === "adjust";
+  const isDraggingMotionMarker = draggingTimelineBlockCategory === "motion";
+  const isDraggingCompositionBlock = draggingTimelineBlockCategory === "comp";
 
   useEffect(() => {
     setTimelineZoom(timelineViewportState.zoom);
   }, [timelineViewportState.zoom]);
+
+  useLayoutEffect(() => {
+    const element = timelineViewportRef.current;
+    if (!element) return;
+
+    function updateHeight() {
+      setTimelineLaneViewportHeight(Math.round(element?.clientHeight ?? 0));
+    }
+
+    updateHeight();
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => () => {
     if (adjustmentSelectionFrameRef.current) window.cancelAnimationFrame(adjustmentSelectionFrameRef.current);
     if (zoomSelectionFrameRef.current) window.cancelAnimationFrame(zoomSelectionFrameRef.current);
     if (translationSelectionFrameRef.current) window.cancelAnimationFrame(translationSelectionFrameRef.current);
     if (scrubPreviewFrameRef.current) window.cancelAnimationFrame(scrubPreviewFrameRef.current);
+    if (timelineDragAutoScrollFrameRef.current) window.cancelAnimationFrame(timelineDragAutoScrollFrameRef.current);
     if (effectDragPreviewFrameRef.current) window.cancelAnimationFrame(effectDragPreviewFrameRef.current);
     if (scrubCommitTimeoutRef.current) window.clearTimeout(scrubCommitTimeoutRef.current);
+    clearTimelineSnapGuide();
     setGlobalTimelineDragActive(false);
   }, []);
 
@@ -189,6 +218,58 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
 
   function withPlayheadSnapBoundary(boundaries: number[]) {
     return Array.from(new Set([...boundaries, currentSceneTimeRef.current])).sort((left, right) => left - right);
+  }
+
+  function getTimelineSnapGuideTime(time: number, boundaries: number[], snapThresholdSeconds: number) {
+    let guideTime: number | null = null;
+    let nearestDistance = snapThresholdSeconds;
+    for (const boundary of boundaries) {
+      const distance = Math.abs(time - boundary);
+      if (distance <= nearestDistance) {
+        guideTime = boundary;
+        nearestDistance = distance;
+      }
+    }
+    return guideTime;
+  }
+
+  function getTimelineBlockSnap(start: number, duration: number, boundaries: number[], snapThresholdSeconds: number) {
+    let nextStart = start;
+    let guideTime: number | null = null;
+    let nearestDistance = snapThresholdSeconds;
+
+    for (const boundary of boundaries) {
+      const startDistance = Math.abs(start - boundary);
+      if (startDistance <= nearestDistance) {
+        nextStart = boundary;
+        guideTime = boundary;
+        nearestDistance = startDistance;
+      }
+
+      const endDistance = Math.abs(start + duration - boundary);
+      if (endDistance <= nearestDistance) {
+        nextStart = boundary - duration;
+        guideTime = boundary;
+        nearestDistance = endDistance;
+      }
+    }
+
+    return { start: nextStart, guideTime };
+  }
+
+  function updateTimelineSnapGuide(time: number | null) {
+    const element = timelineSnapGuideRef.current;
+    if (!element || time === null || timelineDisplayDuration <= 0 || Math.abs(time - currentSceneTimeRef.current) < 0.0001) {
+      clearTimelineSnapGuide();
+      return;
+    }
+
+    element.style.display = "block";
+    element.style.transform = `translate3d(${(time / timelineDisplayDuration) * contentWidth}px, 0, 0)`;
+  }
+
+  function clearTimelineSnapGuide() {
+    if (timelineSnapGuideRef.current) timelineSnapGuideRef.current.style.display = "none";
   }
 
   currentSceneTimeRef.current = currentSceneTime;
@@ -225,10 +306,10 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
   function timeFromClientX(clientX: number, snap: boolean) {
     const rect = timelineRef.current?.getBoundingClientRect();
     if (!rect || sceneDuration <= 0) return 0;
-    const rawTime = clamp(((clientX - rect.left) / rect.width) * sceneDuration, 0, sceneDuration);
+    const rawTime = clamp(((clientX - rect.left) / rect.width) * timelineDisplayDuration, 0, sceneDuration);
     if (!snap) return rawTime;
 
-    const pixelsPerSecond = rect.width / sceneDuration;
+    const pixelsPerSecond = rect.width / timelineDisplayDuration;
     const snapThresholdSeconds = Math.min(0.35, Math.max(0.05, 10 / pixelsPerSecond));
     return snapScrubTimeToBoundary(rawTime, scrubSnapBoundaries, snapThresholdSeconds);
   }
@@ -244,7 +325,7 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
     latestScrubPreviewTimeRef.current = time;
     const playhead = playbackPlayheadRef.current;
     if (!playhead) return;
-    playhead.style.setProperty("--clipper-playhead-left", `${sceneDuration > 0 ? (time / sceneDuration) * 100 : 0}%`);
+    playhead.style.setProperty("--clipper-playhead-left", `${timelineDisplayDuration > 0 ? (time / timelineDisplayDuration) * 100 : 0}%`);
     playhead.style.removeProperty("--clipper-playhead-x");
   }
 
@@ -264,7 +345,6 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
     if (nextTime === null) return;
     lastScrubCommitAtRef.current = performance.now();
     if (fastSelectEnabled) selectTimelineItemAtTime(nextTime);
-    onScrub(nextTime);
   }
 
   function scheduleScrubCommit(time: number) {
@@ -282,6 +362,7 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
   function updateScrubFromClientX(clientX: number, snap: boolean, commit: "throttled" | "immediate" = "throttled") {
     const time = timeFromClientX(visibleScrubClientX(clientX), snap);
     previewScrubTime(time);
+    onScrub(time);
     if (commit === "immediate") {
       pendingScrubCommitRef.current = time;
       commitPendingScrub();
@@ -317,12 +398,9 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
       onSelectAdjustmentLayer(item.layer.id);
       return;
     }
-    if (item.kind === "translation") {
-      onSelectTranslationMarker(item.part.id, item.marker.id);
-      return;
-    }
-    if (item.kind === "zoom") {
-      onSelectZoomMarker(item.part.id, item.marker.id);
+    if (item.kind === "motion") {
+      if (item.motionKind === "translation") onSelectTranslationMarker(item.part.id, item.marker.id);
+      else onSelectZoomMarker(item.part.id, item.marker.id);
       return;
     }
     onSelectPart(item.part.id);
@@ -334,6 +412,54 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
     scrubAutoScrollFrameRef.current = 0;
   }
 
+  function getTimelineEdgeScrollDelta(clientX: number, viewport: HTMLElement) {
+    const rect = viewport.getBoundingClientRect();
+    const edgeSize = 72;
+    const leftDistance = rect.left + edgeSize - clientX;
+    const rightDistance = clientX - (rect.right - edgeSize);
+    if (leftDistance > 0) return -clamp(leftDistance / 3, 5, 34);
+    if (rightDistance > 0) return clamp(rightDistance / 3, 5, 34);
+    return 0;
+  }
+
+  function stopTimelineDragAutoScroll() {
+    timelineDragClientXRef.current = null;
+    timelineDragAutoScrollCallbackRef.current = null;
+    if (timelineDragAutoScrollFrameRef.current) window.cancelAnimationFrame(timelineDragAutoScrollFrameRef.current);
+    timelineDragAutoScrollFrameRef.current = 0;
+  }
+
+  function scheduleTimelineDragAutoScroll() {
+    if (timelineDragAutoScrollFrameRef.current) return;
+
+    const tick = () => {
+      timelineDragAutoScrollFrameRef.current = 0;
+      const clientX = timelineDragClientXRef.current;
+      const viewport = timelineViewportRef.current;
+      if (clientX === null || !viewport) return;
+
+      const scrollDelta = getTimelineEdgeScrollDelta(clientX, viewport);
+      if (scrollDelta !== 0) {
+        const previousScrollLeft = viewport.scrollLeft;
+        viewport.scrollLeft += scrollDelta;
+        if (viewport.scrollLeft !== previousScrollLeft) {
+          syncTimelineRulerScroll(viewport.scrollLeft);
+          timelineDragAutoScrollCallbackRef.current?.();
+        }
+      }
+
+      timelineDragAutoScrollFrameRef.current = window.requestAnimationFrame(tick);
+    };
+
+    timelineDragAutoScrollFrameRef.current = window.requestAnimationFrame(tick);
+  }
+
+  function updateTimelineDragAutoScroll(clientX: number, onScroll: () => void) {
+    timelineDragClientXRef.current = clientX;
+    timelineDragAutoScrollCallbackRef.current = onScroll;
+    scheduleTimelineDragAutoScroll();
+  }
+
   function scheduleScrubAutoScroll() {
     if (scrubAutoScrollFrameRef.current) return;
 
@@ -343,14 +469,7 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
       const viewport = timelineViewportRef.current;
       if (clientX === null || !viewport) return;
 
-      const rect = viewport.getBoundingClientRect();
-      const edgeSize = 72;
-      const leftDistance = rect.left + edgeSize - clientX;
-      const rightDistance = clientX - (rect.right - edgeSize);
-      let scrollDelta = 0;
-
-      if (leftDistance > 0) scrollDelta = -clamp(leftDistance / 3, 5, 34);
-      if (rightDistance > 0) scrollDelta = clamp(rightDistance / 3, 5, 34);
+      const scrollDelta = getTimelineEdgeScrollDelta(clientX, viewport);
 
       if (scrollDelta !== 0) {
         const previousScrollLeft = viewport.scrollLeft;
@@ -427,8 +546,8 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
   }
 
   function adjustmentSelectionFromDrag(selectionDrag: TimelineSelectionDrag, rect: DOMRect) {
-    const start = clamp(((Math.min(selectionDrag.startX, selectionDrag.currentX) - rect.left) / rect.width) * sceneDuration, 0, sceneDuration);
-    const end = clamp(((Math.max(selectionDrag.startX, selectionDrag.currentX) - rect.left) / rect.width) * sceneDuration, 0, sceneDuration);
+    const start = clamp(((Math.min(selectionDrag.startX, selectionDrag.currentX) - rect.left) / rect.width) * timelineDisplayDuration, 0, timelineDisplayDuration);
+    const end = clamp(((Math.max(selectionDrag.startX, selectionDrag.currentX) - rect.left) / rect.width) * timelineDisplayDuration, 0, timelineDisplayDuration);
     return adjustmentLayers
       .filter((layer) => layer.start <= end && layer.start + layer.duration >= start)
       .map((layer) => ({ layerId: layer.id }));
@@ -495,8 +614,8 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
   }
 
   function zoomSelectionFromDrag(selectionDrag: TimelineSelectionDrag, rect: DOMRect) {
-    const start = clamp(((Math.min(selectionDrag.startX, selectionDrag.currentX) - rect.left) / rect.width) * sceneDuration, 0, sceneDuration);
-    const end = clamp(((Math.max(selectionDrag.startX, selectionDrag.currentX) - rect.left) / rect.width) * sceneDuration, 0, sceneDuration);
+    const start = clamp(((Math.min(selectionDrag.startX, selectionDrag.currentX) - rect.left) / rect.width) * timelineDisplayDuration, 0, timelineDisplayDuration);
+    const end = clamp(((Math.max(selectionDrag.startX, selectionDrag.currentX) - rect.left) / rect.width) * timelineDisplayDuration, 0, timelineDisplayDuration);
     return timeline.flatMap((timelinePart) => timelinePart.zoomMarkers
       .filter((marker) => timelinePart.start + marker.start <= end && timelinePart.start + marker.start + marker.duration >= start)
       .map((marker) => ({ partId: timelinePart.id, markerId: marker.id })));
@@ -564,8 +683,8 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
   }
 
   function translationSelectionFromDrag(selectionDrag: TimelineSelectionDrag, rect: DOMRect) {
-    const start = clamp(((Math.min(selectionDrag.startX, selectionDrag.currentX) - rect.left) / rect.width) * sceneDuration, 0, sceneDuration);
-    const end = clamp(((Math.max(selectionDrag.startX, selectionDrag.currentX) - rect.left) / rect.width) * sceneDuration, 0, sceneDuration);
+    const start = clamp(((Math.min(selectionDrag.startX, selectionDrag.currentX) - rect.left) / rect.width) * timelineDisplayDuration, 0, timelineDisplayDuration);
+    const end = clamp(((Math.max(selectionDrag.startX, selectionDrag.currentX) - rect.left) / rect.width) * timelineDisplayDuration, 0, timelineDisplayDuration);
     return timeline.flatMap((timelinePart) => timelinePart.translationMarkers
       .filter((marker) => timelinePart.start + marker.start <= end && timelinePart.start + marker.start + marker.duration >= start)
       .map((marker) => ({ partId: timelinePart.id, markerId: marker.id })));
@@ -633,8 +752,8 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
   }
 
   function timelineSelectionFromDrag(selectionDrag: TimelineSelectionDrag, rect: DOMRect) {
-    const start = clamp(((Math.min(selectionDrag.startX, selectionDrag.currentX) - rect.left) / rect.width) * sceneDuration, 0, sceneDuration);
-    const end = clamp(((Math.max(selectionDrag.startX, selectionDrag.currentX) - rect.left) / rect.width) * sceneDuration, 0, sceneDuration);
+    const start = clamp(((Math.min(selectionDrag.startX, selectionDrag.currentX) - rect.left) / rect.width) * timelineDisplayDuration, 0, timelineDisplayDuration);
+    const end = clamp(((Math.max(selectionDrag.startX, selectionDrag.currentX) - rect.left) / rect.width) * timelineDisplayDuration, 0, timelineDisplayDuration);
     const dragTop = clamp(Math.min(selectionDrag.startY ?? rect.top, selectionDrag.currentY ?? rect.top) - rect.top, 0, rect.height);
     const dragBottom = clamp(Math.max(selectionDrag.startY ?? rect.top, selectionDrag.currentY ?? rect.top) - rect.top, 0, rect.height);
     const adjustmentSelection: AdjustmentLayerSelection[] = [];
@@ -834,15 +953,15 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
       .map((marker) => ({ ...marker, sourcePartId: timelinePart.id, sourcePartStart: timelinePart.start, start: timelinePart.start + marker.start })));
   }
 
-  function getAbsoluteMarkerResizeState<T extends { id: string; start: number; duration: number; snapIn?: boolean; snapOut?: boolean }>(markers: Array<AbsoluteTimelineMarker<T>>, markerId: string, action: "start" | "end", deltaSeconds: number) {
-    return resizeTimelineMarkerFreely(markers, markerId, action, deltaSeconds, sceneDuration).filter((marker) => {
-      const initial = markers.find((item) => item.id === marker.id);
+  function getAbsoluteMarkerResizeState<T extends { id: string; start: number; duration: number; snapIn?: boolean; snapOut?: boolean }>(markers: Array<AbsoluteTimelineMarker<T>>, markerId: string, sourcePartId: string, action: "start" | "end", deltaSeconds: number) {
+    return resizeTimelineMarkersWithPush(markers, markerId, action, deltaSeconds, Number.POSITIVE_INFINITY, 0, sourcePartId).filter((marker) => {
+      const initial = markers.find((item) => item.id === marker.id && item.sourcePartId === marker.sourcePartId);
       return initial && (initial.start !== marker.start || initial.duration !== marker.duration);
     });
   }
 
   function getTimelineMarkerResizeCommits<T extends { id: string; start: number; duration: number }>(markers: Array<AbsoluteTimelineMarker<T>>): TimelineMarkerResize[] {
-    return markers.map((marker) => ({ sourcePartId: marker.sourcePartId, markerId: marker.id, absoluteStart: marker.start, duration: marker.duration }));
+    return markers.map((marker) => ({ sourcePartId: marker.sourcePartId, markerId: marker.id, absoluteStart: roundTwo(marker.start), duration: roundTwo(marker.duration) }));
   }
 
   function getTimelineMarkerResizePreviewMap<T extends { id: string; start: number; duration: number }>(markers: Array<AbsoluteTimelineMarker<T>>) {
@@ -858,6 +977,7 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
     return Array.from(new Map(markers.map((marker) => [`${marker.sourcePartId}:${marker.id}`, marker])).values());
   }
 
+
   function blockDeltaForTimelineDrag(items: TimelineMarkerDragItem[], rawDelta: number, snapThresholdSeconds: number, snap: boolean, kind: "zoom" | "translation", targetLayerId?: string) {
     const constraintItems = getTimelineDragConstraintItems(items);
     const blockStart = Math.min(...constraintItems.map((item) => item.absoluteStart));
@@ -867,24 +987,39 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
     let nextDelta = rawDelta;
 
     if (snap) {
-      for (const boundary of snapBoundaries) {
-        if (Math.abs(blockStart + nextDelta - boundary) <= snapThresholdSeconds) nextDelta = boundary - blockStart;
-        if (Math.abs(blockEnd + nextDelta - boundary) <= snapThresholdSeconds) nextDelta = boundary - blockEnd;
-      }
+      const snapped = getTimelineBlockSnap(blockStart + nextDelta, blockEnd - blockStart, snapBoundaries, snapThresholdSeconds);
+      nextDelta = snapped.start - blockStart;
+      updateTimelineSnapGuide(snapped.guideTime);
+    } else {
+      clearTimelineSnapGuide();
     }
 
-    return clamp(nextDelta, -blockStart, sceneDuration - blockEnd);
+    return clamp(nextDelta, -blockStart, timelineDisplayDuration - blockStart);
   }
 
   function getUniversalTimelineSnapBoundaries(kind: "zoom" | "translation", movingKeys: Set<string>) {
+    const movingEdges = getMovingMarkerEdgeTimes(kind, movingKeys);
     return withPlayheadSnapBoundary(Array.from(new Set([
-      ...getScrubSnapBoundaries(timeline, adjustmentLayers),
+      ...getScrubSnapBoundaries(timeline, adjustmentLayers).filter((boundary) => !movingEdges.has(roundTenth(boundary))),
       ...getTimelineMarkerDragSnapBoundaries(timeline, kind, movingKeys),
     ])).sort((left, right) => left - right));
   }
 
+  function getMovingMarkerEdgeTimes(kind: "zoom" | "translation", movingKeys: Set<string>) {
+    const edges = new Set<number>();
+    for (const timelinePart of timeline) {
+      const markers = kind === "zoom" ? timelinePart.zoomMarkers : timelinePart.translationMarkers;
+      for (const marker of markers) {
+        if (!movingKeys.has(`${timelinePart.id}:${marker.id}`)) continue;
+        edges.add(roundTenth(timelinePart.start + marker.start));
+        edges.add(roundTenth(timelinePart.start + marker.start + marker.duration));
+      }
+    }
+    return edges;
+  }
+
   function getTimelineMarkerElement(kind: "zoom" | "translation", partId: string, markerId: string) {
-    return timelineViewportRef.current?.querySelector<HTMLElement>(`[data-timeline-marker-kind="${kind}"][data-timeline-marker-part-id="${CSS.escape(partId)}"][data-timeline-marker-id="${CSS.escape(markerId)}"]`) ?? null;
+    return timelineViewportRef.current?.querySelector<HTMLElement>(`[data-timeline-marker-kind="motion"][data-timeline-motion-kind="${kind}"][data-timeline-marker-part-id="${CSS.escape(partId)}"][data-timeline-marker-id="${CSS.escape(markerId)}"]`) ?? null;
   }
 
   function getTimelineMarkerLayerId(kind: "zoom" | "translation", partId: string, markerId: string) {
@@ -898,13 +1033,7 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
     for (const item of items) {
       const element = getTimelineMarkerElement(kind, item.partId, item.markerId);
       if (!element) continue;
-      element.style.transform = `translate3d(${deltaPixels}px, ${deltaYPixels}px, 0)`;
-      if (previewHeight !== undefined) {
-        element.style.bottom = "auto";
-        element.style.height = `${previewHeight}px`;
-      }
-      element.style.willChange = "transform";
-      element.style.zIndex = "25";
+      applyTimelineBlockPreview(element, { deltaX: deltaPixels, deltaY: deltaYPixels, height: previewHeight });
     }
   }
 
@@ -914,18 +1043,14 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
   }
 
   function getLayerDragPreview(category: TimelineLayerCategory, sourceLayerId: string | undefined, clientY: number) {
-    return getTimelineLayerDragPreview(layerLayout, sourceLayerId, getDropLayerId(category, clientY));
+    return getTimelineBlockLayerPreview(layerLayout, category, sourceLayerId, clientY, timelineViewportRef.current?.firstElementChild?.getBoundingClientRect());
   }
 
   function clearTimelineMarkerDragTransforms(kind: "zoom" | "translation", items: TimelineMarkerDragItem[]) {
     for (const item of items) {
       const element = getTimelineMarkerElement(kind, item.partId, item.markerId);
       if (!element) continue;
-      element.style.removeProperty("transform");
-      element.style.removeProperty("bottom");
-      element.style.removeProperty("height");
-      element.style.removeProperty("will-change");
-      element.style.removeProperty("z-index");
+      clearTimelineBlockPreview(element);
     }
   }
 
@@ -935,10 +1060,7 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
       if (!nextMarker || (nextMarker.start === initialMarker.start && nextMarker.duration === initialMarker.duration)) continue;
       const element = getTimelineMarkerElement(kind, partId, initialMarker.id);
       if (!element) continue;
-      element.style.transform = `translate3d(${(nextMarker.start - initialMarker.start) * pixelsPerSecond}px, 0, 0)`;
-      element.style.setProperty("--clipper-timeline-resize-width", `${(nextMarker.duration - initialMarker.duration) * pixelsPerSecond}px`);
-      element.style.willChange = "transform, width";
-      element.style.zIndex = "25";
+      applyTimelineBlockPreview(element, { deltaX: (nextMarker.start - initialMarker.start) * pixelsPerSecond, widthDelta: (nextMarker.duration - initialMarker.duration) * pixelsPerSecond });
     }
   }
 
@@ -946,10 +1068,7 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
     for (const marker of markers) {
       const element = getTimelineMarkerElement(kind, partId, marker.id);
       if (!element) continue;
-      element.style.removeProperty("transform");
-      element.style.removeProperty("--clipper-timeline-resize-width");
-      element.style.removeProperty("will-change");
-      element.style.removeProperty("z-index");
+      clearTimelineBlockPreview(element);
     }
   }
 
@@ -963,10 +1082,7 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
       if (!nextLayer || (nextLayer.start === initialLayer.start && nextLayer.duration === initialLayer.duration)) continue;
       const element = getTimelineAdjustmentElement(initialLayer.id);
       if (!element) continue;
-      element.style.transform = `translate3d(${(nextLayer.start - initialLayer.start) * pixelsPerSecond}px, 0, 0)`;
-      element.style.setProperty("--clipper-adjustment-resize-width", `${(nextLayer.duration - initialLayer.duration) * pixelsPerSecond}px`);
-      element.style.willChange = "transform, width";
-      element.style.zIndex = "25";
+      applyTimelineBlockPreview(element, { deltaX: (nextLayer.start - initialLayer.start) * pixelsPerSecond, widthDelta: (nextLayer.duration - initialLayer.duration) * pixelsPerSecond, resizeProperty: "--clipper-adjustment-resize-width" });
     }
   }
 
@@ -975,13 +1091,7 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
       const nextLayer = nextLayers.find((item) => item.id === initialLayer.id);
       const element = getTimelineAdjustmentElement(initialLayer.id);
       if (!nextLayer || !element) continue;
-      element.style.transform = `translate3d(${(nextLayer.start - initialLayer.start) * pixelsPerSecond}px, ${deltaYPixels}px, 0)`;
-      if (previewHeight !== undefined) {
-        element.style.bottom = "auto";
-        element.style.height = `${previewHeight}px`;
-      }
-      element.style.willChange = "transform";
-      element.style.zIndex = "25";
+      applyTimelineBlockPreview(element, { deltaX: (nextLayer.start - initialLayer.start) * pixelsPerSecond, deltaY: deltaYPixels, height: previewHeight });
     }
   }
 
@@ -989,13 +1099,111 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
     for (const layer of layers) {
       const element = getTimelineAdjustmentElement(layer.id);
       if (!element) continue;
-      element.style.removeProperty("transform");
-      element.style.removeProperty("--clipper-adjustment-resize-width");
-      element.style.removeProperty("bottom");
-      element.style.removeProperty("height");
-      element.style.removeProperty("will-change");
-      element.style.removeProperty("z-index");
+      clearTimelineBlockPreview(element, "--clipper-adjustment-resize-width");
     }
+  }
+
+  function clearCompositionPreview(element: HTMLElement) {
+    clearTimelineBlockPreview(element, "--clipper-composition-resize-width");
+  }
+
+  function updateCompositionFromPointer(event: PointerEvent<HTMLElement>, composition: TimelinePart, action: "move" | "start" | "end") {
+    event.preventDefault();
+    event.stopPropagation();
+    onSelectPart(composition.id);
+    const element = event.currentTarget.closest("[data-timeline-composition-id]") as HTMLElement | null ?? event.currentTarget;
+    const initialClientX = event.clientX;
+    const initialClientY = event.clientY;
+    const sourceLayerId = composition.layerId ?? "comp";
+    const initialScrollLeft = timelineViewportRef.current?.scrollLeft ?? 0;
+    const pixelsPerSecond = (timelineRef.current?.getBoundingClientRect().width ?? 1) / Math.max(timelineDisplayDuration, 1);
+    const snapThresholdSeconds = Math.max(0.08, 8 / pixelsPerSecond);
+    const boundaries = withPlayheadSnapBoundary(getScrubSnapBoundaries(timeline.filter((item) => item.id !== composition.id), adjustmentLayers));
+    let pendingClientX = event.clientX;
+    let pendingClientY = event.clientY;
+    let pendingSnap = event.shiftKey;
+    let animationFrame = 0;
+    let hasDragged = false;
+
+    function getNextComposition(clientX: number, snap: boolean) {
+      const scrollDeltaPixels = (timelineViewportRef.current?.scrollLeft ?? initialScrollLeft) - initialScrollLeft;
+      const deltaSeconds = (clientX + scrollDeltaPixels - initialClientX) / pixelsPerSecond;
+      if (action === "start") {
+        const maxStart = composition.start + composition.duration - 0.1;
+        let nextStart = clamp(composition.start + deltaSeconds, 0, maxStart);
+        if (snap) {
+          const guideTime = getTimelineSnapGuideTime(nextStart, boundaries, snapThresholdSeconds);
+          nextStart = clamp(guideTime ?? nextStart, 0, maxStart);
+          updateTimelineSnapGuide(guideTime);
+        } else clearTimelineSnapGuide();
+        return { ...composition, start: nextStart, duration: composition.duration + composition.start - nextStart };
+      }
+
+      if (action === "end") {
+        const currentEnd = composition.start + composition.duration;
+        let nextEnd = Math.max(currentEnd + deltaSeconds, composition.start + 0.1);
+        if (snap) {
+          const guideTime = getTimelineSnapGuideTime(nextEnd, boundaries, snapThresholdSeconds);
+          nextEnd = Math.max(guideTime ?? nextEnd, composition.start + 0.1);
+          updateTimelineSnapGuide(guideTime);
+        } else clearTimelineSnapGuide();
+        return { ...composition, duration: nextEnd - composition.start };
+      }
+
+      let nextStart = Math.max(composition.start + deltaSeconds, 0);
+      if (snap) {
+        const snapped = getTimelineBlockSnap(nextStart, composition.duration, boundaries, snapThresholdSeconds);
+        nextStart = Math.max(snapped.start, 0);
+        updateTimelineSnapGuide(snapped.guideTime);
+      } else clearTimelineSnapGuide();
+      return { ...composition, start: nextStart };
+    }
+
+    function applyDrag(clientX: number, snap: boolean) {
+      const nextComposition = getNextComposition(clientX, snap);
+      const preview = action === "move" ? getLayerDragPreview("comp", sourceLayerId, pendingClientY) : { deltaY: 0, height: undefined };
+      applyTimelineBlockPreview(element, { deltaX: (nextComposition.start - composition.start) * pixelsPerSecond, deltaY: preview.deltaY, widthDelta: (nextComposition.duration - composition.duration) * pixelsPerSecond, height: preview.height, resizeProperty: "--clipper-composition-resize-width" });
+    }
+
+    function scheduleDragPreview() {
+      if (animationFrame) return;
+      animationFrame = window.requestAnimationFrame(() => {
+        animationFrame = 0;
+        applyDrag(pendingClientX, pendingSnap);
+      });
+    }
+
+    function move(pointerEvent: globalThis.PointerEvent) {
+      pendingClientX = pointerEvent.clientX;
+      pendingClientY = pointerEvent.clientY;
+      pendingSnap = pointerEvent.shiftKey;
+      if (!hasDragged && Math.max(Math.abs(pendingClientX - initialClientX), Math.abs(pendingClientY - initialClientY)) < 4) return;
+      hasDragged = true;
+      setGlobalTimelineDragActive(true);
+      if (action === "move") setDraggingTimelineBlockCategory("comp");
+      updateTimelineDragAutoScroll(pendingClientX, scheduleDragPreview);
+      scheduleDragPreview();
+    }
+
+    function up(pointerEvent: globalThis.PointerEvent) {
+      if (animationFrame) window.cancelAnimationFrame(animationFrame);
+      if (hasDragged) {
+        const nextComposition = getNextComposition(pendingClientX, pointerEvent.shiftKey);
+        clearCompositionPreview(element);
+        if (action === "move") onMoveComposition(composition.id, roundTenth(nextComposition.start), getDropLayerId("comp", pendingClientY) ?? sourceLayerId);
+        else onUpdateComposition(composition.id, (current) => ({ ...current, start: roundTenth(nextComposition.start), duration: roundTenth(nextComposition.duration) }));
+      }
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      setGlobalTimelineDragActive(false);
+      setDraggingTimelineBlockCategory(null);
+      stopTimelineDragAutoScroll();
+      clearTimelineSnapGuide();
+      window.requestAnimationFrame(() => clearCompositionPreview(element));
+    }
+
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up, { once: true });
   }
 
   function updateAdjustmentFromPointer(event: PointerEvent<HTMLElement>, layer: AdjustmentLayer, action: "move" | "start" | "end") {
@@ -1009,7 +1217,8 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
     const initialClientX = event.clientX;
     const initialClientY = event.clientY;
     const sourceLayerId = getAdjustmentLayerRowId(layer);
-    const pixelsPerSecond = (timelineRef.current?.getBoundingClientRect().width ?? 1) / Math.max(sceneDuration, 1);
+    const initialScrollLeft = timelineViewportRef.current?.scrollLeft ?? 0;
+    const pixelsPerSecond = (timelineRef.current?.getBoundingClientRect().width ?? 1) / Math.max(timelineDisplayDuration, 1);
     const snapThresholdSeconds = Math.max(0.08, 8 / pixelsPerSecond);
     const resizeTargetIds = new Set(resizeTargets.map((item) => item.id));
     const boundaries = withPlayheadSnapBoundary(getScrubSnapBoundaries(timeline, adjustmentLayers.filter((item) => !resizeTargetIds.has(item.id))));
@@ -1020,26 +1229,37 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
     let hasDragged = false;
 
     function getNextLayer(targetLayer: AdjustmentLayer, clientX: number, snap: boolean) {
-      const deltaSeconds = (clientX - initialClientX) / pixelsPerSecond;
+      const scrollDeltaPixels = (timelineViewportRef.current?.scrollLeft ?? initialScrollLeft) - initialScrollLeft;
+      const deltaSeconds = (clientX + scrollDeltaPixels - initialClientX) / pixelsPerSecond;
       if (action === "start") {
         const maxStart = targetLayer.start + targetLayer.duration - 0.1;
         let nextStart = clamp(targetLayer.start + deltaSeconds, 0, maxStart);
-        if (snap) nextStart = clamp(snapScrubTimeToBoundary(nextStart, boundaries, snapThresholdSeconds), 0, maxStart);
+        if (snap) {
+          const guideTime = getTimelineSnapGuideTime(nextStart, boundaries, snapThresholdSeconds);
+          nextStart = clamp(guideTime ?? nextStart, 0, maxStart);
+          if (targetLayer.id === layer.id) updateTimelineSnapGuide(guideTime);
+        } else if (targetLayer.id === layer.id) clearTimelineSnapGuide();
         return { ...targetLayer, start: nextStart, duration: targetLayer.duration + targetLayer.start - nextStart };
       }
 
       if (action === "end") {
         const currentEnd = targetLayer.start + targetLayer.duration;
-        let nextEnd = clamp(currentEnd + deltaSeconds, targetLayer.start + 0.1, sceneDuration);
-        if (snap) nextEnd = clamp(snapScrubTimeToBoundary(nextEnd, boundaries, snapThresholdSeconds), targetLayer.start + 0.1, sceneDuration);
+        let nextEnd = Math.max(currentEnd + deltaSeconds, targetLayer.start + 0.1);
+        if (snap) {
+          const guideTime = getTimelineSnapGuideTime(nextEnd, boundaries, snapThresholdSeconds);
+          nextEnd = Math.max(guideTime ?? nextEnd, targetLayer.start + 0.1);
+          if (targetLayer.id === layer.id) updateTimelineSnapGuide(guideTime);
+        } else if (targetLayer.id === layer.id) clearTimelineSnapGuide();
         return { ...targetLayer, duration: nextEnd - targetLayer.start };
       }
 
-      let nextStart = clamp(targetLayer.start + deltaSeconds, 0, Math.max(sceneDuration - targetLayer.duration, 0));
+      let nextStart = clamp(targetLayer.start + deltaSeconds, 0, timelineDisplayDuration);
       if (snap) {
-        nextStart = snapScrubTimeToBoundary(nextStart, boundaries, snapThresholdSeconds);
-        nextStart = clamp(nextStart, 0, Math.max(sceneDuration - targetLayer.duration, 0));
-      }
+        const snapped = getTimelineBlockSnap(nextStart, targetLayer.duration, boundaries, snapThresholdSeconds);
+        nextStart = snapped.start;
+        nextStart = clamp(nextStart, 0, timelineDisplayDuration);
+        if (targetLayer.id === layer.id) updateTimelineSnapGuide(snapped.guideTime);
+      } else if (targetLayer.id === layer.id) clearTimelineSnapGuide();
       return { ...targetLayer, start: nextStart };
     }
 
@@ -1059,14 +1279,15 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
         return;
       }
       const preview = action === "move" ? getLayerDragPreview("adjust", sourceLayerId, pendingClientY) : { deltaY: 0, height: undefined };
-      element.style.transform = `translate3d(${(nextLayer.start - layer.start) * pixelsPerSecond}px, ${preview.deltaY}px, 0)`;
-      element.style.setProperty("--clipper-adjustment-resize-width", `${(nextLayer.duration - layer.duration) * pixelsPerSecond}px`);
-      if (preview.height !== undefined) {
-        element.style.bottom = "auto";
-        element.style.height = `${preview.height}px`;
-      }
-      element.style.willChange = "transform, width";
-      element.style.zIndex = "25";
+      applyTimelineBlockPreview(element, { deltaX: (nextLayer.start - layer.start) * pixelsPerSecond, deltaY: preview.deltaY, widthDelta: (nextLayer.duration - layer.duration) * pixelsPerSecond, height: preview.height, resizeProperty: "--clipper-adjustment-resize-width" });
+    }
+
+    function scheduleDragPreview() {
+      if (animationFrame) return;
+      animationFrame = window.requestAnimationFrame(() => {
+        animationFrame = 0;
+        applyDrag(pendingClientX, pendingSnap);
+      });
     }
 
     function move(pointerEvent: globalThis.PointerEvent) {
@@ -1076,14 +1297,11 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
       if (!hasDragged && Math.max(Math.abs(pendingClientX - initialClientX), Math.abs(pendingClientY - initialClientY)) < 4) return;
       if (!hasDragged) {
         setGlobalTimelineDragActive(true);
-        setDraggingAdjustmentLayerId(layer.id);
+        if (action === "move") setDraggingTimelineBlockCategory("adjust");
       }
       hasDragged = true;
-      if (animationFrame) return;
-      animationFrame = window.requestAnimationFrame(() => {
-        animationFrame = 0;
-        applyDrag(pendingClientX, pendingSnap);
-      });
+      updateTimelineDragAutoScroll(pendingClientX, scheduleDragPreview);
+      scheduleDragPreview();
     }
 
     function up(pointerEvent: globalThis.PointerEvent) {
@@ -1109,17 +1327,12 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       setGlobalTimelineDragActive(false);
-      setDraggingAdjustmentLayerId(null);
+      setDraggingTimelineBlockCategory(null);
+      stopTimelineDragAutoScroll();
+      clearTimelineSnapGuide();
       window.requestAnimationFrame(() => {
         if (isSelectionMove || isSelectionResize) clearAdjustmentResizePreviews(resizeTargets);
-        else {
-          element.style.removeProperty("transform");
-          element.style.removeProperty("--clipper-adjustment-resize-width");
-          element.style.removeProperty("bottom");
-          element.style.removeProperty("height");
-          element.style.removeProperty("will-change");
-          element.style.removeProperty("z-index");
-        }
+        else clearTimelineBlockPreview(element, "--clipper-adjustment-resize-width");
       });
     }
 
@@ -1131,7 +1344,7 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
     event.preventDefault();
     event.stopPropagation();
     const dragItems = selectedZoomDragItems(part, marker);
-    const resizeTargets = selectedZoomResizeTargets(part, marker);
+    const resizeTargets = action !== "move" && dragItems.length > 1 ? [{ part, marker }] : selectedZoomResizeTargets(part, marker);
     const targetAlreadySelected = selectedZoomKeys.has(`${part.id}:${marker.id}`);
     const isSelectionMove = action === "move" && dragItems.length > 1;
     const isSelectionResize = action !== "move" && targetAlreadySelected && resizeTargets.length > 1;
@@ -1139,9 +1352,10 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
     const initialClientX = event.clientX;
     const initialClientY = event.clientY;
     const sourceLayerId = marker.layerId ?? "";
-    const pixelsPerSecond = (timelineRef.current?.getBoundingClientRect().width ?? 1) / Math.max(sceneDuration, 1);
+    const initialScrollLeft = timelineViewportRef.current?.scrollLeft ?? 0;
+    const pixelsPerSecond = (timelineRef.current?.getBoundingClientRect().width ?? 1) / Math.max(timelineDisplayDuration, 1);
     const snapThresholdSeconds = Math.max(0.08, 8 / pixelsPerSecond);
-    const activePartIds = new Map(dragItems.map((item) => [item.markerId, item.partId]));
+    const activePartIds = new Map(dragItems.map((item) => [`${item.partId}:${item.markerId}`, item.partId]));
     let pendingClientX = event.clientX;
     let pendingClientY = event.clientY;
     let pendingSnap = event.shiftKey;
@@ -1149,7 +1363,8 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
     let hasDragged = false;
 
     function getMoveDragState(clientX: number, snap: boolean) {
-      const deltaSeconds = (clientX - initialClientX) / pixelsPerSecond;
+      const scrollDeltaPixels = (timelineViewportRef.current?.scrollLeft ?? initialScrollLeft) - initialScrollLeft;
+      const deltaSeconds = (clientX + scrollDeltaPixels - initialClientX) / pixelsPerSecond;
       const targetLayerId = getMotionDropLayerId("motion", pendingClientY);
       const blockDeltaSeconds = blockDeltaForTimelineDrag(dragItems, deltaSeconds, snapThresholdSeconds, snap, "zoom", targetLayerId);
       const moves = getTimelineMarkerMoves(timeline, dragItems, blockDeltaSeconds, "zoom", activePartIds, snapThresholdSeconds).map((move) => ({ ...move, targetLayerId }));
@@ -1168,13 +1383,26 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
     }
 
     function getResizeDeltaSeconds(clientX: number, snap: boolean) {
-      let deltaSeconds = (clientX - initialClientX) / pixelsPerSecond;
-      if (!snap || (action !== "start" && action !== "end")) return deltaSeconds;
+      const scrollDeltaPixels = (timelineViewportRef.current?.scrollLeft ?? initialScrollLeft) - initialScrollLeft;
+      let deltaSeconds = (clientX + scrollDeltaPixels - initialClientX) / pixelsPerSecond;
+      if (!snap || (action !== "start" && action !== "end")) {
+        clearTimelineSnapGuide();
+        return deltaSeconds;
+      }
+      const internalMendedEdge = action === "end" ? isZoomMarkerMendedEdge(timeline, part, marker, "end") : isZoomMarkerMendedEdge(timeline, part, marker, "start");
+      if (internalMendedEdge) {
+        clearTimelineSnapGuide();
+        return deltaSeconds;
+      }
 
-      const movingKeys = new Set([`${part.id}:${marker.id}`]);
+      const movingKeys = new Set(dragItems.map((item) => `${item.partId}:${item.markerId}`));
       const boundaries = getUniversalTimelineSnapBoundaries("zoom", movingKeys);
-      const edgeTime = part.start + marker.start + (action === "end" ? marker.duration : 0) + deltaSeconds;
-      deltaSeconds += snapScrubTimeToBoundary(edgeTime, boundaries, snapThresholdSeconds) - edgeTime;
+      const edgeTime = (action === "end"
+        ? Math.max(...dragItems.map((item) => item.absoluteStart + item.duration))
+        : Math.min(...dragItems.map((item) => item.absoluteStart))) + deltaSeconds;
+      const guideTime = getTimelineSnapGuideTime(edgeTime, boundaries, snapThresholdSeconds);
+      deltaSeconds += (guideTime ?? edgeTime) - edgeTime;
+      updateTimelineSnapGuide(guideTime);
       return deltaSeconds;
     }
 
@@ -1184,7 +1412,7 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
 
     function getResizeMarkers(clientX: number, snap: boolean) {
       const deltaSeconds = getResizeDeltaSeconds(clientX, snap);
-      const resizedMarkers = resizeTargets.flatMap((target) => getAbsoluteMarkerResizeState(getAbsoluteZoomResizeMarkers(target), target.marker.id, action as "start" | "end", deltaSeconds));
+      const resizedMarkers = resizeTargets.flatMap((target) => getAbsoluteMarkerResizeState(getAbsoluteZoomResizeMarkers(target), target.marker.id, target.part.id, action as "start" | "end", deltaSeconds));
       return uniqueAbsoluteTimelineMarkers(resizedMarkers);
     }
 
@@ -1226,8 +1454,9 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
       if (!hasDragged) {
         hasDragged = true;
         setGlobalTimelineDragActive(true);
-        setDraggingZoomMarkerId(marker.id);
+        if (action === "move") setDraggingTimelineBlockCategory("motion");
       }
+      updateTimelineDragAutoScroll(pendingClientX, scheduleDragPreview);
       scheduleDragPreview();
     }
 
@@ -1248,7 +1477,9 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
       window.removeEventListener("keydown", key);
       window.removeEventListener("keyup", key);
       setGlobalTimelineDragActive(false);
-      setDraggingZoomMarkerId(null);
+      setDraggingTimelineBlockCategory(null);
+      stopTimelineDragAutoScroll();
+      clearTimelineSnapGuide();
       if (action === "move") window.requestAnimationFrame(() => clearTimelineMarkerDragTransforms("zoom", dragItems));
       if (action !== "move") window.requestAnimationFrame(() => {
         for (const target of resizeTargets) clearTimelineMarkerResizePreviews("zoom", target.part.id, target.part.zoomMarkers);
@@ -1265,7 +1496,7 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
     event.preventDefault();
     event.stopPropagation();
     const dragItems = selectedTranslationDragItems(part, marker);
-    const resizeTargets = selectedTranslationResizeTargets(part, marker);
+    const resizeTargets = action !== "move" && dragItems.length > 1 ? [{ part, marker }] : selectedTranslationResizeTargets(part, marker);
     const targetAlreadySelected = selectedTranslationKeys.has(`${part.id}:${marker.id}`);
     const isSelectionMove = action === "move" && dragItems.length > 1;
     const isSelectionResize = action !== "move" && targetAlreadySelected && resizeTargets.length > 1;
@@ -1273,9 +1504,10 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
     const initialClientX = event.clientX;
     const initialClientY = event.clientY;
     const sourceLayerId = marker.layerId ?? "";
-    const pixelsPerSecond = (timelineRef.current?.getBoundingClientRect().width ?? 1) / Math.max(sceneDuration, 1);
+    const initialScrollLeft = timelineViewportRef.current?.scrollLeft ?? 0;
+    const pixelsPerSecond = (timelineRef.current?.getBoundingClientRect().width ?? 1) / Math.max(timelineDisplayDuration, 1);
     const snapThresholdSeconds = Math.max(0.08, 8 / pixelsPerSecond);
-    const activePartIds = new Map(dragItems.map((item) => [item.markerId, item.partId]));
+    const activePartIds = new Map(dragItems.map((item) => [`${item.partId}:${item.markerId}`, item.partId]));
     let pendingClientX = event.clientX;
     let pendingClientY = event.clientY;
     let pendingSnap = event.shiftKey;
@@ -1283,7 +1515,8 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
     let hasDragged = false;
 
     function getMoveDragState(clientX: number, snap: boolean) {
-      const deltaSeconds = (clientX - initialClientX) / pixelsPerSecond;
+      const scrollDeltaPixels = (timelineViewportRef.current?.scrollLeft ?? initialScrollLeft) - initialScrollLeft;
+      const deltaSeconds = (clientX + scrollDeltaPixels - initialClientX) / pixelsPerSecond;
       const targetLayerId = getMotionDropLayerId("motion", pendingClientY);
       const blockDeltaSeconds = blockDeltaForTimelineDrag(dragItems, deltaSeconds, snapThresholdSeconds, snap, "translation", targetLayerId);
       const moves = getTimelineMarkerMoves(timeline, dragItems, blockDeltaSeconds, "translation", activePartIds, snapThresholdSeconds).map((move) => ({ ...move, targetLayerId }));
@@ -1302,13 +1535,26 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
     }
 
     function getResizeDeltaSeconds(clientX: number, snap: boolean) {
-      let deltaSeconds = (clientX - initialClientX) / pixelsPerSecond;
-      if (!snap || (action !== "start" && action !== "end")) return deltaSeconds;
+      const scrollDeltaPixels = (timelineViewportRef.current?.scrollLeft ?? initialScrollLeft) - initialScrollLeft;
+      let deltaSeconds = (clientX + scrollDeltaPixels - initialClientX) / pixelsPerSecond;
+      if (!snap || (action !== "start" && action !== "end")) {
+        clearTimelineSnapGuide();
+        return deltaSeconds;
+      }
+      const internalMendedEdge = action === "end" ? isTranslationMarkerMendedEdge(timeline, part, marker, "end") : isTranslationMarkerMendedEdge(timeline, part, marker, "start");
+      if (internalMendedEdge) {
+        clearTimelineSnapGuide();
+        return deltaSeconds;
+      }
 
-      const movingKeys = new Set([`${part.id}:${marker.id}`]);
+      const movingKeys = new Set(dragItems.map((item) => `${item.partId}:${item.markerId}`));
       const boundaries = getUniversalTimelineSnapBoundaries("translation", movingKeys);
-      const edgeTime = part.start + marker.start + (action === "end" ? marker.duration : 0) + deltaSeconds;
-      deltaSeconds += snapScrubTimeToBoundary(edgeTime, boundaries, snapThresholdSeconds) - edgeTime;
+      const edgeTime = (action === "end"
+        ? Math.max(...dragItems.map((item) => item.absoluteStart + item.duration))
+        : Math.min(...dragItems.map((item) => item.absoluteStart))) + deltaSeconds;
+      const guideTime = getTimelineSnapGuideTime(edgeTime, boundaries, snapThresholdSeconds);
+      deltaSeconds += (guideTime ?? edgeTime) - edgeTime;
+      updateTimelineSnapGuide(guideTime);
       return deltaSeconds;
     }
 
@@ -1318,7 +1564,7 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
 
     function getResizeMarkers(clientX: number, snap: boolean) {
       const deltaSeconds = getResizeDeltaSeconds(clientX, snap);
-      const resizedMarkers = resizeTargets.flatMap((target) => getAbsoluteMarkerResizeState(getAbsoluteTranslationResizeMarkers(target), target.marker.id, action as "start" | "end", deltaSeconds));
+      const resizedMarkers = resizeTargets.flatMap((target) => getAbsoluteMarkerResizeState(getAbsoluteTranslationResizeMarkers(target), target.marker.id, target.part.id, action as "start" | "end", deltaSeconds));
       return uniqueAbsoluteTimelineMarkers(resizedMarkers);
     }
 
@@ -1360,8 +1606,9 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
       if (!hasDragged) {
         hasDragged = true;
         setGlobalTimelineDragActive(true);
-        setDraggingTranslationMarkerId(marker.id);
+        if (action === "move") setDraggingTimelineBlockCategory("motion");
       }
+      updateTimelineDragAutoScroll(pendingClientX, scheduleDragPreview);
       scheduleDragPreview();
     }
 
@@ -1382,7 +1629,9 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
       window.removeEventListener("keydown", key);
       window.removeEventListener("keyup", key);
       setGlobalTimelineDragActive(false);
-      setDraggingTranslationMarkerId(null);
+      setDraggingTimelineBlockCategory(null);
+      stopTimelineDragAutoScroll();
+      clearTimelineSnapGuide();
       if (action === "move") window.requestAnimationFrame(() => clearTimelineMarkerDragTransforms("translation", dragItems));
       if (action !== "move") window.requestAnimationFrame(() => {
         for (const target of resizeTargets) clearTimelineMarkerResizePreviews("translation", target.part.id, target.part.translationMarkers);
@@ -1406,18 +1655,23 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
     setEditingLayerId(null);
     if (!layerId || !nextName) return;
     onTimelineLayersChange((state) => {
-      if (layerId === "comp") return { ...state, compName: nextName };
-      if (adjustmentRows.some((row) => row.key === layerId)) return { ...state, adjustmentLayers: (state.adjustmentLayers ?? defaultTimelineLayerState.adjustmentLayers!).map((layer) => (layer.id === layerId ? { ...layer, name: nextName } : layer)) };
-      return { ...state, motionLayers: (state.motionLayers ?? []).map((layer) => (layer.id === layerId ? { ...layer, name: nextName } : layer)) };
+      const category = getLayerCategory(layerId);
+      return category ? renameTimelineStateLayer(state, category, layerId, nextName, defaultTimelineLayerState) : state;
     }, { history: true });
   }
 
   function toggleLayerHidden(layerId: string) {
     onTimelineLayersChange((state) => {
-      if (layerId === "comp") return { ...state, compHidden: !state.compHidden || undefined };
-      if (adjustmentRows.some((row) => row.key === layerId)) return { ...state, adjustmentLayers: (state.adjustmentLayers ?? defaultTimelineLayerState.adjustmentLayers!).map((layer) => (layer.id === layerId ? { ...layer, hidden: !layer.hidden || undefined } : layer)) };
-      return { ...state, motionLayers: (state.motionLayers ?? []).map((layer) => (layer.id === layerId ? { ...layer, hidden: !layer.hidden || undefined } : layer)) };
+      const category = getLayerCategory(layerId);
+      return category ? toggleTimelineStateLayerHidden(state, category, layerId, defaultTimelineLayerState) : state;
     }, { history: false });
+  }
+
+  function getLayerCategory(layerId: string): TimelineLayerCategory | null {
+    if (compositionRows.some((row) => row.id === layerId)) return "comp";
+    if (adjustmentRows.some((row) => row.key === layerId)) return "adjust";
+    if (motionLayers.some((row) => row.id === layerId)) return "motion";
+    return null;
   }
 
   function cancelLayerNameEdit() {
@@ -1430,22 +1684,32 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
     setMotionLayerMenuId(null);
   }
 
+  function moveLayer(category: TimelineLayerCategory, layerId: string, direction: "up" | "down") {
+    onTimelineLayersChange((state) => moveTimelineStateLayer(state, category, layerId, direction, defaultTimelineLayerState), { history: true });
+    setMotionLayerMenuId(null);
+  }
+
+  function addCompositionLayerAround(layerId: string, placement: "before" | "after") {
+    onAddCompositionLayer(layerId, placement);
+    setMotionLayerMenuId(null);
+  }
+
+  function moveCompositionLayer(layerId: string, direction: "up" | "down") {
+    moveLayer("comp", layerId, direction);
+  }
+
+  function removeCompositionLayer(layerId: string) {
+    onRemoveCompositionLayer(layerId);
+    setMotionLayerMenuId(null);
+  }
+
   function addAdjustmentLayerAround(layerId: string, placement: "before" | "after") {
     onAddAdjustmentLayer(layerId, placement);
     setMotionLayerMenuId(null);
   }
 
   function moveAdjustmentRow(layerId: string, direction: "up" | "down") {
-    onTimelineLayersChange((state) => {
-      const layers = state.adjustmentLayers?.length ? state.adjustmentLayers : defaultTimelineLayerState.adjustmentLayers!;
-      const index = layers.findIndex((layer) => layer.id === layerId);
-      const targetIndex = direction === "up" ? index - 1 : index + 1;
-      if (index < 0 || targetIndex < 0 || targetIndex >= layers.length) return state;
-      const nextLayers = [...layers];
-      [nextLayers[index], nextLayers[targetIndex]] = [nextLayers[targetIndex], nextLayers[index]];
-      return { ...state, adjustmentLayers: nextLayers };
-    }, { history: true });
-    setMotionLayerMenuId(null);
+    moveLayer("adjust", layerId, direction);
   }
 
   function removeAdjustmentLayer(layerId: string) {
@@ -1454,16 +1718,7 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
   }
 
   function moveMotionLayer(layerId: string, direction: "up" | "down") {
-    onTimelineLayersChange((state) => {
-      const layers = state.motionLayers?.length ? state.motionLayers : defaultTimelineLayerState.motionLayers!;
-      const index = layers.findIndex((layer) => layer.id === layerId);
-      const targetIndex = direction === "up" ? index - 1 : index + 1;
-      if (index < 0 || targetIndex < 0 || targetIndex >= layers.length) return state;
-      const nextLayers = [...layers];
-      [nextLayers[index], nextLayers[targetIndex]] = [nextLayers[targetIndex], nextLayers[index]];
-      return { ...state, motionLayers: nextLayers };
-    }, { history: true });
-    setMotionLayerMenuId(null);
+    moveLayer("motion", layerId, direction);
   }
 
   function removeMotionLayer(layerId: string) {
@@ -1479,7 +1734,7 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
   function getSceneTimeFromClientX(clientX: number) {
     const rect = timelineViewportRef.current?.firstElementChild?.getBoundingClientRect();
     if (!rect) return currentSceneTime;
-    return clamp(((clientX - rect.left) / rect.width) * sceneDuration, 0, sceneDuration);
+    return clamp(((clientX - rect.left) / rect.width) * timelineDisplayDuration, 0, timelineDisplayDuration);
   }
 
   function getDropSceneTime(event: DragEvent<HTMLElement>) {
@@ -1501,8 +1756,8 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
     if (!element || !preview) return;
     const rowIndex = layerRows.findIndex((row) => row.key === preview.layerKey);
     if (rowIndex < 0) return;
-    const left = sceneDuration > 0 ? (preview.start / sceneDuration) * contentWidth : 0;
-    const width = sceneDuration > 0 ? (preview.duration / sceneDuration) * contentWidth : 0;
+    const left = timelineDisplayDuration > 0 ? (preview.start / timelineDisplayDuration) * contentWidth : 0;
+    const width = timelineDisplayDuration > 0 ? (preview.duration / timelineDisplayDuration) * contentWidth : 0;
     element.style.transform = `translate3d(${left}px, ${layerRowStarts[rowIndex]}px, 0)`;
     element.style.width = `${width}px`;
     element.style.height = `${layerRowHeights[rowIndex]}px`;
@@ -1520,7 +1775,7 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
   function updateEffectDragPreview(nextPreview: EffectDragPreview | null) {
     const current = effectDragPreviewRef.current;
     effectDragPreviewRef.current = nextPreview;
-    if (Boolean(current) !== Boolean(nextPreview)) window.dispatchEvent(new CustomEvent("clipper:effect-drag-preview", { detail: { active: Boolean(nextPreview) } }));
+    if (Boolean(current) !== Boolean(nextPreview)) setClipperPointerDragPreview(effectDragPreviewEvent, Boolean(nextPreview));
     if (!nextPreview) {
       if (effectDragPreviewFrameRef.current) window.cancelAnimationFrame(effectDragPreviewFrameRef.current);
       effectDragPreviewFrameRef.current = 0;
@@ -1544,22 +1799,20 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
       return { category: "adjustment" as const, effectId, layerKey, start: placement.start, duration: placement.duration, initialClientX: clientX, initialStart: placement.start };
     }
 
-    const timelinePart = getTimelinePartAtTime(timeline, sceneTime);
-    if (!timelinePart) return null;
     const kind = effect.kind;
     const duration = Math.min(defaultNewMarkerDurationSeconds, Math.max(sceneDuration, 0.1));
-    const start = roundTenth(clamp(sceneTime - duration / 2, 0, Math.max(sceneDuration - duration, 0)));
+    const start = roundTenth(clamp(sceneTime - duration / 2, 0, timelineDisplayDuration));
     return { category: "motion" as const, effectId, kind, layerKey, start, duration, initialClientX: clientX, initialStart: start };
   }
 
   function previewAdjustmentEffectDrop(effectId: AdjustmentEffectId, layerId: string, clientX: number, sceneTime: number, snap: boolean) {
     const base = getEffectPreviewBase(effectId, layerId, clientX, sceneTime);
     if (!base) return;
-    const pixelsPerSecond = (timelineRef.current?.getBoundingClientRect().width ?? 1) / Math.max(sceneDuration, 1);
+    const pixelsPerSecond = (timelineRef.current?.getBoundingClientRect().width ?? 1) / Math.max(timelineDisplayDuration, 1);
     const snapThresholdSeconds = Math.max(0.08, 8 / pixelsPerSecond);
     const boundaries = getScrubSnapBoundaries(timeline, adjustmentLayers);
-    let nextStart = clamp(sceneTime, 0, Math.max(sceneDuration - base.duration, 0));
-    if (snap) nextStart = clamp(snapScrubTimeToBoundary(nextStart, boundaries, snapThresholdSeconds), 0, Math.max(sceneDuration - base.duration, 0));
+    let nextStart = clamp(sceneTime, 0, timelineDisplayDuration);
+    if (snap) nextStart = clamp(snapTimelineBlockStartToBoundary(nextStart, base.duration, boundaries, snapThresholdSeconds), 0, timelineDisplayDuration);
     updateEffectDragPreview({ ...base, start: roundTenth(nextStart) });
   }
 
@@ -1573,12 +1826,18 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
       return;
     }
 
-    const pixelsPerSecond = (timelineRef.current?.getBoundingClientRect().width ?? 1) / Math.max(sceneDuration, 1);
+    const pixelsPerSecond = (timelineRef.current?.getBoundingClientRect().width ?? 1) / Math.max(timelineDisplayDuration, 1);
     const snapThresholdSeconds = Math.max(0.08, 8 / pixelsPerSecond);
     const boundaries = withPlayheadSnapBoundary(getScrubSnapBoundaries(timeline, adjustmentLayers));
-    let nextStart = clamp(sceneTime - base.duration / 2, 0, Math.max(sceneDuration - base.duration, 0));
-    if (snap) nextStart = clamp(snapScrubTimeToBoundary(nextStart, boundaries, snapThresholdSeconds), 0, Math.max(sceneDuration - base.duration, 0));
+    let nextStart = clamp(sceneTime - base.duration / 2, 0, timelineDisplayDuration);
+    if (snap) nextStart = clamp(snapTimelineBlockStartToBoundary(nextStart, base.duration, boundaries, snapThresholdSeconds), 0, timelineDisplayDuration);
     updateEffectDragPreview({ ...base, start: roundTenth(nextStart) });
+  }
+
+  function previewCompositionDrop(detail: CompositionPointerDragDetail, layerId: string, sceneTime: number) {
+    const duration = Math.max(detail.duration, 0.1);
+    const start = roundTenth(clamp(sceneTime, 0, timelineDisplayDuration));
+    updateEffectDragPreview({ category: "composition", layerKey: layerId, label: detail.label, start, duration, initialClientX: detail.clientX, initialStart: start });
   }
 
   function allowAdjustmentEffectDrop(event: DragEvent<HTMLElement>, layerId: string, sceneTime = getDropSceneTime(event)) {
@@ -1699,8 +1958,47 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
       previewMotionEffectDrop(motionEffect.id, layer.id, detail.clientX, target.sceneTime, detail.shiftKey);
     }
 
-    window.addEventListener("clipper:effect-pointer-drag", handleEffectPointerDrag);
-    return () => window.removeEventListener("clipper:effect-pointer-drag", handleEffectPointerDrag);
+    window.addEventListener(effectPointerDragEvent, handleEffectPointerDrag);
+    return () => window.removeEventListener(effectPointerDragEvent, handleEffectPointerDrag);
+  });
+
+  useEffect(() => {
+    function handleCompositionPointerDrag(event: Event) {
+      const detail = (event as CustomEvent<CompositionPointerDragDetail>).detail;
+      if (!detail) return;
+      if (detail.phase === "cancel") {
+        setGlobalTimelineDragActive(false);
+        setClipperPointerDragPreview(compositionDragPreviewEvent, false);
+        return;
+      }
+
+      const target = getEffectPointerDropTarget(detail.clientX, detail.clientY);
+      const compositionRow = target ? compositionRows.find((row) => row.id === target.rowKey) : null;
+      const overTimeline = isEffectPointerOverTimeline(detail.clientX, detail.clientY);
+      setGlobalTimelineDragActive(detail.phase !== "drop" && overTimeline);
+      setClipperPointerDragPreview(compositionDragPreviewEvent, Boolean(compositionRow && detail.phase !== "drop"));
+
+      if (!target || !compositionRow) {
+        if (detail.phase === "drop") setGlobalTimelineDragActive(false);
+        updateEffectDragPreview(null);
+        return;
+      }
+
+      if (detail.phase === "drop") {
+        const preview = effectDragPreviewRef.current;
+        const targetStart = preview?.category === "composition" && preview.layerKey === compositionRow.id ? preview.start : target.sceneTime;
+        setGlobalTimelineDragActive(false);
+        updateEffectDragPreview(null);
+        setClipperPointerDragPreview(compositionDragPreviewEvent, false);
+        onAddComposition(detail.compositionId, compositionRow.id, targetStart);
+        return;
+      }
+
+      previewCompositionDrop(detail, compositionRow.id, target.sceneTime);
+    }
+
+    window.addEventListener(compositionPointerDragEvent, handleCompositionPointerDrag);
+    return () => window.removeEventListener(compositionPointerDragEvent, handleCompositionPointerDrag);
   });
 
   function startLayerRowResize(event: PointerEvent<HTMLElement>, rowKey: string, edge: "top" | "bottom" = "bottom") {
@@ -1732,28 +2030,29 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
 
   useLayoutEffect(() => {
     if (effectDragPreview) applyEffectDragPreviewElement(effectDragPreview);
-  }, [effectDragPreview, contentWidth, layerRows, layerRowStarts, layerRowHeights, sceneDuration]);
+  }, [effectDragPreview, contentWidth, layerRows, layerRowStarts, layerRowHeights, timelineDisplayDuration]);
 
   const playheadColor = "#ff3b30";
 
   return (
-    <footer ref={timelinePanelRef} className={`grid h-full min-h-0 select-none grid-rows-[34px_minmax(0,1fr)] gap-1.5 overflow-hidden border-t border-[#1d2028] bg-[#141821] px-[22px] pb-[18px] pt-2.5 ${timelineDragActive ? "clipper-timeline-dragging-no-hover" : ""}`}>
-      <div className="grid grid-cols-[auto_1fr_auto] items-center gap-4 text-[11px] uppercase tracking-[0.11em] text-[#9b9da7]">
-        <div className="flex rounded-full border border-[#2d313b] bg-[#111319] p-1 normal-case tracking-normal" aria-label="Timeline mode">
+    <footer ref={timelinePanelRef} className={`grid h-full min-h-0 select-none grid-rows-[34px_minmax(0,1fr)] gap-1.5 overflow-hidden border-t border-[#1d2028] bg-[#141821] px-[22px] pb-0 pt-2.5 ${timelineDragActive ? "clipper-timeline-dragging-no-hover" : ""}`}>
+      <div className="grid grid-cols-[auto_1fr_auto] items-center gap-4 text-[12px] text-[#9b9da7]">
+        <div className="flex rounded-full border border-[#2d313b] bg-[#111319] p-1" aria-label="Timeline mode">
           <button className={`rounded-full px-3 py-1 text-xs font-extrabold transition ${mode === "edit" ? "bg-[var(--clipper-accent)] text-[var(--clipper-accent-foreground)]" : "text-[#9b9da7] hover:text-white"}`} onClick={() => onModeChange("edit")}>Edit</button>
           <button className={`rounded-full px-3 py-1 text-xs font-extrabold transition ${mode === "composition" ? "bg-[var(--clipper-accent)] text-[var(--clipper-accent-foreground)]" : "text-[#9b9da7] hover:text-white"}`} onClick={() => onModeChange("composition")}>Direct</button>
         </div>
         <div className="h-px bg-[#2d313b]" />
-        <div className="flex items-center gap-3 normal-case tracking-normal">
+        <div className="flex items-center gap-3">
           <span className="min-w-[54px] text-center text-[12px] text-[#dfe2ea] tabular-nums">{Math.round(timelineZoom * 100)}%</span>
           <input aria-label="Timeline zoom" className="h-2 w-[168px] accent-[#737884] [appearance:none] rounded-full bg-[#2d313b] [&::-webkit-slider-runnable-track]:h-2 [&::-webkit-slider-runnable-track]:rounded-full [&::-webkit-slider-runnable-track]:bg-[#2d313b] [&::-webkit-slider-thumb]:mt-[-5px] [&::-webkit-slider-thumb]:h-[18px] [&::-webkit-slider-thumb]:w-[18px] [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border [&::-webkit-slider-thumb]:border-[#474d5b] [&::-webkit-slider-thumb]:bg-[#9b9da7] [&::-moz-range-track]:h-2 [&::-moz-range-track]:rounded-full [&::-moz-range-track]:bg-[#2d313b] [&::-moz-range-thumb]:h-[18px] [&::-moz-range-thumb]:w-[18px] [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border [&::-moz-range-thumb]:border-[#474d5b] [&::-moz-range-thumb]:bg-[#9b9da7]" type="range" min={0.01} max={4} step={0.01} value={timelineZoom} onChange={(event) => updateTimelineZoom(Number(event.target.value))} />
           <button className="grid h-8 w-8 place-items-center rounded-[9px] border border-[#2d313b] bg-[#14161c] text-[#dfe2ea] hover:border-[var(--clipper-accent)]" title="Zoom timeline out" onClick={() => updateTimelineZoom(roundTenth(timelineZoom - 0.25))}><Minus size={14} /></button>
           <button className="grid h-8 w-8 place-items-center rounded-[9px] border border-[#2d313b] bg-[#14161c] text-[#dfe2ea] hover:border-[var(--clipper-accent)]" title="Zoom timeline in" onClick={() => updateTimelineZoom(roundTenth(timelineZoom + 0.25))}><Plus size={14} /></button>
         </div>
       </div>
-      <div ref={playbackPlayheadRef} className="relative grid h-full min-h-0 max-h-full grid-rows-[38px_minmax(0,1fr)] overflow-hidden" style={{ "--clipper-playhead-left": `${sceneDuration > 0 ? (currentSceneTime / sceneDuration) * 100 : 0}%`, "--clipper-timeline-scroll-x": `${-(timelineViewportRef.current?.scrollLeft ?? timelineViewportState.displacement)}px` } as CSSProperties}>
+      <div ref={playbackPlayheadRef} className="relative grid h-full min-h-0 max-h-full grid-rows-[38px_minmax(0,1fr)] overflow-hidden" style={{ "--clipper-playhead-left": `${timelineDisplayDuration > 0 ? (currentSceneTime / timelineDisplayDuration) * 100 : 0}%`, "--clipper-timeline-scroll-x": `${-(timelineViewportRef.current?.scrollLeft ?? timelineViewportState.displacement)}px` } as CSSProperties}>
         <div className="pointer-events-none absolute right-0 top-0 z-30 overflow-hidden pl-0 pr-3" style={{ left: layerRailWidth, height: 38 + laneContentHeight }}>
           <div className="relative" style={{ width: contentWidth, height: 38 + laneContentHeight, transform: "translate3d(var(--clipper-timeline-scroll-x, 0px), 0, 0)", willChange: "transform" }}>
+            <div ref={timelineSnapGuideRef} className="pointer-events-none absolute top-0 z-20 hidden w-px bg-white/90 shadow-[0_0_0_1px_rgba(255,255,255,0.2),0_0_12px_rgba(255,255,255,0.35)]" style={{ height: 38 + laneContentHeight, transform: "translate3d(0, 0, 0)" }} />
             <div className="absolute top-[12px] h-3 w-2.5 rounded-[2px]" style={{ left: `var(--clipper-playhead-left)`, backgroundColor: playheadColor, clipPath: "polygon(0 0, 100% 0, 100% 68%, 50% 100%, 0 68%)", transform: "translateX(-50%)" }} />
             <div className="absolute top-[38px] w-px" style={{ left: `var(--clipper-playhead-left)`, height: laneContentHeight, backgroundColor: playheadColor }} />
           </div>
@@ -1763,7 +2062,7 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
             <span className="min-w-0 truncate text-[13px] font-extrabold text-[#dfe2ea]" title={timelineName}>{timelineName}</span>
           </div>
           <div ref={timelineRulerViewportRef} className="relative overflow-hidden pl-0 pr-3">
-            <TimeRuler rulerRef={timelineRef} ticks={ticks} sceneDuration={sceneDuration} contentWidth={contentWidth} onPointerDown={startScrub} onPointerMove={continueScrub} onPointerUp={endScrub} onPointerCancel={endScrub} />
+            <TimeRuler rulerRef={timelineRef} ticks={ticks} sceneDuration={timelineDisplayDuration} contentWidth={contentWidth} onPointerDown={startScrub} onPointerMove={continueScrub} onPointerUp={endScrub} onPointerCancel={endScrub} />
           </div>
         </div>
         <div className="grid min-h-0 overflow-hidden" style={{ gridTemplateColumns: `${layerRailWidth}px minmax(0, 1fr)` }}>
@@ -1773,35 +2072,36 @@ export function TimelinePanel({ timelineName, timeline, timelineLayers, adjustme
             {layerRows.map((row, index) => <span className="pointer-events-none absolute right-0 z-40 w-0.5" key={`layer-accent-${row.key}`} style={{ top: layerRowStarts[index], height: layerRowHeights[index], backgroundColor: row.accent }} />)}
             {layerRows.length > 0 ? <LayerResizeSeparator key={`label-separator-${layerRows[0].key}-top`} top={0} onPointerDown={(event) => startLayerRowResize(event, layerRows[0].key, "top")} /> : null}
             {layerRows.slice(1).map((row, index) => <LayerResizeSeparator key={`label-separator-${row.key}`} top={layerRowStarts[index + 1]} onPointerDown={(event) => startLayerRowResize(event, row.key, "top")} />)}
-            {isCompositionMode ? adjustmentRows.map((row, index) => <LayerLabel key={row.key} editing={editingLayerId === row.key} hidden={row.hidden} menuOpen={motionLayerMenuId === row.key} name={row.name} draft={layerNameDraft} canMoveDown={index < adjustmentRows.length - 1} canMoveUp={index > 0} addBeforeLabel="Add adjust above" addAfterLabel="Add adjust below" removeLabel="Remove adjust layer" onDraftChange={setLayerNameDraft} onEdit={() => startLayerNameEdit(row.key, row.name)} onCommit={commitLayerNameEdit} onCancel={cancelLayerNameEdit} onEffectDragOver={(event) => allowAdjustmentEffectDrop(event, row.key, currentSceneTime)} onEffectDrop={(event) => dropAdjustmentEffect(event, row.key, currentSceneTime)} onMenuToggle={() => setMotionLayerMenuId((current) => current === row.key ? null : row.key)} onAddBefore={() => addAdjustmentLayerAround(row.key, "before")} onAddAfter={() => addAdjustmentLayerAround(row.key, "after")} onMoveUp={() => moveAdjustmentRow(row.key, "up")} onMoveDown={() => moveAdjustmentRow(row.key, "down")} onRemove={() => removeAdjustmentLayer(row.key)} onToggleHidden={() => toggleLayerHidden(row.key)} />) : null}
-            {isCompositionMode ? motionLayers.map((layer, index) => <LayerLabel key={layer.id} editing={editingLayerId === layer.id} hidden={Boolean(layer.hidden)} menuOpen={motionLayerMenuId === layer.id} name={layer.name} draft={layerNameDraft} canMoveDown={index < motionLayers.length - 1} canMoveUp={index > 0} addBeforeLabel="Add motion above" addAfterLabel="Add motion below" removeLabel="Remove motion layer" onDraftChange={setLayerNameDraft} onEdit={() => startLayerNameEdit(layer.id, layer.name)} onCommit={commitLayerNameEdit} onCancel={cancelLayerNameEdit} onEffectDragOver={(event) => allowMotionLayerEffectDrop(event, layer.id, currentSceneTime)} onEffectDrop={(event) => dropMotionLayerEffect(event, layer.id, currentSceneTime)} onMenuToggle={() => setMotionLayerMenuId((current) => current === layer.id ? null : layer.id)} onAddBefore={() => addMotionLayerAround(layer.id, "before")} onAddAfter={() => addMotionLayerAround(layer.id, "after")} onMoveUp={() => moveMotionLayer(layer.id, "up")} onMoveDown={() => moveMotionLayer(layer.id, "down")} onRemove={() => removeMotionLayer(layer.id)} onToggleHidden={() => toggleLayerHidden(layer.id)} />) : null}
-            <LayerLabel editing={editingLayerId === "comp"} hidden={Boolean(timelineLayers.compHidden)} name={timelineLayers.compName ?? "Comp"} draft={layerNameDraft} onDraftChange={setLayerNameDraft} onEdit={() => startLayerNameEdit("comp", timelineLayers.compName ?? "Comp")} onCommit={commitLayerNameEdit} onCancel={cancelLayerNameEdit} onToggleHidden={() => toggleLayerHidden("comp")} />
+            {isCompositionMode ? adjustmentRows.map((row, index) => <LayerLabel key={row.key} editing={editingLayerId === row.key} hidden={row.hidden} compactControls={layerRowHeights[index] < 52} menuOpen={motionLayerMenuId === row.key} name={row.name} draft={layerNameDraft} canMoveDown={index < adjustmentRows.length - 1} canMoveUp={index > 0} addBeforeLabel="Add adjust above" addAfterLabel="Add adjust below" removeLabel="Remove adjust" onDraftChange={setLayerNameDraft} onEdit={() => startLayerNameEdit(row.key, row.name)} onCommit={commitLayerNameEdit} onCancel={cancelLayerNameEdit} onEffectDragOver={(event) => allowAdjustmentEffectDrop(event, row.key, currentSceneTime)} onEffectDrop={(event) => dropAdjustmentEffect(event, row.key, currentSceneTime)} onMenuToggle={() => setMotionLayerMenuId((current) => current === row.key ? null : row.key)} onAddBefore={() => addAdjustmentLayerAround(row.key, "before")} onAddAfter={() => addAdjustmentLayerAround(row.key, "after")} onMoveUp={() => moveAdjustmentRow(row.key, "up")} onMoveDown={() => moveAdjustmentRow(row.key, "down")} onRemove={() => removeAdjustmentLayer(row.key)} onToggleHidden={() => toggleLayerHidden(row.key)} />) : null}
+            {isCompositionMode ? motionLayers.map((layer, index) => <LayerLabel key={layer.id} editing={editingLayerId === layer.id} hidden={Boolean(layer.hidden)} compactControls={layerRowHeights[adjustmentRows.length + index] < 52} menuOpen={motionLayerMenuId === layer.id} name={layer.name} draft={layerNameDraft} canMoveDown={index < motionLayers.length - 1} canMoveUp={index > 0} addBeforeLabel="Add motion above" addAfterLabel="Add motion below" removeLabel="Remove motion" onDraftChange={setLayerNameDraft} onEdit={() => startLayerNameEdit(layer.id, layer.name)} onCommit={commitLayerNameEdit} onCancel={cancelLayerNameEdit} onEffectDragOver={(event) => allowMotionLayerEffectDrop(event, layer.id, currentSceneTime)} onEffectDrop={(event) => dropMotionLayerEffect(event, layer.id, currentSceneTime)} onMenuToggle={() => setMotionLayerMenuId((current) => current === layer.id ? null : layer.id)} onAddBefore={() => addMotionLayerAround(layer.id, "before")} onAddAfter={() => addMotionLayerAround(layer.id, "after")} onMoveUp={() => moveMotionLayer(layer.id, "up")} onMoveDown={() => moveMotionLayer(layer.id, "down")} onRemove={() => removeMotionLayer(layer.id)} onToggleHidden={() => toggleLayerHidden(layer.id)} />) : null}
+            {compositionRows.map((layer, index) => <LayerLabel key={layer.id} editing={editingLayerId === layer.id} hidden={Boolean(layer.hidden)} compactControls={layerRowHeights[(isCompositionMode ? adjustmentRows.length + motionLayers.length : 0) + index] < 52} menuOpen={motionLayerMenuId === layer.id} name={layer.name} draft={layerNameDraft} canMoveDown={index < compositionRows.length - 1} canMoveUp={index > 0} addBeforeLabel="Add composition above" addAfterLabel="Add composition below" removeLabel="Remove composition" onDraftChange={setLayerNameDraft} onEdit={() => startLayerNameEdit(layer.id, layer.name)} onCommit={commitLayerNameEdit} onCancel={cancelLayerNameEdit} onMenuToggle={() => setMotionLayerMenuId((current) => current === layer.id ? null : layer.id)} onAddBefore={() => addCompositionLayerAround(layer.id, "before")} onAddAfter={() => addCompositionLayerAround(layer.id, "after")} onMoveUp={() => moveCompositionLayer(layer.id, "up")} onMoveDown={() => moveCompositionLayer(layer.id, "down")} onRemove={() => removeCompositionLayer(layer.id)} onToggleHidden={() => toggleLayerHidden(layer.id)} />)}
           </div>
           </div>
             <div ref={timelineViewportRef} className="timeline-scrollbar min-h-0 overflow-x-scroll overflow-y-auto pl-0 pr-3 [scrollbar-gutter:stable]" onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) updateEffectDragPreview(null); }} onScroll={saveTimelineDisplacement}>
               <div className="relative grid" style={{ ...laneRowsStyle, width: contentWidth, height: laneContentHeight }}>
-            {showTimelineBoundaryGuides ? <TimelineBoundaryGuides timeline={timeline} sceneDuration={sceneDuration} /> : null}
             {timelineSelectionDrag ? <TimelineSelectionBox boxRef={timelineSelectionBoxRef} drag={timelineSelectionDrag} /> : null}
             {isCompositionMode ? adjustmentRows.map((row) => <TimelineLayerLane key={row.key} hidden={row.hidden} overflowVisible={isDraggingAdjustmentLayer} className="block" onDragOver={(event) => allowAdjustmentEffectDrop(event, row.key)} onDrop={(event) => dropAdjustmentEffect(event, row.key)} onPointerDown={startTimelineSelection} onPointerMove={continueTimelineSelection} onPointerUp={endTimelineSelection} onPointerCancel={endTimelineSelection}>
               {adjustmentLayers.filter((layer) => getAdjustmentLayerRowId(layer) === row.key).map((layer) => (
-                  <TimelineBlock variant="adjustment" dataAttributes={{ "data-timeline-marker-kind": "adjustment", "data-timeline-adjustment-id": layer.id }} key={layer.id} selected={selectedAdjustmentLayerIds.has(layer.id) || layer.id === selectedAdjustmentLayerId} style={{ left: `${(layer.start / sceneDuration) * 100}%`, width: `calc(${(layer.duration / sceneDuration) * 100}% + var(--clipper-adjustment-resize-width, 0px))` }} onPointerDown={(event) => updateAdjustmentFromPointer(event, layer, "move")} onClick={() => onSelectAdjustmentLayer(layer.id)} onLeftResize={(event) => updateAdjustmentFromPointer(event, layer, "start")} onRightResize={(event) => updateAdjustmentFromPointer(event, layer, "end")} onContextMenu={(event) => onOpenNodeContextMenu(event, { kind: "adjustment", layerId: layer.id })}>
-                  <span className="pointer-events-none block overflow-hidden text-ellipsis whitespace-nowrap">{layer.name}: {getFrameSkipEvery(layer)}f</span>
+                  <TimelineBlock variant="adjustment" gradient={getEffectPackage(layer.effect.effectId)?.timelineGradient} dataAttributes={{ "data-timeline-marker-kind": "adjustment", "data-timeline-adjustment-id": layer.id }} key={layer.id} selected={selectedAdjustmentLayerIds.has(layer.id) || layer.id === selectedAdjustmentLayerId} style={{ left: `${(layer.start / timelineDisplayDuration) * 100}%`, width: `calc(${(layer.duration / timelineDisplayDuration) * 100}% + var(--clipper-adjustment-resize-width, 0px))` }} onPointerDown={(event) => updateAdjustmentFromPointer(event, layer, "move")} onClick={() => onSelectAdjustmentLayer(layer.id)} onLeftResize={(event) => updateAdjustmentFromPointer(event, layer, "start")} onRightResize={(event) => updateAdjustmentFromPointer(event, layer, "end")} onContextMenu={(event) => onOpenNodeContextMenu(event, { kind: "adjustment", layerId: layer.id })}>
+                  <span className="pointer-events-none block overflow-hidden text-ellipsis whitespace-nowrap">{layer.name}</span>
                 </TimelineBlock>
               ))}
             </TimelineLayerLane>) : null}
-            {isCompositionMode ? motionLayers.map((layer) => <MotionLane key={layer.id} layerId={layer.id} hidden={Boolean(layer.hidden)} timeline={timeline} sceneDuration={sceneDuration} draggingZoomMarkerId={draggingZoomMarkerId} draggingTranslationMarkerId={draggingTranslationMarkerId} zoomSelectionDrag={null} zoomSelectionBoxRef={zoomSelectionBoxRef} translationSelectionDrag={null} translationSelectionBoxRef={translationSelectionBoxRef} selectedZoomKeys={selectedZoomKeys} selectedZoomMarkerId={selectedZoomMarkerId} selectedZoomMarkerPartId={selectedZoomMarkerPartId} selectedTranslationKeys={selectedTranslationKeys} selectedTranslationMarkerId={selectedTranslationMarkerId} selectedTranslationMarkerPartId={selectedTranslationMarkerPartId} onEffectDragOver={(event) => allowMotionLayerEffectDrop(event, layer.id)} onEffectDrop={(event) => dropMotionLayerEffect(event, layer.id)} onStartSelection={startTimelineSelection} onMoveSelection={continueTimelineSelection} onEndSelection={endTimelineSelection} onSelectZoomMarker={onSelectZoomMarker} onSelectTranslationMarker={onSelectTranslationMarker} onOpenNodeContextMenu={onOpenNodeContextMenu} onUpdateZoomFromPointer={updateZoomFromPointer} onUpdateTranslationFromPointer={updateTranslationFromPointer} />) : null}
+            {isCompositionMode ? motionLayers.map((layer) => <MotionLane key={layer.id} layerId={layer.id} hidden={Boolean(layer.hidden)} timeline={timeline} sceneDuration={timelineDisplayDuration} overflowVisible={isDraggingMotionMarker} zoomSelectionDrag={null} zoomSelectionBoxRef={zoomSelectionBoxRef} translationSelectionDrag={null} translationSelectionBoxRef={translationSelectionBoxRef} selectedZoomKeys={selectedZoomKeys} selectedZoomMarkerId={selectedZoomMarkerId} selectedZoomMarkerPartId={selectedZoomMarkerPartId} selectedTranslationKeys={selectedTranslationKeys} selectedTranslationMarkerId={selectedTranslationMarkerId} selectedTranslationMarkerPartId={selectedTranslationMarkerPartId} onEffectDragOver={(event) => allowMotionLayerEffectDrop(event, layer.id)} onEffectDrop={(event) => dropMotionLayerEffect(event, layer.id)} onStartSelection={startTimelineSelection} onMoveSelection={continueTimelineSelection} onEndSelection={endTimelineSelection} onSelectZoomMarker={onSelectZoomMarker} onSelectTranslationMarker={onSelectTranslationMarker} onOpenNodeContextMenu={onOpenNodeContextMenu} onUpdateZoomFromPointer={updateZoomFromPointer} onUpdateTranslationFromPointer={updateTranslationFromPointer} />) : null}
             {effectDragPreview ? <EffectDragPreviewBlock blockRef={effectDragPreviewElementRef} preview={effectDragPreview} /> : null}
-            <TimelineLayerLane hidden={Boolean(timelineLayers.compHidden)} className="flex" onClick={(event) => { if (event.target === event.currentTarget) onClearTimelineSelection(); }} onDragOver={(event) => { if (event.dataTransfer.types.includes("application/x-clipper-composition")) event.preventDefault(); }} onDrop={(event) => { const compositionId = event.dataTransfer.getData("application/x-clipper-composition"); if (!compositionId) return; event.preventDefault(); onAddComposition(compositionId); }}>
-              {timeline.map((item) => {
+            {compositionRows.map((row) => <TimelineLayerLane key={row.id} hidden={Boolean(row.hidden)} overflowVisible={isDraggingCompositionBlock} className="block" onClick={(event) => { if (event.target === event.currentTarget) onClearTimelineSelection(); }} onDragOver={(event) => { if (event.dataTransfer.types.includes("application/x-clipper-composition")) event.preventDefault(); }} onDrop={(event) => { const compositionId = event.dataTransfer.getData("application/x-clipper-composition"); if (!compositionId) return; event.preventDefault(); onAddComposition(compositionId, row.id, getDropSceneTime(event)); }}>
+              {timeline.filter((item) => (item.layerId ?? "comp") === row.id).map((item) => {
                 const isEmptyPart = item.objects.length === 0 && item.background.elements.length === 0;
                 const isUnlinkedPart = Boolean(item.sourceMissing);
                 return (
-                  <button data-timeline-control draggable key={item.id} className={`relative flex min-h-0 min-w-[86px] cursor-default items-end justify-between gap-2 self-stretch overflow-hidden px-3 py-2 text-left text-[13px] leading-none shadow-[inset_1px_0_0_rgb(0_0_0/0.55),inset_-1px_0_0_rgb(0_0_0/0.55)] before:absolute before:left-1/2 before:top-2 before:-translate-x-1/2 before:text-[12px] before:font-extrabold before:text-white/25 before:content-['Clip'] ${isUnlinkedPart ? "bg-black text-[#f1f3f7]" : isEmptyPart ? "bg-[linear-gradient(180deg,#2b2d35,#191b21)] text-[#8c929f] opacity-75" : "bg-[linear-gradient(180deg,#38a86d,#17603c)] text-white"} ${item.id === selectedPartId && !selectedZoomMarkerId && !selectedTranslationMarkerId ? "z-20 opacity-100 outline outline-2 -outline-offset-2 outline-[var(--clipper-accent)]" : ""}`} style={{ width: `${(item.duration / sceneDuration) * 100}%` }} onPointerDown={() => onSelectPart(item.id)} onClick={() => onSelectPart(item.id)} onContextMenu={(event) => onOpenNodeContextMenu(event, { kind: "part", partId: item.id })} onDragStart={(event) => onPartDragStart(event, item.id)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => onPartDrop(event, item.id)} onDragEnd={() => setDraggedPartId(null)}>
+                  <div data-timeline-control data-timeline-composition-id={item.id} key={item.id} role="button" tabIndex={0} className={`absolute inset-y-0 box-border flex min-w-[34px] cursor-default items-end justify-between gap-2 overflow-hidden rounded-[3px] px-3 py-2 text-left text-[13px] leading-none shadow-[inset_1px_0_0_rgb(0_0_0/0.55),inset_-1px_0_0_rgb(0_0_0/0.55)] before:absolute before:left-1/2 before:top-2 before:-translate-x-1/2 before:text-[12px] before:font-extrabold before:text-white/25 before:content-['Clip'] ${isUnlinkedPart ? "bg-black text-[#f1f3f7]" : isEmptyPart ? "bg-[linear-gradient(180deg,#2b2d35,#191b21)] text-[#8c929f] opacity-75" : "bg-[linear-gradient(180deg,#38a86d,#17603c)] text-white"} ${item.id === selectedPartId && !selectedZoomMarkerId && !selectedTranslationMarkerId ? "z-20 opacity-100 outline outline-2 -outline-offset-2 outline-[var(--clipper-accent)]" : "opacity-90"}`} style={{ left: `${timelineDisplayDuration > 0 ? (item.start / timelineDisplayDuration) * 100 : 0}%`, width: `calc(${timelineDisplayDuration > 0 ? (item.duration / timelineDisplayDuration) * 100 : 0}% + var(--clipper-composition-resize-width, 0px))` }} onPointerDown={(event) => updateCompositionFromPointer(event, item, "move")} onClick={() => onSelectPart(item.id)} onContextMenu={(event) => onOpenNodeContextMenu(event, { kind: "part", partId: item.id })}>
                     <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-bold">{isUnlinkedPart ? `Unlinked: ${item.name}` : item.name}</span><small className="shrink-0 text-[12px] font-extrabold text-white/80">{item.duration}s</small>
-                  </button>
+                    <div className="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize" onPointerDown={(event) => updateCompositionFromPointer(event, item, "start")} />
+                    <div className="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize" onPointerDown={(event) => updateCompositionFromPointer(event, item, "end")} />
+                  </div>
                 );
               })}
-            </TimelineLayerLane>
+            </TimelineLayerLane>)}
           </div>
         </div>
       </div>
@@ -1820,29 +2120,19 @@ export function TimelineSelectionBox({ boxRef, drag }: { boxRef: RefObject<HTMLD
   return <div ref={boxRef} className="pointer-events-none absolute left-0 top-0 z-40 border border-[#159dff] bg-[#159dff]/10 shadow-[0_0_0_1px_rgba(21,157,255,0.18)] will-change-transform" style={{ display: "none" }} />;
 }
 
-function TimelineBoundaryGuides({ timeline, sceneDuration }: { timeline: TimelinePart[]; sceneDuration: number }) {
-  return <div className="pointer-events-none absolute inset-0 z-30">
-    {timeline.slice(1).map((part) => <div className="absolute top-0 h-full w-px bg-white/90 shadow-[0_0_10px_rgba(255,255,255,0.35)] animate-[clipper-zoom-boundary-in_180ms_ease-out_both]" key={`timeline-boundary-${part.id}`} style={{ left: `${sceneDuration > 0 ? (part.start / sceneDuration) * 100 : 0}%` }} />)}
-  </div>;
-}
-
 function EffectDragPreviewBlock({ blockRef, preview }: { blockRef: RefObject<HTMLDivElement | null>; preview: EffectDragPreview }) {
-  const effect = getEffectPackage(preview.effectId);
-  const className = preview.category === "adjustment"
-    ? "bg-[linear-gradient(180deg,#a77cff,#5f35c6)] text-white"
-    : preview.kind === "zoom"
-      ? "bg-[linear-gradient(180deg,#f0c95a,#b88312)] text-[#1a1202]"
-      : "bg-[linear-gradient(180deg,#24b7c9,#127c8d)] text-white";
-  const label = effect?.label ?? preview.effectId;
+  const effect = preview.effectId ? getEffectPackage(preview.effectId) : undefined;
+  const gradient = effect?.timelineGradient ?? (preview.category === "composition" ? { from: "#38a86d", to: "#17603c", text: "#ffffff" } : getDefaultTimelineGradient(preview.category === "motion" && preview.kind === "zoom" ? "zoom" : preview.category === "adjustment" ? "adjustment" : "translation"));
+  const label = effect?.label ?? preview.label ?? preview.effectId ?? "Composition";
 
   return (
-    <div ref={blockRef} className={`pointer-events-none absolute left-0 top-0 z-30 box-border min-w-[18px] overflow-hidden px-3 py-2 text-xs font-bold opacity-55 shadow-[inset_1px_0_0_rgb(0_0_0/0.55),inset_-1px_0_0_rgb(0_0_0/0.55)] ${className}`}>
+    <div ref={blockRef} className="pointer-events-none absolute left-0 top-0 z-30 box-border min-w-[18px] overflow-hidden rounded-[3px] px-3 py-2 text-xs font-bold opacity-55 shadow-[inset_1px_0_0_rgb(0_0_0/0.55),inset_-1px_0_0_rgb(0_0_0/0.55)]" style={timelineGradientStyle(gradient)}>
       <span className="block overflow-hidden text-ellipsis whitespace-nowrap">{label}</span>
     </div>
   );
 }
 
-function LayerLabel({ name, draft, editing, hidden, menuOpen, canMoveDown = true, canMoveUp = true, addAfterLabel = "Add layer below", addBeforeLabel = "Add layer above", removeLabel = "Remove layer", onAddAfter, onAddBefore, onCancel, onCommit, onDraftChange, onEdit, onEffectDragOver, onEffectDrop, onMenuToggle, onMoveDown, onMoveUp, onRemove, onToggleHidden }: { name: string; draft: string; editing: boolean; hidden: boolean; menuOpen?: boolean; canMoveDown?: boolean; canMoveUp?: boolean; addAfterLabel?: string; addBeforeLabel?: string; removeLabel?: string; onAddAfter?: () => void; onAddBefore?: () => void; onCancel: () => void; onCommit: () => void; onDraftChange: (value: string) => void; onEdit: () => void; onEffectDragOver?: (event: DragEvent<HTMLDivElement>) => void; onEffectDrop?: (event: DragEvent<HTMLDivElement>) => void; onMenuToggle?: () => void; onMoveDown?: () => void; onMoveUp?: () => void; onRemove?: () => void; onToggleHidden: () => void }) {
+function LayerLabel({ name, draft, editing, hidden, compactControls, menuOpen, canMoveDown = true, canMoveUp = true, addAfterLabel = "Add layer below", addBeforeLabel = "Add layer above", removeLabel = "Remove layer", onAddAfter, onAddBefore, onCancel, onCommit, onDraftChange, onEdit, onEffectDragOver, onEffectDrop, onMenuToggle, onMoveDown, onMoveUp, onRemove, onToggleHidden }: { name: string; draft: string; editing: boolean; hidden: boolean; compactControls: boolean; menuOpen?: boolean; canMoveDown?: boolean; canMoveUp?: boolean; addAfterLabel?: string; addBeforeLabel?: string; removeLabel?: string; onAddAfter?: () => void; onAddBefore?: () => void; onCancel: () => void; onCommit: () => void; onDraftChange: (value: string) => void; onEdit: () => void; onEffectDragOver?: (event: DragEvent<HTMLDivElement>) => void; onEffectDrop?: (event: DragEvent<HTMLDivElement>) => void; onMenuToggle?: () => void; onMoveDown?: () => void; onMoveUp?: () => void; onRemove?: () => void; onToggleHidden: () => void }) {
   const menuButtonRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
@@ -1896,15 +2186,16 @@ function LayerLabel({ name, draft, editing, hidden, menuOpen, canMoveDown = true
   }, [menuOpen, onMenuToggle]);
 
   return (
-    <div className={`relative grid h-full grid-cols-[1fr_auto] items-center gap-2 pr-0 transition ${hidden ? "opacity-45" : ""}`} onDragOver={onEffectDragOver} onDrop={onEffectDrop}>
-      {editing ? <input autoFocus className="min-w-0 rounded-md border border-[var(--clipper-accent)] bg-[#111319] px-2 py-1 text-xs font-bold normal-case tracking-normal text-[#dfe2ea] outline-none" value={draft} onBlur={onCommit} onChange={(event) => onDraftChange(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") onCommit(); if (event.key === "Escape") onCancel(); }} /> : <button className="relative min-w-0 cursor-text overflow-hidden text-ellipsis whitespace-nowrap rounded-md py-1 pl-0 pr-1 text-left text-[12px] font-bold normal-case tracking-normal text-[#9b9da7] transition hover:bg-[#20232c]/70 hover:text-[#dfe2ea] before:absolute before:left-0 before:top-1/2 before:h-4 before:w-px before:-translate-y-1/2 before:bg-[var(--clipper-accent)] before:opacity-0 before:transition-opacity hover:before:opacity-100 focus-visible:bg-[#20232c]/70 focus-visible:outline-none focus-visible:before:opacity-100" title="Double-click to rename" onDoubleClick={onEdit}>{name}</button>}
-      <div className="flex items-center gap-2 justify-self-end pr-2">
-        <button data-timeline-control className="grid h-7 w-7 place-items-center rounded-md border border-[#2d313b] bg-[#111319] text-[#dfe2ea] hover:border-[#37d6c2]" title={hidden ? "Show layer" : "Hide layer"} onClick={onToggleHidden}>{hidden ? <EyeOff size={14} /> : <Eye size={14} />}</button>
-        {onMenuToggle ? <button ref={menuButtonRef} data-timeline-control className="grid h-7 w-7 place-items-center rounded-md border border-[#2d313b] bg-[#111319] text-[#dfe2ea] hover:border-[#37d6c2]" title="Layer options" onClick={onMenuToggle}><MoreHorizontal size={15} /></button> : null}
+    <div className={`relative grid h-full grid-cols-[1fr_auto] items-start gap-2 pr-0 pt-2 transition ${hidden ? "opacity-45" : ""}`} onDragOver={onEffectDragOver} onDrop={onEffectDrop}>
+      {editing ? <input autoFocus className="min-w-0 rounded-md border border-[var(--clipper-accent)] bg-[#111319] px-2 py-1 text-xs font-bold text-[#dfe2ea] outline-none" value={draft} onBlur={onCommit} onChange={(event) => onDraftChange(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") onCommit(); if (event.key === "Escape") onCancel(); }} /> : <button className="relative min-w-0 cursor-text overflow-hidden text-ellipsis whitespace-nowrap rounded-md py-1 pl-0 pr-1 text-left text-[12px] font-bold text-[#9b9da7] transition hover:bg-[#20232c]/70 hover:text-[#dfe2ea] before:absolute before:left-0 before:top-1/2 before:h-4 before:w-px before:-translate-y-1/2 before:bg-[var(--clipper-accent)] before:opacity-0 before:transition-opacity hover:before:opacity-100 focus-visible:bg-[#20232c]/70 focus-visible:outline-none focus-visible:before:opacity-100" title="Double-click to rename" onDoubleClick={onEdit}>{name}</button>}
+      <div className="flex flex-col items-start gap-0.5 self-start justify-self-end pr-2">
+        {onMenuToggle ? <button ref={menuButtonRef} data-timeline-control className="grid h-5 w-5 place-items-center rounded text-[#dfe2ea] transition hover:bg-[#20232c] hover:text-[#37d6c2]" title="Layer options" onClick={onMenuToggle}><MoreHorizontal size={13} /></button> : null}
+        {compactControls ? null : <button data-timeline-control className="grid h-5 w-5 place-items-center rounded text-[#dfe2ea] transition hover:bg-[#20232c] hover:text-[#37d6c2]" title={hidden ? "Show layer" : "Hide layer"} onClick={onToggleHidden}>{hidden ? <EyeOff size={12} /> : <Eye size={12} />}</button>}
       </div>
-      {menuOpen && typeof document !== "undefined" ? createPortal(<div ref={menuRef} data-timeline-control className="fixed z-50 grid min-w-[180px] overflow-hidden rounded-xl border border-[#2d313b] bg-[#111319] py-1 text-xs font-bold normal-case tracking-normal text-[#dfe2ea] shadow-[0_18px_48px_rgba(0,0,0,0.48)]" style={{ left: menuPosition?.x ?? 0, top: menuPosition?.y ?? 0, visibility: menuPosition ? "visible" : "hidden" }}>
-        {onMoveUp ? <button className="px-3 py-2 text-left hover:bg-[#20232c] disabled:cursor-not-allowed disabled:text-[#5f6470] disabled:hover:bg-transparent" disabled={!canMoveUp} onClick={onMoveUp}>Move up</button> : null}
-        {onMoveDown ? <button className="px-3 py-2 text-left hover:bg-[#20232c] disabled:cursor-not-allowed disabled:text-[#5f6470] disabled:hover:bg-transparent" disabled={!canMoveDown} onClick={onMoveDown}>Move down</button> : null}
+      {menuOpen && typeof document !== "undefined" ? createPortal(<div ref={menuRef} data-timeline-control className="fixed z-50 grid min-w-[180px] overflow-hidden rounded-xl border border-[#2d313b] bg-[#111319] py-1 text-xs font-bold text-[#dfe2ea] shadow-[0_18px_48px_rgba(0,0,0,0.48)]" style={{ left: menuPosition?.x ?? 0, top: menuPosition?.y ?? 0, visibility: menuPosition ? "visible" : "hidden" }}>
+        <button className="px-3 py-2 text-left hover:bg-[#20232c]" onClick={onToggleHidden}>{hidden ? "Enable layer" : "Disable layer"}</button>
+        {onMoveUp && canMoveUp ? <button className="px-3 py-2 text-left hover:bg-[#20232c]" onClick={onMoveUp}>Move up</button> : null}
+        {onMoveDown && canMoveDown ? <button className="px-3 py-2 text-left hover:bg-[#20232c]" onClick={onMoveDown}>Move down</button> : null}
         {onAddBefore ? <button className="px-3 py-2 text-left hover:bg-[#20232c]" onClick={onAddBefore}>{addBeforeLabel}</button> : null}
         {onAddAfter ? <button className="px-3 py-2 text-left hover:bg-[#20232c]" onClick={onAddAfter}>{addAfterLabel}</button> : null}
         {onRemove ? <button className="px-3 py-2 text-left text-[#ffb4b4] hover:bg-[#2a1719]" onClick={onRemove}>{removeLabel}</button> : null}
@@ -1921,22 +2212,37 @@ function getTimelineLayerRowHeight(rowHeights: Record<string, number>, key: stri
   return clamp(Math.round(rowHeights[key] ?? 58), 42, 140);
 }
 
+function getDefaultTimelineGradient(variant: "adjustment" | "translation" | "zoom"): EffectTimelineGradient {
+  if (variant === "adjustment") return { from: "#a77cff", to: "#5f35c6", text: "#ffffff" };
+  if (variant === "zoom") return { from: "#f0c95a", to: "#b88312", text: "#1a1202" };
+  return { from: "#24b7c9", to: "#127c8d", text: "#ffffff" };
+}
+
+function timelineGradientStyle(gradient: EffectTimelineGradient): CSSProperties {
+  return {
+    background: `linear-gradient(180deg, ${gradient.from}, ${gradient.to})`,
+    color: gradient.text ?? "#ffffff",
+  };
+}
+
 function TimelineLayerLane({ hidden, overflowVisible = false, className = "block", children, onClick, onDragOver, onDrop, onPointerCancel, onPointerDown, onPointerMove, onPointerUp }: { hidden: boolean; overflowVisible?: boolean; className?: string; children: ReactNode; onClick?: (event: ReactMouseEvent<HTMLDivElement>) => void; onDragOver?: (event: DragEvent<HTMLDivElement>) => void; onDrop?: (event: DragEvent<HTMLDivElement>) => void; onPointerCancel?: (event: PointerEvent<HTMLDivElement>) => void; onPointerDown?: (event: PointerEvent<HTMLDivElement>) => void; onPointerMove?: (event: PointerEvent<HTMLDivElement>) => void; onPointerUp?: (event: PointerEvent<HTMLDivElement>) => void }) {
   return <div className={`relative h-full min-h-0 ${className} ${overflowVisible ? "overflow-visible" : "overflow-hidden"} border-x border-[#2d313b] bg-[#111319] transition ${hidden ? "opacity-35" : ""}`} onClick={onClick} onDragOver={onDragOver} onDrop={onDrop} onPointerCancel={onPointerCancel} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}>{children}</div>;
 }
 
-function TimelineBlock({ variant, selected, muted, style, children, leftHandle, rightHandle, dataAttributes, onClick, onPointerDown, onLeftResize, onRightResize, onContextMenu }: { variant: "adjustment" | "translation" | "zoom"; selected: boolean; muted?: boolean; style: CSSProperties; children: ReactNode; leftHandle?: ReactNode; rightHandle?: ReactNode; dataAttributes: Record<string, string>; onClick: () => void; onPointerDown: (event: PointerEvent<HTMLDivElement>) => void; onLeftResize: (event: PointerEvent<HTMLDivElement>) => void; onRightResize: (event: PointerEvent<HTMLDivElement>) => void; onContextMenu: (event: ReactMouseEvent<HTMLElement>) => void }) {
-  const variantClass = variant === "adjustment"
-    ? "min-w-[34px] bg-[linear-gradient(180deg,#a77cff,#5f35c6)] text-white text-left font-extrabold"
-    : variant === "zoom"
-      ? "min-w-[18px] bg-[linear-gradient(180deg,#f0c95a,#b88312)] text-[#1a1202] font-bold"
-      : "min-w-[18px] bg-[linear-gradient(180deg,#24b7c9,#127c8d)] text-white font-bold";
+function TimelineBlock({ variant, gradient, selected, muted, squareLeft, squareRight, leftResizeEnabled = true, rightResizeEnabled = true, style, children, leftHandle, rightHandle, dataAttributes, onClick, onPointerDown, onLeftResize, onRightResize, onContextMenu }: { variant: "adjustment" | "translation" | "zoom"; gradient?: EffectTimelineGradient; selected: boolean; muted?: boolean; squareLeft?: boolean; squareRight?: boolean; leftResizeEnabled?: boolean; rightResizeEnabled?: boolean; style: CSSProperties; children: ReactNode; leftHandle?: ReactNode; rightHandle?: ReactNode; dataAttributes: Record<string, string>; onClick: () => void; onPointerDown: (event: PointerEvent<HTMLDivElement>) => void; onLeftResize: (event: PointerEvent<HTMLDivElement>) => void; onRightResize: (event: PointerEvent<HTMLDivElement>) => void; onContextMenu: (event: ReactMouseEvent<HTMLElement>) => void }) {
+  const variantClass = variant === "adjustment" ? "min-w-[34px] text-left font-extrabold" : "min-w-[18px] font-bold";
   const selectionClass = selected ? "z-20 opacity-100 outline outline-2 -outline-offset-2 outline-[var(--clipper-accent)]" : muted ? "opacity-80" : "opacity-85";
+  const radiusClass = `${squareLeft ? "rounded-l-none" : ""} ${squareRight ? "rounded-r-none" : ""}`;
+  const edgeShadows = [
+    squareLeft ? null : "inset 1px 0 0 rgba(0, 0, 0, 0.55)",
+    squareRight ? null : "inset -1px 0 0 rgba(0, 0, 0, 0.55)",
+  ].filter(Boolean).join(", ");
+  const blockStyle = { ...style, ...timelineGradientStyle(gradient ?? getDefaultTimelineGradient(variant)), boxShadow: edgeShadows || undefined };
 
-  return <div data-timeline-control {...dataAttributes} role="button" tabIndex={0} className={`absolute inset-y-0 box-border cursor-default overflow-hidden px-3 py-2 text-xs shadow-[inset_1px_0_0_rgb(0_0_0/0.55),inset_-1px_0_0_rgb(0_0_0/0.55)] ${variantClass} ${selectionClass}`} style={style} onClick={onClick} onPointerDown={onPointerDown} onContextMenu={onContextMenu}>
+  return <div data-timeline-control {...dataAttributes} role="button" tabIndex={0} className={`absolute inset-y-0 box-border cursor-default overflow-hidden rounded-[3px] px-3 py-2 text-xs ${radiusClass} ${variantClass} ${selectionClass}`} style={blockStyle} onClick={onClick} onPointerDown={onPointerDown} onContextMenu={onContextMenu}>
     {children}
-    <div className="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize" onPointerDown={onLeftResize}>{leftHandle}</div>
-    <div className="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize" onPointerDown={onRightResize}>{rightHandle}</div>
+    <div className={`absolute left-0 top-0 bottom-0 w-2 ${leftResizeEnabled ? "cursor-ew-resize" : "pointer-events-none cursor-default"}`} onPointerDown={leftResizeEnabled ? onLeftResize : undefined}>{leftHandle}</div>
+    <div className={`absolute right-0 top-0 bottom-0 w-2 ${rightResizeEnabled ? "cursor-ew-resize" : "pointer-events-none cursor-default"}`} onPointerDown={rightResizeEnabled ? onRightResize : undefined}>{rightHandle}</div>
   </div>;
 }
 
@@ -1954,58 +2260,74 @@ function timelineEdgeIndicatorClass(side: "left" | "right", mended: boolean) {
   return `pointer-events-none absolute inset-y-0 ${position} w-1 ${gradient}`;
 }
 
-function isZoomMarkerMendedEdge(part: TimelinePart, marker: ZoomMarker, edge: "start" | "end") {
-  const markers = part.zoomMarkers.filter((item) => getZoomMarkerLayerId(item) === getZoomMarkerLayerId(marker)).sort((left, right) => left.start - right.start);
-  const markerIndex = markers.findIndex((item) => item.id === marker.id);
+function isZoomMarkerMendedEdge(timeline: TimelinePart[], part: TimelinePart, marker: ZoomMarker, edge: "start" | "end") {
+  const markers = timeline.flatMap((timelinePart) => timelinePart.zoomMarkers
+    .filter((item) => getZoomMarkerLayerId(item) === getZoomMarkerLayerId(marker))
+    .map((item) => ({ ...item, partId: timelinePart.id, start: timelinePart.start + item.start })))
+    .sort((left, right) => left.start - right.start);
+  const markerIndex = markers.findIndex((item) => item.partId === part.id && item.id === marker.id);
   if (markerIndex < 0) return false;
 
-  if (edge === "start") {
-    const previous = markers[markerIndex - 1];
-    return Boolean(previous?.snapOut && marker.snapIn && roundTenth(previous.start + previous.duration) === roundTenth(marker.start));
-  }
+  if (edge === "start") return Boolean(markers[markerIndex - 1] && isExplicitTimelineMarkerMend(markers[markerIndex - 1], markers[markerIndex]));
 
-  const next = markers[markerIndex + 1];
-  return Boolean(marker.snapOut && next?.snapIn && roundTenth(marker.start + marker.duration) === roundTenth(next.start));
+  return Boolean(markers[markerIndex + 1] && isExplicitTimelineMarkerMend(markers[markerIndex], markers[markerIndex + 1]));
 }
 
-function isTranslationMarkerMendedEdge(part: TimelinePart, marker: TranslationMarker, edge: "start" | "end") {
+function isTranslationMarkerMendedEdge(timeline: TimelinePart[], part: TimelinePart, marker: TranslationMarker, edge: "start" | "end") {
   const markerKind = getTranslationMarkerLayerKind(marker);
-  const markers = part.translationMarkers.filter((item) => getTranslationMarkerLayerId(item) === getTranslationMarkerLayerId(marker) && getTranslationMarkerLayerKind(item) === markerKind).sort((left, right) => left.start - right.start);
-  const markerIndex = markers.findIndex((item) => item.id === marker.id);
+  const markers = timeline.flatMap((timelinePart) => timelinePart.translationMarkers
+    .filter((item) => getTranslationMarkerLayerId(item) === getTranslationMarkerLayerId(marker) && getTranslationMarkerLayerKind(item) === markerKind)
+    .map((item) => ({ ...item, partId: timelinePart.id, start: timelinePart.start + item.start })))
+    .sort((left, right) => left.start - right.start);
+  const markerIndex = markers.findIndex((item) => item.partId === part.id && item.id === marker.id);
   if (markerIndex < 0) return false;
 
-  if (edge === "start") {
-    const previous = markers[markerIndex - 1];
-    return Boolean(previous?.snapOut && marker.snapIn && roundTenth(previous.start + previous.duration) === roundTenth(marker.start));
-  }
+  if (edge === "start") return Boolean(markers[markerIndex - 1] && isExplicitTimelineMarkerMend(markers[markerIndex - 1], markers[markerIndex]));
 
-  const next = markers[markerIndex + 1];
-  return Boolean(marker.snapOut && next?.snapIn && roundTenth(marker.start + marker.duration) === roundTenth(next.start));
+  return Boolean(markers[markerIndex + 1] && isExplicitTimelineMarkerMend(markers[markerIndex], markers[markerIndex + 1]));
 }
 
-function MotionLane({ hidden, layerId, timeline, sceneDuration, draggingZoomMarkerId, draggingTranslationMarkerId, zoomSelectionDrag, zoomSelectionBoxRef, translationSelectionDrag, translationSelectionBoxRef, selectedZoomKeys, selectedZoomMarkerId, selectedZoomMarkerPartId, selectedTranslationKeys, selectedTranslationMarkerId, selectedTranslationMarkerPartId, onEffectDragOver, onEffectDrop, onStartSelection, onMoveSelection, onEndSelection, onSelectZoomMarker, onSelectTranslationMarker, onOpenNodeContextMenu, onUpdateZoomFromPointer, onUpdateTranslationFromPointer }: { hidden: boolean; layerId: string; timeline: TimelinePart[]; sceneDuration: number; draggingZoomMarkerId: string | null; draggingTranslationMarkerId: string | null; zoomSelectionDrag: TimelineSelectionDrag | null; zoomSelectionBoxRef: RefObject<HTMLDivElement | null>; translationSelectionDrag: TimelineSelectionDrag | null; translationSelectionBoxRef: RefObject<HTMLDivElement | null>; selectedZoomKeys: Set<string>; selectedZoomMarkerId: string | null; selectedZoomMarkerPartId: string | null; selectedTranslationKeys: Set<string>; selectedTranslationMarkerId: string | null; selectedTranslationMarkerPartId: string | null; onEffectDragOver: (event: DragEvent<HTMLDivElement>) => void; onEffectDrop: (event: DragEvent<HTMLDivElement>) => void; onStartSelection: (event: PointerEvent<HTMLDivElement>) => void; onMoveSelection: (event: PointerEvent<HTMLDivElement>) => void; onEndSelection: (event: PointerEvent<HTMLDivElement>) => void; onSelectZoomMarker: (partId: string, markerId: string) => void; onSelectTranslationMarker: (partId: string, markerId: string) => void; onOpenNodeContextMenu: (event: ReactMouseEvent<HTMLElement>, target: TimelineNodeContextTarget) => void; onUpdateZoomFromPointer: (event: PointerEvent<HTMLDivElement>, part: TimelinePart, marker: ZoomMarker, action: "move" | "start" | "end") => void; onUpdateTranslationFromPointer: (event: PointerEvent<HTMLDivElement>, part: TimelinePart, marker: TranslationMarker, action: "move" | "start" | "end") => void }) {
-  return <TimelineLayerLane hidden={hidden} overflowVisible={Boolean(draggingZoomMarkerId || draggingTranslationMarkerId)} className="block" onDragOver={onEffectDragOver} onDrop={onEffectDrop} onPointerDown={onStartSelection} onPointerMove={onMoveSelection} onPointerUp={onEndSelection} onPointerCancel={onEndSelection}>
+function MotionLane({ hidden, layerId, timeline, sceneDuration, overflowVisible, zoomSelectionDrag, zoomSelectionBoxRef, translationSelectionDrag, translationSelectionBoxRef, selectedZoomKeys, selectedZoomMarkerId, selectedZoomMarkerPartId, selectedTranslationKeys, selectedTranslationMarkerId, selectedTranslationMarkerPartId, onEffectDragOver, onEffectDrop, onStartSelection, onMoveSelection, onEndSelection, onSelectZoomMarker, onSelectTranslationMarker, onOpenNodeContextMenu, onUpdateZoomFromPointer, onUpdateTranslationFromPointer }: { hidden: boolean; layerId: string; timeline: TimelinePart[]; sceneDuration: number; overflowVisible: boolean; zoomSelectionDrag: TimelineSelectionDrag | null; zoomSelectionBoxRef: RefObject<HTMLDivElement | null>; translationSelectionDrag: TimelineSelectionDrag | null; translationSelectionBoxRef: RefObject<HTMLDivElement | null>; selectedZoomKeys: Set<string>; selectedZoomMarkerId: string | null; selectedZoomMarkerPartId: string | null; selectedTranslationKeys: Set<string>; selectedTranslationMarkerId: string | null; selectedTranslationMarkerPartId: string | null; onEffectDragOver: (event: DragEvent<HTMLDivElement>) => void; onEffectDrop: (event: DragEvent<HTMLDivElement>) => void; onStartSelection: (event: PointerEvent<HTMLDivElement>) => void; onMoveSelection: (event: PointerEvent<HTMLDivElement>) => void; onEndSelection: (event: PointerEvent<HTMLDivElement>) => void; onSelectZoomMarker: (partId: string, markerId: string) => void; onSelectTranslationMarker: (partId: string, markerId: string) => void; onOpenNodeContextMenu: (event: ReactMouseEvent<HTMLElement>, target: TimelineNodeContextTarget) => void; onUpdateZoomFromPointer: (event: PointerEvent<HTMLDivElement>, part: TimelinePart, marker: ZoomMarker, action: "move" | "start" | "end") => void; onUpdateTranslationFromPointer: (event: PointerEvent<HTMLDivElement>, part: TimelinePart, marker: TranslationMarker, action: "move" | "start" | "end") => void }) {
+  return <TimelineLayerLane hidden={hidden} overflowVisible={overflowVisible} className="block" onDragOver={onEffectDragOver} onDrop={onEffectDrop} onPointerDown={onStartSelection} onPointerMove={onMoveSelection} onPointerUp={onEndSelection} onPointerCancel={onEndSelection}>
     {zoomSelectionDrag ? <TimelineSelectionBox boxRef={zoomSelectionBoxRef} drag={zoomSelectionDrag} /> : null}
     {translationSelectionDrag ? <TimelineSelectionBox boxRef={translationSelectionBoxRef} drag={translationSelectionDrag} /> : null}
     {timeline.flatMap((timelinePart) => timelinePart.translationMarkers.filter((marker) => isAnyTranslationMarkerOnLayer(marker, layerId)).map((marker) => {
       const markerKind = getTranslationMarkerLayerKind(marker);
+      const effectId = marker.effectId ?? (markerKind === "rotate" ? "clipper.motion.rotate" : markerKind === "perspective" ? "clipper.motion.perspective" : "clipper.motion.pan");
+      const leftMended = isTranslationMarkerMendedEdge(timeline, timelinePart, marker, "start");
+      const rightMended = isTranslationMarkerMendedEdge(timeline, timelinePart, marker, "end");
       return (
-        <TimelineBlock variant="translation" dataAttributes={{ "data-timeline-marker-kind": "translation", "data-timeline-marker-part-id": timelinePart.id, "data-timeline-marker-id": marker.id }} selected={selectedTranslationKeys.has(`${timelinePart.id}:${marker.id}`) || (marker.id === selectedTranslationMarkerId && timelinePart.id === selectedTranslationMarkerPartId)} muted key={`translation-${timelinePart.id}-${marker.id}`} style={{ left: `${((timelinePart.start + marker.start) / sceneDuration) * 100}%`, width: `calc(${(marker.duration / sceneDuration) * 100}% + var(--clipper-timeline-resize-width, 0px))` }} onClick={() => onSelectTranslationMarker(timelinePart.id, marker.id)} onPointerDown={(event) => onUpdateTranslationFromPointer(event, timelinePart, marker, "move")} onLeftResize={(event) => onUpdateTranslationFromPointer(event, timelinePart, marker, "start")} onRightResize={(event) => onUpdateTranslationFromPointer(event, timelinePart, marker, "end")} onContextMenu={(event) => onOpenNodeContextMenu(event, { kind: "translation", partId: timelinePart.id, markerId: marker.id })} leftHandle={marker.snapIn ? <span className={timelineEdgeIndicatorClass("left", isTranslationMarkerMendedEdge(timelinePart, marker, "start"))} /> : null} rightHandle={marker.snapOut ? <span className={timelineEdgeIndicatorClass("right", isTranslationMarkerMendedEdge(timelinePart, marker, "end"))} /> : null}>
-          <span className="pointer-events-none block overflow-hidden text-ellipsis whitespace-nowrap">{markerKind === "rotate" ? `Rotate ${Math.round(marker.rotation ?? 0)}deg` : markerKind === "perspective" ? `Perspective ${Math.round(marker.perspective?.rotateX ?? 0)}deg` : `Pan ${marker.position.x}, ${marker.position.y}`}</span>
+        <TimelineBlock variant="translation" gradient={getEffectPackage(effectId)?.timelineGradient} squareLeft={leftMended} squareRight={rightMended} dataAttributes={{ "data-timeline-marker-kind": "motion", "data-timeline-motion-kind": "translation", "data-timeline-marker-part-id": timelinePart.id, "data-timeline-marker-id": marker.id }} selected={selectedTranslationKeys.has(`${timelinePart.id}:${marker.id}`) || (marker.id === selectedTranslationMarkerId && timelinePart.id === selectedTranslationMarkerPartId)} muted key={`translation-${timelinePart.id}-${marker.id}`} style={{ left: `${((timelinePart.start + marker.start) / sceneDuration) * 100}%`, width: `calc(${(marker.duration / sceneDuration) * 100}% + var(--clipper-timeline-resize-width, 0px))` }} onClick={() => onSelectTranslationMarker(timelinePart.id, marker.id)} onPointerDown={(event) => onUpdateTranslationFromPointer(event, timelinePart, marker, "move")} onLeftResize={(event) => onUpdateTranslationFromPointer(event, timelinePart, marker, "start")} onRightResize={(event) => onUpdateTranslationFromPointer(event, timelinePart, marker, "end")} onContextMenu={(event) => onOpenNodeContextMenu(event, { kind: "translation", partId: timelinePart.id, markerId: marker.id })} leftHandle={marker.snapIn && !leftMended ? <span className={timelineEdgeIndicatorClass("left", false)} /> : null} rightHandle={marker.snapOut ? <span className={timelineEdgeIndicatorClass("right", rightMended)} /> : null}>
+          <span className="pointer-events-none block overflow-hidden text-ellipsis whitespace-nowrap">{getTranslationMarkerTimelineLabel(marker, effectId)}</span>
           {markerKind === "pan" && marker.followId ? <Link2 className="pointer-events-none absolute bottom-1 left-1 text-white/85" size={9} strokeWidth={2.5} /> : null}
         </TimelineBlock>
       );
     }))}
-    {timeline.flatMap((timelinePart) => timelinePart.zoomMarkers.filter((marker) => isZoomMarkerOnLayer(marker, layerId)).map((marker) => (
-      <TimelineBlock variant="zoom" dataAttributes={{ "data-timeline-marker-kind": "zoom", "data-timeline-marker-part-id": timelinePart.id, "data-timeline-marker-id": marker.id }} selected={selectedZoomKeys.has(`${timelinePart.id}:${marker.id}`) || (marker.id === selectedZoomMarkerId && timelinePart.id === selectedZoomMarkerPartId)} key={`zoom-${timelinePart.id}-${marker.id}`} style={{ left: `${((timelinePart.start + marker.start) / sceneDuration) * 100}%`, width: `calc(${(marker.duration / sceneDuration) * 100}% + var(--clipper-timeline-resize-width, 0px))` }} onClick={() => onSelectZoomMarker(timelinePart.id, marker.id)} onPointerDown={(event) => onUpdateZoomFromPointer(event, timelinePart, marker, "move")} onLeftResize={(event) => onUpdateZoomFromPointer(event, timelinePart, marker, "start")} onRightResize={(event) => onUpdateZoomFromPointer(event, timelinePart, marker, "end")} onContextMenu={(event) => onOpenNodeContextMenu(event, { kind: "zoom", partId: timelinePart.id, markerId: marker.id })} leftHandle={marker.snapIn ? <span className={timelineEdgeIndicatorClass("left", isZoomMarkerMendedEdge(timelinePart, marker, "start"))} /> : null} rightHandle={marker.snapOut ? <span className={timelineEdgeIndicatorClass("right", isZoomMarkerMendedEdge(timelinePart, marker, "end"))} /> : null}>
-        <span className="pointer-events-none block overflow-hidden text-ellipsis whitespace-nowrap">Zoom {marker.scale}x</span>
-      </TimelineBlock>
-    )))}
+    {timeline.flatMap((timelinePart) => timelinePart.zoomMarkers.filter((marker) => isZoomMarkerOnLayer(marker, layerId)).map((marker) => {
+      const leftMended = isZoomMarkerMendedEdge(timeline, timelinePart, marker, "start");
+      const rightMended = isZoomMarkerMendedEdge(timeline, timelinePart, marker, "end");
+      return <TimelineBlock variant="zoom" gradient={getEffectPackage(marker.effectId ?? "clipper.motion.zoom")?.timelineGradient} squareLeft={leftMended} squareRight={rightMended} dataAttributes={{ "data-timeline-marker-kind": "motion", "data-timeline-motion-kind": "zoom", "data-timeline-marker-part-id": timelinePart.id, "data-timeline-marker-id": marker.id }} selected={selectedZoomKeys.has(`${timelinePart.id}:${marker.id}`) || (marker.id === selectedZoomMarkerId && timelinePart.id === selectedZoomMarkerPartId)} key={`zoom-${timelinePart.id}-${marker.id}`} style={{ left: `${((timelinePart.start + marker.start) / sceneDuration) * 100}%`, width: `calc(${(marker.duration / sceneDuration) * 100}% + var(--clipper-timeline-resize-width, 0px))` }} onClick={() => onSelectZoomMarker(timelinePart.id, marker.id)} onPointerDown={(event) => onUpdateZoomFromPointer(event, timelinePart, marker, "move")} onLeftResize={(event) => onUpdateZoomFromPointer(event, timelinePart, marker, "start")} onRightResize={(event) => onUpdateZoomFromPointer(event, timelinePart, marker, "end")} onContextMenu={(event) => onOpenNodeContextMenu(event, { kind: "zoom", partId: timelinePart.id, markerId: marker.id })} leftHandle={marker.snapIn && !leftMended ? <span className={timelineEdgeIndicatorClass("left", false)} /> : null} rightHandle={marker.snapOut ? <span className={timelineEdgeIndicatorClass("right", rightMended)} /> : null}>
+        <span className="pointer-events-none block overflow-hidden text-ellipsis whitespace-nowrap">{getZoomMarkerTimelineLabel(marker)}</span>
+      </TimelineBlock>;
+    }))}
   </TimelineLayerLane>;
+}
+
+function getTimelineMarkerName(marker: Pick<ZoomMarker | TranslationMarker, "name">, fallback: string) {
+  return marker.name?.trim() || fallback;
+}
+
+function getTranslationMarkerTimelineLabel(marker: TranslationMarker, effectId: MotionEffectId) {
+  return getTimelineMarkerName(marker, getMotionEffectPackage(effectId)?.label ?? "Motion");
+}
+
+function getZoomMarkerTimelineLabel(marker: ZoomMarker) {
+  return getTimelineMarkerName(marker, getMotionEffectPackage(marker.effectId ?? "clipper.motion.zoom")?.label ?? "Zoom");
 }
 
 export function TimeRuler({ rulerRef, ticks, sceneDuration, contentWidth, onPointerDown, onPointerMove, onPointerUp, onPointerCancel }: { rulerRef: RefObject<HTMLDivElement | null>; ticks: number[]; sceneDuration: number; contentWidth: number; onPointerDown: (event: PointerEvent<HTMLDivElement>) => void; onPointerMove: (event: PointerEvent<HTMLDivElement>) => void; onPointerUp: (event: PointerEvent<HTMLDivElement>) => void; onPointerCancel: (event: PointerEvent<HTMLDivElement>) => void }) {
   const tickMarks = useMemo(() => buildTimelineRulerMarks(sceneDuration, contentWidth, ticks), [contentWidth, sceneDuration, ticks]);
+  const labelTicks = useMemo(() => ticks.filter((tick, index) => index === 0 || formatTime(tick) !== formatTime(ticks[index - 1])), [ticks]);
 
   return (
     <div ref={rulerRef} className="relative h-[38px] pt-1.5 text-xs text-[#858a96] tabular-nums" style={{ width: contentWidth }}>
@@ -2017,12 +2339,12 @@ export function TimeRuler({ rulerRef, ticks, sceneDuration, contentWidth, onPoin
         const className = mark.kind === "major" ? "h-[16px] bg-[#596071]" : mark.kind === "medium" ? "h-[11px] bg-[#444a58]" : "h-[6px] bg-[#363b47]";
         return <span className={`pointer-events-none absolute bottom-0 w-px ${tickAlign} ${className}`} key={`${mark.time}-${mark.kind}`} style={{ left }} />;
       })}
-      {ticks.map((tick) => {
+      {labelTicks.map((tick) => {
         const isStart = tick === 0;
         const isEnd = tick === sceneDuration;
         const labelAlign = isStart ? "translate-x-0 text-left" : isEnd ? "-translate-x-full text-right" : "-translate-x-1/2 text-center";
         const left = sceneDuration > 0 ? `${(tick / sceneDuration) * 100}%` : "0%";
-        return <span className={`pointer-events-none absolute top-[5px] whitespace-nowrap font-semibold tracking-[0.01em] ${labelAlign}`} key={tick} style={{ left }}>{formatTime(tick)}</span>;
+        return <span className={`pointer-events-none absolute top-[5px] whitespace-nowrap font-semibold ${labelAlign}`} key={tick} style={{ left }}>{formatTime(tick)}</span>;
       })}
     </div>
   );

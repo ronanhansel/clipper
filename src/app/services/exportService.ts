@@ -1,7 +1,6 @@
-import { defaultAssets, serializeProjectForSave, stripLegacyMotionMarkers } from "../../core/project";
-import { compositionToSource } from "../../core/compositionSource";
-import { buildLinearTimeline, validateScene } from "../../core/timeline";
-import type { ProjectManifest } from "../../core/types";
+import { defaultAssets, serializeProjectForSave } from "../../core/project";
+import { buildLinearTimeline, sceneDuration, validateScene } from "../../core/timeline";
+import type { CompositionClip, ProjectManifest } from "../../core/types";
 import type { ProjectExportFormat } from "../types";
 import { videoExportFrameRate } from "../config";
 import { clipperHost } from "../clipperHost";
@@ -35,13 +34,13 @@ class ExportService {
           scene,
           media: {
             resolution: project.resolution,
-            durationSeconds: timeline.at(-1)?.end ?? 0,
+            durationSeconds: sceneDuration(scene),
             compositions: timeline.map((item) => ({ id: item.id, name: item.name, filePath: item.filePath, start: item.start, end: item.end, duration: item.duration })),
             assetsPath: project.assetsPath,
             assets: project.assets ?? defaultAssets,
           },
           validation: validateScene(scene),
-          sources: includeSources ? Object.fromEntries(scene.compositions.flatMap((item) => item.sourceMissing ? [] : [[item.filePath, compositionSources[item.filePath] ?? compositionToSource(item)]])) : undefined,
+          sources: includeSources ? Object.fromEntries(scene.compositions.flatMap((item) => item.sourceMissing ? [] : [[item.filePath, getCompositionSource(item, compositionSources)]])) : undefined,
         };
     const content = `${JSON.stringify(payload, null, 2)}\n`;
     const defaultFileName = `${slugifyFileName(project.name)}-${slugifyFileName(scene.name)}.${format === "scene-json" ? "scene" : "project"}.json`;
@@ -56,7 +55,7 @@ class ExportService {
   prepareRenderedMediaExport({ project, sceneId }: PrepareRenderedMediaInput) {
     const scene = getScene(project, sceneId);
     const timeline = buildLinearTimeline(scene);
-    const durationSeconds = timeline.at(-1)?.end ?? 0;
+    const durationSeconds = sceneDuration(scene);
     const totalFrames = Math.max(1, Math.ceil(durationSeconds * videoExportFrameRate));
     const defaultFileName = `${slugifyFileName(project.name)}-${slugifyFileName(scene.name)}.mp4`;
 
@@ -64,7 +63,7 @@ class ExportService {
   }
 
   renderVideoExport(exportId: string, defaultFileName: string, project: ProjectManifest, scene: ProjectManifest["scenes"][number]) {
-    return clipperHost.renderVideoExport(exportId, defaultFileName, serializeProjectForSave(project), stripLegacyMotionMarkers(scene), videoExportFrameRate);
+    return clipperHost.renderVideoExport(exportId, defaultFileName, serializeProjectForSave(project), scene, videoExportFrameRate);
   }
 
   cancelVideoExport(exportId: string) {
@@ -74,6 +73,12 @@ class ExportService {
 
 function getScene(project: ProjectManifest, sceneId: string) {
   return project.scenes.find((item) => item.id === sceneId) ?? project.scenes[0];
+}
+
+function getCompositionSource(composition: CompositionClip, compositionSources: Record<string, string>) {
+  const source = compositionSources[composition.filePath] ?? composition.source;
+  if (source === undefined) throw new Error(`Composition ${composition.filePath} is missing source.`);
+  return source;
 }
 
 function slugifyFileName(value: string) {
