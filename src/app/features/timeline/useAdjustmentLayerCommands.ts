@@ -1,0 +1,105 @@
+import { defaultAdjustmentEffectPackage, getAdjustmentEffectPackage } from "../../../core/effects/registry";
+import type { AdjustmentEffectPointControl } from "../../../core/effects/types";
+import { roundTenth } from "../../../core/math";
+import { getAdjustmentPlacement } from "../../../core/timeline";
+import type { AdjustmentEffectId, AdjustmentLayer, TimelineLayerState } from "../../../core/types";
+import { applyAdjustmentLayerOverwrite } from "./timelineMutationHelpers";
+
+type PointPickAdjustment = { layerId: string; control: AdjustmentEffectPointControl } | null;
+type UpdateSceneAdjustmentLayers = (updater: (layers: AdjustmentLayer[]) => AdjustmentLayer[]) => void;
+
+type UseAdjustmentLayerCommandsInput = {
+  currentSceneTimeRef: { current: number };
+  pointPickAdjustment: PointPickAdjustment;
+  scene: {
+    adjustmentLayers?: AdjustmentLayer[];
+  };
+  sceneDurationSeconds: number;
+  timelineLayers: TimelineLayerState;
+  selectAdjustmentLayer: (layerId: string) => void;
+  setFocusPickZoomMarker: (selection: { partId: string; markerId: string } | null) => void;
+  setFramePickPreviewPoint: (point: null) => void;
+  setIsPlaying: (playing: boolean) => void;
+  setPointPickAdjustment: (selection: PointPickAdjustment) => void;
+  setPositionPickTranslationMarker: (selection: { partId: string; markerId: string } | null) => void;
+  setSelectedAdjustmentLayerId: (id: string | null) => void;
+  setSelectedAdjustmentLayers: (selection: Array<{ layerId: string }>) => void;
+  setSelectedPartId: (id: string) => void;
+  setTrackerPickTranslationMarker: (selection: { partId: string; markerId: string } | null) => void;
+  updateSceneAdjustmentLayers: UpdateSceneAdjustmentLayers;
+};
+
+export function useAdjustmentLayerCommands({
+  currentSceneTimeRef,
+  pointPickAdjustment,
+  scene,
+  sceneDurationSeconds,
+  timelineLayers,
+  selectAdjustmentLayer,
+  setFocusPickZoomMarker,
+  setFramePickPreviewPoint,
+  setIsPlaying,
+  setPointPickAdjustment,
+  setPositionPickTranslationMarker,
+  setSelectedAdjustmentLayerId,
+  setSelectedAdjustmentLayers,
+  setSelectedPartId,
+  setTrackerPickTranslationMarker,
+  updateSceneAdjustmentLayers,
+}: UseAdjustmentLayerCommandsInput) {
+  function updateAdjustmentLayer(layerId: string, updater: (layer: AdjustmentLayer) => AdjustmentLayer) {
+    updateSceneAdjustmentLayers((layers) => applyAdjustmentLayerOverwrite(layers.map((layer) => (layer.id === layerId ? updater(layer) : layer)), new Set([layerId])));
+  }
+
+  function moveAdjustmentLayer(layerId: string, start: number, targetLayerId?: string) {
+    updateAdjustmentLayer(layerId, (layer) => ({ ...layer, layerId: targetLayerId ?? layer.layerId, start: roundTenth(Math.max(start, 0)) }));
+    setSelectedAdjustmentLayerId(layerId);
+    setSelectedAdjustmentLayers([{ layerId }]);
+    setSelectedPartId("");
+  }
+
+  function addAdjustmentLayer() {
+    addAdjustmentLayerAt(defaultAdjustmentEffectPackage.id, currentSceneTimeRef.current, timelineLayers.adjustmentLayers?.[0]?.id);
+  }
+
+  function addAdjustmentLayerAt(effectId: AdjustmentEffectId, sceneTime: number, layerId?: string) {
+    const effect = getAdjustmentEffectPackage(effectId);
+    if (!effect) return;
+    const placement = getAdjustmentPlacement(scene.adjustmentLayers, sceneDurationSeconds, sceneTime);
+    const layer = effect.createDefaultLayer({ id: `adj_${Date.now().toString(36)}`, layerId, start: placement.start, duration: placement.duration });
+    updateSceneAdjustmentLayers((layers) => applyAdjustmentLayerOverwrite([...layers, layer], new Set([layer.id])));
+    selectAdjustmentLayer(layer.id);
+  }
+
+  function deleteAdjustmentLayer(layerId: string) {
+    updateSceneAdjustmentLayers((layers) => layers.filter((layer) => layer.id !== layerId));
+    if (pointPickAdjustment?.layerId === layerId) setPointPickAdjustment(null);
+    setSelectedAdjustmentLayerId(null);
+    setSelectedAdjustmentLayers([]);
+  }
+
+  function startAdjustmentPointPick(layerId: string, control: AdjustmentEffectPointControl) {
+    if (pointPickAdjustment?.layerId === layerId && pointPickAdjustment.control.xKey === control.xKey && pointPickAdjustment.control.yKey === control.yKey) {
+      setPointPickAdjustment(null);
+      setFramePickPreviewPoint(null);
+      return;
+    }
+
+    selectAdjustmentLayer(layerId);
+    setFocusPickZoomMarker(null);
+    setPositionPickTranslationMarker(null);
+    setTrackerPickTranslationMarker(null);
+    setIsPlaying(false);
+    setPointPickAdjustment({ layerId, control });
+    setFramePickPreviewPoint(null);
+  }
+
+  return {
+    addAdjustmentLayer,
+    addAdjustmentLayerAt,
+    deleteAdjustmentLayer,
+    moveAdjustmentLayer,
+    startAdjustmentPointPick,
+    updateAdjustmentLayer,
+  };
+}

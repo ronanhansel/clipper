@@ -39,10 +39,15 @@ Rename the former Edit timeline mode to Compose and evolve it into a focused com
 - Compose Layers supports multi-select and marquee selection. Visual selection can include Frame, Background, and group rows, while only draggable object rows are written into Arborist's internal DnD selection and app-level `selectionPayload` so mixed selections do not disable object reordering.
 - `App.selectComposeLayerObjects()` maps multiple selected object rows into the existing frame selection payload, enabling multi-object preview selection from the layer tree.
 - Selecting object rows in Compose Layers now forces the right Inspector to the `video` tab, clears text-edit mode, sets `selectedObjectId`, and updates the frame `selectionPayload`; this makes the frame selector overlay and object inspector follow layer selection.
+- Extracted frame interaction orchestration from `App.tsx` into `src/app/features/frame-interactions/useFrameInteractionController.ts`. `App.tsx` still owns the DOM refs because keyboard shortcuts, outside-clear behavior, and preview rendering already share those refs, while the new controller owns frame pick previews, marquee drag boxes, object drag/resize rAF DOM previews, commit-on-release mutations, text edit start, and chart bounds sync during object commits.
+- Moved reusable frame-object helpers (`syncChartObjectBounds`, `getPartFrameObject`, preview-bounds/transform helpers) into `src/core/frameInteraction.ts` so both `App.tsx` derived selection previews and the frame interaction controller use the same pure helpers.
+- Extracted project and rendered-media export orchestration from `App.tsx` into `src/app/features/export/useExportCommands.ts`. The hook owns the video export id ref, progress subscription filtering, cancellation, export dialog/progress state transitions, and calls `exportService`; `App.tsx` keeps toast rendering and `PathToastMessage` through injected notification callbacks.
 
 ## Verification
 
 - `npm run typecheck` passes.
+- `npm run typecheck` passes after the frame interaction controller extraction.
+- `npm run typecheck` passes after the export command extraction.
 - `npm test` passes with 84 tests, including a migration test for old `timelineMode: "edit"` state.
 
 ## Follow-Ups

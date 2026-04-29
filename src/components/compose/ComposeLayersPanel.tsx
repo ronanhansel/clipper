@@ -31,11 +31,7 @@ export function ComposeLayersPanel({ part, selectedObjectIds, onSelectObjects, o
   const treeHeight = Math.max(composeLayerMinDropHeight, countComposeLayerNodes(treeData) * composeLayerRowHeight);
 
   useEffect(() => {
-    setSelectedLayerIds((current) => {
-      if (selectedObjectIds.length > 0) return selectedObjectIds;
-      const preserved = current.filter((id) => findComposeLayerNode(treeData, id));
-      return preserved.length > 0 ? preserved : [];
-    });
+    setSelectedLayerIds(selectedObjectIds.filter((id) => findComposeLayerNode(treeData, id)));
   }, [selectedObjectIds, treeData]);
 
   const updateDragPosition = useCallback((isDragging: boolean, mouse: { x: number; y: number } | null) => {
@@ -70,11 +66,12 @@ export function ComposeLayersPanel({ part, selectedObjectIds, onSelectObjects, o
     const objectIds = nodes.flatMap((node) => (node.data.kind === "object" ? [node.id] : []));
     setSelectedLayerIds(ids);
     arboristTreeRef.current?.setSelection({ ids: objectIds, anchor: objectIds[0] ?? null, mostRecent: objectIds.at(-1) ?? null });
-    onSelectObjects(nodes.flatMap((node) => (node.data.kind === "object" && node.data.object ? [node.data.object] : [])));
+    onSelectObjects(nodes.flatMap((node) => node.data.object ? [node.data.object] : []));
   }
 
   function selectLayerFromPointer(event: PointerEvent<HTMLDivElement>, node: NodeApi<ComposeLayerNode>) {
     if (event.button !== 0) return;
+    event.stopPropagation();
     if (event.shiftKey && selectedLayerIds.length > 0) {
       const visibleNodes = arboristTreeRef.current?.visibleNodes ?? [];
       const anchorId = selectedLayerIds.at(-1);
@@ -157,7 +154,7 @@ export function ComposeLayersPanel({ part, selectedObjectIds, onSelectObjects, o
       <div className="mb-3 grid gap-1.5">
         <h2 className="text-[13px] font-extrabold tracking-normal text-[#9b9da7]">Layers</h2>
       </div>
-      <div className="min-h-0 flex-1 overflow-hidden rounded-[14px] border border-[#2d313b] bg-[#111319]/72 p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
+      <div data-compose-layers-panel className="min-h-0 flex-1 overflow-hidden rounded-[14px] border border-[#2d313b] bg-[#111319]/72 p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
         <div ref={treeRef} className="relative" onPointerDown={startMarquee} onPointerMove={updateMarquee} onPointerUp={finishMarquee} onPointerCancel={finishMarquee}>
           {marquee ? <ComposeLayerMarquee marquee={marquee} /> : null}
         <Tree<ComposeLayerNode>

@@ -63,7 +63,7 @@ export function useEditorDerivedState({
   const hasActiveComposition = Boolean(activeComposition);
   const previewTime = activeTimelinePart ? clamp(adjustedSceneTime - activeTimelinePart.start, 0, part.duration) : 0;
   const selectedAdjustmentLayer = scene.adjustmentLayers?.find((layer) => layer.id === selectedAdjustmentLayerId) ?? null;
-  const selectedObject = part.objects.find((object) => object.id === selectedObjectId) ?? null;
+  const selectedObject = part.objects.find((object) => object.id === selectedObjectId) ?? part.background.elements.find((object) => object.id === selectedObjectId) ?? null;
   const selectedZoomPart = scene.compositions.find((item) => item.id === selectedZoomMarker?.partId) ?? null;
   const selectedZoom = selectedZoomMarker?.partId === "__timeline_motion__" ? (scene.zoomMarkers ?? []).find((marker) => marker.id === selectedZoomMarker.markerId) ?? null : selectedZoomPart?.zoomMarkers.find((marker) => marker.id === selectedZoomMarker?.markerId) ?? null;
   const selectedTranslationPart = scene.compositions.find((item) => item.id === selectedTranslationMarker?.partId) ?? null;

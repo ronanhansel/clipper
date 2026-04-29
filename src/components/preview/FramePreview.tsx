@@ -13,6 +13,9 @@ import type { PlaybackClock } from "../../app/types";
 
 export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dragSelectionBoxRef, framePickPoint, focusPicking, trackerPicking, canSelectObjects, cameraTransform, frameViewportRef, frameScale, isPlaying, part, partStart, adjustmentLayers, playbackClock, previewTime, sceneTime, timelineMode, motionLayers, hiddenMotionLayerIds, pickingTranslationPosition, pickingZoomFocus, compHidden, selectedObjects, marqueeDragging, editingTextObjectId, onFramePointerCancel, onFramePointerDown, onFramePointerDownCapture, onFramePointerMove, onFramePointerUp, onObjectPointerDown, onObjectResizePointerDown, onTextEditCommit, onTextObjectDoubleClick, onTrackerTargetPick }: { cameraRef: RefObject<HTMLDivElement | null>; dragBox: Bounds | null; dragSelectionBoxRef: RefObject<HTMLDivElement | null>; framePickPoint: Point | null; focusPicking: boolean; trackerPicking: boolean; canSelectObjects: boolean; cameraTransform: CameraPreviewTransform; frameViewportRef: RefObject<HTMLDivElement | null>; frameScale: number; isPlaying: boolean; part: Part; partStart: number; adjustmentLayers?: AdjustmentLayer[]; playbackClock: PlaybackClock; previewTime: number; sceneTime: number; timelineMode: TimelineMode; motionLayers: TimelineMotionLayerState[]; hiddenMotionLayerIds?: Set<string>; pickingTranslationPosition: boolean; pickingZoomFocus: boolean; compHidden?: boolean; selectedObjects: SelectionPayload["objects"]; marqueeDragging: boolean; editingTextObjectId: string | null; onFramePointerCancel: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerDown: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerDownCapture: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerMove: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerUp: (event: PointerEvent<HTMLDivElement>) => void; onObjectPointerDown: (event: PointerEvent<HTMLDivElement>, object: FrameObject) => void; onObjectResizePointerDown: (event: PointerEvent<HTMLDivElement>, handle: ResizeHandle, objectId?: string) => void; onTextEditCommit: (objectId: string, content: string, richText?: RichTextSegment[]) => void; onTextObjectDoubleClick: (event: ReactMouseEvent<HTMLDivElement>, object: FrameObject) => void; onTrackerTargetPick: (objectId: string) => void }) {
   const viewportStyle = useMemo(() => ({ width: FRAME_WIDTH * frameScale, height: FRAME_HEIGHT * frameScale }) as CSSProperties, [frameScale]);
+  const selectionBleedPx = selectorOffsetPx + selectorHandleSizePx;
+  const viewportOverlayStyle = useMemo(() => ({ width: FRAME_WIDTH * frameScale + selectionBleedPx * 2, height: FRAME_HEIGHT * frameScale + selectionBleedPx * 2, margin: -selectionBleedPx }) as CSSProperties, [frameScale, selectionBleedPx]);
+  const clippedViewportStyle = useMemo(() => ({ ...viewportStyle, left: selectionBleedPx, top: selectionBleedPx }) as CSSProperties, [selectionBleedPx, viewportStyle]);
   const animationsEnabled = true;
   const timeSensitive = isPlaybackTimeSensitivePart(part, timelineMode, adjustmentLayers, animationsEnabled);
   const [livePreviewTime, setLivePreviewTime] = useState(previewTime);
@@ -150,25 +153,27 @@ export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dra
   return (
     <div className="grid gap-3" data-clipper-frame-preview-wrapper>
       <div className="flex items-baseline justify-between text-[#dfe2ea]"><span className={mutedCaps}>{part.name}</span><strong className="text-[13px]">{FRAME_WIDTH} x {FRAME_HEIGHT}</strong></div>
-      <div ref={frameViewportRef} className={`relative overflow-hidden bg-black shadow-[0_22px_70px_rgba(0,0,0,0.44)] ${!isPlaying && (focusPicking || trackerPicking) ? "cursor-crosshair ring-2 ring-[#37d6c2]" : ""}`} data-clipper-frame-preview style={viewportStyle} onPointerDownCapture={handleFramePointerDownCapture} onPointerDown={isPlaying ? undefined : onFramePointerDown} onPointerMove={handleFramePointerMove} onPointerUp={isPlaying ? undefined : onFramePointerUp} onPointerCancel={isPlaying ? undefined : onFramePointerCancel} onPointerLeave={clearSelectorHover}>
-        <div className="absolute left-0 top-0 origin-top-left overflow-hidden" data-clipper-frame-content style={frameStyle}>
-          <div className="absolute inset-0" data-clipper-perspective-stage style={perspectiveStageStyle}>
-            {isUnlinkedPart || compHidden ? <div className="absolute inset-0 bg-black" ref={cameraRef} /> : <div className="absolute inset-0 origin-center" ref={cameraRef} style={{ transformStyle: "preserve-3d" }}>
-              <div className="absolute inset-0" data-clipper-visual-adjustments style={visualAdjustmentStyle}>
-                <BackgroundLayerView animationsEnabled={animationsEnabled} background={part.background} duration={part.duration} previewTime={displayPreviewTime} />
-                {part.objects.map((object) => (
-                  <FrameObjectView key={object.id} animationsEnabled={animationsEnabled} object={object} canSelect={!isPlaying && (canSelectObjects || trackerPicking)} duration={part.duration} editing={!isPlaying && editingTextObjectId === object.id} focusPicking={!isPlaying && (focusPicking || trackerPicking)} previewTime={displayPreviewTime} onDoubleClick={(event) => { if (!isPlaying) onTextObjectDoubleClick(event, object); }} onPointerDown={(event) => { if (!isPlaying) onObjectPointerDown(event, object); }} onTextEditCommit={(content, richText) => onTextEditCommit(object.id, content, richText)} />
-                ))}
-                <div ref={frameVisualAdjustmentOverlaysRef} className="pointer-events-none absolute inset-0" data-clipper-visual-adjustment-overlays="frame" style={{ zIndex: 2147483647 }} />
-              </div>
-            </div>}
+      <div className="relative overflow-visible" style={viewportOverlayStyle}>
+        <div ref={frameViewportRef} className={`absolute overflow-hidden bg-black shadow-[0_22px_70px_rgba(0,0,0,0.44)] ${!isPlaying && (focusPicking || trackerPicking) ? "cursor-crosshair ring-2 ring-[#37d6c2]" : ""}`} data-clipper-frame-preview style={clippedViewportStyle} onPointerDownCapture={handleFramePointerDownCapture} onPointerDown={isPlaying ? undefined : onFramePointerDown} onPointerMove={handleFramePointerMove} onPointerUp={isPlaying ? undefined : onFramePointerUp} onPointerCancel={isPlaying ? undefined : onFramePointerCancel} onPointerLeave={clearSelectorHover}>
+          <div className="absolute left-0 top-0 origin-top-left overflow-hidden" data-clipper-frame-content style={frameStyle}>
+            <div className="absolute inset-0" data-clipper-perspective-stage style={perspectiveStageStyle}>
+              {isUnlinkedPart || compHidden ? <div className="absolute inset-0 bg-black" ref={cameraRef} /> : <div className="absolute inset-0 origin-center" ref={cameraRef} style={{ transformStyle: "preserve-3d" }}>
+                <div className="absolute inset-0" data-clipper-visual-adjustments style={visualAdjustmentStyle}>
+                  <BackgroundLayerView animationsEnabled={animationsEnabled} background={part.background} duration={part.duration} previewTime={displayPreviewTime} />
+                  {part.objects.map((object) => (
+                    <FrameObjectView key={object.id} animationsEnabled={animationsEnabled} object={object} canSelect={!isPlaying && (canSelectObjects || trackerPicking)} duration={part.duration} editing={!isPlaying && editingTextObjectId === object.id} focusPicking={!isPlaying && (focusPicking || trackerPicking)} previewTime={displayPreviewTime} onDoubleClick={(event) => { if (!isPlaying) onTextObjectDoubleClick(event, object); }} onPointerDown={(event) => { if (!isPlaying) onObjectPointerDown(event, object); }} onTextEditCommit={(content, richText) => onTextEditCommit(object.id, content, richText)} />
+                  ))}
+                  <div ref={frameVisualAdjustmentOverlaysRef} className="pointer-events-none absolute inset-0" data-clipper-visual-adjustment-overlays="frame" style={{ zIndex: 2147483647 }} />
+                </div>
+              </div>}
+            </div>
+            <div ref={cameraVisualAdjustmentOverlaysRef} className="pointer-events-none absolute inset-0" data-clipper-visual-adjustment-overlays="camera" style={{ zIndex: 2147483647 }} />
           </div>
-          <div ref={cameraVisualAdjustmentOverlaysRef} className="pointer-events-none absolute inset-0" data-clipper-visual-adjustment-overlays="camera" style={{ zIndex: 2147483647 }} />
+          {trackerPicking && trackerHoverTarget ? <TrackerTargetOverlay target={trackerHoverTarget} /> : null}
+          {dragBox ? <DragSelectionBox ref={dragSelectionBoxRef} bounds={dragBox} frameScale={frameScale} visible={Boolean(showDragBox)} /> : null}
+          {focusPicking && framePickPoint ? <FramePickPointOverlay point={framePickPoint} frameScale={frameScale} /> : null}
         </div>
-        {canSelectObjects && !isUnlinkedPart ? selectedObjects.map((object) => <SelectionOverlayBox key={object.id} objectId={object.id} bounds={object.bounds} cameraTransform={liveCameraTransform} frameScale={frameScale} highlighted={selectorHover} interactive={!marqueeDragging} onResizePointerDown={(event, handle) => onObjectResizePointerDown(event, handle, object.id)} />) : null}
-        {trackerPicking && trackerHoverTarget ? <TrackerTargetOverlay target={trackerHoverTarget} /> : null}
-        {dragBox ? <DragSelectionBox ref={dragSelectionBoxRef} bounds={dragBox} frameScale={frameScale} visible={Boolean(showDragBox)} /> : null}
-        {focusPicking && framePickPoint ? <FramePickPointOverlay point={framePickPoint} frameScale={frameScale} /> : null}
+        {canSelectObjects && !isUnlinkedPart ? selectedObjects.map((object) => <SelectionOverlayBox key={object.id} objectId={object.id} bounds={object.bounds} cameraTransform={liveCameraTransform} frameScale={frameScale} highlighted={selectorHover} interactive={!marqueeDragging} overlayOffset={selectionBleedPx} onResizePointerDown={(event, handle) => onObjectResizePointerDown(event, handle, object.id)} />) : null}
       </div>
     </div>
   );
@@ -384,29 +389,27 @@ function isPlaybackTimeSensitivePart(part: Part, timelineMode: TimelineMode, adj
     || (timelineMode === "composition" && (part.zoomMarkers.length > 0 || part.translationMarkers.length > 0));
 }
 
-export function SelectionOverlayBox({ objectId, bounds, cameraTransform, frameScale, highlighted, interactive, onResizePointerDown }: { objectId: string; bounds: Bounds; cameraTransform: CameraPreviewTransform; frameScale: number; highlighted: boolean; interactive: boolean; onResizePointerDown: (event: PointerEvent<HTMLDivElement>, handle: ResizeHandle) => void }) {
+export function SelectionOverlayBox({ objectId, bounds, cameraTransform, frameScale, highlighted, interactive, overlayOffset = 0, onResizePointerDown }: { objectId: string; bounds: Bounds; cameraTransform: CameraPreviewTransform; frameScale: number; highlighted: boolean; interactive: boolean; overlayOffset?: number; onResizePointerDown: (event: PointerEvent<HTMLDivElement>, handle: ResizeHandle) => void }) {
   const viewportBounds = insetBounds(boundsToViewport(bounds, cameraTransform, frameScale), -selectorOffsetPx);
-  const horizontalEdgeClass = `${interactive ? "pointer-events-auto" : "pointer-events-none"} absolute left-0 w-full cursor-ns-resize opacity-95 ${highlighted ? "h-0.5" : "h-px"}`;
-  const verticalEdgeClass = `${interactive ? "pointer-events-auto" : "pointer-events-none"} absolute top-0 h-full cursor-ew-resize opacity-95 ${highlighted ? "w-0.5" : "w-px"}`;
+  const edgeHitClass = `${interactive ? "pointer-events-auto" : "pointer-events-none"} absolute grid place-items-center`;
+  const horizontalEdgeHitClass = `${edgeHitClass} -left-1 -right-1 h-3 cursor-ns-resize`;
+  const verticalEdgeHitClass = `${edgeHitClass} -top-1 -bottom-1 w-3 cursor-ew-resize`;
+  const horizontalEdgeLineClass = `w-full opacity-95 ${highlighted ? "h-0.5" : "h-px"}`;
+  const verticalEdgeLineClass = `h-full opacity-95 ${highlighted ? "w-0.5" : "w-px"}`;
   const edgeStyle = { backgroundColor: selectorBlue };
   const handleClass = `${interactive ? "pointer-events-auto" : "pointer-events-none"} absolute border-2 bg-white shadow-[0_1px_4px_rgba(0,0,0,0.24)]`;
   const handleStyle = { width: selectorHandleSizePx, height: selectorHandleSizePx };
   const handleStyleWithColor = { ...handleStyle, borderColor: selectorBlue };
-  const handleInset = selectorHandleSizePx / 2;
-  const keepLeftHandleInside = viewportBounds.x < handleInset;
-  const keepTopHandleInside = viewportBounds.y < handleInset;
-  const keepRightHandleInside = viewportBounds.x + viewportBounds.width > FRAME_WIDTH * frameScale - handleInset;
-  const keepBottomHandleInside = viewportBounds.y + viewportBounds.height > FRAME_HEIGHT * frameScale - handleInset;
-  const topLeftHandleClass = `${handleClass} left-0 top-0 ${keepLeftHandleInside ? "" : "-translate-x-1/2"} ${keepTopHandleInside ? "" : "-translate-y-1/2"} cursor-nwse-resize`;
-  const topRightHandleClass = `${handleClass} right-0 top-0 ${keepRightHandleInside ? "" : "translate-x-1/2"} ${keepTopHandleInside ? "" : "-translate-y-1/2"} cursor-nesw-resize`;
-  const bottomRightHandleClass = `${handleClass} bottom-0 right-0 ${keepRightHandleInside ? "" : "translate-x-1/2"} ${keepBottomHandleInside ? "" : "translate-y-1/2"} cursor-nwse-resize`;
-  const bottomLeftHandleClass = `${handleClass} bottom-0 left-0 ${keepLeftHandleInside ? "" : "-translate-x-1/2"} ${keepBottomHandleInside ? "" : "translate-y-1/2"} cursor-nesw-resize`;
+  const topLeftHandleClass = `${handleClass} left-0 top-0 -translate-x-1/2 -translate-y-1/2 cursor-nwse-resize`;
+  const topRightHandleClass = `${handleClass} right-0 top-0 translate-x-1/2 -translate-y-1/2 cursor-nesw-resize`;
+  const bottomRightHandleClass = `${handleClass} bottom-0 right-0 translate-x-1/2 translate-y-1/2 cursor-nwse-resize`;
+  const bottomLeftHandleClass = `${handleClass} bottom-0 left-0 -translate-x-1/2 translate-y-1/2 cursor-nesw-resize`;
   return (
-    <div data-frame-selection-box={objectId} className="pointer-events-none absolute bg-transparent" style={{ left: viewportBounds.x, top: viewportBounds.y, width: viewportBounds.width, height: viewportBounds.height, transform: "translate(var(--clipper-drag-x, 0px), var(--clipper-drag-y, 0px))", zIndex: 70 }}>
-      <div className={`${horizontalEdgeClass} top-0`} style={edgeStyle} onPointerDown={(event) => onResizePointerDown(event, "top")} />
-      <div className={`${horizontalEdgeClass} bottom-0`} style={edgeStyle} onPointerDown={(event) => onResizePointerDown(event, "bottom")} />
-      <div className={`${verticalEdgeClass} left-0`} style={edgeStyle} onPointerDown={(event) => onResizePointerDown(event, "left")} />
-      <div className={`${verticalEdgeClass} right-0`} style={edgeStyle} onPointerDown={(event) => onResizePointerDown(event, "right")} />
+    <div data-frame-selection-box={objectId} className="pointer-events-none absolute bg-transparent" style={{ left: viewportBounds.x + overlayOffset, top: viewportBounds.y + overlayOffset, width: viewportBounds.width, height: viewportBounds.height, transform: "translate(var(--clipper-drag-x, 0px), var(--clipper-drag-y, 0px))", zIndex: 70 }}>
+      <div className={`${horizontalEdgeHitClass} top-0 -translate-y-1/2`} onPointerDown={(event) => onResizePointerDown(event, "top")}><span className={horizontalEdgeLineClass} style={edgeStyle} /></div>
+      <div className={`${horizontalEdgeHitClass} bottom-0 translate-y-1/2`} onPointerDown={(event) => onResizePointerDown(event, "bottom")}><span className={horizontalEdgeLineClass} style={edgeStyle} /></div>
+      <div className={`${verticalEdgeHitClass} left-0 -translate-x-1/2`} onPointerDown={(event) => onResizePointerDown(event, "left")}><span className={verticalEdgeLineClass} style={edgeStyle} /></div>
+      <div className={`${verticalEdgeHitClass} right-0 translate-x-1/2`} onPointerDown={(event) => onResizePointerDown(event, "right")}><span className={verticalEdgeLineClass} style={edgeStyle} /></div>
       <div className={topLeftHandleClass} style={handleStyleWithColor} onPointerDown={(event) => onResizePointerDown(event, "top-left")} />
       <div className={topRightHandleClass} style={handleStyleWithColor} onPointerDown={(event) => onResizePointerDown(event, "top-right")} />
       <div className={bottomRightHandleClass} style={handleStyleWithColor} onPointerDown={(event) => onResizePointerDown(event, "bottom-right")} />
