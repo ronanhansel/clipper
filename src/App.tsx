@@ -1,19 +1,21 @@
 import { Folder, Magnet, Pause, Play, RotateCcw, Scissors, Search, Signpost, SkipBack, SkipForward, Sparkles, StepBack, StepForward } from "lucide-react";
 import { nanoid } from "nanoid";
-import { startTransition, useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent } from "react";
+import { startTransition, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent } from "react";
 import toast, { Toaster } from "react-hot-toast";
 import { Input, numberInputScrubEndEvent, numberInputScrubStartEvent } from "./components/ui/input";
 import { AgentPanel } from "./components/AgentPanel";
 import { AppContextMenu } from "./components/AppContextMenu";
-import { FileManager, type FileManagerProps, type FileManagerTreeSnapshot } from "./components/FileManager";
+import type { FileManagerTreeSnapshot } from "./components/FileManager";
 import { CodePane } from "./components/CodePane";
+import { ComposeLayersPanel } from "./components/compose/ComposeLayersPanel";
 import { ExportMediaDialog, VideoExportOverlay } from "./components/export/ExportMediaDialog";
 import { FrameZoomBar } from "./components/FrameZoomBar";
 import { AdjustmentInspector, ChartInspector, EmptyInspector, FrameInspector, ObjectInspector, TranslationInspector, ZoomInspector } from "./components/inspector/InspectorPanels";
 import { FramePreview } from "./components/preview/FramePreview";
 import { QuickAccessTooltip } from "./components/QuickAccessTooltip";
 import { SettingsDialog } from "./components/SettingsDialog";
-import { TimelinePanel } from "./components/timeline/TimelinePanel";
+import { buildFileManagerWorkspaceProps, FileManagerWorkspace, type FileManagerWorkspaceProps } from "./app/features/file-manager/FileManagerWorkspace";
+import { ConnectedTimelinePanel, TimelineProvider } from "./app/features/timeline/TimelineProvider";
 import { ToolsPanel } from "./components/ToolsPanel";
 import { appBarActionButtonBase, appBarSaveButtonClass, appDragRegion, appNoDragRegion, defaultFramePreviewScale, defaultScrubCommitThrottleMs, maxProjectHistoryActions, projectHistoryCoalesceMs, sectionTitle, segmentedTabActive, segmentedTabBase, segmentedTabInactive, selectorOffsetPx } from "./app/config";
 import { exportService } from "./app/services/exportService";
@@ -22,9 +24,9 @@ import { projectPersistenceService } from "./app/services/projectPersistenceServ
 import { useEditorDerivedState } from "./app/state/editorDerivedState";
 import { EditorStoreProvider, useAppEditorState, useEditorStoreApi } from "./app/state/editorStore";
 import { getProjectContentSnapshot, ProjectStoreProvider, useProjectDocumentState } from "./app/state/projectStore";
-import type { AdjustmentLayerSelection, ContextMenuState, ExportDialogTab, LeftPanelTab, Mode, PlaybackClock, ProjectExportFormat, ProjectUpdater, RightPanelTab, SettingsSection, TimelineNodeContextTarget, TranslationMarkerSelection, VideoExportProgress, ZoomMarkerSelection } from "./app/types";
+import { TIMELINE_MOTION_PART_ID, type AdjustmentLayerSelection, type CompositionSelection, type ContextMenuState, type ExportDialogTab, type LeftPanelTab, type Mode, type PlaybackClock, type ProjectExportFormat, type ProjectUpdater, type RightPanelTab, type SettingsSection, type TimelineBlankContextTarget, type TimelineNodeContextTarget, type TranslationMarkerSelection, type VideoExportProgress, type ZoomMarkerSelection } from "./app/types";
 import { advanceTimeSensitiveSceneTime, applyAdjustmentLayersToSceneTime, applyAdjustmentLayersToVisualStyle, getSceneTimeForTimeSensitiveDisplayTime, getTimeSensitiveDisplayDuration, getTimeSensitiveDisplayTime } from "./core/adjustments";
-import { appendAssetsToFolder, duplicateAssetTree, getAssetPath, moveAssetTree, removeAsset, sortAssetsInParent, updateAssetTree, type AssetDropIntent, type AssetSortMode } from "./core/assetTree";
+import { appendAssetsToFolder, duplicateAssetTree, findAsset, getAssetPath, moveAssetTree, removeAsset, sortAssetsInParent, updateAssetTree, type AssetDropIntent, type AssetSortMode } from "./core/assetTree";
 import { boundsToViewport, formatCameraPreviewTransform, framePointToCameraTranslation, getLayeredCameraPreviewTransform, isMarkerOnMotionLayer, type CameraPreviewTransform } from "./core/camera";
 import { centerOf, constrainDragDeltaToDominantAxis, getBoundsUnion, getDraggedObjects, getResizedObjects, insetBounds, isVisibleMarqueeBounds, moveBounds, selectionObjectFromFrameObject, selectionPayloadFromObjects, updateDragSelectionBoxElement, type ObjectDrag, type ObjectResize, type ResizeHandle } from "./core/frameInteraction";
 import { boundsToPoints, createSelectionPayload, framePointFromClient, normalizeBounds } from "./core/geometry";
@@ -34,11 +36,11 @@ import { defaultAdjustmentEffectPackage, getAdjustmentEffectPackage, getMotionEf
 import type { AdjustmentEffectPointControl } from "./core/effects/types";
 import { createDefaultMotionBlockByEffectId, motionBlocksToTranslationMarkers, motionBlocksToZoomMarkers } from "./core/motionEffects";
 import { compositionFromSource, compositionToSource } from "./core/compositionSource";
-import { defaultAssets, defaultPreviewViewportState, defaultTimelineLayerState, defaultTimelineMode, defaultTimelineViewportState, deleteCompositionFromProject, normalizeProject, replacePartInProject } from "./core/project";
-import { buildLinearTimeline, expandExplicitTimelineMarkerMendIds, formatTime, getAdjustmentLayerRowId, getAdjustmentPlacement, getAvailableZoomPlacement, getExecutableAdjustmentLayers, getSelectedActiveMiddleMend, getSelectedZoomMiddleSnap, getTimelinePartAtTime, getTranslationMarkerLayerId, getTranslationMarkerMendKey, getZoomMarkerLayerId, getZoomMarkerMendKey, getZoomMiddleSnap, isMotionMarkerOnLayerId, isZoomMiddleSnapActive, rebaseCompositionTimelineMarkers, removeTimelineAdjustmentLayerMarkers, removeTimelineMotionLayerMarkers, sceneMotionPartId, timelineDisplayDuration, type TimelineMarkerMove, type TimelineMarkerResize } from "./core/timeline";
+import { defaultAssets, defaultComposeLayoutState, defaultEditorLayoutState, defaultPreviewViewportState, defaultTimelineLayerState, defaultTimelineMode, defaultTimelineViewportState, deleteCompositionFromProject, normalizeProject, replacePartInProject, serializeProjectForSave } from "./core/project";
+import { buildLinearTimeline, expandExplicitTimelineMarkerMendIds, formatTime, getAdjustmentLayerRowId, getAdjustmentPlacement, getAvailableZoomPlacement, getExecutableAdjustmentLayers, getSelectedActiveMiddleMend, getSelectedZoomMiddleSnap, getTimelinePartAtTime, getTranslationMarkerLayerId, getTranslationMarkerMendKey, getZoomMarkerLayerId, getZoomMarkerMendKey, getZoomMiddleSnap, isMotionMarkerOnLayerId, isZoomMiddleSnapActive, rebaseCompositionTimelineMarkers, removeTimelineAdjustmentLayerMarkers, removeTimelineMotionLayerMarkers, timelineDisplayDuration, type TimelineMarkerMove, type TimelineMarkerResize } from "./core/timeline";
 import { getTimelineStateLayers, insertTimelineStateLayer, type TimelineLayerCategory } from "./core/timelineLayers";
 import { getInsertedOverwriteRanges, overwriteTimelineMarkers, type TimelineOverwriteRange } from "./core/timelineOverwrite";
-import { FRAME_HEIGHT, FRAME_WIDTH, type AdjustmentEffectId, type AdjustmentLayer, type BackgroundLayer, type Bounds, type CodeViewportState, type CompositionClip, type EditorState, type FrameObject, type MotionBlock, type MotionEase, type MotionEffectId, type MotionEffectKind, type Part, type PartFrame, type Point, type ProjectManifest, type RichTextSegment, type SelectionPayload, type TimelineClip, type TimelineLayerState, type TimelineMode, type TimelineMotionLayerKind, type TimelineViewportState, type TranslationMarker, type ZoomMarker } from "./core/types";
+import { FRAME_HEIGHT, FRAME_WIDTH, type AdjustmentEffectId, type AdjustmentLayer, type AssetItem, type BackgroundLayer, type Bounds, type CodeViewportState, type ComposeLayoutState, type CompositionClip, type EditorLayoutState, type EditorState, type FrameObject, type MotionBlock, type MotionEase, type MotionEffectId, type MotionEffectKind, type Part, type PartFrame, type Point, type ProjectManifest, type RichTextSegment, type SelectionPayload, type TimelineClip, type TimelineLayerState, type TimelineMode, type TimelineMotionLayerKind, type TimelineViewportState, type TranslationMarker, type ZoomMarker } from "./core/types";
 
 const activeProjectManifestStorageKey = "clipper.activeProjectManifestPath";
 const appStatePath = "clipper/app-state.json";
@@ -49,8 +51,33 @@ const defaultEditorState: EditorState = {
   leftPanelTab: "assets",
   rightPanelTab: "video",
   currentSceneTime: 0,
+  layout: defaultEditorLayoutState,
+  composeLayout: defaultComposeLayoutState,
   preview: defaultPreviewViewportState,
   code: {},
+};
+
+const editorPanelLayoutLimits = {
+  leftMin: 220,
+  leftMax: 560,
+  rightMin: 280,
+  rightMax: 620,
+  timelineMin: 220,
+  timelineMax: 560,
+  centerMin: 640,
+};
+
+type EditorPanelResizeKind = "left" | "compose-left" | "right" | "timeline";
+
+type EditorPanelResizeDrag = {
+  kind: EditorPanelResizeKind;
+  originX: number;
+  originY: number;
+  initialLayout: EditorLayoutState;
+  initialComposeLayout: ComposeLayoutState;
+  nextLayout: EditorLayoutState;
+  nextComposeLayout: ComposeLayoutState;
+  frame: number;
 };
 
 function createCompositionId() {
@@ -83,6 +110,8 @@ type TimelineNodeClipboard =
   | { kind: "adjustment"; nodes: Array<{ absoluteStart: number; layer: AdjustmentLayer }> }
   | { kind: "translation"; nodes: Array<{ absoluteStart: number; partId: string; marker: TranslationMarker }> }
   | { kind: "zoom"; nodes: Array<{ absoluteStart: number; partId: string; marker: ZoomMarker }> };
+
+type ProjectHistoryEntry = { project: ProjectManifest; implicitFileOperation?: boolean };
 
 type PresentationMode = "frame" | "theater" | null;
 
@@ -233,6 +262,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     timelineMode, setTimelineMode,
     selectedSceneId, setSelectedSceneId,
     selectedPartId, setSelectedPartId,
+    selectedParts, setSelectedParts,
     selectedObjectId, setSelectedObjectId,
     editingTextObjectId, setEditingTextObjectId,
     selectedZoomMarker, setSelectedZoomMarker,
@@ -288,13 +318,12 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   const activeProjectManifestPathRef = useRef(activeProjectManifestPath);
   const savedProjectSnapshotRef = useRef(savedProjectSnapshot);
   const savedCompositionSourcesSnapshotRef = useRef(savedCompositionSourcesSnapshot);
-  const hasUnsavedChangesRef = useRef(false);
   const timelineNodeClipboardRef = useRef<TimelineNodeClipboard | null>(null);
   const presentationModeRef = useRef<PresentationMode>(presentationMode);
   const presentationControlsTimeoutRef = useRef(0);
   const modeRef = useRef(mode);
   const activePartFilePathRef = useRef("");
-  const projectHistoryRef = useRef<{ past: ProjectManifest[]; future: ProjectManifest[] }>({ past: [], future: [] });
+  const projectHistoryRef = useRef<{ past: ProjectHistoryEntry[]; future: ProjectHistoryEntry[] }>({ past: [], future: [] });
   const lastProjectHistoryAtRef = useRef(0);
   const implicitFileOperationSaveTimeoutRef = useRef(0);
   const saveAllChangesRef = useRef<(() => Promise<void>) | null>(null);
@@ -306,6 +335,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   const timelineScrubbingRef = useRef(false);
   const timelineScrubPausedPlaybackRef = useRef(false);
   const presentationScrubPausedPlaybackRef = useRef(false);
+  const editorPanelResizeRef = useRef<EditorPanelResizeDrag | null>(null);
   const numberInputScrubPausedPlaybackRef = useRef(false);
   const playbackTimeLabelRef = useRef<HTMLSpanElement | null>(null);
   const playbackPlayheadRef = useRef<HTMLDivElement | null>(null);
@@ -404,7 +434,8 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   const baseMotionLayers = timelineLayers.motionLayers?.length ? timelineLayers.motionLayers : defaultTimelineLayerState.motionLayers!;
   const motionLayers = baseMotionLayers;
   const hiddenMotionLayerIds = new Set(motionLayers.filter((layer) => layer.hidden).map((layer) => layer.id));
-  const visibleSceneAdjustmentLayers = getExecutableAdjustmentLayers(scene.adjustmentLayers, timelineLayers);
+  const visibleSceneAdjustmentLayers = useMemo(() => getExecutableAdjustmentLayers(scene.adjustmentLayers, timelineLayers), [scene.adjustmentLayers, timelineLayers]);
+  const visibleSceneAdjustmentSignature = useMemo(() => JSON.stringify(visibleSceneAdjustmentLayers.map((layer) => ({ id: layer.id, layerId: layer.layerId, start: layer.start, duration: layer.duration, effect: layer.effect }))), [visibleSceneAdjustmentLayers]);
   function replaceProject(nextProject: ProjectManifest, options: { history?: boolean; syncSources?: boolean; coalesceHistory?: boolean } = {}) {
     let normalizedProject = normalizeProject(nextProject);
     const currentProject = projectRef.current;
@@ -420,7 +451,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
       const isCoalescedAction = options.coalesceHistory !== false && now - lastProjectHistoryAtRef.current < projectHistoryCoalesceMs && projectHistoryRef.current.past.length > 0;
 
       projectHistoryRef.current = {
-        past: isCoalescedAction ? projectHistoryRef.current.past : [...projectHistoryRef.current.past, currentProject].slice(-maxProjectHistoryActions),
+        past: isCoalescedAction ? projectHistoryRef.current.past : [...projectHistoryRef.current.past, { project: currentProject }].slice(-maxProjectHistoryActions),
         future: [],
       };
       lastProjectHistoryAtRef.current = now;
@@ -468,8 +499,8 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   function getSyncedCompositionSources(nextProject: ProjectManifest, previousProject: ProjectManifest | undefined, currentSources: Record<string, string>) {
     let changed = false;
     const nextSources = { ...currentSources };
-    const nextParts = Array.from(new Map([...(nextProject.compositionLibrary ?? []), ...nextProject.scenes.flatMap((item) => item.compositions)].map((item) => [item.filePath, item])).values());
-    const previousPartsByPath = new Map([...(previousProject?.compositionLibrary ?? []), ...(previousProject?.scenes.flatMap((item) => item.compositions) ?? [])].map((item) => [item.filePath, item]));
+    const nextParts = Array.from(new Map([...nextProject.scenes.flatMap((item) => item.compositions), ...(nextProject.compositionLibrary ?? []), ...(nextProject.compositions ?? [])].map((item) => [item.filePath, item])).values());
+    const previousPartsByPath = new Map([...(previousProject?.scenes.flatMap((item) => item.compositions) ?? []), ...(previousProject?.compositionLibrary ?? []), ...(previousProject?.compositions ?? [])].map((item) => [item.filePath, item]));
     for (const nextPart of nextParts) {
       if (nextPart.sourceMissing) continue;
       const previousPart = previousPartsByPath.get(nextPart.filePath);
@@ -488,10 +519,27 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     return changed ? nextSources : currentSources;
   }
 
+  function getSavedProjectSnapshotProject() {
+    try {
+      return JSON.parse(savedProjectSnapshotRef.current) as ProjectManifest;
+    } catch {
+      return undefined;
+    }
+  }
+
   function syncCompositionSourcesFromProject(nextProject: ProjectManifest) {
     const nextSources = getProjectCompositionSources(nextProject);
     compositionSourcesRef.current = nextSources;
     setCompositionSources(nextSources);
+  }
+
+  function markLastHistoryEntryAsImplicitFileOperation() {
+    const past = projectHistoryRef.current.past;
+    if (past.length === 0) return;
+    projectHistoryRef.current = {
+      ...projectHistoryRef.current,
+      past: past.map((entry, index) => (index === past.length - 1 ? { ...entry, implicitFileOperation: true } : entry)),
+    };
   }
 
   function resetProjectHistory() {
@@ -549,28 +597,29 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   }
 
   function undoProjectChange() {
-    const previousProject = projectHistoryRef.current.past.at(-1);
-    if (!previousProject) return;
-    const restoredProject = preserveCurrentPageMode(previousProject);
+    const previousEntry = projectHistoryRef.current.past.at(-1);
+    if (!previousEntry) return;
+    const restoredProject = preserveCurrentPageMode(previousEntry.project);
 
     projectHistoryRef.current = {
       past: projectHistoryRef.current.past.slice(0, -1),
-      future: [projectRef.current, ...projectHistoryRef.current.future].slice(0, maxProjectHistoryActions),
+      future: [{ project: projectRef.current, implicitFileOperation: previousEntry.implicitFileOperation }, ...projectHistoryRef.current.future].slice(0, maxProjectHistoryActions),
     };
     lastProjectHistoryAtRef.current = 0;
     projectRef.current = restoredProject;
     setProject(restoredProject);
     setTimelineMode(timelineModeRef.current);
     syncCompositionSourcesFromProject(restoredProject);
+    if (previousEntry.implicitFileOperation) scheduleImplicitFileOperationSave(restoredProject);
   }
 
   function redoProjectChange() {
-    const nextProject = projectHistoryRef.current.future[0];
-    if (!nextProject) return;
-    const restoredProject = preserveCurrentPageMode(nextProject);
+    const nextEntry = projectHistoryRef.current.future[0];
+    if (!nextEntry) return;
+    const restoredProject = preserveCurrentPageMode(nextEntry.project);
 
     projectHistoryRef.current = {
-      past: [...projectHistoryRef.current.past, projectRef.current].slice(-maxProjectHistoryActions),
+      past: [...projectHistoryRef.current.past, { project: projectRef.current, implicitFileOperation: nextEntry.implicitFileOperation }].slice(-maxProjectHistoryActions),
       future: projectHistoryRef.current.future.slice(1),
     };
     lastProjectHistoryAtRef.current = 0;
@@ -578,6 +627,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     setProject(restoredProject);
     setTimelineMode(timelineModeRef.current);
     syncCompositionSourcesFromProject(restoredProject);
+    if (nextEntry.implicitFileOperation) scheduleImplicitFileOperationSave(restoredProject);
   }
 
   function syncPlaybackDom(time: number) {
@@ -669,10 +719,6 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   }, [savedCompositionSourcesSnapshot]);
 
   useEffect(() => {
-    hasUnsavedChangesRef.current = hasUnsavedChanges;
-  }, [hasUnsavedChanges]);
-
-  useEffect(() => {
     modeRef.current = mode;
   }, [mode]);
 
@@ -752,7 +798,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
       leftPanelTab,
       rightPanelTab,
       selectedSceneId,
-      selectedPartId: selectedZoomMarker || selectedTranslationMarker ? (selectedZoomMarker?.partId ?? selectedTranslationMarker?.partId) : selectedPartId || undefined,
+      selectedPartId: selectedPartId || undefined,
       selectedZoomMarker,
       selectedTranslationMarker: selectedZoomMarker ? null : selectedTranslationMarker,
       defaultNewMarkerDurationSeconds: markerDurationSeconds,
@@ -776,6 +822,17 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     document.addEventListener("pointerdown", dismissFrameZoomBar, true);
     return () => document.removeEventListener("pointerdown", dismissFrameZoomBar, true);
   }, [frameZoomBarOpen, setFrameZoomBarOpen]);
+
+  useEffect(() => () => {
+    const drag = editorPanelResizeRef.current;
+    if (drag?.frame) cancelAnimationFrame(drag.frame);
+    editorPanelResizeRef.current = null;
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+    window.removeEventListener("pointermove", onEditorPanelResizeMove, true);
+    window.removeEventListener("pointerup", onEditorPanelResizeEnd, true);
+    window.removeEventListener("pointercancel", onEditorPanelResizeEnd, true);
+  }, []);
 
   useEffect(() => {
     const editorState = project.editorState;
@@ -878,7 +935,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   }, [activeTimelinePart, selectedPartId, selectedTranslationMarker, selectedZoomMarker]);
 
   useEffect(() => {
-    if (timelineMode === "edit") {
+    if (timelineMode === "compose") {
       clearMarkerSelection();
       return;
     }
@@ -988,7 +1045,12 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
 
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [activeTimelinePart?.id, isPlaying, scene.adjustmentLayers, sceneDurationSeconds, timeline]);
+  }, [activeTimelinePart?.id, isPlaying, sceneDurationSeconds, timeline, visibleSceneAdjustmentLayers]);
+
+  useEffect(() => {
+    if (!isPlaying) return;
+    updatePlaybackClock({ startedAt: performance.now(), startedFrom: currentSceneTimeRef.current });
+  }, [isPlaying, visibleSceneAdjustmentSignature]);
 
   useEffect(() => {
     if (isPlaying && currentSceneTime >= sceneDurationSeconds) {
@@ -1000,7 +1062,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     function switchModeShortcut(key: "1" | "2" | "3" | "4") {
       if (key === "1") updateMode("interactive");
       if (key === "2") updateMode("code");
-      if (key === "3") updateTimelineMode("edit");
+      if (key === "3") updateTimelineMode("compose");
       if (key === "4") updateTimelineMode("composition");
     }
 
@@ -1201,10 +1263,6 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
         return;
       }
 
-      if (isDeleteKey && selectedPartId) {
-        event.preventDefault();
-        deleteCompositionFromTimeline(selectedPartId);
-      }
     }
 
     function onKeyUp(event: KeyboardEvent) {
@@ -1219,7 +1277,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
     };
-  }, [focusPickZoomMarker, isPlaying, positionPickTranslationMarker, scene, sceneDurationSeconds, selectedAdjustmentLayer, selectedAdjustmentLayers, selectedPartId, selectedTranslationMarker, selectedTranslationMarkers, selectedZoomMarker, selectedZoomMarkers, timeline, trackerPickTranslationMarker]);
+  }, [focusPickZoomMarker, isPlaying, positionPickTranslationMarker, scene, sceneDurationSeconds, selectedAdjustmentLayer, selectedAdjustmentLayers, selectedPartId, selectedParts, selectedTranslationMarker, selectedTranslationMarkers, selectedZoomMarker, selectedZoomMarkers, timeline, trackerPickTranslationMarker]);
 
   function updateCurrentPart(nextPart: Part) {
     updateSceneParts((parts) => parts.map((item) => (item.id === nextPart.id ? nextPart : item)));
@@ -1245,6 +1303,17 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     });
   }
 
+  function updateSceneMotionMarkers(updater: (markers: { zoomMarkers: ZoomMarker[]; translationMarkers: TranslationMarker[] }) => { zoomMarkers: ZoomMarker[]; translationMarkers: TranslationMarker[] }) {
+    updateProject((current) => {
+      const currentTimeline = current.timelines?.find((timeline) => timeline.id === scene.id);
+      const nextMarkers = updater({ zoomMarkers: currentTimeline?.zoomMarkers ?? scene.zoomMarkers ?? [], translationMarkers: currentTimeline?.translationMarkers ?? scene.translationMarkers ?? [] });
+      return {
+        ...current,
+        timelines: (current.timelines ?? []).map((timeline) => (timeline.id === scene.id ? { ...timeline, zoomMarkers: nextMarkers.zoomMarkers, translationMarkers: nextMarkers.translationMarkers } : timeline)),
+      };
+    });
+  }
+
   function timelineClipFromPart(item: Part): TimelineClip {
     return {
       id: item.id,
@@ -1252,9 +1321,9 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
       start: item.start,
       layerId: item.layerId,
       duration: item.duration,
-      motionBlocks: item.motionBlocks ?? [],
-      zoomMarkers: item.zoomMarkers,
-      translationMarkers: item.translationMarkers,
+      motionBlocks: [],
+      zoomMarkers: [],
+      translationMarkers: [],
     };
   }
 
@@ -1393,9 +1462,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
 
   function motionLayerHasMarkers(layerId: string) {
     return (scene.zoomMarkers ?? []).some((marker) => isMotionMarkerOnLayerId(marker, layerId))
-      || (scene.translationMarkers ?? []).some((marker) => isMotionMarkerOnLayerId(marker, layerId))
-      || scene.compositions.some((composition) => composition.zoomMarkers.some((marker) => isMotionMarkerOnLayerId(marker, layerId))
-        || composition.translationMarkers.some((marker) => isMotionMarkerOnLayerId(marker, layerId)));
+      || (scene.translationMarkers ?? []).some((marker) => isMotionMarkerOnLayerId(marker, layerId));
   }
 
   function assignAvailableMotionLayerKind(layerId: string | undefined, _kind: Exclude<TimelineMotionLayerKind, "empty">) {
@@ -1411,11 +1478,11 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   function updateTimelineMode(nextMode: TimelineMode) {
     timelineModeRef.current = nextMode;
     setTimelineMode(nextMode);
-    if (nextMode === "edit" && modeRef.current !== "interactive") {
+    if (nextMode === "compose" && modeRef.current !== "interactive") {
       modeRef.current = "interactive";
       setMode("interactive");
     }
-    updateEditorState((state) => ({ ...state, timelineMode: nextMode, mode: nextMode === "edit" ? "interactive" : state.mode }));
+    updateEditorState((state) => ({ ...state, timelineMode: nextMode, mode: nextMode === "compose" ? "interactive" : state.mode }));
   }
 
   function updateMode(nextMode: Mode) {
@@ -1460,6 +1527,55 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     updateObject(objectId, (object) => (object.type === "text" ? { ...object, content, richText } : object));
   }
 
+  function selectComposeLayerObject(object: FrameObject | null) {
+    setRightPanelTab("video");
+    setEditingTextObjectId(null);
+    if (!object) {
+      setSelectedObjectId(null);
+      setSelectionPayload(null);
+      return;
+    }
+
+    setSelectedPartId(part.id);
+    clearMarkerSelection();
+    setSelectedAdjustmentLayerId(null);
+    setSelectedAdjustmentLayers([]);
+    setSelectedObjectId(object.id);
+    setSelectionPayload(selectionPayloadFromObjects([selectionObjectFromFrameObject(object)]));
+  }
+
+  function selectComposeLayerObjects(objects: FrameObject[]) {
+    setRightPanelTab("video");
+    setEditingTextObjectId(null);
+    if (objects.length === 0) {
+      setSelectedObjectId(null);
+      setSelectionPayload(null);
+      return;
+    }
+
+    setSelectedPartId(part.id);
+    clearMarkerSelection();
+    setSelectedAdjustmentLayerId(null);
+    setSelectedAdjustmentLayers([]);
+    setSelectedObjectId(objects[0].id);
+    setSelectionPayload(selectionPayloadFromObjects(objects.map(selectionObjectFromFrameObject)));
+  }
+
+  function reorderComposeObjects(objectIds: string[], targetIndex: number) {
+    const movingIds = new Set(objectIds);
+    if (movingIds.size === 0) return;
+    updateCompositionForTimelinePart(part.id, (composition) => {
+      const movingObjects = composition.objects.filter((object) => movingIds.has(object.id));
+      if (movingObjects.length === 0) return composition;
+      const remainingObjects = composition.objects.filter((object) => !movingIds.has(object.id));
+      const boundedIndex = Math.max(0, Math.min(targetIndex, remainingObjects.length));
+      return {
+        ...composition,
+        objects: [...remainingObjects.slice(0, boundedIndex), ...movingObjects, ...remainingObjects.slice(boundedIndex)],
+      };
+    });
+  }
+
   function updatePartFrame(updater: (frame: PartFrame) => PartFrame) {
     updateCompositionForTimelinePart(part.id, (composition) => ({ ...composition, frame: updater(composition.frame) }));
   }
@@ -1489,8 +1605,9 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     const nextSources = { ...compositionSourcesRef.current, [basePart.filePath]: source };
     compositionSourcesRef.current = nextSources;
     setCompositionSources(nextSources);
-    const nextPart = await compositionFromSource(basePart, source);
-    const nextProject = replacePartInProject({ ...projectRef.current, compositionSources: nextSources }, basePart.id, (currentPart) => ({
+    const compositionId = basePart.compositionId ?? basePart.id;
+    const nextPart = await compositionFromSource({ ...basePart, id: compositionId }, source);
+    const nextProject = replacePartInProject({ ...projectRef.current, compositionSources: nextSources }, compositionId, (currentPart) => ({
       ...nextPart,
       zoomMarkers: currentPart.zoomMarkers,
       translationMarkers: currentPart.translationMarkers,
@@ -1503,13 +1620,24 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   }
 
   async function saveProject(projectToSave = projectRef.current) {
-    const embeddedProject = normalizeProject({ ...projectToSave, compositionSources: compositionSourcesRef.current });
-    const snapshot = getProjectContentSnapshot(embeddedProject);
+    const syncedSources = getSyncedCompositionSources(projectToSave, getSavedProjectSnapshotProject(), compositionSourcesRef.current);
+    if (syncedSources !== compositionSourcesRef.current) {
+      compositionSourcesRef.current = syncedSources;
+      setCompositionSources(syncedSources);
+    }
+    const embeddedProject = normalizeProject({ ...projectToSave, compositionSources: syncedSources });
+    const persistedProject = serializeProjectForSave(embeddedProject);
+    const projectSnapshot = getProjectContentSnapshot(persistedProject);
+    const compositionSourcesSnapshot = JSON.stringify(persistedProject.compositionSources ?? {});
 
     try {
-      const result = await projectPersistenceService.saveProject({ manifestPath: activeProjectManifestPath, project: embeddedProject });
-      setSavedProjectSnapshot(result.projectSnapshot ? getProjectContentSnapshot(JSON.parse(result.projectSnapshot) as ProjectManifest) : snapshot);
-      setSavedCompositionSourcesSnapshot(result.compositionSourcesSnapshot);
+      const result = await projectPersistenceService.saveProject({ manifestPath: activeProjectManifestPathRef.current, project: persistedProject });
+      const savedProjectSnapshot = result.projectSnapshot ? getProjectContentSnapshot(JSON.parse(result.projectSnapshot) as ProjectManifest) : projectSnapshot;
+      const savedCompositionSourcesSnapshot = result.compositionSourcesSnapshot || compositionSourcesSnapshot;
+      setSavedProjectSnapshot(savedProjectSnapshot);
+      setSavedCompositionSourcesSnapshot(savedCompositionSourcesSnapshot);
+      savedProjectSnapshotRef.current = savedProjectSnapshot;
+      savedCompositionSourcesSnapshotRef.current = savedCompositionSourcesSnapshot;
       setSourceStatus(result.sourceStatus);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Unable to save project.");
@@ -1517,12 +1645,12 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   }
 
   async function saveAllChanges() {
-    if (!hasUnsavedChanges) return;
     await saveProject(projectRef.current);
   }
 
-  function scheduleImplicitFileOperationSave() {
-    const projectToSave = normalizeProject({ ...projectRef.current, compositionSources: compositionSourcesRef.current });
+  function scheduleImplicitFileOperationSave(projectOverride = projectRef.current, errorMessage = "Unable to save file operation.") {
+    const projectSources = projectOverride === projectRef.current ? compositionSourcesRef.current : getProjectCompositionSources(projectOverride);
+    const projectToSave = normalizeProject({ ...projectOverride, compositionSources: projectSources });
     const projectSnapshot = getProjectContentSnapshot(projectToSave);
     const compositionSourcesSnapshot = JSON.stringify(projectToSave.compositionSources ?? {});
     setSavedProjectSnapshot(projectSnapshot);
@@ -1534,13 +1662,14 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     implicitFileOperationSaveTimeoutRef.current = window.setTimeout(() => {
       projectPersistenceService.saveProject({ manifestPath: activeProjectManifestPathRef.current, project: projectToSave })
         .then((result) => setSourceStatus(result.sourceStatus))
-        .catch((error) => toast.error(error instanceof Error ? error.message : "Unable to save file operation."));
+        .catch((error) => toast.error(error instanceof Error ? error.message : errorMessage));
     }, 150);
   }
 
   function implicitFileOperation<T extends unknown[]>(operation: (...args: T) => void) {
     return (...args: T) => {
       operation(...args);
+      markLastHistoryEntryAsImplicitFileOperation();
       scheduleImplicitFileOperationSave();
     };
   }
@@ -1609,6 +1738,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
 
   function selectPart(partId: string) {
     setSelectedPartId(partId);
+    setSelectedParts(partId ? [{ partId }] : []);
     setSelectedAdjustmentLayerId(null);
     setSelectedAdjustmentLayers([]);
     setSelectedObjectId(null);
@@ -1617,12 +1747,24 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     setIsPlaying(false);
   }
 
+  function openComposePart(partId: string) {
+    const timelinePart = timeline.find((item) => item.id === partId);
+    if (!timelinePart) return;
+    const currentTime = currentSceneTimeRef.current;
+    const insidePart = currentTime >= timelinePart.start && currentTime < timelinePart.start + timelinePart.duration;
+    selectPart(partId);
+    if (!insidePart) scrubToSceneTime(timelinePart.start);
+    updateTimelineMode("compose");
+  }
+
   function selectZoomMarker(partId: string, markerId: string) {
-    setSelectedPartId(partId);
+    if (partId !== TIMELINE_MOTION_PART_ID) setSelectedPartId(partId);
+    setSelectedParts([]);
     setSelectedAdjustmentLayerId(null);
     setSelectedAdjustmentLayers([]);
     setSelectedZoomMarker({ partId, markerId });
     setSelectedZoomMarkers([{ partId, markerId }]);
+    setSelectedParts([]);
     setSelectedTranslationMarker(null);
     setSelectedTranslationMarkers([]);
     setPositionPickTranslationMarker(null);
@@ -1633,6 +1775,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   }
 
   function selectZoomMarkers(selection: ZoomMarkerSelection[]) {
+    setSelectedParts([]);
     setSelectedAdjustmentLayerId(null);
     setSelectedAdjustmentLayers([]);
     setSelectedZoomMarkers(selection);
@@ -1646,7 +1789,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     setSelectionPayload(null);
     setFocusPickZoomMarker(null);
     setIsPlaying(false);
-    if (primarySelection) setSelectedPartId(primarySelection.partId);
+    if (primarySelection && primarySelection.partId !== TIMELINE_MOTION_PART_ID) setSelectedPartId(primarySelection.partId);
   }
 
   function startZoomFocusPick(partId: string, markerId: string) {
@@ -1670,7 +1813,8 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   }
 
   function selectTranslationMarker(partId: string, markerId: string) {
-    setSelectedPartId(partId);
+    if (partId !== TIMELINE_MOTION_PART_ID) setSelectedPartId(partId);
+    setSelectedParts([]);
     setSelectedAdjustmentLayerId(null);
     setSelectedAdjustmentLayers([]);
     setSelectedTranslationMarker({ partId, markerId });
@@ -1685,6 +1829,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   }
 
   function selectTranslationMarkers(selection: TranslationMarkerSelection[]) {
+    setSelectedParts([]);
     setSelectedAdjustmentLayerId(null);
     setSelectedAdjustmentLayers([]);
     setSelectedTranslationMarkers(selection);
@@ -1697,13 +1842,14 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     setSelectedObjectId(null);
     setSelectionPayload(null);
     setIsPlaying(false);
-    if (primarySelection) setSelectedPartId(primarySelection.partId);
+    if (primarySelection && primarySelection.partId !== TIMELINE_MOTION_PART_ID) setSelectedPartId(primarySelection.partId);
   }
 
   function selectAdjustmentLayer(layerId: string) {
     setSelectedAdjustmentLayerId(layerId);
     setSelectedAdjustmentLayers(layerId ? [{ layerId }] : []);
     setSelectedPartId("");
+    setSelectedParts([]);
     setSelectedObjectId(null);
     setSelectionPayload(null);
     clearMarkerSelection();
@@ -1715,6 +1861,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     setSelectedAdjustmentLayers(selection);
     setSelectedAdjustmentLayerId(selection.at(-1)?.layerId ?? null);
     setSelectedPartId("");
+    setSelectedParts([]);
     setSelectedObjectId(null);
     setSelectionPayload(null);
     clearMarkerSelection();
@@ -1722,16 +1869,18 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     setIsPlaying(false);
   }
 
-  function selectTimelineNodes(selection: { adjustmentLayers: AdjustmentLayerSelection[]; zoomMarkers: ZoomMarkerSelection[]; translationMarkers: TranslationMarkerSelection[] }) {
+  function selectTimelineNodes(selection: { adjustmentLayers: AdjustmentLayerSelection[]; compositions: CompositionSelection[]; zoomMarkers: ZoomMarkerSelection[]; translationMarkers: TranslationMarkerSelection[] }) {
     const primaryZoom = selection.zoomMarkers.at(-1) ?? null;
     const primaryTranslation = selection.translationMarkers.at(-1) ?? null;
+    const primaryPart = selection.compositions.at(-1) ?? null;
     setSelectedAdjustmentLayers(selection.adjustmentLayers);
     setSelectedAdjustmentLayerId(selection.adjustmentLayers.at(-1)?.layerId ?? null);
+    setSelectedParts(selection.compositions);
     setSelectedZoomMarkers(selection.zoomMarkers);
     setSelectedZoomMarker(primaryZoom);
     setSelectedTranslationMarkers(selection.translationMarkers);
     setSelectedTranslationMarker(primaryTranslation);
-    setSelectedPartId(primaryTranslation?.partId ?? primaryZoom?.partId ?? "");
+    setSelectedPartId(primaryPart?.partId ?? "");
     setSelectedObjectId(null);
     setSelectionPayload(null);
     setFocusPickZoomMarker(null);
@@ -2018,6 +2167,24 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     });
   }
 
+  function moveCompositionMarkers(moves: Array<{ compositionId: string; start: number; targetLayerId?: string }>) {
+    if (moves.length === 0) return;
+    const moveById = new Map(moves.map((move) => [move.compositionId, move]));
+    updateSceneParts((parts) => {
+      const timelineParts = buildLinearTimeline({ ...scene, compositions: parts });
+      const startsById = new Map(timelineParts.map((composition) => [composition.id, composition.start]));
+      return parts.map((composition) => {
+        const previousStart = startsById.get(composition.id) ?? composition.start ?? 0;
+        const move = moveById.get(composition.id);
+        const nextStart = roundTenth(Math.max(move?.start ?? previousStart, 0));
+        const nextComposition = move
+          ? { ...composition, start: nextStart, layerId: move.targetLayerId || undefined }
+          : { ...composition, start: roundTenth(previousStart) };
+        return rebaseCompositionTimelineMarkers(nextComposition, previousStart, nextStart);
+      });
+    });
+  }
+
   function updateCompositionMarker(compositionId: string, updater: (composition: Part) => Part) {
     updateSceneParts((parts) => {
       const timelineParts = buildLinearTimeline({ ...scene, compositions: parts });
@@ -2032,11 +2199,19 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   }
 
   function deleteCompositionFromTimeline(compositionId: string) {
-    const deletedIndex = scene.compositions.findIndex((composition) => composition.id === compositionId);
-    if (deletedIndex < 0) return;
-    const nextSelection = scene.compositions[deletedIndex + 1]?.id ?? scene.compositions[deletedIndex - 1]?.id ?? "";
-    updateSceneParts((parts) => parts.filter((composition) => composition.id !== compositionId));
+    deleteCompositionsFromTimeline([compositionId]);
+  }
+
+  function deleteCompositionsFromTimeline(compositionIds: string[]) {
+    const deleteIds = new Set(compositionIds);
+    if (deleteIds.size === 0) return;
+    const firstDeletedIndex = scene.compositions.findIndex((composition) => deleteIds.has(composition.id));
+    if (firstDeletedIndex < 0) return;
+    const remaining = scene.compositions.filter((composition) => !deleteIds.has(composition.id));
+    const nextSelection = remaining[firstDeletedIndex]?.id ?? remaining[firstDeletedIndex - 1]?.id ?? "";
+    updateSceneParts((parts) => parts.filter((composition) => !deleteIds.has(composition.id)));
     setSelectedPartId(nextSelection);
+    setSelectedParts(nextSelection ? [{ partId: nextSelection }] : []);
     setSelectedObjectId(null);
     setSelectionPayload(null);
     clearMarkerSelection();
@@ -2052,9 +2227,14 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     setSelectedPartId(timelineComposition.id);
     clearNodeSelection();
     setSelectedPartId(timelineComposition.id);
+    setSelectedParts([{ partId: timelineComposition.id }]);
   }
 
   function updateZoomMarker(partId: string, markerId: string, updater: (marker: ZoomMarker, part: Part) => ZoomMarker) {
+    if (partId === TIMELINE_MOTION_PART_ID) {
+      updateSceneMotionMarkers(({ zoomMarkers, translationMarkers }) => ({ zoomMarkers: normalizeMendedZoomMarkerFocus(zoomMarkers.map((marker) => (marker.id === markerId ? updater(marker, part) : marker))), translationMarkers }));
+      return;
+    }
     updateSceneParts((parts) => parts.map((item) => {
       if (item.id !== partId) return item;
       const zoomMarkers = item.zoomMarkers.map((marker) => (marker.id === markerId ? updater(marker, item) : marker));
@@ -2064,6 +2244,19 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
 
   function previewZoomScale(partId: string, markerId: string, scale: number) {
     if (timelineMode !== "composition" || isPickingZoomFocus) return;
+    if (partId === TIMELINE_MOTION_PART_ID) {
+      const activeStart = activeTimelinePart?.start ?? 0;
+      const previewZoomMarkers = (scene.zoomMarkers ?? []).map((marker) => (marker.id === markerId ? { ...marker, scale } : marker)).map((marker) => ({ ...marker, start: marker.start - activeStart }));
+      pendingZoomScalePreviewRef.current = getLayeredCameraPreviewTransform({ ...part, zoomMarkers: previewZoomMarkers, translationMarkers: (scene.translationMarkers ?? []).map((marker) => ({ ...marker, start: marker.start - activeStart })) }, motionLayers, previewTime, { hiddenLayerIds: hiddenMotionLayerIds, pickingTranslationPosition: isPickingTranslationPosition });
+      if (zoomScalePreviewFrameRef.current) return;
+      zoomScalePreviewFrameRef.current = requestAnimationFrame(() => {
+        zoomScalePreviewFrameRef.current = 0;
+        const transform = pendingZoomScalePreviewRef.current;
+        if (!transform || !cameraRef.current) return;
+        cameraRef.current.style.transform = formatCameraPreviewTransform(transform);
+      });
+      return;
+    }
     const previewPart = scene.compositions.find((item) => item.id === partId);
     if (!previewPart || previewPart.id !== part.id) return;
     const previewZoomMarkers = previewPart.zoomMarkers.map((marker) => (marker.id === markerId ? { ...marker, scale } : marker));
@@ -2086,6 +2279,10 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   }
 
   function updateZoomMarkers(partId: string, updater: (markers: ZoomMarker[], part: Part) => ZoomMarker[]) {
+    if (partId === TIMELINE_MOTION_PART_ID) {
+      updateSceneMotionMarkers(({ zoomMarkers, translationMarkers }) => ({ zoomMarkers: normalizeMendedZoomMarkerFocus(updater(zoomMarkers, part)), translationMarkers }));
+      return;
+    }
     updateSceneParts((parts) => parts.map((item) => {
       if (item.id !== partId) return item;
       return withMotionMarkers(item, normalizeMendedZoomMarkerFocus(updater(item.zoomMarkers, item)), item.translationMarkers);
@@ -2095,6 +2292,13 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   function updateZoomMarkerFocusGroup(partId: string, markerId: string, focus: Point) {
     const absoluteMarkers = getAbsoluteZoomMarkers();
     const markerKeys = getMendedMarkerIds(absoluteMarkers, timelineMarkerKey(partId, markerId));
+    if (partId === TIMELINE_MOTION_PART_ID) {
+      updateSceneMotionMarkers(({ zoomMarkers, translationMarkers }) => {
+        const nextZoomMarkers = zoomMarkers.map((marker) => (markerKeys.has(timelineMarkerKey(TIMELINE_MOTION_PART_ID, marker.id)) ? { ...marker, focus } : marker));
+        return { zoomMarkers: normalizeMendedZoomMarkerFocus(nextZoomMarkers), translationMarkers };
+      });
+      return;
+    }
     updateSceneParts((parts) => parts.map((item) => {
       let changed = false;
       const zoomMarkers = item.zoomMarkers.map((marker) => (markerKeys.has(timelineMarkerKey(item.id, marker.id)) ? { ...marker, focus } : marker));
@@ -2109,6 +2313,15 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     const selectedIdsByPart = new Map<string, Set<string>>();
     for (const selection of selectedZoomMarkers) {
       selectedIdsByPart.set(selection.partId, (selectedIdsByPart.get(selection.partId) ?? new Set()).add(selection.markerId));
+    }
+
+    const timelineMotionIds = selectedIdsByPart.get(TIMELINE_MOTION_PART_ID);
+    if (timelineMotionIds) {
+      updateSceneMotionMarkers(({ zoomMarkers, translationMarkers }) => ({
+        zoomMarkers: normalizeMendedZoomMarkerFocus(zoomMarkers.map((marker) => timelineMotionIds.has(marker.id) ? { ...marker, [key]: enabled || undefined, mendInId: key === "snapIn" ? undefined : marker.mendInId, mendOutId: key === "snapOut" ? undefined : marker.mendOutId } : marker)),
+        translationMarkers,
+      }));
+      return;
     }
 
     updateSceneParts((parts) => parts.map((item) => {
@@ -2128,6 +2341,15 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
       selectedIdsByPart.set(selection.partId, (selectedIdsByPart.get(selection.partId) ?? new Set()).add(selection.markerId));
     }
 
+    const timelineMotionIds = selectedIdsByPart.get(TIMELINE_MOTION_PART_ID);
+    if (timelineMotionIds) {
+      updateSceneMotionMarkers(({ zoomMarkers, translationMarkers }) => ({
+        zoomMarkers,
+        translationMarkers: translationMarkers.map((marker) => timelineMotionIds.has(marker.id) ? { ...marker, [key]: enabled || undefined, mendInId: key === "snapIn" ? undefined : marker.mendInId, mendOutId: key === "snapOut" ? undefined : marker.mendOutId } : marker),
+      }));
+      return;
+    }
+
     updateSceneParts((parts) => parts.map((item) => {
       const selectedIds = selectedIdsByPart.get(item.id);
       if (!selectedIds) return item;
@@ -2139,6 +2361,10 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   }
 
   function updateTranslationMarkers(partId: string, updater: (markers: TranslationMarker[], part: Part) => TranslationMarker[]) {
+    if (partId === TIMELINE_MOTION_PART_ID) {
+      updateSceneMotionMarkers(({ zoomMarkers, translationMarkers }) => ({ zoomMarkers, translationMarkers: updater(translationMarkers, part) }));
+      return;
+    }
     updateSceneParts((parts) => parts.map((item) => {
       if (item.id !== partId) return item;
       return withMotionMarkers(item, item.zoomMarkers, updater(item.translationMarkers, item));
@@ -2195,6 +2421,15 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     return withMotionMarkers(item, normalizeMendedZoomMarkerFocus(trimCollection(zoomMarkers)), trimCollection(translationMarkers));
   }
 
+  function applySceneMotionMarkerOverwrite(zoomMarkers: ZoomMarker[], translationMarkers: TranslationMarker[], insertedIds: Set<string>) {
+    const protectedZoomIds = expandExplicitTimelineMarkerMendIds(zoomMarkers, insertedIds, TIMELINE_MOTION_PART_ID);
+    const protectedTranslationIds = expandExplicitTimelineMarkerMendIds(translationMarkers, insertedIds, TIMELINE_MOTION_PART_ID);
+    const insertedRanges = getInsertedOverwriteRanges([...zoomMarkers, ...translationMarkers], new Set([...protectedZoomIds, ...protectedTranslationIds]));
+    const splitIdSuffix = Date.now().toString(36);
+    const trimCollection = <T extends ZoomMarker | TranslationMarker>(markers: T[]) => overwriteTimelineMarkers(markers, insertedRanges, { createSplitId: (marker, _range, index) => `${marker.id}_split_${splitIdSuffix}_${index.toString(36)}` });
+    return { zoomMarkers: normalizeMendedZoomMarkerFocus(trimCollection(zoomMarkers)), translationMarkers: trimCollection(translationMarkers) };
+  }
+
   function withMotionMarkers(item: Part, zoomMarkers: ZoomMarker[], translationMarkers: TranslationMarker[]): Part {
     const motionBlocks = [...zoomMarkers.map(motionBlockFromMarker), ...translationMarkers.map(motionBlockFromMarker)].sort((left, right) => left.start - right.start);
     return {
@@ -2217,6 +2452,16 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
 
   function moveZoomMarker(sourcePartId: string, markerId: string, targetPartId: string, start: number, targetLayerId?: string) {
     assignAvailableMotionLayerKind(targetLayerId, "motion");
+    if (sourcePartId === TIMELINE_MOTION_PART_ID || targetPartId === TIMELINE_MOTION_PART_ID) {
+      updateSceneMotionMarkers(({ zoomMarkers, translationMarkers }) => {
+        const marker = zoomMarkers.find((item) => item.id === markerId);
+        if (!marker) return { zoomMarkers, translationMarkers };
+        const nextMarker = { ...marker, layerId: targetLayerId ?? marker.layerId, start: roundTwo(start) };
+        return applySceneMotionMarkerOverwrite([...zoomMarkers.filter((item) => item.id !== markerId), nextMarker], translationMarkers, new Set([markerId]));
+      });
+      setSelectedZoomMarker({ partId: TIMELINE_MOTION_PART_ID, markerId });
+      return;
+    }
     updateSceneParts((parts) => {
       const timelineParts = buildLinearTimeline({ ...scene, compositions: parts });
       const sourcePart = parts.find((item) => item.id === sourcePartId);
@@ -2239,6 +2484,21 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
 
   function moveZoomMarkers(moves: TimelineMarkerMove[]) {
     for (const move of moves) assignAvailableMotionLayerKind(move.targetLayerId, "motion");
+    if (moves.some((move) => move.sourcePartId === TIMELINE_MOTION_PART_ID || move.targetPartId === TIMELINE_MOTION_PART_ID)) {
+      updateSceneMotionMarkers(({ zoomMarkers, translationMarkers }) => {
+        const moveById = new Map(moves.map((move) => [move.markerId, move]));
+        const insertedIds = new Set(moves.map((move) => move.markerId));
+        const nextZoomMarkers = zoomMarkers.map((marker) => {
+          const move = moveById.get(marker.id);
+          return move ? remapMovedMarkerMendIds({ ...marker, layerId: move.targetLayerId ?? marker.layerId, start: roundTwo(move.start) }, new Map()) : marker;
+        });
+        return applySceneMotionMarkerOverwrite(nextZoomMarkers, translationMarkers, insertedIds);
+      });
+      const nextSelection = selectedZoomMarkers.map((selection) => ({ ...selection, partId: TIMELINE_MOTION_PART_ID }));
+      setSelectedZoomMarkers(nextSelection);
+      setSelectedZoomMarker(nextSelection.at(-1) ?? (moves[0] ? { partId: TIMELINE_MOTION_PART_ID, markerId: moves[0].markerId } : null));
+      return;
+    }
     updateSceneParts((parts) => {
       const timelineParts = buildLinearTimeline({ ...scene, compositions: parts });
       const movedMarkerKeys = new Map(moves.map((move) => [timelineMoveKey(move.sourcePartId, move.markerId), timelineMoveKey(move.targetPartId, move.markerId)]));
@@ -2298,6 +2558,16 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
 
   function moveTranslationMarker(sourcePartId: string, markerId: string, targetPartId: string, start: number, targetLayerId?: string) {
     assignAvailableMotionLayerKind(targetLayerId, "motion");
+    if (sourcePartId === TIMELINE_MOTION_PART_ID || targetPartId === TIMELINE_MOTION_PART_ID) {
+      updateSceneMotionMarkers(({ zoomMarkers, translationMarkers }) => {
+        const marker = translationMarkers.find((item) => item.id === markerId);
+        if (!marker) return { zoomMarkers, translationMarkers };
+        const nextMarker = { ...marker, layerId: targetLayerId ?? marker.layerId, start: roundTwo(start) };
+        return applySceneMotionMarkerOverwrite(zoomMarkers, [...translationMarkers.filter((item) => item.id !== markerId), nextMarker], new Set([markerId]));
+      });
+      setSelectedTranslationMarker({ partId: TIMELINE_MOTION_PART_ID, markerId });
+      return;
+    }
     updateSceneParts((parts) => {
       const timelineParts = buildLinearTimeline({ ...scene, compositions: parts });
       const sourcePart = parts.find((item) => item.id === sourcePartId);
@@ -2322,6 +2592,21 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     for (const move of moves) {
       const sourceMarker = scene.compositions.find((item) => item.id === move.sourcePartId)?.translationMarkers.find((item) => item.id === move.markerId);
       if (sourceMarker) assignAvailableMotionLayerKind(move.targetLayerId, "motion");
+    }
+    if (moves.some((move) => move.sourcePartId === TIMELINE_MOTION_PART_ID || move.targetPartId === TIMELINE_MOTION_PART_ID)) {
+      updateSceneMotionMarkers(({ zoomMarkers, translationMarkers }) => {
+        const moveById = new Map(moves.map((move) => [move.markerId, move]));
+        const insertedIds = new Set(moves.map((move) => move.markerId));
+        const nextTranslationMarkers = translationMarkers.map((marker) => {
+          const move = moveById.get(marker.id);
+          return move ? remapMovedMarkerMendIds({ ...marker, layerId: move.targetLayerId ?? marker.layerId, start: roundTwo(move.start) }, new Map()) : marker;
+        });
+        return applySceneMotionMarkerOverwrite(zoomMarkers, nextTranslationMarkers, insertedIds);
+      });
+      const nextSelection = selectedTranslationMarkers.map((selection) => ({ ...selection, partId: TIMELINE_MOTION_PART_ID }));
+      setSelectedTranslationMarkers(nextSelection);
+      setSelectedTranslationMarker(nextSelection.at(-1) ?? (moves[0] ? { partId: TIMELINE_MOTION_PART_ID, markerId: moves[0].markerId } : null));
+      return;
     }
     updateSceneParts((parts) => {
       const timelineParts = buildLinearTimeline({ ...scene, compositions: parts });
@@ -2374,6 +2659,18 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   }
 
   function resizeZoomMarkers(resizes: TimelineMarkerResize[]) {
+    if (resizes.some((resize) => resize.sourcePartId === TIMELINE_MOTION_PART_ID)) {
+      updateSceneMotionMarkers(({ zoomMarkers, translationMarkers }) => {
+        const resizeById = new Map(resizes.map((resize) => [resize.markerId, resize]));
+        const insertedIds = new Set(resizes.map((resize) => resize.markerId));
+        const nextZoomMarkers = zoomMarkers.map((marker) => {
+          const resize = resizeById.get(marker.id);
+          return resize ? { ...marker, start: roundTwo(resize.absoluteStart), duration: roundTwo(resize.duration) } : marker;
+        });
+        return applySceneMotionMarkerOverwrite(nextZoomMarkers, translationMarkers, insertedIds);
+      });
+      return;
+    }
     updateSceneParts((parts) => {
       const timelineParts = buildLinearTimeline({ ...scene, compositions: parts });
       const resizedSegments = new Map<string, Array<{ partId: string; marker: ZoomMarker }>>();
@@ -2408,6 +2705,18 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   }
 
   function resizeTranslationMarkers(resizes: TimelineMarkerResize[]) {
+    if (resizes.some((resize) => resize.sourcePartId === TIMELINE_MOTION_PART_ID)) {
+      updateSceneMotionMarkers(({ zoomMarkers, translationMarkers }) => {
+        const resizeById = new Map(resizes.map((resize) => [resize.markerId, resize]));
+        const insertedIds = new Set(resizes.map((resize) => resize.markerId));
+        const nextTranslationMarkers = translationMarkers.map((marker) => {
+          const resize = resizeById.get(marker.id);
+          return resize ? { ...marker, start: roundTwo(resize.absoluteStart), duration: roundTwo(resize.duration) } : marker;
+        });
+        return applySceneMotionMarkerOverwrite(zoomMarkers, nextTranslationMarkers, insertedIds);
+      });
+      return;
+    }
     updateSceneParts((parts) => {
       const timelineParts = buildLinearTimeline({ ...scene, compositions: parts });
       const resizedSegments = new Map<string, Array<{ partId: string; marker: TranslationMarker }>>();
@@ -2442,6 +2751,13 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   }
 
   function deleteZoomMarker(partId: string, markerId: string) {
+    if (partId === TIMELINE_MOTION_PART_ID) {
+      updateSceneMotionMarkers(({ zoomMarkers, translationMarkers }) => ({ zoomMarkers: normalizeMendedZoomMarkerFocus(zoomMarkers.filter((marker) => marker.id !== markerId)), translationMarkers }));
+      setSelectedZoomMarker(null);
+      setSelectedZoomMarkers([]);
+      setFocusPickZoomMarker(null);
+      return;
+    }
     updateSceneParts((parts) => parts.map((item) => (item.id === partId ? withMotionMarkers(item, item.zoomMarkers.filter((marker) => marker.id !== markerId), item.translationMarkers) : item)));
     setSelectedZoomMarker(null);
     setSelectedZoomMarkers([]);
@@ -2449,6 +2765,13 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   }
 
   function deleteTranslationMarker(partId: string, markerId: string) {
+    if (partId === TIMELINE_MOTION_PART_ID) {
+      updateSceneMotionMarkers(({ zoomMarkers, translationMarkers }) => ({ zoomMarkers, translationMarkers: translationMarkers.filter((marker) => marker.id !== markerId) }));
+      setSelectedTranslationMarker(null);
+      setSelectedTranslationMarkers([]);
+      setPositionPickTranslationMarker(null);
+      return;
+    }
     updateSceneParts((parts) => parts.map((item) => (item.id === partId ? withMotionMarkers(item, item.zoomMarkers, item.translationMarkers.filter((marker) => marker.id !== markerId)) : item)));
     setSelectedTranslationMarker(null);
     setSelectedTranslationMarkers([]);
@@ -2474,6 +2797,10 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
 
     const zoomSelection = uniqueTimelineMarkerSelections(selectedZoomMarkers.length > 0 ? selectedZoomMarkers : selectedZoomMarker ? [selectedZoomMarker] : []);
     const zoomNodes = zoomSelection.flatMap((selection) => {
+      if (selection.partId === TIMELINE_MOTION_PART_ID) {
+        const marker = (scene.zoomMarkers ?? []).find((item) => item.id === selection.markerId);
+        return marker ? [{ absoluteStart: marker.start, partId: TIMELINE_MOTION_PART_ID, marker }] : [];
+      }
       const timelinePart = timeline.find((item) => item.id === selection.partId);
       const marker = timelinePart?.zoomMarkers.find((item) => item.id === selection.markerId);
       return timelinePart && marker ? [{ absoluteStart: timelinePart.start + marker.start, partId: timelinePart.id, marker }] : [];
@@ -2482,13 +2809,17 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
 
     const translationSelection = uniqueTimelineMarkerSelections(selectedTranslationMarkers.length > 0 ? selectedTranslationMarkers : selectedTranslationMarker ? [selectedTranslationMarker] : []);
     const translationNodes = translationSelection.flatMap((selection) => {
+      if (selection.partId === TIMELINE_MOTION_PART_ID) {
+        const marker = (scene.translationMarkers ?? []).find((item) => item.id === selection.markerId);
+        return marker ? [{ absoluteStart: marker.start, partId: TIMELINE_MOTION_PART_ID, marker }] : [];
+      }
       const timelinePart = timeline.find((item) => item.id === selection.partId);
       const marker = timelinePart?.translationMarkers.find((item) => item.id === selection.markerId);
       return timelinePart && marker ? [{ absoluteStart: timelinePart.start + marker.start, partId: timelinePart.id, marker }] : [];
     });
     if (translationNodes.length > 0) return { kind: "translation", nodes: translationNodes.sort((a, b) => a.absoluteStart - b.absoluteStart) };
 
-    if (showToast && selectedPartId) toast.error("Compositions can't be copied.");
+    if (showToast && (selectedPartId || selectedParts.length > 0)) toast.error("Compositions can't be copied.");
     return null;
   }
 
@@ -2498,6 +2829,15 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     if (target.kind === "adjustment") {
       const layer = scene.adjustmentLayers?.find((item) => item.id === target.layerId);
       return layer ? { kind: "adjustment", nodes: [{ absoluteStart: layer.start, layer }] } : null;
+    }
+
+    if (target.partId === TIMELINE_MOTION_PART_ID) {
+      if (target.kind === "zoom") {
+        const marker = (scene.zoomMarkers ?? []).find((item) => item.id === target.markerId);
+        return marker ? { kind: "zoom", nodes: [{ absoluteStart: marker.start, partId: TIMELINE_MOTION_PART_ID, marker }] } : null;
+      }
+      const marker = (scene.translationMarkers ?? []).find((item) => item.id === target.markerId);
+      return marker ? { kind: "translation", nodes: [{ absoluteStart: marker.start, partId: TIMELINE_MOTION_PART_ID, marker }] } : null;
     }
 
     const timelinePart = timeline.find((item) => item.id === target.partId);
@@ -2522,6 +2862,14 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     }
 
     if (clipboard.kind === "zoom") {
+      if (clipboard.nodes.some((node) => node.partId === TIMELINE_MOTION_PART_ID)) {
+        const markerIds = new Set(clipboard.nodes.map((node) => node.marker.id));
+        updateSceneMotionMarkers(({ zoomMarkers, translationMarkers }) => ({ zoomMarkers: normalizeMendedZoomMarkerFocus(zoomMarkers.filter((marker) => !markerIds.has(marker.id))), translationMarkers }));
+        setSelectedZoomMarker(null);
+        setSelectedZoomMarkers([]);
+        setFocusPickZoomMarker(null);
+        return;
+      }
       const markerIdsByPart = new Map<string, Set<string>>();
       for (const node of clipboard.nodes) markerIdsByPart.set(node.partId, (markerIdsByPart.get(node.partId) ?? new Set()).add(node.marker.id));
       updateSceneParts((parts) => parts.map((item) => {
@@ -2531,6 +2879,15 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
       setSelectedZoomMarker(null);
       setSelectedZoomMarkers([]);
       setFocusPickZoomMarker(null);
+      return;
+    }
+
+    if (clipboard.nodes.some((node) => node.partId === TIMELINE_MOTION_PART_ID)) {
+      const markerIds = new Set(clipboard.nodes.map((node) => node.marker.id));
+      updateSceneMotionMarkers(({ zoomMarkers, translationMarkers }) => ({ zoomMarkers, translationMarkers: translationMarkers.filter((marker) => !markerIds.has(marker.id)) }));
+      setSelectedTranslationMarker(null);
+      setSelectedTranslationMarkers([]);
+      setPositionPickTranslationMarker(null);
       return;
     }
 
@@ -2547,15 +2904,22 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
 
   function deleteSelectedTimelineNodes() {
     const adjustmentLayerIds = selectedAdjustmentLayers.length > 0 ? selectedAdjustmentLayers.map((selection) => selection.layerId) : selectedAdjustmentLayer ? [selectedAdjustmentLayer.id] : [];
+    const compositionIds = selectedParts.length > 0 ? selectedParts.map((selection) => selection.partId) : selectedPartId && !selectedZoomMarker && !selectedTranslationMarker ? [selectedPartId] : [];
     const zoomSelection = uniqueTimelineMarkerSelections(selectedZoomMarkers.length > 0 ? selectedZoomMarkers : selectedZoomMarker ? [selectedZoomMarker] : []);
     const translationSelection = uniqueTimelineMarkerSelections(selectedTranslationMarkers.length > 0 ? selectedTranslationMarkers : selectedTranslationMarker ? [selectedTranslationMarker] : []);
-    const hasSelection = adjustmentLayerIds.length > 0 || zoomSelection.length > 0 || translationSelection.length > 0;
+    const hasSelection = adjustmentLayerIds.length > 0 || compositionIds.length > 0 || zoomSelection.length > 0 || translationSelection.length > 0;
     if (!hasSelection) return false;
+
+    if (compositionIds.length > 0) deleteCompositionsFromTimeline(compositionIds);
 
     const adjustmentNodes = (scene.adjustmentLayers ?? []).filter((layer) => adjustmentLayerIds.includes(layer.id)).map((layer) => ({ absoluteStart: layer.start, layer }));
     if (adjustmentNodes.length > 0) deleteTimelineClipboardNodes({ kind: "adjustment", nodes: adjustmentNodes });
 
     const zoomNodes = zoomSelection.flatMap((selection) => {
+      if (selection.partId === TIMELINE_MOTION_PART_ID) {
+        const marker = (scene.zoomMarkers ?? []).find((item) => item.id === selection.markerId);
+        return marker ? [{ absoluteStart: marker.start, partId: TIMELINE_MOTION_PART_ID, marker }] : [];
+      }
       const timelinePart = timeline.find((item) => item.id === selection.partId);
       const marker = timelinePart?.zoomMarkers.find((item) => item.id === selection.markerId);
       return timelinePart && marker ? [{ absoluteStart: timelinePart.start + marker.start, partId: timelinePart.id, marker }] : [];
@@ -2563,6 +2927,10 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     if (zoomNodes.length > 0) deleteTimelineClipboardNodes({ kind: "zoom", nodes: zoomNodes });
 
     const translationNodes = translationSelection.flatMap((selection) => {
+      if (selection.partId === TIMELINE_MOTION_PART_ID) {
+        const marker = (scene.translationMarkers ?? []).find((item) => item.id === selection.markerId);
+        return marker ? [{ absoluteStart: marker.start, partId: TIMELINE_MOTION_PART_ID, marker }] : [];
+      }
       const timelinePart = timeline.find((item) => item.id === selection.partId);
       const marker = timelinePart?.translationMarkers.find((item) => item.id === selection.markerId);
       return timelinePart && marker ? [{ absoluteStart: timelinePart.start + marker.start, partId: timelinePart.id, marker }] : [];
@@ -2594,16 +2962,16 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     return `${prefix}_${Date.now().toString(36)}_${index.toString(36)}`;
   }
 
-  function pasteTimelineNodes() {
+  function pasteTimelineNodes(targetStart?: number) {
     const clipboard = timelineNodeClipboardRef.current;
     if (!clipboard) return false;
 
-    const pasteStart = clamp(currentSceneTimeRef.current, 0, sceneDurationSeconds);
+    const pasteStart = clamp(targetStart ?? currentSceneTimeRef.current, 0, sceneDurationSeconds);
     const sourceStart = Math.min(...clipboard.nodes.map((node) => node.absoluteStart));
 
     if (clipboard.kind === "adjustment") {
       const pastedLayers = clipboard.nodes.map((node, index) => {
-        const start = clamp(pasteStart + node.absoluteStart - sourceStart, 0, Math.max(sceneDurationSeconds - node.layer.duration, 0));
+        const start = clamp(pasteStart + node.absoluteStart - sourceStart, 0, sceneDurationSeconds);
         return { ...node.layer, id: pastedTimelineNodeId("adj", index), name: `${node.layer.name} copy`, start: roundTenth(start) };
       });
       updateSceneAdjustmentLayers((layers) => overwriteAdjustmentLayers([...layers, ...pastedLayers], new Set(pastedLayers.map((layer) => layer.id))));
@@ -2613,10 +2981,16 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
 
     if (clipboard.kind === "zoom") {
       const pastedSelections: ZoomMarkerSelection[] = [];
+      if (clipboard.nodes.every((node) => node.partId === TIMELINE_MOTION_PART_ID)) {
+        const pastedMarkers = clipboard.nodes.map((node, index) => ({ ...node.marker, id: pastedTimelineNodeId("zom", index), start: roundTwo(clamp(pasteStart + node.absoluteStart - sourceStart, 0, sceneDurationSeconds)) }));
+        updateSceneMotionMarkers(({ zoomMarkers, translationMarkers }) => applySceneMotionMarkerOverwrite([...zoomMarkers, ...pastedMarkers], translationMarkers, new Set(pastedMarkers.map((marker) => marker.id))));
+        selectZoomMarkers(pastedMarkers.map((marker) => ({ partId: TIMELINE_MOTION_PART_ID, markerId: marker.id })));
+        return true;
+      }
       updateSceneParts((parts) => {
         const timelineParts = buildLinearTimeline({ ...scene, compositions: parts });
         const pastedSegments = clipboard.nodes.flatMap((node, index) => {
-          const absoluteStart = clamp(pasteStart + node.absoluteStart - sourceStart, 0, Math.max(sceneDurationSeconds - node.marker.duration, 0));
+          const absoluteStart = clamp(pasteStart + node.absoluteStart - sourceStart, 0, sceneDurationSeconds);
           const marker = { ...node.marker, id: pastedTimelineNodeId("zom", index) };
           return placeMotionMarkerOnTimeline(marker, absoluteStart, timelineParts);
         });
@@ -2634,10 +3008,16 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     }
 
     const pastedSelections: TranslationMarkerSelection[] = [];
+    if (clipboard.nodes.every((node) => node.partId === TIMELINE_MOTION_PART_ID)) {
+      const pastedMarkers = clipboard.nodes.map((node, index) => ({ ...node.marker, id: pastedTimelineNodeId("trn", index), start: roundTwo(clamp(pasteStart + node.absoluteStart - sourceStart, 0, sceneDurationSeconds)) }));
+      updateSceneMotionMarkers(({ zoomMarkers, translationMarkers }) => applySceneMotionMarkerOverwrite(zoomMarkers, [...translationMarkers, ...pastedMarkers], new Set(pastedMarkers.map((marker) => marker.id))));
+      selectTranslationMarkers(pastedMarkers.map((marker) => ({ partId: TIMELINE_MOTION_PART_ID, markerId: marker.id })));
+      return true;
+    }
     updateSceneParts((parts) => {
       const timelineParts = buildLinearTimeline({ ...scene, compositions: parts });
       const pastedSegments = clipboard.nodes.flatMap((node, index) => {
-        const absoluteStart = clamp(pasteStart + node.absoluteStart - sourceStart, 0, Math.max(sceneDurationSeconds - node.marker.duration, 0));
+        const absoluteStart = clamp(pasteStart + node.absoluteStart - sourceStart, 0, sceneDurationSeconds);
         const marker = { ...node.marker, id: pastedTimelineNodeId("trn", index) };
         return placeMotionMarkerOnTimeline(marker, absoluteStart, timelineParts);
       });
@@ -2658,6 +3038,19 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     pasteTimelineNodes();
   }
 
+  function openTimelineBlankContextMenu(event: ReactMouseEvent<HTMLElement>, target: TimelineBlankContextTarget) {
+    event.preventDefault();
+    event.stopPropagation();
+    const pasteStart = target.time;
+    setAppContextMenu({
+      x: event.clientX,
+      y: event.clientY,
+      items: [
+        { label: "Paste", action: () => { pasteTimelineNodes(pasteStart); }, disabled: !timelineNodeClipboardRef.current },
+      ],
+    });
+  }
+
   function openTimelineNodeContextMenu(event: ReactMouseEvent<HTMLElement>, target: TimelineNodeContextTarget) {
     event.preventDefault();
     event.stopPropagation();
@@ -2665,13 +3058,13 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     const targetAlreadySelected = target.kind === "adjustment"
       ? selectedAdjustmentLayers.some((selection) => selection.layerId === target.layerId) || selectedAdjustmentLayerId === target.layerId
       : target.kind === "part"
-        ? selectedPartId === target.partId && !selectedZoomMarker && !selectedTranslationMarker
+        ? selectedParts.some((selection) => selection.partId === target.partId) || selectedPartId === target.partId
         : target.kind === "zoom"
         ? selectedZoomMarkers.some((selection) => `${selection.partId}:${selection.markerId}` === targetKey) || (selectedZoomMarker?.partId === target.partId && selectedZoomMarker.markerId === target.markerId)
         : selectedTranslationMarkers.some((selection) => `${selection.partId}:${selection.markerId}` === targetKey) || (selectedTranslationMarker?.partId === target.partId && selectedTranslationMarker.markerId === target.markerId);
     const menuClipboard = targetAlreadySelected ? getSelectedTimelineNodeClipboard() : getTimelineNodeClipboardForTarget(target);
     if (target.kind === "adjustment") selectAdjustmentLayer(target.layerId);
-    if (target.kind === "part") selectPart(target.partId);
+    if (target.kind === "part" && !targetAlreadySelected) selectPart(target.partId);
     if (target.kind === "zoom") selectZoomMarker(target.partId, target.markerId);
     if (target.kind === "translation") selectTranslationMarker(target.partId, target.markerId);
     setAppContextMenu({
@@ -2688,9 +3081,9 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
           deleteTimelineClipboardNodes(menuClipboard);
           toast.success(`${menuClipboard.nodes.length} timeline node${menuClipboard.nodes.length === 1 ? "" : "s"} cut`);
         } },
-        { label: "Paste", action: pasteTimelineNodesSilently, disabled: !timelineNodeClipboardRef.current },
+        { label: "Paste", action: () => { pasteTimelineNodes(target.time); }, disabled: !timelineNodeClipboardRef.current },
         { label: "Delete", danger: true, action: () => {
-          if (target.kind === "part") deleteCompositionFromTimeline(target.partId);
+          if (target.kind === "part") deleteCompositionsFromTimeline(targetAlreadySelected ? selectedParts.map((selection) => selection.partId) : [target.partId]);
           if (target.kind !== "part" && menuClipboard) deleteTimelineClipboardNodes(menuClipboard);
         } },
       ],
@@ -2763,8 +3156,8 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   }
 
   function isMotionLayerVacant(layerId: string) {
-    return !timeline.some((timelinePart) => timelinePart.zoomMarkers.some((marker) => getZoomMarkerLayerId(marker) === layerId)
-      || timelinePart.translationMarkers.some((marker) => getTranslationMarkerLayerId(marker) === layerId));
+    return !(scene.zoomMarkers ?? []).some((marker) => getZoomMarkerLayerId(marker) === layerId)
+      && !(scene.translationMarkers ?? []).some((marker) => getTranslationMarkerLayerId(marker) === layerId);
   }
 
   function addMotionEffect(effectId: MotionEffectId, layerId: string, sceneTime: number) {
@@ -2782,8 +3175,6 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
       }), { history: true });
     }
 
-    const timelinePart = getTimelinePartAtTime(timeline, sceneTime) ?? timeline.find((item) => item.id !== sceneMotionPartId) ?? null;
-
     const duration = Math.min(markerDurationSeconds, Math.max(sceneDurationSeconds, 0.1));
     const absoluteStart = roundTenth(Math.max(sceneTime - duration / 2, 0));
     const markerIdPrefix = kind === "zoom" ? "zom" : kind === "rotate" ? "rot" : kind === "perspective" ? "prs" : "trn";
@@ -2795,30 +3186,13 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
       focus: selectedObject ? centerOf(selectedObject.bounds) : { x: FRAME_WIDTH / 2, y: FRAME_HEIGHT / 2 },
       position: selectedObject ? framePointToCameraTranslation(centerOf(selectedObject.bounds)) : { x: 0, y: 0 },
     });
-    const timelineParts = buildLinearTimeline(scene);
-
     if (kind === "zoom") {
       const zoomMarker = motionBlocksToZoomMarkers([marker])[0];
       if (!zoomMarker) return;
-      if (!timelinePart || timelinePart.id === sceneMotionPartId) {
-        updateProject((current) => ({
-          ...current,
-          timelines: (current.timelines ?? []).map((timeline) => timeline.id === scene.id ? { ...timeline, zoomMarkers: [...(timeline.zoomMarkers ?? []), { ...zoomMarker, start: absoluteStart, layerId }] } : timeline),
-        }), { history: true });
-        setSelectedZoomMarker({ partId: sceneMotionPartId, markerId: zoomMarker.id });
-        setSelectedZoomMarkers([{ partId: sceneMotionPartId, markerId: zoomMarker.id }]);
-        setSelectedTranslationMarker(null);
-        setSelectedTranslationMarkers([]);
-        return;
-      }
-      const zoomSegments = placeMotionMarkerOnTimeline(zoomMarker, absoluteStart, timelineParts, layerId, timelinePart.id);
-      const insertedIds = new Set(zoomSegments.map((segment) => segment.marker.id));
-      updateSceneParts((parts) => parts.map((item) => {
-        const itemSegments = zoomSegments.filter((segment) => segment.partId === item.id).map((segment) => segment.marker);
-        return itemSegments.length > 0 ? applyMotionMarkerOverwrite(item, [...item.zoomMarkers, ...itemSegments], item.translationMarkers, insertedIds) : item;
-      }));
-      const selection = zoomSegments.map((segment) => ({ partId: segment.partId, markerId: segment.marker.id }));
-      setSelectedZoomMarker(selection.at(-1) ?? { partId: timelinePart.id, markerId: marker.id });
+      const nextMarker = { ...zoomMarker, start: absoluteStart, layerId };
+      updateSceneMotionMarkers(({ zoomMarkers, translationMarkers }) => applySceneMotionMarkerOverwrite([...zoomMarkers, nextMarker], translationMarkers, new Set([nextMarker.id])));
+      const selection = [{ partId: TIMELINE_MOTION_PART_ID, markerId: nextMarker.id }];
+      setSelectedZoomMarker(selection[0]);
       setSelectedZoomMarkers(selection);
       setSelectedTranslationMarker(null);
       setSelectedTranslationMarkers([]);
@@ -2827,25 +3201,10 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
 
     const translationMarker = motionBlocksToTranslationMarkers([marker])[0];
     if (!translationMarker) return;
-    if (!timelinePart || timelinePart.id === sceneMotionPartId) {
-      updateProject((current) => ({
-        ...current,
-        timelines: (current.timelines ?? []).map((timeline) => timeline.id === scene.id ? { ...timeline, translationMarkers: [...(timeline.translationMarkers ?? []), { ...translationMarker, start: absoluteStart, layerId }] } : timeline),
-      }), { history: true });
-      setSelectedTranslationMarker({ partId: sceneMotionPartId, markerId: translationMarker.id });
-      setSelectedTranslationMarkers([{ partId: sceneMotionPartId, markerId: translationMarker.id }]);
-      setSelectedZoomMarker(null);
-      setSelectedZoomMarkers([]);
-      return;
-    }
-    const translationSegments = placeMotionMarkerOnTimeline(translationMarker, absoluteStart, timelineParts, layerId, timelinePart.id);
-    const insertedIds = new Set(translationSegments.map((segment) => segment.marker.id));
-    updateSceneParts((parts) => parts.map((item) => {
-      const itemSegments = translationSegments.filter((segment) => segment.partId === item.id).map((segment) => segment.marker);
-      return itemSegments.length > 0 ? applyMotionMarkerOverwrite(item, item.zoomMarkers, [...item.translationMarkers, ...itemSegments], insertedIds) : item;
-    }));
-    const selection = translationSegments.map((segment) => ({ partId: segment.partId, markerId: segment.marker.id }));
-    setSelectedTranslationMarker(selection.at(-1) ?? { partId: timelinePart.id, markerId: marker.id });
+    const nextMarker = { ...translationMarker, start: absoluteStart, layerId };
+    updateSceneMotionMarkers(({ zoomMarkers, translationMarkers }) => applySceneMotionMarkerOverwrite(zoomMarkers, [...translationMarkers, nextMarker], new Set([nextMarker.id])));
+    const selection = [{ partId: TIMELINE_MOTION_PART_ID, markerId: nextMarker.id }];
+    setSelectedTranslationMarker(selection[0]);
     setSelectedTranslationMarkers(selection);
     setSelectedZoomMarker(null);
     setSelectedZoomMarkers([]);
@@ -2860,12 +3219,12 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     return separatorIndex >= 0 ? { partId: key.slice(0, separatorIndex), markerId: key.slice(separatorIndex + 1) } : { partId: "", markerId: key };
   }
 
-  function getAbsoluteZoomMarkers(timelineParts = timeline) {
-    return timelineParts.flatMap((timelinePart) => timelinePart.zoomMarkers.map((marker) => ({ ...marker, id: timelineMarkerKey(timelinePart.id, marker.id), partId: timelinePart.id, start: timelinePart.start + marker.start })));
+  function getAbsoluteZoomMarkers() {
+    return (scene.zoomMarkers ?? []).map((marker) => ({ ...marker, id: timelineMarkerKey(TIMELINE_MOTION_PART_ID, marker.id), partId: TIMELINE_MOTION_PART_ID, start: marker.start }));
   }
 
-  function getAbsoluteTranslationMarkers(timelineParts = timeline) {
-    return timelineParts.flatMap((timelinePart) => timelinePart.translationMarkers.map((marker) => ({ ...marker, id: timelineMarkerKey(timelinePart.id, marker.id), partId: timelinePart.id, start: timelinePart.start + marker.start })));
+  function getAbsoluteTranslationMarkers() {
+    return (scene.translationMarkers ?? []).map((marker) => ({ ...marker, id: timelineMarkerKey(TIMELINE_MOTION_PART_ID, marker.id), partId: TIMELINE_MOTION_PART_ID, start: marker.start }));
   }
 
   function uniqueMarkerSelections(keys: string[]) {
@@ -3485,8 +3844,35 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     updateProject((current) => ({ ...current, assets: updateAssetTree(current.assets ?? defaultAssets, assetId, (item) => ({ ...item, name: name.trim() || item.name })) }));
   }
 
+  function nextNumberedName(baseName: string, siblingNames: Iterable<string>) {
+    const names = new Set(Array.from(siblingNames).map((name) => name.trim()).filter(Boolean));
+    if (!names.has(baseName)) return baseName;
+    let index = 2;
+    while (names.has(`${baseName} ${index}`)) index += 1;
+    return `${baseName} ${index}`;
+  }
+
+  function getAssetSiblingNames(items: AssetItem[], parentFolderId?: string) {
+    const siblings = parentFolderId ? findAsset(items, parentFolderId)?.children ?? [] : items;
+    return siblings.map((item) => item.name);
+  }
+
+  function getProjectFolderSiblingNames(parentFolderPath: string) {
+    const names = new Set<string>();
+    const addChildFolderName = (path: string) => {
+      if (path === parentFolderPath || !path.startsWith(`${parentFolderPath}/`)) return;
+      const name = path.slice(parentFolderPath.length + 1).split("/")[0]?.trim();
+      if (name) names.add(name);
+    };
+    for (const folder of projectRef.current.compositionFolders ?? []) addChildFolderName(folder);
+    for (const composition of projectRef.current.compositionLibrary ?? []) addChildFolderName(getDirectoryPath(composition.filePath));
+    for (const timeline of projectRef.current.timelines ?? []) addChildFolderName(getDirectoryPath(timeline.filePath ?? `${watchedProjectDirectory}/${timeline.id}.timeline.json`));
+    return names;
+  }
+
   function createAssetFolder(parentFolderId?: string) {
-    const folder = { id: `ast_folder_${Date.now().toString(36)}`, name: "New folder", kind: "folder" as const, children: [] };
+    const currentAssets = projectRef.current.assets ?? defaultAssets;
+    const folder = { id: `ast_folder_${Date.now().toString(36)}`, name: nextNumberedName("New folder", getAssetSiblingNames(currentAssets, parentFolderId)), kind: "folder" as const, children: [] };
     updateProject((current) => {
       const currentAssets = current.assets ?? defaultAssets;
       return { ...current, assets: parentFolderId ? appendAssetsToFolder(currentAssets, parentFolderId, [folder]) : [...currentAssets, folder] };
@@ -3558,25 +3944,26 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
       compositionLibrary: [...(current.compositionLibrary ?? []), composition],
       compositionFolders: Array.from(new Set([...(current.compositionFolders ?? []), folderPath])),
     }), { syncSources: false });
-    toast.success("Composition added to the library.");
   }
 
   function createCompositionFolder(parentFolderPath = watchedProjectDirectory) {
-    const folderPath = `${parentFolderPath}/new-folder-${Date.now().toString(36)}`;
+    const folderName = nextNumberedName("New folder", getProjectFolderSiblingNames(parentFolderPath));
+    const folderPath = `${parentFolderPath}/${folderName}`;
     updateProject((current) => ({ ...current, compositionFolders: Array.from(new Set([...(current.compositionFolders ?? []), folderPath])) }));
   }
 
   function createTimeline() {
     const timelineId = `tl_${nanoid(8)}`;
-    const firstComposition = compositionLibrary[0];
     updateProject((current) => ({
       ...current,
       timelines: [...(current.timelines ?? []), {
         id: timelineId,
         name: `Timeline ${(current.timelines?.length ?? current.scenes.length) + 1}`,
         filePath: `${watchedProjectDirectory}/${timelineId}.timeline.json`,
-        clips: firstComposition ? [{ id: firstComposition.id, compositionId: firstComposition.id, zoomMarkers: [], translationMarkers: [] }] : [],
+        clips: [],
         adjustmentLayers: [],
+        zoomMarkers: [],
+        translationMarkers: [],
         settings: {},
       }],
     }));
@@ -3872,6 +4259,111 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     setFramePreviewScale(roundTwo(clamp(nextScale, 0.25, 1)));
   }
 
+  function clampEditorLayout(layout: EditorLayoutState): EditorLayoutState {
+    const availablePanelWidth = Math.max(window.innerWidth - editorPanelLayoutLimits.centerMin, editorPanelLayoutLimits.leftMin + editorPanelLayoutLimits.rightMin);
+    const rightPanelWidth = Math.round(clamp(layout.rightPanelWidth, editorPanelLayoutLimits.rightMin, Math.min(editorPanelLayoutLimits.rightMax, availablePanelWidth - editorPanelLayoutLimits.leftMin)));
+    const leftPanelWidth = Math.round(clamp(layout.leftPanelWidth, editorPanelLayoutLimits.leftMin, Math.min(editorPanelLayoutLimits.leftMax, availablePanelWidth - rightPanelWidth)));
+    const timelineMax = Math.max(editorPanelLayoutLimits.timelineMin, Math.min(editorPanelLayoutLimits.timelineMax, window.innerHeight - 48 - 220));
+    const timelineHeight = Math.round(clamp(layout.timelineHeight, editorPanelLayoutLimits.timelineMin, timelineMax));
+    return { leftPanelWidth, rightPanelWidth, timelineHeight };
+  }
+
+  function clampComposeLayout(layout: ComposeLayoutState): ComposeLayoutState {
+    const currentLayout = projectRef.current.editorState?.layout ?? defaultEditorLayoutState;
+    const availablePanelWidth = Math.max(window.innerWidth - editorPanelLayoutLimits.centerMin, editorPanelLayoutLimits.leftMin + editorPanelLayoutLimits.rightMin);
+    const maxLeftPanelWidth = Math.min(editorPanelLayoutLimits.leftMax, availablePanelWidth - currentLayout.rightPanelWidth);
+    return { leftPanelWidth: Math.round(clamp(layout.leftPanelWidth, editorPanelLayoutLimits.leftMin, maxLeftPanelWidth)) };
+  }
+
+  function applyEditorLayoutCss(layout: EditorLayoutState) {
+    const root = appRootRef.current;
+    if (!root) return;
+    root.style.setProperty("--clipper-left-panel-width", `${layout.leftPanelWidth}px`);
+    root.style.setProperty("--clipper-right-panel-width", `${layout.rightPanelWidth}px`);
+    root.style.setProperty("--clipper-timeline-height", `${layout.timelineHeight}px`);
+  }
+
+  function applyComposeLayoutCss(layout: ComposeLayoutState) {
+    const root = appRootRef.current;
+    if (!root) return;
+    root.style.setProperty("--clipper-compose-left-panel-width", `${layout.leftPanelWidth}px`);
+  }
+
+  function updateEditorLayout(layout: EditorLayoutState) {
+    const nextLayout = clampEditorLayout(layout);
+    const currentLayout = projectRef.current.editorState?.layout ?? defaultEditorLayoutState;
+    if (JSON.stringify(nextLayout) === JSON.stringify(currentLayout)) return;
+    updateEditorState((state) => ({ ...state, layout: nextLayout }));
+    scheduleImplicitFileOperationSave(projectRef.current, "Unable to save layout.");
+  }
+
+  function updateComposeLayout(layout: ComposeLayoutState) {
+    const nextLayout = clampComposeLayout(layout);
+    const currentLayout = projectRef.current.editorState?.composeLayout ?? defaultComposeLayoutState;
+    if (JSON.stringify(nextLayout) === JSON.stringify(currentLayout)) return;
+    updateEditorState((state) => ({ ...state, composeLayout: nextLayout }));
+    scheduleImplicitFileOperationSave(projectRef.current, "Unable to save compose layout.");
+  }
+
+  function startEditorPanelResize(event: PointerEvent<HTMLDivElement>, kind: EditorPanelResizeKind) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+
+    const initialLayout = clampEditorLayout(projectRef.current.editorState?.layout ?? defaultEditorLayoutState);
+    const initialComposeLayout = clampComposeLayout(projectRef.current.editorState?.composeLayout ?? defaultComposeLayoutState);
+    const drag: EditorPanelResizeDrag = { kind, originX: event.clientX, originY: event.clientY, initialLayout, initialComposeLayout, nextLayout: initialLayout, nextComposeLayout: initialComposeLayout, frame: 0 };
+    editorPanelResizeRef.current = drag;
+    document.body.style.cursor = kind === "timeline" ? "row-resize" : "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("pointermove", onEditorPanelResizeMove, true);
+    window.addEventListener("pointerup", onEditorPanelResizeEnd, true);
+    window.addEventListener("pointercancel", onEditorPanelResizeEnd, true);
+  }
+
+  function onEditorPanelResizeMove(event: globalThis.PointerEvent) {
+    const drag = editorPanelResizeRef.current;
+    if (!drag) return;
+
+    const deltaX = event.clientX - drag.originX;
+    const deltaY = event.clientY - drag.originY;
+    const nextLayout = clampEditorLayout({
+      ...drag.initialLayout,
+      leftPanelWidth: drag.kind === "left" ? drag.initialLayout.leftPanelWidth + deltaX : drag.initialLayout.leftPanelWidth,
+      rightPanelWidth: drag.kind === "right" ? drag.initialLayout.rightPanelWidth - deltaX : drag.initialLayout.rightPanelWidth,
+      timelineHeight: drag.kind === "timeline" ? drag.initialLayout.timelineHeight - deltaY : drag.initialLayout.timelineHeight,
+    });
+    const nextComposeLayout = clampComposeLayout({
+      ...drag.initialComposeLayout,
+      leftPanelWidth: drag.kind === "compose-left" ? drag.initialComposeLayout.leftPanelWidth + deltaX : drag.initialComposeLayout.leftPanelWidth,
+    });
+    drag.nextLayout = nextLayout;
+    drag.nextComposeLayout = nextComposeLayout;
+    if (drag.frame) return;
+
+    drag.frame = requestAnimationFrame(() => {
+      drag.frame = 0;
+      applyEditorLayoutCss(drag.nextLayout);
+      applyComposeLayoutCss(drag.nextComposeLayout);
+    });
+  }
+
+  function onEditorPanelResizeEnd() {
+    const drag = editorPanelResizeRef.current;
+    if (!drag) return;
+    if (drag.frame) cancelAnimationFrame(drag.frame);
+    applyEditorLayoutCss(drag.nextLayout);
+    applyComposeLayoutCss(drag.nextComposeLayout);
+    if (drag.kind === "compose-left") updateComposeLayout(drag.nextComposeLayout);
+    else updateEditorLayout(drag.nextLayout);
+    editorPanelResizeRef.current = null;
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+    window.removeEventListener("pointermove", onEditorPanelResizeMove, true);
+    window.removeEventListener("pointerup", onEditorPanelResizeEnd, true);
+    window.removeEventListener("pointercancel", onEditorPanelResizeEnd, true);
+  }
+
   async function enterFrameFullscreen() {
     updateMode("interactive");
     setPresentationMode("frame");
@@ -3942,7 +4434,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     });
   }
 
-  const fileManagerProps: FileManagerProps = {
+  const fileManagerProps: FileManagerWorkspaceProps = buildFileManagerWorkspaceProps({
     assets,
     compositions: compositionLibrary,
     compositionFolders: project.compositionFolders ?? [],
@@ -3950,35 +4442,48 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     fileManagerState: project.editorState?.fileManagerState,
     timelines,
     timelineCompositionIds,
-    onAddComposition: addCompositionFromLibrary,
-    onApplyTreeSnapshot: implicitFileOperation(applyFileManagerTreeSnapshot),
-    onCopyAsset: copyAssetPath,
-    onCopyCompositionPath: copyCompositionPath,
-    onCreateComposition: implicitFileOperation(createComposition),
-    onCreateCompositionFolder: implicitFileOperation(createCompositionFolder),
-    onCreateFolder: implicitFileOperation(createAssetFolder),
-    onCreateTimeline: implicitFileOperation(createTimeline),
-    onDeleteAsset: implicitFileOperation(deleteAsset),
-    onDeleteComposition: implicitFileOperation(deleteCompositionFile),
-    onDeleteCompositionFolder: implicitFileOperation(deleteCompositionFolder),
-    onDeleteTimeline: implicitFileOperation(deleteTimeline),
-    onDropFiles: implicitFileOperation(importDroppedAssets),
-    onDuplicateAsset: implicitFileOperation(duplicateAsset),
-    onDuplicateComposition: implicitFileOperation(duplicateComposition),
-    onFileManagerStateChange: updateFileManagerState,
-    onMoveComposition: implicitFileOperation(moveComposition),
-    onMoveTimeline: implicitFileOperation(moveTimeline),
-    onRenameAsset: implicitFileOperation(renameAsset),
-    onRenameComposition: implicitFileOperation(renameComposition),
-    onRenameCompositionFolder: implicitFileOperation(renameCompositionFolder),
-    onRenameTimeline: implicitFileOperation(renameTimeline),
-    onRevealAssetRoot: revealAssetRoot,
-    onRevealComposition: revealComposition,
-    onRevealCompositionFolder: revealCompositionFolder,
-    onSelectTimeline: selectTimeline,
-    onSortAssets: implicitFileOperation(sortAssets),
-  };
-  const presentationStyle = { "--clipper-presentation-scale": presentationScale } as CSSProperties;
+    actions: {
+      addComposition: addCompositionFromLibrary,
+      applyTreeSnapshot: implicitFileOperation(applyFileManagerTreeSnapshot),
+      copyAsset: copyAssetPath,
+      copyCompositionPath,
+      createComposition: implicitFileOperation(createComposition),
+      createCompositionFolder: implicitFileOperation(createCompositionFolder),
+      createFolder: implicitFileOperation(createAssetFolder),
+      createTimeline: implicitFileOperation(createTimeline),
+      deleteAsset: implicitFileOperation(deleteAsset),
+      deleteComposition: implicitFileOperation(deleteCompositionFile),
+      deleteCompositionFolder: implicitFileOperation(deleteCompositionFolder),
+      deleteTimeline: implicitFileOperation(deleteTimeline),
+      dropFiles: implicitFileOperation(importDroppedAssets),
+      duplicateAsset: implicitFileOperation(duplicateAsset),
+      duplicateComposition: implicitFileOperation(duplicateComposition),
+      fileManagerStateChange: updateFileManagerState,
+      moveComposition: implicitFileOperation(moveComposition),
+      moveTimeline: implicitFileOperation(moveTimeline),
+      renameAsset: implicitFileOperation(renameAsset),
+      renameComposition: implicitFileOperation(renameComposition),
+      renameCompositionFolder: implicitFileOperation(renameCompositionFolder),
+      renameTimeline: implicitFileOperation(renameTimeline),
+      revealAssetRoot,
+      revealComposition,
+      revealCompositionFolder,
+      selectTimeline,
+      sortAssets: implicitFileOperation(sortAssets),
+    },
+  });
+  const editorLayout = project.editorState?.layout ?? defaultEditorLayoutState;
+  const composeLayout = project.editorState?.composeLayout ?? defaultComposeLayoutState;
+  const composeMode = timelineMode === "compose";
+  const appShellStyle = {
+    "--clipper-left-panel-width": `${editorLayout.leftPanelWidth}px`,
+    "--clipper-compose-left-panel-width": `${composeLayout.leftPanelWidth}px`,
+    "--clipper-right-panel-width": `${editorLayout.rightPanelWidth}px`,
+    "--clipper-timeline-height": `${editorLayout.timelineHeight}px`,
+    "--clipper-presentation-scale": presentationScale,
+    gridTemplateRows: `48px minmax(0, 1fr) var(--clipper-timeline-height)`,
+  } as CSSProperties;
+  const editorShellStyle = { gridTemplateColumns: `${composeMode ? "var(--clipper-compose-left-panel-width)" : "var(--clipper-left-panel-width)"} minmax(640px, 1fr) var(--clipper-right-panel-width)` } as CSSProperties;
   const presentationTime = presentationMode ? presentationDisplayTime : currentSceneTime;
   const presentationProgress = sceneDurationSeconds > 0 ? `${clamp(presentationTime / sceneDurationSeconds, 0, 1) * 100}%` : "0%";
   const presentationScrubberStyle = { "--clipper-presentation-progress": presentationProgress } as CSSProperties;
@@ -3986,6 +4491,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   const playbackDisplayTime = clamp(getTimeSensitiveDisplayTime(currentSceneTime, visibleSceneAdjustmentLayers), 0, playbackDisplayDuration);
   const playbackProgress = playbackDisplayDuration > 0 ? `${clamp(playbackDisplayTime / playbackDisplayDuration, 0, 1) * 100}%` : "0%";
   const playbackScrubberStyle = { "--clipper-playback-progress": playbackProgress } as CSSProperties;
+  const blankFrameViewportStyle = { width: FRAME_WIDTH * framePreviewScale, height: FRAME_HEIGHT * framePreviewScale } as CSSProperties;
   const adjustmentPickLayer = pointPickAdjustment ? scene.adjustmentLayers?.find((layer) => layer.id === pointPickAdjustment.layerId) : null;
   const adjustmentFramePickPoint = pointPickAdjustment && adjustmentPickLayer ? getAdjustmentPointControlFramePoint(adjustmentPickLayer, pointPickAdjustment.control) : null;
   const activeFramePickPoint = pointPickAdjustment ? framePickPreviewPoint ?? adjustmentFramePickPoint : framePickPoint;
@@ -4002,7 +4508,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
 
   return (
     <>
-    <main ref={appRootRef} className="grid h-screen grid-rows-[48px_minmax(0,1fr)_340px] bg-[#12141a] text-[#f7f7f8]" data-clipper-frame-presentation={presentationMode ?? undefined} style={presentationStyle} onPointerMove={presentationMode ? showPresentationControls : undefined}>
+    <main ref={appRootRef} className="relative grid h-screen bg-[#12141a] text-[#f7f7f8]" data-clipper-frame-presentation={presentationMode ?? undefined} style={appShellStyle} onPointerMove={presentationMode ? showPresentationControls : undefined}>
       <header className={`${appDragRegion} grid grid-cols-[220px_1fr_430px] items-center gap-[18px] border-b border-[#2d313b] bg-[rgba(22,24,31,0.98)] px-[22px]`}>
         <div />
         <div className={`${appNoDragRegion} flex min-w-0 items-baseline justify-center gap-2 justify-self-center text-center leading-none`} onContextMenu={openProjectTitleMenu} title="Right-click to rename project">
@@ -4018,19 +4524,25 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
         </div>
       </header>
 
-      <section className="grid min-h-0 grid-cols-[286px_minmax(640px,1fr)_350px] border-b border-[#2d313b]" data-clipper-editor-shell>
+      <section className="relative grid min-h-0 border-b border-[#2d313b]" data-clipper-editor-shell style={editorShellStyle}>
         <aside className="flex min-h-0 flex-col overflow-hidden border-r border-[#2d313b] bg-[#171920] p-4">
-          <div className="mb-4 grid shrink-0 grid-cols-2 gap-1">
-            <button className={`${segmentedTabBase} flex items-center justify-center gap-1.5 ${leftPanelTab === "assets" ? segmentedTabActive : segmentedTabInactive}`} onClick={() => setLeftPanelTab("assets")}><Folder size={14} />Assets</button>
-            <button className={`${segmentedTabBase} flex items-center justify-center gap-1.5 ${leftPanelTab === "tools" ? segmentedTabActive : segmentedTabInactive}`} onClick={() => setLeftPanelTab("tools")}><Sparkles size={14} />Effects</button>
-          </div>
-          <div className={`min-h-0 flex-1 overflow-hidden ${leftPanelTab === "assets" ? "grid" : "hidden"}`} aria-hidden={leftPanelTab !== "assets"}>
-            <FileManager {...fileManagerProps} />
-          </div>
-          <div className={`min-h-0 flex-1 overflow-hidden ${leftPanelTab === "tools" ? "grid" : "hidden"}`} aria-hidden={leftPanelTab !== "tools"}>
-            <ToolsPanel effectsPanelState={project.editorState?.effectsPanelState} timelineMode={timelineMode} onEffectsPanelStateChange={updateEffectsPanelState} />
-          </div>
+          {composeMode ? (
+            hasActiveComposition ? <ComposeLayersPanel part={part} selectedObjectIds={selectionPayload?.objects.map((object) => object.id) ?? (selectedObjectId ? [selectedObjectId] : [])} onSelectObjects={selectComposeLayerObjects} onHoverObject={() => undefined} onReorderObjects={reorderComposeObjects} /> : <div className="grid h-full place-items-center rounded-[14px] border border-[#2d313b] bg-[#111319]/72 p-5 text-center text-sm font-bold text-[#737884]">Move the playhead over a composition to inspect its layers.</div>
+          ) : <>
+            <div className="mb-4 grid shrink-0 grid-cols-2 gap-1">
+              <button className={`${segmentedTabBase} flex items-center justify-center gap-1.5 ${leftPanelTab === "assets" ? segmentedTabActive : segmentedTabInactive}`} onClick={() => setLeftPanelTab("assets")}><Folder size={14} />Assets</button>
+              <button className={`${segmentedTabBase} flex items-center justify-center gap-1.5 ${leftPanelTab === "tools" ? segmentedTabActive : segmentedTabInactive}`} onClick={() => setLeftPanelTab("tools")}><Sparkles size={14} />Effects</button>
+            </div>
+            <div className={`min-h-0 flex-1 overflow-hidden ${leftPanelTab === "assets" ? "grid" : "hidden"}`} aria-hidden={leftPanelTab !== "assets"}>
+              <FileManagerWorkspace {...fileManagerProps} />
+            </div>
+            <div className={`min-h-0 flex-1 overflow-hidden ${leftPanelTab === "tools" ? "grid" : "hidden"}`} aria-hidden={leftPanelTab !== "tools"}>
+              <ToolsPanel effectsPanelState={project.editorState?.effectsPanelState} timelineMode={timelineMode} onEffectsPanelStateChange={updateEffectsPanelState} />
+            </div>
+          </>}
         </aside>
+
+        <div aria-label={composeMode ? "Resize compose layers panel" : "Resize left panel"} className="absolute inset-y-0 z-30 w-2 -translate-x-1 cursor-col-resize bg-transparent transition hover:bg-[rgb(var(--clipper-accent-rgb)/0.18)]" role="separator" style={{ left: composeMode ? "var(--clipper-compose-left-panel-width)" : "var(--clipper-left-panel-width)" }} onPointerDown={(event) => startEditorPanelResize(event, composeMode ? "compose-left" : "left")} />
 
         <section className="grid min-h-0 min-w-0 grid-rows-[58px_minmax(0,1fr)_58px] bg-[radial-gradient(circle_at_50%_45%,rgb(var(--clipper-accent-rgb)/0.10),transparent_30%),#141821]" data-clipper-preview-column onPointerEnter={() => setPreviewColumnHovered(true)} onPointerLeave={() => setPreviewColumnHovered(false)}>
           <div className="grid place-items-center border-b border-[#2d313b] px-[18px]" data-clipper-preview-toolbar>
@@ -4083,10 +4595,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
               />
             ) : null}
             {mode === "interactive" && !hasActiveComposition ? (
-              <div className="grid max-w-[420px] gap-2 rounded-2xl border border-[#2d313b] bg-[#171920]/90 p-6 text-center shadow-2xl">
-                <strong className="text-sm text-[#f7f7f8]">Timeline has no compositions</strong>
-                <p className="text-xs leading-5 text-[#9b9da7]">Add or drag a composition into this timeline to enable preview and editing.</p>
-              </div>
+              <div className="relative overflow-hidden bg-black shadow-[0_22px_70px_rgba(0,0,0,0.44)]" aria-label="Blank preview frame" data-clipper-blank-frame-preview style={blankFrameViewportStyle} />
             ) : null}
             {mode === "code" && hasActiveComposition ? (
               <div className="min-h-0 h-full w-full">
@@ -4150,73 +4659,85 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
           </section>
           {validationErrors.length > 0 ? <section className="mb-5 grid gap-2.5 text-[#ffbf66]"><h2 className={sectionTitle}>Validation</h2>{validationErrors.map((error) => <p key={error}>{error}</p>)}</section> : null}
         </aside>
+
+        <div aria-label="Resize right panel" className="absolute inset-y-0 right-[var(--clipper-right-panel-width)] z-30 w-2 translate-x-1 cursor-col-resize bg-transparent transition hover:bg-[rgb(var(--clipper-accent-rgb)/0.18)]" role="separator" onPointerDown={(event) => startEditorPanelResize(event, "right")} />
       </section>
 
-      <TimelinePanel
-        timelineName={activeTimelineName}
-        currentSceneTime={currentSceneTime}
-        isPlaying={isPlaying}
-        playbackPlayheadRef={playbackPlayheadRef}
-        scrubbingRef={timelineScrubbingRef}
-        fastSelectEnabled={fastSelectEnabled}
-        scrubCommitThrottleMs={scrubCommitThrottleMs}
-        defaultNewMarkerDurationSeconds={markerDurationSeconds}
-        timelineEndPaddingFraction={timelineEndPaddingFraction}
-        scrubSnapEnabled={scrubSnapEnabled}
-        sceneDuration={sceneDurationSeconds}
-        selectedPartId={selectedPartId}
-        selectedZoomMarkerPartId={selectedZoomMarker?.partId ?? null}
-        selectedZoomMarkerId={selectedZoomMarker?.markerId ?? null}
-        selectedZoomMarkers={selectedZoomMarkers}
-        selectedTranslationMarkerPartId={selectedTranslationMarker?.partId ?? null}
-        selectedTranslationMarkerId={selectedTranslationMarker?.markerId ?? null}
-        selectedTranslationMarkers={selectedTranslationMarkers}
-        selectedAdjustmentLayerId={selectedAdjustmentLayerId}
-        selectedAdjustmentLayers={selectedAdjustmentLayers}
-        mode={timelineMode}
-        timelineViewportState={project.editorState?.timeline ?? defaultTimelineViewportState}
-        timeline={timeline}
-        timelineLayers={timelineLayers}
-        adjustmentLayers={scene.adjustmentLayers ?? []}
-        onModeChange={updateTimelineMode}
-        onTimelineViewportStateChange={updateTimelineViewportState}
-        onTimelineLayersChange={updateTimelineLayers}
-        onAddCompositionLayer={addCompositionTimelineLayer}
-        onRemoveCompositionLayer={removeCompositionTimelineLayer}
-        onAddAdjustmentLayer={addAdjustmentTimelineLayer}
-        onRemoveAdjustmentLayer={removeAdjustmentTimelineLayer}
-        onAddMotionLayer={addMotionLayer}
-        onRemoveMotionLayer={removeMotionLayer}
-        onSelectPart={selectPart}
-        onSelectZoomMarker={selectZoomMarker}
-        onSelectZoomMarkers={selectZoomMarkers}
-        onSelectTranslationMarker={selectTranslationMarker}
-        onSelectTranslationMarkers={selectTranslationMarkers}
-        onSelectAdjustmentLayer={selectAdjustmentLayer}
-        onSelectAdjustmentLayers={selectAdjustmentLayers}
-        onSelectTimelineNodes={selectTimelineNodes}
-        onClearTimelineSelection={clearNodeSelection}
-        onOpenNodeContextMenu={openTimelineNodeContextMenu}
-        onMoveAdjustmentLayer={moveAdjustmentLayer}
-        onUpdateAdjustmentLayer={updateAdjustmentLayer}
-        onReorderPart={reorderPart}
-        onMoveComposition={moveCompositionMarker}
-        onUpdateComposition={updateCompositionMarker}
-        onMoveZoomMarker={moveZoomMarker}
-        onMoveZoomMarkers={moveZoomMarkers}
-        onMoveTranslationMarker={moveTranslationMarker}
-        onMoveTranslationMarkers={moveTranslationMarkers}
-        onScrub={scrubToSceneTime}
-        onScrubStart={pausePlaybackForTimelineScrub}
-        onScrubEnd={resumePlaybackAfterTimelineScrub}
-        onUpdateZoomMarkers={updateZoomMarkers}
-        onUpdateTranslationMarkers={updateTranslationMarkers}
-        onResizeZoomMarkers={resizeZoomMarkers}
-        onResizeTranslationMarkers={resizeTranslationMarkers}
-        onAddComposition={addCompositionFromLibrary}
-        onAddAdjustmentEffect={addAdjustmentLayerAt}
-        onAddMotionEffect={addMotionEffect}
-      />
+      <div aria-label="Resize timeline panel" className="absolute inset-x-0 bottom-[calc(var(--clipper-timeline-height)-4px)] z-40 h-2 cursor-row-resize bg-transparent transition hover:bg-[rgb(var(--clipper-accent-rgb)/0.18)]" role="separator" onPointerDown={(event) => startEditorPanelResize(event, "timeline")} />
+
+      <TimelineProvider panelProps={{
+        timelineName: activeTimelineName,
+        currentSceneTime,
+        isPlaying,
+        playbackPlayheadRef,
+        scrubbingRef: timelineScrubbingRef,
+        fastSelectEnabled,
+        scrubCommitThrottleMs,
+        defaultNewMarkerDurationSeconds: markerDurationSeconds,
+        timelineEndPaddingFraction,
+        scrubSnapEnabled,
+        sceneDuration: sceneDurationSeconds,
+        selectedPartId,
+        selectedParts,
+        selectedZoomMarkerPartId: selectedZoomMarker?.partId ?? null,
+        selectedZoomMarkerId: selectedZoomMarker?.markerId ?? null,
+        selectedZoomMarkers,
+        selectedTranslationMarkerPartId: selectedTranslationMarker?.partId ?? null,
+        selectedTranslationMarkerId: selectedTranslationMarker?.markerId ?? null,
+        selectedTranslationMarkers,
+        selectedAdjustmentLayerId,
+        selectedAdjustmentLayers,
+        mode: timelineMode,
+        timelineViewportState: project.editorState?.timeline ?? defaultTimelineViewportState,
+        timeline,
+        zoomMarkers: scene.zoomMarkers ?? [],
+        translationMarkers: scene.translationMarkers ?? [],
+        timelineLayers,
+        adjustmentLayers: scene.adjustmentLayers ?? [],
+        onModeChange: updateTimelineMode,
+        onTimelineViewportStateChange: updateTimelineViewportState,
+        onTimelineLayersChange: updateTimelineLayers,
+        onAddCompositionLayer: addCompositionTimelineLayer,
+        onRemoveCompositionLayer: removeCompositionTimelineLayer,
+        onAddAdjustmentLayer: addAdjustmentTimelineLayer,
+        onRemoveAdjustmentLayer: removeAdjustmentTimelineLayer,
+        onAddMotionLayer: addMotionLayer,
+        onRemoveMotionLayer: removeMotionLayer,
+        onSelectPart: selectPart,
+        onOpenComposePart: openComposePart,
+        onSelectZoomMarker: selectZoomMarker,
+        onSelectZoomMarkers: selectZoomMarkers,
+        onSelectTranslationMarker: selectTranslationMarker,
+        onSelectTranslationMarkers: selectTranslationMarkers,
+        onSelectAdjustmentLayer: selectAdjustmentLayer,
+        onSelectAdjustmentLayers: selectAdjustmentLayers,
+        onSelectTimelineNodes: selectTimelineNodes,
+        onClearTimelineSelection: clearNodeSelection,
+        onOpenNodeContextMenu: openTimelineNodeContextMenu,
+        onOpenBlankContextMenu: openTimelineBlankContextMenu,
+        onMoveAdjustmentLayer: moveAdjustmentLayer,
+        onUpdateAdjustmentLayer: updateAdjustmentLayer,
+        onReorderPart: reorderPart,
+        onMoveComposition: moveCompositionMarker,
+        onMoveCompositions: moveCompositionMarkers,
+        onUpdateComposition: updateCompositionMarker,
+        onMoveZoomMarker: moveZoomMarker,
+        onMoveZoomMarkers: moveZoomMarkers,
+        onMoveTranslationMarker: moveTranslationMarker,
+        onMoveTranslationMarkers: moveTranslationMarkers,
+        onScrub: scrubToSceneTime,
+        onScrubStart: pausePlaybackForTimelineScrub,
+        onScrubEnd: resumePlaybackAfterTimelineScrub,
+        onUpdateZoomMarkers: updateZoomMarkers,
+        onUpdateTranslationMarkers: updateTranslationMarkers,
+        onResizeZoomMarkers: resizeZoomMarkers,
+        onResizeTranslationMarkers: resizeTranslationMarkers,
+        onAddComposition: addCompositionFromLibrary,
+        onAddAdjustmentEffect: addAdjustmentLayerAt,
+        onAddMotionEffect: addMotionEffect,
+      }}>
+        <ConnectedTimelinePanel />
+      </TimelineProvider>
     </main>
     <ExportMediaDialog
       activeTab={exportDialogTab}

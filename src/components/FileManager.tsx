@@ -1,11 +1,12 @@
 import { ChartNoAxesGantt, ChevronDown, ChevronRight, Clapperboard, File as FileIcon, Folder, Plus } from "lucide-react";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type PropsWithChildren } from "react";
-import { SimpleTree, Tree, type CursorProps, type DragPreviewProps, type MoveHandler, type NodeApi, type NodeRendererProps, type RowRendererProps, type TreeApi } from "react-arborist";
+import { SimpleTree, Tree, type CursorProps, type DragPreviewProps, type MoveHandler, type NodeApi, type NodeRendererProps, type TreeApi } from "react-arborist";
 import type { ContextMenuItem, ContextMenuState } from "../app/types";
 import { getParentAssetId, type AssetSortMode } from "../core/assetTree";
 import type { AssetItem, CompositionClip, FileManagerState, FileManagerStateNode, TimelineDocument } from "../core/types";
 import { compositionDragPreviewEvent, compositionPointerDragEvent, startClipperPointerDrag } from "../lib/pointerDrag";
 import { AppContextMenu } from "./AppContextMenu";
+import { ArboristClickRow } from "./tree/ArboristClickRow";
 import { Input } from "./ui/input";
 
 type ProjectFileTreeNode =
@@ -194,15 +195,31 @@ function FileManagerPanel() {
   function handleFileManagerKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
     const target = event.target;
     if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement || (target instanceof HTMLElement && target.isContentEditable)) return;
-    if (event.key !== "Backspace" || (!event.metaKey && !event.ctrlKey)) return;
-    if (!selectedNodeIds.length) return;
+    deleteSelectedFileManagerNodes(event);
+  }
+
+  function deleteSelectedFileManagerNodes(event: Pick<ReactKeyboardEvent<HTMLElement> | KeyboardEvent, "ctrlKey" | "key" | "metaKey" | "preventDefault" | "stopPropagation">) {
+    if (event.key !== "Backspace" || (!event.metaKey && !event.ctrlKey)) return false;
+    if (!selectedNodeIds.length) return false;
 
     const nodes = getTopLevelSelectedFileTreeNodes(buildUnifiedFileTree(compositions, compositionFolders, compositionRootPath, timelines, assets), selectedNodeIds);
-    if (!nodes.length) return;
+    if (!nodes.length) return false;
     event.preventDefault();
     event.stopPropagation();
     deleteFileTreeNodes(nodes, timelines.length, { onDeleteAsset, onDeleteComposition, onDeleteCompositionFolder, onDeleteTimeline });
+    return true;
   }
+
+  useEffect(() => {
+    function onWindowKeyDown(event: KeyboardEvent) {
+      const target = event.target;
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement || (target instanceof HTMLElement && target.isContentEditable)) return;
+      deleteSelectedFileManagerNodes(event);
+    }
+
+    window.addEventListener("keydown", onWindowKeyDown, true);
+    return () => window.removeEventListener("keydown", onWindowKeyDown, true);
+  }, [assets, compositions, compositionFolders, compositionRootPath, onDeleteAsset, onDeleteComposition, onDeleteCompositionFolder, onDeleteTimeline, selectedNodeIds, timelines]);
 
   return (
     <section ref={managerRef} className="min-h-0 min-w-0 overflow-auto rounded-[14px] border border-dashed border-[#303646] bg-[#151821] p-3" onContextMenu={openProjectMenu} onDragOver={handleProjectDragOver} onDrop={handleProjectDrop} onKeyDown={handleFileManagerKeyDown} onPointerDown={handleFileManagerPointerDown}>
@@ -432,16 +449,13 @@ function isFileManagerInteractiveTarget(target: HTMLElement) {
   return Boolean(target.closest("button,input,textarea,select,[contenteditable='true'],[data-file-manager-row='true']"));
 }
 
-function FileManagerTreeRow({ attrs, children, innerRef, node }: RowRendererProps<FileManagerTreeNode>) {
+function FileManagerTreeRow(props: Parameters<typeof ArboristClickRow<FileManagerTreeNode>>[0]) {
   const { onSelectTimeline } = useFileManager();
 
-  return <div {...attrs} ref={innerRef} onFocus={(event) => event.stopPropagation()} onClick={(event) => {
-    node.handleClick(event);
+  return <ArboristClickRow {...props} onClick={(event, node) => {
     if (!event.metaKey && !event.shiftKey && isFileTreeFolderNode(node.data)) node.toggle();
     if (node.data.kind === "timeline" && !event.metaKey && !event.shiftKey) onSelectTimeline(node.data.timeline.id);
-  }}>
-    {children}
-  </div>;
+  }} />;
 }
 
 function UnifiedTreeNode({ dragHandle, node, style }: NodeRendererProps<FileManagerTreeNode>) {
@@ -496,16 +510,16 @@ function UnifiedTreeNode({ dragHandle, node, style }: NodeRendererProps<FileMana
   }
 
   const Icon = data.kind === "asset-file" ? FileIcon : data.kind === "timeline" ? ChartNoAxesGantt : data.kind === "composition" ? Clapperboard : Folder;
-  const label = data.kind === "timeline" ? `${data.name}.timeline` : data.name;
+  const label = data.name;
 
   function startCompositionDrag(event: ReactPointerEvent<HTMLDivElement>) {
     if (data.kind !== "composition" || node.isEditing) return;
-    event.stopPropagation();
+    const isEmpty = data.composition.objects.length === 0 && data.composition.background.elements.length === 0;
     startClipperPointerDrag({
       accent: "#38a86d",
       eventName: compositionPointerDragEvent,
       label: data.name,
-      payload: { compositionId: data.composition.id, duration: data.composition.duration, label: data.name },
+      payload: { compositionId: data.composition.id, duration: data.composition.duration, isEmpty, label: data.name, sourceMissing: Boolean(data.composition.sourceMissing) },
       pointerEvent: event,
       previewEventName: compositionDragPreviewEvent,
     });
@@ -551,7 +565,7 @@ function UnifiedTreeDragPreview({ id, isDragging, mouse, nodes, onDragPositionCh
   const Icon = node.kind === "asset-file" ? FileIcon : node.kind === "timeline" ? ChartNoAxesGantt : node.kind === "composition" ? Clapperboard : Folder;
   return <div className="pointer-events-none fixed z-[9999] inline-grid max-w-[260px] grid-cols-[16px_minmax(0,1fr)] items-center gap-2 rounded-[8px] border border-[var(--clipper-accent)] bg-[#242128] px-2.5 py-1.5 text-xs font-bold text-[#f2f3f7] shadow-2xl" style={{ left: mouse.x + 12, top: mouse.y + 12 }}>
     <Icon size={15} />
-    <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{node.kind === "timeline" ? `${node.name}.timeline` : node.name}</span>
+    <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{node.name}</span>
   </div>;
 }
 

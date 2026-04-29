@@ -60,6 +60,13 @@ describe("render runtime", () => {
     expect(advanceTimeSensitiveSceneTime(5, 2, 23, layers, 30)).toBe(6);
   });
 
+  it("advances the scene playhead eight times faster inside speed changes", () => {
+    const layers = [{ id: "adj", name: "Speed", start: 5, duration: 7, effect: { effectId: "clipper.adjustment.speedChange" as const, params: { speed: 8 } } }];
+
+    expect(advanceTimeSensitiveSceneTime(5, 0.25, 23, layers, 30)).toBe(7);
+    expect(advanceTimeSensitiveSceneTime(5, 0.875, 23, layers, 30)).toBe(12);
+  });
+
   it("does not expand player display time for non-time-sensitive adjustments", () => {
     const layers = [{ id: "adj", name: "Freeze", start: 5, duration: 5, effect: { effectId: "clipper.adjustment.freezeFrame" as const, params: {} } }];
 

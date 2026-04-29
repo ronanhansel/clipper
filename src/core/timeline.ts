@@ -1,42 +1,17 @@
 import { defaultZoomDuration, minimumZoomDuration } from "./editorConstants";
 import { getAdjustmentEffectPackage } from "./effects/registry";
 import { getMotionBlockEffectKind } from "./motionEffects";
-import { FRAME_HEIGHT, FRAME_WIDTH, MAX_PART_DURATION_SECONDS, MAX_SCENE_DURATION_SECONDS, type AdjustmentLayer, type CompositionClip, type MotionEffectKind, type Scene, type TimelineComposition, type TimelineLayerState, type TimelineMotionLayerKind, type TimelineMotionLayerState, type TimelinePart, type TranslationMarker, type ZoomMarker } from "./types";
+import { MAX_PART_DURATION_SECONDS, MAX_SCENE_DURATION_SECONDS, type AdjustmentLayer, type CompositionClip, type MotionEffectKind, type Scene, type TimelineComposition, type TimelineLayerState, type TimelineMotionLayerKind, type TimelineMotionLayerState, type TimelinePart, type TranslationMarker, type ZoomMarker } from "./types";
 import { clamp, roundTenth, roundTwo } from "./math";
-
-export const sceneMotionPartId = "__scene_motion__";
 
 export function buildLinearTimeline(scene: Scene): TimelineComposition[] {
   let cursor = 0;
-  const compositions = scene.compositions.map((composition) => {
+  return scene.compositions.map((composition) => {
     const start = composition.start ?? cursor;
     const end = start + composition.duration;
     cursor = composition.start === undefined ? end : Math.max(cursor, end);
     return { ...composition, start, end };
   });
-  const sceneZoomMarkers = scene.zoomMarkers ?? [];
-  const sceneTranslationMarkers = scene.translationMarkers ?? [];
-  if (sceneZoomMarkers.length === 0 && sceneTranslationMarkers.length === 0) return compositions;
-  const motionEnd = Math.max(
-    0.1,
-    ...sceneZoomMarkers.map((marker) => marker.start + marker.duration),
-    ...sceneTranslationMarkers.map((marker) => marker.start + marker.duration),
-  );
-  return [...compositions, {
-    id: sceneMotionPartId,
-    name: "Scene Motion",
-    filePath: "",
-    layerId: sceneMotionPartId,
-    duration: motionEnd,
-    start: 0,
-    end: motionEnd,
-    frame: { width: FRAME_WIDTH, height: FRAME_HEIGHT, style: {} },
-    background: { id: "background", name: "Background", style: {}, elements: [] },
-    objects: [],
-    snapshot: [],
-    zoomMarkers: sceneZoomMarkers,
-    translationMarkers: sceneTranslationMarkers,
-  }];
 }
 
 export function sceneDuration(scene: Scene) {
@@ -45,11 +20,7 @@ export function sceneDuration(scene: Scene) {
     composition.end,
     ...composition.zoomMarkers.map((marker) => composition.start + marker.start + marker.duration),
     ...composition.translationMarkers.map((marker) => composition.start + marker.start + marker.duration),
-  ), Math.max(
-    (scene.adjustmentLayers ?? []).reduce((total, layer) => Math.max(total, layer.start + layer.duration), 0),
-    ...(scene.zoomMarkers ?? []).map((marker) => marker.start + marker.duration),
-    ...(scene.translationMarkers ?? []).map((marker) => marker.start + marker.duration),
-  ));
+  ), [...(scene.adjustmentLayers ?? []), ...(scene.zoomMarkers ?? []), ...(scene.translationMarkers ?? [])].reduce((total, item) => Math.max(total, item.start + item.duration), 0));
 }
 
 export function timelineDuration(timeline: TimelinePart[]) {

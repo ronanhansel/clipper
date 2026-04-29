@@ -124,7 +124,7 @@ export function ToolsPanel({ effectsPanelState, timelineMode, onEffectsPanelStat
           </div>
         </div>
       </div> : null}
-      {!isCompositionMode ? <div className={panelCard}><span>Edit mode</span><small className="text-[#9b9da7]">Scene element selection is enabled and motion lanes are hidden.</small></div> : null}
+      {!isCompositionMode ? <div className={panelCard}><span>Compose mode</span><small className="text-[#9b9da7]">Scene element selection is enabled and motion lanes are hidden.</small></div> : null}
     </section>
   );
 }

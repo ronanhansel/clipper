@@ -17,3 +17,4 @@ Future editor-only state should be added to `EditorState` and written through th
 - `projectPersistenceService.saveEditorState` updates only the manifest metadata so implicit editor persistence does not write unsaved composition/content changes.
 - The preview zoom button only toggles the controls and no longer resets preview zoom or scroll when pressed again.
 - Playhead time is explicitly committed to editor state when scrubbing settles, playback pauses, and playback reaches the end, so the restored player head follows the last visible position.
+- File Manager operations are implicit saves: they update the saved snapshot and persist shortly after create/delete/rename/move/sort. History entries created by these operations carry `implicitFileOperation`; undo/redo of those entries must also realign the saved snapshots and persist, so undoing a file delete does not light the Save button.

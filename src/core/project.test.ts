@@ -44,8 +44,9 @@ describe("project normalization", () => {
     const normalized = normalizeProject(projectWithComposition());
 
     expect(normalized.timelines).toHaveLength(1);
-    expect(normalized.timelines?.[0].clips[0].motionBlocks?.[0]).toMatchObject({ id: "zoom_1", effectId: "clipper.motion.zoom", layerId: "clipper.motion.zoom" });
-    expect(normalized.timelines?.[0].clips[0].zoomMarkers[0]).toMatchObject({ id: "zoom_1", layerId: "clipper.motion.zoom", scale: 1.2 });
+    expect(normalized.timelines?.[0].clips[0].motionBlocks).toEqual([]);
+    expect(normalized.timelines?.[0].clips[0].zoomMarkers).toEqual([]);
+    expect(normalized.timelines?.[0].zoomMarkers?.[0]).toMatchObject({ id: "zoom_1", layerId: "clipper.motion.zoom", scale: 1.2 });
     expect(normalized.compositions).toHaveLength(1);
     expect(normalized.compositions?.[0].source).toBe("export const composition = { id: 'cmp_intro' };");
   });
@@ -65,7 +66,8 @@ describe("project normalization", () => {
 
     expect(normalized.timelines?.[0].filePath).toBe("compositions/folder/tl_main.timeline.json");
     expect(normalized.timelines?.[0].settings).toEqual({ frameRate: 30 });
-    expect(normalized.timelines?.[0].clips[0].motionBlocks?.[0]).toMatchObject({ id: "zoom_1", effectId: "clipper.motion.zoom" });
+    expect(normalized.timelines?.[0].clips[0].motionBlocks).toEqual([]);
+    expect(normalized.timelines?.[0].zoomMarkers?.[0]).toMatchObject({ id: "zoom_1", effectId: "clipper.motion.zoom" });
   });
 
   it("preserves an intentionally empty timeline instead of restoring old clips", () => {
@@ -85,10 +87,23 @@ describe("project normalization", () => {
     expect(normalized.scenes[0].compositions).toEqual([]);
   });
 
-  it("serializes motion block contents", () => {
+  it("serializes motion block contents as timeline-level markers", () => {
     const serialized = serializeProjectForSave(projectWithComposition());
 
-    expect(serialized.timelines?.[0].clips[0].motionBlocks?.[0]).toMatchObject({ id: "zoom_1", effectId: "clipper.motion.zoom" });
+    expect(serialized.timelines?.[0].clips[0].motionBlocks).toEqual([]);
+    expect(serialized.timelines?.[0].zoomMarkers?.[0]).toMatchObject({ id: "zoom_1", effectId: "clipper.motion.zoom" });
+  });
+
+  it("migrates the old edit timeline mode to compose", () => {
+    const normalized = normalizeProject({
+      ...projectWithComposition(),
+      editorState: {
+        timeline: { displacement: 0, zoom: 1 },
+        timelineMode: "edit",
+      } as ProjectManifest["editorState"] & { timelineMode: "edit" },
+    });
+
+    expect(normalized.editorState?.timelineMode).toBe("compose");
   });
 
   it("serializes timeline-level motion markers independently of compositions", () => {

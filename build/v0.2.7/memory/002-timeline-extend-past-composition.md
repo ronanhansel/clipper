@@ -34,6 +34,10 @@ Timeline deletion no longer enforces arbitrary minimum content. Users can delete
 
 Empty timelines must remain empty through normalization. `getProjectTimelines` now always syncs timelines from runtime scenes, even when every scene has zero compositions, so deleting the final timeline composition does not restore stale clips from the saved timeline document. Users can drag compositions back from the File Manager later.
 
+New timeline creation must also start blank. `App.createTimeline` persists `clips: []`, empty adjustment layers, and empty scene-level motion arrays. Do not seed new timelines from `compositionLibrary[0]`; that makes every new timeline inherit an unrelated composition.
+
+File Manager timeline rows display `timeline.name` directly. Do not append a UI-only `.timeline` suffix to the label or drag preview; the backing file path can still use `.timeline.json`.
+
 Layer menus hide impossible move actions instead of showing disabled rows. Topmost rows do not show `Move up`, bottommost rows do not show `Move down`, and a single-row category shows neither move action.
 
 Effects and composition assets now share a pointer-driven drag helper in `src/lib/pointerDrag.ts`. Effects emit `clipper:effect-pointer-drag`; compositions from the File Manager emit `clipper:composition-pointer-drag`. `TimelinePanel` listens for both, which avoids native browser drag ghost lag and lets blank Composition rows accept dropped compositions just like blank Adjust rows accept adjustment effects. Keep future timeline external drags on this helper rather than adding separate native DnD ghost lifecycles.

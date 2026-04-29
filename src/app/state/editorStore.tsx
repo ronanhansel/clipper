@@ -2,7 +2,7 @@ import { createContext, useContext, useRef, type PropsWithChildren } from "react
 import { createStore, useStore, type StoreApi } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import { defaultFramePreviewScale, defaultNewMarkerDurationSeconds, defaultScrubCommitThrottleMs, defaultTimelineEndPaddingFraction } from "../config";
-import type { AdjustmentLayerSelection, ContextMenuState, ExportDialogTab, LeftPanelTab, Mode, PlaybackClock, ProjectExportFormat, RightPanelTab, SettingsSection, TranslationMarkerSelection, VideoExportProgress, ZoomMarkerSelection } from "../types";
+import type { AdjustmentLayerSelection, CompositionSelection, ContextMenuState, ExportDialogTab, LeftPanelTab, Mode, PlaybackClock, ProjectExportFormat, RightPanelTab, SettingsSection, TranslationMarkerSelection, VideoExportProgress, ZoomMarkerSelection } from "../types";
 import { defaultPreviewViewportState, defaultTimelineMode } from "../../core/project";
 import type { Bounds, EditorState, Point, ProjectManifest, SelectionPayload, TimelineMode } from "../../core/types";
 
@@ -15,6 +15,7 @@ export type EditorStoreState = {
   timelineMode: TimelineMode;
   selectedSceneId: string;
   selectedPartId: string;
+  selectedParts: CompositionSelection[];
   selectedObjectId: string | null;
   editingTextObjectId: string | null;
   selectedZoomMarker: MarkerSelection;
@@ -63,6 +64,7 @@ export type EditorStoreActions = {
   setTimelineMode: (mode: Setter<TimelineMode>) => void;
   setSelectedSceneId: (sceneId: Setter<string>) => void;
   setSelectedPartId: (partId: Setter<string>) => void;
+  setSelectedParts: (parts: Setter<CompositionSelection[]>) => void;
   setSelectedObjectId: (objectId: Setter<string | null>) => void;
   setEditingTextObjectId: (objectId: Setter<string | null>) => void;
   setSelectedZoomMarker: (selection: Setter<MarkerSelection>) => void;
@@ -128,7 +130,8 @@ function getInitialState(project: ProjectManifest): EditorStoreState {
     mode: editorState?.mode ?? "interactive",
     timelineMode: editorState?.timelineMode ?? defaultTimelineMode,
     selectedSceneId: editorState?.selectedSceneId ?? project.scenes[0].id,
-    selectedPartId: editorState?.selectedPartId ?? editorState?.selectedZoomMarker?.partId ?? editorState?.selectedTranslationMarker?.partId ?? "",
+    selectedPartId: editorState?.selectedPartId ?? "",
+    selectedParts: editorState?.selectedPartId ? [{ partId: editorState.selectedPartId }] : [],
     selectedObjectId: null,
     editingTextObjectId: null,
     selectedZoomMarker: editorState?.selectedZoomMarker ?? null,
@@ -180,6 +183,7 @@ export function createEditorStore(project: ProjectManifest) {
     setTimelineMode: createFieldSetter(set, "timelineMode"),
     setSelectedSceneId: createFieldSetter(set, "selectedSceneId"),
     setSelectedPartId: createFieldSetter(set, "selectedPartId"),
+    setSelectedParts: createFieldSetter(set, "selectedParts"),
     setSelectedObjectId: createFieldSetter(set, "selectedObjectId"),
     setEditingTextObjectId: createFieldSetter(set, "editingTextObjectId"),
     setSelectedZoomMarker: createFieldSetter(set, "selectedZoomMarker"),
@@ -225,7 +229,8 @@ export function createEditorStore(project: ProjectManifest) {
       mode: editorState.mode ?? "interactive",
       timelineMode: editorState.timelineMode ?? defaultTimelineMode,
       selectedSceneId: editorState.selectedSceneId ?? fallbackSceneId,
-      selectedPartId: editorState.selectedPartId ?? editorState.selectedZoomMarker?.partId ?? editorState.selectedTranslationMarker?.partId ?? "",
+      selectedPartId: editorState.selectedPartId ?? "",
+      selectedParts: editorState.selectedPartId ? [{ partId: editorState.selectedPartId }] : [],
       selectedZoomMarker: editorState.selectedZoomMarker ?? null,
       selectedZoomMarkers: editorState.selectedZoomMarker ? [editorState.selectedZoomMarker] : [],
       selectedTranslationMarker: editorState.selectedZoomMarker ? null : editorState.selectedTranslationMarker ?? null,
@@ -255,6 +260,7 @@ export function createEditorStore(project: ProjectManifest) {
     clearNodeSelection: () => set({
       editingTextObjectId: null,
       selectedPartId: "",
+      selectedParts: [],
       selectedObjectId: null,
       selectionPayload: null,
       selectedZoomMarker: null,
@@ -300,6 +306,8 @@ export function useAppEditorState() {
     setSelectedSceneId: state.setSelectedSceneId,
     selectedPartId: state.selectedPartId,
     setSelectedPartId: state.setSelectedPartId,
+    selectedParts: state.selectedParts,
+    setSelectedParts: state.setSelectedParts,
     selectedObjectId: state.selectedObjectId,
     setSelectedObjectId: state.setSelectedObjectId,
     editingTextObjectId: state.editingTextObjectId,

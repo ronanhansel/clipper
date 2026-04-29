@@ -1,0 +1,101 @@
+import { FileManager, type FileManagerProps, type FileManagerTreeSnapshot } from "../../../components/FileManager";
+import type { EditorState } from "../../../core/types";
+
+export type FileManagerWorkspaceProps = FileManagerProps;
+
+export type BuildFileManagerWorkspacePropsInput = Omit<FileManagerProps,
+  | "onAddComposition"
+  | "onApplyTreeSnapshot"
+  | "onCopyAsset"
+  | "onCopyCompositionPath"
+  | "onCreateComposition"
+  | "onCreateCompositionFolder"
+  | "onCreateFolder"
+  | "onCreateTimeline"
+  | "onDeleteAsset"
+  | "onDeleteComposition"
+  | "onDeleteCompositionFolder"
+  | "onDeleteTimeline"
+  | "onDropFiles"
+  | "onDuplicateAsset"
+  | "onDuplicateComposition"
+  | "onFileManagerStateChange"
+  | "onMoveComposition"
+  | "onMoveTimeline"
+  | "onRenameAsset"
+  | "onRenameComposition"
+  | "onRenameCompositionFolder"
+  | "onRenameTimeline"
+  | "onRevealAssetRoot"
+  | "onRevealComposition"
+  | "onRevealCompositionFolder"
+  | "onSelectTimeline"
+  | "onSortAssets"
+> & {
+  actions: {
+    addComposition: FileManagerProps["onAddComposition"];
+    applyTreeSnapshot: (snapshot: FileManagerTreeSnapshot) => void;
+    copyAsset: FileManagerProps["onCopyAsset"];
+    copyCompositionPath: FileManagerProps["onCopyCompositionPath"];
+    createComposition: FileManagerProps["onCreateComposition"];
+    createCompositionFolder: FileManagerProps["onCreateCompositionFolder"];
+    createFolder: FileManagerProps["onCreateFolder"];
+    createTimeline: FileManagerProps["onCreateTimeline"];
+    deleteAsset: FileManagerProps["onDeleteAsset"];
+    deleteComposition: FileManagerProps["onDeleteComposition"];
+    deleteCompositionFolder: FileManagerProps["onDeleteCompositionFolder"];
+    deleteTimeline: FileManagerProps["onDeleteTimeline"];
+    dropFiles: FileManagerProps["onDropFiles"];
+    duplicateAsset: FileManagerProps["onDuplicateAsset"];
+    duplicateComposition: FileManagerProps["onDuplicateComposition"];
+    fileManagerStateChange: (fileManagerState: EditorState["fileManagerState"]) => void;
+    moveComposition: FileManagerProps["onMoveComposition"];
+    moveTimeline: FileManagerProps["onMoveTimeline"];
+    renameAsset: FileManagerProps["onRenameAsset"];
+    renameComposition: FileManagerProps["onRenameComposition"];
+    renameCompositionFolder: FileManagerProps["onRenameCompositionFolder"];
+    renameTimeline: FileManagerProps["onRenameTimeline"];
+    revealAssetRoot: FileManagerProps["onRevealAssetRoot"];
+    revealComposition: FileManagerProps["onRevealComposition"];
+    revealCompositionFolder: FileManagerProps["onRevealCompositionFolder"];
+    selectTimeline: FileManagerProps["onSelectTimeline"];
+    sortAssets: FileManagerProps["onSortAssets"];
+  };
+};
+
+export function buildFileManagerWorkspaceProps({ actions, ...state }: BuildFileManagerWorkspacePropsInput): FileManagerWorkspaceProps {
+  return {
+    ...state,
+    onAddComposition: actions.addComposition,
+    onApplyTreeSnapshot: actions.applyTreeSnapshot,
+    onCopyAsset: actions.copyAsset,
+    onCopyCompositionPath: actions.copyCompositionPath,
+    onCreateComposition: actions.createComposition,
+    onCreateCompositionFolder: actions.createCompositionFolder,
+    onCreateFolder: actions.createFolder,
+    onCreateTimeline: actions.createTimeline,
+    onDeleteAsset: actions.deleteAsset,
+    onDeleteComposition: actions.deleteComposition,
+    onDeleteCompositionFolder: actions.deleteCompositionFolder,
+    onDeleteTimeline: actions.deleteTimeline,
+    onDropFiles: actions.dropFiles,
+    onDuplicateAsset: actions.duplicateAsset,
+    onDuplicateComposition: actions.duplicateComposition,
+    onFileManagerStateChange: actions.fileManagerStateChange,
+    onMoveComposition: actions.moveComposition,
+    onMoveTimeline: actions.moveTimeline,
+    onRenameAsset: actions.renameAsset,
+    onRenameComposition: actions.renameComposition,
+    onRenameCompositionFolder: actions.renameCompositionFolder,
+    onRenameTimeline: actions.renameTimeline,
+    onRevealAssetRoot: actions.revealAssetRoot,
+    onRevealComposition: actions.revealComposition,
+    onRevealCompositionFolder: actions.revealCompositionFolder,
+    onSelectTimeline: actions.selectTimeline,
+    onSortAssets: actions.sortAssets,
+  };
+}
+
+export function FileManagerWorkspace(props: FileManagerWorkspaceProps) {
+  return <FileManager {...props} />;
+}

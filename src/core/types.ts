@@ -296,18 +296,21 @@ export type TimelineMotionLayerState = {
   kind: TimelineMotionLayerKind;
   name: string;
   hidden?: boolean;
+  locked?: boolean;
 };
 
 export type TimelineAdjustmentLayerState = {
   id: string;
   name: string;
   hidden?: boolean;
+  locked?: boolean;
 };
 
 export type TimelineCompositionLayerState = {
   id: string;
   name: string;
   hidden?: boolean;
+  locked?: boolean;
 };
 
 export type TimelineLayerState = {
@@ -319,7 +322,7 @@ export type TimelineLayerState = {
   rowHeights?: Record<string, number>;
 };
 
-export type TimelineMode = "edit" | "composition";
+export type TimelineMode = "compose" | "composition";
 
 export type PreviewViewportState = {
   scale: number;
@@ -331,6 +334,16 @@ export type PreviewViewportState = {
 export type CodeViewportState = {
   scrollLeft: number;
   scrollTop: number;
+};
+
+export type EditorLayoutState = {
+  leftPanelWidth: number;
+  rightPanelWidth: number;
+  timelineHeight: number;
+};
+
+export type ComposeLayoutState = {
+  leftPanelWidth: number;
 };
 
 export type EffectsPanelState = {
@@ -352,6 +365,8 @@ export type EditorState = {
   currentSceneTime?: number;
   defaultNewMarkerDurationSeconds?: number;
   timelineEndPaddingFraction?: number;
+  layout?: EditorLayoutState;
+  composeLayout?: ComposeLayoutState;
   preview?: PreviewViewportState;
   code?: Record<string, CodeViewportState>;
   fileManagerState?: FileManagerState;

@@ -76,6 +76,11 @@ export function toggleTimelineStateLayerHidden(state: TimelineLayerState, catego
   return { ...state, [key]: getTimelineStateLayers(state, category, defaults).map((layer) => (layer.id === layerId ? { ...layer, hidden: !layer.hidden || undefined } : layer)) };
 }
 
+export function toggleTimelineStateLayerLocked(state: TimelineLayerState, category: TimelineLayerCategory, layerId: string, defaults: TimelineLayerState): TimelineLayerState {
+  const key = getTimelineLayerStateKey(category);
+  return { ...state, [key]: getTimelineStateLayers(state, category, defaults).map((layer) => (layer.id === layerId ? { ...layer, locked: !layer.locked || undefined } : layer)) };
+}
+
 export function moveTimelineStateLayer(state: TimelineLayerState, category: TimelineLayerCategory, layerId: string, direction: "up" | "down", defaults: TimelineLayerState): TimelineLayerState {
   const key = getTimelineLayerStateKey(category);
   const layers = getTimelineStateLayers(state, category, defaults);
