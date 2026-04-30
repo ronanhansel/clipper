@@ -4,7 +4,7 @@ import { SimpleTree, Tree, type CursorProps, type DragPreviewProps, type MoveHan
 import type { ContextMenuItem, ContextMenuState } from "../app/types";
 import { getParentAssetId, type AssetSortMode } from "../core/assetTree";
 import type { AssetItem, CompositionClip, FileManagerState, FileManagerStateNode, TimelineDocument } from "../core/types";
-import { compositionPointerDragEvent, type CompositionPointerDragDetail } from "../lib/pointerDrag";
+import { compositionDragPreviewEvent, compositionPointerDragEvent, type CompositionPointerDragDetail, type PointerDragPreviewDetail } from "../lib/pointerDrag";
 import { AppContextMenu } from "./AppContextMenu";
 import { ArboristClickRow } from "./tree/ArboristClickRow";
 import { Input } from "./ui/input";
@@ -563,9 +563,13 @@ function UnifiedTreeDragPreview({ id, isDragging, mouse, nodes, onDragPositionCh
       }
       suppressNativeExternalDrag(event, isPointOverTimelinePanel(event.clientX, event.clientY));
       ensureExternalCompositionDrag(node, nextMouse, event.shiftKey);
-      const external = externalDragRef.current;
-      if (external) external.ghost.style.opacity = isPointOverTimelinePanel(event.clientX, event.clientY) ? "0" : "1";
       scheduleExternalCompositionDragMove(nextMouse, event.shiftKey);
+    }
+
+    function updatePreviewVisibility(event: Event) {
+      const external = externalDragRef.current;
+      if (!external) return;
+      external.ghost.style.opacity = (event as CustomEvent<PointerDragPreviewDetail>).detail?.active ? "0" : "1";
     }
 
     function dropExternalDrag(event: globalThis.DragEvent) {
@@ -603,6 +607,7 @@ function UnifiedTreeDragPreview({ id, isDragging, mouse, nodes, onDragPositionCh
     window.addEventListener("blur", hidePreview);
     window.addEventListener("keydown", updateShift, true);
     window.addEventListener("keyup", updateShift, true);
+    window.addEventListener(compositionDragPreviewEvent, updatePreviewVisibility);
     return () => {
       window.removeEventListener("dragend", hidePreview);
       window.removeEventListener("drop", dropExternalDrag, true);
@@ -612,6 +617,7 @@ function UnifiedTreeDragPreview({ id, isDragging, mouse, nodes, onDragPositionCh
       window.removeEventListener("blur", hidePreview);
       window.removeEventListener("keydown", updateShift, true);
       window.removeEventListener("keyup", updateShift, true);
+      window.removeEventListener(compositionDragPreviewEvent, updatePreviewVisibility);
       cleanupExternalCompositionDrag("cancel");
     };
   }, [isDragging, node, onDragPositionChange]);

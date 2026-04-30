@@ -21,7 +21,6 @@ type SourceObject = {
 };
 
 type SourceComposition = {
-  id?: string;
   name?: string;
   duration: number;
   frame: {
@@ -131,7 +130,7 @@ ${backgroundElements.map((object) => indent(object, 6)).join(",\n")}
   }`;
   const objects = composition.objects.map(frameObjectToConstructorSource);
 
-  return `import { ${imports.join(", ")} } from "@clipper/composition-api";\n\nclass GeneratedCompositionObjects extends Component {\n  render() {\n    return [\n${objects.map((object) => indent(object, 6)).join(",\n")}\n    ];\n  }\n}\n\nexport const composition = new Composition({\n  id: ${JSON.stringify(composition.compositionId ?? composition.id)},\n  name: ${JSON.stringify(composition.name)},\n  duration: ${JSON.stringify(composition.duration)},\n  frame: ${tsBlock(composition.frame, 2)},\n  background: ${indent(backgroundSource, 2).trimStart()},\n  render() {\n    return [new GeneratedCompositionObjects()];\n  },\n});\n`;
+  return `import { ${imports.join(", ")} } from "@clipper/composition-api";\n\nclass GeneratedCompositionObjects extends Component {\n  render() {\n    return [\n${objects.map((object) => indent(object, 6)).join(",\n")}\n    ];\n  }\n}\n\nexport const composition = new Composition({\n  name: ${JSON.stringify(composition.name)},\n  duration: ${JSON.stringify(composition.duration)},\n  frame: ${tsBlock(composition.frame, 2)},\n  background: ${indent(backgroundSource, 2).trimStart()},\n  render() {\n    return [new GeneratedCompositionObjects()];\n  },\n});\n`;
 }
 
 function frameObjectToSourceObject(object: FrameObject): SourceObject {

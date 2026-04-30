@@ -30,6 +30,7 @@ Composition rows started Clipper's pointer-driven drag, but Arborist's native tr
 - The shared pointer-drag helper now defaults to a shorter 160ms pickup delay for effect/source drags.
 - Holding Shift while dragging a composition onto the timeline enables the same block-start snapping used by timeline blocks, including current playhead snap boundaries, and now shows the white snap guide.
 - `src/lib/pointerDrag.ts` now also listens for document-level `pointerup`, `pointercancel`, and `mouseup` cleanup. This mirrors the effect-pane cleanup behavior and removes custom ghosts immediately when a release is observable outside the normal window pointer path.
+- File Manager external composition drags no longer hide the source ghost for the entire timeline panel. The ghost now listens to `clipper:composition-drag-preview` and hides only while the timeline composition preview block is active, matching effect drag/source ghost coordination and keeping the ghost stable while crossing non-target timeline space.
 
 ## Follow-up Name Persistence Fix
 
@@ -41,3 +42,4 @@ Composition rows started Clipper's pointer-driven drag, but Arborist's native tr
 
 - The timeline still owns placement via `DirectTimelinePanel.onAddComposition`; File Manager only supplies the source composition id for both pointer-driven and native DnD paths.
 - Keep both paths supported because File Manager uses Arborist for internal tree moves while timeline drops use Clipper-specific payloads.
+- Source ghost visibility should stay event-driven. Timeline preview ownership belongs in `DirectTimelinePanel`, while File Manager only mirrors the preview-active signal for its external drag ghost.
