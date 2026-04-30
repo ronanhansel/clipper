@@ -2,36 +2,36 @@ import { expandExplicitTimelineMarkerMendIds, getTimelinePartAtTime } from "../.
 import { getInsertedOverwriteRanges, overwriteTimelineMarkers } from "../../../core/timelineOverwrite";
 import { clamp, roundTwo } from "../../../core/math";
 import { TIMELINE_MOTION_PART_ID } from "../../types";
-import { getMotionMarkerViews, motionBlocksToMotionMarkers, withCanonicalMotionMarkers } from "../../../core/motionEffects";
-import { normalizeMendedZoomMarkerFocus } from "../../../core/markers";
-import { FRAME_HEIGHT, FRAME_WIDTH, type AdjustmentLayer, type MotionBlock, type Part, type Point, type TimelinePart, type TranslationMarker, type ZoomMarker } from "../../../core/types";
+import { motionBlocksToMotionMarkers, withCanonicalMotionMarkers } from "../../../core/motionEffects";
+import { normalizeMendedMotionMarkerFocus } from "../../../core/markers";
+import { FRAME_HEIGHT, FRAME_WIDTH, type AdjustmentLayer, type MotionBlock, type MotionMarker, type Part, type Point, type TimelinePart } from "../../../core/types";
 import type { AdjustmentEffectPointControl } from "../../../core/effects/types";
 
-export function motionBlockFromMarker(marker: ZoomMarker | TranslationMarker): MotionBlock {
+export function motionBlockFromMarker(marker: MotionMarker): MotionBlock {
   return {
     ...marker,
     params: {
       ...marker.params,
       ease: marker.ease,
-      focus: "focus" in marker ? marker.focus : undefined,
-      followId: "followId" in marker ? marker.followId : undefined,
+      focus: marker.focus,
+      followId: marker.followId,
       mendInId: marker.mendInId,
       mendOutId: marker.mendOutId,
       middleEase: marker.middleEase,
       middleTransition: marker.middleTransition,
-      perspective: "perspective" in marker ? marker.perspective : undefined,
-      position: "position" in marker ? marker.position : undefined,
-      rotation: "rotation" in marker ? marker.rotation : undefined,
-      scale: "scale" in marker ? marker.scale : undefined,
+      perspective: marker.perspective,
+      position: marker.position,
+      rotation: marker.rotation,
+      scale: marker.scale,
       snapIn: marker.snapIn,
       snapOut: marker.snapOut,
     },
   };
 }
 
-export function withMotionMarkers(item: Part, zoomMarkers: ZoomMarker[], translationMarkers: TranslationMarker[]): Part {
-  const motionMarkers = motionBlocksToMotionMarkers([...zoomMarkers.map(motionBlockFromMarker), ...translationMarkers.map(motionBlockFromMarker)]);
-  const motionCollections = withCanonicalMotionMarkers(motionMarkers);
+export function withMotionMarkers(item: Part, motionMarkers: MotionMarker[]): Part {
+  const markers = motionBlocksToMotionMarkers(motionMarkers.map(motionBlockFromMarker));
+  const motionCollections = withCanonicalMotionMarkers(markers);
   return {
     ...item,
     ...motionCollections,
@@ -51,13 +51,13 @@ export function parseTimelineMarkerKey(key: string) {
   return separatorIndex >= 0 ? { partId: key.slice(0, separatorIndex), markerId: key.slice(separatorIndex + 1) } : { partId: "", markerId: key };
 }
 
-export function remapMovedMarkerMendIds<T extends ZoomMarker | TranslationMarker>(marker: T, movedMarkerKeys: Map<string, string>): T {
+export function remapMovedMarkerMendIds<T extends MotionMarker>(marker: T, movedMarkerKeys: Map<string, string>): T {
   const mendInId = marker.mendInId ? movedMarkerKeys.get(marker.mendInId) ?? marker.mendInId : marker.mendInId;
   const mendOutId = marker.mendOutId ? movedMarkerKeys.get(marker.mendOutId) ?? marker.mendOutId : marker.mendOutId;
   return mendInId === marker.mendInId && mendOutId === marker.mendOutId ? marker : { ...marker, mendInId, mendOutId };
 }
 
-export function placeMotionMarkerOnTimeline<T extends ZoomMarker | TranslationMarker>(marker: T, absoluteStart: number, timelineParts: TimelinePart[], targetLayerId?: string, preferredPartId?: string) {
+export function placeMotionMarkerOnTimeline<T extends MotionMarker>(marker: T, absoluteStart: number, timelineParts: TimelinePart[], targetLayerId?: string, preferredPartId?: string) {
   const timelinePart = timelineParts.find((item) => item.id === preferredPartId)
     ?? getTimelinePartAtTime(timelineParts, absoluteStart)
     ?? timelineParts[0];
@@ -72,29 +72,26 @@ export function placeMotionMarkerOnTimeline<T extends ZoomMarker | TranslationMa
   }];
 }
 
-export function applyMotionMarkerOverwrite(item: Part, zoomMarkers: ZoomMarker[], translationMarkers: TranslationMarker[], insertedIds: Set<string>) {
-  const itemViews = getMotionMarkerViews(item);
-  const protectedZoomIds = expandExplicitTimelineMarkerMendIds([...itemViews.zoomMarkers, ...zoomMarkers], insertedIds, item.id);
-  const protectedTranslationIds = expandExplicitTimelineMarkerMendIds([...itemViews.translationMarkers, ...translationMarkers], insertedIds, item.id);
-  const insertedRanges = getInsertedOverwriteRanges([...zoomMarkers, ...translationMarkers], new Set([...protectedZoomIds, ...protectedTranslationIds]));
+export function applyMotionMarkerOverwrite(item: Part, markers: MotionMarker[], insertedIds: Set<string>) {
+  const itemViews = motionBlocksToMotionMarkers(item.motionMarkers ?? []);
+  const protectedIds = expandExplicitTimelineMarkerMendIds([...itemViews, ...markers], insertedIds, item.id);
+  const insertedRanges = getInsertedOverwriteRanges(markers, new Set([...protectedIds]));
   const splitIdSuffix = Date.now().toString(36);
 
-  function trimCollection<T extends ZoomMarker | TranslationMarker>(markers: T[]) {
-    return overwriteTimelineMarkers(markers, insertedRanges, { createSplitId: (marker, _range, index) => `${marker.id}_split_${splitIdSuffix}_${index.toString(36)}` });
+  function trimCollection<T extends MotionMarker>(markersList: T[]) {
+    return overwriteTimelineMarkers(markersList, insertedRanges, { createSplitId: (m, _range, index) => `${m.id}_split_${splitIdSuffix}_${index.toString(36)}` });
   }
 
-  return withMotionMarkers(item, normalizeMendedZoomMarkerFocus(trimCollection(zoomMarkers)), trimCollection(translationMarkers));
+  return withMotionMarkers(item, normalizeMendedMotionMarkerFocus(trimCollection(markers)));
 }
 
-export function applySceneMotionMarkerOverwrite(zoomMarkers: ZoomMarker[], translationMarkers: TranslationMarker[], insertedIds: Set<string>) {
-  const protectedZoomIds = expandExplicitTimelineMarkerMendIds(zoomMarkers, insertedIds, TIMELINE_MOTION_PART_ID);
-  const protectedTranslationIds = expandExplicitTimelineMarkerMendIds(translationMarkers, insertedIds, TIMELINE_MOTION_PART_ID);
-  const insertedRanges = getInsertedOverwriteRanges([...zoomMarkers, ...translationMarkers], new Set([...protectedZoomIds, ...protectedTranslationIds]));
+export function applySceneMotionMarkerOverwrite(markers: MotionMarker[], insertedIds: Set<string>) {
+  const protectedIds = expandExplicitTimelineMarkerMendIds(markers, insertedIds, TIMELINE_MOTION_PART_ID);
+  const insertedRanges = getInsertedOverwriteRanges(markers, new Set([...protectedIds]));
   const splitIdSuffix = Date.now().toString(36);
-  const trimCollection = <T extends ZoomMarker | TranslationMarker>(markers: T[]) => overwriteTimelineMarkers(markers, insertedRanges, { createSplitId: (marker, _range, index) => `${marker.id}_split_${splitIdSuffix}_${index.toString(36)}` });
-  const nextZoomMarkers = normalizeMendedZoomMarkerFocus(trimCollection(zoomMarkers));
-  const nextTranslationMarkers = trimCollection(translationMarkers);
-  return withCanonicalMotionMarkers(motionBlocksToMotionMarkers([...nextZoomMarkers.map(motionBlockFromMarker), ...nextTranslationMarkers.map(motionBlockFromMarker)]));
+  const trimCollection = <T extends MotionMarker>(markersList: T[]) => overwriteTimelineMarkers(markersList, insertedRanges, { createSplitId: (m, _range, index) => `${m.id}_split_${splitIdSuffix}_${index.toString(36)}` });
+  const nextMarkers = normalizeMendedMotionMarkerFocus(trimCollection(markers));
+  return withCanonicalMotionMarkers(motionBlocksToMotionMarkers(nextMarkers.map(motionBlockFromMarker)));
 }
 
 export function applyAdjustmentLayerOverwrite(layers: AdjustmentLayer[], insertedIds: Set<string>) {

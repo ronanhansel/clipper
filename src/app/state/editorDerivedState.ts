@@ -1,12 +1,12 @@
 import { useMemo } from "react";
 import { createAgentContext } from "../../core/agentContext";
 import { applyAdjustmentLayersToSceneTime } from "../../core/adjustments";
-import { cameraTranslationToFramePoint, getCameraPreviewTransform, getLayeredCameraPreviewTransform } from "../../core/camera";
+import { cameraTranslationToFramePoint, CAMERA_PERSPECTIVE, getLayeredCameraPreviewTransform, type CameraPreviewTransform } from "../../core/camera";
 import { clamp } from "../../core/math";
 import { getMotionMarkerViews, motionBlocksToMotionMarkers } from "../../core/motionEffects";
 import { defaultAssets, defaultTimelineLayerState, serializeProjectForSave } from "../../core/project";
-import { buildLinearTimeline, getExecutableAdjustmentLayers, getMiddleTransitionMode, getSelectedActiveMiddleMend, getSelectedZoomMiddleSnap, getTimelinePartAtTime, getTranslationMarkerMendKey, getZoomMarkerMendKey, getZoomMiddleSnap, isZoomMiddleSnapActive, sceneDuration as getSceneDuration, validateScene } from "../../core/timeline";
-import { FRAME_HEIGHT, FRAME_WIDTH, type CompositionClip, type ProjectManifest, type SelectionPayload, type TimelineMode, type TimelinePart, type TranslationMarker, type ZoomMarker } from "../../core/types";
+import { buildLinearTimeline, getExecutableAdjustmentLayers, getMiddleTransitionMode, getSelectedActiveMiddleMend, getSelectedMotionMiddleSnap, getTimelinePartAtTime, getMotionMarkerMendKey, getMotionMiddleSnap, isMotionMiddleSnapActive, sceneDuration as getSceneDuration, validateScene } from "../../core/timeline";
+import { FRAME_HEIGHT, FRAME_WIDTH, type CompositionClip, type MotionMarker, type ProjectManifest, type SelectionPayload, type TimelineMode, type TimelinePart } from "../../core/types";
 import { TIMELINE_MOTION_PART_ID } from "../types";
 import type { MotionMarkerSelection } from "../types";
 import { getProjectContentSnapshot } from "./projectStore";
@@ -63,12 +63,12 @@ export function useEditorDerivedState({
   const sceneMotionViews = useMemo(() => getMotionMarkerViews(scene), [scene.motionMarkers]);
   const part = useMemo(() => {
     const partStart = activeTimelinePart?.start ?? 0;
-    const shiftedMotionMarkers = motionBlocksToMotionMarkers([...sceneMotionViews.zoomMarkers, ...sceneMotionViews.translationMarkers].map((marker) => ({ ...marker, start: marker.start - partStart })));
+    const shiftedMotionMarkers = motionBlocksToMotionMarkers(sceneMotionViews.motionMarkers.map((marker) => ({ ...marker, start: marker.start - partStart })));
     return {
       ...basePart,
       motionMarkers: shiftedMotionMarkers,
     };
-  }, [activeTimelinePart?.start, basePart, sceneMotionViews.translationMarkers, sceneMotionViews.zoomMarkers]);
+  }, [activeTimelinePart?.start, basePart, sceneMotionViews.motionMarkers]);
   const hasActiveComposition = Boolean(activeComposition);
   const previewTime = activeTimelinePart ? clamp(compositionLookupTime - activeTimelinePart.start, 0, part.duration) : 0;
   const selectedAdjustmentLayer = scene.adjustmentLayers?.find((layer) => layer.id === selectedAdjustmentLayerId) ?? null;
@@ -82,10 +82,11 @@ export function useEditorDerivedState({
   }), [scene.motionMarkers, sceneDurationSeconds]);
   const selectedMotionPart = selectedMotionMarker?.partId === TIMELINE_MOTION_PART_ID ? timelineMotionPart : scene.compositions.find((item) => item.id === selectedMotionMarker?.partId) ?? null;
   const selectedMotionViews = selectedMotionPart ? getMotionMarkerViews(selectedMotionPart) : null;
-  const selectedZoomPart = selectedMotionViews?.zoomMarkers.some((marker) => marker.id === selectedMotionMarker?.markerId) ? selectedMotionPart : null;
-  const selectedZoom = selectedZoomPart ? selectedMotionViews?.zoomMarkers.find((marker) => marker.id === selectedMotionMarker?.markerId) ?? null : null;
-  const selectedTranslationPart = selectedMotionViews?.translationMarkers.some((marker) => marker.id === selectedMotionMarker?.markerId) ? selectedMotionPart : null;
-  const selectedTranslation = selectedTranslationPart ? selectedMotionViews?.translationMarkers.find((marker) => marker.id === selectedMotionMarker?.markerId) ?? null : null;
+  const selectedMotion = selectedMotionPart && selectedMotionMarker ? selectedMotionViews?.motionMarkers.find((marker) => marker.id === selectedMotionMarker.markerId) ?? null : null;
+  const selectedZoomPart = selectedMotionViews?.motionMarkers.some((marker) => marker.id === selectedMotionMarker?.markerId) ? selectedMotionPart : null;
+  const selectedZoom = selectedZoomPart ? selectedMotionViews?.motionMarkers.find((marker) => marker.id === selectedMotionMarker?.markerId) ?? null : null;
+  const selectedTranslationPart = selectedMotionViews?.motionMarkers.some((marker) => marker.id === selectedMotionMarker?.markerId) ? selectedMotionPart : null;
+  const selectedTranslation = selectedTranslationPart ? selectedMotionViews?.motionMarkers.find((marker) => marker.id === selectedMotionMarker?.markerId) ?? null : null;
   const selectedPart = scene.compositions.find((item) => item.id === selectedPartId) ?? null;
   const validationErrors = useMemo(() => validateScene({ ...scene, adjustmentLayers: visibleAdjustmentLayers }), [scene, visibleAdjustmentLayers]);
   const motionLayers = project.editorState?.timelineLayers?.motionLayers?.length ? project.editorState.timelineLayers.motionLayers : defaultTimelineLayerState.motionLayers!;
@@ -101,44 +102,29 @@ export function useEditorDerivedState({
   const isPickingZoomFocus = Boolean(focusPickZoomMarker);
   const isPickingTranslationPosition = Boolean(positionPickTranslationMarker);
   const canSelectFrameObjects = timelineMode === "compose";
-  const persistedFramePickPoint = isPickingZoomFocus && selectedZoom ? selectedZoom.focus : isPickingTranslationPosition && selectedTranslation ? cameraTranslationToFramePoint(selectedTranslation.position) : null;
+  const persistedFramePickPoint = isPickingZoomFocus && selectedZoom ? selectedZoom.focus : isPickingTranslationPosition && selectedTranslation?.position ? cameraTranslationToFramePoint(selectedTranslation.position) : null;
   const framePickPoint = framePickPreviewPoint ?? persistedFramePickPoint;
+  const identityCameraPreview: CameraPreviewTransform = { x: 0, y: 0, z: 0, scale: 1, rotation: 0, rotateX: 0, rotateY: 0, perspective: CAMERA_PERSPECTIVE };
   const cameraPreviewTransform = useMemo(() => timelineMode === "composition"
     ? getLayeredCameraPreviewTransform(part, motionLayers, previewTime, { hiddenLayerIds: hiddenMotionLayerIds, pickingTranslationPosition: isPickingTranslationPosition, pickingZoomFocus: isPickingZoomFocus })
-    : getCameraPreviewTransform(null, null), [hiddenMotionLayerIds, isPickingTranslationPosition, isPickingZoomFocus, motionLayers, previewTime, part, timelineMode]);
+    : identityCameraPreview, [hiddenMotionLayerIds, isPickingTranslationPosition, isPickingZoomFocus, motionLayers, previewTime, part, timelineMode]);
   const zoomScale = cameraPreviewTransform.scale;
-  const absoluteZoomMarkers = useMemo(() => sceneMotionViews.zoomMarkers.map((marker) => ({ ...marker, id: timelineMarkerKey({ partId: TIMELINE_MOTION_PART_ID, markerId: marker.id }), partId: TIMELINE_MOTION_PART_ID, start: marker.start })), [sceneMotionViews.zoomMarkers]);
-  const absoluteTranslationMarkers = useMemo(() => sceneMotionViews.translationMarkers.map((marker) => ({ ...marker, id: timelineMarkerKey({ partId: TIMELINE_MOTION_PART_ID, markerId: marker.id }), partId: TIMELINE_MOTION_PART_ID, start: marker.start })), [sceneMotionViews.translationMarkers]);
-  const currentPartSelectedZoomIds = useMemo(() => selectedMotionMarkers.filter((selection) => selection.partId === part.id).map(timelineMarkerKey), [part.id, selectedMotionMarkers]);
-  const selectedZoomPartSelectedZoomIds = useMemo(() => selectedZoomPart ? selectedMotionMarkers.filter((selection) => selection.partId === selectedZoomPart.id).map(timelineMarkerKey) : [], [selectedMotionMarkers, selectedZoomPart]);
-  const selectedZoomSnapMarkers = useMemo(() => selectedMotionMarkers.flatMap((selection) => {
-    const zoomPart = scene.compositions.find((item) => item.id === selection.partId);
-    const zoomMarker = selection.partId === TIMELINE_MOTION_PART_ID ? sceneMotionViews.zoomMarkers.find((item) => item.id === selection.markerId) : zoomPart ? getMotionMarkerViews(zoomPart).zoomMarkers.find((item) => item.id === selection.markerId) : undefined;
-    return zoomMarker ? [zoomMarker] : [];
-  }), [scene.compositions, sceneMotionViews.zoomMarkers, selectedMotionMarkers]);
-  const selectedZoomSnapInActive = selectedZoomSnapMarkers.length > 1 ? selectedZoomSnapMarkers.every((marker) => marker.snapIn) : Boolean(selectedZoom?.snapIn);
-  const selectedZoomSnapOutActive = selectedZoomSnapMarkers.length > 1 ? selectedZoomSnapMarkers.every((marker) => marker.snapOut) : Boolean(selectedZoom?.snapOut);
-  const selectedZoomMiddleSnap = getSelectedActiveMiddleMend(absoluteZoomMarkers, currentPartSelectedZoomIds, getZoomMarkerMendKey) ?? getSelectedZoomMiddleSnap(absoluteZoomMarkers, currentPartSelectedZoomIds, getZoomMarkerMendKey);
-  const selectedZoomPartMiddleSnap = selectedZoomPart ? getSelectedActiveMiddleMend(absoluteZoomMarkers, selectedZoomPartSelectedZoomIds, getZoomMarkerMendKey) ?? getSelectedZoomMiddleSnap(absoluteZoomMarkers, selectedZoomPartSelectedZoomIds, getZoomMarkerMendKey) : null;
-  const selectedZoomPartMiddleSnapActive = selectedZoomPart ? isZoomMiddleSnapActive(absoluteZoomMarkers, selectedZoomPartMiddleSnap) : false;
-  const selectedZoomPartMiddleTransitionMode = getMiddleTransitionMode(absoluteZoomMarkers, selectedZoomPartMiddleSnap);
-  const zoomMiddleSnap = selectedZoomMiddleSnap ?? getZoomMiddleSnap(absoluteZoomMarkers, adjustedSceneTime, getZoomMarkerMendKey);
-  const inspectorZoomMiddleSnap = selectedZoomPartMiddleSnap ?? (selectedZoomPart?.id === part.id ? zoomMiddleSnap : null);
-  const currentPartSelectedTranslationIds = useMemo(() => selectedMotionMarkers.filter((selection) => selection.partId === part.id).map(timelineMarkerKey), [part.id, selectedMotionMarkers]);
-  const selectedTranslationPartSelectedTranslationIds = useMemo(() => selectedTranslationPart ? selectedMotionMarkers.filter((selection) => selection.partId === selectedTranslationPart.id).map(timelineMarkerKey) : [], [selectedMotionMarkers, selectedTranslationPart]);
-  const selectedTranslationSnapMarkers = useMemo(() => selectedMotionMarkers.flatMap((selection) => {
-    const translationPart = scene.compositions.find((item) => item.id === selection.partId);
-    const translationMarker = selection.partId === TIMELINE_MOTION_PART_ID ? sceneMotionViews.translationMarkers.find((item) => item.id === selection.markerId) : translationPart ? getMotionMarkerViews(translationPart).translationMarkers.find((item) => item.id === selection.markerId) : undefined;
-    return translationMarker ? [translationMarker] : [];
-  }), [scene.compositions, sceneMotionViews.translationMarkers, selectedMotionMarkers]);
-  const selectedTranslationSnapInActive = selectedTranslationSnapMarkers.length > 1 ? selectedTranslationSnapMarkers.every((marker) => marker.snapIn) : Boolean(selectedTranslation?.snapIn);
-  const selectedTranslationSnapOutActive = selectedTranslationSnapMarkers.length > 1 ? selectedTranslationSnapMarkers.every((marker) => marker.snapOut) : Boolean(selectedTranslation?.snapOut);
-  const selectedTranslationMiddleSnap = getSelectedActiveMiddleMend(absoluteTranslationMarkers, currentPartSelectedTranslationIds, getTranslationMarkerMendKey) ?? getSelectedZoomMiddleSnap(absoluteTranslationMarkers, currentPartSelectedTranslationIds, getTranslationMarkerMendKey);
-  const selectedTranslationPartMiddleSnap = selectedTranslationPart ? getSelectedActiveMiddleMend(absoluteTranslationMarkers, selectedTranslationPartSelectedTranslationIds, getTranslationMarkerMendKey) ?? getSelectedZoomMiddleSnap(absoluteTranslationMarkers, selectedTranslationPartSelectedTranslationIds, getTranslationMarkerMendKey) : null;
-  const selectedTranslationPartMiddleSnapActive = selectedTranslationPart ? isZoomMiddleSnapActive(absoluteTranslationMarkers, selectedTranslationPartMiddleSnap) : false;
-  const selectedTranslationPartMiddleTransitionMode = getMiddleTransitionMode(absoluteTranslationMarkers, selectedTranslationPartMiddleSnap);
-  const translationMiddleSnap = selectedTranslationMiddleSnap ?? getZoomMiddleSnap(absoluteTranslationMarkers, adjustedSceneTime, getTranslationMarkerMendKey);
-  const inspectorTranslationMiddleSnap = selectedTranslationPartMiddleSnap ?? (selectedTranslationPart?.id === part.id ? translationMiddleSnap : null);
+  const absoluteMotionMarkers = useMemo(() => sceneMotionViews.motionMarkers.map((marker) => ({ ...marker, id: timelineMarkerKey({ partId: TIMELINE_MOTION_PART_ID, markerId: marker.id }), partId: TIMELINE_MOTION_PART_ID, start: marker.start })), [sceneMotionViews.motionMarkers]);
+  const currentPartSelectedMotionIds = useMemo(() => selectedMotionMarkers.filter((selection) => selection.partId === part.id).map(timelineMarkerKey), [part.id, selectedMotionMarkers]);
+  const selectedMotionPartSelectedMotionIds = useMemo(() => selectedMotionPart ? selectedMotionMarkers.filter((selection) => selection.partId === selectedMotionPart.id).map(timelineMarkerKey) : [], [selectedMotionMarkers, selectedMotionPart]);
+  const selectedMotionSnapMarkers = useMemo(() => selectedMotionMarkers.flatMap((selection) => {
+    const markerPart = scene.compositions.find((item) => item.id === selection.partId);
+    const marker = selection.partId === TIMELINE_MOTION_PART_ID ? sceneMotionViews.motionMarkers.find((item) => item.id === selection.markerId) : markerPart ? getMotionMarkerViews(markerPart).motionMarkers.find((item) => item.id === selection.markerId) : undefined;
+    return marker ? [marker] : [];
+  }), [scene.compositions, sceneMotionViews.motionMarkers, selectedMotionMarkers]);
+  const selectedMotionSnapInActive = selectedMotionSnapMarkers.length > 1 ? selectedMotionSnapMarkers.every((marker) => marker.snapIn) : Boolean(selectedMotion?.snapIn);
+  const selectedMotionSnapOutActive = selectedMotionSnapMarkers.length > 1 ? selectedMotionSnapMarkers.every((marker) => marker.snapOut) : Boolean(selectedMotion?.snapOut);
+  const selectedMotionMiddleSnap = getSelectedActiveMiddleMend(absoluteMotionMarkers, currentPartSelectedMotionIds, getMotionMarkerMendKey) ?? getSelectedMotionMiddleSnap(absoluteMotionMarkers, currentPartSelectedMotionIds, getMotionMarkerMendKey);
+  const selectedMotionPartMiddleSnap = selectedMotionPart ? getSelectedActiveMiddleMend(absoluteMotionMarkers, selectedMotionPartSelectedMotionIds, getMotionMarkerMendKey) ?? getSelectedMotionMiddleSnap(absoluteMotionMarkers, selectedMotionPartSelectedMotionIds, getMotionMarkerMendKey) : null;
+  const selectedMotionPartMiddleSnapActive = selectedMotionPart ? isMotionMiddleSnapActive(absoluteMotionMarkers, selectedMotionPartMiddleSnap) : false;
+  const selectedMotionPartMiddleTransitionMode = getMiddleTransitionMode(absoluteMotionMarkers, selectedMotionPartMiddleSnap);
+  const motionMiddleSnap = selectedMotionMiddleSnap ?? getMotionMiddleSnap(absoluteMotionMarkers, adjustedSceneTime, getMotionMarkerMendKey);
+  const inspectorMotionMiddleSnap = selectedMotionPartMiddleSnap ?? (selectedMotionPart?.id === part.id ? motionMiddleSnap : null);
 
   return {
     activeTimelinePart,
@@ -150,8 +136,7 @@ export function useEditorDerivedState({
     framePickPoint,
     hasUnsavedChanges,
     hasActiveComposition,
-    inspectorTranslationMiddleSnap,
-    inspectorZoomMiddleSnap,
+    inspectorMotionMiddleSnap,
     isPickingTranslationPosition,
     isPickingZoomFocus,
     part,
@@ -162,24 +147,33 @@ export function useEditorDerivedState({
     selectedObject,
     selectedAdjustmentLayer,
     selectedPart,
-    selectedTranslation,
-    selectedTranslationPart,
-    selectedTranslationPartMiddleSnapActive,
-    selectedTranslationPartMiddleTransitionMode,
-    selectedTranslationSnapInActive,
-    selectedTranslationSnapMarkers,
-    selectedTranslationSnapOutActive,
-    selectedZoom,
-    selectedZoomPart,
-    selectedZoomPartMiddleSnapActive,
-    selectedZoomPartMiddleTransitionMode,
-    selectedZoomSnapInActive,
-    selectedZoomSnapMarkers,
-    selectedZoomSnapOutActive,
+    selectedMotion,
+    selectedMotionPart,
+    selectedMotionPartMiddleSnapActive,
+    selectedMotionPartMiddleTransitionMode,
+    selectedMotionSnapInActive,
+    selectedMotionSnapMarkers,
+    selectedMotionSnapOutActive,
+    selectedZoom: selectedMotion,
+    selectedZoomPart: selectedMotionPart,
+    selectedZoomPartMiddleSnapActive: selectedMotionPartMiddleSnapActive,
+    selectedZoomPartMiddleTransitionMode: selectedMotionPartMiddleTransitionMode,
+    selectedZoomSnapInActive: selectedMotionSnapInActive,
+    selectedZoomSnapMarkers: selectedMotionSnapMarkers,
+    selectedZoomSnapOutActive: selectedMotionSnapOutActive,
+    selectedTranslation: selectedMotion,
+    selectedTranslationPart: selectedMotionPart,
+    selectedTranslationPartMiddleSnapActive: selectedMotionPartMiddleSnapActive,
+    selectedTranslationPartMiddleTransitionMode: selectedMotionPartMiddleTransitionMode,
+    selectedTranslationSnapInActive: selectedMotionSnapInActive,
+    selectedTranslationSnapMarkers: selectedMotionSnapMarkers,
+    selectedTranslationSnapOutActive: selectedMotionSnapOutActive,
+    inspectorZoomMiddleSnap: inspectorMotionMiddleSnap,
+    inspectorTranslationMiddleSnap: inspectorMotionMiddleSnap,
+    zoomMiddleSnap: motionMiddleSnap,
+    translationMiddleSnap: motionMiddleSnap,
     timeline,
-    translationMiddleSnap,
     validationErrors,
-    zoomMiddleSnap,
     zoomScale,
   };
 }
@@ -196,17 +190,14 @@ const blankPreviewComposition: CompositionClip = {
   motionMarkers: [],
 };
 
-type AbsoluteZoomMarker = ZoomMarker & { id: string; partId: string; start: number };
-type AbsoluteTranslationMarker = TranslationMarker & { id: string; partId: string; start: number };
+type AbsoluteMotionMarker = MotionMarker & { id: string; partId: string; start: number };
 
 function timelineMarkerKey(selection: { partId: string; markerId: string }) {
   return `${selection.partId}:${selection.markerId}`;
 }
 
-function getAbsoluteTimelineMarkers(timeline: TimelinePart[], kind: "zoom"): AbsoluteZoomMarker[];
-function getAbsoluteTimelineMarkers(timeline: TimelinePart[], kind: "translation"): AbsoluteTranslationMarker[];
-function getAbsoluteTimelineMarkers(timeline: TimelinePart[], kind: "zoom" | "translation") {
-  return timeline.flatMap((timelinePart) => (kind === "zoom" ? getMotionMarkerViews(timelinePart).zoomMarkers : getMotionMarkerViews(timelinePart).translationMarkers).map((marker) => ({
+function getAbsoluteTimelineMarkers(timeline: TimelinePart[]) {
+  return timeline.flatMap((timelinePart) => getMotionMarkerViews(timelinePart).motionMarkers.map((marker) => ({
     ...marker,
     id: `${timelinePart.id}:${marker.id}`,
     partId: timelinePart.id,

@@ -1,7 +1,7 @@
 import type { MouseEvent as ReactMouseEvent, RefObject } from "react";
 import type { AdjustmentLayerSelection, CompositionSelection, MotionMarkerSelection, TimelineBlankContextTarget, TimelineNodeContextTarget } from "../../app/types";
 import type { TimelineMarkerMove, TimelineMarkerResize } from "../../core/timeline";
-import type { AdjustmentEffectId, AdjustmentLayer, BackgroundLayer, FrameObject, MotionEffectId, MotionEffectKind, MotionTrack, Part, TimelineLayerState, TimelineMode, TimelineMotionLayerKind, TimelinePart, TimelineViewportState, TranslationMarker, ZoomMarker } from "../../core/types";
+import type { AdjustmentEffectId, AdjustmentLayer, BackgroundLayer, FrameObject, MotionEffectId, MotionEffectKind, MotionMarker, MotionTrack, Part, TimelineLayerState, TimelineMode, TimelineMotionLayerKind, TimelinePart, TimelineViewportState } from "../../core/types";
 
 export type TimelinePanelProps = {
   timelineName: string;
@@ -56,14 +56,10 @@ export type TimelinePanelProps = {
   onMoveComposition: (compositionId: string, start: number, targetLayerId?: string) => void;
   onMoveCompositions: (moves: Array<{ compositionId: string; start: number; targetLayerId?: string }>) => void;
   onUpdateComposition: (compositionId: string, updater: (composition: Part) => Part) => void;
-  onMoveZoomMarker: (sourcePartId: string, markerId: string, targetPartId: string, start: number, targetLayerId?: string) => void;
-  onMoveZoomMarkers: (moves: TimelineMarkerMove[]) => void;
-  onMoveTranslationMarker: (sourcePartId: string, markerId: string, targetPartId: string, start: number, targetLayerId?: string) => void;
-  onMoveTranslationMarkers: (moves: TimelineMarkerMove[]) => void;
-  onUpdateZoomMarkers: (partId: string, updater: (markers: ZoomMarker[], part: Part) => ZoomMarker[]) => void;
-  onUpdateTranslationMarkers: (partId: string, updater: (markers: TranslationMarker[], part: Part) => TranslationMarker[]) => void;
-  onResizeZoomMarkers: (resizes: TimelineMarkerResize[]) => void;
-  onResizeTranslationMarkers: (resizes: TimelineMarkerResize[]) => void;
+  onMoveMotionMarker: (sourcePartId: string, markerId: string, targetPartId: string, start: number, targetLayerId?: string) => void;
+  onMoveMotionMarkers: (moves: TimelineMarkerMove[]) => void;
+  onUpdateMotionMarkers: (partId: string, updater: (markers: MotionMarker[], part: Part) => MotionMarker[]) => void;
+  onResizeMotionMarkers: (resizes: TimelineMarkerResize[]) => void;
   onAddComposition: (compositionId: string, targetLayerId?: string, start?: number) => void;
   onAddAdjustmentEffect: (effectId: AdjustmentEffectId, sceneTime: number, layerId?: string) => void;
   onAddMotionEffect: (effectId: MotionEffectId, layerId: string, sceneTime: number) => void;
@@ -98,6 +94,5 @@ export type AbsoluteTimelineMarker<T extends { id: string; start: number; durati
 };
 
 export type TimelinePartMotionView = TimelinePart & {
-  zoomMarkers: ZoomMarker[];
-  translationMarkers: TranslationMarker[];
+  motionMarkers: MotionMarker[];
 };

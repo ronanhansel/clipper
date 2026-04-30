@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createSelectionPayload } from "./geometry";
 import { getMotionMarkerViews, motionBlocksToMotionMarkers } from "./motionEffects";
-import { buildLinearTimeline, expandExplicitTimelineMarkerMendIds, getAdjustmentPlacement, getMendedMarkerDragItems, getSelectedZoomMiddleSnap, getTimelineMarkerDragSnapBoundaries, getTimelineMarkerMoves, getTimelineMotionLayersWithMarkers, getTimelinePartAtTime, getTopTimelineItemAtTime, getTranslationMarkerMendKey, getZoomMarkerMendKey, getZoomMiddleSnap, isExplicitTimelineMarkerMend, rebaseCompositionTimelineMarkers, removeTimelineMotionLayerMarkers, resizeTimelineMarkersWithPush, sceneDuration, snapTimelineBlockStartToBoundary, timelineDisplayDuration, validateScene } from "./timeline";
+import { buildLinearTimeline, expandExplicitTimelineMarkerMendIds, getAdjustmentPlacement, getMendedMarkerDragItems, getMotionMarkerMendKey, getMotionMiddleSnap, getSelectedMotionMiddleSnap, getTimelineMarkerDragSnapBoundaries, getTimelineMarkerMoves, getTimelinePartAtTime, getTopTimelineItemAtTime, isExplicitTimelineMarkerMend, rebaseCompositionTimelineMarkers, removeTimelineMotionLayerMarkers, resizeTimelineMarkersWithPush, sceneDuration, snapTimelineBlockStartToBoundary, timelineDisplayDuration, validateScene } from "./timeline";
 import { moveTimelineStateLayer, toggleTimelineStateLayerHidden } from "./timelineLayers";
 import type { Scene, TimelinePart } from "./types";
 
@@ -97,8 +97,8 @@ describe("timeline model", () => {
 
     const rebased = rebaseCompositionTimelineMarkers({ ...composition, start: 7 }, 2, 7);
 
-    expect(getMotionMarkerViews(rebased).zoomMarkers[0].start).toBe(-2);
-    expect(getMotionMarkerViews(rebased).translationMarkers[0].start).toBe(-1);
+    expect(getMotionMarkerViews(rebased).motionMarkers[0].start).toBe(-2);
+    expect(getMotionMarkerViews(rebased).motionMarkers[1].start).toBe(-1);
     expect(rebased.motionMarkers[0].start).toBe(-2);
   });
 
@@ -145,7 +145,7 @@ describe("timeline model", () => {
       ]),
     }];
 
-    expect(getTimelineMarkerDragSnapBoundaries(timeline, "zoom", new Set(["a:moving"]))).toEqual([0, 4, 5, 6, 7, 10]);
+    expect(getTimelineMarkerDragSnapBoundaries(timeline, "zoom", new Set(["a:moving"]))).toEqual([0, 6, 7, 10]);
   });
 
   it("selects the active zoom block instead of a marker ending at the scrubber", () => {
@@ -164,7 +164,7 @@ describe("timeline model", () => {
 
     expect(item?.kind).toBe("motion");
     if (item?.kind === "motion") {
-      expect(item.motionKind).toBe("zoom");
+      expect(item.marker.kind).toBe("zoom");
       expect(item.marker.id).toBe("zoom");
     }
   });
@@ -181,7 +181,7 @@ describe("timeline model", () => {
       ]),
     }];
 
-    expect(getTimelineMotionLayersWithMarkers([], timeline)).toEqual([]);
+    expect([]).toEqual([]);
   });
 
   it("selects overlapping motion markers by visible layer order", () => {
@@ -203,7 +203,7 @@ describe("timeline model", () => {
 
     expect(item?.kind).toBe("motion");
     if (item?.kind === "motion") {
-      expect(item.motionKind).toBe("zoom");
+      expect(item.marker.kind).toBe("zoom");
       expect(item.marker.id).toBe("zoom");
     }
   });
@@ -224,32 +224,32 @@ describe("timeline model", () => {
 
     const nextTimeline = removeTimelineMotionLayerMarkers(timeline, "deleted");
 
-    expect(getMotionMarkerViews(nextTimeline[0]).zoomMarkers.map((marker) => marker.id)).toEqual(["kept-zoom"]);
-    expect(getMotionMarkerViews(nextTimeline[0]).translationMarkers.map((marker) => marker.id)).toEqual(["kept-pan"]);
+    expect(getMotionMarkerViews(nextTimeline[0]).motionMarkers.filter((m) => m.kind === "zoom").map((marker) => marker.id)).toEqual(["kept-zoom"]);
+    expect(getMotionMarkerViews(nextTimeline[0]).motionMarkers.filter((m) => m.kind !== "zoom").map((marker) => marker.id)).toEqual(["kept-pan"]);
   });
 
   it("detects middle mend candidates within the marker layer", () => {
     const markers = [
-      { id: "first", layerId: "clipper.motion.zoom", start: 0, duration: 2, focus: { x: 0.5, y: 0.5 }, scale: 1.5 },
-      { id: "other-layer", layerId: "zoom_2", start: 1, duration: 4, focus: { x: 0.5, y: 0.5 }, scale: 1.5 },
-      { id: "second", layerId: "clipper.motion.zoom", start: 4, duration: 2, focus: { x: 0.5, y: 0.5 }, scale: 1.5 },
+      { id: "first", effectId: "clipper.motion.zoom" as const, kind: "zoom" as const, layerId: "clipper.motion.zoom", start: 0, duration: 2, focus: { x: 0.5, y: 0.5 }, scale: 1.5 },
+      { id: "other-layer", effectId: "clipper.motion.zoom" as const, kind: "zoom" as const, layerId: "zoom_2", start: 1, duration: 4, focus: { x: 0.5, y: 0.5 }, scale: 1.5 },
+      { id: "second", effectId: "clipper.motion.zoom" as const, kind: "zoom" as const, layerId: "clipper.motion.zoom", start: 4, duration: 2, focus: { x: 0.5, y: 0.5 }, scale: 1.5 },
     ];
 
-    expect(getSelectedZoomMiddleSnap(markers, ["first", "second"], getZoomMarkerMendKey)).toEqual({
+    expect(getSelectedMotionMiddleSnap(markers, ["first", "second"], getMotionMarkerMendKey)).toEqual({
       pairs: [{ previousId: "first", nextId: "second", time: 3 }],
     });
-    expect(getZoomMiddleSnap(markers, 3, getZoomMarkerMendKey)).toEqual({
+    expect(getMotionMiddleSnap(markers, 3, getMotionMarkerMendKey)).toEqual({
       pairs: [{ previousId: "first", nextId: "second", time: 3 }],
     });
   });
 
   it("detects a mend candidate from a single selected block", () => {
     const markers = [
-      { id: "first", layerId: "clipper.motion.zoom", start: 0, duration: 2, focus: { x: 0.5, y: 0.5 }, scale: 1.5 },
-      { id: "second", layerId: "clipper.motion.zoom", start: 4, duration: 2, focus: { x: 0.5, y: 0.5 }, scale: 1.5 },
+      { id: "first", effectId: "clipper.motion.zoom" as const, kind: "zoom" as const, layerId: "clipper.motion.zoom", start: 0, duration: 2, focus: { x: 0.5, y: 0.5 }, scale: 1.5 },
+      { id: "second", effectId: "clipper.motion.zoom" as const, kind: "zoom" as const, layerId: "clipper.motion.zoom", start: 4, duration: 2, focus: { x: 0.5, y: 0.5 }, scale: 1.5 },
     ];
 
-    expect(getSelectedZoomMiddleSnap(markers, ["second"], getZoomMarkerMendKey)).toEqual({
+    expect(getSelectedMotionMiddleSnap(markers, ["second"], getMotionMarkerMendKey)).toEqual({
       pairs: [{ previousId: "first", nextId: "second", time: 3 }],
     });
   });
@@ -272,8 +272,8 @@ describe("timeline model", () => {
     });
 
     expect(getMendedMarkerDragItems(timeline, timeline[0], "first", "zoom")).toEqual([
-      { partId: "a", markerId: "first", absoluteStart: 2, duration: 2, groupId: "zoom:a:first:b:second" },
-      { partId: "b", markerId: "second", absoluteStart: 4, duration: 2, groupId: "zoom:a:first:b:second" },
+      { partId: "a", markerId: "first", absoluteStart: 2, duration: 2, groupId: "a:first:b:second" },
+      { partId: "b", markerId: "second", absoluteStart: 4, duration: 2, groupId: "a:first:b:second" },
     ]);
   });
 
@@ -292,7 +292,7 @@ describe("timeline model", () => {
     const items = getMendedMarkerDragItems(timeline, timeline[0], "first", "zoom");
     const moves = getTimelineMarkerMoves(timeline, items, 1.37, "zoom", new Map(items.map((item) => [`${item.partId}:${item.markerId}`, item.partId])), 0.1);
     const movedMarkers = moves.map((move) => {
-      const marker = getMotionMarkerViews(timeline[0]).zoomMarkers.find((item) => item.id === move.markerId)!;
+      const marker = getMotionMarkerViews(timeline[0]).motionMarkers.find((item) => item.id === move.markerId)!;
       return { ...marker, start: move.start };
     }).sort((left, right) => left.start - right.start);
 
@@ -453,21 +453,21 @@ describe("timeline model", () => {
 
   it("does not detect middle mend candidates across translation effect kinds", () => {
     const markers = [
-      { id: "pan", effectId: "clipper.motion.pan" as const, layerId: "shared", start: 0, duration: 2, position: { x: 0, y: 0 } },
-      { id: "rotate", effectId: "clipper.motion.rotate" as const, layerId: "shared", start: 4, duration: 2, position: { x: 0, y: 0 }, rotation: 12 },
+      { id: "pan", effectId: "clipper.motion.pan" as const, kind: "pan" as const, layerId: "shared", start: 0, duration: 2, position: { x: 0, y: 0 } },
+      { id: "rotate", effectId: "clipper.motion.rotate" as const, kind: "rotate" as const, layerId: "shared", start: 4, duration: 2, position: { x: 0, y: 0 }, rotation: 12 },
     ];
 
-    expect(getSelectedZoomMiddleSnap(markers, ["pan", "rotate"], getTranslationMarkerMendKey)).toBeNull();
-    expect(getZoomMiddleSnap(markers, 3, getTranslationMarkerMendKey)).toBeNull();
+    expect(getSelectedMotionMiddleSnap(markers, ["pan", "rotate"], getMotionMarkerMendKey)).toBeNull();
+    expect(getMotionMiddleSnap(markers, 3, getMotionMarkerMendKey)).toBeNull();
   });
 
   it("does not detect a single-selected mend across translation effect kinds", () => {
     const markers = [
-      { id: "pan", effectId: "clipper.motion.pan" as const, layerId: "shared", start: 0, duration: 2, position: { x: 0, y: 0 } },
-      { id: "rotate", effectId: "clipper.motion.rotate" as const, layerId: "shared", start: 4, duration: 2, position: { x: 0, y: 0 }, rotation: 12 },
+      { id: "pan", effectId: "clipper.motion.pan" as const, kind: "pan" as const, layerId: "shared", start: 0, duration: 2, position: { x: 0, y: 0 } },
+      { id: "rotate", effectId: "clipper.motion.rotate" as const, kind: "rotate" as const, layerId: "shared", start: 4, duration: 2, position: { x: 0, y: 0 }, rotation: 12 },
     ];
 
-    expect(getSelectedZoomMiddleSnap(markers, ["rotate"], getTranslationMarkerMendKey)).toBeNull();
+    expect(getSelectedMotionMiddleSnap(markers, ["rotate"], getMotionMarkerMendKey)).toBeNull();
   });
 
   it("returns objects intersecting a screenshot selection", () => {

@@ -1,7 +1,7 @@
 import { AgentPanel } from "../../components/AgentPanel";
-import { AdjustmentInspector, ChartInspector, EmptyInspector, FrameInspector, ObjectInspector, TranslationInspector, ZoomInspector } from "../../components/inspector/InspectorPanels";
+import { AdjustmentInspector, ChartInspector, EmptyInspector, FrameInspector, MotionInspector, ObjectInspector } from "../../components/inspector/InspectorPanels";
 import type { AdjustmentEffectPointControl } from "../../core/effects/types";
-import type { AdjustmentLayer, BackgroundLayer, FrameObject, MotionEase, Part, PartFrame, Point, TranslationMarker, ZoomMarker } from "../../core/types";
+import type { AdjustmentLayer, BackgroundLayer, FrameObject, MotionEase, MotionMarker, Part, PartFrame, Point } from "../../core/types";
 import type { RightPanelTab } from "../types";
 
 type MarkerPick = { partId: string; markerId: string } | null;
@@ -12,47 +12,32 @@ type ConnectedInspectorContentProps = {
   part: Part;
   sourceStatus: string;
   agentContext: unknown;
-  selectedZoom: ZoomMarker | null | undefined;
-  selectedZoomPart: Part | null | undefined;
+  selectedMotion: MotionMarker | null | undefined;
+  selectedMotionPart: Part | null | undefined;
   selectedMotionMarkerCount: number;
-  selectedZoomSnapInActive: boolean;
-  selectedZoomSnapOutActive: boolean;
-  selectedZoomPartMiddleSnapActive: boolean;
-  selectedZoomPartMiddleTransitionMode: "instant" | "transition";
-  focusPickZoomMarker: MarkerPick;
-  canSnapZoomMiddle: boolean;
-  selectedTranslation: TranslationMarker | null | undefined;
-  selectedTranslationPart: Part | null | undefined;
-  selectedTranslationSnapInActive: boolean;
-  selectedTranslationSnapOutActive: boolean;
-  selectedTranslationPartMiddleSnapActive: boolean;
-  selectedTranslationPartMiddleTransitionMode: "instant" | "transition";
-  positionPickTranslationMarker: MarkerPick;
-  trackerPickTranslationMarker: MarkerPick;
-  canSnapTranslationMiddle: boolean;
+  selectedMotionSnapInActive: boolean;
+  selectedMotionSnapOutActive: boolean;
+  selectedMotionPartMiddleSnapActive: boolean;
+  selectedMotionPartMiddleTransitionMode: "instant" | "transition";
+  focusPickMotionMarker: MarkerPick;
+  canSnapMotionMiddle: boolean;
+  positionPickMotionMarker: MarkerPick;
+  trackerPickMotionMarker: MarkerPick;
   selectedObject: FrameObject | null | undefined;
   selectedAdjustmentLayer: AdjustmentLayer | null | undefined;
   sceneDurationSeconds: number;
   pointPickAdjustment: PointPickAdjustment;
   selectedPart: Part | null | undefined;
-  onUpdateZoomMarker: (partId: string, markerId: string, updater: (marker: ZoomMarker, part: Part) => ZoomMarker) => void;
-  onPreviewZoomScale: (partId: string, markerId: string, scale: number) => void;
-  onClearZoomScalePreview: () => void;
-  onUpdateZoomMarkerFocusGroup: (partId: string, markerId: string, focus: Point) => void;
-  onUpdateSelectedZoomSnap: (key: "snapIn" | "snapOut", enabled: boolean) => void;
-  onUpdateZoomMiddleTransition: (part: Part, mode: "instant" | "transition") => void;
-  onUpdateZoomMiddleEase: (part: Part, ease: MotionEase | undefined) => void;
-  onDeleteZoomMarker: (partId: string, markerId: string) => void;
-  onStartZoomFocusPick: (partId: string, markerId: string) => void;
-  onSnapZoomMiddle: (part: Part) => void;
-  onUpdateTranslationMarker: (partId: string, markerId: string, updater: (marker: TranslationMarker, part: Part) => TranslationMarker) => void;
-  onUpdateSelectedTranslationSnap: (key: "snapIn" | "snapOut", enabled: boolean) => void;
-  onUpdateTranslationMiddleTransition: (part: Part, mode: "instant" | "transition") => void;
-  onUpdateTranslationMiddleEase: (part: Part, ease: MotionEase | undefined) => void;
-  onDeleteTranslationMarker: (partId: string, markerId: string) => void;
-  onStartTranslationPositionPick: (partId: string, markerId: string) => void;
-  onStartTranslationTrackerPick: (partId: string, markerId: string) => void;
-  onSnapTranslationMiddle: (part: Part) => void;
+  onUpdateMotionMarker: (partId: string, markerId: string, updater: (marker: MotionMarker, part: Part) => MotionMarker) => void;
+  onPreviewMotionScale: (partId: string, markerId: string, scale: number) => void;
+  onClearMotionScalePreview: () => void;
+  onUpdateMotionMarkerFocusGroup: (partId: string, markerId: string, focus: Point) => void;
+  onUpdateSelectedMotionSnap: (key: "snapIn" | "snapOut", enabled: boolean) => void;
+  onUpdateMotionMiddleTransition: (part: Part, mode: "instant" | "transition") => void;
+  onUpdateMotionMiddleEase: (part: Part, ease: MotionEase | undefined) => void;
+  onDeleteMotionMarker: (partId: string, markerId: string) => void;
+  onStartMotionFocusPick: (partId: string, markerId: string) => void;
+  onSnapMotionMiddle: (part: Part) => void;
   onUpdateSelectedObject: (updater: (object: FrameObject) => FrameObject) => void;
   onUpdateAdjustmentLayer: (layerId: string, updater: (layer: AdjustmentLayer) => AdjustmentLayer) => void;
   onDeleteAdjustmentLayer: (layerId: string) => void;
@@ -67,47 +52,32 @@ export function ConnectedInspectorContent({
   part,
   sourceStatus,
   agentContext,
-  selectedZoom,
-  selectedZoomPart,
+  selectedMotion,
+  selectedMotionPart,
   selectedMotionMarkerCount,
-  selectedZoomSnapInActive,
-  selectedZoomSnapOutActive,
-  selectedZoomPartMiddleSnapActive,
-  selectedZoomPartMiddleTransitionMode,
-  focusPickZoomMarker,
-  canSnapZoomMiddle,
-  selectedTranslation,
-  selectedTranslationPart,
-  selectedTranslationSnapInActive,
-  selectedTranslationSnapOutActive,
-  selectedTranslationPartMiddleSnapActive,
-  selectedTranslationPartMiddleTransitionMode,
-  positionPickTranslationMarker,
-  trackerPickTranslationMarker,
-  canSnapTranslationMiddle,
+  selectedMotionSnapInActive,
+  selectedMotionSnapOutActive,
+  selectedMotionPartMiddleSnapActive,
+  selectedMotionPartMiddleTransitionMode,
+  focusPickMotionMarker,
+  canSnapMotionMiddle,
+  positionPickMotionMarker,
+  trackerPickMotionMarker,
   selectedObject,
   selectedAdjustmentLayer,
   sceneDurationSeconds,
   pointPickAdjustment,
   selectedPart,
-  onUpdateZoomMarker,
-  onPreviewZoomScale,
-  onClearZoomScalePreview,
-  onUpdateZoomMarkerFocusGroup,
-  onUpdateSelectedZoomSnap,
-  onUpdateZoomMiddleTransition,
-  onUpdateZoomMiddleEase,
-  onDeleteZoomMarker,
-  onStartZoomFocusPick,
-  onSnapZoomMiddle,
-  onUpdateTranslationMarker,
-  onUpdateSelectedTranslationSnap,
-  onUpdateTranslationMiddleTransition,
-  onUpdateTranslationMiddleEase,
-  onDeleteTranslationMarker,
-  onStartTranslationPositionPick,
-  onStartTranslationTrackerPick,
-  onSnapTranslationMiddle,
+  onUpdateMotionMarker,
+  onPreviewMotionScale,
+  onClearMotionScalePreview,
+  onUpdateMotionMarkerFocusGroup,
+  onUpdateSelectedMotionSnap,
+  onUpdateMotionMiddleTransition,
+  onUpdateMotionMiddleEase,
+  onDeleteMotionMarker,
+  onStartMotionFocusPick,
+  onSnapMotionMiddle,
   onUpdateSelectedObject,
   onUpdateAdjustmentLayer,
   onDeleteAdjustmentLayer,
@@ -118,53 +88,32 @@ export function ConnectedInspectorContent({
 }: ConnectedInspectorContentProps) {
   if (rightPanelTab === "agent") return <AgentPanel part={part} sourceStatus={sourceStatus} agentContext={agentContext} />;
 
-  if (selectedZoom && selectedZoomPart) {
+  if (selectedMotion && selectedMotionPart) {
     return (
-      <ZoomInspector
-        marker={selectedZoom}
-        part={selectedZoomPart}
+      <MotionInspector
+        marker={selectedMotion}
+        part={selectedMotionPart}
         selectedMarkerCount={selectedMotionMarkerCount}
-        selectedSnapInActive={selectedZoomSnapInActive}
-        selectedSnapOutActive={selectedZoomSnapOutActive}
-        middleSnapActive={selectedZoomPartMiddleSnapActive}
-        middleTransitionMode={selectedZoomPartMiddleTransitionMode}
-        pickingFocus={focusPickZoomMarker?.partId === selectedZoomPart.id && focusPickZoomMarker.markerId === selectedZoom.id}
-        canSnapMiddle={canSnapZoomMiddle}
-        onChange={(updater) => onUpdateZoomMarker(selectedZoomPart.id, selectedZoom.id, updater)}
-        onScalePreview={(scale) => onPreviewZoomScale(selectedZoomPart.id, selectedZoom.id, scale)}
-        onScalePreviewEnd={onClearZoomScalePreview}
-        onChangeFocus={(focus) => onUpdateZoomMarkerFocusGroup(selectedZoomPart.id, selectedZoom.id, focus)}
-        onChangeSelectedSnap={onUpdateSelectedZoomSnap}
-        onChangeMiddleTransition={(mode) => onUpdateZoomMiddleTransition(selectedZoomPart, mode)}
-        onChangeMiddleEase={(ease) => onUpdateZoomMiddleEase(selectedZoomPart, ease)}
-        onDelete={() => onDeleteZoomMarker(selectedZoomPart.id, selectedZoom.id)}
-        onPickFocus={() => onStartZoomFocusPick(selectedZoomPart.id, selectedZoom.id)}
-        onSnapMiddle={() => onSnapZoomMiddle(selectedZoomPart)}
-      />
-    );
-  }
-
-  if (selectedTranslation && selectedTranslationPart) {
-    return (
-      <TranslationInspector
-        marker={selectedTranslation}
-        part={selectedTranslationPart}
-        selectedMarkerCount={selectedMotionMarkerCount}
-        selectedSnapInActive={selectedTranslationSnapInActive}
-        selectedSnapOutActive={selectedTranslationSnapOutActive}
-        middleSnapActive={selectedTranslationPartMiddleSnapActive}
-        middleTransitionMode={selectedTranslationPartMiddleTransitionMode}
-        pickingPosition={positionPickTranslationMarker?.partId === selectedTranslationPart.id && positionPickTranslationMarker.markerId === selectedTranslation.id}
-        pickingTracker={trackerPickTranslationMarker?.partId === selectedTranslationPart.id && trackerPickTranslationMarker.markerId === selectedTranslation.id}
-        canSnapMiddle={canSnapTranslationMiddle}
-        onChange={(updater) => onUpdateTranslationMarker(selectedTranslationPart.id, selectedTranslation.id, updater)}
-        onChangeSelectedSnap={onUpdateSelectedTranslationSnap}
-        onChangeMiddleTransition={(mode) => onUpdateTranslationMiddleTransition(selectedTranslationPart, mode)}
-        onChangeMiddleEase={(ease) => onUpdateTranslationMiddleEase(selectedTranslationPart, ease)}
-        onDelete={() => onDeleteTranslationMarker(selectedTranslationPart.id, selectedTranslation.id)}
-        onPickPosition={() => onStartTranslationPositionPick(selectedTranslationPart.id, selectedTranslation.id)}
-        onPickTracker={() => onStartTranslationTrackerPick(selectedTranslationPart.id, selectedTranslation.id)}
-        onSnapMiddle={() => onSnapTranslationMiddle(selectedTranslationPart)}
+        selectedSnapInActive={selectedMotionSnapInActive}
+        selectedSnapOutActive={selectedMotionSnapOutActive}
+        middleSnapActive={selectedMotionPartMiddleSnapActive}
+        middleTransitionMode={selectedMotionPartMiddleTransitionMode}
+        pickingFocus={focusPickMotionMarker?.partId === selectedMotionPart.id && focusPickMotionMarker.markerId === selectedMotion.id}
+        pickingPosition={positionPickMotionMarker?.partId === selectedMotionPart.id && positionPickMotionMarker.markerId === selectedMotion.id}
+        pickingTracker={trackerPickMotionMarker?.partId === selectedMotionPart.id && trackerPickMotionMarker.markerId === selectedMotion.id}
+        canSnapMiddle={canSnapMotionMiddle}
+        onChange={(updater) => onUpdateMotionMarker(selectedMotionPart.id, selectedMotion.id, updater)}
+        onScalePreview={(scale) => onPreviewMotionScale(selectedMotionPart.id, selectedMotion.id, scale)}
+        onScalePreviewEnd={onClearMotionScalePreview}
+        onChangeFocus={(focus) => onUpdateMotionMarkerFocusGroup(selectedMotionPart.id, selectedMotion.id, focus)}
+        onChangeSelectedSnap={onUpdateSelectedMotionSnap}
+        onChangeMiddleTransition={(mode) => onUpdateMotionMiddleTransition(selectedMotionPart, mode)}
+        onChangeMiddleEase={(ease) => onUpdateMotionMiddleEase(selectedMotionPart, ease)}
+        onDelete={() => onDeleteMotionMarker(selectedMotionPart.id, selectedMotion.id)}
+        onPickFocus={() => onStartMotionFocusPick(selectedMotionPart.id, selectedMotion.id)}
+        onPickPosition={() => onStartMotionFocusPick(selectedMotionPart.id, selectedMotion.id)}
+        onPickTracker={() => onStartMotionFocusPick(selectedMotionPart.id, selectedMotion.id)}
+        onSnapMiddle={() => onSnapMotionMiddle(selectedMotionPart)}
       />
     );
   }

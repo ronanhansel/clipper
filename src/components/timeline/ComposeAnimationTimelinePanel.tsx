@@ -2,7 +2,7 @@ import { memo, useEffect, useMemo, useRef, useState, type PointerEvent, type Ref
 import { defaultTimelinePixelsPerSecond } from "../../app/config";
 import { roundTwo } from "../../core/math";
 import { getTimelineTicks } from "../../core/timeline";
-import type { BackgroundLayer, FrameObject, LayerAnimation, MotionTrack, Part, TimelineLayerState, TimelineViewportState, TimelinePart, TranslationMarker, ZoomMarker } from "../../core/types";
+import type { BackgroundLayer, FrameObject, LayerAnimation, MotionMarker, MotionTrack, Part, TimelineLayerState, TimelineViewportState, TimelinePart } from "../../core/types";
 import { useTimelineDragAutoScroll } from "./useTimelineDragAutoScroll";
 import { useTimelinePointerTransaction } from "./useTimelinePointerTransaction";
 import { getTimelineRowHeight, useTimelineRowResize } from "./useTimelineRowResize";
@@ -207,7 +207,7 @@ export const ComposeAnimationTimelinePanel = memo(function ComposeAnimationTimel
     updateComposeAnimationLayerMotionTiming(drag.layer, next, onUpdateBackgroundMotion, onUpdateObjectMotion, onUpdateBackgroundAnimation, onUpdateObjectAnimation, drag.animationId);
   }
 
-  function updateComposeTranslationFromPointer(event: PointerEvent<HTMLDivElement>, _timelinePart: TimelinePart, marker: TranslationMarker, action: "move" | "start" | "end") {
+  function updateComposeMotionFromPointer(event: PointerEvent<HTMLDivElement>, _timelinePart: TimelinePart, marker: MotionMarker, action: "move" | "start" | "end") {
     const animMatch = marker.id.match(/^(.+)\/anim\/(.+)$/);
     if (animMatch) {
       const [, layerId, animationId] = animMatch;
@@ -232,7 +232,7 @@ export const ComposeAnimationTimelinePanel = memo(function ComposeAnimationTimel
     {layers.slice(1).map((layer, index) => <LayerResizeSeparator key={`compose-label-separator-${layer.id}`} top={layerRowStarts[index + 1]} onPointerDown={(event) => startLayerRowResize(event, layer.id, "top")} />)}
     {layers.map((layer, index) => <LayerLabel key={layer.id} editing={editingLayerId === layer.id} hidden={false} locked={false} compactControls={layerRowHeights[index] < 44} hideLockControl name={layer.name} draft={layerNameDraft} canMoveDown={false} canMoveUp={false} onDraftChange={setLayerNameDraft} onEdit={() => startLayerNameEdit(layer.id, layer.name)} onCommit={commitLayerNameEdit} onCancel={cancelLayerNameEdit} onToggleHidden={() => undefined} onToggleLocked={() => undefined} />)}
   </>} renderTimelineViewport={() => <>
-    {layers.map((layer) => <MotionLane key={layer.id} layerId={layer.id} hidden={false} locked={false} timeline={composeMotionTimeline} sceneDuration={timelineDuration} overflowVisible={false} timelineBlockPreviews={timelineBlockPreviews} motionGradient={{ from: "#6f7684", to: "#424854", text: "#f0f2f6" }} zoomSelectionDrag={null} zoomSelectionBoxRef={{ current: null }} translationSelectionDrag={null} translationSelectionBoxRef={{ current: null }} selectedMotionKeys={selectedComposeMotionKeys} selectedMotionMarkerId={null} selectedMotionMarkerPartId={null} onEffectDragOver={() => undefined} onEffectDrop={() => undefined} onStartSelection={(event) => { const target = event.target as HTMLElement; if (!target.closest("[data-timeline-control]")) selectLayer(layer); }} onMoveSelection={() => undefined} onEndSelection={() => undefined} onOpenBlankContextMenu={(event) => event.preventDefault()}               onSelectMotionMarker={(_partId, markerId) => { const animMatch = markerId.match(/^(.+)\/anim\/(.+)$/); const layerId = animMatch ? animMatch[1] : markerId; const selectedLayer = layers.find((item) => item.id === layerId); if (selectedLayer) selectLayer(selectedLayer); }} onOpenNodeContextMenu={(event) => event.preventDefault()} onUpdateZoomFromPointer={(event) => event.preventDefault()} onUpdateTranslationFromPointer={updateComposeTranslationFromPointer} />)}
+    {layers.map((layer) => <MotionLane key={layer.id} layerId={layer.id} hidden={false} locked={false} timeline={composeMotionTimeline} sceneDuration={timelineDuration} overflowVisible={false} timelineBlockPreviews={timelineBlockPreviews} motionGradient={{ from: "#6f7684", to: "#424854", text: "#f0f2f6" }} motionSelectionDrag={null} motionSelectionBoxRef={{ current: null }} selectedMotionKeys={selectedComposeMotionKeys} selectedMotionMarkerId={null} selectedMotionMarkerPartId={null} onEffectDragOver={() => undefined} onEffectDrop={() => undefined} onStartSelection={(event) => { const target = event.target as HTMLElement; if (!target.closest("[data-timeline-control]")) selectLayer(layer); }} onMoveSelection={() => undefined} onEndSelection={() => undefined} onOpenBlankContextMenu={(event) => event.preventDefault()}               onSelectMotionMarker={(_partId, markerId) => { const animMatch = markerId.match(/^(.+)\/anim\/(.+)$/); const layerId = animMatch ? animMatch[1] : markerId; const selectedLayer = layers.find((item) => item.id === layerId); if (selectedLayer) selectLayer(selectedLayer); }} onOpenNodeContextMenu={(event) => event.preventDefault()} onUpdateMotionFromPointer={updateComposeMotionFromPointer} />)}
   </>} />;
 }, areComposeAnimationTimelinePanelPropsEqual);
 

@@ -1,5 +1,5 @@
 import { getTimelineDragDeltaSeconds, getTimelineBlockTiming, type TimelineBlockTimingAction } from "../../core/timelineBlockTiming";
-import type { BackgroundLayer, FrameObject, LayerAnimation, MotionTrack, Part, TranslationMarker } from "../../core/types";
+import type { BackgroundLayer, FrameObject, LayerAnimation, MotionMarker, MotionTrack, Part } from "../../core/types";
 import type { TimelinePartMotionView } from "./timelineTypes";
 
 export type ComposeAnimationTimelineLayer = {
@@ -35,9 +35,9 @@ export function buildComposeAnimationTimelineLayers(part: Part): ComposeAnimatio
 }
 
 export function buildComposeAnimationMotionTimelinePart(part: Part, layers: ComposeAnimationTimelineLayer[], timelineDuration: number): TimelinePartMotionView {
-  const translationMarkers = layers.flatMap((layer): TranslationMarker[] => {
+  const motionMarkers: MotionMarker[] = layers.flatMap((layer) => {
     if (layer.animations && layer.animations.length > 0) {
-      return layer.animations.map((animation): TranslationMarker => ({
+      return layer.animations.map((animation): MotionMarker => ({
         id: `${layer.id}/anim/${animation.id}`,
         name: animation.name || "Animation",
         layerId: layer.id,
@@ -46,6 +46,8 @@ export function buildComposeAnimationMotionTimelinePart(part: Part, layers: Comp
         start: animation.options.delay ?? 0,
         duration: animation.options.duration,
         position: { x: 0, y: 0 },
+        scale: 1,
+        focus: { x: 0.5, y: 0.5 },
       }));
     }
     if (!layer.motion) return [];
@@ -58,6 +60,8 @@ export function buildComposeAnimationMotionTimelinePart(part: Part, layers: Comp
       start: layer.motion.delay ?? 0,
       duration: layer.motion.duration,
       position: { x: 0, y: 0 },
+      scale: 1,
+      focus: { x: 0.5, y: 0.5 },
     }];
   });
 
@@ -66,8 +70,7 @@ export function buildComposeAnimationMotionTimelinePart(part: Part, layers: Comp
     start: 0,
     end: timelineDuration,
     duration: timelineDuration,
-    zoomMarkers: [],
-    translationMarkers,
+    motionMarkers,
   };
 }
 

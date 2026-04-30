@@ -1,11 +1,11 @@
 import { defaultTimelineLayerState, defaultTimelineViewportState, replacePartInProject } from "../../../core/project";
-import { getCanonicalMotionMarkers, motionBlocksToMotionMarkers, motionBlocksToTranslationMarkers, motionBlocksToZoomMarkers } from "../../../core/motionEffects";
-import type { AdjustmentLayer, EditorState, MotionMarker, Part, ProjectManifest, TimelineLayerState, TimelineMode, TimelineViewportState, TranslationMarker, ZoomMarker } from "../../../core/types";
+import { getCanonicalMotionMarkers } from "../../../core/motionEffects";
+import type { AdjustmentLayer, EditorState, MotionMarker, Part, ProjectManifest, TimelineLayerState, TimelineMode, TimelineViewportState } from "../../../core/types";
 import { timelineClipFromPart } from "./timelineLayerHelpers";
 
 type UpdateProject = (updater: ProjectManifest | ((current: ProjectManifest) => ProjectManifest), options?: { history?: boolean; syncSources?: boolean; coalesceHistory?: boolean }) => void;
 type UpdateEditorState = (updater: (state: EditorState) => EditorState, options?: { history?: boolean; coalesceHistory?: boolean }) => void;
-export type SceneMotionMarkerUpdate = { zoomMarkers: ZoomMarker[]; translationMarkers: TranslationMarker[] } | { motionMarkers: MotionMarker[] };
+export type SceneMotionMarkerUpdate = { motionMarkers: MotionMarker[] };
 
 type UseTimelineProjectActionsInput = {
   scene: {
@@ -31,14 +31,12 @@ export function useTimelineProjectActions({ scene, timelineMode, updateEditorSta
     });
   }
 
-  function updateSceneMotionMarkers(updater: (markers: { zoomMarkers: ZoomMarker[]; translationMarkers: TranslationMarker[] }) => SceneMotionMarkerUpdate) {
+  function updateSceneMotionMarkers(updater: (markers: MotionMarker[]) => SceneMotionMarkerUpdate) {
     updateProject((current) => {
       const currentTimeline = current.timelines?.find((timeline) => timeline.id === scene.id);
       const currentMotionMarkers = getCanonicalMotionMarkers(currentTimeline ?? scene);
-      const currentZoomMarkers = motionBlocksToZoomMarkers(currentMotionMarkers);
-      const currentTranslationMarkers = motionBlocksToTranslationMarkers(currentMotionMarkers);
-      const nextMarkers = updater({ zoomMarkers: currentZoomMarkers, translationMarkers: currentTranslationMarkers });
-      const nextMotionMarkers = "motionMarkers" in nextMarkers ? nextMarkers.motionMarkers : motionBlocksToMotionMarkers([...nextMarkers.zoomMarkers, ...nextMarkers.translationMarkers]);
+      const nextMarkers = updater(currentMotionMarkers);
+      const nextMotionMarkers = nextMarkers.motionMarkers;
       return {
         ...current,
         timelines: (current.timelines ?? []).map((timeline) => (timeline.id === scene.id ? { ...timeline, motionMarkers: nextMotionMarkers } : timeline)),

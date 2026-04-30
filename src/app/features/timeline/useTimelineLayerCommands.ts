@@ -164,8 +164,7 @@ export function useTimelineLayerCommands({
 
   function motionLayerHasMarkers(layerId: string) {
     const motionViews = getMotionMarkerViews(scene);
-    return motionViews.zoomMarkers.some((marker) => isMotionMarkerOnLayerId(marker, layerId))
-      || motionViews.translationMarkers.some((marker) => isMotionMarkerOnLayerId(marker, layerId));
+    return motionViews.motionMarkers.some((marker) => isMotionMarkerOnLayerId(marker, layerId));
   }
 
   function assignAvailableMotionLayerKind(layerId: string | undefined, _kind: Exclude<TimelineMotionLayerKind, "empty">) {

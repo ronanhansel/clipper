@@ -70,7 +70,7 @@ export function normalizeMendedMotionMarkerFocus(markers: MotionMarker[]): Motio
       const marker = sortedMarkers[index];
       const previous = sortedMarkers[index - 1];
       const mendedToPrevious = Boolean(previous && isExplicitMendedPair(previous, marker));
-      if (!mendedToPrevious) sharedFocus = marker.focus;
+      if (!mendedToPrevious) sharedFocus = marker.focus ?? null;
       if (sharedFocus) focusById.set(marker.id, sharedFocus);
     }
   }

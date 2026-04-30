@@ -8,7 +8,7 @@ import { getBoundsUnion, insetBounds, isVisibleMarqueeBounds, updateDragSelectio
 import { clamp } from "../../core/math";
 import { getMotionMarkerViews } from "../../core/motionEffects";
 import { evaluateBackgroundLayer, evaluateFrameObject, isTimeSensitiveFrameObject, type EvaluatedFrameObject } from "../../core/renderRuntime";
-import { FRAME_HEIGHT, FRAME_WIDTH, type AdjustmentLayer, type BackgroundLayer, type Bounds, type FrameObject, type Part, type Point, type RichTextSegment, type SelectionPayload, type TimelineMode, type TimelineMotionLayerState, type TranslationMarker } from "../../core/types";
+import { FRAME_HEIGHT, FRAME_WIDTH, type AdjustmentLayer, type BackgroundLayer, type Bounds, type FrameObject, type Part, type Point, type RichTextSegment, type SelectionPayload, type TimelineMode, type TimelineMotionLayerState } from "../../core/types";
 import type { AdjustmentVisualOverlay } from "../../core/effects/types";
 import type { PlaybackClock } from "../../app/types";
 
@@ -390,7 +390,7 @@ function isPlaybackTimeSensitivePart(part: Part, timelineMode: TimelineMode, adj
     || part.background.elements.some(isPreviewTimeSensitiveObject)
     || part.objects.some(isPreviewTimeSensitiveObject)))
     || (animationsEnabled && Boolean(adjustmentLayers?.length))
-    || (timelineMode === "composition" && (motionViews.zoomMarkers.length > 0 || motionViews.translationMarkers.length > 0));
+    || (timelineMode === "composition" && motionViews.motionMarkers.length > 0);
 }
 
 export function SelectionOverlayBox({ objectId, bounds, cameraTransform, frameScale, highlighted, interactive, overlayOffset = 0, onResizePointerDown }: { objectId: string; bounds: Bounds; cameraTransform: CameraPreviewTransform; frameScale: number; highlighted: boolean; interactive: boolean; overlayOffset?: number; onResizePointerDown: (event: PointerEvent<HTMLDivElement>, handle: ResizeHandle) => void }) {

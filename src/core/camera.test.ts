@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { CAMERA_PERSPECTIVE, formatCameraPreviewTransform, getActivePerspective, getActiveTranslation, getLayeredCameraPreviewTransform } from "./camera";
-import { motionBlocksToMotionMarkers, motionBlocksToTranslationMarkers } from "./motionEffects";
+import { CAMERA_PERSPECTIVE, formatCameraPreviewTransform, getActiveMarkerByKind, getActivePerspectiveMarkers, getLayeredCameraPreviewTransform } from "./camera";
+import { motionBlocksToMotionMarkers } from "./motionEffects";
 import type { Part, TimelineMotionLayerState } from "./types";
 
 const basePart: Part = {
@@ -33,10 +33,10 @@ describe("camera", () => {
       objects: [{ id: "tracker", name: "Tracker", type: "rect", selector: "[data-object-id='tracker']", bounds: { x: 100, y: 100, width: 100, height: 100 }, style: {}, motion: { duration: 4, x: [0, 400] } }],
     };
 
-    const tracked = getActiveTranslation([{ id: "pan", effectId: "clipper.motion.pan", layerId: "clipper.motion.pan", start: 0, duration: 4, position: { x: 12, y: 34 }, followId: "tracker" }], 2, part);
-    const manual = getActiveTranslation([{ id: "pan", effectId: "clipper.motion.pan", layerId: "clipper.motion.pan", start: 0, duration: 4, position: { x: 12, y: 34 } }], 2, part);
+    const tracked = getActiveMarkerByKind([{ id: "pan", effectId: "clipper.motion.pan", kind: "pan" as const, layerId: "clipper.motion.pan", start: 0, duration: 4, position: { x: 12, y: 34 }, followId: "tracker" }], "pan", 2, part);
+    const manual = getActiveMarkerByKind([{ id: "pan", effectId: "clipper.motion.pan", kind: "pan" as const, layerId: "clipper.motion.pan", start: 0, duration: 4, position: { x: 12, y: 34 } }], "pan", 2, part);
 
-    expect(tracked?.position.x).not.toBe(12);
+    expect(tracked?.position?.x).not.toBe(12);
     expect(manual?.position).toEqual({ x: 12, y: 34 });
   });
 
@@ -79,13 +79,13 @@ describe("camera", () => {
   });
 
   it("preserves perspective tilt values when converting motion blocks to markers", () => {
-    const [marker] = motionBlocksToTranslationMarkers([{ id: "perspective", effectId: "clipper.motion.perspective", layerId: "clipper.motion.perspective", start: 0, duration: 1, position: { x: 0, y: 0 }, params: { perspective: { z: 102, rotateX: 33, rotateY: 40 } } }]);
+    const [marker] = motionBlocksToMotionMarkers([{ id: "perspective", effectId: "clipper.motion.perspective", layerId: "clipper.motion.perspective", start: 0, duration: 1, position: { x: 0, y: 0 }, params: { perspective: { z: 102, rotateX: 33, rotateY: 40 } } }]);
 
     expect(marker.perspective).toEqual({ z: 102, rotateX: 33, rotateY: 40 });
   });
 
   it("interpolates perspective markers with existing easing", () => {
-    const perspective = getActivePerspective([{ id: "perspective", effectId: "clipper.motion.perspective", layerId: "clipper.motion.perspective", start: 0, duration: 4, position: { x: 0, y: 0 }, perspective: { z: 200, rotateX: 10, rotateY: -20 }, ease: "linear" }], 0.44);
+    const perspective = getActivePerspectiveMarkers([{ id: "perspective", effectId: "clipper.motion.perspective", kind: "perspective" as const, layerId: "clipper.motion.perspective", start: 0, duration: 4, position: { x: 0, y: 0 }, perspective: { z: 200, rotateX: 10, rotateY: -20 }, ease: "linear" }], 0.44);
 
     expect(perspective).toMatchObject({ z: 100, rotateX: 5, rotateY: -10 });
   });

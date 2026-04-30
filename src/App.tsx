@@ -48,9 +48,9 @@ import { boundsToPoints } from "./core/geometry";
 import { clamp, roundTenth } from "./core/math";
 import type { AdjustmentEffectPointControl } from "./core/effects/types";
 import { defaultComposeLayoutState, defaultEditorLayoutState, defaultPreviewViewportState, defaultTimelineLayerState, defaultTimelineMode, defaultTimelineViewportState } from "./core/project";
-import { getExecutableAdjustmentLayers, getTranslationMarkerLayerId, getZoomMarkerLayerId } from "./core/timeline";
+import { getExecutableAdjustmentLayers } from "./core/timeline";
 import type { TimelineLayerCategory } from "./core/timelineLayers";
-import { FRAME_HEIGHT, FRAME_WIDTH, type Bounds, type CompositionClip, type EditorState, type FrameObject, type LayerAnimation, type MotionEffectKind, type Part, type Point, type ProjectManifest, type SelectionPayload, type TimelineClip, type TimelineLayerState, type TimelineMotionLayerKind, type TimelineViewportState } from "./core/types";
+import { FRAME_HEIGHT, FRAME_WIDTH, type Bounds, type CompositionClip, type EditorState, type FrameObject, type LayerAnimation, type MotionEffectKind, type Part, type Point, type ProjectManifest, type SelectionPayload, type TimelineClip, type TimelineLayerState, type TimelineViewportState } from "./core/types";
 
 const defaultEditorState: EditorState = {
   timeline: defaultTimelineViewportState,
@@ -302,8 +302,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     framePickPoint,
     hasUnsavedChanges,
     hasActiveComposition,
-    inspectorTranslationMiddleSnap,
-    inspectorZoomMiddleSnap,
+    inspectorMotionMiddleSnap,
     isPickingTranslationPosition,
     isPickingZoomFocus,
     part,
@@ -314,24 +313,15 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     selectedObject,
     selectedAdjustmentLayer,
     selectedPart,
-    selectedTranslation,
-    selectedTranslationPart,
-    selectedTranslationPartMiddleSnapActive,
-    selectedTranslationPartMiddleTransitionMode,
-    selectedTranslationSnapInActive,
-    selectedTranslationSnapMarkers,
-    selectedTranslationSnapOutActive,
-    selectedZoom,
-    selectedZoomPart,
-    selectedZoomPartMiddleSnapActive,
-    selectedZoomPartMiddleTransitionMode,
-    selectedZoomSnapInActive,
-    selectedZoomSnapMarkers,
-    selectedZoomSnapOutActive,
+    selectedMotion,
+    selectedMotionPart,
+    selectedMotionPartMiddleSnapActive,
+    selectedMotionPartMiddleTransitionMode,
+    selectedMotionSnapInActive,
+    selectedMotionSnapMarkers,
+    selectedMotionSnapOutActive,
     timeline,
-    translationMiddleSnap,
     validationErrors,
-    zoomMiddleSnap,
     zoomScale,
   } = useEditorDerivedState({
     currentSceneTime,
@@ -844,7 +834,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
       return;
     }
 
-    updateTranslationMarker(pick.partId, pick.markerId, (marker) => ({ ...marker, followId: objectId || undefined }));
+    updateMotionMarker(pick.partId, pick.markerId, (marker) => ({ ...marker, followId: objectId || undefined }));
     setTrackerPickTranslationMarker(null);
   }
 
@@ -870,7 +860,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     updateSceneParts,
   });
 
-  const { addMotionEffect, addRotationMarker, addTranslationMarker, addZoomMarker, clearZoomScalePreview, deleteTranslationMarker, deleteZoomMarker, moveTranslationMarker, moveTranslationMarkers, moveZoomMarker, moveZoomMarkers, previewZoomScale, resizeTranslationMarkers, resizeZoomMarkers, snapTranslationMiddle, snapZoomMiddle, updateSelectedTranslationSnap, updateSelectedZoomSnap, updateTranslationMarker, updateTranslationMarkers, updateTranslationMiddleEase, updateTranslationMiddleTransition, updateZoomMarker, updateZoomMarkerFocusGroup, updateZoomMarkers, updateZoomMiddleEase, updateZoomMiddleTransition } = useMotionMarkerCommands({
+  const { addMotionEffect, addMotionMarker: addZoomMarker, previewMotionScale: previewZoomScale, clearMotionScalePreview: clearZoomScalePreview, deleteMotionMarker, moveMotionMarker, moveMotionMarkers, resizeMotionMarkers, snapMotionMiddle, updateMotionMiddleTransition, updateMotionMiddleEase, updateSelectedMotionSnap, updateMotionMarker, updateMotionMarkers, updateMotionMarkerFocusGroup } = useMotionMarkerCommands({
     activeTimelinePart,
     cameraRef,
     hiddenMotionLayerIds,
@@ -879,14 +869,14 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     markerDurationSeconds,
     motionLayers,
     part,
-    pendingZoomScalePreviewRef,
+    pendingScalePreviewRef: pendingZoomScalePreviewRef,
     previewTime,
     scene,
     sceneDurationSeconds,
     selectedObjectBounds: selectedObject?.bounds ?? null,
     selectedMotionMarkers,
     timelineMode,
-    zoomScalePreviewFrameRef,
+    scalePreviewFrameRef: zoomScalePreviewFrameRef,
     assignAvailableMotionLayerKind,
     setFocusPickZoomMarker,
     setPositionPickTranslationMarker,
@@ -946,8 +936,8 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     setSelectionPayload,
     updateAdjustmentLayer,
     updateCompositionForTimelinePart,
-    updateTranslationMarker,
-    updateZoomMarkerFocusGroup,
+    updateTranslationMarker: updateMotionMarker,
+    updateZoomMarkerFocusGroup: updateMotionMarkerFocusGroup,
   });
   frameInteractionControllerRef.current = frameInteractionController;
   const {
@@ -1093,7 +1083,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   const blankFrameViewportStyle = { width: FRAME_WIDTH * framePreviewScale, height: FRAME_HEIGHT * framePreviewScale } as CSSProperties;
   const adjustmentPickLayer = pointPickAdjustment ? scene.adjustmentLayers?.find((layer) => layer.id === pointPickAdjustment.layerId) : null;
   const adjustmentFramePickPoint = pointPickAdjustment && adjustmentPickLayer ? getAdjustmentPointControlFramePoint(adjustmentPickLayer, pointPickAdjustment.control) : null;
-  const activeFramePickPoint = pointPickAdjustment ? framePickPreviewPoint ?? adjustmentFramePickPoint : framePickPoint;
+  const activeFramePickPoint = (pointPickAdjustment ? framePickPreviewPoint ?? adjustmentFramePickPoint : framePickPoint) ?? null;
   const selectedComposeObjectIds = useMemo(() => selectionPayload?.objects.map((object) => object.id) ?? (selectedObjectId ? [selectedObjectId] : []), [selectedObjectId, selectionPayload]);
 
   return (
@@ -1156,47 +1146,32 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
             part={part}
             sourceStatus={sourceStatus}
             agentContext={agentContext}
-            selectedZoom={selectedZoom}
-            selectedZoomPart={selectedZoomPart}
+            selectedMotion={selectedMotion}
+            selectedMotionPart={selectedMotionPart}
             selectedMotionMarkerCount={selectedMotionMarkers.length}
-            selectedZoomSnapInActive={selectedZoomSnapInActive}
-            selectedZoomSnapOutActive={selectedZoomSnapOutActive}
-            selectedZoomPartMiddleSnapActive={selectedZoomPartMiddleSnapActive}
-            selectedZoomPartMiddleTransitionMode={selectedZoomPartMiddleTransitionMode}
-            focusPickZoomMarker={focusPickZoomMarker}
-            canSnapZoomMiddle={Boolean(inspectorZoomMiddleSnap)}
-            selectedTranslation={selectedTranslation}
-            selectedTranslationPart={selectedTranslationPart}
-            selectedTranslationSnapInActive={selectedTranslationSnapInActive}
-            selectedTranslationSnapOutActive={selectedTranslationSnapOutActive}
-            selectedTranslationPartMiddleSnapActive={selectedTranslationPartMiddleSnapActive}
-            selectedTranslationPartMiddleTransitionMode={selectedTranslationPartMiddleTransitionMode}
-            positionPickTranslationMarker={positionPickTranslationMarker}
-            trackerPickTranslationMarker={trackerPickTranslationMarker}
-            canSnapTranslationMiddle={Boolean(inspectorTranslationMiddleSnap)}
+            selectedMotionSnapInActive={selectedMotionSnapInActive}
+            selectedMotionSnapOutActive={selectedMotionSnapOutActive}
+            selectedMotionPartMiddleSnapActive={selectedMotionPartMiddleSnapActive}
+            selectedMotionPartMiddleTransitionMode={selectedMotionPartMiddleTransitionMode}
+            focusPickMotionMarker={focusPickZoomMarker}
+            canSnapMotionMiddle={Boolean(inspectorMotionMiddleSnap)}
+            positionPickMotionMarker={positionPickTranslationMarker}
+            trackerPickMotionMarker={trackerPickTranslationMarker}
             selectedObject={selectedObject}
             selectedAdjustmentLayer={selectedAdjustmentLayer}
             sceneDurationSeconds={sceneDurationSeconds}
             pointPickAdjustment={pointPickAdjustment}
             selectedPart={selectedPart}
-            onUpdateZoomMarker={updateZoomMarker}
-            onPreviewZoomScale={previewZoomScale}
-            onClearZoomScalePreview={clearZoomScalePreview}
-            onUpdateZoomMarkerFocusGroup={updateZoomMarkerFocusGroup}
-            onUpdateSelectedZoomSnap={updateSelectedZoomSnap}
-            onUpdateZoomMiddleTransition={updateZoomMiddleTransition}
-            onUpdateZoomMiddleEase={updateZoomMiddleEase}
-            onDeleteZoomMarker={deleteZoomMarker}
-            onStartZoomFocusPick={startZoomFocusPick}
-            onSnapZoomMiddle={snapZoomMiddle}
-            onUpdateTranslationMarker={updateTranslationMarker}
-            onUpdateSelectedTranslationSnap={updateSelectedTranslationSnap}
-            onUpdateTranslationMiddleTransition={updateTranslationMiddleTransition}
-            onUpdateTranslationMiddleEase={updateTranslationMiddleEase}
-            onDeleteTranslationMarker={deleteTranslationMarker}
-            onStartTranslationPositionPick={startTranslationPositionPick}
-            onStartTranslationTrackerPick={startTranslationTrackerPick}
-            onSnapTranslationMiddle={snapTranslationMiddle}
+            onUpdateMotionMarker={updateMotionMarker}
+            onPreviewMotionScale={previewZoomScale}
+            onClearMotionScalePreview={clearZoomScalePreview}
+            onUpdateMotionMarkerFocusGroup={updateMotionMarkerFocusGroup}
+            onUpdateSelectedMotionSnap={updateSelectedMotionSnap}
+            onUpdateMotionMiddleTransition={updateMotionMiddleTransition}
+            onUpdateMotionMiddleEase={updateMotionMiddleEase}
+            onDeleteMotionMarker={deleteMotionMarker}
+            onStartMotionFocusPick={startZoomFocusPick}
+            onSnapMotionMiddle={snapMotionMiddle}
             onUpdateSelectedObject={updateSelectedObject}
             onUpdateAdjustmentLayer={updateAdjustmentLayer}
             onDeleteAdjustmentLayer={deleteAdjustmentLayer}
@@ -1261,17 +1236,13 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
         onMoveComposition: moveCompositionMarker,
         onMoveCompositions: moveCompositionMarkers,
         onUpdateComposition: updateCompositionMarker,
-        onMoveZoomMarker: moveZoomMarker,
-        onMoveZoomMarkers: moveZoomMarkers,
-        onMoveTranslationMarker: moveTranslationMarker,
-        onMoveTranslationMarkers: moveTranslationMarkers,
+        onMoveMotionMarker: moveMotionMarker,
+        onMoveMotionMarkers: moveMotionMarkers,
         onScrub: composeMode && activeTimelinePart ? scrubToPlaybackDisplayTime : scrubToSceneTime,
         onScrubStart: pausePlaybackForTimelineScrub,
         onScrubEnd: resumePlaybackAfterTimelineScrub,
-        onUpdateZoomMarkers: updateZoomMarkers,
-        onUpdateTranslationMarkers: updateTranslationMarkers,
-        onResizeZoomMarkers: resizeZoomMarkers,
-        onResizeTranslationMarkers: resizeTranslationMarkers,
+        onUpdateMotionMarkers: updateMotionMarkers as any,
+        onResizeMotionMarkers: resizeMotionMarkers as any,
         onAddComposition: addCompositionFromLibrary,
         onAddAdjustmentEffect: addAdjustmentLayerAt,
         onAddMotionEffect: addMotionEffect,

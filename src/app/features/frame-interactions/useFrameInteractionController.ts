@@ -60,7 +60,7 @@ type FrameInteractionControllerParams = {
   setSelectionPayload: Dispatch<SetStateAction<SelectionPayload | null>>;
   updateAdjustmentLayer: (layerId: string, updater: (layer: AdjustmentLayer) => AdjustmentLayer) => void;
   updateCompositionForTimelinePart: (partId: string, updater: (composition: CompositionClip) => CompositionClip) => void;
-  updateTranslationMarker: (partId: string, markerId: string, updater: (marker: import("../../../core/types").TranslationMarker) => import("../../../core/types").TranslationMarker) => void;
+  updateTranslationMarker: (partId: string, markerId: string, updater: (marker: import("../../../core/types").MotionMarker) => import("../../../core/types").MotionMarker) => void;
   updateZoomMarkerFocusGroup: (partId: string, markerId: string, point: Point) => void;
 };
 
