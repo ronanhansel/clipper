@@ -3,7 +3,7 @@ import type { StoreApi } from "zustand";
 import { numberInputScrubEndEvent, numberInputScrubStartEvent } from "../../../components/ui/input";
 import {
   advanceTimeSensitiveSceneTime,
-  applyAdjustmentLayersToSceneTime,
+  applyPlaybackAdjustmentLayersToSceneTime,
   applyAdjustmentLayersToVisualStyle,
   getSceneTimeForTimeSensitiveDisplayTime,
   getTimeSensitiveDisplayDuration,
@@ -359,7 +359,7 @@ export function usePlaybackController({
 
   useEffect(() => {
     if (!isPlaying) return;
-    let lastCommittedPartId = getTimelinePartAtTime(timeline, applyAdjustmentLayersToSceneTime(currentSceneTimeRef.current, visibleSceneAdjustmentLayers))?.id ?? activeTimelinePart?.id ?? "";
+    let lastCommittedPartId = getTimelinePartAtTime(timeline, applyPlaybackAdjustmentLayersToSceneTime(currentSceneTimeRef.current, visibleSceneAdjustmentLayers))?.id ?? activeTimelinePart?.id ?? "";
     let frame = 0;
 
     function tick(now: number) {
@@ -368,7 +368,7 @@ export function usePlaybackController({
       const nextTime = useLocalPlaybackLabels
         ? clamp(clock.startedFrom + (now - clock.startedAt) / 1000, playbackStart, playbackEnd)
         : advanceTimeSensitiveSceneTime(clock.startedFrom, (now - clock.startedAt) / 1000, sceneDurationSeconds, visibleSceneAdjustmentLayers);
-      const nextTimelinePart = getTimelinePartAtTime(timeline, applyAdjustmentLayersToSceneTime(nextTime, visibleSceneAdjustmentLayers));
+      const nextTimelinePart = getTimelinePartAtTime(timeline, applyPlaybackAdjustmentLayersToSceneTime(nextTime, visibleSceneAdjustmentLayers));
       const partChanged = Boolean(nextTimelinePart?.id && nextTimelinePart.id !== lastCommittedPartId);
       const shouldSyncReact = partChanged || nextTime >= playbackEnd;
 

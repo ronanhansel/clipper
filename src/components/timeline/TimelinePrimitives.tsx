@@ -1,4 +1,6 @@
-import { type CSSProperties, type DragEvent, type MouseEvent as ReactMouseEvent, type PointerEvent, type ReactNode, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type DragEvent, type MouseEvent as ReactMouseEvent, type PointerEvent, type ReactNode, type RefObject } from "react";
+import { createPortal } from "react-dom";
+import { Eye, EyeOff, Lock, MoreVertical, Unlock } from "lucide-react";
 import { getEffectPackage } from "../../core/effects/registry";
 import type { EffectTimelineGradient } from "../../core/types";
 import { Input } from "../ui/input";
@@ -43,9 +45,94 @@ export function CompositionTimelineBlock({ blockRef, name, duration, isEmpty, so
 }
 
 export function LayerLabel({ name, draft, editing, hidden, locked, compactControls, hideLockControl, menuOpen, canMoveDown = true, canMoveUp = true, addAfterLabel = "Add layer below", addBeforeLabel = "Add layer above", removeLabel = "Remove layer", onAddAfter, onAddBefore, onCancel, onCommit, onDraftChange, onEdit, onEffectDragOver, onEffectDrop, onMenuToggle, onMoveDown, onMoveUp, onRemove, onToggleHidden, onToggleLocked }: { name: string; draft: string; editing: boolean; hidden: boolean; locked: boolean; compactControls: boolean; hideLockControl: boolean; menuOpen?: boolean; canMoveDown?: boolean; canMoveUp?: boolean; addAfterLabel?: string; addBeforeLabel?: string; removeLabel?: string; onAddAfter?: () => void; onAddBefore?: () => void; onCancel: () => void; onCommit: () => void; onDraftChange: (value: string) => void; onEdit: () => void; onEffectDragOver?: (event: DragEvent<HTMLDivElement>) => void; onEffectDrop?: (event: DragEvent<HTMLDivElement>) => void; onMenuToggle?: () => void; onMoveDown?: () => void; onMoveUp?: () => void; onRemove?: () => void; onToggleHidden: () => void; onToggleLocked: () => void }) {
+  const menuButtonRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
+  const showControls = Boolean(onMenuToggle);
+  const hideEyeControl = compactControls;
+  const controlButtonClass = "h-3.5 w-5 rounded-[4px]";
+  const controlIconSize = 10;
+
+  useLayoutEffect(() => {
+    if (!menuOpen) {
+      setMenuPosition(null);
+      return;
+    }
+
+    function updateMenuPosition() {
+      const buttonRect = menuButtonRef.current?.getBoundingClientRect();
+      const menuRect = menuRef.current?.getBoundingClientRect();
+      if (!buttonRect || !menuRect) return;
+
+      const gap = 6;
+      const margin = 8;
+      let x = buttonRect.right + gap;
+      let y = buttonRect.top;
+
+      if (x + menuRect.width > window.innerWidth - margin) x = buttonRect.left - menuRect.width - gap;
+      if (x < margin) x = margin;
+      if (y + menuRect.height > window.innerHeight - margin) y = window.innerHeight - menuRect.height - margin;
+      if (y < margin) y = margin;
+
+      setMenuPosition({ x, y });
+    }
+
+    updateMenuPosition();
+    window.addEventListener("resize", updateMenuPosition);
+    window.addEventListener("scroll", updateMenuPosition, true);
+    return () => {
+      window.removeEventListener("resize", updateMenuPosition);
+      window.removeEventListener("scroll", updateMenuPosition, true);
+    };
+  }, [menuOpen]);
+
+  useEffect(() => {
+    if (!menuOpen || !onMenuToggle) return;
+    const closeMenu = onMenuToggle;
+
+    function closeOnOutsidePointer(event: globalThis.PointerEvent) {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (menuRef.current?.contains(target) || menuButtonRef.current?.contains(target)) return;
+      closeMenu();
+    }
+
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") closeMenu();
+    }
+
+    window.addEventListener("pointerdown", closeOnOutsidePointer);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.removeEventListener("pointerdown", closeOnOutsidePointer);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [menuOpen, onMenuToggle]);
+
+  function handleControlClick(action: () => void) {
+    return (event: ReactMouseEvent<HTMLButtonElement>) => {
+      event.stopPropagation();
+      action();
+    };
+  }
+
   return (
-    <div className={`relative h-full pt-2 transition ${hidden ? "opacity-45" : locked ? "opacity-70" : ""}`} onDragOver={locked ? undefined : onEffectDragOver} onDrop={locked ? undefined : onEffectDrop}>
+    <div className={`relative grid h-full grid-cols-[minmax(0,1fr)_auto] items-start gap-2 pt-2 transition ${hidden ? "opacity-45" : locked ? "opacity-70" : ""}`} onDragOver={locked ? undefined : onEffectDragOver} onDrop={locked ? undefined : onEffectDrop}>
       {editing ? <Input autoFocus className="h-7 min-w-0 border-[var(--clipper-accent)] bg-[#111319] text-xs font-bold text-[#dfe2ea]" value={draft} onBlur={onCommit} onChange={(event) => onDraftChange(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") onCommit(); if (event.key === "Escape") onCancel(); }} /> : <button className={`relative min-w-0 overflow-hidden text-ellipsis whitespace-nowrap rounded-md py-1 pl-0 pr-1 text-left text-[12px] font-bold transition before:absolute before:left-0 before:top-1/2 before:h-4 before:w-px before:-translate-y-1/2 before:bg-[var(--clipper-accent)] before:opacity-0 before:transition-opacity ${locked ? "cursor-default text-[#ff6b6b]" : "cursor-text text-[#9b9da7] hover:bg-[#20232c]/70 hover:text-[#dfe2ea] hover:before:opacity-100 focus-visible:bg-[#20232c]/70 focus-visible:outline-none focus-visible:before:opacity-100"}`} title={locked ? "Unlock layer to rename" : "Double-click to rename"} onDoubleClick={locked ? undefined : onEdit}>{name}</button>}
+      {showControls ? <div className="flex flex-col items-center gap-0 pr-1 text-[#858a96]">
+        <button ref={menuButtonRef} data-timeline-control className={`grid ${controlButtonClass} place-items-center border border-transparent bg-transparent transition hover:border-[#2d313b] hover:bg-[#20232c] hover:text-[#dfe2ea] ${menuOpen ? "text-[#dfe2ea]" : ""}`} title="Layer options" onClick={(event) => { event.stopPropagation(); onMenuToggle?.(); }} onPointerDown={(event) => event.stopPropagation()}><MoreVertical size={controlIconSize} /></button>
+        {!hideEyeControl ? <button data-timeline-control className={`grid ${controlButtonClass} place-items-center border border-transparent bg-transparent transition hover:border-[#2d313b] hover:bg-[#20232c] hover:text-[#dfe2ea] ${hidden ? "text-[#dfe2ea]" : ""}`} title={hidden ? "Show layer" : "Hide layer"} onClick={handleControlClick(onToggleHidden)} onPointerDown={(event) => event.stopPropagation()}>{hidden ? <EyeOff size={controlIconSize} /> : <Eye size={controlIconSize} />}</button> : null}
+        {!hideLockControl ? <button data-timeline-control className={`grid ${controlButtonClass} place-items-center border border-transparent bg-transparent transition hover:border-[#2d313b] hover:bg-[#20232c] hover:text-[#dfe2ea] ${locked ? "text-[#ff8b8b]" : ""}`} title={locked ? "Unlock layer" : "Lock layer"} onClick={handleControlClick(onToggleLocked)} onPointerDown={(event) => event.stopPropagation()}>{locked ? <Lock size={controlIconSize} /> : <Unlock size={controlIconSize} />}</button> : null}
+      </div> : null}
+      {menuOpen && showControls && typeof document !== "undefined" ? createPortal(<div ref={menuRef} data-timeline-control className="fixed z-50 grid min-w-[180px] overflow-hidden rounded-xl border border-[#2d313b] bg-[#111319] py-1 text-xs font-bold normal-case tracking-normal text-[#dfe2ea] shadow-[0_18px_48px_rgba(0,0,0,0.48)]" style={{ left: menuPosition?.x ?? 0, top: menuPosition?.y ?? 0, visibility: menuPosition ? "visible" : "hidden" }}>
+        <button className="px-3 py-2 text-left hover:bg-[#20232c]" onClick={onToggleHidden}>{hidden ? "Show layer" : "Hide layer"}</button>
+        <button className="px-3 py-2 text-left hover:bg-[#20232c]" onClick={onToggleLocked}>{locked ? "Unlock layer" : "Lock layer"}</button>
+        {onMoveUp ? <button className="px-3 py-2 text-left hover:bg-[#20232c] disabled:cursor-not-allowed disabled:text-[#5f6470] disabled:hover:bg-transparent" disabled={!canMoveUp} onClick={onMoveUp}>Move up</button> : null}
+        {onMoveDown ? <button className="px-3 py-2 text-left hover:bg-[#20232c] disabled:cursor-not-allowed disabled:text-[#5f6470] disabled:hover:bg-transparent" disabled={!canMoveDown} onClick={onMoveDown}>Move down</button> : null}
+        {onAddBefore ? <button className="px-3 py-2 text-left hover:bg-[#20232c]" onClick={onAddBefore}>{addBeforeLabel}</button> : null}
+        {onAddAfter ? <button className="px-3 py-2 text-left hover:bg-[#20232c]" onClick={onAddAfter}>{addAfterLabel}</button> : null}
+        {onRemove ? <button className="px-3 py-2 text-left text-[#ffb4b4] hover:bg-[#2a1719]" onClick={onRemove}>{removeLabel}</button> : null}
+      </div>, document.body) : null}
     </div>
   );
 }

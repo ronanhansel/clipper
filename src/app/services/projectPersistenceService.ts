@@ -66,8 +66,9 @@ async function loadZipProject(manifestPath: string) {
   if (!manifestFile) throw new Error("Clipper container is missing project.json.");
 
   const manifestProject = JSON.parse(await manifestFile.async("string")) as ProjectManifest;
-  const timelines = await loadZipTimelines(zip);
-  const compositions = await loadZipCompositions(zip);
+  const rootPath = getDirectoryPath(manifestPath);
+  const timelines = await loadZipTimelines(zip, rootPath);
+  const compositions = await loadZipCompositions(zip, rootPath);
   return normalizeProject({
     ...manifestProject,
     timelines,
@@ -78,24 +79,25 @@ async function loadZipProject(manifestPath: string) {
   });
 }
 
-async function loadZipTimelines(zip: JSZip) {
+async function loadZipTimelines(zip: JSZip, rootPath: string) {
   const entries = Object.values(zip.files).filter((file) => !file.dir && file.name.startsWith("timelines/") && file.name.endsWith(".json"));
-  const timelines = await Promise.all(entries.map(async (file) => ({ ...JSON.parse(await file.async("string")) as TimelineDocument, filePath: file.name })));
+  const timelines = await Promise.all(entries.map(async (file) => ({ ...JSON.parse(await file.async("string")) as TimelineDocument, filePath: projectPathFromZipEntry(rootPath, file.name, "timelines") })));
   return timelines.sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
 }
 
-async function loadZipCompositions(zip: JSZip) {
+async function loadZipCompositions(zip: JSZip, rootPath: string) {
   const entries = Object.values(zip.files).filter((file) => !file.dir && file.name.startsWith("compositions/") && file.name.endsWith(".ts"));
   return Promise.all(entries.map(async (file) => {
     const source = await file.async("string");
     const id = getSourceCompositionId(source, file.name.replace(/^compositions\//, ""));
-    const baseComposition = createBaseComposition(id, file.name, source);
+    const baseComposition = createBaseComposition(id, projectPathFromZipEntry(rootPath, file.name, "compositions"), source);
     return { ...(await compositionFromEmbeddedSource(baseComposition, source)), source } as CompositionDocument;
   }));
 }
 
 async function saveZipProject(manifestPath: string, project: ProjectManifest) {
   const normalized = serializeProjectForSave(project);
+  const rootPath = getDirectoryPath(manifestPath);
   const zip = new JSZip();
   const metadataProject = {
     id: normalized.id,
@@ -112,13 +114,13 @@ async function saveZipProject(manifestPath: string, project: ProjectManifest) {
   zip.file("project.json", `${JSON.stringify(metadataProject, null, 2)}\n`);
 
   for (const timeline of normalized.timelines ?? []) {
-    zip.file(safeTimelinePath(timeline), `${JSON.stringify(timeline, null, 2)}\n`);
+    zip.file(safeTimelinePath(timeline, rootPath), `${JSON.stringify(timeline, null, 2)}\n`);
   }
 
   for (const composition of normalized.compositions ?? []) {
     const source = composition.source ?? normalized.compositionSources?.[composition.filePath];
     if (source === undefined) throw new Error(`Composition ${composition.filePath} is missing source.`);
-    zip.file(`compositions/${safeZipName(composition.id)}.ts`, source);
+    zip.file(safeCompositionPath(composition, rootPath), source);
   }
 
   await clipperHost.writeBinaryFile(manifestPath, await zip.generateAsync({ type: "base64", compression: "DEFLATE" }));
@@ -126,7 +128,7 @@ async function saveZipProject(manifestPath: string, project: ProjectManifest) {
 
 function getSourceCompositionId(source: string, fileName: string) {
   const compositionBlock = /export\s+const\s+composition\s*=\s*new\s+Composition\s*\(\s*{([\s\S]*?)\n}\s*\)/.exec(source)?.[1];
-  const sourceId = /\bid\s*:\s*["'`]([^"'`]+)["'`]/.exec(compositionBlock ?? source)?.[1] ?? null;
+  const sourceId = /^\s{2}id\s*:\s*["'`]([^"'`]+)["'`]/m.exec(compositionBlock ?? source)?.[1] ?? null;
   return sourceId ?? fileName.replace(/\.ts$/, "");
 }
 
@@ -149,10 +151,41 @@ function safeZipName(value: string) {
   return value.replace(/[^a-zA-Z0-9_-]+/g, "_") || "item";
 }
 
-function safeTimelinePath(timeline: TimelineDocument) {
-  const filePath = timeline.filePath?.replace(/^\/+/, "");
-  if (filePath?.startsWith("timelines/") && filePath.endsWith(".json") && !filePath.includes("..")) return filePath;
-  return `timelines/${safeZipName(timeline.id)}.timeline.json`;
+function safeCompositionPath(composition: CompositionClip, rootPath: string) {
+  return safeProjectZipPath(composition.filePath, rootPath, "compositions", `${safeZipName(composition.id)}.ts`, ".ts");
+}
+
+function safeTimelinePath(timeline: TimelineDocument, rootPath: string) {
+  return safeProjectZipPath(timeline.filePath, rootPath, "timelines", `${safeZipName(timeline.id)}.timeline.json`, ".json");
+}
+
+function safeProjectZipPath(filePath: string | undefined, rootPath: string, folder: "compositions" | "timelines", fallbackFileName: string, extension: ".ts" | ".json") {
+  const relativePath = relativeProjectFilePath(filePath, rootPath);
+  const entryPath = relativePath?.startsWith(`${folder}/`) ? relativePath : relativePath ? `${folder}/${relativePath}` : `${folder}/${fallbackFileName}`;
+  if (entryPath.startsWith(`${folder}/`) && entryPath.endsWith(extension) && isSafeZipEntryPath(entryPath)) return entryPath;
+  return `${folder}/${fallbackFileName}`;
+}
+
+function relativeProjectFilePath(filePath: string | undefined, rootPath: string) {
+  if (!filePath) return "";
+  const normalizedPath = filePath.replace(/^\/+/, "");
+  const normalizedRoot = rootPath.replace(/^\/+/, "");
+  if (normalizedRoot && normalizedPath.startsWith(`${normalizedRoot}/`)) return normalizedPath.slice(normalizedRoot.length + 1);
+  return normalizedPath;
+}
+
+function isSafeZipEntryPath(filePath: string) {
+  return filePath.split("/").every((segment) => segment && segment !== "." && segment !== "..");
+}
+
+function projectPathFromZipEntry(rootPath: string, entryName: string, folder: "compositions" | "timelines") {
+  const relativePath = entryName.replace(new RegExp(`^${folder}/`), "");
+  return rootPath ? `${rootPath}/${relativePath}` : relativePath;
+}
+
+function getDirectoryPath(path: string) {
+  const slashIndex = path.lastIndexOf("/");
+  return slashIndex > 0 ? path.slice(0, slashIndex) : "";
 }
 
 async function compositionFromEmbeddedSource(composition: CompositionClip, source: string) {

@@ -8,10 +8,17 @@ export function getActiveAdjustmentLayers(layers: AdjustmentLayer[] | undefined,
   return (layers ?? []).filter((layer) => sceneTime >= layer.start && sceneTime < layer.start + layer.duration);
 }
 
-export function applyAdjustmentLayersToSceneTime(sceneTime: number, layers: AdjustmentLayer[] | undefined, frameRate = defaultAdjustmentFrameRate) {
+export function applyAdjustmentLayersToSceneTime(sceneTime: number, layers: AdjustmentLayer[] | undefined, frameRate = defaultAdjustmentFrameRate, options?: { includeTimeSensitive?: boolean }) {
+  const includeTimeSensitive = options?.includeTimeSensitive ?? true;
   return getActiveAdjustmentLayers(layers, sceneTime).reduce((time, layer) => {
-    return getAdjustmentEffectPackage(layer.effect.effectId)?.applySceneTime?.({ sceneTime: time, layer, frameRate }) ?? time;
+    const effect = getAdjustmentEffectPackage(layer.effect.effectId);
+    if (!includeTimeSensitive && effect?.timeSensitive) return time;
+    return effect?.applySceneTime?.({ sceneTime: time, layer, frameRate }) ?? time;
   }, sceneTime);
+}
+
+export function applyPlaybackAdjustmentLayersToSceneTime(sceneTime: number, layers: AdjustmentLayer[] | undefined, frameRate = defaultAdjustmentFrameRate) {
+  return applyAdjustmentLayersToSceneTime(sceneTime, layers, frameRate, { includeTimeSensitive: false });
 }
 
 export function applyAdjustmentLayersToVisualStyle(sceneTime: number, layers: AdjustmentLayer[] | undefined, frameRate = defaultAdjustmentFrameRate): AdjustmentVisualStyle {

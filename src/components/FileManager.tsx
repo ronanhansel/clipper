@@ -4,7 +4,7 @@ import { SimpleTree, Tree, type CursorProps, type DragPreviewProps, type MoveHan
 import type { ContextMenuItem, ContextMenuState } from "../app/types";
 import { getParentAssetId, type AssetSortMode } from "../core/assetTree";
 import type { AssetItem, CompositionClip, FileManagerState, FileManagerStateNode, TimelineDocument } from "../core/types";
-import { compositionDragPreviewEvent, compositionPointerDragEvent, startClipperPointerDrag } from "../lib/pointerDrag";
+import { compositionPointerDragEvent, type CompositionPointerDragDetail } from "../lib/pointerDrag";
 import { AppContextMenu } from "./AppContextMenu";
 import { ArboristClickRow } from "./tree/ArboristClickRow";
 import { Input } from "./ui/input";
@@ -222,7 +222,7 @@ function FileManagerPanel() {
   }, [assets, compositions, compositionFolders, compositionRootPath, onDeleteAsset, onDeleteComposition, onDeleteCompositionFolder, onDeleteTimeline, selectedNodeIds, timelines]);
 
   return (
-    <section ref={managerRef} className="min-h-0 min-w-0 overflow-auto rounded-[14px] border border-dashed border-[#303646] bg-[#151821] p-3" onContextMenu={openProjectMenu} onDragOver={handleProjectDragOver} onDrop={handleProjectDrop} onKeyDown={handleFileManagerKeyDown} onPointerDown={handleFileManagerPointerDown}>
+    <section ref={managerRef} data-file-manager-panel className="min-h-0 min-w-0 overflow-auto rounded-[14px] border border-dashed border-[#303646] bg-[#151821] p-3" onContextMenu={openProjectMenu} onDragOver={handleProjectDragOver} onDrop={handleProjectDrop} onKeyDown={handleFileManagerKeyDown} onPointerDown={handleFileManagerPointerDown}>
       <div className="mb-2 flex items-center justify-between px-0.5">
         <h3 className="text-[13px] font-semibold text-[#aeb3c1]">File Manager</h3>
         <button className="grid h-7 w-7 place-items-center rounded-md text-[#dfe2ea] hover:bg-[#20232c]" aria-label="Create file manager item" onClick={openCreateMenu} type="button"><Plus size={17} /></button>
@@ -512,21 +512,16 @@ function UnifiedTreeNode({ dragHandle, node, style }: NodeRendererProps<FileMana
   const Icon = data.kind === "asset-file" ? FileIcon : data.kind === "timeline" ? ChartNoAxesGantt : data.kind === "composition" ? Clapperboard : Folder;
   const label = data.name;
 
-  function startCompositionDrag(event: ReactPointerEvent<HTMLDivElement>) {
+  function hideNativeCompositionDragImage(event: DragEvent<HTMLDivElement>) {
     if (data.kind !== "composition" || node.isEditing) return;
-    const isEmpty = data.composition.objects.length === 0 && data.composition.background.elements.length === 0;
-    startClipperPointerDrag({
-      accent: "#38a86d",
-      eventName: compositionPointerDragEvent,
-      label: data.name,
-      payload: { compositionId: data.composition.id, duration: data.composition.duration, isEmpty, label: data.name, sourceMissing: Boolean(data.composition.sourceMissing) },
-      pointerEvent: event,
-      previewEventName: compositionDragPreviewEvent,
-      skipPreventDefault: true,
-    });
+    const dragImage = document.createElement("span");
+    dragImage.style.cssText = "position:fixed;top:-1000px;left:-1000px;width:1px;height:1px;opacity:0;pointer-events:none;";
+    document.body.appendChild(dragImage);
+    event.dataTransfer.setDragImage(dragImage, 0, 0);
+    window.setTimeout(() => dragImage.remove(), 0);
   }
 
-  return <div ref={dragHandle} data-file-manager-row="true" style={style} className={`relative box-border grid h-full min-w-0 cursor-pointer select-none grid-cols-[16px_18px_minmax(0,1fr)_auto] items-center gap-1.5 border px-1.5 text-[13px] font-bold ${node.isDragging ? "border-[var(--clipper-accent)] bg-[var(--clipper-accent-muted-surface)] opacity-60" : node.willReceiveDrop ? "border-[var(--clipper-accent)] bg-[var(--clipper-accent-muted-surface)]" : node.isSelected || (node.isFocused && node.tree.hasFocus) ? "border-transparent bg-[#242733]" : "border-transparent hover:bg-[#20232c]"}`} onContextMenu={openMenu} onPointerDown={startCompositionDrag}>
+  return <div ref={dragHandle} data-file-manager-row="true" style={style} className={`relative box-border grid h-full min-w-0 cursor-pointer select-none grid-cols-[16px_18px_minmax(0,1fr)_auto] items-center gap-1.5 border px-1.5 text-[13px] font-bold ${node.isDragging ? "border-[var(--clipper-accent)] bg-[var(--clipper-accent-muted-surface)] opacity-60" : node.willReceiveDrop ? "border-[var(--clipper-accent)] bg-[var(--clipper-accent-muted-surface)]" : node.isSelected || (node.isFocused && node.tree.hasFocus) ? "border-transparent bg-[#242733]" : "border-transparent hover:bg-[#20232c]"}`} onContextMenu={openMenu} onDragStartCapture={hideNativeCompositionDragImage}>
     {node.isInternal ? <button className="grid h-4 w-4 place-items-center rounded text-current hover:bg-black/15" aria-label={`${node.isOpen ? "Collapse" : "Expand"} ${data.name}`} onClick={(event) => { event.stopPropagation(); node.toggle(); }} onDoubleClick={(event) => event.stopPropagation()} type="button">{node.isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</button> : <span />}
     <Icon size={data.kind === "asset-file" || data.kind === "composition" || data.kind === "timeline" ? 16 : 17} className="text-current" />
     {node.isEditing ? <Input autoFocus className="h-7 min-w-0 border-[var(--clipper-accent)] bg-[#171920] px-1 py-0 text-[13px] font-bold" value={editDraft} onBlur={submitEdit} onChange={(event) => setEditDraft(event.target.value)} onClick={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === "Enter") submitEdit(); if (event.key === "Escape") node.reset(); }} /> : <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap px-1">{label}</span>}
@@ -537,9 +532,13 @@ function UnifiedTreeNode({ dragHandle, node, style }: NodeRendererProps<FileMana
 function UnifiedTreeDragPreview({ id, isDragging, mouse, nodes, onDragPositionChange }: DragPreviewProps & { nodes: FileManagerTreeNode[]; onDragPositionChange: (node: FileManagerTreeNode | null, mouse: { x: number; y: number } | null) => void }) {
   const [forceHidden, setForceHidden] = useState(false);
   const node = id ? findFileTreeNode(nodes, id) : null;
+  const externalDragRef = useRef<{ node: Extract<FileManagerTreeNode, { kind: "composition" }>; ghost: HTMLSpanElement; lastMouse: { x: number; y: number }; shiftKey: boolean } | null>(null);
+  const externalDragFrameRef = useRef(0);
+  const pendingExternalDragMoveRef = useRef<{ mouse: { x: number; y: number }; shiftKey: boolean } | null>(null);
 
   useEffect(() => {
     if (isDragging) setForceHidden(false);
+    else cleanupExternalCompositionDrag("cancel");
   }, [id, isDragging]);
 
   useEffect(() => {
@@ -550,24 +549,155 @@ function UnifiedTreeDragPreview({ id, isDragging, mouse, nodes, onDragPositionCh
   useEffect(() => {
     function hidePreview() {
       setForceHidden(true);
+      cleanupExternalCompositionDrag("cancel");
       onDragPositionChange(null, null);
     }
+
+    function updateExternalDrag(event: globalThis.DragEvent) {
+      if (!isDragging || node?.kind !== "composition") return;
+      const nextMouse = { x: event.clientX, y: event.clientY };
+      const outsideFileManager = !isPointOverFileManagerPanel(event.clientX, event.clientY);
+      if (!outsideFileManager) {
+        cleanupExternalCompositionDrag("cancel");
+        return;
+      }
+      suppressNativeExternalDrag(event, isPointOverTimelinePanel(event.clientX, event.clientY));
+      ensureExternalCompositionDrag(node, nextMouse, event.shiftKey);
+      const external = externalDragRef.current;
+      if (external) external.ghost.style.opacity = isPointOverTimelinePanel(event.clientX, event.clientY) ? "0" : "1";
+      scheduleExternalCompositionDragMove(nextMouse, event.shiftKey);
+    }
+
+    function dropExternalDrag(event: globalThis.DragEvent) {
+      const external = externalDragRef.current;
+      if (!external) {
+        hidePreview();
+        return;
+      }
+      suppressNativeExternalDrag(event, isPointOverTimelinePanel(event.clientX, event.clientY));
+      external.lastMouse = { x: event.clientX, y: event.clientY };
+      external.shiftKey = event.shiftKey;
+      if (isPointOverFileManagerPanel(event.clientX, event.clientY)) cleanupExternalCompositionDrag("cancel");
+      else cleanupExternalCompositionDrag("drop");
+      hidePreview();
+    }
+
+    function cancelOnWindowExit(event: globalThis.DragEvent) {
+      const external = externalDragRef.current;
+      if (!external) return;
+      const outsideWindow = event.clientX <= 0 || event.clientY <= 0 || event.clientX >= window.innerWidth || event.clientY >= window.innerHeight;
+      if (outsideWindow || event.relatedTarget === null) cleanupExternalCompositionDrag("cancel");
+    }
+
+    function updateShift(event: KeyboardEvent) {
+      const external = externalDragRef.current;
+      if (!external) return;
+      scheduleExternalCompositionDragMove(external.lastMouse, event.shiftKey);
+    }
+
     window.addEventListener("dragend", hidePreview);
-    window.addEventListener("drop", hidePreview);
+    window.addEventListener("drop", dropExternalDrag, true);
+    window.addEventListener("dragover", updateExternalDrag, true);
+    window.addEventListener("dragleave", cancelOnWindowExit, true);
     window.addEventListener("pointerup", hidePreview);
+    window.addEventListener("blur", hidePreview);
+    window.addEventListener("keydown", updateShift, true);
+    window.addEventListener("keyup", updateShift, true);
     return () => {
       window.removeEventListener("dragend", hidePreview);
-      window.removeEventListener("drop", hidePreview);
+      window.removeEventListener("drop", dropExternalDrag, true);
+      window.removeEventListener("dragover", updateExternalDrag, true);
+      window.removeEventListener("dragleave", cancelOnWindowExit, true);
       window.removeEventListener("pointerup", hidePreview);
+      window.removeEventListener("blur", hidePreview);
+      window.removeEventListener("keydown", updateShift, true);
+      window.removeEventListener("keyup", updateShift, true);
+      cleanupExternalCompositionDrag("cancel");
     };
-  }, [onDragPositionChange]);
+  }, [isDragging, node, onDragPositionChange]);
+
+  function ensureExternalCompositionDrag(compositionNode: Extract<FileManagerTreeNode, { kind: "composition" }>, currentMouse: { x: number; y: number }, shiftKey: boolean) {
+    if (externalDragRef.current) return;
+    const ghost = document.createElement("span");
+    ghost.textContent = compositionNode.name;
+    ghost.style.cssText = `position:fixed;top:0;left:0;z-index:9999;box-sizing:border-box;min-width:104px;pointer-events:none;border:1px solid #38a86d;border-radius:9px;background:#111319;color:#f1f3f7;padding:7px 10px;font:700 11px system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;box-shadow:0 14px 34px rgba(0,0,0,0.36),0 0 0 4px color-mix(in srgb, #38a86d 18%, transparent);will-change:transform;`;
+    document.body.appendChild(ghost);
+    externalDragRef.current = { node: compositionNode, ghost, lastMouse: currentMouse, shiftKey };
+    applyExternalCompositionDragMove(currentMouse, shiftKey);
+  }
+
+  function scheduleExternalCompositionDragMove(currentMouse: { x: number; y: number }, shiftKey: boolean) {
+    pendingExternalDragMoveRef.current = { mouse: currentMouse, shiftKey };
+    if (externalDragFrameRef.current) return;
+    externalDragFrameRef.current = window.requestAnimationFrame(() => {
+      externalDragFrameRef.current = 0;
+      const pending = pendingExternalDragMoveRef.current;
+      pendingExternalDragMoveRef.current = null;
+      if (pending) applyExternalCompositionDragMove(pending.mouse, pending.shiftKey);
+    });
+  }
+
+  function applyExternalCompositionDragMove(currentMouse: { x: number; y: number }, shiftKey: boolean) {
+    const external = externalDragRef.current;
+    if (!external) return;
+    external.lastMouse = currentMouse;
+    external.shiftKey = shiftKey;
+    if (currentMouse.x !== 0 || currentMouse.y !== 0) external.ghost.style.transform = `translate3d(${currentMouse.x + 10}px, ${currentMouse.y - 10}px, 0)`;
+    dispatchExternalCompositionDrag(external.node, currentMouse, "move", shiftKey);
+  }
+
+  function cleanupExternalCompositionDrag(phase: "cancel" | "drop") {
+    const external = externalDragRef.current;
+    if (!external) return;
+    if (externalDragFrameRef.current) window.cancelAnimationFrame(externalDragFrameRef.current);
+    externalDragFrameRef.current = 0;
+    pendingExternalDragMoveRef.current = null;
+    dispatchExternalCompositionDrag(external.node, external.lastMouse, phase, external.shiftKey);
+    external.ghost.remove();
+    externalDragRef.current = null;
+  }
 
   if (!isDragging || forceHidden || !node || !mouse) return null;
-  const Icon = node.kind === "asset-file" ? FileIcon : node.kind === "timeline" ? ChartNoAxesGantt : node.kind === "composition" ? Clapperboard : Folder;
+  if (node.kind === "composition") return null;
+  const Icon = node.kind === "asset-file" ? FileIcon : node.kind === "timeline" ? ChartNoAxesGantt : Folder;
   return <div className="pointer-events-none fixed z-[9999] inline-grid max-w-[260px] grid-cols-[16px_minmax(0,1fr)] items-center gap-2 rounded-[8px] border border-[var(--clipper-accent)] bg-[#242128] px-2.5 py-1.5 text-xs font-bold text-[#f2f3f7] shadow-2xl" style={{ left: mouse.x + 12, top: mouse.y + 12 }}>
     <Icon size={15} />
     <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{node.name}</span>
   </div>;
+}
+
+function isPointOverFileManagerPanel(clientX: number, clientY: number) {
+  const target = document.elementFromPoint(clientX, clientY);
+  return target instanceof HTMLElement && Boolean(target.closest("[data-file-manager-panel]"));
+}
+
+function isPointOverTimelinePanel(clientX: number, clientY: number) {
+  const target = document.elementFromPoint(clientX, clientY);
+  return target instanceof HTMLElement && Boolean(target.closest("[data-timeline-panel]"));
+}
+
+function suppressNativeExternalDrag(event: globalThis.DragEvent, overTimeline: boolean) {
+  event.preventDefault();
+  event.stopPropagation();
+  event.stopImmediatePropagation();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = overTimeline ? "copy" : "none";
+}
+
+function dispatchExternalCompositionDrag(node: Extract<FileManagerTreeNode, { kind: "composition" }>, mouse: { x: number; y: number }, phase: CompositionPointerDragDetail["phase"], shiftKey: boolean) {
+  const composition = node.composition;
+  window.dispatchEvent(new CustomEvent<CompositionPointerDragDetail>(compositionPointerDragEvent, {
+    detail: {
+      phase,
+      clientX: mouse.x,
+      clientY: mouse.y,
+      shiftKey,
+      compositionId: composition.id,
+      duration: composition.duration,
+      isEmpty: composition.objects.length === 0 && composition.background.elements.length === 0,
+      label: node.name,
+      sourceMissing: Boolean(composition.sourceMissing),
+    },
+  }));
 }
 
 function FileManagerMarquee({ marquee }: { marquee: { startX: number; startY: number; currentX: number; currentY: number } }) {

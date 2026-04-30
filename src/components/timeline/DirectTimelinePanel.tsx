@@ -2,7 +2,7 @@ import { startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState,
 import { defaultTimelinePixelsPerSecond } from "../../app/config";
 import { TIMELINE_MOTION_PART_ID, type AdjustmentLayerSelection, type CompositionSelection, type MotionMarkerSelection, type TimelineNodeContextTarget, type TimelineSelectionDrag } from "../../app/types";
 import { clamp, roundTenth, roundTwo } from "../../core/math";
-import { buildLinearTimeline, getAdjustmentLayerRowId, getAdjustmentPlacement, getMendedMarkerDragItems, getMotionMarkerLayerId, getScrubSnapBoundaries, getTimelineDragConstraintItems, getTimelineMarkerDragSnapBoundaries, getTimelineMarkerMoves, getTimelinePartAtTime, getTimelineTicks, getTopTimelineItemAtTime, isMotionMarkerOnLayerId, resizeTimelineMarkersWithPush, snapTimelineBlockStartToBoundary, timelineDisplayDuration as getTimelineDisplayDuration, uniqueTimelineDragItems, type TimelineMarkerDragItem, type TimelineMarkerMove, type TimelineMarkerResize } from "../../core/timeline";
+import { buildLinearTimeline, getAdjustmentLayerRowId, getAdjustmentPlacement, getMendedMarkerDragItems, getMotionMarkerLayerId, getScrubSnapBoundaries, getTimelineDragConstraintItems, getTimelineMarkerDragSnapBoundaries, getTimelineMarkerMoves, getTimelinePartAtTime, getTimelineTicks, getTopTimelineItemAtTime, isMotionMarkerOnLayerId, resizeTimelineMarkersWithPush, timelineDisplayDuration as getTimelineDisplayDuration, uniqueTimelineDragItems, type TimelineMarkerDragItem, type TimelineMarkerMove, type TimelineMarkerResize } from "../../core/timeline";
 import { getTimelineBlockSnap, getTimelineBlockTiming, getTimelineDragDeltaSeconds, getTimelineSnapGuideTime } from "../../core/timelineBlockTiming";
 import { defaultTimelineLayerState } from "../../core/project";
 import { getAdjustmentEffectPackage, getEffectDragType, getEffectPackage, getMotionEffectPackage, installedEffectPackages } from "../../core/effects/registry";
@@ -566,10 +566,17 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
 
   function getUniversalTimelineSnapBoundaries(motionKind: MotionBlockEffectKind | undefined, movingKeys: Set<string>) {
     const movingEdges = getMovingMarkerEdgeTimes(motionKind, movingKeys);
+    const snapTimeline = [...timelineMotionViews, ...motionTimeline];
     return withPlayheadSnapBoundary(Array.from(new Set([
-      ...getScrubSnapBoundaries(timeline, adjustmentLayers).filter((boundary) => !movingEdges.has(roundTenth(boundary))),
-      ...getTimelineMarkerDragSnapBoundaries(timeline, motionKind, movingKeys),
+      ...getScrubSnapBoundaries(snapTimeline, adjustmentLayers).filter((boundary) => !movingEdges.has(roundTenth(boundary))),
+      ...getTimelineMarkerDragSnapBoundaries(snapTimeline, motionKind, movingKeys),
     ])).sort((left, right) => left - right));
+  }
+
+  function getUniversalBlockSnapBoundaries(options: { excludeCompositionIds?: Set<string>; excludeAdjustmentIds?: Set<string> } = {}) {
+    const snapTimeline = [...timelineMotionViews.filter((item) => !options.excludeCompositionIds?.has(item.id)), ...motionTimeline];
+    const snapAdjustments = adjustmentLayers.filter((item) => !options.excludeAdjustmentIds?.has(item.id));
+    return withPlayheadSnapBoundary(getScrubSnapBoundaries(snapTimeline, snapAdjustments));
   }
 
   function getMovingMarkerEdgeTimes(motionKind: MotionBlockEffectKind | undefined, movingKeys: Set<string>) {
@@ -679,7 +686,7 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
     const pixelsPerSecond = (timelineRef.current?.getBoundingClientRect().width ?? 1) / Math.max(timelineDisplayDuration, 1);
     const snapThresholdSeconds = Math.max(0.08, 8 / pixelsPerSecond);
     const moveTargetIds = new Set(moveTargets.map((item) => item.id));
-    const boundaries = withPlayheadSnapBoundary(getScrubSnapBoundaries(timeline.filter((item) => !moveTargetIds.has(item.id)), adjustmentLayers));
+    const boundaries = getUniversalBlockSnapBoundaries({ excludeCompositionIds: moveTargetIds });
     function getDeltaSeconds(clientX: number) {
       return getTimelineDragDeltaSeconds({
         initialClientX,
@@ -795,7 +802,7 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
     const pixelsPerSecond = (timelineRef.current?.getBoundingClientRect().width ?? 1) / Math.max(timelineDisplayDuration, 1);
     const snapThresholdSeconds = Math.max(0.08, 8 / pixelsPerSecond);
     const resizeTargetIds = new Set(resizeTargets.map((item) => item.id));
-    const boundaries = withPlayheadSnapBoundary(getScrubSnapBoundaries(timeline, adjustmentLayers.filter((item) => !resizeTargetIds.has(item.id))));
+    const boundaries = getUniversalBlockSnapBoundaries({ excludeAdjustmentIds: resizeTargetIds });
     function getDeltaSeconds(clientX: number) {
       return getTimelineDragDeltaSeconds({
         initialClientX,
@@ -1187,6 +1194,7 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
     if (!nextPreview) {
       if (effectDragPreviewFrameRef.current) window.cancelAnimationFrame(effectDragPreviewFrameRef.current);
       effectDragPreviewFrameRef.current = 0;
+      clearTimelineSnapGuide();
       setEffectDragPreview(null);
       return;
     }
@@ -1213,15 +1221,32 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
     return { category: "motion" as const, effectId, kind, layerKey, start, duration, initialClientX: clientX, initialStart: start };
   }
 
+  function getExternalDropTiming(start: number, duration: number, snap: boolean) {
+    const pixelsPerSecond = (timelineRef.current?.getBoundingClientRect().width ?? 1) / Math.max(timelineDisplayDuration, 1);
+    return getTimelineBlockTiming({
+      action: "move",
+      initialStart: clamp(start, 0, timelineDisplayDuration),
+      initialDuration: duration,
+      deltaSeconds: 0,
+      timelineDuration: timelineDisplayDuration,
+      moveMaxStartMode: "start",
+      snap,
+      snapBoundaries: getUniversalBlockSnapBoundaries(),
+      snapThresholdSeconds: Math.max(0.08, 8 / pixelsPerSecond),
+    });
+  }
+
+  function updateExternalSnapGuide(guideTime: number | null) {
+    if (guideTime === null) clearTimelineSnapGuide();
+    else updateTimelineSnapGuide(guideTime);
+  }
+
   function previewAdjustmentEffectDrop(effectId: AdjustmentEffectId, layerId: string, clientX: number, sceneTime: number, snap: boolean) {
     const base = getEffectPreviewBase(effectId, layerId, clientX, sceneTime);
     if (!base) return;
-    const pixelsPerSecond = (timelineRef.current?.getBoundingClientRect().width ?? 1) / Math.max(timelineDisplayDuration, 1);
-    const snapThresholdSeconds = Math.max(0.08, 8 / pixelsPerSecond);
-    const boundaries = getScrubSnapBoundaries(timeline, adjustmentLayers);
-    let nextStart = clamp(sceneTime, 0, timelineDisplayDuration);
-    if (snap) nextStart = clamp(snapTimelineBlockStartToBoundary(nextStart, base.duration, boundaries, snapThresholdSeconds), 0, timelineDisplayDuration);
-    updateEffectDragPreview({ ...base, start: roundTenth(nextStart) });
+    const timing = getExternalDropTiming(sceneTime, base.duration, snap);
+    updateExternalSnapGuide(timing.guideTime);
+    updateEffectDragPreview({ ...base, start: timing.start });
   }
 
   function previewMotionEffectDrop(effectId: MotionEffectId, layerId: string, clientX: number, sceneTime: number, snap: boolean) {
@@ -1234,18 +1259,21 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
       return;
     }
 
-    const pixelsPerSecond = (timelineRef.current?.getBoundingClientRect().width ?? 1) / Math.max(timelineDisplayDuration, 1);
-    const snapThresholdSeconds = Math.max(0.08, 8 / pixelsPerSecond);
-    const boundaries = withPlayheadSnapBoundary(getScrubSnapBoundaries(timeline, adjustmentLayers));
-    let nextStart = clamp(sceneTime - base.duration / 2, 0, timelineDisplayDuration);
-    if (snap) nextStart = clamp(snapTimelineBlockStartToBoundary(nextStart, base.duration, boundaries, snapThresholdSeconds), 0, timelineDisplayDuration);
-    updateEffectDragPreview({ ...base, start: roundTenth(nextStart) });
+    const timing = getExternalDropTiming(sceneTime - base.duration / 2, base.duration, snap);
+    updateExternalSnapGuide(timing.guideTime);
+    updateEffectDragPreview({ ...base, start: timing.start });
   }
 
   function previewCompositionDrop(detail: CompositionPointerDragDetail, layerId: string, sceneTime: number) {
     const duration = Math.max(detail.duration, 0.1);
-    const start = roundTenth(clamp(sceneTime, 0, timelineDisplayDuration));
-    updateEffectDragPreview({ category: "composition", layerKey: layerId, label: detail.label, isEmpty: detail.isEmpty, sourceMissing: detail.sourceMissing, start, duration, initialClientX: detail.clientX, initialStart: start });
+    const timing = getExternalDropTiming(sceneTime, duration, detail.shiftKey);
+    const start = timing.start;
+    updateExternalSnapGuide(timing.guideTime);
+    const current = effectDragPreviewRef.current;
+    const base = current?.category === "composition" && current.layerKey === layerId && current.label === detail.label && current.duration === duration && current.isEmpty === detail.isEmpty && current.sourceMissing === detail.sourceMissing
+      ? current
+      : { category: "composition" as const, layerKey: layerId, label: detail.label, isEmpty: detail.isEmpty, sourceMissing: detail.sourceMissing, start, duration, initialClientX: detail.clientX, initialStart: start };
+    updateEffectDragPreview({ ...base, start });
   }
 
   function allowAdjustmentEffectDrop(event: DragEvent<HTMLElement>, layerId: string, sceneTime = getDropSceneTime(event)) {
@@ -1321,6 +1349,16 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
     return Boolean(rect && clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom);
   }
 
+  function updateExternalPointerAutoScroll<T extends EffectPointerDragDetail | CompositionPointerDragDetail>(eventName: string, detail: T) {
+    if (detail.phase === "drop" || !isEffectPointerOverTimeline(detail.clientX, detail.clientY)) {
+      stopTimelineDragAutoScroll();
+      return;
+    }
+    updateTimelineDragAutoScroll(detail.clientX, () => {
+      window.dispatchEvent(new CustomEvent<T>(eventName, { detail: { ...detail, phase: "move" } }));
+    }, detail.clientY);
+  }
+
   useEffect(() => {
     function handleEffectPointerDrag(event: Event) {
       const detail = (event as CustomEvent<EffectPointerDragDetail>).detail;
@@ -1328,10 +1366,12 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
       if (detail.phase === "cancel") {
         setGlobalTimelineDragActive(false);
         updateEffectDragPreview(null);
+        stopTimelineDragAutoScroll();
         return;
       }
 
       setGlobalTimelineDragActive(detail.phase !== "drop" && isEffectPointerOverTimeline(detail.clientX, detail.clientY));
+      updateExternalPointerAutoScroll(effectPointerDragEvent, detail);
       const target = getEffectPointerDropTarget(detail.clientX, detail.clientY);
       const motionEffect = getMotionEffectPackage(detail.effect);
       const adjustmentEffect = getAdjustmentEffectPackage(detail.effect);
@@ -1351,6 +1391,7 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
           const previewStart = effectDragPreviewRef.current?.category === "adjustment" && effectDragPreviewRef.current.effectId === adjustmentEffect.id && effectDragPreviewRef.current.layerKey === adjustmentRow.key ? effectDragPreviewRef.current.start : target.sceneTime;
           setGlobalTimelineDragActive(false);
           updateEffectDragPreview(null);
+          stopTimelineDragAutoScroll();
           onAddAdjustmentEffect(adjustmentEffect.id, previewStart, adjustmentRow.key);
           return;
         }
@@ -1369,6 +1410,7 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
         const targetSceneTime = preview?.effectId === motionEffect.id && preview.layerKey === layer.id ? preview.start + preview.duration / 2 : target.sceneTime;
         setGlobalTimelineDragActive(false);
         updateEffectDragPreview(null);
+        stopTimelineDragAutoScroll();
         onAddMotionEffect(motionEffect.id, layer.id, targetSceneTime);
         return;
       }
@@ -1387,6 +1429,8 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
       if (detail.phase === "cancel") {
         setGlobalTimelineDragActive(false);
         setClipperPointerDragPreview(compositionDragPreviewEvent, false);
+        clearTimelineSnapGuide();
+        stopTimelineDragAutoScroll();
         return;
       }
 
@@ -1394,11 +1438,13 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
       const compositionRow = target ? compositionRows.find((row) => row.id === target.rowKey) : null;
       const overTimeline = isEffectPointerOverTimeline(detail.clientX, detail.clientY);
       setGlobalTimelineDragActive(detail.phase !== "drop" && overTimeline);
+      updateExternalPointerAutoScroll(compositionPointerDragEvent, detail);
       setClipperPointerDragPreview(compositionDragPreviewEvent, Boolean(compositionRow && !compositionRow.locked && detail.phase !== "drop"));
 
       if (!target || !compositionRow || compositionRow.locked) {
         if (detail.phase === "drop") setGlobalTimelineDragActive(false);
         updateEffectDragPreview(null);
+        clearTimelineSnapGuide();
         return;
       }
 
@@ -1408,6 +1454,8 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
         setGlobalTimelineDragActive(false);
         updateEffectDragPreview(null);
         setClipperPointerDragPreview(compositionDragPreviewEvent, false);
+        clearTimelineSnapGuide();
+        stopTimelineDragAutoScroll();
         onAddComposition(detail.compositionId, compositionRow.id, targetStart);
         return;
       }
@@ -1439,9 +1487,9 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
             {layerRows.map((row, index) => <span className="pointer-events-none absolute right-0 z-40 w-0.5" key={`layer-accent-${row.key}`} style={{ top: layerRowStarts[index], height: layerRowHeights[index], backgroundColor: row.accent }} />)}
             {layerRows.length > 0 ? <LayerResizeSeparator key={`label-separator-${layerRows[0].key}-top`} top={0} onPointerDown={(event) => startLayerRowResize(event, layerRows[0].key, "top")} /> : null}
             {layerRows.slice(1).map((row, index) => <LayerResizeSeparator key={`label-separator-${row.key}`} top={layerRowStarts[index + 1]} onPointerDown={(event) => startLayerRowResize(event, row.key, "top")} />)}
-            {isCompositionMode ? adjustmentRows.map((row, index) => <LayerLabel key={row.key} editing={editingLayerId === row.key} hidden={row.hidden} locked={row.locked} compactControls={layerRowHeights[index] < 44} hideLockControl={layerRowHeights[index] < 68} menuOpen={motionLayerMenuId === row.key} name={row.name} draft={layerNameDraft} canMoveDown={index < adjustmentRows.length - 1} canMoveUp={index > 0} addBeforeLabel="Add adjust above" addAfterLabel="Add adjust below" removeLabel="Remove adjust" onDraftChange={setLayerNameDraft} onEdit={() => startLayerNameEdit(row.key, row.name)} onCommit={commitLayerNameEdit} onCancel={cancelLayerNameEdit} onEffectDragOver={(event) => allowAdjustmentEffectDrop(event, row.key, currentSceneTime)} onEffectDrop={(event) => dropAdjustmentEffect(event, row.key, currentSceneTime)} onMenuToggle={() => setMotionLayerMenuId((current) => current === row.key ? null : row.key)} onAddBefore={() => addAdjustmentLayerAround(row.key, "before")} onAddAfter={() => addAdjustmentLayerAround(row.key, "after")} onMoveUp={() => moveAdjustmentRow(row.key, "up")} onMoveDown={() => moveAdjustmentRow(row.key, "down")} onRemove={() => removeAdjustmentLayer(row.key)} onToggleHidden={() => toggleLayerHidden(row.key)} onToggleLocked={() => toggleLayerLocked(row.key)} />) : null}
-            {isCompositionMode ? motionLayers.map((layer, index) => <LayerLabel key={layer.id} editing={editingLayerId === layer.id} hidden={Boolean(layer.hidden)} locked={Boolean(layer.locked)} compactControls={layerRowHeights[adjustmentRows.length + index] < 44} hideLockControl={layerRowHeights[adjustmentRows.length + index] < 68} menuOpen={motionLayerMenuId === layer.id} name={layer.name} draft={layerNameDraft} canMoveDown={index < motionLayers.length - 1} canMoveUp={index > 0} addBeforeLabel="Add motion above" addAfterLabel="Add motion below" removeLabel="Remove motion" onDraftChange={setLayerNameDraft} onEdit={() => startLayerNameEdit(layer.id, layer.name)} onCommit={commitLayerNameEdit} onCancel={cancelLayerNameEdit} onEffectDragOver={(event) => allowMotionLayerEffectDrop(event, layer.id, currentSceneTime)} onEffectDrop={(event) => dropMotionLayerEffect(event, layer.id, currentSceneTime)} onMenuToggle={() => setMotionLayerMenuId((current) => current === layer.id ? null : layer.id)} onAddBefore={() => addMotionLayerAround(layer.id, "before")} onAddAfter={() => addMotionLayerAround(layer.id, "after")} onMoveUp={() => moveMotionLayer(layer.id, "up")} onMoveDown={() => moveMotionLayer(layer.id, "down")} onRemove={() => removeMotionLayer(layer.id)} onToggleHidden={() => toggleLayerHidden(layer.id)} onToggleLocked={() => toggleLayerLocked(layer.id)} />) : null}
-            {compositionRows.map((layer, index) => <LayerLabel key={layer.id} editing={editingLayerId === layer.id} hidden={Boolean(layer.hidden)} locked={Boolean(layer.locked)} compactControls={layerRowHeights[(isCompositionMode ? adjustmentRows.length + motionLayers.length : 0) + index] < 44} hideLockControl={layerRowHeights[(isCompositionMode ? adjustmentRows.length + motionLayers.length : 0) + index] < 68} menuOpen={motionLayerMenuId === layer.id} name={layer.name} draft={layerNameDraft} canMoveDown={index < compositionRows.length - 1} canMoveUp={index > 0} addBeforeLabel="Add composition above" addAfterLabel="Add composition below" removeLabel="Remove composition" onDraftChange={setLayerNameDraft} onEdit={() => startLayerNameEdit(layer.id, layer.name)} onCommit={commitLayerNameEdit} onCancel={cancelLayerNameEdit} onMenuToggle={() => setMotionLayerMenuId((current) => current === layer.id ? null : layer.id)} onAddBefore={() => addCompositionLayerAround(layer.id, "before")} onAddAfter={() => addCompositionLayerAround(layer.id, "after")} onMoveUp={() => moveCompositionLayer(layer.id, "up")} onMoveDown={() => moveCompositionLayer(layer.id, "down")} onRemove={() => removeCompositionLayer(layer.id)} onToggleHidden={() => toggleLayerHidden(layer.id)} onToggleLocked={() => toggleLayerLocked(layer.id)} />)}
+            {isCompositionMode ? adjustmentRows.map((row, index) => <LayerLabel key={row.key} editing={editingLayerId === row.key} hidden={row.hidden} locked={row.locked} compactControls={layerRowHeights[index] < 50} hideLockControl={layerRowHeights[index] < 58} menuOpen={motionLayerMenuId === row.key} name={row.name} draft={layerNameDraft} canMoveDown={index < adjustmentRows.length - 1} canMoveUp={index > 0} addBeforeLabel="Add adjust above" addAfterLabel="Add adjust below" removeLabel="Remove adjust" onDraftChange={setLayerNameDraft} onEdit={() => startLayerNameEdit(row.key, row.name)} onCommit={commitLayerNameEdit} onCancel={cancelLayerNameEdit} onEffectDragOver={(event) => allowAdjustmentEffectDrop(event, row.key, currentSceneTime)} onEffectDrop={(event) => dropAdjustmentEffect(event, row.key, currentSceneTime)} onMenuToggle={() => setMotionLayerMenuId((current) => current === row.key ? null : row.key)} onAddBefore={() => addAdjustmentLayerAround(row.key, "before")} onAddAfter={() => addAdjustmentLayerAround(row.key, "after")} onMoveUp={() => moveAdjustmentRow(row.key, "up")} onMoveDown={() => moveAdjustmentRow(row.key, "down")} onRemove={() => removeAdjustmentLayer(row.key)} onToggleHidden={() => toggleLayerHidden(row.key)} onToggleLocked={() => toggleLayerLocked(row.key)} />) : null}
+            {isCompositionMode ? motionLayers.map((layer, index) => <LayerLabel key={layer.id} editing={editingLayerId === layer.id} hidden={Boolean(layer.hidden)} locked={Boolean(layer.locked)} compactControls={layerRowHeights[adjustmentRows.length + index] < 50} hideLockControl={layerRowHeights[adjustmentRows.length + index] < 58} menuOpen={motionLayerMenuId === layer.id} name={layer.name} draft={layerNameDraft} canMoveDown={index < motionLayers.length - 1} canMoveUp={index > 0} addBeforeLabel="Add motion above" addAfterLabel="Add motion below" removeLabel="Remove motion" onDraftChange={setLayerNameDraft} onEdit={() => startLayerNameEdit(layer.id, layer.name)} onCommit={commitLayerNameEdit} onCancel={cancelLayerNameEdit} onEffectDragOver={(event) => allowMotionLayerEffectDrop(event, layer.id, currentSceneTime)} onEffectDrop={(event) => dropMotionLayerEffect(event, layer.id, currentSceneTime)} onMenuToggle={() => setMotionLayerMenuId((current) => current === layer.id ? null : layer.id)} onAddBefore={() => addMotionLayerAround(layer.id, "before")} onAddAfter={() => addMotionLayerAround(layer.id, "after")} onMoveUp={() => moveMotionLayer(layer.id, "up")} onMoveDown={() => moveMotionLayer(layer.id, "down")} onRemove={() => removeMotionLayer(layer.id)} onToggleHidden={() => toggleLayerHidden(layer.id)} onToggleLocked={() => toggleLayerLocked(layer.id)} />) : null}
+            {compositionRows.map((layer, index) => <LayerLabel key={layer.id} editing={editingLayerId === layer.id} hidden={Boolean(layer.hidden)} locked={Boolean(layer.locked)} compactControls={layerRowHeights[(isCompositionMode ? adjustmentRows.length + motionLayers.length : 0) + index] < 50} hideLockControl={layerRowHeights[(isCompositionMode ? adjustmentRows.length + motionLayers.length : 0) + index] < 58} menuOpen={motionLayerMenuId === layer.id} name={layer.name} draft={layerNameDraft} canMoveDown={index < compositionRows.length - 1} canMoveUp={index > 0} addBeforeLabel="Add composition above" addAfterLabel="Add composition below" removeLabel="Remove composition" onDraftChange={setLayerNameDraft} onEdit={() => startLayerNameEdit(layer.id, layer.name)} onCommit={commitLayerNameEdit} onCancel={cancelLayerNameEdit} onMenuToggle={() => setMotionLayerMenuId((current) => current === layer.id ? null : layer.id)} onAddBefore={() => addCompositionLayerAround(layer.id, "before")} onAddAfter={() => addCompositionLayerAround(layer.id, "after")} onMoveUp={() => moveCompositionLayer(layer.id, "up")} onMoveDown={() => moveCompositionLayer(layer.id, "down")} onRemove={() => removeCompositionLayer(layer.id)} onToggleHidden={() => toggleLayerHidden(layer.id)} onToggleLocked={() => toggleLayerLocked(layer.id)} />)}
           </>} renderTimelineViewport={() => <>
             {timelineSelectionDrag ? <TimelineSelectionBox boxRef={timelineSelectionBoxRef} drag={timelineSelectionDrag} /> : null}
             {isCompositionMode ? adjustmentRows.map((row) => <TimelineLayerLane key={row.key} hidden={row.hidden} locked={row.locked} overflowVisible={isDraggingAdjustmentLayer} className="block" onDragOver={(event) => allowAdjustmentEffectDrop(event, row.key)} onDrop={(event) => dropAdjustmentEffect(event, row.key)} onPointerDown={startTimelineSelection} onPointerMove={continueTimelineSelection} onPointerUp={endTimelineSelection} onPointerCancel={endTimelineSelection} onContextMenu={openBlankTimelineContextMenu}>

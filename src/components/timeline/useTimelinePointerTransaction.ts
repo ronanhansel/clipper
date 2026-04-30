@@ -14,7 +14,7 @@ type StartTimelinePointerTransactionOptions = {
   event: PointerEvent<HTMLElement>;
   activationThreshold?: number;
   capturePointer?: boolean;
-  updateAutoScroll?: (clientX: number, onScroll: () => void) => void;
+  updateAutoScroll?: (clientX: number, onScroll: () => void, clientY?: number) => void;
   stopAutoScroll?: () => void;
   onPreview: (state: TimelinePointerTransactionState) => void;
   onCommit: (state: TimelinePointerTransactionState, event: globalThis.PointerEvent) => void;
@@ -29,7 +29,7 @@ type ActiveTimelinePointerTransaction = {
   capturePointer: boolean;
   frame: number;
   state: TimelinePointerTransactionState;
-  updateAutoScroll?: (clientX: number, onScroll: () => void) => void;
+  updateAutoScroll?: (clientX: number, onScroll: () => void, clientY?: number) => void;
   stopAutoScroll?: () => void;
   onPreview: (state: TimelinePointerTransactionState) => void;
   onCommit: (state: TimelinePointerTransactionState, event: globalThis.PointerEvent) => void;
@@ -106,7 +106,7 @@ export function useTimelinePointerTransaction() {
       active.state.clientY = pointerEvent.clientY;
       active.state.snap = pointerEvent.shiftKey;
       if (!activateIfNeeded(active)) return;
-      active.updateAutoScroll?.(active.state.clientX, schedulePreview);
+      active.updateAutoScroll?.(active.state.clientX, schedulePreview, active.state.clientY);
       schedulePreview();
     }
 

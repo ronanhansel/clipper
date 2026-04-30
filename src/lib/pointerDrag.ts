@@ -40,7 +40,7 @@ type StartPointerDragOptions<TPayload extends Record<string, unknown>> = {
 };
 
 const dragGhostOffset = { x: 10, y: -10 };
-const defaultPointerDragActivationDelayMs = 320;
+const defaultPointerDragActivationDelayMs = 160;
 let activePointerDragCleanup: (() => void) | null = null;
 
 export function startClipperPointerDrag<TPayload extends Record<string, unknown>>({ accent, activationDelayMs = defaultPointerDragActivationDelayMs, eventName, label, payload, pointerEvent, previewEventName, skipPreventDefault }: StartPointerDragOptions<TPayload>) {
@@ -79,6 +79,10 @@ export function startClipperPointerDrag<TPayload extends Record<string, unknown>
     window.dispatchEvent(new CustomEvent<ClipperPointerDragDetail<TPayload>>(eventName, { detail: { ...payload, phase, clientX: event.clientX, clientY: event.clientY, shiftKey: event.shiftKey } }));
   }
 
+  function emitFromMouse(phase: ClipperPointerDragPhase, event: globalThis.MouseEvent) {
+    window.dispatchEvent(new CustomEvent<ClipperPointerDragDetail<TPayload>>(eventName, { detail: { ...payload, phase, clientX: event.clientX, clientY: event.clientY, shiftKey: event.shiftKey } }));
+  }
+
   function onPointerMove(event: globalThis.PointerEvent) {
     lastPointer = { clientX: event.clientX, clientY: event.clientY, shiftKey: event.shiftKey };
     if (!active) return;
@@ -100,6 +104,11 @@ export function startClipperPointerDrag<TPayload extends Record<string, unknown>
     cleanup();
   }
 
+  function onMouseUp(event: globalThis.MouseEvent) {
+    if (active) emitFromMouse("drop", event);
+    cleanup();
+  }
+
   function onPreview(event: Event) {
     const active = Boolean((event as CustomEvent<PointerDragPreviewDetail>).detail?.active);
     if (ghost) ghost.style.opacity = active ? "0" : "1";
@@ -114,6 +123,9 @@ export function startClipperPointerDrag<TPayload extends Record<string, unknown>
     window.removeEventListener("pointermove", onPointerMove, true);
     window.removeEventListener("pointerup", onPointerUp, true);
     window.removeEventListener("pointercancel", onPointerCancel, true);
+    document.removeEventListener("pointerup", onPointerUp, true);
+    document.removeEventListener("pointercancel", onPointerCancel, true);
+    document.removeEventListener("mouseup", onMouseUp, true);
     if (previewEventName) window.removeEventListener(previewEventName, onPreview);
     ghost?.remove();
   }
@@ -123,6 +135,9 @@ export function startClipperPointerDrag<TPayload extends Record<string, unknown>
   window.addEventListener("pointermove", onPointerMove, true);
   window.addEventListener("pointerup", onPointerUp, true);
   window.addEventListener("pointercancel", onPointerCancel, true);
+  document.addEventListener("pointerup", onPointerUp, true);
+  document.addEventListener("pointercancel", onPointerCancel, true);
+  document.addEventListener("mouseup", onMouseUp, true);
   if (previewEventName) window.addEventListener(previewEventName, onPreview);
 
   return cleanup;
@@ -130,4 +145,8 @@ export function startClipperPointerDrag<TPayload extends Record<string, unknown>
 
 export function setClipperPointerDragPreview(previewEventName: string, active: boolean) {
   window.dispatchEvent(new CustomEvent<PointerDragPreviewDetail>(previewEventName, { detail: { active } }));
+}
+
+export function cancelActiveClipperPointerDrag() {
+  activePointerDragCleanup?.();
 }

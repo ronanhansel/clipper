@@ -46,6 +46,8 @@ Rename the former Edit timeline mode to Compose and evolve it into a focused com
 - Compose layer expand/collapse is now routed through a single local `toggleLayerNode()` helper that keeps the visual chevron state and Arborist open state aligned. Empty Objects/Background groups no longer receive empty `children` arrays, preventing rows such as an empty background layer from showing a fake expandable chevron during playback.
 - Group row primary pointer-down now toggles expansion directly before layer selection handling. This avoids the row selection pointer handler swallowing the interaction path that users expect when clicking the Objects group label, not just its chevron.
 - Compose layer rows now keep group/background/frame rows at the same text brightness as object rows, and the chevron button no longer has its own hover background/text treatment so hovering the dropdown does not create a separate block state.
+- `.clipper` project save/load now maps root-relative File Manager composition and timeline paths into the zip `compositions/` and `timelines/` storage folders instead of flattening compositions to `compositions/<id>.ts`. This keeps composition file/folder moves restorable after reopening while keeping the in-app paths rooted at the opened container directory.
+- The code pane source prop now falls back to `part.source` when `compositionSources[part.filePath]` is temporarily unavailable during a source-key remap, so moving an unrelated File Manager composition cannot blank the active code editor.
 
 ## Verification
 
@@ -53,6 +55,8 @@ Rename the former Edit timeline mode to Compose and evolve it into a focused com
 - `npm run typecheck` passes after the frame interaction controller extraction.
 - `npm run typecheck` passes after the export command extraction.
 - `npm test` passes with 84 tests, including a migration test for old `timelineMode: "edit"` state.
+- `npm run typecheck` passes after the File Manager zip path/source fallback fix.
+- `npm test` passes with 92 tests after the File Manager zip path/source fallback fix.
 
 ## Follow-Ups
 

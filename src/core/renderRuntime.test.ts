@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { evaluateBackgroundLayer, evaluateFrameObject, getMotionTranslation } from "./renderRuntime";
-import { advanceTimeSensitiveSceneTime, applyAdjustmentLayersToSceneTime, applyAdjustmentLayersToVisualStyle, getSceneTimeForTimeSensitiveDisplayTime, getTimeSensitiveDisplayDuration, getTimeSensitiveDisplayTime } from "./adjustments";
+import { advanceTimeSensitiveSceneTime, applyAdjustmentLayersToSceneTime, applyPlaybackAdjustmentLayersToSceneTime, applyAdjustmentLayersToVisualStyle, getSceneTimeForTimeSensitiveDisplayTime, getTimeSensitiveDisplayDuration, getTimeSensitiveDisplayTime } from "./adjustments";
 import { installedEffectPackages } from "./effects/registry";
 import type { AdjustmentLayer, BackgroundLayer, FrameObject } from "./types";
 
@@ -65,6 +65,14 @@ describe("render runtime", () => {
 
     expect(advanceTimeSensitiveSceneTime(5, 0.25, 23, layers, 30)).toBe(7);
     expect(advanceTimeSensitiveSceneTime(5, 0.875, 23, layers, 30)).toBe(12);
+  });
+
+  it("does not double-apply speed changes after playback clock advancement", () => {
+    const layers = [{ id: "adj", name: "Speed", start: 5, duration: 7, effect: { effectId: "clipper.adjustment.speedChange" as const, params: { speed: 8 } } }];
+    const playheadTime = advanceTimeSensitiveSceneTime(5, 0.25, 23, layers, 30);
+
+    expect(applyPlaybackAdjustmentLayersToSceneTime(playheadTime, layers, 30)).toBe(7);
+    expect(applyAdjustmentLayersToSceneTime(playheadTime, layers, 30)).toBeCloseTo(11.9666667);
   });
 
   it("does not expand player display time for non-time-sensitive adjustments", () => {

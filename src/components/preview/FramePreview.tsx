@@ -1,7 +1,7 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent, type RefObject, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { mutedCaps, selectorBlue, selectorHandleSizePx, selectorOffsetPx } from "../../app/config";
 import { getRenderableTextSegments, getSelectionFormatState, normalizeEditableFormatting, renderRichTextSegments, richTextSegmentsFromElement, shouldPersistRichText, textSegmentsToEditableNodes } from "../../app/richText";
-import { advanceTimeSensitiveSceneTime, applyAdjustmentLayersToSceneTime, applyAdjustmentLayersToVisualStyle } from "../../core/adjustments";
+import { advanceTimeSensitiveSceneTime, applyPlaybackAdjustmentLayersToSceneTime, applyAdjustmentLayersToVisualStyle } from "../../core/adjustments";
 import { boundsToViewport, formatCameraPreviewTransform, getLayeredCameraPreviewTransform, type CameraPreviewTransform } from "../../core/camera";
 import { generateChartObjects, type ChartGeneratedObject } from "../../core/chart";
 import { getBoundsUnion, insetBounds, isVisibleMarqueeBounds, updateDragSelectionBoxElement, type ResizeHandle } from "../../core/frameInteraction";
@@ -55,7 +55,7 @@ export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dra
     function tick(now: number) {
       const nextSceneTime = advanceTimeSensitiveSceneTime(clock.startedFrom, (now - clock.startedAt) / 1000, partStart + part.duration, adjustmentLayers);
       setLiveSceneTime(nextSceneTime);
-      setLivePreviewTime(clamp(applyAdjustmentLayersToSceneTime(nextSceneTime, adjustmentLayers) - partStart, 0, part.duration));
+      setLivePreviewTime(clamp(applyPlaybackAdjustmentLayersToSceneTime(nextSceneTime, adjustmentLayers) - partStart, 0, part.duration));
       frame = requestAnimationFrame(tick);
     }
 
