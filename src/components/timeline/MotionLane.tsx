@@ -10,11 +10,11 @@ import { TimelineSelectionBox } from "./TimelineSelectionBox";
 import { timelineBlockPreviewKey, type TimelineBlockPreviewMap } from "./timelineBlockPreview";
 import type { TimelinePartMotionView } from "./timelineTypes";
 
-function isZoomMarkerOnLayer(marker: ZoomMarker, layerId: string) {
+export function isZoomMarkerOnLayer(marker: ZoomMarker, layerId: string) {
   return marker.layerId === layerId;
 }
 
-function isAnyTranslationMarkerOnLayer(marker: TranslationMarker, layerId: string) {
+export function isAnyTranslationMarkerOnLayer(marker: TranslationMarker, layerId: string) {
   return marker.layerId === layerId;
 }
 
