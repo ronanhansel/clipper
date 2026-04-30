@@ -1,5 +1,5 @@
 import { defaultZoomDuration, minimumZoomDuration } from "./editorConstants";
-import { getAdjustmentEffectPackage } from "./effects/registry";
+import { effectBlocksMending, getAdjustmentEffectPackage } from "./effects/registry";
 import { getMotionBlockEffectKind, getCanonicalMotionMarkers, getMotionMarkerViews, withCanonicalMotionMarkers } from "./motionEffects";
 import { MAX_PART_DURATION_SECONDS, MAX_SCENE_DURATION_SECONDS, type AdjustmentLayer, type CompositionClip, type MotionBlock, type MotionBlockEffectKind, type MotionEffectKind, type MotionMarker, type Scene, type TimelineComposition, type TimelineLayerState, type TimelineMotionLayerState, type TimelinePart } from "./types";
 import { clamp, roundTenth, roundTwo } from "./math";
@@ -105,7 +105,8 @@ export type TimelineMarkerMove = { sourcePartId: string; markerId: string; targe
 export type TimelineMarkerResize = { sourcePartId: string; markerId: string; absoluteStart: number; duration: number };
 export type TimelineMarkerDragItem = { partId: string; markerId: string; absoluteStart: number; duration: number; groupId?: string };
 type TopTimelineItem = { kind: "adjustment"; layer: AdjustmentLayer } | { kind: "motion"; part: TimelineComposition; marker: MotionMarker } | { kind: "part"; part: TimelineComposition };
-type MiddleSnapMarker = { id: string; start: number; duration: number; layerId?: string; snapIn?: boolean; snapOut?: boolean; mendInId?: string; mendOutId?: string };
+type TimelineMendMarker = { id: string; start: number; duration: number; effectId?: string; effect?: { effectId?: string }; layerId?: string; snapIn?: boolean; snapOut?: boolean; mendInId?: string; mendOutId?: string; partId?: string; sourcePartId?: string };
+type MiddleSnapMarker = TimelineMendMarker;
 type MiddleSnapLayerResolver<T extends MiddleSnapMarker> = (marker: T) => string;
 
 export function getTimelineTicks(duration: number) {
@@ -154,7 +155,21 @@ export function getMotionMarkerLayerId(marker: Pick<MotionMarker, "layerId">) {
 }
 
 export function getMotionMarkerMendKey(marker: MotionMarker) {
-  return `${getMotionBlockEffectKind(marker) ?? "pan"}:${getMotionMarkerLayerId(marker)}`;
+  return getTimelineMarkerMendLayerId(marker);
+}
+
+export function canMendTimelineMarkers(previous: { effectId?: string; effect?: { effectId?: string }; layerId?: string }, next: { effectId?: string; effect?: { effectId?: string }; layerId?: string }) {
+  return getTimelineMarkerMendLayerId(previous) === getTimelineMarkerMendLayerId(next)
+    && !effectBlocksMending(getTimelineMarkerEffectId(previous))
+    && !effectBlocksMending(getTimelineMarkerEffectId(next));
+}
+
+function getTimelineMarkerEffectId(marker: { effectId?: string; effect?: { effectId?: string } }) {
+  return marker.effectId ?? marker.effect?.effectId;
+}
+
+export function getTimelineMarkerMendLayerId(marker: { layerId?: string; effect?: { effectId?: string } }) {
+  return marker.layerId ?? marker.effect?.effectId ?? "";
 }
 
 function motionViews(part: Pick<CompositionClip, "motionMarkers">) {
@@ -364,13 +379,13 @@ export function exactMarkerPlacementInTimeline(timeline: TimelinePart[], absolut
   return targetPart ? { partId: targetPart.id, start: absoluteStart - targetPart.start } : null;
 }
 
-export function getMendedMarkerDragItems(timeline: TimelinePart[], part: TimelinePart, markerId: string, motionKind: MotionBlockEffectKind | undefined): TimelineMarkerDragItem[] {
-  const sourceMarkers = getCanonicalMotionMarkers(part).filter((marker) => !motionKind || marker.kind === motionKind);
+export function getMendedMarkerDragItems(timeline: TimelinePart[], part: TimelinePart, markerId: string, _motionKind?: MotionBlockEffectKind): TimelineMarkerDragItem[] {
+  const sourceMarkers = getCanonicalMotionMarkers(part).filter((marker) => !effectBlocksMending(marker.effectId));
   const targetMarker = sourceMarkers.find((marker) => marker.id === markerId);
   if (!targetMarker) return [];
   const targetMendKey = getMotionMarkerMendKey(targetMarker);
   const markers = timeline.flatMap((timelinePart) => getCanonicalMotionMarkers(timelinePart)
-    .filter((marker) => !motionKind || marker.kind === motionKind)
+    .filter((marker) => !effectBlocksMending(marker.effectId))
     .filter((marker) => getMotionMarkerMendKey(marker) === targetMendKey)
     .map((marker) => ({ partId: timelinePart.id, marker, absoluteStart: timelinePart.start + marker.start })));
   const sortedMarkers = [...markers].sort((left, right) => left.absoluteStart - right.absoluteStart);
@@ -403,6 +418,19 @@ export function getMendedMarkerDragItems(timeline: TimelinePart[], part: Timelin
     duration: item.marker.duration,
     groupId,
   }));
+}
+
+export function isTimelineMarkerMendedEdge(timeline: TimelinePart[], part: TimelinePart, marker: MotionMarker, edge: "start" | "end") {
+  if (effectBlocksMending(marker.effectId)) return false;
+  const markers = timeline.flatMap((timelinePart) => getCanonicalMotionMarkers(timelinePart)
+    .filter((item) => getMotionMarkerMendKey(item) === getMotionMarkerMendKey(marker) && !effectBlocksMending(item.effectId))
+    .map((item) => ({ ...item, partId: timelinePart.id, start: timelinePart.start + item.start })))
+    .sort((left, right) => left.start - right.start);
+  const markerIndex = markers.findIndex((item) => item.partId === part.id && item.id === marker.id);
+  if (markerIndex < 0) return false;
+
+  if (edge === "start") return Boolean(markers[markerIndex - 1] && isExplicitTimelineMarkerMend(markers[markerIndex - 1], markers[markerIndex]));
+  return Boolean(markers[markerIndex + 1] && isExplicitTimelineMarkerMend(markers[markerIndex], markers[markerIndex + 1]));
 }
 
 export function getAvailableMotionPlacement(markers: Array<{ start: number; duration: number }>, partDuration: number, preferredTime: number) {
@@ -464,6 +492,7 @@ export function getMotionMiddleSnap<T extends MiddleSnapMarker>(markers: T[], pr
     for (let index = 0; index < sortedMarkers.length - 1; index += 1) {
       const previous = sortedMarkers[index];
       const next = sortedMarkers[index + 1];
+      if (!canMendTimelineMarkers(previous, next)) continue;
       const previousEnd = previous.start + previous.duration;
       const nextStart = next.start;
 
@@ -505,6 +534,7 @@ export function getSelectedMotionMiddleSnap<T extends MiddleSnapMarker>(markers:
   for (let index = 0; index < selectedIndexes.length - 1; index += 1) {
     const previous = sortedMarkers[selectedIndexes[index]];
     const next = sortedMarkers[selectedIndexes[index + 1]];
+    if (!canMendTimelineMarkers(previous, next)) return null;
 
     const previousEnd = previous.start + previous.duration;
     const nextStart = next.start;
@@ -536,6 +566,7 @@ function getSingleSelectedMiddleSnap<T extends MiddleSnapMarker>(markers: T[], m
 
 function getMiddleSnapPair<T extends MiddleSnapMarker>(previous: T | undefined, next: T | undefined) {
   if (!previous || !next) return null;
+  if (!canMendTimelineMarkers(previous, next)) return null;
   const tolerance = 0.12;
   const previousEnd = previous.start + previous.duration;
   const nextStart = next.start;
@@ -711,15 +742,17 @@ function markerIdentityKeys(marker: { id: string; partId?: string; sourcePartId?
   return new Set(partId ? [marker.id, `${partId}:${marker.id}`] : [marker.id]);
 }
 
-export function isExplicitTimelineMarkerMend(previous: { id: string; start: number; duration: number; snapOut?: boolean; mendOutId?: string; partId?: string; sourcePartId?: string }, next: { id: string; start: number; snapIn?: boolean; mendInId?: string; partId?: string; sourcePartId?: string }) {
-  return hasExplicitTimelineMarkerMendReference(previous, next);
+export function isExplicitTimelineMarkerMend(previous: TimelineMendMarker, next: TimelineMendMarker) {
+  return canMendTimelineMarkers(previous, next) && areTimelineMarkersAdjacent(previous, next) && hasExplicitTimelineMarkerMendReference(previous, next);
+}
+
+function areTimelineMarkersAdjacent(previous: { start: number; duration: number }, next: { start: number }) {
+  return Math.abs(previous.start + previous.duration - next.start) <= 0.001;
 }
 
 function hasExplicitTimelineMarkerMendReference(previous: { id: string; snapOut?: boolean; mendOutId?: string; partId?: string; sourcePartId?: string }, next: { id: string; snapIn?: boolean; mendInId?: string; partId?: string; sourcePartId?: string }) {
   return Boolean(
-    previous.snapOut
-      && next.snapIn
-      && previous.mendOutId
+    previous.mendOutId
       && next.mendInId
       && markerIdentityKeys(next).has(previous.mendOutId)
       && markerIdentityKeys(previous).has(next.mendInId),

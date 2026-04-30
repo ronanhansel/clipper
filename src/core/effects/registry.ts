@@ -22,6 +22,10 @@ export function getEffectPackage(effectId: string) {
   return effectPackageRegistry.get(effectId as EffectId);
 }
 
+export function effectBlocksMending(effectId: string | undefined) {
+  return Boolean(effectId && getEffectPackage(effectId)?.tags?.includes("blocksMending"));
+}
+
 export function getMotionEffectPackage(effectId: string) {
   const definition = getEffectPackage(effectId);
   return definition?.category === "motion" ? definition as MotionEffectPackage : undefined;

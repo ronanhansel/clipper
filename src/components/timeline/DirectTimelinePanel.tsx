@@ -2,8 +2,8 @@ import { startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState,
 import { defaultTimelinePixelsPerSecond } from "../../app/config";
 import { TIMELINE_MOTION_PART_ID, type AdjustmentLayerSelection, type CompositionSelection, type MotionMarkerSelection, type TimelineNodeContextTarget, type TimelineSelectionDrag } from "../../app/types";
 import { clamp, roundTenth, roundTwo } from "../../core/math";
-import { buildLinearTimeline, getAdjustmentLayerRowId, getAdjustmentPlacement, getMendedMarkerDragItems, getMotionMarkerLayerId, getScrubSnapBoundaries, getTimelineDragConstraintItems, getTimelineMarkerDragSnapBoundaries, getTimelineMarkerMoves, getTimelinePartAtTime, getTimelineTicks, getTopTimelineItemAtTime, isMotionMarkerOnLayerId, resizeTimelineMarkersWithPush, timelineDisplayDuration as getTimelineDisplayDuration, uniqueTimelineDragItems, type TimelineMarkerDragItem, type TimelineMarkerMove, type TimelineMarkerResize } from "../../core/timeline";
-import { getTimelineBlockSnap, getTimelineBlockTiming, getTimelineDragDeltaSeconds, getTimelineSnapGuideTime } from "../../core/timelineBlockTiming";
+import { buildLinearTimeline, getAdjustmentLayerRowId, getAdjustmentPlacement, getMendedMarkerDragItems, getMotionMarkerLayerId, getScrubSnapBoundaries, getTimelineDragConstraintItems, getTimelineMarkerDragSnapBoundaries, getTimelineMarkerMoves, getTimelinePartAtTime, getTimelineTicks, getTopTimelineItemAtTime, isMotionMarkerOnLayerId, isTimelineMarkerMendedEdge, resizeTimelineMarkersWithPush, timelineDisplayDuration as getTimelineDisplayDuration, uniqueTimelineDragItems, type TimelineMarkerDragItem, type TimelineMarkerMove, type TimelineMarkerResize } from "../../core/timeline";
+import { getTimelineBlockTiming, getTimelineDragDeltaSeconds, getTimelineSnapGuideTime } from "../../core/timelineBlockTiming";
 import { defaultTimelineLayerState } from "../../core/project";
 import { getAdjustmentEffectPackage, getEffectDragType, getEffectPackage, getMotionEffectPackage, installedEffectPackages } from "../../core/effects/registry";
 import { applyTimelineBlockPreview, clearTimelineBlockPreview, getTimelineBlockLayerPreview, getTimelineLayerRowAtClientY, moveTimelineStateLayer, renameTimelineStateLayer, toggleTimelineStateLayerHidden, toggleTimelineStateLayerLocked, type TimelineLayerCategory } from "../../core/timelineLayers";
@@ -12,7 +12,7 @@ import { getMotionMarkerViews } from "../../core/motionEffects";
 import { compositionDragPreviewEvent, compositionPointerDragEvent, effectDragPreviewEvent, effectPointerDragEvent, setClipperPointerDragPreview, type CompositionPointerDragDetail, type EffectPointerDragDetail } from "../../lib/pointerDrag";
 import { useTimelineScrubber } from "./useTimelineScrubber";
 import { TimelineShell } from "./TimelineShell";
-import { MotionLane, isMotionMarkerMendedEdge } from "./MotionLane";
+import { MotionLane } from "./MotionLane";
 import { EffectDragPreviewBlock, CompositionTimelineBlock, LayerLabel, LayerResizeSeparator, TimelineBlock, TimelineLayerLane } from "./TimelinePrimitives";
 import { TimelineSelectionBox, updateTimelineSelectionBoxElement } from "./TimelineSelectionBox";
 import { useTimelineDragAutoScroll } from "./useTimelineDragAutoScroll";
@@ -545,23 +545,27 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
   }
 
 
-  function blockDeltaForTimelineDrag(items: TimelineMarkerDragItem[], rawDelta: number, snapThresholdSeconds: number, snap: boolean, motionKind: MotionBlockEffectKind | undefined, targetLayerId?: string) {
+  function blockDeltaForTimelineDrag(items: TimelineMarkerDragItem[], rawDelta: number, snapThresholdSeconds: number, snap: boolean, motionKind: MotionBlockEffectKind | undefined) {
     const constraintItems = getTimelineDragConstraintItems(items);
     const blockStart = Math.min(...constraintItems.map((item) => item.absoluteStart));
     const blockEnd = Math.max(...constraintItems.map((item) => item.absoluteStart + item.duration));
     const movingKeys = new Set(items.map((item) => `${item.partId}:${item.markerId}`));
     const snapBoundaries = getUniversalTimelineSnapBoundaries(motionKind, movingKeys);
-    let nextDelta = rawDelta;
-
-    if (snap) {
-      const snapped = getTimelineBlockSnap(blockStart + nextDelta, blockEnd - blockStart, snapBoundaries, snapThresholdSeconds);
-      nextDelta = snapped.start - blockStart;
-      updateTimelineSnapGuide(snapped.guideTime);
-    } else {
-      clearTimelineSnapGuide();
-    }
-
-    return clamp(nextDelta, -blockStart, timelineDisplayDuration - blockStart);
+    const timing = getTimelineBlockTiming({
+      action: "move",
+      initialStart: blockStart,
+      initialDuration: blockEnd - blockStart,
+      deltaSeconds: rawDelta,
+      timelineDuration: timelineDisplayDuration,
+      minDuration: 0.1,
+      moveMaxStartMode: "start",
+      endMaxMode: "none",
+      snap,
+      snapBoundaries,
+      snapThresholdSeconds,
+    });
+    updateTimelineSnapGuide(timing.guideTime);
+    return timing.start - blockStart;
   }
 
   function getUniversalTimelineSnapBoundaries(motionKind: MotionBlockEffectKind | undefined, movingKeys: Set<string>) {
@@ -899,7 +903,7 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
     const motionKind = marker.kind;
     const dragItems = selectedMotionDragItems(part, marker);
     if (dragItems.length === 0 || isMotionMarkerLocked(marker)) return;
-    const resizeTargets = action !== "move" && dragItems.length > 1 ? [{ part, marker }] : selectedMotionResizeTargets(part, marker);
+    const resizeTargets = selectedMotionResizeTargets(part, marker);
     const targetAlreadySelected = selectedMotionKeys.has(`${part.id}:${marker.id}`);
     const isSelectionMove = action === "move" && dragItems.length > 1;
     const isSelectionResize = action !== "move" && targetAlreadySelected && resizeTargets.length > 1;
@@ -922,8 +926,8 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
 
     function getMoveDragState(clientX: number, clientY: number, snap: boolean) {
       const deltaSeconds = getDeltaSeconds(clientX);
-      const targetLayerId = getMotionDropLayerId("motion", clientY);
-      const blockDeltaSeconds = blockDeltaForTimelineDrag(dragItems, deltaSeconds, snapThresholdSeconds, snap, motionKind, targetLayerId);
+      const targetLayerId = getMotionDropLayerId("motion", clientY) ?? sourceLayerId;
+      const blockDeltaSeconds = blockDeltaForTimelineDrag(dragItems, deltaSeconds, snapThresholdSeconds, snap, motionKind);
       const moves = getTimelineMarkerMoves(motionTimeline, dragItems, blockDeltaSeconds, motionKind, activePartIds, snapThresholdSeconds).map((move) => ({ ...move, targetLayerId }));
       return { blockDeltaSeconds, moves };
     }
@@ -945,7 +949,7 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
         clearTimelineSnapGuide();
         return deltaSeconds;
       }
-      const internalMendedEdge = isMotionMarkerMendedEdge(motionTimeline, part as TimelinePartMotionView, marker, action);
+      const internalMendedEdge = isTimelineMarkerMendedEdge(motionTimeline, part as TimelinePartMotionView, marker, action);
       if (internalMendedEdge) {
         clearTimelineSnapGuide();
         return deltaSeconds;

@@ -369,7 +369,7 @@ export function useMotionMarkerCommands({
     }
   }
 
-  // ── snap / middle ────────────────────────────────────────────────
+  // ── snap / mend ──────────────────────────────────────────────────
 
   function updateSelectedMotionSnap(key: "snapIn" | "snapOut", enabled: boolean) {
     const selectedIdsByPart = new Map<string, Set<string>>();
@@ -378,7 +378,7 @@ export function useMotionMarkerCommands({
     if (timelineMotionIds) {
       updateSceneMotionMarkers((markers) => ({
         motionMarkers: normalizeMendedMotionMarkerFocus(markers.map((marker) => timelineMotionIds.has(marker.id)
-          ? { ...marker, [key]: enabled || undefined, mendInId: key === "snapIn" ? undefined : marker.mendInId, mendOutId: key === "snapOut" ? undefined : marker.mendOutId }
+          ? { ...marker, [key]: enabled || undefined }
           : marker)),
       }));
       return;
@@ -387,7 +387,7 @@ export function useMotionMarkerCommands({
       const selectedIds = selectedIdsByPart.get(item.id);
       if (!selectedIds) return item;
       const motionMarkers = getMotionMarkerViews(item).motionMarkers.map((marker) => selectedIds.has(marker.id)
-        ? { ...marker, [key]: enabled || undefined, mendInId: key === "snapIn" ? undefined : marker.mendInId, mendOutId: key === "snapOut" ? undefined : marker.mendOutId }
+        ? { ...marker, [key]: enabled || undefined }
         : marker);
       return withMotionMarkers(item, normalizeMendedMotionMarkerFocus(motionMarkers));
     }));
@@ -416,11 +416,11 @@ export function useMotionMarkerCommands({
       const previousBounds = nextBounds.get(pair.previousId);
       const nextMarkerBounds = nextBounds.get(pair.nextId);
       if (middleSnapActive) {
-        if (previousBounds) nextBounds.set(pair.previousId, { ...previousBounds, snapOut: undefined, mendOutId: undefined });
-        if (nextMarkerBounds) nextBounds.set(pair.nextId, { ...nextMarkerBounds, snapIn: undefined, mendInId: undefined });
+        if (previousBounds) nextBounds.set(pair.previousId, { ...previousBounds, mendOutId: undefined });
+        if (nextMarkerBounds) nextBounds.set(pair.nextId, { ...nextMarkerBounds, mendInId: undefined });
       } else {
-        if (previousBounds) nextBounds.set(pair.previousId, { ...previousBounds, end: pair.time, snapOut: true, mendOutId: pair.nextId });
-        if (nextMarkerBounds) nextBounds.set(pair.nextId, { ...nextMarkerBounds, start: pair.time, snapIn: true, mendInId: pair.previousId });
+        if (previousBounds) nextBounds.set(pair.previousId, { ...previousBounds, end: pair.time, mendOutId: pair.nextId });
+        if (nextMarkerBounds) nextBounds.set(pair.nextId, { ...nextMarkerBounds, start: pair.time, mendInId: pair.previousId });
       }
     }
     updateSceneMotionMarkers((markers) => {

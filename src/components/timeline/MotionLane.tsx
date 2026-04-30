@@ -2,7 +2,7 @@ import { Link2 } from "lucide-react";
 import { useMemo, type DragEvent, type MouseEvent as ReactMouseEvent, type PointerEvent, type RefObject } from "react";
 import type { TimelineNodeContextTarget, TimelineSelectionDrag } from "../../app/types";
 import { getEffectPackage, getMotionEffectPackage } from "../../core/effects/registry";
-import { isExplicitTimelineMarkerMend, isMotionMarkerOnLayerId, getMotionMarkerLayerId } from "../../core/timeline";
+import { isMotionMarkerOnLayerId, isTimelineMarkerMendedEdge } from "../../core/timeline";
 import type { EffectTimelineGradient, MotionMarker, TimelinePart } from "../../core/types";
 import { TimelineBlock, TimelineLayerLane } from "./TimelinePrimitives";
 import { TimelineSelectionBox } from "./TimelineSelectionBox";
@@ -15,27 +15,14 @@ function timelineEdgeIndicatorClass(side: "left" | "right", mended: boolean) {
   return `pointer-events-none absolute inset-y-0 ${position} w-1 ${gradient}`;
 }
 
-export function isMotionMarkerMendedEdge(timeline: TimelinePartMotionView[], part: TimelinePartMotionView, marker: MotionMarker, edge: "start" | "end") {
-  const markers = timeline.flatMap((timelinePart) => timelinePart.motionMarkers
-    .filter((item) => getMotionMarkerLayerId(item) === getMotionMarkerLayerId(marker) && item.kind === marker.kind)
-    .map((item) => ({ ...item, partId: timelinePart.id, start: timelinePart.start + item.start })))
-    .sort((left, right) => left.start - right.start);
-  const markerIndex = markers.findIndex((item) => item.partId === part.id && item.id === marker.id);
-  if (markerIndex < 0) return false;
-
-  if (edge === "start") return Boolean(markers[markerIndex - 1] && isExplicitTimelineMarkerMend(markers[markerIndex - 1], markers[markerIndex]));
-
-  return Boolean(markers[markerIndex + 1] && isExplicitTimelineMarkerMend(markers[markerIndex], markers[markerIndex + 1]));
-}
-
 export function MotionLane({ hidden, locked, layerId, timeline, sceneDuration, overflowVisible, timelineBlockPreviews, motionGradient, motionSelectionDrag, motionSelectionBoxRef, selectedMotionKeys, selectedMotionMarkerId, selectedMotionMarkerPartId, onEffectDragOver, onEffectDrop, onStartSelection, onMoveSelection, onEndSelection, onOpenBlankContextMenu, onSelectMotionMarker, onOpenNodeContextMenu, onUpdateMotionFromPointer }: { hidden: boolean; locked: boolean; layerId: string; timeline: TimelinePartMotionView[]; sceneDuration: number; overflowVisible: boolean; timelineBlockPreviews: TimelineBlockPreviewMap | null; motionGradient?: EffectTimelineGradient; motionSelectionDrag: TimelineSelectionDrag | null; motionSelectionBoxRef: RefObject<HTMLDivElement | null>; selectedMotionKeys: Set<string>; selectedMotionMarkerId: string | null; selectedMotionMarkerPartId: string | null; onEffectDragOver: (event: DragEvent<HTMLDivElement>) => void; onEffectDrop: (event: DragEvent<HTMLDivElement>) => void; onStartSelection: (event: PointerEvent<HTMLDivElement>) => void; onMoveSelection: (event: PointerEvent<HTMLDivElement>) => void; onEndSelection: (event: PointerEvent<HTMLDivElement>) => void; onOpenBlankContextMenu: (event: ReactMouseEvent<HTMLElement>) => void; onSelectMotionMarker: (partId: string, markerId: string) => void; onOpenNodeContextMenu: (event: ReactMouseEvent<HTMLElement>, target: TimelineNodeContextTarget) => void; onUpdateMotionFromPointer: (event: PointerEvent<HTMLDivElement>, part: TimelinePart, marker: MotionMarker, action: "move" | "start" | "end") => void }) {
   const motionMarkerEdges = useMemo(() => {
     const edges = new Map<string, { left: boolean; right: boolean }>();
     for (const timelinePart of timeline) {
       for (const marker of timelinePart.motionMarkers) {
         edges.set(timelineBlockPreviewKey("motion", timelinePart.id, marker.id), {
-          left: isMotionMarkerMendedEdge(timeline, timelinePart, marker, "start"),
-          right: isMotionMarkerMendedEdge(timeline, timelinePart, marker, "end"),
+          left: isTimelineMarkerMendedEdge(timeline, timelinePart, marker, "start"),
+          right: isTimelineMarkerMendedEdge(timeline, timelinePart, marker, "end"),
         });
       }
     }
@@ -54,7 +41,7 @@ export function MotionLane({ hidden, locked, layerId, timeline, sceneDuration, o
       const leftMended = motionMarkerEdges.get(markerKey)?.left ?? false;
       const rightMended = motionMarkerEdges.get(markerKey)?.right ?? false;
       return (
-        <TimelineBlock variant={variant} gradient={motionGradient ?? effectDef?.timelineGradient ?? getEffectPackage(effectId)?.timelineGradient} squareLeft={leftMended} squareRight={rightMended} dataAttributes={{ "data-timeline-marker-kind": "motion", "data-timeline-motion-kind": effectKind, "data-timeline-marker-part-id": timelinePart.id, "data-timeline-marker-id": marker.id }} locked={locked} selected={selectedMotionKeys.has(`${timelinePart.id}:${marker.id}`) || (marker.id === selectedMotionMarkerId && timelinePart.id === selectedMotionMarkerPartId)} key={`${effectKind}-${timelinePart.id}-${marker.id}`} style={{ left: `${((timelinePart.start + previewMarker.start) / sceneDuration) * 100}%`, width: `calc(${(previewMarker.duration / sceneDuration) * 100}% + var(--clipper-timeline-resize-width, 0px))` }} onClick={() => onSelectMotionMarker(timelinePart.id, marker.id)} onPointerDown={(event) => onUpdateMotionFromPointer(event, timelinePart, marker, "move")} onLeftResize={(event) => onUpdateMotionFromPointer(event, timelinePart, marker, "start")} onRightResize={(event) => onUpdateMotionFromPointer(event, timelinePart, marker, "end")} onContextMenu={(event) => onOpenNodeContextMenu(event, { kind: "motion", partId: timelinePart.id, markerId: marker.id })} leftHandle={marker.snapIn && !leftMended ? <span className={timelineEdgeIndicatorClass("left", false)} /> : null} rightHandle={marker.snapOut ? <span className={timelineEdgeIndicatorClass("right", rightMended)} /> : null}>
+        <TimelineBlock variant={variant} gradient={motionGradient ?? effectDef?.timelineGradient ?? getEffectPackage(effectId)?.timelineGradient} squareLeft={leftMended} squareRight={rightMended} dataAttributes={{ "data-timeline-marker-kind": "motion", "data-timeline-motion-kind": effectKind, "data-timeline-marker-part-id": timelinePart.id, "data-timeline-marker-id": marker.id }} locked={locked} selected={selectedMotionKeys.has(`${timelinePart.id}:${marker.id}`) || (marker.id === selectedMotionMarkerId && timelinePart.id === selectedMotionMarkerPartId)} key={`${effectKind}-${timelinePart.id}-${marker.id}`} style={{ left: `${((timelinePart.start + previewMarker.start) / sceneDuration) * 100}%`, width: `calc(${(previewMarker.duration / sceneDuration) * 100}% + var(--clipper-timeline-resize-width, 0px))` }} onClick={() => onSelectMotionMarker(timelinePart.id, marker.id)} onPointerDown={(event) => onUpdateMotionFromPointer(event, timelinePart, marker, "move")} onLeftResize={(event) => onUpdateMotionFromPointer(event, timelinePart, marker, "start")} onRightResize={(event) => onUpdateMotionFromPointer(event, timelinePart, marker, "end")} onContextMenu={(event) => onOpenNodeContextMenu(event, { kind: "motion", partId: timelinePart.id, markerId: marker.id })} leftHandle={leftMended ? <span className={timelineEdgeIndicatorClass("left", true)} /> : null} rightHandle={rightMended ? <span className={timelineEdgeIndicatorClass("right", true)} /> : null}>
           <span className="pointer-events-none block overflow-hidden text-ellipsis whitespace-nowrap">{getMotionMarkerTimelineLabel(marker, effectId)}</span>
           {marker.kind === "pan" && marker.followId ? <Link2 className="pointer-events-none absolute bottom-1 left-1 text-white/85" size={9} strokeWidth={2.5} /> : null}
         </TimelineBlock>

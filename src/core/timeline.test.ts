@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { createSelectionPayload } from "./geometry";
 import { getMotionMarkerViews, motionBlocksToMotionMarkers } from "./motionEffects";
-import { buildLinearTimeline, expandExplicitTimelineMarkerMendIds, getAdjustmentPlacement, getMendedMarkerDragItems, getMotionMarkerMendKey, getMotionMiddleSnap, getSelectedMotionMiddleSnap, getTimelineMarkerDragSnapBoundaries, getTimelineMarkerMoves, getTimelinePartAtTime, getTopTimelineItemAtTime, isExplicitTimelineMarkerMend, rebaseCompositionTimelineMarkers, removeTimelineMotionLayerMarkers, resizeTimelineMarkersWithPush, sceneDuration, snapTimelineBlockStartToBoundary, timelineDisplayDuration, validateScene } from "./timeline";
+import { effectBlocksMending } from "./effects/registry";
+import { buildLinearTimeline, canMendTimelineMarkers, expandExplicitTimelineMarkerMendIds, getAdjustmentPlacement, getMendedMarkerDragItems, getMotionMarkerMendKey, getMotionMiddleSnap, getSelectedMotionMiddleSnap, getTimelineMarkerDragSnapBoundaries, getTimelineMarkerMoves, getTimelinePartAtTime, getTopTimelineItemAtTime, isExplicitTimelineMarkerMend, rebaseCompositionTimelineMarkers, removeTimelineMotionLayerMarkers, resizeTimelineMarkersWithPush, sceneDuration, snapTimelineBlockStartToBoundary, timelineDisplayDuration, validateScene } from "./timeline";
 import { moveTimelineStateLayer, toggleTimelineStateLayerHidden } from "./timelineLayers";
 import type { Scene, TimelinePart } from "./types";
 
@@ -299,9 +300,23 @@ describe("timeline model", () => {
     expect(isExplicitTimelineMarkerMend(movedMarkers[0], movedMarkers[1])).toBe(true);
   });
 
-  it("keeps explicit mends active even when timing drifts", () => {
+  it("does not treat drifted explicit references as active mends", () => {
     const previous = { id: "first", start: 0, duration: 2.04, snapOut: true, mendOutId: "second" };
     const next = { id: "second", start: 2.26, duration: 2, snapIn: true, mendInId: "first" };
+
+    expect(isExplicitTimelineMarkerMend(previous, next)).toBe(false);
+  });
+
+  it("keeps explicit mends active without snap flags", () => {
+    const previous = { id: "first", start: 0, duration: 2, mendOutId: "second" };
+    const next = { id: "second", start: 2, duration: 2, mendInId: "first" };
+
+    expect(isExplicitTimelineMarkerMend(previous, next)).toBe(true);
+  });
+
+  it("keeps explicit mends active when snap flags are toggled off", () => {
+    const previous = { id: "first", start: 0, duration: 2, snapOut: undefined, mendOutId: "second" };
+    const next = { id: "second", start: 2, duration: 2, snapIn: undefined, mendInId: "first" };
 
     expect(isExplicitTimelineMarkerMend(previous, next)).toBe(true);
   });
@@ -331,7 +346,7 @@ describe("timeline model", () => {
     ]);
   });
 
-  it("preserves existing explicit mend timing drift during internal seam resize", () => {
+  it("does not resize drifted explicit references as a mended seam", () => {
     const markers = [
       { id: "first", start: 0, duration: 2.04, snapOut: true, mendOutId: "second" },
       { id: "second", start: 2.26, duration: 2, snapIn: true, mendInId: "first" },
@@ -339,10 +354,10 @@ describe("timeline model", () => {
 
     expect(resizeTimelineMarkersWithPush(markers, "first", "end", 0.5, 10)).toEqual([
       { id: "first", start: 0, duration: 2.54, snapOut: true, mendOutId: "second" },
-      { id: "second", start: 2.76, duration: 1.5, snapIn: true, mendInId: "first" },
+      { id: "second", start: 2.26, duration: 2, snapIn: true, mendInId: "first" },
     ]);
     expect(resizeTimelineMarkersWithPush(markers, "second", "start", -0.5, 10)).toEqual([
-      { id: "first", start: 0, duration: 1.54, snapOut: true, mendOutId: "second" },
+      { id: "first", start: 0, duration: 2.04, snapOut: true, mendOutId: "second" },
       { id: "second", start: 1.76, duration: 2.5, snapIn: true, mendInId: "first" },
     ]);
   });
@@ -451,23 +466,45 @@ describe("timeline model", () => {
     ]);
   });
 
-  it("does not detect middle mend candidates across translation effect kinds", () => {
+  it("detects middle mend candidates across motion effect kinds in the same layer", () => {
     const markers = [
       { id: "pan", effectId: "clipper.motion.pan" as const, kind: "pan" as const, layerId: "shared", start: 0, duration: 2, position: { x: 0, y: 0 } },
       { id: "rotate", effectId: "clipper.motion.rotate" as const, kind: "rotate" as const, layerId: "shared", start: 4, duration: 2, position: { x: 0, y: 0 }, rotation: 12 },
     ];
 
-    expect(getSelectedMotionMiddleSnap(markers, ["pan", "rotate"], getMotionMarkerMendKey)).toBeNull();
-    expect(getMotionMiddleSnap(markers, 3, getMotionMarkerMendKey)).toBeNull();
+    expect(getSelectedMotionMiddleSnap(markers, ["pan", "rotate"], getMotionMarkerMendKey)).toEqual({
+      pairs: [{ previousId: "pan", nextId: "rotate", time: 3 }],
+    });
+    expect(getMotionMiddleSnap(markers, 3, getMotionMarkerMendKey)).toEqual({
+      pairs: [{ previousId: "pan", nextId: "rotate", time: 3 }],
+    });
   });
 
-  it("does not detect a single-selected mend across translation effect kinds", () => {
+  it("detects a single-selected mend across motion effect kinds in the same layer", () => {
     const markers = [
       { id: "pan", effectId: "clipper.motion.pan" as const, kind: "pan" as const, layerId: "shared", start: 0, duration: 2, position: { x: 0, y: 0 } },
       { id: "rotate", effectId: "clipper.motion.rotate" as const, kind: "rotate" as const, layerId: "shared", start: 4, duration: 2, position: { x: 0, y: 0 }, rotation: 12 },
     ];
 
-    expect(getSelectedMotionMiddleSnap(markers, ["rotate"], getMotionMarkerMendKey)).toBeNull();
+    expect(getSelectedMotionMiddleSnap(markers, ["rotate"], getMotionMarkerMendKey)).toEqual({
+      pairs: [{ previousId: "pan", nextId: "rotate", time: 3 }],
+    });
+  });
+
+  it("blocks mending when an effect manifest blocks mending", () => {
+    expect(effectBlocksMending("clipper.adjustment.speedChange")).toBe(true);
+    expect(canMendTimelineMarkers(
+      { effectId: "clipper.adjustment.speedChange", layerId: "adjust" },
+      { effectId: "clipper.adjustment.speedChange", layerId: "adjust" },
+    )).toBe(false);
+    expect(canMendTimelineMarkers(
+      { effect: { effectId: "clipper.adjustment.speedChange" }, layerId: "adjust" },
+      { effect: { effectId: "clipper.adjustment.speedChange" }, layerId: "adjust" },
+    )).toBe(false);
+    expect(getMotionMiddleSnap([
+      { id: "first", effectId: "clipper.adjustment.speedChange", layerId: "adjust", start: 0, duration: 2 },
+      { id: "second", effectId: "clipper.adjustment.speedChange", layerId: "adjust", start: 4, duration: 2 },
+    ], 3)).toBeNull();
   });
 
   it("returns objects intersecting a screenshot selection", () => {

@@ -146,6 +146,8 @@ export type EffectCategory = "motion" | "adjustment";
 
 export type EffectId = `${string}.${string}`;
 
+export type EffectManifestTag = "blocksMending";
+
 export type MotionEffectId = EffectId;
 
 export type AdjustmentEffectId = EffectId;
@@ -166,7 +168,14 @@ export type MotionBlockParams = Record<string, unknown> & {
   snapOut?: boolean;
 };
 
-export type MotionBlock = {
+export type TimelineMarkerMetadata = {
+  mendInId?: string;
+  mendOutId?: string;
+  snapIn?: boolean;
+  snapOut?: boolean;
+};
+
+export type MotionBlock = TimelineMarkerMetadata & {
   id: string;
   name?: string;
   layerId?: string;
@@ -179,14 +188,10 @@ export type MotionBlock = {
   followId?: string;
   middleEase?: MotionEase;
   middleTransition?: "transition";
-  mendInId?: string;
-  mendOutId?: string;
   perspective?: PerspectiveSettings;
   position?: Point;
   rotation?: number;
   scale?: number;
-  snapIn?: boolean;
-  snapOut?: boolean;
 };
 
 export type MotionBlockEffectKind = "pan" | "zoom" | "rotate" | "perspective";
@@ -205,6 +210,7 @@ export type MotionEffectDefinition = {
   group: string;
   accent?: string;
   previewColor?: string;
+  tags?: readonly EffectManifestTag[];
   timelineGradient?: EffectTimelineGradient;
   defaultDuration: number;
 };
@@ -244,6 +250,7 @@ export type AdjustmentEffectDefinition = {
   group: string;
   accent?: string;
   previewColor?: string;
+  tags?: readonly EffectManifestTag[];
   timelineGradient?: EffectTimelineGradient;
   defaultDuration: number;
   defaultParams: AdjustmentEffectParams;
@@ -256,7 +263,7 @@ export type AdjustmentEffect = {
   params?: AdjustmentEffectParams;
 };
 
-export type AdjustmentLayer = {
+export type AdjustmentLayer = TimelineMarkerMetadata & {
   id: string;
   layerId?: string;
   name: string;
@@ -265,7 +272,7 @@ export type AdjustmentLayer = {
   effect: AdjustmentEffect;
 };
 
-export type CompositionClip = {
+export type CompositionClip = TimelineMarkerMetadata & {
   id: string;
   compositionId?: string;
   name: string;

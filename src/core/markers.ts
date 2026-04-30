@@ -1,6 +1,7 @@
 import type { MotionMarker, Point } from "./types";
+import { canMendTimelineMarkers } from "./timeline";
 
-type MendedMarker = { id: string; layerId?: string; start: number; duration: number; snapIn?: boolean; snapOut?: boolean; mendInId?: string; mendOutId?: string };
+type MendedMarker = { id: string; effectId?: string; layerId?: string; start: number; duration: number; snapIn?: boolean; snapOut?: boolean; mendInId?: string; mendOutId?: string };
 
 function getMendedMarkerLayerId(marker: MendedMarker) {
   return marker.layerId ?? "";
@@ -14,7 +15,10 @@ function getMendedMarkerLayer(markers: MendedMarker[], markerId: string) {
 }
 
 function isExplicitMendedPair(previous: MendedMarker, next: MendedMarker) {
-  return Boolean(previous.snapOut && next.snapIn && previous.mendOutId === next.id && next.mendInId === previous.id);
+  return canMendTimelineMarkers(previous, next)
+    && Math.abs(previous.start + previous.duration - next.start) <= 0.001
+    && previous.mendOutId === next.id
+    && next.mendInId === previous.id;
 }
 
 export function isMotionMarkerMended(markers: MendedMarker[], markerId: string) {
