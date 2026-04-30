@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { deleteCompositionFromProject, normalizeProject, serializeProjectForSave } from "./project";
+import { motionBlocksToMotionMarkers } from "./motionEffects";
 import type { CompositionClip, ProjectManifest } from "./types";
+
+const motionMarkers = motionBlocksToMotionMarkers([{ id: "zoom_1", effectId: "clipper.motion.zoom", layerId: "clipper.motion.zoom", start: 0, duration: 1, focus: { x: 960, y: 540 }, scale: 1.2, params: { focus: { x: 960, y: 540 }, scale: 1.2 } }]);
 
 const composition: CompositionClip = {
   id: "cmp_intro",
@@ -11,9 +14,7 @@ const composition: CompositionClip = {
   background: { id: "background", name: "Background", style: { background: "#050505" }, elements: [] },
   objects: [],
   snapshot: [],
-  motionBlocks: [{ id: "zoom_1", effectId: "clipper.motion.zoom", layerId: "clipper.motion.zoom", start: 0, duration: 1, focus: { x: 960, y: 540 }, scale: 1.2, params: { focus: { x: 960, y: 540 }, scale: 1.2 } }],
-  zoomMarkers: [],
-  translationMarkers: [],
+  motionMarkers,
 };
 
 function projectWithComposition(): ProjectManifest {
@@ -27,7 +28,7 @@ function projectWithComposition(): ProjectManifest {
       id: "tl_main",
       name: "Main",
       filePath: "timelines/tl_main.timeline.json",
-      clips: [{ id: composition.id, compositionId: composition.id, duration: composition.duration, motionBlocks: composition.motionBlocks, zoomMarkers: [], translationMarkers: [] }],
+      clips: [{ id: composition.id, compositionId: composition.id, duration: composition.duration, motionMarkers }],
       adjustmentLayers: [],
       settings: {},
     }],
@@ -44,9 +45,8 @@ describe("project normalization", () => {
     const normalized = normalizeProject(projectWithComposition());
 
     expect(normalized.timelines).toHaveLength(1);
-    expect(normalized.timelines?.[0].clips[0].motionBlocks).toEqual([]);
-    expect(normalized.timelines?.[0].clips[0].zoomMarkers).toEqual([]);
-    expect(normalized.timelines?.[0].zoomMarkers?.[0]).toMatchObject({ id: "zoom_1", layerId: "clipper.motion.zoom", scale: 1.2 });
+    expect(normalized.timelines?.[0].clips[0].motionMarkers).toEqual([]);
+    expect(normalized.timelines?.[0].motionMarkers?.[0]).toMatchObject({ id: "zoom_1", kind: "zoom", layerId: "clipper.motion.zoom", scale: 1.2 });
     expect(normalized.compositions).toHaveLength(1);
     expect(normalized.compositions?.[0].source).toBe("export const composition = { id: 'cmp_intro' };");
   });
@@ -58,7 +58,7 @@ describe("project normalization", () => {
         id: "tl_main",
         name: "Main",
         filePath: "compositions/folder/tl_main.timeline.json",
-        clips: [{ id: composition.id, compositionId: composition.id, duration: composition.duration, motionBlocks: composition.motionBlocks, zoomMarkers: [], translationMarkers: [] }],
+        clips: [{ id: composition.id, compositionId: composition.id, duration: composition.duration, motionMarkers }],
         adjustmentLayers: [],
         settings: { frameRate: 30 },
       }],
@@ -66,8 +66,7 @@ describe("project normalization", () => {
 
     expect(normalized.timelines?.[0].filePath).toBe("compositions/folder/tl_main.timeline.json");
     expect(normalized.timelines?.[0].settings).toEqual({ frameRate: 30 });
-    expect(normalized.timelines?.[0].clips[0].motionBlocks).toEqual([]);
-    expect(normalized.timelines?.[0].zoomMarkers?.[0]).toMatchObject({ id: "zoom_1", effectId: "clipper.motion.zoom" });
+    expect(normalized.timelines?.[0].motionMarkers?.[0]).toMatchObject({ id: "zoom_1", kind: "zoom", effectId: "clipper.motion.zoom" });
   });
 
   it("preserves an intentionally empty timeline instead of restoring old clips", () => {
@@ -87,11 +86,11 @@ describe("project normalization", () => {
     expect(normalized.scenes[0].compositions).toEqual([]);
   });
 
-  it("serializes motion block contents as timeline-level markers", () => {
+  it("serializes clip motion markers as timeline-level motion markers", () => {
     const serialized = serializeProjectForSave(projectWithComposition());
 
-    expect(serialized.timelines?.[0].clips[0].motionBlocks).toEqual([]);
-    expect(serialized.timelines?.[0].zoomMarkers?.[0]).toMatchObject({ id: "zoom_1", effectId: "clipper.motion.zoom" });
+    expect(serialized.timelines?.[0].clips[0].motionMarkers).toEqual([]);
+    expect(serialized.timelines?.[0].motionMarkers?.[0]).toMatchObject({ id: "zoom_1", kind: "zoom", effectId: "clipper.motion.zoom" });
   });
 
   it("migrates the old edit timeline mode to compose", () => {
@@ -115,14 +114,13 @@ describe("project normalization", () => {
         filePath: "timelines/tl_main.timeline.json",
         clips: [],
         adjustmentLayers: [],
-        zoomMarkers: [{ id: "scene_zoom", layerId: "motion", start: 2, duration: 1, focus: { x: 0.5, y: 0.5 }, scale: 1.5 }],
-        translationMarkers: [],
+        motionMarkers: [{ id: "scene_zoom", kind: "zoom", effectId: "clipper.motion.zoom", layerId: "motion", start: 2, duration: 1, focus: { x: 0.5, y: 0.5 }, scale: 1.5 }],
         settings: {},
       }],
     });
 
-    expect(serialized.timelines?.[0].zoomMarkers?.[0]).toMatchObject({ id: "scene_zoom", layerId: "motion" });
-    expect(serialized.scenes[0].zoomMarkers?.[0]).toMatchObject({ id: "scene_zoom", layerId: "motion" });
+    expect(serialized.timelines?.[0].motionMarkers?.[0]).toMatchObject({ id: "scene_zoom", kind: "zoom", layerId: "motion" });
+    expect(serialized.scenes[0].motionMarkers?.[0]).toMatchObject({ id: "scene_zoom", kind: "zoom", layerId: "motion" });
   });
 
   it("drops stale adjustment blocks that no longer belong to a timeline row on save", () => {
@@ -141,7 +139,7 @@ describe("project normalization", () => {
         id: "tl_main",
         name: "Main",
         filePath: "timelines/tl_main.timeline.json",
-        clips: [{ id: composition.id, compositionId: composition.id, duration: composition.duration, motionBlocks: composition.motionBlocks, zoomMarkers: [], translationMarkers: [] }],
+        clips: [{ id: composition.id, compositionId: composition.id, duration: composition.duration, motionMarkers }],
         adjustmentLayers: [
           { id: "live", name: "Live", layerId: "adjust", start: 0, duration: 1, effect: { effectId: "clipper.adjustment.colourGrade", params: {} } },
           { id: "stale", name: "Stale", layerId: "removed_row", start: 0, duration: 10, effect: { effectId: "clipper.adjustment.colourGrade", params: {} } },

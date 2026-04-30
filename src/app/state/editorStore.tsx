@@ -2,7 +2,7 @@ import { createContext, useContext, useRef, type PropsWithChildren } from "react
 import { createStore, useStore, type StoreApi } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import { defaultFramePreviewScale, defaultNewMarkerDurationSeconds, defaultScrubCommitThrottleMs, defaultTimelineEndPaddingFraction } from "../config";
-import type { AdjustmentLayerSelection, CompositionSelection, ContextMenuState, ExportDialogTab, LeftPanelTab, Mode, PlaybackClock, ProjectExportFormat, RightPanelTab, SettingsSection, TranslationMarkerSelection, VideoExportProgress, ZoomMarkerSelection } from "../types";
+import type { AdjustmentLayerSelection, CompositionSelection, ContextMenuState, ExportDialogTab, LeftPanelTab, Mode, MotionMarkerSelection, PlaybackClock, ProjectExportFormat, RightPanelTab, SettingsSection, VideoExportProgress } from "../types";
 import { defaultPreviewViewportState, defaultTimelineMode } from "../../core/project";
 import type { Bounds, EditorState, Point, ProjectManifest, SelectionPayload, TimelineMode } from "../../core/types";
 
@@ -18,11 +18,9 @@ export type EditorStoreState = {
   selectedParts: CompositionSelection[];
   selectedObjectId: string | null;
   editingTextObjectId: string | null;
-  selectedZoomMarker: MarkerSelection;
-  selectedZoomMarkers: ZoomMarkerSelection[];
+  selectedMotionMarker: MarkerSelection;
+  selectedMotionMarkers: MotionMarkerSelection[];
   focusPickZoomMarker: MarkerSelection;
-  selectedTranslationMarker: MarkerSelection;
-  selectedTranslationMarkers: TranslationMarkerSelection[];
   positionPickTranslationMarker: MarkerSelection;
   selectedAdjustmentLayerId: string | null;
   selectedAdjustmentLayers: AdjustmentLayerSelection[];
@@ -67,11 +65,9 @@ export type EditorStoreActions = {
   setSelectedParts: (parts: Setter<CompositionSelection[]>) => void;
   setSelectedObjectId: (objectId: Setter<string | null>) => void;
   setEditingTextObjectId: (objectId: Setter<string | null>) => void;
-  setSelectedZoomMarker: (selection: Setter<MarkerSelection>) => void;
-  setSelectedZoomMarkers: (selection: Setter<ZoomMarkerSelection[]>) => void;
+  setSelectedMotionMarker: (selection: Setter<MarkerSelection>) => void;
+  setSelectedMotionMarkers: (selection: Setter<MotionMarkerSelection[]>) => void;
   setFocusPickZoomMarker: (selection: Setter<MarkerSelection>) => void;
-  setSelectedTranslationMarker: (selection: Setter<MarkerSelection>) => void;
-  setSelectedTranslationMarkers: (selection: Setter<TranslationMarkerSelection[]>) => void;
   setPositionPickTranslationMarker: (selection: Setter<MarkerSelection>) => void;
   setSelectedAdjustmentLayerId: (id: Setter<string | null>) => void;
   setSelectedAdjustmentLayers: (selection: Setter<AdjustmentLayerSelection[]>) => void;
@@ -134,11 +130,9 @@ function getInitialState(project: ProjectManifest): EditorStoreState {
     selectedParts: editorState?.selectedPartId ? [{ partId: editorState.selectedPartId }] : [],
     selectedObjectId: null,
     editingTextObjectId: null,
-    selectedZoomMarker: editorState?.selectedZoomMarker ?? null,
-    selectedZoomMarkers: editorState?.selectedZoomMarker ? [editorState.selectedZoomMarker] : [],
+    selectedMotionMarker: editorState?.selectedMotionMarker ?? null,
+    selectedMotionMarkers: editorState?.selectedMotionMarker ? [editorState.selectedMotionMarker] : [],
     focusPickZoomMarker: null,
-    selectedTranslationMarker: editorState?.selectedZoomMarker ? null : editorState?.selectedTranslationMarker ?? null,
-    selectedTranslationMarkers: !editorState?.selectedZoomMarker && editorState?.selectedTranslationMarker ? [editorState.selectedTranslationMarker] : [],
     positionPickTranslationMarker: null,
     selectedAdjustmentLayerId: null,
     selectedAdjustmentLayers: [],
@@ -186,11 +180,9 @@ export function createEditorStore(project: ProjectManifest) {
     setSelectedParts: createFieldSetter(set, "selectedParts"),
     setSelectedObjectId: createFieldSetter(set, "selectedObjectId"),
     setEditingTextObjectId: createFieldSetter(set, "editingTextObjectId"),
-    setSelectedZoomMarker: createFieldSetter(set, "selectedZoomMarker"),
-    setSelectedZoomMarkers: createFieldSetter(set, "selectedZoomMarkers"),
+    setSelectedMotionMarker: createFieldSetter(set, "selectedMotionMarker"),
+    setSelectedMotionMarkers: createFieldSetter(set, "selectedMotionMarkers"),
     setFocusPickZoomMarker: createFieldSetter(set, "focusPickZoomMarker"),
-    setSelectedTranslationMarker: createFieldSetter(set, "selectedTranslationMarker"),
-    setSelectedTranslationMarkers: createFieldSetter(set, "selectedTranslationMarkers"),
     setPositionPickTranslationMarker: createFieldSetter(set, "positionPickTranslationMarker"),
     setSelectedAdjustmentLayerId: createFieldSetter(set, "selectedAdjustmentLayerId"),
     setSelectedAdjustmentLayers: createFieldSetter(set, "selectedAdjustmentLayers"),
@@ -231,10 +223,8 @@ export function createEditorStore(project: ProjectManifest) {
       selectedSceneId: editorState.selectedSceneId ?? fallbackSceneId,
       selectedPartId: editorState.selectedPartId ?? "",
       selectedParts: editorState.selectedPartId ? [{ partId: editorState.selectedPartId }] : [],
-      selectedZoomMarker: editorState.selectedZoomMarker ?? null,
-      selectedZoomMarkers: editorState.selectedZoomMarker ? [editorState.selectedZoomMarker] : [],
-      selectedTranslationMarker: editorState.selectedZoomMarker ? null : editorState.selectedTranslationMarker ?? null,
-      selectedTranslationMarkers: !editorState.selectedZoomMarker && editorState.selectedTranslationMarker ? [editorState.selectedTranslationMarker] : [],
+      selectedMotionMarker: editorState.selectedMotionMarker ?? null,
+      selectedMotionMarkers: editorState.selectedMotionMarker ? [editorState.selectedMotionMarker] : [],
       selectedObjectId: null,
       editingTextObjectId: null,
       selectedAdjustmentLayerId: null,
@@ -249,11 +239,9 @@ export function createEditorStore(project: ProjectManifest) {
       rightPanelTab: editorState.rightPanelTab ?? "video",
     }),
     clearMarkerSelection: () => set({
-      selectedZoomMarker: null,
-      selectedZoomMarkers: [],
+      selectedMotionMarker: null,
+      selectedMotionMarkers: [],
       focusPickZoomMarker: null,
-      selectedTranslationMarker: null,
-      selectedTranslationMarkers: [],
       positionPickTranslationMarker: null,
       framePickPreviewPoint: null,
     }),
@@ -263,11 +251,9 @@ export function createEditorStore(project: ProjectManifest) {
       selectedParts: [],
       selectedObjectId: null,
       selectionPayload: null,
-      selectedZoomMarker: null,
-      selectedZoomMarkers: [],
+      selectedMotionMarker: null,
+      selectedMotionMarkers: [],
       focusPickZoomMarker: null,
-      selectedTranslationMarker: null,
-      selectedTranslationMarkers: [],
       positionPickTranslationMarker: null,
       selectedAdjustmentLayerId: null,
       selectedAdjustmentLayers: [],
@@ -312,16 +298,12 @@ export function useAppEditorState() {
     setSelectedObjectId: state.setSelectedObjectId,
     editingTextObjectId: state.editingTextObjectId,
     setEditingTextObjectId: state.setEditingTextObjectId,
-    selectedZoomMarker: state.selectedZoomMarker,
-    setSelectedZoomMarker: state.setSelectedZoomMarker,
-    selectedZoomMarkers: state.selectedZoomMarkers,
-    setSelectedZoomMarkers: state.setSelectedZoomMarkers,
+    selectedMotionMarker: state.selectedMotionMarker,
+    setSelectedMotionMarker: state.setSelectedMotionMarker,
+    selectedMotionMarkers: state.selectedMotionMarkers,
+    setSelectedMotionMarkers: state.setSelectedMotionMarkers,
     focusPickZoomMarker: state.focusPickZoomMarker,
     setFocusPickZoomMarker: state.setFocusPickZoomMarker,
-    selectedTranslationMarker: state.selectedTranslationMarker,
-    setSelectedTranslationMarker: state.setSelectedTranslationMarker,
-    selectedTranslationMarkers: state.selectedTranslationMarkers,
-    setSelectedTranslationMarkers: state.setSelectedTranslationMarkers,
     positionPickTranslationMarker: state.positionPickTranslationMarker,
     setPositionPickTranslationMarker: state.setPositionPickTranslationMarker,
     selectedAdjustmentLayerId: state.selectedAdjustmentLayerId,

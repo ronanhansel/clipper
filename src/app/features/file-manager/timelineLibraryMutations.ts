@@ -10,8 +10,7 @@ export function createTimelineInProject(project: ProjectManifest, timelineId: st
       filePath: `${directoryPath}/${timelineId}.timeline.json`,
       clips: [],
       adjustmentLayers: [],
-      zoomMarkers: [],
-      translationMarkers: [],
+      motionMarkers: [],
       settings: {},
     }],
   };

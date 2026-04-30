@@ -1,8 +1,9 @@
 import { defaultTimelineLayerState, defaultTimelineMode, defaultTimelineViewportState } from "../../../core/project";
+import { getCanonicalMotionMarkers, getMotionMarkerViews } from "../../../core/motionEffects";
 import { getAdjustmentLayerRowId, isMotionMarkerOnLayerId, removeTimelineAdjustmentLayerMarkers, removeTimelineMotionLayerMarkers } from "../../../core/timeline";
 import { getTimelineStateLayers, insertTimelineStateLayer } from "../../../core/timelineLayers";
-import type { AdjustmentLayerSelection, TranslationMarkerSelection, ZoomMarkerSelection } from "../../types";
-import type { AdjustmentLayer, Part, ProjectManifest, SelectionPayload, TimelineLayerState, TimelineMotionLayerKind, TimelineMotionLayerState, ZoomMarker, TranslationMarker } from "../../../core/types";
+import type { AdjustmentLayerSelection, MotionMarkerSelection } from "../../types";
+import type { AdjustmentLayer, MotionMarker, Part, ProjectManifest, SelectionPayload, TimelineLayerState, TimelineMotionLayerKind, TimelineMotionLayerState } from "../../../core/types";
 import { createAdjustmentTimelineLayer, createBlankAdjustmentLayer, createBlankCompositionLayer, createBlankMotionLayer, createCompositionTimelineLayer, createMotionTimelineLayer, timelineClipFromPart } from "./timelineLayerHelpers";
 
 type UpdateProject = (updater: ProjectManifest | ((current: ProjectManifest) => ProjectManifest), options?: { history?: boolean; syncSources?: boolean; coalesceHistory?: boolean }) => void;
@@ -14,8 +15,7 @@ type UseTimelineLayerCommandsInput = {
     id: string;
     compositions: Part[];
     adjustmentLayers?: AdjustmentLayer[];
-    zoomMarkers?: ZoomMarker[];
-    translationMarkers?: TranslationMarker[];
+    motionMarkers?: MotionMarker[];
   };
   timelineLayers: TimelineLayerState;
   clearMarkerSelection: () => void;
@@ -25,10 +25,8 @@ type UseTimelineLayerCommandsInput = {
   setSelectedAdjustmentLayers: (selection: AdjustmentLayerSelection[]) => void;
   setSelectedObjectId: (id: string | null) => void;
   setSelectedPartId: (id: string) => void;
-  setSelectedTranslationMarker: (selection: { partId: string; markerId: string } | null) => void;
-  setSelectedTranslationMarkers: (selection: TranslationMarkerSelection[]) => void;
-  setSelectedZoomMarker: (selection: { partId: string; markerId: string } | null) => void;
-  setSelectedZoomMarkers: (selection: ZoomMarkerSelection[]) => void;
+  setSelectedMotionMarker: (selection: { partId: string; markerId: string } | null) => void;
+  setSelectedMotionMarkers: (selection: MotionMarkerSelection[]) => void;
   setSelectionPayload: (payload: SelectionPayload | null) => void;
   setTrackerPickTranslationMarker: (selection: { partId: string; markerId: string } | null) => void;
   updateProject: UpdateProject;
@@ -46,10 +44,8 @@ export function useTimelineLayerCommands({
   setSelectedAdjustmentLayers,
   setSelectedObjectId,
   setSelectedPartId,
-  setSelectedTranslationMarker,
-  setSelectedTranslationMarkers,
-  setSelectedZoomMarker,
-  setSelectedZoomMarkers,
+  setSelectedMotionMarker,
+  setSelectedMotionMarkers,
   setSelectionPayload,
   setTrackerPickTranslationMarker,
   updateProject,
@@ -150,17 +146,16 @@ export function useTimelineLayerCommands({
         return {
           ...timeline,
           clips: timeline.clips.map((clip) => clipsById.get(clip.id) ?? clip),
-          zoomMarkers: (timeline.zoomMarkers ?? []).filter((marker) => !isMotionMarkerOnLayerId(marker, layerId)),
-          translationMarkers: (timeline.translationMarkers ?? []).filter((marker) => !isMotionMarkerOnLayerId(marker, layerId)),
+          motionMarkers: getCanonicalMotionMarkers(timeline).filter((marker) => !isMotionMarkerOnLayerId(marker, layerId)),
         };
       }),
     }), { history: true });
 
     if (hasMarkers) {
-      setSelectedZoomMarker(null);
-      setSelectedZoomMarkers([]);
-      setSelectedTranslationMarker(null);
-      setSelectedTranslationMarkers([]);
+      setSelectedMotionMarker(null);
+      setSelectedMotionMarkers([]);
+      setSelectedMotionMarker(null);
+      setSelectedMotionMarkers([]);
       setFocusPickZoomMarker(null);
       setPositionPickTranslationMarker(null);
       setTrackerPickTranslationMarker(null);
@@ -168,8 +163,9 @@ export function useTimelineLayerCommands({
   }
 
   function motionLayerHasMarkers(layerId: string) {
-    return (scene.zoomMarkers ?? []).some((marker) => isMotionMarkerOnLayerId(marker, layerId))
-      || (scene.translationMarkers ?? []).some((marker) => isMotionMarkerOnLayerId(marker, layerId));
+    const motionViews = getMotionMarkerViews(scene);
+    return motionViews.zoomMarkers.some((marker) => isMotionMarkerOnLayerId(marker, layerId))
+      || motionViews.translationMarkers.some((marker) => isMotionMarkerOnLayerId(marker, layerId));
   }
 
   function assignAvailableMotionLayerKind(layerId: string | undefined, _kind: Exclude<TimelineMotionLayerKind, "empty">) {

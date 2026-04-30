@@ -14,7 +14,7 @@ type ConnectedInspectorContentProps = {
   agentContext: unknown;
   selectedZoom: ZoomMarker | null | undefined;
   selectedZoomPart: Part | null | undefined;
-  selectedZoomMarkerCount: number;
+  selectedMotionMarkerCount: number;
   selectedZoomSnapInActive: boolean;
   selectedZoomSnapOutActive: boolean;
   selectedZoomPartMiddleSnapActive: boolean;
@@ -23,7 +23,6 @@ type ConnectedInspectorContentProps = {
   canSnapZoomMiddle: boolean;
   selectedTranslation: TranslationMarker | null | undefined;
   selectedTranslationPart: Part | null | undefined;
-  selectedTranslationMarkerCount: number;
   selectedTranslationSnapInActive: boolean;
   selectedTranslationSnapOutActive: boolean;
   selectedTranslationPartMiddleSnapActive: boolean;
@@ -70,7 +69,7 @@ export function ConnectedInspectorContent({
   agentContext,
   selectedZoom,
   selectedZoomPart,
-  selectedZoomMarkerCount,
+  selectedMotionMarkerCount,
   selectedZoomSnapInActive,
   selectedZoomSnapOutActive,
   selectedZoomPartMiddleSnapActive,
@@ -79,7 +78,6 @@ export function ConnectedInspectorContent({
   canSnapZoomMiddle,
   selectedTranslation,
   selectedTranslationPart,
-  selectedTranslationMarkerCount,
   selectedTranslationSnapInActive,
   selectedTranslationSnapOutActive,
   selectedTranslationPartMiddleSnapActive,
@@ -125,7 +123,7 @@ export function ConnectedInspectorContent({
       <ZoomInspector
         marker={selectedZoom}
         part={selectedZoomPart}
-        selectedMarkerCount={selectedZoomMarkerCount}
+        selectedMarkerCount={selectedMotionMarkerCount}
         selectedSnapInActive={selectedZoomSnapInActive}
         selectedSnapOutActive={selectedZoomSnapOutActive}
         middleSnapActive={selectedZoomPartMiddleSnapActive}
@@ -151,7 +149,7 @@ export function ConnectedInspectorContent({
       <TranslationInspector
         marker={selectedTranslation}
         part={selectedTranslationPart}
-        selectedMarkerCount={selectedTranslationMarkerCount}
+        selectedMarkerCount={selectedMotionMarkerCount}
         selectedSnapInActive={selectedTranslationSnapInActive}
         selectedSnapOutActive={selectedTranslationSnapOutActive}
         middleSnapActive={selectedTranslationPartMiddleSnapActive}

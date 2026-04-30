@@ -7,9 +7,7 @@ export function timelineClipFromPart(item: Part): TimelineClip {
     start: item.start,
     layerId: item.layerId,
     duration: item.duration,
-    motionBlocks: [],
-    zoomMarkers: [],
-    translationMarkers: [],
+    motionMarkers: item.motionMarkers ?? [],
   };
 }
 

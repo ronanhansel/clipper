@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CAMERA_PERSPECTIVE, formatCameraPreviewTransform, getActivePerspective, getActiveTranslation, getLayeredCameraPreviewTransform } from "./camera";
-import { motionBlocksToTranslationMarkers } from "./motionEffects";
+import { motionBlocksToMotionMarkers, motionBlocksToTranslationMarkers } from "./motionEffects";
 import type { Part, TimelineMotionLayerState } from "./types";
 
 const basePart: Part = {
@@ -12,8 +12,7 @@ const basePart: Part = {
   background: { id: "background", name: "Background", style: {}, elements: [] },
   objects: [],
   snapshot: [],
-  zoomMarkers: [],
-  translationMarkers: [],
+  motionMarkers: [],
 };
 
 describe("camera", () => {
@@ -21,7 +20,7 @@ describe("camera", () => {
     const part: Part = {
       ...basePart,
       objects: [{ id: "tracker", name: "Tracker", type: "rect", selector: "[data-object-id='tracker']", bounds: { x: 100, y: 100, width: 100, height: 100 }, style: {}, motion: { duration: 4, x: [0, 400] } }],
-      translationMarkers: [{ id: "pan", effectId: "clipper.motion.pan", layerId: "removed_pan", start: 0, duration: 4, position: { x: 0, y: 0 }, followId: "tracker" }],
+      motionMarkers: motionBlocksToMotionMarkers([{ id: "pan", effectId: "clipper.motion.pan", layerId: "removed_pan", start: 0, duration: 4, position: { x: 0, y: 0 }, followId: "tracker" }]),
     };
     const layers: TimelineMotionLayerState[] = [{ id: "clipper.motion.pan", kind: "motion", name: "Pan" }];
 
@@ -44,7 +43,7 @@ describe("camera", () => {
   it("suppresses rotation while picking a pan target", () => {
     const part: Part = {
       ...basePart,
-      translationMarkers: [{ id: "rotate", effectId: "clipper.motion.rotate", layerId: "clipper.motion.rotate", start: 0, duration: 4, position: { x: 0, y: 0 }, rotation: 15 }],
+      motionMarkers: motionBlocksToMotionMarkers([{ id: "rotate", effectId: "clipper.motion.rotate", layerId: "clipper.motion.rotate", start: 0, duration: 4, position: { x: 0, y: 0 }, rotation: 15 }]),
     };
     const layers: TimelineMotionLayerState[] = [{ id: "clipper.motion.rotate", kind: "motion", name: "Rotate" }];
 
@@ -55,7 +54,7 @@ describe("camera", () => {
   it("keeps pan as x/y translation only", () => {
     const part: Part = {
       ...basePart,
-      translationMarkers: [{ id: "pan", effectId: "clipper.motion.pan", layerId: "clipper.motion.pan", start: 0, duration: 4, position: { x: 10, y: 20 }, snapIn: true, snapOut: true }],
+      motionMarkers: motionBlocksToMotionMarkers([{ id: "pan", effectId: "clipper.motion.pan", layerId: "clipper.motion.pan", start: 0, duration: 4, position: { x: 10, y: 20 }, snapIn: true, snapOut: true }]),
     };
     const layers: TimelineMotionLayerState[] = [{ id: "clipper.motion.pan", kind: "motion", name: "Pan" }];
 
@@ -65,7 +64,7 @@ describe("camera", () => {
   it("layers perspective markers into the camera transform", () => {
     const part: Part = {
       ...basePart,
-      translationMarkers: [{ id: "perspective", effectId: "clipper.motion.perspective", layerId: "clipper.motion.perspective", start: 0, duration: 4, position: { x: 0, y: 0 }, perspective: { z: 300, rotateX: 8, rotateY: -4 }, snapIn: true, snapOut: true }],
+      motionMarkers: motionBlocksToMotionMarkers([{ id: "perspective", effectId: "clipper.motion.perspective", layerId: "clipper.motion.perspective", start: 0, duration: 4, position: { x: 0, y: 0 }, perspective: { z: 300, rotateX: 8, rotateY: -4 }, snapIn: true, snapOut: true }]),
     };
     const layers: TimelineMotionLayerState[] = [{ id: "clipper.motion.perspective", kind: "motion", name: "Perspective" }];
 

@@ -153,6 +153,16 @@ export type TranslationMarker = MotionBlock & {
 
 export type MotionBlockEffectKind = "pan" | "zoom" | "rotate" | "perspective";
 
+export type MotionMarker = MotionBlock & {
+  kind: MotionBlockEffectKind;
+  effectId: MotionEffectId;
+  focus?: Point;
+  position?: Point;
+  scale?: number;
+  rotation?: number;
+  perspective?: PerspectiveSettings;
+};
+
 export type MotionEffectDefinition = {
   id: MotionEffectId;
   category: "motion";
@@ -236,9 +246,7 @@ export type CompositionClip = {
   background: BackgroundLayer;
   objects: FrameObject[];
   snapshot: PartSnapshotLine[];
-  motionBlocks?: MotionBlock[];
-  zoomMarkers: ZoomMarker[];
-  translationMarkers: TranslationMarker[];
+  motionMarkers: MotionMarker[];
 };
 
 export type Part = CompositionClip;
@@ -248,8 +256,7 @@ export type Scene = {
   name: string;
   compositions: CompositionClip[];
   adjustmentLayers?: AdjustmentLayer[];
-  zoomMarkers?: ZoomMarker[];
-  translationMarkers?: TranslationMarker[];
+  motionMarkers?: MotionMarker[];
 };
 
 export type CompositionDocument = CompositionClip & {
@@ -262,9 +269,7 @@ export type TimelineClip = {
   start?: number;
   layerId?: string;
   duration?: number;
-  motionBlocks?: MotionBlock[];
-  zoomMarkers: ZoomMarker[];
-  translationMarkers: TranslationMarker[];
+  motionMarkers?: MotionMarker[];
 };
 
 export type TimelineSettings = {
@@ -277,8 +282,7 @@ export type TimelineDocument = {
   filePath?: string;
   clips: TimelineClip[];
   adjustmentLayers?: AdjustmentLayer[];
-  zoomMarkers?: ZoomMarker[];
-  translationMarkers?: TranslationMarker[];
+  motionMarkers?: MotionMarker[];
   settings?: TimelineSettings;
 };
 
@@ -352,6 +356,7 @@ export type EffectsPanelState = {
 
 export type EditorState = {
   timeline: TimelineViewportState;
+  composeTimeline?: TimelineViewportState;
   timelineLayers?: TimelineLayerState;
   timelineMode: TimelineMode;
   mode?: "interactive" | "code";
@@ -360,8 +365,7 @@ export type EditorState = {
   selectedSceneId?: string;
   selectedTimelineId?: string;
   selectedPartId?: string;
-  selectedZoomMarker?: { partId: string; markerId: string } | null;
-  selectedTranslationMarker?: { partId: string; markerId: string } | null;
+  selectedMotionMarker?: { partId: string; markerId: string } | null;
   currentSceneTime?: number;
   defaultNewMarkerDurationSeconds?: number;
   timelineEndPaddingFraction?: number;

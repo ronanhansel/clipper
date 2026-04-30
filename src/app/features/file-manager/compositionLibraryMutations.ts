@@ -30,8 +30,7 @@ export function createCompositionInLibrary(project: ProjectManifest, composition
     duration: 3,
     objects: [],
     snapshot: [],
-    zoomMarkers: [],
-    translationMarkers: [],
+    motionMarkers: [],
   };
   const nextSources = { ...compositionSources, [composition.filePath]: compositionToSource(composition) };
   return {
@@ -85,7 +84,7 @@ export function moveCompositionInProject(project: ProjectManifest, compositionSo
 export function duplicateCompositionInProject(project: ProjectManifest, compositionSources: Record<string, string>, compositionId: string, duplicateId: string, fallbackLibrary: Part[]): CompositionLibraryMutationResult | null {
   const composition = fallbackLibrary.find((item) => item.id === compositionId);
   if (!composition) return null;
-  const duplicate: Part = { ...composition, id: duplicateId, name: `${composition.name} copy`, filePath: `${getDirectoryPath(composition.filePath)}/${duplicateId}.ts`, zoomMarkers: [], translationMarkers: [], snapshot: [] };
+  const duplicate: Part = { ...composition, id: duplicateId, name: `${composition.name} copy`, filePath: `${getDirectoryPath(composition.filePath)}/${duplicateId}.ts`, motionMarkers: [], snapshot: [] };
   const nextSources = { ...compositionSources, [duplicate.filePath]: compositionToSource(duplicate) };
   return { compositionSources: nextSources, project: { ...project, compositionSources: nextSources, compositionLibrary: [...(project.compositionLibrary ?? fallbackLibrary), duplicate] } };
 }

@@ -7,7 +7,7 @@ import { MAX_PART_DURATION_SECONDS, FRAME_HEIGHT, FRAME_WIDTH, type AdjustmentLa
 import { clamp, roundTenth, roundTwo } from "../../core/math";
 import { getAdjustmentEffectPackage, getMotionEffectPackage } from "../../core/effects/registry";
 import type { AdjustmentEffectDisableCondition, AdjustmentEffectParamControl, AdjustmentEffectPointControl } from "../../core/effects/types";
-import { getMotionBlockEffectKind } from "../../core/motionEffects";
+import { getMotionBlockEffectKind, getMotionMarkerViews } from "../../core/motionEffects";
 import { minimumZoomDuration, mutedCaps, panelCard } from "../../app/config";
 import { Checkbox } from "../ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../ui/dialog";
@@ -169,7 +169,8 @@ function EaseSelectItems({ includeLinear = true, defaultInOut = false }: { inclu
 }
 
 export function FrameInspector({ part, onDurationChange, onFrameChange, onBackgroundChange }: { part: Part; onDurationChange: (duration: number) => void; onFrameChange: (updater: (frame: PartFrame) => PartFrame) => void; onBackgroundChange: (updater: (background: BackgroundLayer) => BackgroundLayer) => void }) {
-  const markerEnd = Math.max(0, ...part.zoomMarkers.map((marker) => marker.start + marker.duration), ...part.translationMarkers.map((marker) => marker.start + marker.duration));
+  const motionViews = getMotionMarkerViews(part);
+  const markerEnd = Math.max(0, ...motionViews.zoomMarkers.map((marker) => marker.start + marker.duration), ...motionViews.translationMarkers.map((marker) => marker.start + marker.duration));
   const minimumDuration = roundTenth(Math.max(0.1, markerEnd));
 
   function updateDuration(value: string) {

@@ -140,9 +140,7 @@ function createBaseComposition(id: string, filePath: string, source: string): Co
     background: { id: "background", name: "Background", style: { background: "#050505" }, elements: [] },
     objects: [],
     snapshot: [],
-    motionBlocks: [],
-    zoomMarkers: [],
-    translationMarkers: [],
+    motionMarkers: [],
   };
 }
 

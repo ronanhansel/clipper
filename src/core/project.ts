@@ -1,5 +1,5 @@
 import { roundTwo, sanitizeProjectNumbers } from "./math";
-import { motionBlocksToTranslationMarkers, motionBlocksToZoomMarkers, normalizeMotionBlocks } from "./motionEffects";
+import { getCanonicalMotionMarkers, getMotionMarkerViews, motionBlocksToMotionMarkers, withCanonicalMotionMarkers } from "./motionEffects";
 import { adjustmentEffectPackages, normalizeAdjustmentEffectId } from "./effects/registry";
 import { getExecutableAdjustmentLayers } from "./timeline";
 import type { AdjustmentLayer, AssetItem, CodeViewportState, ComposeLayoutState, CompositionClip, CompositionDocument, EditorLayoutState, EffectsPanelState, FileManagerState, PreviewViewportState, ProjectManifest, Scene, TimelineDocument, TimelineLayerState, TimelineMode, TimelineViewportState } from "./types";
@@ -43,6 +43,13 @@ function normalizeEditorLayoutState(state: EditorLayoutState | undefined): Edito
 function normalizeComposeLayoutState(state: ComposeLayoutState | undefined): ComposeLayoutState {
   return {
     leftPanelWidth: Math.round(Math.min(Math.max(state?.leftPanelWidth ?? defaultComposeLayoutState.leftPanelWidth, 220), 560)),
+  };
+}
+
+function normalizeTimelineViewportState(state: TimelineViewportState | undefined): TimelineViewportState {
+  return {
+    displacement: roundTwo(Math.max(state?.displacement ?? defaultTimelineViewportState.displacement, 0)),
+    zoom: roundTwo(Math.min(Math.max(state?.zoom ?? defaultTimelineViewportState.zoom, 0.01), 4)),
   };
 }
 
@@ -112,7 +119,8 @@ export function replacePartInProject(project: ProjectManifest, compositionId: st
 }
 
 function normalizeComposition(composition: CompositionClip): CompositionClip {
-  const motionBlocks = normalizeMotionBlocks(composition.motionBlocks);
+  const motionMarkers = getCanonicalMotionMarkers(composition);
+  const motionCollections = withCanonicalMotionMarkers(motionMarkers);
   return {
     ...composition,
     compositionId: composition.compositionId || undefined,
@@ -124,9 +132,7 @@ function normalizeComposition(composition: CompositionClip): CompositionClip {
       stretchToElements: composition.background.stretchToElements || undefined,
       elements: composition.background.elements ?? [],
     },
-    motionBlocks,
-    zoomMarkers: motionBlocksToZoomMarkers(motionBlocks),
-    translationMarkers: motionBlocksToTranslationMarkers(motionBlocks),
+    ...motionCollections,
   };
 }
 
@@ -156,33 +162,25 @@ function getProjectTimelines(project: ProjectManifest): TimelineDocument[] {
   if (timelines.length === 0) throw new Error("Project is missing timelines.");
   return timelines.map((timeline) => {
     const clipMotion = timeline.clips.flatMap((clip) => {
-      const motionBlocks = normalizeMotionBlocks(clip.motionBlocks);
+      const motionMarkers = getCanonicalMotionMarkers(clip);
       const clipStart = roundTwo(Math.max(clip.start ?? 0, 0));
-      return [
-        ...motionBlocksToZoomMarkers(motionBlocks).map((marker) => ({ ...marker, start: roundTwo(clipStart + marker.start) })),
-        ...motionBlocksToTranslationMarkers(motionBlocks).map((marker) => ({ ...marker, start: roundTwo(clipStart + marker.start) })),
-        ...(clip.zoomMarkers ?? []).map((marker) => ({ ...marker, start: roundTwo(clipStart + marker.start) })),
-        ...(clip.translationMarkers ?? []).map((marker) => ({ ...marker, start: roundTwo(clipStart + marker.start) })),
-      ];
+      return motionMarkers.map((marker) => ({ ...marker, start: roundTwo(clipStart + marker.start) }));
     });
-    const clipZoomMarkers = clipMotion.filter((marker): marker is ReturnType<typeof motionBlocksToZoomMarkers>[number] => marker.effectId === "clipper.motion.zoom" || "focus" in marker);
-    const clipTranslationMarkers = clipMotion.filter((marker): marker is ReturnType<typeof motionBlocksToTranslationMarkers>[number] => "position" in marker);
+    const timelineMotionMarkers = motionBlocksToMotionMarkers([
+      ...getCanonicalMotionMarkers(timeline),
+      ...clipMotion,
+    ]);
     return {
       ...timeline,
       filePath: timeline.filePath ?? `timelines/${timeline.id}.timeline.json`,
       clips: timeline.clips.map((clip) => {
-        const motionBlocks = normalizeMotionBlocks(clip.motionBlocks);
-        const hasLegacyMotion = motionBlocks.length > 0 || (clip.zoomMarkers?.length ?? 0) > 0 || (clip.translationMarkers?.length ?? 0) > 0;
       return {
         ...clip,
-        motionBlocks: hasLegacyMotion ? [] : motionBlocks,
-        zoomMarkers: [],
-        translationMarkers: [],
+        motionMarkers: [],
       };
       }),
       adjustmentLayers: normalizeAdjustmentLayers(timeline.adjustmentLayers),
-      zoomMarkers: [...motionBlocksToZoomMarkers(normalizeMotionBlocks(timeline.zoomMarkers?.map((marker) => ({ ...marker, effectId: "clipper.motion.zoom" as const })))), ...clipZoomMarkers],
-      translationMarkers: [...motionBlocksToTranslationMarkers(normalizeMotionBlocks(timeline.translationMarkers)), ...clipTranslationMarkers],
+      motionMarkers: timelineMotionMarkers,
       settings: timeline.settings ?? {},
     };
   });
@@ -194,11 +192,10 @@ function getScenesFromTimelines(timelines: TimelineDocument[], compositions: Com
     id: timeline.id,
     name: timeline.name,
     adjustmentLayers: timeline.adjustmentLayers ?? [],
-    zoomMarkers: timeline.zoomMarkers ?? [],
-    translationMarkers: timeline.translationMarkers ?? [],
+    motionMarkers: timeline.motionMarkers ?? [],
     compositions: timeline.clips.flatMap((clip) => {
         const composition = compositionsById.get(clip.compositionId);
-        return composition ? [{ ...composition, id: clip.id, compositionId: clip.compositionId, start: clip.start, layerId: clip.layerId, duration: clip.duration ?? composition.duration, motionBlocks: [], zoomMarkers: [], translationMarkers: [] }] : [];
+        return composition ? [{ ...composition, id: clip.id, compositionId: clip.compositionId, start: clip.start, layerId: clip.layerId, duration: clip.duration ?? composition.duration, motionMarkers: [] }] : [];
       }),
   }));
 }
@@ -247,15 +244,13 @@ function normalizeEffectsPanelState(state: EffectsPanelState | undefined): Effec
   };
 }
 
-function normalizeEditorMarkerSelection(scene: Scene | undefined, selection: { partId: string; markerId: string } | null | undefined, markerKind: "zoom" | "translation") {
+function normalizeEditorMarkerSelection(scene: Scene | undefined, selection: { partId: string; markerId: string } | null | undefined) {
   if (!scene || !selection) return null;
   if (selection.partId === "__timeline_motion__") {
-    const markers = markerKind === "zoom" ? scene.zoomMarkers : scene.translationMarkers;
-    return markers?.some((marker) => marker.id === selection.markerId) ? selection : null;
+    return getCanonicalMotionMarkers(scene).some((marker) => marker.id === selection.markerId) ? selection : null;
   }
   const part = scene.compositions.find((composition) => composition.id === selection.partId);
-  const markers = markerKind === "zoom" ? part?.zoomMarkers : part?.translationMarkers;
-  return markers?.some((marker) => marker.id === selection.markerId) ? selection : null;
+  return part && getCanonicalMotionMarkers(part).some((marker) => marker.id === selection.markerId) ? selection : null;
 }
 
 function normalizeAdjustmentLayers(layers: AdjustmentLayer[] | undefined): AdjustmentLayer[] {
@@ -271,7 +266,6 @@ function normalizeAdjustmentLayers(layers: AdjustmentLayer[] | undefined): Adjus
 }
 
 export function normalizeProject(project: ProjectManifest): ProjectManifest {
-  const timelineState = project.editorState?.timeline ?? defaultTimelineViewportState;
   const timelineMode = normalizeTimelineMode(project.editorState?.timelineMode);
   const previewState = project.editorState?.preview ?? defaultPreviewViewportState;
   const compositionDocuments = getCompositionDocuments(project);
@@ -279,18 +273,15 @@ export function normalizeProject(project: ProjectManifest): ProjectManifest {
   const scenes = getScenesFromTimelines(timelines, compositionDocuments);
   const selectedSceneId = timelines.some((timeline) => timeline.id === (project.editorState?.selectedTimelineId ?? project.editorState?.selectedSceneId)) ? (project.editorState?.selectedTimelineId ?? project.editorState?.selectedSceneId) : timelines[0]?.id;
   const selectedScene = scenes.find((scene) => scene.id === selectedSceneId) ?? scenes[0];
-  const selectedZoomMarker = normalizeEditorMarkerSelection(selectedScene, project.editorState?.selectedZoomMarker, "zoom");
-  const selectedTranslationMarker = selectedZoomMarker ? null : normalizeEditorMarkerSelection(selectedScene, project.editorState?.selectedTranslationMarker, "translation");
+  const selectedMotionMarker = normalizeEditorMarkerSelection(selectedScene, project.editorState?.selectedMotionMarker);
   const selectedPartId = selectedScene?.compositions.some((composition) => composition.id === project.editorState?.selectedPartId) ? project.editorState?.selectedPartId : undefined;
 
   const normalized = sanitizeProjectNumbers({
     ...project,
     editorState: {
       ...project.editorState,
-      timeline: {
-        displacement: roundTwo(Math.max(timelineState.displacement, 0)),
-        zoom: roundTwo(Math.min(Math.max(timelineState.zoom, 0.01), 4)),
-      },
+      timeline: normalizeTimelineViewportState(project.editorState?.timeline),
+      composeTimeline: normalizeTimelineViewportState(project.editorState?.composeTimeline),
       timelineLayers: normalizeTimelineLayerState(project.editorState?.timelineLayers),
       timelineMode,
       mode: project.editorState?.mode === "code" ? "code" : "interactive",
@@ -299,8 +290,7 @@ export function normalizeProject(project: ProjectManifest): ProjectManifest {
       selectedTimelineId: timelines.some((timeline) => timeline.id === project.editorState?.selectedTimelineId) ? project.editorState?.selectedTimelineId : timelines[0]?.id,
       selectedSceneId,
       selectedPartId,
-      selectedZoomMarker,
-      selectedTranslationMarker,
+      selectedMotionMarker,
       currentSceneTime: roundTwo(Math.max(project.editorState?.currentSceneTime ?? 0, 0)),
       layout: normalizeEditorLayoutState(project.editorState?.layout),
       composeLayout: normalizeComposeLayoutState(project.editorState?.composeLayout),

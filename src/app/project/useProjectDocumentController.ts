@@ -242,8 +242,7 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
     const nextPart = await compositionFromSource({ ...basePart, id: compositionId }, source);
     const nextProject = replacePartInProject({ ...projectRef.current, compositionSources: nextSources }, compositionId, (currentPart) => ({
       ...nextPart,
-      zoomMarkers: currentPart.zoomMarkers,
-      translationMarkers: currentPart.translationMarkers,
+      motionMarkers: currentPart.motionMarkers,
       snapshot: currentPart.snapshot,
     }));
 

@@ -54,6 +54,7 @@ import { FRAME_HEIGHT, FRAME_WIDTH, type Bounds, type CompositionClip, type Edit
 
 const defaultEditorState: EditorState = {
   timeline: defaultTimelineViewportState,
+  composeTimeline: defaultTimelineViewportState,
   timelineMode: defaultTimelineMode,
   mode: "interactive",
   leftPanelTab: "assets",
@@ -127,11 +128,9 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     selectedParts, setSelectedParts,
     selectedObjectId, setSelectedObjectId,
     editingTextObjectId, setEditingTextObjectId,
-    selectedZoomMarker, setSelectedZoomMarker,
-    selectedZoomMarkers, setSelectedZoomMarkers,
+    selectedMotionMarker, setSelectedMotionMarker,
+    selectedMotionMarkers, setSelectedMotionMarkers,
     focusPickZoomMarker, setFocusPickZoomMarker,
-    selectedTranslationMarker, setSelectedTranslationMarker,
-    selectedTranslationMarkers, setSelectedTranslationMarkers,
     positionPickTranslationMarker, setPositionPickTranslationMarker,
     selectedAdjustmentLayerId, setSelectedAdjustmentLayerId,
     selectedAdjustmentLayers, setSelectedAdjustmentLayers,
@@ -347,13 +346,13 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     selectedAdjustmentLayerId,
     selectedPartId,
     selectedSceneId,
-    selectedTranslationMarker,
-    selectedTranslationMarkers,
-    selectedZoomMarker,
-    selectedZoomMarkers,
+    selectedMotionMarker,
+    selectedMotionMarkers,
     selectionPayload,
     timelineMode,
   });
+  const composeMode = timelineMode === "compose";
+  const composePlaybackRange = composeMode && activeTimelinePart ? { start: activeTimelinePart.start, end: activeTimelinePart.start + part.duration, localLabels: true } : undefined;
   const compositionLibrary = project.compositionLibrary ?? [];
   const timelines = project.timelines ?? [];
   const activeTimelineName = timelines.find((item) => item.id === selectedSceneId)?.name ?? scene.name;
@@ -379,6 +378,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     togglePlayback,
   } = usePlaybackController({
     activeTimelinePart,
+    playbackRange: composePlaybackRange,
     currentSceneTime,
     currentSceneTimeRef,
     editorStore,
@@ -470,8 +470,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
       rightPanelTab,
       selectedSceneId,
       selectedPartId: selectedPartId || undefined,
-      selectedZoomMarker,
-      selectedTranslationMarker: selectedZoomMarker ? null : selectedTranslationMarker,
+      selectedMotionMarker,
       defaultNewMarkerDurationSeconds: markerDurationSeconds,
       timelineEndPaddingFraction,
       preview: {
@@ -480,7 +479,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
         zoomBarOpen: frameZoomBarOpen,
       },
     }));
-  }, [framePreviewScale, frameZoomBarOpen, leftPanelTab, markerDurationSeconds, mode, rightPanelTab, selectedPartId, selectedSceneId, selectedTranslationMarker, selectedZoomMarker, timelineEndPaddingFraction, timelineMode]);
+  }, [framePreviewScale, frameZoomBarOpen, leftPanelTab, markerDurationSeconds, mode, rightPanelTab, selectedMotionMarker, selectedPartId, selectedSceneId, timelineEndPaddingFraction, timelineMode]);
 
   useEditorStatePersistence({ activeProjectManifestPath, editorState: project.editorState, editorStateSnapshot });
   useSettingsShortcut({ setSettingsOpen });
@@ -502,7 +501,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
       setSelectedObjectId(null);
       setSelectionPayload(null);
     }
-  }, [activeTimelinePart, selectedPartId, selectedTranslationMarker, selectedZoomMarker]);
+  }, [activeTimelinePart, selectedMotionMarker, selectedPartId]);
 
   useEffect(() => {
     if (timelineMode === "compose") {
@@ -606,10 +605,8 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     selectAdjustmentLayers,
     selectPart,
     selectTimelineNodes,
-    selectTranslationMarker,
-    selectTranslationMarkers,
-    selectZoomMarker,
-    selectZoomMarkers,
+    selectMotionMarker,
+    selectMotionMarkers,
   } = useTimelineSelectionCommands({
     currentSceneTimeRef,
     rightPanelTab,
@@ -627,10 +624,8 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     setSelectedObjectId,
     setSelectedPartId,
     setSelectedParts,
-    setSelectedTranslationMarker,
-    setSelectedTranslationMarkers,
-    setSelectedZoomMarker,
-    setSelectedZoomMarkers,
+    setSelectedMotionMarker,
+    setSelectedMotionMarkers,
     setSelectionPayload,
     setTrackerPickTranslationMarker,
     updateTimelineMode,
@@ -656,10 +651,8 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     setSelectedAdjustmentLayers,
     setSelectedObjectId,
     setSelectedPartId,
-    setSelectedTranslationMarker,
-    setSelectedTranslationMarkers,
-    setSelectedZoomMarker,
-    setSelectedZoomMarkers,
+    setSelectedMotionMarker,
+    setSelectedMotionMarkers,
     setSelectionPayload,
     setTrackerPickTranslationMarker,
     updateProject,
@@ -695,6 +688,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   const {
     reorderComposeObjects,
     selectComposeLayerObjects,
+    updateObjectById,
     updatePartBackground,
     updatePartFrame,
     updateSelectedObject,
@@ -717,6 +711,26 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     updateSceneParts,
   });
 
+  function updateComposeObjectMotion(objectId: string, updater: (motion: FrameObject["motion"] | undefined, object: FrameObject) => FrameObject["motion"] | undefined) {
+    updateObjectById(objectId, (object) => ({ ...object, motion: updater(object.motion, object) }));
+  }
+
+  function updateComposeBackgroundMotion(updater: (motion: Part["background"]["motion"] | undefined, background: Part["background"]) => Part["background"]["motion"] | undefined) {
+    updatePartBackground((background) => ({ ...background, motion: updater(background.motion, background) }));
+  }
+
+  function renameComposeAnimationLayer(layerId: string, name: string) {
+    if (part.background.id === layerId) {
+      updatePartBackground((background) => ({ ...background, name }));
+      return;
+    }
+    updateObjectById(layerId, (object) => ({ ...object, name }));
+  }
+
+  function updateComposeTimelineViewportState(updater: (state: TimelineViewportState) => TimelineViewportState) {
+    updateEditorState((state) => ({ ...state, composeTimeline: updater(state.composeTimeline ?? defaultTimelineViewportState) }));
+  }
+
   function startZoomFocusPick(partId: string, markerId: string) {
     if (focusPickZoomMarker?.partId === partId && focusPickZoomMarker.markerId === markerId) {
       setFocusPickZoomMarker(null);
@@ -724,10 +738,8 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
       return;
     }
 
-    setSelectedZoomMarker({ partId, markerId });
-    setSelectedZoomMarkers([{ partId, markerId }]);
-    setSelectedTranslationMarker(null);
-    setSelectedTranslationMarkers([]);
+    setSelectedMotionMarker({ partId, markerId });
+    setSelectedMotionMarkers([{ partId, markerId }]);
     setPositionPickTranslationMarker(null);
     setTrackerPickTranslationMarker(null);
     setSelectedObjectId(null);
@@ -744,10 +756,8 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
       return;
     }
 
-    setSelectedTranslationMarker({ partId, markerId });
-    setSelectedTranslationMarkers([{ partId, markerId }]);
-    setSelectedZoomMarker(null);
-    setSelectedZoomMarkers([]);
+    setSelectedMotionMarker({ partId, markerId });
+    setSelectedMotionMarkers([{ partId, markerId }]);
     setFocusPickZoomMarker(null);
     setTrackerPickTranslationMarker(null);
     setSelectedObjectId(null);
@@ -763,10 +773,8 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
       return;
     }
 
-    setSelectedTranslationMarker({ partId, markerId });
-    setSelectedTranslationMarkers([{ partId, markerId }]);
-    setSelectedZoomMarker(null);
-    setSelectedZoomMarkers([]);
+    setSelectedMotionMarker({ partId, markerId });
+    setSelectedMotionMarkers([{ partId, markerId }]);
     setFocusPickZoomMarker(null);
     setPositionPickTranslationMarker(null);
     setFramePickPreviewPoint(null);
@@ -836,18 +844,15 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     scene,
     sceneDurationSeconds,
     selectedObjectBounds: selectedObject?.bounds ?? null,
-    selectedTranslationMarkers,
-    selectedZoomMarkers,
+    selectedMotionMarkers,
     timelineMode,
     zoomScalePreviewFrameRef,
     assignAvailableMotionLayerKind,
     setFocusPickZoomMarker,
     setPositionPickTranslationMarker,
     setSelectedObjectId,
-    setSelectedTranslationMarker,
-    setSelectedTranslationMarkers,
-    setSelectedZoomMarker,
-    setSelectedZoomMarkers,
+    setSelectedMotionMarker,
+    setSelectedMotionMarkers,
     updateCurrentPart,
     updateSceneMotionMarkers,
     updateSceneParts,
@@ -932,27 +937,21 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     selectedAdjustmentLayers,
     selectedPartId,
     selectedParts,
-    selectedTranslationMarker,
-    selectedTranslationMarkers,
-    selectedZoomMarker,
-    selectedZoomMarkers,
+    selectedMotionMarker,
+    selectedMotionMarkers,
     timeline,
     deleteCompositionsFromTimeline,
     selectAdjustmentLayer,
     selectPart,
-    selectTranslationMarker,
-    selectTranslationMarkers,
-    selectZoomMarker,
-    selectZoomMarkers,
+    selectMotionMarker,
+    selectMotionMarkers,
     setAppContextMenu,
     setFocusPickZoomMarker,
     setPositionPickTranslationMarker,
     setSelectedAdjustmentLayerId,
     setSelectedAdjustmentLayers,
-    setSelectedTranslationMarker,
-    setSelectedTranslationMarkers,
-    setSelectedZoomMarker,
-    setSelectedZoomMarkers,
+    setSelectedMotionMarker,
+    setSelectedMotionMarkers,
     updateSceneAdjustmentLayers,
     updateSceneMotionMarkers,
     updateSceneParts,
@@ -988,8 +987,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   });
 
   function isMotionLayerVacant(layerId: string) {
-    return !(scene.zoomMarkers ?? []).some((marker) => getZoomMarkerLayerId(marker) === layerId)
-      && !(scene.translationMarkers ?? []).some((marker) => getTranslationMarkerLayerId(marker) === layerId);
+    return !(scene.motionMarkers ?? []).some((marker) => marker.layerId === layerId);
   }
 
   function updateEffectsPanelState(effectsPanelState: NonNullable<EditorState["effectsPanelState"]>) {
@@ -1036,7 +1034,6 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   });
   const editorLayout = project.editorState?.layout ?? defaultEditorLayoutState;
   const composeLayout = project.editorState?.composeLayout ?? defaultComposeLayoutState;
-  const composeMode = timelineMode === "compose";
   const appShellStyle = {
     "--clipper-left-panel-width": `${editorLayout.leftPanelWidth}px`,
     "--clipper-compose-left-panel-width": `${composeLayout.leftPanelWidth}px`,
@@ -1049,8 +1046,8 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   const presentationTime = presentationMode ? presentationDisplayTime : currentSceneTime;
   const presentationProgress = sceneDurationSeconds > 0 ? `${clamp(presentationTime / sceneDurationSeconds, 0, 1) * 100}%` : "0%";
   const presentationScrubberStyle = { "--clipper-presentation-progress": presentationProgress } as CSSProperties;
-  const playbackDisplayDuration = getTimeSensitiveDisplayDuration(sceneDurationSeconds, visibleSceneAdjustmentLayers);
-  const playbackDisplayTime = clamp(getTimeSensitiveDisplayTime(currentSceneTime, visibleSceneAdjustmentLayers), 0, playbackDisplayDuration);
+  const playbackDisplayDuration = composePlaybackRange ? Math.max(composePlaybackRange.end - composePlaybackRange.start, 0) : getTimeSensitiveDisplayDuration(sceneDurationSeconds, visibleSceneAdjustmentLayers);
+  const playbackDisplayTime = composePlaybackRange ? clamp(currentSceneTime - composePlaybackRange.start, 0, playbackDisplayDuration) : clamp(getTimeSensitiveDisplayTime(currentSceneTime, visibleSceneAdjustmentLayers), 0, playbackDisplayDuration);
   const playbackProgress = playbackDisplayDuration > 0 ? `${clamp(playbackDisplayTime / playbackDisplayDuration, 0, 1) * 100}%` : "0%";
   const playbackScrubberStyle = { "--clipper-playback-progress": playbackProgress } as CSSProperties;
   const blankFrameViewportStyle = { width: FRAME_WIDTH * framePreviewScale, height: FRAME_HEIGHT * framePreviewScale } as CSSProperties;
@@ -1098,7 +1095,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
         <CenterPreviewPane
           blankFrameViewportStyle={blankFrameViewportStyle}
           codePaneProps={hasActiveComposition ? { part, source: compositionSources[part.filePath], viewportState: project.editorState?.code?.[part.id], onSaveAll: saveAllChanges, onSourceChange: (source) => updateCompositionFromSource(part, source, { history: false, syncSource: false }), onViewportStateChange: updateCodeViewportState } : null}
-          framePreviewProps={hasActiveComposition ? { cameraRef, dragBox, dragSelectionBoxRef, framePickPoint: activeFramePickPoint, focusPicking: isPickingZoomFocus || isPickingTranslationPosition || Boolean(pointPickAdjustment), trackerPicking: Boolean(trackerPickTranslationMarker), canSelectObjects: canSelectFrameObjects && !isPlaying, cameraTransform: cameraPreviewTransform, frameViewportRef, frameScale: framePreviewScale, isPlaying, part, partStart: activeTimelinePart?.start ?? 0, adjustmentLayers: visibleSceneAdjustmentLayers, playbackClock, previewTime, sceneTime: currentSceneTime, timelineMode, motionLayers, hiddenMotionLayerIds, pickingTranslationPosition: isPickingTranslationPosition || Boolean(pointPickAdjustment), pickingZoomFocus: isPickingZoomFocus || Boolean(pointPickAdjustment), compHidden: Boolean(timelineLayers.compHidden), selectedObjects: previewSelectionObjects, marqueeDragging, editingTextObjectId: isPlaying ? null : editingTextObjectId, onFramePointerCancel, onFramePointerDown, onFramePointerDownCapture, onFramePointerMove, onFramePointerUp, onObjectPointerDown: startObjectDrag, onObjectResizePointerDown: startObjectResize, onTextEditCommit: updateTextObjectContent, onTextObjectDoubleClick: startTextObjectEdit, onTrackerTargetPick: commitTranslationTrackerPick } : null}
+          framePreviewProps={hasActiveComposition ? { cameraRef, dragBox, dragSelectionBoxRef, framePickPoint: activeFramePickPoint, focusPicking: isPickingZoomFocus || isPickingTranslationPosition || Boolean(pointPickAdjustment), trackerPicking: Boolean(trackerPickTranslationMarker), canSelectObjects: canSelectFrameObjects && !isPlaying, cameraTransform: cameraPreviewTransform, frameViewportRef, frameScale: framePreviewScale, isPlaying, part, partStart: activeTimelinePart?.start ?? 0, adjustmentLayers: composeMode ? [] : visibleSceneAdjustmentLayers, playbackClock, previewTime, sceneTime: currentSceneTime, timelineMode, motionLayers: composeMode ? [] : motionLayers, hiddenMotionLayerIds: composeMode ? new Set<string>() : hiddenMotionLayerIds, pickingTranslationPosition: isPickingTranslationPosition || Boolean(pointPickAdjustment), pickingZoomFocus: isPickingZoomFocus || Boolean(pointPickAdjustment), compHidden: composeMode ? false : Boolean(timelineLayers.compHidden), selectedObjects: previewSelectionObjects, marqueeDragging, editingTextObjectId: isPlaying ? null : editingTextObjectId, onFramePointerCancel, onFramePointerDown, onFramePointerDownCapture, onFramePointerMove, onFramePointerUp, onObjectPointerDown: startObjectDrag, onObjectResizePointerDown: startObjectResize, onTextEditCommit: updateTextObjectContent, onTextObjectDoubleClick: startTextObjectEdit, onTrackerTargetPick: commitTranslationTrackerPick } : null}
           hasActiveComposition={hasActiveComposition}
           mode={mode}
           previewKey={part.id}
@@ -1118,7 +1115,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
             agentContext={agentContext}
             selectedZoom={selectedZoom}
             selectedZoomPart={selectedZoomPart}
-            selectedZoomMarkerCount={selectedZoomSnapMarkers.length}
+            selectedMotionMarkerCount={selectedMotionMarkers.length}
             selectedZoomSnapInActive={selectedZoomSnapInActive}
             selectedZoomSnapOutActive={selectedZoomSnapOutActive}
             selectedZoomPartMiddleSnapActive={selectedZoomPartMiddleSnapActive}
@@ -1127,7 +1124,6 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
             canSnapZoomMiddle={Boolean(inspectorZoomMiddleSnap)}
             selectedTranslation={selectedTranslation}
             selectedTranslationPart={selectedTranslationPart}
-            selectedTranslationMarkerCount={selectedTranslationSnapMarkers.length}
             selectedTranslationSnapInActive={selectedTranslationSnapInActive}
             selectedTranslationSnapOutActive={selectedTranslationSnapOutActive}
             selectedTranslationPartMiddleSnapActive={selectedTranslationPartMiddleSnapActive}
@@ -1174,7 +1170,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
 
       <TimelineProvider panelProps={{
         timelineName: activeTimelineName,
-        currentSceneTime,
+        currentSceneTime: composeMode ? previewTime : currentSceneTime,
         isPlaying,
         playbackPlayheadRef,
         scrubbingRef: timelineScrubbingRef,
@@ -1183,26 +1179,22 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
         defaultNewMarkerDurationSeconds: markerDurationSeconds,
         timelineEndPaddingFraction,
         scrubSnapEnabled,
-        sceneDuration: sceneDurationSeconds,
+        sceneDuration: composeMode ? part.duration : sceneDurationSeconds,
         selectedPartId,
         selectedParts,
-        selectedZoomMarkerPartId: selectedZoomMarker?.partId ?? null,
-        selectedZoomMarkerId: selectedZoomMarker?.markerId ?? null,
-        selectedZoomMarkers,
-        selectedTranslationMarkerPartId: selectedTranslationMarker?.partId ?? null,
-        selectedTranslationMarkerId: selectedTranslationMarker?.markerId ?? null,
-        selectedTranslationMarkers,
+        selectedMotionMarkerPartId: selectedMotionMarker?.partId ?? null,
+        selectedMotionMarkerId: selectedMotionMarker?.markerId ?? null,
+        selectedMotionMarkers,
         selectedAdjustmentLayerId,
         selectedAdjustmentLayers,
         mode: timelineMode,
-        timelineViewportState: project.editorState?.timeline ?? defaultTimelineViewportState,
+        timelineViewportState: composeMode ? project.editorState?.composeTimeline ?? defaultTimelineViewportState : project.editorState?.timeline ?? defaultTimelineViewportState,
         timeline,
-        zoomMarkers: scene.zoomMarkers ?? [],
-        translationMarkers: scene.translationMarkers ?? [],
+        motionMarkers: scene.motionMarkers ?? [],
         timelineLayers,
         adjustmentLayers: scene.adjustmentLayers ?? [],
         onModeChange: updateTimelineMode,
-        onTimelineViewportStateChange: updateTimelineViewportState,
+        onTimelineViewportStateChange: composeMode ? updateComposeTimelineViewportState : updateTimelineViewportState,
         onTimelineLayersChange: updateTimelineLayers,
         onAddCompositionLayer: addCompositionTimelineLayer,
         onRemoveCompositionLayer: removeCompositionTimelineLayer,
@@ -1212,10 +1204,8 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
         onRemoveMotionLayer: removeMotionLayer,
         onSelectPart: selectPart,
         onOpenComposePart: openComposePart,
-        onSelectZoomMarker: selectZoomMarker,
-        onSelectZoomMarkers: selectZoomMarkers,
-        onSelectTranslationMarker: selectTranslationMarker,
-        onSelectTranslationMarkers: selectTranslationMarkers,
+        onSelectMotionMarker: selectMotionMarker,
+        onSelectMotionMarkers: selectMotionMarkers,
         onSelectAdjustmentLayer: selectAdjustmentLayer,
         onSelectAdjustmentLayers: selectAdjustmentLayers,
         onSelectTimelineNodes: selectTimelineNodes,
@@ -1232,7 +1222,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
         onMoveZoomMarkers: moveZoomMarkers,
         onMoveTranslationMarker: moveTranslationMarker,
         onMoveTranslationMarkers: moveTranslationMarkers,
-        onScrub: scrubToSceneTime,
+        onScrub: composeMode && activeTimelinePart ? (time) => scrubToSceneTime(activeTimelinePart.start + time) : scrubToSceneTime,
         onScrubStart: pausePlaybackForTimelineScrub,
         onScrubEnd: resumePlaybackAfterTimelineScrub,
         onUpdateZoomMarkers: updateZoomMarkers,
@@ -1242,6 +1232,13 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
         onAddComposition: addCompositionFromLibrary,
         onAddAdjustmentEffect: addAdjustmentLayerAt,
         onAddMotionEffect: addMotionEffect,
+        composeAnimationPart: composeMode && hasActiveComposition ? part : null,
+        selectedObjectIds: selectionPayload?.objects.map((object) => object.id) ?? (selectedObjectId ? [selectedObjectId] : []),
+        onExitCompose: () => updateTimelineMode("composition"),
+        onSelectComposeObjects: selectComposeLayerObjects,
+        onRenameComposeAnimationLayer: renameComposeAnimationLayer,
+        onUpdateComposeBackgroundMotion: updateComposeBackgroundMotion,
+        onUpdateComposeObjectMotion: updateComposeObjectMotion,
       }}>
         <ConnectedTimelinePanel />
       </TimelineProvider>

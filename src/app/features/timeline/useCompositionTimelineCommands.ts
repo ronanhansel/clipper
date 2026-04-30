@@ -120,7 +120,7 @@ export function useCompositionTimelineCommands({
     if (!libraryComposition) return;
     const clipId = `clip_${Date.now().toString(36)}`;
     const layerId = targetLayerId ?? (timelineLayers.compositionLayers?.length ? timelineLayers.compositionLayers : defaultTimelineLayerState.compositionLayers!)?.[0]?.id ?? "comp";
-    const timelineComposition = { ...libraryComposition, id: clipId, compositionId: libraryComposition.compositionId ?? libraryComposition.id, start: roundTenth(Math.max(start, 0)), layerId, zoomMarkers: [], translationMarkers: [], motionBlocks: [] };
+    const timelineComposition = { ...libraryComposition, id: clipId, compositionId: libraryComposition.compositionId ?? libraryComposition.id, start: roundTenth(Math.max(start, 0)), layerId };
     updateSceneParts((parts) => [...parts, timelineComposition]);
     setSelectedPartId(timelineComposition.id);
     clearNodeSelection();

@@ -12,14 +12,12 @@ export const TIMELINE_MOTION_PART_ID = "__timeline_motion__";
 export type TimelineNodeContextTarget = ({ time?: number } & (
   | { kind: "adjustment"; layerId: string }
   | { kind: "part"; partId: string }
-  | { kind: "translation"; partId: string; markerId: string }
-  | { kind: "zoom"; partId: string; markerId: string }
+  | { kind: "motion"; partId: string; markerId: string }
 ));
 export type TimelineBlankContextTarget = { time: number };
 export type VideoExportProgress = { frame: number; totalFrames: number; percent: number; status: string };
 export type SettingsSection = "playback" | "timeline" | "export" | "advanced";
-export type ZoomMarkerSelection = { partId: string; markerId: string };
-export type TranslationMarkerSelection = { partId: string; markerId: string };
+export type MotionMarkerSelection = { partId: string; markerId: string };
 export type AdjustmentLayerSelection = { layerId: string };
 export type CompositionSelection = { partId: string };
 export type TimelineSelectionDrag = { startX: number; currentX: number; startY?: number; currentY?: number };

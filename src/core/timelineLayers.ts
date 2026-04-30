@@ -104,12 +104,11 @@ export function getTimelineBlockLayerPreview(layout: TimelineLayerLayout, catego
   return getTimelineLayerDragPreview(layout, sourceLayerId, targetLayerId);
 }
 
-export function applyTimelineBlockPreview(element: HTMLElement, options: { deltaX: number; deltaY?: number; widthDelta?: number; height?: number; resizeProperty?: string }) {
+export function applyTimelineBlockPreview(element: HTMLElement, options: { deltaX: number; deltaY?: number; height?: number; resizeProperty?: string }) {
   element.style.transform = `translate3d(${options.deltaX}px, ${options.deltaY ?? 0}px, 0)`;
-  if (options.widthDelta !== undefined) element.style.setProperty(options.resizeProperty ?? "--clipper-timeline-resize-width", `${options.widthDelta}px`);
   if (options.height !== undefined) element.style.height = `${options.height}px`;
   else element.style.removeProperty("height");
-  element.style.willChange = options.widthDelta !== undefined ? "transform, width" : "transform";
+  element.style.willChange = "transform";
   element.style.zIndex = "25";
   element.parentElement?.style.setProperty("overflow", "visible");
 }

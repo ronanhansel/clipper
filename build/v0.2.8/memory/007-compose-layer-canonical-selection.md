@@ -28,4 +28,4 @@ Holding Shift during object resize preserves the display selection box aspect ra
 
 App also listens for global Shift keydown/keyup during an active resize and reschedules the preview with the current pointer delta. This makes the selector snap to or from the preserved aspect ratio immediately when Shift is pressed/released, without requiring another pointer movement.
 
-Compose layer row highlights now treat App's `selectedObjectIds` as canonical. `ComposeLayersPanel` clears `selectedLayerIds` when frame/canvas selection is cleared, so outside-click or interactive-screen deselection no longer leaves a stale highlighted object row in the Layers panel.
+Compose layer object-row highlights now treat App's `selectedObjectIds` as canonical. `ComposeLayersPanel` clears `selectedLayerIds` when the canonical object selection transitions from populated to empty, so outside-click or interactive-screen deselection no longer leaves a stale highlighted object row in the Layers panel while local Frame/Background/group row selection can still remain panel-only.

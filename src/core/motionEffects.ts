@@ -1,6 +1,6 @@
 import { roundTwo } from "./math";
 import { getMotionEffectByKind, getMotionEffectPackage, motionEffectPackages } from "./effects/registry";
-import type { MotionBlock, MotionBlockEffectKind, MotionEffectId, MotionEffectKind, PerspectiveSettings, Point, TranslationMarker, ZoomMarker } from "./types";
+import type { MotionBlock, MotionBlockEffectKind, MotionEffectId, MotionEffectKind, MotionMarker, PerspectiveSettings, Point, TranslationMarker, ZoomMarker } from "./types";
 
 export const motionEffectDefinitions = motionEffectPackages;
 
@@ -18,7 +18,7 @@ export function getMotionEffectDragType(effectId: string) {
   return `application/x-clipper-effect-${effectId.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`;
 }
 
-export function getMotionBlockEffectKind(block: Pick<MotionBlock, "effectId">): MotionBlockEffectKind | null {
+export function getMotionBlockEffectKind(block: { effectId?: string }): MotionBlockEffectKind | null {
   return block.effectId ? getMotionEffectDefinition(block.effectId)?.kind ?? null : null;
 }
 
@@ -65,6 +65,43 @@ export function motionBlocksToZoomMarkers(blocks: MotionBlock[]): ZoomMarker[] {
     if (!isZoomMotionBlock(block)) return [];
       return [{ ...block, effectId: "clipper.motion.zoom", layerId: block.layerId ?? "clipper.motion.zoom", focus: block.focus ?? { x: 960, y: 540 }, scale: block.scale ?? 1.8, params: block.params ?? {} }];
   });
+}
+
+export function motionBlocksToMotionMarkers(blocks: MotionBlock[]): MotionMarker[] {
+  const markers = normalizeMotionBlocks(blocks).map((block) => {
+    const kind = getMotionBlockEffectKind(block) ?? "pan";
+    const definition = getMotionEffectByKind(kind) ?? getMotionEffectByKind("pan")!;
+    return {
+      ...block,
+      kind,
+      effectId: block.effectId ?? definition.id,
+      layerId: block.layerId ?? definition.id,
+    };
+  });
+  return Array.from(new Map(markers.map((marker) => [marker.id, marker])).values()).sort((left, right) => left.start - right.start);
+}
+
+export function motionMarkersToMotionBlocks(markers: MotionMarker[]): MotionBlock[] {
+  return normalizeMotionBlocks(markers.map((marker) => ({ ...marker, effectId: marker.effectId ?? getMotionEffectByKind(marker.kind)?.id })));
+}
+
+export function getCanonicalMotionMarkers(input: { motionMarkers?: MotionMarker[] }) {
+  return motionBlocksToMotionMarkers(input.motionMarkers ?? []);
+}
+
+export function getMotionMarkerViews(input: { motionMarkers?: MotionMarker[] }) {
+  const motionMarkers = getCanonicalMotionMarkers(input);
+  return {
+    motionMarkers,
+    zoomMarkers: motionBlocksToZoomMarkers(motionMarkers),
+    translationMarkers: motionBlocksToTranslationMarkers(motionMarkers),
+  };
+}
+
+export function withCanonicalMotionMarkers(motionMarkers: MotionMarker[]) {
+  return {
+    motionMarkers: motionBlocksToMotionMarkers(motionMarkers),
+  };
 }
 
 export function motionBlocksToTranslationMarkers(blocks: MotionBlock[]): TranslationMarker[] {

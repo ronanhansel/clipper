@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createSelectionPayload } from "./geometry";
+import { getMotionMarkerViews, motionBlocksToMotionMarkers } from "./motionEffects";
 import { buildLinearTimeline, expandExplicitTimelineMarkerMendIds, getAdjustmentPlacement, getMendedMarkerDragItems, getSelectedZoomMiddleSnap, getTimelineMarkerDragSnapBoundaries, getTimelineMarkerMoves, getTimelineMotionLayersWithMarkers, getTimelinePartAtTime, getTopTimelineItemAtTime, getTranslationMarkerMendKey, getZoomMarkerMendKey, getZoomMiddleSnap, isExplicitTimelineMarkerMend, rebaseCompositionTimelineMarkers, removeTimelineMotionLayerMarkers, resizeTimelineMarkersWithPush, sceneDuration, snapTimelineBlockStartToBoundary, timelineDisplayDuration, validateScene } from "./timeline";
 import { moveTimelineStateLayer, toggleTimelineStateLayerHidden } from "./timelineLayers";
 import type { Scene, TimelinePart } from "./types";
@@ -11,8 +12,8 @@ const scene: Scene = {
   id: "scene_test",
   name: "Test Scene",
   compositions: [
-    { id: "a", name: "A", filePath: "a.ts", duration: 4, frame, background, objects: [], snapshot: [], zoomMarkers: [], translationMarkers: [] },
-    { id: "b", name: "B", filePath: "b.ts", duration: 6, frame, background, objects: [], snapshot: [], zoomMarkers: [], translationMarkers: [] },
+    { id: "a", name: "A", filePath: "a.ts", duration: 4, frame, background, objects: [], snapshot: [], motionMarkers: [] },
+    { id: "b", name: "B", filePath: "b.ts", duration: 6, frame, background, objects: [], snapshot: [], motionMarkers: [] },
   ],
 };
 
@@ -91,16 +92,14 @@ describe("timeline model", () => {
     const composition = {
       ...scene.compositions[0],
       start: 2,
-      zoomMarkers: [{ id: "zoom", start: 3, duration: 1, focus: { x: 0.5, y: 0.5 }, scale: 1.5 }],
-      translationMarkers: [{ id: "pan", start: 4, duration: 1, position: { x: 0, y: 0 } }],
-      motionBlocks: [{ id: "zoom", start: 3, duration: 1, scale: 1.5, focus: { x: 0.5, y: 0.5 } }],
+      motionMarkers: motionBlocksToMotionMarkers([{ id: "zoom", effectId: "clipper.motion.zoom", start: 3, duration: 1, scale: 1.5, focus: { x: 0.5, y: 0.5 } }, { id: "pan", effectId: "clipper.motion.pan", start: 4, duration: 1, position: { x: 0, y: 0 } }]),
     };
 
     const rebased = rebaseCompositionTimelineMarkers({ ...composition, start: 7 }, 2, 7);
 
-    expect(rebased.zoomMarkers[0].start).toBe(-2);
-    expect(rebased.translationMarkers[0].start).toBe(-1);
-    expect(rebased.motionBlocks?.[0].start).toBe(-2);
+    expect(getMotionMarkerViews(rebased).zoomMarkers[0].start).toBe(-2);
+    expect(getMotionMarkerViews(rebased).translationMarkers[0].start).toBe(-1);
+    expect(rebased.motionMarkers[0].start).toBe(-2);
   });
 
   it("flags compositions longer than one minute", () => {
@@ -116,7 +115,7 @@ describe("timeline model", () => {
     })).toBe(14);
     expect(sceneDuration({
       ...scene,
-      compositions: [{ ...scene.compositions[0], start: 0, duration: 4, zoomMarkers: [{ id: "zoom", start: 8, duration: 3, focus: { x: 0.5, y: 0.5 }, scale: 1.5 }] }],
+      compositions: [{ ...scene.compositions[0], start: 0, duration: 4, motionMarkers: motionBlocksToMotionMarkers([{ id: "zoom", effectId: "clipper.motion.zoom", start: 8, duration: 3, focus: { x: 0.5, y: 0.5 }, scale: 1.5 }]) }],
     })).toBe(11);
   });
 
@@ -139,13 +138,11 @@ describe("timeline model", () => {
       start: 0,
       end: 10,
       duration: 10,
-      zoomMarkers: [
-        { id: "moving", start: 1, duration: 2, focus: { x: 0.5, y: 0.5 }, scale: 1.5 },
-        { id: "target", start: 6, duration: 1, focus: { x: 0.5, y: 0.5 }, scale: 1.5 },
-      ],
-      translationMarkers: [
-        { id: "pan", start: 4, duration: 1, position: { x: 0.5, y: 0.5 } },
-      ],
+      motionMarkers: motionBlocksToMotionMarkers([
+        { id: "moving", effectId: "clipper.motion.zoom", start: 1, duration: 2, focus: { x: 0.5, y: 0.5 }, scale: 1.5 },
+        { id: "target", effectId: "clipper.motion.zoom", start: 6, duration: 1, focus: { x: 0.5, y: 0.5 }, scale: 1.5 },
+        { id: "pan", effectId: "clipper.motion.pan", start: 4, duration: 1, position: { x: 0.5, y: 0.5 } },
+      ]),
     }];
 
     expect(getTimelineMarkerDragSnapBoundaries(timeline, "zoom", new Set(["a:moving"]))).toEqual([0, 4, 5, 6, 7, 10]);
@@ -157,12 +154,10 @@ describe("timeline model", () => {
       start: 0,
       end: 10,
       duration: 10,
-      zoomMarkers: [
-        { id: "zoom", start: 5, duration: 3, focus: { x: 0.5, y: 0.5 }, scale: 1.5 },
-      ],
-      translationMarkers: [
-        { id: "pan", start: 3, duration: 2, position: { x: 0, y: 0 } },
-      ],
+      motionMarkers: motionBlocksToMotionMarkers([
+        { id: "zoom", effectId: "clipper.motion.zoom", start: 5, duration: 3, focus: { x: 0.5, y: 0.5 }, scale: 1.5 },
+        { id: "pan", effectId: "clipper.motion.pan", start: 3, duration: 2, position: { x: 0, y: 0 } },
+      ]),
     }];
 
     const item = getTopTimelineItemAtTime(timeline, 5);
@@ -180,12 +175,10 @@ describe("timeline model", () => {
       start: 0,
       end: 10,
       duration: 10,
-      zoomMarkers: [
-        { id: "zoom", layerId: "zoom_recovered", start: 5, duration: 3, focus: { x: 0.5, y: 0.5 }, scale: 1.5 },
-      ],
-      translationMarkers: [
-        { id: "pan", layerId: "pan_recovered", start: 3, duration: 2, position: { x: 0, y: 0 } },
-      ],
+      motionMarkers: motionBlocksToMotionMarkers([
+        { id: "zoom", effectId: "clipper.motion.zoom", layerId: "zoom_recovered", start: 5, duration: 3, focus: { x: 0.5, y: 0.5 }, scale: 1.5 },
+        { id: "pan", effectId: "clipper.motion.pan", layerId: "pan_recovered", start: 3, duration: 2, position: { x: 0, y: 0 } },
+      ]),
     }];
 
     expect(getTimelineMotionLayersWithMarkers([], timeline)).toEqual([]);
@@ -197,12 +190,10 @@ describe("timeline model", () => {
       start: 0,
       end: 10,
       duration: 10,
-      zoomMarkers: [
-        { id: "zoom", layerId: "zoom", start: 4, duration: 4, focus: { x: 0.5, y: 0.5 }, scale: 1.5 },
-      ],
-      translationMarkers: [
-        { id: "lower-pan", layerId: "lower_pan", start: 4, duration: 4, position: { x: 0, y: 0 } },
-      ],
+      motionMarkers: motionBlocksToMotionMarkers([
+        { id: "zoom", effectId: "clipper.motion.zoom", layerId: "zoom", start: 4, duration: 4, focus: { x: 0.5, y: 0.5 }, scale: 1.5 },
+        { id: "lower-pan", effectId: "clipper.motion.pan", layerId: "lower_pan", start: 4, duration: 4, position: { x: 0, y: 0 } },
+      ]),
     }];
 
     const item = getTopTimelineItemAtTime(timeline, 6, [], [
@@ -223,20 +214,18 @@ describe("timeline model", () => {
       start: 0,
       end: 10,
       duration: 10,
-      zoomMarkers: [
-        { id: "deleted-zoom", layerId: "deleted", start: 1, duration: 2, focus: { x: 0.5, y: 0.5 }, scale: 1.5 },
-        { id: "kept-zoom", layerId: "kept", start: 4, duration: 2, focus: { x: 0.5, y: 0.5 }, scale: 1.5 },
-      ],
-      translationMarkers: [
-        { id: "deleted-pan", layerId: "deleted", start: 1, duration: 2, position: { x: 0, y: 0 } },
-        { id: "kept-pan", layerId: "kept", start: 4, duration: 2, position: { x: 0, y: 0 } },
-      ],
+      motionMarkers: motionBlocksToMotionMarkers([
+        { id: "deleted-zoom", effectId: "clipper.motion.zoom", layerId: "deleted", start: 1, duration: 2, focus: { x: 0.5, y: 0.5 }, scale: 1.5 },
+        { id: "kept-zoom", effectId: "clipper.motion.zoom", layerId: "kept", start: 4, duration: 2, focus: { x: 0.5, y: 0.5 }, scale: 1.5 },
+        { id: "deleted-pan", effectId: "clipper.motion.pan", layerId: "deleted", start: 1, duration: 2, position: { x: 0, y: 0 } },
+        { id: "kept-pan", effectId: "clipper.motion.pan", layerId: "kept", start: 4, duration: 2, position: { x: 0, y: 0 } },
+      ]),
     }];
 
     const nextTimeline = removeTimelineMotionLayerMarkers(timeline, "deleted");
 
-    expect(nextTimeline[0].zoomMarkers.map((marker) => marker.id)).toEqual(["kept-zoom"]);
-    expect(nextTimeline[0].translationMarkers.map((marker) => marker.id)).toEqual(["kept-pan"]);
+    expect(getMotionMarkerViews(nextTimeline[0]).zoomMarkers.map((marker) => marker.id)).toEqual(["kept-zoom"]);
+    expect(getMotionMarkerViews(nextTimeline[0]).translationMarkers.map((marker) => marker.id)).toEqual(["kept-pan"]);
   });
 
   it("detects middle mend candidates within the marker layer", () => {
@@ -272,12 +261,12 @@ describe("timeline model", () => {
         {
           ...scene.compositions[0],
           duration: 4,
-          zoomMarkers: [{ id: "first", layerId: "camera", start: 2, duration: 2, focus: { x: 0.5, y: 0.5 }, scale: 1.5, snapOut: true, mendOutId: "b:second" }],
+          motionMarkers: motionBlocksToMotionMarkers([{ id: "first", effectId: "clipper.motion.zoom", layerId: "camera", start: 2, duration: 2, focus: { x: 0.5, y: 0.5 }, scale: 1.5, snapOut: true, mendOutId: "b:second" }]),
         },
         {
           ...scene.compositions[1],
           duration: 4,
-          zoomMarkers: [{ id: "second", layerId: "camera", start: 0, duration: 2, focus: { x: 0.5, y: 0.5 }, scale: 1.5, snapIn: true, mendInId: "a:first" }],
+          motionMarkers: motionBlocksToMotionMarkers([{ id: "second", effectId: "clipper.motion.zoom", layerId: "camera", start: 0, duration: 2, focus: { x: 0.5, y: 0.5 }, scale: 1.5, snapIn: true, mendInId: "a:first" }]),
         },
       ],
     });
@@ -294,16 +283,16 @@ describe("timeline model", () => {
       compositions: [{
         ...scene.compositions[0],
         duration: 8,
-        zoomMarkers: [
-          { id: "first", layerId: "camera", start: 1, duration: 2, focus: { x: 0.5, y: 0.5 }, scale: 1.5, snapOut: true, mendOutId: "second" },
-          { id: "second", layerId: "camera", start: 3, duration: 2, focus: { x: 0.5, y: 0.5 }, scale: 1.5, snapIn: true, mendInId: "first" },
-        ],
+        motionMarkers: motionBlocksToMotionMarkers([
+          { id: "first", effectId: "clipper.motion.zoom", layerId: "camera", start: 1, duration: 2, focus: { x: 0.5, y: 0.5 }, scale: 1.5, snapOut: true, mendOutId: "second" },
+          { id: "second", effectId: "clipper.motion.zoom", layerId: "camera", start: 3, duration: 2, focus: { x: 0.5, y: 0.5 }, scale: 1.5, snapIn: true, mendInId: "first" },
+        ]),
       }],
     });
     const items = getMendedMarkerDragItems(timeline, timeline[0], "first", "zoom");
     const moves = getTimelineMarkerMoves(timeline, items, 1.37, "zoom", new Map(items.map((item) => [`${item.partId}:${item.markerId}`, item.partId])), 0.1);
     const movedMarkers = moves.map((move) => {
-      const marker = timeline[0].zoomMarkers.find((item) => item.id === move.markerId)!;
+      const marker = getMotionMarkerViews(timeline[0]).zoomMarkers.find((item) => item.id === move.markerId)!;
       return { ...marker, start: move.start };
     }).sort((left, right) => left.start - right.start);
 

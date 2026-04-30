@@ -1,5 +1,5 @@
 import { roundTenth } from "./math";
-import { getMotionBlockEffectKind } from "./motionEffects";
+import { getMotionBlockEffectKind, getMotionMarkerViews } from "./motionEffects";
 import { getMotionTranslation } from "./renderRuntime";
 import { FRAME_HEIGHT, FRAME_WIDTH, type Bounds, type FrameObject, type MotionEase, type Part, type PerspectiveSettings, type Point, type TimelineMotionLayerState, type TranslationMarker, type ZoomMarker } from "./types";
 
@@ -37,12 +37,13 @@ export function getCameraPreviewTransform(activeZoom: ZoomMarker | null, activeT
 export function getLayeredCameraPreviewTransform(part: Part, layers: TimelineMotionLayerState[], time: number, options: { hiddenLayerIds?: Set<string>; pickingTranslationPosition?: boolean; pickingZoomFocus?: boolean; resetMotionEffects?: boolean } = {}): CameraPreviewTransform {
   const transform: CameraPreviewTransform = { x: 0, y: 0, z: 0, scale: 1, rotation: 0, rotateX: 0, rotateY: 0, perspective: CAMERA_PERSPECTIVE };
   if (options.resetMotionEffects) return transform;
+  const partMotion = getPartMotionMarkers(part);
 
   for (const layer of layers) {
     if (options.hiddenLayerIds?.has(layer.id) || layer.kind === "empty") continue;
 
     if (!options.pickingZoomFocus) {
-      const activeZoom = getActiveZoom(part.zoomMarkers.filter((marker) => isMarkerOnMotionLayer(marker, layer)), time);
+      const activeZoom = getActiveZoom(partMotion.zoomMarkers.filter((marker) => isMarkerOnMotionLayer(marker, layer)), time);
       if (activeZoom) {
         const zoomTransform = getCameraPreviewTransform(activeZoom, null, null);
         transform.x += zoomTransform.x;
@@ -51,7 +52,7 @@ export function getLayeredCameraPreviewTransform(part: Part, layers: TimelineMot
       }
     }
 
-    const markers = part.translationMarkers.filter((marker) => isMarkerOnMotionLayer(marker, layer));
+    const markers = partMotion.translationMarkers.filter((marker) => isMarkerOnMotionLayer(marker, layer));
     if (options.pickingTranslationPosition) continue;
 
     const activeTranslation = getActiveTranslation(markers, time, part);
@@ -68,6 +69,10 @@ export function getLayeredCameraPreviewTransform(part: Part, layers: TimelineMot
   }
 
   return transform;
+}
+
+function getPartMotionMarkers(part: Part) {
+  return getMotionMarkerViews(part);
 }
 
 export function isMarkerOnMotionLayer(marker: ZoomMarker | TranslationMarker, layer: TimelineMotionLayerState) {

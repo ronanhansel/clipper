@@ -17,6 +17,7 @@ import type { EditorStore } from "../../state/editorStore";
 
 type PlaybackControllerOptions = {
   activeTimelinePart: TimelinePart | null | undefined;
+  playbackRange?: { start: number; end: number; localLabels?: boolean };
   currentSceneTime: number;
   currentSceneTimeRef: RefObject<number>;
   editorStore: StoreApi<EditorStore>;
@@ -47,6 +48,7 @@ type PlaybackControllerOptions = {
 
 export function usePlaybackController({
   activeTimelinePart,
+  playbackRange,
   currentSceneTime,
   currentSceneTimeRef,
   editorStore,
@@ -75,15 +77,36 @@ export function usePlaybackController({
   wasPlayingRef,
 }: PlaybackControllerOptions) {
   const visibleSceneAdjustmentSignature = useMemo(() => JSON.stringify(visibleSceneAdjustmentLayers.map((layer) => ({ id: layer.id, layerId: layer.layerId, start: layer.start, duration: layer.duration, effect: layer.effect }))), [visibleSceneAdjustmentLayers]);
+  const playbackStart = playbackRange?.start ?? 0;
+  const playbackEnd = playbackRange?.end ?? sceneDurationSeconds;
+  const playbackDuration = Math.max(playbackEnd - playbackStart, 0);
+  const useLocalPlaybackLabels = Boolean(playbackRange?.localLabels);
+
+  function clampPlaybackTime(time: number) {
+    return clamp(time, playbackStart, playbackEnd);
+  }
+
+  function toPlaybackDisplayTime(time: number) {
+    return useLocalPlaybackLabels ? clamp(time - playbackStart, 0, playbackDuration) : getTimeSensitiveDisplayTime(time, visibleSceneAdjustmentLayers);
+  }
+
+  function toSceneTimeFromPlaybackDisplay(displayTime: number) {
+    return useLocalPlaybackLabels ? playbackStart + clamp(displayTime, 0, playbackDuration) : getSceneTimeForTimeSensitiveDisplayTime(displayTime, sceneDurationSeconds, visibleSceneAdjustmentLayers);
+  }
+
+  function getPlaybackDisplayDuration() {
+    return useLocalPlaybackLabels ? playbackDuration : getTimeSensitiveDisplayDuration(sceneDurationSeconds, visibleSceneAdjustmentLayers);
+  }
 
   function syncPlaybackDom(time: number) {
     if (playbackTimeLabelRef.current) playbackTimeLabelRef.current.textContent = formatPlaybackTimeLabel(time);
-    const displayDuration = timelineDisplayDuration(sceneDurationSeconds, timelineEndPaddingFraction);
-    if (playbackPlayheadRef.current) playbackPlayheadRef.current.style.setProperty("--clipper-playhead-left", `${displayDuration > 0 ? (time / displayDuration) * 100 : 0}%`);
+    const displayDuration = useLocalPlaybackLabels ? playbackDuration : timelineDisplayDuration(sceneDurationSeconds, timelineEndPaddingFraction);
+    const timelineTime = useLocalPlaybackLabels ? time - playbackStart : time;
+    if (playbackPlayheadRef.current) playbackPlayheadRef.current.style.setProperty("--clipper-playhead-left", `${displayDuration > 0 ? (timelineTime / displayDuration) * 100 : 0}%`);
     if (playbackPlayheadRef.current) playbackPlayheadRef.current.style.removeProperty("--clipper-playhead-x");
     if (playbackBorderScrubberRef.current) {
-      const displayTime = getTimeSensitiveDisplayTime(time, visibleSceneAdjustmentLayers);
-      const displayPlaybackDuration = getTimeSensitiveDisplayDuration(sceneDurationSeconds, visibleSceneAdjustmentLayers);
+      const displayTime = toPlaybackDisplayTime(time);
+      const displayPlaybackDuration = getPlaybackDisplayDuration();
       const progress = displayPlaybackDuration > 0 ? `${clamp(displayTime / displayPlaybackDuration, 0, 1) * 100}%` : "0%";
       playbackBorderScrubberRef.current.max = String(Math.max(displayPlaybackDuration, 0.001));
       playbackBorderScrubberRef.current.value = String(clamp(displayTime, 0, displayPlaybackDuration));
@@ -115,13 +138,13 @@ export function usePlaybackController({
   }
 
   function formatPlaybackTimeLabel(time: number) {
-    const displayDuration = getTimeSensitiveDisplayDuration(sceneDurationSeconds, visibleSceneAdjustmentLayers);
-    const displayTime = clamp(getTimeSensitiveDisplayTime(time, visibleSceneAdjustmentLayers), 0, displayDuration);
+    const displayDuration = getPlaybackDisplayDuration();
+    const displayTime = clamp(toPlaybackDisplayTime(time), 0, displayDuration);
     return `${formatTime(displayTime)} / ${formatTime(displayDuration)}`;
   }
 
   function scrubToPlaybackDisplayTime(displayTime: number) {
-    scrubToSceneTime(getSceneTimeForTimeSensitiveDisplayTime(displayTime, sceneDurationSeconds, visibleSceneAdjustmentLayers));
+    scrubToSceneTime(toSceneTimeFromPlaybackDisplay(displayTime));
   }
 
   function updatePlaybackClock(nextClock: PlaybackClock) {
@@ -130,13 +153,12 @@ export function usePlaybackController({
   }
 
   function commitPlayheadEditorState(time: number) {
-    const currentDuration = Math.max(sceneDurationSeconds, 0);
-    const currentSceneTime = roundTwo(clamp(time, 0, currentDuration));
+    const currentSceneTime = roundTwo(clampPlaybackTime(time));
     updateEditorState((state) => (state.currentSceneTime === currentSceneTime ? state : { ...state, currentSceneTime }));
   }
 
   function scrubToSceneTime(time: number) {
-    const nextTime = clamp(time, 0, sceneDurationSeconds);
+    const nextTime = clampPlaybackTime(time);
     if (Math.abs(nextTime - currentSceneTimeRef.current) < 0.001) {
       if (!timelineScrubbingRef.current) commitPlayheadEditorState(nextTime);
       return;
@@ -144,7 +166,7 @@ export function usePlaybackController({
 
     currentSceneTimeRef.current = nextTime;
     if (isPlayingRef.current) updatePlaybackClock({ startedAt: performance.now(), startedFrom: nextTime });
-    if (!timelineScrubbingRef.current) syncPlaybackDom(nextTime);
+    if (!timelineScrubbingRef.current || useLocalPlaybackLabels) syncPlaybackDom(nextTime);
     else syncFrameVisualAdjustmentDom(nextTime);
 
     pendingScrubTimeRef.current = nextTime;
@@ -177,10 +199,10 @@ export function usePlaybackController({
   }
 
   function startPlaybackFromCurrentTime() {
-    if (currentSceneTimeRef.current >= sceneDurationSeconds) {
-      currentSceneTimeRef.current = 0;
-      syncPlaybackDom(0);
-      setCurrentSceneTime(0);
+    if (currentSceneTimeRef.current >= playbackEnd || currentSceneTimeRef.current < playbackStart) {
+      currentSceneTimeRef.current = playbackStart;
+      syncPlaybackDom(playbackStart);
+      setCurrentSceneTime(playbackStart);
     }
 
     updatePlaybackClock({ startedAt: performance.now(), startedFrom: currentSceneTimeRef.current });
@@ -240,18 +262,23 @@ export function usePlaybackController({
 
   function jumpToStart() {
     setIsPlaying(false);
-    scrubToSceneTime(0);
+    scrubToSceneTime(playbackStart);
   }
 
   function jumpToNextPart() {
     setIsPlaying(false);
+    if (useLocalPlaybackLabels) {
+      scrubToSceneTime(playbackEnd);
+      return;
+    }
+
     const nextPart = timeline.find((item) => item.start > currentSceneTimeRef.current + 0.001);
     scrubToSceneTime(nextPart?.start ?? sceneDurationSeconds);
   }
 
   function jumpToEnd() {
     setIsPlaying(false);
-    scrubToSceneTime(sceneDurationSeconds);
+    scrubToSceneTime(playbackEnd);
   }
 
   useEffect(() => {
@@ -334,10 +361,12 @@ export function usePlaybackController({
     function tick(now: number) {
       const clock = playbackClockRef.current ?? { startedAt: now, startedFrom: currentSceneTimeRef.current };
       playbackClockRef.current = clock;
-      const nextTime = advanceTimeSensitiveSceneTime(clock.startedFrom, (now - clock.startedAt) / 1000, sceneDurationSeconds, visibleSceneAdjustmentLayers);
+      const nextTime = useLocalPlaybackLabels
+        ? clamp(clock.startedFrom + (now - clock.startedAt) / 1000, playbackStart, playbackEnd)
+        : advanceTimeSensitiveSceneTime(clock.startedFrom, (now - clock.startedAt) / 1000, sceneDurationSeconds, visibleSceneAdjustmentLayers);
       const nextTimelinePart = getTimelinePartAtTime(timeline, applyAdjustmentLayersToSceneTime(nextTime, visibleSceneAdjustmentLayers));
       const partChanged = Boolean(nextTimelinePart?.id && nextTimelinePart.id !== lastCommittedPartId);
-      const shouldSyncReact = partChanged || nextTime >= sceneDurationSeconds;
+      const shouldSyncReact = partChanged || nextTime >= playbackEnd;
 
       currentSceneTimeRef.current = nextTime;
       syncPlaybackDom(nextTime);
@@ -347,7 +376,7 @@ export function usePlaybackController({
         setCurrentSceneTime(nextTime);
       }
 
-      if (nextTime >= sceneDurationSeconds) {
+      if (nextTime >= playbackEnd) {
         commitPlayheadEditorState(nextTime);
         updatePlaybackClock(null);
         setIsPlaying(false);
@@ -359,7 +388,7 @@ export function usePlaybackController({
 
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [activeTimelinePart?.id, isPlaying, sceneDurationSeconds, timeline, visibleSceneAdjustmentLayers]);
+  }, [activeTimelinePart?.id, isPlaying, playbackEnd, playbackStart, sceneDurationSeconds, timeline, useLocalPlaybackLabels, visibleSceneAdjustmentLayers]);
 
   useEffect(() => {
     if (!isPlaying) return;
@@ -367,10 +396,10 @@ export function usePlaybackController({
   }, [isPlaying, visibleSceneAdjustmentSignature]);
 
   useEffect(() => {
-    if (isPlaying && currentSceneTime >= sceneDurationSeconds) {
+    if (isPlaying && currentSceneTime >= playbackEnd) {
       setIsPlaying(false);
     }
-  }, [currentSceneTime, isPlaying, sceneDurationSeconds, setIsPlaying]);
+  }, [currentSceneTime, isPlaying, playbackEnd, setIsPlaying]);
 
   return {
     commitPlayheadEditorState,

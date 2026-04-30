@@ -1,7 +1,7 @@
 import { defaultZoomDuration, minimumZoomDuration } from "./editorConstants";
 import { getAdjustmentEffectPackage } from "./effects/registry";
-import { getMotionBlockEffectKind } from "./motionEffects";
-import { MAX_PART_DURATION_SECONDS, MAX_SCENE_DURATION_SECONDS, type AdjustmentLayer, type CompositionClip, type MotionEffectKind, type Scene, type TimelineComposition, type TimelineLayerState, type TimelineMotionLayerKind, type TimelineMotionLayerState, type TimelinePart, type TranslationMarker, type ZoomMarker } from "./types";
+import { getMotionBlockEffectKind, getCanonicalMotionMarkers, getMotionMarkerViews, withCanonicalMotionMarkers } from "./motionEffects";
+import { MAX_PART_DURATION_SECONDS, MAX_SCENE_DURATION_SECONDS, type AdjustmentLayer, type CompositionClip, type MotionBlock, type MotionEffectKind, type MotionMarker, type Scene, type TimelineComposition, type TimelineLayerState, type TimelineMotionLayerKind, type TimelineMotionLayerState, type TimelinePart, type TranslationMarker, type ZoomMarker } from "./types";
 import { clamp, roundTenth, roundTwo } from "./math";
 
 export function buildLinearTimeline(scene: Scene): TimelineComposition[] {
@@ -18,9 +18,8 @@ export function sceneDuration(scene: Scene) {
   return buildLinearTimeline(scene).reduce((total, composition) => Math.max(
     total,
     composition.end,
-    ...composition.zoomMarkers.map((marker) => composition.start + marker.start + marker.duration),
-    ...composition.translationMarkers.map((marker) => composition.start + marker.start + marker.duration),
-  ), [...(scene.adjustmentLayers ?? []), ...(scene.zoomMarkers ?? []), ...(scene.translationMarkers ?? [])].reduce((total, item) => Math.max(total, item.start + item.duration), 0));
+    ...getCanonicalMotionMarkers(composition).map((marker) => composition.start + marker.start + marker.duration),
+  ), [...(scene.adjustmentLayers ?? []), ...getCanonicalMotionMarkers(scene)].reduce((total, item) => Math.max(total, item.start + item.duration), 0));
 }
 
 export function timelineDuration(timeline: TimelinePart[]) {
@@ -95,12 +94,10 @@ export function updateCompositionObject(compositions: CompositionClip[], composi
 export function rebaseCompositionTimelineMarkers<T extends CompositionClip>(composition: T, previousStart: number, nextStart: number): T {
   const delta = roundTwo(previousStart - nextStart);
   if (delta === 0) return composition;
-  const rebaseMarker = <Marker extends ZoomMarker | TranslationMarker>(marker: Marker): Marker => ({ ...marker, start: roundTwo(marker.start + delta) });
+  const motionMarkers = getCanonicalMotionMarkers(composition).map((marker) => ({ ...marker, start: roundTwo(marker.start + delta) }));
   return {
     ...composition,
-    zoomMarkers: composition.zoomMarkers.map(rebaseMarker),
-    translationMarkers: composition.translationMarkers.map(rebaseMarker),
-    motionBlocks: composition.motionBlocks?.map((marker) => ({ ...marker, start: roundTwo(marker.start + delta) })),
+    ...withCanonicalMotionMarkers(motionMarkers),
   };
 }
 
@@ -136,8 +133,8 @@ export function getTopTimelineItemAtTime(timeline: TimelineComposition[], time: 
 
   if (motionLayers.length > 0) {
     for (const layer of motionLayers) {
-      const zoomMarker = [...timeline].reverse().flatMap((part) => [...part.zoomMarkers].reverse().map((marker) => ({ part, marker }))).find((item) => getZoomMarkerLayerId(item.marker) === layer.id && isMarkerAtSelectionTime(item.part, item.marker, time));
-      const translationMarker = [...timeline].reverse().flatMap((part) => [...part.translationMarkers].reverse().map((marker) => ({ part, marker }))).find((item) => getTranslationMarkerLayerId(item.marker) === layer.id && isMarkerAtSelectionTime(item.part, item.marker, time));
+      const zoomMarker = [...timeline].reverse().flatMap((part) => [...motionViews(part).zoomMarkers].reverse().map((marker) => ({ part, marker }))).find((item) => getZoomMarkerLayerId(item.marker) === layer.id && isMarkerAtSelectionTime(item.part, item.marker, time));
+      const translationMarker = [...timeline].reverse().flatMap((part) => [...motionViews(part).translationMarkers].reverse().map((marker) => ({ part, marker }))).find((item) => getTranslationMarkerLayerId(item.marker) === layer.id && isMarkerAtSelectionTime(item.part, item.marker, time));
       if (isMotionLayerKind(layer.kind)) {
         if (translationMarker) return { kind: "motion", motionKind: "translation", part: translationMarker.part, marker: translationMarker.marker };
         if (zoomMarker) return { kind: "motion", motionKind: "zoom", part: zoomMarker.part, marker: zoomMarker.marker };
@@ -150,9 +147,9 @@ export function getTopTimelineItemAtTime(timeline: TimelineComposition[], time: 
     return { kind: "part", part: timelinePart };
   }
 
-  const translationMarker = [...timeline].reverse().flatMap((part) => [...part.translationMarkers].reverse().map((marker) => ({ part, marker }))).find((item) => isMarkerAtSelectionTime(item.part, item.marker, time));
+  const translationMarker = [...timeline].reverse().flatMap((part) => [...motionViews(part).translationMarkers].reverse().map((marker) => ({ part, marker }))).find((item) => isMarkerAtSelectionTime(item.part, item.marker, time));
   if (translationMarker) return { kind: "motion", motionKind: "translation", part: translationMarker.part, marker: translationMarker.marker };
-  const zoomMarker = [...timeline].reverse().flatMap((part) => [...part.zoomMarkers].reverse().map((marker) => ({ part, marker }))).find((item) => isMarkerAtSelectionTime(item.part, item.marker, time));
+  const zoomMarker = [...timeline].reverse().flatMap((part) => [...motionViews(part).zoomMarkers].reverse().map((marker) => ({ part, marker }))).find((item) => isMarkerAtSelectionTime(item.part, item.marker, time));
   if (zoomMarker) return { kind: "motion", motionKind: "zoom", part: zoomMarker.part, marker: zoomMarker.marker };
   return { kind: "part", part: timelinePart };
 }
@@ -162,6 +159,10 @@ export function getTranslationMarkerLayerKind(marker: Pick<TranslationMarker, "e
   if (effectKind === "rotate") return "rotate";
   if (effectKind === "perspective") return "perspective";
   return "pan";
+}
+
+function getTimelineMarkerKind(marker: { effectId?: string; kind?: string }): TimelineMarkerKind {
+  return getMotionBlockEffectKind(marker) === "zoom" || marker.kind === "zoom" ? "zoom" : "translation";
 }
 
 export function getZoomMarkerLayerId(marker: Pick<ZoomMarker, "layerId">) {
@@ -239,16 +240,19 @@ export function isMotionLayerKind(kind: TimelineMotionLayerKind) {
   return kind !== "empty";
 }
 
-export function removeTimelineMotionLayerMarkers<T extends { zoomMarkers: ZoomMarker[]; translationMarkers: TranslationMarker[] }>(timeline: T[], layerId: string): T[] {
+export function removeTimelineMotionLayerMarkers<T extends { motionMarkers?: MotionMarker[] }>(timeline: T[], layerId: string): T[] {
   return timeline.map((timelinePart) => {
-    const zoomMarkers = timelinePart.zoomMarkers.filter((marker) => !isMotionMarkerOnLayerId(marker, layerId));
-    const translationMarkers = timelinePart.translationMarkers.filter((marker) => !isMotionMarkerOnLayerId(marker, layerId));
-    if (zoomMarkers.length === timelinePart.zoomMarkers.length && translationMarkers.length === timelinePart.translationMarkers.length) return timelinePart;
-    return { ...timelinePart, zoomMarkers, translationMarkers };
+    const motionMarkers = getCanonicalMotionMarkers(timelinePart).filter((marker) => !isMotionMarkerOnLayerId(marker, layerId));
+    if (motionMarkers.length === getCanonicalMotionMarkers(timelinePart).length) return timelinePart;
+    return { ...timelinePart, ...withCanonicalMotionMarkers(motionMarkers) };
   });
 }
 
-export function isMotionMarkerOnLayerId(marker: ZoomMarker | TranslationMarker, layerId: string) {
+function motionViews(part: Pick<CompositionClip, "motionMarkers">) {
+  return getMotionMarkerViews(part);
+}
+
+export function isMotionMarkerOnLayerId(marker: { layerId?: string }, layerId: string) {
   return marker.layerId === layerId;
 }
 
@@ -304,8 +308,7 @@ export function getScrubSnapBoundaries(timeline: TimelinePart[], adjustmentLayer
   return Array.from(new Set(timeline.flatMap((part) => [
     part.start,
     part.end,
-    ...part.zoomMarkers.flatMap((marker) => [part.start + marker.start, part.start + marker.start + marker.duration]),
-    ...part.translationMarkers.flatMap((marker) => [part.start + marker.start, part.start + marker.start + marker.duration]),
+    ...getCanonicalMotionMarkers(part).flatMap((marker) => [part.start + marker.start, part.start + marker.start + marker.duration]),
   ]).concat(adjustmentLayers.flatMap((layer) => [layer.start, layer.start + layer.duration])))).sort((left, right) => left - right);
 }
 
@@ -313,8 +316,7 @@ export function getMarkerSnapBoundaries(timeline: TimelinePart[], exclude: { kin
   return Array.from(new Set(timeline.flatMap((part) => [
     part.start,
     part.end,
-    ...part.zoomMarkers.flatMap((marker) => (exclude.kind === "zoom" && part.id === exclude.partId && marker.id === exclude.markerId ? [] : [part.start + marker.start, part.start + marker.start + marker.duration])),
-    ...part.translationMarkers.flatMap((marker) => (exclude.kind === "translation" && part.id === exclude.partId && marker.id === exclude.markerId ? [] : [part.start + marker.start, part.start + marker.start + marker.duration])),
+    ...getCanonicalMotionMarkers(part).flatMap((marker) => (getTimelineMarkerKind(marker) === exclude.kind && part.id === exclude.partId && marker.id === exclude.markerId ? [] : [part.start + marker.start, part.start + marker.start + marker.duration])),
   ]))).sort((left, right) => left - right);
 }
 
@@ -322,8 +324,7 @@ export function getTimelineMarkerDragSnapBoundaries(timeline: TimelinePart[], mo
   return Array.from(new Set(timeline.flatMap((part) => [
     part.start,
     part.end,
-    ...part.zoomMarkers.flatMap((marker) => (movingKind === "zoom" && movingKeys.has(`${part.id}:${marker.id}`) ? [] : [part.start + marker.start, part.start + marker.start + marker.duration])),
-    ...part.translationMarkers.flatMap((marker) => (movingKind === "translation" && movingKeys.has(`${part.id}:${marker.id}`) ? [] : [part.start + marker.start, part.start + marker.start + marker.duration])),
+    ...getCanonicalMotionMarkers(part).flatMap((marker) => (getTimelineMarkerKind(marker) === movingKind && movingKeys.has(`${part.id}:${marker.id}`) ? [] : [part.start + marker.start, part.start + marker.start + marker.duration])),
   ]))).sort((left, right) => left - right);
 }
 
@@ -387,7 +388,8 @@ export function getTimelineMarkerGapIntervals(timeline: TimelinePart[], kind: Ti
   return timeline.flatMap((timelinePart) => {
     if (duration > timelinePart.duration) return [];
 
-    const blockers = (kind === "zoom" ? timelinePart.zoomMarkers : timelinePart.translationMarkers)
+    const blockers = getCanonicalMotionMarkers(timelinePart)
+      .filter((marker) => getTimelineMarkerKind(marker) === kind)
       .filter((marker) => !movingKeys.has(`${timelinePart.id}:${marker.id}`))
       .map((marker) => ({ start: timelinePart.start + marker.start, end: timelinePart.start + marker.start + marker.duration }))
       .sort((left, right) => left.start - right.start);
@@ -454,12 +456,17 @@ export function exactMarkerPlacementInTimeline(timeline: TimelinePart[], absolut
 }
 
 export function getMendedMarkerDragItems(timeline: TimelinePart[], part: TimelinePart, markerId: string, kind: TimelineMarkerKind): TimelineMarkerDragItem[] {
-  const sourceMarkers = kind === "zoom" ? part.zoomMarkers : part.translationMarkers;
+  const sourceMarkers = getCanonicalMotionMarkers(part).filter((marker) => getTimelineMarkerKind(marker) === kind);
   const targetMarker = sourceMarkers.find((marker) => marker.id === markerId);
   if (!targetMarker) return [];
-  const targetMendKey = kind === "zoom" ? getZoomMarkerMendKey(targetMarker as ZoomMarker) : getTranslationMarkerMendKey(targetMarker as TranslationMarker);
-  const markers = timeline.flatMap((timelinePart) => (kind === "zoom" ? timelinePart.zoomMarkers : timelinePart.translationMarkers)
-    .filter((marker) => (kind === "zoom" ? getZoomMarkerMendKey(marker as ZoomMarker) : getTranslationMarkerMendKey(marker as TranslationMarker)) === targetMendKey)
+  const targetViews = getMotionMarkerViews({ motionMarkers: [targetMarker] });
+  const targetMendKey = kind === "zoom" ? getZoomMarkerMendKey(targetViews.zoomMarkers[0]) : getTranslationMarkerMendKey(targetViews.translationMarkers[0]);
+  const markers = timeline.flatMap((timelinePart) => getCanonicalMotionMarkers(timelinePart)
+    .filter((marker) => getTimelineMarkerKind(marker) === kind)
+    .filter((marker) => {
+      const markerViews = getMotionMarkerViews({ motionMarkers: [marker] });
+      return (kind === "zoom" ? getZoomMarkerMendKey(markerViews.zoomMarkers[0]) : getTranslationMarkerMendKey(markerViews.translationMarkers[0])) === targetMendKey;
+    })
     .map((marker) => ({ partId: timelinePart.id, marker, absoluteStart: timelinePart.start + marker.start })));
   const sortedMarkers = [...markers].sort((left, right) => left.absoluteStart - right.absoluteStart);
   const markerIndex = sortedMarkers.findIndex((item) => item.partId === part.id && item.marker.id === markerId);

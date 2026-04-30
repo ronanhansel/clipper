@@ -1,17 +1,18 @@
 import { defaultTimelineLayerState, defaultTimelineViewportState, replacePartInProject } from "../../../core/project";
-import type { AdjustmentLayer, EditorState, Part, ProjectManifest, TimelineLayerState, TimelineMode, TimelineViewportState, TranslationMarker, ZoomMarker } from "../../../core/types";
+import { getCanonicalMotionMarkers, motionBlocksToMotionMarkers, motionBlocksToTranslationMarkers, motionBlocksToZoomMarkers } from "../../../core/motionEffects";
+import type { AdjustmentLayer, EditorState, MotionMarker, Part, ProjectManifest, TimelineLayerState, TimelineMode, TimelineViewportState, TranslationMarker, ZoomMarker } from "../../../core/types";
 import { timelineClipFromPart } from "./timelineLayerHelpers";
 
 type UpdateProject = (updater: ProjectManifest | ((current: ProjectManifest) => ProjectManifest), options?: { history?: boolean; syncSources?: boolean; coalesceHistory?: boolean }) => void;
 type UpdateEditorState = (updater: (state: EditorState) => EditorState, options?: { history?: boolean; coalesceHistory?: boolean }) => void;
+export type SceneMotionMarkerUpdate = { zoomMarkers: ZoomMarker[]; translationMarkers: TranslationMarker[] } | { motionMarkers: MotionMarker[] };
 
 type UseTimelineProjectActionsInput = {
   scene: {
     id: string;
     compositions: Part[];
     adjustmentLayers?: AdjustmentLayer[];
-    translationMarkers?: TranslationMarker[];
-    zoomMarkers?: ZoomMarker[];
+    motionMarkers?: MotionMarker[];
   };
   timelineMode: TimelineMode;
   updateEditorState: UpdateEditorState;
@@ -30,13 +31,17 @@ export function useTimelineProjectActions({ scene, timelineMode, updateEditorSta
     });
   }
 
-  function updateSceneMotionMarkers(updater: (markers: { zoomMarkers: ZoomMarker[]; translationMarkers: TranslationMarker[] }) => { zoomMarkers: ZoomMarker[]; translationMarkers: TranslationMarker[] }) {
+  function updateSceneMotionMarkers(updater: (markers: { zoomMarkers: ZoomMarker[]; translationMarkers: TranslationMarker[] }) => SceneMotionMarkerUpdate) {
     updateProject((current) => {
       const currentTimeline = current.timelines?.find((timeline) => timeline.id === scene.id);
-      const nextMarkers = updater({ zoomMarkers: currentTimeline?.zoomMarkers ?? scene.zoomMarkers ?? [], translationMarkers: currentTimeline?.translationMarkers ?? scene.translationMarkers ?? [] });
+      const currentMotionMarkers = getCanonicalMotionMarkers(currentTimeline ?? scene);
+      const currentZoomMarkers = motionBlocksToZoomMarkers(currentMotionMarkers);
+      const currentTranslationMarkers = motionBlocksToTranslationMarkers(currentMotionMarkers);
+      const nextMarkers = updater({ zoomMarkers: currentZoomMarkers, translationMarkers: currentTranslationMarkers });
+      const nextMotionMarkers = "motionMarkers" in nextMarkers ? nextMarkers.motionMarkers : motionBlocksToMotionMarkers([...nextMarkers.zoomMarkers, ...nextMarkers.translationMarkers]);
       return {
         ...current,
-        timelines: (current.timelines ?? []).map((timeline) => (timeline.id === scene.id ? { ...timeline, zoomMarkers: nextMarkers.zoomMarkers, translationMarkers: nextMarkers.translationMarkers } : timeline)),
+        timelines: (current.timelines ?? []).map((timeline) => (timeline.id === scene.id ? { ...timeline, motionMarkers: nextMotionMarkers } : timeline)),
       };
     });
   }

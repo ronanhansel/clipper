@@ -40,8 +40,7 @@ describe("defineChart", () => {
       background: { id: "background", name: "Background", style: { background: "#000" }, elements: [] },
       objects: [],
       snapshot: [],
-      zoomMarkers: [],
-      translationMarkers: [],
+      motionMarkers: [],
     };
 
     const part = await compositionFromSource(basePart, `
@@ -78,8 +77,7 @@ describe("defineChart", () => {
       background: { id: "background", name: "Background", style: { background: "#000" }, elements: [] },
       objects: [],
       snapshot: [],
-      zoomMarkers: [],
-      translationMarkers: [],
+      motionMarkers: [],
     };
 
     const part = await compositionFromSource(basePart, `
@@ -129,8 +127,7 @@ describe("defineChart", () => {
       background: { id: "background", name: "Background", style: { background: "#000" }, elements: [] },
       objects: [],
       snapshot: [],
-      zoomMarkers: [],
-      translationMarkers: [],
+      motionMarkers: [],
     };
 
     await expect(compositionFromSource(basePart, `
@@ -155,8 +152,7 @@ describe("defineChart", () => {
       background: { id: "background", name: "Background", style: { background: "#000" }, elements: [] },
       objects: [],
       snapshot: [],
-      zoomMarkers: [],
-      translationMarkers: [],
+      motionMarkers: [],
     };
 
     await expect(compositionFromSource(basePart, `
@@ -185,8 +181,7 @@ describe("defineChart", () => {
         { id: "generated-panel", name: "Generated Panel", type: "rect", selector: "[data-object-id='generated-panel']", bounds: { x: 0, y: 0, width: 100, height: 100 }, style: { background: "#111" } },
       ],
       snapshot: [],
-      zoomMarkers: [],
-      translationMarkers: [],
+      motionMarkers: [],
     });
 
     expect(source).toContain("class GeneratedCompositionObjects extends Component");
