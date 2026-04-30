@@ -57,6 +57,50 @@ export type MotionTrack = {
   y?: readonly [number, number];
 };
 
+export type LayerAnimation = {
+  id: string;
+  name?: string;
+  target?: "self" | "children";
+  keyframes: {
+    opacity?: readonly [number, number] | readonly [number, number, number, ...number[]];
+    x?: readonly [number, number] | readonly [number, number, number, ...number[]];
+    y?: readonly [number, number] | readonly [number, number, number, ...number[]];
+    z?: readonly [number, number] | readonly [number, number, number, ...number[]];
+    scale?: readonly [number, number] | readonly [number, number, number, ...number[]];
+    scaleX?: readonly [number, number] | readonly [number, number, number, ...number[]];
+    scaleY?: readonly [number, number] | readonly [number, number, number, ...number[]];
+    rotate?: readonly [number, number] | readonly [number, number, number, ...number[]];
+    rotateX?: readonly [number, number] | readonly [number, number, number, ...number[]];
+    rotateY?: readonly [number, number] | readonly [number, number, number, ...number[]];
+    rotateZ?: readonly [number, number] | readonly [number, number, number, ...number[]];
+    skewX?: readonly [number, number] | readonly [number, number, number, ...number[]];
+    skewY?: readonly [number, number] | readonly [number, number, number, ...number[]];
+    transformPerspective?: readonly [number, number] | readonly [number, number, number, ...number[]];
+    backgroundColor?: readonly [string, string] | readonly string[];
+    color?: readonly [string, string] | readonly string[];
+    pathOffset?: readonly [number, number];
+    pathLength?: readonly [number, number];
+    pathSpacing?: readonly [number, number];
+  };
+  options: {
+    delay?: number;
+    duration: number;
+    ease?: MotionEase | readonly [number, number, number, number];
+    type?: "tween" | "spring" | "inertia";
+    repeat?: number;
+    repeatType?: "loop" | "reverse" | "mirror";
+    repeatDelay?: number;
+    bounce?: number;
+    stiffness?: number;
+    damping?: number;
+    mass?: number;
+    velocity?: number;
+  };
+  enabled?: boolean;
+};
+
+export type LayerAnimationMode = "low-code-motion" | "custom-html" | "css-animation" | "code-driven-motion" | "static";
+
 export type FrameObject = {
   id: string;
   name: string;
@@ -70,6 +114,9 @@ export type FrameObject = {
   style: Record<string, string | number>;
   motion?: MotionTrack;
   layoutId?: string;
+  hidden?: boolean;
+  locked?: boolean;
+  animations?: LayerAnimation[];
 };
 
 export type PartFrame = {
@@ -84,6 +131,9 @@ export type BackgroundLayer = {
   style: Record<string, string | number>;
   stretchToElements?: boolean;
   motion?: MotionTrack;
+  hidden?: boolean;
+  locked?: boolean;
+  animations?: LayerAnimation[];
   elements: FrameObject[];
 };
 

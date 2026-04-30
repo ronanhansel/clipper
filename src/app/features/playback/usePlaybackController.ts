@@ -166,9 +166,13 @@ export function usePlaybackController({
 
     currentSceneTimeRef.current = nextTime;
     if (isPlayingRef.current) updatePlaybackClock({ startedAt: performance.now(), startedFrom: nextTime });
-    if (!timelineScrubbingRef.current || useLocalPlaybackLabels) syncPlaybackDom(nextTime);
-    else syncFrameVisualAdjustmentDom(nextTime);
 
+    if (timelineScrubbingRef.current) {
+      syncFrameVisualAdjustmentDom(nextTime);
+      return;
+    }
+
+    syncPlaybackDom(nextTime);
     pendingScrubTimeRef.current = nextTime;
     if (scrubFrameRef.current) return;
 
@@ -177,12 +181,7 @@ export function usePlaybackController({
       const committedTime = pendingScrubTimeRef.current;
       pendingScrubTimeRef.current = null;
       if (committedTime === null) return;
-      if (!timelineScrubbingRef.current) commitPlayheadEditorState(committedTime);
-      if (timelineScrubbingRef.current) {
-        setCurrentSceneTime(committedTime);
-        return;
-      }
-
+      commitPlayheadEditorState(committedTime);
       startTransition(() => setCurrentSceneTime(committedTime));
     });
   }

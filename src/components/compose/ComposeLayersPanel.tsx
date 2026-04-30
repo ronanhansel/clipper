@@ -1,5 +1,4 @@
-import { FlowArrowIcon } from "@phosphor-icons/react";
-import { Braces, ChartNoAxesColumn, ChevronRight, Code2, Frame, Image, Layers, Palette, PenTool, Type } from "lucide-react";
+import { Braces, ChartNoAxesColumn, ChevronRight, Code2, Eye, EyeOff, Frame, Image, Layers, Lock, Palette, PenTool, Type, Unlock } from "lucide-react";
 import type { MouseEvent, PointerEvent, ReactNode, Ref } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Tree, type CursorProps, type DragPreviewProps, type MoveHandler, type NodeApi, type NodeRendererProps, type RowRendererProps, type TreeApi } from "react-arborist";
@@ -20,7 +19,7 @@ export type ComposeLayerNode = {
   children?: ComposeLayerNode[];
 };
 
-export function ComposeLayersPanel({ part, selectedObjectIds, onSelectObjects, onHoverObject, onReorderObjects }: { part: Part; selectedObjectIds: string[]; onSelectObjects: (objects: FrameObject[]) => void; onHoverObject: (object: FrameObject | null) => void; onReorderObjects: (objectIds: string[], targetIndex: number) => void }) {
+export function ComposeLayersPanel({ part, selectedObjectIds, onSelectObjects, onHoverObject, onReorderObjects, onToggleLayerHidden, onToggleLayerLocked }: { part: Part; selectedObjectIds: string[]; onSelectObjects: (objects: FrameObject[]) => void; onHoverObject: (object: FrameObject | null) => void; onReorderObjects: (objectIds: string[], targetIndex: number) => void; onToggleLayerHidden?: (layerId: string) => void; onToggleLayerLocked?: (layerId: string) => void }) {
   const [openById, setOpenById] = useState<Record<string, boolean>>({ root: true, frame: true, background: true, objects: true });
   const [selectedLayerIds, setSelectedLayerIds] = useState<string[]>(selectedObjectIds);
   const [dropCursorVisible, setDropCursorVisible] = useState(false);
@@ -172,7 +171,11 @@ export function ComposeLayersPanel({ part, selectedObjectIds, onSelectObjects, o
   }
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col overflow-hidden" onPointerLeave={() => onHoverObject(null)}>
+    <section className="flex min-h-0 flex-1 flex-col overflow-hidden" onPointerLeave={() => onHoverObject(null)} onPointerDown={(event) => {
+      if (event.target instanceof HTMLElement && !isComposeLayerInteractiveTarget(event.target)) {
+        selectLayerNodes([]);
+      }
+    }}>
       <div className="mb-3 grid gap-1.5">
         <h2 className="text-[13px] font-extrabold tracking-normal text-[#9b9da7]">Layers</h2>
       </div>
@@ -194,7 +197,7 @@ export function ComposeLayersPanel({ part, selectedObjectIds, onSelectObjects, o
           renderDragPreview={(previewProps) => <ComposeLayerDragPreview {...previewProps} onDragPositionChange={updateDragPosition} />}
           renderRow={(rowProps) => <ComposeLayerTreeRow {...rowProps} onClick={handleRowClick} />}
         >
-          {(props) => <ComposeLayerRow {...props} openById={openById} onHoverObject={onHoverObject} onSelectLayer={selectLayerFromPointer} onToggleLayer={toggleLayerNode} selectedLayerIds={selectedLayerIds} />}
+          {(props) => <ComposeLayerRow {...props} openById={openById} onHoverObject={onHoverObject} onSelectLayer={selectLayerFromPointer} onToggleLayer={toggleLayerNode} selectedLayerIds={selectedLayerIds} onToggleLayerHidden={onToggleLayerHidden} onToggleLayerLocked={onToggleLayerLocked} selectForDrag={(node: NodeApi<ComposeLayerNode>) => { arboristTreeRef.current?.setSelection({ ids: [node.id], anchor: node.id, mostRecent: node.id }); }} />}
         </Tree>
         </div>
       </div>
@@ -211,26 +214,43 @@ function ComposeLayerTreeRow(props: RowRendererProps<ComposeLayerNode> & { onCli
   return <div {...props.attrs} ref={props.innerRef as Ref<HTMLDivElement>} onFocus={(event) => event.stopPropagation()} onClick={(event) => props.onClick(event, props.node)}>{props.children as ReactNode}</div>;
 }
 
-function ComposeLayerRow({ dragHandle, node, style, openById, selectedLayerIds, onHoverObject, onSelectLayer, onToggleLayer }: NodeRendererProps<ComposeLayerNode> & { openById: Record<string, boolean>; selectedLayerIds: string[]; onHoverObject: (object: FrameObject | null) => void; onSelectLayer: (event: PointerEvent<HTMLDivElement>, node: NodeApi<ComposeLayerNode>) => void; onToggleLayer: (node: NodeApi<ComposeLayerNode>) => void }) {
+function ComposeLayerRow({ dragHandle, node, style, openById, selectedLayerIds, onHoverObject, onSelectLayer, onToggleLayer, onToggleLayerHidden, onToggleLayerLocked, selectForDrag }: NodeRendererProps<ComposeLayerNode> & { openById: Record<string, boolean>; selectedLayerIds: string[]; onHoverObject: (object: FrameObject | null) => void; onSelectLayer: (event: PointerEvent<HTMLDivElement>, node: NodeApi<ComposeLayerNode>) => void; onToggleLayer: (node: NodeApi<ComposeLayerNode>) => void; onToggleLayerHidden?: (layerId: string) => void; onToggleLayerLocked?: (layerId: string) => void; selectForDrag?: (node: NodeApi<ComposeLayerNode>) => void }) {
   const data = node.data;
   const selected = selectedLayerIds.includes(data.id);
   const expanded = openById[node.id] ?? node.isOpen;
+  const hidden = data.object?.hidden;
+  const locked = data.object?.locked;
 
   return (
     <div
       ref={data.kind === "object" ? dragHandle : undefined}
       data-compose-layer-row="true"
-      className={`group flex h-full items-center gap-2 border border-transparent px-2 py-0 text-[12px] font-bold leading-none transition ${selected ? "bg-[rgb(var(--clipper-accent-rgb)/0.16)] text-white" : "text-[#dfe2ea] hover:bg-[#1a1d26]"}`}
+      className={`group flex h-full items-center gap-2 border border-transparent px-2 py-0 text-[12px] font-bold leading-none transition ${selected ? "bg-[rgb(var(--clipper-accent-rgb)/0.16)] text-white" : "text-[#dfe2ea] hover:bg-[#1a1d26]"} ${hidden ? "opacity-50" : ""}`}
       style={style}
       onPointerEnter={() => onHoverObject(data.object ?? null)}
+      onPointerDownCapture={data.kind === "object" && selectForDrag ? (event) => {
+        if (!event.shiftKey && !event.metaKey && !event.ctrlKey && !selectedLayerIds.includes(data.id)) {
+          if (event.button !== 0) return;
+          selectForDrag(node);
+        }
+      } : undefined}
       onPointerDown={(event) => onSelectLayer(event, node)}
     >
       <button className={`grid h-full w-5 shrink-0 place-items-center rounded text-[#737884] ${node.isInternal ? "" : "pointer-events-none opacity-0"}`} onClick={(event) => { event.stopPropagation(); onToggleLayer(node); }} tabIndex={node.isInternal ? 0 : -1}>
         <ChevronRight size={13} className={`transition-transform ${expanded ? "rotate-90" : ""}`} />
       </button>
       <LayerIcon node={data} />
-      <span className="min-w-0 flex-1 truncate" title={data.name}>{data.name}</span>
-      {data.animated ? <FlowArrowIcon size={14} weight="bold" className="shrink-0 text-[#858995]" aria-label="Animated layer" /> : null}
+      <span className={`min-w-0 flex-1 truncate ${data.animated ? "text-[#5599ff]" : ""}`} title={data.name}>{data.name}</span>
+      {data.object ? (
+        <>
+          <button className={`grid h-full w-5 shrink-0 place-items-center rounded transition ${hidden ? "text-[#737884]" : "opacity-0 group-hover:opacity-100 text-[#737884] hover:bg-[#20232c] hover:text-white"}`} title={hidden ? "Show layer" : "Hide layer"} onClick={(event) => { event.stopPropagation(); onToggleLayerHidden?.(data.id); }} onPointerDown={(event) => { event.stopPropagation(); }}>
+            {hidden ? <EyeOff size={12} /> : <Eye size={12} />}
+          </button>
+          <button className={`grid h-full w-5 shrink-0 place-items-center rounded transition ${locked ? "text-white" : "opacity-0 group-hover:opacity-100 text-[#737884] hover:bg-[#20232c] hover:text-white"}`} title={locked ? "Unlock layer" : "Lock layer"} onClick={(event) => { event.stopPropagation(); onToggleLayerLocked?.(data.id); }} onPointerDown={(event) => { event.stopPropagation(); }}>
+            {locked ? <Lock size={12} /> : <Unlock size={12} />}
+          </button>
+        </>
+      ) : null}
     </div>
   );
 }
@@ -305,7 +325,7 @@ function buildComposeLayerTree(part: Part): ComposeLayerNode[] {
       id: "background",
       name: part.background.name || "Background",
       kind: "background",
-      animated: Boolean(part.background.motion),
+      animated: Boolean(part.background.motion || part.background.animations?.length),
       children: backgroundChildren.length > 0 ? backgroundChildren : undefined,
     },
     { id: "frame", name: `${part.frame.width} x ${part.frame.height} Frame`, kind: "frame" },
@@ -317,7 +337,7 @@ function objectToNode(object: FrameObject, kind: Extract<ComposeLayerKind, "back
     id: object.id,
     name: object.name || object.id,
     kind,
-    animated: Boolean(object.motion),
+    animated: Boolean(object.motion || object.animations?.length),
     object,
   };
 }

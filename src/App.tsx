@@ -50,7 +50,7 @@ import type { AdjustmentEffectPointControl } from "./core/effects/types";
 import { defaultComposeLayoutState, defaultEditorLayoutState, defaultPreviewViewportState, defaultTimelineLayerState, defaultTimelineMode, defaultTimelineViewportState } from "./core/project";
 import { getExecutableAdjustmentLayers, getTranslationMarkerLayerId, getZoomMarkerLayerId } from "./core/timeline";
 import type { TimelineLayerCategory } from "./core/timelineLayers";
-import { FRAME_HEIGHT, FRAME_WIDTH, type Bounds, type CompositionClip, type EditorState, type FrameObject, type MotionEffectKind, type Part, type Point, type ProjectManifest, type SelectionPayload, type TimelineClip, type TimelineLayerState, type TimelineMotionLayerKind, type TimelineViewportState } from "./core/types";
+import { FRAME_HEIGHT, FRAME_WIDTH, type Bounds, type CompositionClip, type EditorState, type FrameObject, type LayerAnimation, type MotionEffectKind, type Part, type Point, type ProjectManifest, type SelectionPayload, type TimelineClip, type TimelineLayerState, type TimelineMotionLayerKind, type TimelineViewportState } from "./core/types";
 
 const defaultEditorState: EditorState = {
   timeline: defaultTimelineViewportState,
@@ -553,7 +553,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   useEffect(() => {
     function clearFrameSelectionOnOutsidePointer(event: globalThis.PointerEvent) {
       const target = event.target as HTMLElement | null;
-      if (isCodeEditorTarget(target) || isInspectorTarget(target) || isSelectPopoverTarget(target) || isComposeLayersTarget(target)) return;
+      if (isCodeEditorTarget(target) || isInspectorTarget(target) || isSelectPopoverTarget(target) || isComposeLayersTarget(target) || isTimelineTarget(target)) return;
       if (frameViewportRef.current?.contains(event.target as Node)) return;
       setEditingTextObjectId(null);
       setSelectedObjectId(null);
@@ -717,6 +717,46 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
 
   function updateComposeBackgroundMotion(updater: (motion: Part["background"]["motion"] | undefined, background: Part["background"]) => Part["background"]["motion"] | undefined) {
     updatePartBackground((background) => ({ ...background, motion: updater(background.motion, background) }));
+  }
+
+  function updateComposeObjectAnimation(objectId: string, updater: (animations: LayerAnimation[]) => LayerAnimation[]) {
+    updateObjectById(objectId, (object) => ({ ...object, animations: updater(object.animations ?? []) }));
+  }
+
+  function updateComposeBackgroundAnimation(updater: (animations: LayerAnimation[]) => LayerAnimation[]) {
+    updatePartBackground((background) => ({ ...background, animations: updater(background.animations ?? []) }));
+  }
+
+  function toggleComposeLayerHidden(layerId: string) {
+    if (part.background.id === layerId) {
+      updatePartBackground((background) => ({ ...background, hidden: !background.hidden || undefined }));
+      return;
+    }
+    const element = part.background.elements.find((el) => el.id === layerId);
+    if (element) {
+      updatePartBackground((background) => ({
+        ...background,
+        elements: background.elements.map((el) => el.id === layerId ? { ...el, hidden: !el.hidden || undefined } : el),
+      }));
+      return;
+    }
+    updateObjectById(layerId, (object) => ({ ...object, hidden: !object.hidden || undefined }));
+  }
+
+  function toggleComposeLayerLocked(layerId: string) {
+    if (part.background.id === layerId) {
+      updatePartBackground((background) => ({ ...background, locked: !background.locked || undefined }));
+      return;
+    }
+    const element = part.background.elements.find((el) => el.id === layerId);
+    if (element) {
+      updatePartBackground((background) => ({
+        ...background,
+        elements: background.elements.map((el) => el.id === layerId ? { ...el, locked: !el.locked || undefined } : el),
+      }));
+      return;
+    }
+    updateObjectById(layerId, (object) => ({ ...object, locked: !object.locked || undefined }));
   }
 
   function renameComposeAnimationLayer(layerId: string, name: string) {
@@ -1090,6 +1130,8 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
           onLeftPanelTabChange={setLeftPanelTab}
           onReorderComposeObjects={reorderComposeObjects}
           onSelectComposeLayerObjects={selectComposeLayerObjects}
+          onToggleComposeLayerHidden={toggleComposeLayerHidden}
+          onToggleComposeLayerLocked={toggleComposeLayerLocked}
         />
 
         <CenterPreviewPane
@@ -1239,6 +1281,8 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
         onRenameComposeAnimationLayer: renameComposeAnimationLayer,
         onUpdateComposeBackgroundMotion: updateComposeBackgroundMotion,
         onUpdateComposeObjectMotion: updateComposeObjectMotion,
+        onUpdateComposeBackgroundAnimation: updateComposeBackgroundAnimation,
+        onUpdateComposeObjectAnimation: updateComposeObjectAnimation,
       }}>
         <ConnectedTimelinePanel />
       </TimelineProvider>
@@ -1293,4 +1337,8 @@ function isSelectPopoverTarget(target: HTMLElement | null) {
 
 function isComposeLayersTarget(target: HTMLElement | null) {
   return Boolean(target?.closest("[data-compose-layers-panel]"));
+}
+
+function isTimelineTarget(target: HTMLElement | null) {
+  return Boolean(target?.closest("[data-timeline-panel]"));
 }

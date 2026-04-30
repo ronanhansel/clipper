@@ -28,7 +28,7 @@ export function createSelectionPayload(selectionBox: Bounds, objects: FrameObjec
   return {
     selectionBox,
     coordinates: boundsToPoints(selectionBox),
-    objects: objects.filter((object) => intersects(selectionBox, object.bounds)).map((object) => ({
+    objects: objects.filter((object) => !object.hidden && !object.locked && intersects(selectionBox, object.bounds)).map((object) => ({
       id: object.id,
       name: object.name,
       selector: object.selector,

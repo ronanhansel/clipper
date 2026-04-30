@@ -74,6 +74,8 @@ export type TimelinePanelProps = {
   onRenameComposeAnimationLayer?: (layerId: string, name: string) => void;
   onUpdateComposeBackgroundMotion?: (updater: (motion: MotionTrack | undefined, background: BackgroundLayer) => MotionTrack | undefined) => void;
   onUpdateComposeObjectMotion?: (objectId: string, updater: (motion: MotionTrack | undefined, object: FrameObject) => MotionTrack | undefined) => void;
+  onUpdateComposeBackgroundAnimation?: (updater: (animations: import("../../core/types").LayerAnimation[]) => import("../../core/types").LayerAnimation[]) => void;
+  onUpdateComposeObjectAnimation?: (objectId: string, updater: (animations: import("../../core/types").LayerAnimation[]) => import("../../core/types").LayerAnimation[]) => void;
 };
 
 export type EffectDragPreview = {

@@ -48,7 +48,7 @@ export type TimelineShellProps = {
 
 export function TimelineShell({ contentWidth, currentTime, displayDuration, dragActive = false, emptyContent, laneContentHeight, laneRowsStyle, layerRailWidth, playheadColor = "#ff3b30", refs, timelineName, timelineViewportDisplacement, timelineZoom, ticks, activeMode, onModeChange, onTimelineViewportScroll, onTimelineViewportDragLeave, onTimelineZoomChange, onLayerRailWheel, rulerHandlers, renderLayerRail, renderTimelineViewport }: TimelineShellProps) {
   return (
-    <footer ref={refs.timelinePanelRef} className={`grid h-full min-h-0 select-none grid-rows-[34px_minmax(0,1fr)] gap-1.5 overflow-hidden border-t border-[#1d2028] bg-[#141821] px-[22px] pb-0 pt-2.5 ${dragActive ? "clipper-timeline-dragging-no-hover" : ""}`}>
+    <footer ref={refs.timelinePanelRef} data-timeline-panel className={`grid h-full min-h-0 select-none grid-rows-[34px_minmax(0,1fr)] gap-1.5 overflow-hidden border-t border-[#1d2028] bg-[#141821] px-[22px] pb-0 pt-2.5 ${dragActive ? "clipper-timeline-dragging-no-hover" : ""}`}>
       <div className="grid grid-cols-[auto_1fr_auto] items-center gap-4 text-[12px] text-[#9b9da7]">
         <div className="flex rounded-full border border-[#2d313b] bg-[#111319] p-1" aria-label="Timeline mode">
           <button className={`rounded-full px-3 py-1 text-xs font-extrabold transition ${activeMode === "compose" ? "bg-[var(--clipper-accent)] text-[var(--clipper-accent-foreground)]" : "text-[#9b9da7] hover:text-white"}`} onClick={() => onModeChange("compose")}>Compose</button>
@@ -62,7 +62,7 @@ export function TimelineShell({ contentWidth, currentTime, displayDuration, drag
           <button className="grid h-8 w-8 place-items-center rounded-[9px] border border-[#2d313b] bg-[#14161c] text-[#dfe2ea] hover:border-[var(--clipper-accent)]" title="Zoom timeline in" onClick={() => onTimelineZoomChange(roundTenth(timelineZoom + 0.25))}><Plus size={14} /></button>
         </div>
       </div>
-      <div ref={refs.playbackPlayheadRef} className="relative grid h-full min-h-0 max-h-full grid-rows-[38px_minmax(0,1fr)] overflow-hidden" style={{ "--clipper-playhead-left": `${displayDuration > 0 ? (currentTime / displayDuration) * 100 : 0}%`, "--clipper-timeline-scroll-x": `${-(refs.timelineViewportRef.current?.scrollLeft ?? timelineViewportDisplacement)}px` } as CSSProperties}>
+      <div ref={refs.playbackPlayheadRef} className="relative grid h-full min-h-0 max-h-full grid-rows-[38px_minmax(0,1fr)] overflow-hidden" style={{ "--clipper-timeline-scroll-x": `${-(refs.timelineViewportRef.current?.scrollLeft ?? timelineViewportDisplacement)}px` } as CSSProperties}>
         <div className="pointer-events-none absolute right-0 top-0 z-30 overflow-hidden pl-0 pr-3" style={{ left: layerRailWidth, height: 38 + laneContentHeight }}>
           <div className="relative" style={{ width: contentWidth, height: 38 + laneContentHeight, transform: "translate3d(var(--clipper-timeline-scroll-x, 0px), 0, 0)", willChange: "transform" }}>
             <div ref={refs.timelineSnapGuideRef} className="pointer-events-none absolute top-0 z-20 hidden w-px bg-white/90 shadow-[0_0_0_1px_rgba(255,255,255,0.2),0_0_12px_rgba(255,255,255,0.35)]" style={{ height: 38 + laneContentHeight, transform: "translate3d(0, 0, 0)" }} />

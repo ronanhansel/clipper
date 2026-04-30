@@ -463,7 +463,7 @@ export function useFrameInteractionController(params: FrameInteractionController
   }
 
   function startObjectDrag(event: ReactPointerEvent<HTMLDivElement>, object: FrameObject) {
-    if (mode !== "interactive" || !canSelectFrameObjects) return;
+    if (mode !== "interactive" || !canSelectFrameObjects || object.locked) return;
     if (focusPickZoomMarker || positionPickTranslationMarker) return;
     setEditingTextObjectId(null);
     event.stopPropagation();
@@ -527,7 +527,7 @@ export function useFrameInteractionController(params: FrameInteractionController
   }
 
   function startTextObjectEdit(event: ReactMouseEvent<HTMLDivElement>, object: FrameObject) {
-    if (mode !== "interactive" || object.type !== "text" || !canSelectFrameObjects) return;
+    if (mode !== "interactive" || object.type !== "text" || !canSelectFrameObjects || object.locked) return;
     event.preventDefault();
     event.stopPropagation();
     setSelectedObjectId(object.id);

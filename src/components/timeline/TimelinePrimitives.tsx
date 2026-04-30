@@ -1,6 +1,4 @@
-import { Eye, EyeOff, Lock, MoreHorizontal, Unlock } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type DragEvent, type MouseEvent as ReactMouseEvent, type PointerEvent, type ReactNode, type RefObject } from "react";
-import { createPortal } from "react-dom";
+import { type CSSProperties, type DragEvent, type MouseEvent as ReactMouseEvent, type PointerEvent, type ReactNode, type RefObject } from "react";
 import { getEffectPackage } from "../../core/effects/registry";
 import type { EffectTimelineGradient } from "../../core/types";
 import { Input } from "../ui/input";
@@ -45,75 +43,9 @@ export function CompositionTimelineBlock({ blockRef, name, duration, isEmpty, so
 }
 
 export function LayerLabel({ name, draft, editing, hidden, locked, compactControls, hideLockControl, menuOpen, canMoveDown = true, canMoveUp = true, addAfterLabel = "Add layer below", addBeforeLabel = "Add layer above", removeLabel = "Remove layer", onAddAfter, onAddBefore, onCancel, onCommit, onDraftChange, onEdit, onEffectDragOver, onEffectDrop, onMenuToggle, onMoveDown, onMoveUp, onRemove, onToggleHidden, onToggleLocked }: { name: string; draft: string; editing: boolean; hidden: boolean; locked: boolean; compactControls: boolean; hideLockControl: boolean; menuOpen?: boolean; canMoveDown?: boolean; canMoveUp?: boolean; addAfterLabel?: string; addBeforeLabel?: string; removeLabel?: string; onAddAfter?: () => void; onAddBefore?: () => void; onCancel: () => void; onCommit: () => void; onDraftChange: (value: string) => void; onEdit: () => void; onEffectDragOver?: (event: DragEvent<HTMLDivElement>) => void; onEffectDrop?: (event: DragEvent<HTMLDivElement>) => void; onMenuToggle?: () => void; onMoveDown?: () => void; onMoveUp?: () => void; onRemove?: () => void; onToggleHidden: () => void; onToggleLocked: () => void }) {
-  const menuButtonRef = useRef<HTMLButtonElement | null>(null);
-  const menuRef = useRef<HTMLDivElement | null>(null);
-  const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
-
-  useLayoutEffect(() => {
-    if (!menuOpen) {
-      setMenuPosition(null);
-      return;
-    }
-
-    function updateMenuPosition() {
-      const buttonRect = menuButtonRef.current?.getBoundingClientRect();
-      const menuRect = menuRef.current?.getBoundingClientRect();
-      if (!buttonRect || !menuRect) return;
-
-      const gap = 6;
-      const margin = 8;
-      let x = buttonRect.right - menuRect.width;
-      let y = buttonRect.bottom + gap;
-
-      if (x + menuRect.width > window.innerWidth - margin) x = window.innerWidth - menuRect.width - margin;
-      if (x < margin) x = margin;
-      if (y + menuRect.height > window.innerHeight - margin) y = buttonRect.top - menuRect.height - gap;
-      if (y < margin) y = margin;
-
-      setMenuPosition({ x, y });
-    }
-
-    updateMenuPosition();
-    window.addEventListener("resize", updateMenuPosition);
-    window.addEventListener("scroll", updateMenuPosition, true);
-    return () => {
-      window.removeEventListener("resize", updateMenuPosition);
-      window.removeEventListener("scroll", updateMenuPosition, true);
-    };
-  }, [menuOpen]);
-
-  useEffect(() => {
-    if (!menuOpen || !onMenuToggle) return;
-    const closeMenu = onMenuToggle;
-
-    function closeOnOutsidePointer(event: globalThis.PointerEvent) {
-      const target = event.target;
-      if (!(target instanceof Node)) return;
-      if (menuRef.current?.contains(target) || menuButtonRef.current?.contains(target)) return;
-      closeMenu();
-    }
-
-    window.addEventListener("pointerdown", closeOnOutsidePointer);
-    return () => window.removeEventListener("pointerdown", closeOnOutsidePointer);
-  }, [menuOpen, onMenuToggle]);
-
   return (
-    <div className={`relative grid h-full grid-cols-[1fr_auto] items-start gap-2 pr-0 pt-2 transition ${hidden ? "opacity-45" : locked ? "opacity-70" : ""}`} onDragOver={locked ? undefined : onEffectDragOver} onDrop={locked ? undefined : onEffectDrop}>
+    <div className={`relative h-full pt-2 transition ${hidden ? "opacity-45" : locked ? "opacity-70" : ""}`} onDragOver={locked ? undefined : onEffectDragOver} onDrop={locked ? undefined : onEffectDrop}>
       {editing ? <Input autoFocus className="h-7 min-w-0 border-[var(--clipper-accent)] bg-[#111319] text-xs font-bold text-[#dfe2ea]" value={draft} onBlur={onCommit} onChange={(event) => onDraftChange(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") onCommit(); if (event.key === "Escape") onCancel(); }} /> : <button className={`relative min-w-0 overflow-hidden text-ellipsis whitespace-nowrap rounded-md py-1 pl-0 pr-1 text-left text-[12px] font-bold transition before:absolute before:left-0 before:top-1/2 before:h-4 before:w-px before:-translate-y-1/2 before:bg-[var(--clipper-accent)] before:opacity-0 before:transition-opacity ${locked ? "cursor-default text-[#ff6b6b]" : "cursor-text text-[#9b9da7] hover:bg-[#20232c]/70 hover:text-[#dfe2ea] hover:before:opacity-100 focus-visible:bg-[#20232c]/70 focus-visible:outline-none focus-visible:before:opacity-100"}`} title={locked ? "Unlock layer to rename" : "Double-click to rename"} onDoubleClick={locked ? undefined : onEdit}>{name}</button>}
-      <div className="flex flex-col items-start gap-0.5 self-start justify-self-end pr-2">
-        {onMenuToggle ? <button ref={menuButtonRef} data-timeline-control className="grid h-5 w-5 place-items-center rounded text-[#dfe2ea] transition hover:bg-[#20232c] hover:text-[#37d6c2]" title="Layer options" onClick={onMenuToggle}><MoreHorizontal size={13} /></button> : null}
-        {compactControls ? null : <button data-timeline-control className={`grid h-5 w-5 place-items-center rounded transition ${locked ? "text-[#737884]" : "text-[#dfe2ea] hover:bg-[#20232c] hover:text-[#37d6c2]"}`} title={locked ? "Unlock layer before hiding" : hidden ? "Show layer" : "Hide layer"} disabled={locked} onClick={onToggleHidden}>{hidden ? <EyeOff size={12} /> : <Eye size={12} />}</button>}
-        {hideLockControl ? null : <button data-timeline-control className={`grid h-5 w-5 place-items-center rounded transition ${locked ? "bg-[#20232c] text-[#37d6c2]" : "text-[#dfe2ea] hover:bg-[#20232c] hover:text-[#37d6c2]"}`} title={locked ? "Unlock layer" : "Lock layer"} onClick={onToggleLocked}>{locked ? <Lock size={12} /> : <Unlock size={12} />}</button>}
-      </div>
-      {menuOpen && typeof document !== "undefined" ? createPortal(<div ref={menuRef} data-timeline-control className="fixed z-50 grid min-w-[180px] overflow-hidden rounded-xl border border-[#2d313b] bg-[#111319] py-1 text-xs font-bold text-[#dfe2ea] shadow-[0_18px_48px_rgba(0,0,0,0.48)]" style={{ left: menuPosition?.x ?? 0, top: menuPosition?.y ?? 0, visibility: menuPosition ? "visible" : "hidden" }}>
-        <button className="px-3 py-2 text-left hover:bg-[#20232c]" onClick={onToggleLocked}>{locked ? "Unlock layer" : "Lock layer"}</button>
-        <button className="px-3 py-2 text-left hover:bg-[#20232c] disabled:cursor-not-allowed disabled:text-[#737884] disabled:hover:bg-transparent" disabled={locked} onClick={onToggleHidden}>{hidden ? "Enable layer" : "Disable layer"}</button>
-        {onMoveUp && canMoveUp ? <button className="px-3 py-2 text-left hover:bg-[#20232c] disabled:cursor-not-allowed disabled:text-[#737884] disabled:hover:bg-transparent" disabled={locked} onClick={onMoveUp}>Move up</button> : null}
-        {onMoveDown && canMoveDown ? <button className="px-3 py-2 text-left hover:bg-[#20232c] disabled:cursor-not-allowed disabled:text-[#737884] disabled:hover:bg-transparent" disabled={locked} onClick={onMoveDown}>Move down</button> : null}
-        {onAddBefore ? <button className="px-3 py-2 text-left hover:bg-[#20232c] disabled:cursor-not-allowed disabled:text-[#737884] disabled:hover:bg-transparent" disabled={locked} onClick={onAddBefore}>{addBeforeLabel}</button> : null}
-        {onAddAfter ? <button className="px-3 py-2 text-left hover:bg-[#20232c] disabled:cursor-not-allowed disabled:text-[#737884] disabled:hover:bg-transparent" disabled={locked} onClick={onAddAfter}>{addAfterLabel}</button> : null}
-        {onRemove ? <button className="px-3 py-2 text-left text-[#ffb4b4] hover:bg-[#2a1719] disabled:cursor-not-allowed disabled:text-[#73575b] disabled:hover:bg-transparent" disabled={locked} onClick={onRemove}>{removeLabel}</button> : null}
-      </div>, document.body) : null}
     </div>
   );
 }

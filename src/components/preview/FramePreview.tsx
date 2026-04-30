@@ -160,8 +160,8 @@ export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dra
             <div className="absolute inset-0" data-clipper-perspective-stage style={perspectiveStageStyle}>
               {isUnlinkedPart || compHidden ? <div className="absolute inset-0 bg-black" ref={cameraRef} /> : <div className="absolute inset-0 origin-center" ref={cameraRef} style={{ transformStyle: "preserve-3d" }}>
                 <div className="absolute inset-0" data-clipper-visual-adjustments style={visualAdjustmentStyle}>
-                  <BackgroundLayerView animationsEnabled={animationsEnabled} background={part.background} duration={part.duration} previewTime={displayPreviewTime} />
-                  {part.objects.map((object) => (
+                  {!part.background.hidden && <BackgroundLayerView animationsEnabled={animationsEnabled} background={part.background} duration={part.duration} previewTime={displayPreviewTime} />}
+                  {part.objects.filter(obj => !obj.hidden).map((object) => (
                     <FrameObjectView key={object.id} animationsEnabled={animationsEnabled} object={object} canSelect={!isPlaying && (canSelectObjects || trackerPicking)} duration={part.duration} editing={!isPlaying && editingTextObjectId === object.id} focusPicking={!isPlaying && (focusPicking || trackerPicking)} previewTime={displayPreviewTime} onDoubleClick={(event) => { if (!isPlaying) onTextObjectDoubleClick(event, object); }} onPointerDown={(event) => { if (!isPlaying) onObjectPointerDown(event, object); }} onTextEditCommit={(content, richText) => onTextEditCommit(object.id, content, richText)} />
                   ))}
                   <div ref={frameVisualAdjustmentOverlaysRef} className="pointer-events-none absolute inset-0" data-clipper-visual-adjustment-overlays="frame" style={{ zIndex: 2147483647 }} />
@@ -296,8 +296,10 @@ export const FrameObjectView = memo(function FrameObjectView({ animationsEnabled
     selection.addRange(nextRange);
   }
 
+  const isLocked = Boolean(object.locked);
+
   return (
-    <div className={`absolute flex touch-none select-none flex-col justify-center whitespace-pre-line ${object.type === "chart" ? "overflow-visible" : "overflow-hidden"} ${focusPicking ? "cursor-crosshair" : editing ? "cursor-text" : "cursor-default"} ${editing ? "select-text" : ""}`} data-object-id={canSelect ? object.id : undefined} style={style} onDoubleClick={onDoubleClick} onPointerDown={onPointerDown}>
+    <div className={`absolute flex touch-none select-none flex-col justify-center whitespace-pre-line ${object.type === "chart" ? "overflow-visible" : "overflow-hidden"} ${focusPicking ? "cursor-crosshair" : editing ? "cursor-text" : "cursor-default"} ${editing ? "select-text" : ""}`} data-object-id={canSelect && !isLocked ? object.id : undefined} style={{ ...style, ...(isLocked ? { opacity: 0.6 } : {}) }} onDoubleClick={(event) => { if (!isLocked) onDoubleClick(event); }} onPointerDown={(event) => { if (!isLocked) onPointerDown(event); }}>
       {object.type === "text" && editing ? <div ref={editableRef} className="min-h-0 w-full whitespace-pre-wrap outline-none" contentEditable suppressContentEditableWarning onBlur={commitTextEdit} onKeyDown={onTextEditKeyDown} onPointerDown={(event) => event.stopPropagation()} /> : null}
       {object.type === "text" && !editing ? <div className="min-h-0 w-full whitespace-pre-wrap">{renderRichTextSegments(textSegments, Boolean(richText))}</div> : null}
       {object.type === "chart" && object.chart ? <ChartObjectView animationsEnabled={animationsEnabled} object={object} duration={duration} previewTime={previewTime} /> : null}
@@ -436,7 +438,7 @@ export const BackgroundLayerView = memo(function BackgroundLayerView({ animation
   return (
     <div className={`pointer-events-none absolute inset-0 ${background.stretchToElements ? "overflow-visible" : "overflow-hidden"}`} data-layer-id={background.id} style={layerStyle}>
       <div className="absolute" style={fillStyle} />
-      {evaluatedBackground.elements.map((element) => <BackgroundElementView duration={duration} element={element} key={element.id} previewTime={previewTime} />)}
+      {evaluatedBackground.elements.filter((element) => !element.hidden).map((element) => <BackgroundElementView duration={duration} element={element} key={element.id} previewTime={previewTime} />)}
     </div>
   );
 }, areBackgroundLayerPropsEqual);
@@ -455,7 +457,7 @@ export const BackgroundElementView = memo(function BackgroundElementView({ eleme
   const textLines = useMemo(() => content?.split("\n") ?? [], [content]);
 
   return (
-    <div className="absolute flex select-none flex-col justify-center overflow-hidden whitespace-pre-line" data-background-element-id={element.id} style={style}>
+    <div className="absolute flex select-none flex-col justify-center overflow-hidden whitespace-pre-line" data-background-element-id={element.locked ? undefined : element.id} style={{ ...style, ...(element.locked ? { opacity: 0.6 } : {}) }}>
       {element.type === "text" ? textLines.map((line, index) => <span key={`${line}-${index}`}>{line}</span>) : null}
       {element.type === "svg" && content ? <div className="h-full w-full" dangerouslySetInnerHTML={{ __html: content }} /> : null}
       {(element.type === "html" || element.type === "template") && content ? <div className="h-full w-full" dangerouslySetInnerHTML={{ __html: content }} /> : null}

@@ -1,3 +1,4 @@
+import { evaluateLayerAnimations } from "./animations";
 import { FRAME_HEIGHT, FRAME_WIDTH, type BackgroundLayer, type FrameObject, type FrameTemplate, type MotionEase, type MotionTrack, type Point } from "./types";
 
 export type RenderStyle = Record<string, string | number | undefined>;
@@ -35,11 +36,15 @@ const templateCache = new Map<string, (context: TemplateRenderContext) => Templa
 export function evaluateFrameObject(object: FrameObject, time: number, duration: number, options: RenderEvaluationOptions = {}): EvaluatedFrameObject {
   const animationsEnabled = options.animations ?? true;
   const motionStyle = animationsEnabled ? getMotionPreviewAnimation(object.motion, time) : {};
+  const layerAnimationStyle = animationsEnabled && object.animations ? evaluateLayerAnimations(object.animations, time) : {};
   const templateRender = object.template ? renderFrameTemplate(object.template, object, time, duration) : null;
-  const motionTransform = typeof motionStyle.transform === "string" ? motionStyle.transform : "";
+
+  // Merge: layer animation style takes precedence over motion style
+  const mergedMotionStyle = { ...motionStyle, ...layerAnimationStyle };
+  const motionTransform = typeof mergedMotionStyle.transform === "string" ? mergedMotionStyle.transform : "";
   const templateTransform = typeof templateRender?.style?.transform === "string" ? templateRender.style.transform : "";
-  const renderStyle = {
-    ...motionStyle,
+  const renderStyle: RenderStyle = {
+    ...mergedMotionStyle,
     ...templateRender?.style,
   };
   if (motionTransform || templateTransform) renderStyle.transform = `${motionTransform} ${templateTransform}`.trim();
@@ -60,11 +65,12 @@ export function evaluateBackgroundLayer(background: BackgroundLayer, time: numbe
   const fillBounds = getBackgroundLayerFillBounds(background);
   const elements = background.elements.map((element) => evaluateFrameObject(element, time, duration, options));
   const layerMotion = animationsEnabled ? getMotionPreviewAnimation(background.motion, time) : {};
+  const layerAnimationStyle = animationsEnabled && background.animations ? evaluateLayerAnimations(background.animations, time) : {};
 
   return {
     ...background,
     elements,
-    renderStyle: layerMotion,
+    renderStyle: { ...layerMotion, ...layerAnimationStyle },
     fillStyle: {
       ...background.style,
       left: fillBounds.x,
@@ -72,12 +78,12 @@ export function evaluateBackgroundLayer(background: BackgroundLayer, time: numbe
       width: fillBounds.width,
       height: fillBounds.height,
     },
-    timeSensitive: animationsEnabled && (Boolean(background.motion) || elements.some((element) => element.timeSensitive)),
+    timeSensitive: animationsEnabled && (Boolean(background.motion) || Boolean(background.animations?.length) || elements.some((element) => element.timeSensitive)),
   };
 }
 
 export function isTimeSensitiveFrameObject(object: FrameObject) {
-  return Boolean(object.motion) || Boolean(object.template && !object.template.static);
+  return Boolean(object.motion) || Boolean(object.animations?.length) || Boolean(object.template && !object.template.static);
 }
 
 export function renderFrameTemplate(template: FrameTemplate, object: FrameObject, time: number, duration: number) {

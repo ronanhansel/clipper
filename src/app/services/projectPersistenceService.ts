@@ -88,7 +88,7 @@ async function loadZipCompositions(zip: JSZip) {
   const entries = Object.values(zip.files).filter((file) => !file.dir && file.name.startsWith("compositions/") && file.name.endsWith(".ts"));
   return Promise.all(entries.map(async (file) => {
     const source = await file.async("string");
-    const id = getSourceCompositionId(source) ?? file.name.replace(/^compositions\//, "").replace(/\.ts$/, "");
+    const id = getSourceCompositionId(source, file.name.replace(/^compositions\//, ""));
     const baseComposition = createBaseComposition(id, file.name, source);
     return { ...(await compositionFromEmbeddedSource(baseComposition, source)), source } as CompositionDocument;
   }));
@@ -124,15 +124,16 @@ async function saveZipProject(manifestPath: string, project: ProjectManifest) {
   await clipperHost.writeBinaryFile(manifestPath, await zip.generateAsync({ type: "base64", compression: "DEFLATE" }));
 }
 
-function getSourceCompositionId(source: string) {
+function getSourceCompositionId(source: string, fileName: string) {
   const compositionBlock = /export\s+const\s+composition\s*=\s*new\s+Composition\s*\(\s*{([\s\S]*?)\n}\s*\)/.exec(source)?.[1];
-  return /\bid\s*:\s*["'`]([^"'`]+)["'`]/.exec(compositionBlock ?? source)?.[1] ?? null;
+  const sourceId = /\bid\s*:\s*["'`]([^"'`]+)["'`]/.exec(compositionBlock ?? source)?.[1] ?? null;
+  return sourceId ?? fileName.replace(/\.ts$/, "");
 }
 
 function createBaseComposition(id: string, filePath: string, source: string): CompositionDocument {
   return {
     id,
-    name: titleFromId(id),
+    name: id,
     filePath,
     source,
     duration: 5,
@@ -142,10 +143,6 @@ function createBaseComposition(id: string, filePath: string, source: string): Co
     snapshot: [],
     motionMarkers: [],
   };
-}
-
-function titleFromId(id: string) {
-  return id.replace(/^cmp[_-]?/, "").replace(/[_-]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase()) || "Composition";
 }
 
 function safeZipName(value: string) {

@@ -1,9 +1,9 @@
 import DataEditor, { GridCellKind, type EditableGridCell, type GridCell, type GridColumn, type Item } from "@glideapps/glide-data-grid";
 import "@glideapps/glide-data-grid/dist/index.css";
-import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, Crosshair, Database, Italic, Strikethrough, Trash2, Underline } from "lucide-react";
+import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, Copy, Crosshair, Database, Italic, Strikethrough, Trash2, Underline, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { chartTypes, formatChartTypeLabel, type ChartDatum, type ChartSpec, type ChartStyle, type ChartType } from "../../core/chart";
-import { MAX_PART_DURATION_SECONDS, FRAME_HEIGHT, FRAME_WIDTH, type AdjustmentLayer, type BackgroundLayer, type Bounds, type FrameObject, type MotionEase, type Part, type PartFrame, type Point, type TranslationMarker, type ZoomMarker } from "../../core/types";
+import { MAX_PART_DURATION_SECONDS, FRAME_HEIGHT, FRAME_WIDTH, type AdjustmentLayer, type BackgroundLayer, type Bounds, type FrameObject, type LayerAnimation, type MotionEase, type Part, type PartFrame, type Point, type TranslationMarker, type ZoomMarker } from "../../core/types";
 import { clamp, roundTenth, roundTwo } from "../../core/math";
 import { getAdjustmentEffectPackage, getMotionEffectPackage } from "../../core/effects/registry";
 import type { AdjustmentEffectDisableCondition, AdjustmentEffectParamControl, AdjustmentEffectPointControl } from "../../core/effects/types";
@@ -17,6 +17,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/
 import { Textarea } from "../ui/textarea";
 import { ColorSelector, formatStyleLabel, getEditableColorStyleEntries, isHexColor } from "../ColorSelector";
 import { clipperHost } from "../../app/clipperHost";
+import { nanoid } from "nanoid";
+import { animationPresets, createAnimationFromPreset } from "../../core/animationPresets";
 
 const defaultFontFamily = "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
 const defaultFontOption = { value: defaultFontFamily, label: "System" };
@@ -750,6 +752,64 @@ export function ObjectInspector({ object, onChange }: { object: FrameObject; onC
     }
   }
 
+  function updateAnimation(id: string, updater: (anim: LayerAnimation) => LayerAnimation) {
+    onChange((current) => ({
+      ...current,
+      animations: (current.animations ?? []).map((anim) => anim.id === id ? updater(anim) : anim),
+    }));
+  }
+
+  function deleteAnimation(id: string) {
+    onChange((current) => ({
+      ...current,
+      animations: (current.animations ?? []).filter((anim) => anim.id !== id),
+    }));
+  }
+
+  function duplicateAnimation(id: string) {
+    onChange((current) => {
+      const animation = (current.animations ?? []).find((anim) => anim.id === id);
+      if (!animation) return current;
+      return {
+        ...current,
+        animations: [...(current.animations ?? []), { ...animation, id: nanoid() }],
+      };
+    });
+  }
+
+  function toggleAnimationEnabled(id: string) {
+    updateAnimation(id, (anim) => ({ ...anim, enabled: !(anim.enabled !== false) }));
+  }
+
+  function addAnimationFromPreset(presetName: string) {
+    const presetIndex = animationPresets.findIndex((preset) => preset.name === presetName);
+    if (presetIndex < 0) return;
+    const animation = createAnimationFromPreset(presetIndex, nanoid());
+    onChange((current) => ({
+      ...current,
+      animations: [...(current.animations ?? []), animation],
+    }));
+  }
+
+  function animationEaseSelectValue(ease: LayerAnimation["options"]["ease"]) {
+    if (typeof ease === "string") return motionEaseSelectValue(ease);
+    return "easeOut";
+  }
+
+  function formatKeyframeSummary(keyframes: LayerAnimation["keyframes"]): string {
+    const parts: string[] = [];
+    for (const [key, value] of Object.entries(keyframes)) {
+      if (Array.isArray(value) && value.length >= 2) {
+        const first = value[0];
+        const last = value[value.length - 1];
+        if (typeof first === "number" && typeof last === "number") {
+          parts.push(`${key} ${roundTwo(first)}→${roundTwo(last)}`);
+        }
+      }
+    }
+    return parts.join(", ") || "No keyframe properties";
+  }
+
   return (
     <div className="grid gap-3">
       <div className="grid grid-cols-2 gap-2">
@@ -780,6 +840,37 @@ export function ObjectInspector({ object, onChange }: { object: FrameObject; onC
       </> : null}
       {colorStyleEntries.length > 0 ? <div className="grid gap-2"><span className={mutedCaps}>Colours</span><div className="grid gap-2">{colorStyleEntries.map(([key, value]) => <label className={`grid gap-1.5 ${mutedCaps}`} key={key}>{formatStyleLabel(key)}<ColorSelector value={value} onChange={(nextValue) => updateStyleColor(key, nextValue)} /></label>)}</div></div> : null}
       <label className={`grid gap-1.5 ${mutedCaps}`}>Motion JSON<Textarea className="min-h-[92px] resize-y font-mono" value={object.motion ? JSON.stringify(object.motion, null, 2) : ""} onChange={(event) => updateMotion(event.target.value)} /></label>
+      <div className="grid gap-3">
+        <div className="flex items-center justify-between">
+          <span className={mutedCaps}>Animations</span>
+          <span className="text-[11px] font-medium text-[#737884]">{(object.animations ?? []).length} added</span>
+        </div>
+        {(object.animations ?? []).map((anim) => (
+          <div key={anim.id} className="grid gap-2.5 rounded-[10px] border border-[#2d313b] bg-[#171920] p-3">
+            <div className="flex items-center gap-2 min-w-0">
+              <Checkbox checked={anim.enabled !== false} onCheckedChange={() => toggleAnimationEnabled(anim.id)} />
+              <span className="flex-1 truncate text-[13px] font-bold text-[#dfe2ea]">{anim.name ?? "Unnamed"}</span>
+              <button className="grid h-7 w-7 place-items-center rounded-[7px] text-[#737884] transition hover:bg-[#2d313b] hover:text-white" title="Duplicate" onClick={() => duplicateAnimation(anim.id)}><Copy size={14} /></button>
+              <button className="grid h-7 w-7 place-items-center rounded-[7px] text-[#737884] transition hover:bg-[#3b2a2a] hover:text-[#ffb4b4]" title="Delete" onClick={() => deleteAnimation(anim.id)}><X size={14} /></button>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <label className={`grid gap-1.5 ${mutedCaps}`}>Duration<Input type="number" min={0.1} step={0.1} value={anim.options.duration} onChange={(event) => updateAnimation(anim.id, (a) => ({ ...a, options: { ...a.options, duration: Number(event.target.value) || 0.1 } }))} /></label>
+              <label className={`grid gap-1.5 ${mutedCaps}`}>Delay<Input type="number" min={0} step={0.1} value={anim.options.delay ?? 0} onChange={(event) => updateAnimation(anim.id, (a) => ({ ...a, options: { ...a.options, delay: Number(event.target.value) || 0 } }))} /></label>
+            </div>
+            <label className={`grid gap-1.5 ${mutedCaps}`}>Ease
+              <Select value={animationEaseSelectValue(anim.options.ease)} onValueChange={(value) => updateAnimation(anim.id, (a) => ({ ...a, options: { ...a.options, ease: value as MotionEase } }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent><SelectGroup><EaseSelectItems /></SelectGroup></SelectContent>
+              </Select>
+            </label>
+            <div className="text-[11px] font-medium text-[#737884]">Properties: {formatKeyframeSummary(anim.keyframes)}</div>
+          </div>
+        ))}
+        <Select value="" onValueChange={addAnimationFromPreset}>
+          <SelectTrigger className="border-dashed"><SelectValue placeholder="+ Add animation from preset" /></SelectTrigger>
+          <SelectContent><SelectGroup>{animationPresets.map((preset) => <SelectItem key={preset.name} value={preset.name!}>{preset.name}</SelectItem>)}</SelectGroup></SelectContent>
+        </Select>
+      </div>
     </div>
   );
 }

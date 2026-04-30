@@ -73,6 +73,8 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
     if (options.syncSources !== false) {
       nextCompositionSources = getSyncedCompositionSources(normalizedProject, currentProject, compositionSourcesRef.current);
       normalizedProject = normalizeProject({ ...normalizedProject, compositionSources: nextCompositionSources });
+    } else {
+      nextCompositionSources = compositionSourcesRef.current;
     }
     if (JSON.stringify(normalizedProject) === JSON.stringify(currentProject)) return;
 

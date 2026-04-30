@@ -36,15 +36,16 @@ type StartPointerDragOptions<TPayload extends Record<string, unknown>> = {
   payload: TPayload;
   pointerEvent: Pick<PointerEvent, "clientX" | "clientY" | "button" | "preventDefault" | "shiftKey">;
   previewEventName?: string;
+  skipPreventDefault?: boolean;
 };
 
 const dragGhostOffset = { x: 10, y: -10 };
 const defaultPointerDragActivationDelayMs = 320;
 let activePointerDragCleanup: (() => void) | null = null;
 
-export function startClipperPointerDrag<TPayload extends Record<string, unknown>>({ accent, activationDelayMs = defaultPointerDragActivationDelayMs, eventName, label, payload, pointerEvent, previewEventName }: StartPointerDragOptions<TPayload>) {
+export function startClipperPointerDrag<TPayload extends Record<string, unknown>>({ accent, activationDelayMs = defaultPointerDragActivationDelayMs, eventName, label, payload, pointerEvent, previewEventName, skipPreventDefault }: StartPointerDragOptions<TPayload>) {
   if (pointerEvent.button !== 0) return;
-  pointerEvent.preventDefault();
+  if (!skipPreventDefault) pointerEvent.preventDefault();
 
   let ghost: HTMLSpanElement | null = null;
   let active = false;

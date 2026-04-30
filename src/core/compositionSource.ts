@@ -15,10 +15,13 @@ type SourceObject = {
   motion?: FrameObject["motion"];
   transform?: compositionApi.Transform | string;
   layoutId?: string;
+  hidden?: boolean;
+  locked?: boolean;
+  animations?: FrameObject["animations"];
 };
 
 type SourceComposition = {
-  id: string;
+  id?: string;
   duration: number;
   frame: {
     width: number;
@@ -31,6 +34,9 @@ type SourceComposition = {
     style?: BackgroundLayer["style"];
     stretchToElements?: boolean;
     motion?: BackgroundLayer["motion"];
+    hidden?: boolean;
+    locked?: boolean;
+    animations?: BackgroundLayer["animations"];
     elements?: SourceRenderable[];
   };
   render: (context: compositionApi.RenderContext) => SourceRenderable[];
@@ -49,10 +55,6 @@ export async function loadCompositionsFromSource(compositions: Part[], readFile:
 
 export async function compositionFromSource(baseComposition: Part, source: string): Promise<Part> {
   const sourceComposition = await evaluateCompositionSource(source, 0, baseComposition.duration);
-
-  if (sourceComposition.id !== baseComposition.id) {
-    throw new Error(`Source composition id ${sourceComposition.id} does not match manifest composition id ${baseComposition.id}.`);
-  }
 
   return {
     ...baseComposition,
@@ -79,6 +81,9 @@ function sourceBackgroundToLayer(background: SourceComposition["background"]): B
     style: background?.style ?? { background: "transparent" },
     stretchToElements: background?.stretchToElements || undefined,
     motion: background?.motion,
+    hidden: background?.hidden,
+    locked: background?.locked,
+    animations: background?.animations,
     elements: resolveRenderables(background?.elements ?? [], compositionApi.renderContext(0, 0)).map(sourceObjectToFrameObject),
   };
 }
@@ -97,6 +102,9 @@ function sourceObjectToFrameObject(object: SourceObject): FrameObject {
     style: object.style,
     motion: object.motion,
     layoutId: object.layoutId,
+    hidden: object.hidden,
+    locked: object.locked,
+    animations: object.animations,
   };
 }
 
@@ -108,6 +116,9 @@ export function compositionToSource(composition: Part) {
     style: composition.background.style,
     stretchToElements: composition.background.stretchToElements,
     motion: composition.background.motion,
+    hidden: composition.background.hidden || undefined,
+    locked: composition.background.locked || undefined,
+    animations: composition.background.animations?.length ? composition.background.animations : undefined,
   });
   const backgroundElements = composition.background.elements.map(frameObjectToConstructorSource);
   const backgroundSource = `{
@@ -118,7 +129,7 @@ ${backgroundElements.map((object) => indent(object, 6)).join(",\n")}
   }`;
   const objects = composition.objects.map(frameObjectToConstructorSource);
 
-  return `import { ${imports.join(", ")} } from "@clipper/composition-api";\n\nclass GeneratedCompositionObjects extends Component {\n  render() {\n    return [\n${objects.map((object) => indent(object, 6)).join(",\n")}\n    ];\n  }\n}\n\nexport const composition = new Composition({\n  id: ${JSON.stringify(composition.id)},\n  duration: ${JSON.stringify(composition.duration)},\n  frame: ${tsBlock(composition.frame, 2)},\n  background: ${indent(backgroundSource, 2).trimStart()},\n  render() {\n    return [new GeneratedCompositionObjects()];\n  },\n});\n`;
+  return `import { ${imports.join(", ")} } from "@clipper/composition-api";\n\nclass GeneratedCompositionObjects extends Component {\n  render() {\n    return [\n${objects.map((object) => indent(object, 6)).join(",\n")}\n    ];\n  }\n}\n\nexport const composition = new Composition({\n  duration: ${JSON.stringify(composition.duration)},\n  frame: ${tsBlock(composition.frame, 2)},\n  background: ${indent(backgroundSource, 2).trimStart()},\n  render() {\n    return [new GeneratedCompositionObjects()];\n  },\n});\n`;
 }
 
 function frameObjectToSourceObject(object: FrameObject): SourceObject {
@@ -134,6 +145,9 @@ function frameObjectToSourceObject(object: FrameObject): SourceObject {
     style: object.style,
     motion: object.motion,
     layoutId: object.layoutId,
+    hidden: object.hidden,
+    locked: object.locked,
+    animations: object.animations,
   };
 }
 
@@ -149,6 +163,9 @@ function frameObjectToConstructorSource(object: FrameObject) {
     style: object.style,
     motion: object.motion,
     layoutId: object.layoutId,
+    hidden: object.hidden || undefined,
+    locked: object.locked || undefined,
+    animations: object.animations?.length ? object.animations : undefined,
   });
   return `new ${frameObjectConstructorName(object)}(${tsBlock(input, 0)})`;
 }
@@ -223,10 +240,9 @@ function assertSourceComposition(value: unknown): SourceComposition {
   if (!value || typeof value !== "object") throw new Error("Composition source must export a composition object.");
   const composition = value as Partial<SourceComposition>;
 
-  if (typeof composition.id !== "string") throw new Error("Composition source is missing string id.");
-  if (typeof composition.duration !== "number") throw new Error(`Composition ${composition.id} is missing numeric duration.`);
-  if (!composition.frame || composition.frame.width !== FRAME_WIDTH || composition.frame.height !== FRAME_HEIGHT) throw new Error(`Composition ${composition.id} must use a 1920x1080 frame.`);
-  if (typeof composition.render !== "function") throw new Error(`Composition ${composition.id} must define render() and return class-based renderables.`);
+  if (typeof composition.duration !== "number") throw new Error("Composition source is missing numeric duration.");
+  if (!composition.frame || composition.frame.width !== FRAME_WIDTH || composition.frame.height !== FRAME_HEIGHT) throw new Error("Composition source must use a 1920x1080 frame.");
+  if (typeof composition.render !== "function") throw new Error("Composition source must define render() and return class-based renderables.");
 
   return composition as SourceComposition;
 }
@@ -247,7 +263,7 @@ function getSourceCompositionObjects(composition: ResolvedSourceComposition): So
   return composition.objects;
 }
 
-function resolveRenderables(renderables: SourceRenderable[] | SourceRenderable, context: compositionApi.RenderContext, inherited?: { style?: FrameObject["style"]; transform?: string; motion?: FrameObject["motion"] }): SourceObject[] {
+function resolveRenderables(renderables: SourceRenderable[] | SourceRenderable, context: compositionApi.RenderContext, inherited?: { style?: FrameObject["style"]; transform?: string; motion?: FrameObject["motion"]; animations?: FrameObject["animations"]; hidden?: boolean; locked?: boolean }): SourceObject[] {
   if (!Array.isArray(renderables)) return resolveRenderables([renderables], context, inherited);
 
   return renderables.flatMap((renderable) => {
@@ -255,7 +271,7 @@ function resolveRenderables(renderables: SourceRenderable[] | SourceRenderable, 
     if (Array.isArray(renderable)) return resolveRenderables(renderable, context, inherited);
     if (isComponentLike(renderable)) {
       const nextInherited = isGroupLike(renderable)
-        ? mergeInherited(inherited, renderable.style, renderable.transform, renderable.motion)
+        ? mergeInherited(inherited, renderable.style, renderable.transform, renderable.motion, renderable.animations, renderable.hidden, renderable.locked)
         : inherited;
       return resolveRenderables(renderable.render(context), context, nextInherited);
     }
@@ -276,15 +292,18 @@ function isRenderableObject(value: unknown): value is compositionApi.RenderableO
   return value instanceof compositionApi.RenderableObject;
 }
 
-function mergeInherited(inherited: { style?: FrameObject["style"]; transform?: string; motion?: FrameObject["motion"] } | undefined, style: FrameObject["style"] | undefined, transform: compositionApi.Transform | string | undefined, motion: FrameObject["motion"] | undefined) {
+function mergeInherited(inherited: { style?: FrameObject["style"]; transform?: string; motion?: FrameObject["motion"]; animations?: FrameObject["animations"]; hidden?: boolean; locked?: boolean } | undefined, style: FrameObject["style"] | undefined, transform: compositionApi.Transform | string | undefined, motion: FrameObject["motion"] | undefined, animations?: FrameObject["animations"], hidden?: boolean, locked?: boolean) {
   return {
     style: { ...(inherited?.style ?? {}), ...(style ?? {}) },
     transform: joinTransforms(inherited?.transform, compositionApi.transformToCss(transform)),
     motion: motion ?? inherited?.motion,
+    animations: animations ?? inherited?.animations,
+    hidden: hidden ?? inherited?.hidden,
+    locked: locked ?? inherited?.locked,
   };
 }
 
-function applyInheritedToSourceObject(object: SourceObject, inherited: { style?: FrameObject["style"]; transform?: string; motion?: FrameObject["motion"] } | undefined): SourceObject {
+function applyInheritedToSourceObject(object: SourceObject, inherited: { style?: FrameObject["style"]; transform?: string; motion?: FrameObject["motion"]; animations?: FrameObject["animations"]; hidden?: boolean; locked?: boolean } | undefined): SourceObject {
   const ownTransform = compositionApi.transformToCss(object.transform);
   const styleTransform = typeof object.style?.transform === "string" ? object.style.transform : undefined;
   const transform = joinTransforms(inherited?.transform, styleTransform, ownTransform);
@@ -296,6 +315,9 @@ function applyInheritedToSourceObject(object: SourceObject, inherited: { style?:
       ...(transform ? { transform } : {}),
     },
     motion: object.motion ?? inherited?.motion,
+    animations: object.animations ?? inherited?.animations,
+    hidden: object.hidden ?? inherited?.hidden,
+    locked: object.locked ?? inherited?.locked,
   };
 }
 

@@ -21,24 +21,26 @@ export function getProjectFolderSiblingNames(project: ProjectManifest, parentFol
   return names;
 }
 
-export function createCompositionInLibrary(project: ProjectManifest, compositionSources: Record<string, string>, basePart: Part, folderPath: string, compositionId: string): CompositionLibraryMutationResult {
+export function createCompositionInLibrary(project: ProjectManifest, compositionSources: Record<string, string>, _basePart: Part, folderPath: string, compositionId: string): CompositionLibraryMutationResult {
   const composition: Part = {
-    ...basePart,
     id: compositionId,
     name: "New Composition",
     filePath: `${folderPath}/${compositionId}.ts`,
     duration: 3,
+    frame: { width: 1920, height: 1080, style: { background: "#050505" } },
+    background: { id: "background", name: "Background", style: { background: "transparent" }, elements: [] },
     objects: [],
     snapshot: [],
     motionMarkers: [],
   };
-  const nextSources = { ...compositionSources, [composition.filePath]: compositionToSource(composition) };
+  const source = compositionToSource(composition);
+  const nextSources = { ...compositionSources, [composition.filePath]: source };
   return {
     compositionSources: nextSources,
     project: {
       ...project,
       compositionSources: nextSources,
-      compositionLibrary: [...(project.compositionLibrary ?? []), composition],
+      compositionLibrary: [...(project.compositionLibrary ?? []), { ...composition, source }],
       compositionFolders: Array.from(new Set([...(project.compositionFolders ?? []), folderPath])),
     },
   };

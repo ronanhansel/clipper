@@ -136,10 +136,10 @@ function normalizeComposition(composition: CompositionClip): CompositionClip {
   };
 }
 
-function normalizeCompositionDocument(composition: CompositionClip, sources: Record<string, string>): CompositionDocument {
+function normalizeCompositionDocument(composition: CompositionClip, sources: Record<string, string>): CompositionDocument | undefined {
   const normalized = normalizeComposition(composition);
   const source = composition.source ?? sources[composition.filePath];
-  if (source === undefined) throw new Error(`Composition ${composition.filePath} is missing source.`);
+  if (source === undefined) return undefined;
   return {
     ...normalized,
     source,
@@ -148,13 +148,13 @@ function normalizeCompositionDocument(composition: CompositionClip, sources: Rec
 
 function getCompositionLibrary(project: ProjectManifest) {
   const library = project.compositionLibrary ?? project.compositions ?? [];
-  return Array.from(new Map(library.map((composition) => [composition.filePath, normalizeComposition(composition)])).values());
+  return Array.from(new Map(library.map((composition) => [composition.filePath, { ...normalizeComposition(composition), source: composition.source }])).values());
 }
 
 function getCompositionDocuments(project: ProjectManifest) {
   const sources = normalizeCompositionSources(project.compositionSources);
-  const compositions = project.compositions ?? [];
-  return Array.from(new Map(compositions.map((composition) => [composition.id, normalizeCompositionDocument(composition, sources)])).values());
+  const compositions = [...(project.compositionLibrary ?? []), ...(project.compositions ?? [])];
+  return Array.from(new Map(compositions.map((composition) => [composition.id, normalizeCompositionDocument(composition, sources)]).filter((entry): entry is [string, CompositionDocument] => entry[1] !== undefined)).values());
 }
 
 function getProjectTimelines(project: ProjectManifest): TimelineDocument[] {
@@ -309,7 +309,7 @@ export function normalizeProject(project: ProjectManifest): ProjectManifest {
     timelineOrder: timelines.map((timeline) => timeline.id),
     compositions: compositionDocuments,
     compositionOrder: compositionDocuments.map((composition) => composition.id),
-    compositionSources: Object.fromEntries(compositionDocuments.map((composition) => [composition.filePath, composition.source])),
+    compositionSources: Object.fromEntries([...(project.compositionLibrary ?? []).filter((c) => c.source).map((c) => [c.filePath, c.source!]), ...compositionDocuments.map((composition) => [composition.filePath, composition.source])]),
     assets: normalizeAssets(project.assets),
   }) as ProjectManifest;
 

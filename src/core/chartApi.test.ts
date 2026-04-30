@@ -54,7 +54,6 @@ describe("defineChart", () => {
       });
 
       export const composition = new Composition({
-        id: "prt_chart_eval",
         duration: 4,
         frame: { width: 1920, height: 1080, style: { background: "#000" } },
         render() {
@@ -98,7 +97,6 @@ describe("defineChart", () => {
       }
 
       export const composition = new Composition({
-        id: "prt_component_eval",
         duration: 4,
         frame: { width: 1920, height: 1080, style: { background: "#000" } },
         render() {
@@ -134,7 +132,6 @@ describe("defineChart", () => {
       import { Composition } from "@clipper/composition-api";
 
       export const part = new Composition({
-        id: "prt_invalid_export_eval",
         duration: 4,
         frame: { width: 1920, height: 1080, style: { background: "#000" } },
         render() { return []; },
@@ -159,7 +156,6 @@ describe("defineChart", () => {
       import { Composition } from "@clipper/composition-api";
 
       export const composition = new Composition({
-        id: "prt_plain_object_eval",
         duration: 4,
         frame: { width: 1920, height: 1080, style: { background: "#000" } },
         render() {
