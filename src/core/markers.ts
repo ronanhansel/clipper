@@ -1,4 +1,4 @@
-import type { Point, ZoomMarker } from "./types";
+import type { MotionMarker, Point } from "./types";
 
 type MendedMarker = { id: string; layerId?: string; start: number; duration: number; snapIn?: boolean; snapOut?: boolean; mendInId?: string; mendOutId?: string };
 
@@ -17,7 +17,7 @@ function isExplicitMendedPair(previous: MendedMarker, next: MendedMarker) {
   return Boolean(previous.snapOut && next.snapIn && previous.mendOutId === next.id && next.mendInId === previous.id);
 }
 
-export function isZoomMarkerMended(markers: MendedMarker[], markerId: string) {
+export function isMotionMarkerMended(markers: MendedMarker[], markerId: string) {
   const sortedMarkers = getMendedMarkerLayer(markers, markerId);
 
   for (let index = 0; index < sortedMarkers.length; index += 1) {
@@ -59,7 +59,7 @@ export function getMendedMarkerIds(markers: MendedMarker[], markerId: string) {
   return new Set(sortedMarkers.slice(firstIndex, lastIndex + 1).map((marker) => marker.id));
 }
 
-export function normalizeMendedZoomMarkerFocus(markers: ZoomMarker[]) {
+export function normalizeMendedMotionMarkerFocus(markers: MotionMarker[]): MotionMarker[] {
   const focusById = new Map<string, Point>();
 
   for (const layerId of new Set(markers.map(getMendedMarkerLayerId))) {
@@ -76,8 +76,9 @@ export function normalizeMendedZoomMarkerFocus(markers: ZoomMarker[]) {
   }
 
   return markers.map((marker) => {
-    if (!isZoomMarkerMended(markers, marker.id)) return marker;
+    if (!isMotionMarkerMended(markers, marker.id)) return marker;
     const focus = focusById.get(marker.id);
-    return focus && (marker.focus.x !== focus.x || marker.focus.y !== focus.y) ? { ...marker, focus } : marker;
+    if (!focus || !marker.focus) return marker;
+    return (marker.focus.x !== focus.x || marker.focus.y !== focus.y) ? { ...marker, focus } : marker;
   });
 }

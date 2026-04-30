@@ -189,28 +189,11 @@ export type MotionBlock = {
   snapOut?: boolean;
 };
 
-export type ZoomMarker = MotionBlock & {
-  effectId?: "clipper.motion.zoom";
-  focus: Point;
-  scale: number;
-};
-
-export type TranslationMarker = MotionBlock & {
-  effectId?: "clipper.motion.pan" | "clipper.motion.rotate" | "clipper.motion.perspective";
-  kind?: "pan" | "rotate" | "perspective";
-  position: Point;
-};
-
 export type MotionBlockEffectKind = "pan" | "zoom" | "rotate" | "perspective";
 
 export type MotionMarker = MotionBlock & {
   kind: MotionBlockEffectKind;
   effectId: MotionEffectId;
-  focus?: Point;
-  position?: Point;
-  scale?: number;
-  rotation?: number;
-  perspective?: PerspectiveSettings;
 };
 
 export type MotionEffectDefinition = {

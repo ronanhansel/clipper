@@ -160,19 +160,24 @@ export function usePlaybackController({
   function scrubToSceneTime(time: number) {
     const nextTime = clampPlaybackTime(time);
     if (Math.abs(nextTime - currentSceneTimeRef.current) < 0.001) {
-      if (!timelineScrubbingRef.current) commitPlayheadEditorState(nextTime);
+      if (!timelineScrubbingRef.current) {
+        commitPlayheadEditorState(nextTime);
+        setCurrentSceneTime(nextTime);
+        setRenderCurrentSceneTime(nextTime);
+      }
       return;
     }
 
     currentSceneTimeRef.current = nextTime;
     if (isPlayingRef.current) updatePlaybackClock({ startedAt: performance.now(), startedFrom: nextTime });
+    if (!timelineScrubbingRef.current) syncPlaybackDom(nextTime);
+    else if (!useLocalPlaybackLabels) syncFrameVisualAdjustmentDom(nextTime);
 
     if (timelineScrubbingRef.current) {
-      syncFrameVisualAdjustmentDom(nextTime);
+      setRenderCurrentSceneTime(nextTime);
       return;
     }
 
-    syncPlaybackDom(nextTime);
     pendingScrubTimeRef.current = nextTime;
     if (scrubFrameRef.current) return;
 

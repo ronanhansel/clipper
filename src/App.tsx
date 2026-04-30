@@ -1094,6 +1094,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   const adjustmentPickLayer = pointPickAdjustment ? scene.adjustmentLayers?.find((layer) => layer.id === pointPickAdjustment.layerId) : null;
   const adjustmentFramePickPoint = pointPickAdjustment && adjustmentPickLayer ? getAdjustmentPointControlFramePoint(adjustmentPickLayer, pointPickAdjustment.control) : null;
   const activeFramePickPoint = pointPickAdjustment ? framePickPreviewPoint ?? adjustmentFramePickPoint : framePickPoint;
+  const selectedComposeObjectIds = useMemo(() => selectionPayload?.objects.map((object) => object.id) ?? (selectedObjectId ? [selectedObjectId] : []), [selectedObjectId, selectionPayload]);
 
   return (
     <>
@@ -1264,7 +1265,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
         onMoveZoomMarkers: moveZoomMarkers,
         onMoveTranslationMarker: moveTranslationMarker,
         onMoveTranslationMarkers: moveTranslationMarkers,
-        onScrub: composeMode && activeTimelinePart ? (time) => scrubToSceneTime(activeTimelinePart.start + time) : scrubToSceneTime,
+        onScrub: composeMode && activeTimelinePart ? scrubToPlaybackDisplayTime : scrubToSceneTime,
         onScrubStart: pausePlaybackForTimelineScrub,
         onScrubEnd: resumePlaybackAfterTimelineScrub,
         onUpdateZoomMarkers: updateZoomMarkers,
@@ -1275,7 +1276,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
         onAddAdjustmentEffect: addAdjustmentLayerAt,
         onAddMotionEffect: addMotionEffect,
         composeAnimationPart: composeMode && hasActiveComposition ? part : null,
-        selectedObjectIds: selectionPayload?.objects.map((object) => object.id) ?? (selectedObjectId ? [selectedObjectId] : []),
+        selectedObjectIds: selectedComposeObjectIds,
         onExitCompose: () => updateTimelineMode("composition"),
         onSelectComposeObjects: selectComposeLayerObjects,
         onRenameComposeAnimationLayer: renameComposeAnimationLayer,

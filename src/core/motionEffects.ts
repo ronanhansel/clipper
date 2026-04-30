@@ -1,6 +1,6 @@
 import { roundTwo } from "./math";
 import { getMotionEffectByKind, getMotionEffectPackage, motionEffectPackages } from "./effects/registry";
-import type { MotionBlock, MotionBlockEffectKind, MotionEffectId, MotionEffectKind, MotionMarker, PerspectiveSettings, Point, TranslationMarker, ZoomMarker } from "./types";
+import type { MotionBlock, MotionBlockEffectKind, MotionEffectId, MotionEffectKind, MotionMarker, PerspectiveSettings, Point } from "./types";
 
 export const motionEffectDefinitions = motionEffectPackages;
 
@@ -22,12 +22,8 @@ export function getMotionBlockEffectKind(block: { effectId?: string }): MotionBl
   return block.effectId ? getMotionEffectDefinition(block.effectId)?.kind ?? null : null;
 }
 
-export function isZoomMotionBlock(block: Pick<MotionBlock, "effectId">) {
-  return getMotionBlockEffectKind(block) === "zoom";
-}
-
-export function isTranslationMotionBlock(block: Pick<MotionBlock, "effectId">) {
-  return !isZoomMotionBlock(block);
+export function isMotionKind(marker: MotionMarker, kind: MotionBlockEffectKind) {
+  return marker.kind === kind;
 }
 
 export function normalizeMotionBlocks(blocks: MotionBlock[] | undefined): MotionBlock[] {
@@ -60,13 +56,6 @@ export function normalizeMotionBlocks(blocks: MotionBlock[] | undefined): Motion
   });
 }
 
-export function motionBlocksToZoomMarkers(blocks: MotionBlock[]): ZoomMarker[] {
-  return blocks.flatMap((block) => {
-    if (!isZoomMotionBlock(block)) return [];
-      return [{ ...block, effectId: "clipper.motion.zoom", layerId: block.layerId ?? "clipper.motion.zoom", focus: block.focus ?? { x: 960, y: 540 }, scale: block.scale ?? 1.8, params: block.params ?? {} }];
-  });
-}
-
 export function motionBlocksToMotionMarkers(blocks: MotionBlock[]): MotionMarker[] {
   const markers = normalizeMotionBlocks(blocks).map((block) => {
     const kind = getMotionBlockEffectKind(block) ?? "pan";
@@ -91,27 +80,13 @@ export function getCanonicalMotionMarkers(input: { motionMarkers?: MotionMarker[
 
 export function getMotionMarkerViews(input: { motionMarkers?: MotionMarker[] }) {
   const motionMarkers = getCanonicalMotionMarkers(input);
-  return {
-    motionMarkers,
-    zoomMarkers: motionBlocksToZoomMarkers(motionMarkers),
-    translationMarkers: motionBlocksToTranslationMarkers(motionMarkers),
-  };
+  return { motionMarkers };
 }
 
 export function withCanonicalMotionMarkers(motionMarkers: MotionMarker[]) {
   return {
     motionMarkers: motionBlocksToMotionMarkers(motionMarkers),
   };
-}
-
-export function motionBlocksToTranslationMarkers(blocks: MotionBlock[]): TranslationMarker[] {
-  return blocks.flatMap((block) => {
-    if (!isTranslationMotionBlock(block)) return [];
-    const effectId = block.effectId === "clipper.motion.rotate" || block.effectId === "clipper.motion.perspective" ? block.effectId : "clipper.motion.pan";
-    const params = block.params ?? {};
-    const perspective = block.perspective ?? params.perspective;
-    return [{ ...block, effectId, layerId: block.layerId ?? effectId, position: block.position ?? { x: 0, y: 0 }, perspective, params: perspective ? { ...params, perspective } : params }];
-  });
 }
 
 export function createDefaultMotionBlock(kind: MotionEffectKind, input: { id: string; layerId: string; start: number; duration: number; focus: Point; position: Point }): MotionBlock {

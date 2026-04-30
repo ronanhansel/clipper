@@ -62,7 +62,7 @@ export function TimelineShell({ contentWidth, currentTime, displayDuration, drag
           <button className="grid h-8 w-8 place-items-center rounded-[9px] border border-[#2d313b] bg-[#14161c] text-[#dfe2ea] hover:border-[var(--clipper-accent)]" title="Zoom timeline in" onClick={() => onTimelineZoomChange(roundTenth(timelineZoom + 0.25))}><Plus size={14} /></button>
         </div>
       </div>
-      <div ref={refs.playbackPlayheadRef} className="relative grid h-full min-h-0 max-h-full grid-rows-[38px_minmax(0,1fr)] overflow-hidden" style={{ "--clipper-timeline-scroll-x": `${-(refs.timelineViewportRef.current?.scrollLeft ?? timelineViewportDisplacement)}px` } as CSSProperties}>
+      <div ref={refs.playbackPlayheadRef} className="relative grid h-full min-h-0 max-h-full grid-rows-[38px_minmax(0,1fr)] overflow-hidden" style={{ "--clipper-playhead-left": `${displayDuration > 0 ? (currentTime / displayDuration) * 100 : 0}%`, "--clipper-timeline-scroll-x": `${-(refs.timelineViewportRef.current?.scrollLeft ?? timelineViewportDisplacement)}px` } as CSSProperties}>
         <div className="pointer-events-none absolute right-0 top-0 z-30 overflow-hidden pl-0 pr-3" style={{ left: layerRailWidth, height: 38 + laneContentHeight }}>
           <div className="relative" style={{ width: contentWidth, height: 38 + laneContentHeight, transform: "translate3d(var(--clipper-timeline-scroll-x, 0px), 0, 0)", willChange: "transform" }}>
             <div ref={refs.timelineSnapGuideRef} className="pointer-events-none absolute top-0 z-20 hidden w-px bg-white/90 shadow-[0_0_0_1px_rgba(255,255,255,0.2),0_0_12px_rgba(255,255,255,0.35)]" style={{ height: 38 + laneContentHeight, transform: "translate3d(0, 0, 0)" }} />
