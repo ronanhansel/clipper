@@ -72,7 +72,7 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
   const selectedTransitionLayerIds = useMemo(() => new Set(selectedTransitionLayers.map((selection) => selection.layerId)), [selectedTransitionLayers]);
   const selectedPartIds = useMemo(() => new Set(selectedParts.map((selection) => selection.partId)), [selectedParts]);
   const selectedMotionKeys = useMemo(() => new Set(selectedMotionMarkers.map((selection) => `${selection.partId}:${selection.markerId}`)), [selectedMotionMarkers]);
-  const scrubSnapBoundaries = useMemo(() => getScrubSnapBoundaries([...timelineMotionViews, ...motionTimeline], adjustmentLayers), [adjustmentLayers, motionTimeline, timelineMotionViews]);
+  const scrubSnapBoundaries = useMemo(() => getScrubSnapBoundaries([...timelineMotionViews, ...motionTimeline], adjustmentLayers, transitionLayers), [adjustmentLayers, motionTimeline, timelineMotionViews, transitionLayers]);
   const contentWidth = Math.max(timelineDisplayDuration * defaultTimelinePixelsPerSecond * timelineZoom, 160);
   const [resizePreviewRowHeights, setResizePreviewRowHeights] = useState<Record<string, number> | null>(null);
   const rowHeights = resizePreviewRowHeights ?? timelineLayers.rowHeights ?? {};
@@ -592,7 +592,7 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
     const movingEdges = getMovingMarkerEdgeTimes(motionKind, movingKeys);
     const snapTimeline = [...timelineMotionViews, ...motionTimeline];
     return withPlayheadSnapBoundary(Array.from(new Set([
-      ...getScrubSnapBoundaries(snapTimeline, adjustmentLayers).filter((boundary) => !movingEdges.has(roundTenth(boundary))),
+      ...getScrubSnapBoundaries(snapTimeline, adjustmentLayers, transitionLayers).filter((boundary) => !movingEdges.has(roundTenth(boundary))),
       ...getTimelineMarkerDragSnapBoundaries(snapTimeline, motionKind, movingKeys),
     ])).sort((left, right) => left - right));
   }
@@ -704,11 +704,8 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
   function getUniversalBlockSnapBoundaries(options: { excludeCompositionIds?: Set<string>; excludeAdjustmentIds?: Set<string>; excludeTransitionIds?: Set<string> } = {}) {
     const snapTimeline = [...timelineMotionViews.filter((item) => !options.excludeCompositionIds?.has(item.id)), ...motionTimeline];
     const snapAdjustments = adjustmentLayers.filter((item) => !options.excludeAdjustmentIds?.has(item.id));
-    const baseBoundaries = withPlayheadSnapBoundary(getScrubSnapBoundaries(snapTimeline, snapAdjustments));
-    const transitionEdges = transitionLayers
-      .filter((item) => !options.excludeTransitionIds?.has(item.id))
-      .flatMap((item) => [item.start, item.start + item.duration, item.start + item.midPoint]);
-    return Array.from(new Set([...baseBoundaries, ...transitionEdges])).sort((a, b) => a - b);
+    const snapTransitions = transitionLayers.filter((item) => !options.excludeTransitionIds?.has(item.id));
+    return withPlayheadSnapBoundary(getScrubSnapBoundaries(snapTimeline, snapAdjustments, snapTransitions));
   }
 
   function getMovingMarkerEdgeTimes(motionKind: MotionBlockEffectKind | undefined, movingKeys: Set<string>) {

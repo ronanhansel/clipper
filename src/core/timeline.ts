@@ -234,12 +234,20 @@ export function snapTimelineBlockStartToBoundary(start: number, duration: number
   return nextStart;
 }
 
-export function getScrubSnapBoundaries(timeline: TimelinePart[], adjustmentLayers: AdjustmentLayer[] = []) {
-  return Array.from(new Set(timeline.flatMap((part) => [
-    part.start,
-    part.end,
-    ...getCanonicalMotionMarkers(part).flatMap((marker) => [part.start + marker.start, part.start + marker.start + marker.duration]),
-  ]).concat(adjustmentLayers.flatMap((layer) => [layer.start, layer.start + layer.duration])))).sort((left, right) => left - right);
+export function getScrubSnapBoundaries(
+  timeline: TimelinePart[],
+  adjustmentLayers: AdjustmentLayer[] = [],
+  transitionLayers: Array<Pick<TransitionLayer, "start" | "duration" | "midPoint">> = [],
+) {
+  return Array.from(new Set([
+    ...timeline.flatMap((part) => [
+      part.start,
+      part.end,
+      ...getCanonicalMotionMarkers(part).flatMap((marker) => [part.start + marker.start, part.start + marker.start + marker.duration]),
+    ]),
+    ...adjustmentLayers.flatMap((layer) => [layer.start, layer.start + layer.duration]),
+    ...transitionLayers.flatMap((layer) => [layer.start, layer.start + layer.duration, layer.start + layer.midPoint]),
+  ])).sort((left, right) => left - right);
 }
 
 export function getMarkerSnapBoundaries(timeline: TimelinePart[], motionKind: MotionBlockEffectKind | undefined, exclude: { kind: MotionBlockEffectKind; partId: string; markerId: string }) {
