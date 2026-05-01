@@ -39,6 +39,7 @@ export function useTimelineProjectActions({ scene, timelineMode, updateEditorSta
       const nextMotionMarkers = nextMarkers.motionMarkers;
       return {
         ...current,
+        scenes: current.scenes.map((s) => (s.id === scene.id ? { ...s, motionMarkers: nextMotionMarkers } : s)),
         timelines: (current.timelines ?? []).map((timeline) => (timeline.id === scene.id ? { ...timeline, motionMarkers: nextMotionMarkers } : timeline)),
       };
     });

@@ -99,6 +99,37 @@ export function removeTimelineStateLayer(state: TimelineLayerState, category: Ti
   return { ...state, [key]: layers.filter((layer) => layer.id !== layerId) };
 }
 
+export function computeBulkLayerTargets(
+  layout: TimelineLayerLayout,
+  category: TimelineLayerCategory,
+  sourceLayerId: string | undefined,
+  cursorLayerId: string | undefined,
+  moveTargets: Array<{ id: string; layerId?: string }>,
+  defaultLayerKey: string,
+): Map<string, string> {
+  const categoryRows = layout.rows.filter((row) => row.category === category);
+  const normalizedSource = sourceLayerId ?? defaultLayerKey;
+  const sourceIdx = categoryRows.findIndex((row) => row.key === normalizedSource);
+  const cursorIdx = cursorLayerId ? categoryRows.findIndex((row) => row.key === cursorLayerId) : sourceIdx;
+  if (sourceIdx < 0 || cursorIdx < 0) {
+    const fallback = cursorLayerId ?? sourceLayerId ?? normalizedSource;
+    return new Map(moveTargets.map((t) => [t.id, fallback]));
+  }
+  const layerIdxDelta = cursorIdx - sourceIdx;
+  const result = new Map<string, string>();
+  for (const target of moveTargets) {
+    const targetSourceLayer = target.layerId ?? defaultLayerKey;
+    const targetSrcIdx = categoryRows.findIndex((row) => row.key === targetSourceLayer);
+    if (targetSrcIdx < 0) {
+      result.set(target.id, cursorLayerId ?? normalizedSource);
+      continue;
+    }
+    const newIdx = Math.max(0, Math.min(targetSrcIdx + layerIdxDelta, categoryRows.length - 1));
+    result.set(target.id, categoryRows[newIdx].key);
+  }
+  return result;
+}
+
 export function getTimelineBlockLayerPreview(layout: TimelineLayerLayout, category: TimelineLayerCategory, sourceLayerId: string | undefined, clientY: number, containerRect: Pick<DOMRect, "top"> | null | undefined) {
   const targetLayerId = getTimelineLayerRowAtClientY(layout, containerRect, clientY, category)?.row.key;
   return getTimelineLayerDragPreview(layout, sourceLayerId, targetLayerId);

@@ -141,7 +141,7 @@ export function getActivePerspectiveMarkers(markers: MotionMarker[], time: numbe
 
 function getActiveZoom(markers: MotionMarker[], time: number) {
   const sortedMarkers = [...markers].sort((left, right) => left.start - right.start);
-  const markerIndex = getActiveMotionMarkerIndex(sortedMarkers, time);
+  const markerIndex = sortedMarkers.findIndex((item) => time >= item.start && time <= item.start + item.duration);
   const marker = markerIndex >= 0 ? sortedMarkers[markerIndex] : null;
   if (!marker) return null;
   const progress = (time - marker.start) / marker.duration;

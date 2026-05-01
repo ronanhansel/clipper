@@ -319,6 +319,21 @@ describe("timeline model", () => {
     });
   });
 
+  it("detects active mend links from a single selected marker with timeline part id", () => {
+    const markers = [
+      { id: "__timeline_motion__:first", rawMarkerId: "first", partId: "__timeline_motion__", start: 0, duration: 2, kind: "zoom" as const, effectId: "clipper.motion.zoom" as const, layerId: "camera", focus: { x: 0.5, y: 0.5 }, scale: 1.5, mendOutId: "second" },
+      { id: "__timeline_motion__:second", rawMarkerId: "second", partId: "__timeline_motion__", start: 2, duration: 2, kind: "zoom" as const, effectId: "clipper.motion.zoom" as const, layerId: "camera", focus: { x: 0.5, y: 0.5 }, scale: 1.5, mendInId: "first", mendOutId: "third" },
+      { id: "__timeline_motion__:third", rawMarkerId: "third", partId: "__timeline_motion__", start: 4, duration: 2, kind: "zoom" as const, effectId: "clipper.motion.zoom" as const, layerId: "camera", focus: { x: 0.5, y: 0.5 }, scale: 1.5, mendInId: "second" },
+    ];
+
+    expect(getSelectedActiveMiddleMend(markers, ["__timeline_motion__:second"], getMotionMarkerMendKey)).toEqual({
+      pairs: [
+        { previousId: "__timeline_motion__:first", nextId: "__timeline_motion__:second", time: 2 },
+        { previousId: "__timeline_motion__:second", nextId: "__timeline_motion__:third", time: 4 },
+      ],
+    });
+  });
+
   it("does not treat drifted explicit references as active mends", () => {
     const previous = { id: "first", start: 0, duration: 2.04, snapOut: true, mendOutId: "second" };
     const next = { id: "second", start: 2.26, duration: 2, snapIn: true, mendInId: "first" };
@@ -349,6 +364,13 @@ describe("timeline model", () => {
       { id: "first", start: 0, duration: 2, mendOutId: "second" },
       { id: "second", start: 2, duration: 2, snapIn: true, mendInId: "first" },
     )).toBe(false);
+  });
+
+  it("matches raw marker ids against timeline-qualified mend references", () => {
+    expect(isExplicitTimelineMarkerMend(
+      { id: "first", partId: "__timeline_motion__", start: 0, duration: 2, mendOutId: "__timeline_motion__:second" },
+      { id: "second", partId: "__timeline_motion__", start: 2, duration: 2, mendInId: "__timeline_motion__:first" },
+    )).toBe(true);
   });
 
   it("snaps moved timeline blocks by either front or back edge", () => {

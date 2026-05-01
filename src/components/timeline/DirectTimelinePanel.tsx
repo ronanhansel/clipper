@@ -6,7 +6,7 @@ import { buildLinearTimeline, getAdjustmentLayerRowId, getAdjustmentPlacement, g
 import { getTimelineBlockTiming, getTimelineDragDeltaSeconds, getTimelineSnapGuideTime } from "../../core/timelineBlockTiming";
 import { defaultTimelineLayerState } from "../../core/project";
 import { getAdjustmentEffectPackage, getEffectDragType, getEffectPackage, getMotionEffectPackage, installedEffectPackages } from "../../core/effects/registry";
-import { applyTimelineBlockPreview, clearTimelineBlockPreview, getTimelineBlockLayerPreview, getTimelineLayerRowAtClientY, moveTimelineStateLayer, renameTimelineStateLayer, toggleTimelineStateLayerHidden, toggleTimelineStateLayerLocked, type TimelineLayerCategory } from "../../core/timelineLayers";
+import { applyTimelineBlockPreview, clearTimelineBlockPreview, computeBulkLayerTargets, getTimelineBlockLayerPreview, getTimelineLayerDragPreview, getTimelineLayerRowAtClientY, moveTimelineStateLayer, renameTimelineStateLayer, toggleTimelineStateLayerHidden, toggleTimelineStateLayerLocked, type TimelineLayerCategory } from "../../core/timelineLayers";
 import type { AdjustmentEffectId, AdjustmentLayer, MotionBlockEffectKind, MotionEffectId, MotionEffectKind, MotionMarker, Part, TimelineMotionLayerKind, TimelinePart } from "../../core/types";
 import { getMotionMarkerViews } from "../../core/motionEffects";
 import { compositionDragPreviewEvent, compositionPointerDragEvent, effectDragPreviewEvent, effectPointerDragEvent, setClipperPointerDragPreview, type CompositionPointerDragDetail, type EffectPointerDragDetail } from "../../lib/pointerDrag";
@@ -740,11 +740,16 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
       if (isSelectionMove) {
         const nextTargets = getNextMoveTargets(clientX, snap);
         previewTimelineBlocks(previewMapFromBlocks("composition", nextTargets));
+        const containerRect = timelineViewportRef.current?.firstElementChild?.getBoundingClientRect();
+        const cursorLayerId = getTimelineLayerRowAtClientY(layerLayout, containerRect, clientY, "comp")?.row.key;
+        const layerTargets = computeBulkLayerTargets(layerLayout, "comp", sourceLayerId, cursorLayerId, moveTargets, "comp");
         for (const target of moveTargets) {
           const nextTarget = nextTargets.find((item) => item.id === target.id);
           const targetElement = timelineViewportRef.current?.querySelector<HTMLElement>(`[data-timeline-composition-id="${CSS.escape(target.id)}"]`);
           if (!nextTarget || !targetElement) continue;
-          applyTimelineBlockPreview(targetElement, { deltaX: 0, deltaY: preview.deltaY, height: preview.height, resizeProperty: "--clipper-composition-resize-width" });
+          const computedLayerId = layerTargets.get(target.id);
+          const layerPreview = getTimelineLayerDragPreview(layerLayout, target.layerId ?? "comp", computedLayerId && !isLayerLocked("comp", computedLayerId) ? computedLayerId : undefined);
+          applyTimelineBlockPreview(targetElement, { deltaX: 0, deltaY: layerPreview.deltaY, height: layerPreview.height, resizeProperty: "--clipper-composition-resize-width" });
         }
         return;
       }
@@ -781,8 +786,10 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
           if (targetElement) clearCompositionPreview(targetElement);
         }
         if (isSelectionMove) {
-          const targetLayerId = getDropLayerId("comp", clientY) ?? sourceLayerId;
-          onMoveCompositions(getNextMoveTargets(clientX, snap).map((target) => ({ compositionId: target.id, start: roundTenth(target.start), targetLayerId })));
+          const containerRect = timelineViewportRef.current?.firstElementChild?.getBoundingClientRect();
+          const cursorLayerId = getTimelineLayerRowAtClientY(layerLayout, containerRect, clientY, "comp")?.row.key;
+          const layerTargets = computeBulkLayerTargets(layerLayout, "comp", sourceLayerId, cursorLayerId, moveTargets, "comp");
+          onMoveCompositions(getNextMoveTargets(clientX, snap).map((target) => ({ compositionId: target.id, start: roundTenth(target.start), targetLayerId: layerTargets.get(target.id) ?? target.layerId })));
         } else if (action === "move") onMoveComposition(composition.id, roundTenth(nextComposition.start), getDropLayerId("comp", clientY) ?? sourceLayerId);
         else onUpdateComposition(composition.id, (current) => ({ ...current, start: roundTenth(nextComposition.start), duration: roundTenth(nextComposition.duration) }));
       },
@@ -842,8 +849,18 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
     function applyDrag(clientX: number, clientY: number, snap: boolean) {
       const nextLayer = getNextLayer(layer, clientX, snap);
       if (action === "move" && isSelectionMove) {
-        const preview = getLayerDragPreview("adjust", sourceLayerId, clientY);
-        setAdjustmentDragPreviews(resizeTargets, getNextLayers(clientX, snap), pixelsPerSecond, preview.deltaY, preview.height);
+        const nextLayers = getNextLayers(clientX, snap);
+        const containerRect = timelineViewportRef.current?.firstElementChild?.getBoundingClientRect();
+        const cursorLayerId = getTimelineLayerRowAtClientY(layerLayout, containerRect, clientY, "adjust")?.row.key;
+        const layerTargets = computeBulkLayerTargets(layerLayout, "adjust", sourceLayerId, cursorLayerId, resizeTargets.map((l) => ({ id: l.id, layerId: getAdjustmentLayerRowId(l) })), sourceLayerId);
+        for (const targetLayer of resizeTargets) {
+          const nextLayer = nextLayers.find((item) => item.id === targetLayer.id);
+          const element = getTimelineAdjustmentElement(targetLayer.id);
+          if (!nextLayer || !element) continue;
+          const computedLayerId = layerTargets.get(targetLayer.id);
+          const layerPreview = getTimelineLayerDragPreview(layerLayout, getAdjustmentLayerRowId(targetLayer), computedLayerId && !isLayerLocked("adjust", computedLayerId) ? computedLayerId : undefined);
+          applyTimelineBlockPreview(element, { deltaX: (nextLayer.start - targetLayer.start) * pixelsPerSecond, deltaY: layerPreview.deltaY, height: layerPreview.height });
+        }
         return;
       }
       if (action !== "move" && isSelectionResize) {
@@ -877,12 +894,15 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
         const nextLayer = getNextLayer(layer, clientX, snap);
         clearAdjustmentDragState();
         if (action === "move") {
-          const targetLayerId = getDropLayerId("adjust", clientY) ?? sourceLayerId;
           if (isSelectionMove) {
+            const containerRect = timelineViewportRef.current?.firstElementChild?.getBoundingClientRect();
+            const cursorLayerId = getTimelineLayerRowAtClientY(layerLayout, containerRect, clientY, "adjust")?.row.key;
+            const layerTargets = computeBulkLayerTargets(layerLayout, "adjust", sourceLayerId, cursorLayerId, resizeTargets.map((l) => ({ id: l.id, layerId: getAdjustmentLayerRowId(l) })), sourceLayerId);
             for (const targetLayer of getNextLayers(clientX, snap)) {
-              onUpdateAdjustmentLayer(targetLayer.id, () => ({ ...targetLayer, layerId: targetLayerId, start: roundTenth(targetLayer.start) }));
+              onUpdateAdjustmentLayer(targetLayer.id, () => ({ ...targetLayer, layerId: layerTargets.get(targetLayer.id) ?? getAdjustmentLayerRowId(targetLayer), start: roundTenth(targetLayer.start) }));
             }
           } else {
+            const targetLayerId = getDropLayerId("adjust", clientY) ?? sourceLayerId;
             onMoveAdjustmentLayer(layer.id, nextLayer.start, targetLayerId);
           }
         }
@@ -926,10 +946,23 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
 
     function getMoveDragState(clientX: number, clientY: number, snap: boolean) {
       const deltaSeconds = getDeltaSeconds(clientX);
-      const targetLayerId = getMotionDropLayerId("motion", clientY) ?? sourceLayerId;
+      const cursorLayerId = getMotionDropLayerId("motion", clientY);
       const blockDeltaSeconds = blockDeltaForTimelineDrag(dragItems, deltaSeconds, snapThresholdSeconds, snap, motionKind);
-      const moves = getTimelineMarkerMoves(motionTimeline, dragItems, blockDeltaSeconds, motionKind, activePartIds, snapThresholdSeconds).map((move) => ({ ...move, targetLayerId }));
-      return { blockDeltaSeconds, moves };
+      const markerLayerLookup = new Map<string, string>();
+      for (const item of dragItems) {
+        const key = `${item.partId}:${item.markerId}`;
+        if (!markerLayerLookup.has(key)) {
+          const part = motionTimeline.find((p) => p.id === item.partId);
+          const marker = part?.motionMarkers.find((m) => m.id === item.markerId);
+          markerLayerLookup.set(key, getMotionMarkerLayerId(marker ?? { layerId: undefined }));
+        }
+      }
+      const layerTargets = computeBulkLayerTargets(layerLayout, "motion", sourceLayerId, cursorLayerId, dragItems.map((item) => ({ id: `${item.partId}:${item.markerId}`, layerId: markerLayerLookup.get(`${item.partId}:${item.markerId}`) })), sourceLayerId);
+      const moves = getTimelineMarkerMoves(motionTimeline, dragItems, blockDeltaSeconds, motionKind, activePartIds, snapThresholdSeconds).map((move) => ({
+        ...move,
+        targetLayerId: layerTargets.get(`${move.sourcePartId}:${move.markerId}`) ?? sourceLayerId,
+      }));
+      return { blockDeltaSeconds, moves, layerTargets };
     }
 
     function commitMoveDrag(clientX: number, clientY: number, snap: boolean) {
@@ -982,9 +1015,18 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
 
     function applyDrag(clientX: number, clientY: number, snap: boolean) {
       if (action === "move") {
-        const { blockDeltaSeconds } = getMoveDragState(clientX, clientY, snap);
-        const preview = getLayerDragPreview("motion", sourceLayerId, clientY);
-        setTimelineMarkerDragTransforms(dragItems, blockDeltaSeconds * pixelsPerSecond, preview.deltaY, preview.height);
+        const { blockDeltaSeconds, layerTargets } = getMoveDragState(clientX, clientY, snap);
+        for (const item of dragItems) {
+          const element = getTimelineMarkerElement(item.partId, item.markerId);
+          if (!element) continue;
+          const itemKey = `${item.partId}:${item.markerId}`;
+          const targetLayerId = layerTargets.get(itemKey);
+          const part = motionTimeline.find((p) => p.id === item.partId);
+          const marker = part?.motionMarkers.find((m) => m.id === item.markerId);
+          const itemSourceLayer = getMotionMarkerLayerId(marker ?? { layerId: undefined });
+          const layerPreview = getTimelineLayerDragPreview(layerLayout, itemSourceLayer, targetLayerId && !isLayerLocked("motion", targetLayerId) ? targetLayerId : undefined);
+          applyTimelineBlockPreview(element, { deltaX: blockDeltaSeconds * pixelsPerSecond, deltaY: layerPreview.deltaY, height: layerPreview.height });
+        }
         return;
       }
 

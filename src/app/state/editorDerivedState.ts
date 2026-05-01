@@ -109,7 +109,7 @@ export function useEditorDerivedState({
     ? getLayeredCameraPreviewTransform(part, motionLayers, previewTime, { hiddenLayerIds: hiddenMotionLayerIds, pickingTranslationPosition: isPickingTranslationPosition, pickingZoomFocus: isPickingZoomFocus })
     : identityCameraPreview, [hiddenMotionLayerIds, isPickingTranslationPosition, isPickingZoomFocus, motionLayers, previewTime, part, timelineMode]);
   const zoomScale = cameraPreviewTransform.scale;
-  const absoluteMotionMarkers = useMemo(() => sceneMotionViews.motionMarkers.map((marker) => ({ ...marker, id: timelineMarkerKey({ partId: TIMELINE_MOTION_PART_ID, markerId: marker.id }), partId: TIMELINE_MOTION_PART_ID, start: marker.start })), [sceneMotionViews.motionMarkers]);
+  const absoluteMotionMarkers = useMemo(() => sceneMotionViews.motionMarkers.map((marker) => ({ ...marker, id: timelineMarkerKey({ partId: TIMELINE_MOTION_PART_ID, markerId: marker.id }), rawMarkerId: marker.id, partId: TIMELINE_MOTION_PART_ID, start: marker.start })), [sceneMotionViews.motionMarkers]);
   const currentPartSelectedMotionIds = useMemo(() => selectedMotionMarkers.filter((selection) => selection.partId === part.id).map(timelineMarkerKey), [part.id, selectedMotionMarkers]);
   const selectedMotionPartSelectedMotionIds = useMemo(() => selectedMotionPart ? selectedMotionMarkers.filter((selection) => selection.partId === selectedMotionPart.id).map(timelineMarkerKey) : [], [selectedMotionMarkers, selectedMotionPart]);
   const selectedMotionSnapMarkers = useMemo(() => selectedMotionMarkers.flatMap((selection) => {

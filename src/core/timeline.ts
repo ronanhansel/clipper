@@ -105,7 +105,7 @@ export type TimelineMarkerMove = { sourcePartId: string; markerId: string; targe
 export type TimelineMarkerResize = { sourcePartId: string; markerId: string; absoluteStart: number; duration: number };
 export type TimelineMarkerDragItem = { partId: string; markerId: string; absoluteStart: number; duration: number; groupId?: string };
 type TopTimelineItem = { kind: "adjustment"; layer: AdjustmentLayer } | { kind: "motion"; part: TimelineComposition; marker: MotionMarker } | { kind: "part"; part: TimelineComposition };
-export type TimelineMendMarker = { id: string; start: number; duration: number; effectId?: string; effect?: { effectId?: string }; layerId?: string; snapIn?: boolean; snapOut?: boolean; mendInId?: string; mendOutId?: string; partId?: string; sourcePartId?: string };
+export type TimelineMendMarker = { id: string; start: number; duration: number; effectId?: string; effect?: { effectId?: string }; layerId?: string; snapIn?: boolean; snapOut?: boolean; mendInId?: string; mendOutId?: string; partId?: string; sourcePartId?: string; rawMarkerId?: string };
 type MiddleSnapMarker = TimelineMendMarker;
 type MiddleSnapLayerResolver<T extends MiddleSnapMarker> = (marker: T) => string;
 
@@ -701,9 +701,11 @@ export function removeTimelineMotionLayerMarkers<T extends { motionMarkers?: Mot
   });
 }
 
-function markerIdentityKeys(marker: { id: string; partId?: string; sourcePartId?: string }) {
+function markerIdentityKeys(marker: { id: string; partId?: string; sourcePartId?: string; rawMarkerId?: string }) {
   const partId = marker.partId ?? marker.sourcePartId;
-  return new Set(partId ? [marker.id, `${partId}:${marker.id}`] : [marker.id]);
+  const keys = partId ? [marker.id, `${partId}:${marker.id}`] : [marker.id];
+  if (marker.rawMarkerId) keys.push(marker.rawMarkerId);
+  return new Set(keys);
 }
 
 export function isExplicitTimelineMarkerMend(previous: TimelineMendMarker, next: TimelineMendMarker) {
@@ -714,7 +716,7 @@ function areTimelineMarkersAdjacent(previous: { start: number; duration: number 
   return Math.abs(previous.start + previous.duration - next.start) <= 0.001;
 }
 
-function hasExplicitTimelineMarkerMendReference(previous: { id: string; snapOut?: boolean; mendOutId?: string; partId?: string; sourcePartId?: string }, next: { id: string; snapIn?: boolean; mendInId?: string; partId?: string; sourcePartId?: string }) {
+function hasExplicitTimelineMarkerMendReference(previous: { id: string; snapOut?: boolean; mendOutId?: string; partId?: string; sourcePartId?: string; rawMarkerId?: string }, next: { id: string; snapIn?: boolean; mendInId?: string; partId?: string; sourcePartId?: string; rawMarkerId?: string }) {
   return Boolean(
     previous.mendOutId
       && next.mendInId
@@ -723,7 +725,7 @@ function hasExplicitTimelineMarkerMendReference(previous: { id: string; snapOut?
   );
 }
 
-export function expandExplicitTimelineMarkerMendIds<T extends { id: string; start: number; snapIn?: boolean; snapOut?: boolean; mendInId?: string; mendOutId?: string; partId?: string; sourcePartId?: string }>(markers: T[], seedIds: Set<string>, partId?: string) {
+export function expandExplicitTimelineMarkerMendIds<T extends { id: string; start: number; snapIn?: boolean; snapOut?: boolean; mendInId?: string; mendOutId?: string; partId?: string; sourcePartId?: string; rawMarkerId?: string }>(markers: T[], seedIds: Set<string>, partId?: string) {
   const expandedIds = new Set(seedIds);
   const normalizedMarkers = markers.map((marker) => ({ ...marker, partId: marker.partId ?? marker.sourcePartId ?? partId }));
   let changed = true;

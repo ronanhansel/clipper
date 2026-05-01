@@ -148,3 +148,76 @@ Implementation notes:
 Verification after snap/mend exclusivity follow-up:
 - `npm run typecheck` passes
 - `npm test -- src/core/timeline.test.ts src/core/timelineBlockTiming.test.ts src/core/camera.test.ts` passes (56 tests)
+
+## Follow-up Fix: Runtime Mend ID Normalization
+
+Root cause of remaining motion handoff failure:
+- Motion mends were computed in absolute timeline space using timeline-qualified marker IDs such as `__timeline_motion__:markerId`.
+- Those qualified IDs were being persisted into scene motion markers.
+- Runtime camera evaluation sees raw scene marker IDs, so `isExplicitTimelineMarkerMend` could not recognize the stored links and fell back to ordinary in/out ramp behavior.
+
+Implementation notes:
+- `snapMotionMiddle` now normalizes timeline-motion mend references back to raw marker IDs when writing scene motion markers.
+- Timeline-qualified IDs are still used internally for selection/snap computation where they are needed to disambiguate marker identity.
+- Added a regression test documenting timeline-qualified reference matching for timeline marker objects.
+
+Verification after runtime ID normalization:
+- `npm run typecheck` passes
+- `npm test -- src/core/timeline.test.ts src/core/timelineBlockTiming.test.ts src/core/camera.test.ts` passes (57 tests)
+
+## Follow-up Fix: Absolute Marker Identity Resolution
+
+Root cause of inspector not recognizing runtime mends:
+- `getAbsoluteMotionMarkers` qualifies marker IDs with `TIMELINE_MOTION_PART_ID:markerId` for selection disambiguation.
+- Stored motion mend references use raw marker IDs.
+- `markerIdentityKeys` only checked `marker.id` (qualified) and `partId:marker.id` (double-qualified), but never checked the raw marker ID.
+- Therefore the derived state could not find active mends for the inspector, even though runtime recognized them.
+
+Implementation notes:
+- Added `rawMarkerId` to `TimelineMendMarker` type and to the `markerIdentityKeys` resolution.
+- `getAbsoluteMotionMarkers` in both `useMotionMarkerCommands` and `editorDerivedState` now emit `rawMarkerId: marker.id` alongside the qualified `id`.
+- Mend references are stored as raw IDs by `snapMotionMiddle` (via `normalizeTimelineMotionMendId`), and `markerIdentityKeys` now matches them.
+
+Verification after identity resolution:
+- `npm run typecheck` passes
+- `npm test -- src/core/timeline.test.ts src/core/timelineBlockTiming.test.ts src/core/camera.test.ts` passes (58 tests)
+
+## Follow-up Fix: Unmend Handoff Cleanup
+
+Root cause of stale mend metadata after unmend:
+- `snapMotionMiddle`'s bounds map only tracked `mendInId`/`mendOutId`, not `middleTransition`/`middleEase`.
+- Unmending cleared the mend references but left transition/ease metadata on the next marker.
+- This caused stale handoff mode/ease values to persist after unmend, and could confuse subsequent mend operations.
+
+Implementation notes:
+- `nextBounds` map now tracks `middleTransition` and `middleEase`.
+- Unmend path now clears `middleTransition: undefined` and `middleEase: undefined` on the next marker.
+- Write-back now includes `middleTransition` and `middleEase` from bounds.
+- Added a regression test for timeline-qualified ID matching with `rawMarkerId`.
+
+## Follow-up Fix: Scene Marker Write-back
+
+Root cause of unmend (and any scene-level motion marker mutation) being silently ignored:
+- `updateSceneMotionMarkers` wrote motion marker changes only to `project.timelines`.
+- The app reads motion markers from `project.scenes` via `editorDerivedState`.
+- These are two separate project arrays — the write went to a location that is never read by the editing UI.
+- All scene-level motion marker mutations (mend, unmend, snap toggle, transition, ease, focus group, add/delete) were effectively no-ops for the displayed state.
+
+Fix:
+- `updateSceneMotionMarkers` now writes to both `project.scenes` and `project.timelines`, preserving the existing timeline entry format alongside the scene format.
+- Also fixed the 2-marker unmend selection to only preserve the currently selected markers rather than expanding to both pair members.
+
+## Follow-up Fix: Params Shadowing In Marker Normalization
+
+Root cause of mutations (mend, unmend, transition, ease, snap toggle) silently reverting:
+- `MotionBlock` has both top-level fields (`mendInId`, `middleTransition`, etc.) and `params: MotionBlockParams` with the same keys.
+- `normalizeMotionBlocks` resolves via `block.mendInId ?? params.mendInId` — so if a mutation only cleared the top-level field but `params` still held the old value, the value was restored.
+- Every read via `getCanonicalMotionMarkers` went through this fallback, silently reverting all mutations.
+- Combined with `updateSceneMotionMarkers` only writing to `project.timelines` (not `project.scenes`), nested params shadowing caused complete write-through failure.
+
+Fixes:
+- `updateSceneMotionMarkers` now writes to `project.scenes` alongside `project.timelines`.
+- `snapMotionMiddle` write-back now syncs `params` fields with the updated mend metadata.
+- `applySnapToggle` (snap flag changes) clears corresponding `params` fields when breaking mends.
+- `updateMotionMiddleTransition` and `updateMotionMiddleEase` sync `params.middleTransition`/`params.middleEase`.
+- Added `clearMendParams` helper for consistent params synchronization.

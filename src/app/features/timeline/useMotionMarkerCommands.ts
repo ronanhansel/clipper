@@ -8,7 +8,7 @@ import { clamp, roundTenth, roundTwo } from "../../../core/math";
 import { getMotionEffectByKind, getMotionEffectPackage } from "../../../core/effects/registry";
 import { createDefaultMotionBlockByEffectId, getMotionMarkerViews, motionBlocksToMotionMarkers } from "../../../core/motionEffects";
 import { buildLinearTimeline, getAvailableMotionPlacement, getSelectedActiveMiddleMend, getSelectedMotionMiddleSnap, getMotionMarkerMendKey, isMotionMiddleSnapActive, type TimelineMarkerMove, type TimelineMarkerResize } from "../../../core/timeline";
-import { applyMotionMarkerOverwrite, applySceneMotionMarkerOverwrite, placeMotionMarkerOnTimeline, remapMovedMarkerMendIds, motionBlockFromMarker, timelineMarkerKey, timelineMoveKey, uniqueMarkerSelections, withMotionMarkers } from "./timelineMutationHelpers";
+import { applyMotionMarkerOverwrite, applySceneMotionMarkerOverwrite, placeMotionMarkerOnTimeline, remapMovedMarkerMendIds, motionBlockFromMarker, parseTimelineMarkerKey, timelineMarkerKey, timelineMoveKey, uniqueMarkerSelections, withMotionMarkers } from "./timelineMutationHelpers";
 import type { SceneMotionMarkerUpdate } from "./useTimelineProjectActions";
 
 type SceneMotionState = {
@@ -82,7 +82,7 @@ export function useMotionMarkerCommands({
   const timelineMotionPart = { ...part, id: TIMELINE_MOTION_PART_ID, name: "Timeline motion", duration: Math.max(sceneDurationSeconds, 0.1), motionMarkers: scene.motionMarkers ?? [] };
 
   function getAbsoluteMotionMarkers() {
-    return getMotionMarkerViews(scene).motionMarkers.map((marker) => ({ ...marker, id: timelineMarkerKey(TIMELINE_MOTION_PART_ID, marker.id), partId: TIMELINE_MOTION_PART_ID, start: marker.start }));
+    return getMotionMarkerViews(scene).motionMarkers.map((marker) => ({ ...marker, id: timelineMarkerKey(TIMELINE_MOTION_PART_ID, marker.id), rawMarkerId: marker.id, partId: TIMELINE_MOTION_PART_ID, start: marker.start }));
   }
 
   // ── update / move / resize / delete ──────────────────────────────
@@ -376,7 +376,7 @@ export function useMotionMarkerCommands({
     for (const selection of selectedMotionMarkers) selectedIdsByPart.set(selection.partId, (selectedIdsByPart.get(selection.partId) ?? new Set()).add(selection.markerId));
     function applySnapToggle(markers: MotionMarker[], selectedIds: Set<string>) {
       const nextMarkers = markers.map((marker) => selectedIds.has(marker.id)
-        ? { ...marker, [key]: enabled || undefined }
+        ? { ...marker, [key]: enabled || undefined, params: marker.params ? { ...marker.params, [key]: enabled || undefined } : marker.params }
         : marker);
       if (!enabled) return nextMarkers;
       const markerById = new Map(nextMarkers.map((marker) => [marker.id, marker]));
@@ -385,13 +385,13 @@ export function useMotionMarkerCommands({
         if (!selectedIds.has(marker.id)) continue;
         if (key === "snapIn" && marker.mendInId) {
           const previous = markerById.get(marker.mendInId);
-          updated.set(marker.id, { ...updated.get(marker.id)!, mendInId: undefined, middleTransition: undefined, middleEase: undefined });
-          if (previous?.mendOutId === marker.id) updated.set(previous.id, { ...updated.get(previous.id)!, mendOutId: undefined });
+          updated.set(marker.id, { ...updated.get(marker.id)!, mendInId: undefined, middleTransition: undefined, middleEase: undefined, params: marker.params ? { ...marker.params, mendInId: undefined, middleTransition: undefined, middleEase: undefined } : undefined });
+          if (previous?.mendOutId === marker.id) updated.set(previous.id, { ...updated.get(previous.id)!, mendOutId: undefined, params: previous.params ? { ...previous.params, mendOutId: undefined } : undefined });
         }
         if (key === "snapOut" && marker.mendOutId) {
           const next = markerById.get(marker.mendOutId);
-          updated.set(marker.id, { ...updated.get(marker.id)!, mendOutId: undefined });
-          if (next?.mendInId === marker.id) updated.set(next.id, { ...updated.get(next.id)!, mendInId: undefined, middleTransition: undefined, middleEase: undefined });
+          updated.set(marker.id, { ...updated.get(marker.id)!, mendOutId: undefined, params: marker.params ? { ...marker.params, mendOutId: undefined } : undefined });
+          if (next?.mendInId === marker.id) updated.set(next.id, { ...updated.get(next.id)!, mendInId: undefined, middleTransition: undefined, middleEase: undefined, params: next.params ? { ...next.params, mendInId: undefined, middleTransition: undefined, middleEase: undefined } : undefined });
         }
       }
       return [...updated.values()];
@@ -426,15 +426,15 @@ export function useMotionMarkerCommands({
     const activeSelectedIds = new Set(selectedIds.length > 0 ? selectedIds : targetPartSelectedIds);
     const nextSelection = snap.pairs.length > 1
       ? uniqueMarkerSelections(absoluteMarkers.filter((marker) => activeSelectedIds.has(marker.id)).map((marker) => marker.id))
-      : uniqueMarkerSelections([snap.pairs[0].previousId, snap.pairs[0].nextId]);
-    const nextBounds = new Map(absoluteMarkers.map((marker) => [marker.id, { start: marker.start, end: marker.start + marker.duration, snapIn: marker.snapIn, snapOut: marker.snapOut, mendInId: marker.mendInId, mendOutId: marker.mendOutId }]));
+      : uniqueMarkerSelections((selectedIds.length > 0 ? selectedIds : targetPartSelectedIds));
+    const nextBounds = new Map(absoluteMarkers.map((marker) => [marker.id, { start: marker.start, end: marker.start + marker.duration, snapIn: marker.snapIn, snapOut: marker.snapOut, mendInId: marker.mendInId, mendOutId: marker.mendOutId, middleTransition: marker.middleTransition, middleEase: marker.middleEase }]));
     const mendedIds = new Set(snap.pairs.flatMap((pair) => [pair.previousId, pair.nextId]));
     for (const pair of snap.pairs) {
       const previousBounds = nextBounds.get(pair.previousId);
       const nextMarkerBounds = nextBounds.get(pair.nextId);
       if (middleSnapActive) {
         if (previousBounds) nextBounds.set(pair.previousId, { ...previousBounds, mendOutId: undefined });
-        if (nextMarkerBounds) nextBounds.set(pair.nextId, { ...nextMarkerBounds, mendInId: undefined });
+        if (nextMarkerBounds) nextBounds.set(pair.nextId, { ...nextMarkerBounds, mendInId: undefined, middleTransition: undefined, middleEase: undefined });
       } else {
         if (previousBounds) nextBounds.set(pair.previousId, { ...previousBounds, end: pair.time, snapOut: undefined, mendOutId: pair.nextId });
         if (nextMarkerBounds) nextBounds.set(pair.nextId, { ...nextMarkerBounds, start: pair.time, snapIn: undefined, mendInId: pair.previousId });
@@ -446,12 +446,26 @@ export function useMotionMarkerCommands({
         if (!mendedIds.has(key)) return marker;
         const bounds = nextBounds.get(key);
         if (!bounds) return marker;
-        return { ...marker, start: roundTenth(bounds.start), duration: roundTenth(bounds.end - bounds.start), snapIn: bounds.snapIn, snapOut: bounds.snapOut, mendInId: bounds.mendInId, mendOutId: bounds.mendOutId };
+        const nextMarker = { ...marker, start: roundTenth(bounds.start), duration: roundTenth(bounds.end - bounds.start), snapIn: bounds.snapIn, snapOut: bounds.snapOut, mendInId: normalizeTimelineMotionMendId(bounds.mendInId), mendOutId: normalizeTimelineMotionMendId(bounds.mendOutId), middleTransition: bounds.middleTransition, middleEase: bounds.middleEase, params: clearMendParams(marker) };
+        // Re-sync params with the new values on nextMarker
+        if (nextMarker.params) nextMarker.params = clearMendParams(nextMarker);
+        return nextMarker;
       }));
       return { motionMarkers: nextMarkers };
     });
     setSelectedMotionMarker(nextSelection.at(-1) ?? null);
     setSelectedMotionMarkers(nextSelection);
+  }
+
+  function normalizeTimelineMotionMendId(id: string | undefined) {
+    if (!id) return undefined;
+    const parsed = parseTimelineMarkerKey(id);
+    return parsed.partId === TIMELINE_MOTION_PART_ID ? parsed.markerId : id;
+  }
+
+  function clearMendParams(marker: MotionMarker) {
+    if (!marker.params) return marker.params;
+    return { ...marker.params, mendInId: marker.mendInId, mendOutId: marker.mendOutId, middleTransition: marker.middleTransition, middleEase: marker.middleEase, snapIn: marker.snapIn, snapOut: marker.snapOut };
   }
 
   function updateMotionMiddleTransition(_targetPart: Part, mode: "instant" | "transition") {
@@ -463,7 +477,7 @@ export function useMotionMarkerCommands({
     const nextMarkerIds = new Set(snap.pairs.map((pair) => pair.nextId));
     updateSceneMotionMarkers((markers) => ({
       motionMarkers: markers.map((marker) => nextMarkerIds.has(timelineMarkerKey(TIMELINE_MOTION_PART_ID, marker.id))
-        ? { ...marker, middleTransition: mode === "transition" ? "transition" : undefined }
+        ? { ...marker, middleTransition: mode === "transition" ? "transition" : undefined, params: marker.params ? { ...marker.params, middleTransition: mode === "transition" ? "transition" : undefined } : undefined }
         : marker),
     }));
   }
@@ -477,7 +491,7 @@ export function useMotionMarkerCommands({
     const nextMarkerIds = new Set(snap.pairs.map((pair) => pair.nextId));
     updateSceneMotionMarkers((markers) => ({
       motionMarkers: markers.map((marker) => nextMarkerIds.has(timelineMarkerKey(TIMELINE_MOTION_PART_ID, marker.id))
-        ? { ...marker, middleEase: ease }
+        ? { ...marker, middleEase: ease, params: marker.params ? { ...marker.params, middleEase: ease } : undefined }
         : marker),
     }));
   }
