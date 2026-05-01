@@ -1,7 +1,7 @@
 import { defaultAdjustmentEffectPackage, getAdjustmentEffectPackage } from "../../../core/effects/registry";
 import type { AdjustmentEffectPointControl } from "../../../core/effects/types";
-import { roundTenth } from "../../../core/math";
-import { getAdjustmentPlacement } from "../../../core/timeline";
+import { roundTenth, roundTwo } from "../../../core/math";
+import { getAdjustmentPlacement, getTimelineMarkerMendLayerId, getSelectedActiveMiddleMend, getSelectedMotionMiddleSnap, getMotionMiddleSnap, isMotionMiddleSnapActive, type TimelineMendMarker } from "../../../core/timeline";
 import type { AdjustmentEffectId, AdjustmentLayer, TimelineLayerState } from "../../../core/types";
 import { applyAdjustmentLayerOverwrite } from "./timelineMutationHelpers";
 
@@ -15,6 +15,7 @@ type UseAdjustmentLayerCommandsInput = {
     adjustmentLayers?: AdjustmentLayer[];
   };
   sceneDurationSeconds: number;
+  selectedAdjustmentLayerId: string | null;
   timelineLayers: TimelineLayerState;
   selectAdjustmentLayer: (layerId: string) => void;
   setFocusPickZoomMarker: (selection: { partId: string; markerId: string } | null) => void;
@@ -34,6 +35,7 @@ export function useAdjustmentLayerCommands({
   pointPickAdjustment,
   scene,
   sceneDurationSeconds,
+  selectedAdjustmentLayerId,
   timelineLayers,
   selectAdjustmentLayer,
   setFocusPickZoomMarker,
@@ -78,6 +80,50 @@ export function useAdjustmentLayerCommands({
     setSelectedAdjustmentLayers([]);
   }
 
+  function snapAdjustmentMiddle() {
+    const markers: TimelineMendMarker[] = (scene.adjustmentLayers ?? []).map((layer) => ({
+      id: layer.id,
+      start: layer.start,
+      duration: layer.duration,
+      effectId: layer.effect.effectId,
+      layerId: layer.layerId ?? layer.effect.effectId,
+      snapIn: layer.snapIn,
+      snapOut: layer.snapOut,
+      mendInId: layer.mendInId,
+      mendOutId: layer.mendOutId,
+    }));
+    const selectedIds = selectedAdjustmentLayerId ? [selectedAdjustmentLayerId] : [];
+    const snap = getSelectedActiveMiddleMend(markers, selectedIds, getTimelineMarkerMendLayerId)
+      ?? getSelectedMotionMiddleSnap(markers, selectedIds, getTimelineMarkerMendLayerId)
+      ?? getMotionMiddleSnap(markers, currentSceneTimeRef.current, getTimelineMarkerMendLayerId);
+    if (!snap) return;
+    const middleSnapActive = isMotionMiddleSnapActive(markers, snap);
+    const nextBounds = new Map(markers.map((marker) => [marker.id, { start: marker.start, end: marker.start + marker.duration, snapIn: marker.snapIn, snapOut: marker.snapOut, mendInId: marker.mendInId, mendOutId: marker.mendOutId }]));
+    const mendedIds = new Set(snap.pairs.flatMap((pair: { previousId: string; nextId: string }) => [pair.previousId, pair.nextId]));
+    for (const pair of snap.pairs) {
+      const previousBounds = nextBounds.get(pair.previousId);
+      const nextMarkerBounds = nextBounds.get(pair.nextId);
+      if (middleSnapActive) {
+        if (previousBounds) nextBounds.set(pair.previousId, { ...previousBounds, mendOutId: undefined });
+        if (nextMarkerBounds) nextBounds.set(pair.nextId, { ...nextMarkerBounds, mendInId: undefined });
+      } else {
+        if (previousBounds) nextBounds.set(pair.previousId, { ...previousBounds, end: pair.time, mendOutId: pair.nextId });
+        if (nextMarkerBounds) nextBounds.set(pair.nextId, { ...nextMarkerBounds, start: pair.time, mendInId: pair.previousId });
+      }
+    }
+    updateSceneAdjustmentLayers((layers) => applyAdjustmentLayerOverwrite(layers.map((layer) => {
+      if (!mendedIds.has(layer.id)) return layer;
+      const bounds = nextBounds.get(layer.id);
+      if (!bounds) return layer;
+      return { ...layer, start: roundTenth(bounds.start), duration: roundTenth(bounds.end - bounds.start), snapIn: bounds.snapIn, snapOut: bounds.snapOut, mendInId: bounds.mendInId, mendOutId: bounds.mendOutId };
+    }), mendedIds));
+    const nextLayerId = snap.pairs[snap.pairs.length - 1]?.nextId ?? snap.pairs[0]?.previousId;
+    if (nextLayerId) {
+      setSelectedAdjustmentLayerId(nextLayerId);
+      setSelectedAdjustmentLayers([{ layerId: nextLayerId }]);
+    }
+  }
+
   function startAdjustmentPointPick(layerId: string, control: AdjustmentEffectPointControl) {
     if (pointPickAdjustment?.layerId === layerId && pointPickAdjustment.control.xKey === control.xKey && pointPickAdjustment.control.yKey === control.yKey) {
       setPointPickAdjustment(null);
@@ -99,6 +145,7 @@ export function useAdjustmentLayerCommands({
     addAdjustmentLayerAt,
     deleteAdjustmentLayer,
     moveAdjustmentLayer,
+    snapAdjustmentMiddle,
     startAdjustmentPointPick,
     updateAdjustmentLayer,
   };

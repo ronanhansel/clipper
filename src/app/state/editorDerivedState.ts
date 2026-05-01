@@ -5,7 +5,7 @@ import { cameraTranslationToFramePoint, CAMERA_PERSPECTIVE, getLayeredCameraPrev
 import { clamp } from "../../core/math";
 import { getMotionMarkerViews, motionBlocksToMotionMarkers } from "../../core/motionEffects";
 import { defaultAssets, defaultTimelineLayerState, serializeProjectForSave } from "../../core/project";
-import { buildLinearTimeline, getExecutableAdjustmentLayers, getMiddleTransitionMode, getSelectedActiveMiddleMend, getSelectedMotionMiddleSnap, getTimelinePartAtTime, getMotionMarkerMendKey, getMotionMiddleSnap, isMotionMiddleSnapActive, sceneDuration as getSceneDuration, validateScene } from "../../core/timeline";
+import { buildLinearTimeline, getExecutableAdjustmentLayers, getMiddleTransitionMode, getSelectedActiveMiddleMend, getSelectedMotionMiddleSnap, getTimelineMarkerMendLayerId, getTimelinePartAtTime, getMotionMarkerMendKey, getMotionMiddleSnap, isMotionMiddleSnapActive, sceneDuration as getSceneDuration, validateScene, type TimelineMendMarker } from "../../core/timeline";
 import { FRAME_HEIGHT, FRAME_WIDTH, type CompositionClip, type MotionMarker, type ProjectManifest, type SelectionPayload, type TimelineMode, type TimelinePart } from "../../core/types";
 import { TIMELINE_MOTION_PART_ID } from "../types";
 import type { MotionMarkerSelection } from "../types";
@@ -126,6 +126,37 @@ export function useEditorDerivedState({
   const motionMiddleSnap = selectedMotionMiddleSnap ?? getMotionMiddleSnap(absoluteMotionMarkers, adjustedSceneTime, getMotionMarkerMendKey);
   const inspectorMotionMiddleSnap = selectedMotionPartMiddleSnap ?? (selectedMotionPart?.id === part.id ? motionMiddleSnap : null);
 
+  const adjustmentMarkers = useMemo<TimelineMendMarker[]>(() => (scene.adjustmentLayers ?? []).map((layer) => ({
+    id: layer.id,
+    start: layer.start,
+    duration: layer.duration,
+    effectId: layer.effect.effectId,
+    layerId: layer.layerId ?? layer.effect.effectId,
+    snapIn: layer.snapIn,
+    snapOut: layer.snapOut,
+    mendInId: layer.mendInId,
+    mendOutId: layer.mendOutId,
+  })), [scene.adjustmentLayers]);
+  const selectedAdjustmentIds = useMemo(() => selectedAdjustmentLayerId ? [selectedAdjustmentLayerId] : [], [selectedAdjustmentLayerId]);
+  const inspectorAdjustmentMiddleSnap = getSelectedActiveMiddleMend(adjustmentMarkers, selectedAdjustmentIds, getTimelineMarkerMendLayerId)
+    ?? getSelectedMotionMiddleSnap(adjustmentMarkers, selectedAdjustmentIds, getTimelineMarkerMendLayerId)
+    ?? getMotionMiddleSnap(adjustmentMarkers, currentSceneTime, getTimelineMarkerMendLayerId);
+
+  const compositionMarkers = useMemo<TimelineMendMarker[]>(() => scene.compositions.map((comp) => ({
+    id: comp.id,
+    start: comp.start ?? 0,
+    duration: comp.duration,
+    layerId: comp.layerId ?? "comp",
+    snapIn: comp.snapIn,
+    snapOut: comp.snapOut,
+    mendInId: comp.mendInId,
+    mendOutId: comp.mendOutId,
+  })), [scene.compositions]);
+  const selectedCompositionIds = useMemo(() => selectedPartId ? [selectedPartId] : [], [selectedPartId]);
+  const inspectorCompositionMiddleSnap = getSelectedActiveMiddleMend(compositionMarkers, selectedCompositionIds)
+    ?? getSelectedMotionMiddleSnap(compositionMarkers, selectedCompositionIds)
+    ?? getMotionMiddleSnap(compositionMarkers, currentSceneTime);
+
   return {
     activeTimelinePart,
     agentContext,
@@ -136,6 +167,8 @@ export function useEditorDerivedState({
     framePickPoint,
     hasUnsavedChanges,
     hasActiveComposition,
+    inspectorAdjustmentMiddleSnap,
+    inspectorCompositionMiddleSnap,
     inspectorMotionMiddleSnap,
     isPickingTranslationPosition,
     isPickingZoomFocus,

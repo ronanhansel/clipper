@@ -302,6 +302,8 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     framePickPoint,
     hasUnsavedChanges,
     hasActiveComposition,
+    inspectorAdjustmentMiddleSnap,
+    inspectorCompositionMiddleSnap,
     inspectorMotionMiddleSnap,
     isPickingTranslationPosition,
     isPickingZoomFocus,
@@ -654,6 +656,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     addAdjustmentLayerAt,
     deleteAdjustmentLayer,
     moveAdjustmentLayer,
+    snapAdjustmentMiddle,
     startAdjustmentPointPick,
     updateAdjustmentLayer,
   } = useAdjustmentLayerCommands({
@@ -661,6 +664,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     pointPickAdjustment,
     scene,
     sceneDurationSeconds,
+    selectedAdjustmentLayerId,
     timelineLayers,
     selectAdjustmentLayer,
     setFocusPickZoomMarker,
@@ -845,6 +849,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     moveCompositionMarker,
     moveCompositionMarkers,
     reorderPart,
+    snapCompositionMiddle,
     updateCompositionMarker,
   } = useCompositionTimelineCommands({
     compositionLibrary,
@@ -1155,6 +1160,8 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
             selectedMotionPartMiddleTransitionMode={selectedMotionPartMiddleTransitionMode}
             focusPickMotionMarker={focusPickZoomMarker}
             canSnapMotionMiddle={Boolean(inspectorMotionMiddleSnap)}
+            canSnapAdjustmentMiddle={Boolean(inspectorAdjustmentMiddleSnap)}
+            canSnapCompositionMiddle={Boolean(inspectorCompositionMiddleSnap)}
             positionPickMotionMarker={positionPickTranslationMarker}
             trackerPickMotionMarker={trackerPickTranslationMarker}
             selectedObject={selectedObject}
@@ -1172,6 +1179,8 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
             onDeleteMotionMarker={deleteMotionMarker}
             onStartMotionFocusPick={startZoomFocusPick}
             onSnapMotionMiddle={snapMotionMiddle}
+            onSnapAdjustmentMiddle={snapAdjustmentMiddle}
+            onSnapCompositionMiddle={snapCompositionMiddle}
             onUpdateSelectedObject={updateSelectedObject}
             onUpdateAdjustmentLayer={updateAdjustmentLayer}
             onDeleteAdjustmentLayer={deleteAdjustmentLayer}

@@ -21,6 +21,8 @@ type ConnectedInspectorContentProps = {
   selectedMotionPartMiddleTransitionMode: "instant" | "transition";
   focusPickMotionMarker: MarkerPick;
   canSnapMotionMiddle: boolean;
+  canSnapAdjustmentMiddle: boolean;
+  canSnapCompositionMiddle: boolean;
   positionPickMotionMarker: MarkerPick;
   trackerPickMotionMarker: MarkerPick;
   selectedObject: FrameObject | null | undefined;
@@ -38,6 +40,8 @@ type ConnectedInspectorContentProps = {
   onDeleteMotionMarker: (partId: string, markerId: string) => void;
   onStartMotionFocusPick: (partId: string, markerId: string) => void;
   onSnapMotionMiddle: (part: Part) => void;
+  onSnapAdjustmentMiddle: () => void;
+  onSnapCompositionMiddle: () => void;
   onUpdateSelectedObject: (updater: (object: FrameObject) => FrameObject) => void;
   onUpdateAdjustmentLayer: (layerId: string, updater: (layer: AdjustmentLayer) => AdjustmentLayer) => void;
   onDeleteAdjustmentLayer: (layerId: string) => void;
@@ -61,6 +65,8 @@ export function ConnectedInspectorContent({
   selectedMotionPartMiddleTransitionMode,
   focusPickMotionMarker,
   canSnapMotionMiddle,
+  canSnapAdjustmentMiddle,
+  canSnapCompositionMiddle,
   positionPickMotionMarker,
   trackerPickMotionMarker,
   selectedObject,
@@ -78,6 +84,8 @@ export function ConnectedInspectorContent({
   onDeleteMotionMarker,
   onStartMotionFocusPick,
   onSnapMotionMiddle,
+  onSnapAdjustmentMiddle,
+  onSnapCompositionMiddle,
   onUpdateSelectedObject,
   onUpdateAdjustmentLayer,
   onDeleteAdjustmentLayer,
@@ -127,14 +135,16 @@ export function ConnectedInspectorContent({
         layer={selectedAdjustmentLayer}
         sceneDuration={sceneDurationSeconds}
         pickingPointKey={pointPickAdjustment?.layerId === selectedAdjustmentLayer.id ? `${pointPickAdjustment.control.xKey}:${pointPickAdjustment.control.yKey}` : null}
+        canSnapMiddle={canSnapAdjustmentMiddle}
         onChange={(updater) => onUpdateAdjustmentLayer(selectedAdjustmentLayer.id, updater)}
         onDelete={() => onDeleteAdjustmentLayer(selectedAdjustmentLayer.id)}
         onPickPoint={(control) => onStartAdjustmentPointPick(selectedAdjustmentLayer.id, control)}
+        onSnapMiddle={onSnapAdjustmentMiddle}
       />
     );
   }
 
-  if (selectedPart) return <FrameInspector part={selectedPart} onDurationChange={onUpdateSelectedPartDuration} onFrameChange={onUpdatePartFrame} onBackgroundChange={onUpdatePartBackground} />;
+  if (selectedPart) return <FrameInspector part={selectedPart} canSnapMiddle={canSnapCompositionMiddle} onDurationChange={onUpdateSelectedPartDuration} onFrameChange={onUpdatePartFrame} onBackgroundChange={onUpdatePartBackground} onSnapMiddle={onSnapCompositionMiddle} />;
 
   return <EmptyInspector />;
 }

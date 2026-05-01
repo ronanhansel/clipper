@@ -171,7 +171,7 @@ function EaseSelectItems({ includeLinear = true, defaultInOut = false }: { inclu
   return <>{items.filter((item) => includeLinear || item.value !== "linear").map((item) => <EaseSelectItem key={item.value} {...item} />)}</>;
 }
 
-export function FrameInspector({ part, onDurationChange, onFrameChange, onBackgroundChange }: { part: Part; onDurationChange: (duration: number) => void; onFrameChange: (updater: (frame: PartFrame) => PartFrame) => void; onBackgroundChange: (updater: (background: BackgroundLayer) => BackgroundLayer) => void }) {
+export function FrameInspector({ part, canSnapMiddle, onDurationChange, onFrameChange, onBackgroundChange, onSnapMiddle }: { part: Part; canSnapMiddle: boolean; onDurationChange: (duration: number) => void; onFrameChange: (updater: (frame: PartFrame) => PartFrame) => void; onBackgroundChange: (updater: (background: BackgroundLayer) => BackgroundLayer) => void; onSnapMiddle: () => void }) {
   const motionViews = getMotionMarkerViews(part);
   const markerEnd = Math.max(0, ...motionViews.motionMarkers.map((marker) => marker.start + marker.duration));
   const minimumDuration = roundTenth(Math.max(0.1, markerEnd));
@@ -223,6 +223,12 @@ export function FrameInspector({ part, onDurationChange, onFrameChange, onBackgr
       </label>
       <label className={`grid gap-1.5 ${mutedCaps}`}>Background style JSON<Textarea className="min-h-[120px] resize-y font-mono" value={JSON.stringify(part.background.style, null, 2)} onChange={(event) => updateBackgroundStyle(event.target.value)} /></label>
       <label className={`grid gap-1.5 ${mutedCaps}`}>Background motion JSON<Textarea className="min-h-[92px] resize-y font-mono" value={part.background.motion ? JSON.stringify(part.background.motion, null, 2) : ""} onChange={(event) => updateBackgroundMotion(event.target.value)} /></label>
+      <div className="grid gap-2">
+        <span className={mutedCaps}>Mend</span>
+        <div className="grid gap-2">
+          <button className={snapButtonClass(false, canSnapMiddle)} disabled={!canSnapMiddle} title="Mend adjacent compositions" aria-pressed={false} onClick={onSnapMiddle}>Mend</button>
+        </div>
+      </div>
       <div className={panelCard}><span>Constant Elements</span><strong className="text-[13px]">{part.background.elements.length}</strong><small className="text-[#9b9da7]">Edit these in the composition code as background.elements.</small></div>
     </div>
   );
@@ -876,7 +882,7 @@ export function ObjectInspector({ object, onChange }: { object: FrameObject; onC
   );
 }
 
-export function AdjustmentInspector({ layer, sceneDuration, pickingPointKey, onChange, onDelete, onPickPoint }: { layer: AdjustmentLayer; sceneDuration: number; pickingPointKey?: string | null; onChange: (updater: (layer: AdjustmentLayer) => AdjustmentLayer) => void; onDelete: () => void; onPickPoint?: (control: AdjustmentEffectPointControl) => void }) {
+export function AdjustmentInspector({ layer, sceneDuration, pickingPointKey, canSnapMiddle, onChange, onDelete, onPickPoint, onSnapMiddle }: { layer: AdjustmentLayer; sceneDuration: number; pickingPointKey?: string | null; canSnapMiddle: boolean; onChange: (updater: (layer: AdjustmentLayer) => AdjustmentLayer) => void; onDelete: () => void; onPickPoint?: (control: AdjustmentEffectPointControl) => void; onSnapMiddle: () => void }) {
   const effect = getAdjustmentEffectPackage(layer.effect.effectId);
 
   function updateText(key: "name", value: string) {
@@ -942,6 +948,12 @@ export function AdjustmentInspector({ layer, sceneDuration, pickingPointKey, onC
         return <label className={`grid gap-1.5 ${mutedCaps} ${disabledReason ? "opacity-50" : ""}`} key={control.key} title={disabledReason}>{control.label}{control.type === "select" ? <Select value={String(getParamValue(control))} onValueChange={(value) => updateParam(control, value)} disabled={Boolean(disabledReason)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectGroup>{control.options.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectGroup></SelectContent></Select> : <Input type={control.type} min={control.min} max={control.max} step={control.step} value={getParamValue(control)} resetValue={control.defaultValue} numberScrubMode="continuous" numberScrubCommitThrottleMs={16} disabled={Boolean(disabledReason)} onChange={(event) => updateParam(control, event.target.value)} />}</label>;
       })}
       {effect?.pointControls?.map((control) => <AdjustmentPointControlField control={control} disabledReason={getAdjustmentControlDisabledReason(layer, control.disabledWhen)} key={`${control.xKey}:${control.yKey}`} picking={pickingPointKey === `${control.xKey}:${control.yKey}`} xValue={getPointValue(control, "x")} yValue={getPointValue(control, "y")} onPick={() => onPickPoint?.(control)} onValueChange={(axis, value) => updatePointParam(control, axis, value)} />)}
+      <div className="grid gap-2">
+        <span className={mutedCaps}>Mend</span>
+        <div className="grid gap-2">
+          <button className={snapButtonClass(false, canSnapMiddle)} disabled={!canSnapMiddle} title="Mend adjacent adjustment layers" aria-pressed={false} onClick={onSnapMiddle}>Mend</button>
+        </div>
+      </div>
       <button className="flex items-center justify-center gap-2 rounded-[10px] border border-[#3b2a2a] bg-[#231516] px-[13px] py-[9px] text-sm font-medium text-[#ffb4b4] transition hover:border-[#6b3838] hover:bg-[#301b1d]" onClick={onDelete}><Trash2 size={15} />Delete</button>
     </div>
   );
@@ -972,6 +984,11 @@ function getAdjustmentControlDisabledReason(layer: AdjustmentLayer, condition: A
 
 function isAdjustmentControlDisabled(layer: AdjustmentLayer, condition: AdjustmentEffectDisableCondition | undefined) {
   return Boolean(getAdjustmentControlDisabledReason(layer, condition));
+}
+
+function snapButtonClass(active: boolean, enabled = true) {
+  if (active) return "rounded-[10px] border border-[var(--clipper-accent-strong)] bg-[rgb(var(--clipper-accent-rgb)/0.12)] px-3 py-2.5 text-center text-xs font-bold text-[var(--clipper-accent)] transition hover:bg-[rgb(var(--clipper-accent-rgb)/0.18)]";
+  return `rounded-[10px] border border-[#2d313b] bg-[#171920] px-3 py-2.5 text-center text-xs font-bold text-[#dfe2ea] transition hover:border-[var(--clipper-accent-strong)] hover:bg-[#20232c] ${enabled ? "" : "cursor-not-allowed opacity-45 hover:border-[#2d313b] hover:bg-[#171920]"}`;
 }
 
 export function EmptyInspector() {
@@ -1056,11 +1073,6 @@ export function MotionInspector({ marker, part, selectedMarkerCount, selectedSna
 
   function updateMiddleEase(value: string) {
     onChangeMiddleEase(value === defaultMotionEaseSelectValue ? undefined : value as MotionEase);
-  }
-
-  function snapButtonClass(active: boolean, enabled = true) {
-    if (active) return "rounded-[10px] border border-[var(--clipper-accent-strong)] bg-[rgb(var(--clipper-accent-rgb)/0.12)] px-3 py-2.5 text-center text-xs font-bold text-[var(--clipper-accent)] transition hover:bg-[rgb(var(--clipper-accent-rgb)/0.18)]";
-    return `rounded-[10px] border border-[#2d313b] bg-[#171920] px-3 py-2.5 text-center text-xs font-bold text-[#dfe2ea] transition hover:border-[var(--clipper-accent-strong)] hover:bg-[#20232c] ${enabled ? "" : "cursor-not-allowed opacity-45 hover:border-[#2d313b] hover:bg-[#171920]"}`;
   }
 
   function middleTransitionButtonClass(active: boolean) {

@@ -1,5 +1,5 @@
 import { defaultTimelineLayerState } from "../../../core/project";
-import { buildLinearTimeline, rebaseCompositionTimelineMarkers } from "../../../core/timeline";
+import { buildLinearTimeline, rebaseCompositionTimelineMarkers, getMotionMiddleSnap, isMotionMiddleSnapActive, type TimelineMendMarker } from "../../../core/timeline";
 import { roundTenth } from "../../../core/math";
 import type { CompositionSelection } from "../../types";
 import type { Part, SelectionPayload, TimelineLayerState } from "../../../core/types";
@@ -128,6 +128,49 @@ export function useCompositionTimelineCommands({
     setSelectedParts([{ partId: timelineComposition.id }]);
   }
 
+  function snapCompositionMiddle() {
+    const markers: TimelineMendMarker[] = scene.compositions.map((comp) => ({
+      id: comp.id,
+      start: comp.start ?? 0,
+      duration: comp.duration,
+      layerId: comp.layerId ?? "comp",
+      snapIn: comp.snapIn,
+      snapOut: comp.snapOut,
+      mendInId: comp.mendInId,
+      mendOutId: comp.mendOutId,
+    }));
+    const snap = getMotionMiddleSnap(markers, currentSceneTimeRef.current);
+    if (!snap) return;
+    const middleSnapActive = isMotionMiddleSnapActive(markers, snap);
+    const nextBounds = new Map(markers.map((marker) => [marker.id, { start: marker.start, end: marker.start + marker.duration, snapIn: marker.snapIn, snapOut: marker.snapOut, mendInId: marker.mendInId, mendOutId: marker.mendOutId }]));
+    const mendedIds = new Set(snap.pairs.flatMap((pair: { previousId: string; nextId: string }) => [pair.previousId, pair.nextId]));
+    for (const pair of snap.pairs) {
+      const previousBounds = nextBounds.get(pair.previousId);
+      const nextMarkerBounds = nextBounds.get(pair.nextId);
+      if (middleSnapActive) {
+        if (previousBounds) nextBounds.set(pair.previousId, { ...previousBounds, mendOutId: undefined });
+        if (nextMarkerBounds) nextBounds.set(pair.nextId, { ...nextMarkerBounds, mendInId: undefined });
+      } else {
+        if (previousBounds) nextBounds.set(pair.previousId, { ...previousBounds, end: pair.time, mendOutId: pair.nextId });
+        if (nextMarkerBounds) nextBounds.set(pair.nextId, { ...nextMarkerBounds, start: pair.time, mendInId: pair.previousId });
+      }
+    }
+    updateSceneParts((parts) => {
+      const timelineParts = buildLinearTimeline({ ...scene, compositions: parts });
+      const startsById = new Map(timelineParts.map((composition) => [composition.id, composition.start]));
+      return parts.map((composition) => {
+        const previousStart = startsById.get(composition.id) ?? composition.start ?? 0;
+        if (!mendedIds.has(composition.id)) {
+          return rebaseCompositionTimelineMarkers({ ...composition, start: roundTenth(previousStart) }, previousStart, roundTenth(previousStart));
+        }
+        const bounds = nextBounds.get(composition.id);
+        if (!bounds) return { ...composition, start: roundTenth(previousStart) };
+        const nextComposition = { ...composition, start: roundTenth(bounds.start), duration: roundTenth(bounds.end - bounds.start), snapIn: bounds.snapIn, snapOut: bounds.snapOut, mendInId: bounds.mendInId, mendOutId: bounds.mendOutId };
+        return rebaseCompositionTimelineMarkers(nextComposition, previousStart, nextComposition.start);
+      });
+    });
+  }
+
   return {
     addCompositionFromLibrary,
     deleteCompositionFromTimeline,
@@ -135,6 +178,7 @@ export function useCompositionTimelineCommands({
     moveCompositionMarker,
     moveCompositionMarkers,
     reorderPart,
+    snapCompositionMiddle,
     updateCompositionMarker,
   };
 }

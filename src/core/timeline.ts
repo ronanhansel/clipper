@@ -105,7 +105,7 @@ export type TimelineMarkerMove = { sourcePartId: string; markerId: string; targe
 export type TimelineMarkerResize = { sourcePartId: string; markerId: string; absoluteStart: number; duration: number };
 export type TimelineMarkerDragItem = { partId: string; markerId: string; absoluteStart: number; duration: number; groupId?: string };
 type TopTimelineItem = { kind: "adjustment"; layer: AdjustmentLayer } | { kind: "motion"; part: TimelineComposition; marker: MotionMarker } | { kind: "part"; part: TimelineComposition };
-type TimelineMendMarker = { id: string; start: number; duration: number; effectId?: string; effect?: { effectId?: string }; layerId?: string; snapIn?: boolean; snapOut?: boolean; mendInId?: string; mendOutId?: string; partId?: string; sourcePartId?: string };
+export type TimelineMendMarker = { id: string; start: number; duration: number; effectId?: string; effect?: { effectId?: string }; layerId?: string; snapIn?: boolean; snapOut?: boolean; mendInId?: string; mendOutId?: string; partId?: string; sourcePartId?: string };
 type MiddleSnapMarker = TimelineMendMarker;
 type MiddleSnapLayerResolver<T extends MiddleSnapMarker> = (marker: T) => string;
 
