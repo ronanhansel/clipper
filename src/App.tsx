@@ -317,6 +317,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
     selectedPart,
     selectedMotion,
     selectedMotionPart,
+    selectedMotionPartMiddleEase,
     selectedMotionPartMiddleSnapActive,
     selectedMotionPartMiddleTransitionMode,
     selectedMotionSnapInActive,
@@ -1157,6 +1158,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
             selectedMotionSnapInActive={selectedMotionSnapInActive}
             selectedMotionSnapOutActive={selectedMotionSnapOutActive}
             selectedMotionPartMiddleSnapActive={selectedMotionPartMiddleSnapActive}
+            selectedMotionPartMiddleEase={selectedMotionPartMiddleEase}
             selectedMotionPartMiddleTransitionMode={selectedMotionPartMiddleTransitionMode}
             focusPickMotionMarker={focusPickZoomMarker}
             canSnapMotionMiddle={Boolean(inspectorMotionMiddleSnap)}
@@ -1178,6 +1180,8 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
             onUpdateMotionMiddleEase={updateMotionMiddleEase}
             onDeleteMotionMarker={deleteMotionMarker}
             onStartMotionFocusPick={startZoomFocusPick}
+            onStartMotionPositionPick={startTranslationPositionPick}
+            onStartMotionTrackerPick={startTranslationTrackerPick}
             onSnapMotionMiddle={snapMotionMiddle}
             onSnapAdjustmentMiddle={snapAdjustmentMiddle}
             onSnapCompositionMiddle={snapCompositionMiddle}

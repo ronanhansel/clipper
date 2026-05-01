@@ -18,6 +18,7 @@ type ConnectedInspectorContentProps = {
   selectedMotionSnapInActive: boolean;
   selectedMotionSnapOutActive: boolean;
   selectedMotionPartMiddleSnapActive: boolean;
+  selectedMotionPartMiddleEase: MotionEase | undefined;
   selectedMotionPartMiddleTransitionMode: "instant" | "transition";
   focusPickMotionMarker: MarkerPick;
   canSnapMotionMiddle: boolean;
@@ -39,6 +40,8 @@ type ConnectedInspectorContentProps = {
   onUpdateMotionMiddleEase: (part: Part, ease: MotionEase | undefined) => void;
   onDeleteMotionMarker: (partId: string, markerId: string) => void;
   onStartMotionFocusPick: (partId: string, markerId: string) => void;
+  onStartMotionPositionPick: (partId: string, markerId: string) => void;
+  onStartMotionTrackerPick: (partId: string, markerId: string) => void;
   onSnapMotionMiddle: (part: Part) => void;
   onSnapAdjustmentMiddle: () => void;
   onSnapCompositionMiddle: () => void;
@@ -62,6 +65,7 @@ export function ConnectedInspectorContent({
   selectedMotionSnapInActive,
   selectedMotionSnapOutActive,
   selectedMotionPartMiddleSnapActive,
+  selectedMotionPartMiddleEase,
   selectedMotionPartMiddleTransitionMode,
   focusPickMotionMarker,
   canSnapMotionMiddle,
@@ -83,6 +87,8 @@ export function ConnectedInspectorContent({
   onUpdateMotionMiddleEase,
   onDeleteMotionMarker,
   onStartMotionFocusPick,
+  onStartMotionPositionPick,
+  onStartMotionTrackerPick,
   onSnapMotionMiddle,
   onSnapAdjustmentMiddle,
   onSnapCompositionMiddle,
@@ -105,6 +111,7 @@ export function ConnectedInspectorContent({
         selectedSnapInActive={selectedMotionSnapInActive}
         selectedSnapOutActive={selectedMotionSnapOutActive}
         middleSnapActive={selectedMotionPartMiddleSnapActive}
+        middleEase={selectedMotionPartMiddleEase}
         middleTransitionMode={selectedMotionPartMiddleTransitionMode}
         pickingFocus={focusPickMotionMarker?.partId === selectedMotionPart.id && focusPickMotionMarker.markerId === selectedMotion.id}
         pickingPosition={positionPickMotionMarker?.partId === selectedMotionPart.id && positionPickMotionMarker.markerId === selectedMotion.id}
@@ -119,8 +126,8 @@ export function ConnectedInspectorContent({
         onChangeMiddleEase={(ease) => onUpdateMotionMiddleEase(selectedMotionPart, ease)}
         onDelete={() => onDeleteMotionMarker(selectedMotionPart.id, selectedMotion.id)}
         onPickFocus={() => onStartMotionFocusPick(selectedMotionPart.id, selectedMotion.id)}
-        onPickPosition={() => onStartMotionFocusPick(selectedMotionPart.id, selectedMotion.id)}
-        onPickTracker={() => onStartMotionFocusPick(selectedMotionPart.id, selectedMotion.id)}
+        onPickPosition={() => onStartMotionPositionPick(selectedMotionPart.id, selectedMotion.id)}
+        onPickTracker={() => onStartMotionTrackerPick(selectedMotionPart.id, selectedMotion.id)}
         onSnapMiddle={() => onSnapMotionMiddle(selectedMotionPart)}
       />
     );

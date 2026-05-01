@@ -1,6 +1,7 @@
 import { roundTenth } from "./math";
 import { getMotionBlockEffectKind, getMotionMarkerViews } from "./motionEffects";
 import { getMotionTranslation } from "./renderRuntime";
+import { isExplicitTimelineMarkerMend } from "./timeline";
 import { FRAME_HEIGHT, FRAME_WIDTH, type Bounds, type FrameObject, type MotionEase, type MotionMarker, type Part, type PerspectiveSettings, type Point, type TimelineMotionLayerState } from "./types";
 
 export const CAMERA_PERSPECTIVE = 1800;
@@ -140,12 +141,13 @@ export function getActivePerspectiveMarkers(markers: MotionMarker[], time: numbe
 
 function getActiveZoom(markers: MotionMarker[], time: number) {
   const sortedMarkers = [...markers].sort((left, right) => left.start - right.start);
-  const markerIndex = sortedMarkers.findIndex((item) => time >= item.start && time <= item.start + item.duration);
+  const markerIndex = getActiveMotionMarkerIndex(sortedMarkers, time);
   const marker = markerIndex >= 0 ? sortedMarkers[markerIndex] : null;
   if (!marker) return null;
   const progress = (time - marker.start) / marker.duration;
   const previousMarker = sortedMarkers[markerIndex - 1];
-  const middleTransitionFrom = marker.middleTransition === "transition" && marker.snapIn && previousMarker?.snapOut && roundTenth(previousMarker.start + previousMarker.duration) === roundTenth(marker.start)
+  const mendedToPrevious = Boolean(previousMarker && isExplicitTimelineMarkerMend(previousMarker, marker));
+  const middleTransitionFrom = marker.middleTransition === "transition" && mendedToPrevious
     ? previousMarker
     : null;
   if (middleTransitionFrom) {
@@ -155,12 +157,12 @@ function getActiveZoom(markers: MotionMarker[], time: number) {
       x: Math.round(interpolate([middleTransitionFrom.focus?.x ?? FRAME_WIDTH / 2, marker.focus?.x ?? FRAME_WIDTH / 2] as const, easedIn)),
       y: Math.round(interpolate([middleTransitionFrom.focus?.y ?? FRAME_HEIGHT / 2, marker.focus?.y ?? FRAME_HEIGHT / 2] as const, easedIn)),
     };
-    if (marker.snapOut) return { ...marker, focus, scale };
+    if (marker.snapOut || isMendedToNext(sortedMarkers, markerIndex)) return { ...marker, focus, scale };
     const rampOut = cameraEaseProgress(clamp((1 - progress) / 0.22, 0, 1), marker.ease);
     return { ...marker, focus, scale: 1 + (scale - 1) * rampOut };
   }
-  const rampIn = marker.snapIn ? 1 : progress / 0.22;
-  const rampOut = marker.snapOut ? 1 : (1 - progress) / 0.22;
+  const rampIn = marker.snapIn || mendedToPrevious ? 1 : progress / 0.22;
+  const rampOut = marker.snapOut || isMendedToNext(sortedMarkers, markerIndex) ? 1 : (1 - progress) / 0.22;
   const ramp = Math.min(rampIn, rampOut, 1);
   const eased = cameraEaseProgress(clamp(ramp, 0, 1), marker.ease);
   return { ...marker, scale: 1 + ((marker.scale ?? 1) - 1) * eased };
@@ -175,7 +177,8 @@ function getActiveMotionMarker(markers: MotionMarker[], time: number, part?: Par
   const previousMarker = sortedMarkers[markerIndex - 1];
   const targetPosition = getMotionMarkerPosition(marker, time, part);
   const previousPosition = previousMarker?.position ?? null;
-  const middleTransitionFrom = marker.middleTransition === "transition" && marker.snapIn && previousMarker?.snapOut && roundTenth(previousMarker.start + previousMarker.duration) === roundTenth(marker.start)
+  const mendedToPrevious = Boolean(previousMarker && isExplicitTimelineMarkerMend(previousMarker, marker));
+  const middleTransitionFrom = marker.middleTransition === "transition" && mendedToPrevious
     ? previousPosition
     : null;
   if (middleTransitionFrom) {
@@ -186,12 +189,12 @@ function getActiveMotionMarker(markers: MotionMarker[], time: number, part?: Par
     };
     const rotation = interpolateRotation(previousMarker, marker, easedIn);
     const perspective = interpolatePerspective(previousMarker, marker, easedIn);
-    if (marker.snapOut) return { ...marker, position, rotation, perspective };
+    if (marker.snapOut || isMendedToNext(sortedMarkers, markerIndex)) return { ...marker, position, rotation, perspective };
     const rampOut = cameraEaseProgress(clamp((1 - progress) / 0.22, 0, 1), marker.ease);
     return { ...marker, position: scalePoint(position, rampOut), rotation: rotation * rampOut, perspective: scalePerspective(perspective, rampOut) };
   }
-  const rampIn = marker.snapIn ? 1 : progress / 0.22;
-  const rampOut = marker.snapOut ? 1 : (1 - progress) / 0.22;
+  const rampIn = marker.snapIn || mendedToPrevious ? 1 : progress / 0.22;
+  const rampOut = marker.snapOut || isMendedToNext(sortedMarkers, markerIndex) ? 1 : (1 - progress) / 0.22;
   const ramp = Math.min(rampIn, rampOut, 1);
   const eased = cameraEaseProgress(clamp(ramp, 0, 1), marker.ease);
   return { ...marker, position: scalePoint(targetPosition, eased), rotation: (marker.rotation ?? 0) * eased, perspective: scalePerspective(marker.perspective, eased) };
@@ -228,11 +231,17 @@ function getActiveMotionMarkerIndex(sortedMarkers: MotionMarker[], time: number)
 
   const boundaryIndex = sortedMarkers.findIndex((item, index) => {
     const previous = sortedMarkers[index - 1];
-    if (!previous?.snapOut || !item.snapIn) return false;
-    return roundTenth(time) === roundTenth(item.start) && roundTenth(previous.start + previous.duration) === roundTenth(item.start);
+    if (!previous || !isExplicitTimelineMarkerMend(previous, item)) return false;
+    return Math.abs(time - item.start) <= 0.001;
   });
 
   return boundaryIndex >= 0 ? boundaryIndex : activeIndex;
+}
+
+function isMendedToNext(markers: MotionMarker[], markerIndex: number) {
+  const marker = markers[markerIndex];
+  const nextMarker = markers[markerIndex + 1];
+  return Boolean(marker && nextMarker && isExplicitTimelineMarkerMend(marker, nextMarker));
 }
 
 function interpolateRotation(previousMarker: MotionMarker | undefined, marker: MotionMarker, progress: number) {

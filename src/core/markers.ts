@@ -1,4 +1,4 @@
-import type { MotionMarker, Point } from "./types";
+import type { MotionMarker } from "./types";
 import { canMendTimelineMarkers } from "./timeline";
 
 type MendedMarker = { id: string; effectId?: string; layerId?: string; start: number; duration: number; snapIn?: boolean; snapOut?: boolean; mendInId?: string; mendOutId?: string };
@@ -16,6 +16,8 @@ function getMendedMarkerLayer(markers: MendedMarker[], markerId: string) {
 
 function isExplicitMendedPair(previous: MendedMarker, next: MendedMarker) {
   return canMendTimelineMarkers(previous, next)
+    && !previous.snapOut
+    && !next.snapIn
     && Math.abs(previous.start + previous.duration - next.start) <= 0.001
     && previous.mendOutId === next.id
     && next.mendInId === previous.id;
@@ -64,25 +66,5 @@ export function getMendedMarkerIds(markers: MendedMarker[], markerId: string) {
 }
 
 export function normalizeMendedMotionMarkerFocus(markers: MotionMarker[]): MotionMarker[] {
-  const focusById = new Map<string, Point>();
-
-  for (const layerId of new Set(markers.map(getMendedMarkerLayerId))) {
-    const sortedMarkers = markers.filter((marker) => getMendedMarkerLayerId(marker) === layerId).sort((left, right) => left.start - right.start);
-    let sharedFocus: Point | null = null;
-
-    for (let index = 0; index < sortedMarkers.length; index += 1) {
-      const marker = sortedMarkers[index];
-      const previous = sortedMarkers[index - 1];
-      const mendedToPrevious = Boolean(previous && isExplicitMendedPair(previous, marker));
-      if (!mendedToPrevious) sharedFocus = marker.focus ?? null;
-      if (sharedFocus) focusById.set(marker.id, sharedFocus);
-    }
-  }
-
-  return markers.map((marker) => {
-    if (!isMotionMarkerMended(markers, marker.id)) return marker;
-    const focus = focusById.get(marker.id);
-    if (!focus || !marker.focus) return marker;
-    return (marker.focus.x !== focus.x || marker.focus.y !== focus.y) ? { ...marker, focus } : marker;
-  });
+  return markers;
 }

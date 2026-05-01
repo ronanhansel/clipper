@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createSelectionPayload } from "./geometry";
 import { getMotionMarkerViews, motionBlocksToMotionMarkers } from "./motionEffects";
 import { effectBlocksMending } from "./effects/registry";
-import { buildLinearTimeline, canMendTimelineMarkers, expandExplicitTimelineMarkerMendIds, getAdjustmentPlacement, getMendedMarkerDragItems, getMotionMarkerMendKey, getMotionMiddleSnap, getSelectedMotionMiddleSnap, getTimelineMarkerDragSnapBoundaries, getTimelineMarkerMoves, getTimelinePartAtTime, getTopTimelineItemAtTime, isExplicitTimelineMarkerMend, rebaseCompositionTimelineMarkers, removeTimelineMotionLayerMarkers, resizeTimelineMarkersWithPush, sceneDuration, snapTimelineBlockStartToBoundary, timelineDisplayDuration, validateScene } from "./timeline";
+import { buildLinearTimeline, canMendTimelineMarkers, expandExplicitTimelineMarkerMendIds, getAdjustmentPlacement, getMendedMarkerDragItems, getMotionMarkerMendKey, getMotionMiddleSnap, getSelectedActiveMiddleMend, getSelectedMotionMiddleSnap, getTimelineMarkerDragSnapBoundaries, getTimelineMarkerMoves, getTimelinePartAtTime, getTopTimelineItemAtTime, isExplicitTimelineMarkerMend, rebaseCompositionTimelineMarkers, removeTimelineMotionLayerMarkers, resizeTimelineMarkersWithPush, sceneDuration, snapTimelineBlockStartToBoundary, timelineDisplayDuration, validateScene } from "./timeline";
 import { moveTimelineStateLayer, toggleTimelineStateLayerHidden } from "./timelineLayers";
 import type { Scene, TimelinePart } from "./types";
 
@@ -229,30 +229,34 @@ describe("timeline model", () => {
     expect(getMotionMarkerViews(nextTimeline[0]).motionMarkers.filter((m) => m.kind !== "zoom").map((marker) => marker.id)).toEqual(["kept-pan"]);
   });
 
-  it("detects middle mend candidates within the marker layer", () => {
+  it("only detects selected mend candidates when neighboring markers are adjacent", () => {
     const markers = [
       { id: "first", effectId: "clipper.motion.zoom" as const, kind: "zoom" as const, layerId: "clipper.motion.zoom", start: 0, duration: 2, focus: { x: 0.5, y: 0.5 }, scale: 1.5 },
       { id: "other-layer", effectId: "clipper.motion.zoom" as const, kind: "zoom" as const, layerId: "zoom_2", start: 1, duration: 4, focus: { x: 0.5, y: 0.5 }, scale: 1.5 },
-      { id: "second", effectId: "clipper.motion.zoom" as const, kind: "zoom" as const, layerId: "clipper.motion.zoom", start: 4, duration: 2, focus: { x: 0.5, y: 0.5 }, scale: 1.5 },
+      { id: "second", effectId: "clipper.motion.zoom" as const, kind: "zoom" as const, layerId: "clipper.motion.zoom", start: 2, duration: 2, focus: { x: 0.5, y: 0.5 }, scale: 1.5 },
     ];
 
     expect(getSelectedMotionMiddleSnap(markers, ["first", "second"], getMotionMarkerMendKey)).toEqual({
-      pairs: [{ previousId: "first", nextId: "second", time: 3 }],
-    });
-    expect(getMotionMiddleSnap(markers, 3, getMotionMarkerMendKey)).toEqual({
-      pairs: [{ previousId: "first", nextId: "second", time: 3 }],
+      pairs: [{ previousId: "first", nextId: "second", time: 2 }],
     });
   });
 
-  it("detects a mend candidate from a single selected block", () => {
+  it("does not detect selected mend candidates across gaps", () => {
     const markers = [
       { id: "first", effectId: "clipper.motion.zoom" as const, kind: "zoom" as const, layerId: "clipper.motion.zoom", start: 0, duration: 2, focus: { x: 0.5, y: 0.5 }, scale: 1.5 },
       { id: "second", effectId: "clipper.motion.zoom" as const, kind: "zoom" as const, layerId: "clipper.motion.zoom", start: 4, duration: 2, focus: { x: 0.5, y: 0.5 }, scale: 1.5 },
     ];
 
-    expect(getSelectedMotionMiddleSnap(markers, ["second"], getMotionMarkerMendKey)).toEqual({
-      pairs: [{ previousId: "first", nextId: "second", time: 3 }],
-    });
+    expect(getSelectedMotionMiddleSnap(markers, ["first", "second"], getMotionMarkerMendKey)).toBeNull();
+  });
+
+  it("does not detect a selected mend candidate from a single selected block", () => {
+    const markers = [
+      { id: "first", effectId: "clipper.motion.zoom" as const, kind: "zoom" as const, layerId: "clipper.motion.zoom", start: 0, duration: 2, focus: { x: 0.5, y: 0.5 }, scale: 1.5 },
+      { id: "second", effectId: "clipper.motion.zoom" as const, kind: "zoom" as const, layerId: "clipper.motion.zoom", start: 4, duration: 2, focus: { x: 0.5, y: 0.5 }, scale: 1.5 },
+    ];
+
+    expect(getSelectedMotionMiddleSnap(markers, ["second"], getMotionMarkerMendKey)).toBeNull();
   });
 
   it("keeps mended drag groups together across compositions", () => {
@@ -262,12 +266,12 @@ describe("timeline model", () => {
         {
           ...scene.compositions[0],
           duration: 4,
-          motionMarkers: motionBlocksToMotionMarkers([{ id: "first", effectId: "clipper.motion.zoom", layerId: "camera", start: 2, duration: 2, focus: { x: 0.5, y: 0.5 }, scale: 1.5, snapOut: true, mendOutId: "b:second" }]),
+          motionMarkers: motionBlocksToMotionMarkers([{ id: "first", effectId: "clipper.motion.zoom", layerId: "camera", start: 2, duration: 2, focus: { x: 0.5, y: 0.5 }, scale: 1.5, mendOutId: "b:second" }]),
         },
         {
           ...scene.compositions[1],
           duration: 4,
-          motionMarkers: motionBlocksToMotionMarkers([{ id: "second", effectId: "clipper.motion.zoom", layerId: "camera", start: 0, duration: 2, focus: { x: 0.5, y: 0.5 }, scale: 1.5, snapIn: true, mendInId: "a:first" }]),
+          motionMarkers: motionBlocksToMotionMarkers([{ id: "second", effectId: "clipper.motion.zoom", layerId: "camera", start: 0, duration: 2, focus: { x: 0.5, y: 0.5 }, scale: 1.5, mendInId: "a:first" }]),
         },
       ],
     });
@@ -285,8 +289,8 @@ describe("timeline model", () => {
         ...scene.compositions[0],
         duration: 8,
         motionMarkers: motionBlocksToMotionMarkers([
-          { id: "first", effectId: "clipper.motion.zoom", layerId: "camera", start: 1, duration: 2, focus: { x: 0.5, y: 0.5 }, scale: 1.5, snapOut: true, mendOutId: "second" },
-          { id: "second", effectId: "clipper.motion.zoom", layerId: "camera", start: 3, duration: 2, focus: { x: 0.5, y: 0.5 }, scale: 1.5, snapIn: true, mendInId: "first" },
+          { id: "first", effectId: "clipper.motion.zoom", layerId: "camera", start: 1, duration: 2, focus: { x: 0.5, y: 0.5 }, scale: 1.5, mendOutId: "second" },
+          { id: "second", effectId: "clipper.motion.zoom", layerId: "camera", start: 3, duration: 2, focus: { x: 0.5, y: 0.5 }, scale: 1.5, mendInId: "first" },
         ]),
       }],
     });
@@ -298,6 +302,21 @@ describe("timeline model", () => {
     }).sort((left, right) => left.start - right.start);
 
     expect(isExplicitTimelineMarkerMend(movedMarkers[0], movedMarkers[1])).toBe(true);
+  });
+
+  it("detects active mend links from a single selected marker", () => {
+    const markers = [
+      { id: "first", kind: "zoom" as const, start: 0, duration: 2, effectId: "clipper.motion.zoom" as const, layerId: "camera", focus: { x: 0.5, y: 0.5 }, scale: 1.5, mendOutId: "second" },
+      { id: "second", kind: "zoom" as const, start: 2, duration: 2, effectId: "clipper.motion.zoom" as const, layerId: "camera", focus: { x: 0.5, y: 0.5 }, scale: 1.5, mendInId: "first", mendOutId: "third" },
+      { id: "third", kind: "zoom" as const, start: 4, duration: 2, effectId: "clipper.motion.zoom" as const, layerId: "camera", focus: { x: 0.5, y: 0.5 }, scale: 1.5, mendInId: "second" },
+    ];
+
+    expect(getSelectedActiveMiddleMend(markers, ["second"], getMotionMarkerMendKey)).toEqual({
+      pairs: [
+        { previousId: "first", nextId: "second", time: 2 },
+        { previousId: "second", nextId: "third", time: 4 },
+      ],
+    });
   });
 
   it("does not treat drifted explicit references as active mends", () => {
@@ -321,6 +340,17 @@ describe("timeline model", () => {
     expect(isExplicitTimelineMarkerMend(previous, next)).toBe(true);
   });
 
+  it("treats snap flags as mutually exclusive with explicit mends", () => {
+    expect(isExplicitTimelineMarkerMend(
+      { id: "first", start: 0, duration: 2, snapOut: true, mendOutId: "second" },
+      { id: "second", start: 2, duration: 2, mendInId: "first" },
+    )).toBe(false);
+    expect(isExplicitTimelineMarkerMend(
+      { id: "first", start: 0, duration: 2, mendOutId: "second" },
+      { id: "second", start: 2, duration: 2, snapIn: true, mendInId: "first" },
+    )).toBe(false);
+  });
+
   it("snaps moved timeline blocks by either front or back edge", () => {
     expect(snapTimelineBlockStartToBoundary(1.95, 1, [3], 0.1)).toBe(2);
     expect(snapTimelineBlockStartToBoundary(2.95, 1, [3], 0.1)).toBe(3);
@@ -329,20 +359,20 @@ describe("timeline model", () => {
 
   it("resizes internal mended seams from the previous marker end", () => {
     const markers = [
-      { id: "first", start: 0, duration: 2, snapOut: true, mendOutId: "second" },
-      { id: "second", start: 2, duration: 2, snapIn: true, snapOut: true, mendInId: "first", mendOutId: "third" },
-      { id: "third", start: 4, duration: 2, snapIn: true, mendInId: "second" },
+      { id: "first", start: 0, duration: 2, mendOutId: "second" },
+      { id: "second", start: 2, duration: 2, mendInId: "first", mendOutId: "third" },
+      { id: "third", start: 4, duration: 2, mendInId: "second" },
     ];
 
     expect(resizeTimelineMarkersWithPush(markers, "first", "end", 1, 10)).toEqual([
-      { id: "first", start: 0, duration: 3, snapOut: true, mendOutId: "second" },
-      { id: "second", start: 3, duration: 1, snapIn: true, snapOut: true, mendInId: "first", mendOutId: "third" },
-      { id: "third", start: 4, duration: 2, snapIn: true, mendInId: "second" },
+      { id: "first", start: 0, duration: 3, mendOutId: "second" },
+      { id: "second", start: 3, duration: 1, mendInId: "first", mendOutId: "third" },
+      { id: "third", start: 4, duration: 2, mendInId: "second" },
     ]);
     expect(resizeTimelineMarkersWithPush(markers, "first", "end", -1, 10)).toEqual([
-      { id: "first", start: 0, duration: 1, snapOut: true, mendOutId: "second" },
-      { id: "second", start: 1, duration: 3, snapIn: true, snapOut: true, mendInId: "first", mendOutId: "third" },
-      { id: "third", start: 4, duration: 2, snapIn: true, mendInId: "second" },
+      { id: "first", start: 0, duration: 1, mendOutId: "second" },
+      { id: "second", start: 1, duration: 3, mendInId: "first", mendOutId: "third" },
+      { id: "third", start: 4, duration: 2, mendInId: "second" },
     ]);
   });
 
@@ -376,47 +406,47 @@ describe("timeline model", () => {
 
   it("resizes internal mended seams from the following marker start", () => {
     const markers = [
-      { id: "first", start: 1, duration: 2, snapOut: true, mendOutId: "second" },
-      { id: "second", start: 3, duration: 2, snapIn: true, snapOut: true, mendInId: "first", mendOutId: "third" },
-      { id: "third", start: 5, duration: 2, snapIn: true, mendInId: "second" },
+      { id: "first", start: 1, duration: 2, mendOutId: "second" },
+      { id: "second", start: 3, duration: 2, mendInId: "first", mendOutId: "third" },
+      { id: "third", start: 5, duration: 2, mendInId: "second" },
     ];
 
     expect(resizeTimelineMarkersWithPush(markers, "third", "start", 1, 10)).toEqual([
-      { id: "first", start: 1, duration: 2, snapOut: true, mendOutId: "second" },
-      { id: "second", start: 3, duration: 3, snapIn: true, snapOut: true, mendInId: "first", mendOutId: "third" },
-      { id: "third", start: 6, duration: 1, snapIn: true, mendInId: "second" },
+      { id: "first", start: 1, duration: 2, mendOutId: "second" },
+      { id: "second", start: 3, duration: 3, mendInId: "first", mendOutId: "third" },
+      { id: "third", start: 6, duration: 1, mendInId: "second" },
     ]);
     expect(resizeTimelineMarkersWithPush(markers, "third", "start", -1, 10)).toEqual([
-      { id: "first", start: 1, duration: 2, snapOut: true, mendOutId: "second" },
-      { id: "second", start: 3, duration: 1, snapIn: true, snapOut: true, mendInId: "first", mendOutId: "third" },
-      { id: "third", start: 4, duration: 3, snapIn: true, mendInId: "second" },
+      { id: "first", start: 1, duration: 2, mendOutId: "second" },
+      { id: "second", start: 3, duration: 1, mendInId: "first", mendOutId: "third" },
+      { id: "third", start: 4, duration: 3, mendInId: "second" },
     ]);
   });
 
   it("resizes only mended block outer edges", () => {
     const markers = [
-      { id: "first", start: 2, duration: 2, snapOut: true, mendOutId: "second" },
-      { id: "second", start: 4, duration: 2, snapIn: true, snapOut: true, mendInId: "first", mendOutId: "third" },
-      { id: "third", start: 6, duration: 2, snapIn: true, mendInId: "second" },
+      { id: "first", start: 2, duration: 2, mendOutId: "second" },
+      { id: "second", start: 4, duration: 2, mendInId: "first", mendOutId: "third" },
+      { id: "third", start: 6, duration: 2, mendInId: "second" },
     ];
 
     expect(resizeTimelineMarkersWithPush(markers, "first", "start", -1, 20)).toEqual([
-      { id: "first", start: 1, duration: 3, snapOut: true, mendOutId: "second" },
-      { id: "second", start: 4, duration: 2, snapIn: true, snapOut: true, mendInId: "first", mendOutId: "third" },
-      { id: "third", start: 6, duration: 2, snapIn: true, mendInId: "second" },
+      { id: "first", start: 1, duration: 3, mendOutId: "second" },
+      { id: "second", start: 4, duration: 2, mendInId: "first", mendOutId: "third" },
+      { id: "third", start: 6, duration: 2, mendInId: "second" },
     ]);
 
     expect(resizeTimelineMarkersWithPush(markers, "third", "end", 1, 20)).toEqual([
-      { id: "first", start: 2, duration: 2, snapOut: true, mendOutId: "second" },
-      { id: "second", start: 4, duration: 2, snapIn: true, snapOut: true, mendInId: "first", mendOutId: "third" },
-      { id: "third", start: 6, duration: 3, snapIn: true, mendInId: "second" },
+      { id: "first", start: 2, duration: 2, mendOutId: "second" },
+      { id: "second", start: 4, duration: 2, mendInId: "first", mendOutId: "third" },
+      { id: "third", start: 6, duration: 3, mendInId: "second" },
     ]);
   });
 
   it("keeps the internal seam fixed when resizing the left edge of a mended chain", () => {
     const markers = [
-      { id: "first", start: 2, duration: 2, snapOut: true, mendOutId: "second" },
-      { id: "second", start: 4, duration: 2, snapIn: true, mendInId: "first" },
+      { id: "first", start: 2, duration: 2, mendOutId: "second" },
+      { id: "second", start: 4, duration: 2, mendInId: "first" },
     ];
     const originalSeam = markers[0].start + markers[0].duration;
     const resized = resizeTimelineMarkersWithPush(markers, "first", "start", 0.015, 20);
@@ -427,21 +457,21 @@ describe("timeline model", () => {
 
   it("does not let leftmost mended resize cross the internal seam", () => {
     const markers = [
-      { id: "first", start: 2, duration: 2, snapOut: true, mendOutId: "second" },
-      { id: "second", start: 4, duration: 2, snapIn: true, mendInId: "first" },
+      { id: "first", start: 2, duration: 2, mendOutId: "second" },
+      { id: "second", start: 4, duration: 2, mendInId: "first" },
     ];
 
     expect(resizeTimelineMarkersWithPush(markers, "first", "start", 10, 20)).toEqual([
-      { id: "first", start: 3, duration: 1, snapOut: true, mendOutId: "second" },
-      { id: "second", start: 4, duration: 2, snapIn: true, mendInId: "first" },
+      { id: "first", start: 3, duration: 1, mendOutId: "second" },
+      { id: "second", start: 4, duration: 2, mendInId: "first" },
     ]);
   });
 
   it("protects all explicit mended marker ids during overwrite", () => {
     const markers = [
-      { id: "first", start: 0, duration: 2, snapOut: true, mendOutId: "second" },
-      { id: "second", start: 8, duration: 2, snapIn: true, snapOut: true, mendInId: "first", mendOutId: "third" },
-      { id: "third", start: 4, duration: 2, snapIn: true, mendInId: "second" },
+      { id: "first", start: 0, duration: 2, mendOutId: "second" },
+      { id: "second", start: 8, duration: 2, mendInId: "first", mendOutId: "third" },
+      { id: "third", start: 4, duration: 2, mendInId: "second" },
       { id: "other", start: 6, duration: 2 },
     ];
 
@@ -450,9 +480,9 @@ describe("timeline model", () => {
 
   it("keeps mended seams stable across repeated outer edge resizes", () => {
     const markers = [
-      { id: "first", start: 0, duration: 2, snapOut: true, mendOutId: "second" },
-      { id: "second", start: 2, duration: 2, snapIn: true, snapOut: true, mendInId: "first", mendOutId: "third" },
-      { id: "third", start: 4, duration: 2, snapIn: true, mendInId: "second" },
+      { id: "first", start: 0, duration: 2, mendOutId: "second" },
+      { id: "second", start: 2, duration: 2, mendInId: "first", mendOutId: "third" },
+      { id: "third", start: 4, duration: 2, mendInId: "second" },
     ];
 
     const resizedOnce = resizeTimelineMarkersWithPush(markers, "third", "end", 1, 20);
@@ -460,35 +490,29 @@ describe("timeline model", () => {
     const resizedThreeTimes = resizeTimelineMarkersWithPush(resizedTwice, "third", "end", 1, 20);
 
     expect(resizedThreeTimes).toEqual([
-      { id: "first", start: 0, duration: 2, snapOut: true, mendOutId: "second" },
-      { id: "second", start: 2, duration: 2, snapIn: true, snapOut: true, mendInId: "first", mendOutId: "third" },
-      { id: "third", start: 4, duration: 5, snapIn: true, mendInId: "second" },
+      { id: "first", start: 0, duration: 2, mendOutId: "second" },
+      { id: "second", start: 2, duration: 2, mendInId: "first", mendOutId: "third" },
+      { id: "third", start: 4, duration: 5, mendInId: "second" },
     ]);
   });
 
-  it("detects middle mend candidates across motion effect kinds in the same layer", () => {
+  it("does not detect middle mend candidates across motion effect kinds in the same layer", () => {
     const markers = [
       { id: "pan", effectId: "clipper.motion.pan" as const, kind: "pan" as const, layerId: "shared", start: 0, duration: 2, position: { x: 0, y: 0 } },
-      { id: "rotate", effectId: "clipper.motion.rotate" as const, kind: "rotate" as const, layerId: "shared", start: 4, duration: 2, position: { x: 0, y: 0 }, rotation: 12 },
+      { id: "rotate", effectId: "clipper.motion.rotate" as const, kind: "rotate" as const, layerId: "shared", start: 2, duration: 2, position: { x: 0, y: 0 }, rotation: 12 },
     ];
 
-    expect(getSelectedMotionMiddleSnap(markers, ["pan", "rotate"], getMotionMarkerMendKey)).toEqual({
-      pairs: [{ previousId: "pan", nextId: "rotate", time: 3 }],
-    });
-    expect(getMotionMiddleSnap(markers, 3, getMotionMarkerMendKey)).toEqual({
-      pairs: [{ previousId: "pan", nextId: "rotate", time: 3 }],
-    });
+    expect(getSelectedMotionMiddleSnap(markers, ["pan", "rotate"], getMotionMarkerMendKey)).toBeNull();
+    expect(getMotionMiddleSnap(markers, 2, getMotionMarkerMendKey)).toBeNull();
   });
 
-  it("detects a single-selected mend across motion effect kinds in the same layer", () => {
+  it("does not detect a single-selected mend across motion effect kinds in the same layer", () => {
     const markers = [
       { id: "pan", effectId: "clipper.motion.pan" as const, kind: "pan" as const, layerId: "shared", start: 0, duration: 2, position: { x: 0, y: 0 } },
       { id: "rotate", effectId: "clipper.motion.rotate" as const, kind: "rotate" as const, layerId: "shared", start: 4, duration: 2, position: { x: 0, y: 0 }, rotation: 12 },
     ];
 
-    expect(getSelectedMotionMiddleSnap(markers, ["rotate"], getMotionMarkerMendKey)).toEqual({
-      pairs: [{ previousId: "pan", nextId: "rotate", time: 3 }],
-    });
+    expect(getSelectedMotionMiddleSnap(markers, ["rotate"], getMotionMarkerMendKey)).toBeNull();
   });
 
   it("blocks mending when an effect manifest blocks mending", () => {

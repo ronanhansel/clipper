@@ -7,7 +7,7 @@ import { getMendedMarkerIds, normalizeMendedMotionMarkerFocus } from "../../../c
 import { clamp, roundTenth, roundTwo } from "../../../core/math";
 import { getMotionEffectByKind, getMotionEffectPackage } from "../../../core/effects/registry";
 import { createDefaultMotionBlockByEffectId, getMotionMarkerViews, motionBlocksToMotionMarkers } from "../../../core/motionEffects";
-import { buildLinearTimeline, getAvailableMotionPlacement, getSelectedActiveMiddleMend, getSelectedMotionMiddleSnap, getMotionMarkerMendKey, getMotionMiddleSnap, isMotionMiddleSnapActive, type TimelineMarkerMove, type TimelineMarkerResize } from "../../../core/timeline";
+import { buildLinearTimeline, getAvailableMotionPlacement, getSelectedActiveMiddleMend, getSelectedMotionMiddleSnap, getMotionMarkerMendKey, isMotionMiddleSnapActive, type TimelineMarkerMove, type TimelineMarkerResize } from "../../../core/timeline";
 import { applyMotionMarkerOverwrite, applySceneMotionMarkerOverwrite, placeMotionMarkerOnTimeline, remapMovedMarkerMendIds, motionBlockFromMarker, timelineMarkerKey, timelineMoveKey, uniqueMarkerSelections, withMotionMarkers } from "./timelineMutationHelpers";
 import type { SceneMotionMarkerUpdate } from "./useTimelineProjectActions";
 
@@ -374,21 +374,39 @@ export function useMotionMarkerCommands({
   function updateSelectedMotionSnap(key: "snapIn" | "snapOut", enabled: boolean) {
     const selectedIdsByPart = new Map<string, Set<string>>();
     for (const selection of selectedMotionMarkers) selectedIdsByPart.set(selection.partId, (selectedIdsByPart.get(selection.partId) ?? new Set()).add(selection.markerId));
+    function applySnapToggle(markers: MotionMarker[], selectedIds: Set<string>) {
+      const nextMarkers = markers.map((marker) => selectedIds.has(marker.id)
+        ? { ...marker, [key]: enabled || undefined }
+        : marker);
+      if (!enabled) return nextMarkers;
+      const markerById = new Map(nextMarkers.map((marker) => [marker.id, marker]));
+      const updated = new Map(nextMarkers.map((marker) => [marker.id, marker]));
+      for (const marker of nextMarkers) {
+        if (!selectedIds.has(marker.id)) continue;
+        if (key === "snapIn" && marker.mendInId) {
+          const previous = markerById.get(marker.mendInId);
+          updated.set(marker.id, { ...updated.get(marker.id)!, mendInId: undefined, middleTransition: undefined, middleEase: undefined });
+          if (previous?.mendOutId === marker.id) updated.set(previous.id, { ...updated.get(previous.id)!, mendOutId: undefined });
+        }
+        if (key === "snapOut" && marker.mendOutId) {
+          const next = markerById.get(marker.mendOutId);
+          updated.set(marker.id, { ...updated.get(marker.id)!, mendOutId: undefined });
+          if (next?.mendInId === marker.id) updated.set(next.id, { ...updated.get(next.id)!, mendInId: undefined, middleTransition: undefined, middleEase: undefined });
+        }
+      }
+      return [...updated.values()];
+    }
     const timelineMotionIds = selectedIdsByPart.get(TIMELINE_MOTION_PART_ID);
     if (timelineMotionIds) {
       updateSceneMotionMarkers((markers) => ({
-        motionMarkers: normalizeMendedMotionMarkerFocus(markers.map((marker) => timelineMotionIds.has(marker.id)
-          ? { ...marker, [key]: enabled || undefined }
-          : marker)),
+        motionMarkers: normalizeMendedMotionMarkerFocus(applySnapToggle(markers, timelineMotionIds)),
       }));
       return;
     }
     updateSceneParts((parts) => parts.map((item) => {
       const selectedIds = selectedIdsByPart.get(item.id);
       if (!selectedIds) return item;
-      const motionMarkers = getMotionMarkerViews(item).motionMarkers.map((marker) => selectedIds.has(marker.id)
-        ? { ...marker, [key]: enabled || undefined }
-        : marker);
+      const motionMarkers = applySnapToggle(getMotionMarkerViews(item).motionMarkers, selectedIds);
       return withMotionMarkers(item, normalizeMendedMotionMarkerFocus(motionMarkers));
     }));
   }
@@ -397,12 +415,12 @@ export function useMotionMarkerCommands({
     const absoluteMarkers = getAbsoluteMotionMarkers();
     const targetPartSelectedIds = selectedMotionMarkers.filter((selection) => selection.partId === targetPart.id).map((selection) => timelineMarkerKey(selection.partId, selection.markerId));
     const selectedIds = selectedMotionMarkers.map((selection) => timelineMarkerKey(selection.partId, selection.markerId));
-    const absolutePreviewTime = (activeTimelinePart?.start ?? 0) + previewTime;
+    const selectedSnapIds = selectedIds.length > 1 ? selectedIds : [];
+    const targetPartSnapIds = targetPartSelectedIds.length > 1 ? targetPartSelectedIds : [];
     const snap = getSelectedActiveMiddleMend(absoluteMarkers, selectedIds, getMotionMarkerMendKey)
-      ?? getSelectedMotionMiddleSnap(absoluteMarkers, selectedIds, getMotionMarkerMendKey)
+      ?? getSelectedMotionMiddleSnap(absoluteMarkers, selectedSnapIds, getMotionMarkerMendKey)
       ?? getSelectedActiveMiddleMend(absoluteMarkers, targetPartSelectedIds, getMotionMarkerMendKey)
-      ?? getSelectedMotionMiddleSnap(absoluteMarkers, targetPartSelectedIds, getMotionMarkerMendKey)
-      ?? (targetPart.id === part.id ? getMotionMiddleSnap(absoluteMarkers, absolutePreviewTime, getMotionMarkerMendKey) : null);
+      ?? getSelectedMotionMiddleSnap(absoluteMarkers, targetPartSnapIds, getMotionMarkerMendKey);
     if (!snap) return;
     const middleSnapActive = isMotionMiddleSnapActive(absoluteMarkers, snap);
     const activeSelectedIds = new Set(selectedIds.length > 0 ? selectedIds : targetPartSelectedIds);
@@ -411,7 +429,6 @@ export function useMotionMarkerCommands({
       : uniqueMarkerSelections([snap.pairs[0].previousId, snap.pairs[0].nextId]);
     const nextBounds = new Map(absoluteMarkers.map((marker) => [marker.id, { start: marker.start, end: marker.start + marker.duration, snapIn: marker.snapIn, snapOut: marker.snapOut, mendInId: marker.mendInId, mendOutId: marker.mendOutId }]));
     const mendedIds = new Set(snap.pairs.flatMap((pair) => [pair.previousId, pair.nextId]));
-    const sharedFocus = absoluteMarkers.find((marker) => marker.id === snap.pairs[0].previousId)?.focus;
     for (const pair of snap.pairs) {
       const previousBounds = nextBounds.get(pair.previousId);
       const nextMarkerBounds = nextBounds.get(pair.nextId);
@@ -419,8 +436,8 @@ export function useMotionMarkerCommands({
         if (previousBounds) nextBounds.set(pair.previousId, { ...previousBounds, mendOutId: undefined });
         if (nextMarkerBounds) nextBounds.set(pair.nextId, { ...nextMarkerBounds, mendInId: undefined });
       } else {
-        if (previousBounds) nextBounds.set(pair.previousId, { ...previousBounds, end: pair.time, mendOutId: pair.nextId });
-        if (nextMarkerBounds) nextBounds.set(pair.nextId, { ...nextMarkerBounds, start: pair.time, mendInId: pair.previousId });
+        if (previousBounds) nextBounds.set(pair.previousId, { ...previousBounds, end: pair.time, snapOut: undefined, mendOutId: pair.nextId });
+        if (nextMarkerBounds) nextBounds.set(pair.nextId, { ...nextMarkerBounds, start: pair.time, snapIn: undefined, mendInId: pair.previousId });
       }
     }
     updateSceneMotionMarkers((markers) => {
@@ -429,7 +446,7 @@ export function useMotionMarkerCommands({
         if (!mendedIds.has(key)) return marker;
         const bounds = nextBounds.get(key);
         if (!bounds) return marker;
-        return { ...marker, start: roundTenth(bounds.start), duration: roundTenth(bounds.end - bounds.start), focus: !middleSnapActive && sharedFocus && mendedIds.has(key) ? sharedFocus : marker.focus, snapIn: bounds.snapIn, snapOut: bounds.snapOut, mendInId: bounds.mendInId, mendOutId: bounds.mendOutId };
+        return { ...marker, start: roundTenth(bounds.start), duration: roundTenth(bounds.end - bounds.start), snapIn: bounds.snapIn, snapOut: bounds.snapOut, mendInId: bounds.mendInId, mendOutId: bounds.mendOutId };
       }));
       return { motionMarkers: nextMarkers };
     });

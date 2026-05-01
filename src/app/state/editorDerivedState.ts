@@ -6,7 +6,7 @@ import { clamp } from "../../core/math";
 import { getMotionMarkerViews, motionBlocksToMotionMarkers } from "../../core/motionEffects";
 import { defaultAssets, defaultTimelineLayerState, serializeProjectForSave } from "../../core/project";
 import { buildLinearTimeline, getExecutableAdjustmentLayers, getMiddleTransitionMode, getSelectedActiveMiddleMend, getSelectedMotionMiddleSnap, getTimelineMarkerMendLayerId, getTimelinePartAtTime, getMotionMarkerMendKey, getMotionMiddleSnap, isMotionMiddleSnapActive, sceneDuration as getSceneDuration, validateScene, type TimelineMendMarker } from "../../core/timeline";
-import { FRAME_HEIGHT, FRAME_WIDTH, type CompositionClip, type MotionMarker, type ProjectManifest, type SelectionPayload, type TimelineMode, type TimelinePart } from "../../core/types";
+import { FRAME_HEIGHT, FRAME_WIDTH, type CompositionClip, type MotionEase, type MotionMarker, type ProjectManifest, type SelectionPayload, type TimelineMode, type TimelinePart } from "../../core/types";
 import { TIMELINE_MOTION_PART_ID } from "../types";
 import type { MotionMarkerSelection } from "../types";
 import { getProjectContentSnapshot } from "./projectStore";
@@ -119,12 +119,13 @@ export function useEditorDerivedState({
   }), [scene.compositions, sceneMotionViews.motionMarkers, selectedMotionMarkers]);
   const selectedMotionSnapInActive = selectedMotionSnapMarkers.length > 1 ? selectedMotionSnapMarkers.every((marker) => marker.snapIn) : Boolean(selectedMotion?.snapIn);
   const selectedMotionSnapOutActive = selectedMotionSnapMarkers.length > 1 ? selectedMotionSnapMarkers.every((marker) => marker.snapOut) : Boolean(selectedMotion?.snapOut);
-  const selectedMotionMiddleSnap = getSelectedActiveMiddleMend(absoluteMotionMarkers, currentPartSelectedMotionIds, getMotionMarkerMendKey) ?? getSelectedMotionMiddleSnap(absoluteMotionMarkers, currentPartSelectedMotionIds, getMotionMarkerMendKey);
-  const selectedMotionPartMiddleSnap = selectedMotionPart ? getSelectedActiveMiddleMend(absoluteMotionMarkers, selectedMotionPartSelectedMotionIds, getMotionMarkerMendKey) ?? getSelectedMotionMiddleSnap(absoluteMotionMarkers, selectedMotionPartSelectedMotionIds, getMotionMarkerMendKey) : null;
+  const selectedMotionMiddleSnap = getSelectedActiveMiddleMend(absoluteMotionMarkers, currentPartSelectedMotionIds, getMotionMarkerMendKey) ?? (currentPartSelectedMotionIds.length > 1 ? getSelectedMotionMiddleSnap(absoluteMotionMarkers, currentPartSelectedMotionIds, getMotionMarkerMendKey) : null);
+  const selectedMotionPartMiddleSnap = selectedMotionPart ? getSelectedActiveMiddleMend(absoluteMotionMarkers, selectedMotionPartSelectedMotionIds, getMotionMarkerMendKey) ?? (selectedMotionPartSelectedMotionIds.length > 1 ? getSelectedMotionMiddleSnap(absoluteMotionMarkers, selectedMotionPartSelectedMotionIds, getMotionMarkerMendKey) : null) : null;
   const selectedMotionPartMiddleSnapActive = selectedMotionPart ? isMotionMiddleSnapActive(absoluteMotionMarkers, selectedMotionPartMiddleSnap) : false;
   const selectedMotionPartMiddleTransitionMode = getMiddleTransitionMode(absoluteMotionMarkers, selectedMotionPartMiddleSnap);
+  const selectedMotionPartMiddleEase = getMiddleEase(absoluteMotionMarkers, selectedMotionPartMiddleSnap);
   const motionMiddleSnap = selectedMotionMiddleSnap ?? getMotionMiddleSnap(absoluteMotionMarkers, adjustedSceneTime, getMotionMarkerMendKey);
-  const inspectorMotionMiddleSnap = selectedMotionPartMiddleSnap ?? (selectedMotionPart?.id === part.id ? motionMiddleSnap : null);
+  const inspectorMotionMiddleSnap = selectedMotionPartMiddleSnap;
 
   const adjustmentMarkers = useMemo<TimelineMendMarker[]>(() => (scene.adjustmentLayers ?? []).map((layer) => ({
     id: layer.id,
@@ -183,6 +184,7 @@ export function useEditorDerivedState({
     selectedMotion,
     selectedMotionPart,
     selectedMotionPartMiddleSnapActive,
+    selectedMotionPartMiddleEase,
     selectedMotionPartMiddleTransitionMode,
     selectedMotionSnapInActive,
     selectedMotionSnapMarkers,
@@ -190,6 +192,7 @@ export function useEditorDerivedState({
     selectedZoom: selectedMotion,
     selectedZoomPart: selectedMotionPart,
     selectedZoomPartMiddleSnapActive: selectedMotionPartMiddleSnapActive,
+    selectedZoomPartMiddleEase: selectedMotionPartMiddleEase,
     selectedZoomPartMiddleTransitionMode: selectedMotionPartMiddleTransitionMode,
     selectedZoomSnapInActive: selectedMotionSnapInActive,
     selectedZoomSnapMarkers: selectedMotionSnapMarkers,
@@ -197,6 +200,7 @@ export function useEditorDerivedState({
     selectedTranslation: selectedMotion,
     selectedTranslationPart: selectedMotionPart,
     selectedTranslationPartMiddleSnapActive: selectedMotionPartMiddleSnapActive,
+    selectedTranslationPartMiddleEase: selectedMotionPartMiddleEase,
     selectedTranslationPartMiddleTransitionMode: selectedMotionPartMiddleTransitionMode,
     selectedTranslationSnapInActive: selectedMotionSnapInActive,
     selectedTranslationSnapMarkers: selectedMotionSnapMarkers,
@@ -222,6 +226,13 @@ const blankPreviewComposition: CompositionClip = {
   snapshot: [],
   motionMarkers: [],
 };
+
+function getMiddleEase(markers: Array<{ id: string; middleEase?: MotionEase }>, snap: { pairs: Array<{ nextId: string }> } | null): MotionEase | undefined {
+  if (!snap) return undefined;
+  const markersById = new Map(markers.map((marker) => [marker.id, marker]));
+  const eases = new Set(snap.pairs.map((pair) => markersById.get(pair.nextId)?.middleEase).filter((ease): ease is MotionEase => Boolean(ease)));
+  return eases.size === 1 ? [...eases][0] : undefined;
+}
 
 type AbsoluteMotionMarker = MotionMarker & { id: string; partId: string; start: number };
 

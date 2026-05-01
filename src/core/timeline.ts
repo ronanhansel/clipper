@@ -159,9 +159,12 @@ export function getMotionMarkerMendKey(marker: MotionMarker) {
 }
 
 export function canMendTimelineMarkers(previous: { effectId?: string; effect?: { effectId?: string }; layerId?: string }, next: { effectId?: string; effect?: { effectId?: string }; layerId?: string }) {
+  const previousEffectId = getTimelineMarkerEffectId(previous);
+  const nextEffectId = getTimelineMarkerEffectId(next);
   return getTimelineMarkerMendLayerId(previous) === getTimelineMarkerMendLayerId(next)
-    && !effectBlocksMending(getTimelineMarkerEffectId(previous))
-    && !effectBlocksMending(getTimelineMarkerEffectId(next));
+    && (!previousEffectId || !nextEffectId || previousEffectId === nextEffectId)
+    && !effectBlocksMending(previousEffectId)
+    && !effectBlocksMending(nextEffectId);
 }
 
 function getTimelineMarkerEffectId(marker: { effectId?: string; effect?: { effectId?: string } }) {
@@ -514,7 +517,6 @@ export function getMotionMiddleSnap<T extends MiddleSnapMarker>(markers: T[], pr
 
 export function getSelectedMotionMiddleSnap<T extends MiddleSnapMarker>(markers: T[], selectedMarkerIds: string[], getLayerId: MiddleSnapLayerResolver<T> = defaultMiddleSnapLayerId) {
   const selectedIds = new Set(selectedMarkerIds);
-  if (selectedIds.size === 1) return getSingleSelectedMiddleSnap(markers, [...selectedIds][0], getLayerId);
   if (selectedIds.size < 2) return null;
 
   const selectedLayerIds = new Set(markers.filter((marker) => selectedIds.has(marker.id)).map(getLayerId));
@@ -522,7 +524,6 @@ export function getSelectedMotionMiddleSnap<T extends MiddleSnapMarker>(markers:
   const selectedLayerId = [...selectedLayerIds][0];
   const sortedMarkers = markers.filter((marker) => getLayerId(marker) === selectedLayerId).sort((left, right) => left.start - right.start);
   const selectedIndexes = sortedMarkers.map((marker, index) => (selectedIds.has(marker.id) ? index : -1)).filter((index) => index >= 0);
-  const tolerance = 0.12;
   if (selectedIndexes.length !== selectedIds.size) return null;
 
   for (let index = 1; index < selectedIndexes.length; index += 1) {
@@ -538,62 +539,25 @@ export function getSelectedMotionMiddleSnap<T extends MiddleSnapMarker>(markers:
 
     const previousEnd = previous.start + previous.duration;
     const nextStart = next.start;
-    if (previousEnd > nextStart + tolerance) return null;
-
-    const snapTime = roundTenth((previousEnd + nextStart) / 2);
-    const previousDuration = snapTime - previous.start;
-    const nextDuration = next.start + next.duration - snapTime;
-
-    if (previousDuration >= minimumZoomDuration - tolerance && nextDuration >= minimumZoomDuration - tolerance) {
-      pairs.push({ previousId: previous.id, nextId: next.id, time: snapTime });
-    }
+    if (!areTimelineMarkersAdjacent(previous, next)) return null;
+    pairs.push({ previousId: previous.id, nextId: next.id, time: roundTenth(previousEnd) });
   }
 
   return pairs.length === selectedIndexes.length - 1 ? { pairs } : null;
 }
 
-function getSingleSelectedMiddleSnap<T extends MiddleSnapMarker>(markers: T[], markerId: string, getLayerId: MiddleSnapLayerResolver<T>) {
-  const targetMarker = markers.find((marker) => marker.id === markerId);
-  if (!targetMarker) return null;
-
-  const sortedMarkers = markers.filter((marker) => getLayerId(marker) === getLayerId(targetMarker)).sort((left, right) => left.start - right.start);
-  const markerIndex = sortedMarkers.findIndex((marker) => marker.id === markerId);
-  if (markerIndex < 0) return null;
-
-  return getMiddleSnapPair(sortedMarkers[markerIndex - 1], sortedMarkers[markerIndex])
-    ?? getMiddleSnapPair(sortedMarkers[markerIndex], sortedMarkers[markerIndex + 1]);
-}
-
-function getMiddleSnapPair<T extends MiddleSnapMarker>(previous: T | undefined, next: T | undefined) {
-  if (!previous || !next) return null;
-  if (!canMendTimelineMarkers(previous, next)) return null;
-  const tolerance = 0.12;
-  const previousEnd = previous.start + previous.duration;
-  const nextStart = next.start;
-  if (previousEnd > nextStart + tolerance) return null;
-
-  const snapTime = roundTenth((previousEnd + nextStart) / 2);
-  const previousDuration = snapTime - previous.start;
-  const nextDuration = next.start + next.duration - snapTime;
-
-  return previousDuration >= minimumZoomDuration - tolerance && nextDuration >= minimumZoomDuration - tolerance
-    ? { pairs: [{ previousId: previous.id, nextId: next.id, time: snapTime }] }
-    : null;
-}
-
 export function getSelectedActiveMiddleMend<T extends MiddleSnapMarker>(markers: T[], selectedMarkerIds: string[], getLayerId: MiddleSnapLayerResolver<T> = defaultMiddleSnapLayerId) {
-  if (selectedMarkerIds.length === 0) return null;
   const selectedIds = new Set(selectedMarkerIds);
-  const pairs: Array<{ previousId: string; nextId: string; time: number }> = [];
+  if (selectedIds.size === 0) return null;
 
+  const pairs: Array<{ previousId: string; nextId: string; time: number }> = [];
   for (const sortedMarkers of middleSnapLayerGroups(markers, getLayerId)) {
     for (let index = 0; index < sortedMarkers.length - 1; index += 1) {
       const previous = sortedMarkers[index];
       const next = sortedMarkers[index + 1];
       if (!selectedIds.has(previous.id) && !selectedIds.has(next.id)) continue;
       if (!isExplicitTimelineMarkerMend(previous, next)) continue;
-      const time = roundTenth(previous.start + previous.duration);
-      pairs.push({ previousId: previous.id, nextId: next.id, time });
+      pairs.push({ previousId: previous.id, nextId: next.id, time: roundTenth(previous.start + previous.duration) });
     }
   }
 
@@ -743,7 +707,7 @@ function markerIdentityKeys(marker: { id: string; partId?: string; sourcePartId?
 }
 
 export function isExplicitTimelineMarkerMend(previous: TimelineMendMarker, next: TimelineMendMarker) {
-  return canMendTimelineMarkers(previous, next) && areTimelineMarkersAdjacent(previous, next) && hasExplicitTimelineMarkerMendReference(previous, next);
+  return !previous.snapOut && !next.snapIn && canMendTimelineMarkers(previous, next) && areTimelineMarkersAdjacent(previous, next) && hasExplicitTimelineMarkerMendReference(previous, next);
 }
 
 function areTimelineMarkersAdjacent(previous: { start: number; duration: number }, next: { start: number }) {

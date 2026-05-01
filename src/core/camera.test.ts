@@ -89,4 +89,23 @@ describe("camera", () => {
 
     expect(perspective).toMatchObject({ z: 100, rotateX: 5, rotateY: -10 });
   });
+
+  it("uses explicit mends for instant motion handoffs without snap flags", () => {
+    const markers = [
+      { id: "a", effectId: "clipper.motion.pan" as const, kind: "pan" as const, layerId: "clipper.motion.pan", start: 0, duration: 2, position: { x: 10, y: 0 }, mendOutId: "b" },
+      { id: "b", effectId: "clipper.motion.pan" as const, kind: "pan" as const, layerId: "clipper.motion.pan", start: 2, duration: 2, position: { x: 100, y: 0 }, mendInId: "a" },
+    ];
+
+    expect(getActiveMarkerByKind(markers, "pan", 1.95)?.position?.x).toBe(10);
+    expect(getActiveMarkerByKind(markers, "pan", 2)?.position?.x).toBe(100);
+  });
+
+  it("uses explicit mends for transition motion handoffs without snap flags", () => {
+    const markers = [
+      { id: "a", effectId: "clipper.motion.pan" as const, kind: "pan" as const, layerId: "clipper.motion.pan", start: 0, duration: 2, position: { x: 10, y: 0 }, mendOutId: "b" },
+      { id: "b", effectId: "clipper.motion.pan" as const, kind: "pan" as const, layerId: "clipper.motion.pan", start: 2, duration: 2, position: { x: 100, y: 0 }, mendInId: "a", middleTransition: "transition" as const, middleEase: "linear" as const },
+    ];
+
+    expect(getActiveMarkerByKind(markers, "pan", 2.22)?.position?.x).toBe(55);
+  });
 });
