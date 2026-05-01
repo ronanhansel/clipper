@@ -1,10 +1,33 @@
 # Agent Instructions
 
+---
+
+# Part 1: Agent Behaviour
+
+## Path of Discovery
+
+- **Evidence first, execution second.** Start every task by gathering all relevant context. Do not search for files or references one at a time — batch tool calls together for efficiency.
+- Before modifying any code, find every instance of the feature, function, or pattern the user mentions. Understand the full scope of what will be affected.
+- **When the reference is ambiguous** (e.g., the same function name exists in multiple modules, two separate modules could both match the user's description):
+  - Stop and ask the user for clarification. Never guess which one the user intends.
+  - Only choose without asking if the user explicitly instructs you to reason and select. When reasoning, consider all available information, then select the best reference for the user's intended code.
+- **Simple tweaks**: When the user gives a short prompt for a simple, straightforward change — locate the target quickly, edit it efficiently, and move on. Do not overthink or over-engineer trivial edits.
+
 ## External Memory
 
-- Always start project work with an external memory file at `build/[version number]/memory/[id]-feature-name.md`.
+- **This is mandatory. Do not skip this step.** Every code change must be documented in external memory.
+- Always start project work by creating or identifying the relevant memory file at `build/[version number]/memory/[id]-feature-name.md`.
 - Example: `build/v0.2.8/memory/001-init-editor.md`.
-- After every major added feature, major update, rework, rewrite, or feature addition, populate or update the relevant memory files so future agents can pick up the work.
+- After EVERY change — whether a new feature, update, rework, rewrite, refactor, bug fix, or any code modification — populate or update the relevant memory files so future agents can pick up the work.
+- If a memory file for the feature/area already exists, update it with the latest changes and architecture decisions. If none exists, create a new file with the next sequential ID.
+- **Long-running tasks**: write memory incrementally as you work, not only at the end. This prevents memory loss if the session is interrupted, and keeps external memory current for every step of the task.
+- For quick edits or small bug fixes, still update or create the relevant memory file — do not skip this step under any circumstances.
+- If you are unsure what memory file to update, look at existing files in `build/[version number]/memory/` for context, or ask the user.
+- After finishing any task, verify that the relevant memory files have been written or updated before marking the work as complete.
+
+---
+
+# Part 2: Project Instructions
 
 ## Version Planning
 

@@ -51,6 +51,7 @@ import { defaultComposeLayoutState, defaultEditorLayoutState, defaultPreviewView
 import { getExecutableAdjustmentLayers } from "./core/timeline";
 import type { TimelineLayerCategory } from "./core/timelineLayers";
 import { FRAME_HEIGHT, FRAME_WIDTH, type Bounds, type CompositionClip, type EditorState, type FrameObject, type LayerAnimation, type MotionEffectKind, type Part, type Point, type ProjectManifest, type SelectionPayload, type TimelineClip, type TimelineLayerState, type TimelineViewportState } from "./core/types";
+import { WelcomeScreen } from "./components/WelcomeScreen";
 
 const defaultEditorState: EditorState = {
   timeline: defaultTimelineViewportState,
@@ -82,19 +83,17 @@ function PathToastMessage({ action, path }: { action: string; path: string }) {
 }
 
 export function App() {
-  const { bootError, bootProject, openProjectFromBoot } = useActiveProjectBoot();
+  const { bootError, bootProject, isWelcome, recentProjects, openProjectFromBoot, createNewProject, openRecentProject, closeProject } = useActiveProjectBoot();
 
-  if (bootError) {
+  if (isWelcome || bootError) {
     return (
-      <main className="grid h-screen place-items-center bg-[#12141a] px-6 text-[#dfe2ea]">
-        <section className="grid max-w-md gap-4 rounded-2xl border border-white/10 bg-[#171a22] p-6 shadow-2xl">
-          <div className="grid gap-2">
-            <h1 className="text-lg font-bold">No project loaded</h1>
-            <p className="text-sm text-[#a7adbb]">{bootError}</p>
-          </div>
-          <button type="button" className="rounded-xl bg-[#dfe2ea] px-4 py-2 text-sm font-bold text-[#12141a]" onClick={openProjectFromBoot}>Open Project</button>
-        </section>
-      </main>
+      <WelcomeScreen
+        error={bootError}
+        recentProjects={recentProjects}
+        onCreateNewProject={createNewProject}
+        onOpenProject={openProjectFromBoot}
+        onOpenRecentProject={openRecentProject}
+      />
     );
   }
 
@@ -102,20 +101,20 @@ export function App() {
     return <main className="grid h-screen place-items-center bg-[#12141a] text-sm font-bold text-[#dfe2ea]">Opening project...</main>;
   }
 
-  return <AppProviders bootProject={bootProject} />;
+  return <AppProviders bootProject={bootProject} onCloseProject={closeProject} />;
 }
 
-function AppProviders({ bootProject }: { bootProject: BootProject }) {
+function AppProviders({ bootProject, onCloseProject }: { bootProject: BootProject; onCloseProject: () => void }) {
   return (
     <ProjectStoreProvider key={bootProject.manifestPath} project={bootProject.project} compositionSources={bootProject.compositionSources}>
       <EditorStoreProvider project={bootProject.project}>
-        <AppContent initialProjectManifestPath={bootProject.manifestPath} initialSourceStatus={bootProject.sourceStatus} />
+        <AppContent initialProjectManifestPath={bootProject.manifestPath} initialSourceStatus={bootProject.sourceStatus} onCloseProject={onCloseProject} />
       </EditorStoreProvider>
     </ProjectStoreProvider>
   );
 }
 
-function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initialProjectManifestPath: string; initialSourceStatus: string }) {
+function AppContent({ initialProjectManifestPath, initialSourceStatus, onCloseProject }: { initialProjectManifestPath: string; initialSourceStatus: string; onCloseProject: () => void }) {
   const editorStore = useEditorStoreApi();
   const [currentSceneTime, setRenderCurrentSceneTime] = useState(() => editorStore.getState().currentSceneTime);
   const [trackerPickTranslationMarker, setTrackerPickTranslationMarker] = useState<{ partId: string; markerId: string } | null>(null);
@@ -1092,6 +1091,11 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
   const activeFramePickPoint = (pointPickAdjustment ? framePickPreviewPoint ?? adjustmentFramePickPoint : framePickPoint) ?? null;
   const selectedComposeObjectIds = useMemo(() => selectionPayload?.objects.map((object) => object.id) ?? (selectedObjectId ? [selectedObjectId] : []), [selectedObjectId, selectionPayload]);
 
+  async function handleCloseProject() {
+    if (hasUnsavedChanges) await saveAllChanges();
+    onCloseProject();
+  }
+
   return (
     <>
     <main ref={appRootRef} className="relative grid h-screen bg-[#12141a] text-[#f7f7f8]" data-clipper-frame-presentation={presentationMode ?? undefined} style={appShellStyle} onPointerMove={presentationMode ? showPresentationControls : undefined}>
@@ -1104,6 +1108,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus }: { initi
         renamingProject={renamingProject}
         sceneName={scene.name}
         onCancelProjectRename={cancelProjectRename}
+        onCloseProject={handleCloseProject}
         onCommitProjectRename={commitProjectRename}
         onExportOpen={() => setExportDialogOpen(true)}
         onOpenProject={() => void openProjectManifest()}

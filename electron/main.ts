@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, dialog, ipcMain, shell } from "electron";
+import { app, BrowserWindow, Menu, dialog, ipcMain, screen, shell } from "electron";
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { watch, type FSWatcher } from "node:fs";
 import fs from "node:fs/promises";
@@ -14,10 +14,30 @@ const isDev = process.env.VITE_DEV_SERVER_URL || !app.isPackaged;
 const videoExportSessions = new Map<string, { process: ChildProcessWithoutNullStreams; outputPath: string; closePromise: Promise<string | null> }>();
 const cancelledVideoRenders = new Set<string>();
 const textFileWatchers = new Map<number, FSWatcher[]>();
+const appStatePath = "clipper/app-state.json";
 const frameWidth = 1920;
 const frameHeight = 1080;
 let hardwareEncoderSupport: Set<string> | null = null;
 let systemFontFamilies: string[] | null = null;
+
+async function readAppState(): Promise<Record<string, unknown>> {
+  try {
+    return JSON.parse(await fs.readFile(resolveClipperFile(appStatePath), "utf8")) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+async function writeAppState(updates: Record<string, unknown>) {
+  const state = await readAppState();
+  const merged = { ...state, ...updates };
+  await fs.mkdir(path.dirname(resolveClipperFile(appStatePath)), { recursive: true });
+  await fs.writeFile(resolveClipperFile(appStatePath), `${JSON.stringify(merged, null, 2)}\n`, "utf8");
+}
+
+async function writeWindowBounds(window: BrowserWindow) {
+  await writeAppState({ windowBounds: window.getBounds() as unknown as Record<string, unknown> });
+}
 
 type ProjectWatchPaths = {
   files: string[];
@@ -299,6 +319,18 @@ ipcMain.handle("clipper:open-project-manifest", async () => {
 
   if (canceled || !filePaths[0]) return null;
   return getClipperRelativePath(filePaths[0]);
+});
+
+ipcMain.handle("clipper:create-project-dialog", async () => {
+  const appRoot = path.resolve(__dirname, "..");
+  const { canceled, filePath } = await dialog.showSaveDialog({
+    title: "New Clipper project",
+    defaultPath: path.join(appRoot, "clipper", "projects", "Untitled.clipper"),
+    filters: [{ name: "Clipper Project", extensions: ["clipper"] }],
+  });
+
+  if (canceled || !filePath) return null;
+  return getClipperRelativePath(filePath);
 });
 
 ipcMain.handle("clipper:export-media-file", async (_event, defaultFileName: string, content: string) => {
@@ -839,6 +871,24 @@ async function createWindow() {
     },
   });
 
+  try {
+    const state = await readAppState();
+    const bounds = state.windowBounds as { x: number; y: number; width: number; height: number } | undefined;
+    if (bounds && typeof bounds.x === "number" && typeof bounds.y === "number" && typeof bounds.width === "number" && typeof bounds.height === "number") {
+      const displays = screen.getAllDisplays();
+      const inAnyDisplay = displays.some((d) => {
+        const b = d.workArea;
+        return bounds.x < b.x + b.width && bounds.x + 40 > b.x && bounds.y < b.y + b.height && bounds.y + 40 > b.y;
+      });
+      if (inAnyDisplay) window.setBounds(bounds);
+    }
+  } catch { /* no saved bounds */ }
+
+  window.on("close", (event) => {
+    event.preventDefault();
+    writeWindowBounds(window).catch(() => {}).finally(() => window.destroy());
+  });
+
   window.webContents.session.setPermissionCheckHandler((_webContents, permission) => {
     return String(permission) === "local-fonts";
   });
@@ -929,7 +979,7 @@ app.whenReady().then(async () => {
 });
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
+  app.quit();
 });
 
 app.on("activate", () => {

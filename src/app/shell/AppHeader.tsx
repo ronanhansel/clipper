@@ -11,6 +11,7 @@ type AppHeaderProps = {
   renamingProject: boolean;
   sceneName: string;
   onCancelProjectRename: () => void;
+  onCloseProject: () => void;
   onCommitProjectRename: () => void;
   onExportOpen: () => void;
   onOpenProject: () => void;
@@ -20,9 +21,9 @@ type AppHeaderProps = {
   onSettingsOpen: () => void;
 };
 
-export function AppHeader({ hasActiveComposition, hasUnsavedChanges, partName, projectName, projectNameDraft, renamingProject, sceneName, onCancelProjectRename, onCommitProjectRename, onExportOpen, onOpenProject, onProjectNameDraftChange, onProjectTitleContextMenu, onSaveAll, onSettingsOpen }: AppHeaderProps) {
+export function AppHeader({ hasActiveComposition, hasUnsavedChanges, partName, projectName, projectNameDraft, renamingProject, sceneName, onCancelProjectRename, onCloseProject, onCommitProjectRename, onExportOpen, onOpenProject, onProjectNameDraftChange, onProjectTitleContextMenu, onSaveAll, onSettingsOpen }: AppHeaderProps) {
   return (
-    <header className={`${appDragRegion} grid grid-cols-[220px_1fr_430px] items-center gap-[18px] border-b border-[#2d313b] bg-[rgba(22,24,31,0.98)] px-[22px]`}>
+    <header className={`${appDragRegion} grid grid-cols-[220px_1fr_500px] items-center gap-[18px] border-b border-[#2d313b] bg-[rgba(22,24,31,0.98)] px-[22px]`}>
       <div />
       <div className={`${appNoDragRegion} flex min-w-0 items-baseline justify-center gap-2 justify-self-center text-center leading-none`} onContextMenu={onProjectTitleContextMenu} title="Right-click to rename project">
         {renamingProject ? <Input autoFocus className="h-7 w-[240px] border-[var(--clipper-accent)] bg-[#171920] px-2 py-0 text-center text-[14px] font-bold" value={projectNameDraft} onBlur={onCommitProjectRename} onChange={(event) => onProjectNameDraftChange(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") onCommitProjectRename(); if (event.key === "Escape") onCancelProjectRename(); }} /> : <strong className="truncate text-[14px] font-bold">{projectName}</strong>}
@@ -31,6 +32,7 @@ export function AppHeader({ hasActiveComposition, hasUnsavedChanges, partName, p
       </div>
       <div className={`${appNoDragRegion} flex justify-end gap-1.5`}>
         <button className={appBarActionButtonBase} title="Open a Clipper .clipper project" onClick={onOpenProject}>Open</button>
+        <button className={appBarActionButtonBase} title="Close project and return to welcome screen" onClick={onCloseProject}>Close</button>
         <button className={appBarActionButtonBase} title="Settings (Cmd/Ctrl+,)" onClick={onSettingsOpen}>Settings</button>
         <button className={appBarActionButtonBase} onClick={onExportOpen}>Export</button>
         <button className={appBarSaveButtonClass(hasUnsavedChanges)} disabled={!hasUnsavedChanges} title="Save every project, timeline, inspector, and active code change (Ctrl+S or Cmd+S)" onClick={onSaveAll}>Save</button>

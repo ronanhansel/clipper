@@ -30,6 +30,7 @@ interface Window {
     copyFile: (relativePath: string, nextRelativePath: string) => Promise<void>;
     listSystemFonts: () => Promise<string[]>;
     openProjectManifest: () => Promise<string | null>;
+    createProjectDialog: () => Promise<string | null>;
     exportMediaFile: (defaultFileName: string, content: string) => Promise<string | null>;
     exportBinaryFile: (defaultFileName: string, base64Content: string) => Promise<string | null>;
     startVideoExport: (defaultFileName: string, frameRate: number, width: number, height: number) => Promise<{ sessionId: string; filePath: string } | null>;
