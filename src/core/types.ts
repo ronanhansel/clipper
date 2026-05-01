@@ -142,15 +142,17 @@ export type PartSnapshotLine = {
   description: string;
 };
 
-export type EffectCategory = "motion" | "adjustment";
+export type EffectCategory = "motion" | "adjustment" | "transition";
 
 export type EffectId = `${string}.${string}`;
 
-export type EffectManifestTag = "blocksMending";
+export type EffectManifestTag = "blocksMending" | "blocksOverlap";
 
 export type MotionEffectId = EffectId;
 
 export type AdjustmentEffectId = EffectId;
+
+export type TransitionEffectId = EffectId;
 
 export type MotionBlockParams = Record<string, unknown> & {
   ease?: MotionEase;
@@ -256,7 +258,7 @@ export type AdjustmentEffectDefinition = {
   defaultParams: AdjustmentEffectParams;
 };
 
-export type EffectDefinition = MotionEffectDefinition | AdjustmentEffectDefinition;
+export type EffectDefinition = MotionEffectDefinition | AdjustmentEffectDefinition | TransitionEffectDefinition;
 
 export type AdjustmentEffect = {
   effectId: AdjustmentEffectId;
@@ -270,6 +272,39 @@ export type AdjustmentLayer = TimelineMarkerMetadata & {
   start: number;
   duration: number;
   effect: AdjustmentEffect;
+};
+
+export type TransitionEffectParams = Record<string, unknown> & {
+  ease?: MotionEase;
+};
+
+export type TransitionEffectDefinition = {
+  id: TransitionEffectId;
+  category: "transition";
+  name: string;
+  label: string;
+  group: string;
+  accent?: string;
+  previewColor?: string;
+  tags?: readonly EffectManifestTag[];
+  timelineGradient?: EffectTimelineGradient;
+  defaultDuration: number;
+  defaultParams: TransitionEffectParams;
+};
+
+export type TransitionEffect = {
+  effectId: TransitionEffectId;
+  params?: TransitionEffectParams;
+};
+
+export type TransitionLayer = TimelineMarkerMetadata & {
+  id: string;
+  layerId?: string;
+  name: string;
+  start: number;
+  duration: number;
+  midPoint: number;
+  effect: TransitionEffect;
 };
 
 export type CompositionClip = TimelineMarkerMetadata & {
@@ -297,6 +332,7 @@ export type Scene = {
   compositions: CompositionClip[];
   adjustmentLayers?: AdjustmentLayer[];
   motionMarkers?: MotionMarker[];
+  transitionLayers?: TransitionLayer[];
 };
 
 export type CompositionDocument = CompositionClip & {
@@ -323,6 +359,7 @@ export type TimelineDocument = {
   clips: TimelineClip[];
   adjustmentLayers?: AdjustmentLayer[];
   motionMarkers?: MotionMarker[];
+  transitionLayers?: TransitionLayer[];
   settings?: TimelineSettings;
 };
 
@@ -350,6 +387,13 @@ export type TimelineAdjustmentLayerState = {
   locked?: boolean;
 };
 
+export type TimelineTransitionLayerState = {
+  id: string;
+  name: string;
+  hidden?: boolean;
+  locked?: boolean;
+};
+
 export type TimelineCompositionLayerState = {
   id: string;
   name: string;
@@ -363,6 +407,7 @@ export type TimelineLayerState = {
   compositionLayers?: TimelineCompositionLayerState[];
   adjustmentLayers?: TimelineAdjustmentLayerState[];
   motionLayers?: TimelineMotionLayerState[];
+  transitionLayers?: TimelineTransitionLayerState[];
   rowHeights?: Record<string, number>;
 };
 
@@ -409,6 +454,7 @@ export type EditorState = {
   currentSceneTime?: number;
   defaultNewMarkerDurationSeconds?: number;
   timelineEndPaddingFraction?: number;
+  timelinePrecision?: number;
   layout?: EditorLayoutState;
   composeLayout?: ComposeLayoutState;
   preview?: PreviewViewportState;

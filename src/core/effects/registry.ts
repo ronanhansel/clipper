@@ -1,11 +1,13 @@
-import type { AdjustmentEffectId, EffectId, MotionEffectId } from "../types";
+import type { AdjustmentEffectId, EffectId, MotionEffectId, TransitionEffectId } from "../types";
 import { builtInAdjustmentEffects } from "./adjustments";
 import { builtInMotionEffects } from "./motion";
-import type { AdjustmentEffectPackage, EffectPackage, MotionEffectPackage } from "./types";
+import { builtInTransitionEffects } from "./transitions";
+import type { AdjustmentEffectPackage, EffectPackage, MotionEffectPackage, TransitionEffectPackage } from "./types";
 
 export const installedEffectPackages: readonly EffectPackage[] = [
   ...builtInAdjustmentEffects,
   ...builtInMotionEffects,
+  ...builtInTransitionEffects,
 ] as const;
 
 export const effectPackageRegistry = new Map<EffectId, EffectPackage>(installedEffectPackages.map((definition) => [definition.id, definition]));
@@ -14,9 +16,13 @@ export const adjustmentEffectPackages = installedEffectPackages.filter((definiti
 
 export const motionEffectPackages = installedEffectPackages.filter((definition): definition is MotionEffectPackage => definition.category === "motion");
 
+export const transitionEffectPackages = installedEffectPackages.filter((definition): definition is TransitionEffectPackage => definition.category === "transition");
+
 export const defaultAdjustmentEffectPackage = adjustmentEffectPackages[0];
 
 export const defaultMotionEffectPackage = motionEffectPackages[0];
+
+export const defaultTransitionEffectPackage = transitionEffectPackages[0];
 
 export function getEffectPackage(effectId: string) {
   return effectPackageRegistry.get(effectId as EffectId);
@@ -36,6 +42,11 @@ export function getAdjustmentEffectPackage(effectId: string) {
   return definition?.category === "adjustment" ? definition as AdjustmentEffectPackage : undefined;
 }
 
+export function getTransitionEffectPackage(effectId: string) {
+  const definition = getEffectPackage(effectId);
+  return definition?.category === "transition" ? definition as TransitionEffectPackage : undefined;
+}
+
 export function getEffectDragType(effectId: string) {
   return `application/x-clipper-effect-${effectId.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`;
 }
@@ -50,4 +61,8 @@ export function normalizeAdjustmentEffectId(effectId: string | undefined): Adjus
 
 export function normalizeMotionEffectId(effectId: string | undefined): MotionEffectId {
   return getMotionEffectPackage(effectId ?? "")?.id ?? defaultMotionEffectPackage.id;
+}
+
+export function normalizeTransitionEffectId(effectId: string | undefined): TransitionEffectId {
+  return getTransitionEffectPackage(effectId ?? "")?.id ?? defaultTransitionEffectPackage?.id as TransitionEffectId ?? "clipper.transition.swipe";
 }

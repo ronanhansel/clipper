@@ -69,7 +69,7 @@ export function placeMotionMarkerOnTimeline<T extends MotionMarker>(marker: T, a
     marker: {
       ...marker,
       layerId: targetLayerId ?? marker.layerId,
-      start: roundTwo(absoluteStart - timelinePart.start),
+      start: absoluteStart - timelinePart.start,
     },
   }];
 }

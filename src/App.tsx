@@ -45,8 +45,9 @@ import { getTimeSensitiveDisplayDuration, getTimeSensitiveDisplayTime } from "./
 import { isMarkerOnMotionLayer, type CameraPreviewTransform } from "./core/camera";
 import { getBoundsUnion, getFrameObjectWithPreviewBounds, getPartFrameObject, selectionObjectFromFrameObject, type ObjectDrag, type ObjectResize } from "./core/frameInteraction";
 import { boundsToPoints } from "./core/geometry";
-import { clamp, roundTenth } from "./core/math";
+import { clamp, roundToPrecision, roundTenth } from "./core/math";
 import type { AdjustmentEffectPointControl } from "./core/effects/types";
+import { getTransitionEffectPackage } from "./core/effects/registry";
 import { defaultComposeLayoutState, defaultEditorLayoutState, defaultPreviewViewportState, defaultTimelineLayerState, defaultTimelineMode, defaultTimelineViewportState } from "./core/project";
 import { getExecutableAdjustmentLayers } from "./core/timeline";
 import type { TimelineLayerCategory } from "./core/timelineLayers";
@@ -133,6 +134,8 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     positionPickTranslationMarker, setPositionPickTranslationMarker,
     selectedAdjustmentLayerId, setSelectedAdjustmentLayerId,
     selectedAdjustmentLayers, setSelectedAdjustmentLayers,
+    selectedTransitionLayerId, setSelectedTransitionLayerId,
+    selectedTransitionLayers, setSelectedTransitionLayers,
     selectionPayload, setSelectionPayload,
     framePickPreviewPoint, setFramePickPreviewPoint,
     dragStart, setDragStart,
@@ -146,6 +149,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     scrubCommitThrottleMs, setScrubCommitThrottleMs,
     defaultNewMarkerDurationSeconds: markerDurationSeconds, setDefaultNewMarkerDurationSeconds,
     timelineEndPaddingFraction, setTimelineEndPaddingFraction,
+    timelinePrecision, setTimelinePrecision,
     fastSelectEnabled, setFastSelectEnabled,
     leftPanelTab, setLeftPanelTab,
     rightPanelTab, setRightPanelTab,
@@ -465,13 +469,14 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
       selectedMotionMarker,
       defaultNewMarkerDurationSeconds: markerDurationSeconds,
       timelineEndPaddingFraction,
+      timelinePrecision,
       preview: {
         ...(state.preview ?? defaultPreviewViewportState),
         scale: framePreviewScale,
         zoomBarOpen: frameZoomBarOpen,
       },
     }));
-  }, [framePreviewScale, frameZoomBarOpen, leftPanelTab, markerDurationSeconds, mode, rightPanelTab, selectedMotionMarker, selectedPartId, selectedSceneId, timelineEndPaddingFraction, timelineMode]);
+  }, [framePreviewScale, frameZoomBarOpen, leftPanelTab, markerDurationSeconds, mode, rightPanelTab, selectedMotionMarker, selectedPartId, selectedSceneId, timelineEndPaddingFraction, timelinePrecision, timelineMode]);
 
   useEditorStatePersistence({ activeProjectManifestPath, editorState: project.editorState, editorStateSnapshot });
   useSettingsShortcut({ setSettingsOpen });
@@ -587,7 +592,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     };
   }, []);
 
-  const { updateCompositionForTimelinePart, updateCurrentPart, updateSceneAdjustmentLayers, updateSceneMotionMarkers, updateSceneParts, updateTimelineLayers, updateTimelineViewportState } = useTimelineProjectActions({ scene, timelineMode, updateEditorState, updateProject });
+  const { updateCompositionForTimelinePart, updateCurrentPart, updateSceneAdjustmentLayers, updateSceneMotionMarkers, updateSceneParts, updateSceneTransitionLayers, updateTimelineLayers, updateTimelineViewportState } = useTimelineProjectActions({ scene, timelineMode, updateEditorState, updateProject });
 
   const {
     clearMarkerSelection,
@@ -618,6 +623,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     setSelectedParts,
     setSelectedMotionMarker,
     setSelectedMotionMarkers,
+    setSelectedTransitionLayers,
     setSelectionPayload,
     setTrackerPickTranslationMarker,
     updateTimelineMode,
@@ -627,11 +633,13 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     addAdjustmentTimelineLayer,
     addCompositionTimelineLayer,
     addMotionLayer,
+    addTransitionTimelineLayer,
     assignAvailableMotionLayerKind,
     motionLayerHasMarkers,
     removeAdjustmentTimelineLayer,
     removeCompositionTimelineLayer,
     removeMotionLayer,
+    removeTransitionTimelineLayer,
   } = useTimelineLayerCommands({
     motionLayers,
     scene,
@@ -676,8 +684,55 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     setSelectedAdjustmentLayers,
     setSelectedPartId,
     setTrackerPickTranslationMarker,
+    timelinePrecision,
     updateSceneAdjustmentLayers,
   });
+
+  function selectTransitionLayer(layerId: string) {
+    setSelectedTransitionLayerId(layerId);
+    setSelectedTransitionLayers([{ layerId }]);
+    setSelectedAdjustmentLayerId(null);
+    setSelectedAdjustmentLayers([]);
+    setSelectedPartId("");
+    setSelectedParts([]);
+    setSelectedMotionMarker(null);
+    setSelectedMotionMarkers([]);
+    clearMarkerSelection();
+  }
+
+  function selectTransitionLayers(selection: Array<{ layerId: string }>) {
+    setSelectedTransitionLayerId(null);
+    setSelectedTransitionLayers(selection);
+  }
+
+  function moveTransitionLayer(layerId: string, start: number, targetLayerId?: string) {
+    updateProject((current) => ({
+      ...current,
+      timelines: (current.timelines ?? []).map((timeline) => (timeline.id === scene.id ? { ...timeline, transitionLayers: (timeline.transitionLayers ?? []).map((layer) => layer.id === layerId ? { ...layer, start: roundToPrecision(start, timelinePrecision), layerId: targetLayerId ?? layer.layerId } : layer) } : timeline)),
+    }), { history: true });
+  }
+
+  function updateTransitionLayer(layerId: string, updater: (layer: import("./core/types").TransitionLayer) => import("./core/types").TransitionLayer) {
+    updateProject((current) => ({
+      ...current,
+      timelines: (current.timelines ?? []).map((timeline) => (timeline.id === scene.id ? { ...timeline, transitionLayers: (timeline.transitionLayers ?? []).map((layer) => layer.id === layerId ? updater(layer) : layer) } : timeline)),
+    }), { history: true });
+  }
+
+  function addTransitionLayerAt(effectId: string, sceneTime: number, layerId?: string) {
+    const effect = getTransitionEffectPackage(effectId);
+    if (!effect) return;
+    const newLayerId = `transition-${Date.now().toString(36)}`;
+    const duration = effect.defaultDuration;
+    const midPoint = duration / 2;
+    const start = roundToPrecision(Math.max(sceneTime, 0), timelinePrecision);
+    const newLayer = effect.createDefaultLayer({ id: newLayerId, layerId, start, duration, midPoint });
+    updateProject((current) => ({
+      ...current,
+      timelines: (current.timelines ?? []).map((timeline) => (timeline.id === scene.id ? { ...timeline, transitionLayers: [...(timeline.transitionLayers ?? []), newLayer] } : timeline)),
+    }), { history: true });
+    selectTransitionLayer(newLayerId);
+  }
 
   const {
     reorderComposeObjects,
@@ -862,6 +917,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     setSelectedPartId,
     setSelectedParts,
     setSelectionPayload,
+    timelinePrecision,
     updateSceneParts,
   });
 
@@ -881,6 +937,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     selectedObjectBounds: selectedObject?.bounds ?? null,
     selectedMotionMarkers,
     timelineMode,
+    timelinePrecision,
     scalePreviewFrameRef: zoomScalePreviewFrameRef,
     assignAvailableMotionLayerKind,
     setFocusPickZoomMarker,
@@ -974,12 +1031,15 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     selectedParts,
     selectedMotionMarker,
     selectedMotionMarkers,
+    selectedTransitionLayerId,
+    selectedTransitionLayers,
     timeline,
     deleteCompositionsFromTimeline,
     selectAdjustmentLayer,
     selectPart,
     selectMotionMarker,
     selectMotionMarkers,
+    selectTransitionLayer,
     setAppContextMenu,
     setFocusPickZoomMarker,
     setPositionPickTranslationMarker,
@@ -987,9 +1047,13 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     setSelectedAdjustmentLayers,
     setSelectedMotionMarker,
     setSelectedMotionMarkers,
+    setSelectedTransitionLayerId,
+    setSelectedTransitionLayers,
+    timelinePrecision,
     updateSceneAdjustmentLayers,
     updateSceneMotionMarkers,
     updateSceneParts,
+    updateSceneTransitionLayers,
   });
 
   useGlobalEditorShortcuts({
@@ -1173,6 +1237,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
             trackerPickMotionMarker={trackerPickTranslationMarker}
             selectedObject={selectedObject}
             selectedAdjustmentLayer={selectedAdjustmentLayer}
+            selectedTransitionLayer={scene.transitionLayers?.find((l) => l.id === selectedTransitionLayerId) ?? null}
             sceneDurationSeconds={sceneDurationSeconds}
             pointPickAdjustment={pointPickAdjustment}
             selectedPart={selectedPart}
@@ -1193,6 +1258,15 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
             onUpdateSelectedObject={updateSelectedObject}
             onUpdateAdjustmentLayer={updateAdjustmentLayer}
             onDeleteAdjustmentLayer={deleteAdjustmentLayer}
+            onUpdateTransitionLayer={updateTransitionLayer}
+            onDeleteTransitionLayer={(layerId) => {
+              updateProject((current) => ({
+                ...current,
+                timelines: (current.timelines ?? []).map((timeline) => (timeline.id === scene.id ? { ...timeline, transitionLayers: (timeline.transitionLayers ?? []).filter((l) => l.id !== layerId) } : timeline)),
+              }), { history: true });
+              setSelectedTransitionLayerId(null);
+              setSelectedTransitionLayers([]);
+            }}
             onStartAdjustmentPointPick={startAdjustmentPointPick}
             onUpdateSelectedPartDuration={updateSelectedPartDuration}
             onUpdatePartFrame={updatePartFrame}
@@ -1214,6 +1288,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
         scrubCommitThrottleMs,
         defaultNewMarkerDurationSeconds: markerDurationSeconds,
         timelineEndPaddingFraction,
+        timelinePrecision,
         scrubSnapEnabled,
         sceneDuration: composeMode ? part.duration : sceneDurationSeconds,
         selectedPartId,
@@ -1229,6 +1304,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
         motionMarkers: scene.motionMarkers ?? [],
         timelineLayers,
         adjustmentLayers: scene.adjustmentLayers ?? [],
+        transitionLayers: scene.transitionLayers ?? [],
         onModeChange: updateTimelineMode,
         onTimelineViewportStateChange: composeMode ? updateComposeTimelineViewportState : updateTimelineViewportState,
         onTimelineLayersChange: updateTimelineLayers,
@@ -1264,6 +1340,15 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
         onAddComposition: addCompositionFromLibrary,
         onAddAdjustmentEffect: addAdjustmentLayerAt,
         onAddMotionEffect: addMotionEffect,
+        onAddTransitionLayer: addTransitionTimelineLayer,
+        onRemoveTransitionLayer: removeTransitionTimelineLayer,
+        onAddTransitionEffect: addTransitionLayerAt,
+        selectedTransitionLayerId,
+        selectedTransitionLayers,
+        onSelectTransitionLayer: selectTransitionLayer,
+        onSelectTransitionLayers: selectTransitionLayers,
+        onMoveTransitionLayer: moveTransitionLayer,
+        onUpdateTransitionLayer: updateTransitionLayer,
         composeAnimationPart: composeMode && hasActiveComposition ? part : null,
         selectedObjectIds: selectedComposeObjectIds,
         onExitCompose: () => updateTimelineMode("composition"),
@@ -1295,6 +1380,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
       settingsOpen={settingsOpen}
       settingsSection={settingsSection}
       timelineEndPaddingFraction={timelineEndPaddingFraction}
+      timelinePrecision={timelinePrecision}
       validationErrorCount={validationErrors.length}
       videoExportCancelling={videoExportCancelling}
       videoExportProgress={videoExportProgress}
@@ -1310,6 +1396,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
       onSettingsOpenChange={setSettingsOpen}
       onSettingsSectionChange={setSettingsSection}
       onTimelineEndPaddingFractionChange={setTimelineEndPaddingFraction}
+      onTimelinePrecisionChange={setTimelinePrecision}
       onVideoExportCancel={() => void stopVideoExport()}
     />
     </>

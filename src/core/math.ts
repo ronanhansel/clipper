@@ -2,8 +2,13 @@ export function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
 
+export function roundToPrecision(value: number, decimals: number) {
+  const factor = Math.pow(10, decimals);
+  return Math.round(value * factor) / factor;
+}
+
 export function roundTwo(value: number) {
-  return Math.round(value * 100) / 100;
+  return roundToPrecision(value, 2);
 }
 
 export function roundTenth(value: number) {

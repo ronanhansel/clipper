@@ -13,6 +13,7 @@ export type TimelineNodeContextTarget = ({ time?: number } & (
   | { kind: "adjustment"; layerId: string }
   | { kind: "part"; partId: string }
   | { kind: "motion"; partId: string; markerId: string }
+  | { kind: "transition"; layerId: string }
 ));
 export type TimelineBlankContextTarget = { time: number };
 export type VideoExportProgress = { frame: number; totalFrames: number; percent: number; status: string };

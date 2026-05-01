@@ -1,4 +1,4 @@
-import { clamp, roundTwo } from "./math";
+import { clamp, roundToPrecision } from "./math";
 
 export type TimelineBlockTimingAction = "move" | "start" | "end";
 
@@ -20,6 +20,7 @@ export type TimelineBlockTimingInput = {
   snap?: boolean;
   snapBoundaries?: number[];
   snapThresholdSeconds?: number;
+  precision?: number;
 };
 
 export type TimelineBlockTimingResult = {
@@ -78,6 +79,8 @@ export function getTimelineBlockTiming(input: TimelineBlockTimingInput): Timelin
   const snapBoundaries = input.snapBoundaries ?? [];
   const snapThresholdSeconds = input.snapThresholdSeconds ?? 0;
   const initialEnd = input.initialStart + input.initialDuration;
+  const precision = input.precision ?? 2;
+  const r = (v: number) => roundToPrecision(v, precision);
 
   if (input.action === "move") {
     const maxStart = moveMaxStartMode === "contain"
@@ -92,7 +95,7 @@ export function getTimelineBlockTiming(input: TimelineBlockTimingInput): Timelin
       start = clamp(snapped.start, moveMinStart, maxStart);
       guideTime = snapped.guideTime;
     }
-    return { start: roundTwo(start), duration: roundTwo(input.initialDuration), guideTime };
+    return { start, duration: r(input.initialDuration), guideTime };
   }
 
   if (input.action === "start") {
@@ -103,7 +106,7 @@ export function getTimelineBlockTiming(input: TimelineBlockTimingInput): Timelin
       guideTime = getTimelineSnapGuideTime(start, snapBoundaries, snapThresholdSeconds);
       start = clamp(guideTime ?? start, 0, maxStart);
     }
-    return { start: roundTwo(start), duration: roundTwo(Math.max(initialEnd - start, minDuration)), guideTime };
+    return { start: r(start), duration: r(Math.max(initialEnd - start, minDuration)), guideTime };
   }
 
   const maxEnd = endMaxMode === "timeline" ? input.timelineDuration : Number.POSITIVE_INFINITY;
@@ -113,5 +116,5 @@ export function getTimelineBlockTiming(input: TimelineBlockTimingInput): Timelin
     guideTime = getTimelineSnapGuideTime(end, snapBoundaries, snapThresholdSeconds);
     end = clamp(guideTime ?? end, input.initialStart + minDuration, maxEnd);
   }
-  return { start: roundTwo(input.initialStart), duration: roundTwo(Math.max(end - input.initialStart, minDuration)), guideTime };
+  return { start: r(input.initialStart), duration: r(Math.max(end - input.initialStart, minDuration)), guideTime };
 }

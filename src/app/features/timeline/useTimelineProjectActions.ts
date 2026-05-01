@@ -1,6 +1,6 @@
 import { defaultTimelineLayerState, defaultTimelineViewportState, getSceneFromProject, replacePartInProject } from "../../../core/project";
 import { getCanonicalMotionMarkers } from "../../../core/motionEffects";
-import type { AdjustmentLayer, EditorState, MotionMarker, Part, ProjectManifest, TimelineLayerState, TimelineMode, TimelineViewportState } from "../../../core/types";
+import type { AdjustmentLayer, EditorState, MotionMarker, Part, ProjectManifest, TimelineLayerState, TimelineMode, TimelineViewportState, TransitionLayer } from "../../../core/types";
 import { timelineClipFromPart } from "./timelineLayerHelpers";
 
 type UpdateProject = (updater: ProjectManifest | ((current: ProjectManifest) => ProjectManifest), options?: { history?: boolean; syncSources?: boolean; coalesceHistory?: boolean }) => void;
@@ -13,6 +13,7 @@ type UseTimelineProjectActionsInput = {
     compositions: Part[];
     adjustmentLayers?: AdjustmentLayer[];
     motionMarkers?: MotionMarker[];
+    transitionLayers?: TransitionLayer[];
   };
   timelineMode: TimelineMode;
   updateEditorState: UpdateEditorState;
@@ -55,6 +56,17 @@ export function useTimelineProjectActions({ scene, timelineMode, updateEditorSta
     }, { history: true });
   }
 
+  function updateSceneTransitionLayers(updater: (layers: TransitionLayer[]) => TransitionLayer[]) {
+    updateProject((current) => {
+      const currentTimeline = current.timelines?.find((timeline) => timeline.id === scene.id);
+      const nextLayers = updater(currentTimeline?.transitionLayers ?? scene.transitionLayers ?? []);
+      return {
+        ...current,
+        timelines: current.timelines?.map((timeline) => (timeline.id === scene.id ? { ...timeline, transitionLayers: nextLayers } : timeline)),
+      };
+    }, { history: true });
+  }
+
   function updateCurrentPart(nextPart: Part) {
     updateSceneParts((parts) => parts.map((item) => (item.id === nextPart.id ? nextPart : item)));
   }
@@ -82,6 +94,7 @@ export function useTimelineProjectActions({ scene, timelineMode, updateEditorSta
     updateSceneAdjustmentLayers,
     updateSceneMotionMarkers,
     updateSceneParts,
+    updateSceneTransitionLayers,
     updateTimelineLayers,
     updateTimelineViewportState,
   };

@@ -1,4 +1,4 @@
-import type { AdjustmentEffectDefinition, AdjustmentLayer, MotionBlock, MotionEffectDefinition, Point } from "../types";
+import type { AdjustmentEffectDefinition, AdjustmentLayer, MotionBlock, MotionEffectDefinition, TransitionEffectDefinition, TransitionLayer, Point } from "../types";
 
 export type AdjustmentVisualStyle = {
   filter?: string;
@@ -6,6 +6,17 @@ export type AdjustmentVisualStyle = {
 };
 
 export type AdjustmentVisualOverlay = {
+  id: string;
+  target?: "frame" | "camera";
+  style: Record<string, string | number>;
+};
+
+export type TransitionVisualStyle = {
+  filter?: string;
+  overlays?: TransitionVisualOverlay[];
+};
+
+export type TransitionVisualOverlay = {
   id: string;
   target?: "frame" | "camera";
   style: Record<string, string | number>;
@@ -68,4 +79,9 @@ export type AdjustmentEffectPackage = AdjustmentEffectDefinition & {
   validate?(layer: AdjustmentLayer): string | null;
 };
 
-export type EffectPackage = MotionEffectPackage | AdjustmentEffectPackage;
+export type TransitionEffectPackage = TransitionEffectDefinition & {
+  createDefaultLayer(input: { id: string; layerId?: string; start: number; duration: number; midPoint: number }): TransitionLayer;
+  applyVisualStyle?(input: { sceneTime: number; layer: TransitionLayer; frameRate: number; progress: number }): TransitionVisualStyle;
+};
+
+export type EffectPackage = MotionEffectPackage | AdjustmentEffectPackage | TransitionEffectPackage;

@@ -7,6 +7,7 @@ type TimelineNodeSelection = {
   adjustmentLayers: AdjustmentLayerSelection[];
   compositions: CompositionSelection[];
   motionMarkers: MotionMarkerSelection[];
+  transitionLayers: Array<{ layerId: string }>;
 };
 
 type UseTimelineSelectionCommandsInput = {
@@ -28,6 +29,7 @@ type UseTimelineSelectionCommandsInput = {
   setSelectedParts: (selection: CompositionSelection[]) => void;
   setSelectedMotionMarker: (selection: MarkerSelection) => void;
   setSelectedMotionMarkers: (selection: MotionMarkerSelection[]) => void;
+  setSelectedTransitionLayers: (selection: Array<{ layerId: string }>) => void;
   setSelectionPayload: (payload: SelectionPayload | null) => void;
   setTrackerPickTranslationMarker: (selection: MarkerSelection) => void;
   updateTimelineMode: (mode: TimelineMode) => void;
@@ -52,6 +54,7 @@ export function useTimelineSelectionCommands({
   setSelectedParts,
   setSelectedMotionMarker,
   setSelectedMotionMarkers,
+  setSelectedTransitionLayers,
   setSelectionPayload,
   setTrackerPickTranslationMarker,
   updateTimelineMode,
@@ -153,6 +156,7 @@ export function useTimelineSelectionCommands({
     setSelectedMotionMarkers(selection.motionMarkers);
     setSelectedMotionMarker(primaryMotion);
     setSelectedPartId(primaryPart?.partId ?? "");
+    setSelectedTransitionLayers(selection.transitionLayers);
     setSelectedObjectId(null);
     setSelectionPayload(null);
     setFocusPickZoomMarker(null);

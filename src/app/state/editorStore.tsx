@@ -1,7 +1,7 @@
 import { createContext, useContext, useRef, type PropsWithChildren } from "react";
 import { createStore, useStore, type StoreApi } from "zustand";
 import { useShallow } from "zustand/react/shallow";
-import { defaultFramePreviewScale, defaultNewMarkerDurationSeconds, defaultScrubCommitThrottleMs, defaultTimelineEndPaddingFraction } from "../config";
+import { defaultFramePreviewScale, defaultNewMarkerDurationSeconds, defaultScrubCommitThrottleMs, defaultTimelineEndPaddingFraction, defaultTimelinePrecision } from "../config";
 import type { AdjustmentLayerSelection, CompositionSelection, ContextMenuState, ExportDialogTab, LeftPanelTab, Mode, MotionMarkerSelection, PlaybackClock, ProjectExportFormat, RightPanelTab, SettingsSection, VideoExportProgress } from "../types";
 import { defaultPreviewViewportState, defaultTimelineMode } from "../../core/project";
 import type { Bounds, EditorState, Point, ProjectManifest, SelectionPayload, TimelineMode } from "../../core/types";
@@ -24,6 +24,8 @@ export type EditorStoreState = {
   positionPickTranslationMarker: MarkerSelection;
   selectedAdjustmentLayerId: string | null;
   selectedAdjustmentLayers: AdjustmentLayerSelection[];
+  selectedTransitionLayerId: string | null;
+  selectedTransitionLayers: Array<{ layerId: string }>;
   selectionPayload: SelectionPayload | null;
   framePickPreviewPoint: Point | null;
   dragStart: Point | null;
@@ -38,6 +40,7 @@ export type EditorStoreState = {
   scrubCommitThrottleMs: number;
   defaultNewMarkerDurationSeconds: number;
   timelineEndPaddingFraction: number;
+  timelinePrecision: number;
   fastSelectEnabled: boolean;
   leftPanelTab: LeftPanelTab;
   rightPanelTab: RightPanelTab;
@@ -71,6 +74,8 @@ export type EditorStoreActions = {
   setPositionPickTranslationMarker: (selection: Setter<MarkerSelection>) => void;
   setSelectedAdjustmentLayerId: (id: Setter<string | null>) => void;
   setSelectedAdjustmentLayers: (selection: Setter<AdjustmentLayerSelection[]>) => void;
+  setSelectedTransitionLayerId: (id: Setter<string | null>) => void;
+  setSelectedTransitionLayers: (selection: Setter<Array<{ layerId: string }>>) => void;
   setSelectionPayload: (payload: Setter<SelectionPayload | null>) => void;
   setFramePickPreviewPoint: (point: Setter<Point | null>) => void;
   setDragStart: (point: Setter<Point | null>) => void;
@@ -85,6 +90,7 @@ export type EditorStoreActions = {
   setScrubCommitThrottleMs: (ms: Setter<number>) => void;
   setDefaultNewMarkerDurationSeconds: (seconds: Setter<number>) => void;
   setTimelineEndPaddingFraction: (fraction: Setter<number>) => void;
+  setTimelinePrecision: (precision: Setter<number>) => void;
   setFastSelectEnabled: (enabled: Setter<boolean>) => void;
   setLeftPanelTab: (tab: Setter<LeftPanelTab>) => void;
   setRightPanelTab: (tab: Setter<RightPanelTab>) => void;
@@ -136,6 +142,8 @@ function getInitialState(project: ProjectManifest): EditorStoreState {
     positionPickTranslationMarker: null,
     selectedAdjustmentLayerId: null,
     selectedAdjustmentLayers: [],
+    selectedTransitionLayerId: null,
+    selectedTransitionLayers: [],
     selectionPayload: null,
     framePickPreviewPoint: null,
     dragStart: null,
@@ -150,6 +158,7 @@ function getInitialState(project: ProjectManifest): EditorStoreState {
     scrubCommitThrottleMs: defaultScrubCommitThrottleMs,
     defaultNewMarkerDurationSeconds: editorState?.defaultNewMarkerDurationSeconds ?? defaultNewMarkerDurationSeconds,
     timelineEndPaddingFraction: editorState?.timelineEndPaddingFraction ?? defaultTimelineEndPaddingFraction,
+    timelinePrecision: editorState?.timelinePrecision ?? defaultTimelinePrecision,
     fastSelectEnabled: false,
     leftPanelTab: editorState?.leftPanelTab ?? "assets",
     rightPanelTab: editorState?.rightPanelTab ?? "video",
@@ -186,6 +195,8 @@ export function createEditorStore(project: ProjectManifest) {
     setPositionPickTranslationMarker: createFieldSetter(set, "positionPickTranslationMarker"),
     setSelectedAdjustmentLayerId: createFieldSetter(set, "selectedAdjustmentLayerId"),
     setSelectedAdjustmentLayers: createFieldSetter(set, "selectedAdjustmentLayers"),
+    setSelectedTransitionLayerId: createFieldSetter(set, "selectedTransitionLayerId"),
+    setSelectedTransitionLayers: createFieldSetter(set, "selectedTransitionLayers"),
     setSelectionPayload: createFieldSetter(set, "selectionPayload"),
     setFramePickPreviewPoint: createFieldSetter(set, "framePickPreviewPoint"),
     setDragStart: createFieldSetter(set, "dragStart"),
@@ -200,6 +211,7 @@ export function createEditorStore(project: ProjectManifest) {
     setScrubCommitThrottleMs: createFieldSetter(set, "scrubCommitThrottleMs"),
     setDefaultNewMarkerDurationSeconds: createFieldSetter(set, "defaultNewMarkerDurationSeconds"),
     setTimelineEndPaddingFraction: createFieldSetter(set, "timelineEndPaddingFraction"),
+    setTimelinePrecision: createFieldSetter(set, "timelinePrecision"),
     setFastSelectEnabled: createFieldSetter(set, "fastSelectEnabled"),
     setLeftPanelTab: createFieldSetter(set, "leftPanelTab"),
     setRightPanelTab: createFieldSetter(set, "rightPanelTab"),
@@ -229,6 +241,8 @@ export function createEditorStore(project: ProjectManifest) {
       editingTextObjectId: null,
       selectedAdjustmentLayerId: null,
       selectedAdjustmentLayers: [],
+      selectedTransitionLayerId: null,
+      selectedTransitionLayers: [],
       selectionPayload: null,
       currentSceneTime: editorState.currentSceneTime ?? 2.6,
       defaultNewMarkerDurationSeconds: editorState.defaultNewMarkerDurationSeconds ?? defaultNewMarkerDurationSeconds,
@@ -257,6 +271,8 @@ export function createEditorStore(project: ProjectManifest) {
       positionPickTranslationMarker: null,
       selectedAdjustmentLayerId: null,
       selectedAdjustmentLayers: [],
+      selectedTransitionLayerId: null,
+      selectedTransitionLayers: [],
       framePickPreviewPoint: null,
     }),
   }));
@@ -310,6 +326,10 @@ export function useAppEditorState() {
     setSelectedAdjustmentLayerId: state.setSelectedAdjustmentLayerId,
     selectedAdjustmentLayers: state.selectedAdjustmentLayers,
     setSelectedAdjustmentLayers: state.setSelectedAdjustmentLayers,
+    selectedTransitionLayerId: state.selectedTransitionLayerId,
+    setSelectedTransitionLayerId: state.setSelectedTransitionLayerId,
+    selectedTransitionLayers: state.selectedTransitionLayers,
+    setSelectedTransitionLayers: state.setSelectedTransitionLayers,
     selectionPayload: state.selectionPayload,
     setSelectionPayload: state.setSelectionPayload,
     framePickPreviewPoint: state.framePickPreviewPoint,
@@ -336,6 +356,8 @@ export function useAppEditorState() {
     setDefaultNewMarkerDurationSeconds: state.setDefaultNewMarkerDurationSeconds,
     timelineEndPaddingFraction: state.timelineEndPaddingFraction,
     setTimelineEndPaddingFraction: state.setTimelineEndPaddingFraction,
+    timelinePrecision: state.timelinePrecision,
+    setTimelinePrecision: state.setTimelinePrecision,
     fastSelectEnabled: state.fastSelectEnabled,
     setFastSelectEnabled: state.setFastSelectEnabled,
     leftPanelTab: state.leftPanelTab,

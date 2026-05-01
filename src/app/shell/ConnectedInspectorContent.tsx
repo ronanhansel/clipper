@@ -1,7 +1,7 @@
 import { AgentPanel } from "../../components/AgentPanel";
-import { AdjustmentInspector, ChartInspector, EmptyInspector, FrameInspector, MotionInspector, ObjectInspector } from "../../components/inspector/InspectorPanels";
+import { AdjustmentInspector, ChartInspector, EmptyInspector, FrameInspector, MotionInspector, ObjectInspector, TransitionInspector } from "../../components/inspector/InspectorPanels";
 import type { AdjustmentEffectPointControl } from "../../core/effects/types";
-import type { AdjustmentLayer, BackgroundLayer, FrameObject, MotionEase, MotionMarker, Part, PartFrame, Point } from "../../core/types";
+import type { AdjustmentLayer, BackgroundLayer, FrameObject, MotionEase, MotionMarker, Part, PartFrame, Point, TransitionLayer } from "../../core/types";
 import type { RightPanelTab } from "../types";
 
 type MarkerPick = { partId: string; markerId: string } | null;
@@ -28,6 +28,7 @@ type ConnectedInspectorContentProps = {
   trackerPickMotionMarker: MarkerPick;
   selectedObject: FrameObject | null | undefined;
   selectedAdjustmentLayer: AdjustmentLayer | null | undefined;
+  selectedTransitionLayer: TransitionLayer | null | undefined;
   sceneDurationSeconds: number;
   pointPickAdjustment: PointPickAdjustment;
   selectedPart: Part | null | undefined;
@@ -48,6 +49,8 @@ type ConnectedInspectorContentProps = {
   onUpdateSelectedObject: (updater: (object: FrameObject) => FrameObject) => void;
   onUpdateAdjustmentLayer: (layerId: string, updater: (layer: AdjustmentLayer) => AdjustmentLayer) => void;
   onDeleteAdjustmentLayer: (layerId: string) => void;
+  onUpdateTransitionLayer: (layerId: string, updater: (layer: TransitionLayer) => TransitionLayer) => void;
+  onDeleteTransitionLayer: (layerId: string) => void;
   onStartAdjustmentPointPick: (layerId: string, control: AdjustmentEffectPointControl) => void;
   onUpdateSelectedPartDuration: (duration: number) => void;
   onUpdatePartFrame: (updater: (frame: PartFrame) => PartFrame) => void;
@@ -75,6 +78,7 @@ export function ConnectedInspectorContent({
   trackerPickMotionMarker,
   selectedObject,
   selectedAdjustmentLayer,
+  selectedTransitionLayer,
   sceneDurationSeconds,
   pointPickAdjustment,
   selectedPart,
@@ -95,6 +99,8 @@ export function ConnectedInspectorContent({
   onUpdateSelectedObject,
   onUpdateAdjustmentLayer,
   onDeleteAdjustmentLayer,
+  onUpdateTransitionLayer,
+  onDeleteTransitionLayer,
   onStartAdjustmentPointPick,
   onUpdateSelectedPartDuration,
   onUpdatePartFrame,
@@ -135,6 +141,16 @@ export function ConnectedInspectorContent({
 
   if (selectedObject?.type === "chart" && selectedObject.chart) return <ChartInspector object={selectedObject} onChange={onUpdateSelectedObject} />;
   if (selectedObject) return <ObjectInspector object={selectedObject} onChange={onUpdateSelectedObject} />;
+
+  if (selectedTransitionLayer) {
+    return (
+      <TransitionInspector
+        layer={selectedTransitionLayer}
+        onChange={(updater) => onUpdateTransitionLayer(selectedTransitionLayer.id, updater)}
+        onDelete={() => onDeleteTransitionLayer(selectedTransitionLayer.id)}
+      />
+    );
+  }
 
   if (selectedAdjustmentLayer) {
     return (

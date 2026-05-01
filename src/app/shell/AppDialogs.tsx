@@ -23,6 +23,7 @@ type AppDialogsProps = {
   settingsOpen: boolean;
   settingsSection: SettingsSection;
   timelineEndPaddingFraction: number;
+  timelinePrecision: number; // v-- add here
   validationErrorCount: number;
   videoExportCancelling: boolean;
   videoExportProgress: VideoExportProgress | null;
@@ -38,10 +39,11 @@ type AppDialogsProps = {
   onSettingsOpenChange: (open: boolean) => void;
   onSettingsSectionChange: (section: SettingsSection) => void;
   onTimelineEndPaddingFractionChange: (value: number) => void;
+  onTimelinePrecisionChange: (value: number) => void;
   onVideoExportCancel: () => void;
 };
 
-export function AppDialogs({ appContextMenu, defaultNewMarkerDurationSeconds, exportDialogOpen, exportDialogTab, exportIncludeSources, exportProgress, isExporting, partCount, projectExportFormat, projectName, resolution, sceneDurationSeconds, sceneName, scrubCommitThrottleMs, settingsOpen, settingsSection, timelineEndPaddingFraction, validationErrorCount, videoExportCancelling, videoExportProgress, onAppContextMenuClose, onDefaultNewMarkerDurationSecondsChange, onExportDialogOpenChange, onExportDialogTabChange, onExportIncludeSourcesChange, onMediaExport, onProjectExport, onProjectExportFormatChange, onScrubCommitThrottleMsChange, onSettingsOpenChange, onSettingsSectionChange, onTimelineEndPaddingFractionChange, onVideoExportCancel }: AppDialogsProps) {
+export function AppDialogs({ appContextMenu, defaultNewMarkerDurationSeconds, exportDialogOpen, exportDialogTab, exportIncludeSources, exportProgress, isExporting, partCount, projectExportFormat, projectName, resolution, sceneDurationSeconds, sceneName, scrubCommitThrottleMs, settingsOpen, settingsSection, timelineEndPaddingFraction, timelinePrecision, validationErrorCount, videoExportCancelling, videoExportProgress, onAppContextMenuClose, onDefaultNewMarkerDurationSecondsChange, onExportDialogOpenChange, onExportDialogTabChange, onExportIncludeSourcesChange, onMediaExport, onProjectExport, onProjectExportFormatChange, onScrubCommitThrottleMsChange, onSettingsOpenChange, onSettingsSectionChange, onTimelineEndPaddingFractionChange, onTimelinePrecisionChange, onVideoExportCancel }: AppDialogsProps) {
   return (
     <>
       <ExportMediaDialog
@@ -70,11 +72,13 @@ export function AppDialogs({ appContextMenu, defaultNewMarkerDurationSeconds, ex
         scrubCommitThrottleMs={scrubCommitThrottleMs}
         defaultNewMarkerDurationSeconds={defaultNewMarkerDurationSeconds}
         timelineEndPaddingFraction={timelineEndPaddingFraction}
+        timelinePrecision={timelinePrecision}
         onActiveSectionChange={onSettingsSectionChange}
         onOpenChange={onSettingsOpenChange}
         onScrubCommitThrottleMsChange={onScrubCommitThrottleMsChange}
         onDefaultNewMarkerDurationSecondsChange={onDefaultNewMarkerDurationSecondsChange}
         onTimelineEndPaddingFractionChange={onTimelineEndPaddingFractionChange}
+        onTimelinePrecisionChange={onTimelinePrecisionChange}
       />
       {videoExportProgress ? <VideoExportOverlay cancelling={videoExportCancelling} progress={videoExportProgress} onCancel={onVideoExportCancel} /> : null}
       <AppContextMenu menu={appContextMenu} onClose={onAppContextMenuClose} />

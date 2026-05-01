@@ -3,9 +3,9 @@ import "@glideapps/glide-data-grid/dist/index.css";
 import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, Copy, Crosshair, Database, Italic, Strikethrough, Trash2, Underline, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { chartTypes, formatChartTypeLabel, type ChartDatum, type ChartSpec, type ChartStyle, type ChartType } from "../../core/chart";
-import { MAX_PART_DURATION_SECONDS, FRAME_HEIGHT, FRAME_WIDTH, type AdjustmentLayer, type BackgroundLayer, type Bounds, type FrameObject, type LayerAnimation, type MotionEase, type Part, type PartFrame, type Point } from "../../core/types";
+import { MAX_PART_DURATION_SECONDS, FRAME_HEIGHT, FRAME_WIDTH, type AdjustmentLayer, type BackgroundLayer, type Bounds, type FrameObject, type LayerAnimation, type MotionEase, type Part, type PartFrame, type Point, type TransitionLayer } from "../../core/types";
 import { clamp, roundTenth, roundTwo } from "../../core/math";
-import { getAdjustmentEffectPackage, getMotionEffectPackage } from "../../core/effects/registry";
+import { getAdjustmentEffectPackage, getMotionEffectPackage, getTransitionEffectPackage } from "../../core/effects/registry";
 import type { AdjustmentEffectDisableCondition, AdjustmentEffectParamControl, AdjustmentEffectPointControl } from "../../core/effects/types";
 import { getMotionBlockEffectKind, getMotionMarkerViews } from "../../core/motionEffects";
 import type { MotionMarker } from "../../core/types";
@@ -998,6 +998,33 @@ export function EmptyInspector() {
       <span>No selection</span>
       <strong className="text-[13px]">Nothing selected</strong>
       <small className="text-[#9b9da7]">Select a composition, marker, or object to edit its settings.</small>
+    </div>
+  );
+}
+
+export function TransitionInspector({ layer, onChange, onDelete }: { layer: TransitionLayer; onChange: (updater: (layer: TransitionLayer) => TransitionLayer) => void; onDelete: () => void }) {
+  const effect = getTransitionEffectPackage(layer.effect.effectId);
+  const ease = (layer.effect.params?.ease as MotionEase) ?? "linear";
+
+  function updateEase(value: string) {
+    const easeValue = value === defaultMotionEaseSelectValue ? undefined : value as MotionEase;
+    onChange((current) => ({
+      ...current,
+      effect: { ...current.effect, params: { ...current.effect.params, ease: easeValue } },
+    }));
+  }
+
+  return (
+    <div className={panelCard}>
+      <div className="flex items-center justify-between">
+        <strong className="text-[13px]">{effect?.label ?? layer.name}</strong>
+        <button data-timeline-control className="grid h-7 w-7 place-items-center rounded-md border border-transparent text-[#858a96] transition hover:border-[#2d313b] hover:bg-[#20232c] hover:text-[#ff8b8b]" title="Delete transition" onClick={onDelete}><Trash2 size={12} /></button>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <label className={`grid gap-1.5 ${mutedCaps}`}>Duration<Input type="number" min={0.1} max={MAX_PART_DURATION_SECONDS} step={0.1} value={roundTwo(layer.duration)} onChange={(event) => { const value = Number.parseFloat(event.target.value); if (Number.isFinite(value)) onChange((current) => ({ ...current, duration: clamp(value, 0.1, MAX_PART_DURATION_SECONDS) })); }} /></label>
+        <label className={`grid gap-1.5 ${mutedCaps}`}>Mid-point<Input type="number" min={0} max={MAX_PART_DURATION_SECONDS} step={0.1} value={roundTwo(layer.midPoint)} onChange={(event) => { const value = Number.parseFloat(event.target.value); if (Number.isFinite(value)) onChange((current) => ({ ...current, midPoint: clamp(value, 0, current.duration) })); }} /></label>
+      </div>
+      <label className={`grid gap-1.5 ${mutedCaps}`}>Ease<Select value={motionEaseSelectValue(ease)} onValueChange={updateEase}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><TooltipProvider delayDuration={1000} skipDelayDuration={0}><SelectGroup><EaseSelectItems defaultInOut /></SelectGroup></TooltipProvider></SelectContent></Select></label>
     </div>
   );
 }

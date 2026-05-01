@@ -1,8 +1,8 @@
-import type { TimelineAdjustmentLayerState, TimelineCompositionLayerState, TimelineLayerState, TimelineMotionLayerState } from "./types";
+import type { TimelineAdjustmentLayerState, TimelineCompositionLayerState, TimelineLayerState, TimelineMotionLayerState, TimelineTransitionLayerState } from "./types";
 
-export type TimelineLayerCategory = "adjust" | "motion" | "comp";
-export type TimelineLayerStateKey = "compositionLayers" | "adjustmentLayers" | "motionLayers";
-export type TimelineLayerStateItem = TimelineCompositionLayerState | TimelineAdjustmentLayerState | TimelineMotionLayerState;
+export type TimelineLayerCategory = "transition" | "adjust" | "motion" | "comp";
+export type TimelineLayerStateKey = "compositionLayers" | "adjustmentLayers" | "motionLayers" | "transitionLayers";
+export type TimelineLayerStateItem = TimelineCompositionLayerState | TimelineAdjustmentLayerState | TimelineMotionLayerState | TimelineTransitionLayerState;
 
 export type TimelineLayerRow = {
   key: string;
@@ -50,6 +50,7 @@ export function getTimelineLayerDragPreview(layout: TimelineLayerLayout, sourceL
 export function getTimelineLayerStateKey(category: TimelineLayerCategory): TimelineLayerStateKey {
   if (category === "comp") return "compositionLayers";
   if (category === "adjust") return "adjustmentLayers";
+  if (category === "transition") return "transitionLayers";
   return "motionLayers";
 }
 
@@ -135,12 +136,21 @@ export function getTimelineBlockLayerPreview(layout: TimelineLayerLayout, catego
   return getTimelineLayerDragPreview(layout, sourceLayerId, targetLayerId);
 }
 
-export function applyTimelineBlockPreview(element: HTMLElement, options: { deltaX: number; deltaY?: number; height?: number; resizeProperty?: string }) {
+export function applyTimelineBlockPreview(element: HTMLElement, options: { deltaX: number; deltaY?: number; height?: number; resizeProperty?: string; blocked?: boolean }) {
   element.style.transform = `translate3d(${options.deltaX}px, ${options.deltaY ?? 0}px, 0)`;
   if (options.height !== undefined) element.style.height = `${options.height}px`;
   else element.style.removeProperty("height");
   element.style.willChange = "transform";
   element.style.zIndex = "25";
+  if (options.blocked) {
+    if (!element.dataset.originalBackground) element.dataset.originalBackground = element.style.background;
+    element.style.background = "linear-gradient(180deg, #dc2626, #991b1b)";
+    element.style.color = "#ffffff";
+  } else if (element.dataset.originalBackground) {
+    element.style.background = element.dataset.originalBackground;
+    delete element.dataset.originalBackground;
+    element.style.removeProperty("color");
+  }
   element.parentElement?.style.setProperty("overflow", "visible");
 }
 
@@ -150,5 +160,10 @@ export function clearTimelineBlockPreview(element: HTMLElement, resizeProperty =
   element.style.removeProperty("height");
   element.style.removeProperty("will-change");
   element.style.removeProperty("z-index");
+  if (element.dataset.originalBackground) {
+    element.style.background = element.dataset.originalBackground;
+    delete element.dataset.originalBackground;
+  }
+  element.style.removeProperty("color");
   element.parentElement?.style.removeProperty("overflow");
 }

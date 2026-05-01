@@ -1,7 +1,7 @@
 import type { MouseEvent as ReactMouseEvent, RefObject } from "react";
 import type { AdjustmentLayerSelection, CompositionSelection, MotionMarkerSelection, TimelineBlankContextTarget, TimelineNodeContextTarget } from "../../app/types";
 import type { TimelineMarkerMove, TimelineMarkerResize } from "../../core/timeline";
-import type { AdjustmentEffectId, AdjustmentLayer, BackgroundLayer, FrameObject, MotionEffectId, MotionEffectKind, MotionMarker, MotionTrack, Part, TimelineLayerState, TimelineMode, TimelineMotionLayerKind, TimelinePart, TimelineViewportState } from "../../core/types";
+import type { AdjustmentEffectId, AdjustmentLayer, BackgroundLayer, FrameObject, MotionEffectId, MotionEffectKind, MotionMarker, MotionTrack, Part, TimelineLayerState, TimelineMode, TimelineMotionLayerKind, TimelinePart, TimelineViewportState, TransitionEffectId, TransitionLayer } from "../../core/types";
 
 export type TimelinePanelProps = {
   timelineName: string;
@@ -27,6 +27,7 @@ export type TimelinePanelProps = {
   scrubCommitThrottleMs: number;
   defaultNewMarkerDurationSeconds: number;
   timelineEndPaddingFraction: number;
+  timelinePrecision: number;
   scrubSnapEnabled: boolean;
   onScrub: (time: number) => void;
   onScrubStart: () => void;
@@ -46,7 +47,7 @@ export type TimelinePanelProps = {
   onSelectMotionMarkers: (selection: MotionMarkerSelection[]) => void;
   onSelectAdjustmentLayer: (layerId: string) => void;
   onSelectAdjustmentLayers: (selection: AdjustmentLayerSelection[]) => void;
-  onSelectTimelineNodes: (selection: { adjustmentLayers: AdjustmentLayerSelection[]; compositions: CompositionSelection[]; motionMarkers: MotionMarkerSelection[] }) => void;
+  onSelectTimelineNodes: (selection: { adjustmentLayers: AdjustmentLayerSelection[]; compositions: CompositionSelection[]; motionMarkers: MotionMarkerSelection[]; transitionLayers: Array<{ layerId: string }> }) => void;
   onClearTimelineSelection: () => void;
   onOpenNodeContextMenu: (event: ReactMouseEvent<HTMLElement>, target: TimelineNodeContextTarget) => void;
   onOpenBlankContextMenu: (event: ReactMouseEvent<HTMLElement>, target: TimelineBlankContextTarget) => void;
@@ -63,6 +64,16 @@ export type TimelinePanelProps = {
   onAddComposition: (compositionId: string, targetLayerId?: string, start?: number) => void;
   onAddAdjustmentEffect: (effectId: AdjustmentEffectId, sceneTime: number, layerId?: string) => void;
   onAddMotionEffect: (effectId: MotionEffectId, layerId: string, sceneTime: number) => void;
+  transitionLayers?: TransitionLayer[];
+  selectedTransitionLayerId?: string | null;
+  selectedTransitionLayers?: Array<{ layerId: string }>;
+  onAddTransitionLayer?: (targetLayerId?: string, placement?: "before" | "after") => void;
+  onRemoveTransitionLayer?: (layerId: string) => void;
+  onAddTransitionEffect?: (effectId: TransitionEffectId, sceneTime: number, layerId?: string) => void;
+  onSelectTransitionLayer?: (layerId: string) => void;
+  onSelectTransitionLayers?: (selection: Array<{ layerId: string }>) => void;
+  onMoveTransitionLayer?: (layerId: string, start: number, targetLayerId?: string) => void;
+  onUpdateTransitionLayer?: (layerId: string, updater: (layer: TransitionLayer) => TransitionLayer) => void;
   composeAnimationPart?: Part | null;
   selectedObjectIds?: string[];
   onExitCompose?: () => void;
@@ -75,13 +86,14 @@ export type TimelinePanelProps = {
 };
 
 export type EffectDragPreview = {
-  category: "adjustment" | "motion" | "composition";
+  category: "adjustment" | "motion" | "composition" | "transition";
   effectId?: string;
   isEmpty?: boolean;
   kind?: MotionEffectKind;
   layerKey: string;
   label?: string;
   sourceMissing?: boolean;
+  blocked?: boolean;
   start: number;
   duration: number;
   initialClientX: number;

@@ -1,9 +1,9 @@
 import { mutedCaps, panelCard } from "../app/config";
-import { adjustmentEffectPackages, installedEffectPackages, motionEffectPackages } from "../core/effects/registry";
+import { adjustmentEffectPackages, installedEffectPackages, motionEffectPackages, transitionEffectPackages } from "../core/effects/registry";
 import type { EditorState, EffectDefinition, EffectsPanelState, TimelineMode } from "../core/types";
 import { effectDragPreviewEvent, effectPointerDragEvent, startClipperPointerDrag } from "../lib/pointerDrag";
 import { CardsIcon, WaveTriangleIcon } from "@phosphor-icons/react";
-import { ChevronDown, ChevronRight, Folder } from "lucide-react";
+import { ArrowLeftRight, ChevronDown, ChevronRight, Folder } from "lucide-react";
 import type { PointerEvent } from "react";
 
 const defaultAdjustmentAccent = "#8f65f2";
@@ -61,7 +61,7 @@ function collectEffectGroupPaths(effects: readonly EffectDefinition[]) {
 
 export function ToolsPanel({ effectsPanelState, timelineMode, onEffectsPanelStateChange }: { effectsPanelState?: EffectsPanelState; timelineMode: TimelineMode; onEffectsPanelStateChange: (state: NonNullable<EditorState["effectsPanelState"]>) => void }) {
   const isCompositionMode = timelineMode === "composition";
-  const defaultOpenEffectGroups = new Set([...collectEffectGroupPaths(adjustmentEffectPackages), ...collectEffectGroupPaths(motionEffectPackages)]);
+  const defaultOpenEffectGroups = new Set([...collectEffectGroupPaths(adjustmentEffectPackages), ...collectEffectGroupPaths(motionEffectPackages), ...collectEffectGroupPaths(transitionEffectPackages)]);
   const openEffectGroups = new Set(Object.entries(effectsPanelState?.openGroups ?? Object.fromEntries([...defaultOpenEffectGroups].map((path) => [path, true]))).filter((entry) => entry[1]).map((entry) => entry[0]));
 
   function startEffectDrag(event: PointerEvent<HTMLButtonElement>, effect: string) {
@@ -82,7 +82,7 @@ export function ToolsPanel({ effectsPanelState, timelineMode, onEffectsPanelStat
   }
 
   function renderEffectButton(definition: EffectDefinition, depth: number) {
-    const EffectIcon = definition.category === "motion" ? WaveTriangleIcon : CardsIcon;
+    const EffectIcon = definition.category === "motion" ? WaveTriangleIcon : definition.category === "transition" ? ArrowLeftRight : CardsIcon;
     return <button className={`${effectButtonClass} w-full cursor-grab active:cursor-grabbing`} key={definition.id} style={{ paddingLeft: 4 + depth * 18 }} onPointerDown={(event) => startEffectDrag(event, definition.id)}><EffectIcon size={14} weight="bold" className="text-[#858995]" /><span className="truncate">{definition.label}</span></button>;
   }
 
@@ -105,10 +105,18 @@ export function ToolsPanel({ effectsPanelState, timelineMode, onEffectsPanelStat
 
   const adjustmentEffectTree = buildEffectGroupTree(adjustmentEffectPackages);
   const motionEffectTree = buildEffectGroupTree(motionEffectPackages);
+  const transitionEffectTree = buildEffectGroupTree(transitionEffectPackages);
 
   return (
     <section className="grid min-h-0 flex-1 overflow-hidden">
-      {isCompositionMode ? <div className="grid min-h-0 grid-rows-2 gap-2 overflow-hidden">
+      {isCompositionMode ? <div className="grid min-h-0 grid-rows-3 gap-2 overflow-hidden">
+        <div className={effectGroupClass}>
+          <span className={mutedCaps}>Transition</span>
+          <div className={effectListClass}>
+            {transitionEffectTree.groups.map((group) => renderEffectFolder(group))}
+            {transitionEffectTree.effects.map((definition) => renderEffectButton(definition, 0))}
+          </div>
+        </div>
         <div className={effectGroupClass}>
           <span className={mutedCaps}>Adjust</span>
           <div className={effectListClass}>

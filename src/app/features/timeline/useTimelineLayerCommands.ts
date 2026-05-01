@@ -3,8 +3,8 @@ import { getCanonicalMotionMarkers, getMotionMarkerViews } from "../../../core/m
 import { getAdjustmentLayerRowId, isMotionMarkerOnLayerId, removeTimelineAdjustmentLayerMarkers, removeTimelineMotionLayerMarkers } from "../../../core/timeline";
 import { getTimelineStateLayers, insertTimelineStateLayer } from "../../../core/timelineLayers";
 import type { AdjustmentLayerSelection, MotionMarkerSelection } from "../../types";
-import type { AdjustmentLayer, MotionMarker, Part, ProjectManifest, SelectionPayload, TimelineLayerState, TimelineMotionLayerKind, TimelineMotionLayerState } from "../../../core/types";
-import { createAdjustmentTimelineLayer, createBlankAdjustmentLayer, createBlankCompositionLayer, createBlankMotionLayer, createCompositionTimelineLayer, createMotionTimelineLayer, timelineClipFromPart } from "./timelineLayerHelpers";
+import type { AdjustmentLayer, MotionMarker, Part, ProjectManifest, SelectionPayload, TimelineLayerState, TimelineMotionLayerKind, TimelineMotionLayerState, TransitionLayer } from "../../../core/types";
+import { createAdjustmentTimelineLayer, createBlankAdjustmentLayer, createBlankCompositionLayer, createBlankMotionLayer, createBlankTransitionLayer, createCompositionTimelineLayer, createMotionTimelineLayer, createTransitionTimelineLayer, timelineClipFromPart } from "./timelineLayerHelpers";
 
 type UpdateProject = (updater: ProjectManifest | ((current: ProjectManifest) => ProjectManifest), options?: { history?: boolean; syncSources?: boolean; coalesceHistory?: boolean }) => void;
 type UpdateTimelineLayers = (updater: (state: TimelineLayerState) => TimelineLayerState, options?: { history?: boolean }) => void;
@@ -177,14 +177,46 @@ export function useTimelineLayerCommands({
     }), { history: true });
   }
 
+  function addTransitionTimelineLayer(targetLayerId?: string, placement: "before" | "after" = "after") {
+    const newLayer = createTransitionTimelineLayer();
+    updateTimelineLayers((state) => ({
+      ...state,
+      transitionLayers: insertTimelineStateLayer(state.transitionLayers ?? defaultTimelineLayerState.transitionLayers!, newLayer, targetLayerId, placement),
+    }), { history: true });
+  }
+
+  function removeTransitionTimelineLayer(layerId: string) {
+    const layers = getTimelineStateLayers(timelineLayers, "transition", defaultTimelineLayerState);
+    const nextTransitionLayers = layers.length > 1 ? layers.filter((layer) => layer.id !== layerId) : [createBlankTransitionLayer()];
+    updateProject((current) => ({
+      ...current,
+      editorState: {
+        ...current.editorState,
+        timeline: current.editorState?.timeline ?? defaultTimelineViewportState,
+        timelineMode: current.editorState?.timelineMode ?? defaultTimelineMode,
+        timelineLayers: {
+          ...(current.editorState?.timelineLayers ?? defaultTimelineLayerState),
+          transitionLayers: nextTransitionLayers,
+        },
+      },
+      timelines: (current.timelines ?? []).map((timeline) => (timeline.id === scene.id ? { ...timeline, transitionLayers: (timeline.transitionLayers ?? []).filter((layer) => (layer.layerId ?? transitionLayerRowId(layer)) !== layerId) } : timeline)),
+    }), { history: true });
+  }
+
   return {
     addAdjustmentTimelineLayer,
     addCompositionTimelineLayer,
     addMotionLayer,
+    addTransitionTimelineLayer,
     assignAvailableMotionLayerKind,
     motionLayerHasMarkers,
     removeAdjustmentTimelineLayer,
     removeCompositionTimelineLayer,
     removeMotionLayer,
+    removeTransitionTimelineLayer,
   };
+}
+
+function transitionLayerRowId(layer: TransitionLayer) {
+  return layer.layerId ?? layer.effect.effectId;
 }

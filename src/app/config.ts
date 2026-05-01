@@ -9,6 +9,7 @@ export const defaultTimelinePixelsPerSecond = 126;
 export const defaultTimelineEndPaddingFraction = 0.5;
 export const defaultScrubCommitThrottleMs = 75;
 export const defaultNewMarkerDurationSeconds = 3;
+export const defaultTimelinePrecision = 3;
 export const maxProjectHistoryActions = 1000;
 export const projectHistoryCoalesceMs = 700;
 

@@ -1,6 +1,6 @@
 import { defaultTimelineLayerState } from "../../../core/project";
 import { buildLinearTimeline, rebaseCompositionTimelineMarkers, getMotionMiddleSnap, isMotionMiddleSnapActive, type TimelineMendMarker } from "../../../core/timeline";
-import { roundTenth } from "../../../core/math";
+import { roundToPrecision, roundTenth } from "../../../core/math";
 import type { CompositionSelection } from "../../types";
 import type { Part, SelectionPayload, TimelineLayerState } from "../../../core/types";
 
@@ -21,6 +21,7 @@ type UseCompositionTimelineCommandsInput = {
   setSelectedPartId: (id: string) => void;
   setSelectedParts: (selection: CompositionSelection[]) => void;
   setSelectionPayload: (payload: SelectionPayload | null) => void;
+  timelinePrecision: number;
   updateSceneParts: UpdateSceneParts;
 };
 
@@ -35,6 +36,7 @@ export function useCompositionTimelineCommands({
   setSelectedPartId,
   setSelectedParts,
   setSelectionPayload,
+  timelinePrecision,
   updateSceneParts,
 }: UseCompositionTimelineCommandsInput) {
   function reorderPart(sourcePartId: string, targetPartId: string) {
@@ -56,7 +58,7 @@ export function useCompositionTimelineCommands({
       const startsById = new Map(timelineParts.map((composition) => [composition.id, composition.start]));
       return parts.map((composition) => {
         const previousStart = startsById.get(composition.id) ?? composition.start ?? 0;
-        const nextStart = composition.id === compositionId ? roundTenth(Math.max(start, 0)) : roundTenth(previousStart);
+        const nextStart = composition.id === compositionId ? roundToPrecision(Math.max(start, 0), timelinePrecision) : roundToPrecision(previousStart, timelinePrecision);
         const nextComposition = composition.id === compositionId
           ? { ...composition, start: nextStart, layerId: layerId || undefined }
           : { ...composition, start: nextStart };
@@ -74,10 +76,10 @@ export function useCompositionTimelineCommands({
       return parts.map((composition) => {
         const previousStart = startsById.get(composition.id) ?? composition.start ?? 0;
         const move = moveById.get(composition.id);
-        const nextStart = roundTenth(Math.max(move?.start ?? previousStart, 0));
+        const nextStart = roundToPrecision(Math.max(move?.start ?? previousStart, 0), timelinePrecision);
         const nextComposition = move
           ? { ...composition, start: nextStart, layerId: move.targetLayerId || undefined }
-          : { ...composition, start: roundTenth(previousStart) };
+          : { ...composition, start: roundToPrecision(previousStart, timelinePrecision) };
         return rebaseCompositionTimelineMarkers(nextComposition, previousStart, nextStart);
       });
     });
@@ -89,7 +91,7 @@ export function useCompositionTimelineCommands({
       const startsById = new Map(timelineParts.map((composition) => [composition.id, composition.start]));
       return parts.map((composition) => {
         const previousStart = startsById.get(composition.id) ?? composition.start ?? 0;
-        const withExplicitStart = { ...composition, start: roundTenth(previousStart) };
+        const withExplicitStart = { ...composition, start: roundToPrecision(previousStart, timelinePrecision) };
         const nextComposition = composition.id === compositionId ? updater(withExplicitStart) : withExplicitStart;
         return rebaseCompositionTimelineMarkers(nextComposition, previousStart, nextComposition.start ?? previousStart);
       });
@@ -120,7 +122,7 @@ export function useCompositionTimelineCommands({
     if (!libraryComposition) return;
     const clipId = `clip_${Date.now().toString(36)}`;
     const layerId = targetLayerId ?? (timelineLayers.compositionLayers?.length ? timelineLayers.compositionLayers : defaultTimelineLayerState.compositionLayers!)?.[0]?.id ?? "comp";
-    const timelineComposition = { ...libraryComposition, id: clipId, compositionId: libraryComposition.compositionId ?? libraryComposition.id, start: roundTenth(Math.max(start, 0)), layerId };
+    const timelineComposition = { ...libraryComposition, id: clipId, compositionId: libraryComposition.compositionId ?? libraryComposition.id, start: roundToPrecision(Math.max(start, 0), timelinePrecision), layerId };
     updateSceneParts((parts) => [...parts, timelineComposition]);
     setSelectedPartId(timelineComposition.id);
     clearNodeSelection();
@@ -161,11 +163,12 @@ export function useCompositionTimelineCommands({
       return parts.map((composition) => {
         const previousStart = startsById.get(composition.id) ?? composition.start ?? 0;
         if (!mendedIds.has(composition.id)) {
-          return rebaseCompositionTimelineMarkers({ ...composition, start: roundTenth(previousStart) }, previousStart, roundTenth(previousStart));
+          const fixedStart = roundToPrecision(previousStart, timelinePrecision);
+          return rebaseCompositionTimelineMarkers({ ...composition, start: fixedStart }, previousStart, fixedStart);
         }
         const bounds = nextBounds.get(composition.id);
-        if (!bounds) return { ...composition, start: roundTenth(previousStart) };
-        const nextComposition = { ...composition, start: roundTenth(bounds.start), duration: roundTenth(bounds.end - bounds.start), snapIn: bounds.snapIn, snapOut: bounds.snapOut, mendInId: bounds.mendInId, mendOutId: bounds.mendOutId };
+        if (!bounds) return { ...composition, start: roundToPrecision(previousStart, timelinePrecision) };
+        const nextComposition = { ...composition, start: roundToPrecision(bounds.start, timelinePrecision), duration: roundToPrecision(bounds.end - bounds.start, timelinePrecision), snapIn: bounds.snapIn, snapOut: bounds.snapOut, mendInId: bounds.mendInId, mendOutId: bounds.mendOutId };
         return rebaseCompositionTimelineMarkers(nextComposition, previousStart, nextComposition.start);
       });
     });

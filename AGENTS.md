@@ -6,7 +6,7 @@
 
 ## Path of Discovery
 
-- **Evidence first, execution second.** Start every task by gathering all relevant context. Do not search for files or references one at a time — batch tool calls together for efficiency.
+- **Evidence first, execution second.** Start every task by gathering all relevant context. Do not search for files or references one at a time — batch tool calls together for efficiency. Use glob/grep extensively with patterns for multiple matching at the same time to locate relevant parts to narrow down neccessary files before reading, narrowing down the evidence. Use this tool to help find relevant information faster within each files, and proceed with reading.
 - Before modifying any code, find every instance of the feature, function, or pattern the user mentions. Understand the full scope of what will be affected.
 - **When the reference is ambiguous** (e.g., the same function name exists in multiple modules, two separate modules could both match the user's description):
   - Stop and ask the user for clarification. Never guess which one the user intends.

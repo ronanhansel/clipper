@@ -1,11 +1,11 @@
 import { RotateCcw } from "lucide-react";
-import { appBarButtonBase, defaultNewMarkerDurationSeconds, defaultScrubCommitThrottleMs, defaultTimelineEndPaddingFraction } from "../app/config";
+import { appBarButtonBase, defaultNewMarkerDurationSeconds, defaultScrubCommitThrottleMs, defaultTimelineEndPaddingFraction, defaultTimelinePrecision } from "../app/config";
 import type { SettingsSection } from "../app/types";
 import { clamp } from "../core/math";
 import { Dialog, DialogContent } from "./ui/dialog";
 import { Input } from "./ui/input";
 
-export function SettingsDialog({ activeSection, open, scrubCommitThrottleMs, defaultNewMarkerDurationSeconds: markerDurationSeconds, timelineEndPaddingFraction, onActiveSectionChange, onOpenChange, onScrubCommitThrottleMsChange, onDefaultNewMarkerDurationSecondsChange, onTimelineEndPaddingFractionChange }: { activeSection: SettingsSection; open: boolean; scrubCommitThrottleMs: number; defaultNewMarkerDurationSeconds: number; timelineEndPaddingFraction: number; onActiveSectionChange: (section: SettingsSection) => void; onOpenChange: (open: boolean) => void; onScrubCommitThrottleMsChange: (value: number) => void; onDefaultNewMarkerDurationSecondsChange: (value: number) => void; onTimelineEndPaddingFractionChange: (value: number) => void }) {
+export function SettingsDialog({ activeSection, open, scrubCommitThrottleMs, defaultNewMarkerDurationSeconds: markerDurationSeconds, timelineEndPaddingFraction, timelinePrecision, onActiveSectionChange, onOpenChange, onScrubCommitThrottleMsChange, onDefaultNewMarkerDurationSecondsChange, onTimelineEndPaddingFractionChange, onTimelinePrecisionChange }: { activeSection: SettingsSection; open: boolean; scrubCommitThrottleMs: number; defaultNewMarkerDurationSeconds: number; timelineEndPaddingFraction: number; timelinePrecision: number; onActiveSectionChange: (section: SettingsSection) => void; onOpenChange: (open: boolean) => void; onScrubCommitThrottleMsChange: (value: number) => void; onDefaultNewMarkerDurationSecondsChange: (value: number) => void; onTimelineEndPaddingFractionChange: (value: number) => void; onTimelinePrecisionChange: (value: number) => void }) {
   const navItems: Array<{ id: SettingsSection; label: string }> = [
     { id: "playback", label: "Playback" },
     { id: "timeline", label: "Timeline" },
@@ -29,6 +29,12 @@ export function SettingsDialog({ activeSection, open, scrubCommitThrottleMs, def
     const parsed = Number(value);
     if (!Number.isFinite(parsed)) return;
     onTimelineEndPaddingFractionChange(Math.round(clamp(parsed, 0, 2) * 100) / 100);
+  }
+
+  function updateTimelinePrecision(value: string) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return;
+    onTimelinePrecisionChange(Math.round(clamp(parsed, 1, 6)));
   }
 
   return (
@@ -94,6 +100,20 @@ export function SettingsDialog({ activeSection, open, scrubCommitThrottleMs, def
                     <span className="relative">
                       <Input id="scrub-commit-throttle" className="pr-10" min={16} max={500} step={10} type="number" value={scrubCommitThrottleMs} onChange={(event) => updateScrubCommitThrottle(event.target.value)} />
                       <button aria-label={`Reset scrub commit throttle to ${defaultScrubCommitThrottleMs}ms`} className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-md text-[#8f939d] transition hover:bg-[#252a34] hover:text-white" type="button" onClick={() => onScrubCommitThrottleMsChange(defaultScrubCommitThrottleMs)}>
+                        <RotateCcw size={14} />
+                      </button>
+                    </span>
+                  </label>
+                  <div className="h-px bg-[#363b47]" />
+                  <div className="grid gap-1.5">
+                    <strong className="text-sm text-white">Position precision</strong>
+                    <p className="text-xs leading-5 text-[#8f939d]">Sets the number of decimal places used when rounding marker and block positions. Higher values give finer control.</p>
+                  </div>
+                  <label className="grid max-w-[260px] gap-1.5 text-xs font-bold text-[#dfe2ea]" htmlFor="timeline-precision">
+                    Decimal places
+                    <span className="relative">
+                      <Input id="timeline-precision" className="pr-10" min={1} max={6} step={1} type="number" value={timelinePrecision} onChange={(event) => updateTimelinePrecision(event.target.value)} />
+                      <button aria-label={`Reset timeline precision to ${defaultTimelinePrecision}`} className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-md text-[#8f939d] transition hover:bg-[#252a34] hover:text-white" type="button" onClick={() => onTimelinePrecisionChange(defaultTimelinePrecision)}>
                         <RotateCcw size={14} />
                       </button>
                     </span>

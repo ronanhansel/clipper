@@ -14,6 +14,7 @@ export const defaultTimelineLayerState: TimelineLayerState = {
   compositionLayers: [{ id: "comp", name: "Composition" }],
   adjustmentLayers: [{ id: "adjust", name: "Adjust" }],
   motionLayers: [{ id: "motion", kind: "empty", name: "Motion" }],
+  transitionLayers: [{ id: "transition", name: "Transition" }],
 };
 
 function normalizeRightPanelTab(tab: unknown) {
@@ -173,6 +174,7 @@ function getSceneFromProjectWithDocs(project: ProjectManifest, sceneId: string, 
     name: timeline.name,
     adjustmentLayers: timeline.adjustmentLayers ?? [],
     motionMarkers: timeline.motionMarkers ?? [],
+    transitionLayers: timeline.transitionLayers ?? [],
     compositions: timeline.clips.flatMap((clip) => {
       const composition = compositionsById.get(clip.compositionId);
       return composition ? [{ ...composition, id: clip.id, compositionId: clip.compositionId, start: clip.start, layerId: clip.layerId, duration: clip.duration ?? composition.duration, motionMarkers: [] }] : [];
@@ -218,6 +220,7 @@ function getScenesFromTimelines(timelines: TimelineDocument[], compositions: Com
     name: timeline.name,
     adjustmentLayers: timeline.adjustmentLayers ?? [],
     motionMarkers: timeline.motionMarkers ?? [],
+    transitionLayers: timeline.transitionLayers ?? [],
     compositions: timeline.clips.flatMap((clip) => {
         const composition = compositionsById.get(clip.compositionId);
         return composition ? [{ ...composition, id: clip.id, compositionId: clip.compositionId, start: clip.start, layerId: clip.layerId, duration: clip.duration ?? composition.duration, motionMarkers: [] }] : [];

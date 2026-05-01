@@ -1,15 +1,18 @@
-import type { AdjustmentEffectDefinition, MotionEffectDefinition } from "../types";
-import type { AdjustmentEffectPackage, MotionEffectPackage } from "./types";
+import type { AdjustmentEffectDefinition, MotionEffectDefinition, TransitionEffectDefinition } from "../types";
+import type { AdjustmentEffectPackage, MotionEffectPackage, TransitionEffectPackage } from "./types";
 import { createAdjustmentLayer } from "./builtins/adjustments/helpers";
 
 type MotionEffectManifest = MotionEffectDefinition;
 type AdjustmentEffectManifest = AdjustmentEffectDefinition;
+type TransitionEffectManifest = TransitionEffectDefinition;
 
 type YamlValue = string | number | boolean | null | YamlValue[] | { [key: string]: YamlValue };
 
 export type MotionEffectLogic = Pick<MotionEffectPackage, "createDefaultBlock">;
 
 export type AdjustmentEffectLogic = Partial<Pick<AdjustmentEffectPackage, "applySceneTime" | "applyVisualStyle" | "getDisplayElapsed" | "validate">>;
+
+export type TransitionEffectLogic = Partial<Pick<TransitionEffectPackage, "applyVisualStyle">>;
 
 export function createMotionEffectPackage(manifestSource: string, logic: MotionEffectLogic): MotionEffectPackage {
   return { ...parseEffectManifest<MotionEffectManifest>(manifestSource), ...logic };
@@ -21,6 +24,23 @@ export function createAdjustmentEffectPackage(manifestSource: string, logic: Adj
     ...manifest,
     ...logic,
     createDefaultLayer: (input) => createAdjustmentLayer(input, manifest.name, manifest.id, manifest.defaultParams),
+  };
+}
+
+export function createTransitionEffectPackage(manifestSource: string, logic: TransitionEffectLogic = {}): TransitionEffectPackage {
+  const manifest = parseEffectManifest<TransitionEffectManifest>(manifestSource);
+  return {
+    ...manifest,
+    ...logic,
+    createDefaultLayer: (input) => ({
+      id: input.id,
+      layerId: input.layerId,
+      name: manifest.name,
+      start: input.start,
+      duration: input.duration,
+      midPoint: input.midPoint,
+      effect: { effectId: manifest.id, params: manifest.defaultParams },
+    }),
   };
 }
 

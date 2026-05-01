@@ -1,6 +1,6 @@
 import { defaultAdjustmentEffectPackage, getAdjustmentEffectPackage } from "../../../core/effects/registry";
 import type { AdjustmentEffectPointControl } from "../../../core/effects/types";
-import { roundTenth, roundTwo } from "../../../core/math";
+import { roundToPrecision, roundTenth, roundTwo } from "../../../core/math";
 import { getAdjustmentPlacement, getTimelineMarkerMendLayerId, getSelectedActiveMiddleMend, getSelectedMotionMiddleSnap, getMotionMiddleSnap, isMotionMiddleSnapActive, type TimelineMendMarker } from "../../../core/timeline";
 import type { AdjustmentEffectId, AdjustmentLayer, TimelineLayerState } from "../../../core/types";
 import { applyAdjustmentLayerOverwrite } from "./timelineMutationHelpers";
@@ -27,6 +27,7 @@ type UseAdjustmentLayerCommandsInput = {
   setSelectedAdjustmentLayers: (selection: Array<{ layerId: string }>) => void;
   setSelectedPartId: (id: string) => void;
   setTrackerPickTranslationMarker: (selection: { partId: string; markerId: string } | null) => void;
+  timelinePrecision: number;
   updateSceneAdjustmentLayers: UpdateSceneAdjustmentLayers;
 };
 
@@ -47,6 +48,7 @@ export function useAdjustmentLayerCommands({
   setSelectedAdjustmentLayers,
   setSelectedPartId,
   setTrackerPickTranslationMarker,
+  timelinePrecision,
   updateSceneAdjustmentLayers,
 }: UseAdjustmentLayerCommandsInput) {
   function updateAdjustmentLayer(layerId: string, updater: (layer: AdjustmentLayer) => AdjustmentLayer) {
@@ -54,7 +56,7 @@ export function useAdjustmentLayerCommands({
   }
 
   function moveAdjustmentLayer(layerId: string, start: number, targetLayerId?: string) {
-    updateAdjustmentLayer(layerId, (layer) => ({ ...layer, layerId: targetLayerId ?? layer.layerId, start: roundTenth(Math.max(start, 0)) }));
+    updateAdjustmentLayer(layerId, (layer) => ({ ...layer, layerId: targetLayerId ?? layer.layerId, start: roundToPrecision(Math.max(start, 0), timelinePrecision) }));
     setSelectedAdjustmentLayerId(layerId);
     setSelectedAdjustmentLayers([{ layerId }]);
     setSelectedPartId("");
@@ -115,7 +117,7 @@ export function useAdjustmentLayerCommands({
       if (!mendedIds.has(layer.id)) return layer;
       const bounds = nextBounds.get(layer.id);
       if (!bounds) return layer;
-      return { ...layer, start: roundTenth(bounds.start), duration: roundTenth(bounds.end - bounds.start), snapIn: bounds.snapIn, snapOut: bounds.snapOut, mendInId: bounds.mendInId, mendOutId: bounds.mendOutId };
+      return { ...layer, start: roundToPrecision(bounds.start, timelinePrecision), duration: roundToPrecision(bounds.end - bounds.start, timelinePrecision), snapIn: bounds.snapIn, snapOut: bounds.snapOut, mendInId: bounds.mendInId, mendOutId: bounds.mendOutId };
     }), mendedIds));
     const nextLayerId = snap.pairs[snap.pairs.length - 1]?.nextId ?? snap.pairs[0]?.previousId;
     if (nextLayerId) {

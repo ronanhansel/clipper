@@ -1,5 +1,5 @@
 import { defaultTimelineLayerState } from "../../core/project";
-import { getAdjustmentEffectPackage } from "../../core/effects/registry";
+import { getAdjustmentEffectPackage, getTransitionEffectPackage } from "../../core/effects/registry";
 import type { TimelineLayerCategory, TimelineLayerLayout } from "../../core/timelineLayers";
 import type { TimelineLayerState, TimelineMode } from "../../core/types";
 import { getTimelineRowHeight } from "./useTimelineRowResize";
@@ -22,7 +22,11 @@ export function buildDirectTimelineModel({ mode, rowHeights, timelineLayers }: {
     const effect = getAdjustmentEffectPackage(layer.id);
     return { key: layer.id, accent: effect?.accent ?? "#8f65f2", name: layer.name, hidden: Boolean(layer.hidden), locked: Boolean(layer.locked), effect };
   });
-  const directLayerRows: DirectTimelineLayerRow[] = [...adjustmentRows.map((row) => ({ key: row.key, category: "adjust" as const, accent: row.accent })), ...motionLayers.map((layer) => ({ key: layer.id, category: "motion" as const, accent: "#24b7c9" })), ...compositionRows.map((layer) => ({ key: layer.id, category: "comp" as const, accent: "#38a86d" }))];
+  const transitionRows = (timelineLayers.transitionLayers?.length ? timelineLayers.transitionLayers : defaultTimelineLayerState.transitionLayers!).map((layer) => {
+    const effect = getTransitionEffectPackage(layer.id);
+    return { key: layer.id, accent: effect?.accent ?? "#ff8c42", name: layer.name, hidden: Boolean(layer.hidden), locked: Boolean(layer.locked), effect };
+  });
+  const directLayerRows: DirectTimelineLayerRow[] = [...transitionRows.map((row) => ({ key: row.key, category: "transition" as const, accent: row.accent })), ...adjustmentRows.map((row) => ({ key: row.key, category: "adjust" as const, accent: row.accent })), ...motionLayers.map((layer) => ({ key: layer.id, category: "motion" as const, accent: "#24b7c9" })), ...compositionRows.map((layer) => ({ key: layer.id, category: "comp" as const, accent: "#38a86d" }))];
   const layerRows: DirectTimelineLayerRow[] = isCompositionMode
     ? directLayerRows
     : compositionRows.map((layer) => ({ key: layer.id, category: "comp" as const, accent: "#38a86d" }));
@@ -39,6 +43,7 @@ export function buildDirectTimelineModel({ mode, rowHeights, timelineLayers }: {
   return {
     adjustmentRows,
     compositionRows,
+    transitionRows,
     isCompositionMode,
     laneContentHeight,
     laneRowsStyle,

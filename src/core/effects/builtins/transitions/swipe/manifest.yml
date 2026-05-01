@@ -1,0 +1,11 @@
+id: clipper.transition.swipe
+category: transition
+name: Swipe
+label: Swipe
+group: Push
+accent: "#ff8c42"
+previewColor: "#ff8c42"
+tags: ["blocksOverlap"]
+timelineGradient: {"from":"#ff8c42","to":"#cc5500","text":"#ffffff"}
+defaultDuration: 2
+defaultParams: {"ease":"linear"}

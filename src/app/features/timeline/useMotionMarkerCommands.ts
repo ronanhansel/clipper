@@ -4,7 +4,7 @@ import { FRAME_HEIGHT, FRAME_WIDTH, type MotionEase, type MotionEffectId, type M
 import { centerOf } from "../../../core/frameInteraction";
 import { framePointToCameraTranslation, formatCameraPreviewTransform, getLayeredCameraPreviewTransform, type CameraPreviewTransform } from "../../../core/camera";
 import { getMendedMarkerIds } from "../../../core/markers";
-import { clamp, roundTenth, roundTwo } from "../../../core/math";
+import { clamp, roundToPrecision, roundTenth, roundTwo } from "../../../core/math";
 import { getMotionEffectByKind, getMotionEffectPackage } from "../../../core/effects/registry";
 import { createDefaultMotionBlockByEffectId, getMotionMarkerViews, motionBlocksToMotionMarkers } from "../../../core/motionEffects";
 import { buildLinearTimeline, getAvailableMotionPlacement, getSelectedActiveMiddleMend, getSelectedMotionMiddleSnap, getMotionMarkerMendKey, isMotionMiddleSnapActive, type TimelineMarkerMove, type TimelineMarkerResize } from "../../../core/timeline";
@@ -37,6 +37,7 @@ type UseMotionMarkerCommandsInput = {
   selectedObjectBounds: { x: number; y: number; width: number; height: number } | null;
   selectedMotionMarkers: MotionMarkerSelection[];
   timelineMode: TimelineMode;
+  timelinePrecision: number;
   scalePreviewFrameRef: { current: number };
   assignAvailableMotionLayerKind: (layerId: string | undefined, kind: "motion") => void;
   setFocusPickZoomMarker: (selection: { partId: string; markerId: string } | null) => void;
@@ -66,6 +67,7 @@ export function useMotionMarkerCommands({
   selectedObjectBounds,
   selectedMotionMarkers,
   timelineMode,
+  timelinePrecision,
   scalePreviewFrameRef,
   assignAvailableMotionLayerKind,
   setFocusPickZoomMarker,
@@ -125,7 +127,7 @@ export function useMotionMarkerCommands({
       updateSceneMotionMarkers((markers) => {
         const marker = markers.find((m) => m.id === markerId);
         if (!marker) return { motionMarkers: markers };
-        const nextMarker = { ...marker, layerId: targetLayerId ?? marker.layerId, start: roundTwo(start) };
+        const nextMarker = { ...marker, layerId: targetLayerId ?? marker.layerId, start };
         return applySceneMotionMarkerOverwrite([...markers.filter((m) => m.id !== markerId), nextMarker], new Set([markerId])) as SceneMotionMarkerUpdate;
       });
       setSelectedMotionMarker({ partId: TIMELINE_MOTION_PART_ID, markerId });
@@ -158,7 +160,7 @@ export function useMotionMarkerCommands({
         const insertedIds = new Set(moves.map((move) => move.markerId));
         const nextMarkers = markers.map((marker) => {
           const move = moveById.get(marker.id);
-          return move ? remapMovedMarkerMendIds({ ...marker, layerId: move.targetLayerId ?? marker.layerId, start: roundTwo(move.start) }, new Map()) : marker;
+          return move ? remapMovedMarkerMendIds({ ...marker, layerId: move.targetLayerId ?? marker.layerId, start: move.start }, new Map()) : marker;
         });
         return applySceneMotionMarkerOverwrite(nextMarkers, insertedIds) as SceneMotionMarkerUpdate;
       });
@@ -218,7 +220,7 @@ export function useMotionMarkerCommands({
         const insertedIds = new Set(resizes.map((resize) => resize.markerId));
         const nextMarkers = markers.map((marker) => {
           const resize = resizeById.get(marker.id);
-          return resize ? { ...marker, start: roundTwo(resize.absoluteStart), duration: roundTwo(resize.duration) } : marker;
+          return resize ? { ...marker, start: resize.absoluteStart, duration: resize.duration } : marker;
         });
         return applySceneMotionMarkerOverwrite(nextMarkers, insertedIds) as SceneMotionMarkerUpdate;
       });
@@ -312,7 +314,7 @@ export function useMotionMarkerCommands({
       }), { history: true });
     }
     const duration = Math.min(markerDurationSeconds, Math.max(sceneDurationSeconds, 0.1));
-    const absoluteStart = roundTenth(Math.max(sceneTime - duration / 2, 0));
+    const absoluteStart = roundToPrecision(Math.max(sceneTime - duration / 2, 0), timelinePrecision);
     const markerIdPrefix = effect.kind === "zoom" ? "zom" : effect.kind === "rotate" ? "rot" : effect.kind === "perspective" ? "prs" : "trn";
     const block = createDefaultMotionBlockByEffectId(effect.id, {
       id: `${markerIdPrefix}_${Date.now().toString(36)}`,
@@ -461,7 +463,7 @@ export function useMotionMarkerCommands({
         if (!mendedIds.has(key)) return marker;
         const bounds = nextBounds.get(key);
         if (!bounds) return marker;
-        const nextMarker = { ...marker, start: roundTenth(bounds.start), duration: roundTenth(bounds.end - bounds.start), snapIn: bounds.snapIn, snapOut: bounds.snapOut, mendInId: normalizeTimelineMotionMendId(bounds.mendInId), mendOutId: normalizeTimelineMotionMendId(bounds.mendOutId), middleTransition: bounds.middleTransition, middleEase: bounds.middleEase, params: clearMendParams(marker) };
+        const nextMarker = { ...marker, start: roundToPrecision(bounds.start, timelinePrecision), duration: roundToPrecision(bounds.end - bounds.start, timelinePrecision), snapIn: bounds.snapIn, snapOut: bounds.snapOut, mendInId: normalizeTimelineMotionMendId(bounds.mendInId), mendOutId: normalizeTimelineMotionMendId(bounds.mendOutId), middleTransition: bounds.middleTransition, middleEase: bounds.middleEase, params: clearMendParams(marker) };
         // Re-sync params with the new values on nextMarker
         if (nextMarker.params) nextMarker.params = clearMendParams(nextMarker);
         return nextMarker;
