@@ -1,4 +1,3 @@
-import type { MotionMarker } from "./types";
 import { canMendTimelineMarkers } from "./timeline";
 
 type MendedMarker = { id: string; effectId?: string; layerId?: string; start: number; duration: number; snapIn?: boolean; snapOut?: boolean; mendInId?: string; mendOutId?: string };
@@ -63,8 +62,4 @@ export function getMendedMarkerIds(markers: MendedMarker[], markerId: string) {
   }
 
   return new Set(sortedMarkers.slice(firstIndex, lastIndex + 1).map((marker) => marker.id));
-}
-
-export function normalizeMendedMotionMarkerFocus(markers: MotionMarker[]): MotionMarker[] {
-  return markers;
 }

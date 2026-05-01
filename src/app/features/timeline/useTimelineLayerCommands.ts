@@ -1,4 +1,4 @@
-import { defaultTimelineLayerState, defaultTimelineMode, defaultTimelineViewportState } from "../../../core/project";
+import { defaultTimelineLayerState, defaultTimelineMode, defaultTimelineViewportState, getSceneFromProject } from "../../../core/project";
 import { getCanonicalMotionMarkers, getMotionMarkerViews } from "../../../core/motionEffects";
 import { getAdjustmentLayerRowId, isMotionMarkerOnLayerId, removeTimelineAdjustmentLayerMarkers, removeTimelineMotionLayerMarkers } from "../../../core/timeline";
 import { getTimelineStateLayers, insertTimelineStateLayer } from "../../../core/timelineLayers";
@@ -141,7 +141,7 @@ export function useTimelineLayerCommands({
       },
       timelines: (current.timelines ?? []).map((timeline) => {
         if (timeline.id !== scene.id) return timeline;
-        const currentScene = current.scenes.find((item) => item.id === scene.id) ?? scene;
+        const currentScene = getSceneFromProject(current, scene.id) ?? scene;
         const clipsById = new Map(removeTimelineMotionLayerMarkers(currentScene.compositions, layerId).map((item) => [item.id, timelineClipFromPart(item)]));
         return {
           ...timeline,

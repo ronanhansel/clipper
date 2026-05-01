@@ -14,8 +14,8 @@ export function getProjectCompositionSources(project: ProjectManifest) {
 export function getSyncedCompositionSources(nextProject: ProjectManifest, previousProject: ProjectManifest | undefined, currentSources: Record<string, string>) {
   let changed = false;
   const nextSources = { ...currentSources };
-  const nextParts = Array.from(new Map([...nextProject.scenes.flatMap((item) => item.compositions), ...(nextProject.compositionLibrary ?? []), ...(nextProject.compositions ?? [])].map((item) => [item.filePath, item])).values());
-  const previousPartsByPath = new Map([...(previousProject?.scenes.flatMap((item) => item.compositions) ?? []), ...(previousProject?.compositionLibrary ?? []), ...(previousProject?.compositions ?? [])].map((item) => [item.filePath, item]));
+  const nextParts = Array.from(new Map([...(nextProject.compositionLibrary ?? []), ...(nextProject.compositions ?? [])].map((item) => [item.filePath, item])).values());
+  const previousPartsByPath = new Map([...(previousProject?.compositionLibrary ?? []), ...(previousProject?.compositions ?? [])].map((item) => [item.filePath, item]));
 
   for (const nextPart of nextParts) {
     if (nextPart.sourceMissing) continue;

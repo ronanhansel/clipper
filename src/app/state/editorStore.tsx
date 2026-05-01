@@ -125,7 +125,7 @@ function getInitialState(project: ProjectManifest): EditorStoreState {
   return {
     mode: editorState?.mode ?? "interactive",
     timelineMode: editorState?.timelineMode ?? defaultTimelineMode,
-    selectedSceneId: editorState?.selectedSceneId ?? project.scenes[0].id,
+    selectedSceneId: editorState?.selectedSceneId ?? project.timelines?.[0]?.id ?? "",
     selectedPartId: editorState?.selectedPartId ?? "",
     selectedParts: editorState?.selectedPartId ? [{ partId: editorState.selectedPartId }] : [],
     selectedObjectId: null,

@@ -4,7 +4,7 @@ import { applyAdjustmentLayersToSceneTime } from "../../core/adjustments";
 import { cameraTranslationToFramePoint, CAMERA_PERSPECTIVE, getLayeredCameraPreviewTransform, type CameraPreviewTransform } from "../../core/camera";
 import { clamp } from "../../core/math";
 import { getMotionMarkerViews, motionBlocksToMotionMarkers } from "../../core/motionEffects";
-import { defaultAssets, defaultTimelineLayerState, serializeProjectForSave } from "../../core/project";
+import { defaultAssets, defaultTimelineLayerState, getSceneFromProject, serializeProjectForSave } from "../../core/project";
 import { buildLinearTimeline, getExecutableAdjustmentLayers, getMiddleTransitionMode, getSelectedActiveMiddleMend, getSelectedMotionMiddleSnap, getTimelineMarkerMendLayerId, getTimelinePartAtTime, getMotionMarkerMendKey, getMotionMiddleSnap, isMotionMiddleSnapActive, sceneDuration as getSceneDuration, validateScene, type TimelineMendMarker } from "../../core/timeline";
 import { FRAME_HEIGHT, FRAME_WIDTH, type CompositionClip, type MotionEase, type MotionMarker, type ProjectManifest, type SelectionPayload, type TimelineMode, type TimelinePart } from "../../core/types";
 import { TIMELINE_MOTION_PART_ID } from "../types";
@@ -46,7 +46,7 @@ export function useEditorDerivedState({
   selectionPayload: SelectionPayload | null;
   timelineMode: TimelineMode;
 }) {
-  const scene = project.scenes.find((item) => item.id === selectedSceneId) ?? project.scenes[0];
+  const scene = useMemo(() => getSceneFromProject(project, selectedSceneId) ?? getSceneFromProject(project, project.timelines?.[0]?.id ?? ""), [project, selectedSceneId]);
   if (!scene) throw new Error("Project has no timelines.");
   const assets = project.assets ?? defaultAssets;
   const timelineLayerState = project.editorState?.timelineLayers ?? defaultTimelineLayerState;

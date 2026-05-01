@@ -62,7 +62,8 @@ function formatFontValueLabel(value: string) {
   return value.split(",")[0]?.trim().replace(/^['"]|['"]$/g, "") || value;
 }
 
-function motionEaseSelectValue(ease: MotionEase | undefined) {
+function motionEaseSelectValue(ease: MotionEase | undefined, explicit = false) {
+  if (explicit) return ease ?? "";
   return ease && ease !== "easeInOut" ? ease : defaultMotionEaseSelectValue;
 }
 
@@ -1121,7 +1122,7 @@ export function MotionInspector({ marker, part, selectedMarkerCount, selectedSna
         <div className="grid gap-2">
           <button className={snapButtonClass(middleSnapActive, canSnapMiddle)} disabled={!canSnapMiddle} title={middleSnapActive ? "Unmend the neighboring edges" : "Mend the neighboring edges"} aria-pressed={middleSnapActive} onClick={onSnapMiddle}>{middleSnapActive ? "Unmend" : "Mend"}</button>
         </div>
-        {middleSnapActive ? <div className="grid gap-1.5"><span className={mutedCaps}>Mend handoff</span><div className="grid grid-cols-2 gap-2"><button className={middleTransitionButtonClass(middleTransitionMode === "instant")} aria-pressed={middleTransitionMode === "instant"} onClick={() => onChangeMiddleTransition("instant")}>Instant</button><button className={middleTransitionButtonClass(middleTransitionMode === "transition")} aria-pressed={middleTransitionMode === "transition"} onClick={() => onChangeMiddleTransition("transition")}>Transition</button></div>{middleTransitionMode === "transition" ? <label className={`grid gap-1.5 ${mutedCaps}`}>Mend ease<Select value={motionEaseSelectValue(middleEase)} onValueChange={updateMiddleEase}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><TooltipProvider delayDuration={1000} skipDelayDuration={0}><SelectGroup><EaseSelectItems includeLinear={false} /></SelectGroup></TooltipProvider></SelectContent></Select></label> : null}</div> : null}
+        {middleSnapActive ? <div className="grid gap-1.5"><span className={mutedCaps}>Mend handoff</span><div className="grid grid-cols-2 gap-2"><button className={middleTransitionButtonClass(middleTransitionMode === "instant")} aria-pressed={middleTransitionMode === "instant"} onClick={() => onChangeMiddleTransition("instant")}>Instant</button><button className={middleTransitionButtonClass(middleTransitionMode === "transition")} aria-pressed={middleTransitionMode === "transition"} onClick={() => onChangeMiddleTransition("transition")}>Transition</button></div>{middleTransitionMode === "transition" ? <label className={`grid gap-1.5 ${mutedCaps}`}>Mend ease<Select value={motionEaseSelectValue(middleEase, true)} onValueChange={updateMiddleEase}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><TooltipProvider delayDuration={1000} skipDelayDuration={0}><SelectGroup><EaseSelectItems includeLinear={false} /></SelectGroup></TooltipProvider></SelectContent></Select></label> : null}</div> : null}
       </div>
       <button className="flex items-center justify-center gap-2 rounded-[10px] border border-[#3b2a2a] bg-[#231516] px-[13px] py-[9px] text-sm font-medium text-[#ffb4b4] transition hover:border-[#6b3838] hover:bg-[#301b1d]" onClick={onDelete}><Trash2 size={15} />Delete</button>
     </div>

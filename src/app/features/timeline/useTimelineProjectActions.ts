@@ -1,4 +1,4 @@
-import { defaultTimelineLayerState, defaultTimelineViewportState, replacePartInProject } from "../../../core/project";
+import { defaultTimelineLayerState, defaultTimelineViewportState, getSceneFromProject, replacePartInProject } from "../../../core/project";
 import { getCanonicalMotionMarkers } from "../../../core/motionEffects";
 import type { AdjustmentLayer, EditorState, MotionMarker, Part, ProjectManifest, TimelineLayerState, TimelineMode, TimelineViewportState } from "../../../core/types";
 import { timelineClipFromPart } from "./timelineLayerHelpers";
@@ -22,13 +22,13 @@ type UseTimelineProjectActionsInput = {
 export function useTimelineProjectActions({ scene, timelineMode, updateEditorState, updateProject }: UseTimelineProjectActionsInput) {
   function updateSceneParts(updater: (compositions: Part[]) => Part[]) {
     updateProject((current) => {
-      const currentScene = current.scenes.find((item) => item.id === scene.id) ?? scene;
+      const currentScene = getSceneFromProject(current, scene.id) ?? scene;
       const nextParts = updater(currentScene.compositions);
       return {
         ...current,
         timelines: (current.timelines ?? []).map((timeline) => (timeline.id === scene.id ? { ...timeline, clips: nextParts.map(timelineClipFromPart) } : timeline)),
       };
-    });
+    }, { history: true });
   }
 
   function updateSceneMotionMarkers(updater: (markers: MotionMarker[]) => SceneMotionMarkerUpdate) {
@@ -39,10 +39,9 @@ export function useTimelineProjectActions({ scene, timelineMode, updateEditorSta
       const nextMotionMarkers = nextMarkers.motionMarkers;
       return {
         ...current,
-        scenes: current.scenes.map((s) => (s.id === scene.id ? { ...s, motionMarkers: nextMotionMarkers } : s)),
         timelines: (current.timelines ?? []).map((timeline) => (timeline.id === scene.id ? { ...timeline, motionMarkers: nextMotionMarkers } : timeline)),
       };
-    });
+    }, { history: true });
   }
 
   function updateSceneAdjustmentLayers(updater: (layers: AdjustmentLayer[]) => AdjustmentLayer[]) {
@@ -53,7 +52,7 @@ export function useTimelineProjectActions({ scene, timelineMode, updateEditorSta
         ...current,
         timelines: current.timelines?.map((timeline) => (timeline.id === scene.id ? { ...timeline, adjustmentLayers: nextLayers } : timeline)),
       };
-    });
+    }, { history: true });
   }
 
   function updateCurrentPart(nextPart: Part) {
@@ -62,11 +61,11 @@ export function useTimelineProjectActions({ scene, timelineMode, updateEditorSta
 
   function updateCompositionForTimelinePart(partId: string, updater: (composition: Part) => Part) {
     updateProject((current) => {
-      const currentScene = current.scenes.find((item) => item.id === scene.id);
+      const currentScene = getSceneFromProject(current, scene.id);
       const timelinePart = currentScene?.compositions.find((item) => item.id === partId);
       const compositionId = timelinePart?.compositionId ?? partId;
       return replacePartInProject(current, compositionId, updater);
-    });
+    }, { history: true });
   }
 
   function updateTimelineViewportState(updater: (state: TimelineViewportState) => TimelineViewportState) {

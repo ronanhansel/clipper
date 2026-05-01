@@ -3,7 +3,6 @@ import { getInsertedOverwriteRanges, overwriteTimelineMarkers } from "../../../c
 import { clamp, roundTwo } from "../../../core/math";
 import { TIMELINE_MOTION_PART_ID } from "../../types";
 import { motionBlocksToMotionMarkers, withCanonicalMotionMarkers } from "../../../core/motionEffects";
-import { normalizeMendedMotionMarkerFocus } from "../../../core/markers";
 import { FRAME_HEIGHT, FRAME_WIDTH, type AdjustmentLayer, type MotionBlock, type MotionMarker, type Part, type Point, type TimelinePart } from "../../../core/types";
 import type { AdjustmentEffectPointControl } from "../../../core/effects/types";
 
@@ -54,7 +53,10 @@ export function parseTimelineMarkerKey(key: string) {
 export function remapMovedMarkerMendIds<T extends MotionMarker>(marker: T, movedMarkerKeys: Map<string, string>): T {
   const mendInId = marker.mendInId ? movedMarkerKeys.get(marker.mendInId) ?? marker.mendInId : marker.mendInId;
   const mendOutId = marker.mendOutId ? movedMarkerKeys.get(marker.mendOutId) ?? marker.mendOutId : marker.mendOutId;
-  return mendInId === marker.mendInId && mendOutId === marker.mendOutId ? marker : { ...marker, mendInId, mendOutId };
+  if (mendInId === marker.mendInId && mendOutId === marker.mendOutId) return marker;
+  const nextMarker = { ...marker, mendInId, mendOutId };
+  if (nextMarker.params) nextMarker.params = { ...nextMarker.params, mendInId, mendOutId };
+  return nextMarker;
 }
 
 export function placeMotionMarkerOnTimeline<T extends MotionMarker>(marker: T, absoluteStart: number, timelineParts: TimelinePart[], targetLayerId?: string, preferredPartId?: string) {
@@ -82,7 +84,7 @@ export function applyMotionMarkerOverwrite(item: Part, markers: MotionMarker[], 
     return overwriteTimelineMarkers(markersList, insertedRanges, { createSplitId: (m, _range, index) => `${m.id}_split_${splitIdSuffix}_${index.toString(36)}` });
   }
 
-  return withMotionMarkers(item, normalizeMendedMotionMarkerFocus(trimCollection(markers)));
+  return withMotionMarkers(item, trimCollection(markers));
 }
 
 export function applySceneMotionMarkerOverwrite(markers: MotionMarker[], insertedIds: Set<string>) {
@@ -90,7 +92,7 @@ export function applySceneMotionMarkerOverwrite(markers: MotionMarker[], inserte
   const insertedRanges = getInsertedOverwriteRanges(markers, new Set([...protectedIds]));
   const splitIdSuffix = Date.now().toString(36);
   const trimCollection = <T extends MotionMarker>(markersList: T[]) => overwriteTimelineMarkers(markersList, insertedRanges, { createSplitId: (m, _range, index) => `${m.id}_split_${splitIdSuffix}_${index.toString(36)}` });
-  const nextMarkers = normalizeMendedMotionMarkerFocus(trimCollection(markers));
+  const nextMarkers = trimCollection(markers);
   return withCanonicalMotionMarkers(motionBlocksToMotionMarkers(nextMarkers.map(motionBlockFromMarker)));
 }
 

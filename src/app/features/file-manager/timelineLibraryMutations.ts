@@ -6,7 +6,7 @@ export function createTimelineInProject(project: ProjectManifest, timelineId: st
     ...project,
     timelines: [...(project.timelines ?? []), {
       id: timelineId,
-      name: `Timeline ${(project.timelines?.length ?? project.scenes.length) + 1}`,
+      name: `Timeline ${(project.timelines?.length ?? 0) + 1}`,
       filePath: `${directoryPath}/${timelineId}.timeline.json`,
       clips: [],
       adjustmentLayers: [],

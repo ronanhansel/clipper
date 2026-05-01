@@ -157,6 +157,29 @@ function getCompositionDocuments(project: ProjectManifest) {
   return Array.from(new Map(compositions.map((composition) => [composition.id, normalizeCompositionDocument(composition, sources)]).filter((entry): entry is [string, CompositionDocument] => entry[1] !== undefined)).values());
 }
 
+export { getCompositionDocuments };
+
+export function getSceneFromProject(project: ProjectManifest, sceneId: string): Scene | undefined {
+  const compositionDocs = getCompositionDocuments(project);
+  return getSceneFromProjectWithDocs(project, sceneId, compositionDocs);
+}
+
+function getSceneFromProjectWithDocs(project: ProjectManifest, sceneId: string, compositionDocs: CompositionDocument[]): Scene | undefined {
+  const timeline = (project.timelines ?? []).find((t) => t.id === sceneId);
+  if (!timeline) return undefined;
+  const compositionsById = new Map(compositionDocs.map((composition) => [composition.id, composition]));
+  return {
+    id: timeline.id,
+    name: timeline.name,
+    adjustmentLayers: timeline.adjustmentLayers ?? [],
+    motionMarkers: timeline.motionMarkers ?? [],
+    compositions: timeline.clips.flatMap((clip) => {
+      const composition = compositionsById.get(clip.compositionId);
+      return composition ? [{ ...composition, id: clip.id, compositionId: clip.compositionId, start: clip.start, layerId: clip.layerId, duration: clip.duration ?? composition.duration, motionMarkers: [] }] : [];
+    }),
+  };
+}
+
 function getProjectTimelines(project: ProjectManifest): TimelineDocument[] {
   const timelines = project.timelines ?? [];
   if (timelines.length === 0) throw new Error("Project is missing timelines.");
@@ -186,6 +209,8 @@ function getProjectTimelines(project: ProjectManifest): TimelineDocument[] {
   });
 }
 
+// Derives Scene[] from timelines for persistence / backward compat.
+// Editing mutations write only to project.timelines; runtime reads use getSceneFromProject.
 function getScenesFromTimelines(timelines: TimelineDocument[], compositions: CompositionDocument[]): Scene[] {
   const compositionsById = new Map(compositions.map((composition) => [composition.id, composition]));
   return timelines.map((timeline) => ({
@@ -304,6 +329,8 @@ export function normalizeProject(project: ProjectManifest): ProjectManifest {
       fileManagerState: normalizeFileManagerState(project.editorState?.fileManagerState),
       effectsPanelState: normalizeEffectsPanelState(project.editorState?.effectsPanelState),
     },
+    // scenes is derived from timelines via getScenesFromTimelines.
+    // Editing mutations write only to project.timelines; runtime reads use getSceneFromProject.
     scenes,
     timelines,
     timelineOrder: timelines.map((timeline) => timeline.id),
