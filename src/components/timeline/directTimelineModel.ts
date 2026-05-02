@@ -19,19 +19,19 @@ export function buildDirectTimelineModel({ mode, rowHeights, timelineLayers }: {
   const isCompositionMode = mode === "composition";
   const motionLayers = (timelineLayers.motionLayers !== undefined ? timelineLayers.motionLayers : defaultTimelineLayerState.motionLayers!).map(layer => ({
     ...layer,
-    name: "Motion"
+    name: layer.name || "Motion"
   }));
   const compositionRows = (timelineLayers.compositionLayers !== undefined ? timelineLayers.compositionLayers : defaultTimelineLayerState.compositionLayers!).map(layer => ({
     ...layer,
-    name: getDisplayNameFromPath(layer.id)
+    name: layer.name || getDisplayNameFromPath(layer.id)
   }));
   const adjustmentRows = (timelineLayers.adjustmentLayers !== undefined ? timelineLayers.adjustmentLayers : defaultTimelineLayerState.adjustmentLayers!).map((layer) => {
     const effect = getAdjustmentEffectPackage(layer.id);
-    return { key: layer.id, accent: effect?.accent ?? "#8f65f2", name: effect?.label ?? "Adjustment", hidden: Boolean(layer.hidden), locked: Boolean(layer.locked), effect };
+    return { key: layer.id, accent: effect?.accent ?? "#8f65f2", name: layer.name || effect?.label || "Adjustment", hidden: Boolean(layer.hidden), locked: Boolean(layer.locked), effect };
   });
   const transitionRows = (timelineLayers.transitionLayers !== undefined ? timelineLayers.transitionLayers : defaultTimelineLayerState.transitionLayers!).map((layer) => {
     const effect = getTransitionEffectPackage(layer.id);
-    return { key: layer.id, accent: effect?.accent ?? "#ff8c42", name: effect?.label ?? "Transition", hidden: Boolean(layer.hidden), locked: Boolean(layer.locked), effect };
+    return { key: layer.id, accent: effect?.accent ?? "#ff8c42", name: layer.name || effect?.label || "Transition", hidden: Boolean(layer.hidden), locked: Boolean(layer.locked), effect };
   });
   const directLayerRows: DirectTimelineLayerRow[] = [...transitionRows.map((row) => ({ key: row.key, category: "transition" as const, accent: row.accent })), ...adjustmentRows.map((row) => ({ key: row.key, category: "adjust" as const, accent: row.accent })), ...motionLayers.map((layer) => ({ key: layer.id, category: "motion" as const, accent: "#24b7c9" })), ...compositionRows.map((layer) => ({ key: layer.id, category: "comp" as const, accent: "#38a86d" }))];
   const layerRows: DirectTimelineLayerRow[] = isCompositionMode

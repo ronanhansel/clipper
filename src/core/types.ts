@@ -375,24 +375,28 @@ export type TimelineMotionLayerKind = "empty" | "motion";
 export type TimelineMotionLayerState = {
   id: string;
   kind: TimelineMotionLayerKind;
+  name?: string;
   hidden?: boolean;
   locked?: boolean;
 };
 
 export type TimelineAdjustmentLayerState = {
   id: string;
+  name?: string;
   hidden?: boolean;
   locked?: boolean;
 };
 
 export type TimelineTransitionLayerState = {
   id: string;
+  name?: string;
   hidden?: boolean;
   locked?: boolean;
 };
 
 export type TimelineCompositionLayerState = {
   id: string;
+  name?: string;
   hidden?: boolean;
   locked?: boolean;
 };

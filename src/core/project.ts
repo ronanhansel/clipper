@@ -11,7 +11,7 @@ export const defaultPreviewViewportState: PreviewViewportState = { scale: 0.5, s
 export const defaultEditorLayoutState: EditorLayoutState = { leftPanelWidth: 286, rightPanelWidth: 350, timelineHeight: 340 };
 export const defaultComposeLayoutState: ComposeLayoutState = { leftPanelWidth: 286 };
 export const defaultTimelineLayerState: TimelineLayerState = {
-  compositionLayers: [{ id: "comp" }],
+  compositionLayers: [{ id: "comp", name: "Composition" }],
   adjustmentLayers: [{ id: "adjust" }],
   motionLayers: [{ id: "motion", kind: "empty" }],
   transitionLayers: [{ id: "transition" }],
@@ -66,19 +66,19 @@ function normalizeTimelineMode(mode: unknown): TimelineMode {
 }
 
 function normalizeTimelineLayerState(state: TimelineLayerState | undefined): TimelineLayerState {
-  const sourceCompositionLayers = state?.compositionLayers?.length ? state.compositionLayers : [{ id: "comp", hidden: state?.compHidden || undefined }];
+  const sourceCompositionLayers = state?.compositionLayers?.length ? state.compositionLayers : [{ id: "comp", name: "Composition", hidden: state?.compHidden || undefined }];
   const seenCompositionLayerIds = new Set<string>();
   const compositionLayers = sourceCompositionLayers.flatMap((layer) => {
     if (!layer.id || seenCompositionLayerIds.has(layer.id)) return [];
     seenCompositionLayerIds.add(layer.id);
-    return [{ id: layer.id, hidden: layer.hidden || undefined, locked: layer.locked || undefined }];
+    return [{ id: layer.id, name: layer.name || undefined, hidden: layer.hidden || undefined, locked: layer.locked || undefined }];
   });
   const sourceAdjustmentLayers = state?.adjustmentLayers?.length ? state.adjustmentLayers : defaultTimelineLayerState.adjustmentLayers!;
   const seenAdjustmentLayerIds = new Set<string>();
   const adjustmentLayers = sourceAdjustmentLayers.flatMap((layer) => {
     if (!layer.id || seenAdjustmentLayerIds.has(layer.id)) return [];
     seenAdjustmentLayerIds.add(layer.id);
-    return [{ id: layer.id, hidden: layer.hidden || undefined, locked: layer.locked || undefined }];
+    return [{ id: layer.id, name: layer.name || undefined, hidden: layer.hidden || undefined, locked: layer.locked || undefined }];
   });
   const motionLayers = state?.motionLayers?.filter((layer) => layer.kind === "empty" || layer.kind === "motion") ?? defaultTimelineLayerState.motionLayers!;
   const rowHeights = normalizeTimelineLayerRowHeights(state?.rowHeights);
@@ -86,7 +86,7 @@ function normalizeTimelineLayerState(state: TimelineLayerState | undefined): Tim
     compHidden: state?.compHidden || undefined,
     compositionLayers: compositionLayers.length > 0 ? compositionLayers : defaultTimelineLayerState.compositionLayers!,
     adjustmentLayers: adjustmentLayers.length > 0 ? adjustmentLayers : defaultTimelineLayerState.adjustmentLayers!,
-    motionLayers: (motionLayers.length > 0 ? motionLayers : defaultTimelineLayerState.motionLayers!).map((layer) => ({ ...layer, kind: layer.kind, hidden: layer.hidden || undefined, locked: layer.locked || undefined })),
+    motionLayers: (motionLayers.length > 0 ? motionLayers : defaultTimelineLayerState.motionLayers!).map((layer) => ({ ...layer, kind: layer.kind, name: layer.name || undefined, hidden: layer.hidden || undefined, locked: layer.locked || undefined })),
     rowHeights: Object.keys(rowHeights).length ? rowHeights : undefined,
   };
 }

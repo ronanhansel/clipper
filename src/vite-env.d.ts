@@ -5,6 +5,11 @@ declare module "*.yml?raw" {
   export default source;
 }
 
+declare module "*.ts?raw" {
+  const source: string;
+  export default source;
+}
+
 type LocalFontData = {
   family: string;
   fullName: string;

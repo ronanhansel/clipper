@@ -170,8 +170,8 @@ describe("project normalization", () => {
   it("creates one blank default row for each timeline category", () => {
     const normalized = normalizeProject(projectWithComposition());
 
-    expect(normalized.editorState?.timelineLayers?.compositionLayers).toEqual([{ id: "comp", hidden: undefined }]);
-    expect(normalized.editorState?.timelineLayers?.adjustmentLayers).toEqual([{ id: "adjust", hidden: undefined }]);
-    expect(normalized.editorState?.timelineLayers?.motionLayers).toEqual([{ id: "motion", kind: "empty", hidden: undefined }]);
+    expect(normalized.editorState?.timelineLayers?.compositionLayers).toEqual([{ id: "comp", name: "Composition", hidden: undefined, locked: undefined }]);
+    expect(normalized.editorState?.timelineLayers?.adjustmentLayers).toEqual([{ id: "adjust", name: undefined, hidden: undefined, locked: undefined }]);
+    expect(normalized.editorState?.timelineLayers?.motionLayers).toEqual([{ id: "motion", kind: "empty", name: undefined, hidden: undefined, locked: undefined }]);
   });
 });

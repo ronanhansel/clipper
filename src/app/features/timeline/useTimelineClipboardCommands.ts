@@ -1,7 +1,8 @@
 import { useRef, type MouseEvent as ReactMouseEvent } from "react";
 import toast from "react-hot-toast";
 import { TIMELINE_MOTION_PART_ID, type ContextMenuState, type MotionMarkerSelection, type TimelineBlankContextTarget, type TimelineNodeContextTarget } from "../../types";
-import { clamp, roundToPrecision, roundTenth, roundTwo } from "../../../core/math";
+import { clamp, roundToPrecision } from "../../../core/math";
+import { getEffectPackage } from "../../../core/effects/registry";
 import { getMotionMarkerViews } from "../../../core/motionEffects";
 import { buildLinearTimeline } from "../../../core/timeline";
 import type { AdjustmentLayer, MotionMarker, Part, TransitionLayer } from "../../../core/types";
@@ -10,6 +11,7 @@ import type { SceneMotionMarkerUpdate } from "./useTimelineProjectActions";
 
 export type TimelineNodeClipboard =
   | { kind: "adjustment"; nodes: Array<{ absoluteStart: number; layer: AdjustmentLayer }> }
+  | { kind: "composition"; nodes: Array<{ absoluteStart: number; part: Part }> }
   | { kind: "motion"; nodes: Array<{ absoluteStart: number; partId: string; marker: MotionMarker }> }
   | { kind: "transition"; nodes: Array<{ absoluteStart: number; layer: TransitionLayer }> };
 
@@ -69,6 +71,57 @@ function getMotionMarkers(item: { motionMarkers?: MotionMarker[] }) {
   return getMotionMarkerViews(item).motionMarkers;
 }
 
+function getCompositionPasteShift(pastedParts: Part[], existingParts: Part[]) {
+  let shift = 0;
+  const maxAttempts = Math.max(1, pastedParts.length * existingParts.length + 1);
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    let nextShift: number | null = null;
+    for (const pastedPart of pastedParts) {
+      const layerId = pastedPart.layerId ?? "comp";
+      const sourceStart = pastedPart.start ?? 0;
+      const start = sourceStart + shift;
+      const end = start + pastedPart.duration;
+      for (const existingPart of existingParts) {
+        if ((existingPart.layerId ?? "comp") !== layerId) continue;
+        const existingStart = existingPart.start ?? 0;
+        const existingEnd = existingStart + existingPart.duration;
+        if (!(start < existingEnd && end > existingStart)) continue;
+        const candidateShift = existingEnd - sourceStart;
+        if (candidateShift <= shift) continue;
+        nextShift = nextShift === null ? candidateShift : Math.min(nextShift, candidateShift);
+      }
+    }
+    if (nextShift === null) return shift;
+    shift = nextShift;
+  }
+  return shift;
+}
+
+function getTransitionPasteShift(pastedLayers: TransitionLayer[], existingLayers: TransitionLayer[]) {
+  let shift = 0;
+  const maxAttempts = Math.max(1, pastedLayers.length * existingLayers.length + 1);
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    let nextShift: number | null = null;
+    for (const pastedLayer of pastedLayers) {
+      if (!getEffectPackage(pastedLayer.effect.effectId)?.tags?.includes("blocksOverlap")) continue;
+      const rowKey = pastedLayer.layerId ?? pastedLayer.effect.effectId;
+      const start = pastedLayer.start + shift;
+      const end = start + pastedLayer.duration;
+      for (const existingLayer of existingLayers) {
+        if ((existingLayer.layerId ?? existingLayer.effect.effectId) !== rowKey) continue;
+        const existingEnd = existingLayer.start + existingLayer.duration;
+        if (!(start < existingEnd && end > existingLayer.start)) continue;
+        const candidateShift = existingEnd - pastedLayer.start;
+        if (candidateShift <= shift) continue;
+        nextShift = nextShift === null ? candidateShift : Math.min(nextShift, candidateShift);
+      }
+    }
+    if (nextShift === null) return shift;
+    shift = nextShift;
+  }
+  return shift;
+}
+
 export function useTimelineClipboardCommands({
   currentSceneTimeRef,
   scene,
@@ -107,6 +160,19 @@ export function useTimelineClipboardCommands({
   const timelineNodeClipboardRef = useRef<TimelineNodeClipboard | null>(null);
 
   function getSelectedTimelineNodeClipboard(showToast = false): TimelineNodeClipboard | null {
+    if (selectedParts.length > 0) {
+      const nodes = selectedParts.flatMap((selection) => {
+        const part = timeline.find((item) => item.id === selection.partId);
+        return part ? [{ absoluteStart: part.start ?? 0, part }] : [];
+      });
+      if (nodes.length > 0) return { kind: "composition", nodes };
+    }
+
+    if (selectedPartId && !selectedMotionMarker) {
+      const part = timeline.find((item) => item.id === selectedPartId);
+      if (part) return { kind: "composition", nodes: [{ absoluteStart: part.start ?? 0, part }] };
+    }
+
     if (selectedTransitionLayers.length > 0) {
       const nodes = selectedTransitionLayers.flatMap((selection) => {
         const layer = scene.transitionLayers?.find((item) => item.id === selection.layerId);
@@ -144,12 +210,15 @@ export function useTimelineClipboardCommands({
     });
     if (motionNodes.length > 0) return { kind: "motion", nodes: motionNodes.sort((a, b) => a.absoluteStart - b.absoluteStart) };
 
-    if (showToast && (selectedPartId || selectedParts.length > 0)) toast.error("Compositions can't be copied.");
+    if (showToast && (selectedPartId || selectedParts.length > 0)) toast.error("No copyable timeline nodes selected.");
     return null;
   }
 
   function getTimelineNodeClipboardForTarget(target: TimelineNodeContextTarget): TimelineNodeClipboard | null {
-    if (target.kind === "part") return null;
+    if (target.kind === "part") {
+      const part = timeline.find((item) => item.id === target.partId);
+      return part ? { kind: "composition", nodes: [{ absoluteStart: part.start ?? 0, part }] } : null;
+    }
 
     if (target.kind === "adjustment") {
       const layer = scene.adjustmentLayers?.find((item) => item.id === target.layerId);
@@ -176,6 +245,11 @@ export function useTimelineClipboardCommands({
   }
 
   function deleteTimelineClipboardNodes(clipboard: TimelineNodeClipboard) {
+    if (clipboard.kind === "composition") {
+      deleteCompositionsFromTimeline(clipboard.nodes.map((node) => node.part.id));
+      return;
+    }
+
     if (clipboard.kind === "adjustment") {
       const layerIds = new Set(clipboard.nodes.map((node) => node.layer.id));
       updateSceneAdjustmentLayers((layers) => layers.filter((layer) => !layerIds.has(layer.id)));
@@ -265,11 +339,32 @@ export function useTimelineClipboardCommands({
   }
 
   function pasteTimelineNodes(targetStart?: number) {
+    return pasteTimelineNodesAt(targetStart);
+  }
+
+  function pasteTimelineNodesAt(targetStart?: number, targetCompositionLayerId?: string) {
     const clipboard = timelineNodeClipboardRef.current;
     if (!clipboard) return false;
 
     const pasteStart = clamp(targetStart ?? currentSceneTimeRef.current, 0, sceneDurationSeconds);
     const sourceStart = Math.min(...clipboard.nodes.map((node) => node.absoluteStart));
+
+    if (clipboard.kind === "composition") {
+      const sourceLayerId = clipboard.nodes.at(0)?.part.layerId ?? "comp";
+      const pastedParts = clipboard.nodes.map((node, index) => {
+        const layerId = targetCompositionLayerId ?? node.part.layerId ?? "comp";
+        const layerOffset = targetCompositionLayerId && (node.part.layerId ?? "comp") !== sourceLayerId ? 0 : node.absoluteStart - sourceStart;
+        const id = pastedTimelineNodeId("clip", index);
+        return { ...node.part, id, start: pasteStart + layerOffset, layerId, compositionId: node.part.compositionId ?? node.part.id };
+      });
+
+      const startShift = getCompositionPasteShift(pastedParts, timeline);
+
+      const finalParts = pastedParts.map((part) => ({ ...part, start: roundToPrecision(Math.max((part.start ?? 0) + startShift, 0), timelinePrecision) }));
+      updateSceneParts((parts) => [...parts, ...finalParts]);
+      selectPart(finalParts.at(-1)?.id ?? "");
+      return true;
+    }
 
     if (clipboard.kind === "adjustment") {
       const pastedLayers = clipboard.nodes.map((node, index) => {
@@ -284,9 +379,13 @@ export function useTimelineClipboardCommands({
     if (clipboard.kind === "transition") {
       const pastedLayers = clipboard.nodes.map((node, index) => {
         const start = clamp(pasteStart + node.absoluteStart - sourceStart, 0, sceneDurationSeconds);
-        return { ...node.layer, id: pastedTimelineNodeId("trn", index), name: `${node.layer.name} copy`, start: roundToPrecision(start, timelinePrecision) };
+        return { ...node.layer, id: pastedTimelineNodeId("trn", index), name: `${node.layer.name} copy`, start };
       });
-      updateSceneTransitionLayers((layers) => [...layers, ...pastedLayers]);
+      updateSceneTransitionLayers((layers) => {
+        const startShift = getTransitionPasteShift(pastedLayers, layers);
+        const finalLayers = pastedLayers.map((layer) => ({ ...layer, start: roundToPrecision(Math.max(layer.start + startShift, 0), timelinePrecision) }));
+        return [...layers, ...finalLayers];
+      });
       selectTransitionLayer(pastedLayers.at(-1)?.id ?? "");
       return true;
     }
@@ -321,7 +420,7 @@ export function useTimelineClipboardCommands({
   }
 
   function pasteTimelineNodesSilently() {
-    pasteTimelineNodes();
+    pasteTimelineNodesAt();
   }
 
   function openTimelineBlankContextMenu(event: ReactMouseEvent<HTMLElement>, target: TimelineBlankContextTarget) {
@@ -332,7 +431,7 @@ export function useTimelineClipboardCommands({
       x: event.clientX,
       y: event.clientY,
       items: [
-        { label: "Paste", action: () => { pasteTimelineNodes(pasteStart); }, disabled: !timelineNodeClipboardRef.current },
+        { label: "Paste", action: () => { pasteTimelineNodesAt(pasteStart, target.compositionLayerId); }, disabled: !timelineNodeClipboardRef.current },
       ],
     });
   }
@@ -367,7 +466,7 @@ export function useTimelineClipboardCommands({
           deleteTimelineClipboardNodes(menuClipboard);
           toast.success(`${menuClipboard.nodes.length} timeline node${menuClipboard.nodes.length === 1 ? "" : "s"} cut`);
         } },
-        { label: "Paste", action: () => { pasteTimelineNodes(target.time); }, disabled: !timelineNodeClipboardRef.current },
+        { label: "Paste", action: () => { pasteTimelineNodesAt(target.time, target.compositionLayerId); }, disabled: !timelineNodeClipboardRef.current },
         { label: "Delete", danger: true, action: () => {
           if (target.kind === "part") deleteCompositionsFromTimeline(targetAlreadySelected ? selectedParts.map((selection) => selection.partId) : [target.partId]);
           if (target.kind !== "part" && menuClipboard) deleteTimelineClipboardNodes(menuClipboard);

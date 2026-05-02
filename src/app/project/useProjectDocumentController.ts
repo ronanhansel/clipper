@@ -136,14 +136,6 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
     replaceProject(nextProject, options);
   }
 
-  function getSavedProjectSnapshotProject() {
-    try {
-      return JSON.parse(savedProjectSnapshotRef.current) as ProjectManifest;
-    } catch {
-      return undefined;
-    }
-  }
-
   function syncCompositionSourcesFromProject(nextProject: ProjectManifest) {
     const nextSources = getProjectCompositionSources(nextProject);
     compositionSourcesRef.current = nextSources;
@@ -406,6 +398,7 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
     const nextPart = await compositionFromSource({ ...basePart, id: compositionId }, source);
     const nextProject = replacePartInProject({ ...projectRef.current, compositionSources: nextSources }, compositionId, (currentPart) => ({
       ...nextPart,
+      source,
       motionMarkers: currentPart.motionMarkers,
       snapshot: currentPart.snapshot,
     }));
@@ -415,11 +408,7 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
   }
 
   async function saveProject(projectToSave = projectRef.current) {
-    const syncedSources = getSyncedCompositionSources(projectToSave, getSavedProjectSnapshotProject(), compositionSourcesRef.current);
-    if (syncedSources !== compositionSourcesRef.current) {
-      compositionSourcesRef.current = syncedSources;
-      setCompositionSources(syncedSources);
-    }
+    const syncedSources = projectToSave === projectRef.current ? compositionSourcesRef.current : getProjectCompositionSources(projectToSave);
     const embeddedProject = normalizeProject({ ...projectToSave, compositionSources: syncedSources });
     const persistedProject = serializeProjectForSave(embeddedProject);
     const projectSnapshot = getProjectContentSnapshot(persistedProject);

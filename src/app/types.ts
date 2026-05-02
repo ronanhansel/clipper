@@ -9,13 +9,13 @@ export type ProjectExportFormat = "project-package" | "scene-json";
 export type ContextMenuState = { x: number; y: number; items: ContextMenuItem[] } | null;
 export type ContextMenuItem = { label: string; action?: () => void; children?: ContextMenuItem[]; danger?: boolean; disabled?: boolean };
 export const TIMELINE_MOTION_PART_ID = "__timeline_motion__";
-export type TimelineNodeContextTarget = ({ time?: number } & (
+export type TimelineNodeContextTarget = ({ time?: number; compositionLayerId?: string } & (
   | { kind: "adjustment"; layerId: string }
   | { kind: "part"; partId: string }
   | { kind: "motion"; partId: string; markerId: string }
   | { kind: "transition"; layerId: string }
 ));
-export type TimelineBlankContextTarget = { time: number };
+export type TimelineBlankContextTarget = { time: number; compositionLayerId?: string };
 export type VideoExportProgress = { frame: number; totalFrames: number; percent: number; status: string };
 export type SettingsSection = "playback" | "timeline" | "export" | "advanced";
 export type MotionMarkerSelection = { partId: string; markerId: string };

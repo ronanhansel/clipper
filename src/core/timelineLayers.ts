@@ -143,13 +143,19 @@ export function applyTimelineBlockPreview(element: HTMLElement, options: { delta
   element.style.willChange = "transform";
   element.style.zIndex = "25";
   if (options.blocked) {
-    if (!element.dataset.originalBackground) element.dataset.originalBackground = element.style.background;
+    if (!("originalBackground" in element.dataset)) element.dataset.originalBackground = element.style.background;
+    if (!("originalColor" in element.dataset)) element.dataset.originalColor = element.style.color;
     element.style.background = "linear-gradient(180deg, #dc2626, #991b1b)";
     element.style.color = "#ffffff";
-  } else if (element.dataset.originalBackground) {
-    element.style.background = element.dataset.originalBackground;
+  } else if ("originalBackground" in element.dataset) {
+    const originalBackground = element.dataset.originalBackground ?? "";
+    const originalColor = element.dataset.originalColor ?? "";
+    if (originalBackground) element.style.background = originalBackground;
+    else element.style.removeProperty("background");
+    if (originalColor) element.style.color = originalColor;
+    else element.style.removeProperty("color");
     delete element.dataset.originalBackground;
-    element.style.removeProperty("color");
+    delete element.dataset.originalColor;
   }
   element.parentElement?.style.setProperty("overflow", "visible");
 }
@@ -160,10 +166,16 @@ export function clearTimelineBlockPreview(element: HTMLElement, resizeProperty =
   element.style.removeProperty("height");
   element.style.removeProperty("will-change");
   element.style.removeProperty("z-index");
-  if (element.dataset.originalBackground) {
-    element.style.background = element.dataset.originalBackground;
+  if ("originalBackground" in element.dataset) {
+    const originalBackground = element.dataset.originalBackground ?? "";
+    const originalColor = element.dataset.originalColor ?? "";
+    if (originalBackground) element.style.background = originalBackground;
+    else element.style.removeProperty("background");
+    if (originalColor) element.style.color = originalColor;
+    else element.style.removeProperty("color");
     delete element.dataset.originalBackground;
+    delete element.dataset.originalColor;
   }
-  element.style.removeProperty("color");
+  else element.style.removeProperty("color");
   element.parentElement?.style.removeProperty("overflow");
 }

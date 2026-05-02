@@ -316,10 +316,10 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
     setTimelineSelectionDrag(next);
   }
 
-  function openBlankTimelineContextMenu(event: ReactMouseEvent<HTMLElement>) {
+  function openBlankTimelineContextMenu(event: ReactMouseEvent<HTMLElement>, compositionLayerId?: string) {
     const target = event.target as HTMLElement;
     if (target.closest("[data-timeline-control]")) return;
-    onOpenBlankContextMenu(event, { time: timeFromClientX(event.clientX, false) });
+    onOpenBlankContextMenu(event, { time: timeFromClientX(event.clientX, false), compositionLayerId });
   }
 
   function openTimelineNodeContextMenu(event: ReactMouseEvent<HTMLElement>, target: TimelineNodeContextTarget) {
@@ -612,7 +612,7 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
     boundaries: number[];
     transformTiming: (timing: TimelineBlockTimingResult, shiftActive: boolean) => T;
     transformSnapGuide?: (timing: TimelineBlockTimingResult, result: T) => number | null;
-    isBlocked?: (item: T) => boolean;
+    isBlocked?: (item: T, targetLayerId?: string) => boolean;
     onMove: (start: number, targetLayerId?: string) => void;
     onResize: (item: T) => void;
     precision?: number;
@@ -658,11 +658,12 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
 
     function applyDrag(clientX: number, clientY: number, snap: boolean) {
       const next = getNextItem(clientX, snap);
-      const blocked = config.isBlocked?.(next) ?? false;
       if (action === "move") {
         const preview = getLayerDragPreview(category, sourceLayerId, clientY);
+        const blocked = config.isBlocked?.(next, preview.targetLayerId ?? sourceLayerId) ?? false;
         applyTimelineBlockPreview(element, { deltaX: (next.start - item.start) * pixelsPerSecond, deltaY: preview.deltaY, height: preview.height, resizeProperty: resizeCssVar, blocked });
       } else {
+        const blocked = config.isBlocked?.(next) ?? false;
         const block = { ...next, blocked } as typeof next & { blocked?: boolean };
         previewTimelineBlocks(previewMapFromBlocks(previewKind, [block]));
       }
@@ -687,11 +688,11 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
       onPreview: ({ clientX, clientY, snap }) => applyDrag(clientX, clientY, snap),
       onCommit: ({ clientX, clientY, snap }) => {
         const next = getNextItem(clientX, snap);
-        const blocked = config.isBlocked?.(next) ?? false;
+        const targetLayerId = action === "move" ? getDropLayerId(category, clientY) ?? sourceLayerId : undefined;
+        const blocked = config.isBlocked?.(next, targetLayerId) ?? false;
         clearDragState();
         if (blocked) return;
         if (action === "move") {
-          const targetLayerId = getDropLayerId(category, clientY) ?? sourceLayerId;
           onMove(next.start, targetLayerId);
         } else {
           onResize(next);
@@ -926,7 +927,7 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
       resizeCssVar: "--clipper-composition-resize-width",
       boundaries: getUniversalBlockSnapBoundaries({ excludeCompositionIds: moveTargetIds }),
       transformTiming: (timing) => ({ ...composition, start: timing.start, duration: timing.duration }),
-      isBlocked: (item) => isCompositionBlocked(item.start, item.duration, item.layerId ?? "comp", moveTargetIds),
+      isBlocked: (item, targetLayerId) => isCompositionBlocked(item.start, item.duration, targetLayerId ?? item.layerId ?? "comp", moveTargetIds),
       onMove: (start, targetLayerId) => onMoveComposition(composition.id, start, targetLayerId ?? (composition.layerId ?? "comp")),
       onResize: (next) => onUpdateComposition(composition.id, () => ({ ...composition, start: next.start, duration: next.duration })),
       precision: timelinePrecision,
@@ -1223,10 +1224,10 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
       transformTiming,
       transformSnapGuide,
       precision: timelinePrecision,
-      isBlocked: (item) => {
+      isBlocked: (item, targetLayerId) => {
         const effect = getEffectPackage(layer.effect.effectId);
         if (!effect?.tags?.includes("blocksOverlap")) return false;
-        const rowKey = layer.layerId ?? layer.effect.effectId;
+        const rowKey = targetLayerId ?? layer.layerId ?? layer.effect.effectId;
         const itemEnd = item.start + item.duration;
         return transitionLayers.some((other) => {
           if (other.id === layer.id) return false;
@@ -2019,14 +2020,14 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
             </TimelineLayerLane>) : null}
             {isCompositionMode ? motionLayers.map((layer) => <MotionLane key={layer.id} layerId={layer.id} hidden={Boolean(layer.hidden)} locked={Boolean(layer.locked)} timeline={motionTimeline} sceneDuration={timelineDisplayDuration} overflowVisible={isDraggingMotionMarker} timelineBlockPreviews={timelineBlockPreviews} motionSelectionDrag={null} motionSelectionBoxRef={motionSelectionBoxRef} selectedMotionKeys={selectedMotionKeys} selectedMotionMarkerId={selectedMotionMarkerId} selectedMotionMarkerPartId={selectedMotionMarkerPartId} onEffectDragOver={(event) => allowMotionLayerEffectDrop(event, layer.id)} onEffectDrop={(event) => dropMotionLayerEffect(event, layer.id)} onStartSelection={startTimelineSelection} onMoveSelection={continueTimelineSelection} onEndSelection={endTimelineSelection} onOpenBlankContextMenu={openBlankTimelineContextMenu} onSelectMotionMarker={onSelectMotionMarker} onOpenNodeContextMenu={openTimelineNodeContextMenu} onUpdateMotionFromPointer={updateMotionMarkerFromPointer} />) : null}
             {effectDragPreview ? <EffectDragPreviewBlock blockRef={effectDragPreviewElementRef} preview={effectDragPreview} /> : null}
-            {compositionRows.map((row) => <TimelineLayerLane key={row.id} hidden={Boolean(row.hidden)} locked={Boolean(row.locked)} overflowVisible={timelineMarkersEditable && isDraggingCompositionBlock} className="block" onDragOver={(event) => { if (timelineMarkersEditable && !row.locked && event.dataTransfer.types.includes("application/x-clipper-composition")) event.preventDefault(); }} onDrop={handleCompositionNativeDrop} onPointerDown={startTimelineSelection} onPointerMove={continueTimelineSelection} onPointerUp={endTimelineSelection} onPointerCancel={endTimelineSelection} onContextMenu={openBlankTimelineContextMenu}>
+            {compositionRows.map((row) => <TimelineLayerLane key={row.id} hidden={Boolean(row.hidden)} locked={Boolean(row.locked)} overflowVisible={timelineMarkersEditable && isDraggingCompositionBlock} className="block" onDragOver={(event) => { if (timelineMarkersEditable && !row.locked && event.dataTransfer.types.includes("application/x-clipper-composition")) event.preventDefault(); }} onDrop={handleCompositionNativeDrop} onPointerDown={startTimelineSelection} onPointerMove={continueTimelineSelection} onPointerUp={endTimelineSelection} onPointerCancel={endTimelineSelection} onContextMenu={(event) => openBlankTimelineContextMenu(event, row.id)}>
               {timeline.filter((item) => (item.layerId ?? "comp") === row.id).map((item) => {
                 const previewItem = timelineBlockPreviews?.[timelineBlockPreviewKey("composition", item.id)] ?? item;
                 const isEmptyPart = item.objects.length === 0 && item.background.elements.length === 0;
                 const isUnlinkedPart = Boolean(item.sourceMissing);
                 return (
                   <CompositionTimelineBlock dataAttributes={{ "data-timeline-composition-id": item.id }} key={item.id} name={getDisplayNameFromPath(item.filePath)} duration={previewItem.duration}
- isEmpty={isEmptyPart} sourceMissing={isUnlinkedPart} locked={Boolean(row.locked)} selected={selectedPartIds.has(item.id)} style={{ left: `${timelineDisplayDuration > 0 ? (previewItem.start / timelineDisplayDuration) * 100 : 0}%`, width: `calc(${timelineDisplayDuration > 0 ? (previewItem.duration / timelineDisplayDuration) * 100 : 0}% + var(--clipper-composition-resize-width, 0px))` }} onPointerDown={(event) => { if (timelineMarkersEditable) updateCompositionFromPointer(event, item, "move"); }} onClick={() => onSelectPart(item.id)} onDoubleClick={() => onOpenComposePart(item.id)} onContextMenu={(event) => { if (timelineMarkersEditable) openTimelineNodeContextMenu(event, { kind: "part", partId: item.id }); }} leftResizeEnabled={timelineMarkersEditable} rightResizeEnabled={timelineMarkersEditable} onLeftResize={(event) => updateCompositionFromPointer(event, item, "start")} onRightResize={(event) => updateCompositionFromPointer(event, item, "end")} />
+ isEmpty={isEmptyPart} sourceMissing={isUnlinkedPart} locked={Boolean(row.locked)} selected={selectedPartIds.has(item.id)} style={{ left: `${timelineDisplayDuration > 0 ? (previewItem.start / timelineDisplayDuration) * 100 : 0}%`, width: `calc(${timelineDisplayDuration > 0 ? (previewItem.duration / timelineDisplayDuration) * 100 : 0}% + var(--clipper-composition-resize-width, 0px))` }} onPointerDown={(event) => { if (timelineMarkersEditable) updateCompositionFromPointer(event, item, "move"); }} onClick={() => onSelectPart(item.id)} onDoubleClick={() => onOpenComposePart(item.id)} onContextMenu={(event) => { if (timelineMarkersEditable) openTimelineNodeContextMenu(event, { kind: "part", partId: item.id, compositionLayerId: row.id }); }} leftResizeEnabled={timelineMarkersEditable} rightResizeEnabled={timelineMarkersEditable} onLeftResize={(event) => updateCompositionFromPointer(event, item, "start")} onRightResize={(event) => updateCompositionFromPointer(event, item, "end")} />
                 );
               })}
             </TimelineLayerLane>)}
