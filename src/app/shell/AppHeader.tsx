@@ -23,9 +23,9 @@ type AppHeaderProps = {
 
 export function AppHeader({ hasActiveComposition, hasUnsavedChanges, partName, projectName, projectNameDraft, renamingProject, sceneName, onCancelProjectRename, onCloseProject, onCommitProjectRename, onExportOpen, onOpenProject, onProjectNameDraftChange, onProjectTitleContextMenu, onSaveAll, onSettingsOpen }: AppHeaderProps) {
   return (
-    <header className={`${appDragRegion} grid grid-cols-[220px_1fr_500px] items-center gap-[18px] border-b border-[#2d313b] bg-[rgba(22,24,31,0.98)] px-[22px]`}>
+    <header className={`${appDragRegion} relative grid grid-cols-[1fr_auto] items-center gap-[18px] border-b border-[#2d313b] bg-[rgba(22,24,31,0.98)] px-[22px]`}>
       <div />
-      <div className={`${appNoDragRegion} flex min-w-0 items-baseline justify-center gap-2 justify-self-center text-center leading-none`} onContextMenu={onProjectTitleContextMenu} title="Right-click to rename project">
+      <div className={`${appNoDragRegion} pointer-events-auto absolute left-1/2 top-1/2 flex w-[520px] max-w-[520px] -translate-x-1/2 -translate-y-1/2 items-baseline justify-center gap-2 text-center leading-none`} onContextMenu={onProjectTitleContextMenu} title="Right-click to rename project">
         {renamingProject ? <Input autoFocus className="h-7 w-[240px] border-[var(--clipper-accent)] bg-[#171920] px-2 py-0 text-center text-[14px] font-bold" value={projectNameDraft} onBlur={onCommitProjectRename} onChange={(event) => onProjectNameDraftChange(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") onCommitProjectRename(); if (event.key === "Escape") onCancelProjectRename(); }} /> : <strong className="truncate text-[14px] font-bold">{projectName}</strong>}
         {!renamingProject ? <span className="text-xs text-[#565b66]">/</span> : null}
         {!renamingProject ? <span className="truncate text-xs text-[#9b9da7]">{hasActiveComposition ? `${sceneName} / ${partName}` : sceneName}</span> : null}

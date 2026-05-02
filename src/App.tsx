@@ -54,7 +54,7 @@ import { clamp, roundToPrecision, roundTenth } from "./core/math";
 import type { AdjustmentEffectPointControl } from "./core/effects/types";
 import { getTransitionEffectPackage } from "./core/effects/registry";
 import { defaultComposeLayoutState, defaultEditorLayoutState, defaultPreviewViewportState, defaultTimelineLayerState, defaultTimelineMode, defaultTimelineViewportState, emptyTimelineLayerState } from "./core/project";
-import { getExecutableAdjustmentLayers } from "./core/timeline";
+import { getExecutableAdjustmentLayers, getExecutableTransitionLayers } from "./core/timeline";
 import type { TimelineLayerCategory } from "./core/timelineLayers";
 import { FRAME_HEIGHT, FRAME_WIDTH, type Bounds, type CompositionClip, type EditorState, type FrameObject, type LayerAnimation, type MotionEffectKind, type Part, type Point, type ProjectManifest, type SelectionPayload, type TimelineClip, type TimelineLayerState, type TimelineViewportState } from "./core/types";
 import { WelcomeScreen } from "./components/WelcomeScreen";
@@ -394,7 +394,10 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
   const baseMotionLayers = timelineLayers.motionLayers?.length ? timelineLayers.motionLayers : defaultTimelineLayerState.motionLayers!;
   const motionLayers = baseMotionLayers;
   const hiddenMotionLayerIds = new Set(motionLayers.filter((layer) => layer.hidden).map((layer) => layer.id));
+  const hiddenCompositionLayerIds = new Set((timelineLayers.compositionLayers ?? []).filter((layer) => layer.hidden).map((layer) => layer.id));
   const visibleSceneAdjustmentLayers = useMemo(() => getExecutableAdjustmentLayers(scene.adjustmentLayers, timelineLayers), [scene.adjustmentLayers, timelineLayers]);
+  const visibleSceneTransitionLayers = useMemo(() => getExecutableTransitionLayers(scene.transitionLayers, timelineLayers), [scene.transitionLayers, timelineLayers]);
+  const activeCompositionHidden = Boolean(activeTimelinePart && hiddenCompositionLayerIds.has(activeTimelinePart.layerId ?? "comp"));
   const {
     formatPlaybackTimeLabel,
     jumpToEnd,
@@ -667,6 +670,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     setSelectedParts,
     setSelectedMotionMarker,
     setSelectedMotionMarkers,
+    setSelectedTransitionLayerId,
     setSelectedTransitionLayers,
     setSelectionPayload,
     setTrackerPickTranslationMarker,
@@ -1289,7 +1293,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
         <CenterPreviewPane
           blankFrameViewportStyle={blankFrameViewportStyle}
           codePaneProps={hasActiveComposition ? { part, source: compositionSources[part.filePath] ?? part.source, viewportState: project.editorState?.code?.[part.id], projectDirectory: activeProjectManifestPath.endsWith(".json") ? getDirectoryPath(activeProjectManifestPath) : undefined, onSaveAll: saveAllChanges, onSourceChange: (source) => updateCompositionFromSource(part, source, { history: false, syncSource: false }), onViewportStateChange: updateCodeViewportState } : null}
-          framePreviewProps={hasActiveComposition ? { cameraRef, dragBox, dragSelectionBoxRef, framePickPoint: activeFramePickPoint, focusPicking: isPickingZoomFocus || isPickingTranslationPosition || Boolean(pointPickAdjustment), trackerPicking: Boolean(trackerPickTranslationMarker), canSelectObjects: canSelectFrameObjects && !isPlaying, cameraTransform: cameraPreviewTransform, frameViewportRef, frameScale: framePreviewScale, isPlaying, part, partStart: activeTimelinePart?.start ?? 0, adjustmentLayers: composeMode ? [] : visibleSceneAdjustmentLayers, playbackClock, previewTime, sceneTime: currentSceneTime, timelineMode, motionLayers: composeMode ? [] : motionLayers, hiddenMotionLayerIds: composeMode ? new Set<string>() : hiddenMotionLayerIds, pickingTranslationPosition: isPickingTranslationPosition || Boolean(pointPickAdjustment), pickingZoomFocus: isPickingZoomFocus || Boolean(pointPickAdjustment), compHidden: composeMode ? false : Boolean(timelineLayers.compHidden), selectedObjects: previewSelectionObjects, marqueeDragging, editingTextObjectId: isPlaying ? null : editingTextObjectId, onFramePointerCancel, onFramePointerDown, onFramePointerDownCapture, onFramePointerMove, onFramePointerUp, onObjectPointerDown: startObjectDrag, onObjectResizePointerDown: startObjectResize, onTextEditCommit: updateTextObjectContent, onTextObjectDoubleClick: startTextObjectEdit, onTrackerTargetPick: commitTranslationTrackerPick } : null}
+          framePreviewProps={hasActiveComposition ? { cameraRef, dragBox, dragSelectionBoxRef, framePickPoint: activeFramePickPoint, focusPicking: isPickingZoomFocus || isPickingTranslationPosition || Boolean(pointPickAdjustment), trackerPicking: Boolean(trackerPickTranslationMarker), canSelectObjects: canSelectFrameObjects && !isPlaying, cameraTransform: cameraPreviewTransform, frameViewportRef, frameScale: framePreviewScale, isPlaying, part, partStart: activeTimelinePart?.start ?? 0, adjustmentLayers: composeMode ? [] : visibleSceneAdjustmentLayers, transitionLayers: composeMode ? [] : visibleSceneTransitionLayers, playbackClock, previewTime, sceneTime: currentSceneTime, timelineMode, motionLayers: composeMode ? [] : motionLayers, hiddenMotionLayerIds: composeMode ? new Set<string>() : hiddenMotionLayerIds, pickingTranslationPosition: isPickingTranslationPosition || Boolean(pointPickAdjustment), pickingZoomFocus: isPickingZoomFocus || Boolean(pointPickAdjustment), compHidden: composeMode ? false : activeCompositionHidden, selectedObjects: previewSelectionObjects, marqueeDragging, editingTextObjectId: isPlaying ? null : editingTextObjectId, onFramePointerCancel, onFramePointerDown, onFramePointerDownCapture, onFramePointerMove, onFramePointerUp, onObjectPointerDown: startObjectDrag, onObjectResizePointerDown: startObjectResize, onTextEditCommit: updateTextObjectContent, onTextObjectDoubleClick: startTextObjectEdit, onTrackerTargetPick: commitTranslationTrackerPick } : null}
           hasActiveComposition={hasActiveComposition}
           mode={mode}
           previewKey={part.id}

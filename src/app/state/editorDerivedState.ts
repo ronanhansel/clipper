@@ -5,7 +5,7 @@ import { cameraTranslationToFramePoint, CAMERA_PERSPECTIVE, getLayeredCameraPrev
 import { clamp } from "../../core/math";
 import { getMotionMarkerViews, motionBlocksToMotionMarkers } from "../../core/motionEffects";
 import { defaultAssets, defaultTimelineLayerState, getSceneFromProject, serializeProjectForSave } from "../../core/project";
-import { buildLinearTimeline, getExecutableAdjustmentLayers, getMiddleTransitionMode, getSelectedActiveMiddleMend, getSelectedMotionMiddleSnap, getTimelineMarkerMendLayerId, getTimelinePartAtTime, getMotionMarkerMendKey, getMotionMiddleSnap, isMotionMiddleSnapActive, sceneDuration as getSceneDuration, validateScene, type TimelineMendMarker } from "../../core/timeline";
+import { buildLinearTimeline, getExecutableAdjustmentLayers, getMiddleTransitionMode, getRenderableScene, getSelectedActiveMiddleMend, getSelectedMotionMiddleSnap, getTimelineMarkerMendLayerId, getTopTimelinePartAtTime, getMotionMarkerMendKey, getMotionMiddleSnap, isMotionMiddleSnapActive, sceneDuration as getSceneDuration, validateScene, type TimelineMendMarker } from "../../core/timeline";
 import { FRAME_HEIGHT, FRAME_WIDTH, type CompositionClip, type MotionEase, type MotionMarker, type ProjectManifest, type Scene, type SelectionPayload, type TimelineMode, type TimelinePart } from "../../core/types";
 import { TIMELINE_MOTION_PART_ID } from "../types";
 import type { MotionMarkerSelection } from "../types";
@@ -50,12 +50,13 @@ export function useEditorDerivedState({
   const assets = project.assets ?? defaultAssets;
   const timelineLayerState = project.editorState?.timelineLayers ?? defaultTimelineLayerState;
   const visibleAdjustmentLayers = getExecutableAdjustmentLayers(scene.adjustmentLayers, timelineLayerState);
-  const timeline = useMemo(() => buildLinearTimeline(scene), [scene]);
-  const sceneDurationSeconds = getSceneDuration({ ...scene, adjustmentLayers: visibleAdjustmentLayers });
+  const renderableScene = useMemo(() => getRenderableScene(scene, timelineLayerState), [scene, timelineLayerState]);
+  const timeline = useMemo(() => buildLinearTimeline(renderableScene), [renderableScene]);
+  const sceneDurationSeconds = getSceneDuration(renderableScene);
   const adjustedSceneTime = applyAdjustmentLayersToSceneTime(currentSceneTime, visibleAdjustmentLayers);
   const compositionLookupTime = timelineMode === "compose" ? currentSceneTime : adjustedSceneTime;
   const timelinePartLookupTime = timelineMode === "compose" && compositionLookupTime > 0 ? compositionLookupTime - 0.000001 : compositionLookupTime;
-  const timelinePartAtTime = getTimelinePartAtTime(timeline, timelinePartLookupTime);
+  const timelinePartAtTime = getTopTimelinePartAtTime(timeline, timelinePartLookupTime, timelineLayerState);
   const activeTimelinePart = timelinePartAtTime;
   const activeComposition = activeTimelinePart ? scene.compositions.find((item) => item.id === activeTimelinePart.id) ?? null : null;
   const basePart = activeComposition ?? blankPreviewComposition;
@@ -87,7 +88,7 @@ export function useEditorDerivedState({
   const selectedTranslationPart = selectedMotionViews?.motionMarkers.some((marker) => marker.id === selectedMotionMarker?.markerId) ? selectedMotionPart : null;
   const selectedTranslation = selectedTranslationPart ? selectedMotionViews?.motionMarkers.find((marker) => marker.id === selectedMotionMarker?.markerId) ?? null : null;
   const selectedPart = scene.compositions.find((item) => item.id === selectedPartId) ?? null;
-  const validationErrors = useMemo(() => validateScene({ ...scene, adjustmentLayers: visibleAdjustmentLayers }), [scene, visibleAdjustmentLayers]);
+  const validationErrors = useMemo(() => validateScene(renderableScene), [renderableScene]);
   const motionLayers = project.editorState?.timelineLayers?.motionLayers?.length ? project.editorState.timelineLayers.motionLayers : defaultTimelineLayerState.motionLayers!;
   const hiddenMotionLayerIds = useMemo(() => new Set(motionLayers.filter((layer) => layer.hidden).map((layer) => layer.id)), [motionLayers]);
   const agentContext = useMemo(() => createAgentContext(project, scene, part, selectionPayload), [project, scene, part, selectionPayload]);

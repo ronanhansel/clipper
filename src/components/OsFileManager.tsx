@@ -617,7 +617,7 @@ export const composition = new Composition({
       onPointerDown={handlePanelPointerDown}
     >
       <div className="mb-2 flex items-center justify-between px-0.5">
-        <h3 className="text-[13px] font-semibold text-[#aeb3c1]">File Manager</h3>
+        <h3 className="text-[13px] text-[#aeb3c1]">File Manager</h3>
       </div>
       {loading ? (
         <div className="px-0.5 text-[13px] text-[#737884]">Loading...</div>
@@ -743,7 +743,7 @@ function OsFileTreeNode({
       ref={dragHandle}
       data-file-manager-row="true"
       style={style}
-      className={`relative box-border grid h-full min-w-0 cursor-pointer select-none grid-cols-[16px_18px_minmax(0,1fr)_auto] items-center gap-1.5 border px-1.5 text-[13px] font-bold ${
+      className={`relative box-border grid h-full min-w-0 cursor-pointer select-none grid-cols-[16px_18px_minmax(0,1fr)_auto] items-center gap-1.5 border px-1.5 text-[13px] ${
         node.isDragging
           ? "border-[var(--clipper-accent)] bg-[var(--clipper-accent-muted-surface)] opacity-60"
           : node.willReceiveDropWithin
@@ -778,7 +778,7 @@ function OsFileTreeNode({
       {node.isEditing ? (
         <Input
           autoFocus
-          className="h-7 min-w-0 border-[var(--clipper-accent)] bg-[#171920] px-1 py-0 text-[13px] font-bold"
+          className="h-7 min-w-0 border-[var(--clipper-accent)] bg-[#171920] px-1 py-0 text-[13px]"
           value={editDraft}
           onBlur={submitEdit}
           onChange={(event) => setEditDraft(event.target.value)}

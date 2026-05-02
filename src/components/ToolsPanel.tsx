@@ -1,17 +1,20 @@
-import { mutedCaps, panelCard } from "../app/config";
+import { panelCard } from "../app/config";
 import { adjustmentEffectPackages, installedEffectPackages, motionEffectPackages, transitionEffectPackages } from "../core/effects/registry";
 import type { EditorState, EffectDefinition, EffectsPanelState, TimelineMode } from "../core/types";
 import { effectDragPreviewEvent, effectPointerDragEvent, startClipperPointerDrag } from "../lib/pointerDrag";
 import { CardsIcon, WaveTriangleIcon } from "@phosphor-icons/react";
-import { ArrowLeftRight, ChevronDown, ChevronRight, Folder } from "lucide-react";
+import { ArrowLeftRight, ChevronDown, ChevronRight, Folder, FolderOpen } from "lucide-react";
 import type { PointerEvent } from "react";
 import { NativeTree, type NativeTreeNodeRendererProps } from "./tree/NativeTree";
 
 const defaultAdjustmentAccent = "#8f65f2";
 const defaultMotionAccent = "#24b7c9";
-const effectButtonClass = "grid h-8 min-w-0 grid-cols-[16px_minmax(0,1fr)] items-center gap-2 border border-transparent px-1.5 text-left text-[12px] font-bold leading-5 text-[#f7f7f8] transition hover:bg-[#20232c] active:bg-[#242733]";
-const effectGroupClass = "grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-1.5 overflow-hidden rounded-xl border border-[#2d313b] bg-[#111319] p-2.5";
+const EFFECT_ROW_HEIGHT = 30;
+const EFFECT_TREE_INDENT = 24;
+const effectButtonClass = "grid min-w-0 grid-cols-[16px_18px_minmax(0,1fr)] items-center gap-1.5 border border-transparent px-1.5 text-left text-[13px] text-[#f7f7f8] transition hover:bg-[#20232c] active:bg-[#242733]";
+const effectGroupClass = "grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-1.5 overflow-hidden rounded-[14px] border border-dashed border-[#303646] bg-[#151821] p-3";
 const effectListClass = "timeline-scrollbar min-h-0 overflow-y-auto pt-px pr-1";
+const effectGroupLabelClass = "text-[12px] text-[#9b9da7]";
 
 type EffectGroupNode = {
   id: string;
@@ -88,16 +91,11 @@ export function ToolsPanel({ effectsPanelState, timelineMode, onEffectsPanelStat
     onEffectsPanelStateChange({ openGroups: next });
   }
 
-  function renderEffectButton(definition: EffectDefinition, depth: number) {
-    const EffectIcon = definition.category === "motion" ? WaveTriangleIcon : definition.category === "transition" ? ArrowLeftRight : CardsIcon;
-    return <button className={`${effectButtonClass} w-full cursor-grab active:cursor-grabbing`} key={definition.id} style={{ paddingLeft: 4 + depth * 18 }} onPointerDown={(event) => startEffectDrag(event, definition.id)}><EffectIcon size={14} weight="bold" className="text-[#858995]" /><span className="truncate">{definition.label}</span></button>;
-  }
-
   function renderEffectTree(tree: EffectGroupNode) {
     const rowCount = countEffectTreeRows(tree.children, openEffectGroups);
-    return <NativeTree<EffectTreeNode> data={tree.children} height={Math.max(32, rowCount * 32)} idAccessor="id" indent={18} initialOpenState={Object.fromEntries([...openEffectGroups].map((path) => [`group:${path}`, true]))} isInternal={(node) => "children" in node} movable={false} onToggle={(node) => {
+    return <NativeTree<EffectTreeNode> data={tree.children} height={Math.max(EFFECT_ROW_HEIGHT, rowCount * EFFECT_ROW_HEIGHT)} idAccessor="id" indent={EFFECT_TREE_INDENT} initialOpenState={Object.fromEntries([...openEffectGroups].map((path) => [`group:${path}`, true]))} isInternal={(node) => "children" in node} movable={false} onToggle={(node) => {
       if ("children" in node.data) toggleEffectGroup(node.data.path);
-    }} openByDefault={false} rowHeight={32} width="100%">{(props) => <EffectTreeRow {...props} onStartEffectDrag={startEffectDrag} />}</NativeTree>;
+    }} openByDefault={false} rowHeight={EFFECT_ROW_HEIGHT} width="100%">{(props) => <EffectTreeRow {...props} onStartEffectDrag={startEffectDrag} />}</NativeTree>;
   }
 
   const adjustmentEffectTree = buildEffectGroupTree(adjustmentEffectPackages);
@@ -108,19 +106,19 @@ export function ToolsPanel({ effectsPanelState, timelineMode, onEffectsPanelStat
     <section className="grid min-h-0 flex-1 overflow-hidden">
       {isCompositionMode ? <div className="grid min-h-0 grid-rows-3 gap-2 overflow-hidden">
         <div className={effectGroupClass}>
-          <span className={mutedCaps}>Transition</span>
+          <span className={effectGroupLabelClass}>Transition</span>
           <div className={effectListClass}>
             {renderEffectTree(transitionEffectTree)}
           </div>
         </div>
         <div className={effectGroupClass}>
-          <span className={mutedCaps}>Adjust</span>
+          <span className={effectGroupLabelClass}>Adjust</span>
           <div className={effectListClass}>
             {renderEffectTree(adjustmentEffectTree)}
           </div>
         </div>
         <div className={effectGroupClass}>
-          <span className={mutedCaps}>Motion</span>
+          <span className={effectGroupLabelClass}>Motion</span>
           <div className={effectListClass}>
             {renderEffectTree(motionEffectTree)}
           </div>
@@ -135,15 +133,16 @@ function EffectTreeRow({ node, style, onStartEffectDrag }: NativeTreeNodeRendere
   const data = node.data;
   if ("children" in data) {
     const Chevron = node.isOpen ? ChevronDown : ChevronRight;
-    return <button className="grid h-full w-full min-w-0 grid-cols-[16px_18px_minmax(0,1fr)] items-center gap-1.5 rounded-[7px] border border-transparent px-1 text-left text-[12px] font-black text-[#b2b6c2] transition hover:bg-[#20232c]" style={style} type="button" onClick={(event) => { event.stopPropagation(); node.toggle(); }} aria-expanded={node.isOpen}>
-      <Chevron size={15} className="text-[#f1f3f7]" />
-      <Folder size={17} className="text-[#dfe3ec]" />
-      <span className="truncate">{data.name}</span>
+    const FolderIcon = node.isOpen ? FolderOpen : Folder;
+    return <button className="grid h-full w-full min-w-0 grid-cols-[16px_18px_minmax(0,1fr)] items-center gap-1.5 border border-transparent px-1.5 text-left text-[13px] text-current transition hover:bg-[#20232c]" style={style} type="button" onClick={(event) => { event.stopPropagation(); node.toggle(); }} aria-expanded={node.isOpen}>
+      <Chevron size={14} className="text-current" />
+      <FolderIcon size={17} className="text-current" />
+      <span className="truncate px-1">{data.name}</span>
     </button>;
   }
 
   const EffectIcon = data.effect.category === "motion" ? WaveTriangleIcon : data.effect.category === "transition" ? ArrowLeftRight : CardsIcon;
-  return <button className={`${effectButtonClass} h-full w-full cursor-grab active:cursor-grabbing`} style={style} onPointerDown={(event) => onStartEffectDrag(event, data.effect.id)}><EffectIcon size={14} weight="bold" className="text-[#858995]" /><span className="truncate">{data.effect.label}</span></button>;
+  return <button className={`${effectButtonClass} h-full w-full cursor-grab active:cursor-grabbing`} style={style} onPointerDown={(event) => onStartEffectDrag(event, data.effect.id)}><span /><EffectIcon size={14} weight="bold" className="text-[#858995]" /><span className="truncate px-1">{data.effect.label}</span></button>;
 }
 
 function countEffectTreeRows(nodes: EffectTreeNode[], openGroups: Set<string>): number {

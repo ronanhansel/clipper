@@ -7,26 +7,9 @@ export const swipeTransitionLogic: Pick<TransitionEffectPackage, "applyVisualSty
     const offset = (1 - t) * 100;
 
     return {
-      overlays: [
-        {
-          id: "swipe-push",
-          target: "camera",
-          style: {
-            transform: `translateX(${-offset}%)`,
-            transition: "none",
-          },
-        },
-        {
-          id: "swipe-incoming",
-          target: "frame",
-          style: {
-            transform: `translateX(${100 - offset}%)`,
-            transition: "none",
-            position: "absolute",
-            inset: "0",
-          },
-        },
-      ],
+      cameraStyle: {
+        transform: `translateX(${-offset}%)`,
+      },
     };
   },
 };

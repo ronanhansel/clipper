@@ -1,13 +1,16 @@
 import type { ComponentProps, CSSProperties, ReactNode, UIEvent } from "react";
 import { CodePane } from "../../components/CodePane";
 import { FramePreview } from "../../components/preview/FramePreview";
+import type { TransitionLayer } from "../../core/types";
 import type { Mode } from "../types";
+
+type FramePreviewProps = ComponentProps<typeof FramePreview> & { transitionLayers?: TransitionLayer[] };
 
 type PreviewColumnProps = {
   blankFrameViewportStyle: CSSProperties;
   children: ReactNode;
   codePaneProps: ComponentProps<typeof CodePane> | null;
-  framePreviewProps: ComponentProps<typeof FramePreview> | null;
+  framePreviewProps: FramePreviewProps | null;
   hasActiveComposition: boolean;
   mode: Mode;
   onModeChange: (mode: Mode) => void;

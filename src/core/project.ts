@@ -81,12 +81,20 @@ function normalizeTimelineLayerState(state: TimelineLayerState | undefined): Tim
     return [{ id: layer.id, name: layer.name || undefined, hidden: layer.hidden || undefined, locked: layer.locked || undefined }];
   });
   const motionLayers = state?.motionLayers?.filter((layer) => layer.kind === "empty" || layer.kind === "motion") ?? defaultTimelineLayerState.motionLayers!;
+  const sourceTransitionLayers = state?.transitionLayers?.length ? state.transitionLayers : defaultTimelineLayerState.transitionLayers!;
+  const seenTransitionLayerIds = new Set<string>();
+  const transitionLayers = sourceTransitionLayers.flatMap((layer) => {
+    if (!layer.id || seenTransitionLayerIds.has(layer.id)) return [];
+    seenTransitionLayerIds.add(layer.id);
+    return [{ id: layer.id, name: layer.name || undefined, hidden: layer.hidden || undefined, locked: layer.locked || undefined }];
+  });
   const rowHeights = normalizeTimelineLayerRowHeights(state?.rowHeights);
   return {
     compHidden: state?.compHidden || undefined,
     compositionLayers: compositionLayers.length > 0 ? compositionLayers : defaultTimelineLayerState.compositionLayers!,
     adjustmentLayers: adjustmentLayers.length > 0 ? adjustmentLayers : defaultTimelineLayerState.adjustmentLayers!,
     motionLayers: (motionLayers.length > 0 ? motionLayers : defaultTimelineLayerState.motionLayers!).map((layer) => ({ ...layer, kind: layer.kind, name: layer.name || undefined, hidden: layer.hidden || undefined, locked: layer.locked || undefined })),
+    transitionLayers: transitionLayers.length > 0 ? transitionLayers : defaultTimelineLayerState.transitionLayers!,
     rowHeights: Object.keys(rowHeights).length ? rowHeights : undefined,
   };
 }

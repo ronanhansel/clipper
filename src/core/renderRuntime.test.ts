@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { evaluateBackgroundLayer, evaluateFrameObject, getMotionTranslation } from "./renderRuntime";
 import { advanceTimeSensitiveSceneTime, applyAdjustmentLayersToSceneTime, applyPlaybackAdjustmentLayersToSceneTime, applyAdjustmentLayersToVisualStyle, getSceneTimeForTimeSensitiveDisplayTime, getTimeSensitiveDisplayDuration, getTimeSensitiveDisplayTime } from "./adjustments";
 import { installedEffectPackages } from "./effects/registry";
+import { applyTransitionLayersToVisualStyle } from "./transitions";
 import type { AdjustmentLayer, BackgroundLayer, FrameObject } from "./types";
 
 const baseObject: FrameObject = {
@@ -125,6 +126,13 @@ describe("render runtime", () => {
     expect(active?.map((overlay) => overlay.target ?? "camera")).toEqual(["camera", "camera"]);
     expect(active?.[0].style.opacity).toBe(0.3);
     expect(applyAdjustmentLayersToVisualStyle(5.5, layers, 30).overlays).toBeUndefined();
+  });
+
+  it("applies transition visual styles from active layers", () => {
+    const layers = [{ id: "swipe", name: "Swipe", start: 2, duration: 4, midPoint: 2, effect: { effectId: "clipper.transition.swipe" as const, params: {} } }];
+
+    expect(applyTransitionLayersToVisualStyle(3, layers, 30).cameraStyle?.transform).toBe("translateX(-75%)");
+    expect(applyTransitionLayersToVisualStyle(6.5, layers, 30).cameraStyle).toBeUndefined();
   });
 
   it("uses package-owned point params for light leak focus", () => {

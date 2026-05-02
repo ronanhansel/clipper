@@ -13,6 +13,8 @@ export type AdjustmentVisualOverlay = {
 
 export type TransitionVisualStyle = {
   filter?: string;
+  frameStyle?: Record<string, string | number>;
+  cameraStyle?: Record<string, string | number>;
   overlays?: TransitionVisualOverlay[];
 };
 

@@ -1,5 +1,5 @@
 import { defaultAssets, serializeProjectForSave } from "../../core/project";
-import { buildLinearTimeline, sceneDuration, validateScene } from "../../core/timeline";
+import { buildLinearTimeline, getRenderableScene, sceneDuration, validateScene } from "../../core/timeline";
 import type { CompositionClip, ProjectManifest } from "../../core/types";
 import type { ProjectExportFormat } from "../types";
 import { videoExportFrameRate } from "../config";
@@ -23,7 +23,7 @@ type PrepareRenderedMediaInput = {
 class ExportService {
   async exportProject({ project, sceneId, format, includeSources, compositionSources }: ExportProjectInput) {
     const exportProject = serializeProjectForSave(project);
-    const scene = getScene(exportProject, sceneId);
+    const scene = getRenderableScene(getScene(exportProject, sceneId), exportProject.editorState?.timelineLayers);
     const timeline = buildLinearTimeline(scene);
     const payload = format === "scene-json"
       ? scene
@@ -55,7 +55,7 @@ class ExportService {
   }
 
   prepareRenderedMediaExport({ project, sceneId }: PrepareRenderedMediaInput) {
-    const scene = getScene(project, sceneId);
+    const scene = getRenderableScene(getScene(project, sceneId), project.editorState?.timelineLayers);
     const timeline = buildLinearTimeline(scene);
     const durationSeconds = sceneDuration(scene);
     const totalFrames = Math.max(1, Math.ceil(durationSeconds * videoExportFrameRate));
@@ -66,7 +66,8 @@ class ExportService {
   }
 
   renderVideoExport(exportId: string, defaultFileName: string, project: ProjectManifest, scene: ProjectManifest["scenes"][number]) {
-    return clipperHost.renderVideoExport(exportId, defaultFileName, serializeProjectForSave(project), scene, videoExportFrameRate);
+    const exportProject = serializeProjectForSave(project);
+    return clipperHost.renderVideoExport(exportId, defaultFileName, exportProject, getRenderableScene(scene, exportProject.editorState?.timelineLayers), videoExportFrameRate);
   }
 
   cancelVideoExport(exportId: string) {

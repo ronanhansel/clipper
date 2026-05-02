@@ -216,7 +216,7 @@ function FileManagerPanel() {
   return (
     <section ref={managerRef} data-file-manager-panel className="min-h-0 min-w-0 overflow-auto rounded-[14px] border border-dashed border-[#303646] bg-[#151821] p-3" onContextMenu={openProjectMenu} onKeyDown={handleFileManagerKeyDown} onPointerDown={handleFileManagerPointerDown}>
       <div className="mb-2 flex items-center justify-between px-0.5">
-        <h3 className="text-[13px] font-semibold text-[#aeb3c1]">File Manager</h3>
+        <h3 className="text-[13px] text-[#aeb3c1]">File Manager</h3>
         <button className="grid h-7 w-7 place-items-center rounded-md text-[#dfe2ea] hover:bg-[#20232c]" aria-label="Create file manager item" onClick={openCreateMenu} type="button"><Plus size={17} /></button>
       </div>
       <UnifiedFileManagerTree />
@@ -615,10 +615,10 @@ function UnifiedTreeNode({ dragHandle, node, style }: NativeTreeNodeRendererProp
 
   const dropBlockClass = node.willReceiveDropWithin ? `border-[var(--clipper-accent)] bg-[var(--clipper-accent-muted-surface)] ${node.willReceiveDropBlockStart ? "" : "border-t-transparent"} ${node.willReceiveDropBlockEnd ? "" : "border-b-transparent"}` : "";
 
-  return <div ref={dragHandle} data-file-manager-row="true" style={style} className={`relative box-border grid h-full min-w-0 cursor-pointer select-none grid-cols-[16px_18px_minmax(0,1fr)_auto] items-center gap-1.5 border px-1.5 text-[13px] font-bold ${node.isDragging ? "border-[var(--clipper-accent)] bg-[var(--clipper-accent-muted-surface)] opacity-60" : dropBlockClass || (node.isSelected || (node.isFocused && node.tree.hasFocus) ? "border-transparent bg-[#242733]" : "border-transparent hover:bg-[#20232c]")}`} onClick={(event) => { if (!event.metaKey && !event.shiftKey && isFileTreeFolderNode(node.data)) node.toggle(); }} onContextMenu={openMenu} onDragStartCapture={hideNativeCompositionDragImage}>
+  return <div ref={dragHandle} data-file-manager-row="true" style={style} className={`relative box-border grid h-full min-w-0 cursor-pointer select-none grid-cols-[16px_18px_minmax(0,1fr)_auto] items-center gap-1.5 border px-1.5 text-[13px] ${node.isDragging ? "border-[var(--clipper-accent)] bg-[var(--clipper-accent-muted-surface)] opacity-60" : dropBlockClass || (node.isSelected || (node.isFocused && node.tree.hasFocus) ? "border-transparent bg-[#242733]" : "border-transparent hover:bg-[#20232c]")}`} onClick={(event) => { if (!event.metaKey && !event.shiftKey && isFileTreeFolderNode(node.data)) node.toggle(); }} onContextMenu={openMenu} onDragStartCapture={hideNativeCompositionDragImage}>
     {node.isInternal ? <button className="grid h-4 w-4 place-items-center rounded text-current hover:bg-black/15" aria-label={`${node.isOpen ? "Collapse" : "Expand"} ${displayName}`} onClick={(event) => { event.stopPropagation(); node.toggle(); }} onDoubleClick={(event) => event.stopPropagation()} type="button">{node.isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</button> : <span />}
     <Icon size={data.kind === "asset-file" || data.kind === "composition" || data.kind === "timeline" ? 16 : 17} className={contentClass} />
-    {node.isEditing ? <Input autoFocus className="h-7 min-w-0 border-[var(--clipper-accent)] bg-[#171920] px-1 py-0 text-[13px] font-bold" value={editDraft} onBlur={submitEdit} onChange={(event) => setEditDraft(event.target.value)} onClick={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === "Enter") submitEdit(); if (event.key === "Escape") node.reset(); }} /> : <span className={`min-w-0 overflow-hidden text-ellipsis whitespace-nowrap px-1 ${contentClass}`}>{displayName}</span>}
+    {node.isEditing ? <Input autoFocus className="h-7 min-w-0 border-[var(--clipper-accent)] bg-[#171920] px-1 py-0 text-[13px]" value={editDraft} onBlur={submitEdit} onChange={(event) => setEditDraft(event.target.value)} onClick={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === "Enter") submitEdit(); if (event.key === "Escape") node.reset(); }} /> : <span className={`min-w-0 overflow-hidden text-ellipsis whitespace-nowrap px-1 ${contentClass}`}>{displayName}</span>}
     <span />
   </div>;
 }

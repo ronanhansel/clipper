@@ -29,6 +29,7 @@ type UseTimelineSelectionCommandsInput = {
   setSelectedParts: (selection: CompositionSelection[]) => void;
   setSelectedMotionMarker: (selection: MarkerSelection) => void;
   setSelectedMotionMarkers: (selection: MotionMarkerSelection[]) => void;
+  setSelectedTransitionLayerId: (id: string | null) => void;
   setSelectedTransitionLayers: (selection: Array<{ layerId: string }>) => void;
   setSelectionPayload: (payload: SelectionPayload | null) => void;
   setTrackerPickTranslationMarker: (selection: MarkerSelection) => void;
@@ -54,6 +55,7 @@ export function useTimelineSelectionCommands({
   setSelectedParts,
   setSelectedMotionMarker,
   setSelectedMotionMarkers,
+  setSelectedTransitionLayerId,
   setSelectedTransitionLayers,
   setSelectionPayload,
   setTrackerPickTranslationMarker,
@@ -76,6 +78,8 @@ export function useTimelineSelectionCommands({
     setSelectedParts(partId ? [{ partId }] : []);
     setSelectedAdjustmentLayerId(null);
     setSelectedAdjustmentLayers([]);
+    setSelectedTransitionLayerId(null);
+    setSelectedTransitionLayers([]);
     setSelectedObjectId(null);
     clearMarkerSelection();
     setSelectionPayload(null);
@@ -97,6 +101,8 @@ export function useTimelineSelectionCommands({
     setSelectedParts([]);
     setSelectedAdjustmentLayerId(null);
     setSelectedAdjustmentLayers([]);
+    setSelectedTransitionLayerId(null);
+    setSelectedTransitionLayers([]);
     setSelectedMotionMarker({ partId, markerId });
     setSelectedMotionMarkers([{ partId, markerId }]);
     setSelectedParts([]);
@@ -111,6 +117,8 @@ export function useTimelineSelectionCommands({
     setSelectedParts([]);
     setSelectedAdjustmentLayerId(null);
     setSelectedAdjustmentLayers([]);
+    setSelectedTransitionLayerId(null);
+    setSelectedTransitionLayers([]);
     setSelectedMotionMarkers(selection);
     const primarySelection = selection.at(-1) ?? null;
     setSelectedMotionMarker(primarySelection);
@@ -128,6 +136,8 @@ export function useTimelineSelectionCommands({
     setSelectedAdjustmentLayers(layerId ? [{ layerId }] : []);
     setSelectedPartId("");
     setSelectedParts([]);
+    setSelectedTransitionLayerId(null);
+    setSelectedTransitionLayers([]);
     setSelectedObjectId(null);
     setSelectionPayload(null);
     clearMarkerSelection();
@@ -140,6 +150,8 @@ export function useTimelineSelectionCommands({
     setSelectedAdjustmentLayerId(selection.at(-1)?.layerId ?? null);
     setSelectedPartId("");
     setSelectedParts([]);
+    setSelectedTransitionLayerId(null);
+    setSelectedTransitionLayers([]);
     setSelectedObjectId(null);
     setSelectionPayload(null);
     clearMarkerSelection();

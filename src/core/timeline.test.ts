@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createSelectionPayload } from "./geometry";
 import { getMotionMarkerViews, motionBlocksToMotionMarkers } from "./motionEffects";
 import { effectBlocksMending } from "./effects/registry";
-import { buildLinearTimeline, canMendTimelineMarkers, expandExplicitTimelineMarkerMendIds, getAdjustmentPlacement, getMendedMarkerDragItems, getMotionMarkerMendKey, getMotionMiddleSnap, getSelectedActiveMiddleMend, getSelectedMotionMiddleSnap, getTimelineMarkerDragSnapBoundaries, getTimelineMarkerMoves, getTimelinePartAtTime, getTopTimelineItemAtTime, isExplicitTimelineMarkerMend, rebaseCompositionTimelineMarkers, removeTimelineMotionLayerMarkers, resizeTimelineMarkersWithPush, sceneDuration, snapTimelineBlockStartToBoundary, timelineDisplayDuration, validateScene } from "./timeline";
+import { buildLinearTimeline, canMendTimelineMarkers, expandExplicitTimelineMarkerMendIds, getAdjustmentPlacement, getExecutableTransitionLayers, getMendedMarkerDragItems, getMotionMarkerMendKey, getMotionMiddleSnap, getRenderableScene, getSelectedActiveMiddleMend, getSelectedMotionMiddleSnap, getTimelineMarkerDragSnapBoundaries, getTimelineMarkerMoves, getTimelinePartAtTime, getTopTimelineItemAtTime, getTopTimelinePartAtTime, isExplicitTimelineMarkerMend, rebaseCompositionTimelineMarkers, removeTimelineMotionLayerMarkers, resizeTimelineMarkersWithPush, sceneDuration, snapTimelineBlockStartToBoundary, timelineDisplayDuration, validateScene } from "./timeline";
 import { moveTimelineStateLayer, toggleTimelineStateLayerHidden } from "./timelineLayers";
 import type { Scene, TimelinePart } from "./types";
 
@@ -61,6 +61,52 @@ describe("timeline model", () => {
       ["a", "comp_a", 1, 5],
       ["b", "comp_b", 2, 5],
     ]);
+  });
+
+  it("selects overlapping compositions by visible top-down layer order", () => {
+    const timeline = buildLinearTimeline({
+      ...scene,
+      compositions: [
+        { ...scene.compositions[0], start: 0, duration: 5, layerId: "lower" },
+        { ...scene.compositions[1], start: 0, duration: 5, layerId: "upper" },
+      ],
+    });
+
+    expect(getTopTimelinePartAtTime(timeline, 2, { compositionLayers: [{ id: "upper" }, { id: "lower" }] })?.id).toBe("b");
+    expect(getTopTimelinePartAtTime(timeline, 2, { compositionLayers: [{ id: "lower" }, { id: "upper" }] })?.id).toBe("a");
+  });
+
+  it("removes hidden composition, adjustment, motion, and transition rows from renderable scenes", () => {
+    const renderable = getRenderableScene({
+      ...scene,
+      compositions: [
+        { ...scene.compositions[0], layerId: "visible", motionMarkers: motionBlocksToMotionMarkers([{ id: "kept", effectId: "clipper.motion.zoom", layerId: "motion_visible", start: 0, duration: 1, focus: { x: 0.5, y: 0.5 }, scale: 1.5 }, { id: "hidden", effectId: "clipper.motion.pan", layerId: "motion_hidden", start: 0, duration: 1, position: { x: 10, y: 0 } }]) },
+        { ...scene.compositions[1], layerId: "hidden_comp" },
+      ],
+      adjustmentLayers: [{ id: "adj", name: "Hidden adjust", layerId: "hidden_adjust", start: 0, duration: 1, effect: { effectId: "clipper.adjustment.brightness" } }],
+      motionMarkers: motionBlocksToMotionMarkers([{ id: "scene-motion", effectId: "clipper.motion.zoom", layerId: "motion_hidden", start: 0, duration: 1, focus: { x: 0.5, y: 0.5 }, scale: 1.5 }]),
+      transitionLayers: [{ id: "transition", name: "Hidden transition", layerId: "hidden_transition", start: 0, duration: 1, midPoint: 0.5, effect: { effectId: "clipper.transition.swipe" } }],
+    }, {
+      compositionLayers: [{ id: "visible" }, { id: "hidden_comp", hidden: true }],
+      adjustmentLayers: [{ id: "hidden_adjust", hidden: true }],
+      motionLayers: [{ id: "motion_visible", kind: "motion" }, { id: "motion_hidden", kind: "motion", hidden: true }],
+      transitionLayers: [{ id: "hidden_transition", hidden: true }],
+    });
+
+    expect(renderable.compositions.map((composition) => composition.id)).toEqual(["a"]);
+    expect(renderable.compositions[0].motionMarkers.map((marker) => marker.id)).toEqual(["kept"]);
+    expect(renderable.adjustmentLayers).toEqual([]);
+    expect(renderable.motionMarkers).toEqual([]);
+    expect(renderable.transitionLayers).toEqual([]);
+  });
+
+  it("filters transition layers by visible row state", () => {
+    const transitions = [
+      { id: "visible", name: "Visible", layerId: "transition_visible", start: 0, duration: 1, midPoint: 0.5, effect: { effectId: "clipper.transition.swipe" as const } },
+      { id: "hidden", name: "Hidden", layerId: "transition_hidden", start: 0, duration: 1, midPoint: 0.5, effect: { effectId: "clipper.transition.swipe" as const } },
+    ];
+
+    expect(getExecutableTransitionLayers(transitions, { transitionLayers: [{ id: "transition_visible" }, { id: "transition_hidden", hidden: true }] }).map((layer) => layer.id)).toEqual(["visible"]);
   });
 
   it("returns no active composition inside explicit timeline gaps", () => {

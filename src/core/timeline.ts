@@ -15,6 +15,26 @@ export function buildLinearTimeline(scene: Scene): TimelineComposition[] {
   });
 }
 
+export function getRenderableScene(scene: Scene, timelineLayers: TimelineLayerState | undefined): Scene {
+  return {
+    ...scene,
+    compositions: getExecutableCompositions(scene.compositions, timelineLayers),
+    adjustmentLayers: getExecutableAdjustmentLayers(scene.adjustmentLayers, timelineLayers),
+    motionMarkers: getExecutableMotionMarkers(scene.motionMarkers, timelineLayers),
+    transitionLayers: getExecutableTransitionLayers(scene.transitionLayers, timelineLayers),
+  };
+}
+
+export function getExecutableCompositions(compositions: CompositionClip[], timelineLayers: TimelineLayerState | undefined) {
+  const hiddenRowIds = getHiddenLayerIds(timelineLayers?.compositionLayers);
+  return compositions
+    .filter((composition) => !hiddenRowIds.has(composition.layerId ?? "comp"))
+    .map((composition) => ({
+      ...composition,
+      ...withCanonicalMotionMarkers(getExecutableMotionMarkers(getCanonicalMotionMarkers(composition), timelineLayers)),
+    }));
+}
+
 export function sceneDuration(scene: Scene) {
   return buildLinearTimeline(scene).reduce((total, composition) => Math.max(
     total,
@@ -71,6 +91,17 @@ export function getExecutableAdjustmentLayers(layers: AdjustmentLayer[] | undefi
   return (layers ?? []).filter((layer) => rowIds.has(getAdjustmentLayerRowId(layer)));
 }
 
+export function getExecutableTransitionLayers(layers: TransitionLayer[] | undefined, timelineLayers: TimelineLayerState | undefined, options: { includeHiddenRows?: boolean } = {}) {
+  const rowIds = new Set((timelineLayers?.transitionLayers ?? []).filter((layer) => options.includeHiddenRows || !layer.hidden).map((layer) => layer.id));
+  if (rowIds.size === 0) return [];
+  return (layers ?? []).filter((layer) => rowIds.has(getTimelineMarkerMendLayerId(layer)));
+}
+
+export function getExecutableMotionMarkers(markers: MotionMarker[] | undefined, timelineLayers: TimelineLayerState | undefined, options: { includeHiddenRows?: boolean } = {}) {
+  const hiddenRowIds = options.includeHiddenRows ? new Set<string>() : getHiddenLayerIds(timelineLayers?.motionLayers);
+  return (markers ?? []).filter((marker) => !marker.layerId || !hiddenRowIds.has(marker.layerId));
+}
+
 export function getAdjustmentPlacement(layers: AdjustmentLayer[] | undefined, sceneDuration: number, sceneTime: number) {
   const duration = Math.min(3, Math.max(sceneDuration, 0.1));
   return { start: roundTenth(Math.max(sceneTime, 0)), duration };
@@ -122,6 +153,17 @@ export function getTimelinePartAtTime(timeline: TimelinePart[], time: number) {
   if (timeline.length === 0) return null;
   const active = [...timeline].reverse().find((item) => time >= item.start && time < item.end);
   return active ?? null;
+}
+
+export function getTopTimelinePartAtTime(timeline: TimelinePart[], time: number, timelineLayers: TimelineLayerState | undefined) {
+  if (timeline.length === 0) return null;
+  const active = timeline.filter((item) => time >= item.start && time < item.end);
+  if (active.length === 0) return null;
+  const rowOrder = getLayerOrderIndex(timelineLayers?.compositionLayers);
+  return active.sort((left, right) => {
+    const layerDiff = getLayerIndex(rowOrder, left.layerId ?? "comp") - getLayerIndex(rowOrder, right.layerId ?? "comp");
+    return layerDiff || right.start - left.start;
+  })[0];
 }
 
 export function getTopTimelineItemAtTime(timeline: TimelineComposition[], time: number, adjustmentLayers: AdjustmentLayer[] = [], motionLayers: TimelineMotionLayerState[] = [], adjustmentRowIds: string[] = [], transitionLayers: TransitionLayer[] = []): TopTimelineItem | null {
@@ -759,4 +801,16 @@ export function expandExplicitTimelineMarkerMendIds<T extends { id: string; star
   }
 
   return expandedIds;
+}
+
+function getHiddenLayerIds(layers: Array<{ id: string; hidden?: boolean }> | undefined) {
+  return new Set((layers ?? []).filter((layer) => layer.hidden).map((layer) => layer.id));
+}
+
+function getLayerOrderIndex(layers: Array<{ id: string }> | undefined) {
+  return new Map((layers ?? []).map((layer, index) => [layer.id, index]));
+}
+
+function getLayerIndex(rowOrder: Map<string, number>, layerId: string) {
+  return rowOrder.get(layerId) ?? Number.MAX_SAFE_INTEGER;
 }
