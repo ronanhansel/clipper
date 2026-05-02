@@ -1,4 +1,5 @@
 import type { ProjectManifest } from "../../../core/types";
+import { createDefaultTimelineLayerState } from "../../../core/project";
 import { reorderByIntent } from "./fileManagerPaths";
 
 export function createTimelineInProject(project: ProjectManifest, filePath: string): ProjectManifest {
@@ -10,6 +11,7 @@ export function createTimelineInProject(project: ProjectManifest, filePath: stri
       clips: [],
       adjustmentLayers: [],
       motionMarkers: [],
+      timelineLayers: createDefaultTimelineLayerState(),
       settings: {},
     }],
   };

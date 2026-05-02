@@ -188,20 +188,20 @@ async function loadDirectoryProject(manifestPath: string) {
 }
 
 async function loadDirectoryTimelines(editableRoot: string, fallbackRoot: string, timelineOrder?: string[]) {
-  const primaryDir = editableRoot ? `${editableRoot}/timelines` : "file-manager/timelines";
+  const primaryDir = editableRoot || "file-manager";
   const fallbackDir = fallbackRoot ? `${fallbackRoot}/timelines` : "timelines";
 
-  let timelineFiles = await listProjectFilesRecursive(primaryDir).then(files => files.filter(f => f.name.endsWith(".json")));
+  let timelineFiles = await listProjectFilesRecursive(primaryDir).then(files => files.filter(f => f.name.endsWith(".timeline.json")));
 
   if (timelineFiles.length === 0) {
-    timelineFiles = await listProjectFilesRecursive(fallbackDir).then(files => files.filter(f => f.name.endsWith(".json")));
+    timelineFiles = await listProjectFilesRecursive(fallbackDir).then(files => files.filter(f => f.name.endsWith(".timeline.json")));
   }
 
   const timelines = await Promise.all(
     timelineFiles.map(async (file) => {
       const document = JSON.parse(await clipperHost.readTextFile(file.path)) as TimelineDocument;
-      const repairedTimelineLayers = document.timelineLayers ? withRequiredTimelineLayerTypes(document.timelineLayers) : undefined;
-      if (document.timelineLayers && JSON.stringify(document.timelineLayers) !== JSON.stringify(repairedTimelineLayers)) {
+      const repairedTimelineLayers = withRequiredTimelineLayerTypes(document.timelineLayers);
+      if (JSON.stringify(document.timelineLayers) !== JSON.stringify(repairedTimelineLayers)) {
         await clipperHost.writeTextFile(file.path, `${JSON.stringify({ ...document, timelineLayers: repairedTimelineLayers }, null, 2)}\n`);
       }
       const filePath = projectPathFromDirectoryEntry(fallbackRoot, file.relativePath, "timelines");
@@ -332,7 +332,7 @@ async function saveDirectoryProject(manifestPath: string, project: ProjectManife
   }
 
   for (const timeline of normalized.timelines ?? []) {
-    const relativePath = safeTimelinePath(timeline, rootPath);
+    const relativePath = safeDirectoryTimelinePath(timeline, rootPath);
     const fullPath = `${fileManagerDir}/${relativePath}`;
     savedRelativePaths.add(relativePath);
     await ensureDirectoryForPath(fullPath);
@@ -381,6 +381,12 @@ function safeTimelinePath(timeline: TimelineDocument, rootPath: string) {
   return safeProjectZipPath(timeline.filePath, rootPath, "timelines", `${safeZipName(timeline.id)}.timeline.json`, ".json");
 }
 
+function safeDirectoryTimelinePath(timeline: TimelineDocument, rootPath: string) {
+  const relativePath = relativeProjectFilePath(timeline.filePath, rootPath);
+  if (relativePath.endsWith(".timeline.json") && isSafeZipEntryPath(relativePath)) return relativePath;
+  return safeTimelinePath(timeline, rootPath);
+}
+
 function safeCompositionFolderPath(folderPath: string, rootPath: string) {
   const relativePath = relativeProjectFilePath(folderPath, rootPath);
   const entryPath = relativePath?.startsWith("compositions/") ? relativePath : relativePath ? `compositions/${relativePath}` : "compositions";
@@ -411,6 +417,8 @@ function projectPathFromZipEntry(rootPath: string, entryName: string) {
 }
 
 function projectPathFromDirectoryEntry(rootPath: string, relativePath: string, folder: "compositions" | "timelines") {
+  if (folder === "timelines" && relativePath.endsWith(".timeline.json")) return relativePath;
+  if (relativePath.startsWith(`${folder}/`)) return relativePath;
   return `${folder}/${relativePath}`;
 }
 

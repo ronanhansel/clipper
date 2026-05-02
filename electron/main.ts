@@ -654,10 +654,11 @@ function getTimelinePartAtTime(timeline: TimelinePart[], time: number) {
 
 function getActiveTimelinePartsAtTime(timeline: TimelinePart[], time: number, timelineLayers: TimelineLayerState | undefined) {
   const rowOrder = new Map((timelineLayers?.compositionLayers ?? []).map((layer, index) => [layer.id, index]));
-  return timeline.filter((item) => time >= item.start && time < item.end).sort((left, right) => {
+  const topToBottom = timeline.filter((item) => time >= item.start && time < item.end).sort((left, right) => {
     const layerDiff = getLayerIndex(rowOrder, left.layerId) - getLayerIndex(rowOrder, right.layerId);
     return layerDiff || right.start - left.start;
-  }).reverse();
+  });
+  return topToBottom.slice(0, 1).reverse();
 }
 
 function getLayerIndex(rowOrder: Map<string, number>, layerId: string | undefined) {
@@ -837,13 +838,15 @@ function buildFrameBody(parts: Array<{ part: CompositionClip; previewTime: numbe
 
 function buildTransitionFrameBody(parts: { from: Array<{ part: CompositionClip; previewTime: number }>; to: Array<{ part: CompositionClip; previewTime: number }> }, progress: number, visualAdjustmentStyle: AdjustmentVisualStyle, visualTransitionStyle: TransitionVisualStyle) {
   const frameStyle = cssStyle({ position: "relative", width: frameWidth, height: frameHeight, overflow: "hidden", background: "#000" });
-  const visualStyle = cssStyle({ position: "absolute", inset: 0, filter: [visualAdjustmentStyle.filter, visualTransitionStyle.filter].filter(Boolean).join(" ") || undefined });
-  const incomingStyle = cssStyle({ position: "absolute", inset: 0, overflow: "hidden", clipPath: `inset(0 ${Math.max(0, 1 - progress) * 100}% 0 0)` });
+  const visualStyle = cssStyle({ position: "absolute", inset: 0, filter: [visualAdjustmentStyle.filter, visualTransitionStyle.filter].filter(Boolean).join(" ") || undefined, ...visualTransitionStyle.frameStyle });
+  const clampedProgress = clamp(progress, 0, 1);
+  const outgoingStyle = cssStyle({ position: "absolute", inset: 0, overflow: "hidden", transform: `translate3d(${-clampedProgress * 100}%,0,0)` });
+  const incomingStyle = cssStyle({ position: "absolute", inset: 0, overflow: "hidden", transform: `translate3d(${(1 - clampedProgress) * 100}%,0,0)` });
   const frameOverlayHtml = adjustmentOverlayHtml([...(visualAdjustmentStyle.overlays?.filter((overlay) => overlay.target === "frame") ?? []), ...(visualTransitionStyle.overlays?.filter((overlay) => overlay.target === "frame") ?? [])]);
   const cameraOverlayHtml = adjustmentOverlayHtml([...(visualAdjustmentStyle.overlays?.filter((overlay) => (overlay.target ?? "camera") === "camera") ?? []), ...(visualTransitionStyle.overlays?.filter((overlay) => (overlay.target ?? "camera") === "camera") ?? [])]);
   const fromHtml = parts.from.map(({ part, previewTime }) => compositionLayerHtml(part, previewTime)).join("");
   const toHtml = parts.to.map(({ part, previewTime }) => compositionLayerHtml(part, previewTime)).join("");
-  return `<div style="${frameStyle}"><div style="${visualStyle}"><div style="${cssStyle({ position: "absolute", inset: 0 })}">${fromHtml}</div><div style="${incomingStyle}">${toHtml}</div>${frameOverlayHtml}</div>${cameraOverlayHtml}</div>`;
+  return `<div style="${frameStyle}"><div style="${visualStyle}"><div style="${outgoingStyle}">${fromHtml}</div><div style="${incomingStyle}">${toHtml}</div>${frameOverlayHtml}</div>${cameraOverlayHtml}</div>`;
 }
 
 function compositionLayerHtml(part: CompositionClip, previewTime: number) {

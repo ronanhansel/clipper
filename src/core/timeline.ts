@@ -179,7 +179,8 @@ export function getActiveTimelinePartsAtTime(timeline: TimelinePart[], time: num
     const layerDiff = getLayerIndex(rowOrder, left.layerId ?? "comp") - getLayerIndex(rowOrder, right.layerId ?? "comp");
     return layerDiff || right.start - left.start;
   });
-  return order === "top-to-bottom" ? topToBottom : [...topToBottom].reverse();
+  const visible = topToBottom.slice(0, 1);
+  return order === "top-to-bottom" ? visible : [...visible].reverse();
 }
 
 export function getTimelinePreviewState({ adjustmentLayers, compositions, sceneDurationSeconds, sceneTime, timeline, timelineLayers, timelineMode, transitionLayers }: { adjustmentLayers?: AdjustmentLayer[]; compositions: CompositionClip[]; sceneDurationSeconds: number; sceneTime: number; timeline: TimelinePart[]; timelineLayers?: TimelineLayerState; timelineMode: "compose" | "composition"; transitionLayers?: TransitionLayer[] }): TimelinePreviewState {

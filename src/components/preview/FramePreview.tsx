@@ -28,7 +28,7 @@ export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dra
   const visualTransition = useMemo(() => applyTransitionLayersToVisualStyle(displaySceneTime, transitionLayers), [displaySceneTime, transitionLayers]);
   const transitionProgress = getActiveTransitionProgress(displaySceneTime, transitionLayers);
   const useTransitionComposite = Boolean(transitionPreviewParts && transitionProgress !== null);
-  const visualAdjustmentStyle = useMemo(() => ({ filter: [visualAdjustment.filter, visualTransition.filter].filter(Boolean).join(" ") || undefined, ...(!useTransitionComposite ? visualTransition.frameStyle : undefined) }) as CSSProperties, [useTransitionComposite, visualAdjustment.filter, visualTransition.filter, visualTransition.frameStyle]);
+  const visualAdjustmentStyle = useMemo(() => ({ filter: [visualAdjustment.filter, visualTransition.filter].filter(Boolean).join(" ") || undefined, ...visualTransition.frameStyle }) as CSSProperties, [visualAdjustment.filter, visualTransition.filter, visualTransition.frameStyle]);
   const transitionCameraStyle = useMemo(() => (useTransitionComposite ? undefined : visualTransition.cameraStyle) as CSSProperties | undefined, [useTransitionComposite, visualTransition.cameraStyle]);
   const frameVisualAdjustmentOverlaysRef = useRef<HTMLDivElement | null>(null);
   const cameraVisualAdjustmentOverlaysRef = useRef<HTMLDivElement | null>(null);
@@ -198,12 +198,16 @@ function CompositionLayerView({ active, animationsEnabled, canSelect, editingTex
 }
 
 function TransitionCompositeView({ animationsEnabled, progress, transitionPreviewParts }: { animationsEnabled: boolean; progress: number; transitionPreviewParts: { from: Array<{ part: Part; start: number; previewTime: number }>; to: Array<{ part: Part; start: number; previewTime: number }> } }) {
+  const clampedProgress = clamp(progress, 0, 1);
+  const outgoingTransform = `translate3d(${-clampedProgress * 100}%, 0, 0)`;
+  const incomingTransform = `translate3d(${(1 - clampedProgress) * 100}%, 0, 0)`;
+
   return (
     <>
-      <div className="absolute inset-0">
+      <div className="absolute inset-0 overflow-hidden" style={{ transform: outgoingTransform, willChange: "transform" }}>
         {transitionPreviewParts.from.map((item) => <CompositionLayerView key={`from:${item.part.id}:${item.start}`} active={false} animationsEnabled={animationsEnabled} canSelect={false} editingTextObjectId={null} focusPicking={false} isPlaying={false} part={item.part} previewTime={item.previewTime} onObjectPointerDown={noopObjectPointerDown} onTextEditCommit={noopTextEditCommit} onTextObjectDoubleClick={noopTextDoubleClick} />)}
       </div>
-      <div className="absolute inset-0 overflow-hidden" style={{ clipPath: `inset(0 ${Math.max(0, 1 - progress) * 100}% 0 0)` }}>
+      <div className="absolute inset-0 overflow-hidden" style={{ transform: incomingTransform, willChange: "transform" }}>
         {transitionPreviewParts.to.map((item) => <CompositionLayerView key={`to:${item.part.id}:${item.start}`} active={false} animationsEnabled={animationsEnabled} canSelect={false} editingTextObjectId={null} focusPicking={false} isPlaying={false} part={item.part} previewTime={item.previewTime} onObjectPointerDown={noopObjectPointerDown} onTextEditCommit={noopTextEditCommit} onTextObjectDoubleClick={noopTextDoubleClick} />)}
       </div>
     </>

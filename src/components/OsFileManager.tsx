@@ -6,6 +6,7 @@ import type { ContextMenuState } from "../app/types";
 import { clipperHost } from "../app/clipperHost";
 import { getDirectoryPath, nextNumberedName } from "../app/features/file-manager/fileManagerPaths";
 import { getDisplayName, getDragPreviewDisplayName, getFileType, nextNumberedSemanticName, reconstructFileName } from "../core/fileNames";
+import { createDefaultTimelineLayerState } from "../core/project";
 import { getTransparentNativeDragImage } from "../lib/nativeDragImage";
 import { clipperDragGhostClassName, clipperDragGhostOffset, compositionDragPreviewEvent, compositionPointerDragEvent, dispatchClipperPointerDrag, type CompositionPointerDragDetail, type PointerDragPreviewDetail } from "../lib/pointerDrag";
 import { AppContextMenu } from "./AppContextMenu";
@@ -394,6 +395,7 @@ export const composition = new Composition({
         adjustmentLayers: [],
         motionMarkers: [],
         transitionLayers: [],
+        timelineLayers: createDefaultTimelineLayerState(),
         settings: {},
       }, null, 2);
       const filePath = `${parentPath}/${name}`;
@@ -813,6 +815,7 @@ function OsFileTreeNode({
       const timelineId = data.timelineId ?? displayName;
       event.dataTransfer.setData("application/x-clipper-timeline", timelineId);
     }
+    if (fileType === "composition") event.dataTransfer.setData("application/x-clipper-composition", projectRelativeFilePath(data.path, effectiveDirectory));
     event.dataTransfer.setDragImage(getTransparentNativeDragImage(), 0, 0);
   }
 

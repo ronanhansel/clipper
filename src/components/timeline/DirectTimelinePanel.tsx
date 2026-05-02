@@ -1548,13 +1548,17 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
     return getSceneTimeFromClientX(event.clientX);
   }
 
-  function getCompositionDropTargetFromEvent(event: DragEvent<HTMLElement>) {
+  function getCompositionDropTargetFromPoint(clientX: number, clientY: number) {
     const rect = timelineViewportRef.current?.firstElementChild?.getBoundingClientRect();
     if (!rect) return null;
-    const targetLayer = getTimelineLayerRowAtClientY(layerLayout, rect, event.clientY, "comp")?.row.key;
+    const targetLayer = getTimelineLayerRowAtClientY(layerLayout, rect, clientY, "comp")?.row.key;
     const compositionRow = compositionRows.find((row) => row.id === targetLayer) ?? compositionRows.find((row) => !row.locked);
     if (!compositionRow || compositionRow.locked) return null;
-    return { layerId: compositionRow.id, sceneTime: getDropSceneTime(event) };
+    return { layerId: compositionRow.id, sceneTime: getSceneTimeFromClientX(clientX) };
+  }
+
+  function getCompositionDropTargetFromEvent(event: DragEvent<HTMLElement>) {
+    return getCompositionDropTargetFromPoint(event.clientX, event.clientY);
   }
 
   function handleCompositionNativeDragOver(event: DragEvent<HTMLDivElement>) {
@@ -1567,11 +1571,11 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
   }
 
   function handleCompositionNativeDrop(event: DragEvent<HTMLDivElement>) {
-    if (!timelineMarkersEditable) return;
     const activeCompositionDrag = getActiveCompositionPointerDrag();
     const compositionId = event.dataTransfer.getData("application/x-clipper-composition") || activeCompositionDrag?.compositionId || "";
-    if (!compositionId) return;
     const target = getCompositionDropTargetFromEvent(event);
+    if (!timelineMarkersEditable) return;
+    if (!compositionId) return;
     if (!target) return;
     event.preventDefault();
     event.stopPropagation();

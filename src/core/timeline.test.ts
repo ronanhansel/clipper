@@ -76,7 +76,7 @@ describe("timeline model", () => {
     expect(getTopTimelinePartAtTime(timeline, 2, { compositionLayers: [{ id: "lower" }, { id: "upper" }] })?.id).toBe("a");
   });
 
-  it("returns active composition stacks in render order", () => {
+  it("returns the top active composition in render order", () => {
     const timeline = buildLinearTimeline({
       ...scene,
       compositions: [
@@ -85,7 +85,7 @@ describe("timeline model", () => {
       ],
     });
 
-    expect(getActiveTimelinePartsAtTime(timeline, 2, { compositionLayers: [{ id: "upper" }, { id: "lower" }] }, "bottom-to-top").map((part) => part.id)).toEqual(["a", "b"]);
+    expect(getActiveTimelinePartsAtTime(timeline, 2, { compositionLayers: [{ id: "upper" }, { id: "lower" }] }, "bottom-to-top").map((part) => part.id)).toEqual(["b"]);
     expect(getActiveTimelinePartsAtTime(timeline, 4, { compositionLayers: [{ id: "upper" }, { id: "lower" }] }, "bottom-to-top").map((part) => part.id)).toEqual(["a"]);
   });
 
@@ -111,9 +111,9 @@ describe("timeline model", () => {
 
     expect(previewState.activeTimelinePart?.id).toBe("b");
     expect(previewState.previewTime).toBe(0.5);
-    expect(previewState.previewParts.map((item) => [item.part.id, item.previewTime])).toEqual([["a", 2.5], ["b", 0.5]]);
+    expect(previewState.previewParts.map((item) => [item.part.id, item.previewTime])).toEqual([["b", 0.5]]);
     expect(previewState.transitionPreviewParts?.from.map((item) => item.part.id)).toEqual(["a"]);
-    expect(previewState.transitionPreviewParts?.to.map((item) => [item.part.id, item.previewTime])).toEqual([["a", 3], ["b", 1]]);
+    expect(previewState.transitionPreviewParts?.to.map((item) => [item.part.id, item.previewTime])).toEqual([["b", 1]]);
   });
 
   it("removes hidden composition, adjustment, motion, and transition rows from renderable scenes", () => {

@@ -296,7 +296,7 @@ export const NativeTree = forwardRef(function NativeTree<T>(props: NativeTreePro
     const ids = getNodeDragIds(node);
     if (!selectedIdsRef.current.includes(node.id)) updateSelection(ids, node.id);
     event.dataTransfer?.setData("text/plain", node.id);
-    if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+    if (event.dataTransfer) event.dataTransfer.effectAllowed = event.dataTransfer.types.includes("application/x-clipper-composition") ? "copyMove" : "move";
     setDragState({ ids, primaryId: node.id, mouse: { x: event.clientX, y: event.clientY } });
   }
 

@@ -17,6 +17,15 @@ export const defaultTimelineLayerState: TimelineLayerState = {
   transitionLayers: [{ id: "transition" }],
 };
 
+export function createDefaultTimelineLayerState(): TimelineLayerState {
+  return {
+    compositionLayers: defaultTimelineLayerState.compositionLayers?.map((layer) => ({ ...layer })),
+    adjustmentLayers: defaultTimelineLayerState.adjustmentLayers?.map((layer) => ({ ...layer })),
+    motionLayers: defaultTimelineLayerState.motionLayers?.map((layer) => ({ ...layer })),
+    transitionLayers: defaultTimelineLayerState.transitionLayers?.map((layer) => ({ ...layer })),
+  };
+}
+
 export const emptyTimelineLayerState: TimelineLayerState = {
   compositionLayers: [],
   adjustmentLayers: [],
@@ -72,11 +81,12 @@ function normalizeTimelineMode(mode: unknown): TimelineMode {
 }
 
 export function withRequiredTimelineLayerTypes(state: TimelineLayerState | undefined): TimelineLayerState {
+  const defaults = createDefaultTimelineLayerState();
   const next = { ...(state ?? {}) };
   for (const key of timelineLayerKeys) {
     const layers = next[key];
     if (!Array.isArray(layers) || layers.length === 0) {
-      (next as Record<TimelineLayerArrayKey, unknown>)[key] = defaultTimelineLayerState[key];
+      (next as Record<TimelineLayerArrayKey, unknown>)[key] = defaults[key];
     }
   }
   return next;
@@ -271,7 +281,7 @@ function getProjectTimelines(project: ProjectManifest): TimelineDocument[] {
       }),
       adjustmentLayers: normalizeAdjustmentLayers(rest.adjustmentLayers),
       motionMarkers: timelineMotionMarkers,
-      timelineLayers: rest.timelineLayers || legacyTimelineLayers ? normalizeTimelineLayerState(rest.timelineLayers ?? legacyTimelineLayers) : undefined,
+      timelineLayers: normalizeTimelineLayerState(rest.timelineLayers ?? legacyTimelineLayers),
       settings: rest.settings ?? {},
     };
   });

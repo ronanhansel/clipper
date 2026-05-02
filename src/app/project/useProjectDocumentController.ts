@@ -81,6 +81,7 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
   const implicitFileOperationActiveCountRef = useRef(0);
   const implicitFileOperationSaveVersionRef = useRef(0);
   const implicitFileOperationSaveTimeoutRef = useRef(0);
+  const explicitSaveBusyReleaseTimeoutRef = useRef(0);
   const saveAllChangesRef = useRef<(() => Promise<void>) | null>(null);
   const watchedProjectDirectory = getDirectoryPath(activeProjectManifestPath);
 
@@ -414,6 +415,8 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
     const projectSnapshot = getProjectContentSnapshot(persistedProject);
     const compositionSourcesSnapshot = JSON.stringify(persistedProject.compositionSources ?? {});
 
+    window.clearTimeout(explicitSaveBusyReleaseTimeoutRef.current);
+    setIsFileSystemBusy(true);
     try {
       const result = await projectPersistenceService.saveProject({ manifestPath: activeProjectManifestPathRef.current, project: persistedProject });
       const nextSavedProjectSnapshot = result.projectSnapshot ? getProjectContentSnapshot(JSON.parse(result.projectSnapshot) as ProjectManifest) : projectSnapshot;
@@ -425,6 +428,9 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
       setSourceStatus(result.sourceStatus);
     } catch (error) {
       notifyError(error, "Unable to save project.");
+    } finally {
+      if (pendingFileOperationsRef.current > 0) setIsFileSystemBusy(true);
+      else explicitSaveBusyReleaseTimeoutRef.current = window.setTimeout(() => setIsFileSystemBusy(false), 1000);
     }
   }
 
@@ -538,6 +544,7 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
 
   useEffect(() => () => {
     window.clearTimeout(implicitFileOperationSaveTimeoutRef.current);
+    window.clearTimeout(explicitSaveBusyReleaseTimeoutRef.current);
   }, []);
 
   return {

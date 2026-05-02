@@ -665,6 +665,7 @@ function UnifiedTreeNode({ dragHandle, node, style }: NativeTreeNodeRendererProp
     if (node.isEditing) return;
     event.dataTransfer.setDragImage(getTransparentNativeDragImage(), 0, 0);
     if (data.kind === "timeline") event.dataTransfer.setData("application/x-clipper-timeline", data.timeline.id);
+    if (data.kind === "composition") event.dataTransfer.setData("application/x-clipper-composition", data.composition.id);
   }
 
   const dropBlockClass = node.willReceiveDropWithin ? `border-[var(--clipper-accent)] bg-[var(--clipper-accent-muted-surface)] ${node.willReceiveDropBlockStart ? "" : "border-t-transparent"} ${node.willReceiveDropBlockEnd ? "" : "border-b-transparent"}` : "";
