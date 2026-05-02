@@ -17,6 +17,14 @@ export const defaultTimelineLayerState: TimelineLayerState = {
   transitionLayers: [{ id: "transition", name: "Transition" }],
 };
 
+export const emptyTimelineLayerState: TimelineLayerState = {
+  compName: "",
+  compositionLayers: [],
+  adjustmentLayers: [],
+  motionLayers: [],
+  transitionLayers: [],
+};
+
 function normalizeRightPanelTab(tab: unknown) {
   return tab === "motion" || tab === "agent" ? tab : "video";
 }
@@ -184,7 +192,6 @@ function getSceneFromProjectWithDocs(project: ProjectManifest, sceneId: string, 
 
 function getProjectTimelines(project: ProjectManifest): TimelineDocument[] {
   const timelines = project.timelines ?? [];
-  if (timelines.length === 0) throw new Error("Project is missing timelines.");
   return timelines.map((timeline) => {
     const clipMotion = timeline.clips.flatMap((clip) => {
       const motionMarkers = getCanonicalMotionMarkers(clip);
@@ -299,7 +306,7 @@ export function normalizeProject(project: ProjectManifest): ProjectManifest {
   const compositionDocuments = getCompositionDocuments(project);
   const timelines = getProjectTimelines(project);
   const scenes = getScenesFromTimelines(timelines, compositionDocuments);
-  const selectedSceneId = timelines.some((timeline) => timeline.id === (project.editorState?.selectedTimelineId ?? project.editorState?.selectedSceneId)) ? (project.editorState?.selectedTimelineId ?? project.editorState?.selectedSceneId) : timelines[0]?.id;
+  const selectedSceneId = timelines.some((timeline) => timeline.id === (project.editorState?.selectedTimelineId ?? project.editorState?.selectedSceneId)) ? (project.editorState?.selectedTimelineId ?? project.editorState?.selectedSceneId) : undefined;
   const selectedScene = scenes.find((scene) => scene.id === selectedSceneId) ?? scenes[0];
   const selectedMotionMarker = normalizeEditorMarkerSelection(selectedScene, project.editorState?.selectedMotionMarker);
   const selectedPartId = selectedScene?.compositions.some((composition) => composition.id === project.editorState?.selectedPartId) ? project.editorState?.selectedPartId : undefined;
@@ -315,7 +322,7 @@ export function normalizeProject(project: ProjectManifest): ProjectManifest {
       mode: project.editorState?.mode === "code" ? "code" : "interactive",
       leftPanelTab: project.editorState?.leftPanelTab === "tools" ? "tools" : "assets",
       rightPanelTab: normalizeRightPanelTab(project.editorState?.rightPanelTab),
-      selectedTimelineId: timelines.some((timeline) => timeline.id === project.editorState?.selectedTimelineId) ? project.editorState?.selectedTimelineId : timelines[0]?.id,
+      selectedTimelineId: timelines.some((timeline) => timeline.id === project.editorState?.selectedTimelineId) ? project.editorState?.selectedTimelineId : undefined,
       selectedSceneId,
       selectedPartId,
       selectedMotionMarker,
@@ -351,7 +358,7 @@ export function normalizeProject(project: ProjectManifest): ProjectManifest {
 }
 
 export function getActiveTimeline(project: ProjectManifest, timelineId: string | undefined) {
-  return project.timelines?.find((timeline) => timeline.id === timelineId) ?? project.timelines?.[0] ?? null;
+  return project.timelines?.find((timeline) => timeline.id === timelineId) ?? null;
 }
 
 export function deleteCompositionFromProject(project: ProjectManifest, compositionId: string): ProjectManifest {

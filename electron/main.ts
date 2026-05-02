@@ -194,7 +194,14 @@ ipcMain.handle("clipper:reveal-file", async (_event, relativePath: string) => {
 });
 
 ipcMain.handle("clipper:trash-file", async (_event, relativePath: string) => {
-  await shell.trashItem(resolveClipperFile(relativePath));
+  const filePath = resolveClipperFile(relativePath);
+  try {
+    await fs.access(filePath);
+  } catch (error) {
+    if ((error as { code?: string }).code === "ENOENT") return;
+    throw error;
+  }
+  await shell.trashItem(filePath);
 });
 
 ipcMain.handle("clipper:rename-file", async (_event, relativePath: string, nextRelativePath: string) => {
@@ -341,22 +348,39 @@ ipcMain.handle("clipper:open-project-manifest", async () => {
   return getClipperRelativePath(selectedPath);
 });
 
+function validateProjectFolderName(name: string): string | null {
+  if (!name) return "Project name cannot be empty.";
+  if (/^\s|\s$/.test(name)) return "Name cannot start or end with whitespace.";
+  if (name === "." || name === "..") return "Invalid project name.";
+  if (/[\x00-\x1F]/.test(name)) return "Name cannot contain control characters.";
+  if (/[<>:"\/\\|?*]/.test(name)) return 'Name cannot contain < > : " / \\ | ? *';
+  if (/^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\..*)?$/i.test(name)) return `"${name}" is a reserved system name.`;
+  if (name.endsWith(".")) return "Name cannot end with a dot.";
+  return null;
+}
+
 ipcMain.handle("clipper:create-project", async (_event, projectName: string) => {
   const appRoot = path.resolve(__dirname, "..");
   const projectsDir = path.join(appRoot, "clipper", "projects");
   await fs.mkdir(projectsDir, { recursive: true });
-  
-  const safeName = projectName.replace(/[^a-zA-Z0-9_-]/g, "-").toLowerCase();
-  const folderPath = path.join(projectsDir, safeName);
-  
+
+  const error = validateProjectFolderName(projectName);
+  if (error) throw new Error(error);
+
+  const folderName = projectName;
+  const folderPath = path.join(projectsDir, folderName);
+
   try {
-    await fs.mkdir(folderPath, { recursive: true });
-    const manifestPath = path.join(folderPath, "project.json");
-    return getClipperRelativePath(manifestPath);
+    await fs.mkdir(folderPath);
   } catch (error) {
-    console.error("Failed to create project folder", error);
-    return null;
+    if ((error as { code?: string }).code === "EEXIST") {
+      throw new Error(`A project named "${folderName}" already exists.`);
+    }
+    throw error;
   }
+
+  const manifestPath = path.join(folderPath, "project.json");
+  return getClipperRelativePath(manifestPath);
 });
 
 ipcMain.handle("clipper:export-project-dialog", async (_event, defaultFileName: string) => {

@@ -76,7 +76,7 @@ async function loadZipProject(manifestPath: string) {
 
   const manifestProject = JSON.parse(await manifestFile.async("string")) as ProjectManifest;
   const rootPath = getDirectoryPath(manifestPath);
-  const timelines = await loadZipTimelines(zip, rootPath);
+  const timelines = await loadZipTimelines(zip, rootPath, manifestProject.timelineOrder);
   const compositions = await loadZipCompositions(zip, rootPath);
   return normalizeProject({
     ...manifestProject,
@@ -88,9 +88,30 @@ async function loadZipProject(manifestPath: string) {
   });
 }
 
-async function loadZipTimelines(zip: JSZip, rootPath: string) {
+async function loadZipTimelines(zip: JSZip, rootPath: string, timelineOrder?: string[]) {
   const entries = Object.values(zip.files).filter((file) => !file.dir && file.name.startsWith("timelines/") && file.name.endsWith(".json"));
-  const timelines = await Promise.all(entries.map(async (file) => ({ ...JSON.parse(await file.async("string")) as TimelineDocument, filePath: projectPathFromZipEntry(rootPath, file.name, "timelines") })));
+  const timelines = await Promise.all(
+    entries.map(async (file) => {
+      const content = await file.async("string");
+      const document = JSON.parse(content) as TimelineDocument;
+      const filePath = projectPathFromZipEntry(rootPath, file.name);
+      const name = getFallbackDisplayName(document.name, file.name.replace(/^timelines\//, ""));
+      return { ...document, name, filePath };
+    })
+  );
+
+  if (timelineOrder?.length) {
+    const orderMap = new Map(timelineOrder.map((id, index) => [id, index]));
+    return timelines.sort((left, right) => {
+      const leftIndex = orderMap.get(left.id);
+      const rightIndex = orderMap.get(right.id);
+      if (leftIndex !== undefined && rightIndex !== undefined) return leftIndex - rightIndex;
+      if (leftIndex !== undefined) return -1;
+      if (rightIndex !== undefined) return 1;
+      return left.name.localeCompare(right.name, undefined, { sensitivity: "base" });
+    });
+  }
+
   return timelines.sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
 }
 
@@ -99,8 +120,10 @@ async function loadZipCompositions(zip: JSZip, rootPath: string) {
   return Promise.all(entries.map(async (file) => {
     const source = await file.async("string");
     const id = getSourceCompositionId(source, file.name.replace(/^compositions\//, ""));
-    const baseComposition = createBaseComposition(id, projectPathFromZipEntry(rootPath, file.name, "compositions"), source);
-    return { ...(await compositionFromEmbeddedSource(baseComposition, source)), source } as CompositionDocument;
+    const baseComposition = createBaseComposition(id, projectPathFromZipEntry(rootPath, file.name), source);
+    const document = await compositionFromEmbeddedSource(baseComposition, source);
+    const name = getFallbackDisplayName(document.name, file.name.replace(/^compositions\//, ""));
+    return { ...document, name, source } as CompositionDocument;
   }));
 }
 
@@ -152,7 +175,7 @@ async function loadDirectoryProject(manifestPath: string) {
   const manifestProject = JSON.parse(content) as ProjectManifest;
   const rootPath = getDirectoryPath(manifestPath);
   const editableRoot = await getEditableRootPath(rootPath);
-  const timelines = await loadDirectoryTimelines(editableRoot, rootPath);
+  const timelines = await loadDirectoryTimelines(editableRoot, rootPath, manifestProject.timelineOrder);
   const compositions = await loadDirectoryCompositions(editableRoot, rootPath);
   return normalizeProject({
     ...manifestProject,
@@ -164,26 +187,37 @@ async function loadDirectoryProject(manifestPath: string) {
   });
 }
 
-async function loadDirectoryTimelines(editableRoot: string, fallbackRoot: string) {
+async function loadDirectoryTimelines(editableRoot: string, fallbackRoot: string, timelineOrder?: string[]) {
   const primaryDir = editableRoot ? `${editableRoot}/timelines` : "file-manager/timelines";
   const fallbackDir = fallbackRoot ? `${fallbackRoot}/timelines` : "timelines";
 
-  let entries = await clipperHost.listDirectory(primaryDir).catch(() => [] as { name: string; isDirectory: boolean }[]);
-  let timelineFiles = entries.filter((entry) => !entry.isDirectory && entry.name.endsWith(".json"));
-  let effectiveDir = primaryDir;
+  let timelineFiles = await listProjectFilesRecursive(primaryDir).then(files => files.filter(f => f.name.endsWith(".json")));
 
   if (timelineFiles.length === 0) {
-    entries = await clipperHost.listDirectory(fallbackDir).catch(() => [] as { name: string; isDirectory: boolean }[]);
-    timelineFiles = entries.filter((entry) => !entry.isDirectory && entry.name.endsWith(".json"));
-    effectiveDir = fallbackDir;
+    timelineFiles = await listProjectFilesRecursive(fallbackDir).then(files => files.filter(f => f.name.endsWith(".json")));
   }
 
   const timelines = await Promise.all(
     timelineFiles.map(async (file) => {
-      const filePath = `${effectiveDir}/${file.name}`;
-      return { ...JSON.parse(await clipperHost.readTextFile(filePath)) as TimelineDocument, filePath: projectPathFromDirectoryEntry(fallbackRoot, file.name, "timelines") };
+      const document = JSON.parse(await clipperHost.readTextFile(file.path)) as TimelineDocument;
+      const filePath = projectPathFromDirectoryEntry(fallbackRoot, file.relativePath, "timelines");
+      const name = getFallbackDisplayName(document.name, file.relativePath);
+      return { ...document, name, filePath };
     })
   );
+
+  if (timelineOrder?.length) {
+    const orderMap = new Map(timelineOrder.map((id, index) => [id, index]));
+    return timelines.sort((left, right) => {
+      const leftIndex = orderMap.get(left.id);
+      const rightIndex = orderMap.get(right.id);
+      if (leftIndex !== undefined && rightIndex !== undefined) return leftIndex - rightIndex;
+      if (leftIndex !== undefined) return -1;
+      if (rightIndex !== undefined) return 1;
+      return left.name.localeCompare(right.name, undefined, { sensitivity: "base" });
+    });
+  }
+
   return timelines.sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
 }
 
@@ -191,25 +225,61 @@ async function loadDirectoryCompositions(editableRoot: string, fallbackRoot: str
   const primaryDir = editableRoot ? `${editableRoot}/compositions` : "file-manager/compositions";
   const fallbackDir = fallbackRoot ? `${fallbackRoot}/compositions` : "compositions";
 
-  let entries = await clipperHost.listDirectory(primaryDir).catch(() => [] as { name: string; isDirectory: boolean }[]);
-  let compositionFiles = entries.filter((entry) => !entry.isDirectory && entry.name.endsWith(".ts"));
-  let effectiveDir = primaryDir;
+  let compositionFiles = await listProjectFilesRecursive(primaryDir).then(files => files.filter(f => f.name.endsWith(".ts")));
 
   if (compositionFiles.length === 0) {
-    entries = await clipperHost.listDirectory(fallbackDir).catch(() => [] as { name: string; isDirectory: boolean }[]);
-    compositionFiles = entries.filter((entry) => !entry.isDirectory && entry.name.endsWith(".ts"));
-    effectiveDir = fallbackDir;
+    compositionFiles = await listProjectFilesRecursive(fallbackDir).then(files => files.filter(f => f.name.endsWith(".ts")));
   }
 
   return Promise.all(
     compositionFiles.map(async (file) => {
-      const filePath = `${effectiveDir}/${file.name}`;
-      const source = await clipperHost.readTextFile(filePath);
+      const source = await clipperHost.readTextFile(file.path);
       const id = getSourceCompositionId(source, file.name);
-      const baseComposition = createBaseComposition(id, projectPathFromDirectoryEntry(fallbackRoot, file.name, "compositions"), source);
-      return { ...(await compositionFromEmbeddedSource(baseComposition, source)), source } as CompositionDocument;
+      const baseComposition = createBaseComposition(id, projectPathFromDirectoryEntry(fallbackRoot, file.relativePath, "compositions"), source);
+      const document = await compositionFromEmbeddedSource(baseComposition, source);
+      const name = getFallbackDisplayName(document.name, file.relativePath);
+      return { ...document, name, source } as CompositionDocument;
     })
   );
+}
+
+const listProjectFilesRecursive = async (dir: string, baseDir: string = dir): Promise<{ name: string; path: string; relativePath: string; isDirectory: boolean }[]> => {
+  const entries = await clipperHost.listDirectory(dir).catch(() => [] as { name: string; isDirectory: boolean }[]);
+  const files: { name: string; path: string; relativePath: string; isDirectory: boolean }[] = [];
+  for (const entry of entries) {
+    const fullPath = `${dir}/${entry.name}`;
+    const relativePath = baseDir === dir ? entry.name : fullPath.slice(baseDir.length + 1);
+    if (entry.isDirectory) {
+      files.push({ ...entry, path: fullPath, relativePath });
+      files.push(...(await listProjectFilesRecursive(fullPath, baseDir)));
+    } else {
+      files.push({ ...entry, path: fullPath, relativePath });
+    }
+  }
+  return files;
+};
+
+async function ensureDirectoryForPath(filePath: string) {
+  const directoryPath = getDirectoryPath(filePath);
+  if (!directoryPath) return;
+  const segments = directoryPath.split("/");
+  let currentPath = "";
+  for (const segment of segments) {
+    if (!segment && currentPath === "") {
+      currentPath = "/";
+      continue;
+    }
+    currentPath = currentPath === "/" ? `/${segment}` : currentPath ? `${currentPath}/${segment}` : segment;
+    await clipperHost.createDirectory(currentPath).catch(() => {});
+  }
+}
+
+function getFallbackDisplayName(name: string, relativePath: string) {
+  if (!name || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(name)) {
+    const fileName = relativePath.split("/").pop() || "";
+    return fileName.replace(/\.timeline\.json$/, "").replace(/\.composition\.ts$/, "");
+  }
+  return name;
 }
 
 async function saveDirectoryProject(manifestPath: string, project: ProjectManifest) {
@@ -230,39 +300,34 @@ async function saveDirectoryProject(manifestPath: string, project: ProjectManife
   await clipperHost.writeTextFile(manifestPath, `${JSON.stringify(metadataProject, null, 2)}\n`);
 
   const fileManagerDir = rootPath ? `${rootPath}/file-manager` : "file-manager";
-  const compositionDir = rootPath ? `${rootPath}/file-manager/compositions` : "file-manager/compositions";
-  const timelineDir = rootPath ? `${rootPath}/file-manager/timelines` : "file-manager/timelines";
-  await clipperHost.createDirectory(fileManagerDir);
-  await clipperHost.createDirectory(compositionDir);
-  await clipperHost.createDirectory(timelineDir);
+  await clipperHost.createDirectory(fileManagerDir).catch(() => {});
 
-  const compositionFileNames = new Set<string>();
+  const savedRelativePaths = new Set<string>();
+
   for (const composition of normalized.compositions ?? []) {
     const source = composition.source ?? normalized.compositionSources?.[composition.filePath];
     if (source === undefined) throw new Error(`Composition ${composition.filePath} is missing source.`);
-    const fileName = `${safeZipName(composition.id)}.composition.ts`;
-    compositionFileNames.add(fileName);
-    await clipperHost.writeTextFile(`${compositionDir}/${fileName}`, source);
+    const relativePath = safeCompositionPath(composition, rootPath);
+    const fullPath = `${fileManagerDir}/${relativePath}`;
+    savedRelativePaths.add(relativePath);
+    await ensureDirectoryForPath(fullPath);
+    await clipperHost.writeTextFile(fullPath, source);
   }
 
-  const timelineFileNames = new Set<string>();
   for (const timeline of normalized.timelines ?? []) {
-    const fileName = `${safeZipName(timeline.id)}.timeline.json`;
-    timelineFileNames.add(fileName);
-    await clipperHost.writeTextFile(`${timelineDir}/${fileName}`, `${JSON.stringify(timeline, null, 2)}\n`);
+    const relativePath = safeTimelinePath(timeline, rootPath);
+    const fullPath = `${fileManagerDir}/${relativePath}`;
+    savedRelativePaths.add(relativePath);
+    await ensureDirectoryForPath(fullPath);
+    await clipperHost.writeTextFile(fullPath, `${JSON.stringify(timeline, null, 2)}\n`);
   }
 
-  const compositionEntries = await clipperHost.listDirectory(compositionDir);
-  for (const entry of compositionEntries) {
-    if (!entry.isDirectory && entry.name.endsWith(".ts") && !compositionFileNames.has(entry.name)) {
-      await clipperHost.trashFile(`${compositionDir}/${entry.name}`);
-    }
-  }
-
-  const timelineEntries = await clipperHost.listDirectory(timelineDir);
-  for (const entry of timelineEntries) {
-    if (!entry.isDirectory && entry.name.endsWith(".json") && !timelineFileNames.has(entry.name)) {
-      await clipperHost.trashFile(`${timelineDir}/${entry.name}`);
+  const existingFiles = await listProjectFilesRecursive(fileManagerDir);
+  for (const file of existingFiles) {
+    if (!file.isDirectory && (file.relativePath.startsWith("compositions/") || file.relativePath.startsWith("timelines/"))) {
+      if (!savedRelativePaths.has(file.relativePath)) {
+        await clipperHost.trashFile(file.path).catch(() => {});
+      }
     }
   }
 }
@@ -319,14 +384,13 @@ function isSafeZipEntryPath(filePath: string) {
   return filePath.split("/").every((segment) => segment && segment !== "." && segment !== "..");
 }
 
-function projectPathFromZipEntry(rootPath: string, entryName: string, folder: "compositions" | "timelines") {
-  const relativePath = entryName.replace(new RegExp(`^${folder}/`), "");
-  return rootPath ? `${rootPath}/${relativePath}` : relativePath;
+function projectPathFromZipEntry(rootPath: string, entryName: string) {
+  return rootPath ? `${rootPath}/${entryName}` : entryName;
 }
 
-function projectPathFromDirectoryEntry(rootPath: string, entryName: string, folder: "compositions" | "timelines") {
-  const basePath = rootPath ? `${rootPath}/${entryName}` : entryName;
-  return basePath.replace(/\/file-manager\//, "/");
+function projectPathFromDirectoryEntry(rootPath: string, relativePath: string, folder: "compositions" | "timelines") {
+  const entryPath = `${folder}/${relativePath}`;
+  return rootPath ? `${rootPath}/${entryPath}` : entryPath;
 }
 
 function getDirectoryPath(path: string) {

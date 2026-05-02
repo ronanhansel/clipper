@@ -2,7 +2,8 @@ import { reconstructFileName } from "./fileNames";
 
 export function getDirectoryPath(relativePath: string) {
   const lastSlashIndex = relativePath.lastIndexOf("/");
-  return lastSlashIndex > 0 ? relativePath.slice(0, lastSlashIndex) : relativePath;
+  if (lastSlashIndex === -1) return "";
+  return lastSlashIndex > 0 ? relativePath.slice(0, lastSlashIndex) : (relativePath.startsWith("/") ? "/" : "");
 }
 
 export function reorderByIntent<T>(items: T[], sourceIndex: number, targetIndex: number, action: "before" | "after") {
@@ -30,10 +31,10 @@ export function compositionFilePathWithName(filePath: string, id: string, name: 
   // Otherwise, fallback to the original extension or .ts.
   const nextFileName = reconstructFileName(slug, fileName);
   if (nextFileName !== slug) {
-    return `${directory}/${nextFileName}`;
+    return directory ? `${directory}/${nextFileName}` : nextFileName;
   }
 
   const extensionIndex = filePath.lastIndexOf(".");
   const extension = extensionIndex > filePath.lastIndexOf("/") ? filePath.slice(extensionIndex) : ".ts";
-  return `${directory}/${slug}${extension}`;
+  return directory ? `${directory}/${slug}${extension}` : `${slug}${extension}`;
 }

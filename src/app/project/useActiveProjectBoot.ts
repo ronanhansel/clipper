@@ -10,6 +10,7 @@ import {
   clearStoredActiveProjectManifestPath,
   readRecentProjects,
   readStoredActiveProjectManifestPath,
+  removeRecentProject,
   writeStoredActiveProjectManifestPath,
   type RecentProject,
 } from "./activeProjectManifest";
@@ -61,6 +62,17 @@ function projectNameFromPath(manifestPath: string) {
   return filename.replace(/\.clipper$/i, "");
 }
 
+function isMissingFileError(error: unknown) {
+  if (!(error instanceof Error)) return false;
+  const message = error.message.toLowerCase();
+  return (
+    message.includes("enoent") ||
+    message.includes("no such file or directory") ||
+    message.includes("does not exist") ||
+    message.includes("not found")
+  );
+}
+
 async function extractZipProject(manifestPath: string): Promise<string> {
   const zip = await JSZip.loadAsync(await clipperHost.readBinaryFile(manifestPath), { base64: true });
   const extractDir = manifestPath.replace(/\.clipper$/i, "");
@@ -108,23 +120,15 @@ async function writeProjectTsconfig(projectDir: string) {
   await clipperHost.writeTextFile(`${projectDir}/tsconfig.json`, `${JSON.stringify(tsconfig, null, 2)}\n`);
 }
 
-async function createMinimalProject(manifestPath: string): Promise<BootProject> {
+async function createMinimalProject(manifestPath: string, projectName: string): Promise<BootProject> {
   const directoryPath = manifestPath.endsWith("/project.json") ? manifestPath.slice(0, -"/project.json".length) : manifestPath.replace(/\.clipper$/i, "");
   const manifestOutPath = `${directoryPath}/project.json`;
-  const timelineId = crypto.randomUUID();
   const minimalProject: ProjectManifest = {
     id: crypto.randomUUID(),
-    name: projectNameFromPath(manifestPath),
+    name: projectName,
     resolution: { width: 1920, height: 1080 },
     assetsPath: "assets",
-    timelines: [{
-      id: timelineId,
-      name: "Timeline 1",
-      clips: [],
-      adjustmentLayers: [],
-      motionMarkers: [],
-      settings: {},
-    }],
+    timelines: [],
     compositions: [],
     compositionSources: {},
     scenes: [],
@@ -233,13 +237,11 @@ export function useActiveProjectBoot() {
   }
 
   async function createNewProject(projectName: string) {
+    setBootError(null);
     try {
-      console.log("createNewProject called with", projectName);
       const manifestPath = await clipperHost.createProject(projectName);
-      console.log("manifestPath received:", manifestPath);
-      if (!manifestPath) return;
-      const booted = await createMinimalProject(manifestPath);
-      console.log("createMinimalProject finished", booted);
+      if (!manifestPath) return false;
+      const booted = await createMinimalProject(manifestPath, projectName);
       await writeStoredActiveProjectManifestPath(booted.manifestPath);
       await addRecentProject(booted.manifestPath, projectNameFromPath(booted.manifestPath));
       const recents = await readRecentProjects();
@@ -247,9 +249,32 @@ export function useActiveProjectBoot() {
       setBootProject(booted);
       setBootError(null);
       setIsWelcome(false);
+      return true;
     } catch (error) {
-      console.error("createNewProject error", error);
       setBootError(error instanceof Error ? error.message : "Unable to create project.");
+      return false;
+    }
+  }
+
+  async function deleteRecentProject(project: RecentProject) {
+    try {
+      let pathToRemove = project.path;
+      if (pathToRemove.endsWith("/project.json")) {
+        pathToRemove = pathToRemove.slice(0, -"/project.json".length);
+      }
+      try {
+        await clipperHost.trashFile(pathToRemove);
+      } catch (error) {
+        if (!isMissingFileError(error)) {
+          throw error;
+        }
+        // If file is missing, we still want to remove it from recents
+      }
+      await removeRecentProject(project.path);
+      const recents = await readRecentProjects();
+      setRecentProjects(recents);
+    } catch (error) {
+      setBootError(error instanceof Error ? error.message : "Unable to delete project.");
     }
   }
 
@@ -287,5 +312,5 @@ export function useActiveProjectBoot() {
     setIsWelcome(true);
   }
 
-  return { bootError, bootProject, isWelcome, recentProjects, openProjectFromBoot, createNewProject, openRecentProject, closeProject };
+  return { bootError, bootProject, isWelcome, recentProjects, openProjectFromBoot, createNewProject, openRecentProject, deleteRecentProject, closeProject };
 }

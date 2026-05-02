@@ -123,8 +123,12 @@ export function useFileManagerProjectActions({
   }
 
   function createTimeline() {
-    const timelineId = `tl_${nanoid(8)}`;
-    updateProject((current) => createTimelineInProject(current, timelineId, watchedProjectDirectory));
+    const timelineId = crypto.randomUUID();
+    const existingNames = (project.timelines ?? []).map(t => t.name);
+    const nextName = nextNumberedName("New Timeline", existingNames);
+    const timelineName = nextName;
+    
+    updateProject((current) => createTimelineInProject(current, timelineId, watchedProjectDirectory, timelineName));
     setSelectedSceneId(timelineId);
     updateEditorState((state) => ({ ...state, selectedSceneId: timelineId, selectedTimelineId: timelineId, currentSceneTime: 0 }));
     clearNodeSelection();
@@ -175,7 +179,7 @@ export function useFileManagerProjectActions({
 
   async function renameCompositionFolder(folderPath: string, name: string) {
     const parentDirectory = getDirectoryPath(folderPath);
-    const nextFolderPath = `${parentDirectory}/${name}`;
+    const nextFolderPath = parentDirectory ? `${parentDirectory}/${name}` : name;
     await clipperHost.renameFile(folderPath, nextFolderPath).catch(() => toast.error("Unable to rename folder"));
 
     const result = renameCompositionFolderInProject(projectRef.current, compositionSourcesRef.current, folderPath, name, compositionLibrary);

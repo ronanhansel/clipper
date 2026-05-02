@@ -23,6 +23,7 @@ type OsFileNode = {
   path: string;
   isDirectory: boolean;
   isComposition?: boolean;
+  timelineId?: string;
   children?: OsFileNode[];
 };
 
@@ -282,13 +283,17 @@ export function OsFileManager({
     if (selectedCompositionId) {
       targetId = `${effectiveDirectory}/compositions/${selectedCompositionId}.ts`;
     } else if (selectedTimelineId) {
-      targetId = `${effectiveDirectory}/timelines/${selectedTimelineId}.timeline.json`;
+      // Find the timeline node by its internal ID
+      const timelineNode = findTimelineNodeById(treeData, selectedTimelineId);
+      if (timelineNode) {
+        targetId = timelineNode.id;
+      }
     }
     if (targetId) {
       api.select(targetId, { align: "auto" });
       setSelectedNodeIds([targetId]);
     }
-  }, [selectedCompositionId, selectedTimelineId, effectiveDirectory]);
+  }, [selectedCompositionId, selectedTimelineId, effectiveDirectory, treeData]);
 
   const handleFileActivate = useCallback(
     (nodeData: OsFileNode) => {
@@ -297,7 +302,7 @@ export function OsFileManager({
       if (fileType === "composition") {
         onSelectComposition(displayName);
       } else if (fileType === "timeline") {
-        onSelectTimeline(displayName);
+        onSelectTimeline(nodeData.timelineId ?? displayName);
       }
     },
     [onSelectComposition, onSelectTimeline]
@@ -386,7 +391,7 @@ export const composition = new Composition({
       await clipperHost.createDirectory(parentPath).catch(() => {});
       const entries = await clipperHost.listDirectory(parentPath);
       const names = entries.map((e) => e.name);
-      const name = nextNumberedSemanticName("untitled", ".timeline.json", names);
+      const name = nextNumberedSemanticName("New Timeline", ".timeline.json", names);
       const displayName = getDisplayName(name);
       const content = JSON.stringify({
         id: crypto.randomUUID(),
@@ -630,6 +635,7 @@ export const composition = new Composition({
           onMove={handleMove}
           onRename={handleRename}
           onSelect={handleSelect}
+          onActivate={(node) => handleFileActivate(node.data)}
           onToggle={handleToggle}
           openByDefault={false}
           overscanCount={4}
@@ -644,9 +650,6 @@ export const composition = new Composition({
               onClick={(event, node) => {
                 if (!event.metaKey && !event.shiftKey && node.data.isDirectory) {
                   node.toggle();
-                }
-                if (!event.metaKey && !event.shiftKey && !node.data.isDirectory) {
-                  handleFileActivate(node.data);
                 }
               }}
             />
@@ -733,7 +736,7 @@ function OsFileTreeNode({
   function handleDragStart(event: React.DragEvent<HTMLDivElement>) {
     if (node.isEditing) return;
     if (fileType === "timeline") {
-      const timelineId = displayName;
+      const timelineId = data.timelineId ?? displayName;
       event.dataTransfer.setData("application/x-clipper-timeline", timelineId);
     }
     event.dataTransfer.setDragImage(getTransparentNativeDragImage(), 0, 0);
@@ -805,6 +808,7 @@ async function loadDirectoryTree(path: string): Promise<OsFileNode[]> {
   for (const entry of sorted) {
     const childPath = `${path}/${entry.name}`;
     let isComposition = false;
+    let timelineId: string | undefined = undefined;
     
     if (!entry.isDirectory && childPath.endsWith(".ts")) {
       try {
@@ -812,6 +816,16 @@ async function loadDirectoryTree(path: string): Promise<OsFileNode[]> {
         isComposition = content.includes("new Composition({");
       } catch {
         // Ignore read errors
+      }
+    } else if (!entry.isDirectory && childPath.endsWith(".timeline.json")) {
+      try {
+        const content = await clipperHost.readTextFile(childPath);
+        const json = JSON.parse(content);
+        if (typeof json.id === "string") {
+          timelineId = json.id;
+        }
+      } catch {
+        // Ignore read/parse errors
       }
     }
 
@@ -821,6 +835,7 @@ async function loadDirectoryTree(path: string): Promise<OsFileNode[]> {
       path: childPath,
       isDirectory: entry.isDirectory,
       isComposition,
+      timelineId,
     };
     if (entry.isDirectory) {
       node.children = await loadDirectoryTree(childPath);
@@ -835,6 +850,17 @@ function findNode(nodes: OsFileNode[], id: string): OsFileNode | null {
     if (node.id === id) return node;
     if (node.children) {
       const found = findNode(node.children, id);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+function findTimelineNodeById(nodes: OsFileNode[], timelineId: string): OsFileNode | null {
+  for (const node of nodes) {
+    if (node.timelineId === timelineId) return node;
+    if (node.children) {
+      const found = findTimelineNodeById(node.children, timelineId);
       if (found) return found;
     }
   }

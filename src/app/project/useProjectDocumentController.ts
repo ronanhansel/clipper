@@ -174,7 +174,7 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
   }
 
   function applyEditorState(editorState: EditorState) {
-    applyStoredEditorState(editorState, projectRef.current.timelines?.[0]?.id ?? "");
+    applyStoredEditorState(editorState, "");
     requestAnimationFrame(() => {
       const viewport = centerPreviewScrollRef.current;
       if (!viewport) return;

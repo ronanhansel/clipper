@@ -85,6 +85,8 @@ type FileManagerContextValue = FileManagerProps & {
   selectedNodeIds: string[];
   clearTreeFocus: () => void;
   registerTreeFocusClearer: (clearer: (() => void) | null) => void;
+  requestNodeExpansion: (nodeId: string) => void;
+  registerNodeExpander: (expander: ((nodeId: string) => void) | null) => void;
   setContextMenu: (menu: ContextMenuState) => void;
   setSelectedNodeId: (nodeId: string | null) => void;
   setSelectedNodeIds: (nodeIds: string[]) => void;
@@ -107,8 +109,13 @@ function FileManagerProvider({ children, ...props }: PropsWithChildren<FileManag
   const registerTreeFocusClearer = useCallback((clearer: (() => void) | null) => {
     treeFocusClearerRef.current = clearer;
   }, []);
+  const nodeExpanderRef = useRef<((nodeId: string) => void) | null>(null);
+  const requestNodeExpansion = useCallback((nodeId: string) => nodeExpanderRef.current?.(nodeId), []);
+  const registerNodeExpander = useCallback((expander: ((nodeId: string) => void) | null) => {
+    nodeExpanderRef.current = expander;
+  }, []);
   const setSelectedNodeId = useCallback((nodeId: string | null) => setSelectedNodeIds(nodeId ? [nodeId] : []), []);
-  const value = useMemo<FileManagerContextValue>(() => ({ ...props, contextMenu, selectedNodeId, selectedNodeIds, clearTreeFocus, registerTreeFocusClearer, setContextMenu, setSelectedNodeId, setSelectedNodeIds }), [props, contextMenu, selectedNodeId, selectedNodeIds, clearTreeFocus, registerTreeFocusClearer, setSelectedNodeId]);
+  const value = useMemo<FileManagerContextValue>(() => ({ ...props, contextMenu, selectedNodeId, selectedNodeIds, clearTreeFocus, registerTreeFocusClearer, requestNodeExpansion, registerNodeExpander, setContextMenu, setSelectedNodeId, setSelectedNodeIds }), [props, contextMenu, selectedNodeId, selectedNodeIds, clearTreeFocus, registerTreeFocusClearer, requestNodeExpansion, registerNodeExpander, setSelectedNodeId]);
   return <FileManagerContext.Provider value={value}>{children}</FileManagerContext.Provider>;
 }
 
@@ -239,7 +246,7 @@ function FileManagerPanel() {
 }
 
 function UnifiedFileManagerTree() {
-  const { assets, compositions, compositionFolders: folders, compositionRootPath: rootPath, fileManagerState, timelines, onApplyTreeSnapshot, onFileManagerStateChange, onRenameAsset, onRenameComposition, onRenameCompositionFolder: onRenameFolder, onRenameTimeline, registerTreeFocusClearer, setSelectedNodeId: onSelectNode, setSelectedNodeIds: onSelectNodes, onSelectTimeline } = useFileManager();
+  const { assets, compositions, compositionFolders: folders, compositionRootPath: rootPath, fileManagerState, timelines, onApplyTreeSnapshot, onFileManagerStateChange, onRenameAsset, onRenameComposition, onRenameCompositionFolder: onRenameFolder, onRenameTimeline, registerNodeExpander, registerTreeFocusClearer, setSelectedNodeId: onSelectNode, setSelectedNodeIds: onSelectNodes, onSelectTimeline } = useFileManager();
   const rawTree = useMemo(() => buildUnifiedFileTree(compositions, folders, rootPath, timelines, assets), [assets, compositions, folders, rootPath, timelines]);
   const [tree, setTree] = useState(() => syncFileTreeToSavedState(rawTree, fileManagerState?.tree));
   const initialOpenState = useMemo(() => fileManagerState?.openState ?? getFileTreeOpenState(tree), []);
@@ -349,6 +356,16 @@ function UnifiedFileManagerTree() {
     return () => registerTreeFocusClearer(null);
   }, [onSelectNode, registerTreeFocusClearer]);
 
+  useEffect(() => {
+    registerNodeExpander((nodeId: string) => {
+      const api = arboristTreeRef.current;
+      if (!api) return;
+      api.open(nodeId);
+      window.setTimeout(() => onFileManagerStateChange(createFileManagerState(latestTreeRef.current, api.openState)), 0);
+    });
+    return () => registerNodeExpander(null);
+  }, [onFileManagerStateChange, registerNodeExpander]);
+
   function updateMarqueeSelection(currentX: number, currentY: number) {
     const start = marqueeSelectionRef.current;
     const api = arboristTreeRef.current;
@@ -450,23 +467,34 @@ function UnifiedFileManagerTree() {
 
   const cleanupExternalCompositionDrag = useCallback((phase: "cancel" | "drop" | null) => {
     const external = externalDragRef.current;
-    if (phase !== "drop") {
-      window.setTimeout(() => {
-        setExternalCompositionDragActive(false);
-        const previewEl = document.querySelector(".group\\/filetree .clipper-drag-preview") as HTMLElement;
-        if (previewEl) previewEl.style.opacity = "1";
-      }, 0);
-    }
+    
+    // Clear active states synchronously to prevent stale interaction checks
+    externalCompositionDragActiveRef.current = false;
+    isExternalCompositionDragActiveGlobal = false;
+    treeRef.current?.removeAttribute("data-external-composition-drag");
+    draggingNodeRef.current = null;
+    clearFallbackDrop();
+
+    window.setTimeout(() => {
+      // Still trigger React state update to ensure UI consistency
+      setExternalCompositionDragActive(false);
+      const previewEl = document.querySelector(".group\\/filetree .clipper-drag-preview") as HTMLElement;
+      if (previewEl) previewEl.style.opacity = "1";
+    }, 0);
+
     if (!external) return;
     if (externalDragFrameRef.current) window.cancelAnimationFrame(externalDragFrameRef.current);
     externalDragFrameRef.current = 0;
     pendingExternalDragMoveRef.current = null;
+    
+    // Dispatch events before final cleanup
     if (phase) dispatchExternalCompositionDrag(external.node, external.lastMouse, phase, external.shiftKey);
     if (phase === "cancel" || phase === "drop") setActiveCompositionPointerDrag(null);
+    
     external.ghost.remove();
     externalDragRef.current = null;
     if (phase === "cancel" || phase === "drop") endArboristDrag();
-  }, [endArboristDrag, setExternalCompositionDragActive]);
+  }, [clearFallbackDrop, endArboristDrag, setExternalCompositionDragActive]);
 
   useEffect(() => {
     function onNativeDragEnd() {
@@ -618,12 +646,11 @@ function FileManagerTreeRow(props: Parameters<typeof ArboristClickRow<FileManage
 
   return <ArboristClickRow {...props} onClick={(event, node) => {
     if (!event.metaKey && !event.shiftKey && isFileTreeFolderNode(node.data)) node.toggle();
-    if (node.data.kind === "timeline" && !event.metaKey && !event.shiftKey) onSelectTimeline(node.data.timeline.id);
   }} />;
 }
 
 function UnifiedTreeNode({ dragHandle, node, style }: NodeRendererProps<FileManagerTreeNode>) {
-  const { assets, timelines, onAddComposition, onCopyAsset, onCopyCompositionPath, onCreateFolder: onCreateAssetFolder, onCreateComposition, onCreateCompositionFolder: onCreateFolder, onDeleteAsset, onDeleteComposition, onDeleteCompositionFolder: onDeleteFolder, onDeleteTimeline, onDuplicateAsset, onDuplicateComposition, setContextMenu: onOpenMenu, onRevealComposition, onSelectTimeline, onSortAssets } = useFileManager();
+  const { assets, timelines, onAddComposition, onCopyAsset, onCopyCompositionPath, onCreateFolder: onCreateAssetFolder, onCreateComposition, onCreateCompositionFolder: onCreateFolder, onDeleteAsset, onDeleteComposition, onDeleteCompositionFolder: onDeleteFolder, onDeleteTimeline, onDuplicateAsset, onDuplicateComposition, requestNodeExpansion, setContextMenu: onOpenMenu, onRevealComposition, onSelectTimeline, onSortAssets } = useFileManager();
   const data = node.data;
   const displayName = getDisplayName(data.name);
   const [editDraft, setEditDraft] = useState(displayName);
@@ -660,11 +687,11 @@ function UnifiedTreeNode({ dragHandle, node, style }: NodeRendererProps<FileMana
     }
     if (data.kind === "asset-file" || data.kind === "asset-folder") {
       const parentFolderId = data.kind === "asset-folder" ? data.asset.id : getParentAssetId(assets, data.asset.id);
-      onOpenMenu({ x: event.clientX, y: event.clientY, items: [{ label: "Rename", action: () => node.edit() }, { label: "Copy path", action: () => onCopyAsset(data.asset.id) }, { label: "Duplicate", action: () => onDuplicateAsset(data.asset.id) }, { label: "New folder", action: () => onCreateAssetFolder(parentFolderId ?? undefined) }, { label: "Sort by", children: getAssetSortMenuItems(parentFolderId, onSortAssets) }, { label: "Delete", action: () => onDeleteAsset(data.asset.id), danger: true }] });
+      onOpenMenu({ x: event.clientX, y: event.clientY, items: [{ label: "Rename", action: () => node.edit() }, { label: "Copy path", action: () => onCopyAsset(data.asset.id) }, { label: "Duplicate", action: () => onDuplicateAsset(data.asset.id) }, { label: "New folder", action: () => { onCreateAssetFolder(parentFolderId ?? undefined); if (parentFolderId) requestNodeExpansion(assetNodeId(parentFolderId)); } }, { label: "Sort by", children: getAssetSortMenuItems(parentFolderId, onSortAssets) }, { label: "Delete", action: () => onDeleteAsset(data.asset.id), danger: true }] });
       return;
     }
     if (data.kind === "project-folder") {
-      onOpenMenu({ x: event.clientX, y: event.clientY, items: [{ label: "New composition", action: () => onCreateComposition(data.path) }, { label: "New folder", action: () => onCreateFolder(data.path) }, { label: "Rename", action: () => node.edit() }, { label: "Delete", action: () => onDeleteFolder(data.path), danger: true }] });
+      onOpenMenu({ x: event.clientX, y: event.clientY, items: [{ label: "New composition", action: () => { onCreateComposition(data.path); requestNodeExpansion(projectFolderNodeId(data.path)); } }, { label: "New folder", action: () => { onCreateFolder(data.path); requestNodeExpansion(projectFolderNodeId(data.path)); } }, { label: "Rename", action: () => node.edit() }, { label: "Delete", action: () => onDeleteFolder(data.path), danger: true }] });
       return;
     }
     if (data.kind === "timeline") {

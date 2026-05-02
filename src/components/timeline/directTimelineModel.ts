@@ -16,13 +16,13 @@ export function buildDirectTimelineModel({ mode, rowHeights, timelineLayers }: {
   timelineLayers: TimelineLayerState;
 }) {
   const isCompositionMode = mode === "composition";
-  const motionLayers = timelineLayers.motionLayers?.length ? timelineLayers.motionLayers : defaultTimelineLayerState.motionLayers!;
-  const compositionRows = timelineLayers.compositionLayers?.length ? timelineLayers.compositionLayers : defaultTimelineLayerState.compositionLayers!;
-  const adjustmentRows = (timelineLayers.adjustmentLayers?.length ? timelineLayers.adjustmentLayers : defaultTimelineLayerState.adjustmentLayers!).map((layer) => {
+  const motionLayers = timelineLayers.motionLayers !== undefined ? timelineLayers.motionLayers : defaultTimelineLayerState.motionLayers!;
+  const compositionRows = timelineLayers.compositionLayers !== undefined ? timelineLayers.compositionLayers : defaultTimelineLayerState.compositionLayers!;
+  const adjustmentRows = (timelineLayers.adjustmentLayers !== undefined ? timelineLayers.adjustmentLayers : defaultTimelineLayerState.adjustmentLayers!).map((layer) => {
     const effect = getAdjustmentEffectPackage(layer.id);
     return { key: layer.id, accent: effect?.accent ?? "#8f65f2", name: layer.name, hidden: Boolean(layer.hidden), locked: Boolean(layer.locked), effect };
   });
-  const transitionRows = (timelineLayers.transitionLayers?.length ? timelineLayers.transitionLayers : defaultTimelineLayerState.transitionLayers!).map((layer) => {
+  const transitionRows = (timelineLayers.transitionLayers !== undefined ? timelineLayers.transitionLayers : defaultTimelineLayerState.transitionLayers!).map((layer) => {
     const effect = getTransitionEffectPackage(layer.id);
     return { key: layer.id, accent: effect?.accent ?? "#ff8c42", name: layer.name, hidden: Boolean(layer.hidden), locked: Boolean(layer.locked), effect };
   });

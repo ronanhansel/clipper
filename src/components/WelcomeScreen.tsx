@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { Trash2 } from "lucide-react";
 import type { RecentProject } from "../app/project/activeProjectManifest";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog";
 import { Input } from "./ui/input";
@@ -6,30 +7,60 @@ import { Input } from "./ui/input";
 type WelcomeScreenProps = {
   error: string | null;
   recentProjects: RecentProject[];
-  onCreateNewProject: (name: string) => void;
+  onCreateNewProject: (name: string) => Promise<boolean> | boolean;
+  onDeleteRecentProject: (project: RecentProject) => void;
   onOpenProject: () => void;
   onOpenRecentProject: (project: RecentProject) => void;
 };
 
-export function WelcomeScreen({ error, recentProjects, onCreateNewProject, onOpenProject, onOpenRecentProject }: WelcomeScreenProps) {
+export function WelcomeScreen({ error, recentProjects, onCreateNewProject, onDeleteRecentProject, onOpenProject, onOpenRecentProject }: WelcomeScreenProps) {
   const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const newProjectInputRef = useRef<HTMLInputElement>(null);
+
+  const nameError = validateProjectName(newProjectName);
 
   useEffect(() => {
     if (isCreatingProject) {
       setNewProjectName("");
+      setIsSubmitting(false);
       setTimeout(() => newProjectInputRef.current?.focus(), 50);
     }
   }, [isCreatingProject]);
 
-  function handleCreateProjectSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (newProjectName.trim()) {
-      onCreateNewProject(newProjectName.trim());
-      setIsCreatingProject(false);
+  async function submitCreateProject() {
+    if (newProjectName && !nameError && !isSubmitting) {
+      setIsSubmitting(true);
+      const success = await onCreateNewProject(newProjectName);
+      setIsSubmitting(false);
+      if (success) {
+        setIsCreatingProject(false);
+      }
     }
   }
+
+  async function handleCreateProjectSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    await submitCreateProject();
+  }
+
+  function handleInputKeyDown(e: React.KeyboardEvent) {
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+      if (newProjectName && !nameError && !isSubmitting) {
+        e.preventDefault();
+        submitCreateProject();
+      }
+    }
+  }
+
+  function handleDeleteProject(e: React.MouseEvent, project: RecentProject) {
+    e.stopPropagation();
+    if (window.confirm(`Delete "${project.name}"? The project files will be moved to the Bin.`)) {
+      onDeleteRecentProject(project);
+    }
+  }
+
   return (
     <main className="grid h-screen place-items-center bg-[#12141a] text-[#dfe2ea]">
       <section className="grid w-[360px] gap-6">
@@ -66,14 +97,24 @@ export function WelcomeScreen({ error, recentProjects, onCreateNewProject, onOpe
             </div>
             <div className="grid gap-1">
               {recentProjects.map((project) => (
-                <button
-                  key={project.path}
-                  type="button"
-                  className="rounded-lg px-3 py-2 text-left text-sm text-[#dfe2ea] transition hover:bg-[#1e212a]"
-                  onClick={() => onOpenRecentProject(project)}
-                >
-                  {project.name}
-                </button>
+                <div key={project.path} className="group relative">
+                  <button
+                    type="button"
+                    className="w-full rounded-lg px-3 py-2 text-left text-sm text-[#dfe2ea] transition hover:bg-[#1e212a]"
+                    onClick={() => onOpenRecentProject(project)}
+                  >
+                    {project.name}
+                  </button>
+                  <button
+                    type="button"
+                    className="absolute right-2 top-1.5 opacity-0 transition group-hover:opacity-100 hover:text-red-400 p-1"
+                    title="Delete project"
+                    aria-label="Delete project"
+                    onClick={(e) => handleDeleteProject(e, project)}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
               ))}
             </div>
           </div>
@@ -96,9 +137,16 @@ export function WelcomeScreen({ error, recentProjects, onCreateNewProject, onOpe
                   ref={newProjectInputRef}
                   value={newProjectName}
                   onChange={(e) => setNewProjectName(e.target.value)}
+                  onKeyDown={handleInputKeyDown}
                   placeholder="My Awesome Video"
-                  className="col-span-3"
+                  className={nameError && newProjectName ? "border-red-500 focus-visible:ring-red-500" : ""}
                 />
+                {nameError && newProjectName && (
+                  <p className="text-xs text-red-500">{nameError}</p>
+                )}
+                {error && !nameError && (
+                  <p className="text-xs text-red-500">{error}</p>
+                )}
               </div>
             </div>
             <DialogFooter>
@@ -111,10 +159,10 @@ export function WelcomeScreen({ error, recentProjects, onCreateNewProject, onOpe
               </button>
               <button
                 type="submit"
-                disabled={!newProjectName.trim()}
+                disabled={!newProjectName.trim() || !!nameError || isSubmitting}
                 className="rounded-md bg-[var(--clipper-accent)] px-3 py-2 text-sm font-medium text-[var(--clipper-accent-foreground)] disabled:opacity-50"
               >
-                Create Project
+                {isSubmitting ? "Creating..." : "Create Project"}
               </button>
             </DialogFooter>
           </form>
@@ -122,4 +170,20 @@ export function WelcomeScreen({ error, recentProjects, onCreateNewProject, onOpe
       </Dialog>
     </main>
   );
+}
+
+function validateProjectName(name: string): string | null {
+  if (!name) return "Project name cannot be empty.";
+  if (/^\s|\s$/.test(name)) return "Name cannot start or end with whitespace.";
+  
+  if (name === "." || name === "..") return "Invalid project name.";
+  if (/[\x00-\x1F]/.test(name)) return "Name cannot contain control characters.";
+  if (/[<>:"\/\\|?*]/.test(name)) return 'Name cannot contain < > : " / \\ | ? *';
+  
+  const reserved = /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\..*)?$/i;
+  if (reserved.test(name)) return `"${name}" is a reserved system name.`;
+  
+  if (name.endsWith(".")) return "Name cannot end with a dot.";
+  
+  return null;
 }

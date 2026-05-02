@@ -1,13 +1,15 @@
 import type { ProjectManifest } from "../../../core/types";
 import { reorderByIntent } from "./fileManagerPaths";
 
-export function createTimelineInProject(project: ProjectManifest, timelineId: string, directoryPath: string): ProjectManifest {
+export function createTimelineInProject(project: ProjectManifest, timelineId: string, directoryPath: string, name?: string): ProjectManifest {
+  const timelineName = name || `Timeline ${(project.timelines?.length ?? 0) + 1}`;
+  const fileName = name ? `${name}.timeline.json` : `${timelineId}.timeline.json`;
   return {
     ...project,
     timelines: [...(project.timelines ?? []), {
       id: timelineId,
-      name: `Timeline ${(project.timelines?.length ?? 0) + 1}`,
-      filePath: `${directoryPath}/${timelineId}.timeline.json`,
+      name: timelineName,
+      filePath: directoryPath ? `${directoryPath}/${fileName}` : fileName,
       clips: [],
       adjustmentLayers: [],
       motionMarkers: [],
@@ -32,10 +34,13 @@ export function reorderTimelineInProject(project: ProjectManifest, sourceTimelin
 }
 
 export function moveTimelineInProject(project: ProjectManifest, timelineId: string, folderPath: string): ProjectManifest {
+  const timeline = project.timelines?.find(t => t.id === timelineId);
+  const fileName = timeline?.filePath?.split("/").pop() || `${timelineId}.timeline.json`;
+  const nextPath = folderPath ? `${folderPath}/${fileName}` : fileName;
   return {
     ...project,
-    compositionFolders: Array.from(new Set([...(project.compositionFolders ?? []), folderPath])),
-    timelines: (project.timelines ?? []).map((timeline) => timeline.id === timelineId ? { ...timeline, filePath: `${folderPath}/${timeline.id}.timeline.json` } : timeline),
+    compositionFolders: folderPath ? Array.from(new Set([...(project.compositionFolders ?? []), folderPath])) : project.compositionFolders,
+    timelines: (project.timelines ?? []).map((t) => t.id === timelineId ? { ...t, filePath: nextPath } : t),
   };
 }
 

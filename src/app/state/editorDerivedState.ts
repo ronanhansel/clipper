@@ -6,7 +6,7 @@ import { clamp } from "../../core/math";
 import { getMotionMarkerViews, motionBlocksToMotionMarkers } from "../../core/motionEffects";
 import { defaultAssets, defaultTimelineLayerState, getSceneFromProject, serializeProjectForSave } from "../../core/project";
 import { buildLinearTimeline, getExecutableAdjustmentLayers, getMiddleTransitionMode, getSelectedActiveMiddleMend, getSelectedMotionMiddleSnap, getTimelineMarkerMendLayerId, getTimelinePartAtTime, getMotionMarkerMendKey, getMotionMiddleSnap, isMotionMiddleSnapActive, sceneDuration as getSceneDuration, validateScene, type TimelineMendMarker } from "../../core/timeline";
-import { FRAME_HEIGHT, FRAME_WIDTH, type CompositionClip, type MotionEase, type MotionMarker, type ProjectManifest, type SelectionPayload, type TimelineMode, type TimelinePart } from "../../core/types";
+import { FRAME_HEIGHT, FRAME_WIDTH, type CompositionClip, type MotionEase, type MotionMarker, type ProjectManifest, type Scene, type SelectionPayload, type TimelineMode, type TimelinePart } from "../../core/types";
 import { TIMELINE_MOTION_PART_ID } from "../types";
 import type { MotionMarkerSelection } from "../types";
 import { getProjectContentSnapshot } from "./projectStore";
@@ -46,8 +46,7 @@ export function useEditorDerivedState({
   selectionPayload: SelectionPayload | null;
   timelineMode: TimelineMode;
 }) {
-  const scene = useMemo(() => getSceneFromProject(project, selectedSceneId) ?? getSceneFromProject(project, project.timelines?.[0]?.id ?? ""), [project, selectedSceneId]);
-  if (!scene) throw new Error("Project has no timelines.");
+  const scene = useMemo(() => getSceneFromProject(project, selectedSceneId) ?? blankScene, [project, selectedSceneId]);
   const assets = project.assets ?? defaultAssets;
   const timelineLayerState = project.editorState?.timelineLayers ?? defaultTimelineLayerState;
   const visibleAdjustmentLayers = getExecutableAdjustmentLayers(scene.adjustmentLayers, timelineLayerState);
@@ -225,6 +224,15 @@ const blankPreviewComposition: CompositionClip = {
   objects: [],
   snapshot: [],
   motionMarkers: [],
+};
+
+const blankScene: Scene = {
+  id: "",
+  name: "No timeline selected",
+  adjustmentLayers: [],
+  motionMarkers: [],
+  transitionLayers: [],
+  compositions: [],
 };
 
 function getMiddleEase(markers: Array<{ id: string; middleEase?: MotionEase }>, snap: { pairs: Array<{ nextId: string }> } | null): MotionEase | undefined {

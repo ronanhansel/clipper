@@ -10,7 +10,7 @@ export class RenameCommand implements Command {
     private newName: string
   ) {
     const parentPath = getDirectoryPath(oldPath);
-    this.newPath = `${parentPath}/${newName}`;
+    this.newPath = parentPath ? `${parentPath}/${newName}` : newName;
   }
 
   get label() {

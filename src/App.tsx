@@ -52,7 +52,7 @@ import { boundsToPoints } from "./core/geometry";
 import { clamp, roundToPrecision, roundTenth } from "./core/math";
 import type { AdjustmentEffectPointControl } from "./core/effects/types";
 import { getTransitionEffectPackage } from "./core/effects/registry";
-import { defaultComposeLayoutState, defaultEditorLayoutState, defaultPreviewViewportState, defaultTimelineLayerState, defaultTimelineMode, defaultTimelineViewportState } from "./core/project";
+import { defaultComposeLayoutState, defaultEditorLayoutState, defaultPreviewViewportState, defaultTimelineLayerState, defaultTimelineMode, defaultTimelineViewportState, emptyTimelineLayerState } from "./core/project";
 import { getExecutableAdjustmentLayers } from "./core/timeline";
 import type { TimelineLayerCategory } from "./core/timelineLayers";
 import { FRAME_HEIGHT, FRAME_WIDTH, type Bounds, type CompositionClip, type EditorState, type FrameObject, type LayerAnimation, type MotionEffectKind, type Part, type Point, type ProjectManifest, type SelectionPayload, type TimelineClip, type TimelineLayerState, type TimelineViewportState } from "./core/types";
@@ -88,7 +88,7 @@ function PathToastMessage({ action, path }: { action: string; path: string }) {
 }
 
 export function App() {
-  const { bootError, bootProject, isWelcome, recentProjects, openProjectFromBoot, createNewProject, openRecentProject, closeProject } = useActiveProjectBoot();
+  const { bootError, bootProject, isWelcome, recentProjects, openProjectFromBoot, createNewProject, openRecentProject, deleteRecentProject, closeProject } = useActiveProjectBoot();
 
   if (isWelcome || bootError) {
     return (
@@ -96,6 +96,7 @@ export function App() {
         error={bootError}
         recentProjects={recentProjects}
         onCreateNewProject={createNewProject}
+        onDeleteRecentProject={deleteRecentProject}
         onOpenProject={openProjectFromBoot}
         onOpenRecentProject={openRecentProject}
       />
@@ -379,7 +380,8 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
   const timelines = project.timelines ?? [];
   const activeTimelineName = timelines.find((item) => item.id === selectedSceneId)?.name ?? scene.name;
   const timelineCompositionIds = new Set(scene.compositions.map((composition) => composition.id));
-  const timelineLayers = project.editorState?.timelineLayers ?? defaultTimelineLayerState;
+  const hasActiveTimeline = timelines.some((t) => t.id === selectedSceneId);
+  const timelineLayers = (hasActiveTimeline || composeMode) ? (project.editorState?.timelineLayers ?? defaultTimelineLayerState) : emptyTimelineLayerState;
   const baseMotionLayers = timelineLayers.motionLayers?.length ? timelineLayers.motionLayers : defaultTimelineLayerState.motionLayers!;
   const motionLayers = baseMotionLayers;
   const hiddenMotionLayerIds = new Set(motionLayers.filter((layer) => layer.hidden).map((layer) => layer.id));

@@ -46,6 +46,7 @@ export function renameCompositionFolderInProject(project: ProjectManifest, compo
       compositionSources: nextSources,
       compositionFolders: (project.compositionFolders ?? []).map((path) => remapFolderPath(path, folderPath, nextFolderPath)),
       compositionLibrary: (project.compositionLibrary ?? compositionLibrary).map((item) => item.filePath.startsWith(`${folderPath}/`) ? { ...item, filePath: `${nextFolderPath}${item.filePath.slice(folderPath.length)}` } : item),
+      timelines: (project.timelines ?? []).map((timeline) => (timeline.filePath && timeline.filePath.startsWith(`${folderPath}/`)) ? { ...timeline, filePath: `${nextFolderPath}${timeline.filePath.slice(folderPath.length)}` } : timeline),
     },
   };
 }
@@ -63,6 +64,7 @@ export function moveCompositionFolderInProject(project: ProjectManifest, composi
       compositionSources: nextSources,
       compositionFolders: Array.from(new Set((project.compositionFolders ?? []).map((path) => remapFolderPath(path, folderPath, nextFolderPath)))),
       compositionLibrary: (project.compositionLibrary ?? compositionLibrary).map((item) => item.filePath.startsWith(`${folderPath}/`) ? { ...item, filePath: `${nextFolderPath}${item.filePath.slice(folderPath.length)}` } : item),
+      timelines: (project.timelines ?? []).map((timeline) => (timeline.filePath && timeline.filePath.startsWith(`${folderPath}/`)) ? { ...timeline, filePath: `${nextFolderPath}${timeline.filePath.slice(folderPath.length)}` } : timeline),
     },
   };
 }
