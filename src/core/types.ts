@@ -25,7 +25,7 @@ export type PerspectiveSettings = {
 
 export type FrameObjectType = "rect" | "text" | "image" | "svg" | "html" | "template" | "chart";
 
-export type MotionEase = "linear" | "easeIn" | "easeOut" | "easeInOut" | "circOut";
+export type MotionEase = "linear" | "easeIn" | "easeOut" | "easeInOut" | "circOut" | "backOut";
 
 export type RichTextSegment = {
   text: string;
@@ -211,10 +211,7 @@ export type MotionEffectDefinition = {
   label: string;
   group: string;
   groups?: readonly string[];
-  accent?: string;
-  previewColor?: string;
   tags?: readonly EffectManifestTag[];
-  timelineGradient?: EffectTimelineGradient;
   defaultDuration: number;
 };
 
@@ -252,10 +249,7 @@ export type AdjustmentEffectDefinition = {
   label: string;
   group: string;
   groups?: readonly string[];
-  accent?: string;
-  previewColor?: string;
   tags?: readonly EffectManifestTag[];
-  timelineGradient?: EffectTimelineGradient;
   defaultDuration: number;
   defaultParams: AdjustmentEffectParams;
 };
@@ -278,6 +272,7 @@ export type AdjustmentLayer = TimelineMarkerMetadata & {
 
 export type TransitionEffectParams = Record<string, unknown> & {
   ease?: MotionEase;
+  transitionTime?: number;
 };
 
 export type TransitionEffectDefinition = {
@@ -287,10 +282,7 @@ export type TransitionEffectDefinition = {
   label: string;
   group: string;
   groups?: readonly string[];
-  accent?: string;
-  previewColor?: string;
   tags?: readonly EffectManifestTag[];
-  timelineGradient?: EffectTimelineGradient;
   defaultDuration: number;
   defaultParams: TransitionEffectParams;
 };

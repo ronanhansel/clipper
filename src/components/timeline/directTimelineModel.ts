@@ -5,6 +5,11 @@ import type { TimelineLayerState, TimelineMode } from "../../core/types";
 import { getTimelineRowHeight } from "./useTimelineRowResize";
 import { getDisplayNameFromPath } from "../../core/fileNames";
 
+const transitionTimelineAccent = "#ff8c42";
+const adjustmentTimelineAccent = "#a78bfa";
+const motionTimelineAccent = "#1bb8c9";
+const compositionTimelineAccent = "#38a86d";
+
 export type DirectTimelineLayerRow = {
   key: string;
   category: TimelineLayerCategory;
@@ -27,16 +32,16 @@ export function buildDirectTimelineModel({ mode, rowHeights, timelineLayers }: {
   }));
   const adjustmentRows = (timelineLayers.adjustmentLayers !== undefined ? timelineLayers.adjustmentLayers : defaultTimelineLayerState.adjustmentLayers!).map((layer) => {
     const effect = getAdjustmentEffectPackage(layer.id);
-    return { key: layer.id, accent: effect?.accent ?? "#8f65f2", name: layer.name || effect?.label || "Adjustment", hidden: Boolean(layer.hidden), locked: Boolean(layer.locked), effect };
+    return { key: layer.id, accent: adjustmentTimelineAccent, name: layer.name || effect?.label || "Adjustment", hidden: Boolean(layer.hidden), locked: Boolean(layer.locked), effect };
   });
   const transitionRows = (timelineLayers.transitionLayers !== undefined ? timelineLayers.transitionLayers : defaultTimelineLayerState.transitionLayers!).map((layer) => {
     const effect = getTransitionEffectPackage(layer.id);
-    return { key: layer.id, accent: effect?.accent ?? "#ff8c42", name: layer.name || effect?.label || "Transition", hidden: Boolean(layer.hidden), locked: Boolean(layer.locked), effect };
+    return { key: layer.id, accent: transitionTimelineAccent, name: layer.name || effect?.label || "Transition", hidden: Boolean(layer.hidden), locked: Boolean(layer.locked), effect };
   });
-  const directLayerRows: DirectTimelineLayerRow[] = [...transitionRows.map((row) => ({ key: row.key, category: "transition" as const, accent: row.accent })), ...adjustmentRows.map((row) => ({ key: row.key, category: "adjust" as const, accent: row.accent })), ...motionLayers.map((layer) => ({ key: layer.id, category: "motion" as const, accent: "#24b7c9" })), ...compositionRows.map((layer) => ({ key: layer.id, category: "comp" as const, accent: "#38a86d" }))];
+  const directLayerRows: DirectTimelineLayerRow[] = [...transitionRows.map((row) => ({ key: row.key, category: "transition" as const, accent: row.accent })), ...adjustmentRows.map((row) => ({ key: row.key, category: "adjust" as const, accent: row.accent })), ...motionLayers.map((layer) => ({ key: layer.id, category: "motion" as const, accent: motionTimelineAccent })), ...compositionRows.map((layer) => ({ key: layer.id, category: "comp" as const, accent: compositionTimelineAccent }))];
   const layerRows: DirectTimelineLayerRow[] = isCompositionMode
     ? directLayerRows
-    : compositionRows.map((layer) => ({ key: layer.id, category: "comp" as const, accent: "#38a86d" }));
+    : compositionRows.map((layer) => ({ key: layer.id, category: "comp" as const, accent: compositionTimelineAccent }));
   const directBaseLayerRowHeights = directLayerRows.map((row) => getTimelineRowHeight(rowHeights, row.key));
   const directLayerRowHeightByKey = new Map(directLayerRows.map((row, index) => [row.key, directBaseLayerRowHeights[index]]));
   const layerRowHeights = isCompositionMode

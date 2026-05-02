@@ -191,6 +191,7 @@ export function easeAnimationProgress(progress: number, ease?: string | readonly
   if (ease === "easeIn") return progress * progress * progress;
   if (ease === "easeOut" || ease === "circOut") return easeOutCubic(progress);
   if (ease === "easeInOut") return easeInOutCubic(progress);
+  if (ease === "backOut") return backOut(progress);
   if (Array.isArray(ease) && ease.length === 4) {
     return cubicBezierEase(progress, ease[0], ease[1], ease[2], ease[3]);
   }
@@ -203,6 +204,10 @@ function easeOutCubic(value: number): number {
 
 function easeInOutCubic(value: number): number {
   return value < 0.5 ? 4 * value * value * value : 1 - Math.pow(-2 * value + 2, 3) / 2;
+}
+
+function backOut(value: number): number {
+  return 1 + 2.70158 * Math.pow(value - 1, 3) + 1.70158 * Math.pow(value - 1, 2);
 }
 
 function cubicBezierEase(progress: number, x1: number, y1: number, x2: number, y2: number): number {

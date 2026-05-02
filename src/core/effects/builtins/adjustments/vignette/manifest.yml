@@ -3,9 +3,6 @@ category: adjustment
 name: Vignette
 label: Vignette
 group: Overlay
-accent: "#1f1b2e"
-previewColor: "#8f65f2"
-timelineGradient: {"from":"#a77cff","to":"#5f35c6","text":"#ffffff"}
 defaultDuration: 3
 defaultParams: {"intensity":0.42,"softness":0.64,"focusX":50,"focusY":50,"target":"camera"}
 paramControls:

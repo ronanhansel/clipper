@@ -6,6 +6,7 @@ import { chartTypes, formatChartTypeLabel, type ChartDatum, type ChartSpec, type
 import { MAX_PART_DURATION_SECONDS, FRAME_HEIGHT, FRAME_WIDTH, type AdjustmentLayer, type BackgroundLayer, type Bounds, type FrameObject, type LayerAnimation, type MotionEase, type Part, type PartFrame, type Point, type TransitionLayer } from "../../core/types";
 import { clamp, roundTenth, roundTwo } from "../../core/math";
 import { getAdjustmentEffectPackage, getMotionEffectPackage, getTransitionEffectPackage } from "../../core/effects/registry";
+import { getTransitionMarkerTime, normalizeSymmetricTransitionLayer } from "../../core/transitions";
 import type { AdjustmentEffectDisableCondition, AdjustmentEffectParamControl, AdjustmentEffectPointControl } from "../../core/effects/types";
 import { getMotionBlockEffectKind, getMotionMarkerViews } from "../../core/motionEffects";
 import type { MotionMarker } from "../../core/types";
@@ -33,6 +34,7 @@ const easePreviewItems = [
   { value: "easeIn", label: "Ease in", ease: "easeIn" as const },
   { value: "easeOut", label: "Ease out", ease: "easeOut" as const },
   { value: "circOut", label: "Circ out", ease: "circOut" as const },
+  { value: "backOut", label: "Back out", ease: "backOut" as const },
 ];
 const explicitEasePreviewItems = easePreviewItems.map((item) => item.ease === "easeInOut" ? { ...item, value: "easeInOut" } : item);
 
@@ -71,6 +73,7 @@ function easePreviewProgress(value: number, ease: MotionEase) {
   if (ease === "easeOut" || ease === "circOut") return 1 - Math.pow(1 - value, 3);
   if (ease === "easeIn") return value * value * value;
   if (ease === "easeInOut") return value < 0.5 ? 4 * value * value * value : 1 - Math.pow(-2 * value + 2, 3) / 2;
+  if (ease === "backOut") return 1 + 2.70158 * Math.pow(value - 1, 3) + 1.70158 * Math.pow(value - 1, 2);
   return value;
 }
 
@@ -1004,10 +1007,11 @@ export function EmptyInspector() {
 
 export function TransitionInspector({ layer, onChange, onDelete }: { layer: TransitionLayer; onChange: (updater: (layer: TransitionLayer) => TransitionLayer) => void; onDelete: () => void }) {
   const effect = getTransitionEffectPackage(layer.effect.effectId);
-  const ease = (layer.effect.params?.ease as MotionEase) ?? "linear";
+  const ease = (layer.effect.params?.ease as MotionEase) ?? "easeInOut";
+  const markerTime = getTransitionMarkerTime(layer);
 
   function updateEase(value: string) {
-    const easeValue = value === defaultMotionEaseSelectValue ? undefined : value as MotionEase;
+    const easeValue = value === defaultMotionEaseSelectValue ? "easeInOut" : value as MotionEase;
     onChange((current) => ({
       ...current,
       effect: { ...current.effect, params: { ...current.effect.params, ease: easeValue } },
@@ -1021,8 +1025,8 @@ export function TransitionInspector({ layer, onChange, onDelete }: { layer: Tran
         <button data-timeline-control className="grid h-7 w-7 place-items-center rounded-md border border-transparent text-[#858a96] transition hover:border-[#2d313b] hover:bg-[#20232c] hover:text-[#ff8b8b]" title="Delete transition" onClick={onDelete}><Trash2 size={12} /></button>
       </div>
       <div className="grid grid-cols-2 gap-3">
-        <label className={`grid gap-1.5 ${mutedCaps}`}>Duration<Input type="number" min={0.1} max={MAX_PART_DURATION_SECONDS} step={0.1} value={roundTwo(layer.duration)} onChange={(event) => { const value = Number.parseFloat(event.target.value); if (Number.isFinite(value)) onChange((current) => ({ ...current, duration: clamp(value, 0.1, MAX_PART_DURATION_SECONDS) })); }} /></label>
-        <label className={`grid gap-1.5 ${mutedCaps}`}>Mid-point<Input type="number" min={0} max={MAX_PART_DURATION_SECONDS} step={0.1} value={roundTwo(layer.midPoint)} onChange={(event) => { const value = Number.parseFloat(event.target.value); if (Number.isFinite(value)) onChange((current) => ({ ...current, midPoint: clamp(value, 0, current.duration) })); }} /></label>
+        <label className={`grid gap-1.5 ${mutedCaps}`}>Duration<Input type="number" min={0.1} max={MAX_PART_DURATION_SECONDS} step={0.1} value={roundTwo(layer.duration)} onChange={(event) => { const value = Number.parseFloat(event.target.value); if (Number.isFinite(value)) onChange((current) => { const duration = clamp(value, 0.1, MAX_PART_DURATION_SECONDS); return normalizeSymmetricTransitionLayer({ ...current, start: getTransitionMarkerTime(current) - duration / 2, duration }); }); }} /></label>
+        <label className={`grid gap-1.5 ${mutedCaps}`}>Marker time<Input type="number" min={0} max={MAX_PART_DURATION_SECONDS} step={0.1} value={roundTwo(markerTime)} onChange={(event) => { const value = Number.parseFloat(event.target.value); if (Number.isFinite(value)) onChange((current) => normalizeSymmetricTransitionLayer({ ...current, start: clamp(value, 0, MAX_PART_DURATION_SECONDS) - current.duration / 2 })); }} /></label>
       </div>
       <label className={`grid gap-1.5 ${mutedCaps}`}>Ease<Select value={motionEaseSelectValue(ease)} onValueChange={updateEase}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><TooltipProvider delayDuration={1000} skipDelayDuration={0}><SelectGroup><EaseSelectItems defaultInOut /></SelectGroup></TooltipProvider></SelectContent></Select></label>
     </div>

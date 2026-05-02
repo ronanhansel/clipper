@@ -3,8 +3,5 @@ category: adjustment
 name: Reverse
 label: Reverse
 group: Timing
-accent: "#ff6fae"
-previewColor: "#8f65f2"
-timelineGradient: {"from":"#a77cff","to":"#5f35c6","text":"#ffffff"}
 defaultDuration: 3
 defaultParams: {}

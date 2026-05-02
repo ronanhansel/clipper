@@ -3,9 +3,6 @@ category: adjustment
 name: Light Leak
 label: Light Leak
 group: Overlay
-accent: "#ff9d5c"
-previewColor: "#8f65f2"
-timelineGradient: {"from":"#a77cff","to":"#5f35c6","text":"#ffffff"}
 defaultDuration: 3
 defaultParams: {"intensity":0.34,"warmth":1,"drift":0.8,"focusX":12,"focusY":28,"target":"camera"}
 paramControls:

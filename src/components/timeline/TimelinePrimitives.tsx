@@ -11,9 +11,9 @@ export function EffectDragPreviewBlock({ blockRef, preview }: { blockRef: RefObj
     return <CompositionTimelineBlock blockRef={blockRef} name={preview.label ?? "Composition"} duration={preview.duration} isEmpty={Boolean(preview.isEmpty)} sourceMissing={Boolean(preview.sourceMissing)} selected={false} preview blocked={preview.blocked} style={{ left: 0, width: 0 }} />;
   }
 
-  const effect = preview.effectId ? getEffectPackage(preview.effectId) : undefined;
   const blockedGradient: EffectTimelineGradient = { from: "#dc2626", to: "#991b1b", text: "#ffffff" };
-  const gradient = preview.blocked ? blockedGradient : (effect?.timelineGradient ?? getDefaultTimelineGradient(preview.category === "motion" && preview.kind === "zoom" ? "zoom" : preview.category === "adjustment" ? "adjustment" : preview.category === "transition" ? "transition" : "translation"));
+  const gradient = preview.blocked ? blockedGradient : getDefaultTimelineGradient(preview.category === "transition" ? "transition" : preview.category === "motion" ? "motion" : preview.category === "adjustment" ? "adjustment" : "composition");
+  const effect = preview.effectId ? getEffectPackage(preview.effectId) : undefined;
   const label = effect?.label ?? preview.label ?? preview.effectId ?? "Composition";
 
   return (
@@ -142,11 +142,12 @@ export function LayerResizeSeparator({ top, onPointerDown }: { top: number; onPo
   return <div className="absolute left-0 right-0 z-40 h-2 -translate-y-1 cursor-row-resize transition before:absolute before:left-0 before:right-0 before:top-1/2 before:h-px before:bg-[#2d313b] before:content-[''] hover:bg-[rgb(var(--clipper-accent-rgb)/0.08)] hover:before:bg-[var(--clipper-accent)]" style={{ top }} onPointerDown={onPointerDown} />;
 }
 
-export function getDefaultTimelineGradient(variant: "adjustment" | "translation" | "zoom" | "transition"): EffectTimelineGradient {
-  if (variant === "adjustment") return { from: "#a77cff", to: "#5f35c6", text: "#ffffff" };
-  if (variant === "zoom") return { from: "#f0c95a", to: "#b88312", text: "#1a1202" };
+export function getDefaultTimelineGradient(variant: "adjustment" | "composition" | "motion" | "transition"): EffectTimelineGradient {
   if (variant === "transition") return { from: "#ff8c42", to: "#cc5500", text: "#ffffff" };
-  return { from: "#24b7c9", to: "#127c8d", text: "#ffffff" };
+  if (variant === "composition") return { from: "#38a86d", to: "#17603c", text: "#ffffff" };
+  if (variant === "motion") return { from: "#1bb8c9", to: "#087482", text: "#ffffff" };
+  if (variant === "adjustment") return { from: "#a78bfa", to: "#6d28d9", text: "#ffffff" };
+  return { from: "#6f7684", to: "#424854", text: "#f0f2f6" };
 }
 
 export function timelineGradientStyle(gradient: EffectTimelineGradient): CSSProperties {
@@ -162,7 +163,7 @@ export function TimelineLayerLane({ hidden, locked = false, overflowVisible = fa
 
 const blockedGradient: EffectTimelineGradient = { from: "#dc2626", to: "#991b1b", text: "#ffffff" };
 
-export function TimelineBlock({ variant, gradient, selected, locked = false, muted, blocked, squareLeft, squareRight, leftResizeEnabled = true, rightResizeEnabled = true, style, children, leftHandle, rightHandle, dataAttributes, onClick, onPointerDown, onPointerMove, onPointerUp, onPointerCancel, onLeftResize, onRightResize, onContextMenu }: { variant: "adjustment" | "translation" | "zoom" | "transition"; gradient?: EffectTimelineGradient; selected: boolean; locked?: boolean; muted?: boolean; blocked?: boolean; squareLeft?: boolean; squareRight?: boolean; leftResizeEnabled?: boolean; rightResizeEnabled?: boolean; style: CSSProperties; children: ReactNode; leftHandle?: ReactNode; rightHandle?: ReactNode; dataAttributes: Record<string, string>; onClick: () => void; onPointerDown: (event: PointerEvent<HTMLDivElement>) => void; onPointerMove?: (event: PointerEvent<HTMLDivElement>) => void; onPointerUp?: (event: PointerEvent<HTMLDivElement>) => void; onPointerCancel?: (event: PointerEvent<HTMLDivElement>) => void; onLeftResize: (event: PointerEvent<HTMLDivElement>) => void; onRightResize: (event: PointerEvent<HTMLDivElement>) => void; onContextMenu: (event: ReactMouseEvent<HTMLElement>) => void }) {
+export function TimelineBlock({ variant, selected, locked = false, muted, blocked, squareLeft, squareRight, leftResizeEnabled = true, rightResizeEnabled = true, style, children, leftHandle, rightHandle, dataAttributes, onClick, onPointerDown, onPointerMove, onPointerUp, onPointerCancel, onLeftResize, onRightResize, onContextMenu }: { variant: "adjustment" | "motion" | "transition"; selected: boolean; locked?: boolean; muted?: boolean; blocked?: boolean; squareLeft?: boolean; squareRight?: boolean; leftResizeEnabled?: boolean; rightResizeEnabled?: boolean; style: CSSProperties; children: ReactNode; leftHandle?: ReactNode; rightHandle?: ReactNode; dataAttributes: Record<string, string>; onClick: () => void; onPointerDown: (event: PointerEvent<HTMLDivElement>) => void; onPointerMove?: (event: PointerEvent<HTMLDivElement>) => void; onPointerUp?: (event: PointerEvent<HTMLDivElement>) => void; onPointerCancel?: (event: PointerEvent<HTMLDivElement>) => void; onLeftResize: (event: PointerEvent<HTMLDivElement>) => void; onRightResize: (event: PointerEvent<HTMLDivElement>) => void; onContextMenu: (event: ReactMouseEvent<HTMLElement>) => void }) {
   const variantClass = variant === "adjustment" ? "min-w-[34px] text-left font-extrabold" : "min-w-[18px] font-bold";
   const selectionClass = selected ? "z-20 opacity-100 outline outline-2 -outline-offset-2 outline-[var(--clipper-accent)]" : locked ? "opacity-45" : muted ? "opacity-80" : blocked ? "opacity-85" : "opacity-85";
   const radiusClass = `${squareLeft ? "rounded-l-none" : ""} ${squareRight ? "rounded-r-none" : ""}`;
@@ -170,7 +171,7 @@ export function TimelineBlock({ variant, gradient, selected, locked = false, mut
     squareLeft ? null : "inset 1px 0 0 rgba(0, 0, 0, 0.55)",
     squareRight ? null : "inset -1px 0 0 rgba(0, 0, 0, 0.55)",
   ].filter(Boolean).join(", ");
-  const finalGradient = blocked ? blockedGradient : (gradient ?? getDefaultTimelineGradient(variant));
+  const finalGradient = blocked ? blockedGradient : getDefaultTimelineGradient(variant);
   const blockStyle = { ...style, ...timelineGradientStyle(finalGradient), boxShadow: edgeShadows || undefined };
 
   function blockPointerDown(event: PointerEvent<HTMLDivElement>) {

@@ -3,9 +3,6 @@ category: adjustment
 name: Frame Skip
 label: Frame Skip
 group: Timing
-accent: "#8f65f2"
-previewColor: "#8f65f2"
-timelineGradient: {"from":"#a77cff","to":"#5f35c6","text":"#ffffff"}
 defaultDuration: 3
 defaultParams: {"every":2}
 paramControls:

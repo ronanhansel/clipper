@@ -12,7 +12,7 @@ export type MotionEffectLogic = Pick<MotionEffectPackage, "createDefaultBlock">;
 
 export type AdjustmentEffectLogic = Partial<Pick<AdjustmentEffectPackage, "applySceneTime" | "applyVisualStyle" | "getDisplayElapsed" | "validate">>;
 
-export type TransitionEffectLogic = Partial<Pick<TransitionEffectPackage, "applyVisualStyle">>;
+export type TransitionEffectLogic = Partial<Pick<TransitionEffectPackage, "applyVisualStyle" | "renderSequence">>;
 
 export function createMotionEffectPackage(manifestSource: string, logic: MotionEffectLogic): MotionEffectPackage {
   return { ...parseEffectManifest<MotionEffectManifest>(manifestSource), ...logic };

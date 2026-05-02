@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { evaluateBackgroundLayer, evaluateFrameObject, getMotionTranslation } from "./renderRuntime";
 import { advanceTimeSensitiveSceneTime, applyAdjustmentLayersToSceneTime, applyPlaybackAdjustmentLayersToSceneTime, applyAdjustmentLayersToVisualStyle, getSceneTimeForTimeSensitiveDisplayTime, getTimeSensitiveDisplayDuration, getTimeSensitiveDisplayTime } from "./adjustments";
 import { installedEffectPackages } from "./effects/registry";
-import { applyTransitionLayersToVisualStyle } from "./transitions";
+import { applyTransitionLayersToVisualStyle, getTransitionFinishTime, getTransitionProgress, renderTransitionSequence } from "./transitions";
 import type { AdjustmentLayer, BackgroundLayer, FrameObject } from "./types";
 
 const baseObject: FrameObject = {
@@ -128,11 +128,28 @@ describe("render runtime", () => {
     expect(applyAdjustmentLayersToVisualStyle(5.5, layers, 30).overlays).toBeUndefined();
   });
 
-  it("applies transition visual styles from active layers", () => {
+  it("keeps swipe transition visual styles separate from sequence animation", () => {
     const layers = [{ id: "swipe", name: "Swipe", start: 2, duration: 4, midPoint: 2, effect: { effectId: "clipper.transition.swipe" as const, params: {} } }];
 
-    expect(applyTransitionLayersToVisualStyle(3, layers, 30).cameraStyle?.transform).toBe("translateX(-75%)");
+    expect(applyTransitionLayersToVisualStyle(3, layers, 30).cameraStyle?.transform).toBeUndefined();
     expect(applyTransitionLayersToVisualStyle(6.5, layers, 30).cameraStyle).toBeUndefined();
+  });
+
+  it("renders transition sequences as A/B/t styles", () => {
+    const layer = { id: "swipe", name: "Swipe", start: 2, duration: 4, midPoint: 2, effect: { effectId: "clipper.transition.swipe" as const, params: { ease: "linear" as const } } };
+
+    expect(renderTransitionSequence(3, layer, 30)).toMatchObject({
+      aStyle: { transform: "translate3d(-25%, 0, 0)" },
+      bStyle: { transform: "translate3d(75%, 0, 0)" },
+    });
+  });
+
+  it("uses transition marker duration as the natural finish time", () => {
+    const layer = { id: "swipe", name: "Swipe", start: 2, duration: 8, midPoint: 4, effect: { effectId: "clipper.transition.swipe" as const, params: { ease: "linear" as const, transitionTime: 1.5 } } };
+
+    expect(getTransitionFinishTime(layer)).toBe(8);
+    expect(getTransitionProgress(6, layer)).toBe(0.5);
+    expect(getTransitionProgress(10, layer)).toBe(1);
   });
 
   it("uses package-owned point params for light leak focus", () => {

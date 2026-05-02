@@ -3,9 +3,6 @@ category: adjustment
 name: Colour Grade
 label: Colour Grade
 group: Visual
-accent: "#ffd166"
-previewColor: "#8f65f2"
-timelineGradient: {"from":"#a77cff","to":"#5f35c6","text":"#ffffff"}
 defaultDuration: 3
 defaultParams: {"brightness":0,"contrast":0,"saturation":0,"hue":0}
 paramControls:

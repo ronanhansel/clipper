@@ -29,7 +29,7 @@ export type StyleValue = string | number;
 export type LayerStyle = Record<string, StyleValue>;
 export type RichTextSegment = { text: string; bold: boolean; italic: boolean; underline: boolean };
 export type FrameTemplate = { kind: "html"; source: string; static?: boolean };
-export type MotionEase = "linear" | "easeIn" | "easeOut" | "easeInOut" | "circOut";
+export type MotionEase = "linear" | "easeIn" | "easeOut" | "easeInOut" | "circOut" | "backOut";
 export type MotionTrack = {
   delay?: number;
   duration: number;

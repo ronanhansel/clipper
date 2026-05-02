@@ -112,8 +112,8 @@ describe("timeline model", () => {
     expect(previewState.activeTimelinePart?.id).toBe("b");
     expect(previewState.previewTime).toBe(0.5);
     expect(previewState.previewParts.map((item) => [item.part.id, item.previewTime])).toEqual([["b", 0.5]]);
-    expect(previewState.transitionPreviewParts?.from.map((item) => item.part.id)).toEqual(["a"]);
-    expect(previewState.transitionPreviewParts?.to.map((item) => [item.part.id, item.previewTime])).toEqual([["b", 1]]);
+    expect(previewState.transitionPreviewParts?.from.map((item) => item.part.id)).toEqual(["b"]);
+    expect(previewState.transitionPreviewParts?.to.map((item) => [item.part.id, item.previewTime])).toEqual([["b", 0.75]]);
   });
 
   it("removes hidden composition, adjustment, motion, and transition rows from renderable scenes", () => {

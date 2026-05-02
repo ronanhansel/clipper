@@ -3,9 +3,6 @@ category: adjustment
 name: Film Scratches
 label: Film Scratches
 group: Overlay
-accent: "#e6e0d6"
-previewColor: "#8f65f2"
-timelineGradient: {"from":"#a77cff","to":"#5f35c6","text":"#ffffff"}
 defaultDuration: 3
 defaultParams: {"intensity":0.24,"density":1,"drift":1,"target":"camera"}
 paramControls:

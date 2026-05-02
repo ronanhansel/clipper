@@ -11,6 +11,7 @@ import { getAdjustmentEffectPackage, getEffectDragType, getEffectPackage, getMot
 import { applyTimelineBlockPreview, clearTimelineBlockPreview, computeBulkLayerTargets, getTimelineBlockLayerPreview, getTimelineLayerDragPreview, getTimelineLayerRowAtClientY, moveTimelineStateLayer, renameTimelineStateLayer, toggleTimelineStateLayerHidden, toggleTimelineStateLayerLocked, type TimelineLayerCategory } from "../../core/timelineLayers";
 import type { AdjustmentEffectId, AdjustmentLayer, MotionBlockEffectKind, MotionEffectId, MotionEffectKind, MotionMarker, Part, TimelineMotionLayerKind, TimelinePart, TransitionLayer } from "../../core/types";
 import { getMotionMarkerViews } from "../../core/motionEffects";
+import { getTransitionMarkerTime, normalizeSymmetricTransitionLayer } from "../../core/transitions";
 import { compositionDragPreviewEvent, compositionPointerDragEvent, effectDragPreviewEvent, effectPointerDragEvent, getActiveCompositionPointerDrag, setActiveCompositionPointerDrag, setClipperPointerDragPreview, type CompositionPointerDragDetail, type EffectPointerDragDetail } from "../../lib/pointerDrag";
 import { useTimelineScrubber } from "./useTimelineScrubber";
 import { TimelineShell } from "./TimelineShell";
@@ -1128,83 +1129,59 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
       });
       return;
     }
-    const midPointAbs = layer.start + layer.midPoint;
-    const totalEnd = layer.start + layer.duration;
+    const midPointAbs = getTransitionMarkerTime(layer);
     const baseBoundaries = getUniversalBlockSnapBoundaries({ excludeTransitionIds: new Set([layer.id]) });
     const snapThresholdSeconds = Math.max(0.08, 8 / ((timelineRef.current?.getBoundingClientRect().width ?? 1) / Math.max(timelineDisplayDuration, 1)));
 
     function transformTiming(timing: TimelineBlockTimingResult, shiftActive: boolean): TransitionLayer {
       const minDuration = 0.1;
       const r = (v: number) => roundToPrecision(v, timelinePrecision);
-      const getShiftScaleDuration = (rawDuration: number) => r(clamp(rawDuration, minDuration / 2, Math.max(Math.min(midPointAbs, timelineDisplayDuration - midPointAbs), minDuration / 2)));
+      const getSymmetricDuration = (rawHalfDuration: number) => r(clamp(rawHalfDuration, minDuration / 2, Math.max(Math.min(midPointAbs, timelineDisplayDuration - midPointAbs), minDuration / 2)) * 2);
       if (action === "move") {
         let start = timing.start;
         let midPointGuideTime: number | null = null;
         if (shiftActive) {
-          const absMid = start + layer.midPoint;
+          const absMid = start + timing.duration / 2;
           const midSnap = getTimelineSnapGuideTime(absMid, baseBoundaries, snapThresholdSeconds);
           if (midSnap !== null) {
             start = r(clamp(start + (midSnap - absMid), 0, Math.max(timelineDisplayDuration - layer.duration, 0)));
             midPointGuideTime = midSnap;
           }
         }
-        return { ...layer, start, duration: timing.duration, midPointGuideTime } as TransitionLayer & { midPointGuideTime?: number | null };
+        return normalizeSymmetricTransitionLayer({ ...layer, start, duration: timing.duration, midPointGuideTime } as TransitionLayer & { midPointGuideTime?: number | null });
       }
 
       if (action === "start") {
         let start = timing.start;
         if (start > midPointAbs - minDuration) start = midPointAbs - minDuration;
-        let midPoint = r(Math.max(midPointAbs - start, 0));
-        let duration: number;
+        let duration = getSymmetricDuration(midPointAbs - start);
 
         let midPointGuideTime: number | null = null;
         const middleSnap = getTimelineSnapGuideTime(midPointAbs, baseBoundaries, snapThresholdSeconds);
         if (middleSnap !== null && !shiftActive) {
-          midPoint = r(Math.max(middleSnap - start, 0));
           midPointGuideTime = middleSnap;
         }
 
-        if (shiftActive) {
-          const rawInDuration = midPointAbs - start;
-          const inDuration = getShiftScaleDuration(rawInDuration);
-          start = midPointAbs - inDuration;
-          duration = inDuration * 2;
-          midPoint = r(inDuration);
-        } else {
-          start = r(Math.max(start, 0));
-          duration = Math.max(totalEnd - start, minDuration);
-          midPoint = r(Math.max(midPointAbs - start, 0));
-        }
-        midPoint = r(Math.min(midPoint, duration - minDuration));
-        return { ...layer, start, duration, midPoint, midPointGuideTime } as TransitionLayer & { midPointGuideTime?: number | null };
+        start = r(midPointAbs - duration / 2);
+        return normalizeSymmetricTransitionLayer({ ...layer, start, duration, midPointGuideTime } as TransitionLayer & { midPointGuideTime?: number | null });
       }
 
       // action === "end"
       let duration = timing.duration;
       let newEnd = layer.start + duration;
       if (newEnd < midPointAbs + minDuration) { newEnd = midPointAbs + minDuration; duration = newEnd - layer.start; }
-      let midPoint = layer.midPoint;
-      let start = layer.start;
-
-      if (shiftActive) {
-        const rawOutDuration = newEnd - midPointAbs;
-        const outDuration = getShiftScaleDuration(rawOutDuration);
-        start = midPointAbs - outDuration;
-        duration = outDuration * 2;
-        midPoint = r(outDuration);
-      }
+      duration = getSymmetricDuration(newEnd - midPointAbs);
+      let start = r(midPointAbs - duration / 2);
 
       let midPointGuideTime: number | null = null;
       const middleSnap = getTimelineSnapGuideTime(midPointAbs, baseBoundaries, snapThresholdSeconds);
       if (middleSnap !== null && !shiftActive) {
-        midPoint = r(Math.max(middleSnap - start, 0));
         midPointGuideTime = middleSnap;
       }
 
-      midPoint = r(Math.min(midPoint, duration - minDuration));
       start = r(start);
       duration = Math.max(duration, minDuration);
-      return { ...layer, start, duration, midPoint, midPointGuideTime } as TransitionLayer & { midPointGuideTime?: number | null };
+      return normalizeSymmetricTransitionLayer({ ...layer, start, duration, midPointGuideTime } as TransitionLayer & { midPointGuideTime?: number | null });
     }
 
     function transformSnapGuide(timing: TimelineBlockTimingResult, result: TransitionLayer & { midPointGuideTime?: number | null }) {
@@ -1237,7 +1214,7 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
         });
       },
       onMove: (start, targetLayerId) => onMoveTransitionLayer?.(layer.id, start, targetLayerId ?? (layer.layerId ?? layer.effect.effectId)),
-      onResize: (next) => onUpdateTransitionLayer?.(layer.id, () => ({ ...layer, start: next.start, duration: next.duration, midPoint: next.midPoint })),
+      onResize: (next) => onUpdateTransitionLayer?.(layer.id, () => normalizeSymmetricTransitionLayer({ ...layer, start: next.start, duration: next.duration })),
     });
   }
 
@@ -1701,7 +1678,7 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
       return;
     }
 
-    const timing = getExternalDropTiming(sceneTime - base.duration / 2, base.duration, snap);
+    const timing = getExternalDropTiming(sceneTime, base.duration, snap);
     updateExternalSnapGuide(timing.guideTime);
     updateEffectDragPreview({ ...base, start: timing.start });
   }
@@ -1804,7 +1781,7 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
     if (effect?.kind !== kind) return;
     event.preventDefault();
     const preview = effectDragPreviewRef.current;
-    const targetSceneTime = preview?.effectId === effect.id && preview.layerKey === layerId ? preview.start + preview.duration / 2 : sceneTime;
+    const targetSceneTime = preview?.effectId === effect.id && preview.layerKey === layerId ? preview.start : sceneTime;
     updateEffectDragPreview(null);
     onAddMotionEffect(effect.id, layerId, targetSceneTime);
   }
@@ -1816,7 +1793,7 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
     if (!effect || !layer) return;
     event.preventDefault();
     const preview = effectDragPreviewRef.current;
-    const targetSceneTime = preview?.effectId === effect.id && preview.layerKey === layerId ? preview.start + preview.duration / 2 : sceneTime;
+    const targetSceneTime = preview?.effectId === effect.id && preview.layerKey === layerId ? preview.start : sceneTime;
     updateEffectDragPreview(null);
     onAddMotionEffect(effect.id, layerId, targetSceneTime);
   }
@@ -1934,7 +1911,7 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
             handlePreview: () => previewMotionEffectDrop(motionEffect.id, layer.id, detail.clientX, target.sceneTime, detail.shiftKey),
             handleDrop: () => {
               const preview = effectDragPreviewRef.current;
-              const targetSceneTime = preview?.effectId === motionEffect.id && preview.layerKey === layer.id ? preview.start + preview.duration / 2 : target.sceneTime;
+              const targetSceneTime = preview?.effectId === motionEffect.id && preview.layerKey === layer.id ? preview.start : target.sceneTime;
               onAddMotionEffect(motionEffect.id, layer.id, targetSceneTime);
             },
           };
@@ -2005,10 +1982,10 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
               {transitionLayers.filter((layer) => (layer.layerId ?? layer.effect.effectId) === row.key).map((layer) => {
                 const previewLayer = timelineBlockPreviews?.[timelineBlockPreviewKey("transition", layer.id)] ?? layer;
                 return (
-                  <TimelineBlock variant="transition" gradient={getEffectPackage(layer.effect.effectId)?.timelineGradient} blocked={"blocked" in previewLayer ? previewLayer.blocked : undefined} dataAttributes={{ "data-timeline-marker-kind": "transition", "data-timeline-transition-id": layer.id }} key={layer.id} locked={row.locked} selected={selectedTransitionLayerIds.has(layer.id) || layer.id === selectedTransitionLayerId} style={{ left: `${(previewLayer.start / timelineDisplayDuration) * 100}%`, width: `calc(${(previewLayer.duration / timelineDisplayDuration) * 100}% + var(--clipper-transition-resize-width, 0px))` }} onPointerDown={(event) => updateTransitionFromPointer(event, layer, "move")} onClick={() => onSelectTransitionLayer?.(layer.id)} onLeftResize={(event) => updateTransitionFromPointer(event, layer, "start")} onRightResize={(event) => updateTransitionFromPointer(event, layer, "end")} onContextMenu={(event) => openTimelineNodeContextMenu(event, { kind: "transition", layerId: layer.id })}>
+                  <TimelineBlock variant="transition" blocked={"blocked" in previewLayer ? previewLayer.blocked : undefined} dataAttributes={{ "data-timeline-marker-kind": "transition", "data-timeline-transition-id": layer.id }} key={layer.id} locked={row.locked} selected={selectedTransitionLayerIds.has(layer.id) || layer.id === selectedTransitionLayerId} style={{ left: `${(previewLayer.start / timelineDisplayDuration) * 100}%`, width: `calc(${(previewLayer.duration / timelineDisplayDuration) * 100}% + var(--clipper-transition-resize-width, 0px))` }} onPointerDown={(event) => updateTransitionFromPointer(event, layer, "move")} onClick={() => onSelectTransitionLayer?.(layer.id)} onLeftResize={(event) => updateTransitionFromPointer(event, layer, "start")} onRightResize={(event) => updateTransitionFromPointer(event, layer, "end")} onContextMenu={(event) => openTimelineNodeContextMenu(event, { kind: "transition", layerId: layer.id })}>
                     <span className="pointer-events-none block overflow-hidden text-ellipsis whitespace-nowrap">{layer.name}</span>
                     <ArrowLeftRight size={10} className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-white/60" />
-                    <div className="pointer-events-none absolute top-0 bottom-0 w-px bg-white/30" style={{ left: `${layer.duration > 0 ? ((previewLayer.midPoint ?? layer.midPoint) / previewLayer.duration) * 100 : 50}%` }} />
+                    <div className="pointer-events-none absolute top-0 bottom-0 w-px bg-white/30" style={{ left: "50%" }} />
                   </TimelineBlock>
                 );
               })}
@@ -2017,7 +1994,7 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
               {adjustmentLayers.filter((layer) => getAdjustmentLayerRowId(layer) === row.key).map((layer) => {
                 const previewLayer = timelineBlockPreviews?.[timelineBlockPreviewKey("adjustment", layer.id)] ?? layer;
                 return (
-                  <TimelineBlock variant="adjustment" gradient={getEffectPackage(layer.effect.effectId)?.timelineGradient} dataAttributes={{ "data-timeline-marker-kind": "adjustment", "data-timeline-adjustment-id": layer.id }} key={layer.id} locked={row.locked} selected={selectedAdjustmentLayerIds.has(layer.id) || layer.id === selectedAdjustmentLayerId} style={{ left: `${(previewLayer.start / timelineDisplayDuration) * 100}%`, width: `calc(${(previewLayer.duration / timelineDisplayDuration) * 100}% + var(--clipper-adjustment-resize-width, 0px))` }} onPointerDown={(event) => updateAdjustmentFromPointer(event, layer, "move")} onClick={() => onSelectAdjustmentLayer(layer.id)} onLeftResize={(event) => updateAdjustmentFromPointer(event, layer, "start")} onRightResize={(event) => updateAdjustmentFromPointer(event, layer, "end")} onContextMenu={(event) => openTimelineNodeContextMenu(event, { kind: "adjustment", layerId: layer.id })}>
+                  <TimelineBlock variant="adjustment" dataAttributes={{ "data-timeline-marker-kind": "adjustment", "data-timeline-adjustment-id": layer.id }} key={layer.id} locked={row.locked} selected={selectedAdjustmentLayerIds.has(layer.id) || layer.id === selectedAdjustmentLayerId} style={{ left: `${(previewLayer.start / timelineDisplayDuration) * 100}%`, width: `calc(${(previewLayer.duration / timelineDisplayDuration) * 100}% + var(--clipper-adjustment-resize-width, 0px))` }} onPointerDown={(event) => updateAdjustmentFromPointer(event, layer, "move")} onClick={() => onSelectAdjustmentLayer(layer.id)} onLeftResize={(event) => updateAdjustmentFromPointer(event, layer, "start")} onRightResize={(event) => updateAdjustmentFromPointer(event, layer, "end")} onContextMenu={(event) => openTimelineNodeContextMenu(event, { kind: "adjustment", layerId: layer.id })}>
                   <span className="pointer-events-none block overflow-hidden text-ellipsis whitespace-nowrap">{layer.name}</span>
                 </TimelineBlock>
                 );

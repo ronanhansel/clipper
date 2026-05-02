@@ -573,14 +573,14 @@ async function renderSceneToVideo(_project: ProjectManifest, scene: Scene, outpu
     for (let frameIndex = 0; frameIndex < totalFrames; frameIndex += 1) {
       if (exportId && cancelledVideoRenders.has(exportId)) throw new Error("Video export cancelled.");
       const sceneTime = Math.min(frameIndex / frameRate, Math.max(durationSeconds - 0.001, 0));
-      const visualAdjustmentStyle = applyAdjustmentLayersToVisualStyle(sceneTime, scene.adjustmentLayers);
+      const transitionLayer = getActiveTransitionLayer(sceneTime, scene.transitionLayers);
+      const visualAdjustmentStyle = transitionLayer ? {} : applyAdjustmentLayersToVisualStyle(sceneTime, scene.adjustmentLayers);
       const visualTransitionStyle = applyTransitionLayersToVisualStyle(sceneTime, scene.transitionLayers);
       const adjustedSceneTime = applyAdjustmentLayersToSceneTime(sceneTime, scene.adjustmentLayers, frameRate);
       const timelineParts = getActiveTimelinePartsAtTime(timeline, adjustedSceneTime, _project.editorState?.timelineLayers);
       if (timelineParts.length === 0) throw new Error("The current scene has no compositions to render.");
-      const transitionLayer = getActiveTransitionLayer(sceneTime, scene.transitionLayers);
       const frameHtml = transitionLayer
-        ? buildTransitionFrameBody(getTransitionStackParts(timeline, sceneTime, transitionLayer, scene.adjustmentLayers, _project.editorState?.timelineLayers, frameRate), getTransitionProgress(sceneTime, transitionLayer), visualAdjustmentStyle, visualTransitionStyle)
+        ? buildTransitionFrameBody(getTransitionStackParts(timeline, sceneTime, transitionLayer, scene.adjustmentLayers, _project.editorState?.timelineLayers, frameRate), sceneTime, transitionLayer, frameRate, scene.adjustmentLayers, visualTransitionStyle)
         : buildFrameBody(timelineParts.map((timelinePart) => ({ part: timelinePart, previewTime: clamp(adjustedSceneTime - timelinePart.start, 0, timelinePart.duration) })), visualAdjustmentStyle, visualTransitionStyle);
 
       await renderFrameHtml(rendererWindow, frameHtml);
@@ -617,7 +617,7 @@ async function writeProcessInput(process: ChildProcessWithoutNullStreams, chunk:
   });
 }
 
-type MotionEase = "linear" | "easeIn" | "easeOut" | "easeInOut" | "circOut";
+type MotionEase = "linear" | "easeIn" | "easeOut" | "easeInOut" | "circOut" | "backOut";
 type VideoExportProgress = { frame: number; totalFrames: number; percent: number; status: string };
 type MotionTrack = { delay?: number; duration: number; ease?: MotionEase; loop?: boolean; opacity?: readonly [number, number]; rotate?: readonly [number, number]; scale?: readonly [number, number]; scaleX?: readonly [number, number]; scaleY?: readonly [number, number]; skewX?: readonly [number, number]; skewY?: readonly [number, number]; x?: readonly [number, number]; y?: readonly [number, number] };
 type FrameTemplate = { kind: "html"; source: string; static?: boolean };
@@ -635,6 +635,7 @@ type TimelinePart = CompositionClip & { start: number; end: number };
 type AdjustmentVisualOverlay = { id: string; target?: "frame" | "camera"; style: Record<string, string | number> };
 type AdjustmentVisualStyle = { filter?: string; overlays?: AdjustmentVisualOverlay[] };
 type TransitionVisualStyle = { filter?: string; frameStyle?: Record<string, string | number>; cameraStyle?: Record<string, string | number>; overlays?: AdjustmentVisualOverlay[] };
+type TransitionSequenceStyle = { frameStyle?: Record<string, string | number>; aStyle?: Record<string, string | number>; bStyle?: Record<string, string | number> };
 const templateCache = new Map<string, (context: unknown) => unknown>();
 
 function buildLinearTimeline(scene: Scene): TimelinePart[] {
@@ -712,7 +713,7 @@ function applyAdjustmentLayersToVisualStyle(sceneTime: number, layers: Adjustmen
 }
 
 function applyTransitionLayersToVisualStyle(sceneTime: number, layers: TransitionLayer[] | undefined): TransitionVisualStyle {
-  return (layers ?? []).filter((layer) => sceneTime >= layer.start && sceneTime < layer.start + layer.duration).reduce<TransitionVisualStyle>((style, layer) => {
+  return (layers ?? []).filter((layer) => sceneTime >= layer.start && sceneTime < layer.start + getTransitionFinishTime(layer)).reduce<TransitionVisualStyle>((style, layer) => {
     const nextStyle = applyTransitionVisualStyle(sceneTime, layer);
     return {
       ...style,
@@ -727,27 +728,56 @@ function applyTransitionLayersToVisualStyle(sceneTime: number, layers: Transitio
 
 function applyTransitionVisualStyle(sceneTime: number, layer: TransitionLayer): TransitionVisualStyle {
   const effectId = layer.effect.effectId ?? "";
-  const progress = getTransitionProgress(sceneTime, layer);
-  if (effectId === "clipper.transition.swipe") {
-    return { cameraStyle: { transform: `translateX(${-(1 - progress) * 100}%)` } };
-  }
+  if (effectId === "clipper.transition.swipe") return {};
   return {};
 }
 
+function renderTransitionSequence(sceneTime: number, layer: TransitionLayer, frameRate: number): TransitionSequenceStyle {
+  const progress = getTransitionProgress(sceneTime, layer);
+  const effectId = layer.effect.effectId ?? "";
+  if (effectId === "clipper.transition.swipe") return swipeTransitionSequenceStyle(progress);
+  return swipeTransitionSequenceStyle(progress);
+}
+
+function swipeTransitionSequenceStyle(progress: number): TransitionSequenceStyle {
+  const t = clamp(progress, 0, 1);
+  return {
+    aStyle: { transform: `translate3d(${-t * 100}%,0,0)` },
+    bStyle: { transform: `translate3d(${(1 - t) * 100}%,0,0)` },
+  };
+}
+
 function getActiveTransitionLayer(sceneTime: number, layers: TransitionLayer[] | undefined) {
-  return layers?.find((layer) => sceneTime >= layer.start && sceneTime < layer.start + layer.duration) ?? null;
+  return layers?.find((layer) => sceneTime >= layer.start && sceneTime < layer.start + getTransitionFinishTime(layer)) ?? null;
 }
 
 function getTransitionProgress(sceneTime: number, layer: TransitionLayer) {
-  return layer.duration > 0 ? clamp((sceneTime - layer.start) / layer.duration, 0, 1) : 1;
+  const finishTime = getTransitionFinishTime(layer);
+  const linearProgress = finishTime > 0 ? clamp((sceneTime - layer.start) / finishTime, 0, 1) : 1;
+  return easeProgress(linearProgress, (layer.effect.params?.ease as MotionEase | undefined) ?? "easeInOut");
+}
+
+function getTransitionFinishTime(layer: TransitionLayer) {
+  return Math.max(layer.duration, 0.1);
+}
+
+function getTransitionMarkerTime(layer: Pick<TransitionLayer, "start" | "duration">) {
+  return layer.start + layer.duration / 2;
 }
 
 function getTransitionStackParts(timeline: TimelinePart[], sceneTime: number, layer: TransitionLayer, adjustmentLayers: AdjustmentLayer[] | undefined, timelineLayers: TimelineLayerState | undefined, frameRate: number) {
-  const fromTime = applyAdjustmentLayersToSceneTime(Math.max(layer.start - 0.000001, 0), adjustmentLayers, frameRate);
-  const toTime = applyAdjustmentLayersToSceneTime(layer.start + layer.duration, adjustmentLayers, frameRate);
+  const progress = getTransitionProgress(sceneTime, layer);
+  const midTime = getTransitionMarkerTime(layer);
+  const endTime = layer.start + layer.duration;
+  const fromSceneTime = clamp(layer.start + (midTime - layer.start) * progress, layer.start, Math.max(midTime - 0.000001, layer.start));
+  const toSceneTime = clamp(midTime + (endTime - midTime) * progress, midTime, endTime);
+  const fromTime = applyAdjustmentLayersToSceneTime(fromSceneTime, adjustmentLayers, frameRate);
+  const toTime = applyAdjustmentLayersToSceneTime(toSceneTime, adjustmentLayers, frameRate);
   return {
     from: getActiveTimelinePartsAtTime(timeline, fromTime, timelineLayers).map((part) => ({ part, previewTime: clamp(fromTime - part.start, 0, part.duration) })),
     to: getActiveTimelinePartsAtTime(timeline, toTime, timelineLayers).map((part) => ({ part, previewTime: clamp(toTime - part.start, 0, part.duration) })),
+    fromSceneTime,
+    toSceneTime,
   };
 }
 
@@ -836,17 +866,23 @@ function buildFrameBody(parts: Array<{ part: CompositionClip; previewTime: numbe
   return `<div style="${frameStyle}"><div style="${cameraStyle}"><div style="${visualStyle}">${contentHtml}${frameOverlayHtml}</div></div>${cameraOverlayHtml}</div>`;
 }
 
-function buildTransitionFrameBody(parts: { from: Array<{ part: CompositionClip; previewTime: number }>; to: Array<{ part: CompositionClip; previewTime: number }> }, progress: number, visualAdjustmentStyle: AdjustmentVisualStyle, visualTransitionStyle: TransitionVisualStyle) {
+function buildTransitionFrameBody(parts: { from: Array<{ part: CompositionClip; previewTime: number }>; to: Array<{ part: CompositionClip; previewTime: number }>; fromSceneTime: number; toSceneTime: number }, sceneTime: number, layer: TransitionLayer, frameRate: number, adjustmentLayers: AdjustmentLayer[] | undefined, visualTransitionStyle: TransitionVisualStyle) {
   const frameStyle = cssStyle({ position: "relative", width: frameWidth, height: frameHeight, overflow: "hidden", background: "#000" });
-  const visualStyle = cssStyle({ position: "absolute", inset: 0, filter: [visualAdjustmentStyle.filter, visualTransitionStyle.filter].filter(Boolean).join(" ") || undefined, ...visualTransitionStyle.frameStyle });
-  const clampedProgress = clamp(progress, 0, 1);
-  const outgoingStyle = cssStyle({ position: "absolute", inset: 0, overflow: "hidden", transform: `translate3d(${-clampedProgress * 100}%,0,0)` });
-  const incomingStyle = cssStyle({ position: "absolute", inset: 0, overflow: "hidden", transform: `translate3d(${(1 - clampedProgress) * 100}%,0,0)` });
-  const frameOverlayHtml = adjustmentOverlayHtml([...(visualAdjustmentStyle.overlays?.filter((overlay) => overlay.target === "frame") ?? []), ...(visualTransitionStyle.overlays?.filter((overlay) => overlay.target === "frame") ?? [])]);
-  const cameraOverlayHtml = adjustmentOverlayHtml([...(visualAdjustmentStyle.overlays?.filter((overlay) => (overlay.target ?? "camera") === "camera") ?? []), ...(visualTransitionStyle.overlays?.filter((overlay) => (overlay.target ?? "camera") === "camera") ?? [])]);
-  const fromHtml = parts.from.map(({ part, previewTime }) => compositionLayerHtml(part, previewTime)).join("");
-  const toHtml = parts.to.map(({ part, previewTime }) => compositionLayerHtml(part, previewTime)).join("");
+  const sequenceStyle = renderTransitionSequence(sceneTime, layer, frameRate);
+  const visualStyle = cssStyle({ position: "absolute", inset: 0, filter: visualTransitionStyle.filter, ...visualTransitionStyle.frameStyle, ...sequenceStyle.frameStyle });
+  const outgoingStyle = cssStyle({ position: "absolute", inset: 0, overflow: "hidden", ...sequenceStyle.aStyle });
+  const incomingStyle = cssStyle({ position: "absolute", inset: 0, overflow: "hidden", ...sequenceStyle.bStyle });
+  const frameOverlayHtml = adjustmentOverlayHtml(visualTransitionStyle.overlays?.filter((overlay) => overlay.target === "frame"));
+  const cameraOverlayHtml = adjustmentOverlayHtml(visualTransitionStyle.overlays?.filter((overlay) => (overlay.target ?? "camera") === "camera"));
+  const fromHtml = timelineSequenceHtml(parts.from, applyAdjustmentLayersToVisualStyle(parts.fromSceneTime, adjustmentLayers));
+  const toHtml = timelineSequenceHtml(parts.to, applyAdjustmentLayersToVisualStyle(parts.toSceneTime, adjustmentLayers));
   return `<div style="${frameStyle}"><div style="${visualStyle}"><div style="${outgoingStyle}">${fromHtml}</div><div style="${incomingStyle}">${toHtml}</div>${frameOverlayHtml}</div>${cameraOverlayHtml}</div>`;
+}
+
+function timelineSequenceHtml(parts: Array<{ part: CompositionClip; previewTime: number }>, adjustmentStyle: AdjustmentVisualStyle) {
+  const visualStyle = cssStyle({ position: "absolute", inset: 0, filter: adjustmentStyle.filter });
+  const frameOverlayHtml = adjustmentOverlayHtml(adjustmentStyle.overlays?.filter((overlay) => overlay.target === "frame"));
+  return `<div style="${visualStyle}">${parts.map(({ part, previewTime }) => compositionLayerHtml(part, previewTime)).join("")}${frameOverlayHtml}</div>`;
 }
 
 function compositionLayerHtml(part: CompositionClip, previewTime: number) {
@@ -860,7 +896,7 @@ function compositionLayerHtml(part: CompositionClip, previewTime: number) {
   const x = (frameWidth / 2 - focus.x) * (scale - 1) + (activeTranslation?.position.x ?? 0);
   const y = (frameHeight / 2 - focus.y) * (scale - 1) + (activeTranslation?.position.y ?? 0);
   const rotation = activeRotation?.rotation ?? 0;
-  const style = cssStyle({ ...part.frame.style, position: "absolute", inset: 0, overflow: "hidden", transform: `translate3d(${x}px,${y}px,0) rotate(${rotation}deg) scale(${scale})`.trim(), transformOrigin: "center" });
+  const style = cssStyle({ position: "absolute", inset: 0, overflow: "hidden", ...part.frame.style, transform: `translate3d(${x}px,${y}px,0) rotate(${rotation}deg) scale(${scale})`.trim(), transformOrigin: "center" });
   return `<div style="${style}">${part.background.hidden ? "" : backgroundLayerHtml(part.background, previewTime, part.duration)}${part.objects.filter((object) => !object.hidden).map((object) => frameObjectHtml(object, previewTime, part.duration)).join("")}</div>`;
 }
 
@@ -991,6 +1027,7 @@ function easeProgress(value: number, ease: MotionEase | undefined) {
   if (ease === "easeOut" || ease === "circOut") return 1 - Math.pow(1 - value, 3);
   if (ease === "easeIn") return value * value * value;
   if (ease === "easeInOut") return value < 0.5 ? 4 * value * value * value : 1 - Math.pow(-2 * value + 2, 3) / 2;
+  if (ease === "backOut") return 1 + 2.70158 * Math.pow(value - 1, 3) + 1.70158 * Math.pow(value - 1, 2);
   return value;
 }
 

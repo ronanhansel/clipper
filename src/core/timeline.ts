@@ -5,6 +5,7 @@ import { MAX_PART_DURATION_SECONDS, MAX_SCENE_DURATION_SECONDS, type AdjustmentL
 import { clamp, roundTenth, roundToPrecision, roundTwo } from "./math";
 import { getDisplayNameFromPath } from "./fileNames";
 import { applyAdjustmentLayersToSceneTime } from "./adjustments";
+import { getTransitionFinishTime, getTransitionMarkerTime, getTransitionProgress } from "./transitions";
 
 export function buildLinearTimeline(scene: Scene): TimelineComposition[] {
   let cursor = 0;
@@ -140,12 +141,13 @@ export type TimelineMarkerDragItem = { partId: string; markerId: string; absolut
 type TopTimelineItem = { kind: "adjustment"; layer: AdjustmentLayer } | { kind: "transition"; layer: TransitionLayer } | { kind: "motion"; part: TimelineComposition; marker: MotionMarker } | { kind: "part"; part: TimelineComposition };
 export type TimelineMendMarker = { id: string; start: number; duration: number; effectId?: string; effect?: { effectId?: string }; layerId?: string; snapIn?: boolean; snapOut?: boolean; mendInId?: string; mendOutId?: string; partId?: string; sourcePartId?: string; rawMarkerId?: string };
 export type TimelinePreviewStackPart = { part: CompositionClip; start: number; previewTime: number };
+export type TimelinePreviewSequence = { sceneTime: number; parts: TimelinePreviewStackPart[] };
 export type TimelinePreviewState = {
   activeTimelinePart: TimelinePart | null;
   activeComposition: CompositionClip | null;
   previewTime: number;
   previewParts: TimelinePreviewStackPart[];
-  transitionPreviewParts: { from: TimelinePreviewStackPart[]; to: TimelinePreviewStackPart[] } | null;
+  transitionPreviewParts: { from: TimelinePreviewStackPart[]; to: TimelinePreviewStackPart[]; fromSceneTime: number; toSceneTime: number } | null;
 };
 type MiddleSnapMarker = TimelineMendMarker;
 type MiddleSnapLayerResolver<T extends MiddleSnapMarker> = (marker: T) => string;
@@ -189,12 +191,19 @@ export function getTimelinePreviewState({ adjustmentLayers, compositions, sceneD
   const activeTimelinePart = getTopTimelinePartAtTime(timeline, timelinePartLookupTime, timelineLayers);
   const activeComposition = activeTimelinePart ? compositions.find((item) => item.id === activeTimelinePart.id) ?? null : null;
   const previewParts = getPreviewStackParts(compositions, timeline, timelinePartLookupTime, compositionLookupTime, timelineLayers);
-  const transitionLayer = transitionLayers?.find((layer) => sceneTime >= layer.start && sceneTime < layer.start + layer.duration);
-  const transitionFromTime = transitionLayer ? applyAdjustmentLayersToSceneTime(Math.max(transitionLayer.start - 0.000001, 0), adjustmentLayers) : 0;
-  const transitionToTime = transitionLayer ? applyAdjustmentLayersToSceneTime(Math.min(transitionLayer.start + transitionLayer.duration, sceneDurationSeconds), adjustmentLayers) : 0;
+  const transitionLayer = transitionLayers?.find((layer) => sceneTime >= layer.start && sceneTime < layer.start + getTransitionFinishTime(layer));
+  const transitionMidTime = transitionLayer ? clamp(getTransitionMarkerTime(transitionLayer), 0, sceneDurationSeconds) : 0;
+  const transitionEndTime = transitionLayer ? clamp(transitionLayer.start + transitionLayer.duration, 0, sceneDurationSeconds) : 0;
+  const transitionProgress = transitionLayer ? getTransitionProgress(sceneTime, transitionLayer) : 0;
+  const transitionFromSceneTime = transitionLayer ? clamp(transitionLayer.start + (transitionMidTime - transitionLayer.start) * transitionProgress, transitionLayer.start, Math.max(transitionMidTime - 0.000001, transitionLayer.start)) : 0;
+  const transitionToSceneTime = transitionLayer ? clamp(transitionMidTime + (transitionEndTime - transitionMidTime) * transitionProgress, transitionMidTime, transitionEndTime) : 0;
+  const transitionFromTime = transitionLayer ? applyAdjustmentLayersToSceneTime(transitionFromSceneTime, adjustmentLayers) : 0;
+  const transitionToTime = transitionLayer ? applyAdjustmentLayersToSceneTime(transitionToSceneTime, adjustmentLayers) : 0;
   const transitionPreviewParts = transitionLayer ? {
     from: getPreviewStackParts(compositions, timeline, transitionFromTime, transitionFromTime, timelineLayers),
     to: getPreviewStackParts(compositions, timeline, transitionToTime, transitionToTime, timelineLayers),
+    fromSceneTime: transitionFromSceneTime,
+    toSceneTime: transitionToSceneTime,
   } : null;
 
   return {
@@ -337,7 +346,7 @@ export function getScrubSnapBoundaries(
       ...getCanonicalMotionMarkers(part).flatMap((marker) => [part.start + marker.start, part.start + marker.start + marker.duration]),
     ]),
     ...adjustmentLayers.flatMap((layer) => [layer.start, layer.start + layer.duration]),
-    ...transitionLayers.flatMap((layer) => [layer.start, layer.start + layer.duration, layer.start + layer.midPoint]),
+    ...transitionLayers.flatMap((layer) => [layer.start, layer.start + layer.duration, getTransitionMarkerTime(layer)]),
   ])).sort((left, right) => left - right);
 }
 

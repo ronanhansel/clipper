@@ -7,8 +7,10 @@ import { ArrowLeftRight, ChevronDown, ChevronRight, Folder, FolderOpen } from "l
 import type { PointerEvent } from "react";
 import { NativeTree, type NativeTreeNodeRendererProps } from "./tree/NativeTree";
 
-const defaultAdjustmentAccent = "#8f65f2";
-const defaultMotionAccent = "#24b7c9";
+const defaultEffectAccent = "#6f7684";
+const transitionEffectAccent = "#ff8c42";
+const adjustmentEffectAccent = "#a78bfa";
+const motionEffectAccent = "#1bb8c9";
 const EFFECT_ROW_HEIGHT = 30;
 const EFFECT_TREE_INDENT = 24;
 const effectButtonClass = "grid min-w-0 grid-cols-[16px_18px_minmax(0,1fr)] items-center gap-1.5 border border-transparent px-1.5 text-left text-[13px] text-[#f7f7f8] transition hover:bg-[#20232c] active:bg-[#242733]";
@@ -29,9 +31,7 @@ const effectDragLabels: Record<string, string> = {
   ...Object.fromEntries(installedEffectPackages.map((definition) => [definition.id, definition.label])),
 };
 
-const effectDragAccents: Record<string, string> = {
-  ...Object.fromEntries(installedEffectPackages.map((definition) => [definition.id, definition.previewColor ?? definition.accent ?? (definition.category === "adjustment" ? defaultAdjustmentAccent : defaultMotionAccent)])),
-};
+const effectDragAccents: Record<string, string> = Object.fromEntries(installedEffectPackages.map((definition) => [definition.id, definition.category === "transition" ? transitionEffectAccent : definition.category === "motion" ? motionEffectAccent : definition.category === "adjustment" ? adjustmentEffectAccent : defaultEffectAccent]));
 
 
 function buildEffectGroupTree(effects: readonly EffectDefinition[]) {
@@ -76,7 +76,7 @@ export function ToolsPanel({ effectsPanelState, timelineMode, onEffectsPanelStat
 
   function startEffectDrag(event: PointerEvent<HTMLButtonElement>, effect: string) {
     startClipperPointerDrag({
-      accent: effectDragAccents[effect] ?? defaultAdjustmentAccent,
+      accent: effectDragAccents[effect] ?? defaultEffectAccent,
       eventName: effectPointerDragEvent,
       label: effectDragLabels[effect] ?? effect,
       payload: { effect },

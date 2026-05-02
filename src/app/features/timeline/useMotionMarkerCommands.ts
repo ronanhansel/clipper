@@ -313,7 +313,7 @@ export function useMotionMarkerCommands({
       }), { history: true });
     }
     const duration = Math.min(markerDurationSeconds, Math.max(sceneDurationSeconds, 0.1));
-    const absoluteStart = roundToPrecision(Math.max(sceneTime - duration / 2, 0), timelinePrecision);
+    const absoluteStart = roundToPrecision(Math.max(sceneTime, 0), timelinePrecision);
     const markerIdPrefix = effect.kind === "zoom" ? "zom" : effect.kind === "rotate" ? "rot" : effect.kind === "perspective" ? "prs" : "trn";
     const block = createDefaultMotionBlockByEffectId(effect.id, {
       id: `${markerIdPrefix}_${Date.now().toString(36)}`,

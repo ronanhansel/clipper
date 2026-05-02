@@ -1,8 +1,8 @@
-id: clipper.transition.swipe
+id: clipper.transition.fade
 category: transition
-name: Swipe
-label: Swipe
-group: Push
+name: Fade
+label: Fade
+group: Dissolve
 tags: ["blocksOverlap"]
 defaultDuration: 2
 defaultParams: {"ease":"linear","transitionTime":2}

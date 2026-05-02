@@ -53,6 +53,7 @@ import { boundsToPoints } from "./core/geometry";
 import { clamp, roundToPrecision, roundTenth } from "./core/math";
 import type { AdjustmentEffectPointControl } from "./core/effects/types";
 import { getTransitionEffectPackage } from "./core/effects/registry";
+import { normalizeSymmetricTransitionLayer } from "./core/transitions";
 import { defaultComposeLayoutState, defaultEditorLayoutState, defaultPreviewViewportState, defaultTimelineLayerState, defaultTimelineMode, defaultTimelineViewportState, emptyTimelineLayerState } from "./core/project";
 import { getExecutableAdjustmentLayers, getExecutableTransitionLayers } from "./core/timeline";
 import type { TimelineLayerCategory } from "./core/timelineLayers";
@@ -786,7 +787,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
   function updateTransitionLayer(layerId: string, updater: (layer: import("./core/types").TransitionLayer) => import("./core/types").TransitionLayer) {
     updateProject((current) => ({
       ...current,
-      timelines: (current.timelines ?? []).map((timeline) => (timeline.id === scene.id ? { ...timeline, transitionLayers: (timeline.transitionLayers ?? []).map((layer) => layer.id === layerId ? updater(layer) : layer) } : timeline)),
+      timelines: (current.timelines ?? []).map((timeline) => (timeline.id === scene.id ? { ...timeline, transitionLayers: (timeline.transitionLayers ?? []).map((layer) => layer.id === layerId ? normalizeSymmetricTransitionLayer(updater(layer)) : layer) } : timeline)),
     }), { history: true });
   }
 

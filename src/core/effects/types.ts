@@ -18,6 +18,12 @@ export type TransitionVisualStyle = {
   overlays?: TransitionVisualOverlay[];
 };
 
+export type TransitionSequenceStyle = {
+  frameStyle?: Record<string, string | number>;
+  aStyle?: Record<string, string | number>;
+  bStyle?: Record<string, string | number>;
+};
+
 export type TransitionVisualOverlay = {
   id: string;
   target?: "frame" | "camera";
@@ -84,6 +90,7 @@ export type AdjustmentEffectPackage = AdjustmentEffectDefinition & {
 export type TransitionEffectPackage = TransitionEffectDefinition & {
   createDefaultLayer(input: { id: string; layerId?: string; start: number; duration: number; midPoint: number }): TransitionLayer;
   applyVisualStyle?(input: { sceneTime: number; layer: TransitionLayer; frameRate: number; progress: number }): TransitionVisualStyle;
+  renderSequence?(input: { sceneTime: number; layer: TransitionLayer; frameRate: number; progress: number }): TransitionSequenceStyle;
 };
 
 export type EffectPackage = MotionEffectPackage | AdjustmentEffectPackage | TransitionEffectPackage;

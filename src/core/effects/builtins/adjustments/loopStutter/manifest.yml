@@ -3,9 +3,6 @@ category: adjustment
 name: Loop / Stutter
 label: Loop / Stutter
 group: Timing
-accent: "#ffb44f"
-previewColor: "#8f65f2"
-timelineGradient: {"from":"#a77cff","to":"#5f35c6","text":"#ffffff"}
 defaultDuration: 3
 defaultParams: {"window":0.5}
 paramControls:

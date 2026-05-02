@@ -276,6 +276,7 @@ function easeProgress(value: number, ease: MotionEase | undefined) {
   if (ease === "easeOut" || ease === "circOut") return easeOutCubic(value);
   if (ease === "easeIn") return value * value * value;
   if (ease === "easeInOut") return easeInOutCubic(value);
+  if (ease === "backOut") return backOut(value);
   return value;
 }
 
@@ -285,6 +286,10 @@ function easeOutCubic(value: number) {
 
 function easeInOutCubic(value: number) {
   return value < 0.5 ? 4 * value * value * value : 1 - Math.pow(-2 * value + 2, 3) / 2;
+}
+
+function backOut(value: number) {
+  return 1 + 2.70158 * Math.pow(value - 1, 3) + 1.70158 * Math.pow(value - 1, 2);
 }
 
 function clamp(value: number, min: number, max: number) {
