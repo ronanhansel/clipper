@@ -1,14 +1,35 @@
+import { useState, useRef, useEffect } from "react";
 import type { RecentProject } from "../app/project/activeProjectManifest";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog";
+import { Input } from "./ui/input";
 
 type WelcomeScreenProps = {
   error: string | null;
   recentProjects: RecentProject[];
-  onCreateNewProject: () => void;
+  onCreateNewProject: (name: string) => void;
   onOpenProject: () => void;
   onOpenRecentProject: (project: RecentProject) => void;
 };
 
 export function WelcomeScreen({ error, recentProjects, onCreateNewProject, onOpenProject, onOpenRecentProject }: WelcomeScreenProps) {
+  const [isCreatingProject, setIsCreatingProject] = useState(false);
+  const [newProjectName, setNewProjectName] = useState("");
+  const newProjectInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (isCreatingProject) {
+      setNewProjectName("");
+      setTimeout(() => newProjectInputRef.current?.focus(), 50);
+    }
+  }, [isCreatingProject]);
+
+  function handleCreateProjectSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (newProjectName.trim()) {
+      onCreateNewProject(newProjectName.trim());
+      setIsCreatingProject(false);
+    }
+  }
   return (
     <main className="grid h-screen place-items-center bg-[#12141a] text-[#dfe2ea]">
       <section className="grid w-[360px] gap-6">
@@ -23,7 +44,7 @@ export function WelcomeScreen({ error, recentProjects, onCreateNewProject, onOpe
           <button
             type="button"
             className="rounded-xl bg-[var(--clipper-accent)] px-4 py-2.5 text-sm font-bold text-[var(--clipper-accent-foreground)] transition hover:bg-[var(--clipper-accent-hover)]"
-            onClick={onCreateNewProject}
+            onClick={() => setIsCreatingProject(true)}
           >
             Create New Project
           </button>
@@ -58,6 +79,47 @@ export function WelcomeScreen({ error, recentProjects, onCreateNewProject, onOpe
           </div>
         )}
       </section>
+
+      <Dialog open={isCreatingProject} onOpenChange={setIsCreatingProject}>
+        <DialogContent className="sm:max-w-[425px]">
+          <form onSubmit={handleCreateProjectSubmit}>
+            <DialogHeader>
+              <DialogTitle>Create New Project</DialogTitle>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
+              <div className="grid gap-2">
+                <label htmlFor="projectName" className="text-sm font-medium">
+                  Project Name
+                </label>
+                <Input
+                  id="projectName"
+                  ref={newProjectInputRef}
+                  value={newProjectName}
+                  onChange={(e) => setNewProjectName(e.target.value)}
+                  placeholder="My Awesome Video"
+                  className="col-span-3"
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <button
+                type="button"
+                className="rounded-md px-3 py-2 text-sm font-medium hover:bg-white/10"
+                onClick={() => setIsCreatingProject(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={!newProjectName.trim()}
+                className="rounded-md bg-[var(--clipper-accent)] px-3 py-2 text-sm font-medium text-[var(--clipper-accent-foreground)] disabled:opacity-50"
+              >
+                Create Project
+              </button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </main>
   );
 }

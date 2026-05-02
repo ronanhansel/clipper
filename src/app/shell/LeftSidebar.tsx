@@ -1,6 +1,7 @@
 import { Folder, Sparkles } from "lucide-react";
 import { segmentedTabActive, segmentedTabBase, segmentedTabInactive } from "../config";
 import { ComposeLayersPanel } from "../../components/compose/ComposeLayersPanel";
+import { OsFileManager, type OsFileManagerProps } from "../../components/OsFileManager";
 import { ToolsPanel } from "../../components/ToolsPanel";
 import { FileManagerWorkspace, type FileManagerWorkspaceProps } from "../features/file-manager/FileManagerWorkspace";
 import type { EditorState, FrameObject, Part, TimelineMode } from "../../core/types";
@@ -12,6 +13,7 @@ type LeftSidebarProps = {
   fileManagerProps: FileManagerWorkspaceProps;
   hasActiveComposition: boolean;
   leftPanelTab: LeftPanelTab;
+  osFileManagerProps?: OsFileManagerProps;
   part: Part;
   selectedObjectIds: string[];
   timelineMode: TimelineMode;
@@ -23,7 +25,7 @@ type LeftSidebarProps = {
   onToggleComposeLayerLocked?: (layerId: string) => void;
 };
 
-export function LeftSidebar({ composeMode, effectsPanelState, fileManagerProps, hasActiveComposition, leftPanelTab, part, selectedObjectIds, timelineMode, onEffectsPanelStateChange, onLeftPanelTabChange, onReorderComposeObjects, onSelectComposeLayerObjects, onToggleComposeLayerHidden, onToggleComposeLayerLocked }: LeftSidebarProps) {
+export function LeftSidebar({ composeMode, effectsPanelState, fileManagerProps, hasActiveComposition, leftPanelTab, osFileManagerProps, part, selectedObjectIds, timelineMode, onEffectsPanelStateChange, onLeftPanelTabChange, onReorderComposeObjects, onSelectComposeLayerObjects, onToggleComposeLayerHidden, onToggleComposeLayerLocked }: LeftSidebarProps) {
   return (
     <aside className="flex min-h-0 flex-col overflow-hidden border-r border-[#2d313b] bg-[#171920] p-4">
       {composeMode ? (
@@ -36,7 +38,7 @@ export function LeftSidebar({ composeMode, effectsPanelState, fileManagerProps, 
           <button className={`${segmentedTabBase} flex items-center justify-center gap-1.5 ${leftPanelTab === "tools" ? segmentedTabActive : segmentedTabInactive}`} onClick={() => onLeftPanelTabChange("tools")}><Sparkles size={14} />Effects</button>
         </div>
         <div className={`min-h-0 flex-1 overflow-hidden ${leftPanelTab === "assets" ? "grid" : "hidden"}`} aria-hidden={leftPanelTab !== "assets"}>
-          <FileManagerWorkspace {...fileManagerProps} />
+          {osFileManagerProps ? <OsFileManager {...osFileManagerProps} /> : <FileManagerWorkspace {...fileManagerProps} />}
         </div>
         <div className={`min-h-0 flex-1 overflow-hidden ${leftPanelTab === "tools" ? "grid" : "hidden"}`} aria-hidden={leftPanelTab !== "tools"}>
           <ToolsPanel effectsPanelState={effectsPanelState} timelineMode={timelineMode} onEffectsPanelStateChange={onEffectsPanelStateChange} />

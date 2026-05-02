@@ -34,6 +34,8 @@ export type TimelineShellProps = {
   onModeChange: (mode: TimelineMode) => void;
   onTimelineViewportScroll: () => void;
   onTimelineViewportDragLeave?: (event: DragEvent<HTMLDivElement>) => void;
+  onTimelineViewportDragOver?: (event: DragEvent<HTMLDivElement>) => void;
+  onTimelineViewportDrop?: (event: DragEvent<HTMLDivElement>) => void;
   onTimelineZoomChange: (zoom: number) => void;
   onLayerRailWheel: (event: WheelEvent<HTMLDivElement>) => void;
   rulerHandlers: {
@@ -46,7 +48,7 @@ export type TimelineShellProps = {
   renderTimelineViewport: () => ReactNode;
 };
 
-export function TimelineShell({ contentWidth, currentTime, displayDuration, dragActive = false, emptyContent, laneContentHeight, laneRowsStyle, layerRailWidth, playheadColor = "#ff3b30", refs, timelineName, timelineViewportDisplacement, timelineZoom, ticks, activeMode, onModeChange, onTimelineViewportScroll, onTimelineViewportDragLeave, onTimelineZoomChange, onLayerRailWheel, rulerHandlers, renderLayerRail, renderTimelineViewport }: TimelineShellProps) {
+export function TimelineShell({ contentWidth, currentTime, displayDuration, dragActive = false, emptyContent, laneContentHeight, laneRowsStyle, layerRailWidth, playheadColor = "#ff3b30", refs, timelineName, timelineViewportDisplacement, timelineZoom, ticks, activeMode, onModeChange, onTimelineViewportScroll, onTimelineViewportDragLeave, onTimelineViewportDragOver, onTimelineViewportDrop, onTimelineZoomChange, onLayerRailWheel, rulerHandlers, renderLayerRail, renderTimelineViewport }: TimelineShellProps) {
   return (
     <footer ref={refs.timelinePanelRef} data-timeline-panel className={`grid h-full min-h-0 select-none grid-rows-[34px_minmax(0,1fr)] gap-1.5 overflow-hidden border-t border-[#1d2028] bg-[#141821] px-[22px] pb-0 pt-2.5 ${dragActive ? "clipper-timeline-dragging-no-hover" : ""}`}>
       <div className="grid grid-cols-[auto_1fr_auto] items-center gap-4 text-[12px] text-[#9b9da7]">
@@ -85,7 +87,7 @@ export function TimelineShell({ contentWidth, currentTime, displayDuration, drag
             </div>
           </div>
           <div ref={refs.timelineViewportRef} className="timeline-scrollbar min-h-0 overflow-x-scroll overflow-y-auto pl-0 pr-3 [scrollbar-gutter:stable]" onScroll={onTimelineViewportScroll}>
-            <div className="relative grid" style={{ ...laneRowsStyle, width: contentWidth, height: laneContentHeight }} onDragLeave={onTimelineViewportDragLeave}>
+            <div data-timeline-content className="relative grid" style={{ ...laneRowsStyle, width: contentWidth, height: laneContentHeight }} onDragLeave={onTimelineViewportDragLeave} onDragOver={onTimelineViewportDragOver} onDrop={onTimelineViewportDrop}>
               {renderTimelineViewport()}
             </div>
           </div>

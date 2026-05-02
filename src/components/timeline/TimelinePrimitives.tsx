@@ -8,7 +8,7 @@ import type { EffectDragPreview } from "./timelineTypes";
 
 export function EffectDragPreviewBlock({ blockRef, preview }: { blockRef: RefObject<HTMLDivElement | null>; preview: EffectDragPreview }) {
   if (preview.category === "composition") {
-    return <CompositionTimelineBlock blockRef={blockRef} name={preview.label ?? "Composition"} duration={preview.duration} isEmpty={Boolean(preview.isEmpty)} sourceMissing={Boolean(preview.sourceMissing)} selected={false} preview style={{ left: 0, width: 0 }} />;
+    return <CompositionTimelineBlock blockRef={blockRef} name={preview.label ?? "Composition"} duration={preview.duration} isEmpty={Boolean(preview.isEmpty)} sourceMissing={Boolean(preview.sourceMissing)} selected={false} preview blocked={preview.blocked} style={{ left: 0, width: 0 }} />;
   }
 
   const effect = preview.effectId ? getEffectPackage(preview.effectId) : undefined;
@@ -23,11 +23,11 @@ export function EffectDragPreviewBlock({ blockRef, preview }: { blockRef: RefObj
   );
 }
 
-export function CompositionTimelineBlock({ blockRef, name, duration, isEmpty, sourceMissing, locked = false, selected, preview = false, style, dataAttributes, leftResizeEnabled = false, rightResizeEnabled = false, onClick, onDoubleClick, onPointerDown, onContextMenu, onLeftResize, onRightResize }: { blockRef?: RefObject<HTMLDivElement | null>; name: string; duration: number; isEmpty: boolean; sourceMissing: boolean; locked?: boolean; selected: boolean; preview?: boolean; style: CSSProperties; dataAttributes?: Record<string, string>; leftResizeEnabled?: boolean; rightResizeEnabled?: boolean; onClick?: () => void; onDoubleClick?: () => void; onPointerDown?: (event: PointerEvent<HTMLDivElement>) => void; onContextMenu?: (event: ReactMouseEvent<HTMLElement>) => void; onLeftResize?: (event: PointerEvent<HTMLDivElement>) => void; onRightResize?: (event: PointerEvent<HTMLDivElement>) => void }) {
+export function CompositionTimelineBlock({ blockRef, name, duration, isEmpty, sourceMissing, locked = false, selected, preview = false, blocked = false, style, dataAttributes, leftResizeEnabled = false, rightResizeEnabled = false, onClick, onDoubleClick, onPointerDown, onContextMenu, onLeftResize, onRightResize }: { blockRef?: RefObject<HTMLDivElement | null>; name: string; duration: number; isEmpty: boolean; sourceMissing: boolean; locked?: boolean; selected: boolean; preview?: boolean; blocked?: boolean; style: CSSProperties; dataAttributes?: Record<string, string>; leftResizeEnabled?: boolean; rightResizeEnabled?: boolean; onClick?: () => void; onDoubleClick?: () => void; onPointerDown?: (event: PointerEvent<HTMLDivElement>) => void; onContextMenu?: (event: ReactMouseEvent<HTMLElement>) => void; onLeftResize?: (event: PointerEvent<HTMLDivElement>) => void; onRightResize?: (event: PointerEvent<HTMLDivElement>) => void }) {
   const fillClass = preview ? "top-0" : "inset-y-0";
   const interactivityClass = preview ? "pointer-events-none z-30" : "";
-  const surfaceClass = sourceMissing ? "bg-black text-[#f1f3f7]" : isEmpty ? "bg-[linear-gradient(180deg,#2b2d35,#191b21)] text-[#8c929f] opacity-75" : "bg-[linear-gradient(180deg,#38a86d,#17603c)] text-white";
-  const stateClass = selected ? "z-20 opacity-100 outline outline-2 -outline-offset-2 outline-[var(--clipper-accent)]" : preview ? "opacity-90" : locked ? "opacity-45" : "opacity-90";
+  const surfaceClass = blocked ? "bg-[linear-gradient(180deg,#dc2626,#991b1b)] text-white" : sourceMissing ? "bg-black text-[#f1f3f7]" : isEmpty ? "bg-[linear-gradient(180deg,#2b2d35,#191b21)] text-[#8c929f] opacity-75" : "bg-[linear-gradient(180deg,#38a86d,#17603c)] text-white";
+  const stateClass = selected ? "z-20 opacity-100 outline outline-2 -outline-offset-2 outline-[var(--clipper-accent)]" : preview ? "opacity-90" : locked ? "opacity-45" : blocked ? "opacity-85" : "opacity-90";
 
   function blockPointerDown(event: PointerEvent<HTMLDivElement>) {
     if (locked) {

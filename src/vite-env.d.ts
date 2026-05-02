@@ -28,9 +28,13 @@ interface Window {
     trashFile: (relativePath: string) => Promise<void>;
     renameFile: (relativePath: string, nextRelativePath: string) => Promise<void>;
     copyFile: (relativePath: string, nextRelativePath: string) => Promise<void>;
+    listDirectory: (relativePath: string) => Promise<{ name: string; isDirectory: boolean }[]>;
+    findProjectFileByName: (directoryPath: string, fileName: string) => Promise<string | null>;
+    openCompositionFile: (directoryPath: string) => Promise<string | null>;
     listSystemFonts: () => Promise<string[]>;
     openProjectManifest: () => Promise<string | null>;
-    createProjectDialog: () => Promise<string | null>;
+    createProject: (projectName: string) => Promise<string | null>;
+    exportProjectDialog: (defaultFileName: string) => Promise<string | null>;
     exportMediaFile: (defaultFileName: string, content: string) => Promise<string | null>;
     exportBinaryFile: (defaultFileName: string, base64Content: string) => Promise<string | null>;
     startVideoExport: (defaultFileName: string, frameRate: number, width: number, height: number) => Promise<{ sessionId: string; filePath: string } | null>;
@@ -41,9 +45,14 @@ interface Window {
     cancelRenderVideoExport: (exportId: string) => Promise<void>;
     setWindowFullscreen: (fullscreen: boolean) => Promise<boolean>;
     toggleWindowFullscreen: () => Promise<boolean>;
+    watchTextFiles: (relativePaths: string[]) => Promise<void>;
+    watchProjectFiles: (watchPaths: { files: string[]; directories: string[] }) => Promise<void>;
     onVideoExportProgress: (callback: (exportId: string, progress: { frame: number; totalFrames: number; percent: number; status: string }) => void) => () => void;
+    onTextFileChanged: (callback: (relativePath: string) => void) => () => void;
+    onProjectFileChanged: (callback: (relativePath: string) => void) => () => void;
     onModeShortcut: (callback: (key: "1" | "2" | "3" | "4") => void) => () => void;
     onSettingsShortcut: (callback: () => void) => () => void;
+    onExportProject: (callback: () => void) => () => void;
     onWindowFullscreenChange: (callback: (fullscreen: boolean) => void) => () => void;
   };
 }

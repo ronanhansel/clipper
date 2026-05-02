@@ -208,6 +208,15 @@ ipcMain.handle("clipper:copy-file", async (_event, relativePath: string, nextRel
   await fs.copyFile(source, target);
 });
 
+ipcMain.handle("clipper:list-directory", async (_event, relativePath: string) => {
+  try {
+    const entries = await fs.readdir(resolveClipperFile(relativePath), { withFileTypes: true });
+    return entries.sort((a, b) => a.name.localeCompare(b.name)).map((entry) => ({ name: entry.name, isDirectory: entry.isDirectory() }));
+  } catch {
+    return [];
+  }
+});
+
 ipcMain.handle("clipper:find-project-file-by-name", async (_event, directoryPath: string, fileName: string) => {
   const matchedPath = await findFileByName(resolveClipperFile(directoryPath), fileName);
   return matchedPath ? getClipperRelativePath(matchedPath) : null;
@@ -313,19 +322,48 @@ ipcMain.handle("clipper:open-project-manifest", async () => {
   const { canceled, filePaths } = await dialog.showOpenDialog({
     title: "Open Clipper project",
     defaultPath: path.join(appRoot, "clipper", "projects"),
-    properties: ["openFile"],
+    properties: ["openFile", "openDirectory"],
     filters: [{ name: "Clipper Project", extensions: ["clipper"] }],
   });
 
   if (canceled || !filePaths[0]) return null;
-  return getClipperRelativePath(filePaths[0]);
+  const selectedPath = filePaths[0];
+  const stat = await fs.stat(selectedPath);
+  if (stat.isDirectory()) {
+    const manifestPath = path.join(selectedPath, "project.json");
+    try {
+      await fs.access(manifestPath);
+      return getClipperRelativePath(manifestPath);
+    } catch {
+      return null;
+    }
+  }
+  return getClipperRelativePath(selectedPath);
 });
 
-ipcMain.handle("clipper:create-project-dialog", async () => {
+ipcMain.handle("clipper:create-project", async (_event, projectName: string) => {
+  const appRoot = path.resolve(__dirname, "..");
+  const projectsDir = path.join(appRoot, "clipper", "projects");
+  await fs.mkdir(projectsDir, { recursive: true });
+  
+  const safeName = projectName.replace(/[^a-zA-Z0-9_-]/g, "-").toLowerCase();
+  const folderPath = path.join(projectsDir, safeName);
+  
+  try {
+    await fs.mkdir(folderPath, { recursive: true });
+    const manifestPath = path.join(folderPath, "project.json");
+    return getClipperRelativePath(manifestPath);
+  } catch (error) {
+    console.error("Failed to create project folder", error);
+    return null;
+  }
+});
+
+ipcMain.handle("clipper:export-project-dialog", async (_event, defaultFileName: string) => {
   const appRoot = path.resolve(__dirname, "..");
   const { canceled, filePath } = await dialog.showSaveDialog({
-    title: "New Clipper project",
-    defaultPath: path.join(appRoot, "clipper", "projects", "Untitled.clipper"),
+    title: "Export as .clipper",
+    defaultPath: path.join(appRoot, "clipper", "projects", defaultFileName),
     filters: [{ name: "Clipper Project", extensions: ["clipper"] }],
   });
 
@@ -934,6 +972,14 @@ function installAppMenu() {
           accelerator: "CommandOrControl+,",
           click: (_menuItem, browserWindow) => {
             if (browserWindow instanceof BrowserWindow) browserWindow.webContents.send("clipper:settings-shortcut");
+          },
+        },
+        { type: "separator" },
+        {
+          label: "Export as .clipper",
+          accelerator: "CommandOrControl+Shift+E",
+          click: (_menuItem, browserWindow) => {
+            if (browserWindow instanceof BrowserWindow) browserWindow.webContents.send("clipper:export-project");
           },
         },
         { type: "separator" },

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import toast from "react-hot-toast";
 import { useEditorPanelResize } from "./app/features/editor-layout/useEditorPanelResize";
 import { useFramePreviewZoomCommands } from "./app/features/editor-layout/useFramePreviewZoomCommands";
@@ -9,6 +9,7 @@ import { usePresentationController } from "./app/features/presentation/usePresen
 import { isCodeEditorTarget, useGlobalEditorShortcuts } from "./app/features/shortcuts/useGlobalEditorShortcuts";
 import { useSettingsShortcut } from "./app/features/shortcuts/useSettingsShortcut";
 import { getProjectFolderSiblingNames } from "./app/features/file-manager/compositionLibraryMutations";
+import { getDirectoryPath } from "./app/features/file-manager/fileManagerPaths";
 import { useFileManagerController } from "./app/features/file-manager/useFileManagerController";
 import { useFileManagerProjectActions } from "./app/features/file-manager/useFileManagerProjectActions";
 import { useFrameInteractionController, type FrameInteractionController } from "./app/features/frame-interactions/useFrameInteractionController";
@@ -22,8 +23,11 @@ import { useMotionMarkerCommands } from "./app/features/timeline/useMotionMarker
 import { useTimelineClipboardCommands } from "./app/features/timeline/useTimelineClipboardCommands";
 import { useTimelineProjectActions } from "./app/features/timeline/useTimelineProjectActions";
 import { useTimelineSelectionCommands } from "./app/features/timeline/useTimelineSelectionCommands";
+import { clipperHost } from "./app/clipperHost";
 import { useActiveProjectBoot, type BootProject } from "./app/project/useActiveProjectBoot";
 import { useProjectDocumentController } from "./app/project/useProjectDocumentController";
+import { useProjectFileWatcher } from "./app/project/useProjectFileWatcher";
+import { projectPersistenceService } from "./app/services/projectPersistenceService";
 import { AppDialogs } from "./app/shell/AppDialogs";
 import { AppHeader } from "./app/shell/AppHeader";
 import { CenterPreviewPane } from "./app/shell/CenterPreviewPane";
@@ -231,8 +235,17 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     frameInteractionControllerRef.current?.clearDragBox();
   }
 
+  const notifyError = useCallback((error: unknown, fallback: string) => {
+    toast.error(error instanceof Error ? error.message : fallback);
+  }, []);
+
+  const notifyOpenSuccess = useCallback((path: string) => {
+    toast.success(<PathToastMessage action="Opened" path={path} />);
+  }, []);
+
   const {
     activeProjectManifestPath,
+    activeProjectManifestPathRef,
     compositionSources,
     compositionSourcesRef,
     implicitFileOperation,
@@ -241,6 +254,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     projectRef,
     replaceProject,
     redoProjectChange,
+    reloadProject,
     saveAllChanges,
     saveAllChangesRef,
     savedCompositionSourcesSnapshot,
@@ -253,17 +267,29 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     updateEditorState,
     updateProject,
     watchedProjectDirectory,
+    executeFileManagerCommand,
+    fileSystemRevision,
   } = useProjectDocumentController({
     applyStoredEditorState,
     centerPreviewScrollRef,
     defaultEditorState,
     initialProjectManifestPath,
     modeRef,
-    notifyError: (error, fallback) => toast.error(error instanceof Error ? error.message : fallback),
-    notifyOpenSuccess: (path) => toast.success(<PathToastMessage action="Opened" path={path} />),
+    notifyError,
+    notifyOpenSuccess,
     setSourceStatus,
     setTimelineMode,
     timelineModeRef,
+  });
+
+  useProjectFileWatcher({
+    manifestPath: activeProjectManifestPath,
+    project,
+    compositionSources,
+    updateCompositionFromSource,
+    replaceProject,
+    reloadProject,
+    notifyError: (error, fallback) => toast.error(error instanceof Error ? error.message : fallback),
   });
 
   const { updateMode, updateTimelineMode } = useEditorModeCommands({
@@ -492,6 +518,13 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
   useEffect(() => {
     setSourceStatus(initialSourceStatus);
   }, [initialSourceStatus]);
+
+  useEffect(() => {
+    const cleanup = window.clipper?.onExportProject?.(() => {
+      void exportProjectToClipper();
+    });
+    return () => cleanup?.();
+  }, []);
 
   useEffect(() => {
     if (selectedPartId && activeTimelinePart && activeTimelinePart.id !== selectedPartId) {
@@ -1129,7 +1162,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     implicitFileOperation,
     timelines,
     timelineCompositionIds,
-    actions: fileManagerActions,
+    actions: { ...fileManagerActions, reloadProject },
   });
   const editorLayout = project.editorState?.layout ?? defaultEditorLayoutState;
   const composeLayout = project.editorState?.composeLayout ?? defaultComposeLayoutState;
@@ -1155,9 +1188,40 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
   const activeFramePickPoint = (pointPickAdjustment ? framePickPreviewPoint ?? adjustmentFramePickPoint : framePickPoint) ?? null;
   const selectedComposeObjectIds = useMemo(() => selectionPayload?.objects.map((object) => object.id) ?? (selectedObjectId ? [selectedObjectId] : []), [selectedObjectId, selectionPayload]);
 
+  async function exportProjectToClipper() {
+    try {
+      const defaultFileName = `${projectRef.current.name || "Untitled"}.clipper`;
+      const path = await clipperHost.exportProjectDialog(defaultFileName);
+      if (!path) return;
+      await projectPersistenceService.saveProject({ manifestPath: path, project: projectRef.current });
+      toast.success(<PathToastMessage action="Exported to" path={path} />);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to export project.");
+    }
+  }
+
   async function handleCloseProject() {
     if (hasUnsavedChanges) await saveAllChanges();
     onCloseProject();
+  }
+
+  const isDirectoryMode = activeProjectManifestPath.endsWith(".json");
+
+  async function handleReloadProject() {
+    await reloadProject();
+  }
+
+  function handleSelectComposition(_compositionId: string) {
+    // Compositions are only added to the timeline via drag-and-drop.
+    // Clicking a composition in the file manager does not insert it.
+  }
+
+  function handleSelectTimeline(timelineId: string) {
+    setSelectedSceneId(timelineId);
+    updateEditorState((state) => ({ ...state, selectedSceneId: timelineId, selectedTimelineId: timelineId, currentSceneTime: 0 }));
+    clearNodeSelection();
+    setSelectedPartId("");
+    setCurrentSceneTime(0);
   }
 
   return (
@@ -1189,6 +1253,15 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
           fileManagerProps={fileManagerProps}
           hasActiveComposition={hasActiveComposition}
           leftPanelTab={leftPanelTab}
+          osFileManagerProps={isDirectoryMode ? {
+            projectDirectory: watchedProjectDirectory,
+            selectedTimelineId: selectedSceneId,
+            fileSystemRevision,
+            onReloadProject: handleReloadProject,
+            onSelectComposition: handleSelectComposition,
+            onSelectTimeline: handleSelectTimeline,
+            executeFileManagerCommand,
+          } : undefined}
           part={part}
           selectedObjectIds={selectionPayload?.objects.map((object) => object.id) ?? (selectedObjectId ? [selectedObjectId] : [])}
           timelineMode={timelineMode}
@@ -1202,7 +1275,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
 
         <CenterPreviewPane
           blankFrameViewportStyle={blankFrameViewportStyle}
-          codePaneProps={hasActiveComposition ? { part, source: compositionSources[part.filePath] ?? part.source, viewportState: project.editorState?.code?.[part.id], onSaveAll: saveAllChanges, onSourceChange: (source) => updateCompositionFromSource(part, source, { history: false, syncSource: false }), onViewportStateChange: updateCodeViewportState } : null}
+          codePaneProps={hasActiveComposition ? { part, source: compositionSources[part.filePath] ?? part.source, viewportState: project.editorState?.code?.[part.id], projectDirectory: activeProjectManifestPath.endsWith(".json") ? getDirectoryPath(activeProjectManifestPath) : undefined, onSaveAll: saveAllChanges, onSourceChange: (source) => updateCompositionFromSource(part, source, { history: false, syncSource: false }), onViewportStateChange: updateCodeViewportState } : null}
           framePreviewProps={hasActiveComposition ? { cameraRef, dragBox, dragSelectionBoxRef, framePickPoint: activeFramePickPoint, focusPicking: isPickingZoomFocus || isPickingTranslationPosition || Boolean(pointPickAdjustment), trackerPicking: Boolean(trackerPickTranslationMarker), canSelectObjects: canSelectFrameObjects && !isPlaying, cameraTransform: cameraPreviewTransform, frameViewportRef, frameScale: framePreviewScale, isPlaying, part, partStart: activeTimelinePart?.start ?? 0, adjustmentLayers: composeMode ? [] : visibleSceneAdjustmentLayers, playbackClock, previewTime, sceneTime: currentSceneTime, timelineMode, motionLayers: composeMode ? [] : motionLayers, hiddenMotionLayerIds: composeMode ? new Set<string>() : hiddenMotionLayerIds, pickingTranslationPosition: isPickingTranslationPosition || Boolean(pointPickAdjustment), pickingZoomFocus: isPickingZoomFocus || Boolean(pointPickAdjustment), compHidden: composeMode ? false : Boolean(timelineLayers.compHidden), selectedObjects: previewSelectionObjects, marqueeDragging, editingTextObjectId: isPlaying ? null : editingTextObjectId, onFramePointerCancel, onFramePointerDown, onFramePointerDownCapture, onFramePointerMove, onFramePointerUp, onObjectPointerDown: startObjectDrag, onObjectResizePointerDown: startObjectResize, onTextEditCommit: updateTextObjectContent, onTextObjectDoubleClick: startTextObjectEdit, onTrackerTargetPick: commitTranslationTrackerPick } : null}
           hasActiveComposition={hasActiveComposition}
           mode={mode}
@@ -1290,7 +1363,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
         timelineEndPaddingFraction,
         timelinePrecision,
         scrubSnapEnabled,
-        sceneDuration: composeMode ? part.duration : sceneDurationSeconds,
+        sceneDuration: sceneDurationSeconds,
         selectedPartId,
         selectedParts,
         selectedMotionMarkerPartId: selectedMotionMarker?.partId ?? null,

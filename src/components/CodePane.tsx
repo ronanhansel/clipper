@@ -1,6 +1,7 @@
 import Editor, { type BeforeMount, type OnMount } from "@monaco-editor/react";
 import { useEffect, useRef, useState } from "react";
-import compositionApiSource from "../../clipper/projects/composition-api.ts?raw";
+import { compositionApiSource } from "../core/compositionApiSource";
+import { clipperHost } from "../app/clipperHost";
 import { monacoOptions } from "../app/config";
 import type { CodeViewportState, Part } from "../core/types";
 
@@ -24,9 +25,10 @@ function getClipperAccent() {
   };
 }
 
-export function CodePane({ part, source: externalSource, viewportState, active = true, onSaveAll, onSourceChange, onViewportStateChange }: { part: Part; source: string | undefined; viewportState?: CodeViewportState; active?: boolean; onSaveAll: () => Promise<void>; onSourceChange: (source: string) => Promise<void>; onViewportStateChange: (sourceId: string, state: CodeViewportState) => void }) {
+export function CodePane({ part, source: externalSource, viewportState, active = true, projectDirectory, onSaveAll, onSourceChange, onViewportStateChange }: { part: Part; source: string | undefined; viewportState?: CodeViewportState; active?: boolean; projectDirectory?: string; onSaveAll: () => Promise<void>; onSourceChange: (source: string) => Promise<void>; onViewportStateChange: (sourceId: string, state: CodeViewportState) => void }) {
   const [source, setSource] = useState(externalSource ?? "");
   const [error, setError] = useState("");
+  const [apiMissing, setApiMissing] = useState(false);
   const sourceId = part.id;
   const saveAllRef = useRef<() => Promise<void>>(onSaveAll);
   const applySourceChangeRef = useRef(onSourceChange);
@@ -59,6 +61,31 @@ export function CodePane({ part, source: externalSource, viewportState, active =
   useEffect(() => {
     activeRef.current = active;
   }, [active]);
+
+  useEffect(() => {
+    if (!projectDirectory) return;
+    let cancelled = false;
+    async function check() {
+      try {
+        await clipperHost.readTextFile(`${projectDirectory}/composition-api.ts`);
+        if (!cancelled) setApiMissing(false);
+      } catch {
+        if (!cancelled) setApiMissing(true);
+      }
+    }
+    check();
+    return () => { cancelled = true; };
+  }, [projectDirectory]);
+
+  async function restoreCompositionApi() {
+    if (!projectDirectory) return;
+    try {
+      await clipperHost.writeTextFile(`${projectDirectory}/composition-api.ts`, compositionApiSource);
+      setApiMissing(false);
+    } catch (restoreError) {
+      setError(restoreError instanceof Error ? restoreError.message : "Unable to restore composition-api.ts.");
+    }
+  }
 
   useEffect(() => () => {
     const viewState = editorRef.current?.saveViewState();
@@ -211,7 +238,7 @@ export function CodePane({ part, source: externalSource, viewportState, active =
     restoreScrollPosition();
   };
 
-  const gridTemplateRows = `auto minmax(0,1fr)${error ? " auto" : ""}`;
+  const gridTemplateRows = `auto${apiMissing ? " auto" : ""} minmax(0,1fr)${error ? " auto" : ""}`;
 
-  return <div className="grid h-full min-h-0 w-full overflow-hidden bg-[#12141a]" style={{ gridTemplateRows }}><div className="flex min-w-0 items-center gap-2 border-b border-[#2d313b] bg-[#171920] px-3.5 py-3 text-xs"><span className="font-extrabold text-[var(--clipper-accent)]">Project code</span><span className="text-[#565b66]">/</span><span className="min-w-0 truncate text-[#dfe2ea]">{part.name}</span></div><div className="min-h-0 border-y border-[#20232c] bg-[#12141a] shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]"><Editor beforeMount={configureMonaco} language="typescript" onMount={onEditorMount} options={monacoOptions} path={`file:///clipper/project/compositions/${part.id}.ts`} theme="clipper-dark" value={source} onChange={(value) => updateSource(value ?? "")} /></div>{error ? <div className="border-t border-[#3b2a2a] bg-[#1a0f10] px-3.5 py-2 text-xs text-[#ffb4b4] break-words">{error}</div> : null}</div>;
+  return <div className="grid h-full min-h-0 w-full overflow-hidden bg-[#12141a]" style={{ gridTemplateRows }}><div className="flex min-w-0 items-center gap-2 border-b border-[#2d313b] bg-[#171920] px-3.5 py-3 text-xs"><span className="font-extrabold text-[var(--clipper-accent)]">Project code</span><span className="text-[#565b66]">/</span><span className="min-w-0 truncate text-[#dfe2ea]">{part.name}</span></div>{apiMissing ? <div className="flex items-center justify-between gap-2 border-b border-[#3b2a2a] bg-[#1a0f10] px-3.5 py-2 text-xs text-[#ffb4b4]"><span className="break-words">composition-api.ts is missing from the project. External editors and type-checking will not work.</span><button className="shrink-0 rounded bg-[#2d313b] px-2 py-1 text-[11px] font-bold text-[#dfe2ea] hover:bg-[#3b4150]" type="button" onClick={() => void restoreCompositionApi()}>Restore</button></div> : null}<div className="min-h-0 border-y border-[#20232c] bg-[#12141a] shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]"><Editor beforeMount={configureMonaco} language="typescript" onMount={onEditorMount} options={monacoOptions} path={`file:///clipper/project/compositions/${part.id}.ts`} theme="clipper-dark" value={source} onChange={(value) => updateSource(value ?? "")} /></div>{error ? <div className="border-t border-[#3b2a2a] bg-[#1a0f10] px-3.5 py-2 text-xs text-[#ffb4b4] break-words">{error}</div> : null}</div>;
 }

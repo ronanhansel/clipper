@@ -31,6 +31,7 @@ export type BuildFileManagerWorkspacePropsInput = Omit<FileManagerProps,
   | "onRevealCompositionFolder"
   | "onSelectTimeline"
   | "onSortAssets"
+  | "onReloadProject"
 > & {
   actions: {
     addComposition: FileManagerProps["onAddComposition"];
@@ -60,6 +61,7 @@ export type BuildFileManagerWorkspacePropsInput = Omit<FileManagerProps,
     revealCompositionFolder: FileManagerProps["onRevealCompositionFolder"];
     selectTimeline: FileManagerProps["onSelectTimeline"];
     sortAssets: FileManagerProps["onSortAssets"];
+    reloadProject: FileManagerProps["onReloadProject"];
   };
 };
 
@@ -93,7 +95,8 @@ export function buildFileManagerWorkspaceProps({ actions, ...state }: BuildFileM
     onRevealCompositionFolder: actions.revealCompositionFolder,
     onSelectTimeline: actions.selectTimeline,
     onSortAssets: actions.sortAssets,
-  };
+    onReloadProject: actions.reloadProject,
+  } as FileManagerWorkspaceProps;
 }
 
 export function FileManagerWorkspace(props: FileManagerWorkspaceProps) {

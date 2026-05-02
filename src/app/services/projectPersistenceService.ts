@@ -23,6 +23,14 @@ class ProjectPersistenceService {
       };
     }
 
+    if (manifestPath.endsWith(".json")) {
+      const project = await loadDirectoryProject(manifestPath);
+      return {
+        project,
+        sourceStatus: `Project loaded from ${manifestPath}.`,
+      };
+    }
+
     const content = await clipperHost.readTextFile(manifestPath);
     const project = normalizeProject(JSON.parse(content) as ProjectManifest);
     return {
@@ -34,6 +42,7 @@ class ProjectPersistenceService {
   async saveProject({ manifestPath, project }: SaveProjectInput) {
     const saveProject = serializeProjectForSave(project);
     if (manifestPath.endsWith(".clipper")) await saveZipProject(manifestPath, saveProject);
+    else if (manifestPath.endsWith(".json")) await saveDirectoryProject(manifestPath, saveProject);
     else await clipperHost.writeTextFile(manifestPath, `${JSON.stringify(saveProject, null, 2)}\n`);
     return {
       projectSnapshot: JSON.stringify(saveProject),
@@ -126,6 +135,138 @@ async function saveZipProject(manifestPath: string, project: ProjectManifest) {
   await clipperHost.writeBinaryFile(manifestPath, await zip.generateAsync({ type: "base64", compression: "DEFLATE" }));
 }
 
+async function getEditableRootPath(rootPath: string): Promise<string> {
+  try {
+    const entries = await clipperHost.listDirectory(rootPath);
+    if (entries.some((entry) => entry.isDirectory && entry.name === "file-manager")) {
+      return `${rootPath}/file-manager`
+    }
+  } catch {
+    // ignore
+  }
+  return rootPath
+}
+
+async function loadDirectoryProject(manifestPath: string) {
+  const content = await clipperHost.readTextFile(manifestPath);
+  const manifestProject = JSON.parse(content) as ProjectManifest;
+  const rootPath = getDirectoryPath(manifestPath);
+  const editableRoot = await getEditableRootPath(rootPath);
+  const timelines = await loadDirectoryTimelines(editableRoot, rootPath);
+  const compositions = await loadDirectoryCompositions(editableRoot, rootPath);
+  return normalizeProject({
+    ...manifestProject,
+    timelines,
+    compositions,
+    compositionLibrary: compositions,
+    compositionSources: Object.fromEntries(compositions.map((composition) => [composition.filePath, composition.source])),
+    scenes: manifestProject.scenes ?? [],
+  });
+}
+
+async function loadDirectoryTimelines(editableRoot: string, fallbackRoot: string) {
+  const primaryDir = editableRoot ? `${editableRoot}/timelines` : "file-manager/timelines";
+  const fallbackDir = fallbackRoot ? `${fallbackRoot}/timelines` : "timelines";
+
+  let entries = await clipperHost.listDirectory(primaryDir).catch(() => [] as { name: string; isDirectory: boolean }[]);
+  let timelineFiles = entries.filter((entry) => !entry.isDirectory && entry.name.endsWith(".json"));
+  let effectiveDir = primaryDir;
+
+  if (timelineFiles.length === 0) {
+    entries = await clipperHost.listDirectory(fallbackDir).catch(() => [] as { name: string; isDirectory: boolean }[]);
+    timelineFiles = entries.filter((entry) => !entry.isDirectory && entry.name.endsWith(".json"));
+    effectiveDir = fallbackDir;
+  }
+
+  const timelines = await Promise.all(
+    timelineFiles.map(async (file) => {
+      const filePath = `${effectiveDir}/${file.name}`;
+      return { ...JSON.parse(await clipperHost.readTextFile(filePath)) as TimelineDocument, filePath: projectPathFromDirectoryEntry(fallbackRoot, file.name, "timelines") };
+    })
+  );
+  return timelines.sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
+}
+
+async function loadDirectoryCompositions(editableRoot: string, fallbackRoot: string) {
+  const primaryDir = editableRoot ? `${editableRoot}/compositions` : "file-manager/compositions";
+  const fallbackDir = fallbackRoot ? `${fallbackRoot}/compositions` : "compositions";
+
+  let entries = await clipperHost.listDirectory(primaryDir).catch(() => [] as { name: string; isDirectory: boolean }[]);
+  let compositionFiles = entries.filter((entry) => !entry.isDirectory && entry.name.endsWith(".ts"));
+  let effectiveDir = primaryDir;
+
+  if (compositionFiles.length === 0) {
+    entries = await clipperHost.listDirectory(fallbackDir).catch(() => [] as { name: string; isDirectory: boolean }[]);
+    compositionFiles = entries.filter((entry) => !entry.isDirectory && entry.name.endsWith(".ts"));
+    effectiveDir = fallbackDir;
+  }
+
+  return Promise.all(
+    compositionFiles.map(async (file) => {
+      const filePath = `${effectiveDir}/${file.name}`;
+      const source = await clipperHost.readTextFile(filePath);
+      const id = getSourceCompositionId(source, file.name);
+      const baseComposition = createBaseComposition(id, projectPathFromDirectoryEntry(fallbackRoot, file.name, "compositions"), source);
+      return { ...(await compositionFromEmbeddedSource(baseComposition, source)), source } as CompositionDocument;
+    })
+  );
+}
+
+async function saveDirectoryProject(manifestPath: string, project: ProjectManifest) {
+  const normalized = serializeProjectForSave(project);
+  const rootPath = getDirectoryPath(manifestPath);
+  const metadataProject = {
+    id: normalized.id,
+    name: normalized.name,
+    resolution: normalized.resolution,
+    assetsPath: normalized.assetsPath,
+    assets: normalized.assets,
+    compositionFolders: normalized.compositionFolders ?? [],
+    timelineOrder: normalized.timelines?.map((timeline) => timeline.id) ?? [],
+    compositionOrder: normalized.compositions?.map((composition) => composition.id) ?? [],
+    editorState: normalized.editorState,
+    scenes: [],
+  };
+  await clipperHost.writeTextFile(manifestPath, `${JSON.stringify(metadataProject, null, 2)}\n`);
+
+  const fileManagerDir = rootPath ? `${rootPath}/file-manager` : "file-manager";
+  const compositionDir = rootPath ? `${rootPath}/file-manager/compositions` : "file-manager/compositions";
+  const timelineDir = rootPath ? `${rootPath}/file-manager/timelines` : "file-manager/timelines";
+  await clipperHost.createDirectory(fileManagerDir);
+  await clipperHost.createDirectory(compositionDir);
+  await clipperHost.createDirectory(timelineDir);
+
+  const compositionFileNames = new Set<string>();
+  for (const composition of normalized.compositions ?? []) {
+    const source = composition.source ?? normalized.compositionSources?.[composition.filePath];
+    if (source === undefined) throw new Error(`Composition ${composition.filePath} is missing source.`);
+    const fileName = `${safeZipName(composition.id)}.composition.ts`;
+    compositionFileNames.add(fileName);
+    await clipperHost.writeTextFile(`${compositionDir}/${fileName}`, source);
+  }
+
+  const timelineFileNames = new Set<string>();
+  for (const timeline of normalized.timelines ?? []) {
+    const fileName = `${safeZipName(timeline.id)}.timeline.json`;
+    timelineFileNames.add(fileName);
+    await clipperHost.writeTextFile(`${timelineDir}/${fileName}`, `${JSON.stringify(timeline, null, 2)}\n`);
+  }
+
+  const compositionEntries = await clipperHost.listDirectory(compositionDir);
+  for (const entry of compositionEntries) {
+    if (!entry.isDirectory && entry.name.endsWith(".ts") && !compositionFileNames.has(entry.name)) {
+      await clipperHost.trashFile(`${compositionDir}/${entry.name}`);
+    }
+  }
+
+  const timelineEntries = await clipperHost.listDirectory(timelineDir);
+  for (const entry of timelineEntries) {
+    if (!entry.isDirectory && entry.name.endsWith(".json") && !timelineFileNames.has(entry.name)) {
+      await clipperHost.trashFile(`${timelineDir}/${entry.name}`);
+    }
+  }
+}
+
 function getSourceCompositionId(source: string, fileName: string) {
   const compositionBlock = /export\s+const\s+composition\s*=\s*new\s+Composition\s*\(\s*{([\s\S]*?)\n}\s*\)/.exec(source)?.[1];
   const sourceId = /^\s{2}id\s*:\s*["'`]([^"'`]+)["'`]/m.exec(compositionBlock ?? source)?.[1] ?? null;
@@ -152,7 +293,7 @@ function safeZipName(value: string) {
 }
 
 function safeCompositionPath(composition: CompositionClip, rootPath: string) {
-  return safeProjectZipPath(composition.filePath, rootPath, "compositions", `${safeZipName(composition.id)}.ts`, ".ts");
+  return safeProjectZipPath(composition.filePath, rootPath, "compositions", `${safeZipName(composition.id)}.composition.ts`, ".ts");
 }
 
 function safeTimelinePath(timeline: TimelineDocument, rootPath: string) {
@@ -181,6 +322,11 @@ function isSafeZipEntryPath(filePath: string) {
 function projectPathFromZipEntry(rootPath: string, entryName: string, folder: "compositions" | "timelines") {
   const relativePath = entryName.replace(new RegExp(`^${folder}/`), "");
   return rootPath ? `${rootPath}/${relativePath}` : relativePath;
+}
+
+function projectPathFromDirectoryEntry(rootPath: string, entryName: string, folder: "compositions" | "timelines") {
+  const basePath = rootPath ? `${rootPath}/${entryName}` : entryName;
+  return basePath.replace(/\/file-manager\//, "/");
 }
 
 function getDirectoryPath(path: string) {

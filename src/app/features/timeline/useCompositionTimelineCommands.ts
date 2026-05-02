@@ -1,6 +1,7 @@
 import { defaultTimelineLayerState } from "../../../core/project";
 import { buildLinearTimeline, rebaseCompositionTimelineMarkers, getMotionMiddleSnap, isMotionMiddleSnapActive, type TimelineMendMarker } from "../../../core/timeline";
 import { roundToPrecision, roundTenth } from "../../../core/math";
+import { getDisplayName } from "../file-manager/fileNames";
 import type { CompositionSelection } from "../../types";
 import type { Part, SelectionPayload, TimelineLayerState } from "../../../core/types";
 
@@ -118,7 +119,7 @@ export function useCompositionTimelineCommands({
   }
 
   function addCompositionFromLibrary(compositionId: string, targetLayerId?: string, start = currentSceneTimeRef.current) {
-    const libraryComposition = compositionLibrary.find((composition) => composition.id === compositionId);
+    const libraryComposition = compositionLibrary.find((composition) => composition.id === compositionId || (composition.filePath && getDisplayName(composition.filePath.split("/").pop() || "") === compositionId));
     if (!libraryComposition) return;
     const clipId = `clip_${Date.now().toString(36)}`;
     const layerId = targetLayerId ?? (timelineLayers.compositionLayers?.length ? timelineLayers.compositionLayers : defaultTimelineLayerState.compositionLayers!)?.[0]?.id ?? "comp";

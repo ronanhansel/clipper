@@ -1,7 +1,7 @@
 /// <reference types="node" />
 
 import { describe, expect, it } from "vitest";
-import { defineChart, type ChartType } from "../../clipper/projects/composition-api";
+import { defineChart, type ChartType } from "./compositionApi";
 import { compositionFromSource, compositionToSource } from "./compositionSource";
 import type { Part } from "./types";
 

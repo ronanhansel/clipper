@@ -70,6 +70,14 @@ class ClipperHostService {
     await window.clipper?.copyFile?.(relativePath, nextRelativePath);
   }
 
+  async listDirectory(relativePath: string): Promise<{ name: string; isDirectory: boolean }[]> {
+    if (window.clipper?.listDirectory) return window.clipper.listDirectory(relativePath);
+
+    const response = await fetch(`/__clipper_fs/list?path=${encodeURIComponent(relativePath)}`);
+    if (!response.ok) return [];
+    return response.json() as Promise<{ name: string; isDirectory: boolean }[]>;
+  }
+
   async listSystemFonts() {
     const browserFonts = await this.listBrowserLocalFonts();
     if (browserFonts.length > 0) return browserFonts;
@@ -96,9 +104,16 @@ class ClipperHostService {
     return window.clipper.openProjectManifest();
   }
 
-  async createProjectDialog() {
-    if (!window.clipper?.createProjectDialog) return null;
-    return window.clipper.createProjectDialog();
+  async createProject(projectName: string) {
+    if (!window.clipper?.createProject) {
+      throw new Error("Electron app needs to be restarted to apply the latest updates.");
+    }
+    return window.clipper.createProject(projectName);
+  }
+
+  async exportProjectDialog(defaultFileName: string) {
+    if (!window.clipper?.exportProjectDialog) return null;
+    return window.clipper.exportProjectDialog(defaultFileName);
   }
 
   async renderVideoExport(exportId: string, defaultFileName: string, project: ProjectManifest, scene: SceneManifest, frameRate: number) {

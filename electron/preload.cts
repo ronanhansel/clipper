@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld("clipper", {
   trashFile: (relativePath: string) => ipcRenderer.invoke("clipper:trash-file", relativePath) as Promise<void>,
   renameFile: (relativePath: string, nextRelativePath: string) => ipcRenderer.invoke("clipper:rename-file", relativePath, nextRelativePath) as Promise<void>,
   copyFile: (relativePath: string, nextRelativePath: string) => ipcRenderer.invoke("clipper:copy-file", relativePath, nextRelativePath) as Promise<void>,
+  listDirectory: (relativePath: string) => ipcRenderer.invoke("clipper:list-directory", relativePath) as Promise<{ name: string; isDirectory: boolean }[]>,
   findProjectFileByName: (directoryPath: string, fileName: string) => ipcRenderer.invoke("clipper:find-project-file-by-name", directoryPath, fileName) as Promise<string | null>,
   openCompositionFile: (directoryPath: string) => ipcRenderer.invoke("clipper:open-composition-file", directoryPath) as Promise<string | null>,
   listSystemFonts: () => ipcRenderer.invoke("clipper:list-system-fonts") as Promise<string[]>,
@@ -19,7 +20,8 @@ contextBridge.exposeInMainWorld("clipper", {
   watchTextFiles: (relativePaths: string[]) => ipcRenderer.invoke("clipper:watch-text-files", relativePaths) as Promise<void>,
   watchProjectFiles: (watchPaths: { files: string[]; directories: string[] }) => ipcRenderer.invoke("clipper:watch-project-files", watchPaths) as Promise<void>,
   openProjectManifest: () => ipcRenderer.invoke("clipper:open-project-manifest") as Promise<string | null>,
-  createProjectDialog: () => ipcRenderer.invoke("clipper:create-project-dialog") as Promise<string | null>,
+  createProject: (projectName: string) => ipcRenderer.invoke("clipper:create-project", projectName) as Promise<string | null>,
+  exportProjectDialog: (defaultFileName: string) => ipcRenderer.invoke("clipper:export-project-dialog", defaultFileName) as Promise<string | null>,
   exportMediaFile: (defaultFileName: string, content: string) => ipcRenderer.invoke("clipper:export-media-file", defaultFileName, content) as Promise<string | null>,
   exportBinaryFile: (defaultFileName: string, base64Content: string) => ipcRenderer.invoke("clipper:export-binary-file", defaultFileName, base64Content) as Promise<string | null>,
   startVideoExport: (defaultFileName: string, frameRate: number, width: number, height: number) => ipcRenderer.invoke("clipper:start-video-export", defaultFileName, frameRate, width, height) as Promise<{ sessionId: string; filePath: string } | null>,
@@ -52,6 +54,11 @@ contextBridge.exposeInMainWorld("clipper", {
     const listener = () => callback();
     ipcRenderer.on("clipper:settings-shortcut", listener);
     return () => ipcRenderer.removeListener("clipper:settings-shortcut", listener);
+  },
+  onExportProject: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on("clipper:export-project", listener);
+    return () => ipcRenderer.removeListener("clipper:export-project", listener);
   },
   onWindowFullscreenChange: (callback: (fullscreen: boolean) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, fullscreen: boolean) => callback(fullscreen);

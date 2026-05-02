@@ -39,6 +39,7 @@ type UseFileManagerControllerInput = Pick<FileManagerProps,
     revealCompositionFolder: FileManagerProps["onRevealCompositionFolder"];
     selectTimeline: FileManagerProps["onSelectTimeline"];
     sortAssets: FileManagerProps["onSortAssets"];
+    reloadProject: FileManagerProps["onReloadProject"];
   };
   implicitFileOperation: <T extends unknown[]>(operation: (...args: T) => void) => (...args: T) => void;
 };
@@ -74,6 +75,7 @@ export function useFileManagerController({ actions, implicitFileOperation, ...st
       revealCompositionFolder: actions.revealCompositionFolder,
       selectTimeline: actions.selectTimeline,
       sortAssets: implicitFileOperation(actions.sortAssets),
+      reloadProject: actions.reloadProject,
     },
   });
 }

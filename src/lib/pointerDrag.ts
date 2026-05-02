@@ -28,6 +28,16 @@ export type CompositionPointerDragDetail = ClipperPointerDragDetail<{
   sourceMissing: boolean;
 }>;
 
+let activeCompositionPointerDrag: CompositionPointerDragDetail | null = null;
+
+export function setActiveCompositionPointerDrag(detail: CompositionPointerDragDetail | null) {
+  activeCompositionPointerDrag = detail;
+}
+
+export function getActiveCompositionPointerDrag() {
+  return activeCompositionPointerDrag;
+}
+
 type StartPointerDragOptions<TPayload extends Record<string, unknown>> = {
   accent: string;
   activationDelayMs?: number;
@@ -72,15 +82,21 @@ export function startClipperPointerDrag<TPayload extends Record<string, unknown>
   }
 
   function emitFromPointer(phase: ClipperPointerDragPhase, pointer: typeof lastPointer) {
-    window.dispatchEvent(new CustomEvent<ClipperPointerDragDetail<TPayload>>(eventName, { detail: { ...payload, phase, clientX: pointer.clientX, clientY: pointer.clientY, shiftKey: pointer.shiftKey } }));
+    const detail = { ...payload, phase, clientX: pointer.clientX, clientY: pointer.clientY, shiftKey: pointer.shiftKey } as ClipperPointerDragDetail<TPayload>;
+    if (eventName === compositionPointerDragEvent) setActiveCompositionPointerDrag(detail as unknown as CompositionPointerDragDetail);
+    window.dispatchEvent(new CustomEvent<ClipperPointerDragDetail<TPayload>>(eventName, { detail }));
   }
 
   function emit(phase: ClipperPointerDragPhase, event: globalThis.PointerEvent) {
-    window.dispatchEvent(new CustomEvent<ClipperPointerDragDetail<TPayload>>(eventName, { detail: { ...payload, phase, clientX: event.clientX, clientY: event.clientY, shiftKey: event.shiftKey } }));
+    const detail = { ...payload, phase, clientX: event.clientX, clientY: event.clientY, shiftKey: event.shiftKey } as ClipperPointerDragDetail<TPayload>;
+    if (eventName === compositionPointerDragEvent) setActiveCompositionPointerDrag(phase === "move" ? detail as unknown as CompositionPointerDragDetail : null);
+    window.dispatchEvent(new CustomEvent<ClipperPointerDragDetail<TPayload>>(eventName, { detail }));
   }
 
   function emitFromMouse(phase: ClipperPointerDragPhase, event: globalThis.MouseEvent) {
-    window.dispatchEvent(new CustomEvent<ClipperPointerDragDetail<TPayload>>(eventName, { detail: { ...payload, phase, clientX: event.clientX, clientY: event.clientY, shiftKey: event.shiftKey } }));
+    const detail = { ...payload, phase, clientX: event.clientX, clientY: event.clientY, shiftKey: event.shiftKey } as ClipperPointerDragDetail<TPayload>;
+    if (eventName === compositionPointerDragEvent) setActiveCompositionPointerDrag(phase === "move" ? detail as unknown as CompositionPointerDragDetail : null);
+    window.dispatchEvent(new CustomEvent<ClipperPointerDragDetail<TPayload>>(eventName, { detail }));
   }
 
   function onPointerMove(event: globalThis.PointerEvent) {

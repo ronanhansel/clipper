@@ -10,7 +10,7 @@ import { getAdjustmentEffectPackage, getEffectDragType, getEffectPackage, getMot
 import { applyTimelineBlockPreview, clearTimelineBlockPreview, computeBulkLayerTargets, getTimelineBlockLayerPreview, getTimelineLayerDragPreview, getTimelineLayerRowAtClientY, moveTimelineStateLayer, renameTimelineStateLayer, toggleTimelineStateLayerHidden, toggleTimelineStateLayerLocked, type TimelineLayerCategory } from "../../core/timelineLayers";
 import type { AdjustmentEffectId, AdjustmentLayer, MotionBlockEffectKind, MotionEffectId, MotionEffectKind, MotionMarker, Part, TimelineMotionLayerKind, TimelinePart, TransitionLayer } from "../../core/types";
 import { getMotionMarkerViews } from "../../core/motionEffects";
-import { compositionDragPreviewEvent, compositionPointerDragEvent, effectDragPreviewEvent, effectPointerDragEvent, setClipperPointerDragPreview, type CompositionPointerDragDetail, type EffectPointerDragDetail } from "../../lib/pointerDrag";
+import { compositionDragPreviewEvent, compositionPointerDragEvent, effectDragPreviewEvent, effectPointerDragEvent, getActiveCompositionPointerDrag, setActiveCompositionPointerDrag, setClipperPointerDragPreview, type CompositionPointerDragDetail, type EffectPointerDragDetail } from "../../lib/pointerDrag";
 import { useTimelineScrubber } from "./useTimelineScrubber";
 import { TimelineShell } from "./TimelineShell";
 import { MotionLane } from "./MotionLane";
@@ -818,6 +818,16 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
     clearTimelineBlockPreview(element, "--clipper-composition-resize-width");
   }
 
+  function isCompositionBlocked(start: number, duration: number, layerId: string, compositionIdsToExclude?: Set<string>): boolean {
+    const end = start + duration;
+    return timeline.some((part) => {
+      if (compositionIdsToExclude?.has(part.id)) return false;
+      if ((part.layerId ?? "comp") !== layerId) return false;
+      const partEnd = part.start + part.duration;
+      return start < partEnd && end > part.start;
+    });
+  }
+
   function updateCompositionFromPointer(event: PointerEvent<HTMLElement>, composition: TimelinePart, action: "move" | "start" | "end") {
     const moveTargets = action === "move" ? selectedCompositionMoveTargets(composition) : [composition];
     if (moveTargets.length === 0 || isCompositionLocked(composition)) return;
@@ -843,19 +853,26 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
         const moveDelta = timing.start - composition.start;
         return moveTargets.map((target) => ({ ...target, start: target.start + moveDelta }));
       }
+      function isAnyLayerBlocked(nextTargets: TimelinePart[], layerTargets: Map<string, string>): boolean {
+        return nextTargets.some((nextTarget) => {
+          const rowKey = layerTargets.get(nextTarget.id) ?? nextTarget.layerId ?? "comp";
+          return isCompositionBlocked(nextTarget.start, nextTarget.duration, rowKey, moveTargetIds);
+        });
+      }
       function applyDrag(clientX: number, clientY: number, snap: boolean) {
         const nextTargets = getNextMoveTargets(clientX, snap);
-        previewTimelineBlocks(previewMapFromBlocks("composition", nextTargets));
         const containerRect = timelineViewportRef.current?.firstElementChild?.getBoundingClientRect();
         const cursorLayerId = getTimelineLayerRowAtClientY(layerLayout, containerRect, clientY, "comp")?.row.key;
         const layerTargets = computeBulkLayerTargets(layerLayout, "comp", sourceLayerId, cursorLayerId, moveTargets, "comp");
+        const blocked = isAnyLayerBlocked(nextTargets, layerTargets);
+        previewTimelineBlocks(previewMapFromBlocks("composition", nextTargets.map((t) => ({ ...t, blocked } as any))));
         for (const target of moveTargets) {
           const nextTarget = nextTargets.find((item) => item.id === target.id);
           const targetElement = timelineViewportRef.current?.querySelector<HTMLElement>(`[data-timeline-composition-id="${CSS.escape(target.id)}"]`);
           if (!nextTarget || !targetElement) continue;
           const computedLayerId = layerTargets.get(target.id);
           const layerPreview = getTimelineLayerDragPreview(layerLayout, target.layerId ?? "comp", computedLayerId && !isLayerLocked("comp", computedLayerId) ? computedLayerId : undefined);
-          applyTimelineBlockPreview(targetElement, { deltaX: 0, deltaY: layerPreview.deltaY, height: layerPreview.height, resizeProperty: "--clipper-composition-resize-width" });
+          applyTimelineBlockPreview(targetElement, { deltaX: 0, deltaY: layerPreview.deltaY, height: layerPreview.height, resizeProperty: "--clipper-composition-resize-width", blocked });
         }
       }
       function clearDragState() {
@@ -881,6 +898,10 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
           const cursorLayerId = getTimelineLayerRowAtClientY(layerLayout, containerRect, clientY, "comp")?.row.key;
           const layerTargets = computeBulkLayerTargets(layerLayout, "comp", sourceLayerId, cursorLayerId, moveTargets, "comp");
           const nextTargets = getNextMoveTargets(clientX, snap);
+          if (isAnyLayerBlocked(nextTargets, layerTargets)) {
+            clearDragState();
+            return;
+          }
           for (const target of moveTargets) {
             const targetElement = timelineViewportRef.current?.querySelector<HTMLElement>(`[data-timeline-composition-id="${CSS.escape(target.id)}"]`);
             if (targetElement) clearTimelineBlockPreview(targetElement, "--clipper-composition-resize-width");
@@ -904,6 +925,7 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
       resizeCssVar: "--clipper-composition-resize-width",
       boundaries: getUniversalBlockSnapBoundaries({ excludeCompositionIds: moveTargetIds }),
       transformTiming: (timing) => ({ ...composition, start: timing.start, duration: timing.duration }),
+      isBlocked: (item) => isCompositionBlocked(item.start, item.duration, item.layerId ?? "comp", moveTargetIds),
       onMove: (start, targetLayerId) => onMoveComposition(composition.id, start, targetLayerId ?? (composition.layerId ?? "comp")),
       onResize: (next) => onUpdateComposition(composition.id, () => ({ ...composition, start: next.start, duration: next.duration })),
       precision: timelinePrecision,
@@ -1522,6 +1544,45 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
     return getSceneTimeFromClientX(event.clientX);
   }
 
+  function getCompositionDropTargetFromEvent(event: DragEvent<HTMLElement>) {
+    const rect = timelineViewportRef.current?.firstElementChild?.getBoundingClientRect();
+    if (!rect) return null;
+    const targetLayer = getTimelineLayerRowAtClientY(layerLayout, rect, event.clientY, "comp")?.row.key;
+    const compositionRow = compositionRows.find((row) => row.id === targetLayer) ?? compositionRows.find((row) => !row.locked);
+    if (!compositionRow || compositionRow.locked) return null;
+    return { layerId: compositionRow.id, sceneTime: getDropSceneTime(event) };
+  }
+
+  function handleCompositionNativeDragOver(event: DragEvent<HTMLDivElement>) {
+    const hasCompositionDrag = event.dataTransfer.types.includes("application/x-clipper-composition") || Boolean(getActiveCompositionPointerDrag());
+    if (!timelineMarkersEditable || !hasCompositionDrag) return;
+    const target = getCompositionDropTargetFromEvent(event);
+    if (!target) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  }
+
+  function handleCompositionNativeDrop(event: DragEvent<HTMLDivElement>) {
+    if (!timelineMarkersEditable) return;
+    const activeCompositionDrag = getActiveCompositionPointerDrag();
+    const compositionId = event.dataTransfer.getData("application/x-clipper-composition") || activeCompositionDrag?.compositionId || "";
+    if (!compositionId) return;
+    const target = getCompositionDropTargetFromEvent(event);
+    if (!target) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const preview = effectDragPreviewRef.current;
+    const sceneTime = preview?.category === "composition" && preview.layerKey === target.layerId && !preview.blocked ? preview.start : target.sceneTime;
+    updateEffectDragPreview(null);
+    setGlobalTimelineDragActive(false);
+    setClipperPointerDragPreview(compositionDragPreviewEvent, false);
+    clearTimelineSnapGuide();
+    stopTimelineDragAutoScroll();
+    setActiveCompositionPointerDrag(null);
+    if (isCompositionBlocked(sceneTime, 0.1, target.layerId, new Set())) return;
+    onAddComposition(compositionId, target.layerId, sceneTime);
+  }
+
   function getDraggedEffect(event: DragEvent<HTMLElement>) {
     const types = Array.from(event.dataTransfer.types);
     const registeredType = types.find((type) => type.startsWith("application/x-clipper-effect-"));
@@ -1662,11 +1723,12 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
     const timing = getExternalDropTiming(sceneTime, duration, detail.shiftKey);
     const start = timing.start;
     updateExternalSnapGuide(timing.guideTime);
+    const blocked = isCompositionBlocked(start, duration, layerId, new Set());
     const current = effectDragPreviewRef.current;
     const base = current?.category === "composition" && current.layerKey === layerId && current.label === detail.label && current.duration === duration && current.isEmpty === detail.isEmpty && current.sourceMissing === detail.sourceMissing
       ? current
       : { category: "composition" as const, layerKey: layerId, label: detail.label, isEmpty: detail.isEmpty, sourceMissing: detail.sourceMissing, start, duration, initialClientX: detail.clientX, initialStart: start };
-    updateEffectDragPreview({ ...base, start });
+    updateEffectDragPreview({ ...base, start, blocked });
   }
 
   function allowAdjustmentEffectDrop(event: DragEvent<HTMLElement>, layerId: string, sceneTime = getDropSceneTime(event)) {
@@ -1773,83 +1835,101 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
     }, detail.clientY);
   }
 
+  function handleSharedPointerDrag<T extends EffectPointerDragDetail | CompositionPointerDragDetail>(
+    detail: T | null | undefined,
+    eventName: string,
+    previewEventName: string | null,
+    resolveTarget: (target: { rowKey: string; sceneTime: number }) => { valid: boolean; handlePreview: () => void; handleDrop: () => void } | null
+  ) {
+    if (!detail) return;
+    if (detail.phase === "cancel") {
+      setGlobalTimelineDragActive(false);
+      updateEffectDragPreview(null);
+      if (previewEventName) setClipperPointerDragPreview(previewEventName, false);
+      clearTimelineSnapGuide();
+      stopTimelineDragAutoScroll();
+      return;
+    }
+
+    const overTimeline = isEffectPointerOverTimeline(detail.clientX, detail.clientY);
+    setGlobalTimelineDragActive(detail.phase !== "drop" && overTimeline);
+    updateExternalPointerAutoScroll(eventName, detail);
+
+    const target = getEffectPointerDropTarget(detail.clientX, detail.clientY);
+    const resolved = target ? resolveTarget(target) : null;
+
+    if (previewEventName) setClipperPointerDragPreview(previewEventName, Boolean(resolved?.valid && detail.phase !== "drop"));
+
+    if (!resolved || !resolved.valid) {
+      if (detail.phase === "drop") setGlobalTimelineDragActive(false);
+      updateEffectDragPreview(null);
+      clearTimelineSnapGuide();
+      return;
+    }
+
+    if (detail.phase === "drop") {
+      setGlobalTimelineDragActive(false);
+      updateEffectDragPreview(null);
+      if (previewEventName) setClipperPointerDragPreview(previewEventName, false);
+      clearTimelineSnapGuide();
+      stopTimelineDragAutoScroll();
+      resolved.handleDrop();
+      return;
+    }
+
+    resolved.handlePreview();
+  }
+
   useEffect(() => {
     function handleEffectPointerDrag(event: Event) {
       const detail = (event as CustomEvent<EffectPointerDragDetail>).detail;
-      if (!detail || !isCompositionMode) return;
-      if (detail.phase === "cancel") {
-        setGlobalTimelineDragActive(false);
-        updateEffectDragPreview(null);
-        stopTimelineDragAutoScroll();
-        return;
-      }
+      if (!isCompositionMode) return;
 
-      setGlobalTimelineDragActive(detail.phase !== "drop" && isEffectPointerOverTimeline(detail.clientX, detail.clientY));
-      updateExternalPointerAutoScroll(effectPointerDragEvent, detail);
-      const target = getEffectPointerDropTarget(detail.clientX, detail.clientY);
-      const motionEffect = getMotionEffectPackage(detail.effect);
-      const adjustmentEffect = getAdjustmentEffectPackage(detail.effect);
-      const transitionEffect = getTransitionEffectPackage(detail.effect);
-      if (!target) {
-        if (detail.phase === "drop") setGlobalTimelineDragActive(false);
-        updateEffectDragPreview(null);
-        return;
-      }
+      handleSharedPointerDrag(detail, effectPointerDragEvent, null, (target) => {
+        const motionEffect = getMotionEffectPackage(detail.effect);
+        const adjustmentEffect = getAdjustmentEffectPackage(detail.effect);
+        const transitionEffect = getTransitionEffectPackage(detail.effect);
 
-      const transitionRow = transitionEffect ? transitionRows.find((row) => row.key === target.rowKey) : null;
-      if (transitionEffect && transitionRow) {
-        if (transitionRow.locked) {
-          updateEffectDragPreview(null);
-          return;
+        const transitionRow = transitionEffect ? transitionRows.find((row) => row.key === target.rowKey) : null;
+        if (transitionEffect && transitionRow) {
+          return {
+            valid: !transitionRow.locked,
+            handlePreview: () => previewTransitionEffectDrop(transitionEffect.id, transitionRow.key, detail.clientX, target.sceneTime, detail.shiftKey),
+            handleDrop: () => {
+              const previewStart = effectDragPreviewRef.current?.category === "transition" && effectDragPreviewRef.current.effectId === transitionEffect.id && effectDragPreviewRef.current.layerKey === transitionRow.key ? effectDragPreviewRef.current.start : target.sceneTime;
+              const blocked = effectDragPreviewRef.current?.category === "transition" && effectDragPreviewRef.current.blocked;
+              if (!blocked) onAddTransitionEffect?.(transitionEffect.id, previewStart, transitionRow.key);
+            },
+          };
         }
-        if (detail.phase === "drop") {
-          const previewStart = effectDragPreviewRef.current?.category === "transition" && effectDragPreviewRef.current.effectId === transitionEffect.id && effectDragPreviewRef.current.layerKey === transitionRow.key ? effectDragPreviewRef.current.start : target.sceneTime;
-          const blocked = effectDragPreviewRef.current?.category === "transition" && effectDragPreviewRef.current.blocked;
-          setGlobalTimelineDragActive(false);
-          updateEffectDragPreview(null);
-          stopTimelineDragAutoScroll();
-          if (!blocked) onAddTransitionEffect?.(transitionEffect.id, previewStart, transitionRow.key);
-          return;
+
+        const adjustmentRow = adjustmentRows.find((row) => row.key === target.rowKey);
+        if (adjustmentEffect && adjustmentRow) {
+          return {
+            valid: !adjustmentRow.locked,
+            handlePreview: () => previewAdjustmentEffectDrop(adjustmentEffect.id, adjustmentRow.key, detail.clientX, target.sceneTime, detail.shiftKey),
+            handleDrop: () => {
+              const previewStart = effectDragPreviewRef.current?.category === "adjustment" && effectDragPreviewRef.current.effectId === adjustmentEffect.id && effectDragPreviewRef.current.layerKey === adjustmentRow.key ? effectDragPreviewRef.current.start : target.sceneTime;
+              onAddAdjustmentEffect(adjustmentEffect.id, previewStart, adjustmentRow.key);
+            },
+          };
         }
-        previewTransitionEffectDrop(transitionEffect.id, transitionRow.key, detail.clientX, target.sceneTime, detail.shiftKey);
-        return;
-      }
 
-      const adjustmentRow = adjustmentRows.find((row) => row.key === target.rowKey);
-      if (adjustmentEffect && adjustmentRow) {
-        if (adjustmentRow.locked) {
-          updateEffectDragPreview(null);
-          return;
+        const layer = motionEffect ? motionLayers.find((item) => item.id === target.rowKey) : null;
+        if (motionEffect && layer) {
+          return {
+            valid: !layer.locked,
+            handlePreview: () => previewMotionEffectDrop(motionEffect.id, layer.id, detail.clientX, target.sceneTime, detail.shiftKey),
+            handleDrop: () => {
+              const preview = effectDragPreviewRef.current;
+              const targetSceneTime = preview?.effectId === motionEffect.id && preview.layerKey === layer.id ? preview.start + preview.duration / 2 : target.sceneTime;
+              onAddMotionEffect(motionEffect.id, layer.id, targetSceneTime);
+            },
+          };
         }
-        if (detail.phase === "drop") {
-          const previewStart = effectDragPreviewRef.current?.category === "adjustment" && effectDragPreviewRef.current.effectId === adjustmentEffect.id && effectDragPreviewRef.current.layerKey === adjustmentRow.key ? effectDragPreviewRef.current.start : target.sceneTime;
-          setGlobalTimelineDragActive(false);
-          updateEffectDragPreview(null);
-          stopTimelineDragAutoScroll();
-          onAddAdjustmentEffect(adjustmentEffect.id, previewStart, adjustmentRow.key);
-          return;
-        }
-        previewAdjustmentEffectDrop(adjustmentEffect.id, adjustmentRow.key, detail.clientX, target.sceneTime, detail.shiftKey);
-        return;
-      }
 
-      const layer = motionEffect ? motionLayers.find((item) => item.id === target.rowKey) : null;
-      if (!motionEffect || !layer || layer.locked) {
-        updateEffectDragPreview(null);
-        return;
-      }
-
-      if (detail.phase === "drop") {
-        const preview = effectDragPreviewRef.current;
-        const targetSceneTime = preview?.effectId === motionEffect.id && preview.layerKey === layer.id ? preview.start + preview.duration / 2 : target.sceneTime;
-        setGlobalTimelineDragActive(false);
-        updateEffectDragPreview(null);
-        stopTimelineDragAutoScroll();
-        onAddMotionEffect(motionEffect.id, layer.id, targetSceneTime);
-        return;
-      }
-
-      previewMotionEffectDrop(motionEffect.id, layer.id, detail.clientX, target.sceneTime, detail.shiftKey);
+        return null;
+      });
     }
 
     window.addEventListener(effectPointerDragEvent, handleEffectPointerDrag);
@@ -1859,42 +1939,24 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
   useEffect(() => {
     function handleCompositionPointerDrag(event: Event) {
       const detail = (event as CustomEvent<CompositionPointerDragDetail>).detail;
-      if (!detail) return;
-      if (detail.phase === "cancel") {
-        setGlobalTimelineDragActive(false);
-        setClipperPointerDragPreview(compositionDragPreviewEvent, false);
-        clearTimelineSnapGuide();
-        stopTimelineDragAutoScroll();
-        return;
-      }
 
-      const target = getEffectPointerDropTarget(detail.clientX, detail.clientY);
-      const compositionRow = target ? compositionRows.find((row) => row.id === target.rowKey) : null;
-      const overTimeline = isEffectPointerOverTimeline(detail.clientX, detail.clientY);
-      setGlobalTimelineDragActive(detail.phase !== "drop" && overTimeline);
-      updateExternalPointerAutoScroll(compositionPointerDragEvent, detail);
-      setClipperPointerDragPreview(compositionDragPreviewEvent, Boolean(compositionRow && !compositionRow.locked && detail.phase !== "drop"));
-
-      if (!target || !compositionRow || compositionRow.locked) {
-        if (detail.phase === "drop") setGlobalTimelineDragActive(false);
-        updateEffectDragPreview(null);
-        clearTimelineSnapGuide();
-        return;
-      }
-
-      if (detail.phase === "drop") {
-        const preview = effectDragPreviewRef.current;
-        const targetStart = preview?.category === "composition" && preview.layerKey === compositionRow.id ? preview.start : target.sceneTime;
-        setGlobalTimelineDragActive(false);
-        updateEffectDragPreview(null);
-        setClipperPointerDragPreview(compositionDragPreviewEvent, false);
-        clearTimelineSnapGuide();
-        stopTimelineDragAutoScroll();
-        onAddComposition(detail.compositionId, compositionRow.id, targetStart);
-        return;
-      }
-
-      previewCompositionDrop(detail, compositionRow.id, target.sceneTime);
+      handleSharedPointerDrag(detail, compositionPointerDragEvent, compositionDragPreviewEvent, (target) => {
+        const compositionRow = compositionRows.find((row) => row.id === target.rowKey);
+        if (compositionRow) {
+          return {
+            valid: !compositionRow.locked,
+            handlePreview: () => previewCompositionDrop(detail, compositionRow.id, target.sceneTime),
+            handleDrop: () => {
+              const preview = effectDragPreviewRef.current;
+              const targetStart = preview?.category === "composition" && preview.layerKey === compositionRow.id && !preview.blocked ? preview.start : target.sceneTime;
+              setActiveCompositionPointerDrag(null);
+              if (preview?.category === "composition" && preview.blocked) return;
+              onAddComposition(detail.compositionId, compositionRow.id, targetStart);
+            },
+          };
+        }
+        return null;
+      });
     }
 
     window.addEventListener(compositionPointerDragEvent, handleCompositionPointerDrag);
@@ -1916,7 +1978,7 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
     if (effectDragPreview) applyEffectDragPreviewElement(effectDragPreview);
   }, [effectDragPreview, contentWidth, layerRows, layerRowStarts, layerRowHeights, timelineDisplayDuration]);
 
-  return <TimelineShell activeMode={mode} contentWidth={contentWidth} currentTime={currentSceneTime} displayDuration={timelineDisplayDuration} dragActive={timelineDragActive} laneContentHeight={laneContentHeight} laneRowsStyle={laneRowsStyle} layerRailWidth={layerRailWidth} refs={{ playbackPlayheadRef, timelineRef, timelineViewportRef, timelineRulerViewportRef, timelineLayerRailRef, timelineSnapGuideRef, timelinePanelRef }} timelineName={timelineName} timelineViewportDisplacement={timelineViewportState.displacement} timelineZoom={timelineZoom} ticks={ticks} onLayerRailWheel={scrollTimelineFromLayerRail} onModeChange={onModeChange} onTimelineViewportDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) updateEffectDragPreview(null); }} onTimelineViewportScroll={saveTimelineDisplacement} onTimelineZoomChange={updateTimelineZoom} rulerHandlers={{ onPointerDown: startScrub, onPointerMove: continueScrub, onPointerUp: endScrub, onPointerCancel: endScrub }} renderLayerRail={() => <>
+  return <TimelineShell activeMode={mode} contentWidth={contentWidth} currentTime={currentSceneTime} displayDuration={timelineDisplayDuration} dragActive={timelineDragActive} laneContentHeight={laneContentHeight} laneRowsStyle={laneRowsStyle} layerRailWidth={layerRailWidth} refs={{ playbackPlayheadRef, timelineRef, timelineViewportRef, timelineRulerViewportRef, timelineLayerRailRef, timelineSnapGuideRef, timelinePanelRef }} timelineName={timelineName} timelineViewportDisplacement={timelineViewportState.displacement} timelineZoom={timelineZoom} ticks={ticks} onLayerRailWheel={scrollTimelineFromLayerRail} onModeChange={onModeChange} onTimelineViewportDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) updateEffectDragPreview(null); }} onTimelineViewportDragOver={handleCompositionNativeDragOver} onTimelineViewportDrop={handleCompositionNativeDrop} onTimelineViewportScroll={saveTimelineDisplacement} onTimelineZoomChange={updateTimelineZoom} rulerHandlers={{ onPointerDown: startScrub, onPointerMove: continueScrub, onPointerUp: endScrub, onPointerCancel: endScrub }} renderLayerRail={() => <>
             <span className="pointer-events-none absolute inset-y-0 right-0 z-30 w-px bg-[#39404d]" />
             {layerRows.map((row, index) => <span className="pointer-events-none absolute right-0 z-40 w-0.5" key={`layer-accent-${row.key}`} style={{ top: layerRowStarts[index], height: layerRowHeights[index], backgroundColor: row.accent }} />)}
             {layerRows.length > 0 ? <LayerResizeSeparator key={`label-separator-${layerRows[0].key}-top`} top={0} onPointerDown={(event) => startLayerRowResize(event, layerRows[0].key, "top")} /> : null}
@@ -1951,7 +2013,7 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
             </TimelineLayerLane>) : null}
             {isCompositionMode ? motionLayers.map((layer) => <MotionLane key={layer.id} layerId={layer.id} hidden={Boolean(layer.hidden)} locked={Boolean(layer.locked)} timeline={motionTimeline} sceneDuration={timelineDisplayDuration} overflowVisible={isDraggingMotionMarker} timelineBlockPreviews={timelineBlockPreviews} motionSelectionDrag={null} motionSelectionBoxRef={motionSelectionBoxRef} selectedMotionKeys={selectedMotionKeys} selectedMotionMarkerId={selectedMotionMarkerId} selectedMotionMarkerPartId={selectedMotionMarkerPartId} onEffectDragOver={(event) => allowMotionLayerEffectDrop(event, layer.id)} onEffectDrop={(event) => dropMotionLayerEffect(event, layer.id)} onStartSelection={startTimelineSelection} onMoveSelection={continueTimelineSelection} onEndSelection={endTimelineSelection} onOpenBlankContextMenu={openBlankTimelineContextMenu} onSelectMotionMarker={onSelectMotionMarker} onOpenNodeContextMenu={openTimelineNodeContextMenu} onUpdateMotionFromPointer={updateMotionMarkerFromPointer} />) : null}
             {effectDragPreview ? <EffectDragPreviewBlock blockRef={effectDragPreviewElementRef} preview={effectDragPreview} /> : null}
-            {compositionRows.map((row) => <TimelineLayerLane key={row.id} hidden={Boolean(row.hidden)} locked={Boolean(row.locked)} overflowVisible={timelineMarkersEditable && isDraggingCompositionBlock} className="block" onDragOver={(event) => { if (timelineMarkersEditable && !row.locked && event.dataTransfer.types.includes("application/x-clipper-composition")) event.preventDefault(); }} onDrop={(event) => { if (!timelineMarkersEditable || row.locked) return; const compositionId = event.dataTransfer.getData("application/x-clipper-composition"); if (!compositionId) return; event.preventDefault(); onAddComposition(compositionId, row.id, getDropSceneTime(event)); }} onPointerDown={startTimelineSelection} onPointerMove={continueTimelineSelection} onPointerUp={endTimelineSelection} onPointerCancel={endTimelineSelection} onContextMenu={openBlankTimelineContextMenu}>
+            {compositionRows.map((row) => <TimelineLayerLane key={row.id} hidden={Boolean(row.hidden)} locked={Boolean(row.locked)} overflowVisible={timelineMarkersEditable && isDraggingCompositionBlock} className="block" onDragOver={(event) => { if (timelineMarkersEditable && !row.locked && event.dataTransfer.types.includes("application/x-clipper-composition")) event.preventDefault(); }} onDrop={handleCompositionNativeDrop} onPointerDown={startTimelineSelection} onPointerMove={continueTimelineSelection} onPointerUp={endTimelineSelection} onPointerCancel={endTimelineSelection} onContextMenu={openBlankTimelineContextMenu}>
               {timeline.filter((item) => (item.layerId ?? "comp") === row.id).map((item) => {
                 const previewItem = timelineBlockPreviews?.[timelineBlockPreviewKey("composition", item.id)] ?? item;
                 const isEmptyPart = item.objects.length === 0 && item.background.elements.length === 0;

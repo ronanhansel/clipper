@@ -1,5 +1,5 @@
-import * as compositionApi from "../../clipper/projects/composition-api";
-import { type ChartSpec } from "../../clipper/projects/composition-api";
+import * as compositionApi from "./compositionApi";
+import { type ChartSpec } from "./compositionApi";
 import { FRAME_HEIGHT, FRAME_WIDTH, type BackgroundLayer, type FrameObject, type FrameObjectType, type FrameTemplate, type Part, type PartFrame } from "./types";
 
 type SourceObject = {

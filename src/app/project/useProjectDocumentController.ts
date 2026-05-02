@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState, type MutableRefObject, type RefObject } from "react";
+import { useCallback, useEffect, useRef, useState, type MutableRefObject, type RefObject } from "react";
 import { clipperHost } from "../clipperHost";
+import toast from "react-hot-toast";
 import { maxProjectHistoryActions, projectHistoryCoalesceMs } from "../config";
 import { getDirectoryPath } from "../features/file-manager/fileManagerPaths";
 import { projectPersistenceService } from "../services/projectPersistenceService";
@@ -10,20 +11,24 @@ import { defaultTimelineMode, normalizeProject, replacePartInProject, serializeP
 import type { EditorState, Part, ProjectManifest, TimelineMode } from "../../core/types";
 import { clipperContainerPath, writeStoredActiveProjectManifestPath } from "./activeProjectManifest";
 import { getProjectCompositionSources, getSyncedCompositionSources } from "./projectSources";
+import type { Command } from "../features/file-manager/operations/Command";
 
-type ProjectHistoryEntry = { project: ProjectManifest; implicitFileOperation?: boolean };
+type ProjectHistoryEntry = { project: ProjectManifest; implicitFileOperation?: boolean; fileCommand?: Command };
 
 export type ProjectDocumentController = {
   activeProjectManifestPath: string;
   activeProjectManifestPathRef: MutableRefObject<string>;
   compositionSources: Record<string, string>;
   compositionSourcesRef: MutableRefObject<Record<string, string>>;
+  executeFileManagerCommand: (command: Command) => Promise<void>;
+  fileSystemRevision: number;
   implicitFileOperation: <T extends unknown[]>(operation: (...args: T) => void) => (...args: T) => void;
   openProjectManifest: () => Promise<void>;
   project: ProjectManifest;
   projectRef: MutableRefObject<ProjectManifest>;
   replaceProject: (nextProject: ProjectManifest, options?: { history?: boolean; syncSources?: boolean; coalesceHistory?: boolean }) => void;
-  redoProjectChange: () => void;
+  redoProjectChange: () => Promise<void> | void;
+  reloadProject: () => Promise<void>;
   saveAllChanges: () => Promise<void>;
   saveAllChangesRef: MutableRefObject<(() => Promise<void>) | null>;
   saveProject: (projectToSave?: ProjectManifest) => Promise<void>;
@@ -32,7 +37,7 @@ export type ProjectDocumentController = {
   scheduleImplicitFileOperationSave: (projectOverride?: ProjectManifest, errorMessage?: string) => void;
   setCompositionSources: (sources: Record<string, string> | ((current: Record<string, string>) => Record<string, string>)) => void;
   syncCompositionSourcesFromProject: (nextProject: ProjectManifest) => void;
-  undoProjectChange: () => void;
+  undoProjectChange: () => Promise<void> | void;
   updateCompositionFromSource: (basePart: Part, source: string, options?: { syncSource?: boolean; history?: boolean }) => Promise<void>;
   updateEditorState: (updater: (state: EditorState) => EditorState, options?: { history?: boolean; coalesceHistory?: boolean }) => void;
   updateProject: (updater: ProjectUpdater, options?: { history?: boolean; syncSources?: boolean; coalesceHistory?: boolean }) => void;
@@ -55,6 +60,7 @@ export type UseProjectDocumentControllerInput = {
 export function useProjectDocumentController({ applyStoredEditorState, centerPreviewScrollRef, defaultEditorState, initialProjectManifestPath, modeRef, notifyError, notifyOpenSuccess, setSourceStatus, setTimelineMode, timelineModeRef }: UseProjectDocumentControllerInput): ProjectDocumentController {
   const { project, setProject, savedProjectSnapshot, setSavedProjectSnapshot, compositionSources, setCompositionSources, savedCompositionSourcesSnapshot, setSavedCompositionSourcesSnapshot } = useProjectDocumentState();
   const [activeProjectManifestPath, setActiveProjectManifestPath] = useState(initialProjectManifestPath);
+  const [fileSystemRevision, setFileSystemRevision] = useState(0);
   const projectRef = useRef(project);
   const compositionSourcesRef = useRef(compositionSources);
   const activeProjectManifestPathRef = useRef(activeProjectManifestPath);
@@ -62,11 +68,12 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
   const savedCompositionSourcesSnapshotRef = useRef(savedCompositionSourcesSnapshot);
   const projectHistoryRef = useRef<{ past: ProjectHistoryEntry[]; future: ProjectHistoryEntry[] }>({ past: [], future: [] });
   const lastProjectHistoryAtRef = useRef(0);
+  const operationQueueRef = useRef<Promise<void>>(Promise.resolve());
   const implicitFileOperationSaveTimeoutRef = useRef(0);
   const saveAllChangesRef = useRef<(() => Promise<void>) | null>(null);
   const watchedProjectDirectory = getDirectoryPath(activeProjectManifestPath);
 
-  function replaceProject(nextProject: ProjectManifest, options: { history?: boolean; syncSources?: boolean; coalesceHistory?: boolean } = {}) {
+  const replaceProject = useCallback((nextProject: ProjectManifest, options: { history?: boolean; syncSources?: boolean; coalesceHistory?: boolean } = {}) => {
     let normalizedProject = normalizeProject(nextProject);
     const currentProject = projectRef.current;
     let nextCompositionSources = normalizedProject.compositionSources ?? getProjectCompositionSources(normalizedProject);
@@ -76,7 +83,9 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
     } else {
       nextCompositionSources = compositionSourcesRef.current;
     }
-    if (JSON.stringify(normalizedProject) === JSON.stringify(currentProject)) return;
+    const sortedSources = (sources: Record<string, string> | undefined) => sources ? Object.fromEntries(Object.entries(sources).sort(([a], [b]) => a.localeCompare(b))) : undefined;
+    const projectForCompare = (p: ProjectManifest) => ({ ...p, compositionSources: sortedSources(p.compositionSources) });
+    if (JSON.stringify(projectForCompare(normalizedProject)) === JSON.stringify(projectForCompare(currentProject))) return;
 
     if (options.history !== false) {
       const now = Date.now();
@@ -93,7 +102,7 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
     setTimelineMode(normalizedProject.editorState?.timelineMode ?? defaultTimelineMode);
     compositionSourcesRef.current = nextCompositionSources;
     setCompositionSources(nextCompositionSources);
-  }
+  }, []);
 
   function updateEditorState(updater: (state: EditorState) => EditorState, options: { history?: boolean; coalesceHistory?: boolean } = {}) {
     const current = projectRef.current;
@@ -191,6 +200,40 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
     setSourceStatus(manifestPath === activeManifestPath ? nextSourceStatus : `Migrated ${manifestPath} to ${activeManifestPath}. Save to write the .clipper container.`);
   }
 
+  const reloadProject = useCallback(async () => {
+    try {
+      const { project: loadedProject } = await projectPersistenceService.loadProject({ manifestPath: activeProjectManifestPathRef.current });
+      const normalizedProject = normalizeProject(loadedProject);
+      replaceProject(normalizedProject, { history: false, syncSources: false });
+      setSourceStatus("Project reloaded from disk.");
+      setFileSystemRevision((r) => r + 1);
+    } catch (error) {
+      notifyError(error, "Unable to reload project.");
+    }
+  }, [replaceProject, setSourceStatus, notifyError]);
+
+  const enqueueHistoryOperation = useCallback(<T,>(operation: () => Promise<T> | T): Promise<T> => {
+    const promise = operationQueueRef.current.then(operation);
+    operationQueueRef.current = promise.catch((error) => {
+      console.error("History operation failed:", error);
+    }) as Promise<void>;
+    return promise;
+  }, []);
+
+  const executeFileManagerCommand = useCallback((command: Command) => {
+    return enqueueHistoryOperation(async () => {
+      const previousProject = projectRef.current;
+      await command.execute();
+      await reloadProject();
+      
+      projectHistoryRef.current = {
+        past: [...projectHistoryRef.current.past, { project: previousProject, fileCommand: command }].slice(-maxProjectHistoryActions),
+        future: [],
+      };
+      lastProjectHistoryAtRef.current = Date.now();
+    });
+  }, [reloadProject, enqueueHistoryOperation]);
+
   async function openProjectManifest() {
     try {
       const manifestPath = await clipperHost.openProjectManifest();
@@ -203,37 +246,69 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
   }
 
   function undoProjectChange() {
-    const previousEntry = projectHistoryRef.current.past.at(-1);
-    if (!previousEntry) return;
-    const restoredProject = preserveCurrentPageMode(previousEntry.project);
+    return enqueueHistoryOperation(async () => {
+      const previousEntry = projectHistoryRef.current.past.at(-1);
+      if (!previousEntry) return;
 
-    projectHistoryRef.current = {
-      past: projectHistoryRef.current.past.slice(0, -1),
-      future: [{ project: projectRef.current, implicitFileOperation: previousEntry.implicitFileOperation }, ...projectHistoryRef.current.future].slice(0, maxProjectHistoryActions),
-    };
-    lastProjectHistoryAtRef.current = 0;
-    projectRef.current = restoredProject;
-    setProject(restoredProject);
-    setTimelineMode(timelineModeRef.current);
-    syncCompositionSourcesFromProject(restoredProject);
-    if (previousEntry.implicitFileOperation) scheduleImplicitFileOperationSave(restoredProject);
+      if (previousEntry.fileCommand) {
+        const stateBeforeUndo = projectRef.current;
+        await previousEntry.fileCommand.undo();
+        await reloadProject();
+        projectHistoryRef.current = {
+          past: projectHistoryRef.current.past.slice(0, -1),
+          future: [{ project: stateBeforeUndo, fileCommand: previousEntry.fileCommand }, ...projectHistoryRef.current.future].slice(0, maxProjectHistoryActions),
+        };
+        lastProjectHistoryAtRef.current = 0;
+        return;
+      }
+
+      // Detect file operations before applying undo
+      const restoredProject = preserveCurrentPageMode(previousEntry.project);
+
+      projectHistoryRef.current = {
+        past: projectHistoryRef.current.past.slice(0, -1),
+        future: [{ project: projectRef.current, implicitFileOperation: previousEntry.implicitFileOperation }, ...projectHistoryRef.current.future].slice(0, maxProjectHistoryActions),
+      };
+      lastProjectHistoryAtRef.current = 0;
+      projectRef.current = restoredProject;
+      setProject(restoredProject);
+      setTimelineMode(timelineModeRef.current);
+      syncCompositionSourcesFromProject(restoredProject);
+      if (previousEntry.implicitFileOperation) scheduleImplicitFileOperationSave(restoredProject);
+    });
   }
 
   function redoProjectChange() {
-    const nextEntry = projectHistoryRef.current.future[0];
-    if (!nextEntry) return;
-    const restoredProject = preserveCurrentPageMode(nextEntry.project);
+    return enqueueHistoryOperation(async () => {
+      const nextEntry = projectHistoryRef.current.future[0];
+      if (!nextEntry) return;
 
-    projectHistoryRef.current = {
-      past: [...projectHistoryRef.current.past, { project: projectRef.current, implicitFileOperation: nextEntry.implicitFileOperation }].slice(-maxProjectHistoryActions),
-      future: projectHistoryRef.current.future.slice(1),
-    };
-    lastProjectHistoryAtRef.current = 0;
-    projectRef.current = restoredProject;
-    setProject(restoredProject);
-    setTimelineMode(timelineModeRef.current);
-    syncCompositionSourcesFromProject(restoredProject);
-    if (nextEntry.implicitFileOperation) scheduleImplicitFileOperationSave(restoredProject);
+      if (nextEntry.fileCommand) {
+        const stateBeforeRedo = projectRef.current;
+        await nextEntry.fileCommand.redo();
+        await reloadProject();
+        projectHistoryRef.current = {
+          past: [...projectHistoryRef.current.past, { project: stateBeforeRedo, fileCommand: nextEntry.fileCommand }].slice(-maxProjectHistoryActions),
+          future: projectHistoryRef.current.future.slice(1),
+        };
+        lastProjectHistoryAtRef.current = 0;
+        return;
+      }
+
+      // Detect file operations before applying redo
+      const restoredProject = preserveCurrentPageMode(nextEntry.project);
+
+      projectHistoryRef.current = {
+        past: [...projectHistoryRef.current.past, { project: projectRef.current, implicitFileOperation: nextEntry.implicitFileOperation }].slice(-maxProjectHistoryActions),
+        future: projectHistoryRef.current.future.slice(1),
+      };
+      lastProjectHistoryAtRef.current = 0;
+      projectRef.current = restoredProject;
+      setProject(restoredProject);
+      setTimelineMode(timelineModeRef.current);
+      syncCompositionSourcesFromProject(restoredProject);
+      if (nextEntry.implicitFileOperation) scheduleImplicitFileOperationSave(restoredProject);
+    });
   }
 
   async function updateCompositionFromSource(basePart: Part, source: string, options: { syncSource?: boolean; history?: boolean } = {}) {
@@ -340,12 +415,15 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
     activeProjectManifestPathRef,
     compositionSources,
     compositionSourcesRef,
+    executeFileManagerCommand,
+    fileSystemRevision,
     implicitFileOperation,
     openProjectManifest,
     project,
     projectRef,
     replaceProject,
     redoProjectChange,
+    reloadProject,
     saveAllChanges,
     saveAllChangesRef,
     saveProject,

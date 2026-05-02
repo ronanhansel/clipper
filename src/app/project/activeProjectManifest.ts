@@ -26,8 +26,9 @@ async function writeAppState(updates: Record<string, unknown>) {
 export async function readStoredActiveProjectManifestPath(): Promise<string | null> {
   try {
     const state = await readAppState();
-    if (typeof state.activeProjectManifestPath === "string" && state.activeProjectManifestPath.startsWith("clipper/")) {
-      return state.activeProjectManifestPath;
+    const path = state.activeProjectManifestPath;
+    if (typeof path === "string" && path.startsWith("clipper/") && (path.endsWith(".clipper") || path.endsWith(".json"))) {
+      return path;
     }
   } catch {
     // New installs will not have app-state.json yet.
@@ -76,5 +77,7 @@ export async function removeRecentProject(path: string) {
 }
 
 export function clipperContainerPath(manifestPath: string) {
-  return manifestPath.endsWith(".clipper") ? manifestPath : manifestPath.replace(/(?:\/project)?\.json$/, ".clipper");
+  if (manifestPath.endsWith(".clipper")) return manifestPath;
+  if (manifestPath.endsWith("/project.json")) return manifestPath;
+  return manifestPath.replace(/(?:\/project)?\.json$/, ".clipper");
 }

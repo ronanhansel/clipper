@@ -5,3 +5,4 @@ dist/
 dist-electron/
 coverage/
 build/
+.DS_Store

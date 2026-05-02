@@ -16,7 +16,7 @@
 ## External Memory
 
 - **This is mandatory. Do not skip this step.** Every code change must be documented in external memory.
-- Always start project work by creating or identifying the relevant memory file at `build/[version number]/memory/[id]-feature-name.md`.
+- Always start project work by creating or identifying the relevant memory file at `build/[version number]/memory/[id]-feature-name.md`. Make sure the id is incremental, not repeated ids.w
 - Example: `build/v0.2.8/memory/001-init-editor.md`.
 - After EVERY change — whether a new feature, update, rework, rewrite, refactor, bug fix, or any code modification — populate or update the relevant memory files so future agents can pick up the work.
 - If a memory file for the feature/area already exists, update it with the latest changes and architecture decisions. If none exists, create a new file with the next sequential ID.

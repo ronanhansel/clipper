@@ -25,7 +25,7 @@ export function createCompositionInLibrary(project: ProjectManifest, composition
   const composition: Part = {
     id: compositionId,
     name: "New Composition",
-    filePath: `${folderPath}/${compositionId}.ts`,
+    filePath: `${folderPath}/${compositionId}.composition.ts`,
     duration: 3,
     frame: { width: 1920, height: 1080, style: { background: "#050505" } },
     background: { id: "background", name: "Background", style: { background: "transparent" }, elements: [] },
@@ -49,7 +49,10 @@ export function createCompositionInLibrary(project: ProjectManifest, composition
 export function createCompositionFolderInProject(project: ProjectManifest, parentFolderPath: string, fallbackTimelineDirectory: string) {
   const folderName = nextNumberedName("New folder", getProjectFolderSiblingNames(project, parentFolderPath, fallbackTimelineDirectory));
   const folderPath = `${parentFolderPath}/${folderName}`;
-  return { ...project, compositionFolders: Array.from(new Set([...(project.compositionFolders ?? []), folderPath])) };
+  return {
+    folderPath,
+    project: { ...project, compositionFolders: Array.from(new Set([...(project.compositionFolders ?? []), folderPath])) }
+  };
 }
 
 export function renameCompositionInProject(project: ProjectManifest, compositionSources: Record<string, string>, compositionId: string, name: string, fallbackLibrary: Part[]): CompositionLibraryMutationResult | null {
@@ -86,7 +89,7 @@ export function moveCompositionInProject(project: ProjectManifest, compositionSo
 export function duplicateCompositionInProject(project: ProjectManifest, compositionSources: Record<string, string>, compositionId: string, duplicateId: string, fallbackLibrary: Part[]): CompositionLibraryMutationResult | null {
   const composition = fallbackLibrary.find((item) => item.id === compositionId);
   if (!composition) return null;
-  const duplicate: Part = { ...composition, id: duplicateId, name: `${composition.name} copy`, filePath: `${getDirectoryPath(composition.filePath)}/${duplicateId}.ts`, motionMarkers: [], snapshot: [] };
+  const duplicate: Part = { ...composition, id: duplicateId, name: `${composition.name} copy`, filePath: `${getDirectoryPath(composition.filePath)}/${duplicateId}.composition.ts`, motionMarkers: [], snapshot: [] };
   const nextSources = { ...compositionSources, [duplicate.filePath]: compositionToSource(duplicate) };
   return { compositionSources: nextSources, project: { ...project, compositionSources: nextSources, compositionLibrary: [...(project.compositionLibrary ?? fallbackLibrary), duplicate] } };
 }
