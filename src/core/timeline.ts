@@ -4,6 +4,7 @@ import { getMotionBlockEffectKind, getCanonicalMotionMarkers, getMotionMarkerVie
 import { MAX_PART_DURATION_SECONDS, MAX_SCENE_DURATION_SECONDS, type AdjustmentLayer, type CompositionClip, type MotionBlock, type MotionBlockEffectKind, type MotionEffectKind, type MotionMarker, type Scene, type TimelineComposition, type TimelineLayerState, type TimelineMotionLayerState, type TimelinePart, type TransitionLayer } from "./types";
 import { clamp, roundTenth, roundToPrecision, roundTwo } from "./math";
 import { getDisplayNameFromPath } from "./fileNames";
+import { applyAdjustmentLayersToSceneTime } from "./adjustments";
 
 export function buildLinearTimeline(scene: Scene): TimelineComposition[] {
   let cursor = 0;
@@ -138,6 +139,14 @@ export type TimelineMarkerResize = { sourcePartId: string; markerId: string; abs
 export type TimelineMarkerDragItem = { partId: string; markerId: string; absoluteStart: number; duration: number; groupId?: string };
 type TopTimelineItem = { kind: "adjustment"; layer: AdjustmentLayer } | { kind: "transition"; layer: TransitionLayer } | { kind: "motion"; part: TimelineComposition; marker: MotionMarker } | { kind: "part"; part: TimelineComposition };
 export type TimelineMendMarker = { id: string; start: number; duration: number; effectId?: string; effect?: { effectId?: string }; layerId?: string; snapIn?: boolean; snapOut?: boolean; mendInId?: string; mendOutId?: string; partId?: string; sourcePartId?: string; rawMarkerId?: string };
+export type TimelinePreviewStackPart = { part: CompositionClip; start: number; previewTime: number };
+export type TimelinePreviewState = {
+  activeTimelinePart: TimelinePart | null;
+  activeComposition: CompositionClip | null;
+  previewTime: number;
+  previewParts: TimelinePreviewStackPart[];
+  transitionPreviewParts: { from: TimelinePreviewStackPart[]; to: TimelinePreviewStackPart[] } | null;
+};
 type MiddleSnapMarker = TimelineMendMarker;
 type MiddleSnapLayerResolver<T extends MiddleSnapMarker> = (marker: T) => string;
 
@@ -156,14 +165,52 @@ export function getTimelinePartAtTime(timeline: TimelinePart[], time: number) {
 }
 
 export function getTopTimelinePartAtTime(timeline: TimelinePart[], time: number, timelineLayers: TimelineLayerState | undefined) {
-  if (timeline.length === 0) return null;
-  const active = timeline.filter((item) => time >= item.start && time < item.end);
+  const active = getActiveTimelinePartsAtTime(timeline, time, timelineLayers, "top-to-bottom");
   if (active.length === 0) return null;
+  return active[0];
+}
+
+export function getActiveTimelinePartsAtTime(timeline: TimelinePart[], time: number, timelineLayers: TimelineLayerState | undefined, order: "top-to-bottom" | "bottom-to-top" = "top-to-bottom") {
+  if (timeline.length === 0) return [];
+  const active = timeline.filter((item) => time >= item.start && time < item.end);
+  if (active.length === 0) return [];
   const rowOrder = getLayerOrderIndex(timelineLayers?.compositionLayers);
-  return active.sort((left, right) => {
+  const topToBottom = active.sort((left, right) => {
     const layerDiff = getLayerIndex(rowOrder, left.layerId ?? "comp") - getLayerIndex(rowOrder, right.layerId ?? "comp");
     return layerDiff || right.start - left.start;
-  })[0];
+  });
+  return order === "top-to-bottom" ? topToBottom : [...topToBottom].reverse();
+}
+
+export function getTimelinePreviewState({ adjustmentLayers, compositions, sceneDurationSeconds, sceneTime, timeline, timelineLayers, timelineMode, transitionLayers }: { adjustmentLayers?: AdjustmentLayer[]; compositions: CompositionClip[]; sceneDurationSeconds: number; sceneTime: number; timeline: TimelinePart[]; timelineLayers?: TimelineLayerState; timelineMode: "compose" | "composition"; transitionLayers?: TransitionLayer[] }): TimelinePreviewState {
+  const compositionLookupTime = timelineMode === "compose" ? sceneTime : applyAdjustmentLayersToSceneTime(sceneTime, adjustmentLayers);
+  const timelinePartLookupTime = timelineMode === "compose" && compositionLookupTime > 0 ? compositionLookupTime - 0.000001 : compositionLookupTime;
+  const activeTimelinePart = getTopTimelinePartAtTime(timeline, timelinePartLookupTime, timelineLayers);
+  const activeComposition = activeTimelinePart ? compositions.find((item) => item.id === activeTimelinePart.id) ?? null : null;
+  const previewParts = getPreviewStackParts(compositions, timeline, timelinePartLookupTime, compositionLookupTime, timelineLayers);
+  const transitionLayer = transitionLayers?.find((layer) => sceneTime >= layer.start && sceneTime < layer.start + layer.duration);
+  const transitionFromTime = transitionLayer ? applyAdjustmentLayersToSceneTime(Math.max(transitionLayer.start - 0.000001, 0), adjustmentLayers) : 0;
+  const transitionToTime = transitionLayer ? applyAdjustmentLayersToSceneTime(Math.min(transitionLayer.start + transitionLayer.duration, sceneDurationSeconds), adjustmentLayers) : 0;
+  const transitionPreviewParts = transitionLayer ? {
+    from: getPreviewStackParts(compositions, timeline, transitionFromTime, transitionFromTime, timelineLayers),
+    to: getPreviewStackParts(compositions, timeline, transitionToTime, transitionToTime, timelineLayers),
+  } : null;
+
+  return {
+    activeTimelinePart,
+    activeComposition,
+    previewTime: activeTimelinePart ? clamp(compositionLookupTime - activeTimelinePart.start, 0, activeTimelinePart.duration) : 0,
+    previewParts,
+    transitionPreviewParts,
+  };
+}
+
+function getPreviewStackParts(compositions: CompositionClip[], timeline: TimelinePart[], lookupTime: number, previewSceneTime: number, timelineLayers: TimelineLayerState | undefined): TimelinePreviewStackPart[] {
+  return getActiveTimelinePartsAtTime(timeline, lookupTime, timelineLayers, "bottom-to-top").map((timelinePart) => ({
+    part: compositions.find((item) => item.id === timelinePart.id) ?? timelinePart,
+    start: timelinePart.start,
+    previewTime: clamp(previewSceneTime - timelinePart.start, 0, timelinePart.duration),
+  }));
 }
 
 export function getTopTimelineItemAtTime(timeline: TimelineComposition[], time: number, adjustmentLayers: AdjustmentLayer[] = [], motionLayers: TimelineMotionLayerState[] = [], adjustmentRowIds: string[] = [], transitionLayers: TransitionLayer[] = []): TopTimelineItem | null {

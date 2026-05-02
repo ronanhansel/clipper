@@ -1,6 +1,6 @@
 import JSZip from "jszip";
 import { loadCompositionsFromSource } from "../../core/compositionSource";
-import { normalizeProject, serializeProjectForSave } from "../../core/project";
+import { normalizeProject, serializeProjectForSave, withRequiredTimelineLayerTypes } from "../../core/project";
 import { FRAME_HEIGHT, FRAME_WIDTH, type CompositionClip, type CompositionDocument, type EditorState, type ProjectManifest, type TimelineDocument } from "../../core/types";
 import { clipperHost } from "../clipperHost";
 import { getDisplayNameFromPath } from "../../core/fileNames";
@@ -176,11 +176,12 @@ async function loadDirectoryProject(manifestPath: string) {
   const editableRoot = await getEditableRootPath(rootPath);
   const timelines = await loadDirectoryTimelines(editableRoot, rootPath, manifestProject.timelineOrder);
   const compositions = await loadDirectoryCompositions(editableRoot, rootPath);
+  const compositionLibrary = mergeMissingCompositionMetadata(manifestProject, compositions);
   return normalizeProject({
     ...manifestProject,
     timelines,
     compositions,
-    compositionLibrary: compositions,
+    compositionLibrary,
     compositionSources: Object.fromEntries(compositions.map((composition) => [composition.filePath, composition.source])),
     scenes: manifestProject.scenes ?? [],
   });
@@ -199,8 +200,12 @@ async function loadDirectoryTimelines(editableRoot: string, fallbackRoot: string
   const timelines = await Promise.all(
     timelineFiles.map(async (file) => {
       const document = JSON.parse(await clipperHost.readTextFile(file.path)) as TimelineDocument;
+      const repairedTimelineLayers = document.timelineLayers ? withRequiredTimelineLayerTypes(document.timelineLayers) : undefined;
+      if (document.timelineLayers && JSON.stringify(document.timelineLayers) !== JSON.stringify(repairedTimelineLayers)) {
+        await clipperHost.writeTextFile(file.path, `${JSON.stringify({ ...document, timelineLayers: repairedTimelineLayers }, null, 2)}\n`);
+      }
       const filePath = projectPathFromDirectoryEntry(fallbackRoot, file.relativePath, "timelines");
-      return { ...document, id: filePath, filePath };
+      return { ...document, id: filePath, filePath, timelineLayers: repairedTimelineLayers };
     })
   );
 
@@ -279,6 +284,14 @@ function getFallbackDisplayName(name: string, relativePath: string) {
   return name;
 }
 
+function mergeMissingCompositionMetadata(manifestProject: ProjectManifest, compositions: CompositionDocument[]): CompositionClip[] {
+  const loadedIds = new Set(compositions.map((composition) => composition.id));
+  const missing = (manifestProject.compositionLibrary ?? [])
+    .filter((composition) => !loadedIds.has(composition.id))
+    .map((composition) => ({ ...composition, source: undefined, sourceMissing: true }));
+  return [...compositions, ...missing];
+}
+
 async function saveDirectoryProject(manifestPath: string, project: ProjectManifest) {
   const normalized = serializeProjectForSave(project);
   const rootPath = getDirectoryPath(manifestPath);
@@ -289,6 +302,7 @@ async function saveDirectoryProject(manifestPath: string, project: ProjectManife
     assetsPath: normalized.assetsPath,
     assets: normalized.assets,
     compositionFolders: normalized.compositionFolders ?? [],
+    compositionLibrary: normalized.compositionLibrary?.filter((composition) => composition.sourceMissing).map((composition) => ({ ...composition, source: undefined })) ?? [],
     timelineOrder: normalized.timelines?.map((timeline) => timeline.id) ?? [],
     compositionOrder: normalized.compositions?.map((composition) => composition.id) ?? [],
     editorState: normalized.editorState,
@@ -307,6 +321,7 @@ async function saveDirectoryProject(manifestPath: string, project: ProjectManife
   }
 
   for (const composition of normalized.compositions ?? []) {
+    if (composition.sourceMissing) continue;
     const source = composition.source ?? normalized.compositionSources?.[composition.filePath];
     if (source === undefined) throw new Error(`Composition ${composition.filePath} is missing source.`);
     const relativePath = safeCompositionPath(composition, rootPath);

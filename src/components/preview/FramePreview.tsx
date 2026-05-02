@@ -1,12 +1,11 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent, type RefObject, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { mutedCaps, selectorBlue, selectorHandleSizePx, selectorOffsetPx } from "../../app/config";
 import { getRenderableTextSegments, getSelectionFormatState, normalizeEditableFormatting, renderRichTextSegments, richTextSegmentsFromElement, shouldPersistRichText, textSegmentsToEditableNodes } from "../../app/richText";
-import { advanceTimeSensitiveSceneTime, applyPlaybackAdjustmentLayersToSceneTime, applyAdjustmentLayersToVisualStyle } from "../../core/adjustments";
+import { applyAdjustmentLayersToVisualStyle } from "../../core/adjustments";
 import { boundsToViewport, formatCameraPreviewTransform, getLayeredCameraPreviewTransform, type CameraPreviewTransform } from "../../core/camera";
 import { generateChartObjects, type ChartGeneratedObject } from "../../core/chart";
 import { getBoundsUnion, insetBounds, isVisibleMarqueeBounds, updateDragSelectionBoxElement, type ResizeHandle } from "../../core/frameInteraction";
 import { clamp } from "../../core/math";
-import { getMotionMarkerViews } from "../../core/motionEffects";
 import { getDisplayNameFromPath } from "../../core/fileNames";
 import { evaluateBackgroundLayer, evaluateFrameObject, isTimeSensitiveFrameObject, type EvaluatedFrameObject } from "../../core/renderRuntime";
 import { applyTransitionLayersToVisualStyle } from "../../core/transitions";
@@ -20,16 +19,17 @@ export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dra
   const viewportOverlayStyle = useMemo(() => ({ width: FRAME_WIDTH * frameScale + selectionBleedPx * 2, height: FRAME_HEIGHT * frameScale + selectionBleedPx * 2, margin: -selectionBleedPx }) as CSSProperties, [frameScale, selectionBleedPx]);
   const clippedViewportStyle = useMemo(() => ({ ...viewportStyle, left: selectionBleedPx, top: selectionBleedPx }) as CSSProperties, [selectionBleedPx, viewportStyle]);
   const animationsEnabled = true;
+  const previewParts = (arguments[0] as { previewParts?: Array<{ part: Part; start: number; previewTime: number }> }).previewParts;
+  const transitionPreviewParts = (arguments[0] as { transitionPreviewParts?: { from: Array<{ part: Part; start: number; previewTime: number }>; to: Array<{ part: Part; start: number; previewTime: number }> } | null }).transitionPreviewParts;
   const transitionLayers = (arguments[0] as { transitionLayers?: TransitionLayer[] }).transitionLayers;
-  const timeSensitive = isPlaybackTimeSensitivePart(part, timelineMode, adjustmentLayers, animationsEnabled) || Boolean(transitionLayers?.length);
-  const [livePreviewTime, setLivePreviewTime] = useState(previewTime);
-  const [liveSceneTime, setLiveSceneTime] = useState(sceneTime);
-  const displayPreviewTime = isPlaying && playbackClock && timeSensitive ? livePreviewTime : previewTime;
-  const displaySceneTime = isPlaying && playbackClock && timeSensitive ? liveSceneTime : sceneTime;
+  const displayPreviewTime = previewTime;
+  const displaySceneTime = sceneTime;
   const visualAdjustment = useMemo(() => applyAdjustmentLayersToVisualStyle(displaySceneTime, adjustmentLayers), [adjustmentLayers, displaySceneTime]);
   const visualTransition = useMemo(() => applyTransitionLayersToVisualStyle(displaySceneTime, transitionLayers), [displaySceneTime, transitionLayers]);
-  const visualAdjustmentStyle = useMemo(() => ({ filter: [visualAdjustment.filter, visualTransition.filter].filter(Boolean).join(" ") || undefined, ...visualTransition.frameStyle }) as CSSProperties, [visualAdjustment.filter, visualTransition.filter, visualTransition.frameStyle]);
-  const transitionCameraStyle = useMemo(() => visualTransition.cameraStyle as CSSProperties | undefined, [visualTransition.cameraStyle]);
+  const transitionProgress = getActiveTransitionProgress(displaySceneTime, transitionLayers);
+  const useTransitionComposite = Boolean(transitionPreviewParts && transitionProgress !== null);
+  const visualAdjustmentStyle = useMemo(() => ({ filter: [visualAdjustment.filter, visualTransition.filter].filter(Boolean).join(" ") || undefined, ...(!useTransitionComposite ? visualTransition.frameStyle : undefined) }) as CSSProperties, [useTransitionComposite, visualAdjustment.filter, visualTransition.filter, visualTransition.frameStyle]);
+  const transitionCameraStyle = useMemo(() => (useTransitionComposite ? undefined : visualTransition.cameraStyle) as CSSProperties | undefined, [useTransitionComposite, visualTransition.cameraStyle]);
   const frameVisualAdjustmentOverlaysRef = useRef<HTMLDivElement | null>(null);
   const cameraVisualAdjustmentOverlaysRef = useRef<HTMLDivElement | null>(null);
   const liveCameraTransform = useMemo(() => {
@@ -45,28 +45,7 @@ export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dra
   const selectorHoverRef = useRef(false);
   const showDragBox = dragBox && isVisibleMarqueeBounds(dragBox, frameScale);
   const isUnlinkedPart = Boolean(part.sourceMissing);
-
-  useLayoutEffect(() => {
-    if (isPlaying && playbackClock && timeSensitive) return;
-    setLivePreviewTime(previewTime);
-    setLiveSceneTime(sceneTime);
-  }, [isPlaying, playbackClock, previewTime, sceneTime, timeSensitive]);
-
-  useEffect(() => {
-    if (!isPlaying || !playbackClock || !timeSensitive) return;
-    const clock = playbackClock;
-    let frame = 0;
-
-    function tick(now: number) {
-      const nextSceneTime = advanceTimeSensitiveSceneTime(clock.startedFrom, (now - clock.startedAt) / 1000, partStart + part.duration, adjustmentLayers);
-      setLiveSceneTime(nextSceneTime);
-      setLivePreviewTime(clamp(applyPlaybackAdjustmentLayersToSceneTime(nextSceneTime, adjustmentLayers) - partStart, 0, part.duration));
-      frame = requestAnimationFrame(tick);
-    }
-
-    frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
-  }, [adjustmentLayers, isPlaying, part.duration, partStart, playbackClock, timeSensitive]);
+  const stackPreviewParts = previewParts?.length ? previewParts : [{ part, start: partStart, previewTime }];
 
   useEffect(() => {
     if (!cameraRef.current) return;
@@ -167,10 +146,9 @@ export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dra
             <div className="absolute inset-0" data-clipper-perspective-stage style={perspectiveStageStyle}>
               {isUnlinkedPart || compHidden ? <div className="absolute inset-0 bg-black" ref={cameraRef} /> : <div className="absolute inset-0 origin-center" ref={cameraRef} style={{ transformStyle: "preserve-3d", ...transitionCameraStyle }}>
                 <div className="absolute inset-0" data-clipper-visual-adjustments style={visualAdjustmentStyle}>
-                  {!part.background.hidden && <BackgroundLayerView animationsEnabled={animationsEnabled} background={part.background} duration={part.duration} previewTime={displayPreviewTime} />}
-                  {part.objects.filter(obj => !obj.hidden).map((object) => (
-                    <FrameObjectView key={object.id} animationsEnabled={animationsEnabled} object={object} canSelect={!isPlaying && (canSelectObjects || trackerPicking)} duration={part.duration} editing={!isPlaying && editingTextObjectId === object.id} focusPicking={!isPlaying && (focusPicking || trackerPicking)} previewTime={displayPreviewTime} onDoubleClick={(event) => { if (!isPlaying) onTextObjectDoubleClick(event, object); }} onPointerDown={(event) => { if (!isPlaying) onObjectPointerDown(event, object); }} onTextEditCommit={(content, richText) => onTextEditCommit(object.id, content, richText)} />
-                  ))}
+                  {transitionPreviewParts && transitionProgress !== null
+                    ? <TransitionCompositeView animationsEnabled={animationsEnabled} progress={transitionProgress} transitionPreviewParts={transitionPreviewParts} />
+                    : stackPreviewParts.map((item) => <CompositionLayerView key={`${item.part.id}:${item.start}`} active={item.part.id === part.id} animationsEnabled={animationsEnabled} canSelect={!isPlaying && (canSelectObjects || trackerPicking)} editingTextObjectId={editingTextObjectId} focusPicking={!isPlaying && (focusPicking || trackerPicking)} isPlaying={isPlaying} part={item.part} previewTime={item.previewTime} onObjectPointerDown={onObjectPointerDown} onTextEditCommit={onTextEditCommit} onTextObjectDoubleClick={onTextObjectDoubleClick} />)}
                   <div ref={frameVisualAdjustmentOverlaysRef} className="pointer-events-none absolute inset-0" data-clipper-visual-adjustment-overlays="frame" style={{ zIndex: 2147483647 }} />
                 </div>
               </div>}
@@ -207,6 +185,40 @@ function TrackerTargetOverlay({ target }: { target: { id: string; viewportBounds
     </div>
   );
 }
+
+function CompositionLayerView({ active, animationsEnabled, canSelect, editingTextObjectId, focusPicking, isPlaying, part, previewTime, onObjectPointerDown, onTextEditCommit, onTextObjectDoubleClick }: { active: boolean; animationsEnabled: boolean; canSelect: boolean; editingTextObjectId: string | null; focusPicking: boolean; isPlaying: boolean; part: Part; previewTime: number; onObjectPointerDown: (event: PointerEvent<HTMLDivElement>, object: FrameObject) => void; onTextEditCommit: (objectId: string, content: string, richText?: RichTextSegment[]) => void; onTextObjectDoubleClick: (event: ReactMouseEvent<HTMLDivElement>, object: FrameObject) => void }) {
+  return (
+    <div className="absolute inset-0">
+      {!part.background.hidden && <BackgroundLayerView animationsEnabled={animationsEnabled} background={part.background} duration={part.duration} previewTime={previewTime} />}
+      {part.objects.filter(obj => !obj.hidden).map((object) => (
+        <FrameObjectView key={object.id} animationsEnabled={animationsEnabled} object={object} canSelect={active && canSelect} duration={part.duration} editing={active && !isPlaying && editingTextObjectId === object.id} focusPicking={active && focusPicking} previewTime={previewTime} onDoubleClick={(event) => { if (active && !isPlaying) onTextObjectDoubleClick(event, object); }} onPointerDown={(event) => { if (active && !isPlaying) onObjectPointerDown(event, object); }} onTextEditCommit={(content, richText) => onTextEditCommit(object.id, content, richText)} />
+      ))}
+    </div>
+  );
+}
+
+function TransitionCompositeView({ animationsEnabled, progress, transitionPreviewParts }: { animationsEnabled: boolean; progress: number; transitionPreviewParts: { from: Array<{ part: Part; start: number; previewTime: number }>; to: Array<{ part: Part; start: number; previewTime: number }> } }) {
+  return (
+    <>
+      <div className="absolute inset-0">
+        {transitionPreviewParts.from.map((item) => <CompositionLayerView key={`from:${item.part.id}:${item.start}`} active={false} animationsEnabled={animationsEnabled} canSelect={false} editingTextObjectId={null} focusPicking={false} isPlaying={false} part={item.part} previewTime={item.previewTime} onObjectPointerDown={noopObjectPointerDown} onTextEditCommit={noopTextEditCommit} onTextObjectDoubleClick={noopTextDoubleClick} />)}
+      </div>
+      <div className="absolute inset-0 overflow-hidden" style={{ clipPath: `inset(0 ${Math.max(0, 1 - progress) * 100}% 0 0)` }}>
+        {transitionPreviewParts.to.map((item) => <CompositionLayerView key={`to:${item.part.id}:${item.start}`} active={false} animationsEnabled={animationsEnabled} canSelect={false} editingTextObjectId={null} focusPicking={false} isPlaying={false} part={item.part} previewTime={item.previewTime} onObjectPointerDown={noopObjectPointerDown} onTextEditCommit={noopTextEditCommit} onTextObjectDoubleClick={noopTextDoubleClick} />)}
+      </div>
+    </>
+  );
+}
+
+function getActiveTransitionProgress(sceneTime: number, layers: TransitionLayer[] | undefined) {
+  const layer = layers?.find((item) => sceneTime >= item.start && sceneTime < item.start + item.duration);
+  if (!layer) return null;
+  return layer.duration > 0 ? clamp((sceneTime - layer.start) / layer.duration, 0, 1) : 1;
+}
+
+function noopObjectPointerDown() {}
+function noopTextEditCommit() {}
+function noopTextDoubleClick() {}
 
 export function FramePickPointOverlay({ point, frameScale }: { point: Point; frameScale: number }) {
   return (
@@ -389,15 +401,6 @@ function areBackgroundElementPropsEqual(previous: { duration: number; element: E
 
 function isPreviewTimeSensitiveObject(object: FrameObject) {
   return isTimeSensitiveFrameObject(object) || object.type === "chart";
-}
-
-function isPlaybackTimeSensitivePart(part: Part, timelineMode: TimelineMode, adjustmentLayers: AdjustmentLayer[] | undefined, animationsEnabled: boolean) {
-  const motionViews = getMotionMarkerViews(part);
-  return (animationsEnabled && (Boolean(part.background.motion)
-    || part.background.elements.some(isPreviewTimeSensitiveObject)
-    || part.objects.some(isPreviewTimeSensitiveObject)))
-    || (animationsEnabled && Boolean(adjustmentLayers?.length))
-    || (timelineMode === "composition" && motionViews.motionMarkers.length > 0);
 }
 
 export function SelectionOverlayBox({ objectId, bounds, cameraTransform, frameScale, highlighted, interactive, overlayOffset = 0, onResizePointerDown }: { objectId: string; bounds: Bounds; cameraTransform: CameraPreviewTransform; frameScale: number; highlighted: boolean; interactive: boolean; overlayOffset?: number; onResizePointerDown: (event: PointerEvent<HTMLDivElement>, handle: ResizeHandle) => void }) {

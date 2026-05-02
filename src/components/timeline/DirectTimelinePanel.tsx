@@ -1429,6 +1429,7 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
   function getLayerCategory(layerId: string): TimelineLayerCategory | null {
     if (compositionRows.some((row) => row.id === layerId)) return "comp";
     if (adjustmentRows.some((row) => row.key === layerId)) return "adjust";
+    if (transitionRows.some((row) => row.key === layerId)) return "transition";
     if (motionLayers.some((row) => row.id === layerId)) return "motion";
     return null;
   }
@@ -1629,7 +1630,7 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
       return;
     }
 
-    const shouldRemount = !current || current.category !== nextPreview.category || current.effectId !== nextPreview.effectId || current.label !== nextPreview.label || current.isEmpty !== nextPreview.isEmpty || current.sourceMissing !== nextPreview.sourceMissing || current.layerKey !== nextPreview.layerKey || current.duration !== nextPreview.duration || current.initialClientX !== nextPreview.initialClientX || current.initialStart !== nextPreview.initialStart || current.blocked !== nextPreview.blocked;
+    const shouldRemount = !current || current.category !== nextPreview.category || current.effectId !== nextPreview.effectId || current.label !== nextPreview.label || current.isEmpty !== nextPreview.isEmpty || current.sourceMissing !== nextPreview.sourceMissing || current.layerKey !== nextPreview.layerKey || current.duration !== nextPreview.duration || current.blocked !== nextPreview.blocked;
     if (shouldRemount) setEffectDragPreview(nextPreview);
     else scheduleEffectDragPreviewElementUpdate();
   }

@@ -85,7 +85,10 @@ export function useTimelineProjectActions({ scene, timelineMode, updateEditorSta
   }
 
   function updateTimelineLayers(updater: (state: TimelineLayerState) => TimelineLayerState, options: { history?: boolean } = {}) {
-    updateEditorState((state) => ({ ...state, timelineLayers: updater(state.timelineLayers ?? defaultTimelineLayerState) }), { history: options.history, coalesceHistory: false });
+    updateProject((current) => ({
+      ...current,
+      timelines: (current.timelines ?? []).map((timeline) => (timeline.id === scene.id ? { ...timeline, timelineLayers: updater(timeline.timelineLayers ?? defaultTimelineLayerState) } : timeline)),
+    }), { history: options.history, coalesceHistory: false });
   }
 
   return {

@@ -57,9 +57,10 @@ type MacFontProfile = {
 
 async function findFileByName(directoryPath: string, fileName: string): Promise<string | null> {
   const entries = await fs.readdir(directoryPath, { withFileTypes: true });
+  const normalizedFileName = fileName.toLocaleLowerCase();
   for (const entry of entries) {
     const entryPath = path.join(directoryPath, entry.name);
-    if (entry.isFile() && entry.name === fileName) return entryPath;
+    if (entry.isFile() && entry.name.toLocaleLowerCase() === normalizedFileName) return entryPath;
     if (entry.isDirectory()) {
       const matchedPath = await findFileByName(entryPath, fileName);
       if (matchedPath) return matchedPath;
@@ -523,7 +524,7 @@ async function renderSceneToVideo(_project: ProjectManifest, scene: Scene, outpu
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
   const encoder = getVideoEncoderArgs();
   const timeline = buildLinearTimeline(scene);
-  const durationSeconds = timeline.at(-1)?.end ?? 0;
+  const durationSeconds = timeline.reduce((duration, item) => Math.max(duration, item.end), 0);
   const totalFrames = Math.max(1, Math.ceil(durationSeconds * frameRate));
   onProgress?.({ frame: 0, totalFrames, percent: 0, status: `Preparing ${encoder.label} export...` });
   const rendererWindow = new BrowserWindow({
@@ -575,10 +576,12 @@ async function renderSceneToVideo(_project: ProjectManifest, scene: Scene, outpu
       const visualAdjustmentStyle = applyAdjustmentLayersToVisualStyle(sceneTime, scene.adjustmentLayers);
       const visualTransitionStyle = applyTransitionLayersToVisualStyle(sceneTime, scene.transitionLayers);
       const adjustedSceneTime = applyAdjustmentLayersToSceneTime(sceneTime, scene.adjustmentLayers, frameRate);
-      const timelinePart = getTimelinePartAtTime(timeline, adjustedSceneTime) ?? timeline[0];
-      if (!timelinePart) throw new Error("The current scene has no compositions to render.");
-      const previewTime = clamp(adjustedSceneTime - timelinePart.start, 0, timelinePart.duration);
-      const frameHtml = buildFrameBody(timelinePart, previewTime, visualAdjustmentStyle, visualTransitionStyle, getActiveZoom(timelinePart.zoomMarkers, previewTime), getActiveTranslation(timelinePart.translationMarkers, previewTime), getActiveRotation(timelinePart.translationMarkers, previewTime));
+      const timelineParts = getActiveTimelinePartsAtTime(timeline, adjustedSceneTime, _project.editorState?.timelineLayers);
+      if (timelineParts.length === 0) throw new Error("The current scene has no compositions to render.");
+      const transitionLayer = getActiveTransitionLayer(sceneTime, scene.transitionLayers);
+      const frameHtml = transitionLayer
+        ? buildTransitionFrameBody(getTransitionStackParts(timeline, sceneTime, transitionLayer, scene.adjustmentLayers, _project.editorState?.timelineLayers, frameRate), getTransitionProgress(sceneTime, transitionLayer), visualAdjustmentStyle, visualTransitionStyle)
+        : buildFrameBody(timelineParts.map((timelinePart) => ({ part: timelinePart, previewTime: clamp(adjustedSceneTime - timelinePart.start, 0, timelinePart.duration) })), visualAdjustmentStyle, visualTransitionStyle);
 
       await renderFrameHtml(rendererWindow, frameHtml);
       const image = await rendererWindow.webContents.capturePage({ x: 0, y: 0, width: frameWidth, height: frameHeight });
@@ -626,7 +629,8 @@ type AdjustmentLayer = { id: string; name: string; start: number; duration: numb
 type TransitionLayer = { id: string; name: string; start: number; duration: number; midPoint: number; effect: { effectId?: string; params?: Record<string, unknown> } };
 type CompositionClip = { id: string; name: string; filePath: string; sourceMissing?: boolean; start?: number; layerId?: string; duration: number; frame: { width: number; height: number; style: Record<string, string | number> }; background: BackgroundLayer; objects: FrameObject[]; snapshot: unknown[]; zoomMarkers: ZoomMarker[]; translationMarkers: TranslationMarker[] };
 type Scene = { id: string; name: string; compositions: CompositionClip[]; adjustmentLayers?: AdjustmentLayer[]; transitionLayers?: TransitionLayer[] };
-type ProjectManifest = { id: string; name: string; resolution: { width: number; height: number }; scenes: Scene[]; assetsPath: string };
+type TimelineLayerState = { compositionLayers?: Array<{ id: string }> };
+type ProjectManifest = { id: string; name: string; resolution: { width: number; height: number }; scenes: Scene[]; assetsPath: string; editorState?: { timelineLayers?: TimelineLayerState } };
 type TimelinePart = CompositionClip & { start: number; end: number };
 type AdjustmentVisualOverlay = { id: string; target?: "frame" | "camera"; style: Record<string, string | number> };
 type AdjustmentVisualStyle = { filter?: string; overlays?: AdjustmentVisualOverlay[] };
@@ -646,6 +650,18 @@ function buildLinearTimeline(scene: Scene): TimelinePart[] {
 function getTimelinePartAtTime(timeline: TimelinePart[], time: number) {
   if (timeline.length === 0) return null;
   return [...timeline].reverse().find((item) => time >= item.start && time < item.end) ?? null;
+}
+
+function getActiveTimelinePartsAtTime(timeline: TimelinePart[], time: number, timelineLayers: TimelineLayerState | undefined) {
+  const rowOrder = new Map((timelineLayers?.compositionLayers ?? []).map((layer, index) => [layer.id, index]));
+  return timeline.filter((item) => time >= item.start && time < item.end).sort((left, right) => {
+    const layerDiff = getLayerIndex(rowOrder, left.layerId) - getLayerIndex(rowOrder, right.layerId);
+    return layerDiff || right.start - left.start;
+  }).reverse();
+}
+
+function getLayerIndex(rowOrder: Map<string, number>, layerId: string | undefined) {
+  return rowOrder.get(layerId ?? "comp") ?? Number.MAX_SAFE_INTEGER;
 }
 
 function applyAdjustmentLayersToSceneTime(sceneTime: number, layers: AdjustmentLayer[] | undefined, frameRate: number) {
@@ -710,11 +726,28 @@ function applyTransitionLayersToVisualStyle(sceneTime: number, layers: Transitio
 
 function applyTransitionVisualStyle(sceneTime: number, layer: TransitionLayer): TransitionVisualStyle {
   const effectId = layer.effect.effectId ?? "";
-  const progress = layer.duration > 0 ? clamp((sceneTime - layer.start) / layer.duration, 0, 1) : 1;
+  const progress = getTransitionProgress(sceneTime, layer);
   if (effectId === "clipper.transition.swipe") {
     return { cameraStyle: { transform: `translateX(${-(1 - progress) * 100}%)` } };
   }
   return {};
+}
+
+function getActiveTransitionLayer(sceneTime: number, layers: TransitionLayer[] | undefined) {
+  return layers?.find((layer) => sceneTime >= layer.start && sceneTime < layer.start + layer.duration) ?? null;
+}
+
+function getTransitionProgress(sceneTime: number, layer: TransitionLayer) {
+  return layer.duration > 0 ? clamp((sceneTime - layer.start) / layer.duration, 0, 1) : 1;
+}
+
+function getTransitionStackParts(timeline: TimelinePart[], sceneTime: number, layer: TransitionLayer, adjustmentLayers: AdjustmentLayer[] | undefined, timelineLayers: TimelineLayerState | undefined, frameRate: number) {
+  const fromTime = applyAdjustmentLayersToSceneTime(Math.max(layer.start - 0.000001, 0), adjustmentLayers, frameRate);
+  const toTime = applyAdjustmentLayersToSceneTime(layer.start + layer.duration, adjustmentLayers, frameRate);
+  return {
+    from: getActiveTimelinePartsAtTime(timeline, fromTime, timelineLayers).map((part) => ({ part, previewTime: clamp(fromTime - part.start, 0, part.duration) })),
+    to: getActiveTimelinePartsAtTime(timeline, toTime, timelineLayers).map((part) => ({ part, previewTime: clamp(toTime - part.start, 0, part.duration) })),
+  };
 }
 
 function getAdjustmentVisualOverlays(effectId: string, layer: AdjustmentLayer, sceneTime: number): AdjustmentVisualOverlay[] {
@@ -791,21 +824,41 @@ function buildFrameShell() {
   return `<!doctype html><html><head><meta charset="utf-8"><style>*{box-sizing:border-box}html,body{margin:0;width:${frameWidth}px;height:${frameHeight}px;overflow:hidden;background:#000}</style></head><body><div id="clipper-frame-root"></div><script>window.__clipperSetFrame=function(html){document.getElementById("clipper-frame-root").innerHTML=html;return new Promise(function(resolve){requestAnimationFrame(function(){requestAnimationFrame(resolve);});});};</script></body></html>`;
 }
 
-function buildFrameBody(part: CompositionClip, previewTime: number, visualAdjustmentStyle: AdjustmentVisualStyle, visualTransitionStyle: TransitionVisualStyle, activeZoom: ZoomMarker | null, activeTranslation: TranslationMarker | null, activeRotation: TranslationMarker | null) {
-  if (part.sourceMissing) return `<div style="${cssStyle({ position: "relative", width: frameWidth, height: frameHeight, overflow: "hidden", background: "#000" })}"></div>`;
+function buildFrameBody(parts: Array<{ part: CompositionClip; previewTime: number }>, visualAdjustmentStyle: AdjustmentVisualStyle, visualTransitionStyle: TransitionVisualStyle) {
+  const frameStyle = cssStyle({ position: "relative", width: frameWidth, height: frameHeight, overflow: "hidden", background: "#000" });
+  const transitionTransform = typeof visualTransitionStyle.cameraStyle?.transform === "string" ? visualTransitionStyle.cameraStyle.transform : "";
+  const cameraStyle = cssStyle({ position: "absolute", inset: 0, transformOrigin: "center", ...visualTransitionStyle.cameraStyle, transform: transitionTransform });
+  const visualStyle = cssStyle({ position: "absolute", inset: 0, filter: [visualAdjustmentStyle.filter, visualTransitionStyle.filter].filter(Boolean).join(" ") || undefined, ...visualTransitionStyle.frameStyle });
+  const frameOverlayHtml = adjustmentOverlayHtml([...(visualAdjustmentStyle.overlays?.filter((overlay) => overlay.target === "frame") ?? []), ...(visualTransitionStyle.overlays?.filter((overlay) => overlay.target === "frame") ?? [])]);
+  const cameraOverlayHtml = adjustmentOverlayHtml([...(visualAdjustmentStyle.overlays?.filter((overlay) => (overlay.target ?? "camera") === "camera") ?? []), ...(visualTransitionStyle.overlays?.filter((overlay) => (overlay.target ?? "camera") === "camera") ?? [])]);
+  const contentHtml = parts.map(({ part, previewTime }) => compositionLayerHtml(part, previewTime)).join("");
+  return `<div style="${frameStyle}"><div style="${cameraStyle}"><div style="${visualStyle}">${contentHtml}${frameOverlayHtml}</div></div>${cameraOverlayHtml}</div>`;
+}
 
+function buildTransitionFrameBody(parts: { from: Array<{ part: CompositionClip; previewTime: number }>; to: Array<{ part: CompositionClip; previewTime: number }> }, progress: number, visualAdjustmentStyle: AdjustmentVisualStyle, visualTransitionStyle: TransitionVisualStyle) {
+  const frameStyle = cssStyle({ position: "relative", width: frameWidth, height: frameHeight, overflow: "hidden", background: "#000" });
+  const visualStyle = cssStyle({ position: "absolute", inset: 0, filter: [visualAdjustmentStyle.filter, visualTransitionStyle.filter].filter(Boolean).join(" ") || undefined });
+  const incomingStyle = cssStyle({ position: "absolute", inset: 0, overflow: "hidden", clipPath: `inset(0 ${Math.max(0, 1 - progress) * 100}% 0 0)` });
+  const frameOverlayHtml = adjustmentOverlayHtml([...(visualAdjustmentStyle.overlays?.filter((overlay) => overlay.target === "frame") ?? []), ...(visualTransitionStyle.overlays?.filter((overlay) => overlay.target === "frame") ?? [])]);
+  const cameraOverlayHtml = adjustmentOverlayHtml([...(visualAdjustmentStyle.overlays?.filter((overlay) => (overlay.target ?? "camera") === "camera") ?? []), ...(visualTransitionStyle.overlays?.filter((overlay) => (overlay.target ?? "camera") === "camera") ?? [])]);
+  const fromHtml = parts.from.map(({ part, previewTime }) => compositionLayerHtml(part, previewTime)).join("");
+  const toHtml = parts.to.map(({ part, previewTime }) => compositionLayerHtml(part, previewTime)).join("");
+  return `<div style="${frameStyle}"><div style="${visualStyle}"><div style="${cssStyle({ position: "absolute", inset: 0 })}">${fromHtml}</div><div style="${incomingStyle}">${toHtml}</div>${frameOverlayHtml}</div>${cameraOverlayHtml}</div>`;
+}
+
+function compositionLayerHtml(part: CompositionClip, previewTime: number) {
+  if (part.sourceMissing) return "";
+
+  const activeZoom = getActiveZoom(part.zoomMarkers, previewTime);
+  const activeTranslation = getActiveTranslation(part.translationMarkers, previewTime);
+  const activeRotation = getActiveRotation(part.translationMarkers, previewTime);
   const scale = activeZoom?.scale ?? 1;
   const focus = activeZoom?.focus ?? { x: frameWidth / 2, y: frameHeight / 2 };
   const x = (frameWidth / 2 - focus.x) * (scale - 1) + (activeTranslation?.position.x ?? 0);
   const y = (frameHeight / 2 - focus.y) * (scale - 1) + (activeTranslation?.position.y ?? 0);
-  const frameStyle = cssStyle({ ...part.frame.style, position: "relative", width: frameWidth, height: frameHeight, overflow: "hidden" });
   const rotation = activeRotation?.rotation ?? 0;
-  const transitionTransform = typeof visualTransitionStyle.cameraStyle?.transform === "string" ? visualTransitionStyle.cameraStyle.transform : "";
-  const cameraStyle = cssStyle({ position: "absolute", inset: 0, transformOrigin: "center", ...visualTransitionStyle.cameraStyle, transform: `${transitionTransform} translate3d(${x}px,${y}px,0) rotate(${rotation}deg) scale(${scale})`.trim() });
-  const visualStyle = cssStyle({ position: "absolute", inset: 0, filter: [visualAdjustmentStyle.filter, visualTransitionStyle.filter].filter(Boolean).join(" ") || undefined, ...visualTransitionStyle.frameStyle });
-  const frameOverlayHtml = adjustmentOverlayHtml([...(visualAdjustmentStyle.overlays?.filter((overlay) => overlay.target === "frame") ?? []), ...(visualTransitionStyle.overlays?.filter((overlay) => overlay.target === "frame") ?? [])]);
-  const cameraOverlayHtml = adjustmentOverlayHtml([...(visualAdjustmentStyle.overlays?.filter((overlay) => (overlay.target ?? "camera") === "camera") ?? []), ...(visualTransitionStyle.overlays?.filter((overlay) => (overlay.target ?? "camera") === "camera") ?? [])]);
-  return `<div style="${frameStyle}"><div style="${cameraStyle}"><div style="${visualStyle}">${part.background.hidden ? "" : backgroundLayerHtml(part.background, previewTime, part.duration)}${part.objects.filter((object) => !object.hidden).map((object) => frameObjectHtml(object, previewTime, part.duration)).join("")}${frameOverlayHtml}</div></div>${cameraOverlayHtml}</div>`;
+  const style = cssStyle({ ...part.frame.style, position: "absolute", inset: 0, overflow: "hidden", transform: `translate3d(${x}px,${y}px,0) rotate(${rotation}deg) scale(${scale})`.trim(), transformOrigin: "center" });
+  return `<div style="${style}">${part.background.hidden ? "" : backgroundLayerHtml(part.background, previewTime, part.duration)}${part.objects.filter((object) => !object.hidden).map((object) => frameObjectHtml(object, previewTime, part.duration)).join("")}</div>`;
 }
 
 function adjustmentOverlayHtml(overlays: AdjustmentVisualOverlay[] | undefined) {

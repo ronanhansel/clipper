@@ -1,4 +1,4 @@
-import { defaultTimelineLayerState, defaultTimelineMode, defaultTimelineViewportState, getSceneFromProject } from "../../../core/project";
+import { defaultTimelineLayerState, getSceneFromProject } from "../../../core/project";
 import { getCanonicalMotionMarkers, getMotionMarkerViews } from "../../../core/motionEffects";
 import { getAdjustmentLayerRowId, isMotionMarkerOnLayerId, removeTimelineAdjustmentLayerMarkers, removeTimelineMotionLayerMarkers } from "../../../core/timeline";
 import { getTimelineStateLayers, insertTimelineStateLayer } from "../../../core/timelineLayers";
@@ -81,16 +81,7 @@ export function useTimelineLayerCommands({
     const nextCompositionLayers = layers.length > 1 ? layers.filter((layer) => layer.id !== layerId) : [createBlankCompositionLayer()];
     updateProject((current) => ({
       ...current,
-      editorState: {
-        ...current.editorState,
-        timeline: current.editorState?.timeline ?? defaultTimelineViewportState,
-        timelineMode: current.editorState?.timelineMode ?? defaultTimelineMode,
-        timelineLayers: {
-          ...(current.editorState?.timelineLayers ?? defaultTimelineLayerState),
-          compositionLayers: nextCompositionLayers,
-        },
-      },
-      timelines: (current.timelines ?? []).map((timeline) => (timeline.id === scene.id ? { ...timeline, clips: timeline.clips.filter((clip) => (clip.layerId ?? "comp") !== layerId) } : timeline)),
+      timelines: (current.timelines ?? []).map((timeline) => (timeline.id === scene.id ? { ...timeline, timelineLayers: { ...(timeline.timelineLayers ?? defaultTimelineLayerState), compositionLayers: nextCompositionLayers }, clips: timeline.clips.filter((clip) => (clip.layerId ?? "comp") !== layerId) } : timeline)),
     }), { history: true });
 
     if (hasCompositions) {
@@ -107,16 +98,7 @@ export function useTimelineLayerCommands({
     const nextAdjustmentLayers = layers.length > 1 ? layers.filter((layer) => layer.id !== layerId) : [createBlankAdjustmentLayer()];
     updateProject((current) => ({
       ...current,
-      editorState: {
-        ...current.editorState,
-        timeline: current.editorState?.timeline ?? defaultTimelineViewportState,
-        timelineMode: current.editorState?.timelineMode ?? defaultTimelineMode,
-        timelineLayers: {
-          ...(current.editorState?.timelineLayers ?? defaultTimelineLayerState),
-          adjustmentLayers: nextAdjustmentLayers,
-        },
-      },
-      timelines: (current.timelines ?? []).map((timeline) => (timeline.id === scene.id ? { ...timeline, adjustmentLayers: removeTimelineAdjustmentLayerMarkers(timeline.adjustmentLayers ?? [], layerId) } : timeline)),
+      timelines: (current.timelines ?? []).map((timeline) => (timeline.id === scene.id ? { ...timeline, timelineLayers: { ...(timeline.timelineLayers ?? defaultTimelineLayerState), adjustmentLayers: nextAdjustmentLayers }, adjustmentLayers: removeTimelineAdjustmentLayerMarkers(timeline.adjustmentLayers ?? [], layerId) } : timeline)),
     }), { history: true });
 
     if (hasLayers) {
@@ -130,21 +112,13 @@ export function useTimelineLayerCommands({
     const nextMotionLayers = motionLayers.length > 1 ? motionLayers.filter((layer) => layer.id !== layerId) : [createBlankMotionLayer()];
     updateProject((current) => ({
       ...current,
-      editorState: {
-        ...current.editorState,
-        timeline: current.editorState?.timeline ?? defaultTimelineViewportState,
-        timelineMode: current.editorState?.timelineMode ?? defaultTimelineMode,
-        timelineLayers: {
-          ...(current.editorState?.timelineLayers ?? defaultTimelineLayerState),
-          motionLayers: nextMotionLayers,
-        },
-      },
       timelines: (current.timelines ?? []).map((timeline) => {
         if (timeline.id !== scene.id) return timeline;
         const currentScene = getSceneFromProject(current, scene.id) ?? scene;
         const clipsById = new Map(removeTimelineMotionLayerMarkers(currentScene.compositions, layerId).map((item) => [item.id, timelineClipFromPart(item)]));
         return {
           ...timeline,
+          timelineLayers: { ...(timeline.timelineLayers ?? defaultTimelineLayerState), motionLayers: nextMotionLayers },
           clips: timeline.clips.map((clip) => clipsById.get(clip.id) ?? clip),
           motionMarkers: getCanonicalMotionMarkers(timeline).filter((marker) => !isMotionMarkerOnLayerId(marker, layerId)),
         };
@@ -190,16 +164,7 @@ export function useTimelineLayerCommands({
     const nextTransitionLayers = layers.length > 1 ? layers.filter((layer) => layer.id !== layerId) : [createBlankTransitionLayer()];
     updateProject((current) => ({
       ...current,
-      editorState: {
-        ...current.editorState,
-        timeline: current.editorState?.timeline ?? defaultTimelineViewportState,
-        timelineMode: current.editorState?.timelineMode ?? defaultTimelineMode,
-        timelineLayers: {
-          ...(current.editorState?.timelineLayers ?? defaultTimelineLayerState),
-          transitionLayers: nextTransitionLayers,
-        },
-      },
-      timelines: (current.timelines ?? []).map((timeline) => (timeline.id === scene.id ? { ...timeline, transitionLayers: (timeline.transitionLayers ?? []).filter((layer) => (layer.layerId ?? transitionLayerRowId(layer)) !== layerId) } : timeline)),
+      timelines: (current.timelines ?? []).map((timeline) => (timeline.id === scene.id ? { ...timeline, timelineLayers: { ...(timeline.timelineLayers ?? defaultTimelineLayerState), transitionLayers: nextTransitionLayers }, transitionLayers: (timeline.transitionLayers ?? []).filter((layer) => (layer.layerId ?? transitionLayerRowId(layer)) !== layerId) } : timeline)),
     }), { history: true });
   }
 

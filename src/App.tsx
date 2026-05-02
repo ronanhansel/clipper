@@ -53,11 +53,13 @@ import { boundsToPoints } from "./core/geometry";
 import { clamp, roundToPrecision, roundTenth } from "./core/math";
 import type { AdjustmentEffectPointControl } from "./core/effects/types";
 import { getTransitionEffectPackage } from "./core/effects/registry";
-import { defaultComposeLayoutState, defaultEditorLayoutState, defaultPreviewViewportState, defaultTimelineLayerState, defaultTimelineMode, defaultTimelineViewportState, emptyTimelineLayerState } from "./core/project";
+import { defaultComposeLayoutState, defaultEditorLayoutState, defaultPreviewViewportState, defaultTimelineLayerState, defaultTimelineMode, defaultTimelineViewportState, emptyTimelineLayerState, withRequiredTimelineLayerTypes } from "./core/project";
 import { getExecutableAdjustmentLayers, getExecutableTransitionLayers } from "./core/timeline";
 import type { TimelineLayerCategory } from "./core/timelineLayers";
-import { FRAME_HEIGHT, FRAME_WIDTH, type Bounds, type CompositionClip, type EditorState, type FrameObject, type LayerAnimation, type MotionEffectKind, type Part, type Point, type ProjectManifest, type SelectionPayload, type TimelineClip, type TimelineLayerState, type TimelineViewportState } from "./core/types";
+import { FRAME_HEIGHT, FRAME_WIDTH, type Bounds, type CompositionClip, type EditorState, type FrameObject, type LayerAnimation, type MotionEffectKind, type Part, type Point, type ProjectManifest, type SelectionPayload, type TimelineClip, type TimelineDocument, type TimelineLayerState, type TimelineViewportState } from "./core/types";
+import { FindMediaDialog } from "./components/FileManager";
 import { WelcomeScreen } from "./components/WelcomeScreen";
+import { consumePendingFileManagerFindMedia, fileManagerFindMediaEvent, type FileManagerFindMediaDetail } from "./lib/fileManagerEvents";
 
 const defaultEditorState: EditorState = {
   timeline: defaultTimelineViewportState,
@@ -126,6 +128,8 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
   const [currentSceneTime, setRenderCurrentSceneTime] = useState(() => editorStore.getState().currentSceneTime);
   const [trackerPickTranslationMarker, setTrackerPickTranslationMarker] = useState<{ partId: string; markerId: string } | null>(null);
   const [pointPickAdjustment, setPointPickAdjustment] = useState<{ layerId: string; control: AdjustmentEffectPointControl } | null>(null);
+  const [findMediaRequest, setFindMediaRequest] = useState<FileManagerFindMediaDetail | null>(null);
+
   const {
     mode, setMode,
     timelineMode, setTimelineMode,
@@ -302,6 +306,14 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     updateEditorState,
   });
   const { updateCodeViewportState } = useCodeViewportState(updateEditorState);
+  const timelines = project.timelines ?? [];
+  const activeTimelineDocument = getSelectedTimelineDocument(timelines, selectedSceneId);
+  const activeTimelineId = activeTimelineDocument?.id ?? selectedSceneId;
+  const activeTimelineName = getDisplayNameFromPath(activeTimelineDocument?.filePath ?? activeTimelineId ?? "");
+  const hasActiveTimeline = Boolean(activeTimelineDocument);
+  const hasSelectedTimelineFile = Boolean(selectedSceneId?.endsWith(".timeline.json"));
+  const storedTimelineLayers = activeTimelineDocument?.timelineLayers ?? project.editorState?.timelineLayers;
+  const timelineLayers = useMemo(() => (hasActiveTimeline || hasSelectedTimelineFile || timelineMode === "compose") ? withRequiredTimelineLayerTypes(storedTimelineLayers) : emptyTimelineLayerState, [hasActiveTimeline, hasSelectedTimelineFile, timelineMode, storedTimelineLayers]);
   const { toggleFrameZoomBar, updateFramePreviewScale } = useFramePreviewZoomCommands({
     frameZoomBarOpen,
     frameZoomControlRef,
@@ -341,6 +353,8 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     part,
     compositionSourcesSnapshot,
     previewTime,
+    previewParts,
+    transitionPreviewParts,
     scene,
     sceneDurationSeconds,
     selectedObject,
@@ -374,23 +388,12 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     selectedMotionMarkers,
     selectionPayload,
     timelineMode,
+    timelineLayers,
   });
   const composeMode = timelineMode === "compose";
   const composePlaybackRange = composeMode && activeTimelinePart ? { start: activeTimelinePart.start, end: activeTimelinePart.start + part.duration, localLabels: true } : undefined;
   const compositionLibrary = project.compositionLibrary ?? [];
-  const timelines = project.timelines ?? [];
-  const activeTimelineName = getDisplayNameFromPath(selectedSceneId ?? "");
   const timelineCompositionIds = new Set(scene.compositions.map((composition) => composition.id));
-  const hasActiveTimeline = timelines.some((t) => t.id === selectedSceneId);
-  const storedTimelineLayers = project.editorState?.timelineLayers;
-  const timelineLayers = (hasActiveTimeline || composeMode) ? {
-    ...defaultTimelineLayerState,
-    ...storedTimelineLayers,
-    compositionLayers: storedTimelineLayers?.compositionLayers?.length ? storedTimelineLayers.compositionLayers : defaultTimelineLayerState.compositionLayers,
-    adjustmentLayers: storedTimelineLayers?.adjustmentLayers?.length ? storedTimelineLayers.adjustmentLayers : defaultTimelineLayerState.adjustmentLayers,
-    motionLayers: storedTimelineLayers?.motionLayers?.length ? storedTimelineLayers.motionLayers : defaultTimelineLayerState.motionLayers,
-    transitionLayers: storedTimelineLayers?.transitionLayers?.length ? storedTimelineLayers.transitionLayers : defaultTimelineLayerState.transitionLayers,
-  } : emptyTimelineLayerState;
   const baseMotionLayers = timelineLayers.motionLayers?.length ? timelineLayers.motionLayers : defaultTimelineLayerState.motionLayers!;
   const motionLayers = baseMotionLayers;
   const hiddenMotionLayerIds = new Set(motionLayers.filter((layer) => layer.hidden).map((layer) => layer.id));
@@ -413,7 +416,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     stepSceneTime,
     togglePlayback,
   } = usePlaybackController({
-    activeTimelinePart,
+    compositions: scene.compositions,
     playbackRange: composePlaybackRange,
     currentSceneTime,
     currentSceneTimeRef,
@@ -435,7 +438,9 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     setPlaybackClock,
     setRenderCurrentSceneTime,
     timeline,
+    timelineLayers,
     timelineEndPaddingFraction,
+    transitionLayers: visibleSceneTransitionLayers,
     timelineScrubPausedPlaybackRef,
     timelineScrubbingRef,
     updateEditorState,
@@ -490,8 +495,31 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
   }, [mode]);
 
   useEffect(() => {
+    function openFindMediaDialog(event: Event) {
+      const detail = (event as CustomEvent<FileManagerFindMediaDetail>).detail;
+      if (!detail?.compositionId || !detail.fileName) return;
+      setFindMediaRequest(detail);
+    }
+
+    window.addEventListener(fileManagerFindMediaEvent, openFindMediaDialog);
+    const pending = consumePendingFileManagerFindMedia();
+    if (pending) setFindMediaRequest(pending);
+    return () => window.removeEventListener(fileManagerFindMediaEvent, openFindMediaDialog);
+  }, []);
+
+  useEffect(() => {
     timelineModeRef.current = timelineMode;
   }, [timelineMode]);
+
+  useEffect(() => {
+    if (!selectedSceneId || activeTimelineDocument || !selectedSceneId.endsWith(".timeline.json")) return;
+    void reloadProject().then(() => {
+      const resolvedTimelineId = getSelectedTimelineDocument(projectRef.current.timelines ?? [], selectedSceneId)?.id;
+      if (!resolvedTimelineId || resolvedTimelineId === selectedSceneId) return;
+      setSelectedSceneId(resolvedTimelineId);
+      updateEditorState((state) => ({ ...state, selectedSceneId: resolvedTimelineId, selectedTimelineId: resolvedTimelineId }));
+    });
+  }, [activeTimelineDocument, reloadProject, selectedSceneId, setSelectedSceneId, updateEditorState]);
 
   useEffect(() => {
     activePartFilePathRef.current = hasActiveComposition ? part.filePath : "";
@@ -1175,9 +1203,11 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     compositionFolders: project.compositionFolders ?? [],
     compositionRootPath: watchedProjectDirectory,
     fileManagerState: project.editorState?.fileManagerState,
+    findMediaRequest,
     implicitFileOperation,
     timelines,
     timelineCompositionIds,
+    onFindMediaRequestChange: setFindMediaRequest,
     actions: { ...fileManagerActions, reloadProject },
   });
   const editorLayout = project.editorState?.layout ?? defaultEditorLayoutState;
@@ -1232,10 +1262,14 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     // Clicking a composition in the file manager does not insert it.
   }
 
-  function handleSelectTimeline(timelineId: string) {
+  async function handleSelectTimeline(timelineId: string) {
+    if (!getSelectedTimelineDocument(projectRef.current.timelines ?? [], timelineId)) {
+      await reloadProject();
+    }
+    const resolvedTimelineId = getSelectedTimelineDocument(projectRef.current.timelines ?? [], timelineId)?.id ?? timelineId;
     updateTimelineMode("composition");
-    setSelectedSceneId(timelineId);
-    updateEditorState((state) => ({ ...state, selectedSceneId: timelineId, selectedTimelineId: timelineId, currentSceneTime: 0 }));
+    setSelectedSceneId(resolvedTimelineId);
+    updateEditorState((state) => ({ ...state, selectedSceneId: resolvedTimelineId, selectedTimelineId: resolvedTimelineId, currentSceneTime: 0 }));
     clearNodeSelection();
     setSelectedPartId("");
     setCurrentSceneTime(0);
@@ -1272,7 +1306,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
           leftPanelTab={leftPanelTab}
           osFileManagerProps={isDirectoryMode ? {
             projectDirectory: watchedProjectDirectory,
-            selectedTimelineId: selectedSceneId,
+            selectedTimelineId: activeTimelineId,
             fileSystemRevision,
             onReloadProject: handleReloadProject,
             onSelectComposition: handleSelectComposition,
@@ -1293,7 +1327,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
         <CenterPreviewPane
           blankFrameViewportStyle={blankFrameViewportStyle}
           codePaneProps={hasActiveComposition ? { part, source: compositionSources[part.filePath] ?? part.source, viewportState: project.editorState?.code?.[part.id], projectDirectory: activeProjectManifestPath.endsWith(".json") ? getDirectoryPath(activeProjectManifestPath) : undefined, onSaveAll: saveAllChanges, onSourceChange: (source) => updateCompositionFromSource(part, source, { history: false, syncSource: false }), onViewportStateChange: updateCodeViewportState } : null}
-          framePreviewProps={hasActiveComposition ? { cameraRef, dragBox, dragSelectionBoxRef, framePickPoint: activeFramePickPoint, focusPicking: isPickingZoomFocus || isPickingTranslationPosition || Boolean(pointPickAdjustment), trackerPicking: Boolean(trackerPickTranslationMarker), canSelectObjects: canSelectFrameObjects && !isPlaying, cameraTransform: cameraPreviewTransform, frameViewportRef, frameScale: framePreviewScale, isPlaying, part, partStart: activeTimelinePart?.start ?? 0, adjustmentLayers: composeMode ? [] : visibleSceneAdjustmentLayers, transitionLayers: composeMode ? [] : visibleSceneTransitionLayers, playbackClock, previewTime, sceneTime: currentSceneTime, timelineMode, motionLayers: composeMode ? [] : motionLayers, hiddenMotionLayerIds: composeMode ? new Set<string>() : hiddenMotionLayerIds, pickingTranslationPosition: isPickingTranslationPosition || Boolean(pointPickAdjustment), pickingZoomFocus: isPickingZoomFocus || Boolean(pointPickAdjustment), compHidden: composeMode ? false : activeCompositionHidden, selectedObjects: previewSelectionObjects, marqueeDragging, editingTextObjectId: isPlaying ? null : editingTextObjectId, onFramePointerCancel, onFramePointerDown, onFramePointerDownCapture, onFramePointerMove, onFramePointerUp, onObjectPointerDown: startObjectDrag, onObjectResizePointerDown: startObjectResize, onTextEditCommit: updateTextObjectContent, onTextObjectDoubleClick: startTextObjectEdit, onTrackerTargetPick: commitTranslationTrackerPick } : null}
+          framePreviewProps={hasActiveComposition ? { cameraRef, dragBox, dragSelectionBoxRef, framePickPoint: activeFramePickPoint, focusPicking: isPickingZoomFocus || isPickingTranslationPosition || Boolean(pointPickAdjustment), trackerPicking: Boolean(trackerPickTranslationMarker), canSelectObjects: canSelectFrameObjects && !isPlaying, cameraTransform: cameraPreviewTransform, frameViewportRef, frameScale: framePreviewScale, isPlaying, part, partStart: activeTimelinePart?.start ?? 0, previewParts: composeMode ? [] : previewParts, transitionPreviewParts: composeMode ? null : transitionPreviewParts, adjustmentLayers: composeMode ? [] : visibleSceneAdjustmentLayers, transitionLayers: composeMode ? [] : visibleSceneTransitionLayers, playbackClock, previewTime, sceneTime: currentSceneTime, timelineMode, motionLayers: composeMode ? [] : motionLayers, hiddenMotionLayerIds: composeMode ? new Set<string>() : hiddenMotionLayerIds, pickingTranslationPosition: isPickingTranslationPosition || Boolean(pointPickAdjustment), pickingZoomFocus: isPickingZoomFocus || Boolean(pointPickAdjustment), compHidden: composeMode ? false : activeCompositionHidden, selectedObjects: previewSelectionObjects, marqueeDragging, editingTextObjectId: isPlaying ? null : editingTextObjectId, onFramePointerCancel, onFramePointerDown, onFramePointerDownCapture, onFramePointerMove, onFramePointerUp, onObjectPointerDown: startObjectDrag, onObjectResizePointerDown: startObjectResize, onTextEditCommit: updateTextObjectContent, onTextObjectDoubleClick: startTextObjectEdit, onTrackerTargetPick: commitTranslationTrackerPick } : null}
           hasActiveComposition={hasActiveComposition}
           mode={mode}
           previewKey={part.id}
@@ -1489,6 +1523,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
       onTimelinePrecisionChange={setTimelinePrecision}
       onVideoExportCancel={() => void stopVideoExport()}
     />
+    <FindMediaDialog findMediaRequest={findMediaRequest} onFindCompositionMedia={fileManagerActions.findCompositionMedia} onFindMediaRequestChange={setFindMediaRequest} />
     </>
   );
 }
@@ -1504,6 +1539,19 @@ function isSelectPopoverTarget(target: HTMLElement | null) {
 
 function isComposeLayersTarget(target: HTMLElement | null) {
   return Boolean(target?.closest("[data-compose-layers-panel]"));
+}
+
+function getSelectedTimelineDocument(timelines: TimelineDocument[], selectedTimelineId: string | undefined) {
+  if (!selectedTimelineId) return null;
+  const normalizedSelected = normalizeTimelineLookupId(selectedTimelineId);
+  return timelines.find((timeline) => {
+    const ids = [timeline.id, timeline.filePath, getDisplayNameFromPath(timeline.filePath ?? timeline.id)];
+    return ids.some((id) => normalizeTimelineLookupId(id) === normalizedSelected);
+  }) ?? null;
+}
+
+function normalizeTimelineLookupId(id: string | undefined) {
+  return (id ?? "").replace(/^file-manager\//, "").replace(/\.timeline\.json$/, "");
 }
 
 function isTimelineTarget(target: HTMLElement | null) {

@@ -98,6 +98,11 @@ class ClipperHostService {
     return response.json() as Promise<{ name: string; isDirectory: boolean }[]>;
   }
 
+  async findProjectFileByName(directoryPath: string, fileName: string) {
+    if (window.clipper?.findProjectFileByName) return window.clipper.findProjectFileByName(directoryPath, fileName);
+    return findFileByNameWithListDirectory(this, directoryPath, fileName);
+  }
+
   async listSystemFonts() {
     const browserFonts = await this.listBrowserLocalFonts();
     if (browserFonts.length > 0) return browserFonts;
@@ -166,3 +171,17 @@ function base64ToUint8Array(value: string) {
 }
 
 export const clipperHost = new ClipperHostService();
+
+async function findFileByNameWithListDirectory(host: ClipperHostService, directoryPath: string, fileName: string): Promise<string | null> {
+  const entries = await host.listDirectory(directoryPath).catch(() => []);
+  const normalizedFileName = fileName.toLocaleLowerCase();
+  for (const entry of entries) {
+    const entryPath = `${directoryPath}/${entry.name}`;
+    if (!entry.isDirectory && entry.name.toLocaleLowerCase() === normalizedFileName) return entryPath;
+    if (entry.isDirectory) {
+      const matchedPath = await findFileByNameWithListDirectory(host, entryPath, fileName);
+      if (matchedPath) return matchedPath;
+    }
+  }
+  return null;
+}

@@ -10,13 +10,13 @@ import {
   getTimeSensitiveDisplayTime,
 } from "../../../core/adjustments";
 import { clamp, roundTwo } from "../../../core/math";
-import { formatTime, getTimelinePartAtTime, timelineDisplayDuration } from "../../../core/timeline";
-import type { AdjustmentLayer, EditorState, TimelinePart } from "../../../core/types";
+import { formatTime, getTimelinePreviewState, timelineDisplayDuration } from "../../../core/timeline";
+import type { AdjustmentLayer, CompositionClip, EditorState, TimelineLayerState, TimelinePart, TransitionLayer } from "../../../core/types";
 import type { PlaybackClock } from "../../types";
 import type { EditorStore } from "../../state/editorStore";
 
 type PlaybackControllerOptions = {
-  activeTimelinePart: TimelinePart | null | undefined;
+  compositions: CompositionClip[];
   playbackRange?: { start: number; end: number; localLabels?: boolean };
   currentSceneTime: number;
   currentSceneTimeRef: RefObject<number>;
@@ -38,7 +38,9 @@ type PlaybackControllerOptions = {
   setPlaybackClock: (clock: PlaybackClock) => void;
   setRenderCurrentSceneTime: (time: number) => void;
   timeline: TimelinePart[];
+  timelineLayers?: TimelineLayerState;
   timelineEndPaddingFraction: number;
+  transitionLayers?: TransitionLayer[];
   timelineScrubPausedPlaybackRef: RefObject<boolean>;
   timelineScrubbingRef: RefObject<boolean>;
   updateEditorState: (updater: (state: EditorState) => EditorState) => void;
@@ -47,7 +49,7 @@ type PlaybackControllerOptions = {
 };
 
 export function usePlaybackController({
-  activeTimelinePart,
+  compositions,
   playbackRange,
   currentSceneTime,
   currentSceneTimeRef,
@@ -69,7 +71,9 @@ export function usePlaybackController({
   setPlaybackClock,
   setRenderCurrentSceneTime,
   timeline,
+  timelineLayers,
   timelineEndPaddingFraction,
+  transitionLayers,
   timelineScrubPausedPlaybackRef,
   timelineScrubbingRef,
   updateEditorState,
@@ -359,7 +363,7 @@ export function usePlaybackController({
 
   useEffect(() => {
     if (!isPlaying) return;
-    let lastCommittedPartId = getTimelinePartAtTime(timeline, applyPlaybackAdjustmentLayersToSceneTime(currentSceneTimeRef.current, visibleSceneAdjustmentLayers))?.id ?? activeTimelinePart?.id ?? "";
+    let lastCommittedPreviewKey = getPlaybackPreviewKey(currentSceneTimeRef.current, compositions, sceneDurationSeconds, timeline, timelineLayers, transitionLayers, visibleSceneAdjustmentLayers);
     let frame = 0;
 
     function tick(now: number) {
@@ -368,15 +372,15 @@ export function usePlaybackController({
       const nextTime = useLocalPlaybackLabels
         ? clamp(clock.startedFrom + (now - clock.startedAt) / 1000, playbackStart, playbackEnd)
         : advanceTimeSensitiveSceneTime(clock.startedFrom, (now - clock.startedAt) / 1000, sceneDurationSeconds, visibleSceneAdjustmentLayers);
-      const nextTimelinePart = getTimelinePartAtTime(timeline, applyPlaybackAdjustmentLayersToSceneTime(nextTime, visibleSceneAdjustmentLayers));
-      const partChanged = Boolean(nextTimelinePart?.id && nextTimelinePart.id !== lastCommittedPartId);
-      const shouldSyncReact = partChanged || nextTime >= playbackEnd;
+      const nextPreviewKey = getPlaybackPreviewKey(nextTime, compositions, sceneDurationSeconds, timeline, timelineLayers, transitionLayers, visibleSceneAdjustmentLayers);
+      const shouldSyncReact = nextPreviewKey !== lastCommittedPreviewKey || nextTime >= playbackEnd;
 
       currentSceneTimeRef.current = nextTime;
       syncPlaybackDom(nextTime);
+      setRenderCurrentSceneTime(nextTime);
 
       if (shouldSyncReact) {
-        lastCommittedPartId = nextTimelinePart?.id ?? lastCommittedPartId;
+        lastCommittedPreviewKey = nextPreviewKey;
         setCurrentSceneTime(nextTime);
       }
 
@@ -392,7 +396,7 @@ export function usePlaybackController({
 
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [activeTimelinePart?.id, isPlaying, playbackEnd, playbackStart, sceneDurationSeconds, timeline, useLocalPlaybackLabels, visibleSceneAdjustmentLayers]);
+  }, [compositions, isPlaying, playbackEnd, playbackStart, sceneDurationSeconds, timeline, timelineLayers, transitionLayers, useLocalPlaybackLabels, visibleSceneAdjustmentLayers]);
 
   useEffect(() => {
     if (!isPlaying) return;
@@ -425,4 +429,20 @@ export function usePlaybackController({
     togglePlayback,
     updatePlaybackClock,
   };
+}
+
+function getPlaybackPreviewKey(sceneTime: number, compositions: CompositionClip[], sceneDurationSeconds: number, timeline: TimelinePart[], timelineLayers: TimelineLayerState | undefined, transitionLayers: TransitionLayer[] | undefined, adjustmentLayers: AdjustmentLayer[]) {
+  const state = getTimelinePreviewState({
+    adjustmentLayers,
+    compositions,
+    sceneDurationSeconds,
+    sceneTime,
+    timeline,
+    timelineLayers,
+    timelineMode: "composition",
+    transitionLayers,
+  });
+  const stackKey = state.previewParts.map((item) => `${item.part.id}:${item.start}`).join("|");
+  const transitionKey = state.transitionPreviewParts ? [state.transitionPreviewParts.from, state.transitionPreviewParts.to].map((parts) => parts.map((item) => `${item.part.id}:${item.start}`).join("|")).join(">") : "";
+  return `${state.activeTimelinePart?.id ?? ""}:${stackKey}:${transitionKey}`;
 }

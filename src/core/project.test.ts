@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deleteCompositionFromProject, normalizeProject, replacePartInProject, serializeProjectForSave } from "./project";
+import { defaultTimelineLayerState, deleteCompositionFromProject, normalizeProject, replacePartInProject, serializeProjectForSave, withRequiredTimelineLayerTypes } from "./project";
 import { motionBlocksToMotionMarkers } from "./motionEffects";
 import type { CompositionClip, ProjectManifest } from "./types";
 
@@ -125,17 +125,16 @@ describe("project normalization", () => {
       editorState: {
         timeline: { displacement: 0, zoom: 1 },
         timelineMode: "composition",
-        timelineLayers: {
-      compositionLayers: [{ id: "comp" }],
-      adjustmentLayers: [{ id: "adjust" }],
-      motionLayers: [{ id: "motion", kind: "empty" }],
-
-        },
       },
       timelines: [{
         id: "tl_main",
         filePath: "timelines/tl_main.timeline.json",
         clips: [{ id: composition.id, compositionId: composition.id, duration: composition.duration, motionMarkers }],
+        timelineLayers: {
+          compositionLayers: [{ id: "comp" }],
+          adjustmentLayers: [{ id: "adjust" }],
+          motionLayers: [{ id: "motion", kind: "empty" }],
+        },
         adjustmentLayers: [
           { id: "live", name: "Live", layerId: "adjust", start: 0, duration: 1, effect: { effectId: "clipper.adjustment.colourGrade", params: {} } },
           { id: "stale", name: "Stale", layerId: "removed_row", start: 0, duration: 10, effect: { effectId: "clipper.adjustment.colourGrade", params: {} } },
@@ -148,14 +147,14 @@ describe("project normalization", () => {
     expect(normalizeProject(serialized).scenes[0].adjustmentLayers!.map((layer) => layer.id)).toEqual(["live"]);
   });
 
-  it("deletes a composition and removes all timeline clips that reference it", () => {
+  it("deletes a composition and preserves timeline clips as missing media", () => {
     const normalized = normalizeProject(projectWithComposition());
     const deleted = deleteCompositionFromProject(normalized, "cmp_intro");
 
     expect(deleted.compositions).toEqual([]);
-    expect(deleted.compositionLibrary).toEqual([]);
-    expect(deleted.timelines?.[0].clips).toEqual([]);
-    expect(deleted.scenes[0].compositions).toEqual([]);
+    expect(deleted.compositionLibrary?.[0]).toMatchObject({ id: "cmp_intro", sourceMissing: true });
+    expect(deleted.timelines?.[0].clips[0]).toMatchObject({ compositionId: "cmp_intro" });
+    expect(deleted.scenes[0].compositions[0]).toMatchObject({ compositionId: "cmp_intro", sourceMissing: true });
   });
 
   it("remaps timeline clip composition references when composition path IDs change", () => {
@@ -167,11 +166,51 @@ describe("project normalization", () => {
     expect(renamed.timelines?.[0].clips[0].compositionId).toBe(renamedPath);
   });
 
-  it("creates one blank default row for each timeline category", () => {
+  it("does not persist default timeline rows when a timeline has no layer state", () => {
     const normalized = normalizeProject(projectWithComposition());
 
-    expect(normalized.editorState?.timelineLayers?.compositionLayers).toEqual([{ id: "comp", name: "Composition", hidden: undefined, locked: undefined }]);
-    expect(normalized.editorState?.timelineLayers?.adjustmentLayers).toEqual([{ id: "adjust", name: undefined, hidden: undefined, locked: undefined }]);
-    expect(normalized.editorState?.timelineLayers?.motionLayers).toEqual([{ id: "motion", kind: "empty", name: undefined, hidden: undefined, locked: undefined }]);
+    expect(normalized.editorState?.timelineLayers).toBeUndefined();
+    expect(normalized.timelines?.[0].timelineLayers).toBeUndefined();
+  });
+
+  it("repairs existing partial timeline layer state with missing categories", () => {
+    const normalized = normalizeProject({
+      ...projectWithComposition(),
+      timelines: [{
+        id: "tl_main",
+        filePath: "timelines/tl_main.timeline.json",
+        clips: [],
+        timelineLayers: { compositionLayers: [{ id: "legacy", name: "Legacy" }] },
+        settings: {},
+      }],
+    });
+
+    expect(normalized.timelines?.[0].timelineLayers?.compositionLayers).toEqual([{ id: "legacy", name: "Legacy", hidden: undefined, locked: undefined }]);
+    expect(normalized.timelines?.[0].timelineLayers?.adjustmentLayers).toEqual([{ id: "adjust", name: undefined, hidden: undefined, locked: undefined }]);
+    expect(normalized.timelines?.[0].timelineLayers?.motionLayers).toEqual([{ id: "motion", kind: "empty", name: undefined, hidden: undefined, locked: undefined }]);
+    expect(normalized.timelines?.[0].timelineLayers?.transitionLayers).toEqual([{ id: "transition", name: undefined, hidden: undefined, locked: undefined }]);
+  });
+
+  it("adds any missing timeline layer categories without replacing existing categories", () => {
+    const layers = withRequiredTimelineLayerTypes({ compositionLayers: [{ id: "legacy", name: "Legacy" }] });
+
+    expect(layers.compositionLayers).toEqual([{ id: "legacy", name: "Legacy" }]);
+    expect(layers.adjustmentLayers).toEqual(defaultTimelineLayerState.adjustmentLayers);
+    expect(layers.motionLayers).toEqual(defaultTimelineLayerState.motionLayers);
+    expect(layers.transitionLayers).toEqual(defaultTimelineLayerState.transitionLayers);
+  });
+
+  it("migrates legacy editor timeline layers into existing timelines without keeping global layout state", () => {
+    const normalized = normalizeProject({
+      ...projectWithComposition(),
+      editorState: {
+        timeline: { displacement: 0, zoom: 1 },
+        timelineMode: "composition",
+        timelineLayers: { compositionLayers: [{ id: "legacy", name: "Legacy" }] },
+      },
+    });
+
+    expect(normalized.editorState?.timelineLayers).toBeUndefined();
+    expect(normalized.timelines?.[0].timelineLayers?.compositionLayers?.[0]).toMatchObject({ id: "legacy", name: "Legacy" });
   });
 });

@@ -1,6 +1,7 @@
 import { ChartNoAxesGantt, ChevronDown, ChevronRight, Clapperboard, File, FileCode, FileJson, Folder, FolderOpen } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import toast from "react-hot-toast";
+import { isTextEditingTarget } from "../app/features/shortcuts/useGlobalEditorShortcuts";
 import type { ContextMenuState } from "../app/types";
 import { clipperHost } from "../app/clipperHost";
 import { getDirectoryPath, nextNumberedName } from "../app/features/file-manager/fileManagerPaths";
@@ -60,6 +61,7 @@ export function OsFileManager({
   const treeRef = useRef<NativeTreeApi<OsFileNode> | undefined>(undefined);
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
   const [effectiveDirectory, setEffectiveDirectory] = useState(projectDirectory);
+  const loadedDirectoryRef = useRef<string | null>(null);
   const openStateRef = useRef<Record<string, boolean>>({});
   const externalDragRef = useRef<{ node: OsFileNode; lastMouse: { x: number; y: number }; shiftKey: boolean } | null>(null);
   const externalDragFrameRef = useRef(0);
@@ -121,6 +123,15 @@ export function OsFileManager({
     }
     externalDragRef.current = null;
   }, [getCompositionDragDetail]);
+
+  useEffect(() => {
+    function updateCompositionLanePreview(event: Event) {
+      setCompositionLanePreviewActive(Boolean((event as CustomEvent<PointerDragPreviewDetail>).detail?.active));
+    }
+
+    window.addEventListener(compositionDragPreviewEvent, updateCompositionLanePreview);
+    return () => window.removeEventListener(compositionDragPreviewEvent, updateCompositionLanePreview);
+  }, []);
 
   useEffect(() => {
     function updateCompositionLanePreview(event: Event) {
@@ -240,10 +251,14 @@ export function OsFileManager({
   useEffect(() => {
     let cancelled = false;
     async function load() {
-      setLoading(true);
+      const showInitialLoading = loadedDirectoryRef.current !== effectiveDirectory;
+      if (showInitialLoading) setLoading(true);
       try {
         const children = await loadDirectoryTree(effectiveDirectory, projectDirectory);
-        if (!cancelled) setTreeData(children);
+        if (!cancelled) {
+          loadedDirectoryRef.current = effectiveDirectory;
+          setTreeData(children);
+        }
       } catch (error) {
         if (!cancelled) toast.error(error instanceof Error ? error.message : "Unable to load project directory.");
       } finally {
@@ -301,6 +316,8 @@ export function OsFileManager({
       event.preventDefault();
       event.stopPropagation();
       const items: NonNullable<ContextMenuState>["items"] = [];
+      const selectedNodes = node?.isSelected ? getTopLevelOsFileNodes(node.tree.selectedNodes.map((selectedNode) => selectedNode.data)) : [];
+      const shouldUseSelection = selectedNodes.length > 1;
       if (!node || node.data.path === effectiveDirectory) {
         items.push(
           { label: "New Composition", action: () => void createNewComposition(effectiveDirectory) },
@@ -314,13 +331,13 @@ export function OsFileManager({
           { label: "New Timeline", action: () => void createNewTimeline(node.data.path) },
           { label: "New Folder", action: () => void createNewFolder(node.data.path) },
           { label: "Rename", action: () => node.edit() },
-          { label: "Delete", action: () => void deleteNode(node.data), danger: true },
+          { label: shouldUseSelection ? `Delete ${selectedNodes.length} items` : "Delete", action: () => void deleteNodes(shouldUseSelection ? selectedNodes : [node.data]), danger: true },
           { label: "Reveal in Finder", action: () => void clipperHost.revealFile(node.data.path) }
         );
       } else {
         items.push(
           { label: "Rename", action: () => node.edit() },
-          { label: "Delete", action: () => void deleteNode(node.data), danger: true },
+          { label: shouldUseSelection ? `Delete ${selectedNodes.length} items` : "Delete", action: () => void deleteNodes(shouldUseSelection ? selectedNodes : [node.data]), danger: true },
           { label: "Reveal in Finder", action: () => void clipperHost.revealFile(node.data.path) }
         );
         if (node.data.isComposition) {
@@ -374,6 +391,10 @@ export const composition = new Composition({
       const name = nextNumberedSemanticName("New Timeline", ".timeline.json", names);
       const content = JSON.stringify({
         clips: [],
+        adjustmentLayers: [],
+        motionMarkers: [],
+        transitionLayers: [],
+        settings: {},
       }, null, 2);
       const filePath = `${parentPath}/${name}`;
       setTreeData((current) => addNode(current, parentPath, { id: filePath, name, path: filePath, isDirectory: false }));
@@ -397,31 +418,23 @@ export const composition = new Composition({
   }
 
   async function deleteNode(node: OsFileNode) {
-    try {
-      if (node.path === effectiveDirectory) {
-        toast.error("Cannot delete the project root folder.");
-        return;
-      }
-      
-      const command = new DeleteCommand(node.path, node.name, node.isDirectory, effectiveDirectory);
-      setTreeData((current) => removeNodes(current, [node]));
-      await execute(command);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Unable to delete.");
-    }
+    await deleteNodes([node]);
   }
 
   async function deleteNodes(nodes: OsFileNode[]) {
-    if (!nodes.length) return;
-    
-    // Filter to top-level nodes to avoid conflicts (don't delete child if parent is deleted)
-    const nodesToDelete = nodes.filter(node => !nodes.some(parent => node.path.startsWith(`${parent.path}/`)));
+    const nodesToDelete = getTopLevelOsFileNodes(nodes).filter((node) => {
+      if (node.path !== effectiveDirectory) return true;
+      toast.error("Cannot delete the project root folder.");
+      return false;
+    });
+    if (!nodesToDelete.length) return;
 
-    // Optimistically update UI
-    setTreeData(prev => removeNodes(prev, nodesToDelete));
-
-    for (const node of nodesToDelete) {
-      await deleteNode(node);
+    try {
+      setTreeData((current) => removeNodes(current, nodesToDelete));
+      await execute(new DeleteCommand(nodesToDelete.map((node) => ({ path: node.path, name: node.name, isDirectory: node.isDirectory })), effectiveDirectory));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to delete.");
+      setRefreshKey((k) => k + 1);
     }
   }
 
@@ -457,24 +470,27 @@ export const composition = new Composition({
       const nextFullName = reconstructFileName(name, node.name);
       const oldPath = rebasePath(node.path, pendingPathMovesRef.current);
       if (oldPath.endsWith(`/${nextFullName}`)) return; // No change
+      const parentPath = getDirectoryPath(oldPath);
+      const newPath = `${parentPath}/${nextFullName}`;
+      pendingPathMovesRef.current.push({ oldPath, newPath });
+      setTreeData((current) => renameNode(current, node.path, nextFullName));
 
       try {
-        const parentPath = getDirectoryPath(oldPath);
         const entries = await clipperHost.listDirectory(parentPath);
         const exists = entries.some((e) => e.name.toLowerCase() === nextFullName.toLowerCase() && `${parentPath}/${e.name}` !== oldPath);
         if (exists) {
           toast.error(`A file or folder named "${nextFullName}" already exists.`);
+          pendingPathMovesRef.current = pendingPathMovesRef.current.filter((move) => move.oldPath !== oldPath || move.newPath !== newPath);
+          setTreeData((current) => renameNode(current, newPath, node.name));
           setRefreshKey((k) => k + 1);
           return;
         }
         
         const command = new RenameCommand(oldPath, nextFullName);
-        const newPath = `${parentPath}/${nextFullName}`;
-        pendingPathMovesRef.current.push({ oldPath, newPath });
-        setTreeData((current) => renameNode(current, node.path, nextFullName));
         await execute(command);
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "Unable to rename.");
+        pendingPathMovesRef.current = pendingPathMovesRef.current.filter((move) => move.oldPath !== oldPath || move.newPath !== newPath);
         setRefreshKey((k) => k + 1);
       }
     },
@@ -496,7 +512,7 @@ export const composition = new Composition({
       const moves: Array<{ oldPath: string; newPath: string }> = [];
       const targetFolderPath = rebasePath(targetFolder.path, pendingPathMovesRef.current);
 
-      for (const dragId of dragIds) {
+      for (const dragId of getTopLevelOsFileIds(dragIds)) {
         let node = findNode(treeData, dragId);
         if (!node) {
           const parts = dragId.split("/");
@@ -515,7 +531,7 @@ export const composition = new Composition({
         }
         const oldPath = rebasePath(node.path, pendingPathMovesRef.current);
         const newPath = `${targetFolderPath}/${node.name}`;
-        if (oldPath === newPath) continue;
+        if (!canMoveOsFilePath(oldPath, newPath)) continue;
         moves.push({ oldPath, newPath });
         moved = true;
       }
@@ -554,13 +570,44 @@ export const composition = new Composition({
   );
 
   function handleKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
-    if (event.key !== "Backspace" || (!event.metaKey && !event.ctrlKey)) return;
-    if (!selectedNodeIds.length) return;
+    const target = event.target;
+    if (target instanceof HTMLElement && isTextEditingTarget(target)) return;
+    deleteSelectedNodes(event);
+  }
+
+  function deleteSelectedNodes(event: Pick<ReactKeyboardEvent<HTMLElement> | KeyboardEvent, "ctrlKey" | "key" | "metaKey" | "preventDefault" | "stopPropagation">) {
+    if (event.key !== "Backspace" || (!event.metaKey && !event.ctrlKey)) return false;
+    if (!selectedNodeIds.length) return false;
+    const nodesToDelete = selectedNodeIds.map((id) => findNode(treeData, id)).filter(Boolean) as OsFileNode[];
+    if (!nodesToDelete.length) return false;
     event.preventDefault();
     event.stopPropagation();
-    const nodesToDelete = selectedNodeIds.map((id) => findNode(treeData, id)).filter(Boolean) as OsFileNode[];
     void deleteNodes(nodesToDelete);
+    return true;
   }
+
+  useEffect(() => {
+    function onWindowPointerDown(event: globalThis.PointerEvent) {
+      if (containerRef.current?.contains(event.target as Node)) return;
+      treeRef.current?.deselectAll();
+      treeRef.current?.onBlur();
+      setSelectedNodeIds([]);
+    }
+
+    window.addEventListener("pointerdown", onWindowPointerDown);
+    return () => window.removeEventListener("pointerdown", onWindowPointerDown);
+  }, []);
+
+  useEffect(() => {
+    function onWindowKeyDown(event: KeyboardEvent) {
+      const target = event.target;
+      if (target instanceof HTMLElement && isTextEditingTarget(target)) return;
+      deleteSelectedNodes(event);
+    }
+
+    window.addEventListener("keydown", onWindowKeyDown, true);
+    return () => window.removeEventListener("keydown", onWindowKeyDown, true);
+  }, [selectedNodeIds, treeData]);
 
   function handlePanelPointerDown(event: ReactPointerEvent<HTMLElement>) {
     if (event.button !== 0) return;
@@ -585,9 +632,9 @@ export const composition = new Composition({
     }
     const localX = mouse.x - rect.left;
     const localY = mouse.y - rect.top;
-    const rowBottom = api.visibleNodes.length * ROW_HEIGHT;
     const dragIds = api.selectedNodes.some((selectedNode) => selectedNode.id === node.id) ? api.selectedNodes.map((selectedNode) => selectedNode.id) : [node.id];
-    setRootDropVisible(localX >= 0 && localX <= rect.width && localY > rowBottom && localY <= rect.height && canDropOsFileRoot(api, dragIds));
+    const dropTarget = localX >= 0 && localX <= rect.width && localY >= 0 && localY <= rect.height ? getOsFileDropTarget(api, dragIds, localY) ?? getDefaultOsFileDropTarget(api, dragIds, localY) : null;
+    setRootDropVisible(dropTarget?.parentId === null);
   }
 
   const totalRowCount = countNodes(data);
@@ -689,15 +736,35 @@ function isFileManagerInteractiveTarget(target: HTMLElement) {
   return Boolean(target.closest("button,input,textarea,select,[contenteditable='true'],[data-file-manager-row='true']"));
 }
 
+function canMoveOsFilePath(oldPath: string, newPath: string) {
+  return oldPath !== newPath && !newPath.startsWith(`${oldPath}/`);
+}
+
 function getOsFileDropTarget(api: NativeTreeApi<OsFileNode>, dragIds: string[], localY: number): NativeTreeDropTarget | null {
   const visibleNodes = api.visibleNodes;
-  if (!visibleNodes.length || localY > visibleNodes.length * ROW_HEIGHT) return canDropOsFileRoot(api, dragIds) ? { dragIds, parentId: null, index: visibleNodes.length } : null;
+  if (!visibleNodes.length || localY < 0 || localY > visibleNodes.length * ROW_HEIGHT) return canDropOsFileRoot(api, dragIds) ? { dragIds, parentId: null, index: visibleNodes.length } : null;
+  const rowIndex = Math.max(0, Math.min(visibleNodes.length - 1, Math.floor(localY / ROW_HEIGHT)));
+  const node = visibleNodes[rowIndex];
+  if (!node) return null;
+  const yInRow = localY - rowIndex * ROW_HEIGHT;
+  if (node.isInternal && node.isOpen && yInRow >= ROW_HEIGHT / 2) return { dragIds, parentId: node.id, index: 0 };
   return null;
+}
+
+function getDefaultOsFileDropTarget(api: NativeTreeApi<OsFileNode>, dragIds: string[], localY: number): NativeTreeDropTarget | null {
+  const visibleNodes = api.visibleNodes;
+  if (!visibleNodes.length) return null;
+  const rowIndex = Math.max(0, Math.min(visibleNodes.length - 1, Math.floor(localY / ROW_HEIGHT)));
+  const node = visibleNodes[rowIndex];
+  if (!node) return null;
+  const yInRow = localY - rowIndex * ROW_HEIGHT;
+  if (node.isInternal && yInRow > ROW_HEIGHT * 0.25 && yInRow < ROW_HEIGHT * 0.75) return { dragIds, parentId: node.id, index: 0 };
+  return { dragIds, parentId: node.parent?.id ?? null, index: node.childIndex + (yInRow >= ROW_HEIGHT / 2 ? 1 : 0) };
 }
 
 function canDropOsFileRoot(api: NativeTreeApi<OsFileNode>, dragIds: string[]) {
   const dragNodes = dragIds.flatMap((id) => api.visibleNodes.find((node) => node.id === id) ?? []);
-  return dragNodes.length === dragIds.length;
+  return dragNodes.length === dragIds.length && dragNodes.every((node) => getDirectoryPath(node.data.path) !== node.data.path);
 }
 
 function OsFileTreeNode({
@@ -713,15 +780,26 @@ function OsFileTreeNode({
   const data = node.data;
   const displayName = getDisplayName(data.name);
   const [editDraft, setEditDraft] = useState(displayName);
+  const editSubmittedRef = useRef(false);
 
   useEffect(() => {
-    if (node.isEditing) setEditDraft(displayName);
+    if (node.isEditing) {
+      editSubmittedRef.current = false;
+      setEditDraft(displayName);
+    }
   }, [displayName, node.isEditing]);
 
   function submitEdit() {
+    if (editSubmittedRef.current) return;
+    editSubmittedRef.current = true;
     const nextName = editDraft.trim();
     if (nextName) node.submit(nextName);
     else node.reset();
+  }
+
+  function cancelEdit() {
+    editSubmittedRef.current = true;
+    node.reset();
   }
 
   const isRoot = data.path === effectiveDirectory;
@@ -785,7 +863,7 @@ function OsFileTreeNode({
           onClick={(event) => event.stopPropagation()}
           onKeyDown={(event) => {
             if (event.key === "Enter") submitEdit();
-            if (event.key === "Escape") node.reset();
+            if (event.key === "Escape") cancelEdit();
           }}
         />
       ) : (
@@ -844,7 +922,8 @@ async function loadDirectoryTree(path: string, projectDirectory: string): Promis
 
 function projectRelativeFilePath(filePath: string, rootPath: string) {
   const editableRoot = filePath.startsWith(`${rootPath}/file-manager/`) ? `${rootPath}/file-manager` : rootPath;
-  return filePath.startsWith(`${editableRoot}/`) ? filePath.slice(editableRoot.length + 1) : filePath;
+  const relativePath = filePath.startsWith(`${editableRoot}/`) ? filePath.slice(editableRoot.length + 1) : filePath;
+  return relativePath.startsWith("file-manager/") ? relativePath.slice("file-manager/".length) : relativePath;
 }
 
 function findNode(nodes: OsFileNode[], id: string): OsFileNode | null {
@@ -856,6 +935,14 @@ function findNode(nodes: OsFileNode[], id: string): OsFileNode | null {
     }
   }
   return null;
+}
+
+function getTopLevelOsFileIds(ids: string[]) {
+  return ids.filter((id) => !ids.some((parentId) => id !== parentId && id.startsWith(`${parentId}/`)));
+}
+
+function getTopLevelOsFileNodes(nodes: OsFileNode[]) {
+  return nodes.filter((node) => !nodes.some((parent) => node.path !== parent.path && node.path.startsWith(`${parent.path}/`)));
 }
 
 function sortNodes(nodes: OsFileNode[]) {

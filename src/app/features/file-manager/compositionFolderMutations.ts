@@ -131,8 +131,7 @@ export function deleteCompositionFolderFromProject(project: ProjectManifest, com
       ...project,
       compositionSources: nextSources,
       compositionFolders: (project.compositionFolders ?? []).filter((path) => path !== folderPath && !path.startsWith(`${folderPath}/`)),
-      compositionLibrary: (project.compositionLibrary ?? compositionLibrary).filter((item) => !affectedIds.has(item.id)),
-      timelines: (project.timelines ?? []).map((timeline) => ({ ...timeline, clips: timeline.clips.filter((clip) => !affectedIds.has(clip.compositionId)) })),
+      compositionLibrary: (project.compositionLibrary ?? compositionLibrary).map((item) => affectedIds.has(item.id) ? { ...item, source: undefined, sourceMissing: true } : item),
     },
   };
 }

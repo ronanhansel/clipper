@@ -109,3 +109,53 @@ export function deleteCompositionFileFromProject(project: ProjectManifest, compo
   const { [composition.filePath]: _removed, ...nextSources } = compositionSources;
   return { compositionSources: nextSources, project: deleteCompositionFromProject({ ...project, compositionSources: nextSources }, compositionId) };
 }
+
+export function relinkCompositionInProject(project: ProjectManifest, compositionSources: Record<string, string>, compositionId: string, nextFilePath: string, source: string, fallbackLibrary: Part[], parsedComposition?: Part): CompositionLibraryMutationResult | null {
+  const library = project.compositionLibrary ?? fallbackLibrary;
+  const libraryComposition = library.find((item) => item.id === compositionId);
+  const referencedByTimeline = project.timelines?.some((timeline) => timeline.clips.some((clip) => clip.compositionId === compositionId));
+  const composition = libraryComposition ?? (referencedByTimeline ? createMissingComposition(compositionId) : null);
+  if (!composition || !nextFilePath.trim()) return null;
+  const targetFileName = composition.filePath.split("/").pop() || composition.filePath;
+  const relinkIds = new Set(library
+    .filter((item) => item.id === compositionId || (item.sourceMissing && (item.filePath === composition.filePath || (item.filePath.split("/").pop() || item.filePath) === targetFileName)))
+    .map((item) => item.id));
+  relinkIds.add(compositionId);
+  const rest = Object.fromEntries(Object.entries(compositionSources).filter(([path]) => !library.some((item) => relinkIds.has(item.id) && item.filePath === path)));
+  const nextSources = { ...rest, [nextFilePath]: source };
+  const restoredComposition = parsedComposition ? { ...parsedComposition, source } : { ...composition, source };
+  const relinkedLibrary = library.map((item) => relinkIds.has(item.id) ? {
+    ...restoredComposition,
+    id: nextFilePath,
+    filePath: nextFilePath,
+    sourceMissing: undefined,
+  } : item);
+  const hasRelinkedLibraryEntry = relinkedLibrary.some((item) => item.id === nextFilePath);
+  const nextLibrary = hasRelinkedLibraryEntry ? relinkedLibrary : [...relinkedLibrary, { ...restoredComposition, id: nextFilePath, filePath: nextFilePath, sourceMissing: undefined }];
+  return {
+    compositionSources: nextSources,
+    project: {
+      ...project,
+      compositionSources: nextSources,
+      compositionLibrary: nextLibrary,
+      timelines: (project.timelines ?? []).map((timeline) => ({
+        ...timeline,
+        clips: timeline.clips.map((clip) => relinkIds.has(clip.compositionId) ? { ...clip, compositionId: nextFilePath } : clip),
+      })),
+    },
+  };
+}
+
+function createMissingComposition(compositionId: string): Part {
+  return {
+    id: compositionId,
+    filePath: compositionId,
+    duration: 5,
+    frame: { width: 1920, height: 1080, style: {} },
+    background: { id: "background", name: "Background", style: {}, elements: [] },
+    objects: [],
+    snapshot: [],
+    motionMarkers: [],
+    sourceMissing: true,
+  };
+}

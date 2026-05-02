@@ -6,6 +6,7 @@ import { getEffectPackage } from "../../../core/effects/registry";
 import { getMotionMarkerViews } from "../../../core/motionEffects";
 import { buildLinearTimeline } from "../../../core/timeline";
 import type { AdjustmentLayer, MotionMarker, Part, TransitionLayer } from "../../../core/types";
+import { requestFileManagerFindMedia } from "../../../lib/fileManagerEvents";
 import { applyAdjustmentLayerOverwrite, applyMotionMarkerOverwrite, applySceneMotionMarkerOverwrite, placeMotionMarkerOnTimeline, withMotionMarkers } from "./timelineMutationHelpers";
 import type { SceneMotionMarkerUpdate } from "./useTimelineProjectActions";
 
@@ -448,6 +449,9 @@ export function useTimelineClipboardCommands({
           ? selectedTransitionLayers.some((selection) => selection.layerId === target.layerId) || selectedTransitionLayerId === target.layerId
           : selectedMotionMarkers.some((selection) => `${selection.partId}:${selection.markerId}` === targetKey) || (selectedMotionMarker?.partId === (target as { partId: string }).partId && selectedMotionMarker?.markerId === (target as { markerId: string }).markerId);
     const menuClipboard = targetAlreadySelected ? getSelectedTimelineNodeClipboard() : getTimelineNodeClipboardForTarget(target);
+    const targetPart = target.kind === "part" ? timeline.find((part) => part.id === target.partId) : null;
+    const targetCompositionId = targetPart?.compositionId ?? targetPart?.id ?? "";
+    const targetFileName = targetPart?.filePath.split("/").pop() || targetPart?.filePath || "";
     if (target.kind === "adjustment") selectAdjustmentLayer(target.layerId);
     if (target.kind === "transition") selectTransitionLayer(target.layerId);
     if (target.kind === "part" && !targetAlreadySelected) selectPart(target.partId);
@@ -464,9 +468,9 @@ export function useTimelineClipboardCommands({
           if (!menuClipboard) return;
           timelineNodeClipboardRef.current = menuClipboard;
           deleteTimelineClipboardNodes(menuClipboard);
-          toast.success(`${menuClipboard.nodes.length} timeline node${menuClipboard.nodes.length === 1 ? "" : "s"} cut`);
         } },
         { label: "Paste", action: () => { pasteTimelineNodesAt(target.time, target.compositionLayerId); }, disabled: !timelineNodeClipboardRef.current },
+        { label: "Find media in project", action: () => { if (targetCompositionId && targetFileName) requestFileManagerFindMedia({ compositionId: targetCompositionId, fileName: targetFileName }); }, disabled: target.kind !== "part" || !targetPart?.sourceMissing },
         { label: "Delete", danger: true, action: () => {
           if (target.kind === "part") deleteCompositionsFromTimeline(targetAlreadySelected ? selectedParts.map((selection) => selection.partId) : [target.partId]);
           if (target.kind !== "part" && menuClipboard) deleteTimelineClipboardNodes(menuClipboard);

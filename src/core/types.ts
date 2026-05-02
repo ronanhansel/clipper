@@ -360,6 +360,7 @@ export type TimelineDocument = {
   adjustmentLayers?: AdjustmentLayer[];
   motionMarkers?: MotionMarker[];
   transitionLayers?: TransitionLayer[];
+  timelineLayers?: TimelineLayerState;
   settings?: TimelineSettings;
 };
 
@@ -441,6 +442,7 @@ export type EffectsPanelState = {
 export type EditorState = {
   timeline: TimelineViewportState;
   composeTimeline?: TimelineViewportState;
+  /** Legacy global timeline layout. New timeline layout belongs to TimelineDocument.timelineLayers. */
   timelineLayers?: TimelineLayerState;
   timelineMode: TimelineMode;
   mode?: "interactive" | "code";

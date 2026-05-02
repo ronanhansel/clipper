@@ -30,4 +30,14 @@ describe("MoveCommand", () => {
     expect(clipperHost.renameFile).toHaveBeenNthCalledWith(2, "/project/compositions/C", "/project/compositions/D");
     expect(clipperHost.renameFile).toHaveBeenNthCalledWith(3, "/project/compositions/B", "/project/compositions/A");
   });
+
+  it("ignores self and descendant moves", async () => {
+    await new MoveCommand([
+      { oldPath: "/project/compositions", newPath: "/project/compositions" },
+      { oldPath: "/project/compositions", newPath: "/project/compositions/nested/compositions" },
+    ]).execute();
+
+    expect(clipperHost.renameFile).not.toHaveBeenCalled();
+    expect(clipperHost.createDirectory).not.toHaveBeenCalled();
+  });
 });

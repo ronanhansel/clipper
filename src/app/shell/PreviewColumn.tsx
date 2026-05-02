@@ -4,7 +4,8 @@ import { FramePreview } from "../../components/preview/FramePreview";
 import type { TransitionLayer } from "../../core/types";
 import type { Mode } from "../types";
 
-type FramePreviewProps = ComponentProps<typeof FramePreview> & { transitionLayers?: TransitionLayer[] };
+type PreviewStackPart = { part: ComponentProps<typeof FramePreview>["part"]; start: number; previewTime: number };
+type FramePreviewProps = ComponentProps<typeof FramePreview> & { previewParts?: PreviewStackPart[]; transitionPreviewParts?: { from: PreviewStackPart[]; to: PreviewStackPart[] } | null; transitionLayers?: TransitionLayer[] };
 
 type PreviewColumnProps = {
   blankFrameViewportStyle: CSSProperties;

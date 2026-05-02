@@ -2,9 +2,13 @@ import { clipperHost } from "../../../clipperHost";
 import type { Command } from "./Command";
 
 export class MoveCommand implements Command {
+  private moves: Array<{ oldPath: string; newPath: string }>;
+
   constructor(
-    private moves: Array<{ oldPath: string; newPath: string }>
-  ) {}
+    moves: Array<{ oldPath: string; newPath: string }>
+  ) {
+    this.moves = moves.filter(isValidMovePath);
+  }
 
   get label() {
     return "Move files";
@@ -47,6 +51,10 @@ async function performMoves(moves: Array<{ oldPath: string; newPath: string }>) 
     }
     throw error;
   }
+}
+
+function isValidMovePath(move: { oldPath: string; newPath: string }) {
+  return move.oldPath !== move.newPath && !move.newPath.startsWith(`${move.oldPath}/`);
 }
 
 async function ensureParentDirectory(path: string) {

@@ -8,6 +8,8 @@ type UseFileManagerControllerInput = Pick<FileManagerProps,
   | "compositionRootPath"
   | "compositions"
   | "fileManagerState"
+  | "findMediaRequest"
+  | "onFindMediaRequestChange"
   | "timelineCompositionIds"
   | "timelines"
 > & {
@@ -40,6 +42,7 @@ type UseFileManagerControllerInput = Pick<FileManagerProps,
     selectTimeline: FileManagerProps["onSelectTimeline"];
     sortAssets: FileManagerProps["onSortAssets"];
     reloadProject: FileManagerProps["onReloadProject"];
+    findCompositionMedia: FileManagerProps["onFindCompositionMedia"];
   };
   implicitFileOperation: <T extends unknown[]>(operation: (...args: T) => void) => (...args: T) => void;
 };
@@ -76,6 +79,7 @@ export function useFileManagerController({ actions, implicitFileOperation, ...st
       selectTimeline: actions.selectTimeline,
       sortAssets: implicitFileOperation(actions.sortAssets),
       reloadProject: actions.reloadProject,
+      findCompositionMedia: implicitFileOperation(actions.findCompositionMedia),
     },
   });
 }

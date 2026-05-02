@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createSelectionPayload } from "./geometry";
 import { getMotionMarkerViews, motionBlocksToMotionMarkers } from "./motionEffects";
 import { effectBlocksMending } from "./effects/registry";
-import { buildLinearTimeline, canMendTimelineMarkers, expandExplicitTimelineMarkerMendIds, getAdjustmentPlacement, getExecutableTransitionLayers, getMendedMarkerDragItems, getMotionMarkerMendKey, getMotionMiddleSnap, getRenderableScene, getSelectedActiveMiddleMend, getSelectedMotionMiddleSnap, getTimelineMarkerDragSnapBoundaries, getTimelineMarkerMoves, getTimelinePartAtTime, getTopTimelineItemAtTime, getTopTimelinePartAtTime, isExplicitTimelineMarkerMend, rebaseCompositionTimelineMarkers, removeTimelineMotionLayerMarkers, resizeTimelineMarkersWithPush, sceneDuration, snapTimelineBlockStartToBoundary, timelineDisplayDuration, validateScene } from "./timeline";
+import { buildLinearTimeline, canMendTimelineMarkers, expandExplicitTimelineMarkerMendIds, getActiveTimelinePartsAtTime, getAdjustmentPlacement, getExecutableTransitionLayers, getMendedMarkerDragItems, getMotionMarkerMendKey, getMotionMiddleSnap, getRenderableScene, getSelectedActiveMiddleMend, getSelectedMotionMiddleSnap, getTimelineMarkerDragSnapBoundaries, getTimelineMarkerMoves, getTimelinePartAtTime, getTimelinePreviewState, getTopTimelineItemAtTime, getTopTimelinePartAtTime, isExplicitTimelineMarkerMend, rebaseCompositionTimelineMarkers, removeTimelineMotionLayerMarkers, resizeTimelineMarkersWithPush, sceneDuration, snapTimelineBlockStartToBoundary, timelineDisplayDuration, validateScene } from "./timeline";
 import { moveTimelineStateLayer, toggleTimelineStateLayerHidden } from "./timelineLayers";
 import type { Scene, TimelinePart } from "./types";
 
@@ -74,6 +74,46 @@ describe("timeline model", () => {
 
     expect(getTopTimelinePartAtTime(timeline, 2, { compositionLayers: [{ id: "upper" }, { id: "lower" }] })?.id).toBe("b");
     expect(getTopTimelinePartAtTime(timeline, 2, { compositionLayers: [{ id: "lower" }, { id: "upper" }] })?.id).toBe("a");
+  });
+
+  it("returns active composition stacks in render order", () => {
+    const timeline = buildLinearTimeline({
+      ...scene,
+      compositions: [
+        { ...scene.compositions[0], start: 0, duration: 5, layerId: "lower" },
+        { ...scene.compositions[1], start: 0, duration: 3, layerId: "upper" },
+      ],
+    });
+
+    expect(getActiveTimelinePartsAtTime(timeline, 2, { compositionLayers: [{ id: "upper" }, { id: "lower" }] }, "bottom-to-top").map((part) => part.id)).toEqual(["a", "b"]);
+    expect(getActiveTimelinePartsAtTime(timeline, 4, { compositionLayers: [{ id: "upper" }, { id: "lower" }] }, "bottom-to-top").map((part) => part.id)).toEqual(["a"]);
+  });
+
+  it("derives preview stack, active part, and transition inputs from one scene time", () => {
+    const layeredScene: Scene = {
+      ...scene,
+      compositions: [
+        { ...scene.compositions[0], start: 0, duration: 5, layerId: "lower" },
+        { ...scene.compositions[1], start: 2, duration: 4, layerId: "upper" },
+      ],
+      transitionLayers: [{ id: "transition", name: "Swipe", layerId: "transition", start: 2, duration: 1, midPoint: 0.5, effect: { effectId: "clipper.transition.swipe" } }],
+    };
+    const timeline = buildLinearTimeline(layeredScene);
+    const previewState = getTimelinePreviewState({
+      compositions: layeredScene.compositions,
+      sceneDurationSeconds: sceneDuration(layeredScene),
+      sceneTime: 2.5,
+      timeline,
+      timelineLayers: { compositionLayers: [{ id: "upper" }, { id: "lower" }] },
+      timelineMode: "composition",
+      transitionLayers: layeredScene.transitionLayers,
+    });
+
+    expect(previewState.activeTimelinePart?.id).toBe("b");
+    expect(previewState.previewTime).toBe(0.5);
+    expect(previewState.previewParts.map((item) => [item.part.id, item.previewTime])).toEqual([["a", 2.5], ["b", 0.5]]);
+    expect(previewState.transitionPreviewParts?.from.map((item) => item.part.id)).toEqual(["a"]);
+    expect(previewState.transitionPreviewParts?.to.map((item) => [item.part.id, item.previewTime])).toEqual([["a", 3], ["b", 1]]);
   });
 
   it("removes hidden composition, adjustment, motion, and transition rows from renderable scenes", () => {

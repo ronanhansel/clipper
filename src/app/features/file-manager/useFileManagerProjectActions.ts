@@ -1,6 +1,7 @@
 import type { MutableRefObject } from "react";
 import toast from "react-hot-toast";
 import type { FileManagerTreeSnapshot } from "../../../components/FileManager";
+import { compositionFromSource } from "../../../core/compositionSource";
 import { getAssetPath } from "../../../core/assetTree";
 import type { AssetItem, CompositionClip, EditorState, Part, ProjectManifest, TimelineMode } from "../../../core/types";
 import type { ProjectUpdater } from "../../types";
@@ -8,7 +9,7 @@ import { clipperHost } from "../../clipperHost";
 import type { BuildFileManagerWorkspacePropsInput } from "./FileManagerWorkspace";
 import { getDirectoryPath, nextNumberedName } from "./fileManagerPaths";
 import { createAssetFolderInProject, deleteAssetFromProject, duplicateAssetInProject, importDroppedAssetsIntoProject, renameAssetInProject, sortAssetsInProject } from "./assetProjectMutations";
-import { createCompositionFolderInProject, createCompositionInLibrary, deleteCompositionFileFromProject, duplicateCompositionInProject, moveCompositionInProject, renameCompositionInProject } from "./compositionLibraryMutations";
+import { createCompositionFolderInProject, createCompositionInLibrary, deleteCompositionFileFromProject, duplicateCompositionInProject, moveCompositionInProject, relinkCompositionInProject, renameCompositionInProject } from "./compositionLibraryMutations";
 import { applyFileManagerTreeSnapshotToProject, deleteCompositionFolderFromProject, renameCompositionFolderInProject } from "./compositionFolderMutations";
 import { createTimelineInProject, deleteTimelineFromProject, moveTimelineInProject, renameTimelineInProject } from "./timelineLibraryMutations";
 import { getDisplayNameFromPath, nextNumberedSemanticName } from "../../../core/fileNames";
@@ -232,6 +233,43 @@ export function useFileManagerProjectActions({
     if (result) syncCompositionResult(result);
   }
 
+  async function findCompositionMedia(compositionId: string, fileName: string) {
+    const targetName = fileName.trim();
+    if (!targetName) return;
+    const searchRoots = Array.from(new Set([
+      `${watchedProjectDirectory}/file-manager`,
+      watchedProjectDirectory,
+      `${watchedProjectDirectory}/compositions`,
+    ]));
+    let matchedPath: string | null = null;
+    for (const root of searchRoots) {
+      matchedPath = await clipperHost.findProjectFileByName(root, targetName).catch(() => null);
+      if (matchedPath) break;
+    }
+    if (!matchedPath) {
+      toast.error(`Could not find ${targetName}.`);
+      return;
+    }
+
+    const source = await clipperHost.readTextFile(matchedPath);
+    const libraryComposition = compositionLibrary.find((item) => item.id === compositionId);
+    const referencedByTimeline = projectRef.current.timelines?.some((timeline) => timeline.clips.some((clip) => clip.compositionId === compositionId));
+    const baseComposition = libraryComposition ?? (referencedByTimeline ? createRelinkBaseComposition(matchedPath) : null);
+    const parsedComposition = baseComposition ? await compositionFromSource({ ...baseComposition, id: matchedPath, filePath: matchedPath }, source) : undefined;
+    const result = relinkCompositionInProject(projectRef.current, compositionSourcesRef.current, compositionId, matchedPath, source, compositionLibrary, parsedComposition);
+    if (!result) {
+      toast.error(`Unable to relink ${targetName}.`);
+      return;
+    }
+
+    syncCompositionResult(result);
+    toast.success(`Relinked ${targetName}.`);
+  }
+
+  function createRelinkBaseComposition(filePath: string): Part {
+    return { id: filePath, filePath, duration: 5, frame: { width: 1920, height: 1080, style: {} }, background: { id: "background", name: "Background", style: {}, elements: [] }, objects: [], snapshot: [], motionMarkers: [] };
+  }
+
   function duplicateAsset(assetId: string) {
     updateProject((current) => duplicateAssetInProject(current, assetId));
   }
@@ -261,6 +299,7 @@ export function useFileManagerProjectActions({
     duplicateAsset,
     duplicateComposition,
     fileManagerStateChange: updateFileManagerState,
+    findCompositionMedia,
     moveComposition,
     moveTimeline,
     renameAsset,

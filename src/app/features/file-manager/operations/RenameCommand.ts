@@ -18,14 +18,21 @@ export class RenameCommand implements Command {
   }
 
   async execute() {
+    await ensureParentDirectory(this.newPath);
     await clipperHost.renameFile(this.oldPath, this.newPath);
   }
 
   async undo() {
+    await ensureParentDirectory(this.oldPath);
     await clipperHost.renameFile(this.newPath, this.oldPath);
   }
 
   async redo() {
     await this.execute();
   }
+}
+
+async function ensureParentDirectory(path: string) {
+  const parentPath = getDirectoryPath(path);
+  if (parentPath) await clipperHost.createDirectory(parentPath).catch(() => {});
 }
