@@ -1,15 +1,12 @@
 import type { ProjectManifest } from "../../../core/types";
 import { reorderByIntent } from "./fileManagerPaths";
 
-export function createTimelineInProject(project: ProjectManifest, timelineId: string, directoryPath: string, name?: string): ProjectManifest {
-  const timelineName = name || `Timeline ${(project.timelines?.length ?? 0) + 1}`;
-  const fileName = name ? `${name}.timeline.json` : `${timelineId}.timeline.json`;
+export function createTimelineInProject(project: ProjectManifest, filePath: string): ProjectManifest {
   return {
     ...project,
     timelines: [...(project.timelines ?? []), {
-      id: timelineId,
-      name: timelineName,
-      filePath: directoryPath ? `${directoryPath}/${fileName}` : fileName,
+      id: filePath,
+      filePath,
       clips: [],
       adjustmentLayers: [],
       motionMarkers: [],
@@ -18,10 +15,21 @@ export function createTimelineInProject(project: ProjectManifest, timelineId: st
   };
 }
 
+
+
 export function renameTimelineInProject(project: ProjectManifest, timelineId: string, name: string): ProjectManifest {
   const nextName = name.trim();
   if (!nextName) return project;
-  return { ...project, timelines: (project.timelines ?? []).map((timeline) => timeline.id === timelineId ? { ...timeline, name: nextName } : timeline) };
+  return {
+    ...project,
+    timelines: (project.timelines ?? []).map((timeline) => {
+      if (timeline.id !== timelineId) return timeline;
+      const fileName = `${nextName}.timeline.json`;
+      const directory = timeline.filePath ? timeline.filePath.slice(0, timeline.filePath.lastIndexOf("/") + 1) : "";
+      const filePath = `${directory}${fileName}`;
+      return { ...timeline, id: filePath, filePath };
+    })
+  };
 }
 
 export function reorderTimelineInProject(project: ProjectManifest, sourceTimelineId: string, targetTimelineId: string, action: "before" | "after"): ProjectManifest {
@@ -40,7 +48,7 @@ export function moveTimelineInProject(project: ProjectManifest, timelineId: stri
   return {
     ...project,
     compositionFolders: folderPath ? Array.from(new Set([...(project.compositionFolders ?? []), folderPath])) : project.compositionFolders,
-    timelines: (project.timelines ?? []).map((t) => t.id === timelineId ? { ...t, filePath: nextPath } : t),
+    timelines: (project.timelines ?? []).map((t) => t.id === timelineId ? { ...t, id: nextPath, filePath: nextPath } : t),
   };
 }
 

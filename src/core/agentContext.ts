@@ -1,6 +1,7 @@
 import type { Part, ProjectManifest, Scene, SelectionPayload } from "./types";
 import { buildLinearTimeline } from "./timeline";
 import { getMotionMarkerViews } from "./motionEffects";
+import { getDisplayNameFromPath } from "./fileNames";
 
 export function createAgentContext(project: ProjectManifest, scene: Scene, part: Part, selection: SelectionPayload | null) {
   const partMotionViews = getMotionMarkerViews(part);
@@ -13,11 +14,11 @@ export function createAgentContext(project: ProjectManifest, scene: Scene, part:
     },
     scene: {
       id: scene.id,
-      name: scene.name,
+      name: getDisplayNameFromPath(scene.id),
       duration: buildLinearTimeline(scene).at(-1)?.end ?? 0,
       timeline: buildLinearTimeline(scene).map((timelinePart) => ({
         id: timelinePart.id,
-        name: timelinePart.name,
+        name: getDisplayNameFromPath(timelinePart.filePath),
         filePath: timelinePart.filePath,
         start: timelinePart.start,
         end: timelinePart.end,
@@ -25,7 +26,7 @@ export function createAgentContext(project: ProjectManifest, scene: Scene, part:
     },
     part: {
       id: part.id,
-      name: part.name,
+      name: getDisplayNameFromPath(part.filePath),
       filePath: part.filePath,
       duration: part.duration,
       objects: part.objects,

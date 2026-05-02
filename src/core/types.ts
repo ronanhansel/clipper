@@ -210,6 +210,7 @@ export type MotionEffectDefinition = {
   name: string;
   label: string;
   group: string;
+  groups?: readonly string[];
   accent?: string;
   previewColor?: string;
   tags?: readonly EffectManifestTag[];
@@ -250,6 +251,7 @@ export type AdjustmentEffectDefinition = {
   name: string;
   label: string;
   group: string;
+  groups?: readonly string[];
   accent?: string;
   previewColor?: string;
   tags?: readonly EffectManifestTag[];
@@ -284,6 +286,7 @@ export type TransitionEffectDefinition = {
   name: string;
   label: string;
   group: string;
+  groups?: readonly string[];
   accent?: string;
   previewColor?: string;
   tags?: readonly EffectManifestTag[];
@@ -310,7 +313,6 @@ export type TransitionLayer = TimelineMarkerMetadata & {
 export type CompositionClip = TimelineMarkerMetadata & {
   id: string;
   compositionId?: string;
-  name: string;
   filePath: string;
   source?: string;
   sourceMissing?: boolean;
@@ -328,7 +330,6 @@ export type Part = CompositionClip;
 
 export type Scene = {
   id: string;
-  name: string;
   compositions: CompositionClip[];
   adjustmentLayers?: AdjustmentLayer[];
   motionMarkers?: MotionMarker[];
@@ -354,7 +355,6 @@ export type TimelineSettings = {
 
 export type TimelineDocument = {
   id: string;
-  name: string;
   filePath?: string;
   clips: TimelineClip[];
   adjustmentLayers?: AdjustmentLayer[];
@@ -375,34 +375,29 @@ export type TimelineMotionLayerKind = "empty" | "motion";
 export type TimelineMotionLayerState = {
   id: string;
   kind: TimelineMotionLayerKind;
-  name: string;
   hidden?: boolean;
   locked?: boolean;
 };
 
 export type TimelineAdjustmentLayerState = {
   id: string;
-  name: string;
   hidden?: boolean;
   locked?: boolean;
 };
 
 export type TimelineTransitionLayerState = {
   id: string;
-  name: string;
   hidden?: boolean;
   locked?: boolean;
 };
 
 export type TimelineCompositionLayerState = {
   id: string;
-  name: string;
   hidden?: boolean;
   locked?: boolean;
 };
 
 export type TimelineLayerState = {
-  compName?: string;
   compHidden?: boolean;
   compositionLayers?: TimelineCompositionLayerState[];
   adjustmentLayers?: TimelineAdjustmentLayerState[];

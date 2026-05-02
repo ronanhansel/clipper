@@ -82,7 +82,20 @@ function parseEffectManifest<T>(source: string): T {
     parent[key] = parseScalarOrInline(valueSource);
   }
 
+  normalizeEffectGroups(root);
   return root as T;
+}
+
+function normalizeEffectGroups(root: Record<string, YamlValue>) {
+  const groups = root.groups;
+  if (Array.isArray(groups)) {
+    const normalized = groups.map((group) => String(group).trim()).filter(Boolean);
+    root.groups = normalized;
+    root.group = normalized.join("/");
+    return;
+  }
+
+  if (typeof root.group === "string") root.groups = root.group.split("/").map((group) => group.trim()).filter(Boolean);
 }
 
 function getNextContainer(lines: string[], currentLine: string, currentIndent: number): Record<string, YamlValue> | YamlValue[] {

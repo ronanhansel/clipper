@@ -5,6 +5,7 @@ import type { ProjectExportFormat } from "../types";
 import { videoExportFrameRate } from "../config";
 import { clipperHost } from "../clipperHost";
 import { fileDownloadService } from "./fileDownloadService";
+import { getDisplayNameFromPath } from "../../core/fileNames";
 
 type ExportProjectInput = {
   project: ProjectManifest;
@@ -35,7 +36,7 @@ class ExportService {
           media: {
             resolution: project.resolution,
             durationSeconds: sceneDuration(scene),
-            compositions: timeline.map((item) => ({ id: item.id, name: item.name, filePath: item.filePath, start: item.start, end: item.end, duration: item.duration })),
+            compositions: timeline.map((item) => ({ id: item.id, name: getDisplayNameFromPath(item.filePath), filePath: item.filePath, start: item.start, end: item.end, duration: item.duration })),
             assetsPath: project.assetsPath,
             assets: project.assets ?? defaultAssets,
           },
@@ -43,7 +44,8 @@ class ExportService {
           sources: includeSources ? Object.fromEntries(scene.compositions.flatMap((item) => item.sourceMissing ? [] : [[item.filePath, getCompositionSource(item, compositionSources)]])) : undefined,
         };
     const content = `${JSON.stringify(payload, null, 2)}\n`;
-    const defaultFileName = `${slugifyFileName(project.name)}-${slugifyFileName(scene.name)}.${format === "scene-json" ? "scene" : "project"}.json`;
+    const sceneName = getDisplayNameFromPath(scene.id);
+    const defaultFileName = `${slugifyFileName(project.name)}-${slugifyFileName(sceneName)}.${format === "scene-json" ? "scene" : "project"}.json`;
     const exportPath = await clipperHost.exportMediaFile(defaultFileName, content);
 
     if (exportPath) return { kind: "host" as const, path: exportPath };
@@ -57,7 +59,8 @@ class ExportService {
     const timeline = buildLinearTimeline(scene);
     const durationSeconds = sceneDuration(scene);
     const totalFrames = Math.max(1, Math.ceil(durationSeconds * videoExportFrameRate));
-    const defaultFileName = `${slugifyFileName(project.name)}-${slugifyFileName(scene.name)}.mp4`;
+    const sceneName = getDisplayNameFromPath(scene.id);
+    const defaultFileName = `${slugifyFileName(project.name)}-${slugifyFileName(sceneName)}.mp4`;
 
     return { scene, totalFrames, defaultFileName };
   }

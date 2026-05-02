@@ -11,18 +11,45 @@ export class MoveCommand implements Command {
   }
 
   async execute() {
-    for (const m of this.moves) {
-      await clipperHost.renameFile(m.oldPath, m.newPath);
-    }
+    await performMoves(this.moves);
   }
 
   async undo() {
-    for (const m of this.moves) {
-      await clipperHost.renameFile(m.newPath, m.oldPath);
-    }
+    await performMoves(this.moves.map((m) => ({ oldPath: m.newPath, newPath: m.oldPath })));
   }
 
   async redo() {
     await this.execute();
   }
+}
+
+async function performMoves(moves: Array<{ oldPath: string; newPath: string }>) {
+  const applied: Array<{ oldPath: string; newPath: string }> = [];
+
+  try {
+    for (const m of moves) {
+      await ensureParentDirectory(m.newPath);
+      await clipperHost.renameFile(m.oldPath, m.newPath);
+      applied.push(m);
+    }
+  } catch (error) {
+    const rollbackErrors: unknown[] = [];
+    for (const m of applied.reverse()) {
+      try {
+        await ensureParentDirectory(m.oldPath);
+        await clipperHost.renameFile(m.newPath, m.oldPath);
+      } catch (rollbackError) {
+        rollbackErrors.push(rollbackError);
+      }
+    }
+    if (rollbackErrors.length > 0) {
+      throw new AggregateError([error, ...rollbackErrors], "Move failed and rollback was incomplete.");
+    }
+    throw error;
+  }
+}
+
+async function ensureParentDirectory(path: string) {
+  const parentPath = path.substring(0, path.lastIndexOf("/"));
+  if (parentPath) await clipperHost.createDirectory(parentPath).catch(() => {});
 }

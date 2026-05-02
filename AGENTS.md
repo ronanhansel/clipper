@@ -4,6 +4,12 @@
 
 # Part 1: Agent Behaviour
 
+## Token rules
+
+- Be concise.
+- Do not over-explain.
+- Do not paste large context unless needed.
+
 ## Path of Discovery
 
 - **Evidence first, execution second.** Start every task by gathering all relevant context. Do not search for files or references one at a time — batch tool calls together for efficiency. Use glob/grep extensively with patterns for multiple matching at the same time to locate relevant parts to narrow down neccessary files before reading, narrowing down the evidence. Use this tool to help find relevant information faster within each files, and proceed with reading.
@@ -15,14 +21,14 @@
 
 ## External Memory
 
-- **This is mandatory. Do not skip this step.** Every code change must be documented in external memory.
-- Always start project work by creating or identifying the relevant memory file at `build/[version number]/memory/[id]-feature-name.md`. Make sure the id is incremental, not repeated ids.w
-- Example: `build/v0.2.8/memory/001-init-editor.md`.
+- This is mandatory. Do not skip this step. Every code change must be documented in external memory.
+- Always start project work by creating or identifying the relevant memory file at `build/[version number]/memory/[id]-feature-name.md`. Make sure the id is incremental, not repeated ids.
+- Example: `build/v0.2.9/memory/001-version-bump.md`.
 - After EVERY change — whether a new feature, update, rework, rewrite, refactor, bug fix, or any code modification — populate or update the relevant memory files so future agents can pick up the work.
 - If a memory file for the feature/area already exists, update it with the latest changes and architecture decisions. If none exists, create a new file with the next sequential ID.
 - **Long-running tasks**: write memory incrementally as you work, not only at the end. This prevents memory loss if the session is interrupted, and keeps external memory current for every step of the task.
 - For quick edits or small bug fixes, still update or create the relevant memory file — do not skip this step under any circumstances.
-- If you are unsure what memory file to update, look at existing files in `build/[version number]/memory/` for context, or ask the user.
+  - If you are unsure what memory file to update, look at existing files in `build/[version number]/memory/` for context, or ask the user.
 - After finishing any task, verify that the relevant memory files have been written or updated before marking the work as complete.
 
 ---
@@ -31,6 +37,7 @@
 
 ## Version Planning
 
+- Current active version folder: `build/v0.2.9/`.
 - When the user starts a new version with a vision, document it in `build/[version]/PLAN.md`.
 - The plan should highlight the focus of the current version, its progress, and the big overarching goals.
 - For smaller edits or smaller user commands, do not edit the plan. `PLAN.md` is reserved for tracking progress on major updates.
@@ -74,4 +81,4 @@
 - Prefer imperative DOM/CSS previews (`transform`, `translate3d`, opacity, width/height variables, targeted refs). Commit canonical app/project state once on release, pointer up/cancel, blur, pause, or another explicit finalization event.
 - Do not call project-mutating callbacks from every pointer-move frame unless unavoidable. If unavoidable, throttle, deduplicate, and keep changed state narrow.
 - Preserve existing drag constraints while optimizing previews: snapping, clamping, no-overlap rules, selection semantics, mended marker chains, and final committed positions/sizes must still be computed from the same canonical logic.
-- For live render, camera, motion, effect, or animation previews, use `src/core` helpers to compute deterministic preview values, then apply only the affected DOM/CSS property with rAF. Keep labels/readouts local and reuse `build/v0.2.8/memory/001-compose-page.md` for Compose page patterns.
+- For live render, camera, motion, effect, or animation previews, use `src/core` helpers to compute deterministic preview values, then apply only the affected DOM/CSS property with rAF. Keep labels/readouts local and reuse `build/v0.2.9/memory/002-compose-page.md` for Compose page patterns.

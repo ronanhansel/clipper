@@ -3,6 +3,7 @@ import { getCanonicalMotionMarkers, getMotionMarkerViews, motionBlocksToMotionMa
 import { adjustmentEffectPackages, normalizeAdjustmentEffectId } from "./effects/registry";
 import { getExecutableAdjustmentLayers } from "./timeline";
 import type { AdjustmentLayer, AssetItem, CodeViewportState, ComposeLayoutState, CompositionClip, CompositionDocument, EditorLayoutState, EffectsPanelState, FileManagerState, PreviewViewportState, ProjectManifest, Scene, TimelineDocument, TimelineLayerState, TimelineMode, TimelineViewportState } from "./types";
+import { getDisplayNameFromPath } from "./fileNames";
 
 export const defaultTimelineViewportState: TimelineViewportState = { displacement: 0, zoom: 1 };
 export const defaultTimelineMode: TimelineMode = "compose";
@@ -10,15 +11,13 @@ export const defaultPreviewViewportState: PreviewViewportState = { scale: 0.5, s
 export const defaultEditorLayoutState: EditorLayoutState = { leftPanelWidth: 286, rightPanelWidth: 350, timelineHeight: 340 };
 export const defaultComposeLayoutState: ComposeLayoutState = { leftPanelWidth: 286 };
 export const defaultTimelineLayerState: TimelineLayerState = {
-  compName: "Composition",
-  compositionLayers: [{ id: "comp", name: "Composition" }],
-  adjustmentLayers: [{ id: "adjust", name: "Adjust" }],
-  motionLayers: [{ id: "motion", kind: "empty", name: "Motion" }],
-  transitionLayers: [{ id: "transition", name: "Transition" }],
+  compositionLayers: [{ id: "comp" }],
+  adjustmentLayers: [{ id: "adjust" }],
+  motionLayers: [{ id: "motion", kind: "empty" }],
+  transitionLayers: [{ id: "transition" }],
 };
 
 export const emptyTimelineLayerState: TimelineLayerState = {
-  compName: "",
   compositionLayers: [],
   adjustmentLayers: [],
   motionLayers: [],
@@ -67,29 +66,27 @@ function normalizeTimelineMode(mode: unknown): TimelineMode {
 }
 
 function normalizeTimelineLayerState(state: TimelineLayerState | undefined): TimelineLayerState {
-  const sourceCompositionLayers = state?.compositionLayers?.length ? state.compositionLayers : [{ id: "comp", name: state?.compName?.trim() || defaultTimelineLayerState.compName!, hidden: state?.compHidden || undefined }];
+  const sourceCompositionLayers = state?.compositionLayers?.length ? state.compositionLayers : [{ id: "comp", hidden: state?.compHidden || undefined }];
   const seenCompositionLayerIds = new Set<string>();
   const compositionLayers = sourceCompositionLayers.flatMap((layer) => {
     if (!layer.id || seenCompositionLayerIds.has(layer.id)) return [];
     seenCompositionLayerIds.add(layer.id);
-    return [{ id: layer.id, name: layer.name.trim() || "Composition", hidden: layer.hidden || undefined, locked: layer.locked || undefined }];
+    return [{ id: layer.id, hidden: layer.hidden || undefined, locked: layer.locked || undefined }];
   });
   const sourceAdjustmentLayers = state?.adjustmentLayers?.length ? state.adjustmentLayers : defaultTimelineLayerState.adjustmentLayers!;
   const seenAdjustmentLayerIds = new Set<string>();
   const adjustmentLayers = sourceAdjustmentLayers.flatMap((layer) => {
     if (!layer.id || seenAdjustmentLayerIds.has(layer.id)) return [];
     seenAdjustmentLayerIds.add(layer.id);
-    const fallback = adjustmentEffectPackages.find((effect) => effect.id === layer.id)?.label ?? "Adjust";
-    return [{ id: layer.id, name: layer.name.trim() || fallback, hidden: layer.hidden || undefined, locked: layer.locked || undefined }];
+    return [{ id: layer.id, hidden: layer.hidden || undefined, locked: layer.locked || undefined }];
   });
   const motionLayers = state?.motionLayers?.filter((layer) => layer.kind === "empty" || layer.kind === "motion") ?? defaultTimelineLayerState.motionLayers!;
   const rowHeights = normalizeTimelineLayerRowHeights(state?.rowHeights);
   return {
-    compName: state?.compName?.trim() || defaultTimelineLayerState.compName,
     compHidden: state?.compHidden || undefined,
     compositionLayers: compositionLayers.length > 0 ? compositionLayers : defaultTimelineLayerState.compositionLayers!,
     adjustmentLayers: adjustmentLayers.length > 0 ? adjustmentLayers : defaultTimelineLayerState.adjustmentLayers!,
-    motionLayers: (motionLayers.length > 0 ? motionLayers : defaultTimelineLayerState.motionLayers!).map((layer) => ({ ...layer, kind: layer.kind, name: layer.name.trim() || "Motion", hidden: layer.hidden || undefined, locked: layer.locked || undefined })),
+    motionLayers: (motionLayers.length > 0 ? motionLayers : defaultTimelineLayerState.motionLayers!).map((layer) => ({ ...layer, kind: layer.kind, hidden: layer.hidden || undefined, locked: layer.locked || undefined })),
     rowHeights: Object.keys(rowHeights).length ? rowHeights : undefined,
   };
 }
@@ -115,31 +112,45 @@ function normalizeAssets(assets: AssetItem[] | undefined): AssetItem[] {
 }
 
 export function replacePartInProject(project: ProjectManifest, compositionId: string, updater: (composition: CompositionClip) => CompositionClip): ProjectManifest {
+  let nextCompositionId = compositionId;
   const nextCompositions = project.compositions?.map((currentComposition) => {
     if (currentComposition.id !== compositionId) return currentComposition;
     const nextComposition = updater(currentComposition);
+    nextCompositionId = nextComposition.id;
     return { ...nextComposition, source: nextComposition.source ?? currentComposition.source } as CompositionDocument;
   });
+  const nextCompositionLibrary = project.compositionLibrary?.map((currentComposition) => {
+    if (currentComposition.id !== compositionId) return currentComposition;
+    const nextComposition = updater(currentComposition);
+    nextCompositionId = nextComposition.id;
+    return nextComposition;
+  });
+  const nextTimelines = nextCompositionId === compositionId ? project.timelines : project.timelines?.map((timeline) => ({
+    ...timeline,
+    clips: timeline.clips.map((clip) => (clip.compositionId === compositionId ? { ...clip, compositionId: nextCompositionId } : clip)),
+  }));
   return {
     ...project,
     compositions: nextCompositions,
-    compositionLibrary: project.compositionLibrary?.map((currentComposition) => (currentComposition.id === compositionId ? updater(currentComposition) : currentComposition)),
+    compositionLibrary: nextCompositionLibrary,
+    timelines: nextTimelines,
   };
 }
 
 function normalizeComposition(composition: CompositionClip): CompositionClip {
-  const motionMarkers = getCanonicalMotionMarkers(composition);
+  const { name: _name, ...rest } = composition as any;
+  const motionMarkers = getCanonicalMotionMarkers(rest);
   const motionCollections = withCanonicalMotionMarkers(motionMarkers);
   return {
-    ...composition,
-    compositionId: composition.compositionId || undefined,
-    start: typeof composition.start === "number" && Number.isFinite(composition.start) ? roundTwo(Math.max(composition.start, 0)) : undefined,
-    layerId: composition.layerId || undefined,
-    sourceMissing: composition.sourceMissing || undefined,
+    ...rest,
+    compositionId: rest.compositionId || undefined,
+    start: typeof rest.start === "number" && Number.isFinite(rest.start) ? roundTwo(Math.max(rest.start, 0)) : undefined,
+    layerId: rest.layerId || undefined,
+    sourceMissing: rest.sourceMissing || undefined,
     background: {
-      ...composition.background,
-      stretchToElements: composition.background.stretchToElements || undefined,
-      elements: composition.background.elements ?? [],
+      ...rest.background,
+      stretchToElements: rest.background.stretchToElements || undefined,
+      elements: rest.background.elements ?? [],
     },
     ...motionCollections,
   };
@@ -179,7 +190,6 @@ function getSceneFromProjectWithDocs(project: ProjectManifest, sceneId: string, 
   const compositionsById = new Map(compositionDocs.map((composition) => [composition.id, composition]));
   return {
     id: timeline.id,
-    name: timeline.name,
     adjustmentLayers: timeline.adjustmentLayers ?? [],
     motionMarkers: timeline.motionMarkers ?? [],
     transitionLayers: timeline.transitionLayers ?? [],
@@ -202,18 +212,20 @@ function getProjectTimelines(project: ProjectManifest): TimelineDocument[] {
       ...getCanonicalMotionMarkers(timeline),
       ...clipMotion,
     ]);
+    const { name: _name, ...rest } = timeline as any;
     return {
-      ...timeline,
-      filePath: timeline.filePath ?? `timelines/${timeline.id}.timeline.json`,
-      clips: timeline.clips.map((clip) => {
-      return {
-        ...clip,
-        motionMarkers: [],
-      };
+      ...rest,
+      filePath: rest.filePath ?? `timelines/${rest.id}.timeline.json`,
+      clips: rest.clips.map((clip: any) => {
+        const { name: _clipName, ...clipRest } = clip;
+        return {
+          ...clipRest,
+          motionMarkers: [],
+        };
       }),
-      adjustmentLayers: normalizeAdjustmentLayers(timeline.adjustmentLayers),
+      adjustmentLayers: normalizeAdjustmentLayers(rest.adjustmentLayers),
       motionMarkers: timelineMotionMarkers,
-      settings: timeline.settings ?? {},
+      settings: rest.settings ?? {},
     };
   });
 }
@@ -224,7 +236,6 @@ function getScenesFromTimelines(timelines: TimelineDocument[], compositions: Com
   const compositionsById = new Map(compositions.map((composition) => [composition.id, composition]));
   return timelines.map((timeline) => ({
     id: timeline.id,
-    name: timeline.name,
     adjustmentLayers: timeline.adjustmentLayers ?? [],
     motionMarkers: timeline.motionMarkers ?? [],
     transitionLayers: timeline.transitionLayers ?? [],

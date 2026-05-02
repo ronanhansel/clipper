@@ -3,6 +3,14 @@ import type { ProjectManifest } from "../core/types";
 type SceneManifest = ProjectManifest["scenes"][number];
 
 class ClipperHostService {
+  private mutationQueue: Promise<void> = Promise.resolve();
+
+  private enqueueMutation<T>(op: () => Promise<T>): Promise<T> {
+    const promise = this.mutationQueue.then(op);
+    this.mutationQueue = promise.catch(() => {}).then(() => {});
+    return promise;
+  }
+
   async readTextFile(relativePath: string) {
     if (window.clipper) return window.clipper.readTextFile(relativePath);
 
@@ -21,37 +29,43 @@ class ClipperHostService {
   }
 
   async writeTextFile(relativePath: string, content: string) {
-    if (window.clipper) {
-      await window.clipper.writeTextFile(relativePath, content);
-      return;
-    }
+    return this.enqueueMutation(async () => {
+      if (window.clipper) {
+        await window.clipper.writeTextFile(relativePath, content);
+        return;
+      }
 
-    const response = await fetch(`/__clipper_fs/write?path=${encodeURIComponent(relativePath)}`, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain; charset=utf-8" },
-      body: content,
+      const response = await fetch(`/__clipper_fs/write?path=${encodeURIComponent(relativePath)}`, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain; charset=utf-8" },
+        body: content,
+      });
+
+      if (!response.ok) throw new Error((await response.text()) || "Unable to save composition file.");
     });
-
-    if (!response.ok) throw new Error((await response.text()) || "Unable to save composition file.");
   }
 
   async writeBinaryFile(relativePath: string, base64Content: string) {
-    if (window.clipper?.writeBinaryFile) {
-      await window.clipper.writeBinaryFile(relativePath, base64Content);
-      return;
-    }
+    return this.enqueueMutation(async () => {
+      if (window.clipper?.writeBinaryFile) {
+        await window.clipper.writeBinaryFile(relativePath, base64Content);
+        return;
+      }
 
-    const response = await fetch(`/__clipper_fs/write?path=${encodeURIComponent(relativePath)}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/octet-stream" },
-      body: base64ToUint8Array(base64Content),
+      const response = await fetch(`/__clipper_fs/write?path=${encodeURIComponent(relativePath)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: base64ToUint8Array(base64Content),
+      });
+
+      if (!response.ok) throw new Error((await response.text()) || "Unable to save binary file.");
     });
-
-    if (!response.ok) throw new Error((await response.text()) || "Unable to save binary file.");
   }
 
   async createDirectory(relativePath: string) {
-    await window.clipper?.createDirectory?.(relativePath);
+    return this.enqueueMutation(async () => {
+      await window.clipper?.createDirectory?.(relativePath);
+    });
   }
 
   async revealFile(relativePath: string) {
@@ -59,15 +73,21 @@ class ClipperHostService {
   }
 
   async trashFile(relativePath: string) {
-    await window.clipper?.trashFile?.(relativePath);
+    return this.enqueueMutation(async () => {
+      await window.clipper?.trashFile?.(relativePath);
+    });
   }
 
   async renameFile(relativePath: string, nextRelativePath: string) {
-    await window.clipper?.renameFile?.(relativePath, nextRelativePath);
+    return this.enqueueMutation(async () => {
+      await window.clipper?.renameFile?.(relativePath, nextRelativePath);
+    });
   }
 
   async copyFile(relativePath: string, nextRelativePath: string) {
-    await window.clipper?.copyFile?.(relativePath, nextRelativePath);
+    return this.enqueueMutation(async () => {
+      await window.clipper?.copyFile?.(relativePath, nextRelativePath);
+    });
   }
 
   async listDirectory(relativePath: string): Promise<{ name: string; isDirectory: boolean }[]> {

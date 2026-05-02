@@ -216,7 +216,6 @@ export function useEditorDerivedState({
 
 const blankPreviewComposition: CompositionClip = {
   id: "__blank_preview__",
-  name: "No composition selected",
   filePath: "",
   duration: 1,
   frame: { width: FRAME_WIDTH, height: FRAME_HEIGHT, style: { background: "#050505" } },
@@ -228,7 +227,6 @@ const blankPreviewComposition: CompositionClip = {
 
 const blankScene: Scene = {
   id: "",
-  name: "No timeline selected",
   adjustmentLayers: [],
   motionMarkers: [],
   transitionLayers: [],

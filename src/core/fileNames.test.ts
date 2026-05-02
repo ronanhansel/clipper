@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { getDisplayName, getFileType, reconstructFileName, isSemanticFile, nextNumberedSemanticName } from "./fileNames";
+import { getDisplayName, getDragPreviewDisplayName, getFileType, reconstructFileName, isSemanticFile, nextNumberedSemanticName } from "./fileNames";
 
 describe("fileNames helpers", () => {
   describe("getDisplayName", () => {
@@ -47,6 +47,20 @@ describe("fileNames helpers", () => {
 
     it("should respect isCompositionContent for legacy files", () => {
       expect(getFileType("intro.ts", false, true)).toBe("composition");
+    });
+  });
+
+  describe("getDragPreviewDisplayName", () => {
+    it("strips semantic suffixes from drag preview labels", () => {
+      expect(getDragPreviewDisplayName("intro.composition.ts")).toBe("intro");
+      expect(getDragPreviewDisplayName("main.timeline.json")).toBe("main");
+      expect(getDragPreviewDisplayName("intro.composition")).toBe("intro");
+      expect(getDragPreviewDisplayName("main.timeline")).toBe("main");
+    });
+
+    it("uses the basename for paths and leaves normal extensions intact", () => {
+      expect(getDragPreviewDisplayName("/tmp/project/intro.composition")).toBe("intro");
+      expect(getDragPreviewDisplayName("/tmp/project/README.md")).toBe("README.md");
     });
   });
 

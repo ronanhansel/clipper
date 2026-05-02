@@ -24,6 +24,7 @@ import { useTimelineClipboardCommands } from "./app/features/timeline/useTimelin
 import { useTimelineProjectActions } from "./app/features/timeline/useTimelineProjectActions";
 import { useTimelineSelectionCommands } from "./app/features/timeline/useTimelineSelectionCommands";
 import { clipperHost } from "./app/clipperHost";
+import { getDisplayNameFromPath } from "./core/fileNames";
 import { useActiveProjectBoot, type BootProject } from "./app/project/useActiveProjectBoot";
 import { useProjectDocumentController } from "./app/project/useProjectDocumentController";
 import { useProjectFileWatcher } from "./app/project/useProjectFileWatcher";
@@ -378,10 +379,18 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
   const composePlaybackRange = composeMode && activeTimelinePart ? { start: activeTimelinePart.start, end: activeTimelinePart.start + part.duration, localLabels: true } : undefined;
   const compositionLibrary = project.compositionLibrary ?? [];
   const timelines = project.timelines ?? [];
-  const activeTimelineName = timelines.find((item) => item.id === selectedSceneId)?.name ?? scene.name;
+  const activeTimelineName = getDisplayNameFromPath(selectedSceneId ?? "");
   const timelineCompositionIds = new Set(scene.compositions.map((composition) => composition.id));
   const hasActiveTimeline = timelines.some((t) => t.id === selectedSceneId);
-  const timelineLayers = (hasActiveTimeline || composeMode) ? (project.editorState?.timelineLayers ?? defaultTimelineLayerState) : emptyTimelineLayerState;
+  const storedTimelineLayers = project.editorState?.timelineLayers;
+  const timelineLayers = (hasActiveTimeline || composeMode) ? {
+    ...defaultTimelineLayerState,
+    ...storedTimelineLayers,
+    compositionLayers: storedTimelineLayers?.compositionLayers?.length ? storedTimelineLayers.compositionLayers : defaultTimelineLayerState.compositionLayers,
+    adjustmentLayers: storedTimelineLayers?.adjustmentLayers?.length ? storedTimelineLayers.adjustmentLayers : defaultTimelineLayerState.adjustmentLayers,
+    motionLayers: storedTimelineLayers?.motionLayers?.length ? storedTimelineLayers.motionLayers : defaultTimelineLayerState.motionLayers,
+    transitionLayers: storedTimelineLayers?.transitionLayers?.length ? storedTimelineLayers.transitionLayers : defaultTimelineLayerState.transitionLayers,
+  } : emptyTimelineLayerState;
   const baseMotionLayers = timelineLayers.motionLayers?.length ? timelineLayers.motionLayers : defaultTimelineLayerState.motionLayers!;
   const motionLayers = baseMotionLayers;
   const hiddenMotionLayerIds = new Set(motionLayers.filter((layer) => layer.hidden).map((layer) => layer.id));
@@ -1150,6 +1159,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     setCurrentSceneTime,
     setSelectedPartId,
     setSelectedSceneId,
+    updateTimelineMode,
     updateEditorState,
     updateProject,
     watchedProjectDirectory,
@@ -1219,6 +1229,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
   }
 
   function handleSelectTimeline(timelineId: string) {
+    updateTimelineMode("composition");
     setSelectedSceneId(timelineId);
     updateEditorState((state) => ({ ...state, selectedSceneId: timelineId, selectedTimelineId: timelineId, currentSceneTime: 0 }));
     clearNodeSelection();
@@ -1232,11 +1243,11 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
       <AppHeader
         hasActiveComposition={hasActiveComposition}
         hasUnsavedChanges={hasUnsavedChanges}
-        partName={part.name}
+        partName={getDisplayNameFromPath(part.filePath)}
         projectName={project.name}
         projectNameDraft={projectNameDraft}
         renamingProject={renamingProject}
-        sceneName={scene.name}
+        sceneName={getDisplayNameFromPath(selectedSceneId ?? "")}
         onCancelProjectRename={cancelProjectRename}
         onCloseProject={handleCloseProject}
         onCommitProjectRename={commitProjectRename}
@@ -1450,7 +1461,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
       projectName={project.name}
       resolution={project.resolution}
       sceneDurationSeconds={sceneDurationSeconds}
-      sceneName={scene.name}
+      sceneName={getDisplayNameFromPath(selectedSceneId ?? "")}
       scrubCommitThrottleMs={scrubCommitThrottleMs}
       settingsOpen={settingsOpen}
       settingsSection={settingsSection}

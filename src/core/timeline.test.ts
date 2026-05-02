@@ -11,10 +11,9 @@ const background = { id: "background", name: "Background", style: { background: 
 
 const scene: Scene = {
   id: "scene_test",
-  name: "Test Scene",
   compositions: [
-    { id: "a", name: "A", filePath: "a.ts", duration: 4, frame, background, objects: [], snapshot: [], motionMarkers: [] },
-    { id: "b", name: "B", filePath: "b.ts", duration: 6, frame, background, objects: [], snapshot: [], motionMarkers: [] },
+    { id: "a", filePath: "A.composition.ts", duration: 4, frame, background, objects: [], snapshot: [], motionMarkers: [] },
+    { id: "b", filePath: "B.composition.ts", duration: 6, frame, background, objects: [], snapshot: [], motionMarkers: [] },
   ],
 };
 
@@ -22,22 +21,23 @@ describe("timeline model", () => {
   it("uses shared layer operations without changing hidden state", () => {
     const state = {
       compositionLayers: [
-        { id: "comp_a", name: "A", hidden: true },
-        { id: "comp_b", name: "B" },
+        { id: "comp_a", hidden: true },
+        { id: "comp_b" },
       ],
       adjustmentLayers: [
-        { id: "adjust_a", name: "A" },
-        { id: "adjust_b", name: "B", hidden: true },
+        { id: "adjust_a" },
+        { id: "adjust_b", hidden: true },
       ],
       motionLayers: [
-        { id: "motion_a", kind: "motion" as const, name: "A" },
-        { id: "motion_b", kind: "motion" as const, name: "B", hidden: true },
+        { id: "motion_a", kind: "motion" as const },
+        { id: "motion_b", kind: "motion" as const, hidden: true },
       ],
+
     };
 
     expect(moveTimelineStateLayer(state, "comp", "comp_a", "down", state).compositionLayers).toEqual([
-      { id: "comp_b", name: "B" },
-      { id: "comp_a", name: "A", hidden: true },
+      { id: "comp_b" },
+      { id: "comp_a", hidden: true },
     ]);
     expect(moveTimelineStateLayer(state, "adjust", "adjust_b", "up", state).adjustmentLayers?.[0].hidden).toBe(true);
     expect(toggleTimelineStateLayerHidden(state, "motion", "motion_b", state).motionLayers?.[1].hidden).toBeUndefined();
@@ -198,8 +198,8 @@ describe("timeline model", () => {
     }];
 
     const item = getTopTimelineItemAtTime(timeline, 6, [], [
-      { id: "zoom", kind: "motion", name: "Zoom" },
-      { id: "lower_pan", kind: "motion", name: "Motion" },
+      { id: "zoom", kind: "motion" },
+      { id: "lower_pan", kind: "motion" },
     ]);
 
     expect(item?.kind).toBe("motion");

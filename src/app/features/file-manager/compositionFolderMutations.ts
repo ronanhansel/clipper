@@ -39,14 +39,40 @@ export function renameCompositionFolderInProject(project: ProjectManifest, compo
   const parentPath = getDirectoryPath(folderPath);
   const nextFolderPath = parentPath ? `${parentPath}/${nextName}` : nextName;
   const nextSources = remapSourcesForFolder(compositionSources, folderPath, nextFolderPath);
+
+  const idMap = new Map<string, string>();
+  const nextLibrary = (project.compositionLibrary ?? compositionLibrary).map((item) => {
+    if (item.filePath.startsWith(`${folderPath}/`)) {
+      const nextFilePath = `${nextFolderPath}${item.filePath.slice(folderPath.length)}`;
+      idMap.set(item.id, nextFilePath);
+      return { ...item, id: nextFilePath, filePath: nextFilePath };
+    }
+    return item;
+  });
+
+  const nextTimelines = (project.timelines ?? []).map((timeline) => {
+    let nextTimeline = timeline;
+    if (timeline.filePath && timeline.filePath.startsWith(`${folderPath}/`)) {
+      const nextFilePath = `${nextFolderPath}${timeline.filePath.slice(folderPath.length)}`;
+      nextTimeline = { ...nextTimeline, id: nextFilePath, filePath: nextFilePath };
+    }
+    return {
+      ...nextTimeline,
+      clips: nextTimeline.clips.map((clip) => ({
+        ...clip,
+        compositionId: idMap.get(clip.compositionId) ?? clip.compositionId,
+      })),
+    };
+  });
+
   return {
     compositionSources: nextSources,
     project: {
       ...project,
       compositionSources: nextSources,
       compositionFolders: (project.compositionFolders ?? []).map((path) => remapFolderPath(path, folderPath, nextFolderPath)),
-      compositionLibrary: (project.compositionLibrary ?? compositionLibrary).map((item) => item.filePath.startsWith(`${folderPath}/`) ? { ...item, filePath: `${nextFolderPath}${item.filePath.slice(folderPath.length)}` } : item),
-      timelines: (project.timelines ?? []).map((timeline) => (timeline.filePath && timeline.filePath.startsWith(`${folderPath}/`)) ? { ...timeline, filePath: `${nextFolderPath}${timeline.filePath.slice(folderPath.length)}` } : timeline),
+      compositionLibrary: nextLibrary,
+      timelines: nextTimelines,
     },
   };
 }
@@ -57,14 +83,40 @@ export function moveCompositionFolderInProject(project: ProjectManifest, composi
   const nextFolderPath = parentFolderPath ? `${parentFolderPath}/${folderName}` : folderName;
   if (nextFolderPath === folderPath) return null;
   const nextSources = remapSourcesForFolder(compositionSources, folderPath, nextFolderPath);
+
+  const idMap = new Map<string, string>();
+  const nextLibrary = (project.compositionLibrary ?? compositionLibrary).map((item) => {
+    if (item.filePath.startsWith(`${folderPath}/`)) {
+      const nextFilePath = `${nextFolderPath}${item.filePath.slice(folderPath.length)}`;
+      idMap.set(item.id, nextFilePath);
+      return { ...item, id: nextFilePath, filePath: nextFilePath };
+    }
+    return item;
+  });
+
+  const nextTimelines = (project.timelines ?? []).map((timeline) => {
+    let nextTimeline = timeline;
+    if (timeline.filePath && timeline.filePath.startsWith(`${folderPath}/`)) {
+      const nextFilePath = `${nextFolderPath}${timeline.filePath.slice(folderPath.length)}`;
+      nextTimeline = { ...nextTimeline, id: nextFilePath, filePath: nextFilePath };
+    }
+    return {
+      ...nextTimeline,
+      clips: nextTimeline.clips.map((clip) => ({
+        ...clip,
+        compositionId: idMap.get(clip.compositionId) ?? clip.compositionId,
+      })),
+    };
+  });
+
   return {
     compositionSources: nextSources,
     project: {
       ...project,
       compositionSources: nextSources,
       compositionFolders: Array.from(new Set((project.compositionFolders ?? []).map((path) => remapFolderPath(path, folderPath, nextFolderPath)))),
-      compositionLibrary: (project.compositionLibrary ?? compositionLibrary).map((item) => item.filePath.startsWith(`${folderPath}/`) ? { ...item, filePath: `${nextFolderPath}${item.filePath.slice(folderPath.length)}` } : item),
-      timelines: (project.timelines ?? []).map((timeline) => (timeline.filePath && timeline.filePath.startsWith(`${folderPath}/`)) ? { ...timeline, filePath: `${nextFolderPath}${timeline.filePath.slice(folderPath.length)}` } : timeline),
+      compositionLibrary: nextLibrary,
+      timelines: nextTimelines,
     },
   };
 }
@@ -90,18 +142,53 @@ export function applyFileManagerTreeSnapshotToProject(project: ProjectManifest, 
   const timelines = project.timelines ?? [];
   let nextSources = compositionSources;
 
+  const compIdMap = new Map<string, string>();
   for (const composition of library) {
     const nextFilePath = snapshot.compositionFilePaths[composition.id];
     if (!nextFilePath || nextFilePath === composition.filePath) continue;
+    compIdMap.set(composition.id, nextFilePath);
     const source = nextSources[composition.filePath];
     const { [composition.filePath]: _removed, ...rest } = nextSources;
     nextSources = source === undefined ? rest : { ...rest, [nextFilePath]: source };
   }
 
-  const nextCompositionById = new Map(library.map((composition) => [composition.id, { ...composition, filePath: snapshot.compositionFilePaths[composition.id] ?? composition.filePath }]));
+  const timelineIdMap = new Map<string, string>();
+  for (const timeline of timelines) {
+    const nextFilePath = snapshot.timelineFilePaths[timeline.id];
+    if (!nextFilePath || nextFilePath === timeline.filePath) continue;
+    timelineIdMap.set(timeline.id, nextFilePath);
+  }
+
+  const nextCompositionById = new Map(library.map((composition) => {
+    const nextPath = snapshot.compositionFilePaths[composition.id] ?? composition.filePath;
+    return [composition.id, { ...composition, id: nextPath, filePath: nextPath }];
+  }));
+
+  const nextTimelineById = new Map(timelines.map((timeline) => {
+    const nextPath = snapshot.timelineFilePaths[timeline.id] ?? timeline.filePath;
+    return [timeline.id, {
+      ...timeline,
+      id: nextPath,
+      filePath: nextPath,
+      clips: timeline.clips.map((clip) => ({
+        ...clip,
+        compositionId: compIdMap.get(clip.compositionId) ?? clip.compositionId,
+      })),
+    }];
+  }));
+
   const orderedCompositionIds = new Set(snapshot.compositionOrder);
-  const nextTimelineById = new Map(timelines.map((timeline) => [timeline.id, { ...timeline, filePath: snapshot.timelineFilePaths[timeline.id] ?? timeline.filePath }]));
   const orderedTimelineIds = new Set(snapshot.timelineOrder);
+
+  const nextCompositionLibrary = [
+    ...snapshot.compositionOrder.flatMap((id) => nextCompositionById.get(id) ?? []),
+    ...library.filter((composition) => !orderedCompositionIds.has(composition.id)).map((composition) => nextCompositionById.get(composition.id) ?? composition)
+  ];
+
+  const nextTimelines = [
+    ...snapshot.timelineOrder.flatMap((id) => nextTimelineById.get(id) ?? []),
+    ...timelines.filter((timeline) => !orderedTimelineIds.has(timeline.id)).map((timeline) => nextTimelineById.get(timeline.id) ?? timeline)
+  ];
 
   return {
     compositionSources: nextSources,
@@ -110,9 +197,15 @@ export function applyFileManagerTreeSnapshotToProject(project: ProjectManifest, 
       assets: snapshot.assets,
       compositionSources: nextSources,
       compositionFolders: snapshot.compositionFolders,
-      editorState: { ...(project.editorState ?? defaultEditorState), fileManagerState: snapshot.fileManagerState },
-      compositionLibrary: [...snapshot.compositionOrder.flatMap((id) => nextCompositionById.get(id) ?? []), ...library.filter((composition) => !orderedCompositionIds.has(composition.id)).map((composition) => nextCompositionById.get(composition.id) ?? composition)],
-      timelines: [...snapshot.timelineOrder.flatMap((id) => nextTimelineById.get(id) ?? []), ...timelines.filter((timeline) => !orderedTimelineIds.has(timeline.id)).map((timeline) => nextTimelineById.get(timeline.id) ?? timeline)],
+      editorState: {
+        ...(project.editorState ?? defaultEditorState),
+        fileManagerState: snapshot.fileManagerState,
+        selectedSceneId: timelineIdMap.get(project.editorState?.selectedSceneId ?? "") ?? project.editorState?.selectedSceneId,
+        selectedTimelineId: timelineIdMap.get(project.editorState?.selectedTimelineId ?? "") ?? project.editorState?.selectedTimelineId,
+        selectedPartId: compIdMap.get(project.editorState?.selectedPartId ?? "") ?? project.editorState?.selectedPartId,
+      },
+      compositionLibrary: nextCompositionLibrary,
+      timelines: nextTimelines,
     },
   };
 }

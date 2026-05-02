@@ -60,7 +60,7 @@ export function TimelinePanel(props: TimelinePanelProps) {
     };
   }, [props]);
 
-  if (props.mode === "compose") {
+  if (props.mode === "compose" && props.composeAnimationPart) {
     return <ComposeAnimationTimelinePanel currentTime={props.currentSceneTime} part={props.composeAnimationPart ?? null} playbackPlayheadRef={props.playbackPlayheadRef} scrubbingRef={props.scrubbingRef} scrubSnapEnabled={props.scrubSnapEnabled} selectedObjectIds={props.selectedObjectIds ?? []} timelineLayers={props.timelineLayers} timelineViewportState={props.timelineViewportState} onExitCompose={props.onExitCompose ?? (() => props.onModeChange("composition"))} onRenameLayer={props.onRenameComposeAnimationLayer} onScrub={props.onScrub} onScrubStart={props.onScrubStart} onScrubEnd={props.onScrubEnd} onSelectObjects={props.onSelectComposeObjects} onTimelineLayersChange={props.onTimelineLayersChange} onTimelineViewportStateChange={props.onTimelineViewportStateChange} onUpdateBackgroundAnimation={props.onUpdateComposeBackgroundAnimation} onUpdateBackgroundMotion={props.onUpdateComposeBackgroundMotion} onUpdateObjectAnimation={props.onUpdateComposeObjectAnimation} onUpdateObjectMotion={props.onUpdateComposeObjectMotion} />;
   }
 

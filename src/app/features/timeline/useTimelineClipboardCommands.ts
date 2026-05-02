@@ -15,7 +15,6 @@ export type TimelineNodeClipboard =
 
 type SceneTimelineClipboardState = {
   id: string;
-  name: string;
   adjustmentLayers?: AdjustmentLayer[];
   compositions: Part[];
   motionMarkers?: MotionMarker[];

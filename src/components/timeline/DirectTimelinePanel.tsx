@@ -6,6 +6,7 @@ import { clamp, roundToPrecision, roundTenth, roundTwo } from "../../core/math";
 import { buildLinearTimeline, getAdjustmentLayerRowId, getAdjustmentPlacement, getMendedMarkerDragItems, getMotionMarkerLayerId, getScrubSnapBoundaries, getTimelineDragConstraintItems, getTimelineMarkerDragSnapBoundaries, getTimelineMarkerMoves, getTimelinePartAtTime, getTimelineTicks, getTopTimelineItemAtTime, isMotionMarkerOnLayerId, isTimelineMarkerMendedEdge, resizeTimelineMarkersWithPush, timelineDisplayDuration as getTimelineDisplayDuration, uniqueTimelineDragItems, type TimelineMarkerDragItem, type TimelineMarkerMove, type TimelineMarkerResize } from "../../core/timeline";
 import { getTimelineBlockTiming, getTimelineDragDeltaSeconds, getTimelineSnapGuideTime, type TimelineBlockTimingResult } from "../../core/timelineBlockTiming";
 import { defaultTimelineLayerState } from "../../core/project";
+import { getDisplayNameFromPath } from "../../core/fileNames";
 import { getAdjustmentEffectPackage, getEffectDragType, getEffectPackage, getMotionEffectPackage, getTransitionEffectPackage, installedEffectPackages } from "../../core/effects/registry";
 import { applyTimelineBlockPreview, clearTimelineBlockPreview, computeBulkLayerTargets, getTimelineBlockLayerPreview, getTimelineLayerDragPreview, getTimelineLayerRowAtClientY, moveTimelineStateLayer, renameTimelineStateLayer, toggleTimelineStateLayerHidden, toggleTimelineStateLayerLocked, type TimelineLayerCategory } from "../../core/timelineLayers";
 import type { AdjustmentEffectId, AdjustmentLayer, MotionBlockEffectKind, MotionEffectId, MotionEffectKind, MotionMarker, Part, TimelineMotionLayerKind, TimelinePart, TransitionLayer } from "../../core/types";
@@ -1134,6 +1135,7 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
     function transformTiming(timing: TimelineBlockTimingResult, shiftActive: boolean): TransitionLayer {
       const minDuration = 0.1;
       const r = (v: number) => roundToPrecision(v, timelinePrecision);
+      const getShiftScaleDuration = (rawDuration: number) => r(clamp(rawDuration, minDuration / 2, Math.max(Math.min(midPointAbs, timelineDisplayDuration - midPointAbs), minDuration / 2)));
       if (action === "move") {
         let start = timing.start;
         let midPointGuideTime: number | null = null;
@@ -1163,7 +1165,7 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
 
         if (shiftActive) {
           const rawInDuration = midPointAbs - start;
-          const inDuration = r(Math.max(rawInDuration, minDuration / 2));
+          const inDuration = getShiftScaleDuration(rawInDuration);
           start = midPointAbs - inDuration;
           duration = inDuration * 2;
           midPoint = r(inDuration);
@@ -1185,7 +1187,7 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
 
       if (shiftActive) {
         const rawOutDuration = newEnd - midPointAbs;
-        const outDuration = r(Math.max(rawOutDuration, minDuration / 2));
+        const outDuration = getShiftScaleDuration(rawOutDuration);
         start = midPointAbs - outDuration;
         duration = outDuration * 2;
         midPoint = r(outDuration);
@@ -2023,7 +2025,8 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
                 const isEmptyPart = item.objects.length === 0 && item.background.elements.length === 0;
                 const isUnlinkedPart = Boolean(item.sourceMissing);
                 return (
-                  <CompositionTimelineBlock dataAttributes={{ "data-timeline-composition-id": item.id }} key={item.id} name={item.name} duration={previewItem.duration} isEmpty={isEmptyPart} sourceMissing={isUnlinkedPart} locked={Boolean(row.locked)} selected={selectedPartIds.has(item.id)} style={{ left: `${timelineDisplayDuration > 0 ? (previewItem.start / timelineDisplayDuration) * 100 : 0}%`, width: `calc(${timelineDisplayDuration > 0 ? (previewItem.duration / timelineDisplayDuration) * 100 : 0}% + var(--clipper-composition-resize-width, 0px))` }} onPointerDown={(event) => { if (timelineMarkersEditable) updateCompositionFromPointer(event, item, "move"); }} onClick={() => onSelectPart(item.id)} onDoubleClick={() => onOpenComposePart(item.id)} onContextMenu={(event) => { if (timelineMarkersEditable) openTimelineNodeContextMenu(event, { kind: "part", partId: item.id }); }} leftResizeEnabled={timelineMarkersEditable} rightResizeEnabled={timelineMarkersEditable} onLeftResize={(event) => updateCompositionFromPointer(event, item, "start")} onRightResize={(event) => updateCompositionFromPointer(event, item, "end")} />
+                  <CompositionTimelineBlock dataAttributes={{ "data-timeline-composition-id": item.id }} key={item.id} name={getDisplayNameFromPath(item.filePath)} duration={previewItem.duration}
+ isEmpty={isEmptyPart} sourceMissing={isUnlinkedPart} locked={Boolean(row.locked)} selected={selectedPartIds.has(item.id)} style={{ left: `${timelineDisplayDuration > 0 ? (previewItem.start / timelineDisplayDuration) * 100 : 0}%`, width: `calc(${timelineDisplayDuration > 0 ? (previewItem.duration / timelineDisplayDuration) * 100 : 0}% + var(--clipper-composition-resize-width, 0px))` }} onPointerDown={(event) => { if (timelineMarkersEditable) updateCompositionFromPointer(event, item, "move"); }} onClick={() => onSelectPart(item.id)} onDoubleClick={() => onOpenComposePart(item.id)} onContextMenu={(event) => { if (timelineMarkersEditable) openTimelineNodeContextMenu(event, { kind: "part", partId: item.id }); }} leftResizeEnabled={timelineMarkersEditable} rightResizeEnabled={timelineMarkersEditable} onLeftResize={(event) => updateCompositionFromPointer(event, item, "start")} onRightResize={(event) => updateCompositionFromPointer(event, item, "end")} />
                 );
               })}
             </TimelineLayerLane>)}

@@ -1,7 +1,7 @@
 import { defaultTimelineLayerState } from "../../../core/project";
 import { buildLinearTimeline, rebaseCompositionTimelineMarkers, getMotionMiddleSnap, isMotionMiddleSnapActive, type TimelineMendMarker } from "../../../core/timeline";
 import { roundToPrecision, roundTenth } from "../../../core/math";
-import { getDisplayName } from "../file-manager/fileNames";
+import { getDisplayName } from "../../../core/fileNames";
 import type { CompositionSelection } from "../../types";
 import type { Part, SelectionPayload, TimelineLayerState } from "../../../core/types";
 
@@ -12,7 +12,6 @@ type UseCompositionTimelineCommandsInput = {
   currentSceneTimeRef: { current: number };
   scene: {
     id: string;
-    name: string;
     compositions: Part[];
   };
   timelineLayers: TimelineLayerState;

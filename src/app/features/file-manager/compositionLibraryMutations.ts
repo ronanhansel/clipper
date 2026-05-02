@@ -2,6 +2,7 @@ import { compositionToSource } from "../../../core/compositionSource";
 import { deleteCompositionFromProject, replacePartInProject } from "../../../core/project";
 import type { Part, ProjectManifest } from "../../../core/types";
 import { compositionFilePathWithName, getDirectoryPath, nextNumberedName } from "./fileManagerPaths";
+import { getDisplayNameFromPath, reconstructFileName } from "../../../core/fileNames";
 
 export type CompositionLibraryMutationResult = {
   project: ProjectManifest;
@@ -21,11 +22,10 @@ export function getProjectFolderSiblingNames(project: ProjectManifest, parentFol
   return names;
 }
 
-export function createCompositionInLibrary(project: ProjectManifest, compositionSources: Record<string, string>, _basePart: Part, folderPath: string, compositionId: string): CompositionLibraryMutationResult {
+export function createCompositionInLibrary(project: ProjectManifest, compositionSources: Record<string, string>, _basePart: Part, filePath: string): CompositionLibraryMutationResult {
   const composition: Part = {
-    id: compositionId,
-    name: "New Composition",
-    filePath: `${folderPath}/${compositionId}.composition.ts`,
+    id: filePath,
+    filePath,
     duration: 3,
     frame: { width: 1920, height: 1080, style: { background: "#050505" } },
     background: { id: "background", name: "Background", style: { background: "transparent" }, elements: [] },
@@ -41,14 +41,14 @@ export function createCompositionInLibrary(project: ProjectManifest, composition
       ...project,
       compositionSources: nextSources,
       compositionLibrary: [...(project.compositionLibrary ?? []), { ...composition, source }],
-      compositionFolders: Array.from(new Set([...(project.compositionFolders ?? []), folderPath])),
+      compositionFolders: Array.from(new Set([...(project.compositionFolders ?? []), getDirectoryPath(filePath)])),
     },
   };
 }
 
 export function createCompositionFolderInProject(project: ProjectManifest, parentFolderPath: string, fallbackTimelineDirectory: string) {
   const folderName = nextNumberedName("New folder", getProjectFolderSiblingNames(project, parentFolderPath, fallbackTimelineDirectory));
-  const folderPath = `${parentFolderPath}/${folderName}`;
+  const folderPath = parentFolderPath ? `${parentFolderPath}/${folderName}` : folderName;
   return {
     folderPath,
     project: { ...project, compositionFolders: Array.from(new Set([...(project.compositionFolders ?? []), folderPath])) }
@@ -65,7 +65,7 @@ export function renameCompositionInProject(project: ProjectManifest, composition
   const nextSources = source === undefined ? rest : { ...rest, [nextFilePath]: source };
   return {
     compositionSources: nextSources,
-    project: replacePartInProject({ ...project, compositionSources: nextSources, compositionLibrary: project.compositionLibrary ?? fallbackLibrary }, compositionId, (item) => ({ ...item, name: nextName, filePath: nextFilePath })),
+    project: replacePartInProject({ ...project, compositionSources: nextSources, compositionLibrary: project.compositionLibrary ?? fallbackLibrary }, compositionId, (item) => ({ ...item, id: nextFilePath, filePath: nextFilePath })),
   };
 }
 
@@ -80,19 +80,28 @@ export function moveCompositionInProject(project: ProjectManifest, compositionSo
   return {
     compositionSources: nextSources,
     project: {
-      ...replacePartInProject({ ...project, compositionSources: nextSources, compositionLibrary: project.compositionLibrary ?? fallbackLibrary }, compositionId, (item) => ({ ...item, filePath: nextFilePath })),
+      ...replacePartInProject({ ...project, compositionSources: nextSources, compositionLibrary: project.compositionLibrary ?? fallbackLibrary }, compositionId, (item) => ({ ...item, id: nextFilePath, filePath: nextFilePath })),
       compositionFolders: Array.from(new Set([...(project.compositionFolders ?? []), folderPath])),
     },
   };
 }
 
-export function duplicateCompositionInProject(project: ProjectManifest, compositionSources: Record<string, string>, compositionId: string, duplicateId: string, fallbackLibrary: Part[]): CompositionLibraryMutationResult | null {
+export function duplicateCompositionInProject(project: ProjectManifest, compositionSources: Record<string, string>, compositionId: string, fallbackLibrary: Part[]): CompositionLibraryMutationResult | null {
   const composition = fallbackLibrary.find((item) => item.id === compositionId);
   if (!composition) return null;
-  const duplicate: Part = { ...composition, id: duplicateId, name: `${composition.name} copy`, filePath: `${getDirectoryPath(composition.filePath)}/${duplicateId}.composition.ts`, motionMarkers: [], snapshot: [] };
+  const directoryPath = getDirectoryPath(composition.filePath);
+  const siblingNames = (project.compositionLibrary ?? fallbackLibrary)
+    .filter((item) => getDirectoryPath(item.filePath) === directoryPath)
+    .map((item) => item.filePath.split("/").pop() || item.filePath);
+  const sourceFileName = composition.filePath.split("/").pop() || "untitled.composition.ts";
+  const duplicateName = nextNumberedName(`${getDisplayNameFromPath(composition.filePath)} copy`, siblingNames.map((name) => name.replace(/\.composition\.ts$/, "")));
+  const fileName = reconstructFileName(duplicateName, sourceFileName);
+  const filePath = directoryPath ? `${directoryPath}/${fileName}` : fileName;
+  const duplicate: Part = { ...composition, id: filePath, filePath, motionMarkers: [], snapshot: [] };
   const nextSources = { ...compositionSources, [duplicate.filePath]: compositionToSource(duplicate) };
   return { compositionSources: nextSources, project: { ...project, compositionSources: nextSources, compositionLibrary: [...(project.compositionLibrary ?? fallbackLibrary), duplicate] } };
 }
+
 
 export function deleteCompositionFileFromProject(project: ProjectManifest, compositionSources: Record<string, string>, compositionId: string, fallbackLibrary: Part[]): CompositionLibraryMutationResult | null {
   const composition = fallbackLibrary.find((item) => item.id === compositionId);

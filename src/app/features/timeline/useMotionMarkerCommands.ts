@@ -13,7 +13,6 @@ import type { SceneMotionMarkerUpdate } from "./useTimelineProjectActions";
 
 type SceneMotionState = {
   id: string;
-  name: string;
   compositions: Part[];
   duration?: number;
   motionMarkers?: MotionMarker[];

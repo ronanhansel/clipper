@@ -14,6 +14,10 @@ export class CreateCommand implements Command {
   }
 
   async execute() {
+    const parentPath = this.path.substring(0, this.path.lastIndexOf("/"));
+    if (parentPath) {
+      await clipperHost.createDirectory(parentPath).catch(() => {});
+    }
     if (this.isDirectory) {
       await clipperHost.createDirectory(this.path);
     } else if (this.content !== undefined) {

@@ -38,6 +38,13 @@ export function getActiveCompositionPointerDrag() {
   return activeCompositionPointerDrag;
 }
 
+export function dispatchClipperPointerDrag<TPayload extends Record<string, unknown>>(eventName: string, detail: ClipperPointerDragDetail<TPayload>) {
+  if (eventName === compositionPointerDragEvent) {
+    setActiveCompositionPointerDrag(detail.phase === "move" ? detail as unknown as CompositionPointerDragDetail : null);
+  }
+  window.dispatchEvent(new CustomEvent<ClipperPointerDragDetail<TPayload>>(eventName, { detail }));
+}
+
 type StartPointerDragOptions<TPayload extends Record<string, unknown>> = {
   accent: string;
   activationDelayMs?: number;
@@ -49,9 +56,14 @@ type StartPointerDragOptions<TPayload extends Record<string, unknown>> = {
   skipPreventDefault?: boolean;
 };
 
-const dragGhostOffset = { x: 10, y: -10 };
+export const clipperDragGhostOffset = { x: 12, y: 12 };
+export const clipperDragGhostClassName = "clipper-drag-preview pointer-events-none fixed left-0 top-0 z-[9999] inline-grid min-w-[104px] max-w-[260px] grid-cols-[16px_minmax(0,1fr)] items-center gap-2 rounded-[9px] border border-[var(--clipper-accent)] bg-[#111319] px-2.5 py-[7px] text-[11px] font-bold text-[#f1f3f7] shadow-[0_14px_34px_rgba(0,0,0,0.36),0_0_0_4px_color-mix(in_srgb,var(--clipper-accent)_18%,transparent)]";
 const defaultPointerDragActivationDelayMs = 160;
 let activePointerDragCleanup: (() => void) | null = null;
+
+export function getClipperDragGhostCssText(accent: string) {
+  return `position:fixed;top:0;left:0;z-index:9999;box-sizing:border-box;min-width:104px;max-width:260px;pointer-events:none;border:1px solid ${accent};border-radius:9px;background:#111319;color:#f1f3f7;padding:7px 10px;font:700 11px system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;box-shadow:0 14px 34px rgba(0,0,0,0.36),0 0 0 4px color-mix(in srgb, ${accent} 18%, transparent);will-change:transform;`;
+}
 
 export function startClipperPointerDrag<TPayload extends Record<string, unknown>>({ accent, activationDelayMs = defaultPointerDragActivationDelayMs, eventName, label, payload, pointerEvent, previewEventName, skipPreventDefault }: StartPointerDragOptions<TPayload>) {
   if (pointerEvent.button !== 0) return;
@@ -69,7 +81,7 @@ export function startClipperPointerDrag<TPayload extends Record<string, unknown>
     active = true;
     ghost = document.createElement("span");
     ghost.textContent = label;
-    ghost.style.cssText = `position:fixed;top:0;left:0;z-index:9999;box-sizing:border-box;min-width:104px;pointer-events:none;border:1px solid ${accent};border-radius:9px;background:#111319;color:#f1f3f7;padding:7px 10px;font:700 11px system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;box-shadow:0 14px 34px rgba(0,0,0,0.36),0 0 0 4px color-mix(in srgb, ${accent} 18%, transparent);will-change:transform;`;
+    ghost.style.cssText = getClipperDragGhostCssText(accent);
     document.body.appendChild(ghost);
     moveGhost(lastPointer.clientX, lastPointer.clientY);
     emitFromPointer("move", lastPointer);
@@ -78,25 +90,22 @@ export function startClipperPointerDrag<TPayload extends Record<string, unknown>
   function moveGhost(clientX: number, clientY: number) {
     if (!ghost) return;
     if (clientX === 0 && clientY === 0) return;
-    ghost.style.transform = `translate3d(${clientX + dragGhostOffset.x}px, ${clientY + dragGhostOffset.y}px, 0)`;
+    ghost.style.transform = `translate3d(${clientX + clipperDragGhostOffset.x}px, ${clientY + clipperDragGhostOffset.y}px, 0)`;
   }
 
   function emitFromPointer(phase: ClipperPointerDragPhase, pointer: typeof lastPointer) {
     const detail = { ...payload, phase, clientX: pointer.clientX, clientY: pointer.clientY, shiftKey: pointer.shiftKey } as ClipperPointerDragDetail<TPayload>;
-    if (eventName === compositionPointerDragEvent) setActiveCompositionPointerDrag(detail as unknown as CompositionPointerDragDetail);
-    window.dispatchEvent(new CustomEvent<ClipperPointerDragDetail<TPayload>>(eventName, { detail }));
+    dispatchClipperPointerDrag(eventName, detail);
   }
 
   function emit(phase: ClipperPointerDragPhase, event: globalThis.PointerEvent) {
     const detail = { ...payload, phase, clientX: event.clientX, clientY: event.clientY, shiftKey: event.shiftKey } as ClipperPointerDragDetail<TPayload>;
-    if (eventName === compositionPointerDragEvent) setActiveCompositionPointerDrag(phase === "move" ? detail as unknown as CompositionPointerDragDetail : null);
-    window.dispatchEvent(new CustomEvent<ClipperPointerDragDetail<TPayload>>(eventName, { detail }));
+    dispatchClipperPointerDrag(eventName, detail);
   }
 
   function emitFromMouse(phase: ClipperPointerDragPhase, event: globalThis.MouseEvent) {
     const detail = { ...payload, phase, clientX: event.clientX, clientY: event.clientY, shiftKey: event.shiftKey } as ClipperPointerDragDetail<TPayload>;
-    if (eventName === compositionPointerDragEvent) setActiveCompositionPointerDrag(phase === "move" ? detail as unknown as CompositionPointerDragDetail : null);
-    window.dispatchEvent(new CustomEvent<ClipperPointerDragDetail<TPayload>>(eventName, { detail }));
+    dispatchClipperPointerDrag(eventName, detail);
   }
 
   function onPointerMove(event: globalThis.PointerEvent) {

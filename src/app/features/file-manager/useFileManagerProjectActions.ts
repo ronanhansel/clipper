@@ -1,17 +1,17 @@
-import { nanoid } from "nanoid";
 import type { MutableRefObject } from "react";
 import toast from "react-hot-toast";
 import type { FileManagerTreeSnapshot } from "../../../components/FileManager";
 import { getAssetPath } from "../../../core/assetTree";
-import type { AssetItem, CompositionClip, EditorState, Part, ProjectManifest } from "../../../core/types";
+import type { AssetItem, CompositionClip, EditorState, Part, ProjectManifest, TimelineMode } from "../../../core/types";
 import type { ProjectUpdater } from "../../types";
 import { clipperHost } from "../../clipperHost";
 import type { BuildFileManagerWorkspacePropsInput } from "./FileManagerWorkspace";
-import { compositionFilePathWithName, getDirectoryPath, nextNumberedName } from "./fileManagerPaths";
+import { getDirectoryPath, nextNumberedName } from "./fileManagerPaths";
 import { createAssetFolderInProject, deleteAssetFromProject, duplicateAssetInProject, importDroppedAssetsIntoProject, renameAssetInProject, sortAssetsInProject } from "./assetProjectMutations";
-import { createCompositionFolderInProject, createCompositionInLibrary, deleteCompositionFileFromProject, duplicateCompositionInProject, getProjectFolderSiblingNames, moveCompositionInProject, renameCompositionInProject } from "./compositionLibraryMutations";
+import { createCompositionFolderInProject, createCompositionInLibrary, deleteCompositionFileFromProject, duplicateCompositionInProject, moveCompositionInProject, renameCompositionInProject } from "./compositionLibraryMutations";
 import { applyFileManagerTreeSnapshotToProject, deleteCompositionFolderFromProject, renameCompositionFolderInProject } from "./compositionFolderMutations";
 import { createTimelineInProject, deleteTimelineFromProject, moveTimelineInProject, renameTimelineInProject } from "./timelineLibraryMutations";
+import { getDisplayNameFromPath, nextNumberedSemanticName } from "../../../core/fileNames";
 
 type FileManagerProjectActions = Omit<BuildFileManagerWorkspacePropsInput["actions"], "reloadProject">;
 
@@ -28,16 +28,13 @@ type UseFileManagerProjectActionsInput = {
   setCurrentSceneTime: (time: number) => void;
   setSelectedPartId: (partId: string) => void;
   setSelectedSceneId: (sceneId: string) => void;
+  updateTimelineMode: (mode: TimelineMode) => void;
   updateEditorState: (updater: (state: EditorState) => EditorState, options?: { history?: boolean; coalesceHistory?: boolean }) => void;
   updateProject: (updater: ProjectUpdater, options?: { history?: boolean; syncSources?: boolean; coalesceHistory?: boolean }) => void;
   watchedProjectDirectory: string;
   clearNodeSelection: () => void;
   addCompositionFromLibrary: (compositionId: string) => void;
 };
-
-function createCompositionId() {
-  return nanoid(8);
-}
 
 export function useFileManagerProjectActions({
   addCompositionFromLibrary,
@@ -54,6 +51,7 @@ export function useFileManagerProjectActions({
   setCurrentSceneTime,
   setSelectedPartId,
   setSelectedSceneId,
+  updateTimelineMode,
   updateEditorState,
   updateProject,
   watchedProjectDirectory,
@@ -109,32 +107,38 @@ export function useFileManagerProjectActions({
     void clipperHost.revealFile(project.assetsPath).catch(() => toast.error("Unable to reveal in Finder."));
   }
 
-  async function createComposition(folderPath = watchedProjectDirectory) {
-    const result = createCompositionInLibrary(projectRef.current, compositionSourcesRef.current, part, folderPath, createCompositionId());
-    const newComposition = result.project.compositionLibrary![result.project.compositionLibrary!.length - 1];
-    await clipperHost.writeTextFile(newComposition.filePath, newComposition.source!).catch(() => toast.error("Unable to create composition file"));
+  async function createComposition(folderPath?: string) {
+    const safeFolderPath = folderPath && folderPath !== watchedProjectDirectory ? folderPath : "compositions";
+    const siblingNames = (compositionLibrary ?? [])
+      .filter((composition) => getDirectoryPath(composition.filePath) === safeFolderPath)
+      .map((composition) => composition.filePath.split("/").pop() || composition.filePath);
+    const fileName = nextNumberedSemanticName("untitled", ".composition.ts", siblingNames);
+    const filePath = `${safeFolderPath}/${fileName}`;
+    const result = createCompositionInLibrary(projectRef.current, compositionSourcesRef.current, part, filePath);
     syncCompositionResult(result);
   }
 
-  async function createCompositionFolder(parentFolderPath = watchedProjectDirectory) {
-    const { folderPath, project: nextProject } = createCompositionFolderInProject(projectRef.current, parentFolderPath, watchedProjectDirectory);
-    await clipperHost.createDirectory(folderPath).catch(() => toast.error("Unable to create folder"));
+  async function createCompositionFolder(parentFolderPath?: string) {
+    const safeParent = parentFolderPath && parentFolderPath !== watchedProjectDirectory ? parentFolderPath : "compositions";
+    const { folderPath, project: nextProject } = createCompositionFolderInProject(projectRef.current, safeParent, "");
     updateProject(nextProject);
   }
 
   function createTimeline() {
-    const timelineId = crypto.randomUUID();
-    const existingNames = (project.timelines ?? []).map(t => t.name);
+    const existingNames = (project.timelines ?? []).map(t => getDisplayNameFromPath(t.filePath || t.id));
     const nextName = nextNumberedName("New Timeline", existingNames);
-    const timelineName = nextName;
+    const fileName = `${nextName}.timeline.json`;
+    const filePath = `timelines/${fileName}`;
     
-    updateProject((current) => createTimelineInProject(current, timelineId, watchedProjectDirectory, timelineName));
-    setSelectedSceneId(timelineId);
-    updateEditorState((state) => ({ ...state, selectedSceneId: timelineId, selectedTimelineId: timelineId, currentSceneTime: 0 }));
+    updateProject((current) => createTimelineInProject(current, filePath));
+    updateTimelineMode("composition");
+    setSelectedSceneId(filePath);
+    updateEditorState((state) => ({ ...state, selectedSceneId: filePath, selectedTimelineId: filePath, currentSceneTime: 0 }));
     clearNodeSelection();
   }
 
   function selectTimeline(timelineId: string) {
+    updateTimelineMode("composition");
     setSelectedSceneId(timelineId);
     updateEditorState((state) => ({ ...state, selectedSceneId: timelineId, selectedTimelineId: timelineId, currentSceneTime: 0 }));
     clearNodeSelection();
@@ -143,11 +147,29 @@ export function useFileManagerProjectActions({
   }
 
   function renameTimeline(timelineId: string, name: string) {
+    const nextName = name.trim();
+    if (!nextName) return;
+    const timeline = project.timelines?.find(t => t.id === timelineId);
+    const directory = timeline?.filePath ? timeline.filePath.slice(0, timeline.filePath.lastIndexOf("/") + 1) : "";
+    const nextId = `${directory}${nextName}.timeline.json`;
+
     updateProject((current) => renameTimelineInProject(current, timelineId, name));
+    if (timelineId === selectedSceneId) {
+      setSelectedSceneId(nextId);
+      updateEditorState((state) => ({ ...state, selectedSceneId: nextId, selectedTimelineId: nextId }));
+    }
   }
 
   function moveTimeline(timelineId: string, folderPath: string) {
+    const timeline = project.timelines?.find(t => t.id === timelineId);
+    const fileName = timeline?.filePath?.split("/").pop() || `${timelineId}.timeline.json`;
+    const nextId = folderPath ? `${folderPath}/${fileName}` : fileName;
+
     updateProject((current) => moveTimelineInProject(current, timelineId, folderPath));
+    if (timelineId === selectedSceneId) {
+      setSelectedSceneId(nextId);
+      updateEditorState((state) => ({ ...state, selectedSceneId: nextId, selectedTimelineId: nextId }));
+    }
   }
 
   function deleteTimeline(timelineId: string) {
@@ -165,9 +187,6 @@ export function useFileManagerProjectActions({
     const composition = compositionLibrary.find((item) => item.id === compositionId);
     if (!composition) return;
 
-    const nextFilePath = compositionFilePathWithName(composition.filePath, composition.id, name);
-    await clipperHost.renameFile(composition.filePath, nextFilePath).catch(() => toast.error("Unable to rename file"));
-
     const result = renameCompositionInProject(projectRef.current, compositionSourcesRef.current, compositionId, name, compositionLibrary);
     if (result) syncCompositionResult(result);
   }
@@ -178,10 +197,6 @@ export function useFileManagerProjectActions({
   }
 
   async function renameCompositionFolder(folderPath: string, name: string) {
-    const parentDirectory = getDirectoryPath(folderPath);
-    const nextFolderPath = parentDirectory ? `${parentDirectory}/${name}` : name;
-    await clipperHost.renameFile(folderPath, nextFolderPath).catch(() => toast.error("Unable to rename folder"));
-
     const result = renameCompositionFolderInProject(projectRef.current, compositionSourcesRef.current, folderPath, name, compositionLibrary);
     if (result) syncCompositionResult(result);
   }
@@ -208,16 +223,11 @@ export function useFileManagerProjectActions({
   }
 
   function duplicateComposition(compositionId: string) {
-    const result = duplicateCompositionInProject(projectRef.current, compositionSourcesRef.current, compositionId, createCompositionId(), compositionLibrary);
+    const result = duplicateCompositionInProject(projectRef.current, compositionSourcesRef.current, compositionId, compositionLibrary);
     if (result) syncCompositionResult(result);
   }
 
   async function deleteCompositionFile(compositionId: string) {
-    const composition = compositionLibrary.find((item) => item.id === compositionId);
-    if (!composition) return;
-
-    await clipperHost.trashFile(composition.filePath).catch(() => toast.error("Unable to delete file"));
-
     const result = deleteCompositionFileFromProject(projectRef.current, compositionSourcesRef.current, compositionId, compositionLibrary);
     if (result) syncCompositionResult(result);
   }

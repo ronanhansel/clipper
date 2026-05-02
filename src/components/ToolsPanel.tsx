@@ -5,20 +5,22 @@ import { effectDragPreviewEvent, effectPointerDragEvent, startClipperPointerDrag
 import { CardsIcon, WaveTriangleIcon } from "@phosphor-icons/react";
 import { ArrowLeftRight, ChevronDown, ChevronRight, Folder } from "lucide-react";
 import type { PointerEvent } from "react";
+import { NativeTree, type NativeTreeNodeRendererProps } from "./tree/NativeTree";
 
 const defaultAdjustmentAccent = "#8f65f2";
 const defaultMotionAccent = "#24b7c9";
 const effectButtonClass = "grid h-8 min-w-0 grid-cols-[16px_minmax(0,1fr)] items-center gap-2 border border-transparent px-1.5 text-left text-[12px] font-bold leading-5 text-[#f7f7f8] transition hover:bg-[#20232c] active:bg-[#242733]";
 const effectGroupClass = "grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-1.5 overflow-hidden rounded-xl border border-[#2d313b] bg-[#111319] p-2.5";
-const effectListClass = "timeline-scrollbar grid min-h-0 content-start gap-0.5 overflow-y-auto pt-px pr-1";
-const effectFolderButtonClass = "grid h-8 min-w-0 grid-cols-[16px_18px_minmax(0,1fr)] items-center gap-1.5 rounded-[7px] border border-transparent px-1 text-left text-[12px] font-black text-[#b2b6c2] transition hover:bg-[#20232c]";
+const effectListClass = "timeline-scrollbar min-h-0 overflow-y-auto pt-px pr-1";
 
 type EffectGroupNode = {
+  id: string;
   name: string;
   path: string;
-  groups: EffectGroupNode[];
-  effects: EffectDefinition[];
+  children: EffectTreeNode[];
 };
+
+type EffectTreeNode = EffectGroupNode | { id: string; kind: "effect"; effect: EffectDefinition; name: string };
 
 const effectDragLabels: Record<string, string> = {
   ...Object.fromEntries(installedEffectPackages.map((definition) => [definition.id, definition.label])),
@@ -30,23 +32,23 @@ const effectDragAccents: Record<string, string> = {
 
 
 function buildEffectGroupTree(effects: readonly EffectDefinition[]) {
-  const root: EffectGroupNode = { name: "", path: "", groups: [], effects: [] };
+  const root: EffectGroupNode = { id: "group:", name: "", path: "", children: [] };
 
   for (const effect of effects) {
-    const parts = effect.group.split("/").map((part) => part.trim()).filter(Boolean);
+    const parts = parseEffectGroups(effect);
     let node = root;
 
     for (const part of parts) {
       const path = node.path ? `${node.path}/${part}` : part;
-      let child = node.groups.find((group) => group.name === part);
+      let child = node.children.find((childNode): childNode is EffectGroupNode => "children" in childNode && childNode.name === part);
       if (!child) {
-        child = { name: part, path, groups: [], effects: [] };
-        node.groups.push(child);
+        child = { id: `group:${path}`, name: part, path, children: [] };
+        node.children.push(child);
       }
       node = child;
     }
 
-    node.effects.push(effect);
+    node.children.push({ id: effect.id, kind: "effect", effect, name: effect.label });
   }
 
   return root;
@@ -54,9 +56,14 @@ function buildEffectGroupTree(effects: readonly EffectDefinition[]) {
 
 function collectEffectGroupPaths(effects: readonly EffectDefinition[]) {
   return effects.flatMap((effect) => {
-    const parts = effect.group.split("/").map((part) => part.trim()).filter(Boolean);
+    const parts = parseEffectGroups(effect);
     return parts.map((_, index) => parts.slice(0, index + 1).join("/"));
   });
+}
+
+function parseEffectGroups(effect: EffectDefinition) {
+  const groups = effect.groups?.length ? effect.groups : effect.group.split("/");
+  return groups.map((part) => part.trim()).filter(Boolean);
 }
 
 export function ToolsPanel({ effectsPanelState, timelineMode, onEffectsPanelStateChange }: { effectsPanelState?: EffectsPanelState; timelineMode: TimelineMode; onEffectsPanelStateChange: (state: NonNullable<EditorState["effectsPanelState"]>) => void }) {
@@ -86,21 +93,11 @@ export function ToolsPanel({ effectsPanelState, timelineMode, onEffectsPanelStat
     return <button className={`${effectButtonClass} w-full cursor-grab active:cursor-grabbing`} key={definition.id} style={{ paddingLeft: 4 + depth * 18 }} onPointerDown={(event) => startEffectDrag(event, definition.id)}><EffectIcon size={14} weight="bold" className="text-[#858995]" /><span className="truncate">{definition.label}</span></button>;
   }
 
-  function renderEffectFolder(node: EffectGroupNode, depth = 0) {
-    const isOpen = openEffectGroups.has(node.path);
-    const Chevron = isOpen ? ChevronDown : ChevronRight;
-
-    return <div className="grid gap-1" key={node.path}>
-      <button className={effectFolderButtonClass} style={{ paddingLeft: 4 + depth * 18 }} type="button" onClick={() => toggleEffectGroup(node.path)} aria-expanded={isOpen}>
-        <Chevron size={15} className="text-[#f1f3f7]" />
-        <Folder size={17} className="text-[#dfe3ec]" />
-        <span className="truncate">{node.name}</span>
-      </button>
-      {isOpen ? <div className="grid gap-0.5">
-        {node.groups.map((group) => renderEffectFolder(group, depth + 1))}
-        {node.effects.map((definition) => renderEffectButton(definition, depth + 1))}
-      </div> : null}
-    </div>;
+  function renderEffectTree(tree: EffectGroupNode) {
+    const rowCount = countEffectTreeRows(tree.children, openEffectGroups);
+    return <NativeTree<EffectTreeNode> data={tree.children} height={Math.max(32, rowCount * 32)} idAccessor="id" indent={18} initialOpenState={Object.fromEntries([...openEffectGroups].map((path) => [`group:${path}`, true]))} isInternal={(node) => "children" in node} movable={false} onToggle={(node) => {
+      if ("children" in node.data) toggleEffectGroup(node.data.path);
+    }} openByDefault={false} rowHeight={32} width="100%">{(props) => <EffectTreeRow {...props} onStartEffectDrag={startEffectDrag} />}</NativeTree>;
   }
 
   const adjustmentEffectTree = buildEffectGroupTree(adjustmentEffectPackages);
@@ -113,26 +110,45 @@ export function ToolsPanel({ effectsPanelState, timelineMode, onEffectsPanelStat
         <div className={effectGroupClass}>
           <span className={mutedCaps}>Transition</span>
           <div className={effectListClass}>
-            {transitionEffectTree.groups.map((group) => renderEffectFolder(group))}
-            {transitionEffectTree.effects.map((definition) => renderEffectButton(definition, 0))}
+            {renderEffectTree(transitionEffectTree)}
           </div>
         </div>
         <div className={effectGroupClass}>
           <span className={mutedCaps}>Adjust</span>
           <div className={effectListClass}>
-            {adjustmentEffectTree.groups.map((group) => renderEffectFolder(group))}
-            {adjustmentEffectTree.effects.map((definition) => renderEffectButton(definition, 0))}
+            {renderEffectTree(adjustmentEffectTree)}
           </div>
         </div>
         <div className={effectGroupClass}>
           <span className={mutedCaps}>Motion</span>
           <div className={effectListClass}>
-            {motionEffectTree.groups.map((group) => renderEffectFolder(group))}
-            {motionEffectTree.effects.map((definition) => renderEffectButton(definition, 0))}
+            {renderEffectTree(motionEffectTree)}
           </div>
         </div>
       </div> : null}
       {!isCompositionMode ? <div className={panelCard}><span>Compose mode</span><small className="text-[#9b9da7]">Scene element selection is enabled and motion lanes are hidden.</small></div> : null}
     </section>
   );
+}
+
+function EffectTreeRow({ node, style, onStartEffectDrag }: NativeTreeNodeRendererProps<EffectTreeNode> & { onStartEffectDrag: (event: PointerEvent<HTMLButtonElement>, effect: string) => void }) {
+  const data = node.data;
+  if ("children" in data) {
+    const Chevron = node.isOpen ? ChevronDown : ChevronRight;
+    return <button className="grid h-full w-full min-w-0 grid-cols-[16px_18px_minmax(0,1fr)] items-center gap-1.5 rounded-[7px] border border-transparent px-1 text-left text-[12px] font-black text-[#b2b6c2] transition hover:bg-[#20232c]" style={style} type="button" onClick={(event) => { event.stopPropagation(); node.toggle(); }} aria-expanded={node.isOpen}>
+      <Chevron size={15} className="text-[#f1f3f7]" />
+      <Folder size={17} className="text-[#dfe3ec]" />
+      <span className="truncate">{data.name}</span>
+    </button>;
+  }
+
+  const EffectIcon = data.effect.category === "motion" ? WaveTriangleIcon : data.effect.category === "transition" ? ArrowLeftRight : CardsIcon;
+  return <button className={`${effectButtonClass} h-full w-full cursor-grab active:cursor-grabbing`} style={style} onPointerDown={(event) => onStartEffectDrag(event, data.effect.id)}><EffectIcon size={14} weight="bold" className="text-[#858995]" /><span className="truncate">{data.effect.label}</span></button>;
+}
+
+function countEffectTreeRows(nodes: EffectTreeNode[], openGroups: Set<string>): number {
+  return nodes.reduce((total, node) => {
+    if (!("children" in node)) return total + 1;
+    return total + 1 + (openGroups.has(node.path) ? countEffectTreeRows(node.children, openGroups) : 0);
+  }, 0);
 }

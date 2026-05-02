@@ -1,4 +1,4 @@
-import { reconstructFileName } from "./fileNames";
+import { reconstructFileName } from "../../../core/fileNames";
 
 export function getDirectoryPath(relativePath: string) {
   const lastSlashIndex = relativePath.lastIndexOf("/");

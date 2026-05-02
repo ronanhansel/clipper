@@ -3,6 +3,7 @@ import { effectBlocksMending, getAdjustmentEffectPackage } from "./effects/regis
 import { getMotionBlockEffectKind, getCanonicalMotionMarkers, getMotionMarkerViews, withCanonicalMotionMarkers } from "./motionEffects";
 import { MAX_PART_DURATION_SECONDS, MAX_SCENE_DURATION_SECONDS, type AdjustmentLayer, type CompositionClip, type MotionBlock, type MotionBlockEffectKind, type MotionEffectKind, type MotionMarker, type Scene, type TimelineComposition, type TimelineLayerState, type TimelineMotionLayerState, type TimelinePart, type TransitionLayer } from "./types";
 import { clamp, roundTenth, roundToPrecision, roundTwo } from "./math";
+import { getDisplayNameFromPath } from "./fileNames";
 
 export function buildLinearTimeline(scene: Scene): TimelineComposition[] {
   let cursor = 0;
@@ -35,21 +36,21 @@ export function validateScene(scene: Scene): string[] {
   const duration = sceneDuration(scene);
 
   if (duration > MAX_SCENE_DURATION_SECONDS) {
-    errors.push(`Scene ${scene.name} is ${duration}s and exceeds the 30 minute limit.`);
+    errors.push(`Timeline ${getDisplayNameFromPath(scene.id)} is ${duration}s and exceeds the 30 minute limit.`);
   }
 
   scene.compositions.forEach((composition) => {
     const compositionStart = composition.start ?? 0;
     if (composition.duration <= 0) {
-      errors.push(`Composition ${composition.name} must have a positive duration.`);
+      errors.push(`Composition ${getDisplayNameFromPath(composition.filePath)} must have a positive duration.`);
     }
 
     if (compositionStart < 0) {
-      errors.push(`Composition ${composition.name} cannot start before the timeline.`);
+      errors.push(`Composition ${getDisplayNameFromPath(composition.filePath)} cannot start before the timeline.`);
     }
 
     if (composition.duration > MAX_PART_DURATION_SECONDS) {
-      errors.push(`Composition ${composition.name} is ${composition.duration}s and exceeds the 1 minute limit.`);
+      errors.push(`Composition ${getDisplayNameFromPath(composition.filePath)} is ${composition.duration}s and exceeds the 1 minute limit.`);
     }
   });
 

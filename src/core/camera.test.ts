@@ -5,7 +5,6 @@ import type { Part, TimelineMotionLayerState } from "./types";
 
 const basePart: Part = {
   id: "part",
-  name: "Part",
   filePath: "part.ts",
   duration: 4,
   frame: { width: 1920, height: 1080, style: {} },
@@ -22,7 +21,7 @@ describe("camera", () => {
       objects: [{ id: "tracker", name: "Tracker", type: "rect", selector: "[data-object-id='tracker']", bounds: { x: 100, y: 100, width: 100, height: 100 }, style: {}, motion: { duration: 4, x: [0, 400] } }],
       motionMarkers: motionBlocksToMotionMarkers([{ id: "pan", effectId: "clipper.motion.pan", layerId: "removed_pan", start: 0, duration: 4, position: { x: 0, y: 0 }, followId: "tracker" }]),
     };
-    const layers: TimelineMotionLayerState[] = [{ id: "clipper.motion.pan", kind: "motion", name: "Pan" }];
+    const layers: TimelineMotionLayerState[] = [{ id: "clipper.motion.pan", kind: "motion" }];
 
     expect(getLayeredCameraPreviewTransform(part, layers, 2)).toMatchObject({ x: 0, y: 0 });
   });
@@ -45,7 +44,7 @@ describe("camera", () => {
       ...basePart,
       motionMarkers: motionBlocksToMotionMarkers([{ id: "rotate", effectId: "clipper.motion.rotate", layerId: "clipper.motion.rotate", start: 0, duration: 4, position: { x: 0, y: 0 }, rotation: 15 }]),
     };
-    const layers: TimelineMotionLayerState[] = [{ id: "clipper.motion.rotate", kind: "motion", name: "Rotate" }];
+    const layers: TimelineMotionLayerState[] = [{ id: "clipper.motion.rotate", kind: "motion" }];
 
     expect(getLayeredCameraPreviewTransform(part, layers, 2).rotation).toBeGreaterThan(0);
     expect(getLayeredCameraPreviewTransform(part, layers, 2, { pickingTranslationPosition: true }).rotation).toBe(0);
@@ -56,7 +55,7 @@ describe("camera", () => {
       ...basePart,
       motionMarkers: motionBlocksToMotionMarkers([{ id: "pan", effectId: "clipper.motion.pan", layerId: "clipper.motion.pan", start: 0, duration: 4, position: { x: 10, y: 20 }, snapIn: true, snapOut: true }]),
     };
-    const layers: TimelineMotionLayerState[] = [{ id: "clipper.motion.pan", kind: "motion", name: "Pan" }];
+    const layers: TimelineMotionLayerState[] = [{ id: "clipper.motion.pan", kind: "motion" }];
 
     expect(getLayeredCameraPreviewTransform(part, layers, 2)).toMatchObject({ x: 10, y: 20, z: 0 });
   });
@@ -66,7 +65,7 @@ describe("camera", () => {
       ...basePart,
       motionMarkers: motionBlocksToMotionMarkers([{ id: "perspective", effectId: "clipper.motion.perspective", layerId: "clipper.motion.perspective", start: 0, duration: 4, position: { x: 0, y: 0 }, perspective: { z: 300, rotateX: 8, rotateY: -4 }, snapIn: true, snapOut: true }]),
     };
-    const layers: TimelineMotionLayerState[] = [{ id: "clipper.motion.perspective", kind: "motion", name: "Perspective" }];
+    const layers: TimelineMotionLayerState[] = [{ id: "clipper.motion.perspective", kind: "motion" }];
 
     expect(getLayeredCameraPreviewTransform(part, layers, 2)).toMatchObject({ z: 300, rotateX: 8, rotateY: -4, perspective: CAMERA_PERSPECTIVE });
   });

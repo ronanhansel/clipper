@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deleteCompositionFromProject, normalizeProject, serializeProjectForSave } from "./project";
+import { deleteCompositionFromProject, normalizeProject, replacePartInProject, serializeProjectForSave } from "./project";
 import { motionBlocksToMotionMarkers } from "./motionEffects";
 import type { CompositionClip, ProjectManifest } from "./types";
 
@@ -7,7 +7,6 @@ const motionMarkers = motionBlocksToMotionMarkers([{ id: "zoom_1", effectId: "cl
 
 const composition: CompositionClip = {
   id: "cmp_intro",
-  name: "Intro",
   filePath: "compositions/cmp_intro.ts",
   duration: 5,
   frame: { width: 1920, height: 1080, style: { background: "#050505" } },
@@ -24,10 +23,10 @@ function projectWithComposition(): ProjectManifest {
     resolution: { width: 1920, height: 1080 },
     assetsPath: "assets",
     scenes: [],
-    timelines: [{
-      id: "tl_main",
-      name: "Main",
-      filePath: "timelines/tl_main.timeline.json",
+      timelines: [{
+        id: "tl_main",
+        filePath: "timelines/tl_main.timeline.json",
+
       clips: [{ id: composition.id, compositionId: composition.id, duration: composition.duration, motionMarkers }],
       adjustmentLayers: [],
       settings: {},
@@ -56,7 +55,6 @@ describe("project normalization", () => {
       ...projectWithComposition(),
       timelines: [{
         id: "tl_main",
-        name: "Main",
         filePath: "compositions/folder/tl_main.timeline.json",
         clips: [{ id: composition.id, compositionId: composition.id, duration: composition.duration, motionMarkers }],
         adjustmentLayers: [],
@@ -74,7 +72,6 @@ describe("project normalization", () => {
       ...projectWithComposition(),
       timelines: [{
         id: "tl_main",
-        name: "Main",
         filePath: "timelines/tl_main.timeline.json",
         clips: [],
         adjustmentLayers: [],
@@ -110,7 +107,6 @@ describe("project normalization", () => {
       ...projectWithComposition(),
       timelines: [{
         id: "tl_main",
-        name: "Main",
         filePath: "timelines/tl_main.timeline.json",
         clips: [],
         adjustmentLayers: [],
@@ -130,14 +126,14 @@ describe("project normalization", () => {
         timeline: { displacement: 0, zoom: 1 },
         timelineMode: "composition",
         timelineLayers: {
-          compositionLayers: [{ id: "comp", name: "Composition" }],
-          adjustmentLayers: [{ id: "adjust", name: "Adjust" }],
-          motionLayers: [{ id: "motion", kind: "empty", name: "Motion" }],
+      compositionLayers: [{ id: "comp" }],
+      adjustmentLayers: [{ id: "adjust" }],
+      motionLayers: [{ id: "motion", kind: "empty" }],
+
         },
       },
       timelines: [{
         id: "tl_main",
-        name: "Main",
         filePath: "timelines/tl_main.timeline.json",
         clips: [{ id: composition.id, compositionId: composition.id, duration: composition.duration, motionMarkers }],
         adjustmentLayers: [
@@ -162,11 +158,20 @@ describe("project normalization", () => {
     expect(deleted.scenes[0].compositions).toEqual([]);
   });
 
+  it("remaps timeline clip composition references when composition path IDs change", () => {
+    const renamedPath = "compositions/renamed_intro.composition.ts";
+    const renamed = replacePartInProject(projectWithComposition(), composition.id, (part) => ({ ...part, id: renamedPath, filePath: renamedPath }));
+
+    expect(renamed.compositions?.[0].id).toBe(renamedPath);
+    expect(renamed.compositionLibrary?.[0].id).toBe(renamedPath);
+    expect(renamed.timelines?.[0].clips[0].compositionId).toBe(renamedPath);
+  });
+
   it("creates one blank default row for each timeline category", () => {
     const normalized = normalizeProject(projectWithComposition());
 
-    expect(normalized.editorState?.timelineLayers?.compositionLayers).toEqual([{ id: "comp", name: "Composition", hidden: undefined }]);
-    expect(normalized.editorState?.timelineLayers?.adjustmentLayers).toEqual([{ id: "adjust", name: "Adjust", hidden: undefined }]);
-    expect(normalized.editorState?.timelineLayers?.motionLayers).toEqual([{ id: "motion", kind: "empty", name: "Motion", hidden: undefined }]);
+    expect(normalized.editorState?.timelineLayers?.compositionLayers).toEqual([{ id: "comp", hidden: undefined }]);
+    expect(normalized.editorState?.timelineLayers?.adjustmentLayers).toEqual([{ id: "adjust", hidden: undefined }]);
+    expect(normalized.editorState?.timelineLayers?.motionLayers).toEqual([{ id: "motion", kind: "empty", hidden: undefined }]);
   });
 });

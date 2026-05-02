@@ -33,7 +33,6 @@ describe("defineChart", () => {
   it("is available inside evaluated composition sources", async () => {
     const basePart: Part = {
       id: "prt_chart_eval",
-      name: "Chart Eval",
       filePath: "clipper/projects/test/prt_chart_eval.ts",
       duration: 4,
       frame: { width: 1920, height: 1080, style: { background: "#000" } },
@@ -69,7 +68,6 @@ describe("defineChart", () => {
   it("hydrates class-based component compositions into first-class objects", async () => {
     const basePart: Part = {
       id: "prt_component_eval",
-      name: "Component Eval",
       filePath: "clipper/projects/test/prt_component_eval.ts",
       duration: 4,
       frame: { width: 1920, height: 1080, style: { background: "#000" } },
@@ -118,7 +116,6 @@ describe("defineChart", () => {
   it("rejects non-current part exports", async () => {
     const basePart: Part = {
       id: "prt_invalid_export_eval",
-      name: "Invalid Export Eval",
       filePath: "clipper/projects/test/prt_invalid_export_eval.ts",
       duration: 4,
       frame: { width: 1920, height: 1080, style: { background: "#000" } },
@@ -142,7 +139,6 @@ describe("defineChart", () => {
   it("rejects plain object renderables", async () => {
     const basePart: Part = {
       id: "prt_plain_object_eval",
-      name: "Plain Object Eval",
       filePath: "clipper/projects/test/prt_plain_object_eval.ts",
       duration: 4,
       frame: { width: 1920, height: 1080, style: { background: "#000" } },
@@ -168,7 +164,6 @@ describe("defineChart", () => {
   it("generates component-authored source", () => {
     const source = compositionToSource({
       id: "prt_generated_eval",
-      name: "Generated Eval",
       filePath: "clipper/projects/test/prt_generated_eval.ts",
       duration: 4,
       frame: { width: 1920, height: 1080, style: { background: "#000" } },

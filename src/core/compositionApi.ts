@@ -167,7 +167,6 @@ export class Group extends Component {
 }
 
 export class Composition {
-  name?: string;
   duration: number;
   frame: { width: number; height: number; style?: Record<string, string | number> };
   background?: {
@@ -184,7 +183,6 @@ export class Composition {
   render: (context: RenderContext) => (RenderableObject | Component | Group | null | undefined | false | unknown[])[];
 
   constructor(props: Record<string, unknown>) {
-    this.name = props.name as string | undefined;
     this.duration = props.duration as number;
     this.frame = props.frame as { width: number; height: number; style?: Record<string, string | number> };
     this.background = props.background as typeof this.background;

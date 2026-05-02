@@ -3,6 +3,7 @@ import { loadCompositionsFromSource } from "../../core/compositionSource";
 import { normalizeProject, serializeProjectForSave } from "../../core/project";
 import { FRAME_HEIGHT, FRAME_WIDTH, type CompositionClip, type CompositionDocument, type EditorState, type ProjectManifest, type TimelineDocument } from "../../core/types";
 import { clipperHost } from "../clipperHost";
+import { getDisplayNameFromPath } from "../../core/fileNames";
 
 type LoadProjectInput = {
   manifestPath: string;
@@ -95,8 +96,7 @@ async function loadZipTimelines(zip: JSZip, rootPath: string, timelineOrder?: st
       const content = await file.async("string");
       const document = JSON.parse(content) as TimelineDocument;
       const filePath = projectPathFromZipEntry(rootPath, file.name);
-      const name = getFallbackDisplayName(document.name, file.name.replace(/^timelines\//, ""));
-      return { ...document, name, filePath };
+      return { ...document, id: filePath, filePath };
     })
   );
 
@@ -108,22 +108,21 @@ async function loadZipTimelines(zip: JSZip, rootPath: string, timelineOrder?: st
       if (leftIndex !== undefined && rightIndex !== undefined) return leftIndex - rightIndex;
       if (leftIndex !== undefined) return -1;
       if (rightIndex !== undefined) return 1;
-      return left.name.localeCompare(right.name, undefined, { sensitivity: "base" });
+      return getDisplayNameFromPath(left.filePath || left.id).localeCompare(getDisplayNameFromPath(right.filePath || right.id), undefined, { sensitivity: "base" });
     });
   }
 
-  return timelines.sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
+  return timelines.sort((left, right) => getDisplayNameFromPath(left.filePath || left.id).localeCompare(getDisplayNameFromPath(right.filePath || right.id), undefined, { sensitivity: "base" }));
 }
 
 async function loadZipCompositions(zip: JSZip, rootPath: string) {
   const entries = Object.values(zip.files).filter((file) => !file.dir && file.name.startsWith("compositions/") && file.name.endsWith(".ts"));
   return Promise.all(entries.map(async (file) => {
     const source = await file.async("string");
-    const id = getSourceCompositionId(source, file.name.replace(/^compositions\//, ""));
-    const baseComposition = createBaseComposition(id, projectPathFromZipEntry(rootPath, file.name), source);
+    const filePath = projectPathFromZipEntry(rootPath, file.name);
+    const baseComposition = createBaseComposition(filePath, filePath, source);
     const document = await compositionFromEmbeddedSource(baseComposition, source);
-    const name = getFallbackDisplayName(document.name, file.name.replace(/^compositions\//, ""));
-    return { ...document, name, source } as CompositionDocument;
+    return { ...document, source } as CompositionDocument;
   }));
 }
 
@@ -201,8 +200,7 @@ async function loadDirectoryTimelines(editableRoot: string, fallbackRoot: string
     timelineFiles.map(async (file) => {
       const document = JSON.parse(await clipperHost.readTextFile(file.path)) as TimelineDocument;
       const filePath = projectPathFromDirectoryEntry(fallbackRoot, file.relativePath, "timelines");
-      const name = getFallbackDisplayName(document.name, file.relativePath);
-      return { ...document, name, filePath };
+      return { ...document, id: filePath, filePath };
     })
   );
 
@@ -214,11 +212,11 @@ async function loadDirectoryTimelines(editableRoot: string, fallbackRoot: string
       if (leftIndex !== undefined && rightIndex !== undefined) return leftIndex - rightIndex;
       if (leftIndex !== undefined) return -1;
       if (rightIndex !== undefined) return 1;
-      return left.name.localeCompare(right.name, undefined, { sensitivity: "base" });
+      return getDisplayNameFromPath(left.filePath || left.id).localeCompare(getDisplayNameFromPath(right.filePath || right.id), undefined, { sensitivity: "base" });
     });
   }
 
-  return timelines.sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
+  return timelines.sort((left, right) => getDisplayNameFromPath(left.filePath || left.id).localeCompare(getDisplayNameFromPath(right.filePath || right.id), undefined, { sensitivity: "base" }));
 }
 
 async function loadDirectoryCompositions(editableRoot: string, fallbackRoot: string) {
@@ -234,11 +232,10 @@ async function loadDirectoryCompositions(editableRoot: string, fallbackRoot: str
   return Promise.all(
     compositionFiles.map(async (file) => {
       const source = await clipperHost.readTextFile(file.path);
-      const id = getSourceCompositionId(source, file.name);
-      const baseComposition = createBaseComposition(id, projectPathFromDirectoryEntry(fallbackRoot, file.relativePath, "compositions"), source);
+      const filePath = projectPathFromDirectoryEntry(fallbackRoot, file.relativePath, "compositions");
+      const baseComposition = createBaseComposition(filePath, filePath, source);
       const document = await compositionFromEmbeddedSource(baseComposition, source);
-      const name = getFallbackDisplayName(document.name, file.relativePath);
-      return { ...document, name, source } as CompositionDocument;
+      return { ...document, source } as CompositionDocument;
     })
   );
 }
@@ -304,6 +301,11 @@ async function saveDirectoryProject(manifestPath: string, project: ProjectManife
 
   const savedRelativePaths = new Set<string>();
 
+  for (const folderPath of normalized.compositionFolders ?? []) {
+    const relativePath = safeCompositionFolderPath(folderPath, rootPath);
+    await clipperHost.createDirectory(`${fileManagerDir}/${relativePath}`).catch(() => {});
+  }
+
   for (const composition of normalized.compositions ?? []) {
     const source = composition.source ?? normalized.compositionSources?.[composition.filePath];
     if (source === undefined) throw new Error(`Composition ${composition.filePath} is missing source.`);
@@ -341,7 +343,6 @@ function getSourceCompositionId(source: string, fileName: string) {
 function createBaseComposition(id: string, filePath: string, source: string): CompositionDocument {
   return {
     id,
-    name: id,
     filePath,
     source,
     duration: 5,
@@ -365,6 +366,12 @@ function safeTimelinePath(timeline: TimelineDocument, rootPath: string) {
   return safeProjectZipPath(timeline.filePath, rootPath, "timelines", `${safeZipName(timeline.id)}.timeline.json`, ".json");
 }
 
+function safeCompositionFolderPath(folderPath: string, rootPath: string) {
+  const relativePath = relativeProjectFilePath(folderPath, rootPath);
+  const entryPath = relativePath?.startsWith("compositions/") ? relativePath : relativePath ? `compositions/${relativePath}` : "compositions";
+  return isSafeZipEntryPath(entryPath) ? entryPath : "compositions";
+}
+
 function safeProjectZipPath(filePath: string | undefined, rootPath: string, folder: "compositions" | "timelines", fallbackFileName: string, extension: ".ts" | ".json") {
   const relativePath = relativeProjectFilePath(filePath, rootPath);
   const entryPath = relativePath?.startsWith(`${folder}/`) ? relativePath : relativePath ? `${folder}/${relativePath}` : `${folder}/${fallbackFileName}`;
@@ -385,12 +392,11 @@ function isSafeZipEntryPath(filePath: string) {
 }
 
 function projectPathFromZipEntry(rootPath: string, entryName: string) {
-  return rootPath ? `${rootPath}/${entryName}` : entryName;
+  return entryName;
 }
 
 function projectPathFromDirectoryEntry(rootPath: string, relativePath: string, folder: "compositions" | "timelines") {
-  const entryPath = `${folder}/${relativePath}`;
-  return rootPath ? `${rootPath}/${entryPath}` : entryPath;
+  return `${folder}/${relativePath}`;
 }
 
 function getDirectoryPath(path: string) {

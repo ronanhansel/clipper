@@ -7,6 +7,7 @@ import { generateChartObjects, type ChartGeneratedObject } from "../../core/char
 import { getBoundsUnion, insetBounds, isVisibleMarqueeBounds, updateDragSelectionBoxElement, type ResizeHandle } from "../../core/frameInteraction";
 import { clamp } from "../../core/math";
 import { getMotionMarkerViews } from "../../core/motionEffects";
+import { getDisplayNameFromPath } from "../../core/fileNames";
 import { evaluateBackgroundLayer, evaluateFrameObject, isTimeSensitiveFrameObject, type EvaluatedFrameObject } from "../../core/renderRuntime";
 import { FRAME_HEIGHT, FRAME_WIDTH, type AdjustmentLayer, type BackgroundLayer, type Bounds, type FrameObject, type Part, type Point, type RichTextSegment, type SelectionPayload, type TimelineMode, type TimelineMotionLayerState } from "../../core/types";
 import type { AdjustmentVisualOverlay } from "../../core/effects/types";
@@ -153,7 +154,8 @@ export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dra
 
   return (
     <div className="grid gap-3" data-clipper-frame-preview-wrapper>
-      <div className="flex items-baseline justify-between text-[#dfe2ea]"><span className={mutedCaps}>{part.name}</span><strong className="text-[13px]">{FRAME_WIDTH} x {FRAME_HEIGHT}</strong></div>
+      <div className="flex items-baseline justify-between text-[#dfe2ea]"><span className={mutedCaps}>{getDisplayNameFromPath(part.filePath)}</span>
+<strong className="text-[13px]">{FRAME_WIDTH} x {FRAME_HEIGHT}</strong></div>
       <div className="relative overflow-visible" style={viewportOverlayStyle}>
         <div ref={frameViewportRef} className={`absolute overflow-hidden bg-black shadow-[0_22px_70px_rgba(0,0,0,0.44)] ${!isPlaying && (focusPicking || trackerPicking) ? "cursor-crosshair ring-2 ring-[#159dff]" : ""}`} data-clipper-frame-preview style={clippedViewportStyle} onPointerDownCapture={handleFramePointerDownCapture} onPointerDown={isPlaying ? undefined : onFramePointerDown} onPointerMove={handleFramePointerMove} onPointerUp={isPlaying ? undefined : onFramePointerUp} onPointerCancel={isPlaying ? undefined : onFramePointerCancel} onPointerLeave={clearSelectorHover}>
           <div className="absolute left-0 top-0 origin-top-left overflow-hidden" data-clipper-frame-content style={frameStyle}>

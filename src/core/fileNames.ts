@@ -7,6 +7,7 @@ export type FileType = "composition" | "timeline" | "folder" | "file";
 
 const COMPOSITION_SUFFIXES = [".composition.ts", ".composition.json"];
 const TIMELINE_SUFFIXES = [".timeline.ts", ".timeline.json"];
+const DRAG_PREVIEW_SUFFIXES = [...COMPOSITION_SUFFIXES, ...TIMELINE_SUFFIXES, ".composition", ".timeline"];
 
 export function getDisplayName(fileName: string): string {
   for (const suffix of COMPOSITION_SUFFIXES) {
@@ -23,6 +24,19 @@ export function getDisplayName(fileName: string): string {
   // "main.timeline.ts ... should display/edit as main"
   // "README.md ... should display/edit unchanged"
   
+  return fileName;
+}
+
+export function getDisplayNameFromPath(filePath: string): string {
+  const fileName = filePath.split("/").pop() || "";
+  return getDisplayName(fileName);
+}
+
+export function getDragPreviewDisplayName(fileNameOrPath: string): string {
+  const fileName = fileNameOrPath.split("/").pop() || fileNameOrPath;
+  for (const suffix of DRAG_PREVIEW_SUFFIXES) {
+    if (fileName.endsWith(suffix)) return fileName.slice(0, -suffix.length);
+  }
   return fileName;
 }
 

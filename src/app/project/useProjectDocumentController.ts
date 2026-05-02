@@ -14,6 +14,7 @@ import { getProjectCompositionSources, getSyncedCompositionSources } from "./pro
 import type { Command } from "../features/file-manager/operations/Command";
 
 type ProjectHistoryEntry = { project: ProjectManifest; implicitFileOperation?: boolean; fileCommand?: Command };
+type SavedSnapshots = { project: string; compositionSources: string };
 
 export type ProjectDocumentController = {
   activeProjectManifestPath: string;
@@ -22,7 +23,8 @@ export type ProjectDocumentController = {
   compositionSourcesRef: MutableRefObject<Record<string, string>>;
   executeFileManagerCommand: (command: Command) => Promise<void>;
   fileSystemRevision: number;
-  implicitFileOperation: <T extends unknown[]>(operation: (...args: T) => void) => (...args: T) => void;
+  implicitFileOperation: <T extends unknown[]>(operation: (...args: T) => Promise<void> | void) => (...args: T) => void;
+  isFileSystemBusy: boolean;
   openProjectManifest: () => Promise<void>;
   project: ProjectManifest;
   projectRef: MutableRefObject<ProjectManifest>;
@@ -61,6 +63,10 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
   const { project, setProject, savedProjectSnapshot, setSavedProjectSnapshot, compositionSources, setCompositionSources, savedCompositionSourcesSnapshot, setSavedCompositionSourcesSnapshot } = useProjectDocumentState();
   const [activeProjectManifestPath, setActiveProjectManifestPath] = useState(initialProjectManifestPath);
   const [fileSystemRevision, setFileSystemRevision] = useState(0);
+  const [isFileSystemBusy, setIsFileSystemBusy] = useState(false);
+  const pendingFileOperationsRef = useRef(0);
+  const lastGoodProjectRef = useRef<ProjectManifest | null>(null);
+  const lastGoodSavedSnapshotsRef = useRef<SavedSnapshots | null>(null);
   const projectRef = useRef(project);
   const compositionSourcesRef = useRef(compositionSources);
   const activeProjectManifestPathRef = useRef(activeProjectManifestPath);
@@ -69,6 +75,11 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
   const projectHistoryRef = useRef<{ past: ProjectHistoryEntry[]; future: ProjectHistoryEntry[] }>({ past: [], future: [] });
   const lastProjectHistoryAtRef = useRef(0);
   const operationQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const fileSystemQueueGenerationRef = useRef(0);
+  const fileSystemRecoveryPromiseRef = useRef<Promise<void> | null>(null);
+  const implicitFileOperationBatchActiveRef = useRef(false);
+  const implicitFileOperationActiveCountRef = useRef(0);
+  const implicitFileOperationSaveVersionRef = useRef(0);
   const implicitFileOperationSaveTimeoutRef = useRef(0);
   const saveAllChangesRef = useRef<(() => Promise<void>) | null>(null);
   const watchedProjectDirectory = getDirectoryPath(activeProjectManifestPath);
@@ -200,7 +211,7 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
     setSourceStatus(manifestPath === activeManifestPath ? nextSourceStatus : `Migrated ${manifestPath} to ${activeManifestPath}. Save to write the .clipper container.`);
   }
 
-  const reloadProject = useCallback(async () => {
+  const reloadProjectFromDisk = useCallback(async () => {
     try {
       const { project: loadedProject } = await projectPersistenceService.loadProject({ manifestPath: activeProjectManifestPathRef.current });
       const normalizedProject = normalizeProject(loadedProject);
@@ -212,27 +223,103 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
     }
   }, [replaceProject, setSourceStatus, notifyError]);
 
+  const reloadProject = useCallback(async () => {
+    if (pendingFileOperationsRef.current > 0) return;
+    await reloadProjectFromDisk();
+  }, [reloadProjectFromDisk]);
+
   const enqueueHistoryOperation = useCallback(<T,>(operation: () => Promise<T> | T): Promise<T> => {
-    const promise = operationQueueRef.current.then(operation);
+    const promise = operationQueueRef.current.catch(() => {}).then(operation);
     operationQueueRef.current = promise.catch((error) => {
       console.error("History operation failed:", error);
-    }) as Promise<void>;
+    }).then(() => undefined);
     return promise;
   }, []);
 
-  const executeFileManagerCommand = useCallback((command: Command) => {
+  function beginQueuedFileSystemOperation() {
+    pendingFileOperationsRef.current++;
+    if (pendingFileOperationsRef.current === 1) {
+      lastGoodProjectRef.current = projectRef.current;
+      lastGoodSavedSnapshotsRef.current = {
+        project: savedProjectSnapshotRef.current,
+        compositionSources: savedCompositionSourcesSnapshotRef.current,
+      };
+      setIsFileSystemBusy(true);
+    }
+    return fileSystemQueueGenerationRef.current;
+  }
+
+  async function finishQueuedFileSystemOperation() {
+    pendingFileOperationsRef.current--;
+    if (pendingFileOperationsRef.current > 0) return;
+
+    pendingFileOperationsRef.current = 0;
+    setIsFileSystemBusy(false);
+    lastGoodProjectRef.current = null;
+    lastGoodSavedSnapshotsRef.current = null;
+    const recoveryPromise = fileSystemRecoveryPromiseRef.current;
+    if (recoveryPromise) {
+      await recoveryPromise;
+      if (fileSystemRecoveryPromiseRef.current === recoveryPromise) fileSystemRecoveryPromiseRef.current = null;
+      return;
+    }
+    await reloadProjectFromDisk();
+  }
+
+  function restoreLastGoodProject() {
+    if (!lastGoodProjectRef.current) return;
+    const restored = lastGoodProjectRef.current;
+    projectRef.current = restored;
+    setProject(restored);
+    syncCompositionSourcesFromProject(restored);
+    const snapshots = lastGoodSavedSnapshotsRef.current;
+    if (!snapshots) return;
+    savedProjectSnapshotRef.current = snapshots.project;
+    savedCompositionSourcesSnapshotRef.current = snapshots.compositionSources;
+    setSavedProjectSnapshot(snapshots.project);
+    setSavedCompositionSourcesSnapshot(snapshots.compositionSources);
+  }
+
+  function startFileSystemRecovery(cancelImplicitSave = true) {
+    fileSystemQueueGenerationRef.current++;
+    if (cancelImplicitSave) {
+      window.clearTimeout(implicitFileOperationSaveTimeoutRef.current);
+      implicitFileOperationSaveVersionRef.current++;
+    }
+    if (!fileSystemRecoveryPromiseRef.current) fileSystemRecoveryPromiseRef.current = reloadProjectFromDisk();
+  }
+
+  const enqueueFileSystemOperation = useCallback(<T,>(operation: () => Promise<T> | T, options: { rollbackOnFailure?: boolean; errorMessage?: string } = {}) => {
+    const operationGeneration = beginQueuedFileSystemOperation();
+
     return enqueueHistoryOperation(async () => {
+      try {
+        if (fileSystemRecoveryPromiseRef.current) await fileSystemRecoveryPromiseRef.current;
+        if (operationGeneration !== fileSystemQueueGenerationRef.current) throw new Error("File operation cancelled because an earlier operation failed.");
+        return await operation();
+      } catch (error) {
+        if (options.rollbackOnFailure) restoreLastGoodProject();
+        if (options.errorMessage) notifyError(error, options.errorMessage);
+        startFileSystemRecovery();
+        throw error;
+      } finally {
+        await finishQueuedFileSystemOperation();
+      }
+    });
+  }, [enqueueHistoryOperation, notifyError, reloadProjectFromDisk]);
+
+  const executeFileManagerCommand = useCallback((command: Command) => {
+    return enqueueFileSystemOperation(async () => {
       const previousProject = projectRef.current;
       await command.execute();
-      await reloadProject();
-      
+
       projectHistoryRef.current = {
         past: [...projectHistoryRef.current.past, { project: previousProject, fileCommand: command }].slice(-maxProjectHistoryActions),
         future: [],
       };
       lastProjectHistoryAtRef.current = Date.now();
     });
-  }, [reloadProject, enqueueHistoryOperation]);
+  }, [enqueueFileSystemOperation]);
 
   async function openProjectManifest() {
     try {
@@ -357,6 +444,11 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
   }
 
   function scheduleImplicitFileOperationSave(projectOverride = projectRef.current, errorMessage = "Unable to save file operation.") {
+    if (!implicitFileOperationBatchActiveRef.current) {
+      beginQueuedFileSystemOperation();
+      implicitFileOperationBatchActiveRef.current = true;
+    }
+
     const projectSources = projectOverride === projectRef.current ? compositionSourcesRef.current : getProjectCompositionSources(projectOverride);
     const projectToSave = normalizeProject({ ...projectOverride, compositionSources: projectSources });
     const projectSnapshot = getProjectContentSnapshot(projectToSave);
@@ -366,19 +458,68 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
     savedProjectSnapshotRef.current = projectSnapshot;
     savedCompositionSourcesSnapshotRef.current = compositionSourcesSnapshot;
 
+    const operationGeneration = fileSystemQueueGenerationRef.current;
+    const saveVersion = ++implicitFileOperationSaveVersionRef.current;
     window.clearTimeout(implicitFileOperationSaveTimeoutRef.current);
     implicitFileOperationSaveTimeoutRef.current = window.setTimeout(() => {
-      projectPersistenceService.saveProject({ manifestPath: activeProjectManifestPathRef.current, project: projectToSave })
-        .then((result) => setSourceStatus(result.sourceStatus))
-        .catch((error) => notifyError(error, errorMessage));
+      enqueueHistoryOperation(async () => {
+        try {
+          if (fileSystemRecoveryPromiseRef.current) await fileSystemRecoveryPromiseRef.current;
+          if (operationGeneration !== fileSystemQueueGenerationRef.current) throw new Error("File operation save cancelled because an earlier operation failed.");
+          const result = await projectPersistenceService.saveProject({ manifestPath: activeProjectManifestPathRef.current, project: projectToSave });
+          if (saveVersion !== implicitFileOperationSaveVersionRef.current) return;
+          setSourceStatus(result.sourceStatus);
+          lastGoodProjectRef.current = projectRef.current;
+        } catch (error) {
+          if (saveVersion !== implicitFileOperationSaveVersionRef.current) return;
+          notifyError(error, errorMessage);
+          restoreLastGoodProject();
+          startFileSystemRecovery(false);
+          throw error;
+        } finally {
+          if (saveVersion !== implicitFileOperationSaveVersionRef.current) return;
+          implicitFileOperationBatchActiveRef.current = false;
+          await finishQueuedFileSystemOperation();
+        }
+      });
     }, 150);
   }
 
-  function implicitFileOperation<T extends unknown[]>(operation: (...args: T) => void) {
+  function implicitFileOperation<T extends unknown[]>(operation: (...args: T) => Promise<void> | void) {
     return (...args: T) => {
-      operation(...args);
-      markLastHistoryEntryAsImplicitFileOperation();
-      scheduleImplicitFileOperationSave();
+      if (!implicitFileOperationBatchActiveRef.current) {
+        beginQueuedFileSystemOperation();
+        implicitFileOperationBatchActiveRef.current = true;
+      }
+      implicitFileOperationActiveCountRef.current++;
+
+      let opResult: Promise<void> | void;
+      try {
+        opResult = operation(...args);
+        markLastHistoryEntryAsImplicitFileOperation();
+      } catch (error) {
+        implicitFileOperationActiveCountRef.current = Math.max(0, implicitFileOperationActiveCountRef.current - 1);
+        restoreLastGoodProject();
+        startFileSystemRecovery();
+        notifyError(error, "Operation failed. Reverting to last good state.");
+        implicitFileOperationBatchActiveRef.current = false;
+        void finishQueuedFileSystemOperation();
+        return;
+      }
+
+      Promise.resolve(opResult).then(() => {
+        implicitFileOperationActiveCountRef.current = Math.max(0, implicitFileOperationActiveCountRef.current - 1);
+        if (implicitFileOperationActiveCountRef.current === 0) scheduleImplicitFileOperationSave();
+      }).catch((error) => {
+        implicitFileOperationActiveCountRef.current = Math.max(0, implicitFileOperationActiveCountRef.current - 1);
+        window.clearTimeout(implicitFileOperationSaveTimeoutRef.current);
+        implicitFileOperationSaveVersionRef.current++;
+        restoreLastGoodProject();
+        startFileSystemRecovery();
+        notifyError(error, "Operation failed. Reverting to last good state.");
+        implicitFileOperationBatchActiveRef.current = false;
+        void finishQueuedFileSystemOperation();
+      });
     };
   }
 
@@ -418,6 +559,7 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
     executeFileManagerCommand,
     fileSystemRevision,
     implicitFileOperation,
+    isFileSystemBusy,
     openProjectManifest,
     project,
     projectRef,
