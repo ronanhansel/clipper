@@ -100,5 +100,25 @@ export function buildFileManagerWorkspaceProps({ actions, ...state }: BuildFileM
 }
 
 export function FileManagerWorkspace(props: FileManagerWorkspaceProps) {
-  return <FileManager {...props} />;
+  function handleDragOver(event: React.DragEvent) {
+    if (event.dataTransfer.types.includes("Files")) {
+      event.preventDefault();
+      event.stopPropagation();
+      event.dataTransfer.dropEffect = "copy";
+    }
+  }
+
+  function handleDrop(event: React.DragEvent) {
+    if (event.dataTransfer.types.includes("Files") && event.dataTransfer.files.length > 0) {
+      event.preventDefault();
+      event.stopPropagation();
+      props.onDropFiles(event.dataTransfer.files);
+    }
+  }
+
+  return (
+    <div onDragOverCapture={handleDragOver} onDropCapture={handleDrop} className="min-h-0 min-w-0">
+      <FileManager {...props} />
+    </div>
+  );
 }

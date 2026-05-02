@@ -1861,7 +1861,11 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
     if (previewEventName) setClipperPointerDragPreview(previewEventName, Boolean(resolved?.valid && detail.phase !== "drop"));
 
     if (!resolved || !resolved.valid) {
-      if (detail.phase === "drop") setGlobalTimelineDragActive(false);
+      if (detail.phase === "drop") {
+        setGlobalTimelineDragActive(false);
+        if (previewEventName) setClipperPointerDragPreview(previewEventName, false);
+        stopTimelineDragAutoScroll();
+      }
       updateEffectDragPreview(null);
       clearTimelineSnapGuide();
       return;
@@ -1869,11 +1873,11 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
 
     if (detail.phase === "drop") {
       setGlobalTimelineDragActive(false);
-      updateEffectDragPreview(null);
       if (previewEventName) setClipperPointerDragPreview(previewEventName, false);
       clearTimelineSnapGuide();
       stopTimelineDragAutoScroll();
       resolved.handleDrop();
+      updateEffectDragPreview(null);
       return;
     }
 

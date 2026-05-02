@@ -126,7 +126,7 @@ export function FileManager(props: FileManagerProps) {
 }
 
 function FileManagerPanel() {
-  const { assets, compositions, compositionFolders, fileManagerState, compositionRootPath, timelines, contextMenu, selectedNodeIds, clearTreeFocus, setContextMenu, setSelectedNodeIds, onCopyAsset, onCreateComposition, onCreateCompositionFolder, onCreateFolder, onCreateTimeline, onDeleteAsset, onDeleteComposition, onDeleteCompositionFolder, onDeleteTimeline, onDropFiles, onMoveComposition, onMoveTimeline, onRevealAssetRoot, onSortAssets } = useFileManager();
+  const { assets, compositions, compositionFolders, fileManagerState, compositionRootPath, timelines, contextMenu, selectedNodeIds, clearTreeFocus, setContextMenu, setSelectedNodeIds, onCopyAsset, onCreateComposition, onCreateCompositionFolder, onCreateFolder, onCreateTimeline, onDeleteAsset, onDeleteComposition, onDeleteCompositionFolder, onDeleteTimeline, onMoveComposition, onMoveTimeline, onRevealAssetRoot, onSortAssets } = useFileManager();
   const managerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -172,29 +172,6 @@ function FileManagerPanel() {
     });
   }
 
-  function handleProjectDragOver(event: DragEvent<HTMLElement>) {
-    if (event.dataTransfer.files.length > 0 || event.dataTransfer.types.includes("application/x-clipper-composition") || event.dataTransfer.types.includes("application/x-clipper-timeline")) event.preventDefault();
-  }
-
-  function handleProjectDrop(event: DragEvent<HTMLElement>) {
-    const compositionId = event.dataTransfer.getData("application/x-clipper-composition");
-    const timelineId = event.dataTransfer.getData("application/x-clipper-timeline");
-    if (compositionId) {
-      event.preventDefault();
-      onMoveComposition(compositionId, compositionRootPath);
-      return;
-    }
-    if (timelineId) {
-      event.preventDefault();
-      onMoveTimeline(timelineId, compositionRootPath);
-      return;
-    }
-    if (event.dataTransfer.files.length > 0) {
-      event.preventDefault();
-      onDropFiles(event.dataTransfer.files);
-    }
-  }
-
   function handleFileManagerPointerDown(event: ReactPointerEvent<HTMLElement>) {
     if (event.button !== 0) return;
     if (event.target !== event.currentTarget) return;
@@ -234,7 +211,7 @@ function FileManagerPanel() {
   }, [assets, compositions, compositionFolders, compositionRootPath, onDeleteAsset, onDeleteComposition, onDeleteCompositionFolder, onDeleteTimeline, selectedNodeIds, timelines]);
 
   return (
-    <section ref={managerRef} data-file-manager-panel className="min-h-0 min-w-0 overflow-auto rounded-[14px] border border-dashed border-[#303646] bg-[#151821] p-3" onContextMenu={openProjectMenu} onDragOver={handleProjectDragOver} onDrop={handleProjectDrop} onKeyDown={handleFileManagerKeyDown} onPointerDown={handleFileManagerPointerDown}>
+    <section ref={managerRef} data-file-manager-panel className="min-h-0 min-w-0 overflow-auto rounded-[14px] border border-dashed border-[#303646] bg-[#151821] p-3" onContextMenu={openProjectMenu} onKeyDown={handleFileManagerKeyDown} onPointerDown={handleFileManagerPointerDown}>
       <div className="mb-2 flex items-center justify-between px-0.5">
         <h3 className="text-[13px] font-semibold text-[#aeb3c1]">File Manager</h3>
         <button className="grid h-7 w-7 place-items-center rounded-md text-[#dfe2ea] hover:bg-[#20232c]" aria-label="Create file manager item" onClick={openCreateMenu} type="button"><Plus size={17} /></button>
@@ -259,11 +236,8 @@ function UnifiedFileManagerTree() {
   const draggingNodeRef = useRef<FileManagerTreeNode | null>(null);
   const orderReferenceTreeRef = useRef<FileManagerTreeNode[] | null>(null);
   const latestTreeRef = useRef(tree);
-  const nativeMoveCompletedRef = useRef(false);
-  const fallbackDropAppliedRef = useRef(false);
-  const fallbackDragIdRef = useRef<string | null>(null);
-  const fallbackDropRef = useRef<FileManagerDropTarget | null>(null);
   const externalCompositionDragActiveRef = useRef(false);
+  const externalCompositionDropHandledRef = useRef(false);
   const externalDragRef = useRef<{ node: Extract<FileManagerTreeNode, { kind: "composition" }>; ghost: HTMLSpanElement; lastMouse: { x: number; y: number }; shiftKey: boolean } | null>(null);
   const externalDragFrameRef = useRef(0);
   const pendingExternalDragMoveRef = useRef<{ mouse: { x: number; y: number }; shiftKey: boolean } | null>(null);
@@ -277,11 +251,6 @@ function UnifiedFileManagerTree() {
     setDropCursorVisible(false);
     setDropParentId(undefined);
     setDropPointerY(null);
-  }, []);
-
-  const clearFallbackDrop = useCallback(() => {
-    fallbackDropRef.current = null;
-    fallbackDragIdRef.current = null;
   }, []);
 
   const endArboristDrag = useCallback(() => {
@@ -305,12 +274,6 @@ function UnifiedFileManagerTree() {
       return;
     }
     draggingNodeRef.current = node;
-    if (node && fallbackDragIdRef.current !== node.id) {
-      clearFallbackDrop();
-      fallbackDragIdRef.current = node.id;
-      fallbackDropAppliedRef.current = false;
-      nativeMoveCompletedRef.current = false;
-    }
     const rect = treeRef.current?.getBoundingClientRect();
     if (!node || !mouse || !rect) {
       hideDropCursor();
@@ -322,10 +285,9 @@ function UnifiedFileManagerTree() {
     const api = arboristTreeRef.current;
     const dragIds = api?.state.dnd.dragIds.includes(node.id) ? api.state.dnd.dragIds : [node.id];
     const drop = api ? getPointerFileTreeDrop(api, latestTreeRef.current, dragIds, localX, localY, rect.width) ?? getArboristFileTreeDrop(api, latestTreeRef.current, node.id, localX, localY, rect.width, treeHeight) : null;
-    fallbackDropRef.current = drop;
     setDropParentId(drop ? drop.parentId : undefined);
     setDropCursorVisible(localX >= 0 && localX <= rect.width && localY >= FILE_MANAGER_TOP_DROP_PADDING && localY <= rowDropHeight && visibleRowCount > 0);
-  }, [hideDropCursor, rowDropHeight, tree.length, treeHeight, visibleRowCount]);
+  }, [hideDropCursor, rowDropHeight, treeHeight, visibleRowCount]);
 
   const applyTreeMove = useCallback((dragIds: string[], parentId: string | null, index: number) => {
     const simpleTree = new SimpleTree<FileManagerTreeNode>(latestTreeRef.current);
@@ -465,39 +427,52 @@ function UnifiedFileManagerTree() {
     applyExternalCompositionDragMove(currentMouse, shiftKey);
   }, [applyExternalCompositionDragMove]);
 
-  const cleanupExternalCompositionDrag = useCallback((phase: "cancel" | "drop" | null) => {
-    const external = externalDragRef.current;
-    
-    // Clear active states synchronously to prevent stale interaction checks
+  const resetExternalCompositionDragState = useCallback(() => {
+    if (externalCompositionDragActiveRef.current) {
+      (arboristTreeRef.current as { dispatch?: (action: { type: "DND_DRAG_END" }) => void } | undefined)?.dispatch?.({ type: "DND_DRAG_END" });
+    }
     externalCompositionDragActiveRef.current = false;
     isExternalCompositionDragActiveGlobal = false;
-    treeRef.current?.removeAttribute("data-external-composition-drag");
     draggingNodeRef.current = null;
-    clearFallbackDrop();
+    treeRef.current?.removeAttribute("data-external-composition-drag");
+    hideDropCursor();
+    arboristTreeRef.current?.hideCursor();
+  }, [hideDropCursor]);
 
-    window.setTimeout(() => {
-      // Still trigger React state update to ensure UI consistency
-      setExternalCompositionDragActive(false);
-      const previewEl = document.querySelector(".group\\/filetree .clipper-drag-preview") as HTMLElement;
-      if (previewEl) previewEl.style.opacity = "1";
-    }, 0);
+  const restoreFileTreeHoverState = useCallback(() => {
+    setExternalCompositionDragActive(false);
+    const previewEl = document.querySelector(".group\\/filetree .clipper-drag-preview") as HTMLElement;
+    if (previewEl) previewEl.style.opacity = "1";
+  }, [setExternalCompositionDragActive]);
 
-    if (!external) return;
+  const cleanupExternalCompositionDrag = useCallback((phase: "cancel" | "drop" | null) => {
+    const external = externalDragRef.current;
+    if (!external && !externalCompositionDropHandledRef.current) return;
+
+    if (phase === "drop") externalCompositionDropHandledRef.current = true;
+    resetExternalCompositionDragState();
+    restoreFileTreeHoverState();
+
     if (externalDragFrameRef.current) window.cancelAnimationFrame(externalDragFrameRef.current);
     externalDragFrameRef.current = 0;
     pendingExternalDragMoveRef.current = null;
-    
-    // Dispatch events before final cleanup
+
+    if (!external) return;
     if (phase) dispatchExternalCompositionDrag(external.node, external.lastMouse, phase, external.shiftKey);
     if (phase === "cancel" || phase === "drop") setActiveCompositionPointerDrag(null);
-    
+
     external.ghost.remove();
     externalDragRef.current = null;
-    if (phase === "cancel" || phase === "drop") endArboristDrag();
-  }, [clearFallbackDrop, endArboristDrag, setExternalCompositionDragActive]);
+  }, [resetExternalCompositionDragState, restoreFileTreeHoverState]);
 
   useEffect(() => {
     function onNativeDragEnd() {
+      if (externalCompositionDropHandledRef.current) {
+        externalCompositionDropHandledRef.current = false;
+        resetExternalCompositionDragState();
+        restoreFileTreeHoverState();
+        return;
+      }
       cleanupExternalCompositionDrag("cancel");
     }
 
@@ -548,24 +523,6 @@ function UnifiedFileManagerTree() {
       external.ghost.style.opacity = (event as CustomEvent<PointerDragPreviewDetail>).detail?.active ? "0" : "1";
     }
 
-    function maybeApplyFallbackDrop() {
-      if (externalCompositionDragActiveRef.current) {
-        nativeMoveCompletedRef.current = false;
-        hideDropCursor();
-        return;
-      }
-      const fallbackDrop = fallbackDropRef.current;
-      window.setTimeout(() => {
-        if (fallbackDrop && !nativeMoveCompletedRef.current && !fallbackDropAppliedRef.current) {
-          fallbackDropAppliedRef.current = true;
-          applyTreeMove(fallbackDrop.dragIds, fallbackDrop.parentId, fallbackDrop.index);
-        }
-        nativeMoveCompletedRef.current = false;
-        hideDropCursor();
-        clearFallbackDrop();
-      }, 0);
-    }
-
     window.addEventListener("dragend", onNativeDragEnd);
     window.addEventListener("drop", dropExternalDrag, true);
     window.addEventListener("dragover", updateExternalDrag, true);
@@ -574,8 +531,6 @@ function UnifiedFileManagerTree() {
     window.addEventListener("keyup", updateShift, true);
     window.addEventListener(compositionDragPreviewEvent, updatePreviewVisibility);
 
-    window.addEventListener("dragend", maybeApplyFallbackDrop, true);
-    window.addEventListener("drop", maybeApplyFallbackDrop, true);
     return () => {
       window.removeEventListener("dragend", onNativeDragEnd);
       window.removeEventListener("drop", dropExternalDrag, true);
@@ -584,15 +539,11 @@ function UnifiedFileManagerTree() {
       window.removeEventListener("keydown", updateShift, true);
       window.removeEventListener("keyup", updateShift, true);
       window.removeEventListener(compositionDragPreviewEvent, updatePreviewVisibility);
-
-      window.removeEventListener("dragend", maybeApplyFallbackDrop, true);
-      window.removeEventListener("drop", maybeApplyFallbackDrop, true);
     };
-  }, [applyTreeMove, cleanupExternalCompositionDrag, clearFallbackDrop, ensureExternalCompositionDrag, hideDropCursor, scheduleExternalCompositionDragMove, setExternalCompositionDragActive]);
+  }, [cleanupExternalCompositionDrag, ensureExternalCompositionDrag, resetExternalCompositionDragState, restoreFileTreeHoverState, scheduleExternalCompositionDragMove, setExternalCompositionDragActive]);
 
   const handleMove: MoveHandler<FileManagerTreeNode> = ({ dragIds, parentId, index }) => {
     if (externalCompositionDragActiveRef.current) return;
-    nativeMoveCompletedRef.current = true;
     applyTreeMove(dragIds, parentId, index);
   };
 
