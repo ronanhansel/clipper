@@ -5,13 +5,16 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
-import { scenePrefersTiledCapture } from "./exportSceneHeuristics.js";
+import { analyzeFastCanvasExportCapability, scenePrefersTiledCapture } from "./exportSceneHeuristics.js";
+import { getExportRenderAheadFrameLimit, getRenderedVideoFrameCount, getRenderedVideoFrameTime } from "./exportTiming.js";
+import { cancelNativeVideoExportSession, finishNativeVideoExportSession, isNativeVideoExportOwner, startNativeH264StreamExportSession, writeOwnedNativeVideoExportChunk, type NativeVideoExportSession } from "./nativeVideoExport.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 const ffmpegPath = require("ffmpeg-static") as string | null;
 const isDev = process.env.VITE_DEV_SERVER_URL || !app.isPackaged;
 const cancelledVideoRenders = new Set<string>();
+const fastExportProgressCallbacks = new Map<string, { ownerWebContentsId: number; onProgress: (frame: number) => void }>();
 const textFileWatchers = new Map<number, FSWatcher[]>();
 const appStatePath = "clipper/app-state.json";
 const appIconPath = path.resolve(__dirname, "../build/icons/icon.png");
@@ -24,11 +27,9 @@ const exportCaptureTileValidationSamples = 2;
 const exportCaptureTileTimeoutMs = 4000;
 const exportCaptureTileMaxDifferingPixelRatio = 0.0005;
 const exportCaptureTileMaxAverageByteDelta = 0.025;
-const exportFullFrameStableFramesForTrust = 4;
 const exportFullFrameProbeAfterTiledStableFrames = 60;
 const exportRendererWorkerCount = 2;
 const exportRendererMaxWorkerCount = 10;
-const exportRenderAheadFramesPerWorker = 2;
 const deterministicExportMode = process.env.CLIPPER_EXPORT_DETERMINISTIC === "1";
 const deterministicExportLevel = process.env.CLIPPER_EXPORT_DETERMINISTIC_LEVEL === "strict" ? "strict" : "minimal";
 const allowNondeterministicTiledExport = process.env.CLIPPER_EXPORT_ALLOW_NONDETERMINISTIC_TILED === "1";
@@ -496,12 +497,24 @@ ipcMain.handle("clipper:cancel-render-video-export", async (_event, exportId: st
   cancelledVideoRenders.add(exportId);
 });
 
+ipcMain.handle("clipper:native-video-export-write-chunk", async (event, sessionId: string, chunk: Uint8Array) => {
+  await writeOwnedNativeVideoExportChunk(sessionId, event.sender.id, chunk);
+});
+
+ipcMain.handle("clipper:fast-video-export-progress", async (event, exportId: string, sessionId: string, frame: number) => {
+  const callback = fastExportProgressCallbacks.get(exportId);
+  if (!callback || callback.ownerWebContentsId !== event.sender.id || !isNativeVideoExportOwner(sessionId, event.sender.id, exportId)) return;
+  callback.onProgress(frame);
+});
+
 async function renderSceneToVideo(_project: ProjectManifest, scene: Scene, outputPath: string, frameRate: number, durationSeconds: number, exportId?: string, onProgress?: (progress: VideoExportProgress) => void, requestedWorkerCountInput?: number) {
   if (!ffmpegPath) throw new Error("The bundled ffmpeg binary is unavailable.");
 
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
+  if (await tryRenderSceneToVideoFastCanvas(_project, scene, outputPath, frameRate, durationSeconds, exportId, onProgress)) return;
+
   const encoder = getVideoEncoderArgs();
-  const totalFrames = Math.max(1, Math.ceil(durationSeconds * frameRate));
+  const totalFrames = getRenderedVideoFrameCount(durationSeconds, frameRate);
   onProgress?.({ frame: 0, totalFrames, percent: 0, status: `Preparing ${encoder.label} export...` });
 
   const ffmpeg = spawn(ffmpegPath, [
@@ -548,7 +561,7 @@ async function renderSceneToVideo(_project: ProjectManifest, scene: Scene, outpu
   };
   try {
     const workerCount = Math.min(getEffectiveExportWorkerCount(scene, requestedWorkerCount), totalFrames);
-    const maxBufferedFrames = Math.max(1, workerCount * exportRenderAheadFramesPerWorker);
+    const maxBufferedFrames = getExportRenderAheadFrameLimit(workerCount);
     metrics.effectiveWorkers = workerCount;
     console.log(`[clipper export] Starting rendered video export: ${totalFrames} frame(s), ${frameRate} fps, ${durationSeconds.toFixed(3)}s, ${workerCount} renderer worker(s), ${encoder.label}.`);
     if (traceVideoExport) console.log(`[clipper export trace] Max render-ahead buffer: ${maxBufferedFrames} frame(s).`);
@@ -561,6 +574,7 @@ async function renderSceneToVideo(_project: ProjectManifest, scene: Scene, outpu
       window.webContents.setVisualZoomLevelLimits(1, 1).catch(() => {});
       if (traceVideoExport) console.log(`[clipper export trace] Worker ${workerIndex + 1}: loading renderer.`);
       await loadRenderedMediaExportWindow(window);
+      await initializeExportRenderer(window, _project, scene, frameRate);
       if (traceVideoExport) console.log(`[clipper export trace] Worker ${workerIndex + 1}: ready.`);
     }
 
@@ -617,7 +631,7 @@ async function renderSceneToVideo(_project: ProjectManifest, scene: Scene, outpu
         }
         if (frameIndex === null) return;
         try {
-          const renderedFrame = await renderExportFrameWithWorker(worker, _project, scene, frameIndex, frameRate, durationSeconds);
+          const renderedFrame = await renderExportFrameWithWorker(worker, frameIndex, frameRate, durationSeconds);
           renderedFrames.set(renderedFrame.frameIndex, renderedFrame.frameBitmap);
           metrics.framesCaptured += 1;
           metrics.maxOrderedBufferSize = Math.max(metrics.maxOrderedBufferSize, renderedFrames.size);
@@ -685,6 +699,61 @@ async function renderSceneToVideo(_project: ProjectManifest, scene: Scene, outpu
   }
   finalizeMetrics("completed");
   onProgress?.({ frame: totalFrames, totalFrames, percent: 100, status: "Finalizing video..." });
+}
+
+async function tryRenderSceneToVideoFastCanvas(project: ProjectManifest, scene: Scene, outputPath: string, frameRate: number, durationSeconds: number, exportId?: string, onProgress?: (progress: VideoExportProgress) => void) {
+  const capability = analyzeFastCanvasExportCapability(scene);
+  if (!capability.supported) {
+    console.log(`[clipper export] Using legacy Electron capture backend; fast canvas unsupported: ${capability.reasons.slice(0, 6).join("; ")}${capability.reasons.length > 6 ? `; +${capability.reasons.length - 6} more` : ""}.`);
+    onProgress?.({ frame: 0, totalFrames: getRenderedVideoFrameCount(durationSeconds, frameRate), percent: 0, status: `Using compatibility capture export (${capability.reasons[0] ?? "unsupported fast scene"}).` });
+    return false;
+  }
+
+  const totalFrames = getRenderedVideoFrameCount(durationSeconds, frameRate);
+  const startedAt = Date.now();
+  let session: NativeVideoExportSession | null = null;
+  let worker: BrowserWindow | null = null;
+  let progressExportId: string | null = null;
+  try {
+    onProgress?.({ frame: 0, totalFrames, percent: 0, status: "Preparing fast WebCodecs export..." });
+    console.log(`[clipper export] Starting fast canvas/WebCodecs export: ${totalFrames} frame(s), ${frameRate} fps, ${durationSeconds.toFixed(3)}s, h264 stream-copy.`);
+    worker = createExportRendererWindow();
+    worker.webContents.setZoomFactor(1);
+    await loadRenderedMediaExportWindow(worker);
+    await initializeExportRenderer(worker, project, scene, frameRate);
+    const sessionId = `clipper-fast-export-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    progressExportId = exportId ?? sessionId;
+    session = await startNativeH264StreamExportSession({ sessionId, exportId: progressExportId, ffmpegPath: ffmpegPath!, ownerWebContentsId: worker.webContents.id, outputPath, frameRate });
+    fastExportProgressCallbacks.set(progressExportId, {
+      ownerWebContentsId: worker.webContents.id,
+      onProgress: (frame) => {
+        onProgress?.({ frame, totalFrames, percent: Math.round((frame / totalFrames) * 100), status: `Fast WebCodecs export frame ${frame} of ${totalFrames}` });
+      },
+    });
+    const rendererExportPromise = withTimeout<FastCanvasExportMetrics>(
+      worker.webContents.executeJavaScript(`window.__clipperRunFastCanvasExport(${JSON.stringify({ sessionId, durationSeconds, exportId: progressExportId })})`, true),
+      Math.max(exportRendererFrameTimeoutMs, totalFrames * 2000),
+      "Timed out during fast canvas WebCodecs export.",
+    );
+    const metrics = exportId ? await raceFastExportCancellation(rendererExportPromise, exportId, worker) : await rendererExportPromise;
+    if (exportId && cancelledVideoRenders.has(exportId)) throw new Error("Video export cancelled.");
+    await finishNativeVideoExportSession(session);
+    const elapsedMs = Date.now() - startedAt;
+    console.log(`[clipper export] Completed fast canvas/WebCodecs export: ${totalFrames} frame(s) in ${(elapsedMs / 1000).toFixed(2)}s (${(totalFrames / Math.max(elapsedMs / 1000, 0.001)).toFixed(2)} fps wall).`);
+    console.log(`[clipper export] Fast metrics: frames=${metrics.framesRendered}, chunks=${metrics.chunksWritten}, bytes=${metrics.bytesWritten}, canvas=${formatMs(metrics.renderCanvasMs)}, encode flush=${formatMs(metrics.encodeFlushMs)}, native write wait=${formatMs(metrics.nativeWriteWaitMs)}, max encode queue=${metrics.maxEncodeQueueSize}, max native writes=${metrics.maxInFlightNativeWrites}.`);
+    onProgress?.({ frame: totalFrames, totalFrames, percent: 100, status: "Finalizing fast video..." });
+    return true;
+  } catch (error) {
+    if (session) await cancelNativeVideoExportSession(session);
+    if (exportId) cancelledVideoRenders.delete(exportId);
+    if (error instanceof Error && error.message === "Video export cancelled.") throw error;
+    console.warn(`[clipper export] Fast canvas/WebCodecs export failed; falling back to legacy Electron capture: ${error instanceof Error ? error.message : String(error)}`);
+    await fs.rm(outputPath, { force: true }).catch(() => undefined);
+    return false;
+  } finally {
+    if (progressExportId) fastExportProgressCallbacks.delete(progressExportId);
+    if (worker && !worker.isDestroyed()) worker.destroy();
+  }
 }
 
 function getExportRendererWorkerCount(requestedWorkerCount?: number) {
@@ -759,16 +828,17 @@ function createExportRendererWindow() {
       backgroundThrottling: false,
       contextIsolation: true,
       nodeIntegration: false,
+      preload: path.join(__dirname, "preload.cjs"),
       zoomFactor: 1,
     },
   });
 }
 
-async function renderExportFrameWithWorker(worker: ExportRendererWorker, _project: ProjectManifest, _scene: Scene, frameIndex: number, frameRate: number, durationSeconds: number): Promise<RenderedExportFrame> {
-  const sceneTime = Math.min(frameIndex / frameRate, Math.max(durationSeconds - 0.001, 0));
+async function renderExportFrameWithWorker(worker: ExportRendererWorker, frameIndex: number, frameRate: number, durationSeconds: number): Promise<RenderedExportFrame> {
+  const sceneTime = getRenderedVideoFrameTime(frameIndex, frameRate, durationSeconds);
   const renderStartedAt = Date.now();
   if (traceVideoExport) console.log(`[clipper export trace] Rendering frame ${frameIndex + 1} at ${sceneTime.toFixed(3)}s.`);
-  const syncResult = await renderExportFrame(worker.window, _project, _scene, sceneTime, frameRate);
+  const syncResult = await renderExportFrame(worker.window, sceneTime);
   worker.metrics.renderJsPinMs += Date.now() - renderStartedAt;
   if (traceVideoExport) console.log(`[clipper export trace] Render frame ${frameIndex + 1} ready; capture starting.`);
   if (syncResult.failedCount > 0) {
@@ -796,12 +866,50 @@ async function loadRenderedMediaExportWindow(window: BrowserWindow) {
   await window.loadFile(path.join(__dirname, "../dist/index.html"), { query: { clipperExport: "1" } });
 }
 
-async function renderExportFrame(window: BrowserWindow, project: ProjectManifest, scene: Scene, sceneTime: number, frameRate: number) {
+async function initializeExportRenderer(window: BrowserWindow, project: ProjectManifest, scene: Scene, frameRate: number) {
+  await withTimeout<void>(
+    window.webContents.executeJavaScript(`window.__clipperInitializeRenderExport(${JSON.stringify({ project, scene, frameRate })})`, true),
+    exportRendererFrameTimeoutMs,
+    "Timed out initializing export renderer.",
+  );
+}
+
+async function renderExportFrame(window: BrowserWindow, sceneTime: number) {
   return withTimeout<RenderClockReadinessResult>(
-    window.webContents.executeJavaScript(`window.__clipperRenderExportFrame(${JSON.stringify({ project, scene, sceneTime, frameRate })})`, true),
+    window.webContents.executeJavaScript(`window.__clipperRenderExportFrame(${JSON.stringify({ sceneTime })})`, true),
     exportRendererFrameTimeoutMs,
     `Timed out waiting ${exportRendererFrameTimeoutMs}ms for export renderer frame at ${sceneTime.toFixed(3)}s.`,
   );
+}
+
+function raceFastExportCancellation<T>(promise: Promise<T>, exportId: string, window: BrowserWindow) {
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const interval = setInterval(() => {
+      if (!cancelledVideoRenders.has(exportId)) return;
+      clearInterval(interval);
+      if (!window.isDestroyed()) {
+        window.webContents.executeJavaScript("window.__clipperCancelFastCanvasExport?.()", true).catch(() => {});
+      }
+      if (!settled) {
+        settled = true;
+        reject(new Error("Video export cancelled."));
+      }
+    }, 100);
+    promise.then((value) => {
+      clearInterval(interval);
+      if (!settled) {
+        settled = true;
+        resolve(value);
+      }
+    }, (error) => {
+      clearInterval(interval);
+      if (!settled) {
+        settled = true;
+        reject(error);
+      }
+    });
+  });
 }
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string) {
@@ -826,7 +934,7 @@ function createExportCaptureState(scene: Scene, metrics: ExportMetrics): ExportC
     tileHeightIndex: 0,
     tileMemoryPressureDetected: false,
     tileMemoryPressureEverDetected: false,
-    fullFrameMode: preferTiledCapture && !deterministicExportMode ? "disabled" : "strict",
+    fullFrameMode: preferTiledCapture && !deterministicExportMode ? "disabled" : "enabled",
     fullFrameStableFrames: 0,
     tiledStableFrames: 0,
     preferTiledCapture,
@@ -913,9 +1021,6 @@ function recordStableFullFrameCapture(captureState: ExportCaptureState) {
   captureState.fullFrameStableFrames += 1;
   captureState.tiledStableFrames = 0;
   captureState.tileMemoryPressureDetected = false;
-  if (captureState.fullFrameMode !== "trusted" && captureState.fullFrameStableFrames >= exportFullFrameStableFramesForTrust) {
-    captureState.fullFrameMode = "trusted";
-  }
 }
 
 function recordFullFrameCaptureFailure(captureState: ExportCaptureState) {
@@ -928,7 +1033,7 @@ function recordFullFrameCaptureFailure(captureState: ExportCaptureState) {
 function recordStableTiledCapture(captureState: ExportCaptureState) {
   captureState.tiledStableFrames += 1;
   if (!captureState.preferTiledCapture && captureState.tiledStableFrames >= exportFullFrameProbeAfterTiledStableFrames) {
-    captureState.fullFrameMode = "strict";
+    captureState.fullFrameMode = "enabled";
     captureState.fullFrameStableFrames = 0;
   }
 }
@@ -1204,7 +1309,7 @@ type ExportCaptureState = {
   tileHeightIndex: number;
   tileMemoryPressureDetected: boolean;
   tileMemoryPressureEverDetected: boolean;
-  fullFrameMode: "strict" | "trusted" | "disabled";
+  fullFrameMode: "enabled" | "disabled";
   fullFrameStableFrames: number;
   tiledStableFrames: number;
   preferTiledCapture: boolean;
@@ -1212,6 +1317,7 @@ type ExportCaptureState = {
   metrics: ExportMetrics;
 };
 type ExportCaptureTile = { x: number; y: number; width: number; height: number };
+type FastCanvasExportMetrics = { framesRendered: number; chunksWritten: number; bytesWritten: number; renderCanvasMs: number; encodeFlushMs: number; nativeWriteWaitMs: number; maxEncodeQueueSize: number; maxInFlightNativeWrites: number };
 type MotionMarker = { start: number; duration: number };
 type AdjustmentLayer = { id: string; name: string; start: number; duration: number; effect: { kind?: "frameSkip"; every?: number; effectId?: string; params?: Record<string, unknown> } };
 type TransitionLayer = { id: string; name: string; start: number; duration: number; midPoint: number; effect: { effectId?: string; params?: Record<string, unknown> } };

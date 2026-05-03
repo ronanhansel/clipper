@@ -4,18 +4,31 @@ import { CAMERA_PERSPECTIVE } from "../../core/camera";
 import { waitForRenderClockAnimationsReady, type RenderClockReadinessResult } from "../../core/renderClock";
 import { FRAME_HEIGHT, FRAME_WIDTH, type CompositionClip, type ProjectManifest, type Scene } from "../../core/types";
 import { deriveFramePreviewRenderModel, getFramePreviewTimelineLayers } from "../state/framePreviewRenderModel";
+import { encodeSceneWithFastCanvas, type FastCanvasExportMetrics } from "./fastCanvasEncoder";
 
 type ExportFrameRequest = {
+  sceneTime: number;
+};
+
+type FastCanvasExportRequest = {
+  durationSeconds: number;
+  exportId?: string;
+  sessionId: string;
+};
+
+type ExportRendererContext = {
   project: ProjectManifest;
   scene: Scene;
-  sceneTime: number;
   frameRate: number;
 };
 
 declare global {
   interface Window {
+    __clipperInitializeRenderExport?: (context: ExportRendererContext) => Promise<void>;
     __clipperRenderExportFrame?: (request: ExportFrameRequest) => Promise<RenderClockReadinessResult>;
     __clipperSyncExportRenderClock?: () => Promise<RenderClockReadinessResult>;
+    __clipperRunFastCanvasExport?: (request: FastCanvasExportRequest) => Promise<FastCanvasExportMetrics>;
+    __clipperCancelFastCanvasExport?: () => void;
   }
 }
 
@@ -37,13 +50,26 @@ type ExportFramePreviewRefs = {
 
 export function RenderedMediaExportApp() {
   const [request, setRequest] = useState<ExportFrameRequest | null>(null);
+  const [context, setContext] = useState<ExportRendererContext | null>(null);
   const pendingRequestRef = useRef<PendingFrameRequest | null>(null);
   const cameraRef = useRef<HTMLDivElement | null>(null);
+  const fastCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const frameViewportRef = useRef<HTMLDivElement | null>(null);
   const dragSelectionBoxRef = useRef<HTMLDivElement | null>(null);
+  const fastCanvasCancelRef = useRef(false);
 
   useLayoutEffect(() => {
+    window.__clipperInitializeRenderExport = async (nextContext) => {
+      rejectPendingFrame(pendingRequestRef, new Error("Superseded by a newer export renderer initialization."));
+      setContext(nextContext);
+      setRequest(null);
+      await nextAnimationFrame();
+    };
     window.__clipperRenderExportFrame = (nextRequest) => new Promise((resolve, reject) => {
+      if (!context) {
+        reject(new Error("Export renderer was not initialized before frame render."));
+        return;
+      }
       rejectPendingFrame(pendingRequestRef, new Error("Superseded by a newer export frame request."));
       const timeoutId = window.setTimeout(() => {
         rejectPendingFrame(pendingRequestRef, new Error(`Timed out waiting ${exportFrameReadyTimeoutMs}ms for export frame render.`));
@@ -56,12 +82,35 @@ export function RenderedMediaExportApp() {
       await nextAnimationFrame();
       return syncResult;
     };
+    window.__clipperRunFastCanvasExport = async (fastRequest) => {
+      fastCanvasCancelRef.current = false;
+      if (!context) throw new Error("Export renderer was not initialized before fast canvas export.");
+      const nativeWriteChunk = window.clipper?.nativeVideoExportWriteChunk;
+      if (!nativeWriteChunk) throw new Error("Native H.264 stream writer was not installed.");
+      const canvas = fastCanvasRef.current;
+      if (!canvas) throw new Error("Fast canvas export surface was not mounted.");
+      return encodeSceneWithFastCanvas({
+        canvas,
+        scene: context.scene,
+        frameRate: context.frameRate,
+        durationSeconds: fastRequest.durationSeconds,
+        writer: { writeChunk: (chunk) => nativeWriteChunk(fastRequest.sessionId, chunk) },
+        isCancelled: () => fastCanvasCancelRef.current,
+        onFrame: fastRequest.exportId ? (frame) => window.clipper?.fastVideoExportProgress?.(fastRequest.exportId!, fastRequest.sessionId, frame) : undefined,
+      });
+    };
+    window.__clipperCancelFastCanvasExport = () => {
+      fastCanvasCancelRef.current = true;
+    };
     return () => {
       rejectPendingFrame(pendingRequestRef, new Error("Export renderer unmounted before frame completed."));
+      delete window.__clipperInitializeRenderExport;
       delete window.__clipperRenderExportFrame;
       delete window.__clipperSyncExportRenderClock;
+      delete window.__clipperRunFastCanvasExport;
+      delete window.__clipperCancelFastCanvasExport;
     };
-  }, []);
+  }, [context]);
 
   useLayoutEffect(() => {
     if (!request || !pendingRequestRef.current) return;
@@ -85,18 +134,20 @@ export function RenderedMediaExportApp() {
   return (
     <main className="h-screen w-screen overflow-hidden bg-black">
       <div className="absolute left-0 top-0 h-[1080px] w-[1920px] overflow-hidden bg-black">
-        <ExportRenderErrorBoundary onError={(error) => rejectPendingFrame(pendingRequestRef, error)} resetKey={request ? `${request.scene.id}:${request.sceneTime}` : "empty"}>
-          {request ? <ExportFramePreview key={request.scene.id} refs={{ cameraRef, dragSelectionBoxRef, frameViewportRef }} request={request} /> : <div className="h-full w-full bg-black" />}
+        <ExportRenderErrorBoundary onError={(error) => rejectPendingFrame(pendingRequestRef, error)} resetKey={request && context ? `${context.scene.id}:${request.sceneTime}` : "empty"}>
+          {request && context ? <ExportFramePreview key={context.scene.id} refs={{ cameraRef, dragSelectionBoxRef, frameViewportRef }} context={context} request={request} /> : <div className="h-full w-full bg-black" />}
         </ExportRenderErrorBoundary>
+        <canvas ref={fastCanvasRef} className="hidden" width={FRAME_WIDTH} height={FRAME_HEIGHT} />
       </div>
       <style>{`[data-clipper-frame-preview-wrapper] > :first-child{display:none}`}</style>
     </main>
   );
 }
 
-function ExportFramePreview({ refs, request }: { refs: ExportFramePreviewRefs; request: ExportFrameRequest }) {
+function ExportFramePreview({ refs, context, request }: { refs: ExportFramePreviewRefs; context: ExportRendererContext; request: ExportFrameRequest }) {
   const framePreviewProps = useMemo(() => {
-    const { project, scene, sceneTime, frameRate } = request;
+    const { project, scene, frameRate } = context;
+    const { sceneTime } = request;
     const previewModel = deriveFramePreviewRenderModel({
       blankPart: blankPreviewComposition,
       frameRate,
@@ -150,7 +201,7 @@ function ExportFramePreview({ refs, request }: { refs: ExportFramePreviewRefs; r
       onTextObjectDoubleClick: noopTextDoubleClick,
       onTrackerTargetPick: noopTrackerPick,
     };
-  }, [refs.cameraRef, refs.dragSelectionBoxRef, refs.frameViewportRef, request]);
+  }, [context, refs.cameraRef, refs.dragSelectionBoxRef, refs.frameViewportRef, request]);
 
   return framePreviewProps ? <FramePreview {...framePreviewProps} /> : <div className="h-full w-full bg-black" />;
 }

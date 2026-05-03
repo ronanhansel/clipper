@@ -50,6 +50,8 @@ interface Window {
     exportBinaryFile: (defaultFileName: string, base64Content: string) => Promise<string | null>;
     renderVideoExport: (exportId: string, defaultFileName: string, project: unknown, scene: unknown, frameRate: number, durationSeconds: number, workerCount: number) => Promise<string | null>;
     cancelRenderVideoExport: (exportId: string) => Promise<void>;
+    nativeVideoExportWriteChunk?: (sessionId: string, chunk: Uint8Array) => Promise<void>;
+    fastVideoExportProgress?: (exportId: string, sessionId: string, frame: number) => Promise<void>;
     setWindowFullscreen: (fullscreen: boolean) => Promise<boolean>;
     toggleWindowFullscreen: () => Promise<boolean>;
     watchTextFiles: (relativePaths: string[]) => Promise<void>;

@@ -27,6 +27,8 @@ contextBridge.exposeInMainWorld("clipper", {
   exportBinaryFile: (defaultFileName: string, base64Content: string) => ipcRenderer.invoke("clipper:export-binary-file", defaultFileName, base64Content) as Promise<string | null>,
   renderVideoExport: (exportId: string, defaultFileName: string, project: unknown, scene: unknown, frameRate: number, durationSeconds: number, workerCount: number) => ipcRenderer.invoke("clipper:render-video-export", exportId, defaultFileName, project, scene, frameRate, durationSeconds, workerCount) as Promise<string | null>,
   cancelRenderVideoExport: (exportId: string) => ipcRenderer.invoke("clipper:cancel-render-video-export", exportId) as Promise<void>,
+  nativeVideoExportWriteChunk: (sessionId: string, chunk: Uint8Array) => ipcRenderer.invoke("clipper:native-video-export-write-chunk", sessionId, chunk) as Promise<void>,
+  fastVideoExportProgress: (exportId: string, sessionId: string, frame: number) => ipcRenderer.invoke("clipper:fast-video-export-progress", exportId, sessionId, frame) as Promise<void>,
   onVideoExportProgress: (callback: (exportId: string, progress: { frame: number; totalFrames: number; percent: number; status: string }) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, exportId: string, progress: { frame: number; totalFrames: number; percent: number; status: string }) => callback(exportId, progress);
     ipcRenderer.on("clipper:video-export-progress", listener);
