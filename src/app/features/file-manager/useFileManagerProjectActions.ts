@@ -109,27 +109,31 @@ export function useFileManagerProjectActions({
   }
 
   async function createComposition(folderPath?: string) {
-    const safeFolderPath = folderPath && folderPath !== watchedProjectDirectory ? folderPath : "compositions";
+    const safeFolderPath = folderPath && folderPath !== watchedProjectDirectory ? folderPath : "";
     const siblingNames = (compositionLibrary ?? [])
-      .filter((composition) => getDirectoryPath(composition.filePath) === safeFolderPath)
+      .filter((composition) => {
+        const dir = getDirectoryPath(composition.filePath);
+        return dir === safeFolderPath || (dir === "." && safeFolderPath === "");
+      })
       .map((composition) => composition.filePath.split("/").pop() || composition.filePath);
     const fileName = nextNumberedSemanticName("untitled", ".composition.ts", siblingNames);
-    const filePath = `${safeFolderPath}/${fileName}`;
+    const filePath = safeFolderPath ? `${safeFolderPath}/${fileName}` : fileName;
     const result = createCompositionInLibrary(projectRef.current, compositionSourcesRef.current, part, filePath);
     syncCompositionResult(result);
   }
 
   async function createCompositionFolder(parentFolderPath?: string) {
-    const safeParent = parentFolderPath && parentFolderPath !== watchedProjectDirectory ? parentFolderPath : "compositions";
+    const safeParent = parentFolderPath && parentFolderPath !== watchedProjectDirectory ? parentFolderPath : "";
     const { folderPath, project: nextProject } = createCompositionFolderInProject(projectRef.current, safeParent, "");
     updateProject(nextProject);
   }
 
-  function createTimeline() {
+  function createTimeline(folderPath?: string) {
+    const safeFolderPath = folderPath && folderPath !== watchedProjectDirectory ? folderPath : "";
     const existingNames = (project.timelines ?? []).map(t => getDisplayNameFromPath(t.filePath || t.id));
     const nextName = nextNumberedName("New Timeline", existingNames);
     const fileName = `${nextName}.timeline.json`;
-    const filePath = `timelines/${fileName}`;
+    const filePath = safeFolderPath ? `${safeFolderPath}/${fileName}` : fileName;
     
     updateProject((current) => createTimelineInProject(current, filePath));
     updateTimelineMode("composition");
@@ -300,6 +304,7 @@ export function useFileManagerProjectActions({
     duplicateComposition,
     fileManagerStateChange: updateFileManagerState,
     findCompositionMedia,
+    openCompositionFile: () => undefined,
     moveComposition,
     moveTimeline,
     renameAsset,

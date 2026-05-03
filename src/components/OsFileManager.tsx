@@ -37,6 +37,7 @@ export type OsFileManagerProps = {
   onReloadProject: () => Promise<void>;
   onSelectComposition: (compositionId: string) => void;
   onSelectTimeline: (timelineId: string) => void;
+  onOpenFile: (filePath: string, options?: { isComposition?: boolean; temporary?: boolean }) => void;
   executeFileManagerCommand: (command: Command) => Promise<void>;
 };
 
@@ -51,6 +52,7 @@ export function OsFileManager({
   fileSystemRevision,
   onSelectComposition,
   onSelectTimeline,
+  onOpenFile,
   executeFileManagerCommand,
 }: OsFileManagerProps) {
   const [treeData, setTreeData] = useState<OsFileNode[]>([]);
@@ -296,16 +298,20 @@ export function OsFileManager({
   }, [selectedCompositionId, selectedTimelineId, effectiveDirectory, treeData]);
 
   const handleFileActivate = useCallback(
-    (nodeData: OsFileNode) => {
+    (nodeData: OsFileNode, event: ReactMouseEvent<HTMLDivElement>) => {
       const fileType = getFileType(nodeData.name, nodeData.isDirectory, nodeData.isComposition);
       const displayName = getDisplayName(nodeData.name);
+      const temporary = event.detail < 2;
       if (fileType === "composition") {
-        onSelectComposition(projectRelativeFilePath(nodeData.path, projectDirectory));
+        if (!temporary) onSelectComposition(projectRelativeFilePath(nodeData.path, projectDirectory));
+        onOpenFile(nodeData.path, { isComposition: true, temporary });
       } else if (fileType === "timeline") {
-        onSelectTimeline(nodeData.timelineId ?? displayName);
+        onOpenFile(nodeData.path, { temporary });
+      } else if (!nodeData.isDirectory) {
+        onOpenFile(nodeData.path, { temporary });
       }
     },
-    [onSelectComposition, onSelectTimeline, projectDirectory]
+    [onOpenFile, onSelectComposition, onSelectTimeline, projectDirectory]
   );
 
   const handleSelect = useCallback((nodes: NativeTreeNodeApi<OsFileNode>[]) => {
@@ -319,12 +325,13 @@ export function OsFileManager({
       const items: NonNullable<ContextMenuState>["items"] = [];
       const selectedNodes = node?.isSelected ? getTopLevelOsFileNodes(node.tree.selectedNodes.map((selectedNode) => selectedNode.data)) : [];
       const shouldUseSelection = selectedNodes.length > 1;
+      const targetPath = !node ? effectiveDirectory : node.data.path;
       if (!node || node.data.path === effectiveDirectory) {
         items.push(
-          { label: "New Composition", action: () => void createNewComposition(effectiveDirectory) },
-          { label: "New Timeline", action: () => void createNewTimeline(effectiveDirectory) },
-          { label: "New Folder", action: () => void createNewFolder(effectiveDirectory) },
-          { label: "Reveal in Finder", action: () => void clipperHost.revealFile(effectiveDirectory) }
+          { label: "New Composition", action: () => void createNewComposition(targetPath) },
+          { label: "New Timeline", action: () => void createNewTimeline(targetPath) },
+          { label: "New Folder", action: () => void createNewFolder(targetPath) },
+          { label: "Reveal in Finder", action: () => void clipperHost.revealFile(targetPath) }
         );
       } else if (node.data.isDirectory) {
         items.push(
@@ -361,7 +368,7 @@ export function OsFileManager({
 
   async function createNewComposition(basePath: string) {
     try {
-      const parentPath = basePath === effectiveDirectory ? `${effectiveDirectory}/compositions` : basePath;
+      const parentPath = basePath;
       const entries = await clipperHost.listDirectory(parentPath).catch(() => []);
       const names = entries.map((e) => e.name);
       const name = nextNumberedSemanticName("untitled", ".composition.ts", names);
@@ -386,7 +393,7 @@ export const composition = new Composition({
 
   async function createNewTimeline(basePath: string) {
     try {
-      const parentPath = basePath === effectiveDirectory ? `${effectiveDirectory}/timelines` : basePath;
+      const parentPath = basePath;
       const entries = await clipperHost.listDirectory(parentPath).catch(() => []);
       const names = entries.map((e) => e.name);
       const name = nextNumberedSemanticName("New Timeline", ".timeline.json", names);
@@ -686,7 +693,7 @@ export const composition = new Composition({
           onMove={handleMove}
           onRename={handleRename}
           onSelect={handleSelect}
-          onActivate={(node) => handleFileActivate(node.data)}
+          onActivate={(node, event) => handleFileActivate(node.data, event)}
           onToggle={handleToggle}
           openByDefault={false}
           paddingBottom={0}

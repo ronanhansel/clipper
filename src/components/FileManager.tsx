@@ -7,6 +7,7 @@ import type { AssetItem, CompositionClip, FileManagerState, FileManagerStateNode
 import { getTransparentNativeDragImage } from "../lib/nativeDragImage";
 import { getDisplayName, getDisplayNameFromPath, getDragPreviewDisplayName, getFileType, reconstructFileName } from "../core/fileNames";
 import { clipperDragGhostClassName, clipperDragGhostOffset, compositionDragPreviewEvent, compositionPointerDragEvent, dispatchClipperPointerDrag, type CompositionPointerDragDetail, type PointerDragPreviewDetail } from "../lib/pointerDrag";
+import { useDragAutoScroll } from "../lib/useDragAutoScroll";
 import { AppContextMenu } from "./AppContextMenu";
 import { NativeTree, type NativeTreeApi, type NativeTreeDragPreviewProps, type NativeTreeDropTarget, type NativeTreeNodeApi, type NativeTreeNodeRendererProps } from "./tree/NativeTree";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
@@ -59,7 +60,7 @@ export type FileManagerProps = {
   onCreateComposition: (folderPath?: string) => void;
   onCreateCompositionFolder: (parentFolderPath?: string) => void;
   onCreateFolder: (parentFolderId?: string) => void;
-  onCreateTimeline: () => void;
+  onCreateTimeline: (folderPath?: string) => void;
   onDeleteAsset: (assetId: string) => void;
   onDeleteComposition: (compositionId: string) => void;
   onDeleteCompositionFolder: (folderPath: string) => void;
@@ -74,6 +75,7 @@ export type FileManagerProps = {
   onFindCompositionMedia: (compositionId: string, fileName: string) => void;
   findMediaRequest?: { compositionId: string; fileName: string } | null;
   onFindMediaRequestChange?: (request: { compositionId: string; fileName: string } | null) => void;
+  onOpenCompositionFile?: (compositionId: string, options?: { temporary?: boolean }) => void;
   onRenameAsset: (assetId: string, name: string) => void;
   onRenameComposition: (compositionId: string, name: string) => void;
   onRenameCompositionFolder: (folderPath: string, name: string) => void;
@@ -267,7 +269,7 @@ function stripCompositionFileSuffix(fileName: string) {
 }
 
 function UnifiedFileManagerTree() {
-  const { assets, compositions, compositionFolders: folders, compositionRootPath: rootPath, fileManagerState, timelines, onApplyTreeSnapshot, onFileManagerStateChange, onRenameAsset, onRenameComposition, onRenameCompositionFolder: onRenameFolder, onRenameTimeline, registerNodeExpander, registerTreeFocusClearer, setSelectedNodeId: onSelectNode, setSelectedNodeIds: onSelectNodes, onSelectTimeline } = useFileManager();
+  const { assets, compositions, compositionFolders: folders, compositionRootPath: rootPath, fileManagerState, timelines, onApplyTreeSnapshot, onFileManagerStateChange, onOpenCompositionFile, onRenameAsset, onRenameComposition, onRenameCompositionFolder: onRenameFolder, onRenameTimeline, registerNodeExpander, registerTreeFocusClearer, setSelectedNodeId: onSelectNode, setSelectedNodeIds: onSelectNodes, onSelectTimeline } = useFileManager();
   const rawTree = useMemo(() => buildUnifiedFileTree(compositions, folders, rootPath, timelines, assets), [assets, compositions, folders, rootPath, timelines]);
   const [tree, setTree] = useState(() => syncFileTreeToSavedState(rawTree, fileManagerState?.tree));
   const initialOpenState = useMemo(() => fileManagerState?.openState ?? getFileTreeOpenState(tree), []);
@@ -283,11 +285,16 @@ function UnifiedFileManagerTree() {
   const externalDragRef = useRef<{ node: Extract<FileManagerTreeNode, { kind: "composition" }>; lastMouse: { x: number; y: number }; shiftKey: boolean } | null>(null);
   const externalDragFrameRef = useRef(0);
   const pendingExternalDragMoveRef = useRef<{ mouse: { x: number; y: number }; shiftKey: boolean } | null>(null);
-  const marqueeSelectionRef = useRef<{ startX: number; startY: number; pointerId: number; active: boolean } | null>(null);
+  const marqueeSelectionRef = useRef<{ startX: number; startY: number; pointerId: number; active: boolean; startScrollTop: number } | null>(null);
+  const marqueePointerRef = useRef<{ clientX: number; clientY: number } | null>(null);
   const [dropCursorVisible, setDropCursorVisible] = useState(false);
   const [dropParentId, setDropParentId] = useState<string | null | undefined>(undefined);
   const [compositionLanePreviewActive, setCompositionLanePreviewActive] = useState(false);
   const [marquee, setMarquee] = useState<{ startX: number; startY: number; currentX: number; currentY: number } | null>(null);
+  const { updateDragAutoScroll: updateMarqueeAutoScroll, stopDragAutoScroll: stopMarqueeAutoScroll } = useDragAutoScroll({
+    getScrollElement: () => getFileManagerScrollElement(treeRef.current),
+    axis: "y",
+  });
 
   const hideDropCursor = useCallback(() => {
     setDropCursorVisible(false);
@@ -356,10 +363,14 @@ function UnifiedFileManagerTree() {
     const start = marqueeSelectionRef.current;
     const api = nativeTreeRef.current;
     if (!start || !api) return;
+    const scrollElement = getFileManagerScrollElement(treeRef.current);
+    const scrollTop = scrollElement?.scrollTop ?? 0;
+    const startContentY = start.startY + start.startScrollTop;
+    const currentContentY = currentY + scrollTop;
     const left = Math.min(start.startX, currentX);
     const right = Math.max(start.startX, currentX);
-    const top = Math.min(start.startY, currentY);
-    const bottom = Math.max(start.startY, currentY);
+    const top = Math.min(startContentY, currentContentY);
+    const bottom = Math.max(startContentY, currentContentY);
     const nextIds = api.visibleNodes.flatMap((node) => {
       if (node.rowIndex === null) return [];
       const rowTop = node.rowIndex * FILE_MANAGER_ROW_HEIGHT + FILE_MANAGER_TOP_DROP_PADDING;
@@ -379,10 +390,11 @@ function UnifiedFileManagerTree() {
     if (!rect) return;
     const startX = event.clientX - rect.left;
     const startY = event.clientY - rect.top;
+    const startScrollTop = getFileManagerScrollElement(treeRef.current)?.scrollTop ?? 0;
     nativeTreeRef.current?.deselectAll();
     nativeTreeRef.current?.onBlur();
     onSelectNodes([]);
-    marqueeSelectionRef.current = { startX, startY, pointerId: event.pointerId, active: false };
+    marqueeSelectionRef.current = { startX, startY, pointerId: event.pointerId, active: false, startScrollTop };
     event.currentTarget.setPointerCapture(event.pointerId);
   }
 
@@ -393,16 +405,30 @@ function UnifiedFileManagerTree() {
     event.preventDefault();
   }
 
-  function handleMarqueePointerMove(event: ReactPointerEvent<HTMLDivElement>) {
+  function updateMarqueeFromClient(clientX: number, clientY: number) {
     const start = marqueeSelectionRef.current;
     const rect = treeRef.current?.getBoundingClientRect();
-    if (!start || start.pointerId !== event.pointerId || !rect) return;
-    const currentX = event.clientX - rect.left;
-    const currentY = event.clientY - rect.top;
+    if (!start || !rect) return;
+    const currentX = clientX - rect.left;
+    const currentY = clientY - rect.top;
     if (!start.active && Math.hypot(currentX - start.startX, currentY - start.startY) < 4) return;
+    const scrollTop = getFileManagerScrollElement(treeRef.current)?.scrollTop ?? 0;
     start.active = true;
-    setMarquee({ startX: start.startX, startY: start.startY, currentX, currentY });
+    setMarquee({ startX: start.startX, startY: start.startY + start.startScrollTop - scrollTop, currentX, currentY });
     updateMarqueeSelection(currentX, currentY);
+  }
+
+  function handleMarqueePointerMove(event: ReactPointerEvent<HTMLDivElement>) {
+    const start = marqueeSelectionRef.current;
+    if (!start || start.pointerId !== event.pointerId) return;
+    marqueePointerRef.current = { clientX: event.clientX, clientY: event.clientY };
+    updateMarqueeFromClient(event.clientX, event.clientY);
+    if (start.active) {
+      updateMarqueeAutoScroll(event.clientX, event.clientY, () => {
+        const pointer = marqueePointerRef.current;
+        if (pointer) updateMarqueeFromClient(pointer.clientX, pointer.clientY);
+      });
+    }
   }
 
   function finishMarquee(event: ReactPointerEvent<HTMLDivElement>) {
@@ -410,6 +436,8 @@ function UnifiedFileManagerTree() {
     if (!start || start.pointerId !== event.pointerId) return;
     const wasActive = start.active;
     marqueeSelectionRef.current = null;
+    marqueePointerRef.current = null;
+    stopMarqueeAutoScroll();
     setMarquee(null);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
     if (!wasActive) {
@@ -569,8 +597,9 @@ function UnifiedFileManagerTree() {
     if (node.kind === "timeline") onRenameTimeline(node.timeline.id, name);
   }
 
-  function handleActivate(node: NativeTreeNodeApi<FileManagerTreeNode>) {
-    if (node.data.kind === "timeline") onSelectTimeline(node.data.timeline.id);
+  function handleActivate(node: NativeTreeNodeApi<FileManagerTreeNode>, event: ReactMouseEvent<HTMLDivElement>) {
+    if (node.data.kind === "timeline" && event.detail >= 2) onSelectTimeline(node.data.timeline.id);
+    if (node.data.kind === "composition") onOpenCompositionFile?.(node.data.composition.id, { temporary: event.detail < 2 });
   }
 
   function handleSelect(nodes: NativeTreeNodeApi<FileManagerTreeNode>[]) {
@@ -596,6 +625,10 @@ function UnifiedFileManagerTree() {
   return <div ref={treeRef} className={`group/filetree relative ${isDroppingRoot ? "bg-[var(--clipper-accent-muted-surface)] shadow-[0_0_0_1px_rgba(255,255,255,0.05)_inset,0_0_0_2px_var(--clipper-accent)]" : ""}`} onPointerDownCapture={suppressEmptyTreePointerFocus} onPointerDown={handleMarqueePointerDown} onPointerMove={handleMarqueePointerMove} onPointerUp={finishMarquee} onPointerCancel={finishMarquee}>{marquee ? <FileManagerMarquee marquee={marquee} /> : null}<NativeTree<FileManagerTreeNode> ref={nativeTreeRef} data={tree} disableDrop={disableDrop} getDropTarget={({ dragIds, localX, localY, tree: api, width }) => getPointerFileTreeDrop(api, latestTreeRef.current, dragIds, localX, localY, width)} height={treeHeight} idAccessor="id" indent={FILE_MANAGER_INDENT} initialOpenState={initialOpenState} isInternal={isFileTreeFolderNode} movable onActivate={handleActivate} onMove={handleMove} onRename={handleRename} onSelect={handleSelect} onToggle={handleToggle} openByDefault={!fileManagerState?.openState} paddingBottom={FILE_MANAGER_BOTTOM_DROP_PADDING} paddingTop={FILE_MANAGER_TOP_DROP_PADDING} rowHeight={FILE_MANAGER_ROW_HEIGHT} width="100%" renderDragPreview={(previewProps) => <UnifiedTreeDragPreview {...previewProps} hideGhost={compositionLanePreviewActive} nodes={tree} onDragPositionChange={updateDragPosition} />}>{(nodeProps) => <UnifiedTreeNode {...nodeProps} />}</NativeTree></div>;
 }
 
+function getFileManagerScrollElement(tree: HTMLElement | null) {
+  return tree?.closest<HTMLElement>("[data-file-manager-panel]") ?? null;
+}
+
 function isFileManagerInteractiveTarget(target: HTMLElement) {
   return Boolean(target.closest("button,input,textarea,select,[contenteditable='true'],[data-file-manager-row='true']"));
 }
@@ -605,7 +638,7 @@ export function shouldSkipFileManagerShortcut(target: EventTarget | null) {
 }
 
 function UnifiedTreeNode({ dragHandle, node, style }: NativeTreeNodeRendererProps<FileManagerTreeNode>) {
-  const { assets, timelines, onAddComposition, onCopyAsset, onCopyCompositionPath, onCreateFolder: onCreateAssetFolder, onCreateComposition, onCreateCompositionFolder: onCreateFolder, onDeleteAsset, onDeleteComposition, onDeleteCompositionFolder: onDeleteFolder, onDeleteTimeline, onDuplicateAsset, onDuplicateComposition, requestNodeExpansion, setContextMenu: onOpenMenu, onFindMediaRequestChange, onRevealComposition, onSelectTimeline, onSortAssets } = useFileManager();
+  const { assets, timelines, onAddComposition, onCopyAsset, onCopyCompositionPath, onCreateFolder: onCreateAssetFolder, onCreateComposition, onCreateCompositionFolder: onCreateFolder, onCreateTimeline, onDeleteAsset, onDeleteComposition, onDeleteCompositionFolder: onDeleteFolder, onDeleteTimeline, onDuplicateAsset, onDuplicateComposition, requestNodeExpansion, setContextMenu: onOpenMenu, onFindMediaRequestChange, onRevealComposition, onSelectTimeline, onSortAssets } = useFileManager();
   const data = node.data;
   const displayName = data.kind === "composition" ? getDisplayNameFromPath(data.composition.filePath) :
                     data.kind === "timeline" ? getDisplayNameFromPath(data.timeline.filePath || data.timeline.id) :
@@ -648,7 +681,13 @@ function UnifiedTreeNode({ dragHandle, node, style }: NativeTreeNodeRendererProp
       return;
     }
     if (data.kind === "project-folder") {
-      onOpenMenu({ x: event.clientX, y: event.clientY, items: [{ label: "New composition", action: () => { onCreateComposition(data.path); requestNodeExpansion(projectFolderNodeId(data.path)); } }, { label: "New folder", action: () => { onCreateFolder(data.path); requestNodeExpansion(projectFolderNodeId(data.path)); } }, { label: "Rename", action: () => node.edit() }, { label: "Delete", action: () => onDeleteFolder(data.path), danger: true }] });
+      onOpenMenu({ x: event.clientX, y: event.clientY, items: [
+        { label: "New composition", action: () => { onCreateComposition(data.path); requestNodeExpansion(projectFolderNodeId(data.path)); } },
+        { label: "New timeline", action: () => { onCreateTimeline(data.path); requestNodeExpansion(projectFolderNodeId(data.path)); } },
+        { label: "New folder", action: () => { onCreateFolder(data.path); requestNodeExpansion(projectFolderNodeId(data.path)); } },
+        { label: "Rename", action: () => node.edit() },
+        { label: "Delete", action: () => onDeleteFolder(data.path), danger: true }
+      ] });
       return;
     }
     if (data.kind === "timeline") {
