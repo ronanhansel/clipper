@@ -1,11 +1,11 @@
 import { RotateCcw } from "lucide-react";
-import { appBarButtonBase, defaultNewMarkerDurationSeconds, defaultScrubCommitThrottleMs, defaultTimelineEndPaddingFraction, defaultTimelinePrecision } from "../app/config";
+import { appBarButtonBase, defaultNewMarkerDurationSeconds, defaultRenderedVideoExportWorkerCount, defaultScrubCommitThrottleMs, defaultTimelineEndPaddingFraction, defaultTimelinePrecision } from "../app/config";
 import type { SettingsSection } from "../app/types";
 import { clamp } from "../core/math";
 import { Dialog, DialogContent } from "./ui/dialog";
 import { Input } from "./ui/input";
 
-export function SettingsDialog({ activeSection, open, scrubCommitThrottleMs, defaultNewMarkerDurationSeconds: markerDurationSeconds, timelineEndPaddingFraction, timelinePrecision, onActiveSectionChange, onOpenChange, onScrubCommitThrottleMsChange, onDefaultNewMarkerDurationSecondsChange, onTimelineEndPaddingFractionChange, onTimelinePrecisionChange }: { activeSection: SettingsSection; open: boolean; scrubCommitThrottleMs: number; defaultNewMarkerDurationSeconds: number; timelineEndPaddingFraction: number; timelinePrecision: number; onActiveSectionChange: (section: SettingsSection) => void; onOpenChange: (open: boolean) => void; onScrubCommitThrottleMsChange: (value: number) => void; onDefaultNewMarkerDurationSecondsChange: (value: number) => void; onTimelineEndPaddingFractionChange: (value: number) => void; onTimelinePrecisionChange: (value: number) => void }) {
+export function SettingsDialog({ activeSection, open, scrubCommitThrottleMs, defaultNewMarkerDurationSeconds: markerDurationSeconds, renderedVideoExportWorkerCount, timelineEndPaddingFraction, timelinePrecision, onActiveSectionChange, onOpenChange, onScrubCommitThrottleMsChange, onDefaultNewMarkerDurationSecondsChange, onRenderedVideoExportWorkerCountChange, onTimelineEndPaddingFractionChange, onTimelinePrecisionChange }: { activeSection: SettingsSection; open: boolean; scrubCommitThrottleMs: number; defaultNewMarkerDurationSeconds: number; renderedVideoExportWorkerCount: number; timelineEndPaddingFraction: number; timelinePrecision: number; onActiveSectionChange: (section: SettingsSection) => void; onOpenChange: (open: boolean) => void; onScrubCommitThrottleMsChange: (value: number) => void; onDefaultNewMarkerDurationSecondsChange: (value: number) => void; onRenderedVideoExportWorkerCountChange: (value: number) => void; onTimelineEndPaddingFractionChange: (value: number) => void; onTimelinePrecisionChange: (value: number) => void }) {
   const navItems: Array<{ id: SettingsSection; label: string }> = [
     { id: "playback", label: "Playback" },
     { id: "timeline", label: "Timeline" },
@@ -37,6 +37,12 @@ export function SettingsDialog({ activeSection, open, scrubCommitThrottleMs, def
     onTimelinePrecisionChange(Math.round(clamp(parsed, 1, 6)));
   }
 
+  function updateRenderedVideoExportWorkerCount(value: string) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return;
+    onRenderedVideoExportWorkerCountChange(Math.round(clamp(parsed, 1, 10)));
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="h-[min(680px,calc(100vh-56px))] w-[min(980px,calc(100vw-42px))] gap-0 overflow-hidden p-0" showCloseButton={false}>
@@ -55,7 +61,7 @@ export function SettingsDialog({ activeSection, open, scrubCommitThrottleMs, def
             <header className="flex items-center justify-between border-b border-[#14161c] px-5">
               <div>
                 <h2 className="text-sm font-extrabold text-white">{navItems.find((item) => item.id === activeSection)?.label}</h2>
-                <p className="mt-1 text-xs text-[#8f939d]">{activeSection === "timeline" ? "Tune timeline interaction responsiveness." : "Settings for this section will be added as the editor grows."}</p>
+                <p className="mt-1 text-xs text-[#8f939d]">{activeSection === "timeline" ? "Tune timeline interaction responsiveness." : activeSection === "export" ? "Control rendered media export performance." : "Settings for this section will be added as the editor grows."}</p>
               </div>
               <button className={`${appBarButtonBase} px-3 py-1.5`} onClick={() => onOpenChange(false)}>Close</button>
             </header>
@@ -118,6 +124,28 @@ export function SettingsDialog({ activeSection, open, scrubCommitThrottleMs, def
                       </button>
                     </span>
                   </label>
+                </div>
+              ) : activeSection === "export" ? (
+                <div className="grid gap-4 rounded-xl border border-[#363b47] bg-[#1b1e26] p-4">
+                  <div className="grid gap-1.5">
+                    <strong className="text-sm text-white">Rendered video workers</strong>
+                    <p className="text-xs leading-5 text-[#8f939d]">Controls how many hidden renderer workers capture frames during MP4 export. More workers may be faster, but can increase Chromium GPU and memory pressure. 2 workers is recommended; frame accuracy validation remains enabled.</p>
+                  </div>
+                  <label className="grid max-w-[300px] gap-1.5 text-xs font-bold text-[#dfe2ea]" htmlFor="rendered-video-export-workers">
+                    Worker count
+                    <span className="relative">
+                      <Input id="rendered-video-export-workers" className="pr-10" min={1} max={10} step={1} type="number" value={renderedVideoExportWorkerCount} onChange={(event) => updateRenderedVideoExportWorkerCount(event.target.value)} />
+                      <button aria-label={`Reset rendered video export workers to ${defaultRenderedVideoExportWorkerCount}`} className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-md text-[#8f939d] transition hover:bg-[#252a34] hover:text-white" type="button" onClick={() => onRenderedVideoExportWorkerCountChange(defaultRenderedVideoExportWorkerCount)}>
+                        <RotateCcw size={14} />
+                      </button>
+                    </span>
+                    <span className="text-[11px] font-medium text-[#8f939d]">Range: 1-10. 2 workers is recommended.</span>
+                  </label>
+                  {renderedVideoExportWorkerCount > 5 ? (
+                    <div className="rounded-lg border border-[#8f5d1f] bg-[#2b2114] px-3 py-2 text-xs leading-5 text-[#f3c78f]" role="alert">
+                      High worker counts can create severe Chromium/GPU memory pressure, may slow export, and may fail safely rather than accepting unstable frames.
+                    </div>
+                  ) : null}
                 </div>
               ) : <div className="grid h-full place-items-center rounded-xl border border-dashed border-[#363b47] bg-[#1b1e26] text-center">
                 <div className="max-w-[320px] px-6">

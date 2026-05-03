@@ -3,15 +3,14 @@ import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:chil
 import { watch, type FSWatcher } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+import { scenePrefersTiledCapture } from "./exportSceneHeuristics.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 const ffmpegPath = require("ffmpeg-static") as string | null;
 const isDev = process.env.VITE_DEV_SERVER_URL || !app.isPackaged;
-const videoExportSessions = new Map<string, { process: ChildProcessWithoutNullStreams; outputPath: string; closePromise: Promise<string | null> }>();
 const cancelledVideoRenders = new Set<string>();
 const textFileWatchers = new Map<number, FSWatcher[]>();
 const appStatePath = "clipper/app-state.json";
@@ -25,19 +24,47 @@ const exportCaptureTileValidationSamples = 2;
 const exportCaptureTileTimeoutMs = 4000;
 const exportCaptureTileMaxDifferingPixelRatio = 0.0005;
 const exportCaptureTileMaxAverageByteDelta = 0.025;
+const exportFullFrameStableFramesForTrust = 4;
+const exportFullFrameProbeAfterTiledStableFrames = 60;
+const exportRendererWorkerCount = 2;
+const exportRendererMaxWorkerCount = 10;
+const exportRenderAheadFramesPerWorker = 2;
+const deterministicExportMode = process.env.CLIPPER_EXPORT_DETERMINISTIC === "1";
+const deterministicExportLevel = process.env.CLIPPER_EXPORT_DETERMINISTIC_LEVEL === "strict" ? "strict" : "minimal";
+const allowNondeterministicTiledExport = process.env.CLIPPER_EXPORT_ALLOW_NONDETERMINISTIC_TILED === "1";
+const traceVideoExport = process.env.CLIPPER_EXPORT_TRACE === "1";
+const hashExportFrames = process.env.CLIPPER_EXPORT_FRAME_HASH === "1";
+const exportCaptureTileCache = new Map<number, ExportCaptureTile[]>();
 let hardwareEncoderSupport: Set<string> | null = null;
 let systemFontFamilies: string[] | null = null;
+let commandVideoRenderActive = false;
 
 configureChromiumForStableExports();
 
 function configureChromiumForStableExports() {
+  if (deterministicExportMode && deterministicExportLevel === "strict") app.disableHardwareAcceleration();
   app.commandLine.appendSwitch("disable-backgrounding-occluded-windows");
   app.commandLine.appendSwitch("disable-renderer-backgrounding");
   app.commandLine.appendSwitch("disable-background-timer-throttling");
   app.commandLine.appendSwitch("disable-partial-raster");
   app.commandLine.appendSwitch("force-device-scale-factor", "1");
-  app.commandLine.appendSwitch("num-raster-threads", "4");
+  app.commandLine.appendSwitch("num-raster-threads", deterministicExportMode && deterministicExportLevel === "strict" ? "1" : "4");
   app.commandLine.appendSwitch("js-flags", "--max-old-space-size=4096");
+  if (!deterministicExportMode) return;
+
+  app.commandLine.appendSwitch("force-color-profile", "srgb");
+  app.commandLine.appendSwitch("disable-skia-runtime-opts");
+  if (deterministicExportLevel !== "strict") return;
+
+  app.commandLine.appendSwitch("run-all-compositor-stages-before-draw");
+  app.commandLine.appendSwitch("disable-new-content-rendering-timeout");
+  app.commandLine.appendSwitch("disable-threaded-animation");
+  app.commandLine.appendSwitch("disable-threaded-scrolling");
+  app.commandLine.appendSwitch("disable-checker-imaging");
+  app.commandLine.appendSwitch("disable-image-animation-resync");
+  app.commandLine.appendSwitch("disable-gpu-rasterization");
+  app.commandLine.appendSwitch("disable-accelerated-2d-canvas");
+  app.commandLine.appendSwitch("disable-zero-copy");
 }
 
 async function readAppState(): Promise<Record<string, unknown>> {
@@ -447,84 +474,7 @@ ipcMain.handle("clipper:export-binary-file", async (_event, defaultFileName: str
   return filePath;
 });
 
-ipcMain.handle("clipper:start-video-export", async (_event, defaultFileName: string, frameRate: number, width: number, height: number) => {
-  if (!ffmpegPath) throw new Error("The bundled ffmpeg binary is unavailable.");
-
-  const { canceled, filePath } = await dialog.showSaveDialog({
-    title: "Export video",
-    defaultPath: defaultFileName,
-    filters: [{ name: "MP4 Video", extensions: ["mp4"] }],
-  });
-
-  if (canceled || !filePath) return null;
-
-  const sessionId = randomUUID();
-  const ffmpeg = spawn(ffmpegPath, [
-    "-y",
-    "-f", "rawvideo",
-    "-pix_fmt", "rgba",
-    "-s", `${width}x${height}`,
-    "-r", String(frameRate),
-    "-i", "-",
-    "-an",
-    "-c:v", "libx264",
-    "-pix_fmt", "yuv420p",
-    "-movflags", "+faststart",
-    filePath,
-  ]);
-  ffmpeg.stdin.setMaxListeners(0);
-
-  let stderr = "";
-  ffmpeg.stderr.on("data", (chunk: Buffer) => {
-    stderr += chunk.toString("utf8");
-    if (stderr.length > 12000) stderr = stderr.slice(-12000);
-  });
-
-  const closePromise = new Promise<string | null>((resolve) => {
-    ffmpeg.once("error", (error) => resolve(error.message));
-    ffmpeg.once("close", (code) => {
-      videoExportSessions.delete(sessionId);
-      if (code === 0) resolve(null);
-      else resolve(stderr.trim() || `ffmpeg exited with code ${code ?? "unknown"}.`);
-    });
-  });
-
-  videoExportSessions.set(sessionId, { process: ffmpeg, outputPath: filePath, closePromise });
-  return { sessionId, filePath };
-});
-
-ipcMain.handle("clipper:write-video-frame", async (_event, sessionId: string, frameData: Uint8Array) => {
-  const session = videoExportSessions.get(sessionId);
-  if (!session) throw new Error("Video export session is not active.");
-
-  const frame = Buffer.from(frameData);
-  if (session.process.stdin.write(frame)) return;
-
-  await new Promise<void>((resolve, reject) => {
-    session.process.stdin.once("drain", resolve);
-    session.process.stdin.once("error", reject);
-  });
-});
-
-ipcMain.handle("clipper:finish-video-export", async (_event, sessionId: string) => {
-  const session = videoExportSessions.get(sessionId);
-  if (!session) throw new Error("Video export session is not active.");
-
-  session.process.stdin.end();
-  const error = await session.closePromise;
-  if (error) throw new Error(error);
-  return session.outputPath;
-});
-
-ipcMain.handle("clipper:cancel-video-export", async (_event, sessionId: string) => {
-  const session = videoExportSessions.get(sessionId);
-  if (!session) return;
-
-  videoExportSessions.delete(sessionId);
-  session.process.kill("SIGTERM");
-});
-
-ipcMain.handle("clipper:render-video-export", async (event, exportId: string, defaultFileName: string, project: ProjectManifest, scene: Scene, frameRate: number, durationSeconds: number) => {
+ipcMain.handle("clipper:render-video-export", async (event, exportId: string, defaultFileName: string, project: ProjectManifest, scene: Scene, frameRate: number, durationSeconds: number, workerCount?: number) => {
   const { canceled, filePath } = await dialog.showSaveDialog({
     title: "Export video",
     defaultPath: defaultFileName,
@@ -533,37 +483,26 @@ ipcMain.handle("clipper:render-video-export", async (event, exportId: string, de
 
   if (canceled || !filePath) return null;
   cancelledVideoRenders.delete(exportId);
-  await renderSceneToVideo(project, scene, filePath, frameRate, durationSeconds, exportId, (progress) => event.sender.send("clipper:video-export-progress", exportId, progress));
-  cancelledVideoRenders.delete(exportId);
-  shell.showItemInFolder(filePath);
-  return filePath;
+  try {
+    await renderSceneToVideo(project, scene, filePath, frameRate, durationSeconds, exportId, (progress) => event.sender.send("clipper:video-export-progress", exportId, progress), workerCount);
+    shell.showItemInFolder(filePath);
+    return filePath;
+  } finally {
+    cancelledVideoRenders.delete(exportId);
+  }
 });
 
 ipcMain.handle("clipper:cancel-render-video-export", async (_event, exportId: string) => {
   cancelledVideoRenders.add(exportId);
 });
 
-async function renderSceneToVideo(_project: ProjectManifest, scene: Scene, outputPath: string, frameRate: number, durationSeconds: number, exportId?: string, onProgress?: (progress: VideoExportProgress) => void) {
+async function renderSceneToVideo(_project: ProjectManifest, scene: Scene, outputPath: string, frameRate: number, durationSeconds: number, exportId?: string, onProgress?: (progress: VideoExportProgress) => void, requestedWorkerCountInput?: number) {
   if (!ffmpegPath) throw new Error("The bundled ffmpeg binary is unavailable.");
 
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
   const encoder = getVideoEncoderArgs();
   const totalFrames = Math.max(1, Math.ceil(durationSeconds * frameRate));
   onProgress?.({ frame: 0, totalFrames, percent: 0, status: `Preparing ${encoder.label} export...` });
-  const rendererWindow = new BrowserWindow({
-    width: frameWidth,
-    height: frameHeight,
-    useContentSize: true,
-    show: false,
-    frame: false,
-    transparent: false,
-    webPreferences: {
-      backgroundThrottling: false,
-      contextIsolation: true,
-      nodeIntegration: false,
-      zoomFactor: 1,
-    },
-  });
 
   const ffmpeg = spawn(ffmpegPath, [
     "-y",
@@ -593,48 +532,258 @@ async function renderSceneToVideo(_project: ProjectManifest, scene: Scene, outpu
     });
   });
 
+  const workers: ExportRendererWorker[] = [];
+  let workerPromises: Promise<void>[] = [];
+  let firstWorkerError: unknown = null;
+  const startedAt = Date.now();
+  const requestedWorkerCount = getExportRendererWorkerCount(requestedWorkerCountInput);
+  const metrics = createExportMetrics(totalFrames, requestedWorkerCount);
+  let metricsLogged = false;
+  let notifyExportWaiters = () => {};
+  const finalizeMetrics = (status: "completed" | "failed" | "cancelled") => {
+    if (metricsLogged) return;
+    metrics.totalElapsedMs = Date.now() - startedAt;
+    logExportMetrics(metrics, status);
+    metricsLogged = true;
+  };
   try {
-    rendererWindow.webContents.setZoomFactor(1);
-    rendererWindow.webContents.setVisualZoomLevelLimits(1, 1).catch(() => {});
-    await loadRenderedMediaExportWindow(rendererWindow);
-    let pendingFrameWrite: Promise<void> | null = null;
-    const captureState: ExportCaptureState = { tileHeightIndex: 0, tileMemoryPressureDetected: false };
-    const removeTileMemoryWarningListener = watchExportTileMemoryWarnings(rendererWindow, captureState);
+    const workerCount = Math.min(getEffectiveExportWorkerCount(scene, requestedWorkerCount), totalFrames);
+    const maxBufferedFrames = Math.max(1, workerCount * exportRenderAheadFramesPerWorker);
+    metrics.effectiveWorkers = workerCount;
+    console.log(`[clipper export] Starting rendered video export: ${totalFrames} frame(s), ${frameRate} fps, ${durationSeconds.toFixed(3)}s, ${workerCount} renderer worker(s), ${encoder.label}.`);
+    if (traceVideoExport) console.log(`[clipper export trace] Max render-ahead buffer: ${maxBufferedFrames} frame(s).`);
+    for (let workerIndex = 0; workerIndex < workerCount; workerIndex += 1) {
+      const window = createExportRendererWindow();
+      const captureState = createExportCaptureState(scene, metrics);
+      const removeTileMemoryWarningListener = watchExportTileMemoryWarnings(window, captureState);
+      workers.push({ window, captureState, removeTileMemoryWarningListener, metrics });
+      window.webContents.setZoomFactor(1);
+      window.webContents.setVisualZoomLevelLimits(1, 1).catch(() => {});
+      if (traceVideoExport) console.log(`[clipper export trace] Worker ${workerIndex + 1}: loading renderer.`);
+      await loadRenderedMediaExportWindow(window);
+      if (traceVideoExport) console.log(`[clipper export trace] Worker ${workerIndex + 1}: ready.`);
+    }
 
-    try {
-      for (let frameIndex = 0; frameIndex < totalFrames; frameIndex += 1) {
-        if (exportId && cancelledVideoRenders.has(exportId)) throw new Error("Video export cancelled.");
-        const sceneTime = Math.min(frameIndex / frameRate, Math.max(durationSeconds - 0.001, 0));
-        const syncResult = await renderExportFrame(rendererWindow, _project, scene, sceneTime, frameRate);
-        if (syncResult.failedCount > 0) {
-          throw new Error(`Export renderer failed to pin ${syncResult.failedCount} animation(s) at ${sceneTime.toFixed(3)}s after ${syncResult.passCount} sync pass(es).`);
+    let pendingFrameWrite: Promise<void> | null = null;
+    let nextFrameToRender = 0;
+    let nextFrameToWrite = 0;
+    let wakeWriter: (() => void) | null = null;
+    const renderCapacityWaiters = new Set<() => void>();
+    const renderedFrames = new Map<number, Buffer>();
+    const failExport = (error: unknown) => {
+      if (!firstWorkerError) firstWorkerError = error;
+      notifyWriter();
+      notifyRenderCapacity();
+    };
+    const notifyWriter = () => {
+      wakeWriter?.();
+      wakeWriter = null;
+    };
+    const notifyRenderCapacity = () => {
+      for (const resolve of renderCapacityWaiters) resolve();
+      renderCapacityWaiters.clear();
+    };
+    notifyExportWaiters = () => {
+      notifyWriter();
+      notifyRenderCapacity();
+    };
+    const waitForRenderCapacity = () => {
+      if (firstWorkerError || nextFrameToRender - nextFrameToWrite < maxBufferedFrames || nextFrameToRender >= totalFrames) return Promise.resolve();
+      return new Promise<void>((resolve) => {
+        renderCapacityWaiters.add(resolve);
+      });
+    };
+    const takeNextFrameIndex = () => {
+      if (firstWorkerError) return null;
+      if (exportId && cancelledVideoRenders.has(exportId)) {
+        failExport(new Error("Video export cancelled."));
+        return null;
+      }
+      if (nextFrameToRender - nextFrameToWrite >= maxBufferedFrames) return "wait" as const;
+      if (nextFrameToRender >= totalFrames) return null;
+      const frameIndex = nextFrameToRender;
+      nextFrameToRender += 1;
+      metrics.framesScheduled = Math.max(metrics.framesScheduled, nextFrameToRender);
+      metrics.maxRenderAheadDepth = Math.max(metrics.maxRenderAheadDepth, nextFrameToRender - nextFrameToWrite);
+      return frameIndex;
+    };
+
+    workerPromises = workers.map(async (worker) => {
+      while (!firstWorkerError) {
+        const frameIndex = takeNextFrameIndex();
+        if (frameIndex === "wait") {
+          await waitForRenderCapacity();
+          continue;
         }
-        const frameBitmap = await captureTiledExportFrame(rendererWindow, frameIndex, sceneTime, captureState);
-        if (pendingFrameWrite) await pendingFrameWrite;
-        pendingFrameWrite = writeProcessInput(ffmpeg, frameBitmap);
-        onProgress?.({ frame: frameIndex + 1, totalFrames, percent: Math.round(((frameIndex + 1) / totalFrames) * 100), status: `Rendering frame ${frameIndex + 1} of ${totalFrames} with ${encoder.label}` });
+        if (frameIndex === null) return;
+        try {
+          const renderedFrame = await renderExportFrameWithWorker(worker, _project, scene, frameIndex, frameRate, durationSeconds);
+          renderedFrames.set(renderedFrame.frameIndex, renderedFrame.frameBitmap);
+          metrics.framesCaptured += 1;
+          metrics.maxOrderedBufferSize = Math.max(metrics.maxOrderedBufferSize, renderedFrames.size);
+          notifyWriter();
+        } catch (error) {
+          failExport(error);
+          return;
+        }
+      }
+    });
+
+    while (nextFrameToWrite < totalFrames) {
+      if (exportId && cancelledVideoRenders.has(exportId) && !firstWorkerError) failExport(new Error("Video export cancelled."));
+      if (firstWorkerError) throw firstWorkerError;
+
+      const frameBitmap = renderedFrames.get(nextFrameToWrite);
+      if (!frameBitmap) {
+        await new Promise<void>((resolve) => {
+          wakeWriter = resolve;
+          if (firstWorkerError || renderedFrames.has(nextFrameToWrite)) notifyWriter();
+        });
+        continue;
       }
 
+      renderedFrames.delete(nextFrameToWrite);
       if (pendingFrameWrite) await pendingFrameWrite;
-      if (exportId && cancelledVideoRenders.has(exportId)) throw new Error("Video export cancelled.");
-    } finally {
-      removeTileMemoryWarningListener();
+      if (hashExportFrames) logExportFrameHash(nextFrameToWrite, frameBitmap);
+      const writeStartedAt = Date.now();
+      pendingFrameWrite = writeProcessInput(ffmpeg, frameBitmap).finally(() => {
+        metrics.ffmpegWriteWaitMs += Date.now() - writeStartedAt;
+      });
+      pendingFrameWrite.catch(failExport);
+      metrics.maxOrderedBufferSize = Math.max(metrics.maxOrderedBufferSize, renderedFrames.size);
+      onProgress?.({ frame: nextFrameToWrite + 1, totalFrames, percent: Math.round(((nextFrameToWrite + 1) / totalFrames) * 100), status: `Rendering frame ${nextFrameToWrite + 1} of ${totalFrames} with ${encoder.label}` });
+      nextFrameToWrite += 1;
+      metrics.framesWritten = nextFrameToWrite;
+      notifyWriter();
+      notifyRenderCapacity();
     }
+
+    await Promise.all(workerPromises);
+    if (pendingFrameWrite) await pendingFrameWrite;
+    if (exportId && cancelledVideoRenders.has(exportId)) throw new Error("Video export cancelled.");
   } catch (error) {
+    if (!firstWorkerError) firstWorkerError = error;
+    notifyExportWaiters();
     ffmpeg.kill("SIGTERM");
+    destroyExportRendererWorkers(workers);
+    finalizeMetrics(error instanceof Error && error.message === "Video export cancelled." ? "cancelled" : "failed");
+    await Promise.allSettled(workerPromises);
     if (exportId) cancelledVideoRenders.delete(exportId);
     if (error instanceof Error && error.message === "Video export cancelled.") {
       await fs.rm(outputPath, { force: true });
     }
     throw error;
   } finally {
-    rendererWindow.destroy();
+    destroyExportRendererWorkers(workers);
   }
 
   ffmpeg.stdin.end();
   const error = await closePromise;
-  if (error) throw new Error(error);
+  if (error) {
+    finalizeMetrics("failed");
+    throw new Error(error);
+  }
+  finalizeMetrics("completed");
   onProgress?.({ frame: totalFrames, totalFrames, percent: 100, status: "Finalizing video..." });
+}
+
+function getExportRendererWorkerCount(requestedWorkerCount?: number) {
+  if (requestedWorkerCount !== undefined) return clampExportRendererWorkerCount(requestedWorkerCount);
+  const raw = process.env.CLIPPER_EXPORT_WORKERS;
+  if (!raw) return clampExportRendererWorkerCount(requestedWorkerCount ?? exportRendererWorkerCount);
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed)) return clampExportRendererWorkerCount(requestedWorkerCount ?? exportRendererWorkerCount);
+  return clampExportRendererWorkerCount(parsed);
+}
+
+function clampExportRendererWorkerCount(workerCount: number) {
+  return Math.min(Math.max(Math.round(workerCount), 1), exportRendererMaxWorkerCount);
+}
+
+function getEffectiveExportWorkerCount(scene: Scene, requestedWorkerCount: number) {
+  if (requestedWorkerCount > 1 && scenePrefersTiledCapture(scene)) {
+    console.log(`[clipper export] Using 1 renderer worker for heavy WebLayer/SVG scene to preserve deterministic raw frame output; requested ${requestedWorkerCount}.`);
+    return 1;
+  }
+  return requestedWorkerCount;
+}
+
+function createExportMetrics(totalFrames: number, requestedWorkers: number): ExportMetrics {
+  return {
+    requestedWorkers,
+    effectiveWorkers: 0,
+    totalFrames,
+    framesScheduled: 0,
+    framesCaptured: 0,
+    framesWritten: 0,
+    totalElapsedMs: 0,
+    renderJsPinMs: 0,
+    fullFrameCaptureMs: 0,
+    tiledCaptureMs: 0,
+    validationMs: 0,
+    stitchMs: 0,
+    ffmpegWriteWaitMs: 0,
+    maxOrderedBufferSize: 0,
+    maxRenderAheadDepth: 0,
+    tileHeightHistogram: {},
+    fullFrameFallbackCount: 0,
+    tileFallbackCount: 0,
+    memoryWarningCount: 0,
+  };
+}
+
+function logExportMetrics(metrics: ExportMetrics, status: "completed" | "failed" | "cancelled") {
+  const seconds = metrics.totalElapsedMs / 1000;
+  const tileHistogram = Object.entries(metrics.tileHeightHistogram).sort((a, b) => Number(b[0]) - Number(a[0])).map(([height, count]) => `${height}px:${count}`).join(", ") || "none";
+  console.log(`[clipper export] ${status[0].toUpperCase()}${status.slice(1)} rendered video export: ${metrics.totalFrames} frame(s) in ${seconds.toFixed(2)}s (${(metrics.totalFrames / Math.max(seconds, 0.001)).toFixed(2)} fps wall), workers=${metrics.effectiveWorkers}/${metrics.requestedWorkers}.`);
+  console.log(`[clipper export] Metrics: scheduled/captured/written=${metrics.framesScheduled}/${metrics.framesCaptured}/${metrics.framesWritten}, render/pin cumulative=${formatMs(metrics.renderJsPinMs)}, capture full cumulative=${formatMs(metrics.fullFrameCaptureMs)}, capture tiled cumulative=${formatMs(metrics.tiledCaptureMs)}, validation cumulative=${formatMs(metrics.validationMs)}, stitch cumulative=${formatMs(metrics.stitchMs)}, ffmpeg write/drain cumulative=${formatMs(metrics.ffmpegWriteWaitMs)}, max completed ordered buffer=${metrics.maxOrderedBufferSize}, max render-ahead scheduled=${metrics.maxRenderAheadDepth}, fallbacks full/tile=${metrics.fullFrameFallbackCount}/${metrics.tileFallbackCount}, memory warnings=${metrics.memoryWarningCount}, tiles={${tileHistogram}}.`);
+}
+
+function formatMs(value: number) {
+  return `${Math.round(value)}ms`;
+}
+
+function logExportFrameHash(frameIndex: number, frame: Buffer) {
+  console.log(`[clipper export frame hash] frame=${frameIndex + 1} fnv1a32=${checksumBuffer(frame).toString(16).padStart(8, "0")} bytes=${frame.byteLength}`);
+}
+
+function createExportRendererWindow() {
+  return new BrowserWindow({
+    width: frameWidth,
+    height: frameHeight,
+    useContentSize: true,
+    show: false,
+    frame: false,
+    transparent: false,
+    webPreferences: {
+      backgroundThrottling: false,
+      contextIsolation: true,
+      nodeIntegration: false,
+      zoomFactor: 1,
+    },
+  });
+}
+
+async function renderExportFrameWithWorker(worker: ExportRendererWorker, _project: ProjectManifest, _scene: Scene, frameIndex: number, frameRate: number, durationSeconds: number): Promise<RenderedExportFrame> {
+  const sceneTime = Math.min(frameIndex / frameRate, Math.max(durationSeconds - 0.001, 0));
+  const renderStartedAt = Date.now();
+  if (traceVideoExport) console.log(`[clipper export trace] Rendering frame ${frameIndex + 1} at ${sceneTime.toFixed(3)}s.`);
+  const syncResult = await renderExportFrame(worker.window, _project, _scene, sceneTime, frameRate);
+  worker.metrics.renderJsPinMs += Date.now() - renderStartedAt;
+  if (traceVideoExport) console.log(`[clipper export trace] Render frame ${frameIndex + 1} ready; capture starting.`);
+  if (syncResult.failedCount > 0) {
+    throw new Error(`Export renderer failed to pin ${syncResult.failedCount} animation(s) at ${sceneTime.toFixed(3)}s after ${syncResult.passCount} sync pass(es).`);
+  }
+  const frameBitmap = await captureExportFrame(worker.window, frameIndex, sceneTime, worker.captureState);
+  if (traceVideoExport) console.log(`[clipper export trace] Capture frame ${frameIndex + 1} complete.`);
+  return { frameIndex, frameBitmap };
+}
+
+function destroyExportRendererWorkers(workers: ExportRendererWorker[]) {
+  for (const worker of workers) {
+    if (!worker.window.isDestroyed()) worker.removeTileMemoryWarningListener();
+    if (!worker.window.isDestroyed()) worker.window.destroy();
+  }
 }
 
 async function loadRenderedMediaExportWindow(window: BrowserWindow) {
@@ -657,7 +806,10 @@ async function renderExportFrame(window: BrowserWindow, project: ProjectManifest
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string) {
   return new Promise<T>((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error(message)), timeoutMs);
+    const timeout = setTimeout(() => {
+      if (traceVideoExport) console.warn(`[clipper export trace] timeout fired: ${message}`);
+      reject(new Error(message));
+    }, timeoutMs);
     promise.then((value) => {
       clearTimeout(timeout);
       resolve(value);
@@ -668,14 +820,133 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string)
   });
 }
 
+function createExportCaptureState(scene: Scene, metrics: ExportMetrics): ExportCaptureState {
+  const preferTiledCapture = scenePrefersTiledCapture(scene);
+  return {
+    tileHeightIndex: 0,
+    tileMemoryPressureDetected: false,
+    tileMemoryPressureEverDetected: false,
+    fullFrameMode: preferTiledCapture && !deterministicExportMode ? "disabled" : "strict",
+    fullFrameStableFrames: 0,
+    tiledStableFrames: 0,
+    preferTiledCapture,
+    allowHeavyFullFrameProbe: deterministicExportMode && preferTiledCapture,
+    metrics,
+  };
+}
+
+async function captureExportFrame(window: BrowserWindow, frameIndex: number, sceneTime: number, captureState: ExportCaptureState) {
+  if (shouldAttemptFullFrameCapture(captureState)) {
+    try {
+      const startedAt = Date.now();
+      const frame = await captureFullFrameExportFrame(window, frameIndex, sceneTime, captureState);
+      captureState.metrics.fullFrameCaptureMs += Date.now() - startedAt;
+      recordStableFullFrameCapture(captureState);
+      return frame;
+    } catch (error) {
+      recordFullFrameCaptureFailure(captureState);
+      captureState.metrics.fullFrameFallbackCount += 1;
+      console.warn(`Full-frame export capture fell back to adaptive tiles for frame ${frameIndex + 1}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  const startedAt = Date.now();
+  const frame = await captureTiledExportFrame(window, frameIndex, sceneTime, captureState);
+  captureState.metrics.tiledCaptureMs += Date.now() - startedAt;
+  recordStableTiledCapture(captureState);
+  return frame;
+}
+
+function shouldAttemptFullFrameCapture(captureState: ExportCaptureState) {
+  if (captureState.preferTiledCapture && !captureState.allowHeavyFullFrameProbe) return false;
+  if (deterministicExportMode && captureState.allowHeavyFullFrameProbe) return true;
+  if (captureState.fullFrameMode !== "disabled") return true;
+  if (captureState.allowHeavyFullFrameProbe) return false;
+  return captureState.tiledStableFrames >= exportFullFrameProbeAfterTiledStableFrames;
+}
+
+async function captureFullFrameExportFrame(window: BrowserWindow, frameIndex: number, sceneTime: number, captureState: ExportCaptureState) {
+  await applyFullFrameExportCaptureViewport(window);
+  await syncExportRenderClock(window, frameIndex, sceneTime);
+
+  captureState.tileMemoryPressureDetected = false;
+  const firstSample = await captureFullFrameExportBitmap(window, frameIndex, sceneTime);
+  const secondSample = await captureFullFrameExportBitmap(window, frameIndex, sceneTime);
+  if (captureState.tileMemoryPressureDetected) {
+    throw new ExportTileMemoryPressureError(`Chromium reported tile memory pressure while validating export frame ${frameIndex + 1} full-frame capture.`);
+  }
+  validateMatchingExportBitmaps(firstSample, secondSample, `Captured export frame ${frameIndex + 1} full-frame changed between validation samples at pinned time ${sceneTime.toFixed(3)}s`, captureState.metrics);
+  return firstSample;
+}
+
+async function applyFullFrameExportCaptureViewport(window: BrowserWindow) {
+  const [currentWidth, currentHeight] = window.getContentSize();
+  if (currentWidth !== frameWidth || currentHeight !== frameHeight) window.setContentSize(frameWidth, frameHeight, false);
+  await withTimeout(
+    window.webContents.executeJavaScript(`(() => {
+      document.documentElement.style.width = "${frameWidth}px";
+      document.documentElement.style.height = "${frameHeight}px";
+      document.documentElement.style.overflow = "hidden";
+      document.body.style.width = "${frameWidth}px";
+      document.body.style.height = "${frameHeight}px";
+      document.body.style.overflow = "hidden";
+      document.body.style.margin = "0";
+      document.body.style.transformOrigin = "0 0";
+      document.body.style.transform = "translate3d(0, 0, 0)";
+      return true;
+    })()`, true),
+    exportCaptureTileTimeoutMs,
+    "Timed out applying full-frame export capture viewport.",
+  );
+}
+
+async function captureFullFrameExportBitmap(window: BrowserWindow, frameIndex: number, sceneTime: number) {
+  const image = await withTimeout(
+    window.webContents.capturePage({ x: 0, y: 0, width: frameWidth, height: frameHeight }),
+    exportCaptureTileTimeoutMs,
+    `Timed out capturing export frame ${frameIndex + 1} full-frame at ${sceneTime.toFixed(3)}s.`,
+  );
+  return getBgraBitmap(image, frameWidth, frameHeight, `export frame ${frameIndex + 1} full-frame`);
+}
+
+function recordStableFullFrameCapture(captureState: ExportCaptureState) {
+  captureState.fullFrameStableFrames += 1;
+  captureState.tiledStableFrames = 0;
+  captureState.tileMemoryPressureDetected = false;
+  if (captureState.fullFrameMode !== "trusted" && captureState.fullFrameStableFrames >= exportFullFrameStableFramesForTrust) {
+    captureState.fullFrameMode = "trusted";
+  }
+}
+
+function recordFullFrameCaptureFailure(captureState: ExportCaptureState) {
+  captureState.fullFrameMode = "disabled";
+  captureState.fullFrameStableFrames = 0;
+  captureState.tiledStableFrames = 0;
+  captureState.tileMemoryPressureDetected = false;
+}
+
+function recordStableTiledCapture(captureState: ExportCaptureState) {
+  captureState.tiledStableFrames += 1;
+  if (!captureState.preferTiledCapture && captureState.tiledStableFrames >= exportFullFrameProbeAfterTiledStableFrames) {
+    captureState.fullFrameMode = "strict";
+    captureState.fullFrameStableFrames = 0;
+  }
+}
+
 async function captureTiledExportFrame(window: BrowserWindow, frameIndex: number, sceneTime: number, captureState: ExportCaptureState) {
+  if (deterministicExportMode && captureState.tileMemoryPressureEverDetected && !allowNondeterministicTiledExport) {
+    throw new Error(`Deterministic export cannot safely continue after Chromium tile-memory pressure forced tiled capture for frame ${frameIndex + 1}. Heavy WebLayer/SVG/filter tiled capture has not proven repeatable on this scene. Retry with CLIPPER_EXPORT_DETERMINISTIC_LEVEL=strict, simplify the scene, or explicitly opt into suspect tiled output with CLIPPER_EXPORT_ALLOW_NONDETERMINISTIC_TILED=1.`);
+  }
   const frame = Buffer.allocUnsafe(frameWidth * frameHeight * 4);
   while (captureState.tileHeightIndex < exportCaptureTileHeights.length) {
-    const tileHeight = exportCaptureTileHeights[captureState.tileHeightIndex];
-    try {
-      for (const tile of getExportCaptureTiles(tileHeight)) {
-        const tileBitmap = await captureStableExportTile(window, tile, frameIndex, sceneTime, captureState);
+      const tileHeight = exportCaptureTileHeights[captureState.tileHeightIndex];
+      try {
+        for (const tile of getExportCaptureTiles(tileHeight)) {
+          await syncExportRenderClock(window, frameIndex, sceneTime);
+          const tileBitmap = await captureStableExportTile(window, tile, frameIndex, sceneTime, captureState);
+        const stitchStartedAt = Date.now();
         stitchBgraTile(frame, tileBitmap, tile);
+        captureState.metrics.stitchMs += Date.now() - stitchStartedAt;
       }
       if (frame.byteLength !== frameWidth * frameHeight * 4) {
         throw new Error(`Stitched frame byte length was ${frame.byteLength}; expected ${frameWidth * frameHeight * 4}.`);
@@ -686,17 +957,29 @@ async function captureTiledExportFrame(window: BrowserWindow, frameIndex: number
       if (!shouldReduceExportTileHeight(captureState, error)) {
         throw new Error(`Failed to capture stable export frame ${frameIndex + 1} at ${sceneTime.toFixed(3)}s with ${tileHeight}px tiles: ${message}`);
       }
+      captureState.metrics.tileFallbackCount += 1;
     }
   }
 
   throw new Error(`Failed to capture stable export frame ${frameIndex + 1} at ${sceneTime.toFixed(3)}s: exhausted adaptive tile heights (${exportCaptureTileHeights.join(" -> ")}).`);
 }
 
+async function syncExportRenderClock(window: BrowserWindow, frameIndex: number, sceneTime: number) {
+  await withTimeout<RenderClockReadinessResult>(
+    window.webContents.executeJavaScript("window.__clipperSyncExportRenderClock()", true),
+    exportRendererFrameTimeoutMs,
+    `Timed out syncing export render clock before capture for frame ${frameIndex + 1} at ${sceneTime.toFixed(3)}s.`,
+  );
+}
+
 function getExportCaptureTiles(tileHeight: number) {
+  const cached = exportCaptureTileCache.get(tileHeight);
+  if (cached) return cached;
   const tiles: ExportCaptureTile[] = [];
   for (let y = 0; y < frameHeight; y += tileHeight) {
     tiles.push({ x: 0, y, width: frameWidth, height: Math.min(tileHeight, frameHeight - y) });
   }
+  exportCaptureTileCache.set(tileHeight, tiles);
   return tiles;
 }
 
@@ -706,6 +989,7 @@ async function captureStableExportTile(window: BrowserWindow, tile: ExportCaptur
     try {
       captureState.tileMemoryPressureDetected = false;
       await applyExportCaptureViewport(window, tile);
+      await syncExportRenderClock(window, frameIndex, sceneTime);
       const samples: Buffer[] = [];
       for (let sampleIndex = 0; sampleIndex < exportCaptureTileValidationSamples; sampleIndex += 1) {
         samples.push(await captureExportTileBitmap(window, tile, frameIndex, sceneTime));
@@ -713,16 +997,10 @@ async function captureStableExportTile(window: BrowserWindow, tile: ExportCaptur
       if (captureState.tileMemoryPressureDetected) {
         throw new ExportTileMemoryPressureError(`Chromium reported tile memory pressure while capturing export frame ${frameIndex + 1} tile ${formatTileRange(tile)}.`);
       }
-      const firstChecksum = checksumBuffer(samples[0]);
       for (let sampleIndex = 1; sampleIndex < samples.length; sampleIndex += 1) {
-        const nextChecksum = checksumBuffer(samples[sampleIndex]);
-        if (firstChecksum !== nextChecksum || !samples[0].equals(samples[sampleIndex])) {
-          const diff = getBitmapDiffStats(samples[0], samples[sampleIndex]);
-          if (!isAcceptableCaptureReadbackDrift(diff)) {
-            throw new ExportTileUnstableError(`Captured export frame ${frameIndex + 1} tile ${formatTileRange(tile)} changed between validation samples at pinned time ${sceneTime.toFixed(3)}s (${formatBitmapDiffStats(diff)}).`);
-          }
-        }
+        validateMatchingExportBitmaps(samples[0], samples[sampleIndex], `Captured export frame ${frameIndex + 1} tile ${formatTileRange(tile)} changed between validation samples at pinned time ${sceneTime.toFixed(3)}s`, captureState.metrics);
       }
+      captureState.metrics.tileHeightHistogram[tile.height] = (captureState.metrics.tileHeightHistogram[tile.height] ?? 0) + 1;
       return samples[0];
     } catch (error) {
       lastError = error;
@@ -744,6 +1022,23 @@ async function captureExportTileBitmap(window: BrowserWindow, tile: ExportCaptur
     `Timed out capturing export frame ${frameIndex + 1} tile ${formatTileRange(tile)} at ${sceneTime.toFixed(3)}s.`,
   );
   return getBgraBitmap(image, tile.width, tile.height, `export frame ${frameIndex + 1} tile ${formatTileRange(tile)}`);
+}
+
+function validateMatchingExportBitmaps(first: Buffer, second: Buffer, message: string, metrics?: ExportMetrics) {
+  const startedAt = Date.now();
+  try {
+    if (first.equals(second)) return;
+
+    const firstChecksum = checksumBuffer(first);
+    const secondChecksum = checksumBuffer(second);
+    const diff = getBitmapDiffStats(first, second);
+    if (traceVideoExport) console.warn(`[clipper export trace] validation mismatch: first checksum=${firstChecksum}, second checksum=${secondChecksum}, ${formatBitmapDiffStats(diff)}.`);
+    if (!isAcceptableCaptureReadbackDrift(diff)) {
+      throw new ExportTileUnstableError(`${message} (${formatBitmapDiffStats(diff)}).`);
+    }
+  } finally {
+    if (metrics) metrics.validationMs += Date.now() - startedAt;
+  }
 }
 
 async function applyExportCaptureViewport(window: BrowserWindow, tile: ExportCaptureTile) {
@@ -785,9 +1080,12 @@ function isAdaptiveTileReductionSignal(error: unknown) {
 }
 
 function watchExportTileMemoryWarnings(window: BrowserWindow, captureState: ExportCaptureState) {
-  const handleConsoleMessage = (_event: Electron.Event, _level: number, message: string) => {
+  const handleConsoleMessage = (event: Electron.Event<Electron.WebContentsConsoleMessageEventParams>, _level?: number, legacyMessage?: string) => {
+    const message = legacyMessage ?? event.message ?? "";
     if (/tile memory limits exceeded|some content may not draw/i.test(message)) {
       captureState.tileMemoryPressureDetected = true;
+      captureState.tileMemoryPressureEverDetected = true;
+      captureState.metrics.memoryWarningCount += 1;
     }
   };
   window.webContents.on("console-message", handleConsoleMessage);
@@ -879,12 +1177,45 @@ async function writeProcessInput(process: ChildProcessWithoutNullStreams, chunk:
 
 type VideoExportProgress = { frame: number; totalFrames: number; percent: number; status: string };
 type RenderClockReadinessResult = { animationCount: number; pinnedCount: number; failedCount: number; pendingReadyCount: number; passCount: number; layerCount: number };
-type ExportCaptureState = { tileHeightIndex: number; tileMemoryPressureDetected: boolean };
+type ExportMetrics = {
+  requestedWorkers: number;
+  effectiveWorkers: number;
+  totalFrames: number;
+  framesScheduled: number;
+  framesCaptured: number;
+  framesWritten: number;
+  totalElapsedMs: number;
+  renderJsPinMs: number;
+  fullFrameCaptureMs: number;
+  tiledCaptureMs: number;
+  validationMs: number;
+  stitchMs: number;
+  ffmpegWriteWaitMs: number;
+  maxOrderedBufferSize: number;
+  maxRenderAheadDepth: number;
+  tileHeightHistogram: Record<number, number>;
+  fullFrameFallbackCount: number;
+  tileFallbackCount: number;
+  memoryWarningCount: number;
+};
+type ExportRendererWorker = { window: BrowserWindow; captureState: ExportCaptureState; removeTileMemoryWarningListener: () => void; metrics: ExportMetrics };
+type RenderedExportFrame = { frameIndex: number; frameBitmap: Buffer };
+type ExportCaptureState = {
+  tileHeightIndex: number;
+  tileMemoryPressureDetected: boolean;
+  tileMemoryPressureEverDetected: boolean;
+  fullFrameMode: "strict" | "trusted" | "disabled";
+  fullFrameStableFrames: number;
+  tiledStableFrames: number;
+  preferTiledCapture: boolean;
+  allowHeavyFullFrameProbe: boolean;
+  metrics: ExportMetrics;
+};
 type ExportCaptureTile = { x: number; y: number; width: number; height: number };
 type MotionMarker = { start: number; duration: number };
 type AdjustmentLayer = { id: string; name: string; start: number; duration: number; effect: { kind?: "frameSkip"; every?: number; effectId?: string; params?: Record<string, unknown> } };
 type TransitionLayer = { id: string; name: string; start: number; duration: number; midPoint: number; effect: { effectId?: string; params?: Record<string, unknown> } };
-type CompositionClip = { start?: number; duration: number; motionMarkers?: MotionMarker[] };
+type CompositionClip = { start?: number; duration: number; motionMarkers?: MotionMarker[]; objects?: Array<{ type?: string; content?: string }> };
 type Scene = { id: string; name: string; compositions: CompositionClip[]; adjustmentLayers?: AdjustmentLayer[]; motionMarkers?: MotionMarker[]; transitionLayers?: TransitionLayer[] };
 type ProjectManifest = { id: string; name: string; resolution: { width: number; height: number }; scenes: Scene[]; assetsPath: string; editorState?: unknown };
 type TimelinePart = CompositionClip & { start: number; end: number };
@@ -1042,8 +1373,13 @@ async function renderVideoFromCommand() {
   const scene = project.scenes.find((item) => item.id === sceneId) ?? project.scenes[0];
   if (!scene) throw new Error(`Scene ${sceneId} was not found.`);
 
-  await renderSceneToVideo(project, scene, resolvedOutputPath, 30, getSceneDuration(scene));
-  console.log(`Rendered video to ${resolvedOutputPath}`);
+  commandVideoRenderActive = true;
+  try {
+    await renderSceneToVideo(project, scene, resolvedOutputPath, 30, getSceneDuration(scene));
+    console.log(`Rendered video to ${resolvedOutputPath}`);
+  } finally {
+    commandVideoRenderActive = false;
+  }
   return true;
 }
 
@@ -1059,6 +1395,7 @@ app.whenReady().then(async () => {
 });
 
 app.on("window-all-closed", () => {
+  if (commandVideoRenderActive) return;
   app.quit();
 });
 

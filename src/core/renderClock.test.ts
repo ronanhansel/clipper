@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { getRenderClockAttributes, getRenderClockStyle, syncDomAnimationListToRenderClock, waitForRenderClockAnimationsReady } from "./renderClock";
+import { getRenderClockAttributes, getRenderClockStyle, syncDomAnimationListToRenderClock, syncDomAnimationsToRenderClock, waitForRenderClockAnimationsReady } from "./renderClock";
 
 describe("render clock", () => {
   it("exposes deterministic DOM attributes and CSS variables", () => {
@@ -34,7 +34,7 @@ describe("render clock", () => {
     expect(play).not.toHaveBeenCalled();
   });
 
-  it("preserves each CSS animation phase offset while pinning to render time", () => {
+  it("preserves each CSS animation phase offset while pinning preview render time", () => {
     const earlyAnimation = { currentTime: 125, play: vi.fn(), pause: vi.fn() };
     const lateAnimation = { currentTime: 875, play: vi.fn(), pause: vi.fn() };
 
@@ -47,6 +47,42 @@ describe("render clock", () => {
 
     expect(earlyAnimation.currentTime).toBe(3125);
     expect(lateAnimation.currentTime).toBe(3875);
+  });
+
+  it("ignores browser-start phase offsets in export mode", () => {
+    const animation = { currentTime: 875, play: vi.fn(), pause: vi.fn() };
+
+    syncDomAnimationListToRenderClock([animation], { playing: false, time: 2, mode: "export" });
+
+    expect(animation.currentTime).toBe(2000);
+  });
+
+  it("ignores previously sampled preview phase offsets in export mode", () => {
+    const animation = { currentTime: 875, play: vi.fn(), pause: vi.fn() };
+
+    syncDomAnimationListToRenderClock([animation], { playing: false, time: 1, mode: "preview" });
+    expect(animation.currentTime).toBe(1875);
+
+    syncDomAnimationListToRenderClock([animation], { playing: false, time: 2, mode: "export" });
+
+    expect(animation.currentTime).toBe(2000);
+  });
+
+  it("pins document animations associated with render-clock subtree pseudo-elements", () => {
+    const animation = { currentTime: 450, play: vi.fn(), pause: vi.fn(), effect: { target: { element: null as Element | null } } };
+    const child = {} as Element;
+    const root = {
+      ownerDocument: { getAnimations: vi.fn(() => [animation as unknown as Animation]) },
+      getAnimations: vi.fn(() => []),
+      contains: vi.fn((target: Element) => target === child),
+    } as unknown as Element;
+    animation.effect.target.element = child;
+
+    const result = syncDomAnimationsToRenderClock(root, { playing: false, time: 1.25, mode: "export" });
+
+    expect(result.animationCount).toBe(1);
+    expect(animation.currentTime).toBe(1250);
+    expect(animation.pause).toHaveBeenCalledOnce();
   });
 
   it("keeps browser animations paused even while preview playback advances", () => {

@@ -195,6 +195,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     scrubSnapEnabled, setScrubSnapEnabled,
     scrubCommitThrottleMs, setScrubCommitThrottleMs,
     defaultNewMarkerDurationSeconds: markerDurationSeconds, setDefaultNewMarkerDurationSeconds,
+    renderedVideoExportWorkerCount, setRenderedVideoExportWorkerCount,
     timelineEndPaddingFraction, setTimelineEndPaddingFraction,
     timelinePrecision, setTimelinePrecision,
     fastSelectEnabled, setFastSelectEnabled,
@@ -528,6 +529,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     projectRef,
     selectedSceneId,
     projectExportFormat,
+    renderedVideoExportWorkerCount,
     exportIncludeSources,
     compositionSources,
     saveAllChanges,
@@ -578,6 +580,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
       selectedPartId: selectedPartId || undefined,
       selectedMotionMarker,
       defaultNewMarkerDurationSeconds: markerDurationSeconds,
+      renderedVideoExportWorkerCount,
       timelineEndPaddingFraction,
       timelinePrecision,
       preview: {
@@ -586,7 +589,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
         zoomBarOpen: frameZoomBarOpen,
       },
     }));
-  }, [framePreviewScale, frameZoomBarOpen, leftPanelTab, markerDurationSeconds, mode, rightPanelTab, selectedMotionMarker, selectedPartId, selectedSceneId, timelineEndPaddingFraction, timelinePrecision, timelineMode]);
+  }, [framePreviewScale, frameZoomBarOpen, leftPanelTab, markerDurationSeconds, mode, renderedVideoExportWorkerCount, rightPanelTab, selectedMotionMarker, selectedPartId, selectedSceneId, timelineEndPaddingFraction, timelinePrecision, timelineMode]);
 
   useEffect(() => {
     const editorSession = toPersistedEditorSession(editorTabs, activeEditorTabId);
@@ -1635,6 +1638,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
       partCount={scene.compositions.length}
       projectExportFormat={projectExportFormat}
       projectName={project.name}
+      renderedVideoExportWorkerCount={renderedVideoExportWorkerCount}
       resolution={project.resolution}
       sceneDurationSeconds={sceneDurationSeconds}
       sceneName={getDisplayNameFromPath(selectedSceneId ?? "")}
@@ -1654,6 +1658,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
       onMediaExport={() => void exportRenderedMedia()}
       onProjectExport={() => void exportProject()}
       onProjectExportFormatChange={setProjectExportFormat}
+      onRenderedVideoExportWorkerCountChange={setRenderedVideoExportWorkerCount}
       onScrubCommitThrottleMsChange={setScrubCommitThrottleMs}
       onSettingsOpenChange={setSettingsOpen}
       onSettingsSectionChange={setSettingsSection}

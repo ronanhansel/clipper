@@ -7,6 +7,7 @@ type UseExportCommandsInput = {
   projectRef: MutableRefObject<ProjectManifest>;
   selectedSceneId: string;
   projectExportFormat: ProjectExportFormat;
+  renderedVideoExportWorkerCount: number;
   exportIncludeSources: boolean;
   compositionSources: Record<string, string>;
   saveAllChanges: () => Promise<void>;
@@ -25,6 +26,7 @@ export function useExportCommands({
   projectRef,
   selectedSceneId,
   projectExportFormat,
+  renderedVideoExportWorkerCount,
   exportIncludeSources,
   compositionSources,
   saveAllChanges,
@@ -85,7 +87,7 @@ export function useExportCommands({
       setExportDialogOpen(false);
       setExportProgress(`Rendering ${totalFrames} frames`);
       setVideoExportProgress({ frame: 0, totalFrames, percent: 0, status: "Preparing export..." });
-      const exportPath = await exportService.renderVideoExport(exportId, defaultFileName, currentProject, currentScene, durationSeconds);
+      const exportPath = await exportService.renderVideoExport(exportId, defaultFileName, currentProject, currentScene, durationSeconds, renderedVideoExportWorkerCount);
       if (!exportPath) return;
       notifyRenderedMedia(exportPath);
     } catch (error) {

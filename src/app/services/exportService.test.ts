@@ -41,11 +41,11 @@ describe("export service", () => {
 
     const prepared = exportService.prepareRenderedMediaExport({ project, sceneId: "scene" });
     hostMocks.renderVideoExport.mockResolvedValue("/tmp/export.mp4");
-    await exportService.renderVideoExport("export-id", prepared.defaultFileName, project, prepared.scene, prepared.durationSeconds);
+    await exportService.renderVideoExport("export-id", prepared.defaultFileName, project, prepared.scene, prepared.durationSeconds, 1);
 
     expect(prepared.scene.compositions.map((composition) => composition.id)).toEqual(["visible-clip", "hidden-clip"]);
     expect(prepared.durationSeconds).toBe(2);
     expect(prepared.totalFrames).toBe(60);
-    expect(hostMocks.renderVideoExport).toHaveBeenCalledWith("export-id", "export-project-scene.mp4", expect.any(Object), expect.objectContaining({ compositions: expect.arrayContaining([expect.objectContaining({ id: "hidden-clip" })]) }), 30, 2);
+    expect(hostMocks.renderVideoExport).toHaveBeenCalledWith("export-id", "export-project-scene.mp4", expect.any(Object), expect.objectContaining({ compositions: expect.arrayContaining([expect.objectContaining({ id: "hidden-clip" })]) }), 30, 2, 1);
   });
 });

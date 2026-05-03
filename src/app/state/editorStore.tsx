@@ -1,7 +1,7 @@
 import { createContext, useContext, useRef, type PropsWithChildren } from "react";
 import { createStore, useStore, type StoreApi } from "zustand";
 import { useShallow } from "zustand/react/shallow";
-import { defaultFramePreviewScale, defaultNewMarkerDurationSeconds, defaultScrubCommitThrottleMs, defaultTimelineEndPaddingFraction, defaultTimelinePrecision } from "../config";
+import { defaultFramePreviewScale, defaultNewMarkerDurationSeconds, defaultRenderedVideoExportWorkerCount, defaultScrubCommitThrottleMs, defaultTimelineEndPaddingFraction, defaultTimelinePrecision } from "../config";
 import type { AdjustmentLayerSelection, CompositionSelection, ContextMenuState, ExportDialogTab, LeftPanelTab, Mode, MotionMarkerSelection, PlaybackClock, ProjectExportFormat, RightPanelTab, SettingsSection, VideoExportProgress } from "../types";
 import { defaultPreviewViewportState, defaultTimelineMode } from "../../core/project";
 import type { Bounds, EditorState, PersistedEditorTab, Point, ProjectManifest, SelectionPayload, TimelineMode } from "../../core/types";
@@ -44,6 +44,7 @@ export type EditorStoreState = {
   scrubSnapEnabled: boolean;
   scrubCommitThrottleMs: number;
   defaultNewMarkerDurationSeconds: number;
+  renderedVideoExportWorkerCount: number;
   timelineEndPaddingFraction: number;
   timelinePrecision: number;
   fastSelectEnabled: boolean;
@@ -119,6 +120,7 @@ export type EditorStoreActions = {
   setScrubSnapEnabled: (enabled: Setter<boolean>) => void;
   setScrubCommitThrottleMs: (ms: Setter<number>) => void;
   setDefaultNewMarkerDurationSeconds: (seconds: Setter<number>) => void;
+  setRenderedVideoExportWorkerCount: (workers: Setter<number>) => void;
   setTimelineEndPaddingFraction: (fraction: Setter<number>) => void;
   setTimelinePrecision: (precision: Setter<number>) => void;
   setFastSelectEnabled: (enabled: Setter<boolean>) => void;
@@ -195,6 +197,7 @@ function getInitialState(project: ProjectManifest): EditorStoreState {
     scrubSnapEnabled: false,
     scrubCommitThrottleMs: defaultScrubCommitThrottleMs,
     defaultNewMarkerDurationSeconds: editorState?.defaultNewMarkerDurationSeconds ?? defaultNewMarkerDurationSeconds,
+    renderedVideoExportWorkerCount: editorState?.renderedVideoExportWorkerCount ?? defaultRenderedVideoExportWorkerCount,
     timelineEndPaddingFraction: editorState?.timelineEndPaddingFraction ?? defaultTimelineEndPaddingFraction,
     timelinePrecision: editorState?.timelinePrecision ?? defaultTimelinePrecision,
     fastSelectEnabled: false,
@@ -256,6 +259,7 @@ export function createEditorStore(project: ProjectManifest) {
     setScrubSnapEnabled: createFieldSetter(set, "scrubSnapEnabled"),
     setScrubCommitThrottleMs: createFieldSetter(set, "scrubCommitThrottleMs"),
     setDefaultNewMarkerDurationSeconds: createFieldSetter(set, "defaultNewMarkerDurationSeconds"),
+    setRenderedVideoExportWorkerCount: createFieldSetter(set, "renderedVideoExportWorkerCount"),
     setTimelineEndPaddingFraction: createFieldSetter(set, "timelineEndPaddingFraction"),
     setTimelinePrecision: createFieldSetter(set, "timelinePrecision"),
     setFastSelectEnabled: createFieldSetter(set, "fastSelectEnabled"),
@@ -341,7 +345,9 @@ export function createEditorStore(project: ProjectManifest) {
       selectionPayload: null,
       currentSceneTime: editorState.currentSceneTime ?? 2.6,
       defaultNewMarkerDurationSeconds: editorState.defaultNewMarkerDurationSeconds ?? defaultNewMarkerDurationSeconds,
+      renderedVideoExportWorkerCount: editorState.renderedVideoExportWorkerCount ?? defaultRenderedVideoExportWorkerCount,
       timelineEndPaddingFraction: editorState.timelineEndPaddingFraction ?? defaultTimelineEndPaddingFraction,
+      timelinePrecision: editorState.timelinePrecision ?? defaultTimelinePrecision,
       frameZoomBarOpen: editorState.preview?.zoomBarOpen ?? defaultPreviewViewportState.zoomBarOpen,
       framePreviewScale: editorState.preview?.scale ?? defaultFramePreviewScale,
       leftPanelTab: editorState.leftPanelTab ?? "assets",
@@ -452,6 +458,8 @@ export function useAppEditorState() {
     setScrubCommitThrottleMs: state.setScrubCommitThrottleMs,
     defaultNewMarkerDurationSeconds: state.defaultNewMarkerDurationSeconds,
     setDefaultNewMarkerDurationSeconds: state.setDefaultNewMarkerDurationSeconds,
+    renderedVideoExportWorkerCount: state.renderedVideoExportWorkerCount,
+    setRenderedVideoExportWorkerCount: state.setRenderedVideoExportWorkerCount,
     timelineEndPaddingFraction: state.timelineEndPaddingFraction,
     setTimelineEndPaddingFraction: state.setTimelineEndPaddingFraction,
     timelinePrecision: state.timelinePrecision,

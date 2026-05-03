@@ -15,6 +15,7 @@ type ExportFrameRequest = {
 declare global {
   interface Window {
     __clipperRenderExportFrame?: (request: ExportFrameRequest) => Promise<RenderClockReadinessResult>;
+    __clipperSyncExportRenderClock?: () => Promise<RenderClockReadinessResult>;
   }
 }
 
@@ -50,9 +51,15 @@ export function RenderedMediaExportApp() {
       pendingRequestRef.current = { resolve, reject, timeoutId };
       setRequest(nextRequest);
     });
+    window.__clipperSyncExportRenderClock = async () => {
+      const syncResult = await waitForRenderClockAnimationsReady(frameViewportRef.current);
+      await nextAnimationFrame();
+      return syncResult;
+    };
     return () => {
       rejectPendingFrame(pendingRequestRef, new Error("Export renderer unmounted before frame completed."));
       delete window.__clipperRenderExportFrame;
+      delete window.__clipperSyncExportRenderClock;
     };
   }, []);
 
@@ -182,7 +189,11 @@ function nextAnimationFrame() {
 async function waitForFontsReady() {
   const fonts = "fonts" in document ? document.fonts : undefined;
   if (!fonts?.ready) return;
-  await fonts.ready;
+  await withTimeout(fonts.ready, 1000);
+}
+
+function withTimeout(promise: PromiseLike<unknown>, timeoutMs: number) {
+  return Promise.race([promise, new Promise<void>((resolve) => window.setTimeout(resolve, timeoutMs))]);
 }
 
 function toError(error: unknown) {

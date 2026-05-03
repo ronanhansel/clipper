@@ -12,6 +12,15 @@ const baseProject: ProjectManifest = {
 };
 
 describe("editorStore editor tabs", () => {
+  it("restores rendered video export worker count from persisted editor state", () => {
+    const store = createEditorStore({ ...baseProject, editorState: { ...baseProject.editorState!, renderedVideoExportWorkerCount: 1 } });
+
+    expect(store.getState().renderedVideoExportWorkerCount).toBe(1);
+
+    store.getState().setRenderedVideoExportWorkerCount(2);
+    expect(store.getState().renderedVideoExportWorkerCount).toBe(2);
+  });
+
   it("restores the most recently closed pinned tab without persisting runtime source", () => {
     const store = createEditorStore(baseProject);
 

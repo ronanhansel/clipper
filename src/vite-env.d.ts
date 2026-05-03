@@ -48,11 +48,7 @@ interface Window {
     exportProjectDialog: (defaultFileName: string) => Promise<string | null>;
     exportMediaFile: (defaultFileName: string, content: string) => Promise<string | null>;
     exportBinaryFile: (defaultFileName: string, base64Content: string) => Promise<string | null>;
-    startVideoExport: (defaultFileName: string, frameRate: number, width: number, height: number) => Promise<{ sessionId: string; filePath: string } | null>;
-    writeVideoFrame: (sessionId: string, frameData: Uint8ClampedArray) => Promise<void>;
-    finishVideoExport: (sessionId: string) => Promise<string>;
-    cancelVideoExport: (sessionId: string) => Promise<void>;
-    renderVideoExport: (exportId: string, defaultFileName: string, project: unknown, scene: unknown, frameRate: number, durationSeconds: number) => Promise<string | null>;
+    renderVideoExport: (exportId: string, defaultFileName: string, project: unknown, scene: unknown, frameRate: number, durationSeconds: number, workerCount: number) => Promise<string | null>;
     cancelRenderVideoExport: (exportId: string) => Promise<void>;
     setWindowFullscreen: (fullscreen: boolean) => Promise<boolean>;
     toggleWindowFullscreen: () => Promise<boolean>;

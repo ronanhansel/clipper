@@ -65,9 +65,9 @@ class ExportService {
     return { scene, durationSeconds, totalFrames, defaultFileName };
   }
 
-  renderVideoExport(exportId: string, defaultFileName: string, project: ProjectManifest, scene: ProjectManifest["scenes"][number], durationSeconds: number) {
+  renderVideoExport(exportId: string, defaultFileName: string, project: ProjectManifest, scene: ProjectManifest["scenes"][number], durationSeconds: number, workerCount: number) {
     const exportProject = serializeProjectForSave(project);
-    return clipperHost.renderVideoExport(exportId, defaultFileName, exportProject, scene, videoExportFrameRate, durationSeconds);
+    return clipperHost.renderVideoExport(exportId, defaultFileName, exportProject, scene, videoExportFrameRate, durationSeconds, workerCount);
   }
 
   cancelVideoExport(exportId: string) {

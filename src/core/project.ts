@@ -43,6 +43,12 @@ function normalizeRightPanelTab(tab: unknown) {
   return tab === "motion" || tab === "agent" ? tab : "video";
 }
 
+function normalizeRenderedVideoExportWorkerCount(workerCount: unknown) {
+  const parsed = typeof workerCount === "number" ? workerCount : Number(workerCount);
+  if (!Number.isFinite(parsed)) return 2;
+  return Math.min(Math.max(Math.round(parsed), 1), 10);
+}
+
 function normalizeCodeViewportState(state: CodeViewportState | undefined): CodeViewportState {
   return {
     scrollLeft: roundTwo(Math.max(state?.scrollLeft ?? 0, 0)),
@@ -402,6 +408,7 @@ function normalizeProjectEditorState(project: ProjectManifest, timelines: Timeli
     selectedPartId,
     selectedMotionMarker,
     currentSceneTime: roundTwo(Math.max(project.editorState?.currentSceneTime ?? 0, 0)),
+    renderedVideoExportWorkerCount: normalizeRenderedVideoExportWorkerCount(project.editorState?.renderedVideoExportWorkerCount),
     layout: normalizeEditorLayoutState(project.editorState?.layout),
     composeLayout: normalizeComposeLayoutState(project.editorState?.composeLayout),
     preview: {

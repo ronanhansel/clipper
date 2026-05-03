@@ -126,6 +126,23 @@ describe("project normalization", () => {
     }).editorState?.mode).toBe("editor");
   });
 
+  it("normalizes rendered video export worker count to the supported range", () => {
+    expect(normalizeProject({
+      ...projectWithComposition(),
+      editorState: { timeline: { displacement: 0, zoom: 1 }, timelineMode: "compose", renderedVideoExportWorkerCount: 8 },
+    }).editorState?.renderedVideoExportWorkerCount).toBe(8);
+
+    expect(normalizeProject({
+      ...projectWithComposition(),
+      editorState: { timeline: { displacement: 0, zoom: 1 }, timelineMode: "compose", renderedVideoExportWorkerCount: 11 },
+    }).editorState?.renderedVideoExportWorkerCount).toBe(10);
+
+    expect(normalizeProject({
+      ...projectWithComposition(),
+      editorState: { timeline: { displacement: 0, zoom: 1 }, timelineMode: "compose", renderedVideoExportWorkerCount: 0 },
+    }).editorState?.renderedVideoExportWorkerCount).toBe(1);
+  });
+
   it("normalizes persisted editor sessions without runtime source data", () => {
     const normalized = normalizeProject({
       ...projectWithComposition(),

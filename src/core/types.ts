@@ -461,6 +461,7 @@ export type EditorState = {
   selectedMotionMarker?: { partId: string; markerId: string } | null;
   currentSceneTime?: number;
   defaultNewMarkerDurationSeconds?: number;
+  renderedVideoExportWorkerCount?: number;
   timelineEndPaddingFraction?: number;
   timelinePrecision?: number;
   layout?: EditorLayoutState;

@@ -145,9 +145,9 @@ class ClipperHostService {
     return window.clipper.exportProjectDialog(defaultFileName);
   }
 
-  async renderVideoExport(exportId: string, defaultFileName: string, project: ProjectManifest, scene: SceneManifest, frameRate: number, durationSeconds: number) {
+  async renderVideoExport(exportId: string, defaultFileName: string, project: ProjectManifest, scene: SceneManifest, frameRate: number, durationSeconds: number, workerCount: number) {
     if (!window.clipper?.renderVideoExport) throw new Error("Video export requires the Clipper desktop app. Restart the app if this was just updated.");
-    return window.clipper.renderVideoExport(exportId, defaultFileName, project, scene, frameRate, durationSeconds);
+    return window.clipper.renderVideoExport(exportId, defaultFileName, project, scene, frameRate, durationSeconds, workerCount);
   }
 
   async exportMediaFile(defaultFileName: string, content: string) {

@@ -16,6 +16,7 @@ type AppDialogsProps = {
   partCount: number;
   projectExportFormat: ProjectExportFormat;
   projectName: string;
+  renderedVideoExportWorkerCount: number;
   resolution: ProjectManifest["resolution"];
   sceneDurationSeconds: number;
   sceneName: string;
@@ -35,6 +36,7 @@ type AppDialogsProps = {
   onMediaExport: () => void;
   onProjectExport: () => void;
   onProjectExportFormatChange: (format: ProjectExportFormat) => void;
+  onRenderedVideoExportWorkerCountChange: (value: number) => void;
   onScrubCommitThrottleMsChange: (value: number) => void;
   onSettingsOpenChange: (open: boolean) => void;
   onSettingsSectionChange: (section: SettingsSection) => void;
@@ -43,7 +45,7 @@ type AppDialogsProps = {
   onVideoExportCancel: () => void;
 };
 
-export function AppDialogs({ appContextMenu, defaultNewMarkerDurationSeconds, exportDialogOpen, exportDialogTab, exportIncludeSources, exportProgress, isExporting, partCount, projectExportFormat, projectName, resolution, sceneDurationSeconds, sceneName, scrubCommitThrottleMs, settingsOpen, settingsSection, timelineEndPaddingFraction, timelinePrecision, validationErrorCount, videoExportCancelling, videoExportProgress, onAppContextMenuClose, onDefaultNewMarkerDurationSecondsChange, onExportDialogOpenChange, onExportDialogTabChange, onExportIncludeSourcesChange, onMediaExport, onProjectExport, onProjectExportFormatChange, onScrubCommitThrottleMsChange, onSettingsOpenChange, onSettingsSectionChange, onTimelineEndPaddingFractionChange, onTimelinePrecisionChange, onVideoExportCancel }: AppDialogsProps) {
+export function AppDialogs({ appContextMenu, defaultNewMarkerDurationSeconds, exportDialogOpen, exportDialogTab, exportIncludeSources, exportProgress, isExporting, partCount, projectExportFormat, projectName, renderedVideoExportWorkerCount, resolution, sceneDurationSeconds, sceneName, scrubCommitThrottleMs, settingsOpen, settingsSection, timelineEndPaddingFraction, timelinePrecision, validationErrorCount, videoExportCancelling, videoExportProgress, onAppContextMenuClose, onDefaultNewMarkerDurationSecondsChange, onExportDialogOpenChange, onExportDialogTabChange, onExportIncludeSourcesChange, onMediaExport, onProjectExport, onProjectExportFormatChange, onRenderedVideoExportWorkerCountChange, onScrubCommitThrottleMsChange, onSettingsOpenChange, onSettingsSectionChange, onTimelineEndPaddingFractionChange, onTimelinePrecisionChange, onVideoExportCancel }: AppDialogsProps) {
   return (
     <>
       <ExportMediaDialog
@@ -69,12 +71,14 @@ export function AppDialogs({ appContextMenu, defaultNewMarkerDurationSeconds, ex
       <SettingsDialog
         activeSection={settingsSection}
         open={settingsOpen}
+        renderedVideoExportWorkerCount={renderedVideoExportWorkerCount}
         scrubCommitThrottleMs={scrubCommitThrottleMs}
         defaultNewMarkerDurationSeconds={defaultNewMarkerDurationSeconds}
         timelineEndPaddingFraction={timelineEndPaddingFraction}
         timelinePrecision={timelinePrecision}
         onActiveSectionChange={onSettingsSectionChange}
         onOpenChange={onSettingsOpenChange}
+        onRenderedVideoExportWorkerCountChange={onRenderedVideoExportWorkerCountChange}
         onScrubCommitThrottleMsChange={onScrubCommitThrottleMsChange}
         onDefaultNewMarkerDurationSecondsChange={onDefaultNewMarkerDurationSecondsChange}
         onTimelineEndPaddingFractionChange={onTimelineEndPaddingFractionChange}

@@ -6,7 +6,7 @@ export type RenderClockState = {
   mode?: RenderClockMode;
 };
 
-export type DomAnimationLike = Pick<Animation, "currentTime" | "play" | "pause"> & { ready?: PromiseLike<unknown> };
+export type DomAnimationLike = Pick<Animation, "currentTime" | "play" | "pause"> & { effect?: AnimationEffect | null; ready?: PromiseLike<unknown> };
 
 export type RenderClockSyncResult = {
   animationCount: number;
@@ -39,7 +39,7 @@ export function getRenderClockStyle(state: RenderClockState) {
 
 export function syncDomAnimationsToRenderClock(root: Element | null, state: RenderClockState) {
   if (!root || typeof root.getAnimations !== "function") return emptyRenderClockSyncResult();
-  return syncDomAnimationListToRenderClock(root.getAnimations({ subtree: true }), state);
+  return syncDomAnimationListToRenderClock(getRenderClockAnimations(root), state);
 }
 
 export function syncDomAnimationListToRenderClock(animations: readonly DomAnimationLike[], state: RenderClockState) {
@@ -47,7 +47,7 @@ export function syncDomAnimationListToRenderClock(animations: readonly DomAnimat
   const result = emptyRenderClockSyncResult();
   result.animationCount = animations.length;
   for (const animation of animations) {
-    const phaseOffset = getAnimationPhaseOffset(animation);
+    const phaseOffset = state.mode === "export" ? 0 : getAnimationPhaseOffset(animation);
     try {
       animation.pause();
     } catch {
@@ -63,6 +63,25 @@ export function syncDomAnimationListToRenderClock(animations: readonly DomAnimat
     if (animation.ready) result.pendingReadyCount += 1;
   }
   return result;
+}
+
+function getRenderClockAnimations(root: Element) {
+  const animations = new Set<Animation>(root.getAnimations({ subtree: true }));
+  const ownerDocument = root.ownerDocument;
+  if (ownerDocument && typeof ownerDocument.getAnimations === "function") {
+    for (const animation of ownerDocument.getAnimations()) {
+      if (isAnimationInRoot(animation, root)) animations.add(animation);
+    }
+  }
+  return [...animations];
+}
+
+function isAnimationInRoot(animation: Animation, root: Element) {
+  const target = animation.effect && "target" in animation.effect ? (animation.effect as AnimationEffect & { target?: unknown }).target : null;
+  if (!target) return false;
+  if (typeof Element !== "undefined" && target instanceof Element) return target === root || root.contains(target);
+  const pseudoElementTarget = target as { element?: Element };
+  return Boolean(pseudoElementTarget.element && (pseudoElementTarget.element === root || root.contains(pseudoElementTarget.element)));
 }
 
 const renderClockPhaseOffset = new WeakMap<DomAnimationLike, number>();
@@ -89,7 +108,7 @@ export async function waitForRenderClockAnimationsReady(root: ParentNode | null,
     for (const layer of layers) {
       const state = getRenderClockStateFromElement(layer);
       if (!state || typeof layer.getAnimations !== "function") continue;
-      const animations = layer.getAnimations({ subtree: true }) as DomAnimationLike[];
+      const animations = getRenderClockAnimations(layer) as DomAnimationLike[];
       mergeRenderClockSyncResult(aggregate, syncDomAnimationListToRenderClock(animations, state));
       readyPromises.push(...animations.map((animation) => animation.ready).filter((ready): ready is PromiseLike<unknown> => Boolean(ready)));
     }
