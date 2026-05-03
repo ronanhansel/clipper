@@ -10,6 +10,11 @@ declare module "*.ts?raw" {
   export default source;
 }
 
+declare module "*.css" {
+  const source: string;
+  export default source;
+}
+
 type LocalFontData = {
   family: string;
   fullName: string;
@@ -30,6 +35,7 @@ interface Window {
     writeBinaryFile: (relativePath: string, base64Content: string) => Promise<void>;
     createDirectory: (relativePath: string) => Promise<void>;
     revealFile: (relativePath: string) => Promise<void>;
+    revealAbsolutePath?: (filePath: string) => Promise<void>;
     trashFile: (relativePath: string) => Promise<void>;
     renameFile: (relativePath: string, nextRelativePath: string) => Promise<void>;
     copyFile: (relativePath: string, nextRelativePath: string) => Promise<void>;
@@ -46,7 +52,7 @@ interface Window {
     writeVideoFrame: (sessionId: string, frameData: Uint8ClampedArray) => Promise<void>;
     finishVideoExport: (sessionId: string) => Promise<string>;
     cancelVideoExport: (sessionId: string) => Promise<void>;
-    renderVideoExport: (exportId: string, defaultFileName: string, project: unknown, scene: unknown, frameRate: number) => Promise<string | null>;
+    renderVideoExport: (exportId: string, defaultFileName: string, project: unknown, scene: unknown, frameRate: number, durationSeconds: number) => Promise<string | null>;
     cancelRenderVideoExport: (exportId: string) => Promise<void>;
     setWindowFullscreen: (fullscreen: boolean) => Promise<boolean>;
     toggleWindowFullscreen: () => Promise<boolean>;
@@ -58,6 +64,8 @@ interface Window {
     onModeShortcut: (callback: (key: "1" | "2" | "3" | "4") => void) => () => void;
     onSettingsShortcut: (callback: () => void) => () => void;
     onExportProject: (callback: () => void) => () => void;
+    onCloseEditorTabShortcut: (callback: () => void) => () => void;
+    onRestoreEditorTabShortcut: (callback: () => void) => () => void;
     onWindowFullscreenChange: (callback: (fullscreen: boolean) => void) => () => void;
   };
 }

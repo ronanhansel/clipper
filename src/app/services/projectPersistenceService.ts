@@ -116,13 +116,22 @@ async function loadZipTimelines(zip: JSZip, rootPath: string, timelineOrder?: st
 }
 
 async function loadZipCompositions(zip: JSZip, rootPath: string) {
-  const entries = Object.values(zip.files).filter((file) => !file.dir && file.name.startsWith("compositions/") && file.name.endsWith(".ts"));
+  const entries = Object.values(zip.files).filter((file) => !file.dir && file.name.startsWith("compositions/") && file.name.endsWith(".composition.ts"));
   return Promise.all(entries.map(async (file) => {
     const source = await file.async("string");
     const filePath = projectPathFromZipEntry(rootPath, file.name);
     const baseComposition = createBaseComposition(filePath, filePath, source);
-    const document = await compositionFromEmbeddedSource(baseComposition, source);
-    return { ...document, source } as CompositionDocument;
+    try {
+      const document = await compositionFromProjectSource(baseComposition, source, async (relativePath) => {
+        const zipPath = relativePath.startsWith("compositions/") ? relativePath : `compositions/${relativePath}`;
+        const entry = zip.file(zipPath);
+        if (!entry) throw new Error(`Composition dependency ${relativePath} was not found.`);
+        return entry.async("string");
+      });
+      return { ...document, source } as CompositionDocument;
+    } catch (error) {
+      return createErroredComposition(baseComposition, source, error);
+    }
   }));
 }
 
@@ -157,7 +166,7 @@ async function saveZipProject(manifestPath: string, project: ProjectManifest) {
   await clipperHost.writeBinaryFile(manifestPath, await zip.generateAsync({ type: "base64", compression: "DEFLATE" }));
 }
 
-async function getEditableRootPath(rootPath: string): Promise<string> {
+export async function getEditableRootPath(rootPath: string): Promise<string> {
   try {
     const entries = await clipperHost.listDirectory(rootPath);
     if (entries.some((entry) => entry.isDirectory && entry.name === "file-manager")) {
@@ -228,10 +237,10 @@ async function loadDirectoryCompositions(editableRoot: string, fallbackRoot: str
   const primaryDir = editableRoot ? `${editableRoot}/compositions` : "file-manager/compositions";
   const fallbackDir = fallbackRoot ? `${fallbackRoot}/compositions` : "compositions";
 
-  let compositionFiles = await listProjectFilesRecursive(primaryDir).then(files => files.filter(f => f.name.endsWith(".ts")));
+  let compositionFiles = await listProjectFilesRecursive(primaryDir).then(files => files.filter(isCompositionSourceFile));
 
   if (compositionFiles.length === 0) {
-    compositionFiles = await listProjectFilesRecursive(fallbackDir).then(files => files.filter(f => f.name.endsWith(".ts")));
+    compositionFiles = await listProjectFilesRecursive(fallbackDir).then(files => files.filter(isCompositionSourceFile));
   }
 
   return Promise.all(
@@ -239,10 +248,21 @@ async function loadDirectoryCompositions(editableRoot: string, fallbackRoot: str
       const source = await clipperHost.readTextFile(file.path);
       const filePath = projectPathFromDirectoryEntry(fallbackRoot, file.relativePath, "compositions");
       const baseComposition = createBaseComposition(filePath, filePath, source);
-      const document = await compositionFromEmbeddedSource(baseComposition, source);
-      return { ...document, source } as CompositionDocument;
+      try {
+        const document = await compositionFromProjectSource(baseComposition, source, async (relativePath) => {
+          const dependencyPath = relativePath.startsWith("compositions/") ? `${editableRoot}/${relativePath}` : `${getDirectoryPath(file.path)}/${relativePath}`;
+          return clipperHost.readTextFile(dependencyPath);
+        });
+        return { ...document, source } as CompositionDocument;
+      } catch (error) {
+        return createErroredComposition(baseComposition, source, error);
+      }
     })
   );
+}
+
+function isCompositionSourceFile(file: { name: string }) {
+  return file.name.endsWith(".composition.ts");
 }
 
 const listProjectFilesRecursive = async (dir: string, baseDir: string = dir): Promise<{ name: string; path: string; relativePath: string; isDirectory: boolean }[]> => {
@@ -317,6 +337,7 @@ async function saveDirectoryProject(manifestPath: string, project: ProjectManife
 
   for (const folderPath of normalized.compositionFolders ?? []) {
     const relativePath = safeCompositionFolderPath(folderPath, rootPath);
+    if (!relativePath) continue;
     await clipperHost.createDirectory(`${fileManagerDir}/${relativePath}`).catch(() => {});
   }
 
@@ -341,7 +362,7 @@ async function saveDirectoryProject(manifestPath: string, project: ProjectManife
 
   const existingFiles = await listProjectFilesRecursive(fileManagerDir);
   for (const file of existingFiles) {
-    if (!file.isDirectory && (file.relativePath.startsWith("compositions/") || file.relativePath.startsWith("timelines/"))) {
+    if (!file.isDirectory && (file.relativePath.endsWith(".composition.ts") || file.relativePath.endsWith(".timeline.json"))) {
       if (!savedRelativePaths.has(file.relativePath)) {
         await clipperHost.trashFile(file.path).catch(() => {});
       }
@@ -369,6 +390,14 @@ function createBaseComposition(id: string, filePath: string, source: string): Co
   };
 }
 
+function createErroredComposition(baseComposition: CompositionDocument, source: string, error: unknown): CompositionDocument {
+  return {
+    ...baseComposition,
+    source,
+    compositionError: error instanceof Error ? error.message : "Unable to load composition source.",
+  };
+}
+
 function safeZipName(value: string) {
   return value.replace(/[^a-zA-Z0-9_-]+/g, "_") || "item";
 }
@@ -389,6 +418,7 @@ function safeDirectoryTimelinePath(timeline: TimelineDocument, rootPath: string)
 
 function safeCompositionFolderPath(folderPath: string, rootPath: string) {
   const relativePath = relativeProjectFilePath(folderPath, rootPath);
+  if (!relativePath || relativePath === "compositions") return "";
   const entryPath = relativePath?.startsWith("compositions/") ? relativePath : relativePath ? `compositions/${relativePath}` : "compositions";
   return isSafeZipEntryPath(entryPath) ? entryPath : "compositions";
 }
@@ -402,9 +432,11 @@ function safeProjectZipPath(filePath: string | undefined, rootPath: string, fold
 
 function relativeProjectFilePath(filePath: string | undefined, rootPath: string) {
   if (!filePath) return "";
-  const normalizedPath = filePath.replace(/^\/+/, "");
-  const normalizedRoot = rootPath.replace(/^\/+/, "");
+  const normalizedPath = filePath.replace(/\\/g, "/").replace(/^\/+/, "");
+  const normalizedRoot = rootPath.replace(/\\/g, "/").replace(/^\/+/, "");
+  if (normalizedRoot && normalizedPath.startsWith(`${normalizedRoot}/file-manager/`)) return normalizedPath.slice(`${normalizedRoot}/file-manager/`.length);
   if (normalizedRoot && normalizedPath.startsWith(`${normalizedRoot}/`)) return normalizedPath.slice(normalizedRoot.length + 1);
+  if (normalizedPath.startsWith("file-manager/")) return normalizedPath.slice("file-manager/".length);
   return normalizedPath;
 }
 
@@ -427,8 +459,8 @@ function getDirectoryPath(path: string) {
   return slashIndex > 0 ? path.slice(0, slashIndex) : "";
 }
 
-async function compositionFromEmbeddedSource(composition: CompositionClip, source: string) {
-  return (await loadCompositionsFromSource([composition], async () => source))[0];
+async function compositionFromProjectSource(composition: CompositionClip, source: string, readDependency: (relativePath: string) => Promise<string>) {
+  return (await loadCompositionsFromSource([composition], async (relativePath) => relativePath === composition.filePath ? source : readDependency(relativePath)))[0];
 }
 
 export const projectPersistenceService = new ProjectPersistenceService();

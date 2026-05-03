@@ -91,7 +91,7 @@ export type NativeTreeProps<T> = {
   width?: number | string;
   disableDrop?: (args: NativeTreeDisableDropArgs<T>) => boolean;
   getDropTarget?: (args: NativeTreeGetDropTargetArgs<T>) => NativeTreeDropTarget | null;
-  onActivate?: (node: NativeTreeNodeApi<T>) => void;
+  onActivate?: (node: NativeTreeNodeApi<T>, event: MouseEvent<HTMLDivElement>) => void;
   onMove?: (target: NativeTreeDropTarget) => void;
   onRename?: (args: { id: string; name: string }) => void;
   onSelect?: (nodes: NativeTreeNodeApi<T>[]) => void;
@@ -269,7 +269,7 @@ export const NativeTree = forwardRef(function NativeTree<T>(props: NativeTreePro
       if (anchor >= 0 && target >= 0) nextIds = visibleNodes.slice(Math.min(anchor, target), Math.max(anchor, target) + 1).map((item) => item.id);
     }
     updateSelection(nextIds, node.id);
-    onActivate?.(node);
+    onActivate?.(node, event);
   }
 
   function getNodeDragIds(node: NativeTreeNodeApi<T>) {
@@ -296,7 +296,7 @@ export const NativeTree = forwardRef(function NativeTree<T>(props: NativeTreePro
     const ids = getNodeDragIds(node);
     if (!selectedIdsRef.current.includes(node.id)) updateSelection(ids, node.id);
     event.dataTransfer?.setData("text/plain", node.id);
-    if (event.dataTransfer) event.dataTransfer.effectAllowed = event.dataTransfer.types.includes("application/x-clipper-composition") ? "copyMove" : "move";
+    if (event.dataTransfer) event.dataTransfer.effectAllowed = event.dataTransfer.types.includes("application/x-clipper-composition") || event.dataTransfer.types.includes("application/x-clipper-timeline") ? "copyMove" : "move";
     setDragState({ ids, primaryId: node.id, mouse: { x: event.clientX, y: event.clientY } });
   }
 

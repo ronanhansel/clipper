@@ -20,6 +20,15 @@
     @apply m-0 min-w-[1280px] overflow-hidden bg-[#12141a];
   }
 
+  [data-clipper-render-playing],
+  [data-clipper-render-playing] *,
+  [data-clipper-render-playing]::before,
+  [data-clipper-render-playing]::after,
+  [data-clipper-render-playing] *::before,
+  [data-clipper-render-playing] *::after {
+    animation-play-state: var(--clipper-render-animation-play-state, paused) !important;
+  }
+
   button,
   input,
   textarea {
@@ -111,6 +120,16 @@
   .timeline-scrollbar::-webkit-scrollbar-thumb:hover {
     background: rgba(247, 247, 248, 0.74);
     background-clip: padding-box;
+  }
+
+  .clipper-hidden-scrollbar {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .clipper-hidden-scrollbar::-webkit-scrollbar {
+    width: 0;
+    height: 0;
   }
 
   .clipper-timeline-dragging-no-hover *,
@@ -270,24 +289,33 @@
   [data-clipper-frame-presentation] [data-clipper-frame-preview-wrapper] {
     position: absolute;
     inset: 0;
-    display: block !important;
+    display: grid !important;
+    place-items: center;
+  }
+
+  [data-clipper-frame-presentation] [data-clipper-frame-preview-shell] {
+    position: absolute !important;
+    inset: 0 !important;
+    width: auto !important;
+    height: auto !important;
+    margin: 0 !important;
   }
 
   [data-clipper-frame-presentation] [data-clipper-frame-preview] {
     position: absolute !important;
     left: 50% !important;
     top: 50% !important;
-    width: 1920px !important;
-    height: 1080px !important;
+    width: var(--clipper-presentation-width, 100vw) !important;
+    height: var(--clipper-presentation-height, calc(100vw * 0.5625)) !important;
     box-shadow: none;
-    transform: translate(-50%, -50%) scale(var(--clipper-presentation-scale, 1)) !important;
+    transform: translate(-50%, -50%) !important;
     transform-origin: center;
   }
 
   [data-clipper-frame-presentation] [data-clipper-frame-content] {
     left: 0 !important;
     top: 0 !important;
-    transform: none !important;
+    transform: scale(var(--clipper-presentation-scale, 1)) !important;
     transform-origin: top left;
   }
 }

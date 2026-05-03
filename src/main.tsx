@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { App } from "./App";
+import { RenderedMediaExportApp } from "./app/export/RenderedMediaExportApp";
 import "./styles.css";
 
 type ErrorBoundaryState = { error: Error | null };
@@ -39,7 +40,7 @@ class ErrorBoundary extends React.Component<React.PropsWithChildren, ErrorBounda
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <ErrorBoundary>
-      <App />
+      {new URLSearchParams(window.location.search).has("clipperExport") ? <RenderedMediaExportApp /> : <App />}
     </ErrorBoundary>
   </React.StrictMode>,
 );

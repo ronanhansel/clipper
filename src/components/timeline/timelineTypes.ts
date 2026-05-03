@@ -62,13 +62,12 @@ export type TimelinePanelProps = {
   onUpdateMotionMarkers: (partId: string, updater: (markers: MotionMarker[], part: Part) => MotionMarker[]) => void;
   onResizeMotionMarkers: (resizes: TimelineMarkerResize[]) => void;
   onAddComposition: (compositionId: string, targetLayerId?: string, start?: number) => void;
+  onOpenTimeline: (timelineId: string) => void;
   onAddAdjustmentEffect: (effectId: AdjustmentEffectId, sceneTime: number, layerId?: string) => void;
   onAddMotionEffect: (effectId: MotionEffectId, layerId: string, sceneTime: number) => void;
   transitionLayers?: TransitionLayer[];
   selectedTransitionLayerId?: string | null;
   selectedTransitionLayers?: Array<{ layerId: string }>;
-  onAddTransitionLayer?: (targetLayerId?: string, placement?: "before" | "after") => void;
-  onRemoveTransitionLayer?: (layerId: string) => void;
   onAddTransitionEffect?: (effectId: TransitionEffectId, sceneTime: number, layerId?: string) => void;
   onSelectTransitionLayer?: (layerId: string) => void;
   onSelectTransitionLayers?: (selection: Array<{ layerId: string }>) => void;

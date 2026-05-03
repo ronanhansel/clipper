@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getFileTreeMoveInsertionIndex, getPointerFileTreeDrop, moveFileTreeNodesForTest, shouldSkipFileManagerShortcut } from "./FileManager";
+import { createFileManagerTreeSnapshotForTest, getFileTreeMoveInsertionIndex, getPointerFileTreeDrop, moveFileTreeNodesForTest, shouldSkipFileManagerShortcut } from "./FileManager";
 
 describe("getFileTreeMoveInsertionIndex", () => {
   it("adjusts same-parent drop indexes using original sibling order", () => {
@@ -115,6 +115,60 @@ describe("moveFileTreeNodes", () => {
     expect(moveFileTreeNodesForTest(tree, ["composition:child"], null, 1)).toEqual([
       { id: "project-folder:folder", kind: "project-folder", path: "folder", name: "folder", children: [] },
       child,
+    ]);
+  });
+
+  it("renames project files before inserting into a folder with matching names", () => {
+    const source = { id: "composition:source", kind: "composition" as const, name: "intro", composition: { id: "source", duration: 5, frame: { width: 1920 as const, height: 1080 as const, style: {} }, objects: [], background: { id: "bg", name: "Background", style: {}, elements: [] }, filePath: "root/source/intro.composition.ts", snapshot: [], motionMarkers: [] } };
+    const existing = { id: "composition:existing", kind: "composition" as const, name: "intro", composition: { id: "existing", duration: 5, frame: { width: 1920 as const, height: 1080 as const, style: {} }, objects: [], background: { id: "bg", name: "Background", style: {}, elements: [] }, filePath: "root/folder/intro.composition.ts", snapshot: [], motionMarkers: [] } };
+    const tree = [
+      source,
+      { id: "project-folder:folder", kind: "project-folder" as const, path: "folder", name: "folder", children: [existing] },
+    ];
+
+    expect(moveFileTreeNodesForTest(tree, ["composition:source"], "project-folder:folder", 0)).toEqual([
+      { id: "project-folder:folder", kind: "project-folder", path: "folder", name: "folder", children: [
+        { ...source, name: "intro 2.composition.ts", composition: { ...source.composition, filePath: "root/source/intro 2.composition.ts" } },
+        existing,
+      ] },
+    ]);
+  });
+});
+
+describe("createFileManagerTreeSnapshot", () => {
+  it("renames duplicate project files in the same folder with counters", () => {
+    const snapshot = createFileManagerTreeSnapshotForTest([
+      { id: "project-folder:folder", kind: "project-folder" as const, path: "folder", name: "folder", children: [
+        { id: "composition:intro-a", kind: "composition" as const, name: "intro", composition: { id: "intro-a", duration: 5, frame: { width: 1920 as const, height: 1080 as const, style: {} }, objects: [], background: { id: "bg", name: "Background", style: {}, elements: [] }, filePath: "root/a/intro.composition.ts", snapshot: [], motionMarkers: [] } },
+        { id: "composition:intro-b", kind: "composition" as const, name: "intro", composition: { id: "intro-b", duration: 5, frame: { width: 1920 as const, height: 1080 as const, style: {} }, objects: [], background: { id: "bg", name: "Background", style: {}, elements: [] }, filePath: "root/b/intro.composition.ts", snapshot: [], motionMarkers: [] } },
+        { id: "timeline:intro", kind: "timeline" as const, name: "intro", timeline: { id: "timeline-intro", filePath: "root/c/intro.timeline.json", clips: [], adjustmentLayers: [], motionMarkers: [], timelineLayers: { compositionLayers: [], adjustmentLayers: [], motionLayers: [], transitionLayers: [] }, settings: {} } },
+        { id: "timeline:intro-copy", kind: "timeline" as const, name: "intro", timeline: { id: "timeline-intro-copy", filePath: "root/d/intro.timeline.json", clips: [], adjustmentLayers: [], motionMarkers: [], timelineLayers: { compositionLayers: [], adjustmentLayers: [], motionLayers: [], transitionLayers: [] }, settings: {} } },
+      ] },
+    ], "root");
+
+    expect(snapshot.compositionFilePaths).toEqual({
+      "intro-a": "root/folder/intro.composition.ts",
+      "intro-b": "root/folder/intro 2.composition.ts",
+    });
+    expect(snapshot.timelineFilePaths).toEqual({
+      "timeline-intro": "root/folder/intro.timeline.json",
+      "timeline-intro-copy": "root/folder/intro 2.timeline.json",
+    });
+  });
+
+  it("renames duplicate asset files in the same folder with counters", () => {
+    const snapshot = createFileManagerTreeSnapshotForTest([
+      { id: "asset:folder", kind: "asset-folder" as const, name: "folder", asset: { id: "folder", kind: "folder", name: "folder", children: [] }, children: [
+        { id: "asset:a", kind: "asset-file" as const, name: "logo.png", asset: { id: "a", kind: "file", name: "logo.png", path: "assets/a/logo.png" } },
+        { id: "asset:b", kind: "asset-file" as const, name: "logo.png", asset: { id: "b", kind: "file", name: "logo.png", path: "assets/b/logo.png" } },
+      ] },
+    ], "root");
+
+    expect(snapshot.assets).toEqual([
+      { id: "folder", kind: "folder", name: "folder", children: [
+        { id: "a", kind: "file", name: "logo.png", path: "assets/a/logo.png" },
+        { id: "b", kind: "file", name: "logo 2.png", path: "assets/b/logo.png" },
+      ] },
     ]);
   });
 });

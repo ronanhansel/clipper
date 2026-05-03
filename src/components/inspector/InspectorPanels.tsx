@@ -1010,6 +1010,10 @@ export function TransitionInspector({ layer, onChange, onDelete }: { layer: Tran
   const ease = (layer.effect.params?.ease as MotionEase) ?? "easeInOut";
   const markerTime = getTransitionMarkerTime(layer);
 
+  function updateName(value: string) {
+    onChange((current) => ({ ...current, name: value }));
+  }
+
   function updateEase(value: string) {
     const easeValue = value === defaultMotionEaseSelectValue ? "easeInOut" : value as MotionEase;
     onChange((current) => ({
@@ -1019,16 +1023,15 @@ export function TransitionInspector({ layer, onChange, onDelete }: { layer: Tran
   }
 
   return (
-    <div className={panelCard}>
-      <div className="flex items-center justify-between">
-        <strong className="text-[13px]">{effect?.label ?? layer.name}</strong>
-        <button data-timeline-control className="grid h-7 w-7 place-items-center rounded-md border border-transparent text-[#858a96] transition hover:border-[#2d313b] hover:bg-[#20232c] hover:text-[#ff8b8b]" title="Delete transition" onClick={onDelete}><Trash2 size={12} /></button>
-      </div>
-      <div className="grid grid-cols-2 gap-3">
+    <div className="grid gap-3">
+      <label className={`grid gap-1.5 ${mutedCaps}`}>Name<Input value={layer.name} placeholder={effect?.label ?? "Transition"} onChange={(event) => updateName(event.target.value)} /></label>
+      <div className="grid grid-cols-2 gap-2">
         <label className={`grid gap-1.5 ${mutedCaps}`}>Duration<Input type="number" min={0.1} max={MAX_PART_DURATION_SECONDS} step={0.1} value={roundTwo(layer.duration)} onChange={(event) => { const value = Number.parseFloat(event.target.value); if (Number.isFinite(value)) onChange((current) => { const duration = clamp(value, 0.1, MAX_PART_DURATION_SECONDS); return normalizeSymmetricTransitionLayer({ ...current, start: getTransitionMarkerTime(current) - duration / 2, duration }); }); }} /></label>
         <label className={`grid gap-1.5 ${mutedCaps}`}>Marker time<Input type="number" min={0} max={MAX_PART_DURATION_SECONDS} step={0.1} value={roundTwo(markerTime)} onChange={(event) => { const value = Number.parseFloat(event.target.value); if (Number.isFinite(value)) onChange((current) => normalizeSymmetricTransitionLayer({ ...current, start: clamp(value, 0, MAX_PART_DURATION_SECONDS) - current.duration / 2 })); }} /></label>
       </div>
+      <label className={`grid gap-1.5 ${mutedCaps}`}>Effect<Input value={effect?.label ?? layer.effect.effectId} readOnly /></label>
       <label className={`grid gap-1.5 ${mutedCaps}`}>Ease<Select value={motionEaseSelectValue(ease)} onValueChange={updateEase}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><TooltipProvider delayDuration={1000} skipDelayDuration={0}><SelectGroup><EaseSelectItems defaultInOut /></SelectGroup></TooltipProvider></SelectContent></Select></label>
+      <button className="flex items-center justify-center gap-2 rounded-[10px] border border-[#3b2a2a] bg-[#231516] px-[13px] py-[9px] text-sm font-medium text-[#ffb4b4] transition hover:border-[#6b3838] hover:bg-[#301b1d]" onClick={onDelete}><Trash2 size={15} />Delete</button>
     </div>
   );
 }

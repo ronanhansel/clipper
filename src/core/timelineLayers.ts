@@ -22,6 +22,15 @@ export type TimelineLayerDragPreview = {
   height?: number;
 };
 
+export type TimelineBlockPreviewOptions = {
+  deltaX: number;
+  deltaY?: number;
+  height?: number;
+  width?: number;
+  resizeProperty?: string;
+  blocked?: boolean;
+};
+
 export function getTimelineLayerRowAtY(layout: TimelineLayerLayout, y: number, category?: TimelineLayerCategory) {
   const index = layout.rows.findIndex((row, rowIndex) => {
     if (category && row.category !== category) return false;
@@ -136,26 +145,24 @@ export function getTimelineBlockLayerPreview(layout: TimelineLayerLayout, catego
   return getTimelineLayerDragPreview(layout, sourceLayerId, targetLayerId);
 }
 
-export function applyTimelineBlockPreview(element: HTMLElement, options: { deltaX: number; deltaY?: number; height?: number; resizeProperty?: string; blocked?: boolean }) {
+export function applyTimelineBlockPreview(element: HTMLElement, options: TimelineBlockPreviewOptions) {
   element.style.transform = `translate3d(${options.deltaX}px, ${options.deltaY ?? 0}px, 0)`;
   if (options.height !== undefined) element.style.height = `${options.height}px`;
   else element.style.removeProperty("height");
+  if (options.width !== undefined) {
+    if (!("originalWidth" in element.dataset)) element.dataset.originalWidth = element.style.width;
+    element.style.width = `${options.width}px`;
+  }
   element.style.willChange = "transform";
   element.style.zIndex = "25";
   if (options.blocked) {
-    if (!("originalBackground" in element.dataset)) element.dataset.originalBackground = element.style.background;
-    if (!("originalColor" in element.dataset)) element.dataset.originalColor = element.style.color;
+    preserveInlineStyle(element, "originalBackground", "background");
+    preserveInlineStyle(element, "originalColor", "color");
     element.style.background = "linear-gradient(180deg, #dc2626, #991b1b)";
     element.style.color = "#ffffff";
   } else if ("originalBackground" in element.dataset) {
-    const originalBackground = element.dataset.originalBackground ?? "";
-    const originalColor = element.dataset.originalColor ?? "";
-    if (originalBackground) element.style.background = originalBackground;
-    else element.style.removeProperty("background");
-    if (originalColor) element.style.color = originalColor;
-    else element.style.removeProperty("color");
-    delete element.dataset.originalBackground;
-    delete element.dataset.originalColor;
+    restoreInlineStyle(element, "originalBackground", "background");
+    restoreInlineStyle(element, "originalColor", "color");
   }
   element.parentElement?.style.setProperty("overflow", "visible");
 }
@@ -164,18 +171,28 @@ export function clearTimelineBlockPreview(element: HTMLElement, resizeProperty =
   element.style.removeProperty("transform");
   element.style.removeProperty(resizeProperty);
   element.style.removeProperty("height");
+  if ("originalWidth" in element.dataset) {
+    const originalWidth = element.dataset.originalWidth ?? "";
+    if (originalWidth) element.style.width = originalWidth;
+    else element.style.removeProperty("width");
+    delete element.dataset.originalWidth;
+  }
   element.style.removeProperty("will-change");
   element.style.removeProperty("z-index");
   if ("originalBackground" in element.dataset) {
-    const originalBackground = element.dataset.originalBackground ?? "";
-    const originalColor = element.dataset.originalColor ?? "";
-    if (originalBackground) element.style.background = originalBackground;
-    else element.style.removeProperty("background");
-    if (originalColor) element.style.color = originalColor;
-    else element.style.removeProperty("color");
-    delete element.dataset.originalBackground;
-    delete element.dataset.originalColor;
-  }
-  else element.style.removeProperty("color");
+    restoreInlineStyle(element, "originalBackground", "background");
+    restoreInlineStyle(element, "originalColor", "color");
+  } else element.style.removeProperty("color");
   element.parentElement?.style.removeProperty("overflow");
+}
+
+function preserveInlineStyle(element: HTMLElement, datasetKey: "originalBackground" | "originalColor", property: "background" | "color") {
+  if (!(datasetKey in element.dataset)) element.dataset[datasetKey] = element.style[property];
+}
+
+function restoreInlineStyle(element: HTMLElement, datasetKey: "originalBackground" | "originalColor", property: "background" | "color") {
+  const originalValue = element.dataset[datasetKey] ?? "";
+  if (originalValue) element.style[property] = originalValue;
+  else element.style.removeProperty(property);
+  delete element.dataset[datasetKey];
 }

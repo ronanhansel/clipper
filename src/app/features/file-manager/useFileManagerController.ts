@@ -43,6 +43,7 @@ type UseFileManagerControllerInput = Pick<FileManagerProps,
     sortAssets: FileManagerProps["onSortAssets"];
     reloadProject: FileManagerProps["onReloadProject"];
     findCompositionMedia: FileManagerProps["onFindCompositionMedia"];
+    openCompositionFile: NonNullable<FileManagerProps["onOpenCompositionFile"]>;
   };
   implicitFileOperation: <T extends unknown[]>(operation: (...args: T) => void) => (...args: T) => void;
 };
@@ -80,6 +81,7 @@ export function useFileManagerController({ actions, implicitFileOperation, ...st
       sortAssets: implicitFileOperation(actions.sortAssets),
       reloadProject: actions.reloadProject,
       findCompositionMedia: implicitFileOperation(actions.findCompositionMedia),
+      openCompositionFile: actions.openCompositionFile,
     },
   });
 }

@@ -7,6 +7,7 @@ import { clipperHost } from "../app/clipperHost";
 import { getDirectoryPath, nextNumberedName } from "../app/features/file-manager/fileManagerPaths";
 import { getDisplayName, getDragPreviewDisplayName, getFileType, nextNumberedSemanticName, reconstructFileName } from "../core/fileNames";
 import { createDefaultTimelineLayerState } from "../core/project";
+import type { CompositionClip } from "../core/types";
 import { getTransparentNativeDragImage } from "../lib/nativeDragImage";
 import { clipperDragGhostClassName, clipperDragGhostOffset, compositionDragPreviewEvent, compositionPointerDragEvent, dispatchClipperPointerDrag, type CompositionPointerDragDetail, type PointerDragPreviewDetail } from "../lib/pointerDrag";
 import { AppContextMenu } from "./AppContextMenu";
@@ -31,6 +32,7 @@ type OsFileNode = {
 
 export type OsFileManagerProps = {
   projectDirectory: string;
+  compositionLibrary?: CompositionClip[];
   selectedCompositionId?: string;
   selectedTimelineId?: string;
   fileSystemRevision?: number;
@@ -47,6 +49,7 @@ const MIN_TREE_HEIGHT = 360;
 
 export function OsFileManager({
   projectDirectory,
+  compositionLibrary = [],
   selectedCompositionId,
   selectedTimelineId,
   fileSystemRevision,
@@ -74,17 +77,21 @@ export function OsFileManager({
   const [compositionLanePreviewActive, setCompositionLanePreviewActive] = useState(false);
   const [rootDropVisible, setRootDropVisible] = useState(false);
 
-  const getCompositionDragDetail = useCallback((node: OsFileNode, phase: CompositionPointerDragDetail["phase"], currentMouse: { x: number; y: number }, shiftKey: boolean): CompositionPointerDragDetail => ({
-    phase,
-    clientX: currentMouse.x,
-    clientY: currentMouse.y,
-    shiftKey,
-    compositionId: projectRelativeFilePath(node.path, projectDirectory),
-    duration: 5,
-    isEmpty: true,
-    label: getDragPreviewDisplayName(node.name),
-    sourceMissing: false,
-  }), [projectDirectory]);
+  const getCompositionDragDetail = useCallback((node: OsFileNode, phase: CompositionPointerDragDetail["phase"], currentMouse: { x: number; y: number }, shiftKey: boolean): CompositionPointerDragDetail => {
+    const compositionId = projectRelativeFilePath(node.path, projectDirectory);
+    const metadata = resolveOsCompositionDragMetadata(compositionLibrary, compositionId);
+    return {
+      phase,
+      clientX: currentMouse.x,
+      clientY: currentMouse.y,
+      shiftKey,
+      compositionId,
+      duration: metadata.duration,
+      isEmpty: metadata.isEmpty,
+      label: getDragPreviewDisplayName(metadata.filePath ?? node.name),
+      sourceMissing: metadata.sourceMissing,
+    };
+  }, [compositionLibrary, projectDirectory]);
 
   const applyExternalCompositionDragMove = useCallback((currentMouse: { x: number; y: number }, shiftKey: boolean) => {
     const external = externalDragRef.current;
@@ -137,15 +144,6 @@ export function OsFileManager({
   }, []);
 
   useEffect(() => {
-    function updateCompositionLanePreview(event: Event) {
-      setCompositionLanePreviewActive(Boolean((event as CustomEvent<PointerDragPreviewDetail>).detail?.active));
-    }
-
-    window.addEventListener(compositionDragPreviewEvent, updateCompositionLanePreview);
-    return () => window.removeEventListener(compositionDragPreviewEvent, updateCompositionLanePreview);
-  }, []);
-
-  useEffect(() => {
     function onNativeDragEnd() {
       cleanupExternalCompositionDrag("cancel");
     }
@@ -184,6 +182,8 @@ export function OsFileManager({
         }
         event.preventDefault();
         event.stopPropagation();
+      } else if (nodeData.timelineId) {
+        treeRef.current?.endDrag();
       } else {
         treeRef.current?.endDrag();
         event.preventDefault();
@@ -520,6 +520,8 @@ export const composition = new Composition({
       let moved = false;
       const moves: Array<{ oldPath: string; newPath: string }> = [];
       const targetFolderPath = rebasePath(targetFolder.path, pendingPathMovesRef.current);
+      const targetEntries = await clipperHost.listDirectory(targetFolderPath).catch(() => []);
+      const targetNames = new Set(targetEntries.map((entry) => entry.name));
 
       for (const dragId of getTopLevelOsFileIds(dragIds)) {
         let node = findNode(treeData, dragId);
@@ -539,7 +541,9 @@ export const composition = new Composition({
           continue;
         }
         const oldPath = rebasePath(node.path, pendingPathMovesRef.current);
-        const newPath = `${targetFolderPath}/${node.name}`;
+        targetNames.delete(oldPath.startsWith(`${targetFolderPath}/`) ? oldPath.slice(targetFolderPath.length + 1).split("/")[0] : "");
+        const nextName = nextAvailableOsFileName(node.name, targetNames);
+        const newPath = `${targetFolderPath}/${nextName}`;
         if (!canMoveOsFilePath(oldPath, newPath)) continue;
         moves.push({ oldPath, newPath });
         moved = true;
@@ -749,6 +753,27 @@ function canMoveOsFilePath(oldPath: string, newPath: string) {
   return oldPath !== newPath && !newPath.startsWith(`${oldPath}/`);
 }
 
+function nextAvailableOsFileName(fileName: string, siblingNames: Set<string>) {
+  const parsed = splitOsFileName(fileName);
+  let nextName = fileName;
+  let index = 2;
+  while (siblingNames.has(nextName)) {
+    nextName = `${parsed.base} ${index}${parsed.extension}`;
+    index += 1;
+  }
+  siblingNames.add(nextName);
+  return nextName;
+}
+
+function splitOsFileName(fileName: string) {
+  const semanticSuffixes = [".composition.ts", ".composition.json", ".timeline.ts", ".timeline.json"];
+  for (const suffix of semanticSuffixes) {
+    if (fileName.endsWith(suffix)) return { base: fileName.slice(0, -suffix.length), extension: suffix };
+  }
+  const extensionIndex = fileName.lastIndexOf(".");
+  return extensionIndex > 0 ? { base: fileName.slice(0, extensionIndex), extension: fileName.slice(extensionIndex) } : { base: fileName, extension: "" };
+}
+
 function getOsFileDropTarget(api: NativeTreeApi<OsFileNode>, dragIds: string[], localY: number): NativeTreeDropTarget | null {
   const visibleNodes = api.visibleNodes;
   if (!visibleNodes.length || localY < 0 || localY > visibleNodes.length * ROW_HEIGHT) return canDropOsFileRoot(api, dragIds) ? { dragIds, parentId: null, index: visibleNodes.length } : null;
@@ -934,6 +959,16 @@ function projectRelativeFilePath(filePath: string, rootPath: string) {
   const editableRoot = filePath.startsWith(`${rootPath}/file-manager/`) ? `${rootPath}/file-manager` : rootPath;
   const relativePath = filePath.startsWith(`${editableRoot}/`) ? filePath.slice(editableRoot.length + 1) : filePath;
   return relativePath.startsWith("file-manager/") ? relativePath.slice("file-manager/".length) : relativePath;
+}
+
+export function resolveOsCompositionDragMetadata(compositions: Pick<CompositionClip, "id" | "filePath" | "duration" | "objects" | "background" | "sourceMissing">[], compositionId: string) {
+  const composition = compositions.find((item) => item.id === compositionId || item.filePath === compositionId || item.filePath.endsWith(`/${compositionId}`));
+  return {
+    duration: Math.max(composition?.duration ?? 5, 0.1),
+    isEmpty: composition ? composition.objects.length === 0 && composition.background.elements.length === 0 : true,
+    filePath: composition?.filePath,
+    sourceMissing: Boolean(composition?.sourceMissing),
+  };
 }
 
 function findNode(nodes: OsFileNode[], id: string): OsFileNode | null {

@@ -308,6 +308,7 @@ export type CompositionClip = TimelineMarkerMetadata & {
   filePath: string;
   source?: string;
   sourceMissing?: boolean;
+  compositionError?: string;
   start?: number;
   layerId?: string;
   duration: number;
@@ -431,13 +432,27 @@ export type EffectsPanelState = {
   openGroups?: Record<string, boolean>;
 };
 
+export type PersistedEditorTab = {
+  id: string;
+  filePath: string;
+  language: string;
+  unsupportedReason?: string;
+  isComposition?: boolean;
+  isPinned?: boolean;
+};
+
+export type EditorSessionState = {
+  tabs: PersistedEditorTab[];
+  activeTabId?: string | null;
+};
+
 export type EditorState = {
   timeline: TimelineViewportState;
   composeTimeline?: TimelineViewportState;
   /** Legacy global timeline layout. New timeline layout belongs to TimelineDocument.timelineLayers. */
   timelineLayers?: TimelineLayerState;
   timelineMode: TimelineMode;
-  mode?: "interactive" | "code";
+  mode?: "preview" | "editor" | "interactive" | "code";
   leftPanelTab?: "assets" | "tools";
   rightPanelTab?: "video" | "motion" | "agent";
   selectedSceneId?: string;
@@ -451,9 +466,12 @@ export type EditorState = {
   layout?: EditorLayoutState;
   composeLayout?: ComposeLayoutState;
   preview?: PreviewViewportState;
+  editor?: Record<string, CodeViewportState>;
+  /** Legacy editor viewport state key. New projects should use editor. */
   code?: Record<string, CodeViewportState>;
   fileManagerState?: FileManagerState;
   effectsPanelState?: EffectsPanelState;
+  editorSession?: EditorSessionState;
 };
 
 export type AssetItem = {

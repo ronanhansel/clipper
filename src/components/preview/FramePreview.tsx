@@ -7,6 +7,7 @@ import { generateChartObjects, type ChartGeneratedObject } from "../../core/char
 import { getBoundsUnion, insetBounds, isVisibleMarqueeBounds, updateDragSelectionBoxElement, type ResizeHandle } from "../../core/frameInteraction";
 import { clamp } from "../../core/math";
 import { getDisplayNameFromPath } from "../../core/fileNames";
+import { getRenderClockAttributes, getRenderClockStyle, syncDomAnimationsToRenderClock } from "../../core/renderClock";
 import { evaluateBackgroundLayer, evaluateFrameObject, isTimeSensitiveFrameObject, type EvaluatedFrameObject } from "../../core/renderRuntime";
 import { applyTransitionLayersToVisualStyle, getTransitionFinishTime, getTransitionProgress, renderTransitionSequence } from "../../core/transitions";
 import { FRAME_HEIGHT, FRAME_WIDTH, type AdjustmentLayer, type BackgroundLayer, type Bounds, type FrameObject, type Part, type Point, type RichTextSegment, type SelectionPayload, type TimelineMode, type TimelineMotionLayerState, type TransitionLayer } from "../../core/types";
@@ -24,6 +25,7 @@ export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dra
   const previewParts = (arguments[0] as { previewParts?: Array<{ part: Part; start: number; previewTime: number }> }).previewParts;
   const transitionPreviewParts = (arguments[0] as { transitionPreviewParts?: { from: Array<{ part: Part; start: number; previewTime: number }>; to: Array<{ part: Part; start: number; previewTime: number }>; fromSceneTime: number; toSceneTime: number } | null }).transitionPreviewParts;
   const transitionLayers = (arguments[0] as { transitionLayers?: TransitionLayer[] }).transitionLayers;
+  const renderMode = (arguments[0] as { renderMode?: "preview" | "export" }).renderMode ?? "preview";
   const displayPreviewTime = previewTime;
   const displaySceneTime = sceneTime;
   const visualAdjustment = useMemo(() => applyAdjustmentLayersToVisualStyle(displaySceneTime, adjustmentLayers), [adjustmentLayers, displaySceneTime]);
@@ -50,6 +52,7 @@ export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dra
   const selectorHoverRef = useRef(false);
   const showDragBox = dragBox && isVisibleMarqueeBounds(dragBox, frameScale);
   const isUnlinkedPart = Boolean(part.sourceMissing);
+  const compositionError = part.compositionError;
   const stackPreviewParts = previewParts?.length ? previewParts : [{ part, start: partStart, previewTime }];
 
   useEffect(() => {
@@ -146,15 +149,15 @@ export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dra
     <div className="grid gap-3" data-clipper-frame-preview-wrapper>
       <div className="flex items-baseline justify-between text-[#dfe2ea]"><span className={mutedCaps}>{getDisplayNameFromPath(part.filePath)}</span>
 <strong className="text-[13px]">{FRAME_WIDTH} x {FRAME_HEIGHT}</strong></div>
-      <div className="relative overflow-visible" style={viewportOverlayStyle}>
+      <div className="relative overflow-visible" data-clipper-frame-preview-shell style={viewportOverlayStyle}>
         <div ref={frameViewportRef} className={`absolute overflow-hidden bg-black shadow-[0_22px_70px_rgba(0,0,0,0.44)] ${!isPlaying && (focusPicking || trackerPicking) ? "cursor-crosshair ring-2 ring-[#159dff]" : ""}`} data-clipper-frame-preview style={clippedViewportStyle} onPointerDownCapture={handleFramePointerDownCapture} onPointerDown={isPlaying ? undefined : onFramePointerDown} onPointerMove={handleFramePointerMove} onPointerUp={isPlaying ? undefined : onFramePointerUp} onPointerCancel={isPlaying ? undefined : onFramePointerCancel} onPointerLeave={clearSelectorHover}>
           <div className="absolute left-0 top-0 origin-top-left overflow-hidden" data-clipper-frame-content style={frameStyle}>
             <div className="absolute inset-0" data-clipper-perspective-stage style={perspectiveStageStyle}>
-              {isUnlinkedPart || compHidden ? <div className="absolute inset-0 bg-black" ref={cameraRef} /> : <div className="absolute inset-0 origin-center" ref={cameraRef} style={{ transformStyle: "preserve-3d", ...transitionCameraStyle }}>
+              {isUnlinkedPart || compHidden || compositionError ? <div className="absolute inset-0 bg-black" ref={cameraRef}>{compositionError ? <CompositionErrorOverlay filePath={part.filePath} message={compositionError} /> : null}</div> : <div className="absolute inset-0 origin-center" ref={cameraRef} style={{ transformStyle: "preserve-3d", ...transitionCameraStyle }}>
                 <div className="absolute inset-0" data-clipper-visual-adjustments style={visualAdjustmentStyle}>
                   {transitionPreviewParts && transitionProgress !== null
-                    ? <TransitionCompositeView adjustmentLayers={adjustmentLayers} animationsEnabled={animationsEnabled} sequenceStyle={transitionSequenceStyle} transitionPreviewParts={transitionPreviewParts} />
-                    : stackPreviewParts.map((item) => <CompositionLayerView key={`${item.part.id}:${item.start}`} active={item.part.id === part.id} animationsEnabled={animationsEnabled} canSelect={!isPlaying && (canSelectObjects || trackerPicking)} editingTextObjectId={editingTextObjectId} focusPicking={!isPlaying && (focusPicking || trackerPicking)} isPlaying={isPlaying} part={item.part} previewTime={item.previewTime} onObjectPointerDown={onObjectPointerDown} onTextEditCommit={onTextEditCommit} onTextObjectDoubleClick={onTextObjectDoubleClick} />)}
+                    ? <TransitionCompositeView adjustmentLayers={adjustmentLayers} animationsEnabled={animationsEnabled} isPlaying={isPlaying} renderMode={renderMode} sequenceStyle={transitionSequenceStyle} transitionPreviewParts={transitionPreviewParts} />
+                    : stackPreviewParts.map((item) => <CompositionLayerView key={`${item.part.id}:${item.start}`} active={item.part.id === part.id} animationsEnabled={animationsEnabled} canSelect={!isPlaying && (canSelectObjects || trackerPicking)} editingTextObjectId={editingTextObjectId} focusPicking={!isPlaying && (focusPicking || trackerPicking)} isPlaying={isPlaying} part={item.part} previewTime={item.previewTime} renderMode={renderMode} onObjectPointerDown={onObjectPointerDown} onTextEditCommit={onTextEditCommit} onTextObjectDoubleClick={onTextObjectDoubleClick} />)}
                   <div ref={frameVisualAdjustmentOverlaysRef} className="pointer-events-none absolute inset-0" data-clipper-visual-adjustment-overlays="frame" style={{ zIndex: 2147483647 }} />
                 </div>
               </div>}
@@ -170,6 +173,18 @@ export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dra
     </div>
   );
 });
+
+function CompositionErrorOverlay({ filePath, message }: { filePath: string; message: string }) {
+  return (
+    <div className="absolute inset-0 grid place-items-center bg-[#07090d] p-16 text-[#ffd6d6]">
+      <div className="max-w-[1080px] rounded-[28px] border border-[#5a222c] bg-[#1a0f13]/95 p-10 shadow-[0_26px_90px_rgba(0,0,0,0.55)]">
+        <div className="text-[22px] font-extrabold tracking-tight text-[#ff6b7a]">Composition failed to load</div>
+        <div className="mt-2 break-all font-mono text-[15px] text-[#a7adbb]">{filePath}</div>
+        <pre className="mt-6 max-h-[560px] overflow-auto whitespace-pre-wrap rounded-[18px] border border-[#3b2a2a] bg-[#090b10] p-5 font-mono text-[20px] leading-relaxed text-[#ffd6d6]">{message}</pre>
+      </div>
+    </div>
+  );
+}
 
 function syncVisualAdjustmentOverlays(container: HTMLElement | null, overlays: AdjustmentVisualOverlay[] | undefined) {
   if (!container) return;
@@ -192,9 +207,21 @@ function TrackerTargetOverlay({ target }: { target: { id: string; viewportBounds
   );
 }
 
-function CompositionLayerView({ active, animationsEnabled, canSelect, editingTextObjectId, focusPicking, isPlaying, part, previewTime, onObjectPointerDown, onTextEditCommit, onTextObjectDoubleClick }: { active: boolean; animationsEnabled: boolean; canSelect: boolean; editingTextObjectId: string | null; focusPicking: boolean; isPlaying: boolean; part: Part; previewTime: number; onObjectPointerDown: (event: PointerEvent<HTMLDivElement>, object: FrameObject) => void; onTextEditCommit: (objectId: string, content: string, richText?: RichTextSegment[]) => void; onTextObjectDoubleClick: (event: ReactMouseEvent<HTMLDivElement>, object: FrameObject) => void }) {
+function CompositionLayerView({ active, animationsEnabled, canSelect, editingTextObjectId, focusPicking, isPlaying, part, previewTime, renderMode, onObjectPointerDown, onTextEditCommit, onTextObjectDoubleClick }: { active: boolean; animationsEnabled: boolean; canSelect: boolean; editingTextObjectId: string | null; focusPicking: boolean; isPlaying: boolean; part: Part; previewTime: number; renderMode: "preview" | "export"; onObjectPointerDown: (event: PointerEvent<HTMLDivElement>, object: FrameObject) => void; onTextEditCommit: (objectId: string, content: string, richText?: RichTextSegment[]) => void; onTextObjectDoubleClick: (event: ReactMouseEvent<HTMLDivElement>, object: FrameObject) => void }) {
+  const layerRef = useRef<HTMLDivElement | null>(null);
+  const renderClockState = useMemo(() => ({ playing: renderMode !== "export" && isPlaying, time: previewTime, mode: renderMode }), [isPlaying, previewTime, renderMode]);
+  const renderClockStateRef = useRef(renderClockState);
+  const renderClockStyle = useMemo(() => getRenderClockStyle(renderClockState) as CSSProperties, [renderClockState]);
+
+  useLayoutEffect(() => {
+    renderClockStateRef.current = renderClockState;
+    syncDomAnimationsToRenderClock(layerRef.current, renderClockState);
+  }, [renderClockState]);
+
+  useLayoutEffect(() => syncRenderClockSubtree(layerRef.current, renderClockStateRef), []);
+
   return (
-    <div className="absolute inset-0 overflow-hidden" style={part.frame.style as CSSProperties}>
+    <div ref={layerRef} className="absolute inset-0 overflow-hidden" {...getRenderClockAttributes(renderClockState)} style={{ ...(part.frame.style as CSSProperties), ...renderClockStyle }}>
       {!part.background.hidden && <BackgroundLayerView animationsEnabled={animationsEnabled} background={part.background} duration={part.duration} previewTime={previewTime} />}
       {part.objects.filter(obj => !obj.hidden).map((object) => (
         <FrameObjectView key={object.id} animationsEnabled={animationsEnabled} object={object} canSelect={active && canSelect} duration={part.duration} editing={active && !isPlaying && editingTextObjectId === object.id} focusPicking={active && focusPicking} previewTime={previewTime} onDoubleClick={(event) => { if (active && !isPlaying) onTextObjectDoubleClick(event, object); }} onPointerDown={(event) => { if (active && !isPlaying) onObjectPointerDown(event, object); }} onTextEditCommit={(content, richText) => onTextEditCommit(object.id, content, richText)} />
@@ -203,7 +230,7 @@ function CompositionLayerView({ active, animationsEnabled, canSelect, editingTex
   );
 }
 
-function TransitionCompositeView({ adjustmentLayers, animationsEnabled, sequenceStyle, transitionPreviewParts }: { adjustmentLayers?: AdjustmentLayer[]; animationsEnabled: boolean; sequenceStyle: TransitionSequenceStyle | undefined; transitionPreviewParts: { from: Array<{ part: Part; start: number; previewTime: number }>; to: Array<{ part: Part; start: number; previewTime: number }>; fromSceneTime: number; toSceneTime: number } }) {
+function TransitionCompositeView({ adjustmentLayers, animationsEnabled, isPlaying, renderMode, sequenceStyle, transitionPreviewParts }: { adjustmentLayers?: AdjustmentLayer[]; animationsEnabled: boolean; isPlaying: boolean; renderMode: "preview" | "export"; sequenceStyle: TransitionSequenceStyle | undefined; transitionPreviewParts: { from: Array<{ part: Part; start: number; previewTime: number }>; to: Array<{ part: Part; start: number; previewTime: number }>; fromSceneTime: number; toSceneTime: number } }) {
   const frameStyle = sequenceStyle?.frameStyle as CSSProperties | undefined;
   const aStyle = sequenceStyle?.aStyle as CSSProperties | undefined;
   const bStyle = sequenceStyle?.bStyle as CSSProperties | undefined;
@@ -213,20 +240,20 @@ function TransitionCompositeView({ adjustmentLayers, animationsEnabled, sequence
   return (
     <div className="absolute inset-0 overflow-hidden" style={frameStyle}>
       <div className="absolute inset-0 overflow-hidden" style={{ ...aStyle, willChange: "transform" }}>
-        <TimelineSequenceView adjustment={fromAdjustment} animationsEnabled={animationsEnabled} parts={transitionPreviewParts.from} sequenceKey="from" />
+          <TimelineSequenceView adjustment={fromAdjustment} animationsEnabled={animationsEnabled} isPlaying={isPlaying} parts={transitionPreviewParts.from} renderMode={renderMode} sequenceKey="from" />
       </div>
       <div className="absolute inset-0 overflow-hidden" style={{ ...bStyle, willChange: "transform" }}>
-        <TimelineSequenceView adjustment={toAdjustment} animationsEnabled={animationsEnabled} parts={transitionPreviewParts.to} sequenceKey="to" />
+          <TimelineSequenceView adjustment={toAdjustment} animationsEnabled={animationsEnabled} isPlaying={isPlaying} parts={transitionPreviewParts.to} renderMode={renderMode} sequenceKey="to" />
       </div>
     </div>
   );
 }
 
-function TimelineSequenceView({ adjustment, animationsEnabled, parts, sequenceKey }: { adjustment: ReturnType<typeof applyAdjustmentLayersToVisualStyle>; animationsEnabled: boolean; parts: Array<{ part: Part; start: number; previewTime: number }>; sequenceKey: string }) {
+function TimelineSequenceView({ adjustment, animationsEnabled, isPlaying, parts, renderMode, sequenceKey }: { adjustment: ReturnType<typeof applyAdjustmentLayersToVisualStyle>; animationsEnabled: boolean; isPlaying: boolean; parts: Array<{ part: Part; start: number; previewTime: number }>; renderMode: "preview" | "export"; sequenceKey: string }) {
   const visualStyle = { filter: adjustment.filter } as CSSProperties;
   return (
     <div className="absolute inset-0" style={visualStyle}>
-      {parts.map((item) => <CompositionLayerView key={`${sequenceKey}:${item.part.id}:${item.start}`} active={false} animationsEnabled={animationsEnabled} canSelect={false} editingTextObjectId={null} focusPicking={false} isPlaying={false} part={item.part} previewTime={item.previewTime} onObjectPointerDown={noopObjectPointerDown} onTextEditCommit={noopTextEditCommit} onTextObjectDoubleClick={noopTextDoubleClick} />)}
+      {parts.map((item) => <CompositionLayerView key={`${sequenceKey}:${item.part.id}:${item.start}`} active={false} animationsEnabled={animationsEnabled} canSelect={false} editingTextObjectId={null} focusPicking={false} isPlaying={isPlaying} part={item.part} previewTime={item.previewTime} renderMode={renderMode} onObjectPointerDown={noopObjectPointerDown} onTextEditCommit={noopTextEditCommit} onTextObjectDoubleClick={noopTextDoubleClick} />)}
       {adjustment.overlays?.map((overlay) => <div key={overlay.id} className="pointer-events-none absolute inset-0" style={{ zIndex: 2147483647, ...overlay.style }} />)}
     </div>
   );
@@ -240,6 +267,17 @@ function noopObjectPointerDown() {}
 function noopTextEditCommit() {}
 function noopTextDoubleClick() {}
 
+function syncRenderClockSubtree(root: HTMLDivElement | null, stateRef: { current: { playing: boolean; time: number; mode: "preview" | "export" } }) {
+  syncDomAnimationsToRenderClock(root, stateRef.current);
+  const frame = requestAnimationFrame(() => syncDomAnimationsToRenderClock(root, stateRef.current));
+  const observer = typeof MutationObserver !== "undefined" && root ? new MutationObserver(() => syncDomAnimationsToRenderClock(root, stateRef.current)) : null;
+  if (observer && root) observer.observe(root, { childList: true, subtree: true });
+  return () => {
+    cancelAnimationFrame(frame);
+    observer?.disconnect();
+  };
+}
+
 export function FramePickPointOverlay({ point, frameScale }: { point: Point; frameScale: number }) {
   return (
     <div className="pointer-events-none absolute z-20" style={{ left: point.x * frameScale, top: point.y * frameScale }}>
@@ -252,6 +290,7 @@ export const FrameObjectView = memo(function FrameObjectView({ animationsEnabled
   const evaluatedObject = useMemo(() => evaluateObjectForPreview(object, previewTime, duration, animationsEnabled), [animationsEnabled, duration, object, previewTime]);
   const animation = { style: evaluatedObject.renderStyle, content: evaluatedObject.renderContent };
   const editableRef = useRef<HTMLDivElement | null>(null);
+  const lastCommittedTextRef = useRef<string | null>(null);
   const objectTransform = typeof object.style.transform === "string" ? object.style.transform : undefined;
   const animationTransform = typeof animation.style.transform === "string" ? animation.style.transform : undefined;
   const style = {
@@ -270,8 +309,12 @@ export const FrameObjectView = memo(function FrameObjectView({ animationsEnabled
 
   useEffect(() => {
     if (!editing || !editableRef.current) return;
+    const currentCommittedText = JSON.stringify({ content: object.content ?? "", richText: object.richText });
+    if (currentCommittedText === lastCommittedTextRef.current) return;
+
     const editable = editableRef.current;
     editable.replaceChildren(...textSegmentsToEditableNodes(getRenderableTextSegments(object.content ?? "", object.richText), Boolean(object.richText)));
+    lastCommittedTextRef.current = currentCommittedText;
     editable.focus();
     const selection = window.getSelection();
     const range = document.createRange();
@@ -279,7 +322,7 @@ export const FrameObjectView = memo(function FrameObjectView({ animationsEnabled
     range.collapse(false);
     selection?.removeAllRanges();
     selection?.addRange(range);
-  }, [editing]);
+  }, [editing, object.content, object.richText]);
 
   useEffect(() => {
     if (!editing) return;
@@ -298,7 +341,12 @@ export const FrameObjectView = memo(function FrameObjectView({ animationsEnabled
     if (!editableRef.current) return;
     normalizeEditableFormatting(editableRef.current);
     const richText = richTextSegmentsFromElement(editableRef.current, object.style);
-    onTextEditCommit(richText.map((segment) => segment.text).join(""), shouldPersistRichText(richText, object.style) ? richText : undefined);
+    const content = richText.map((segment) => segment.text).join("");
+    const nextRichText = shouldPersistRichText(richText, object.style) ? richText : undefined;
+    const nextCommittedText = JSON.stringify({ content, richText: nextRichText });
+    if (nextCommittedText === lastCommittedTextRef.current) return;
+    lastCommittedTextRef.current = nextCommittedText;
+    onTextEditCommit(content, nextRichText);
   }
 
   function onTextEditKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
@@ -339,7 +387,7 @@ export const FrameObjectView = memo(function FrameObjectView({ animationsEnabled
 
   return (
     <div className={`absolute flex touch-none select-none flex-col justify-center whitespace-pre-line ${object.type === "chart" ? "overflow-visible" : "overflow-hidden"} ${focusPicking ? "cursor-crosshair" : editing ? "cursor-text" : "cursor-default"} ${editing ? "select-text" : ""}`} data-object-id={canSelect && !isLocked ? object.id : undefined} style={{ ...style, ...(isLocked ? { opacity: 0.6 } : {}) }} onDoubleClick={(event) => { if (!isLocked) onDoubleClick(event); }} onPointerDown={(event) => { if (!isLocked) onPointerDown(event); }}>
-      {object.type === "text" && editing ? <div ref={editableRef} className="min-h-0 w-full whitespace-pre-wrap outline-none" contentEditable suppressContentEditableWarning onBlur={commitTextEdit} onKeyDown={onTextEditKeyDown} onPointerDown={(event) => event.stopPropagation()} /> : null}
+      {object.type === "text" && editing ? <div ref={editableRef} className="min-h-0 w-full whitespace-pre-wrap outline-none" contentEditable suppressContentEditableWarning onBlur={commitTextEdit} onInput={commitTextEdit} onKeyDown={onTextEditKeyDown} onPointerDown={(event) => event.stopPropagation()} /> : null}
       {object.type === "text" && !editing ? <div className="min-h-0 w-full whitespace-pre-wrap">{renderRichTextSegments(textSegments, Boolean(richText))}</div> : null}
       {object.type === "chart" && object.chart ? <ChartObjectView animationsEnabled={animationsEnabled} object={object} duration={duration} previewTime={previewTime} /> : null}
       {object.type === "svg" && content ? <div className="h-full w-full" dangerouslySetInnerHTML={{ __html: content }} /> : null}

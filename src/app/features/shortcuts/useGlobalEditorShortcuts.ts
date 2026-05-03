@@ -6,6 +6,9 @@ type Setter<T> = T | ((current: T) => T);
 
 type UseGlobalEditorShortcutsOptions = {
   cancelActiveSelector: () => boolean;
+  activeEditorTabId: string | null;
+  closeEditorTab: (tabId: string) => void;
+  restoreClosedEditorTab: () => boolean;
   copySelectedTimelineNodes: () => boolean;
   cutSelectedTimelineNodes: () => boolean;
   deleteSelectedTimelineNodes: () => boolean;
@@ -18,12 +21,12 @@ type UseGlobalEditorShortcutsOptions = {
   marqueeDraggingRef: { current: boolean };
   marqueeSpacePanningRef: { current: boolean };
   pasteTimelineNodesSilently: () => void;
+  pausePlaybackAtCurrentTime: () => void;
   presentationModeRef: { current: string | false | null };
   redoProjectChange: () => void;
   saveAllChangesRef: { current: (() => Promise<void> | void) | null | undefined };
   selectedPartId: string;
   setFastSelectEnabled: (enabled: Setter<boolean>) => void;
-  setIsPlaying: (playing: Setter<boolean>) => void;
   setScrubSnapEnabled: (enabled: Setter<boolean>) => void;
   showPresentationControls: () => void;
   stepSceneTime: (direction: -1 | 1) => void;
@@ -33,9 +36,11 @@ type UseGlobalEditorShortcutsOptions = {
   updateTimelineMode: (mode: TimelineMode) => void;
 };
 
-export function isCodeEditorTarget(target: HTMLElement | null) {
+export function isEditorTarget(target: HTMLElement | null) {
   return Boolean(target?.closest(".monaco-editor"));
 }
+
+export const isCodeEditorTarget = isEditorTarget;
 
 export function isTextEditingTarget(target: HTMLElement | null) {
   const editable = target?.closest("input, textarea, select, [contenteditable='true']") as HTMLElement | null;
@@ -45,6 +50,9 @@ export function isTextEditingTarget(target: HTMLElement | null) {
 
 export function useGlobalEditorShortcuts({
   cancelActiveSelector,
+  activeEditorTabId,
+  closeEditorTab,
+  restoreClosedEditorTab,
   copySelectedTimelineNodes,
   cutSelectedTimelineNodes,
   deleteSelectedTimelineNodes,
@@ -57,12 +65,12 @@ export function useGlobalEditorShortcuts({
   marqueeDraggingRef,
   marqueeSpacePanningRef,
   pasteTimelineNodesSilently,
+  pausePlaybackAtCurrentTime,
   presentationModeRef,
   redoProjectChange,
   saveAllChangesRef,
   selectedPartId,
   setFastSelectEnabled,
-  setIsPlaying,
   setScrubSnapEnabled,
   showPresentationControls,
   stepSceneTime,
@@ -72,9 +80,15 @@ export function useGlobalEditorShortcuts({
   updateTimelineMode,
 }: UseGlobalEditorShortcutsOptions) {
   useEffect(() => {
+    function closeActiveEditorTab() {
+      if (!activeEditorTabId) return false;
+      closeEditorTab(activeEditorTabId);
+      return true;
+    }
+
     function switchModeShortcut(key: "1" | "2" | "3" | "4") {
-      if (key === "1") updateMode("interactive");
-      if (key === "2") updateMode("code");
+      if (key === "1") updateMode("preview");
+      if (key === "2") updateMode("editor");
       if (key === "3") updateTimelineMode("compose");
       if (key === "4") updateTimelineMode("composition");
     }
@@ -83,6 +97,22 @@ export function useGlobalEditorShortcuts({
       if (event.key.toLowerCase() === "s" && (event.ctrlKey || event.metaKey)) {
         event.preventDefault();
         void saveAllChangesRef.current?.();
+        return;
+      }
+
+      if (event.key.toLowerCase() === "w" && (event.ctrlKey || event.metaKey)) {
+        if (closeActiveEditorTab()) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+        return;
+      }
+
+      if (event.key.toLowerCase() === "t" && (event.ctrlKey || event.metaKey)) {
+        if (restoreClosedEditorTab()) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
         return;
       }
 
@@ -157,13 +187,16 @@ export function useGlobalEditorShortcuts({
         }
       }
 
+      if (isCodeEditorTarget(target)) return;
+
+      const textEditingTarget = isTextEditingTarget(target);
+      if (event.key === "Escape" && textEditingTarget) return;
+
       if (event.key === "Escape" && cancelActiveSelector()) {
         event.preventDefault();
         event.stopPropagation();
         return;
       }
-
-      if (isCodeEditorTarget(target)) return;
 
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
         event.preventDefault();
@@ -179,7 +212,7 @@ export function useGlobalEditorShortcuts({
       }
 
       const isDeleteKey = event.key === "Backspace" || event.key === "Delete";
-      if (isTextEditingTarget(target)) return;
+      if (textEditingTarget) return;
 
       if (!event.ctrlKey && !event.metaKey && !event.altKey) {
         if (event.key.toLowerCase() === "f") {
@@ -249,7 +282,7 @@ export function useGlobalEditorShortcuts({
 
       if (event.key.toLowerCase() === "c") {
         event.preventDefault();
-        setIsPlaying(false);
+        pausePlaybackAtCurrentTime();
         return;
       }
 
@@ -282,12 +315,16 @@ export function useGlobalEditorShortcuts({
     }
 
     const unsubscribeModeShortcut = window.clipper?.onModeShortcut(switchModeShortcut);
+    const unsubscribeCloseEditorTabShortcut = window.clipper?.onCloseEditorTabShortcut?.(() => { closeActiveEditorTab(); });
+    const unsubscribeRestoreEditorTabShortcut = window.clipper?.onRestoreEditorTabShortcut?.(() => { restoreClosedEditorTab(); });
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
     return () => {
       unsubscribeModeShortcut?.();
+      unsubscribeCloseEditorTabShortcut?.();
+      unsubscribeRestoreEditorTabShortcut?.();
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
     };
-  }, [cancelActiveSelector, copySelectedTimelineNodes, cutSelectedTimelineNodes, deleteSelectedTimelineNodes, enterFrameFullscreen, enterTheaterMode, exitPresentationMode, jumpToEnd, jumpToNextPart, jumpToStart, marqueeDraggingRef, marqueeSpacePanningRef, pasteTimelineNodesSilently, presentationModeRef, redoProjectChange, saveAllChangesRef, selectedPartId, setFastSelectEnabled, setIsPlaying, setScrubSnapEnabled, showPresentationControls, stepSceneTime, togglePlayback, undoProjectChange, updateMode, updateTimelineMode]);
+  }, [activeEditorTabId, cancelActiveSelector, closeEditorTab, copySelectedTimelineNodes, cutSelectedTimelineNodes, deleteSelectedTimelineNodes, enterFrameFullscreen, enterTheaterMode, exitPresentationMode, jumpToEnd, jumpToNextPart, jumpToStart, marqueeDraggingRef, marqueeSpacePanningRef, pasteTimelineNodesSilently, pausePlaybackAtCurrentTime, presentationModeRef, redoProjectChange, restoreClosedEditorTab, saveAllChangesRef, selectedPartId, setFastSelectEnabled, setScrubSnapEnabled, showPresentationControls, stepSceneTime, togglePlayback, undoProjectChange, updateMode, updateTimelineMode]);
 }

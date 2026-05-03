@@ -9,6 +9,7 @@ type UseExportCommandsInput = {
   projectExportFormat: ProjectExportFormat;
   exportIncludeSources: boolean;
   compositionSources: Record<string, string>;
+  saveAllChanges: () => Promise<void>;
   setExportDialogOpen: (open: boolean) => void;
   setExportProgress: (progress: string | null) => void;
   setIsExporting: (exporting: boolean) => void;
@@ -26,6 +27,7 @@ export function useExportCommands({
   projectExportFormat,
   exportIncludeSources,
   compositionSources,
+  saveAllChanges,
   setExportDialogOpen,
   setExportProgress,
   setIsExporting,
@@ -49,6 +51,7 @@ export function useExportCommands({
     setIsExporting(true);
 
     try {
+      await saveAllChanges();
       const result = await exportService.exportProject({
         project: projectRef.current,
         sceneId: selectedSceneId,
@@ -76,12 +79,13 @@ export function useExportCommands({
     videoExportIdRef.current = exportId;
 
     try {
+      await saveAllChanges();
       const currentProject = projectRef.current;
-      const { scene: currentScene, totalFrames, defaultFileName } = exportService.prepareRenderedMediaExport({ project: currentProject, sceneId: selectedSceneId });
+      const { scene: currentScene, durationSeconds, totalFrames, defaultFileName } = exportService.prepareRenderedMediaExport({ project: currentProject, sceneId: selectedSceneId });
       setExportDialogOpen(false);
       setExportProgress(`Rendering ${totalFrames} frames`);
       setVideoExportProgress({ frame: 0, totalFrames, percent: 0, status: "Preparing export..." });
-      const exportPath = await exportService.renderVideoExport(exportId, defaultFileName, currentProject, currentScene);
+      const exportPath = await exportService.renderVideoExport(exportId, defaultFileName, currentProject, currentScene, durationSeconds);
       if (!exportPath) return;
       notifyRenderedMedia(exportPath);
     } catch (error) {

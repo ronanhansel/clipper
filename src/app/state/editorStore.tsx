@@ -4,11 +4,16 @@ import { useShallow } from "zustand/react/shallow";
 import { defaultFramePreviewScale, defaultNewMarkerDurationSeconds, defaultScrubCommitThrottleMs, defaultTimelineEndPaddingFraction, defaultTimelinePrecision } from "../config";
 import type { AdjustmentLayerSelection, CompositionSelection, ContextMenuState, ExportDialogTab, LeftPanelTab, Mode, MotionMarkerSelection, PlaybackClock, ProjectExportFormat, RightPanelTab, SettingsSection, VideoExportProgress } from "../types";
 import { defaultPreviewViewportState, defaultTimelineMode } from "../../core/project";
-import type { Bounds, EditorState, Point, ProjectManifest, SelectionPayload, TimelineMode } from "../../core/types";
+import type { Bounds, EditorState, PersistedEditorTab, Point, ProjectManifest, SelectionPayload, TimelineMode } from "../../core/types";
 
 type Setter<T> = T | ((current: T) => T);
+const closedEditorTabStackLimit = 20;
 
 type MarkerSelection = { partId: string; markerId: string } | null;
+
+function normalizeMode(mode: EditorState["mode"] | undefined): Mode {
+  return mode === "editor" || mode === "code" ? "editor" : "preview";
+}
 
 export type EditorStoreState = {
   mode: Mode;
@@ -58,7 +63,32 @@ export type EditorStoreState = {
   videoExportCancelling: boolean;
   settingsOpen: boolean;
   settingsSection: SettingsSection;
+  editorTabs: EditorTab[];
+  closedEditorTabs: ClosedEditorTab[];
+  activeEditorTabId: string | null;
 };
+
+export type EditorTab = {
+  id: string;
+  filePath: string;
+  source?: string;
+  language: string;
+  unsupportedReason?: string;
+  isComposition?: boolean;
+  isPinned: boolean;
+};
+
+export type ClosedEditorTab = Omit<EditorTab, "source">;
+
+function tabsFromEditorSession(editorState: EditorState | undefined): EditorTab[] {
+  return editorState?.editorSession?.tabs.map((tab: PersistedEditorTab) => ({ ...tab, isPinned: true })) ?? [];
+}
+
+function activeTabIdFromEditorSession(editorState: EditorState | undefined) {
+  const tabs = editorState?.editorSession?.tabs ?? [];
+  const activeTabId = editorState?.editorSession?.activeTabId ?? null;
+  return activeTabId && tabs.some((tab) => tab.id === activeTabId) ? activeTabId : tabs[0]?.id ?? null;
+}
 
 export type EditorStoreActions = {
   setMode: (mode: Setter<Mode>) => void;
@@ -108,6 +138,13 @@ export type EditorStoreActions = {
   setVideoExportCancelling: (cancelling: Setter<boolean>) => void;
   setSettingsOpen: (open: Setter<boolean>) => void;
   setSettingsSection: (section: Setter<SettingsSection>) => void;
+  openEditorTab: (tab: Omit<EditorTab, "isPinned"> & { isPinned?: boolean }) => void;
+  openTemporaryEditorTab: (tab: Omit<EditorTab, "isPinned"> & { isPinned?: boolean }) => void;
+  pinEditorTab: (tabId: string) => void;
+  updateEditorTab: (tabId: string, patch: Partial<EditorTab>) => void;
+  selectEditorTab: (tabId: string) => void;
+  closeEditorTab: (tabId: string) => void;
+  restoreClosedEditorTab: () => boolean;
   applyEditorState: (editorState: EditorState, fallbackSceneId: string) => void;
   clearMarkerSelection: () => void;
   clearNodeSelection: () => void;
@@ -128,8 +165,9 @@ function createFieldSetter<T extends keyof EditorStoreState>(set: StoreApi<Edito
 
 function getInitialState(project: ProjectManifest): EditorStoreState {
   const editorState = project.editorState;
+  const mode = normalizeMode(editorState?.mode);
   return {
-    mode: editorState?.mode ?? "interactive",
+    mode,
     timelineMode: editorState?.timelineMode ?? defaultTimelineMode,
     selectedSceneId: editorState?.selectedSceneId ?? "",
     selectedPartId: editorState?.selectedPartId ?? "",
@@ -176,11 +214,19 @@ function getInitialState(project: ProjectManifest): EditorStoreState {
     videoExportCancelling: false,
     settingsOpen: false,
     settingsSection: "playback",
+    editorTabs: tabsFromEditorSession(editorState),
+    closedEditorTabs: [],
+    activeEditorTabId: activeTabIdFromEditorSession(editorState),
   };
 }
 
+function toClosedEditorTab(tab: EditorTab): ClosedEditorTab {
+  const { source: _source, ...closedTab } = tab;
+  return closedTab;
+}
+
 export function createEditorStore(project: ProjectManifest) {
-  return createStore<EditorStore>((set) => ({
+  return createStore<EditorStore>((set, get) => ({
     ...getInitialState(project),
     setMode: createFieldSetter(set, "mode"),
     setTimelineMode: createFieldSetter(set, "timelineMode"),
@@ -229,8 +275,57 @@ export function createEditorStore(project: ProjectManifest) {
     setVideoExportCancelling: createFieldSetter(set, "videoExportCancelling"),
     setSettingsOpen: createFieldSetter(set, "settingsOpen"),
     setSettingsSection: createFieldSetter(set, "settingsSection"),
+    openEditorTab: (tab) => set((state) => {
+      const existingTab = state.editorTabs.find((item) => item.id === tab.id);
+      const pinnedTab = { ...tab, isPinned: true };
+      const editorTabs = existingTab ? state.editorTabs.map((item) => item.id === tab.id ? { ...item, ...pinnedTab } : item) : [...state.editorTabs, pinnedTab];
+      return { editorTabs, closedEditorTabs: state.closedEditorTabs.filter((closedTab) => closedTab.id !== tab.id), activeEditorTabId: tab.id };
+    }),
+    openTemporaryEditorTab: (tab) => set((state) => {
+      const existingTab = state.editorTabs.find((item) => item.id === tab.id);
+      if (existingTab) {
+        const editorTabs = state.editorTabs.map((item) => item.id === tab.id ? { ...item, ...tab } : item);
+        return { editorTabs, closedEditorTabs: state.closedEditorTabs.filter((closedTab) => closedTab.id !== tab.id), activeEditorTabId: tab.id };
+      }
+      const temporaryTab: EditorTab = { ...tab, isPinned: false };
+      const temporaryIndex = state.editorTabs.findIndex((item) => !item.isPinned);
+      const editorTabs = temporaryIndex >= 0 ? state.editorTabs.map((item, index) => index === temporaryIndex ? temporaryTab : item) : [...state.editorTabs, temporaryTab];
+      return { editorTabs, closedEditorTabs: state.closedEditorTabs.filter((closedTab) => closedTab.id !== tab.id), activeEditorTabId: tab.id };
+    }),
+    pinEditorTab: (tabId) => set((state) => state.editorTabs.some((tab) => tab.id === tabId && !tab.isPinned) ? { editorTabs: state.editorTabs.map((tab) => tab.id === tabId ? { ...tab, isPinned: true } : tab) } : state),
+    updateEditorTab: (tabId, patch) => set((state) => {
+      if (!state.editorTabs.some((tab) => tab.id === tabId)) return state;
+      return { editorTabs: state.editorTabs.map((tab) => tab.id === tabId ? { ...tab, ...patch, id: tab.id } : tab) };
+    }),
+    selectEditorTab: (tabId) => set((state) => state.activeEditorTabId === tabId || !state.editorTabs.some((tab) => tab.id === tabId) ? state : { activeEditorTabId: tabId }),
+    closeEditorTab: (tabId) => set((state) => {
+      const tabIndex = state.editorTabs.findIndex((tab) => tab.id === tabId);
+      if (tabIndex < 0) return state;
+      const closedTab = toClosedEditorTab(state.editorTabs[tabIndex]);
+      const editorTabs = state.editorTabs.filter((tab) => tab.id !== tabId);
+      const closedEditorTabs = [closedTab, ...state.closedEditorTabs.filter((tab) => tab.id !== tabId)].slice(0, closedEditorTabStackLimit);
+      if (state.activeEditorTabId !== tabId) return { editorTabs, closedEditorTabs };
+      const nextActiveTab = editorTabs[Math.min(tabIndex, editorTabs.length - 1)] ?? null;
+      return { editorTabs, closedEditorTabs, activeEditorTabId: nextActiveTab?.id ?? null };
+    }),
+    restoreClosedEditorTab: () => {
+      const state = get();
+      const restoreIndex = state.closedEditorTabs.findIndex((tab) => !state.editorTabs.some((openTab) => openTab.id === tab.id));
+      if (restoreIndex < 0) {
+        if (state.closedEditorTabs.length) set({ closedEditorTabs: [] });
+        return false;
+      }
+      const restoredTab = state.closedEditorTabs[restoreIndex];
+      const remainingClosedTabs = state.closedEditorTabs.filter((_, index) => index > restoreIndex || (index < restoreIndex && !state.editorTabs.some((openTab) => openTab.id === state.closedEditorTabs[index].id)));
+      const editorTabs = restoredTab.isPinned ? [...state.editorTabs, restoredTab] : (() => {
+        const temporaryIndex = state.editorTabs.findIndex((tab) => !tab.isPinned);
+        return temporaryIndex >= 0 ? state.editorTabs.map((tab, index) => index === temporaryIndex ? restoredTab : tab) : [...state.editorTabs, restoredTab];
+      })();
+      set({ editorTabs, closedEditorTabs: remainingClosedTabs, activeEditorTabId: restoredTab.id });
+      return true;
+    },
     applyEditorState: (editorState, fallbackSceneId) => set({
-      mode: editorState.mode ?? "interactive",
+      mode: normalizeMode(editorState.mode),
       timelineMode: editorState.timelineMode ?? defaultTimelineMode,
       selectedSceneId: editorState.selectedSceneId ?? fallbackSceneId,
       selectedPartId: editorState.selectedPartId ?? "",
@@ -251,6 +346,9 @@ export function createEditorStore(project: ProjectManifest) {
       framePreviewScale: editorState.preview?.scale ?? defaultFramePreviewScale,
       leftPanelTab: editorState.leftPanelTab ?? "assets",
       rightPanelTab: editorState.rightPanelTab ?? "video",
+      editorTabs: tabsFromEditorSession(editorState),
+      closedEditorTabs: [],
+      activeEditorTabId: activeTabIdFromEditorSession(editorState),
     }),
     clearMarkerSelection: () => set({
       selectedMotionMarker: null,
@@ -392,6 +490,16 @@ export function useAppEditorState() {
     setSettingsOpen: state.setSettingsOpen,
     settingsSection: state.settingsSection,
     setSettingsSection: state.setSettingsSection,
+    editorTabs: state.editorTabs,
+    closedEditorTabs: state.closedEditorTabs,
+    activeEditorTabId: state.activeEditorTabId,
+    openEditorTab: state.openEditorTab,
+    updateEditorTab: state.updateEditorTab,
+    selectEditorTab: state.selectEditorTab,
+    closeEditorTab: state.closeEditorTab,
+    restoreClosedEditorTab: state.restoreClosedEditorTab,
+    openTemporaryEditorTab: state.openTemporaryEditorTab,
+    pinEditorTab: state.pinEditorTab,
     setCurrentSceneTime: state.setCurrentSceneTime,
     applyEditorState: state.applyEditorState,
     clearMarkerSelection: state.clearMarkerSelection,

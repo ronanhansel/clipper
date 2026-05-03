@@ -20,6 +20,7 @@ export type TimelineShellProps = {
   currentTime: number;
   displayDuration: number;
   dragActive?: boolean;
+  dragOverlayLabel?: string;
   emptyContent?: ReactNode;
   laneContentHeight: number;
   laneRowsStyle: CSSProperties;
@@ -48,9 +49,10 @@ export type TimelineShellProps = {
   renderTimelineViewport: () => ReactNode;
 };
 
-export function TimelineShell({ contentWidth, currentTime, displayDuration, dragActive = false, emptyContent, laneContentHeight, laneRowsStyle, layerRailWidth, playheadColor = "#ff3b30", refs, timelineName, timelineViewportDisplacement, timelineZoom, ticks, activeMode, onModeChange, onTimelineViewportScroll, onTimelineViewportDragLeave, onTimelineViewportDragOver, onTimelineViewportDrop, onTimelineZoomChange, onLayerRailWheel, rulerHandlers, renderLayerRail, renderTimelineViewport }: TimelineShellProps) {
+export function TimelineShell({ contentWidth, currentTime, displayDuration, dragActive = false, dragOverlayLabel, emptyContent, laneContentHeight, laneRowsStyle, layerRailWidth, playheadColor = "#ff3b30", refs, timelineName, timelineViewportDisplacement, timelineZoom, ticks, activeMode, onModeChange, onTimelineViewportScroll, onTimelineViewportDragLeave, onTimelineViewportDragOver, onTimelineViewportDrop, onTimelineZoomChange, onLayerRailWheel, rulerHandlers, renderLayerRail, renderTimelineViewport }: TimelineShellProps) {
   return (
-    <footer ref={refs.timelinePanelRef} data-timeline-panel className={`grid h-full min-h-0 select-none grid-rows-[34px_minmax(0,1fr)] gap-1.5 overflow-hidden border-t border-[#1d2028] bg-[#141821] px-[22px] pb-0 pt-2.5 ${dragActive ? "clipper-timeline-dragging-no-hover" : ""}`}>
+    <footer ref={refs.timelinePanelRef} data-timeline-panel className={`relative grid h-full min-h-0 select-none grid-rows-[34px_minmax(0,1fr)] gap-1.5 overflow-hidden border-t border-[#1d2028] bg-[#141821] px-[22px] pb-0 pt-2.5 ${dragActive ? "clipper-timeline-dragging-no-hover" : ""}`} onDragLeave={onTimelineViewportDragLeave} onDragOver={onTimelineViewportDragOver} onDrop={onTimelineViewportDrop}>
+      {dragActive && dragOverlayLabel ? <div className="pointer-events-none absolute inset-0 z-50 grid place-items-center bg-[rgba(13,17,24,0.78)]"><div className="rounded-full bg-[var(--clipper-accent-muted-surface)] px-5 py-2 text-[12px] font-extrabold uppercase tracking-[0.18em] text-[var(--clipper-accent)]">{dragOverlayLabel}</div></div> : null}
       <div className="grid grid-cols-[auto_1fr_auto] items-center gap-4 text-[12px] text-[#9b9da7]">
         <div className="flex rounded-full border border-[#2d313b] bg-[#111319] p-1" aria-label="Timeline mode">
           <button className={`rounded-full px-3 py-1 text-xs font-extrabold transition ${activeMode === "compose" ? "bg-[var(--clipper-accent)] text-[var(--clipper-accent-foreground)]" : "text-[#9b9da7] hover:text-white"}`} onClick={() => onModeChange("compose")}>Compose</button>
@@ -87,7 +89,7 @@ export function TimelineShell({ contentWidth, currentTime, displayDuration, drag
             </div>
           </div>
           <div ref={refs.timelineViewportRef} className="timeline-scrollbar min-h-0 overflow-x-scroll overflow-y-auto pl-0 pr-3 [scrollbar-gutter:stable]" onScroll={onTimelineViewportScroll}>
-            <div data-timeline-content className="relative grid" style={{ ...laneRowsStyle, width: contentWidth, height: laneContentHeight }} onDragLeave={onTimelineViewportDragLeave} onDragOver={onTimelineViewportDragOver} onDrop={onTimelineViewportDrop}>
+            <div data-timeline-content className="relative grid" style={{ ...laneRowsStyle, width: contentWidth, height: laneContentHeight }}>
               {renderTimelineViewport()}
             </div>
           </div>

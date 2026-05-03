@@ -18,6 +18,7 @@ export function EffectDragPreviewBlock({ blockRef, preview }: { blockRef: RefObj
 
   return (
     <div ref={blockRef} className="pointer-events-none absolute left-0 top-0 z-30 box-border min-w-[18px] overflow-hidden rounded-[3px] px-3 py-2 text-xs font-bold opacity-55 shadow-[inset_1px_0_0_rgb(0_0_0/0.55),inset_-1px_0_0_rgb(0_0_0/0.55)]" style={timelineGradientStyle(gradient)}>
+      {preview.category === "transition" ? <span className="absolute left-1/2 top-1/2 h-[calc(100%-10px)] w-px -translate-x-1/2 -translate-y-1/2 bg-white/65 shadow-[0_0_8px_rgba(255,255,255,0.45)]" /> : null}
       <span className="block overflow-hidden text-ellipsis whitespace-nowrap">{label}</span>
     </div>
   );
@@ -45,12 +46,12 @@ export function CompositionTimelineBlock({ blockRef, name, duration, isEmpty, so
   </div>;
 }
 
-export function LayerLabel({ name, draft, editing, hidden, locked, compactControls, hideLockControl, menuOpen, canMoveDown = true, canMoveUp = true, addAfterLabel = "Add layer below", addBeforeLabel = "Add layer above", removeLabel = "Remove layer", onAddAfter, onAddBefore, onCancel, onCommit, onDraftChange, onEdit, onEffectDragOver, onEffectDrop, onMenuToggle, onMoveDown, onMoveUp, onRemove, onToggleHidden, onToggleLocked }: { name: string; draft: string; editing: boolean; hidden: boolean; locked: boolean; compactControls: boolean; hideLockControl: boolean; menuOpen?: boolean; canMoveDown?: boolean; canMoveUp?: boolean; addAfterLabel?: string; addBeforeLabel?: string; removeLabel?: string; onAddAfter?: () => void; onAddBefore?: () => void; onCancel: () => void; onCommit: () => void; onDraftChange: (value: string) => void; onEdit: () => void; onEffectDragOver?: (event: DragEvent<HTMLDivElement>) => void; onEffectDrop?: (event: DragEvent<HTMLDivElement>) => void; onMenuToggle?: () => void; onMoveDown?: () => void; onMoveUp?: () => void; onRemove?: () => void; onToggleHidden: () => void; onToggleLocked: () => void }) {
+export function LayerLabel({ name, draft, editing, hidden, locked, compactControls, hideHiddenControl = false, hideLockControl, menuOpen, canMoveDown = true, canMoveUp = true, addAfterLabel = "Add layer below", addBeforeLabel = "Add layer above", removeLabel = "Remove layer", onAddAfter, onAddBefore, onCancel, onCommit, onDraftChange, onEdit, onEffectDragOver, onEffectDrop, onMenuToggle, onMoveDown, onMoveUp, onRemove, onToggleHidden, onToggleLocked }: { name: string; draft: string; editing: boolean; hidden: boolean; locked: boolean; compactControls: boolean; hideHiddenControl?: boolean; hideLockControl: boolean; menuOpen?: boolean; canMoveDown?: boolean; canMoveUp?: boolean; addAfterLabel?: string; addBeforeLabel?: string; removeLabel?: string; onAddAfter?: () => void; onAddBefore?: () => void; onCancel: () => void; onCommit: () => void; onDraftChange: (value: string) => void; onEdit: () => void; onEffectDragOver?: (event: DragEvent<HTMLDivElement>) => void; onEffectDrop?: (event: DragEvent<HTMLDivElement>) => void; onMenuToggle?: () => void; onMoveDown?: () => void; onMoveUp?: () => void; onRemove?: () => void; onToggleHidden: () => void; onToggleLocked: () => void }) {
   const menuButtonRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
   const showControls = Boolean(onMenuToggle);
-  const hideEyeControl = compactControls;
+  const hideEyeControl = compactControls || hideHiddenControl;
   const controlButtonClass = "h-3.5 w-5 rounded-[4px]";
   const controlIconSize = 10;
 
@@ -126,7 +127,7 @@ export function LayerLabel({ name, draft, editing, hidden, locked, compactContro
         {!hideLockControl ? <button data-timeline-control className={`grid ${controlButtonClass} place-items-center border border-transparent bg-transparent transition hover:border-[#2d313b] hover:bg-[#20232c] hover:text-[#dfe2ea] ${locked ? "text-[#ff8b8b]" : ""}`} title={locked ? "Unlock layer" : "Lock layer"} onClick={handleControlClick(onToggleLocked)} onPointerDown={(event) => event.stopPropagation()}>{locked ? <Lock size={controlIconSize} /> : <Unlock size={controlIconSize} />}</button> : null}
       </div> : null}
       {menuOpen && showControls && typeof document !== "undefined" ? createPortal(<div ref={menuRef} data-timeline-control className="fixed z-50 grid min-w-[180px] overflow-hidden rounded-xl border border-[#2d313b] bg-[#111319] py-1 text-xs font-bold normal-case tracking-normal text-[#dfe2ea] shadow-[0_18px_48px_rgba(0,0,0,0.48)]" style={{ left: menuPosition?.x ?? 0, top: menuPosition?.y ?? 0, visibility: menuPosition ? "visible" : "hidden" }}>
-        <button className="px-3 py-2 text-left hover:bg-[#20232c]" onClick={onToggleHidden}>{hidden ? "Show layer" : "Hide layer"}</button>
+        {!hideHiddenControl ? <button className="px-3 py-2 text-left hover:bg-[#20232c]" onClick={onToggleHidden}>{hidden ? "Show layer" : "Hide layer"}</button> : null}
         <button className="px-3 py-2 text-left hover:bg-[#20232c]" onClick={onToggleLocked}>{locked ? "Unlock layer" : "Lock layer"}</button>
         {onMoveUp ? <button className="px-3 py-2 text-left hover:bg-[#20232c] disabled:cursor-not-allowed disabled:text-[#5f6470] disabled:hover:bg-transparent" disabled={!canMoveUp} onClick={onMoveUp}>Move up</button> : null}
         {onMoveDown ? <button className="px-3 py-2 text-left hover:bg-[#20232c] disabled:cursor-not-allowed disabled:text-[#5f6470] disabled:hover:bg-transparent" disabled={!canMoveDown} onClick={onMoveDown}>Move down</button> : null}

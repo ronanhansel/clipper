@@ -17,9 +17,9 @@ type UseTimelineSelectionCommandsInput = {
   cancelFramePickPreview: () => void;
   clearStoredMarkerSelection: () => void;
   clearStoredNodeSelection: () => void;
+  pausePlaybackAtCurrentTime: () => void;
   scrubToSceneTime: (time: number) => void;
   setFocusPickZoomMarker: (selection: MarkerSelection) => void;
-  setIsPlaying: (playing: boolean) => void;
   setPositionPickTranslationMarker: (selection: MarkerSelection) => void;
   setRightPanelTab: (tab: RightPanelTab) => void;
   setSelectedAdjustmentLayerId: (id: string | null) => void;
@@ -43,9 +43,9 @@ export function useTimelineSelectionCommands({
   cancelFramePickPreview,
   clearStoredMarkerSelection,
   clearStoredNodeSelection,
+  pausePlaybackAtCurrentTime,
   scrubToSceneTime,
   setFocusPickZoomMarker,
-  setIsPlaying,
   setPositionPickTranslationMarker,
   setRightPanelTab,
   setSelectedAdjustmentLayerId,
@@ -83,7 +83,7 @@ export function useTimelineSelectionCommands({
     setSelectedObjectId(null);
     clearMarkerSelection();
     setSelectionPayload(null);
-    setIsPlaying(false);
+    pausePlaybackAtCurrentTime();
   }
 
   function openComposePart(partId: string) {
@@ -110,7 +110,7 @@ export function useTimelineSelectionCommands({
     setTrackerPickTranslationMarker(null);
     setSelectedObjectId(null);
     setSelectionPayload(null);
-    setIsPlaying(false);
+    pausePlaybackAtCurrentTime();
   }
 
   function selectMotionMarkers(selection: MotionMarkerSelection[]) {
@@ -127,7 +127,7 @@ export function useTimelineSelectionCommands({
     setSelectedObjectId(null);
     setSelectionPayload(null);
     setFocusPickZoomMarker(null);
-    setIsPlaying(false);
+    pausePlaybackAtCurrentTime();
     if (primarySelection && primarySelection.partId !== TIMELINE_MOTION_PART_ID) setSelectedPartId(primarySelection.partId);
   }
 
@@ -142,7 +142,7 @@ export function useTimelineSelectionCommands({
     setSelectionPayload(null);
     clearMarkerSelection();
     if (rightPanelTab === "agent") setRightPanelTab("motion");
-    setIsPlaying(false);
+    pausePlaybackAtCurrentTime();
   }
 
   function selectAdjustmentLayers(selection: AdjustmentLayerSelection[]) {
@@ -156,7 +156,7 @@ export function useTimelineSelectionCommands({
     setSelectionPayload(null);
     clearMarkerSelection();
     if (rightPanelTab === "agent") setRightPanelTab("motion");
-    setIsPlaying(false);
+    pausePlaybackAtCurrentTime();
   }
 
   function selectTimelineNodes(selection: TimelineNodeSelection) {
@@ -175,7 +175,7 @@ export function useTimelineSelectionCommands({
     setPositionPickTranslationMarker(null);
     setTrackerPickTranslationMarker(null);
     if (rightPanelTab === "agent") setRightPanelTab("motion");
-    setIsPlaying(false);
+    pausePlaybackAtCurrentTime();
   }
 
   return {

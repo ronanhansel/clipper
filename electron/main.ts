@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, dialog, ipcMain, screen, shell } from "electron";
+import { app, BrowserWindow, Menu, dialog, ipcMain, screen, shell, type NativeImage } from "electron";
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { watch, type FSWatcher } from "node:fs";
 import fs from "node:fs/promises";
@@ -15,10 +15,27 @@ const videoExportSessions = new Map<string, { process: ChildProcessWithoutNullSt
 const cancelledVideoRenders = new Set<string>();
 const textFileWatchers = new Map<number, FSWatcher[]>();
 const appStatePath = "clipper/app-state.json";
+const appIconPath = path.resolve(__dirname, "../build/icons/icon.png");
 const frameWidth = 1920;
 const frameHeight = 1080;
+const exportRendererFrameTimeoutMs = 8000;
+const exportCaptureStripCount = 4;
+const exportCaptureTileRetries = 3;
+const exportCaptureTileTimeoutMs = 4000;
 let hardwareEncoderSupport: Set<string> | null = null;
 let systemFontFamilies: string[] | null = null;
+
+configureChromiumForStableExports();
+
+function configureChromiumForStableExports() {
+  app.commandLine.appendSwitch("disable-backgrounding-occluded-windows");
+  app.commandLine.appendSwitch("disable-renderer-backgrounding");
+  app.commandLine.appendSwitch("disable-background-timer-throttling");
+  app.commandLine.appendSwitch("disable-partial-raster");
+  app.commandLine.appendSwitch("force-device-scale-factor", "1");
+  app.commandLine.appendSwitch("num-raster-threads", "4");
+  app.commandLine.appendSwitch("js-flags", "--max-old-space-size=4096");
+}
 
 async function readAppState(): Promise<Record<string, unknown>> {
   try {
@@ -132,7 +149,7 @@ function getVideoEncoderArgs() {
   if (process.platform === "darwin" && supportedEncoders.has("h264_videotoolbox")) {
     return {
       label: "VideoToolbox",
-      args: ["-c:v", "h264_videotoolbox", "-b:v", "12M", "-allow_sw", "1", "-pix_fmt", "yuv420p"],
+      args: ["-c:v", "h264_videotoolbox", "-b:v", "12M", "-allow_sw", "0", "-pix_fmt", "yuv420p"],
     };
   }
 
@@ -192,6 +209,10 @@ ipcMain.handle("clipper:create-directory", async (_event, relativePath: string) 
 
 ipcMain.handle("clipper:reveal-file", async (_event, relativePath: string) => {
   shell.showItemInFolder(resolveClipperFile(relativePath));
+});
+
+ipcMain.handle("clipper:reveal-absolute-path", async (_event, filePath: string) => {
+  shell.showItemInFolder(path.resolve(filePath));
 });
 
 ipcMain.handle("clipper:trash-file", async (_event, relativePath: string) => {
@@ -500,7 +521,7 @@ ipcMain.handle("clipper:cancel-video-export", async (_event, sessionId: string) 
   session.process.kill("SIGTERM");
 });
 
-ipcMain.handle("clipper:render-video-export", async (event, exportId: string, defaultFileName: string, project: ProjectManifest, scene: Scene, frameRate: number) => {
+ipcMain.handle("clipper:render-video-export", async (event, exportId: string, defaultFileName: string, project: ProjectManifest, scene: Scene, frameRate: number, durationSeconds: number) => {
   const { canceled, filePath } = await dialog.showSaveDialog({
     title: "Export video",
     defaultPath: defaultFileName,
@@ -509,8 +530,9 @@ ipcMain.handle("clipper:render-video-export", async (event, exportId: string, de
 
   if (canceled || !filePath) return null;
   cancelledVideoRenders.delete(exportId);
-  await renderSceneToVideo(project, scene, filePath, frameRate, exportId, (progress) => event.sender.send("clipper:video-export-progress", exportId, progress));
+  await renderSceneToVideo(project, scene, filePath, frameRate, durationSeconds, exportId, (progress) => event.sender.send("clipper:video-export-progress", exportId, progress));
   cancelledVideoRenders.delete(exportId);
+  shell.showItemInFolder(filePath);
   return filePath;
 });
 
@@ -518,18 +540,17 @@ ipcMain.handle("clipper:cancel-render-video-export", async (_event, exportId: st
   cancelledVideoRenders.add(exportId);
 });
 
-async function renderSceneToVideo(_project: ProjectManifest, scene: Scene, outputPath: string, frameRate: number, exportId?: string, onProgress?: (progress: VideoExportProgress) => void) {
+async function renderSceneToVideo(_project: ProjectManifest, scene: Scene, outputPath: string, frameRate: number, durationSeconds: number, exportId?: string, onProgress?: (progress: VideoExportProgress) => void) {
   if (!ffmpegPath) throw new Error("The bundled ffmpeg binary is unavailable.");
 
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
   const encoder = getVideoEncoderArgs();
-  const timeline = buildLinearTimeline(scene);
-  const durationSeconds = timeline.reduce((duration, item) => Math.max(duration, item.end), 0);
   const totalFrames = Math.max(1, Math.ceil(durationSeconds * frameRate));
   onProgress?.({ frame: 0, totalFrames, percent: 0, status: `Preparing ${encoder.label} export...` });
   const rendererWindow = new BrowserWindow({
     width: frameWidth,
     height: frameHeight,
+    useContentSize: true,
     show: false,
     frame: false,
     transparent: false,
@@ -537,14 +558,16 @@ async function renderSceneToVideo(_project: ProjectManifest, scene: Scene, outpu
       backgroundThrottling: false,
       contextIsolation: true,
       nodeIntegration: false,
+      zoomFactor: 1,
     },
   });
 
   const ffmpeg = spawn(ffmpegPath, [
     "-y",
-    "-f", "image2pipe",
+    "-f", "rawvideo",
+    "-pix_fmt", "bgra",
+    "-s", `${frameWidth}x${frameHeight}`,
     "-framerate", String(frameRate),
-    "-vcodec", "png",
     "-i", "-",
     "-an",
     ...encoder.args,
@@ -568,26 +591,26 @@ async function renderSceneToVideo(_project: ProjectManifest, scene: Scene, outpu
   });
 
   try {
-    await rendererWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(buildFrameShell())}`);
+    rendererWindow.webContents.setZoomFactor(1);
+    rendererWindow.webContents.setVisualZoomLevelLimits(1, 1).catch(() => {});
+    await loadRenderedMediaExportWindow(rendererWindow);
+    let pendingFrameWrite: Promise<void> | null = null;
 
     for (let frameIndex = 0; frameIndex < totalFrames; frameIndex += 1) {
       if (exportId && cancelledVideoRenders.has(exportId)) throw new Error("Video export cancelled.");
       const sceneTime = Math.min(frameIndex / frameRate, Math.max(durationSeconds - 0.001, 0));
-      const transitionLayer = getActiveTransitionLayer(sceneTime, scene.transitionLayers);
-      const visualAdjustmentStyle = transitionLayer ? {} : applyAdjustmentLayersToVisualStyle(sceneTime, scene.adjustmentLayers);
-      const visualTransitionStyle = applyTransitionLayersToVisualStyle(sceneTime, scene.transitionLayers);
-      const adjustedSceneTime = applyAdjustmentLayersToSceneTime(sceneTime, scene.adjustmentLayers, frameRate);
-      const timelineParts = getActiveTimelinePartsAtTime(timeline, adjustedSceneTime, _project.editorState?.timelineLayers);
-      if (timelineParts.length === 0) throw new Error("The current scene has no compositions to render.");
-      const frameHtml = transitionLayer
-        ? buildTransitionFrameBody(getTransitionStackParts(timeline, sceneTime, transitionLayer, scene.adjustmentLayers, _project.editorState?.timelineLayers, frameRate), sceneTime, transitionLayer, frameRate, scene.adjustmentLayers, visualTransitionStyle)
-        : buildFrameBody(timelineParts.map((timelinePart) => ({ part: timelinePart, previewTime: clamp(adjustedSceneTime - timelinePart.start, 0, timelinePart.duration) })), visualAdjustmentStyle, visualTransitionStyle);
-
-      await renderFrameHtml(rendererWindow, frameHtml);
-      const image = await rendererWindow.webContents.capturePage({ x: 0, y: 0, width: frameWidth, height: frameHeight });
-      await writeProcessInput(ffmpeg, image.toPNG());
+      const syncResult = await renderExportFrame(rendererWindow, _project, scene, sceneTime, frameRate);
+      if (syncResult.failedCount > 0) {
+        throw new Error(`Export renderer failed to pin ${syncResult.failedCount} animation(s) at ${sceneTime.toFixed(3)}s after ${syncResult.passCount} sync pass(es).`);
+      }
+      const frameBitmap = await captureTiledExportFrame(rendererWindow, frameIndex, sceneTime);
+      if (pendingFrameWrite) await pendingFrameWrite;
+      pendingFrameWrite = writeProcessInput(ffmpeg, frameBitmap);
       onProgress?.({ frame: frameIndex + 1, totalFrames, percent: Math.round(((frameIndex + 1) / totalFrames) * 100), status: `Rendering frame ${frameIndex + 1} of ${totalFrames} with ${encoder.label}` });
     }
+
+    if (pendingFrameWrite) await pendingFrameWrite;
+    if (exportId && cancelledVideoRenders.has(exportId)) throw new Error("Video export cancelled.");
   } catch (error) {
     ffmpeg.kill("SIGTERM");
     if (exportId) cancelledVideoRenders.delete(exportId);
@@ -605,8 +628,93 @@ async function renderSceneToVideo(_project: ProjectManifest, scene: Scene, outpu
   onProgress?.({ frame: totalFrames, totalFrames, percent: 100, status: "Finalizing video..." });
 }
 
-async function renderFrameHtml(window: BrowserWindow, frameHtml: string) {
-  await window.webContents.executeJavaScript(`window.__clipperSetFrame(${JSON.stringify(frameHtml)})`, true);
+async function loadRenderedMediaExportWindow(window: BrowserWindow) {
+  if (isDev) {
+    const baseUrl = process.env.VITE_DEV_SERVER_URL ?? "http://127.0.0.1:5173";
+    await window.loadURL(`${baseUrl}?clipperExport=1`);
+    return;
+  }
+
+  await window.loadFile(path.join(__dirname, "../dist/index.html"), { query: { clipperExport: "1" } });
+}
+
+async function renderExportFrame(window: BrowserWindow, project: ProjectManifest, scene: Scene, sceneTime: number, frameRate: number) {
+  return withTimeout<RenderClockReadinessResult>(
+    window.webContents.executeJavaScript(`window.__clipperRenderExportFrame(${JSON.stringify({ project, scene, sceneTime, frameRate })})`, true),
+    exportRendererFrameTimeoutMs,
+    `Timed out waiting ${exportRendererFrameTimeoutMs}ms for export renderer frame at ${sceneTime.toFixed(3)}s.`,
+  );
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string) {
+  return new Promise<T>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error(message)), timeoutMs);
+    promise.then((value) => {
+      clearTimeout(timeout);
+      resolve(value);
+    }, (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+  });
+}
+
+async function captureTiledExportFrame(window: BrowserWindow, frameIndex: number, sceneTime: number) {
+  const frame = Buffer.allocUnsafe(frameWidth * frameHeight * 4);
+  for (const tile of getExportCaptureTiles()) {
+    const tileBitmap = await captureExportTileWithRetries(window, tile, frameIndex, sceneTime);
+    stitchBgraTile(frame, tileBitmap, tile);
+  }
+  return frame;
+}
+
+function getExportCaptureTiles() {
+  const tileHeight = Math.ceil(frameHeight / exportCaptureStripCount);
+  const tiles: ExportCaptureTile[] = [];
+  for (let y = 0; y < frameHeight; y += tileHeight) {
+    tiles.push({ x: 0, y, width: frameWidth, height: Math.min(tileHeight, frameHeight - y) });
+  }
+  return tiles;
+}
+
+async function captureExportTileWithRetries(window: BrowserWindow, tile: ExportCaptureTile, frameIndex: number, sceneTime: number) {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= exportCaptureTileRetries; attempt += 1) {
+    try {
+      const image = await withTimeout(
+        window.webContents.capturePage(tile),
+        exportCaptureTileTimeoutMs,
+        `Timed out capturing export frame ${frameIndex + 1} tile ${tile.y}-${tile.y + tile.height} at ${sceneTime.toFixed(3)}s.`,
+      );
+      return getBgraBitmap(image, tile.width, tile.height, `export frame ${frameIndex + 1} tile ${tile.y}-${tile.y + tile.height}`);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  const message = lastError instanceof Error ? lastError.message : String(lastError);
+  throw new Error(`Failed to capture export frame ${frameIndex + 1} tile ${tile.y}-${tile.y + tile.height} at ${sceneTime.toFixed(3)}s after ${exportCaptureTileRetries} attempt(s): ${message}`);
+}
+
+function stitchBgraTile(frame: Buffer, tileBitmap: Buffer, tile: ExportCaptureTile) {
+  const bytesPerPixel = 4;
+  const sourceStride = tile.width * bytesPerPixel;
+  const targetStride = frameWidth * bytesPerPixel;
+  for (let row = 0; row < tile.height; row += 1) {
+    tileBitmap.copy(frame, (tile.y + row) * targetStride + tile.x * bytesPerPixel, row * sourceStride, (row + 1) * sourceStride);
+  }
+}
+
+function getBgraBitmap(image: NativeImage, width: number, height: number, context: string) {
+  const expectedLength = width * height * 4;
+  const bitmap = image.toBitmap({ scaleFactor: 1 });
+  if (bitmap.byteLength === expectedLength) return bitmap;
+
+  const resizedBitmap = image.resize({ width, height, quality: "best" }).toBitmap({ scaleFactor: 1 });
+  if (resizedBitmap.byteLength === expectedLength) return resizedBitmap;
+
+  const imageSize = image.getSize();
+  throw new Error(`Captured ${context} bitmap length was ${resizedBitmap.byteLength}; image size was ${imageSize.width}x${imageSize.height}, expected ${width}x${height}.`);
 }
 
 async function writeProcessInput(process: ChildProcessWithoutNullStreams, chunk: Buffer) {
@@ -617,26 +725,28 @@ async function writeProcessInput(process: ChildProcessWithoutNullStreams, chunk:
   });
 }
 
-type MotionEase = "linear" | "easeIn" | "easeOut" | "easeInOut" | "circOut" | "backOut";
 type VideoExportProgress = { frame: number; totalFrames: number; percent: number; status: string };
-type MotionTrack = { delay?: number; duration: number; ease?: MotionEase; loop?: boolean; opacity?: readonly [number, number]; rotate?: readonly [number, number]; scale?: readonly [number, number]; scaleX?: readonly [number, number]; scaleY?: readonly [number, number]; skewX?: readonly [number, number]; skewY?: readonly [number, number]; x?: readonly [number, number]; y?: readonly [number, number] };
-type FrameTemplate = { kind: "html"; source: string; static?: boolean };
-type FrameObject = { id: string; name: string; type: string; selector: string; bounds: { x: number; y: number; width: number; height: number }; content?: string; template?: FrameTemplate; richText?: Array<{ text: string; bold: boolean; italic: boolean; underline: boolean }>; style: Record<string, string | number>; motion?: MotionTrack; hidden?: boolean };
-type BackgroundLayer = { id: string; name: string; style: Record<string, string | number>; stretchToElements?: boolean; motion?: MotionTrack; hidden?: boolean; elements: FrameObject[] };
-type ZoomMarker = { id: string; start: number; duration: number; focus: { x: number; y: number }; scale: number; ease?: MotionEase; snapIn?: boolean; snapOut?: boolean; middleTransition?: "transition"; middleEase?: MotionEase };
-type TranslationMarker = { id: string; start: number; duration: number; kind?: "pan" | "rotate"; position: { x: number; y: number }; rotation?: number; ease?: MotionEase; snapIn?: boolean; snapOut?: boolean; middleTransition?: "transition"; middleEase?: MotionEase };
+type RenderClockReadinessResult = { animationCount: number; pinnedCount: number; failedCount: number; pendingReadyCount: number; passCount: number; layerCount: number };
+type ExportCaptureTile = { x: number; y: number; width: number; height: number };
+type MotionMarker = { start: number; duration: number };
 type AdjustmentLayer = { id: string; name: string; start: number; duration: number; effect: { kind?: "frameSkip"; every?: number; effectId?: string; params?: Record<string, unknown> } };
 type TransitionLayer = { id: string; name: string; start: number; duration: number; midPoint: number; effect: { effectId?: string; params?: Record<string, unknown> } };
-type CompositionClip = { id: string; name: string; filePath: string; sourceMissing?: boolean; start?: number; layerId?: string; duration: number; frame: { width: number; height: number; style: Record<string, string | number> }; background: BackgroundLayer; objects: FrameObject[]; snapshot: unknown[]; zoomMarkers: ZoomMarker[]; translationMarkers: TranslationMarker[] };
-type Scene = { id: string; name: string; compositions: CompositionClip[]; adjustmentLayers?: AdjustmentLayer[]; transitionLayers?: TransitionLayer[] };
-type TimelineLayerState = { compositionLayers?: Array<{ id: string }> };
-type ProjectManifest = { id: string; name: string; resolution: { width: number; height: number }; scenes: Scene[]; assetsPath: string; editorState?: { timelineLayers?: TimelineLayerState } };
+type CompositionClip = { start?: number; duration: number; motionMarkers?: MotionMarker[] };
+type Scene = { id: string; name: string; compositions: CompositionClip[]; adjustmentLayers?: AdjustmentLayer[]; motionMarkers?: MotionMarker[]; transitionLayers?: TransitionLayer[] };
+type ProjectManifest = { id: string; name: string; resolution: { width: number; height: number }; scenes: Scene[]; assetsPath: string; editorState?: unknown };
 type TimelinePart = CompositionClip & { start: number; end: number };
-type AdjustmentVisualOverlay = { id: string; target?: "frame" | "camera"; style: Record<string, string | number> };
-type AdjustmentVisualStyle = { filter?: string; overlays?: AdjustmentVisualOverlay[] };
-type TransitionVisualStyle = { filter?: string; frameStyle?: Record<string, string | number>; cameraStyle?: Record<string, string | number>; overlays?: AdjustmentVisualOverlay[] };
-type TransitionSequenceStyle = { frameStyle?: Record<string, string | number>; aStyle?: Record<string, string | number>; bStyle?: Record<string, string | number> };
-const templateCache = new Map<string, (context: unknown) => unknown>();
+
+function getSceneDuration(scene: Scene) {
+  const timeline = buildLinearTimeline(scene);
+  return Math.max(
+    ...timeline.map((item) => item.end),
+    ...(scene.adjustmentLayers ?? []).map((item) => item.start + item.duration),
+    ...(scene.transitionLayers ?? []).map((item) => item.start + item.duration),
+    ...(scene.motionMarkers ?? []).map((item) => item.start + item.duration),
+    ...timeline.flatMap((item) => (item.motionMarkers ?? []).map((marker) => item.start + marker.start + marker.duration)),
+    0,
+  );
+}
 
 function buildLinearTimeline(scene: Scene): TimelinePart[] {
   let cursor = 0;
@@ -648,393 +758,6 @@ function buildLinearTimeline(scene: Scene): TimelinePart[] {
   });
 }
 
-function getTimelinePartAtTime(timeline: TimelinePart[], time: number) {
-  if (timeline.length === 0) return null;
-  return [...timeline].reverse().find((item) => time >= item.start && time < item.end) ?? null;
-}
-
-function getActiveTimelinePartsAtTime(timeline: TimelinePart[], time: number, timelineLayers: TimelineLayerState | undefined) {
-  const rowOrder = new Map((timelineLayers?.compositionLayers ?? []).map((layer, index) => [layer.id, index]));
-  const topToBottom = timeline.filter((item) => time >= item.start && time < item.end).sort((left, right) => {
-    const layerDiff = getLayerIndex(rowOrder, left.layerId) - getLayerIndex(rowOrder, right.layerId);
-    return layerDiff || right.start - left.start;
-  });
-  return topToBottom.slice(0, 1).reverse();
-}
-
-function getLayerIndex(rowOrder: Map<string, number>, layerId: string | undefined) {
-  return rowOrder.get(layerId ?? "comp") ?? Number.MAX_SAFE_INTEGER;
-}
-
-function applyAdjustmentLayersToSceneTime(sceneTime: number, layers: AdjustmentLayer[] | undefined, frameRate: number) {
-  return (layers ?? []).reduce((time, layer) => {
-    if (time < layer.start || time >= layer.start + layer.duration) return time;
-    const effectId = getAdjustmentEffectId(layer);
-    if (effectId === "clipper.adjustment.frameSkip" || layer.effect.kind === "frameSkip") return quantizeFrameSkipTime(time, layer.start, getNumberParam(layer, "every", layer.effect.every ?? 2), frameRate);
-    if (effectId === "clipper.adjustment.freezeFrame") return layer.start;
-    if (effectId === "clipper.adjustment.speedChange") {
-      const speed = Math.max(0.05, getNumberParam(layer, "speed", 0.5));
-      const maxTime = layer.start + Math.max(0, layer.duration - frameDuration(frameRate));
-      return clamp(layer.start + Math.max(0, time - layer.start) * speed, layer.start, maxTime);
-    }
-    if (effectId === "clipper.adjustment.loopStutter") return layer.start + positiveModulo(Math.max(0, time - layer.start), Math.max(0.05, getNumberParam(layer, "window", 0.5)));
-    if (effectId === "clipper.adjustment.reverse") return clamp(layer.start + layer.duration - frameDuration(frameRate) - Math.max(0, time - layer.start), layer.start, layer.start + layer.duration);
-    if (effectId === "clipper.adjustment.boomerang") {
-      const elapsed = Math.max(0, time - layer.start);
-      const halfDuration = Math.max(layer.duration / 2, frameDuration(frameRate));
-      const maxTime = layer.start + Math.max(0, layer.duration - frameDuration(frameRate));
-      const mapped = elapsed <= halfDuration ? layer.start + elapsed * 2 : maxTime - (elapsed - halfDuration) * 2;
-      return clamp(mapped, layer.start, maxTime);
-    }
-    return time;
-  }, sceneTime);
-}
-
-function applyAdjustmentLayersToVisualStyle(sceneTime: number, layers: AdjustmentLayer[] | undefined): AdjustmentVisualStyle {
-  const filters: string[] = [];
-  const overlays: AdjustmentVisualOverlay[] = [];
-  for (const layer of layers ?? []) {
-    if (sceneTime < layer.start || sceneTime >= layer.start + layer.duration) continue;
-    const effectId = getAdjustmentEffectId(layer);
-    if (effectId === "clipper.adjustment.colourGrade") {
-      filters.push(`brightness(${clamp(getNumberParam(layer, "brightness", 1), 0, 3)})`);
-      filters.push(`contrast(${clamp(getNumberParam(layer, "contrast", 1), 0, 3)})`);
-      filters.push(`saturate(${clamp(getNumberParam(layer, "saturation", 1), 0, 3)})`);
-      filters.push(`hue-rotate(${clamp(getNumberParam(layer, "hue", 0), -180, 180)}deg)`);
-    }
-    if (effectId === "clipper.adjustment.brightness") filters.push(`brightness(${clamp(getNumberParam(layer, "amount", 1.15), 0, 3)})`);
-    if (effectId === "clipper.adjustment.contrast") filters.push(`contrast(${clamp(getNumberParam(layer, "amount", 1.2), 0, 3)})`);
-    if (effectId === "clipper.adjustment.saturation") filters.push(`saturate(${clamp(getNumberParam(layer, "amount", 1.25), 0, 3)})`);
-    if (effectId === "clipper.adjustment.hueRotate") filters.push(`hue-rotate(${clamp(getNumberParam(layer, "degrees", 30), -180, 180)}deg)`);
-    if (effectId === "clipper.adjustment.blur") filters.push(`blur(${clamp(getNumberParam(layer, "radius", 6), 0, 20)}px)`);
-    overlays.push(...getAdjustmentVisualOverlays(effectId, layer, sceneTime));
-  }
-  return { filter: filters.join(" ") || undefined, overlays: overlays.length > 0 ? overlays : undefined };
-}
-
-function applyTransitionLayersToVisualStyle(sceneTime: number, layers: TransitionLayer[] | undefined): TransitionVisualStyle {
-  return (layers ?? []).filter((layer) => sceneTime >= layer.start && sceneTime < layer.start + getTransitionFinishTime(layer)).reduce<TransitionVisualStyle>((style, layer) => {
-    const nextStyle = applyTransitionVisualStyle(sceneTime, layer);
-    return {
-      ...style,
-      ...nextStyle,
-      filter: [style.filter, nextStyle.filter].filter(Boolean).join(" ") || undefined,
-      frameStyle: { ...style.frameStyle, ...nextStyle.frameStyle },
-      cameraStyle: { ...style.cameraStyle, ...nextStyle.cameraStyle },
-      overlays: [...(style.overlays ?? []), ...(nextStyle.overlays ?? [])],
-    };
-  }, {});
-}
-
-function applyTransitionVisualStyle(sceneTime: number, layer: TransitionLayer): TransitionVisualStyle {
-  const effectId = layer.effect.effectId ?? "";
-  if (effectId === "clipper.transition.swipe") return {};
-  return {};
-}
-
-function renderTransitionSequence(sceneTime: number, layer: TransitionLayer, frameRate: number): TransitionSequenceStyle {
-  const progress = getTransitionProgress(sceneTime, layer);
-  const effectId = layer.effect.effectId ?? "";
-  if (effectId === "clipper.transition.swipe") return swipeTransitionSequenceStyle(progress);
-  return swipeTransitionSequenceStyle(progress);
-}
-
-function swipeTransitionSequenceStyle(progress: number): TransitionSequenceStyle {
-  const t = clamp(progress, 0, 1);
-  return {
-    aStyle: { transform: `translate3d(${-t * 100}%,0,0)` },
-    bStyle: { transform: `translate3d(${(1 - t) * 100}%,0,0)` },
-  };
-}
-
-function getActiveTransitionLayer(sceneTime: number, layers: TransitionLayer[] | undefined) {
-  return layers?.find((layer) => sceneTime >= layer.start && sceneTime < layer.start + getTransitionFinishTime(layer)) ?? null;
-}
-
-function getTransitionProgress(sceneTime: number, layer: TransitionLayer) {
-  const finishTime = getTransitionFinishTime(layer);
-  const linearProgress = finishTime > 0 ? clamp((sceneTime - layer.start) / finishTime, 0, 1) : 1;
-  return easeProgress(linearProgress, (layer.effect.params?.ease as MotionEase | undefined) ?? "easeInOut");
-}
-
-function getTransitionFinishTime(layer: TransitionLayer) {
-  return Math.max(layer.duration, 0.1);
-}
-
-function getTransitionMarkerTime(layer: Pick<TransitionLayer, "start" | "duration">) {
-  return layer.start + layer.duration / 2;
-}
-
-function getTransitionStackParts(timeline: TimelinePart[], sceneTime: number, layer: TransitionLayer, adjustmentLayers: AdjustmentLayer[] | undefined, timelineLayers: TimelineLayerState | undefined, frameRate: number) {
-  const progress = getTransitionProgress(sceneTime, layer);
-  const midTime = getTransitionMarkerTime(layer);
-  const endTime = layer.start + layer.duration;
-  const fromSceneTime = clamp(layer.start + (midTime - layer.start) * progress, layer.start, Math.max(midTime - 0.000001, layer.start));
-  const toSceneTime = clamp(midTime + (endTime - midTime) * progress, midTime, endTime);
-  const fromTime = applyAdjustmentLayersToSceneTime(fromSceneTime, adjustmentLayers, frameRate);
-  const toTime = applyAdjustmentLayersToSceneTime(toSceneTime, adjustmentLayers, frameRate);
-  return {
-    from: getActiveTimelinePartsAtTime(timeline, fromTime, timelineLayers).map((part) => ({ part, previewTime: clamp(fromTime - part.start, 0, part.duration) })),
-    to: getActiveTimelinePartsAtTime(timeline, toTime, timelineLayers).map((part) => ({ part, previewTime: clamp(toTime - part.start, 0, part.duration) })),
-    fromSceneTime,
-    toSceneTime,
-  };
-}
-
-function getAdjustmentVisualOverlays(effectId: string, layer: AdjustmentLayer, sceneTime: number): AdjustmentVisualOverlay[] {
-  if (effectId === "clipper.adjustment.filmDust") {
-    const intensity = clamp(getNumberParam(layer, "intensity", 0.28), 0, 1);
-    const density = clamp(getNumberParam(layer, "density", 1), 0.25, 3);
-    const drift = clamp(getNumberParam(layer, "drift", 1), 0, 4);
-    const offsetX = Math.round(sceneTime * 41 * drift) % 97;
-    const offsetY = Math.round(sceneTime * 67 * drift) % 113;
-    const scale = Math.max(1, 38 / density);
-    return [{ id: `${layer.id}:film-dust`, target: getOverlayTarget(layer), style: { backgroundImage: ["radial-gradient(circle at 14% 18%, rgba(255,255,255,0.95) 0 0.9px, transparent 1.4px)", "radial-gradient(circle at 72% 36%, rgba(255,255,255,0.75) 0 0.7px, transparent 1.2px)", "radial-gradient(circle at 42% 78%, rgba(0,0,0,0.5) 0 0.8px, transparent 1.5px)"].join(","), backgroundPosition: `${offsetX}px ${offsetY}px, ${-offsetY}px ${offsetX}px, ${offsetY / 2}px ${-offsetX / 2}px`, backgroundSize: `${scale}px ${scale}px, ${scale * 1.7}px ${scale * 1.7}px, ${scale * 2.3}px ${scale * 2.3}px`, mixBlendMode: "screen", opacity: intensity } }];
-  }
-  if (effectId === "clipper.adjustment.filmScratches") {
-    const intensity = clamp(getNumberParam(layer, "intensity", 0.24), 0, 1);
-    const density = clamp(getNumberParam(layer, "density", 1), 0.25, 3);
-    const drift = clamp(getNumberParam(layer, "drift", 1), 0, 4);
-    const jitter = Math.round(Math.sin(sceneTime * 37) * 18 * drift);
-    const spacing = Math.max(72, 180 / density);
-    return [{ id: `${layer.id}:film-scratches`, target: getOverlayTarget(layer), style: { backgroundImage: ["repeating-linear-gradient(90deg, transparent 0 92px, rgba(255,255,255,0.78) 94px 95px, transparent 97px 178px)", "repeating-linear-gradient(90deg, transparent 0 154px, rgba(0,0,0,0.34) 157px 158px, transparent 160px 246px)"].join(","), backgroundPosition: `${jitter}px 0, ${-jitter * 1.7}px 0`, backgroundSize: `${spacing}px 100%, ${spacing * 1.45}px 100%`, mixBlendMode: "screen", opacity: intensity } }];
-  }
-  if (effectId === "clipper.adjustment.vignette") {
-    const intensity = clamp(getNumberParam(layer, "intensity", 0.42), 0, 1);
-    const softness = clamp(getNumberParam(layer, "softness", 0.64), 0.2, 1);
-    const focusX = clamp(getNumberParam(layer, "focusX", 50), 0, 100);
-    const focusY = clamp(getNumberParam(layer, "focusY", 50), 0, 100);
-    const clearStop = Math.round(softness * 62);
-    return [{ id: `${layer.id}:vignette`, target: getOverlayTarget(layer), style: { backgroundImage: `radial-gradient(ellipse at ${focusX}% ${focusY}%, transparent 0 ${clearStop}%, rgba(0,0,0,0.88) 100%)`, mixBlendMode: "multiply", opacity: intensity } }];
-  }
-  if (effectId === "clipper.adjustment.lightLeak") {
-    const intensity = clamp(getNumberParam(layer, "intensity", 0.34), 0, 1);
-    const warmth = clamp(getNumberParam(layer, "warmth", 1), 0, 2);
-    const drift = clamp(getNumberParam(layer, "drift", 0.8), 0, 4);
-    const focusX = clamp(getNumberParam(layer, "focusX", 12), 0, 100);
-    const focusY = clamp(getNumberParam(layer, "focusY", 28), 0, 100);
-    const centerX = focusX + Math.sin(sceneTime * 0.8 * drift) * 8 * drift;
-    const centerY = focusY + Math.cos(sceneTime * 0.6 * drift) * 18 * drift;
-    const green = Math.round(105 + warmth * 45);
-    const blue = Math.round(36 + warmth * 26);
-    return [{ id: `${layer.id}:light-leak`, target: getOverlayTarget(layer), style: { backgroundImage: [`radial-gradient(circle at ${centerX}% ${centerY}%, rgba(255,${green},${blue},0.95) 0, rgba(255,${green},${blue},0.42) 18%, transparent 46%)`, "linear-gradient(90deg, rgba(255,226,143,0.58), transparent 28%)"].join(","), mixBlendMode: "screen", opacity: intensity } }];
-  }
-  return [];
-}
-
-function getOverlayTarget(layer: AdjustmentLayer) {
-  return layer.effect.params?.target === "frame" ? "frame" : "camera";
-}
-
-function getAdjustmentEffectId(layer: AdjustmentLayer) {
-  return layer.effect.effectId ?? (layer.effect.kind === "frameSkip" ? "clipper.adjustment.frameSkip" : "");
-}
-
-function getNumberParam(layer: AdjustmentLayer, key: string, fallback: number) {
-  const value = Number(layer.effect.params?.[key] ?? layer.effect[key as keyof AdjustmentLayer["effect"]] ?? fallback);
-  return Number.isFinite(value) ? value : fallback;
-}
-
-function quantizeFrameSkipTime(sceneTime: number, start: number, every: number, frameRate: number) {
-  const frameStep = Math.max(1, Math.round(every));
-  if (frameStep <= 1 || frameRate <= 0) return sceneTime;
-  const elapsedFrames = Math.max(0, Math.floor((sceneTime - start) * frameRate));
-  const heldFrame = Math.floor(elapsedFrames / frameStep) * frameStep;
-  return start + heldFrame / frameRate;
-}
-
-function frameDuration(frameRate: number) {
-  return frameRate > 0 ? 1 / frameRate : 0;
-}
-
-function positiveModulo(value: number, divisor: number) {
-  return ((value % divisor) + divisor) % divisor;
-}
-
-function buildFrameShell() {
-  return `<!doctype html><html><head><meta charset="utf-8"><style>*{box-sizing:border-box}html,body{margin:0;width:${frameWidth}px;height:${frameHeight}px;overflow:hidden;background:#000}</style></head><body><div id="clipper-frame-root"></div><script>window.__clipperSetFrame=function(html){document.getElementById("clipper-frame-root").innerHTML=html;return new Promise(function(resolve){requestAnimationFrame(function(){requestAnimationFrame(resolve);});});};</script></body></html>`;
-}
-
-function buildFrameBody(parts: Array<{ part: CompositionClip; previewTime: number }>, visualAdjustmentStyle: AdjustmentVisualStyle, visualTransitionStyle: TransitionVisualStyle) {
-  const frameStyle = cssStyle({ position: "relative", width: frameWidth, height: frameHeight, overflow: "hidden", background: "#000" });
-  const transitionTransform = typeof visualTransitionStyle.cameraStyle?.transform === "string" ? visualTransitionStyle.cameraStyle.transform : "";
-  const cameraStyle = cssStyle({ position: "absolute", inset: 0, transformOrigin: "center", ...visualTransitionStyle.cameraStyle, transform: transitionTransform });
-  const visualStyle = cssStyle({ position: "absolute", inset: 0, filter: [visualAdjustmentStyle.filter, visualTransitionStyle.filter].filter(Boolean).join(" ") || undefined, ...visualTransitionStyle.frameStyle });
-  const frameOverlayHtml = adjustmentOverlayHtml([...(visualAdjustmentStyle.overlays?.filter((overlay) => overlay.target === "frame") ?? []), ...(visualTransitionStyle.overlays?.filter((overlay) => overlay.target === "frame") ?? [])]);
-  const cameraOverlayHtml = adjustmentOverlayHtml([...(visualAdjustmentStyle.overlays?.filter((overlay) => (overlay.target ?? "camera") === "camera") ?? []), ...(visualTransitionStyle.overlays?.filter((overlay) => (overlay.target ?? "camera") === "camera") ?? [])]);
-  const contentHtml = parts.map(({ part, previewTime }) => compositionLayerHtml(part, previewTime)).join("");
-  return `<div style="${frameStyle}"><div style="${cameraStyle}"><div style="${visualStyle}">${contentHtml}${frameOverlayHtml}</div></div>${cameraOverlayHtml}</div>`;
-}
-
-function buildTransitionFrameBody(parts: { from: Array<{ part: CompositionClip; previewTime: number }>; to: Array<{ part: CompositionClip; previewTime: number }>; fromSceneTime: number; toSceneTime: number }, sceneTime: number, layer: TransitionLayer, frameRate: number, adjustmentLayers: AdjustmentLayer[] | undefined, visualTransitionStyle: TransitionVisualStyle) {
-  const frameStyle = cssStyle({ position: "relative", width: frameWidth, height: frameHeight, overflow: "hidden", background: "#000" });
-  const sequenceStyle = renderTransitionSequence(sceneTime, layer, frameRate);
-  const visualStyle = cssStyle({ position: "absolute", inset: 0, filter: visualTransitionStyle.filter, ...visualTransitionStyle.frameStyle, ...sequenceStyle.frameStyle });
-  const outgoingStyle = cssStyle({ position: "absolute", inset: 0, overflow: "hidden", ...sequenceStyle.aStyle });
-  const incomingStyle = cssStyle({ position: "absolute", inset: 0, overflow: "hidden", ...sequenceStyle.bStyle });
-  const frameOverlayHtml = adjustmentOverlayHtml(visualTransitionStyle.overlays?.filter((overlay) => overlay.target === "frame"));
-  const cameraOverlayHtml = adjustmentOverlayHtml(visualTransitionStyle.overlays?.filter((overlay) => (overlay.target ?? "camera") === "camera"));
-  const fromHtml = timelineSequenceHtml(parts.from, applyAdjustmentLayersToVisualStyle(parts.fromSceneTime, adjustmentLayers));
-  const toHtml = timelineSequenceHtml(parts.to, applyAdjustmentLayersToVisualStyle(parts.toSceneTime, adjustmentLayers));
-  return `<div style="${frameStyle}"><div style="${visualStyle}"><div style="${outgoingStyle}">${fromHtml}</div><div style="${incomingStyle}">${toHtml}</div>${frameOverlayHtml}</div>${cameraOverlayHtml}</div>`;
-}
-
-function timelineSequenceHtml(parts: Array<{ part: CompositionClip; previewTime: number }>, adjustmentStyle: AdjustmentVisualStyle) {
-  const visualStyle = cssStyle({ position: "absolute", inset: 0, filter: adjustmentStyle.filter });
-  const frameOverlayHtml = adjustmentOverlayHtml(adjustmentStyle.overlays?.filter((overlay) => overlay.target === "frame"));
-  return `<div style="${visualStyle}">${parts.map(({ part, previewTime }) => compositionLayerHtml(part, previewTime)).join("")}${frameOverlayHtml}</div>`;
-}
-
-function compositionLayerHtml(part: CompositionClip, previewTime: number) {
-  if (part.sourceMissing) return "";
-
-  const activeZoom = getActiveZoom(part.zoomMarkers, previewTime);
-  const activeTranslation = getActiveTranslation(part.translationMarkers, previewTime);
-  const activeRotation = getActiveRotation(part.translationMarkers, previewTime);
-  const scale = activeZoom?.scale ?? 1;
-  const focus = activeZoom?.focus ?? { x: frameWidth / 2, y: frameHeight / 2 };
-  const x = (frameWidth / 2 - focus.x) * (scale - 1) + (activeTranslation?.position.x ?? 0);
-  const y = (frameHeight / 2 - focus.y) * (scale - 1) + (activeTranslation?.position.y ?? 0);
-  const rotation = activeRotation?.rotation ?? 0;
-  const style = cssStyle({ position: "absolute", inset: 0, overflow: "hidden", ...part.frame.style, transform: `translate3d(${x}px,${y}px,0) rotate(${rotation}deg) scale(${scale})`.trim(), transformOrigin: "center" });
-  return `<div style="${style}">${part.background.hidden ? "" : backgroundLayerHtml(part.background, previewTime, part.duration)}${part.objects.filter((object) => !object.hidden).map((object) => frameObjectHtml(object, previewTime, part.duration)).join("")}</div>`;
-}
-
-function adjustmentOverlayHtml(overlays: AdjustmentVisualOverlay[] | undefined) {
-  return (overlays ?? []).map((overlay) => `<div style="${cssStyle({ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 2147483647, ...overlay.style })}"></div>`).join("");
-}
-
-function backgroundLayerHtml(background: BackgroundLayer, previewTime: number, duration: number) {
-  const layerStyle = cssStyle({ position: "absolute", inset: 0, overflow: background.stretchToElements ? "visible" : "hidden", ...getMotionPreviewAnimation(background.motion, previewTime) });
-  const fillBounds = getBackgroundLayerFillBounds(background);
-  const fillStyle = cssStyle({ position: "absolute", left: fillBounds.x, top: fillBounds.y, width: fillBounds.width, height: fillBounds.height, ...background.style });
-  return `<div style="${layerStyle}"><div style="${fillStyle}"></div>${background.elements.filter((element) => !element.hidden).map((element) => frameObjectHtml(element, previewTime, duration)).join("")}</div>`;
-}
-
-function frameObjectHtml(object: FrameObject, previewTime: number, duration: number) {
-  const animation = getMotionPreviewAnimation(object.motion, previewTime);
-  const templateRender = object.template ? renderFrameTemplate(object.template, object, previewTime, duration) : null;
-  const objectTransform = typeof object.style.transform === "string" ? object.style.transform : "";
-  const animationTransform = typeof animation.transform === "string" ? animation.transform : "";
-  const templateTransform = typeof templateRender?.style?.transform === "string" ? templateRender.style.transform : "";
-  const style = cssStyle({ position: "absolute", display: "flex", flexDirection: "column", justifyContent: "center", overflow: "hidden", whiteSpace: "pre-line", left: object.bounds.x, top: object.bounds.y, width: object.bounds.width, height: object.bounds.height, ...object.style, ...animation, ...templateRender?.style, transform: `${animationTransform || objectTransform} ${templateTransform}`.trim() || undefined });
-  const content = templateRender?.content ?? object.content ?? "";
-  const html = object.type === "html" || object.type === "svg" || object.type === "template" ? content : escapeHtml(content).replace(/\n/g, "<br />");
-  return `<div style="${style}">${html}</div>`;
-}
-
-function renderFrameTemplate(template: FrameTemplate, object: FrameObject, time: number, duration: number): { content?: string; style?: Record<string, string | number | undefined> } {
-  const renderer = compileFrameTemplate(template.source);
-  const result = renderer({
-    time,
-    duration,
-    progress: clamp(duration > 0 ? time / duration : 0, 0, 1),
-    frame: { width: frameWidth, height: frameHeight },
-    object: { id: object.id, name: object.name, bounds: object.bounds, style: object.style, content: object.content },
-  });
-
-  if (typeof result === "string") return { content: result };
-  if (!result || typeof result !== "object") return { content: "" };
-  const rendered = result as { content?: string; style?: Record<string, string | number | undefined> };
-  return { content: rendered.content, style: rendered.style ?? {} };
-}
-
-function compileFrameTemplate(source: string) {
-  const cached = templateCache.get(source);
-  if (cached) return cached;
-  const renderer = Function(`"use strict"; const template = (${source}); if (typeof template !== "function") throw new Error("Frame template source must evaluate to a function."); return template;`)() as (context: unknown) => unknown;
-  templateCache.set(source, renderer);
-  return renderer;
-}
-
-function getBackgroundLayerFillBounds(background: BackgroundLayer) {
-  if (!background.stretchToElements || background.elements.length === 0) return { x: 0, y: 0, width: frameWidth, height: frameHeight };
-  const left = Math.min(0, ...background.elements.map((element) => element.bounds.x));
-  const top = Math.min(0, ...background.elements.map((element) => element.bounds.y));
-  const right = Math.max(frameWidth, ...background.elements.map((element) => element.bounds.x + element.bounds.width));
-  const bottom = Math.max(frameHeight, ...background.elements.map((element) => element.bounds.y + element.bounds.height));
-  return { x: left, y: top, width: right - left, height: bottom - top };
-}
-
-function cssStyle(style: Record<string, unknown>) {
-  return Object.entries(style).filter(([, value]) => value !== undefined && value !== null && value !== "").map(([key, value]) => `${key.replace(/[A-Z]/g, (match) => `-${match.toLowerCase()}`)}:${cssValue(key, value)};`).join("");
-}
-
-function cssValue(key: string, value: unknown) {
-  if (typeof value !== "number") return escapeHtml(String(value));
-  return unitlessCssProperties.has(key) ? String(value) : `${value}px`;
-}
-
-const unitlessCssProperties = new Set(["fontWeight", "lineHeight", "opacity", "zIndex", "flex", "flexGrow", "flexShrink", "order"]);
-
-function escapeHtml(value: string) {
-  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
-
-function getMotionPreviewAnimation(motion: MotionTrack | undefined, time: number): Record<string, string | number | undefined> {
-  if (!motion) return {};
-  const delay = motion.delay ?? 0;
-  const elapsed = Math.max(time - delay, 0);
-  const cycleTime = motion.loop && motion.duration > 0 ? elapsed % motion.duration : elapsed;
-  const progress = easeProgress(clamp(cycleTime / motion.duration, 0, 1), motion.ease);
-  const transforms: string[] = [];
-  if (motion.x) transforms.push(`translateX(${Math.round(interpolate(motion.x, progress))}px)`);
-  if (motion.y) transforms.push(`translateY(${Math.round(interpolate(motion.y, progress))}px)`);
-  if (motion.rotate) transforms.push(`rotate(${interpolate(motion.rotate, progress).toFixed(2)}deg)`);
-  if (motion.skewX) transforms.push(`skewX(${interpolate(motion.skewX, progress).toFixed(2)}deg)`);
-  if (motion.skewY) transforms.push(`skewY(${interpolate(motion.skewY, progress).toFixed(2)}deg)`);
-  if (motion.scale) transforms.push(`scale(${interpolate(motion.scale, progress).toFixed(4)})`);
-  if (motion.scaleX) transforms.push(`scaleX(${interpolate(motion.scaleX, progress).toFixed(4)})`);
-  if (motion.scaleY) transforms.push(`scaleY(${interpolate(motion.scaleY, progress).toFixed(4)})`);
-  return { opacity: motion.opacity ? interpolate(motion.opacity, progress) : undefined, transform: transforms.length > 0 ? transforms.join(" ") : undefined };
-}
-
-function getActiveZoom(markers: ZoomMarker[], time: number) {
-  const marker = markers.find((item) => time >= item.start && time <= item.start + item.duration);
-  if (!marker) return null;
-  const progress = (time - marker.start) / marker.duration;
-  const rampIn = marker.snapIn ? 1 : progress / 0.22;
-  const rampOut = marker.snapOut ? 1 : (1 - progress) / 0.22;
-  const eased = easeProgress(clamp(Math.min(rampIn, rampOut, 1), 0, 1), marker.ease ?? "easeInOut");
-  return { ...marker, scale: 1 + (marker.scale - 1) * eased };
-}
-
-function getActiveTranslation(markers: TranslationMarker[], time: number) {
-  const marker = markers.find((item) => (item.kind ?? "pan") === "pan" && time >= item.start && time <= item.start + item.duration);
-  if (!marker) return null;
-  const progress = (time - marker.start) / marker.duration;
-  const rampIn = marker.snapIn ? 1 : progress / 0.22;
-  const rampOut = marker.snapOut ? 1 : (1 - progress) / 0.22;
-  const eased = easeProgress(clamp(Math.min(rampIn, rampOut, 1), 0, 1), marker.ease ?? "easeInOut");
-  return { ...marker, position: { x: Math.round(marker.position.x * eased), y: Math.round(marker.position.y * eased) } };
-}
-
-function getActiveRotation(markers: TranslationMarker[], time: number) {
-  const marker = markers.find((item) => item.kind === "rotate" && time >= item.start && time <= item.start + item.duration);
-  if (!marker) return null;
-  const progress = (time - marker.start) / marker.duration;
-  const rampIn = marker.snapIn ? 1 : progress / 0.22;
-  const rampOut = marker.snapOut ? 1 : (1 - progress) / 0.22;
-  const eased = easeProgress(clamp(Math.min(rampIn, rampOut, 1), 0, 1), marker.ease ?? "easeInOut");
-  return { ...marker, rotation: (marker.rotation ?? 0) * eased };
-}
-
-function interpolate(range: readonly [number, number], progress: number) {
-  return range[0] + (range[1] - range[0]) * progress;
-}
-
-function easeProgress(value: number, ease: MotionEase | undefined) {
-  if (ease === "easeOut" || ease === "circOut") return 1 - Math.pow(1 - value, 3);
-  if (ease === "easeIn") return value * value * value;
-  if (ease === "easeInOut") return value < 0.5 ? 4 * value * value * value : 1 - Math.pow(-2 * value + 2, 3) / 2;
-  if (ease === "backOut") return 1 + 2.70158 * Math.pow(value - 1, 3) + 1.70158 * Math.pow(value - 1, 2);
-  return value;
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(Math.max(value, min), max);
-}
-
 async function createWindow() {
   const window = new BrowserWindow({
     width: 1440,
@@ -1043,6 +766,7 @@ async function createWindow() {
     minHeight: 760,
     backgroundColor: "#00000000",
     title: "Clipper",
+    icon: appIconPath,
     titleBarStyle: "hiddenInset",
     transparent: true,
     webPreferences: {
@@ -1051,6 +775,8 @@ async function createWindow() {
       nodeIntegration: false,
     },
   });
+
+  if (process.platform === "darwin") app.dock?.setIcon(appIconPath);
 
   try {
     const state = await readAppState();
@@ -1082,6 +808,18 @@ async function createWindow() {
 
   window.webContents.on("before-input-event", (event, input) => {
     if (!(input.control || input.meta)) return;
+    if (input.key.toLowerCase() === "w") {
+      event.preventDefault();
+      window.webContents.send("clipper:close-editor-tab-shortcut");
+      return;
+    }
+
+    if (input.key.toLowerCase() === "t") {
+      event.preventDefault();
+      window.webContents.send("clipper:restore-editor-tab-shortcut");
+      return;
+    }
+
     if (input.key === ",") {
       event.preventDefault();
       window.webContents.send("clipper:settings-shortcut");
@@ -1126,7 +864,7 @@ function installAppMenu() {
           },
         },
         { type: "separator" },
-        isMac ? { role: "close" } : { role: "quit" },
+        isMac ? { label: "Close Window", click: (_menuItem, browserWindow) => { browserWindow?.close(); } } : { role: "quit" },
       ],
     },
     { label: "Edit", submenu: [{ role: "undo" }, { role: "redo" }, { type: "separator" }, { role: "cut" }, { role: "copy" }, { role: "paste" }, { role: "selectAll" }] },
@@ -1151,7 +889,7 @@ async function renderVideoFromCommand() {
   const scene = project.scenes.find((item) => item.id === sceneId) ?? project.scenes[0];
   if (!scene) throw new Error(`Scene ${sceneId} was not found.`);
 
-  await renderSceneToVideo(project, scene, resolvedOutputPath, 30);
+  await renderSceneToVideo(project, scene, resolvedOutputPath, 30, getSceneDuration(scene));
   console.log(`Rendered video to ${resolvedOutputPath}`);
   return true;
 }

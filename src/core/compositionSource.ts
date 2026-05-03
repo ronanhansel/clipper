@@ -48,12 +48,12 @@ type SourceExports = { composition?: unknown };
 type SourceRenderable = compositionApi.RenderableObject | compositionApi.Component | compositionApi.Group | null | undefined | false | SourceRenderable[];
 
 export async function loadCompositionsFromSource(compositions: Part[], readFile: (relativePath: string) => Promise<string>) {
-  const loaded = await Promise.all(compositions.map(async (composition) => compositionFromSource(composition, await readFile(composition.filePath))));
+  const loaded = await Promise.all(compositions.map(async (composition) => compositionFromSource(composition, await readFile(composition.filePath), readFile)));
   return loaded;
 }
 
-export async function compositionFromSource(baseComposition: Part, source: string): Promise<Part> {
-  const sourceComposition = await evaluateCompositionSource(source, 0, baseComposition.duration);
+export async function compositionFromSource(baseComposition: Part, source: string, readFile?: (relativePath: string) => Promise<string>): Promise<Part> {
+  const sourceComposition = await evaluateCompositionSource(source, 0, baseComposition.duration, baseComposition.filePath, readFile);
 
   return {
     ...baseComposition,
@@ -217,9 +217,11 @@ function indent(value: string, spaces: number) {
   return value.split("\n").map((line) => `${prefix}${line}`).join("\n");
 }
 
-async function evaluateCompositionSource(source: string, time: number, duration: number): Promise<ResolvedSourceComposition> {
+async function evaluateCompositionSource(source: string, time: number, duration: number, sourcePath = "", readFile?: (relativePath: string) => Promise<string>): Promise<ResolvedSourceComposition> {
   const ts = await import("typescript");
-  const strippedSource = source.replace(/^\s*import\s+[^;]+;\s*$/gm, "");
+  const cssImports = new Map<string, string>();
+  const sourceWithCss = await inlineCssImports(source, sourcePath, readFile, cssImports);
+  const strippedSource = sourceWithCss.replace(/^\s*import\s+[^;]+;\s*$/gm, "");
   const transpiled = ts.transpileModule(strippedSource, {
     compilerOptions: {
       jsx: ts.JsxEmit.ReactJSX,
@@ -233,6 +235,39 @@ async function evaluateCompositionSource(source: string, time: number, duration:
   Function("exports", ...apiEntries.map(([key]) => key), `${transpiled}\nreturn exports;`)(exports, ...apiEntries.map(([, value]) => value));
 
   return normalizeSourceComposition(assertSourceComposition(exports.composition), time, duration);
+}
+
+async function inlineCssImports(source: string, sourcePath: string, readFile: ((relativePath: string) => Promise<string>) | undefined, cssImports: Map<string, string>) {
+  if (!readFile) return source;
+  const cssImportPattern = /^\s*import\s+(\w+)\s+from\s+["'](.+\.css)["'];?\s*$/gm;
+  const replacements: Array<{ start: number; end: number; value: string }> = [];
+
+  for (const match of source.matchAll(cssImportPattern)) {
+    const identifier = match[1];
+    const cssPath = match[2];
+    if (!identifier || !cssPath || match.index === undefined) continue;
+    const resolvedPath = resolveRelativeSourcePath(sourcePath, cssPath);
+    let cssSource = cssImports.get(resolvedPath);
+    if (cssSource === undefined) {
+      cssSource = await readFile(resolvedPath);
+      cssImports.set(resolvedPath, cssSource);
+    }
+    replacements.push({ start: match.index, end: match.index + match[0].length, value: `const ${identifier} = ${JSON.stringify(cssSource)};` });
+  }
+
+  return replacements.reduceRight((current, replacement) => `${current.slice(0, replacement.start)}${replacement.value}${current.slice(replacement.end)}`, source);
+}
+
+function resolveRelativeSourcePath(sourcePath: string, importPath: string) {
+  if (!importPath.startsWith(".")) return importPath;
+  const parts = `${sourcePath.includes("/") ? sourcePath.slice(0, sourcePath.lastIndexOf("/")) : ""}/${importPath}`.split("/");
+  const resolved: string[] = [];
+  for (const part of parts) {
+    if (!part || part === ".") continue;
+    if (part === "..") resolved.pop();
+    else resolved.push(part);
+  }
+  return resolved.join("/");
 }
 
 function assertSourceComposition(value: unknown): SourceComposition {

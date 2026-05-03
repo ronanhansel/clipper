@@ -72,6 +72,10 @@ class ClipperHostService {
     await window.clipper?.revealFile?.(relativePath);
   }
 
+  async revealAbsolutePath(filePath: string) {
+    await window.clipper?.revealAbsolutePath?.(filePath);
+  }
+
   async trashFile(relativePath: string) {
     return this.enqueueMutation(async () => {
       await window.clipper?.trashFile?.(relativePath);
@@ -141,9 +145,9 @@ class ClipperHostService {
     return window.clipper.exportProjectDialog(defaultFileName);
   }
 
-  async renderVideoExport(exportId: string, defaultFileName: string, project: ProjectManifest, scene: SceneManifest, frameRate: number) {
+  async renderVideoExport(exportId: string, defaultFileName: string, project: ProjectManifest, scene: SceneManifest, frameRate: number, durationSeconds: number) {
     if (!window.clipper?.renderVideoExport) throw new Error("Video export requires the Clipper desktop app. Restart the app if this was just updated.");
-    return window.clipper.renderVideoExport(exportId, defaultFileName, project, scene, frameRate);
+    return window.clipper.renderVideoExport(exportId, defaultFileName, project, scene, frameRate, durationSeconds);
   }
 
   async exportMediaFile(defaultFileName: string, content: string) {

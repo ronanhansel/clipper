@@ -1,6 +1,6 @@
 import type { ProjectManifest } from "../core/types";
 
-export type Mode = "interactive" | "code";
+export type Mode = "preview" | "editor";
 export type LeftPanelTab = "assets" | "tools";
 export type RightPanelTab = "video" | "motion" | "agent";
 export type ProjectUpdater = ProjectManifest | ((current: ProjectManifest) => ProjectManifest);
@@ -21,5 +21,5 @@ export type SettingsSection = "playback" | "timeline" | "export" | "advanced";
 export type MotionMarkerSelection = { partId: string; markerId: string };
 export type AdjustmentLayerSelection = { layerId: string };
 export type CompositionSelection = { partId: string };
-export type TimelineSelectionDrag = { startX: number; currentX: number; startY?: number; currentY?: number };
+export type TimelineSelectionDrag = { startX: number; currentX: number; startY?: number; currentY?: number; startContentX?: number; currentContentX?: number; startContentY?: number; currentContentY?: number };
 export type PlaybackClock = { startedAt: number; startedFrom: number } | null;

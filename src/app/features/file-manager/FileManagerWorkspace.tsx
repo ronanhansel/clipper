@@ -21,6 +21,7 @@ export type BuildFileManagerWorkspacePropsInput = Omit<FileManagerProps,
   | "onDuplicateComposition"
   | "onFileManagerStateChange"
   | "onFindCompositionMedia"
+  | "onOpenCompositionFile"
   | "onMoveComposition"
   | "onMoveTimeline"
   | "onRenameAsset"
@@ -64,6 +65,7 @@ export type BuildFileManagerWorkspacePropsInput = Omit<FileManagerProps,
     sortAssets: FileManagerProps["onSortAssets"];
     reloadProject: FileManagerProps["onReloadProject"];
     findCompositionMedia: FileManagerProps["onFindCompositionMedia"];
+    openCompositionFile: NonNullable<FileManagerProps["onOpenCompositionFile"]>;
   };
 };
 
@@ -99,6 +101,7 @@ export function buildFileManagerWorkspaceProps({ actions, ...state }: BuildFileM
     onSortAssets: actions.sortAssets,
     onReloadProject: actions.reloadProject,
     onFindCompositionMedia: actions.findCompositionMedia,
+    onOpenCompositionFile: actions.openCompositionFile,
   } as FileManagerWorkspaceProps;
 }
 

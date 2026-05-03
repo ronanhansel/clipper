@@ -34,11 +34,3 @@ export function createAdjustmentTimelineLayer() {
 export function createCompositionTimelineLayer() {
   return { id: `comp_${Date.now().toString(36)}`, name: "New Composition" };
 }
-
-export function createTransitionTimelineLayer() {
-  return { id: `transition_${Date.now().toString(36)}`, name: "New Transition" };
-}
-
-export function createBlankTransitionLayer() {
-  return { id: "transition", name: "Transition" };
-}

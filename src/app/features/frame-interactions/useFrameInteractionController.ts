@@ -300,7 +300,7 @@ export function useFrameInteractionController(params: FrameInteractionController
   }
 
   function onFramePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
-    if (mode !== "interactive" || !cameraRef.current || objectDragRef.current || objectResizeRef.current) return;
+    if (mode !== "preview" || !cameraRef.current || objectDragRef.current || objectResizeRef.current) return;
     if (trackerPickTranslationMarker) return;
     if (focusPickZoomMarker || pointPickAdjustment) {
       startFramePickDrag(event);
@@ -463,7 +463,7 @@ export function useFrameInteractionController(params: FrameInteractionController
   }
 
   function startObjectDrag(event: ReactPointerEvent<HTMLDivElement>, object: FrameObject) {
-    if (mode !== "interactive" || !canSelectFrameObjects || object.locked) return;
+    if (mode !== "preview" || !canSelectFrameObjects || object.locked) return;
     if (focusPickZoomMarker || positionPickTranslationMarker) return;
     setEditingTextObjectId(null);
     event.stopPropagation();
@@ -484,7 +484,7 @@ export function useFrameInteractionController(params: FrameInteractionController
   }
 
   function startObjectResize(event: ReactPointerEvent<HTMLDivElement>, handle: ResizeHandle, objectId?: string) {
-    if (mode !== "interactive" || !canSelectFrameObjects || !selectionPayload?.objects.length) return;
+    if (mode !== "preview" || !canSelectFrameObjects || !selectionPayload?.objects.length) return;
     if (focusPickZoomMarker || positionPickTranslationMarker) return;
     event.preventDefault();
     event.stopPropagation();
@@ -527,7 +527,7 @@ export function useFrameInteractionController(params: FrameInteractionController
   }
 
   function startTextObjectEdit(event: ReactMouseEvent<HTMLDivElement>, object: FrameObject) {
-    if (mode !== "interactive" || object.type !== "text" || !canSelectFrameObjects || object.locked) return;
+    if (mode !== "preview" || object.type !== "text" || !canSelectFrameObjects || object.locked) return;
     event.preventDefault();
     event.stopPropagation();
     setSelectedObjectId(object.id);

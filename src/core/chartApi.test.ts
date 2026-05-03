@@ -113,6 +113,38 @@ describe("defineChart", () => {
     expect(part.objects.find((object) => object.id === "hero-title")?.style.transform).toBe("scale(0.9) translate3d(12px, 20px, 0px) rotate(3deg) scale(1.2)");
   });
 
+  it("inlines sidecar css imports for WebLayer compositions", async () => {
+    const basePart: Part = {
+      id: "prt_css_import_eval",
+      filePath: "clipper/projects/test/compositions/prt_css_import_eval.ts",
+      duration: 4,
+      frame: { width: 1920, height: 1080, style: { background: "#000" } },
+      background: { id: "background", name: "Background", style: { background: "#000" }, elements: [] },
+      objects: [],
+      snapshot: [],
+      motionMarkers: [],
+    };
+
+    const part = await compositionFromSource(basePart, `
+      import { Composition, WebLayer, html } from "@clipper/composition-api";
+      import styles from "./effect.css";
+
+      export const composition = new Composition({
+        duration: 4,
+        frame: { width: 1920, height: 1080, style: { background: "#000" } },
+        render() {
+          return [new WebLayer({ id: "web-effect", bounds: { x: 0, y: 0, width: 100, height: 100 }, css: styles, html: html` + "`<div class=\"effect\"></div>`" + ` })];
+        },
+      });
+    `, async (path) => {
+      expect(path).toBe("clipper/projects/test/compositions/effect.css");
+      return ".effect { opacity: 0.5; }";
+    });
+
+    expect(part.objects[0]?.type).toBe("html");
+    expect(part.objects[0]?.content).toContain("<style>.effect { opacity: 0.5; }</style>");
+  });
+
   it("rejects non-current part exports", async () => {
     const basePart: Part = {
       id: "prt_invalid_export_eval",

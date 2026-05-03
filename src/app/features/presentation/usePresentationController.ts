@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
-import { FRAME_WIDTH } from "../../../core/types";
+import { FRAME_HEIGHT, FRAME_WIDTH } from "../../../core/types";
 import type { Mode } from "../../types";
 import { clamp } from "../../../core/math";
 
@@ -11,9 +11,9 @@ type PresentationControllerOptions = {
   currentSceneTime: number;
   currentSceneTimeRef: RefObject<number>;
   isPlaying: boolean;
+  pausePlaybackAtCurrentTime: () => void;
   sceneDurationSeconds: number;
   scrubToSceneTime: (time: number) => void;
-  setIsPlaying: (isPlaying: boolean) => void;
   updateMode: (mode: Mode) => void;
 };
 
@@ -23,15 +23,15 @@ export function usePresentationController({
   currentSceneTime,
   currentSceneTimeRef,
   isPlaying,
+  pausePlaybackAtCurrentTime,
   sceneDurationSeconds,
   scrubToSceneTime,
-  setIsPlaying,
   updateMode,
 }: PresentationControllerOptions) {
   const [presentationMode, setPresentationMode] = useState<PresentationMode>(null);
   const [presentationControlsVisible, setPresentationControlsVisible] = useState(false);
   const [presentationDisplayTime, setPresentationDisplayTime] = useState(currentSceneTime);
-  const [presentationScale, setPresentationScale] = useState(() => window.innerWidth / FRAME_WIDTH);
+  const [presentationViewport, setPresentationViewport] = useState(() => getPresentationViewport(window.innerWidth));
   const presentationModeRef = useRef<PresentationMode>(presentationMode);
   const presentationControlsTimeoutRef = useRef(0);
 
@@ -46,19 +46,19 @@ export function usePresentationController({
   }, [presentationMode]);
 
   useEffect(() => {
-    function updatePresentationScale() {
+    function updatePresentationViewport() {
       const rect = centerPreviewScrollRef.current?.getBoundingClientRect();
       const width = rect?.width || window.innerWidth;
-      setPresentationScale(width / FRAME_WIDTH);
+      setPresentationViewport(getPresentationViewport(width));
     }
 
-    updatePresentationScale();
-    const resizeObserver = new ResizeObserver(updatePresentationScale);
+    updatePresentationViewport();
+    const resizeObserver = new ResizeObserver(updatePresentationViewport);
     if (centerPreviewScrollRef.current) resizeObserver.observe(centerPreviewScrollRef.current);
-    window.addEventListener("resize", updatePresentationScale);
+    window.addEventListener("resize", updatePresentationViewport);
     return () => {
       resizeObserver.disconnect();
-      window.removeEventListener("resize", updatePresentationScale);
+      window.removeEventListener("resize", updatePresentationViewport);
     };
   }, [centerPreviewScrollRef, presentationMode]);
 
@@ -115,14 +115,14 @@ export function usePresentationController({
   }
 
   async function enterFrameFullscreen() {
-    updateMode("interactive");
+    updateMode("preview");
     setPresentationMode("frame");
     showPresentationControls();
     await setElectronWindowFullscreen(true);
   }
 
   function enterTheaterMode() {
-    updateMode("interactive");
+    updateMode("preview");
     setPresentationMode("theater");
     showPresentationControls();
   }
@@ -136,7 +136,7 @@ export function usePresentationController({
   }
 
   function scrubPresentationTime(nextTime: number) {
-    setIsPlaying(false);
+    pausePlaybackAtCurrentTime();
     setPresentationDisplayTime(clamp(nextTime, 0, sceneDurationSeconds));
     scrubToSceneTime(nextTime);
     showPresentationControls();
@@ -150,8 +150,18 @@ export function usePresentationController({
     presentationDisplayTime,
     presentationMode,
     presentationModeRef,
-    presentationScale,
+    presentationViewport,
     scrubPresentationTime,
     showPresentationControls,
+  };
+}
+
+function getPresentationViewport(width: number) {
+  const fittedWidth = Math.max(width, 1);
+  const scale = fittedWidth / FRAME_WIDTH;
+  return {
+    width: fittedWidth,
+    height: FRAME_HEIGHT * scale,
+    scale,
   };
 }

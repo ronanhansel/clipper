@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createAdjustmentEffectPackage } from "./manifest";
+import { createAdjustmentEffectPackage, createTransitionEffectPackage } from "./manifest";
 
 describe("effect manifest parsing", () => {
   it("parses explicit groups and derives the slash group path", () => {
@@ -33,5 +33,19 @@ defaultParams: {}
 
     expect(effect.groups).toEqual(["Motion", "Camera", "Zoom"]);
     expect(effect.group).toBe("Motion / Camera / Zoom");
+  });
+
+  it("defaults transition package layers to ease in-out", () => {
+    const effect = createTransitionEffectPackage(`
+id: test.transition-ease
+category: transition
+name: Transition Ease
+label: Transition Ease
+group: Transitions
+defaultDuration: 2
+defaultParams: {}
+`);
+
+    expect(effect.createDefaultLayer({ id: "transition-1", start: 0, duration: 2, midPoint: 1 }).effect.params?.ease).toBe("easeInOut");
   });
 });

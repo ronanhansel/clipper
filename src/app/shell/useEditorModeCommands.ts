@@ -15,11 +15,11 @@ export function useEditorModeCommands({ modeRef, timelineModeRef, setMode, setTi
   function updateTimelineMode(nextMode: TimelineMode) {
     timelineModeRef.current = nextMode;
     setTimelineMode(nextMode);
-    if (nextMode === "compose" && modeRef.current !== "interactive") {
-      modeRef.current = "interactive";
-      setMode("interactive");
+    if (nextMode === "compose" && modeRef.current !== "preview") {
+      modeRef.current = "preview";
+      setMode("preview");
     }
-    updateEditorState((state) => ({ ...state, timelineMode: nextMode, mode: nextMode === "compose" ? "interactive" : state.mode }));
+    updateEditorState((state) => ({ ...state, timelineMode: nextMode, mode: nextMode === "compose" ? "preview" : state.mode }));
   }
 
   function updateMode(nextMode: Mode) {

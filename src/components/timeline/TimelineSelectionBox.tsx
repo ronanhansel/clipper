@@ -13,10 +13,10 @@ export function TimelineSelectionBox({ boxRef, drag }: { boxRef: RefObject<HTMLD
 }
 
 export function updateTimelineSelectionBoxElement(element: HTMLDivElement, drag: TimelineSelectionDrag, rect: DOMRect) {
-  const startX = clamp(drag.startX - rect.left, 0, rect.width);
-  const currentX = clamp(drag.currentX - rect.left, 0, rect.width);
-  const startY = drag.startY === undefined ? 0 : clamp(drag.startY - rect.top, 0, rect.height);
-  const currentY = drag.currentY === undefined ? rect.height : clamp(drag.currentY - rect.top, 0, rect.height);
+  const startX = clamp(drag.startContentX ?? drag.startX - rect.left, 0, rect.width);
+  const currentX = clamp(drag.currentContentX ?? drag.currentX - rect.left, 0, rect.width);
+  const startY = drag.startY === undefined ? 0 : clamp(drag.startContentY ?? drag.startY - rect.top, 0, rect.height);
+  const currentY = drag.currentY === undefined ? rect.height : clamp(drag.currentContentY ?? drag.currentY - rect.top, 0, rect.height);
   element.style.display = Math.max(Math.abs(currentX - startX), Math.abs(currentY - startY)) >= 4 ? "block" : "none";
   element.style.transform = `translate3d(${Math.min(startX, currentX)}px, ${Math.min(startY, currentY)}px, 0)`;
   element.style.width = `${Math.abs(currentX - startX)}px`;

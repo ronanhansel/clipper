@@ -39,6 +39,7 @@ type UseTimelineClipboardCommandsInput = {
   selectedTransitionLayers: Array<{ layerId: string }>;
   timeline: Part[];
   deleteCompositionsFromTimeline: (compositionIds: string[]) => void;
+  openCompositionInEditor: (compositionId: string) => void;
   selectAdjustmentLayer: (layerId: string) => void;
   selectPart: (partId: string) => void;
   selectMotionMarker: (partId: string, markerId: string) => void;
@@ -138,6 +139,7 @@ export function useTimelineClipboardCommands({
   selectedTransitionLayers,
   timeline,
   deleteCompositionsFromTimeline,
+  openCompositionInEditor,
   selectAdjustmentLayer,
   selectPart,
   selectMotionMarker,
@@ -470,6 +472,7 @@ export function useTimelineClipboardCommands({
           deleteTimelineClipboardNodes(menuClipboard);
         } },
         { label: "Paste", action: () => { pasteTimelineNodesAt(target.time, target.compositionLayerId); }, disabled: !timelineNodeClipboardRef.current },
+        { label: "Open in editor", action: () => { if (targetCompositionId) openCompositionInEditor(targetCompositionId); }, disabled: target.kind !== "part" || !targetCompositionId },
         { label: "Find media in project", action: () => { if (targetCompositionId && targetFileName) requestFileManagerFindMedia({ compositionId: targetCompositionId, fileName: targetFileName }); }, disabled: target.kind !== "part" || !targetPart?.sourceMissing },
         { label: "Delete", danger: true, action: () => {
           if (target.kind === "part") deleteCompositionsFromTimeline(targetAlreadySelected ? selectedParts.map((selection) => selection.partId) : [target.partId]);

@@ -264,17 +264,17 @@ export function usePlaybackController({
   }
 
   function stepSceneTime(delta: number) {
-    setIsPlaying(false);
+    pausePlaybackAtCurrentTime();
     scrubToSceneTime(currentSceneTimeRef.current + delta);
   }
 
   function jumpToStart() {
-    setIsPlaying(false);
+    pausePlaybackAtCurrentTime();
     scrubToSceneTime(playbackStart);
   }
 
   function jumpToNextPart() {
-    setIsPlaying(false);
+    pausePlaybackAtCurrentTime();
     if (useLocalPlaybackLabels) {
       scrubToSceneTime(playbackEnd);
       return;
@@ -285,7 +285,7 @@ export function usePlaybackController({
   }
 
   function jumpToEnd() {
-    setIsPlaying(false);
+    pausePlaybackAtCurrentTime();
     scrubToSceneTime(playbackEnd);
   }
 
@@ -385,9 +385,7 @@ export function usePlaybackController({
       }
 
       if (nextTime >= playbackEnd) {
-        commitPlayheadEditorState(nextTime);
-        updatePlaybackClock(null);
-        setIsPlaying(false);
+        pausePlaybackAtCurrentTime();
         return;
       }
 
@@ -405,9 +403,9 @@ export function usePlaybackController({
 
   useEffect(() => {
     if (isPlaying && currentSceneTime >= playbackEnd) {
-      setIsPlaying(false);
+      pausePlaybackAtCurrentTime();
     }
-  }, [currentSceneTime, isPlaying, playbackEnd, setIsPlaying]);
+  }, [currentSceneTime, isPlaying, playbackEnd]);
 
   return {
     commitPlayheadEditorState,

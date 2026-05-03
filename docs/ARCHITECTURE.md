@@ -10,7 +10,7 @@ Clipper is a desktop-first Electron and Vite editor for TypeScript-authored moti
 - `src/lib`: small generic utilities that are not Clipper-domain specific.
 - `electron`: desktop host process, preload bridges, filesystem/export integration, and command-line entry points.
 - `clipper/projects`: runtime project data and author-authored part sources.
-- `build/[version]`: version plans and memory files for future agents.
+- `agent-log/[version]`: version plans and memory files for future agents.
 
 ## Boundary Rules
 

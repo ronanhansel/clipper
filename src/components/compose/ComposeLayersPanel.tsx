@@ -3,6 +3,7 @@ import type { MouseEvent, PointerEvent, ReactNode, Ref } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Tree, type CursorProps, type DragPreviewProps, type MoveHandler, type NodeApi, type NodeRendererProps, type RowRendererProps, type TreeApi } from "react-arborist";
 import type { FrameObject, Part } from "../../core/types";
+import { useDragAutoScroll } from "../../lib/useDragAutoScroll";
 
 const composeLayerRowHeight = 32;
 const composeLayerIndent = 18;
@@ -27,10 +28,15 @@ export function ComposeLayersPanel({ part, selectedObjectIds, onSelectObjects, o
   const [marquee, setMarquee] = useState<{ startX: number; startY: number; currentX: number; currentY: number } | null>(null);
   const treeRef = useRef<HTMLDivElement | null>(null);
   const arboristTreeRef = useRef<TreeApi<ComposeLayerNode> | undefined>(undefined);
-  const marqueeSelectionRef = useRef<{ startX: number; startY: number; pointerId: number; active: boolean } | null>(null);
+  const marqueeSelectionRef = useRef<{ startX: number; startY: number; pointerId: number; active: boolean; startScrollTop: number } | null>(null);
+  const marqueePointerRef = useRef<{ clientX: number; clientY: number } | null>(null);
   const previousSelectedObjectIdsRef = useRef<string[]>(selectedObjectIds);
   const treeData = useMemo(() => buildComposeLayerTree(part), [part]);
   const treeHeight = Math.max(composeLayerMinDropHeight, countComposeLayerNodes(treeData) * composeLayerRowHeight);
+  const { updateDragAutoScroll: updateMarqueeAutoScroll, stopDragAutoScroll: stopMarqueeAutoScroll } = useDragAutoScroll({
+    getScrollElement: () => getComposeLayersScrollElement(treeRef.current),
+    axis: "y",
+  });
 
   useEffect(() => {
     const previousSelectedObjectIds = previousSelectedObjectIdsRef.current;
@@ -122,10 +128,14 @@ export function ComposeLayersPanel({ part, selectedObjectIds, onSelectObjects, o
     const start = marqueeSelectionRef.current;
     const api = arboristTreeRef.current;
     if (!start || !api) return;
+    const scrollElement = getComposeLayersScrollElement(treeRef.current);
+    const scrollTop = scrollElement?.scrollTop ?? 0;
+    const startContentY = start.startY + start.startScrollTop;
+    const currentContentY = currentY + scrollTop;
     const left = Math.min(start.startX, currentX);
     const right = Math.max(start.startX, currentX);
-    const top = Math.min(start.startY, currentY);
-    const bottom = Math.max(start.startY, currentY);
+    const top = Math.min(startContentY, currentContentY);
+    const bottom = Math.max(startContentY, currentContentY);
     const nextNodes = api.visibleNodes.filter((node) => {
       if (node.rowIndex === null) return false;
       const rowTop = node.rowIndex * composeLayerRowHeight;
@@ -143,21 +153,36 @@ export function ComposeLayersPanel({ part, selectedObjectIds, onSelectObjects, o
     if (!rect) return;
     const startX = event.clientX - rect.left;
     const startY = event.clientY - rect.top;
+    const startScrollTop = getComposeLayersScrollElement(treeRef.current)?.scrollTop ?? 0;
     selectLayerNodes([]);
-    marqueeSelectionRef.current = { startX, startY, pointerId: event.pointerId, active: false };
+    marqueeSelectionRef.current = { startX, startY, pointerId: event.pointerId, active: false, startScrollTop };
     event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function updateMarqueeFromClient(clientX: number, clientY: number) {
+    const start = marqueeSelectionRef.current;
+    const rect = treeRef.current?.getBoundingClientRect();
+    if (!start || !rect) return;
+    const currentX = clientX - rect.left;
+    const currentY = clientY - rect.top;
+    if (!start.active && Math.hypot(currentX - start.startX, currentY - start.startY) < 4) return;
+    const scrollTop = getComposeLayersScrollElement(treeRef.current)?.scrollTop ?? 0;
+    start.active = true;
+    setMarquee({ startX: start.startX, startY: start.startY + start.startScrollTop - scrollTop, currentX, currentY });
+    updateMarqueeSelection(currentX, currentY);
   }
 
   function updateMarquee(event: PointerEvent<HTMLDivElement>) {
     const start = marqueeSelectionRef.current;
-    const rect = treeRef.current?.getBoundingClientRect();
-    if (!start || start.pointerId !== event.pointerId || !rect) return;
-    const currentX = event.clientX - rect.left;
-    const currentY = event.clientY - rect.top;
-    if (!start.active && Math.hypot(currentX - start.startX, currentY - start.startY) < 4) return;
-    start.active = true;
-    setMarquee({ startX: start.startX, startY: start.startY, currentX, currentY });
-    updateMarqueeSelection(currentX, currentY);
+    if (!start || start.pointerId !== event.pointerId) return;
+    marqueePointerRef.current = { clientX: event.clientX, clientY: event.clientY };
+    updateMarqueeFromClient(event.clientX, event.clientY);
+    if (start.active) {
+      updateMarqueeAutoScroll(event.clientX, event.clientY, () => {
+        const pointer = marqueePointerRef.current;
+        if (pointer) updateMarqueeFromClient(pointer.clientX, pointer.clientY);
+      });
+    }
   }
 
   function finishMarquee(event: PointerEvent<HTMLDivElement>) {
@@ -165,6 +190,8 @@ export function ComposeLayersPanel({ part, selectedObjectIds, onSelectObjects, o
     if (!start || start.pointerId !== event.pointerId) return;
     const wasActive = start.active;
     marqueeSelectionRef.current = null;
+    marqueePointerRef.current = null;
+    stopMarqueeAutoScroll();
     setMarquee(null);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
     if (!wasActive) selectLayerNodes([]);
@@ -179,7 +206,7 @@ export function ComposeLayersPanel({ part, selectedObjectIds, onSelectObjects, o
       <div className="mb-3 grid gap-1.5">
         <h2 className="text-[13px] font-extrabold tracking-normal text-[#9b9da7]">Layers</h2>
       </div>
-      <div data-compose-layers-panel className="min-h-0 flex-1 overflow-hidden rounded-[14px] border border-[#2d313b] bg-[#111319]/72 p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
+      <div data-compose-layers-panel className="timeline-scrollbar min-h-0 flex-1 overflow-auto rounded-[14px] border border-[#2d313b] bg-[#111319]/72 p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
         <div ref={treeRef} className="relative" onPointerDown={startMarquee} onPointerMove={updateMarquee} onPointerUp={finishMarquee} onPointerCancel={finishMarquee}>
           {marquee ? <ComposeLayerMarquee marquee={marquee} /> : null}
         <Tree<ComposeLayerNode>
@@ -274,6 +301,10 @@ function ComposeLayerMarquee({ marquee }: { marquee: { startX: number; startY: n
 
 function isComposeLayerInteractiveTarget(target: HTMLElement) {
   return Boolean(target.closest("button,input,textarea,select,[contenteditable='true'],[data-compose-layer-row='true']"));
+}
+
+function getComposeLayersScrollElement(tree: HTMLElement | null) {
+  return tree?.closest<HTMLElement>("[data-compose-layers-panel]") ?? null;
 }
 
 function LayerIcon({ node }: { node: ComposeLayerNode }) {

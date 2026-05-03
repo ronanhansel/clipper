@@ -67,6 +67,18 @@ describe("project normalization", () => {
     expect(normalized.timelines?.[0].motionMarkers?.[0]).toMatchObject({ id: "zoom_1", kind: "zoom", effectId: "clipper.motion.zoom" });
   });
 
+  it("normalizes composition folder roots without preserving empty compositions or file-manager prefixes", () => {
+    const normalized = normalizeProject({
+      ...projectWithComposition(),
+      timelines: [],
+      compositionFolders: ["compositions", "file-manager/compositions/cards"],
+      compositionLibrary: [{ ...composition, id: "compositions/title.composition.ts", filePath: "compositions/title.composition.ts" }],
+      compositionSources: { "compositions/title.composition.ts": "source" },
+    });
+
+    expect(normalized.compositionFolders).toEqual(["compositions/cards"]);
+  });
+
   it("preserves an intentionally empty timeline instead of restoring old clips", () => {
     const normalized = normalizeProject({
       ...projectWithComposition(),
@@ -100,6 +112,47 @@ describe("project normalization", () => {
     });
 
     expect(normalized.editorState?.timelineMode).toBe("compose");
+  });
+
+  it("normalizes legacy editor modes to preview/editor values", () => {
+    expect(normalizeProject({
+      ...projectWithComposition(),
+      editorState: { timeline: { displacement: 0, zoom: 1 }, timelineMode: "compose", mode: "interactive" },
+    }).editorState?.mode).toBe("preview");
+
+    expect(normalizeProject({
+      ...projectWithComposition(),
+      editorState: { timeline: { displacement: 0, zoom: 1 }, timelineMode: "compose", mode: "code" },
+    }).editorState?.mode).toBe("editor");
+  });
+
+  it("normalizes persisted editor sessions without runtime source data", () => {
+    const normalized = normalizeProject({
+      ...projectWithComposition(),
+      editorState: {
+        timeline: { displacement: 0, zoom: 1 },
+        timelineMode: "compose",
+        editorSession: {
+          tabs: [
+            { id: composition.id, filePath: composition.filePath, language: "typescript", source: "runtime-only", isComposition: true },
+            { id: "missing", filePath: "compositions/missing.ts", language: "typescript", isComposition: true },
+            { id: "notes/readme.md", filePath: "notes/readme.md", language: "markdown", unsupportedReason: "Read-only", isPinned: false },
+            { id: "notes/readme.md", filePath: "notes/readme.md", language: "markdown" },
+            { id: "plain", filePath: "notes/plain.txt", language: "" },
+          ] as Array<{ id: string; filePath: string; language: string; source?: string; unsupportedReason?: string; isComposition?: boolean }>,
+          activeTabId: "missing",
+        },
+      },
+    });
+
+    expect(normalized.editorState?.editorSession).toEqual({
+      tabs: [
+        { id: composition.id, filePath: composition.filePath, language: "typescript", isComposition: true, isPinned: true },
+        { id: "notes/readme.md", filePath: "notes/readme.md", language: "markdown", unsupportedReason: "Read-only", isPinned: true },
+        { id: "plain", filePath: "notes/plain.txt", language: "plaintext", isPinned: true },
+      ],
+      activeTabId: composition.id,
+    });
   });
 
   it("serializes timeline-level motion markers independently of compositions", () => {
@@ -183,6 +236,32 @@ describe("project normalization", () => {
     expect(layers.adjustmentLayers).toEqual(defaultTimelineLayerState.adjustmentLayers);
     expect(layers.motionLayers).toEqual(defaultTimelineLayerState.motionLayers);
     expect(layers.transitionLayers).toEqual(defaultTimelineLayerState.transitionLayers);
+  });
+
+  it("keeps only one top transition row and remaps transition markers to it", () => {
+    const normalized = normalizeProject({
+      ...projectWithComposition(),
+      timelines: [{
+        id: "tl_main",
+        filePath: "timelines/tl_main.timeline.json",
+        clips: [],
+        timelineLayers: {
+          compositionLayers: [{ id: "comp" }],
+          adjustmentLayers: [{ id: "adjust" }],
+          motionLayers: [{ id: "motion", kind: "empty" }],
+          transitionLayers: [{ id: "top-transition", name: "Top Transition", hidden: true }, { id: "old-transition", name: "Old Transition" }],
+        },
+        transitionLayers: [
+          { id: "transition-a", name: "A", layerId: "old-transition", start: 0, duration: 2, midPoint: 1, effect: { effectId: "clipper.transition.swipe", params: {} } },
+          { id: "transition-b", name: "B", layerId: "top-transition", start: 3, duration: 2, midPoint: 1, effect: { effectId: "clipper.transition.fade", params: {} } },
+        ],
+        settings: {},
+      }],
+    });
+
+    expect(normalized.timelines?.[0].timelineLayers?.transitionLayers).toEqual([{ id: "top-transition", name: "Top Transition", hidden: undefined, locked: undefined }]);
+    expect(normalized.timelines?.[0].transitionLayers?.map((layer) => layer.layerId)).toEqual(["top-transition", "top-transition"]);
+    expect(normalized.scenes[0].transitionLayers?.map((layer) => layer.layerId)).toEqual(["top-transition", "top-transition"]);
   });
 
   it("creates independent default timeline layer objects for new timelines", () => {

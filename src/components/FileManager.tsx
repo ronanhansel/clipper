@@ -323,7 +323,7 @@ function UnifiedFileManagerTree() {
   }, [hideDropCursor, treeHeight, visibleRowCount]);
 
   const applyTreeMove = useCallback((dragIds: string[], parentId: string | null, index: number) => {
-    const nextTree = moveFileTreeNodes(latestTreeRef.current, dragIds, parentId, index);
+    const nextTree = moveFileTreeNodes(latestTreeRef.current, dragIds, parentId, index, true);
     latestTreeRef.current = nextTree;
     orderReferenceTreeRef.current = nextTree;
     setTree(nextTree);
@@ -498,15 +498,6 @@ function UnifiedFileManagerTree() {
   }, []);
 
   useEffect(() => {
-    function updateCompositionLanePreview(event: Event) {
-      setCompositionLanePreviewActive(Boolean((event as CustomEvent<PointerDragPreviewDetail>).detail?.active));
-    }
-
-    window.addEventListener(compositionDragPreviewEvent, updateCompositionLanePreview);
-    return () => window.removeEventListener(compositionDragPreviewEvent, updateCompositionLanePreview);
-  }, []);
-
-  useEffect(() => {
     function onNativeDragEnd() {
       cleanupExternalCompositionDrag("cancel");
     }
@@ -516,7 +507,7 @@ function UnifiedFileManagerTree() {
       if (!node) return;
       if (!externalDragRef.current && isDragEventInsideElement(event, treeRef.current)) return;
       const nextMouse = { x: event.clientX, y: event.clientY };
-      
+
       if (node.kind === "composition") {
         ensureExternalCompositionDrag(node, nextMouse, event.shiftKey);
         scheduleExternalCompositionDragMove(nextMouse, event.shiftKey);
@@ -545,6 +536,8 @@ function UnifiedFileManagerTree() {
         }
         event.preventDefault();
         event.stopPropagation();
+      } else if (node.kind === "timeline") {
+        nativeTreeRef.current?.endDrag();
       } else {
         nativeTreeRef.current?.endDrag();
         event.preventDefault();
@@ -1039,16 +1032,54 @@ function canDropFileTreeTarget(tree: FileManagerTreeNode[], dragIds: string[], p
 }
 
 export function moveFileTreeNodesForTest(nodes: FileManagerTreeNode[], dragIds: string[], parentId: string | null, index: number) {
-  return moveFileTreeNodes(nodes, dragIds, parentId, index);
+  return moveFileTreeNodes(nodes, dragIds, parentId, index, true);
 }
 
-function moveFileTreeNodes(nodes: FileManagerTreeNode[], dragIds: string[], parentId: string | null, index: number): FileManagerTreeNode[] {
+export function createFileManagerTreeSnapshotForTest(nodes: FileManagerTreeNode[], rootPath: string, openState?: Record<string, boolean>) {
+  return createFileManagerTreeSnapshot(nodes, rootPath, openState);
+}
+
+function moveFileTreeNodes(nodes: FileManagerTreeNode[], dragIds: string[], parentId: string | null, index: number, renameOnCollision = false): FileManagerTreeNode[] {
   const dragIdSet = new Set(dragIds);
   const removed: FileManagerTreeNode[] = [];
   const siblingIds = getFileTreeChildren(nodes, parentId).map((node) => node.id);
   const withoutDragged = removeFileTreeNodesForMove(nodes, dragIdSet, removed);
   const insertionIndex = getFileTreeMoveInsertionIndex(siblingIds, dragIdSet, index);
-  return insertFileTreeNodesForMove(withoutDragged, parentId, insertionIndex, removed);
+  const insertNodes = renameOnCollision ? renameFileTreeNodesForDestination(removed, getFileTreeChildren(withoutDragged, parentId)) : removed;
+  return insertFileTreeNodesForMove(withoutDragged, parentId, insertionIndex, insertNodes);
+}
+
+function renameFileTreeNodesForDestination(nodes: FileManagerTreeNode[], siblings: FileManagerTreeNode[]): FileManagerTreeNode[] {
+  const siblingNames = new Set(siblings.map(getFileTreeNodeCollisionName).filter(Boolean));
+  return nodes.map((node) => renameFileTreeNodeForDestination(node, siblingNames));
+}
+
+function renameFileTreeNodeForDestination(node: FileManagerTreeNode, siblingNames: Set<string>): FileManagerTreeNode {
+  if (node.kind === "project-folder") {
+    const name = nextAvailableFileTreeName(node.name, siblingNames);
+    return { ...node, name };
+  }
+  if (node.kind === "asset-folder") {
+    const name = nextAvailableFileTreeName(node.asset.name, siblingNames);
+    return { ...node, name, asset: { ...node.asset, name } };
+  }
+  if (node.kind === "asset-file") {
+    const name = nextAvailableFileTreeName(node.asset.name, siblingNames);
+    return { ...node, name, asset: { ...node.asset, name } };
+  }
+  if (node.kind === "composition") {
+    const fileName = nextAvailableFileTreeName(getFileName(node.composition.filePath), siblingNames);
+    return fileName === getFileName(node.composition.filePath) ? node : { ...node, name: fileName, composition: { ...node.composition, filePath: replaceFileName(node.composition.filePath, fileName) } };
+  }
+  const fileName = nextAvailableFileTreeName(getFileName(node.timeline.filePath || `${node.timeline.id}.timeline.json`), siblingNames);
+  return fileName === getFileName(node.timeline.filePath || `${node.timeline.id}.timeline.json`) ? node : { ...node, name: fileName, timeline: { ...node.timeline, filePath: replaceFileName(node.timeline.filePath || `${node.timeline.id}.timeline.json`, fileName) } };
+}
+
+function getFileTreeNodeCollisionName(node: FileManagerTreeNode) {
+  if (node.kind === "project-folder") return node.name;
+  if (node.kind === "asset-file" || node.kind === "asset-folder") return node.asset.name;
+  if (node.kind === "composition") return getFileName(node.composition.filePath);
+  return getFileName(node.timeline.filePath || `${node.timeline.id}.timeline.json`);
 }
 
 export function getFileTreeMoveInsertionIndex(siblingIds: string[], dragIds: ReadonlySet<string>, rawIndex: number) {
@@ -1078,9 +1109,11 @@ function insertFileTreeNodesForMove(nodes: FileManagerTreeNode[], parentId: stri
 
 function createFileManagerTreeSnapshot(nodes: FileManagerTreeNode[], rootPath: string, openState?: Record<string, boolean>): FileManagerTreeSnapshot {
   const snapshot: FileManagerTreeSnapshot = { assets: [], compositionFilePaths: {}, compositionFolders: [], compositionOrder: [], fileManagerState: createFileManagerState(nodes, openState), timelineFilePaths: {}, timelineOrder: [] };
+  const assetSiblingNames = new Set<string>();
+  const projectSiblingNames = new Set<string>();
   for (const node of nodes) {
-    if (node.kind === "asset-file" || node.kind === "asset-folder") snapshot.assets.push(assetFromFileTreeNode(node));
-    else collectProjectTreeSnapshot(node, rootPath, snapshot);
+    if (node.kind === "asset-file" || node.kind === "asset-folder") snapshot.assets.push(assetFromFileTreeNode(node, assetSiblingNames));
+    else collectProjectTreeSnapshot(node, rootPath, snapshot, projectSiblingNames);
   }
   return snapshot;
 }
@@ -1094,27 +1127,54 @@ function fileTreeNodeToStateNode(node: FileManagerTreeNode): FileManagerStateNod
   return { id: node.id };
 }
 
-function collectProjectTreeSnapshot(node: FileManagerTreeNode, parentPath: string, snapshot: FileManagerTreeSnapshot) {
+function collectProjectTreeSnapshot(node: FileManagerTreeNode, parentPath: string, snapshot: FileManagerTreeSnapshot, siblingNames: Set<string>) {
   if (node.kind === "project-folder") {
-    const folderPath = `${parentPath}/${node.name}`;
+    const folderName = nextAvailableFileTreeName(node.name, siblingNames);
+    const folderPath = `${parentPath}/${folderName}`;
     snapshot.compositionFolders.push(folderPath);
-    for (const child of node.children) collectProjectTreeSnapshot(child, folderPath, snapshot);
+    const childNames = new Set<string>();
+    for (const child of node.children) collectProjectTreeSnapshot(child, folderPath, snapshot, childNames);
     return;
   }
   if (node.kind === "composition") {
+    const fileName = nextAvailableFileTreeName(getFileName(node.composition.filePath), siblingNames);
     snapshot.compositionOrder.push(node.composition.id);
-    snapshot.compositionFilePaths[node.composition.id] = `${parentPath}/${getFileName(node.composition.filePath)}`;
+    snapshot.compositionFilePaths[node.composition.id] = `${parentPath}/${fileName}`;
     return;
   }
   if (node.kind === "timeline") {
+    const fileName = nextAvailableFileTreeName(getFileName(node.timeline.filePath || `${node.timeline.id}.timeline.json`), siblingNames);
     snapshot.timelineOrder.push(node.timeline.id);
-    snapshot.timelineFilePaths[node.timeline.id] = `${parentPath}/${getFileName(node.timeline.filePath || `${node.timeline.id}.timeline.json`)}`;
+    snapshot.timelineFilePaths[node.timeline.id] = `${parentPath}/${fileName}`;
   }
 }
 
-function assetFromFileTreeNode(node: Extract<FileManagerTreeNode, { kind: "asset-file" | "asset-folder" }>): AssetItem {
-  if (node.kind === "asset-file") return node.asset;
-  return { ...node.asset, children: node.children.flatMap((child) => child.kind === "asset-file" || child.kind === "asset-folder" ? [assetFromFileTreeNode(child)] : []) };
+function nextAvailableFileTreeName(fileName: string, siblingNames: Set<string>) {
+  const parsed = splitFileTreeName(fileName);
+  let nextName = fileName;
+  let index = 2;
+  while (siblingNames.has(nextName)) {
+    nextName = `${parsed.base} ${index}${parsed.extension}`;
+    index += 1;
+  }
+  siblingNames.add(nextName);
+  return nextName;
+}
+
+function splitFileTreeName(fileName: string) {
+  const semanticSuffixes = [".composition.ts", ".composition.json", ".timeline.ts", ".timeline.json"];
+  for (const suffix of semanticSuffixes) {
+    if (fileName.endsWith(suffix)) return { base: fileName.slice(0, -suffix.length), extension: suffix };
+  }
+  const extensionIndex = fileName.lastIndexOf(".");
+  return extensionIndex > 0 ? { base: fileName.slice(0, extensionIndex), extension: fileName.slice(extensionIndex) } : { base: fileName, extension: "" };
+}
+
+function assetFromFileTreeNode(node: Extract<FileManagerTreeNode, { kind: "asset-file" | "asset-folder" }>, siblingNames: Set<string>): AssetItem {
+  const name = nextAvailableFileTreeName(node.asset.name, siblingNames);
+  if (node.kind === "asset-file") return { ...node.asset, name };
+  const childNames = new Set<string>();
+  return { ...node.asset, name, children: node.children.flatMap((child) => child.kind === "asset-file" || child.kind === "asset-folder" ? [assetFromFileTreeNode(child, childNames)] : []) };
 }
 
 function syncFileTreeToSavedState(rawNodes: FileManagerTreeNode[], stateNodes?: FileManagerStateNode[]): FileManagerTreeNode[] {
@@ -1220,6 +1280,11 @@ function getDirectoryPath(relativePath: string) {
 
 function getFileName(path: string) {
   return path.slice(path.lastIndexOf("/") + 1);
+}
+
+function replaceFileName(path: string, fileName: string) {
+  const directory = getDirectoryPath(path);
+  return directory ? `${directory}/${fileName}` : fileName;
 }
 
 function relativeCompositionPath(filePath: string, rootPath: string) {

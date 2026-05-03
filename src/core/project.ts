@@ -2,7 +2,7 @@ import { roundTwo, sanitizeProjectNumbers } from "./math";
 import { getCanonicalMotionMarkers, getMotionMarkerViews, motionBlocksToMotionMarkers, withCanonicalMotionMarkers } from "./motionEffects";
 import { adjustmentEffectPackages, normalizeAdjustmentEffectId } from "./effects/registry";
 import { getExecutableAdjustmentLayers } from "./timeline";
-import type { AdjustmentLayer, AssetItem, CodeViewportState, ComposeLayoutState, CompositionClip, CompositionDocument, EditorLayoutState, EditorState, EffectsPanelState, FileManagerState, PartFrame, PreviewViewportState, ProjectManifest, Scene, TimelineDocument, TimelineLayerState, TimelineMode, TimelineViewportState } from "./types";
+import type { AdjustmentLayer, AssetItem, CodeViewportState, ComposeLayoutState, CompositionClip, CompositionDocument, EditorLayoutState, EditorSessionState, EditorState, EffectsPanelState, FileManagerState, PartFrame, PersistedEditorTab, PreviewViewportState, ProjectManifest, Scene, TimelineDocument, TimelineLayerState, TimelineMode, TimelineViewportState, TransitionLayer } from "./types";
 import { getDisplayNameFromPath } from "./fileNames";
 
 export const defaultTimelineViewportState: TimelineViewportState = { displacement: 0, zoom: 1 };
@@ -80,6 +80,10 @@ function normalizeTimelineMode(mode: unknown): TimelineMode {
   return mode === "composition" ? "composition" : "compose";
 }
 
+function normalizeEditorMode(mode: unknown): "preview" | "editor" {
+  return mode === "editor" || mode === "code" ? "editor" : "preview";
+}
+
 export function withRequiredTimelineLayerTypes(state: TimelineLayerState | undefined): TimelineLayerState {
   const defaults = createDefaultTimelineLayerState();
   const next = { ...(state ?? {}) };
@@ -109,12 +113,12 @@ function normalizeTimelineLayerState(state: TimelineLayerState | undefined): Tim
     return [{ id: layer.id, name: layer.name || undefined, hidden: layer.hidden || undefined, locked: layer.locked || undefined }];
   });
   const motionLayers = layerState.motionLayers!.filter((layer) => layer.kind === "empty" || layer.kind === "motion");
-  const sourceTransitionLayers = layerState.transitionLayers!;
+  const sourceTransitionLayers = layerState.transitionLayers!.slice(0, 1);
   const seenTransitionLayerIds = new Set<string>();
   const transitionLayers = sourceTransitionLayers.flatMap((layer) => {
     if (!layer.id || seenTransitionLayerIds.has(layer.id)) return [];
     seenTransitionLayerIds.add(layer.id);
-    return [{ id: layer.id, name: layer.name || undefined, hidden: layer.hidden || undefined, locked: layer.locked || undefined }];
+    return [{ id: layer.id, name: layer.name || undefined, hidden: undefined, locked: layer.locked || undefined }];
   });
   const rowHeights = normalizeTimelineLayerRowHeights(state?.rowHeights);
   return {
@@ -183,6 +187,7 @@ function normalizeComposition(composition: CompositionClip): CompositionClip {
     start: typeof rest.start === "number" && Number.isFinite(rest.start) ? roundTwo(Math.max(rest.start, 0)) : undefined,
     layerId: rest.layerId || undefined,
     sourceMissing: rest.sourceMissing || undefined,
+    compositionError: typeof rest.compositionError === "string" && rest.compositionError ? rest.compositionError : undefined,
     background: {
       ...rest.background,
       stretchToElements: rest.background.stretchToElements || undefined,
@@ -259,6 +264,8 @@ function getProjectTimelines(project: ProjectManifest): TimelineDocument[] {
   const timelines = project.timelines ?? [];
   const legacyTimelineLayers = project.editorState?.timelineLayers ? normalizeTimelineLayerState(project.editorState.timelineLayers) : undefined;
   return timelines.map((timeline) => {
+    const timelineLayers = normalizeTimelineLayerState(timeline.timelineLayers ?? legacyTimelineLayers);
+    const transitionLayerId = timelineLayers.transitionLayers?.[0]?.id ?? defaultTimelineLayerState.transitionLayers![0].id;
     const clipMotion = timeline.clips.flatMap((clip) => {
       const motionMarkers = getCanonicalMotionMarkers(clip);
       const clipStart = roundTwo(Math.max(clip.start ?? 0, 0));
@@ -280,8 +287,9 @@ function getProjectTimelines(project: ProjectManifest): TimelineDocument[] {
         };
       }),
       adjustmentLayers: normalizeAdjustmentLayers(rest.adjustmentLayers),
+      transitionLayers: normalizeTransitionLayers(rest.transitionLayers, transitionLayerId),
       motionMarkers: timelineMotionMarkers,
-      timelineLayers: normalizeTimelineLayerState(rest.timelineLayers ?? legacyTimelineLayers),
+      timelineLayers,
       settings: rest.settings ?? {},
     };
   });
@@ -318,12 +326,20 @@ function pruneStaleAdjustmentLayers(project: ProjectManifest): ProjectManifest {
 }
 
 function getCompositionFolders(project: ProjectManifest, library: CompositionClip[]) {
-  const folderPaths = new Set(project.compositionFolders ?? []);
+  const folderPaths = new Set((project.compositionFolders ?? []).map(normalizeCompositionFolderPath).filter(Boolean));
   for (const composition of library) {
     const slashIndex = composition.filePath.lastIndexOf("/");
-    if (slashIndex > 0) folderPaths.add(composition.filePath.slice(0, slashIndex));
+    if (slashIndex > 0) {
+      const folderPath = normalizeCompositionFolderPath(composition.filePath.slice(0, slashIndex));
+      if (folderPath) folderPaths.add(folderPath);
+    }
   }
   return [...folderPaths].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+}
+
+function normalizeCompositionFolderPath(folderPath: string) {
+  const normalized = folderPath.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "").replace(/^file-manager\//, "");
+  return normalized === "compositions" ? "" : normalized;
 }
 
 function normalizeCompositionSources(sources: Record<string, string> | undefined) {
@@ -346,14 +362,39 @@ function normalizeEffectsPanelState(state: EffectsPanelState | undefined): Effec
   };
 }
 
-function normalizeProjectEditorState(project: ProjectManifest, timelines: TimelineDocument[], timelineMode: TimelineMode, selectedSceneId: string | undefined, selectedMotionMarker: { partId: string; markerId: string } | null, selectedPartId: string | undefined) {
+function normalizeEditorSessionState(state: EditorSessionState | undefined, compositionLibrary: CompositionClip[]): EditorSessionState | undefined {
+  if (!state || !Array.isArray(state.tabs)) return undefined;
+  const compositionIds = new Set(compositionLibrary.map((composition) => composition.id));
+  const compositionPaths = new Set(compositionLibrary.map((composition) => composition.filePath));
+  const seen = new Set<string>();
+  const tabs = state.tabs.flatMap((tab) => {
+    if (!tab || typeof tab.id !== "string" || typeof tab.filePath !== "string" || seen.has(tab.id)) return [];
+    if (tab.isComposition && !compositionIds.has(tab.id) && !compositionPaths.has(tab.filePath)) return [];
+    seen.add(tab.id);
+    const normalizedTab = {
+      id: tab.id,
+      filePath: tab.filePath,
+      language: typeof tab.language === "string" && tab.language ? tab.language : "plaintext",
+      ...(typeof tab.unsupportedReason === "string" ? { unsupportedReason: tab.unsupportedReason } : {}),
+      ...(tab.isComposition === true ? { isComposition: true } : {}),
+      isPinned: true,
+    } satisfies PersistedEditorTab;
+    return [normalizedTab];
+  });
+  return {
+    tabs,
+    activeTabId: typeof state.activeTabId === "string" && tabs.some((tab) => tab.id === state.activeTabId) ? state.activeTabId : tabs[0]?.id ?? null,
+  };
+}
+
+function normalizeProjectEditorState(project: ProjectManifest, timelines: TimelineDocument[], compositionLibrary: CompositionClip[], timelineMode: TimelineMode, selectedSceneId: string | undefined, selectedMotionMarker: { partId: string; markerId: string } | null, selectedPartId: string | undefined) {
   const previewState = project.editorState?.preview ?? defaultPreviewViewportState;
   const editorState = {
     ...project.editorState,
     timeline: normalizeTimelineViewportState(project.editorState?.timeline),
     composeTimeline: normalizeTimelineViewportState(project.editorState?.composeTimeline),
     timelineMode,
-    mode: project.editorState?.mode === "code" ? "code" : "interactive",
+    mode: normalizeEditorMode(project.editorState?.mode),
     leftPanelTab: project.editorState?.leftPanelTab === "tools" ? "tools" : "assets",
     rightPanelTab: normalizeRightPanelTab(project.editorState?.rightPanelTab),
     selectedTimelineId: timelines.some((timeline) => timeline.id === project.editorState?.selectedTimelineId) ? project.editorState?.selectedTimelineId : undefined,
@@ -369,9 +410,10 @@ function normalizeProjectEditorState(project: ProjectManifest, timelines: Timeli
       scrollTop: roundTwo(Math.max(previewState.scrollTop, 0)),
       zoomBarOpen: Boolean(previewState.zoomBarOpen),
     },
-    code: normalizeCodeViewportStates(project.editorState?.code),
+    editor: normalizeCodeViewportStates(project.editorState?.editor ?? project.editorState?.code),
     fileManagerState: normalizeFileManagerState(project.editorState?.fileManagerState),
     effectsPanelState: normalizeEffectsPanelState(project.editorState?.effectsPanelState),
+    editorSession: normalizeEditorSessionState(project.editorState?.editorSession, compositionLibrary),
   };
   delete (editorState as EditorState).timelineLayers;
   return editorState;
@@ -398,6 +440,15 @@ function normalizeAdjustmentLayers(layers: AdjustmentLayer[] | undefined): Adjus
   }));
 }
 
+function normalizeTransitionLayers(layers: TransitionLayer[] | undefined, layerId: string): TransitionLayer[] {
+  return (layers ?? []).map((layer) => ({
+    ...layer,
+    layerId,
+    start: roundTwo(Math.max(layer.start, 0)),
+    duration: roundTwo(Math.max(layer.duration, 0.1)),
+  }));
+}
+
 export function normalizeProject(project: ProjectManifest): ProjectManifest {
   const timelineMode = normalizeTimelineMode(project.editorState?.timelineMode);
   const compositionDocuments = getCompositionDocuments(project);
@@ -411,7 +462,7 @@ export function normalizeProject(project: ProjectManifest): ProjectManifest {
 
   const normalized = sanitizeProjectNumbers({
     ...project,
-    editorState: normalizeProjectEditorState(project, timelines, timelineMode, selectedSceneId, selectedMotionMarker, selectedPartId),
+    editorState: normalizeProjectEditorState(project, timelines, compositionLibrary, timelineMode, selectedSceneId, selectedMotionMarker, selectedPartId),
     // scenes is derived from timelines via getScenesFromTimelines.
     // Editing mutations write only to project.timelines; runtime reads use getSceneFromProject.
     scenes,

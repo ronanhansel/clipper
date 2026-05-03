@@ -39,7 +39,7 @@ export function createTransitionEffectPackage(manifestSource: string, logic: Tra
       start: input.start,
       duration: input.duration,
       midPoint: input.midPoint,
-      effect: { effectId: manifest.id, params: manifest.defaultParams },
+      effect: { effectId: manifest.id, params: { ease: "easeInOut", ...manifest.defaultParams } },
     }),
   };
 }

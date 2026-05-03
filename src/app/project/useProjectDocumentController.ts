@@ -3,7 +3,7 @@ import { clipperHost } from "../clipperHost";
 import toast from "react-hot-toast";
 import { maxProjectHistoryActions, projectHistoryCoalesceMs } from "../config";
 import { getDirectoryPath } from "../features/file-manager/fileManagerPaths";
-import { projectPersistenceService } from "../services/projectPersistenceService";
+import { getEditableRootPath, projectPersistenceService } from "../services/projectPersistenceService";
 import { getProjectContentSnapshot, useProjectDocumentState } from "../state/projectStore";
 import type { Mode, ProjectUpdater } from "../types";
 import { compositionFromSource } from "../../core/compositionSource";
@@ -71,6 +71,7 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
   const compositionSourcesRef = useRef(compositionSources);
   const activeProjectManifestPathRef = useRef(activeProjectManifestPath);
   const savedProjectSnapshotRef = useRef(savedProjectSnapshot);
+  const editableRootCacheRef = useRef<Record<string, string>>({});
   const savedCompositionSourcesSnapshotRef = useRef(savedCompositionSourcesSnapshot);
   const projectHistoryRef = useRef<{ past: ProjectHistoryEntry[]; future: ProjectHistoryEntry[] }>({ past: [], future: [] });
   const lastProjectHistoryAtRef = useRef(0);
@@ -396,7 +397,7 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
     compositionSourcesRef.current = nextSources;
     setCompositionSources(nextSources);
     const compositionId = basePart.compositionId ?? basePart.id;
-    const nextPart = await compositionFromSource({ ...basePart, id: compositionId }, source);
+    const nextPart = await compositionFromSource({ ...basePart, id: compositionId }, source, readCompositionSiblingFile(basePart.filePath));
     const nextProject = replacePartInProject({ ...projectRef.current, compositionSources: nextSources }, compositionId, (currentPart) => ({
       ...nextPart,
       source,
@@ -406,6 +407,29 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
 
     replaceProject(nextProject, { history: options.history, syncSources: options.syncSource !== false });
     setSourceStatus(`Preview updated from ${nextPart.filePath}.`);
+  }
+
+  function readCompositionSiblingFile(sourcePath: string) {
+    const sourceDirectory = getDirectoryPath(sourcePath);
+    return async (relativePath: string) => {
+      const projectPath = relativePath.startsWith("/") || !sourceDirectory || relativePath.startsWith(`${sourceDirectory}/`) ? relativePath : `${sourceDirectory}/${relativePath}`;
+      
+      const manifestPath = activeProjectManifestPathRef.current;
+      if (manifestPath) {
+        const rootPath = getDirectoryPath(manifestPath);
+        
+        let editableRoot = editableRootCacheRef.current[rootPath];
+        if (editableRoot === undefined) {
+          editableRoot = await getEditableRootPath(rootPath);
+          editableRootCacheRef.current[rootPath] = editableRoot;
+        }
+        
+        const fullPath = editableRoot && !projectPath.startsWith(`${editableRoot}/`) ? `${editableRoot}/${projectPath}` : projectPath;
+        return clipperHost.readTextFile(fullPath);
+      }
+      
+      return clipperHost.readTextFile(projectPath);
+    };
   }
 
   async function saveProject(projectToSave = projectRef.current) {

@@ -76,6 +76,7 @@ export type TextProps = Omit<RenderableProps, "content"> & { text?: string; cont
 export type ChartProps = RenderableProps & { chart: ChartSpec };
 export type ComponentProps = Pick<RenderableProps, "style" | "transform" | "motion" | "animations" | "hidden" | "locked">;
 export type GroupProps = ComponentProps & { children?: Renderable[] };
+export type WebLayerProps = Omit<RenderableProps, "content"> & { css?: string; html: string };
 export type CompositionProps = {
   id?: string;
   name?: string;
@@ -115,6 +116,14 @@ export function transformToCss(transform: Transform | string | undefined): strin
     parts.push(`scaleY(${transform.scaleY})`);
   }
   return parts.length > 0 ? parts.join(" ") : undefined;
+}
+
+export function css(strings: TemplateStringsArray, ...values: unknown[]) {
+  return String.raw({ raw: strings }, ...values).trim();
+}
+
+export function html(strings: TemplateStringsArray, ...values: unknown[]) {
+  return String.raw({ raw: strings }, ...values).trim();
 }
 
 export class RenderableObject {
@@ -185,6 +194,15 @@ export class Html extends RenderableObject {
   constructor(props: RenderableProps) {
     super(props);
     this.kind = "html";
+  }
+}
+
+export class WebLayer extends Html {
+  constructor(props: WebLayerProps) {
+    super({
+      ...props,
+      content: `${props.css ? `<style>${props.css}</style>` : ""}${props.html}`,
+    });
   }
 }
 

@@ -17,10 +17,10 @@ type UseAdjustmentLayerCommandsInput = {
   sceneDurationSeconds: number;
   selectedAdjustmentLayerId: string | null;
   timelineLayers: TimelineLayerState;
+  pausePlaybackAtCurrentTime: () => void;
   selectAdjustmentLayer: (layerId: string) => void;
   setFocusPickZoomMarker: (selection: { partId: string; markerId: string } | null) => void;
   setFramePickPreviewPoint: (point: null) => void;
-  setIsPlaying: (playing: boolean) => void;
   setPointPickAdjustment: (selection: PointPickAdjustment) => void;
   setPositionPickTranslationMarker: (selection: { partId: string; markerId: string } | null) => void;
   setSelectedAdjustmentLayerId: (id: string | null) => void;
@@ -38,10 +38,10 @@ export function useAdjustmentLayerCommands({
   sceneDurationSeconds,
   selectedAdjustmentLayerId,
   timelineLayers,
+  pausePlaybackAtCurrentTime,
   selectAdjustmentLayer,
   setFocusPickZoomMarker,
   setFramePickPreviewPoint,
-  setIsPlaying,
   setPointPickAdjustment,
   setPositionPickTranslationMarker,
   setSelectedAdjustmentLayerId,
@@ -137,7 +137,7 @@ export function useAdjustmentLayerCommands({
     setFocusPickZoomMarker(null);
     setPositionPickTranslationMarker(null);
     setTrackerPickTranslationMarker(null);
-    setIsPlaying(false);
+    pausePlaybackAtCurrentTime();
     setPointPickAdjustment({ layerId, control });
     setFramePickPreviewPoint(null);
   }

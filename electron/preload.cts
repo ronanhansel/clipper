@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld("clipper", {
   writeBinaryFile: (relativePath: string, base64Content: string) => ipcRenderer.invoke("clipper:write-binary-file", relativePath, base64Content) as Promise<void>,
   createDirectory: (relativePath: string) => ipcRenderer.invoke("clipper:create-directory", relativePath) as Promise<void>,
   revealFile: (relativePath: string) => ipcRenderer.invoke("clipper:reveal-file", relativePath) as Promise<void>,
+  revealAbsolutePath: (filePath: string) => ipcRenderer.invoke("clipper:reveal-absolute-path", filePath) as Promise<void>,
   trashFile: (relativePath: string) => ipcRenderer.invoke("clipper:trash-file", relativePath) as Promise<void>,
   renameFile: (relativePath: string, nextRelativePath: string) => ipcRenderer.invoke("clipper:rename-file", relativePath, nextRelativePath) as Promise<void>,
   copyFile: (relativePath: string, nextRelativePath: string) => ipcRenderer.invoke("clipper:copy-file", relativePath, nextRelativePath) as Promise<void>,
@@ -28,7 +29,7 @@ contextBridge.exposeInMainWorld("clipper", {
   writeVideoFrame: (sessionId: string, frameData: Uint8ClampedArray) => ipcRenderer.invoke("clipper:write-video-frame", sessionId, frameData) as Promise<void>,
   finishVideoExport: (sessionId: string) => ipcRenderer.invoke("clipper:finish-video-export", sessionId) as Promise<string>,
   cancelVideoExport: (sessionId: string) => ipcRenderer.invoke("clipper:cancel-video-export", sessionId) as Promise<void>,
-  renderVideoExport: (exportId: string, defaultFileName: string, project: unknown, scene: unknown, frameRate: number) => ipcRenderer.invoke("clipper:render-video-export", exportId, defaultFileName, project, scene, frameRate) as Promise<string | null>,
+  renderVideoExport: (exportId: string, defaultFileName: string, project: unknown, scene: unknown, frameRate: number, durationSeconds: number) => ipcRenderer.invoke("clipper:render-video-export", exportId, defaultFileName, project, scene, frameRate, durationSeconds) as Promise<string | null>,
   cancelRenderVideoExport: (exportId: string) => ipcRenderer.invoke("clipper:cancel-render-video-export", exportId) as Promise<void>,
   onVideoExportProgress: (callback: (exportId: string, progress: { frame: number; totalFrames: number; percent: number; status: string }) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, exportId: string, progress: { frame: number; totalFrames: number; percent: number; status: string }) => callback(exportId, progress);
@@ -59,6 +60,16 @@ contextBridge.exposeInMainWorld("clipper", {
     const listener = () => callback();
     ipcRenderer.on("clipper:export-project", listener);
     return () => ipcRenderer.removeListener("clipper:export-project", listener);
+  },
+  onCloseEditorTabShortcut: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on("clipper:close-editor-tab-shortcut", listener);
+    return () => ipcRenderer.removeListener("clipper:close-editor-tab-shortcut", listener);
+  },
+  onRestoreEditorTabShortcut: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on("clipper:restore-editor-tab-shortcut", listener);
+    return () => ipcRenderer.removeListener("clipper:restore-editor-tab-shortcut", listener);
   },
   onWindowFullscreenChange: (callback: (fullscreen: boolean) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, fullscreen: boolean) => callback(fullscreen);

@@ -3,9 +3,7 @@ import { Input } from "../../components/ui/input";
 import { appBarActionButtonBase, appBarSaveButtonClass, appDragRegion, appNoDragRegion } from "../config";
 
 type AppHeaderProps = {
-  hasActiveComposition: boolean;
   hasUnsavedChanges: boolean;
-  partName: string;
   projectName: string;
   projectNameDraft: string;
   renamingProject: boolean;
@@ -21,14 +19,14 @@ type AppHeaderProps = {
   onSettingsOpen: () => void;
 };
 
-export function AppHeader({ hasActiveComposition, hasUnsavedChanges, partName, projectName, projectNameDraft, renamingProject, sceneName, onCancelProjectRename, onCloseProject, onCommitProjectRename, onExportOpen, onOpenProject, onProjectNameDraftChange, onProjectTitleContextMenu, onSaveAll, onSettingsOpen }: AppHeaderProps) {
+export function AppHeader({ hasUnsavedChanges, projectName, projectNameDraft, renamingProject, sceneName, onCancelProjectRename, onCloseProject, onCommitProjectRename, onExportOpen, onOpenProject, onProjectNameDraftChange, onProjectTitleContextMenu, onSaveAll, onSettingsOpen }: AppHeaderProps) {
   return (
     <header className={`${appDragRegion} relative grid grid-cols-[1fr_auto] items-center gap-[18px] border-b border-[#2d313b] bg-[rgba(22,24,31,0.98)] px-[22px]`}>
       <div />
-      <div className={`${appNoDragRegion} pointer-events-auto absolute left-1/2 top-1/2 flex w-[520px] max-w-[520px] -translate-x-1/2 -translate-y-1/2 items-baseline justify-center gap-2 text-center leading-none`} onContextMenu={onProjectTitleContextMenu} title="Right-click to rename project">
+      <div className={`pointer-events-auto absolute left-1/2 top-1/2 flex w-[520px] max-w-[520px] -translate-x-1/2 -translate-y-1/2 items-baseline justify-center gap-2 text-center leading-none ${renamingProject ? appNoDragRegion : ""}`} onContextMenu={onProjectTitleContextMenu} title={renamingProject ? undefined : "Drag to move window"}>
         {renamingProject ? <Input autoFocus className="h-7 w-[240px] border-[var(--clipper-accent)] bg-[#171920] px-2 py-0 text-center text-[14px] font-bold" value={projectNameDraft} onBlur={onCommitProjectRename} onChange={(event) => onProjectNameDraftChange(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") onCommitProjectRename(); if (event.key === "Escape") onCancelProjectRename(); }} /> : <strong className="truncate text-[14px] font-bold">{projectName}</strong>}
         {!renamingProject ? <span className="text-xs text-[#565b66]">/</span> : null}
-        {!renamingProject ? <span className="truncate text-xs text-[#9b9da7]">{hasActiveComposition ? `${sceneName} / ${partName}` : sceneName}</span> : null}
+        {!renamingProject ? <span className="truncate text-xs text-[#9b9da7]">{sceneName}</span> : null}
       </div>
       <div className={`${appNoDragRegion} flex justify-end gap-1.5`}>
         <button className={appBarActionButtonBase} title="Open a Clipper .clipper project" onClick={onOpenProject}>Open</button>
