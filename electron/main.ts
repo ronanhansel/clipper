@@ -19,9 +19,12 @@ const appIconPath = path.resolve(__dirname, "../build/icons/icon.png");
 const frameWidth = 1920;
 const frameHeight = 1080;
 const exportRendererFrameTimeoutMs = 8000;
-const exportCaptureStripCount = 4;
+const exportCaptureTileHeights = [270, 135, 68, 34, 17] as const;
 const exportCaptureTileRetries = 3;
+const exportCaptureTileValidationSamples = 2;
 const exportCaptureTileTimeoutMs = 4000;
+const exportCaptureTileMaxDifferingPixelRatio = 0.0005;
+const exportCaptureTileMaxAverageByteDelta = 0.025;
 let hardwareEncoderSupport: Set<string> | null = null;
 let systemFontFamilies: string[] | null = null;
 
@@ -595,22 +598,28 @@ async function renderSceneToVideo(_project: ProjectManifest, scene: Scene, outpu
     rendererWindow.webContents.setVisualZoomLevelLimits(1, 1).catch(() => {});
     await loadRenderedMediaExportWindow(rendererWindow);
     let pendingFrameWrite: Promise<void> | null = null;
+    const captureState: ExportCaptureState = { tileHeightIndex: 0, tileMemoryPressureDetected: false };
+    const removeTileMemoryWarningListener = watchExportTileMemoryWarnings(rendererWindow, captureState);
 
-    for (let frameIndex = 0; frameIndex < totalFrames; frameIndex += 1) {
-      if (exportId && cancelledVideoRenders.has(exportId)) throw new Error("Video export cancelled.");
-      const sceneTime = Math.min(frameIndex / frameRate, Math.max(durationSeconds - 0.001, 0));
-      const syncResult = await renderExportFrame(rendererWindow, _project, scene, sceneTime, frameRate);
-      if (syncResult.failedCount > 0) {
-        throw new Error(`Export renderer failed to pin ${syncResult.failedCount} animation(s) at ${sceneTime.toFixed(3)}s after ${syncResult.passCount} sync pass(es).`);
+    try {
+      for (let frameIndex = 0; frameIndex < totalFrames; frameIndex += 1) {
+        if (exportId && cancelledVideoRenders.has(exportId)) throw new Error("Video export cancelled.");
+        const sceneTime = Math.min(frameIndex / frameRate, Math.max(durationSeconds - 0.001, 0));
+        const syncResult = await renderExportFrame(rendererWindow, _project, scene, sceneTime, frameRate);
+        if (syncResult.failedCount > 0) {
+          throw new Error(`Export renderer failed to pin ${syncResult.failedCount} animation(s) at ${sceneTime.toFixed(3)}s after ${syncResult.passCount} sync pass(es).`);
+        }
+        const frameBitmap = await captureTiledExportFrame(rendererWindow, frameIndex, sceneTime, captureState);
+        if (pendingFrameWrite) await pendingFrameWrite;
+        pendingFrameWrite = writeProcessInput(ffmpeg, frameBitmap);
+        onProgress?.({ frame: frameIndex + 1, totalFrames, percent: Math.round(((frameIndex + 1) / totalFrames) * 100), status: `Rendering frame ${frameIndex + 1} of ${totalFrames} with ${encoder.label}` });
       }
-      const frameBitmap = await captureTiledExportFrame(rendererWindow, frameIndex, sceneTime);
-      if (pendingFrameWrite) await pendingFrameWrite;
-      pendingFrameWrite = writeProcessInput(ffmpeg, frameBitmap);
-      onProgress?.({ frame: frameIndex + 1, totalFrames, percent: Math.round(((frameIndex + 1) / totalFrames) * 100), status: `Rendering frame ${frameIndex + 1} of ${totalFrames} with ${encoder.label}` });
-    }
 
-    if (pendingFrameWrite) await pendingFrameWrite;
-    if (exportId && cancelledVideoRenders.has(exportId)) throw new Error("Video export cancelled.");
+      if (pendingFrameWrite) await pendingFrameWrite;
+      if (exportId && cancelledVideoRenders.has(exportId)) throw new Error("Video export cancelled.");
+    } finally {
+      removeTileMemoryWarningListener();
+    }
   } catch (error) {
     ffmpeg.kill("SIGTERM");
     if (exportId) cancelledVideoRenders.delete(exportId);
@@ -659,17 +668,31 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string)
   });
 }
 
-async function captureTiledExportFrame(window: BrowserWindow, frameIndex: number, sceneTime: number) {
+async function captureTiledExportFrame(window: BrowserWindow, frameIndex: number, sceneTime: number, captureState: ExportCaptureState) {
   const frame = Buffer.allocUnsafe(frameWidth * frameHeight * 4);
-  for (const tile of getExportCaptureTiles()) {
-    const tileBitmap = await captureExportTileWithRetries(window, tile, frameIndex, sceneTime);
-    stitchBgraTile(frame, tileBitmap, tile);
+  while (captureState.tileHeightIndex < exportCaptureTileHeights.length) {
+    const tileHeight = exportCaptureTileHeights[captureState.tileHeightIndex];
+    try {
+      for (const tile of getExportCaptureTiles(tileHeight)) {
+        const tileBitmap = await captureStableExportTile(window, tile, frameIndex, sceneTime, captureState);
+        stitchBgraTile(frame, tileBitmap, tile);
+      }
+      if (frame.byteLength !== frameWidth * frameHeight * 4) {
+        throw new Error(`Stitched frame byte length was ${frame.byteLength}; expected ${frameWidth * frameHeight * 4}.`);
+      }
+      return frame;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!shouldReduceExportTileHeight(captureState, error)) {
+        throw new Error(`Failed to capture stable export frame ${frameIndex + 1} at ${sceneTime.toFixed(3)}s with ${tileHeight}px tiles: ${message}`);
+      }
+    }
   }
-  return frame;
+
+  throw new Error(`Failed to capture stable export frame ${frameIndex + 1} at ${sceneTime.toFixed(3)}s: exhausted adaptive tile heights (${exportCaptureTileHeights.join(" -> ")}).`);
 }
 
-function getExportCaptureTiles() {
-  const tileHeight = Math.ceil(frameHeight / exportCaptureStripCount);
+function getExportCaptureTiles(tileHeight: number) {
   const tiles: ExportCaptureTile[] = [];
   for (let y = 0; y < frameHeight; y += tileHeight) {
     tiles.push({ x: 0, y, width: frameWidth, height: Math.min(tileHeight, frameHeight - y) });
@@ -677,23 +700,152 @@ function getExportCaptureTiles() {
   return tiles;
 }
 
-async function captureExportTileWithRetries(window: BrowserWindow, tile: ExportCaptureTile, frameIndex: number, sceneTime: number) {
+async function captureStableExportTile(window: BrowserWindow, tile: ExportCaptureTile, frameIndex: number, sceneTime: number, captureState: ExportCaptureState) {
   let lastError: unknown;
   for (let attempt = 1; attempt <= exportCaptureTileRetries; attempt += 1) {
     try {
-      const image = await withTimeout(
-        window.webContents.capturePage(tile),
-        exportCaptureTileTimeoutMs,
-        `Timed out capturing export frame ${frameIndex + 1} tile ${tile.y}-${tile.y + tile.height} at ${sceneTime.toFixed(3)}s.`,
-      );
-      return getBgraBitmap(image, tile.width, tile.height, `export frame ${frameIndex + 1} tile ${tile.y}-${tile.y + tile.height}`);
+      captureState.tileMemoryPressureDetected = false;
+      await applyExportCaptureViewport(window, tile);
+      const samples: Buffer[] = [];
+      for (let sampleIndex = 0; sampleIndex < exportCaptureTileValidationSamples; sampleIndex += 1) {
+        samples.push(await captureExportTileBitmap(window, tile, frameIndex, sceneTime));
+      }
+      if (captureState.tileMemoryPressureDetected) {
+        throw new ExportTileMemoryPressureError(`Chromium reported tile memory pressure while capturing export frame ${frameIndex + 1} tile ${formatTileRange(tile)}.`);
+      }
+      const firstChecksum = checksumBuffer(samples[0]);
+      for (let sampleIndex = 1; sampleIndex < samples.length; sampleIndex += 1) {
+        const nextChecksum = checksumBuffer(samples[sampleIndex]);
+        if (firstChecksum !== nextChecksum || !samples[0].equals(samples[sampleIndex])) {
+          const diff = getBitmapDiffStats(samples[0], samples[sampleIndex]);
+          if (!isAcceptableCaptureReadbackDrift(diff)) {
+            throw new ExportTileUnstableError(`Captured export frame ${frameIndex + 1} tile ${formatTileRange(tile)} changed between validation samples at pinned time ${sceneTime.toFixed(3)}s (${formatBitmapDiffStats(diff)}).`);
+          }
+        }
+      }
+      return samples[0];
     } catch (error) {
       lastError = error;
+      if (captureState.tileHeightIndex < exportCaptureTileHeights.length - 1 && isAdaptiveTileReductionSignal(error)) break;
     }
   }
 
   const message = lastError instanceof Error ? lastError.message : String(lastError);
-  throw new Error(`Failed to capture export frame ${frameIndex + 1} tile ${tile.y}-${tile.y + tile.height} at ${sceneTime.toFixed(3)}s after ${exportCaptureTileRetries} attempt(s): ${message}`);
+  if (lastError instanceof ExportTileUnstableError || lastError instanceof ExportTileMemoryPressureError) {
+    throw lastError;
+  }
+  throw new Error(`Failed to capture stable export frame ${frameIndex + 1} tile ${formatTileRange(tile)} at ${sceneTime.toFixed(3)}s after ${exportCaptureTileRetries} attempt(s): ${message}`);
+}
+
+async function captureExportTileBitmap(window: BrowserWindow, tile: ExportCaptureTile, frameIndex: number, sceneTime: number) {
+  const image = await withTimeout(
+    window.webContents.capturePage({ x: 0, y: 0, width: tile.width, height: tile.height }),
+    exportCaptureTileTimeoutMs,
+    `Timed out capturing export frame ${frameIndex + 1} tile ${formatTileRange(tile)} at ${sceneTime.toFixed(3)}s.`,
+  );
+  return getBgraBitmap(image, tile.width, tile.height, `export frame ${frameIndex + 1} tile ${formatTileRange(tile)}`);
+}
+
+async function applyExportCaptureViewport(window: BrowserWindow, tile: ExportCaptureTile) {
+  const [, currentHeight] = window.getContentSize();
+  if (currentHeight !== tile.height) window.setContentSize(frameWidth, tile.height, false);
+  await withTimeout(
+    window.webContents.executeJavaScript(`(() => {
+      const offset = ${JSON.stringify(tile.y)};
+      document.documentElement.style.width = "${frameWidth}px";
+      document.documentElement.style.height = "${tile.height}px";
+      document.documentElement.style.overflow = "hidden";
+      document.body.style.width = "${frameWidth}px";
+      document.body.style.height = "${frameHeight}px";
+      document.body.style.overflow = "hidden";
+      document.body.style.margin = "0";
+      document.body.style.transformOrigin = "0 0";
+      document.body.style.transform = "translate3d(0, -" + offset + "px, 0)";
+      return true;
+    })()`, true),
+    exportCaptureTileTimeoutMs,
+    `Timed out applying export capture viewport for tile ${formatTileRange(tile)}.`,
+  );
+}
+
+function shouldReduceExportTileHeight(captureState: ExportCaptureState, error: unknown) {
+  if (captureState.tileHeightIndex >= exportCaptureTileHeights.length - 1) return false;
+  if (captureState.tileMemoryPressureDetected || isAdaptiveTileReductionSignal(error)) {
+    captureState.tileHeightIndex += 1;
+    captureState.tileMemoryPressureDetected = false;
+    return true;
+  }
+  return false;
+}
+
+function isAdaptiveTileReductionSignal(error: unknown) {
+  if (error instanceof ExportTileUnstableError || error instanceof ExportTileMemoryPressureError) return true;
+  if (!(error instanceof Error)) return false;
+  return /bitmap length|image size|memory|timed out/i.test(error.message);
+}
+
+function watchExportTileMemoryWarnings(window: BrowserWindow, captureState: ExportCaptureState) {
+  const handleConsoleMessage = (_event: Electron.Event, _level: number, message: string) => {
+    if (/tile memory limits exceeded|some content may not draw/i.test(message)) {
+      captureState.tileMemoryPressureDetected = true;
+    }
+  };
+  window.webContents.on("console-message", handleConsoleMessage);
+  return () => window.webContents.off("console-message", handleConsoleMessage);
+}
+
+function checksumBuffer(buffer: Buffer) {
+  let hash = 0x811c9dc5;
+  for (const byte of buffer) {
+    hash ^= byte;
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash;
+}
+
+function getBitmapDiffStats(left: Buffer, right: Buffer) {
+  const length = Math.min(left.byteLength, right.byteLength);
+  let differingBytes = Math.abs(left.byteLength - right.byteLength);
+  let totalDelta = 0;
+  let maxDelta = 0;
+  for (let index = 0; index < length; index += 1) {
+    const delta = Math.abs(left[index] - right[index]);
+    if (delta > 0) {
+      differingBytes += 1;
+      totalDelta += delta;
+      if (delta > maxDelta) maxDelta = delta;
+    }
+  }
+  const pixels = Math.max(1, Math.ceil(Math.max(left.byteLength, right.byteLength) / 4));
+  const differingPixelRatio = differingBytes / 4 / pixels;
+  const averageByteDelta = totalDelta / Math.max(1, length);
+  return { differingBytes, differingPixelRatio, averageByteDelta, maxDelta };
+}
+
+function isAcceptableCaptureReadbackDrift(diff: ReturnType<typeof getBitmapDiffStats>) {
+  return diff.differingPixelRatio <= exportCaptureTileMaxDifferingPixelRatio && diff.averageByteDelta <= exportCaptureTileMaxAverageByteDelta;
+}
+
+function formatBitmapDiffStats(diff: ReturnType<typeof getBitmapDiffStats>) {
+  return `${diff.differingBytes} differing bytes, ${(diff.differingPixelRatio * 100).toFixed(4)}% pixel-equivalent ratio, avg byte delta ${diff.averageByteDelta.toFixed(4)}, max byte delta ${diff.maxDelta}`;
+}
+
+function formatTileRange(tile: ExportCaptureTile) {
+  return `${tile.y}-${tile.y + tile.height}`;
+}
+
+class ExportTileUnstableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ExportTileUnstableError";
+  }
+}
+
+class ExportTileMemoryPressureError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ExportTileMemoryPressureError";
+  }
 }
 
 function stitchBgraTile(frame: Buffer, tileBitmap: Buffer, tile: ExportCaptureTile) {
@@ -727,6 +879,7 @@ async function writeProcessInput(process: ChildProcessWithoutNullStreams, chunk:
 
 type VideoExportProgress = { frame: number; totalFrames: number; percent: number; status: string };
 type RenderClockReadinessResult = { animationCount: number; pinnedCount: number; failedCount: number; pendingReadyCount: number; passCount: number; layerCount: number };
+type ExportCaptureState = { tileHeightIndex: number; tileMemoryPressureDetected: boolean };
 type ExportCaptureTile = { x: number; y: number; width: number; height: number };
 type MotionMarker = { start: number; duration: number };
 type AdjustmentLayer = { id: string; name: string; start: number; duration: number; effect: { kind?: "frameSkip"; every?: number; effectId?: string; params?: Record<string, unknown> } };
