@@ -24,6 +24,7 @@ export type BuildFileManagerWorkspacePropsInput = Omit<FileManagerProps,
   | "onOpenCompositionFile"
   | "onMoveComposition"
   | "onMoveTimeline"
+  | "onPrerenderComposition"
   | "onRenameAsset"
   | "onRenameComposition"
   | "onRenameCompositionFolder"
@@ -54,6 +55,7 @@ export type BuildFileManagerWorkspacePropsInput = Omit<FileManagerProps,
     fileManagerStateChange: (fileManagerState: EditorState["fileManagerState"]) => void;
     moveComposition: FileManagerProps["onMoveComposition"];
     moveTimeline: FileManagerProps["onMoveTimeline"];
+    prerenderComposition?: FileManagerProps["onPrerenderComposition"];
     renameAsset: FileManagerProps["onRenameAsset"];
     renameComposition: FileManagerProps["onRenameComposition"];
     renameCompositionFolder: FileManagerProps["onRenameCompositionFolder"];
@@ -90,6 +92,7 @@ export function buildFileManagerWorkspaceProps({ actions, ...state }: BuildFileM
     onFileManagerStateChange: actions.fileManagerStateChange,
     onMoveComposition: actions.moveComposition,
     onMoveTimeline: actions.moveTimeline,
+    onPrerenderComposition: actions.prerenderComposition,
     onRenameAsset: actions.renameAsset,
     onRenameComposition: actions.renameComposition,
     onRenameCompositionFolder: actions.renameCompositionFolder,

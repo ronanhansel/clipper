@@ -85,6 +85,20 @@ describe("frame preview render model", () => {
     expect(model.previewParts.map((item) => [item.part.id, item.previewTime])).toEqual([["a", 0.5]]);
   });
 
+  it("applies clip trim starts to active preview timing", () => {
+    const scene: Scene = {
+      id: "scene",
+      compositions: [
+        { id: "a", filePath: "a.ts", start: 1, trimStart: 0.75, duration: 3, frame, background, objects: [], snapshot: [], motionMarkers: [] },
+      ],
+    };
+
+    const model = deriveFramePreviewRenderModel({ blankPart, scene, sceneTime: 2, timelineMode: "composition" });
+
+    expect(model.previewTime).toBe(1.75);
+    expect(model.previewParts.map((item) => [item.part.id, item.previewTime])).toEqual([["a", 1.75]]);
+  });
+
   it("keeps intentional timeline gaps renderable with the blank fallback", () => {
     const scene: Scene = {
       id: "scene",

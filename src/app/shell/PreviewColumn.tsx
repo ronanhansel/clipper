@@ -167,7 +167,7 @@ function PrerenderVideoPreview({ blackMissDebug, currentSceneTimeRef, framePrevi
 
   return (
     <div className="relative" data-clipper-prerender-video-preview-wrapper style={previewStyle}>
-      <div className="relative" style={previewStyle}>
+      <div className="relative" data-clipper-prerender-video-preview-stage style={previewStyle}>
         <div className={`absolute left-0 top-0 ${showingCachedCanvas ? "opacity-0" : "opacity-100"}`} aria-hidden={showingCachedCanvas}>
           <FramePreview {...framePreviewProps} />
         </div>

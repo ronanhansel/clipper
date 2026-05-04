@@ -209,6 +209,7 @@ export function usePlaybackController({
     else if (!useLocalPlaybackLabels) syncFrameVisualAdjustmentDom(nextTime);
 
     if (timelineScrubbingRef.current) {
+      startTransition(() => setRenderCurrentSceneTime(nextTime));
       return;
     }
 
@@ -259,13 +260,8 @@ export function usePlaybackController({
   }
 
   function resumePlaybackAfterTimelineScrub() {
-    const settledTime = currentSceneTimeRef.current;
-    commitPlayheadEditorState(settledTime);
-    setCurrentSceneTime(settledTime);
-    setRenderCurrentSceneTime(settledTime);
-    if (!timelineScrubPausedPlaybackRef.current) return;
-
     timelineScrubPausedPlaybackRef.current = false;
+    pausePlaybackAtCurrentTime();
   }
 
   function pausePlaybackForPresentationScrub() {

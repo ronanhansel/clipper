@@ -307,9 +307,11 @@ export type CompositionClip = TimelineMarkerMetadata & {
   compositionId?: string;
   filePath: string;
   source?: string;
+  prerender?: boolean;
   sourceMissing?: boolean;
   compositionError?: string;
   start?: number;
+  trimStart?: number;
   layerId?: string;
   duration: number;
   frame: PartFrame;
@@ -337,6 +339,7 @@ export type TimelineClip = {
   id: string;
   compositionId: string;
   start?: number;
+  trimStart?: number;
   layerId?: string;
   duration?: number;
   motionMarkers?: MotionMarker[];
@@ -463,6 +466,7 @@ export type EditorState = {
   defaultNewMarkerDurationSeconds?: number;
   timelineEndPaddingFraction?: number;
   timelinePrecision?: number;
+  pausePlaybackOnScrub?: boolean;
   layout?: EditorLayoutState;
   composeLayout?: ComposeLayoutState;
   preview?: PreviewViewportState;

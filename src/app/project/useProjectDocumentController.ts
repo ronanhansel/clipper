@@ -354,6 +354,7 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
       projectRef.current = restoredProject;
       setProject(restoredProject);
       setTimelineMode(timelineModeRef.current);
+      applyEditorState(restoredProject.editorState ?? defaultEditorState);
       syncCompositionSourcesFromProject(restoredProject);
       if (previousEntry.implicitFileOperation) scheduleImplicitFileOperationSave(restoredProject);
     });
@@ -387,6 +388,7 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
       projectRef.current = restoredProject;
       setProject(restoredProject);
       setTimelineMode(timelineModeRef.current);
+      applyEditorState(restoredProject.editorState ?? defaultEditorState);
       syncCompositionSourcesFromProject(restoredProject);
       if (nextEntry.implicitFileOperation) scheduleImplicitFileOperationSave(restoredProject);
     });

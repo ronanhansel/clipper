@@ -356,7 +356,12 @@ export const FrameObjectView = memo(function FrameObjectView({ animationsEnabled
       }
       if (event.key === "Enter") editableRef.current?.blur();
     }
-    if (event.key === "Escape") editableRef.current?.blur();
+    if (event.key === "Escape") {
+      const editable = editableRef.current;
+      const selection = window.getSelection();
+      if (editable && selection?.rangeCount && editable.contains(selection.getRangeAt(0).commonAncestorContainer)) selection.removeAllRanges();
+      editable?.blur();
+    }
   }
 
   function toggleEditableSelectionFormat(format: "bold" | "italic" | "underline") {

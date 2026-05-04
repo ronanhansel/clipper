@@ -185,6 +185,7 @@ function normalizeComposition(composition: CompositionClip): CompositionClip {
     ...rest,
     compositionId: rest.compositionId || undefined,
     start: typeof rest.start === "number" && Number.isFinite(rest.start) ? roundTwo(Math.max(rest.start, 0)) : undefined,
+    trimStart: typeof rest.trimStart === "number" && Number.isFinite(rest.trimStart) ? roundTwo(Math.max(rest.trimStart, 0)) : undefined,
     layerId: rest.layerId || undefined,
     sourceMissing: rest.sourceMissing || undefined,
     compositionError: typeof rest.compositionError === "string" && rest.compositionError ? rest.compositionError : undefined,
@@ -255,7 +256,7 @@ function getSceneFromProjectWithDocs(project: ProjectManifest, sceneId: string, 
     transitionLayers: timeline.transitionLayers ?? [],
     compositions: timeline.clips.flatMap((clip) => {
       const composition = compositionsById.get(clip.compositionId) ?? createMissingCompositionPlaceholder(clip.compositionId, clip);
-      return [{ ...composition, id: clip.id, compositionId: clip.compositionId, start: clip.start, layerId: clip.layerId, duration: clip.duration ?? composition.duration, motionMarkers: [] }];
+      return [{ ...composition, id: clip.id, compositionId: clip.compositionId, start: clip.start, trimStart: clip.trimStart, layerId: clip.layerId, duration: clip.duration ?? composition.duration, motionMarkers: [] }];
     }),
   };
 }
@@ -281,13 +282,15 @@ function getProjectTimelines(project: ProjectManifest): TimelineDocument[] {
       filePath: rest.filePath ?? `timelines/${rest.id}.timeline.json`,
       clips: rest.clips.map((clip: any) => {
         const { name: _clipName, ...clipRest } = clip;
-        const start = typeof clipRest.start === "number" && Number.isFinite(clipRest.start) ? roundTwo(Math.max(clipRest.start, 0)) : undefined;
-        const duration = typeof clipRest.duration === "number" && Number.isFinite(clipRest.duration) ? roundTwo(Math.max(clipRest.duration, 0.1)) : undefined;
-        return {
-          ...clipRest,
-          start,
-          duration,
-          motionMarkers: [],
+          const start = typeof clipRest.start === "number" && Number.isFinite(clipRest.start) ? roundTwo(Math.max(clipRest.start, 0)) : undefined;
+          const trimStart = typeof clipRest.trimStart === "number" && Number.isFinite(clipRest.trimStart) ? roundTwo(Math.max(clipRest.trimStart, 0)) : undefined;
+          const duration = typeof clipRest.duration === "number" && Number.isFinite(clipRest.duration) ? roundTwo(Math.max(clipRest.duration, 0.1)) : undefined;
+          return {
+            ...clipRest,
+            start,
+            trimStart,
+            duration,
+            motionMarkers: [],
         };
       }),
       adjustmentLayers: normalizeAdjustmentLayers(rest.adjustmentLayers),
@@ -310,7 +313,7 @@ function getScenesFromTimelines(timelines: TimelineDocument[], compositions: Com
     transitionLayers: timeline.transitionLayers ?? [],
     compositions: timeline.clips.flatMap((clip) => {
         const composition = compositionsById.get(clip.compositionId) ?? createMissingCompositionPlaceholder(clip.compositionId, clip);
-        return [{ ...composition, id: clip.id, compositionId: clip.compositionId, start: clip.start, layerId: clip.layerId, duration: clip.duration ?? composition.duration, motionMarkers: [] }];
+        return [{ ...composition, id: clip.id, compositionId: clip.compositionId, start: clip.start, trimStart: clip.trimStart, layerId: clip.layerId, duration: clip.duration ?? composition.duration, motionMarkers: [] }];
       }),
   }));
 }

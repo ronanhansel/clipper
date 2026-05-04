@@ -22,6 +22,7 @@ type SourceObject = {
 
 type SourceComposition = {
   duration: number;
+  prerender?: boolean;
   frame: {
     width: number;
     height: number;
@@ -58,6 +59,7 @@ export async function compositionFromSource(baseComposition: Part, source: strin
   return {
     ...baseComposition,
     sourceMissing: undefined,
+    prerender: sourceComposition.prerender || undefined,
     duration: sourceComposition.duration,
     frame: sourceFrameToCompositionFrame(sourceComposition.frame),
     background: sourceBackgroundToLayer(sourceComposition.background),
@@ -127,8 +129,9 @@ ${backgroundElements.map((object) => indent(object, 6)).join(",\n")}
     ],
   }`;
   const objects = composition.objects.map(frameObjectToConstructorSource);
+  const prerenderSource = composition.prerender ? "  prerender: true,\n" : "";
 
-  return `import { ${imports.join(", ")} } from "@clipper/composition-api";\n\nclass GeneratedCompositionObjects extends Component {\n  render() {\n    return [\n${objects.map((object) => indent(object, 6)).join(",\n")}\n    ];\n  }\n}\n\nexport const composition = new Composition({\n  duration: ${JSON.stringify(composition.duration)},\n  frame: ${tsBlock(composition.frame, 2)},\n  background: ${indent(backgroundSource, 2).trimStart()},\n  render() {\n    return [new GeneratedCompositionObjects()];\n  },\n});\n`;
+  return `import { ${imports.join(", ")} } from "@clipper/composition-api";\n\nclass GeneratedCompositionObjects extends Component {\n  render() {\n    return [\n${objects.map((object) => indent(object, 6)).join(",\n")}\n    ];\n  }\n}\n\nexport const composition = new Composition({\n  duration: ${JSON.stringify(composition.duration)},\n${prerenderSource}  frame: ${tsBlock(composition.frame, 2)},\n  background: ${indent(backgroundSource, 2).trimStart()},\n  render() {\n    return [new GeneratedCompositionObjects()];\n  },\n});\n`;
 }
 
 function frameObjectToSourceObject(object: FrameObject): SourceObject {

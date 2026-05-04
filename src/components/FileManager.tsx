@@ -70,6 +70,7 @@ export type FileManagerProps = {
   onDuplicateComposition: (compositionId: string) => void;
   onMoveComposition: (compositionId: string, folderPath: string) => void;
   onMoveTimeline: (timelineId: string, folderPath: string) => void;
+  onPrerenderComposition?: (compositionId: string) => void;
   onApplyTreeSnapshot: (snapshot: FileManagerTreeSnapshot) => void;
   onFileManagerStateChange: (state: FileManagerState) => void;
   onFindCompositionMedia: (compositionId: string, fileName: string) => void;
@@ -631,7 +632,7 @@ export function shouldSkipFileManagerShortcut(target: EventTarget | null) {
 }
 
 function UnifiedTreeNode({ dragHandle, node, style }: NativeTreeNodeRendererProps<FileManagerTreeNode>) {
-  const { assets, timelines, onAddComposition, onCopyAsset, onCopyCompositionPath, onCreateFolder: onCreateAssetFolder, onCreateComposition, onCreateCompositionFolder: onCreateFolder, onCreateTimeline, onDeleteAsset, onDeleteComposition, onDeleteCompositionFolder: onDeleteFolder, onDeleteTimeline, onDuplicateAsset, onDuplicateComposition, requestNodeExpansion, setContextMenu: onOpenMenu, onFindMediaRequestChange, onRevealComposition, onSelectTimeline, onSortAssets } = useFileManager();
+  const { assets, timelines, onAddComposition, onCopyAsset, onCopyCompositionPath, onCreateFolder: onCreateAssetFolder, onCreateComposition, onCreateCompositionFolder: onCreateFolder, onCreateTimeline, onDeleteAsset, onDeleteComposition, onDeleteCompositionFolder: onDeleteFolder, onDeleteTimeline, onDuplicateAsset, onDuplicateComposition, onPrerenderComposition, requestNodeExpansion, setContextMenu: onOpenMenu, onFindMediaRequestChange, onRevealComposition, onSelectTimeline, onSortAssets } = useFileManager();
   const data = node.data;
   const displayName = data.kind === "composition" ? getDisplayNameFromPath(data.composition.filePath) :
                     data.kind === "timeline" ? getDisplayNameFromPath(data.timeline.filePath || data.timeline.id) :
@@ -687,7 +688,7 @@ function UnifiedTreeNode({ dragHandle, node, style }: NativeTreeNodeRendererProp
       onOpenMenu({ x: event.clientX, y: event.clientY, items: [{ label: "Rename", action: () => node.edit() }, { label: "Delete", action: () => onDeleteTimeline(data.timeline.id), danger: true, disabled: timelines.length <= 1 }] });
       return;
     }
-    onOpenMenu({ x: event.clientX, y: event.clientY, items: [{ label: "Add to timeline", action: () => onAddComposition(data.composition.id) }, { label: "Rename", action: () => node.edit() }, { label: "Duplicate", action: () => onDuplicateComposition(data.composition.id) }, { label: "Copy path", action: () => onCopyCompositionPath(data.composition.id) }, { label: "Reveal in Finder", action: () => onRevealComposition(data.composition.id) }, { label: "Find media in project", action: () => onFindMediaRequestChange?.({ compositionId: data.composition.id, fileName: data.composition.filePath.split("/").pop() || data.composition.filePath }) }, { label: "Delete", action: () => onDeleteComposition(data.composition.id), danger: true }] });
+    onOpenMenu({ x: event.clientX, y: event.clientY, items: [{ label: "Add to timeline", action: () => onAddComposition(data.composition.id) }, { label: data.composition.prerender ? "Unmark prerender" : "Mark prerender", action: () => onPrerenderComposition?.(data.composition.id), disabled: !onPrerenderComposition }, { label: "Rename", action: () => node.edit() }, { label: "Duplicate", action: () => onDuplicateComposition(data.composition.id) }, { label: "Copy path", action: () => onCopyCompositionPath(data.composition.id) }, { label: "Reveal in Finder", action: () => onRevealComposition(data.composition.id) }, { label: "Find media in project", action: () => onFindMediaRequestChange?.({ compositionId: data.composition.id, fileName: data.composition.filePath.split("/").pop() || data.composition.filePath }) }, { label: "Delete", action: () => onDeleteComposition(data.composition.id), danger: true }] });
   }
 
   const Icon = data.kind === "asset-file" ? FileIcon : data.kind === "timeline" ? ChartNoAxesGantt : data.kind === "composition" ? Clapperboard : Folder;

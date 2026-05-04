@@ -1,7 +1,7 @@
 import { createContext, useContext, useRef, type PropsWithChildren } from "react";
 import { createStore, useStore, type StoreApi } from "zustand";
 import { useShallow } from "zustand/react/shallow";
-import { defaultFramePreviewScale, defaultNewMarkerDurationSeconds, defaultScrubCommitThrottleMs, defaultTimelineEndPaddingFraction, defaultTimelinePrecision } from "../config";
+import { defaultFramePreviewScale, defaultNewMarkerDurationSeconds, defaultPausePlaybackOnScrub, defaultScrubCommitThrottleMs, defaultTimelineEndPaddingFraction, defaultTimelinePrecision } from "../config";
 import type { AdjustmentLayerSelection, CompositionSelection, ContextMenuState, ExportDialogTab, LeftPanelTab, Mode, MotionMarkerSelection, PlaybackClock, ProjectExportFormat, RightPanelTab, SettingsSection, VideoExportProgress } from "../types";
 import { defaultPreviewViewportState, defaultTimelineMode } from "../../core/project";
 import type { Bounds, EditorState, PersistedEditorTab, Point, ProjectManifest, SelectionPayload, TimelineMode } from "../../core/types";
@@ -46,6 +46,7 @@ export type EditorStoreState = {
   defaultNewMarkerDurationSeconds: number;
   timelineEndPaddingFraction: number;
   timelinePrecision: number;
+  pausePlaybackOnScrub: boolean;
   fastSelectEnabled: boolean;
   leftPanelTab: LeftPanelTab;
   rightPanelTab: RightPanelTab;
@@ -121,6 +122,7 @@ export type EditorStoreActions = {
   setDefaultNewMarkerDurationSeconds: (seconds: Setter<number>) => void;
   setTimelineEndPaddingFraction: (fraction: Setter<number>) => void;
   setTimelinePrecision: (precision: Setter<number>) => void;
+  setPausePlaybackOnScrub: (enabled: Setter<boolean>) => void;
   setFastSelectEnabled: (enabled: Setter<boolean>) => void;
   setLeftPanelTab: (tab: Setter<LeftPanelTab>) => void;
   setRightPanelTab: (tab: Setter<RightPanelTab>) => void;
@@ -197,6 +199,7 @@ function getInitialState(project: ProjectManifest): EditorStoreState {
     defaultNewMarkerDurationSeconds: editorState?.defaultNewMarkerDurationSeconds ?? defaultNewMarkerDurationSeconds,
     timelineEndPaddingFraction: editorState?.timelineEndPaddingFraction ?? defaultTimelineEndPaddingFraction,
     timelinePrecision: editorState?.timelinePrecision ?? defaultTimelinePrecision,
+    pausePlaybackOnScrub: editorState?.pausePlaybackOnScrub ?? defaultPausePlaybackOnScrub,
     fastSelectEnabled: false,
     leftPanelTab: editorState?.leftPanelTab ?? "assets",
     rightPanelTab: editorState?.rightPanelTab ?? "video",
@@ -258,6 +261,7 @@ export function createEditorStore(project: ProjectManifest) {
     setDefaultNewMarkerDurationSeconds: createFieldSetter(set, "defaultNewMarkerDurationSeconds"),
     setTimelineEndPaddingFraction: createFieldSetter(set, "timelineEndPaddingFraction"),
     setTimelinePrecision: createFieldSetter(set, "timelinePrecision"),
+    setPausePlaybackOnScrub: createFieldSetter(set, "pausePlaybackOnScrub"),
     setFastSelectEnabled: createFieldSetter(set, "fastSelectEnabled"),
     setLeftPanelTab: createFieldSetter(set, "leftPanelTab"),
     setRightPanelTab: createFieldSetter(set, "rightPanelTab"),
@@ -342,6 +346,8 @@ export function createEditorStore(project: ProjectManifest) {
       currentSceneTime: editorState.currentSceneTime ?? 2.6,
       defaultNewMarkerDurationSeconds: editorState.defaultNewMarkerDurationSeconds ?? defaultNewMarkerDurationSeconds,
       timelineEndPaddingFraction: editorState.timelineEndPaddingFraction ?? defaultTimelineEndPaddingFraction,
+      timelinePrecision: editorState.timelinePrecision ?? defaultTimelinePrecision,
+      pausePlaybackOnScrub: editorState.pausePlaybackOnScrub ?? defaultPausePlaybackOnScrub,
       frameZoomBarOpen: editorState.preview?.zoomBarOpen ?? defaultPreviewViewportState.zoomBarOpen,
       framePreviewScale: editorState.preview?.scale ?? defaultFramePreviewScale,
       leftPanelTab: editorState.leftPanelTab ?? "assets",
@@ -456,6 +462,8 @@ export function useAppEditorState() {
     setTimelineEndPaddingFraction: state.setTimelineEndPaddingFraction,
     timelinePrecision: state.timelinePrecision,
     setTimelinePrecision: state.setTimelinePrecision,
+    pausePlaybackOnScrub: state.pausePlaybackOnScrub,
+    setPausePlaybackOnScrub: state.setPausePlaybackOnScrub,
     fastSelectEnabled: state.fastSelectEnabled,
     setFastSelectEnabled: state.setFastSelectEnabled,
     leftPanelTab: state.leftPanelTab,

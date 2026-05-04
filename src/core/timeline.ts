@@ -17,6 +17,10 @@ export function buildLinearTimeline(scene: Scene): TimelineComposition[] {
   });
 }
 
+export function getCompositionPreviewTime(composition: Pick<CompositionClip, "duration" | "start" | "trimStart">, sceneTime: number) {
+  return clamp(sceneTime - (composition.start ?? 0) + (composition.trimStart ?? 0), 0, composition.duration);
+}
+
 export function getRenderableScene(scene: Scene, timelineLayers: TimelineLayerState | undefined): Scene {
   return {
     ...scene,
@@ -209,7 +213,7 @@ export function getTimelinePreviewState({ adjustmentLayers, compositions, sceneD
   return {
     activeTimelinePart,
     activeComposition,
-    previewTime: activeTimelinePart ? clamp(compositionLookupTime - activeTimelinePart.start, 0, activeTimelinePart.duration) : 0,
+    previewTime: activeTimelinePart ? getCompositionPreviewTime(activeTimelinePart, compositionLookupTime) : 0,
     previewParts,
     transitionPreviewParts,
   };
@@ -219,7 +223,7 @@ function getPreviewStackParts(compositions: CompositionClip[], timeline: Timelin
   return getActiveTimelinePartsAtTime(timeline, lookupTime, timelineLayers, "bottom-to-top").map((timelinePart) => ({
     part: compositions.find((item) => item.id === timelinePart.id) ?? timelinePart,
     start: timelinePart.start,
-    previewTime: clamp(previewSceneTime - timelinePart.start, 0, timelinePart.duration),
+    previewTime: getCompositionPreviewTime(timelinePart, previewSceneTime),
   }));
 }
 

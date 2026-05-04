@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type DragEvent, type MouseEvent as ReactMouseEvent, type PointerEvent, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { Eye, EyeOff, Lock, MoreVertical, Unlock } from "lucide-react";
+import { Eye, EyeOff, Lock, MoreVertical, Unlock, Zap } from "lucide-react";
 import { getEffectPackage } from "../../core/effects/registry";
 import type { EffectTimelineGradient } from "../../core/types";
 import { Input } from "../ui/input";
@@ -24,7 +24,7 @@ export function EffectDragPreviewBlock({ blockRef, preview }: { blockRef: RefObj
   );
 }
 
-export function CompositionTimelineBlock({ blockRef, name, duration, isEmpty, sourceMissing, locked = false, selected, preview = false, blocked = false, style, dataAttributes, leftResizeEnabled = false, rightResizeEnabled = false, onClick, onDoubleClick, onPointerDown, onContextMenu, onLeftResize, onRightResize }: { blockRef?: RefObject<HTMLDivElement | null>; name: string; duration: number; isEmpty: boolean; sourceMissing: boolean; locked?: boolean; selected: boolean; preview?: boolean; blocked?: boolean; style: CSSProperties; dataAttributes?: Record<string, string>; leftResizeEnabled?: boolean; rightResizeEnabled?: boolean; onClick?: () => void; onDoubleClick?: () => void; onPointerDown?: (event: PointerEvent<HTMLDivElement>) => void; onContextMenu?: (event: ReactMouseEvent<HTMLElement>) => void; onLeftResize?: (event: PointerEvent<HTMLDivElement>) => void; onRightResize?: (event: PointerEvent<HTMLDivElement>) => void }) {
+export function CompositionTimelineBlock({ blockRef, name, duration, isEmpty, sourceMissing, locked = false, selected, preview = false, blocked = false, prerendered = false, style, dataAttributes, leftResizeEnabled = false, rightResizeEnabled = false, onClick, onDoubleClick, onPointerDown, onContextMenu, onLeftResize, onRightResize }: { blockRef?: RefObject<HTMLDivElement | null>; name: string; duration: number; isEmpty: boolean; sourceMissing: boolean; locked?: boolean; selected: boolean; preview?: boolean; blocked?: boolean; prerendered?: boolean; style: CSSProperties; dataAttributes?: Record<string, string>; leftResizeEnabled?: boolean; rightResizeEnabled?: boolean; onClick?: () => void; onDoubleClick?: () => void; onPointerDown?: (event: PointerEvent<HTMLDivElement>) => void; onContextMenu?: (event: ReactMouseEvent<HTMLElement>) => void; onLeftResize?: (event: PointerEvent<HTMLDivElement>) => void; onRightResize?: (event: PointerEvent<HTMLDivElement>) => void }) {
   const fillClass = preview ? "top-0" : "inset-y-0";
   const interactivityClass = preview ? "pointer-events-none z-30" : "";
   const surfaceClass = blocked ? "bg-[linear-gradient(180deg,#dc2626,#991b1b)] text-white" : sourceMissing ? "bg-[linear-gradient(180deg,#5b616b,#343941)] text-[#d6dae2]" : isEmpty ? "bg-[linear-gradient(180deg,#2b2d35,#191b21)] text-[#8c929f] opacity-75" : "bg-[linear-gradient(180deg,#38a86d,#17603c)] text-white";
@@ -40,7 +40,8 @@ export function CompositionTimelineBlock({ blockRef, name, duration, isEmpty, so
   }
 
   return <div ref={blockRef} data-timeline-control {...dataAttributes} role="button" tabIndex={0} className={`absolute ${fillClass} ${interactivityClass} box-border flex min-w-[34px] cursor-default items-end justify-between gap-2 overflow-hidden rounded-[3px] px-3 py-2 text-left text-[13px] leading-none shadow-[inset_1px_0_0_rgb(0_0_0/0.55),inset_-1px_0_0_rgb(0_0_0/0.55)] before:absolute before:left-1/2 before:top-2 before:-translate-x-1/2 before:text-[12px] before:font-extrabold before:text-white/25 before:content-['Clip'] ${surfaceClass} ${stateClass}`} style={style} onClick={locked ? undefined : onClick} onDoubleClick={locked ? undefined : onDoubleClick} onPointerDown={blockPointerDown} onContextMenu={locked ? undefined : onContextMenu}>
-    <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-bold">{name}</span><small className="shrink-0 text-[12px] font-extrabold text-white/80">{duration}s</small>
+    {prerendered && !preview ? <Zap className="absolute left-3 top-1 text-[#bff0ff] drop-shadow-[0_0_7px_rgba(98,199,255,0.85)]" size={12} strokeWidth={2.8} aria-label="Marked for prerender" /> : null}
+    <span className={`min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-bold ${prerendered && !preview ? "pt-2" : ""}`}>{name}</span><small className="shrink-0 text-[12px] font-extrabold text-white/80">{duration}s</small>
     <div className={`absolute left-0 top-0 bottom-0 w-2 ${leftResizeEnabled && !locked ? "cursor-ew-resize" : "pointer-events-none cursor-default"}`} onPointerDown={leftResizeEnabled && !locked ? onLeftResize : undefined} />
     <div className={`absolute right-0 top-0 bottom-0 w-2 ${rightResizeEnabled && !locked ? "cursor-ew-resize" : "pointer-events-none cursor-default"}`} onPointerDown={rightResizeEnabled && !locked ? onRightResize : undefined} />
   </div>;

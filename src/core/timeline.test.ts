@@ -116,6 +116,25 @@ describe("timeline model", () => {
     expect(previewState.transitionPreviewParts?.to.map((item) => [item.part.id, item.previewTime])).toEqual([["b", 0.75]]);
   });
 
+  it("offsets composition preview time by the clip trim start", () => {
+    const trimmedScene: Scene = {
+      ...scene,
+      compositions: [
+        { ...scene.compositions[0], start: 2, trimStart: 1.25, duration: 4 },
+      ],
+    };
+    const previewState = getTimelinePreviewState({
+      compositions: trimmedScene.compositions,
+      sceneDurationSeconds: sceneDuration(trimmedScene),
+      sceneTime: 2.5,
+      timeline: buildLinearTimeline(trimmedScene),
+      timelineMode: "composition",
+    });
+
+    expect(previewState.previewTime).toBe(1.75);
+    expect(previewState.previewParts.map((item) => [item.part.id, item.previewTime])).toEqual([["a", 1.75]]);
+  });
+
   it("removes hidden composition, adjustment, motion, and transition rows from renderable scenes", () => {
     const renderable = getRenderableScene({
       ...scene,

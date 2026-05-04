@@ -5,7 +5,7 @@ import { useFramePreviewZoomCommands } from "./app/features/editor-layout/useFra
 import { usePreviewScrollPersistence } from "./app/features/editor-layout/usePreviewScrollPersistence";
 import { useExportCommands } from "./app/features/export/useExportCommands";
 import { usePlaybackController } from "./app/features/playback/usePlaybackController";
-import { usePrerenderCache } from "./app/features/preview/usePrerenderCache";
+import { usePrerenderCache, type PrerenderManualCompositionRange } from "./app/features/preview/usePrerenderCache";
 import { usePresentationController } from "./app/features/presentation/usePresentationController";
 import { isEditorTarget, useGlobalEditorShortcuts } from "./app/features/shortcuts/useGlobalEditorShortcuts";
 import { useSettingsShortcut } from "./app/features/shortcuts/useSettingsShortcut";
@@ -57,7 +57,7 @@ import type { AdjustmentEffectPointControl } from "./core/effects/types";
 import { getTransitionEffectPackage } from "./core/effects/registry";
 import { normalizeSymmetricTransitionLayer } from "./core/transitions";
 import { defaultComposeLayoutState, defaultEditorLayoutState, defaultPreviewViewportState, defaultTimelineLayerState, defaultTimelineMode, defaultTimelineViewportState, emptyTimelineLayerState } from "./core/project";
-import { getExecutableAdjustmentLayers, getExecutableTransitionLayers } from "./core/timeline";
+import { getExecutableAdjustmentLayers, getExecutableTransitionLayers, getTopTimelinePartAtTime } from "./core/timeline";
 import type { TimelineLayerCategory } from "./core/timelineLayers";
 import { FRAME_HEIGHT, FRAME_WIDTH, type Bounds, type CompositionClip, type EditorSessionState, type EditorState, type FrameObject, type LayerAnimation, type MotionEffectKind, type Part, type Point, type ProjectManifest, type SelectionPayload, type TimelineClip, type TimelineLayerState, type TimelineViewportState } from "./core/types";
 import { FindMediaDialog } from "./components/FileManager";
@@ -78,6 +78,10 @@ const defaultEditorState: EditorState = {
   preview: defaultPreviewViewportState,
   editor: {},
 };
+
+const wheelLineDeltaPx = 16;
+const wheelPageDeltaPx = 600;
+const frameWheelZoomSensitivity = 0.0025;
 
 const unsupportedEditorExtensions = new Set(["mp4", "mov", "m4v", "webm", "avi", "mkv", "mp3", "wav", "aiff", "flac", "png", "jpg", "jpeg", "gif", "webp", "ico", "pdf", "zip"]);
 
@@ -202,6 +206,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     defaultNewMarkerDurationSeconds: markerDurationSeconds, setDefaultNewMarkerDurationSeconds,
     timelineEndPaddingFraction, setTimelineEndPaddingFraction,
     timelinePrecision, setTimelinePrecision,
+    pausePlaybackOnScrub, setPausePlaybackOnScrub,
     fastSelectEnabled, setFastSelectEnabled,
     leftPanelTab, setLeftPanelTab,
     rightPanelTab, setRightPanelTab,
@@ -367,7 +372,9 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     updateEditorState,
   });
   const { updateEditorViewportState } = useEditorViewportState(updateEditorState);
-  const { toggleFrameZoomBar, updateFramePreviewScale } = useFramePreviewZoomCommands({
+  const { toggleFrameZoomBar, updateFramePreviewScale, zoomFramePreviewAtPoint } = useFramePreviewZoomCommands({
+    centerPreviewScrollRef,
+    framePreviewScale,
     frameZoomBarOpen,
     frameZoomControlRef,
     setFramePreviewScale,
@@ -467,10 +474,16 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
   const visibleSceneTransitionLayers = useMemo(() => getExecutableTransitionLayers(scene.transitionLayers, timelineLayers), [scene.transitionLayers, timelineLayers]);
   const activeCompositionHidden = Boolean(activeTimelinePart && hiddenCompositionLayerIds.has(activeTimelinePart.layerId ?? "comp"));
   const hasPreviewComposition = hasActiveComposition;
+  const manualPrerenderRanges = useMemo(() => getManualPrerenderRangesForMarkedCompositions(renderableScene.compositions, sceneDurationSeconds, timelineLayers), [renderableScene.compositions, sceneDurationSeconds, timelineLayers]);
+  const manualPrerenderCompositionIds = useMemo(() => new Set(manualPrerenderRanges.map((range) => range.compositionId)), [manualPrerenderRanges]);
+  const manualPrerenderActiveAtCurrentTime = useMemo(() => manualPrerenderRanges.some((range) => currentSceneTime >= range.start && currentSceneTime < range.end), [currentSceneTime, manualPrerenderRanges]);
+  const cachedPreviewPlaybackEnabled = (prerenderCacheEnabled || manualPrerenderActiveAtCurrentTime) && mode === "preview" && !composeMode;
+  const prerenderScheduleRanges = prerenderCacheEnabled ? [] : manualPrerenderRanges;
+  const prerenderSchedulingEnabled = (prerenderCacheEnabled || manualPrerenderActiveAtCurrentTime) && mode === "preview" && !composeMode;
   const prerenderCache = usePrerenderCache({
     blockDurationMs: prerenderBlockDurationMs,
     cacheResetToken: prerenderCacheResetToken,
-    enabled: prerenderCacheEnabled && mode === "preview" && !composeMode,
+    enabled: prerenderSchedulingEnabled,
     hasActiveComposition: hasPreviewComposition,
     isPlaying,
     manifestPath: activeProjectManifestPath,
@@ -479,7 +492,14 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     sceneDuration: sceneDurationSeconds,
     sceneTime: currentSceneTime,
     tileHeight: videoExportTileHeight,
+    timelineLayers,
+    scheduleRanges: prerenderScheduleRanges,
   });
+  const visiblePrerenderCoverage = useMemo(() => {
+    if (prerenderCacheEnabled) return prerenderCache.coverage;
+    if (manualPrerenderRanges.length === 0) return null;
+    return filterPrerenderCoverageToRanges(prerenderCache.coverage, manualPrerenderRanges);
+  }, [manualPrerenderRanges, prerenderCache.coverage, prerenderCacheEnabled]);
   const {
     formatPlaybackTimeLabel,
     jumpToEnd,
@@ -519,7 +539,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     setPlaybackClock,
     setRenderCurrentSceneTime,
     requestCachedPreviewAtTime: prerenderCache.requestCacheAtTime,
-    useCachedPreviewPlayback: prerenderCacheEnabled && mode === "preview" && !composeMode,
+    useCachedPreviewPlayback: cachedPreviewPlaybackEnabled,
     timeline,
     timelineLayers,
     timelineEndPaddingFraction,
@@ -595,6 +615,55 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
       toast.error(error instanceof Error ? error.message : "Failed to clear prerender caches.");
     }
   }
+  async function togglePrerenderCompositionFromLibrary(compositionId: string) {
+    const sourceComposition = compositionLibrary.find((composition) => composition.id === compositionId || composition.filePath === compositionId) ?? scene.compositions.find((composition) => composition.id === compositionId || composition.compositionId === compositionId || composition.filePath === compositionId);
+    const sourceId = sourceComposition?.compositionId ?? sourceComposition?.id ?? compositionId;
+    const currentlyMarked = Boolean(sourceComposition?.prerender) || manualPrerenderCompositionIds.has(sourceId);
+    if (currentlyMarked) {
+      implicitFileOperation(setCompositionPrerenderMark)(compositionId, false);
+      toast.success("Prerender mark removed.");
+      return;
+    }
+    implicitFileOperation(setCompositionPrerenderMark)(compositionId, true);
+    const toastId = toast.loading("Prerendering composition...");
+    const result = await prerenderCache.prerenderComposition(compositionId);
+    if (result.visibleRanges === 0) {
+      toast.error("No visible timeline instances of this composition to prerender.", { id: toastId });
+      return;
+    }
+    if (result.queuedBlocks === 0) {
+      toast.success("Composition is already prerendered.", { id: toastId });
+      return;
+    }
+    if (!result.completed) {
+      toast.error(result.error ?? "Composition prerender failed.", { id: toastId });
+      return;
+    }
+    toast.success(`Prerendered ${result.queuedBlocks} composition range${result.queuedBlocks === 1 ? "" : "s"}.`, { id: toastId });
+  }
+  function setCompositionPrerenderMark(compositionId: string, marked: boolean) {
+    const composition = compositionLibrary.find((item) => item.id === compositionId || item.filePath === compositionId) ?? scene.compositions.find((item) => item.id === compositionId || item.compositionId === compositionId || item.filePath === compositionId);
+    if (!composition) return;
+    const sourceId = composition.compositionId ?? composition.id;
+    const sourcePath = composition.filePath;
+    const previousSource = compositionSourcesRef.current[sourcePath] ?? composition.source ?? "";
+    const nextSource = setCompositionSourcePrerenderMark(previousSource, marked);
+    const nextSources = { ...compositionSourcesRef.current, [sourcePath]: nextSource };
+    compositionSourcesRef.current = nextSources;
+    setCompositionSources(nextSources);
+    const editorTab = editorTabs.find((tab) => tab.filePath === sourcePath);
+    if (editorTab) updateEditorTab(editorTab.id, { source: nextSource });
+    updateProject((current) => ({
+      ...current,
+      compositionSources: nextSources,
+      compositions: (current.compositions ?? []).map((item) => compositionMatchesManualPrerenderId(item, sourceId) ? { ...item, prerender: marked || undefined, source: item.filePath === sourcePath ? nextSource : item.source } : item),
+      compositionLibrary: (current.compositionLibrary ?? []).map((item) => compositionMatchesManualPrerenderId(item, sourceId) ? { ...item, prerender: marked || undefined, source: item.filePath === sourcePath ? nextSource : item.source } : item),
+      timelines: (current.timelines ?? []).map((timeline) => ({
+        ...timeline,
+        clips: timeline.clips.map((clip) => clip.compositionId === sourceId ? { ...clip } : clip),
+      })),
+    }), { history: true });
+  }
   const { exportProject, exportRenderedMedia, stopVideoExport } = useExportCommands({
     projectRef,
     manifestPath: activeProjectManifestPath,
@@ -638,6 +707,13 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
   }, [timelineMode]);
 
   useEffect(() => {
+    const stage = centerPreviewScrollRef.current;
+    if (!stage || mode !== "preview") return;
+    stage.addEventListener("wheel", zoomFramePreviewFromWheel, { passive: false });
+    return () => stage.removeEventListener("wheel", zoomFramePreviewFromWheel);
+  }, [mode, zoomFramePreviewAtPoint]);
+
+  useEffect(() => {
     activePartFilePathRef.current = hasActiveComposition ? part.filePath : "";
   }, [hasActiveComposition, part.filePath]);
 
@@ -654,13 +730,14 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
       defaultNewMarkerDurationSeconds: markerDurationSeconds,
       timelineEndPaddingFraction,
       timelinePrecision,
+      pausePlaybackOnScrub,
       preview: {
         ...(state.preview ?? defaultPreviewViewportState),
         scale: framePreviewScale,
         zoomBarOpen: frameZoomBarOpen,
       },
     }));
-  }, [framePreviewScale, frameZoomBarOpen, leftPanelTab, markerDurationSeconds, mode, rightPanelTab, selectedMotionMarker, selectedPartId, selectedSceneId, timelineEndPaddingFraction, timelinePrecision, timelineMode]);
+  }, [framePreviewScale, frameZoomBarOpen, leftPanelTab, markerDurationSeconds, mode, pausePlaybackOnScrub, rightPanelTab, selectedMotionMarker, selectedPartId, selectedSceneId, timelineEndPaddingFraction, timelinePrecision, timelineMode]);
 
   useEffect(() => {
     const editorSession = toPersistedEditorSession(editorTabs, activeEditorTabId);
@@ -913,6 +990,44 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
       ...current,
       timelines: (current.timelines ?? []).map((timeline) => (timeline.id === scene.id ? { ...timeline, transitionLayers: (timeline.transitionLayers ?? []).map((layer) => layer.id === layerId ? normalizeSymmetricTransitionLayer(updater(layer)) : layer) } : timeline)),
     }), { history: true });
+  }
+
+  function shiftTimelineGapMarkers(moves: { gapStart: number; gapEnd: number; delta: number; compositions: Array<{ compositionId: string; start: number }>; adjustmentLayers: Array<{ layerId: string; start: number }>; motionMarkers: Array<{ markerId: string; start: number }>; transitionLayers: Array<{ layerId: string; start: number }> }) {
+    const compositionStarts = new Map(moves.compositions.map((move) => [move.compositionId, move.start]));
+    const adjustmentStarts = new Map(moves.adjustmentLayers.map((move) => [move.layerId, move.start]));
+    const motionStarts = new Map(moves.motionMarkers.map((move) => [move.markerId, move.start]));
+    const transitionStarts = new Map(moves.transitionLayers.map((move) => [move.layerId, move.start]));
+    const playheadTime = currentSceneTimeRef.current;
+    const nextPlayheadTime = playheadTime >= moves.gapEnd - 0.000001
+      ? roundToPrecision(Math.max(0, playheadTime + moves.delta), timelinePrecision)
+      : playheadTime > moves.gapStart && playheadTime < moves.gapEnd
+        ? roundToPrecision(moves.gapStart, timelinePrecision)
+        : playheadTime;
+    updateProject((current) => ({
+      ...current,
+      editorState: { ...(current.editorState ?? defaultEditorState), currentSceneTime: nextPlayheadTime },
+      timelines: (current.timelines ?? []).map((timeline) => {
+        if (timeline.id !== scene.id) return timeline;
+        return {
+          ...timeline,
+          clips: timeline.clips.map((clip) => {
+            const start = compositionStarts.get(clip.id);
+            if (start === undefined) return clip;
+            const previousStart = clip.start ?? 0;
+            const delta = roundToPrecision(previousStart - start, timelinePrecision);
+            return {
+              ...clip,
+              start,
+              motionMarkers: clip.motionMarkers?.map((marker) => ({ ...marker, start: roundToPrecision(marker.start + delta, timelinePrecision) })),
+            };
+          }),
+          adjustmentLayers: (timeline.adjustmentLayers ?? []).map((layer) => adjustmentStarts.has(layer.id) ? { ...layer, start: adjustmentStarts.get(layer.id)! } : layer),
+          motionMarkers: (timeline.motionMarkers ?? []).map((marker) => motionStarts.has(marker.id) ? { ...marker, start: motionStarts.get(marker.id)! } : marker),
+          transitionLayers: (timeline.transitionLayers ?? []).map((layer) => transitionStarts.has(layer.id) ? normalizeSymmetricTransitionLayer({ ...layer, start: transitionStarts.get(layer.id)! }) : layer),
+        };
+      }),
+    }), { history: true });
+    if (Math.abs(nextPlayheadTime - playheadTime) >= 0.001) scrubToSceneTime(nextPlayheadTime);
   }
 
   function addTransitionLayerAt(effectId: string, sceneTime: number, layerId?: string) {
@@ -1244,6 +1359,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     timeline,
     deleteCompositionsFromTimeline,
     openCompositionInEditor,
+    prerenderComposition: togglePrerenderCompositionFromLibrary,
     selectAdjustmentLayer,
     selectPart,
     selectMotionMarker,
@@ -1344,7 +1460,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     timelines,
     timelineCompositionIds,
     onFindMediaRequestChange: setFindMediaRequest,
-    actions: { ...fileManagerActions, reloadProject, openCompositionFile: openCompositionInEditor },
+    actions: { ...fileManagerActions, reloadProject, openCompositionFile: openCompositionInEditor, prerenderComposition: togglePrerenderCompositionFromLibrary },
   });
   const editorLayout = project.editorState?.layout ?? defaultEditorLayoutState;
   const composeLayout = project.editorState?.composeLayout ?? defaultComposeLayoutState;
@@ -1367,6 +1483,16 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
   const playbackProgress = playbackDisplayDuration > 0 ? `${clamp(playbackDisplayTime / playbackDisplayDuration, 0, 1) * 100}%` : "0%";
   const playbackScrubberStyle = { "--clipper-playback-progress": playbackProgress } as CSSProperties;
   const blankFrameViewportStyle = { width: FRAME_WIDTH * framePreviewScale, height: FRAME_HEIGHT * framePreviewScale } as CSSProperties;
+  function zoomFramePreviewFromWheel(event: globalThis.WheelEvent) {
+    if (mode !== "preview" || (!event.ctrlKey && !event.metaKey)) return;
+    event.preventDefault();
+    const deltaY = event.deltaMode === globalThis.WheelEvent.DOM_DELTA_LINE
+      ? event.deltaY * wheelLineDeltaPx
+      : event.deltaMode === globalThis.WheelEvent.DOM_DELTA_PAGE
+        ? event.deltaY * wheelPageDeltaPx
+        : event.deltaY;
+    zoomFramePreviewAtPoint(Math.exp(-deltaY * frameWheelZoomSensitivity), event.clientX, event.clientY);
+  }
   const adjustmentPickLayer = pointPickAdjustment ? scene.adjustmentLayers?.find((layer) => layer.id === pointPickAdjustment.layerId) : null;
   const adjustmentFramePickPoint = pointPickAdjustment && adjustmentPickLayer ? getAdjustmentPointControlFramePoint(adjustmentPickLayer, pointPickAdjustment.control) : null;
   const activeFramePickPoint = (pointPickAdjustment ? framePickPreviewPoint ?? adjustmentFramePickPoint : framePickPoint) ?? null;
@@ -1546,7 +1672,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
           mode={mode}
           onCachedPreviewDisplayReadyChange={(ready) => { cachedPreviewDisplayReadyRef.current = ready; }}
           prerenderCacheBlackMissDebug={prerenderCacheBlackMissDebug}
-          prerenderCacheEnabled={prerenderCacheEnabled && !composeMode}
+          prerenderCacheEnabled={cachedPreviewPlaybackEnabled}
           previewKey={part.id}
           stageRef={centerPreviewScrollRef}
           onModeChange={updateMode}
@@ -1631,7 +1757,9 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
         timelineEndPaddingFraction,
         timelinePrecision,
         scrubSnapEnabled,
-        prerenderCacheCoverage: prerenderCacheEnabled && !composeMode ? prerenderCache.coverage : null,
+        prerenderCacheCoverage: !composeMode ? visiblePrerenderCoverage : null,
+        prerenderedCompositionIds: manualPrerenderCompositionIds,
+        prerenderedCompositionRanges: manualPrerenderRanges,
         sceneDuration: sceneDurationSeconds,
         selectedPartId,
         selectedParts,
@@ -1675,8 +1803,8 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
         onMoveMotionMarker: moveMotionMarker,
         onMoveMotionMarkers: moveMotionMarkers,
         onScrub: composeMode && activeTimelinePart ? scrubToPlaybackDisplayTime : scrubToSceneTime,
-        onScrubStart: pausePlaybackForTimelineScrub,
-        onScrubEnd: resumePlaybackAfterTimelineScrub,
+        onScrubStart: pausePlaybackOnScrub ? pausePlaybackForTimelineScrub : () => {},
+        onScrubEnd: pausePlaybackOnScrub ? resumePlaybackAfterTimelineScrub : () => {},
         onUpdateMotionMarkers: updateMotionMarkers as any,
         onResizeMotionMarkers: resizeMotionMarkers as any,
         onAddComposition: addCompositionFromLibrary,
@@ -1689,6 +1817,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
         onSelectTransitionLayer: selectTransitionLayer,
         onSelectTransitionLayers: selectTransitionLayers,
         onMoveTransitionLayer: moveTransitionLayer,
+        onShiftTimelineGapMarkers: shiftTimelineGapMarkers,
         onUpdateTransitionLayer: updateTransitionLayer,
         composeAnimationPart: composeMode && hasActiveComposition ? part : null,
         selectedObjectIds: selectedComposeObjectIds,
@@ -1712,6 +1841,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
       exportIncludeSources={exportIncludeSources}
       exportProgress={exportProgress}
       isExporting={isExporting}
+      pausePlaybackOnScrub={pausePlaybackOnScrub}
       partCount={scene.compositions.length}
       prerenderCacheEnabled={prerenderCacheEnabled}
       prerenderCacheBlackMissDebug={prerenderCacheBlackMissDebug}
@@ -1738,6 +1868,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
       onExportIncludeSourcesChange={setExportIncludeSources}
       onMediaExport={() => void exportRenderedMedia()}
       onProjectExport={() => void exportProject()}
+      onPausePlaybackOnScrubChange={setPausePlaybackOnScrub}
       onPrerenderCacheEnabledChange={setPrerenderCacheEnabled}
       onPrerenderCacheBlackMissDebugChange={setPrerenderCacheBlackMissDebug}
       onPrerenderBlockDurationMsChange={setPrerenderBlockDurationMs}
@@ -1810,6 +1941,89 @@ function clampPrerenderBlockDurationMs(value: number) {
     Math.max(Math.round(value), minPrerenderBlockDurationMs),
     maxPrerenderBlockDurationMs,
   );
+}
+
+function getManualPrerenderRangesForComposition(compositions: CompositionClip[], compositionId: string, sceneDuration: number, timelineLayers: TimelineLayerState | undefined): PrerenderManualCompositionRange[] {
+  const boundaries = new Set<number>([0, sceneDuration]);
+  for (const composition of compositions) {
+    const start = Math.max(composition.start ?? 0, 0);
+    const end = Math.min(start + composition.duration, sceneDuration);
+    if (end <= start) continue;
+    boundaries.add(start);
+    boundaries.add(end);
+  }
+  const sorted = [...boundaries].sort((left, right) => left - right);
+  const ranges: PrerenderManualCompositionRange[] = [];
+  for (let index = 0; index < sorted.length - 1; index += 1) {
+    const start = sorted[index];
+    const end = sorted[index + 1];
+    if (end <= start) continue;
+    const top = getTopTimelinePartAtTime(getCompositionTimelineRanges(compositions), start + (end - start) / 2, timelineLayers);
+    if (!top || !compositionMatchesManualPrerenderId(top, compositionId)) continue;
+    const key = top.compositionId ?? top.id;
+    const last = ranges[ranges.length - 1];
+    if (last && last.compositionId === key && Math.abs(last.end - start) < 1e-6) last.end = end;
+    else ranges.push({ compositionId: key, start, end });
+  }
+  return ranges;
+}
+
+function getCompositionTimelineRanges(compositions: CompositionClip[]) {
+  return compositions.map((composition) => {
+    const start = composition.start ?? 0;
+    return { ...composition, start, end: start + composition.duration };
+  });
+}
+
+function getManualPrerenderRangesForMarkedCompositions(compositions: CompositionClip[], sceneDuration: number, timelineLayers: TimelineLayerState | undefined) {
+  const markedIds = new Set(compositions.filter((composition) => composition.prerender).map((composition) => composition.compositionId ?? composition.id));
+  return mergeManualPrerenderRanges([...markedIds].flatMap((compositionId) => getManualPrerenderRangesForComposition(compositions, compositionId, sceneDuration, timelineLayers)));
+}
+
+function compositionMatchesManualPrerenderId(composition: CompositionClip, compositionId: string) {
+  return composition.id === compositionId || composition.compositionId === compositionId || composition.filePath === compositionId || composition.filePath.endsWith(`/${compositionId}`);
+}
+
+function setCompositionSourcePrerenderMark(source: string, marked: boolean) {
+  const existingPattern = /\n\s*prerender:\s*(?:true|false),?/;
+  if (existingPattern.test(source)) {
+    return marked
+      ? source.replace(existingPattern, "\n  prerender: true,")
+      : source.replace(existingPattern, "");
+  }
+  if (!marked) return source;
+  return source.replace(/new\s+Composition\s*\(\s*{\s*\n/, (match) => `${match}  prerender: true,\n`);
+}
+
+function filterPrerenderCoverageToRanges(coverage: { blocks: Array<{ start: number; duration: number; state: "enqueued" | "queued" | "cached" }> }, ranges: PrerenderManualCompositionRange[]) {
+  const clippedBlocks = coverage.blocks.flatMap((block) => {
+    const blockEnd = block.start + block.duration;
+    return ranges.flatMap((range) => {
+      const start = Math.max(block.start, range.start);
+      const end = Math.min(blockEnd, range.end);
+      return end > start ? [{ ...block, start, duration: end - start }] : [];
+    });
+  });
+  const covered = clippedBlocks.some((block) => block.state !== "enqueued");
+  return {
+    blocks: covered ? clippedBlocks : ranges.map((range) => ({ start: range.start, duration: range.end - range.start, state: "enqueued" as const })),
+  };
+}
+
+function mergeManualPrerenderRanges(ranges: PrerenderManualCompositionRange[]) {
+  const sorted = ranges
+    .slice()
+    .sort((left, right) => left.compositionId.localeCompare(right.compositionId) || left.start - right.start);
+  const merged: PrerenderManualCompositionRange[] = [];
+  for (const range of sorted) {
+    const last = merged[merged.length - 1];
+    if (!last || last.compositionId !== range.compositionId || range.start > last.end) {
+      merged.push({ ...range });
+      continue;
+    }
+    last.end = Math.max(last.end, range.end);
+  }
+  return merged;
 }
 
 function isInspectorTarget(target: HTMLElement | null) {

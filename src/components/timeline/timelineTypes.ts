@@ -31,6 +31,8 @@ export type TimelinePanelProps = {
   timelinePrecision: number;
   scrubSnapEnabled: boolean;
   prerenderCacheCoverage?: PrerenderCacheCoverage | null;
+  prerenderedCompositionIds?: Set<string>;
+  prerenderedCompositionRanges?: Array<{ compositionId: string; start: number; end: number }>;
   onScrub: (time: number) => void;
   onScrubStart: () => void;
   onScrubEnd: () => void;
@@ -74,6 +76,7 @@ export type TimelinePanelProps = {
   onSelectTransitionLayer?: (layerId: string) => void;
   onSelectTransitionLayers?: (selection: Array<{ layerId: string }>) => void;
   onMoveTransitionLayer?: (layerId: string, start: number, targetLayerId?: string) => void;
+  onShiftTimelineGapMarkers?: (moves: { gapStart: number; gapEnd: number; delta: number; compositions: Array<{ compositionId: string; start: number }>; adjustmentLayers: Array<{ layerId: string; start: number }>; motionMarkers: Array<{ markerId: string; start: number }>; transitionLayers: Array<{ layerId: string; start: number }> }) => void;
   onUpdateTransitionLayer?: (layerId: string, updater: (layer: TransitionLayer) => TransitionLayer) => void;
   composeAnimationPart?: Part | null;
   selectedObjectIds?: string[];

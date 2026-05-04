@@ -817,9 +817,10 @@ ipcMain.handle(
     frameRate: number,
     tileHeight?: number,
     blockDurationMs?: number,
+    frameRange?: ExportFrameRange,
   ) => {
     return withTimeout(
-      prerenderFrame(project, manifestPath, scene, sceneTime, sceneDuration, frameRate, tileHeight, blockDurationMs),
+      prerenderFrame(project, manifestPath, scene, sceneTime, sceneDuration, frameRate, tileHeight, blockDurationMs, frameRange),
       12000,
       `Timed out prerendering frame at ${sceneTime.toFixed(3)}s in the main process.`,
     );
@@ -884,6 +885,7 @@ async function prerenderFrame(
   frameRate: number,
   tileHeight = defaultExportTileHeight,
   blockDurationMs = defaultPrerenderBlockDurationMs,
+  exactFrameRange?: ExportFrameRange,
 ): Promise<PrerenderedFrame[]> {
   if (!Number.isFinite(frameRate) || frameRate <= 0)
     throw new Error("Prerender cache requires a valid frame rate.");
@@ -894,7 +896,7 @@ async function prerenderFrame(
   const exportTileHeight = clampExportTileHeight(tileHeight);
   const exportBlockDurationMs = clampPrerenderBlockDurationMs(blockDurationMs);
   const frameIndex = Math.round(sceneTime * frameRate);
-  const block = getPrerenderBlockRange(frameIndex, sceneDuration, frameRate, exportBlockDurationMs);
+  const block = exactFrameRange ? getBoundedPrerenderFrameRange(exactFrameRange, sceneDuration, frameRate) : getPrerenderBlockRange(frameIndex, sceneDuration, frameRate, exportBlockDurationMs);
   const cacheKey = getPrerenderCacheKey(project, scene, frameRate, exportTileHeight, exportBlockDurationMs);
   const logPrefix = `[clipper prerender-cache] scene=${scene.id} frame=${frameIndex} time=${sceneTime.toFixed(3)}`;
   const cachedBlock = await readPrerenderBlock(manifestPath, scene, frameRate, block, cacheKey);
@@ -1470,6 +1472,13 @@ function getPrerenderBlockRange(frameIndex: number, sceneDuration: number, frame
   const boundedFrameIndex = Math.min(Math.max(frameIndex, 0), totalFrames - 1);
   const startFrame = Math.floor(boundedFrameIndex / framesPerBlock) * framesPerBlock;
   return { startFrame, endFrame: Math.min(startFrame + framesPerBlock, totalFrames) };
+}
+
+function getBoundedPrerenderFrameRange(frameRange: ExportFrameRange, sceneDuration: number, frameRate: number): ExportFrameRange {
+  const totalFrames = Math.max(1, Math.ceil(sceneDuration * frameRate));
+  const startFrame = Math.min(Math.max(Math.floor(frameRange.startFrame), 0), totalFrames - 1);
+  const endFrame = Math.min(Math.max(Math.ceil(frameRange.endFrame), startFrame + 1), totalFrames);
+  return { startFrame, endFrame };
 }
 
 function clampPrerenderBlockDurationMs(value: number) {

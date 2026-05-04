@@ -14,6 +14,7 @@ type AppDialogsProps = {
   exportIncludeSources: boolean;
   exportProgress: string | null;
   isExporting: boolean;
+  pausePlaybackOnScrub: boolean;
   partCount: number;
   prerenderCacheEnabled: boolean;
   prerenderCacheBlackMissDebug: boolean;
@@ -40,6 +41,7 @@ type AppDialogsProps = {
   onExportIncludeSourcesChange: (includeSources: boolean) => void;
   onMediaExport: () => void;
   onProjectExport: () => void;
+  onPausePlaybackOnScrubChange: (enabled: boolean) => void;
   onPrerenderCacheEnabledChange: (enabled: boolean) => void;
   onPrerenderCacheBlackMissDebugChange: (enabled: boolean) => void;
   onPrerenderBlockDurationMsChange: (value: number) => void;
@@ -55,7 +57,7 @@ type AppDialogsProps = {
   onVideoExportCancel: () => void;
 };
 
-export function AppDialogs({ appContextMenu, debugSettingsEnabled, defaultNewMarkerDurationSeconds, exportDialogOpen, exportDialogTab, exportIncludeSources, exportProgress, isExporting, partCount, prerenderCacheEnabled, prerenderCacheBlackMissDebug, prerenderBlockDurationMs, projectExportFormat, projectName, resolution, reusePrerenderCacheForExport, sceneDurationSeconds, sceneName, scrubCommitThrottleMs, settingsOpen, settingsSection, timelineEndPaddingFraction, timelinePrecision, videoExportCancelling, videoExportTileHeight, videoExportProgress, onAppContextMenuClose, onDebugSettingsEnabledChange, onDefaultNewMarkerDurationSecondsChange, onExportDialogOpenChange, onExportDialogTabChange, onExportIncludeSourcesChange, onMediaExport, onProjectExport, onPrerenderCacheEnabledChange, onPrerenderCacheBlackMissDebugChange, onPrerenderBlockDurationMsChange, onClearAllPrerenderCaches, onProjectExportFormatChange, onReusePrerenderCacheForExportChange, onScrubCommitThrottleMsChange, onSettingsOpenChange, onSettingsSectionChange, onTimelineEndPaddingFractionChange, onTimelinePrecisionChange, onVideoExportTileHeightChange, onVideoExportCancel }: AppDialogsProps) {
+export function AppDialogs({ appContextMenu, debugSettingsEnabled, defaultNewMarkerDurationSeconds, exportDialogOpen, exportDialogTab, exportIncludeSources, exportProgress, isExporting, pausePlaybackOnScrub, partCount, prerenderCacheEnabled, prerenderCacheBlackMissDebug, prerenderBlockDurationMs, projectExportFormat, projectName, resolution, reusePrerenderCacheForExport, sceneDurationSeconds, sceneName, scrubCommitThrottleMs, settingsOpen, settingsSection, timelineEndPaddingFraction, timelinePrecision, videoExportCancelling, videoExportTileHeight, videoExportProgress, onAppContextMenuClose, onDebugSettingsEnabledChange, onDefaultNewMarkerDurationSecondsChange, onExportDialogOpenChange, onExportDialogTabChange, onExportIncludeSourcesChange, onMediaExport, onProjectExport, onPausePlaybackOnScrubChange, onPrerenderCacheEnabledChange, onPrerenderCacheBlackMissDebugChange, onPrerenderBlockDurationMsChange, onClearAllPrerenderCaches, onProjectExportFormatChange, onReusePrerenderCacheForExportChange, onScrubCommitThrottleMsChange, onSettingsOpenChange, onSettingsSectionChange, onTimelineEndPaddingFractionChange, onTimelinePrecisionChange, onVideoExportTileHeightChange, onVideoExportCancel }: AppDialogsProps) {
   return (
     <>
       <ExportMediaDialog
@@ -83,6 +85,7 @@ export function AppDialogs({ appContextMenu, debugSettingsEnabled, defaultNewMar
         activeSection={settingsSection}
         debugSettingsEnabled={debugSettingsEnabled}
         open={settingsOpen}
+        pausePlaybackOnScrub={pausePlaybackOnScrub}
         prerenderCacheBlackMissDebug={prerenderCacheBlackMissDebug}
         prerenderCacheEnabled={prerenderCacheEnabled}
         prerenderBlockDurationMs={prerenderBlockDurationMs}
@@ -94,6 +97,7 @@ export function AppDialogs({ appContextMenu, debugSettingsEnabled, defaultNewMar
         onActiveSectionChange={onSettingsSectionChange}
         onDebugSettingsEnabledChange={onDebugSettingsEnabledChange}
         onOpenChange={onSettingsOpenChange}
+        onPausePlaybackOnScrubChange={onPausePlaybackOnScrubChange}
         onPrerenderCacheBlackMissDebugChange={onPrerenderCacheBlackMissDebugChange}
         onPrerenderCacheEnabledChange={onPrerenderCacheEnabledChange}
         onPrerenderBlockDurationMsChange={onPrerenderBlockDurationMsChange}

@@ -81,6 +81,7 @@ export type CompositionProps = {
   id?: string;
   name?: string;
   duration: number;
+  prerender?: boolean;
   frame: { width: 1920; height: 1080; style?: LayerStyle };
   background?: {
     id?: string;
@@ -261,6 +262,7 @@ export class Composition {
   id?: string;
   name?: string;
   duration: number;
+  prerender?: boolean;
   frame: CompositionProps["frame"];
   background?: CompositionProps["background"];
   render: (context: RenderContext) => Renderable[];
@@ -269,6 +271,7 @@ export class Composition {
     this.id = props.id;
     this.name = props.name;
     this.duration = props.duration;
+    this.prerender = props.prerender;
     this.frame = props.frame;
     this.background = props.background;
     this.render = props.render;

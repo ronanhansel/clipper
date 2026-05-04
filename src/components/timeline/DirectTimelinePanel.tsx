@@ -25,7 +25,11 @@ import { useTimelineViewportController } from "./useTimelineViewportController";
 import { timelineBlockPreviewKey, type TimelineBlockPreviewKind, type TimelineBlockPreviewMap } from "./timelineBlockPreview";
 import type { AbsoluteTimelineMarker, EffectDragPreview, TimelinePanelProps, TimelinePartMotionView } from "./timelineTypes";
 
-export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = [], timelineLayers, adjustmentLayers, transitionLayers = [], timelineViewportState, mode, selectedPartId, selectedParts, selectedMotionMarkerPartId, selectedMotionMarkerId, selectedMotionMarkers, selectedAdjustmentLayerId, selectedAdjustmentLayers, selectedTransitionLayerId, selectedTransitionLayers = [], sceneDuration, currentSceneTime, isPlaying, playbackPlayheadRef, scrubbingRef, fastSelectEnabled, scrubCommitThrottleMs, defaultNewMarkerDurationSeconds, timelineEndPaddingFraction, timelinePrecision, scrubSnapEnabled, prerenderCacheCoverage, onScrub, onScrubStart, onScrubEnd, onModeChange, onTimelineViewportStateChange, onTimelineLayersChange, onAddCompositionLayer, onRemoveCompositionLayer, onAddAdjustmentLayer, onRemoveAdjustmentLayer, onAddMotionLayer, onRemoveMotionLayer, onSelectPart, onOpenComposePart, onSelectMotionMarker, onSelectMotionMarkers, onSelectAdjustmentLayer, onSelectAdjustmentLayers, onSelectTransitionLayer, onSelectTransitionLayers, onSelectTimelineNodes, onClearTimelineSelection, onOpenNodeContextMenu, onOpenBlankContextMenu, onMoveAdjustmentLayer, onUpdateAdjustmentLayer, onReorderPart, onMoveComposition, onMoveCompositions, onUpdateComposition, onMoveMotionMarker, onMoveMotionMarkers, onUpdateMotionMarkers, onResizeMotionMarkers, onAddComposition, onOpenTimeline, onAddAdjustmentEffect, onAddMotionEffect, onAddTransitionEffect, onMoveTransitionLayer, onUpdateTransitionLayer }: TimelinePanelProps) {
+type TimelineBlankGapSelection = { category: TimelineLayerCategory; rowKey: string; start: number; end: number; previewDelta?: number };
+type TimelineGapShiftMoves = NonNullable<TimelinePanelProps["onShiftTimelineGapMarkers"]> extends (moves: infer Moves) => void ? Moves : never;
+type PendingTimelineGapSlideAnimation = { moves: TimelineGapShiftMoves; fromX: number };
+
+export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = [], timelineLayers, adjustmentLayers, transitionLayers = [], timelineViewportState, mode, selectedPartId, selectedParts, selectedMotionMarkerPartId, selectedMotionMarkerId, selectedMotionMarkers, selectedAdjustmentLayerId, selectedAdjustmentLayers, selectedTransitionLayerId, selectedTransitionLayers = [], sceneDuration, currentSceneTime, isPlaying, playbackPlayheadRef, scrubbingRef, fastSelectEnabled, scrubCommitThrottleMs, defaultNewMarkerDurationSeconds, timelineEndPaddingFraction, timelinePrecision, scrubSnapEnabled, prerenderCacheCoverage, prerenderedCompositionIds, prerenderedCompositionRanges = [], onScrub, onScrubStart, onScrubEnd, onModeChange, onTimelineViewportStateChange, onTimelineLayersChange, onAddCompositionLayer, onRemoveCompositionLayer, onAddAdjustmentLayer, onRemoveAdjustmentLayer, onAddMotionLayer, onRemoveMotionLayer, onSelectPart, onOpenComposePart, onSelectMotionMarker, onSelectMotionMarkers, onSelectAdjustmentLayer, onSelectAdjustmentLayers, onSelectTransitionLayer, onSelectTransitionLayers, onSelectTimelineNodes, onClearTimelineSelection, onOpenNodeContextMenu, onOpenBlankContextMenu, onMoveAdjustmentLayer, onUpdateAdjustmentLayer, onReorderPart, onMoveComposition, onMoveCompositions, onUpdateComposition, onMoveMotionMarker, onMoveMotionMarkers, onUpdateMotionMarkers, onResizeMotionMarkers, onAddComposition, onOpenTimeline, onAddAdjustmentEffect, onAddMotionEffect, onAddTransitionEffect, onMoveTransitionLayer, onShiftTimelineGapMarkers, onUpdateTransitionLayer }: TimelinePanelProps) {
   const timelineDisplayDuration = getTimelineDisplayDuration(sceneDuration, timelineEndPaddingFraction);
   const timelineMotionViews = useMemo<TimelinePartMotionView[]>(() => timeline.map((timelinePart) => ({ ...timelinePart, ...getMotionMarkerViews(timelinePart) })), [timeline]);
   const motionTimeline = useMemo<TimelinePartMotionView[]>(() => [{ id: TIMELINE_MOTION_PART_ID, name: "Timeline motion", filePath: "", start: 0, end: timelineDisplayDuration, duration: timelineDisplayDuration, frame: { width: 1920, height: 1080, style: {} }, background: { id: "timeline-motion-background", name: "Background", style: {}, elements: [] }, objects: [], snapshot: [], ...getMotionMarkerViews({ motionMarkers }) }], [motionMarkers, timelineDisplayDuration]);
@@ -42,9 +46,11 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
   const [effectDragPreview, setEffectDragPreview] = useState<EffectDragPreview | null>(null);
   const [timelineDragActive, setTimelineDragActive] = useState(false);
   const [timelineFileDragActive, setTimelineFileDragActive] = useState(false);
+  const [selectedTimelineGap, setSelectedTimelineGap] = useState<TimelineBlankGapSelection | null>(null);
   const effectDragPreviewRef = useRef<EffectDragPreview | null>(null);
   const effectDragPreviewElementRef = useRef<HTMLDivElement | null>(null);
   const effectDragPreviewFrameRef = useRef(0);
+  const pendingGapSlideAnimationRef = useRef<PendingTimelineGapSlideAnimation | null>(null);
   const adjustmentSelectionDragRef = useRef<TimelineSelectionDrag | null>(null);
   const motionSelectionDragRef = useRef<TimelineSelectionDrag | null>(null);
   const timelineSelectionDragRef = useRef<TimelineSelectionDrag | null>(null);
@@ -346,6 +352,13 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
     const target = event.target as HTMLElement;
     if (target.closest("[data-timeline-control]")) return;
 
+    const gap = getTimelineBlankGapAtPointer(event);
+    if (gap) {
+      startTimelineGapRipple(event, gap);
+      return;
+    }
+    setSelectedTimelineGap(null);
+
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
     const rect = timelineViewportRef.current?.firstElementChild?.getBoundingClientRect() ?? event.currentTarget.getBoundingClientRect();
@@ -430,6 +443,173 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
       selection.transitionLayers.map((item) => item.layerId).join(","),
     ].join("|");
   }
+
+  function getTimelineBlankGapAtPointer(event: PointerEvent<HTMLDivElement>): TimelineBlankGapSelection | null {
+    const rect = timelineViewportRef.current?.firstElementChild?.getBoundingClientRect();
+    if (!rect || timelineDisplayDuration <= 0) return null;
+    const row = getTimelineLayerRowAtClientY(layerLayout, rect, event.clientY);
+    if (!row || isLayerLocked(row.row.category, row.row.key)) return null;
+    const time = clamp(((event.clientX - rect.left) / rect.width) * timelineDisplayDuration, 0, timelineDisplayDuration);
+    const markers = getTimelineRowMarkerRanges(row.row.category, row.row.key).sort((left, right) => left.start - right.start || left.end - right.end);
+    let previousEnd: number | null = null;
+    for (const marker of markers) {
+      if (previousEnd !== null && time > previousEnd && time < marker.start) return { category: row.row.category, rowKey: row.row.key, start: previousEnd, end: marker.start };
+      previousEnd = previousEnd === null ? marker.end : Math.max(previousEnd, marker.end);
+    }
+    return null;
+  }
+
+  function getTimelineRowMarkerRanges(category: TimelineLayerCategory, rowKey: string) {
+    if (category === "transition") return transitionLayers.filter((layer) => (layer.layerId ?? layer.effect.effectId) === rowKey).map((layer) => ({ start: layer.start, end: layer.start + layer.duration }));
+    if (category === "adjust") return adjustmentLayers.filter((layer) => getAdjustmentLayerRowId(layer) === rowKey).map((layer) => ({ start: layer.start, end: layer.start + layer.duration }));
+    if (category === "motion") return motionTimeline.flatMap((timelinePart) => timelinePart.motionMarkers.filter((marker) => isMotionMarkerOnLayerId(marker, rowKey)).map((marker) => ({ start: timelinePart.start + marker.start, end: timelinePart.start + marker.start + marker.duration })));
+    return timeline.filter((part) => (part.layerId ?? "comp") === rowKey).map((part) => ({ start: part.start, end: part.start + part.duration }));
+  }
+
+  function startTimelineGapRipple(event: PointerEvent<HTMLDivElement>, gap: TimelineBlankGapSelection) {
+    event.preventDefault();
+    setSelectedTimelineGap(gap);
+    const initialClientX = event.clientX;
+    const initialScrollLeft = timelineViewportRef.current?.scrollLeft ?? 0;
+    const pixelsPerSecond = (timelineRef.current?.getBoundingClientRect().width ?? 1) / Math.max(timelineDisplayDuration, 1);
+
+    function getGapDelta(clientX: number) {
+      const rawDelta = getTimelineDragDeltaSeconds({ initialClientX, clientX, initialScrollLeft, scrollLeft: timelineViewportRef.current?.scrollLeft ?? initialScrollLeft, pixelsPerSecond });
+      return roundToPrecision(clamp(rawDelta, gap.start - gap.end, 0), timelinePrecision);
+    }
+
+    function previewGap(clientX: number) {
+      const delta = getGapDelta(clientX);
+      setSelectedTimelineGap({ ...gap, previewDelta: delta });
+      previewTimelineBlocks(getTimelineGapShiftPreviewMap(gap, delta));
+    }
+
+    function clearGapDragState() {
+      setGlobalTimelineDragActive(false);
+      clearTimelineBlockPreviews();
+      clearTimelineSnapGuide();
+    }
+
+    startTimelinePointerTransaction({
+      event,
+      updateAutoScroll: updateTimelineDragAutoScroll,
+      stopAutoScroll: stopTimelineDragAutoScroll,
+      onDragStart: () => setGlobalTimelineDragActive(true),
+      onPreview: ({ clientX }) => previewGap(clientX),
+      onCommit: ({ clientX }) => {
+        const delta = getGapDelta(clientX);
+        clearGapDragState();
+        if (delta >= 0) return;
+        const moves = getTimelineGapShiftMoves(gap, delta);
+        if (moves.compositions.length || moves.adjustmentLayers.length || moves.motionMarkers.length || moves.transitionLayers.length) {
+          queueTimelineGapSlideAnimation(moves, delta);
+          onShiftTimelineGapMarkers?.(moves);
+        }
+        const nextEnd = roundToPrecision(gap.end + delta, timelinePrecision);
+        setSelectedTimelineGap(nextEnd > gap.start ? { ...gap, end: nextEnd } : null);
+      },
+      onCancel: clearGapDragState,
+      onDragEnd: clearGapDragState,
+    });
+  }
+
+  function getTimelineGapShiftMoves(gap: Pick<TimelineBlankGapSelection, "start" | "end">, delta: number): TimelineGapShiftMoves {
+    const startsAfterGap = (start: number) => start >= gap.end - 0.000001;
+    const nextStart = (start: number) => roundToPrecision(Math.max(0, start + delta), timelinePrecision);
+    return {
+      gapStart: gap.start,
+      gapEnd: gap.end,
+      delta,
+      compositions: timeline.filter((part) => startsAfterGap(part.start) && !isCompositionLocked(part)).map((part) => ({ compositionId: part.id, start: nextStart(part.start) })),
+      adjustmentLayers: adjustmentLayers.filter((layer) => startsAfterGap(layer.start) && !isAdjustmentLocked(layer)).map((layer) => ({ layerId: layer.id, start: nextStart(layer.start) })),
+      motionMarkers: motionTimeline.flatMap((timelinePart) => timelinePart.motionMarkers.filter((marker) => startsAfterGap(timelinePart.start + marker.start) && !isMotionMarkerLocked(marker)).map((marker) => ({ markerId: marker.id, start: nextStart(timelinePart.start + marker.start) }))),
+      transitionLayers: transitionLayers.filter((layer) => startsAfterGap(layer.start) && !isTransitionLocked(layer)).map((layer) => ({ layerId: layer.id, start: nextStart(layer.start) })),
+    };
+  }
+
+  function getTimelineGapShiftPreviewMap(gap: TimelineBlankGapSelection, delta: number): TimelineBlockPreviewMap {
+    const moves = getTimelineGapShiftMoves(gap, delta);
+    return {
+      ...Object.fromEntries(moves.compositions.map((move) => {
+        const part = timeline.find((item) => item.id === move.compositionId)!;
+        return [timelineBlockPreviewKey("composition", part.id), { start: move.start, duration: part.duration }];
+      })),
+      ...Object.fromEntries(moves.adjustmentLayers.map((move) => {
+        const layer = adjustmentLayers.find((item) => item.id === move.layerId)!;
+        return [timelineBlockPreviewKey("adjustment", layer.id), { start: move.start, duration: layer.duration }];
+      })),
+      ...Object.fromEntries(moves.motionMarkers.map((move) => {
+        const marker = motionTimeline.flatMap((timelinePart) => timelinePart.motionMarkers.map((item) => ({ timelinePart, marker: item }))).find((item) => item.marker.id === move.markerId)!;
+        return [timelineBlockPreviewKey("motion", marker.timelinePart.id, marker.marker.id), { start: move.start - marker.timelinePart.start, duration: marker.marker.duration }];
+      })),
+      ...Object.fromEntries(moves.transitionLayers.map((move) => {
+        const layer = transitionLayers.find((item) => item.id === move.layerId)!;
+        return [timelineBlockPreviewKey("transition", layer.id), { start: move.start, duration: layer.duration, midPoint: layer.midPoint }];
+      })),
+    };
+  }
+
+  function closeSelectedTimelineGap(gap: TimelineBlankGapSelection) {
+    const delta = roundToPrecision(gap.start - gap.end, timelinePrecision);
+    if (delta >= 0) return false;
+    const moves = getTimelineGapShiftMoves(gap, delta);
+    if (!(moves.compositions.length || moves.adjustmentLayers.length || moves.motionMarkers.length || moves.transitionLayers.length)) return false;
+    clearTimelineBlockPreviews();
+    queueTimelineGapSlideAnimation(moves, delta);
+    onShiftTimelineGapMarkers?.(moves);
+    setSelectedTimelineGap(null);
+    return true;
+  }
+
+  function queueTimelineGapSlideAnimation(moves: TimelineGapShiftMoves, delta: number) {
+    const pixelsPerSecond = (timelineRef.current?.getBoundingClientRect().width ?? 1) / Math.max(timelineDisplayDuration, 1);
+    pendingGapSlideAnimationRef.current = { moves, fromX: -delta * pixelsPerSecond };
+  }
+
+  function getTimelineCompositionElement(partId: string) {
+    return timelineViewportRef.current?.querySelector<HTMLElement>(`[data-timeline-composition-id="${CSS.escape(partId)}"]`) ?? null;
+  }
+
+  function runPendingTimelineGapSlideAnimation() {
+    const pending = pendingGapSlideAnimationRef.current;
+    if (!pending) return;
+    pendingGapSlideAnimationRef.current = null;
+    const elements = [
+      ...pending.moves.compositions.map((move) => getTimelineCompositionElement(move.compositionId)),
+      ...pending.moves.adjustmentLayers.map((move) => getTimelineAdjustmentElement(move.layerId)),
+      ...pending.moves.motionMarkers.map((move) => getTimelineMarkerElement(TIMELINE_MOTION_PART_ID, move.markerId)),
+      ...pending.moves.transitionLayers.map((move) => getTimelineTransitionElement(move.layerId)),
+    ].filter((element): element is HTMLElement => Boolean(element));
+
+    for (const element of elements) {
+      element.animate([
+        { transform: `translate3d(${pending.fromX}px, 0, 0)`, offset: 0 },
+        { transform: "translate3d(0, 0, 0)", offset: 1 },
+      ], { duration: 190, easing: "cubic-bezier(0.16, 1, 0.3, 1)" });
+    }
+  }
+
+  useEffect(() => {
+    if (!selectedTimelineGap) return;
+    const selectedGap: TimelineBlankGapSelection = selectedTimelineGap;
+
+    function closeGapFromKeyboard(event: KeyboardEvent) {
+      if (event.key !== "Backspace" && event.key !== "Delete") return;
+      const target = event.target as HTMLElement | null;
+      const editable = target?.closest("input, textarea, select, [contenteditable='true']") as HTMLElement | null;
+      if (editable && !(editable instanceof HTMLInputElement && editable.type === "range")) return;
+      if (!closeSelectedTimelineGap(selectedGap)) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }
+
+    window.addEventListener("keydown", closeGapFromKeyboard);
+    return () => window.removeEventListener("keydown", closeGapFromKeyboard);
+  }, [selectedTimelineGap, timeline, adjustmentLayers, motionTimeline, transitionLayers, timelinePrecision]);
+
+  useLayoutEffect(() => {
+    runPendingTimelineGapSlideAnimation();
+  }, [timeline, adjustmentLayers, motionTimeline, transitionLayers]);
 
   function scheduleTimelineSelectionUpdate() {
     if (timelineSelectionFrameRef.current) return;
@@ -672,6 +852,7 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
     event.preventDefault();
     event.stopPropagation();
     if (isLocked) return;
+    setSelectedTimelineGap(null);
     onSelect();
 
     const element = event.currentTarget.closest(dataAttributeSelector) as HTMLElement | null ?? event.currentTarget;
@@ -975,10 +1156,16 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
       previewKind: "composition",
       resizeCssVar: "--clipper-composition-resize-width",
       boundaries: getUniversalBlockSnapBoundaries({ excludeCompositionIds: moveTargetIds }),
-      transformTiming: (timing) => ({ ...composition, start: timing.start, duration: timing.duration }),
+      transformTiming: (timing) => {
+        if (action !== "start") return { ...composition, start: timing.start, duration: timing.duration };
+        const previousTrimStart = composition.trimStart ?? 0;
+        const trimStart = roundToPrecision(Math.max(previousTrimStart + timing.start - composition.start, 0), timelinePrecision);
+        const start = roundToPrecision(composition.start + trimStart - previousTrimStart, timelinePrecision);
+        return { ...composition, start, duration: roundToPrecision(composition.start + composition.duration - start, timelinePrecision), trimStart: trimStart || undefined };
+      },
       isBlocked: (item, targetLayerId) => isCompositionBlocked(item.start, item.duration, targetLayerId ?? item.layerId ?? "comp", moveTargetIds),
       onMove: (start, targetLayerId) => onMoveComposition(composition.id, start, targetLayerId ?? (composition.layerId ?? "comp")),
-      onResize: (next) => onUpdateComposition(composition.id, () => ({ ...composition, start: next.start, duration: next.duration })),
+      onResize: (next) => onUpdateComposition(composition.id, () => ({ ...composition, start: next.start, duration: next.duration, trimStart: next.trimStart })),
       precision: timelinePrecision,
     });
   }
@@ -2061,6 +2248,7 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
             {compositionRows.map((layer, index) => <LayerLabel key={layer.id} editing={editingLayerId === layer.id} hidden={Boolean(layer.hidden)} locked={Boolean(layer.locked)} compactControls={layerRowHeights[(isCompositionMode ? transitionRows.length + adjustmentRows.length + motionLayers.length : 0) + index] < 50} hideLockControl={layerRowHeights[(isCompositionMode ? transitionRows.length + adjustmentRows.length + motionLayers.length : 0) + index] < 58} menuOpen={motionLayerMenuId === layer.id} name={layer.name} draft={layerNameDraft} canMoveDown={index < compositionRows.length - 1} canMoveUp={index > 0} addBeforeLabel="Add composition above" addAfterLabel="Add composition below" removeLabel="Remove composition" onDraftChange={setLayerNameDraft} onEdit={() => startLayerNameEdit(layer.id, layer.name)} onCommit={commitLayerNameEdit} onCancel={cancelLayerNameEdit} onMenuToggle={() => setMotionLayerMenuId((current) => current === layer.id ? null : layer.id)} onAddBefore={() => addCompositionLayerAround(layer.id, "before")} onAddAfter={() => addCompositionLayerAround(layer.id, "after")} onMoveUp={() => moveCompositionLayer(layer.id, "up")} onMoveDown={() => moveCompositionLayer(layer.id, "down")} onRemove={() => removeCompositionLayer(layer.id)} onToggleHidden={() => toggleLayerHidden(layer.id)} onToggleLocked={() => toggleLayerLocked(layer.id)} />)}
           </>} renderTimelineViewport={() => <>
             {timelineSelectionDrag ? <TimelineSelectionBox boxRef={timelineSelectionBoxRef} drag={timelineSelectionDrag} /> : null}
+            {selectedTimelineGap ? <TimelineBlankGapHighlight gap={selectedTimelineGap} rowIndex={layerRows.findIndex((row) => row.key === selectedTimelineGap.rowKey && row.category === selectedTimelineGap.category)} rowStarts={layerRowStarts} rowHeights={layerRowHeights} timelineDisplayDuration={timelineDisplayDuration} /> : null}
             {isCompositionMode ? transitionRows.map((row, index) => <TimelineLayerLane key={row.key} hidden={row.hidden} locked={row.locked} overflowVisible className="z-10 block" onPointerDown={startTimelineSelection} onPointerMove={continueTimelineSelection} onPointerUp={endTimelineSelection} onPointerCancel={endTimelineSelection} onContextMenu={openBlankTimelineContextMenu}>
               {transitionLayers.filter((layer) => (layer.layerId ?? layer.effect.effectId) === row.key).map((layer) => {
                 const previewLayer = timelineBlockPreviews?.[timelineBlockPreviewKey("transition", layer.id)] ?? layer;
@@ -2111,9 +2299,16 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
                 const isUnlinkedPart = Boolean(item.sourceMissing);
                 return (
                   <CompositionTimelineBlock dataAttributes={{ "data-timeline-composition-id": item.id }} key={item.id} name={getDisplayNameFromPath(item.filePath)} duration={previewItem.duration}
- isEmpty={isEmptyPart} sourceMissing={isUnlinkedPart} locked={Boolean(row.locked)} selected={selectedPartIds.has(item.id)} style={{ left: `${timelineDisplayDuration > 0 ? (previewItem.start / timelineDisplayDuration) * 100 : 0}%`, width: `calc(${timelineDisplayDuration > 0 ? (previewItem.duration / timelineDisplayDuration) * 100 : 0}% + var(--clipper-composition-resize-width, 0px))` }} onPointerDown={(event) => { if (timelineMarkersEditable) updateCompositionFromPointer(event, item, "move"); }} onClick={() => onSelectPart(item.id)} onDoubleClick={() => onOpenComposePart(item.id)} onContextMenu={(event) => { if (timelineMarkersEditable) openTimelineNodeContextMenu(event, { kind: "part", partId: item.id, compositionLayerId: row.id }); }} leftResizeEnabled={timelineMarkersEditable} rightResizeEnabled={timelineMarkersEditable} onLeftResize={(event) => updateCompositionFromPointer(event, item, "start")} onRightResize={(event) => updateCompositionFromPointer(event, item, "end")} />
+ isEmpty={isEmptyPart} sourceMissing={isUnlinkedPart} locked={Boolean(row.locked)} selected={selectedPartIds.has(item.id)} prerendered={Boolean(prerenderedCompositionIds?.has(item.compositionId ?? item.id) && prerenderedCompositionRanges.some((range) => range.compositionId === (item.compositionId ?? item.id) && range.start < item.start + item.duration && range.end > item.start))} style={{ left: `${timelineDisplayDuration > 0 ? (previewItem.start / timelineDisplayDuration) * 100 : 0}%`, width: `calc(${timelineDisplayDuration > 0 ? (previewItem.duration / timelineDisplayDuration) * 100 : 0}% + var(--clipper-composition-resize-width, 0px))` }} onPointerDown={(event) => { if (timelineMarkersEditable) updateCompositionFromPointer(event, item, "move"); }} onClick={() => onSelectPart(item.id)} onDoubleClick={() => onOpenComposePart(item.id)} onContextMenu={(event) => { if (timelineMarkersEditable) openTimelineNodeContextMenu(event, { kind: "part", partId: item.id, compositionLayerId: row.id }); }} leftResizeEnabled={timelineMarkersEditable} rightResizeEnabled={timelineMarkersEditable} onLeftResize={(event) => updateCompositionFromPointer(event, item, "start")} onRightResize={(event) => updateCompositionFromPointer(event, item, "end")} />
                 );
               })}
             </TimelineLayerLane>)}
           </>} />;
+}
+
+function TimelineBlankGapHighlight({ gap, rowIndex, rowStarts, rowHeights, timelineDisplayDuration }: { gap: TimelineBlankGapSelection; rowIndex: number; rowStarts: number[]; rowHeights: number[]; timelineDisplayDuration: number }) {
+  if (rowIndex < 0 || timelineDisplayDuration <= 0) return null;
+  const start = gap.start;
+  const end = Math.max(gap.start, gap.end + (gap.previewDelta ?? 0));
+  return <div className="pointer-events-none absolute z-30 rounded-[3px] border border-[var(--clipper-accent)] bg-[rgb(var(--clipper-accent-rgb)/0.16)] shadow-[inset_0_0_0_1px_rgb(255_255_255/0.08),0_0_18px_rgb(var(--clipper-accent-rgb)/0.18)]" style={{ left: `${(start / timelineDisplayDuration) * 100}%`, top: rowStarts[rowIndex], width: `${((end - start) / timelineDisplayDuration) * 100}%`, height: rowHeights[rowIndex] }} />;
 }

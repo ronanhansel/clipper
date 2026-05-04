@@ -150,9 +150,9 @@ class ClipperHostService {
     return window.clipper.renderVideoExport(exportId, defaultFileName, project, manifestPath, scene, frameRate, durationSeconds, tileHeight, reusePrerenderCache);
   }
 
-  async prerenderFrame(project: ProjectManifest, manifestPath: string, scene: SceneManifest, sceneTime: number, sceneDuration: number, frameRate: number, tileHeight: number, blockDurationMs: number) {
+  async prerenderFrame(project: ProjectManifest, manifestPath: string, scene: SceneManifest, sceneTime: number, sceneDuration: number, frameRate: number, tileHeight: number, blockDurationMs: number, frameRange?: { startFrame: number; endFrame: number }) {
     if (!window.clipper?.prerenderFrame) throw new Error("Prerender cache requires the Clipper desktop app. Restart the app if this was just updated.");
-    return window.clipper.prerenderFrame(project, manifestPath, scene, sceneTime, sceneDuration, frameRate, tileHeight, blockDurationMs);
+    return window.clipper.prerenderFrame(project, manifestPath, scene, sceneTime, sceneDuration, frameRate, tileHeight, blockDurationMs, frameRange);
   }
 
   async prerenderVideoBlock(project: ProjectManifest, manifestPath: string, scene: SceneManifest, sceneTime: number, sceneDuration: number, frameRate: number, tileHeight: number, blockDurationMs: number) {

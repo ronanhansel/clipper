@@ -48,7 +48,7 @@ export function usePresentationController({
   useEffect(() => {
     function updatePresentationViewport() {
       const rect = centerPreviewScrollRef.current?.getBoundingClientRect();
-      const width = rect?.width || window.innerWidth;
+      const width = presentationMode ? window.innerWidth : rect?.width || window.innerWidth;
       setPresentationViewport(getPresentationViewport(width));
     }
 

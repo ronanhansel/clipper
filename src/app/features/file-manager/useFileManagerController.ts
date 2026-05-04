@@ -32,6 +32,7 @@ type UseFileManagerControllerInput = Pick<FileManagerProps,
     fileManagerStateChange: (fileManagerState: EditorState["fileManagerState"]) => void;
     moveComposition: FileManagerProps["onMoveComposition"];
     moveTimeline: FileManagerProps["onMoveTimeline"];
+    prerenderComposition?: FileManagerProps["onPrerenderComposition"];
     renameAsset: FileManagerProps["onRenameAsset"];
     renameComposition: FileManagerProps["onRenameComposition"];
     renameCompositionFolder: FileManagerProps["onRenameCompositionFolder"];
@@ -70,6 +71,7 @@ export function useFileManagerController({ actions, implicitFileOperation, ...st
       fileManagerStateChange: actions.fileManagerStateChange,
       moveComposition: implicitFileOperation(actions.moveComposition),
       moveTimeline: implicitFileOperation(actions.moveTimeline),
+      prerenderComposition: actions.prerenderComposition,
       renameAsset: implicitFileOperation(actions.renameAsset),
       renameComposition: implicitFileOperation(actions.renameComposition),
       renameCompositionFolder: implicitFileOperation(actions.renameCompositionFolder),

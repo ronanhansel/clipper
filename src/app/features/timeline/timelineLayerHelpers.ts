@@ -5,6 +5,7 @@ export function timelineClipFromPart(item: Part): TimelineClip {
     id: item.id,
     compositionId: item.compositionId ?? item.id,
     start: item.start,
+    trimStart: item.trimStart,
     layerId: item.layerId,
     duration: item.duration,
     motionMarkers: item.motionMarkers ?? [],
