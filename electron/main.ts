@@ -54,6 +54,7 @@ const defaultPrerenderBlockDurationMs = 200;
 const minPrerenderBlockDurationMs = 20;
 const maxPrerenderBlockDurationMs = 1000;
 const prerenderVideoBlockMimeType = 'video/mp4; codecs="avc1.42E028"';
+const prerenderVideoBlockCodecVersion = 2;
 let hardwareEncoderSupport: Set<string> | null = null;
 let systemFontFamilies: string[] | null = null;
 
@@ -1570,12 +1571,20 @@ async function encodeFrameFilesToMp4(inputFrameOutputPath: string, outputPath: s
     "ultrafast",
     "-tune",
     "zerolatency",
+    "-vf",
+    "scale=in_range=pc:out_range=pc:out_color_matrix=bt709,format=yuv420p",
     "-profile:v",
     "baseline",
     "-level",
     "4.0",
-    "-pix_fmt",
-    "yuv420p",
+    "-color_range",
+    "pc",
+    "-colorspace",
+    "bt709",
+    "-color_primaries",
+    "bt709",
+    "-color_trc",
+    "bt709",
     "-g",
     String(frameRange.endFrame - frameRange.startFrame),
     "-keyint_min",
@@ -1714,6 +1723,7 @@ function isPrerenderVideoManifestCurrent(manifest: PrerenderVideoCacheManifest |
     manifest.width === frameWidth &&
     manifest.height === frameHeight &&
     manifest.mimeType === prerenderVideoBlockMimeType &&
+    manifest.codecVersion === prerenderVideoBlockCodecVersion &&
     manifest.frameRate === frameRate &&
     manifest.startFrame === frameRange.startFrame &&
     manifest.endFrame === frameRange.endFrame,
@@ -1748,6 +1758,7 @@ async function writePrerenderVideoBlock(cachePaths: PrerenderVideoBlockCachePath
     width: frameWidth,
     height: frameHeight,
     mimeType: prerenderVideoBlockMimeType,
+    codecVersion: prerenderVideoBlockCodecVersion,
     startFrame: frameRange.startFrame,
     endFrame: frameRange.endFrame,
     frameRate,
@@ -2360,6 +2371,7 @@ type PrerenderVideoCacheManifest = {
   width: number;
   height: number;
   mimeType: string;
+  codecVersion?: number;
   startFrame: number;
   endFrame: number;
   frameRate: number;

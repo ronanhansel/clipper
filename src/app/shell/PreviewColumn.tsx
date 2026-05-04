@@ -7,14 +7,13 @@ import type { Mode } from "../types";
 
 type PreviewStackPart = { part: ComponentProps<typeof FramePreview>["part"]; start: number; previewTime: number };
 type FramePreviewProps = ComponentProps<typeof FramePreview> & { previewParts?: PreviewStackPart[]; transitionPreviewParts?: { from: PreviewStackPart[]; to: PreviewStackPart[]; fromSceneTime: number; toSceneTime: number } | null; transitionLayers?: TransitionLayer[] };
-const mseAppendLookBehindBlocks = 2;
-const mseAppendLookAheadBlocks = 14;
-const mseBufferedTimeToleranceSeconds = 0.04;
-const msePlaybackSeekDriftSeconds = 0.35;
-const mseReanchorDistanceSeconds = 2.5;
-const cachedPreviewEnterStableMs = 80;
-const cachedPreviewExitStableMs = 220;
-type CachedPreviewDisplayMode = "dom" | "video";
+type CachedPreviewDisplayMode = "dom" | "video-a" | "video-b";
+type CachedPreviewLoadTarget = { generation: number; mode: Exclude<CachedPreviewDisplayMode, "dom">; block: PrerenderCacheBlock; sceneTime: number };
+
+const cacheVisibleStableDelayMs = 60;
+const cacheDomFallbackDelayMs = 220;
+const haveCurrentDataReadyState = 2;
+const playbackSeekDriftSeconds = 0.18;
 
 type PreviewColumnProps = {
   blankFrameViewportStyle: CSSProperties;
@@ -29,6 +28,7 @@ type PreviewColumnProps = {
   prerenderCacheEnabled: boolean;
   prerenderCacheBlock: PrerenderCacheBlock | null;
   getPrerenderCacheBlockAtTime: (time: number) => PrerenderCacheBlock | null;
+  onCachedPreviewDisplayReadyChange: (ready: boolean) => void;
   currentSceneTimeRef: RefObject<number>;
   isPlaying: boolean;
   onScroll: (event: UIEvent<HTMLDivElement>) => void;
@@ -36,7 +36,7 @@ type PreviewColumnProps = {
   stageRef: ComponentProps<"div">["ref"];
 };
 
-export function PreviewColumn({ blankFrameViewportStyle, children, currentSceneTimeRef, editorPaneProps, framePreviewProps, getPrerenderCacheBlockAtTime, hasActiveComposition, isPlaying, mode, onModeChange, onPointerEnter, onPointerLeave, prerenderCacheEnabled, prerenderCacheBlock, onScroll, previewKey, stageRef }: PreviewColumnProps) {
+export function PreviewColumn({ blankFrameViewportStyle, children, currentSceneTimeRef, editorPaneProps, framePreviewProps, getPrerenderCacheBlockAtTime, hasActiveComposition, isPlaying, mode, onModeChange, onPointerEnter, onPointerLeave, onCachedPreviewDisplayReadyChange, prerenderCacheEnabled, prerenderCacheBlock, onScroll, previewKey, stageRef }: PreviewColumnProps) {
   return (
     <section className="grid min-h-0 min-w-0 grid-rows-[58px_minmax(0,1fr)_58px] bg-[radial-gradient(circle_at_50%_45%,rgb(var(--clipper-accent-rgb)/0.10),transparent_30%),#141821]" data-clipper-preview-column onPointerEnter={onPointerEnter} onPointerLeave={onPointerLeave}>
       <div className="grid place-items-center border-b border-[#2d313b] px-[18px]" data-clipper-preview-toolbar>
@@ -49,7 +49,7 @@ export function PreviewColumn({ blankFrameViewportStyle, children, currentSceneT
       <div ref={stageRef} className={`timeline-scrollbar relative grid min-h-0 ${mode === "preview" ? "place-items-center overflow-auto p-[22px] [scrollbar-gutter:stable]" : "items-stretch overflow-hidden"}`} data-clipper-preview-stage onScroll={onScroll}>
         {mode === "preview" && framePreviewProps ? (
           prerenderCacheEnabled
-            ? <PrerenderVideoPreview key={`prerender:${previewKey}`} block={prerenderCacheBlock} currentSceneTimeRef={currentSceneTimeRef} framePreviewProps={framePreviewProps} getBlockAtTime={getPrerenderCacheBlockAtTime} isPlaying={isPlaying} />
+            ? <PrerenderVideoPreview key={`prerender:${previewKey}`} block={prerenderCacheBlock} currentSceneTimeRef={currentSceneTimeRef} framePreviewProps={framePreviewProps} getBlockAtTime={getPrerenderCacheBlockAtTime} isPlaying={isPlaying} onCachedPreviewDisplayReadyChange={onCachedPreviewDisplayReadyChange} />
             : <FramePreview key={previewKey} {...framePreviewProps} />
         ) : null}
         {mode === "preview" && !hasActiveComposition ? <div className="relative overflow-hidden bg-black shadow-[0_22px_70px_rgba(0,0,0,0.44)]" aria-label="Blank preview frame" data-clipper-blank-frame-preview style={blankFrameViewportStyle} /> : null}
@@ -61,18 +61,17 @@ export function PreviewColumn({ blankFrameViewportStyle, children, currentSceneT
   );
 }
 
-function PrerenderVideoPreview({ block, currentSceneTimeRef, framePreviewProps, getBlockAtTime, isPlaying }: { block: PrerenderCacheBlock | null; currentSceneTimeRef: RefObject<number>; framePreviewProps: FramePreviewProps; getBlockAtTime: (time: number) => PrerenderCacheBlock | null; isPlaying: boolean }) {
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const mediaSourceRef = useRef<MediaSource | null>(null);
-  const sourceBufferRef = useRef<SourceBuffer | null>(null);
-  const appendedBlocksRef = useRef(new Set<number>());
-  const appendQueueRef = useRef<PrerenderCacheBlock[]>([]);
-  const mediaAnchorStartRef = useRef(0);
-  const reanchorBlockStartRef = useRef<number | null>(null);
-  const mseGenerationRef = useRef(0);
-  const objectUrlRef = useRef("");
-  const videoCandidateStartedAtRef = useRef<number | null>(null);
-  const domCandidateStartedAtRef = useRef<number | null>(null);
+function PrerenderVideoPreview({ block, currentSceneTimeRef, framePreviewProps, getBlockAtTime, isPlaying, onCachedPreviewDisplayReadyChange }: { block: PrerenderCacheBlock | null; currentSceneTimeRef: RefObject<number>; framePreviewProps: FramePreviewProps; getBlockAtTime: (time: number) => PrerenderCacheBlock | null; isPlaying: boolean; onCachedPreviewDisplayReadyChange: (ready: boolean) => void }) {
+  const videoARef = useRef<HTMLVideoElement | null>(null);
+  const videoBRef = useRef<HTMLVideoElement | null>(null);
+  const videoABlockRef = useRef<PrerenderCacheBlock | null>(null);
+  const videoBBlockRef = useRef<PrerenderCacheBlock | null>(null);
+  const loadingBlockUrlRef = useRef("");
+  const loadGenerationRef = useRef(0);
+  const loadTargetRef = useRef<CachedPreviewLoadTarget | null>(null);
+  const cacheVisibleTimerRef = useRef<number | null>(null);
+  const domFallbackTimerRef = useRef<number | null>(null);
+  const displayReadyRef = useRef(false);
   const displayModeRef = useRef<CachedPreviewDisplayMode>("dom");
   const [displayMode, setDisplayMode] = useState<CachedPreviewDisplayMode>("dom");
   const frameScale = framePreviewProps.frameScale;
@@ -84,21 +83,26 @@ function PrerenderVideoPreview({ block, currentSceneTimeRef, framePreviewProps, 
     setDisplayMode(nextMode);
   }
 
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video || !block || typeof MediaSource === "undefined" || !MediaSource.isTypeSupported(block.mimeType)) return;
-    resetMediaSource(block);
-    return teardownMediaSource;
-  }, [block?.mimeType]);
+  function updateDisplayReady(ready: boolean) {
+    if (displayReadyRef.current === ready) return;
+    displayReadyRef.current = ready;
+    onCachedPreviewDisplayReadyChange(ready);
+  }
+
+  function clearCacheVisibleTimer() {
+    if (cacheVisibleTimerRef.current === null) return;
+    window.clearTimeout(cacheVisibleTimerRef.current);
+    cacheVisibleTimerRef.current = null;
+  }
+
+  function clearDomFallbackTimer() {
+    if (domFallbackTimerRef.current === null) return;
+    window.clearTimeout(domFallbackTimerRef.current);
+    domFallbackTimerRef.current = null;
+  }
 
   useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
-    if (isPlaying) void video.play().catch(() => undefined);
-    else {
-      video.pause();
-      seekMediaSourceVideo(video, currentSceneTimeRef.current, mediaAnchorStartRef.current);
-    }
+    syncVisibleCachedVideo(currentSceneTimeRef.current);
   }, [currentSceneTimeRef, isPlaying]);
 
   useEffect(() => {
@@ -106,37 +110,11 @@ function PrerenderVideoPreview({ block, currentSceneTimeRef, framePreviewProps, 
     const sync = () => {
       const currentTime = currentSceneTimeRef.current;
       const nextBlock = getBlockAtTime(currentTime);
-      const video = videoRef.current;
-      const now = performance.now();
-      if (!video || !nextBlock) {
-        videoCandidateStartedAtRef.current = null;
-        const missStartedAt = domCandidateStartedAtRef.current ?? now;
-        domCandidateStartedAtRef.current = missStartedAt;
-        if (displayModeRef.current === "dom" || now - missStartedAt >= cachedPreviewExitStableMs) updateDisplayMode("dom");
+      if (!nextBlock) {
+        scheduleDomFallback();
       } else {
-        const targetTime = getMediaSourceSignedLocalTime(currentTime, mediaAnchorStartRef.current);
-        const canUseCurrentStream = Boolean(mediaSourceRef.current && sourceBufferRef.current && targetTime >= -mseReanchorDistanceSeconds && (video.buffered.length === 0 || isTimeNearBufferedRange(video, targetTime, mseReanchorDistanceSeconds)));
-        if (!canUseCurrentStream && reanchorBlockStartRef.current !== nextBlock.startTime) resetMediaSource(nextBlock);
-        domCandidateStartedAtRef.current = null;
-        enqueueMediaSourceBlock(nextBlock);
-        appendContiguousCachedRun(nextBlock);
-        const nextTargetTime = getMediaSourceLocalTime(currentTime, mediaAnchorStartRef.current);
-        const buffered = isVideoTimeBuffered(video, nextTargetTime);
-        const shouldSeek = !isPlaying || (buffered && Math.abs(video.currentTime - nextTargetTime) > msePlaybackSeekDriftSeconds);
-        if (shouldSeek) {
-          seekMediaSourceVideo(video, currentTime, mediaAnchorStartRef.current);
-        }
-        const videoReady = buffered || video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA;
-        if (videoReady) {
-          const readyStartedAt = videoCandidateStartedAtRef.current ?? now;
-          videoCandidateStartedAtRef.current = readyStartedAt;
-          if (displayModeRef.current === "video" || now - readyStartedAt >= cachedPreviewEnterStableMs) updateDisplayMode("video");
-        } else {
-          videoCandidateStartedAtRef.current = null;
-          const missStartedAt = domCandidateStartedAtRef.current ?? now;
-          domCandidateStartedAtRef.current = missStartedAt;
-          if (displayModeRef.current === "dom" || now - missStartedAt >= cachedPreviewExitStableMs) updateDisplayMode("dom");
-        }
+        clearDomFallbackTimer();
+        ensureCachedBlockVideo(nextBlock, currentTime);
       }
       frameId = requestAnimationFrame(sync);
     };
@@ -144,80 +122,157 @@ function PrerenderVideoPreview({ block, currentSceneTimeRef, framePreviewProps, 
     return () => cancelAnimationFrame(frameId);
   }, [currentSceneTimeRef, getBlockAtTime, isPlaying]);
 
-  function resetMediaSource(anchorBlock: PrerenderCacheBlock) {
-    const video = videoRef.current;
-    if (!video || typeof MediaSource === "undefined" || !MediaSource.isTypeSupported(anchorBlock.mimeType)) return;
-    teardownMediaSource();
-    mseGenerationRef.current += 1;
-    videoCandidateStartedAtRef.current = null;
-    domCandidateStartedAtRef.current = null;
-    const mediaSource = new MediaSource();
-    const objectUrl = URL.createObjectURL(mediaSource);
-    mediaSourceRef.current = mediaSource;
-    mediaAnchorStartRef.current = anchorBlock.startTime;
-    reanchorBlockStartRef.current = anchorBlock.startTime;
-    objectUrlRef.current = objectUrl;
-    video.src = objectUrl;
-    const generation = mseGenerationRef.current;
-    const handleSourceOpen = () => {
-      if (generation !== mseGenerationRef.current || mediaSource.readyState !== "open") return;
-      const sourceBuffer = mediaSource.addSourceBuffer(anchorBlock.mimeType);
-      sourceBuffer.mode = "segments";
-      sourceBufferRef.current = sourceBuffer;
-      sourceBuffer.addEventListener("updateend", flushMediaSourceAppendQueue);
-      appendContiguousCachedRun(anchorBlock);
-    };
-    mediaSource.addEventListener("sourceopen", handleSourceOpen, { once: true });
-  }
+  useEffect(() => {
+    function handleReady(event: Event) {
+      const target = loadTargetRef.current;
+      const video = event.currentTarget as HTMLVideoElement | null;
+      if (!target || !video || video !== getDisplayVideo(target.mode)) return;
+      promoteReadyTarget(target.generation);
+    }
 
-  function teardownMediaSource() {
-    const sourceBuffer = sourceBufferRef.current;
-    sourceBuffer?.removeEventListener("updateend", flushMediaSourceAppendQueue);
-    sourceBufferRef.current = null;
-    mediaSourceRef.current = null;
-    appendedBlocksRef.current.clear();
-    appendQueueRef.current = [];
-    mediaAnchorStartRef.current = 0;
-    reanchorBlockStartRef.current = null;
-    if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
-    objectUrlRef.current = "";
-  }
+    function handleError(event: Event) {
+      const target = loadTargetRef.current;
+      const video = event.currentTarget as HTMLVideoElement | null;
+      if (!target || !video || video !== getDisplayVideo(target.mode)) return;
+      if (target.generation !== loadGenerationRef.current) return;
+      loadingBlockUrlRef.current = "";
+      loadTargetRef.current = null;
+      clearCacheVisibleTimer();
+      updateDisplayReady(false);
+      scheduleDomFallback();
+    }
 
-  function appendContiguousCachedRun(block: PrerenderCacheBlock) {
-    const blocks: PrerenderCacheBlock[] = [];
-    for (let offset = -mseAppendLookBehindBlocks; offset <= mseAppendLookAheadBlocks; offset += 1) {
-      const expectedStart = block.startTime + offset * block.duration;
-      const adjacentBlock = getBlockAtTime(expectedStart + 1 / block.frameRate / 2);
-      if (!adjacentBlock || Math.abs(adjacentBlock.startTime - expectedStart) > 1 / block.frameRate) {
-        if (offset > 0) break;
-        continue;
+    const videos = [videoARef.current, videoBRef.current].filter((video): video is HTMLVideoElement => Boolean(video));
+    for (const video of videos) {
+      video.addEventListener("loadedmetadata", handleReady);
+      video.addEventListener("canplay", handleReady);
+      video.addEventListener("seeked", handleReady);
+      video.addEventListener("error", handleError);
+    }
+    return () => {
+      for (const video of videos) {
+        video.removeEventListener("loadedmetadata", handleReady);
+        video.removeEventListener("canplay", handleReady);
+        video.removeEventListener("seeked", handleReady);
+        video.removeEventListener("error", handleError);
       }
-      blocks.push(adjacentBlock);
+    };
+  }, []);
+
+  useEffect(() => () => {
+    clearCacheVisibleTimer();
+    clearDomFallbackTimer();
+    updateDisplayReady(false);
+  }, []);
+
+  function ensureCachedBlockVideo(nextBlock: PrerenderCacheBlock, sceneTime: number) {
+    const visibleVideo = getDisplayVideo(displayModeRef.current);
+    const visibleBlock = getDisplayBlock(displayModeRef.current);
+    if (visibleVideo && visibleBlock?.url === nextBlock.url) {
+      syncVideoToBlock(visibleVideo, nextBlock, sceneTime);
+      updateDisplayReady(isVideoPaintReady(visibleVideo));
+      return;
     }
-    blocks.sort((left, right) => left.startTime - right.startTime);
-    for (const cachedBlock of blocks) enqueueMediaSourceBlock(cachedBlock);
+
+    const cachedMode = videoABlockRef.current?.url === nextBlock.url ? "video-a" : videoBBlockRef.current?.url === nextBlock.url ? "video-b" : null;
+    const cachedVideo = cachedMode ? getDisplayVideo(cachedMode) : null;
+    if (cachedMode && cachedVideo && isVideoPaintReady(cachedVideo)) {
+      syncVideoToBlock(cachedVideo, nextBlock, sceneTime, true);
+      scheduleCacheVisible(cachedMode, cachedVideo, nextBlock, sceneTime);
+      return;
+    }
+
+    const targetMode: CachedPreviewDisplayMode = displayModeRef.current === "video-a" ? "video-b" : "video-a";
+    const targetVideo = getDisplayVideo(targetMode);
+    if (!targetVideo) {
+      scheduleDomFallback();
+      return;
+    }
+    if (loadingBlockUrlRef.current !== nextBlock.url || targetVideo.src !== nextBlock.url) {
+      loadGenerationRef.current += 1;
+      loadingBlockUrlRef.current = nextBlock.url;
+      loadTargetRef.current = { generation: loadGenerationRef.current, mode: targetMode, block: nextBlock, sceneTime };
+      if (targetMode === "video-a") videoABlockRef.current = nextBlock;
+      else videoBBlockRef.current = nextBlock;
+      targetVideo.src = nextBlock.url;
+      targetVideo.load();
+    } else if (loadTargetRef.current?.block.url === nextBlock.url) {
+      loadTargetRef.current = { ...loadTargetRef.current, sceneTime };
+    }
+    syncVideoToBlock(targetVideo, nextBlock, sceneTime, true);
+    if (isVideoPaintReady(targetVideo)) scheduleCacheVisible(targetMode, targetVideo, nextBlock, sceneTime);
+    else updateDisplayReady(false);
   }
 
-  function enqueueMediaSourceBlock(block: PrerenderCacheBlock) {
-    if (appendedBlocksRef.current.has(block.startTime) || appendQueueRef.current.some((queued) => queued.startTime === block.startTime)) return;
-    appendQueueRef.current.push(block);
-    appendQueueRef.current.sort((left, right) => left.startTime - right.startTime);
-    flushMediaSourceAppendQueue();
+  function scheduleCacheVisible(mode: Exclude<CachedPreviewDisplayMode, "dom">, video: HTMLVideoElement, targetBlock: PrerenderCacheBlock, sceneTime: number) {
+    if (displayModeRef.current === mode) {
+      updateDisplayReady(isVideoPaintReady(video));
+      return;
+    }
+    if (cacheVisibleTimerRef.current !== null) return;
+    cacheVisibleTimerRef.current = window.setTimeout(() => {
+      cacheVisibleTimerRef.current = null;
+      const currentTime = currentSceneTimeRef.current;
+      const currentBlock = getBlockAtTime(currentTime);
+      if (!currentBlock || currentBlock.url !== targetBlock.url || !isVideoPaintReady(video)) {
+        updateDisplayReady(false);
+        return;
+      }
+      syncVideoToBlock(video, currentBlock, currentTime, true);
+      updateDisplayMode(mode);
+      updateDisplayReady(true);
+    }, cacheVisibleStableDelayMs);
   }
 
-  function flushMediaSourceAppendQueue() {
-    const sourceBuffer = sourceBufferRef.current;
-    if (!sourceBuffer || sourceBuffer.updating || appendQueueRef.current.length === 0) return;
-    const block = appendQueueRef.current.shift();
-    if (!block) return;
-    try {
-      sourceBuffer.timestampOffset = getMediaSourceLocalTime(block.startTime, mediaAnchorStartRef.current);
-      sourceBuffer.appendBuffer(block.bytes.slice().buffer);
-      appendedBlocksRef.current.add(block.startTime);
-      if (block.startTime === reanchorBlockStartRef.current) reanchorBlockStartRef.current = null;
-    } catch {
-      appendQueueRef.current.unshift(block);
+  function promoteReadyTarget(generation: number) {
+    const target = loadTargetRef.current;
+    if (!target || target.generation !== generation || generation !== loadGenerationRef.current) return;
+    const video = getDisplayVideo(target.mode);
+    if (!video || !isVideoPaintReady(video)) return;
+    scheduleCacheVisible(target.mode, video, target.block, currentSceneTimeRef.current);
+  }
+
+  function scheduleDomFallback() {
+    clearCacheVisibleTimer();
+    updateDisplayReady(false);
+    if (displayModeRef.current === "dom") return;
+    if (domFallbackTimerRef.current !== null) return;
+    domFallbackTimerRef.current = window.setTimeout(() => {
+      domFallbackTimerRef.current = null;
+      if (getBlockAtTime(currentSceneTimeRef.current)) return;
+      loadingBlockUrlRef.current = "";
+      loadTargetRef.current = null;
+      videoARef.current?.pause();
+      videoBRef.current?.pause();
+      updateDisplayMode("dom");
+    }, cacheDomFallbackDelayMs);
+  }
+
+  function syncVisibleCachedVideo(sceneTime: number) {
+    const video = getDisplayVideo(displayModeRef.current);
+    const block = getDisplayBlock(displayModeRef.current);
+    if (!video || !block) return;
+    syncVideoToBlock(video, block, sceneTime);
+  }
+
+  function syncVideoToBlock(video: HTMLVideoElement, block: PrerenderCacheBlock, sceneTime: number, forceSeek = false) {
+    const targetTime = getBlockLocalTime(block, sceneTime);
+    if (isPlaying) {
+      if (forceSeek || Math.abs(video.currentTime - targetTime) > playbackSeekDriftSeconds) seekDirectCacheVideo(video, targetTime);
+      if (video.paused) void video.play().catch(() => undefined);
+      return;
     }
+
+    if (!video.paused) video.pause();
+    if (forceSeek || Math.abs(video.currentTime - targetTime) > Math.max(1 / block.frameRate / 2, 0.01)) seekDirectCacheVideo(video, targetTime);
+  }
+
+  function getDisplayVideo(mode: CachedPreviewDisplayMode) {
+    return mode === "video-a" ? videoARef.current : mode === "video-b" ? videoBRef.current : null;
+  }
+
+  function getDisplayBlock(mode: CachedPreviewDisplayMode) {
+    return mode === "video-a" ? videoABlockRef.current : mode === "video-b" ? videoBBlockRef.current : null;
   }
 
   const showingDomFallback = displayMode === "dom";
@@ -226,39 +281,25 @@ function PrerenderVideoPreview({ block, currentSceneTimeRef, framePreviewProps, 
     <div className="relative" data-clipper-prerender-video-preview-wrapper style={videoStyle}>
       <div className="relative" style={videoStyle}>
         {showingDomFallback ? <div className="absolute left-0 top-0"><FramePreview {...framePreviewProps} /></div> : null}
-        <video ref={videoRef} className={`absolute left-0 top-0 bg-black object-contain shadow-[0_22px_70px_rgba(0,0,0,0.44)] ${showingDomFallback ? "pointer-events-none opacity-0" : "opacity-100"}`} muted playsInline preload="auto" style={videoStyle} data-clipper-prerender-video-preview />
+        <video ref={videoARef} className={`absolute left-0 top-0 bg-black object-contain shadow-[0_22px_70px_rgba(0,0,0,0.44)] ${displayMode !== "video-a" ? "pointer-events-none opacity-0" : "opacity-100"}`} muted playsInline preload="auto" style={videoStyle} data-clipper-prerender-video-preview />
+        <video ref={videoBRef} className={`absolute left-0 top-0 bg-black object-contain shadow-[0_22px_70px_rgba(0,0,0,0.44)] ${displayMode !== "video-b" ? "pointer-events-none opacity-0" : "opacity-100"}`} muted playsInline preload="auto" style={videoStyle} data-clipper-prerender-video-preview />
       </div>
     </div>
   );
 }
 
-function getMediaSourceLocalTime(sceneTime: number, anchorStartTime: number) {
-  return Math.max(0, sceneTime - anchorStartTime);
+function getBlockLocalTime(block: PrerenderCacheBlock, sceneTime: number) {
+  return Math.min(Math.max(sceneTime - block.startTime, 0), Math.max(block.duration - 1 / block.frameRate, 0));
 }
 
-function getMediaSourceSignedLocalTime(sceneTime: number, anchorStartTime: number) {
-  return sceneTime - anchorStartTime;
-}
-
-function seekMediaSourceVideo(video: HTMLVideoElement, sceneTime: number, anchorStartTime: number) {
+function seekDirectCacheVideo(video: HTMLVideoElement, localTime: number) {
   try {
-    video.currentTime = getMediaSourceLocalTime(sceneTime, anchorStartTime);
+    video.currentTime = localTime;
   } catch {
-    // MSE can reject seeks before metadata/buffer ranges exist; rAF sync retries.
+    // The direct cache blob may still be loading metadata; playback retries on the next frame.
   }
 }
 
-function isVideoTimeBuffered(video: HTMLVideoElement, time: number) {
-  for (let index = 0; index < video.buffered.length; index += 1) {
-    if (time >= video.buffered.start(index) - mseBufferedTimeToleranceSeconds && time <= video.buffered.end(index) + mseBufferedTimeToleranceSeconds) return true;
-  }
-  return false;
-}
-
-function isTimeNearBufferedRange(video: HTMLVideoElement, time: number, tolerance: number) {
-  if (video.buffered.length === 0) return false;
-  for (let index = 0; index < video.buffered.length; index += 1) {
-    if (time >= video.buffered.start(index) - tolerance && time <= video.buffered.end(index) + tolerance) return true;
-  }
-  return false;
+function isVideoPaintReady(video: HTMLVideoElement) {
+  return video.readyState >= haveCurrentDataReadyState;
 }

@@ -239,6 +239,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
   const modeRef = useRef(mode);
   const activePartFilePathRef = useRef("");
   const currentSceneTimeRef = useRef(currentSceneTime);
+  const cachedPreviewDisplayReadyRef = useRef(false);
   const isPlayingRef = useRef(isPlaying);
   const playbackClockRef = useRef<PlaybackClock>(null);
   const wasPlayingRef = useRef(false);
@@ -499,6 +500,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     editorStore,
     frameViewportRef,
     hasCachedPreviewFrameAtTime: prerenderCache.hasFrameAtTime,
+    isCachedPreviewPaintReadyAtTime: () => cachedPreviewDisplayReadyRef.current,
     isPlaying,
     isPlayingRef,
     numberInputScrubPausedPlaybackRef,
@@ -514,6 +516,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     setIsPlaying,
     setPlaybackClock,
     setRenderCurrentSceneTime,
+    requestCachedPreviewAtTime: prerenderCache.requestCacheAtTime,
     useCachedPreviewPlayback: prerenderCacheEnabled && mode === "preview" && !composeMode,
     timeline,
     timelineLayers,
@@ -1531,6 +1534,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
           getPrerenderCacheBlockAtTime={prerenderCache.getBlockAtTime}
           isPlaying={isPlaying}
           mode={mode}
+          onCachedPreviewDisplayReadyChange={(ready) => { cachedPreviewDisplayReadyRef.current = ready; }}
           prerenderCacheEnabled={prerenderCacheEnabled && !composeMode}
           prerenderCacheBlock={prerenderCache.block}
           previewKey={part.id}

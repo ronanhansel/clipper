@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { defaultPrerenderBlockDurationMs, maxPrerenderBlockDurationMs, minPrerenderBlockDurationMs, videoExportFrameRate } from "../../config";
 import { clipperHost } from "../../clipperHost";
 import type { ProjectManifest, Scene } from "../../../core/types";
@@ -17,6 +17,8 @@ export type PrerenderCacheBlock = {
 export type PrerenderCacheCoverage = {
   blocks: Array<{ start: number; duration: number; state: "enqueued" | "queued" | "cached" }>;
 };
+
+export type PrerenderCacheInterestReason = "scrub" | "playback" | "idle";
 
 const maxMemoryBlocks = 64;
 const prerenderTimeoutMs = 30000;
@@ -55,24 +57,31 @@ export function usePrerenderCache({ blockDurationMs, cacheResetToken, enabled, h
     revokeCachedBlocks(cacheRef.current);
   }, []);
 
-  useEffect(() => {
-    if (!enabled || !hasActiveComposition || sceneDuration <= 0) return;
+  const requestCacheAtTime = useCallback((time: number, reason: PrerenderCacheInterestReason = "idle") => {
+    const request = latestRequestRef.current;
+    if (!request.enabled || !request.hasActiveComposition || request.sceneDuration <= 0) return;
     const generation = generationRef.current;
-    if (isPlaying) return;
-    const blockStarts = getPrerenderScheduleBlockStarts(sceneTime, sceneDuration, videoExportFrameRate, blockDurationSeconds, isPlaying ? activeRadiusBlocks : 2);
-    const nextQueue = queuedRef.current.filter((blockStart) => shouldKeepQueuedBlock(blockStart, sceneTime, sceneDuration, blockDurationSeconds));
+    const radiusBlocks = reason === "playback" ? activeRadiusBlocks : reason === "scrub" ? 1 : 2;
+    const blockStarts = getPrerenderScheduleBlockStarts(time, request.sceneDuration, videoExportFrameRate, blockDurationSeconds, radiusBlocks, reason);
+    const nextQueue = queuedRef.current.filter((blockStart) => shouldKeepQueuedBlock(blockStart, time, request.sceneDuration, blockDurationSeconds));
     let queueChanged = nextQueue.length !== queuedRef.current.length;
-    for (const blockStart of blockStarts) {
+    for (let index = blockStarts.length - 1; index >= 0; index -= 1) {
+      const blockStart = blockStarts[index];
       if (!cachedBlockStartsRef.current.has(blockStart) && !renderingBlockStartsRef.current.has(blockStart) && !nextQueue.includes(blockStart)) {
-        nextQueue.push(blockStart);
+        nextQueue.unshift(blockStart);
         queueChanged = true;
       }
     }
     queuedRef.current = nextQueue;
-    evictMemoryBlocks(cacheRef.current, sceneTime);
+    evictMemoryBlocks(cacheRef.current, time);
     if (queueChanged) setState((current) => ({ ...current, version: current.version + 1 }));
     void processPrerenderQueue(generation);
-    if (!isPlaying) scheduleIdleExpansion(generation);
+    if (reason !== "playback") scheduleIdleExpansion(generation);
+  }, [blockDurationSeconds]);
+
+  useEffect(() => {
+    if (!enabled || !hasActiveComposition || sceneDuration <= 0) return;
+    requestCacheAtTime(sceneTime, isPlaying ? "playback" : "idle");
   }, [blockDurationSeconds, enabled, hasActiveComposition, isPlaying, sceneDuration, sceneTime]);
 
   useEffect(() => () => {
@@ -91,14 +100,9 @@ export function usePrerenderCache({ blockDurationMs, cacheResetToken, enabled, h
 
       setState((current) => ({ ...current, version: current.version + 1 }));
       const request = latestRequestRef.current;
-      if (request.isPlaying) {
-        renderingBlockStartsRef.current.delete(nextBlockStart);
-        continue;
-      }
       try {
         const videoBlock = await withPrerenderTimeout(clipperHost.prerenderVideoBlock(request.project, request.manifestPath, request.scene, nextBlockStart, request.sceneDuration, videoExportFrameRate, request.tileHeight, request.blockDurationMs), nextBlockStart);
         if (generation !== generationRef.current) break;
-        if (latestRequestRef.current.isPlaying) continue;
         if (videoBlock.duration <= 0 || !videoBlock.data) throw new Error("Prerendered video block was empty.");
         cachedBlockStartsRef.current.add(nextBlockStart);
         const previousBlock = cacheRef.current.get(videoBlock.startTime);
@@ -137,7 +141,7 @@ export function usePrerenderCache({ blockDurationMs, cacheResetToken, enabled, h
       if (generation !== generationRef.current) return;
       const request = latestRequestRef.current;
       if (!request.enabled || !request.hasActiveComposition || request.isPlaying || request.sceneDuration <= 0) return;
-      const nextBlocks = getPrerenderScheduleBlockStarts(request.sceneTime, request.sceneDuration, videoExportFrameRate, blockDurationSeconds, idleRadiusBlocks);
+      const nextBlocks = getPrerenderScheduleBlockStarts(request.sceneTime, request.sceneDuration, videoExportFrameRate, blockDurationSeconds, idleRadiusBlocks, "idle");
       let changed = false;
       for (const blockStart of nextBlocks) {
         if (cachedBlockStartsRef.current.has(blockStart) || renderingBlockStartsRef.current.has(blockStart) || queuedRef.current.includes(blockStart)) continue;
@@ -169,15 +173,19 @@ export function usePrerenderCache({ blockDurationMs, cacheResetToken, enabled, h
       const block = cacheRef.current.get(nextBlockStart);
       return Boolean(block && time >= block.startTime && time < block.startTime + block.duration + 1 / videoExportFrameRate);
     },
+    requestCacheAtTime,
     coverage,
     error: state.error,
   };
 }
 
-function getPrerenderScheduleBlockStarts(sceneTime: number, sceneDuration: number, frameRate: number, blockDurationSeconds: number, radiusBlocks: number) {
+function getPrerenderScheduleBlockStarts(sceneTime: number, sceneDuration: number, frameRate: number, blockDurationSeconds: number, radiusBlocks: number, reason: PrerenderCacheInterestReason) {
   const currentBlockStart = getBlockStartTime(sceneTime, sceneDuration, frameRate, blockDurationSeconds);
   const offsets = [0];
-  for (let offset = 1; offset <= radiusBlocks; offset += 1) offsets.push(offset, -offset);
+  for (let offset = 1; offset <= radiusBlocks; offset += 1) {
+    if (reason === "playback") offsets.push(offset);
+    else offsets.push(offset, -offset);
+  }
   return offsets
     .map((offset) => quantizeFrameTime(currentBlockStart + offset * blockDurationSeconds, frameRate, sceneDuration))
     .map((time) => getBlockStartTime(time, sceneDuration, frameRate, blockDurationSeconds))
