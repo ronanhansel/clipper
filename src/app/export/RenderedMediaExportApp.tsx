@@ -88,7 +88,6 @@ export function RenderedMediaExportApp() {
           {request ? <ExportFramePreview key={request.scene.id} refs={{ cameraRef, dragSelectionBoxRef, frameViewportRef }} request={request} /> : <div className="h-full w-full bg-black" />}
         </ExportRenderErrorBoundary>
       </div>
-      <style>{`[data-clipper-frame-preview-wrapper] > :first-child{display:none}`}</style>
     </main>
   );
 }

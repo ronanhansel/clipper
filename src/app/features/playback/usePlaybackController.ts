@@ -15,6 +15,8 @@ import type { AdjustmentLayer, CompositionClip, EditorState, TimelineLayerState,
 import type { PlaybackClock } from "../../types";
 import type { EditorStore } from "../../state/editorStore";
 
+const playbackReactPreviewSyncIntervalMs = 1000 / 30;
+
 type PlaybackControllerOptions = {
   compositions: CompositionClip[];
   playbackRange?: { start: number; end: number; localLabels?: boolean };
@@ -364,6 +366,7 @@ export function usePlaybackController({
   useEffect(() => {
     if (!isPlaying) return;
     let lastCommittedPreviewKey = getPlaybackPreviewKey(currentSceneTimeRef.current, compositions, sceneDurationSeconds, timeline, timelineLayers, transitionLayers, visibleSceneAdjustmentLayers);
+    let lastReactPreviewSyncAt = 0;
     let frame = 0;
 
     function tick(now: number) {
@@ -374,14 +377,19 @@ export function usePlaybackController({
         : advanceTimeSensitiveSceneTime(clock.startedFrom, (now - clock.startedAt) / 1000, sceneDurationSeconds, visibleSceneAdjustmentLayers);
       const nextPreviewKey = getPlaybackPreviewKey(nextTime, compositions, sceneDurationSeconds, timeline, timelineLayers, transitionLayers, visibleSceneAdjustmentLayers);
       const shouldSyncReact = nextPreviewKey !== lastCommittedPreviewKey || nextTime >= playbackEnd;
+      const shouldSyncPreviewRender = shouldSyncReact || now - lastReactPreviewSyncAt >= playbackReactPreviewSyncIntervalMs;
 
       currentSceneTimeRef.current = nextTime;
       syncPlaybackDom(nextTime);
-      setRenderCurrentSceneTime(nextTime);
+
+      if (shouldSyncPreviewRender) {
+        lastReactPreviewSyncAt = now;
+        startTransition(() => setRenderCurrentSceneTime(nextTime));
+      }
 
       if (shouldSyncReact) {
         lastCommittedPreviewKey = nextPreviewKey;
-        setCurrentSceneTime(nextTime);
+        startTransition(() => setCurrentSceneTime(nextTime));
       }
 
       if (nextTime >= playbackEnd) {

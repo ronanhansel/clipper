@@ -1,8 +1,10 @@
 import { Minus, Plus } from "lucide-react";
 import { useMemo, type CSSProperties, type DragEvent, type PointerEvent, type ReactNode, type RefObject, type WheelEvent } from "react";
+import { videoExportFrameRate } from "../../app/config";
 import { roundTenth } from "../../core/math";
 import type { TimelineMode } from "../../core/types";
 import { formatTime } from "../../core/timeline";
+import type { RasterPreviewCoverage } from "../../app/features/preview/useRasterPreviewCache";
 import { TimelineSlider } from "./TimelineSlider";
 
 export type TimelineShellRefs = {
@@ -26,6 +28,7 @@ export type TimelineShellProps = {
   laneRowsStyle: CSSProperties;
   layerRailWidth: number;
   playheadColor?: string;
+  rasterPreviewCoverage?: RasterPreviewCoverage | null;
   refs: TimelineShellRefs;
   timelineName: string;
   timelineViewportDisplacement: number;
@@ -49,7 +52,7 @@ export type TimelineShellProps = {
   renderTimelineViewport: () => ReactNode;
 };
 
-export function TimelineShell({ contentWidth, currentTime, displayDuration, dragActive = false, dragOverlayLabel, emptyContent, laneContentHeight, laneRowsStyle, layerRailWidth, playheadColor = "#ff3b30", refs, timelineName, timelineViewportDisplacement, timelineZoom, ticks, activeMode, onModeChange, onTimelineViewportScroll, onTimelineViewportDragLeave, onTimelineViewportDragOver, onTimelineViewportDrop, onTimelineZoomChange, onLayerRailWheel, rulerHandlers, renderLayerRail, renderTimelineViewport }: TimelineShellProps) {
+export function TimelineShell({ contentWidth, currentTime, displayDuration, dragActive = false, dragOverlayLabel, emptyContent, laneContentHeight, laneRowsStyle, layerRailWidth, playheadColor = "#ff3b30", rasterPreviewCoverage, refs, timelineName, timelineViewportDisplacement, timelineZoom, ticks, activeMode, onModeChange, onTimelineViewportScroll, onTimelineViewportDragLeave, onTimelineViewportDragOver, onTimelineViewportDrop, onTimelineZoomChange, onLayerRailWheel, rulerHandlers, renderLayerRail, renderTimelineViewport }: TimelineShellProps) {
   return (
     <footer ref={refs.timelinePanelRef} data-timeline-panel className={`relative grid h-full min-h-0 select-none grid-rows-[34px_minmax(0,1fr)] gap-1.5 overflow-hidden border-t border-[#1d2028] bg-[#141821] px-[22px] pb-0 pt-2.5 ${dragActive ? "clipper-timeline-dragging-no-hover" : ""}`} onDragLeave={onTimelineViewportDragLeave} onDragOver={onTimelineViewportDragOver} onDrop={onTimelineViewportDrop}>
       {dragActive && dragOverlayLabel ? <div className="pointer-events-none absolute inset-0 z-50 grid place-items-center bg-[rgba(13,17,24,0.78)]"><div className="rounded-full bg-[var(--clipper-accent-muted-surface)] px-5 py-2 text-[12px] font-extrabold uppercase tracking-[0.18em] text-[var(--clipper-accent)]">{dragOverlayLabel}</div></div> : null}
@@ -79,6 +82,7 @@ export function TimelineShell({ contentWidth, currentTime, displayDuration, drag
             <span className="min-w-0 truncate text-[13px] font-extrabold text-[#dfe2ea]" title={timelineName}>{timelineName}</span>
           </div>
           <div ref={refs.timelineRulerViewportRef} className="relative overflow-hidden pl-0 pr-3">
+            {rasterPreviewCoverage ? <RasterCoverageStrip coverage={rasterPreviewCoverage} sceneDuration={displayDuration} contentWidth={contentWidth} /> : null}
             <TimeRuler rulerRef={refs.timelineRef} ticks={ticks} sceneDuration={displayDuration} contentWidth={contentWidth} onPointerDown={rulerHandlers.onPointerDown} onPointerMove={rulerHandlers.onPointerMove} onPointerUp={rulerHandlers.onPointerUp} onPointerCancel={rulerHandlers.onPointerCancel} />
           </div>
         </div>
@@ -97,6 +101,37 @@ export function TimelineShell({ contentWidth, currentTime, displayDuration, drag
       </div>
     </footer>
   );
+}
+
+function RasterCoverageStrip({ coverage, sceneDuration, contentWidth }: { coverage: RasterPreviewCoverage; sceneDuration: number; contentWidth: number }) {
+  if (sceneDuration <= 0 || (coverage.cachedTimes.length === 0 && coverage.queuedTimes.length === 0)) return null;
+  const cachedRanges = getRasterCoverageRanges(coverage.cachedTimes, sceneDuration);
+  const queuedRanges = getRasterCoverageRanges(coverage.queuedTimes, sceneDuration);
+  const minWidthPercent = (2 / Math.max(contentWidth, 1)) * 100;
+
+  return (
+    <div className="pointer-events-none absolute inset-x-0 top-0 z-30 h-1" style={{ width: contentWidth }} aria-hidden="true">
+      {queuedRanges.map((range) => <span key={`queued:${range.start}:${range.end}`} className="absolute top-0 h-1 rounded-full bg-[#facc15] shadow-[0_0_8px_rgba(250,204,21,0.55)]" style={{ left: `${(range.start / sceneDuration) * 100}%`, width: `${Math.max(((range.end - range.start) / sceneDuration) * 100, minWidthPercent)}%` }} />)}
+      {cachedRanges.map((range) => <span key={`cached:${range.start}:${range.end}`} className="absolute top-0 h-1 rounded-full bg-[#38bdf8] shadow-[0_0_8px_rgba(56,189,248,0.55)]" style={{ left: `${(range.start / sceneDuration) * 100}%`, width: `${Math.max(((range.end - range.start) / sceneDuration) * 100, minWidthPercent)}%` }} />)}
+    </div>
+  );
+}
+
+function getRasterCoverageRanges(times: number[], sceneDuration: number) {
+  const frameDuration = 1 / videoExportFrameRate;
+  const sortedTimes = [...new Set(times)].sort((left, right) => left - right);
+  const ranges: Array<{ start: number; end: number }> = [];
+  for (const time of sortedTimes) {
+    const start = Math.max(0, time - frameDuration / 2);
+    const end = Math.min(sceneDuration, time + frameDuration / 2);
+    const previous = ranges[ranges.length - 1];
+    if (previous && start <= previous.end + frameDuration * 0.25) {
+      previous.end = Math.max(previous.end, end);
+    } else {
+      ranges.push({ start, end });
+    }
+  }
+  return ranges;
 }
 
 export function TimeRuler({ rulerRef, ticks, sceneDuration, contentWidth, onPointerDown, onPointerMove, onPointerUp, onPointerCancel }: { rulerRef: RefObject<HTMLDivElement | null>; ticks: number[]; sceneDuration: number; contentWidth: number; onPointerDown: (event: PointerEvent<HTMLDivElement>) => void; onPointerMove: (event: PointerEvent<HTMLDivElement>) => void; onPointerUp: (event: PointerEvent<HTMLDivElement>) => void; onPointerCancel: (event: PointerEvent<HTMLDivElement>) => void }) {

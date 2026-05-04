@@ -1,12 +1,11 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent, type RefObject, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { mutedCaps, selectorBlue, selectorHandleSizePx, selectorOffsetPx } from "../../app/config";
+import { selectorBlue, selectorHandleSizePx, selectorOffsetPx } from "../../app/config";
 import { getRenderableTextSegments, getSelectionFormatState, normalizeEditableFormatting, renderRichTextSegments, richTextSegmentsFromElement, shouldPersistRichText, textSegmentsToEditableNodes } from "../../app/richText";
 import { applyAdjustmentLayersToVisualStyle } from "../../core/adjustments";
 import { boundsToViewport, formatCameraPreviewTransform, getLayeredCameraPreviewTransform, type CameraPreviewTransform } from "../../core/camera";
 import { generateChartObjects, type ChartGeneratedObject } from "../../core/chart";
 import { getBoundsUnion, insetBounds, isVisibleMarqueeBounds, updateDragSelectionBoxElement, type ResizeHandle } from "../../core/frameInteraction";
 import { clamp } from "../../core/math";
-import { getDisplayNameFromPath } from "../../core/fileNames";
 import { getRenderClockAttributes, getRenderClockStyle, syncDomAnimationsToRenderClock } from "../../core/renderClock";
 import { evaluateBackgroundLayer, evaluateFrameObject, isTimeSensitiveFrameObject, type EvaluatedFrameObject } from "../../core/renderRuntime";
 import { applyTransitionLayersToVisualStyle, getTransitionFinishTime, getTransitionProgress, renderTransitionSequence } from "../../core/transitions";
@@ -146,9 +145,7 @@ export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dra
   }
 
   return (
-    <div className="grid gap-3" data-clipper-frame-preview-wrapper>
-      <div className="flex items-baseline justify-between text-[#dfe2ea]"><span className={mutedCaps}>{getDisplayNameFromPath(part.filePath)}</span>
-<strong className="text-[13px]">{FRAME_WIDTH} x {FRAME_HEIGHT}</strong></div>
+    <div data-clipper-frame-preview-wrapper>
       <div className="relative overflow-visible" data-clipper-frame-preview-shell style={viewportOverlayStyle}>
         <div ref={frameViewportRef} className={`absolute overflow-hidden bg-black shadow-[0_22px_70px_rgba(0,0,0,0.44)] ${!isPlaying && (focusPicking || trackerPicking) ? "cursor-crosshair ring-2 ring-[#159dff]" : ""}`} data-clipper-frame-preview style={clippedViewportStyle} onPointerDownCapture={handleFramePointerDownCapture} onPointerDown={isPlaying ? undefined : onFramePointerDown} onPointerMove={handleFramePointerMove} onPointerUp={isPlaying ? undefined : onFramePointerUp} onPointerCancel={isPlaying ? undefined : onFramePointerCancel} onPointerLeave={clearSelectorHover}>
           <div className="absolute left-0 top-0 origin-top-left overflow-hidden" data-clipper-frame-content style={frameStyle}>

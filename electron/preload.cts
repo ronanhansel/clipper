@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld("clipper", {
   finishVideoExport: (sessionId: string) => ipcRenderer.invoke("clipper:finish-video-export", sessionId) as Promise<string>,
   cancelVideoExport: (sessionId: string) => ipcRenderer.invoke("clipper:cancel-video-export", sessionId) as Promise<void>,
   renderVideoExport: (exportId: string, defaultFileName: string, project: unknown, scene: unknown, frameRate: number, durationSeconds: number) => ipcRenderer.invoke("clipper:render-video-export", exportId, defaultFileName, project, scene, frameRate, durationSeconds) as Promise<string | null>,
+  rasterizePreviewFrame: (project: unknown, scene: unknown, sceneTime: number, frameRate: number) => ipcRenderer.invoke("clipper:rasterize-preview-frame", project, scene, sceneTime, frameRate) as Promise<{ width: number; height: number; pixelFormat: "bgra"; sceneTime: number; frameRate: number; data: string }>,
   cancelRenderVideoExport: (exportId: string) => ipcRenderer.invoke("clipper:cancel-render-video-export", exportId) as Promise<void>,
   onVideoExportProgress: (callback: (exportId: string, progress: { frame: number; totalFrames: number; percent: number; status: string }) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, exportId: string, progress: { frame: number; totalFrames: number; percent: number; status: string }) => callback(exportId, progress);

@@ -150,6 +150,11 @@ class ClipperHostService {
     return window.clipper.renderVideoExport(exportId, defaultFileName, project, scene, frameRate, durationSeconds);
   }
 
+  async rasterizePreviewFrame(project: ProjectManifest, scene: SceneManifest, sceneTime: number, frameRate: number) {
+    if (!window.clipper?.rasterizePreviewFrame) throw new Error("Preview rasterization requires the Clipper desktop app. Restart the app if this was just updated.");
+    return window.clipper.rasterizePreviewFrame(project, scene, sceneTime, frameRate);
+  }
+
   async exportMediaFile(defaultFileName: string, content: string) {
     if (!window.clipper?.exportMediaFile) return null;
     return window.clipper.exportMediaFile(defaultFileName, content);

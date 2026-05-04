@@ -4,8 +4,9 @@ import type { SettingsSection } from "../app/types";
 import { clamp } from "../core/math";
 import { Dialog, DialogContent } from "./ui/dialog";
 import { Input } from "./ui/input";
+import { Checkbox } from "./ui/checkbox";
 
-export function SettingsDialog({ activeSection, open, scrubCommitThrottleMs, defaultNewMarkerDurationSeconds: markerDurationSeconds, timelineEndPaddingFraction, timelinePrecision, onActiveSectionChange, onOpenChange, onScrubCommitThrottleMsChange, onDefaultNewMarkerDurationSecondsChange, onTimelineEndPaddingFractionChange, onTimelinePrecisionChange }: { activeSection: SettingsSection; open: boolean; scrubCommitThrottleMs: number; defaultNewMarkerDurationSeconds: number; timelineEndPaddingFraction: number; timelinePrecision: number; onActiveSectionChange: (section: SettingsSection) => void; onOpenChange: (open: boolean) => void; onScrubCommitThrottleMsChange: (value: number) => void; onDefaultNewMarkerDurationSecondsChange: (value: number) => void; onTimelineEndPaddingFractionChange: (value: number) => void; onTimelinePrecisionChange: (value: number) => void }) {
+export function SettingsDialog({ activeSection, open, rasterPreviewEnabled, scrubCommitThrottleMs, defaultNewMarkerDurationSeconds: markerDurationSeconds, timelineEndPaddingFraction, timelinePrecision, onActiveSectionChange, onOpenChange, onRasterPreviewEnabledChange, onScrubCommitThrottleMsChange, onDefaultNewMarkerDurationSecondsChange, onTimelineEndPaddingFractionChange, onTimelinePrecisionChange }: { activeSection: SettingsSection; open: boolean; rasterPreviewEnabled: boolean; scrubCommitThrottleMs: number; defaultNewMarkerDurationSeconds: number; timelineEndPaddingFraction: number; timelinePrecision: number; onActiveSectionChange: (section: SettingsSection) => void; onOpenChange: (open: boolean) => void; onRasterPreviewEnabledChange: (enabled: boolean) => void; onScrubCommitThrottleMsChange: (value: number) => void; onDefaultNewMarkerDurationSecondsChange: (value: number) => void; onTimelineEndPaddingFractionChange: (value: number) => void; onTimelinePrecisionChange: (value: number) => void }) {
   const navItems: Array<{ id: SettingsSection; label: string }> = [
     { id: "playback", label: "Playback" },
     { id: "timeline", label: "Timeline" },
@@ -55,13 +56,27 @@ export function SettingsDialog({ activeSection, open, scrubCommitThrottleMs, def
             <header className="flex items-center justify-between border-b border-[#14161c] px-5">
               <div>
                 <h2 className="text-sm font-extrabold text-white">{navItems.find((item) => item.id === activeSection)?.label}</h2>
-                <p className="mt-1 text-xs text-[#8f939d]">{activeSection === "timeline" ? "Tune timeline interaction responsiveness." : "Settings for this section will be added as the editor grows."}</p>
+                <p className="mt-1 text-xs text-[#8f939d]">{activeSection === "playback" ? "Control preview and playback diagnostics." : activeSection === "timeline" ? "Tune timeline interaction responsiveness." : "Settings for this section will be added as the editor grows."}</p>
               </div>
               <button className={`${appBarButtonBase} px-3 py-1.5`} onClick={() => onOpenChange(false)}>Close</button>
             </header>
 
             <div className="settings-scrollbar min-h-0 overflow-y-auto overflow-x-hidden p-5 [scrollbar-gutter:stable]">
-              {activeSection === "timeline" ? (
+              {activeSection === "playback" ? (
+                <div className="grid gap-4 rounded-xl border border-[#363b47] bg-[#1b1e26] p-4">
+                  <div className="grid gap-1.5">
+                    <strong className="text-sm text-white">Rasterized preview</strong>
+                    <p className="text-xs leading-5 text-[#8f939d]">Render the preview through the hidden DOM rasterizer and draw the result into a fixed 1920x1080 canvas. This is experimental and may fall back to DOM preview if capture fails.</p>
+                  </div>
+                  <label className="flex max-w-[520px] items-start gap-3 rounded-lg border border-[#363b47] bg-[#171920] p-3 text-xs font-bold text-[#dfe2ea]" htmlFor="raster-preview-toggle">
+                    <Checkbox id="raster-preview-toggle" checked={rasterPreviewEnabled} onCheckedChange={(checked) => onRasterPreviewEnabledChange(checked === true)} />
+                    <span className="grid gap-1">
+                      <span>Use rasterized preview for testing</span>
+                      <span className="font-medium leading-5 text-[#8f939d]">Stored locally on this machine. Disable to force the original live DOM preview.</span>
+                    </span>
+                  </label>
+                </div>
+              ) : activeSection === "timeline" ? (
                 <div className="grid gap-4 rounded-xl border border-[#363b47] bg-[#1b1e26] p-4">
                   <div className="grid gap-1.5">
                     <strong className="text-sm text-white">New marker duration</strong>

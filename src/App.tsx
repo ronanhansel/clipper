@@ -5,6 +5,7 @@ import { useFramePreviewZoomCommands } from "./app/features/editor-layout/useFra
 import { usePreviewScrollPersistence } from "./app/features/editor-layout/usePreviewScrollPersistence";
 import { useExportCommands } from "./app/features/export/useExportCommands";
 import { usePlaybackController } from "./app/features/playback/usePlaybackController";
+import { useRasterPreviewCache } from "./app/features/preview/useRasterPreviewCache";
 import { usePresentationController } from "./app/features/presentation/usePresentationController";
 import { isEditorTarget, useGlobalEditorShortcuts } from "./app/features/shortcuts/useGlobalEditorShortcuts";
 import { useSettingsShortcut } from "./app/features/shortcuts/useSettingsShortcut";
@@ -167,6 +168,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
   const [trackerPickTranslationMarker, setTrackerPickTranslationMarker] = useState<{ partId: string; markerId: string } | null>(null);
   const [pointPickAdjustment, setPointPickAdjustment] = useState<{ layerId: string; control: AdjustmentEffectPointControl } | null>(null);
   const [findMediaRequest, setFindMediaRequest] = useState<FileManagerFindMediaDetail | null>(null);
+  const [rasterPreviewEnabled, setRasterPreviewEnabled] = useState(isRasterPreviewEnabledByDefault);
   const {
     mode, setMode,
     timelineMode, setTimelineMode,
@@ -1310,6 +1312,15 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
   } : null;
   const editorPaneTabs: EditorPaneTab[] = editorTabs.map((tab) => ({ id: tab.id, filePath: tab.filePath, unsupportedReason: tab.unsupportedReason, isPinned: tab.isPinned }));
   const hasPreviewComposition = hasActiveComposition;
+  const rasterPreview = useRasterPreviewCache({
+    enabled: rasterPreviewEnabled && mode === "preview" && !composeMode,
+    hasActiveComposition: hasPreviewComposition,
+    isPlaying,
+    project,
+    scene,
+    sceneDuration: sceneDurationSeconds,
+    sceneTime: currentSceneTime,
+  });
   const activeEditorViewportState = activeEditorDocument ? project.editorState?.editor?.[activeEditorDocument.id] ?? project.editorState?.code?.[activeEditorDocument.id] : undefined;
 
   useEffect(() => {
@@ -1469,6 +1480,8 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
           framePreviewProps={hasPreviewComposition ? { cameraRef, dragBox, dragSelectionBoxRef, framePickPoint: activeFramePickPoint, focusPicking: isPickingZoomFocus || isPickingTranslationPosition || Boolean(pointPickAdjustment), trackerPicking: Boolean(trackerPickTranslationMarker), canSelectObjects: canSelectFrameObjects && !isPlaying, cameraTransform: cameraPreviewTransform, frameViewportRef, frameScale: framePreviewScale, isPlaying, part, partStart: activeTimelinePart?.start ?? 0, previewParts: composeMode ? [] : previewParts, transitionPreviewParts: composeMode ? null : transitionPreviewParts, adjustmentLayers: composeMode ? [] : visibleSceneAdjustmentLayers, transitionLayers: composeMode ? [] : visibleSceneTransitionLayers, playbackClock, previewTime, sceneTime: currentSceneTime, timelineMode, motionLayers: composeMode ? [] : motionLayers, hiddenMotionLayerIds: composeMode ? new Set<string>() : hiddenMotionLayerIds, pickingTranslationPosition: isPickingTranslationPosition || Boolean(pointPickAdjustment), pickingZoomFocus: isPickingZoomFocus || Boolean(pointPickAdjustment), compHidden: composeMode ? false : activeCompositionHidden, selectedObjects: previewSelectionObjects, marqueeDragging, editingTextObjectId: isPlaying ? null : editingTextObjectId, onFramePointerCancel, onFramePointerDown, onFramePointerDownCapture, onFramePointerMove, onFramePointerUp, onObjectPointerDown: startObjectDrag, onObjectResizePointerDown: startObjectResize, onTextEditCommit: updateTextObjectContent, onTextObjectDoubleClick: startTextObjectEdit, onTrackerTargetPick: commitTranslationTrackerPick } : null}
           hasActiveComposition={hasPreviewComposition}
           mode={mode}
+          rasterPreviewEnabled={rasterPreviewEnabled && !composeMode}
+          rasterPreviewFrame={rasterPreview.frame}
           previewKey={part.id}
           stageRef={centerPreviewScrollRef}
           onModeChange={updateMode}
@@ -1553,6 +1566,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
         timelineEndPaddingFraction,
         timelinePrecision,
         scrubSnapEnabled,
+        rasterPreviewCoverage: rasterPreviewEnabled && !composeMode ? rasterPreview.coverage : null,
         sceneDuration: sceneDurationSeconds,
         selectedPartId,
         selectedParts,
@@ -1641,6 +1655,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
       scrubCommitThrottleMs={scrubCommitThrottleMs}
       settingsOpen={settingsOpen}
       settingsSection={settingsSection}
+      rasterPreviewEnabled={rasterPreviewEnabled}
       timelineEndPaddingFraction={timelineEndPaddingFraction}
       timelinePrecision={timelinePrecision}
       validationErrorCount={validationErrors.length}
@@ -1654,6 +1669,10 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
       onMediaExport={() => void exportRenderedMedia()}
       onProjectExport={() => void exportProject()}
       onProjectExportFormatChange={setProjectExportFormat}
+      onRasterPreviewEnabledChange={(enabled) => {
+        setRasterPreviewEnabled(enabled);
+        window.localStorage.setItem("clipper:raster-preview", enabled ? "1" : "0");
+      }}
       onScrubCommitThrottleMsChange={setScrubCommitThrottleMs}
       onSettingsOpenChange={setSettingsOpen}
       onSettingsSectionChange={setSettingsSection}
@@ -1664,6 +1683,11 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     <FindMediaDialog findMediaRequest={findMediaRequest} onFindCompositionMedia={fileManagerActions.findCompositionMedia} onFindMediaRequestChange={setFindMediaRequest} />
     </>
   );
+}
+
+function isRasterPreviewEnabledByDefault() {
+  if (typeof window === "undefined") return true;
+  return window.localStorage.getItem("clipper:raster-preview") !== "0";
 }
 
 

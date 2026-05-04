@@ -13,6 +13,8 @@ const electronResourcesDir = path.join(root, "build", "electron");
 const publicDir = path.join(root, "public");
 const flattenedSourcePng = path.join(iconsDir, "icon-iOS-Default-1024x1024@1x.png");
 const iconsetDir = path.join(iconsDir, "icon.iconset");
+const canvasSize = 1024;
+const artworkSize = 840;
 const iconsetSizes = [
   [16, "icon_16x16.png"],
   [32, "icon_16x16@2x.png"],
@@ -27,7 +29,24 @@ const iconsetSizes = [
 ];
 
 async function renderPng(size, outputPath) {
-  await sharp(flattenedSourcePng).resize(size, size).png().toFile(outputPath);
+  const scale = size / canvasSize;
+  await sharp({
+    create: {
+      width: size,
+      height: size,
+      channels: 4,
+      background: { r: 0, g: 0, b: 0, alpha: 0 },
+    },
+  })
+    .composite([{
+      input: await sharp(flattenedSourcePng)
+        .resize(Math.round(artworkSize * scale), Math.round(artworkSize * scale))
+        .png()
+        .toBuffer(),
+      gravity: "center",
+    }])
+    .png()
+    .toFile(outputPath);
 }
 
 async function main() {

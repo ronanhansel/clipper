@@ -17,6 +17,7 @@ type AppDialogsProps = {
   projectExportFormat: ProjectExportFormat;
   projectName: string;
   resolution: ProjectManifest["resolution"];
+  rasterPreviewEnabled: boolean;
   sceneDurationSeconds: number;
   sceneName: string;
   scrubCommitThrottleMs: number;
@@ -35,6 +36,7 @@ type AppDialogsProps = {
   onMediaExport: () => void;
   onProjectExport: () => void;
   onProjectExportFormatChange: (format: ProjectExportFormat) => void;
+  onRasterPreviewEnabledChange: (enabled: boolean) => void;
   onScrubCommitThrottleMsChange: (value: number) => void;
   onSettingsOpenChange: (open: boolean) => void;
   onSettingsSectionChange: (section: SettingsSection) => void;
@@ -43,7 +45,7 @@ type AppDialogsProps = {
   onVideoExportCancel: () => void;
 };
 
-export function AppDialogs({ appContextMenu, defaultNewMarkerDurationSeconds, exportDialogOpen, exportDialogTab, exportIncludeSources, exportProgress, isExporting, partCount, projectExportFormat, projectName, resolution, sceneDurationSeconds, sceneName, scrubCommitThrottleMs, settingsOpen, settingsSection, timelineEndPaddingFraction, timelinePrecision, validationErrorCount, videoExportCancelling, videoExportProgress, onAppContextMenuClose, onDefaultNewMarkerDurationSecondsChange, onExportDialogOpenChange, onExportDialogTabChange, onExportIncludeSourcesChange, onMediaExport, onProjectExport, onProjectExportFormatChange, onScrubCommitThrottleMsChange, onSettingsOpenChange, onSettingsSectionChange, onTimelineEndPaddingFractionChange, onTimelinePrecisionChange, onVideoExportCancel }: AppDialogsProps) {
+export function AppDialogs({ appContextMenu, defaultNewMarkerDurationSeconds, exportDialogOpen, exportDialogTab, exportIncludeSources, exportProgress, isExporting, partCount, projectExportFormat, projectName, resolution, rasterPreviewEnabled, sceneDurationSeconds, sceneName, scrubCommitThrottleMs, settingsOpen, settingsSection, timelineEndPaddingFraction, timelinePrecision, validationErrorCount, videoExportCancelling, videoExportProgress, onAppContextMenuClose, onDefaultNewMarkerDurationSecondsChange, onExportDialogOpenChange, onExportDialogTabChange, onExportIncludeSourcesChange, onMediaExport, onProjectExport, onProjectExportFormatChange, onRasterPreviewEnabledChange, onScrubCommitThrottleMsChange, onSettingsOpenChange, onSettingsSectionChange, onTimelineEndPaddingFractionChange, onTimelinePrecisionChange, onVideoExportCancel }: AppDialogsProps) {
   return (
     <>
       <ExportMediaDialog
@@ -69,12 +71,14 @@ export function AppDialogs({ appContextMenu, defaultNewMarkerDurationSeconds, ex
       <SettingsDialog
         activeSection={settingsSection}
         open={settingsOpen}
+        rasterPreviewEnabled={rasterPreviewEnabled}
         scrubCommitThrottleMs={scrubCommitThrottleMs}
         defaultNewMarkerDurationSeconds={defaultNewMarkerDurationSeconds}
         timelineEndPaddingFraction={timelineEndPaddingFraction}
         timelinePrecision={timelinePrecision}
         onActiveSectionChange={onSettingsSectionChange}
         onOpenChange={onSettingsOpenChange}
+        onRasterPreviewEnabledChange={onRasterPreviewEnabledChange}
         onScrubCommitThrottleMsChange={onScrubCommitThrottleMsChange}
         onDefaultNewMarkerDurationSecondsChange={onDefaultNewMarkerDurationSecondsChange}
         onTimelineEndPaddingFractionChange={onTimelineEndPaddingFractionChange}

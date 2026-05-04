@@ -53,6 +53,7 @@ interface Window {
     finishVideoExport: (sessionId: string) => Promise<string>;
     cancelVideoExport: (sessionId: string) => Promise<void>;
     renderVideoExport: (exportId: string, defaultFileName: string, project: unknown, scene: unknown, frameRate: number, durationSeconds: number) => Promise<string | null>;
+    rasterizePreviewFrame: (project: unknown, scene: unknown, sceneTime: number, frameRate: number) => Promise<{ width: number; height: number; pixelFormat: "bgra"; sceneTime: number; frameRate: number; data: string }>;
     cancelRenderVideoExport: (exportId: string) => Promise<void>;
     setWindowFullscreen: (fullscreen: boolean) => Promise<boolean>;
     toggleWindowFullscreen: () => Promise<boolean>;
