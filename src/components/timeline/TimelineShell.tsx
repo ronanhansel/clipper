@@ -52,6 +52,8 @@ export type TimelineShellProps = {
 };
 
 export function TimelineShell({ contentWidth, currentTime, displayDuration, dragActive = false, dragOverlayLabel, emptyContent, laneContentHeight, laneRowsStyle, layerRailWidth, playheadColor = "#ff3b30", prerenderCacheCoverage, refs, timelineName, timelineViewportDisplacement, timelineZoom, ticks, activeMode, onModeChange, onTimelineViewportScroll, onTimelineViewportDragLeave, onTimelineViewportDragOver, onTimelineViewportDrop, onTimelineZoomChange, onLayerRailWheel, rulerHandlers, renderLayerRail, renderTimelineViewport }: TimelineShellProps) {
+  const playheadCapBleed = 5;
+
   return (
     <footer ref={refs.timelinePanelRef} data-timeline-panel className={`relative grid h-full min-h-0 select-none grid-rows-[34px_minmax(0,1fr)] gap-1.5 overflow-hidden border-t border-[#1d2028] bg-[#141821] px-[22px] pb-0 pt-2.5 ${dragActive ? "clipper-timeline-dragging-no-hover" : ""}`} onDragLeave={onTimelineViewportDragLeave} onDragOver={onTimelineViewportDragOver} onDrop={onTimelineViewportDrop}>
       {dragActive && dragOverlayLabel ? <div className="pointer-events-none absolute inset-0 z-50 grid place-items-center bg-[rgba(13,17,24,0.78)]"><div className="rounded-full bg-[var(--clipper-accent-muted-surface)] px-5 py-2 text-[12px] font-extrabold uppercase tracking-[0.18em] text-[var(--clipper-accent)]">{dragOverlayLabel}</div></div> : null}
@@ -69,8 +71,8 @@ export function TimelineShell({ contentWidth, currentTime, displayDuration, drag
         </div>
       </div>
       <div ref={refs.playbackPlayheadRef} className="relative grid h-full min-h-0 max-h-full grid-rows-[38px_minmax(0,1fr)] overflow-hidden" style={{ "--clipper-playhead-left": `${displayDuration > 0 ? (currentTime / displayDuration) * 100 : 0}%`, "--clipper-timeline-scroll-x": `${-(refs.timelineViewportRef.current?.scrollLeft ?? timelineViewportDisplacement)}px` } as CSSProperties}>
-        <div className="pointer-events-none absolute right-0 top-0 z-30 overflow-hidden pl-0 pr-3" style={{ left: layerRailWidth, height: 38 + laneContentHeight }}>
-          <div className="relative" style={{ width: contentWidth, height: 38 + laneContentHeight, transform: "translate3d(var(--clipper-timeline-scroll-x, 0px), 0, 0)", willChange: "transform" }}>
+        <div className="pointer-events-none absolute right-0 top-0 z-30 overflow-hidden pl-0 pr-3" style={{ left: layerRailWidth - playheadCapBleed, height: 38 + laneContentHeight }}>
+          <div className="relative" style={{ width: contentWidth, height: 38 + laneContentHeight, transform: `translate3d(calc(var(--clipper-timeline-scroll-x, 0px) + ${playheadCapBleed}px), 0, 0)`, willChange: "transform" }}>
             <div ref={refs.timelineSnapGuideRef} className="pointer-events-none absolute top-0 z-20 hidden w-px bg-white/90 shadow-[0_0_0_1px_rgba(255,255,255,0.2),0_0_12px_rgba(255,255,255,0.35)]" style={{ height: 38 + laneContentHeight, transform: "translate3d(0, 0, 0)" }} />
             <div className="absolute top-[12px] h-3 w-2.5 rounded-[2px]" style={{ left: "var(--clipper-playhead-left)", backgroundColor: playheadColor, clipPath: "polygon(0 0, 100% 0, 100% 68%, 50% 100%, 0 68%)", transform: "translateX(-50%)" }} />
             <div className="absolute top-[38px] w-px" style={{ left: "var(--clipper-playhead-left)", height: laneContentHeight, backgroundColor: playheadColor }} />
@@ -107,7 +109,7 @@ function PrerenderCoverageStrip({ coverage, sceneDuration, contentWidth }: { cov
   const minWidthPercent = (2 / Math.max(contentWidth, 1)) * 100;
 
   return (
-    <div className="pointer-events-none absolute inset-x-0 top-0 z-30 h-0.5" style={{ width: contentWidth }} aria-hidden="true">
+    <div className="pointer-events-none absolute left-0 top-0 z-30 h-0.5" style={{ width: contentWidth }} aria-hidden="true">
       {coverage.blocks.map((block) => <span key={`${block.state}:${block.start}:${block.duration}`} className={`absolute top-0 h-0.5 ${block.state === "cached" ? "bg-[#38bdf8]" : block.state === "queued" ? "bg-[#a16207]" : "bg-[#333846]"}`} style={{ left: `${(block.start / sceneDuration) * 100}%`, width: `${Math.max((block.duration / sceneDuration) * 100, minWidthPercent)}%` }} />)}
     </div>
   );

@@ -26,6 +26,7 @@ const ffmpegPath = require("ffmpeg-static") as string | null;
 const isDev = process.env.VITE_DEV_SERVER_URL || !app.isPackaged;
 const renderVideoChildArgIndex = process.argv.indexOf("--render-video-child");
 const isRenderVideoChildProcess = renderVideoChildArgIndex >= 0;
+app.commandLine.appendSwitch("force-color-profile", "srgb");
 if (isRenderVideoChildProcess && process.platform === "darwin") app.setActivationPolicy("accessory");
 const videoExportSessions = new Map<
   string,
@@ -72,6 +73,7 @@ const exportChromiumArgs = [
   "--force-device-scale-factor=1",
   "--num-raster-threads=8",
   "--js-flags=--max-old-space-size=4096",
+  "--force-color-profile=srgb",
 ] as const;
 
 async function readAppState(): Promise<Record<string, unknown>> {
@@ -1206,9 +1208,7 @@ async function renderSupervisedFrameRangeChild(
     renderSurface,
   };
   await fs.writeFile(payloadPath, JSON.stringify(payload), "utf8");
-  const electronArgs = renderSurface === "preview-cache"
-    ? ["--enable-logging=file", `--log-file=${nativeLogPath}`]
-    : [...exportChromiumArgs, "--enable-logging=file", `--log-file=${nativeLogPath}`];
+  const electronArgs = [...exportChromiumArgs, "--enable-logging=file", `--log-file=${nativeLogPath}`];
   const child = spawn(
     process.execPath,
     getElectronChildArgs(
@@ -1438,7 +1438,7 @@ function getSupervisedFrameOutputPath(
 }
 
 function getPrerenderCacheKey(project: ProjectManifest, scene: Scene, frameRate: number, tileHeight?: number, blockDurationMs?: number) {
-  return JSON.stringify({ projectId: project.id, scene, frameRate, tileHeight, blockDurationMs, previewFrameFormat: "transparent-compositor-raw-bgra-v6", width: frameWidth, height: frameHeight });
+  return JSON.stringify({ projectId: project.id, scene, frameRate, tileHeight, blockDurationMs, previewFrameFormat: "opaque-fullframe-srgb-raw-bgra-v9", width: frameWidth, height: frameHeight });
 }
 
 function getProjectCacheDirectory(manifestPath: string) {
@@ -1655,6 +1655,7 @@ async function renderPrerenderBlock(
       undefined,
       undefined,
       frameRange,
+      "preview-cache",
     );
     const frameCount = await countContiguousSupervisedFrameFiles(rendererResult.outputPath, frameRange);
     if (frameCount !== frameRange.endFrame - frameRange.startFrame)
@@ -1681,7 +1682,7 @@ async function writePrerenderFramesFromSupervisedOutput(manifestPath: string, pr
 async function readPrerenderFrame(cachePaths: PrerenderCachePaths, cacheKey: string, sceneTime: number, frameRate: number): Promise<PrerenderedFrame | null> {
   const frame = await readPrerenderFrameBufferFromPaths(cachePaths, cacheKey, sceneTime, frameRate);
   if (!frame) return null;
-  return { width: frameWidth, height: frameHeight, pixelFormat: "bgra", sceneTime, frameRate, data: frame.toString("base64") };
+  return { width: frameWidth, height: frameHeight, pixelFormat: "bgra", sceneTime, frameRate, data: new Uint8Array(frame.buffer, frame.byteOffset, frame.byteLength) };
 }
 
 async function readPrerenderFrameBufferFromPaths(cachePaths: PrerenderCachePaths, cacheKey: string, sceneTime: number, frameRate: number) {
@@ -1820,7 +1821,7 @@ async function renderSceneToRawFrames(
   onFrameCaptured?: (frameIndex: number) => void,
   shouldStop?: () => boolean,
 ) {
-  const rendererWindow = createExportRendererWindow(payload.renderSurface);
+  const rendererWindow = createExportRendererWindow();
 
   const oomWarningState = createExportOomWarningState();
   try {
@@ -1867,12 +1868,14 @@ async function renderSceneToRawFrames(
             `Supervised renderer failed to pin ${syncResult.failedCount} animation(s) at ${sceneTime.toFixed(3)}s after ${syncResult.passCount} sync pass(es).`,
           );
         }
-        const frame = await captureTiledExportFrame(
-          rendererWindow,
-          frameIndex,
-          sceneTime,
-          payload.tileHeight,
-        );
+        const frame = payload.renderSurface === "preview-cache"
+          ? await captureFullPreviewCacheFrame(rendererWindow, frameIndex, sceneTime)
+          : await captureTiledExportFrame(
+            rendererWindow,
+            frameIndex,
+            sceneTime,
+            payload.tileHeight,
+          );
         if (shouldStop?.())
           return {
             nativeWarningDetected: oomWarningState.totalWarnings > 0,
@@ -1910,8 +1913,7 @@ async function renderSceneToRawFrames(
   };
 }
 
-function createExportRendererWindow(renderSurface: SupervisedRenderPayload["renderSurface"] = "export") {
-  const previewCacheMode = renderSurface === "preview-cache";
+function createExportRendererWindow() {
   return new BrowserWindow({
     width: frameWidth,
     height: frameHeight,
@@ -1920,8 +1922,8 @@ function createExportRendererWindow(renderSurface: SupervisedRenderPayload["rend
     focusable: false,
     frame: false,
     skipTaskbar: true,
-    backgroundColor: previewCacheMode ? "#00000000" : "#000000",
-    transparent: previewCacheMode,
+    backgroundColor: "#000000",
+    transparent: false,
     title: "Clipper Renderer",
     webPreferences: {
       backgroundThrottling: false,
@@ -1930,6 +1932,20 @@ function createExportRendererWindow(renderSurface: SupervisedRenderPayload["rend
       zoomFactor: 1,
     },
   });
+}
+
+async function captureFullPreviewCacheFrame(
+  window: BrowserWindow,
+  frameIndex: number,
+  sceneTime: number,
+) {
+  await applyDefaultExportCaptureViewport(window);
+  const image = await withTimeout(
+    window.webContents.capturePage(),
+    exportCaptureTileTimeoutMs,
+    `Timed out capturing full preview-cache frame ${frameIndex + 1} at ${sceneTime.toFixed(3)}s.`,
+  );
+  return getBgraBitmap(image, frameWidth, frameHeight, `full preview-cache frame ${frameIndex + 1}`);
 }
 
 async function writeSupervisedFrameOutput(
@@ -2342,7 +2358,7 @@ type PrerenderedFrame = {
   pixelFormat: "bgra";
   sceneTime: number;
   frameRate: number;
-  data: string;
+  data: Uint8Array;
 };
 type PrerenderedVideoBlock = {
   width: number;

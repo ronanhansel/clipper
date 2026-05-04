@@ -8,7 +8,8 @@ import type { Mode } from "../types";
 type PreviewStackPart = { part: ComponentProps<typeof FramePreview>["part"]; start: number; previewTime: number };
 type FramePreviewProps = ComponentProps<typeof FramePreview> & { previewParts?: PreviewStackPart[]; transitionPreviewParts?: { from: PreviewStackPart[]; to: PreviewStackPart[]; fromSceneTime: number; toSceneTime: number } | null; transitionLayers?: TransitionLayer[] };
 type CachedPreviewDisplayMode = "dom" | "canvas";
-const cachedMissGraceMs = 100;
+const cachedMissGraceMs = 220;
+const domFallbackReadyToleranceSeconds = 1 / 60;
 
 type PreviewColumnProps = {
   blankFrameViewportStyle: CSSProperties;
@@ -22,17 +23,15 @@ type PreviewColumnProps = {
   onPointerLeave: () => void;
   prerenderCacheEnabled: boolean;
   prerenderCacheBlackMissDebug: boolean;
-  prerenderCacheBlock: PrerenderCacheBlock | null;
   getPrerenderCacheBlockAtTime: (time: number) => PrerenderCacheBlock | null;
   onCachedPreviewDisplayReadyChange: (ready: boolean) => void;
   currentSceneTimeRef: RefObject<number>;
-  isPlaying: boolean;
   onScroll: (event: UIEvent<HTMLDivElement>) => void;
   previewKey: string;
   stageRef: ComponentProps<"div">["ref"];
 };
 
-export function PreviewColumn({ blankFrameViewportStyle, children, currentSceneTimeRef, editorPaneProps, framePreviewProps, getPrerenderCacheBlockAtTime, hasActiveComposition, isPlaying, mode, onModeChange, onPointerEnter, onPointerLeave, onCachedPreviewDisplayReadyChange, prerenderCacheBlackMissDebug, prerenderCacheEnabled, prerenderCacheBlock, onScroll, previewKey, stageRef }: PreviewColumnProps) {
+export function PreviewColumn({ blankFrameViewportStyle, children, currentSceneTimeRef, editorPaneProps, framePreviewProps, getPrerenderCacheBlockAtTime, hasActiveComposition, mode, onModeChange, onPointerEnter, onPointerLeave, onCachedPreviewDisplayReadyChange, prerenderCacheBlackMissDebug, prerenderCacheEnabled, onScroll, previewKey, stageRef }: PreviewColumnProps) {
   return (
     <section className="grid min-h-0 min-w-0 grid-rows-[58px_minmax(0,1fr)_58px] bg-[radial-gradient(circle_at_50%_45%,rgb(var(--clipper-accent-rgb)/0.10),transparent_30%),#141821]" data-clipper-preview-column onPointerEnter={onPointerEnter} onPointerLeave={onPointerLeave}>
       <div className="grid place-items-center border-b border-[#2d313b] px-[18px]" data-clipper-preview-toolbar>
@@ -45,7 +44,7 @@ export function PreviewColumn({ blankFrameViewportStyle, children, currentSceneT
       <div ref={stageRef} className={`timeline-scrollbar relative grid min-h-0 ${mode === "preview" ? "place-items-center overflow-auto p-[22px] [scrollbar-gutter:stable]" : "items-stretch overflow-hidden"}`} data-clipper-preview-stage onScroll={onScroll}>
         {mode === "preview" && framePreviewProps ? (
           prerenderCacheEnabled
-            ? <PrerenderVideoPreview key={`prerender:${previewKey}`} block={prerenderCacheBlock} blackMissDebug={prerenderCacheBlackMissDebug} currentSceneTimeRef={currentSceneTimeRef} framePreviewProps={framePreviewProps} getBlockAtTime={getPrerenderCacheBlockAtTime} isPlaying={isPlaying} onCachedPreviewDisplayReadyChange={onCachedPreviewDisplayReadyChange} />
+            ? <PrerenderVideoPreview key={`prerender:${previewKey}`} blackMissDebug={prerenderCacheBlackMissDebug} currentSceneTimeRef={currentSceneTimeRef} framePreviewProps={framePreviewProps} getBlockAtTime={getPrerenderCacheBlockAtTime} onCachedPreviewDisplayReadyChange={onCachedPreviewDisplayReadyChange} />
             : <FramePreview key={previewKey} {...framePreviewProps} />
         ) : null}
         {mode === "preview" && !hasActiveComposition ? <div className="relative overflow-hidden bg-black shadow-[0_22px_70px_rgba(0,0,0,0.44)]" aria-label="Blank preview frame" data-clipper-blank-frame-preview style={blankFrameViewportStyle} /> : null}
@@ -57,11 +56,10 @@ export function PreviewColumn({ blankFrameViewportStyle, children, currentSceneT
   );
 }
 
-function PrerenderVideoPreview({ blackMissDebug, currentSceneTimeRef, framePreviewProps, getBlockAtTime, onCachedPreviewDisplayReadyChange }: { block: PrerenderCacheBlock | null; blackMissDebug: boolean; currentSceneTimeRef: RefObject<number>; framePreviewProps: FramePreviewProps; getBlockAtTime: (time: number) => PrerenderCacheBlock | null; isPlaying: boolean; onCachedPreviewDisplayReadyChange: (ready: boolean) => void }) {
+function PrerenderVideoPreview({ blackMissDebug, currentSceneTimeRef, framePreviewProps, getBlockAtTime, onCachedPreviewDisplayReadyChange }: { blackMissDebug: boolean; currentSceneTimeRef: RefObject<number>; framePreviewProps: FramePreviewProps; getBlockAtTime: (time: number) => PrerenderCacheBlock | null; onCachedPreviewDisplayReadyChange: (ready: boolean) => void }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const lastFrameKeyRef = useRef("");
   const firstMissAtRef = useRef<number | null>(null);
-  const drawGenerationRef = useRef(0);
   const displayReadyRef = useRef(false);
   const displayModeRef = useRef<CachedPreviewDisplayMode>("dom");
   const [displayMode, setDisplayMode] = useState<CachedPreviewDisplayMode>("dom");
@@ -107,7 +105,7 @@ function PrerenderVideoPreview({ blackMissDebug, currentSceneTimeRef, framePrevi
     const block = getBlockAtTime(sceneTime);
     const frame = block ? getFrameForTime(block, sceneTime) : null;
     if (!canvas || !block || !frame) {
-      showTransientMiss();
+      showTransientMiss(sceneTime);
       return;
     }
 
@@ -119,11 +117,8 @@ function PrerenderVideoPreview({ blackMissDebug, currentSceneTimeRef, framePrevi
         showDomFallback();
         return;
       }
-      const generation = ++drawGenerationRef.current;
-      void drawFrameImage(context, frame.bytes, block.width, block.height).then(() => {
-        if (generation !== drawGenerationRef.current) return;
-        lastFrameKeyRef.current = frameKey;
-      });
+      drawFrameImage(context, frame.bitmap, block.width, block.height);
+      lastFrameKeyRef.current = frameKey;
     }
     updateDisplayMode("canvas");
     updateDisplayReady(true);
@@ -137,11 +132,15 @@ function PrerenderVideoPreview({ blackMissDebug, currentSceneTimeRef, framePrevi
     updateDisplayMode("dom");
   }
 
-  function showTransientMiss() {
+  function showTransientMiss(sceneTime: number) {
     const now = performance.now();
     firstMissAtRef.current ??= now;
     updateDisplayReady(false);
     if (displayModeRef.current === "canvas" && lastFrameKeyRef.current && now - firstMissAtRef.current < cachedMissGraceMs) return;
+    if (!isDomFallbackReady(sceneTime) && lastFrameKeyRef.current) {
+      updateDisplayMode("canvas");
+      return;
+    }
     if (blackMissDebug) showBlackMiss();
     else showDomFallback();
   }
@@ -160,12 +159,16 @@ function PrerenderVideoPreview({ blackMissDebug, currentSceneTimeRef, framePrevi
     updateDisplayReady(false);
   }
 
+  function isDomFallbackReady(sceneTime: number) {
+    return Math.abs(framePreviewProps.sceneTime - sceneTime) <= domFallbackReadyToleranceSeconds;
+  }
+
   const showingCachedCanvas = displayMode === "canvas";
 
   return (
     <div className="relative" data-clipper-prerender-video-preview-wrapper style={previewStyle}>
       <div className="relative" style={previewStyle}>
-        <div className={`absolute left-0 top-0 transition-opacity duration-75 ${showingCachedCanvas ? "opacity-0" : "opacity-100"}`} aria-hidden={showingCachedCanvas}>
+        <div className={`absolute left-0 top-0 ${showingCachedCanvas ? "opacity-0" : "opacity-100"}`} aria-hidden={showingCachedCanvas}>
           <FramePreview {...framePreviewProps} />
         </div>
         <canvas ref={canvasRef} className={`absolute left-0 top-0 bg-black shadow-[0_22px_70px_rgba(0,0,0,0.44)] ${showingCachedCanvas ? "opacity-100" : "pointer-events-none opacity-0"}`} style={cachedCanvasStyle} data-clipper-prerender-canvas-preview />
@@ -174,12 +177,9 @@ function PrerenderVideoPreview({ blackMissDebug, currentSceneTimeRef, framePrevi
   );
 }
 
-async function drawFrameImage(context: CanvasRenderingContext2D, sourceBytes: Uint8ClampedArray, width: number, height: number) {
-  const bytes = new Uint8ClampedArray(sourceBytes.byteLength);
-  bytes.set(sourceBytes);
-  const imageData = new ImageData(bytes, width, height, { colorSpace: "srgb" });
+function drawFrameImage(context: CanvasRenderingContext2D, bitmap: ImageBitmap, width: number, height: number) {
   context.clearRect(0, 0, width, height);
-  context.putImageData(imageData, 0, 0);
+  context.drawImage(bitmap, 0, 0);
 }
 
 function getFrameForTime(block: PrerenderCacheBlock, sceneTime: number) {

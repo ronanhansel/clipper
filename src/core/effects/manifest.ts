@@ -10,7 +10,7 @@ type YamlValue = string | number | boolean | null | YamlValue[] | { [key: string
 
 export type MotionEffectLogic = Pick<MotionEffectPackage, "createDefaultBlock">;
 
-export type AdjustmentEffectLogic = Partial<Pick<AdjustmentEffectPackage, "applySceneTime" | "applyVisualStyle" | "getDisplayElapsed" | "validate">>;
+export type AdjustmentEffectLogic = Partial<Pick<AdjustmentEffectPackage, "applySceneTime" | "applyVisualStyle" | "getDisplayElapsed" | "timeSensitive" | "validate">>;
 
 export type TransitionEffectLogic = Partial<Pick<TransitionEffectPackage, "applyVisualStyle" | "renderSequence">>;
 

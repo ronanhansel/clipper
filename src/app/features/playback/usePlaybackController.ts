@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useMemo, type RefObject } from "react";
+import { startTransition, useEffect, useMemo, useRef, type RefObject } from "react";
 import type { StoreApi } from "zustand";
 import { numberInputScrubEndEvent, numberInputScrubStartEvent } from "../../../components/ui/input";
 import {
@@ -96,6 +96,8 @@ export function usePlaybackController({
   const playbackEnd = playbackRange?.end ?? sceneDurationSeconds;
   const playbackDuration = Math.max(playbackEnd - playbackStart, 0);
   const useLocalPlaybackLabels = Boolean(playbackRange?.localLabels);
+  const pendingScrubCacheTimeRef = useRef<number | null>(null);
+  const scrubCacheFrameRef = useRef(0);
 
   function clampPlaybackTime(time: number) {
     return clamp(time, playbackStart, playbackEnd);
@@ -172,9 +174,26 @@ export function usePlaybackController({
     updateEditorState((state) => (state.currentSceneTime === currentSceneTime ? state : { ...state, currentSceneTime }));
   }
 
+  function requestCachedPreviewInterest(time: number, reason: PrerenderCacheInterestReason) {
+    if (reason !== "scrub") {
+      requestCachedPreviewAtTime?.(time, reason);
+      return;
+    }
+
+    pendingScrubCacheTimeRef.current = time;
+    if (scrubCacheFrameRef.current) return;
+
+    scrubCacheFrameRef.current = requestAnimationFrame(() => {
+      scrubCacheFrameRef.current = 0;
+      const cachedTime = pendingScrubCacheTimeRef.current;
+      pendingScrubCacheTimeRef.current = null;
+      if (cachedTime !== null) requestCachedPreviewAtTime?.(cachedTime, "scrub");
+    });
+  }
+
   function scrubToSceneTime(time: number) {
     const nextTime = clampPlaybackTime(time);
-    requestCachedPreviewAtTime?.(nextTime, "scrub");
+    requestCachedPreviewInterest(nextTime, "scrub");
     if (Math.abs(nextTime - currentSceneTimeRef.current) < 0.001) {
       if (!timelineScrubbingRef.current) {
         commitPlayheadEditorState(nextTime);
@@ -190,7 +209,6 @@ export function usePlaybackController({
     else if (!useLocalPlaybackLabels) syncFrameVisualAdjustmentDom(nextTime);
 
     if (timelineScrubbingRef.current) {
-      setRenderCurrentSceneTime(nextTime);
       return;
     }
 
@@ -241,11 +259,13 @@ export function usePlaybackController({
   }
 
   function resumePlaybackAfterTimelineScrub() {
+    const settledTime = currentSceneTimeRef.current;
+    commitPlayheadEditorState(settledTime);
+    setCurrentSceneTime(settledTime);
+    setRenderCurrentSceneTime(settledTime);
     if (!timelineScrubPausedPlaybackRef.current) return;
 
     timelineScrubPausedPlaybackRef.current = false;
-    if (isPlayingRef.current) return;
-    startPlaybackFromCurrentTime();
   }
 
   function pausePlaybackForPresentationScrub() {
@@ -307,10 +327,7 @@ export function usePlaybackController({
       const nextTime = state.currentSceneTime;
       if (Math.abs(nextTime - previousTime) < 0.001) return;
       previousTime = nextTime;
-      if (timelineScrubbingRef.current) {
-        setRenderCurrentSceneTime(nextTime);
-        return;
-      }
+      if (timelineScrubbingRef.current) return;
 
       startTransition(() => setRenderCurrentSceneTime(nextTime));
     });
@@ -332,8 +349,8 @@ export function usePlaybackController({
       return;
     }
 
-    currentSceneTimeRef.current = currentSceneTime;
     if (timelineScrubbingRef.current) return;
+    currentSceneTimeRef.current = currentSceneTime;
     syncPlaybackDom(currentSceneTime);
   }, [currentSceneTime, isPlaying, sceneDurationSeconds, timelineEndPaddingFraction, visibleSceneAdjustmentLayers]);
 
@@ -372,6 +389,10 @@ export function usePlaybackController({
   useEffect(() => () => {
     if (scrubFrameRef.current) cancelAnimationFrame(scrubFrameRef.current);
   }, [scrubFrameRef]);
+
+  useEffect(() => () => {
+    if (scrubCacheFrameRef.current) cancelAnimationFrame(scrubCacheFrameRef.current);
+  }, []);
 
   useEffect(() => {
     if (!isPlaying) return;
