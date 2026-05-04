@@ -13,13 +13,14 @@ const ffmpegPath = require("ffmpeg-static") as string | null;
 const isDev = process.env.VITE_DEV_SERVER_URL || !app.isPackaged;
 const videoExportSessions = new Map<string, { process: ChildProcessWithoutNullStreams; outputPath: string; closePromise: Promise<string | null> }>();
 const cancelledVideoRenders = new Set<string>();
+const activeVideoRenderControllers = new Map<string, Set<() => void>>();
 const textFileWatchers = new Map<number, FSWatcher[]>();
 const appStatePath = "clipper/app-state.json";
 const appIconPath = path.resolve(__dirname, "../build/icons/icon.png");
 const frameWidth = 1920;
 const frameHeight = 1080;
 const exportRendererFrameTimeoutMs = 8000;
-const exportFallbackSegmentFrameCount = 5;
+const exportMinimumCheckpointSegmentSeconds = 5;
 const exportCaptureStripCount = 4;
 const exportSlowFallbackTileHeights = [270, 135, 68, 34, 17] as const;
 const exportCaptureTileRetries = 3;
@@ -545,6 +546,7 @@ ipcMain.handle("clipper:render-video-export", async (event, exportId: string, de
 
 ipcMain.handle("clipper:cancel-render-video-export", async (_event, exportId: string) => {
   cancelledVideoRenders.add(exportId);
+  for (const cancel of activeVideoRenderControllers.get(exportId) ?? []) cancel();
 });
 
 async function renderSceneToVideo(_project: ProjectManifest, scene: Scene, outputPath: string, frameRate: number, durationSeconds: number, options: RenderSceneToVideoOptions = {}) {
@@ -554,8 +556,8 @@ async function renderSceneToVideo(_project: ProjectManifest, scene: Scene, outpu
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
   const encoder = getVideoEncoderArgs();
   const totalFrames = Math.max(1, Math.ceil(durationSeconds * frameRate));
-  onProgress?.({ frame: 0, totalFrames, percent: 0, status: `Preparing ${encoder.label} export...` });
-  console.log(`[clipper export] source=${source} segment-size=${exportFallbackSegmentFrameCount} total-frames=${totalFrames}`);
+  onProgress?.({ frame: 0, totalFrames, percent: 0, status: `Preparing ${encoder.label} export...`, method: "fast-child" });
+  console.log(`[clipper export] source=${source} segment-min-seconds=${exportMinimumCheckpointSegmentSeconds} total-frames=${totalFrames}`);
   const rendererWindow = new BrowserWindow({
     width: frameWidth,
     height: frameHeight,
@@ -609,12 +611,12 @@ async function renderSceneToVideo(_project: ProjectManifest, scene: Scene, outpu
     const removeNativeStderrWarningListener = watchExportNativeStderrWarnings(oomWarningState);
 
     try {
-      for (const segment of getExportFrameSegments(totalFrames)) {
+  for (const segment of getExportFrameSegments(scene, totalFrames, frameRate, durationSeconds)) {
         if (exportId && cancelledVideoRenders.has(exportId)) throw new Error("Video export cancelled.");
         resetExportSegmentOomWarnings(oomWarningState, segment.index);
         oomWarningState.activeSegment = segment;
         oomWarningState.activePath = "fast/default";
-        console.log(`[clipper export] source=${source} segment=${segment.index} frames=${segment.startFrame}-${segment.endFrame - 1} path=fast segment-size=${exportFallbackSegmentFrameCount} begin`);
+        console.log(`[clipper export] source=${source} segment=${segment.index} frames=${segment.startFrame}-${segment.endFrame - 1} seconds=${segment.startTime.toFixed(3)}-${segment.endTime.toFixed(3)} path=fast begin`);
         const fastFrames: Buffer[] = [];
 
         for (let frameIndex = segment.startFrame; frameIndex < segment.endFrame; frameIndex += 1) {
@@ -681,11 +683,11 @@ async function renderSceneToVideoSupervised(project: ProjectManifest, scene: Sce
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
   const encoder = getVideoEncoderArgs();
   const totalFrames = Math.max(1, Math.ceil(durationSeconds * frameRate));
-  const segments = getExportFrameSegments(totalFrames);
+  const segments = getExportFrameSegments(scene, totalFrames, frameRate, durationSeconds);
   const tempDir = path.join(path.dirname(outputPath), `.clipper-export-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
   await fs.mkdir(tempDir, { recursive: true });
   onProgress?.({ frame: 0, totalFrames, percent: 0, status: `Preparing ${encoder.label} export...` });
-  console.log(`[clipper export] source=${source} segment-size=${exportFallbackSegmentFrameCount} total-frames=${totalFrames}`);
+  console.log(`[clipper export] source=${source} segment-min-seconds=${exportMinimumCheckpointSegmentSeconds} total-frames=${totalFrames} checkpoints=${segments.map((segment) => segment.endTime.toFixed(3)).join(",")}`);
 
   const ffmpeg = spawn(ffmpegPath, [
     "-y",
@@ -715,105 +717,320 @@ async function renderSceneToVideoSupervised(project: ProjectManifest, scene: Sce
   });
 
   let pendingFrameWrite: Promise<void> | null = null;
+  let activeMethod: VideoExportMethod = "fast-child";
+  let lastReportedFrame = 0;
+  const unregisterFfmpegCancel = registerActiveVideoRenderCancel(exportId, () => {
+    if (!ffmpeg.killed) ffmpeg.kill("SIGTERM");
+  });
+  const reportStatus = (status: string, method: VideoExportMethod = activeMethod) => {
+    activeMethod = method;
+    onProgress?.({ frame: lastReportedFrame, totalFrames, percent: Math.round((lastReportedFrame / totalFrames) * 100), status, method });
+  };
+  const reportFrameProgress = (frameIndex: number, method: VideoExportMethod = activeMethod) => {
+    activeMethod = method;
+    lastReportedFrame = Math.max(lastReportedFrame, frameIndex + 1);
+    onProgress?.({ frame: lastReportedFrame, totalFrames, percent: Math.round((lastReportedFrame / totalFrames) * 100), status: `${formatVideoExportMethod(method)} frame ${frameIndex + 1} of ${totalFrames}`, method });
+  };
   try {
     for (const segment of segments) {
       if (exportId && cancelledVideoRenders.has(exportId)) throw new Error("Video export cancelled.");
-      console.log(`[clipper export] source=${source} segment=${segment.index} frames=${segment.startFrame}-${segment.endFrame - 1} path=fast segment-size=${exportFallbackSegmentFrameCount} begin`);
-      const fastResult = await renderSupervisedSegmentChild(project, scene, tempDir, frameRate, durationSeconds, segment, "fast/default");
+      console.log(`[clipper export] source=${source} segment=${segment.index} frames=${segment.startFrame}-${segment.endFrame - 1} seconds=${segment.startTime.toFixed(3)}-${segment.endTime.toFixed(3)} path=fast begin`);
+      reportStatus(`Fast render: segment ${segment.index + 1}/${segments.length}`, "fast-child");
+      const fastResult = await renderSupervisedSegmentChild(project, scene, tempDir, frameRate, durationSeconds, segment, "fast/default", source, reportFrameProgress, exportId);
       const forcedOom = forcedOomSegmentIndexes.has(segment.index) || [...forcedOomFrameIndexes].some((frameIndex) => frameIndex >= segment.startFrame && frameIndex < segment.endFrame);
       const segmentOverflowDetected = forcedOom || fastResult.nativeWarningDetected;
-      if (fastResult.nativeWarningDetected) console.warn(`[clipper export] source=${source} segment=${segment.index} frames=${segment.startFrame}-${segment.endFrame - 1} parent-native-warning=yes`);
+      if (fastResult.nativeWarningDetected) console.warn(`[clipper export] source=${source} segment=${segment.index} frames=${segment.startFrame}-${segment.endFrame - 1} parent-native-warning=yes native-warnings=${fastResult.nativeWarningCount}`);
       if (forcedOom) console.warn(`[clipper export] source=${source} segment=${segment.index} frames=${segment.startFrame}-${segment.endFrame - 1} parent-native-warning=forced`);
 
-      const acceptedResult = segmentOverflowDetected
-        ? await rerenderSupervisedSegmentSlow(project, scene, tempDir, frameRate, durationSeconds, segment, source)
+      const shouldRerenderSlow = segmentOverflowDetected;
+      if (shouldRerenderSlow) {
+        console.warn(`[clipper export] source=${source} segment=${segment.index} frames=${segment.startFrame}-${segment.endFrame - 1} path=fast oom=yes action=rerender-slow native-warnings=${fastResult.nativeWarningCount + (forcedOom ? 1 : 0)}`);
+        reportStatus(`Safe fallback: segment ${segment.index + 1}/${segments.length}`, "slow-fallback");
+      } else {
+        const fastOutputComplete = await isSupervisedSegmentOutputComplete(fastResult.outputPath, segment);
+        if (!fastOutputComplete) throw new Error(`Supervised fast segment ${segment.index} did not produce a complete raw frame range. This is not an OOM fallback signal.`);
+      }
+
+      const acceptedResult = shouldRerenderSlow
+        ? await rerenderSupervisedSegmentRemainderSlow(project, scene, tempDir, frameRate, durationSeconds, segment, fastResult, source, reportFrameProgress, exportId)
         : fastResult;
-      if (segmentOverflowDetected) {
-        await fs.rm(fastResult.outputPath, { force: true }).catch(() => undefined);
+      if (shouldRerenderSlow) {
+        if (acceptedResult.outputPath !== fastResult.outputPath) await fs.rm(fastResult.outputPath, { force: true }).catch(() => undefined);
       } else {
         console.log(`[clipper export] source=${source} segment=${segment.index} frames=${segment.startFrame}-${segment.endFrame - 1} path=fast oom=no write=fast native-warnings=0`);
       }
 
-      const segmentBuffer = await fs.readFile(acceptedResult.outputPath);
-      const expectedBytes = (segment.endFrame - segment.startFrame) * frameWidth * frameHeight * 4;
-      if (segmentBuffer.byteLength !== expectedBytes) throw new Error(`Supervised export segment ${segment.index} produced ${segmentBuffer.byteLength} bytes; expected ${expectedBytes}.`);
-      for (let frameIndex = segment.startFrame; frameIndex < segment.endFrame; frameIndex += 1) {
-        const start = (frameIndex - segment.startFrame) * frameWidth * frameHeight * 4;
-        const frameBuffer = segmentBuffer.subarray(start, start + frameWidth * frameHeight * 4);
+      const frameBuffers = await readSupervisedSegmentFrames(acceptedResult.outputPath, segment);
+      if (frameBuffers.length !== segment.endFrame - segment.startFrame) throw new Error(`Supervised export segment ${segment.index} produced ${frameBuffers.length} frames; expected ${segment.endFrame - segment.startFrame}.`);
+      for (let offset = 0; offset < frameBuffers.length; offset += 1) {
+        const frameIndex = segment.startFrame + offset;
+        const frameBuffer = frameBuffers[offset];
         if (pendingFrameWrite) await pendingFrameWrite;
         pendingFrameWrite = writeProcessInput(ffmpeg, frameBuffer);
-        onProgress?.({ frame: frameIndex + 1, totalFrames, percent: Math.round(((frameIndex + 1) / totalFrames) * 100), status: `Rendering frame ${frameIndex + 1} of ${totalFrames} with ${encoder.label}` });
+        reportFrameProgress(frameIndex, shouldRerenderSlow ? "slow-fallback" : activeMethod);
       }
-      await fs.rm(acceptedResult.outputPath, { force: true }).catch(() => undefined);
+      await removeSupervisedSegmentOutputs(acceptedResult.outputPath, segment).catch(() => undefined);
     }
 
     if (pendingFrameWrite) await pendingFrameWrite;
     if (exportId && cancelledVideoRenders.has(exportId)) throw new Error("Video export cancelled.");
+    ffmpeg.stdin.end();
+    const error = await closePromise;
+    if (exportId && cancelledVideoRenders.has(exportId)) throw new Error("Video export cancelled.");
+    if (error) throw new Error(error);
+    onProgress?.({ frame: totalFrames, totalFrames, percent: 100, status: "Finalizing video...", method: activeMethod });
   } catch (error) {
-    ffmpeg.kill("SIGTERM");
+    if (!ffmpeg.killed) ffmpeg.kill("SIGTERM");
     if (exportId) cancelledVideoRenders.delete(exportId);
-    if (error instanceof Error && error.message === "Video export cancelled.") await fs.rm(outputPath, { force: true });
+    await closePromise.catch(() => undefined);
+    await fs.rm(outputPath, { force: true }).catch(() => undefined);
     throw error;
   } finally {
+    unregisterFfmpegCancel();
     await fs.rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
   }
-
-  ffmpeg.stdin.end();
-  const error = await closePromise;
-  if (error) throw new Error(error);
-  onProgress?.({ frame: totalFrames, totalFrames, percent: 100, status: "Finalizing video..." });
 }
 
-async function rerenderSupervisedSegmentSlow(project: ProjectManifest, scene: Scene, tempDir: string, frameRate: number, durationSeconds: number, segment: ExportFrameSegment, source: ExportSource) {
+function formatVideoExportMethod(method: VideoExportMethod) {
+  if (method === "slow-fallback") return "Slow fallback";
+  if (method === "fast-in-process") return "Fast local retry";
+  return "Fast supervised";
+}
+
+function registerActiveVideoRenderCancel(exportId: string | undefined, cancel: () => void) {
+  if (!exportId) return () => {};
+  let controllers = activeVideoRenderControllers.get(exportId);
+  if (!controllers) {
+    controllers = new Set();
+    activeVideoRenderControllers.set(exportId, controllers);
+  }
+  controllers.add(cancel);
+  return () => {
+    controllers!.delete(cancel);
+    if (controllers!.size === 0) activeVideoRenderControllers.delete(exportId);
+  };
+}
+
+function throwIfVideoRenderCancelled(exportId: string | undefined) {
+  if (exportId && cancelledVideoRenders.has(exportId)) throw new Error("Video export cancelled.");
+}
+
+async function isSupervisedSegmentOutputComplete(outputPath: string, segment: ExportFrameSegment) {
+  const expectedBytes = getSupervisedSegmentByteLength(segment);
+  try {
+    const stat = await fs.stat(outputPath);
+    if (stat.size !== expectedBytes) return false;
+    return (await readSupervisedSegmentFrames(outputPath, segment)).length === segment.endFrame - segment.startFrame;
+  } catch {
+    return false;
+  }
+}
+
+function getSupervisedSegmentByteLength(segment: ExportFrameSegment) {
+  return (segment.endFrame - segment.startFrame) * frameWidth * frameHeight * 4;
+}
+
+async function rerenderSupervisedSegmentSlow(project: ProjectManifest, scene: Scene, tempDir: string, frameRate: number, durationSeconds: number, segment: ExportFrameSegment, source: ExportSource, onFrameCaptured?: (frameIndex: number, method?: VideoExportMethod) => void, exportId?: string) {
   console.log(`[clipper export] source=${source} segment=${segment.index} frames=${segment.startFrame}-${segment.endFrame - 1} path=fast oom=yes action=rerender-slow`);
-  const slowResult = await renderSupervisedSegmentChild(project, scene, tempDir, frameRate, durationSeconds, segment, "slow-fallback");
-  if (slowResult.nativeWarningDetected) console.warn(`[clipper export] source=${source} segment=${segment.index} frames=${segment.startFrame}-${segment.endFrame - 1} parent-native-warning=yes path=slow-fallback`);
+  const slowResult = await renderSupervisedSegmentInProcess(project, scene, tempDir, frameRate, durationSeconds, segment, "slow-fallback", source, onFrameCaptured, exportId);
+  if (slowResult.nativeWarningDetected) console.warn(`[clipper export] source=${source} segment=${segment.index} frames=${segment.startFrame}-${segment.endFrame - 1} parent-native-warning=yes path=slow-fallback native-warnings=${slowResult.nativeWarningCount}`);
   console.log(`[clipper export] source=${source} segment=${segment.index} frames=${segment.startFrame}-${segment.endFrame - 1} path=slow-fallback result=written`);
   return slowResult;
 }
 
-async function renderSupervisedSegmentChild(project: ProjectManifest, scene: Scene, tempDir: string, frameRate: number, durationSeconds: number, segment: ExportFrameSegment, pathMode: ExportPathMode): Promise<SupervisedSegmentResult> {
-  const outputPath = path.join(tempDir, `segment-${segment.index}-${pathMode === "slow-fallback" ? "slow" : "fast"}.bgra`);
+async function rerenderSupervisedSegmentRemainderSlow(project: ProjectManifest, scene: Scene, tempDir: string, frameRate: number, durationSeconds: number, segment: ExportFrameSegment, fastResult: SupervisedSegmentResult, source: ExportSource, onFrameCaptured?: (frameIndex: number, method?: VideoExportMethod) => void, exportId?: string): Promise<SupervisedSegmentResult> {
+  const fastPrefix = await readContiguousSupervisedSegmentFramePrefix(fastResult.outputPath, segment);
+  const slowStartFrame = segment.startFrame + fastPrefix.length;
+  console.log(`[clipper export] source=${source} segment=${segment.index} fast-prefix-frames=${fastPrefix.length} slow-frames=${segment.endFrame - slowStartFrame}`);
+  if (slowStartFrame < segment.endFrame) {
+    throwIfVideoRenderCancelled(exportId);
+    const slowSegment: ExportFrameSegment = {
+      ...segment,
+      startFrame: slowStartFrame,
+      startTime: slowStartFrame / frameRate,
+    };
+    const slowResult = await rerenderSupervisedSegmentSlow(project, scene, tempDir, frameRate, durationSeconds, slowSegment, source, onFrameCaptured, exportId);
+    throwIfVideoRenderCancelled(exportId);
+    for (let frameIndex = slowSegment.startFrame; frameIndex < slowSegment.endFrame; frameIndex += 1) {
+      const sourcePath = getSupervisedFrameOutputPath(slowResult.outputPath, frameIndex);
+      const targetPath = getSupervisedFrameOutputPath(fastResult.outputPath, frameIndex);
+      await fs.rename(sourcePath, targetPath).catch(async () => {
+        await fs.copyFile(sourcePath, targetPath);
+        await fs.rm(sourcePath, { force: true });
+      });
+    }
+    await removeSupervisedSegmentOutputs(slowResult.outputPath, slowSegment).catch(() => undefined);
+  }
+
+  await writeAggregateSupervisedSegmentOutput(fastResult.outputPath, segment);
+  return { outputPath: fastResult.outputPath, nativeWarningDetected: true, nativeWarningCount: fastResult.nativeWarningCount };
+}
+
+async function renderSupervisedSegmentChild(project: ProjectManifest, scene: Scene, tempDir: string, frameRate: number, durationSeconds: number, segment: ExportFrameSegment, pathMode: ExportPathMode, source: ExportSource, onFrameCaptured?: (frameIndex: number, method?: VideoExportMethod) => void, exportId?: string): Promise<SupervisedSegmentResult> {
+  const outputPath = getSupervisedSegmentOutputPath(tempDir, segment, pathMode);
   const payloadPath = path.join(tempDir, `segment-${segment.index}-${pathMode === "slow-fallback" ? "slow" : "fast"}.json`);
+  const nativeLogPath = path.join(tempDir, `segment-${segment.index}-${pathMode === "slow-fallback" ? "slow" : "fast"}.native.log`);
   const payload: SupervisedSegmentPayload = { project, scene, frameRate, durationSeconds, segment, outputPath, pathMode };
   await fs.writeFile(payloadPath, JSON.stringify(payload), "utf8");
-  const child = spawn(process.execPath, getElectronChildArgs(["--render-video-child-segment", payloadPath]), {
+  const child = spawn(process.execPath, getElectronChildArgs(["--render-video-child-segment", payloadPath], ["--enable-logging=file", `--log-file=${nativeLogPath}`]), {
     env: { ...process.env, CLIPPER_EXPORT_FORCE_OOM_SEGMENTS: "", CLIPPER_EXPORT_FORCE_OOM_FRAME: "" },
     stdio: ["ignore", "pipe", "pipe"],
   });
+  const unregisterCancel = registerActiveVideoRenderCancel(exportId, () => child.kill("SIGTERM"));
 
   let stdout = "";
   let stderr = "";
+  let stdoutWarningTail = "";
+  let stderrWarningTail = "";
   let nativeWarningDetected = false;
+  let nativeWarningCount = 0;
+  let childAbortRequested = false;
+  const abortFastChildForNativeWarning = () => {
+    if (pathMode !== "fast/default" || childAbortRequested || child.killed) return;
+    childAbortRequested = true;
+    console.warn(`[clipper export] source=${source} segment=${segment.index} frames=${segment.startFrame}-${segment.endFrame - 1} path=${pathMode} action=abort-fast-child reason=native-warning`);
+    child.kill("SIGTERM");
+  };
   const inspectChunk = (chunk: Buffer, stream: "stdout" | "stderr") => {
     const text = chunk.toString("utf8");
     if (stream === "stdout") stdout += text;
     else stderr += text;
     if (stdout.length > 16000) stdout = stdout.slice(-16000);
     if (stderr.length > 16000) stderr = stderr.slice(-16000);
-    if (isExportOutOfMemoryWarning(text)) {
+    for (const frameIndex of getExportFrameProgressIndexes(text)) onFrameCaptured?.(frameIndex, pathMode === "slow-fallback" ? "slow-fallback" : "fast-child");
+    const combined = `${stream === "stdout" ? stdoutWarningTail : stderrWarningTail}${text}`;
+    if (stream === "stdout") stdoutWarningTail = combined.slice(-512);
+    else stderrWarningTail = combined.slice(-512);
+    if (isExportOutOfMemoryWarning(combined)) {
       nativeWarningDetected = true;
-      console.warn(`[clipper export] source=app-supervised parent-native-warning stream=${stream} segment=${segment.index} frames=${segment.startFrame}-${segment.endFrame - 1}: ${text.trim()}`);
+      nativeWarningCount += 1;
+      console.warn(`[clipper export] source=${source} parent-native-warning stream=${stream} segment=${segment.index} frames=${segment.startFrame}-${segment.endFrame - 1} path=${pathMode}: ${combined.trim()}`);
+      abortFastChildForNativeWarning();
+      if (stream === "stdout") stdoutWarningTail = "";
+      else stderrWarningTail = "";
     }
   };
   child.stdout.on("data", (chunk: Buffer) => inspectChunk(chunk, "stdout"));
   child.stderr.on("data", (chunk: Buffer) => inspectChunk(chunk, "stderr"));
+  const nativeLogPoll = pathMode === "fast/default" ? setInterval(() => {
+    fs.readFile(nativeLogPath, "utf8").then((log) => {
+      if (log) inspectChunk(Buffer.from(log.slice(-32000)), "stderr");
+    }).catch(() => undefined);
+  }, 100) : null;
 
-  const exitCode = await new Promise<number | null>((resolve, reject) => {
-    child.once("error", reject);
-    child.once("close", resolve);
-  });
+  let exitCode: number | null = null;
+  let childError: unknown = null;
+  try {
+    exitCode = await new Promise<number | null>((resolve, reject) => {
+      child.once("error", reject);
+      child.once("close", resolve);
+    });
+  } catch (error) {
+    childError = error;
+  } finally {
+    unregisterCancel();
+    if (nativeLogPoll) clearInterval(nativeLogPoll);
+  }
+  const nativeLog = await readExportNativeLog(nativeLogPath);
+  if (nativeLog) inspectChunk(Buffer.from(nativeLog), "stderr");
   await fs.rm(payloadPath, { force: true }).catch(() => undefined);
+  await fs.rm(nativeLogPath, { force: true }).catch(() => undefined);
+  if (childError) throw childError;
+  throwIfVideoRenderCancelled(exportId);
+  if (nativeWarningDetected && pathMode === "fast/default") return { outputPath, nativeWarningDetected, nativeWarningCount };
   if (exitCode !== 0) throw new Error(`Supervised export child failed for segment ${segment.index} (${pathMode}) with code ${exitCode ?? "unknown"}: ${(stderr || stdout).trim()}`);
-  return { outputPath, nativeWarningDetected };
+  const expectedBytes = getSupervisedSegmentByteLength(segment);
+  const stat = await fs.stat(outputPath).catch(() => null);
+  if (!stat) throw new Error(`Supervised export child did not create ${outputPath} for segment ${segment.index} (${pathMode}).`);
+  if (stat.size !== expectedBytes) throw new Error(`Supervised export child created ${stat.size} bytes for segment ${segment.index} (${pathMode}); expected ${expectedBytes}.`);
+  return { outputPath, nativeWarningDetected, nativeWarningCount };
 }
 
-function getElectronChildArgs(args: string[]) {
-  if (app.isPackaged) return args;
-  return [path.resolve(__dirname, ".."), ...args];
+async function readExportNativeLog(logPath: string) {
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  try {
+    const log = await fs.readFile(logPath, "utf8");
+    return log.length > 32000 ? log.slice(-32000) : log;
+  } catch {
+    return "";
+  }
 }
 
-async function renderSceneSegmentToRawFrames(payload: SupervisedSegmentPayload) {
+function getExportFrameProgressIndexes(message: string) {
+  const frameIndexes: number[] = [];
+  const pattern = /\[clipper export-frame\] frame=(\d+)/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(message))) {
+    const frameIndex = Number.parseInt(match[1], 10) - 1;
+    if (Number.isFinite(frameIndex) && frameIndex >= 0) frameIndexes.push(frameIndex);
+  }
+  return frameIndexes;
+}
+
+function getSupervisedSegmentOutputPath(tempDir: string, segment: ExportFrameSegment, pathMode: ExportPathMode) {
+  return path.join(tempDir, `segment-${segment.index}-${pathMode === "slow-fallback" ? "slow" : "fast"}.bgra`);
+}
+
+function getSupervisedFrameOutputPath(segmentOutputPath: string, frameIndex: number) {
+  return `${segmentOutputPath}.frame-${frameIndex}.bgra`;
+}
+
+async function readSupervisedSegmentFrames(segmentOutputPath: string, segment: ExportFrameSegment) {
+  const frames: Buffer[] = [];
+  for (let frameIndex = segment.startFrame; frameIndex < segment.endFrame; frameIndex += 1) {
+    const framePath = getSupervisedFrameOutputPath(segmentOutputPath, frameIndex);
+    try {
+      const frame = await fs.readFile(framePath);
+      if (frame.byteLength !== frameWidth * frameHeight * 4) break;
+      frames.push(frame);
+    } catch {
+      break;
+    }
+  }
+  return frames;
+}
+
+async function readContiguousSupervisedSegmentFramePrefix(segmentOutputPath: string, segment: ExportFrameSegment) {
+  return readSupervisedSegmentFrames(segmentOutputPath, segment);
+}
+
+async function writeAggregateSupervisedSegmentOutput(segmentOutputPath: string, segment: ExportFrameSegment) {
+  const frames = await readSupervisedSegmentFrames(segmentOutputPath, segment);
+  if (frames.length !== segment.endFrame - segment.startFrame) throw new Error(`Unable to assemble segment ${segment.index}; found ${frames.length} contiguous frame(s), expected ${segment.endFrame - segment.startFrame}.`);
+  const tempOutputPath = `${segmentOutputPath}.tmp-${process.pid}`;
+  await fs.writeFile(tempOutputPath, Buffer.concat(frames));
+  await fs.rename(tempOutputPath, segmentOutputPath);
+}
+
+async function removeSupervisedSegmentOutputs(segmentOutputPath: string, segment: ExportFrameSegment) {
+  await fs.rm(segmentOutputPath, { force: true }).catch(() => undefined);
+  for (let frameIndex = segment.startFrame; frameIndex < segment.endFrame; frameIndex += 1) {
+    await fs.rm(getSupervisedFrameOutputPath(segmentOutputPath, frameIndex), { force: true }).catch(() => undefined);
+  }
+}
+
+async function renderSupervisedSegmentInProcess(project: ProjectManifest, scene: Scene, tempDir: string, frameRate: number, durationSeconds: number, segment: ExportFrameSegment, pathMode: ExportPathMode, source: ExportSource, onFrameCaptured?: (frameIndex: number, method?: VideoExportMethod) => void, exportId?: string): Promise<SupervisedSegmentResult> {
+  const outputPath = path.join(tempDir, `segment-${segment.index}-${pathMode === "slow-fallback" ? "slow-inprocess" : "fast-inprocess"}.bgra`);
+  const payload: SupervisedSegmentPayload = { project, scene, frameRate, durationSeconds, segment, outputPath, pathMode };
+  console.warn(`[clipper export] source=${source} segment=${segment.index} frames=${segment.startFrame}-${segment.endFrame - 1} path=${pathMode} mode=in-process begin`);
+  const renderResult = await renderSceneSegmentToRawFrames(payload, (frameIndex) => onFrameCaptured?.(frameIndex, pathMode === "slow-fallback" ? "slow-fallback" : "fast-in-process"), exportId).catch((error: unknown) => {
+    throwIfVideoRenderCancelled(exportId);
+    throw error;
+  });
+  const expectedBytes = getSupervisedSegmentByteLength(segment);
+  const stat = await fs.stat(outputPath).catch(() => null);
+  if (!stat) throw new Error(`In-process export did not create ${outputPath} for segment ${segment.index} (${pathMode}).`);
+  if (stat.size !== expectedBytes) throw new Error(`In-process export created ${stat.size} bytes for segment ${segment.index} (${pathMode}); expected ${expectedBytes}.`);
+  console.warn(`[clipper export] source=${source} segment=${segment.index} frames=${segment.startFrame}-${segment.endFrame - 1} path=${pathMode} mode=in-process result=written`);
+  return { outputPath, nativeWarningDetected: renderResult.nativeWarningDetected, nativeWarningCount: renderResult.nativeWarningCount };
+}
+
+function getElectronChildArgs(args: string[], electronArgs: string[] = []) {
+  if (app.isPackaged) return [...electronArgs, ...args];
+  return [...electronArgs, path.resolve(__dirname, ".."), ...args];
+}
+
+async function renderSceneSegmentToRawFrames(payload: SupervisedSegmentPayload, onFrameCaptured?: (frameIndex: number) => void, exportId?: string) {
   const rendererWindow = new BrowserWindow({
     width: frameWidth,
     height: frameHeight,
@@ -830,11 +1047,15 @@ async function renderSceneSegmentToRawFrames(payload: SupervisedSegmentPayload) 
   });
 
   const frames: Buffer[] = [];
+  const oomWarningState = createExportOomWarningState();
+  let renderCancelRequested = false;
+  const unregisterCancel = registerActiveVideoRenderCancel(exportId, () => {
+    renderCancelRequested = true;
+  });
   try {
     rendererWindow.webContents.setZoomFactor(1);
     rendererWindow.webContents.setVisualZoomLevelLimits(1, 1).catch(() => {});
     await loadRenderedMediaExportWindow(rendererWindow);
-    const oomWarningState = createExportOomWarningState();
     oomWarningState.activeSegment = payload.segment;
     oomWarningState.activePath = payload.pathMode;
     const removeOomWarningListener = watchExportOutOfMemoryWarnings(rendererWindow, oomWarningState);
@@ -842,14 +1063,21 @@ async function renderSceneSegmentToRawFrames(payload: SupervisedSegmentPayload) 
     try {
       const captureState: SlowFallbackCaptureState = { tileHeightIndex: 0 };
       for (let frameIndex = payload.segment.startFrame; frameIndex < payload.segment.endFrame; frameIndex += 1) {
+        if (renderCancelRequested) throw new Error("Video export cancelled.");
+        throwIfVideoRenderCancelled(exportId);
         const sceneTime = getExportFrameTime(frameIndex, payload.frameRate, payload.durationSeconds);
         const syncResult = await renderExportFrame(rendererWindow, payload.project, payload.scene, sceneTime, payload.frameRate);
         if (syncResult.failedCount > 0) {
           throw new Error(`Supervised segment renderer failed to pin ${syncResult.failedCount} animation(s) at ${sceneTime.toFixed(3)}s after ${syncResult.passCount} sync pass(es).`);
         }
-        frames.push(payload.pathMode === "slow-fallback"
+        const frame = payload.pathMode === "slow-fallback"
           ? await captureSlowFallbackExportFrame(rendererWindow, frameIndex, sceneTime, captureState, oomWarningState, payload.segment.index)
-          : await captureTiledExportFrame(rendererWindow, frameIndex, sceneTime));
+          : await captureTiledExportFrame(rendererWindow, frameIndex, sceneTime);
+        frames.push(frame);
+        await writeSupervisedFrameOutput(payload.outputPath, frameIndex, frame);
+        console.log(`[clipper export-frame] frame=${frameIndex + 1}`);
+        onFrameCaptured?.(frameIndex);
+        if (renderCancelRequested) throw new Error("Video export cancelled.");
       }
     } finally {
       oomWarningState.activeSegment = null;
@@ -857,10 +1085,26 @@ async function renderSceneSegmentToRawFrames(payload: SupervisedSegmentPayload) 
       removeNativeStderrWarningListener();
     }
   } finally {
+    unregisterCancel();
     rendererWindow.destroy();
   }
 
-  await fs.writeFile(payload.outputPath, Buffer.concat(frames));
+  const output = Buffer.concat(frames);
+  const expectedBytes = getSupervisedSegmentByteLength(payload.segment);
+  if (output.byteLength !== expectedBytes) {
+    throw new Error(`Supervised export child segment ${payload.segment.index} produced ${output.byteLength} bytes; expected ${expectedBytes}.`);
+  }
+  const tempOutputPath = `${payload.outputPath}.tmp-${process.pid}`;
+  await fs.writeFile(tempOutputPath, output);
+  await fs.rename(tempOutputPath, payload.outputPath);
+  return { nativeWarningDetected: oomWarningState.overflowSegments.has(payload.segment.index), nativeWarningCount: getExportSegmentOomWarningCount(oomWarningState, payload.segment.index) };
+}
+
+async function writeSupervisedFrameOutput(segmentOutputPath: string, frameIndex: number, frame: Buffer) {
+  const framePath = getSupervisedFrameOutputPath(segmentOutputPath, frameIndex);
+  const tempFramePath = `${framePath}.tmp-${process.pid}`;
+  await fs.writeFile(tempFramePath, frame);
+  await fs.rename(tempFramePath, framePath);
 }
 
 async function loadRenderedMediaExportWindow(window: BrowserWindow) {
@@ -885,12 +1129,43 @@ function getExportFrameTime(frameIndex: number, frameRate: number, durationSecon
   return Math.min(frameIndex / frameRate, Math.max(durationSeconds - 0.001, 0));
 }
 
-function getExportFrameSegments(totalFrames: number): ExportFrameSegment[] {
+function getExportFrameSegments(scene: Scene, totalFrames: number, frameRate: number, durationSeconds: number): ExportFrameSegment[] {
+  const boundaries = getCompositionCheckpointTimes(scene, durationSeconds);
+  const minimumSeconds = Math.min(exportMinimumCheckpointSegmentSeconds, durationSeconds);
   const segments: ExportFrameSegment[] = [];
-  for (let startFrame = 0; startFrame < totalFrames; startFrame += exportFallbackSegmentFrameCount) {
-    segments.push({ index: segments.length, startFrame, endFrame: Math.min(startFrame + exportFallbackSegmentFrameCount, totalFrames) });
+  let startTime = 0;
+
+  for (const boundary of boundaries) {
+    const isFinalBoundary = boundary >= durationSeconds;
+    if (!isFinalBoundary && boundary - startTime < minimumSeconds) continue;
+    const startFrame = Math.min(totalFrames - 1, Math.max(0, Math.round(startTime * frameRate)));
+    const endFrame = Math.min(totalFrames, Math.max(startFrame + 1, Math.round(boundary * frameRate)));
+    if (segments.length > 0 && startFrame < segments[segments.length - 1].endFrame) continue;
+    segments.push({ index: segments.length, startFrame, endFrame, startTime, endTime: boundary });
+    startTime = boundary;
   }
+
+  if (segments.length === 0 || segments[segments.length - 1].endFrame < totalFrames) {
+    const startFrame = segments.length === 0 ? 0 : segments[segments.length - 1].endFrame;
+    segments.push({ index: segments.length, startFrame, endFrame: totalFrames, startTime: startFrame / frameRate, endTime: durationSeconds });
+  }
+
   return segments;
+}
+
+function getCompositionCheckpointTimes(scene: Scene, durationSeconds: number) {
+  const timeline = buildLinearTimeline(scene);
+  const times = new Set<number>([durationSeconds]);
+  for (const item of timeline) {
+    const end = clampExportTime(item.end, durationSeconds);
+    if (end > 0) times.add(end);
+  }
+  return [...times].sort((left, right) => left - right);
+}
+
+function clampExportTime(value: number, durationSeconds: number) {
+  if (!Number.isFinite(value)) return durationSeconds;
+  return Math.min(Math.max(value, 0), durationSeconds);
 }
 
 function createExportOomWarningState(): ExportOomWarningState {
@@ -955,7 +1230,7 @@ function getConsoleMessageText(args: unknown[]) {
 }
 
 function isExportOutOfMemoryWarning(message: string) {
-  return /tile memory limits exceeded|some content may not draw|out[ -]?of[ -]?memory|\boom\b/i.test(message);
+  return /tile memory limits exceeded|some content may not draw|cc\/tiles\/tile_manager|tile_manager\.cc|memory limits exceeded|raster[^\n]{0,80}memory|gpu[^\n]{0,80}memory|out[ -]?of[ -]?memory|\boom\b/i.test(message);
 }
 
 function getExportSegmentOomWarningCount(state: ExportOomWarningState, segmentIndex: number) {
@@ -1054,6 +1329,10 @@ async function captureStableSlowFallbackTile(window: BrowserWindow, tile: Export
       await applySlowFallbackExportCaptureViewport(window, tile);
       const samples: Buffer[] = [];
       for (let sampleIndex = 0; sampleIndex < exportSlowFallbackTileValidationSamples; sampleIndex += 1) {
+        const syncResult = await syncExportRenderClock(window, sceneTime, `slow fallback export frame ${frameIndex + 1} tile ${formatTileRange(tile)} sample ${sampleIndex + 1}`);
+        if (syncResult.failedCount > 0) {
+          throw new ExportTileUnstableError(`Slow fallback failed to repin ${syncResult.failedCount} animation(s) before export frame ${frameIndex + 1} tile ${formatTileRange(tile)} sample ${sampleIndex + 1}.`);
+        }
         samples.push(await captureSlowFallbackTileBitmap(window, tile, frameIndex, sceneTime));
       }
       const warningCountAfter = getExportSegmentOomWarningCount(oomWarningState, segmentIndex);
@@ -1115,6 +1394,14 @@ async function applySlowFallbackExportCaptureViewport(window: BrowserWindow, til
     })()`, true),
     exportCaptureTileTimeoutMs,
     `Timed out applying slow fallback export capture viewport for tile ${formatTileRange(tile)}.`,
+  );
+}
+
+async function syncExportRenderClock(window: BrowserWindow, sceneTime: number, context: string) {
+  return withTimeout<RenderClockReadinessResult>(
+    window.webContents.executeJavaScript("window.__clipperSyncExportRenderClock && window.__clipperSyncExportRenderClock()", true),
+    exportRendererFrameTimeoutMs,
+    `Timed out syncing render clock for ${context} at ${sceneTime.toFixed(3)}s.`,
   );
 }
 
@@ -1259,16 +1546,17 @@ async function writeProcessInput(process: ChildProcessWithoutNullStreams, chunk:
   });
 }
 
-type VideoExportProgress = { frame: number; totalFrames: number; percent: number; status: string };
+type VideoExportMethod = "fast-child" | "fast-in-process" | "slow-fallback";
+type VideoExportProgress = { frame: number; totalFrames: number; percent: number; status: string; method?: VideoExportMethod };
 type RenderClockReadinessResult = { animationCount: number; pinnedCount: number; failedCount: number; pendingReadyCount: number; passCount: number; layerCount: number };
 type ExportSource = "app" | "app-supervised" | "cli";
 type ExportPathMode = "fast/default" | "slow-fallback";
 type RenderSceneToVideoOptions = { source?: ExportSource; exportId?: string; onProgress?: (progress: VideoExportProgress) => void };
-type ExportFrameSegment = { index: number; startFrame: number; endFrame: number };
+type ExportFrameSegment = { index: number; startFrame: number; endFrame: number; startTime: number; endTime: number };
 type ExportOomWarningState = { activeSegment: ExportFrameSegment | null; activePath: "fast/default" | "slow-fallback"; overflowSegments: Set<number>; warningCounts: Map<number, number>; totalWarnings: number };
 type SlowFallbackCaptureState = { tileHeightIndex: number };
 type SupervisedSegmentPayload = { project: ProjectManifest; scene: Scene; frameRate: number; durationSeconds: number; segment: ExportFrameSegment; outputPath: string; pathMode: ExportPathMode };
-type SupervisedSegmentResult = { outputPath: string; nativeWarningDetected: boolean };
+type SupervisedSegmentResult = { outputPath: string; nativeWarningDetected: boolean; nativeWarningCount: number };
 type ExportCaptureTile = { x: number; y: number; width: number; height: number };
 type MotionMarker = { start: number; duration: number };
 type AdjustmentLayer = { id: string; name: string; start: number; duration: number; effect: { kind?: "frameSkip"; every?: number; effectId?: string; params?: Record<string, unknown> } };
@@ -1421,7 +1709,13 @@ async function renderVideoFromCommand() {
   if (childSegmentArgIndex >= 0) {
     const payloadPath = process.argv[childSegmentArgIndex + 1];
     if (!payloadPath) throw new Error("Usage: electron . --render-video-child-segment <payload.json>");
+    let childSegmentCancelled = false;
+    process.once("SIGTERM", () => {
+      childSegmentCancelled = true;
+      app.exit(0);
+    });
     const payload = JSON.parse(await fs.readFile(payloadPath, "utf8")) as SupervisedSegmentPayload;
+    if (childSegmentCancelled) return true;
     await renderSceneSegmentToRawFrames(payload);
     return true;
   }

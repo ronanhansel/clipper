@@ -58,7 +58,7 @@ interface Window {
     toggleWindowFullscreen: () => Promise<boolean>;
     watchTextFiles: (relativePaths: string[]) => Promise<void>;
     watchProjectFiles: (watchPaths: { files: string[]; directories: string[] }) => Promise<void>;
-    onVideoExportProgress: (callback: (exportId: string, progress: { frame: number; totalFrames: number; percent: number; status: string }) => void) => () => void;
+    onVideoExportProgress: (callback: (exportId: string, progress: { frame: number; totalFrames: number; percent: number; status: string; method?: "fast-child" | "fast-in-process" | "slow-fallback" }) => void) => () => void;
     onTextFileChanged: (callback: (relativePath: string) => void) => () => void;
     onProjectFileChanged: (callback: (relativePath: string) => void) => () => void;
     onModeShortcut: (callback: (key: "1" | "2" | "3" | "4") => void) => () => void;

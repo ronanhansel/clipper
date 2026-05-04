@@ -47,7 +47,7 @@ export function syncDomAnimationListToRenderClock(animations: readonly DomAnimat
   const result = emptyRenderClockSyncResult();
   result.animationCount = animations.length;
   for (const animation of animations) {
-    const phaseOffset = getAnimationPhaseOffset(animation);
+    const phaseOffset = state.mode === "export" ? 0 : getAnimationPhaseOffset(animation);
     try {
       animation.pause();
     } catch {
