@@ -1187,6 +1187,7 @@ async function renderSupervisedFrameRangeChild(
   onFrameCaptured?: (frameIndex: number, method?: VideoExportMethod) => void,
   exportId?: string,
   requestedFrameRange?: ExportFrameRange,
+  renderSurface: SupervisedRenderPayload["renderSurface"] = "export",
 ): Promise<SupervisedRenderResult> {
   const frameRange: ExportFrameRange = requestedFrameRange ?? { startFrame: 0, endFrame: totalFrames };
   const outputPath = getSupervisedFrameRangeOutputPath(tempDir);
@@ -1201,17 +1202,18 @@ async function renderSupervisedFrameRangeChild(
     frameRange,
     outputPath,
     tileHeight,
+    source,
+    renderSurface,
   };
   await fs.writeFile(payloadPath, JSON.stringify(payload), "utf8");
+  const electronArgs = renderSurface === "preview-cache"
+    ? ["--enable-logging=file", `--log-file=${nativeLogPath}`]
+    : [...exportChromiumArgs, "--enable-logging=file", `--log-file=${nativeLogPath}`];
   const child = spawn(
     process.execPath,
     getElectronChildArgs(
       ["--render-video-child", payloadPath],
-      [
-        ...exportChromiumArgs,
-        "--enable-logging=file",
-        `--log-file=${nativeLogPath}`,
-      ],
+      electronArgs,
     ),
     {
       env: {
@@ -1436,7 +1438,7 @@ function getSupervisedFrameOutputPath(
 }
 
 function getPrerenderCacheKey(project: ProjectManifest, scene: Scene, frameRate: number, tileHeight?: number, blockDurationMs?: number) {
-  return JSON.stringify({ projectId: project.id, scene, frameRate, tileHeight, blockDurationMs, previewVideoFormat: "fmp4-h264-baseline-v1", width: frameWidth, height: frameHeight });
+  return JSON.stringify({ projectId: project.id, scene, frameRate, tileHeight, blockDurationMs, previewFrameFormat: "transparent-compositor-raw-bgra-v6", width: frameWidth, height: frameHeight });
 }
 
 function getProjectCacheDirectory(manifestPath: string) {
@@ -1532,6 +1534,7 @@ async function renderPrerenderVideoBlock(
       undefined,
       undefined,
       frameRange,
+      "preview-cache",
     );
     const frameCount = await countContiguousSupervisedFrameFiles(rendererResult.outputPath, frameRange);
     const expectedFrameCount = frameRange.endFrame - frameRange.startFrame;
@@ -1817,7 +1820,7 @@ async function renderSceneToRawFrames(
   onFrameCaptured?: (frameIndex: number) => void,
   shouldStop?: () => boolean,
 ) {
-  const rendererWindow = createExportRendererWindow();
+  const rendererWindow = createExportRendererWindow(payload.renderSurface);
 
   const oomWarningState = createExportOomWarningState();
   try {
@@ -1907,7 +1910,8 @@ async function renderSceneToRawFrames(
   };
 }
 
-function createExportRendererWindow() {
+function createExportRendererWindow(renderSurface: SupervisedRenderPayload["renderSurface"] = "export") {
+  const previewCacheMode = renderSurface === "preview-cache";
   return new BrowserWindow({
     width: frameWidth,
     height: frameHeight,
@@ -1916,7 +1920,8 @@ function createExportRendererWindow() {
     focusable: false,
     frame: false,
     skipTaskbar: true,
-    transparent: false,
+    backgroundColor: previewCacheMode ? "#00000000" : "#000000",
+    transparent: previewCacheMode,
     title: "Clipper Renderer",
     webPreferences: {
       backgroundThrottling: false,
@@ -1956,10 +1961,11 @@ async function renderExportFrame(
   scene: Scene,
   sceneTime: number,
   frameRate: number,
+  renderMode: "preview" | "export" = "export",
 ) {
   return withTimeout<RenderClockReadinessResult>(
     window.webContents.executeJavaScript(
-      `window.__clipperRenderExportFrame(${JSON.stringify({ project, scene, sceneTime, frameRate })})`,
+      `window.__clipperRenderExportFrame(${JSON.stringify({ project, scene, sceneTime, frameRate, renderMode })})`,
       true,
     ),
     exportRendererFrameTimeoutMs,
@@ -2316,6 +2322,8 @@ type SupervisedRenderPayload = {
   frameRange: ExportFrameRange;
   outputPath: string;
   tileHeight: number;
+  source: ExportSource;
+  renderSurface?: "export" | "preview-cache";
 };
 type SupervisedRenderResult = {
   outputPath: string;

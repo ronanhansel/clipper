@@ -10,6 +10,7 @@ type ExportFrameRequest = {
   scene: Scene;
   sceneTime: number;
   frameRate: number;
+  renderMode?: "preview" | "export";
 };
 
 declare global {
@@ -118,7 +119,7 @@ function ExportFramePreview({ refs, request }: { refs: ExportFramePreviewRefs; r
       frameViewportRef: refs.frameViewportRef,
       frameScale: 1,
       isPlaying: false,
-      renderMode: "export" as const,
+      renderMode: request.renderMode ?? "export" as const,
       part: previewModel.part,
       partStart,
       previewParts: previewModel.previewParts,

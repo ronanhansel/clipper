@@ -170,6 +170,8 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
   const [findMediaRequest, setFindMediaRequest] = useState<FileManagerFindMediaDetail | null>(null);
   const [reusePrerenderCacheForExport, setReusePrerenderCacheForExportState] = useState(isPrerenderCacheReuseEnabledByDefault);
   const [prerenderCacheEnabled, setPrerenderCacheEnabledState] = useState(isPrerenderCacheEnabledByDefault);
+  const [debugSettingsEnabled, setDebugSettingsEnabledState] = useState(isDebugSettingsEnabledByDefault);
+  const [prerenderCacheBlackMissDebug, setPrerenderCacheBlackMissDebugState] = useState(isPrerenderCacheBlackMissDebugEnabledByDefault);
   const {
     mode, setMode,
     timelineMode, setTimelineMode,
@@ -566,6 +568,15 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
   function setPrerenderCacheEnabled(enabled: boolean) {
     setPrerenderCacheEnabledState(enabled);
     window.localStorage.setItem("clipper:prerender-cache", enabled ? "1" : "0");
+  }
+  function setDebugSettingsEnabled(enabled: boolean) {
+    setDebugSettingsEnabledState(enabled);
+    window.localStorage.setItem("clipper:debug-settings", enabled ? "1" : "0");
+    if (!enabled) setPrerenderCacheBlackMissDebug(false);
+  }
+  function setPrerenderCacheBlackMissDebug(enabled: boolean) {
+    setPrerenderCacheBlackMissDebugState(enabled);
+    window.localStorage.setItem("clipper:prerender-cache-black-miss-debug", enabled ? "1" : "0");
   }
   function setPrerenderBlockDurationMs(value: number) {
     const nextValue = clampPrerenderBlockDurationMs(value);
@@ -1535,6 +1546,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
           isPlaying={isPlaying}
           mode={mode}
           onCachedPreviewDisplayReadyChange={(ready) => { cachedPreviewDisplayReadyRef.current = ready; }}
+          prerenderCacheBlackMissDebug={prerenderCacheBlackMissDebug}
           prerenderCacheEnabled={prerenderCacheEnabled && !composeMode}
           prerenderCacheBlock={prerenderCache.block}
           previewKey={part.id}
@@ -1695,6 +1707,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     </main>
     <AppDialogs
       appContextMenu={appContextMenu}
+      debugSettingsEnabled={debugSettingsEnabled}
       defaultNewMarkerDurationSeconds={markerDurationSeconds}
       exportDialogOpen={exportDialogOpen}
       exportDialogTab={exportDialogTab}
@@ -1703,6 +1716,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
       isExporting={isExporting}
       partCount={scene.compositions.length}
       prerenderCacheEnabled={prerenderCacheEnabled}
+      prerenderCacheBlackMissDebug={prerenderCacheBlackMissDebug}
       prerenderBlockDurationMs={prerenderBlockDurationMs}
       projectExportFormat={projectExportFormat}
       projectName={project.name}
@@ -1719,6 +1733,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
       videoExportTileHeight={videoExportTileHeight}
       videoExportProgress={videoExportProgress}
       onAppContextMenuClose={() => setAppContextMenu(null)}
+      onDebugSettingsEnabledChange={setDebugSettingsEnabled}
       onDefaultNewMarkerDurationSecondsChange={setDefaultNewMarkerDurationSeconds}
       onExportDialogOpenChange={setExportDialogOpen}
       onExportDialogTabChange={setExportDialogTab}
@@ -1726,6 +1741,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
       onMediaExport={() => void exportRenderedMedia()}
       onProjectExport={() => void exportProject()}
       onPrerenderCacheEnabledChange={setPrerenderCacheEnabled}
+      onPrerenderCacheBlackMissDebugChange={setPrerenderCacheBlackMissDebug}
       onPrerenderBlockDurationMsChange={setPrerenderBlockDurationMs}
       onClearAllPrerenderCaches={() => void clearAllPrerenderCaches()}
       onProjectExportFormatChange={setProjectExportFormat}
@@ -1751,6 +1767,17 @@ function isPrerenderCacheReuseEnabledByDefault() {
 function isPrerenderCacheEnabledByDefault() {
   if (typeof window === "undefined") return true;
   return window.localStorage.getItem("clipper:prerender-cache") !== "0";
+}
+
+function isDebugSettingsEnabledByDefault() {
+  if (typeof window === "undefined") return false;
+  return window.localStorage.getItem("clipper:debug-settings") === "1";
+}
+
+function isPrerenderCacheBlackMissDebugEnabledByDefault() {
+  if (typeof window === "undefined") return false;
+  if (window.localStorage.getItem("clipper:debug-settings") !== "1") return false;
+  return window.localStorage.getItem("clipper:prerender-cache-black-miss-debug") === "1";
 }
 
 function getInitialVideoExportTileHeight() {

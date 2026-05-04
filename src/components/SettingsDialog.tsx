@@ -6,7 +6,7 @@ import { Dialog, DialogContent } from "./ui/dialog";
 import { Input } from "./ui/input";
 import { Switch } from "./ui/switch";
 
-export function SettingsDialog({ activeSection, open, prerenderCacheEnabled, prerenderBlockDurationMs, scrubCommitThrottleMs, defaultNewMarkerDurationSeconds: markerDurationSeconds, timelineEndPaddingFraction, timelinePrecision, videoExportTileHeight, onActiveSectionChange, onOpenChange, onPrerenderCacheEnabledChange, onPrerenderBlockDurationMsChange, onClearAllPrerenderCaches, onScrubCommitThrottleMsChange, onDefaultNewMarkerDurationSecondsChange, onTimelineEndPaddingFractionChange, onTimelinePrecisionChange, onVideoExportTileHeightChange }: { activeSection: SettingsSection; open: boolean; prerenderCacheEnabled: boolean; prerenderBlockDurationMs: number; scrubCommitThrottleMs: number; defaultNewMarkerDurationSeconds: number; timelineEndPaddingFraction: number; timelinePrecision: number; videoExportTileHeight: number; onActiveSectionChange: (section: SettingsSection) => void; onOpenChange: (open: boolean) => void; onPrerenderCacheEnabledChange: (enabled: boolean) => void; onPrerenderBlockDurationMsChange: (value: number) => void; onClearAllPrerenderCaches: () => void; onScrubCommitThrottleMsChange: (value: number) => void; onDefaultNewMarkerDurationSecondsChange: (value: number) => void; onTimelineEndPaddingFractionChange: (value: number) => void; onTimelinePrecisionChange: (value: number) => void; onVideoExportTileHeightChange: (value: number) => void }) {
+export function SettingsDialog({ activeSection, debugSettingsEnabled, open, prerenderCacheBlackMissDebug, prerenderCacheEnabled, prerenderBlockDurationMs, scrubCommitThrottleMs, defaultNewMarkerDurationSeconds: markerDurationSeconds, timelineEndPaddingFraction, timelinePrecision, videoExportTileHeight, onActiveSectionChange, onDebugSettingsEnabledChange, onOpenChange, onPrerenderCacheBlackMissDebugChange, onPrerenderCacheEnabledChange, onPrerenderBlockDurationMsChange, onClearAllPrerenderCaches, onScrubCommitThrottleMsChange, onDefaultNewMarkerDurationSecondsChange, onTimelineEndPaddingFractionChange, onTimelinePrecisionChange, onVideoExportTileHeightChange }: { activeSection: SettingsSection; debugSettingsEnabled: boolean; open: boolean; prerenderCacheBlackMissDebug: boolean; prerenderCacheEnabled: boolean; prerenderBlockDurationMs: number; scrubCommitThrottleMs: number; defaultNewMarkerDurationSeconds: number; timelineEndPaddingFraction: number; timelinePrecision: number; videoExportTileHeight: number; onActiveSectionChange: (section: SettingsSection) => void; onDebugSettingsEnabledChange: (enabled: boolean) => void; onOpenChange: (open: boolean) => void; onPrerenderCacheBlackMissDebugChange: (enabled: boolean) => void; onPrerenderCacheEnabledChange: (enabled: boolean) => void; onPrerenderBlockDurationMsChange: (value: number) => void; onClearAllPrerenderCaches: () => void; onScrubCommitThrottleMsChange: (value: number) => void; onDefaultNewMarkerDurationSecondsChange: (value: number) => void; onTimelineEndPaddingFractionChange: (value: number) => void; onTimelinePrecisionChange: (value: number) => void; onVideoExportTileHeightChange: (value: number) => void }) {
   const navItems: Array<{ id: SettingsSection; label: string }> = [
     { id: "playback", label: "Playback" },
     { id: "timeline", label: "Timeline" },
@@ -87,6 +87,13 @@ export function SettingsDialog({ activeSection, open, prerenderCacheEnabled, pre
                     </span>
                     <Switch id="prerender-cache-toggle" className="mt-0.5" checked={prerenderCacheEnabled} onCheckedChange={onPrerenderCacheEnabledChange} />
                   </label>
+                  {debugSettingsEnabled ? <label className="flex w-full items-start justify-between gap-5 text-xs font-bold text-[#dfe2ea]" htmlFor="prerender-cache-black-miss-debug-toggle">
+                    <span className="grid gap-1">
+                      <span className="flex items-center gap-2">Show black for uncached frames <span className="rounded-full border border-[#6f7684] px-2 py-0.5 text-[10px] uppercase tracking-[0.08em] text-[#c5cad3]">Debug</span></span>
+                      <span className="font-medium leading-5 text-[#8f939d]">Disables DOM fallback while prerender cache is enabled, making cache misses visible as black frames for stutter debugging.</span>
+                    </span>
+                    <Switch id="prerender-cache-black-miss-debug-toggle" className="mt-0.5" checked={prerenderCacheBlackMissDebug} onCheckedChange={onPrerenderCacheBlackMissDebugChange} />
+                  </label> : null}
                   <div className="h-px bg-[#363b47]" />
                   <div className="grid gap-1.5">
                     <strong className="text-sm text-white">Prerender block size</strong>
@@ -184,11 +191,18 @@ export function SettingsDialog({ activeSection, open, prerenderCacheEnabled, pre
                     </span>
                   </label>
                 </div>
-              ) : <div className="grid h-full place-items-center rounded-xl border border-dashed border-[#363b47] bg-[#1b1e26] text-center">
-                <div className="max-w-[320px] px-6">
-                  <strong className="text-sm text-white">No controls yet</strong>
-                  <p className="mt-2 text-xs leading-5 text-[#8f939d]">Preview caching controls were removed. This settings shell is ready for future editor, export, and diagnostic preferences.</p>
+              ) : <div className="grid gap-4 rounded-xl border border-[#363b47] bg-[#1b1e26] p-4">
+                <div className="grid gap-1.5">
+                  <strong className="text-sm text-white">Debug settings</strong>
+                  <p className="text-xs leading-5 text-[#8f939d]">Shows developer-only diagnostic controls in their relevant settings sections.</p>
                 </div>
+                <label className="flex w-full items-start justify-between gap-5 text-xs font-bold text-[#dfe2ea]" htmlFor="debug-settings-toggle">
+                  <span className="grid gap-1">
+                    <span>Enable debug settings</span>
+                    <span className="font-medium leading-5 text-[#8f939d]">When turned off, debug controls are hidden and reset to their default values.</span>
+                  </span>
+                  <Switch id="debug-settings-toggle" className="mt-0.5" checked={debugSettingsEnabled} onCheckedChange={onDebugSettingsEnabledChange} />
+                </label>
               </div>}
             </div>
 

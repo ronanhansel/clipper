@@ -7,6 +7,7 @@ import type { ContextMenuState, ExportDialogTab, ProjectExportFormat, SettingsSe
 
 type AppDialogsProps = {
   appContextMenu: ContextMenuState | null;
+  debugSettingsEnabled: boolean;
   defaultNewMarkerDurationSeconds: number;
   exportDialogOpen: boolean;
   exportDialogTab: ExportDialogTab;
@@ -15,6 +16,7 @@ type AppDialogsProps = {
   isExporting: boolean;
   partCount: number;
   prerenderCacheEnabled: boolean;
+  prerenderCacheBlackMissDebug: boolean;
   prerenderBlockDurationMs: number;
   projectExportFormat: ProjectExportFormat;
   projectName: string;
@@ -31,6 +33,7 @@ type AppDialogsProps = {
   videoExportTileHeight: number;
   videoExportProgress: VideoExportProgress | null;
   onAppContextMenuClose: () => void;
+  onDebugSettingsEnabledChange: (enabled: boolean) => void;
   onDefaultNewMarkerDurationSecondsChange: (value: number) => void;
   onExportDialogOpenChange: (open: boolean) => void;
   onExportDialogTabChange: (tab: ExportDialogTab) => void;
@@ -38,6 +41,7 @@ type AppDialogsProps = {
   onMediaExport: () => void;
   onProjectExport: () => void;
   onPrerenderCacheEnabledChange: (enabled: boolean) => void;
+  onPrerenderCacheBlackMissDebugChange: (enabled: boolean) => void;
   onPrerenderBlockDurationMsChange: (value: number) => void;
   onClearAllPrerenderCaches: () => void;
   onProjectExportFormatChange: (format: ProjectExportFormat) => void;
@@ -51,7 +55,7 @@ type AppDialogsProps = {
   onVideoExportCancel: () => void;
 };
 
-export function AppDialogs({ appContextMenu, defaultNewMarkerDurationSeconds, exportDialogOpen, exportDialogTab, exportIncludeSources, exportProgress, isExporting, partCount, prerenderCacheEnabled, prerenderBlockDurationMs, projectExportFormat, projectName, resolution, reusePrerenderCacheForExport, sceneDurationSeconds, sceneName, scrubCommitThrottleMs, settingsOpen, settingsSection, timelineEndPaddingFraction, timelinePrecision, videoExportCancelling, videoExportTileHeight, videoExportProgress, onAppContextMenuClose, onDefaultNewMarkerDurationSecondsChange, onExportDialogOpenChange, onExportDialogTabChange, onExportIncludeSourcesChange, onMediaExport, onProjectExport, onPrerenderCacheEnabledChange, onPrerenderBlockDurationMsChange, onClearAllPrerenderCaches, onProjectExportFormatChange, onReusePrerenderCacheForExportChange, onScrubCommitThrottleMsChange, onSettingsOpenChange, onSettingsSectionChange, onTimelineEndPaddingFractionChange, onTimelinePrecisionChange, onVideoExportTileHeightChange, onVideoExportCancel }: AppDialogsProps) {
+export function AppDialogs({ appContextMenu, debugSettingsEnabled, defaultNewMarkerDurationSeconds, exportDialogOpen, exportDialogTab, exportIncludeSources, exportProgress, isExporting, partCount, prerenderCacheEnabled, prerenderCacheBlackMissDebug, prerenderBlockDurationMs, projectExportFormat, projectName, resolution, reusePrerenderCacheForExport, sceneDurationSeconds, sceneName, scrubCommitThrottleMs, settingsOpen, settingsSection, timelineEndPaddingFraction, timelinePrecision, videoExportCancelling, videoExportTileHeight, videoExportProgress, onAppContextMenuClose, onDebugSettingsEnabledChange, onDefaultNewMarkerDurationSecondsChange, onExportDialogOpenChange, onExportDialogTabChange, onExportIncludeSourcesChange, onMediaExport, onProjectExport, onPrerenderCacheEnabledChange, onPrerenderCacheBlackMissDebugChange, onPrerenderBlockDurationMsChange, onClearAllPrerenderCaches, onProjectExportFormatChange, onReusePrerenderCacheForExportChange, onScrubCommitThrottleMsChange, onSettingsOpenChange, onSettingsSectionChange, onTimelineEndPaddingFractionChange, onTimelinePrecisionChange, onVideoExportTileHeightChange, onVideoExportCancel }: AppDialogsProps) {
   return (
     <>
       <ExportMediaDialog
@@ -77,7 +81,9 @@ export function AppDialogs({ appContextMenu, defaultNewMarkerDurationSeconds, ex
       />
       <SettingsDialog
         activeSection={settingsSection}
+        debugSettingsEnabled={debugSettingsEnabled}
         open={settingsOpen}
+        prerenderCacheBlackMissDebug={prerenderCacheBlackMissDebug}
         prerenderCacheEnabled={prerenderCacheEnabled}
         prerenderBlockDurationMs={prerenderBlockDurationMs}
         scrubCommitThrottleMs={scrubCommitThrottleMs}
@@ -86,7 +92,9 @@ export function AppDialogs({ appContextMenu, defaultNewMarkerDurationSeconds, ex
         timelinePrecision={timelinePrecision}
         videoExportTileHeight={videoExportTileHeight}
         onActiveSectionChange={onSettingsSectionChange}
+        onDebugSettingsEnabledChange={onDebugSettingsEnabledChange}
         onOpenChange={onSettingsOpenChange}
+        onPrerenderCacheBlackMissDebugChange={onPrerenderCacheBlackMissDebugChange}
         onPrerenderCacheEnabledChange={onPrerenderCacheEnabledChange}
         onPrerenderBlockDurationMsChange={onPrerenderBlockDurationMsChange}
         onClearAllPrerenderCaches={onClearAllPrerenderCaches}

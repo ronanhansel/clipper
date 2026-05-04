@@ -6,12 +6,15 @@ import type { ProjectManifest, Scene } from "../../../core/types";
 export type PrerenderCacheBlock = {
   width: number;
   height: number;
-  mimeType: string;
   startTime: number;
   duration: number;
   frameRate: number;
-  bytes: Uint8Array;
-  url: string;
+  frames: PrerenderCacheFrame[];
+};
+
+export type PrerenderCacheFrame = {
+  sceneTime: number;
+  bytes: Uint8ClampedArray;
 };
 
 export type PrerenderCacheCoverage = {
@@ -43,7 +46,6 @@ export function usePrerenderCache({ blockDurationMs, cacheResetToken, enabled, h
 
   useEffect(() => {
     generationRef.current += 1;
-    revokeCachedBlocks(cacheRef.current);
     cacheRef.current.clear();
     queuedRef.current = [];
     renderingBlockStartsRef.current.clear();
@@ -52,10 +54,6 @@ export function usePrerenderCache({ blockDurationMs, cacheResetToken, enabled, h
     idleTimerRef.current = null;
     setState((current) => ({ version: current.version + 1, error: "" }));
   }, [enabled, hasActiveComposition, cacheKey, tileHeight, blockDurationMs, cacheResetToken]);
-
-  useEffect(() => () => {
-    revokeCachedBlocks(cacheRef.current);
-  }, []);
 
   const requestCacheAtTime = useCallback((time: number, reason: PrerenderCacheInterestReason = "idle") => {
     const request = latestRequestRef.current;
@@ -101,22 +99,19 @@ export function usePrerenderCache({ blockDurationMs, cacheResetToken, enabled, h
       setState((current) => ({ ...current, version: current.version + 1 }));
       const request = latestRequestRef.current;
       try {
-        const videoBlock = await withPrerenderTimeout(clipperHost.prerenderVideoBlock(request.project, request.manifestPath, request.scene, nextBlockStart, request.sceneDuration, videoExportFrameRate, request.tileHeight, request.blockDurationMs), nextBlockStart);
+        const frames = await withPrerenderTimeout(clipperHost.prerenderFrame(request.project, request.manifestPath, request.scene, nextBlockStart, request.sceneDuration, videoExportFrameRate, request.tileHeight, request.blockDurationMs), nextBlockStart);
         if (generation !== generationRef.current) break;
-        if (videoBlock.duration <= 0 || !videoBlock.data) throw new Error("Prerendered video block was empty.");
+        if (frames.length === 0) throw new Error("Prerendered frame block was empty.");
         cachedBlockStartsRef.current.add(nextBlockStart);
-        const previousBlock = cacheRef.current.get(videoBlock.startTime);
-        if (previousBlock) URL.revokeObjectURL(previousBlock.url);
-        const bytes = base64ToUint8Array(videoBlock.data);
-        cacheRef.current.set(videoBlock.startTime, {
-          width: videoBlock.width,
-          height: videoBlock.height,
-          mimeType: videoBlock.mimeType,
-          startTime: videoBlock.startTime,
-          duration: videoBlock.duration,
-          frameRate: videoBlock.frameRate,
-          bytes,
-          url: URL.createObjectURL(new Blob([bytes], { type: videoBlock.mimeType })),
+        const firstFrame = frames[0];
+        const frameRate = firstFrame.frameRate;
+        cacheRef.current.set(nextBlockStart, {
+          width: firstFrame.width,
+          height: firstFrame.height,
+          startTime: nextBlockStart,
+          duration: frames.length / frameRate,
+          frameRate,
+          frames: frames.map((frame) => ({ sceneTime: frame.sceneTime, bytes: bgraBase64ToRgbaClamped(frame.data) })),
         });
         evictMemoryBlocks(cacheRef.current, request.sceneTime);
         setState((current) => ({ version: current.version + 1, error: "" }));
@@ -164,14 +159,10 @@ export function usePrerenderCache({ blockDurationMs, cacheResetToken, enabled, h
   return {
     block: cacheRef.current.get(blockStart) ?? null,
     getBlockAtTime: (time: number) => {
-      const nextBlockStart = getBlockStartTime(time, sceneDuration, videoExportFrameRate, blockDurationSeconds);
-      const block = cacheRef.current.get(nextBlockStart);
-      return block && time >= block.startTime && time < block.startTime + block.duration + 1 / videoExportFrameRate ? block : null;
+      return getCachedBlockAtTime(cacheRef.current, time, sceneDuration, videoExportFrameRate, blockDurationSeconds);
     },
     hasFrameAtTime: (time: number) => {
-      const nextBlockStart = getBlockStartTime(time, sceneDuration, videoExportFrameRate, blockDurationSeconds);
-      const block = cacheRef.current.get(nextBlockStart);
-      return Boolean(block && time >= block.startTime && time < block.startTime + block.duration + 1 / videoExportFrameRate);
+      return Boolean(getCachedBlockAtTime(cacheRef.current, time, sceneDuration, videoExportFrameRate, blockDurationSeconds));
     },
     requestCacheAtTime,
     coverage,
@@ -198,9 +189,31 @@ function shouldKeepQueuedBlock(blockStart: number, sceneTime: number, sceneDurat
 }
 
 function getBlockStartTime(sceneTime: number, sceneDuration: number, frameRate: number, blockDurationSeconds: number) {
-  const frameIndex = Math.min(Math.max(Math.round(sceneTime * frameRate), 0), Math.max(Math.ceil(sceneDuration * frameRate) - 1, 0));
+  const frameIndex = getFrameIndexAtTime(sceneTime, sceneDuration, frameRate);
   const framesPerBlock = Math.max(1, Math.round(blockDurationSeconds * frameRate));
   return Math.floor(frameIndex / framesPerBlock) * framesPerBlock / frameRate;
+}
+
+function getCachedBlockAtTime(cache: Map<number, PrerenderCacheBlock>, sceneTime: number, sceneDuration: number, frameRate: number, blockDurationSeconds: number) {
+  const frameIndex = getFrameIndexAtTime(sceneTime, sceneDuration, frameRate);
+  const framesPerBlock = Math.max(1, Math.round(blockDurationSeconds * frameRate));
+  const primaryStart = Math.floor(frameIndex / framesPerBlock) * framesPerBlock / frameRate;
+  const candidateStarts = [primaryStart, primaryStart - framesPerBlock / frameRate, primaryStart + framesPerBlock / frameRate];
+  for (const start of candidateStarts) {
+    const block = cache.get(quantizeFrameTime(start, frameRate, sceneDuration));
+    if (block && getBlockFrameIndex(block, frameIndex) !== null) return block;
+  }
+  return null;
+}
+
+function getBlockFrameIndex(block: PrerenderCacheBlock, sceneFrameIndex: number) {
+  const blockStartFrameIndex = Math.round(block.startTime * block.frameRate);
+  const localFrameIndex = sceneFrameIndex - blockStartFrameIndex;
+  return localFrameIndex >= 0 && localFrameIndex < block.frames.length ? localFrameIndex : null;
+}
+
+function getFrameIndexAtTime(sceneTime: number, sceneDuration: number, frameRate: number) {
+  return Math.min(Math.max(Math.round(sceneTime * frameRate), 0), Math.max(Math.ceil(sceneDuration * frameRate) - 1, 0));
 }
 
 function getCoverageBlocks(cachedBlocks: Set<number>, renderingBlocks: Set<number>, queuedBlocks: number[], blockDurationSeconds: number, sceneDuration: number): PrerenderCacheCoverage["blocks"] {
@@ -227,16 +240,8 @@ function evictMemoryBlocks(cache: Map<number, PrerenderCacheBlock>, sceneTime: n
   const keep = [...cache.entries()]
     .sort(([leftTime], [rightTime]) => Math.abs(leftTime - sceneTime) - Math.abs(rightTime - sceneTime))
     .slice(0, maxMemoryBlocks);
-  const keepTimes = new Set(keep.map(([time]) => time));
-  for (const [time, block] of cache) {
-    if (!keepTimes.has(time)) URL.revokeObjectURL(block.url);
-  }
   cache.clear();
   for (const [time, block] of keep) cache.set(time, block);
-}
-
-function revokeCachedBlocks(cache: Map<number, PrerenderCacheBlock>) {
-  for (const block of cache.values()) URL.revokeObjectURL(block.url);
 }
 
 function getPrerenderCacheKey(project: ProjectManifest, scene: Scene, blockDurationMs: number) {
@@ -244,6 +249,7 @@ function getPrerenderCacheKey(project: ProjectManifest, scene: Scene, blockDurat
     projectId: project.id,
     sceneId: scene.id,
     blockDurationMs,
+    decodedFrameFormat: "rgba-straight-opaque-aware-v3",
     compositions: scene.compositions.map((part) => ({
       id: part.id,
       filePath: part.filePath,
@@ -265,11 +271,29 @@ function getPrerenderCacheKey(project: ProjectManifest, scene: Scene, blockDurat
   });
 }
 
-function base64ToUint8Array(value: string) {
+function bgraBase64ToRgbaClamped(value: string) {
   const binary = atob(value);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  const bytes = new Uint8ClampedArray(binary.length);
+  let hasTransparency = false;
+  for (let index = 3; index < binary.length; index += 4) {
+    if (binary.charCodeAt(index) !== 255) {
+      hasTransparency = true;
+      break;
+    }
+  }
+  for (let index = 0; index < binary.length; index += 4) {
+    const alpha = binary.charCodeAt(index + 3);
+    bytes[index] = hasTransparency ? unpremultiplyColorChannel(binary.charCodeAt(index + 2), alpha) : binary.charCodeAt(index + 2);
+    bytes[index + 1] = hasTransparency ? unpremultiplyColorChannel(binary.charCodeAt(index + 1), alpha) : binary.charCodeAt(index + 1);
+    bytes[index + 2] = hasTransparency ? unpremultiplyColorChannel(binary.charCodeAt(index), alpha) : binary.charCodeAt(index);
+    bytes[index + 3] = alpha;
+  }
   return bytes;
+}
+
+function unpremultiplyColorChannel(value: number, alpha: number) {
+  if (alpha === 0 || alpha === 255) return value;
+  return Math.min(Math.round(value * 255 / alpha), 255);
 }
 
 function withPrerenderTimeout<T>(promise: Promise<T>, sceneTime: number) {
