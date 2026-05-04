@@ -82,7 +82,7 @@ export function RenderedMediaExportApp() {
   }, [request]);
 
   return (
-    <main className="h-screen w-screen overflow-hidden bg-black">
+    <main className="relative overflow-hidden bg-black" style={{ width: FRAME_WIDTH, height: FRAME_HEIGHT }}>
       <div className="absolute left-0 top-0 h-[1080px] w-[1920px] overflow-hidden bg-black">
         <ExportRenderErrorBoundary onError={(error) => rejectPendingFrame(pendingRequestRef, error)} resetKey={request ? `${request.scene.id}:${request.sceneTime}` : "empty"}>
           {request ? <ExportFramePreview key={request.scene.id} refs={{ cameraRef, dragSelectionBoxRef, frameViewportRef }} request={request} /> : <div className="h-full w-full bg-black" />}

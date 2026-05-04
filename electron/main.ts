@@ -46,10 +46,14 @@ const exportSlowFallbackTileHeights = [270, 135, 68, 34, 17] as const;
 const exportCaptureTileRetries = 3;
 const exportSlowFallbackTileValidationSamples = 2;
 const exportCaptureTileTimeoutMs = 4000;
+const exportSlowFallbackTilePadding = getIntegerEnv(
+  "CLIPPER_EXPORT_SLOW_TILE_PADDING",
+  128,
+  0,
+  frameHeight,
+);
 const exportSlowFallbackMaxDifferingPixelRatio = 0.0005;
 const exportSlowFallbackMaxAverageByteDelta = 0.025;
-const exportSlowFallbackFinalTierMaxAverageByteDelta = 0.01;
-const exportSlowFallbackFinalTierMaxByteDelta = 3;
 const exportProcessStopTimeoutMs = 1200;
 const forcedOomSegmentIndexes = parseForcedOomIndexes(
   process.env.CLIPPER_EXPORT_FORCE_OOM_SEGMENTS,
@@ -1106,14 +1110,13 @@ async function renderSceneToVideoSupervised(
       }
 
       const acceptedResult = shouldRerenderSlow
-        ? await rerenderSupervisedSegmentRemainderSlow(
+        ? await rerenderSupervisedSegmentSlow(
             project,
             scene,
             tempDir,
             frameRate,
             durationSeconds,
             segment,
-            fastResult,
             source,
             reportFrameProgress,
             exportId,
@@ -1295,76 +1298,6 @@ async function rerenderSupervisedSegmentSlow(
     `[clipper export] source=${source} segment=${segment.index} frames=${segment.startFrame}-${segment.endFrame - 1} path=slow-fallback result=written`,
   );
   return slowResult;
-}
-
-async function rerenderSupervisedSegmentRemainderSlow(
-  project: ProjectManifest,
-  scene: Scene,
-  tempDir: string,
-  frameRate: number,
-  durationSeconds: number,
-  segment: ExportFrameSegment,
-  fastResult: SupervisedSegmentResult,
-  source: ExportSource,
-  onFrameCaptured?: (frameIndex: number, method?: VideoExportMethod) => void,
-  exportId?: string,
-): Promise<SupervisedSegmentResult> {
-  const fastPrefixFrameCount = await countContiguousSupervisedSegmentFrames(
-    fastResult.outputPath,
-    segment,
-  );
-  const slowStartFrame = segment.startFrame + fastPrefixFrameCount;
-  console.log(
-    `[clipper export] source=${source} segment=${segment.index} fast-prefix-frames=${fastPrefixFrameCount} slow-frames=${segment.endFrame - slowStartFrame}`,
-  );
-  if (slowStartFrame < segment.endFrame) {
-    throwIfVideoRenderCancelled(exportId);
-    const slowSegment: ExportFrameSegment = {
-      ...segment,
-      startFrame: slowStartFrame,
-      startTime: slowStartFrame / frameRate,
-    };
-    const slowResult = await rerenderSupervisedSegmentSlow(
-      project,
-      scene,
-      tempDir,
-      frameRate,
-      durationSeconds,
-      slowSegment,
-      source,
-      onFrameCaptured,
-      exportId,
-    );
-    throwIfVideoRenderCancelled(exportId);
-    for (
-      let frameIndex = slowSegment.startFrame;
-      frameIndex < slowSegment.endFrame;
-      frameIndex += 1
-    ) {
-      const sourcePath = getSupervisedFrameOutputPath(
-        slowResult.outputPath,
-        frameIndex,
-      );
-      const targetPath = getSupervisedFrameOutputPath(
-        fastResult.outputPath,
-        frameIndex,
-      );
-      await fs.rename(sourcePath, targetPath).catch(async () => {
-        await fs.copyFile(sourcePath, targetPath);
-        await fs.rm(sourcePath, { force: true });
-      });
-    }
-    await removeSupervisedSegmentOutputs(
-      slowResult.outputPath,
-      slowSegment,
-    ).catch(() => undefined);
-  }
-
-  return {
-    outputPath: fastResult.outputPath,
-    nativeWarningDetected: true,
-    nativeWarningCount: fastResult.nativeWarningCount,
-  };
 }
 
 async function renderSupervisedSegmentChild(
@@ -2077,6 +2010,17 @@ function parseForcedOomIndexes(raw: string | undefined) {
   );
 }
 
+function getIntegerEnv(
+  name: string,
+  fallback: number,
+  min: number,
+  max: number,
+) {
+  const value = Number.parseInt(process.env[name] ?? "", 10);
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, value));
+}
+
 function withTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number,
@@ -2213,25 +2157,9 @@ async function captureStableSlowFallbackTile(
         segmentIndex,
       );
       if (warningCountAfter > warningCountBefore) {
-        if (!isFinalTileTier)
-          throw new ExportTileMemoryPressureError(
-            `Chromium reported tile memory pressure while capturing export frame ${frameIndex + 1} tile ${formatTileRange(tile)}.`,
-          );
-        console.warn(
-          `[clipper export] Segment ${segmentIndex + 1}: path=slow-fallback accepted final-tier tile ${formatTileRange(tile)} despite native memory warning.`,
+        throw new ExportTileMemoryPressureError(
+          `Chromium reported tile memory pressure while capturing export frame ${frameIndex + 1} tile ${formatTileRange(tile)}${isFinalTileTier ? " at final tile tier" : ""}.`,
         );
-      }
-      if (isFinalTileTier) {
-        const drift =
-          samples.length > 1
-            ? getBitmapDiffStats(samples[0], samples[1])
-            : null;
-        if (drift && !isAcceptableFinalTierReadbackDrift(drift)) {
-          console.warn(
-            `[clipper export] Segment ${segmentIndex + 1}: path=slow-fallback accepted final-tier tile ${formatTileRange(tile)} despite validation drift (${formatBitmapDiffStats(drift)}).`,
-          );
-        }
-        return samples[0];
       }
       for (
         let sampleIndex = 1;
@@ -2293,21 +2221,20 @@ async function applySlowFallbackExportCaptureViewport(
   tile: ExportCaptureTile,
 ) {
   const [currentWidth, currentHeight] = window.getContentSize();
-  if (currentWidth !== frameWidth || currentHeight !== tile.height)
-    window.setContentSize(frameWidth, tile.height, false);
+  if (currentWidth !== frameWidth || currentHeight !== frameHeight)
+    window.setContentSize(frameWidth, frameHeight, false);
   await withTimeout(
     window.webContents.executeJavaScript(
       `(() => {
-      const offset = ${JSON.stringify(tile.y)};
       document.documentElement.style.width = "${frameWidth}px";
-      document.documentElement.style.height = "${tile.height}px";
+      document.documentElement.style.height = "${frameHeight}px";
       document.documentElement.style.overflow = "hidden";
       document.body.style.width = "${frameWidth}px";
       document.body.style.height = "${frameHeight}px";
       document.body.style.overflow = "hidden";
       document.body.style.margin = "0";
       document.body.style.transformOrigin = "0 0";
-      document.body.style.transform = "translate3d(0, -" + offset + "px, 0)";
+      document.body.style.transform = "translate3d(0, 0, 0)";
       return true;
     })()`,
       true,
@@ -2338,22 +2265,31 @@ async function captureSlowFallbackTileBitmap(
   frameIndex: number,
   sceneTime: number,
 ) {
+  const captureTile = getPaddedSlowFallbackCaptureTile(tile);
   const image = await withTimeout(
-    window.webContents.capturePage({
-      x: 0,
-      y: 0,
-      width: tile.width,
-      height: tile.height,
-    }),
+    window.webContents.capturePage(captureTile),
     exportCaptureTileTimeoutMs,
-    `Timed out capturing slow fallback export frame ${frameIndex + 1} tile ${formatTileRange(tile)} at ${sceneTime.toFixed(3)}s.`,
+    `Timed out capturing slow fallback export frame ${frameIndex + 1} tile ${formatTileRange(tile)} capture ${formatTileRect(captureTile)} at ${sceneTime.toFixed(3)}s.`,
   );
-  return getBgraBitmap(
+  const captureBitmap = getBgraBitmap(
     image,
-    tile.width,
-    tile.height,
-    `slow fallback export frame ${frameIndex + 1} tile ${formatTileRange(tile)}`,
+    captureTile.width,
+    captureTile.height,
+    `slow fallback export frame ${frameIndex + 1} tile ${formatTileRange(tile)} capture ${formatTileRect(captureTile)}`,
   );
+  if (captureTile.x === tile.x && captureTile.y === tile.y && captureTile.width === tile.width && captureTile.height === tile.height)
+    return captureBitmap;
+  return cropBgraTile(captureBitmap, captureTile, tile);
+}
+
+function getPaddedSlowFallbackCaptureTile(tile: ExportCaptureTile) {
+  const padding = exportSlowFallbackTilePadding;
+  if (padding <= 0) return tile;
+  const x = Math.max(0, tile.x - padding);
+  const y = Math.max(0, tile.y - padding);
+  const right = Math.min(frameWidth, tile.x + tile.width + padding);
+  const bottom = Math.min(frameHeight, tile.y + tile.height + padding);
+  return { x, y, width: right - x, height: bottom - y };
 }
 
 function getSlowFallbackExportCaptureTiles(tileHeight: number) {
@@ -2394,13 +2330,10 @@ function validateMatchingExportBitmaps(
   first: Buffer,
   second: Buffer,
   message: string,
-  tolerateFinalTierDrift = false,
 ) {
   if (first.equals(second)) return;
 
   const diff = getBitmapDiffStats(first, second);
-  if (tolerateFinalTierDrift && isAcceptableFinalTierReadbackDrift(diff))
-    return;
   if (!isAcceptableCaptureReadbackDrift(diff)) {
     throw new ExportTileUnstableError(
       `${message} (${formatBitmapDiffStats(diff)}).`,
@@ -2439,21 +2372,16 @@ function isAcceptableCaptureReadbackDrift(
   );
 }
 
-function isAcceptableFinalTierReadbackDrift(
-  diff: ReturnType<typeof getBitmapDiffStats>,
-) {
-  return (
-    diff.averageByteDelta <= exportSlowFallbackFinalTierMaxAverageByteDelta &&
-    diff.maxDelta <= exportSlowFallbackFinalTierMaxByteDelta
-  );
-}
-
 function formatBitmapDiffStats(diff: ReturnType<typeof getBitmapDiffStats>) {
   return `${diff.differingBytes} differing bytes, ${(diff.differingPixelRatio * 100).toFixed(4)}% pixel-equivalent ratio, avg byte delta ${diff.averageByteDelta.toFixed(4)}, max byte delta ${diff.maxDelta}`;
 }
 
 function formatTileRange(tile: ExportCaptureTile) {
   return `${tile.y}-${tile.y + tile.height}`;
+}
+
+function formatTileRect(tile: ExportCaptureTile) {
+  return `${tile.x},${tile.y},${tile.width}x${tile.height}`;
 }
 
 class ExportTileUnstableError extends Error {
@@ -2532,6 +2460,31 @@ function stitchBgraTile(
       (row + 1) * sourceStride,
     );
   }
+}
+
+function cropBgraTile(
+  bitmap: Buffer,
+  sourceTile: ExportCaptureTile,
+  targetTile: ExportCaptureTile,
+) {
+  const bytesPerPixel = 4;
+  const sourceStride = sourceTile.width * bytesPerPixel;
+  const targetStride = targetTile.width * bytesPerPixel;
+  const sourceOffsetX = (targetTile.x - sourceTile.x) * bytesPerPixel;
+  const sourceOffsetY = targetTile.y - sourceTile.y;
+  const target = Buffer.allocUnsafe(targetTile.width * targetTile.height * bytesPerPixel);
+
+  for (let row = 0; row < targetTile.height; row += 1) {
+    const sourceStart = (sourceOffsetY + row) * sourceStride + sourceOffsetX;
+    bitmap.copy(
+      target,
+      row * targetStride,
+      sourceStart,
+      sourceStart + targetStride,
+    );
+  }
+
+  return target;
 }
 
 function getBgraBitmap(

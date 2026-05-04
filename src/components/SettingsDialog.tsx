@@ -4,7 +4,7 @@ import type { SettingsSection } from "../app/types";
 import { clamp } from "../core/math";
 import { Dialog, DialogContent } from "./ui/dialog";
 import { Input } from "./ui/input";
-import { Checkbox } from "./ui/checkbox";
+import { Switch } from "./ui/switch";
 
 export function SettingsDialog({ activeSection, open, rasterPreviewEnabled, scrubCommitThrottleMs, defaultNewMarkerDurationSeconds: markerDurationSeconds, timelineEndPaddingFraction, timelinePrecision, onActiveSectionChange, onOpenChange, onRasterPreviewEnabledChange, onScrubCommitThrottleMsChange, onDefaultNewMarkerDurationSecondsChange, onTimelineEndPaddingFractionChange, onTimelinePrecisionChange }: { activeSection: SettingsSection; open: boolean; rasterPreviewEnabled: boolean; scrubCommitThrottleMs: number; defaultNewMarkerDurationSeconds: number; timelineEndPaddingFraction: number; timelinePrecision: number; onActiveSectionChange: (section: SettingsSection) => void; onOpenChange: (open: boolean) => void; onRasterPreviewEnabledChange: (enabled: boolean) => void; onScrubCommitThrottleMsChange: (value: number) => void; onDefaultNewMarkerDurationSecondsChange: (value: number) => void; onTimelineEndPaddingFractionChange: (value: number) => void; onTimelinePrecisionChange: (value: number) => void }) {
   const navItems: Array<{ id: SettingsSection; label: string }> = [
@@ -68,12 +68,12 @@ export function SettingsDialog({ activeSection, open, rasterPreviewEnabled, scru
                     <strong className="text-sm text-white">Rasterized preview</strong>
                     <p className="text-xs leading-5 text-[#8f939d]">Render the preview through the hidden DOM rasterizer and draw the result into a fixed 1920x1080 canvas. This is experimental and may fall back to DOM preview if capture fails.</p>
                   </div>
-                  <label className="flex max-w-[520px] items-start gap-3 rounded-lg border border-[#363b47] bg-[#171920] p-3 text-xs font-bold text-[#dfe2ea]" htmlFor="raster-preview-toggle">
-                    <Checkbox id="raster-preview-toggle" checked={rasterPreviewEnabled} onCheckedChange={(checked) => onRasterPreviewEnabledChange(checked === true)} />
+                  <label className="flex max-w-[620px] items-start justify-between gap-5 text-xs font-bold text-[#dfe2ea]" htmlFor="raster-preview-toggle">
                     <span className="grid gap-1">
                       <span>Use rasterized preview for testing</span>
                       <span className="font-medium leading-5 text-[#8f939d]">Stored locally on this machine. Disable to force the original live DOM preview.</span>
                     </span>
+                    <Switch id="raster-preview-toggle" className="mt-0.5" checked={rasterPreviewEnabled} onCheckedChange={onRasterPreviewEnabledChange} />
                   </label>
                 </div>
               ) : activeSection === "timeline" ? (
