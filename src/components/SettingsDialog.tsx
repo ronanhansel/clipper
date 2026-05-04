@@ -1,12 +1,12 @@
 import { RotateCcw } from "lucide-react";
-import { appBarButtonBase, defaultNewMarkerDurationSeconds, defaultScrubCommitThrottleMs, defaultTimelineEndPaddingFraction, defaultTimelinePrecision } from "../app/config";
+import { appBarButtonBase, defaultNewMarkerDurationSeconds, defaultPrerenderBlockDurationMs, defaultScrubCommitThrottleMs, defaultTimelineEndPaddingFraction, defaultTimelinePrecision, defaultVideoExportTileHeight, maxPrerenderBlockDurationMs, maxVideoExportTileHeight, minPrerenderBlockDurationMs, minVideoExportTileHeight } from "../app/config";
 import type { SettingsSection } from "../app/types";
 import { clamp } from "../core/math";
 import { Dialog, DialogContent } from "./ui/dialog";
 import { Input } from "./ui/input";
 import { Switch } from "./ui/switch";
 
-export function SettingsDialog({ activeSection, open, rasterPreviewEnabled, scrubCommitThrottleMs, defaultNewMarkerDurationSeconds: markerDurationSeconds, timelineEndPaddingFraction, timelinePrecision, onActiveSectionChange, onOpenChange, onRasterPreviewEnabledChange, onScrubCommitThrottleMsChange, onDefaultNewMarkerDurationSecondsChange, onTimelineEndPaddingFractionChange, onTimelinePrecisionChange }: { activeSection: SettingsSection; open: boolean; rasterPreviewEnabled: boolean; scrubCommitThrottleMs: number; defaultNewMarkerDurationSeconds: number; timelineEndPaddingFraction: number; timelinePrecision: number; onActiveSectionChange: (section: SettingsSection) => void; onOpenChange: (open: boolean) => void; onRasterPreviewEnabledChange: (enabled: boolean) => void; onScrubCommitThrottleMsChange: (value: number) => void; onDefaultNewMarkerDurationSecondsChange: (value: number) => void; onTimelineEndPaddingFractionChange: (value: number) => void; onTimelinePrecisionChange: (value: number) => void }) {
+export function SettingsDialog({ activeSection, open, prerenderCacheEnabled, prerenderBlockDurationMs, scrubCommitThrottleMs, defaultNewMarkerDurationSeconds: markerDurationSeconds, timelineEndPaddingFraction, timelinePrecision, videoExportTileHeight, onActiveSectionChange, onOpenChange, onPrerenderCacheEnabledChange, onPrerenderBlockDurationMsChange, onClearAllPrerenderCaches, onScrubCommitThrottleMsChange, onDefaultNewMarkerDurationSecondsChange, onTimelineEndPaddingFractionChange, onTimelinePrecisionChange, onVideoExportTileHeightChange }: { activeSection: SettingsSection; open: boolean; prerenderCacheEnabled: boolean; prerenderBlockDurationMs: number; scrubCommitThrottleMs: number; defaultNewMarkerDurationSeconds: number; timelineEndPaddingFraction: number; timelinePrecision: number; videoExportTileHeight: number; onActiveSectionChange: (section: SettingsSection) => void; onOpenChange: (open: boolean) => void; onPrerenderCacheEnabledChange: (enabled: boolean) => void; onPrerenderBlockDurationMsChange: (value: number) => void; onClearAllPrerenderCaches: () => void; onScrubCommitThrottleMsChange: (value: number) => void; onDefaultNewMarkerDurationSecondsChange: (value: number) => void; onTimelineEndPaddingFractionChange: (value: number) => void; onTimelinePrecisionChange: (value: number) => void; onVideoExportTileHeightChange: (value: number) => void }) {
   const navItems: Array<{ id: SettingsSection; label: string }> = [
     { id: "playback", label: "Playback" },
     { id: "timeline", label: "Timeline" },
@@ -38,6 +38,18 @@ export function SettingsDialog({ activeSection, open, rasterPreviewEnabled, scru
     onTimelinePrecisionChange(Math.round(clamp(parsed, 1, 6)));
   }
 
+  function updateVideoExportTileHeight(value: string) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return;
+    onVideoExportTileHeightChange(Math.round(clamp(parsed, minVideoExportTileHeight, maxVideoExportTileHeight)));
+  }
+
+  function updatePrerenderBlockDuration(value: string) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return;
+    onPrerenderBlockDurationMsChange(Math.round(clamp(parsed, minPrerenderBlockDurationMs, maxPrerenderBlockDurationMs)));
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="h-[min(680px,calc(100vh-56px))] w-[min(980px,calc(100vw-42px))] gap-0 overflow-hidden p-0" showCloseButton={false}>
@@ -56,7 +68,7 @@ export function SettingsDialog({ activeSection, open, rasterPreviewEnabled, scru
             <header className="flex items-center justify-between border-b border-[#14161c] px-5">
               <div>
                 <h2 className="text-sm font-extrabold text-white">{navItems.find((item) => item.id === activeSection)?.label}</h2>
-                <p className="mt-1 text-xs text-[#8f939d]">{activeSection === "playback" ? "Control preview and playback diagnostics." : activeSection === "timeline" ? "Tune timeline interaction responsiveness." : "Settings for this section will be added as the editor grows."}</p>
+                <p className="mt-1 text-xs text-[#8f939d]">{activeSection === "playback" ? "Control preview and playback diagnostics." : activeSection === "timeline" ? "Tune timeline interaction responsiveness." : activeSection === "export" ? "Tune video rendering and capture behavior." : "Settings for this section will be added as the editor grows."}</p>
               </div>
               <button className={`${appBarButtonBase} px-3 py-1.5`} onClick={() => onOpenChange(false)}>Close</button>
             </header>
@@ -65,16 +77,38 @@ export function SettingsDialog({ activeSection, open, rasterPreviewEnabled, scru
               {activeSection === "playback" ? (
                 <div className="grid gap-4 rounded-xl border border-[#363b47] bg-[#1b1e26] p-4">
                   <div className="grid gap-1.5">
-                    <strong className="text-sm text-white">Rasterized preview</strong>
-                    <p className="text-xs leading-5 text-[#8f939d]">Render the preview through the hidden DOM rasterizer and draw the result into a fixed 1920x1080 canvas. This is experimental and may fall back to DOM preview if capture fails.</p>
+                    <strong className="text-sm text-white">Prerender cache</strong>
+                    <p className="text-xs leading-5 text-[#8f939d]">Controls whether Clipper prerenders frames around the playhead for smoother playback.</p>
                   </div>
-                  <label className="flex max-w-[620px] items-start justify-between gap-5 text-xs font-bold text-[#dfe2ea]" htmlFor="raster-preview-toggle">
+                  <label className="flex w-full items-start justify-between gap-5 text-xs font-bold text-[#dfe2ea]" htmlFor="prerender-cache-toggle">
                     <span className="grid gap-1">
-                      <span>Use rasterized preview for testing</span>
-                      <span className="font-medium leading-5 text-[#8f939d]">Stored locally on this machine. Disable to force the original live DOM preview.</span>
+                      <span>Prerender frames around the playhead</span>
+                      <span className="font-medium leading-5 text-[#8f939d]">Saves nearby preview frames in the project `.cache` folder for smoother playback.</span>
                     </span>
-                    <Switch id="raster-preview-toggle" className="mt-0.5" checked={rasterPreviewEnabled} onCheckedChange={onRasterPreviewEnabledChange} />
+                    <Switch id="prerender-cache-toggle" className="mt-0.5" checked={prerenderCacheEnabled} onCheckedChange={onPrerenderCacheEnabledChange} />
                   </label>
+                  <div className="h-px bg-[#363b47]" />
+                  <div className="grid gap-1.5">
+                    <strong className="text-sm text-white">Prerender block size</strong>
+                    <p className="text-xs leading-5 text-[#8f939d]">Controls the time span rendered per cache block. Changing this clears the existing prerender cache.</p>
+                  </div>
+                  <label className="grid max-w-[260px] gap-1.5 text-xs font-bold text-[#dfe2ea]" htmlFor="prerender-block-duration">
+                    Block duration (ms)
+                    <span className="relative">
+                      <Input id="prerender-block-duration" className="pr-10" min={minPrerenderBlockDurationMs} max={maxPrerenderBlockDurationMs} step={10} type="number" value={prerenderBlockDurationMs} onChange={(event) => updatePrerenderBlockDuration(event.target.value)} />
+                      <button aria-label={`Reset prerender block duration to ${defaultPrerenderBlockDurationMs}ms`} className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-md text-[#8f939d] transition hover:bg-[#252a34] hover:text-white" type="button" onClick={() => onPrerenderBlockDurationMsChange(defaultPrerenderBlockDurationMs)}>
+                        <RotateCcw size={14} />
+                      </button>
+                    </span>
+                  </label>
+                  <div className="h-px bg-[#363b47]" />
+                  <div className="flex w-full items-center justify-between gap-5">
+                    <span className="grid gap-1 text-xs">
+                      <strong className="text-sm text-white">All project caches</strong>
+                      <span className="font-medium leading-5 text-[#8f939d]">Delete prerender cache folders for every project in the local projects directory.</span>
+                    </span>
+                    <button className="rounded-[8px] border border-[#5b6270] bg-transparent px-3 py-2 text-xs font-extrabold text-[#f7f7f8] transition hover:border-[#dfe2ea] hover:bg-white/10" type="button" onClick={onClearAllPrerenderCaches}>Clear all caches</button>
+                  </div>
                 </div>
               ) : activeSection === "timeline" ? (
                 <div className="grid gap-4 rounded-xl border border-[#363b47] bg-[#1b1e26] p-4">
@@ -129,6 +163,22 @@ export function SettingsDialog({ activeSection, open, rasterPreviewEnabled, scru
                     <span className="relative">
                       <Input id="timeline-precision" className="pr-10" min={1} max={6} step={1} type="number" value={timelinePrecision} onChange={(event) => updateTimelinePrecision(event.target.value)} />
                       <button aria-label={`Reset timeline precision to ${defaultTimelinePrecision}`} className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-md text-[#8f939d] transition hover:bg-[#252a34] hover:text-white" type="button" onClick={() => onTimelinePrecisionChange(defaultTimelinePrecision)}>
+                        <RotateCcw size={14} />
+                      </button>
+                    </span>
+                  </label>
+                </div>
+              ) : activeSection === "export" ? (
+                <div className="grid gap-4 rounded-xl border border-[#363b47] bg-[#1b1e26] p-4">
+                  <div className="grid gap-1.5">
+                    <strong className="text-sm text-white">Capture tile height</strong>
+                    <p className="text-xs leading-5 text-[#8f939d]">Controls the fixed vertical tile height used when reading frames from the hidden export renderer. Lower values create more readbacks; higher values create fewer, larger readbacks.</p>
+                  </div>
+                  <label className="grid max-w-[260px] gap-1.5 text-xs font-bold text-[#dfe2ea]" htmlFor="video-export-tile-height">
+                    Tile height (px)
+                    <span className="relative">
+                      <Input id="video-export-tile-height" className="pr-10" min={minVideoExportTileHeight} max={maxVideoExportTileHeight} step={1} type="number" value={videoExportTileHeight} onChange={(event) => updateVideoExportTileHeight(event.target.value)} />
+                      <button aria-label={`Reset export tile height to ${defaultVideoExportTileHeight}px`} className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-md text-[#8f939d] transition hover:bg-[#252a34] hover:text-white" type="button" onClick={() => onVideoExportTileHeightChange(defaultVideoExportTileHeight)}>
                         <RotateCcw size={14} />
                       </button>
                     </span>

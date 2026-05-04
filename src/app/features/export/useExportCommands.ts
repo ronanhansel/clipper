@@ -5,9 +5,12 @@ import type { ProjectManifest } from "../../../core/types";
 
 type UseExportCommandsInput = {
   projectRef: MutableRefObject<ProjectManifest>;
+  manifestPath: string;
   selectedSceneId: string;
   projectExportFormat: ProjectExportFormat;
   exportIncludeSources: boolean;
+  reusePrerenderCacheForExport: boolean;
+  videoExportTileHeight: number;
   compositionSources: Record<string, string>;
   saveAllChanges: () => Promise<void>;
   setExportDialogOpen: (open: boolean) => void;
@@ -23,9 +26,12 @@ type UseExportCommandsInput = {
 
 export function useExportCommands({
   projectRef,
+  manifestPath,
   selectedSceneId,
   projectExportFormat,
   exportIncludeSources,
+  reusePrerenderCacheForExport,
+  videoExportTileHeight,
   compositionSources,
   saveAllChanges,
   setExportDialogOpen,
@@ -85,7 +91,7 @@ export function useExportCommands({
       setExportDialogOpen(false);
       setExportProgress(`Rendering ${totalFrames} frames`);
       setVideoExportProgress({ frame: 0, totalFrames, percent: 0, status: "Preparing export..." });
-      const exportPath = await exportService.renderVideoExport(exportId, defaultFileName, currentProject, currentScene, durationSeconds);
+      const exportPath = await exportService.renderVideoExport(exportId, defaultFileName, currentProject, manifestPath, currentScene, durationSeconds, videoExportTileHeight, reusePrerenderCacheForExport);
       if (!exportPath) return;
       notifyRenderedMedia(exportPath);
     } catch (error) {

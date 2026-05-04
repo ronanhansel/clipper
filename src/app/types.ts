@@ -16,7 +16,7 @@ export type TimelineNodeContextTarget = ({ time?: number; compositionLayerId?: s
   | { kind: "transition"; layerId: string }
 ));
 export type TimelineBlankContextTarget = { time: number; compositionLayerId?: string };
-export type VideoExportMethod = "fast-child" | "fast-in-process" | "slow-fallback";
+export type VideoExportMethod = "renderer";
 export type VideoExportProgress = { frame: number; totalFrames: number; percent: number; status: string; method?: VideoExportMethod };
 export type SettingsSection = "playback" | "timeline" | "export" | "advanced";
 export type MotionMarkerSelection = { partId: string; markerId: string };

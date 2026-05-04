@@ -1,6 +1,12 @@
 export { defaultZoomDuration, marqueeSelectionThresholdPx, minimumObjectResizeSide, minimumZoomDuration } from "../core/editorConstants";
 
 export const videoExportFrameRate = 30;
+export const defaultVideoExportTileHeight = 270;
+export const minVideoExportTileHeight = 1;
+export const maxVideoExportTileHeight = 1080;
+export const defaultPrerenderBlockDurationMs = 200;
+export const minPrerenderBlockDurationMs = 20;
+export const maxPrerenderBlockDurationMs = 1000;
 export const defaultFramePreviewScale = 0.5;
 export const selectorOffsetPx = 4;
 export const selectorHandleSizePx = 8;

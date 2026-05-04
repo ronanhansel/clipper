@@ -145,14 +145,28 @@ class ClipperHostService {
     return window.clipper.exportProjectDialog(defaultFileName);
   }
 
-  async renderVideoExport(exportId: string, defaultFileName: string, project: ProjectManifest, scene: SceneManifest, frameRate: number, durationSeconds: number) {
+  async renderVideoExport(exportId: string, defaultFileName: string, project: ProjectManifest, manifestPath: string, scene: SceneManifest, frameRate: number, durationSeconds: number, tileHeight: number, reusePrerenderCache: boolean) {
     if (!window.clipper?.renderVideoExport) throw new Error("Video export requires the Clipper desktop app. Restart the app if this was just updated.");
-    return window.clipper.renderVideoExport(exportId, defaultFileName, project, scene, frameRate, durationSeconds);
+    return window.clipper.renderVideoExport(exportId, defaultFileName, project, manifestPath, scene, frameRate, durationSeconds, tileHeight, reusePrerenderCache);
   }
 
-  async rasterizePreviewFrame(project: ProjectManifest, scene: SceneManifest, sceneTime: number, frameRate: number) {
-    if (!window.clipper?.rasterizePreviewFrame) throw new Error("Preview rasterization requires the Clipper desktop app. Restart the app if this was just updated.");
-    return window.clipper.rasterizePreviewFrame(project, scene, sceneTime, frameRate);
+  async prerenderFrame(project: ProjectManifest, manifestPath: string, scene: SceneManifest, sceneTime: number, sceneDuration: number, frameRate: number, tileHeight: number, blockDurationMs: number) {
+    if (!window.clipper?.prerenderFrame) throw new Error("Prerender cache requires the Clipper desktop app. Restart the app if this was just updated.");
+    return window.clipper.prerenderFrame(project, manifestPath, scene, sceneTime, sceneDuration, frameRate, tileHeight, blockDurationMs);
+  }
+
+  async prerenderVideoBlock(project: ProjectManifest, manifestPath: string, scene: SceneManifest, sceneTime: number, sceneDuration: number, frameRate: number, tileHeight: number, blockDurationMs: number) {
+    if (!window.clipper?.prerenderVideoBlock) throw new Error("Prerender video cache requires the Clipper desktop app. Restart the app if this was just updated.");
+    return window.clipper.prerenderVideoBlock(project, manifestPath, scene, sceneTime, sceneDuration, frameRate, tileHeight, blockDurationMs);
+  }
+
+  async clearPrerenderCache(manifestPath: string) {
+    await window.clipper?.clearPrerenderCache?.(manifestPath);
+  }
+
+  async clearAllPrerenderCaches() {
+    if (!window.clipper?.clearAllPrerenderCaches) throw new Error("Clearing all prerender caches requires the Clipper desktop app. Restart the app if this was just updated.");
+    return window.clipper.clearAllPrerenderCaches();
   }
 
   async exportMediaFile(defaultFileName: string, content: string) {

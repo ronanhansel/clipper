@@ -56,8 +56,12 @@ class ExportService {
   }
 
   prepareRenderedMediaExport({ project, sceneId }: PrepareRenderedMediaInput) {
-    const scene = getRenderedMediaScene(project, sceneId);
-    const durationSeconds = getRenderedMediaSceneDuration(project, scene);
+    const exportProject = serializeProjectForSave(project);
+    const scene = getRenderedMediaScene(exportProject, sceneId);
+    const durationSeconds = getRenderedMediaSceneDuration(exportProject, scene);
+    if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
+      throw new Error("Unable to render media because the selected timeline has invalid timing data.");
+    }
     const totalFrames = Math.max(1, Math.ceil(durationSeconds * videoExportFrameRate));
     const sceneName = getDisplayNameFromPath(scene.id);
     const defaultFileName = `${slugifyFileName(project.name)}-${slugifyFileName(sceneName)}.mp4`;
@@ -65,9 +69,9 @@ class ExportService {
     return { scene, durationSeconds, totalFrames, defaultFileName };
   }
 
-  renderVideoExport(exportId: string, defaultFileName: string, project: ProjectManifest, scene: ProjectManifest["scenes"][number], durationSeconds: number) {
+  renderVideoExport(exportId: string, defaultFileName: string, project: ProjectManifest, manifestPath: string, scene: ProjectManifest["scenes"][number], durationSeconds: number, tileHeight: number, reusePrerenderCache: boolean) {
     const exportProject = serializeProjectForSave(project);
-    return clipperHost.renderVideoExport(exportId, defaultFileName, exportProject, scene, videoExportFrameRate, durationSeconds);
+    return clipperHost.renderVideoExport(exportId, defaultFileName, exportProject, manifestPath, scene, videoExportFrameRate, durationSeconds, tileHeight, reusePrerenderCache);
   }
 
   cancelVideoExport(exportId: string) {

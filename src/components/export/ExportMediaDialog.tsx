@@ -7,7 +7,7 @@ import { Checkbox } from "../ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../ui/dialog";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 
-export function ExportMediaDialog({ activeTab, durationSeconds, exporting, includeSources, open, partCount, progress, projectFormat, projectName, resolution, sceneName, validationErrorCount, onIncludeSourcesChange, onMediaExport, onOpenChange, onProjectExport, onProjectFormatChange, onTabChange }: { activeTab: ExportDialogTab; durationSeconds: number; exporting: boolean; includeSources: boolean; open: boolean; partCount: number; progress: string | null; projectFormat: ProjectExportFormat; projectName: string; resolution: ProjectManifest["resolution"]; sceneName: string; validationErrorCount: number; onIncludeSourcesChange: (includeSources: boolean) => void; onMediaExport: () => void; onOpenChange: (open: boolean) => void; onProjectExport: () => void; onProjectFormatChange: (format: ProjectExportFormat) => void; onTabChange: (tab: ExportDialogTab) => void }) {
+export function ExportMediaDialog({ activeTab, durationSeconds, exporting, includeSources, open, partCount, progress, projectFormat, projectName, resolution, reusePrerenderCache, sceneName, onIncludeSourcesChange, onMediaExport, onOpenChange, onProjectExport, onProjectFormatChange, onReusePrerenderCacheChange, onTabChange }: { activeTab: ExportDialogTab; durationSeconds: number; exporting: boolean; includeSources: boolean; open: boolean; partCount: number; progress: string | null; projectFormat: ProjectExportFormat; projectName: string; resolution: ProjectManifest["resolution"]; reusePrerenderCache: boolean; sceneName: string; onIncludeSourcesChange: (includeSources: boolean) => void; onMediaExport: () => void; onOpenChange: (open: boolean) => void; onProjectExport: () => void; onProjectFormatChange: (format: ProjectExportFormat) => void; onReusePrerenderCacheChange: (reuse: boolean) => void; onTabChange: (tab: ExportDialogTab) => void }) {
   const tabButtonClass = (tab: ExportDialogTab) => `rounded-[8px] px-3 py-1.5 text-xs font-extrabold transition ${activeTab === tab ? "bg-[#202b37] text-white shadow-[inset_0_0_0_1px_#2d4052]" : "text-[#9b9da7] hover:bg-[#20232c] hover:text-white"}`;
 
   return (
@@ -32,13 +32,15 @@ export function ExportMediaDialog({ activeTab, durationSeconds, exporting, inclu
             <ExportStat label="Duration" value={formatTime(durationSeconds)} />
             <ExportStat label="Resolution" value={`${resolution.width} x ${resolution.height}`} />
             <ExportStat label={activeTab === "media" ? "Frame rate" : "Compositions"} value={activeTab === "media" ? `${videoExportFrameRate} fps` : `${partCount}`} />
-            <ExportStat label="Validation" value={validationErrorCount === 0 ? "Ready" : `${validationErrorCount} issue${validationErrorCount === 1 ? "" : "s"}`} warning={validationErrorCount > 0} />
+            <ExportStat label="Export format" value={activeTab === "media" ? "MP4 video" : formatProjectExportLabel(projectFormat)} />
           </div>
 
           {activeTab === "media" ? (
-            <div className="grid gap-3 rounded-xl border border-[#2d313b] bg-[#171920] p-3 text-sm text-[#dfe2ea]">
-              <strong className="text-white">Rendered MP4 video</strong>
-              <span className="text-xs leading-5 text-[#9b9da7]">Renders the full scene at 1920 x 1080 using the project timeline, motion, zoom, and pan markers. Export uses bundled ffmpeg so the MP4 works out of the box.</span>
+            <div>
+              <label className="flex w-fit items-center gap-2 text-xs font-semibold text-[#aeb3bf]">
+                <Checkbox checked={reusePrerenderCache} onCheckedChange={(checked) => onReusePrerenderCacheChange(checked === true)} />
+                <span>Use cached frames</span>
+              </label>
               {progress ? <span className="rounded-lg bg-[#10131a] px-3 py-2 text-xs font-bold text-[var(--clipper-accent-strong)]">{progress}</span> : null}
             </div>
           ) : (
@@ -87,6 +89,10 @@ function ExportStat({ label, value, warning = false }: { label: string; value: s
       <strong className={`mt-1 block truncate text-sm ${warning ? "text-[#ffbf66]" : "text-white"}`}>{value}</strong>
     </div>
   );
+}
+
+function formatProjectExportLabel(format: ProjectExportFormat) {
+  return format === "scene-json" ? "Scene JSON" : "Project package";
 }
 
 export function VideoExportOverlay({ cancelling, progress, onCancel }: { cancelling: boolean; progress: VideoExportProgress; onCancel: () => void }) {

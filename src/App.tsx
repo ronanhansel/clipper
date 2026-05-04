@@ -5,7 +5,7 @@ import { useFramePreviewZoomCommands } from "./app/features/editor-layout/useFra
 import { usePreviewScrollPersistence } from "./app/features/editor-layout/usePreviewScrollPersistence";
 import { useExportCommands } from "./app/features/export/useExportCommands";
 import { usePlaybackController } from "./app/features/playback/usePlaybackController";
-import { useRasterPreviewCache } from "./app/features/preview/useRasterPreviewCache";
+import { usePrerenderCache } from "./app/features/preview/usePrerenderCache";
 import { usePresentationController } from "./app/features/presentation/usePresentationController";
 import { isEditorTarget, useGlobalEditorShortcuts } from "./app/features/shortcuts/useGlobalEditorShortcuts";
 import { useSettingsShortcut } from "./app/features/shortcuts/useSettingsShortcut";
@@ -41,7 +41,7 @@ import { RightInspectorPanel } from "./app/shell/RightInspectorPanel";
 import { useEditorViewportState } from "./app/shell/useEditorViewportState";
 import { useEditorModeCommands } from "./app/shell/useEditorModeCommands";
 import { useProjectTitleRename } from "./app/shell/useProjectTitleRename";
-import { defaultScrubCommitThrottleMs, selectorHandleSizePx, selectorOffsetPx } from "./app/config";
+import { defaultPrerenderBlockDurationMs, defaultScrubCommitThrottleMs, defaultVideoExportTileHeight, maxPrerenderBlockDurationMs, maxVideoExportTileHeight, minPrerenderBlockDurationMs, minVideoExportTileHeight, selectorHandleSizePx, selectorOffsetPx } from "./app/config";
 import { useEditorStatePersistence } from "./app/project/useEditorStatePersistence";
 import { useEditorDerivedState } from "./app/state/editorDerivedState";
 import { getFramePreviewTimelineLayers } from "./app/state/framePreviewRenderModel";
@@ -168,7 +168,8 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
   const [trackerPickTranslationMarker, setTrackerPickTranslationMarker] = useState<{ partId: string; markerId: string } | null>(null);
   const [pointPickAdjustment, setPointPickAdjustment] = useState<{ layerId: string; control: AdjustmentEffectPointControl } | null>(null);
   const [findMediaRequest, setFindMediaRequest] = useState<FileManagerFindMediaDetail | null>(null);
-  const [rasterPreviewEnabled, setRasterPreviewEnabled] = useState(isRasterPreviewEnabledByDefault);
+  const [reusePrerenderCacheForExport, setReusePrerenderCacheForExportState] = useState(isPrerenderCacheReuseEnabledByDefault);
+  const [prerenderCacheEnabled, setPrerenderCacheEnabledState] = useState(isPrerenderCacheEnabledByDefault);
   const {
     mode, setMode,
     timelineMode, setTimelineMode,
@@ -247,6 +248,13 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
   const numberInputScrubPausedPlaybackRef = useRef(false);
   const playbackTimeLabelRef = useRef<HTMLSpanElement | null>(null);
   const playbackPlayheadRef = useRef<HTMLDivElement | null>(null);
+  const [videoExportTileHeight, setVideoExportTileHeightState] = useState(
+    getInitialVideoExportTileHeight,
+  );
+  const [prerenderBlockDurationMs, setPrerenderBlockDurationMsState] = useState(
+    getInitialPrerenderBlockDurationMs,
+  );
+  const [prerenderCacheResetToken, setPrerenderCacheResetToken] = useState(0);
   const playbackBorderScrubberRef = useRef<HTMLInputElement | null>(null);
   const pendingScrubTimeRef = useRef<number | null>(null);
   const scrubFrameRef = useRef(0);
@@ -396,6 +404,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     compositionSourcesSnapshot,
     previewTime,
     previewParts,
+    renderableScene,
     transitionPreviewParts,
     scene,
     sceneDurationSeconds,
@@ -454,6 +463,20 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
   const visibleSceneAdjustmentLayers = useMemo(() => getExecutableAdjustmentLayers(scene.adjustmentLayers, timelineLayers), [scene.adjustmentLayers, timelineLayers]);
   const visibleSceneTransitionLayers = useMemo(() => getExecutableTransitionLayers(scene.transitionLayers, timelineLayers), [scene.transitionLayers, timelineLayers]);
   const activeCompositionHidden = Boolean(activeTimelinePart && hiddenCompositionLayerIds.has(activeTimelinePart.layerId ?? "comp"));
+  const hasPreviewComposition = hasActiveComposition;
+  const prerenderCache = usePrerenderCache({
+    blockDurationMs: prerenderBlockDurationMs,
+    cacheResetToken: prerenderCacheResetToken,
+    enabled: prerenderCacheEnabled && mode === "preview" && !composeMode,
+    hasActiveComposition: hasPreviewComposition,
+    isPlaying,
+    manifestPath: activeProjectManifestPath,
+    project,
+    scene: renderableScene,
+    sceneDuration: sceneDurationSeconds,
+    sceneTime: currentSceneTime,
+    tileHeight: videoExportTileHeight,
+  });
   const {
     formatPlaybackTimeLabel,
     jumpToEnd,
@@ -475,6 +498,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     currentSceneTimeRef,
     editorStore,
     frameViewportRef,
+    hasCachedPreviewFrameAtTime: prerenderCache.hasFrameAtTime,
     isPlaying,
     isPlayingRef,
     numberInputScrubPausedPlaybackRef,
@@ -490,6 +514,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     setIsPlaying,
     setPlaybackClock,
     setRenderCurrentSceneTime,
+    useCachedPreviewPlayback: prerenderCacheEnabled && mode === "preview" && !composeMode,
     timeline,
     timelineLayers,
     timelineEndPaddingFraction,
@@ -526,11 +551,44 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     const object = getPartFrameObject(part, selected.id);
     return object ? selectionObjectFromFrameObject(getFrameObjectWithPreviewBounds(object, previewTime, part.duration)) : selected;
   }) ?? [], [part, previewTime, selectionPayload]);
+  function setVideoExportTileHeight(value: number) {
+    const nextValue = clampVideoExportTileHeight(value);
+    setVideoExportTileHeightState(nextValue);
+    window.localStorage.setItem("clipper:video-export-tile-height", String(nextValue));
+  }
+  function setReusePrerenderCacheForExport(reuse: boolean) {
+    setReusePrerenderCacheForExportState(reuse);
+    window.localStorage.setItem("clipper:reuse-prerender-cache-export", reuse ? "1" : "0");
+  }
+  function setPrerenderCacheEnabled(enabled: boolean) {
+    setPrerenderCacheEnabledState(enabled);
+    window.localStorage.setItem("clipper:prerender-cache", enabled ? "1" : "0");
+  }
+  function setPrerenderBlockDurationMs(value: number) {
+    const nextValue = clampPrerenderBlockDurationMs(value);
+    setPrerenderBlockDurationMsState(nextValue);
+    window.localStorage.setItem("clipper:prerender-block-duration-ms", String(nextValue));
+    setPrerenderCacheResetToken((token) => token + 1);
+    void clipperHost.clearPrerenderCache(activeProjectManifestPath);
+  }
+  async function clearAllPrerenderCaches() {
+    try {
+      const result = await clipperHost.clearAllPrerenderCaches();
+      await clipperHost.clearPrerenderCache(activeProjectManifestPath);
+      setPrerenderCacheResetToken((token) => token + 1);
+      toast.success(`Cleared prerender caches for ${result.clearedCount} project${result.clearedCount === 1 ? "" : "s"}.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to clear prerender caches.");
+    }
+  }
   const { exportProject, exportRenderedMedia, stopVideoExport } = useExportCommands({
     projectRef,
+    manifestPath: activeProjectManifestPath,
     selectedSceneId,
     projectExportFormat,
     exportIncludeSources,
+    reusePrerenderCacheForExport,
+    videoExportTileHeight,
     compositionSources,
     saveAllChanges,
     setExportDialogOpen,
@@ -1311,16 +1369,6 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     showCompositionApiStatus: Boolean(activeEditorTab.isComposition),
   } : null;
   const editorPaneTabs: EditorPaneTab[] = editorTabs.map((tab) => ({ id: tab.id, filePath: tab.filePath, unsupportedReason: tab.unsupportedReason, isPinned: tab.isPinned }));
-  const hasPreviewComposition = hasActiveComposition;
-  const rasterPreview = useRasterPreviewCache({
-    enabled: rasterPreviewEnabled && mode === "preview" && !composeMode,
-    hasActiveComposition: hasPreviewComposition,
-    isPlaying,
-    project,
-    scene,
-    sceneDuration: sceneDurationSeconds,
-    sceneTime: currentSceneTime,
-  });
   const activeEditorViewportState = activeEditorDocument ? project.editorState?.editor?.[activeEditorDocument.id] ?? project.editorState?.code?.[activeEditorDocument.id] : undefined;
 
   useEffect(() => {
@@ -1473,15 +1521,18 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
 
         <CenterPreviewPane
           blankFrameViewportStyle={blankFrameViewportStyle}
+          currentSceneTimeRef={currentSceneTimeRef}
           editorPaneProps={activeEditorDocument ? { document: activeEditorDocument, tabs: editorPaneTabs, viewportState: activeEditorViewportState, projectDirectory, onCloseTab: closeEditorTab, onRestoreClosedTab: restoreClosedEditorTab, onSaveAll: saveAllChanges, onSelectTab: selectEditorTab, onPinTab: pinEditorTab, onSourceChange: (source) => {
             pinEditorTab(activeEditorDocument.id);
             return activeEditorComposition ? updateCompositionFromSource(activeEditorComposition, source, { history: false, syncSource: false }).then(() => updateEditorTab(activeEditorDocument.id, { source })) : clipperHost.writeTextFile(activeEditorDocument.filePath, source).then(() => updateEditorTab(activeEditorDocument.id, { source }));
           }, onViewportStateChange: updateEditorViewportState } : null}
           framePreviewProps={hasPreviewComposition ? { cameraRef, dragBox, dragSelectionBoxRef, framePickPoint: activeFramePickPoint, focusPicking: isPickingZoomFocus || isPickingTranslationPosition || Boolean(pointPickAdjustment), trackerPicking: Boolean(trackerPickTranslationMarker), canSelectObjects: canSelectFrameObjects && !isPlaying, cameraTransform: cameraPreviewTransform, frameViewportRef, frameScale: framePreviewScale, isPlaying, part, partStart: activeTimelinePart?.start ?? 0, previewParts: composeMode ? [] : previewParts, transitionPreviewParts: composeMode ? null : transitionPreviewParts, adjustmentLayers: composeMode ? [] : visibleSceneAdjustmentLayers, transitionLayers: composeMode ? [] : visibleSceneTransitionLayers, playbackClock, previewTime, sceneTime: currentSceneTime, timelineMode, motionLayers: composeMode ? [] : motionLayers, hiddenMotionLayerIds: composeMode ? new Set<string>() : hiddenMotionLayerIds, pickingTranslationPosition: isPickingTranslationPosition || Boolean(pointPickAdjustment), pickingZoomFocus: isPickingZoomFocus || Boolean(pointPickAdjustment), compHidden: composeMode ? false : activeCompositionHidden, selectedObjects: previewSelectionObjects, marqueeDragging, editingTextObjectId: isPlaying ? null : editingTextObjectId, onFramePointerCancel, onFramePointerDown, onFramePointerDownCapture, onFramePointerMove, onFramePointerUp, onObjectPointerDown: startObjectDrag, onObjectResizePointerDown: startObjectResize, onTextEditCommit: updateTextObjectContent, onTextObjectDoubleClick: startTextObjectEdit, onTrackerTargetPick: commitTranslationTrackerPick } : null}
           hasActiveComposition={hasPreviewComposition}
+          getPrerenderCacheBlockAtTime={prerenderCache.getBlockAtTime}
+          isPlaying={isPlaying}
           mode={mode}
-          rasterPreviewEnabled={rasterPreviewEnabled && !composeMode}
-          rasterPreviewFrame={rasterPreview.frame}
+          prerenderCacheEnabled={prerenderCacheEnabled && !composeMode}
+          prerenderCacheBlock={prerenderCache.block}
           previewKey={part.id}
           stageRef={centerPreviewScrollRef}
           onModeChange={updateMode}
@@ -1566,7 +1617,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
         timelineEndPaddingFraction,
         timelinePrecision,
         scrubSnapEnabled,
-        rasterPreviewCoverage: rasterPreviewEnabled && !composeMode ? rasterPreview.coverage : null,
+        prerenderCacheCoverage: prerenderCacheEnabled && !composeMode ? prerenderCache.coverage : null,
         sceneDuration: sceneDurationSeconds,
         selectedPartId,
         selectedParts,
@@ -1647,19 +1698,21 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
       exportProgress={exportProgress}
       isExporting={isExporting}
       partCount={scene.compositions.length}
+      prerenderCacheEnabled={prerenderCacheEnabled}
+      prerenderBlockDurationMs={prerenderBlockDurationMs}
       projectExportFormat={projectExportFormat}
       projectName={project.name}
       resolution={project.resolution}
+      reusePrerenderCacheForExport={reusePrerenderCacheForExport}
       sceneDurationSeconds={sceneDurationSeconds}
       sceneName={getDisplayNameFromPath(selectedSceneId ?? "")}
       scrubCommitThrottleMs={scrubCommitThrottleMs}
       settingsOpen={settingsOpen}
       settingsSection={settingsSection}
-      rasterPreviewEnabled={rasterPreviewEnabled}
       timelineEndPaddingFraction={timelineEndPaddingFraction}
       timelinePrecision={timelinePrecision}
-      validationErrorCount={validationErrors.length}
       videoExportCancelling={videoExportCancelling}
+      videoExportTileHeight={videoExportTileHeight}
       videoExportProgress={videoExportProgress}
       onAppContextMenuClose={() => setAppContextMenu(null)}
       onDefaultNewMarkerDurationSecondsChange={setDefaultNewMarkerDurationSeconds}
@@ -1668,16 +1721,17 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
       onExportIncludeSourcesChange={setExportIncludeSources}
       onMediaExport={() => void exportRenderedMedia()}
       onProjectExport={() => void exportProject()}
+      onPrerenderCacheEnabledChange={setPrerenderCacheEnabled}
+      onPrerenderBlockDurationMsChange={setPrerenderBlockDurationMs}
+      onClearAllPrerenderCaches={() => void clearAllPrerenderCaches()}
       onProjectExportFormatChange={setProjectExportFormat}
-      onRasterPreviewEnabledChange={(enabled) => {
-        setRasterPreviewEnabled(enabled);
-        window.localStorage.setItem("clipper:raster-preview", enabled ? "1" : "0");
-      }}
+      onReusePrerenderCacheForExportChange={setReusePrerenderCacheForExport}
       onScrubCommitThrottleMsChange={setScrubCommitThrottleMs}
       onSettingsOpenChange={setSettingsOpen}
       onSettingsSectionChange={setSettingsSection}
       onTimelineEndPaddingFractionChange={setTimelineEndPaddingFraction}
       onTimelinePrecisionChange={setTimelinePrecision}
+      onVideoExportTileHeightChange={setVideoExportTileHeight}
       onVideoExportCancel={() => void stopVideoExport()}
     />
     <FindMediaDialog findMediaRequest={findMediaRequest} onFindCompositionMedia={fileManagerActions.findCompositionMedia} onFindMediaRequestChange={setFindMediaRequest} />
@@ -1685,11 +1739,49 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
   );
 }
 
-function isRasterPreviewEnabledByDefault() {
+function isPrerenderCacheReuseEnabledByDefault() {
   if (typeof window === "undefined") return true;
-  return window.localStorage.getItem("clipper:raster-preview") !== "0";
+  return window.localStorage.getItem("clipper:reuse-prerender-cache-export") !== "0";
 }
 
+function isPrerenderCacheEnabledByDefault() {
+  if (typeof window === "undefined") return true;
+  return window.localStorage.getItem("clipper:prerender-cache") !== "0";
+}
+
+function getInitialVideoExportTileHeight() {
+  if (typeof window === "undefined") return defaultVideoExportTileHeight;
+  const storedValue = Number.parseInt(
+    window.localStorage.getItem("clipper:video-export-tile-height") ?? "",
+    10,
+  );
+  return clampVideoExportTileHeight(storedValue);
+}
+
+function getInitialPrerenderBlockDurationMs() {
+  if (typeof window === "undefined") return defaultPrerenderBlockDurationMs;
+  const storedValue = Number.parseInt(
+    window.localStorage.getItem("clipper:prerender-block-duration-ms") ?? "",
+    10,
+  );
+  return clampPrerenderBlockDurationMs(storedValue);
+}
+
+function clampVideoExportTileHeight(value: number) {
+  if (!Number.isFinite(value)) return defaultVideoExportTileHeight;
+  return Math.min(
+    Math.max(Math.round(value), minVideoExportTileHeight),
+    maxVideoExportTileHeight,
+  );
+}
+
+function clampPrerenderBlockDurationMs(value: number) {
+  if (!Number.isFinite(value)) return defaultPrerenderBlockDurationMs;
+  return Math.min(
+    Math.max(Math.round(value), minPrerenderBlockDurationMs),
+    maxPrerenderBlockDurationMs,
+  );
+}
 
 function isInspectorTarget(target: HTMLElement | null) {
   return Boolean(target?.closest("[data-inspector-panel]"));

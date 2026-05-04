@@ -1,6 +1,6 @@
 import type { MouseEvent as ReactMouseEvent, RefObject } from "react";
 import type { AdjustmentLayerSelection, CompositionSelection, MotionMarkerSelection, TimelineBlankContextTarget, TimelineNodeContextTarget } from "../../app/types";
-import type { RasterPreviewCoverage } from "../../app/features/preview/useRasterPreviewCache";
+import type { PrerenderCacheCoverage } from "../../app/features/preview/usePrerenderCache";
 import type { TimelineMarkerMove, TimelineMarkerResize } from "../../core/timeline";
 import type { AdjustmentEffectId, AdjustmentLayer, BackgroundLayer, FrameObject, MotionEffectId, MotionEffectKind, MotionMarker, MotionTrack, Part, TimelineLayerState, TimelineMode, TimelineMotionLayerKind, TimelinePart, TimelineViewportState, TransitionEffectId, TransitionLayer } from "../../core/types";
 
@@ -30,7 +30,7 @@ export type TimelinePanelProps = {
   timelineEndPaddingFraction: number;
   timelinePrecision: number;
   scrubSnapEnabled: boolean;
-  rasterPreviewCoverage?: RasterPreviewCoverage | null;
+  prerenderCacheCoverage?: PrerenderCacheCoverage | null;
   onScrub: (time: number) => void;
   onScrubStart: () => void;
   onScrubEnd: () => void;

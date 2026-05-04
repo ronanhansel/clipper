@@ -281,8 +281,12 @@ function getProjectTimelines(project: ProjectManifest): TimelineDocument[] {
       filePath: rest.filePath ?? `timelines/${rest.id}.timeline.json`,
       clips: rest.clips.map((clip: any) => {
         const { name: _clipName, ...clipRest } = clip;
+        const start = typeof clipRest.start === "number" && Number.isFinite(clipRest.start) ? roundTwo(Math.max(clipRest.start, 0)) : undefined;
+        const duration = typeof clipRest.duration === "number" && Number.isFinite(clipRest.duration) ? roundTwo(Math.max(clipRest.duration, 0.1)) : undefined;
         return {
           ...clipRest,
+          start,
+          duration,
           motionMarkers: [],
         };
       }),

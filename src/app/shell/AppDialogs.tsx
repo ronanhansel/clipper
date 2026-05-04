@@ -14,10 +14,12 @@ type AppDialogsProps = {
   exportProgress: string | null;
   isExporting: boolean;
   partCount: number;
+  prerenderCacheEnabled: boolean;
+  prerenderBlockDurationMs: number;
   projectExportFormat: ProjectExportFormat;
   projectName: string;
   resolution: ProjectManifest["resolution"];
-  rasterPreviewEnabled: boolean;
+  reusePrerenderCacheForExport: boolean;
   sceneDurationSeconds: number;
   sceneName: string;
   scrubCommitThrottleMs: number;
@@ -25,8 +27,8 @@ type AppDialogsProps = {
   settingsSection: SettingsSection;
   timelineEndPaddingFraction: number;
   timelinePrecision: number; // v-- add here
-  validationErrorCount: number;
   videoExportCancelling: boolean;
+  videoExportTileHeight: number;
   videoExportProgress: VideoExportProgress | null;
   onAppContextMenuClose: () => void;
   onDefaultNewMarkerDurationSecondsChange: (value: number) => void;
@@ -35,17 +37,21 @@ type AppDialogsProps = {
   onExportIncludeSourcesChange: (includeSources: boolean) => void;
   onMediaExport: () => void;
   onProjectExport: () => void;
+  onPrerenderCacheEnabledChange: (enabled: boolean) => void;
+  onPrerenderBlockDurationMsChange: (value: number) => void;
+  onClearAllPrerenderCaches: () => void;
   onProjectExportFormatChange: (format: ProjectExportFormat) => void;
-  onRasterPreviewEnabledChange: (enabled: boolean) => void;
+  onReusePrerenderCacheForExportChange: (reuse: boolean) => void;
   onScrubCommitThrottleMsChange: (value: number) => void;
   onSettingsOpenChange: (open: boolean) => void;
   onSettingsSectionChange: (section: SettingsSection) => void;
   onTimelineEndPaddingFractionChange: (value: number) => void;
   onTimelinePrecisionChange: (value: number) => void;
+  onVideoExportTileHeightChange: (value: number) => void;
   onVideoExportCancel: () => void;
 };
 
-export function AppDialogs({ appContextMenu, defaultNewMarkerDurationSeconds, exportDialogOpen, exportDialogTab, exportIncludeSources, exportProgress, isExporting, partCount, projectExportFormat, projectName, resolution, rasterPreviewEnabled, sceneDurationSeconds, sceneName, scrubCommitThrottleMs, settingsOpen, settingsSection, timelineEndPaddingFraction, timelinePrecision, validationErrorCount, videoExportCancelling, videoExportProgress, onAppContextMenuClose, onDefaultNewMarkerDurationSecondsChange, onExportDialogOpenChange, onExportDialogTabChange, onExportIncludeSourcesChange, onMediaExport, onProjectExport, onProjectExportFormatChange, onRasterPreviewEnabledChange, onScrubCommitThrottleMsChange, onSettingsOpenChange, onSettingsSectionChange, onTimelineEndPaddingFractionChange, onTimelinePrecisionChange, onVideoExportCancel }: AppDialogsProps) {
+export function AppDialogs({ appContextMenu, defaultNewMarkerDurationSeconds, exportDialogOpen, exportDialogTab, exportIncludeSources, exportProgress, isExporting, partCount, prerenderCacheEnabled, prerenderBlockDurationMs, projectExportFormat, projectName, resolution, reusePrerenderCacheForExport, sceneDurationSeconds, sceneName, scrubCommitThrottleMs, settingsOpen, settingsSection, timelineEndPaddingFraction, timelinePrecision, videoExportCancelling, videoExportTileHeight, videoExportProgress, onAppContextMenuClose, onDefaultNewMarkerDurationSecondsChange, onExportDialogOpenChange, onExportDialogTabChange, onExportIncludeSourcesChange, onMediaExport, onProjectExport, onPrerenderCacheEnabledChange, onPrerenderBlockDurationMsChange, onClearAllPrerenderCaches, onProjectExportFormatChange, onReusePrerenderCacheForExportChange, onScrubCommitThrottleMsChange, onSettingsOpenChange, onSettingsSectionChange, onTimelineEndPaddingFractionChange, onTimelinePrecisionChange, onVideoExportTileHeightChange, onVideoExportCancel }: AppDialogsProps) {
   return (
     <>
       <ExportMediaDialog
@@ -58,12 +64,13 @@ export function AppDialogs({ appContextMenu, defaultNewMarkerDurationSeconds, ex
         projectFormat={projectExportFormat}
         projectName={projectName}
         resolution={resolution}
+        reusePrerenderCache={reusePrerenderCacheForExport}
         sceneName={sceneName}
-        validationErrorCount={validationErrorCount}
         exporting={isExporting}
         onProjectExport={onProjectExport}
         onMediaExport={onMediaExport}
         onProjectFormatChange={onProjectExportFormatChange}
+        onReusePrerenderCacheChange={onReusePrerenderCacheForExportChange}
         onIncludeSourcesChange={onExportIncludeSourcesChange}
         onOpenChange={onExportDialogOpenChange}
         onTabChange={onExportDialogTabChange}
@@ -71,18 +78,23 @@ export function AppDialogs({ appContextMenu, defaultNewMarkerDurationSeconds, ex
       <SettingsDialog
         activeSection={settingsSection}
         open={settingsOpen}
-        rasterPreviewEnabled={rasterPreviewEnabled}
+        prerenderCacheEnabled={prerenderCacheEnabled}
+        prerenderBlockDurationMs={prerenderBlockDurationMs}
         scrubCommitThrottleMs={scrubCommitThrottleMs}
         defaultNewMarkerDurationSeconds={defaultNewMarkerDurationSeconds}
         timelineEndPaddingFraction={timelineEndPaddingFraction}
         timelinePrecision={timelinePrecision}
+        videoExportTileHeight={videoExportTileHeight}
         onActiveSectionChange={onSettingsSectionChange}
         onOpenChange={onSettingsOpenChange}
-        onRasterPreviewEnabledChange={onRasterPreviewEnabledChange}
+        onPrerenderCacheEnabledChange={onPrerenderCacheEnabledChange}
+        onPrerenderBlockDurationMsChange={onPrerenderBlockDurationMsChange}
+        onClearAllPrerenderCaches={onClearAllPrerenderCaches}
         onScrubCommitThrottleMsChange={onScrubCommitThrottleMsChange}
         onDefaultNewMarkerDurationSecondsChange={onDefaultNewMarkerDurationSecondsChange}
         onTimelineEndPaddingFractionChange={onTimelineEndPaddingFractionChange}
         onTimelinePrecisionChange={onTimelinePrecisionChange}
+        onVideoExportTileHeightChange={onVideoExportTileHeightChange}
       />
       {videoExportProgress ? <VideoExportOverlay cancelling={videoExportCancelling} progress={videoExportProgress} onCancel={onVideoExportCancel} /> : null}
       <AppContextMenu menu={appContextMenu} onClose={onAppContextMenuClose} />

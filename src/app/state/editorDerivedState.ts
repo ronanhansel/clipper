@@ -169,6 +169,7 @@ export function useEditorDerivedState({
     compositionSourcesSnapshot,
     previewTime,
     previewParts,
+    renderableScene,
     transitionPreviewParts,
     scene,
     sceneDurationSeconds,
