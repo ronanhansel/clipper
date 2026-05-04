@@ -84,4 +84,22 @@ describe("frame preview render model", () => {
     expect(model.previewTime).toBe(0.5);
     expect(model.previewParts.map((item) => [item.part.id, item.previewTime])).toEqual([["a", 0.5]]);
   });
+
+  it("keeps intentional timeline gaps renderable with the blank fallback", () => {
+    const scene: Scene = {
+      id: "scene",
+      compositions: [
+        { id: "a", filePath: "a.ts", start: 0, duration: 1, frame, background, objects: [], snapshot: [], motionMarkers: [] },
+        { id: "b", filePath: "b.ts", start: 3, duration: 1, frame, background, objects: [], snapshot: [], motionMarkers: [] },
+      ],
+    };
+
+    const model = deriveFramePreviewRenderModel({ blankPart, scene, sceneTime: 2, timelineMode: "composition" });
+
+    expect(model.sceneDurationSeconds).toBe(4);
+    expect(model.activeTimelinePart).toBeNull();
+    expect(model.activeComposition).toBeNull();
+    expect(model.part.id).toBe("blank");
+    expect(model.previewParts).toEqual([]);
+  });
 });

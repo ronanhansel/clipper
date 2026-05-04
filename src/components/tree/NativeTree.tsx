@@ -1,5 +1,4 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type CSSProperties, type ForwardedRef, type MouseEvent, type ReactNode } from "react";
-import { flushSync } from "react-dom";
 
 const ROOT_ID = "__NATIVE_TREE_ROOT__";
 
@@ -136,10 +135,8 @@ export const NativeTree = forwardRef(function NativeTree<T>(props: NativeTreePro
   selectedIdsRef.current = selectedIds;
 
   const finishDrag = useCallback(() => {
-    flushSync(() => {
-      setDropTarget(null);
-      setDragState(null);
-    });
+    setDropTarget(null);
+    setDragState(null);
   }, []);
 
   useEffect(() => {

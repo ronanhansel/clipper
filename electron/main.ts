@@ -28,12 +28,17 @@ const exportSlowFallbackTileValidationSamples = 2;
 const exportCaptureTileTimeoutMs = 4000;
 const exportSlowFallbackMaxDifferingPixelRatio = 0.0005;
 const exportSlowFallbackMaxAverageByteDelta = 0.025;
+const exportProcessStopTimeoutMs = 1200;
 const forcedOomSegmentIndexes = parseForcedOomIndexes(process.env.CLIPPER_EXPORT_FORCE_OOM_SEGMENTS);
 const forcedOomFrameIndexes = parseForcedOomIndexes(process.env.CLIPPER_EXPORT_FORCE_OOM_FRAME);
 let hardwareEncoderSupport: Set<string> | null = null;
 let systemFontFamilies: string[] | null = null;
 
-configureChromiumForStableExports();
+if (isVideoRenderProcess()) configureChromiumForStableExports();
+
+function isVideoRenderProcess() {
+  return process.argv.includes("--render-video-child-segment") || process.argv.includes("--render-video-supervised") || process.argv.includes("--render-video");
+}
 
 function configureChromiumForStableExports() {
   app.commandLine.appendSwitch("disable-backgrounding-occluded-windows");
@@ -766,7 +771,7 @@ async function renderSceneToVideoSupervised(project: ProjectManifest, scene: Sce
         const frameIndex = segment.startFrame + offset;
         const frameBuffer = frameBuffers[offset];
         if (pendingFrameWrite) await pendingFrameWrite;
-        pendingFrameWrite = writeProcessInput(ffmpeg, frameBuffer);
+        pendingFrameWrite = writeProcessInput(ffmpeg, frameBuffer, exportId);
         reportFrameProgress(frameIndex, shouldRerenderSlow ? "slow-fallback" : activeMethod);
       }
       await removeSupervisedSegmentOutputs(acceptedResult.outputPath, segment).catch(() => undefined);
@@ -782,7 +787,7 @@ async function renderSceneToVideoSupervised(project: ProjectManifest, scene: Sce
   } catch (error) {
     if (!ffmpeg.killed) ffmpeg.kill("SIGTERM");
     if (exportId) cancelledVideoRenders.delete(exportId);
-    await closePromise.catch(() => undefined);
+    await waitForProcessClose(closePromise, () => ffmpeg.kill("SIGKILL"), exportProcessStopTimeoutMs);
     await fs.rm(outputPath, { force: true }).catch(() => undefined);
     throw error;
   } finally {
@@ -815,6 +820,23 @@ function throwIfVideoRenderCancelled(exportId: string | undefined) {
   if (exportId && cancelledVideoRenders.has(exportId)) throw new Error("Video export cancelled.");
 }
 
+async function waitForProcessClose<T>(closePromise: Promise<T>, forceStop: () => void, timeoutMs: number) {
+  let timeout: NodeJS.Timeout | null = null;
+  try {
+    await Promise.race([
+      closePromise.catch(() => undefined),
+      new Promise<void>((resolve) => {
+        timeout = setTimeout(() => {
+          forceStop();
+          resolve();
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
 async function isSupervisedSegmentOutputComplete(outputPath: string, segment: ExportFrameSegment) {
   const expectedBytes = getSupervisedSegmentByteLength(segment);
   try {
@@ -832,7 +854,7 @@ function getSupervisedSegmentByteLength(segment: ExportFrameSegment) {
 
 async function rerenderSupervisedSegmentSlow(project: ProjectManifest, scene: Scene, tempDir: string, frameRate: number, durationSeconds: number, segment: ExportFrameSegment, source: ExportSource, onFrameCaptured?: (frameIndex: number, method?: VideoExportMethod) => void, exportId?: string) {
   console.log(`[clipper export] source=${source} segment=${segment.index} frames=${segment.startFrame}-${segment.endFrame - 1} path=fast oom=yes action=rerender-slow`);
-  const slowResult = await renderSupervisedSegmentInProcess(project, scene, tempDir, frameRate, durationSeconds, segment, "slow-fallback", source, onFrameCaptured, exportId);
+  const slowResult = await renderSupervisedSegmentChild(project, scene, tempDir, frameRate, durationSeconds, segment, "slow-fallback", source, onFrameCaptured, exportId);
   if (slowResult.nativeWarningDetected) console.warn(`[clipper export] source=${source} segment=${segment.index} frames=${segment.startFrame}-${segment.endFrame - 1} parent-native-warning=yes path=slow-fallback native-warnings=${slowResult.nativeWarningCount}`);
   console.log(`[clipper export] source=${source} segment=${segment.index} frames=${segment.startFrame}-${segment.endFrame - 1} path=slow-fallback result=written`);
   return slowResult;
@@ -876,7 +898,10 @@ async function renderSupervisedSegmentChild(project: ProjectManifest, scene: Sce
     env: { ...process.env, CLIPPER_EXPORT_FORCE_OOM_SEGMENTS: "", CLIPPER_EXPORT_FORCE_OOM_FRAME: "" },
     stdio: ["ignore", "pipe", "pipe"],
   });
-  const unregisterCancel = registerActiveVideoRenderCancel(exportId, () => child.kill("SIGTERM"));
+  const stopChild = () => {
+    if (child.exitCode === null) child.kill("SIGTERM");
+  };
+  const unregisterCancel = registerActiveVideoRenderCancel(exportId, stopChild);
 
   let stdout = "";
   let stderr = "";
@@ -920,11 +945,28 @@ async function renderSupervisedSegmentChild(project: ProjectManifest, scene: Sce
 
   let exitCode: number | null = null;
   let childError: unknown = null;
+  let cancelledWhileWaiting = false;
   try {
-    exitCode = await new Promise<number | null>((resolve, reject) => {
+    const childClosePromise = new Promise<number | null>((resolve, reject) => {
       child.once("error", reject);
       child.once("close", resolve);
     });
+    exitCode = await Promise.race([
+      childClosePromise,
+      new Promise<null>((resolve) => {
+        const checkCancel = setInterval(() => {
+          if (!exportId || !cancelledVideoRenders.has(exportId)) return;
+          cancelledWhileWaiting = true;
+          stopChild();
+          clearInterval(checkCancel);
+          setTimeout(() => {
+            if (child.exitCode === null) child.kill("SIGKILL");
+            resolve(null);
+          }, exportProcessStopTimeoutMs);
+        }, 50);
+        childClosePromise.finally(() => clearInterval(checkCancel));
+      }),
+    ]);
   } catch (error) {
     childError = error;
   } finally {
@@ -936,6 +978,7 @@ async function renderSupervisedSegmentChild(project: ProjectManifest, scene: Sce
   await fs.rm(payloadPath, { force: true }).catch(() => undefined);
   await fs.rm(nativeLogPath, { force: true }).catch(() => undefined);
   if (childError) throw childError;
+  if (cancelledWhileWaiting) throw new Error("Video export cancelled.");
   throwIfVideoRenderCancelled(exportId);
   if (nativeWarningDetected && pathMode === "fast/default") return { outputPath, nativeWarningDetected, nativeWarningCount };
   if (exitCode !== 0) throw new Error(`Supervised export child failed for segment ${segment.index} (${pathMode}) with code ${exitCode ?? "unknown"}: ${(stderr || stdout).trim()}`);
@@ -1538,12 +1581,41 @@ function getBgraBitmap(image: NativeImage, width: number, height: number, contex
   throw new Error(`Captured ${context} bitmap length was ${resizedBitmap.byteLength}; image size was ${imageSize.width}x${imageSize.height}, expected ${width}x${height}.`);
 }
 
-async function writeProcessInput(process: ChildProcessWithoutNullStreams, chunk: Buffer) {
+async function writeProcessInput(process: ChildProcessWithoutNullStreams, chunk: Buffer, exportId?: string) {
+  throwIfVideoRenderCancelled(exportId);
   if (process.stdin.write(chunk)) return;
   await new Promise<void>((resolve, reject) => {
-    process.stdin.once("drain", resolve);
-    process.stdin.once("error", reject);
+    let cancelPoll: NodeJS.Timeout | null = null;
+    const cleanup = () => {
+      process.stdin.off("drain", handleDrain);
+      process.stdin.off("error", handleError);
+      process.off("close", handleClose);
+      if (cancelPoll) clearInterval(cancelPoll);
+    };
+    const handleDrain = () => {
+      cleanup();
+      resolve();
+    };
+    const handleError = (error: Error) => {
+      cleanup();
+      reject(error);
+    };
+    const handleClose = () => {
+      cleanup();
+      reject(new Error(exportId && cancelledVideoRenders.has(exportId) ? "Video export cancelled." : "Video encoder closed before accepting frame data."));
+    };
+    process.stdin.once("drain", handleDrain);
+    process.stdin.once("error", handleError);
+    process.once("close", handleClose);
+    if (exportId) {
+      cancelPoll = setInterval(() => {
+        if (!cancelledVideoRenders.has(exportId)) return;
+        cleanup();
+        reject(new Error("Video export cancelled."));
+      }, 50);
+    }
   });
+  throwIfVideoRenderCancelled(exportId);
 }
 
 type VideoExportMethod = "fast-child" | "fast-in-process" | "slow-fallback";

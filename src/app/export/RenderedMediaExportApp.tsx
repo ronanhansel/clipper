@@ -105,7 +105,7 @@ function ExportFramePreview({ refs, request }: { refs: ExportFramePreviewRefs; r
       timelineMode: "composition",
     });
     const activeTimelinePart = previewModel.activeTimelinePart;
-    if (!activeTimelinePart || !previewModel.activeComposition) return null;
+    const partStart = activeTimelinePart?.start ?? previewModel.adjustedSceneTime;
 
     return {
       cameraRef: refs.cameraRef,
@@ -121,12 +121,12 @@ function ExportFramePreview({ refs, request }: { refs: ExportFramePreviewRefs; r
       isPlaying: false,
       renderMode: "export" as const,
       part: previewModel.part,
-      partStart: activeTimelinePart.start,
+      partStart,
       previewParts: previewModel.previewParts,
       transitionPreviewParts: previewModel.transitionPreviewParts,
       adjustmentLayers: previewModel.visibleAdjustmentLayers,
       transitionLayers: previewModel.transitionLayers,
-      playbackClock: { startedAt: 0, startedFrom: previewModel.adjustedSceneTime },
+      playbackClock: { startedAt: 0, startedFrom: previewModel.adjustedSceneTime - partStart },
       previewTime: previewModel.previewTime,
       sceneTime,
       timelineMode: "composition" as const,
