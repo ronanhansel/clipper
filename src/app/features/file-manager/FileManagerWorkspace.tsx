@@ -10,6 +10,7 @@ export type BuildFileManagerWorkspacePropsInput = Omit<FileManagerProps,
   | "onCopyCompositionPath"
   | "onCreateComposition"
   | "onCreateCompositionFolder"
+  | "onCreateProjectFile"
   | "onCreateFolder"
   | "onCreateTimeline"
   | "onDeleteAsset"
@@ -22,12 +23,14 @@ export type BuildFileManagerWorkspacePropsInput = Omit<FileManagerProps,
   | "onFileManagerStateChange"
   | "onFindCompositionMedia"
   | "onOpenCompositionFile"
+  | "onOpenProjectFile"
   | "onMoveComposition"
   | "onMoveTimeline"
   | "onPrerenderComposition"
   | "onRenameAsset"
   | "onRenameComposition"
   | "onRenameCompositionFolder"
+  | "onRenameProjectFile"
   | "onRenameTimeline"
   | "onRevealAssetRoot"
   | "onRevealComposition"
@@ -43,6 +46,7 @@ export type BuildFileManagerWorkspacePropsInput = Omit<FileManagerProps,
     copyCompositionPath: FileManagerProps["onCopyCompositionPath"];
     createComposition: FileManagerProps["onCreateComposition"];
     createCompositionFolder: FileManagerProps["onCreateCompositionFolder"];
+    createProjectFile: FileManagerProps["onCreateProjectFile"];
     createFolder: FileManagerProps["onCreateFolder"];
     createTimeline: FileManagerProps["onCreateTimeline"];
     deleteAsset: FileManagerProps["onDeleteAsset"];
@@ -59,6 +63,7 @@ export type BuildFileManagerWorkspacePropsInput = Omit<FileManagerProps,
     renameAsset: FileManagerProps["onRenameAsset"];
     renameComposition: FileManagerProps["onRenameComposition"];
     renameCompositionFolder: FileManagerProps["onRenameCompositionFolder"];
+    renameProjectFile: FileManagerProps["onRenameProjectFile"];
     renameTimeline: FileManagerProps["onRenameTimeline"];
     revealAssetRoot: FileManagerProps["onRevealAssetRoot"];
     revealComposition: FileManagerProps["onRevealComposition"];
@@ -68,6 +73,7 @@ export type BuildFileManagerWorkspacePropsInput = Omit<FileManagerProps,
     reloadProject: FileManagerProps["onReloadProject"];
     findCompositionMedia: FileManagerProps["onFindCompositionMedia"];
     openCompositionFile: NonNullable<FileManagerProps["onOpenCompositionFile"]>;
+    openProjectFile: NonNullable<FileManagerProps["onOpenProjectFile"]>;
   };
 };
 
@@ -80,6 +86,7 @@ export function buildFileManagerWorkspaceProps({ actions, ...state }: BuildFileM
     onCopyCompositionPath: actions.copyCompositionPath,
     onCreateComposition: actions.createComposition,
     onCreateCompositionFolder: actions.createCompositionFolder,
+    onCreateProjectFile: actions.createProjectFile,
     onCreateFolder: actions.createFolder,
     onCreateTimeline: actions.createTimeline,
     onDeleteAsset: actions.deleteAsset,
@@ -96,6 +103,7 @@ export function buildFileManagerWorkspaceProps({ actions, ...state }: BuildFileM
     onRenameAsset: actions.renameAsset,
     onRenameComposition: actions.renameComposition,
     onRenameCompositionFolder: actions.renameCompositionFolder,
+    onRenameProjectFile: actions.renameProjectFile,
     onRenameTimeline: actions.renameTimeline,
     onRevealAssetRoot: actions.revealAssetRoot,
     onRevealComposition: actions.revealComposition,
@@ -105,6 +113,7 @@ export function buildFileManagerWorkspaceProps({ actions, ...state }: BuildFileM
     onReloadProject: actions.reloadProject,
     onFindCompositionMedia: actions.findCompositionMedia,
     onOpenCompositionFile: actions.openCompositionFile,
+    onOpenProjectFile: actions.openProjectFile,
   } as FileManagerWorkspaceProps;
 }
 

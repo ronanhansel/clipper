@@ -22,7 +22,6 @@ type SourceObject = {
 
 type SourceComposition = {
   duration: number;
-  prerender?: boolean;
   frame: {
     width: number;
     height: number;
@@ -59,7 +58,6 @@ export async function compositionFromSource(baseComposition: Part, source: strin
   return {
     ...baseComposition,
     sourceMissing: undefined,
-    prerender: sourceComposition.prerender || undefined,
     duration: sourceComposition.duration,
     frame: sourceFrameToCompositionFrame(sourceComposition.frame),
     background: sourceBackgroundToLayer(sourceComposition.background),
@@ -129,9 +127,8 @@ ${backgroundElements.map((object) => indent(object, 6)).join(",\n")}
     ],
   }`;
   const objects = composition.objects.map(frameObjectToConstructorSource);
-  const prerenderSource = composition.prerender ? "  prerender: true,\n" : "";
 
-  return `import { ${imports.join(", ")} } from "@clipper/composition-api";\n\nclass GeneratedCompositionObjects extends Component {\n  render() {\n    return [\n${objects.map((object) => indent(object, 6)).join(",\n")}\n    ];\n  }\n}\n\nexport const composition = new Composition({\n  duration: ${JSON.stringify(composition.duration)},\n${prerenderSource}  frame: ${tsBlock(composition.frame, 2)},\n  background: ${indent(backgroundSource, 2).trimStart()},\n  render() {\n    return [new GeneratedCompositionObjects()];\n  },\n});\n`;
+  return `import { ${imports.join(", ")} } from "@clipper/composition-api";\n\nclass GeneratedCompositionObjects extends Component {\n  render() {\n    return [\n${objects.map((object) => indent(object, 6)).join(",\n")}\n    ];\n  }\n}\n\nexport const composition = new Composition({\n  duration: ${JSON.stringify(composition.duration)},\n  frame: ${tsBlock(composition.frame, 2)},\n  background: ${indent(backgroundSource, 2).trimStart()},\n  render() {\n    return [new GeneratedCompositionObjects()];\n  },\n});\n`;
 }
 
 function frameObjectToSourceObject(object: FrameObject): SourceObject {
@@ -222,9 +219,9 @@ function indent(value: string, spaces: number) {
 
 async function evaluateCompositionSource(source: string, time: number, duration: number, sourcePath = "", readFile?: (relativePath: string) => Promise<string>): Promise<ResolvedSourceComposition> {
   const ts = await import("typescript");
-  const cssImports = new Map<string, string>();
-  const sourceWithCss = await inlineCssImports(source, sourcePath, readFile, cssImports);
-  const strippedSource = sourceWithCss.replace(/^\s*import\s+[^;]+;\s*$/gm, "");
+  const textImports = new Map<string, string>();
+  const sourceWithTextImports = await inlineTextImports(source, sourcePath, readFile, textImports);
+  const strippedSource = sourceWithTextImports.replace(/^\s*import\s+[^;]+;\s*$/gm, "");
   const transpiled = ts.transpileModule(strippedSource, {
     compilerOptions: {
       jsx: ts.JsxEmit.ReactJSX,
@@ -240,22 +237,22 @@ async function evaluateCompositionSource(source: string, time: number, duration:
   return normalizeSourceComposition(assertSourceComposition(exports.composition), time, duration);
 }
 
-async function inlineCssImports(source: string, sourcePath: string, readFile: ((relativePath: string) => Promise<string>) | undefined, cssImports: Map<string, string>) {
+async function inlineTextImports(source: string, sourcePath: string, readFile: ((relativePath: string) => Promise<string>) | undefined, textImports: Map<string, string>) {
   if (!readFile) return source;
-  const cssImportPattern = /^\s*import\s+(\w+)\s+from\s+["'](.+\.css)["'];?\s*$/gm;
+  const textImportPattern = /^\s*import\s+(\w+)\s+from\s+["'](.+\.(?:css|html))["'];?\s*$/gm;
   const replacements: Array<{ start: number; end: number; value: string }> = [];
 
-  for (const match of source.matchAll(cssImportPattern)) {
+  for (const match of source.matchAll(textImportPattern)) {
     const identifier = match[1];
-    const cssPath = match[2];
-    if (!identifier || !cssPath || match.index === undefined) continue;
-    const resolvedPath = resolveRelativeSourcePath(sourcePath, cssPath);
-    let cssSource = cssImports.get(resolvedPath);
-    if (cssSource === undefined) {
-      cssSource = await readFile(resolvedPath);
-      cssImports.set(resolvedPath, cssSource);
+    const importPath = match[2];
+    if (!identifier || !importPath || match.index === undefined) continue;
+    const resolvedPath = resolveRelativeSourcePath(sourcePath, importPath);
+    let importedSource = textImports.get(resolvedPath);
+    if (importedSource === undefined) {
+      importedSource = await readFile(resolvedPath);
+      textImports.set(resolvedPath, importedSource);
     }
-    replacements.push({ start: match.index, end: match.index + match[0].length, value: `const ${identifier} = ${JSON.stringify(cssSource)};` });
+    replacements.push({ start: match.index, end: match.index + match[0].length, value: `const ${identifier} = ${JSON.stringify(importedSource)};` });
   }
 
   return replacements.reduceRight((current, replacement) => `${current.slice(0, replacement.start)}${replacement.value}${current.slice(replacement.end)}`, source);

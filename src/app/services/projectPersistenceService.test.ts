@@ -31,7 +31,7 @@ describe("project persistence service", () => {
     hostMocks.trashFile.mockResolvedValue();
   });
 
-  it("loads directory compositions with sidecar css imports", async () => {
+  it("loads directory compositions with sidecar css and html imports", async () => {
     hostMocks.readTextFile.mockImplementation(async (path) => {
       if (path === "clipper/projects/hi/project.json") {
         return JSON.stringify({
@@ -48,17 +48,19 @@ describe("project persistence service", () => {
         return `
           import { Composition, WebLayer, html } from "@clipper/composition-api";
           import styles from "./effect.css";
+          import markup from "./effect.html";
 
           export const composition = new Composition({
             duration: 4,
             frame: { width: 1920, height: 1080, style: { background: "#000" } },
             render() {
-              return [new WebLayer({ id: "effect", bounds: { x: 0, y: 0, width: 100, height: 100 }, css: styles, html: html` + "`<div class=\"effect\"></div>`" + ` })];
+              return [new WebLayer({ id: "effect", bounds: { x: 0, y: 0, width: 100, height: 100 }, css: styles, html: markup })];
             },
           });
         `;
       }
       if (path === "clipper/projects/hi/file-manager/compositions/effect.css") return ".effect { opacity: 0.5; }";
+      if (path === "clipper/projects/hi/file-manager/compositions/effect.html") return `<div class="effect"></div>`;
       throw new Error(`Unexpected read ${path}`);
     });
     hostMocks.listDirectory.mockImplementation(async (path) => {
@@ -67,6 +69,7 @@ describe("project persistence service", () => {
       if (path === "clipper/projects/hi/file-manager/compositions") return [
         { name: "effect.composition.ts", isDirectory: false },
         { name: "effect.css", isDirectory: false },
+        { name: "effect.html", isDirectory: false },
         { name: "effect.css.d.ts", isDirectory: false },
         { name: "css-modules.d.ts", isDirectory: false },
       ];
@@ -77,6 +80,7 @@ describe("project persistence service", () => {
     const { project } = await projectPersistenceService.loadProject({ manifestPath: "clipper/projects/hi/project.json" });
 
     expect(project.compositionLibrary?.[0]?.objects[0]?.content).toContain(".effect { opacity: 0.5; }");
+    expect(project.compositionLibrary?.[0]?.objects[0]?.content).toContain('<div class="effect"></div>');
   });
 
   it("keeps loading when a directory composition dependency is missing", async () => {

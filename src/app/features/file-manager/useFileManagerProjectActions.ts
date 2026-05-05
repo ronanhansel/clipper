@@ -13,6 +13,9 @@ import { createCompositionFolderInProject, createCompositionInLibrary, deleteCom
 import { applyFileManagerTreeSnapshotToProject, deleteCompositionFolderFromProject, renameCompositionFolderInProject } from "./compositionFolderMutations";
 import { createTimelineInProject, deleteTimelineFromProject, moveTimelineInProject, renameTimelineInProject } from "./timelineLibraryMutations";
 import { getDisplayNameFromPath, nextNumberedSemanticName } from "../../../core/fileNames";
+import { CreateCommand } from "./operations/CreateCommand";
+import { RenameCommand } from "./operations/RenameCommand";
+import type { Command } from "./operations/Command";
 
 type FileManagerProjectActions = Omit<BuildFileManagerWorkspacePropsInput["actions"], "reloadProject">;
 
@@ -33,6 +36,7 @@ type UseFileManagerProjectActionsInput = {
   updateEditorState: (updater: (state: EditorState) => EditorState, options?: { history?: boolean; coalesceHistory?: boolean }) => void;
   updateProject: (updater: ProjectUpdater, options?: { history?: boolean; syncSources?: boolean; coalesceHistory?: boolean }) => void;
   watchedProjectDirectory: string;
+  executeFileManagerCommand: (command: Command) => Promise<void>;
   clearNodeSelection: () => void;
   addCompositionFromLibrary: (compositionId: string) => void;
 };
@@ -56,6 +60,7 @@ export function useFileManagerProjectActions({
   updateEditorState,
   updateProject,
   watchedProjectDirectory,
+  executeFileManagerCommand,
 }: UseFileManagerProjectActionsInput): FileManagerProjectActions {
   function syncCompositionResult(result: { project: ProjectManifest; compositionSources: Record<string, string> }) {
     compositionSourcesRef.current = result.compositionSources;
@@ -126,6 +131,29 @@ export function useFileManagerProjectActions({
     const safeParent = parentFolderPath && parentFolderPath !== watchedProjectDirectory ? parentFolderPath : "";
     const { folderPath, project: nextProject } = createCompositionFolderInProject(projectRef.current, safeParent, "");
     updateProject(nextProject);
+  }
+
+  function createProjectFile(folderPath?: string) {
+    const safeFolderPath = folderPath && folderPath !== watchedProjectDirectory ? folderPath : "";
+    const fileName = nextNumberedName("untitled.txt", getProjectFileStateSiblingNames(projectRef.current.editorState?.fileManagerState?.tree, safeFolderPath));
+    const filePath = `${safeFolderPath || watchedProjectDirectory}/${fileName}`;
+    void executeFileManagerCommand(new CreateCommand(filePath, fileName, false, "")).catch((error) => {
+      console.error(error);
+      toast.error("Unable to create file.");
+    });
+    updateFileManagerState(insertProjectFileStateNode(projectRef.current.editorState?.fileManagerState, safeFolderPath, filePath));
+    return filePath;
+  }
+
+  function renameProjectFile(filePath: string, name: string) {
+    const nextName = name.trim();
+    if (!nextName || nextName === filePath.split("/").pop()) return;
+    const nextPath = getDirectoryPath(filePath) ? `${getDirectoryPath(filePath)}/${nextName}` : nextName;
+    void executeFileManagerCommand(new RenameCommand(filePath, nextName)).catch((error) => {
+      console.error(error);
+      toast.error("Unable to rename file.");
+    });
+    updateFileManagerState(renameProjectFileStateNode(projectRef.current.editorState?.fileManagerState, filePath, nextPath));
   }
 
   function createTimeline(folderPath?: string) {
@@ -270,7 +298,7 @@ export function useFileManagerProjectActions({
     toast.success(`Relinked ${targetName}.`);
   }
 
-  function createRelinkBaseComposition(filePath: string): Part {
+function createRelinkBaseComposition(filePath: string): Part {
     return { id: filePath, filePath, duration: 5, frame: { width: 1920, height: 1080, style: {} }, background: { id: "background", name: "Background", style: {}, elements: [] }, objects: [], snapshot: [], motionMarkers: [] };
   }
 
@@ -293,6 +321,7 @@ export function useFileManagerProjectActions({
     copyCompositionPath,
     createComposition,
     createCompositionFolder,
+    createProjectFile,
     createFolder: createAssetFolder,
     createTimeline,
     deleteAsset,
@@ -305,11 +334,13 @@ export function useFileManagerProjectActions({
     fileManagerStateChange: updateFileManagerState,
     findCompositionMedia,
     openCompositionFile: () => undefined,
+    openProjectFile: () => undefined,
     moveComposition,
     moveTimeline,
     renameAsset,
     renameComposition,
     renameCompositionFolder,
+    renameProjectFile,
     renameTimeline,
     revealAssetRoot,
     revealComposition,
@@ -318,3 +349,43 @@ export function useFileManagerProjectActions({
     sortAssets,
   };
 }
+
+function insertProjectFileStateNode(fileManagerState: EditorState["fileManagerState"], folderPath: string, filePath: string): EditorState["fileManagerState"] {
+  const nextNode = { id: `project-file:${filePath}`, filePath };
+  return { ...fileManagerState, tree: insertProjectFileStateNodeIntoTree(fileManagerState?.tree ?? [], folderPath, nextNode) };
+}
+
+function insertProjectFileStateNodeIntoTree(nodes: NonNullable<EditorState["fileManagerState"]>["tree"], folderPath: string, nextNode: { id: string; filePath: string }): NonNullable<EditorState["fileManagerState"]>["tree"] {
+  if (!folderPath) return [...(nodes ?? []), nextNode];
+  return (nodes ?? []).map((node) => {
+    if (node.id === `project-folder:${folderPath}`) return { ...node, children: [...(node.children ?? []), nextNode] };
+    return node.children ? { ...node, children: insertProjectFileStateNodeIntoTree(node.children, folderPath, nextNode) } : node;
+  });
+}
+
+function renameProjectFileStateNode(fileManagerState: EditorState["fileManagerState"], oldPath: string, nextPath: string): EditorState["fileManagerState"] {
+  return { ...fileManagerState, tree: renameProjectFileStateNodeInTree(fileManagerState?.tree ?? [], oldPath, nextPath) };
+}
+
+function renameProjectFileStateNodeInTree(nodes: NonNullable<EditorState["fileManagerState"]>["tree"], oldPath: string, nextPath: string): NonNullable<EditorState["fileManagerState"]>["tree"] {
+  return (nodes ?? []).map((node) => {
+    if (node.filePath === oldPath) return { ...node, id: `project-file:${nextPath}`, filePath: nextPath };
+    return node.children ? { ...node, children: renameProjectFileStateNodeInTree(node.children, oldPath, nextPath) } : node;
+  });
+}
+
+function getProjectFileStateSiblingNames(nodes: NonNullable<EditorState["fileManagerState"]>["tree"] | undefined, folderPath: string): string[] {
+  const siblings = folderPath ? findProjectFileStateChildren(nodes ?? [], `project-folder:${folderPath}`) : (nodes ?? []);
+  return siblings.flatMap((node) => node.filePath ? [node.filePath.split("/").pop() || node.filePath] : []);
+}
+
+function findProjectFileStateChildren(nodes: NonNullable<EditorState["fileManagerState"]>["tree"], folderId: string): FileManagerStateTreeNode[] {
+  for (const node of nodes ?? []) {
+    if (node.id === folderId) return node.children ?? [];
+    const childMatch = node.children ? findProjectFileStateChildren(node.children, folderId) : [];
+    if (childMatch.length) return childMatch;
+  }
+  return [];
+}
+
+type FileManagerStateTreeNode = NonNullable<NonNullable<EditorState["fileManagerState"]>["tree"]>[number];

@@ -8,6 +8,7 @@ export function timelineClipFromPart(item: Part): TimelineClip {
     trimStart: item.trimStart,
     layerId: item.layerId,
     duration: item.duration,
+    prerender: item.prerender || undefined,
     motionMarkers: item.motionMarkers ?? [],
   };
 }

@@ -20,6 +20,7 @@ type UseFileManagerControllerInput = Pick<FileManagerProps,
     copyCompositionPath: FileManagerProps["onCopyCompositionPath"];
     createComposition: FileManagerProps["onCreateComposition"];
     createCompositionFolder: FileManagerProps["onCreateCompositionFolder"];
+    createProjectFile: FileManagerProps["onCreateProjectFile"];
     createFolder: FileManagerProps["onCreateFolder"];
     createTimeline: FileManagerProps["onCreateTimeline"];
     deleteAsset: FileManagerProps["onDeleteAsset"];
@@ -45,6 +46,8 @@ type UseFileManagerControllerInput = Pick<FileManagerProps,
     reloadProject: FileManagerProps["onReloadProject"];
     findCompositionMedia: FileManagerProps["onFindCompositionMedia"];
     openCompositionFile: NonNullable<FileManagerProps["onOpenCompositionFile"]>;
+    openProjectFile: NonNullable<FileManagerProps["onOpenProjectFile"]>;
+    renameProjectFile: FileManagerProps["onRenameProjectFile"];
   };
   implicitFileOperation: <T extends unknown[]>(operation: (...args: T) => void) => (...args: T) => void;
 };
@@ -59,6 +62,7 @@ export function useFileManagerController({ actions, implicitFileOperation, ...st
       copyCompositionPath: actions.copyCompositionPath,
       createComposition: implicitFileOperation(actions.createComposition),
       createCompositionFolder: implicitFileOperation(actions.createCompositionFolder),
+      createProjectFile: actions.createProjectFile,
       createFolder: implicitFileOperation(actions.createFolder),
       createTimeline: implicitFileOperation(actions.createTimeline),
       deleteAsset: implicitFileOperation(actions.deleteAsset),
@@ -75,6 +79,7 @@ export function useFileManagerController({ actions, implicitFileOperation, ...st
       renameAsset: implicitFileOperation(actions.renameAsset),
       renameComposition: implicitFileOperation(actions.renameComposition),
       renameCompositionFolder: implicitFileOperation(actions.renameCompositionFolder),
+      renameProjectFile: actions.renameProjectFile,
       renameTimeline: implicitFileOperation(actions.renameTimeline),
       revealAssetRoot: actions.revealAssetRoot,
       revealComposition: actions.revealComposition,
@@ -84,6 +89,7 @@ export function useFileManagerController({ actions, implicitFileOperation, ...st
       reloadProject: actions.reloadProject,
       findCompositionMedia: implicitFileOperation(actions.findCompositionMedia),
       openCompositionFile: actions.openCompositionFile,
+      openProjectFile: actions.openProjectFile,
     },
   });
 }

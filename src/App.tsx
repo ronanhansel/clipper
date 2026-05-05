@@ -81,7 +81,7 @@ const defaultEditorState: EditorState = {
 
 const wheelLineDeltaPx = 16;
 const wheelPageDeltaPx = 600;
-const frameWheelZoomSensitivity = 0.0025;
+const frameWheelZoomSensitivity = 0.005;
 
 const unsupportedEditorExtensions = new Set(["mp4", "mov", "m4v", "webm", "avi", "mkv", "mp3", "wav", "aiff", "flac", "png", "jpg", "jpeg", "gif", "webp", "ico", "pdf", "zip"]);
 
@@ -616,52 +616,29 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     }
   }
   async function togglePrerenderCompositionFromLibrary(compositionId: string) {
-    const sourceComposition = compositionLibrary.find((composition) => composition.id === compositionId || composition.filePath === compositionId) ?? scene.compositions.find((composition) => composition.id === compositionId || composition.compositionId === compositionId || composition.filePath === compositionId);
+    const isTimelineClipTarget = scene.compositions.some((composition) => composition.id === compositionId);
+    const sourceComposition = scene.compositions.find((composition) => composition.id === compositionId || composition.compositionId === compositionId || composition.filePath === compositionId) ?? compositionLibrary.find((composition) => composition.id === compositionId || composition.filePath === compositionId);
     const sourceId = sourceComposition?.compositionId ?? sourceComposition?.id ?? compositionId;
-    const currentlyMarked = Boolean(sourceComposition?.prerender) || manualPrerenderCompositionIds.has(sourceId);
+    const matchingTimelineClips = scene.compositions.filter((composition) => compositionMatchesManualPrerenderId(composition, compositionId));
+    const currentlyMarked = matchingTimelineClips.length > 0 ? matchingTimelineClips.every((composition) => composition.prerender) : manualPrerenderCompositionIds.has(sourceId);
     if (currentlyMarked) {
-      implicitFileOperation(setCompositionPrerenderMark)(compositionId, false);
-      toast.success("Prerender mark removed.");
+      implicitFileOperation(setCompositionPrerenderMark)(compositionId, false, isTimelineClipTarget ? compositionId : undefined);
       return;
     }
-    implicitFileOperation(setCompositionPrerenderMark)(compositionId, true);
-    const toastId = toast.loading("Prerendering composition...");
+    implicitFileOperation(setCompositionPrerenderMark)(compositionId, true, isTimelineClipTarget ? compositionId : undefined);
     const result = await prerenderCache.prerenderComposition(compositionId);
-    if (result.visibleRanges === 0) {
-      toast.error("No visible timeline instances of this composition to prerender.", { id: toastId });
-      return;
-    }
-    if (result.queuedBlocks === 0) {
-      toast.success("Composition is already prerendered.", { id: toastId });
-      return;
-    }
-    if (!result.completed) {
-      toast.error(result.error ?? "Composition prerender failed.", { id: toastId });
-      return;
-    }
-    toast.success(`Prerendered ${result.queuedBlocks} composition range${result.queuedBlocks === 1 ? "" : "s"}.`, { id: toastId });
+    if (result.visibleRanges === 0 || result.queuedBlocks === 0 || !result.completed) return;
   }
-  function setCompositionPrerenderMark(compositionId: string, marked: boolean) {
-    const composition = compositionLibrary.find((item) => item.id === compositionId || item.filePath === compositionId) ?? scene.compositions.find((item) => item.id === compositionId || item.compositionId === compositionId || item.filePath === compositionId);
-    if (!composition) return;
-    const sourceId = composition.compositionId ?? composition.id;
-    const sourcePath = composition.filePath;
-    const previousSource = compositionSourcesRef.current[sourcePath] ?? composition.source ?? "";
-    const nextSource = setCompositionSourcePrerenderMark(previousSource, marked);
-    const nextSources = { ...compositionSourcesRef.current, [sourcePath]: nextSource };
-    compositionSourcesRef.current = nextSources;
-    setCompositionSources(nextSources);
-    const editorTab = editorTabs.find((tab) => tab.filePath === sourcePath);
-    if (editorTab) updateEditorTab(editorTab.id, { source: nextSource });
+  function setCompositionPrerenderMark(compositionId: string, marked: boolean, timelineClipId?: string) {
     updateProject((current) => ({
       ...current,
-      compositionSources: nextSources,
-      compositions: (current.compositions ?? []).map((item) => compositionMatchesManualPrerenderId(item, sourceId) ? { ...item, prerender: marked || undefined, source: item.filePath === sourcePath ? nextSource : item.source } : item),
-      compositionLibrary: (current.compositionLibrary ?? []).map((item) => compositionMatchesManualPrerenderId(item, sourceId) ? { ...item, prerender: marked || undefined, source: item.filePath === sourcePath ? nextSource : item.source } : item),
-      timelines: (current.timelines ?? []).map((timeline) => ({
+      timelines: (current.timelines ?? []).map((timeline) => timeline.id === scene.id ? ({
         ...timeline,
-        clips: timeline.clips.map((clip) => clip.compositionId === sourceId ? { ...clip } : clip),
-      })),
+        clips: timeline.clips.map((clip) => {
+          const matchesClip = timelineClipId ? clip.id === timelineClipId : clip.compositionId === compositionId || clip.id === compositionId;
+          return matchesClip ? { ...clip, prerender: marked || undefined } : clip;
+        }),
+      }) : timeline),
     }), { history: true });
   }
   const { exportProject, exportRenderedMedia, stopVideoExport } = useExportCommands({
@@ -1447,6 +1424,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     updateEditorState,
     updateProject,
     watchedProjectDirectory,
+    executeFileManagerCommand,
   });
 
   const fileManagerProps = useFileManagerController({
@@ -1460,7 +1438,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     timelines,
     timelineCompositionIds,
     onFindMediaRequestChange: setFindMediaRequest,
-    actions: { ...fileManagerActions, reloadProject, openCompositionFile: openCompositionInEditor, prerenderComposition: togglePrerenderCompositionFromLibrary },
+    actions: { ...fileManagerActions, reloadProject, openCompositionFile: openCompositionInEditor, openProjectFile: openProjectFileInEditor, prerenderComposition: togglePrerenderCompositionFromLibrary },
   });
   const editorLayout = project.editorState?.layout ?? defaultEditorLayoutState;
   const composeLayout = project.editorState?.composeLayout ?? defaultComposeLayoutState;
@@ -1960,7 +1938,7 @@ function getManualPrerenderRangesForComposition(compositions: CompositionClip[],
     if (end <= start) continue;
     const top = getTopTimelinePartAtTime(getCompositionTimelineRanges(compositions), start + (end - start) / 2, timelineLayers);
     if (!top || !compositionMatchesManualPrerenderId(top, compositionId)) continue;
-    const key = top.compositionId ?? top.id;
+    const key = top.id;
     const last = ranges[ranges.length - 1];
     if (last && last.compositionId === key && Math.abs(last.end - start) < 1e-6) last.end = end;
     else ranges.push({ compositionId: key, start, end });
@@ -1976,23 +1954,12 @@ function getCompositionTimelineRanges(compositions: CompositionClip[]) {
 }
 
 function getManualPrerenderRangesForMarkedCompositions(compositions: CompositionClip[], sceneDuration: number, timelineLayers: TimelineLayerState | undefined) {
-  const markedIds = new Set(compositions.filter((composition) => composition.prerender).map((composition) => composition.compositionId ?? composition.id));
+  const markedIds = new Set(compositions.filter((composition) => composition.prerender).map((composition) => composition.id));
   return mergeManualPrerenderRanges([...markedIds].flatMap((compositionId) => getManualPrerenderRangesForComposition(compositions, compositionId, sceneDuration, timelineLayers)));
 }
 
 function compositionMatchesManualPrerenderId(composition: CompositionClip, compositionId: string) {
   return composition.id === compositionId || composition.compositionId === compositionId || composition.filePath === compositionId || composition.filePath.endsWith(`/${compositionId}`);
-}
-
-function setCompositionSourcePrerenderMark(source: string, marked: boolean) {
-  const existingPattern = /\n\s*prerender:\s*(?:true|false),?/;
-  if (existingPattern.test(source)) {
-    return marked
-      ? source.replace(existingPattern, "\n  prerender: true,")
-      : source.replace(existingPattern, "");
-  }
-  if (!marked) return source;
-  return source.replace(/new\s+Composition\s*\(\s*{\s*\n/, (match) => `${match}  prerender: true,\n`);
 }
 
 function filterPrerenderCoverageToRanges(coverage: { blocks: Array<{ start: number; duration: number; state: "enqueued" | "queued" | "cached" }> }, ranges: PrerenderManualCompositionRange[]) {

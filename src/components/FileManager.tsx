@@ -15,11 +15,13 @@ import { Input } from "./ui/input";
 
 type ProjectFileTreeNode =
   | { id: string; kind: "folder"; path: string; name: string; children: ProjectFileTreeNode[] }
+  | { id: string; kind: "project-file"; path: string; name: string }
   | { id: string; kind: "composition"; name: string; composition: CompositionClip }
   | { id: string; kind: "timeline"; name: string; timeline: TimelineDocument };
 
 type FileManagerTreeNode =
   | { id: string; kind: "project-folder"; path: string; name: string; children: FileManagerTreeNode[] }
+  | { id: string; kind: "project-file"; path: string; name: string }
   | { id: string; kind: "composition"; name: string; composition: CompositionClip }
   | { id: string; kind: "timeline"; name: string; timeline: TimelineDocument }
   | { id: string; kind: "asset-folder"; asset: AssetItem; name: string; children: FileManagerTreeNode[] }
@@ -59,6 +61,7 @@ export type FileManagerProps = {
   onCopyCompositionPath: (compositionId: string) => void;
   onCreateComposition: (folderPath?: string) => void;
   onCreateCompositionFolder: (parentFolderPath?: string) => void;
+  onCreateProjectFile: (folderPath?: string) => string;
   onCreateFolder: (parentFolderId?: string) => void;
   onCreateTimeline: (folderPath?: string) => void;
   onDeleteAsset: (assetId: string) => void;
@@ -77,7 +80,9 @@ export type FileManagerProps = {
   findMediaRequest?: { compositionId: string; fileName: string } | null;
   onFindMediaRequestChange?: (request: { compositionId: string; fileName: string } | null) => void;
   onOpenCompositionFile?: (compositionId: string, options?: { temporary?: boolean }) => void;
+  onOpenProjectFile?: (filePath: string, options?: { temporary?: boolean }) => void;
   onRenameAsset: (assetId: string, name: string) => void;
+  onRenameProjectFile: (filePath: string, name: string) => void;
   onRenameComposition: (compositionId: string, name: string) => void;
   onRenameCompositionFolder: (folderPath: string, name: string) => void;
   onRenameTimeline: (timelineId: string, name: string) => void;
@@ -94,7 +99,9 @@ type FileManagerContextValue = FileManagerProps & {
   selectedNodeId: string | null;
   selectedNodeIds: string[];
   clearTreeFocus: () => void;
+  requestProjectFileCreation: (folderPath?: string) => void;
   registerTreeFocusClearer: (clearer: (() => void) | null) => void;
+  registerProjectFileCreator: (creator: ((folderPath?: string) => void) | null) => void;
   requestNodeExpansion: (nodeId: string) => void;
   registerNodeExpander: (expander: ((nodeId: string) => void) | null) => void;
   setContextMenu: (menu: ContextMenuState) => void;
@@ -115,9 +122,14 @@ function FileManagerProvider({ children, ...props }: PropsWithChildren<FileManag
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
   const selectedNodeId = selectedNodeIds[0] ?? null;
   const treeFocusClearerRef = useRef<(() => void) | null>(null);
+  const projectFileCreatorRef = useRef<((folderPath?: string) => void) | null>(null);
   const clearTreeFocus = useCallback(() => treeFocusClearerRef.current?.(), []);
+  const requestProjectFileCreation = useCallback((folderPath?: string) => projectFileCreatorRef.current?.(folderPath), []);
   const registerTreeFocusClearer = useCallback((clearer: (() => void) | null) => {
     treeFocusClearerRef.current = clearer;
+  }, []);
+  const registerProjectFileCreator = useCallback((creator: ((folderPath?: string) => void) | null) => {
+    projectFileCreatorRef.current = creator;
   }, []);
   const nodeExpanderRef = useRef<((nodeId: string) => void) | null>(null);
   const requestNodeExpansion = useCallback((nodeId: string) => nodeExpanderRef.current?.(nodeId), []);
@@ -125,7 +137,7 @@ function FileManagerProvider({ children, ...props }: PropsWithChildren<FileManag
     nodeExpanderRef.current = expander;
   }, []);
   const setSelectedNodeId = useCallback((nodeId: string | null) => setSelectedNodeIds(nodeId ? [nodeId] : []), []);
-  const value = useMemo<FileManagerContextValue>(() => ({ ...props, contextMenu, selectedNodeId, selectedNodeIds, clearTreeFocus, registerTreeFocusClearer, requestNodeExpansion, registerNodeExpander, setContextMenu, setSelectedNodeId, setSelectedNodeIds }), [props, contextMenu, selectedNodeId, selectedNodeIds, clearTreeFocus, registerTreeFocusClearer, requestNodeExpansion, registerNodeExpander, setSelectedNodeId]);
+  const value = useMemo<FileManagerContextValue>(() => ({ ...props, contextMenu, selectedNodeId, selectedNodeIds, clearTreeFocus, requestProjectFileCreation, registerTreeFocusClearer, registerProjectFileCreator, requestNodeExpansion, registerNodeExpander, setContextMenu, setSelectedNodeId, setSelectedNodeIds }), [props, contextMenu, selectedNodeId, selectedNodeIds, clearTreeFocus, requestProjectFileCreation, registerTreeFocusClearer, registerProjectFileCreator, requestNodeExpansion, registerNodeExpander, setSelectedNodeId]);
   return <FileManagerContext.Provider value={value}>{children}</FileManagerContext.Provider>;
 }
 
@@ -134,7 +146,7 @@ export function FileManager(props: FileManagerProps) {
 }
 
 function FileManagerPanel() {
-  const { assets, compositions, compositionFolders, fileManagerState, compositionRootPath, timelines, contextMenu, selectedNodeIds, clearTreeFocus, setContextMenu, setSelectedNodeIds, onCopyAsset, onCreateComposition, onCreateCompositionFolder, onCreateFolder, onCreateTimeline, onDeleteAsset, onDeleteComposition, onDeleteCompositionFolder, onDeleteTimeline, onMoveComposition, onMoveTimeline, onRevealAssetRoot, onSortAssets } = useFileManager();
+  const { assets, compositions, compositionFolders, fileManagerState, compositionRootPath, timelines, contextMenu, selectedNodeIds, clearTreeFocus, requestProjectFileCreation, setContextMenu, setSelectedNodeIds, onCopyAsset, onCreateComposition, onCreateCompositionFolder, onCreateFolder, onCreateTimeline, onDeleteAsset, onDeleteComposition, onDeleteCompositionFolder, onDeleteTimeline, onMoveComposition, onMoveTimeline, onRevealAssetRoot, onSortAssets } = useFileManager();
   const managerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -157,6 +169,7 @@ function FileManagerPanel() {
       x: event.clientX,
       y: event.clientY,
       items: [
+        { label: "New file", action: () => requestProjectFileCreation() },
         { label: "New composition", action: () => onCreateComposition() },
         { label: "New composition folder", action: () => onCreateCompositionFolder() },
         { label: "New timeline", action: onCreateTimeline },
@@ -175,6 +188,7 @@ function FileManagerPanel() {
       x: rect.left,
       y: rect.bottom + 4,
       items: [
+        { label: "New file", action: () => requestProjectFileCreation() },
         { label: "New folder", action: () => onCreateCompositionFolder() },
         { label: "New timeline", action: onCreateTimeline },
         { label: "New composition", action: () => onCreateComposition() },
@@ -270,7 +284,7 @@ function stripCompositionFileSuffix(fileName: string) {
 }
 
 function UnifiedFileManagerTree() {
-  const { assets, compositions, compositionFolders: folders, compositionRootPath: rootPath, fileManagerState, timelines, onApplyTreeSnapshot, onFileManagerStateChange, onOpenCompositionFile, onRenameAsset, onRenameComposition, onRenameCompositionFolder: onRenameFolder, onRenameTimeline, registerNodeExpander, registerTreeFocusClearer, setSelectedNodeId: onSelectNode, setSelectedNodeIds: onSelectNodes, onSelectTimeline } = useFileManager();
+  const { assets, compositions, compositionFolders: folders, compositionRootPath: rootPath, fileManagerState, timelines, onApplyTreeSnapshot, onCreateProjectFile, onFileManagerStateChange, onOpenCompositionFile, onOpenProjectFile, onRenameAsset, onRenameComposition, onRenameCompositionFolder: onRenameFolder, onRenameProjectFile, onRenameTimeline, registerNodeExpander, registerProjectFileCreator, registerTreeFocusClearer, requestNodeExpansion, setSelectedNodeId: onSelectNode, setSelectedNodeIds: onSelectNodes, onSelectTimeline } = useFileManager();
   const rawTree = useMemo(() => buildUnifiedFileTree(compositions, folders, rootPath, timelines, assets), [assets, compositions, folders, rootPath, timelines]);
   const [tree, setTree] = useState(() => syncFileTreeToSavedState(rawTree, fileManagerState?.tree));
   const initialOpenState = useMemo(() => fileManagerState?.openState ?? getFileTreeOpenState(tree), []);
@@ -284,6 +298,7 @@ function UnifiedFileManagerTree() {
   const orderReferenceTreeRef = useRef<FileManagerTreeNode[] | null>(null);
   const latestTreeRef = useRef(tree);
   const externalDragRef = useRef<{ node: Extract<FileManagerTreeNode, { kind: "composition" }>; lastMouse: { x: number; y: number }; shiftKey: boolean } | null>(null);
+  const pendingEditNodeIdRef = useRef<string | null>(null);
   const externalDragFrameRef = useRef(0);
   const pendingExternalDragMoveRef = useRef<{ mouse: { x: number; y: number }; shiftKey: boolean } | null>(null);
   const marqueeSelectionRef = useRef<{ startX: number; startY: number; pointerId: number; active: boolean; startScrollTop: number } | null>(null);
@@ -330,6 +345,23 @@ function UnifiedFileManagerTree() {
     setTree(nextTree);
     onApplyTreeSnapshot(createFileManagerTreeSnapshot(nextTree, rootPath, nativeTreeRef.current?.openState));
   }, [onApplyTreeSnapshot, rootPath]);
+
+  const createProjectFile = useCallback((folderPath?: string) => {
+    const filePath = onCreateProjectFile(folderPath);
+    const nodeId = projectFileNodeId(filePath);
+    const nextNode: FileManagerTreeNode = { id: nodeId, kind: "project-file", path: filePath, name: getFileName(filePath) };
+    pendingEditNodeIdRef.current = nodeId;
+    if (folderPath) requestNodeExpansion(projectFolderNodeId(folderPath));
+    latestTreeRef.current = insertProjectFileTreeNode(latestTreeRef.current, folderPath || rootPath, nextNode);
+    orderReferenceTreeRef.current = latestTreeRef.current;
+    setTree(latestTreeRef.current);
+    onSelectNode(nodeId);
+  }, [onCreateProjectFile, onSelectNode, requestNodeExpansion, rootPath]);
+
+  useEffect(() => {
+    registerProjectFileCreator(createProjectFile);
+    return () => registerProjectFileCreator(null);
+  }, [createProjectFile, registerProjectFileCreator]);
 
   useEffect(() => {
     setTree((current) => {
@@ -587,6 +619,7 @@ function UnifiedFileManagerTree() {
     if (!node) return;
     if (node.kind === "asset-file" || node.kind === "asset-folder") onRenameAsset(node.asset.id, name);
     if (node.kind === "project-folder") onRenameFolder(node.path, name);
+    if (node.kind === "project-file") onRenameProjectFile(node.path, name);
     if (node.kind === "composition") onRenameComposition(node.composition.id, name);
     if (node.kind === "timeline") onRenameTimeline(node.timeline.id, name);
   }
@@ -594,6 +627,7 @@ function UnifiedFileManagerTree() {
   function handleActivate(node: NativeTreeNodeApi<FileManagerTreeNode>, event: ReactMouseEvent<HTMLDivElement>) {
     if (node.data.kind === "timeline" && event.detail >= 2) onSelectTimeline(node.data.timeline.id);
     if (node.data.kind === "composition") onOpenCompositionFile?.(node.data.composition.id, { temporary: event.detail < 2 });
+    if (node.data.kind === "project-file") onOpenProjectFile?.(node.data.path, { temporary: event.detail < 2 });
   }
 
   function handleSelect(nodes: NativeTreeNodeApi<FileManagerTreeNode>[]) {
@@ -616,7 +650,13 @@ function UnifiedFileManagerTree() {
 
   const isDroppingRoot = dropParentId === null && dropCursorVisible;
 
-  return <div ref={treeRef} className={`group/filetree relative ${isDroppingRoot ? "bg-[var(--clipper-accent-muted-surface)] shadow-[0_0_0_1px_rgba(255,255,255,0.05)_inset,0_0_0_2px_var(--clipper-accent)]" : ""}`} onPointerDownCapture={suppressEmptyTreePointerFocus} onPointerDown={handleMarqueePointerDown} onPointerMove={handleMarqueePointerMove} onPointerUp={finishMarquee} onPointerCancel={finishMarquee}>{marquee ? <FileManagerMarquee marquee={marquee} /> : null}<NativeTree<FileManagerTreeNode> ref={nativeTreeRef} data={tree} disableDrop={disableDrop} getDropTarget={({ dragIds, localX, localY, tree: api, width }) => getPointerFileTreeDrop(api, latestTreeRef.current, dragIds, localX, localY, width)} height={treeHeight} idAccessor="id" indent={FILE_MANAGER_INDENT} initialOpenState={initialOpenState} isInternal={isFileTreeFolderNode} movable onActivate={handleActivate} onMove={handleMove} onRename={handleRename} onSelect={handleSelect} onToggle={handleToggle} openByDefault={!fileManagerState?.openState} paddingBottom={FILE_MANAGER_BOTTOM_DROP_PADDING} paddingTop={FILE_MANAGER_TOP_DROP_PADDING} rowHeight={FILE_MANAGER_ROW_HEIGHT} width="100%" renderDragPreview={(previewProps) => <UnifiedTreeDragPreview {...previewProps} hideGhost={compositionLanePreviewActive} nodes={tree} onDragPositionChange={updateDragPosition} />}>{(nodeProps) => <UnifiedTreeNode {...nodeProps} />}</NativeTree></div>;
+  return <div ref={treeRef} className={`group/filetree relative ${isDroppingRoot ? "bg-[var(--clipper-accent-muted-surface)] shadow-[0_0_0_1px_rgba(255,255,255,0.05)_inset,0_0_0_2px_var(--clipper-accent)]" : ""}`} onPointerDownCapture={suppressEmptyTreePointerFocus} onPointerDown={handleMarqueePointerDown} onPointerMove={handleMarqueePointerMove} onPointerUp={finishMarquee} onPointerCancel={finishMarquee}>{marquee ? <FileManagerMarquee marquee={marquee} /> : null}<NativeTree<FileManagerTreeNode> ref={nativeTreeRef} data={tree} disableDrop={disableDrop} getDropTarget={({ dragIds, localX, localY, tree: api, width }) => getPointerFileTreeDrop(api, latestTreeRef.current, dragIds, localX, localY, width)} height={treeHeight} idAccessor="id" indent={FILE_MANAGER_INDENT} initialOpenState={initialOpenState} isInternal={isFileTreeFolderNode} movable onActivate={handleActivate} onMove={handleMove} onRename={handleRename} onSelect={handleSelect} onToggle={handleToggle} openByDefault={!fileManagerState?.openState} paddingBottom={FILE_MANAGER_BOTTOM_DROP_PADDING} paddingTop={FILE_MANAGER_TOP_DROP_PADDING} rowHeight={FILE_MANAGER_ROW_HEIGHT} width="100%" renderDragPreview={(previewProps) => <UnifiedTreeDragPreview {...previewProps} hideGhost={compositionLanePreviewActive} nodes={tree} onDragPositionChange={updateDragPosition} />}>{(nodeProps) => {
+    if (pendingEditNodeIdRef.current === nodeProps.node.id) {
+      pendingEditNodeIdRef.current = null;
+      queueMicrotask(() => nodeProps.node.edit());
+    }
+    return <UnifiedTreeNode {...nodeProps} onCreateProjectFile={createProjectFile} />;
+  }}</NativeTree></div>;
 }
 
 function getFileManagerScrollElement(tree: HTMLElement | null) {
@@ -631,7 +671,7 @@ export function shouldSkipFileManagerShortcut(target: EventTarget | null) {
   return target instanceof HTMLElement && isTextEditingTarget(target);
 }
 
-function UnifiedTreeNode({ dragHandle, node, style }: NativeTreeNodeRendererProps<FileManagerTreeNode>) {
+function UnifiedTreeNode({ dragHandle, node, onCreateProjectFile, style }: NativeTreeNodeRendererProps<FileManagerTreeNode> & { onCreateProjectFile: (folderPath?: string) => void }) {
   const { assets, timelines, onAddComposition, onCopyAsset, onCopyCompositionPath, onCreateFolder: onCreateAssetFolder, onCreateComposition, onCreateCompositionFolder: onCreateFolder, onCreateTimeline, onDeleteAsset, onDeleteComposition, onDeleteCompositionFolder: onDeleteFolder, onDeleteTimeline, onDuplicateAsset, onDuplicateComposition, onPrerenderComposition, requestNodeExpansion, setContextMenu: onOpenMenu, onFindMediaRequestChange, onRevealComposition, onSelectTimeline, onSortAssets } = useFileManager();
   const data = node.data;
   const displayName = data.kind === "composition" ? getDisplayNameFromPath(data.composition.filePath) :
@@ -676,6 +716,7 @@ function UnifiedTreeNode({ dragHandle, node, style }: NativeTreeNodeRendererProp
     }
     if (data.kind === "project-folder") {
       onOpenMenu({ x: event.clientX, y: event.clientY, items: [
+        { label: "New file", action: () => onCreateProjectFile(data.path) },
         { label: "New composition", action: () => { onCreateComposition(data.path); requestNodeExpansion(projectFolderNodeId(data.path)); } },
         { label: "New timeline", action: () => { onCreateTimeline(data.path); requestNodeExpansion(projectFolderNodeId(data.path)); } },
         { label: "New folder", action: () => { onCreateFolder(data.path); requestNodeExpansion(projectFolderNodeId(data.path)); } },
@@ -688,10 +729,14 @@ function UnifiedTreeNode({ dragHandle, node, style }: NativeTreeNodeRendererProp
       onOpenMenu({ x: event.clientX, y: event.clientY, items: [{ label: "Rename", action: () => node.edit() }, { label: "Delete", action: () => onDeleteTimeline(data.timeline.id), danger: true, disabled: timelines.length <= 1 }] });
       return;
     }
-    onOpenMenu({ x: event.clientX, y: event.clientY, items: [{ label: "Add to timeline", action: () => onAddComposition(data.composition.id) }, { label: data.composition.prerender ? "Unmark prerender" : "Mark prerender", action: () => onPrerenderComposition?.(data.composition.id), disabled: !onPrerenderComposition }, { label: "Rename", action: () => node.edit() }, { label: "Duplicate", action: () => onDuplicateComposition(data.composition.id) }, { label: "Copy path", action: () => onCopyCompositionPath(data.composition.id) }, { label: "Reveal in Finder", action: () => onRevealComposition(data.composition.id) }, { label: "Find media in project", action: () => onFindMediaRequestChange?.({ compositionId: data.composition.id, fileName: data.composition.filePath.split("/").pop() || data.composition.filePath }) }, { label: "Delete", action: () => onDeleteComposition(data.composition.id), danger: true }] });
+    if (data.kind === "project-file") {
+      onOpenMenu({ x: event.clientX, y: event.clientY, items: [{ label: "Rename", action: () => node.edit() }] });
+      return;
+    }
+    onOpenMenu({ x: event.clientX, y: event.clientY, items: [{ label: "Add to timeline", action: () => onAddComposition(data.composition.id) }, { label: "Toggle timeline prerender", action: () => onPrerenderComposition?.(data.composition.id), disabled: !onPrerenderComposition }, { label: "Rename", action: () => node.edit() }, { label: "Duplicate", action: () => onDuplicateComposition(data.composition.id) }, { label: "Copy path", action: () => onCopyCompositionPath(data.composition.id) }, { label: "Reveal in Finder", action: () => onRevealComposition(data.composition.id) }, { label: "Find media in project", action: () => onFindMediaRequestChange?.({ compositionId: data.composition.id, fileName: data.composition.filePath.split("/").pop() || data.composition.filePath }) }, { label: "Delete", action: () => onDeleteComposition(data.composition.id), danger: true }] });
   }
 
-  const Icon = data.kind === "asset-file" ? FileIcon : data.kind === "timeline" ? ChartNoAxesGantt : data.kind === "composition" ? Clapperboard : Folder;
+  const Icon = data.kind === "asset-file" || data.kind === "project-file" ? FileIcon : data.kind === "timeline" ? ChartNoAxesGantt : data.kind === "composition" ? Clapperboard : Folder;
   const contentClass = data.kind === "composition" ? (data.composition.sourceMissing ? "text-[#8c929f]" : "text-[#38d996]") : "text-current";
 
   function hideNativeCompositionDragImage(event: React.DragEvent<HTMLDivElement>) {
@@ -787,6 +832,7 @@ function buildUnifiedFileTree(compositions: CompositionClip[], folders: string[]
 
 function projectNodeToFileNode(node: ProjectFileTreeNode): FileManagerTreeNode {
   if (node.kind === "folder") return { id: projectFolderNodeId(node.path), kind: "project-folder", path: node.path, name: node.name, children: node.children.map(projectNodeToFileNode) };
+  if (node.kind === "project-file") return { id: projectFileNodeId(node.path), kind: "project-file", path: node.path, name: node.name };
   if (node.kind === "composition") return { id: compositionNodeId(node.composition.id), kind: "composition", name: getDisplayNameFromPath(node.composition.filePath), composition: node.composition };
   return { id: timelineNodeId(node.timeline.id), kind: "timeline", name: getDisplayNameFromPath(node.timeline.filePath || node.timeline.id), timeline: node.timeline };
 }
@@ -800,6 +846,10 @@ function assetToFileNode(asset: AssetItem): FileManagerTreeNode {
 
 function projectFolderNodeId(path: string) {
   return `project-folder:${path}`;
+}
+
+function projectFileNodeId(path: string) {
+  return `project-file:${path}`;
 }
 
 function assetNodeId(assetId: string) {
@@ -1068,6 +1118,10 @@ function renameFileTreeNodeForDestination(node: FileManagerTreeNode, siblingName
     const name = nextAvailableFileTreeName(node.asset.name, siblingNames);
     return { ...node, name, asset: { ...node.asset, name } };
   }
+  if (node.kind === "project-file") {
+    const fileName = nextAvailableFileTreeName(getFileName(node.path), siblingNames);
+    return fileName === getFileName(node.path) ? node : { ...node, name: fileName, path: replaceFileName(node.path, fileName), id: projectFileNodeId(replaceFileName(node.path, fileName)) };
+  }
   if (node.kind === "composition") {
     const fileName = nextAvailableFileTreeName(getFileName(node.composition.filePath), siblingNames);
     return fileName === getFileName(node.composition.filePath) ? node : { ...node, name: fileName, composition: { ...node.composition, filePath: replaceFileName(node.composition.filePath, fileName) } };
@@ -1079,6 +1133,7 @@ function renameFileTreeNodeForDestination(node: FileManagerTreeNode, siblingName
 function getFileTreeNodeCollisionName(node: FileManagerTreeNode) {
   if (node.kind === "project-folder") return node.name;
   if (node.kind === "asset-file" || node.kind === "asset-folder") return node.asset.name;
+  if (node.kind === "project-file") return getFileName(node.path);
   if (node.kind === "composition") return getFileName(node.composition.filePath);
   return getFileName(node.timeline.filePath || `${node.timeline.id}.timeline.json`);
 }
@@ -1125,6 +1180,7 @@ function createFileManagerState(nodes: FileManagerTreeNode[], openState?: Record
 
 function fileTreeNodeToStateNode(node: FileManagerTreeNode): FileManagerStateNode {
   if (node.kind === "project-folder" || node.kind === "asset-folder") return { id: node.id, children: node.children.map(fileTreeNodeToStateNode) };
+  if (node.kind === "project-file") return { id: node.id, filePath: node.path };
   return { id: node.id };
 }
 
@@ -1135,6 +1191,10 @@ function collectProjectTreeSnapshot(node: FileManagerTreeNode, parentPath: strin
     snapshot.compositionFolders.push(folderPath);
     const childNames = new Set<string>();
     for (const child of node.children) collectProjectTreeSnapshot(child, folderPath, snapshot, childNames);
+    return;
+  }
+  if (node.kind === "project-file") {
+    const fileName = nextAvailableFileTreeName(getFileName(node.path), siblingNames);
     return;
   }
   if (node.kind === "composition") {
@@ -1178,6 +1238,15 @@ function assetFromFileTreeNode(node: Extract<FileManagerTreeNode, { kind: "asset
   return { ...node.asset, name, children: node.children.flatMap((child) => child.kind === "asset-file" || child.kind === "asset-folder" ? [assetFromFileTreeNode(child, childNames)] : []) };
 }
 
+function insertProjectFileTreeNode(nodes: FileManagerTreeNode[], parentPath: string, projectFile: Extract<FileManagerTreeNode, { kind: "project-file" }>): FileManagerTreeNode[] {
+  if (!parentPath) return [...nodes, projectFile];
+  return nodes.map((node) => {
+    if (node.kind === "project-folder" && node.path === parentPath) return { ...node, children: [...node.children, projectFile] };
+    if (node.kind === "project-folder" || node.kind === "asset-folder") return { ...node, children: insertProjectFileTreeNode(node.children, parentPath, projectFile) } as FileManagerTreeNode;
+    return node;
+  });
+}
+
 function syncFileTreeToSavedState(rawNodes: FileManagerTreeNode[], stateNodes?: FileManagerStateNode[]): FileManagerTreeNode[] {
   if (!stateNodes?.length) return rawNodes;
   const remaining = [...rawNodes];
@@ -1185,8 +1254,8 @@ function syncFileTreeToSavedState(rawNodes: FileManagerTreeNode[], stateNodes?: 
 
   for (const stateNode of stateNodes) {
     const rawIndex = remaining.findIndex((node) => node.id === stateNode.id);
-    if (rawIndex < 0) continue;
-    const [rawNode] = remaining.splice(rawIndex, 1);
+    const rawNode = rawIndex >= 0 ? remaining.splice(rawIndex, 1)[0] : stateNode.filePath ? { id: projectFileNodeId(stateNode.filePath), kind: "project-file" as const, path: stateNode.filePath, name: getFileName(stateNode.filePath) } : null;
+    if (!rawNode) continue;
     if ((rawNode.kind === "project-folder" || rawNode.kind === "asset-folder") && stateNode.children) next.push({ ...rawNode, children: syncFileTreeToSavedState(rawNode.children, stateNode.children) } as FileManagerTreeNode);
     else next.push(rawNode);
   }

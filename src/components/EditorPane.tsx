@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { compositionApiSource } from "../core/compositionApiSource";
 import { clipperHost } from "../app/clipperHost";
 import { getDisplayNameFromPath } from "../core/fileNames";
-import { monacoOptions } from "../app/config";
+import { getMonacoOptionsForDocument } from "../app/config";
 import { configureMonacoTypeScriptLanguageService } from "../app/editor/monacoLanguageService";
 import type { CodeViewportState } from "../core/types";
 
@@ -56,12 +56,13 @@ export function EditorPane({ document, tabs, viewportState, active = true, proje
   const applySourceChangeRef = useRef(onSourceChange);
   const editorRef = useRef<MonacoEditor | null>(null);
   const restoreScrollFrameRef = useRef(0);
-  const saveScrollFrameRef = useRef(0);
   const restoreScrollTimersRef = useRef<number[]>([]);
   const viewportStateChangeRef = useRef(onViewportStateChange);
   const sourceIdRef = useRef(sourceId);
   const activeRef = useRef(active);
+  const wordWrapRef = useRef<"on" | "off">("off");
   const latestViewportStateRef = useRef<CodeViewportState>(editorViewportStateCache.get(sourceId) ?? viewportState ?? { scrollLeft: 0, scrollTop: 0 });
+  const editorOptions = getMonacoOptionsForDocument({ ...document, source });
 
   useEffect(() => { saveAllRef.current = onSaveAll; }, [onSaveAll]);
   useEffect(() => { closeActiveTabRef.current = () => onCloseTab(document.id); }, [document.id, onCloseTab]);
@@ -100,14 +101,25 @@ export function EditorPane({ document, tabs, viewportState, active = true, proje
   }
 
   useEffect(() => () => {
-    const viewState = editorRef.current?.saveViewState();
-    if (viewState) editorMonacoViewStateCache.set(sourceIdRef.current, viewState);
-    editorViewportStateCache.set(sourceIdRef.current, latestViewportStateRef.current);
-    viewportStateChangeRef.current(sourceIdRef.current, latestViewportStateRef.current);
+    persistEditorViewportState();
     window.cancelAnimationFrame(restoreScrollFrameRef.current);
-    window.cancelAnimationFrame(saveScrollFrameRef.current);
     restoreScrollTimersRef.current.forEach((timer) => window.clearTimeout(timer));
   }, []);
+
+  useEffect(() => () => persistEditorViewportState(), [sourceId]);
+
+  function persistEditorViewportState() {
+    saveMonacoViewState();
+    editorViewportStateCache.set(sourceIdRef.current, latestViewportStateRef.current);
+    viewportStateChangeRef.current(sourceIdRef.current, latestViewportStateRef.current);
+  }
+
+  function saveMonacoViewState() {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const viewState = editor.saveViewState();
+    if (viewState) editorMonacoViewStateCache.set(sourceIdRef.current, viewState);
+  }
 
   function restoreScrollPosition() {
     const editor = editorRef.current;
@@ -120,6 +132,7 @@ export function EditorPane({ document, tabs, viewportState, active = true, proje
 
   useEffect(() => {
     latestViewportStateRef.current = editorViewportStateCache.get(sourceId) ?? viewportState ?? { scrollLeft: 0, scrollTop: 0 };
+    saveMonacoViewState();
     window.cancelAnimationFrame(restoreScrollFrameRef.current);
     restoreScrollTimersRef.current.forEach((timer) => window.clearTimeout(timer));
     restoreScrollTimersRef.current = [];
@@ -131,7 +144,7 @@ export function EditorPane({ document, tabs, viewportState, active = true, proje
   }, [active, sourceId, viewportState]);
 
   const configureMonaco: BeforeMount = (monaco) => {
-    const { accent, alpha: accentAlpha } = getClipperAccent();
+    const { accent } = getClipperAccent();
     monaco.editor.defineTheme("clipper-dark", {
       base: "vs-dark",
       inherit: true,
@@ -155,7 +168,7 @@ export function EditorPane({ document, tabs, viewportState, active = true, proje
         "editorWidget.border": "#2d313b",
         "scrollbarSlider.background": "#9b9da747",
         "scrollbarSlider.hoverBackground": "#d9dbe15c",
-        "scrollbarSlider.activeBackground": accentAlpha(0.4),
+        "scrollbarSlider.activeBackground": "#d9dbe180",
       },
     });
     configureMonacoTypeScriptLanguageService(monaco);
@@ -178,22 +191,17 @@ export function EditorPane({ document, tabs, viewportState, active = true, proje
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => { void saveAllRef.current(); });
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyW, () => { closeActiveTabRef.current(); });
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyT, () => { restoreClosedTabRef.current(); });
+    editor.addCommand(monaco.KeyMod.Alt | monaco.KeyCode.KeyZ, () => {
+      wordWrapRef.current = wordWrapRef.current === "off" ? "on" : "off";
+      editor.updateOptions({ wordWrap: wordWrapRef.current });
+    });
     editor.onDidScrollChange(() => {
       if (!activeRef.current) return;
       latestViewportStateRef.current = { scrollLeft: Math.max(Math.round(editor.getScrollLeft()), 0), scrollTop: Math.max(Math.round(editor.getScrollTop()), 0) };
-      const viewState = editor.saveViewState();
-      if (viewState) editorMonacoViewStateCache.set(sourceIdRef.current, viewState);
       editorViewportStateCache.set(sourceIdRef.current, latestViewportStateRef.current);
-      if (saveScrollFrameRef.current) return;
-      saveScrollFrameRef.current = requestAnimationFrame(() => {
-        saveScrollFrameRef.current = 0;
-        viewportStateChangeRef.current(sourceIdRef.current, latestViewportStateRef.current);
-      });
     });
-    editor.onDidContentSizeChange(() => { if (activeRef.current) restoreScrollPosition(); });
     editor.onDidChangeCursorPosition(() => {
-      const viewState = editor.saveViewState();
-      if (viewState) editorMonacoViewStateCache.set(sourceIdRef.current, viewState);
+      saveMonacoViewState();
     });
     restoreScrollPosition();
   };
@@ -206,5 +214,5 @@ export function EditorPane({ document, tabs, viewportState, active = true, proje
     const selected = tab.id === document.id;
     return <button key={tab.id} type="button" className={`group flex max-w-[220px] shrink-0 items-center gap-2 rounded-t-[3px] border border-b-0 px-3 py-2 text-left font-bold transition-colors ${selected ? "border-[#2d313b] bg-[#12141a] text-[#dfe2ea]" : "border-transparent bg-transparent text-[#8c929f] hover:bg-[#20232c] hover:text-[#dfe2ea]"}`} title={tab.filePath} onClick={() => onSelectTab(tab.id)} onDoubleClick={() => onPinTab(tab.id)}><span className={`min-w-0 truncate ${tab.isPinned ? "" : "italic"}`}>{tabTitle}</span>{tab.unsupportedReason ? <span className="text-[#f0b35c]">!</span> : null}<span className="rounded-[3px] px-1 text-[#565b66] opacity-70 hover:bg-[#2d313b] hover:text-[#dfe2ea] group-hover:opacity-100" role="button" tabIndex={-1} aria-label={`Close ${tabTitle}`} onClick={(event) => { event.stopPropagation(); onCloseTab(tab.id); }} onDoubleClick={(event) => event.stopPropagation()}>×</span></button>;
   })}</div>
-{apiMissing ? <div className="flex items-center justify-between gap-2 border-b border-[#3b2a2a] bg-[#1a0f10] px-3.5 py-2 text-xs text-[#ffb4b4]"><span className="break-words">composition-api.ts is missing from the project. External editors and type-checking will not work.</span><button className="shrink-0 rounded bg-[#2d313b] px-2 py-1 text-[11px] font-bold text-[#dfe2ea] hover:bg-[#3b4150]" type="button" onClick={() => void restoreCompositionApi()}>Restore</button></div> : null}<div className="min-h-0 border-y border-[#20232c] bg-[#12141a] shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">{document.unsupportedReason ? <div className="grid h-full place-items-center p-8 text-center"><div className="max-w-[520px] rounded-[18px] border border-[#2d313b] bg-[#171920] p-7 shadow-[0_18px_60px_rgba(0,0,0,0.25)]"><div className="text-sm font-extrabold text-[#dfe2ea]">Unsupported file type</div><div className="mt-2 text-sm leading-6 text-[#8c929f]">{document.unsupportedReason}</div><div className="mt-4 break-all text-xs text-[#565b66]">{document.filePath}</div></div></div> : <Editor beforeMount={configureMonaco} language={document.language} onMount={onEditorMount} options={monacoOptions} path={`file:///${document.filePath}`} theme="clipper-dark" value={source} onChange={(value) => updateSource(value ?? "")} />}</div>{error ? <div className="border-t border-[#3b2a2a] bg-[#1a0f10] px-3.5 py-2 text-xs text-[#ffb4b4] break-words">{error}</div> : null}</div>;
+{apiMissing ? <div className="flex items-center justify-between gap-2 border-b border-[#3b2a2a] bg-[#1a0f10] px-3.5 py-2 text-xs text-[#ffb4b4]"><span className="break-words">composition-api.ts is missing from the project. External editors and type-checking will not work.</span><button className="shrink-0 rounded bg-[#2d313b] px-2 py-1 text-[11px] font-bold text-[#dfe2ea] hover:bg-[#3b4150]" type="button" onClick={() => void restoreCompositionApi()}>Restore</button></div> : null}<div className="min-h-0 border-y border-[#20232c] bg-[#12141a] shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">{document.unsupportedReason ? <div className="grid h-full place-items-center p-8 text-center"><div className="max-w-[520px] rounded-[18px] border border-[#2d313b] bg-[#171920] p-7 shadow-[0_18px_60px_rgba(0,0,0,0.25)]"><div className="text-sm font-extrabold text-[#dfe2ea]">Unsupported file type</div><div className="mt-2 text-sm leading-6 text-[#8c929f]">{document.unsupportedReason}</div><div className="mt-4 break-all text-xs text-[#565b66]">{document.filePath}</div></div></div> : <Editor beforeMount={configureMonaco} language={document.language} onMount={onEditorMount} options={editorOptions} path={`file:///${document.filePath}`} theme="clipper-dark" value={source} onChange={(value) => updateSource(value ?? "")} />}</div>{error ? <div className="border-t border-[#3b2a2a] bg-[#1a0f10] px-3.5 py-2 text-xs text-[#ffb4b4] break-words">{error}</div> : null}</div>;
 }

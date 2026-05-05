@@ -66,11 +66,10 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
   const currentSceneTimeRef = useRef(currentSceneTime);
   const [, setShiftSnapActive] = useState(false);
   const provisionalContentWidth = Math.max(timelineDisplayDuration * defaultTimelinePixelsPerSecond * timelineViewportState.zoom, 160);
-  const { timelineRef, timelineViewportRef, timelineRulerViewportRef, timelineLayerRailRef, timelineSnapGuideRef, timelineZoom, updateTimelineZoom, syncTimelineRulerScroll, saveTimelineDisplacement, scrollTimelineFromLayerRail, updateTimelineSnapGuide, clearTimelineSnapGuide } = useTimelineViewportController({
+  const { timelineRef, timelineViewportRef, timelineLayerRailRef, timelineSnapGuideRef, timelineZoom, updateTimelineZoom, syncTimelineScrollPosition, saveTimelineDisplacement, scrollTimelineFromLayerRail, updateTimelineSnapGuide, clearTimelineSnapGuide } = useTimelineViewportController({
     contentWidth: provisionalContentWidth,
     currentTime: currentSceneTime,
     displayDuration: timelineDisplayDuration,
-    playbackPlayheadRef,
     timelineViewportState,
     onTimelineViewportStateChange,
   });
@@ -152,7 +151,7 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
     snapEnabled: scrubSnapEnabled,
     snapBoundaries: scrubSnapBoundaries,
     onBlurBeforeScrub: blurInspectorFocus,
-    onRulerScroll: syncTimelineRulerScroll,
+    onRulerScroll: syncTimelineScrollPosition,
     onScrub,
     onScrubStart,
     onScrubEnd,
@@ -163,7 +162,7 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
   const { updateTimelineDragAutoScroll, stopTimelineDragAutoScroll } = useTimelineDragAutoScroll({
     viewportRef: timelineViewportRef,
     getTimelineEdgeScrollDelta,
-    onRulerScroll: syncTimelineRulerScroll,
+    onRulerScroll: syncTimelineScrollPosition,
     onScrollPersist: saveTimelineDisplacement,
   });
   const { startTimelinePointerTransaction } = useTimelinePointerTransaction();
@@ -2237,7 +2236,7 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
     if (effectDragPreview) applyEffectDragPreviewElement(effectDragPreview);
   }, [effectDragPreview, contentWidth, layerRows, layerRowStarts, layerRowHeights, timelineDisplayDuration]);
 
-  return <TimelineShell activeMode={mode} contentWidth={contentWidth} currentTime={currentSceneTime} displayDuration={timelineDisplayDuration} dragActive={timelineDragActive || timelineFileDragActive} dragOverlayLabel={timelineFileDragActive ? "Open timeline" : undefined} laneContentHeight={laneContentHeight} laneRowsStyle={laneRowsStyle} layerRailWidth={layerRailWidth} prerenderCacheCoverage={prerenderCacheCoverage} refs={{ playbackPlayheadRef, timelineRef, timelineViewportRef, timelineRulerViewportRef, timelineLayerRailRef, timelineSnapGuideRef, timelinePanelRef }} timelineName={timelineName} timelineViewportDisplacement={timelineViewportState.displacement} timelineZoom={timelineZoom} ticks={ticks} onLayerRailWheel={scrollTimelineFromLayerRail} onModeChange={onModeChange} onTimelineViewportDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) { setTimelineFileDragActive(false); setGlobalTimelineDragActive(false); updateEffectDragPreview(null); } }} onTimelineViewportDragOver={handleCompositionNativeDragOver} onTimelineViewportDrop={handleCompositionNativeDrop} onTimelineViewportScroll={saveTimelineDisplacement} onTimelineZoomChange={updateTimelineZoom} rulerHandlers={{ onPointerDown: startScrub, onPointerMove: continueScrub, onPointerUp: endScrub, onPointerCancel: endScrub }} renderLayerRail={() => <>
+  return <TimelineShell activeMode={mode} contentWidth={contentWidth} currentTime={currentSceneTime} displayDuration={timelineDisplayDuration} dragActive={timelineDragActive || timelineFileDragActive} dragOverlayLabel={timelineFileDragActive ? "Open timeline" : undefined} laneContentHeight={laneContentHeight} laneRowsStyle={laneRowsStyle} layerRailWidth={layerRailWidth} prerenderCacheCoverage={prerenderCacheCoverage} refs={{ playbackPlayheadRef, timelineRef, timelineViewportRef, timelineLayerRailRef, timelineSnapGuideRef, timelinePanelRef }} timelineName={timelineName} timelineZoom={timelineZoom} ticks={ticks} onLayerRailWheel={scrollTimelineFromLayerRail} onModeChange={onModeChange} onTimelineViewportDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) { setTimelineFileDragActive(false); setGlobalTimelineDragActive(false); updateEffectDragPreview(null); } }} onTimelineViewportDragOver={handleCompositionNativeDragOver} onTimelineViewportDrop={handleCompositionNativeDrop} onTimelineViewportScroll={saveTimelineDisplacement} onTimelineZoomChange={updateTimelineZoom} rulerHandlers={{ onPointerDown: startScrub, onPointerMove: continueScrub, onPointerUp: endScrub, onPointerCancel: endScrub }} renderLayerRail={() => <>
             <span className="pointer-events-none absolute inset-y-0 right-0 z-30 w-px bg-[#39404d]" />
             {layerRows.map((row, index) => <span className="pointer-events-none absolute right-0 z-40 w-0.5" key={`layer-accent-${row.key}`} style={{ top: layerRowStarts[index], height: layerRowHeights[index], backgroundColor: row.accent }} />)}
             {layerRows.length > 0 ? <LayerResizeSeparator key={`label-separator-${layerRows[0].key}-top`} top={0} onPointerDown={(event) => startLayerRowResize(event, layerRows[0].key, "top")} /> : null}
@@ -2299,7 +2298,7 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
                 const isUnlinkedPart = Boolean(item.sourceMissing);
                 return (
                   <CompositionTimelineBlock dataAttributes={{ "data-timeline-composition-id": item.id }} key={item.id} name={getDisplayNameFromPath(item.filePath)} duration={previewItem.duration}
- isEmpty={isEmptyPart} sourceMissing={isUnlinkedPart} locked={Boolean(row.locked)} selected={selectedPartIds.has(item.id)} prerendered={Boolean(prerenderedCompositionIds?.has(item.compositionId ?? item.id) && prerenderedCompositionRanges.some((range) => range.compositionId === (item.compositionId ?? item.id) && range.start < item.start + item.duration && range.end > item.start))} style={{ left: `${timelineDisplayDuration > 0 ? (previewItem.start / timelineDisplayDuration) * 100 : 0}%`, width: `calc(${timelineDisplayDuration > 0 ? (previewItem.duration / timelineDisplayDuration) * 100 : 0}% + var(--clipper-composition-resize-width, 0px))` }} onPointerDown={(event) => { if (timelineMarkersEditable) updateCompositionFromPointer(event, item, "move"); }} onClick={() => onSelectPart(item.id)} onDoubleClick={() => onOpenComposePart(item.id)} onContextMenu={(event) => { if (timelineMarkersEditable) openTimelineNodeContextMenu(event, { kind: "part", partId: item.id, compositionLayerId: row.id }); }} leftResizeEnabled={timelineMarkersEditable} rightResizeEnabled={timelineMarkersEditable} onLeftResize={(event) => updateCompositionFromPointer(event, item, "start")} onRightResize={(event) => updateCompositionFromPointer(event, item, "end")} />
+ isEmpty={isEmptyPart} sourceMissing={isUnlinkedPart} locked={Boolean(row.locked)} selected={selectedPartIds.has(item.id)} prerendered={Boolean(prerenderedCompositionIds?.has(item.id) && prerenderedCompositionRanges.some((range) => range.compositionId === item.id && range.start < item.start + item.duration && range.end > item.start))} style={{ left: `${timelineDisplayDuration > 0 ? (previewItem.start / timelineDisplayDuration) * 100 : 0}%`, width: `calc(${timelineDisplayDuration > 0 ? (previewItem.duration / timelineDisplayDuration) * 100 : 0}% + var(--clipper-composition-resize-width, 0px))` }} onPointerDown={(event) => { if (timelineMarkersEditable) updateCompositionFromPointer(event, item, "move"); }} onClick={() => onSelectPart(item.id)} onDoubleClick={() => onOpenComposePart(item.id)} onContextMenu={(event) => { if (timelineMarkersEditable) openTimelineNodeContextMenu(event, { kind: "part", partId: item.id, compositionLayerId: row.id }); }} leftResizeEnabled={timelineMarkersEditable} rightResizeEnabled={timelineMarkersEditable} onLeftResize={(event) => updateCompositionFromPointer(event, item, "start")} onRightResize={(event) => updateCompositionFromPointer(event, item, "end")} />
                 );
               })}
             </TimelineLayerLane>)}

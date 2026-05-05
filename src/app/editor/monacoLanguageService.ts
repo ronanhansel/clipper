@@ -1,6 +1,11 @@
 import { compositionApiSource } from "../../core/compositionApiSource";
 
-export const cssImportDeclarationSource = `declare module "*.css" {
+export const textImportDeclarationSource = `declare module "*.css" {
+  const source: string;
+  export default source;
+}
+
+declare module "*.html" {
   const source: string;
   export default source;
 }
@@ -35,6 +40,6 @@ export function configureMonacoTypeScriptLanguageService(monaco: MonacoTypeScrip
     target: monaco.languages.typescript.ScriptTarget.ES2022,
   });
   monaco.languages.typescript.typescriptDefaults.addExtraLib(compositionApiSource, "file:///clipper/projects/composition-api.ts");
-  monaco.languages.typescript.typescriptDefaults.addExtraLib(cssImportDeclarationSource, "file:///clipper/projects/css-imports.d.ts");
+  monaco.languages.typescript.typescriptDefaults.addExtraLib(textImportDeclarationSource, "file:///clipper/projects/text-imports.d.ts");
   monaco.languages.typescript.typescriptDefaults.setDiagnosticsOptions({ noSemanticValidation: false, noSyntaxValidation: false });
 }

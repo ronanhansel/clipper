@@ -475,7 +475,7 @@ export function useTimelineClipboardCommands({
         } },
         { label: "Paste", action: () => { pasteTimelineNodesAt(target.time, target.compositionLayerId); }, disabled: !timelineNodeClipboardRef.current },
         { label: "Open in editor", action: () => { if (targetCompositionId) openCompositionInEditor(targetCompositionId); }, disabled: target.kind !== "part" || !targetCompositionId },
-        { label: targetPart?.prerender ? "Unmark prerender" : "Mark prerender", action: () => { if (targetCompositionId) prerenderComposition?.(targetCompositionId); }, disabled: target.kind !== "part" || !targetCompositionId || !prerenderComposition },
+        { label: targetPart?.prerender ? "Unmark prerender" : "Mark prerender", action: () => { if (target.kind === "part") prerenderComposition?.(target.partId); }, disabled: target.kind !== "part" || !targetCompositionId || !prerenderComposition },
         { label: "Find media in project", action: () => { if (targetCompositionId && targetFileName) requestFileManagerFindMedia({ compositionId: targetCompositionId, fileName: targetFileName }); }, disabled: target.kind !== "part" || !targetPart?.sourceMissing },
         { label: "Delete", danger: true, action: () => {
           if (target.kind === "part") deleteCompositionsFromTimeline(targetAlreadySelected ? selectedParts.map((selection) => selection.partId) : [target.partId]);

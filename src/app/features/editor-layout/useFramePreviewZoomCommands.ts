@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
+import { flushSync } from "react-dom";
 import { clamp, roundTwo } from "../../../core/math";
 
 type Setter<T> = T | ((current: T) => T);
@@ -45,9 +46,8 @@ export function useFramePreviewZoomCommands({ centerPreviewScrollRef, framePrevi
 
   const zoomFramePreviewAtPoint = useCallback((scaleMultiplier: number, clientX: number, clientY: number) => {
     const viewport = centerPreviewScrollRef.current;
-    const pendingWheelZoom = pendingWheelZoomRef.current?.viewport === viewport ? pendingWheelZoomRef.current : null;
-    const previousScale = pendingWheelZoom?.previousScale ?? framePreviewScaleRef.current;
-    const clampedScale = clamp(framePreviewScaleRef.current * scaleMultiplier, 0.25, 1);
+    const previousScale = framePreviewScaleRef.current;
+    const clampedScale = clamp(previousScale * scaleMultiplier, 0.25, 1);
     if (!viewport) {
       framePreviewScaleRef.current = clampedScale;
       setFramePreviewScale(clampedScale);
@@ -76,14 +76,10 @@ export function useFramePreviewZoomCommands({ centerPreviewScrollRef, framePrevi
       if (!pending) return;
       const latestViewport = centerPreviewScrollRef.current;
       if (latestViewport !== pending.viewport) return;
+      flushSync(() => setFramePreviewScale(pending.scale));
       const ratio = pending.scale / pending.previousScale;
-      setFramePreviewScale(pending.scale);
-      requestAnimationFrame(() => {
-        const currentViewport = centerPreviewScrollRef.current;
-        if (currentViewport !== pending.viewport) return;
-        currentViewport.scrollLeft = Math.max(pending.contentX * ratio - pending.anchorX, 0);
-        currentViewport.scrollTop = Math.max(pending.contentY * ratio - pending.anchorY, 0);
-      });
+      latestViewport.scrollLeft = Math.max(pending.contentX * ratio - pending.anchorX, 0);
+      latestViewport.scrollTop = Math.max(pending.contentY * ratio - pending.anchorY, 0);
     });
   }, [centerPreviewScrollRef, setFramePreviewScale]);
 

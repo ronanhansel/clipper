@@ -26,6 +26,7 @@ const ffmpegPath = require("ffmpeg-static") as string | null;
 const isDev = process.env.VITE_DEV_SERVER_URL || !app.isPackaged;
 const renderVideoChildArgIndex = process.argv.indexOf("--render-video-child");
 const isRenderVideoChildProcess = renderVideoChildArgIndex >= 0;
+app.setName("Clipper");
 app.commandLine.appendSwitch("force-color-profile", "srgb");
 if (isRenderVideoChildProcess && process.platform === "darwin") app.setActivationPolicy("accessory");
 const videoExportSessions = new Map<

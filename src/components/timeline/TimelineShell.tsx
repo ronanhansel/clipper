@@ -10,7 +10,6 @@ export type TimelineShellRefs = {
   playbackPlayheadRef: RefObject<HTMLDivElement | null>;
   timelineRef: RefObject<HTMLDivElement | null>;
   timelineViewportRef: RefObject<HTMLDivElement | null>;
-  timelineRulerViewportRef: RefObject<HTMLDivElement | null>;
   timelineLayerRailRef: RefObject<HTMLDivElement | null>;
   timelineSnapGuideRef: RefObject<HTMLDivElement | null>;
   timelinePanelRef?: RefObject<HTMLElement | null>;
@@ -30,7 +29,6 @@ export type TimelineShellProps = {
   prerenderCacheCoverage?: PrerenderCacheCoverage | null;
   refs: TimelineShellRefs;
   timelineName: string;
-  timelineViewportDisplacement: number;
   timelineZoom: number;
   ticks: number[];
   activeMode: TimelineMode;
@@ -51,9 +49,7 @@ export type TimelineShellProps = {
   renderTimelineViewport: () => ReactNode;
 };
 
-export function TimelineShell({ contentWidth, currentTime, displayDuration, dragActive = false, dragOverlayLabel, emptyContent, laneContentHeight, laneRowsStyle, layerRailWidth, playheadColor = "#ff3b30", prerenderCacheCoverage, refs, timelineName, timelineViewportDisplacement, timelineZoom, ticks, activeMode, onModeChange, onTimelineViewportScroll, onTimelineViewportDragLeave, onTimelineViewportDragOver, onTimelineViewportDrop, onTimelineZoomChange, onLayerRailWheel, rulerHandlers, renderLayerRail, renderTimelineViewport }: TimelineShellProps) {
-  const playheadCapBleed = 5;
-
+export function TimelineShell({ contentWidth, currentTime, displayDuration, dragActive = false, dragOverlayLabel, emptyContent, laneContentHeight, laneRowsStyle, layerRailWidth, playheadColor = "#ff3b30", prerenderCacheCoverage, refs, timelineName, timelineZoom, ticks, activeMode, onModeChange, onTimelineViewportScroll, onTimelineViewportDragLeave, onTimelineViewportDragOver, onTimelineViewportDrop, onTimelineZoomChange, onLayerRailWheel, rulerHandlers, renderLayerRail, renderTimelineViewport }: TimelineShellProps) {
   return (
     <footer ref={refs.timelinePanelRef} data-timeline-panel className={`relative grid h-full min-h-0 select-none grid-rows-[34px_minmax(0,1fr)] gap-1.5 overflow-hidden border-t border-[#1d2028] bg-[#141821] px-[22px] pb-0 pt-2.5 ${dragActive ? "clipper-timeline-dragging-no-hover" : ""}`} onDragLeave={onTimelineViewportDragLeave} onDragOver={onTimelineViewportDragOver} onDrop={onTimelineViewportDrop}>
       {dragActive && dragOverlayLabel ? <div className="pointer-events-none absolute inset-0 z-50 grid place-items-center bg-[rgba(13,17,24,0.78)]"><div className="rounded-full bg-[var(--clipper-accent-muted-surface)] px-5 py-2 text-[12px] font-extrabold uppercase tracking-[0.18em] text-[var(--clipper-accent)]">{dragOverlayLabel}</div></div> : null}
@@ -70,35 +66,35 @@ export function TimelineShell({ contentWidth, currentTime, displayDuration, drag
           <button className="grid h-8 w-8 place-items-center rounded-[9px] border border-[#2d313b] bg-[#14161c] text-[#dfe2ea] hover:border-[var(--clipper-accent)]" title="Zoom timeline in" onClick={() => onTimelineZoomChange(roundTenth(timelineZoom + 0.25))}><Plus size={14} /></button>
         </div>
       </div>
-      <div ref={refs.playbackPlayheadRef} className="relative grid h-full min-h-0 max-h-full grid-rows-[38px_minmax(0,1fr)] overflow-hidden" style={{ "--clipper-playhead-left": `${displayDuration > 0 ? (currentTime / displayDuration) * 100 : 0}%`, "--clipper-timeline-scroll-x": `${-(refs.timelineViewportRef.current?.scrollLeft ?? timelineViewportDisplacement)}px` } as CSSProperties}>
-        <div className="pointer-events-none absolute right-0 top-0 z-30 overflow-hidden pl-0 pr-3" style={{ left: layerRailWidth - playheadCapBleed, height: 38 + laneContentHeight }}>
-          <div className="relative" style={{ width: contentWidth, height: 38 + laneContentHeight, transform: `translate3d(calc(var(--clipper-timeline-scroll-x, 0px) + ${playheadCapBleed}px), 0, 0)`, willChange: "transform" }}>
-            <div ref={refs.timelineSnapGuideRef} className="pointer-events-none absolute top-0 z-20 hidden w-px bg-white/90 shadow-[0_0_0_1px_rgba(255,255,255,0.2),0_0_12px_rgba(255,255,255,0.35)]" style={{ height: 38 + laneContentHeight, transform: "translate3d(0, 0, 0)" }} />
-            <div className="absolute top-[12px] h-3 w-2.5 rounded-[2px]" style={{ left: "var(--clipper-playhead-left)", backgroundColor: playheadColor, clipPath: "polygon(0 0, 100% 0, 100% 68%, 50% 100%, 0 68%)", transform: "translateX(-50%)" }} />
-            <div className="absolute top-[38px] w-px" style={{ left: "var(--clipper-playhead-left)", height: laneContentHeight, backgroundColor: playheadColor }} />
-          </div>
-        </div>
-        <div className="grid min-h-0" style={{ gridTemplateColumns: `${layerRailWidth}px minmax(0, 1fr)` }}>
-          <div className="flex min-w-0 items-center pr-4">
-            <span className="min-w-0 truncate text-[13px] font-extrabold text-[#dfe2ea]" title={timelineName}>{timelineName}</span>
-          </div>
-          <div ref={refs.timelineRulerViewportRef} className="relative overflow-hidden pl-0 pr-3">
-            {prerenderCacheCoverage ? <PrerenderCoverageStrip coverage={prerenderCacheCoverage} sceneDuration={displayDuration} contentWidth={contentWidth} /> : null}
-            <TimeRuler rulerRef={refs.timelineRef} ticks={ticks} sceneDuration={displayDuration} contentWidth={contentWidth} onPointerDown={rulerHandlers.onPointerDown} onPointerMove={rulerHandlers.onPointerMove} onPointerUp={rulerHandlers.onPointerUp} onPointerCancel={rulerHandlers.onPointerCancel} />
-          </div>
-        </div>
-        {emptyContent ? <div className="min-h-0 overflow-hidden">{emptyContent}</div> : <div className="grid min-h-0 overflow-hidden" style={{ gridTemplateColumns: `${layerRailWidth}px minmax(0, 1fr)` }}>
-          <div className="min-h-0 overflow-hidden" onWheel={onLayerRailWheel}>
-            <div ref={refs.timelineLayerRailRef} className="relative grid pr-0 will-change-transform" style={{ ...laneRowsStyle, height: laneContentHeight }}>
+      <div ref={refs.playbackPlayheadRef} className="relative h-full min-h-0 max-h-full overflow-hidden" style={{ "--clipper-playhead-left": `${displayDuration > 0 ? (currentTime / displayDuration) * 100 : 0}%` } as CSSProperties}>
+        <div className="grid h-full min-h-0 overflow-hidden" style={{ gridTemplateColumns: `${layerRailWidth}px minmax(0, 1fr)` }}>
+          <div className="grid min-h-0 min-w-0 grid-rows-[38px_minmax(0,1fr)] overflow-hidden">
+            <div className="flex min-w-0 items-center pr-4">
+              <span className="min-w-0 truncate text-[13px] font-extrabold text-[#dfe2ea]" title={timelineName}>{timelineName}</span>
+            </div>
+            <div className="min-h-0 overflow-hidden" onWheel={onLayerRailWheel}>
+              <div ref={refs.timelineLayerRailRef} className="relative grid pr-0 will-change-transform" style={{ ...laneRowsStyle, height: laneContentHeight }}>
               {renderLayerRail()}
+              </div>
             </div>
           </div>
-          <div ref={refs.timelineViewportRef} className="timeline-scrollbar min-h-0 overflow-x-scroll overflow-y-auto pl-0 pr-3 [scrollbar-gutter:stable]" onScroll={onTimelineViewportScroll}>
-            <div data-timeline-content className="relative grid" style={{ ...laneRowsStyle, width: contentWidth, height: laneContentHeight }}>
-              {renderTimelineViewport()}
+          <div ref={refs.timelineViewportRef} className="timeline-scrollbar h-full min-h-0 min-w-0 overflow-x-scroll overflow-y-auto pl-0 pr-3 [scrollbar-gutter:stable]" onScroll={onTimelineViewportScroll}>
+            <div className="relative" style={{ width: contentWidth, minHeight: 38 + laneContentHeight }}>
+              <div className="pointer-events-none sticky top-0 z-50 h-0" style={{ width: contentWidth }}>
+                <div ref={refs.timelineSnapGuideRef} className="pointer-events-none absolute top-0 z-20 hidden w-px bg-white/90 shadow-[0_0_0_1px_rgba(255,255,255,0.2),0_0_12px_rgba(255,255,255,0.35)]" style={{ height: 38 + laneContentHeight, transform: "translate3d(0, 0, 0)" }} />
+                <div className="absolute top-[12px] h-3 w-2.5 rounded-[2px]" style={{ left: "var(--clipper-playhead-left)", backgroundColor: playheadColor, clipPath: "polygon(0 0, 100% 0, 100% 68%, 50% 100%, 0 68%)", transform: "translateX(-50%)" }} />
+                <div className="absolute top-[38px] w-px" style={{ left: "var(--clipper-playhead-left)", height: laneContentHeight, backgroundColor: playheadColor }} />
+              </div>
+              <div className="sticky top-0 z-30 bg-[#141821]">
+                {prerenderCacheCoverage ? <PrerenderCoverageStrip coverage={prerenderCacheCoverage} sceneDuration={displayDuration} contentWidth={contentWidth} /> : null}
+                <TimeRuler rulerRef={refs.timelineRef} ticks={ticks} sceneDuration={displayDuration} contentWidth={contentWidth} onPointerDown={rulerHandlers.onPointerDown} onPointerMove={rulerHandlers.onPointerMove} onPointerUp={rulerHandlers.onPointerUp} onPointerCancel={rulerHandlers.onPointerCancel} />
+              </div>
+              {emptyContent ? <div className="sticky left-0 grid h-full min-h-[58px] place-items-center">{emptyContent}</div> : <div data-timeline-content className="relative grid" style={{ ...laneRowsStyle, width: contentWidth, height: laneContentHeight }}>
+                {renderTimelineViewport()}
+              </div>}
             </div>
           </div>
-        </div>}
+        </div>
       </div>
     </footer>
   );

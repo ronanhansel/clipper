@@ -178,7 +178,7 @@ export function replacePartInProject(project: ProjectManifest, compositionId: st
 }
 
 function normalizeComposition(composition: CompositionClip): CompositionClip {
-  const { name: _name, ...rest } = composition as any;
+  const { name: _name, prerender: _prerender, ...rest } = composition as any;
   const motionMarkers = getCanonicalMotionMarkers(rest);
   const motionCollections = withCanonicalMotionMarkers(motionMarkers);
   return {
@@ -220,7 +220,7 @@ function normalizeCompositionDocument(composition: CompositionClip, sources: Rec
   if (source === undefined) return undefined;
   return {
     ...normalized,
-    source,
+    source: stripCompositionSourcePrerenderMark(source),
   };
 }
 
@@ -256,12 +256,12 @@ function getSceneFromProjectWithDocs(project: ProjectManifest, sceneId: string, 
     transitionLayers: timeline.transitionLayers ?? [],
     compositions: timeline.clips.flatMap((clip) => {
       const composition = compositionsById.get(clip.compositionId) ?? createMissingCompositionPlaceholder(clip.compositionId, clip);
-      return [{ ...composition, id: clip.id, compositionId: clip.compositionId, start: clip.start, trimStart: clip.trimStart, layerId: clip.layerId, duration: clip.duration ?? composition.duration, motionMarkers: [] }];
+      return [{ ...composition, id: clip.id, compositionId: clip.compositionId, start: clip.start, trimStart: clip.trimStart, layerId: clip.layerId, duration: clip.duration ?? composition.duration, prerender: clip.prerender || undefined, motionMarkers: [] }];
     }),
   };
 }
 
-function getProjectTimelines(project: ProjectManifest): TimelineDocument[] {
+function getProjectTimelines(project: ProjectManifest, legacyPrerenderCompositionIds: Set<string> = new Set()): TimelineDocument[] {
   const timelines = project.timelines ?? [];
   const legacyTimelineLayers = project.editorState?.timelineLayers ? normalizeTimelineLayerState(project.editorState.timelineLayers) : undefined;
   return timelines.map((timeline) => {
@@ -290,6 +290,7 @@ function getProjectTimelines(project: ProjectManifest): TimelineDocument[] {
             start,
             trimStart,
             duration,
+            prerender: (clipRest.prerender || legacyPrerenderCompositionIds.has(clipRest.compositionId)) || undefined,
             motionMarkers: [],
         };
       }),
@@ -313,7 +314,7 @@ function getScenesFromTimelines(timelines: TimelineDocument[], compositions: Com
     transitionLayers: timeline.transitionLayers ?? [],
     compositions: timeline.clips.flatMap((clip) => {
         const composition = compositionsById.get(clip.compositionId) ?? createMissingCompositionPlaceholder(clip.compositionId, clip);
-        return [{ ...composition, id: clip.id, compositionId: clip.compositionId, start: clip.start, trimStart: clip.trimStart, layerId: clip.layerId, duration: clip.duration ?? composition.duration, motionMarkers: [] }];
+        return [{ ...composition, id: clip.id, compositionId: clip.compositionId, start: clip.start, trimStart: clip.trimStart, layerId: clip.layerId, duration: clip.duration ?? composition.duration, prerender: clip.prerender || undefined, motionMarkers: [] }];
       }),
   }));
 }
@@ -351,7 +352,21 @@ function normalizeCompositionFolderPath(folderPath: string) {
 
 function normalizeCompositionSources(sources: Record<string, string> | undefined) {
   if (!sources) return {};
-  return Object.fromEntries(Object.entries(sources).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
+  return Object.fromEntries(Object.entries(sources).filter((entry): entry is [string, string] => typeof entry[1] === "string").map(([filePath, source]) => [filePath, stripCompositionSourcePrerenderMark(source)]));
+}
+
+function stripCompositionSourcePrerenderMark(source: string) {
+  return source.replace(/\n\s*prerender:\s*(?:true|false),?/g, "");
+}
+
+function getLegacyPrerenderCompositionIds(project: ProjectManifest) {
+  const sources = project.compositionSources ?? {};
+  const marked = new Set<string>();
+  for (const composition of [...(project.compositionLibrary ?? []), ...(project.compositions ?? [])]) {
+    const source = composition.source ?? sources[composition.filePath] ?? "";
+    if (composition.prerender || /\n\s*prerender:\s*true\s*,?/.test(source)) marked.add(composition.id);
+  }
+  return marked;
 }
 
 function normalizeFileManagerState(state: FileManagerState | undefined): FileManagerState | undefined {
@@ -458,9 +473,10 @@ function normalizeTransitionLayers(layers: TransitionLayer[] | undefined, layerI
 
 export function normalizeProject(project: ProjectManifest): ProjectManifest {
   const timelineMode = normalizeTimelineMode(project.editorState?.timelineMode);
+  const legacyPrerenderCompositionIds = getLegacyPrerenderCompositionIds(project);
   const compositionDocuments = getCompositionDocuments(project);
   const compositionLibrary = getCompositionLibrary({ ...project, compositions: compositionDocuments });
-  const timelines = getProjectTimelines(project);
+  const timelines = getProjectTimelines(project, legacyPrerenderCompositionIds);
   const scenes = getScenesFromTimelines(timelines, compositionLibrary);
   const selectedSceneId = timelines.some((timeline) => timeline.id === (project.editorState?.selectedTimelineId ?? project.editorState?.selectedSceneId)) ? (project.editorState?.selectedTimelineId ?? project.editorState?.selectedSceneId) : undefined;
   const selectedScene = scenes.find((scene) => scene.id === selectedSceneId) ?? scenes[0];

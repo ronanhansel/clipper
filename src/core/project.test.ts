@@ -50,6 +50,23 @@ describe("project normalization", () => {
     expect(normalized.compositions?.[0].source).toBe("export const composition = { id: 'cmp_intro' };");
   });
 
+  it("migrates legacy composition prerender marks onto timeline clips", () => {
+    const normalized = normalizeProject({
+      ...projectWithComposition(),
+      compositions: [{ ...composition, prerender: true, source: "export const composition = new Composition({\n  duration: 5,\n  prerender: true,\n});" }],
+      compositionLibrary: [{ ...composition, prerender: true }],
+      compositionSources: {
+        [composition.filePath]: "export const composition = new Composition({\n  duration: 5,\n  prerender: true,\n});",
+      },
+    });
+
+    expect(normalized.timelines?.[0].clips[0].prerender).toBe(true);
+    expect(normalized.scenes[0].compositions[0].prerender).toBe(true);
+    expect(normalized.compositions?.[0].prerender).toBeUndefined();
+    expect(normalized.compositionLibrary?.[0].prerender).toBeUndefined();
+    expect(normalized.compositionSources?.[composition.filePath]).not.toContain("prerender");
+  });
+
   it("preserves existing timeline file paths while syncing runtime scene clips", () => {
     const normalized = normalizeProject({
       ...projectWithComposition(),

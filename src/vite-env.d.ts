@@ -15,6 +15,11 @@ declare module "*.css" {
   export default source;
 }
 
+declare module "*.html" {
+  const source: string;
+  export default source;
+}
+
 type LocalFontData = {
   family: string;
   fullName: string;

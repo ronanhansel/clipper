@@ -36,9 +36,9 @@ export const segmentedTabInactive = "bg-[#191c24] text-[#9b9da7] hover:text-whit
 
 export const monacoOptions = {
   automaticLayout: true,
-  bracketPairColorization: { enabled: true },
-  cursorBlinking: "smooth",
-  cursorSmoothCaretAnimation: "on",
+  bracketPairColorization: { enabled: false },
+  cursorBlinking: "blink",
+  cursorSmoothCaretAnimation: "off",
   foldingHighlight: false,
   fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
   fontSize: 12,
@@ -49,11 +49,17 @@ export const monacoOptions = {
   minimap: { enabled: false },
   overviewRulerBorder: false,
   padding: { top: 14, bottom: 14 },
-  renderLineHighlight: "all",
+  renderLineHighlight: "line",
   scrollBeyondLastLine: false,
   tabSize: 2,
-  wordWrap: "on",
+  wordWrap: "off",
 } as const;
+
+export function getMonacoOptionsForDocument(_document: { language: string; source?: string }) {
+  return {
+    ...monacoOptions,
+  } as const;
+}
 
 export function appBarSaveButtonClass(enabled: boolean) {
   return enabled ? appBarSaveButtonEnabled : appBarSaveButtonDisabled;

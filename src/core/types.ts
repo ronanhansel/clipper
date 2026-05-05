@@ -342,6 +342,7 @@ export type TimelineClip = {
   trimStart?: number;
   layerId?: string;
   duration?: number;
+  prerender?: boolean;
   motionMarkers?: MotionMarker[];
 };
 
@@ -488,6 +489,7 @@ export type AssetItem = {
 
 export type FileManagerStateNode = {
   id: string;
+  filePath?: string;
   children?: FileManagerStateNode[];
 };
 

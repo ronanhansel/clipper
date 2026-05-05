@@ -45,11 +45,10 @@ export const ComposeAnimationTimelinePanel = memo(function ComposeAnimationTimel
   const ticks = useMemo(() => getTimelineTicks(timelineDuration), [timelineDuration]);
   const timingDragRef = useRef<ComposeAnimationTimingDrag | null>(null);
   const provisionalContentWidth = Math.max(timelineDuration * defaultTimelinePixelsPerSecond * timelineViewportState.zoom, 160);
-  const { timelineRef, timelineViewportRef, timelineRulerViewportRef, timelineLayerRailRef, timelineSnapGuideRef, timelineZoom, updateTimelineZoom, syncTimelineRulerScroll, saveTimelineDisplacement, scrollTimelineFromLayerRail, updateTimelineSnapGuide, clearTimelineSnapGuide } = useTimelineViewportController({
+  const { timelineRef, timelineViewportRef, timelineLayerRailRef, timelineSnapGuideRef, timelineZoom, updateTimelineZoom, syncTimelineScrollPosition, saveTimelineDisplacement, scrollTimelineFromLayerRail, updateTimelineSnapGuide, clearTimelineSnapGuide } = useTimelineViewportController({
     contentWidth: provisionalContentWidth,
     currentTime,
     displayDuration: timelineDuration,
-    playbackPlayheadRef,
     timelineViewportState,
     onTimelineViewportStateChange,
   });
@@ -93,7 +92,7 @@ export const ComposeAnimationTimelinePanel = memo(function ComposeAnimationTimel
     viewportRef: timelineViewportRef,
     snapEnabled: scrubSnapEnabled,
     snapBoundaries: scrubSnapBoundaries,
-    onRulerScroll: syncTimelineRulerScroll,
+    onRulerScroll: syncTimelineScrollPosition,
     onScrub,
     onScrubStart,
     onScrubEnd,
@@ -102,7 +101,7 @@ export const ComposeAnimationTimelinePanel = memo(function ComposeAnimationTimel
   const { updateTimelineDragAutoScroll: updateTimingDragAutoScroll, stopTimelineDragAutoScroll: stopTimingDragAutoScroll } = useTimelineDragAutoScroll({
     viewportRef: timelineViewportRef,
     getTimelineEdgeScrollDelta,
-    onRulerScroll: syncTimelineRulerScroll,
+    onRulerScroll: syncTimelineScrollPosition,
     onScrollPersist: saveTimelineDisplacement,
   });
   const { startTimelinePointerTransaction: startTimingPointerTransaction } = useTimelinePointerTransaction();
@@ -223,11 +222,11 @@ export const ComposeAnimationTimelinePanel = memo(function ComposeAnimationTimel
   }
 
   if (!part) {
-    return <TimelineShell activeMode="compose" contentWidth={contentWidth} currentTime={currentTime} displayDuration={timelineDuration} emptyContent={<div className="grid h-full place-items-center text-center text-sm font-bold text-[#737884]">Move the playhead over a composition to edit its animations.</div>} laneContentHeight={laneContentHeight} laneRowsStyle={laneRowsStyle} layerRailWidth={layerRailWidth} playheadColor="var(--clipper-accent)" refs={{ playbackPlayheadRef, timelineRef, timelineViewportRef, timelineRulerViewportRef, timelineLayerRailRef, timelineSnapGuideRef }} timelineName="Compose" timelineViewportDisplacement={timelineViewportState.displacement} timelineZoom={timelineZoom} ticks={ticks} onLayerRailWheel={scrollTimelineFromLayerRail} onModeChange={(nextMode) => { if (nextMode === "composition") onExitCompose(); }} onTimelineViewportScroll={saveTimelineDisplacement} onTimelineZoomChange={updateTimelineZoom} rulerHandlers={{ onPointerDown: startScrub, onPointerMove: continueScrub, onPointerUp: endScrub, onPointerCancel: endScrub }} renderLayerRail={() => null} renderTimelineViewport={() => null} />;
+    return <TimelineShell activeMode="compose" contentWidth={contentWidth} currentTime={currentTime} displayDuration={timelineDuration} emptyContent={<div className="grid h-full place-items-center text-center text-sm font-bold text-[#737884]">Move the playhead over a composition to edit its animations.</div>} laneContentHeight={laneContentHeight} laneRowsStyle={laneRowsStyle} layerRailWidth={layerRailWidth} playheadColor="var(--clipper-accent)" refs={{ playbackPlayheadRef, timelineRef, timelineViewportRef, timelineLayerRailRef, timelineSnapGuideRef }} timelineName="Compose" timelineZoom={timelineZoom} ticks={ticks} onLayerRailWheel={scrollTimelineFromLayerRail} onModeChange={(nextMode) => { if (nextMode === "composition") onExitCompose(); }} onTimelineViewportScroll={saveTimelineDisplacement} onTimelineZoomChange={updateTimelineZoom} rulerHandlers={{ onPointerDown: startScrub, onPointerMove: continueScrub, onPointerUp: endScrub, onPointerCancel: endScrub }} renderLayerRail={() => null} renderTimelineViewport={() => null} />;
   }
 
-  return <TimelineShell activeMode="compose" contentWidth={contentWidth} currentTime={currentTime} displayDuration={timelineDuration} dragActive={timelineDragActive} laneContentHeight={laneContentHeight} laneRowsStyle={laneRowsStyle} layerRailWidth={layerRailWidth} playheadColor="var(--clipper-accent)" refs={{ playbackPlayheadRef, timelineRef, timelineViewportRef, timelineRulerViewportRef, timelineLayerRailRef, timelineSnapGuideRef }} timelineName={getDisplayNameFromPath(part.filePath)}
- timelineViewportDisplacement={timelineViewportState.displacement} timelineZoom={timelineZoom} ticks={ticks} onLayerRailWheel={scrollTimelineFromLayerRail} onModeChange={(nextMode) => { if (nextMode === "composition") onExitCompose(); }} onTimelineViewportScroll={saveTimelineDisplacement} onTimelineZoomChange={updateTimelineZoom} rulerHandlers={{ onPointerDown: startScrub, onPointerMove: continueScrub, onPointerUp: endScrub, onPointerCancel: endScrub }} renderLayerRail={() => <>
+  return <TimelineShell activeMode="compose" contentWidth={contentWidth} currentTime={currentTime} displayDuration={timelineDuration} dragActive={timelineDragActive} laneContentHeight={laneContentHeight} laneRowsStyle={laneRowsStyle} layerRailWidth={layerRailWidth} playheadColor="var(--clipper-accent)" refs={{ playbackPlayheadRef, timelineRef, timelineViewportRef, timelineLayerRailRef, timelineSnapGuideRef }} timelineName={getDisplayNameFromPath(part.filePath)}
+ timelineZoom={timelineZoom} ticks={ticks} onLayerRailWheel={scrollTimelineFromLayerRail} onModeChange={(nextMode) => { if (nextMode === "composition") onExitCompose(); }} onTimelineViewportScroll={saveTimelineDisplacement} onTimelineZoomChange={updateTimelineZoom} rulerHandlers={{ onPointerDown: startScrub, onPointerMove: continueScrub, onPointerUp: endScrub, onPointerCancel: endScrub }} renderLayerRail={() => <>
     <span className="pointer-events-none absolute inset-y-0 right-0 z-30 w-px bg-[#39404d]" />
     {layers.map((layer, index) => <span className="pointer-events-none absolute right-0 z-40 w-0.5 bg-[#6f7684]" key={`compose-layer-accent-${layer.id}`} style={{ top: layerRowStarts[index], height: layerRowHeights[index] }} />)}
     {layers.length > 0 ? <LayerResizeSeparator key={`compose-label-separator-${layers[0].id}-top`} top={0} onPointerDown={(event) => startLayerRowResize(event, layers[0].id, "top")} /> : null}
