@@ -150,7 +150,7 @@ export class RenderEngine {
     const frameRange: ExportFrameRange = { startFrame: 0, endFrame: totalFrames };
     const tempDir = path.join(
       path.dirname(outputPath),
-      `.clipper-export-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      `.export-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     );
     await fs.mkdir(tempDir, { recursive: true });
     onProgress?.({ frame: 0, totalFrames, percent: 0, status: `Preparing ${encoder.label} export...` });
@@ -702,7 +702,7 @@ export class RenderEngine {
 
   private getProjectCacheDirectory(manifestPath: string): string {
     const manifestFilePath = this.resolveClipperFile(manifestPath);
-    const projectDirectory = manifestPath.endsWith("/project.json") ? path.dirname(manifestFilePath) : manifestFilePath.replace(/\.clipper$/i, "");
+    const projectDirectory = path.dirname(manifestFilePath);
     return path.join(projectDirectory, ".cache", "prerender");
   }
 

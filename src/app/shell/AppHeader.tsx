@@ -29,7 +29,7 @@ export function AppHeader({ hasUnsavedChanges, projectName, projectNameDraft, re
         {!renamingProject ? <span className="truncate text-xs text-[#9b9da7]">{sceneName}</span> : null}
       </div>
       <div className={`${appNoDragRegion} flex justify-end gap-1.5`}>
-        <button className={appBarActionButtonBase} title="Open a Clipper .clipper project" onClick={onOpenProject}>Open</button>
+        <button className={appBarActionButtonBase} title="Open a Clipper project folder or project.json" onClick={onOpenProject}>Open</button>
         <button className={appBarActionButtonBase} title="Close project and return to welcome screen" onClick={onCloseProject}>Close</button>
         <button className={appBarActionButtonBase} title="Settings (Cmd/Ctrl+,)" onClick={onSettingsOpen}>Settings</button>
         <button className={appBarActionButtonBase} onClick={onExportOpen}>Export</button>

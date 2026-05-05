@@ -1,4 +1,3 @@
-import JSZip from "jszip";
 import { loadCompositionsFromSource } from "../../core/compositionSource";
 import { normalizeProject, serializeProjectForSave, withRequiredTimelineLayerTypes } from "../../core/project";
 import { FRAME_HEIGHT, FRAME_WIDTH, type CompositionClip, type CompositionDocument, type EditorState, type ProjectManifest, type TimelineDocument } from "../../core/types";
@@ -16,14 +15,6 @@ type SaveProjectInput = {
 
 class ProjectPersistenceService {
   async loadProject({ manifestPath }: LoadProjectInput) {
-    if (manifestPath.endsWith(".clipper")) {
-      const project = await loadZipProject(manifestPath);
-      return {
-        project,
-        sourceStatus: `Project loaded from ${manifestPath}.`,
-      };
-    }
-
     if (manifestPath.endsWith(".json")) {
       const project = await loadDirectoryProject(manifestPath);
       return {
@@ -42,8 +33,7 @@ class ProjectPersistenceService {
 
   async saveProject({ manifestPath, project }: SaveProjectInput) {
     const saveProject = serializeProjectForSave(project);
-    if (manifestPath.endsWith(".clipper")) await saveZipProject(manifestPath, saveProject);
-    else if (manifestPath.endsWith(".json")) await saveDirectoryProject(manifestPath, saveProject);
+    if (manifestPath.endsWith(".json")) await saveDirectoryProject(manifestPath, saveProject);
     else await clipperHost.writeTextFile(manifestPath, `${JSON.stringify(saveProject, null, 2)}\n`);
     return {
       projectSnapshot: JSON.stringify(saveProject),
@@ -53,117 +43,11 @@ class ProjectPersistenceService {
   }
 
   async saveEditorState(manifestPath: string, editorState: EditorState) {
-    if (manifestPath.endsWith(".clipper")) {
-      const zip = await JSZip.loadAsync(await clipperHost.readBinaryFile(manifestPath), { base64: true });
-      const manifestFile = zip.file("project.json");
-      if (!manifestFile) return;
-      const manifestProject = JSON.parse(await manifestFile.async("string")) as Partial<ProjectManifest>;
-      zip.file("project.json", `${JSON.stringify({ ...manifestProject, editorState }, null, 2)}\n`);
-      await clipperHost.writeBinaryFile(manifestPath, await zip.generateAsync({ type: "base64", compression: "DEFLATE" }));
-      return;
-    }
-
     const content = await clipperHost.readTextFile(manifestPath);
     const manifestProject = JSON.parse(content) as ProjectManifest;
     await clipperHost.writeTextFile(manifestPath, `${JSON.stringify({ ...manifestProject, editorState }, null, 2)}\n`);
   }
 
-}
-
-async function loadZipProject(manifestPath: string) {
-  const zip = await JSZip.loadAsync(await clipperHost.readBinaryFile(manifestPath), { base64: true });
-  const manifestFile = zip.file("project.json");
-  if (!manifestFile) throw new Error("Clipper container is missing project.json.");
-
-  const manifestProject = JSON.parse(await manifestFile.async("string")) as ProjectManifest;
-  const rootPath = getDirectoryPath(manifestPath);
-  const timelines = await loadZipTimelines(zip, rootPath, manifestProject.timelineOrder);
-  const compositions = await loadZipCompositions(zip, rootPath);
-  return normalizeProject({
-    ...manifestProject,
-    timelines,
-    compositions,
-    compositionLibrary: compositions,
-    compositionSources: Object.fromEntries(compositions.map((composition) => [composition.filePath, composition.source])),
-    scenes: manifestProject.scenes ?? [],
-  });
-}
-
-async function loadZipTimelines(zip: JSZip, rootPath: string, timelineOrder?: string[]) {
-  const entries = Object.values(zip.files).filter((file) => !file.dir && file.name.startsWith("timelines/") && file.name.endsWith(".json"));
-  const timelines = await Promise.all(
-    entries.map(async (file) => {
-      const content = await file.async("string");
-      const document = JSON.parse(content) as TimelineDocument;
-      const filePath = projectPathFromZipEntry(rootPath, file.name);
-      return { ...document, id: filePath, filePath };
-    })
-  );
-
-  if (timelineOrder?.length) {
-    const orderMap = new Map(timelineOrder.map((id, index) => [id, index]));
-    return timelines.sort((left, right) => {
-      const leftIndex = orderMap.get(left.id);
-      const rightIndex = orderMap.get(right.id);
-      if (leftIndex !== undefined && rightIndex !== undefined) return leftIndex - rightIndex;
-      if (leftIndex !== undefined) return -1;
-      if (rightIndex !== undefined) return 1;
-      return getDisplayNameFromPath(left.filePath || left.id).localeCompare(getDisplayNameFromPath(right.filePath || right.id), undefined, { sensitivity: "base" });
-    });
-  }
-
-  return timelines.sort((left, right) => getDisplayNameFromPath(left.filePath || left.id).localeCompare(getDisplayNameFromPath(right.filePath || right.id), undefined, { sensitivity: "base" }));
-}
-
-async function loadZipCompositions(zip: JSZip, rootPath: string) {
-  const entries = Object.values(zip.files).filter((file) => !file.dir && file.name.startsWith("compositions/") && file.name.endsWith(".composition.ts"));
-  return Promise.all(entries.map(async (file) => {
-    const source = await file.async("string");
-    const filePath = projectPathFromZipEntry(rootPath, file.name);
-    const baseComposition = createBaseComposition(filePath, filePath, source);
-    try {
-      const document = await compositionFromProjectSource(baseComposition, source, async (relativePath) => {
-        const zipPath = relativePath.startsWith("compositions/") ? relativePath : `compositions/${relativePath}`;
-        const entry = zip.file(zipPath);
-        if (!entry) throw new Error(`Composition dependency ${relativePath} was not found.`);
-        return entry.async("string");
-      });
-      return { ...document, source } as CompositionDocument;
-    } catch (error) {
-      return createErroredComposition(baseComposition, source, error);
-    }
-  }));
-}
-
-async function saveZipProject(manifestPath: string, project: ProjectManifest) {
-  const normalized = serializeProjectForSave(project);
-  const rootPath = getDirectoryPath(manifestPath);
-  const zip = new JSZip();
-  const metadataProject = {
-    id: normalized.id,
-    name: normalized.name,
-    resolution: normalized.resolution,
-    assetsPath: normalized.assetsPath,
-    assets: normalized.assets,
-    compositionFolders: normalized.compositionFolders ?? [],
-    timelineOrder: normalized.timelines?.map((timeline) => timeline.id) ?? [],
-    compositionOrder: normalized.compositions?.map((composition) => composition.id) ?? [],
-    editorState: normalized.editorState,
-    scenes: [],
-  };
-  zip.file("project.json", `${JSON.stringify(metadataProject, null, 2)}\n`);
-
-  for (const timeline of normalized.timelines ?? []) {
-    zip.file(safeTimelinePath(timeline, rootPath), `${JSON.stringify(timeline, null, 2)}\n`);
-  }
-
-  for (const composition of normalized.compositions ?? []) {
-    const source = composition.source ?? normalized.compositionSources?.[composition.filePath];
-    if (source === undefined) throw new Error(`Composition ${composition.filePath} is missing source.`);
-    zip.file(safeCompositionPath(composition, rootPath), source);
-  }
-
-  await clipperHost.writeBinaryFile(manifestPath, await zip.generateAsync({ type: "base64", compression: "DEFLATE" }));
 }
 
 export async function getEditableRootPath(rootPath: string): Promise<string> {
@@ -398,21 +282,21 @@ function createErroredComposition(baseComposition: CompositionDocument, source: 
   };
 }
 
-function safeZipName(value: string) {
+function safeFileName(value: string) {
   return value.replace(/[^a-zA-Z0-9_-]+/g, "_") || "item";
 }
 
 function safeCompositionPath(composition: CompositionClip, rootPath: string) {
-  return safeProjectZipPath(composition.filePath, rootPath, "compositions", `${safeZipName(composition.id)}.composition.ts`, ".ts");
+  return safeProjectFilePath(composition.filePath, rootPath, "compositions", `${safeFileName(composition.id)}.composition.ts`, ".ts");
 }
 
 function safeTimelinePath(timeline: TimelineDocument, rootPath: string) {
-  return safeProjectZipPath(timeline.filePath, rootPath, "timelines", `${safeZipName(timeline.id)}.timeline.json`, ".json");
+  return safeProjectFilePath(timeline.filePath, rootPath, "timelines", `${safeFileName(timeline.id)}.timeline.json`, ".json");
 }
 
 function safeDirectoryTimelinePath(timeline: TimelineDocument, rootPath: string) {
   const relativePath = relativeProjectFilePath(timeline.filePath, rootPath);
-  if (relativePath.endsWith(".timeline.json") && isSafeZipEntryPath(relativePath)) return relativePath;
+  if (relativePath.endsWith(".timeline.json") && isSafeProjectFilePath(relativePath)) return relativePath;
   return safeTimelinePath(timeline, rootPath);
 }
 
@@ -420,13 +304,13 @@ function safeCompositionFolderPath(folderPath: string, rootPath: string) {
   const relativePath = relativeProjectFilePath(folderPath, rootPath);
   if (!relativePath || relativePath === "compositions") return "";
   const entryPath = relativePath?.startsWith("compositions/") ? relativePath : relativePath ? `compositions/${relativePath}` : "compositions";
-  return isSafeZipEntryPath(entryPath) ? entryPath : "compositions";
+  return isSafeProjectFilePath(entryPath) ? entryPath : "compositions";
 }
 
-function safeProjectZipPath(filePath: string | undefined, rootPath: string, folder: "compositions" | "timelines", fallbackFileName: string, extension: ".ts" | ".json") {
+function safeProjectFilePath(filePath: string | undefined, rootPath: string, folder: "compositions" | "timelines", fallbackFileName: string, extension: ".ts" | ".json") {
   const relativePath = relativeProjectFilePath(filePath, rootPath);
   const entryPath = relativePath?.startsWith(`${folder}/`) ? relativePath : relativePath ? `${folder}/${relativePath}` : `${folder}/${fallbackFileName}`;
-  if (entryPath.startsWith(`${folder}/`) && entryPath.endsWith(extension) && isSafeZipEntryPath(entryPath)) return entryPath;
+  if (entryPath.startsWith(`${folder}/`) && entryPath.endsWith(extension) && isSafeProjectFilePath(entryPath)) return entryPath;
   return `${folder}/${fallbackFileName}`;
 }
 
@@ -440,12 +324,8 @@ function relativeProjectFilePath(filePath: string | undefined, rootPath: string)
   return normalizedPath;
 }
 
-function isSafeZipEntryPath(filePath: string) {
+function isSafeProjectFilePath(filePath: string) {
   return filePath.split("/").every((segment) => segment && segment !== "." && segment !== "..");
-}
-
-function projectPathFromZipEntry(rootPath: string, entryName: string) {
-  return entryName;
 }
 
 function projectPathFromDirectoryEntry(rootPath: string, relativePath: string, folder: "compositions" | "timelines") {

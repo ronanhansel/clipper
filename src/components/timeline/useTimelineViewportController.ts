@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject, type WheelEvent } from "react";
+import { useEffect, useRef, useState, type WheelEvent } from "react";
 import { clamp } from "../../core/math";
 import type { TimelineViewportState } from "../../core/types";
 

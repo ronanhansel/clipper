@@ -34,10 +34,11 @@ interface Window {
 interface Window {
   clipper?: {
     platform: string;
+    experimentalHtmlCanvasPostProcess?: boolean;
     readTextFile: (relativePath: string) => Promise<string>;
-    readBinaryFile: (relativePath: string) => Promise<string>;
+    readAppState?: () => Promise<Record<string, unknown>>;
+    writeAppState?: (updates: Record<string, unknown>) => Promise<void>;
     writeTextFile: (relativePath: string, content: string) => Promise<void>;
-    writeBinaryFile: (relativePath: string, base64Content: string) => Promise<void>;
     createDirectory: (relativePath: string) => Promise<void>;
     revealFile: (relativePath: string) => Promise<void>;
     revealAbsolutePath?: (filePath: string) => Promise<void>;
@@ -50,7 +51,6 @@ interface Window {
     listSystemFonts: () => Promise<string[]>;
     openProjectManifest: () => Promise<string | null>;
     createProject: (projectName: string) => Promise<string | null>;
-    exportProjectDialog: (defaultFileName: string) => Promise<string | null>;
     exportMediaFile: (defaultFileName: string, content: string) => Promise<string | null>;
     exportBinaryFile: (defaultFileName: string, base64Content: string) => Promise<string | null>;
     startVideoExport: (defaultFileName: string, frameRate: number, width: number, height: number) => Promise<{ sessionId: string; filePath: string } | null>;
@@ -72,7 +72,6 @@ interface Window {
     onProjectFileChanged: (callback: (relativePath: string) => void) => () => void;
     onModeShortcut: (callback: (key: "1" | "2" | "3" | "4") => void) => () => void;
     onSettingsShortcut: (callback: () => void) => () => void;
-    onExportProject: (callback: () => void) => () => void;
     onCloseEditorTabShortcut: (callback: () => void) => () => void;
     onRestoreEditorTabShortcut: (callback: () => void) => () => void;
     onWindowFullscreenChange: (callback: (fullscreen: boolean) => void) => () => void;

@@ -27,7 +27,7 @@ export async function readStoredActiveProjectManifestPath(): Promise<string | nu
   try {
     const state = await readAppState();
     const path = state.activeProjectManifestPath;
-    if (typeof path === "string" && path.startsWith("clipper/") && (path.endsWith(".clipper") || path.endsWith(".json"))) {
+    if (typeof path === "string" && path.startsWith("clipper/") && path.endsWith(".json")) {
       return path;
     }
   } catch {
@@ -35,7 +35,7 @@ export async function readStoredActiveProjectManifestPath(): Promise<string | nu
   }
 
   const localStoragePath = localStorage.getItem(activeProjectManifestStorageKey);
-  if (localStoragePath) return localStoragePath;
+  if (localStoragePath?.endsWith(".json")) return localStoragePath;
 
   return null;
 }
@@ -55,7 +55,7 @@ export async function readRecentProjects(): Promise<RecentProject[]> {
     const state = await readAppState();
     if (Array.isArray(state.recentProjects)) {
       return (state.recentProjects as RecentProject[]).filter(
-        (r) => r && typeof r.path === "string" && typeof r.name === "string"
+        (r) => r && typeof r.path === "string" && r.path.endsWith(".json") && typeof r.name === "string"
       ).slice(0, 10);
     }
   } catch { /* ignore */ }
@@ -74,10 +74,4 @@ export async function removeRecentProject(path: string) {
   let projects = await readRecentProjects();
   projects = projects.filter((r) => r.path !== path);
   await writeAppState({ recentProjects: projects });
-}
-
-export function clipperContainerPath(manifestPath: string) {
-  if (manifestPath.endsWith(".clipper")) return manifestPath;
-  if (manifestPath.endsWith("/project.json")) return manifestPath;
-  return manifestPath.replace(/(?:\/project)?\.json$/, ".clipper");
 }

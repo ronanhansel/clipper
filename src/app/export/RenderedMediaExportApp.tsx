@@ -1,6 +1,11 @@
 import { Component, useLayoutEffect, useMemo, useRef, useState, type ErrorInfo, type ReactNode, type RefObject } from "react";
 import { FramePreview } from "../../components/preview/FramePreview";
+import { applyAdjustmentLayersToPostProcessPasses } from "../../core/adjustments";
 import { CAMERA_PERSPECTIVE } from "../../core/camera";
+import { applyExportPostProcessFrame, type ExportPostProcessFrameRequest, type ExportPostProcessFrameResult } from "../../core/effects/postprocess/exportFrameBridge";
+import { withPostProcessFrameBackground } from "../../core/effects/postprocess/passes";
+import { createLensExportPostProcessRenderer, LensPostProcessRenderer } from "../../core/effects/postprocess/lensWebGlRenderer";
+import type { PostProcessPass } from "../../core/effects/types";
 import { waitForRenderClockAnimationsReady, type RenderClockReadinessResult } from "../../render-engine/renderClock";
 import { FRAME_HEIGHT, FRAME_WIDTH, type CompositionClip, type ProjectManifest, type Scene } from "../../core/types";
 import { deriveFramePreviewRenderModel, getFramePreviewTimelineLayers } from "../state/framePreviewRenderModel";
@@ -15,10 +20,15 @@ type ExportFrameRequest = {
 
 declare global {
   interface Window {
-    __clipperRenderExportFrame?: (request: ExportFrameRequest) => Promise<RenderClockReadinessResult>;
+    __clipperRenderExportFrame?: (request: ExportFrameRequest) => Promise<ExportFrameRenderResult>;
     __clipperSyncExportRenderClock?: () => Promise<RenderClockReadinessResult>;
+    __clipperApplyExportPostProcessFrame?: (request: ExportPostProcessFrameRequest) => Promise<ExportPostProcessFrameResult>;
   }
 }
+
+type ExportFrameRenderResult = RenderClockReadinessResult & {
+  postProcessPasses: PostProcessPass[];
+};
 
 const identityCameraTransform = { x: 0, y: 0, z: 0, scale: 1, rotation: 0, rotateX: 0, rotateY: 0, perspective: CAMERA_PERSPECTIVE, motionBlur: 0 };
 const noopPointerHandler = () => {};
@@ -29,7 +39,7 @@ const noopTextDoubleClick = () => {};
 const noopTrackerPick = () => {};
 const exportFrameReadyTimeoutMs = 5000;
 
-type PendingFrameRequest = { resolve: (result: RenderClockReadinessResult) => void; reject: (error: Error) => void; timeoutId: number };
+type PendingFrameRequest = { resolve: (result: ExportFrameRenderResult) => void; reject: (error: Error) => void; timeoutId: number };
 type ExportFramePreviewRefs = {
   cameraRef: RefObject<HTMLDivElement | null>;
   dragSelectionBoxRef: RefObject<HTMLDivElement | null>;
@@ -42,6 +52,7 @@ export function RenderedMediaExportApp() {
   const cameraRef = useRef<HTMLDivElement | null>(null);
   const frameViewportRef = useRef<HTMLDivElement | null>(null);
   const dragSelectionBoxRef = useRef<HTMLDivElement | null>(null);
+  const postProcessRendererRef = useRef<LensPostProcessRenderer | null>(null);
 
   useLayoutEffect(() => {
     window.__clipperRenderExportFrame = (nextRequest) => new Promise((resolve, reject) => {
@@ -58,10 +69,17 @@ export function RenderedMediaExportApp() {
       await nextAnimationFrame();
       return syncResult;
     };
+    window.__clipperApplyExportPostProcessFrame = (postProcessRequest) => {
+      postProcessRendererRef.current ??= new LensPostProcessRenderer();
+      return applyExportPostProcessFrame(postProcessRequest, [createLensExportPostProcessRenderer(postProcessRendererRef.current)]);
+    };
     return () => {
       rejectPendingFrame(pendingRequestRef, new Error("Export renderer unmounted before frame completed."));
+      postProcessRendererRef.current?.destroy();
+      postProcessRendererRef.current = null;
       delete window.__clipperRenderExportFrame;
       delete window.__clipperSyncExportRenderClock;
+      delete window.__clipperApplyExportPostProcessFrame;
     };
   }, []);
 
@@ -70,8 +88,8 @@ export function RenderedMediaExportApp() {
     let cancelled = false;
     const waitForFrame = async () => {
       try {
-        const syncResult = await window.__clipperSyncExportRenderClock?.() ?? await waitForRenderClockAnimationsReady(frameViewportRef.current);
-        if (!cancelled) resolvePendingFrame(pendingRequestRef, syncResult);
+        const syncResult = (await window.__clipperSyncExportRenderClock?.()) ?? await waitForRenderClockAnimationsReady(frameViewportRef.current);
+        if (!cancelled) resolvePendingFrame(pendingRequestRef, { ...syncResult, postProcessPasses: getExportPostProcessPasses(request) });
       } catch (error) {
         if (!cancelled) rejectPendingFrame(pendingRequestRef, toError(error));
       }
@@ -154,6 +172,19 @@ function ExportFramePreview({ refs, request }: { refs: ExportFramePreviewRefs; r
   return framePreviewProps ? <FramePreview {...framePreviewProps} /> : <div className="h-full w-full bg-black" />;
 }
 
+export function getExportPostProcessPasses(request: ExportFrameRequest): PostProcessPass[] {
+  const previewModel = deriveFramePreviewRenderModel({
+    blankPart: blankPreviewComposition,
+    frameRate: request.frameRate,
+    scene: request.scene,
+    sceneTime: request.sceneTime,
+    timelineLayers: getFramePreviewTimelineLayers(request.project, request.scene.id),
+    timelineMode: "composition",
+  });
+  return applyAdjustmentLayersToPostProcessPasses(request.sceneTime, previewModel.visibleAdjustmentLayers, request.frameRate, { width: FRAME_WIDTH, height: FRAME_HEIGHT })
+    .map((pass) => withPostProcessFrameBackground(pass, previewModel.part.frame.style.background));
+}
+
 const blankPreviewComposition: CompositionClip = {
   id: "__blank_export_preview__",
   filePath: "",
@@ -165,7 +196,7 @@ const blankPreviewComposition: CompositionClip = {
   motionMarkers: [],
 };
 
-function resolvePendingFrame(ref: { current: PendingFrameRequest | null }, result: RenderClockReadinessResult) {
+function resolvePendingFrame(ref: { current: PendingFrameRequest | null }, result: ExportFrameRenderResult) {
   const pending = ref.current;
   if (!pending) return;
   ref.current = null;

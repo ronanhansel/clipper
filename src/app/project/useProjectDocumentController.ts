@@ -9,7 +9,7 @@ import type { Mode, ProjectUpdater } from "../types";
 import { compositionFromSource } from "../../core/compositionSource";
 import { defaultTimelineMode, normalizeProject, replacePartInProject, serializeProjectForSave } from "../../core/project";
 import type { EditorState, Part, ProjectManifest, TimelineMode } from "../../core/types";
-import { clipperContainerPath, writeStoredActiveProjectManifestPath } from "./activeProjectManifest";
+import { writeStoredActiveProjectManifestPath } from "./activeProjectManifest";
 import { getProjectCompositionSources, getSyncedCompositionSources } from "./projectSources";
 import type { Command } from "../features/file-manager/operations/Command";
 
@@ -193,18 +193,17 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
   async function loadProjectFromManifest(manifestPath: string) {
     const { project: loadedProject, sourceStatus: nextSourceStatus } = await projectPersistenceService.loadProject({ manifestPath });
     const normalizedProject = normalizeProject(loadedProject);
-    const activeManifestPath = clipperContainerPath(manifestPath);
     const loadedCompositionSources = getProjectCompositionSources(normalizedProject);
 
-    await storeActiveProjectManifestPath(activeManifestPath);
-    setActiveProjectManifestPath(activeManifestPath);
+    await storeActiveProjectManifestPath(manifestPath);
+    setActiveProjectManifestPath(manifestPath);
     resetProjectHistory();
     replaceProject(normalizedProject, { history: false, syncSources: false });
     applyEditorState(normalizedProject.editorState!);
     setCompositionSources(loadedCompositionSources);
     setSavedProjectSnapshot(getProjectContentSnapshot(normalizedProject));
     setSavedCompositionSourcesSnapshot(JSON.stringify(loadedCompositionSources));
-    setSourceStatus(manifestPath === activeManifestPath ? nextSourceStatus : `Migrated ${manifestPath} to ${activeManifestPath}. Save to write the .clipper container.`);
+    setSourceStatus(nextSourceStatus);
   }
 
   const reloadProjectFromDisk = useCallback(async () => {

@@ -18,11 +18,7 @@ export function useProjectFileWatcher({
   const isFileSystemBusyRef = useRef(isFileSystemBusy);
   reloadProjectRef.current = reloadProject;
   isFileSystemBusyRef.current = isFileSystemBusy;
-  const isDirectory = !manifestPath.endsWith(".clipper");
-
   useEffect(() => {
-    if (!isDirectory) return;
-
     const directories = [manifestPath.replace(/\/project\.json$/, "/file-manager")].filter(Boolean);
 
     void window.clipper?.watchProjectFiles?.({ files: [], directories });
@@ -44,5 +40,5 @@ export function useProjectFileWatcher({
       cleanup?.();
       void window.clipper?.watchProjectFiles?.({ files: [], directories: [] });
     };
-  }, [isDirectory, manifestPath]);
+  }, [manifestPath]);
 }

@@ -1,4 +1,7 @@
 import type { AdjustmentEffectDefinition, AdjustmentLayer, MotionBlock, MotionEffectDefinition, TransitionEffectDefinition, TransitionLayer, Point } from "../types";
+import type { LensPostProcessPass } from "./postprocess/lens";
+
+export type PostProcessPass = LensPostProcessPass;
 
 export type AdjustmentVisualStyle = {
   filter?: string;
@@ -108,9 +111,11 @@ export type AdjustmentEffectPackage = AdjustmentEffectDefinition & {
   paramControls?: readonly AdjustmentEffectParamControl[];
   pointControls?: readonly AdjustmentEffectPointControl[];
   timeSensitive?: boolean;
+  requiresLiveDomPostProcessSource?: boolean;
   createDefaultLayer(input: { id: string; layerId?: string; start: number; duration: number }): AdjustmentLayer;
   applySceneTime?(input: { sceneTime: number; layer: AdjustmentLayer; frameRate: number }): number;
   applyVisualStyle?(input: { sceneTime: number; layer: AdjustmentLayer; frameRate: number }): AdjustmentVisualStyle;
+  collectPostProcessPasses?(input: { sceneTime: number; layer: AdjustmentLayer; frameRate: number; frameSize: { width: number; height: number } }): PostProcessPass[];
   getDisplayElapsed?(input: { elapsed: number; layer: AdjustmentLayer; frameRate: number }): number;
   validate?(layer: AdjustmentLayer): string | null;
 };

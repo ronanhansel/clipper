@@ -1,6 +1,6 @@
 import type { AdjustmentLayer } from "./types";
 import { getAdjustmentEffectPackage } from "./effects/registry";
-import type { AdjustmentVisualStyle } from "./effects/types";
+import type { AdjustmentVisualStyle, PostProcessPass } from "./effects/types";
 
 export const defaultAdjustmentFrameRate = 30;
 
@@ -32,6 +32,12 @@ export function applyAdjustmentLayersToVisualStyle(sceneTime: number, layers: Ad
       overlays: [...(style.overlays ?? []), ...(nextStyle.overlays ?? [])],
     };
   }, {});
+}
+
+export function applyAdjustmentLayersToPostProcessPasses(sceneTime: number, layers: AdjustmentLayer[] | undefined, frameRate = defaultAdjustmentFrameRate, frameSize: { width: number; height: number }): PostProcessPass[] {
+  return getActiveAdjustmentLayers(layers, sceneTime).flatMap((layer) => {
+    return getAdjustmentEffectPackage(layer.effect.effectId)?.collectPostProcessPasses?.({ sceneTime, layer, frameRate, frameSize }) ?? [];
+  });
 }
 
 export function getTimeSensitiveDisplayTime(sceneTime: number, layers: AdjustmentLayer[] | undefined, frameRate = defaultAdjustmentFrameRate) {

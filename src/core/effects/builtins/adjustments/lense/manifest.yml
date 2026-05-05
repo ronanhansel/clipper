@@ -4,67 +4,62 @@ name: Lense
 label: Lense
 group: Lense
 defaultDuration: 3
-defaultParams: {"target":"camera","focusX":50,"focusY":50,"radius":34,"softness":0.62,"magnification":1.12,"distortion":0.32,"chromaticAberration":0.55,"rimWidth":0.18,"rimOpacity":0.48,"dimAmount":0.28}
+defaultParams: {"focusX":50,"focusY":50,"radius":34,"softness":0.62,"magnification":1.12,"distortion":0.32,"chromaticAberration":0.55,"rimWidth":0.18,"rimOpacity":0.48,"dimAmount":0.28}
 paramControls:
-  - key: target
-    label: Target
-    type: select
-    defaultValue: camera
-    options: [{"value":"camera","label":"Camera"},{"value":"frame","label":"Frame"}]
   - key: radius
     label: Radius
     type: number
-    min: 8
-    max: 90
+    min: 1
+    max: 200
     step: 0.5
     defaultValue: 34
   - key: softness
     label: Softness
     type: number
-    min: 0.05
-    max: 1
+    min: -2
+    max: 4
     step: 0.01
     defaultValue: 0.62
   - key: magnification
     label: Magnification
     type: number
-    min: 0.75
-    max: 1.65
+    min: 0.05
+    max: 8
     step: 0.01
     defaultValue: 1.12
   - key: distortion
     label: Rim Distortion
     type: number
-    min: 0
-    max: 1
-    step: 0.01
+    min: -4
+    max: 4
+    step: 0.05
     defaultValue: 0.32
   - key: chromaticAberration
-    label: Chromatic Aberration
+    label: Chromatic Aberration px
     type: number
-    min: 0
-    max: 1
-    step: 0.01
+    min: -96
+    max: 96
+    step: 1
     defaultValue: 0.55
   - key: rimWidth
     label: Rim Width
     type: number
-    min: 0.04
-    max: 0.45
+    min: -1
+    max: 1
     step: 0.01
     defaultValue: 0.18
   - key: rimOpacity
     label: Rim Opacity
     type: number
-    min: 0
-    max: 1
+    min: -2
+    max: 2
     step: 0.01
     defaultValue: 0.48
   - key: dimAmount
     label: Outside Dim
     type: number
-    min: 0
-    max: 0.8
+    min: -2
+    max: 2
     step: 0.01
     defaultValue: 0.28
 pointControls:

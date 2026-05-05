@@ -1,5 +1,6 @@
 import {
   BrowserWindow,
+  nativeImage,
   type NativeImage,
 } from "electron";
 import fs from "node:fs/promises";
@@ -17,6 +18,16 @@ import {
   type ProjectManifest,
   type Scene,
 } from "./types.js";
+
+type ExportFrameRenderResult = {
+  failedCount: number;
+  passCount: number;
+  animationCount: number;
+  pinnedCount: number;
+  pendingReadyCount: number;
+  layerCount: number;
+  postProcessPasses?: unknown[];
+};
 
 // ─── Dependencies passed from RenderEngine ───────────────────────────────
 
@@ -113,8 +124,15 @@ export async function renderSceneToRawFrames(
             `Supervised renderer failed to pin ${syncResult.failedCount} animation(s) at ${sceneTime.toFixed(3)}s after ${syncResult.passCount} sync pass(es).`,
           );
         }
-        const frame =
-          payload.renderSurface === "preview-cache"
+        const postProcessPasses = getExportPostProcessPasses(syncResult);
+        const frame = postProcessPasses.length > 0
+          ? await captureAndPostProcessFullExportFrame(
+              rendererWindow,
+              postProcessPasses,
+              frameIndex,
+              sceneTime,
+            )
+          : payload.renderSurface === "preview-cache"
             ? await captureFullPreviewCacheFrame(
                 rendererWindow,
                 frameIndex,
@@ -235,6 +253,59 @@ async function captureTiledExportFrame(
     stitchBgraTile(frame, tileBitmap, tile);
   }
   return frame;
+}
+
+function getExportPostProcessPasses(syncResult: ExportFrameRenderResult): unknown[] {
+  return Array.isArray(syncResult.postProcessPasses) ? syncResult.postProcessPasses : [];
+}
+
+async function captureAndPostProcessFullExportFrame(
+  window: BrowserWindow,
+  passes: unknown[],
+  frameIndex: number,
+  sceneTime: number,
+): Promise<Buffer> {
+  const image = await captureFullExportFrameImage(window, frameIndex, sceneTime, "post-process source");
+  const sourceDataUrl = image.toDataURL();
+  if (!sourceDataUrl.startsWith("data:image/png;base64,")) {
+    throw new Error(`Export post-process source for frame ${frameIndex + 1} was not a PNG data URL.`);
+  }
+  const result = await withTimeout(
+    window.webContents.executeJavaScript(
+      `window.__clipperApplyExportPostProcessFrame(${JSON.stringify({ width: FRAME_WIDTH, height: FRAME_HEIGHT, sourceDataUrl, passes })})`,
+      true,
+    ),
+    EXPORT_RENDERER_FRAME_TIMEOUT_MS,
+    `Timed out applying export post-process for frame ${frameIndex + 1} at ${sceneTime.toFixed(3)}s.`,
+  ) as { applied?: unknown; outputDataUrl?: unknown; droppedPassCount?: unknown };
+  if (!isValidPostProcessResult(result)) {
+    throw new Error(`Export post-process failed to return a processed PNG for ${passes.length} active pass(es) on frame ${frameIndex + 1} at ${sceneTime.toFixed(3)}s.`);
+  }
+  const processedImage = nativeImage.createFromDataURL(result.outputDataUrl);
+  if (processedImage.isEmpty()) throw new Error(`Export post-process returned an empty image for frame ${frameIndex + 1}.`);
+  const droppedPassCount = typeof result.droppedPassCount === "number" ? result.droppedPassCount : 0;
+  if (droppedPassCount > 0) console.warn(`[clipper export] postprocess dropped ${droppedPassCount} additional pass(es) on frame ${frameIndex + 1}.`);
+  return getBgraBitmap(processedImage, FRAME_WIDTH, FRAME_HEIGHT, `post-processed export frame ${frameIndex + 1}`);
+}
+
+async function captureFullExportFrameImage(
+  window: BrowserWindow,
+  frameIndex: number,
+  sceneTime: number,
+  label: string,
+): Promise<NativeImage> {
+  await applyDefaultExportCaptureViewport(window);
+  return withTimeout(
+    window.webContents.capturePage(),
+    EXPORT_CAPTURE_TILE_TIMEOUT_MS,
+    `Timed out capturing ${label} frame ${frameIndex + 1} at ${sceneTime.toFixed(3)}s.`,
+  );
+}
+
+function isValidPostProcessResult(result: unknown): result is { applied: true; outputDataUrl: string; droppedPassCount: number } {
+  if (!result || typeof result !== "object") return false;
+  const candidate = result as { applied?: unknown; outputDataUrl?: unknown; droppedPassCount?: unknown };
+  return candidate.applied === true && typeof candidate.outputDataUrl === "string" && candidate.outputDataUrl.startsWith("data:image/png;base64,") && typeof candidate.droppedPassCount === "number";
 }
 
 async function applyDefaultExportCaptureViewport(
@@ -368,14 +439,7 @@ async function renderExportFrame(
   sceneTime: number,
   frameRate: number,
   renderMode: "preview" | "export" = "export",
-): Promise<{
-  failedCount: number;
-  passCount: number;
-  animationCount: number;
-  pinnedCount: number;
-  pendingReadyCount: number;
-  layerCount: number;
-}> {
+): Promise<ExportFrameRenderResult> {
   return withTimeout(
     window.webContents.executeJavaScript(
       `window.__clipperRenderExportFrame(${JSON.stringify({ project, scene, sceneTime, frameRate, renderMode })})`,

@@ -14,6 +14,9 @@ type AppDialogsProps = {
   exportIncludeSources: boolean;
   exportProgress: string | null;
   isExporting: boolean;
+  liveDomPostProcessPreviewEnabled: boolean;
+  liveDomPostProcessRuntimeEnabled: boolean;
+  liveDomPostProcessMaxFps: number;
   pausePlaybackOnScrub: boolean;
   partCount: number;
   prerenderCacheEnabled: boolean;
@@ -40,6 +43,8 @@ type AppDialogsProps = {
   onExportDialogTabChange: (tab: ExportDialogTab) => void;
   onExportIncludeSourcesChange: (includeSources: boolean) => void;
   onMediaExport: () => void;
+  onLiveDomPostProcessPreviewEnabledChange: (enabled: boolean) => void;
+  onLiveDomPostProcessMaxFpsChange: (value: number) => void;
   onProjectExport: () => void;
   onPausePlaybackOnScrubChange: (enabled: boolean) => void;
   onPrerenderCacheEnabledChange: (enabled: boolean) => void;
@@ -57,7 +62,7 @@ type AppDialogsProps = {
   onVideoExportCancel: () => void;
 };
 
-export function AppDialogs({ appContextMenu, debugSettingsEnabled, defaultNewMarkerDurationSeconds, exportDialogOpen, exportDialogTab, exportIncludeSources, exportProgress, isExporting, pausePlaybackOnScrub, partCount, prerenderCacheEnabled, prerenderCacheBlackMissDebug, prerenderBlockDurationMs, projectExportFormat, projectName, resolution, reusePrerenderCacheForExport, sceneDurationSeconds, sceneName, scrubCommitThrottleMs, settingsOpen, settingsSection, timelineEndPaddingFraction, timelinePrecision, videoExportCancelling, videoExportTileHeight, videoExportProgress, onAppContextMenuClose, onDebugSettingsEnabledChange, onDefaultNewMarkerDurationSecondsChange, onExportDialogOpenChange, onExportDialogTabChange, onExportIncludeSourcesChange, onMediaExport, onProjectExport, onPausePlaybackOnScrubChange, onPrerenderCacheEnabledChange, onPrerenderCacheBlackMissDebugChange, onPrerenderBlockDurationMsChange, onClearAllPrerenderCaches, onProjectExportFormatChange, onReusePrerenderCacheForExportChange, onScrubCommitThrottleMsChange, onSettingsOpenChange, onSettingsSectionChange, onTimelineEndPaddingFractionChange, onTimelinePrecisionChange, onVideoExportTileHeightChange, onVideoExportCancel }: AppDialogsProps) {
+export function AppDialogs({ appContextMenu, debugSettingsEnabled, defaultNewMarkerDurationSeconds, exportDialogOpen, exportDialogTab, exportIncludeSources, exportProgress, isExporting, liveDomPostProcessPreviewEnabled, liveDomPostProcessRuntimeEnabled, liveDomPostProcessMaxFps, pausePlaybackOnScrub, partCount, prerenderCacheEnabled, prerenderCacheBlackMissDebug, prerenderBlockDurationMs, projectExportFormat, projectName, resolution, reusePrerenderCacheForExport, sceneDurationSeconds, sceneName, scrubCommitThrottleMs, settingsOpen, settingsSection, timelineEndPaddingFraction, timelinePrecision, videoExportCancelling, videoExportTileHeight, videoExportProgress, onAppContextMenuClose, onDebugSettingsEnabledChange, onDefaultNewMarkerDurationSecondsChange, onExportDialogOpenChange, onExportDialogTabChange, onExportIncludeSourcesChange, onMediaExport, onLiveDomPostProcessPreviewEnabledChange, onLiveDomPostProcessMaxFpsChange, onProjectExport, onPausePlaybackOnScrubChange, onPrerenderCacheEnabledChange, onPrerenderCacheBlackMissDebugChange, onPrerenderBlockDurationMsChange, onClearAllPrerenderCaches, onProjectExportFormatChange, onReusePrerenderCacheForExportChange, onScrubCommitThrottleMsChange, onSettingsOpenChange, onSettingsSectionChange, onTimelineEndPaddingFractionChange, onTimelinePrecisionChange, onVideoExportTileHeightChange, onVideoExportCancel }: AppDialogsProps) {
   return (
     <>
       <ExportMediaDialog
@@ -84,6 +89,9 @@ export function AppDialogs({ appContextMenu, debugSettingsEnabled, defaultNewMar
       <SettingsDialog
         activeSection={settingsSection}
         debugSettingsEnabled={debugSettingsEnabled}
+        liveDomPostProcessPreviewEnabled={liveDomPostProcessPreviewEnabled}
+        liveDomPostProcessRuntimeEnabled={liveDomPostProcessRuntimeEnabled}
+        liveDomPostProcessMaxFps={liveDomPostProcessMaxFps}
         open={settingsOpen}
         pausePlaybackOnScrub={pausePlaybackOnScrub}
         prerenderCacheBlackMissDebug={prerenderCacheBlackMissDebug}
@@ -96,6 +104,8 @@ export function AppDialogs({ appContextMenu, debugSettingsEnabled, defaultNewMar
         videoExportTileHeight={videoExportTileHeight}
         onActiveSectionChange={onSettingsSectionChange}
         onDebugSettingsEnabledChange={onDebugSettingsEnabledChange}
+        onLiveDomPostProcessPreviewEnabledChange={onLiveDomPostProcessPreviewEnabledChange}
+        onLiveDomPostProcessMaxFpsChange={onLiveDomPostProcessMaxFpsChange}
         onOpenChange={onSettingsOpenChange}
         onPausePlaybackOnScrubChange={onPausePlaybackOnScrubChange}
         onPrerenderCacheBlackMissDebugChange={onPrerenderCacheBlackMissDebugChange}

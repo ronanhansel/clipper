@@ -1,12 +1,10 @@
 import { useEffect, useState } from "react";
-import JSZip from "jszip";
 import { clipperHost } from "../clipperHost";
 import { projectPersistenceService } from "../services/projectPersistenceService";
 import { normalizeProject } from "../../core/project";
 import type { ProjectManifest } from "../../core/types";
 import {
   addRecentProject,
-  clipperContainerPath,
   clearStoredActiveProjectManifestPath,
   readRecentProjects,
   readStoredActiveProjectManifestPath,
@@ -26,28 +24,22 @@ export type BootProject = {
 };
 
 async function loadBootProject(): Promise<BootProject> {
-  let manifestPath = await readStoredActiveProjectManifestPath();
+  const manifestPath = await readStoredActiveProjectManifestPath();
   if (!manifestPath) throw new Error("NO_STORED_PROJECT");
-
-  if (manifestPath.endsWith(".clipper")) {
-    manifestPath = await extractZipProject(manifestPath);
-    await writeStoredActiveProjectManifestPath(manifestPath);
-  }
 
   const { project } = await projectPersistenceService.loadProject({ manifestPath });
   const normalizedProject = normalizeProject(project);
-  const activeManifestPath = clipperContainerPath(manifestPath);
 
   try {
-    await writeStoredActiveProjectManifestPath(activeManifestPath);
+    await writeStoredActiveProjectManifestPath(manifestPath);
   } catch {
     // Browser/dev can still rely on localStorage when host state is unavailable.
   }
 
   return {
-    manifestPath: activeManifestPath,
+    manifestPath,
     project: normalizedProject,
-    sourceStatus: `Project loaded from ${activeManifestPath}.`,
+    sourceStatus: `Project loaded from ${manifestPath}.`,
     compositionSources: getProjectCompositionSources(normalizedProject),
   };
 }
@@ -59,7 +51,7 @@ function projectNameFromPath(manifestPath: string) {
   }
   const segments = manifestPath.split("/");
   const filename = segments[segments.length - 1];
-  return filename.replace(/\.clipper$/i, "");
+  return filename.replace(/\.json$/i, "");
 }
 
 function isMissingFileError(error: unknown) {
@@ -71,36 +63,6 @@ function isMissingFileError(error: unknown) {
     message.includes("does not exist") ||
     message.includes("not found")
   );
-}
-
-async function extractZipProject(manifestPath: string): Promise<string> {
-  const zip = await JSZip.loadAsync(await clipperHost.readBinaryFile(manifestPath), { base64: true });
-  const extractDir = manifestPath.replace(/\.clipper$/i, "");
-  const manifestOutPath = `${extractDir}/project.json`;
-
-  await clipperHost.createDirectory(`${extractDir}/file-manager`);
-  await clipperHost.createDirectory(`${extractDir}/file-manager/compositions`);
-  await clipperHost.createDirectory(`${extractDir}/file-manager/timelines`);
-
-  for (const [, entry] of Object.entries(zip.files)) {
-    if (entry.dir) continue;
-    let outPath: string;
-    if (entry.name.startsWith("compositions/") || entry.name.startsWith("timelines/")) {
-      outPath = `${extractDir}/file-manager/${entry.name}`;
-    } else {
-      outPath = `${extractDir}/${entry.name}`;
-    }
-    if (entry.name.endsWith(".ts") || entry.name.endsWith(".json")) {
-      await clipperHost.writeTextFile(outPath, await entry.async("string"));
-    } else {
-      await clipperHost.writeBinaryFile(outPath, await entry.async("base64"));
-    }
-  }
-
-  await clipperHost.writeTextFile(`${extractDir}/composition-api.ts`, compositionApiSource);
-  await clipperHost.writeTextFile(`${extractDir}/chart.ts`, chartSource);
-  await writeProjectTsconfig(extractDir);
-  return manifestOutPath;
 }
 
 async function writeProjectTsconfig(projectDir: string) {
@@ -121,7 +83,7 @@ async function writeProjectTsconfig(projectDir: string) {
 }
 
 async function createMinimalProject(manifestPath: string, projectName: string): Promise<BootProject> {
-  const directoryPath = manifestPath.endsWith("/project.json") ? manifestPath.slice(0, -"/project.json".length) : manifestPath.replace(/\.clipper$/i, "");
+  const directoryPath = manifestPath.endsWith("/project.json") ? manifestPath.slice(0, -"/project.json".length) : manifestPath.replace(/\.json$/i, "");
   const manifestOutPath = `${directoryPath}/project.json`;
   const minimalProject: ProjectManifest = {
     id: crypto.randomUUID(),
@@ -211,22 +173,16 @@ export function useActiveProjectBoot() {
       const manifestPath = await clipperHost.openProjectManifest();
       if (!manifestPath) return;
 
-      let activeManifestPath = manifestPath;
-      if (manifestPath.endsWith(".clipper")) {
-        activeManifestPath = await extractZipProject(manifestPath);
-      }
-
-      const { project } = await projectPersistenceService.loadProject({ manifestPath: activeManifestPath });
+      const { project } = await projectPersistenceService.loadProject({ manifestPath });
       const normalizedProject = normalizeProject(project);
-      const containerPath = clipperContainerPath(activeManifestPath);
-      await writeStoredActiveProjectManifestPath(containerPath);
-      await addRecentProject(containerPath, projectNameFromPath(containerPath));
+      await writeStoredActiveProjectManifestPath(manifestPath);
+      await addRecentProject(manifestPath, projectNameFromPath(manifestPath));
       const recents = await readRecentProjects();
       setRecentProjects(recents);
       setBootProject({
-        manifestPath: containerPath,
+        manifestPath,
         project: normalizedProject,
-        sourceStatus: `Project loaded from ${containerPath}.`,
+        sourceStatus: `Project loaded from ${manifestPath}.`,
         compositionSources: getProjectCompositionSources(normalizedProject),
       });
       setBootError(null);
@@ -280,22 +236,18 @@ export function useActiveProjectBoot() {
 
   async function openRecentProject(project: RecentProject) {
     try {
-      let manifestPath = project.path;
-      if (manifestPath.endsWith(".clipper")) {
-        manifestPath = await extractZipProject(manifestPath);
-      }
+      const manifestPath = project.path;
 
       const { project: loadedProject } = await projectPersistenceService.loadProject({ manifestPath });
       const normalizedProject = normalizeProject(loadedProject);
-      const containerPath = clipperContainerPath(manifestPath);
-      await writeStoredActiveProjectManifestPath(containerPath);
-      await addRecentProject(containerPath, project.name);
+      await writeStoredActiveProjectManifestPath(manifestPath);
+      await addRecentProject(manifestPath, project.name);
       const recents = await readRecentProjects();
       setRecentProjects(recents);
       setBootProject({
-        manifestPath: containerPath,
+        manifestPath,
         project: normalizedProject,
-        sourceStatus: `Project loaded from ${containerPath}.`,
+        sourceStatus: `Project loaded from ${manifestPath}.`,
         compositionSources: getProjectCompositionSources(normalizedProject),
       });
       setBootError(null);

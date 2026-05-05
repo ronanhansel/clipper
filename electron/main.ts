@@ -10,6 +10,7 @@ import {
 import {
   spawn,
 } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { watch, type FSWatcher } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -20,6 +21,8 @@ import { RenderEngine } from "./render-engine/renderer.js";
 import type { ExportFrameRange, ProjectManifest, Scene } from "./render-engine/types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const appRoot = path.resolve(__dirname, "..");
+const appStatePath = "clipper/app-state.json";
 const require = createRequire(import.meta.url);
 const ffmpegPath = require("ffmpeg-static") as string | null;
 const isDev = process.env.VITE_DEV_SERVER_URL || !app.isPackaged;
@@ -27,14 +30,27 @@ const renderVideoChildArgIndex = process.argv.indexOf("--render-video-child");
 const isRenderVideoChildProcess = renderVideoChildArgIndex >= 0;
 app.setName("Clipper");
 app.commandLine.appendSwitch("force-color-profile", "srgb");
+const experimentalHtmlCanvasPostProcessEnabled = process.env.CLIPPER_EXPERIMENTAL_HTML_CANVAS_POSTPROCESS === "1" || readStartupAppStateBoolean("experimentalHtmlCanvasPostProcess");
+if (experimentalHtmlCanvasPostProcessEnabled) {
+  app.commandLine.appendSwitch("enable-blink-features", "HTMLCanvasElementDrawElement");
+  app.commandLine.appendSwitch("enable-features", "CanvasDrawElement");
+}
 if (isRenderVideoChildProcess && process.platform === "darwin") app.setActivationPolicy("accessory");
 
 const textFileWatchers = new Map<number, FSWatcher[]>();
 let appShuttingDown = false;
 const appShuttingDownRef = { current: appShuttingDown };
 Object.defineProperty(appShuttingDownRef, "current", { get: () => appShuttingDown, set: (v) => { appShuttingDown = v; } });
-const appStatePath = "clipper/app-state.json";
 const appIconPath = path.resolve(__dirname, "../build/icons/icon.png");
+
+function readStartupAppStateBoolean(key: string) {
+  try {
+    const state = JSON.parse(readFileSync(path.join(appRoot, appStatePath), "utf8")) as Record<string, unknown>;
+    return state[key] === true;
+  } catch {
+    return false;
+  }
+}
 
 // ─── Render Engine (instantiated after resolveClipperFile is defined) ────
 
@@ -159,7 +175,6 @@ function readCommandOutput(command: string, args: string[]) {
 }
 
 function resolveClipperFile(relativePath: string) {
-  const appRoot = path.resolve(__dirname, "..");
   const resolved = path.resolve(appRoot, relativePath);
   const clipperRoot = path.join(appRoot, "clipper");
 
@@ -176,7 +191,6 @@ function resolveClipperFile(relativePath: string) {
 }
 
 function getClipperRelativePath(filePath: string) {
-  const appRoot = path.resolve(__dirname, "..");
   const clipperRoot = path.join(appRoot, "clipper");
   const resolved = path.resolve(filePath);
 
@@ -228,14 +242,11 @@ ipcMain.handle(
   },
 );
 
-ipcMain.handle(
-  "clipper:read-binary-file",
-  async (_event, relativePath: string) => {
-    return (await fs.readFile(resolveClipperFile(relativePath))).toString(
-      "base64",
-    );
-  },
-);
+ipcMain.handle("clipper:read-app-state", async () => readAppState());
+
+ipcMain.handle("clipper:write-app-state", async (_event, updates: Record<string, unknown>) => {
+  await writeAppState(updates);
+});
 
 ipcMain.handle(
   "clipper:write-text-file",
@@ -243,15 +254,6 @@ ipcMain.handle(
     const filePath = resolveClipperFile(relativePath);
     await fs.mkdir(path.dirname(filePath), { recursive: true });
     await fs.writeFile(filePath, content, "utf8");
-  },
-);
-
-ipcMain.handle(
-  "clipper:write-binary-file",
-  async (_event, relativePath: string, base64Content: string) => {
-    const filePath = resolveClipperFile(relativePath);
-    await fs.mkdir(path.dirname(filePath), { recursive: true });
-    await fs.writeFile(filePath, Buffer.from(base64Content, "base64"));
   },
 );
 
@@ -470,7 +472,7 @@ ipcMain.handle("clipper:open-project-manifest", async () => {
     title: "Open Clipper project",
     defaultPath: path.join(appRoot, "clipper", "projects"),
     properties: ["openFile", "openDirectory"],
-    filters: [{ name: "Clipper Project", extensions: ["clipper"] }],
+    filters: [{ name: "Clipper Project", extensions: ["json"] }],
   });
 
   if (canceled || !filePaths[0]) return null;
@@ -485,7 +487,7 @@ ipcMain.handle("clipper:open-project-manifest", async () => {
       return null;
     }
   }
-  return getClipperRelativePath(selectedPath);
+  return path.basename(selectedPath) === "project.json" ? getClipperRelativePath(selectedPath) : null;
 });
 
 function validateProjectFolderName(name: string): string | null {
@@ -526,21 +528,6 @@ ipcMain.handle(
 
     const manifestPath = path.join(folderPath, "project.json");
     return getClipperRelativePath(manifestPath);
-  },
-);
-
-ipcMain.handle(
-  "clipper:export-project-dialog",
-  async (_event, defaultFileName: string) => {
-    const appRoot = path.resolve(__dirname, "..");
-    const { canceled, filePath } = await dialog.showSaveDialog({
-      title: "Export as .clipper",
-      defaultPath: path.join(appRoot, "clipper", "projects", defaultFileName),
-      filters: [{ name: "Clipper Project", extensions: ["clipper"] }],
-    });
-
-    if (canceled || !filePath) return null;
-    return getClipperRelativePath(filePath);
   },
 );
 
@@ -747,6 +734,7 @@ async function createWindow() {
     titleBarStyle: "hiddenInset",
     transparent: true,
     webPreferences: {
+      additionalArguments: experimentalHtmlCanvasPostProcessEnabled ? ["clipperExperimentalHtmlCanvasPostProcess=1"] : [],
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
@@ -873,15 +861,6 @@ function installAppMenu() {
           click: (_menuItem, browserWindow) => {
             if (browserWindow instanceof BrowserWindow)
               browserWindow.webContents.send("clipper:settings-shortcut");
-          },
-        },
-        { type: "separator" },
-        {
-          label: "Export as .clipper",
-          accelerator: "CommandOrControl+Shift+E",
-          click: (_menuItem, browserWindow) => {
-            if (browserWindow instanceof BrowserWindow)
-              browserWindow.webContents.send("clipper:export-project");
           },
         },
         { type: "separator" },

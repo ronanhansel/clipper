@@ -2,10 +2,11 @@ import { contextBridge, ipcRenderer } from "electron";
 
 contextBridge.exposeInMainWorld("clipper", {
   platform: process.platform,
+  experimentalHtmlCanvasPostProcess: process.env.CLIPPER_EXPERIMENTAL_HTML_CANVAS_POSTPROCESS === "1" || process.argv.includes("--clipper-experimental-html-canvas-postprocess") || process.argv.includes("clipperExperimentalHtmlCanvasPostProcess=1"),
   readTextFile: (relativePath: string) => ipcRenderer.invoke("clipper:read-text-file", relativePath) as Promise<string>,
-  readBinaryFile: (relativePath: string) => ipcRenderer.invoke("clipper:read-binary-file", relativePath) as Promise<string>,
+  readAppState: () => ipcRenderer.invoke("clipper:read-app-state") as Promise<Record<string, unknown>>,
+  writeAppState: (updates: Record<string, unknown>) => ipcRenderer.invoke("clipper:write-app-state", updates) as Promise<void>,
   writeTextFile: (relativePath: string, content: string) => ipcRenderer.invoke("clipper:write-text-file", relativePath, content) as Promise<void>,
-  writeBinaryFile: (relativePath: string, base64Content: string) => ipcRenderer.invoke("clipper:write-binary-file", relativePath, base64Content) as Promise<void>,
   createDirectory: (relativePath: string) => ipcRenderer.invoke("clipper:create-directory", relativePath) as Promise<void>,
   revealFile: (relativePath: string) => ipcRenderer.invoke("clipper:reveal-file", relativePath) as Promise<void>,
   revealAbsolutePath: (filePath: string) => ipcRenderer.invoke("clipper:reveal-absolute-path", filePath) as Promise<void>,
@@ -22,7 +23,6 @@ contextBridge.exposeInMainWorld("clipper", {
   watchProjectFiles: (watchPaths: { files: string[]; directories: string[] }) => ipcRenderer.invoke("clipper:watch-project-files", watchPaths) as Promise<void>,
   openProjectManifest: () => ipcRenderer.invoke("clipper:open-project-manifest") as Promise<string | null>,
   createProject: (projectName: string) => ipcRenderer.invoke("clipper:create-project", projectName) as Promise<string | null>,
-  exportProjectDialog: (defaultFileName: string) => ipcRenderer.invoke("clipper:export-project-dialog", defaultFileName) as Promise<string | null>,
   exportMediaFile: (defaultFileName: string, content: string) => ipcRenderer.invoke("clipper:export-media-file", defaultFileName, content) as Promise<string | null>,
   exportBinaryFile: (defaultFileName: string, base64Content: string) => ipcRenderer.invoke("clipper:export-binary-file", defaultFileName, base64Content) as Promise<string | null>,
   startVideoExport: (defaultFileName: string, frameRate: number, width: number, height: number) => ipcRenderer.invoke("clipper:start-video-export", defaultFileName, frameRate, width, height) as Promise<{ sessionId: string; filePath: string } | null>,
@@ -59,11 +59,6 @@ contextBridge.exposeInMainWorld("clipper", {
     const listener = () => callback();
     ipcRenderer.on("clipper:settings-shortcut", listener);
     return () => ipcRenderer.removeListener("clipper:settings-shortcut", listener);
-  },
-  onExportProject: (callback: () => void) => {
-    const listener = () => callback();
-    ipcRenderer.on("clipper:export-project", listener);
-    return () => ipcRenderer.removeListener("clipper:export-project", listener);
   },
   onCloseEditorTabShortcut: (callback: () => void) => {
     const listener = () => callback();

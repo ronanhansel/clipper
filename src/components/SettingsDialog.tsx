@@ -1,12 +1,12 @@
 import { RotateCcw } from "lucide-react";
-import { appBarButtonBase, defaultNewMarkerDurationSeconds, defaultPausePlaybackOnScrub, defaultPrerenderBlockDurationMs, defaultScrubCommitThrottleMs, defaultTimelineEndPaddingFraction, defaultTimelinePrecision, defaultVideoExportTileHeight, maxPrerenderBlockDurationMs, maxVideoExportTileHeight, minPrerenderBlockDurationMs, minVideoExportTileHeight } from "../app/config";
+import { appBarButtonBase, defaultLiveDomPostProcessMaxFps, defaultNewMarkerDurationSeconds, defaultPausePlaybackOnScrub, defaultPrerenderBlockDurationMs, defaultScrubCommitThrottleMs, defaultTimelineEndPaddingFraction, defaultTimelinePrecision, defaultVideoExportTileHeight, maxLiveDomPostProcessMaxFps, maxPrerenderBlockDurationMs, maxVideoExportTileHeight, minLiveDomPostProcessMaxFps, minPrerenderBlockDurationMs, minVideoExportTileHeight } from "../app/config";
 import type { SettingsSection } from "../app/types";
 import { clamp } from "../core/math";
 import { Dialog, DialogContent } from "./ui/dialog";
 import { Input } from "./ui/input";
 import { Switch } from "./ui/switch";
 
-export function SettingsDialog({ activeSection, debugSettingsEnabled, open, pausePlaybackOnScrub, prerenderCacheBlackMissDebug, prerenderCacheEnabled, prerenderBlockDurationMs, scrubCommitThrottleMs, defaultNewMarkerDurationSeconds: markerDurationSeconds, timelineEndPaddingFraction, timelinePrecision, videoExportTileHeight, onActiveSectionChange, onDebugSettingsEnabledChange, onOpenChange, onPausePlaybackOnScrubChange, onPrerenderCacheBlackMissDebugChange, onPrerenderCacheEnabledChange, onPrerenderBlockDurationMsChange, onClearAllPrerenderCaches, onScrubCommitThrottleMsChange, onDefaultNewMarkerDurationSecondsChange, onTimelineEndPaddingFractionChange, onTimelinePrecisionChange, onVideoExportTileHeightChange }: { activeSection: SettingsSection; debugSettingsEnabled: boolean; open: boolean; pausePlaybackOnScrub: boolean; prerenderCacheBlackMissDebug: boolean; prerenderCacheEnabled: boolean; prerenderBlockDurationMs: number; scrubCommitThrottleMs: number; defaultNewMarkerDurationSeconds: number; timelineEndPaddingFraction: number; timelinePrecision: number; videoExportTileHeight: number; onActiveSectionChange: (section: SettingsSection) => void; onDebugSettingsEnabledChange: (enabled: boolean) => void; onOpenChange: (open: boolean) => void; onPausePlaybackOnScrubChange: (enabled: boolean) => void; onPrerenderCacheBlackMissDebugChange: (enabled: boolean) => void; onPrerenderCacheEnabledChange: (enabled: boolean) => void; onPrerenderBlockDurationMsChange: (value: number) => void; onClearAllPrerenderCaches: () => void; onScrubCommitThrottleMsChange: (value: number) => void; onDefaultNewMarkerDurationSecondsChange: (value: number) => void; onTimelineEndPaddingFractionChange: (value: number) => void; onTimelinePrecisionChange: (value: number) => void; onVideoExportTileHeightChange: (value: number) => void }) {
+export function SettingsDialog({ activeSection, debugSettingsEnabled, liveDomPostProcessPreviewEnabled, liveDomPostProcessRuntimeEnabled, liveDomPostProcessMaxFps, open, pausePlaybackOnScrub, prerenderCacheBlackMissDebug, prerenderCacheEnabled, prerenderBlockDurationMs, scrubCommitThrottleMs, defaultNewMarkerDurationSeconds: markerDurationSeconds, timelineEndPaddingFraction, timelinePrecision, videoExportTileHeight, onActiveSectionChange, onDebugSettingsEnabledChange, onLiveDomPostProcessPreviewEnabledChange, onLiveDomPostProcessMaxFpsChange, onOpenChange, onPausePlaybackOnScrubChange, onPrerenderCacheBlackMissDebugChange, onPrerenderCacheEnabledChange, onPrerenderBlockDurationMsChange, onClearAllPrerenderCaches, onScrubCommitThrottleMsChange, onDefaultNewMarkerDurationSecondsChange, onTimelineEndPaddingFractionChange, onTimelinePrecisionChange, onVideoExportTileHeightChange }: { activeSection: SettingsSection; debugSettingsEnabled: boolean; liveDomPostProcessPreviewEnabled: boolean; liveDomPostProcessRuntimeEnabled: boolean; liveDomPostProcessMaxFps: number; open: boolean; pausePlaybackOnScrub: boolean; prerenderCacheBlackMissDebug: boolean; prerenderCacheEnabled: boolean; prerenderBlockDurationMs: number; scrubCommitThrottleMs: number; defaultNewMarkerDurationSeconds: number; timelineEndPaddingFraction: number; timelinePrecision: number; videoExportTileHeight: number; onActiveSectionChange: (section: SettingsSection) => void; onDebugSettingsEnabledChange: (enabled: boolean) => void; onLiveDomPostProcessPreviewEnabledChange: (enabled: boolean) => void; onLiveDomPostProcessMaxFpsChange: (value: number) => void; onOpenChange: (open: boolean) => void; onPausePlaybackOnScrubChange: (enabled: boolean) => void; onPrerenderCacheBlackMissDebugChange: (enabled: boolean) => void; onPrerenderCacheEnabledChange: (enabled: boolean) => void; onPrerenderBlockDurationMsChange: (value: number) => void; onClearAllPrerenderCaches: () => void; onScrubCommitThrottleMsChange: (value: number) => void; onDefaultNewMarkerDurationSecondsChange: (value: number) => void; onTimelineEndPaddingFractionChange: (value: number) => void; onTimelinePrecisionChange: (value: number) => void; onVideoExportTileHeightChange: (value: number) => void }) {
   const navItems: Array<{ id: SettingsSection; label: string }> = [
     { id: "playback", label: "Playback" },
     { id: "timeline", label: "Timeline" },
@@ -36,6 +36,12 @@ export function SettingsDialog({ activeSection, debugSettingsEnabled, open, paus
     const parsed = Number(value);
     if (!Number.isFinite(parsed)) return;
     onTimelinePrecisionChange(Math.round(clamp(parsed, 1, 6)));
+  }
+
+  function updateLiveDomPostProcessMaxFps(value: string) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return;
+    onLiveDomPostProcessMaxFpsChange(Math.round(clamp(parsed, minLiveDomPostProcessMaxFps, maxLiveDomPostProcessMaxFps)));
   }
 
   function updateVideoExportTileHeight(value: string) {
@@ -68,7 +74,7 @@ export function SettingsDialog({ activeSection, debugSettingsEnabled, open, paus
             <header className="flex items-center justify-between border-b border-[#14161c] px-5">
               <div>
                 <h2 className="text-sm font-extrabold text-white">{navItems.find((item) => item.id === activeSection)?.label}</h2>
-                <p className="mt-1 text-xs text-[#8f939d]">{activeSection === "playback" ? "Control preview and playback diagnostics." : activeSection === "timeline" ? "Tune timeline interaction responsiveness." : activeSection === "export" ? "Tune video rendering and capture behavior." : "Settings for this section will be added as the editor grows."}</p>
+                <p className="mt-1 text-xs text-[#8f939d]">{activeSection === "playback" ? "Control preview and playback diagnostics." : activeSection === "timeline" ? "Tune timeline interaction responsiveness." : activeSection === "export" ? "Tune video rendering and capture behavior." : "Configure experimental and developer-facing editor behavior."}</p>
               </div>
               <button className={`${appBarButtonBase} px-3 py-1.5`} onClick={() => onOpenChange(false)}>Close</button>
             </header>
@@ -172,6 +178,22 @@ export function SettingsDialog({ activeSection, debugSettingsEnabled, open, paus
                       </button>
                     </span>
                   </label>
+                  {liveDomPostProcessPreviewEnabled ? <>
+                    <div className="h-px bg-[#363b47]" />
+                    <div className="grid gap-1.5">
+                      <strong className="text-sm text-white">Live DOM render throttle</strong>
+                      <p className="text-xs leading-5 text-[#8f939d]">Because HTML-in-Canvas is unstable and still in Canary, throttle live rendering so the app stays usable and other features do not stall.</p>
+                    </div>
+                    <label className="grid max-w-[260px] gap-1.5 text-xs font-bold text-[#dfe2ea]" htmlFor="live-dom-postprocess-max-fps">
+                      Max rendered FPS
+                      <span className="relative">
+                        <Input id="live-dom-postprocess-max-fps" className="pr-10" min={minLiveDomPostProcessMaxFps} max={maxLiveDomPostProcessMaxFps} step={1} type="number" value={liveDomPostProcessMaxFps} onChange={(event) => updateLiveDomPostProcessMaxFps(event.target.value)} />
+                        <button aria-label={`Reset live DOM render throttle to ${defaultLiveDomPostProcessMaxFps}fps`} className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-md text-[#8f939d] transition hover:bg-[#252a34] hover:text-white" type="button" onClick={() => onLiveDomPostProcessMaxFpsChange(defaultLiveDomPostProcessMaxFps)}>
+                          <RotateCcw size={14} />
+                        </button>
+                      </span>
+                    </label>
+                  </> : null}
                   <div className="h-px bg-[#363b47]" />
                   <div className="grid gap-1.5">
                     <strong className="text-sm text-white">Position precision</strong>
@@ -203,19 +225,36 @@ export function SettingsDialog({ activeSection, debugSettingsEnabled, open, paus
                     </span>
                   </label>
                 </div>
-              ) : <div className="grid gap-4 rounded-xl border border-[#363b47] bg-[#1b1e26] p-4">
-                <div className="grid gap-1.5">
-                  <strong className="text-sm text-white">Debug settings</strong>
-                  <p className="text-xs leading-5 text-[#8f939d]">Shows developer-only diagnostic controls in their relevant settings sections.</p>
+              ) : (
+                <div className="grid gap-4 rounded-xl border border-[#363b47] bg-[#1b1e26] p-4">
+                  <div className="grid gap-1.5">
+                    <strong className="text-sm text-white">Experimental preview</strong>
+                    <p className="text-xs leading-5 text-[#8f939d]">Controls draft browser features used for live complex WebGL adjustment previews.</p>
+                  </div>
+                  <label className="flex w-full items-start justify-between gap-5 text-xs font-bold text-[#dfe2ea]" htmlFor="live-dom-postprocess-toggle">
+                    <span className="grid gap-1">
+                      <span>Use HTML-in-Canvas live post-process preview</span>
+                      <span className="font-medium leading-5 text-[#8f939d]">Enables the experimental Canvas Draw Element path for live Lense previews on supported Chromium/Canary builds. Unsupported builds keep the normal DOM/cached fallback.</span>
+                    </span>
+                    <Switch id="live-dom-postprocess-toggle" className="mt-0.5" checked={liveDomPostProcessPreviewEnabled} onCheckedChange={onLiveDomPostProcessPreviewEnabledChange} />
+                  </label>
+                  {liveDomPostProcessPreviewEnabled !== liveDomPostProcessRuntimeEnabled ? <p className="rounded-lg border border-[#594531] bg-[#211a13] px-3 py-2 text-xs leading-5 text-[#dec39e]">Restart to apply settings.</p> : null}
+                  <div className="h-px bg-[#363b47]" />
+                  <div className="grid gap-4">
+                    <div className="grid gap-1.5">
+                      <strong className="text-sm text-white">Debug settings</strong>
+                      <p className="text-xs leading-5 text-[#8f939d]">Shows developer-only diagnostic controls in their relevant settings sections.</p>
+                    </div>
+                    <label className="flex w-full items-start justify-between gap-5 text-xs font-bold text-[#dfe2ea]" htmlFor="debug-settings-toggle">
+                      <span className="grid gap-1">
+                        <span>Enable debug settings</span>
+                        <span className="font-medium leading-5 text-[#8f939d]">When turned off, debug controls are hidden and reset to their default values.</span>
+                      </span>
+                      <Switch id="debug-settings-toggle" className="mt-0.5" checked={debugSettingsEnabled} onCheckedChange={onDebugSettingsEnabledChange} />
+                    </label>
+                  </div>
                 </div>
-                <label className="flex w-full items-start justify-between gap-5 text-xs font-bold text-[#dfe2ea]" htmlFor="debug-settings-toggle">
-                  <span className="grid gap-1">
-                    <span>Enable debug settings</span>
-                    <span className="font-medium leading-5 text-[#8f939d]">When turned off, debug controls are hidden and reset to their default values.</span>
-                  </span>
-                  <Switch id="debug-settings-toggle" className="mt-0.5" checked={debugSettingsEnabled} onCheckedChange={onDebugSettingsEnabledChange} />
-                </label>
-              </div>}
+              )}
             </div>
 
             <footer className="flex items-center justify-between border-t border-[#14161c] bg-[#202229] px-5">
