@@ -6,6 +6,7 @@ export type RightPanelTab = "video" | "motion" | "agent";
 export type ProjectUpdater = ProjectManifest | ((current: ProjectManifest) => ProjectManifest);
 export type ExportDialogTab = "media" | "project";
 export type ProjectExportFormat = "project-package" | "scene-json";
+export type MediaExportFormat = "prores-422-hq" | "prores-4444" | "dnxhr-hqx" | "mov" | "h264-high" | "mp4" | "webm";
 export type ContextMenuState = { x: number; y: number; items: ContextMenuItem[] } | null;
 export type ContextMenuItem = { label: string; action?: () => void; children?: ContextMenuItem[]; danger?: boolean; disabled?: boolean };
 export const TIMELINE_MOTION_PART_ID = "__timeline_motion__";

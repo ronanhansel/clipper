@@ -14,7 +14,14 @@ export type TimelineNodeClipboard =
   | { kind: "adjustment"; nodes: Array<{ absoluteStart: number; layer: AdjustmentLayer }> }
   | { kind: "composition"; nodes: Array<{ absoluteStart: number; part: Part }> }
   | { kind: "motion"; nodes: Array<{ absoluteStart: number; partId: string; marker: MotionMarker }> }
-  | { kind: "transition"; nodes: Array<{ absoluteStart: number; layer: TransitionLayer }> };
+  | { kind: "transition"; nodes: Array<{ absoluteStart: number; layer: TransitionLayer }> }
+  | { kind: "mixed"; nodes: TimelineClipboardNode[] };
+
+type TimelineClipboardNode =
+  | { kind: "adjustment"; absoluteStart: number; layer: AdjustmentLayer }
+  | { kind: "composition"; absoluteStart: number; part: Part }
+  | { kind: "motion"; absoluteStart: number; partId: string; marker: MotionMarker }
+  | { kind: "transition"; absoluteStart: number; layer: TransitionLayer };
 
 type SceneTimelineClipboardState = {
   id: string;
@@ -53,6 +60,7 @@ type UseTimelineClipboardCommandsInput = {
   setSelectedAdjustmentLayers: (selection: Array<{ layerId: string }>) => void;
   setSelectedMotionMarker: (selection: MotionMarkerSelection | null) => void;
   setSelectedMotionMarkers: (selection: MotionMarkerSelection[]) => void;
+  setSelectedParts: (selection: Array<{ partId: string }>) => void;
   setSelectedTransitionLayerId: (id: string | null) => void;
   setSelectedTransitionLayers: (selection: Array<{ layerId: string }>) => void;
   timelinePrecision: number;
@@ -166,6 +174,7 @@ export function useTimelineClipboardCommands({
   setSelectedAdjustmentLayers,
   setSelectedMotionMarker,
   setSelectedMotionMarkers,
+  setSelectedParts,
   setSelectedTransitionLayerId,
   setSelectedTransitionLayers,
   timelinePrecision,
@@ -177,55 +186,50 @@ export function useTimelineClipboardCommands({
   const timelineNodeClipboardRef = useRef<TimelineNodeClipboard | null>(null);
 
   function getSelectedTimelineNodeClipboard(showToast = false): TimelineNodeClipboard | null {
-    if (selectedParts.length > 0) {
-      const nodes = selectedParts.flatMap((selection) => {
-        const part = timeline.find((item) => item.id === selection.partId);
-        return part ? [{ absoluteStart: part.start ?? 0, part }] : [];
-      });
-      if (nodes.length > 0) return { kind: "composition", nodes };
-    }
-
-    if (selectedPartId && !selectedMotionMarker) {
+    const selectedPartIds = new Set(selectedParts.map((selection) => selection.partId));
+    const compositionNodes = selectedParts.flatMap((selection) => {
+      const part = timeline.find((item) => item.id === selection.partId);
+      return part ? [{ kind: "composition" as const, absoluteStart: part.start ?? 0, part }] : [];
+    });
+    if (compositionNodes.length === 0 && selectedPartId && !selectedMotionMarker && selectedMotionMarkers.length === 0 && selectedAdjustmentLayers.length === 0 && selectedTransitionLayers.length === 0) {
       const part = timeline.find((item) => item.id === selectedPartId);
-      if (part) return { kind: "composition", nodes: [{ absoluteStart: part.start ?? 0, part }] };
+      if (part) compositionNodes.push({ kind: "composition", absoluteStart: part.start ?? 0, part });
     }
 
-    if (selectedTransitionLayers.length > 0) {
-      const nodes = selectedTransitionLayers.flatMap((selection) => {
-        const layer = scene.transitionLayers?.find((item) => item.id === selection.layerId);
-        return layer ? [{ absoluteStart: layer.start, layer }] : [];
-      });
-      if (nodes.length > 0) return { kind: "transition", nodes };
-    }
-
-    if (selectedTransitionLayerId) {
+    const transitionNodes = selectedTransitionLayers.flatMap((selection) => {
+      const layer = scene.transitionLayers?.find((item) => item.id === selection.layerId);
+      return layer ? [{ kind: "transition" as const, absoluteStart: layer.start, layer }] : [];
+    });
+    if (transitionNodes.length === 0 && selectedTransitionLayerId && compositionNodes.length === 0 && selectedMotionMarkers.length === 0 && selectedAdjustmentLayers.length === 0) {
       const layer = scene.transitionLayers?.find((item) => item.id === selectedTransitionLayerId);
-      if (layer) return { kind: "transition", nodes: [{ absoluteStart: layer.start, layer }] };
+      if (layer) transitionNodes.push({ kind: "transition", absoluteStart: layer.start, layer });
     }
 
-    if (selectedAdjustmentLayers.length > 0) {
-      const nodes = selectedAdjustmentLayers.flatMap((selection) => {
-        const layer = scene.adjustmentLayers?.find((item) => item.id === selection.layerId);
-        return layer ? [{ absoluteStart: layer.start, layer }] : [];
-      });
-      if (nodes.length > 0) return { kind: "adjustment", nodes };
-    }
-
-    if (selectedAdjustmentLayer) {
-      return { kind: "adjustment", nodes: [{ absoluteStart: selectedAdjustmentLayer.start, layer: selectedAdjustmentLayer }] };
-    }
+    const adjustmentNodes = selectedAdjustmentLayers.flatMap((selection) => {
+      const layer = scene.adjustmentLayers?.find((item) => item.id === selection.layerId);
+      return layer ? [{ kind: "adjustment" as const, absoluteStart: layer.start, layer }] : [];
+    });
+    if (adjustmentNodes.length === 0 && selectedAdjustmentLayer && compositionNodes.length === 0 && selectedMotionMarkers.length === 0 && transitionNodes.length === 0) adjustmentNodes.push({ kind: "adjustment", absoluteStart: selectedAdjustmentLayer.start, layer: selectedAdjustmentLayer });
 
     const motionSelection = uniqueTimelineMarkerSelections(selectedMotionMarkers.length > 0 ? selectedMotionMarkers : selectedMotionMarker ? [selectedMotionMarker] : []);
     const motionNodes = motionSelection.flatMap((selection) => {
       if (selection.partId === TIMELINE_MOTION_PART_ID) {
         const marker = getMotionMarkers(scene).find((item) => item.id === selection.markerId);
-        return marker ? [{ absoluteStart: marker.start, partId: TIMELINE_MOTION_PART_ID, marker }] : [];
+        return marker ? [{ kind: "motion" as const, absoluteStart: marker.start, partId: TIMELINE_MOTION_PART_ID, marker }] : [];
       }
+      if (selectedPartIds.has(selection.partId)) return [];
       const timelinePart = timeline.find((item) => item.id === selection.partId);
       const marker = timelinePart ? getMotionMarkers(timelinePart).find((item) => item.id === selection.markerId) : undefined;
-      return timelinePart && marker ? [{ absoluteStart: timelinePart.start! + marker.start, partId: timelinePart.id, marker }] : [];
+      return timelinePart && marker ? [{ kind: "motion" as const, absoluteStart: timelinePart.start! + marker.start, partId: timelinePart.id, marker }] : [];
     });
-    if (motionNodes.length > 0) return { kind: "motion", nodes: motionNodes.sort((a, b) => a.absoluteStart - b.absoluteStart) };
+
+    const nodes: TimelineClipboardNode[] = [...compositionNodes, ...transitionNodes, ...adjustmentNodes, ...motionNodes].sort((a, b) => a.absoluteStart - b.absoluteStart);
+    const kinds = new Set(nodes.map((node) => node.kind));
+    if (kinds.size > 1) return { kind: "mixed", nodes };
+    if (kinds.has("composition")) return { kind: "composition", nodes: compositionNodes.map(({ absoluteStart, part }) => ({ absoluteStart, part })) };
+    if (kinds.has("transition")) return { kind: "transition", nodes: transitionNodes.map(({ absoluteStart, layer }) => ({ absoluteStart, layer })) };
+    if (kinds.has("adjustment")) return { kind: "adjustment", nodes: adjustmentNodes.map(({ absoluteStart, layer }) => ({ absoluteStart, layer })) };
+    if (kinds.has("motion")) return { kind: "motion", nodes: motionNodes.map(({ absoluteStart, partId, marker }) => ({ absoluteStart, partId, marker })) };
 
     if (showToast && (selectedPartId || selectedParts.length > 0)) toast.error("No copyable timeline nodes selected.");
     return null;
@@ -262,6 +266,18 @@ export function useTimelineClipboardCommands({
   }
 
   function deleteTimelineClipboardNodes(clipboard: TimelineNodeClipboard) {
+    if (clipboard.kind === "mixed") {
+      const compositionNodes = clipboard.nodes.filter((node): node is Extract<TimelineClipboardNode, { kind: "composition" }> => node.kind === "composition").map(({ absoluteStart, part }) => ({ absoluteStart, part }));
+      const adjustmentNodes = clipboard.nodes.filter((node): node is Extract<TimelineClipboardNode, { kind: "adjustment" }> => node.kind === "adjustment").map(({ absoluteStart, layer }) => ({ absoluteStart, layer }));
+      const transitionNodes = clipboard.nodes.filter((node): node is Extract<TimelineClipboardNode, { kind: "transition" }> => node.kind === "transition").map(({ absoluteStart, layer }) => ({ absoluteStart, layer }));
+      const motionNodes = clipboard.nodes.filter((node): node is Extract<TimelineClipboardNode, { kind: "motion" }> => node.kind === "motion").map(({ absoluteStart, partId, marker }) => ({ absoluteStart, partId, marker }));
+      if (compositionNodes.length > 0) deleteTimelineClipboardNodes({ kind: "composition", nodes: compositionNodes });
+      if (adjustmentNodes.length > 0) deleteTimelineClipboardNodes({ kind: "adjustment", nodes: adjustmentNodes });
+      if (transitionNodes.length > 0) deleteTimelineClipboardNodes({ kind: "transition", nodes: transitionNodes });
+      if (motionNodes.length > 0) deleteTimelineClipboardNodes({ kind: "motion", nodes: motionNodes });
+      return;
+    }
+
     if (clipboard.kind === "composition") {
       deleteCompositionsFromTimeline(clipboard.nodes.map((node) => node.part.id));
       return;
@@ -366,11 +382,74 @@ export function useTimelineClipboardCommands({
     const pasteStart = clamp(targetStart ?? currentSceneTimeRef.current, 0, sceneDurationSeconds);
     const sourceStart = Math.min(...clipboard.nodes.map((node) => node.absoluteStart));
 
+    if (clipboard.kind === "mixed") {
+      const compositionNodes = clipboard.nodes.filter((node): node is Extract<TimelineClipboardNode, { kind: "composition" }> => node.kind === "composition");
+      const adjustmentNodes = clipboard.nodes.filter((node): node is Extract<TimelineClipboardNode, { kind: "adjustment" }> => node.kind === "adjustment");
+      const transitionNodes = clipboard.nodes.filter((node): node is Extract<TimelineClipboardNode, { kind: "transition" }> => node.kind === "transition");
+      const motionNodes = clipboard.nodes.filter((node): node is Extract<TimelineClipboardNode, { kind: "motion" }> => node.kind === "motion");
+      const pastedParts = compositionNodes.map((node, index) => ({
+        ...node.part,
+        id: pastedTimelineNodeId("clip", index),
+        start: pasteStart + node.absoluteStart - sourceStart,
+        layerId: targetCompositionLayerId ?? node.part.layerId ?? "comp",
+        compositionId: node.part.compositionId ?? node.part.id,
+      }));
+      const sharedShift = pastedParts.length > 0 ? getCompositionPasteShift(pastedParts, timeline) : 0;
+      const shiftedPasteStart = pasteStart + sharedShift;
+      const finalParts = pastedParts.map((part) => ({ ...part, start: roundToPrecision(Math.max((part.start ?? 0) + sharedShift, 0), timelinePrecision) }));
+      const pastedSelections: MotionMarkerSelection[] = [];
+
+      if (adjustmentNodes.length > 0) {
+        const pastedLayers = adjustmentNodes.map((node, index) => ({ ...node.layer, id: pastedTimelineNodeId("adj", index), name: `${node.layer.name} copy`, start: roundToPrecision(clamp(shiftedPasteStart + node.absoluteStart - sourceStart, 0, sceneDurationSeconds), timelinePrecision) }));
+        updateSceneAdjustmentLayers((layers) => applyAdjustmentLayerOverwrite([...layers, ...pastedLayers], new Set(pastedLayers.map((layer) => layer.id))));
+        setSelectedAdjustmentLayers(pastedLayers.map((layer) => ({ layerId: layer.id })));
+        setSelectedAdjustmentLayerId(pastedLayers.at(-1)?.id ?? null);
+      }
+
+      if (transitionNodes.length > 0) {
+        const pastedLayers = transitionNodes.map((node, index) => ({ ...node.layer, id: pastedTimelineNodeId("trn", index), name: `${node.layer.name} copy`, start: roundToPrecision(clamp(shiftedPasteStart + node.absoluteStart - sourceStart, 0, sceneDurationSeconds), timelinePrecision) }));
+        updateSceneTransitionLayers((layers) => [...layers, ...pastedLayers]);
+        setSelectedTransitionLayers(pastedLayers.map((layer) => ({ layerId: layer.id })));
+        setSelectedTransitionLayerId(pastedLayers.at(-1)?.id ?? null);
+      }
+
+      const sceneMotionNodes = motionNodes.filter((node) => node.partId === TIMELINE_MOTION_PART_ID);
+      if (sceneMotionNodes.length > 0) {
+        const pastedMarkers = sceneMotionNodes.map((node, index) => ({ ...node.marker, id: pastedTimelineNodeId("mot", index), start: roundToPrecision(clamp(shiftedPasteStart + node.absoluteStart - sourceStart, 0, sceneDurationSeconds), timelinePrecision) }));
+        updateSceneMotionMarkers((markers) => applySceneMotionMarkerOverwrite([...markers, ...pastedMarkers], new Set(pastedMarkers.map((marker) => marker.id))));
+        pastedSelections.push(...pastedMarkers.map((marker) => ({ partId: TIMELINE_MOTION_PART_ID, markerId: marker.id })));
+      }
+
+      const partMotionNodes = motionNodes.filter((node) => node.partId !== TIMELINE_MOTION_PART_ID);
+      updateSceneParts((parts) => {
+        const nextParts = [...parts, ...finalParts];
+        if (partMotionNodes.length === 0) return nextParts;
+        const timelineParts = buildLinearTimeline({ ...scene, compositions: nextParts });
+        const pastedSegments = partMotionNodes.flatMap((node, index) => {
+          const absoluteStart = clamp(shiftedPasteStart + node.absoluteStart - sourceStart, 0, sceneDurationSeconds);
+          const marker = { ...node.marker, id: pastedTimelineNodeId("mot", index + sceneMotionNodes.length) };
+          return placeMotionMarkerOnTimeline(marker, absoluteStart, timelineParts);
+        });
+        const insertedIds = new Set(pastedSegments.map((segment) => segment.marker.id));
+        pastedSelections.push(...pastedSegments.map((segment) => ({ partId: segment.partId, markerId: segment.marker.id })));
+        return nextParts.map((item) => {
+          const itemSegments = pastedSegments.filter((segment) => segment.partId === item.id).map((segment) => segment.marker);
+          return itemSegments.length > 0 ? applyMotionMarkerOverwrite(item, [...getMotionMarkers(item), ...itemSegments], insertedIds) : item;
+        });
+      });
+
+      setSelectedParts(finalParts.map((part) => ({ partId: part.id })));
+      setSelectedMotionMarkers(pastedSelections);
+      setSelectedMotionMarker(pastedSelections.at(-1) ?? null);
+      setFocusPickZoomMarker(null);
+      setPositionPickTranslationMarker(null);
+      return finalParts.length > 0 || adjustmentNodes.length > 0 || transitionNodes.length > 0 || motionNodes.length > 0;
+    }
+
     if (clipboard.kind === "composition") {
-      const sourceLayerId = clipboard.nodes.at(0)?.part.layerId ?? "comp";
       const pastedParts = clipboard.nodes.map((node, index) => {
         const layerId = targetCompositionLayerId ?? node.part.layerId ?? "comp";
-        const layerOffset = targetCompositionLayerId && (node.part.layerId ?? "comp") !== sourceLayerId ? 0 : node.absoluteStart - sourceStart;
+        const layerOffset = node.absoluteStart - sourceStart;
         const id = pastedTimelineNodeId("clip", index);
         return { ...node.part, id, start: pasteStart + layerOffset, layerId, compositionId: node.part.compositionId ?? node.part.id };
       });

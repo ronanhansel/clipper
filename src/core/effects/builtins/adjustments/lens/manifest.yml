@@ -1,0 +1,187 @@
+id: clipper.adjustment.lens
+category: adjustment
+name: Lens
+label: Lens
+group: Lens
+defaultDuration: 3
+defaultParams: {"focusX":50,"focusY":50,"radius":34,"softness":0.62,"magnification":1.12,"distortion":0.32,"chromaticAberration":0.55,"rimWidth":0.18,"rimOpacity":0.48,"dimAmount":0.28,"chromaticAberrationUseMask":false,"chromaticAberrationMaskPreview":false,"chromaticAberrationMaskInvert":false,"chromaticAberrationMaskShape":"circular","chromaticAberrationMaskFocusX":50,"chromaticAberrationMaskFocusY":50,"chromaticAberrationMaskRadius":200,"chromaticAberrationMaskRadiusX":200,"chromaticAberrationMaskRadiusY":200,"chromaticAberrationMaskFeather":20}
+paramControls:
+  - key: radius
+    label: Radius
+    type: number
+    min: 1
+    max: 200
+    step: 0.5
+    defaultValue: 34
+  - key: softness
+    label: Softness
+    type: number
+    min: -2
+    max: 4
+    step: 0.01
+    defaultValue: 0.62
+  - key: magnification
+    label: Magnification
+    type: number
+    min: 0.05
+    max: 8
+    step: 0.01
+    defaultValue: 1.12
+  - key: distortion
+    label: Rim Distortion
+    type: number
+    min: -4
+    max: 4
+    step: 0.05
+    defaultValue: 0.32
+  - key: chromaticAberration
+    label: Chromatic Aberration px
+    type: number
+    min: -96
+    max: 96
+    step: 1
+    defaultValue: 0.55
+    inlineToggle:
+      label: Use mask
+      key: chromaticAberrationUseMask
+      defaultValue: false
+  - key: chromaticAberrationMaskPreview
+    label: Preview mask
+    type: boolean
+    defaultValue: false
+    section:
+      key: chromaticAberration
+      label: Chromatic Aberration
+    inlineGroup: maskToggles
+    visibleWhen:
+      key: chromaticAberrationUseMask
+      truthy: true
+  - key: chromaticAberrationMaskInvert
+    label: Invert mask
+    type: boolean
+    defaultValue: false
+    section:
+      key: chromaticAberration
+      label: Chromatic Aberration
+    inlineGroup: maskToggles
+    visibleWhen:
+      key: chromaticAberrationUseMask
+      truthy: true
+  - key: chromaticAberrationMaskShape
+    label: Mask Shape
+    type: select
+    defaultValue: circular
+    options:
+      - value: circular
+        label: Circular
+      - value: ellipsoid
+        label: Ellipsoid
+    section:
+      key: chromaticAberration
+      label: Chromatic Aberration
+    visibleWhen:
+      key: chromaticAberrationUseMask
+      truthy: true
+  - key: chromaticAberrationMaskRadius
+    label: Mask Radius
+    type: number
+    min: 1
+    max: 2000
+    step: 1
+    defaultValue: 200
+    section:
+      key: chromaticAberration
+      label: Chromatic Aberration
+    visibleWhen:
+      and:
+        - key: chromaticAberrationUseMask
+          truthy: true
+        - key: chromaticAberrationMaskShape
+          equals: circular
+  - key: chromaticAberrationMaskRadiusX
+    label: Mask Radius X
+    type: number
+    min: 1
+    max: 2000
+    step: 1
+    defaultValue: 200
+    section:
+      key: chromaticAberration
+      label: Chromatic Aberration
+    visibleWhen:
+      and:
+        - key: chromaticAberrationUseMask
+          truthy: true
+        - key: chromaticAberrationMaskShape
+          equals: ellipsoid
+  - key: chromaticAberrationMaskRadiusY
+    label: Mask Radius Y
+    type: number
+    min: 1
+    max: 2000
+    step: 1
+    defaultValue: 200
+    section:
+      key: chromaticAberration
+      label: Chromatic Aberration
+    visibleWhen:
+      and:
+        - key: chromaticAberrationUseMask
+          truthy: true
+        - key: chromaticAberrationMaskShape
+          equals: ellipsoid
+  - key: chromaticAberrationMaskFeather
+    label: Mask Feather
+    type: number
+    min: 0
+    max: 500
+    step: 1
+    defaultValue: 20
+    section:
+      key: chromaticAberration
+      label: Chromatic Aberration
+    visibleWhen:
+      key: chromaticAberrationUseMask
+      truthy: true
+  - key: rimWidth
+    label: Rim Width
+    type: number
+    min: -1
+    max: 1
+    step: 0.01
+    defaultValue: 0.18
+  - key: rimOpacity
+    label: Rim Opacity
+    type: number
+    min: -2
+    max: 2
+    step: 0.01
+    defaultValue: 0.48
+  - key: dimAmount
+    label: Outside Dim
+    type: number
+    min: -2
+    max: 2
+    step: 0.01
+    defaultValue: 0.28
+pointControls:
+  - label: Focal Point
+    xKey: focusX
+    yKey: focusY
+    xDefault: 50
+    yDefault: 50
+    coordinateSpace: percent
+    pickLabel: Pick Focal Point
+  - label: Mask Focal Point
+    xKey: chromaticAberrationMaskFocusX
+    yKey: chromaticAberrationMaskFocusY
+    xDefault: 50
+    yDefault: 50
+    coordinateSpace: percent
+    pickLabel: Pick Mask Focal Point
+    section:
+      key: chromaticAberration
+      label: Chromatic Aberration
+    visibleWhen:
+      key: chromaticAberrationUseMask
+      truthy: true

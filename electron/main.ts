@@ -624,19 +624,32 @@ ipcMain.handle(
     durationSeconds: number,
     tileHeight?: number,
     reusePrerenderCache?: boolean,
+    exportWidth?: number,
+    exportHeight?: number,
+    mediaExportFormat?: string,
   ) => {
+    type MediaExportFormat = "prores-422-hq" | "prores-4444" | "dnxhr-hqx" | "mov" | "h264-high" | "mp4" | "webm";
+    const knownFormats = new Set<string>(["prores-422-hq", "prores-4444", "dnxhr-hqx", "mov", "h264-high", "mp4", "webm"]);
+    const defaultExtension = path.extname(defaultFileName).toLowerCase();
+    const inferredFormat = defaultExtension === ".webm" ? "webm" : defaultExtension === ".mp4" ? "mp4" : "prores-422-hq";
+    const format = (knownFormats.has(mediaExportFormat ?? "") ? mediaExportFormat : inferredFormat) as MediaExportFormat;
+    const extension = format === "webm" ? ".webm" : format === "h264-high" || format === "mp4" ? ".mp4" : ".mov";
+    const defaultPath = withMediaExportExtension(defaultFileName, extension);
+    const filters = getMediaExportDialogFilters(format);
+    const title = getMediaExportDialogTitle(format);
     const { canceled, filePath } = await dialog.showSaveDialog({
-      title: "Export video",
-      defaultPath: defaultFileName,
-      filters: [{ name: "MP4 Video", extensions: ["mp4"] }],
+      title,
+      defaultPath,
+      filters,
     });
 
     if (canceled || !filePath) return null;
+    const outputPath = withMediaExportExtension(filePath, extension);
     await engine.renderSceneToVideoSupervised(
       project,
       manifestPath,
       scene,
-      filePath,
+      outputPath,
       frameRate,
       durationSeconds,
       {
@@ -644,6 +657,9 @@ ipcMain.handle(
         exportId,
         tileHeight,
         reusePrerenderCache: reusePrerenderCache === true,
+        exportWidth,
+        exportHeight,
+        exportFormat: format,
         onProgress: (progress) =>
           event.sender.send(
             "clipper:video-export-progress",
@@ -652,10 +668,48 @@ ipcMain.handle(
           ),
       },
     );
-    shell.showItemInFolder(filePath);
-    return filePath;
+    shell.showItemInFolder(outputPath);
+    return outputPath;
   },
 );
+
+function getMediaExportDialogFilters(format: "prores-422-hq" | "prores-4444" | "dnxhr-hqx" | "mov" | "h264-high" | "mp4" | "webm") {
+  switch (format) {
+    case "webm":
+      return [{ name: "WebM Video", extensions: ["webm"] }];
+    case "h264-high":
+      return [{ name: "MP4 H.264 High Quality", extensions: ["mp4"] }];
+    case "mp4":
+      return [{ name: "MP4 Video", extensions: ["mp4"] }];
+    case "prores-4444":
+      return [{ name: "MOV ProRes 4444", extensions: ["mov"] }];
+    case "dnxhr-hqx":
+      return [{ name: "MOV DNxHR HQX", extensions: ["mov"] }];
+    case "mov":
+      return [{ name: "MOV Uncompressed BGRA", extensions: ["mov"] }];
+    default:
+      return [{ name: "MOV ProRes 422 HQ", extensions: ["mov"] }];
+  }
+}
+
+function getMediaExportDialogTitle(format: "prores-422-hq" | "prores-4444" | "dnxhr-hqx" | "mov" | "h264-high" | "mp4" | "webm") {
+  switch (format) {
+    case "webm": return "Export WebM video";
+    case "h264-high": return "Export high-quality H.264 video";
+    case "mp4": return "Export MP4 video";
+    case "prores-4444": return "Export ProRes 4444 video";
+    case "dnxhr-hqx": return "Export DNxHR HQX video";
+    case "mov": return "Export uncompressed MOV video";
+    default: return "Export ProRes 422 HQ video";
+  }
+}
+
+function withMediaExportExtension(filePath: string, extension: ".mov" | ".mp4" | ".webm") {
+  const parsed = path.parse(filePath);
+  const knownExtensions = new Set([".mov", ".mp4", ".webm"]);
+  const baseName = knownExtensions.has(parsed.ext.toLowerCase()) ? parsed.name : parsed.base;
+  return path.join(parsed.dir, `${baseName}${extension}`);
+}
 
 ipcMain.handle(
   "clipper:prerender-frame",

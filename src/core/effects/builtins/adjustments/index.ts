@@ -16,8 +16,8 @@ import freezeFrameManifest from "./freezeFrame/manifest.yml?raw";
 import { freezeFrameLogic } from "./freezeFrame/logic";
 import lightLeakManifest from "./lightLeak/manifest.yml?raw";
 import { lightLeakLogic } from "./lightLeak/logic";
-import lenseManifest from "./lense/manifest.yml?raw";
-import { lenseLogic } from "./lense/logic";
+import lensManifest from "./lens/manifest.yml?raw";
+import { lensLogic } from "./lens/logic";
 import loopStutterManifest from "./loopStutter/manifest.yml?raw";
 import { loopStutterLogic } from "./loopStutter/logic";
 import reverseManifest from "./reverse/manifest.yml?raw";
@@ -39,7 +39,7 @@ export const filmScratchesEffect = createAdjustmentEffectPackage(filmScratchesMa
 export const frameSkipEffect = createAdjustmentEffectPackage(frameSkipManifest, frameSkipLogic);
 export const freezeFrameEffect = createAdjustmentEffectPackage(freezeFrameManifest, freezeFrameLogic);
 export const lightLeakEffect = createAdjustmentEffectPackage(lightLeakManifest, lightLeakLogic);
-export const lenseEffect = createAdjustmentEffectPackage(lenseManifest, lenseLogic);
+export const lensEffect = createAdjustmentEffectPackage(lensManifest, lensLogic);
 export const loopStutterEffect = createAdjustmentEffectPackage(loopStutterManifest, loopStutterLogic);
 export const reverseEffect = createAdjustmentEffectPackage(reverseManifest, reverseLogic);
 export const speedChangeEffect = createAdjustmentEffectPackage(speedChangeManifest, speedChangeLogic);
@@ -58,5 +58,5 @@ export const builtInAdjustmentEffects = [
   filmScratchesEffect,
   vignetteEffect,
   lightLeakEffect,
-  lenseEffect,
+  lensEffect,
 ] as const satisfies readonly AdjustmentEffectPackage[];

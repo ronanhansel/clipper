@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { applyAdjustmentLayersToPostProcessPasses, applyAdjustmentLayersToVisualStyle } from "../../adjustments";
 import type { AdjustmentLayer } from "../../types";
-import { applyExportPostProcessFrame, hasExportPostProcessPasses, isPngDataUrl, isValidExportPostProcessFrameResult, type ExportPostProcessRenderer } from "./exportFrameBridge";
-import { getLensPostProcessUniforms, lensPostProcessKind } from "./lens";
+import { applyExportPostProcessFrame, applyExportRawPostProcessFrame, bgraBytesToRgbaClamped, hasExportPostProcessPasses, isPngDataUrl, isValidExportPostProcessFrameResult, isValidExportRawFramePayload, isValidExportRawPostProcessFrameResult, rgbaBytesToBgra, webGlReadPixelsRgbaToTopLeftRgba, type ExportPostProcessRenderer } from "./exportFrameBridge";
+import { getLensPostProcessUniforms, getShapeMaskUniforms, lensPostProcessKind } from "./lens";
 import { getLiveDomPostProcessCapability, getLiveDomPostProcessPreflight, LiveDomCapabilityProbe, LiveDomTextureUploader, prepareLiveDomPostProcessSource, uploadLiveDomElementToTexture } from "./liveDomCapability";
 import { LiveDomPostProcessRenderer } from "./liveDomRenderer";
 import { adjustmentLayersRequireLiveDomPostProcessSource, collectLiveDomPostProcessRequirement } from "./liveDomRequirement";
-import { createLensExportPostProcessRenderer, LensPostProcessRenderer, selectLensPostProcessPass } from "./lensWebGlRenderer";
+import { createLensExportPostProcessRenderer, createLensPostProcessRenderer, selectLensPostProcessPass, type LensPostProcessRenderer } from "./lensWebGlRenderer";
 import { withLensFrameBackground } from "./lens";
 import { selectLiveDomPostProcessPass, withPostProcessFrameBackground } from "./passes";
 
@@ -42,15 +42,133 @@ describe("lens post-process parameters", () => {
     expect(withLensFrameBackground(testLensPass(), "rgb(12, 34, 56)").uniforms.frameBackground).toEqual({ r: 12 / 255, g: 34 / 255, b: 56 / 255 });
     expect(withLensFrameBackground(testLensPass(), "not-a-color").uniforms.frameBackground).toEqual({ r: 0, g: 0, b: 0 });
   });
+
+  it("returns mask disabled by default with safe zeroed preview and feathered inside apply", () => {
+    const mask = getShapeMaskUniforms(lensLayer({}));
+    expect(mask.enabled).toBe(false);
+    expect(mask.preview).toBe(false);
+    expect(mask.applyInside).toBe(true);
+    expect(mask.shape).toBe("circular");
+    expect(mask.focus).toEqual({ x: 0.5, y: 0.5 });
+    expect(mask.radiusX).toBe(200);
+    expect(mask.radiusY).toBe(200);
+    expect(mask.feather).toBe(20);
+  });
+
+  it("enabled mask creates expected focus/radius/feather/applyInside/shape", () => {
+    const mask = getShapeMaskUniforms(lensLayer({
+      chromaticAberrationUseMask: true,
+      chromaticAberrationMaskPreview: true,
+      chromaticAberrationMaskInvert: true,
+      chromaticAberrationMaskShape: "circular",
+      chromaticAberrationMaskFocusX: 30,
+      chromaticAberrationMaskFocusY: 70,
+      chromaticAberrationMaskRadius: 400,
+      chromaticAberrationMaskFeather: 50,
+    }));
+    expect(mask.enabled).toBe(true);
+    expect(mask.preview).toBe(true);
+    expect(mask.applyInside).toBe(false);
+    expect(mask.shape).toBe("circular");
+    expect(mask.focus).toEqual({ x: 0.3, y: 0.7 });
+    expect(mask.radiusX).toBe(400);
+    expect(mask.radiusY).toBe(400);
+    expect(mask.feather).toBe(50);
+  });
+
+  it("ellipsoid shape uses separate radiusX/Y while ignoring single radius fallback", () => {
+    const mask = getShapeMaskUniforms(lensLayer({
+      chromaticAberrationUseMask: true,
+      chromaticAberrationMaskShape: "ellipsoid",
+      chromaticAberrationMaskRadius: 100,
+      chromaticAberrationMaskRadiusX: 300,
+      chromaticAberrationMaskRadiusY: 150,
+    }));
+    expect(mask.shape).toBe("ellipsoid");
+    expect(mask.radiusX).toBe(300);
+    expect(mask.radiusY).toBe(150);
+  });
+
+  it("circular shape uses single radius for both axes", () => {
+    const mask = getShapeMaskUniforms(lensLayer({
+      chromaticAberrationUseMask: true,
+      chromaticAberrationMaskShape: "circular",
+      chromaticAberrationMaskRadius: 350,
+      chromaticAberrationMaskRadiusX: 999,
+      chromaticAberrationMaskRadiusY: 999,
+    }));
+    expect(mask.radiusX).toBe(350);
+    expect(mask.radiusY).toBe(350);
+  });
+
+  it("clamps mask radius to minimum of 1 and feather to non-negative", () => {
+    const mask = getShapeMaskUniforms(lensLayer({
+      chromaticAberrationUseMask: true,
+      chromaticAberrationMaskRadius: -5,
+      chromaticAberrationMaskFeather: -10,
+    }));
+    expect(mask.radiusX).toBe(1);
+    expect(mask.radiusY).toBe(1);
+    expect(mask.feather).toBe(0);
+  });
+
+  it("falls back to circular for unknown shape strings", () => {
+    const params: AdjustmentLayer["effect"]["params"] = {
+      chromaticAberrationUseMask: true,
+      // @ts-expect-error -- intentionally using an unsupported legacy shape to test runtime fallback to "circular"
+      chromaticAberrationMaskShape: "square",
+      chromaticAberrationMaskRadius: 300,
+      chromaticAberrationMaskRadiusX: 500,
+      chromaticAberrationMaskRadiusY: 600,
+    };
+    const mask = getShapeMaskUniforms(lensLayer(params));
+    expect(mask.shape).toBe("circular");
+    expect(mask.radiusX).toBe(300);
+    expect(mask.radiusY).toBe(300);
+  });
+
+  it("mask is included in getLensPostProcessUniforms output", () => {
+    const uniforms = getLensPostProcessUniforms(lensLayer({
+      chromaticAberrationUseMask: true,
+      chromaticAberrationMaskInvert: true,
+      chromaticAberrationMaskFocusX: 25,
+      chromaticAberrationMaskRadius: 500,
+    }), { width: 1920, height: 1080 });
+    expect(uniforms.chromaticAberrationMask).toMatchObject({
+      enabled: true,
+      applyInside: false,
+      focus: { x: 0.25, y: 0.5 },
+      radiusX: 500,
+      radiusY: 500,
+    });
+    expect(uniforms.focus).toEqual({ x: 0.5, y: 0.5 });
+    expect(uniforms.chromaticAberrationPixels).toBe(0.55);
+  });
 });
 
 describe("lens WebGL renderer", () => {
+  it("uploads DOM image sources with WebGL Y flip enabled", () => {
+    const canvas = fakeCanvasElement({});
+    const source = fakeSource({}) as unknown as TexImageSource;
+    const pixelStoreCalls: unknown[][] = [];
+    const texImageCalls: unknown[][] = [];
+    canvas.context.pixelStorei = (...args: unknown[]) => { pixelStoreCalls.push(args); };
+    canvas.context.texImage2D = (...args: unknown[]) => { texImageCalls.push(args); };
+    const renderer = createLensPostProcessRenderer();
+
+    expect(renderer.render(canvas, source, testLensPass(), 16, 16)).toBe(true);
+    expect(pixelStoreCalls).toContainEqual([canvas.context.UNPACK_FLIP_Y_WEBGL, true]);
+    expect(texImageCalls[0]?.at(-1)).toBe(source);
+
+    renderer.destroy();
+  });
+
   it("reinitializes WebGL resources when reused with a different output canvas", () => {
     const firstCanvas = fakeCanvasElement({});
     const secondCanvas = fakeCanvasElement({});
     let firstCanvasProgramDeletes = 0;
     firstCanvas.context.deleteProgram = () => { firstCanvasProgramDeletes += 1; };
-    const renderer = new LensPostProcessRenderer();
+    const renderer = createLensPostProcessRenderer();
 
     expect(renderer.render(firstCanvas, fakeImageBitmap(), testLensPass(), 16, 16)).toBe(true);
     expect(renderer.render(secondCanvas, fakeImageBitmap(), testLensPass(), 16, 16)).toBe(true);
@@ -207,18 +325,18 @@ describe("live DOM post-process capability", () => {
 });
 
 describe("lens post-process pass collection", () => {
-  it("collects active lense passes separately from CSS visual styles", () => {
+  it("collects active lens passes separately from CSS visual styles", () => {
     const layers: AdjustmentLayer[] = [lensLayer({ target: "frame", focusX: 25, focusY: 75 })];
 
     const passes = applyAdjustmentLayersToPostProcessPasses(1.5, layers, 30, { width: 1920, height: 1080 });
 
     expect(applyAdjustmentLayersToVisualStyle(1.5, layers, 30).overlays).toBeUndefined();
     expect(passes).toHaveLength(1);
-    expect(passes[0]).toMatchObject({ id: "lens:lense-postprocess", kind: lensPostProcessKind, target: "final", requiresLiveDomSource: true });
+    expect(passes[0]).toMatchObject({ id: "lens:lens-postprocess", kind: lensPostProcessKind, target: "final", requiresLiveDomSource: true });
     expect(passes[0].uniforms.focus).toEqual({ x: 0.25, y: 0.75 });
   });
 
-  it("preserves CSS-safe visual adjustments when lense is also active", () => {
+  it("preserves CSS-safe visual adjustments when lens is also active", () => {
     const layers: AdjustmentLayer[] = [
       lensLayer({ focusX: 25 }),
       adjustmentLayer("blur", "clipper.adjustment.blur", { radius: 8 }),
@@ -228,7 +346,7 @@ describe("lens post-process pass collection", () => {
     expect(applyAdjustmentLayersToVisualStyle(1.5, layers, 30).filter).toContain("blur");
   });
 
-  it("ignores inactive lense layers", () => {
+  it("ignores inactive lens layers", () => {
     expect(applyAdjustmentLayersToPostProcessPasses(5, [lensLayer({})], 30, { width: 1920, height: 1080 })).toEqual([]);
   });
 
@@ -245,13 +363,13 @@ describe("lens post-process pass collection", () => {
     const passes = applyAdjustmentLayersToPostProcessPasses(1.5, [lensLayer({ focusX: 10 }), { ...lensLayer({ focusX: 90 }), id: "lens-2" }], 30, { width: 1920, height: 1080 });
 
     expect(passes).toHaveLength(2);
-    expect(selectLensPostProcessPass(passes)).toMatchObject({ pass: { id: "lens:lense-postprocess" }, droppedPassCount: 1 });
+    expect(selectLensPostProcessPass(passes)).toMatchObject({ pass: { id: "lens:lens-postprocess" }, droppedPassCount: 1 });
   });
 
   it("selects live DOM post-process passes independently of lens kind", () => {
     const passes = applyAdjustmentLayersToPostProcessPasses(1.5, [lensLayer({ focusX: 10 }), { ...lensLayer({ focusX: 90 }), id: "lens-2" }], 30, { width: 1920, height: 1080 });
 
-    expect(selectLiveDomPostProcessPass(passes)).toMatchObject({ pass: { id: "lens:lense-postprocess", requiresLiveDomSource: true }, droppedPassCount: 1 });
+    expect(selectLiveDomPostProcessPass(passes)).toMatchObject({ pass: { id: "lens:lens-postprocess", requiresLiveDomSource: true }, droppedPassCount: 1 });
   });
 
   it("applies frame background through the generic post-process decorator", () => {
@@ -281,7 +399,7 @@ describe("export post-process routing helpers", () => {
   });
 
   it("dispatches lens through a generic export renderer", async () => {
-    installExportBridgeDomMocks();
+    const { image } = installExportBridgeDomMocks();
     const calls: unknown[] = [];
     const renderer = createLensExportPostProcessRenderer({
       render: (canvas, source, pass, width, height) => {
@@ -295,6 +413,27 @@ describe("export post-process routing helpers", () => {
 
     expect(result).toEqual({ applied: true, outputDataUrl: "data:image/png;base64,BBBB", droppedPassCount: 0 });
     expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ source: image });
+  });
+
+  it("decodes export sources as DOM images so WebGL unpack flip applies", async () => {
+    const { image } = installExportBridgeDomMocks();
+    const createImageBitmap = vi.fn();
+    vi.stubGlobal("createImageBitmap", createImageBitmap);
+    let renderedSource: TexImageSource | null = null;
+    const renderer: ExportPostProcessRenderer = {
+      kind: lensPostProcessKind,
+      render: ({ canvas, source }) => {
+        renderedSource = source;
+        canvas.toDataURL = () => "data:image/png;base64,BBBB";
+        return true;
+      },
+    };
+
+    await applyExportPostProcessFrame({ width: 16, height: 16, sourceDataUrl: "data:image/png;base64,AAAA", passes: [testLensPass()] }, [renderer]);
+
+    expect(renderedSource).toBe(image);
+    expect(createImageBitmap).not.toHaveBeenCalled();
   });
 
   it("fails explicitly for active pass kinds without an export renderer", async () => {
@@ -317,10 +456,80 @@ describe("export post-process routing helpers", () => {
 
     expect(result).toMatchObject({ applied: true, droppedPassCount: 1 });
   });
+
+  it("converts BGRA and RGBA bytes without changing row order", () => {
+    const topLeftThenRight = new Uint8Array([10, 20, 30, 255, 40, 50, 60, 128]);
+
+    expect([...bgraBytesToRgbaClamped(topLeftThenRight)]).toEqual([30, 20, 10, 255, 60, 50, 40, 128]);
+    expect([...rgbaBytesToBgra(new Uint8Array([30, 20, 10, 255, 60, 50, 40, 128]))]).toEqual([...topLeftThenRight]);
+  });
+
+  it("flips WebGL readPixels rows back to top-left frame orientation", () => {
+    const bottomRowThenTopRow = new Uint8Array([
+      1, 2, 3, 255, 4, 5, 6, 255,
+      7, 8, 9, 255, 10, 11, 12, 255,
+    ]);
+
+    expect([...webGlReadPixelsRgbaToTopLeftRgba(bottomRowThenTopRow, 2, 2)]).toEqual([
+      7, 8, 9, 255, 10, 11, 12, 255,
+      1, 2, 3, 255, 4, 5, 6, 255,
+    ]);
+  });
+
+  it("validates raw bridge requests and results", () => {
+    const frame = { width: 2, height: 1, pixelFormat: "bgra" as const, data: new Uint8Array(8) };
+
+    expect(isValidExportRawFramePayload(frame, 2, 1)).toBe(true);
+    expect(isValidExportRawFramePayload({ ...frame, pixelFormat: "rgb" }, 2, 1)).toBe(false);
+    expect(isValidExportRawFramePayload({ ...frame, data: new Uint8Array(4) }, 2, 1)).toBe(false);
+    expect(isValidExportRawPostProcessFrameResult({ applied: true, outputFrame: frame, droppedPassCount: 0 }, 2, 1)).toBe(true);
+    expect(isValidExportRawPostProcessFrameResult({ applied: true, outputFrame: { ...frame, height: 2 }, droppedPassCount: 0 }, 2, 1)).toBe(false);
+  });
+
+  it("dispatches raw frames through the generic renderer and returns top-left RGBA", async () => {
+    installRawExportBridgeDomMocks({
+      readPixels: [
+        1, 2, 3, 255, 4, 5, 6, 255,
+        7, 8, 9, 255, 10, 11, 12, 255,
+      ],
+    });
+    const calls: unknown[] = [];
+    const renderer: ExportPostProcessRenderer = {
+      kind: lensPostProcessKind,
+      render: ({ source, width, height }) => {
+        calls.push({ source, width, height });
+        return true;
+      },
+    };
+
+    const result = await applyExportRawPostProcessFrame({ width: 2, height: 2, sourceFrame: { width: 2, height: 2, pixelFormat: "bgra", data: new Uint8Array(16) }, passes: [testLensPass()] }, [renderer]);
+
+    expect(result.applied).toBe(true);
+    expect(result.outputFrame.pixelFormat).toBe("rgba");
+    expect(result.outputFrame.data).toBeInstanceOf(Uint8Array);
+    expect([...(result.outputFrame.data as Uint8Array)]).toEqual([
+      7, 8, 9, 255, 10, 11, 12, 255,
+      1, 2, 3, 255, 4, 5, 6, 255,
+    ]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ width: 2, height: 2 });
+  });
+
+  it("keeps the raw direct route unchanged when no passes are active", async () => {
+    const sourceFrame = { width: 1, height: 1, pixelFormat: "bgra" as const, data: new Uint8Array([1, 2, 3, 4]) };
+
+    await expect(applyExportRawPostProcessFrame({ width: 1, height: 1, sourceFrame, passes: [] }, [])).resolves.toEqual({ applied: false, outputFrame: sourceFrame, droppedPassCount: 0 });
+  });
+
+  it("fails raw routing explicitly for active pass kinds without an export renderer", async () => {
+    installRawExportBridgeDomMocks({ readPixels: [0, 0, 0, 255] });
+
+    await expect(applyExportRawPostProcessFrame({ width: 1, height: 1, sourceFrame: { width: 1, height: 1, pixelFormat: "bgra", data: new Uint8Array(4) }, passes: [testUnsupportedPass()] }, [])).rejects.toThrow(/no registered export renderer/);
+  });
 });
 
 function lensLayer(params: AdjustmentLayer["effect"]["params"]): AdjustmentLayer {
-  return adjustmentLayer("lens", "clipper.adjustment.lense", params);
+  return adjustmentLayer("lens", "clipper.adjustment.lens", params);
 }
 
 function adjustmentLayer(id: string, effectId: AdjustmentLayer["effect"]["effectId"], params: AdjustmentLayer["effect"]["params"]): AdjustmentLayer {
@@ -434,14 +643,91 @@ function fakeImageBitmap() {
 }
 
 function installExportBridgeDomMocks() {
-  vi.stubGlobal("fetch", vi.fn(async () => ({ blob: async () => new Blob() })));
-  vi.stubGlobal("createImageBitmap", vi.fn(async () => fakeImageBitmap()));
+  const image = new TestImage() as unknown as HTMLImageElement;
+  vi.stubGlobal("Image", class {
+    constructor() {
+      return image;
+    }
+  });
   vi.stubGlobal("document", {
     createElement: (tagName: string) => {
       if (tagName !== "canvas") throw new Error(`Unexpected test element: ${tagName}`);
       return { width: 0, height: 0, toDataURL: () => "data:image/png;base64,CCCC" };
     },
   });
+  return { image };
+}
+
+function installRawExportBridgeDomMocks({ readPixels }: { readPixels: number[] }) {
+  const canvases: Array<ReturnType<typeof fakeRawCanvas>> = [];
+  vi.stubGlobal("ImageData", class {
+    data: Uint8ClampedArray;
+    width: number;
+    height: number;
+    colorSpace: string;
+
+    constructor(data: Uint8ClampedArray, width: number, height: number, options?: { colorSpace?: string }) {
+      this.data = data;
+      this.width = width;
+      this.height = height;
+      this.colorSpace = options?.colorSpace ?? "srgb";
+    }
+  });
+  vi.stubGlobal("document", {
+    createElement: (tagName: string) => {
+      if (tagName !== "canvas") throw new Error(`Unexpected test element: ${tagName}`);
+      const canvas = fakeRawCanvas(readPixels);
+      canvases.push(canvas);
+      return canvas;
+    },
+  });
+  return { canvases };
+}
+
+function fakeRawCanvas(readPixelValues: number[]) {
+  const canvas = {
+    width: 0,
+    height: 0,
+    putImageDataCalls: [] as unknown[],
+    getContext: (kind: string) => {
+      if (kind === "2d") {
+        return {
+          putImageData: (imageData: unknown, x: number, y: number) => canvas.putImageDataCalls.push({ imageData, x, y }),
+          getImageData: () => ({ data: new Uint8ClampedArray(readPixelValues) }),
+        };
+      }
+      if (kind === "webgl") {
+        if (canvas.putImageDataCalls.length > 0) return null;
+        return {
+          RGBA: 6408,
+          UNSIGNED_BYTE: 5121,
+          isContextLost: () => false,
+          readPixels: (_x: number, _y: number, _width: number, _height: number, _format: number, _type: number, pixels: Uint8Array) => pixels.set(readPixelValues),
+        };
+      }
+      return null;
+    },
+  };
+  return canvas as unknown as HTMLCanvasElement & { putImageDataCalls: unknown[] };
+}
+
+class TestImage {
+  complete = false;
+  naturalWidth = 0;
+  onload: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  private source = "";
+
+  get src() {
+    return this.source;
+  }
+
+  set src(value: string) {
+    this.source = value;
+    this.complete = true;
+    this.naturalWidth = 16;
+    this.onload?.();
+  }
 }
 
 function testUnsupportedPass() {
@@ -469,6 +755,16 @@ function testLensPass() {
       rimOpacity: 0,
       dimAmount: 0,
       frameBackground: { r: 0, g: 0, b: 0 },
+      chromaticAberrationMask: {
+        enabled: false,
+        preview: false,
+        applyInside: true,
+        shape: "circular",
+        focus: { x: 0.5, y: 0.5 },
+        radiusX: 200,
+        radiusY: 200,
+        feather: 20,
+      },
     },
   } as const;
 }

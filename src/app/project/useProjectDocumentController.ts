@@ -49,7 +49,7 @@ export type ProjectDocumentController = {
 };
 
 export type UseProjectDocumentControllerInput = {
-  applyStoredEditorState: (editorState: EditorState, fallbackSceneId: string) => void;
+  applyStoredEditorState: (editorState: EditorState, fallbackSceneId: string, options?: { preserveMarkerSelection?: boolean }) => void;
   centerPreviewScrollRef: RefObject<HTMLDivElement | null>;
   defaultEditorState: EditorState;
   initialProjectManifestPath: string;
@@ -180,8 +180,8 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
     }
   }
 
-  function applyEditorState(editorState: EditorState) {
-    applyStoredEditorState(editorState, "");
+  function applyEditorState(editorState: EditorState, options?: { preserveMarkerSelection?: boolean }) {
+    applyStoredEditorState(editorState, "", options);
     requestAnimationFrame(() => {
       const viewport = centerPreviewScrollRef.current;
       if (!viewport) return;
@@ -367,7 +367,7 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
       projectRef.current = restoredProject;
       setProject(restoredProject);
       setTimelineMode(timelineModeRef.current);
-      applyEditorState(restoredProject.editorState ?? defaultEditorState);
+      applyEditorState(restoredProject.editorState ?? defaultEditorState, { preserveMarkerSelection: true });
       syncCompositionSourcesFromProject(restoredProject);
       if (previousEntry.implicitFileOperation) scheduleImplicitFileOperationSave(restoredProject);
     });
@@ -401,7 +401,7 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
       projectRef.current = restoredProject;
       setProject(restoredProject);
       setTimelineMode(timelineModeRef.current);
-      applyEditorState(restoredProject.editorState ?? defaultEditorState);
+      applyEditorState(restoredProject.editorState ?? defaultEditorState, { preserveMarkerSelection: true });
       syncCompositionSourcesFromProject(restoredProject);
       if (nextEntry.implicitFileOperation) scheduleImplicitFileOperationSave(restoredProject);
     });

@@ -34,11 +34,14 @@ export type TransitionVisualOverlay = {
 };
 
 export type AdjustmentEffectDisableCondition = {
-  key: string;
+  key?: string;
   truthy?: boolean;
   equals?: string | number | boolean;
   reason?: string;
+  and?: AdjustmentEffectDisableCondition[];
 };
+
+export type AdjustmentEffectSection = string | { key: string; label: string; description?: string };
 
 export type AdjustmentEffectNumberParamControl = {
   key: string;
@@ -49,6 +52,14 @@ export type AdjustmentEffectNumberParamControl = {
   step?: number;
   defaultValue: number;
   disabledWhen?: AdjustmentEffectDisableCondition;
+  visibleWhen?: AdjustmentEffectDisableCondition;
+  section?: AdjustmentEffectSection;
+  inlineGroup?: string;
+  inlineToggle?: {
+    label: string;
+    key: string;
+    defaultValue: boolean;
+  };
 };
 
 export type AdjustmentEffectSelectParamControl = {
@@ -58,9 +69,28 @@ export type AdjustmentEffectSelectParamControl = {
   defaultValue: string;
   options: readonly { value: string; label: string }[];
   disabledWhen?: AdjustmentEffectDisableCondition;
+  visibleWhen?: AdjustmentEffectDisableCondition;
+  section?: AdjustmentEffectSection;
+  inlineGroup?: string;
+  inlineToggle?: {
+    label: string;
+    key: string;
+    defaultValue: boolean;
+  };
 };
 
-export type AdjustmentEffectParamControl = AdjustmentEffectNumberParamControl | AdjustmentEffectSelectParamControl;
+export type AdjustmentEffectBooleanParamControl = {
+  key: string;
+  label: string;
+  type: "boolean";
+  defaultValue: boolean;
+  disabledWhen?: AdjustmentEffectDisableCondition;
+  visibleWhen?: AdjustmentEffectDisableCondition;
+  section?: AdjustmentEffectSection;
+  inlineGroup?: string;
+};
+
+export type AdjustmentEffectParamControl = AdjustmentEffectNumberParamControl | AdjustmentEffectSelectParamControl | AdjustmentEffectBooleanParamControl;
 
 export type AdjustmentEffectPointControl = {
   label: string;
@@ -73,6 +103,9 @@ export type AdjustmentEffectPointControl = {
   coordinateSpace: "percent" | "frame";
   pickLabel?: string;
   disabledWhen?: AdjustmentEffectDisableCondition;
+  visibleWhen?: AdjustmentEffectDisableCondition;
+  section?: AdjustmentEffectSection;
+  inlineGroup?: string;
 };
 
 export type MotionMendTransitionNumberControl = {

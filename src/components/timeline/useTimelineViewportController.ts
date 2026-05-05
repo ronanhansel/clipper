@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type WheelEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import { clamp } from "../../core/math";
 import type { TimelineViewportState } from "../../core/types";
 
@@ -46,7 +46,7 @@ export function useTimelineViewportController({ contentWidth, currentTime, displ
     onTimelineViewportStateChange((state) => ({ ...state, displacement }));
   }
 
-  function scrollTimelineFromLayerRail(event: WheelEvent<HTMLDivElement>) {
+  function scrollTimelineFromLayerRail(event: WheelEvent) {
     const viewport = timelineViewportRef.current;
     if (!viewport) return;
     if (event.deltaY === 0 && event.deltaX === 0) return;
@@ -55,6 +55,14 @@ export function useTimelineViewportController({ contentWidth, currentTime, displ
     viewport.scrollLeft += event.deltaX;
     saveTimelineDisplacement();
   }
+
+  useEffect(() => {
+    const railContainer = timelineLayerRailRef.current?.parentElement;
+    if (!railContainer) return;
+
+    railContainer.addEventListener("wheel", scrollTimelineFromLayerRail, { passive: false });
+    return () => railContainer.removeEventListener("wheel", scrollTimelineFromLayerRail);
+  });
 
   function updateTimelineSnapGuide(time: number | null) {
     const element = timelineSnapGuideRef.current;
@@ -80,7 +88,6 @@ export function useTimelineViewportController({ contentWidth, currentTime, displ
     updateTimelineZoom,
     syncTimelineScrollPosition,
     saveTimelineDisplacement,
-    scrollTimelineFromLayerRail,
     updateTimelineSnapGuide,
     clearTimelineSnapGuide,
   };

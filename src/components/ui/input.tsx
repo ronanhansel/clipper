@@ -224,7 +224,11 @@ export function Input({ className, type = "text", numberScrubMode = "commit", nu
   function blurOnConfirmKey(event: KeyboardEvent<HTMLInputElement>) {
     onKeyDown?.(event);
     if (event.defaultPrevented || (event.key !== "Enter" && event.key !== "Escape")) return;
-    if (event.key === "Escape") restoreInputValue(event.currentTarget, focusedValueRef.current, onChange);
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      restoreInputValue(event.currentTarget, focusedValueRef.current, onChange);
+    }
     event.currentTarget.blur();
   }
 

@@ -147,7 +147,7 @@ export type EditorStoreActions = {
   selectEditorTab: (tabId: string) => void;
   closeEditorTab: (tabId: string) => void;
   restoreClosedEditorTab: () => boolean;
-  applyEditorState: (editorState: EditorState, fallbackSceneId: string) => void;
+  applyEditorState: (editorState: EditorState, fallbackSceneId: string, options?: { preserveMarkerSelection?: boolean }) => void;
   clearMarkerSelection: () => void;
   clearNodeSelection: () => void;
 };
@@ -328,14 +328,14 @@ export function createEditorStore(project: ProjectManifest) {
       set({ editorTabs, closedEditorTabs: remainingClosedTabs, activeEditorTabId: restoredTab.id });
       return true;
     },
-    applyEditorState: (editorState, fallbackSceneId) => set({
+    applyEditorState: (editorState, fallbackSceneId, options) => set((state) => ({
       mode: normalizeMode(editorState.mode),
       timelineMode: editorState.timelineMode ?? defaultTimelineMode,
       selectedSceneId: editorState.selectedSceneId ?? fallbackSceneId,
       selectedPartId: editorState.selectedPartId ?? "",
       selectedParts: editorState.selectedPartId ? [{ partId: editorState.selectedPartId }] : [],
-      selectedMotionMarker: editorState.selectedMotionMarker ?? null,
-      selectedMotionMarkers: editorState.selectedMotionMarker ? [editorState.selectedMotionMarker] : [],
+      selectedMotionMarker: options?.preserveMarkerSelection ? state.selectedMotionMarker : (editorState.selectedMotionMarker ?? null),
+      selectedMotionMarkers: options?.preserveMarkerSelection ? state.selectedMotionMarkers : (editorState.selectedMotionMarker ? [editorState.selectedMotionMarker] : []),
       selectedObjectId: null,
       editingTextObjectId: null,
       selectedAdjustmentLayerId: null,
@@ -355,7 +355,7 @@ export function createEditorStore(project: ProjectManifest) {
       editorTabs: tabsFromEditorSession(editorState),
       closedEditorTabs: [],
       activeEditorTabId: activeTabIdFromEditorSession(editorState),
-    }),
+    })),
     clearMarkerSelection: () => set({
       selectedMotionMarker: null,
       selectedMotionMarkers: [],

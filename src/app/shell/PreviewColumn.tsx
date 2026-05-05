@@ -5,9 +5,8 @@ import { applyAdjustmentLayersToPostProcessPasses, applyAdjustmentLayersToVisual
 import { getLiveDomPostProcessPreflight, isLiveDomPostProcessPreviewOptedIn, type LiveDomPostProcessCapability } from "../../core/effects/postprocess/liveDomCapability";
 import { collectLiveDomPostProcessRequirement } from "../../core/effects/postprocess/liveDomRequirement";
 import { LiveDomPostProcessRenderer } from "../../core/effects/postprocess/liveDomRenderer";
-import { withLensFrameBackground } from "../../core/effects/postprocess/lens";
 import { selectLiveDomPostProcessPass, withPostProcessFrameBackground } from "../../core/effects/postprocess/passes";
-import { selectLensPostProcessPass, LensPostProcessRenderer } from "../../core/effects/postprocess/lensWebGlRenderer";
+import { createLensPostProcessRenderer } from "../../core/effects/postprocess/lensWebGlRenderer";
 import type { AdjustmentVisualOverlay, AdjustmentVisualStyle } from "../../core/effects/types";
 import { FRAME_HEIGHT, FRAME_WIDTH, type AdjustmentLayer, type TransitionLayer } from "../../core/types";
 import type { PrerenderCacheBlock } from "../features/preview/usePrerenderCache";
@@ -26,6 +25,16 @@ const livePostProcessReasonLabel: Record<LiveDomPostProcessCapability["reason"],
   "missing-paint": "missing paint invalidation support",
   "missing-tex-element-image": "missing WebGL texElementImage2D support",
 };
+
+function requiresDomOverlayPreview(props: FramePreviewProps): boolean {
+  return props.focusPicking
+    || props.trackerPicking
+    || props.pickingTranslationPosition
+    || props.pickingZoomFocus
+    || props.framePickPoint !== null
+    || props.dragBox !== null
+    || props.marqueeDragging;
+}
 
 type PreviewColumnProps = {
   blankFrameViewportStyle: CSSProperties;
@@ -101,7 +110,7 @@ export function PreviewColumn({ blankFrameViewportStyle, children, currentSceneT
 function PrerenderVideoPreview({ blackMissDebug, currentSceneTimeRef, framePreviewProps, getBlockAtTime, liveDomPostProcessMaxFps, livePostProcessPreviewEnabled, onCachedPreviewDisplayReadyChange }: { blackMissDebug: boolean; currentSceneTimeRef: RefObject<number>; framePreviewProps: FramePreviewProps; getBlockAtTime: (time: number) => PrerenderCacheBlock | null; liveDomPostProcessMaxFps: number; livePostProcessPreviewEnabled: boolean; onCachedPreviewDisplayReadyChange: (ready: boolean) => void }) {
   const canvas2dRef = useRef<HTMLCanvasElement | null>(null);
   const webglCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const lensRendererRef = useRef<LensPostProcessRenderer | null>(null);
+  const postProcessRendererRef = useRef<ReturnType<typeof createLensPostProcessRenderer> | null>(null);
   const lastFrameKeyRef = useRef("");
   const firstMissAtRef = useRef<number | null>(null);
   const displayReadyRef = useRef(false);
@@ -142,12 +151,17 @@ function PrerenderVideoPreview({ blackMissDebug, currentSceneTimeRef, framePrevi
   }, [currentSceneTimeRef, framePreviewProps.adjustmentLayers, getBlockAtTime]);
 
   useEffect(() => () => {
-    lensRendererRef.current?.destroy();
-    lensRendererRef.current = null;
+    postProcessRendererRef.current?.destroy();
+    postProcessRendererRef.current = null;
     updateDisplayReady(false);
   }, []);
 
   function drawCachedFrameAtTime(sceneTime: number) {
+    if (requiresDomOverlayPreview(framePreviewProps)) {
+      showDomFallback();
+      return;
+    }
+
     const block = getBlockAtTime(sceneTime);
     const frame = block ? getFrameForTime(block, sceneTime) : null;
     if (!block || !frame) {
@@ -157,18 +171,19 @@ function PrerenderVideoPreview({ blackMissDebug, currentSceneTimeRef, framePrevi
 
     firstMissAtRef.current = null;
     const postProcessPasses = applyAdjustmentLayersToPostProcessPasses(sceneTime, framePreviewProps.adjustmentLayers, undefined, { width: block.width, height: block.height });
-    const { pass: lensPass } = selectLensPostProcessPass(postProcessPasses);
-    const targetDisplayMode: CachedPreviewDisplayMode = lensPass ? "webgl" : "canvas2d";
+    const { pass: webGlPostProcessPass } = selectLiveDomPostProcessPass(postProcessPasses);
+    const targetDisplayMode: CachedPreviewDisplayMode = webGlPostProcessPass ? "webgl" : "canvas2d";
     const frameKey = `${targetDisplayMode}:${block.startTime}:${frame.sceneTime}:${JSON.stringify(postProcessPasses)}`;
     if (lastFrameKeyRef.current !== frameKey) {
-      if (lensPass) {
+      if (webGlPostProcessPass) {
         const canvas = webglCanvasRef.current;
         if (!canvas) {
           showDomFallback();
           return;
         }
-        lensRendererRef.current ??= new LensPostProcessRenderer();
-        if (!lensRendererRef.current.render(canvas, frame.bitmap, withLensFrameBackground(lensPass, framePreviewProps.part.frame.style.background), block.width, block.height)) {
+        postProcessRendererRef.current ??= createLensPostProcessRenderer();
+        const decoratedPass = withPostProcessFrameBackground(webGlPostProcessPass, framePreviewProps.part.frame.style.background);
+        if (!postProcessRendererRef.current.render(canvas, frame.bitmap, decoratedPass, block.width, block.height)) {
           showDomFallback();
           return;
         }
@@ -454,6 +469,11 @@ function LivePostProcessFramePreview({ currentSceneTimeRef, framePreviewProps, l
   useEffect(() => {
     let frameId = 0;
     const sync = (now: number) => {
+      if (requiresDomOverlayPreview(framePreviewProps)) {
+        clearInactiveLivePreview("not-opted-in");
+        frameId = requestAnimationFrame(sync);
+        return;
+      }
       const canvas = renderCanvasRef.current;
       const layers = previewLayersRef.current ?? framePreviewProps.adjustmentLayers;
       const sceneTime = currentSceneTimeRef.current;
@@ -512,7 +532,7 @@ function LivePostProcessFramePreview({ currentSceneTimeRef, framePreviewProps, l
     };
   }, [currentSceneTimeRef, framePreviewProps.adjustmentLayers, livePostProcessEnabled]);
 
-  const diagnostic = diagnosticReason ? `Live Lense preview: ${livePostProcessReasonLabel[diagnosticReason]}` : undefined;
+  const diagnostic = diagnosticReason ? `Live Lens preview: ${livePostProcessReasonLabel[diagnosticReason]}` : undefined;
   const outputRequiresLiveSource = livePostProcessEnabled && activeLiveSourceRequired;
   const liveCanvasFilterStyle = liveVisualStyle.filter ? { filter: liveVisualStyle.filter } as CSSProperties : undefined;
 
@@ -522,7 +542,7 @@ function LivePostProcessFramePreview({ currentSceneTimeRef, framePreviewProps, l
         <FramePreview {...framePreviewProps} />
       </div>
       {outputRequiresLiveSource || showLiveCanvas ? <canvas aria-hidden="true" ref={renderCanvasRef} className="pointer-events-none absolute left-0 top-0 z-0 block bg-black" data-clipper-live-postprocess-canvas="html-in-canvas" height={FRAME_HEIGHT} style={{ ...liveCanvasStyle, ...liveCanvasFilterStyle, opacity: 1, visibility: "visible" }} width={FRAME_WIDTH}>
-          {outputRequiresLiveSource ? <div aria-hidden="true" className="pointer-events-none absolute" data-clipper-frame-content inert={true} ref={sourceElementRef} style={sourceCanvasStyle}>
+          {outputRequiresLiveSource ? <div aria-hidden="true" className="pointer-events-none absolute" data-clipper-live-postprocess-source inert={true} ref={sourceElementRef} style={sourceCanvasStyle}>
             <FramePreview {...sourceFramePreviewProps} />
           </div> : null}
         </canvas> : null}

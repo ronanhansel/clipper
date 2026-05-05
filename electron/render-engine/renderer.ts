@@ -5,6 +5,7 @@ import {
   type ChildProcessWithoutNullStreams,
 } from "node:child_process";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 
 import {
@@ -140,12 +141,15 @@ export class RenderEngine {
       reusePrerenderCache = false,
       source = "app-supervised",
       tileHeight = DEFAULT_EXPORT_TILE_HEIGHT,
+      exportWidth = FRAME_WIDTH,
+      exportHeight = FRAME_HEIGHT,
+      exportFormat = "prores-422-hq",
     } = options;
     // Clear any previous cancel flag for this export ID
     if (exportId) this.cancelledVideoRenders.delete(exportId);
-    const exportTileHeight = this.clampExportTileHeight(tileHeight);
+    const exportTileHeight = this.clampExportTileHeight(tileHeight, exportHeight);
     await fs.mkdir(path.dirname(outputPath), { recursive: true });
-    const encoder = this.getVideoEncoderArgs();
+    const encoder = this.getVideoEncoderArgs(exportFormat);
     const totalFrames = Math.max(1, Math.ceil(durationSeconds * frameRate));
     const frameRange: ExportFrameRange = { startFrame: 0, endFrame: totalFrames };
     const tempDir = path.join(
@@ -154,15 +158,15 @@ export class RenderEngine {
     );
     await fs.mkdir(tempDir, { recursive: true });
     onProgress?.({ frame: 0, totalFrames, percent: 0, status: `Preparing ${encoder.label} export...` });
-    console.log(`[clipper export] source=${source} total-frames=${totalFrames} tile-height=${exportTileHeight}`);
+    console.log(`[clipper export] source=${source} total-frames=${totalFrames} tile-height=${exportTileHeight} resolution=${exportWidth}x${exportHeight}`);
 
     const ffmpeg = spawn(this.ffmpegPath, [
       "-y", "-f", "rawvideo", "-pix_fmt", "bgra",
-      "-s", `${FRAME_WIDTH}x${FRAME_HEIGHT}`,
+      "-s", `${exportWidth}x${exportHeight}`,
       "-framerate", String(frameRate),
       "-i", "-", "-an",
       ...encoder.args,
-      "-movflags", "+faststart",
+      ...(encoder.movflags ? ["-movflags", encoder.movflags] : []),
       outputPath,
     ]);
     ffmpeg.stdin.setMaxListeners(0);
@@ -193,32 +197,136 @@ export class RenderEngine {
     const reportFrameProgress = (frameIndex: number, method: VideoExportMethod = activeMethod) => {
       activeMethod = method;
       lastReportedFrame = Math.max(lastReportedFrame, frameIndex + 1);
-      onProgress?.({ frame: lastReportedFrame, totalFrames, percent: Math.round((lastReportedFrame / totalFrames) * 100), status: `Renderer frame ${frameIndex + 1} of ${totalFrames}`, method });
+      onProgress?.({ frame: lastReportedFrame, totalFrames, percent: Math.round((lastReportedFrame / totalFrames) * 100), status: `Renderer frame ${lastReportedFrame} of ${totalFrames}`, method });
     };
 
     try {
       if (exportId && this.cancelledVideoRenders.has(exportId))
         throw new Error("Video export cancelled.");
-      reportStatus("Renderer: capturing frames", "renderer");
-      const rendererResult = await this.renderSupervisedFrameRangeChild(
-        project, manifestPath, scene, tempDir, frameRate, durationSeconds,
-        totalFrames, exportTileHeight, source, reportFrameProgress, exportId,
+
+      const workerCount = this.getExportWorkerCount(exportWidth, exportHeight, totalFrames);
+      const workerRanges = this.splitFrameRangeForWorkers(frameRange, workerCount);
+
+      const startupStatus = workerCount > 1
+        ? `Renderer: capturing frames with ${workerCount} worker(s)`
+        : "Renderer: capturing frames";
+      reportStatus(startupStatus, "renderer");
+      console.log(`[clipper export] source=${source} total-frames=${totalFrames} tile-height=${exportTileHeight} resolution=${exportWidth}x${exportHeight} workers=${workerCount} ranges=${workerRanges.map(r => `${r.startFrame}-${r.endFrame}`).join(",")}`);
+
+      const exportStartTime = Date.now();
+
+      // Per-worker temp directories (inside parent tempDir)
+      const workerTempDirs = workerRanges.map((_, i) => path.join(tempDir, `worker-${i}`));
+      await Promise.all(workerTempDirs.map(d => fs.mkdir(d, { recursive: true })));
+
+      // Build frame-index → outputPath lookup and worker-index map
+      const frameOutputPathMap = new Map<number, string>();
+      const frameWorkerIndexMap = new Map<number, number>();
+      for (let w = 0; w < workerRanges.length; w += 1) {
+        const outputPath = this.getSupervisedFrameRangeOutputPath(workerTempDirs[w]);
+        for (let f = workerRanges[w].startFrame; f < workerRanges[w].endFrame; f += 1) {
+          frameOutputPathMap.set(f, outputPath);
+          frameWorkerIndexMap.set(f, w);
+        }
+      }
+
+      // Launch all workers concurrently
+      const workerFutures = workerRanges.map((range, i) =>
+        this.renderSupervisedFrameRangeChild(
+          project, manifestPath, scene, workerTempDirs[i], frameRate, durationSeconds,
+          totalFrames, exportTileHeight, source, reportFrameProgress, exportId,
+          range, "export", exportWidth, exportHeight,
+        ),
       );
-      if (rendererResult.nativeWarningDetected)
-        console.warn(`[clipper export] source=${source} parent-native-warning=yes native-warnings=${rendererResult.nativeWarningCount}`);
-      const frameCount = await this.countContiguousSupervisedFrameFiles(rendererResult.outputPath, frameRange);
-      if (frameCount !== totalFrames)
-        throw new Error(`Supervised export produced ${frameCount} frames; expected ${totalFrames}.`);
+
+      // Track per-worker completion / error
+      const workerStates: { done: boolean; error: unknown; nativeWarningDetected: boolean; nativeWarningCount: number }[] =
+        workerFutures.map(() => ({ done: false, error: null, nativeWarningDetected: false, nativeWarningCount: 0 }));
+      workerFutures.forEach((promise, i) => {
+        promise.then(
+          (result) => {
+            workerStates[i].done = true;
+            workerStates[i].nativeWarningDetected = result.nativeWarningDetected;
+            workerStates[i].nativeWarningCount = result.nativeWarningCount;
+          },
+          (err) => {
+            workerStates[i].done = true;
+            workerStates[i].error = err;
+          },
+        );
+      });
+
+      const expectedFrameSize = exportWidth * exportHeight * 4;
+      const cacheKey = reusePrerenderCache && exportWidth === FRAME_WIDTH && exportHeight === FRAME_HEIGHT
+        ? this.getPrerenderCacheKey(project, scene, frameRate, exportTileHeight, DEFAULT_PRERENDER_BLOCK_DURATION_MS, exportWidth, exportHeight)
+        : null;
+
+      // Stream frames to ffmpeg stdin in increasing frame order
       for (let frameIndex = 0; frameIndex < totalFrames; frameIndex += 1) {
-        const frameBuffer = await fs.readFile(this.getSupervisedFrameOutputPath(rendererResult.outputPath, frameIndex));
+        this.throwIfVideoRenderCancelled(exportId);
+
+        const outputPath = frameOutputPathMap.get(frameIndex)!;
+        const framePath = this.getSupervisedFrameOutputPath(outputPath, frameIndex);
+        const workerIdx = frameWorkerIndexMap.get(frameIndex)!;
+
+        // Wait for the frame file to be written by its worker
+        while (true) {
+          this.throwIfVideoRenderCancelled(exportId);
+
+          const ws = workerStates[workerIdx];
+          if (ws.done && ws.error) {
+            if (exportId) {
+              this.cancelledVideoRenders.add(exportId);
+              for (const cancel of (this.activeVideoRenderControllers.get(exportId) ?? [])) cancel();
+            }
+            throw ws.error;
+          }
+
+          const stat = await fs.stat(framePath).catch(() => null);
+          if (stat && stat.size === expectedFrameSize) break;
+
+          if (ws.done && !ws.error && !stat) {
+            throw new Error(`Worker ${workerIdx} completed but frame ${frameIndex} file not found.`);
+          }
+
+          await new Promise(r => setTimeout(r, 5));
+        }
+
+        // Read and pipe to ffmpeg
+        const frameBuffer = await fs.readFile(framePath);
         if (pendingFrameWrite) await pendingFrameWrite;
         pendingFrameWrite = this.writeProcessInput(ffmpeg, frameBuffer, exportId);
+
+        // Delete frame file to reduce disk usage
+        await fs.rm(framePath, { force: true }).catch(() => undefined);
+
+        // Write to prerender cache while streaming
+        if (cacheKey) {
+          const cachePaths = this.getPrerenderCachePaths(manifestPath, scene, frameRate, frameIndex);
+          await this.writePrerenderFrame(cachePaths, frameBuffer, cacheKey, frameIndex / frameRate, frameRate, exportWidth, exportHeight);
+        }
+
         reportFrameProgress(frameIndex, "renderer");
       }
-      if (reusePrerenderCache) {
-        await this.writePrerenderFramesFromSupervisedOutput(manifestPath, project, scene, rendererResult.outputPath, frameRate, frameRange, exportTileHeight, DEFAULT_PRERENDER_BLOCK_DURATION_MS);
+
+      // Clean up remaining frame files from all workers
+      for (let w = 0; w < workerTempDirs.length; w += 1) {
+        await this.removeSupervisedFrameOutputs(
+          this.getSupervisedFrameRangeOutputPath(workerTempDirs[w]),
+          workerRanges[w],
+        ).catch(() => undefined);
       }
-      await this.removeSupervisedFrameOutputs(rendererResult.outputPath, frameRange).catch(() => undefined);
+
+      // Wait for all workers to finish and collect native warnings
+      for (const p of workerFutures) {
+        await p.catch(() => { /* already handled */ });
+      }
+      for (const ws of workerStates) {
+        if (ws.nativeWarningDetected) {
+          console.warn(`[clipper export] source=${source} parent-native-warning=yes native-warnings=${ws.nativeWarningCount}`);
+        }
+      }
+
       if (pendingFrameWrite) await pendingFrameWrite;
       if (exportId && this.cancelledVideoRenders.has(exportId))
         throw new Error("Video export cancelled.");
@@ -227,12 +335,20 @@ export class RenderEngine {
       if (exportId && this.cancelledVideoRenders.has(exportId))
         throw new Error("Video export cancelled.");
       if (error) throw new Error(error);
+
+      const exportElapsed = (Date.now() - exportStartTime) / 1000;
+      console.log(`[clipper export] total-elapsed=${exportElapsed.toFixed(1)}s total-frames=${totalFrames} throughput=${(totalFrames / Math.max(exportElapsed, 0.001)).toFixed(1)}fps workers=${workerCount}`);
+
       onProgress?.({ frame: totalFrames, totalFrames, percent: 100, status: "Finalizing video...", method: activeMethod });
     } catch (error) {
       if (!ffmpeg.killed) ffmpeg.kill("SIGTERM");
-      if (exportId) this.cancelledVideoRenders.delete(exportId);
+      if (exportId) {
+        this.cancelledVideoRenders.add(exportId);
+        for (const cancel of (this.activeVideoRenderControllers.get(exportId) ?? [])) cancel();
+      }
       await this.waitForProcessClose(closePromise, () => ffmpeg.kill("SIGKILL"), EXPORT_PROCESS_STOP_TIMEOUT_MS);
       await fs.rm(outputPath, { force: true }).catch(() => undefined);
+      if (exportId) this.cancelledVideoRenders.delete(exportId);
       throw error;
     } finally {
       unregisterFfmpegCancel();
@@ -405,12 +521,30 @@ export class RenderEngine {
     return this.hardwareEncoderSupport;
   }
 
-  private getVideoEncoderArgs(): { label: string; args: string[] } {
+  private getVideoEncoderArgs(format: "prores-422-hq" | "prores-4444" | "dnxhr-hqx" | "mov" | "h264-high" | "mp4" | "webm" = "prores-422-hq"): { label: string; args: string[]; movflags?: string } {
+    if (format === "prores-422-hq") {
+      return { label: "ProRes 422 HQ", args: ["-c:v", "prores_ks", "-profile:v", "3", "-vendor", "apl0", "-pix_fmt", "yuv422p10le"] };
+    }
+    if (format === "prores-4444") {
+      return { label: "ProRes 4444", args: ["-c:v", "prores_ks", "-profile:v", "4", "-vendor", "apl0", "-pix_fmt", "yuva444p10le"] };
+    }
+    if (format === "dnxhr-hqx") {
+      return { label: "DNxHR HQX", args: ["-c:v", "dnxhd", "-profile:v", "dnxhr_hqx", "-pix_fmt", "yuv422p10le"] };
+    }
+    if (format === "mov") {
+      return { label: "Uncompressed BGRA", args: ["-c:v", "rawvideo", "-pix_fmt", "bgra"] };
+    }
+    if (format === "webm") {
+      return { label: "VP9", args: ["-c:v", "libvpx-vp9", "-b:v", "0", "-crf", "30", "-pix_fmt", "yuv420p", "-deadline", "realtime", "-cpu-used", "5"] };
+    }
+    if (format === "h264-high") {
+      return { label: "x264 High Quality", args: ["-c:v", "libx264", "-preset", "slow", "-crf", "12", "-pix_fmt", "yuv420p"], movflags: "+faststart" };
+    }
     const supportedEncoders = this.getSupportedHardwareEncoders();
     if (process.platform === "darwin" && supportedEncoders.has("h264_videotoolbox")) {
-      return { label: "VideoToolbox", args: ["-c:v", "h264_videotoolbox", "-b:v", "12M", "-allow_sw", "0", "-pix_fmt", "yuv420p"] };
+      return { label: "VideoToolbox", args: ["-c:v", "h264_videotoolbox", "-b:v", "12M", "-allow_sw", "0", "-pix_fmt", "yuv420p"], movflags: "+faststart" };
     }
-    return { label: "x264", args: ["-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p"] };
+    return { label: "x264", args: ["-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p"], movflags: "+faststart" };
   }
 
   // ── Cancel handling ──────────────────────────────────────────────────
@@ -434,9 +568,33 @@ export class RenderEngine {
       throw new Error("Video export cancelled.");
   }
 
-  private clampExportTileHeight(value: number): number {
+  private clampExportTileHeight(value: number, maxHeight: number = FRAME_HEIGHT): number {
     if (!Number.isFinite(value)) return DEFAULT_EXPORT_TILE_HEIGHT;
-    return Math.min(Math.max(Math.round(value), 1), FRAME_HEIGHT);
+    return Math.min(Math.max(Math.round(value), 1), maxHeight);
+  }
+
+  // ── Parallel worker helpers ──────────────────────────────────────────
+
+  private getExportWorkerCount(exportWidth: number, exportHeight: number, totalFrames: number): number {
+    const cpuCount = os.availableParallelism?.() ?? os.cpus().length;
+    const is1080pOrLower = exportHeight <= 1080;
+    let maxWorkers = is1080pOrLower ? 4 : 2;
+    maxWorkers = Math.min(maxWorkers, Math.max(1, cpuCount - 1));
+    return Math.max(1, Math.min(maxWorkers, totalFrames));
+  }
+
+  private splitFrameRangeForWorkers(range: ExportFrameRange, workerCount: number): ExportFrameRange[] {
+    const totalFrames = range.endFrame - range.startFrame;
+    if (totalFrames <= 0 || workerCount <= 1) return [range];
+    const ranges: ExportFrameRange[] = [];
+    const framesPerWorker = Math.ceil(totalFrames / workerCount);
+    for (let i = 0; i < workerCount; i += 1) {
+      const start = range.startFrame + i * framesPerWorker;
+      const end = Math.min(range.startFrame + (i + 1) * framesPerWorker, range.endFrame);
+      if (start >= end) break;
+      ranges.push({ startFrame: start, endFrame: end });
+    }
+    return ranges.length > 0 ? ranges : [range];
   }
 
   // ── Process / Promise helpers ────────────────────────────────────────
@@ -505,13 +663,17 @@ export class RenderEngine {
     exportId?: string,
     requestedFrameRange?: ExportFrameRange,
     renderSurface: SupervisedRenderPayload["renderSurface"] = "export",
+    exportWidth?: number,
+    exportHeight?: number,
   ): Promise<SupervisedRenderResult> {
+    const _exportWidth = exportWidth ?? FRAME_WIDTH;
+    const _exportHeight = exportHeight ?? FRAME_HEIGHT;
     const frameRange: ExportFrameRange = requestedFrameRange ?? { startFrame: 0, endFrame: totalFrames };
     const outputPath = this.getSupervisedFrameRangeOutputPath(tempDir);
     const payloadPath = path.join(tempDir, "renderer.json");
     const nativeLogPath = path.join(tempDir, "renderer.native.log");
     const payload: SupervisedRenderPayload = {
-      project, manifestPath, scene, frameRate, durationSeconds, frameRange, outputPath, tileHeight, source, renderSurface,
+      project, manifestPath, scene, frameRate, durationSeconds, frameRange, outputPath, tileHeight, source, renderSurface, exportWidth: _exportWidth, exportHeight: _exportHeight,
     };
     await fs.writeFile(payloadPath, JSON.stringify(payload), "utf8");
     const electronArgs = [...EXPORT_CHROMIUM_ARGS, "--enable-logging=file", `--log-file=${nativeLogPath}`];
@@ -621,7 +783,7 @@ export class RenderEngine {
     if (cancelledWhileWaiting || childStopReason === "cancel")
       throw new Error("Video export cancelled.");
     this.throwIfVideoRenderCancelled(exportId);
-    const frameCount = await this.countContiguousSupervisedFrameFiles(outputPath, frameRange);
+    const frameCount = await this.countContiguousSupervisedFrameFiles(outputPath, frameRange, _exportWidth * _exportHeight * 4);
     const expectedFrameCount = frameRange.endFrame - frameRange.startFrame;
     if (frameCount === expectedFrameCount)
       return { outputPath, nativeWarningDetected, nativeWarningCount };
@@ -631,7 +793,7 @@ export class RenderEngine {
     const stat = await fs.stat(outputPath).catch(() => null);
     if (!stat)
       throw new Error(`Supervised export child produced ${frameCount}/${expectedFrameCount} frame file(s).${detail ? ` Child output: ${detail}` : ""}`);
-    const expectedBytes = expectedFrameCount * FRAME_WIDTH * FRAME_HEIGHT * 4;
+    const expectedBytes = expectedFrameCount * _exportWidth * _exportHeight * 4;
     if (stat.size !== expectedBytes)
       throw new Error(`Supervised export child created ${stat.size} bytes; expected ${expectedBytes}.`);
     return { outputPath, nativeWarningDetected, nativeWarningCount };
@@ -677,11 +839,12 @@ export class RenderEngine {
     return `${outputPath}.frame-${frameIndex}.bgra`;
   }
 
-  private async countContiguousSupervisedFrameFiles(outputPath: string, frameRange: ExportFrameRange): Promise<number> {
+  private async countContiguousSupervisedFrameFiles(outputPath: string, frameRange: ExportFrameRange, expectedFrameByteLength?: number): Promise<number> {
+    const expectedLength = expectedFrameByteLength ?? FRAME_WIDTH * FRAME_HEIGHT * 4;
     let count = 0;
     for (let frameIndex = frameRange.startFrame; frameIndex < frameRange.endFrame; frameIndex += 1) {
       const stat = await fs.stat(this.getSupervisedFrameOutputPath(outputPath, frameIndex)).catch(() => null);
-      if (!stat || stat.size !== FRAME_WIDTH * FRAME_HEIGHT * 4) break;
+      if (!stat || stat.size !== expectedLength) break;
       count += 1;
     }
     return count;
@@ -696,8 +859,8 @@ export class RenderEngine {
 
   // ── Prerender cache helpers ──────────────────────────────────────────
 
-  private getPrerenderCacheKey(project: ProjectManifest, scene: Scene, frameRate: number, tileHeight?: number, blockDurationMs?: number): string {
-    return JSON.stringify({ projectId: project.id, scene, frameRate, tileHeight, blockDurationMs, previewFrameFormat: "opaque-fullframe-srgb-raw-bgra-v9", width: FRAME_WIDTH, height: FRAME_HEIGHT });
+  private getPrerenderCacheKey(project: ProjectManifest, scene: Scene, frameRate: number, tileHeight?: number, blockDurationMs?: number, width: number = FRAME_WIDTH, height: number = FRAME_HEIGHT): string {
+    return JSON.stringify({ projectId: project.id, scene, frameRate, tileHeight, blockDurationMs, previewFrameFormat: "opaque-fullframe-srgb-raw-bgra-v9", width, height });
   }
 
   private getProjectCacheDirectory(manifestPath: string): string {
@@ -754,17 +917,17 @@ export class RenderEngine {
     return frames;
   }
 
-  private async readPrerenderFrame(cachePaths: PrerenderCachePaths, cacheKey: string, sceneTime: number, frameRate: number): Promise<PrerenderedFrame | null> {
-    const frame = await this.readPrerenderFrameBufferFromPaths(cachePaths, cacheKey, sceneTime, frameRate);
+  private async readPrerenderFrame(cachePaths: PrerenderCachePaths, cacheKey: string, sceneTime: number, frameRate: number, width: number = FRAME_WIDTH, height: number = FRAME_HEIGHT): Promise<PrerenderedFrame | null> {
+    const frame = await this.readPrerenderFrameBufferFromPaths(cachePaths, cacheKey, sceneTime, frameRate, width, height);
     if (!frame) return null;
-    return { width: FRAME_WIDTH, height: FRAME_HEIGHT, pixelFormat: "bgra", sceneTime, frameRate, data: new Uint8Array(frame.buffer, frame.byteOffset, frame.byteLength) };
+    return { width, height, pixelFormat: "bgra", sceneTime, frameRate, data: new Uint8Array(frame.buffer, frame.byteOffset, frame.byteLength) };
   }
 
-  private async readPrerenderFrameBufferFromPaths(cachePaths: PrerenderCachePaths, cacheKey: string, sceneTime: number, frameRate: number): Promise<Buffer | null> {
+  private async readPrerenderFrameBufferFromPaths(cachePaths: PrerenderCachePaths, cacheKey: string, sceneTime: number, frameRate: number, width: number = FRAME_WIDTH, height: number = FRAME_HEIGHT): Promise<Buffer | null> {
     const manifest = await this.readPrerenderManifest(cachePaths.manifestPath);
-    if (!this.isPrerenderManifestCurrent(manifest, cacheKey, sceneTime, frameRate)) return null;
+    if (!this.isPrerenderManifestCurrent(manifest, cacheKey, sceneTime, frameRate, width, height)) return null;
     const frame = await fs.readFile(cachePaths.framePath).catch(() => null);
-    if (!frame || frame.length !== FRAME_WIDTH * FRAME_HEIGHT * 4) return null;
+    if (!frame || frame.length !== width * height * 4) return null;
     return frame;
   }
 
@@ -772,43 +935,43 @@ export class RenderEngine {
     try { return JSON.parse(await fs.readFile(manifestPath, "utf8")); } catch { return null; }
   }
 
-  private isPrerenderManifestCurrent(manifest: PrerenderCacheManifest, cacheKey: string, sceneTime: number, frameRate: number): boolean {
-    return Boolean(manifest && manifest.cacheKey === cacheKey && manifest.width === FRAME_WIDTH && manifest.height === FRAME_HEIGHT && manifest.frameRate === frameRate && Math.abs(manifest.sceneTime - sceneTime) <= 1 / frameRate / 2);
+  private isPrerenderManifestCurrent(manifest: PrerenderCacheManifest, cacheKey: string, sceneTime: number, frameRate: number, width: number = FRAME_WIDTH, height: number = FRAME_HEIGHT): boolean {
+    return Boolean(manifest && manifest.cacheKey === cacheKey && manifest.width === width && manifest.height === height && manifest.frameRate === frameRate && Math.abs(manifest.sceneTime - sceneTime) <= 1 / frameRate / 2);
   }
 
-  private async readPrerenderVideoBlock(manifestPath: string, scene: Scene, frameRate: number, frameRange: ExportFrameRange, cacheKey: string): Promise<PrerenderedVideoBlock | null> {
+  private async readPrerenderVideoBlock(manifestPath: string, scene: Scene, frameRate: number, frameRange: ExportFrameRange, cacheKey: string, width: number = FRAME_WIDTH, height: number = FRAME_HEIGHT): Promise<PrerenderedVideoBlock | null> {
     const cachePaths = this.getPrerenderVideoBlockCachePaths(manifestPath, scene, frameRate, frameRange);
     const manifest = await this.readPrerenderVideoManifest(cachePaths.manifestPath);
-    if (!this.isPrerenderVideoManifestCurrent(manifest, cacheKey, frameRange, frameRate)) return null;
+    if (!this.isPrerenderVideoManifestCurrent(manifest, cacheKey, frameRange, frameRate, width, height)) return null;
     const video = await fs.readFile(cachePaths.videoPath).catch(() => null);
     if (!video || video.length === 0) return null;
-    return { width: FRAME_WIDTH, height: FRAME_HEIGHT, mimeType: PRERENDER_VIDEO_BLOCK_MIME_TYPE, startTime: frameRange.startFrame / frameRate, duration: (frameRange.endFrame - frameRange.startFrame) / frameRate, startFrame: frameRange.startFrame, endFrame: frameRange.endFrame, frameRate, data: video.toString("base64") };
+    return { width, height, mimeType: PRERENDER_VIDEO_BLOCK_MIME_TYPE, startTime: frameRange.startFrame / frameRate, duration: (frameRange.endFrame - frameRange.startFrame) / frameRate, startFrame: frameRange.startFrame, endFrame: frameRange.endFrame, frameRate, data: video.toString("base64") };
   }
 
   private async readPrerenderVideoManifest(manifestPath: string): Promise<PrerenderVideoCacheManifest> {
     try { return JSON.parse(await fs.readFile(manifestPath, "utf8")); } catch { return null; }
   }
 
-  private isPrerenderVideoManifestCurrent(manifest: PrerenderVideoCacheManifest, cacheKey: string, frameRange: ExportFrameRange, frameRate: number): boolean {
-    return Boolean(manifest && manifest.cacheKey === cacheKey && manifest.width === FRAME_WIDTH && manifest.height === FRAME_HEIGHT && manifest.mimeType === PRERENDER_VIDEO_BLOCK_MIME_TYPE && manifest.codecVersion === PRERENDER_VIDEO_BLOCK_CODEC_VERSION && manifest.frameRate === frameRate && manifest.startFrame === frameRange.startFrame && manifest.endFrame === frameRange.endFrame);
+  private isPrerenderVideoManifestCurrent(manifest: PrerenderVideoCacheManifest, cacheKey: string, frameRange: ExportFrameRange, frameRate: number, width: number = FRAME_WIDTH, height: number = FRAME_HEIGHT): boolean {
+    return Boolean(manifest && manifest.cacheKey === cacheKey && manifest.width === width && manifest.height === height && manifest.mimeType === PRERENDER_VIDEO_BLOCK_MIME_TYPE && manifest.codecVersion === PRERENDER_VIDEO_BLOCK_CODEC_VERSION && manifest.frameRate === frameRate && manifest.startFrame === frameRange.startFrame && manifest.endFrame === frameRange.endFrame);
   }
 
-  private async writePrerenderFrame(cachePaths: PrerenderCachePaths, frame: Buffer, cacheKey: string, sceneTime: number, frameRate: number): Promise<void> {
+  private async writePrerenderFrame(cachePaths: PrerenderCachePaths, frame: Buffer, cacheKey: string, sceneTime: number, frameRate: number, width: number = FRAME_WIDTH, height: number = FRAME_HEIGHT): Promise<void> {
     await fs.mkdir(cachePaths.directory, { recursive: true });
     const tempFramePath = `${cachePaths.framePath}.tmp-${process.pid}`;
     const tempManifestPath = `${cachePaths.manifestPath}.tmp-${process.pid}`;
-    const manifest = { cacheKey, width: FRAME_WIDTH, height: FRAME_HEIGHT, pixelFormat: "bgra" as const, sceneTime, frameRate, updatedAt: new Date().toISOString() };
+    const manifest = { cacheKey, width, height, pixelFormat: "bgra" as const, sceneTime, frameRate, updatedAt: new Date().toISOString() };
     await fs.writeFile(tempFramePath, frame);
     await fs.writeFile(tempManifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
     await fs.rename(tempFramePath, cachePaths.framePath);
     await fs.rename(tempManifestPath, cachePaths.manifestPath);
   }
 
-  private async writePrerenderVideoBlock(cachePaths: PrerenderVideoBlockCachePaths, tempVideoPath: string, cacheKey: string, frameRange: ExportFrameRange, frameRate: number): Promise<void> {
+  private async writePrerenderVideoBlock(cachePaths: PrerenderVideoBlockCachePaths, tempVideoPath: string, cacheKey: string, frameRange: ExportFrameRange, frameRate: number, width: number = FRAME_WIDTH, height: number = FRAME_HEIGHT): Promise<void> {
     await fs.mkdir(cachePaths.directory, { recursive: true });
     const tempCacheVideoPath = `${cachePaths.videoPath}.tmp-${process.pid}`;
     const tempManifestPath = `${cachePaths.manifestPath}.tmp-${process.pid}`;
-    const manifest = { cacheKey, width: FRAME_WIDTH, height: FRAME_HEIGHT, mimeType: PRERENDER_VIDEO_BLOCK_MIME_TYPE, codecVersion: PRERENDER_VIDEO_BLOCK_CODEC_VERSION, startFrame: frameRange.startFrame, endFrame: frameRange.endFrame, frameRate, updatedAt: new Date().toISOString() };
+    const manifest = { cacheKey, width, height, mimeType: PRERENDER_VIDEO_BLOCK_MIME_TYPE, codecVersion: PRERENDER_VIDEO_BLOCK_CODEC_VERSION, startFrame: frameRange.startFrame, endFrame: frameRange.endFrame, frameRate, updatedAt: new Date().toISOString() };
     await fs.copyFile(tempVideoPath, tempCacheVideoPath);
     await fs.writeFile(tempManifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
     await fs.rename(tempCacheVideoPath, cachePaths.videoPath);
@@ -847,10 +1010,10 @@ export class RenderEngine {
     }
   }
 
-  private async encodeFrameFilesToMp4(inputFrameOutputPath: string, outputPath: string, frameRate: number, frameRange: ExportFrameRange): Promise<void> {
+  private async encodeFrameFilesToMp4(inputFrameOutputPath: string, outputPath: string, frameRate: number, frameRange: ExportFrameRange, width: number = FRAME_WIDTH, height: number = FRAME_HEIGHT): Promise<void> {
     if (!this.ffmpegPath) throw new Error("The bundled ffmpeg binary is unavailable.");
     const ffmpeg = spawn(this.ffmpegPath, [
-      "-y", "-f", "rawvideo", "-pix_fmt", "bgra", "-s", `${FRAME_WIDTH}x${FRAME_HEIGHT}`,
+      "-y", "-f", "rawvideo", "-pix_fmt", "bgra", "-s", `${width}x${height}`,
       "-framerate", String(frameRate), "-i", "-", "-frames:v", String(frameRange.endFrame - frameRange.startFrame),
       "-an", "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
       "-vf", "scale=in_range=pc:out_range=pc:out_color_matrix=bt709,format=yuv420p",
@@ -920,12 +1083,12 @@ export class RenderEngine {
   }
 
   private async writePrerenderFramesFromSupervisedOutput(
-    manifestPath: string, project: ProjectManifest, scene: Scene, outputPath: string, frameRate: number, frameRange: ExportFrameRange, tileHeight: number, blockDurationMs: number,
+    manifestPath: string, project: ProjectManifest, scene: Scene, outputPath: string, frameRate: number, frameRange: ExportFrameRange, tileHeight: number, blockDurationMs: number, width: number = FRAME_WIDTH, height: number = FRAME_HEIGHT,
   ): Promise<void> {
-    const cacheKey = this.getPrerenderCacheKey(project, scene, frameRate, tileHeight, blockDurationMs);
+    const cacheKey = this.getPrerenderCacheKey(project, scene, frameRate, tileHeight, blockDurationMs, width, height);
     for (let frameIndex = frameRange.startFrame; frameIndex < frameRange.endFrame; frameIndex += 1) {
       const frame = await fs.readFile(this.getSupervisedFrameOutputPath(outputPath, frameIndex));
-      await this.writePrerenderFrame(this.getPrerenderCachePaths(manifestPath, scene, frameRate, frameIndex), frame, cacheKey, frameIndex / frameRate, frameRate);
+      await this.writePrerenderFrame(this.getPrerenderCachePaths(manifestPath, scene, frameRate, frameIndex), frame, cacheKey, frameIndex / frameRate, frameRate, width, height);
     }
   }
 }

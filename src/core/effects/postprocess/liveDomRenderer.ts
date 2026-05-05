@@ -1,5 +1,5 @@
 import { getLiveDomPostProcessPreflight, LiveDomCapabilityProbe, prepareLiveDomPostProcessSource, type LiveDomPostProcessCapability } from "./liveDomCapability";
-import { LensPostProcessRenderer } from "./lensWebGlRenderer";
+import { createLensPostProcessRenderer } from "./lensWebGlRenderer";
 import type { PostProcessPass } from "../types";
 
 export type LiveDomPostProcessRenderResult = {
@@ -9,7 +9,7 @@ export type LiveDomPostProcessRenderResult = {
 };
 
 export class LiveDomPostProcessRenderer {
-  private readonly renderer = new LensPostProcessRenderer();
+  private readonly renderer = createLensPostProcessRenderer();
   private readonly capabilityProbe = new LiveDomCapabilityProbe();
   private preparedSourceElement: Element | null = null;
   private preparedCanvas: HTMLCanvasElement | null = null;

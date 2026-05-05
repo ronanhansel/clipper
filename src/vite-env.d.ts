@@ -57,7 +57,7 @@ interface Window {
     writeVideoFrame: (sessionId: string, frameData: Uint8ClampedArray) => Promise<void>;
     finishVideoExport: (sessionId: string) => Promise<string>;
     cancelVideoExport: (sessionId: string) => Promise<void>;
-    renderVideoExport: (exportId: string, defaultFileName: string, project: unknown, manifestPath: string, scene: unknown, frameRate: number, durationSeconds: number, tileHeight: number, reusePrerenderCache: boolean) => Promise<string | null>;
+    renderVideoExport: (exportId: string, defaultFileName: string, project: unknown, manifestPath: string, scene: unknown, frameRate: number, durationSeconds: number, tileHeight: number, reusePrerenderCache: boolean, exportWidth?: number, exportHeight?: number, mediaExportFormat?: string) => Promise<string | null>;
     prerenderFrame: (project: unknown, manifestPath: string, scene: unknown, sceneTime: number, sceneDuration: number, frameRate: number, tileHeight: number, blockDurationMs: number, frameRange?: { startFrame: number; endFrame: number }) => Promise<Array<{ width: number; height: number; pixelFormat: "bgra"; sceneTime: number; frameRate: number; data: Uint8Array }>>;
     prerenderVideoBlock: (project: unknown, manifestPath: string, scene: unknown, sceneTime: number, sceneDuration: number, frameRate: number, tileHeight: number, blockDurationMs: number) => Promise<{ width: number; height: number; mimeType: string; startTime: number; duration: number; startFrame: number; endFrame: number; frameRate: number; data: string }>;
     clearPrerenderCache: (manifestPath: string) => Promise<void>;
@@ -75,5 +75,18 @@ interface Window {
     onCloseEditorTabShortcut: (callback: () => void) => () => void;
     onRestoreEditorTabShortcut: (callback: () => void) => () => void;
     onWindowFullscreenChange: (callback: (fullscreen: boolean) => void) => () => void;
+  };
+}
+
+interface Window {
+  /** Narrow export post-process bridge exposed by the export window preload. */
+  clipperExportPostProcess?: {
+    /**
+     * Narrow readiness probe for export bridge diagnostics.
+     * Returns true once the main process has delivered the MessagePort.
+     * Intentionally not consumed by the current page handler; reserved as a
+     * future-facing hook for pre-bridge health checks and dev diagnostics.
+     */
+    isReady: () => boolean;
   };
 }

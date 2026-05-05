@@ -51,6 +51,9 @@ export type RenderSceneToVideoOptions = {
   exportId?: string;
   tileHeight?: number;
   reusePrerenderCache?: boolean;
+  exportWidth?: number;
+  exportHeight?: number;
+  exportFormat?: "prores-422-hq" | "prores-4444" | "dnxhr-hqx" | "mov" | "h264-high" | "mp4" | "webm";
   onProgress?: (progress: VideoExportProgress) => void;
 };
 
@@ -74,6 +77,8 @@ export type SupervisedRenderPayload = {
   outputPath: string;
   tileHeight: number;
   source: ExportSource;
+  exportWidth: number;
+  exportHeight: number;
   renderSurface?: "export" | "preview-cache";
 };
 

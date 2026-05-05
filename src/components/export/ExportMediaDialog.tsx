@@ -1,5 +1,6 @@
-import { appBarButtonBase, mutedCaps, videoExportFrameRate } from "../../app/config";
-import type { ExportDialogTab, ProjectExportFormat, VideoExportProgress } from "../../app/types";
+import { useRef, useState } from "react";
+import { appBarButtonBase, mutedCaps } from "../../app/config";
+import type { ExportDialogTab, MediaExportFormat, ProjectExportFormat, VideoExportProgress } from "../../app/types";
 import { clamp } from "../../core/math";
 import { formatTime } from "../../core/timeline";
 import type { ProjectManifest } from "../../core/types";
@@ -7,7 +8,25 @@ import { Checkbox } from "../ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../ui/dialog";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 
-export function ExportMediaDialog({ activeTab, durationSeconds, exporting, includeSources, open, partCount, progress, projectFormat, projectName, resolution, reusePrerenderCache, sceneName, onIncludeSourcesChange, onMediaExport, onOpenChange, onProjectExport, onProjectFormatChange, onReusePrerenderCacheChange, onTabChange }: { activeTab: ExportDialogTab; durationSeconds: number; exporting: boolean; includeSources: boolean; open: boolean; partCount: number; progress: string | null; projectFormat: ProjectExportFormat; projectName: string; resolution: ProjectManifest["resolution"]; reusePrerenderCache: boolean; sceneName: string; onIncludeSourcesChange: (includeSources: boolean) => void; onMediaExport: () => void; onOpenChange: (open: boolean) => void; onProjectExport: () => void; onProjectFormatChange: (format: ProjectExportFormat) => void; onReusePrerenderCacheChange: (reuse: boolean) => void; onTabChange: (tab: ExportDialogTab) => void }) {
+const RESOLUTION_OPTIONS: { label: string; width: number; height: number }[] = [
+  { label: "1920 × 1080 (HD)", width: 1920, height: 1080 },
+  { label: "2560 × 1440 (QHD)", width: 2560, height: 1440 },
+  { label: "3840 × 2160 (4K)", width: 3840, height: 2160 },
+];
+
+const FRAME_RATE_OPTIONS = [24, 30, 60] as const;
+
+const MEDIA_FORMAT_OPTIONS: { label: string; value: MediaExportFormat }[] = [
+  { label: "MOV ProRes 422 HQ", value: "prores-422-hq" },
+  { label: "MOV ProRes 4444", value: "prores-4444" },
+  { label: "MOV DNxHR HQX", value: "dnxhr-hqx" },
+  { label: "MOV Uncompressed BGRA", value: "mov" },
+  { label: "MP4 H.264 High Quality", value: "h264-high" },
+  { label: "MP4 (H.264)", value: "mp4" },
+  { label: "WebM (VP9)", value: "webm" },
+];
+
+export function ExportMediaDialog({ activeTab, durationSeconds, exportFrameRate, exportResolution, exporting, includeSources, mediaExportFormat, open, partCount, progress, projectFormat, projectName, resolution, reusePrerenderCache, sceneName, onExportFrameRateChange, onExportResolutionChange, onIncludeSourcesChange, onMediaExport, onMediaExportFormatChange, onOpenChange, onProjectExport, onProjectFormatChange, onReusePrerenderCacheChange, onTabChange }: { activeTab: ExportDialogTab; durationSeconds: number; exportFrameRate: number; exportResolution: { width: number; height: number }; exporting: boolean; includeSources: boolean; mediaExportFormat: MediaExportFormat; open: boolean; partCount: number; progress: string | null; projectFormat: ProjectExportFormat; projectName: string; resolution: ProjectManifest["resolution"]; reusePrerenderCache: boolean; sceneName: string; onExportFrameRateChange: (fps: number) => void; onExportResolutionChange: (res: { width: number; height: number }) => void; onIncludeSourcesChange: (includeSources: boolean) => void; onMediaExport: () => void; onMediaExportFormatChange: (format: MediaExportFormat) => void; onOpenChange: (open: boolean) => void; onProjectExport: () => void; onProjectFormatChange: (format: ProjectExportFormat) => void; onReusePrerenderCacheChange: (reuse: boolean) => void; onTabChange: (tab: ExportDialogTab) => void }) {
   const tabButtonClass = (tab: ExportDialogTab) => `rounded-[8px] px-3 py-1.5 text-xs font-extrabold transition ${activeTab === tab ? "bg-[#202b37] text-white shadow-[inset_0_0_0_1px_#2d4052]" : "text-[#9b9da7] hover:bg-[#20232c] hover:text-white"}`;
 
   return (
@@ -16,7 +35,7 @@ export function ExportMediaDialog({ activeTab, durationSeconds, exporting, inclu
         <DialogHeader>
           <DialogTitle>Export</DialogTitle>
           <DialogDescription>
-            Render an MP4 video or export editable project data.
+            Render a video or export editable project data.
           </DialogDescription>
         </DialogHeader>
 
@@ -30,10 +49,26 @@ export function ExportMediaDialog({ activeTab, durationSeconds, exporting, inclu
             <ExportStat label="Project" value={projectName} />
             <ExportStat label="Scene" value={sceneName} />
             <ExportStat label="Duration" value={formatTime(durationSeconds)} />
-            <ExportStat label="Resolution" value={`${resolution.width} x ${resolution.height}`} />
-            <ExportStat label={activeTab === "media" ? "Frame rate" : "Compositions"} value={activeTab === "media" ? `${videoExportFrameRate} fps` : `${partCount}`} />
-            <ExportStat label="Export format" value={activeTab === "media" ? "MP4 video" : formatProjectExportLabel(projectFormat)} />
+            {activeTab === "media" ? (
+              <ExportStatDropdown label="Resolution" value={`${exportResolution.width} × ${exportResolution.height}`} options={buildResolutionOptions(exportResolution, resolution)} selectedValue={formatResolutionKey(exportResolution)} onChange={(value) => { const [w, h] = value.split("x").map(Number); onExportResolutionChange({ width: w, height: h }); }} />
+            ) : (
+              <ExportStat label="Resolution" value={`${resolution.width} × ${resolution.height}`} />
+            )}
+            {activeTab === "media" ? (
+              <ExportStatDropdown popoverMinWidth="130px" label="Frame rate" value={`${exportFrameRate} fps`} options={FRAME_RATE_OPTIONS.map((f) => ({ label: `${f} fps`, value: String(f) }))} selectedValue={String(exportFrameRate)} onChange={(value) => onExportFrameRateChange(Number(value))} />
+            ) : (
+              <ExportStat label="Compositions" value={`${partCount}`} />
+            )}
+            {activeTab === "media" ? (
+              <ExportStatDropdown popoverMinWidth="240px" label="Export format" value={MEDIA_FORMAT_OPTIONS.find((o) => o.value === mediaExportFormat)?.label ?? "MOV ProRes 422 HQ"} options={MEDIA_FORMAT_OPTIONS} selectedValue={mediaExportFormat} onChange={(value) => onMediaExportFormatChange(value as MediaExportFormat)} />
+            ) : (
+              <ExportStat label="Export format" value={formatProjectExportLabel(projectFormat)} />
+            )}
           </div>
+
+          {activeTab === "media" ? (
+            <p className="text-[11px] font-semibold text-[#8e929d]">The composition renders at its native coordinate space; the selected export resolution scales the final video output dimensions.</p>
+          ) : null}
 
           {activeTab === "media" ? (
             <div>
@@ -84,11 +119,74 @@ export function ExportMediaDialog({ activeTab, durationSeconds, exporting, inclu
 
 function ExportStat({ label, value, warning = false }: { label: string; value: string; warning?: boolean }) {
   return (
-    <div className="min-w-0 rounded-lg bg-[#12141a] p-2">
+    <div className="min-w-0 rounded-lg bg-[#1c1f28]/70 p-2">
       <span className={mutedCaps}>{label}</span>
-      <strong className={`mt-1 block truncate text-sm ${warning ? "text-[#ffbf66]" : "text-white"}`}>{value}</strong>
+      <strong className={`mt-1 block truncate text-sm ${warning ? "text-[#ffbf66]" : "text-[#c8cdd6]"}`}>{value}</strong>
     </div>
   );
+}
+
+function ExportStatDropdown({ label, value, options, selectedValue, onChange, popoverMinWidth = "200px" }: { label: string; value: string; options: { label: string; value: string }[]; selectedValue: string; onChange: (value: string) => void; popoverMinWidth?: string }) {
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+
+  return (
+    <div className="relative min-w-0">
+      <button
+        ref={triggerRef}
+        className="min-w-0 w-full rounded-lg bg-[#12141a] p-2 text-left transition hover:bg-[#1a1d27] cursor-pointer"
+        onClick={() => setOpen(!open)}
+      >
+        <span className={mutedCaps}>{label}</span>
+        <strong className="mt-1 block truncate text-sm text-white">{value}</strong>
+      </button>
+      {open ? (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute left-0 z-50 mt-1 min-w-[var(--stat-popover-min-w)] max-w-[calc(100vw-2rem)] rounded-lg border border-[#2d313b] bg-[#15171e] p-1 shadow-[0_18px_60px_rgba(0,0,0,0.45)]" style={{ "--stat-popover-min-w": popoverMinWidth } as React.CSSProperties}>
+            {options.map((opt) => (
+              <button
+                key={opt.value}
+                className={`flex w-full items-center rounded-md px-2.5 py-1.5 text-left text-xs font-bold whitespace-nowrap transition ${opt.value === selectedValue ? "text-[var(--clipper-accent-strong)]" : "text-[#dfe2ea] hover:bg-[#20232c] hover:text-white"}`}
+                onClick={() => { onChange(opt.value); setOpen(false); }}
+              >
+                <span className="flex-1">{opt.label}</span>
+                {opt.value === selectedValue ? <span className="text-[var(--clipper-accent-strong)]">✓</span> : null}
+              </button>
+            ))}
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function buildResolutionOptions(current: { width: number; height: number }, project: ProjectManifest["resolution"]): { label: string; value: string }[] {
+  const projectKey = formatResolutionKey(project);
+  const seen = new Set<string>();
+  const result: { label: string; value: string }[] = [];
+
+  const add = (label: string, r: { width: number; height: number }) => {
+    const key = formatResolutionKey(r);
+    if (seen.has(key)) return;
+    seen.add(key);
+    result.push({ label, value: key });
+  };
+
+  // Fixed order: project resolution first, then presets (1080p, 1440p, 4K).
+  add(`${project.width} × ${project.height} (Project)`, project);
+
+  for (const opt of RESOLUTION_OPTIONS) {
+    const key = formatResolutionKey(opt);
+    if (seen.has(key)) continue;
+    add(opt.label, opt);
+  }
+
+  return result;
+}
+
+function formatResolutionKey(r: { width: number; height: number }) {
+  return `${r.width}x${r.height}`;
 }
 
 function formatProjectExportLabel(format: ProjectExportFormat) {

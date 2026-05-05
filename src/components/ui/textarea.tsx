@@ -5,6 +5,8 @@ export function Textarea({ className, onKeyDown, ...props }: ComponentProps<"tex
   function blurOnEscape(event: KeyboardEvent<HTMLTextAreaElement>) {
     onKeyDown?.(event);
     if (event.defaultPrevented || event.key !== "Escape") return;
+    event.preventDefault();
+    event.stopPropagation();
     event.currentTarget.blur();
   }
 

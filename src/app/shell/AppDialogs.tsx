@@ -3,7 +3,7 @@ import { AppContextMenu } from "../../components/AppContextMenu";
 import { ExportMediaDialog, VideoExportOverlay } from "../../components/export/ExportMediaDialog";
 import { SettingsDialog } from "../../components/SettingsDialog";
 import type { ProjectManifest } from "../../core/types";
-import type { ContextMenuState, ExportDialogTab, ProjectExportFormat, SettingsSection, VideoExportProgress } from "../types";
+import type { ContextMenuState, ExportDialogTab, MediaExportFormat, ProjectExportFormat, SettingsSection, VideoExportProgress } from "../types";
 
 type AppDialogsProps = {
   appContextMenu: ContextMenuState | null;
@@ -11,12 +11,15 @@ type AppDialogsProps = {
   defaultNewMarkerDurationSeconds: number;
   exportDialogOpen: boolean;
   exportDialogTab: ExportDialogTab;
+  exportFrameRate: number;
   exportIncludeSources: boolean;
   exportProgress: string | null;
+  exportResolution: { width: number; height: number };
   isExporting: boolean;
   liveDomPostProcessPreviewEnabled: boolean;
   liveDomPostProcessRuntimeEnabled: boolean;
   liveDomPostProcessMaxFps: number;
+  mediaExportFormat: MediaExportFormat;
   pausePlaybackOnScrub: boolean;
   partCount: number;
   prerenderCacheEnabled: boolean;
@@ -41,8 +44,11 @@ type AppDialogsProps = {
   onDefaultNewMarkerDurationSecondsChange: (value: number) => void;
   onExportDialogOpenChange: (open: boolean) => void;
   onExportDialogTabChange: (tab: ExportDialogTab) => void;
+  onExportFrameRateChange: (fps: number) => void;
   onExportIncludeSourcesChange: (includeSources: boolean) => void;
+  onExportResolutionChange: (res: { width: number; height: number }) => void;
   onMediaExport: () => void;
+  onMediaExportFormatChange: (format: MediaExportFormat) => void;
   onLiveDomPostProcessPreviewEnabledChange: (enabled: boolean) => void;
   onLiveDomPostProcessMaxFpsChange: (value: number) => void;
   onProjectExport: () => void;
@@ -62,13 +68,16 @@ type AppDialogsProps = {
   onVideoExportCancel: () => void;
 };
 
-export function AppDialogs({ appContextMenu, debugSettingsEnabled, defaultNewMarkerDurationSeconds, exportDialogOpen, exportDialogTab, exportIncludeSources, exportProgress, isExporting, liveDomPostProcessPreviewEnabled, liveDomPostProcessRuntimeEnabled, liveDomPostProcessMaxFps, pausePlaybackOnScrub, partCount, prerenderCacheEnabled, prerenderCacheBlackMissDebug, prerenderBlockDurationMs, projectExportFormat, projectName, resolution, reusePrerenderCacheForExport, sceneDurationSeconds, sceneName, scrubCommitThrottleMs, settingsOpen, settingsSection, timelineEndPaddingFraction, timelinePrecision, videoExportCancelling, videoExportTileHeight, videoExportProgress, onAppContextMenuClose, onDebugSettingsEnabledChange, onDefaultNewMarkerDurationSecondsChange, onExportDialogOpenChange, onExportDialogTabChange, onExportIncludeSourcesChange, onMediaExport, onLiveDomPostProcessPreviewEnabledChange, onLiveDomPostProcessMaxFpsChange, onProjectExport, onPausePlaybackOnScrubChange, onPrerenderCacheEnabledChange, onPrerenderCacheBlackMissDebugChange, onPrerenderBlockDurationMsChange, onClearAllPrerenderCaches, onProjectExportFormatChange, onReusePrerenderCacheForExportChange, onScrubCommitThrottleMsChange, onSettingsOpenChange, onSettingsSectionChange, onTimelineEndPaddingFractionChange, onTimelinePrecisionChange, onVideoExportTileHeightChange, onVideoExportCancel }: AppDialogsProps) {
+export function AppDialogs({ appContextMenu, debugSettingsEnabled, defaultNewMarkerDurationSeconds, exportDialogOpen, exportDialogTab, exportFrameRate, exportIncludeSources, exportProgress, exportResolution, isExporting, liveDomPostProcessPreviewEnabled, liveDomPostProcessRuntimeEnabled, liveDomPostProcessMaxFps, mediaExportFormat, pausePlaybackOnScrub, partCount, prerenderCacheEnabled, prerenderCacheBlackMissDebug, prerenderBlockDurationMs, projectExportFormat, projectName, resolution, reusePrerenderCacheForExport, sceneDurationSeconds, sceneName, scrubCommitThrottleMs, settingsOpen, settingsSection, timelineEndPaddingFraction, timelinePrecision, videoExportCancelling, videoExportTileHeight, videoExportProgress, onAppContextMenuClose, onDebugSettingsEnabledChange, onDefaultNewMarkerDurationSecondsChange, onExportDialogOpenChange, onExportDialogTabChange, onExportFrameRateChange, onExportIncludeSourcesChange, onExportResolutionChange, onMediaExport, onMediaExportFormatChange, onLiveDomPostProcessPreviewEnabledChange, onLiveDomPostProcessMaxFpsChange, onProjectExport, onPausePlaybackOnScrubChange, onPrerenderCacheEnabledChange, onPrerenderCacheBlackMissDebugChange, onPrerenderBlockDurationMsChange, onClearAllPrerenderCaches, onProjectExportFormatChange, onReusePrerenderCacheForExportChange, onScrubCommitThrottleMsChange, onSettingsOpenChange, onSettingsSectionChange, onTimelineEndPaddingFractionChange, onTimelinePrecisionChange, onVideoExportTileHeightChange, onVideoExportCancel }: AppDialogsProps) {
   return (
     <>
       <ExportMediaDialog
         activeTab={exportDialogTab}
         durationSeconds={sceneDurationSeconds}
+        exportFrameRate={exportFrameRate}
+        exportResolution={exportResolution}
         includeSources={exportIncludeSources}
+        mediaExportFormat={mediaExportFormat}
         open={exportDialogOpen}
         partCount={partCount}
         progress={exportProgress}
@@ -78,6 +87,9 @@ export function AppDialogs({ appContextMenu, debugSettingsEnabled, defaultNewMar
         reusePrerenderCache={reusePrerenderCacheForExport}
         sceneName={sceneName}
         exporting={isExporting}
+        onExportFrameRateChange={onExportFrameRateChange}
+        onExportResolutionChange={onExportResolutionChange}
+        onMediaExportFormatChange={onMediaExportFormatChange}
         onProjectExport={onProjectExport}
         onMediaExport={onMediaExport}
         onProjectFormatChange={onProjectExportFormatChange}

@@ -2,6 +2,65 @@ import type { AdjustmentLayer } from "../../types";
 
 export const lensPostProcessKind = "clipper.postprocess.lens" as const;
 
+export type ShapeMaskParamConfig = {
+  enabledKey: string;
+  previewKey: string;
+  invertKey: string;
+  shapeKey: string;
+  focusXKey: string;
+  focusYKey: string;
+  radiusKey: string;
+  radiusXKey: string;
+  radiusYKey: string;
+  featherKey: string;
+  fallbacks: {
+    enabled: boolean;
+    preview: boolean;
+    invert: boolean;
+    radius: number;
+    radiusX: number;
+    radiusY: number;
+    feather: number;
+    focusX: number;
+    focusY: number;
+  };
+};
+
+export const chromaticAberrationMaskConfig: ShapeMaskParamConfig = {
+  enabledKey: "chromaticAberrationUseMask",
+  previewKey: "chromaticAberrationMaskPreview",
+  invertKey: "chromaticAberrationMaskInvert",
+  shapeKey: "chromaticAberrationMaskShape",
+  focusXKey: "chromaticAberrationMaskFocusX",
+  focusYKey: "chromaticAberrationMaskFocusY",
+  radiusKey: "chromaticAberrationMaskRadius",
+  radiusXKey: "chromaticAberrationMaskRadiusX",
+  radiusYKey: "chromaticAberrationMaskRadiusY",
+  featherKey: "chromaticAberrationMaskFeather",
+  fallbacks: {
+    enabled: false,
+    preview: false,
+    invert: false,
+    radius: 200,
+    radiusX: 200,
+    radiusY: 200,
+    feather: 20,
+    focusX: 50,
+    focusY: 50,
+  },
+};
+
+export type ShapeMaskUniforms = {
+  enabled: boolean;
+  preview: boolean;
+  applyInside: boolean;
+  shape: "circular" | "ellipsoid";
+  focus: { x: number; y: number };
+  radiusX: number;
+  radiusY: number;
+  feather: number;
+};
+
 export type LensPostProcessUniforms = {
   focus: { x: number; y: number };
   radiusPixels: number;
@@ -13,6 +72,7 @@ export type LensPostProcessUniforms = {
   rimOpacity: number;
   dimAmount: number;
   frameBackground: { r: number; g: number; b: number };
+  chromaticAberrationMask: ShapeMaskUniforms;
 };
 
 export type LensPostProcessPass = {
@@ -25,7 +85,7 @@ export type LensPostProcessPass = {
 
 export function createLensPostProcessPass(layer: AdjustmentLayer, frameSize: { width: number; height: number }): LensPostProcessPass {
   return {
-    id: `${layer.id}:lense-postprocess`,
+    id: `${layer.id}:lens-postprocess`,
     kind: lensPostProcessKind,
     target: "final",
     requiresLiveDomSource: true,
@@ -70,6 +130,7 @@ export function getLensPostProcessUniforms(layer: Pick<AdjustmentLayer, "effect"
     rimOpacity: getFiniteParam(layer, "rimOpacity", 0.48),
     dimAmount: getFiniteParam(layer, "dimAmount", 0.28),
     frameBackground: { r: 0, g: 0, b: 0 },
+    chromaticAberrationMask: getShapeMaskUniforms(layer, chromaticAberrationMaskConfig),
   };
 }
 
@@ -93,4 +154,37 @@ function clamp(value: number, min: number, max: number) {
 
 function clampColor(value: number) {
   return Number.isFinite(value) ? Math.min(Math.max(value, 0), 1) : 0;
+}
+
+export function getShapeMaskUniforms(
+  layer: Pick<AdjustmentLayer, "effect">,
+  config: ShapeMaskParamConfig = chromaticAberrationMaskConfig,
+): ShapeMaskUniforms {
+  const { enabledKey, previewKey, invertKey, shapeKey, focusXKey, focusYKey, radiusKey, radiusXKey, radiusYKey, featherKey, fallbacks } = config;
+
+  const enabled = Boolean(layer.effect.params?.[enabledKey] ?? fallbacks.enabled);
+  const preview = Boolean(layer.effect.params?.[previewKey] ?? fallbacks.preview);
+  const invert = Boolean(layer.effect.params?.[invertKey] ?? fallbacks.invert);
+  const applyInside = !invert;
+
+  const rawShape = String(layer.effect.params?.[shapeKey] ?? "");
+  const shape: "circular" | "ellipsoid" = rawShape === "ellipsoid" ? "ellipsoid" : "circular";
+
+  const radius = getFiniteParam(layer, radiusKey, fallbacks.radius);
+  const radiusX = shape === "ellipsoid" ? getFiniteParam(layer, radiusXKey, fallbacks.radiusX) : radius;
+  const radiusY = shape === "ellipsoid" ? getFiniteParam(layer, radiusYKey, fallbacks.radiusY) : radius;
+  const feather = getFiniteParam(layer, featherKey, fallbacks.feather);
+  const focusX = getFiniteParam(layer, focusXKey, fallbacks.focusX);
+  const focusY = getFiniteParam(layer, focusYKey, fallbacks.focusY);
+
+  return {
+    enabled,
+    preview,
+    applyInside,
+    shape,
+    focus: { x: focusX / 100, y: focusY / 100 },
+    radiusX: Math.max(1, radiusX),
+    radiusY: Math.max(1, radiusY),
+    feather: Math.max(0, feather),
+  };
 }

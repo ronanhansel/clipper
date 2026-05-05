@@ -194,6 +194,10 @@ export function useGlobalEditorShortcuts({
       const textEditingTarget = isTextEditingTarget(target);
       if (event.key === "Escape" && textEditingTarget) return;
 
+      if (textEditingTarget && (event.ctrlKey || event.metaKey) && (event.key.toLowerCase() === "z" || event.key.toLowerCase() === "y")) {
+        return;
+      }
+
       if (event.key === "Escape" && cancelActiveSelector()) {
         event.preventDefault();
         event.stopPropagation();

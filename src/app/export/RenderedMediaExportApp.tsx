@@ -2,9 +2,9 @@ import { Component, useLayoutEffect, useMemo, useRef, useState, type ErrorInfo, 
 import { FramePreview } from "../../components/preview/FramePreview";
 import { applyAdjustmentLayersToPostProcessPasses } from "../../core/adjustments";
 import { CAMERA_PERSPECTIVE } from "../../core/camera";
-import { applyExportPostProcessFrame, type ExportPostProcessFrameRequest, type ExportPostProcessFrameResult } from "../../core/effects/postprocess/exportFrameBridge";
+import { applyExportPostProcessFrame, applyExportRawPostProcessFrame, type ExportPostProcessFrameRequest, type ExportPostProcessFrameResult, type ExportRawPostProcessFrameRequest, type ExportRawPostProcessFrameResult } from "../../core/effects/postprocess/exportFrameBridge";
 import { withPostProcessFrameBackground } from "../../core/effects/postprocess/passes";
-import { createLensExportPostProcessRenderer, LensPostProcessRenderer } from "../../core/effects/postprocess/lensWebGlRenderer";
+import { createLensExportPostProcessRenderer, createLensPostProcessRenderer } from "../../core/effects/postprocess/lensWebGlRenderer";
 import type { PostProcessPass } from "../../core/effects/types";
 import { waitForRenderClockAnimationsReady, type RenderClockReadinessResult } from "../../render-engine/renderClock";
 import { FRAME_HEIGHT, FRAME_WIDTH, type CompositionClip, type ProjectManifest, type Scene } from "../../core/types";
@@ -16,6 +16,8 @@ type ExportFrameRequest = {
   sceneTime: number;
   frameRate: number;
   renderMode?: "preview" | "export";
+  exportWidth?: number;
+  exportHeight?: number;
 };
 
 declare global {
@@ -23,6 +25,7 @@ declare global {
     __clipperRenderExportFrame?: (request: ExportFrameRequest) => Promise<ExportFrameRenderResult>;
     __clipperSyncExportRenderClock?: () => Promise<RenderClockReadinessResult>;
     __clipperApplyExportPostProcessFrame?: (request: ExportPostProcessFrameRequest) => Promise<ExportPostProcessFrameResult>;
+    __clipperApplyExportRawPostProcessFrame?: (request: ExportRawPostProcessFrameRequest) => Promise<ExportRawPostProcessFrameResult>;
   }
 }
 
@@ -52,7 +55,7 @@ export function RenderedMediaExportApp() {
   const cameraRef = useRef<HTMLDivElement | null>(null);
   const frameViewportRef = useRef<HTMLDivElement | null>(null);
   const dragSelectionBoxRef = useRef<HTMLDivElement | null>(null);
-  const postProcessRendererRef = useRef<LensPostProcessRenderer | null>(null);
+  const postProcessRendererRef = useRef<ReturnType<typeof createLensPostProcessRenderer> | null>(null);
 
   useLayoutEffect(() => {
     window.__clipperRenderExportFrame = (nextRequest) => new Promise((resolve, reject) => {
@@ -70,16 +73,97 @@ export function RenderedMediaExportApp() {
       return syncResult;
     };
     window.__clipperApplyExportPostProcessFrame = (postProcessRequest) => {
-      postProcessRendererRef.current ??= new LensPostProcessRenderer();
+      postProcessRendererRef.current ??= createLensPostProcessRenderer();
       return applyExportPostProcessFrame(postProcessRequest, [createLensExportPostProcessRenderer(postProcessRendererRef.current)]);
     };
+    window.__clipperApplyExportRawPostProcessFrame = (postProcessRequest) => {
+      postProcessRendererRef.current ??= createLensPostProcessRenderer();
+      return applyExportRawPostProcessFrame(postProcessRequest, [createLensExportPostProcessRenderer(postProcessRendererRef.current)]);
+    };
+
+    // ── Transferable port bridge handler ────────────────────────────────
+
+    let bridgeActive = true;
+
+    const handleBridgeFrame = async (event: MessageEvent) => {
+      if (!bridgeActive) return;
+      if (event.data?.type !== "clipper:export-postprocess-frame") return;
+
+      const { requestId, width, height, pixelFormat, passes, sourceData } =
+        event.data as {
+          requestId: string;
+          width: number;
+          height: number;
+          pixelFormat: string;
+          passes: PostProcessPass[];
+          sourceData: ArrayBuffer;
+        };
+
+      if (!requestId || !(sourceData instanceof ArrayBuffer)) return;
+
+      try {
+        postProcessRendererRef.current ??= createLensPostProcessRenderer();
+        const result = await applyExportRawPostProcessFrame(
+          {
+            width,
+            height,
+            sourceFrame: { width, height, pixelFormat: pixelFormat as "bgra" | "rgba", data: sourceData },
+            passes,
+          },
+          [createLensExportPostProcessRenderer(postProcessRendererRef.current)],
+        );
+
+        const resultData =
+          result.outputFrame.data instanceof Uint8Array
+            ? result.outputFrame.data.buffer.slice(
+                result.outputFrame.data.byteOffset,
+                result.outputFrame.data.byteOffset + result.outputFrame.data.byteLength,
+              )
+            : result.outputFrame.data instanceof ArrayBuffer
+              ? result.outputFrame.data
+              : new Uint8Array().buffer;
+
+        window.postMessage(
+          {
+            type: "clipper:export-postprocess-result",
+            requestId,
+            applied: result.applied,
+            pixelFormat: result.outputFrame.pixelFormat,
+            droppedPassCount: result.droppedPassCount,
+            resultData,
+          },
+          "*",
+          resultData.byteLength > 0 ? [resultData] : [],
+        );
+      } catch (error) {
+        // Send error back through the bridge so the main process can
+        // fall back to the base64 route.
+        window.postMessage(
+          {
+            type: "clipper:export-postprocess-result",
+            requestId,
+            applied: false,
+            pixelFormat: "rgba",
+            droppedPassCount: 0,
+            resultData: new Uint8Array(0).buffer,
+          },
+          "*",
+        );
+      }
+    };
+
+    window.addEventListener("message", handleBridgeFrame);
+
     return () => {
+      bridgeActive = false;
       rejectPendingFrame(pendingRequestRef, new Error("Export renderer unmounted before frame completed."));
       postProcessRendererRef.current?.destroy();
       postProcessRendererRef.current = null;
+      window.removeEventListener("message", handleBridgeFrame);
       delete window.__clipperRenderExportFrame;
       delete window.__clipperSyncExportRenderClock;
       delete window.__clipperApplyExportPostProcessFrame;
+      delete window.__clipperApplyExportRawPostProcessFrame;
     };
   }, []);
 
@@ -173,6 +257,8 @@ function ExportFramePreview({ refs, request }: { refs: ExportFramePreviewRefs; r
 }
 
 export function getExportPostProcessPasses(request: ExportFrameRequest): PostProcessPass[] {
+  const exportWidth = request.exportWidth ?? FRAME_WIDTH;
+  const exportHeight = request.exportHeight ?? FRAME_HEIGHT;
   const previewModel = deriveFramePreviewRenderModel({
     blankPart: blankPreviewComposition,
     frameRate: request.frameRate,
@@ -181,7 +267,7 @@ export function getExportPostProcessPasses(request: ExportFrameRequest): PostPro
     timelineLayers: getFramePreviewTimelineLayers(request.project, request.scene.id),
     timelineMode: "composition",
   });
-  return applyAdjustmentLayersToPostProcessPasses(request.sceneTime, previewModel.visibleAdjustmentLayers, request.frameRate, { width: FRAME_WIDTH, height: FRAME_HEIGHT })
+  return applyAdjustmentLayersToPostProcessPasses(request.sceneTime, previewModel.visibleAdjustmentLayers, request.frameRate, { width: exportWidth, height: exportHeight })
     .map((pass) => withPostProcessFrameBackground(pass, previewModel.part.frame.style.background));
 }
 

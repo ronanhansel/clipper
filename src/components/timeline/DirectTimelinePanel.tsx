@@ -68,7 +68,7 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
   const currentSceneTimeRef = useRef(currentSceneTime);
   const [, setShiftSnapActive] = useState(false);
   const provisionalContentWidth = timelineDisplayDuration * defaultTimelinePixelsPerSecond * timelineViewportState.zoom;
-  const { timelineRef, timelineViewportRef, timelineLayerRailRef, timelineSnapGuideRef, timelineZoom, updateTimelineZoom, syncTimelineScrollPosition, saveTimelineDisplacement, scrollTimelineFromLayerRail, updateTimelineSnapGuide, clearTimelineSnapGuide } = useTimelineViewportController({
+  const { timelineRef, timelineViewportRef, timelineLayerRailRef, timelineSnapGuideRef, timelineZoom, updateTimelineZoom, syncTimelineScrollPosition, saveTimelineDisplacement, updateTimelineSnapGuide, clearTimelineSnapGuide } = useTimelineViewportController({
     contentWidth: provisionalContentWidth,
     currentTime: currentSceneTime,
     displayDuration: timelineDisplayDuration,
@@ -229,7 +229,7 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
     const start = clamp((Math.min(getTimelineSelectionContentX(selectionDrag, "start", rect), getTimelineSelectionContentX(selectionDrag, "current", rect)) / rect.width) * timelineDisplayDuration, 0, timelineDisplayDuration);
     const end = clamp((Math.max(getTimelineSelectionContentX(selectionDrag, "start", rect), getTimelineSelectionContentX(selectionDrag, "current", rect)) / rect.width) * timelineDisplayDuration, 0, timelineDisplayDuration);
     return adjustmentLayers
-      .filter((layer) => layer.start <= end && layer.start + layer.duration >= start)
+      .filter((layer) => layer.start >= start && layer.start + layer.duration <= end)
       .map((layer) => ({ layerId: layer.id }));
   }
 
@@ -683,7 +683,7 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
     }
 
     const selection = timelineSelectionFromDrag(selectionDrag, rect);
-    if (timelineSelectionKey(selection) !== "||") onSelectTimelineNodes(selection);
+    if (timelineSelectionKey(selection) !== "|||") onSelectTimelineNodes(selection);
     else onClearTimelineSelection();
   }
 
@@ -790,6 +790,156 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
       if (seen.has(target.id)) return false;
       seen.add(target.id);
       return true;
+    });
+  }
+
+  type MixedTimelineResizeItem = { kind: "composition"; part: TimelinePart } | { kind: "motion"; part: TimelinePart; marker: MotionMarker };
+
+  function getSelectedMixedTimelineResizeItems(): MixedTimelineResizeItem[] {
+    const items: MixedTimelineResizeItem[] = [];
+    for (const selection of selectedParts) {
+      const part = timeline.find((item) => item.id === selection.partId);
+      if (part && !isCompositionLocked(part)) items.push({ kind: "composition", part });
+    }
+    for (const selection of selectedMotionMarkers) {
+      const part = motionTimeline.find((item) => item.id === selection.partId);
+      const marker = part?.motionMarkers.find((item) => item.id === selection.markerId);
+      if (part && marker && !isMotionMarkerLocked(marker)) items.push({ kind: "motion", part, marker });
+    }
+    return items;
+  }
+
+  function startMixedTimelineResize(
+    event: PointerEvent<HTMLElement>,
+    action: "start" | "end",
+    anchorComposition?: TimelinePart,
+    anchorMotion?: { part: TimelinePart; marker: MotionMarker },
+  ) {
+    const resizeItems = getSelectedMixedTimelineResizeItems();
+    const comps = resizeItems.filter((item): item is { kind: "composition"; part: TimelinePart } => item.kind === "composition");
+    const motions = resizeItems.filter((item): item is { kind: "motion"; part: TimelinePart; marker: MotionMarker } => item.kind === "motion");
+    if (comps.length === 0 || motions.length === 0) return;
+
+    const anchorInComps = Boolean(anchorComposition && comps.some((c) => c.part.id === anchorComposition.id));
+    const anchorInMotions = Boolean(anchorMotion && motions.some((m) => m.part.id === anchorMotion.part.id && m.marker.id === anchorMotion.marker.id));
+    if (!anchorInComps && !anchorInMotions) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    setSelectedTimelineGap(null);
+
+    const initialClientX = event.clientX;
+    const initialScrollLeft = timelineViewportRef.current?.scrollLeft ?? 0;
+    const pixelsPerSecond = (timelineRef.current?.getBoundingClientRect().width ?? 1) / Math.max(timelineDisplayDuration, 1);
+    const snapThresholdSeconds = Math.max(0.08, 8 / pixelsPerSecond);
+    const compIds = new Set(comps.map((c) => c.part.id));
+    const boundaries = getUniversalBlockSnapBoundaries({ excludeCompositionIds: compIds });
+
+    const anchorStart = anchorComposition ? anchorComposition.start : (anchorMotion ? anchorMotion.part.start + anchorMotion.marker.start : 0);
+    const anchorDuration = anchorComposition ? anchorComposition.duration : (anchorMotion ? anchorMotion.marker.duration : 0);
+
+    function getDeltaSeconds(clientX: number) {
+      return getTimelineDragDeltaSeconds({ initialClientX, clientX, initialScrollLeft, scrollLeft: timelineViewportRef.current?.scrollLeft ?? initialScrollLeft, pixelsPerSecond });
+    }
+
+    function buildNextComps(effectiveDelta: number): TimelinePart[] {
+      return comps.map(({ part: comp }) => {
+        const timing = getTimelineBlockTiming({
+          action,
+          initialStart: comp.start,
+          initialDuration: comp.duration,
+          deltaSeconds: effectiveDelta,
+          timelineDuration: timelineDisplayDuration,
+          minDuration: 0.1,
+          moveMaxStartMode: "start",
+          endMaxMode: "none",
+          snap: false,
+          snapBoundaries: [],
+          snapThresholdSeconds: 0,
+          precision: timelinePrecision,
+        });
+        if (action !== "start") return { ...comp, start: timing.start, duration: timing.duration };
+        const previousTrimStart = comp.trimStart ?? 0;
+        const trimStart = roundToPrecision(Math.max(previousTrimStart + timing.start - comp.start, 0), timelinePrecision);
+        const start = roundToPrecision(comp.start + trimStart - previousTrimStart, timelinePrecision);
+        return { ...comp, start, duration: roundToPrecision(comp.start + comp.duration - start, timelinePrecision), trimStart: trimStart || undefined };
+      });
+    }
+
+    function buildNextMotions(effectiveDelta: number): Array<AbsoluteTimelineMarker<MotionMarker>> {
+      const resizedMarkers = motions.flatMap(({ part, marker }) => {
+        const absoluteMarkers = getAbsoluteTimelineMarkerResizeMarkers(motionTimeline, { part, marker });
+        return getAbsoluteMarkerResizeState(absoluteMarkers, marker.id, part.id, action, effectiveDelta);
+      });
+      return uniqueAbsoluteTimelineMarkers(resizedMarkers);
+    }
+
+    function getNextState(clientX: number, snap: boolean) {
+      const rawDelta = getDeltaSeconds(clientX);
+      let effectiveDelta: number;
+      if (snap) {
+        const anchorTiming = getTimelineBlockTiming({
+          action,
+          initialStart: anchorStart,
+          initialDuration: anchorDuration,
+          deltaSeconds: rawDelta,
+          timelineDuration: timelineDisplayDuration,
+          minDuration: 0.1,
+          moveMaxStartMode: "start",
+          endMaxMode: "none",
+          snap: true,
+          snapBoundaries: boundaries,
+          snapThresholdSeconds,
+          precision: timelinePrecision,
+        });
+        updateTimelineSnapGuide(anchorTiming.guideTime);
+        effectiveDelta = action === "start"
+          ? anchorTiming.start - anchorStart
+          : anchorTiming.duration - anchorDuration;
+      } else {
+        updateTimelineSnapGuide(null);
+        effectiveDelta = rawDelta;
+      }
+      return { effectiveDelta, nextComps: buildNextComps(effectiveDelta), nextMotions: buildNextMotions(effectiveDelta) };
+    }
+
+    function applyDrag(clientX: number, snap: boolean) {
+      const { nextComps, nextMotions } = getNextState(clientX, snap);
+      const compPreview = previewMapFromBlocks("composition", nextComps);
+      const motionPreview = previewMapFromMarkers(getTimelineMarkerResizePreviewMap(nextMotions));
+      const merged = { ...compPreview, ...motionPreview };
+      setTimelineBlockPreviews(merged);
+      timelineBlockPreviewsRef.current = merged;
+    }
+
+    function clearDragState() {
+      setGlobalTimelineDragActive(false);
+      setDraggingTimelineBlockCategory(null);
+      clearTimelineSnapGuide();
+      clearTimelineBlockPreviews();
+    }
+
+    startTimelinePointerTransaction({
+      event,
+      updateAutoScroll: updateTimelineDragAutoScroll,
+      stopAutoScroll: stopTimelineDragAutoScroll,
+      onDragStart: () => {
+        setGlobalTimelineDragActive(true);
+        setDraggingTimelineBlockCategory(anchorComposition ? "comp" : "motion");
+      },
+      onPreview: ({ clientX, snap }) => applyDrag(clientX, snap),
+      onCommit: ({ clientX, snap }) => {
+        const { nextComps, nextMotions } = getNextState(clientX, snap);
+        clearTimelineBlockPreviews();
+        for (const nextComp of nextComps) {
+          onUpdateComposition(nextComp.id, () => ({ ...nextComp, start: roundToPrecision(nextComp.start, timelinePrecision), duration: roundToPrecision(nextComp.duration, timelinePrecision), trimStart: nextComp.trimStart }));
+        }
+        if (nextMotions.length > 0) {
+          onResizeMotionMarkers(getTimelineMarkerResizeCommits(nextMotions, timelinePrecision));
+        }
+      },
+      onCancel: clearDragState,
+      onDragEnd: clearDragState,
     });
   }
 
@@ -1242,6 +1392,15 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
       return;
     }
 
+    if (action !== "move" && selectedPartIds.has(composition.id)) {
+      const mixedResizeItems = getSelectedMixedTimelineResizeItems();
+      const hasMotion = mixedResizeItems.some((item) => item.kind === "motion");
+      if (hasMotion) {
+        startMixedTimelineResize(event, action, composition);
+        return;
+      }
+    }
+
     startBlockPointerInteraction({
       event, item: composition, action,
       isLocked: isCompositionLocked(composition),
@@ -1582,6 +1741,14 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
         }
       }
     }
+    if (action !== "move" && selectedMotionKeys.has(`${part.id}:${marker.id}`)) {
+      const mixedResizeItems = getSelectedMixedTimelineResizeItems();
+      const hasComposition = mixedResizeItems.some((item) => item.kind === "composition");
+      if (hasComposition) {
+        startMixedTimelineResize(event, action, undefined, { part, marker });
+        return;
+      }
+    }
     const motionKind = marker.kind;
     const dragItems = selectedMotionDragItems(part, marker);
     if (dragItems.length === 0 || isMotionMarkerLocked(marker)) return;
@@ -1657,17 +1824,14 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
         clearTimelineSnapGuide();
         return deltaSeconds;
       }
-      const internalMendedEdge = isTimelineMarkerMendedEdge(motionTimeline, part as TimelinePartMotionView, marker, action);
-      if (internalMendedEdge) {
-        clearTimelineSnapGuide();
-        return deltaSeconds;
-      }
-
       const movingKeys = new Set(dragItems.map((item) => `${item.partId}:${item.markerId}`));
       const boundaries = getUniversalTimelineSnapBoundaries(motionKind, movingKeys);
-      const edgeTime = (action === "end"
-        ? Math.max(...dragItems.map((item) => item.absoluteStart + item.duration))
-        : Math.min(...dragItems.map((item) => item.absoluteStart))) + deltaSeconds;
+      const internalMendedEdge = isTimelineMarkerMendedEdge(motionTimeline, part as TimelinePartMotionView, marker, action);
+      const edgeTime = (internalMendedEdge
+        ? part.start + marker.start + (action === "end" ? marker.duration : 0)
+        : action === "end"
+          ? Math.max(...dragItems.map((item) => item.absoluteStart + item.duration))
+          : Math.min(...dragItems.map((item) => item.absoluteStart))) + deltaSeconds;
       const guideTime = getTimelineSnapGuideTime(edgeTime, boundaries, snapThresholdSeconds);
       deltaSeconds += (guideTime ?? edgeTime) - edgeTime;
       updateTimelineSnapGuide(guideTime);
@@ -2393,7 +2557,7 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
     if (effectDragPreview) applyEffectDragPreviewElement(effectDragPreview);
   }, [effectDragPreview, contentWidth, layerRows, layerRowStarts, layerRowHeights, timelineDisplayDuration]);
 
-  return <TimelineShell activeMode={mode} contentWidth={contentWidth} currentTime={currentSceneTime} displayDuration={timelineDisplayDuration} dragActive={timelineDragActive || timelineFileDragActive} dragOverlayLabel={timelineFileDragActive ? "Open timeline" : undefined} laneContentHeight={laneContentHeight} laneRowsStyle={laneRowsStyle} layerRailWidth={layerRailWidth} prerenderCacheCoverage={prerenderCacheCoverage} refs={{ playbackPlayheadRef, timelineRef, timelineViewportRef, timelineLayerRailRef, timelineSnapGuideRef, timelinePanelRef }} timelineName={timelineName} timelineZoom={timelineZoom} ticks={ticks} onLayerRailWheel={scrollTimelineFromLayerRail} onModeChange={onModeChange} onTimelineViewportDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) { setTimelineFileDragActive(false); setGlobalTimelineDragActive(false); updateEffectDragPreview(null); } }} onTimelineViewportDragOver={handleCompositionNativeDragOver} onTimelineViewportDrop={handleCompositionNativeDrop} onTimelineViewportScroll={saveTimelineDisplacement} onTimelineZoomChange={updateTimelineZoom} rulerHandlers={{ onPointerDown: startScrub, onPointerMove: continueScrub, onPointerUp: endScrub, onPointerCancel: endScrub }} renderLayerRail={() => <>
+  return <TimelineShell activeMode={mode} contentWidth={contentWidth} currentTime={currentSceneTime} displayDuration={timelineDisplayDuration} dragActive={timelineDragActive || timelineFileDragActive} dragOverlayLabel={timelineFileDragActive ? "Open timeline" : undefined} laneContentHeight={laneContentHeight} laneRowsStyle={laneRowsStyle} layerRailWidth={layerRailWidth} prerenderCacheCoverage={prerenderCacheCoverage} refs={{ playbackPlayheadRef, timelineRef, timelineViewportRef, timelineLayerRailRef, timelineSnapGuideRef, timelinePanelRef }} timelineName={timelineName} timelineZoom={timelineZoom} ticks={ticks} onModeChange={onModeChange} onTimelineViewportDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) { setTimelineFileDragActive(false); setGlobalTimelineDragActive(false); updateEffectDragPreview(null); } }} onTimelineViewportDragOver={handleCompositionNativeDragOver} onTimelineViewportDrop={handleCompositionNativeDrop} onTimelineViewportScroll={saveTimelineDisplacement} onTimelineZoomChange={updateTimelineZoom} rulerHandlers={{ onPointerDown: startScrub, onPointerMove: continueScrub, onPointerUp: endScrub, onPointerCancel: endScrub }} renderLayerRail={() => <>
             <span className="pointer-events-none absolute inset-y-0 right-0 z-30 w-px bg-[#39404d]" />
             {layerRows.map((row, index) => <span className="pointer-events-none absolute right-0 z-40 w-0.5" key={`layer-accent-${row.key}`} style={{ top: layerRowStarts[index], height: layerRowHeights[index], backgroundColor: row.accent }} />)}
             {layerRows.length > 0 ? <LayerResizeSeparator key={`label-separator-${layerRows[0].key}-top`} top={0} onPointerDown={(event) => startLayerRowResize(event, layerRows[0].key, "top")} /> : null}

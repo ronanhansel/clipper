@@ -246,6 +246,16 @@ export type AdjustmentEffectParams = Record<string, unknown> & {
   target?: "frame" | "camera";
   warmth?: number;
   window?: number;
+  chromaticAberrationUseMask?: boolean;
+  chromaticAberrationMaskPreview?: boolean;
+  chromaticAberrationMaskInvert?: boolean;
+  chromaticAberrationMaskShape?: "circular" | "ellipsoid";
+  chromaticAberrationMaskFocusX?: number;
+  chromaticAberrationMaskFocusY?: number;
+  chromaticAberrationMaskRadius?: number;
+  chromaticAberrationMaskRadiusX?: number;
+  chromaticAberrationMaskRadiusY?: number;
+  chromaticAberrationMaskFeather?: number;
 };
 
 export type AdjustmentEffectDefinition = {

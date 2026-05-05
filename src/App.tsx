@@ -40,13 +40,13 @@ import { RightInspectorPanel } from "./app/shell/RightInspectorPanel";
 import { useEditorViewportState } from "./app/shell/useEditorViewportState";
 import { useEditorModeCommands } from "./app/shell/useEditorModeCommands";
 import { useProjectTitleRename } from "./app/shell/useProjectTitleRename";
-import { defaultLiveDomPostProcessMaxFps, defaultPrerenderBlockDurationMs, defaultScrubCommitThrottleMs, defaultVideoExportTileHeight, maxLiveDomPostProcessMaxFps, maxPrerenderBlockDurationMs, maxVideoExportTileHeight, minLiveDomPostProcessMaxFps, minPrerenderBlockDurationMs, minVideoExportTileHeight, selectorHandleSizePx, selectorOffsetPx } from "./app/config";
+import { defaultLiveDomPostProcessMaxFps, defaultPrerenderBlockDurationMs, defaultScrubCommitThrottleMs, defaultVideoExportTileHeight, maxLiveDomPostProcessMaxFps, maxPrerenderBlockDurationMs, maxVideoExportTileHeight, minLiveDomPostProcessMaxFps, minPrerenderBlockDurationMs, minVideoExportTileHeight, selectorHandleSizePx, selectorOffsetPx, videoExportFrameRate } from "./app/config";
 import { useEditorStatePersistence } from "./app/project/useEditorStatePersistence";
 import { useEditorDerivedState } from "./app/state/editorDerivedState";
 import { getFramePreviewTimelineLayers } from "./app/state/framePreviewRenderModel";
 import { EditorStoreProvider, useAppEditorState, useEditorStoreApi, type EditorTab } from "./app/state/editorStore";
 import { ProjectStoreProvider } from "./app/state/projectStore";
-import { type AdjustmentLayerSelection, type CompositionSelection, type ExportDialogTab, type LeftPanelTab, type PlaybackClock, type ProjectExportFormat, type RightPanelTab, type SettingsSection } from "./app/types";
+import { type AdjustmentLayerSelection, type CompositionSelection, type ExportDialogTab, type LeftPanelTab, type MediaExportFormat, type PlaybackClock, type ProjectExportFormat, type RightPanelTab, type SettingsSection } from "./app/types";
 import { applyAdjustmentLayersToVisualStyle, getTimeSensitiveDisplayDuration, getTimeSensitiveDisplayTime } from "./core/adjustments";
 import { isMarkerOnMotionLayer, type CameraPreviewTransform } from "./core/camera";
 import { liveDomPostProcessStorageKey } from "./core/effects/postprocess/liveDomCapability";
@@ -173,6 +173,8 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
   const [pointPickAdjustment, setPointPickAdjustment] = useState<{ layerId: string; control: AdjustmentEffectPointControl } | null>(null);
   const [findMediaRequest, setFindMediaRequest] = useState<FileManagerFindMediaDetail | null>(null);
   const [reusePrerenderCacheForExport, setReusePrerenderCacheForExportState] = useState(isPrerenderCacheReuseEnabledByDefault);
+  const [exportFrameRate, setExportFrameRate] = useState(videoExportFrameRate);
+  const [mediaExportFormat, setMediaExportFormat] = useState<MediaExportFormat>("prores-422-hq");
   const [prerenderCacheEnabled, setPrerenderCacheEnabledState] = useState(isPrerenderCacheEnabledByDefault);
   const [debugSettingsEnabled, setDebugSettingsEnabledState] = useState(isDebugSettingsEnabledByDefault);
   const [prerenderCacheBlackMissDebug, setPrerenderCacheBlackMissDebugState] = useState(isPrerenderCacheBlackMissDebugEnabledByDefault);
@@ -394,6 +396,9 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     setTimelineMode,
     timelineModeRef,
   });
+
+  // Export resolution is user-selectable via dropdown and threads through the full export backend (wired in v0.2.10).
+  const [exportResolution, setExportResolution] = useState<{ width: number; height: number }>(() => project.resolution);
 
   useProjectFileWatcher({
     manifestPath: activeProjectManifestPath,
@@ -732,6 +737,9 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     selectedSceneId,
     projectExportFormat,
     exportIncludeSources,
+    exportFrameRate,
+    exportResolution,
+    mediaExportFormat,
     reusePrerenderCacheForExport,
     videoExportTileHeight,
     compositionSources,
@@ -1446,6 +1454,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     setSelectedAdjustmentLayers,
     setSelectedMotionMarker,
     setSelectedMotionMarkers,
+    setSelectedParts,
     setSelectedTransitionLayerId,
     setSelectedTransitionLayers,
     timelinePrecision,
@@ -1912,12 +1921,15 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
       defaultNewMarkerDurationSeconds={markerDurationSeconds}
       exportDialogOpen={exportDialogOpen}
       exportDialogTab={exportDialogTab}
+      exportFrameRate={exportFrameRate}
       exportIncludeSources={exportIncludeSources}
       exportProgress={exportProgress}
+      exportResolution={exportResolution}
       isExporting={isExporting}
       liveDomPostProcessPreviewEnabled={liveDomPostProcessPreviewEnabled}
       liveDomPostProcessRuntimeEnabled={liveDomPostProcessRuntimeEnabled}
       liveDomPostProcessMaxFps={liveDomPostProcessMaxFps}
+      mediaExportFormat={mediaExportFormat}
       pausePlaybackOnScrub={pausePlaybackOnScrub}
       partCount={scene.compositions.length}
       prerenderCacheEnabled={prerenderCacheEnabled}
@@ -1942,8 +1954,11 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
       onDefaultNewMarkerDurationSecondsChange={setDefaultNewMarkerDurationSeconds}
       onExportDialogOpenChange={setExportDialogOpen}
       onExportDialogTabChange={setExportDialogTab}
+      onExportFrameRateChange={setExportFrameRate}
       onExportIncludeSourcesChange={setExportIncludeSources}
+      onExportResolutionChange={setExportResolution}
       onMediaExport={() => void exportRenderedMedia()}
+      onMediaExportFormatChange={setMediaExportFormat}
       onLiveDomPostProcessPreviewEnabledChange={setLiveDomPostProcessPreviewEnabled}
       onLiveDomPostProcessMaxFpsChange={setLiveDomPostProcessMaxFps}
       onProjectExport={() => void exportProject()}

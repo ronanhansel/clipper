@@ -29,7 +29,7 @@ function testRequest(scene: Scene, sceneTime = 0) {
 }
 
 function testProject(sceneId: string): ProjectManifest {
-  return { id: "project", name: "Project", resolution: { width: FRAME_WIDTH, height: FRAME_HEIGHT }, assetsPath: "assets", scenes: [], timelines: [{ id: sceneId, clips: [], timelineLayers: { adjustmentLayers: [{ id: "clipper.adjustment.lense" }] } }] };
+  return { id: "project", name: "Project", resolution: { width: FRAME_WIDTH, height: FRAME_HEIGHT }, assetsPath: "assets", scenes: [], timelines: [{ id: sceneId, clips: [], timelineLayers: { adjustmentLayers: [{ id: "clipper.adjustment.lens" }] } }] };
 }
 
 function testScene(overrides: Partial<Scene> = {}): Scene {
@@ -41,5 +41,5 @@ function testComposition(): CompositionClip {
 }
 
 function lensLayer(params: AdjustmentLayer["effect"]["params"]): AdjustmentLayer {
-  return { id: "lens", name: "Lens", start: 1, duration: 2, effect: { effectId: "clipper.adjustment.lense", params } };
+  return { id: "lens", name: "Lens", start: 1, duration: 2, effect: { effectId: "clipper.adjustment.lens", params } };
 }

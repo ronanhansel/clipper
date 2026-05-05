@@ -234,7 +234,7 @@ export function SettingsDialog({ activeSection, debugSettingsEnabled, liveDomPos
                   <label className="flex w-full items-start justify-between gap-5 text-xs font-bold text-[#dfe2ea]" htmlFor="live-dom-postprocess-toggle">
                     <span className="grid gap-1">
                       <span>Use HTML-in-Canvas live post-process preview</span>
-                      <span className="font-medium leading-5 text-[#8f939d]">Enables the experimental Canvas Draw Element path for live Lense previews on supported Chromium/Canary builds. Unsupported builds keep the normal DOM/cached fallback.</span>
+                      <span className="font-medium leading-5 text-[#8f939d]">Enables the experimental Canvas Draw Element path for live Lens previews on supported Chromium/Canary builds. Unsupported builds keep the normal DOM/cached fallback.</span>
                     </span>
                     <Switch id="live-dom-postprocess-toggle" className="mt-0.5" checked={liveDomPostProcessPreviewEnabled} onCheckedChange={onLiveDomPostProcessPreviewEnabledChange} />
                   </label>

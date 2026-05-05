@@ -1,7 +1,7 @@
 import { defaultAssets, getSceneFromProject, serializeProjectForSave } from "../../core/project";
 import { buildLinearTimeline, getRenderableScene, sceneDuration, validateScene } from "../../core/timeline";
 import { FRAME_HEIGHT, FRAME_WIDTH, type CompositionClip, type ProjectManifest } from "../../core/types";
-import type { ProjectExportFormat } from "../types";
+import type { MediaExportFormat, ProjectExportFormat } from "../types";
 import { videoExportFrameRate } from "../config";
 import { clipperHost } from "../clipperHost";
 import { fileDownloadService } from "./fileDownloadService";
@@ -19,7 +19,33 @@ type ExportProjectInput = {
 type PrepareRenderedMediaInput = {
   project: ProjectManifest;
   sceneId: string;
+  frameRate?: number;
 };
+
+export const MEDIA_EXPORT_FORMAT_LABELS: Record<MediaExportFormat, string> = {
+  "prores-422-hq": "ProRes 422 HQ",
+  "prores-4444": "ProRes 4444",
+  "dnxhr-hqx": "DNxHR HQX",
+  mov: "MOV Uncompressed",
+  "h264-high": "H.264 High Quality",
+  mp4: "MP4",
+  webm: "WebM",
+};
+
+export const MEDIA_EXPORT_FORMAT_OPTIONS: { label: string; value: MediaExportFormat }[] = [
+  { label: "MOV ProRes 422 HQ", value: "prores-422-hq" },
+  { label: "MOV ProRes 4444", value: "prores-4444" },
+  { label: "MOV DNxHR HQX", value: "dnxhr-hqx" },
+  { label: "MOV Uncompressed BGRA", value: "mov" },
+  { label: "MP4 H.264 High Quality", value: "h264-high" },
+  { label: "MP4 (H.264)", value: "mp4" },
+  { label: "WebM (VP9)", value: "webm" },
+];
+
+export function getMediaExportFileExtension(format: MediaExportFormat): string {
+  if (format === "prores-422-hq" || format === "prores-4444" || format === "dnxhr-hqx" || format === "mov") return ".mov";
+  return format === "webm" ? ".webm" : ".mp4";
+}
 
 class ExportService {
   async exportProject({ project, sceneId, format, includeSources, compositionSources }: ExportProjectInput) {
@@ -55,23 +81,28 @@ class ExportService {
     return { kind: "download" as const, fileName: defaultFileName };
   }
 
-  prepareRenderedMediaExport({ project, sceneId }: PrepareRenderedMediaInput) {
+  prepareRenderedMediaExport({ project, sceneId, frameRate, mediaExportFormat }: PrepareRenderedMediaInput & { mediaExportFormat?: MediaExportFormat }) {
+    const _frameRate = frameRate ?? videoExportFrameRate;
+    const _format = mediaExportFormat ?? "prores-422-hq";
     const exportProject = serializeProjectForSave(project);
     const scene = getRenderedMediaScene(exportProject, sceneId);
-    const durationSeconds = getRenderedMediaSceneDuration(exportProject, scene);
+    const durationSeconds = getRenderedMediaSceneDuration(exportProject, scene, _frameRate);
     if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
       throw new Error("Unable to render media because the selected timeline has invalid timing data.");
     }
-    const totalFrames = Math.max(1, Math.ceil(durationSeconds * videoExportFrameRate));
+    const totalFrames = Math.max(1, Math.ceil(durationSeconds * _frameRate));
     const sceneName = getDisplayNameFromPath(scene.id);
-    const defaultFileName = `${slugifyFileName(project.name)}-${slugifyFileName(sceneName)}.mp4`;
+    const defaultFileName = `${slugifyFileName(project.name)}-${slugifyFileName(sceneName)}${getMediaExportFileExtension(_format)}`;
 
     return { scene, durationSeconds, totalFrames, defaultFileName };
   }
 
-  renderVideoExport(exportId: string, defaultFileName: string, project: ProjectManifest, manifestPath: string, scene: ProjectManifest["scenes"][number], durationSeconds: number, tileHeight: number, reusePrerenderCache: boolean) {
+  renderVideoExport(exportId: string, defaultFileName: string, project: ProjectManifest, manifestPath: string, scene: ProjectManifest["scenes"][number], durationSeconds: number, tileHeight: number, reusePrerenderCache: boolean, frameRate?: number, exportResolution?: { width: number; height: number }, mediaExportFormat?: MediaExportFormat) {
+    const _frameRate = frameRate ?? videoExportFrameRate;
+    const _resolution = exportResolution ?? project.resolution;
+    const _format = mediaExportFormat ?? "prores-422-hq";
     const exportProject = serializeProjectForSave(project);
-    return clipperHost.renderVideoExport(exportId, defaultFileName, exportProject, manifestPath, scene, videoExportFrameRate, durationSeconds, tileHeight, reusePrerenderCache);
+    return clipperHost.renderVideoExport(exportId, defaultFileName, exportProject, manifestPath, scene, _frameRate, durationSeconds, tileHeight, reusePrerenderCache, _resolution.width, _resolution.height, _format);
   }
 
   cancelVideoExport(exportId: string) {
@@ -93,10 +124,10 @@ function getCompositionSource(composition: CompositionClip, compositionSources: 
   return source;
 }
 
-function getRenderedMediaSceneDuration(project: ProjectManifest, scene: ProjectManifest["scenes"][number]) {
+function getRenderedMediaSceneDuration(project: ProjectManifest, scene: ProjectManifest["scenes"][number], frameRate: number) {
   return deriveFramePreviewRenderModel({
     blankPart: blankRenderedMediaComposition,
-    frameRate: videoExportFrameRate,
+    frameRate,
     scene,
     sceneTime: 0,
     timelineLayers: getFramePreviewTimelineLayers(project, scene.id),
