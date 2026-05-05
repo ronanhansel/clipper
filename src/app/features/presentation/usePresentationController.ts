@@ -1,18 +1,13 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { FRAME_HEIGHT, FRAME_WIDTH } from "../../../core/types";
 import type { Mode } from "../../types";
-import { clamp } from "../../../core/math";
 
 export type PresentationMode = "frame" | "theater" | null;
 
 type PresentationControllerOptions = {
   appRootRef: RefObject<HTMLElement | null>;
   centerPreviewScrollRef: RefObject<HTMLDivElement | null>;
-  currentSceneTime: number;
-  currentSceneTimeRef: RefObject<number>;
-  isPlaying: boolean;
   pausePlaybackAtCurrentTime: () => void;
-  sceneDurationSeconds: number;
   scrubToSceneTime: (time: number) => void;
   updateMode: (mode: Mode) => void;
 };
@@ -20,17 +15,12 @@ type PresentationControllerOptions = {
 export function usePresentationController({
   appRootRef,
   centerPreviewScrollRef,
-  currentSceneTime,
-  currentSceneTimeRef,
-  isPlaying,
   pausePlaybackAtCurrentTime,
-  sceneDurationSeconds,
   scrubToSceneTime,
   updateMode,
 }: PresentationControllerOptions) {
   const [presentationMode, setPresentationMode] = useState<PresentationMode>(null);
   const [presentationControlsVisible, setPresentationControlsVisible] = useState(false);
-  const [presentationDisplayTime, setPresentationDisplayTime] = useState(currentSceneTime);
   const [presentationViewport, setPresentationViewport] = useState(() => getPresentationViewport(window.innerWidth));
   const presentationModeRef = useRef<PresentationMode>(presentationMode);
   const presentationControlsTimeoutRef = useRef(0);
@@ -71,24 +61,6 @@ export function usePresentationController({
     return () => document.removeEventListener("fullscreenchange", clearRendererFullscreenPresentation);
   }, []);
 
-  useEffect(() => {
-    if (isPlaying || !presentationMode) return;
-    setPresentationDisplayTime(currentSceneTime);
-  }, [currentSceneTime, isPlaying, presentationMode]);
-
-  useEffect(() => {
-    if (!presentationMode || !isPlaying) return;
-    let frame = 0;
-
-    function tick() {
-      setPresentationDisplayTime(currentSceneTimeRef.current);
-      frame = requestAnimationFrame(tick);
-    }
-
-    frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
-  }, [currentSceneTimeRef, isPlaying, presentationMode]);
-
   useEffect(() => () => {
     window.clearTimeout(presentationControlsTimeoutRef.current);
   }, []);
@@ -114,18 +86,20 @@ export function usePresentationController({
     presentationControlsTimeoutRef.current = window.setTimeout(() => setPresentationControlsVisible(false), 2200);
   }
 
-  async function enterFrameFullscreen() {
+  async function enterPresentationMode(nextMode: "frame" | "theater") {
+    window.clearTimeout(presentationControlsTimeoutRef.current);
     updateMode("preview");
-    setPresentationMode("frame");
-    showPresentationControls();
-    await setElectronWindowFullscreen(true);
+    presentationModeRef.current = nextMode;
+    setPresentationMode(nextMode);
+    setPresentationControlsVisible(true);
+    presentationControlsTimeoutRef.current = window.setTimeout(() => setPresentationControlsVisible(false), 2200);
+    if (nextMode === "frame") {
+      await setElectronWindowFullscreen(true);
+    }
   }
 
-  function enterTheaterMode() {
-    updateMode("preview");
-    setPresentationMode("theater");
-    showPresentationControls();
-  }
+  const enterFrameFullscreen = () => enterPresentationMode("frame");
+  const enterTheaterMode = () => enterPresentationMode("theater");
 
   async function exitPresentationMode() {
     const mode = presentationModeRef.current;
@@ -137,7 +111,6 @@ export function usePresentationController({
 
   function scrubPresentationTime(nextTime: number) {
     pausePlaybackAtCurrentTime();
-    setPresentationDisplayTime(clamp(nextTime, 0, sceneDurationSeconds));
     scrubToSceneTime(nextTime);
     showPresentationControls();
   }
@@ -147,7 +120,6 @@ export function usePresentationController({
     enterTheaterMode,
     exitPresentationMode,
     presentationControlsVisible,
-    presentationDisplayTime,
     presentationMode,
     presentationModeRef,
     presentationViewport,

@@ -31,6 +31,7 @@ export type ProjectDocumentController = {
   replaceProject: (nextProject: ProjectManifest, options?: { history?: boolean; syncSources?: boolean; coalesceHistory?: boolean }) => void;
   redoProjectChange: () => Promise<void> | void;
   reloadProject: () => Promise<void>;
+  reloadProjectFromWatcher: () => Promise<void>;
   saveAllChanges: () => Promise<void>;
   saveAllChangesRef: MutableRefObject<(() => Promise<void>) | null>;
   saveProject: (projectToSave?: ProjectManifest) => Promise<void>;
@@ -44,6 +45,7 @@ export type ProjectDocumentController = {
   updateEditorState: (updater: (state: EditorState) => EditorState, options?: { history?: boolean; coalesceHistory?: boolean }) => void;
   updateProject: (updater: ProjectUpdater, options?: { history?: boolean; syncSources?: boolean; coalesceHistory?: boolean }) => void;
   watchedProjectDirectory: string;
+  writeEditorTextFile: (filePath: string, source: string) => Promise<void>;
 };
 
 export type UseProjectDocumentControllerInput = {
@@ -221,6 +223,18 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
     if (pendingFileOperationsRef.current > 0) return;
     await reloadProjectFromDisk();
   }, [reloadProjectFromDisk]);
+
+  const reloadProjectFromWatcher = useCallback(async () => {
+    if (pendingFileOperationsRef.current > 0) return;
+    const persistedProject = serializeProjectForSave({ ...projectRef.current, compositionSources: compositionSourcesRef.current });
+    const projectSnapshot = getProjectContentSnapshot(persistedProject);
+    const compositionSourcesSnapshot = JSON.stringify(persistedProject.compositionSources ?? {});
+    if (projectSnapshot !== savedProjectSnapshotRef.current || compositionSourcesSnapshot !== savedCompositionSourcesSnapshotRef.current) {
+      setSourceStatus("External project file change detected. Save or reload to apply it.");
+      return;
+    }
+    await reloadProjectFromDisk();
+  }, [reloadProjectFromDisk, setSourceStatus]);
 
   const enqueueHistoryOperation = useCallback(<T,>(operation: () => Promise<T> | T): Promise<T> => {
     const promise = operationQueueRef.current.catch(() => {}).then(operation);
@@ -464,6 +478,17 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
     await saveProject(projectRef.current);
   }
 
+  async function writeEditorTextFile(filePath: string, source: string) {
+    window.clearTimeout(explicitSaveBusyReleaseTimeoutRef.current);
+    setIsFileSystemBusy(true);
+    try {
+      await clipperHost.writeTextFile(filePath, source);
+    } finally {
+      if (pendingFileOperationsRef.current > 0) setIsFileSystemBusy(true);
+      else explicitSaveBusyReleaseTimeoutRef.current = window.setTimeout(() => setIsFileSystemBusy(false), 1000);
+    }
+  }
+
   function scheduleImplicitFileOperationSave(projectOverride = projectRef.current, errorMessage = "Unable to save file operation.") {
     if (!implicitFileOperationBatchActiveRef.current) {
       beginQueuedFileSystemOperation();
@@ -588,6 +613,7 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
     replaceProject,
     redoProjectChange,
     reloadProject,
+    reloadProjectFromWatcher,
     saveAllChanges,
     saveAllChangesRef,
     saveProject,
@@ -601,5 +627,6 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
     updateEditorState,
     updateProject,
     watchedProjectDirectory,
+    writeEditorTextFile,
   };
 }

@@ -33,8 +33,9 @@ type ConnectedInspectorContentProps = {
   pointPickAdjustment: PointPickAdjustment;
   selectedPart: Part | null | undefined;
   onUpdateMotionMarker: (partId: string, markerId: string, updater: (marker: MotionMarker, part: Part) => MotionMarker) => void;
-  onPreviewMotionScale: (partId: string, markerId: string, scale: number) => void;
-  onClearMotionScalePreview: () => void;
+  onPreviewMotionMarker: (partId: string, markerId: string, updater: (marker: MotionMarker) => MotionMarker) => void;
+  onPreviewMotionPickPoint: (point: Point | null) => void;
+  onClearMotionPreview: () => void;
   onUpdateMotionMarkerFocusGroup: (partId: string, markerId: string, focus: Point) => void;
   onUpdateSelectedMotionSnap: (key: "snapIn" | "snapOut", enabled: boolean) => void;
   onUpdateMotionMiddleTransition: (part: Part, mode: "instant" | "transition") => void;
@@ -48,6 +49,8 @@ type ConnectedInspectorContentProps = {
   onSnapCompositionMiddle: () => void;
   onUpdateSelectedObject: (updater: (object: FrameObject) => FrameObject) => void;
   onUpdateAdjustmentLayer: (layerId: string, updater: (layer: AdjustmentLayer) => AdjustmentLayer) => void;
+  onPreviewAdjustmentLayer: (layerId: string, updater: (layer: AdjustmentLayer) => AdjustmentLayer) => void;
+  onClearAdjustmentPreview: () => void;
   onDeleteAdjustmentLayer: (layerId: string) => void;
   onUpdateTransitionLayer: (layerId: string, updater: (layer: TransitionLayer) => TransitionLayer) => void;
   onDeleteTransitionLayer: (layerId: string) => void;
@@ -83,8 +86,9 @@ export function ConnectedInspectorContent({
   pointPickAdjustment,
   selectedPart,
   onUpdateMotionMarker,
-  onPreviewMotionScale,
-  onClearMotionScalePreview,
+  onPreviewMotionMarker,
+  onPreviewMotionPickPoint,
+  onClearMotionPreview,
   onUpdateMotionMarkerFocusGroup,
   onUpdateSelectedMotionSnap,
   onUpdateMotionMiddleTransition,
@@ -98,6 +102,8 @@ export function ConnectedInspectorContent({
   onSnapCompositionMiddle,
   onUpdateSelectedObject,
   onUpdateAdjustmentLayer,
+  onPreviewAdjustmentLayer,
+  onClearAdjustmentPreview,
   onDeleteAdjustmentLayer,
   onUpdateTransitionLayer,
   onDeleteTransitionLayer,
@@ -124,8 +130,9 @@ export function ConnectedInspectorContent({
         pickingTracker={trackerPickMotionMarker?.partId === selectedMotionPart.id && trackerPickMotionMarker.markerId === selectedMotion.id}
         canSnapMiddle={canSnapMotionMiddle}
         onChange={(updater) => onUpdateMotionMarker(selectedMotionPart.id, selectedMotion.id, updater)}
-        onScalePreview={(scale) => onPreviewMotionScale(selectedMotionPart.id, selectedMotion.id, scale)}
-        onScalePreviewEnd={onClearMotionScalePreview}
+        onPreviewMarker={(updater) => onPreviewMotionMarker(selectedMotionPart.id, selectedMotion.id, updater)}
+        onPreviewPickPoint={onPreviewMotionPickPoint}
+        onClearPreview={onClearMotionPreview}
         onChangeFocus={(focus) => onUpdateMotionMarkerFocusGroup(selectedMotionPart.id, selectedMotion.id, focus)}
         onChangeSelectedSnap={onUpdateSelectedMotionSnap}
         onChangeMiddleTransition={(mode) => onUpdateMotionMiddleTransition(selectedMotionPart, mode)}
@@ -160,6 +167,8 @@ export function ConnectedInspectorContent({
         pickingPointKey={pointPickAdjustment?.layerId === selectedAdjustmentLayer.id ? `${pointPickAdjustment.control.xKey}:${pointPickAdjustment.control.yKey}` : null}
         canSnapMiddle={canSnapAdjustmentMiddle}
         onChange={(updater) => onUpdateAdjustmentLayer(selectedAdjustmentLayer.id, updater)}
+        onPreviewLayer={(updater) => onPreviewAdjustmentLayer(selectedAdjustmentLayer.id, updater)}
+        onClearPreview={onClearAdjustmentPreview}
         onDelete={() => onDeleteAdjustmentLayer(selectedAdjustmentLayer.id)}
         onPickPoint={(control) => onStartAdjustmentPointPick(selectedAdjustmentLayer.id, control)}
         onSnapMiddle={onSnapAdjustmentMiddle}

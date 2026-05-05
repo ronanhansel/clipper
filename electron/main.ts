@@ -71,6 +71,10 @@ async function writeWindowBounds(window: BrowserWindow) {
   });
 }
 
+function isAllowedWindowPermission(permission: string) {
+  return permission === "local-fonts" || permission === "pointerLock" || permission === "pointer-lock";
+}
+
 type ProjectWatchPaths = {
   files: string[];
   directories: string[];
@@ -787,13 +791,11 @@ async function createWindow() {
   });
 
   window.webContents.session.setPermissionCheckHandler(
-    (_webContents, permission) => {
-      return String(permission) === "local-fonts";
-    },
+    (_webContents, permission) => isAllowedWindowPermission(permission),
   );
   window.webContents.session.setPermissionRequestHandler(
     (_webContents, permission, callback) => {
-      callback(String(permission) === "local-fonts");
+      callback(isAllowedWindowPermission(permission));
     },
   );
 

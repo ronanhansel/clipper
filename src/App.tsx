@@ -48,18 +48,18 @@ import { getFramePreviewTimelineLayers } from "./app/state/framePreviewRenderMod
 import { EditorStoreProvider, useAppEditorState, useEditorStoreApi, type EditorTab } from "./app/state/editorStore";
 import { ProjectStoreProvider } from "./app/state/projectStore";
 import { type AdjustmentLayerSelection, type CompositionSelection, type ExportDialogTab, type LeftPanelTab, type PlaybackClock, type ProjectExportFormat, type RightPanelTab, type SettingsSection } from "./app/types";
-import { getTimeSensitiveDisplayDuration, getTimeSensitiveDisplayTime } from "./core/adjustments";
+import { applyAdjustmentLayersToVisualStyle, getTimeSensitiveDisplayDuration, getTimeSensitiveDisplayTime } from "./core/adjustments";
 import { isMarkerOnMotionLayer, type CameraPreviewTransform } from "./core/camera";
 import { getBoundsUnion, getFrameObjectWithPreviewBounds, getPartFrameObject, selectionObjectFromFrameObject, type ObjectDrag, type ObjectResize } from "./core/frameInteraction";
 import { boundsToPoints } from "./core/geometry";
 import { clamp, roundToPrecision, roundTenth } from "./core/math";
-import type { AdjustmentEffectPointControl } from "./core/effects/types";
+import type { AdjustmentEffectPointControl, AdjustmentVisualOverlay } from "./core/effects/types";
 import { getTransitionEffectPackage } from "./core/effects/registry";
 import { normalizeSymmetricTransitionLayer } from "./core/transitions";
 import { defaultComposeLayoutState, defaultEditorLayoutState, defaultPreviewViewportState, defaultTimelineLayerState, defaultTimelineMode, defaultTimelineViewportState, emptyTimelineLayerState } from "./core/project";
 import { getExecutableAdjustmentLayers, getExecutableTransitionLayers, getTopTimelinePartAtTime } from "./core/timeline";
 import type { TimelineLayerCategory } from "./core/timelineLayers";
-import { FRAME_HEIGHT, FRAME_WIDTH, type Bounds, type CompositionClip, type EditorSessionState, type EditorState, type FrameObject, type LayerAnimation, type MotionEffectKind, type Part, type Point, type ProjectManifest, type SelectionPayload, type TimelineClip, type TimelineLayerState, type TimelineViewportState } from "./core/types";
+import { FRAME_HEIGHT, FRAME_WIDTH, type AdjustmentLayer, type Bounds, type CompositionClip, type EditorSessionState, type EditorState, type FrameObject, type LayerAnimation, type MotionEffectKind, type Part, type Point, type ProjectManifest, type SelectionPayload, type TimelineClip, type TimelineLayerState, type TimelineViewportState } from "./core/types";
 import { FindMediaDialog } from "./components/FileManager";
 import type { EditorPaneDocument, EditorPaneTab } from "./components/EditorPane";
 import { WelcomeScreen } from "./components/WelcomeScreen";
@@ -81,7 +81,7 @@ const defaultEditorState: EditorState = {
 
 const wheelLineDeltaPx = 16;
 const wheelPageDeltaPx = 600;
-const frameWheelZoomSensitivity = 0.005;
+const frameWheelZoomSensitivity = 0.008;
 
 const unsupportedEditorExtensions = new Set(["mp4", "mov", "m4v", "webm", "avi", "mkv", "mp3", "wav", "aiff", "flac", "png", "jpg", "jpeg", "gif", "webp", "ico", "pdf", "zip"]);
 
@@ -159,7 +159,7 @@ export function App() {
 function AppProviders({ bootProject, onCloseProject }: { bootProject: BootProject; onCloseProject: () => void }) {
   return (
     <ProjectStoreProvider key={bootProject.manifestPath} project={bootProject.project} compositionSources={bootProject.compositionSources}>
-      <EditorStoreProvider project={bootProject.project}>
+      <EditorStoreProvider key={bootProject.manifestPath} project={bootProject.project}>
         <AppContent initialProjectManifestPath={bootProject.manifestPath} initialSourceStatus={bootProject.sourceStatus} onCloseProject={onCloseProject} />
       </EditorStoreProvider>
     </ProjectStoreProvider>
@@ -283,14 +283,51 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
   const objectResizeDeltaRef = useRef<Point>({ x: 0, y: 0 });
   const objectResizePreserveAspectRef = useRef(false);
   const centerPreviewScrollRef = useRef<HTMLDivElement | null>(null);
-  const centerPreviewScrollFrameRef = useRef(0);
-  const pendingZoomScalePreviewRef = useRef<CameraPreviewTransform | null>(null);
-  const zoomScalePreviewFrameRef = useRef(0);
+  const pendingCameraPreviewRef = useRef<CameraPreviewTransform | null>(null);
+  const cameraPreviewFrameRef = useRef(0);
+  const pendingMotionPickPreviewRef = useRef<Point | null>(null);
+  const motionPickPreviewFrameRef = useRef(0);
+  const pendingAdjustmentPreviewRef = useRef<AdjustmentLayer[] | null>(null);
+  const adjustmentPreviewFrameRef = useRef(0);
   const timelineModeRef = useRef(timelineMode);
   const frameInteractionControllerRef = useRef<FrameInteractionController | null>(null);
 
   function cancelFramePickPreview() {
     frameInteractionControllerRef.current?.cancelFramePickPreview();
+  }
+
+  function previewMotionPickPoint(point: Point | null) {
+    pendingMotionPickPreviewRef.current = point;
+    if (motionPickPreviewFrameRef.current) return;
+    motionPickPreviewFrameRef.current = requestAnimationFrame(() => {
+      motionPickPreviewFrameRef.current = 0;
+      const overlay = frameViewportRef.current?.querySelector<HTMLElement>("[data-clipper-motion-pick-preview]");
+      const stateOverlay = frameViewportRef.current?.querySelector<HTMLElement>("[data-clipper-frame-pick-point]");
+      if (!overlay) return;
+      const nextPoint = pendingMotionPickPreviewRef.current;
+      if (!nextPoint) {
+        overlay.style.opacity = "0";
+        if (stateOverlay) stateOverlay.style.opacity = "";
+        return;
+      }
+      if (stateOverlay) stateOverlay.style.opacity = "0";
+      overlay.style.transform = `translate3d(${nextPoint.x * framePreviewScale}px, ${nextPoint.y * framePreviewScale}px, 0)`;
+      overlay.style.opacity = "1";
+    });
+  }
+
+  function clearMotionPickPointPreview() {
+    const finalPoint = pendingMotionPickPreviewRef.current;
+    pendingMotionPickPreviewRef.current = null;
+    if (motionPickPreviewFrameRef.current) {
+      cancelAnimationFrame(motionPickPreviewFrameRef.current);
+      motionPickPreviewFrameRef.current = 0;
+    }
+    if ((focusPickZoomMarker || positionPickTranslationMarker || pointPickAdjustment) && finalPoint) setFramePickPreviewPoint(finalPoint);
+    const overlay = frameViewportRef.current?.querySelector<HTMLElement>("[data-clipper-motion-pick-preview]");
+    if (overlay) overlay.style.opacity = "0";
+    const stateOverlay = frameViewportRef.current?.querySelector<HTMLElement>("[data-clipper-frame-pick-point]");
+    if (stateOverlay) stateOverlay.style.opacity = "";
   }
 
   function clearObjectDrag() {
@@ -326,6 +363,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     replaceProject,
     redoProjectChange,
     reloadProject,
+    reloadProjectFromWatcher,
     saveAllChanges,
     saveAllChangesRef,
     savedCompositionSourcesSnapshot,
@@ -338,6 +376,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     updateEditorState,
     updateProject,
     watchedProjectDirectory,
+    writeEditorTextFile,
     executeFileManagerCommand,
     fileSystemRevision,
   } = useProjectDocumentController({
@@ -355,12 +394,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
 
   useProjectFileWatcher({
     manifestPath: activeProjectManifestPath,
-    project,
-    compositionSources,
-    updateCompositionFromSource,
-    replaceProject,
-    reloadProject,
-    notifyError: (error, fallback) => toast.error(error instanceof Error ? error.message : fallback),
+    reloadProject: reloadProjectFromWatcher,
     isFileSystemBusy,
   });
 
@@ -381,7 +415,6 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     setFrameZoomBarOpen,
   });
   const { saveCenterPreviewScroll } = usePreviewScrollPersistence({
-    centerPreviewScrollFrameRef,
     centerPreviewScrollRef,
     updateEditorState,
   });
@@ -477,6 +510,48 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
   const manualPrerenderRanges = useMemo(() => getManualPrerenderRangesForMarkedCompositions(renderableScene.compositions, sceneDurationSeconds, timelineLayers), [renderableScene.compositions, sceneDurationSeconds, timelineLayers]);
   const manualPrerenderCompositionIds = useMemo(() => new Set(manualPrerenderRanges.map((range) => range.compositionId)), [manualPrerenderRanges]);
   const manualPrerenderActiveAtCurrentTime = useMemo(() => manualPrerenderRanges.some((range) => currentSceneTime >= range.start && currentSceneTime < range.end), [currentSceneTime, manualPrerenderRanges]);
+
+  function previewAdjustmentLayer(layerId: string, updater: (layer: AdjustmentLayer) => AdjustmentLayer) {
+    const nextLayers = visibleSceneAdjustmentLayers.map((layer) => (layer.id === layerId ? updater(layer) : layer));
+    pendingAdjustmentPreviewRef.current = nextLayers;
+    if (adjustmentPreviewFrameRef.current) return;
+    adjustmentPreviewFrameRef.current = requestAnimationFrame(() => {
+      adjustmentPreviewFrameRef.current = 0;
+      const layers = pendingAdjustmentPreviewRef.current;
+      if (!layers) return;
+      applyAdjustmentPreviewDom(applyAdjustmentLayersToVisualStyle(currentSceneTimeRef.current, layers));
+    });
+  }
+
+  function clearAdjustmentPreview() {
+    pendingAdjustmentPreviewRef.current = null;
+    if (adjustmentPreviewFrameRef.current) {
+      cancelAnimationFrame(adjustmentPreviewFrameRef.current);
+      adjustmentPreviewFrameRef.current = 0;
+    }
+  }
+
+  function applyAdjustmentPreviewDom(style: ReturnType<typeof applyAdjustmentLayersToVisualStyle>) {
+    const visualElement = frameViewportRef.current?.querySelector<HTMLElement>("[data-clipper-visual-adjustments]");
+    if (visualElement) {
+      if (style.filter) visualElement.style.filter = style.filter;
+      else visualElement.style.removeProperty("filter");
+    }
+    syncAdjustmentPreviewOverlays("frame", style.overlays?.filter((overlay) => overlay.target === "frame"));
+    syncAdjustmentPreviewOverlays("camera", style.overlays?.filter((overlay) => (overlay.target ?? "camera") === "camera"));
+  }
+
+  function syncAdjustmentPreviewOverlays(target: "frame" | "camera", overlays: AdjustmentVisualOverlay[] | undefined) {
+    const container = frameViewportRef.current?.querySelector<HTMLElement>(`[data-clipper-visual-adjustment-overlays="${target}"]`);
+    if (!container) return;
+    container.replaceChildren(...(overlays ?? []).map((overlay) => {
+      const element = document.createElement("div");
+      element.className = "pointer-events-none absolute inset-0";
+      element.style.zIndex = "2147483647";
+      Object.assign(element.style, overlay.style);
+      return element;
+    }));
+  }
   const cachedPreviewPlaybackEnabled = (prerenderCacheEnabled || manualPrerenderActiveAtCurrentTime) && mode === "preview" && !composeMode;
   const prerenderScheduleRanges = prerenderCacheEnabled ? [] : manualPrerenderRanges;
   const prerenderSchedulingEnabled = (prerenderCacheEnabled || manualPrerenderActiveAtCurrentTime) && mode === "preview" && !composeMode;
@@ -555,7 +630,6 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     enterTheaterMode,
     exitPresentationMode,
     presentationControlsVisible,
-    presentationDisplayTime,
     presentationMode,
     presentationModeRef,
     presentationViewport,
@@ -564,11 +638,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
   } = usePresentationController({
     appRootRef,
     centerPreviewScrollRef,
-    currentSceneTime,
-    currentSceneTimeRef,
-    isPlaying,
     pausePlaybackAtCurrentTime,
-    sceneDurationSeconds,
     scrubToSceneTime,
     updateMode,
   });
@@ -729,8 +799,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     if (framePickFrameRef.current) cancelAnimationFrame(framePickFrameRef.current);
     if (dragBoxFrameRef.current) cancelAnimationFrame(dragBoxFrameRef.current);
     if (objectDragFrameRef.current) cancelAnimationFrame(objectDragFrameRef.current);
-    if (zoomScalePreviewFrameRef.current) cancelAnimationFrame(zoomScalePreviewFrameRef.current);
-    if (centerPreviewScrollFrameRef.current) cancelAnimationFrame(centerPreviewScrollFrameRef.current);
+    if (cameraPreviewFrameRef.current) cancelAnimationFrame(cameraPreviewFrameRef.current);
   }, []);
 
   useEffect(() => {
@@ -960,6 +1029,25 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
       ...current,
       timelines: (current.timelines ?? []).map((timeline) => (timeline.id === scene.id ? { ...timeline, transitionLayers: (timeline.transitionLayers ?? []).map((layer) => layer.id === layerId ? { ...layer, start: roundToPrecision(start, timelinePrecision), layerId: targetLayerId ?? layer.layerId } : layer) } : timeline)),
     }), { history: true });
+  }
+
+  function moveTransitionLayers(moves: Array<{ layerId: string; start: number; targetLayerId?: string }>) {
+    const moveById = new Map(moves.map((move) => [move.layerId, move]));
+    updateProject((current) => ({
+      ...current,
+      timelines: (current.timelines ?? []).map((timeline) => (timeline.id === scene.id ? { ...timeline, transitionLayers: (timeline.transitionLayers ?? []).map((layer) => {
+        const move = moveById.get(layer.id);
+        return move ? { ...layer, start: roundToPrecision(move.start, timelinePrecision), layerId: move.targetLayerId ?? layer.layerId } : layer;
+      }) } : timeline)),
+    }), { history: true });
+  }
+
+  function moveAdjustmentLayers(moves: Array<{ layerId: string; start: number; targetLayerId?: string }>) {
+    const moveById = new Map(moves.map((move) => [move.layerId, move]));
+    updateSceneAdjustmentLayers((layers) => layers.map((layer) => {
+      const move = moveById.get(layer.id);
+      return move ? { ...layer, start: roundToPrecision(move.start, timelinePrecision), layerId: move.targetLayerId ?? layer.layerId } : layer;
+    }));
   }
 
   function updateTransitionLayer(layerId: string, updater: (layer: import("./core/types").TransitionLayer) => import("./core/types").TransitionLayer) {
@@ -1221,7 +1309,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     updateSceneParts,
   });
 
-  const { addMotionEffect, addMotionMarker: addZoomMarker, previewMotionScale: previewZoomScale, clearMotionScalePreview: clearZoomScalePreview, deleteMotionMarker, moveMotionMarker, moveMotionMarkers, resizeMotionMarkers, snapMotionMiddle, updateMotionMiddleTransition, updateMotionMiddleEase, updateSelectedMotionSnap, updateMotionMarker, updateMotionMarkers, updateMotionMarkerFocusGroup } = useMotionMarkerCommands({
+  const { addMotionEffect, addMotionMarker: addZoomMarker, previewMotionMarker, clearMotionPreview, deleteMotionMarker, moveMotionMarker, moveMotionMarkers, resizeMotionMarkers, snapMotionMiddle, updateMotionMiddleTransition, updateMotionMiddleEase, updateSelectedMotionSnap, updateMotionMarker, updateMotionMarkers, updateMotionMarkerFocusGroup } = useMotionMarkerCommands({
     activeTimelinePart,
     cameraRef,
     hiddenMotionLayerIds,
@@ -1230,7 +1318,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     markerDurationSeconds,
     motionLayers,
     part,
-    pendingScalePreviewRef: pendingZoomScalePreviewRef,
+    pendingPreviewRef: pendingCameraPreviewRef,
     previewTime,
     scene,
     sceneDurationSeconds,
@@ -1238,7 +1326,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     selectedMotionMarkers,
     timelineMode,
     timelinePrecision,
-    scalePreviewFrameRef: zoomScalePreviewFrameRef,
+    previewFrameRef: cameraPreviewFrameRef,
     assignAvailableMotionLayerKind,
     setFocusPickZoomMarker,
     setPositionPickTranslationMarker,
@@ -1319,6 +1407,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     deleteSelectedTimelineNodes,
     openTimelineBlankContextMenu,
     openTimelineNodeContextMenu,
+    pasteTimelineAttributesSilently,
     pasteTimelineNodesSilently,
   } = useTimelineClipboardCommands({
     currentSceneTimeRef,
@@ -1373,6 +1462,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     jumpToStart,
     marqueeDraggingRef,
     marqueeSpacePanningRef,
+    pasteTimelineAttributesSilently,
     pasteTimelineNodesSilently,
     presentationModeRef,
     pausePlaybackAtCurrentTime,
@@ -1453,7 +1543,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     gridTemplateRows: `48px minmax(0, 1fr) var(--clipper-timeline-height)`,
   } as CSSProperties;
   const editorShellStyle = { gridTemplateColumns: `${composeMode ? "var(--clipper-compose-left-panel-width)" : "var(--clipper-left-panel-width)"} minmax(640px, 1fr) var(--clipper-right-panel-width)` } as CSSProperties;
-  const presentationTime = presentationMode ? presentationDisplayTime : currentSceneTime;
+  const presentationTime = currentSceneTime;
   const presentationProgress = sceneDurationSeconds > 0 ? `${clamp(presentationTime / sceneDurationSeconds, 0, 1) * 100}%` : "0%";
   const presentationScrubberStyle = { "--clipper-presentation-progress": presentationProgress } as CSSProperties;
   const playbackDisplayDuration = composePlaybackRange ? Math.max(composePlaybackRange.end - composePlaybackRange.start, 0) : getTimeSensitiveDisplayDuration(sceneDurationSeconds, visibleSceneAdjustmentLayers);
@@ -1642,7 +1732,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
           currentSceneTimeRef={currentSceneTimeRef}
           editorPaneProps={activeEditorDocument ? { document: activeEditorDocument, tabs: editorPaneTabs, viewportState: activeEditorViewportState, projectDirectory, onCloseTab: closeEditorTab, onRestoreClosedTab: restoreClosedEditorTab, onSaveAll: saveAllChanges, onSelectTab: selectEditorTab, onPinTab: pinEditorTab, onSourceChange: (source) => {
             pinEditorTab(activeEditorDocument.id);
-            return activeEditorComposition ? updateCompositionFromSource(activeEditorComposition, source, { history: false, syncSource: false }).then(() => updateEditorTab(activeEditorDocument.id, { source })) : clipperHost.writeTextFile(activeEditorDocument.filePath, source).then(() => updateEditorTab(activeEditorDocument.id, { source }));
+            return activeEditorComposition ? updateCompositionFromSource(activeEditorComposition, source, { history: false, syncSource: false }).then(() => updateEditorTab(activeEditorDocument.id, { source })) : writeEditorTextFile(activeEditorDocument.filePath, source).then(() => updateEditorTab(activeEditorDocument.id, { source }));
           }, onViewportStateChange: updateEditorViewportState } : null}
           framePreviewProps={hasPreviewComposition ? { cameraRef, dragBox, dragSelectionBoxRef, framePickPoint: activeFramePickPoint, focusPicking: isPickingZoomFocus || isPickingTranslationPosition || Boolean(pointPickAdjustment), trackerPicking: Boolean(trackerPickTranslationMarker), canSelectObjects: canSelectFrameObjects && !isPlaying, cameraTransform: cameraPreviewTransform, frameViewportRef, frameScale: framePreviewScale, isPlaying, part, partStart: activeTimelinePart?.start ?? 0, previewParts: composeMode ? [] : previewParts, transitionPreviewParts: composeMode ? null : transitionPreviewParts, adjustmentLayers: composeMode ? [] : visibleSceneAdjustmentLayers, transitionLayers: composeMode ? [] : visibleSceneTransitionLayers, playbackClock, previewTime, sceneTime: currentSceneTime, timelineMode, motionLayers: composeMode ? [] : motionLayers, hiddenMotionLayerIds: composeMode ? new Set<string>() : hiddenMotionLayerIds, pickingTranslationPosition: isPickingTranslationPosition || Boolean(pointPickAdjustment), pickingZoomFocus: isPickingZoomFocus || Boolean(pointPickAdjustment), compHidden: composeMode ? false : activeCompositionHidden, selectedObjects: previewSelectionObjects, marqueeDragging, editingTextObjectId: isPlaying ? null : editingTextObjectId, onFramePointerCancel, onFramePointerDown, onFramePointerDownCapture, onFramePointerMove, onFramePointerUp, onObjectPointerDown: startObjectDrag, onObjectResizePointerDown: startObjectResize, onTextEditCommit: updateTextObjectContent, onTextObjectDoubleClick: startTextObjectEdit, onTrackerTargetPick: commitTranslationTrackerPick } : null}
           hasActiveComposition={hasPreviewComposition}
@@ -1687,8 +1777,12 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
             pointPickAdjustment={pointPickAdjustment}
             selectedPart={selectedPart}
             onUpdateMotionMarker={updateMotionMarker}
-            onPreviewMotionScale={previewZoomScale}
-            onClearMotionScalePreview={clearZoomScalePreview}
+            onPreviewMotionMarker={previewMotionMarker}
+            onPreviewMotionPickPoint={previewMotionPickPoint}
+            onClearMotionPreview={() => {
+              clearMotionPreview();
+              clearMotionPickPointPreview();
+            }}
             onUpdateMotionMarkerFocusGroup={updateMotionMarkerFocusGroup}
             onUpdateSelectedMotionSnap={updateSelectedMotionSnap}
             onUpdateMotionMiddleTransition={updateMotionMiddleTransition}
@@ -1702,6 +1796,8 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
             onSnapCompositionMiddle={snapCompositionMiddle}
             onUpdateSelectedObject={updateSelectedObject}
             onUpdateAdjustmentLayer={updateAdjustmentLayer}
+            onPreviewAdjustmentLayer={previewAdjustmentLayer}
+            onClearAdjustmentPreview={clearAdjustmentPreview}
             onDeleteAdjustmentLayer={deleteAdjustmentLayer}
             onUpdateTransitionLayer={updateTransitionLayer}
             onDeleteTransitionLayer={(layerId) => {
@@ -1773,6 +1869,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
         onOpenNodeContextMenu: openTimelineNodeContextMenu,
         onOpenBlankContextMenu: openTimelineBlankContextMenu,
         onMoveAdjustmentLayer: moveAdjustmentLayer,
+        onMoveAdjustmentLayers: moveAdjustmentLayers,
         onUpdateAdjustmentLayer: updateAdjustmentLayer,
         onReorderPart: reorderPart,
         onMoveComposition: moveCompositionMarker,
@@ -1795,6 +1892,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
         onSelectTransitionLayer: selectTransitionLayer,
         onSelectTransitionLayers: selectTransitionLayers,
         onMoveTransitionLayer: moveTransitionLayer,
+        onMoveTransitionLayers: moveTransitionLayers,
         onShiftTimelineGapMarkers: shiftTimelineGapMarkers,
         onUpdateTransitionLayer: updateTransitionLayer,
         composeAnimationPart: composeMode && hasActiveComposition ? part : null,

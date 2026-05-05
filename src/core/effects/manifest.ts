@@ -8,7 +8,7 @@ type TransitionEffectManifest = TransitionEffectDefinition;
 
 type YamlValue = string | number | boolean | null | YamlValue[] | { [key: string]: YamlValue };
 
-export type MotionEffectLogic = Pick<MotionEffectPackage, "createDefaultBlock">;
+export type MotionEffectLogic = Pick<MotionEffectPackage, "createDefaultBlock" | "mendTransitionOptions">;
 
 export type AdjustmentEffectLogic = Partial<Pick<AdjustmentEffectPackage, "applySceneTime" | "applyVisualStyle" | "getDisplayElapsed" | "timeSensitive" | "validate">>;
 

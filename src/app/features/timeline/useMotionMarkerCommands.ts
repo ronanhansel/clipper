@@ -2,13 +2,14 @@ import toast from "react-hot-toast";
 import { TIMELINE_MOTION_PART_ID, type MotionMarkerSelection } from "../../types";
 import { FRAME_HEIGHT, FRAME_WIDTH, type MotionEase, type MotionEffectId, type MotionMarker, type Part, type Point, type TimelineLayerState, type TimelineMode } from "../../../core/types";
 import { centerOf } from "../../../core/frameInteraction";
-import { framePointToCameraTranslation, formatCameraPreviewTransform, getLayeredCameraPreviewTransform, type CameraPreviewTransform } from "../../../core/camera";
+import { framePointToCameraTranslation, type CameraPreviewTransform } from "../../../core/camera";
 import { getMendedMarkerIds } from "../../../core/markers";
 import { clamp, roundToPrecision, roundTenth, roundTwo } from "../../../core/math";
 import { getMotionEffectByKind, getMotionEffectPackage } from "../../../core/effects/registry";
 import { createDefaultMotionBlockByEffectId, getMotionMarkerViews, motionBlocksToMotionMarkers } from "../../../core/motionEffects";
 import { buildLinearTimeline, getAvailableMotionPlacement, getSelectedActiveMiddleMend, getSelectedMotionMiddleSnap, getMotionMarkerMendKey, isMotionMiddleSnapActive, type TimelineMarkerMove, type TimelineMarkerResize } from "../../../core/timeline";
 import { applyMotionMarkerOverwrite, applySceneMotionMarkerOverwrite, placeMotionMarkerOnTimeline, remapMovedMarkerMendIds, motionBlockFromMarker, parseTimelineMarkerKey, timelineMarkerKey, timelineMoveKey, uniqueMarkerSelections, withMotionMarkers } from "./timelineMutationHelpers";
+import { applyCameraPreviewToElement, buildMotionMarkerCameraPreviewTransform } from "./motionCameraPreview";
 import type { SceneMotionMarkerUpdate } from "./useTimelineProjectActions";
 
 type SceneMotionState = {
@@ -21,7 +22,7 @@ type SceneMotionState = {
 type MotionLayerState = NonNullable<TimelineLayerState["motionLayers"]>[number];
 
 type UseMotionMarkerCommandsInput = {
-  activeTimelinePart: Part | null | undefined;
+  activeTimelinePart: (Part & { start: number }) | null | undefined;
   cameraRef: { current: HTMLElement | null };
   hiddenMotionLayerIds: Set<string>;
   isPickingTranslationPosition: boolean;
@@ -29,7 +30,7 @@ type UseMotionMarkerCommandsInput = {
   markerDurationSeconds: number;
   motionLayers: MotionLayerState[];
   part: Part;
-  pendingScalePreviewRef: { current: CameraPreviewTransform | null };
+  pendingPreviewRef: { current: CameraPreviewTransform | null };
   previewTime: number;
   scene: SceneMotionState;
   sceneDurationSeconds: number;
@@ -37,7 +38,7 @@ type UseMotionMarkerCommandsInput = {
   selectedMotionMarkers: MotionMarkerSelection[];
   timelineMode: TimelineMode;
   timelinePrecision: number;
-  scalePreviewFrameRef: { current: number };
+  previewFrameRef: { current: number };
   assignAvailableMotionLayerKind: (layerId: string | undefined, kind: "motion") => void;
   setFocusPickZoomMarker: (selection: { partId: string; markerId: string } | null) => void;
   setPositionPickTranslationMarker: (selection: { partId: string; markerId: string } | null) => void;
@@ -59,7 +60,7 @@ export function useMotionMarkerCommands({
   markerDurationSeconds,
   motionLayers,
   part,
-  pendingScalePreviewRef,
+  pendingPreviewRef,
   previewTime,
   scene,
   sceneDurationSeconds,
@@ -67,7 +68,7 @@ export function useMotionMarkerCommands({
   selectedMotionMarkers,
   timelineMode,
   timelinePrecision,
-  scalePreviewFrameRef,
+  previewFrameRef,
   assignAvailableMotionLayerKind,
   setFocusPickZoomMarker,
   setPositionPickTranslationMarker,
@@ -334,39 +335,37 @@ export function useMotionMarkerCommands({
     setSelectedMotionMarkers([]);
   }
 
-  function previewMotionScale(partId: string, markerId: string, scale: number) {
-    if (timelineMode !== "composition" || isPickingZoomFocus) return;
-    if (partId === TIMELINE_MOTION_PART_ID) {
-      const activeStart = activeTimelinePart?.start ?? 0;
-      const previewMotionMarkers = getMotionMarkerViews(scene).motionMarkers.map((marker) => ({ ...marker, ...(marker.id === markerId ? { scale } : {}), start: marker.start - activeStart }));
-      pendingScalePreviewRef.current = getLayeredCameraPreviewTransform({ ...part, motionMarkers: motionBlocksToMotionMarkers(previewMotionMarkers) }, motionLayers, previewTime, { hiddenLayerIds: hiddenMotionLayerIds, pickingTranslationPosition: isPickingTranslationPosition });
-      if (scalePreviewFrameRef.current) return;
-      scalePreviewFrameRef.current = requestAnimationFrame(() => {
-        scalePreviewFrameRef.current = 0;
-        const transform = pendingScalePreviewRef.current;
-        if (!transform || !cameraRef.current) return;
-        cameraRef.current.style.transform = formatCameraPreviewTransform(transform);
-      });
-      return;
-    }
-    const previewPart = scene.compositions.find((item) => item.id === partId);
-    if (!previewPart || previewPart.id !== part.id) return;
-    const previewMotionMarkers = getMotionMarkerViews(previewPart).motionMarkers.map((marker) => ({ ...marker, ...(marker.id === markerId ? { scale } : {}) }));
-    pendingScalePreviewRef.current = getLayeredCameraPreviewTransform({ ...previewPart, motionMarkers: motionBlocksToMotionMarkers(previewMotionMarkers) }, motionLayers, previewTime, { hiddenLayerIds: hiddenMotionLayerIds, pickingTranslationPosition: isPickingTranslationPosition });
-    if (scalePreviewFrameRef.current) return;
-    scalePreviewFrameRef.current = requestAnimationFrame(() => {
-      scalePreviewFrameRef.current = 0;
-      const transform = pendingScalePreviewRef.current;
-      if (!transform || !cameraRef.current) return;
-      cameraRef.current.style.transform = formatCameraPreviewTransform(transform);
+  function previewMotionMarker(partId: string, markerId: string, updater: (marker: MotionMarker) => MotionMarker) {
+    const transform = buildMotionMarkerCameraPreviewTransform({
+      activeTimelinePart,
+      hiddenMotionLayerIds,
+      isPickingTranslationPosition,
+      isPickingZoomFocus,
+      markerId,
+      motionLayers,
+      part,
+      partId,
+      previewTime,
+      scene,
+      timelineMode,
+      updater,
+    });
+    if (!transform) return;
+    pendingPreviewRef.current = transform;
+    if (previewFrameRef.current) return;
+    previewFrameRef.current = requestAnimationFrame(() => {
+      previewFrameRef.current = 0;
+      const pending = pendingPreviewRef.current;
+      if (!pending) return;
+      applyCameraPreviewToElement(cameraRef.current, pending);
     });
   }
 
-  function clearMotionScalePreview() {
-    pendingScalePreviewRef.current = null;
-    if (scalePreviewFrameRef.current) {
-      cancelAnimationFrame(scalePreviewFrameRef.current);
-      scalePreviewFrameRef.current = 0;
+  function clearMotionPreview() {
+    pendingPreviewRef.current = null;
+    if (previewFrameRef.current) {
+      cancelAnimationFrame(previewFrameRef.current);
+      previewFrameRef.current = 0;
     }
   }
 
@@ -391,6 +390,7 @@ export function useMotionMarkerCommands({
           const previous = markerById.get(marker.mendInId);
           const clearedMarker = { ...updated.get(marker.id)!, mendInId: undefined, middleTransition: undefined, middleEase: undefined };
           clearedMarker.params = clearMendParams(clearedMarker);
+          if (clearedMarker.params) clearedMarker.params = clearMendVisualParams(clearedMarker.params);
           updated.set(marker.id, clearedMarker);
           if (previous?.mendOutId === marker.id) {
             const clearedPrevious = { ...updated.get(previous.id)!, mendOutId: undefined };
@@ -406,6 +406,7 @@ export function useMotionMarkerCommands({
           if (next?.mendInId === marker.id) {
             const clearedNext = { ...updated.get(next.id)!, mendInId: undefined, middleTransition: undefined, middleEase: undefined };
             clearedNext.params = clearMendParams(clearedNext);
+            if (clearedNext.params) clearedNext.params = clearMendVisualParams(clearedNext.params);
             updated.set(next.id, clearedNext);
           }
         }
@@ -465,6 +466,11 @@ export function useMotionMarkerCommands({
         const nextMarker = { ...marker, start: roundToPrecision(bounds.start, timelinePrecision), duration: roundToPrecision(bounds.end - bounds.start, timelinePrecision), snapIn: bounds.snapIn, snapOut: bounds.snapOut, mendInId: normalizeTimelineMotionMendId(bounds.mendInId), mendOutId: normalizeTimelineMotionMendId(bounds.mendOutId), middleTransition: bounds.middleTransition, middleEase: bounds.middleEase, params: clearMendParams(marker) };
         // Re-sync params with the new values on nextMarker
         if (nextMarker.params) nextMarker.params = clearMendParams(nextMarker);
+        // If unmending, also clear mend visual params
+        if (middleSnapActive && nextMarker.params) {
+          const clearedVisual = clearMendVisualParams(nextMarker.params);
+          if (clearedVisual) nextMarker.params = clearedVisual as typeof nextMarker.params;
+        }
         return nextMarker;
       });
       return { motionMarkers: nextMarkers };
@@ -484,6 +490,17 @@ export function useMotionMarkerCommands({
     return { ...marker.params, mendInId: marker.mendInId, mendOutId: marker.mendOutId, middleTransition: marker.middleTransition, middleEase: marker.middleEase, snapIn: marker.snapIn, snapOut: marker.snapOut };
   }
 
+  function clearMendVisualParams(params: MotionMarker["params"]) {
+    if (!params) return params;
+    // Remove mendVisual selection and all known mend transition param keys
+    const cleaned = { ...params };
+    delete cleaned.mendVisual;
+    delete cleaned.motionBlurStrength;
+    delete cleaned.motionBlurMax;
+    delete cleaned.motionBlurWindow;
+    return cleaned as MotionMarker["params"];
+  }
+
   function updateMotionMiddleTransition(_targetPart: Part, mode: "instant" | "transition") {
     const absoluteMarkers = getAbsoluteMotionMarkers();
     const selectedIds = selectedMotionMarkers.map((selection) => timelineMarkerKey(selection.partId, selection.markerId));
@@ -496,6 +513,7 @@ export function useMotionMarkerCommands({
         if (!nextMarkerIds.has(timelineMarkerKey(TIMELINE_MOTION_PART_ID, marker.id))) return marker;
         const nextMarker = { ...marker, middleTransition: mode === "transition" ? "transition" as const : undefined } as MotionMarker;
         if (nextMarker.params) nextMarker.params = clearMendParams(nextMarker);
+        if (mode === "instant" && nextMarker.params) nextMarker.params = clearMendVisualParams(nextMarker.params);
         return nextMarker;
       }),
     }));
@@ -521,8 +539,8 @@ export function useMotionMarkerCommands({
   return {
     addMotionEffect,
     addMotionMarker,
-    previewMotionScale,
-    clearMotionScalePreview,
+    previewMotionMarker,
+    clearMotionPreview,
     deleteMotionMarker,
     moveMotionMarker,
     moveMotionMarkers,

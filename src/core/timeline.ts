@@ -54,7 +54,7 @@ export function timelineDuration(timeline: TimelinePart[]) {
 }
 
 export function timelineDisplayDuration(duration: number, endPaddingFraction = 0.5) {
-  return duration > 0 ? roundTenth(duration * (1 + clamp(endPaddingFraction, 0, 2))) : 10;
+  return Math.max(duration > 0 ? roundTenth(duration * (1 + clamp(endPaddingFraction, 0, 2))) : 10, 10);
 }
 
 export function validateScene(scene: Scene): string[] {

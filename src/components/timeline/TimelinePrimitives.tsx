@@ -39,11 +39,21 @@ export function CompositionTimelineBlock({ blockRef, name, duration, isEmpty, so
     onPointerDown?.(event);
   }
 
+  function leftResizePointerDown(event: PointerEvent<HTMLDivElement>) {
+    event.stopPropagation();
+    onLeftResize?.(event);
+  }
+
+  function rightResizePointerDown(event: PointerEvent<HTMLDivElement>) {
+    event.stopPropagation();
+    onRightResize?.(event);
+  }
+
   return <div ref={blockRef} data-timeline-control {...dataAttributes} role="button" tabIndex={0} className={`absolute ${fillClass} ${interactivityClass} box-border flex min-w-[34px] cursor-default items-end justify-between gap-2 overflow-hidden rounded-[3px] px-3 py-2 text-left text-[13px] leading-none shadow-[inset_1px_0_0_rgb(0_0_0/0.55),inset_-1px_0_0_rgb(0_0_0/0.55)] before:absolute before:left-1/2 before:top-2 before:-translate-x-1/2 before:text-[12px] before:font-extrabold before:text-white/25 before:content-['Clip'] ${surfaceClass} ${stateClass}`} style={style} onClick={locked ? undefined : onClick} onDoubleClick={locked ? undefined : onDoubleClick} onPointerDown={blockPointerDown} onContextMenu={locked ? undefined : onContextMenu}>
     {prerendered && !preview ? <Zap className="absolute left-3 top-1 text-[#bff0ff] drop-shadow-[0_0_7px_rgba(98,199,255,0.85)]" size={12} strokeWidth={2.8} aria-label="Marked for prerender" /> : null}
     <span className={`min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-bold ${prerendered && !preview ? "pt-2" : ""}`}>{name}</span><small className="shrink-0 text-[12px] font-extrabold text-white/80">{duration}s</small>
-    <div className={`absolute left-0 top-0 bottom-0 w-2 ${leftResizeEnabled && !locked ? "cursor-ew-resize" : "pointer-events-none cursor-default"}`} onPointerDown={leftResizeEnabled && !locked ? onLeftResize : undefined} />
-    <div className={`absolute right-0 top-0 bottom-0 w-2 ${rightResizeEnabled && !locked ? "cursor-ew-resize" : "pointer-events-none cursor-default"}`} onPointerDown={rightResizeEnabled && !locked ? onRightResize : undefined} />
+    <div className={`absolute left-0 top-0 bottom-0 w-2 ${leftResizeEnabled && !locked ? "cursor-ew-resize" : "pointer-events-none cursor-default"}`} onPointerDown={leftResizeEnabled && !locked ? leftResizePointerDown : undefined} />
+    <div className={`absolute right-0 top-0 bottom-0 w-2 ${rightResizeEnabled && !locked ? "cursor-ew-resize" : "pointer-events-none cursor-default"}`} onPointerDown={rightResizeEnabled && !locked ? rightResizePointerDown : undefined} />
   </div>;
 }
 
@@ -185,9 +195,19 @@ export function TimelineBlock({ variant, selected, locked = false, muted, blocke
     onPointerDown(event);
   }
 
+  function leftResizePointerDown(event: PointerEvent<HTMLDivElement>) {
+    event.stopPropagation();
+    onLeftResize(event);
+  }
+
+  function rightResizePointerDown(event: PointerEvent<HTMLDivElement>) {
+    event.stopPropagation();
+    onRightResize(event);
+  }
+
   return <div data-timeline-control {...dataAttributes} role="button" tabIndex={0} className={`absolute inset-y-0 box-border cursor-default overflow-hidden rounded-[3px] px-3 py-2 text-xs ${radiusClass} ${variantClass} ${selectionClass}`} style={blockStyle} onClick={locked ? undefined : onClick} onPointerDown={blockPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerCancel} onContextMenu={locked ? undefined : onContextMenu}>
     {children}
-    <div className={`absolute left-0 top-0 bottom-0 w-2 ${leftResizeEnabled && !locked ? "cursor-ew-resize" : "pointer-events-none cursor-default"}`} onPointerDown={leftResizeEnabled && !locked ? onLeftResize : undefined}>{leftHandle}</div>
-    <div className={`absolute right-0 top-0 bottom-0 w-2 ${rightResizeEnabled && !locked ? "cursor-ew-resize" : "pointer-events-none cursor-default"}`} onPointerDown={rightResizeEnabled && !locked ? onRightResize : undefined}>{rightHandle}</div>
+    <div className={`absolute left-0 top-0 bottom-0 w-2 ${leftResizeEnabled && !locked ? "cursor-ew-resize" : "pointer-events-none cursor-default"}`} onPointerDown={leftResizeEnabled && !locked ? leftResizePointerDown : undefined}>{leftHandle}</div>
+    <div className={`absolute right-0 top-0 bottom-0 w-2 ${rightResizeEnabled && !locked ? "cursor-ew-resize" : "pointer-events-none cursor-default"}`} onPointerDown={rightResizeEnabled && !locked ? rightResizePointerDown : undefined}>{rightHandle}</div>
   </div>;
 }

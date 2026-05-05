@@ -233,6 +233,12 @@ export type AdjustmentEffectParams = Record<string, unknown> & {
   focusY?: number;
   hue?: number;
   intensity?: number;
+  chromaticAberration?: number;
+  dimAmount?: number;
+  distortion?: number;
+  magnification?: number;
+  rimOpacity?: number;
+  rimWidth?: number;
   softness?: number;
   radius?: number;
   saturation?: number;

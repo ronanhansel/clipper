@@ -32,6 +32,17 @@ type PreviewColumnProps = {
 };
 
 export function PreviewColumn({ blankFrameViewportStyle, children, currentSceneTimeRef, editorPaneProps, framePreviewProps, getPrerenderCacheBlockAtTime, hasActiveComposition, mode, onModeChange, onPointerEnter, onPointerLeave, onCachedPreviewDisplayReadyChange, prerenderCacheBlackMissDebug, prerenderCacheEnabled, onScroll, previewKey, stageRef }: PreviewColumnProps) {
+  // Stabilize prerender renderer choice across mode switches: only
+  // sync from prerenderCacheEnabled while in preview mode so the
+  // active preview subtree (PrerenderVideoPreview vs FramePreview)
+  // does not swap when the parent toggles prerender off in editor mode.
+  const [displayPrerenderPreview, setDisplayPrerenderPreview] = useState(prerenderCacheEnabled);
+  useEffect(() => {
+    if (mode === "preview") {
+      setDisplayPrerenderPreview(prerenderCacheEnabled);
+    }
+  }, [mode, prerenderCacheEnabled]);
+
   return (
     <section className="grid min-h-0 min-w-0 grid-rows-[58px_minmax(0,1fr)_58px] bg-[radial-gradient(circle_at_50%_45%,rgb(var(--clipper-accent-rgb)/0.10),transparent_30%),#141821]" data-clipper-preview-column onPointerEnter={onPointerEnter} onPointerLeave={onPointerLeave}>
       <div className="grid place-items-center border-b border-[#2d313b] px-[18px]" data-clipper-preview-toolbar>
@@ -41,15 +52,28 @@ export function PreviewColumn({ blankFrameViewportStyle, children, currentSceneT
         </div>
       </div>
 
-      <div ref={stageRef} className={`timeline-scrollbar relative grid min-h-0 ${mode === "preview" ? "place-items-center overflow-auto p-[22px] [scrollbar-gutter:stable]" : "items-stretch overflow-hidden"}`} data-clipper-preview-stage onScroll={onScroll}>
-        {mode === "preview" && framePreviewProps ? (
-          prerenderCacheEnabled
-            ? <PrerenderVideoPreview key={`prerender:${previewKey}`} blackMissDebug={prerenderCacheBlackMissDebug} currentSceneTimeRef={currentSceneTimeRef} framePreviewProps={framePreviewProps} getBlockAtTime={getPrerenderCacheBlockAtTime} onCachedPreviewDisplayReadyChange={onCachedPreviewDisplayReadyChange} />
-            : <FramePreview key={previewKey} {...framePreviewProps} />
-        ) : null}
-        {mode === "preview" && !hasActiveComposition ? <div className="relative overflow-hidden bg-black shadow-[0_22px_70px_rgba(0,0,0,0.44)]" aria-label="Blank preview frame" data-clipper-blank-frame-preview style={blankFrameViewportStyle} /> : null}
-        {mode === "editor" && editorPaneProps ? <div className="min-h-0 h-full w-full"><EditorPane {...editorPaneProps} /></div> : null}
-        {mode === "editor" && !editorPaneProps ? <div className="grid place-items-center p-6 text-center text-sm font-bold text-[#9b9da7]">No file is open in the editor.</div> : null}
+      {/* Outer positioning container — NOT the scroll viewport, no stageRef */}
+      <div className="relative min-h-0 min-w-0 overflow-hidden">
+        {/* Preview scroll viewport — stageRef, onScroll, data-clipper-preview-stage live here */}
+        <div
+          ref={stageRef}
+          className={`timeline-scrollbar absolute inset-0 grid place-items-center p-[22px] ${mode === "preview" ? "overflow-auto [scrollbar-gutter:stable]" : "invisible pointer-events-none overflow-hidden"}`}
+          data-clipper-preview-stage
+          onScroll={onScroll}
+        >
+          <div>
+            {framePreviewProps ? (
+              displayPrerenderPreview
+                ? <PrerenderVideoPreview key={`prerender:${previewKey}`} blackMissDebug={prerenderCacheBlackMissDebug} currentSceneTimeRef={currentSceneTimeRef} framePreviewProps={framePreviewProps} getBlockAtTime={getPrerenderCacheBlockAtTime} onCachedPreviewDisplayReadyChange={onCachedPreviewDisplayReadyChange} />
+                : <FramePreview key={previewKey} {...framePreviewProps} />
+            ) : null}
+          </div>
+          {!hasActiveComposition ? <div className="relative overflow-hidden bg-black shadow-[0_22px_70px_rgba(0,0,0,0.44)]" aria-label="Blank preview frame" data-clipper-blank-frame-preview style={blankFrameViewportStyle} /> : null}
+        </div>
+
+        {/* Editor overlay — sibling of scroll viewport, not inside it. Not affected by preview scrollTop/scrollLeft. */}
+        {mode === "editor" && editorPaneProps ? <div className="absolute inset-0 z-10"><EditorPane {...editorPaneProps} /></div> : null}
+        {mode === "editor" && !editorPaneProps ? <div className="absolute inset-0 z-10 grid place-items-center p-6 text-center text-sm font-bold text-[#9b9da7]">No file is open in the editor.</div> : null}
       </div>
       {children}
     </section>

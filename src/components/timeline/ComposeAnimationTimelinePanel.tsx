@@ -40,11 +40,11 @@ type ComposeAnimationTimelinePanelProps = {
 };
 
 export const ComposeAnimationTimelinePanel = memo(function ComposeAnimationTimelinePanel({ currentTime, part, playbackPlayheadRef, scrubbingRef, scrubSnapEnabled, selectedObjectIds, timelineLayers, timelineViewportState, onExitCompose, onRenameLayer, onScrub, onScrubEnd, onScrubStart, onSelectObjects, onTimelineLayersChange, onTimelineViewportStateChange, onUpdateBackgroundAnimation, onUpdateBackgroundMotion, onUpdateObjectAnimation, onUpdateObjectMotion }: ComposeAnimationTimelinePanelProps) {
-  const timelineDuration = Math.max(part?.duration ?? 0.1, 0.1);
+  const timelineDuration = Math.max(part?.duration ?? 0.1, 10);
   const layers = useMemo(() => part ? buildComposeAnimationTimelineLayers(part) : [], [part]);
   const ticks = useMemo(() => getTimelineTicks(timelineDuration), [timelineDuration]);
   const timingDragRef = useRef<ComposeAnimationTimingDrag | null>(null);
-  const provisionalContentWidth = Math.max(timelineDuration * defaultTimelinePixelsPerSecond * timelineViewportState.zoom, 160);
+  const provisionalContentWidth = timelineDuration * defaultTimelinePixelsPerSecond * timelineViewportState.zoom;
   const { timelineRef, timelineViewportRef, timelineLayerRailRef, timelineSnapGuideRef, timelineZoom, updateTimelineZoom, syncTimelineScrollPosition, saveTimelineDisplacement, scrollTimelineFromLayerRail, updateTimelineSnapGuide, clearTimelineSnapGuide } = useTimelineViewportController({
     contentWidth: provisionalContentWidth,
     currentTime,
@@ -62,7 +62,7 @@ export const ComposeAnimationTimelinePanel = memo(function ComposeAnimationTimel
   const layerRowStarts = layerRowHeights.reduce<number[]>((starts, height, index) => [...starts, index === 0 ? 0 : starts[index - 1] + layerRowHeights[index - 1]], []);
   const laneRowsStyle = { gridTemplateRows: layerRowHeights.map((height) => `${height}px`).join(" ") || "58px" };
   const laneContentHeight = Math.max(layerRowHeights.reduce((total, height) => total + height, 0), 58);
-  const contentWidth = Math.max(timelineDuration * defaultTimelinePixelsPerSecond * timelineZoom, 160);
+  const contentWidth = timelineDuration * defaultTimelinePixelsPerSecond * timelineZoom;
   const layerRailWidth = 260;
   const composeTimelinePartId = part?.id ?? "compose-animation";
   const composeMotionTimeline = useMemo<TimelinePartMotionView[]>(() => part ? [buildComposeAnimationMotionTimelinePart(part, layers, timelineDuration)] : [], [layers, part, timelineDuration]);

@@ -2,7 +2,7 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSPr
 import { selectorBlue, selectorHandleSizePx, selectorOffsetPx } from "../../app/config";
 import { getRenderableTextSegments, getSelectionFormatState, normalizeEditableFormatting, renderRichTextSegments, richTextSegmentsFromElement, shouldPersistRichText, textSegmentsToEditableNodes } from "../../app/richText";
 import { applyAdjustmentLayersToVisualStyle } from "../../core/adjustments";
-import { boundsToViewport, formatCameraPreviewTransform, getLayeredCameraPreviewTransform, type CameraPreviewTransform } from "../../core/camera";
+import { boundsToViewport, formatCameraPreviewFilter, formatCameraPreviewTransform, getLayeredCameraPreviewTransform, type CameraPreviewTransform } from "../../core/camera";
 import { generateChartObjects, type ChartGeneratedObject } from "../../core/chart";
 import { getBoundsUnion, insetBounds, isVisibleMarqueeBounds, updateDragSelectionBoxElement, type ResizeHandle } from "../../core/frameInteraction";
 import { clamp } from "../../core/math";
@@ -13,7 +13,7 @@ import { FRAME_HEIGHT, FRAME_WIDTH, type AdjustmentLayer, type BackgroundLayer, 
 import type { AdjustmentVisualOverlay, TransitionSequenceStyle, TransitionVisualOverlay } from "../../core/effects/types";
 import type { PlaybackClock } from "../../app/types";
 
-const identityCameraTransform: CameraPreviewTransform = { x: 0, y: 0, z: 0, scale: 1, rotation: 0, rotateX: 0, rotateY: 0, perspective: 1800 };
+const identityCameraTransform: CameraPreviewTransform = { x: 0, y: 0, z: 0, scale: 1, rotation: 0, rotateX: 0, rotateY: 0, perspective: 1800, motionBlur: 0 };
 
 export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dragSelectionBoxRef, framePickPoint, focusPicking, trackerPicking, canSelectObjects, cameraTransform, frameViewportRef, frameScale, isPlaying, part, partStart, adjustmentLayers, playbackClock, previewTime, sceneTime, timelineMode, motionLayers, hiddenMotionLayerIds, pickingTranslationPosition, pickingZoomFocus, compHidden, selectedObjects, marqueeDragging, editingTextObjectId, onFramePointerCancel, onFramePointerDown, onFramePointerDownCapture, onFramePointerMove, onFramePointerUp, onObjectPointerDown, onObjectResizePointerDown, onTextEditCommit, onTextObjectDoubleClick, onTrackerTargetPick }: { cameraRef: RefObject<HTMLDivElement | null>; dragBox: Bounds | null; dragSelectionBoxRef: RefObject<HTMLDivElement | null>; framePickPoint: Point | null; focusPicking: boolean; trackerPicking: boolean; canSelectObjects: boolean; cameraTransform: CameraPreviewTransform; frameViewportRef: RefObject<HTMLDivElement | null>; frameScale: number; isPlaying: boolean; part: Part; partStart: number; adjustmentLayers?: AdjustmentLayer[]; playbackClock: PlaybackClock; previewTime: number; sceneTime: number; timelineMode: TimelineMode; motionLayers: TimelineMotionLayerState[]; hiddenMotionLayerIds?: Set<string>; pickingTranslationPosition: boolean; pickingZoomFocus: boolean; compHidden?: boolean; selectedObjects: SelectionPayload["objects"]; marqueeDragging: boolean; editingTextObjectId: string | null; onFramePointerCancel: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerDown: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerDownCapture: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerMove: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerUp: (event: PointerEvent<HTMLDivElement>) => void; onObjectPointerDown: (event: PointerEvent<HTMLDivElement>, object: FrameObject) => void; onObjectResizePointerDown: (event: PointerEvent<HTMLDivElement>, handle: ResizeHandle, objectId?: string) => void; onTextEditCommit: (objectId: string, content: string, richText?: RichTextSegment[]) => void; onTextObjectDoubleClick: (event: ReactMouseEvent<HTMLDivElement>, object: FrameObject) => void; onTrackerTargetPick: (objectId: string) => void }) {
   const viewportStyle = useMemo(() => ({ width: FRAME_WIDTH * frameScale, height: FRAME_HEIGHT * frameScale }) as CSSProperties, [frameScale]);
@@ -42,7 +42,8 @@ export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dra
     return getLayeredCameraPreviewTransform(part, motionLayers, displayPreviewTime, { hiddenLayerIds: hiddenMotionLayerIds, pickingTranslationPosition, pickingZoomFocus, resetMotionEffects: trackerPicking || focusPicking || pickingTranslationPosition || pickingZoomFocus });
   }, [cameraTransform, displayPreviewTime, focusPicking, hiddenMotionLayerIds, motionLayers, part, pickingTranslationPosition, pickingZoomFocus, timelineMode, trackerPicking]);
   const liveCameraTransform = useTransitionComposite ? identityCameraTransform : activeCameraTransform;
-  const frameStyle = useMemo(() => ({ width: FRAME_WIDTH, height: FRAME_HEIGHT, background: "#000", transform: `scale(${frameScale})` }) as CSSProperties, [frameScale]);
+  const frameBackground = part.frame.style.background ?? "#000";
+  const frameStyle = useMemo(() => ({ width: FRAME_WIDTH, height: FRAME_HEIGHT, background: frameBackground, transform: `scale(${frameScale})` }) as CSSProperties, [frameBackground, frameScale]);
   const perspectiveStageStyle = useMemo(() => ({ perspective: `${liveCameraTransform.perspective}px`, perspectiveOrigin: "center", transformStyle: "preserve-3d" }) as CSSProperties, [liveCameraTransform.perspective]);
   const selectedBounds = useMemo(() => selectedObjects.length > 0 ? getBoundsUnion(selectedObjects.map((object) => object.bounds)) : null, [selectedObjects]);
   const selectedViewportBounds = useMemo(() => selectedBounds ? insetBounds(boundsToViewport(selectedBounds, liveCameraTransform, frameScale), -selectorOffsetPx) : null, [frameScale, liveCameraTransform, selectedBounds]);
@@ -58,6 +59,10 @@ export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dra
     if (!cameraRef.current) return;
     const transitionTransform = typeof transitionCameraStyle?.transform === "string" ? transitionCameraStyle.transform : "";
     cameraRef.current.style.transform = `${transitionTransform} ${formatCameraPreviewTransform(liveCameraTransform)}`.trim();
+    const transitionFilter = typeof transitionCameraStyle?.filter === "string" ? transitionCameraStyle.filter : "";
+    const cameraFilter = formatCameraPreviewFilter(liveCameraTransform) ?? "";
+    const combinedFilter = [transitionFilter, cameraFilter].filter(Boolean).join(" ");
+    cameraRef.current.style.filter = combinedFilter;
   }, [cameraRef, liveCameraTransform, transitionCameraStyle]);
 
   useLayoutEffect(() => {
@@ -162,8 +167,9 @@ export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dra
             <div ref={cameraVisualAdjustmentOverlaysRef} className="pointer-events-none absolute inset-0" data-clipper-visual-adjustment-overlays="camera" style={{ zIndex: 2147483647 }} />
           </div>
           {trackerPicking && trackerHoverTarget ? <TrackerTargetOverlay target={trackerHoverTarget} /> : null}
-          {dragBox ? <DragSelectionBox ref={dragSelectionBoxRef} bounds={dragBox} frameScale={frameScale} visible={Boolean(showDragBox)} /> : null}
-          {focusPicking && framePickPoint ? <FramePickPointOverlay point={framePickPoint} frameScale={frameScale} /> : null}
+          {dragBox ? <DragSelectionBox dragSelectionBoxRef={dragSelectionBoxRef} bounds={dragBox} frameScale={frameScale} visible={Boolean(showDragBox)} /> : null}
+          {framePickPoint ? <FramePickPointOverlay point={framePickPoint} frameScale={frameScale} /> : null}
+          <FramePickPointImperativeOverlay />
         </div>
         {canSelectObjects && !isUnlinkedPart ? selectedObjects.map((object) => <SelectionOverlayBox key={object.id} objectId={object.id} bounds={object.bounds} cameraTransform={liveCameraTransform} frameScale={frameScale} highlighted={selectorHover} interactive={!marqueeDragging} overlayOffset={selectionBleedPx} onResizePointerDown={(event, handle) => onObjectResizePointerDown(event, handle, object.id)} />) : null}
       </div>
@@ -277,7 +283,15 @@ function syncRenderClockSubtree(root: HTMLDivElement | null, stateRef: { current
 
 export function FramePickPointOverlay({ point, frameScale }: { point: Point; frameScale: number }) {
   return (
-    <div className="pointer-events-none absolute z-20" style={{ left: point.x * frameScale, top: point.y * frameScale }}>
+    <div className="pointer-events-none absolute z-20" data-clipper-frame-pick-point style={{ transform: `translate3d(${point.x * frameScale}px, ${point.y * frameScale}px, 0)` }}>
+      <span className="absolute left-1/2 top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/80 bg-[#159dff] shadow-[0_2px_8px_rgba(0,0,0,0.38)]" />
+    </div>
+  );
+}
+
+function FramePickPointImperativeOverlay() {
+  return (
+    <div className="pointer-events-none absolute z-20 opacity-0" data-clipper-motion-pick-preview style={{ transform: "translate3d(0px, 0px, 0)" }}>
       <span className="absolute left-1/2 top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/80 bg-[#159dff] shadow-[0_2px_8px_rgba(0,0,0,0.38)]" />
     </div>
   );
@@ -502,12 +516,12 @@ export function SelectionOverlayBox({ objectId, bounds, cameraTransform, frameSc
   );
 }
 
-export function DragSelectionBox({ ref, bounds, frameScale, visible }: { ref: RefObject<HTMLDivElement | null>; bounds: Bounds; frameScale: number; visible: boolean }) {
+export function DragSelectionBox({ dragSelectionBoxRef, bounds, frameScale, visible }: { dragSelectionBoxRef: RefObject<HTMLDivElement | null>; bounds: Bounds; frameScale: number; visible: boolean }) {
   useLayoutEffect(() => {
-    if (ref.current) updateDragSelectionBoxElement(ref.current, bounds, frameScale, visible);
-  }, [bounds, frameScale, ref, visible]);
+    if (dragSelectionBoxRef.current) updateDragSelectionBoxElement(dragSelectionBoxRef.current, bounds, frameScale, visible);
+  }, [bounds, dragSelectionBoxRef, frameScale, visible]);
 
-  return <div ref={ref} className="pointer-events-none absolute left-0 top-0 border bg-[#159dff]/10 opacity-100 shadow-[0_0_0_1px_rgba(21,157,255,0.18)] will-change-transform" style={{ borderColor: selectorBlue, zIndex: 69 }} />;
+  return <div ref={dragSelectionBoxRef} className="pointer-events-none absolute left-0 top-0 border bg-[#159dff]/10 opacity-100 shadow-[0_0_0_1px_rgba(21,157,255,0.18)] will-change-transform" style={{ borderColor: selectorBlue, zIndex: 69 }} />;
 }
 
 export const BackgroundLayerView = memo(function BackgroundLayerView({ animationsEnabled, background, duration, previewTime }: { animationsEnabled: boolean; background: BackgroundLayer; duration: number; previewTime: number }) {

@@ -72,8 +72,36 @@ export type AdjustmentEffectPointControl = {
   disabledWhen?: AdjustmentEffectDisableCondition;
 };
 
+export type MotionMendTransitionNumberControl = {
+  key: string;
+  label: string;
+  type: "number";
+  min?: number;
+  max?: number;
+  step?: number;
+  defaultValue: number;
+};
+
+export type MotionMendTransitionSelectControl = {
+  key: string;
+  label: string;
+  type: "select";
+  defaultValue: string;
+  options: readonly { value: string; label: string }[];
+};
+
+export type MotionMendTransitionParamControl = MotionMendTransitionNumberControl | MotionMendTransitionSelectControl;
+
+export type MotionMendTransitionOption = {
+  key: string;
+  label: string;
+  defaultParams: Record<string, unknown>;
+  paramControls: readonly MotionMendTransitionParamControl[];
+};
+
 export type MotionEffectPackage = MotionEffectDefinition & {
   createDefaultBlock(input: { id: string; layerId: string; start: number; duration: number; focus: Point; position: Point }): MotionBlock;
+  mendTransitionOptions?: readonly MotionMendTransitionOption[];
 };
 
 export type AdjustmentEffectPackage = AdjustmentEffectDefinition & {

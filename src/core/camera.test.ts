@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { CAMERA_PERSPECTIVE, formatCameraPreviewTransform, getActiveMarkerByKind, getActivePerspectiveMarkers, getLayeredCameraPreviewTransform } from "./camera";
+import { CAMERA_PERSPECTIVE, formatCameraPreviewFilter, formatCameraPreviewTransform, getActiveMarkerByKind, getActivePerspectiveMarkers, getLayeredCameraPreviewTransform, getMotionBlurConfig } from "./camera";
 import { motionBlocksToMotionMarkers } from "./motionEffects";
-import type { Part, TimelineMotionLayerState } from "./types";
+import type { MotionMarker, Part, TimelineMotionLayerState } from "./types";
 
 const basePart: Part = {
   id: "part",
@@ -71,7 +71,7 @@ describe("camera", () => {
   });
 
   it("keeps perspective distance out of the camera transform string", () => {
-    const transform = formatCameraPreviewTransform({ x: 0, y: 0, z: 0, scale: 1, rotation: 0, rotateX: 8, rotateY: 0, perspective: CAMERA_PERSPECTIVE });
+    const transform = formatCameraPreviewTransform({ x: 0, y: 0, z: 0, scale: 1, rotation: 0, rotateX: 8, rotateY: 0, perspective: CAMERA_PERSPECTIVE, motionBlur: 0 });
 
     expect(transform).not.toContain("perspective(");
     expect(transform).toContain("rotateX(8deg)");
@@ -106,5 +106,125 @@ describe("camera", () => {
     ];
 
     expect(getActiveMarkerByKind(markers, "pan", 2.22)?.position?.x).toBe(55);
+  });
+
+  describe("motion blur", () => {
+    it("produces blur during mended pan middle transition with motionBlur enabled", () => {
+      const markers = [
+        { id: "a", effectId: "clipper.motion.pan" as const, kind: "pan" as const, layerId: "clipper.motion.pan", start: 0, duration: 2, position: { x: 10, y: 0 }, mendOutId: "b" },
+        { id: "b", effectId: "clipper.motion.pan" as const, kind: "pan" as const, layerId: "clipper.motion.pan", start: 2, duration: 2, position: { x: 500, y: 0 }, mendInId: "a", middleTransition: "transition" as const, middleEase: "linear" as const, params: { mendVisual: "motionBlur" } },
+      ];
+
+      const marker = getActiveMarkerByKind(markers, "pan", 2.11);
+      expect(marker?.motionBlur).toBeGreaterThan(0);
+    });
+
+    it("blur is zero outside the middle transition window", () => {
+      const markers = [
+        { id: "a", effectId: "clipper.motion.pan" as const, kind: "pan" as const, layerId: "clipper.motion.pan", start: 0, duration: 2, position: { x: 10, y: 0 }, mendOutId: "b" },
+        { id: "b", effectId: "clipper.motion.pan" as const, kind: "pan" as const, layerId: "clipper.motion.pan", start: 2, duration: 2, position: { x: 500, y: 0 }, mendInId: "a", middleTransition: "transition" as const, middleEase: "linear" as const, params: { mendVisual: "motionBlur" } },
+      ];
+
+      // Well past the 0.22 middle transition window, blur should be zero
+      expect(getActiveMarkerByKind(markers, "pan", 3)?.motionBlur).toBeLessThan(0.1);
+    });
+
+    it("motionBlur is zero for static holds without mended transition", () => {
+      const markers = [
+        { id: "a", effectId: "clipper.motion.pan" as const, kind: "pan" as const, layerId: "clipper.motion.pan", start: 0, duration: 2, position: { x: 100, y: 0 }, snapIn: true, snapOut: true },
+      ];
+
+      expect(getActiveMarkerByKind(markers, "pan", 1)?.motionBlur).toBe(0);
+    });
+
+    it("motionBlur is zero for rotate markers in middle transition", () => {
+      const markers = [
+        { id: "a", effectId: "clipper.motion.rotate" as const, kind: "rotate" as const, layerId: "clipper.motion.rotate", start: 0, duration: 2, position: { x: 0, y: 0 }, rotation: 0, mendOutId: "b" },
+        { id: "b", effectId: "clipper.motion.rotate" as const, kind: "rotate" as const, layerId: "clipper.motion.rotate", start: 2, duration: 2, position: { x: 0, y: 0 }, rotation: 90, mendInId: "a", middleTransition: "transition" as const, middleEase: "linear" as const },
+      ];
+
+      const marker = getActiveMarkerByKind(markers, "rotate", 2.11);
+      expect(marker?.motionBlur).toBe(0);
+    });
+
+    it("formatCameraPreviewFilter returns blur(Npx) only when blur > 0", () => {
+      expect(formatCameraPreviewFilter({ x: 0, y: 0, z: 0, scale: 1, rotation: 0, rotateX: 0, rotateY: 0, perspective: CAMERA_PERSPECTIVE, motionBlur: 0 })).toBeUndefined();
+      expect(formatCameraPreviewFilter({ x: 0, y: 0, z: 0, scale: 1, rotation: 0, rotateX: 0, rotateY: 0, perspective: CAMERA_PERSPECTIVE, motionBlur: 12 })).toBe("blur(12px)");
+      expect(formatCameraPreviewFilter({ x: 0, y: 0, z: 0, scale: 1, rotation: 0, rotateX: 0, rotateY: 0, perspective: CAMERA_PERSPECTIVE, motionBlur: 24 })).toBe("blur(24px)");
+    });
+
+    it("blur is capped at configured max for long pans", () => {
+      const markers = [
+        { id: "a", effectId: "clipper.motion.pan" as const, kind: "pan" as const, layerId: "clipper.motion.pan", start: 0, duration: 2, position: { x: 0, y: 0 }, mendOutId: "b" },
+        { id: "b", effectId: "clipper.motion.pan" as const, kind: "pan" as const, layerId: "clipper.motion.pan", start: 2, duration: 2, position: { x: 2000, y: 0 }, mendInId: "a", middleTransition: "transition" as const, middleEase: "linear" as const, params: { mendVisual: "motionBlur" } },
+      ];
+
+      const marker = getActiveMarkerByKind(markers, "pan", 2.11);
+      expect(marker?.motionBlur).toBeLessThanOrEqual(24);
+    });
+
+    it("layered transform accumulates max blur across layers", () => {
+      const part: Part = {
+        ...basePart,
+        motionMarkers: [
+          { id: "a", effectId: "clipper.motion.pan" as const, kind: "pan" as const, layerId: "pan_a", start: 0, duration: 2, position: { x: 0, y: 0 }, mendOutId: "b" },
+          { id: "b", effectId: "clipper.motion.pan" as const, kind: "pan" as const, layerId: "pan_a", start: 2, duration: 2, position: { x: 500, y: 0 }, mendInId: "a", middleTransition: "transition" as const, middleEase: "linear" as const, params: { mendVisual: "motionBlur" } },
+          { id: "c", effectId: "clipper.motion.pan" as const, kind: "pan" as const, layerId: "pan_b", start: 0, duration: 2, position: { x: 0, y: 0 }, mendOutId: "d" },
+          { id: "d", effectId: "clipper.motion.pan" as const, kind: "pan" as const, layerId: "pan_b", start: 2, duration: 2, position: { x: 100, y: 0 }, mendInId: "c", middleTransition: "transition" as const, middleEase: "linear" as const, params: { mendVisual: "motionBlur" } },
+        ],
+      };
+      const layers: TimelineMotionLayerState[] = [
+        { id: "pan_a", kind: "motion" },
+        { id: "pan_b", kind: "motion" },
+      ];
+
+      const transform = getLayeredCameraPreviewTransform(part, layers, 2.11);
+      expect(transform.motionBlur).toBeGreaterThan(0);
+      // blur from pan_a (500px distance) should dominate pan_b (100px distance)
+      const markerA = getActiveMarkerByKind(part.motionMarkers.filter(m => m.layerId === "pan_a"), "pan", 2.11, part);
+      expect(transform.motionBlur).toBe(markerA?.motionBlur);
+    });
+
+    it("motionBlur is zero for mended transition without mendVisual enabled", () => {
+      const markers = [
+        { id: "a", effectId: "clipper.motion.pan" as const, kind: "pan" as const, layerId: "clipper.motion.pan", start: 0, duration: 2, position: { x: 10, y: 0 }, mendOutId: "b" },
+        { id: "b", effectId: "clipper.motion.pan" as const, kind: "pan" as const, layerId: "clipper.motion.pan", start: 2, duration: 2, position: { x: 500, y: 0 }, mendInId: "a", middleTransition: "transition" as const, middleEase: "linear" as const },
+      ];
+
+      // No mendVisual in params → no blur
+      expect(getActiveMarkerByKind(markers, "pan", 2.11)?.motionBlur).toBe(0);
+    });
+
+    it("blur respects custom strength, max, and window params", () => {
+      const markers = [
+        { id: "a", effectId: "clipper.motion.pan" as const, kind: "pan" as const, layerId: "clipper.motion.pan", start: 0, duration: 2, position: { x: 10, y: 0 }, mendOutId: "b" },
+        { id: "b", effectId: "clipper.motion.pan" as const, kind: "pan" as const, layerId: "clipper.motion.pan", start: 2, duration: 2, position: { x: 500, y: 0 }, mendInId: "a", middleTransition: "transition" as const, middleEase: "linear" as const, params: { mendVisual: "motionBlur", motionBlurStrength: 2, motionBlurMax: 12, motionBlurWindow: 0.44 } },
+      ];
+
+      const marker = getActiveMarkerByKind(markers, "pan", 2.11);
+      // With double strength (divisor=8) and half max, blur should be > 0 but ≤ 12
+      expect(marker?.motionBlur).toBeGreaterThan(0);
+      expect(marker?.motionBlur).toBeLessThanOrEqual(12);
+    });
+
+    it("getMotionBlurConfig returns disabled for markers without mendVisual", () => {
+      const marker = { id: "b", effectId: "clipper.motion.pan" as const, kind: "pan" as const, layerId: "clipper.motion.pan", start: 0, duration: 2, position: { x: 0, y: 0 } } as MotionMarker;
+      expect(getMotionBlurConfig(marker).enabled).toBe(false);
+    });
+
+    it("getMotionBlurConfig returns enabled with defaults when mendVisual is motionBlur", () => {
+      const marker = { id: "b", effectId: "clipper.motion.pan" as const, kind: "pan" as const, layerId: "clipper.motion.pan", start: 0, duration: 2, position: { x: 0, y: 0 }, params: { mendVisual: "motionBlur" } } as unknown as MotionMarker;
+      const config = getMotionBlurConfig(marker);
+      expect(config.enabled).toBe(true);
+      expect(config.strength).toBe(1);
+      expect(config.maxBlur).toBe(24);
+      expect(config.window).toBe(0.22);
+    });
+
+    it("getMotionBlurConfig reads custom params", () => {
+      const marker = { id: "b", effectId: "clipper.motion.pan" as const, kind: "pan" as const, layerId: "clipper.motion.pan", start: 0, duration: 2, position: { x: 0, y: 0 }, params: { mendVisual: "motionBlur", motionBlurStrength: 3, motionBlurMax: 48, motionBlurWindow: 0.11 } } as unknown as MotionMarker;
+      const config = getMotionBlurConfig(marker);
+      expect(config).toMatchObject({ enabled: true, strength: 3, maxBlur: 48, window: 0.11 });
+    });
   });
 });

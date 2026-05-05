@@ -39,7 +39,7 @@ export function useFramePreviewZoomCommands({ centerPreviewScrollRef, framePrevi
   }, []);
 
   const updateFramePreviewScale = useCallback((nextScale: number) => {
-    const clampedScale = roundTwo(clamp(nextScale, 0.25, 1));
+    const clampedScale = roundTwo(clamp(nextScale, 0.25, 5));
     framePreviewScaleRef.current = clampedScale;
     setFramePreviewScale(clampedScale);
   }, [setFramePreviewScale]);
@@ -47,7 +47,7 @@ export function useFramePreviewZoomCommands({ centerPreviewScrollRef, framePrevi
   const zoomFramePreviewAtPoint = useCallback((scaleMultiplier: number, clientX: number, clientY: number) => {
     const viewport = centerPreviewScrollRef.current;
     const previousScale = framePreviewScaleRef.current;
-    const clampedScale = clamp(previousScale * scaleMultiplier, 0.25, 1);
+    const clampedScale = clamp(previousScale * scaleMultiplier, 0.25, 5);
     if (!viewport) {
       framePreviewScaleRef.current = clampedScale;
       setFramePreviewScale(clampedScale);

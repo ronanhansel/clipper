@@ -1,4 +1,4 @@
-import { useEffect, useRef, type PointerEvent } from "react";
+import { useEffect, useRef, type PointerEvent, type RefObject } from "react";
 
 export type TimelinePointerTransactionState = {
   clientX: number;
@@ -39,13 +39,40 @@ type ActiveTimelinePointerTransaction = {
   move: (event: globalThis.PointerEvent) => void;
   up: (event: globalThis.PointerEvent) => void;
   cancel: (event: globalThis.PointerEvent) => void;
-  key: (event: KeyboardEvent) => void;
 };
 
 export function useTimelinePointerTransaction() {
   const activeRef = useRef<ActiveTimelinePointerTransaction | null>(null);
+  const shiftPressedRef = useRef(false);
 
-  useEffect(() => () => cleanupTimelinePointerTransaction(false), []);
+  useEffect(() => {
+    function setShiftPressed(next: boolean) {
+      shiftPressedRef.current = next;
+      const active = activeRef.current;
+      if (!active) return;
+      active.state.snap = next;
+      if (active.state.hasDragged) scheduleTimelinePointerPreview(activeRef);
+    }
+
+    function updateShift(event: KeyboardEvent) {
+      if (event.key !== "Shift") return;
+      setShiftPressed(event.type === "keydown");
+    }
+
+    function resetShift() {
+      setShiftPressed(false);
+    }
+
+    window.addEventListener("keydown", updateShift, true);
+    window.addEventListener("keyup", updateShift, true);
+    window.addEventListener("blur", resetShift);
+    return () => {
+      window.removeEventListener("keydown", updateShift, true);
+      window.removeEventListener("keyup", updateShift, true);
+      window.removeEventListener("blur", resetShift);
+      cleanupTimelinePointerTransaction(false);
+    };
+  }, []);
 
   function cleanupTimelinePointerTransaction(runCancel: boolean) {
     const active = activeRef.current;
@@ -57,8 +84,6 @@ export function useTimelinePointerTransaction() {
     window.removeEventListener("pointermove", active.move);
     window.removeEventListener("pointerup", active.up);
     window.removeEventListener("pointercancel", active.cancel);
-    window.removeEventListener("keydown", active.key);
-    window.removeEventListener("keyup", active.key);
     active.stopAutoScroll?.();
     if (active.capturePointer && active.target.hasPointerCapture(active.pointerId)) active.target.releasePointerCapture(active.pointerId);
     if (runCancel) active.onCancel?.(active.state);
@@ -76,19 +101,8 @@ export function useTimelinePointerTransaction() {
       initialClientX: event.clientX,
       initialClientY: event.clientY,
       pointerId: event.pointerId,
-      snap: event.shiftKey,
+      snap: shiftPressedRef.current || event.shiftKey,
     };
-
-    function schedulePreview() {
-      const active = activeRef.current;
-      if (!active || active.frame) return;
-      active.frame = window.requestAnimationFrame(() => {
-        const current = activeRef.current;
-        if (!current) return;
-        current.frame = 0;
-        current.onPreview(current.state);
-      });
-    }
 
     function activateIfNeeded(active: ActiveTimelinePointerTransaction) {
       if (active.state.hasDragged) return true;
@@ -104,18 +118,10 @@ export function useTimelinePointerTransaction() {
       if (!active || pointerEvent.pointerId !== active.pointerId) return;
       active.state.clientX = pointerEvent.clientX;
       active.state.clientY = pointerEvent.clientY;
-      active.state.snap = pointerEvent.shiftKey;
+      active.state.snap = shiftPressedRef.current || pointerEvent.shiftKey;
       if (!activateIfNeeded(active)) return;
-      active.updateAutoScroll?.(active.state.clientX, schedulePreview, active.state.clientY);
-      schedulePreview();
-    }
-
-    function key(keyboardEvent: KeyboardEvent) {
-      if (keyboardEvent.key !== "Shift") return;
-      const active = activeRef.current;
-      if (!active) return;
-      active.state.snap = keyboardEvent.shiftKey;
-      if (active.state.hasDragged) schedulePreview();
+      active.updateAutoScroll?.(active.state.clientX, () => scheduleTimelinePointerPreview(activeRef), active.state.clientY);
+      scheduleTimelinePointerPreview(activeRef);
     }
 
     function up(pointerEvent: globalThis.PointerEvent) {
@@ -123,7 +129,7 @@ export function useTimelinePointerTransaction() {
       if (!active || pointerEvent.pointerId !== active.pointerId) return;
       active.state.clientX = pointerEvent.clientX;
       active.state.clientY = pointerEvent.clientY;
-      active.state.snap = pointerEvent.shiftKey;
+      active.state.snap = shiftPressedRef.current || pointerEvent.shiftKey;
       if (active.frame) {
         window.cancelAnimationFrame(active.frame);
         active.frame = 0;
@@ -137,7 +143,7 @@ export function useTimelinePointerTransaction() {
       if (!active || pointerEvent.pointerId !== active.pointerId) return;
       active.state.clientX = pointerEvent.clientX;
       active.state.clientY = pointerEvent.clientY;
-      active.state.snap = pointerEvent.shiftKey;
+      active.state.snap = shiftPressedRef.current || pointerEvent.shiftKey;
       cleanupTimelinePointerTransaction(true);
     }
 
@@ -157,7 +163,6 @@ export function useTimelinePointerTransaction() {
       move,
       up,
       cancel,
-      key,
     };
 
     activeRef.current = active;
@@ -165,9 +170,18 @@ export function useTimelinePointerTransaction() {
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
     window.addEventListener("pointercancel", cancel);
-    window.addEventListener("keydown", key);
-    window.addEventListener("keyup", key);
   }
 
   return { startTimelinePointerTransaction, cancelTimelinePointerTransaction: () => cleanupTimelinePointerTransaction(true) };
+}
+
+function scheduleTimelinePointerPreview(activeRef: RefObject<ActiveTimelinePointerTransaction | null>) {
+  const active = activeRef.current;
+  if (!active || active.frame) return;
+  active.frame = window.requestAnimationFrame(() => {
+    const current = activeRef.current;
+    if (!current) return;
+    current.frame = 0;
+    current.onPreview(current.state);
+  });
 }

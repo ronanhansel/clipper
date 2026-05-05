@@ -20,7 +20,7 @@ declare global {
   }
 }
 
-const identityCameraTransform = { x: 0, y: 0, z: 0, scale: 1, rotation: 0, rotateX: 0, rotateY: 0, perspective: CAMERA_PERSPECTIVE };
+const identityCameraTransform = { x: 0, y: 0, z: 0, scale: 1, rotation: 0, rotateX: 0, rotateY: 0, perspective: CAMERA_PERSPECTIVE, motionBlur: 0 };
 const noopPointerHandler = () => {};
 const noopObjectPointerHandler = () => {};
 const noopObjectResizeHandler = () => {};

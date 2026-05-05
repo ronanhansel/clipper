@@ -1,19 +1,22 @@
 import { useEffect, useRef, useState, type ChangeEvent, type ComponentProps, type FocusEvent, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent } from "react";
 import { cn } from "../../lib/utils";
 
-const pixelsPerScrubStep = 4;
-const numberScrubActivationDistance = 3;
+const pixelsPerScrubStep = 12;
+const numberScrubActivationDistance = 8;
 const defaultNumberScrubCommitThrottleMs = 80;
 
 export const numberInputScrubStartEvent = "clipper:number-input-scrub-start";
 export const numberInputScrubEndEvent = "clipper:number-input-scrub-end";
 
-type NumberScrubMode = "commit" | "continuous";
+type NumberScrubMode = "commit" | "continuous" | "preview";
 
 type InputProps = ComponentProps<"input"> & {
   numberScrubMode?: NumberScrubMode;
   numberScrubCommitThrottleMs?: number;
   resetValue?: string | number;
+  onNumberScrubPreview?: (value: number) => void;
+  onNumberScrubStart?: () => void;
+  onNumberScrubEnd?: () => void;
 };
 
 type NumberScrubState = {
@@ -25,6 +28,9 @@ type NumberScrubState = {
   lastCommitAt: number;
   mode: NumberScrubMode;
   onChange?: ComponentProps<"input">["onChange"];
+  onPreview?: (value: number) => void;
+  onStart?: () => void;
+  onEnd?: () => void;
   remainder: number;
   step: number;
   throttleMs: number;
@@ -32,11 +38,14 @@ type NumberScrubState = {
 };
 
 type PendingNumberScrubState = Omit<NumberScrubState, "initialBodyCursor" | "initialInputCursor" | "lastCommitAt" | "remainder"> & {
+  lockRequested?: boolean;
+  movementX: number;
+  movementY: number;
   originX: number;
   originY: number;
 };
 
-export function Input({ className, type = "text", numberScrubMode = "commit", numberScrubCommitThrottleMs = defaultNumberScrubCommitThrottleMs, onBlur, onChange, onDoubleClick, onFocus, onKeyDown, onPointerDown, ...props }: InputProps) {
+export function Input({ className, type = "text", numberScrubMode = "commit", numberScrubCommitThrottleMs = defaultNumberScrubCommitThrottleMs, onBlur, onChange, onDoubleClick, onFocus, onKeyDown, onNumberScrubPreview, onNumberScrubStart, onNumberScrubEnd, onPointerDown, ...props }: InputProps) {
   const scrubRef = useRef<NumberScrubState | null>(null);
   const pendingScrubRef = useRef<PendingNumberScrubState | null>(null);
   const focusedValueRef = useRef<string | null>(null);
@@ -49,6 +58,10 @@ export function Input({ className, type = "text", numberScrubMode = "commit", nu
     if (type !== "number") return;
 
     function cancelPendingScrub() {
+      const pending = pendingScrubRef.current;
+      if (pending?.lockRequested && ownsPointerLock(pending.input)) {
+        document.exitPointerLock();
+      }
       pendingScrubRef.current = null;
     }
 
@@ -60,8 +73,9 @@ export function Input({ className, type = "text", numberScrubMode = "commit", nu
       document.body.style.cursor = scrub.initialBodyCursor;
       if (restore) restoreScrubValue(scrub);
       else if (commit) commitInputValue(scrub.input);
+      scrub.onEnd?.();
       scrubRef.current = null;
-      if (document.pointerLockElement === scrub.input) document.exitPointerLock();
+      if (ownsPointerLock(scrub.input)) document.exitPointerLock();
       window.dispatchEvent(new Event(numberInputScrubEndEvent));
     }
 
@@ -71,8 +85,8 @@ export function Input({ className, type = "text", numberScrubMode = "commit", nu
       const initialBodyCursor = document.body.style.cursor;
       input.blur();
       window.getSelection()?.removeAllRanges();
-      input.style.cursor = "ew-resize";
-      document.body.style.cursor = "ew-resize";
+      input.style.cursor = "none";
+      document.body.style.cursor = "none";
       scrubRef.current = {
         ...pending,
         initialBodyCursor,
@@ -82,7 +96,7 @@ export function Input({ className, type = "text", numberScrubMode = "commit", nu
       };
       pendingScrubRef.current = null;
       window.dispatchEvent(new Event(numberInputScrubStartEvent));
-      requestPointerLockSafely(input);
+      scrubRef.current.onStart?.();
     }
 
     function updateScrub(event: MouseEvent) {
@@ -93,11 +107,20 @@ export function Input({ className, type = "text", numberScrubMode = "commit", nu
           return;
         }
 
-        const deltaX = event.clientX - pending.originX;
-        const deltaY = event.clientY - pending.originY;
+        const pointerLocked = ownsPointerLock(pending.input);
+        if (pointerLocked) {
+          pending.movementX += event.movementX;
+          pending.movementY += event.movementY;
+        }
+        const deltaX = pointerLocked ? pending.movementX : event.clientX - pending.originX;
+        const deltaY = pointerLocked ? pending.movementY : event.clientY - pending.originY;
         if (Math.hypot(deltaX, deltaY) < numberScrubActivationDistance) return;
 
         event.preventDefault();
+        if (!pending.lockRequested) {
+          pending.lockRequested = true;
+          requestPointerLockSafely(pending.input);
+        }
         startScrub(pending, deltaX / pixelsPerScrubStep);
         return;
       }
@@ -122,6 +145,8 @@ export function Input({ className, type = "text", numberScrubMode = "commit", nu
           scrub.lastCommitAt = now;
           commitInputValue(scrub.input);
         }
+      } else if (scrub.mode === "preview") {
+        scrub.onPreview?.(nextValue);
       }
     }
 
@@ -180,8 +205,14 @@ export function Input({ className, type = "text", numberScrubMode = "commit", nu
       decimals: getStepDecimals(step),
       initialValue: input.value,
       input,
+      lockRequested: false,
       mode: numberScrubMode,
+      movementX: 0,
+      movementY: 0,
       onChange,
+      onPreview: onNumberScrubPreview,
+      onStart: onNumberScrubStart,
+      onEnd: onNumberScrubEnd,
       originX: event.clientX,
       originY: event.clientY,
       step,
@@ -256,13 +287,23 @@ export function Input({ className, type = "text", numberScrubMode = "commit", nu
 
 function requestPointerLockSafely(input: HTMLInputElement) {
   try {
-    const lockRequest = input.requestPointerLock?.();
+    const lockTarget = getPointerLockTarget(input);
+    const lockRequest = lockTarget.requestPointerLock?.();
     void Promise.resolve(lockRequest).catch(() => {
       // Pointer lock is optional; number scrubbing still works without it.
     });
   } catch {
     // Some embedded documents reject pointer lock synchronously.
   }
+}
+
+function getPointerLockTarget(input: HTMLInputElement): HTMLElement {
+  return input.ownerDocument.body || input;
+}
+
+function ownsPointerLock(input: HTMLInputElement) {
+  const lockedElement = input.ownerDocument.pointerLockElement;
+  return lockedElement === input || lockedElement === getPointerLockTarget(input);
 }
 
 function getInputStep(input: HTMLInputElement) {

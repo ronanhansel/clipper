@@ -3,7 +3,7 @@ import { createSelectionPayload } from "./geometry";
 import { getMotionMarkerViews, motionBlocksToMotionMarkers } from "./motionEffects";
 import { effectBlocksMending } from "./effects/registry";
 import { buildLinearTimeline, canMendTimelineMarkers, expandExplicitTimelineMarkerMendIds, getActiveTimelinePartsAtTime, getAdjustmentPlacement, getExecutableTransitionLayers, getMendedMarkerDragItems, getMotionMarkerMendKey, getMotionMiddleSnap, getRenderableScene, getSelectedActiveMiddleMend, getSelectedMotionMiddleSnap, getTimelineMarkerDragSnapBoundaries, getTimelineMarkerMoves, getTimelinePartAtTime, getTimelinePreviewState, getTopTimelineItemAtTime, getTopTimelinePartAtTime, isExplicitTimelineMarkerMend, rebaseCompositionTimelineMarkers, removeTimelineMotionLayerMarkers, resizeTimelineMarkersWithPush, sceneDuration, snapTimelineBlockStartToBoundary, timelineDisplayDuration, validateScene } from "./timeline";
-import { moveTimelineStateLayer, toggleTimelineStateLayerHidden } from "./timelineLayers";
+import { computeBulkLayerTargets, getLayerMoveDragPreview, getTimelineLayerRowAtClientY, getTimelineLayerRowAtClientYClamped, moveTimelineStateLayer, resolveTimelineLayerMoveTargets, resolveTimelineMoveSourceLayer, toggleTimelineStateLayerHidden, type TimelineLayerLayout } from "./timelineLayers";
 import type { Scene, TimelinePart } from "./types";
 
 const frame = { width: 1920, height: 1080, style: { background: "#000000" } } as const;
@@ -192,6 +192,7 @@ describe("timeline model", () => {
     expect(sceneDuration(overlappedScene)).toBe(17);
     expect(timelineDisplayDuration(sceneDuration(overlappedScene))).toBe(25.5);
     expect(timelineDisplayDuration(sceneDuration(overlappedScene), 0.25)).toBe(21.3);
+    expect(timelineDisplayDuration(1, 0)).toBe(10);
   });
 
   it("rebases composition markers to keep absolute timeline positions stable", () => {
@@ -666,5 +667,169 @@ describe("timeline model", () => {
 
     expect(payload.objects.map((object) => object.id)).toEqual(["hero"]);
     expect(payload.coordinates).toHaveLength(4);
+  });
+});
+
+describe("timeline layer move targets", () => {
+  function layerLayout(rows: Array<{ key: string; category: string }>): TimelineLayerLayout {
+    const heights = rows.map(() => 40);
+    const starts = heights.reduce<number[]>((arr, _, i) => [...arr, i === 0 ? 0 : arr[i - 1] + heights[i - 1]], []);
+    return { rows: rows.map((r) => ({ key: r.key, category: r.category as any, accent: "#000" })), starts, heights };
+  }
+
+  const layout = layerLayout([
+    { key: "motion_a", category: "motion" },
+    { key: "motion_b", category: "motion" },
+    { key: "motion_c", category: "motion" },
+  ]);
+
+  describe("computeBulkLayerTargets", () => {
+    it("shifts all move targets by cursor delta within same-category rows", () => {
+      const targets = computeBulkLayerTargets(layout, "motion", "motion_a", "motion_c", [
+        { id: "k1", layerId: "motion_a" },
+        { id: "k2", layerId: "motion_b" },
+      ], "motion_a");
+
+      // motion_a → motion_c (delta +2), motion_b clamped to motion_c
+      expect(targets.get("k1")).toBe("motion_c");
+      expect(targets.get("k2")).toBe("motion_c");
+    });
+
+    it("preserves cursor target when sourceLayerId is empty", () => {
+      const targets = computeBulkLayerTargets(layout, "motion", "", "motion_b", [
+        { id: "k1", layerId: "" },
+      ], "");
+
+      expect(targets.get("k1")).toBe("motion_b");
+    });
+
+    it("preserves source layer when cursorLayerId is undefined", () => {
+      const targets = computeBulkLayerTargets(layout, "motion", "motion_a", undefined, [
+        { id: "k1", layerId: "motion_a" },
+      ], "motion_a");
+
+      // When cursorLayerId undefined, cursorIdx = sourceIdx, delta = 0
+      expect(targets.get("k1")).toBe("motion_a");
+    });
+
+    it("falls back to cursorLayerId when source not found in rows", () => {
+      const targets = computeBulkLayerTargets(layout, "motion", "nonexistent", "motion_b", [
+        { id: "k1", layerId: "nonexistent" },
+      ], "motion_a");
+
+      // sourceIdx < 0 → fallback to cursorLayerId
+      expect(targets.get("k1")).toBe("motion_b");
+    });
+
+    it("falls back to the first non-empty value when both source and cursor are empty", () => {
+      const targets = computeBulkLayerTargets(layout, "motion", "", undefined, [
+        { id: "k1", layerId: "" },
+      ], "");
+
+      // sourceIdx < 0, cursorLayerId undefined → fallback = "" (empty string returns empty)
+      expect(targets.get("k1")).toBe("");
+    });
+
+    it("never moves a target past the last category row", () => {
+      const targets = computeBulkLayerTargets(layout, "motion", "motion_a", "motion_c", [
+        { id: "k1", layerId: "motion_c" },
+      ], "motion_a");
+
+      // motion_c is already last row, cannot shift further
+      expect(targets.get("k1")).toBe("motion_c");
+    });
+  });
+
+  describe("resolveTimelineMoveSourceLayer", () => {
+    it("returns the layerId when it is a non-empty string", () => {
+      expect(resolveTimelineMoveSourceLayer(layout, "motion", "motion_b")).toBe("motion_b");
+    });
+
+    it("resolves empty string to the first motion row", () => {
+      expect(resolveTimelineMoveSourceLayer(layout, "motion", "")).toBe("motion_a");
+    });
+
+    it("resolves undefined to the first motion row", () => {
+      expect(resolveTimelineMoveSourceLayer(layout, "motion", undefined)).toBe("motion_a");
+    });
+
+    it("resolves null to the first motion row", () => {
+      expect(resolveTimelineMoveSourceLayer(layout, "motion", null)).toBe("motion_a");
+    });
+
+    it("returns empty string when layout has no rows for the category", () => {
+      const emptyLayout = layerLayout([]);
+      expect(resolveTimelineMoveSourceLayer(emptyLayout, "motion", "")).toBe("");
+    });
+  });
+
+  describe("resolveTimelineLayerMoveTargets", () => {
+    const isLocked = (_cat: any, id: string) => id === "motion_c";
+
+    it("computes layer targets from cursor position", () => {
+      const { layerTargets, cursorLayerId } = resolveTimelineLayerMoveTargets(
+        layout, "motion", "motion_a",
+        [{ id: "k1", layerId: "motion_a" }],
+        { top: 0 }, 60, isLocked, "motion_a",
+      );
+
+      expect(cursorLayerId).toBe("motion_b");
+      expect(layerTargets.get("k1")).toBe("motion_b");
+    });
+
+    it("returns undefined cursorLayerId for locked rows", () => {
+      const { layerTargets, cursorLayerId } = resolveTimelineLayerMoveTargets(
+        layout, "motion", "motion_a",
+        [{ id: "k1", layerId: "motion_a" }],
+        { top: 0 }, 100, isLocked, "motion_a",
+      );
+
+      expect(cursorLayerId).toBeUndefined();
+      expect(layerTargets.get("k1")).toBe("motion_a");
+    });
+  });
+
+  describe("getTimelineLayerRowAtClientY", () => {
+    it("resolves the row directly under the cursor", () => {
+      expect(getTimelineLayerRowAtClientY(layout, { top: 0 }, 39, "motion")?.row.key).toBe("motion_a");
+      expect(getTimelineLayerRowAtClientY(layout, { top: 0 }, 40, "motion")?.row.key).toBe("motion_a");
+      expect(getTimelineLayerRowAtClientY(layout, { top: 0 }, 41, "motion")?.row.key).toBe("motion_b");
+    });
+
+    it("resolves upward movement to the row under the cursor", () => {
+      expect(getTimelineLayerRowAtClientY(layout, { top: 0 }, 80, "motion")?.row.key).toBe("motion_b");
+      expect(getTimelineLayerRowAtClientY(layout, { top: 0 }, 81, "motion")?.row.key).toBe("motion_c");
+    });
+  });
+
+  describe("getTimelineLayerRowAtClientYClamped", () => {
+    const mixedLayout = layerLayout([
+      { key: "adjust", category: "adjust" },
+      { key: "motion_a", category: "motion" },
+      { key: "motion_b", category: "motion" },
+    ]);
+
+    it("keeps a motion drag above motion rows on the nearest motion row", () => {
+      expect(getTimelineLayerRowAtClientYClamped(mixedLayout, { top: 0 }, 20, "motion")?.row.key).toBe("motion_a");
+    });
+
+    it("keeps a motion drag below motion rows on the nearest motion row", () => {
+      expect(getTimelineLayerRowAtClientYClamped(mixedLayout, { top: 0 }, 140, "motion")?.row.key).toBe("motion_b");
+    });
+  });
+
+  describe("getLayerMoveDragPreview", () => {
+    const isLocked = (_cat: any, id: string) => id === "motion_c";
+
+    it("returns delta=0 when computedLayerId is locked", () => {
+      const preview = getLayerMoveDragPreview(layout, "motion_a", "motion_c", isLocked, "motion");
+      expect(preview.deltaY).toBe(0);
+    });
+
+    it("returns deltaY when computedLayerId is unlocked and in layout", () => {
+      const preview = getLayerMoveDragPreview(layout, "motion_a", "motion_b", isLocked, "motion");
+      expect(preview.deltaY).toBe(40);
+      expect(preview.targetLayerId).toBe("motion_b");
+    });
   });
 });

@@ -2,6 +2,8 @@ import { clamp, roundToPrecision } from "./math";
 
 export type TimelineBlockTimingAction = "move" | "start" | "end";
 
+export type TimelineBlockSnapEdgePreference = "nearest" | "start" | "end";
+
 export type TimelineBlockSnapResult = {
   start: number;
   guideTime: number | null;
@@ -20,6 +22,7 @@ export type TimelineBlockTimingInput = {
   snap?: boolean;
   snapBoundaries?: number[];
   snapThresholdSeconds?: number;
+  moveSnapEdge?: TimelineBlockSnapEdgePreference;
   precision?: number;
 };
 
@@ -27,6 +30,11 @@ export type TimelineBlockTimingResult = {
   start: number;
   duration: number;
   guideTime: number | null;
+};
+
+export type TimelineBlockMoveItem = {
+  start: number;
+  duration: number;
 };
 
 export function getTimelineSnapGuideTime(time: number, boundaries: number[], snapThresholdSeconds: number) {
@@ -42,28 +50,48 @@ export function getTimelineSnapGuideTime(time: number, boundaries: number[], sna
   return guideTime;
 }
 
-export function getTimelineBlockSnap(start: number, duration: number, boundaries: number[], snapThresholdSeconds: number): TimelineBlockSnapResult {
-  let nextStart = start;
-  let guideTime: number | null = null;
-  let nearestDistance = snapThresholdSeconds;
+export function getTimelineBlockSnap(start: number, duration: number, boundaries: number[], snapThresholdSeconds: number, edgePreference: TimelineBlockSnapEdgePreference = "nearest"): TimelineBlockSnapResult {
+  let nearestStartDistance = snapThresholdSeconds;
+  let nearestStartBoundary: number | null = null;
+
+  let nearestEndDistance = snapThresholdSeconds;
+  let nearestEndBoundary: number | null = null;
 
   for (const boundary of boundaries) {
     const startDistance = Math.abs(start - boundary);
-    if (startDistance <= nearestDistance) {
-      nextStart = boundary;
-      guideTime = boundary;
-      nearestDistance = startDistance;
+    if (startDistance <= nearestStartDistance) {
+      nearestStartDistance = startDistance;
+      nearestStartBoundary = boundary;
     }
 
     const endDistance = Math.abs(start + duration - boundary);
-    if (endDistance <= nearestDistance) {
-      nextStart = boundary - duration;
-      guideTime = boundary;
-      nearestDistance = endDistance;
+    if (endDistance <= nearestEndDistance) {
+      nearestEndDistance = endDistance;
+      nearestEndBoundary = boundary;
     }
   }
 
-  return { start: nextStart, guideTime };
+  if (edgePreference === "start" && nearestStartBoundary !== null) {
+    return { start: nearestStartBoundary, guideTime: nearestStartBoundary };
+  }
+
+  if (edgePreference === "end" && nearestEndBoundary !== null) {
+    return { start: nearestEndBoundary - duration, guideTime: nearestEndBoundary };
+  }
+
+  // "nearest" fallback: pick whichever edge candidate is closest
+  const startDist = nearestStartBoundary !== null ? nearestStartDistance : Number.POSITIVE_INFINITY;
+  const endDist = nearestEndBoundary !== null ? nearestEndDistance : Number.POSITIVE_INFINITY;
+
+  if (startDist <= endDist && nearestStartBoundary !== null) {
+    return { start: nearestStartBoundary, guideTime: nearestStartBoundary };
+  }
+
+  if (nearestEndBoundary !== null) {
+    return { start: nearestEndBoundary - duration, guideTime: nearestEndBoundary };
+  }
+
+  return { start, guideTime: null };
 }
 
 export function getTimelineDragDeltaSeconds(input: { initialClientX: number; clientX: number; initialScrollLeft: number; scrollLeft: number; pixelsPerSecond: number }) {
@@ -91,7 +119,7 @@ export function getTimelineBlockTiming(input: TimelineBlockTimingInput): Timelin
     let start = clamp(input.initialStart + input.deltaSeconds, moveMinStart, maxStart);
     let guideTime: number | null = null;
     if (input.snap) {
-      const snapped = getTimelineBlockSnap(start, input.initialDuration, snapBoundaries, snapThresholdSeconds);
+      const snapped = getTimelineBlockSnap(start, input.initialDuration, snapBoundaries, snapThresholdSeconds, input.moveSnapEdge);
       start = clamp(snapped.start, moveMinStart, maxStart);
       guideTime = snapped.guideTime;
     }
@@ -117,4 +145,59 @@ export function getTimelineBlockTiming(input: TimelineBlockTimingInput): Timelin
     end = clamp(guideTime ?? end, input.initialStart + minDuration, maxEnd);
   }
   return { start: r(input.initialStart), duration: r(Math.max(end - input.initialStart, minDuration)), guideTime };
+}
+
+export function getTimelineGroupMoveTiming(input: {
+  items: TimelineBlockMoveItem[];
+  anchorStart: number;
+  deltaSeconds: number;
+  timelineDuration: number;
+  moveMinStart?: number;
+  moveMaxStartMode?: "contain" | "start" | "none";
+  snap?: boolean;
+  snapBoundaries?: number[];
+  snapThresholdSeconds?: number;
+  precision?: number;
+}): { deltaSeconds: number; guideTime: number | null } {
+  if (input.items.length === 0) return { deltaSeconds: 0, guideTime: null };
+  const minStart = Math.min(...input.items.map((item) => item.start));
+  const maxEnd = Math.max(...input.items.map((item) => item.start + item.duration));
+  const moveMinStart = input.moveMinStart ?? 0;
+  const moveMaxStartMode = input.moveMaxStartMode ?? "contain";
+  const maxStart = moveMaxStartMode === "contain"
+    ? Math.max(input.timelineDuration - (maxEnd - minStart), moveMinStart)
+    : moveMaxStartMode === "start"
+      ? Math.max(input.timelineDuration, moveMinStart)
+      : Number.POSITIVE_INFINITY;
+  const precision = input.precision ?? 2;
+  const r = (v: number) => roundToPrecision(v, precision);
+  const clampDelta = (delta: number) => clamp(minStart + delta, moveMinStart, maxStart) - minStart;
+
+  const unsnappedDelta = clampDelta(input.deltaSeconds);
+  let deltaSeconds = unsnappedDelta;
+  let guideTime: number | null = null;
+  if (input.snap) {
+    const threshold = input.snapThresholdSeconds ?? 0;
+    let nearestDistance = threshold;
+    for (const boundary of input.snapBoundaries ?? []) {
+      for (const item of input.items) {
+        const startDistance = Math.abs(item.start + unsnappedDelta - boundary);
+        if (startDistance <= nearestDistance) {
+          nearestDistance = startDistance;
+          deltaSeconds = clampDelta(boundary - item.start);
+          guideTime = boundary;
+        }
+
+        const end = item.start + item.duration;
+        const endDistance = Math.abs(end + unsnappedDelta - boundary);
+        if (endDistance <= nearestDistance) {
+          nearestDistance = endDistance;
+          deltaSeconds = clampDelta(boundary - end);
+          guideTime = boundary;
+        }
+      }
+    }
+  }
+
+  return { deltaSeconds: r(deltaSeconds), guideTime };
 }

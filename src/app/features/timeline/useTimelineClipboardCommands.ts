@@ -74,6 +74,18 @@ function getMotionMarkers(item: { motionMarkers?: MotionMarker[] }) {
   return getMotionMarkerViews(item).motionMarkers;
 }
 
+function applyAdjustmentSettings(source: AdjustmentLayer, target: AdjustmentLayer): AdjustmentLayer {
+  return { ...source, id: target.id, layerId: target.layerId, start: target.start, duration: target.duration, mendInId: target.mendInId, mendOutId: target.mendOutId, snapIn: target.snapIn, snapOut: target.snapOut };
+}
+
+function applyTransitionSettings(source: TransitionLayer, target: TransitionLayer): TransitionLayer {
+  return { ...source, id: target.id, layerId: target.layerId, start: target.start, duration: target.duration, mendInId: target.mendInId, mendOutId: target.mendOutId, snapIn: target.snapIn, snapOut: target.snapOut };
+}
+
+function applyMotionSettings(source: MotionMarker, target: MotionMarker): MotionMarker {
+  return { ...source, id: target.id, layerId: target.layerId, start: target.start, duration: target.duration, mendInId: target.mendInId, mendOutId: target.mendOutId, snapIn: target.snapIn, snapOut: target.snapOut };
+}
+
 function getCompositionPasteShift(pastedParts: Part[], existingParts: Part[]) {
   let shift = 0;
   const maxAttempts = Math.max(1, pastedParts.length * existingParts.length + 1);
@@ -424,8 +436,72 @@ export function useTimelineClipboardCommands({
     }
   }
 
+  function pasteTimelineAttributes() {
+    const clipboard = timelineNodeClipboardRef.current;
+    if (!clipboard) return false;
+
+    if (clipboard.nodes.length === 1 && clipboard.kind === "adjustment") {
+      const sourceLayer = clipboard.nodes[0].layer;
+      const targetIds = selectedAdjustmentLayers.length > 0 ? selectedAdjustmentLayers.map((selection) => selection.layerId) : selectedAdjustmentLayerId ? [selectedAdjustmentLayerId] : [];
+      const targetIdSet = new Set(targetIds);
+      const matchingTargetIds = new Set((scene.adjustmentLayers ?? []).filter((layer) => targetIdSet.has(layer.id) && layer.effect.effectId === sourceLayer.effect.effectId).map((layer) => layer.id));
+      if (matchingTargetIds.size > 0) {
+        updateSceneAdjustmentLayers((layers) => layers.map((layer) => (matchingTargetIds.has(layer.id) ? applyAdjustmentSettings(sourceLayer, layer) : layer)));
+        return true;
+      }
+    }
+
+    if (clipboard.nodes.length === 1 && clipboard.kind === "transition") {
+      const sourceLayer = clipboard.nodes[0].layer;
+      const targetIds = selectedTransitionLayers.length > 0 ? selectedTransitionLayers.map((selection) => selection.layerId) : selectedTransitionLayerId ? [selectedTransitionLayerId] : [];
+      const targetIdSet = new Set(targetIds);
+      const matchingTargetIds = new Set((scene.transitionLayers ?? []).filter((layer) => targetIdSet.has(layer.id) && layer.effect.effectId === sourceLayer.effect.effectId).map((layer) => layer.id));
+      if (matchingTargetIds.size > 0) {
+        updateSceneTransitionLayers((layers) => layers.map((layer) => (matchingTargetIds.has(layer.id) ? applyTransitionSettings(sourceLayer, layer) : layer)));
+        return true;
+      }
+    }
+
+    if (clipboard.nodes.length === 1 && clipboard.kind === "motion") {
+      const sourceMarker = clipboard.nodes[0].marker;
+      const motionSelection = uniqueTimelineMarkerSelections(selectedMotionMarkers.length > 0 ? selectedMotionMarkers : selectedMotionMarker ? [selectedMotionMarker] : []);
+      const timelineMotionTargetIds = new Set<string>();
+      const compositionTargetIdsByPart = new Map<string, Set<string>>();
+
+      for (const selection of motionSelection) {
+        if (selection.partId === TIMELINE_MOTION_PART_ID) {
+          const targetMarker = getMotionMarkers(scene).find((marker) => marker.id === selection.markerId);
+          if (targetMarker?.effectId === sourceMarker.effectId) timelineMotionTargetIds.add(selection.markerId);
+          continue;
+        }
+        const targetPart = timeline.find((part) => part.id === selection.partId);
+        const targetMarker = targetPart ? getMotionMarkers(targetPart).find((marker) => marker.id === selection.markerId) : undefined;
+        if (targetMarker?.effectId === sourceMarker.effectId) compositionTargetIdsByPart.set(selection.partId, (compositionTargetIdsByPart.get(selection.partId) ?? new Set()).add(selection.markerId));
+      }
+
+      if (timelineMotionTargetIds.size > 0 || compositionTargetIdsByPart.size > 0) {
+        if (timelineMotionTargetIds.size > 0) {
+          updateSceneMotionMarkers((markers) => ({ motionMarkers: markers.map((marker) => (timelineMotionTargetIds.has(marker.id) ? applyMotionSettings(sourceMarker, marker) : marker)) }));
+        }
+        if (compositionTargetIdsByPart.size > 0) {
+          updateSceneParts((parts) => parts.map((item) => {
+            const targetIds = compositionTargetIdsByPart.get(item.id);
+            return targetIds ? withMotionMarkers(item, getMotionMarkers(item).map((marker) => (targetIds.has(marker.id) ? applyMotionSettings(sourceMarker, marker) : marker))) : item;
+          }));
+        }
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   function pasteTimelineNodesSilently() {
     pasteTimelineNodesAt();
+  }
+
+  function pasteTimelineAttributesSilently() {
+    pasteTimelineAttributes();
   }
 
   function openTimelineBlankContextMenu(event: ReactMouseEvent<HTMLElement>, target: TimelineBlankContextTarget) {
@@ -437,6 +513,7 @@ export function useTimelineClipboardCommands({
       y: event.clientY,
       items: [
         { label: "Paste", action: () => { pasteTimelineNodesAt(pasteStart, target.compositionLayerId); }, disabled: !timelineNodeClipboardRef.current },
+        { label: "Paste Attributes", action: () => { pasteTimelineAttributes(); }, disabled: !timelineNodeClipboardRef.current },
       ],
     });
   }
@@ -474,6 +551,7 @@ export function useTimelineClipboardCommands({
           deleteTimelineClipboardNodes(menuClipboard);
         } },
         { label: "Paste", action: () => { pasteTimelineNodesAt(target.time, target.compositionLayerId); }, disabled: !timelineNodeClipboardRef.current },
+        { label: "Paste Attributes", action: () => { pasteTimelineAttributes(); }, disabled: !timelineNodeClipboardRef.current },
         { label: "Open in editor", action: () => { if (targetCompositionId) openCompositionInEditor(targetCompositionId); }, disabled: target.kind !== "part" || !targetCompositionId },
         { label: targetPart?.prerender ? "Unmark prerender" : "Mark prerender", action: () => { if (target.kind === "part") prerenderComposition?.(target.partId); }, disabled: target.kind !== "part" || !targetCompositionId || !prerenderComposition },
         { label: "Find media in project", action: () => { if (targetCompositionId && targetFileName) requestFileManagerFindMedia({ compositionId: targetCompositionId, fileName: targetFileName }); }, disabled: target.kind !== "part" || !targetPart?.sourceMissing },
@@ -491,6 +569,7 @@ export function useTimelineClipboardCommands({
     deleteSelectedTimelineNodes,
     openTimelineBlankContextMenu,
     openTimelineNodeContextMenu,
+    pasteTimelineAttributesSilently,
     pasteTimelineNodesSilently,
   };
 }

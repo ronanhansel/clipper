@@ -1,14 +1,15 @@
 import DataEditor, { GridCellKind, type EditableGridCell, type GridCell, type GridColumn, type Item } from "@glideapps/glide-data-grid";
 import "@glideapps/glide-data-grid/dist/index.css";
-import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, Copy, Crosshair, Database, Italic, Strikethrough, Trash2, Underline, X } from "lucide-react";
+import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, Copy, Database, Italic, Strikethrough, Trash2, Underline, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { chartTypes, formatChartTypeLabel, type ChartDatum, type ChartSpec, type ChartStyle, type ChartType } from "../../core/chart";
 import { MAX_PART_DURATION_SECONDS, FRAME_HEIGHT, FRAME_WIDTH, type AdjustmentLayer, type BackgroundLayer, type Bounds, type FrameObject, type LayerAnimation, type MotionEase, type Part, type PartFrame, type Point, type TransitionLayer } from "../../core/types";
 import { clamp, roundTenth, roundTwo } from "../../core/math";
 import { getAdjustmentEffectPackage, getMotionEffectPackage, getTransitionEffectPackage } from "../../core/effects/registry";
 import { getTransitionMarkerTime, normalizeSymmetricTransitionLayer } from "../../core/transitions";
-import type { AdjustmentEffectDisableCondition, AdjustmentEffectParamControl, AdjustmentEffectPointControl } from "../../core/effects/types";
+import type { AdjustmentEffectDisableCondition, AdjustmentEffectParamControl, AdjustmentEffectPointControl, MotionMendTransitionOption } from "../../core/effects/types";
 import { getMotionBlockEffectKind, getMotionMarkerViews } from "../../core/motionEffects";
+import { cameraTranslationToFramePoint } from "../../core/camera";
 import type { MotionMarker } from "../../core/types";
 import { minimumZoomDuration, mutedCaps, panelCard } from "../../app/config";
 import { Checkbox } from "../ui/checkbox";
@@ -21,6 +22,7 @@ import { ColorSelector, formatStyleLabel, getEditableColorStyleEntries, isHexCol
 import { clipperHost } from "../../app/clipperHost";
 import { nanoid } from "nanoid";
 import { animationPresets, createAnimationFromPreset } from "../../core/animationPresets";
+import { Coordinate2DField, PickButton } from "./Coordinate2DField";
 
 const defaultFontFamily = "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
 const defaultFontOption = { value: defaultFontFamily, label: "System" };
@@ -886,7 +888,7 @@ export function ObjectInspector({ object, onChange }: { object: FrameObject; onC
   );
 }
 
-export function AdjustmentInspector({ layer, sceneDuration, pickingPointKey, canSnapMiddle, onChange, onDelete, onPickPoint, onSnapMiddle }: { layer: AdjustmentLayer; sceneDuration: number; pickingPointKey?: string | null; canSnapMiddle: boolean; onChange: (updater: (layer: AdjustmentLayer) => AdjustmentLayer) => void; onDelete: () => void; onPickPoint?: (control: AdjustmentEffectPointControl) => void; onSnapMiddle: () => void }) {
+export function AdjustmentInspector({ layer, sceneDuration, pickingPointKey, canSnapMiddle, onChange, onPreviewLayer, onClearPreview, onDelete, onPickPoint, onSnapMiddle }: { layer: AdjustmentLayer; sceneDuration: number; pickingPointKey?: string | null; canSnapMiddle: boolean; onChange: (updater: (layer: AdjustmentLayer) => AdjustmentLayer) => void; onPreviewLayer?: (updater: (layer: AdjustmentLayer) => AdjustmentLayer) => void; onClearPreview?: () => void; onDelete: () => void; onPickPoint?: (control: AdjustmentEffectPointControl) => void; onSnapMiddle: () => void }) {
   const effect = getAdjustmentEffectPackage(layer.effect.effectId);
 
   function updateText(key: "name", value: string) {
@@ -914,13 +916,24 @@ export function AdjustmentInspector({ layer, sceneDuration, pickingPointKey, can
       return;
     }
 
+    const numeric = getParamNumericValue(control, value);
+    onChange((current) => ({ ...current, effect: { ...current.effect, params: { ...current.effect.params, [control.key]: numeric } } }));
+  }
+
+  function previewParam(control: AdjustmentEffectParamControl, value: number) {
+    if (control.type === "select" || isAdjustmentControlDisabled(layer, control.disabledWhen)) return;
+    const numeric = getParamNumericValue(control, String(value));
+    onPreviewLayer?.((current) => ({ ...current, effect: { ...current.effect, params: { ...current.effect.params, [control.key]: numeric } } }));
+  }
+
+  function getParamNumericValue(control: Extract<AdjustmentEffectParamControl, { type: "number" }>, value: string) {
     const fallback = control.defaultValue;
     let numeric = Number(value);
     if (!Number.isFinite(numeric)) numeric = fallback;
     if (typeof control.min === "number") numeric = Math.max(control.min, numeric);
     if (typeof control.max === "number") numeric = Math.min(control.max, numeric);
     if (control.step && Number.isInteger(control.step)) numeric = Math.round(numeric);
-    onChange((current) => ({ ...current, effect: { ...current.effect, params: { ...current.effect.params, [control.key]: numeric } } }));
+    return numeric;
   }
 
   function getPointValue(control: AdjustmentEffectPointControl, axis: "x" | "y") {
@@ -932,11 +945,25 @@ export function AdjustmentInspector({ layer, sceneDuration, pickingPointKey, can
 
   function updatePointParam(control: AdjustmentEffectPointControl, axis: "x" | "y", value: string) {
     if (isAdjustmentControlDisabled(layer, control.disabledWhen)) return;
-    const numeric = Number(value);
-    if (!Number.isFinite(numeric)) return;
     const key = axis === "x" ? control.xKey : control.yKey;
+    const numeric = getPointNumericValue(control, axis, value);
+    if (numeric === null) return;
+    onChange((current) => ({ ...current, effect: { ...current.effect, params: { ...current.effect.params, [key]: numeric } } }));
+  }
+
+  function previewPointParam(control: AdjustmentEffectPointControl, axis: "x" | "y", value: number) {
+    if (isAdjustmentControlDisabled(layer, control.disabledWhen)) return;
+    const key = axis === "x" ? control.xKey : control.yKey;
+    const numeric = getPointNumericValue(control, axis, String(value));
+    if (numeric === null) return;
+    onPreviewLayer?.((current) => ({ ...current, effect: { ...current.effect, params: { ...current.effect.params, [key]: numeric } } }));
+  }
+
+  function getPointNumericValue(control: AdjustmentEffectPointControl, axis: "x" | "y", value: string) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return null;
     const max = control.coordinateSpace === "percent" ? 100 : axis === "x" ? FRAME_WIDTH : FRAME_HEIGHT;
-    onChange((current) => ({ ...current, effect: { ...current.effect, params: { ...current.effect.params, [key]: roundTwo(clamp(numeric, 0, max)) } } }));
+    return roundTwo(clamp(numeric, 0, max));
   }
 
   return (
@@ -949,9 +976,9 @@ export function AdjustmentInspector({ layer, sceneDuration, pickingPointKey, can
       <label className={`grid gap-1.5 ${mutedCaps}`}>Effect<Input value={effect?.label ?? layer.effect.effectId} readOnly /></label>
       {effect?.paramControls?.map((control) => {
         const disabledReason = getAdjustmentControlDisabledReason(layer, control.disabledWhen);
-        return <label className={`grid gap-1.5 ${mutedCaps} ${disabledReason ? "opacity-50" : ""}`} key={control.key} title={disabledReason}>{control.label}{control.type === "select" ? <Select value={String(getParamValue(control))} onValueChange={(value) => updateParam(control, value)} disabled={Boolean(disabledReason)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectGroup>{control.options.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectGroup></SelectContent></Select> : <Input type={control.type} min={control.min} max={control.max} step={control.step} value={getParamValue(control)} resetValue={control.defaultValue} numberScrubMode="continuous" numberScrubCommitThrottleMs={16} disabled={Boolean(disabledReason)} onChange={(event) => updateParam(control, event.target.value)} />}</label>;
+        return <label className={`grid gap-1.5 ${mutedCaps} ${disabledReason ? "opacity-50" : ""}`} key={control.key} title={disabledReason}>{control.label}{control.type === "select" ? <Select value={String(getParamValue(control))} onValueChange={(value) => updateParam(control, value)} disabled={Boolean(disabledReason)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectGroup>{control.options.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectGroup></SelectContent></Select> : <Input type={control.type} min={control.min} max={control.max} step={control.step} value={getParamValue(control)} resetValue={control.defaultValue} numberScrubMode="preview" numberScrubCommitThrottleMs={16} disabled={Boolean(disabledReason)} onChange={(event) => updateParam(control, event.target.value)} onNumberScrubEnd={onClearPreview} onNumberScrubPreview={(value) => previewParam(control, value)} />}</label>;
       })}
-      {effect?.pointControls?.map((control) => <AdjustmentPointControlField control={control} disabledReason={getAdjustmentControlDisabledReason(layer, control.disabledWhen)} key={`${control.xKey}:${control.yKey}`} picking={pickingPointKey === `${control.xKey}:${control.yKey}`} xValue={getPointValue(control, "x")} yValue={getPointValue(control, "y")} onPick={() => onPickPoint?.(control)} onValueChange={(axis, value) => updatePointParam(control, axis, value)} />)}
+      {effect?.pointControls?.map((control) => <AdjustmentPointControlField control={control} disabledReason={getAdjustmentControlDisabledReason(layer, control.disabledWhen)} key={`${control.xKey}:${control.yKey}`} picking={pickingPointKey === `${control.xKey}:${control.yKey}`} xValue={getPointValue(control, "x")} yValue={getPointValue(control, "y")} onPick={() => onPickPoint?.(control)} onScrubEnd={onClearPreview} onScrubPreview={(axis, value) => previewPointParam(control, axis, value)} onValueChange={(axis, value) => updatePointParam(control, axis, value)} />)}
       <div className="grid gap-2">
         <span className={mutedCaps}>Mend</span>
         <div className="grid gap-2">
@@ -963,20 +990,11 @@ export function AdjustmentInspector({ layer, sceneDuration, pickingPointKey, can
   );
 }
 
-function AdjustmentPointControlField({ control, disabledReason, picking, xValue, yValue, onPick, onValueChange }: { control: AdjustmentEffectPointControl; disabledReason?: string; picking: boolean; xValue: number; yValue: number; onPick: () => void; onValueChange: (axis: "x" | "y", value: string) => void }) {
+function AdjustmentPointControlField({ control, disabledReason, picking, xValue, yValue, onPick, onScrubEnd, onScrubPreview, onValueChange }: { control: AdjustmentEffectPointControl; disabledReason?: string; picking: boolean; xValue: number; yValue: number; onPick: () => void; onScrubEnd?: () => void; onScrubPreview?: (axis: "x" | "y", value: number) => void; onValueChange: (axis: "x" | "y", value: string) => void }) {
   const percentSpace = control.coordinateSpace === "percent";
   const disabled = Boolean(disabledReason);
 
-  return (
-    <div className={`grid gap-1.5 ${disabled ? "opacity-50" : ""}`} title={disabledReason}>
-      <span className={mutedCaps}>{control.label}</span>
-      <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_40px] items-end gap-2">
-        <label className={`grid gap-1 ${mutedCaps}`}>{control.xLabel ?? "X"}<Input type="number" min={0} max={percentSpace ? 100 : FRAME_WIDTH} step={percentSpace ? 0.5 : 1} value={xValue} resetValue={control.xDefault} numberScrubMode="continuous" numberScrubCommitThrottleMs={16} aria-label={control.xLabel ?? `${control.label} X`} disabled={disabled} onChange={(event) => onValueChange("x", event.target.value)} /></label>
-        <label className={`grid gap-1 ${mutedCaps}`}>{control.yLabel ?? "Y"}<Input type="number" min={0} max={percentSpace ? 100 : FRAME_HEIGHT} step={percentSpace ? 0.5 : 1} value={yValue} resetValue={control.yDefault} numberScrubMode="continuous" numberScrubCommitThrottleMs={16} aria-label={control.yLabel ?? `${control.label} Y`} disabled={disabled} onChange={(event) => onValueChange("y", event.target.value)} /></label>
-        <button className={`grid h-8 w-10 place-items-center rounded-[9px] border ${disabled ? "cursor-not-allowed border-[#2d313b] bg-[#171920] text-[#6f7480]" : picking ? "border-[#37d6c2] bg-[#12312d] text-white" : "border-[#2d313b] bg-[#171920] text-[#d9dbe1] hover:border-[#37d6c2]"}`} disabled={disabled} title={disabledReason ?? control.pickLabel ?? `Pick ${control.label.toLowerCase()} from frame`} type="button" onClick={onPick}><Crosshair size={16} /></button>
-      </div>
-    </div>
-  );
+  return <Coordinate2DField disabledReason={disabledReason} label={control.label} pickLabel={disabledReason ?? control.pickLabel ?? `Pick ${control.label.toLowerCase()} from frame`} picking={picking} x={{ ariaLabel: control.xLabel ?? `${control.label} X`, disabled, label: control.xLabel ?? "X", max: percentSpace ? 100 : FRAME_WIDTH, min: 0, numberScrubMode: "preview", onChange: (value) => onValueChange("x", value), onNumberScrubEnd: onScrubEnd, onNumberScrubPreview: (value) => onScrubPreview?.("x", value), resetValue: control.xDefault, step: percentSpace ? 0.5 : 1, value: xValue }} y={{ ariaLabel: control.yLabel ?? `${control.label} Y`, disabled, label: control.yLabel ?? "Y", max: percentSpace ? 100 : FRAME_HEIGHT, min: 0, numberScrubMode: "preview", onChange: (value) => onValueChange("y", value), onNumberScrubEnd: onScrubEnd, onNumberScrubPreview: (value) => onScrubPreview?.("y", value), resetValue: control.yDefault, step: percentSpace ? 0.5 : 1, value: yValue }} onPick={onPick} />;
 }
 
 function getAdjustmentControlDisabledReason(layer: AdjustmentLayer, condition: AdjustmentEffectDisableCondition | undefined) {
@@ -1036,7 +1054,7 @@ export function TransitionInspector({ layer, onChange, onDelete }: { layer: Tran
   );
 }
 
-export function MotionInspector({ marker, part, selectedMarkerCount, selectedSnapInActive, selectedSnapOutActive, middleSnapActive, middleEase, middleTransitionMode, pickingFocus, pickingPosition, pickingTracker, canSnapMiddle, onChange, onScalePreview, onScalePreviewEnd, onChangeFocus, onChangeSelectedSnap, onChangeMiddleTransition, onChangeMiddleEase, onDelete, onPickFocus, onPickPosition, onPickTracker, onSnapMiddle }: { marker: MotionMarker; part: Part; selectedMarkerCount: number; selectedSnapInActive: boolean; selectedSnapOutActive: boolean; middleSnapActive: boolean; middleEase?: MotionEase; middleTransitionMode: "instant" | "transition"; pickingFocus: boolean; pickingPosition: boolean; pickingTracker: boolean; canSnapMiddle: boolean; onChange: (updater: (marker: MotionMarker, part: Part) => MotionMarker) => void; onScalePreview?: (scale: number) => void; onScalePreviewEnd?: () => void; onChangeFocus?: (focus: Point) => void; onChangeSelectedSnap: (key: "snapIn" | "snapOut", enabled: boolean) => void; onChangeMiddleTransition: (mode: "instant" | "transition") => void; onChangeMiddleEase: (ease: MotionEase | undefined) => void; onDelete: () => void; onPickFocus?: () => void; onPickPosition?: () => void; onPickTracker?: () => void; onSnapMiddle: () => void }) {
+export function MotionInspector({ marker, part, selectedMarkerCount, selectedSnapInActive, selectedSnapOutActive, middleSnapActive, middleEase, middleTransitionMode, pickingFocus, pickingPosition, pickingTracker, canSnapMiddle, onChange, onPreviewMarker, onPreviewPickPoint, onClearPreview, onChangeFocus, onChangeSelectedSnap, onChangeMiddleTransition, onChangeMiddleEase, onDelete, onPickFocus, onPickPosition, onPickTracker, onSnapMiddle }: { marker: MotionMarker; part: Part; selectedMarkerCount: number; selectedSnapInActive: boolean; selectedSnapOutActive: boolean; middleSnapActive: boolean; middleEase?: MotionEase; middleTransitionMode: "instant" | "transition"; pickingFocus: boolean; pickingPosition: boolean; pickingTracker: boolean; canSnapMiddle: boolean; onChange: (updater: (marker: MotionMarker, part: Part) => MotionMarker) => void; onPreviewMarker?: (updater: (marker: MotionMarker) => MotionMarker) => void; onPreviewPickPoint?: (point: Point | null) => void; onClearPreview?: () => void; onChangeFocus?: (focus: Point) => void; onChangeSelectedSnap: (key: "snapIn" | "snapOut", enabled: boolean) => void; onChangeMiddleTransition: (mode: "instant" | "transition") => void; onChangeMiddleEase: (ease: MotionEase | undefined) => void; onDelete: () => void; onPickFocus?: () => void; onPickPosition?: () => void; onPickTracker?: () => void; onSnapMiddle: () => void }) {
   const isMultiSelection = selectedMarkerCount > 1;
   const markerKind = marker.kind;
   const effectId = marker.effectId ?? (markerKind === "zoom" ? "clipper.motion.zoom" : markerKind === "rotate" ? "clipper.motion.rotate" : markerKind === "perspective" ? "clipper.motion.perspective" : "clipper.motion.pan");
@@ -1047,6 +1065,8 @@ export function MotionInspector({ marker, part, selectedMarkerCount, selectedSna
   useEffect(() => {
     setDraftScale(roundTwo(clamp(marker.scale ?? 1, 1, 5)));
   }, [marker.id, marker.scale]);
+
+  useEffect(() => () => onClearPreview?.(), []);
 
   function updateNumber(key: "start" | "duration", value: string) {
     const numeric = Number(value) || 0;
@@ -1066,10 +1086,17 @@ export function MotionInspector({ marker, part, selectedMarkerCount, selectedSna
     onChangeFocus?.({ ...focus, [key]: Math.round(clamp(numeric, 0, key === "x" ? FRAME_WIDTH : FRAME_HEIGHT)) });
   }
 
+  function previewFocus(key: keyof Point, value: number) {
+    const focus = marker.focus ?? { x: FRAME_WIDTH / 2, y: FRAME_HEIGHT / 2 };
+    const nextFocus = { ...focus, [key]: Math.round(clamp(value, 0, key === "x" ? FRAME_WIDTH : FRAME_HEIGHT)) };
+    if (pickingFocus) onPreviewPickPoint?.(nextFocus);
+    onPreviewMarker?.((current) => ({ ...current, focus: nextFocus }));
+  }
+
   function commitScale(value = draftScale) {
     const nextScale = roundTwo(clamp(value, 1, 5));
     setDraftScale(nextScale);
-    onScalePreviewEnd?.();
+    onClearPreview?.();
     if (nextScale === roundTwo(marker.scale ?? 1)) return;
     onChange((current) => ({ ...current, scale: nextScale }));
   }
@@ -1077,7 +1104,7 @@ export function MotionInspector({ marker, part, selectedMarkerCount, selectedSna
   function updateDraftScale(value: string) {
     const nextScale = roundTwo(clamp(Number(value) || 1, 1, 5));
     setDraftScale(nextScale);
-    onScalePreview?.(nextScale);
+    onPreviewMarker?.((current) => ({ ...current, scale: nextScale }));
   }
 
   function updatePosition(key: keyof Point, value: string) {
@@ -1085,8 +1112,18 @@ export function MotionInspector({ marker, part, selectedMarkerCount, selectedSna
     onChange((current) => ({ ...current, position: { ...(current.position ?? { x: 0, y: 0 }), [key]: Math.round(numeric) } }));
   }
 
+  function previewPosition(key: keyof Point, value: number) {
+    const nextPosition = { ...(marker.position ?? { x: 0, y: 0 }), [key]: Math.round(value) };
+    if (pickingPosition) onPreviewPickPoint?.(cameraTranslationToFramePoint(nextPosition));
+    onPreviewMarker?.((current) => ({ ...current, position: { ...(current.position ?? { x: 0, y: 0 }), [key]: Math.round(value) } }));
+  }
+
   function updateRotation(value: string) {
     onChange((current) => ({ ...current, rotation: Math.round(Number(value) || 0) }));
+  }
+
+  function previewRotation(value: number) {
+    onPreviewMarker?.((current) => ({ ...current, rotation: Math.round(value) }));
   }
 
   function updatePerspective(key: "z" | "rotateX" | "rotateY", value: string) {
@@ -1095,6 +1132,11 @@ export function MotionInspector({ marker, part, selectedMarkerCount, selectedSna
       const perspective = { ...current.perspective, [key]: Math.round(numeric) };
       return { ...current, perspective, params: { ...current.params, perspective } };
     });
+  }
+
+  function previewPerspective(key: "z" | "rotateX" | "rotateY", value: number) {
+    const perspective = { ...marker.perspective, [key]: Math.round(value) };
+    onPreviewMarker?.((current) => ({ ...current, perspective }));
   }
 
   function updateFollowId(value: string) {
@@ -1120,32 +1162,16 @@ export function MotionInspector({ marker, part, selectedMarkerCount, selectedSna
       <div className="grid grid-cols-2 gap-2">
         <label className={`grid gap-1.5 ${mutedCaps}`}>Start<Input type="number" min={0} max={part.duration - marker.duration} resetValue={0} step={0.1} value={marker.start} onChange={(event) => updateNumber("start", event.target.value)} /></label>
         <label className={`grid gap-1.5 ${mutedCaps}`}>Duration<Input type="number" min={minimumZoomDuration} max={part.duration - marker.start} resetValue={1} step={0.1} value={marker.duration} onChange={(event) => updateNumber("duration", event.target.value)} /></label>
-        {markerKind === "zoom" ? <>
-          <label className={`grid gap-1.5 ${mutedCaps}`}>Focus X<Input type="number" min={0} max={FRAME_WIDTH} resetValue={FRAME_WIDTH / 2} step={1} value={marker.focus?.x ?? FRAME_WIDTH / 2} onChange={(event) => updateFocus("x", event.target.value)} /></label>
-          <div className="grid gap-1.5">
-            <span className={mutedCaps}>Focus Y</span>
-            <div className="grid grid-cols-[1fr_40px] gap-2">
-              <Input type="number" min={0} max={FRAME_HEIGHT} resetValue={FRAME_HEIGHT / 2} step={1} value={marker.focus?.y ?? FRAME_HEIGHT / 2} onChange={(event) => updateFocus("y", event.target.value)} />
-              <button className={`grid place-items-center rounded-[9px] border px-2 ${pickingFocus ? "border-[#159dff] bg-[#0a1f33] text-white" : "border-[#2d313b] bg-[#171920] text-[#d9dbe1] hover:border-[#159dff]"}`} title="Pick focus from frame" onClick={onPickFocus}><Crosshair size={16} /></button>
-            </div>
-          </div>
-        </> : markerKind === "rotate" ? <label className={`grid gap-1.5 ${mutedCaps}`}>Rotation<Input type="number" numberScrubMode="continuous" numberScrubCommitThrottleMs={16} resetValue={15} step={1} value={marker.rotation ?? 0} onChange={(event) => updateRotation(event.target.value)} /></label> : markerKind === "perspective" ? <>
-          <label className={`grid gap-1.5 ${mutedCaps}`}>Z<Input type="number" numberScrubMode="continuous" numberScrubCommitThrottleMs={16} resetValue={0} step={1} value={marker.perspective?.z ?? 0} onChange={(event) => updatePerspective("z", event.target.value)} /></label>
-          <label className={`grid gap-1.5 ${mutedCaps}`}>Tilt X<Input type="number" numberScrubMode="continuous" numberScrubCommitThrottleMs={16} resetValue={8} step={1} value={marker.perspective?.rotateX ?? 0} onChange={(event) => updatePerspective("rotateX", event.target.value)} /></label>
-        </> : <>
-          <label className={`grid gap-1.5 ${mutedCaps} ${positionDisabledReason ? "opacity-50" : ""}`} title={positionDisabledReason}>X<Input type="number" resetValue={0} step={1} value={marker.position?.x ?? 0} disabled={Boolean(positionDisabledReason)} onChange={(event) => updatePosition("x", event.target.value)} /></label>
-          <div className={`grid gap-1.5 ${positionDisabledReason ? "opacity-50" : ""}`} title={positionDisabledReason}>
-            <span className={mutedCaps}>Y</span>
-            <div className="grid grid-cols-[1fr_40px] gap-2">
-              <Input type="number" resetValue={0} step={1} value={marker.position?.y ?? 0} disabled={Boolean(positionDisabledReason)} onChange={(event) => updatePosition("y", event.target.value)} />
-              <button className={`grid place-items-center rounded-[9px] border px-2 ${positionDisabledReason ? "cursor-not-allowed border-[#2d313b] bg-[#171920] text-[#6f7480]" : pickingPosition ? "border-[#159dff] bg-[#0a1f33] text-white" : "border-[#2d313b] bg-[#171920] text-[#d9dbe1] hover:border-[#159dff]"}`} disabled={Boolean(positionDisabledReason)} title={positionDisabledReason ?? "Pick pan target from frame"} onClick={onPickPosition}><Crosshair size={16} /></button>
-            </div>
-          </div>
-        </>}
+        {markerKind === "rotate" ? <label className={`grid gap-1.5 ${mutedCaps}`}>Rotation<Input type="number" numberScrubMode="preview" numberScrubCommitThrottleMs={16} resetValue={15} step={1} value={marker.rotation ?? 0} onNumberScrubPreview={(v) => previewRotation(v)} onNumberScrubEnd={onClearPreview} onChange={(event) => updateRotation(event.target.value)} /></label> : markerKind === "perspective" ? <>
+          <label className={`grid gap-1.5 ${mutedCaps}`}>Z<Input type="number" numberScrubMode="preview" numberScrubCommitThrottleMs={16} resetValue={0} step={1} value={marker.perspective?.z ?? 0} onNumberScrubPreview={(v) => previewPerspective("z", v)} onNumberScrubEnd={onClearPreview} onChange={(event) => updatePerspective("z", event.target.value)} /></label>
+          <label className={`grid gap-1.5 ${mutedCaps}`}>Tilt X<Input type="number" numberScrubMode="preview" numberScrubCommitThrottleMs={16} resetValue={8} step={1} value={marker.perspective?.rotateX ?? 0} onNumberScrubPreview={(v) => previewPerspective("rotateX", v)} onNumberScrubEnd={onClearPreview} onChange={(event) => updatePerspective("rotateX", event.target.value)} /></label>
+        </> : null}
       </div>
+      {markerKind === "zoom" ? <Coordinate2DField label="Focus" pickLabel="Pick focus from frame" picking={pickingFocus} x={{ max: FRAME_WIDTH, min: 0, numberScrubMode: "preview", onChange: (value) => updateFocus("x", value), onNumberScrubEnd: onClearPreview, onNumberScrubPreview: (value) => previewFocus("x", value), resetValue: FRAME_WIDTH / 2, step: 1, value: marker.focus?.x ?? FRAME_WIDTH / 2 }} y={{ max: FRAME_HEIGHT, min: 0, numberScrubMode: "preview", onChange: (value) => updateFocus("y", value), onNumberScrubEnd: onClearPreview, onNumberScrubPreview: (value) => previewFocus("y", value), resetValue: FRAME_HEIGHT / 2, step: 1, value: marker.focus?.y ?? FRAME_HEIGHT / 2 }} onPick={onPickFocus} /> : null}
+      {markerKind === "pan" ? <Coordinate2DField disabledReason={positionDisabledReason} label="Position" pickLabel={positionDisabledReason ?? "Pick pan target from frame"} picking={pickingPosition} x={{ disabled: Boolean(positionDisabledReason), numberScrubMode: "preview", onChange: (value) => updatePosition("x", value), onNumberScrubEnd: onClearPreview, onNumberScrubPreview: (value) => previewPosition("x", value), resetValue: 0, step: 1, value: marker.position?.x ?? 0 }} y={{ disabled: Boolean(positionDisabledReason), numberScrubMode: "preview", onChange: (value) => updatePosition("y", value), onNumberScrubEnd: onClearPreview, onNumberScrubPreview: (value) => previewPosition("y", value), resetValue: 0, step: 1, value: marker.position?.y ?? 0 }} onPick={onPickPosition} /> : null}
       {markerKind === "zoom" ? <label className={`grid gap-1.5 ${mutedCaps}`}>Scale<div className="grid grid-cols-[1fr_52px] items-center gap-2 rounded-[10px] border border-[#2d313b] bg-[#171920] px-2.5 py-2"><input aria-label="Zoom scale" className="h-1.5 min-w-0 accent-[#37d6c2] [appearance:none] rounded-full bg-[#2d313b] [&::-webkit-slider-runnable-track]:h-1.5 [&::-webkit-slider-runnable-track]:rounded-full [&::-webkit-slider-runnable-track]:bg-[#2d313b] [&::-webkit-slider-thumb]:mt-[-5px] [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border [&::-webkit-slider-thumb]:border-[#37d6c2] [&::-webkit-slider-thumb]:bg-[var(--clipper-accent)] [&::-moz-range-track]:h-1.5 [&::-moz-range-track]:rounded-full [&::-moz-range-track]:bg-[#2d313b] [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border [&::-moz-range-thumb]:border-[#37d6c2] [&::-moz-range-thumb]:bg-[var(--clipper-accent)]" type="range" min={1} max={5} step={0.01} value={draftScale} onChange={(event) => updateDraftScale(event.target.value)} onPointerUp={() => commitScale()} onKeyUp={() => commitScale()} onBlur={() => commitScale()} /><span className="text-right text-xs font-extrabold text-[#dfe2ea] tabular-nums">{draftScale.toFixed(2)}</span></div></label> : null}
-      {markerKind === "perspective" ? <label className={`grid gap-1.5 ${mutedCaps}`}>Tilt Y<Input type="number" numberScrubMode="continuous" numberScrubCommitThrottleMs={16} resetValue={0} step={1} value={marker.perspective?.rotateY ?? 0} onChange={(event) => updatePerspective("rotateY", event.target.value)} /></label> : null}
-      {markerKind === "pan" ? <label className={`grid gap-1.5 ${mutedCaps}`}>Tracker<div className="grid grid-cols-[1fr_40px] gap-2"><Input value={marker.followId ?? ""} placeholder="object-id" onChange={(event) => updateFollowId(event.target.value)} /><button className={`grid place-items-center rounded-[9px] border px-2 ${pickingTracker ? "border-[#159dff] bg-[#0a1f33] text-white" : "border-[#2d313b] bg-[#171920] text-[#d9dbe1] hover:border-[#159dff]"}`} title="Pick tracker target from frame" type="button" onClick={onPickTracker}><Crosshair size={16} /></button></div></label> : null}
+      {markerKind === "perspective" ? <label className={`grid gap-1.5 ${mutedCaps}`}>Tilt Y<Input type="number" numberScrubMode="preview" numberScrubCommitThrottleMs={16} resetValue={0} step={1} value={marker.perspective?.rotateY ?? 0} onNumberScrubPreview={(v) => previewPerspective("rotateY", v)} onNumberScrubEnd={onClearPreview} onChange={(event) => updatePerspective("rotateY", event.target.value)} /></label> : null}
+      {markerKind === "pan" ? <label className={`grid gap-1.5 ${mutedCaps}`}>Tracker<div className="grid grid-cols-[1fr_40px] gap-2"><Input value={marker.followId ?? ""} placeholder="object-id" onChange={(event) => updateFollowId(event.target.value)} /><PickButton active={pickingTracker} label="Pick tracker target from frame" onClick={onPickTracker} /></div></label> : null}
       <label className={`grid gap-1.5 ${mutedCaps}`}>Ease<Select value={motionEaseSelectValue(marker.ease)} onValueChange={updateEase}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><TooltipProvider delayDuration={1000} skipDelayDuration={0}><SelectGroup><EaseSelectItems defaultInOut /></SelectGroup></TooltipProvider></SelectContent></Select></label>
       <div className="grid gap-2">
         <span className={mutedCaps}>Snap</span>
@@ -1156,9 +1182,95 @@ export function MotionInspector({ marker, part, selectedMarkerCount, selectedSna
         <div className="grid gap-2">
           <button className={snapButtonClass(middleSnapActive, canSnapMiddle)} disabled={!canSnapMiddle} title={middleSnapActive ? "Unmend the neighboring edges" : "Mend the neighboring edges"} aria-pressed={middleSnapActive} onClick={onSnapMiddle}>{middleSnapActive ? "Unmend" : "Mend"}</button>
         </div>
-        {middleSnapActive ? <div className="grid gap-1.5"><span className={mutedCaps}>Mend handoff</span><div className="grid grid-cols-2 gap-2"><button className={middleTransitionButtonClass(middleTransitionMode === "instant")} aria-pressed={middleTransitionMode === "instant"} onClick={() => onChangeMiddleTransition("instant")}>Instant</button><button className={middleTransitionButtonClass(middleTransitionMode === "transition")} aria-pressed={middleTransitionMode === "transition"} onClick={() => onChangeMiddleTransition("transition")}>Transition</button></div>{middleTransitionMode === "transition" ? <label className={`grid gap-1.5 ${mutedCaps}`}>Mend ease<Select value={motionEaseSelectValue(middleEase, true)} onValueChange={updateMiddleEase}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><TooltipProvider delayDuration={1000} skipDelayDuration={0}><SelectGroup><EaseSelectItems includeLinear={false} /></SelectGroup></TooltipProvider></SelectContent></Select></label> : null}</div> : null}
+        {middleSnapActive ? <div className="grid gap-1.5"><span className={mutedCaps}>Mend handoff</span><div className="grid grid-cols-2 gap-2"><button className={middleTransitionButtonClass(middleTransitionMode === "instant")} aria-pressed={middleTransitionMode === "instant"} onClick={() => onChangeMiddleTransition("instant")}>Instant</button><button className={middleTransitionButtonClass(middleTransitionMode === "transition")} aria-pressed={middleTransitionMode === "transition"} onClick={() => onChangeMiddleTransition("transition")}>Transition</button></div>{middleTransitionMode === "transition" ? <label className={`grid gap-1.5 ${mutedCaps}`}>Mend ease<Select value={motionEaseSelectValue(middleEase)} onValueChange={updateMiddleEase}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><TooltipProvider delayDuration={1000} skipDelayDuration={0}><SelectGroup><EaseSelectItems includeLinear={false} defaultInOut /></SelectGroup></TooltipProvider></SelectContent></Select></label> : null}{middleTransitionMode === "transition" ? <MendVisualSection marker={marker} effectId={effectId} onChange={onChange} /> : null}</div> : null}
       </div>
       <button className="flex items-center justify-center gap-2 rounded-[10px] border border-[#3b2a2a] bg-[#231516] px-[13px] py-[9px] text-sm font-medium text-[#ffb4b4] transition hover:border-[#6b3838] hover:bg-[#301b1d]" onClick={onDelete}><Trash2 size={15} />Delete</button>
+    </div>
+  );
+}
+
+// ── Mend visual helper ─────────────────────────────────────────────
+
+function MendVisualSection({ marker, effectId, onChange }: { marker: MotionMarker; effectId: string; onChange: (updater: (marker: MotionMarker, part: Part) => MotionMarker) => void }) {
+  const mendOptions = getMotionEffectPackage(effectId)?.mendTransitionOptions;
+  if (!mendOptions || mendOptions.length === 0) return null;
+
+  const params = (marker.params ?? {}) as Record<string, unknown>;
+  const selectedKey = (params.mendVisual as string | undefined) ?? "none";
+  const selectedOption = mendOptions.find((opt) => opt.key === selectedKey);
+
+  function setMendVisual(key: string) {
+    onChange((current) => {
+      const option = mendOptions!.find((opt) => opt.key === key);
+      const nextParams = { ...current.params } as Record<string, unknown>;
+      if (option) {
+        nextParams.mendVisual = key;
+        for (const [paramKey, value] of Object.entries(option.defaultParams)) {
+          if (nextParams[paramKey] === undefined) nextParams[paramKey] = value;
+        }
+      } else {
+        delete nextParams.mendVisual;
+        for (const opt of mendOptions!) {
+          for (const control of opt.paramControls) {
+            delete nextParams[control.key];
+          }
+        }
+      }
+      return { ...current, params: nextParams };
+    });
+  }
+
+  function updateParamValue(control: MotionMendTransitionOption["paramControls"][number], value: string) {
+    onChange((current) => {
+      const numeric = control.type === "number" ? Number(value) || 0 : value;
+      const nextParams = { ...current.params, [control.key]: control.type === "number" ? numeric : value } as Record<string, unknown>;
+      return { ...current, params: nextParams };
+    });
+  }
+
+  function getParamValue(control: MotionMendTransitionOption["paramControls"][number]) {
+    const raw = (params as Record<string, unknown>)[control.key];
+    return String(raw ?? control.defaultValue);
+  }
+
+  return (
+    <div className="grid gap-1.5">
+      <span className={mutedCaps}>Mend visual</span>
+      <Select value={selectedKey} onValueChange={setMendVisual}>
+        <SelectTrigger><SelectValue /></SelectTrigger>
+        <SelectContent>
+          <SelectItem value="none">None</SelectItem>
+          {mendOptions.map((opt) => (
+            <SelectItem key={opt.key} value={opt.key}>{opt.label}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {selectedOption ? selectedOption.paramControls.map((control) => (
+        <label className={`grid gap-1.5 ${mutedCaps}`} key={control.key}>{control.label}
+          {control.type === "number" ? (
+            <Input
+              type="number"
+              min={control.min}
+              max={control.max}
+              step={control.step}
+              value={getParamValue(control)}
+              resetValue={control.defaultValue}
+              numberScrubMode="continuous"
+              numberScrubCommitThrottleMs={16}
+              onChange={(event) => updateParamValue(control, event.target.value)}
+            />
+          ) : (
+            <Select value={getParamValue(control)} onValueChange={(value) => updateParamValue(control, value)}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {control.options.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        </label>
+      )) : null}
     </div>
   );
 }

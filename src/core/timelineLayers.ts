@@ -44,6 +44,21 @@ export function getTimelineLayerRowAtClientY(layout: TimelineLayerLayout, contai
   return getTimelineLayerRowAtY(layout, clientY - containerRect.top, category);
 }
 
+export function getTimelineLayerRowAtClientYClamped(layout: TimelineLayerLayout, containerRect: Pick<DOMRect, "top"> | null | undefined, clientY: number, category: TimelineLayerCategory) {
+  if (!containerRect) return null;
+  const y = clientY - containerRect.top;
+  const exact = getTimelineLayerRowAtY(layout, y, category);
+  if (exact) return exact;
+
+  const categoryRows = layout.rows.flatMap((row, index) => row.category === category ? [{ row, index, start: layout.starts[index], end: layout.starts[index] + layout.heights[index] }] : []);
+  if (categoryRows.length === 0) return null;
+
+  return categoryRows.reduce((nearest, item) => {
+    const distance = y < item.start ? item.start - y : y > item.end ? y - item.end : 0;
+    return distance < nearest.distance ? { item, distance } : nearest;
+  }, { item: categoryRows[0], distance: Number.POSITIVE_INFINITY }).item;
+}
+
 export function getTimelineLayerDragPreview(layout: TimelineLayerLayout, sourceLayerId: string | undefined, targetLayerId: string | undefined): TimelineLayerDragPreview {
   if (!sourceLayerId || !targetLayerId) return { targetLayerId, deltaY: 0 };
   const sourceIndex = layout.rows.findIndex((row) => row.key === sourceLayerId);
@@ -140,8 +155,67 @@ export function computeBulkLayerTargets(
   return result;
 }
 
+/**
+ * Resolve a marker's effective source layer for timeline move operations.
+ * When a marker has no explicit layerId, returns the first available row
+ * for the given category from the layout. Never returns an empty string.
+ */
+export function resolveTimelineMoveSourceLayer(
+  layout: TimelineLayerLayout,
+  category: TimelineLayerCategory,
+  layerId: string | undefined | null,
+): string {
+  if (layerId) return layerId;
+  const categoryRows = layout.rows.filter((row) => row.category === category);
+  const first = categoryRows[0];
+  return first?.key ?? "";
+}
+
+/**
+ * Shared helper that resolves layer move preview and commit targets.
+ * Combines cursor-to-row resolution, lock filtering, and bulk layer target computation.
+ */
+export function resolveTimelineLayerMoveTargets(
+  layout: TimelineLayerLayout,
+  category: TimelineLayerCategory,
+  sourceLayerId: string | undefined,
+  moveTargets: Array<{ id: string; layerId?: string }>,
+  containerRect: Pick<DOMRect, "top"> | null | undefined,
+  clientY: number,
+  isLayerLocked: (category: TimelineLayerCategory, layerId: string) => boolean,
+  defaultLayerKey: string,
+): { layerTargets: Map<string, string>; cursorLayerId: string | undefined } {
+  const cursorRow = getTimelineLayerRowAtClientYClamped(layout, containerRect, clientY, category);
+  const cursorLayerId = cursorRow?.row.key && !isLayerLocked(category, cursorRow.row.key)
+    ? cursorRow.row.key
+    : undefined;
+  const layerTargets = computeBulkLayerTargets(
+    layout,
+    category,
+    sourceLayerId,
+    cursorLayerId,
+    moveTargets,
+    defaultLayerKey,
+  );
+  return { layerTargets, cursorLayerId };
+}
+
+/**
+ * Get the layer drag preview for a single move target, applying lock filtering.
+ */
+export function getLayerMoveDragPreview(
+  layout: TimelineLayerLayout,
+  sourceLayerId: string | undefined,
+  computedLayerId: string | undefined,
+  isLayerLocked: (category: TimelineLayerCategory, layerId: string) => boolean,
+  category: TimelineLayerCategory,
+): TimelineLayerDragPreview {
+  const effectiveTarget = computedLayerId && !isLayerLocked(category, computedLayerId) ? computedLayerId : undefined;
+  return getTimelineLayerDragPreview(layout, sourceLayerId, effectiveTarget);
+}
+
 export function getTimelineBlockLayerPreview(layout: TimelineLayerLayout, category: TimelineLayerCategory, sourceLayerId: string | undefined, clientY: number, containerRect: Pick<DOMRect, "top"> | null | undefined) {
-  const targetLayerId = getTimelineLayerRowAtClientY(layout, containerRect, clientY, category)?.row.key;
+  const targetLayerId = getTimelineLayerRowAtClientYClamped(layout, containerRect, clientY, category)?.row.key;
   return getTimelineLayerDragPreview(layout, sourceLayerId, targetLayerId);
 }
 

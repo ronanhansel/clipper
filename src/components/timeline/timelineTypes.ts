@@ -56,6 +56,7 @@ export type TimelinePanelProps = {
   onOpenNodeContextMenu: (event: ReactMouseEvent<HTMLElement>, target: TimelineNodeContextTarget) => void;
   onOpenBlankContextMenu: (event: ReactMouseEvent<HTMLElement>, target: TimelineBlankContextTarget) => void;
   onMoveAdjustmentLayer: (layerId: string, start: number, targetLayerId?: string) => void;
+  onMoveAdjustmentLayers?: (moves: Array<{ layerId: string; start: number; targetLayerId?: string }>) => void;
   onUpdateAdjustmentLayer: (layerId: string, updater: (layer: AdjustmentLayer) => AdjustmentLayer) => void;
   onReorderPart: (sourcePartId: string, targetPartId: string) => void;
   onMoveComposition: (compositionId: string, start: number, targetLayerId?: string) => void;
@@ -76,6 +77,7 @@ export type TimelinePanelProps = {
   onSelectTransitionLayer?: (layerId: string) => void;
   onSelectTransitionLayers?: (selection: Array<{ layerId: string }>) => void;
   onMoveTransitionLayer?: (layerId: string, start: number, targetLayerId?: string) => void;
+  onMoveTransitionLayers?: (moves: Array<{ layerId: string; start: number; targetLayerId?: string }>) => void;
   onShiftTimelineGapMarkers?: (moves: { gapStart: number; gapEnd: number; delta: number; compositions: Array<{ compositionId: string; start: number }>; adjustmentLayers: Array<{ layerId: string; start: number }>; motionMarkers: Array<{ markerId: string; start: number }>; transitionLayers: Array<{ layerId: string; start: number }> }) => void;
   onUpdateTransitionLayer?: (layerId: string, updater: (layer: TransitionLayer) => TransitionLayer) => void;
   composeAnimationPart?: Part | null;

@@ -6,11 +6,16 @@ import { FRAME_HEIGHT, FRAME_WIDTH, type Bounds, type FrameObject, type MotionEa
 
 export const CAMERA_PERSPECTIVE = 1800;
 
-export type CameraPreviewTransform = { x: number; y: number; z: number; scale: number; rotation: number; rotateX: number; rotateY: number; perspective: number };
+export type CameraPreviewTransform = { x: number; y: number; z: number; scale: number; rotation: number; rotateX: number; rotateY: number; perspective: number; motionBlur: number };
 
 export function formatCameraPreviewTransform(transform: CameraPreviewTransform) {
   const coverScale = getPerspectiveCoverScale(transform);
   return `translate3d(${transform.x}px, ${transform.y}px, ${transform.z}px) rotateX(${transform.rotateX}deg) rotateY(${transform.rotateY}deg) rotate(${transform.rotation}deg) scale(${transform.scale * coverScale})`;
+}
+
+export function formatCameraPreviewFilter(transform: CameraPreviewTransform) {
+  if (transform.motionBlur <= 0) return undefined;
+  return `blur(${transform.motionBlur}px)`;
 }
 
 function getPerspectiveCoverScale(transform: CameraPreviewTransform) {
@@ -32,11 +37,12 @@ export function getCameraPreviewTransformFromMarkers(activeMarkers: { zoom: Moti
     rotateX: activeMarkers.perspective.rotateX,
     rotateY: activeMarkers.perspective.rotateY,
     perspective: CAMERA_PERSPECTIVE,
+    motionBlur: 0,
   };
 }
 
 export function getLayeredCameraPreviewTransform(part: Part, layers: TimelineMotionLayerState[], time: number, options: { hiddenLayerIds?: Set<string>; pickingTranslationPosition?: boolean; pickingZoomFocus?: boolean; resetMotionEffects?: boolean } = {}): CameraPreviewTransform {
-  const transform: CameraPreviewTransform = { x: 0, y: 0, z: 0, scale: 1, rotation: 0, rotateX: 0, rotateY: 0, perspective: CAMERA_PERSPECTIVE };
+  const transform: CameraPreviewTransform = { x: 0, y: 0, z: 0, scale: 1, rotation: 0, rotateX: 0, rotateY: 0, perspective: CAMERA_PERSPECTIVE, motionBlur: 0 };
   if (options.resetMotionEffects) return transform;
   const partMotion = getPartMotionMarkers(part);
 
@@ -61,6 +67,7 @@ export function getLayeredCameraPreviewTransform(part: Part, layers: TimelineMot
     if (activePan) {
       transform.x += activePan.position?.x ?? 0;
       transform.y += activePan.position?.y ?? 0;
+      transform.motionBlur = Math.max(transform.motionBlur, activePan.motionBlur);
     }
 
     const activeRotation = getActiveMarkerByKind(layerMarkers, "rotate", time);
@@ -124,8 +131,8 @@ function clampFrameY(value: number) {
   return Math.min(Math.max(value, 0), FRAME_HEIGHT);
 }
 
-export function getActiveMarkerByKind(markers: MotionMarker[], kind: MotionMarker["kind"], time: number, part?: Part): MotionMarker | null {
-  if (kind === "zoom") return getActiveZoom(markers, time);
+export function getActiveMarkerByKind(markers: MotionMarker[], kind: MotionMarker["kind"], time: number, part?: Part): (MotionMarker & { motionBlur: number }) | null {
+  if (kind === "zoom") return getActiveZoom(markers, time) as (MotionMarker & { motionBlur: number }) | null;
   return getActiveMotionMarker(markers, time, part);
 }
 
@@ -137,6 +144,32 @@ export function getActivePerspectiveMarkers(markers: MotionMarker[], time: numbe
     rotateX: settings?.rotateX ?? 0,
     rotateY: settings?.rotateY ?? 0,
   };
+}
+
+export const defaultMotionBlurConfig = {
+  strength: 1,
+  maxBlur: 24,
+  window: 0.22,
+} as const;
+
+export function getMotionBlurConfig(marker: MotionMarker | undefined): { enabled: boolean; strength: number; maxBlur: number; window: number } {
+  const params = marker?.params as Record<string, unknown> | undefined;
+  const mendVisual = params?.mendVisual;
+  if (mendVisual !== "motionBlur") return { enabled: false, ...defaultMotionBlurConfig };
+  return {
+    enabled: true,
+    strength: Number(params?.motionBlurStrength ?? defaultMotionBlurConfig.strength),
+    maxBlur: Number(params?.motionBlurMax ?? defaultMotionBlurConfig.maxBlur),
+    window: Number(params?.motionBlurWindow ?? defaultMotionBlurConfig.window),
+  };
+}
+
+function computeMotionBlur(panDistance: number, progress: number, blurConfig: ReturnType<typeof getMotionBlurConfig>): number {
+  if (!blurConfig.enabled || panDistance <= 0) return 0;
+  const phase = clamp(progress / blurConfig.window, 0, 1);
+  const bell = Math.sin(phase * Math.PI);
+  const divisor = blurConfig.strength > 0 ? 16 / blurConfig.strength : Infinity;
+  return Math.min((panDistance / divisor) * bell, blurConfig.maxBlur);
 }
 
 function getActiveZoom(markers: MotionMarker[], time: number) {
@@ -168,7 +201,7 @@ function getActiveZoom(markers: MotionMarker[], time: number) {
   return { ...marker, scale: 1 + ((marker.scale ?? 1) - 1) * eased };
 }
 
-function getActiveMotionMarker(markers: MotionMarker[], time: number, part?: Part) {
+function getActiveMotionMarker(markers: MotionMarker[], time: number, part?: Part): (MotionMarker & { motionBlur: number }) | null {
   const sortedMarkers = [...markers].sort((left, right) => left.start - right.start);
   const markerIndex = getActiveMotionMarkerIndex(sortedMarkers, time);
   const marker = markerIndex >= 0 ? sortedMarkers[markerIndex] : null;
@@ -189,15 +222,18 @@ function getActiveMotionMarker(markers: MotionMarker[], time: number, part?: Par
     };
     const rotation = interpolateRotation(previousMarker, marker, easedIn);
     const perspective = interpolatePerspective(previousMarker, marker, easedIn);
-    if (marker.snapOut || isMendedToNext(sortedMarkers, markerIndex)) return { ...marker, position, rotation, perspective };
+    const panDistance = Math.sqrt((targetPosition.x - middleTransitionFrom.x) ** 2 + (targetPosition.y - middleTransitionFrom.y) ** 2);
+    const blurConfig = getMotionBlurConfig(marker);
+    const motionBlur = marker.kind === "pan" ? computeMotionBlur(panDistance, progress, blurConfig) : 0;
+    if (marker.snapOut || isMendedToNext(sortedMarkers, markerIndex)) return { ...marker, position, rotation, perspective, motionBlur };
     const rampOut = cameraEaseProgress(clamp((1 - progress) / 0.22, 0, 1), marker.ease);
-    return { ...marker, position: scalePoint(position, rampOut), rotation: rotation * rampOut, perspective: scalePerspective(perspective, rampOut) };
+    return { ...marker, position: scalePoint(position, rampOut), rotation: rotation * rampOut, perspective: scalePerspective(perspective, rampOut), motionBlur: motionBlur * rampOut };
   }
   const rampIn = marker.snapIn || mendedToPrevious ? 1 : progress / 0.22;
   const rampOut = marker.snapOut || isMendedToNext(sortedMarkers, markerIndex) ? 1 : (1 - progress) / 0.22;
   const ramp = Math.min(rampIn, rampOut, 1);
   const eased = cameraEaseProgress(clamp(ramp, 0, 1), marker.ease);
-  return { ...marker, position: scalePoint(targetPosition, eased), rotation: (marker.rotation ?? 0) * eased, perspective: scalePerspective(marker.perspective, eased) };
+  return { ...marker, position: scalePoint(targetPosition, eased), rotation: (marker.rotation ?? 0) * eased, perspective: scalePerspective(marker.perspective, eased), motionBlur: 0 };
 }
 
 function scalePoint(point: Point, scale: number): Point {

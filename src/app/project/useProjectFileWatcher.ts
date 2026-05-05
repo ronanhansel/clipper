@@ -1,14 +1,7 @@
 import { useEffect, useRef } from "react";
-import type { Part, ProjectManifest } from "../../core/types";
-
 type UseProjectFileWatcherInput = {
   manifestPath: string;
-  project: ProjectManifest;
-  compositionSources: Record<string, string>;
-  updateCompositionFromSource: (basePart: Part, source: string, options?: { syncSource?: boolean; history?: boolean }) => Promise<void>;
-  replaceProject: (nextProject: ProjectManifest, options?: { history?: boolean; syncSources?: boolean }) => void;
   reloadProject: () => Promise<void>;
-  notifyError: (error: unknown, fallback: string) => void;
   isFileSystemBusy?: boolean;
 };
 
