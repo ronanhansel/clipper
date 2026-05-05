@@ -1,5 +1,5 @@
-import { evaluateLayerAnimations } from "./animations";
-import { FRAME_HEIGHT, FRAME_WIDTH, type BackgroundLayer, type FrameObject, type FrameTemplate, type MotionEase, type MotionTrack, type Point } from "./types";
+import { evaluateLayerAnimations } from "../core/animations";
+import { FRAME_HEIGHT, FRAME_WIDTH, type BackgroundLayer, type FrameObject, type FrameTemplate, type MotionEase, type MotionTrack, type Point } from "../core/types";
 
 export type RenderStyle = Record<string, string | number | undefined>;
 

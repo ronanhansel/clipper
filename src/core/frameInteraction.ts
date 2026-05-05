@@ -1,7 +1,7 @@
 import { marqueeSelectionThresholdPx, minimumObjectResizeSide } from "./editorConstants";
 import { boundsToPoints } from "./geometry";
 import { clamp } from "./math";
-import { evaluateFrameObject } from "./renderRuntime";
+import { evaluateFrameObject } from "../render-engine/renderRuntime";
 import { FRAME_HEIGHT, FRAME_WIDTH, type Bounds, type FrameObject, type Part, type Point, type SelectionPayload } from "./types";
 
 export type ResizeHandle = "top-left" | "top" | "top-right" | "right" | "bottom-right" | "bottom" | "bottom-left" | "left";

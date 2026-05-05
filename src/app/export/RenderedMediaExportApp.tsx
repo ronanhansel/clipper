@@ -1,7 +1,7 @@
 import { Component, useLayoutEffect, useMemo, useRef, useState, type ErrorInfo, type ReactNode, type RefObject } from "react";
 import { FramePreview } from "../../components/preview/FramePreview";
 import { CAMERA_PERSPECTIVE } from "../../core/camera";
-import { waitForRenderClockAnimationsReady, type RenderClockReadinessResult } from "../../core/renderClock";
+import { waitForRenderClockAnimationsReady, type RenderClockReadinessResult } from "../../render-engine/renderClock";
 import { FRAME_HEIGHT, FRAME_WIDTH, type CompositionClip, type ProjectManifest, type Scene } from "../../core/types";
 import { deriveFramePreviewRenderModel, getFramePreviewTimelineLayers } from "../state/framePreviewRenderModel";
 

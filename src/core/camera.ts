@@ -1,6 +1,6 @@
 import { roundTenth } from "./math";
 import { getMotionBlockEffectKind, getMotionMarkerViews } from "./motionEffects";
-import { getMotionTranslation } from "./renderRuntime";
+import { getMotionTranslation } from "../render-engine/renderRuntime";
 import { isExplicitTimelineMarkerMend } from "./timeline";
 import { FRAME_HEIGHT, FRAME_WIDTH, type Bounds, type FrameObject, type MotionEase, type MotionMarker, type Part, type PerspectiveSettings, type Point, type TimelineMotionLayerState } from "./types";
 

@@ -1,6 +1,6 @@
 import { getTransitionEffectPackage } from "./effects/registry";
 import type { TransitionSequenceStyle, TransitionVisualStyle } from "./effects/types";
-import { easeProgress } from "./renderRuntime";
+import { easeProgress } from "../render-engine/renderRuntime";
 import type { TransitionLayer } from "./types";
 
 export const defaultTransitionFrameRate = 30;

@@ -1,5 +1,5 @@
 import type { LayerAnimation } from "./types";
-import type { RenderStyle } from "./renderRuntime";
+import type { RenderStyle } from "../render-engine/renderRuntime";
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);

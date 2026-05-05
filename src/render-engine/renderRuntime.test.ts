@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { evaluateBackgroundLayer, evaluateFrameObject, getMotionTranslation } from "./renderRuntime";
-import { advanceTimeSensitiveSceneTime, applyAdjustmentLayersToSceneTime, applyPlaybackAdjustmentLayersToSceneTime, applyAdjustmentLayersToVisualStyle, getSceneTimeForTimeSensitiveDisplayTime, getTimeSensitiveDisplayDuration, getTimeSensitiveDisplayTime } from "./adjustments";
-import { installedEffectPackages } from "./effects/registry";
-import { applyTransitionLayersToVisualStyle, getTransitionFinishTime, getTransitionProgress, renderTransitionSequence } from "./transitions";
-import type { AdjustmentLayer, BackgroundLayer, FrameObject } from "./types";
+import { advanceTimeSensitiveSceneTime, applyAdjustmentLayersToSceneTime, applyPlaybackAdjustmentLayersToSceneTime, applyAdjustmentLayersToVisualStyle, getSceneTimeForTimeSensitiveDisplayTime, getTimeSensitiveDisplayDuration, getTimeSensitiveDisplayTime } from "../core/adjustments";
+import { installedEffectPackages } from "../core/effects/registry";
+import { applyTransitionLayersToVisualStyle, getTransitionFinishTime, getTransitionProgress, renderTransitionSequence } from "../core/transitions";
+import type { AdjustmentLayer, BackgroundLayer, FrameObject } from "../core/types";
 
 const baseObject: FrameObject = {
   id: "template-object",
