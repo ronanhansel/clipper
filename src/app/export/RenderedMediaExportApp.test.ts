@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { lensPostProcessKind } from "../../core/effects/postprocess/lens";
 import type { AdjustmentLayer, CompositionClip, PartFrame, ProjectManifest, Scene } from "../../core/types";
 import { FRAME_HEIGHT, FRAME_WIDTH } from "../../core/types";
-import { getExportPostProcessPasses } from "./RenderedMediaExportApp";
+import { getExportFrameScale, getExportPostProcessPasses } from "./RenderedMediaExportApp";
 
 const frame: PartFrame = { width: FRAME_WIDTH, height: FRAME_HEIGHT, style: { background: "#336699" } };
 const background = { id: "background", name: "Background", style: { background: "#336699" }, elements: [] };
@@ -21,6 +21,17 @@ describe("export post-process pass derivation", () => {
 
     expect(passes).toHaveLength(1);
     expect(passes[0]).toMatchObject({ kind: lensPostProcessKind, uniforms: { frameBackground: { r: 0.2, g: 0.4, b: 0.6 } } });
+  });
+});
+
+describe("export frame scale", () => {
+  it("uses selected export resolution to scale the render surface", () => {
+    expect(getExportFrameScale({ exportWidth: 3840, exportHeight: 2160 })).toBe(2);
+    expect(getExportFrameScale({ exportWidth: 2560, exportHeight: 1440 })).toBeCloseTo(4 / 3);
+  });
+
+  it("falls back to native composition scale for invalid export sizes", () => {
+    expect(getExportFrameScale({ exportWidth: 0, exportHeight: 2160 })).toBe(1);
   });
 });
 

@@ -16,22 +16,15 @@ const RESOLUTION_OPTIONS: { label: string; width: number; height: number }[] = [
 
 const FRAME_RATE_OPTIONS = [24, 30, 60] as const;
 
-const MEDIA_FORMAT_OPTIONS: { label: string; value: MediaExportFormat }[] = [
-  { label: "MOV ProRes 422 HQ", value: "prores-422-hq" },
-  { label: "MOV ProRes 4444", value: "prores-4444" },
-  { label: "MOV DNxHR HQX", value: "dnxhr-hqx" },
-  { label: "MOV Uncompressed BGRA", value: "mov" },
-  { label: "MP4 H.264 High Quality", value: "h264-high" },
-  { label: "MP4 (H.264)", value: "mp4" },
-  { label: "WebM (VP9)", value: "webm" },
-];
+const BASELINE_HD30_PIXELS_PER_SECOND = 1920 * 1080 * 30;
 
 export function ExportMediaDialog({ activeTab, durationSeconds, exportFrameRate, exportResolution, exporting, includeSources, mediaExportFormat, open, partCount, progress, projectFormat, projectName, resolution, reusePrerenderCache, sceneName, onExportFrameRateChange, onExportResolutionChange, onIncludeSourcesChange, onMediaExport, onMediaExportFormatChange, onOpenChange, onProjectExport, onProjectFormatChange, onReusePrerenderCacheChange, onTabChange }: { activeTab: ExportDialogTab; durationSeconds: number; exportFrameRate: number; exportResolution: { width: number; height: number }; exporting: boolean; includeSources: boolean; mediaExportFormat: MediaExportFormat; open: boolean; partCount: number; progress: string | null; projectFormat: ProjectExportFormat; projectName: string; resolution: ProjectManifest["resolution"]; reusePrerenderCache: boolean; sceneName: string; onExportFrameRateChange: (fps: number) => void; onExportResolutionChange: (res: { width: number; height: number }) => void; onIncludeSourcesChange: (includeSources: boolean) => void; onMediaExport: () => void; onMediaExportFormatChange: (format: MediaExportFormat) => void; onOpenChange: (open: boolean) => void; onProjectExport: () => void; onProjectFormatChange: (format: ProjectExportFormat) => void; onReusePrerenderCacheChange: (reuse: boolean) => void; onTabChange: (tab: ExportDialogTab) => void }) {
   const tabButtonClass = (tab: ExportDialogTab) => `rounded-[8px] px-3 py-1.5 text-xs font-extrabold transition ${activeTab === tab ? "bg-[#202b37] text-white shadow-[inset_0_0_0_1px_#2d4052]" : "text-[#9b9da7] hover:bg-[#20232c] hover:text-white"}`;
+  const mediaFormatOptions = buildMediaFormatOptions(exportResolution, exportFrameRate);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="overflow-visible">
         <DialogHeader>
           <DialogTitle>Export</DialogTitle>
           <DialogDescription>
@@ -60,7 +53,7 @@ export function ExportMediaDialog({ activeTab, durationSeconds, exportFrameRate,
               <ExportStat label="Compositions" value={`${partCount}`} />
             )}
             {activeTab === "media" ? (
-              <ExportStatDropdown popoverMinWidth="240px" label="Export format" value={MEDIA_FORMAT_OPTIONS.find((o) => o.value === mediaExportFormat)?.label ?? "MOV ProRes 422 HQ"} options={MEDIA_FORMAT_OPTIONS} selectedValue={mediaExportFormat} onChange={(value) => onMediaExportFormatChange(value as MediaExportFormat)} />
+              <ExportStatDropdown popoverMinWidth="260px" label="Export format" value={mediaFormatOptions.find((o) => o.value === mediaExportFormat)?.label ?? "MOV ProRes 422 HQ"} options={mediaFormatOptions} selectedValue={mediaExportFormat} onChange={(value) => onMediaExportFormatChange(value as MediaExportFormat)} />
             ) : (
               <ExportStat label="Export format" value={formatProjectExportLabel(projectFormat)} />
             )}
@@ -126,7 +119,9 @@ function ExportStat({ label, value, warning = false }: { label: string; value: s
   );
 }
 
-function ExportStatDropdown({ label, value, options, selectedValue, onChange, popoverMinWidth = "200px" }: { label: string; value: string; options: { label: string; value: string }[]; selectedValue: string; onChange: (value: string) => void; popoverMinWidth?: string }) {
+type DropdownOption<T extends string = string> = { label: string; value: T; description?: string };
+
+function ExportStatDropdown({ label, value, options, selectedValue, onChange, popoverMinWidth = "200px" }: { label: string; value: string; options: DropdownOption[]; selectedValue: string; onChange: (value: string) => void; popoverMinWidth?: string }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
 
@@ -142,15 +137,18 @@ function ExportStatDropdown({ label, value, options, selectedValue, onChange, po
       </button>
       {open ? (
         <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 z-50 mt-1 min-w-[var(--stat-popover-min-w)] max-w-[calc(100vw-2rem)] rounded-lg border border-[#2d313b] bg-[#15171e] p-1 shadow-[0_18px_60px_rgba(0,0,0,0.45)]" style={{ "--stat-popover-min-w": popoverMinWidth } as React.CSSProperties}>
+          <div className="fixed inset-0 z-[90]" onClick={() => setOpen(false)} />
+          <div className="absolute left-0 z-[91] mt-1 max-h-[min(320px,calc(100vh-160px))] min-w-[var(--stat-popover-min-w)] max-w-[calc(100vw-2rem)] overflow-y-auto rounded-lg border border-[#2d313b] bg-[#15171e] p-1 shadow-[0_18px_60px_rgba(0,0,0,0.45)]" style={{ "--stat-popover-min-w": popoverMinWidth } as React.CSSProperties}>
             {options.map((opt) => (
               <button
                 key={opt.value}
-                className={`flex w-full items-center rounded-md px-2.5 py-1.5 text-left text-xs font-bold whitespace-nowrap transition ${opt.value === selectedValue ? "text-[var(--clipper-accent-strong)]" : "text-[#dfe2ea] hover:bg-[#20232c] hover:text-white"}`}
+                className={`flex w-full items-center gap-3 rounded-md px-2.5 py-1.5 text-left text-xs font-bold transition ${opt.value === selectedValue ? "text-[var(--clipper-accent-strong)]" : "text-[#dfe2ea] hover:bg-[#20232c] hover:text-white"}`}
                 onClick={() => { onChange(opt.value); setOpen(false); }}
               >
-                <span className="flex-1">{opt.label}</span>
+                <span className="grid min-w-0 flex-1 gap-0.5">
+                  <span className="whitespace-nowrap">{opt.label}</span>
+                  {opt.description ? <span className="whitespace-nowrap text-[10px] font-semibold text-[#8e929d]">{opt.description}</span> : null}
+                </span>
                 {opt.value === selectedValue ? <span className="text-[var(--clipper-accent-strong)]">✓</span> : null}
               </button>
             ))}
@@ -187,6 +185,35 @@ function buildResolutionOptions(current: { width: number; height: number }, proj
 
 function formatResolutionKey(r: { width: number; height: number }) {
   return `${r.width}x${r.height}`;
+}
+
+function buildMediaFormatOptions(resolution: { width: number; height: number }, frameRate: number): DropdownOption<MediaExportFormat>[] {
+  const scale = (resolution.width * resolution.height * frameRate) / BASELINE_HD30_PIXELS_PER_SECOND;
+  return [
+    { label: "MOV ProRes 422 HQ", value: "prores-422-hq", description: formatEstimatedDataRate(27.5 * scale) },
+    { label: "MOV ProRes 4444", value: "prores-4444", description: formatEstimatedDataRate(41.25 * scale) },
+    { label: "MOV DNxHR HQX", value: "dnxhr-hqx", description: formatEstimatedDataRate(27.5 * scale) },
+    { label: "MOV Uncompressed BGRA", value: "mov", description: formatEstimatedDataRate((resolution.width * resolution.height * 4 * frameRate) / 1_000_000) },
+    { label: "MP4 H.264 High Quality", value: "h264-high", description: "CRF 12, variable MB/s" },
+    { label: "MP4 (H.264)", value: "mp4", description: formatEstimatedDataRate(1.5) },
+    { label: "WebM (VP9)", value: "webm", description: "CRF 30, variable MB/s" },
+  ];
+}
+
+function formatEstimatedDataRate(mbPerSecond: number) {
+  const mbPerMinute = mbPerSecond * 60;
+  return `~${formatDataAmount(mbPerSecond)}/s, ${formatDataAmount(mbPerMinute)}/min`;
+}
+
+function formatDataAmount(mb: number) {
+  if (mb >= 1000) return `${formatCompactNumber(mb / 1000)} GB`;
+  return `${formatCompactNumber(mb)} MB`;
+}
+
+function formatCompactNumber(value: number) {
+  if (value >= 100) return String(Math.round(value));
+  if (value >= 10) return value.toFixed(1);
+  return value.toFixed(2);
 }
 
 function formatProjectExportLabel(format: ProjectExportFormat) {

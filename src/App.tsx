@@ -179,6 +179,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
   const [debugSettingsEnabled, setDebugSettingsEnabledState] = useState(isDebugSettingsEnabledByDefault);
   const [prerenderCacheBlackMissDebug, setPrerenderCacheBlackMissDebugState] = useState(isPrerenderCacheBlackMissDebugEnabledByDefault);
   const [liveDomPostProcessPreviewEnabled, setLiveDomPostProcessPreviewEnabledState] = useState(isLiveDomPostProcessPreviewEnabledByDefault);
+  const [motionEffectPreviewScrubActive, setMotionEffectPreviewScrubActive] = useState(false);
   const [liveDomPostProcessMaxFps, setLiveDomPostProcessMaxFpsState] = useState(getInitialLiveDomPostProcessMaxFps);
   const liveDomPostProcessRuntimeEnabled = typeof window !== "undefined" && Boolean(window.clipper?.experimentalHtmlCanvasPostProcess);
   const {
@@ -1743,7 +1744,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
           hasActiveComposition={hasPreviewComposition}
           getPrerenderCacheBlockAtTime={prerenderCache.getBlockAtTime}
           liveDomPostProcessMaxFps={liveDomPostProcessMaxFps}
-          livePostProcessPreviewEnabled={liveDomPostProcessPreviewEnabled}
+          livePostProcessPreviewEnabled={liveDomPostProcessPreviewEnabled && !motionEffectPreviewScrubActive}
           mode={mode}
           onCachedPreviewDisplayReadyChange={(ready) => { cachedPreviewDisplayReadyRef.current = ready; }}
           prerenderCacheBlackMissDebug={prerenderCacheBlackMissDebug}
@@ -1786,7 +1787,10 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
             onUpdateMotionMarker={updateMotionMarker}
             onPreviewMotionMarker={previewMotionMarker}
             onPreviewMotionPickPoint={previewMotionPickPoint}
+            onMotionPreviewScrubStart={() => setMotionEffectPreviewScrubActive(true)}
+            onMotionPreviewScrubEnd={() => setMotionEffectPreviewScrubActive(false)}
             onClearMotionPreview={() => {
+              setMotionEffectPreviewScrubActive(false);
               clearMotionPreview();
               clearMotionPickPointPreview();
             }}

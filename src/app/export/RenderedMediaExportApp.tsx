@@ -184,9 +184,12 @@ export function RenderedMediaExportApp() {
     };
   }, [request]);
 
+  const exportWidth = request?.exportWidth ?? FRAME_WIDTH;
+  const exportHeight = request?.exportHeight ?? FRAME_HEIGHT;
+
   return (
-    <main className="relative overflow-hidden bg-black" style={{ width: FRAME_WIDTH, height: FRAME_HEIGHT }}>
-      <div className="absolute left-0 top-0 h-[1080px] w-[1920px] overflow-hidden bg-black">
+    <main className="relative overflow-hidden bg-black" style={{ width: exportWidth, height: exportHeight }}>
+      <div className="absolute left-0 top-0 overflow-hidden bg-black" style={{ width: exportWidth, height: exportHeight }}>
         <ExportRenderErrorBoundary onError={(error) => rejectPendingFrame(pendingRequestRef, error)} resetKey={request ? `${request.scene.id}:${request.sceneTime}` : "empty"}>
           {request ? <ExportFramePreview key={request.scene.id} refs={{ cameraRef, dragSelectionBoxRef, frameViewportRef }} request={request} /> : <div className="h-full w-full bg-black" />}
         </ExportRenderErrorBoundary>
@@ -196,6 +199,7 @@ export function RenderedMediaExportApp() {
 }
 
 function ExportFramePreview({ refs, request }: { refs: ExportFramePreviewRefs; request: ExportFrameRequest }) {
+  const frameScale = getExportFrameScale(request);
   const framePreviewProps = useMemo(() => {
     const { project, scene, sceneTime, frameRate } = request;
     const previewModel = deriveFramePreviewRenderModel({
@@ -219,7 +223,7 @@ function ExportFramePreview({ refs, request }: { refs: ExportFramePreviewRefs; r
       canSelectObjects: false,
       cameraTransform: identityCameraTransform,
       frameViewportRef: refs.frameViewportRef,
-      frameScale: 1,
+      frameScale,
       isPlaying: false,
       renderMode: request.renderMode ?? "export" as const,
       part: previewModel.part,
@@ -251,9 +255,16 @@ function ExportFramePreview({ refs, request }: { refs: ExportFramePreviewRefs; r
       onTextObjectDoubleClick: noopTextDoubleClick,
       onTrackerTargetPick: noopTrackerPick,
     };
-  }, [refs.cameraRef, refs.dragSelectionBoxRef, refs.frameViewportRef, request]);
+  }, [frameScale, refs.cameraRef, refs.dragSelectionBoxRef, refs.frameViewportRef, request]);
 
   return framePreviewProps ? <FramePreview {...framePreviewProps} /> : <div className="h-full w-full bg-black" />;
+}
+
+export function getExportFrameScale(request: { exportWidth?: number; exportHeight?: number }) {
+  const widthScale = (request.exportWidth ?? FRAME_WIDTH) / FRAME_WIDTH;
+  const heightScale = (request.exportHeight ?? FRAME_HEIGHT) / FRAME_HEIGHT;
+  if (!Number.isFinite(widthScale) || !Number.isFinite(heightScale) || widthScale <= 0 || heightScale <= 0) return 1;
+  return Math.min(widthScale, heightScale);
 }
 
 export function getExportPostProcessPasses(request: ExportFrameRequest): PostProcessPass[] {

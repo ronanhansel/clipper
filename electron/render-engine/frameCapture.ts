@@ -549,20 +549,18 @@ async function applyDefaultExportCaptureViewport(
   const [currentWidth, currentHeight] = window.getContentSize();
   if (currentWidth !== width || currentHeight !== height)
     window.setContentSize(width, height, false);
-  const scaleX = width / FRAME_WIDTH;
-  const scaleY = height / FRAME_HEIGHT;
   await withTimeout(
     window.webContents.executeJavaScript(
       `(() => {
         document.documentElement.style.width = "${width}px";
         document.documentElement.style.height = "${height}px";
         document.documentElement.style.overflow = "hidden";
-        document.body.style.width = "${FRAME_WIDTH}px";
-        document.body.style.height = "${FRAME_HEIGHT}px";
+        document.body.style.width = "${width}px";
+        document.body.style.height = "${height}px";
         document.body.style.overflow = "hidden";
         document.body.style.margin = "0";
         document.body.style.transformOrigin = "0 0";
-        document.body.style.transform = "translate3d(0, 0, 0) scale3d(${scaleX}, ${scaleY}, 1)";
+        document.body.style.transform = "none";
         return true;
       })()`,
       true,

@@ -186,32 +186,45 @@ export class RenderEngine {
 
     let pendingFrameWrite: Promise<void> | null = null;
     let activeMethod: VideoExportMethod = "renderer";
-    let lastReportedFrame = 0;
+    let encodedFrameCount = 0;
+    let capturedFrameCount = 0;
+    let workerCount = 1;
     const unregisterFfmpegCancel = this.registerActiveVideoRenderCancel(exportId, () => {
       if (!ffmpeg.killed) ffmpeg.kill("SIGTERM");
     });
     const reportStatus = (status: string, method: VideoExportMethod = activeMethod) => {
       activeMethod = method;
-      onProgress?.({ frame: lastReportedFrame, totalFrames, percent: Math.round((lastReportedFrame / totalFrames) * 100), status, method });
+      onProgress?.({ frame: encodedFrameCount, totalFrames, percent: Math.round((encodedFrameCount / totalFrames) * 100), status, method });
     };
-    const reportFrameProgress = (frameIndex: number, method: VideoExportMethod = activeMethod) => {
+    const reportCapturedFrameProgress = (_frameIndex: number, method: VideoExportMethod = activeMethod) => {
       activeMethod = method;
-      lastReportedFrame = Math.max(lastReportedFrame, frameIndex + 1);
-      onProgress?.({ frame: lastReportedFrame, totalFrames, percent: Math.round((lastReportedFrame / totalFrames) * 100), status: `Renderer frame ${lastReportedFrame} of ${totalFrames}`, method });
+      capturedFrameCount += 1;
+    };
+    const reportEncodedFrameProgress = (method: VideoExportMethod = activeMethod) => {
+      activeMethod = method;
+      encodedFrameCount += 1;
+      const status = workerCount > 1
+        ? `Encoding frame ${encodedFrameCount} of ${totalFrames} (${capturedFrameCount} captured)`
+        : `Encoding frame ${encodedFrameCount} of ${totalFrames}`;
+      onProgress?.({ frame: encodedFrameCount, totalFrames, percent: Math.round((encodedFrameCount / totalFrames) * 100), status, method });
     };
 
     try {
       if (exportId && this.cancelledVideoRenders.has(exportId))
         throw new Error("Video export cancelled.");
 
-      const workerCount = this.getExportWorkerCount(exportWidth, exportHeight, totalFrames);
+      workerCount = this.getExportWorkerCount(exportWidth, exportHeight, totalFrames);
       const workerRanges = this.splitFrameRangeForWorkers(frameRange, workerCount);
+      const workerRenderRanges = workerRanges.map((range) => ({
+        startFrame: frameRange.startFrame,
+        endFrame: range.endFrame,
+      }));
 
       const startupStatus = workerCount > 1
         ? `Renderer: capturing frames with ${workerCount} worker(s)`
         : "Renderer: capturing frames";
       reportStatus(startupStatus, "renderer");
-      console.log(`[clipper export] source=${source} total-frames=${totalFrames} tile-height=${exportTileHeight} resolution=${exportWidth}x${exportHeight} workers=${workerCount} ranges=${workerRanges.map(r => `${r.startFrame}-${r.endFrame}`).join(",")}`);
+      console.log(`[clipper export] source=${source} total-frames=${totalFrames} tile-height=${exportTileHeight} resolution=${exportWidth}x${exportHeight} workers=${workerCount} ranges=${workerRanges.map(r => `${r.startFrame}-${r.endFrame}`).join(",")} render-ranges=${workerRenderRanges.map(r => `${r.startFrame}-${r.endFrame}`).join(",")}`);
 
       const exportStartTime = Date.now();
 
@@ -231,10 +244,10 @@ export class RenderEngine {
       }
 
       // Launch all workers concurrently
-      const workerFutures = workerRanges.map((range, i) =>
+      const workerFutures = workerRenderRanges.map((range, i) =>
         this.renderSupervisedFrameRangeChild(
           project, manifestPath, scene, workerTempDirs[i], frameRate, durationSeconds,
-          totalFrames, exportTileHeight, source, reportFrameProgress, exportId,
+          totalFrames, exportTileHeight, source, reportCapturedFrameProgress, exportId,
           range, "export", exportWidth, exportHeight,
         ),
       );
@@ -306,14 +319,14 @@ export class RenderEngine {
           await this.writePrerenderFrame(cachePaths, frameBuffer, cacheKey, frameIndex / frameRate, frameRate, exportWidth, exportHeight);
         }
 
-        reportFrameProgress(frameIndex, "renderer");
+        reportEncodedFrameProgress("renderer");
       }
 
       // Clean up remaining frame files from all workers
       for (let w = 0; w < workerTempDirs.length; w += 1) {
         await this.removeSupervisedFrameOutputs(
           this.getSupervisedFrameRangeOutputPath(workerTempDirs[w]),
-          workerRanges[w],
+          workerRenderRanges[w],
         ).catch(() => undefined);
       }
 

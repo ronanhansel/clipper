@@ -16,6 +16,7 @@ type CoordinateAxis = {
   onChange: (value: string) => void;
   onNumberScrubEnd?: NumberInputProps["onNumberScrubEnd"];
   onNumberScrubPreview?: NumberInputProps["onNumberScrubPreview"];
+  onNumberScrubStart?: NumberInputProps["onNumberScrubStart"];
   resetValue?: NumberInputProps["resetValue"];
   step?: NumberInputProps["step"];
   value: NumberInputProps["value"];
@@ -67,6 +68,7 @@ function CoordinateAxisInput({ axis, fallbackLabel, fieldLabel }: { axis: Coordi
         onChange={(event) => axis.onChange(event.target.value)}
         onNumberScrubEnd={axis.onNumberScrubEnd}
         onNumberScrubPreview={axis.onNumberScrubPreview}
+        onNumberScrubStart={axis.onNumberScrubStart}
       />
     </label>
   );

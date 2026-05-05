@@ -35,6 +35,8 @@ type ConnectedInspectorContentProps = {
   onUpdateMotionMarker: (partId: string, markerId: string, updater: (marker: MotionMarker, part: Part) => MotionMarker) => void;
   onPreviewMotionMarker: (partId: string, markerId: string, updater: (marker: MotionMarker) => MotionMarker) => void;
   onPreviewMotionPickPoint: (point: Point | null) => void;
+  onMotionPreviewScrubStart: () => void;
+  onMotionPreviewScrubEnd: () => void;
   onClearMotionPreview: () => void;
   onUpdateMotionMarkerFocusGroup: (partId: string, markerId: string, focus: Point) => void;
   onUpdateSelectedMotionSnap: (key: "snapIn" | "snapOut", enabled: boolean) => void;
@@ -88,6 +90,8 @@ export function ConnectedInspectorContent({
   onUpdateMotionMarker,
   onPreviewMotionMarker,
   onPreviewMotionPickPoint,
+  onMotionPreviewScrubStart,
+  onMotionPreviewScrubEnd,
   onClearMotionPreview,
   onUpdateMotionMarkerFocusGroup,
   onUpdateSelectedMotionSnap,
@@ -132,6 +136,8 @@ export function ConnectedInspectorContent({
         onChange={(updater) => onUpdateMotionMarker(selectedMotionPart.id, selectedMotion.id, updater)}
         onPreviewMarker={(updater) => onPreviewMotionMarker(selectedMotionPart.id, selectedMotion.id, updater)}
         onPreviewPickPoint={onPreviewMotionPickPoint}
+        onPreviewScrubStart={onMotionPreviewScrubStart}
+        onPreviewScrubEnd={onMotionPreviewScrubEnd}
         onClearPreview={onClearMotionPreview}
         onChangeFocus={(focus) => onUpdateMotionMarkerFocusGroup(selectedMotionPart.id, selectedMotion.id, focus)}
         onChangeSelectedSnap={onUpdateSelectedMotionSnap}
