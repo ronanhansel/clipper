@@ -627,12 +627,15 @@ ipcMain.handle(
     exportWidth?: number,
     exportHeight?: number,
     mediaExportFormat?: string,
+    exportRenderQuality?: string,
+    exportWorkerMapping?: unknown,
   ) => {
     type MediaExportFormat = "prores-422-hq" | "prores-4444" | "dnxhr-hqx" | "mov" | "h264-high" | "mp4" | "webm";
     const knownFormats = new Set<string>(["prores-422-hq", "prores-4444", "dnxhr-hqx", "mov", "h264-high", "mp4", "webm"]);
     const defaultExtension = path.extname(defaultFileName).toLowerCase();
     const inferredFormat = defaultExtension === ".webm" ? "webm" : defaultExtension === ".mp4" ? "mp4" : "prores-422-hq";
     const format = (knownFormats.has(mediaExportFormat ?? "") ? mediaExportFormat : inferredFormat) as MediaExportFormat;
+    const renderQuality = normalizeExportRenderQuality(exportRenderQuality);
     const extension = format === "webm" ? ".webm" : format === "h264-high" || format === "mp4" ? ".mp4" : ".mov";
     const defaultPath = withMediaExportExtension(defaultFileName, extension);
     const filters = getMediaExportDialogFilters(format);
@@ -660,6 +663,8 @@ ipcMain.handle(
         exportWidth,
         exportHeight,
         exportFormat: format,
+        exportRenderQuality: renderQuality,
+        exportWorkerMapping: normalizeExportWorkerMapping(exportWorkerMapping),
         onProgress: (progress) =>
           event.sender.send(
             "clipper:video-export-progress",
@@ -672,6 +677,25 @@ ipcMain.handle(
     return outputPath;
   },
 );
+
+function normalizeExportRenderQuality(value: string | undefined): "standard" | "high" | "ultra" {
+  return value === "standard" || value === "ultra" ? value : "high";
+}
+
+function normalizeExportWorkerMapping(value: unknown): { hd: number; qhd: number; uhd: number } {
+  const candidate = value && typeof value === "object" ? value as { hd?: unknown; qhd?: unknown; uhd?: unknown } : {};
+  return {
+    hd: normalizeExportWorkerCount(candidate.hd, 4),
+    qhd: normalizeExportWorkerCount(candidate.qhd, 2),
+    uhd: normalizeExportWorkerCount(candidate.uhd, 1),
+  };
+}
+
+function normalizeExportWorkerCount(value: unknown, fallback: number) {
+  const numeric = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.min(Math.max(Math.round(numeric), 1), 8);
+}
 
 function getMediaExportDialogFilters(format: "prores-422-hq" | "prores-4444" | "dnxhr-hqx" | "mov" | "h264-high" | "mp4" | "webm") {
   switch (format) {

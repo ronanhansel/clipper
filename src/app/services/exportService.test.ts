@@ -46,7 +46,7 @@ describe("export service", () => {
     expect(prepared.scene.compositions.map((composition) => composition.id)).toEqual(["visible-clip", "hidden-clip"]);
     expect(prepared.durationSeconds).toBe(2);
     expect(prepared.totalFrames).toBe(60);
-    expect(hostMocks.renderVideoExport).toHaveBeenCalledWith("export-id", "export-project-scene.mov", expect.any(Object), "clipper/projects/export/project.json", expect.objectContaining({ compositions: expect.arrayContaining([expect.objectContaining({ id: "hidden-clip" })]) }), 30, 2, 270, true, FRAME_WIDTH, FRAME_HEIGHT, "prores-422-hq");
+    expect(hostMocks.renderVideoExport).toHaveBeenLastCalledWith("export-id", "export-project-scene.mov", expect.any(Object), "clipper/projects/export/project.json", expect.objectContaining({ compositions: expect.arrayContaining([expect.objectContaining({ id: "hidden-clip" })]) }), 30, 2, 270, true, FRAME_WIDTH, FRAME_HEIGHT, "prores-422-hq", "high", undefined);
   });
 
   it("prepares rendered media with mp4 extension when format is mp4", async () => {
@@ -103,6 +103,6 @@ describe("export service", () => {
     expect(prepared.defaultFileName).toMatch(/\.webm$/);
     hostMocks.renderVideoExport.mockResolvedValue("/tmp/export.webm");
     await exportService.renderVideoExport("export-id", prepared.defaultFileName, project, "clipper/projects/export/project.json", prepared.scene, prepared.durationSeconds, 270, true, undefined, undefined, "webm");
-    expect(hostMocks.renderVideoExport).toHaveBeenCalledWith("export-id", expect.stringMatching(/\.webm$/), expect.any(Object), "clipper/projects/export/project.json", expect.any(Object), 30, expect.any(Number), 270, true, FRAME_WIDTH, FRAME_HEIGHT, "webm");
+    expect(hostMocks.renderVideoExport).toHaveBeenLastCalledWith("export-id", expect.stringMatching(/\.webm$/), expect.any(Object), "clipper/projects/export/project.json", expect.any(Object), 30, expect.any(Number), 270, true, FRAME_WIDTH, FRAME_HEIGHT, "webm", "high", undefined);
   });
 });

@@ -1,12 +1,12 @@
 import { RotateCcw } from "lucide-react";
-import { appBarButtonBase, defaultLiveDomPostProcessMaxFps, defaultNewMarkerDurationSeconds, defaultPausePlaybackOnScrub, defaultPrerenderBlockDurationMs, defaultScrubCommitThrottleMs, defaultTimelineEndPaddingFraction, defaultTimelinePrecision, defaultVideoExportTileHeight, maxLiveDomPostProcessMaxFps, maxPrerenderBlockDurationMs, maxVideoExportTileHeight, minLiveDomPostProcessMaxFps, minPrerenderBlockDurationMs, minVideoExportTileHeight } from "../app/config";
-import type { SettingsSection } from "../app/types";
+import { appBarButtonBase, defaultExportWorkerMapping, defaultLiveDomPostProcessMaxFps, defaultNewMarkerDurationSeconds, defaultPausePlaybackOnScrub, defaultPrerenderBlockDurationMs, defaultScrubCommitThrottleMs, defaultTimelineEndPaddingFraction, defaultTimelinePrecision, defaultVideoExportTileHeight, maxExportWorkerCount, maxLiveDomPostProcessMaxFps, maxPrerenderBlockDurationMs, maxVideoExportTileHeight, minExportWorkerCount, minLiveDomPostProcessMaxFps, minPrerenderBlockDurationMs, minVideoExportTileHeight } from "../app/config";
+import type { ExportWorkerResolutionMapping, SettingsSection } from "../app/types";
 import { clamp } from "../core/math";
 import { Dialog, DialogContent } from "./ui/dialog";
 import { Input } from "./ui/input";
 import { Switch } from "./ui/switch";
 
-export function SettingsDialog({ activeSection, debugSettingsEnabled, liveDomPostProcessPreviewEnabled, liveDomPostProcessRuntimeEnabled, liveDomPostProcessMaxFps, open, pausePlaybackOnScrub, prerenderCacheBlackMissDebug, prerenderCacheEnabled, prerenderBlockDurationMs, scrubCommitThrottleMs, defaultNewMarkerDurationSeconds: markerDurationSeconds, timelineEndPaddingFraction, timelinePrecision, videoExportTileHeight, onActiveSectionChange, onDebugSettingsEnabledChange, onLiveDomPostProcessPreviewEnabledChange, onLiveDomPostProcessMaxFpsChange, onOpenChange, onPausePlaybackOnScrubChange, onPrerenderCacheBlackMissDebugChange, onPrerenderCacheEnabledChange, onPrerenderBlockDurationMsChange, onClearAllPrerenderCaches, onScrubCommitThrottleMsChange, onDefaultNewMarkerDurationSecondsChange, onTimelineEndPaddingFractionChange, onTimelinePrecisionChange, onVideoExportTileHeightChange }: { activeSection: SettingsSection; debugSettingsEnabled: boolean; liveDomPostProcessPreviewEnabled: boolean; liveDomPostProcessRuntimeEnabled: boolean; liveDomPostProcessMaxFps: number; open: boolean; pausePlaybackOnScrub: boolean; prerenderCacheBlackMissDebug: boolean; prerenderCacheEnabled: boolean; prerenderBlockDurationMs: number; scrubCommitThrottleMs: number; defaultNewMarkerDurationSeconds: number; timelineEndPaddingFraction: number; timelinePrecision: number; videoExportTileHeight: number; onActiveSectionChange: (section: SettingsSection) => void; onDebugSettingsEnabledChange: (enabled: boolean) => void; onLiveDomPostProcessPreviewEnabledChange: (enabled: boolean) => void; onLiveDomPostProcessMaxFpsChange: (value: number) => void; onOpenChange: (open: boolean) => void; onPausePlaybackOnScrubChange: (enabled: boolean) => void; onPrerenderCacheBlackMissDebugChange: (enabled: boolean) => void; onPrerenderCacheEnabledChange: (enabled: boolean) => void; onPrerenderBlockDurationMsChange: (value: number) => void; onClearAllPrerenderCaches: () => void; onScrubCommitThrottleMsChange: (value: number) => void; onDefaultNewMarkerDurationSecondsChange: (value: number) => void; onTimelineEndPaddingFractionChange: (value: number) => void; onTimelinePrecisionChange: (value: number) => void; onVideoExportTileHeightChange: (value: number) => void }) {
+export function SettingsDialog({ activeSection, debugSettingsEnabled, exportWorkerMapping, liveDomPostProcessPreviewEnabled, liveDomPostProcessRuntimeEnabled, liveDomPostProcessMaxFps, open, pausePlaybackOnScrub, prerenderCacheBlackMissDebug, prerenderCacheEnabled, prerenderBlockDurationMs, scrubCommitThrottleMs, defaultNewMarkerDurationSeconds: markerDurationSeconds, timelineEndPaddingFraction, timelinePrecision, videoExportTileHeight, onActiveSectionChange, onDebugSettingsEnabledChange, onExportWorkerMappingChange, onLiveDomPostProcessPreviewEnabledChange, onLiveDomPostProcessMaxFpsChange, onOpenChange, onPausePlaybackOnScrubChange, onPrerenderCacheBlackMissDebugChange, onPrerenderCacheEnabledChange, onPrerenderBlockDurationMsChange, onClearAllPrerenderCaches, onScrubCommitThrottleMsChange, onDefaultNewMarkerDurationSecondsChange, onTimelineEndPaddingFractionChange, onTimelinePrecisionChange, onVideoExportTileHeightChange }: { activeSection: SettingsSection; debugSettingsEnabled: boolean; exportWorkerMapping: ExportWorkerResolutionMapping; liveDomPostProcessPreviewEnabled: boolean; liveDomPostProcessRuntimeEnabled: boolean; liveDomPostProcessMaxFps: number; open: boolean; pausePlaybackOnScrub: boolean; prerenderCacheBlackMissDebug: boolean; prerenderCacheEnabled: boolean; prerenderBlockDurationMs: number; scrubCommitThrottleMs: number; defaultNewMarkerDurationSeconds: number; timelineEndPaddingFraction: number; timelinePrecision: number; videoExportTileHeight: number; onActiveSectionChange: (section: SettingsSection) => void; onDebugSettingsEnabledChange: (enabled: boolean) => void; onExportWorkerMappingChange: (mapping: ExportWorkerResolutionMapping) => void; onLiveDomPostProcessPreviewEnabledChange: (enabled: boolean) => void; onLiveDomPostProcessMaxFpsChange: (value: number) => void; onOpenChange: (open: boolean) => void; onPausePlaybackOnScrubChange: (enabled: boolean) => void; onPrerenderCacheBlackMissDebugChange: (enabled: boolean) => void; onPrerenderCacheEnabledChange: (enabled: boolean) => void; onPrerenderBlockDurationMsChange: (value: number) => void; onClearAllPrerenderCaches: () => void; onScrubCommitThrottleMsChange: (value: number) => void; onDefaultNewMarkerDurationSecondsChange: (value: number) => void; onTimelineEndPaddingFractionChange: (value: number) => void; onTimelinePrecisionChange: (value: number) => void; onVideoExportTileHeightChange: (value: number) => void }) {
   const navItems: Array<{ id: SettingsSection; label: string }> = [
     { id: "playback", label: "Playback" },
     { id: "timeline", label: "Timeline" },
@@ -48,6 +48,12 @@ export function SettingsDialog({ activeSection, debugSettingsEnabled, liveDomPos
     const parsed = Number(value);
     if (!Number.isFinite(parsed)) return;
     onVideoExportTileHeightChange(Math.round(clamp(parsed, minVideoExportTileHeight, maxVideoExportTileHeight)));
+  }
+
+  function updateExportWorkerCount(key: keyof ExportWorkerResolutionMapping, value: string) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return;
+    onExportWorkerMappingChange({ ...exportWorkerMapping, [key]: Math.round(clamp(parsed, minExportWorkerCount, maxExportWorkerCount)) });
   }
 
   function updatePrerenderBlockDuration(value: string) {
@@ -224,6 +230,16 @@ export function SettingsDialog({ activeSection, debugSettingsEnabled, liveDomPos
                       </button>
                     </span>
                   </label>
+                  <div className="h-px bg-[#363b47]" />
+                  <div className="grid gap-1.5">
+                    <strong className="text-sm text-white">Renderer workers</strong>
+                    <p className="text-xs leading-5 text-[#8f939d]">Controls how many hidden renderer processes capture frames in parallel for each output-resolution bucket. Higher values can be faster but use more CPU, RAM, and Chromium tile memory.</p>
+                  </div>
+                  <div className="grid grid-cols-3 gap-3">
+                    <WorkerCountField id="export-workers-hd" label="1080p and below" value={exportWorkerMapping.hd} defaultValue={defaultExportWorkerMapping.hd} onChange={(value) => updateExportWorkerCount("hd", value)} onReset={() => onExportWorkerMappingChange({ ...exportWorkerMapping, hd: defaultExportWorkerMapping.hd })} />
+                    <WorkerCountField id="export-workers-qhd" label="1440p" value={exportWorkerMapping.qhd} defaultValue={defaultExportWorkerMapping.qhd} onChange={(value) => updateExportWorkerCount("qhd", value)} onReset={() => onExportWorkerMappingChange({ ...exportWorkerMapping, qhd: defaultExportWorkerMapping.qhd })} />
+                    <WorkerCountField id="export-workers-uhd" label="4K and above" value={exportWorkerMapping.uhd} defaultValue={defaultExportWorkerMapping.uhd} onChange={(value) => updateExportWorkerCount("uhd", value)} onReset={() => onExportWorkerMappingChange({ ...exportWorkerMapping, uhd: defaultExportWorkerMapping.uhd })} />
+                  </div>
                 </div>
               ) : (
                 <div className="grid gap-4 rounded-xl border border-[#363b47] bg-[#1b1e26] p-4">
@@ -265,5 +281,19 @@ export function SettingsDialog({ activeSection, debugSettingsEnabled, liveDomPos
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function WorkerCountField({ id, label, value, defaultValue, onChange, onReset }: { id: string; label: string; value: number; defaultValue: number; onChange: (value: string) => void; onReset: () => void }) {
+  return (
+    <label className="grid gap-1.5 text-xs font-bold text-[#dfe2ea]" htmlFor={id}>
+      {label}
+      <span className="relative">
+        <Input id={id} className="pr-10" min={minExportWorkerCount} max={maxExportWorkerCount} step={1} type="number" value={value} onChange={(event) => onChange(event.target.value)} />
+        <button aria-label={`Reset ${label} workers to ${defaultValue}`} className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-md text-[#8f939d] transition hover:bg-[#252a34] hover:text-white" type="button" onClick={onReset}>
+          <RotateCcw size={14} />
+        </button>
+      </span>
+    </label>
   );
 }

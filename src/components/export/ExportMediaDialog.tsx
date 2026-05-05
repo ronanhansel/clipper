@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { appBarButtonBase, mutedCaps } from "../../app/config";
-import type { ExportDialogTab, MediaExportFormat, ProjectExportFormat, VideoExportProgress } from "../../app/types";
+import type { ExportDialogTab, ExportRenderQuality, MediaExportFormat, ProjectExportFormat, VideoExportProgress } from "../../app/types";
 import { clamp } from "../../core/math";
 import { formatTime } from "../../core/timeline";
 import type { ProjectManifest } from "../../core/types";
@@ -17,10 +17,16 @@ const RESOLUTION_OPTIONS: { label: string; width: number; height: number }[] = [
 const FRAME_RATE_OPTIONS = [24, 30, 60] as const;
 
 const BASELINE_HD30_PIXELS_PER_SECOND = 1920 * 1080 * 30;
+const RENDER_QUALITY_OPTIONS: { label: string; value: ExportRenderQuality; scale: number }[] = [
+  { label: "Standard", value: "standard", scale: 1 },
+  { label: "High", value: "high", scale: 2 },
+  { label: "Ultra", value: "ultra", scale: 3 },
+];
 
-export function ExportMediaDialog({ activeTab, durationSeconds, exportFrameRate, exportResolution, exporting, includeSources, mediaExportFormat, open, partCount, progress, projectFormat, projectName, resolution, reusePrerenderCache, sceneName, onExportFrameRateChange, onExportResolutionChange, onIncludeSourcesChange, onMediaExport, onMediaExportFormatChange, onOpenChange, onProjectExport, onProjectFormatChange, onReusePrerenderCacheChange, onTabChange }: { activeTab: ExportDialogTab; durationSeconds: number; exportFrameRate: number; exportResolution: { width: number; height: number }; exporting: boolean; includeSources: boolean; mediaExportFormat: MediaExportFormat; open: boolean; partCount: number; progress: string | null; projectFormat: ProjectExportFormat; projectName: string; resolution: ProjectManifest["resolution"]; reusePrerenderCache: boolean; sceneName: string; onExportFrameRateChange: (fps: number) => void; onExportResolutionChange: (res: { width: number; height: number }) => void; onIncludeSourcesChange: (includeSources: boolean) => void; onMediaExport: () => void; onMediaExportFormatChange: (format: MediaExportFormat) => void; onOpenChange: (open: boolean) => void; onProjectExport: () => void; onProjectFormatChange: (format: ProjectExportFormat) => void; onReusePrerenderCacheChange: (reuse: boolean) => void; onTabChange: (tab: ExportDialogTab) => void }) {
+export function ExportMediaDialog({ activeTab, durationSeconds, exportFrameRate, exportRenderQuality, exportResolution, exporting, includeSources, mediaExportFormat, open, partCount, progress, projectFormat, projectName, resolution, sceneName, onExportFrameRateChange, onExportRenderQualityChange, onExportResolutionChange, onIncludeSourcesChange, onMediaExport, onMediaExportFormatChange, onOpenChange, onProjectExport, onProjectFormatChange, onTabChange }: { activeTab: ExportDialogTab; durationSeconds: number; exportFrameRate: number; exportRenderQuality: ExportRenderQuality; exportResolution: { width: number; height: number }; exporting: boolean; includeSources: boolean; mediaExportFormat: MediaExportFormat; open: boolean; partCount: number; progress: string | null; projectFormat: ProjectExportFormat; projectName: string; resolution: ProjectManifest["resolution"]; sceneName: string; onExportFrameRateChange: (fps: number) => void; onExportRenderQualityChange: (quality: ExportRenderQuality) => void; onExportResolutionChange: (res: { width: number; height: number }) => void; onIncludeSourcesChange: (includeSources: boolean) => void; onMediaExport: () => void; onMediaExportFormatChange: (format: MediaExportFormat) => void; onOpenChange: (open: boolean) => void; onProjectExport: () => void; onProjectFormatChange: (format: ProjectExportFormat) => void; onTabChange: (tab: ExportDialogTab) => void }) {
   const tabButtonClass = (tab: ExportDialogTab) => `rounded-[8px] px-3 py-1.5 text-xs font-extrabold transition ${activeTab === tab ? "bg-[#202b37] text-white shadow-[inset_0_0_0_1px_#2d4052]" : "text-[#9b9da7] hover:bg-[#20232c] hover:text-white"}`;
   const mediaFormatOptions = buildMediaFormatOptions(exportResolution, exportFrameRate);
+  const renderQualityOptions = buildRenderQualityOptions(exportResolution);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -57,18 +63,13 @@ export function ExportMediaDialog({ activeTab, durationSeconds, exportFrameRate,
             ) : (
               <ExportStat label="Export format" value={formatProjectExportLabel(projectFormat)} />
             )}
+            {activeTab === "media" ? (
+              <ExportStatDropdown popoverMinWidth="260px" label="Render quality" value={renderQualityOptions.find((o) => o.value === exportRenderQuality)?.label ?? "High"} options={renderQualityOptions} selectedValue={exportRenderQuality} onChange={(value) => onExportRenderQualityChange(value as ExportRenderQuality)} />
+            ) : null}
           </div>
 
           {activeTab === "media" ? (
-            <p className="text-[11px] font-semibold text-[#8e929d]">The composition renders at its native coordinate space; the selected export resolution scales the final video output dimensions.</p>
-          ) : null}
-
-          {activeTab === "media" ? (
             <div>
-              <label className="flex w-fit items-center gap-2 text-xs font-semibold text-[#aeb3bf]">
-                <Checkbox checked={reusePrerenderCache} onCheckedChange={(checked) => onReusePrerenderCacheChange(checked === true)} />
-                <span>Use cached frames</span>
-              </label>
               {progress ? <span className="rounded-lg bg-[#10131a] px-3 py-2 text-xs font-bold text-[var(--clipper-accent-strong)]">{progress}</span> : null}
             </div>
           ) : (
@@ -185,6 +186,14 @@ function buildResolutionOptions(current: { width: number; height: number }, proj
 
 function formatResolutionKey(r: { width: number; height: number }) {
   return `${r.width}x${r.height}`;
+}
+
+function buildRenderQualityOptions(resolution: { width: number; height: number }): DropdownOption<ExportRenderQuality>[] {
+  return RENDER_QUALITY_OPTIONS.map((option) => ({
+    label: option.label,
+    value: option.value,
+    description: `${option.scale}× supersample, internal ${Math.round(resolution.width * option.scale)} × ${Math.round(resolution.height * option.scale)}`,
+  }));
 }
 
 function buildMediaFormatOptions(resolution: { width: number; height: number }, frameRate: number): DropdownOption<MediaExportFormat>[] {

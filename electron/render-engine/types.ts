@@ -54,6 +54,8 @@ export type RenderSceneToVideoOptions = {
   exportWidth?: number;
   exportHeight?: number;
   exportFormat?: "prores-422-hq" | "prores-4444" | "dnxhr-hqx" | "mov" | "h264-high" | "mp4" | "webm";
+  exportRenderQuality?: "standard" | "high" | "ultra";
+  exportWorkerMapping?: { hd?: number; qhd?: number; uhd?: number };
   onProgress?: (progress: VideoExportProgress) => void;
 };
 

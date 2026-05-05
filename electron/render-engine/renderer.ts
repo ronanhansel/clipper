@@ -144,10 +144,15 @@ export class RenderEngine {
       exportWidth = FRAME_WIDTH,
       exportHeight = FRAME_HEIGHT,
       exportFormat = "prores-422-hq",
+      exportRenderQuality = "high",
+      exportWorkerMapping,
     } = options;
     // Clear any previous cancel flag for this export ID
     if (exportId) this.cancelledVideoRenders.delete(exportId);
-    const exportTileHeight = this.clampExportTileHeight(tileHeight, exportHeight);
+    const renderScale = this.getExportRenderQualityScale(exportRenderQuality);
+    const captureWidth = Math.max(1, Math.round(exportWidth * renderScale));
+    const captureHeight = Math.max(1, Math.round(exportHeight * renderScale));
+    const captureTileHeight = this.clampExportTileHeight(tileHeight * renderScale, captureHeight);
     await fs.mkdir(path.dirname(outputPath), { recursive: true });
     const encoder = this.getVideoEncoderArgs(exportFormat);
     const totalFrames = Math.max(1, Math.ceil(durationSeconds * frameRate));
@@ -158,13 +163,14 @@ export class RenderEngine {
     );
     await fs.mkdir(tempDir, { recursive: true });
     onProgress?.({ frame: 0, totalFrames, percent: 0, status: `Preparing ${encoder.label} export...` });
-    console.log(`[clipper export] source=${source} total-frames=${totalFrames} tile-height=${exportTileHeight} resolution=${exportWidth}x${exportHeight}`);
+    console.log(`[clipper export] source=${source} total-frames=${totalFrames} tile-height=${captureTileHeight} output=${exportWidth}x${exportHeight} capture=${captureWidth}x${captureHeight} quality=${exportRenderQuality}`);
 
     const ffmpeg = spawn(this.ffmpegPath, [
       "-y", "-f", "rawvideo", "-pix_fmt", "bgra",
-      "-s", `${exportWidth}x${exportHeight}`,
+      "-s", `${captureWidth}x${captureHeight}`,
       "-framerate", String(frameRate),
       "-i", "-", "-an",
+      ...(captureWidth !== exportWidth || captureHeight !== exportHeight ? ["-vf", `scale=${exportWidth}:${exportHeight}:flags=lanczos`] : []),
       ...encoder.args,
       ...(encoder.movflags ? ["-movflags", encoder.movflags] : []),
       outputPath,
@@ -213,7 +219,7 @@ export class RenderEngine {
       if (exportId && this.cancelledVideoRenders.has(exportId))
         throw new Error("Video export cancelled.");
 
-      workerCount = this.getExportWorkerCount(exportWidth, exportHeight, totalFrames);
+      workerCount = this.getExportWorkerCount(exportWidth, exportHeight, totalFrames, exportWorkerMapping);
       const workerRanges = this.splitFrameRangeForWorkers(frameRange, workerCount);
       const workerRenderRanges = workerRanges.map((range) => ({
         startFrame: frameRange.startFrame,
@@ -224,7 +230,7 @@ export class RenderEngine {
         ? `Renderer: capturing frames with ${workerCount} worker(s)`
         : "Renderer: capturing frames";
       reportStatus(startupStatus, "renderer");
-      console.log(`[clipper export] source=${source} total-frames=${totalFrames} tile-height=${exportTileHeight} resolution=${exportWidth}x${exportHeight} workers=${workerCount} ranges=${workerRanges.map(r => `${r.startFrame}-${r.endFrame}`).join(",")} render-ranges=${workerRenderRanges.map(r => `${r.startFrame}-${r.endFrame}`).join(",")}`);
+      console.log(`[clipper export] source=${source} total-frames=${totalFrames} tile-height=${captureTileHeight} output=${exportWidth}x${exportHeight} capture=${captureWidth}x${captureHeight} quality=${exportRenderQuality} workers=${workerCount} ranges=${workerRanges.map(r => `${r.startFrame}-${r.endFrame}`).join(",")} render-ranges=${workerRenderRanges.map(r => `${r.startFrame}-${r.endFrame}`).join(",")}`);
 
       const exportStartTime = Date.now();
 
@@ -247,8 +253,8 @@ export class RenderEngine {
       const workerFutures = workerRenderRanges.map((range, i) =>
         this.renderSupervisedFrameRangeChild(
           project, manifestPath, scene, workerTempDirs[i], frameRate, durationSeconds,
-          totalFrames, exportTileHeight, source, reportCapturedFrameProgress, exportId,
-          range, "export", exportWidth, exportHeight,
+          totalFrames, captureTileHeight, source, reportCapturedFrameProgress, exportId,
+          range, "export", captureWidth, captureHeight,
         ),
       );
 
@@ -269,9 +275,9 @@ export class RenderEngine {
         );
       });
 
-      const expectedFrameSize = exportWidth * exportHeight * 4;
-      const cacheKey = reusePrerenderCache && exportWidth === FRAME_WIDTH && exportHeight === FRAME_HEIGHT
-        ? this.getPrerenderCacheKey(project, scene, frameRate, exportTileHeight, DEFAULT_PRERENDER_BLOCK_DURATION_MS, exportWidth, exportHeight)
+      const expectedFrameSize = captureWidth * captureHeight * 4;
+      const cacheKey = reusePrerenderCache && renderScale === 1 && exportWidth === FRAME_WIDTH && exportHeight === FRAME_HEIGHT
+        ? this.getPrerenderCacheKey(project, scene, frameRate, captureTileHeight, DEFAULT_PRERENDER_BLOCK_DURATION_MS, exportWidth, exportHeight)
         : null;
 
       // Stream frames to ffmpeg stdin in increasing frame order
@@ -586,12 +592,17 @@ export class RenderEngine {
     return Math.min(Math.max(Math.round(value), 1), maxHeight);
   }
 
+  private getExportRenderQualityScale(quality: RenderSceneToVideoOptions["exportRenderQuality"]): number {
+    if (quality === "standard") return 1;
+    if (quality === "ultra") return 3;
+    return 2;
+  }
+
   // ── Parallel worker helpers ──────────────────────────────────────────
 
-  private getExportWorkerCount(exportWidth: number, exportHeight: number, totalFrames: number): number {
+  private getExportWorkerCount(exportWidth: number, exportHeight: number, totalFrames: number, mapping: RenderSceneToVideoOptions["exportWorkerMapping"]): number {
     const cpuCount = os.availableParallelism?.() ?? os.cpus().length;
-    const is1080pOrLower = exportHeight <= 1080;
-    let maxWorkers = is1080pOrLower ? 4 : 2;
+    let maxWorkers = exportHeight <= 1080 ? mapping?.hd ?? 4 : exportHeight <= 1440 ? mapping?.qhd ?? 2 : mapping?.uhd ?? 1;
     maxWorkers = Math.min(maxWorkers, Math.max(1, cpuCount - 1));
     return Math.max(1, Math.min(maxWorkers, totalFrames));
   }

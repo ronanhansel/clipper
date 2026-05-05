@@ -40,13 +40,13 @@ import { RightInspectorPanel } from "./app/shell/RightInspectorPanel";
 import { useEditorViewportState } from "./app/shell/useEditorViewportState";
 import { useEditorModeCommands } from "./app/shell/useEditorModeCommands";
 import { useProjectTitleRename } from "./app/shell/useProjectTitleRename";
-import { defaultLiveDomPostProcessMaxFps, defaultPrerenderBlockDurationMs, defaultScrubCommitThrottleMs, defaultVideoExportTileHeight, maxLiveDomPostProcessMaxFps, maxPrerenderBlockDurationMs, maxVideoExportTileHeight, minLiveDomPostProcessMaxFps, minPrerenderBlockDurationMs, minVideoExportTileHeight, selectorHandleSizePx, selectorOffsetPx, videoExportFrameRate } from "./app/config";
+import { defaultExportWorkerMapping, defaultLiveDomPostProcessMaxFps, defaultPrerenderBlockDurationMs, defaultScrubCommitThrottleMs, defaultVideoExportTileHeight, maxExportWorkerCount, maxLiveDomPostProcessMaxFps, maxPrerenderBlockDurationMs, maxVideoExportTileHeight, minExportWorkerCount, minLiveDomPostProcessMaxFps, minPrerenderBlockDurationMs, minVideoExportTileHeight, selectorHandleSizePx, selectorOffsetPx, videoExportFrameRate } from "./app/config";
 import { useEditorStatePersistence } from "./app/project/useEditorStatePersistence";
 import { useEditorDerivedState } from "./app/state/editorDerivedState";
 import { getFramePreviewTimelineLayers } from "./app/state/framePreviewRenderModel";
 import { EditorStoreProvider, useAppEditorState, useEditorStoreApi, type EditorTab } from "./app/state/editorStore";
 import { ProjectStoreProvider } from "./app/state/projectStore";
-import { type AdjustmentLayerSelection, type CompositionSelection, type ExportDialogTab, type LeftPanelTab, type MediaExportFormat, type PlaybackClock, type ProjectExportFormat, type RightPanelTab, type SettingsSection } from "./app/types";
+import { type AdjustmentLayerSelection, type CompositionSelection, type ExportDialogTab, type ExportRenderQuality, type ExportWorkerResolutionMapping, type LeftPanelTab, type MediaExportFormat, type PlaybackClock, type ProjectExportFormat, type RightPanelTab, type SettingsSection } from "./app/types";
 import { applyAdjustmentLayersToVisualStyle, getTimeSensitiveDisplayDuration, getTimeSensitiveDisplayTime } from "./core/adjustments";
 import { isMarkerOnMotionLayer, type CameraPreviewTransform } from "./core/camera";
 import { liveDomPostProcessStorageKey } from "./core/effects/postprocess/liveDomCapability";
@@ -175,6 +175,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
   const [reusePrerenderCacheForExport, setReusePrerenderCacheForExportState] = useState(isPrerenderCacheReuseEnabledByDefault);
   const [exportFrameRate, setExportFrameRate] = useState(videoExportFrameRate);
   const [mediaExportFormat, setMediaExportFormat] = useState<MediaExportFormat>("prores-422-hq");
+  const [exportRenderQuality, setExportRenderQuality] = useState<ExportRenderQuality>("high");
   const [prerenderCacheEnabled, setPrerenderCacheEnabledState] = useState(isPrerenderCacheEnabledByDefault);
   const [debugSettingsEnabled, setDebugSettingsEnabledState] = useState(isDebugSettingsEnabledByDefault);
   const [prerenderCacheBlackMissDebug, setPrerenderCacheBlackMissDebugState] = useState(isPrerenderCacheBlackMissDebugEnabledByDefault);
@@ -264,6 +265,9 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
   const playbackPlayheadRef = useRef<HTMLDivElement | null>(null);
   const [videoExportTileHeight, setVideoExportTileHeightState] = useState(
     getInitialVideoExportTileHeight,
+  );
+  const [exportWorkerMapping, setExportWorkerMappingState] = useState(
+    getInitialExportWorkerMapping,
   );
   const [prerenderBlockDurationMs, setPrerenderBlockDurationMsState] = useState(
     getInitialPrerenderBlockDurationMs,
@@ -662,6 +666,11 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     setVideoExportTileHeightState(nextValue);
     window.localStorage.setItem("clipper:video-export-tile-height", String(nextValue));
   }
+  function setExportWorkerMapping(mapping: ExportWorkerResolutionMapping) {
+    const nextMapping = clampExportWorkerMapping(mapping);
+    setExportWorkerMappingState(nextMapping);
+    window.localStorage.setItem("clipper:export-worker-mapping", JSON.stringify(nextMapping));
+  }
   function setReusePrerenderCacheForExport(reuse: boolean) {
     setReusePrerenderCacheForExportState(reuse);
     window.localStorage.setItem("clipper:reuse-prerender-cache-export", reuse ? "1" : "0");
@@ -739,7 +748,9 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     projectExportFormat,
     exportIncludeSources,
     exportFrameRate,
+    exportRenderQuality,
     exportResolution,
+    exportWorkerMapping,
     mediaExportFormat,
     reusePrerenderCacheForExport,
     videoExportTileHeight,
@@ -1928,7 +1939,9 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
       exportFrameRate={exportFrameRate}
       exportIncludeSources={exportIncludeSources}
       exportProgress={exportProgress}
+      exportRenderQuality={exportRenderQuality}
       exportResolution={exportResolution}
+      exportWorkerMapping={exportWorkerMapping}
       isExporting={isExporting}
       liveDomPostProcessPreviewEnabled={liveDomPostProcessPreviewEnabled}
       liveDomPostProcessRuntimeEnabled={liveDomPostProcessRuntimeEnabled}
@@ -1960,7 +1973,9 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
       onExportDialogTabChange={setExportDialogTab}
       onExportFrameRateChange={setExportFrameRate}
       onExportIncludeSourcesChange={setExportIncludeSources}
+      onExportRenderQualityChange={setExportRenderQuality}
       onExportResolutionChange={setExportResolution}
+      onExportWorkerMappingChange={setExportWorkerMapping}
       onMediaExport={() => void exportRenderedMedia()}
       onMediaExportFormatChange={setMediaExportFormat}
       onLiveDomPostProcessPreviewEnabledChange={setLiveDomPostProcessPreviewEnabled}
@@ -2044,6 +2059,15 @@ function getInitialVideoExportTileHeight() {
   return clampVideoExportTileHeight(storedValue);
 }
 
+function getInitialExportWorkerMapping(): ExportWorkerResolutionMapping {
+  if (typeof window === "undefined") return defaultExportWorkerMapping;
+  try {
+    return clampExportWorkerMapping(JSON.parse(window.localStorage.getItem("clipper:export-worker-mapping") ?? "null"));
+  } catch {
+    return defaultExportWorkerMapping;
+  }
+}
+
 function getInitialPrerenderBlockDurationMs() {
   if (typeof window === "undefined") return defaultPrerenderBlockDurationMs;
   const storedValue = Number.parseInt(
@@ -2059,6 +2083,21 @@ function clampVideoExportTileHeight(value: number) {
     Math.max(Math.round(value), minVideoExportTileHeight),
     maxVideoExportTileHeight,
   );
+}
+
+function clampExportWorkerMapping(value: unknown): ExportWorkerResolutionMapping {
+  const candidate = value && typeof value === "object" ? value as Partial<Record<keyof ExportWorkerResolutionMapping, unknown>> : {};
+  return {
+    hd: clampExportWorkerCount(candidate.hd, defaultExportWorkerMapping.hd),
+    qhd: clampExportWorkerCount(candidate.qhd, defaultExportWorkerMapping.qhd),
+    uhd: clampExportWorkerCount(candidate.uhd, defaultExportWorkerMapping.uhd),
+  };
+}
+
+function clampExportWorkerCount(value: unknown, fallback: number) {
+  const numeric = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.min(Math.max(Math.round(numeric), minExportWorkerCount), maxExportWorkerCount);
 }
 
 function clampPrerenderBlockDurationMs(value: number) {

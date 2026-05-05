@@ -43,7 +43,7 @@ export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dra
   }, [cameraTransform, displayPreviewTime, focusPicking, hiddenMotionLayerIds, motionLayers, part, pickingTranslationPosition, pickingZoomFocus, timelineMode, trackerPicking]);
   const liveCameraTransform = useTransitionComposite ? identityCameraTransform : activeCameraTransform;
   const frameBackground = part.frame.style.background ?? "#000";
-  const frameStyle = useMemo(() => ({ width: FRAME_WIDTH, height: FRAME_HEIGHT, background: frameBackground, transform: `scale(${frameScale})` }) as CSSProperties, [frameBackground, frameScale]);
+  const frameStyle = useMemo(() => ({ width: FRAME_WIDTH, height: FRAME_HEIGHT, background: frameBackground, transform: frameScale === 1 ? undefined : `scale(${frameScale})` }) as CSSProperties, [frameBackground, frameScale]);
   const perspectiveStageStyle = useMemo(() => ({ perspective: `${liveCameraTransform.perspective}px`, perspectiveOrigin: "center", transformStyle: "preserve-3d" }) as CSSProperties, [liveCameraTransform.perspective]);
   const selectedBounds = useMemo(() => selectedObjects.length > 0 ? getBoundsUnion(selectedObjects.map((object) => object.bounds)) : null, [selectedObjects]);
   const selectedViewportBounds = useMemo(() => selectedBounds ? insetBounds(boundsToViewport(selectedBounds, liveCameraTransform, frameScale), -selectorOffsetPx) : null, [frameScale, liveCameraTransform, selectedBounds]);
@@ -227,7 +227,7 @@ function CompositionLayerView({ active, animationsEnabled, canSelect, editingTex
     <div ref={layerRef} className="absolute inset-0 overflow-hidden" {...getRenderClockAttributes(renderClockState)} style={{ ...(part.frame.style as CSSProperties), ...renderClockStyle }}>
       {!part.background.hidden && <BackgroundLayerView animationsEnabled={animationsEnabled} background={part.background} duration={part.duration} previewTime={previewTime} />}
       {part.objects.filter(obj => !obj.hidden).map((object) => (
-        <FrameObjectView key={object.id} animationsEnabled={animationsEnabled} object={object} canSelect={active && canSelect} duration={part.duration} editing={active && !isPlaying && editingTextObjectId === object.id} focusPicking={active && focusPicking} previewTime={previewTime} onDoubleClick={(event) => { if (active && !isPlaying) onTextObjectDoubleClick(event, object); }} onPointerDown={(event) => { if (active && !isPlaying) onObjectPointerDown(event, object); }} onTextEditCommit={(content, richText) => onTextEditCommit(object.id, content, richText)} />
+        <FrameObjectView key={object.id} animationsEnabled={animationsEnabled} object={object} canSelect={active && canSelect} duration={part.duration} editing={active && !isPlaying && editingTextObjectId === object.id} focusPicking={active && focusPicking} previewTime={previewTime} renderMode={renderMode} onDoubleClick={(event) => { if (active && !isPlaying) onTextObjectDoubleClick(event, object); }} onPointerDown={(event) => { if (active && !isPlaying) onObjectPointerDown(event, object); }} onTextEditCommit={(content, richText) => onTextEditCommit(object.id, content, richText)} />
       ))}
     </div>
   );
@@ -242,10 +242,10 @@ function TransitionCompositeView({ adjustmentLayers, animationsEnabled, isPlayin
 
   return (
     <div className="absolute inset-0 overflow-hidden" style={frameStyle}>
-      <div className="absolute inset-0 overflow-hidden" style={{ ...aStyle, willChange: "transform" }}>
+      <div className="absolute inset-0 overflow-hidden" style={{ ...aStyle, willChange: renderMode === "export" ? undefined : "transform" }}>
           <TimelineSequenceView adjustment={fromAdjustment} animationsEnabled={animationsEnabled} isPlaying={isPlaying} parts={transitionPreviewParts.from} renderMode={renderMode} sequenceKey="from" />
       </div>
-      <div className="absolute inset-0 overflow-hidden" style={{ ...bStyle, willChange: "transform" }}>
+      <div className="absolute inset-0 overflow-hidden" style={{ ...bStyle, willChange: renderMode === "export" ? undefined : "transform" }}>
           <TimelineSequenceView adjustment={toAdjustment} animationsEnabled={animationsEnabled} isPlaying={isPlaying} parts={transitionPreviewParts.to} renderMode={renderMode} sequenceKey="to" />
       </div>
     </div>
@@ -297,7 +297,7 @@ function FramePickPointImperativeOverlay() {
   );
 }
 
-export const FrameObjectView = memo(function FrameObjectView({ animationsEnabled, object, canSelect, duration, editing, focusPicking, previewTime, onDoubleClick, onPointerDown, onTextEditCommit }: { animationsEnabled: boolean; object: FrameObject; canSelect: boolean; duration: number; editing: boolean; focusPicking: boolean; previewTime: number; onDoubleClick: (event: ReactMouseEvent<HTMLDivElement>) => void; onPointerDown: (event: PointerEvent<HTMLDivElement>) => void; onTextEditCommit: (content: string, richText?: RichTextSegment[]) => void }) {
+export const FrameObjectView = memo(function FrameObjectView({ animationsEnabled, object, canSelect, duration, editing, focusPicking, previewTime, renderMode, onDoubleClick, onPointerDown, onTextEditCommit }: { animationsEnabled: boolean; object: FrameObject; canSelect: boolean; duration: number; editing: boolean; focusPicking: boolean; previewTime: number; renderMode: "preview" | "export"; onDoubleClick: (event: ReactMouseEvent<HTMLDivElement>) => void; onPointerDown: (event: PointerEvent<HTMLDivElement>) => void; onTextEditCommit: (content: string, richText?: RichTextSegment[]) => void }) {
   const evaluatedObject = useMemo(() => evaluateObjectForPreview(object, previewTime, duration, animationsEnabled), [animationsEnabled, duration, object, previewTime]);
   const animation = { style: evaluatedObject.renderStyle, content: evaluatedObject.renderContent };
   const editableRef = useRef<HTMLDivElement | null>(null);
@@ -311,8 +311,8 @@ export const FrameObjectView = memo(function FrameObjectView({ animationsEnabled
     height: object.bounds.height,
     ...object.style,
     ...animation.style,
-    transform: `translate(var(--clipper-drag-x, 0px), var(--clipper-drag-y, 0px)) ${animationTransform ?? objectTransform ?? ""}`.trim(),
-    willChange: "transform",
+    transform: renderMode === "export" ? (animationTransform ?? objectTransform) : `translate(var(--clipper-drag-x, 0px), var(--clipper-drag-y, 0px)) ${animationTransform ?? objectTransform ?? ""}`.trim(),
+    willChange: renderMode === "export" ? undefined : "transform",
   } as CSSProperties;
   const content = animation.content ?? object.content;
   const richText = evaluatedObject.renderRichText;
@@ -405,7 +405,7 @@ export const FrameObjectView = memo(function FrameObjectView({ animationsEnabled
     <div className={`absolute flex touch-none select-none flex-col justify-center whitespace-pre-line ${object.type === "chart" ? "overflow-visible" : "overflow-hidden"} ${focusPicking ? "cursor-crosshair" : editing ? "cursor-text" : "cursor-default"} ${editing ? "select-text" : ""}`} data-object-id={canSelect && !isLocked ? object.id : undefined} style={{ ...style, ...(isLocked ? { opacity: 0.6 } : {}) }} onDoubleClick={(event) => { if (!isLocked) onDoubleClick(event); }} onPointerDown={(event) => { if (!isLocked) onPointerDown(event); }}>
       {object.type === "text" && editing ? <div ref={editableRef} className="min-h-0 w-full whitespace-pre-wrap outline-none" contentEditable suppressContentEditableWarning onBlur={commitTextEdit} onInput={commitTextEdit} onKeyDown={onTextEditKeyDown} onPointerDown={(event) => event.stopPropagation()} /> : null}
       {object.type === "text" && !editing ? <div className="min-h-0 w-full whitespace-pre-wrap">{renderRichTextSegments(textSegments, Boolean(richText))}</div> : null}
-      {object.type === "chart" && object.chart ? <ChartObjectView animationsEnabled={animationsEnabled} object={object} duration={duration} previewTime={previewTime} /> : null}
+      {object.type === "chart" && object.chart ? <ChartObjectView animationsEnabled={animationsEnabled} object={object} duration={duration} previewTime={previewTime} renderMode={renderMode} /> : null}
       {object.type === "svg" && content ? <div className="h-full w-full" dangerouslySetInnerHTML={{ __html: content }} /> : null}
       {(object.type === "html" || object.type === "template") && content ? <div className="h-full w-full" dangerouslySetInnerHTML={{ __html: content }} /> : null}
       {object.type !== "text" && object.type !== "svg" && object.type !== "html" && object.type !== "template" && object.type !== "chart" && content ? content : null}
@@ -413,16 +413,16 @@ export const FrameObjectView = memo(function FrameObjectView({ animationsEnabled
   );
 }, areFrameObjectPropsEqual);
 
-function ChartObjectView({ animationsEnabled, object, duration, previewTime }: { animationsEnabled: boolean; object: FrameObject; duration: number; previewTime: number }) {
+function ChartObjectView({ animationsEnabled, object, duration, previewTime, renderMode }: { animationsEnabled: boolean; object: FrameObject; duration: number; previewTime: number; renderMode: "preview" | "export" }) {
   const chartObjects = useMemo(() => object.chart ? generateChartObjects({ ...object.chart, bounds: object.bounds }) : [], [object.bounds, object.chart]);
   return (
     <div className="pointer-events-none absolute inset-0 overflow-visible" aria-hidden="true">
-      {chartObjects.map((chartObject) => <GeneratedChartObjectView key={chartObject.id} animationsEnabled={animationsEnabled} chartObject={chartObject} chartBounds={object.bounds} duration={duration} previewTime={previewTime} />)}
+      {chartObjects.map((chartObject) => <GeneratedChartObjectView key={chartObject.id} animationsEnabled={animationsEnabled} chartObject={chartObject} chartBounds={object.bounds} duration={duration} previewTime={previewTime} renderMode={renderMode} />)}
     </div>
   );
 }
 
-function GeneratedChartObjectView({ animationsEnabled, chartObject, chartBounds, duration, previewTime }: { animationsEnabled: boolean; chartObject: ChartGeneratedObject; chartBounds: Bounds; duration: number; previewTime: number }) {
+function GeneratedChartObjectView({ animationsEnabled, chartObject, chartBounds, duration, previewTime, renderMode }: { animationsEnabled: boolean; chartObject: ChartGeneratedObject; chartBounds: Bounds; duration: number; previewTime: number; renderMode: "preview" | "export" }) {
   const object = useMemo<FrameObject>(() => chartGeneratedObjectToFrameObject(chartObject), [chartObject]);
   const evaluatedObject = useMemo(() => evaluateObjectForPreview(object, previewTime, duration, animationsEnabled), [animationsEnabled, duration, object, previewTime]);
   const animationTransform = typeof evaluatedObject.renderStyle.transform === "string" ? evaluatedObject.renderStyle.transform : undefined;
@@ -435,7 +435,7 @@ function GeneratedChartObjectView({ animationsEnabled, chartObject, chartBounds,
     ...object.style,
     ...evaluatedObject.renderStyle,
     transform: `${animationTransform ?? objectTransform ?? ""}`.trim(),
-    willChange: "transform",
+    willChange: renderMode === "export" ? undefined : "transform",
   } as CSSProperties;
   const content = evaluatedObject.renderContent ?? object.content;
 
@@ -464,13 +464,14 @@ function chartGeneratedObjectToFrameObject(object: ChartGeneratedObject): FrameO
   };
 }
 
-function areFrameObjectPropsEqual(previous: { animationsEnabled: boolean; object: FrameObject; canSelect: boolean; duration: number; editing: boolean; focusPicking: boolean; previewTime: number }, next: { animationsEnabled: boolean; object: FrameObject; canSelect: boolean; duration: number; editing: boolean; focusPicking: boolean; previewTime: number }) {
+function areFrameObjectPropsEqual(previous: { animationsEnabled: boolean; object: FrameObject; canSelect: boolean; duration: number; editing: boolean; focusPicking: boolean; previewTime: number; renderMode: "preview" | "export" }, next: { animationsEnabled: boolean; object: FrameObject; canSelect: boolean; duration: number; editing: boolean; focusPicking: boolean; previewTime: number; renderMode: "preview" | "export" }) {
   return previous.object === next.object
     && previous.animationsEnabled === next.animationsEnabled
     && previous.canSelect === next.canSelect
     && previous.duration === next.duration
     && previous.editing === next.editing
     && previous.focusPicking === next.focusPicking
+    && previous.renderMode === next.renderMode
     && (!next.animationsEnabled || !isPreviewTimeSensitiveObject(next.object) || previous.previewTime === next.previewTime);
 }
 
