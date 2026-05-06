@@ -3,7 +3,7 @@ import { AppContextMenu } from "../../components/AppContextMenu";
 import { ExportMediaDialog, VideoExportOverlay } from "../../components/export/ExportMediaDialog";
 import { SettingsDialog } from "../../components/SettingsDialog";
 import type { ProjectManifest } from "../../core/types";
-import type { AppUpdateStatus, ContextMenuState, ExportDialogTab, ExportRenderQuality, ExportWorkerResolutionMapping, MediaExportFormat, ProjectExportFormat, SettingsSection, VideoExportProgress } from "../types";
+import type { AppUpdateStatus, ContextMenuState, ExportDialogTab, ExportRenderQuality, ExportTileResolutionMapping, ExportWorkerResolutionMapping, MediaExportFormat, ProjectExportFormat, SettingsSection, VideoExportProgress } from "../types";
 
 type AppDialogsProps = {
   appContextMenu: ContextMenuState | null;
@@ -17,6 +17,7 @@ type AppDialogsProps = {
   exportProgress: string | null;
   exportRenderQuality: ExportRenderQuality;
   exportResolution: { width: number; height: number };
+  exportTileMapping: ExportTileResolutionMapping;
   exportWorkerMapping: ExportWorkerResolutionMapping;
   isExporting: boolean;
   liveDomPostProcessPreviewEnabled: boolean;
@@ -55,6 +56,7 @@ type AppDialogsProps = {
   onExportIncludeSourcesChange: (includeSources: boolean) => void;
   onExportRenderQualityChange: (quality: ExportRenderQuality) => void;
   onExportResolutionChange: (res: { width: number; height: number }) => void;
+  onExportTileMappingChange: (mapping: ExportTileResolutionMapping) => void;
   onExportWorkerMappingChange: (mapping: ExportWorkerResolutionMapping) => void;
   onMediaExport: () => void;
   onMediaExportFormatChange: (format: MediaExportFormat) => void;
@@ -78,7 +80,7 @@ type AppDialogsProps = {
   onInstallUpdate: () => void;
 };
 
-export function AppDialogs({ appContextMenu, autoDownloadUpdates, debugSettingsEnabled, defaultNewMarkerDurationSeconds, exportDialogOpen, exportDialogTab, exportFrameRate, exportIncludeSources, exportProgress, exportRenderQuality, exportResolution, exportWorkerMapping, isExporting, liveDomPostProcessPreviewEnabled, liveDomPostProcessRuntimeEnabled, liveDomPostProcessMaxFps, mediaExportFormat, pausePlaybackOnScrub, partCount, prerenderCacheEnabled, prerenderCacheBlackMissDebug, prerenderBlockDurationMs, projectExportFormat, projectName, resolution, sceneDurationSeconds, sceneName, scrubCommitThrottleMs, settingsOpen, settingsSection, timelineEndPaddingFraction, timelinePrecision, videoExportCancelling, videoExportTileHeight, videoExportProgress, updateStatus, onAppContextMenuClose, onAutoDownloadUpdatesChange, onCheckForUpdates, onDownloadUpdate, onDebugSettingsEnabledChange, onDefaultNewMarkerDurationSecondsChange, onExportDialogOpenChange, onExportDialogTabChange, onExportFrameRateChange, onExportIncludeSourcesChange, onExportRenderQualityChange, onExportResolutionChange, onExportWorkerMappingChange, onMediaExport, onMediaExportFormatChange, onLiveDomPostProcessPreviewEnabledChange, onLiveDomPostProcessMaxFpsChange, onProjectExport, onPausePlaybackOnScrubChange, onPrerenderCacheEnabledChange, onPrerenderCacheBlackMissDebugChange, onPrerenderBlockDurationMsChange, onClearAllPrerenderCaches, onProjectExportFormatChange, onScrubCommitThrottleMsChange, onSettingsOpenChange, onSettingsSectionChange, onTimelineEndPaddingFractionChange, onTimelinePrecisionChange, onVideoExportTileHeightChange, onVideoExportCancel, onInstallUpdate }: AppDialogsProps) {
+export function AppDialogs({ appContextMenu, autoDownloadUpdates, debugSettingsEnabled, defaultNewMarkerDurationSeconds, exportDialogOpen, exportDialogTab, exportFrameRate, exportIncludeSources, exportProgress, exportRenderQuality, exportResolution, exportTileMapping, exportWorkerMapping, isExporting, liveDomPostProcessPreviewEnabled, liveDomPostProcessRuntimeEnabled, liveDomPostProcessMaxFps, mediaExportFormat, pausePlaybackOnScrub, partCount, prerenderCacheEnabled, prerenderCacheBlackMissDebug, prerenderBlockDurationMs, projectExportFormat, projectName, resolution, sceneDurationSeconds, sceneName, scrubCommitThrottleMs, settingsOpen, settingsSection, timelineEndPaddingFraction, timelinePrecision, videoExportCancelling, videoExportTileHeight, videoExportProgress, updateStatus, onAppContextMenuClose, onAutoDownloadUpdatesChange, onCheckForUpdates, onDownloadUpdate, onDebugSettingsEnabledChange, onDefaultNewMarkerDurationSecondsChange, onExportDialogOpenChange, onExportDialogTabChange, onExportFrameRateChange, onExportIncludeSourcesChange, onExportRenderQualityChange, onExportResolutionChange, onExportTileMappingChange, onExportWorkerMappingChange, onMediaExport, onMediaExportFormatChange, onLiveDomPostProcessPreviewEnabledChange, onLiveDomPostProcessMaxFpsChange, onProjectExport, onPausePlaybackOnScrubChange, onPrerenderCacheEnabledChange, onPrerenderCacheBlackMissDebugChange, onPrerenderBlockDurationMsChange, onClearAllPrerenderCaches, onProjectExportFormatChange, onScrubCommitThrottleMsChange, onSettingsOpenChange, onSettingsSectionChange, onTimelineEndPaddingFractionChange, onTimelinePrecisionChange, onVideoExportTileHeightChange, onVideoExportCancel, onInstallUpdate }: AppDialogsProps) {
   return (
     <>
       <ExportMediaDialog
@@ -125,6 +127,7 @@ export function AppDialogs({ appContextMenu, autoDownloadUpdates, debugSettingsE
         timelineEndPaddingFraction={timelineEndPaddingFraction}
         timelinePrecision={timelinePrecision}
         videoExportTileHeight={videoExportTileHeight}
+        exportTileMapping={exportTileMapping}
         exportWorkerMapping={exportWorkerMapping}
         updateStatus={updateStatus}
         onActiveSectionChange={onSettingsSectionChange}
@@ -145,6 +148,7 @@ export function AppDialogs({ appContextMenu, autoDownloadUpdates, debugSettingsE
         onTimelineEndPaddingFractionChange={onTimelineEndPaddingFractionChange}
         onTimelinePrecisionChange={onTimelinePrecisionChange}
         onVideoExportTileHeightChange={onVideoExportTileHeightChange}
+        onExportTileMappingChange={onExportTileMappingChange}
         onExportWorkerMappingChange={onExportWorkerMappingChange}
         onInstallUpdate={onInstallUpdate}
       />

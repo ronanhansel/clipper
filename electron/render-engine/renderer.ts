@@ -146,13 +146,14 @@ export class RenderEngine {
       exportFormat = "prores-422-hq",
       exportRenderQuality = "high",
       exportWorkerMapping,
+      exportTileMapping,
     } = options;
     // Clear any previous cancel flag for this export ID
     if (exportId) this.cancelledVideoRenders.delete(exportId);
     const renderScale = this.getExportRenderQualityScale(exportRenderQuality);
     const captureWidth = Math.max(1, Math.round(exportWidth * renderScale));
     const captureHeight = Math.max(1, Math.round(exportHeight * renderScale));
-    const captureTileHeight = this.clampExportTileHeight(tileHeight * renderScale, captureHeight);
+    const captureTileHeight = this.getExportTileHeight(captureWidth, captureHeight, tileHeight, exportTileMapping);
     await fs.mkdir(path.dirname(outputPath), { recursive: true });
     const encoder = this.getVideoEncoderArgs(exportFormat);
     const totalFrames = Math.max(1, Math.ceil(durationSeconds * frameRate));
@@ -605,6 +606,13 @@ export class RenderEngine {
     let maxWorkers = exportHeight <= 1080 ? mapping?.hd ?? 4 : exportHeight <= 1440 ? mapping?.qhd ?? 2 : mapping?.uhd ?? 1;
     maxWorkers = Math.min(maxWorkers, Math.max(1, cpuCount - 1));
     return Math.max(1, Math.min(maxWorkers, totalFrames));
+  }
+
+  private getExportTileHeight(exportWidth: number, exportHeight: number, fallbackTileHeight: number, mapping: RenderSceneToVideoOptions["exportTileMapping"]): number {
+    const configuredTileCount = exportHeight <= 1080 ? mapping?.hd : exportHeight <= 1440 ? mapping?.qhd : mapping?.uhd;
+    const tileCount = Number.isFinite(configuredTileCount) ? Math.max(1, Math.round(configuredTileCount as number)) : null;
+    if (!tileCount) return this.clampExportTileHeight(fallbackTileHeight, exportHeight);
+    return this.clampExportTileHeight(Math.ceil(exportHeight / tileCount), exportHeight);
   }
 
   private splitFrameRangeForWorkers(range: ExportFrameRange, workerCount: number): ExportFrameRange[] {

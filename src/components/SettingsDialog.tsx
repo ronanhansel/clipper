@@ -1,12 +1,12 @@
 import { RotateCcw } from "lucide-react";
-import { appBarButtonBase, defaultExportWorkerMapping, defaultLiveDomPostProcessMaxFps, defaultNewMarkerDurationSeconds, defaultPausePlaybackOnScrub, defaultPrerenderBlockDurationMs, defaultScrubCommitThrottleMs, defaultTimelineEndPaddingFraction, defaultTimelinePrecision, defaultVideoExportTileHeight, maxExportWorkerCount, maxLiveDomPostProcessMaxFps, maxPrerenderBlockDurationMs, maxVideoExportTileHeight, minExportWorkerCount, minLiveDomPostProcessMaxFps, minPrerenderBlockDurationMs, minVideoExportTileHeight } from "../app/config";
-import type { AppUpdateStatus, ExportWorkerResolutionMapping, SettingsSection } from "../app/types";
+import { appBarButtonBase, defaultExportTileMapping, defaultExportWorkerMapping, defaultLiveDomPostProcessMaxFps, defaultNewMarkerDurationSeconds, defaultPausePlaybackOnScrub, defaultPrerenderBlockDurationMs, defaultScrubCommitThrottleMs, defaultTimelineEndPaddingFraction, defaultTimelinePrecision, defaultVideoExportTileHeight, maxExportTileCount, maxExportWorkerCount, maxLiveDomPostProcessMaxFps, maxPrerenderBlockDurationMs, maxVideoExportTileHeight, minExportTileCount, minExportWorkerCount, minLiveDomPostProcessMaxFps, minPrerenderBlockDurationMs, minVideoExportTileHeight } from "../app/config";
+import type { AppUpdateStatus, ExportTileResolutionMapping, ExportWorkerResolutionMapping, SettingsSection } from "../app/types";
 import { clamp } from "../core/math";
 import { Dialog, DialogContent } from "./ui/dialog";
 import { Input } from "./ui/input";
 import { Switch } from "./ui/switch";
 
-export function SettingsDialog({ activeSection, autoDownloadUpdates, debugSettingsEnabled, exportWorkerMapping, liveDomPostProcessPreviewEnabled, liveDomPostProcessRuntimeEnabled, liveDomPostProcessMaxFps, open, pausePlaybackOnScrub, prerenderCacheBlackMissDebug, prerenderCacheEnabled, prerenderBlockDurationMs, scrubCommitThrottleMs, defaultNewMarkerDurationSeconds: markerDurationSeconds, timelineEndPaddingFraction, timelinePrecision, updateStatus, videoExportTileHeight, onActiveSectionChange, onAutoDownloadUpdatesChange, onCheckForUpdates, onDownloadUpdate, onDebugSettingsEnabledChange, onExportWorkerMappingChange, onInstallUpdate, onLiveDomPostProcessPreviewEnabledChange, onLiveDomPostProcessMaxFpsChange, onOpenChange, onPausePlaybackOnScrubChange, onPrerenderCacheBlackMissDebugChange, onPrerenderCacheEnabledChange, onPrerenderBlockDurationMsChange, onClearAllPrerenderCaches, onScrubCommitThrottleMsChange, onDefaultNewMarkerDurationSecondsChange, onTimelineEndPaddingFractionChange, onTimelinePrecisionChange, onVideoExportTileHeightChange }: { activeSection: SettingsSection; autoDownloadUpdates: boolean; debugSettingsEnabled: boolean; exportWorkerMapping: ExportWorkerResolutionMapping; liveDomPostProcessPreviewEnabled: boolean; liveDomPostProcessRuntimeEnabled: boolean; liveDomPostProcessMaxFps: number; open: boolean; pausePlaybackOnScrub: boolean; prerenderCacheBlackMissDebug: boolean; prerenderCacheEnabled: boolean; prerenderBlockDurationMs: number; scrubCommitThrottleMs: number; defaultNewMarkerDurationSeconds: number; timelineEndPaddingFraction: number; timelinePrecision: number; updateStatus: AppUpdateStatus; videoExportTileHeight: number; onActiveSectionChange: (section: SettingsSection) => void; onAutoDownloadUpdatesChange: (enabled: boolean) => void; onCheckForUpdates: () => void; onDownloadUpdate: () => void; onDebugSettingsEnabledChange: (enabled: boolean) => void; onExportWorkerMappingChange: (mapping: ExportWorkerResolutionMapping) => void; onInstallUpdate: () => void; onLiveDomPostProcessPreviewEnabledChange: (enabled: boolean) => void; onLiveDomPostProcessMaxFpsChange: (value: number) => void; onOpenChange: (open: boolean) => void; onPausePlaybackOnScrubChange: (enabled: boolean) => void; onPrerenderCacheBlackMissDebugChange: (enabled: boolean) => void; onPrerenderCacheEnabledChange: (enabled: boolean) => void; onPrerenderBlockDurationMsChange: (value: number) => void; onClearAllPrerenderCaches: () => void; onScrubCommitThrottleMsChange: (value: number) => void; onDefaultNewMarkerDurationSecondsChange: (value: number) => void; onTimelineEndPaddingFractionChange: (value: number) => void; onTimelinePrecisionChange: (value: number) => void; onVideoExportTileHeightChange: (value: number) => void }) {
+export function SettingsDialog({ activeSection, autoDownloadUpdates, debugSettingsEnabled, exportTileMapping, exportWorkerMapping, liveDomPostProcessPreviewEnabled, liveDomPostProcessRuntimeEnabled, liveDomPostProcessMaxFps, open, pausePlaybackOnScrub, prerenderCacheBlackMissDebug, prerenderCacheEnabled, prerenderBlockDurationMs, scrubCommitThrottleMs, defaultNewMarkerDurationSeconds: markerDurationSeconds, timelineEndPaddingFraction, timelinePrecision, updateStatus, videoExportTileHeight, onActiveSectionChange, onAutoDownloadUpdatesChange, onCheckForUpdates, onDownloadUpdate, onDebugSettingsEnabledChange, onExportTileMappingChange, onExportWorkerMappingChange, onInstallUpdate, onLiveDomPostProcessPreviewEnabledChange, onLiveDomPostProcessMaxFpsChange, onOpenChange, onPausePlaybackOnScrubChange, onPrerenderCacheBlackMissDebugChange, onPrerenderCacheEnabledChange, onPrerenderBlockDurationMsChange, onClearAllPrerenderCaches, onScrubCommitThrottleMsChange, onDefaultNewMarkerDurationSecondsChange, onTimelineEndPaddingFractionChange, onTimelinePrecisionChange, onVideoExportTileHeightChange }: { activeSection: SettingsSection; autoDownloadUpdates: boolean; debugSettingsEnabled: boolean; exportTileMapping: ExportTileResolutionMapping; exportWorkerMapping: ExportWorkerResolutionMapping; liveDomPostProcessPreviewEnabled: boolean; liveDomPostProcessRuntimeEnabled: boolean; liveDomPostProcessMaxFps: number; open: boolean; pausePlaybackOnScrub: boolean; prerenderCacheBlackMissDebug: boolean; prerenderCacheEnabled: boolean; prerenderBlockDurationMs: number; scrubCommitThrottleMs: number; defaultNewMarkerDurationSeconds: number; timelineEndPaddingFraction: number; timelinePrecision: number; updateStatus: AppUpdateStatus; videoExportTileHeight: number; onActiveSectionChange: (section: SettingsSection) => void; onAutoDownloadUpdatesChange: (enabled: boolean) => void; onCheckForUpdates: () => void; onDownloadUpdate: () => void; onDebugSettingsEnabledChange: (enabled: boolean) => void; onExportTileMappingChange: (mapping: ExportTileResolutionMapping) => void; onExportWorkerMappingChange: (mapping: ExportWorkerResolutionMapping) => void; onInstallUpdate: () => void; onLiveDomPostProcessPreviewEnabledChange: (enabled: boolean) => void; onLiveDomPostProcessMaxFpsChange: (value: number) => void; onOpenChange: (open: boolean) => void; onPausePlaybackOnScrubChange: (enabled: boolean) => void; onPrerenderCacheBlackMissDebugChange: (enabled: boolean) => void; onPrerenderCacheEnabledChange: (enabled: boolean) => void; onPrerenderBlockDurationMsChange: (value: number) => void; onClearAllPrerenderCaches: () => void; onScrubCommitThrottleMsChange: (value: number) => void; onDefaultNewMarkerDurationSecondsChange: (value: number) => void; onTimelineEndPaddingFractionChange: (value: number) => void; onTimelinePrecisionChange: (value: number) => void; onVideoExportTileHeightChange: (value: number) => void }) {
   const navItems: Array<{ id: SettingsSection; label: string }> = [
     { id: "general", label: "General" },
     { id: "playback", label: "Playback" },
@@ -55,6 +55,12 @@ export function SettingsDialog({ activeSection, autoDownloadUpdates, debugSettin
     const parsed = Number(value);
     if (!Number.isFinite(parsed)) return;
     onExportWorkerMappingChange({ ...exportWorkerMapping, [key]: Math.round(clamp(parsed, minExportWorkerCount, maxExportWorkerCount)) });
+  }
+
+  function updateExportTileCount(key: keyof ExportTileResolutionMapping, value: string) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return;
+    onExportTileMappingChange({ ...exportTileMapping, [key]: Math.round(clamp(parsed, minExportTileCount, maxExportTileCount)) });
   }
 
   function updatePrerenderBlockDuration(value: string) {
@@ -249,7 +255,7 @@ export function SettingsDialog({ activeSection, autoDownloadUpdates, debugSettin
                 <div className="grid gap-4 rounded-xl border border-[#363b47] bg-[#1b1e26] p-4">
                   <div className="grid gap-1.5">
                     <strong className="text-sm text-white">Capture tile height</strong>
-                    <p className="text-xs leading-5 text-[#8f939d]">Controls the fixed vertical tile height used when reading frames from the hidden export renderer. Lower values create more readbacks; higher values create fewer, larger readbacks.</p>
+                    <p className="text-xs leading-5 text-[#8f939d]">Controls the fallback tile height used by prerender/cache capture. Media export uses the resolution tile counts below.</p>
                   </div>
                   <label className="grid max-w-[260px] gap-1.5 text-xs font-bold text-[#dfe2ea]" htmlFor="video-export-tile-height">
                     Tile height (px)
@@ -262,13 +268,23 @@ export function SettingsDialog({ activeSection, autoDownloadUpdates, debugSettin
                   </label>
                   <div className="h-px bg-[#363b47]" />
                   <div className="grid gap-1.5">
+                    <strong className="text-sm text-white">Export capture tiles</strong>
+                    <p className="text-xs leading-5 text-[#8f939d]">Sets how many vertical tiles each internal render-size bucket uses. More tiles use less Chromium tile memory but are slower.</p>
+                  </div>
+                  <div className="grid grid-cols-3 gap-3">
+                    <TileCountField id="export-tiles-hd" label="1920x1080 and below" value={exportTileMapping.hd} defaultValue={defaultExportTileMapping.hd} onChange={(value) => updateExportTileCount("hd", value)} onReset={() => onExportTileMappingChange({ ...exportTileMapping, hd: defaultExportTileMapping.hd })} />
+                    <TileCountField id="export-tiles-qhd" label="2560x1440 and below" value={exportTileMapping.qhd} defaultValue={defaultExportTileMapping.qhd} onChange={(value) => updateExportTileCount("qhd", value)} onReset={() => onExportTileMappingChange({ ...exportTileMapping, qhd: defaultExportTileMapping.qhd })} />
+                    <TileCountField id="export-tiles-uhd" label="3840x2160 and above" value={exportTileMapping.uhd} defaultValue={defaultExportTileMapping.uhd} onChange={(value) => updateExportTileCount("uhd", value)} onReset={() => onExportTileMappingChange({ ...exportTileMapping, uhd: defaultExportTileMapping.uhd })} />
+                  </div>
+                  <div className="h-px bg-[#363b47]" />
+                  <div className="grid gap-1.5">
                     <strong className="text-sm text-white">Renderer workers</strong>
                     <p className="text-xs leading-5 text-[#8f939d]">Controls how many hidden renderer processes capture frames in parallel for each internal render-size bucket, after High/Ultra supersampling. Higher values can be faster but use more CPU, RAM, and Chromium tile memory.</p>
                   </div>
                   <div className="grid grid-cols-3 gap-3">
-                    <WorkerCountField id="export-workers-hd" label="1080p and below" value={exportWorkerMapping.hd} defaultValue={defaultExportWorkerMapping.hd} onChange={(value) => updateExportWorkerCount("hd", value)} onReset={() => onExportWorkerMappingChange({ ...exportWorkerMapping, hd: defaultExportWorkerMapping.hd })} />
-                    <WorkerCountField id="export-workers-qhd" label="1440p" value={exportWorkerMapping.qhd} defaultValue={defaultExportWorkerMapping.qhd} onChange={(value) => updateExportWorkerCount("qhd", value)} onReset={() => onExportWorkerMappingChange({ ...exportWorkerMapping, qhd: defaultExportWorkerMapping.qhd })} />
-                    <WorkerCountField id="export-workers-uhd" label="4K and above" value={exportWorkerMapping.uhd} defaultValue={defaultExportWorkerMapping.uhd} onChange={(value) => updateExportWorkerCount("uhd", value)} onReset={() => onExportWorkerMappingChange({ ...exportWorkerMapping, uhd: defaultExportWorkerMapping.uhd })} />
+                    <WorkerCountField id="export-workers-hd" label="1920x1080 and below" value={exportWorkerMapping.hd} defaultValue={defaultExportWorkerMapping.hd} onChange={(value) => updateExportWorkerCount("hd", value)} onReset={() => onExportWorkerMappingChange({ ...exportWorkerMapping, hd: defaultExportWorkerMapping.hd })} />
+                    <WorkerCountField id="export-workers-qhd" label="2560x1440 and below" value={exportWorkerMapping.qhd} defaultValue={defaultExportWorkerMapping.qhd} onChange={(value) => updateExportWorkerCount("qhd", value)} onReset={() => onExportWorkerMappingChange({ ...exportWorkerMapping, qhd: defaultExportWorkerMapping.qhd })} />
+                    <WorkerCountField id="export-workers-uhd" label="3840x2160 and above" value={exportWorkerMapping.uhd} defaultValue={defaultExportWorkerMapping.uhd} onChange={(value) => updateExportWorkerCount("uhd", value)} onReset={() => onExportWorkerMappingChange({ ...exportWorkerMapping, uhd: defaultExportWorkerMapping.uhd })} />
                   </div>
                 </div>
               ) : (
@@ -321,6 +337,20 @@ function WorkerCountField({ id, label, value, defaultValue, onChange, onReset }:
       <span className="relative">
         <Input id={id} className="pr-10" min={minExportWorkerCount} max={maxExportWorkerCount} step={1} type="number" value={value} onChange={(event) => onChange(event.target.value)} />
         <button aria-label={`Reset ${label} workers to ${defaultValue}`} className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-md text-[#8f939d] transition hover:bg-[#252a34] hover:text-white" type="button" onClick={onReset}>
+          <RotateCcw size={14} />
+        </button>
+      </span>
+    </label>
+  );
+}
+
+function TileCountField({ id, label, value, defaultValue, onChange, onReset }: { id: string; label: string; value: number; defaultValue: number; onChange: (value: string) => void; onReset: () => void }) {
+  return (
+    <label className="grid gap-1.5 text-xs font-bold text-[#dfe2ea]" htmlFor={id}>
+      {label}
+      <span className="relative">
+        <Input id={id} className="pr-10" min={minExportTileCount} max={maxExportTileCount} step={1} type="number" value={value} onChange={(event) => onChange(event.target.value)} />
+        <button aria-label={`Reset ${label} tiles to ${defaultValue}`} className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-md text-[#8f939d] transition hover:bg-[#252a34] hover:text-white" type="button" onClick={onReset}>
           <RotateCcw size={14} />
         </button>
       </span>

@@ -10,6 +10,7 @@ export type RecentProject = {
 
 async function readAppState(): Promise<Record<string, unknown>> {
   try {
+    if (typeof window !== "undefined" && window.clipper?.readAppState) return window.clipper.readAppState();
     const state = JSON.parse(await clipperHost.readTextFile(appStatePath)) as Record<string, unknown>;
     return typeof state === "object" && state !== null ? state : {};
   } catch {
@@ -18,8 +19,16 @@ async function readAppState(): Promise<Record<string, unknown>> {
 }
 
 async function writeAppState(updates: Record<string, unknown>) {
+  if (typeof window !== "undefined" && window.clipper?.writeAppState) {
+    await window.clipper.writeAppState(updates);
+    return;
+  }
   const state = await readAppState();
-  const merged = { ...state, ...updates };
+  const merged = { ...state };
+  for (const [key, value] of Object.entries(updates)) {
+    if (value === undefined || value === null) delete merged[key];
+    else merged[key] = value;
+  }
   await clipperHost.writeTextFile(appStatePath, `${JSON.stringify(merged, null, 2)}\n`);
 }
 
@@ -30,6 +39,7 @@ export async function readStoredActiveProjectManifestPath(): Promise<string | nu
     if (typeof path === "string" && path.startsWith("clipper/") && path.endsWith(".json")) {
       return path;
     }
+    if (typeof window !== "undefined" && window.clipper?.readAppState) return null;
   } catch {
     // New installs will not have app-state.json yet.
   }
@@ -47,7 +57,7 @@ export async function writeStoredActiveProjectManifestPath(manifestPath: string)
 
 export async function clearStoredActiveProjectManifestPath() {
   localStorage.removeItem(activeProjectManifestStorageKey);
-  await writeAppState({ activeProjectManifestPath: undefined });
+  await writeAppState({ activeProjectManifestPath: null });
 }
 
 export async function readRecentProjects(): Promise<RecentProject[]> {

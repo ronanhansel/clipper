@@ -1,6 +1,6 @@
 import { useEffect, useRef, type MutableRefObject } from "react";
 import { exportService } from "../../services/exportService";
-import type { ExportRenderQuality, ExportWorkerResolutionMapping, MediaExportFormat, ProjectExportFormat, VideoExportProgress } from "../../types";
+import type { ExportRenderQuality, ExportTileResolutionMapping, ExportWorkerResolutionMapping, MediaExportFormat, ProjectExportFormat, VideoExportProgress } from "../../types";
 import type { ProjectManifest } from "../../../core/types";
 
 type UseExportCommandsInput = {
@@ -12,6 +12,7 @@ type UseExportCommandsInput = {
   exportFrameRate: number;
   exportRenderQuality: ExportRenderQuality;
   exportResolution: { width: number; height: number };
+  exportTileMapping: ExportTileResolutionMapping;
   exportWorkerMapping: ExportWorkerResolutionMapping;
   mediaExportFormat: MediaExportFormat;
   reusePrerenderCacheForExport: boolean;
@@ -38,6 +39,7 @@ export function useExportCommands({
   exportFrameRate,
   exportRenderQuality,
   exportResolution,
+  exportTileMapping,
   exportWorkerMapping,
   mediaExportFormat,
   reusePrerenderCacheForExport,
@@ -101,7 +103,7 @@ export function useExportCommands({
       setExportDialogOpen(false);
       setExportProgress(`Rendering ${totalFrames} frames`);
       setVideoExportProgress({ frame: 0, totalFrames, percent: 0, status: "Preparing export..." });
-      const exportPath = await exportService.renderVideoExport(exportId, defaultFileName, currentProject, manifestPath, currentScene, durationSeconds, videoExportTileHeight, reusePrerenderCacheForExport, exportFrameRate, exportResolution, mediaExportFormat, exportRenderQuality, exportWorkerMapping);
+      const exportPath = await exportService.renderVideoExport(exportId, defaultFileName, currentProject, manifestPath, currentScene, durationSeconds, videoExportTileHeight, reusePrerenderCacheForExport, exportFrameRate, exportResolution, mediaExportFormat, exportRenderQuality, exportWorkerMapping, exportTileMapping);
       if (!exportPath) return;
       notifyRenderedMedia(exportPath);
     } catch (error) {

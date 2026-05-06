@@ -18,6 +18,14 @@ type ExportFrameRequest = {
   renderMode?: "preview" | "export";
   exportWidth?: number;
   exportHeight?: number;
+  exportTile?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    fullWidth: number;
+    fullHeight: number;
+  };
 };
 
 declare global {
@@ -180,12 +188,12 @@ export function RenderedMediaExportApp() {
     };
   }, [request]);
 
-  const exportWidth = request?.exportWidth ?? FRAME_WIDTH;
-  const exportHeight = request?.exportHeight ?? FRAME_HEIGHT;
+  const viewportWidth = request?.exportTile?.width ?? request?.exportWidth ?? FRAME_WIDTH;
+  const viewportHeight = request?.exportTile?.height ?? request?.exportHeight ?? FRAME_HEIGHT;
 
   return (
-    <main className="relative overflow-hidden bg-black" style={{ width: exportWidth, height: exportHeight }}>
-      <div className="absolute left-0 top-0 overflow-hidden bg-black" style={{ width: exportWidth, height: exportHeight }}>
+    <main className="relative overflow-hidden bg-black" style={{ width: viewportWidth, height: viewportHeight }}>
+      <div className="absolute left-0 top-0 overflow-hidden bg-black" style={{ width: viewportWidth, height: viewportHeight }}>
         <ExportRenderErrorBoundary onError={(error) => rejectPendingFrame(pendingRequestRef, error)} resetKey={request ? `${request.scene.id}:${request.sceneTime}` : "empty"}>
           {request ? <ExportFramePreview key={request.scene.id} refs={{ cameraRef, dragSelectionBoxRef, frameViewportRef }} request={request} /> : <div className="h-full w-full bg-black" />}
         </ExportRenderErrorBoundary>
@@ -225,6 +233,7 @@ function ExportFramePreview({ refs, request }: { refs: ExportFramePreviewRefs; r
       cameraTransform: identityCameraTransform,
       frameViewportRef: refs.frameViewportRef,
       frameScale,
+      exportTileViewport: request.exportTile ? { x: request.exportTile.x, y: request.exportTile.y, width: request.exportTile.width, height: request.exportTile.height } : undefined,
       isPlaying: false,
       renderMode: request.renderMode ?? "export" as const,
       part: previewModel.part,
@@ -268,9 +277,15 @@ export function getExportFrameScale(request: { exportWidth?: number; exportHeigh
   return Math.min(widthScale, heightScale);
 }
 
+function getExportFullSize(request: ExportFrameRequest) {
+  return {
+    width: request.exportTile?.fullWidth ?? request.exportWidth ?? FRAME_WIDTH,
+    height: request.exportTile?.fullHeight ?? request.exportHeight ?? FRAME_HEIGHT,
+  };
+}
+
 export function getExportPostProcessPasses(request: ExportFrameRequest): PostProcessPass[] {
-  const exportWidth = request.exportWidth ?? FRAME_WIDTH;
-  const exportHeight = request.exportHeight ?? FRAME_HEIGHT;
+  const { width: exportWidth, height: exportHeight } = getExportFullSize(request);
   const previewModel = deriveFramePreviewRenderModel({
     blankPart: blankPreviewComposition,
     frameRate: request.frameRate,

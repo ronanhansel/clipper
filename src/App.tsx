@@ -41,13 +41,13 @@ import { RightInspectorPanel } from "./app/shell/RightInspectorPanel";
 import { useEditorViewportState } from "./app/shell/useEditorViewportState";
 import { useEditorModeCommands } from "./app/shell/useEditorModeCommands";
 import { useProjectTitleRename } from "./app/shell/useProjectTitleRename";
-import { defaultExportWorkerMapping, defaultLiveDomPostProcessMaxFps, defaultPrerenderBlockDurationMs, defaultScrubCommitThrottleMs, defaultVideoExportTileHeight, maxExportWorkerCount, maxLiveDomPostProcessMaxFps, maxPrerenderBlockDurationMs, maxVideoExportTileHeight, minExportWorkerCount, minLiveDomPostProcessMaxFps, minPrerenderBlockDurationMs, minVideoExportTileHeight, selectorHandleSizePx, selectorOffsetPx, videoExportFrameRate } from "./app/config";
+import { defaultExportTileMapping, defaultExportWorkerMapping, defaultLiveDomPostProcessMaxFps, defaultPrerenderBlockDurationMs, defaultScrubCommitThrottleMs, defaultVideoExportTileHeight, maxExportTileCount, maxExportWorkerCount, maxLiveDomPostProcessMaxFps, maxPrerenderBlockDurationMs, maxVideoExportTileHeight, minExportTileCount, minExportWorkerCount, minLiveDomPostProcessMaxFps, minPrerenderBlockDurationMs, minVideoExportTileHeight, selectorHandleSizePx, selectorOffsetPx, videoExportFrameRate } from "./app/config";
 import { useEditorStatePersistence } from "./app/project/useEditorStatePersistence";
 import { useEditorDerivedState } from "./app/state/editorDerivedState";
 import { getFramePreviewTimelineLayers } from "./app/state/framePreviewRenderModel";
 import { EditorStoreProvider, useAppEditorState, useEditorStoreApi, type EditorTab } from "./app/state/editorStore";
 import { ProjectStoreProvider } from "./app/state/projectStore";
-import { type AdjustmentLayerSelection, type CompositionSelection, type ExportDialogTab, type ExportRenderQuality, type ExportWorkerResolutionMapping, type LeftPanelTab, type MediaExportFormat, type PlaybackClock, type ProjectExportFormat, type RightPanelTab, type SettingsSection } from "./app/types";
+import { type AdjustmentLayerSelection, type CompositionSelection, type ExportDialogTab, type ExportRenderQuality, type ExportTileResolutionMapping, type ExportWorkerResolutionMapping, type LeftPanelTab, type MediaExportFormat, type PlaybackClock, type ProjectExportFormat, type RightPanelTab, type SettingsSection } from "./app/types";
 import { applyAdjustmentLayersToVisualStyle, getTimeSensitiveDisplayDuration, getTimeSensitiveDisplayTime } from "./core/adjustments";
 import { isMarkerOnMotionLayer, type CameraPreviewTransform } from "./core/camera";
 import { liveDomPostProcessStorageKey } from "./core/effects/postprocess/liveDomCapability";
@@ -269,6 +269,9 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
   );
   const [exportWorkerMapping, setExportWorkerMappingState] = useState(
     getInitialExportWorkerMapping,
+  );
+  const [exportTileMapping, setExportTileMappingState] = useState(
+    getInitialExportTileMapping,
   );
   const [prerenderBlockDurationMs, setPrerenderBlockDurationMsState] = useState(
     getInitialPrerenderBlockDurationMs,
@@ -673,6 +676,12 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     setExportWorkerMappingState(nextMapping);
     window.localStorage.setItem("clipper:export-worker-mapping", JSON.stringify(nextMapping));
   }
+
+  function setExportTileMapping(mapping: ExportTileResolutionMapping) {
+    const nextMapping = clampExportTileMapping(mapping);
+    setExportTileMappingState(nextMapping);
+    window.localStorage.setItem("clipper:export-tile-mapping", JSON.stringify(nextMapping));
+  }
   function setReusePrerenderCacheForExport(reuse: boolean) {
     setReusePrerenderCacheForExportState(reuse);
     window.localStorage.setItem("clipper:reuse-prerender-cache-export", reuse ? "1" : "0");
@@ -752,6 +761,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     exportFrameRate,
     exportRenderQuality,
     exportResolution,
+    exportTileMapping,
     exportWorkerMapping,
     mediaExportFormat,
     reusePrerenderCacheForExport,
@@ -1944,6 +1954,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
       exportProgress={exportProgress}
       exportRenderQuality={exportRenderQuality}
       exportResolution={exportResolution}
+      exportTileMapping={exportTileMapping}
       exportWorkerMapping={exportWorkerMapping}
       isExporting={isExporting}
       liveDomPostProcessPreviewEnabled={liveDomPostProcessPreviewEnabled}
@@ -1982,6 +1993,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
       onExportIncludeSourcesChange={setExportIncludeSources}
       onExportRenderQualityChange={setExportRenderQuality}
       onExportResolutionChange={setExportResolution}
+      onExportTileMappingChange={setExportTileMapping}
       onExportWorkerMappingChange={setExportWorkerMapping}
       onMediaExport={() => void exportRenderedMedia()}
       onMediaExportFormatChange={setMediaExportFormat}
@@ -2076,6 +2088,15 @@ function getInitialExportWorkerMapping(): ExportWorkerResolutionMapping {
   }
 }
 
+function getInitialExportTileMapping(): ExportTileResolutionMapping {
+  if (typeof window === "undefined") return defaultExportTileMapping;
+  try {
+    return clampExportTileMapping(JSON.parse(window.localStorage.getItem("clipper:export-tile-mapping") ?? "null"));
+  } catch {
+    return defaultExportTileMapping;
+  }
+}
+
 function getInitialPrerenderBlockDurationMs() {
   if (typeof window === "undefined") return defaultPrerenderBlockDurationMs;
   const storedValue = Number.parseInt(
@@ -2102,10 +2123,25 @@ function clampExportWorkerMapping(value: unknown): ExportWorkerResolutionMapping
   };
 }
 
+function clampExportTileMapping(value: unknown): ExportTileResolutionMapping {
+  const candidate = value && typeof value === "object" ? value as Partial<Record<keyof ExportTileResolutionMapping, unknown>> : {};
+  return {
+    hd: clampExportTileCount(candidate.hd, defaultExportTileMapping.hd),
+    qhd: clampExportTileCount(candidate.qhd, defaultExportTileMapping.qhd),
+    uhd: clampExportTileCount(candidate.uhd, defaultExportTileMapping.uhd),
+  };
+}
+
 function clampExportWorkerCount(value: unknown, fallback: number) {
   const numeric = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(numeric)) return fallback;
   return Math.min(Math.max(Math.round(numeric), minExportWorkerCount), maxExportWorkerCount);
+}
+
+function clampExportTileCount(value: unknown, fallback: number) {
+  const numeric = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.min(Math.max(Math.round(numeric), minExportTileCount), maxExportTileCount);
 }
 
 function clampPrerenderBlockDurationMs(value: number) {

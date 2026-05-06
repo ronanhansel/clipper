@@ -22,17 +22,19 @@ import type { ExportFrameRange, ProjectManifest, Scene } from "./render-engine/t
 import { UpdateService } from "./updateService.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const appRoot = path.resolve(__dirname, "..");
+app.setName("Clipper");
+const appRoot = app.isPackaged ? app.getPath("userData") : path.resolve(__dirname, "..");
 const appStatePath = "clipper/app-state.json";
 const require = createRequire(import.meta.url);
 const ffmpegPath = require("ffmpeg-static") as string | null;
 const isDev = process.env.VITE_DEV_SERVER_URL || !app.isPackaged;
 const renderVideoChildArgIndex = process.argv.indexOf("--render-video-child");
 const isRenderVideoChildProcess = renderVideoChildArgIndex >= 0;
-app.setName("Clipper");
 app.commandLine.appendSwitch("force-color-profile", "srgb");
 const experimentalHtmlCanvasPostProcessEnabled = process.env.CLIPPER_EXPERIMENTAL_HTML_CANVAS_POSTPROCESS === "1" || readStartupAppStateBoolean("experimentalHtmlCanvasPostProcess");
 const automaticUpdateDownloadsEnabled = readStartupAppStateBoolean("automaticUpdateDownloads", true);
+const defaultWindowBounds = { width: 1440, height: 960 };
+const minWindowBounds = { width: 1200, height: 760 };
 if (experimentalHtmlCanvasPostProcessEnabled) {
   app.commandLine.appendSwitch("enable-blink-features", "HTMLCanvasElementDrawElement");
   app.commandLine.appendSwitch("enable-features", "CanvasDrawElement");
@@ -80,7 +82,11 @@ async function readAppState(): Promise<Record<string, unknown>> {
 
 async function writeAppState(updates: Record<string, unknown>) {
   const state = await readAppState();
-  const merged = { ...state, ...updates };
+  const merged = { ...state };
+  for (const [key, value] of Object.entries(updates)) {
+    if (value === undefined || value === null) delete merged[key];
+    else merged[key] = value;
+  }
   await fs.mkdir(path.dirname(resolveClipperFile(appStatePath)), {
     recursive: true,
   });
@@ -94,6 +100,90 @@ async function writeAppState(updates: Record<string, unknown>) {
 async function writeWindowBounds(window: BrowserWindow) {
   await writeAppState({
     windowBounds: window.getBounds() as unknown as Record<string, unknown>,
+  });
+}
+
+function restoreWindowBounds(bounds: unknown) {
+  if (
+    !bounds ||
+    typeof bounds !== "object" ||
+    !("x" in bounds) ||
+    !("y" in bounds) ||
+    !("width" in bounds) ||
+    !("height" in bounds)
+  ) {
+    return null;
+  }
+
+  const candidate = bounds as {
+    x: unknown;
+    y: unknown;
+    width: unknown;
+    height: unknown;
+  };
+
+  if (
+    typeof candidate.x !== "number" ||
+    typeof candidate.y !== "number" ||
+    typeof candidate.width !== "number" ||
+    typeof candidate.height !== "number" ||
+    !Number.isFinite(candidate.x) ||
+    !Number.isFinite(candidate.y) ||
+    !Number.isFinite(candidate.width) ||
+    !Number.isFinite(candidate.height)
+  ) {
+    return null;
+  }
+
+  const candidateBounds = {
+    x: candidate.x,
+    y: candidate.y,
+    width: candidate.width,
+    height: candidate.height,
+  };
+  const displays = screen.getAllDisplays();
+  const matchingDisplay = displays.find((display) => {
+    const workArea = display.workArea;
+    return (
+      candidateBounds.x < workArea.x + workArea.width &&
+      candidateBounds.x + candidateBounds.width > workArea.x &&
+      candidateBounds.y < workArea.y + workArea.height &&
+      candidateBounds.y + candidateBounds.height > workArea.y
+    );
+  }) ?? screen.getPrimaryDisplay();
+  const workArea = matchingDisplay.workArea;
+  const width = Math.min(
+    Math.max(candidateBounds.width, minWindowBounds.width),
+    workArea.width,
+  );
+  const height = Math.min(
+    Math.max(candidateBounds.height, minWindowBounds.height),
+    workArea.height,
+  );
+  const x = Math.min(
+    Math.max(candidateBounds.x, workArea.x),
+    workArea.x + workArea.width - width,
+  );
+  const y = Math.min(
+    Math.max(candidateBounds.y, workArea.y),
+    workArea.y + workArea.height - height,
+  );
+
+  return { x, y, width, height };
+}
+
+function installRendererStartupDiagnostics(window: BrowserWindow) {
+  if (isDev) return;
+
+  window.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedUrl) => {
+    console.error("[clipper] renderer failed to load", { errorCode, errorDescription, validatedUrl });
+  });
+  window.webContents.on("render-process-gone", (_event, details) => {
+    console.error("[clipper] renderer process gone", details);
+  });
+  window.webContents.on("console-message", (_event, level, message, line, sourceId) => {
+    if (level < 2) return;
+    console.error("[clipper] renderer console", { level, message, line, sourceId });
   });
 }
 
@@ -218,7 +308,7 @@ function getClipperRelativePath(filePath: string) {
 
 engine = new RenderEngine({
   ffmpegPath,
-  appRoot: path.resolve(__dirname, ".."),
+  appRoot,
   resolveClipperFile,
   loadExportWindow: async (window: BrowserWindow) => {
     if (isDev) {
@@ -490,7 +580,6 @@ ipcMain.handle(
 // ─── Project / Dialog handlers ───────────────────────────────────────────
 
 ipcMain.handle("clipper:open-project-manifest", async () => {
-  const appRoot = path.resolve(__dirname, "..");
   const { canceled, filePaths } = await dialog.showOpenDialog({
     title: "Open Clipper project",
     defaultPath: path.join(appRoot, "clipper", "projects"),
@@ -530,7 +619,6 @@ function validateProjectFolderName(name: string): string | null {
 ipcMain.handle(
   "clipper:create-project",
   async (_event, projectName: string) => {
-    const appRoot = path.resolve(__dirname, "..");
     const projectsDir = path.join(appRoot, "clipper", "projects");
     await fs.mkdir(projectsDir, { recursive: true });
 
@@ -652,6 +740,7 @@ ipcMain.handle(
     mediaExportFormat?: string,
     exportRenderQuality?: string,
     exportWorkerMapping?: unknown,
+    exportTileMapping?: unknown,
   ) => {
     type MediaExportFormat = "prores-422-hq" | "prores-4444" | "dnxhr-hqx" | "mov" | "h264-high" | "mp4" | "webm";
     const knownFormats = new Set<string>(["prores-422-hq", "prores-4444", "dnxhr-hqx", "mov", "h264-high", "mp4", "webm"]);
@@ -688,6 +777,7 @@ ipcMain.handle(
         exportFormat: format,
         exportRenderQuality: renderQuality,
         exportWorkerMapping: normalizeExportWorkerMapping(exportWorkerMapping),
+        exportTileMapping: normalizeExportTileMapping(exportTileMapping),
         onProgress: (progress) =>
           event.sender.send(
             "clipper:video-export-progress",
@@ -705,13 +795,29 @@ function normalizeExportRenderQuality(value: string | undefined): "standard" | "
   return value === "standard" || value === "ultra" ? value : "high";
 }
 
+function normalizeExportTileMapping(value: unknown): { hd?: number; qhd?: number; uhd?: number } | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const source = value as Record<string, unknown>;
+  return {
+    hd: normalizeExportTileCount(source.hd),
+    qhd: normalizeExportTileCount(source.qhd),
+    uhd: normalizeExportTileCount(source.uhd),
+  };
+}
+
 function normalizeExportWorkerMapping(value: unknown): { hd: number; qhd: number; uhd: number } {
   const candidate = value && typeof value === "object" ? value as { hd?: unknown; qhd?: unknown; uhd?: unknown } : {};
   return {
-    hd: normalizeExportWorkerCount(candidate.hd, 4),
+    hd: normalizeExportWorkerCount(candidate.hd, 2),
     qhd: normalizeExportWorkerCount(candidate.qhd, 2),
     uhd: normalizeExportWorkerCount(candidate.uhd, 1),
   };
+}
+
+function normalizeExportTileCount(value: unknown) {
+  const numeric = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(numeric)) return undefined;
+  return Math.min(Math.max(Math.round(numeric), 1), 64);
 }
 
 function normalizeExportWorkerCount(value: unknown, fallback: number) {
@@ -825,15 +931,15 @@ ipcMain.handle(
 
 async function createWindow() {
   const window = new BrowserWindow({
-    width: 1440,
-    height: 960,
-    minWidth: 1200,
-    minHeight: 760,
-    backgroundColor: "#00000000",
+    width: defaultWindowBounds.width,
+    height: defaultWindowBounds.height,
+    minWidth: minWindowBounds.width,
+    minHeight: minWindowBounds.height,
+    backgroundColor: "#101116",
     title: "Clipper",
     icon: appIconPath,
     titleBarStyle: "hiddenInset",
-    transparent: true,
+    transparent: false,
     webPreferences: {
       additionalArguments: experimentalHtmlCanvasPostProcessEnabled ? ["clipperExperimentalHtmlCanvasPostProcess=1"] : [],
       preload: path.join(__dirname, "preload.cjs"),
@@ -841,6 +947,7 @@ async function createWindow() {
       nodeIntegration: false,
     },
   });
+  installRendererStartupDiagnostics(window);
 
   if (process.platform === "darwin") {
     try {
@@ -852,28 +959,8 @@ async function createWindow() {
 
   try {
     const state = await readAppState();
-    const bounds = state.windowBounds as
-      | { x: number; y: number; width: number; height: number }
-      | undefined;
-    if (
-      bounds &&
-      typeof bounds.x === "number" &&
-      typeof bounds.y === "number" &&
-      typeof bounds.width === "number" &&
-      typeof bounds.height === "number"
-    ) {
-      const displays = screen.getAllDisplays();
-      const inAnyDisplay = displays.some((d) => {
-        const b = d.workArea;
-        return (
-          bounds.x < b.x + b.width &&
-          bounds.x + 40 > b.x &&
-          bounds.y < b.y + b.height &&
-          bounds.y + 40 > b.y
-        );
-      });
-      if (inAnyDisplay) window.setBounds(bounds);
-    }
+    const bounds = restoreWindowBounds(state.windowBounds);
+    if (bounds) window.setBounds(bounds);
   } catch {
     /* no saved bounds */
   }

@@ -16,6 +16,8 @@ import { getProjectCompositionSources } from "./projectSources";
 import { compositionApiSource } from "../../core/compositionApiSource";
 import { chartSource } from "../../core/chartSource";
 
+const bootStateReadTimeoutMs = 3000;
+
 export type BootProject = {
   manifestPath: string;
   project: ProjectManifest;
@@ -24,7 +26,7 @@ export type BootProject = {
 };
 
 async function loadBootProject(): Promise<BootProject> {
-  const manifestPath = await readStoredActiveProjectManifestPath();
+  const manifestPath = await withBootStateTimeout(readStoredActiveProjectManifestPath(), null);
   if (!manifestPath) throw new Error("NO_STORED_PROJECT");
 
   const { project } = await projectPersistenceService.loadProject({ manifestPath });
@@ -42,6 +44,29 @@ async function loadBootProject(): Promise<BootProject> {
     sourceStatus: `Project loaded from ${manifestPath}.`,
     compositionSources: getProjectCompositionSources(normalizedProject),
   };
+}
+
+async function withBootStateTimeout<T>(promise: Promise<T>, fallback: T): Promise<T> {
+  let timeout = 0;
+  if (typeof window === "undefined") return promise;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((resolve) => {
+        timeout = window.setTimeout(() => resolve(fallback), bootStateReadTimeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) window.clearTimeout(timeout);
+  }
+}
+
+async function clearStoredActiveProjectManifestPathBestEffort() {
+  try {
+    await clearStoredActiveProjectManifestPath();
+  } catch {
+    // Boot fallback must not fail just because persisted state cannot be updated.
+  }
 }
 
 function projectNameFromPath(manifestPath: string) {
@@ -145,7 +170,7 @@ export function useActiveProjectBoot() {
   useEffect(() => {
     let cancelled = false;
     async function boot() {
-      const recents = await readRecentProjects();
+      const recents = await withBootStateTimeout(readRecentProjects(), []);
       if (cancelled) return;
       setRecentProjects(recents);
 
@@ -159,8 +184,10 @@ export function useActiveProjectBoot() {
         if (message === "NO_STORED_PROJECT") {
           setIsWelcome(true);
         } else {
-          await clearStoredActiveProjectManifestPath();
+          await clearStoredActiveProjectManifestPathBestEffort();
+          if (cancelled) return;
           setBootError(message);
+          setIsWelcome(true);
         }
       }
     }

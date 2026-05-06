@@ -106,6 +106,7 @@ function clipperBrowserFilesystemBridge(): Plugin {
 }
 
 export default defineConfig({
+  base: "./",
   plugins: [react(), tailwindcss(), clipperBrowserFilesystemBridge()],
   resolve: {
     alias: {

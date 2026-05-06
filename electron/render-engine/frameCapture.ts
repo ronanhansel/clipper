@@ -33,6 +33,11 @@ type ExportFrameRenderResult = {
   postProcessPasses?: unknown[];
 };
 
+type ExportRenderTile = ExportCaptureTile & {
+  fullWidth: number;
+  fullHeight: number;
+};
+
 // ─── Dependencies passed from RenderEngine ───────────────────────────────
 
 export interface FrameCaptureDeps {
@@ -114,55 +119,33 @@ export async function renderSceneToRawFrames(
           payload.frameRate,
           payload.durationSeconds,
         );
-        const syncResult = await renderExportFrame(
-          rendererWindow,
-          payload.project,
-          payload.scene,
-          sceneTime,
-          payload.frameRate,
-          "export",
-          exportWidth,
-          exportHeight,
-        );
-        if (shouldStop?.())
-          return {
-            nativeWarningDetected: oomWarningState.totalWarnings > 0,
-            nativeWarningCount: oomWarningState.totalWarnings,
-          };
-        if (syncResult.failedCount > 0) {
-          throw new Error(
-            `Supervised renderer failed to pin ${syncResult.failedCount} animation(s) at ${sceneTime.toFixed(3)}s after ${syncResult.passCount} sync pass(es).`,
-          );
-        }
-        const postProcessPasses = getExportPostProcessPasses(syncResult);
-        const frame = postProcessPasses.length > 0
-          ? await captureAndPostProcessFullExportFrame(
+        const useTileAwareRender = payload.renderSurface !== "preview-cache" && exportWidth * exportHeight > MAX_FULL_FRAME_EXPORT_CAPTURE_PIXELS;
+        const frame = useTileAwareRender
+          ? await captureAdaptiveExportFrame(
               rendererWindow,
-              postProcessPasses,
+              payload.project,
+              payload.scene,
+              frameIndex,
+              sceneTime,
+              payload.frameRate,
+              payload.tileHeight,
+              exportWidth,
+              exportHeight,
+              deps,
+              () => fullFrameExportCaptureDisabled,
+              () => { fullFrameExportCaptureDisabled = true; },
+            )
+          : await captureRenderedExportFrame(
+              rendererWindow,
+              payload,
               frameIndex,
               sceneTime,
               exportWidth,
               exportHeight,
-            )
-          : payload.renderSurface === "preview-cache"
-            ? await captureFullPreviewCacheFrame(
-                rendererWindow,
-                frameIndex,
-                sceneTime,
-                exportWidth,
-                exportHeight,
-              )
-            : await captureAdaptiveExportFrame(
-                rendererWindow,
-                frameIndex,
-                sceneTime,
-                payload.tileHeight,
-                exportWidth,
-                exportHeight,
-                deps,
-                () => fullFrameExportCaptureDisabled,
-                () => { fullFrameExportCaptureDisabled = true; },
-              );
+              deps,
+              () => fullFrameExportCaptureDisabled,
+              () => { fullFrameExportCaptureDisabled = true; },
+            );
         if (shouldStop?.())
           return {
             nativeWarningDetected: oomWarningState.totalWarnings > 0,
@@ -225,10 +208,13 @@ const EXPORT_WINDOW_PRELOAD_PATH = (() => {
   }
 })();
 
+const MAX_FULL_FRAME_EXPORT_CAPTURE_PIXELS = 3840 * 2160;
+
 function createExportRendererWindow(width: number, height: number): BrowserWindow {
+  const initialHeight = width * height > MAX_FULL_FRAME_EXPORT_CAPTURE_PIXELS ? Math.min(height, 1080) : height;
   return new BrowserWindow({
     width,
-    height,
+    height: initialHeight,
     useContentSize: true,
     show: false,
     focusable: false,
@@ -248,6 +234,69 @@ function createExportRendererWindow(width: number, height: number): BrowserWindo
 }
 
 // ─── Frame capture helpers ──────────────────────────────────────────────
+
+async function captureRenderedExportFrame(
+  window: BrowserWindow,
+  payload: SupervisedRenderPayload,
+  frameIndex: number,
+  sceneTime: number,
+  exportWidth: number,
+  exportHeight: number,
+  deps: FrameCaptureDeps,
+  isFullFrameDisabled: () => boolean,
+  disableFullFrame: () => void,
+): Promise<Buffer> {
+  const syncResult = await renderExportFrame(
+    window,
+    payload.project,
+    payload.scene,
+    sceneTime,
+    payload.frameRate,
+    "export",
+    exportWidth,
+    exportHeight,
+  );
+  if (syncResult.failedCount > 0) {
+    throw new Error(
+      `Supervised renderer failed to pin ${syncResult.failedCount} animation(s) at ${sceneTime.toFixed(3)}s after ${syncResult.passCount} sync pass(es).`,
+    );
+  }
+
+  const postProcessPasses = getExportPostProcessPasses(syncResult);
+  if (postProcessPasses.length > 0) {
+    return captureAndPostProcessFullExportFrame(
+      window,
+      postProcessPasses,
+      frameIndex,
+      sceneTime,
+      exportWidth,
+      exportHeight,
+    );
+  }
+  if (payload.renderSurface === "preview-cache") {
+    return captureFullPreviewCacheFrame(
+      window,
+      frameIndex,
+      sceneTime,
+      exportWidth,
+      exportHeight,
+    );
+  }
+  return captureAdaptiveExportFrame(
+    window,
+    payload.project,
+    payload.scene,
+    frameIndex,
+    sceneTime,
+    payload.frameRate,
+    payload.tileHeight,
+    exportWidth,
+    exportHeight,
+    deps,
+    isFullFrameDisabled,
+    disableFullFrame,
+  );
+}
 
 async function captureFullPreviewCacheFrame(
   window: BrowserWindow,
@@ -272,16 +321,25 @@ async function captureFullPreviewCacheFrame(
 
 async function captureTiledExportFrame(
   window: BrowserWindow,
+  project: ProjectManifest,
+  scene: Scene,
   frameIndex: number,
   sceneTime: number,
+  frameRate: number,
   tileHeight: number,
   width: number,
   height: number,
   deps: FrameCaptureDeps,
 ): Promise<Buffer> {
-  await applyDefaultExportCaptureViewport(window, width, height);
   const frame = Buffer.allocUnsafe(width * height * 4);
   for (const tile of getExportCaptureTiles(tileHeight, width, height, deps)) {
+    await applyTiledExportCaptureViewport(window, tile);
+    const syncResult = await renderExportFrame(window, project, scene, sceneTime, frameRate, "export", width, height, { ...tile, fullWidth: width, fullHeight: height });
+    if (syncResult.failedCount > 0) {
+      throw new Error(
+        `Supervised renderer failed to pin ${syncResult.failedCount} animation(s) for tile ${tile.x}-${tile.y} at ${sceneTime.toFixed(3)}s after ${syncResult.passCount} sync pass(es).`,
+      );
+    }
     const tileBitmap = await captureExportTileWithRetries(
       window,
       tile,
@@ -295,8 +353,11 @@ async function captureTiledExportFrame(
 
 async function captureAdaptiveExportFrame(
   window: BrowserWindow,
+  project: ProjectManifest,
+  scene: Scene,
   frameIndex: number,
   sceneTime: number,
+  frameRate: number,
   tileHeight: number,
   width: number,
   height: number,
@@ -304,7 +365,8 @@ async function captureAdaptiveExportFrame(
   isFullFrameDisabled: () => boolean,
   disableFullFrame: () => void,
 ): Promise<Buffer> {
-  if (!isFullFrameDisabled()) {
+  const shouldTryFullFrameCapture = width * height <= MAX_FULL_FRAME_EXPORT_CAPTURE_PIXELS;
+  if (shouldTryFullFrameCapture && !isFullFrameDisabled()) {
     try {
       return await captureFullExportFrameImageAsBgra(window, frameIndex, sceneTime, "full export", width, height);
     } catch (error) {
@@ -312,7 +374,7 @@ async function captureAdaptiveExportFrame(
       console.warn(`[clipper export] full-frame capture failed on frame ${frameIndex + 1}; falling back to tiled capture: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
-  return captureTiledExportFrame(window, frameIndex, sceneTime, tileHeight, width, height, deps);
+  return captureTiledExportFrame(window, project, scene, frameIndex, sceneTime, frameRate, tileHeight, width, height, deps);
 }
 
 function getExportPostProcessPasses(syncResult: ExportFrameRenderResult): unknown[] {
@@ -607,6 +669,35 @@ async function applyDefaultExportCaptureViewport(
   );
 }
 
+async function applyTiledExportCaptureViewport(
+  window: BrowserWindow,
+  tile: ExportCaptureTile,
+): Promise<void> {
+  const [currentWidth, currentHeight] = window.getContentSize();
+  if (currentWidth !== tile.width || currentHeight !== tile.height)
+    window.setContentSize(tile.width, tile.height, false);
+  await withTimeout(
+    window.webContents.executeJavaScript(
+      `(() => {
+        document.documentElement.style.width = "${tile.width}px";
+        document.documentElement.style.height = "${tile.height}px";
+        document.documentElement.style.overflow = "hidden";
+        document.body.style.width = "${tile.width}px";
+        document.body.style.height = "${tile.height}px";
+        document.body.style.overflow = "hidden";
+        document.body.style.margin = "0";
+        document.body.style.transformOrigin = "0 0";
+        document.body.style.transform = "none";
+        window.scrollTo(0, 0);
+        return true;
+      })()`,
+      true,
+    ),
+    EXPORT_CAPTURE_TILE_TIMEOUT_MS,
+    "Timed out applying tiled export capture viewport.",
+  );
+}
+
 function getExportCaptureTiles(
   tileHeight: number,
   frameWidth: number,
@@ -614,16 +705,24 @@ function getExportCaptureTiles(
   deps: FrameCaptureDeps,
 ): ExportCaptureTile[] {
   const exportTileHeight = deps.clampExportTileHeight(tileHeight, frameHeight);
+  const maxTileWidth = getExportMaxTileWidth(frameWidth, frameHeight);
   const tiles: ExportCaptureTile[] = [];
   for (let y = 0; y < frameHeight; y += exportTileHeight) {
-    tiles.push({
-      x: 0,
-      y,
-      width: frameWidth,
-      height: Math.min(exportTileHeight, frameHeight - y),
-    });
+    for (let x = 0; x < frameWidth; x += maxTileWidth) {
+      tiles.push({
+        x,
+        y,
+        width: Math.min(maxTileWidth, frameWidth - x),
+        height: Math.min(exportTileHeight, frameHeight - y),
+      });
+    }
   }
   return tiles;
+}
+
+function getExportMaxTileWidth(frameWidth: number, frameHeight: number): number {
+  if (frameWidth * frameHeight <= MAX_FULL_FRAME_EXPORT_CAPTURE_PIXELS) return frameWidth;
+  return Math.min(frameWidth, 2560);
 }
 
 async function captureExportTileWithRetries(
@@ -636,7 +735,7 @@ async function captureExportTileWithRetries(
   for (let attempt = 1; attempt <= EXPORT_CAPTURE_TILE_RETRIES; attempt += 1) {
     try {
       const image = await withTimeout(
-        window.webContents.capturePage(tile),
+        window.webContents.capturePage(),
         EXPORT_CAPTURE_TILE_TIMEOUT_MS,
         `Timed out capturing export frame ${frameIndex + 1} tile ${tile.y}-${tile.y + tile.height} at ${sceneTime.toFixed(3)}s.`,
       );
@@ -712,10 +811,11 @@ async function renderExportFrame(
   renderMode: "preview" | "export" = "export",
   exportWidth?: number,
   exportHeight?: number,
+  exportTile?: ExportRenderTile,
 ): Promise<ExportFrameRenderResult> {
   return withTimeout(
     window.webContents.executeJavaScript(
-      `window.__clipperRenderExportFrame(${JSON.stringify({ project, scene, sceneTime, frameRate, renderMode, exportWidth, exportHeight })})`,
+      `window.__clipperRenderExportFrame(${JSON.stringify({ project, scene, sceneTime, frameRate, renderMode, exportWidth, exportHeight, exportTile })})`,
       true,
     ),
     EXPORT_RENDERER_FRAME_TIMEOUT_MS,
