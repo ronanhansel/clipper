@@ -195,8 +195,7 @@ export function OsFileManager({
       if (!nodeData) return;
       const outsideWindow = event.clientX <= 0 || event.clientY <= 0 || event.clientX >= window.innerWidth || event.clientY >= window.innerHeight;
       if (outsideWindow) {
-        if (nodeData.isComposition) cleanupExternalCompositionDrag("cancel");
-        else treeRef.current?.endDrag();
+        if (!nodeData.isComposition) treeRef.current?.endDrag();
       }
     }
 

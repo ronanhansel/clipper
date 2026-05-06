@@ -27,6 +27,14 @@ type LocalFontData = {
   style: string;
 };
 
+type ClipperUpdateStatusKind = "idle" | "checking" | "available" | "not-available" | "downloading" | "downloaded" | "error" | "unsupported";
+type ClipperUpdateStatus = {
+  kind: ClipperUpdateStatusKind;
+  message: string;
+  version?: string;
+  downloaded?: boolean;
+};
+
 interface Window {
   queryLocalFonts?: () => Promise<LocalFontData[]>;
 }
@@ -63,6 +71,11 @@ interface Window {
     clearPrerenderCache: (manifestPath: string) => Promise<void>;
     clearAllPrerenderCaches: () => Promise<{ clearedCount: number }>;
     cancelRenderVideoExport: (exportId: string) => Promise<void>;
+    getUpdateStatus?: () => Promise<ClipperUpdateStatus>;
+    setAutoDownloadUpdates?: (enabled: boolean) => Promise<ClipperUpdateStatus>;
+    checkForUpdates?: () => Promise<ClipperUpdateStatus>;
+    downloadUpdate?: () => Promise<ClipperUpdateStatus>;
+    installUpdate?: () => Promise<ClipperUpdateStatus>;
     setWindowFullscreen: (fullscreen: boolean) => Promise<boolean>;
     toggleWindowFullscreen: () => Promise<boolean>;
     watchTextFiles: (relativePaths: string[]) => Promise<void>;
@@ -75,6 +88,7 @@ interface Window {
     onCloseEditorTabShortcut: (callback: () => void) => () => void;
     onRestoreEditorTabShortcut: (callback: () => void) => () => void;
     onWindowFullscreenChange: (callback: (fullscreen: boolean) => void) => () => void;
+    onUpdateStatus?: (callback: (status: ClipperUpdateStatus) => void) => () => void;
   };
 }
 

@@ -1,4 +1,4 @@
-import type { ExportRenderQuality, ExportWorkerResolutionMapping, MediaExportFormat } from "./types";
+import type { AppUpdateStatus, ExportRenderQuality, ExportWorkerResolutionMapping, MediaExportFormat } from "./types";
 import type { ProjectManifest } from "../core/types";
 
 type SceneManifest = ProjectManifest["scenes"][number];
@@ -146,6 +146,34 @@ class ClipperHostService {
 
   async cancelRenderVideoExport(exportId: string) {
     await window.clipper?.cancelRenderVideoExport?.(exportId);
+  }
+
+  async getUpdateStatus(): Promise<AppUpdateStatus> {
+    return window.clipper?.getUpdateStatus?.() ?? {
+      kind: "unsupported",
+      message: "Updates are only available in the packaged Clipper desktop app.",
+    };
+  }
+
+  async setAutoDownloadUpdates(enabled: boolean): Promise<AppUpdateStatus> {
+    if (!window.clipper?.setAutoDownloadUpdates) return this.getUpdateStatus();
+    return window.clipper.setAutoDownloadUpdates(enabled);
+  }
+
+  async checkForUpdates(): Promise<AppUpdateStatus> {
+    return window.clipper?.checkForUpdates?.() ?? this.getUpdateStatus();
+  }
+
+  async downloadUpdate(): Promise<AppUpdateStatus> {
+    return window.clipper?.downloadUpdate?.() ?? this.getUpdateStatus();
+  }
+
+  async installUpdate(): Promise<AppUpdateStatus> {
+    return window.clipper?.installUpdate?.() ?? this.getUpdateStatus();
+  }
+
+  onUpdateStatus(callback: (status: AppUpdateStatus) => void) {
+    return window.clipper?.onUpdateStatus?.(callback) ?? (() => {});
   }
 }
 

@@ -3,10 +3,11 @@ import { AppContextMenu } from "../../components/AppContextMenu";
 import { ExportMediaDialog, VideoExportOverlay } from "../../components/export/ExportMediaDialog";
 import { SettingsDialog } from "../../components/SettingsDialog";
 import type { ProjectManifest } from "../../core/types";
-import type { ContextMenuState, ExportDialogTab, ExportRenderQuality, ExportWorkerResolutionMapping, MediaExportFormat, ProjectExportFormat, SettingsSection, VideoExportProgress } from "../types";
+import type { AppUpdateStatus, ContextMenuState, ExportDialogTab, ExportRenderQuality, ExportWorkerResolutionMapping, MediaExportFormat, ProjectExportFormat, SettingsSection, VideoExportProgress } from "../types";
 
 type AppDialogsProps = {
   appContextMenu: ContextMenuState | null;
+  autoDownloadUpdates: boolean;
   debugSettingsEnabled: boolean;
   defaultNewMarkerDurationSeconds: number;
   exportDialogOpen: boolean;
@@ -41,7 +42,11 @@ type AppDialogsProps = {
   videoExportCancelling: boolean;
   videoExportTileHeight: number;
   videoExportProgress: VideoExportProgress | null;
+  updateStatus: AppUpdateStatus;
   onAppContextMenuClose: () => void;
+  onAutoDownloadUpdatesChange: (enabled: boolean) => void;
+  onCheckForUpdates: () => void;
+  onDownloadUpdate: () => void;
   onDebugSettingsEnabledChange: (enabled: boolean) => void;
   onDefaultNewMarkerDurationSecondsChange: (value: number) => void;
   onExportDialogOpenChange: (open: boolean) => void;
@@ -70,9 +75,10 @@ type AppDialogsProps = {
   onTimelinePrecisionChange: (value: number) => void;
   onVideoExportTileHeightChange: (value: number) => void;
   onVideoExportCancel: () => void;
+  onInstallUpdate: () => void;
 };
 
-export function AppDialogs({ appContextMenu, debugSettingsEnabled, defaultNewMarkerDurationSeconds, exportDialogOpen, exportDialogTab, exportFrameRate, exportIncludeSources, exportProgress, exportRenderQuality, exportResolution, exportWorkerMapping, isExporting, liveDomPostProcessPreviewEnabled, liveDomPostProcessRuntimeEnabled, liveDomPostProcessMaxFps, mediaExportFormat, pausePlaybackOnScrub, partCount, prerenderCacheEnabled, prerenderCacheBlackMissDebug, prerenderBlockDurationMs, projectExportFormat, projectName, resolution, sceneDurationSeconds, sceneName, scrubCommitThrottleMs, settingsOpen, settingsSection, timelineEndPaddingFraction, timelinePrecision, videoExportCancelling, videoExportTileHeight, videoExportProgress, onAppContextMenuClose, onDebugSettingsEnabledChange, onDefaultNewMarkerDurationSecondsChange, onExportDialogOpenChange, onExportDialogTabChange, onExportFrameRateChange, onExportIncludeSourcesChange, onExportRenderQualityChange, onExportResolutionChange, onExportWorkerMappingChange, onMediaExport, onMediaExportFormatChange, onLiveDomPostProcessPreviewEnabledChange, onLiveDomPostProcessMaxFpsChange, onProjectExport, onPausePlaybackOnScrubChange, onPrerenderCacheEnabledChange, onPrerenderCacheBlackMissDebugChange, onPrerenderBlockDurationMsChange, onClearAllPrerenderCaches, onProjectExportFormatChange, onScrubCommitThrottleMsChange, onSettingsOpenChange, onSettingsSectionChange, onTimelineEndPaddingFractionChange, onTimelinePrecisionChange, onVideoExportTileHeightChange, onVideoExportCancel }: AppDialogsProps) {
+export function AppDialogs({ appContextMenu, autoDownloadUpdates, debugSettingsEnabled, defaultNewMarkerDurationSeconds, exportDialogOpen, exportDialogTab, exportFrameRate, exportIncludeSources, exportProgress, exportRenderQuality, exportResolution, exportWorkerMapping, isExporting, liveDomPostProcessPreviewEnabled, liveDomPostProcessRuntimeEnabled, liveDomPostProcessMaxFps, mediaExportFormat, pausePlaybackOnScrub, partCount, prerenderCacheEnabled, prerenderCacheBlackMissDebug, prerenderBlockDurationMs, projectExportFormat, projectName, resolution, sceneDurationSeconds, sceneName, scrubCommitThrottleMs, settingsOpen, settingsSection, timelineEndPaddingFraction, timelinePrecision, videoExportCancelling, videoExportTileHeight, videoExportProgress, updateStatus, onAppContextMenuClose, onAutoDownloadUpdatesChange, onCheckForUpdates, onDownloadUpdate, onDebugSettingsEnabledChange, onDefaultNewMarkerDurationSecondsChange, onExportDialogOpenChange, onExportDialogTabChange, onExportFrameRateChange, onExportIncludeSourcesChange, onExportRenderQualityChange, onExportResolutionChange, onExportWorkerMappingChange, onMediaExport, onMediaExportFormatChange, onLiveDomPostProcessPreviewEnabledChange, onLiveDomPostProcessMaxFpsChange, onProjectExport, onPausePlaybackOnScrubChange, onPrerenderCacheEnabledChange, onPrerenderCacheBlackMissDebugChange, onPrerenderBlockDurationMsChange, onClearAllPrerenderCaches, onProjectExportFormatChange, onScrubCommitThrottleMsChange, onSettingsOpenChange, onSettingsSectionChange, onTimelineEndPaddingFractionChange, onTimelinePrecisionChange, onVideoExportTileHeightChange, onVideoExportCancel, onInstallUpdate }: AppDialogsProps) {
   return (
     <>
       <ExportMediaDialog
@@ -104,6 +110,7 @@ export function AppDialogs({ appContextMenu, debugSettingsEnabled, defaultNewMar
       />
       <SettingsDialog
         activeSection={settingsSection}
+        autoDownloadUpdates={autoDownloadUpdates}
         debugSettingsEnabled={debugSettingsEnabled}
         liveDomPostProcessPreviewEnabled={liveDomPostProcessPreviewEnabled}
         liveDomPostProcessRuntimeEnabled={liveDomPostProcessRuntimeEnabled}
@@ -119,7 +126,11 @@ export function AppDialogs({ appContextMenu, debugSettingsEnabled, defaultNewMar
         timelinePrecision={timelinePrecision}
         videoExportTileHeight={videoExportTileHeight}
         exportWorkerMapping={exportWorkerMapping}
+        updateStatus={updateStatus}
         onActiveSectionChange={onSettingsSectionChange}
+        onAutoDownloadUpdatesChange={onAutoDownloadUpdatesChange}
+        onCheckForUpdates={onCheckForUpdates}
+        onDownloadUpdate={onDownloadUpdate}
         onDebugSettingsEnabledChange={onDebugSettingsEnabledChange}
         onLiveDomPostProcessPreviewEnabledChange={onLiveDomPostProcessPreviewEnabledChange}
         onLiveDomPostProcessMaxFpsChange={onLiveDomPostProcessMaxFpsChange}
@@ -135,6 +146,7 @@ export function AppDialogs({ appContextMenu, debugSettingsEnabled, defaultNewMar
         onTimelinePrecisionChange={onTimelinePrecisionChange}
         onVideoExportTileHeightChange={onVideoExportTileHeightChange}
         onExportWorkerMappingChange={onExportWorkerMappingChange}
+        onInstallUpdate={onInstallUpdate}
       />
       {videoExportProgress ? <VideoExportOverlay cancelling={videoExportCancelling} progress={videoExportProgress} onCancel={onVideoExportCancel} /> : null}
       <AppContextMenu menu={appContextMenu} onClose={onAppContextMenuClose} />

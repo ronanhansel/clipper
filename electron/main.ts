@@ -19,6 +19,7 @@ import { fileURLToPath } from "node:url";
 
 import { RenderEngine } from "./render-engine/renderer.js";
 import type { ExportFrameRange, ProjectManifest, Scene } from "./render-engine/types.js";
+import { UpdateService } from "./updateService.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(__dirname, "..");
@@ -31,6 +32,7 @@ const isRenderVideoChildProcess = renderVideoChildArgIndex >= 0;
 app.setName("Clipper");
 app.commandLine.appendSwitch("force-color-profile", "srgb");
 const experimentalHtmlCanvasPostProcessEnabled = process.env.CLIPPER_EXPERIMENTAL_HTML_CANVAS_POSTPROCESS === "1" || readStartupAppStateBoolean("experimentalHtmlCanvasPostProcess");
+const automaticUpdateDownloadsEnabled = readStartupAppStateBoolean("automaticUpdateDownloads", true);
 if (experimentalHtmlCanvasPostProcessEnabled) {
   app.commandLine.appendSwitch("enable-blink-features", "HTMLCanvasElementDrawElement");
   app.commandLine.appendSwitch("enable-features", "CanvasDrawElement");
@@ -43,18 +45,26 @@ const appShuttingDownRef = { current: appShuttingDown };
 Object.defineProperty(appShuttingDownRef, "current", { get: () => appShuttingDown, set: (v) => { appShuttingDown = v; } });
 const appIconPath = path.resolve(__dirname, "../build/icons/icon.png");
 
-function readStartupAppStateBoolean(key: string) {
+function readStartupAppStateBoolean(key: string, fallback = false) {
   try {
     const state = JSON.parse(readFileSync(path.join(appRoot, appStatePath), "utf8")) as Record<string, unknown>;
-    return state[key] === true;
+    return typeof state[key] === "boolean" ? state[key] === true : fallback;
   } catch {
-    return false;
+    return fallback;
   }
 }
 
 // ─── Render Engine (instantiated after resolveClipperFile is defined) ────
 
 let engine: RenderEngine;
+const updateService = new UpdateService({
+  autoDownload: automaticUpdateDownloadsEnabled,
+  readAutoDownload: async () => {
+    const state = await readAppState();
+    return typeof state.automaticUpdateDownloads === "boolean" ? state.automaticUpdateDownloads : true;
+  },
+  writeAutoDownload: async (enabled) => writeAppState({ automaticUpdateDownloads: enabled }),
+});
 
 // ─── Helper functions ─────────────────────────────────────────────────────
 
@@ -247,6 +257,19 @@ ipcMain.handle("clipper:read-app-state", async () => readAppState());
 ipcMain.handle("clipper:write-app-state", async (_event, updates: Record<string, unknown>) => {
   await writeAppState(updates);
 });
+
+ipcMain.handle("clipper:get-update-status", async () => updateService.getStatus());
+
+ipcMain.handle("clipper:set-auto-download-updates", async (_event, enabled: unknown) => {
+  if (typeof enabled !== "boolean") throw new TypeError("clipper:set-auto-download-updates expects a boolean value.");
+  return updateService.setAutoDownload(enabled);
+});
+
+ipcMain.handle("clipper:check-for-updates", async () => updateService.checkForUpdates());
+
+ipcMain.handle("clipper:download-update", async () => updateService.downloadUpdate());
+
+ipcMain.handle("clipper:install-update", async () => updateService.installUpdate());
 
 ipcMain.handle(
   "clipper:write-text-file",
@@ -1029,8 +1052,10 @@ app.whenReady().then(async () => {
   }
 
   installAppMenu();
+  updateService.initialize();
 
   await createWindow();
+  void updateService.checkOnLaunch();
 });
 
 app.on("window-all-closed", () => {

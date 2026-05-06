@@ -1,13 +1,14 @@
 import { RotateCcw } from "lucide-react";
 import { appBarButtonBase, defaultExportWorkerMapping, defaultLiveDomPostProcessMaxFps, defaultNewMarkerDurationSeconds, defaultPausePlaybackOnScrub, defaultPrerenderBlockDurationMs, defaultScrubCommitThrottleMs, defaultTimelineEndPaddingFraction, defaultTimelinePrecision, defaultVideoExportTileHeight, maxExportWorkerCount, maxLiveDomPostProcessMaxFps, maxPrerenderBlockDurationMs, maxVideoExportTileHeight, minExportWorkerCount, minLiveDomPostProcessMaxFps, minPrerenderBlockDurationMs, minVideoExportTileHeight } from "../app/config";
-import type { ExportWorkerResolutionMapping, SettingsSection } from "../app/types";
+import type { AppUpdateStatus, ExportWorkerResolutionMapping, SettingsSection } from "../app/types";
 import { clamp } from "../core/math";
 import { Dialog, DialogContent } from "./ui/dialog";
 import { Input } from "./ui/input";
 import { Switch } from "./ui/switch";
 
-export function SettingsDialog({ activeSection, debugSettingsEnabled, exportWorkerMapping, liveDomPostProcessPreviewEnabled, liveDomPostProcessRuntimeEnabled, liveDomPostProcessMaxFps, open, pausePlaybackOnScrub, prerenderCacheBlackMissDebug, prerenderCacheEnabled, prerenderBlockDurationMs, scrubCommitThrottleMs, defaultNewMarkerDurationSeconds: markerDurationSeconds, timelineEndPaddingFraction, timelinePrecision, videoExportTileHeight, onActiveSectionChange, onDebugSettingsEnabledChange, onExportWorkerMappingChange, onLiveDomPostProcessPreviewEnabledChange, onLiveDomPostProcessMaxFpsChange, onOpenChange, onPausePlaybackOnScrubChange, onPrerenderCacheBlackMissDebugChange, onPrerenderCacheEnabledChange, onPrerenderBlockDurationMsChange, onClearAllPrerenderCaches, onScrubCommitThrottleMsChange, onDefaultNewMarkerDurationSecondsChange, onTimelineEndPaddingFractionChange, onTimelinePrecisionChange, onVideoExportTileHeightChange }: { activeSection: SettingsSection; debugSettingsEnabled: boolean; exportWorkerMapping: ExportWorkerResolutionMapping; liveDomPostProcessPreviewEnabled: boolean; liveDomPostProcessRuntimeEnabled: boolean; liveDomPostProcessMaxFps: number; open: boolean; pausePlaybackOnScrub: boolean; prerenderCacheBlackMissDebug: boolean; prerenderCacheEnabled: boolean; prerenderBlockDurationMs: number; scrubCommitThrottleMs: number; defaultNewMarkerDurationSeconds: number; timelineEndPaddingFraction: number; timelinePrecision: number; videoExportTileHeight: number; onActiveSectionChange: (section: SettingsSection) => void; onDebugSettingsEnabledChange: (enabled: boolean) => void; onExportWorkerMappingChange: (mapping: ExportWorkerResolutionMapping) => void; onLiveDomPostProcessPreviewEnabledChange: (enabled: boolean) => void; onLiveDomPostProcessMaxFpsChange: (value: number) => void; onOpenChange: (open: boolean) => void; onPausePlaybackOnScrubChange: (enabled: boolean) => void; onPrerenderCacheBlackMissDebugChange: (enabled: boolean) => void; onPrerenderCacheEnabledChange: (enabled: boolean) => void; onPrerenderBlockDurationMsChange: (value: number) => void; onClearAllPrerenderCaches: () => void; onScrubCommitThrottleMsChange: (value: number) => void; onDefaultNewMarkerDurationSecondsChange: (value: number) => void; onTimelineEndPaddingFractionChange: (value: number) => void; onTimelinePrecisionChange: (value: number) => void; onVideoExportTileHeightChange: (value: number) => void }) {
+export function SettingsDialog({ activeSection, autoDownloadUpdates, debugSettingsEnabled, exportWorkerMapping, liveDomPostProcessPreviewEnabled, liveDomPostProcessRuntimeEnabled, liveDomPostProcessMaxFps, open, pausePlaybackOnScrub, prerenderCacheBlackMissDebug, prerenderCacheEnabled, prerenderBlockDurationMs, scrubCommitThrottleMs, defaultNewMarkerDurationSeconds: markerDurationSeconds, timelineEndPaddingFraction, timelinePrecision, updateStatus, videoExportTileHeight, onActiveSectionChange, onAutoDownloadUpdatesChange, onCheckForUpdates, onDownloadUpdate, onDebugSettingsEnabledChange, onExportWorkerMappingChange, onInstallUpdate, onLiveDomPostProcessPreviewEnabledChange, onLiveDomPostProcessMaxFpsChange, onOpenChange, onPausePlaybackOnScrubChange, onPrerenderCacheBlackMissDebugChange, onPrerenderCacheEnabledChange, onPrerenderBlockDurationMsChange, onClearAllPrerenderCaches, onScrubCommitThrottleMsChange, onDefaultNewMarkerDurationSecondsChange, onTimelineEndPaddingFractionChange, onTimelinePrecisionChange, onVideoExportTileHeightChange }: { activeSection: SettingsSection; autoDownloadUpdates: boolean; debugSettingsEnabled: boolean; exportWorkerMapping: ExportWorkerResolutionMapping; liveDomPostProcessPreviewEnabled: boolean; liveDomPostProcessRuntimeEnabled: boolean; liveDomPostProcessMaxFps: number; open: boolean; pausePlaybackOnScrub: boolean; prerenderCacheBlackMissDebug: boolean; prerenderCacheEnabled: boolean; prerenderBlockDurationMs: number; scrubCommitThrottleMs: number; defaultNewMarkerDurationSeconds: number; timelineEndPaddingFraction: number; timelinePrecision: number; updateStatus: AppUpdateStatus; videoExportTileHeight: number; onActiveSectionChange: (section: SettingsSection) => void; onAutoDownloadUpdatesChange: (enabled: boolean) => void; onCheckForUpdates: () => void; onDownloadUpdate: () => void; onDebugSettingsEnabledChange: (enabled: boolean) => void; onExportWorkerMappingChange: (mapping: ExportWorkerResolutionMapping) => void; onInstallUpdate: () => void; onLiveDomPostProcessPreviewEnabledChange: (enabled: boolean) => void; onLiveDomPostProcessMaxFpsChange: (value: number) => void; onOpenChange: (open: boolean) => void; onPausePlaybackOnScrubChange: (enabled: boolean) => void; onPrerenderCacheBlackMissDebugChange: (enabled: boolean) => void; onPrerenderCacheEnabledChange: (enabled: boolean) => void; onPrerenderBlockDurationMsChange: (value: number) => void; onClearAllPrerenderCaches: () => void; onScrubCommitThrottleMsChange: (value: number) => void; onDefaultNewMarkerDurationSecondsChange: (value: number) => void; onTimelineEndPaddingFractionChange: (value: number) => void; onTimelinePrecisionChange: (value: number) => void; onVideoExportTileHeightChange: (value: number) => void }) {
   const navItems: Array<{ id: SettingsSection; label: string }> = [
+    { id: "general", label: "General" },
     { id: "playback", label: "Playback" },
     { id: "timeline", label: "Timeline" },
     { id: "export", label: "Export" },
@@ -62,6 +63,10 @@ export function SettingsDialog({ activeSection, debugSettingsEnabled, exportWork
     onPrerenderBlockDurationMsChange(Math.round(clamp(parsed, minPrerenderBlockDurationMs, maxPrerenderBlockDurationMs)));
   }
 
+  const updateActionLabel = updateStatus.kind === "downloaded" ? "Install and restart" : "Download";
+  const updateActionEnabled = updateStatus.kind === "available" || updateStatus.kind === "downloaded";
+  const runUpdateAction = updateStatus.kind === "downloaded" ? onInstallUpdate : onDownloadUpdate;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="h-[min(680px,calc(100vh-56px))] w-[min(980px,calc(100vw-42px))] gap-0 overflow-hidden p-0" showCloseButton={false}>
@@ -80,13 +85,38 @@ export function SettingsDialog({ activeSection, debugSettingsEnabled, exportWork
             <header className="flex items-center justify-between border-b border-[#14161c] px-5">
               <div>
                 <h2 className="text-sm font-extrabold text-white">{navItems.find((item) => item.id === activeSection)?.label}</h2>
-                <p className="mt-1 text-xs text-[#8f939d]">{activeSection === "playback" ? "Control preview and playback diagnostics." : activeSection === "timeline" ? "Tune timeline interaction responsiveness." : activeSection === "export" ? "Tune video rendering and capture behavior." : "Configure experimental and developer-facing editor behavior."}</p>
+                <p className="mt-1 text-xs text-[#8f939d]">{activeSection === "general" ? "Manage app-wide behavior and updates." : activeSection === "playback" ? "Control preview and playback diagnostics." : activeSection === "timeline" ? "Tune timeline interaction responsiveness." : activeSection === "export" ? "Tune video rendering and capture behavior." : "Configure experimental and developer-facing editor behavior."}</p>
               </div>
               <button className={`${appBarButtonBase} px-3 py-1.5`} onClick={() => onOpenChange(false)}>Close</button>
             </header>
 
             <div className="settings-scrollbar min-h-0 overflow-y-auto overflow-x-hidden p-5 [scrollbar-gutter:stable]">
-              {activeSection === "playback" ? (
+              {activeSection === "general" ? (
+                <div className="grid gap-4 rounded-xl border border-[#363b47] bg-[#1b1e26] p-4">
+                  <div className="grid gap-1.5">
+                    <strong className="text-sm text-white">Automatic updates</strong>
+                    <p className="text-xs leading-5 text-[#8f939d]">Clipper can check GitHub releases in packaged builds and download available updates automatically.</p>
+                  </div>
+                  <label className="flex w-full items-start justify-between gap-5 text-xs font-bold text-[#dfe2ea]" htmlFor="auto-download-updates-toggle">
+                    <span className="grid gap-1">
+                      <span>Download updates automatically</span>
+                      <span className="font-medium leading-5 text-[#8f939d]">When enabled, available updates download after a successful check. You can still install after download when ready.</span>
+                    </span>
+                    <Switch id="auto-download-updates-toggle" className="mt-0.5" checked={autoDownloadUpdates} onCheckedChange={onAutoDownloadUpdatesChange} />
+                  </label>
+                  <div className="h-px bg-[#363b47]" />
+                  <div className="flex w-full items-start justify-between gap-5">
+                    <span className="grid gap-1 text-xs">
+                      <strong className="text-sm text-white">Update status</strong>
+                      <span className="font-medium leading-5 text-[#8f939d]">{updateStatus.message}</span>
+                    </span>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <button className="rounded-[8px] border border-[#5b6270] bg-transparent px-3 py-2 text-xs font-extrabold text-[#f7f7f8] transition hover:border-[#dfe2ea] hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50" type="button" disabled={updateStatus.kind === "checking" || updateStatus.kind === "downloading"} onClick={onCheckForUpdates}>Check now</button>
+                      <button className="rounded-[8px] border border-[var(--clipper-accent)] bg-[var(--clipper-accent)] px-3 py-2 text-xs font-extrabold text-[var(--clipper-accent-foreground)] transition hover:bg-[var(--clipper-accent-hover)] disabled:cursor-not-allowed disabled:border-[#3b4150] disabled:bg-[#252a34] disabled:text-[#7f8490]" type="button" disabled={!updateActionEnabled} onClick={runUpdateAction}>{updateActionLabel}</button>
+                    </div>
+                  </div>
+                </div>
+              ) : activeSection === "playback" ? (
                 <div className="grid gap-4 rounded-xl border border-[#363b47] bg-[#1b1e26] p-4">
                   <div className="grid gap-1.5">
                     <strong className="text-sm text-white">Prerender cache</strong>
@@ -233,7 +263,7 @@ export function SettingsDialog({ activeSection, debugSettingsEnabled, exportWork
                   <div className="h-px bg-[#363b47]" />
                   <div className="grid gap-1.5">
                     <strong className="text-sm text-white">Renderer workers</strong>
-                    <p className="text-xs leading-5 text-[#8f939d]">Controls how many hidden renderer processes capture frames in parallel for each output-resolution bucket. Higher values can be faster but use more CPU, RAM, and Chromium tile memory.</p>
+                    <p className="text-xs leading-5 text-[#8f939d]">Controls how many hidden renderer processes capture frames in parallel for each internal render-size bucket, after High/Ultra supersampling. Higher values can be faster but use more CPU, RAM, and Chromium tile memory.</p>
                   </div>
                   <div className="grid grid-cols-3 gap-3">
                     <WorkerCountField id="export-workers-hd" label="1080p and below" value={exportWorkerMapping.hd} defaultValue={defaultExportWorkerMapping.hd} onChange={(value) => updateExportWorkerCount("hd", value)} onReset={() => onExportWorkerMappingChange({ ...exportWorkerMapping, hd: defaultExportWorkerMapping.hd })} />

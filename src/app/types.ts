@@ -21,7 +21,14 @@ export type TimelineNodeContextTarget = ({ time?: number; compositionLayerId?: s
 export type TimelineBlankContextTarget = { time: number; compositionLayerId?: string };
 export type VideoExportMethod = "renderer";
 export type VideoExportProgress = { frame: number; totalFrames: number; percent: number; status: string; method?: VideoExportMethod };
-export type SettingsSection = "playback" | "timeline" | "export" | "advanced";
+export type SettingsSection = "general" | "playback" | "timeline" | "export" | "advanced";
+export type UpdateStatusKind = "idle" | "checking" | "available" | "not-available" | "downloading" | "downloaded" | "error" | "unsupported";
+export type AppUpdateStatus = {
+  kind: UpdateStatusKind;
+  message: string;
+  version?: string;
+  downloaded?: boolean;
+};
 export type MotionMarkerSelection = { partId: string; markerId: string };
 export type AdjustmentLayerSelection = { layerId: string };
 export type CompositionSelection = { partId: string };

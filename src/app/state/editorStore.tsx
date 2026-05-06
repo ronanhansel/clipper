@@ -216,7 +216,7 @@ function getInitialState(project: ProjectManifest): EditorStoreState {
     videoExportProgress: null,
     videoExportCancelling: false,
     settingsOpen: false,
-    settingsSection: "playback",
+    settingsSection: "general",
     editorTabs: tabsFromEditorSession(editorState),
     closedEditorTabs: [],
     activeEditorTabId: activeTabIdFromEditorSession(editorState),

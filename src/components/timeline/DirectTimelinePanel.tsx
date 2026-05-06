@@ -2112,6 +2112,15 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
     requestAnimationFrame(() => updateEffectDragPreview(null));
   }
 
+  function handleTimelineViewportDragLeave(event: DragEvent<HTMLDivElement>) {
+    if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+    setTimelineFileDragActive(false);
+    setGlobalTimelineDragActive(false);
+    updateEffectDragPreview(null);
+    setClipperPointerDragPreview(compositionDragPreviewEvent, false);
+    setClipperPointerDragPreview(effectDragPreviewEvent, false);
+  }
+
   function getDraggedEffect(event: DragEvent<HTMLElement>) {
     const types = Array.from(event.dataTransfer.types);
     const registeredType = types.find((type) => type.startsWith("application/x-clipper-effect-"));
@@ -2557,7 +2566,7 @@ export function DirectTimelinePanel({ timelineName, timeline, motionMarkers = []
     if (effectDragPreview) applyEffectDragPreviewElement(effectDragPreview);
   }, [effectDragPreview, contentWidth, layerRows, layerRowStarts, layerRowHeights, timelineDisplayDuration]);
 
-  return <TimelineShell activeMode={mode} contentWidth={contentWidth} currentTime={currentSceneTime} displayDuration={timelineDisplayDuration} dragActive={timelineDragActive || timelineFileDragActive} dragOverlayLabel={timelineFileDragActive ? "Open timeline" : undefined} laneContentHeight={laneContentHeight} laneRowsStyle={laneRowsStyle} layerRailWidth={layerRailWidth} prerenderCacheCoverage={prerenderCacheCoverage} refs={{ playbackPlayheadRef, timelineRef, timelineViewportRef, timelineLayerRailRef, timelineSnapGuideRef, timelinePanelRef }} timelineName={timelineName} timelineZoom={timelineZoom} ticks={ticks} onModeChange={onModeChange} onTimelineViewportDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) { setTimelineFileDragActive(false); setGlobalTimelineDragActive(false); updateEffectDragPreview(null); } }} onTimelineViewportDragOver={handleCompositionNativeDragOver} onTimelineViewportDrop={handleCompositionNativeDrop} onTimelineViewportScroll={saveTimelineDisplacement} onTimelineZoomChange={updateTimelineZoom} rulerHandlers={{ onPointerDown: startScrub, onPointerMove: continueScrub, onPointerUp: endScrub, onPointerCancel: endScrub }} renderLayerRail={() => <>
+  return <TimelineShell activeMode={mode} contentWidth={contentWidth} currentTime={currentSceneTime} displayDuration={timelineDisplayDuration} dragActive={timelineDragActive || timelineFileDragActive} dragOverlayLabel={timelineFileDragActive ? "Open timeline" : undefined} laneContentHeight={laneContentHeight} laneRowsStyle={laneRowsStyle} layerRailWidth={layerRailWidth} prerenderCacheCoverage={prerenderCacheCoverage} refs={{ playbackPlayheadRef, timelineRef, timelineViewportRef, timelineLayerRailRef, timelineSnapGuideRef, timelinePanelRef }} timelineName={timelineName} timelineZoom={timelineZoom} ticks={ticks} onModeChange={onModeChange} onTimelineViewportDragLeave={handleTimelineViewportDragLeave} onTimelineViewportDragOver={handleCompositionNativeDragOver} onTimelineViewportDrop={handleCompositionNativeDrop} onTimelineViewportScroll={saveTimelineDisplacement} onTimelineZoomChange={updateTimelineZoom} rulerHandlers={{ onPointerDown: startScrub, onPointerMove: continueScrub, onPointerUp: endScrub, onPointerCancel: endScrub }} renderLayerRail={() => <>
             <span className="pointer-events-none absolute inset-y-0 right-0 z-30 w-px bg-[#39404d]" />
             {layerRows.map((row, index) => <span className="pointer-events-none absolute right-0 z-40 w-0.5" key={`layer-accent-${row.key}`} style={{ top: layerRowStarts[index], height: layerRowHeights[index], backgroundColor: row.accent }} />)}
             {layerRows.length > 0 ? <LayerResizeSeparator key={`label-separator-${layerRows[0].key}-top`} top={0} onPointerDown={(event) => startLayerRowResize(event, layerRows[0].key, "top")} /> : null}

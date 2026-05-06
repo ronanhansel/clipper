@@ -219,7 +219,7 @@ export class RenderEngine {
       if (exportId && this.cancelledVideoRenders.has(exportId))
         throw new Error("Video export cancelled.");
 
-      workerCount = this.getExportWorkerCount(exportWidth, exportHeight, totalFrames, exportWorkerMapping);
+      workerCount = this.getExportWorkerCount(captureWidth, captureHeight, totalFrames, exportWorkerMapping);
       const workerRanges = this.splitFrameRangeForWorkers(frameRange, workerCount);
       const workerRenderRanges = workerRanges.map((range) => ({
         startFrame: frameRange.startFrame,

@@ -582,8 +582,7 @@ function UnifiedFileManagerTree() {
       if (!node) return;
       const outsideWindow = event.clientX <= 0 || event.clientY <= 0 || event.clientX >= window.innerWidth || event.clientY >= window.innerHeight;
       if (outsideWindow) {
-        if (node.kind === "composition") cleanupExternalCompositionDrag("cancel");
-        else nativeTreeRef.current?.endDrag();
+        if (node.kind !== "composition") nativeTreeRef.current?.endDrag();
       }
     }
 

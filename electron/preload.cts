@@ -1,5 +1,8 @@
 import { contextBridge, ipcRenderer } from "electron";
 
+type UpdateStatusKind = "idle" | "checking" | "available" | "not-available" | "downloading" | "downloaded" | "error" | "unsupported";
+type UpdateStatus = { kind: UpdateStatusKind; message: string; version?: string; downloaded?: boolean };
+
 contextBridge.exposeInMainWorld("clipper", {
   platform: process.platform,
   experimentalHtmlCanvasPostProcess: process.env.CLIPPER_EXPERIMENTAL_HTML_CANVAS_POSTPROCESS === "1" || process.argv.includes("--clipper-experimental-html-canvas-postprocess") || process.argv.includes("clipperExperimentalHtmlCanvasPostProcess=1"),
@@ -35,6 +38,11 @@ contextBridge.exposeInMainWorld("clipper", {
   clearPrerenderCache: (manifestPath: string) => ipcRenderer.invoke("clipper:clear-prerender-cache", manifestPath) as Promise<void>,
   clearAllPrerenderCaches: () => ipcRenderer.invoke("clipper:clear-all-prerender-caches") as Promise<{ clearedCount: number }>,
   cancelRenderVideoExport: (exportId: string) => ipcRenderer.invoke("clipper:cancel-render-video-export", exportId) as Promise<void>,
+  getUpdateStatus: () => ipcRenderer.invoke("clipper:get-update-status") as Promise<UpdateStatus>,
+  setAutoDownloadUpdates: (enabled: boolean) => ipcRenderer.invoke("clipper:set-auto-download-updates", enabled) as Promise<UpdateStatus>,
+  checkForUpdates: () => ipcRenderer.invoke("clipper:check-for-updates") as Promise<UpdateStatus>,
+  downloadUpdate: () => ipcRenderer.invoke("clipper:download-update") as Promise<UpdateStatus>,
+  installUpdate: () => ipcRenderer.invoke("clipper:install-update") as Promise<UpdateStatus>,
   onVideoExportProgress: (callback: (exportId: string, progress: { frame: number; totalFrames: number; percent: number; status: string }) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, exportId: string, progress: { frame: number; totalFrames: number; percent: number; status: string }) => callback(exportId, progress);
     ipcRenderer.on("clipper:video-export-progress", listener);
@@ -74,5 +82,10 @@ contextBridge.exposeInMainWorld("clipper", {
     const listener = (_event: Electron.IpcRendererEvent, fullscreen: boolean) => callback(fullscreen);
     ipcRenderer.on("clipper:window-fullscreen-changed", listener);
     return () => ipcRenderer.removeListener("clipper:window-fullscreen-changed", listener);
+  },
+  onUpdateStatus: (callback: (status: UpdateStatus) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, status: UpdateStatus) => callback(status);
+    ipcRenderer.on("clipper:update-status", listener);
+    return () => ipcRenderer.removeListener("clipper:update-status", listener);
   },
 });

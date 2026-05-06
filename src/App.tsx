@@ -9,6 +9,7 @@ import { usePrerenderCache, type PrerenderManualCompositionRange } from "./app/f
 import { usePresentationController } from "./app/features/presentation/usePresentationController";
 import { isEditorTarget, useGlobalEditorShortcuts } from "./app/features/shortcuts/useGlobalEditorShortcuts";
 import { useSettingsShortcut } from "./app/features/shortcuts/useSettingsShortcut";
+import { useAppUpdates } from "./app/features/updates/useAppUpdates";
 import { getProjectFolderSiblingNames } from "./app/features/file-manager/compositionLibraryMutations";
 import { getDirectoryPath } from "./app/features/file-manager/fileManagerPaths";
 import { useFileManagerController } from "./app/features/file-manager/useFileManagerController";
@@ -273,6 +274,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     getInitialPrerenderBlockDurationMs,
   );
   const [prerenderCacheResetToken, setPrerenderCacheResetToken] = useState(0);
+  const { autoDownloadUpdates, updateStatus, setAutoDownloadUpdates, checkForUpdates, downloadUpdate, installUpdate } = useAppUpdates();
   const playbackBorderScrubberRef = useRef<HTMLInputElement | null>(null);
   const pendingScrubTimeRef = useRef<number | null>(null);
   const scrubFrameRef = useRef(0);
@@ -1932,6 +1934,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     </main>
     <AppDialogs
       appContextMenu={appContextMenu}
+      autoDownloadUpdates={autoDownloadUpdates}
       debugSettingsEnabled={debugSettingsEnabled}
       defaultNewMarkerDurationSeconds={markerDurationSeconds}
       exportDialogOpen={exportDialogOpen}
@@ -1966,7 +1969,11 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
       videoExportCancelling={videoExportCancelling}
       videoExportTileHeight={videoExportTileHeight}
       videoExportProgress={videoExportProgress}
+      updateStatus={updateStatus}
       onAppContextMenuClose={() => setAppContextMenu(null)}
+      onAutoDownloadUpdatesChange={(enabled) => void setAutoDownloadUpdates(enabled)}
+      onCheckForUpdates={() => void checkForUpdates()}
+      onDownloadUpdate={() => void downloadUpdate()}
       onDebugSettingsEnabledChange={setDebugSettingsEnabled}
       onDefaultNewMarkerDurationSecondsChange={setDefaultNewMarkerDurationSeconds}
       onExportDialogOpenChange={setExportDialogOpen}
@@ -1995,6 +2002,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
       onTimelinePrecisionChange={setTimelinePrecision}
       onVideoExportTileHeightChange={setVideoExportTileHeight}
       onVideoExportCancel={() => void stopVideoExport()}
+      onInstallUpdate={() => void installUpdate()}
     />
     <FindMediaDialog findMediaRequest={findMediaRequest} onFindCompositionMedia={fileManagerActions.findCompositionMedia} onFindMediaRequestChange={setFindMediaRequest} />
     </>

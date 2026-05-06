@@ -86,6 +86,7 @@ export async function renderSceneToRawFrames(
     activePath: "renderer",
     totalWarnings: 0,
   };
+  let fullFrameExportCaptureDisabled = false;
   try {
     rendererWindow.webContents.setZoomFactor(1);
     rendererWindow.webContents.setVisualZoomLevelLimits(1, 1).catch(() => {});
@@ -151,7 +152,7 @@ export async function renderSceneToRawFrames(
                 exportWidth,
                 exportHeight,
               )
-            : await captureTiledExportFrame(
+            : await captureAdaptiveExportFrame(
                 rendererWindow,
                 frameIndex,
                 sceneTime,
@@ -159,6 +160,8 @@ export async function renderSceneToRawFrames(
                 exportWidth,
                 exportHeight,
                 deps,
+                () => fullFrameExportCaptureDisabled,
+                () => { fullFrameExportCaptureDisabled = true; },
               );
         if (shouldStop?.())
           return {
@@ -288,6 +291,28 @@ async function captureTiledExportFrame(
     stitchBgraTile(frame, tileBitmap, tile, width);
   }
   return frame;
+}
+
+async function captureAdaptiveExportFrame(
+  window: BrowserWindow,
+  frameIndex: number,
+  sceneTime: number,
+  tileHeight: number,
+  width: number,
+  height: number,
+  deps: FrameCaptureDeps,
+  isFullFrameDisabled: () => boolean,
+  disableFullFrame: () => void,
+): Promise<Buffer> {
+  if (!isFullFrameDisabled()) {
+    try {
+      return await captureFullExportFrameImageAsBgra(window, frameIndex, sceneTime, "full export", width, height);
+    } catch (error) {
+      disableFullFrame();
+      console.warn(`[clipper export] full-frame capture failed on frame ${frameIndex + 1}; falling back to tiled capture: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  return captureTiledExportFrame(window, frameIndex, sceneTime, tileHeight, width, height, deps);
 }
 
 function getExportPostProcessPasses(syncResult: ExportFrameRenderResult): unknown[] {
@@ -499,6 +524,18 @@ async function captureFullExportFrameImage(
     EXPORT_CAPTURE_TILE_TIMEOUT_MS,
     `Timed out capturing ${label} frame ${frameIndex + 1} at ${sceneTime.toFixed(3)}s.`,
   );
+}
+
+async function captureFullExportFrameImageAsBgra(
+  window: BrowserWindow,
+  frameIndex: number,
+  sceneTime: number,
+  label: string,
+  width: number,
+  height: number,
+): Promise<Buffer> {
+  const image = await captureFullExportFrameImage(window, frameIndex, sceneTime, label, width, height);
+  return getBgraBitmap(image, width, height, `${label} frame ${frameIndex + 1}`);
 }
 
 function isValidRawPostProcessResult(result: unknown, width: number, height: number): result is { applied: true; outputFrame: { width: number; height: number; pixelFormat: "bgra" | "rgba"; data?: unknown; dataBase64?: string }; droppedPassCount: number } {
