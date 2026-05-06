@@ -19,13 +19,8 @@ jobs:
     name: Build macOS app
     runs-on: macos-latest
     env:
-      CSC_IDENTITY_AUTO_DISCOVERY: ${{ secrets.CSC_LINK == '' && 'false' || 'true' }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      CSC_LINK: ${{ secrets.CSC_LINK }}
-      CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
       GH_TOKEN: ${{ github.token }}
+      HAS_SIGNING_CERTIFICATE: ${{ secrets.CSC_LINK != '' }}
 
     steps:
       - name: Check out repository
@@ -50,6 +45,8 @@ jobs:
         run: npm run build
 
       - name: Package macOS app
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
         run: npx electron-builder --config electron-builder.config.cjs --mac --publish never
 
       - name: Upload macOS artifacts
@@ -71,12 +68,6 @@ jobs:
     permissions:
       contents: write
     env:
-      CSC_IDENTITY_AUTO_DISCOVERY: ${{ secrets.CSC_LINK == '' && 'false' || 'true' }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      CSC_LINK: ${{ secrets.CSC_LINK }}
-      CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
       GH_TOKEN: ${{ github.token }}
 
     steps:
@@ -95,5 +86,19 @@ jobs:
       - name: Build renderer and Electron main process
         run: npm run build
 
-      - name: Publish GitHub release
+      - name: Publish unsigned GitHub release
+        if: env.HAS_SIGNING_CERTIFICATE != 'true'
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        run: npx electron-builder --config electron-builder.config.cjs --mac --publish always
+
+      - name: Publish signed GitHub release
+        if: env.HAS_SIGNING_CERTIFICATE == 'true'
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: true
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: npx electron-builder --config electron-builder.config.cjs --mac --publish always
