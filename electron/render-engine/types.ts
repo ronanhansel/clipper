@@ -34,7 +34,10 @@ export const EXPORT_CHROMIUM_ARGS = [
 
 // ─── Video export types ─────────────────────────────────────────────────
 
-export type VideoExportMethod = "renderer";
+export type VideoExportMethod = "renderer" | "stable-slow";
+export type ExportRenderMode = "renderer" | "stable-slow";
+export type StableSlowGridPreset = "relaxed" | "balanced" | "safe" | "extreme";
+export type StableSlowValidationSamples = 1 | 2 | 3;
 
 export type VideoExportProgress = {
   frame: number;
@@ -57,6 +60,9 @@ export type RenderSceneToVideoOptions = {
   exportRenderQuality?: "standard" | "high" | "ultra";
   exportWorkerMapping?: { hd?: number; qhd?: number; uhd?: number };
   exportTileMapping?: { hd?: number; qhd?: number; uhd?: number };
+  exportRenderMode?: ExportRenderMode;
+  stableSlowGridPreset?: StableSlowGridPreset;
+  stableSlowValidationSamples?: StableSlowValidationSamples;
   onProgress?: (progress: VideoExportProgress) => void;
 };
 
@@ -83,6 +89,9 @@ export type SupervisedRenderPayload = {
   exportWidth: number;
   exportHeight: number;
   renderSurface?: "export" | "preview-cache";
+  exportRenderMode?: ExportRenderMode;
+  stableSlowGridPreset?: StableSlowGridPreset;
+  stableSlowValidationSamples?: StableSlowValidationSamples;
 };
 
 export type SupervisedRenderResult = {
@@ -96,6 +105,8 @@ export type ExportCaptureTile = {
   y: number;
   width: number;
   height: number;
+  fullWidth?: number;
+  fullHeight?: number;
 };
 
 export type PrerenderedFrame = {
@@ -207,9 +218,29 @@ export type TransitionLayer = {
   effect: { effectId?: string; params?: Record<string, unknown> };
 };
 
+export type Bounds = { x: number; y: number; width: number; height: number };
+
+export type FrameObject = {
+  id: string;
+  name?: string;
+  type: string;
+  bounds: Bounds;
+  content?: string;
+  style?: Record<string, unknown>;
+  hidden?: boolean;
+};
+
+export type BackgroundLayer = {
+  elements?: FrameObject[];
+};
+
 export type CompositionClip = {
+  id?: string;
+  filePath?: string;
   start?: number;
   duration: number;
+  background?: BackgroundLayer;
+  objects?: FrameObject[];
   motionMarkers?: MotionMarker[];
 };
 

@@ -65,7 +65,7 @@ interface Window {
     writeVideoFrame: (sessionId: string, frameData: Uint8ClampedArray) => Promise<void>;
     finishVideoExport: (sessionId: string) => Promise<string>;
     cancelVideoExport: (sessionId: string) => Promise<void>;
-    renderVideoExport: (exportId: string, defaultFileName: string, project: unknown, manifestPath: string, scene: unknown, frameRate: number, durationSeconds: number, tileHeight: number, reusePrerenderCache: boolean, exportWidth?: number, exportHeight?: number, mediaExportFormat?: string, exportRenderQuality?: string, exportWorkerMapping?: unknown, exportTileMapping?: unknown) => Promise<string | null>;
+    renderVideoExport: (exportId: string, defaultFileName: string, project: unknown, manifestPath: string, scene: unknown, frameRate: number, durationSeconds: number, tileHeight: number, reusePrerenderCache: boolean, exportWidth?: number, exportHeight?: number, mediaExportFormat?: string, exportRenderQuality?: string, exportWorkerMapping?: unknown, exportTileMapping?: unknown, exportRenderMode?: string, stableSlowGridPreset?: string, stableSlowValidationSamples?: number) => Promise<string | null>;
     prerenderFrame: (project: unknown, manifestPath: string, scene: unknown, sceneTime: number, sceneDuration: number, frameRate: number, tileHeight: number, blockDurationMs: number, frameRange?: { startFrame: number; endFrame: number }) => Promise<Array<{ width: number; height: number; pixelFormat: "bgra"; sceneTime: number; frameRate: number; data: Uint8Array }>>;
     prerenderVideoBlock: (project: unknown, manifestPath: string, scene: unknown, sceneTime: number, sceneDuration: number, frameRate: number, tileHeight: number, blockDurationMs: number) => Promise<{ width: number; height: number; mimeType: string; startTime: number; duration: number; startFrame: number; endFrame: number; frameRate: number; data: string }>;
     clearPrerenderCache: (manifestPath: string) => Promise<void>;
@@ -80,7 +80,7 @@ interface Window {
     toggleWindowFullscreen: () => Promise<boolean>;
     watchTextFiles: (relativePaths: string[]) => Promise<void>;
     watchProjectFiles: (watchPaths: { files: string[]; directories: string[] }) => Promise<void>;
-    onVideoExportProgress: (callback: (exportId: string, progress: { frame: number; totalFrames: number; percent: number; status: string; method?: "renderer" }) => void) => () => void;
+    onVideoExportProgress: (callback: (exportId: string, progress: { frame: number; totalFrames: number; percent: number; status: string; method?: "renderer" | "stable-slow" }) => void) => () => void;
     onTextFileChanged: (callback: (relativePath: string) => void) => () => void;
     onProjectFileChanged: (callback: (relativePath: string) => void) => () => void;
     onModeShortcut: (callback: (key: "1" | "2" | "3" | "4") => void) => () => void;

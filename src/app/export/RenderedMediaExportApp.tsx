@@ -76,6 +76,7 @@ export function RenderedMediaExportApp() {
     });
     window.__clipperSyncExportRenderClock = async () => {
       await waitForFontsReady();
+      await waitForExportRastersReady(frameViewportRef.current);
       const syncResult = await waitForRenderClockAnimationsReady(frameViewportRef.current);
       await nextAnimationFrame();
       return syncResult;
@@ -327,6 +328,50 @@ function rejectPendingFrame(ref: { current: PendingFrameRequest | null }, error:
 
 function nextAnimationFrame() {
   return new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+}
+
+export async function waitForExportSvgRastersReady(root: HTMLElement | null) {
+  return waitForExportRastersReady(root);
+}
+
+export async function waitForExportRastersReady(root: HTMLElement | null) {
+  const deadline = performance.now() + exportFrameReadyTimeoutMs;
+  while (true) {
+    const failed = root?.querySelector<HTMLElement>('[data-clipper-export-svg-raster="failed"]');
+    if (failed) {
+      const message = failed.dataset.clipperExportSvgRasterError || "Export SVG rasterization failed.";
+      logExportDiagnostic("raster-failed", [message]);
+      throw new Error(message);
+    }
+    const failedWebLayerFlatten = root?.querySelector<HTMLElement>('[data-clipper-export-weblayer-flatten="failed"]');
+    if (failedWebLayerFlatten) {
+      const message = failedWebLayerFlatten.dataset.clipperExportWeblayerFlattenError || "Export WebLayer flattening failed.";
+      logExportDiagnostic("weblayer-flatten-failed", [message]);
+      throw new Error(message);
+    }
+    const pending = root?.querySelector('[data-clipper-export-svg-raster="pending"]');
+    const loadingImage = Array.from(root?.querySelectorAll<HTMLImageElement>('img[data-clipper-export-svg-raster="ready"]') ?? []).find((image) => !image.complete || image.naturalWidth === 0);
+    const loadingWebLayerImage = Array.from(root?.querySelectorAll<HTMLImageElement>('img[data-clipper-export-weblayer-flatten="ready"]') ?? []).find((image) => !image.complete || image.naturalWidth === 0);
+    if (!pending && !loadingImage && !loadingWebLayerImage) return;
+    if (performance.now() > deadline) {
+      const details = getExportRasterReadinessDiagnostics(root);
+      const message = ["Timed out waiting for export raster/WebLayer readiness.", ...details].join(" ");
+      logExportDiagnostic("raster-timeout", [message]);
+      throw new Error(message);
+    }
+    await nextAnimationFrame();
+  }
+}
+
+export function getExportRasterReadinessDiagnostics(root: HTMLElement | null) {
+  const pending = Array.from(root?.querySelectorAll<HTMLElement>('[data-clipper-export-svg-raster="pending"]') ?? []).slice(0, 3).map((element, index) => `pending${index + 1}=${element.dataset.clipperExportSvgRasterDiagnostic ?? "unknown"}`);
+  const loading = Array.from(root?.querySelectorAll<HTMLImageElement>('img[data-clipper-export-svg-raster="ready"]') ?? []).filter((image) => !image.complete || image.naturalWidth === 0).slice(0, 3).map((image, index) => `loadingImage${index + 1}=${image.dataset.clipperExportSvgRasterDiagnostic ?? "unknown"}`);
+  const loadingWebLayer = Array.from(root?.querySelectorAll<HTMLImageElement>('img[data-clipper-export-weblayer-flatten="ready"]') ?? []).filter((image) => !image.complete || image.naturalWidth === 0).slice(0, 3).map((image, index) => `loadingWebLayer${index + 1}=${image.dataset.clipperExportWeblayerFlattenDiagnostic ?? "unknown"}`);
+  return [...pending, ...loading, ...loadingWebLayer];
+}
+
+function logExportDiagnostic(kind: string, details: string[]) {
+  console.error(["CLIPPER_EXPORT_DIAGNOSTIC", `kind=${kind}`, ...details].join(" ").slice(0, 2000));
 }
 
 async function waitForFontsReady() {

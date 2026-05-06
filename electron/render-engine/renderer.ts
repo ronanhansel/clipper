@@ -147,6 +147,9 @@ export class RenderEngine {
       exportRenderQuality = "high",
       exportWorkerMapping,
       exportTileMapping,
+      exportRenderMode = "renderer",
+      stableSlowGridPreset = "safe",
+      stableSlowValidationSamples = 1,
     } = options;
     // Clear any previous cancel flag for this export ID
     if (exportId) this.cancelledVideoRenders.delete(exportId);
@@ -192,7 +195,7 @@ export class RenderEngine {
     });
 
     let pendingFrameWrite: Promise<void> | null = null;
-    let activeMethod: VideoExportMethod = "renderer";
+      let activeMethod: VideoExportMethod = exportRenderMode;
     let encodedFrameCount = 0;
     let capturedFrameCount = 0;
     let workerCount = 1;
@@ -230,7 +233,7 @@ export class RenderEngine {
       const startupStatus = workerCount > 1
         ? `Renderer: capturing frames with ${workerCount} worker(s)`
         : "Renderer: capturing frames";
-      reportStatus(startupStatus, "renderer");
+        reportStatus(exportRenderMode === "stable-slow" ? "Stable slow renderer: validating captured tiles" : startupStatus, exportRenderMode);
       console.log(`[clipper export] source=${source} total-frames=${totalFrames} tile-height=${captureTileHeight} output=${exportWidth}x${exportHeight} capture=${captureWidth}x${captureHeight} quality=${exportRenderQuality} workers=${workerCount} ranges=${workerRanges.map(r => `${r.startFrame}-${r.endFrame}`).join(",")} render-ranges=${workerRenderRanges.map(r => `${r.startFrame}-${r.endFrame}`).join(",")}`);
 
       const exportStartTime = Date.now();
@@ -255,7 +258,7 @@ export class RenderEngine {
         this.renderSupervisedFrameRangeChild(
           project, manifestPath, scene, workerTempDirs[i], frameRate, durationSeconds,
           totalFrames, captureTileHeight, source, reportCapturedFrameProgress, exportId,
-          range, "export", captureWidth, captureHeight,
+          range, "export", captureWidth, captureHeight, exportRenderMode, stableSlowGridPreset, stableSlowValidationSamples,
         ),
       );
 
@@ -326,7 +329,7 @@ export class RenderEngine {
           await this.writePrerenderFrame(cachePaths, frameBuffer, cacheKey, frameIndex / frameRate, frameRate, exportWidth, exportHeight);
         }
 
-        reportEncodedFrameProgress("renderer");
+        reportEncodedFrameProgress(exportRenderMode);
       }
 
       // Clean up remaining frame files from all workers
@@ -697,6 +700,9 @@ export class RenderEngine {
     renderSurface: SupervisedRenderPayload["renderSurface"] = "export",
     exportWidth?: number,
     exportHeight?: number,
+    exportRenderMode: SupervisedRenderPayload["exportRenderMode"] = "renderer",
+    stableSlowGridPreset: SupervisedRenderPayload["stableSlowGridPreset"] = "safe",
+    stableSlowValidationSamples: SupervisedRenderPayload["stableSlowValidationSamples"] = 1,
   ): Promise<SupervisedRenderResult> {
     const _exportWidth = exportWidth ?? FRAME_WIDTH;
     const _exportHeight = exportHeight ?? FRAME_HEIGHT;
@@ -705,7 +711,7 @@ export class RenderEngine {
     const payloadPath = path.join(tempDir, "renderer.json");
     const nativeLogPath = path.join(tempDir, "renderer.native.log");
     const payload: SupervisedRenderPayload = {
-      project, manifestPath, scene, frameRate, durationSeconds, frameRange, outputPath, tileHeight, source, renderSurface, exportWidth: _exportWidth, exportHeight: _exportHeight,
+      project, manifestPath, scene, frameRate, durationSeconds, frameRange, outputPath, tileHeight, source, renderSurface, exportWidth: _exportWidth, exportHeight: _exportHeight, exportRenderMode, stableSlowGridPreset, stableSlowValidationSamples,
     };
     await fs.writeFile(payloadPath, JSON.stringify(payload), "utf8");
     const electronArgs = [...EXPORT_CHROMIUM_ARGS, "--enable-logging=file", `--log-file=${nativeLogPath}`];
@@ -820,8 +826,8 @@ export class RenderEngine {
     if (frameCount === expectedFrameCount)
       return { outputPath, nativeWarningDetected, nativeWarningCount };
     if (exitCode !== 0)
-      throw new Error(`Supervised export child failed with code ${exitCode ?? "unknown"} after ${frameCount}/${expectedFrameCount} frame(s): ${this.summarizeChildRenderOutput(stderr || stdout)}`);
-    const detail = this.summarizeChildRenderOutput(stderr || stdout || nativeLog);
+      throw new Error(`Supervised export child failed with code ${exitCode ?? "unknown"} after ${frameCount}/${expectedFrameCount} frame(s): ${summarizeChildRenderOutput(stderr || stdout || nativeLog)}`);
+    const detail = summarizeChildRenderOutput(stderr || stdout || nativeLog);
     const stat = await fs.stat(outputPath).catch(() => null);
     if (!stat)
       throw new Error(`Supervised export child produced ${frameCount}/${expectedFrameCount} frame file(s).${detail ? ` Child output: ${detail}` : ""}`);
@@ -837,19 +843,6 @@ export class RenderEngine {
       const log = await fs.readFile(logPath, "utf8");
       return log.length > 32000 ? log.slice(-32000) : log;
     } catch { return ""; }
-  }
-
-  private summarizeChildRenderOutput(output: string): string {
-    const lines = output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-    const nonWarningLines = lines.filter((line) => !isExportOutOfMemoryWarning(line) && !this.isNoisyChildRenderLogLine(line));
-    const warningCount = lines.length - nonWarningLines.length;
-    const summaryLines = nonWarningLines.slice(-8);
-    if (warningCount > 0) summaryLines.unshift(`${warningCount} native tile-memory warning(s) omitted.`);
-    return summaryLines.join("\n").slice(-4000).trim();
-  }
-
-  private isNoisyChildRenderLogLine(line: string): boolean {
-    return /Download the React DevTools|Electron Security Warning|Insecure Content-Security-Policy|node_modules\/\.vite\/deps\/react-dom/i.test(line);
   }
 
   private getExportFrameProgressIndexes(message: string): number[] {
@@ -1123,4 +1116,18 @@ export class RenderEngine {
       await this.writePrerenderFrame(this.getPrerenderCachePaths(manifestPath, scene, frameRate, frameIndex), frame, cacheKey, frameIndex / frameRate, frameRate, width, height);
     }
   }
+}
+
+export function summarizeChildRenderOutput(output: string): string {
+  const lines = output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const diagnosticLines = lines.filter((line) => line.includes("CLIPPER_EXPORT_DIAGNOSTIC"));
+  const nonWarningLines = lines.filter((line) => !isExportOutOfMemoryWarning(line) && !isNoisyChildRenderLogLine(line) && !line.includes("CLIPPER_EXPORT_DIAGNOSTIC"));
+  const warningCount = lines.length - diagnosticLines.length - nonWarningLines.length;
+  const summaryLines = [...diagnosticLines.slice(-4), ...nonWarningLines.slice(-6)];
+  if (warningCount > 0) summaryLines.unshift(`${warningCount} native tile-memory warning(s) omitted.`);
+  return summaryLines.join("\n").slice(-4000).trim();
+}
+
+function isNoisyChildRenderLogLine(line: string): boolean {
+  return /Download the React DevTools|Electron Security Warning|Insecure Content-Security-Policy|node_modules\/\.vite\/deps\/react-dom/i.test(line);
 }

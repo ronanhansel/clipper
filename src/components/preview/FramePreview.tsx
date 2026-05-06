@@ -6,17 +6,22 @@ import { boundsToViewport, formatCameraPreviewFilter, formatCameraPreviewTransfo
 import { generateChartObjects, type ChartGeneratedObject } from "../../core/chart";
 import { getBoundsUnion, insetBounds, isVisibleMarqueeBounds, updateDragSelectionBoxElement, type ResizeHandle } from "../../core/frameInteraction";
 import { clamp } from "../../core/math";
-import { getRenderClockAttributes, getRenderClockStyle, syncDomAnimationsToRenderClock } from "../../render-engine/renderClock";
+import { getRenderClockAttributes, getRenderClockStyle, syncDomAnimationsToRenderClock, waitForRenderClockAnimationsReady } from "../../render-engine/renderClock";
 import { evaluateBackgroundLayer, evaluateFrameObject, isTimeSensitiveFrameObject, type EvaluatedFrameObject } from "../../render-engine/renderRuntime";
 import { applyTransitionLayersToVisualStyle, getTransitionFinishTime, getTransitionProgress, renderTransitionSequence } from "../../core/transitions";
 import { FRAME_HEIGHT, FRAME_WIDTH, type AdjustmentLayer, type BackgroundLayer, type Bounds, type FrameObject, type Part, type Point, type RichTextSegment, type SelectionPayload, type TimelineMode, type TimelineMotionLayerState, type TransitionLayer } from "../../core/types";
 import type { AdjustmentVisualOverlay, TransitionSequenceStyle, TransitionVisualOverlay } from "../../core/effects/types";
 import type { PlaybackClock } from "../../app/types";
+import { rasterizeSvgForExport, shouldPreRasterizeSvgForExport, type SvgRasterResult } from "./exportSvgRasterCache";
 
 const identityCameraTransform: CameraPreviewTransform = { x: 0, y: 0, z: 0, scale: 1, rotation: 0, rotateX: 0, rotateY: 0, perspective: 1800, motionBlur: 0 };
 
+type ExportTileViewport = { x: number; y: number; width: number; height: number };
+type ExportTileFrameBounds = { x: number; y: number; width: number; height: number };
+
 export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dragSelectionBoxRef, framePickPoint, focusPicking, trackerPicking, canSelectObjects, cameraTransform, frameViewportRef, frameScale, isPlaying, part, partStart, adjustmentLayers, playbackClock, previewTime, sceneTime, timelineMode, motionLayers, hiddenMotionLayerIds, pickingTranslationPosition, pickingZoomFocus, compHidden, selectedObjects, marqueeDragging, editingTextObjectId, onFramePointerCancel, onFramePointerDown, onFramePointerDownCapture, onFramePointerMove, onFramePointerUp, onObjectPointerDown, onObjectResizePointerDown, onTextEditCommit, onTextObjectDoubleClick, onTrackerTargetPick }: { cameraRef: RefObject<HTMLDivElement | null>; dragBox: Bounds | null; dragSelectionBoxRef: RefObject<HTMLDivElement | null>; framePickPoint: Point | null; focusPicking: boolean; trackerPicking: boolean; canSelectObjects: boolean; cameraTransform: CameraPreviewTransform; frameViewportRef: RefObject<HTMLDivElement | null>; frameScale: number; isPlaying: boolean; part: Part; partStart: number; adjustmentLayers?: AdjustmentLayer[]; playbackClock: PlaybackClock; previewTime: number; sceneTime: number; timelineMode: TimelineMode; motionLayers: TimelineMotionLayerState[]; hiddenMotionLayerIds?: Set<string>; pickingTranslationPosition: boolean; pickingZoomFocus: boolean; compHidden?: boolean; selectedObjects: SelectionPayload["objects"]; marqueeDragging: boolean; editingTextObjectId: string | null; onFramePointerCancel: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerDown: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerDownCapture: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerMove: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerUp: (event: PointerEvent<HTMLDivElement>) => void; onObjectPointerDown: (event: PointerEvent<HTMLDivElement>, object: FrameObject) => void; onObjectResizePointerDown: (event: PointerEvent<HTMLDivElement>, handle: ResizeHandle, objectId?: string) => void; onTextEditCommit: (objectId: string, content: string, richText?: RichTextSegment[]) => void; onTextObjectDoubleClick: (event: ReactMouseEvent<HTMLDivElement>, object: FrameObject) => void; onTrackerTargetPick: (objectId: string) => void }) {
-  const exportTileViewport = (arguments[0] as { exportTileViewport?: { x: number; y: number; width: number; height: number } }).exportTileViewport;
+  const exportTileViewport = (arguments[0] as { exportTileViewport?: ExportTileViewport }).exportTileViewport;
+  const exportTileFrameBounds = useMemo(() => exportTileViewport ? ({ x: exportTileViewport.x / frameScale, y: exportTileViewport.y / frameScale, width: exportTileViewport.width / frameScale, height: exportTileViewport.height / frameScale }) : undefined, [exportTileViewport, frameScale]);
   const viewportStyle = useMemo(() => ({ width: exportTileViewport?.width ?? FRAME_WIDTH * frameScale, height: exportTileViewport?.height ?? FRAME_HEIGHT * frameScale }) as CSSProperties, [exportTileViewport?.height, exportTileViewport?.width, frameScale]);
   const selectionBleedPx = selectorOffsetPx + selectorHandleSizePx;
   const viewportOverlayStyle = useMemo(() => exportTileViewport ? ({ width: exportTileViewport.width, height: exportTileViewport.height }) as CSSProperties : ({ width: FRAME_WIDTH * frameScale + selectionBleedPx * 2, height: FRAME_HEIGHT * frameScale + selectionBleedPx * 2, margin: -selectionBleedPx }) as CSSProperties, [exportTileViewport, frameScale, selectionBleedPx]);
@@ -159,8 +164,8 @@ export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dra
               {isUnlinkedPart || compHidden || compositionError ? <div className="absolute inset-0 bg-black" ref={cameraRef}>{compositionError ? <CompositionErrorOverlay filePath={part.filePath} message={compositionError} /> : null}</div> : <div className="absolute inset-0 origin-center" ref={cameraRef} style={{ transformStyle: "preserve-3d", ...transitionCameraStyle }}>
                 <div className="absolute inset-0" data-clipper-visual-adjustments style={visualAdjustmentStyle}>
                   {transitionPreviewParts && transitionProgress !== null
-                    ? <TransitionCompositeView adjustmentLayers={adjustmentLayers} animationsEnabled={animationsEnabled} isPlaying={isPlaying} renderMode={renderMode} sequenceStyle={transitionSequenceStyle} transitionPreviewParts={transitionPreviewParts} />
-                    : stackPreviewParts.map((item) => <CompositionLayerView key={`${item.part.id}:${item.start}`} active={item.part.id === part.id} animationsEnabled={animationsEnabled} canSelect={!isPlaying && (canSelectObjects || trackerPicking)} editingTextObjectId={editingTextObjectId} focusPicking={!isPlaying && (focusPicking || trackerPicking)} isPlaying={isPlaying} part={item.part} previewTime={item.previewTime} renderMode={renderMode} onObjectPointerDown={onObjectPointerDown} onTextEditCommit={onTextEditCommit} onTextObjectDoubleClick={onTextObjectDoubleClick} />)}
+                    ? <TransitionCompositeView adjustmentLayers={adjustmentLayers} animationsEnabled={animationsEnabled} exportTileFrameBounds={exportTileFrameBounds} frameScale={frameScale} isPlaying={isPlaying} renderMode={renderMode} sequenceStyle={transitionSequenceStyle} transitionPreviewParts={transitionPreviewParts} />
+                    : stackPreviewParts.map((item) => <CompositionLayerView key={`${item.part.id}:${item.start}`} active={item.part.id === part.id} animationsEnabled={animationsEnabled} canSelect={!isPlaying && (canSelectObjects || trackerPicking)} editingTextObjectId={editingTextObjectId} exportTileFrameBounds={exportTileFrameBounds} focusPicking={!isPlaying && (focusPicking || trackerPicking)} frameScale={frameScale} isPlaying={isPlaying} part={item.part} previewTime={item.previewTime} renderMode={renderMode} onObjectPointerDown={onObjectPointerDown} onTextEditCommit={onTextEditCommit} onTextObjectDoubleClick={onTextObjectDoubleClick} />)}
                   <div ref={frameVisualAdjustmentOverlaysRef} className="pointer-events-none absolute inset-0" data-clipper-visual-adjustment-overlays="frame" style={{ zIndex: 2147483647 }} />
                 </div>
               </div>}
@@ -211,7 +216,7 @@ function TrackerTargetOverlay({ target }: { target: { id: string; viewportBounds
   );
 }
 
-function CompositionLayerView({ active, animationsEnabled, canSelect, editingTextObjectId, focusPicking, isPlaying, part, previewTime, renderMode, onObjectPointerDown, onTextEditCommit, onTextObjectDoubleClick }: { active: boolean; animationsEnabled: boolean; canSelect: boolean; editingTextObjectId: string | null; focusPicking: boolean; isPlaying: boolean; part: Part; previewTime: number; renderMode: "preview" | "export"; onObjectPointerDown: (event: PointerEvent<HTMLDivElement>, object: FrameObject) => void; onTextEditCommit: (objectId: string, content: string, richText?: RichTextSegment[]) => void; onTextObjectDoubleClick: (event: ReactMouseEvent<HTMLDivElement>, object: FrameObject) => void }) {
+function CompositionLayerView({ active, animationsEnabled, canSelect, editingTextObjectId, exportTileFrameBounds, focusPicking, frameScale, isPlaying, part, previewTime, renderMode, onObjectPointerDown, onTextEditCommit, onTextObjectDoubleClick }: { active: boolean; animationsEnabled: boolean; canSelect: boolean; editingTextObjectId: string | null; exportTileFrameBounds?: ExportTileFrameBounds; focusPicking: boolean; frameScale: number; isPlaying: boolean; part: Part; previewTime: number; renderMode: "preview" | "export"; onObjectPointerDown: (event: PointerEvent<HTMLDivElement>, object: FrameObject) => void; onTextEditCommit: (objectId: string, content: string, richText?: RichTextSegment[]) => void; onTextObjectDoubleClick: (event: ReactMouseEvent<HTMLDivElement>, object: FrameObject) => void }) {
   const layerRef = useRef<HTMLDivElement | null>(null);
   const renderClockState = useMemo(() => ({ playing: renderMode !== "export" && isPlaying, time: previewTime, mode: renderMode }), [isPlaying, previewTime, renderMode]);
   const renderClockStateRef = useRef(renderClockState);
@@ -226,15 +231,15 @@ function CompositionLayerView({ active, animationsEnabled, canSelect, editingTex
 
   return (
     <div ref={layerRef} className="absolute inset-0 overflow-hidden" {...getRenderClockAttributes(renderClockState)} style={{ ...(part.frame.style as CSSProperties), ...renderClockStyle }}>
-      {!part.background.hidden && <BackgroundLayerView animationsEnabled={animationsEnabled} background={part.background} duration={part.duration} previewTime={previewTime} />}
-      {part.objects.filter(obj => !obj.hidden).map((object) => (
-        <FrameObjectView key={object.id} animationsEnabled={animationsEnabled} object={object} canSelect={active && canSelect} duration={part.duration} editing={active && !isPlaying && editingTextObjectId === object.id} focusPicking={active && focusPicking} previewTime={previewTime} renderMode={renderMode} onDoubleClick={(event) => { if (active && !isPlaying) onTextObjectDoubleClick(event, object); }} onPointerDown={(event) => { if (active && !isPlaying) onObjectPointerDown(event, object); }} onTextEditCommit={(content, richText) => onTextEditCommit(object.id, content, richText)} />
+      {!part.background.hidden && <BackgroundLayerView animationsEnabled={animationsEnabled} background={part.background} duration={part.duration} exportTileFrameBounds={exportTileFrameBounds} frameScale={frameScale} previewTime={previewTime} renderMode={renderMode} />}
+      {part.objects.filter(obj => !obj.hidden && isObjectInExportTile(obj, exportTileFrameBounds)).map((object) => (
+        <FrameObjectView key={object.id} animationsEnabled={animationsEnabled} exportTileFrameBounds={exportTileFrameBounds} object={object} canSelect={active && canSelect} duration={part.duration} editing={active && !isPlaying && editingTextObjectId === object.id} focusPicking={active && focusPicking} frameScale={frameScale} previewTime={previewTime} renderMode={renderMode} onDoubleClick={(event) => { if (active && !isPlaying) onTextObjectDoubleClick(event, object); }} onPointerDown={(event) => { if (active && !isPlaying) onObjectPointerDown(event, object); }} onTextEditCommit={(content, richText) => onTextEditCommit(object.id, content, richText)} />
       ))}
     </div>
   );
 }
 
-function TransitionCompositeView({ adjustmentLayers, animationsEnabled, isPlaying, renderMode, sequenceStyle, transitionPreviewParts }: { adjustmentLayers?: AdjustmentLayer[]; animationsEnabled: boolean; isPlaying: boolean; renderMode: "preview" | "export"; sequenceStyle: TransitionSequenceStyle | undefined; transitionPreviewParts: { from: Array<{ part: Part; start: number; previewTime: number }>; to: Array<{ part: Part; start: number; previewTime: number }>; fromSceneTime: number; toSceneTime: number } }) {
+function TransitionCompositeView({ adjustmentLayers, animationsEnabled, exportTileFrameBounds, frameScale, isPlaying, renderMode, sequenceStyle, transitionPreviewParts }: { adjustmentLayers?: AdjustmentLayer[]; animationsEnabled: boolean; exportTileFrameBounds?: ExportTileFrameBounds; frameScale: number; isPlaying: boolean; renderMode: "preview" | "export"; sequenceStyle: TransitionSequenceStyle | undefined; transitionPreviewParts: { from: Array<{ part: Part; start: number; previewTime: number }>; to: Array<{ part: Part; start: number; previewTime: number }>; fromSceneTime: number; toSceneTime: number } }) {
   const frameStyle = sequenceStyle?.frameStyle as CSSProperties | undefined;
   const aStyle = sequenceStyle?.aStyle as CSSProperties | undefined;
   const bStyle = sequenceStyle?.bStyle as CSSProperties | undefined;
@@ -244,20 +249,20 @@ function TransitionCompositeView({ adjustmentLayers, animationsEnabled, isPlayin
   return (
     <div className="absolute inset-0 overflow-hidden" style={frameStyle}>
       <div className="absolute inset-0 overflow-hidden" style={{ ...aStyle, willChange: renderMode === "export" ? undefined : "transform" }}>
-          <TimelineSequenceView adjustment={fromAdjustment} animationsEnabled={animationsEnabled} isPlaying={isPlaying} parts={transitionPreviewParts.from} renderMode={renderMode} sequenceKey="from" />
+          <TimelineSequenceView adjustment={fromAdjustment} animationsEnabled={animationsEnabled} exportTileFrameBounds={exportTileFrameBounds} frameScale={frameScale} isPlaying={isPlaying} parts={transitionPreviewParts.from} renderMode={renderMode} sequenceKey="from" />
       </div>
       <div className="absolute inset-0 overflow-hidden" style={{ ...bStyle, willChange: renderMode === "export" ? undefined : "transform" }}>
-          <TimelineSequenceView adjustment={toAdjustment} animationsEnabled={animationsEnabled} isPlaying={isPlaying} parts={transitionPreviewParts.to} renderMode={renderMode} sequenceKey="to" />
+          <TimelineSequenceView adjustment={toAdjustment} animationsEnabled={animationsEnabled} exportTileFrameBounds={exportTileFrameBounds} frameScale={frameScale} isPlaying={isPlaying} parts={transitionPreviewParts.to} renderMode={renderMode} sequenceKey="to" />
       </div>
     </div>
   );
 }
 
-function TimelineSequenceView({ adjustment, animationsEnabled, isPlaying, parts, renderMode, sequenceKey }: { adjustment: ReturnType<typeof applyAdjustmentLayersToVisualStyle>; animationsEnabled: boolean; isPlaying: boolean; parts: Array<{ part: Part; start: number; previewTime: number }>; renderMode: "preview" | "export"; sequenceKey: string }) {
+function TimelineSequenceView({ adjustment, animationsEnabled, exportTileFrameBounds, frameScale, isPlaying, parts, renderMode, sequenceKey }: { adjustment: ReturnType<typeof applyAdjustmentLayersToVisualStyle>; animationsEnabled: boolean; exportTileFrameBounds?: ExportTileFrameBounds; frameScale: number; isPlaying: boolean; parts: Array<{ part: Part; start: number; previewTime: number }>; renderMode: "preview" | "export"; sequenceKey: string }) {
   const visualStyle = { filter: adjustment.filter } as CSSProperties;
   return (
     <div className="absolute inset-0" style={visualStyle}>
-      {parts.map((item) => <CompositionLayerView key={`${sequenceKey}:${item.part.id}:${item.start}`} active={false} animationsEnabled={animationsEnabled} canSelect={false} editingTextObjectId={null} focusPicking={false} isPlaying={isPlaying} part={item.part} previewTime={item.previewTime} renderMode={renderMode} onObjectPointerDown={noopObjectPointerDown} onTextEditCommit={noopTextEditCommit} onTextObjectDoubleClick={noopTextDoubleClick} />)}
+      {parts.map((item) => <CompositionLayerView key={`${sequenceKey}:${item.part.id}:${item.start}`} active={false} animationsEnabled={animationsEnabled} canSelect={false} editingTextObjectId={null} exportTileFrameBounds={exportTileFrameBounds} focusPicking={false} frameScale={frameScale} isPlaying={isPlaying} part={item.part} previewTime={item.previewTime} renderMode={renderMode} onObjectPointerDown={noopObjectPointerDown} onTextEditCommit={noopTextEditCommit} onTextObjectDoubleClick={noopTextDoubleClick} />)}
       {adjustment.overlays?.map((overlay) => <div key={overlay.id} className="pointer-events-none absolute inset-0" style={{ zIndex: 2147483647, ...overlay.style }} />)}
     </div>
   );
@@ -298,7 +303,7 @@ function FramePickPointImperativeOverlay() {
   );
 }
 
-export const FrameObjectView = memo(function FrameObjectView({ animationsEnabled, object, canSelect, duration, editing, focusPicking, previewTime, renderMode, onDoubleClick, onPointerDown, onTextEditCommit }: { animationsEnabled: boolean; object: FrameObject; canSelect: boolean; duration: number; editing: boolean; focusPicking: boolean; previewTime: number; renderMode: "preview" | "export"; onDoubleClick: (event: ReactMouseEvent<HTMLDivElement>) => void; onPointerDown: (event: PointerEvent<HTMLDivElement>) => void; onTextEditCommit: (content: string, richText?: RichTextSegment[]) => void }) {
+export const FrameObjectView = memo(function FrameObjectView({ animationsEnabled, exportTileFrameBounds, object, canSelect, duration, editing, focusPicking, frameScale, previewTime, renderMode, onDoubleClick, onPointerDown, onTextEditCommit }: { animationsEnabled: boolean; exportTileFrameBounds?: ExportTileFrameBounds; object: FrameObject; canSelect: boolean; duration: number; editing: boolean; focusPicking: boolean; frameScale: number; previewTime: number; renderMode: "preview" | "export"; onDoubleClick: (event: ReactMouseEvent<HTMLDivElement>) => void; onPointerDown: (event: PointerEvent<HTMLDivElement>) => void; onTextEditCommit: (content: string, richText?: RichTextSegment[]) => void }) {
   const evaluatedObject = useMemo(() => evaluateObjectForPreview(object, previewTime, duration, animationsEnabled), [animationsEnabled, duration, object, previewTime]);
   const animation = { style: evaluatedObject.renderStyle, content: evaluatedObject.renderContent };
   const editableRef = useRef<HTMLDivElement | null>(null);
@@ -406,24 +411,148 @@ export const FrameObjectView = memo(function FrameObjectView({ animationsEnabled
     <div className={`absolute flex touch-none select-none flex-col justify-center whitespace-pre-line ${object.type === "chart" ? "overflow-visible" : "overflow-hidden"} ${focusPicking ? "cursor-crosshair" : editing ? "cursor-text" : "cursor-default"} ${editing ? "select-text" : ""}`} data-object-id={canSelect && !isLocked ? object.id : undefined} style={{ ...style, ...(isLocked ? { opacity: 0.6 } : {}) }} onDoubleClick={(event) => { if (!isLocked) onDoubleClick(event); }} onPointerDown={(event) => { if (!isLocked) onPointerDown(event); }}>
       {object.type === "text" && editing ? <div ref={editableRef} className="min-h-0 w-full whitespace-pre-wrap outline-none" contentEditable suppressContentEditableWarning onBlur={commitTextEdit} onInput={commitTextEdit} onKeyDown={onTextEditKeyDown} onPointerDown={(event) => event.stopPropagation()} /> : null}
       {object.type === "text" && !editing ? <div className="min-h-0 w-full whitespace-pre-wrap">{renderRichTextSegments(textSegments, Boolean(richText))}</div> : null}
-      {object.type === "chart" && object.chart ? <ChartObjectView animationsEnabled={animationsEnabled} object={object} duration={duration} previewTime={previewTime} renderMode={renderMode} /> : null}
-      {object.type === "svg" && content ? <div className="h-full w-full" dangerouslySetInnerHTML={{ __html: content }} /> : null}
+      {object.type === "chart" && object.chart ? <ChartObjectView animationsEnabled={animationsEnabled} object={object} duration={duration} exportTileFrameBounds={exportTileFrameBounds} frameScale={frameScale} previewTime={previewTime} renderMode={renderMode} /> : null}
+      {object.type === "svg" && content ? <ExportSvgContent bounds={object.bounds} content={content} exportTileFrameBounds={exportTileFrameBounds} frameScale={frameScale} markupKind="svg" owner={{ id: object.id, name: object.name, type: object.type, layer: "object" }} renderMode={renderMode} style={style} /> : null}
       {(object.type === "html" || object.type === "template") && content ? <div className="h-full w-full" dangerouslySetInnerHTML={{ __html: content }} /> : null}
       {object.type !== "text" && object.type !== "svg" && object.type !== "html" && object.type !== "template" && object.type !== "chart" && content ? content : null}
     </div>
   );
 }, areFrameObjectPropsEqual);
 
-function ChartObjectView({ animationsEnabled, object, duration, previewTime, renderMode }: { animationsEnabled: boolean; object: FrameObject; duration: number; previewTime: number; renderMode: "preview" | "export" }) {
+function isObjectInExportTile(object: FrameObject, tile: ExportTileFrameBounds | undefined): boolean {
+  if (!tile) return true;
+  const bleed = getExportTileBleed(object);
+  return rectsIntersect(
+    { x: object.bounds.x, y: object.bounds.y, width: object.bounds.width, height: object.bounds.height },
+    { x: tile.x - bleed, y: tile.y - bleed, width: tile.width + bleed * 2, height: tile.height + bleed * 2 },
+  );
+}
+
+function isEvaluatedObjectInExportTile(object: EvaluatedFrameObject, tile: ExportTileFrameBounds | undefined): boolean {
+  if (!tile) return true;
+  const bleed = getExportTileBleed(object);
+  return rectsIntersect(
+    { x: object.bounds.x, y: object.bounds.y, width: object.bounds.width, height: object.bounds.height },
+    { x: tile.x - bleed, y: tile.y - bleed, width: tile.width + bleed * 2, height: tile.height + bleed * 2 },
+  );
+}
+
+function getExportTileBleed(object: Pick<FrameObject, "style" | "type">): number {
+  const style = object.style as Record<string, unknown>;
+  const maybeFilter = [style.filter, style.boxShadow, style.textShadow].filter((value) => typeof value === "string").join(" ");
+  if (/blur|drop-shadow|shadow|filter/i.test(maybeFilter)) return 256;
+  return object.type === "svg" || object.type === "html" || object.type === "template" ? 64 : 16;
+}
+
+function rectsIntersect(a: Bounds, b: Bounds): boolean {
+  return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+}
+
+type ExportRasterOwner = { id: string; name?: string; type: string; layer: "object" | "background" };
+
+function ExportSvgContent({ bounds, content, exportTileFrameBounds, frameScale, markupKind, owner, renderMode, style }: { bounds: Bounds; content: string; exportTileFrameBounds?: ExportTileFrameBounds; frameScale: number; markupKind: "svg"; owner: ExportRasterOwner; renderMode: "preview" | "export"; style?: CSSProperties }) {
+  const [raster, setRaster] = useState<SvgRasterResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const styleKey = useMemo(() => JSON.stringify(style ?? {}), [style]);
+  const rasterCrop = useMemo(() => getObjectRasterCrop(bounds, exportTileFrameBounds), [bounds, exportTileFrameBounds]);
+  const rasterBounds = rasterCrop?.bounds ?? bounds;
+  const sourceOffset = rasterCrop?.sourceOffset;
+  const shouldRasterize = renderMode === "export" && shouldPreRasterizeSvgForExport({ svg: content, bounds: rasterBounds, frameScale, style, markupKind });
+
+  useEffect(() => {
+    if (!shouldRasterize) {
+      setRaster(null);
+      setError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setRaster(null);
+    setError(null);
+    rasterizeSvgForExport({ svg: content, bounds: rasterBounds, frameScale, style, markupKind, sourceBounds: bounds, sourceOffset })
+      .then((result) => {
+        if (!cancelled) setRaster(result);
+      })
+      .catch((rasterError) => {
+        if (!cancelled) setError(toExportRasterErrorMessage(rasterError, { bounds, exportTileFrameBounds, frameScale, markupKind, owner, rasterBounds, sourceOffset }));
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [bounds, content, frameScale, markupKind, rasterBounds, renderMode, shouldRasterize, sourceOffset, styleKey]);
+
+  if (!shouldRasterize) return <div className="h-full w-full" dangerouslySetInnerHTML={{ __html: content }} />;
+  const diagnostic = getExportRasterDiagnostic({ bounds, exportTileFrameBounds, frameScale, markupKind, owner, rasterBounds, sourceOffset, source: raster?.source ?? "canvas-png" });
+  if (error) return <div className="h-full w-full" data-clipper-export-svg-raster="failed" data-clipper-export-svg-raster-diagnostic={diagnostic} data-clipper-export-svg-raster-error={error} />;
+  if (!raster) return <div className="h-full w-full" data-clipper-export-svg-raster="pending" data-clipper-export-svg-raster-diagnostic={diagnostic} />;
+  return <img alt="" className="block" data-clipper-export-svg-raster="ready" data-clipper-export-svg-raster-diagnostic={diagnostic} draggable={false} src={raster.url} style={rasterCrop ? { left: rasterCrop.sourceOffset.x, position: "absolute", top: rasterCrop.sourceOffset.y, width: rasterCrop.bounds.width, height: rasterCrop.bounds.height } : { width: "100%", height: "100%" }} />;
+}
+
+function toExportRasterErrorMessage(error: unknown, diagnostic: ExportRasterDiagnosticInput) {
+  const message = error instanceof Error ? error.message : String(error);
+  return `Export SVG rasterization failed: ${message}. ${getExportRasterDiagnostic(diagnostic)}`;
+}
+
+type ExportRasterDiagnosticInput = { bounds: Bounds; exportTileFrameBounds?: ExportTileFrameBounds; frameScale: number; markupKind: "svg" | "html"; owner: ExportRasterOwner; rasterBounds: Bounds; source?: SvgRasterResult["source"]; sourceOffset?: { x: number; y: number } };
+
+function getExportRasterDiagnostic({ bounds, exportTileFrameBounds, frameScale, markupKind, owner, rasterBounds, source, sourceOffset }: ExportRasterDiagnosticInput) {
+  const rasterWidth = Math.max(1, Math.ceil(rasterBounds.width * frameScale));
+  const rasterHeight = Math.max(1, Math.ceil(rasterBounds.height * frameScale));
+  return [
+    `owner=${owner.layer}:${owner.type}:${owner.id}`,
+    owner.name ? `name=${JSON.stringify(owner.name)}` : undefined,
+    `markup=${markupKind}`,
+    source ? `source=${source}` : undefined,
+    `raster=${rasterWidth}x${rasterHeight}`,
+    `bounds=${formatBounds(bounds)}`,
+    exportTileFrameBounds ? `tile=${formatBounds(exportTileFrameBounds)}` : undefined,
+    sourceOffset ? `sourceOffset=${formatPoint(sourceOffset)}` : undefined,
+  ].filter(Boolean).join(" ");
+}
+
+function getObjectRasterCrop(bounds: Bounds, tile: ExportTileFrameBounds | undefined) {
+  if (!tile) return null;
+  const crop = intersectBounds(bounds, tile);
+  if (!crop) return null;
+  if (crop.x === bounds.x && crop.y === bounds.y && crop.width === bounds.width && crop.height === bounds.height) return null;
+  return {
+    bounds: { x: 0, y: 0, width: crop.width, height: crop.height },
+    sourceOffset: { x: crop.x - bounds.x, y: crop.y - bounds.y },
+  };
+}
+
+function intersectBounds(a: Bounds, b: Bounds): Bounds | null {
+  const x = Math.max(a.x, b.x);
+  const y = Math.max(a.y, b.y);
+  const right = Math.min(a.x + a.width, b.x + b.width);
+  const bottom = Math.min(a.y + a.height, b.y + b.height);
+  if (right <= x || bottom <= y) return null;
+  return { x, y, width: right - x, height: bottom - y };
+}
+
+function formatBounds(bounds: Bounds) {
+  return `${formatNumber(bounds.x)},${formatNumber(bounds.y)},${formatNumber(bounds.width)},${formatNumber(bounds.height)}`;
+}
+
+function formatPoint(point: { x: number; y: number }) {
+  return `${formatNumber(point.x)},${formatNumber(point.y)}`;
+}
+
+function formatNumber(value: number) {
+  return Number.isInteger(value) ? String(value) : value.toFixed(2);
+}
+
+function ChartObjectView({ animationsEnabled, object, duration, exportTileFrameBounds, frameScale, previewTime, renderMode }: { animationsEnabled: boolean; object: FrameObject; duration: number; exportTileFrameBounds?: ExportTileFrameBounds; frameScale: number; previewTime: number; renderMode: "preview" | "export" }) {
   const chartObjects = useMemo(() => object.chart ? generateChartObjects({ ...object.chart, bounds: object.bounds }) : [], [object.bounds, object.chart]);
   return (
     <div className="pointer-events-none absolute inset-0 overflow-visible" aria-hidden="true">
-      {chartObjects.map((chartObject) => <GeneratedChartObjectView key={chartObject.id} animationsEnabled={animationsEnabled} chartObject={chartObject} chartBounds={object.bounds} duration={duration} previewTime={previewTime} renderMode={renderMode} />)}
+      {chartObjects.map((chartObject) => <GeneratedChartObjectView key={chartObject.id} animationsEnabled={animationsEnabled} chartObject={chartObject} chartBounds={object.bounds} duration={duration} exportTileFrameBounds={exportTileFrameBounds} frameScale={frameScale} previewTime={previewTime} renderMode={renderMode} />)}
     </div>
   );
 }
 
-function GeneratedChartObjectView({ animationsEnabled, chartObject, chartBounds, duration, previewTime, renderMode }: { animationsEnabled: boolean; chartObject: ChartGeneratedObject; chartBounds: Bounds; duration: number; previewTime: number; renderMode: "preview" | "export" }) {
+function GeneratedChartObjectView({ animationsEnabled, chartObject, chartBounds, duration, exportTileFrameBounds, frameScale, previewTime, renderMode }: { animationsEnabled: boolean; chartObject: ChartGeneratedObject; chartBounds: Bounds; duration: number; exportTileFrameBounds?: ExportTileFrameBounds; frameScale: number; previewTime: number; renderMode: "preview" | "export" }) {
   const object = useMemo<FrameObject>(() => chartGeneratedObjectToFrameObject(chartObject), [chartObject]);
   const evaluatedObject = useMemo(() => evaluateObjectForPreview(object, previewTime, duration, animationsEnabled), [animationsEnabled, duration, object, previewTime]);
   const animationTransform = typeof evaluatedObject.renderStyle.transform === "string" ? evaluatedObject.renderStyle.transform : undefined;
@@ -443,7 +572,7 @@ function GeneratedChartObjectView({ animationsEnabled, chartObject, chartBounds,
   return (
     <div className="absolute flex select-none flex-col justify-center overflow-visible whitespace-pre-line" style={style}>
       {object.type === "text" ? <div className="min-h-0 w-full whitespace-pre-wrap">{content}</div> : null}
-      {object.type === "svg" && content ? <div className="h-full w-full" dangerouslySetInnerHTML={{ __html: content }} /> : null}
+      {object.type === "svg" && content ? <ExportSvgContent bounds={object.bounds} content={content} exportTileFrameBounds={exportTileFrameBounds} frameScale={frameScale} markupKind="svg" owner={{ id: object.id, name: object.name, type: object.type, layer: "object" }} renderMode={renderMode} style={style} /> : null}
       {(object.type === "html" || object.type === "template") && content ? <div className="h-full w-full" dangerouslySetInnerHTML={{ __html: content }} /> : null}
       {object.type !== "text" && object.type !== "svg" && object.type !== "html" && object.type !== "template" && content ? content : null}
     </div>
@@ -465,24 +594,26 @@ function chartGeneratedObjectToFrameObject(object: ChartGeneratedObject): FrameO
   };
 }
 
-function areFrameObjectPropsEqual(previous: { animationsEnabled: boolean; object: FrameObject; canSelect: boolean; duration: number; editing: boolean; focusPicking: boolean; previewTime: number; renderMode: "preview" | "export" }, next: { animationsEnabled: boolean; object: FrameObject; canSelect: boolean; duration: number; editing: boolean; focusPicking: boolean; previewTime: number; renderMode: "preview" | "export" }) {
+function areFrameObjectPropsEqual(previous: { animationsEnabled: boolean; exportTileFrameBounds?: ExportTileFrameBounds; object: FrameObject; canSelect: boolean; duration: number; editing: boolean; focusPicking: boolean; frameScale: number; previewTime: number; renderMode: "preview" | "export" }, next: { animationsEnabled: boolean; exportTileFrameBounds?: ExportTileFrameBounds; object: FrameObject; canSelect: boolean; duration: number; editing: boolean; focusPicking: boolean; frameScale: number; previewTime: number; renderMode: "preview" | "export" }) {
   return previous.object === next.object
     && previous.animationsEnabled === next.animationsEnabled
     && previous.canSelect === next.canSelect
     && previous.duration === next.duration
     && previous.editing === next.editing
+    && previous.exportTileFrameBounds === next.exportTileFrameBounds
     && previous.focusPicking === next.focusPicking
+    && previous.frameScale === next.frameScale
     && previous.renderMode === next.renderMode
     && (!next.animationsEnabled || !isPreviewTimeSensitiveObject(next.object) || previous.previewTime === next.previewTime);
 }
 
-function areBackgroundLayerPropsEqual(previous: { animationsEnabled: boolean; background: BackgroundLayer; duration: number; previewTime: number }, next: { animationsEnabled: boolean; background: BackgroundLayer; duration: number; previewTime: number }) {
+function areBackgroundLayerPropsEqual(previous: { animationsEnabled: boolean; background: BackgroundLayer; duration: number; exportTileFrameBounds?: ExportTileFrameBounds; frameScale: number; previewTime: number; renderMode: "preview" | "export" }, next: { animationsEnabled: boolean; background: BackgroundLayer; duration: number; exportTileFrameBounds?: ExportTileFrameBounds; frameScale: number; previewTime: number; renderMode: "preview" | "export" }) {
   const timeSensitive = Boolean(next.background.motion) || next.background.elements.some(isPreviewTimeSensitiveObject);
-  return previous.animationsEnabled === next.animationsEnabled && previous.background === next.background && previous.duration === next.duration && (!next.animationsEnabled || !timeSensitive || previous.previewTime === next.previewTime);
+  return previous.animationsEnabled === next.animationsEnabled && previous.background === next.background && previous.duration === next.duration && previous.exportTileFrameBounds === next.exportTileFrameBounds && previous.frameScale === next.frameScale && previous.renderMode === next.renderMode && (!next.animationsEnabled || !timeSensitive || previous.previewTime === next.previewTime);
 }
 
-function areBackgroundElementPropsEqual(previous: { duration: number; element: EvaluatedFrameObject; previewTime: number }, next: { duration: number; element: EvaluatedFrameObject; previewTime: number }) {
-  return previous.element === next.element && previous.duration === next.duration && (!next.element.timeSensitive || previous.previewTime === next.previewTime);
+function areBackgroundElementPropsEqual(previous: { duration: number; element: EvaluatedFrameObject; frameScale: number; previewTime: number; renderMode: "preview" | "export" }, next: { duration: number; element: EvaluatedFrameObject; frameScale: number; previewTime: number; renderMode: "preview" | "export" }) {
+  return previous.element === next.element && previous.duration === next.duration && previous.frameScale === next.frameScale && previous.renderMode === next.renderMode && (!next.element.timeSensitive || previous.previewTime === next.previewTime);
 }
 
 function isPreviewTimeSensitiveObject(object: FrameObject) {
@@ -526,7 +657,7 @@ export function DragSelectionBox({ dragSelectionBoxRef, bounds, frameScale, visi
   return <div ref={dragSelectionBoxRef} className="pointer-events-none absolute left-0 top-0 border bg-[#159dff]/10 opacity-100 shadow-[0_0_0_1px_rgba(21,157,255,0.18)] will-change-transform" style={{ borderColor: selectorBlue, zIndex: 69 }} />;
 }
 
-export const BackgroundLayerView = memo(function BackgroundLayerView({ animationsEnabled, background, duration, previewTime }: { animationsEnabled: boolean; background: BackgroundLayer; duration: number; previewTime: number }) {
+export const BackgroundLayerView = memo(function BackgroundLayerView({ animationsEnabled, background, duration, exportTileFrameBounds, frameScale, previewTime, renderMode }: { animationsEnabled: boolean; background: BackgroundLayer; duration: number; exportTileFrameBounds?: ExportTileFrameBounds; frameScale: number; previewTime: number; renderMode: "preview" | "export" }) {
   const evaluatedBackground = useMemo(() => evaluateBackgroundLayer(background, previewTime, duration, { animations: animationsEnabled }), [animationsEnabled, background, duration, previewTime]);
   const layerStyle = evaluatedBackground.renderStyle as CSSProperties;
   const fillStyle = evaluatedBackground.fillStyle as CSSProperties;
@@ -534,12 +665,12 @@ export const BackgroundLayerView = memo(function BackgroundLayerView({ animation
   return (
     <div className={`pointer-events-none absolute inset-0 ${background.stretchToElements ? "overflow-visible" : "overflow-hidden"}`} data-layer-id={background.id} style={layerStyle}>
       <div className="absolute" style={fillStyle} />
-      {evaluatedBackground.elements.filter((element) => !element.hidden).map((element) => <BackgroundElementView duration={duration} element={element} key={element.id} previewTime={previewTime} />)}
+      {evaluatedBackground.elements.filter((element) => !element.hidden && isEvaluatedObjectInExportTile(element, exportTileFrameBounds)).map((element) => <BackgroundElementView duration={duration} element={element} exportTileFrameBounds={exportTileFrameBounds} frameScale={frameScale} key={element.id} previewTime={previewTime} renderMode={renderMode} />)}
     </div>
   );
 }, areBackgroundLayerPropsEqual);
 
-export const BackgroundElementView = memo(function BackgroundElementView({ element }: { duration: number; element: EvaluatedFrameObject; previewTime: number }) {
+export const BackgroundElementView = memo(function BackgroundElementView({ element, exportTileFrameBounds, frameScale, previewTime, renderMode }: { duration: number; element: EvaluatedFrameObject; exportTileFrameBounds?: ExportTileFrameBounds; frameScale: number; previewTime: number; renderMode: "preview" | "export" }) {
   const animation = { style: element.renderStyle, content: element.renderContent };
   const style = {
     left: element.bounds.x,
@@ -555,7 +686,7 @@ export const BackgroundElementView = memo(function BackgroundElementView({ eleme
   return (
     <div className="absolute flex select-none flex-col justify-center overflow-hidden whitespace-pre-line" data-background-element-id={element.locked ? undefined : element.id} style={{ ...style, ...(element.locked ? { opacity: 0.6 } : {}) }}>
       {element.type === "text" ? textLines.map((line, index) => <span key={`${line}-${index}`}>{line}</span>) : null}
-      {element.type === "svg" && content ? <div className="h-full w-full" dangerouslySetInnerHTML={{ __html: content }} /> : null}
+      {element.type === "svg" && content ? <ExportSvgContent bounds={element.bounds} content={content} exportTileFrameBounds={exportTileFrameBounds} frameScale={frameScale} markupKind="svg" owner={{ id: element.id, name: element.name, type: element.type, layer: "background" }} renderMode={renderMode} style={style} /> : null}
       {(element.type === "html" || element.type === "template") && content ? <div className="h-full w-full" dangerouslySetInnerHTML={{ __html: content }} /> : null}
       {element.type !== "text" && element.type !== "svg" && element.type !== "html" && element.type !== "template" && content ? content : null}
     </div>

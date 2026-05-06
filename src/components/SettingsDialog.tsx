@@ -1,12 +1,70 @@
 import { RotateCcw } from "lucide-react";
-import { appBarButtonBase, defaultExportTileMapping, defaultExportWorkerMapping, defaultLiveDomPostProcessMaxFps, defaultNewMarkerDurationSeconds, defaultPausePlaybackOnScrub, defaultPrerenderBlockDurationMs, defaultScrubCommitThrottleMs, defaultTimelineEndPaddingFraction, defaultTimelinePrecision, defaultVideoExportTileHeight, maxExportTileCount, maxExportWorkerCount, maxLiveDomPostProcessMaxFps, maxPrerenderBlockDurationMs, maxVideoExportTileHeight, minExportTileCount, minExportWorkerCount, minLiveDomPostProcessMaxFps, minPrerenderBlockDurationMs, minVideoExportTileHeight } from "../app/config";
-import type { AppUpdateStatus, ExportTileResolutionMapping, ExportWorkerResolutionMapping, SettingsSection } from "../app/types";
+import { appBarButtonBase, defaultExportTileMapping, defaultExportWorkerMapping, defaultLiveDomPostProcessMaxFps, defaultNewMarkerDurationSeconds, defaultPausePlaybackOnScrub, defaultPrerenderBlockDurationMs, defaultPreviewRenderHeight, defaultScrubCommitThrottleMs, defaultStableSlowGridPreset, defaultStableSlowValidationSamples, defaultTimelineEndPaddingFraction, defaultTimelinePrecision, defaultVideoExportTileHeight, maxExportTileCount, maxExportWorkerCount, maxLiveDomPostProcessMaxFps, maxPrerenderBlockDurationMs, maxStableSlowValidationSamples, maxVideoExportTileHeight, minExportTileCount, minExportWorkerCount, minLiveDomPostProcessMaxFps, minPrerenderBlockDurationMs, minStableSlowValidationSamples, minVideoExportTileHeight, previewRenderHeightOptions } from "../app/config";
+import type { AppUpdateStatus, ExportTileResolutionMapping, ExportWorkerResolutionMapping, SettingsSection, StableSlowGridPreset, StableSlowValidationSamples } from "../app/types";
 import { clamp } from "../core/math";
 import { Dialog, DialogContent } from "./ui/dialog";
 import { Input } from "./ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { Switch } from "./ui/switch";
 
-export function SettingsDialog({ activeSection, autoDownloadUpdates, debugSettingsEnabled, exportTileMapping, exportWorkerMapping, liveDomPostProcessPreviewEnabled, liveDomPostProcessRuntimeEnabled, liveDomPostProcessMaxFps, open, pausePlaybackOnScrub, prerenderCacheBlackMissDebug, prerenderCacheEnabled, prerenderBlockDurationMs, scrubCommitThrottleMs, defaultNewMarkerDurationSeconds: markerDurationSeconds, timelineEndPaddingFraction, timelinePrecision, updateStatus, videoExportTileHeight, onActiveSectionChange, onAutoDownloadUpdatesChange, onCheckForUpdates, onDownloadUpdate, onDebugSettingsEnabledChange, onExportTileMappingChange, onExportWorkerMappingChange, onInstallUpdate, onLiveDomPostProcessPreviewEnabledChange, onLiveDomPostProcessMaxFpsChange, onOpenChange, onPausePlaybackOnScrubChange, onPrerenderCacheBlackMissDebugChange, onPrerenderCacheEnabledChange, onPrerenderBlockDurationMsChange, onClearAllPrerenderCaches, onScrubCommitThrottleMsChange, onDefaultNewMarkerDurationSecondsChange, onTimelineEndPaddingFractionChange, onTimelinePrecisionChange, onVideoExportTileHeightChange }: { activeSection: SettingsSection; autoDownloadUpdates: boolean; debugSettingsEnabled: boolean; exportTileMapping: ExportTileResolutionMapping; exportWorkerMapping: ExportWorkerResolutionMapping; liveDomPostProcessPreviewEnabled: boolean; liveDomPostProcessRuntimeEnabled: boolean; liveDomPostProcessMaxFps: number; open: boolean; pausePlaybackOnScrub: boolean; prerenderCacheBlackMissDebug: boolean; prerenderCacheEnabled: boolean; prerenderBlockDurationMs: number; scrubCommitThrottleMs: number; defaultNewMarkerDurationSeconds: number; timelineEndPaddingFraction: number; timelinePrecision: number; updateStatus: AppUpdateStatus; videoExportTileHeight: number; onActiveSectionChange: (section: SettingsSection) => void; onAutoDownloadUpdatesChange: (enabled: boolean) => void; onCheckForUpdates: () => void; onDownloadUpdate: () => void; onDebugSettingsEnabledChange: (enabled: boolean) => void; onExportTileMappingChange: (mapping: ExportTileResolutionMapping) => void; onExportWorkerMappingChange: (mapping: ExportWorkerResolutionMapping) => void; onInstallUpdate: () => void; onLiveDomPostProcessPreviewEnabledChange: (enabled: boolean) => void; onLiveDomPostProcessMaxFpsChange: (value: number) => void; onOpenChange: (open: boolean) => void; onPausePlaybackOnScrubChange: (enabled: boolean) => void; onPrerenderCacheBlackMissDebugChange: (enabled: boolean) => void; onPrerenderCacheEnabledChange: (enabled: boolean) => void; onPrerenderBlockDurationMsChange: (value: number) => void; onClearAllPrerenderCaches: () => void; onScrubCommitThrottleMsChange: (value: number) => void; onDefaultNewMarkerDurationSecondsChange: (value: number) => void; onTimelineEndPaddingFractionChange: (value: number) => void; onTimelinePrecisionChange: (value: number) => void; onVideoExportTileHeightChange: (value: number) => void }) {
+const previewRenderResolutionLabels = new Map(previewRenderHeightOptions.map((height) => [height, `${Math.round(height * 16 / 9)}x${height}`]));
+const stableSlowGridPresetDescriptions: Record<StableSlowGridPreset, string> = {
+  relaxed: "Tile sizes tried in order after failures; full means full-width strips: fullx540 -> fullx360 -> fullx270 -> fullx180 -> 3840x180 -> 2560x135 -> 2048x90.",
+  balanced: "Tile sizes tried in order after failures; starts full-width then narrows: fullx270 -> fullx180 -> 2560x180 -> 2048x135 -> 1536x90 -> 1024x54 -> 768x36.",
+  safe: "Tile sizes tried in order after failures; grid-first for heavy exports: 2048x135 -> 1536x90 -> 1024x54 -> 768x36 -> 512x24 -> 384x16. Default.",
+  extreme: "Tile sizes tried in order after failures; smallest grids for low-memory exports: 1024x54 -> 768x36 -> 512x24 -> 384x16 -> 256x12.",
+};
+
+type SettingsDialogProps = {
+  activeSection: SettingsSection;
+  autoDownloadUpdates: boolean;
+  debugSettingsEnabled: boolean;
+  exportTileMapping: ExportTileResolutionMapping;
+  exportWorkerMapping: ExportWorkerResolutionMapping;
+  stableSlowGridPreset: StableSlowGridPreset;
+  stableSlowValidationSamples: StableSlowValidationSamples;
+  liveDomPostProcessPreviewEnabled: boolean;
+  liveDomPostProcessRuntimeEnabled: boolean;
+  liveDomPostProcessMaxFps: number;
+  open: boolean;
+  pausePlaybackOnScrub: boolean;
+  prerenderCacheBlackMissDebug: boolean;
+  prerenderCacheEnabled: boolean;
+  prerenderBlockDurationMs: number;
+  previewRenderHeight: number;
+  scrubCommitThrottleMs: number;
+  defaultNewMarkerDurationSeconds: number;
+  timelineEndPaddingFraction: number;
+  timelinePrecision: number;
+  updateStatus: AppUpdateStatus;
+  videoExportTileHeight: number;
+  onActiveSectionChange: (section: SettingsSection) => void;
+  onAutoDownloadUpdatesChange: (enabled: boolean) => void;
+  onCheckForUpdates: () => void;
+  onDownloadUpdate: () => void;
+  onDebugSettingsEnabledChange: (enabled: boolean) => void;
+  onExportTileMappingChange: (mapping: ExportTileResolutionMapping) => void;
+  onExportWorkerMappingChange: (mapping: ExportWorkerResolutionMapping) => void;
+  onStableSlowGridPresetChange: (preset: StableSlowGridPreset) => void;
+  onStableSlowValidationSamplesChange: (samples: StableSlowValidationSamples) => void;
+  onInstallUpdate: () => void;
+  onLiveDomPostProcessPreviewEnabledChange: (enabled: boolean) => void;
+  onLiveDomPostProcessMaxFpsChange: (value: number) => void;
+  onOpenChange: (open: boolean) => void;
+  onPausePlaybackOnScrubChange: (enabled: boolean) => void;
+  onPrerenderCacheBlackMissDebugChange: (enabled: boolean) => void;
+  onPrerenderCacheEnabledChange: (enabled: boolean) => void;
+  onPrerenderBlockDurationMsChange: (value: number) => void;
+  onPreviewRenderHeightChange: (value: number) => void;
+  onClearAllPrerenderCaches: () => void;
+  onScrubCommitThrottleMsChange: (value: number) => void;
+  onDefaultNewMarkerDurationSecondsChange: (value: number) => void;
+  onTimelineEndPaddingFractionChange: (value: number) => void;
+  onTimelinePrecisionChange: (value: number) => void;
+  onVideoExportTileHeightChange: (value: number) => void;
+};
+
+export function SettingsDialog({ activeSection, autoDownloadUpdates, debugSettingsEnabled, exportTileMapping, exportWorkerMapping, stableSlowGridPreset, stableSlowValidationSamples, liveDomPostProcessPreviewEnabled, liveDomPostProcessRuntimeEnabled, liveDomPostProcessMaxFps, open, pausePlaybackOnScrub, prerenderCacheBlackMissDebug, prerenderCacheEnabled, prerenderBlockDurationMs, previewRenderHeight, scrubCommitThrottleMs, defaultNewMarkerDurationSeconds: markerDurationSeconds, timelineEndPaddingFraction, timelinePrecision, updateStatus, videoExportTileHeight, onActiveSectionChange, onAutoDownloadUpdatesChange, onCheckForUpdates, onDownloadUpdate, onDebugSettingsEnabledChange, onExportTileMappingChange, onExportWorkerMappingChange, onStableSlowGridPresetChange, onStableSlowValidationSamplesChange, onInstallUpdate, onLiveDomPostProcessPreviewEnabledChange, onLiveDomPostProcessMaxFpsChange, onOpenChange, onPausePlaybackOnScrubChange, onPrerenderCacheBlackMissDebugChange, onPrerenderCacheEnabledChange, onPrerenderBlockDurationMsChange, onPreviewRenderHeightChange, onClearAllPrerenderCaches, onScrubCommitThrottleMsChange, onDefaultNewMarkerDurationSecondsChange, onTimelineEndPaddingFractionChange, onTimelinePrecisionChange, onVideoExportTileHeightChange }: SettingsDialogProps) {
   const navItems: Array<{ id: SettingsSection; label: string }> = [
     { id: "general", label: "General" },
     { id: "playback", label: "Playback" },
@@ -49,6 +107,12 @@ export function SettingsDialog({ activeSection, autoDownloadUpdates, debugSettin
     const parsed = Number(value);
     if (!Number.isFinite(parsed)) return;
     onVideoExportTileHeightChange(Math.round(clamp(parsed, minVideoExportTileHeight, maxVideoExportTileHeight)));
+  }
+
+  function updateStableSlowValidationSamples(value: string) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return;
+    onStableSlowValidationSamplesChange(Math.round(clamp(parsed, minStableSlowValidationSamples, maxStableSlowValidationSamples)) as StableSlowValidationSamples);
   }
 
   function updateExportWorkerCount(key: keyof ExportWorkerResolutionMapping, value: string) {
@@ -157,6 +221,27 @@ export function SettingsDialog({ activeSection, autoDownloadUpdates, debugSettin
                     </span>
                   </label>
                   <div className="h-px bg-[#363b47]" />
+                  <div className="grid gap-1.5">
+                    <strong className="text-sm text-white">Preview render resolution</strong>
+                    <p className="text-xs leading-5 text-[#8f939d]">Keeps the actual preview render surface fixed while zoom controls only scale the displayed result. 1080 renders at 1920x1080.</p>
+                  </div>
+                  <label className="grid max-w-[260px] gap-1.5 text-xs font-bold text-[#dfe2ea]" htmlFor="preview-render-resolution">
+                    Render resolution
+                    <span className="flex items-center gap-2">
+                      <Select value={String(previewRenderHeight)} onValueChange={(value) => onPreviewRenderHeightChange(Number(value))}>
+                        <SelectTrigger id="preview-render-resolution" className="h-9">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {previewRenderHeightOptions.map((height) => <SelectItem key={height} value={String(height)}>{previewRenderResolutionLabels.get(height)}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                      <button aria-label={`Reset preview render height to ${defaultPreviewRenderHeight}px`} className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-[#2d313b] text-[#8f939d] transition hover:bg-[#252a34] hover:text-white" type="button" onClick={() => onPreviewRenderHeightChange(defaultPreviewRenderHeight)}>
+                        <RotateCcw size={14} />
+                      </button>
+                    </span>
+                  </label>
+                  <div className="h-px bg-[#363b47]" />
                   <div className="flex w-full items-center justify-between gap-5">
                     <span className="grid gap-1 text-xs">
                       <strong className="text-sm text-white">All project caches</strong>
@@ -254,10 +339,45 @@ export function SettingsDialog({ activeSection, autoDownloadUpdates, debugSettin
               ) : activeSection === "export" ? (
                 <div className="grid gap-4 rounded-xl border border-[#363b47] bg-[#1b1e26] p-4">
                   <div className="grid gap-1.5">
-                    <strong className="text-sm text-white">Capture tile height</strong>
-                    <p className="text-xs leading-5 text-[#8f939d]">Controls the fallback tile height used by prerender/cache capture. Media export uses the resolution tile counts below.</p>
+                    <strong className="text-sm text-white">Stable slow fallback</strong>
+                    <p className="max-w-full text-xs leading-5 text-[#8f939d]">Controls Stable slow grid capture. Smaller grids are slower but survive heavier 4K/8K DOM and SVG scenes.</p>
                   </div>
-                  <label className="grid max-w-[260px] gap-1.5 text-xs font-bold text-[#dfe2ea]" htmlFor="video-export-tile-height">
+                  <label className="grid gap-1.5 text-xs font-bold text-[#dfe2ea]" htmlFor="stable-slow-grid-preset">
+                    Grid fallback preset
+                    <span className="grid max-w-[260px] grid-cols-[minmax(0,1fr)_2.25rem] items-center gap-2">
+                      <Select value={stableSlowGridPreset} onValueChange={(value) => onStableSlowGridPresetChange(value as StableSlowGridPreset)}>
+                        <SelectTrigger id="stable-slow-grid-preset" className="h-9 w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="relaxed">Relaxed</SelectItem>
+                          <SelectItem value="balanced">Balanced</SelectItem>
+                          <SelectItem value="safe">Safe</SelectItem>
+                          <SelectItem value="extreme">Extreme</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <button aria-label={`Reset stable slow grid fallback to ${defaultStableSlowGridPreset}`} className="grid h-9 w-9 place-items-center rounded-md border border-[#2d313b] text-[#8f939d] transition hover:bg-[#252a34] hover:text-white" type="button" onClick={() => onStableSlowGridPresetChange(defaultStableSlowGridPreset)}>
+                        <RotateCcw size={14} />
+                      </button>
+                    </span>
+                    <span className="block max-w-full font-medium leading-5 text-[#8f939d]">{stableSlowGridPresetDescriptions[stableSlowGridPreset]}</span>
+                  </label>
+                  <label className="grid gap-1.5 text-xs font-bold text-[#dfe2ea]" htmlFor="stable-slow-validation-samples">
+                    Validation samples
+                    <span className="relative block w-[260px] max-w-[260px]">
+                      <Input id="stable-slow-validation-samples" className="pr-10" min={minStableSlowValidationSamples} max={maxStableSlowValidationSamples} step={1} type="number" value={stableSlowValidationSamples} onChange={(event) => updateStableSlowValidationSamples(event.target.value)} />
+                      <button aria-label={`Reset stable slow validation samples to ${defaultStableSlowValidationSamples}`} className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-md text-[#8f939d] transition hover:bg-[#252a34] hover:text-white" type="button" onClick={() => onStableSlowValidationSamplesChange(defaultStableSlowValidationSamples)}>
+                        <RotateCcw size={14} />
+                      </button>
+                    </span>
+                    <span className="block max-w-full font-medium leading-5 text-[#8f939d]">Repeated captures of each tile at the same pinned time; higher numbers catch unstable Chromium readback or animation drift.</span>
+                  </label>
+                  <div className="h-px bg-[#363b47]" />
+                  <div className="grid gap-1.5">
+                    <strong className="text-sm text-white">Prerender capture tile height</strong>
+                    <p className="text-xs leading-5 text-[#8f939d]">Controls prerender/cache capture only. Stable slow media export uses the grid fallback preset above, not this strip height.</p>
+                  </div>
+                  <label className="grid w-[260px] gap-1.5 text-xs font-bold text-[#dfe2ea]" htmlFor="video-export-tile-height">
                     Tile height (px)
                     <span className="relative">
                       <Input id="video-export-tile-height" className="pr-10" min={minVideoExportTileHeight} max={maxVideoExportTileHeight} step={1} type="number" value={videoExportTileHeight} onChange={(event) => updateVideoExportTileHeight(event.target.value)} />
@@ -268,8 +388,8 @@ export function SettingsDialog({ activeSection, autoDownloadUpdates, debugSettin
                   </label>
                   <div className="h-px bg-[#363b47]" />
                   <div className="grid gap-1.5">
-                    <strong className="text-sm text-white">Export capture tiles</strong>
-                    <p className="text-xs leading-5 text-[#8f939d]">Sets how many vertical tiles each internal render-size bucket uses. More tiles use less Chromium tile memory but are slower.</p>
+                    <strong className="text-sm text-white">Adaptive renderer tiles</strong>
+                    <p className="text-xs leading-5 text-[#8f939d]">Controls the default Renderer pipeline for very large outputs. Stable slow ignores these counts and uses validated grid capture instead.</p>
                   </div>
                   <div className="grid grid-cols-3 gap-3">
                     <TileCountField id="export-tiles-hd" label="1920x1080 and below" value={exportTileMapping.hd} defaultValue={defaultExportTileMapping.hd} onChange={(value) => updateExportTileCount("hd", value)} onReset={() => onExportTileMappingChange({ ...exportTileMapping, hd: defaultExportTileMapping.hd })} />
@@ -279,7 +399,7 @@ export function SettingsDialog({ activeSection, autoDownloadUpdates, debugSettin
                   <div className="h-px bg-[#363b47]" />
                   <div className="grid gap-1.5">
                     <strong className="text-sm text-white">Renderer workers</strong>
-                    <p className="text-xs leading-5 text-[#8f939d]">Controls how many hidden renderer processes capture frames in parallel for each internal render-size bucket, after High/Ultra supersampling. Higher values can be faster but use more CPU, RAM, and Chromium tile memory.</p>
+                    <p className="text-xs leading-5 text-[#8f939d]">Controls hidden renderer processes for media export. Heavy 8K scenes should use fewer UHD workers; higher values are faster but multiply CPU, RAM, and Chromium tile memory.</p>
                   </div>
                   <div className="grid grid-cols-3 gap-3">
                     <WorkerCountField id="export-workers-hd" label="1920x1080 and below" value={exportWorkerMapping.hd} defaultValue={defaultExportWorkerMapping.hd} onChange={(value) => updateExportWorkerCount("hd", value)} onReset={() => onExportWorkerMappingChange({ ...exportWorkerMapping, hd: defaultExportWorkerMapping.hd })} />

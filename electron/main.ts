@@ -741,6 +741,9 @@ ipcMain.handle(
     exportRenderQuality?: string,
     exportWorkerMapping?: unknown,
     exportTileMapping?: unknown,
+    exportRenderMode?: unknown,
+    stableSlowGridPreset?: unknown,
+    stableSlowValidationSamples?: unknown,
   ) => {
     type MediaExportFormat = "prores-422-hq" | "prores-4444" | "dnxhr-hqx" | "mov" | "h264-high" | "mp4" | "webm";
     const knownFormats = new Set<string>(["prores-422-hq", "prores-4444", "dnxhr-hqx", "mov", "h264-high", "mp4", "webm"]);
@@ -778,6 +781,9 @@ ipcMain.handle(
         exportRenderQuality: renderQuality,
         exportWorkerMapping: normalizeExportWorkerMapping(exportWorkerMapping),
         exportTileMapping: normalizeExportTileMapping(exportTileMapping),
+        exportRenderMode: exportRenderMode === "stable-slow" ? "stable-slow" : "renderer",
+        stableSlowGridPreset: normalizeStableSlowGridPreset(stableSlowGridPreset),
+        stableSlowValidationSamples: normalizeStableSlowValidationSamples(stableSlowValidationSamples),
         onProgress: (progress) =>
           event.sender.send(
             "clipper:video-export-progress",
@@ -793,6 +799,15 @@ ipcMain.handle(
 
 function normalizeExportRenderQuality(value: string | undefined): "standard" | "high" | "ultra" {
   return value === "standard" || value === "ultra" ? value : "high";
+}
+
+function normalizeStableSlowGridPreset(value: unknown): "relaxed" | "balanced" | "safe" | "extreme" {
+  return value === "relaxed" || value === "balanced" || value === "extreme" ? value : "safe";
+}
+
+function normalizeStableSlowValidationSamples(value: unknown): 1 | 2 | 3 {
+  const numeric = typeof value === "number" ? value : Number(value);
+  return numeric === 2 || numeric === 3 ? numeric : 1;
 }
 
 function normalizeExportTileMapping(value: unknown): { hd?: number; qhd?: number; uhd?: number } | undefined {

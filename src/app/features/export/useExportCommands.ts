@@ -1,6 +1,6 @@
 import { useEffect, useRef, type MutableRefObject } from "react";
 import { exportService } from "../../services/exportService";
-import type { ExportRenderQuality, ExportTileResolutionMapping, ExportWorkerResolutionMapping, MediaExportFormat, ProjectExportFormat, VideoExportProgress } from "../../types";
+import type { ExportRenderQuality, ExportTileResolutionMapping, ExportWorkerResolutionMapping, MediaExportFormat, MediaExportRenderMode, ProjectExportFormat, StableSlowGridPreset, StableSlowValidationSamples, VideoExportProgress } from "../../types";
 import type { ProjectManifest } from "../../../core/types";
 
 type UseExportCommandsInput = {
@@ -12,6 +12,9 @@ type UseExportCommandsInput = {
   exportFrameRate: number;
   exportRenderQuality: ExportRenderQuality;
   exportResolution: { width: number; height: number };
+  mediaExportRenderMode: MediaExportRenderMode;
+  stableSlowGridPreset: StableSlowGridPreset;
+  stableSlowValidationSamples: StableSlowValidationSamples;
   exportTileMapping: ExportTileResolutionMapping;
   exportWorkerMapping: ExportWorkerResolutionMapping;
   mediaExportFormat: MediaExportFormat;
@@ -39,6 +42,9 @@ export function useExportCommands({
   exportFrameRate,
   exportRenderQuality,
   exportResolution,
+  mediaExportRenderMode,
+  stableSlowGridPreset,
+  stableSlowValidationSamples,
   exportTileMapping,
   exportWorkerMapping,
   mediaExportFormat,
@@ -103,7 +109,7 @@ export function useExportCommands({
       setExportDialogOpen(false);
       setExportProgress(`Rendering ${totalFrames} frames`);
       setVideoExportProgress({ frame: 0, totalFrames, percent: 0, status: "Preparing export..." });
-      const exportPath = await exportService.renderVideoExport(exportId, defaultFileName, currentProject, manifestPath, currentScene, durationSeconds, videoExportTileHeight, reusePrerenderCacheForExport, exportFrameRate, exportResolution, mediaExportFormat, exportRenderQuality, exportWorkerMapping, exportTileMapping);
+      const exportPath = await exportService.renderVideoExport(exportId, defaultFileName, currentProject, manifestPath, currentScene, durationSeconds, videoExportTileHeight, reusePrerenderCacheForExport, exportFrameRate, exportResolution, mediaExportFormat, exportRenderQuality, exportWorkerMapping, exportTileMapping, mediaExportRenderMode, stableSlowGridPreset, stableSlowValidationSamples);
       if (!exportPath) return;
       notifyRenderedMedia(exportPath);
     } catch (error) {

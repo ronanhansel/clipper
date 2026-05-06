@@ -1,12 +1,13 @@
 import { useRef, useState } from "react";
 import { appBarButtonBase, mutedCaps } from "../../app/config";
-import type { ExportDialogTab, ExportRenderQuality, MediaExportFormat, ProjectExportFormat, VideoExportProgress } from "../../app/types";
+import type { ExportDialogTab, ExportRenderQuality, MediaExportFormat, MediaExportRenderMode, ProjectExportFormat, VideoExportProgress } from "../../app/types";
 import { clamp } from "../../core/math";
 import { formatTime } from "../../core/timeline";
 import type { ProjectManifest } from "../../core/types";
 import { Checkbox } from "../ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../ui/dialog";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
 
 const RESOLUTION_OPTIONS: { label: string; width: number; height: number }[] = [
   { label: "1920 × 1080 (HD)", width: 1920, height: 1080 },
@@ -22,8 +23,12 @@ const RENDER_QUALITY_OPTIONS: { label: string; value: ExportRenderQuality; scale
   { label: "High", value: "high", scale: 2 },
   { label: "Ultra", value: "ultra", scale: 3 },
 ];
+const RENDER_MODE_OPTIONS: DropdownOption<MediaExportRenderMode>[] = [
+  { label: "Adaptive renderer", value: "renderer", description: "Fast default export pipeline", tooltip: "Uses Clipper's supervised renderer with adaptive full-frame or tiled capture. Best for most scenes because it balances speed, memory use, and output quality automatically." },
+  { label: "Safe capture", value: "stable-slow", description: "Slow validation pipeline", tooltip: "Uses the conservative capture path for scenes that stress Chromium's compositor, such as dense SVG or heavy WebLayer compositions. It is slower, but prioritizes deterministic frame capture." },
+];
 
-export function ExportMediaDialog({ activeTab, durationSeconds, exportFrameRate, exportRenderQuality, exportResolution, exporting, includeSources, mediaExportFormat, open, partCount, progress, projectFormat, projectName, resolution, sceneName, onExportFrameRateChange, onExportRenderQualityChange, onExportResolutionChange, onIncludeSourcesChange, onMediaExport, onMediaExportFormatChange, onOpenChange, onProjectExport, onProjectFormatChange, onTabChange }: { activeTab: ExportDialogTab; durationSeconds: number; exportFrameRate: number; exportRenderQuality: ExportRenderQuality; exportResolution: { width: number; height: number }; exporting: boolean; includeSources: boolean; mediaExportFormat: MediaExportFormat; open: boolean; partCount: number; progress: string | null; projectFormat: ProjectExportFormat; projectName: string; resolution: ProjectManifest["resolution"]; sceneName: string; onExportFrameRateChange: (fps: number) => void; onExportRenderQualityChange: (quality: ExportRenderQuality) => void; onExportResolutionChange: (res: { width: number; height: number }) => void; onIncludeSourcesChange: (includeSources: boolean) => void; onMediaExport: () => void; onMediaExportFormatChange: (format: MediaExportFormat) => void; onOpenChange: (open: boolean) => void; onProjectExport: () => void; onProjectFormatChange: (format: ProjectExportFormat) => void; onTabChange: (tab: ExportDialogTab) => void }) {
+export function ExportMediaDialog({ activeTab, durationSeconds, exportFrameRate, exportRenderQuality, exportResolution, exporting, includeSources, mediaExportFormat, mediaExportRenderMode, open, partCount, progress, projectFormat, projectName, resolution, sceneName, onExportFrameRateChange, onExportRenderQualityChange, onExportResolutionChange, onIncludeSourcesChange, onMediaExport, onMediaExportFormatChange, onMediaExportRenderModeChange, onOpenChange, onProjectExport, onProjectFormatChange, onTabChange }: { activeTab: ExportDialogTab; durationSeconds: number; exportFrameRate: number; exportRenderQuality: ExportRenderQuality; exportResolution: { width: number; height: number }; exporting: boolean; includeSources: boolean; mediaExportFormat: MediaExportFormat; mediaExportRenderMode: MediaExportRenderMode; open: boolean; partCount: number; progress: string | null; projectFormat: ProjectExportFormat; projectName: string; resolution: ProjectManifest["resolution"]; sceneName: string; onExportFrameRateChange: (fps: number) => void; onExportRenderQualityChange: (quality: ExportRenderQuality) => void; onExportResolutionChange: (res: { width: number; height: number }) => void; onIncludeSourcesChange: (includeSources: boolean) => void; onMediaExport: () => void; onMediaExportFormatChange: (format: MediaExportFormat) => void; onMediaExportRenderModeChange: (mode: MediaExportRenderMode) => void; onOpenChange: (open: boolean) => void; onProjectExport: () => void; onProjectFormatChange: (format: ProjectExportFormat) => void; onTabChange: (tab: ExportDialogTab) => void }) {
   const tabButtonClass = (tab: ExportDialogTab) => `rounded-[8px] px-3 py-1.5 text-xs font-extrabold transition ${activeTab === tab ? "bg-[#202b37] text-white shadow-[inset_0_0_0_1px_#2d4052]" : "text-[#9b9da7] hover:bg-[#20232c] hover:text-white"}`;
   const mediaFormatOptions = buildMediaFormatOptions(exportResolution, exportFrameRate);
   const renderQualityOptions = buildRenderQualityOptions(exportResolution);
@@ -65,6 +70,9 @@ export function ExportMediaDialog({ activeTab, durationSeconds, exportFrameRate,
             )}
             {activeTab === "media" ? (
               <ExportStatDropdown popoverMinWidth="260px" label="Render quality" value={renderQualityOptions.find((o) => o.value === exportRenderQuality)?.label ?? "High"} options={renderQualityOptions} selectedValue={exportRenderQuality} onChange={(value) => onExportRenderQualityChange(value as ExportRenderQuality)} />
+            ) : null}
+            {activeTab === "media" ? (
+              <ExportStatDropdown popoverMinWidth="260px" label="Export pipeline" value={RENDER_MODE_OPTIONS.find((o) => o.value === mediaExportRenderMode)?.label ?? "Adaptive renderer"} options={RENDER_MODE_OPTIONS} selectedValue={mediaExportRenderMode} onChange={(value) => onMediaExportRenderModeChange(value as MediaExportRenderMode)} />
             ) : null}
           </div>
 
@@ -120,7 +128,7 @@ function ExportStat({ label, value, warning = false }: { label: string; value: s
   );
 }
 
-type DropdownOption<T extends string = string> = { label: string; value: T; description?: string };
+type DropdownOption<T extends string = string> = { label: string; value: T; description?: string; tooltip?: string };
 
 function ExportStatDropdown({ label, value, options, selectedValue, onChange, popoverMinWidth = "200px" }: { label: string; value: string; options: DropdownOption[]; selectedValue: string; onChange: (value: string) => void; popoverMinWidth?: string }) {
   const [open, setOpen] = useState(false);
@@ -140,19 +148,34 @@ function ExportStatDropdown({ label, value, options, selectedValue, onChange, po
         <>
           <div className="fixed inset-0 z-[90]" onClick={() => setOpen(false)} />
           <div className="absolute left-0 z-[91] mt-1 max-h-[min(320px,calc(100vh-160px))] min-w-[var(--stat-popover-min-w)] max-w-[calc(100vw-2rem)] overflow-y-auto rounded-lg border border-[#2d313b] bg-[#15171e] p-1 shadow-[0_18px_60px_rgba(0,0,0,0.45)]" style={{ "--stat-popover-min-w": popoverMinWidth } as React.CSSProperties}>
-            {options.map((opt) => (
-              <button
-                key={opt.value}
-                className={`flex w-full items-center gap-3 rounded-md px-2.5 py-1.5 text-left text-xs font-bold transition ${opt.value === selectedValue ? "text-[var(--clipper-accent-strong)]" : "text-[#dfe2ea] hover:bg-[#20232c] hover:text-white"}`}
-                onClick={() => { onChange(opt.value); setOpen(false); }}
-              >
-                <span className="grid min-w-0 flex-1 gap-0.5">
-                  <span className="whitespace-nowrap">{opt.label}</span>
-                  {opt.description ? <span className="whitespace-nowrap text-[10px] font-semibold text-[#8e929d]">{opt.description}</span> : null}
-                </span>
-                {opt.value === selectedValue ? <span className="text-[var(--clipper-accent-strong)]">✓</span> : null}
-              </button>
-            ))}
+            <TooltipProvider delayDuration={400} skipDelayDuration={100}>
+              {options.map((opt) => {
+                const item = (
+                  <button
+                    key={opt.value}
+                    className={`flex w-full items-center gap-3 rounded-md px-2.5 py-1.5 text-left text-xs font-bold transition ${opt.value === selectedValue ? "text-[var(--clipper-accent-strong)]" : "text-[#dfe2ea] hover:bg-[#20232c] hover:text-white"}`}
+                    onClick={() => { onChange(opt.value); setOpen(false); }}
+                  >
+                    <span className="grid min-w-0 flex-1 gap-0.5">
+                      <span className="whitespace-nowrap">{opt.label}</span>
+                      {opt.description ? <span className="whitespace-nowrap text-[10px] font-semibold text-[#8e929d]">{opt.description}</span> : null}
+                    </span>
+                    {opt.value === selectedValue ? <span className="text-[var(--clipper-accent-strong)]">✓</span> : null}
+                  </button>
+                );
+
+                if (!opt.tooltip) return item;
+
+                return (
+                  <Tooltip key={opt.value}>
+                    <TooltipTrigger asChild>{item}</TooltipTrigger>
+                    <TooltipContent side="right" align="center" className="max-w-[240px]">
+                      {opt.tooltip}
+                    </TooltipContent>
+                  </Tooltip>
+                );
+              })}
+            </TooltipProvider>
           </div>
         </>
       ) : null}

@@ -3,7 +3,7 @@ import { AppContextMenu } from "../../components/AppContextMenu";
 import { ExportMediaDialog, VideoExportOverlay } from "../../components/export/ExportMediaDialog";
 import { SettingsDialog } from "../../components/SettingsDialog";
 import type { ProjectManifest } from "../../core/types";
-import type { AppUpdateStatus, ContextMenuState, ExportDialogTab, ExportRenderQuality, ExportTileResolutionMapping, ExportWorkerResolutionMapping, MediaExportFormat, ProjectExportFormat, SettingsSection, VideoExportProgress } from "../types";
+import type { AppUpdateStatus, ContextMenuState, ExportDialogTab, ExportRenderQuality, ExportTileResolutionMapping, ExportWorkerResolutionMapping, MediaExportFormat, MediaExportRenderMode, ProjectExportFormat, SettingsSection, StableSlowGridPreset, StableSlowValidationSamples, VideoExportProgress } from "../types";
 
 type AppDialogsProps = {
   appContextMenu: ContextMenuState | null;
@@ -24,11 +24,15 @@ type AppDialogsProps = {
   liveDomPostProcessRuntimeEnabled: boolean;
   liveDomPostProcessMaxFps: number;
   mediaExportFormat: MediaExportFormat;
+  mediaExportRenderMode: MediaExportRenderMode;
+  stableSlowGridPreset: StableSlowGridPreset;
+  stableSlowValidationSamples: StableSlowValidationSamples;
   pausePlaybackOnScrub: boolean;
   partCount: number;
   prerenderCacheEnabled: boolean;
   prerenderCacheBlackMissDebug: boolean;
   prerenderBlockDurationMs: number;
+  previewRenderHeight: number;
   projectExportFormat: ProjectExportFormat;
   projectName: string;
   resolution: ProjectManifest["resolution"];
@@ -60,6 +64,9 @@ type AppDialogsProps = {
   onExportWorkerMappingChange: (mapping: ExportWorkerResolutionMapping) => void;
   onMediaExport: () => void;
   onMediaExportFormatChange: (format: MediaExportFormat) => void;
+  onMediaExportRenderModeChange: (mode: MediaExportRenderMode) => void;
+  onStableSlowGridPresetChange: (preset: StableSlowGridPreset) => void;
+  onStableSlowValidationSamplesChange: (samples: StableSlowValidationSamples) => void;
   onLiveDomPostProcessPreviewEnabledChange: (enabled: boolean) => void;
   onLiveDomPostProcessMaxFpsChange: (value: number) => void;
   onProjectExport: () => void;
@@ -67,6 +74,7 @@ type AppDialogsProps = {
   onPrerenderCacheEnabledChange: (enabled: boolean) => void;
   onPrerenderCacheBlackMissDebugChange: (enabled: boolean) => void;
   onPrerenderBlockDurationMsChange: (value: number) => void;
+  onPreviewRenderHeightChange: (value: number) => void;
   onClearAllPrerenderCaches: () => void;
   onProjectExportFormatChange: (format: ProjectExportFormat) => void;
   onReusePrerenderCacheForExportChange: (reuse: boolean) => void;
@@ -80,7 +88,7 @@ type AppDialogsProps = {
   onInstallUpdate: () => void;
 };
 
-export function AppDialogs({ appContextMenu, autoDownloadUpdates, debugSettingsEnabled, defaultNewMarkerDurationSeconds, exportDialogOpen, exportDialogTab, exportFrameRate, exportIncludeSources, exportProgress, exportRenderQuality, exportResolution, exportTileMapping, exportWorkerMapping, isExporting, liveDomPostProcessPreviewEnabled, liveDomPostProcessRuntimeEnabled, liveDomPostProcessMaxFps, mediaExportFormat, pausePlaybackOnScrub, partCount, prerenderCacheEnabled, prerenderCacheBlackMissDebug, prerenderBlockDurationMs, projectExportFormat, projectName, resolution, sceneDurationSeconds, sceneName, scrubCommitThrottleMs, settingsOpen, settingsSection, timelineEndPaddingFraction, timelinePrecision, videoExportCancelling, videoExportTileHeight, videoExportProgress, updateStatus, onAppContextMenuClose, onAutoDownloadUpdatesChange, onCheckForUpdates, onDownloadUpdate, onDebugSettingsEnabledChange, onDefaultNewMarkerDurationSecondsChange, onExportDialogOpenChange, onExportDialogTabChange, onExportFrameRateChange, onExportIncludeSourcesChange, onExportRenderQualityChange, onExportResolutionChange, onExportTileMappingChange, onExportWorkerMappingChange, onMediaExport, onMediaExportFormatChange, onLiveDomPostProcessPreviewEnabledChange, onLiveDomPostProcessMaxFpsChange, onProjectExport, onPausePlaybackOnScrubChange, onPrerenderCacheEnabledChange, onPrerenderCacheBlackMissDebugChange, onPrerenderBlockDurationMsChange, onClearAllPrerenderCaches, onProjectExportFormatChange, onScrubCommitThrottleMsChange, onSettingsOpenChange, onSettingsSectionChange, onTimelineEndPaddingFractionChange, onTimelinePrecisionChange, onVideoExportTileHeightChange, onVideoExportCancel, onInstallUpdate }: AppDialogsProps) {
+export function AppDialogs({ appContextMenu, autoDownloadUpdates, debugSettingsEnabled, defaultNewMarkerDurationSeconds, exportDialogOpen, exportDialogTab, exportFrameRate, exportIncludeSources, exportProgress, exportRenderQuality, exportResolution, exportTileMapping, exportWorkerMapping, isExporting, liveDomPostProcessPreviewEnabled, liveDomPostProcessRuntimeEnabled, liveDomPostProcessMaxFps, mediaExportFormat, mediaExportRenderMode, stableSlowGridPreset, stableSlowValidationSamples, pausePlaybackOnScrub, partCount, prerenderCacheEnabled, prerenderCacheBlackMissDebug, prerenderBlockDurationMs, previewRenderHeight, projectExportFormat, projectName, resolution, sceneDurationSeconds, sceneName, scrubCommitThrottleMs, settingsOpen, settingsSection, timelineEndPaddingFraction, timelinePrecision, videoExportCancelling, videoExportTileHeight, videoExportProgress, updateStatus, onAppContextMenuClose, onAutoDownloadUpdatesChange, onCheckForUpdates, onDownloadUpdate, onDebugSettingsEnabledChange, onDefaultNewMarkerDurationSecondsChange, onExportDialogOpenChange, onExportDialogTabChange, onExportFrameRateChange, onExportIncludeSourcesChange, onExportRenderQualityChange, onExportResolutionChange, onExportTileMappingChange, onExportWorkerMappingChange, onMediaExport, onMediaExportFormatChange, onMediaExportRenderModeChange, onStableSlowGridPresetChange, onStableSlowValidationSamplesChange, onLiveDomPostProcessPreviewEnabledChange, onLiveDomPostProcessMaxFpsChange, onProjectExport, onPausePlaybackOnScrubChange, onPrerenderCacheEnabledChange, onPrerenderCacheBlackMissDebugChange, onPrerenderBlockDurationMsChange, onPreviewRenderHeightChange, onClearAllPrerenderCaches, onProjectExportFormatChange, onScrubCommitThrottleMsChange, onSettingsOpenChange, onSettingsSectionChange, onTimelineEndPaddingFractionChange, onTimelinePrecisionChange, onVideoExportTileHeightChange, onVideoExportCancel, onInstallUpdate }: AppDialogsProps) {
   return (
     <>
       <ExportMediaDialog
@@ -91,6 +99,7 @@ export function AppDialogs({ appContextMenu, autoDownloadUpdates, debugSettingsE
         exportResolution={exportResolution}
         includeSources={exportIncludeSources}
         mediaExportFormat={mediaExportFormat}
+        mediaExportRenderMode={mediaExportRenderMode}
         open={exportDialogOpen}
         partCount={partCount}
         progress={exportProgress}
@@ -103,6 +112,7 @@ export function AppDialogs({ appContextMenu, autoDownloadUpdates, debugSettingsE
         onExportRenderQualityChange={onExportRenderQualityChange}
         onExportResolutionChange={onExportResolutionChange}
         onMediaExportFormatChange={onMediaExportFormatChange}
+        onMediaExportRenderModeChange={onMediaExportRenderModeChange}
         onProjectExport={onProjectExport}
         onMediaExport={onMediaExport}
         onProjectFormatChange={onProjectExportFormatChange}
@@ -122,6 +132,7 @@ export function AppDialogs({ appContextMenu, autoDownloadUpdates, debugSettingsE
         prerenderCacheBlackMissDebug={prerenderCacheBlackMissDebug}
         prerenderCacheEnabled={prerenderCacheEnabled}
         prerenderBlockDurationMs={prerenderBlockDurationMs}
+        previewRenderHeight={previewRenderHeight}
         scrubCommitThrottleMs={scrubCommitThrottleMs}
         defaultNewMarkerDurationSeconds={defaultNewMarkerDurationSeconds}
         timelineEndPaddingFraction={timelineEndPaddingFraction}
@@ -129,6 +140,8 @@ export function AppDialogs({ appContextMenu, autoDownloadUpdates, debugSettingsE
         videoExportTileHeight={videoExportTileHeight}
         exportTileMapping={exportTileMapping}
         exportWorkerMapping={exportWorkerMapping}
+        stableSlowGridPreset={stableSlowGridPreset}
+        stableSlowValidationSamples={stableSlowValidationSamples}
         updateStatus={updateStatus}
         onActiveSectionChange={onSettingsSectionChange}
         onAutoDownloadUpdatesChange={onAutoDownloadUpdatesChange}
@@ -142,6 +155,7 @@ export function AppDialogs({ appContextMenu, autoDownloadUpdates, debugSettingsE
         onPrerenderCacheBlackMissDebugChange={onPrerenderCacheBlackMissDebugChange}
         onPrerenderCacheEnabledChange={onPrerenderCacheEnabledChange}
         onPrerenderBlockDurationMsChange={onPrerenderBlockDurationMsChange}
+        onPreviewRenderHeightChange={onPreviewRenderHeightChange}
         onClearAllPrerenderCaches={onClearAllPrerenderCaches}
         onScrubCommitThrottleMsChange={onScrubCommitThrottleMsChange}
         onDefaultNewMarkerDurationSecondsChange={onDefaultNewMarkerDurationSecondsChange}
@@ -150,6 +164,8 @@ export function AppDialogs({ appContextMenu, autoDownloadUpdates, debugSettingsE
         onVideoExportTileHeightChange={onVideoExportTileHeightChange}
         onExportTileMappingChange={onExportTileMappingChange}
         onExportWorkerMappingChange={onExportWorkerMappingChange}
+        onStableSlowGridPresetChange={onStableSlowGridPresetChange}
+        onStableSlowValidationSamplesChange={onStableSlowValidationSamplesChange}
         onInstallUpdate={onInstallUpdate}
       />
       {videoExportProgress ? <VideoExportOverlay cancelling={videoExportCancelling} progress={videoExportProgress} onCancel={onVideoExportCancel} /> : null}

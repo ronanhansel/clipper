@@ -55,10 +55,12 @@ type PreviewColumnProps = {
   currentSceneTimeRef: RefObject<number>;
   onScroll: (event: UIEvent<HTMLDivElement>) => void;
   previewKey: string;
+  previewRenderScale: number;
   stageRef: ComponentProps<"div">["ref"];
 };
 
-export function PreviewColumn({ blankFrameViewportStyle, children, currentSceneTimeRef, editorPaneProps, framePreviewProps, getPrerenderCacheBlockAtTime, hasActiveComposition, liveDomPostProcessMaxFps, livePostProcessPreviewEnabled, mode, onModeChange, onPointerEnter, onPointerLeave, onCachedPreviewDisplayReadyChange, prerenderCacheBlackMissDebug, prerenderCacheEnabled, onScroll, previewKey, stageRef }: PreviewColumnProps) {
+export function PreviewColumn({ blankFrameViewportStyle, children, currentSceneTimeRef, editorPaneProps, framePreviewProps, getPrerenderCacheBlockAtTime, hasActiveComposition, liveDomPostProcessMaxFps, livePostProcessPreviewEnabled, mode, onModeChange, onPointerEnter, onPointerLeave, onCachedPreviewDisplayReadyChange, prerenderCacheBlackMissDebug, prerenderCacheEnabled, onScroll, previewKey, previewRenderScale, stageRef }: PreviewColumnProps) {
+  const lastActiveFramePreviewPropsRef = useRef<FramePreviewProps | null>(null);
   // Stabilize prerender renderer choice across mode switches: only
   // sync from prerenderCacheEnabled while in preview mode so the
   // active preview subtree (PrerenderVideoPreview vs FramePreview)
@@ -69,6 +71,17 @@ export function PreviewColumn({ blankFrameViewportStyle, children, currentSceneT
       setDisplayPrerenderPreview(prerenderCacheEnabled);
     }
   }, [mode, prerenderCacheEnabled]);
+
+  if (framePreviewProps && hasActiveComposition) lastActiveFramePreviewPropsRef.current = framePreviewProps;
+  const stableFramePreviewProps = hasActiveComposition || !lastActiveFramePreviewPropsRef.current
+    ? framePreviewProps
+    : framePreviewProps
+      ? { ...lastActiveFramePreviewPropsRef.current, frameScale: framePreviewProps.frameScale, isPlaying: framePreviewProps.isPlaying, playbackClock: framePreviewProps.playbackClock, sceneTime: framePreviewProps.sceneTime }
+      : lastActiveFramePreviewPropsRef.current;
+  const displayScale = stableFramePreviewProps ? stableFramePreviewProps.frameScale / previewRenderScale : 1;
+  const renderFramePreviewProps = stableFramePreviewProps ? { ...stableFramePreviewProps, frameScale: previewRenderScale } : null;
+  const previewDisplayStyle = stableFramePreviewProps ? { width: FRAME_WIDTH * stableFramePreviewProps.frameScale, height: FRAME_HEIGHT * stableFramePreviewProps.frameScale } as CSSProperties : undefined;
+  const previewRenderStyle = stableFramePreviewProps ? { backfaceVisibility: "hidden", contain: "paint", filter: displayScale === 1 ? undefined : "blur(0)", width: FRAME_WIDTH * previewRenderScale, height: FRAME_HEIGHT * previewRenderScale, transform: displayScale === 1 ? undefined : `translateZ(0) scale(${displayScale})`, transformOrigin: "top left", willChange: displayScale === 1 ? undefined : "transform" } as CSSProperties : undefined;
 
   return (
     <section className="grid min-h-0 min-w-0 grid-rows-[58px_minmax(0,1fr)_58px] bg-[radial-gradient(circle_at_50%_45%,rgb(var(--clipper-accent-rgb)/0.10),transparent_30%),#141821]" data-clipper-preview-column onPointerEnter={onPointerEnter} onPointerLeave={onPointerLeave}>
@@ -88,14 +101,17 @@ export function PreviewColumn({ blankFrameViewportStyle, children, currentSceneT
           data-clipper-preview-stage
           onScroll={onScroll}
         >
-          <div>
-            {framePreviewProps ? (
-              displayPrerenderPreview
-                ? <PrerenderVideoPreview key={`prerender:${previewKey}`} blackMissDebug={prerenderCacheBlackMissDebug} currentSceneTimeRef={currentSceneTimeRef} framePreviewProps={framePreviewProps} getBlockAtTime={getPrerenderCacheBlockAtTime} liveDomPostProcessMaxFps={liveDomPostProcessMaxFps} livePostProcessPreviewEnabled={livePostProcessPreviewEnabled} onCachedPreviewDisplayReadyChange={onCachedPreviewDisplayReadyChange} />
-                : <LivePostProcessFramePreview key={previewKey} currentSceneTimeRef={currentSceneTimeRef} framePreviewProps={framePreviewProps} liveDomPostProcessMaxFps={liveDomPostProcessMaxFps} livePostProcessEnabled={livePostProcessPreviewEnabled} />
+          <div className="relative" data-clipper-fixed-preview-display style={previewDisplayStyle}>
+            {renderFramePreviewProps ? (
+              <div className="absolute left-0 top-0" data-clipper-fixed-preview-render style={previewRenderStyle}>
+                {displayPrerenderPreview
+                  ? <PrerenderVideoPreview blackMissDebug={prerenderCacheBlackMissDebug} currentSceneTimeRef={currentSceneTimeRef} framePreviewProps={renderFramePreviewProps} getBlockAtTime={getPrerenderCacheBlockAtTime} liveDomPostProcessMaxFps={liveDomPostProcessMaxFps} livePostProcessPreviewEnabled={livePostProcessPreviewEnabled} onCachedPreviewDisplayReadyChange={onCachedPreviewDisplayReadyChange} />
+                  : <LivePostProcessFramePreview currentSceneTimeRef={currentSceneTimeRef} framePreviewProps={renderFramePreviewProps} liveDomPostProcessMaxFps={liveDomPostProcessMaxFps} livePostProcessEnabled={livePostProcessPreviewEnabled} />}
+                {!hasActiveComposition ? <div className="pointer-events-none absolute left-0 top-0 z-[2147483647] bg-black" data-clipper-stable-blank-preview-overlay style={{ width: FRAME_WIDTH * previewRenderScale, height: FRAME_HEIGHT * previewRenderScale }} /> : null}
+              </div>
             ) : null}
           </div>
-          {!hasActiveComposition ? <div className="relative overflow-hidden bg-black shadow-[0_22px_70px_rgba(0,0,0,0.44)]" aria-label="Blank preview frame" data-clipper-blank-frame-preview style={blankFrameViewportStyle} /> : null}
+          {!hasActiveComposition && !renderFramePreviewProps ? <div className="relative overflow-hidden bg-black shadow-[0_22px_70px_rgba(0,0,0,0.44)]" aria-label="Blank preview frame" data-clipper-blank-frame-preview style={blankFrameViewportStyle} /> : null}
         </div>
 
         {/* Editor overlay — sibling of scroll viewport, not inside it. Not affected by preview scrollTop/scrollLeft. */}
@@ -115,8 +131,9 @@ function PrerenderVideoPreview({ blackMissDebug, currentSceneTimeRef, framePrevi
   const lastFrameKeyRef = useRef("");
   const firstMissAtRef = useRef<number | null>(null);
   const displayReadyRef = useRef(false);
-  const displayModeRef = useRef<CachedPreviewDisplayMode>("dom");
-  const [displayMode, setDisplayMode] = useState<CachedPreviewDisplayMode>("dom");
+  const initialDisplayMode = framePreviewProps.isPlaying ? "canvas2d" : "dom";
+  const displayModeRef = useRef<CachedPreviewDisplayMode>(initialDisplayMode);
+  const [displayMode, setDisplayMode] = useState<CachedPreviewDisplayMode>(initialDisplayMode);
   const frameScale = framePreviewProps.frameScale;
   const previewStyle = { width: FRAME_WIDTH * frameScale, height: FRAME_HEIGHT * frameScale } as CSSProperties;
   const cachedCanvasStyle = { width: FRAME_WIDTH, height: FRAME_HEIGHT, transform: `scale(${frameScale})`, transformOrigin: "top left" } as CSSProperties;
@@ -241,7 +258,7 @@ function PrerenderVideoPreview({ blackMissDebug, currentSceneTimeRef, framePrevi
       updateDisplayMode(displayModeRef.current === "webgl" ? "webgl" : "canvas2d");
       return;
     }
-    if (blackMissDebug) showBlackMiss();
+    if (blackMissDebug || framePreviewProps.isPlaying) showBlackMiss();
     else showDomFallback();
   }
 

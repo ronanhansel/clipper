@@ -8,6 +8,9 @@ export type ExportDialogTab = "media" | "project";
 export type ProjectExportFormat = "project-package" | "scene-json";
 export type MediaExportFormat = "prores-422-hq" | "prores-4444" | "dnxhr-hqx" | "mov" | "h264-high" | "mp4" | "webm";
 export type ExportRenderQuality = "standard" | "high" | "ultra";
+export type MediaExportRenderMode = "renderer" | "stable-slow";
+export type StableSlowGridPreset = "relaxed" | "balanced" | "safe" | "extreme";
+export type StableSlowValidationSamples = 1 | 2 | 3;
 export type ExportWorkerResolutionMapping = { hd: number; qhd: number; uhd: number };
 export type ExportTileResolutionMapping = { hd: number; qhd: number; uhd: number };
 export type ContextMenuState = { x: number; y: number; items: ContextMenuItem[] } | null;
@@ -20,7 +23,7 @@ export type TimelineNodeContextTarget = ({ time?: number; compositionLayerId?: s
   | { kind: "transition"; layerId: string }
 ));
 export type TimelineBlankContextTarget = { time: number; compositionLayerId?: string };
-export type VideoExportMethod = "renderer";
+export type VideoExportMethod = "renderer" | "stable-slow";
 export type VideoExportProgress = { frame: number; totalFrames: number; percent: number; status: string; method?: VideoExportMethod };
 export type SettingsSection = "general" | "playback" | "timeline" | "export" | "advanced";
 export type UpdateStatusKind = "idle" | "checking" | "available" | "not-available" | "downloading" | "downloaded" | "error" | "unsupported";

@@ -1,4 +1,4 @@
-import type { AppUpdateStatus, ExportRenderQuality, ExportTileResolutionMapping, ExportWorkerResolutionMapping, MediaExportFormat } from "./types";
+import type { AppUpdateStatus, ExportRenderQuality, ExportTileResolutionMapping, ExportWorkerResolutionMapping, MediaExportFormat, MediaExportRenderMode, StableSlowGridPreset, StableSlowValidationSamples } from "./types";
 import type { ProjectManifest } from "../core/types";
 
 type SceneManifest = ProjectManifest["scenes"][number];
@@ -115,9 +115,9 @@ class ClipperHostService {
     return window.clipper.createProject(projectName);
   }
 
-  async renderVideoExport(exportId: string, defaultFileName: string, project: ProjectManifest, manifestPath: string, scene: SceneManifest, frameRate: number, durationSeconds: number, tileHeight: number, reusePrerenderCache: boolean, exportWidth?: number, exportHeight?: number, mediaExportFormat?: MediaExportFormat, exportRenderQuality?: ExportRenderQuality, exportWorkerMapping?: ExportWorkerResolutionMapping, exportTileMapping?: ExportTileResolutionMapping) {
+  async renderVideoExport(exportId: string, defaultFileName: string, project: ProjectManifest, manifestPath: string, scene: SceneManifest, frameRate: number, durationSeconds: number, tileHeight: number, reusePrerenderCache: boolean, exportWidth?: number, exportHeight?: number, mediaExportFormat?: MediaExportFormat, exportRenderQuality?: ExportRenderQuality, exportWorkerMapping?: ExportWorkerResolutionMapping, exportTileMapping?: ExportTileResolutionMapping, exportRenderMode?: MediaExportRenderMode, stableSlowGridPreset?: StableSlowGridPreset, stableSlowValidationSamples?: StableSlowValidationSamples) {
     if (!window.clipper?.renderVideoExport) throw new Error("Video export requires the Clipper desktop app. Restart the app if this was just updated.");
-    return window.clipper.renderVideoExport(exportId, defaultFileName, project, manifestPath, scene, frameRate, durationSeconds, tileHeight, reusePrerenderCache, exportWidth, exportHeight, mediaExportFormat, exportRenderQuality, exportWorkerMapping, exportTileMapping);
+    return window.clipper.renderVideoExport(exportId, defaultFileName, project, manifestPath, scene, frameRate, durationSeconds, tileHeight, reusePrerenderCache, exportWidth, exportHeight, mediaExportFormat, exportRenderQuality, exportWorkerMapping, exportTileMapping, exportRenderMode, stableSlowGridPreset, stableSlowValidationSamples);
   }
 
   async prerenderFrame(project: ProjectManifest, manifestPath: string, scene: SceneManifest, sceneTime: number, sceneDuration: number, frameRate: number, tileHeight: number, blockDurationMs: number, frameRange?: { startFrame: number; endFrame: number }) {

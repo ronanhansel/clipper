@@ -1,7 +1,7 @@
 import { defaultAssets, getSceneFromProject, serializeProjectForSave } from "../../core/project";
 import { buildLinearTimeline, getRenderableScene, sceneDuration, validateScene } from "../../core/timeline";
 import { FRAME_HEIGHT, FRAME_WIDTH, type CompositionClip, type ProjectManifest } from "../../core/types";
-import type { ExportRenderQuality, ExportTileResolutionMapping, ExportWorkerResolutionMapping, MediaExportFormat, ProjectExportFormat } from "../types";
+import type { ExportRenderQuality, ExportTileResolutionMapping, ExportWorkerResolutionMapping, MediaExportFormat, MediaExportRenderMode, ProjectExportFormat, StableSlowGridPreset, StableSlowValidationSamples } from "../types";
 import { videoExportFrameRate } from "../config";
 import { clipperHost } from "../clipperHost";
 import { fileDownloadService } from "./fileDownloadService";
@@ -97,12 +97,12 @@ class ExportService {
     return { scene, durationSeconds, totalFrames, defaultFileName };
   }
 
-  renderVideoExport(exportId: string, defaultFileName: string, project: ProjectManifest, manifestPath: string, scene: ProjectManifest["scenes"][number], durationSeconds: number, tileHeight: number, reusePrerenderCache: boolean, frameRate?: number, exportResolution?: { width: number; height: number }, mediaExportFormat?: MediaExportFormat, exportRenderQuality?: ExportRenderQuality, exportWorkerMapping?: ExportWorkerResolutionMapping, exportTileMapping?: ExportTileResolutionMapping) {
+  renderVideoExport(exportId: string, defaultFileName: string, project: ProjectManifest, manifestPath: string, scene: ProjectManifest["scenes"][number], durationSeconds: number, tileHeight: number, reusePrerenderCache: boolean, frameRate?: number, exportResolution?: { width: number; height: number }, mediaExportFormat?: MediaExportFormat, exportRenderQuality?: ExportRenderQuality, exportWorkerMapping?: ExportWorkerResolutionMapping, exportTileMapping?: ExportTileResolutionMapping, exportRenderMode?: MediaExportRenderMode, stableSlowGridPreset?: StableSlowGridPreset, stableSlowValidationSamples?: StableSlowValidationSamples) {
     const _frameRate = frameRate ?? videoExportFrameRate;
     const _resolution = exportResolution ?? project.resolution;
     const _format = mediaExportFormat ?? "prores-422-hq";
     const exportProject = serializeProjectForSave(project);
-    return clipperHost.renderVideoExport(exportId, defaultFileName, exportProject, manifestPath, scene, _frameRate, durationSeconds, tileHeight, reusePrerenderCache, _resolution.width, _resolution.height, _format, exportRenderQuality ?? "high", exportWorkerMapping, exportTileMapping);
+    return clipperHost.renderVideoExport(exportId, defaultFileName, exportProject, manifestPath, scene, _frameRate, durationSeconds, tileHeight, reusePrerenderCache, _resolution.width, _resolution.height, _format, exportRenderQuality ?? "high", exportWorkerMapping, exportTileMapping, exportRenderMode ?? "renderer", stableSlowGridPreset ?? "safe", stableSlowValidationSamples ?? 1);
   }
 
   cancelVideoExport(exportId: string) {

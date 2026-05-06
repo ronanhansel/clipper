@@ -240,8 +240,10 @@ export function usePlaybackController({
   function startPlaybackFromCurrentTime() {
     if (currentSceneTimeRef.current >= playbackEnd || currentSceneTimeRef.current < playbackStart) {
       currentSceneTimeRef.current = playbackStart;
+      requestCachedPreviewInterest(playbackStart, "playback");
       syncPlaybackDom(playbackStart);
       setCurrentSceneTime(playbackStart);
+      setRenderCurrentSceneTime(playbackStart);
     }
 
     updatePlaybackClock({ startedAt: performance.now(), startedFrom: currentSceneTimeRef.current });
