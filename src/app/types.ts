@@ -11,6 +11,7 @@ export type ExportRenderQuality = "standard" | "high" | "ultra";
 export type MediaExportRenderMode = "renderer" | "stable-slow";
 export type StableSlowGridPreset = "relaxed" | "balanced" | "safe" | "extreme";
 export type StableSlowValidationSamples = 1 | 2 | 3;
+export type ExportWorkerConfigurationMode = "separate" | "unified";
 export type ExportWorkerResolutionMapping = { hd: number; qhd: number; uhd: number };
 export type ExportTileResolutionMapping = { hd: number; qhd: number; uhd: number };
 export type ContextMenuState = { x: number; y: number; items: ContextMenuItem[] } | null;

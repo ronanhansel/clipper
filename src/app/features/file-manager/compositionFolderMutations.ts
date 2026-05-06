@@ -40,12 +40,10 @@ export function renameCompositionFolderInProject(project: ProjectManifest, compo
   const nextFolderPath = parentPath ? `${parentPath}/${nextName}` : nextName;
   const nextSources = remapSourcesForFolder(compositionSources, folderPath, nextFolderPath);
 
-  const idMap = new Map<string, string>();
   const nextLibrary = (project.compositionLibrary ?? compositionLibrary).map((item) => {
     if (item.filePath.startsWith(`${folderPath}/`)) {
       const nextFilePath = `${nextFolderPath}${item.filePath.slice(folderPath.length)}`;
-      idMap.set(item.id, nextFilePath);
-      return { ...item, id: nextFilePath, filePath: nextFilePath };
+      return { ...item, filePath: nextFilePath };
     }
     return item;
   });
@@ -56,24 +54,18 @@ export function renameCompositionFolderInProject(project: ProjectManifest, compo
       const nextFilePath = `${nextFolderPath}${timeline.filePath.slice(folderPath.length)}`;
       nextTimeline = { ...nextTimeline, id: nextFilePath, filePath: nextFilePath };
     }
-    return {
-      ...nextTimeline,
-      clips: nextTimeline.clips.map((clip) => ({
-        ...clip,
-        compositionId: idMap.get(clip.compositionId) ?? clip.compositionId,
-      })),
-    };
+    return nextTimeline;
   });
 
   return {
     compositionSources: nextSources,
-    project: {
+    project: relinkEditorStateFolderPaths({
       ...project,
       compositionSources: nextSources,
       compositionFolders: (project.compositionFolders ?? []).map((path) => remapFolderPath(path, folderPath, nextFolderPath)),
       compositionLibrary: nextLibrary,
       timelines: nextTimelines,
-    },
+    }, folderPath, nextFolderPath),
   };
 }
 
@@ -84,12 +76,10 @@ export function moveCompositionFolderInProject(project: ProjectManifest, composi
   if (nextFolderPath === folderPath) return null;
   const nextSources = remapSourcesForFolder(compositionSources, folderPath, nextFolderPath);
 
-  const idMap = new Map<string, string>();
   const nextLibrary = (project.compositionLibrary ?? compositionLibrary).map((item) => {
     if (item.filePath.startsWith(`${folderPath}/`)) {
       const nextFilePath = `${nextFolderPath}${item.filePath.slice(folderPath.length)}`;
-      idMap.set(item.id, nextFilePath);
-      return { ...item, id: nextFilePath, filePath: nextFilePath };
+      return { ...item, filePath: nextFilePath };
     }
     return item;
   });
@@ -100,25 +90,45 @@ export function moveCompositionFolderInProject(project: ProjectManifest, composi
       const nextFilePath = `${nextFolderPath}${timeline.filePath.slice(folderPath.length)}`;
       nextTimeline = { ...nextTimeline, id: nextFilePath, filePath: nextFilePath };
     }
-    return {
-      ...nextTimeline,
-      clips: nextTimeline.clips.map((clip) => ({
-        ...clip,
-        compositionId: idMap.get(clip.compositionId) ?? clip.compositionId,
-      })),
-    };
+    return nextTimeline;
   });
 
   return {
     compositionSources: nextSources,
-    project: {
+    project: relinkEditorStateFolderPaths({
       ...project,
       compositionSources: nextSources,
       compositionFolders: Array.from(new Set((project.compositionFolders ?? []).map((path) => remapFolderPath(path, folderPath, nextFolderPath)))),
       compositionLibrary: nextLibrary,
       timelines: nextTimelines,
+    }, folderPath, nextFolderPath),
+  };
+}
+
+function relinkEditorStateFolderPaths(project: ProjectManifest, folderPath: string, nextFolderPath: string): ProjectManifest {
+  const editorState = project.editorState;
+  if (!editorState) return project;
+  return {
+    ...project,
+    editorState: {
+      ...editorState,
+      selectedSceneId: editorState.selectedSceneId ? remapFolderPath(editorState.selectedSceneId, folderPath, nextFolderPath) : editorState.selectedSceneId,
+      selectedTimelineId: editorState.selectedTimelineId ? remapFolderPath(editorState.selectedTimelineId, folderPath, nextFolderPath) : editorState.selectedTimelineId,
+      selectedPartId: editorState.selectedPartId ? remapFolderPath(editorState.selectedPartId, folderPath, nextFolderPath) : editorState.selectedPartId,
+      editorSession: editorState.editorSession ? {
+        ...editorState.editorSession,
+        activeTabId: editorState.editorSession.activeTabId ? remapFolderPath(editorState.editorSession.activeTabId, folderPath, nextFolderPath) : editorState.editorSession.activeTabId,
+        tabs: editorState.editorSession.tabs.map((tab) => ({ ...tab, id: remapFolderPath(tab.id, folderPath, nextFolderPath), filePath: remapFolderPath(tab.filePath, folderPath, nextFolderPath) })),
+      } : editorState.editorSession,
+      editor: relinkFolderKeyedState(editorState.editor, folderPath, nextFolderPath),
+      code: relinkFolderKeyedState(editorState.code, folderPath, nextFolderPath),
     },
   };
+}
+
+function relinkFolderKeyedState<T>(state: Record<string, T> | undefined, folderPath: string, nextFolderPath: string): Record<string, T> | undefined {
+  if (!state) return state;
+  return Object.fromEntries(Object.entries(state).map(([path, value]) => [remapFolderPath(path, folderPath, nextFolderPath), value]));
 }
 
 export function deleteCompositionFolderFromProject(project: ProjectManifest, compositionSources: Record<string, string>, folderPath: string, compositionLibrary: Part[]): CompositionSourceMutationResult {
@@ -141,11 +151,9 @@ export function applyFileManagerTreeSnapshotToProject(project: ProjectManifest, 
   const timelines = project.timelines ?? [];
   let nextSources = compositionSources;
 
-  const compIdMap = new Map<string, string>();
   for (const composition of library) {
     const nextFilePath = snapshot.compositionFilePaths[composition.id];
     if (!nextFilePath || nextFilePath === composition.filePath) continue;
-    compIdMap.set(composition.id, nextFilePath);
     const source = nextSources[composition.filePath];
     const { [composition.filePath]: _removed, ...rest } = nextSources;
     nextSources = source === undefined ? rest : { ...rest, [nextFilePath]: source };
@@ -160,7 +168,7 @@ export function applyFileManagerTreeSnapshotToProject(project: ProjectManifest, 
 
   const nextCompositionById = new Map(library.map((composition) => {
     const nextPath = snapshot.compositionFilePaths[composition.id] ?? composition.filePath;
-    return [composition.id, { ...composition, id: nextPath, filePath: nextPath }];
+    return [composition.id, { ...composition, filePath: nextPath }];
   }));
 
   const nextTimelineById = new Map(timelines.map((timeline) => {
@@ -169,10 +177,6 @@ export function applyFileManagerTreeSnapshotToProject(project: ProjectManifest, 
       ...timeline,
       id: nextPath,
       filePath: nextPath,
-      clips: timeline.clips.map((clip) => ({
-        ...clip,
-        compositionId: compIdMap.get(clip.compositionId) ?? clip.compositionId,
-      })),
     }];
   }));
 
@@ -201,7 +205,7 @@ export function applyFileManagerTreeSnapshotToProject(project: ProjectManifest, 
         fileManagerState: snapshot.fileManagerState,
         selectedSceneId: timelineIdMap.get(project.editorState?.selectedSceneId ?? "") ?? project.editorState?.selectedSceneId,
         selectedTimelineId: timelineIdMap.get(project.editorState?.selectedTimelineId ?? "") ?? project.editorState?.selectedTimelineId,
-        selectedPartId: compIdMap.get(project.editorState?.selectedPartId ?? "") ?? project.editorState?.selectedPartId,
+        selectedPartId: project.editorState?.selectedPartId,
       },
       compositionLibrary: nextCompositionLibrary,
       timelines: nextTimelines,

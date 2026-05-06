@@ -11,6 +11,7 @@ import { isEditorTarget, useGlobalEditorShortcuts } from "./app/features/shortcu
 import { useSettingsShortcut } from "./app/features/shortcuts/useSettingsShortcut";
 import { useAppUpdates } from "./app/features/updates/useAppUpdates";
 import { getProjectFolderSiblingNames } from "./app/features/file-manager/compositionLibraryMutations";
+import { compositionMatchesIdentity, resolveCanonicalComposition } from "./app/features/file-manager/compositionIdentity";
 import { getDirectoryPath } from "./app/features/file-manager/fileManagerPaths";
 import { useFileManagerController } from "./app/features/file-manager/useFileManagerController";
 import { useFileManagerProjectActions } from "./app/features/file-manager/useFileManagerProjectActions";
@@ -47,7 +48,7 @@ import { useEditorDerivedState } from "./app/state/editorDerivedState";
 import { getFramePreviewTimelineLayers } from "./app/state/framePreviewRenderModel";
 import { EditorStoreProvider, useAppEditorState, useEditorStoreApi, type EditorTab } from "./app/state/editorStore";
 import { ProjectStoreProvider } from "./app/state/projectStore";
-import { type AdjustmentLayerSelection, type CompositionSelection, type ExportDialogTab, type ExportRenderQuality, type ExportTileResolutionMapping, type ExportWorkerResolutionMapping, type LeftPanelTab, type MediaExportFormat, type MediaExportRenderMode, type PlaybackClock, type ProjectExportFormat, type RightPanelTab, type SettingsSection, type StableSlowGridPreset, type StableSlowValidationSamples } from "./app/types";
+import { type AdjustmentLayerSelection, type CompositionSelection, type ExportDialogTab, type ExportRenderQuality, type ExportTileResolutionMapping, type ExportWorkerConfigurationMode, type ExportWorkerResolutionMapping, type LeftPanelTab, type MediaExportFormat, type MediaExportRenderMode, type PlaybackClock, type ProjectExportFormat, type RightPanelTab, type SettingsSection, type StableSlowGridPreset, type StableSlowValidationSamples } from "./app/types";
 import { applyAdjustmentLayersToVisualStyle, getTimeSensitiveDisplayDuration, getTimeSensitiveDisplayTime } from "./core/adjustments";
 import { isMarkerOnMotionLayer, type CameraPreviewTransform } from "./core/camera";
 import { liveDomPostProcessStorageKey } from "./core/effects/postprocess/liveDomCapability";
@@ -79,6 +80,25 @@ const defaultEditorState: EditorState = {
   preview: defaultPreviewViewportState,
   editor: {},
 };
+
+const appSettingKeys = {
+  reusePrerenderCacheForExport: "clipper:reuse-prerender-cache-export",
+  prerenderCache: "clipper:prerender-cache",
+  debugSettings: "clipper:debug-settings",
+  prerenderCacheBlackMissDebug: "clipper:prerender-cache-black-miss-debug",
+  liveDomPostProcess: liveDomPostProcessStorageKey,
+  liveDomPostProcessMaxFps: "clipper:live-dom-postprocess-max-fps",
+  videoExportTileHeight: "clipper:video-export-tile-height",
+  exportWorkerMapping: "clipper:export-worker-mapping",
+  exportWorkerConfigurationMode: "clipper:export-worker-configuration-mode",
+  exportTileMapping: "clipper:export-tile-mapping",
+  stableSlowGridPreset: "clipper:stable-slow-grid-preset",
+  stableSlowValidationSamples: "clipper:stable-slow-validation-samples",
+  prerenderBlockDurationMs: "clipper:prerender-block-duration-ms",
+  previewRenderHeight: "clipper:preview-render-height",
+} as const;
+
+type AppSettingKey = typeof appSettingKeys[keyof typeof appSettingKeys];
 
 const wheelLineDeltaPx = 16;
 const wheelPageDeltaPx = 600;
@@ -271,6 +291,9 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
   const [exportWorkerMapping, setExportWorkerMappingState] = useState(
     getInitialExportWorkerMapping,
   );
+  const [exportWorkerConfigurationMode, setExportWorkerConfigurationModeState] = useState<ExportWorkerConfigurationMode>(
+    getInitialExportWorkerConfigurationMode,
+  );
   const [exportTileMapping, setExportTileMappingState] = useState(
     getInitialExportTileMapping,
   );
@@ -288,6 +311,32 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
   );
   const [prerenderCacheResetToken, setPrerenderCacheResetToken] = useState(0);
   const { autoDownloadUpdates, updateStatus, setAutoDownloadUpdates, checkForUpdates, downloadUpdate, installUpdate } = useAppUpdates();
+
+  useEffect(() => {
+    let cancelled = false;
+    void readStoredAppSettings().then((settings) => {
+      if (cancelled) return;
+      setReusePrerenderCacheForExportState(readStoredBooleanSetting(settings, appSettingKeys.reusePrerenderCacheForExport, true));
+      setPrerenderCacheEnabledState(readStoredBooleanSetting(settings, appSettingKeys.prerenderCache, false));
+      const debugEnabled = readStoredBooleanSetting(settings, appSettingKeys.debugSettings, false);
+      setDebugSettingsEnabledState(debugEnabled);
+      setPrerenderCacheBlackMissDebugState(debugEnabled && readStoredBooleanSetting(settings, appSettingKeys.prerenderCacheBlackMissDebug, false));
+      setLiveDomPostProcessPreviewEnabledState(Boolean(window.clipper?.experimentalHtmlCanvasPostProcess) || readStoredBooleanSetting(settings, appSettingKeys.liveDomPostProcess, false));
+      setLiveDomPostProcessMaxFpsState(clampLiveDomPostProcessMaxFps(Number.parseInt(readStoredStringSetting(settings, appSettingKeys.liveDomPostProcessMaxFps) ?? "", 10)));
+      setVideoExportTileHeightState(clampVideoExportTileHeight(Number.parseInt(readStoredStringSetting(settings, appSettingKeys.videoExportTileHeight) ?? "", 10)));
+      setExportWorkerMappingState(readStoredJsonSetting(settings, appSettingKeys.exportWorkerMapping, clampExportWorkerMapping, defaultExportWorkerMapping));
+      setExportWorkerConfigurationModeState(readStoredStringSetting(settings, appSettingKeys.exportWorkerConfigurationMode) === "unified" ? "unified" : "separate");
+      setExportTileMappingState(readStoredJsonSetting(settings, appSettingKeys.exportTileMapping, clampExportTileMapping, defaultExportTileMapping));
+      setStableSlowGridPresetState(clampStableSlowGridPreset(readStoredStringSetting(settings, appSettingKeys.stableSlowGridPreset)));
+      setStableSlowValidationSamplesState(clampStableSlowValidationSamples(Number.parseInt(readStoredStringSetting(settings, appSettingKeys.stableSlowValidationSamples) ?? "", 10)));
+      setPrerenderBlockDurationMsState(clampPrerenderBlockDurationMs(Number.parseInt(readStoredStringSetting(settings, appSettingKeys.prerenderBlockDurationMs) ?? "", 10)));
+      setPreviewRenderHeightState(clampPreviewRenderHeight(Number.parseInt(readStoredStringSetting(settings, appSettingKeys.previewRenderHeight) ?? "", 10)));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const playbackBorderScrubberRef = useRef<HTMLInputElement | null>(null);
   const pendingScrubTimeRef = useRef<number | null>(null);
   const scrubFrameRef = useRef(0);
@@ -679,67 +728,72 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
   function setVideoExportTileHeight(value: number) {
     const nextValue = clampVideoExportTileHeight(value);
     setVideoExportTileHeightState(nextValue);
-    window.localStorage.setItem("clipper:video-export-tile-height", String(nextValue));
+    writeStoredAppSetting(appSettingKeys.videoExportTileHeight, String(nextValue));
   }
   function setExportWorkerMapping(mapping: ExportWorkerResolutionMapping) {
     const nextMapping = clampExportWorkerMapping(mapping);
     setExportWorkerMappingState(nextMapping);
-    window.localStorage.setItem("clipper:export-worker-mapping", JSON.stringify(nextMapping));
+    writeStoredAppSetting(appSettingKeys.exportWorkerMapping, JSON.stringify(nextMapping));
+  }
+
+  function setExportWorkerConfigurationMode(mode: ExportWorkerConfigurationMode) {
+    setExportWorkerConfigurationModeState(mode);
+    writeStoredAppSetting(appSettingKeys.exportWorkerConfigurationMode, mode);
   }
 
   function setExportTileMapping(mapping: ExportTileResolutionMapping) {
     const nextMapping = clampExportTileMapping(mapping);
     setExportTileMappingState(nextMapping);
-    window.localStorage.setItem("clipper:export-tile-mapping", JSON.stringify(nextMapping));
+    writeStoredAppSetting(appSettingKeys.exportTileMapping, JSON.stringify(nextMapping));
   }
   function setStableSlowGridPreset(preset: StableSlowGridPreset) {
     const nextPreset = clampStableSlowGridPreset(preset);
     setStableSlowGridPresetState(nextPreset);
-    window.localStorage.setItem("clipper:stable-slow-grid-preset", nextPreset);
+    writeStoredAppSetting(appSettingKeys.stableSlowGridPreset, nextPreset);
   }
   function setStableSlowValidationSamples(samples: StableSlowValidationSamples) {
     const nextSamples = clampStableSlowValidationSamples(samples);
     setStableSlowValidationSamplesState(nextSamples);
-    window.localStorage.setItem("clipper:stable-slow-validation-samples", String(nextSamples));
+    writeStoredAppSetting(appSettingKeys.stableSlowValidationSamples, String(nextSamples));
   }
   function setReusePrerenderCacheForExport(reuse: boolean) {
     setReusePrerenderCacheForExportState(reuse);
-    window.localStorage.setItem("clipper:reuse-prerender-cache-export", reuse ? "1" : "0");
+    writeStoredAppSetting(appSettingKeys.reusePrerenderCacheForExport, reuse ? "1" : "0");
   }
   function setPrerenderCacheEnabled(enabled: boolean) {
     setPrerenderCacheEnabledState(enabled);
-    window.localStorage.setItem("clipper:prerender-cache", enabled ? "1" : "0");
+    writeStoredAppSetting(appSettingKeys.prerenderCache, enabled ? "1" : "0");
   }
   function setDebugSettingsEnabled(enabled: boolean) {
     setDebugSettingsEnabledState(enabled);
-    window.localStorage.setItem("clipper:debug-settings", enabled ? "1" : "0");
+    writeStoredAppSetting(appSettingKeys.debugSettings, enabled ? "1" : "0");
     if (!enabled) setPrerenderCacheBlackMissDebug(false);
   }
   function setPrerenderCacheBlackMissDebug(enabled: boolean) {
     setPrerenderCacheBlackMissDebugState(enabled);
-    window.localStorage.setItem("clipper:prerender-cache-black-miss-debug", enabled ? "1" : "0");
+    writeStoredAppSetting(appSettingKeys.prerenderCacheBlackMissDebug, enabled ? "1" : "0");
   }
   function setLiveDomPostProcessPreviewEnabled(enabled: boolean) {
     setLiveDomPostProcessPreviewEnabledState(enabled);
-    window.localStorage.setItem(liveDomPostProcessStorageKey, enabled ? "1" : "0");
+    writeStoredAppSetting(appSettingKeys.liveDomPostProcess, enabled ? "1" : "0");
     void persistLiveDomPostProcessPreviewEnabled(enabled);
   }
   function setLiveDomPostProcessMaxFps(value: number) {
     const nextValue = clampLiveDomPostProcessMaxFps(value);
     setLiveDomPostProcessMaxFpsState(nextValue);
-    window.localStorage.setItem("clipper:live-dom-postprocess-max-fps", String(nextValue));
+    writeStoredAppSetting(appSettingKeys.liveDomPostProcessMaxFps, String(nextValue));
   }
   function setPrerenderBlockDurationMs(value: number) {
     const nextValue = clampPrerenderBlockDurationMs(value);
     setPrerenderBlockDurationMsState(nextValue);
-    window.localStorage.setItem("clipper:prerender-block-duration-ms", String(nextValue));
+    writeStoredAppSetting(appSettingKeys.prerenderBlockDurationMs, String(nextValue));
     setPrerenderCacheResetToken((token) => token + 1);
     void clipperHost.clearPrerenderCache(activeProjectManifestPath);
   }
   function setPreviewRenderHeight(value: number) {
     const nextValue = clampPreviewRenderHeight(value);
     setPreviewRenderHeightState(nextValue);
-    window.localStorage.setItem("clipper:preview-render-height", String(nextValue));
+    writeStoredAppSetting(appSettingKeys.previewRenderHeight, String(nextValue));
   }
   async function clearAllPrerenderCaches() {
     try {
@@ -753,7 +807,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
   }
   async function togglePrerenderCompositionFromLibrary(compositionId: string) {
     const isTimelineClipTarget = scene.compositions.some((composition) => composition.id === compositionId);
-    const sourceComposition = scene.compositions.find((composition) => composition.id === compositionId || composition.compositionId === compositionId || composition.filePath === compositionId) ?? compositionLibrary.find((composition) => composition.id === compositionId || composition.filePath === compositionId);
+    const sourceComposition = resolveCanonicalComposition(compositionLibrary, scene.compositions, compositionId);
     const sourceId = sourceComposition?.compositionId ?? sourceComposition?.id ?? compositionId;
     const matchingTimelineClips = scene.compositions.filter((composition) => compositionMatchesManualPrerenderId(composition, compositionId));
     const currentlyMarked = matchingTimelineClips.length > 0 ? matchingTimelineClips.every((composition) => composition.prerender) : manualPrerenderCompositionIds.has(sourceId);
@@ -1584,6 +1638,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     updateProject,
     watchedProjectDirectory,
     executeFileManagerCommand,
+    scheduleImplicitFileOperationSave,
   });
 
   const fileManagerProps = useFileManagerController({
@@ -1638,10 +1693,10 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
   const selectedComposeObjectIds = useMemo(() => selectionPayload?.objects.map((object) => object.id) ?? (selectedObjectId ? [selectedObjectId] : []), [selectedObjectId, selectionPayload]);
   const projectDirectory = activeProjectManifestPath.endsWith(".json") ? getDirectoryPath(activeProjectManifestPath) : undefined;
   const activeEditorTab = editorTabs.find((tab) => tab.id === activeEditorTabId) ?? null;
-  const activeEditorComposition = activeEditorTab?.isComposition ? compositionLibrary.find((item) => item.id === activeEditorTab.id || item.filePath === activeEditorTab.filePath || item.filePath.endsWith(`/${activeEditorTab.filePath}`)) ?? scene.compositions.find((item) => item.id === activeEditorTab.id || item.filePath === activeEditorTab.filePath || item.filePath.endsWith(`/${activeEditorTab.filePath}`)) ?? null : null;
+  const activeEditorComposition = activeEditorTab?.isComposition ? resolveCanonicalComposition(compositionLibrary, scene.compositions, activeEditorTab.id) ?? resolveCanonicalComposition(compositionLibrary, scene.compositions, activeEditorTab.filePath) : null;
   const activeEditorDocument: EditorPaneDocument | null = activeEditorTab ? {
     id: activeEditorTab.id,
-    filePath: activeEditorTab.filePath,
+    filePath: activeEditorTab.isComposition && activeEditorComposition ? activeEditorComposition.filePath : activeEditorTab.filePath,
     source: activeEditorTab.isComposition && activeEditorComposition ? compositionSources[activeEditorComposition.filePath] ?? activeEditorComposition.source : activeEditorTab.source,
     language: activeEditorTab.language,
     unsupportedReason: activeEditorTab.unsupportedReason,
@@ -1676,8 +1731,8 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
 
   const isDirectoryMode = activeProjectManifestPath.endsWith(".json");
 
-  async function handleReloadProject() {
-    await reloadProject();
+  async function handleFileManagerRefreshProject() {
+    await reloadProjectFromWatcher();
   }
 
   function handleSelectComposition(_compositionId: string) {
@@ -1692,7 +1747,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
   }
 
   function openCompositionInEditor(compositionId: string, options?: { temporary?: boolean }) {
-    const composition = compositionLibrary.find((item) => item.id === compositionId || item.filePath === compositionId) ?? scene.compositions.find((item) => item.id === compositionId || item.filePath === compositionId);
+    const composition = resolveCanonicalComposition(compositionLibrary, scene.compositions, compositionId);
     if (!composition) return;
     const tab = { id: composition.id, filePath: composition.filePath, source: compositionSources[composition.filePath] ?? composition.source, language: "typescript", isComposition: true };
     if (options?.temporary) openTemporaryEditorTab(tab);
@@ -1769,7 +1824,8 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
             compositionLibrary,
             selectedTimelineId: selectedSceneId,
             fileSystemRevision,
-            onReloadProject: handleReloadProject,
+            onReloadProject: handleFileManagerRefreshProject,
+            onCompositionPathMoves: fileManagerActions.updateCompositionFilePaths,
             onOpenFile: openProjectFileInEditor,
             onSelectComposition: handleSelectComposition,
             onSelectTimeline: handleSelectTimeline,
@@ -1986,6 +2042,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
       exportRenderQuality={exportRenderQuality}
       exportResolution={exportResolution}
       exportTileMapping={exportTileMapping}
+      exportWorkerConfigurationMode={exportWorkerConfigurationMode}
       exportWorkerMapping={exportWorkerMapping}
       isExporting={isExporting}
       liveDomPostProcessPreviewEnabled={liveDomPostProcessPreviewEnabled}
@@ -2029,6 +2086,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
       onExportRenderQualityChange={setExportRenderQuality}
       onExportResolutionChange={setExportResolution}
       onExportTileMappingChange={setExportTileMapping}
+      onExportWorkerConfigurationModeChange={setExportWorkerConfigurationMode}
       onExportWorkerMappingChange={setExportWorkerMapping}
       onMediaExport={() => void exportRenderedMedia()}
       onMediaExportFormatChange={setMediaExportFormat}
@@ -2062,34 +2120,34 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
 
 function isPrerenderCacheReuseEnabledByDefault() {
   if (typeof window === "undefined") return true;
-  return window.localStorage.getItem("clipper:reuse-prerender-cache-export") !== "0";
+  return window.localStorage.getItem(appSettingKeys.reusePrerenderCacheForExport) !== "0";
 }
 
 function isPrerenderCacheEnabledByDefault() {
-  if (typeof window === "undefined") return true;
-  return window.localStorage.getItem("clipper:prerender-cache") !== "0";
+  if (typeof window === "undefined") return false;
+  return window.localStorage.getItem(appSettingKeys.prerenderCache) === "1";
 }
 
 function isDebugSettingsEnabledByDefault() {
   if (typeof window === "undefined") return false;
-  return window.localStorage.getItem("clipper:debug-settings") === "1";
+  return window.localStorage.getItem(appSettingKeys.debugSettings) === "1";
 }
 
 function isPrerenderCacheBlackMissDebugEnabledByDefault() {
   if (typeof window === "undefined") return false;
-  if (window.localStorage.getItem("clipper:debug-settings") !== "1") return false;
-  return window.localStorage.getItem("clipper:prerender-cache-black-miss-debug") === "1";
+  if (window.localStorage.getItem(appSettingKeys.debugSettings) !== "1") return false;
+  return window.localStorage.getItem(appSettingKeys.prerenderCacheBlackMissDebug) === "1";
 }
 
 function isLiveDomPostProcessPreviewEnabledByDefault() {
   if (typeof window === "undefined") return false;
   if (window.clipper?.experimentalHtmlCanvasPostProcess) return true;
-  return window.localStorage.getItem(liveDomPostProcessStorageKey) === "1";
+  return window.localStorage.getItem(appSettingKeys.liveDomPostProcess) === "1";
 }
 
 function getInitialLiveDomPostProcessMaxFps() {
   if (typeof window === "undefined") return defaultLiveDomPostProcessMaxFps;
-  const storedValue = Number.parseInt(window.localStorage.getItem("clipper:live-dom-postprocess-max-fps") ?? "", 10);
+  const storedValue = Number.parseInt(window.localStorage.getItem(appSettingKeys.liveDomPostProcessMaxFps) ?? "", 10);
   return clampLiveDomPostProcessMaxFps(storedValue);
 }
 
@@ -2109,10 +2167,58 @@ async function persistLiveDomPostProcessPreviewEnabled(enabled: boolean) {
   await clipperHost.writeTextFile(appStatePath, `${JSON.stringify({ ...state, experimentalHtmlCanvasPostProcess: enabled }, null, 2)}\n`);
 }
 
+async function readStoredAppSettings(): Promise<Record<string, unknown>> {
+  const settings: Record<string, unknown> = {};
+  if (typeof window === "undefined") return settings;
+
+  for (const key of Object.values(appSettingKeys)) {
+    const value = window.localStorage.getItem(key);
+    if (value !== null) settings[key] = value;
+  }
+
+  try {
+    const appState = await window.clipper?.readAppState?.();
+    const persistedSettings = appState?.settings;
+    if (persistedSettings && typeof persistedSettings === "object") return { ...settings, ...(persistedSettings as Record<string, unknown>) };
+  } catch {
+    // localStorage remains the browser/dev fallback.
+  }
+
+  return settings;
+}
+
+function writeStoredAppSetting(key: AppSettingKey, value: string) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(key, value);
+  void window.clipper?.writeAppState?.({ settings: { [key]: value } }).catch(() => {});
+}
+
+function readStoredStringSetting(settings: Record<string, unknown>, key: AppSettingKey) {
+  const value = settings[key];
+  return typeof value === "string" ? value : null;
+}
+
+function readStoredBooleanSetting(settings: Record<string, unknown>, key: AppSettingKey, fallback: boolean) {
+  const value = readStoredStringSetting(settings, key);
+  if (value === "1") return true;
+  if (value === "0") return false;
+  return fallback;
+}
+
+function readStoredJsonSetting<T>(settings: Record<string, unknown>, key: AppSettingKey, clampValue: (value: unknown) => T, fallback: T) {
+  const value = readStoredStringSetting(settings, key);
+  if (!value) return fallback;
+  try {
+    return clampValue(JSON.parse(value));
+  } catch {
+    return fallback;
+  }
+}
+
 function getInitialVideoExportTileHeight() {
   if (typeof window === "undefined") return defaultVideoExportTileHeight;
   const storedValue = Number.parseInt(
-    window.localStorage.getItem("clipper:video-export-tile-height") ?? "",
+    window.localStorage.getItem(appSettingKeys.videoExportTileHeight) ?? "",
     10,
   );
   return clampVideoExportTileHeight(storedValue);
@@ -2121,16 +2227,21 @@ function getInitialVideoExportTileHeight() {
 function getInitialExportWorkerMapping(): ExportWorkerResolutionMapping {
   if (typeof window === "undefined") return defaultExportWorkerMapping;
   try {
-    return clampExportWorkerMapping(JSON.parse(window.localStorage.getItem("clipper:export-worker-mapping") ?? "null"));
+    return clampExportWorkerMapping(JSON.parse(window.localStorage.getItem(appSettingKeys.exportWorkerMapping) ?? "null"));
   } catch {
     return defaultExportWorkerMapping;
   }
 }
 
+function getInitialExportWorkerConfigurationMode(): ExportWorkerConfigurationMode {
+  if (typeof window === "undefined") return "separate";
+  return window.localStorage.getItem(appSettingKeys.exportWorkerConfigurationMode) === "unified" ? "unified" : "separate";
+}
+
 function getInitialExportTileMapping(): ExportTileResolutionMapping {
   if (typeof window === "undefined") return defaultExportTileMapping;
   try {
-    return clampExportTileMapping(JSON.parse(window.localStorage.getItem("clipper:export-tile-mapping") ?? "null"));
+    return clampExportTileMapping(JSON.parse(window.localStorage.getItem(appSettingKeys.exportTileMapping) ?? "null"));
   } catch {
     return defaultExportTileMapping;
   }
@@ -2138,18 +2249,18 @@ function getInitialExportTileMapping(): ExportTileResolutionMapping {
 
 function getInitialStableSlowGridPreset(): StableSlowGridPreset {
   if (typeof window === "undefined") return defaultStableSlowGridPreset;
-  return clampStableSlowGridPreset(window.localStorage.getItem("clipper:stable-slow-grid-preset"));
+  return clampStableSlowGridPreset(window.localStorage.getItem(appSettingKeys.stableSlowGridPreset));
 }
 
 function getInitialStableSlowValidationSamples(): StableSlowValidationSamples {
   if (typeof window === "undefined") return defaultStableSlowValidationSamples;
-  return clampStableSlowValidationSamples(Number.parseInt(window.localStorage.getItem("clipper:stable-slow-validation-samples") ?? "", 10));
+  return clampStableSlowValidationSamples(Number.parseInt(window.localStorage.getItem(appSettingKeys.stableSlowValidationSamples) ?? "", 10));
 }
 
 function getInitialPrerenderBlockDurationMs() {
   if (typeof window === "undefined") return defaultPrerenderBlockDurationMs;
   const storedValue = Number.parseInt(
-    window.localStorage.getItem("clipper:prerender-block-duration-ms") ?? "",
+    window.localStorage.getItem(appSettingKeys.prerenderBlockDurationMs) ?? "",
     10,
   );
   return clampPrerenderBlockDurationMs(storedValue);
@@ -2158,7 +2269,7 @@ function getInitialPrerenderBlockDurationMs() {
 function getInitialPreviewRenderHeight() {
   if (typeof window === "undefined") return defaultPreviewRenderHeight;
   const storedValue = Number.parseInt(
-    window.localStorage.getItem("clipper:preview-render-height") ?? "",
+    window.localStorage.getItem(appSettingKeys.previewRenderHeight) ?? "",
     10,
   );
   return clampPreviewRenderHeight(storedValue);
@@ -2270,7 +2381,7 @@ function getManualPrerenderRangesForMarkedCompositions(compositions: Composition
 }
 
 function compositionMatchesManualPrerenderId(composition: CompositionClip, compositionId: string) {
-  return composition.id === compositionId || composition.compositionId === compositionId || composition.filePath === compositionId || composition.filePath.endsWith(`/${compositionId}`);
+  return compositionMatchesIdentity(composition, compositionId);
 }
 
 function filterPrerenderCoverageToRanges(coverage: { blocks: Array<{ start: number; duration: number; state: "enqueued" | "queued" | "cached" }> }, ranges: PrerenderManualCompositionRange[]) {

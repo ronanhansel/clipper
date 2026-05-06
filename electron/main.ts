@@ -85,6 +85,10 @@ async function writeAppState(updates: Record<string, unknown>) {
   const merged = { ...state };
   for (const [key, value] of Object.entries(updates)) {
     if (value === undefined || value === null) delete merged[key];
+    else if (key === "settings" && value && typeof value === "object" && !Array.isArray(value)) {
+      const previousSettings = merged.settings && typeof merged.settings === "object" && !Array.isArray(merged.settings) ? merged.settings as Record<string, unknown> : {};
+      merged.settings = { ...previousSettings, ...(value as Record<string, unknown>) };
+    }
     else merged[key] = value;
   }
   await fs.mkdir(path.dirname(resolveClipperFile(appStatePath)), {

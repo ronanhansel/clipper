@@ -16,6 +16,7 @@ export type BuildFileManagerWorkspacePropsInput = Omit<FileManagerProps,
   | "onDeleteAsset"
   | "onDeleteComposition"
   | "onDeleteCompositionFolder"
+  | "onDeleteProjectFile"
   | "onDeleteTimeline"
   | "onDropFiles"
   | "onDuplicateAsset"
@@ -52,6 +53,7 @@ export type BuildFileManagerWorkspacePropsInput = Omit<FileManagerProps,
     deleteAsset: FileManagerProps["onDeleteAsset"];
     deleteComposition: FileManagerProps["onDeleteComposition"];
     deleteCompositionFolder: FileManagerProps["onDeleteCompositionFolder"];
+    deleteProjectFile: FileManagerProps["onDeleteProjectFile"];
     deleteTimeline: FileManagerProps["onDeleteTimeline"];
     dropFiles: FileManagerProps["onDropFiles"];
     duplicateAsset: FileManagerProps["onDuplicateAsset"];
@@ -92,6 +94,7 @@ export function buildFileManagerWorkspaceProps({ actions, ...state }: BuildFileM
     onDeleteAsset: actions.deleteAsset,
     onDeleteComposition: actions.deleteComposition,
     onDeleteCompositionFolder: actions.deleteCompositionFolder,
+    onDeleteProjectFile: actions.deleteProjectFile,
     onDeleteTimeline: actions.deleteTimeline,
     onDropFiles: actions.dropFiles,
     onDuplicateAsset: actions.duplicateAsset,

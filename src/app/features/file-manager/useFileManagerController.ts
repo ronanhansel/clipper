@@ -26,6 +26,7 @@ type UseFileManagerControllerInput = Pick<FileManagerProps,
     deleteAsset: FileManagerProps["onDeleteAsset"];
     deleteComposition: FileManagerProps["onDeleteComposition"];
     deleteCompositionFolder: FileManagerProps["onDeleteCompositionFolder"];
+    deleteProjectFile: FileManagerProps["onDeleteProjectFile"];
     deleteTimeline: FileManagerProps["onDeleteTimeline"];
     dropFiles: FileManagerProps["onDropFiles"];
     duplicateAsset: FileManagerProps["onDuplicateAsset"];
@@ -68,6 +69,7 @@ export function useFileManagerController({ actions, implicitFileOperation, ...st
       deleteAsset: implicitFileOperation(actions.deleteAsset),
       deleteComposition: implicitFileOperation(actions.deleteComposition),
       deleteCompositionFolder: implicitFileOperation(actions.deleteCompositionFolder),
+      deleteProjectFile: actions.deleteProjectFile,
       deleteTimeline: implicitFileOperation(actions.deleteTimeline),
       dropFiles: implicitFileOperation(actions.dropFiles),
       duplicateAsset: implicitFileOperation(actions.duplicateAsset),

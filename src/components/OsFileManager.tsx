@@ -7,7 +7,7 @@ import { clipperHost } from "../app/clipperHost";
 import { getDirectoryPath, nextNumberedName } from "../app/features/file-manager/fileManagerPaths";
 import { getDisplayName, getDragPreviewDisplayName, getFileType, nextNumberedSemanticName, reconstructFileName } from "../core/fileNames";
 import { createDefaultTimelineLayerState } from "../core/project";
-import type { CompositionClip } from "../core/types";
+import type { CompositionClip, TimelineDocument } from "../core/types";
 import { getTransparentNativeDragImage } from "../lib/nativeDragImage";
 import { clipperDragGhostClassName, clipperDragGhostOffset, compositionDragPreviewEvent, compositionPointerDragEvent, dispatchClipperPointerDrag, type CompositionPointerDragDetail, type PointerDragPreviewDetail } from "../lib/pointerDrag";
 import { AppContextMenu } from "./AppContextMenu";
@@ -20,7 +20,7 @@ import { MoveCommand } from "../app/features/file-manager/operations/MoveCommand
 import type { Command } from "../app/features/file-manager/operations/Command";
 import { rebasePath, type PendingPathMove } from "../app/features/file-manager/optimisticPathRebase";
 
-type OsFileNode = {
+export type OsFileNode = {
   id: string;
   name: string;
   path: string;
@@ -41,6 +41,25 @@ export type OsFileManagerProps = {
   onSelectTimeline: (timelineId: string) => void;
   onOpenFile: (filePath: string, options?: { isComposition?: boolean; temporary?: boolean }) => void;
   executeFileManagerCommand: (command: Command) => Promise<void>;
+  onCompositionPathMoves?: (moves: Array<{ oldPath: string; newPath: string }>, options?: { save?: boolean }) => void;
+};
+
+export type OsFileOperationStatus = "queued" | "running" | "succeeded";
+
+export type OsFileOperation = {
+  id: number;
+  kind: "create" | "rename" | "move" | "delete";
+  status: OsFileOperationStatus;
+  command: Command;
+  pathMoves?: PendingPathMove[];
+  projectPathMoves?: PendingPathMove[];
+  reloadProjectAfterCommit?: boolean;
+  apply: (nodes: OsFileNode[]) => OsFileNode[];
+  isObserved: (nodes: OsFileNode[]) => boolean;
+};
+
+type PendingOsFileMove = PendingPathMove & {
+  state: "in-flight" | "settling";
 };
 
 const ROW_HEIGHT = 30;
@@ -57,6 +76,8 @@ export function OsFileManager({
   onSelectTimeline,
   onOpenFile,
   executeFileManagerCommand,
+  onCompositionPathMoves,
+  onReloadProject,
 }: OsFileManagerProps) {
   const [treeData, setTreeData] = useState<OsFileNode[]>([]);
   const [loading, setLoading] = useState(true);
@@ -73,24 +94,18 @@ export function OsFileManager({
   const externalDragFrameRef = useRef(0);
   const pendingExternalDragMoveRef = useRef<{ mouse: { x: number; y: number }; shiftKey: boolean } | null>(null);
   const draggingNodeRef = useRef<OsFileNode | null>(null);
-  const pendingPathMovesRef = useRef<PendingPathMove[]>([]);
+  const baseTreeDataRef = useRef<OsFileNode[]>([]);
+  const operationQueueRef = useRef<OsFileOperation[]>([]);
+  const operationProcessingRef = useRef(false);
+  const nextOperationIdRef = useRef(1);
+  const committedProjectReloadPendingRef = useRef(false);
+  const nextOsFileUiIdRef = useRef(1);
+  const osFilePathIdsRef = useRef(new Map<string, string>());
   const [compositionLanePreviewActive, setCompositionLanePreviewActive] = useState(false);
   const [rootDropVisible, setRootDropVisible] = useState(false);
 
-  const getCompositionDragDetail = useCallback((node: OsFileNode, phase: CompositionPointerDragDetail["phase"], currentMouse: { x: number; y: number }, shiftKey: boolean): CompositionPointerDragDetail => {
-    const compositionId = projectRelativeFilePath(node.path, projectDirectory);
-    const metadata = resolveOsCompositionDragMetadata(compositionLibrary, compositionId);
-    return {
-      phase,
-      clientX: currentMouse.x,
-      clientY: currentMouse.y,
-      shiftKey,
-      compositionId,
-      duration: metadata.duration,
-      isEmpty: metadata.isEmpty,
-      label: getDragPreviewDisplayName(metadata.filePath ?? node.name),
-      sourceMissing: metadata.sourceMissing,
-    };
+  const getCompositionDragDetail = useCallback((node: OsFileNode, phase: CompositionPointerDragDetail["phase"], currentMouse: { x: number; y: number }, shiftKey: boolean): CompositionPointerDragDetail | null => {
+    return createOsCompositionDragDetail(compositionLibrary, node.path, node.name, projectDirectory, phase, currentMouse, shiftKey);
   }, [compositionLibrary, projectDirectory]);
 
   const applyExternalCompositionDragMove = useCallback((currentMouse: { x: number; y: number }, shiftKey: boolean) => {
@@ -99,6 +114,7 @@ export function OsFileManager({
     external.lastMouse = currentMouse;
     external.shiftKey = shiftKey;
     const detail = getCompositionDragDetail(external.node, "move", currentMouse, shiftKey);
+    if (!detail) return;
     dispatchClipperPointerDrag(compositionPointerDragEvent, detail);
   }, [getCompositionDragDetail]);
 
@@ -128,6 +144,7 @@ export function OsFileManager({
     pendingExternalDragMoveRef.current = null;
     if (phase) {
       const detail = getCompositionDragDetail(external.node, phase, external.lastMouse, external.shiftKey);
+      if (!detail) return;
       dispatchClipperPointerDrag(compositionPointerDragEvent, detail);
       if (phase === "cancel" || phase === "drop") treeRef.current?.endDrag();
     }
@@ -222,16 +239,69 @@ export function OsFileManager({
     };
   }, [cleanupExternalCompositionDrag, ensureExternalCompositionDrag, scheduleExternalCompositionDragMove]);
 
-  const execute = useCallback(async (command: Command) => {
+  const applyQueuedOperations = useCallback((baseNodes: OsFileNode[]) => {
+    return renderOsFileOperationTree(baseNodes, operationQueueRef.current);
+  }, []);
+
+  const getStableOsFileUiId = useCallback((path: string) => {
+    const existing = osFilePathIdsRef.current.get(path);
+    if (existing) return existing;
+    const id = `os-file:${nextOsFileUiIdRef.current++}`;
+    osFilePathIdsRef.current.set(path, id);
+    return id;
+  }, []);
+
+  const preserveOsFileUiIdForMove = useCallback((oldPath: string, newPath: string) => {
+    preserveStableOsFileMoveIds(osFilePathIdsRef.current, [...treeData, ...baseTreeDataRef.current], oldPath, newPath);
+  }, [treeData]);
+
+  const loadStableDirectoryTree = useCallback((path: string) => loadDirectoryTree(path, projectDirectory, getStableOsFileUiId), [getStableOsFileUiId, projectDirectory]);
+
+  const rebaseTreeFromQueue = useCallback(() => {
+    setTreeData(applyQueuedOperations(baseTreeDataRef.current));
+  }, [applyQueuedOperations]);
+
+  const processOperationQueue = useCallback(async () => {
+    if (operationProcessingRef.current) return;
+    operationProcessingRef.current = true;
     try {
-      await executeFileManagerCommand(command);
-    } catch (error) {
-      console.error(error);
-      pendingPathMovesRef.current = [];
-      setRefreshKey((k) => k + 1);
-      throw error;
+      while (true) {
+        const operation = operationQueueRef.current.find((item) => item.status === "queued");
+        if (!operation) break;
+        operation.status = "running";
+        try {
+          await executeFileManagerCommand(operation.command);
+          operation.status = "succeeded";
+          if (operation.reloadProjectAfterCommit) committedProjectReloadPendingRef.current = true;
+          operationQueueRef.current = pruneObservedOsFileOperations(baseTreeDataRef.current, operationQueueRef.current);
+          rebaseTreeFromQueue();
+        } catch (error) {
+          console.error(error);
+            const rollback = rollbackFailedOsFileOperations(operationQueueRef.current, operation.id);
+            operationQueueRef.current = rollback.operations;
+            const rolledBackOperations = rollback.rolledBackOperations.length ? rollback.rolledBackOperations : [operation];
+            const rollbackMoves = reverseProjectPathMoves(rolledBackOperations.flatMap((item) => item.projectPathMoves ?? []));
+          if (rollbackMoves.length) onCompositionPathMoves?.(rollbackMoves, { save: false });
+          rebaseTreeFromQueue();
+          toast.error(error instanceof Error ? error.message : defaultOsFileOperationError(operation.kind));
+          setRefreshKey((k) => k + 1);
+        }
+      }
+      if (committedProjectReloadPendingRef.current) {
+        committedProjectReloadPendingRef.current = false;
+        await onReloadProject();
+      }
+    } finally {
+      operationProcessingRef.current = false;
     }
-  }, [executeFileManagerCommand]);
+  }, [executeFileManagerCommand, onCompositionPathMoves, onReloadProject, rebaseTreeFromQueue]);
+
+  const enqueueOperation = useCallback((operation: Omit<OsFileOperation, "id" | "status">) => {
+    const queuedOperation: OsFileOperation = { ...operation, id: nextOperationIdRef.current++, status: "queued" };
+    operationQueueRef.current = [...operationQueueRef.current, queuedOperation];
+    rebaseTreeFromQueue();
+    void processOperationQueue();
+  }, [processOperationQueue, rebaseTreeFromQueue]);
 
   useEffect(() => {
     let cancelled = false;
@@ -256,10 +326,12 @@ export function OsFileManager({
       const showInitialLoading = loadedDirectoryRef.current !== effectiveDirectory;
       if (showInitialLoading) setLoading(true);
       try {
-        const children = await loadDirectoryTree(effectiveDirectory, projectDirectory);
+        const children = await loadStableDirectoryTree(effectiveDirectory);
         if (!cancelled) {
+          baseTreeDataRef.current = children;
+          operationQueueRef.current = pruneObservedOsFileOperations(children, operationQueueRef.current);
           loadedDirectoryRef.current = effectiveDirectory;
-          setTreeData(children);
+          setTreeData(applyQueuedOperations(children));
         }
       } catch (error) {
         if (!cancelled) toast.error(error instanceof Error ? error.message : "Unable to load project directory.");
@@ -271,10 +343,10 @@ export function OsFileManager({
     return () => {
       cancelled = true;
     };
-  }, [effectiveDirectory, refreshKey, fileSystemRevision, projectDirectory]);
+  }, [effectiveDirectory, refreshKey, fileSystemRevision, projectDirectory, applyQueuedOperations, loadStableDirectoryTree]);
 
   useEffect(() => {
-    pendingPathMovesRef.current = [];
+    if (loadedDirectoryRef.current !== effectiveDirectory) operationQueueRef.current = [];
   }, [fileSystemRevision, effectiveDirectory]);
 
   useEffect(() => {
@@ -282,7 +354,9 @@ export function OsFileManager({
     if (!api) return;
     let targetId: string | null = null;
     if (selectedCompositionId) {
-      targetId = `${effectiveDirectory}/compositions/${selectedCompositionId}.ts`;
+      const composition = compositionLibrary.find((item) => item.id === selectedCompositionId);
+      const compositionPath = composition ? `${effectiveDirectory}/${composition.filePath}` : null;
+      targetId = compositionPath ? findNodeByPath(treeData, compositionPath)?.id ?? null : null;
     } else if (selectedTimelineId) {
       // Find the timeline node by its internal ID
       const timelineNode = findTimelineNodeById(treeData, selectedTimelineId);
@@ -294,7 +368,7 @@ export function OsFileManager({
       api.select(targetId, { align: "auto" });
       setSelectedNodeIds([targetId]);
     }
-  }, [selectedCompositionId, selectedTimelineId, effectiveDirectory, treeData]);
+  }, [compositionLibrary, selectedCompositionId, selectedTimelineId, effectiveDirectory, treeData]);
 
   const handleFileActivate = useCallback(
     (nodeData: OsFileNode, event: ReactMouseEvent<HTMLDivElement>) => {
@@ -302,7 +376,8 @@ export function OsFileManager({
       const displayName = getDisplayName(nodeData.name);
       const temporary = event.detail < 2;
       if (fileType === "composition") {
-        if (!temporary) onSelectComposition(projectRelativeFilePath(nodeData.path, projectDirectory));
+        const compositionId = resolveOsCompositionId(compositionLibrary, nodeData.path, projectDirectory);
+        if (!temporary && compositionId) onSelectComposition(compositionId);
         onOpenFile(nodeData.path, { isComposition: true, temporary });
       } else if (fileType === "timeline") {
         onOpenFile(nodeData.path, { temporary });
@@ -310,7 +385,7 @@ export function OsFileManager({
         onOpenFile(nodeData.path, { temporary });
       }
     },
-    [onOpenFile, onSelectComposition, onSelectTimeline, projectDirectory]
+    [compositionLibrary, onOpenFile, onSelectComposition, onSelectTimeline, projectDirectory]
   );
 
   const handleSelect = useCallback((nodes: NativeTreeNodeApi<OsFileNode>[]) => {
@@ -327,6 +402,7 @@ export function OsFileManager({
       const targetPath = !node ? effectiveDirectory : node.data.path;
       if (!node || node.data.path === effectiveDirectory) {
         items.push(
+          { label: "New File", action: () => void createNewFile(targetPath) },
           { label: "New Composition", action: () => void createNewComposition(targetPath) },
           { label: "New Timeline", action: () => void createNewTimeline(targetPath) },
           { label: "New Folder", action: () => void createNewFolder(targetPath) },
@@ -334,17 +410,17 @@ export function OsFileManager({
         );
       } else if (node.data.isDirectory) {
         items.push(
+          { label: "New File", action: () => void createNewFile(node.data.path) },
           { label: "New Composition", action: () => void createNewComposition(node.data.path) },
           { label: "New Timeline", action: () => void createNewTimeline(node.data.path) },
           { label: "New Folder", action: () => void createNewFolder(node.data.path) },
           { label: "Rename", action: () => node.edit() },
-          { label: shouldUseSelection ? `Delete ${selectedNodes.length} items` : "Delete", action: () => void deleteNodes(shouldUseSelection ? selectedNodes : [node.data]), danger: true },
-          { label: "Reveal in Finder", action: () => void clipperHost.revealFile(node.data.path) }
+          { label: "Reveal in Finder", action: () => void clipperHost.revealFile(node.data.path) },
+          { label: shouldUseSelection ? `Delete ${selectedNodes.length} items` : "Delete", action: () => void deleteNodes(shouldUseSelection ? selectedNodes : [node.data]), danger: true }
         );
       } else {
         items.push(
           { label: "Rename", action: () => node.edit() },
-          { label: shouldUseSelection ? `Delete ${selectedNodes.length} items` : "Delete", action: () => void deleteNodes(shouldUseSelection ? selectedNodes : [node.data]), danger: true },
           { label: "Reveal in Finder", action: () => void clipperHost.revealFile(node.data.path) }
         );
         if (node.data.isComposition) {
@@ -359,11 +435,26 @@ export function OsFileManager({
             },
           });
         }
+        items.push({ label: shouldUseSelection ? `Delete ${selectedNodes.length} items` : "Delete", action: () => void deleteNodes(shouldUseSelection ? selectedNodes : [node.data]), danger: true });
       }
       setContextMenu({ x: event.clientX, y: event.clientY, items });
     },
     [effectiveDirectory]
   );
+
+  async function createNewFile(basePath: string) {
+    try {
+      const parentPath = basePath;
+      const entries = await clipperHost.listDirectory(parentPath).catch(() => []);
+      const names = entries.map((e) => e.name);
+      const name = nextNumberedName("untitled.txt", names);
+      const filePath = `${parentPath}/${name}`;
+      const node = { id: getStableOsFileUiId(filePath), name, path: filePath, isDirectory: false };
+      enqueueOperation({ kind: "create", command: new CreateCommand(filePath, name, false, ""), apply: (nodes) => addNode(nodes, parentPath, node), isObserved: (nodes) => Boolean(findNodeByPath(nodes, filePath)) });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to create file.");
+    }
+  }
 
   async function createNewComposition(basePath: string) {
     try {
@@ -383,8 +474,8 @@ export const composition = new Composition({
     });
 `;
       const filePath = `${parentPath}/${name}`;
-      setTreeData((current) => addNode(current, parentPath, { id: filePath, name, path: filePath, isDirectory: false, isComposition: true }));
-      await execute(new CreateCommand(filePath, name, false, content));
+      const node = { id: getStableOsFileUiId(filePath), name, path: filePath, isDirectory: false, isComposition: true };
+      enqueueOperation({ kind: "create", command: new CreateCommand(filePath, name, false, content), apply: (nodes) => addNode(nodes, parentPath, node), isObserved: (nodes) => Boolean(findNodeByPath(nodes, filePath)), reloadProjectAfterCommit: true });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Unable to create composition.");
     }
@@ -405,8 +496,8 @@ export const composition = new Composition({
         settings: {},
       }, null, 2);
       const filePath = `${parentPath}/${name}`;
-      setTreeData((current) => addNode(current, parentPath, { id: filePath, name, path: filePath, isDirectory: false }));
-      await execute(new CreateCommand(filePath, name, false, content));
+      const node = { id: getStableOsFileUiId(filePath), name, path: filePath, isDirectory: false };
+      enqueueOperation({ kind: "create", command: new CreateCommand(filePath, name, false, content), apply: (nodes) => addNode(nodes, parentPath, node), isObserved: (nodes) => Boolean(findNodeByPath(nodes, filePath)), reloadProjectAfterCommit: true });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Unable to create timeline.");
     }
@@ -418,8 +509,8 @@ export const composition = new Composition({
       const names = entries.map((e) => e.name);
       const name = nextNumberedName("New Folder", names);
       const folderPath = `${parentPath}/${name}`;
-      setTreeData((current) => addNode(current, parentPath, { id: folderPath, name, path: folderPath, isDirectory: true, children: [] }));
-      await execute(new CreateCommand(folderPath, name, true));
+      const node = { id: getStableOsFileUiId(folderPath), name, path: folderPath, isDirectory: true, children: [] };
+      enqueueOperation({ kind: "create", command: new CreateCommand(folderPath, name, true), apply: (nodes) => addNode(nodes, parentPath, node), isObserved: (nodes) => Boolean(findNodeByPath(nodes, folderPath)) });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Unable to create folder.");
     }
@@ -438,8 +529,8 @@ export const composition = new Composition({
     if (!nodesToDelete.length) return;
 
     try {
-      setTreeData((current) => removeNodes(current, nodesToDelete));
-      await execute(new DeleteCommand(nodesToDelete.map((node) => ({ path: node.path, name: node.name, isDirectory: node.isDirectory })), effectiveDirectory));
+      const targets = nodesToDelete.map((node) => ({ path: node.path, name: node.name, isDirectory: node.isDirectory }));
+      enqueueOperation({ kind: "delete", command: new DeleteCommand(targets, effectiveDirectory), apply: (nodes) => removeNodes(nodes, nodesToDelete), isObserved: (nodes) => targets.every((target) => !findNodeByPath(nodes, target.path)), reloadProjectAfterCommit: true });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Unable to delete.");
       setRefreshKey((k) => k + 1);
@@ -458,17 +549,7 @@ export const composition = new Composition({
 
   const handleRename = useCallback(
     async ({ id, name }: { id: string; name: string }) => {
-      let node = findNode(treeData, id);
-      if (!node) {
-        // ... (findNode logic)
-        const parentPath = getDirectoryPath(id);
-        const baseName = id.split("/").pop() || "";
-        const parentEntries = await clipperHost.listDirectory(parentPath).catch(() => []);
-        const found = parentEntries.find((e) => e.name === baseName);
-        if (found) {
-          node = { id, name: found.name, path: id, isDirectory: found.isDirectory };
-        }
-      }
+      const node = findNodeById(treeData, id);
       if (!node) {
         toast.error("Cannot rename: file information is not loaded. Try again after the tree refreshes.");
         setRefreshKey((k) => k + 1);
@@ -476,82 +557,67 @@ export const composition = new Composition({
       }
       
       const nextFullName = reconstructFileName(name, node.name);
-      const oldPath = rebasePath(node.path, pendingPathMovesRef.current);
+      const oldPath = rebasePath(node.path, getQueuedOsFileMoves(operationQueueRef.current));
       if (oldPath.endsWith(`/${nextFullName}`)) return; // No change
       const parentPath = getDirectoryPath(oldPath);
       const newPath = `${parentPath}/${nextFullName}`;
-      pendingPathMovesRef.current.push({ oldPath, newPath });
-      setTreeData((current) => renameNode(current, node.path, nextFullName));
 
-      try {
-        const entries = await clipperHost.listDirectory(parentPath);
-        const exists = entries.some((e) => e.name.toLowerCase() === nextFullName.toLowerCase() && `${parentPath}/${e.name}` !== oldPath);
-        if (exists) {
-          toast.error(`A file or folder named "${nextFullName}" already exists.`);
-          pendingPathMovesRef.current = pendingPathMovesRef.current.filter((move) => move.oldPath !== oldPath || move.newPath !== newPath);
-          setTreeData((current) => renameNode(current, newPath, node.name));
-          setRefreshKey((k) => k + 1);
-          return;
-        }
-        
-        const command = new RenameCommand(oldPath, nextFullName);
-        await execute(command);
-      } catch (error) {
-        toast.error(error instanceof Error ? error.message : "Unable to rename.");
-        pendingPathMovesRef.current = pendingPathMovesRef.current.filter((move) => move.oldPath !== oldPath || move.newPath !== newPath);
-        setRefreshKey((k) => k + 1);
+      const targetExists = Boolean(findNodeByPath(treeData, newPath));
+      if (targetExists) {
+        toast.error(`A file or folder named "${nextFullName}" already exists.`);
+        return;
       }
+
+      preserveOsFileUiIdForMove(oldPath, newPath);
+      const relativeMove = projectRelativeMove(projectDirectory, oldPath, newPath);
+      onCompositionPathMoves?.([relativeMove], { save: false });
+      enqueueOperation({
+        kind: "rename",
+        command: new RenameCommand(oldPath, nextFullName),
+        pathMoves: [{ oldPath, newPath }],
+        projectPathMoves: [relativeMove],
+        apply: (nodes) => renameOsFileNode(nodes, oldPath, nextFullName),
+        isObserved: (nodes) => Boolean(findNodeByPath(nodes, newPath)) && !Boolean(findNodeByPath(nodes, oldPath)),
+      });
     },
-    [treeData, execute]
+    [treeData, enqueueOperation, onCompositionPathMoves, preserveOsFileUiIdForMove, projectDirectory]
   );
 
   const handleMove = useCallback(
     async ({ dragIds, parentId }: NativeTreeDropTarget) => {
       const targetFolderId = parentId ?? effectiveDirectory;
-      let targetFolder = targetFolderId === effectiveDirectory ? { id: effectiveDirectory, name: effectiveDirectory.split("/").pop() || "", path: effectiveDirectory, isDirectory: true } : findNode(treeData, targetFolderId);
-      if (!targetFolder || !targetFolder.isDirectory) {
-        const parentEntries = await clipperHost.listDirectory(targetFolderId).catch(() => []);
-        if (parentEntries.length > 0) {
-          targetFolder = { id: targetFolderId, name: targetFolderId.split("/").pop() || "", path: targetFolderId, isDirectory: true };
-        }
-      }
+      let targetFolder = targetFolderId === effectiveDirectory ? { id: getStableOsFileUiId(effectiveDirectory), name: effectiveDirectory.split("/").pop() || "", path: effectiveDirectory, isDirectory: true } : findNodeById(treeData, targetFolderId);
       if (!targetFolder || !targetFolder.isDirectory) return;
       let moved = false;
       const moves: Array<{ oldPath: string; newPath: string }> = [];
-      const targetFolderPath = rebasePath(targetFolder.path, pendingPathMovesRef.current);
+      const targetFolderPath = rebasePath(targetFolder.path, getQueuedOsFileMoves(operationQueueRef.current));
       const targetEntries = await clipperHost.listDirectory(targetFolderPath).catch(() => []);
       const targetNames = new Set(targetEntries.map((entry) => entry.name));
 
-      for (const dragId of getTopLevelOsFileIds(dragIds)) {
-        let node = findNode(treeData, dragId);
-        if (!node) {
-          const parts = dragId.split("/");
-          const baseName = parts.pop() || "";
-          const parentPath = parts.join("/");
-          const parentEntries = await clipperHost.listDirectory(parentPath).catch(() => []);
-          const found = parentEntries.find((e) => e.name === baseName);
-          if (found) {
-            node = { id: dragId, name: found.name, path: dragId, isDirectory: found.isDirectory };
-          }
-        }
-        if (!node) {
-          toast.error("Cannot move: file information is not loaded. Try again after the tree refreshes.");
-          setRefreshKey((k) => k + 1);
-          continue;
-        }
-        const oldPath = rebasePath(node.path, pendingPathMovesRef.current);
+      const dragNodes = dragIds.map((dragId) => findNodeById(treeData, dragId)).filter(Boolean) as OsFileNode[];
+      for (const dragNode of getTopLevelOsFileNodes(dragNodes)) {
+        const node = dragNode;
+        const oldPath = rebasePath(node.path, getQueuedOsFileMoves(operationQueueRef.current));
         targetNames.delete(oldPath.startsWith(`${targetFolderPath}/`) ? oldPath.slice(targetFolderPath.length + 1).split("/")[0] : "");
         const nextName = nextAvailableOsFileName(node.name, targetNames);
         const newPath = `${targetFolderPath}/${nextName}`;
         if (!canMoveOsFilePath(oldPath, newPath)) continue;
+        preserveOsFileUiIdForMove(oldPath, newPath);
         moves.push({ oldPath, newPath });
         moved = true;
       }
       if (moved) {
         try {
-          pendingPathMovesRef.current.push(...moves);
-          setTreeData((current) => moveNodes(current, moves, effectiveDirectory));
-          await execute(new MoveCommand(moves));
+          const relativeMoves = moves.map((move) => projectRelativeMove(projectDirectory, move.oldPath, move.newPath));
+          onCompositionPathMoves?.(relativeMoves, { save: false });
+          enqueueOperation({
+            kind: "move",
+            command: new MoveCommand(moves),
+            pathMoves: moves,
+            projectPathMoves: relativeMoves,
+            apply: (nodes) => moveNodes(nodes, moves, effectiveDirectory),
+            isObserved: (nodes) => moves.every((move) => Boolean(findNodeByPath(nodes, move.newPath)) && !Boolean(findNodeByPath(nodes, move.oldPath))),
+          });
         } catch (error) {
           const message = error instanceof Error ? error.message : "Unable to move file.";
           if (message.toLowerCase().includes("already exists") || message.toLowerCase().includes("file exists")) {
@@ -562,7 +628,7 @@ export const composition = new Composition({
         }
       }
     },
-    [effectiveDirectory, treeData, execute]
+    [effectiveDirectory, treeData, enqueueOperation, getStableOsFileUiId, onCompositionPathMoves, preserveOsFileUiIdForMove, projectDirectory]
   );
 
   function handlePanelContextMenu(event: ReactMouseEvent<HTMLElement>) {
@@ -590,7 +656,7 @@ export const composition = new Composition({
   function deleteSelectedNodes(event: Pick<ReactKeyboardEvent<HTMLElement> | KeyboardEvent, "ctrlKey" | "key" | "metaKey" | "preventDefault" | "stopPropagation">) {
     if (event.key !== "Backspace" || (!event.metaKey && !event.ctrlKey)) return false;
     if (!selectedNodeIds.length) return false;
-    const nodesToDelete = selectedNodeIds.map((id) => findNode(treeData, id)).filter(Boolean) as OsFileNode[];
+    const nodesToDelete = selectedNodeIds.map((id) => findNodeById(treeData, id)).filter(Boolean) as OsFileNode[];
     if (!nodesToDelete.length) return false;
     event.preventDefault();
     event.stopPropagation();
@@ -705,7 +771,7 @@ export const composition = new Composition({
           rowHeight={ROW_HEIGHT}
           width="100%"
         >
-          {(props) => <OsFileTreeNode {...props} effectiveDirectory={effectiveDirectory} onContextMenu={openContextMenu} />}
+          {(props) => <OsFileTreeNode {...props} compositionLibrary={compositionLibrary} effectiveDirectory={effectiveDirectory} projectDirectory={projectDirectory} onContextMenu={openContextMenu} />}
         </NativeTree>
         </div>
       )}
@@ -715,7 +781,7 @@ export const composition = new Composition({
 }
 
 function OsFileDragPreview({ hideGhost, id, isDragging, mouse, nodes, onDragPositionChange }: NativeTreeDragPreviewProps & { hideGhost: boolean; nodes: OsFileNode[]; onDragPositionChange: (node: OsFileNode | null, mouse: { x: number; y: number } | null) => void }) {
-  const nodeData = id ? findNode(nodes, id) : null;
+  const nodeData = id ? findNodeById(nodes, id) : null;
   const internalPreviewRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -750,6 +816,13 @@ function isFileManagerInteractiveTarget(target: HTMLElement) {
 
 function canMoveOsFilePath(oldPath: string, newPath: string) {
   return oldPath !== newPath && !newPath.startsWith(`${oldPath}/`);
+}
+
+function defaultOsFileOperationError(kind: OsFileOperation["kind"]) {
+  if (kind === "create") return "Unable to create file.";
+  if (kind === "rename") return "Unable to rename.";
+  if (kind === "move") return "Unable to move file.";
+  return "Unable to delete.";
 }
 
 function nextAvailableOsFileName(fileName: string, siblingNames: Set<string>) {
@@ -801,13 +874,17 @@ function canDropOsFileRoot(api: NativeTreeApi<OsFileNode>, dragIds: string[]) {
 }
 
 function OsFileTreeNode({
+  compositionLibrary,
   dragHandle,
   node,
   style,
   effectiveDirectory,
+  projectDirectory,
   onContextMenu,
 }: NativeTreeNodeRendererProps<OsFileNode> & {
+  compositionLibrary: CompositionClip[];
   effectiveDirectory: string;
+  projectDirectory: string;
   onContextMenu: (event: ReactMouseEvent, node: NativeTreeNodeApi<OsFileNode>) => void;
 }) {
   const data = node.data;
@@ -846,7 +923,10 @@ function OsFileTreeNode({
       const timelineId = data.timelineId ?? displayName;
       event.dataTransfer.setData("application/x-clipper-timeline", timelineId);
     }
-    if (fileType === "composition") event.dataTransfer.setData("application/x-clipper-composition", projectRelativeFilePath(data.path, effectiveDirectory));
+    if (fileType === "composition") {
+      const compositionId = resolveOsCompositionId(compositionLibrary, data.path, projectDirectory);
+      if (compositionId) event.dataTransfer.setData("application/x-clipper-composition", compositionId);
+    }
     event.dataTransfer.setDragImage(getTransparentNativeDragImage(), 0, 0);
   }
 
@@ -896,8 +976,16 @@ function OsFileTreeNode({
           onChange={(event) => setEditDraft(event.target.value)}
           onClick={(event) => event.stopPropagation()}
           onKeyDown={(event) => {
-            if (event.key === "Enter") submitEdit();
-            if (event.key === "Escape") cancelEdit();
+            if (event.key === "Enter") {
+              event.preventDefault();
+              event.stopPropagation();
+              submitEdit();
+            }
+            if (event.key === "Escape") {
+              event.preventDefault();
+              event.stopPropagation();
+              cancelEdit();
+            }
           }}
         />
       ) : (
@@ -908,7 +996,7 @@ function OsFileTreeNode({
   );
 }
 
-async function loadDirectoryTree(path: string, projectDirectory: string): Promise<OsFileNode[]> {
+async function loadDirectoryTree(path: string, projectDirectory: string, getStableId: (path: string) => string = (nodePath) => nodePath): Promise<OsFileNode[]> {
   const entries = await clipperHost.listDirectory(path);
   // Filter out the trash folder
   const sorted = entries.filter(e => e.name !== ".clipper-trash").sort((a, b) => {
@@ -939,7 +1027,7 @@ async function loadDirectoryTree(path: string, projectDirectory: string): Promis
     }
 
     const node: OsFileNode = {
-      id: childPath,
+      id: getStableId(childPath),
       name: entry.name,
       path: childPath,
       isDirectory: entry.isDirectory,
@@ -947,7 +1035,7 @@ async function loadDirectoryTree(path: string, projectDirectory: string): Promis
       timelineId,
     };
     if (entry.isDirectory) {
-      node.children = await loadDirectoryTree(childPath, projectDirectory);
+      node.children = await loadDirectoryTree(childPath, projectDirectory, getStableId);
     }
     nodes.push(node);
   }
@@ -960,6 +1048,43 @@ function projectRelativeFilePath(filePath: string, rootPath: string) {
   return relativePath.startsWith("file-manager/") ? relativePath.slice("file-manager/".length) : relativePath;
 }
 
+function projectRelativeMove(rootPath: string, oldPath: string, newPath: string) {
+  return {
+    oldPath: projectRelativeFilePath(oldPath, rootPath),
+    newPath: projectRelativeFilePath(newPath, rootPath),
+  };
+}
+
+function reverseProjectPathMoves(moves: PendingPathMove[]) {
+  return moves.map((move) => ({ oldPath: move.newPath, newPath: move.oldPath })).reverse();
+}
+
+export function resolveOsCompositionId(compositions: Pick<CompositionClip, "id" | "filePath">[], filePath: string, projectDirectory: string) {
+  const relativePath = projectRelativeFilePath(filePath, projectDirectory);
+  return compositions.find((composition) => composition.filePath === relativePath || composition.filePath === filePath)?.id ?? null;
+}
+
+export function createOsCompositionDragDetail(compositions: Pick<CompositionClip, "id" | "filePath" | "duration" | "objects" | "background" | "sourceMissing">[], filePath: string, name: string, projectDirectory: string, phase: CompositionPointerDragDetail["phase"], currentMouse: { x: number; y: number }, shiftKey: boolean): CompositionPointerDragDetail | null {
+  const compositionId = resolveOsCompositionId(compositions, filePath, projectDirectory);
+  if (!compositionId) return null;
+  const metadata = resolveOsCompositionDragMetadata(compositions, compositionId);
+  return {
+    phase,
+    clientX: currentMouse.x,
+    clientY: currentMouse.y,
+    shiftKey,
+    compositionId,
+    duration: metadata.duration,
+    isEmpty: metadata.isEmpty,
+    label: getDragPreviewDisplayName(metadata.filePath ?? name),
+    sourceMissing: metadata.sourceMissing,
+  };
+}
+
+function isCompositionFilePath(filePath: string) {
+  return filePath.endsWith(".composition.ts");
+}
+
 export function resolveOsCompositionDragMetadata(compositions: Pick<CompositionClip, "id" | "filePath" | "duration" | "objects" | "background" | "sourceMissing">[], compositionId: string) {
   const composition = compositions.find((item) => item.id === compositionId || item.filePath === compositionId || item.filePath.endsWith(`/${compositionId}`));
   return {
@@ -970,19 +1095,26 @@ export function resolveOsCompositionDragMetadata(compositions: Pick<CompositionC
   };
 }
 
-function findNode(nodes: OsFileNode[], id: string): OsFileNode | null {
+function findNodeById(nodes: OsFileNode[], id: string): OsFileNode | null {
   for (const node of nodes) {
     if (node.id === id) return node;
     if (node.children) {
-      const found = findNode(node.children, id);
+      const found = findNodeById(node.children, id);
       if (found) return found;
     }
   }
   return null;
 }
 
-function getTopLevelOsFileIds(ids: string[]) {
-  return ids.filter((id) => !ids.some((parentId) => id !== parentId && id.startsWith(`${parentId}/`)));
+function findNodeByPath(nodes: OsFileNode[], path: string): OsFileNode | null {
+  for (const node of nodes) {
+    if (node.path === path) return node;
+    if (node.children) {
+      const found = findNodeByPath(node.children, path);
+      if (found) return found;
+    }
+  }
+  return null;
 }
 
 function getTopLevelOsFileNodes(nodes: OsFileNode[]) {
@@ -998,17 +1130,17 @@ function sortNodes(nodes: OsFileNode[]) {
 
 function remapNodePath(node: OsFileNode, oldPath: string, newPath: string): OsFileNode {
   const nextNodePath = node.path === oldPath || node.path.startsWith(`${oldPath}/`) ? `${newPath}${node.path.slice(oldPath.length)}` : node.path;
-  return {
+  const nextNode: OsFileNode = {
     ...node,
-    id: node.id === oldPath || node.id.startsWith(`${oldPath}/`) ? `${newPath}${node.id.slice(oldPath.length)}` : node.id,
     path: nextNodePath,
     name: nextNodePath.split("/").pop() || node.name,
-    children: node.children?.map((child) => remapNodePath(child, oldPath, newPath)),
   };
+  if (node.children) nextNode.children = node.children.map((child) => remapNodePath(child, oldPath, newPath));
+  return nextNode;
 }
 
 function addNode(nodes: OsFileNode[], parentPath: string, nodeToAdd: OsFileNode): OsFileNode[] {
-  if (findNode(nodes, nodeToAdd.id)) return nodes;
+  if (findNodeByPath(nodes, nodeToAdd.path)) return nodes;
   const result = addNodeToParent(nodes, parentPath, nodeToAdd);
   return result.inserted ? result.nodes : sortNodes([...nodes, nodeToAdd]);
 }
@@ -1028,12 +1160,87 @@ function addNodeToParent(nodes: OsFileNode[], parentPath: string, nodeToAdd: OsF
   return { nodes: inserted ? sortNodes(nextNodes) : nodes, inserted };
 }
 
-function renameNode(nodes: OsFileNode[], oldPath: string, nextName: string): OsFileNode[] {
+export function renameOsFileNode(nodes: OsFileNode[], oldPath: string, nextName: string): OsFileNode[] {
   const newPath = `${getDirectoryPath(oldPath)}/${nextName}`;
-  return sortNodes(nodes.map((node) => {
-    const renamed = remapNodePath(node, oldPath, newPath);
-    return { ...renamed, children: renamed.children ? renameNode(renamed.children, oldPath, nextName) : undefined };
-  }));
+  return sortNodes(nodes.map((node) => remapNodePath(node, oldPath, newPath)));
+}
+
+export function applyPendingOsFileMoves(nodes: OsFileNode[], moves: PendingPathMove[]): OsFileNode[] {
+  if (!moves.length) return nodes;
+  return sortNodes(nodes.map((node) => moves.reduce((currentNode, move) => remapNodePath(currentNode, move.oldPath, move.newPath), node)));
+}
+
+export function retainUnobservedPendingMoves(nodes: OsFileNode[], moves: PendingPathMove[]) {
+  if (!moves.length) return moves;
+  const paths = collectOsFilePaths(nodes);
+  return moves.filter((move) => paths.has(move.oldPath) && !paths.has(move.newPath));
+}
+
+export function reconcilePendingOsFileMoves(nodes: OsFileNode[], moves: PendingOsFileMove[]): PendingOsFileMove[] {
+  if (!moves.length) return moves;
+  const paths = collectOsFilePaths(nodes);
+  return moves.filter((move) => {
+    const newObserved = pathSetHasPathOrDescendant(paths, move.newPath);
+    if (move.state === "in-flight") return true;
+    return !newObserved;
+  });
+}
+
+export function applyOsFileOperations(nodes: OsFileNode[], operations: Pick<OsFileOperation, "apply">[]): OsFileNode[] {
+  return operations.reduce((current, operation) => operation.apply(current), nodes);
+}
+
+export function renderOsFileOperationTree(nodes: OsFileNode[], operations: Pick<OsFileOperation, "apply">[]): OsFileNode[] {
+  return applyOsFileOperations(nodes, operations);
+}
+
+export function pruneObservedOsFileOperations(nodes: OsFileNode[], operations: OsFileOperation[]): OsFileOperation[] {
+  return operations.filter((operation) => operation.status !== "succeeded" || !operation.isObserved(nodes));
+}
+
+export function rollbackFailedOsFileOperations(operations: OsFileOperation[], failedOperationId: number) {
+  const failedIndex = operations.findIndex((item) => item.id === failedOperationId);
+  if (failedIndex < 0) return { operations: operations.filter((item) => item.id !== failedOperationId), rolledBackOperations: [] as OsFileOperation[] };
+  return {
+    operations: operations.slice(0, failedIndex),
+    rolledBackOperations: operations.slice(failedIndex),
+  };
+}
+
+function getQueuedOsFileMoves(operations: OsFileOperation[]): PendingPathMove[] {
+  return operations.flatMap((operation) => operation.pathMoves ?? []);
+}
+
+function pathSetHasPathOrDescendant(paths: Set<string>, path: string) {
+  for (const candidate of paths) {
+    if (candidate === path || candidate.startsWith(`${path}/`)) return true;
+  }
+  return false;
+}
+
+function collectOsFilePaths(nodes: OsFileNode[], paths = new Set<string>()) {
+  for (const node of nodes) {
+    paths.add(node.path);
+    if (node.children) collectOsFilePaths(node.children, paths);
+  }
+  return paths;
+}
+
+export function preserveStableOsFileMoveIds(idByPath: Map<string, string>, nodes: OsFileNode[], oldPath: string, newPath: string) {
+  const existingNode = findNodeByPath(nodes, oldPath);
+  if (existingNode) {
+    registerMovedNodeIds(idByPath, existingNode, oldPath, newPath);
+    return;
+  }
+
+  const existingId = idByPath.get(oldPath);
+  if (existingId) idByPath.set(newPath, existingId);
+}
+
+function registerMovedNodeIds(idByPath: Map<string, string>, node: OsFileNode, oldPath: string, newPath: string) {
+  const nextPath = node.path === oldPath || node.path.startsWith(`${oldPath}/`) ? `${newPath}${node.path.slice(oldPath.length)}` : node.path;
+  idByPath.set(nextPath, node.id);
+  for (const child of node.children ?? []) registerMovedNodeIds(idByPath, child, oldPath, newPath);
 }
 
 function takeNode(nodes: OsFileNode[], path: string): { nodes: OsFileNode[]; node: OsFileNode | null } {

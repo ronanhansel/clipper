@@ -67,6 +67,7 @@ export type FileManagerProps = {
   onDeleteAsset: (assetId: string) => void;
   onDeleteComposition: (compositionId: string) => void;
   onDeleteCompositionFolder: (folderPath: string) => void;
+  onDeleteProjectFile: (filePath: string) => void;
   onDeleteTimeline: (timelineId: string) => void;
   onDropFiles: (files: FileList, targetFolderId?: string) => void;
   onDuplicateAsset: (assetId: string) => void;
@@ -146,7 +147,7 @@ export function FileManager(props: FileManagerProps) {
 }
 
 function FileManagerPanel() {
-  const { assets, compositions, compositionFolders, fileManagerState, compositionRootPath, timelines, contextMenu, selectedNodeIds, clearTreeFocus, requestProjectFileCreation, setContextMenu, setSelectedNodeIds, onCopyAsset, onCreateComposition, onCreateCompositionFolder, onCreateFolder, onCreateTimeline, onDeleteAsset, onDeleteComposition, onDeleteCompositionFolder, onDeleteTimeline, onMoveComposition, onMoveTimeline, onRevealAssetRoot, onSortAssets } = useFileManager();
+  const { assets, compositions, compositionFolders, fileManagerState, compositionRootPath, timelines, contextMenu, selectedNodeIds, clearTreeFocus, requestProjectFileCreation, setContextMenu, setSelectedNodeIds, onCopyAsset, onCreateComposition, onCreateCompositionFolder, onCreateFolder, onCreateTimeline, onDeleteAsset, onDeleteComposition, onDeleteCompositionFolder, onDeleteProjectFile, onDeleteTimeline, onMoveComposition, onMoveTimeline, onRevealAssetRoot, onSortAssets } = useFileManager();
   const managerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -219,7 +220,7 @@ function FileManagerPanel() {
     if (!nodes.length) return false;
     event.preventDefault();
     event.stopPropagation();
-    deleteFileTreeNodes(nodes, timelines.length, { onDeleteAsset, onDeleteComposition, onDeleteCompositionFolder, onDeleteTimeline });
+    deleteFileTreeNodes(nodes, timelines.length, { onDeleteAsset, onDeleteComposition, onDeleteCompositionFolder, onDeleteProjectFile, onDeleteTimeline });
     return true;
   }
 
@@ -231,7 +232,7 @@ function FileManagerPanel() {
 
     window.addEventListener("keydown", onWindowKeyDown, true);
     return () => window.removeEventListener("keydown", onWindowKeyDown, true);
-  }, [assets, compositions, compositionFolders, compositionRootPath, onDeleteAsset, onDeleteComposition, onDeleteCompositionFolder, onDeleteTimeline, selectedNodeIds, timelines]);
+  }, [assets, compositions, compositionFolders, compositionRootPath, onDeleteAsset, onDeleteComposition, onDeleteCompositionFolder, onDeleteProjectFile, onDeleteTimeline, selectedNodeIds, timelines]);
 
   return (
     <section ref={managerRef} data-file-manager-panel className="min-h-0 min-w-0 overflow-auto rounded-[14px] border border-dashed border-[#303646] bg-[#151821] p-3" onContextMenu={openProjectMenu} onKeyDown={handleFileManagerKeyDown} onPointerDown={handleFileManagerPointerDown}>
@@ -352,7 +353,7 @@ function UnifiedFileManagerTree() {
     const nextNode: FileManagerTreeNode = { id: nodeId, kind: "project-file", path: filePath, name: getFileName(filePath) };
     pendingEditNodeIdRef.current = nodeId;
     if (folderPath) requestNodeExpansion(projectFolderNodeId(folderPath));
-    latestTreeRef.current = insertProjectFileTreeNode(latestTreeRef.current, folderPath || rootPath, nextNode);
+    latestTreeRef.current = insertProjectFileTreeNode(latestTreeRef.current, folderPath || "", nextNode);
     orderReferenceTreeRef.current = latestTreeRef.current;
     setTree(latestTreeRef.current);
     onSelectNode(nodeId);
@@ -671,7 +672,7 @@ export function shouldSkipFileManagerShortcut(target: EventTarget | null) {
 }
 
 function UnifiedTreeNode({ dragHandle, node, onCreateProjectFile, style }: NativeTreeNodeRendererProps<FileManagerTreeNode> & { onCreateProjectFile: (folderPath?: string) => void }) {
-  const { assets, timelines, onAddComposition, onCopyAsset, onCopyCompositionPath, onCreateFolder: onCreateAssetFolder, onCreateComposition, onCreateCompositionFolder: onCreateFolder, onCreateTimeline, onDeleteAsset, onDeleteComposition, onDeleteCompositionFolder: onDeleteFolder, onDeleteTimeline, onDuplicateAsset, onDuplicateComposition, onPrerenderComposition, requestNodeExpansion, setContextMenu: onOpenMenu, onFindMediaRequestChange, onRevealComposition, onSelectTimeline, onSortAssets } = useFileManager();
+  const { assets, timelines, onAddComposition, onCopyAsset, onCopyCompositionPath, onCreateFolder: onCreateAssetFolder, onCreateComposition, onCreateCompositionFolder: onCreateFolder, onCreateTimeline, onDeleteAsset, onDeleteComposition, onDeleteCompositionFolder: onDeleteFolder, onDeleteProjectFile, onDeleteTimeline, onDuplicateAsset, onDuplicateComposition, onPrerenderComposition, requestNodeExpansion, setContextMenu: onOpenMenu, onFindMediaRequestChange, onRevealComposition, onRevealCompositionFolder, onSelectTimeline, onSortAssets } = useFileManager();
   const data = node.data;
   const displayName = data.kind === "composition" ? getDisplayNameFromPath(data.composition.filePath) :
                     data.kind === "timeline" ? getDisplayNameFromPath(data.timeline.filePath || data.timeline.id) :
@@ -703,7 +704,7 @@ function UnifiedTreeNode({ dragHandle, node, onCreateProjectFile, style }: Nativ
         items: [
           { label: `Add ${selectedCompositions.length} to timeline`, action: () => selectedCompositions.forEach((selectedNode) => onAddComposition(selectedNode.composition.id)), disabled: selectedCompositions.length === 0 },
           { label: `Duplicate ${selectedAssets.length + selectedCompositions.length} items`, action: () => { selectedAssets.forEach((selectedNode) => onDuplicateAsset(selectedNode.asset.id)); selectedCompositions.forEach((selectedNode) => onDuplicateComposition(selectedNode.composition.id)); }, disabled: selectedAssets.length + selectedCompositions.length === 0 },
-          { label: `Delete ${selectedNodes.length} items`, action: () => deleteFileTreeNodes(selectedNodes, timelines.length, { onDeleteAsset, onDeleteComposition, onDeleteCompositionFolder: onDeleteFolder, onDeleteTimeline }), danger: true, disabled: !canDeleteSelection },
+          { label: `Delete ${selectedNodes.length} items`, action: () => deleteFileTreeNodes(selectedNodes, timelines.length, { onDeleteAsset, onDeleteComposition, onDeleteCompositionFolder: onDeleteFolder, onDeleteProjectFile, onDeleteTimeline }), danger: true, disabled: !canDeleteSelection },
         ],
       });
       return;
@@ -720,6 +721,7 @@ function UnifiedTreeNode({ dragHandle, node, onCreateProjectFile, style }: Nativ
         { label: "New timeline", action: () => { onCreateTimeline(data.path); requestNodeExpansion(projectFolderNodeId(data.path)); } },
         { label: "New folder", action: () => { onCreateFolder(data.path); requestNodeExpansion(projectFolderNodeId(data.path)); } },
         { label: "Rename", action: () => node.edit() },
+        { label: "Reveal in Finder", action: () => onRevealCompositionFolder(data.path) },
         { label: "Delete", action: () => onDeleteFolder(data.path), danger: true }
       ] });
       return;
@@ -729,14 +731,14 @@ function UnifiedTreeNode({ dragHandle, node, onCreateProjectFile, style }: Nativ
       return;
     }
     if (data.kind === "project-file") {
-      onOpenMenu({ x: event.clientX, y: event.clientY, items: [{ label: "Rename", action: () => node.edit() }] });
+      onOpenMenu({ x: event.clientX, y: event.clientY, items: [{ label: "Rename", action: () => node.edit() }, { label: "Delete", action: () => onDeleteProjectFile(data.path), danger: true }] });
       return;
     }
     onOpenMenu({ x: event.clientX, y: event.clientY, items: [{ label: "Add to timeline", action: () => onAddComposition(data.composition.id) }, { label: "Toggle timeline prerender", action: () => onPrerenderComposition?.(data.composition.id), disabled: !onPrerenderComposition }, { label: "Rename", action: () => node.edit() }, { label: "Duplicate", action: () => onDuplicateComposition(data.composition.id) }, { label: "Copy path", action: () => onCopyCompositionPath(data.composition.id) }, { label: "Reveal in Finder", action: () => onRevealComposition(data.composition.id) }, { label: "Find media in project", action: () => onFindMediaRequestChange?.({ compositionId: data.composition.id, fileName: data.composition.filePath.split("/").pop() || data.composition.filePath }) }, { label: "Delete", action: () => onDeleteComposition(data.composition.id), danger: true }] });
   }
 
   const Icon = data.kind === "asset-file" || data.kind === "project-file" ? FileIcon : data.kind === "timeline" ? ChartNoAxesGantt : data.kind === "composition" ? Clapperboard : Folder;
-  const contentClass = data.kind === "composition" ? (data.composition.sourceMissing ? "text-[#8c929f]" : "text-[#38d996]") : "text-current";
+  const contentClass = data.kind === "composition" ? (data.composition.sourceMissing ? "text-[#7f1d1d]" : "text-[#38d996]") : "text-current";
 
   function hideNativeCompositionDragImage(event: React.DragEvent<HTMLDivElement>) {
     if (node.isEditing) return;
@@ -933,12 +935,13 @@ function getTopLevelSelectedNodeData(selectedNodes: NativeTreeNodeApi<FileManage
   return selectedNodes.filter((selectedNode) => !selectedNodes.some((candidate) => candidate !== selectedNode && candidate.isAncestorOf(selectedNode))).map((selectedNode) => selectedNode.data);
 }
 
-function deleteFileTreeNodes(nodes: FileManagerTreeNode[], timelineCount: number, actions: Pick<FileManagerProps, "onDeleteAsset" | "onDeleteComposition" | "onDeleteCompositionFolder" | "onDeleteTimeline">) {
+function deleteFileTreeNodes(nodes: FileManagerTreeNode[], timelineCount: number, actions: Pick<FileManagerProps, "onDeleteAsset" | "onDeleteComposition" | "onDeleteCompositionFolder" | "onDeleteProjectFile" | "onDeleteTimeline">) {
   const selectedTimelineCount = nodes.filter((node) => node.kind === "timeline").length;
   const canDeleteTimelines = selectedTimelineCount === 0 || timelineCount - selectedTimelineCount >= 1;
   for (const node of nodes) {
     if (node.kind === "asset-file" || node.kind === "asset-folder") actions.onDeleteAsset(node.asset.id);
     if (node.kind === "project-folder") actions.onDeleteCompositionFolder(node.path);
+    if (node.kind === "project-file") actions.onDeleteProjectFile(node.path);
     if (node.kind === "composition") actions.onDeleteComposition(node.composition.id);
     if (node.kind === "timeline" && canDeleteTimelines) actions.onDeleteTimeline(node.timeline.id);
   }

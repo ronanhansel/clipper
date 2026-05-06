@@ -9,15 +9,18 @@ import { clipperHost } from "../../clipperHost";
 import type { BuildFileManagerWorkspacePropsInput } from "./FileManagerWorkspace";
 import { getDirectoryPath, nextNumberedName } from "./fileManagerPaths";
 import { createAssetFolderInProject, deleteAssetFromProject, duplicateAssetInProject, importDroppedAssetsIntoProject, renameAssetInProject, sortAssetsInProject } from "./assetProjectMutations";
-import { createCompositionFolderInProject, createCompositionInLibrary, deleteCompositionFileFromProject, duplicateCompositionInProject, moveCompositionInProject, relinkCompositionInProject, renameCompositionInProject } from "./compositionLibraryMutations";
+import { createCompositionFolderInProject, createCompositionInLibrary, deleteCompositionFileFromProject, duplicateCompositionInProject, moveCompositionInProject, relinkCompositionInProject, renameCompositionInProject, updateCompositionFilePathsInProject } from "./compositionLibraryMutations";
 import { applyFileManagerTreeSnapshotToProject, deleteCompositionFolderFromProject, renameCompositionFolderInProject } from "./compositionFolderMutations";
 import { createTimelineInProject, deleteTimelineFromProject, moveTimelineInProject, renameTimelineInProject } from "./timelineLibraryMutations";
 import { getDisplayNameFromPath, nextNumberedSemanticName } from "../../../core/fileNames";
 import { CreateCommand } from "./operations/CreateCommand";
+import { DeleteCommand } from "./operations/DeleteCommand";
 import { RenameCommand } from "./operations/RenameCommand";
 import type { Command } from "./operations/Command";
 
-type FileManagerProjectActions = Omit<BuildFileManagerWorkspacePropsInput["actions"], "reloadProject">;
+type FileManagerProjectActions = Omit<BuildFileManagerWorkspacePropsInput["actions"], "reloadProject"> & {
+  updateCompositionFilePaths: (moves: Array<{ oldPath: string; newPath: string }>, options?: { save?: boolean }) => void;
+};
 
 type UseFileManagerProjectActionsInput = {
   assets: AssetItem[];
@@ -37,6 +40,7 @@ type UseFileManagerProjectActionsInput = {
   updateProject: (updater: ProjectUpdater, options?: { history?: boolean; syncSources?: boolean; coalesceHistory?: boolean }) => void;
   watchedProjectDirectory: string;
   executeFileManagerCommand: (command: Command) => Promise<void>;
+  scheduleImplicitFileOperationSave: (projectOverride?: ProjectManifest, errorMessage?: string) => void;
   clearNodeSelection: () => void;
   addCompositionFromLibrary: (compositionId: string) => void;
 };
@@ -61,11 +65,25 @@ export function useFileManagerProjectActions({
   updateProject,
   watchedProjectDirectory,
   executeFileManagerCommand,
+  scheduleImplicitFileOperationSave,
 }: UseFileManagerProjectActionsInput): FileManagerProjectActions {
   function syncCompositionResult(result: { project: ProjectManifest; compositionSources: Record<string, string> }) {
     compositionSourcesRef.current = result.compositionSources;
     setCompositionSources(result.compositionSources);
     updateProject(result.project, { syncSources: false });
+  }
+
+  function updateCompositionFilePaths(moves: Array<{ oldPath: string; newPath: string }>, options: { save?: boolean } = {}) {
+    if (moves.length === 0) {
+      if (options.save !== false) scheduleImplicitFileOperationSave(projectRef.current);
+      return;
+    }
+    const result = updateCompositionFilePathsInProject(projectRef.current, compositionSourcesRef.current, moves, compositionLibrary);
+    if (!result) return;
+    compositionSourcesRef.current = result.compositionSources;
+    setCompositionSources(result.compositionSources);
+    updateProject(result.project, { history: false, syncSources: false });
+    if (options.save !== false) scheduleImplicitFileOperationSave(result.project);
   }
 
   function renameAsset(assetId: string, name: string) {
@@ -136,7 +154,7 @@ export function useFileManagerProjectActions({
   function createProjectFile(folderPath?: string) {
     const safeFolderPath = folderPath && folderPath !== watchedProjectDirectory ? folderPath : "";
     const fileName = nextNumberedName("untitled.txt", getProjectFileStateSiblingNames(projectRef.current.editorState?.fileManagerState?.tree, safeFolderPath));
-    const filePath = `${safeFolderPath || watchedProjectDirectory}/${fileName}`;
+    const filePath = safeFolderPath ? `${safeFolderPath}/${fileName}` : fileName;
     void executeFileManagerCommand(new CreateCommand(filePath, fileName, false, "")).catch((error) => {
       console.error(error);
       toast.error("Unable to create file.");
@@ -154,6 +172,15 @@ export function useFileManagerProjectActions({
       toast.error("Unable to rename file.");
     });
     updateFileManagerState(renameProjectFileStateNode(projectRef.current.editorState?.fileManagerState, filePath, nextPath));
+  }
+
+  function deleteProjectFile(filePath: string) {
+    const fileName = filePath.split("/").pop() || filePath;
+    void executeFileManagerCommand(new DeleteCommand([{ path: filePath, name: fileName, isDirectory: false }], watchedProjectDirectory)).catch((error) => {
+      console.error(error);
+      toast.error("Unable to delete file.");
+    });
+    updateFileManagerState(deleteProjectFileStateNode(projectRef.current.editorState?.fileManagerState, filePath));
   }
 
   function createTimeline(folderPath?: string) {
@@ -187,10 +214,7 @@ export function useFileManagerProjectActions({
     const nextId = `${directory}${nextName}.timeline.json`;
 
     updateProject((current) => renameTimelineInProject(current, timelineId, name));
-    if (timelineId === selectedSceneId) {
-      setSelectedSceneId(nextId);
-      updateEditorState((state) => ({ ...state, selectedSceneId: nextId, selectedTimelineId: nextId }));
-    }
+    relinkOpenTimeline(timelineId, nextId);
   }
 
   function moveTimeline(timelineId: string, folderPath: string) {
@@ -199,10 +223,13 @@ export function useFileManagerProjectActions({
     const nextId = folderPath ? `${folderPath}/${fileName}` : fileName;
 
     updateProject((current) => moveTimelineInProject(current, timelineId, folderPath));
-    if (timelineId === selectedSceneId) {
-      setSelectedSceneId(nextId);
-      updateEditorState((state) => ({ ...state, selectedSceneId: nextId, selectedTimelineId: nextId }));
-    }
+    relinkOpenTimeline(timelineId, nextId);
+  }
+
+  function relinkOpenTimeline(oldId: string, nextId: string) {
+    if (oldId !== selectedSceneId) return;
+    setSelectedSceneId(nextId);
+    updateEditorState((state) => ({ ...state, selectedSceneId: nextId, selectedTimelineId: nextId }));
   }
 
   function deleteTimeline(timelineId: string) {
@@ -285,9 +312,7 @@ export function useFileManagerProjectActions({
 
     const source = await clipperHost.readTextFile(matchedPath);
     const libraryComposition = compositionLibrary.find((item) => item.id === compositionId);
-    const referencedByTimeline = projectRef.current.timelines?.some((timeline) => timeline.clips.some((clip) => clip.compositionId === compositionId));
-    const baseComposition = libraryComposition ?? (referencedByTimeline ? createRelinkBaseComposition(matchedPath) : null);
-    const parsedComposition = baseComposition ? await compositionFromSource({ ...baseComposition, id: matchedPath, filePath: matchedPath }, source) : undefined;
+    const parsedComposition = libraryComposition ? await compositionFromSource({ ...libraryComposition, filePath: matchedPath }, source) : undefined;
     const result = relinkCompositionInProject(projectRef.current, compositionSourcesRef.current, compositionId, matchedPath, source, compositionLibrary, parsedComposition);
     if (!result) {
       toast.error(`Unable to relink ${targetName}.`);
@@ -296,10 +321,6 @@ export function useFileManagerProjectActions({
 
     syncCompositionResult(result);
     toast.success(`Relinked ${targetName}.`);
-  }
-
-function createRelinkBaseComposition(filePath: string): Part {
-    return { id: filePath, filePath, duration: 5, frame: { width: 1920, height: 1080, style: {} }, background: { id: "background", name: "Background", style: {}, elements: [] }, objects: [], snapshot: [], motionMarkers: [] };
   }
 
   function duplicateAsset(assetId: string) {
@@ -327,6 +348,7 @@ function createRelinkBaseComposition(filePath: string): Part {
     deleteAsset,
     deleteComposition: deleteCompositionFile,
     deleteCompositionFolder,
+    deleteProjectFile,
     deleteTimeline,
     dropFiles: importDroppedAssets,
     duplicateAsset,
@@ -340,6 +362,7 @@ function createRelinkBaseComposition(filePath: string): Part {
     renameAsset,
     renameComposition,
     renameCompositionFolder,
+    updateCompositionFilePaths,
     renameProjectFile,
     renameTimeline,
     revealAssetRoot,
@@ -367,10 +390,21 @@ function renameProjectFileStateNode(fileManagerState: EditorState["fileManagerSt
   return { ...fileManagerState, tree: renameProjectFileStateNodeInTree(fileManagerState?.tree ?? [], oldPath, nextPath) };
 }
 
+function deleteProjectFileStateNode(fileManagerState: EditorState["fileManagerState"], filePath: string): EditorState["fileManagerState"] {
+  return { ...fileManagerState, tree: deleteProjectFileStateNodeFromTree(fileManagerState?.tree ?? [], filePath) };
+}
+
 function renameProjectFileStateNodeInTree(nodes: NonNullable<EditorState["fileManagerState"]>["tree"], oldPath: string, nextPath: string): NonNullable<EditorState["fileManagerState"]>["tree"] {
   return (nodes ?? []).map((node) => {
     if (node.filePath === oldPath) return { ...node, id: `project-file:${nextPath}`, filePath: nextPath };
     return node.children ? { ...node, children: renameProjectFileStateNodeInTree(node.children, oldPath, nextPath) } : node;
+  });
+}
+
+function deleteProjectFileStateNodeFromTree(nodes: NonNullable<EditorState["fileManagerState"]>["tree"], filePath: string): NonNullable<EditorState["fileManagerState"]>["tree"] {
+  return (nodes ?? []).flatMap((node) => {
+    if (node.filePath === filePath) return [];
+    return node.children ? [{ ...node, children: deleteProjectFileStateNodeFromTree(node.children, filePath) }] : [node];
   });
 }
 

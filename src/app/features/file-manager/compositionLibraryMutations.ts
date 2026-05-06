@@ -9,6 +9,19 @@ export type CompositionLibraryMutationResult = {
   compositionSources: Record<string, string>;
 };
 
+function createStableCompositionId() {
+  return `composition-${crypto.randomUUID()}`;
+}
+
+function hashCompositionSource(source: string) {
+  let hash = 2166136261;
+  for (let index = 0; index < source.length; index += 1) {
+    hash ^= source.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
 export function getProjectFolderSiblingNames(project: ProjectManifest, parentFolderPath: string, fallbackTimelineDirectory: string) {
   const names = new Set<string>();
   const addChildFolderName = (path: string) => {
@@ -24,7 +37,7 @@ export function getProjectFolderSiblingNames(project: ProjectManifest, parentFol
 
 export function createCompositionInLibrary(project: ProjectManifest, compositionSources: Record<string, string>, _basePart: Part, filePath: string): CompositionLibraryMutationResult {
   const composition: Part = {
-    id: filePath,
+    id: createStableCompositionId(),
     filePath,
     duration: 3,
     frame: { width: 1920, height: 1080, style: { background: "#050505" } },
@@ -34,6 +47,7 @@ export function createCompositionInLibrary(project: ProjectManifest, composition
     motionMarkers: [],
   };
   const source = compositionToSource(composition);
+  composition.sourceHash = hashCompositionSource(source);
   const nextSources = { ...compositionSources, [composition.filePath]: source };
   return {
     compositionSources: nextSources,
@@ -65,7 +79,7 @@ export function renameCompositionInProject(project: ProjectManifest, composition
   const nextSources = source === undefined ? rest : { ...rest, [nextFilePath]: source };
   return {
     compositionSources: nextSources,
-    project: replacePartInProject({ ...project, compositionSources: nextSources, compositionLibrary: project.compositionLibrary ?? fallbackLibrary }, compositionId, (item) => ({ ...item, id: nextFilePath, filePath: nextFilePath })),
+    project: relinkEditorStatePaths(replacePartInProject({ ...project, compositionSources: nextSources, compositionLibrary: project.compositionLibrary ?? fallbackLibrary }, compositionId, (item) => ({ ...item, filePath: nextFilePath })), composition.filePath, nextFilePath),
   };
 }
 
@@ -79,11 +93,77 @@ export function moveCompositionInProject(project: ProjectManifest, compositionSo
   const nextSources = source === undefined ? rest : { ...rest, [nextFilePath]: source };
   return {
     compositionSources: nextSources,
-    project: {
-      ...replacePartInProject({ ...project, compositionSources: nextSources, compositionLibrary: project.compositionLibrary ?? fallbackLibrary }, compositionId, (item) => ({ ...item, id: nextFilePath, filePath: nextFilePath })),
+    project: relinkEditorStatePaths({
+      ...replacePartInProject({ ...project, compositionSources: nextSources, compositionLibrary: project.compositionLibrary ?? fallbackLibrary }, compositionId, (item) => ({ ...item, filePath: nextFilePath })),
       compositionFolders: Array.from(new Set([...(project.compositionFolders ?? []), folderPath])),
+    }, composition.filePath, nextFilePath),
+  };
+}
+
+export function updateCompositionFilePathsInProject(project: ProjectManifest, compositionSources: Record<string, string>, pathMoves: Array<{ oldPath: string; newPath: string }>, fallbackLibrary: Part[]): CompositionLibraryMutationResult | null {
+  const library = project.compositionLibrary ?? fallbackLibrary;
+  if (pathMoves.length === 0 || library.length === 0) return null;
+
+  let changed = false;
+  let nextSources = compositionSources;
+  const remapComposition = <T extends Part>(composition: T): T => {
+    const nextFilePath = remapMovedFilePath(composition.filePath, pathMoves);
+    if (nextFilePath === composition.filePath) return composition;
+    changed = true;
+    const source = nextSources[composition.filePath];
+    const { [composition.filePath]: _removed, ...rest } = nextSources;
+    nextSources = source === undefined ? rest : { ...rest, [nextFilePath]: source };
+    return { ...composition, filePath: nextFilePath } as T;
+  };
+  const nextLibrary = library.map(remapComposition);
+  const nextCompositions = project.compositions?.map(remapComposition);
+
+  if (!changed) return null;
+  return {
+    compositionSources: nextSources,
+    project: {
+      ...project,
+      compositionSources: nextSources,
+      compositions: nextCompositions,
+      compositionLibrary: nextLibrary,
     },
   };
+}
+
+function remapMovedFilePath(filePath: string, pathMoves: Array<{ oldPath: string; newPath: string }>) {
+  let nextPath = filePath;
+  for (const move of pathMoves) {
+    if (nextPath === move.oldPath) nextPath = move.newPath;
+    else if (nextPath.startsWith(`${move.oldPath}/`)) nextPath = `${move.newPath}${nextPath.slice(move.oldPath.length)}`;
+  }
+  return nextPath;
+}
+
+function relinkEditorStatePaths(project: ProjectManifest, oldPath: string, nextPath: string): ProjectManifest {
+  const editorState = project.editorState;
+  if (!editorState) return project;
+  return {
+    ...project,
+    editorState: {
+      ...editorState,
+      selectedSceneId: editorState.selectedSceneId === oldPath ? nextPath : editorState.selectedSceneId,
+      selectedTimelineId: editorState.selectedTimelineId === oldPath ? nextPath : editorState.selectedTimelineId,
+      selectedPartId: editorState.selectedPartId === oldPath ? nextPath : editorState.selectedPartId,
+      editorSession: editorState.editorSession ? {
+        ...editorState.editorSession,
+        activeTabId: editorState.editorSession.activeTabId === oldPath ? nextPath : editorState.editorSession.activeTabId,
+        tabs: editorState.editorSession.tabs.map((tab) => tab.id === oldPath || tab.filePath === oldPath ? { ...tab, id: nextPath, filePath: nextPath } : tab),
+      } : editorState.editorSession,
+      editor: relinkKeyedState(editorState.editor, oldPath, nextPath),
+      code: relinkKeyedState(editorState.code, oldPath, nextPath),
+    },
+  };
+}
+
+function relinkKeyedState<T>(state: Record<string, T> | undefined, oldPath: string, nextPath: string): Record<string, T> | undefined {
+  if (!state || !(oldPath in state) || nextPath in state) return state;
+  const { [oldPath]: value, ...rest } = state;
+  return { ...rest, [nextPath]: value };
 }
 
 export function duplicateCompositionInProject(project: ProjectManifest, compositionSources: Record<string, string>, compositionId: string, fallbackLibrary: Part[]): CompositionLibraryMutationResult | null {
@@ -97,8 +177,9 @@ export function duplicateCompositionInProject(project: ProjectManifest, composit
   const duplicateName = nextNumberedName(`${getDisplayNameFromPath(composition.filePath)} copy`, siblingNames.map((name) => name.replace(/\.composition\.ts$/, "")));
   const fileName = reconstructFileName(duplicateName, sourceFileName);
   const filePath = directoryPath ? `${directoryPath}/${fileName}` : fileName;
-  const duplicate: Part = { ...composition, id: filePath, filePath, motionMarkers: [], snapshot: [] };
-  const nextSources = { ...compositionSources, [duplicate.filePath]: compositionToSource(duplicate) };
+  const duplicateSource = compositionToSource({ ...composition, filePath });
+  const duplicate: Part = { ...composition, id: createStableCompositionId(), filePath, sourceHash: hashCompositionSource(duplicateSource), motionMarkers: [], snapshot: [] };
+  const nextSources = { ...compositionSources, [duplicate.filePath]: duplicateSource };
   return { compositionSources: nextSources, project: { ...project, compositionSources: nextSources, compositionLibrary: [...(project.compositionLibrary ?? fallbackLibrary), duplicate] } };
 }
 
@@ -113,49 +194,23 @@ export function deleteCompositionFileFromProject(project: ProjectManifest, compo
 export function relinkCompositionInProject(project: ProjectManifest, compositionSources: Record<string, string>, compositionId: string, nextFilePath: string, source: string, fallbackLibrary: Part[], parsedComposition?: Part): CompositionLibraryMutationResult | null {
   const library = project.compositionLibrary ?? fallbackLibrary;
   const libraryComposition = library.find((item) => item.id === compositionId);
-  const referencedByTimeline = project.timelines?.some((timeline) => timeline.clips.some((clip) => clip.compositionId === compositionId));
-  const composition = libraryComposition ?? (referencedByTimeline ? createMissingComposition(compositionId) : null);
+  const composition = libraryComposition ?? null;
   if (!composition || !nextFilePath.trim()) return null;
-  const targetFileName = composition.filePath.split("/").pop() || composition.filePath;
-  const relinkIds = new Set(library
-    .filter((item) => item.id === compositionId || (item.sourceMissing && (item.filePath === composition.filePath || (item.filePath.split("/").pop() || item.filePath) === targetFileName)))
-    .map((item) => item.id));
-  relinkIds.add(compositionId);
-  const rest = Object.fromEntries(Object.entries(compositionSources).filter(([path]) => !library.some((item) => relinkIds.has(item.id) && item.filePath === path)));
+  const rest = Object.fromEntries(Object.entries(compositionSources).filter(([path]) => path !== composition.filePath));
   const nextSources = { ...rest, [nextFilePath]: source };
-  const restoredComposition = parsedComposition ? { ...parsedComposition, source } : { ...composition, source };
-  const relinkedLibrary = library.map((item) => relinkIds.has(item.id) ? {
+  const restoredComposition = parsedComposition ? { ...parsedComposition, id: composition.id, sourceHash: hashCompositionSource(source), source } : { ...composition, sourceHash: hashCompositionSource(source), source };
+  const nextLibrary = library.map((item) => item.id === compositionId ? {
     ...restoredComposition,
-    id: nextFilePath,
+    id: composition.id,
     filePath: nextFilePath,
     sourceMissing: undefined,
   } : item);
-  const hasRelinkedLibraryEntry = relinkedLibrary.some((item) => item.id === nextFilePath);
-  const nextLibrary = hasRelinkedLibraryEntry ? relinkedLibrary : [...relinkedLibrary, { ...restoredComposition, id: nextFilePath, filePath: nextFilePath, sourceMissing: undefined }];
   return {
     compositionSources: nextSources,
     project: {
       ...project,
       compositionSources: nextSources,
       compositionLibrary: nextLibrary,
-      timelines: (project.timelines ?? []).map((timeline) => ({
-        ...timeline,
-        clips: timeline.clips.map((clip) => relinkIds.has(clip.compositionId) ? { ...clip, compositionId: nextFilePath } : clip),
-      })),
     },
-  };
-}
-
-function createMissingComposition(compositionId: string): Part {
-  return {
-    id: compositionId,
-    filePath: compositionId,
-    duration: 5,
-    frame: { width: 1920, height: 1080, style: {} },
-    background: { id: "background", name: "Background", style: {}, elements: [] },
-    objects: [],
-    snapshot: [],
-    motionMarkers: [],
-    sourceMissing: true,
   };
 }

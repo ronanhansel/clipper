@@ -1,6 +1,6 @@
 import { RotateCcw } from "lucide-react";
 import { appBarButtonBase, defaultExportTileMapping, defaultExportWorkerMapping, defaultLiveDomPostProcessMaxFps, defaultNewMarkerDurationSeconds, defaultPausePlaybackOnScrub, defaultPrerenderBlockDurationMs, defaultPreviewRenderHeight, defaultScrubCommitThrottleMs, defaultStableSlowGridPreset, defaultStableSlowValidationSamples, defaultTimelineEndPaddingFraction, defaultTimelinePrecision, defaultVideoExportTileHeight, maxExportTileCount, maxExportWorkerCount, maxLiveDomPostProcessMaxFps, maxPrerenderBlockDurationMs, maxStableSlowValidationSamples, maxVideoExportTileHeight, minExportTileCount, minExportWorkerCount, minLiveDomPostProcessMaxFps, minPrerenderBlockDurationMs, minStableSlowValidationSamples, minVideoExportTileHeight, previewRenderHeightOptions } from "../app/config";
-import type { AppUpdateStatus, ExportTileResolutionMapping, ExportWorkerResolutionMapping, SettingsSection, StableSlowGridPreset, StableSlowValidationSamples } from "../app/types";
+import type { AppUpdateStatus, ExportTileResolutionMapping, ExportWorkerConfigurationMode, ExportWorkerResolutionMapping, SettingsSection, StableSlowGridPreset, StableSlowValidationSamples } from "../app/types";
 import { clamp } from "../core/math";
 import { Dialog, DialogContent } from "./ui/dialog";
 import { Input } from "./ui/input";
@@ -20,6 +20,7 @@ type SettingsDialogProps = {
   autoDownloadUpdates: boolean;
   debugSettingsEnabled: boolean;
   exportTileMapping: ExportTileResolutionMapping;
+  exportWorkerConfigurationMode: ExportWorkerConfigurationMode;
   exportWorkerMapping: ExportWorkerResolutionMapping;
   stableSlowGridPreset: StableSlowGridPreset;
   stableSlowValidationSamples: StableSlowValidationSamples;
@@ -44,6 +45,7 @@ type SettingsDialogProps = {
   onDownloadUpdate: () => void;
   onDebugSettingsEnabledChange: (enabled: boolean) => void;
   onExportTileMappingChange: (mapping: ExportTileResolutionMapping) => void;
+  onExportWorkerConfigurationModeChange: (mode: ExportWorkerConfigurationMode) => void;
   onExportWorkerMappingChange: (mapping: ExportWorkerResolutionMapping) => void;
   onStableSlowGridPresetChange: (preset: StableSlowGridPreset) => void;
   onStableSlowValidationSamplesChange: (samples: StableSlowValidationSamples) => void;
@@ -64,7 +66,7 @@ type SettingsDialogProps = {
   onVideoExportTileHeightChange: (value: number) => void;
 };
 
-export function SettingsDialog({ activeSection, autoDownloadUpdates, debugSettingsEnabled, exportTileMapping, exportWorkerMapping, stableSlowGridPreset, stableSlowValidationSamples, liveDomPostProcessPreviewEnabled, liveDomPostProcessRuntimeEnabled, liveDomPostProcessMaxFps, open, pausePlaybackOnScrub, prerenderCacheBlackMissDebug, prerenderCacheEnabled, prerenderBlockDurationMs, previewRenderHeight, scrubCommitThrottleMs, defaultNewMarkerDurationSeconds: markerDurationSeconds, timelineEndPaddingFraction, timelinePrecision, updateStatus, videoExportTileHeight, onActiveSectionChange, onAutoDownloadUpdatesChange, onCheckForUpdates, onDownloadUpdate, onDebugSettingsEnabledChange, onExportTileMappingChange, onExportWorkerMappingChange, onStableSlowGridPresetChange, onStableSlowValidationSamplesChange, onInstallUpdate, onLiveDomPostProcessPreviewEnabledChange, onLiveDomPostProcessMaxFpsChange, onOpenChange, onPausePlaybackOnScrubChange, onPrerenderCacheBlackMissDebugChange, onPrerenderCacheEnabledChange, onPrerenderBlockDurationMsChange, onPreviewRenderHeightChange, onClearAllPrerenderCaches, onScrubCommitThrottleMsChange, onDefaultNewMarkerDurationSecondsChange, onTimelineEndPaddingFractionChange, onTimelinePrecisionChange, onVideoExportTileHeightChange }: SettingsDialogProps) {
+export function SettingsDialog({ activeSection, autoDownloadUpdates, debugSettingsEnabled, exportTileMapping, exportWorkerConfigurationMode, exportWorkerMapping, stableSlowGridPreset, stableSlowValidationSamples, liveDomPostProcessPreviewEnabled, liveDomPostProcessRuntimeEnabled, liveDomPostProcessMaxFps, open, pausePlaybackOnScrub, prerenderCacheBlackMissDebug, prerenderCacheEnabled, prerenderBlockDurationMs, previewRenderHeight, scrubCommitThrottleMs, defaultNewMarkerDurationSeconds: markerDurationSeconds, timelineEndPaddingFraction, timelinePrecision, updateStatus, videoExportTileHeight, onActiveSectionChange, onAutoDownloadUpdatesChange, onCheckForUpdates, onDownloadUpdate, onDebugSettingsEnabledChange, onExportTileMappingChange, onExportWorkerConfigurationModeChange, onExportWorkerMappingChange, onStableSlowGridPresetChange, onStableSlowValidationSamplesChange, onInstallUpdate, onLiveDomPostProcessPreviewEnabledChange, onLiveDomPostProcessMaxFpsChange, onOpenChange, onPausePlaybackOnScrubChange, onPrerenderCacheBlackMissDebugChange, onPrerenderCacheEnabledChange, onPrerenderBlockDurationMsChange, onPreviewRenderHeightChange, onClearAllPrerenderCaches, onScrubCommitThrottleMsChange, onDefaultNewMarkerDurationSecondsChange, onTimelineEndPaddingFractionChange, onTimelinePrecisionChange, onVideoExportTileHeightChange }: SettingsDialogProps) {
   const navItems: Array<{ id: SettingsSection; label: string }> = [
     { id: "general", label: "General" },
     { id: "playback", label: "Playback" },
@@ -119,6 +121,13 @@ export function SettingsDialog({ activeSection, autoDownloadUpdates, debugSettin
     const parsed = Number(value);
     if (!Number.isFinite(parsed)) return;
     onExportWorkerMappingChange({ ...exportWorkerMapping, [key]: Math.round(clamp(parsed, minExportWorkerCount, maxExportWorkerCount)) });
+  }
+
+  function updateUnifiedExportWorkerCount(value: string) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return;
+    const workerCount = Math.round(clamp(parsed, minExportWorkerCount, maxExportWorkerCount));
+    onExportWorkerMappingChange({ hd: workerCount, qhd: workerCount, uhd: workerCount });
   }
 
   function updateExportTileCount(key: keyof ExportTileResolutionMapping, value: string) {
@@ -401,11 +410,29 @@ export function SettingsDialog({ activeSection, autoDownloadUpdates, debugSettin
                     <strong className="text-sm text-white">Renderer workers</strong>
                     <p className="text-xs leading-5 text-[#8f939d]">Controls hidden renderer processes for media export. Heavy 8K scenes should use fewer UHD workers; higher values are faster but multiply CPU, RAM, and Chromium tile memory.</p>
                   </div>
-                  <div className="grid grid-cols-3 gap-3">
-                    <WorkerCountField id="export-workers-hd" label="1920x1080 and below" value={exportWorkerMapping.hd} defaultValue={defaultExportWorkerMapping.hd} onChange={(value) => updateExportWorkerCount("hd", value)} onReset={() => onExportWorkerMappingChange({ ...exportWorkerMapping, hd: defaultExportWorkerMapping.hd })} />
-                    <WorkerCountField id="export-workers-qhd" label="2560x1440 and below" value={exportWorkerMapping.qhd} defaultValue={defaultExportWorkerMapping.qhd} onChange={(value) => updateExportWorkerCount("qhd", value)} onReset={() => onExportWorkerMappingChange({ ...exportWorkerMapping, qhd: defaultExportWorkerMapping.qhd })} />
-                    <WorkerCountField id="export-workers-uhd" label="3840x2160 and above" value={exportWorkerMapping.uhd} defaultValue={defaultExportWorkerMapping.uhd} onChange={(value) => updateExportWorkerCount("uhd", value)} onReset={() => onExportWorkerMappingChange({ ...exportWorkerMapping, uhd: defaultExportWorkerMapping.uhd })} />
-                  </div>
+                  <label className="grid w-[260px] gap-1.5 text-xs font-bold text-[#dfe2ea]" htmlFor="export-worker-configuration-mode">
+                    Configuration mode
+                    <Select value={exportWorkerConfigurationMode} onValueChange={(value) => onExportWorkerConfigurationModeChange(value as ExportWorkerConfigurationMode)}>
+                      <SelectTrigger id="export-worker-configuration-mode" className="h-9">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="separate">Separate</SelectItem>
+                        <SelectItem value="unified">Unified</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </label>
+                  {exportWorkerConfigurationMode === "unified" ? (
+                    <div className="grid w-[260px] gap-3">
+                      <WorkerCountField id="export-workers-unified" label="All export resolutions" value={exportWorkerMapping.hd} defaultValue={defaultExportWorkerMapping.hd} onChange={updateUnifiedExportWorkerCount} onReset={() => onExportWorkerMappingChange({ hd: defaultExportWorkerMapping.hd, qhd: defaultExportWorkerMapping.hd, uhd: defaultExportWorkerMapping.hd })} />
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-3 gap-3">
+                      <WorkerCountField id="export-workers-hd" label="1920x1080 and below" value={exportWorkerMapping.hd} defaultValue={defaultExportWorkerMapping.hd} onChange={(value) => updateExportWorkerCount("hd", value)} onReset={() => onExportWorkerMappingChange({ ...exportWorkerMapping, hd: defaultExportWorkerMapping.hd })} />
+                      <WorkerCountField id="export-workers-qhd" label="2560x1440 and below" value={exportWorkerMapping.qhd} defaultValue={defaultExportWorkerMapping.qhd} onChange={(value) => updateExportWorkerCount("qhd", value)} onReset={() => onExportWorkerMappingChange({ ...exportWorkerMapping, qhd: defaultExportWorkerMapping.qhd })} />
+                      <WorkerCountField id="export-workers-uhd" label="3840x2160 and above" value={exportWorkerMapping.uhd} defaultValue={defaultExportWorkerMapping.uhd} onChange={(value) => updateExportWorkerCount("uhd", value)} onReset={() => onExportWorkerMappingChange({ ...exportWorkerMapping, uhd: defaultExportWorkerMapping.uhd })} />
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="grid gap-4 rounded-xl border border-[#363b47] bg-[#1b1e26] p-4">

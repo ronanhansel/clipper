@@ -99,6 +99,42 @@ export type NativeTreeProps<T> = {
   children: (props: NativeTreeNodeRendererProps<T>) => ReactNode;
 };
 
+export function collectNativeTreeIds<T>(data: T[], idAccessor: keyof T | ((node: T) => string)) {
+  const ids = new Set<string>();
+  const getId = (node: T) => typeof idAccessor === "function" ? idAccessor(node) : String(node[idAccessor]);
+
+  function visit(nodes: T[]) {
+    for (const node of nodes) {
+      ids.add(getId(node));
+      const children = (node as { children?: T[] }).children;
+      if (Array.isArray(children)) visit(children);
+    }
+  }
+
+  visit(data);
+  return ids;
+}
+
+export type NativeTreeIdentityState = {
+  selectedIds: string[];
+  focusedId: string | null;
+  editingId: string | null;
+  dragState: { ids: string[]; primaryId: string; mouse: { x: number; y: number } | null } | null;
+  dropTarget: NativeTreeDropTarget | null;
+};
+
+export function reconcileNativeTreeIdentityState(state: NativeTreeIdentityState, validIds: Set<string>): NativeTreeIdentityState {
+  const selectedIds = state.selectedIds.filter((id) => validIds.has(id));
+  const dragIds = state.dragState?.ids.filter((id) => validIds.has(id)) ?? [];
+  return {
+    selectedIds,
+    focusedId: state.focusedId && validIds.has(state.focusedId) ? state.focusedId : null,
+    editingId: state.editingId && validIds.has(state.editingId) ? state.editingId : null,
+    dragState: state.dragState && dragIds.length && validIds.has(state.dragState.primaryId) ? { ...state.dragState, ids: dragIds } : null,
+    dropTarget: state.dropTarget?.parentId && !validIds.has(state.dropTarget.parentId) ? null : state.dropTarget,
+  };
+}
+
 export const NativeTree = forwardRef(function NativeTree<T>(props: NativeTreeProps<T>, ref: ForwardedRef<NativeTreeApi<T> | undefined>) {
   const {
     data,
@@ -151,6 +187,26 @@ export const NativeTree = forwardRef(function NativeTree<T>(props: NativeTreePro
     return Array.isArray(childrenValue) ? childrenValue : [];
   };
 
+  useEffect(() => {
+    const nextIds = collectNativeTreeIds(data, idAccessor);
+    let nextSelectedIds = selectedIds;
+    let selectionChanged = false;
+    setSelectedIds((current) => {
+      nextSelectedIds = current.filter((id) => nextIds.has(id));
+      selectionChanged = nextSelectedIds.length !== current.length || nextSelectedIds.some((id, index) => id !== current[index]);
+      return selectionChanged ? nextSelectedIds : current;
+    });
+    setFocusedId((current) => current && nextIds.has(current) ? current : null);
+    setEditingId((current) => current && nextIds.has(current) ? current : null);
+    setDragState((current) => {
+      if (!current) return current;
+      const ids = current.ids.filter((id) => nextIds.has(id));
+      return ids.length && nextIds.has(current.primaryId) ? { ...current, ids } : null;
+    });
+    setDropTarget((current) => current?.parentId && !nextIds.has(current.parentId) ? null : current);
+    if (selectionChanged) window.setTimeout(() => onSelect?.(nextSelectedIds.flatMap((id) => apiRef.current.visibleNodes.find((node) => node.id === id) ?? [])), 0);
+  }, [data, idAccessor, onSelect, selectedIds]);
+
   const apiRef = useRef<NativeTreeApi<T>>(null as unknown as NativeTreeApi<T>);
   const visibleNodes = useMemo(() => {
     const nodes: NativeTreeNodeApi<T>[] = [];
@@ -199,8 +255,8 @@ export const NativeTree = forwardRef(function NativeTree<T>(props: NativeTreePro
           },
           reset: () => setEditingId(null),
           submit: (name: string) => {
-            setEditingId(null);
             onRename?.({ id, name });
+            setEditingId(null);
           },
           toggle: () => {
             if (!isInternal) return;

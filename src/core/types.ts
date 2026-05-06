@@ -322,6 +322,7 @@ export type CompositionClip = TimelineMarkerMetadata & {
   id: string;
   compositionId?: string;
   filePath: string;
+  sourceHash?: string;
   source?: string;
   prerender?: boolean;
   sourceMissing?: boolean;

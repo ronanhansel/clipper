@@ -107,16 +107,16 @@ export function PreviewColumn({ blankFrameViewportStyle, children, currentSceneT
                 {displayPrerenderPreview
                   ? <PrerenderVideoPreview blackMissDebug={prerenderCacheBlackMissDebug} currentSceneTimeRef={currentSceneTimeRef} framePreviewProps={renderFramePreviewProps} getBlockAtTime={getPrerenderCacheBlockAtTime} liveDomPostProcessMaxFps={liveDomPostProcessMaxFps} livePostProcessPreviewEnabled={livePostProcessPreviewEnabled} onCachedPreviewDisplayReadyChange={onCachedPreviewDisplayReadyChange} />
                   : <LivePostProcessFramePreview currentSceneTimeRef={currentSceneTimeRef} framePreviewProps={renderFramePreviewProps} liveDomPostProcessMaxFps={liveDomPostProcessMaxFps} livePostProcessEnabled={livePostProcessPreviewEnabled} />}
-                {!hasActiveComposition ? <div className="pointer-events-none absolute left-0 top-0 z-[2147483647] bg-black" data-clipper-stable-blank-preview-overlay style={{ width: FRAME_WIDTH * previewRenderScale, height: FRAME_HEIGHT * previewRenderScale }} /> : null}
+                {!hasActiveComposition && !(mode === "editor" && !editorPaneProps) ? <div className="pointer-events-none absolute left-0 top-0 z-[2147483647] bg-black" data-clipper-stable-blank-preview-overlay style={{ width: FRAME_WIDTH * previewRenderScale, height: FRAME_HEIGHT * previewRenderScale }} /> : null}
               </div>
             ) : null}
           </div>
-          {!hasActiveComposition && !renderFramePreviewProps ? <div className="relative overflow-hidden bg-black shadow-[0_22px_70px_rgba(0,0,0,0.44)]" aria-label="Blank preview frame" data-clipper-blank-frame-preview style={blankFrameViewportStyle} /> : null}
+          {!hasActiveComposition && !renderFramePreviewProps && !(mode === "editor" && !editorPaneProps) ? <div className="relative overflow-hidden bg-black shadow-[0_22px_70px_rgba(0,0,0,0.44)]" aria-label="Blank preview frame" data-clipper-blank-frame-preview style={blankFrameViewportStyle} /> : null}
         </div>
 
         {/* Editor overlay — sibling of scroll viewport, not inside it. Not affected by preview scrollTop/scrollLeft. */}
         {mode === "editor" && editorPaneProps ? <div className="absolute inset-0 z-10"><EditorPane {...editorPaneProps} /></div> : null}
-        {mode === "editor" && !editorPaneProps ? <div className="absolute inset-0 z-10 grid place-items-center p-6 text-center text-sm font-bold text-[#9b9da7]">No file is open in the editor.</div> : null}
+        {mode === "editor" && !editorPaneProps ? <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center p-6 text-center text-sm font-bold text-[#9b9da7]">No file is open in the editor.</div> : null}
       </div>
       {children}
     </section>

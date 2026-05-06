@@ -68,8 +68,8 @@ async function loadDirectoryProject(manifestPath: string) {
   const rootPath = getDirectoryPath(manifestPath);
   const editableRoot = await getEditableRootPath(rootPath);
   const timelines = await loadDirectoryTimelines(editableRoot, rootPath, manifestProject.timelineOrder);
-  const compositions = await loadDirectoryCompositions(editableRoot, rootPath);
-  const compositionLibrary = mergeMissingCompositionMetadata(manifestProject, compositions);
+  const compositions = await loadDirectoryCompositions(editableRoot, rootPath, manifestProject.compositionLibrary ?? []);
+  const compositionLibrary = mergeMissingCompositionMetadata({ ...manifestProject, timelines }, compositions);
   return normalizeProject({
     ...manifestProject,
     timelines,
@@ -117,7 +117,7 @@ async function loadDirectoryTimelines(editableRoot: string, fallbackRoot: string
   return timelines.sort((left, right) => getDisplayNameFromPath(left.filePath || left.id).localeCompare(getDisplayNameFromPath(right.filePath || right.id), undefined, { sensitivity: "base" }));
 }
 
-async function loadDirectoryCompositions(editableRoot: string, fallbackRoot: string) {
+async function loadDirectoryCompositions(editableRoot: string, fallbackRoot: string, manifestCompositions: CompositionClip[]) {
   const primaryDir = editableRoot ? `${editableRoot}/compositions` : "file-manager/compositions";
   const fallbackDir = fallbackRoot ? `${fallbackRoot}/compositions` : "compositions";
 
@@ -127,22 +127,45 @@ async function loadDirectoryCompositions(editableRoot: string, fallbackRoot: str
     compositionFiles = await listProjectFilesRecursive(fallbackDir).then(files => files.filter(isCompositionSourceFile));
   }
 
+  const claimedManifestIds = new Set<string>();
   return Promise.all(
     compositionFiles.map(async (file) => {
       const source = await clipperHost.readTextFile(file.path);
       const filePath = projectPathFromDirectoryEntry(fallbackRoot, file.relativePath, "compositions");
-      const baseComposition = createBaseComposition(filePath, filePath, source);
+      const manifestComposition = resolveManifestCompositionForFile(manifestCompositions, claimedManifestIds, filePath, source);
+      if (manifestComposition) claimedManifestIds.add(manifestComposition.id);
+      const baseComposition = createBaseComposition(manifestComposition?.id ?? createStableCompositionId(), filePath, source);
       try {
         const document = await compositionFromProjectSource(baseComposition, source, async (relativePath) => {
           const dependencyPath = relativePath.startsWith("compositions/") ? `${editableRoot}/${relativePath}` : `${getDirectoryPath(file.path)}/${relativePath}`;
           return clipperHost.readTextFile(dependencyPath);
         });
-        return { ...document, source } as CompositionDocument;
+        return { ...document, id: baseComposition.id, filePath, sourceHash: hashCompositionSource(source), source } as CompositionDocument;
       } catch (error) {
         return createErroredComposition(baseComposition, source, error);
       }
     })
   );
+}
+
+function resolveManifestCompositionForFile(manifestCompositions: CompositionClip[], claimedIds: Set<string>, filePath: string, source: string) {
+  const byPath = manifestCompositions.find((composition) => !claimedIds.has(composition.id) && composition.filePath === filePath);
+  if (byPath) return byPath;
+  const sourceHash = hashCompositionSource(source);
+  return manifestCompositions.find((composition) => !claimedIds.has(composition.id) && composition.sourceHash === sourceHash);
+}
+
+function hashCompositionSource(source: string) {
+  let hash = 2166136261;
+  for (let index = 0; index < source.length; index += 1) {
+    hash ^= source.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+function createStableCompositionId() {
+  return `composition-${crypto.randomUUID()}`;
 }
 
 function isCompositionSourceFile(file: { name: string }) {
@@ -193,7 +216,22 @@ function mergeMissingCompositionMetadata(manifestProject: ProjectManifest, compo
   const missing = (manifestProject.compositionLibrary ?? [])
     .filter((composition) => !loadedIds.has(composition.id))
     .map((composition) => ({ ...composition, source: undefined, sourceMissing: true }));
-  return [...compositions, ...missing];
+  const missingById = new Map<string, CompositionClip>(missing.map((composition) => [composition.id, composition]));
+  return [...compositions, ...missingById.values()];
+}
+
+function createMissingCompositionPlaceholder(compositionId: string, duration?: number): CompositionClip {
+  return {
+    id: compositionId,
+    filePath: compositionId,
+    sourceMissing: true,
+    duration: Math.max(duration ?? 3, 0.1),
+    frame: { width: FRAME_WIDTH, height: FRAME_HEIGHT, style: { background: "#050505" } },
+    background: { id: "missing-background", name: "Missing media", style: { background: "#050505" }, elements: [] },
+    objects: [],
+    snapshot: [],
+    motionMarkers: [],
+  };
 }
 
 async function saveDirectoryProject(manifestPath: string, project: ProjectManifest) {
@@ -206,7 +244,7 @@ async function saveDirectoryProject(manifestPath: string, project: ProjectManife
     assetsPath: normalized.assetsPath,
     assets: normalized.assets,
     compositionFolders: normalized.compositionFolders ?? [],
-    compositionLibrary: normalized.compositionLibrary?.filter((composition) => composition.sourceMissing).map((composition) => ({ ...composition, source: undefined })) ?? [],
+    compositionLibrary: normalized.compositionLibrary?.map((composition) => ({ ...composition, source: undefined })) ?? [],
     timelineOrder: normalized.timelines?.map((timeline) => timeline.id) ?? [],
     compositionOrder: normalized.compositions?.map((composition) => composition.id) ?? [],
     editorState: normalized.editorState,
@@ -278,6 +316,7 @@ function createErroredComposition(baseComposition: CompositionDocument, source: 
   return {
     ...baseComposition,
     source,
+    sourceHash: hashCompositionSource(source),
     compositionError: error instanceof Error ? error.message : "Unable to load composition source.",
   };
 }

@@ -146,6 +146,13 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
     setCompositionSources(nextSources);
   }
 
+  function hasUnsavedProjectChanges(projectToCheck = projectRef.current) {
+    const persistedProject = serializeProjectForSave({ ...projectToCheck, compositionSources: compositionSourcesRef.current });
+    const projectSnapshot = getProjectContentSnapshot(persistedProject);
+    const compositionSourcesSnapshot = JSON.stringify(persistedProject.compositionSources ?? {});
+    return projectSnapshot !== savedProjectSnapshotRef.current || compositionSourcesSnapshot !== savedCompositionSourcesSnapshotRef.current;
+  }
+
   function markLastHistoryEntryAsImplicitFileOperation() {
     const past = projectHistoryRef.current.past;
     if (past.length === 0) return;
@@ -268,6 +275,11 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
     if (recoveryPromise) {
       await recoveryPromise;
       if (fileSystemRecoveryPromiseRef.current === recoveryPromise) fileSystemRecoveryPromiseRef.current = null;
+      return;
+    }
+    if (hasUnsavedProjectChanges()) {
+      setSourceStatus("Filesystem operation completed. Save or reload to apply external disk changes.");
+      setFileSystemRevision((r) => r + 1);
       return;
     }
     await reloadProjectFromDisk();
@@ -496,12 +508,6 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
 
     const projectSources = projectOverride === projectRef.current ? compositionSourcesRef.current : getProjectCompositionSources(projectOverride);
     const projectToSave = normalizeProject({ ...projectOverride, compositionSources: projectSources });
-    const projectSnapshot = getProjectContentSnapshot(projectToSave);
-    const compositionSourcesSnapshot = JSON.stringify(projectToSave.compositionSources ?? {});
-    setSavedProjectSnapshot(projectSnapshot);
-    setSavedCompositionSourcesSnapshot(compositionSourcesSnapshot);
-    savedProjectSnapshotRef.current = projectSnapshot;
-    savedCompositionSourcesSnapshotRef.current = compositionSourcesSnapshot;
 
     const operationGeneration = fileSystemQueueGenerationRef.current;
     const saveVersion = ++implicitFileOperationSaveVersionRef.current;
@@ -513,6 +519,12 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
           if (operationGeneration !== fileSystemQueueGenerationRef.current) throw new Error("File operation save cancelled because an earlier operation failed.");
           const result = await projectPersistenceService.saveProject({ manifestPath: activeProjectManifestPathRef.current, project: projectToSave });
           if (saveVersion !== implicitFileOperationSaveVersionRef.current) return;
+          const nextSavedProjectSnapshot = result.projectSnapshot ? getProjectContentSnapshot(JSON.parse(result.projectSnapshot) as ProjectManifest) : getProjectContentSnapshot(projectToSave);
+          const nextSavedCompositionSourcesSnapshot = result.compositionSourcesSnapshot || JSON.stringify(projectToSave.compositionSources ?? {});
+          savedProjectSnapshotRef.current = nextSavedProjectSnapshot;
+          savedCompositionSourcesSnapshotRef.current = nextSavedCompositionSourcesSnapshot;
+          setSavedProjectSnapshot(nextSavedProjectSnapshot);
+          setSavedCompositionSourcesSnapshot(nextSavedCompositionSourcesSnapshot);
           setSourceStatus(result.sourceStatus);
           lastGoodProjectRef.current = projectRef.current;
         } catch (error) {
