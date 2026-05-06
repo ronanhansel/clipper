@@ -6,7 +6,7 @@ import { getLiveDomPostProcessPreflight, isLiveDomPostProcessPreviewOptedIn, typ
 import { collectLiveDomPostProcessRequirement } from "../../core/effects/postprocess/liveDomRequirement";
 import { LiveDomPostProcessRenderer } from "../../core/effects/postprocess/liveDomRenderer";
 import { selectLiveDomPostProcessPass, withPostProcessFrameBackground } from "../../core/effects/postprocess/passes";
-import { createLensPostProcessRenderer } from "../../core/effects/postprocess/lensWebGlRenderer";
+import { createDefaultPostProcessRenderer, type PostProcessRenderer } from "../../core/effects/postprocess/registry";
 import type { AdjustmentVisualOverlay, AdjustmentVisualStyle } from "../../core/effects/types";
 import { FRAME_HEIGHT, FRAME_WIDTH, type AdjustmentLayer, type TransitionLayer } from "../../core/types";
 import type { PrerenderCacheBlock } from "../features/preview/usePrerenderCache";
@@ -110,7 +110,8 @@ export function PreviewColumn({ blankFrameViewportStyle, children, currentSceneT
 function PrerenderVideoPreview({ blackMissDebug, currentSceneTimeRef, framePreviewProps, getBlockAtTime, liveDomPostProcessMaxFps, livePostProcessPreviewEnabled, onCachedPreviewDisplayReadyChange }: { blackMissDebug: boolean; currentSceneTimeRef: RefObject<number>; framePreviewProps: FramePreviewProps; getBlockAtTime: (time: number) => PrerenderCacheBlock | null; liveDomPostProcessMaxFps: number; livePostProcessPreviewEnabled: boolean; onCachedPreviewDisplayReadyChange: (ready: boolean) => void }) {
   const canvas2dRef = useRef<HTMLCanvasElement | null>(null);
   const webglCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const postProcessRendererRef = useRef<ReturnType<typeof createLensPostProcessRenderer> | null>(null);
+  const postProcessRendererRef = useRef<PostProcessRenderer | null>(null);
+  const postProcessRendererKindRef = useRef<string | null>(null);
   const lastFrameKeyRef = useRef("");
   const firstMissAtRef = useRef<number | null>(null);
   const displayReadyRef = useRef(false);
@@ -151,10 +152,23 @@ function PrerenderVideoPreview({ blackMissDebug, currentSceneTimeRef, framePrevi
   }, [currentSceneTimeRef, framePreviewProps.adjustmentLayers, getBlockAtTime]);
 
   useEffect(() => () => {
-    postProcessRendererRef.current?.destroy();
-    postProcessRendererRef.current = null;
+    destroyCachedPostProcessRenderer();
     updateDisplayReady(false);
   }, []);
+
+  function getPostProcessRenderer(kind: string) {
+    if (postProcessRendererRef.current && postProcessRendererKindRef.current === kind) return postProcessRendererRef.current;
+    destroyCachedPostProcessRenderer();
+    postProcessRendererRef.current = createDefaultPostProcessRenderer(kind);
+    postProcessRendererKindRef.current = postProcessRendererRef.current ? kind : null;
+    return postProcessRendererRef.current;
+  }
+
+  function destroyCachedPostProcessRenderer() {
+    postProcessRendererRef.current?.destroy();
+    postProcessRendererRef.current = null;
+    postProcessRendererKindRef.current = null;
+  }
 
   function drawCachedFrameAtTime(sceneTime: number) {
     if (requiresDomOverlayPreview(framePreviewProps)) {
@@ -181,9 +195,13 @@ function PrerenderVideoPreview({ blackMissDebug, currentSceneTimeRef, framePrevi
           showDomFallback();
           return;
         }
-        postProcessRendererRef.current ??= createLensPostProcessRenderer();
+        const renderer = getPostProcessRenderer(webGlPostProcessPass.kind);
+        if (!renderer) {
+          showDomFallback();
+          return;
+        }
         const decoratedPass = withPostProcessFrameBackground(webGlPostProcessPass, framePreviewProps.part.frame.style.background);
-        if (!postProcessRendererRef.current.render(canvas, frame.bitmap, decoratedPass, block.width, block.height)) {
+        if (!renderer.render(canvas, frame.bitmap, decoratedPass, block.width, block.height)) {
           showDomFallback();
           return;
         }
@@ -532,7 +550,7 @@ function LivePostProcessFramePreview({ currentSceneTimeRef, framePreviewProps, l
     };
   }, [currentSceneTimeRef, framePreviewProps.adjustmentLayers, livePostProcessEnabled]);
 
-  const diagnostic = diagnosticReason ? `Live Lens preview: ${livePostProcessReasonLabel[diagnosticReason]}` : undefined;
+  const diagnostic = diagnosticReason ? `Live post-process preview: ${livePostProcessReasonLabel[diagnosticReason]}` : undefined;
   const outputRequiresLiveSource = livePostProcessEnabled && activeLiveSourceRequired;
   const liveCanvasFilterStyle = liveVisualStyle.filter ? { filter: liveVisualStyle.filter } as CSSProperties : undefined;
 

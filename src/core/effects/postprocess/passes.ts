@@ -1,4 +1,4 @@
-import { lensPostProcessKind, withLensFrameBackground, type LensPostProcessPass } from "./lens";
+import { decoratePostProcessPassFrameBackground } from "./registry";
 import type { PostProcessPass } from "../types";
 
 export function selectLiveDomPostProcessPass(passes: PostProcessPass[]) {
@@ -7,9 +7,5 @@ export function selectLiveDomPostProcessPass(passes: PostProcessPass[]) {
 }
 
 export function withPostProcessFrameBackground(pass: PostProcessPass, background: unknown): PostProcessPass {
-  switch (pass.kind) {
-    case lensPostProcessKind:
-      return withLensFrameBackground(pass as LensPostProcessPass, background);
-  }
-  return pass;
+  return decoratePostProcessPassFrameBackground(pass, background);
 }

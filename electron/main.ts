@@ -43,7 +43,7 @@ const textFileWatchers = new Map<number, FSWatcher[]>();
 let appShuttingDown = false;
 const appShuttingDownRef = { current: appShuttingDown };
 Object.defineProperty(appShuttingDownRef, "current", { get: () => appShuttingDown, set: (v) => { appShuttingDown = v; } });
-const appIconPath = path.resolve(__dirname, "../build/icons/icon.png");
+const appIconPath = path.resolve(__dirname, "../build/electron/icon.png");
 
 function readStartupAppStateBoolean(key: string, fallback = false) {
   try {
@@ -842,7 +842,13 @@ async function createWindow() {
     },
   });
 
-  if (process.platform === "darwin") app.dock?.setIcon(appIconPath);
+  if (process.platform === "darwin") {
+    try {
+      app.dock?.setIcon(appIconPath);
+    } catch {
+      /* Missing dock icons should not block renderer startup. */
+    }
+  }
 
   try {
     const state = await readAppState();

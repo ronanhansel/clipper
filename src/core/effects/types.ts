@@ -1,7 +1,16 @@
 import type { AdjustmentEffectDefinition, AdjustmentLayer, MotionBlock, MotionEffectDefinition, TransitionEffectDefinition, TransitionLayer, Point } from "../types";
 import type { LensPostProcessPass } from "./postprocess/lens";
 
-export type PostProcessPass = LensPostProcessPass;
+export type BasePostProcessPass = {
+  id: string;
+  kind: string;
+  target: "final";
+  requiresLiveDomSource?: boolean;
+};
+
+export type UnknownPostProcessPass = BasePostProcessPass & Record<string, unknown>;
+
+export type PostProcessPass = LensPostProcessPass | UnknownPostProcessPass;
 
 export type AdjustmentVisualStyle = {
   filter?: string;

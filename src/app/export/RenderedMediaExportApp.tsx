@@ -4,7 +4,7 @@ import { applyAdjustmentLayersToPostProcessPasses } from "../../core/adjustments
 import { CAMERA_PERSPECTIVE } from "../../core/camera";
 import { applyExportPostProcessFrame, applyExportRawPostProcessFrame, type ExportPostProcessFrameRequest, type ExportPostProcessFrameResult, type ExportRawPostProcessFrameRequest, type ExportRawPostProcessFrameResult } from "../../core/effects/postprocess/exportFrameBridge";
 import { withPostProcessFrameBackground } from "../../core/effects/postprocess/passes";
-import { createLensExportPostProcessRenderer, createLensPostProcessRenderer } from "../../core/effects/postprocess/lensWebGlRenderer";
+import { createDefaultExportPostProcessRenderers, type PostProcessRenderer } from "../../core/effects/postprocess/registry";
 import type { PostProcessPass } from "../../core/effects/types";
 import { waitForRenderClockAnimationsReady, type RenderClockReadinessResult } from "../../render-engine/renderClock";
 import { FRAME_HEIGHT, FRAME_WIDTH, type CompositionClip, type ProjectManifest, type Scene } from "../../core/types";
@@ -55,7 +55,7 @@ export function RenderedMediaExportApp() {
   const cameraRef = useRef<HTMLDivElement | null>(null);
   const frameViewportRef = useRef<HTMLDivElement | null>(null);
   const dragSelectionBoxRef = useRef<HTMLDivElement | null>(null);
-  const postProcessRendererRef = useRef<ReturnType<typeof createLensPostProcessRenderer> | null>(null);
+  const postProcessRenderersRef = useRef<Map<string, PostProcessRenderer>>(new Map());
 
   useLayoutEffect(() => {
     window.__clipperRenderExportFrame = (nextRequest) => new Promise((resolve, reject) => {
@@ -73,12 +73,10 @@ export function RenderedMediaExportApp() {
       return syncResult;
     };
     window.__clipperApplyExportPostProcessFrame = (postProcessRequest) => {
-      postProcessRendererRef.current ??= createLensPostProcessRenderer();
-      return applyExportPostProcessFrame(postProcessRequest, [createLensExportPostProcessRenderer(postProcessRendererRef.current)]);
+      return applyExportPostProcessFrame(postProcessRequest, createDefaultExportPostProcessRenderers(postProcessRenderersRef.current));
     };
     window.__clipperApplyExportRawPostProcessFrame = (postProcessRequest) => {
-      postProcessRendererRef.current ??= createLensPostProcessRenderer();
-      return applyExportRawPostProcessFrame(postProcessRequest, [createLensExportPostProcessRenderer(postProcessRendererRef.current)]);
+      return applyExportRawPostProcessFrame(postProcessRequest, createDefaultExportPostProcessRenderers(postProcessRenderersRef.current));
     };
 
     // ── Transferable port bridge handler ────────────────────────────────
@@ -102,7 +100,6 @@ export function RenderedMediaExportApp() {
       if (!requestId || !(sourceData instanceof ArrayBuffer)) return;
 
       try {
-        postProcessRendererRef.current ??= createLensPostProcessRenderer();
         const result = await applyExportRawPostProcessFrame(
           {
             width,
@@ -110,7 +107,7 @@ export function RenderedMediaExportApp() {
             sourceFrame: { width, height, pixelFormat: pixelFormat as "bgra" | "rgba", data: sourceData },
             passes,
           },
-          [createLensExportPostProcessRenderer(postProcessRendererRef.current)],
+          createDefaultExportPostProcessRenderers(postProcessRenderersRef.current),
         );
 
         const resultData =
@@ -157,8 +154,7 @@ export function RenderedMediaExportApp() {
     return () => {
       bridgeActive = false;
       rejectPendingFrame(pendingRequestRef, new Error("Export renderer unmounted before frame completed."));
-      postProcessRendererRef.current?.destroy();
-      postProcessRendererRef.current = null;
+      destroyPostProcessRenderers(postProcessRenderersRef.current);
       window.removeEventListener("message", handleBridgeFrame);
       delete window.__clipperRenderExportFrame;
       delete window.__clipperSyncExportRenderClock;
@@ -196,6 +192,11 @@ export function RenderedMediaExportApp() {
       </div>
     </main>
   );
+}
+
+function destroyPostProcessRenderers(renderers: Map<string, PostProcessRenderer>) {
+  for (const renderer of renderers.values()) renderer.destroy();
+  renderers.clear();
 }
 
 function ExportFramePreview({ refs, request }: { refs: ExportFramePreviewRefs; request: ExportFrameRequest }) {

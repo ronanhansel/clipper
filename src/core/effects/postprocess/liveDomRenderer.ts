@@ -1,5 +1,5 @@
 import { getLiveDomPostProcessPreflight, LiveDomCapabilityProbe, prepareLiveDomPostProcessSource, type LiveDomPostProcessCapability } from "./liveDomCapability";
-import { createLensPostProcessRenderer } from "./lensWebGlRenderer";
+import { createDefaultPostProcessRenderer, type PostProcessRenderer } from "./registry";
 import type { PostProcessPass } from "../types";
 
 export type LiveDomPostProcessRenderResult = {
@@ -9,7 +9,8 @@ export type LiveDomPostProcessRenderResult = {
 };
 
 export class LiveDomPostProcessRenderer {
-  private readonly renderer = createLensPostProcessRenderer();
+  private renderer: PostProcessRenderer | null = null;
+  private rendererKind: string | null = null;
   private readonly capabilityProbe = new LiveDomCapabilityProbe();
   private preparedSourceElement: Element | null = null;
   private preparedCanvas: HTMLCanvasElement | null = null;
@@ -21,7 +22,9 @@ export class LiveDomPostProcessRenderer {
     if (!preflight.supported) return { rendered: false, presentable: false, capability: { ...preflight, texElementImage2D: null } };
     if (this.incompatibleUpload) return { rendered: false, presentable: false, capability: { ...preflight, texElementImage2D: null, supported: false, reason: "missing-tex-element-image" } };
 
-    const gl = this.renderer.getLiveDomContext(input.canvas);
+    const renderer = this.getRenderer(input.pass.kind);
+    if (!renderer) return { rendered: false, presentable: false, capability: { ...preflight, texElementImage2D: null, supported: false, reason: "missing-tex-element-image" } };
+    const gl = renderer.getLiveDomContext(input.canvas);
     const capability = this.capabilityProbe.getCapability({ ...capabilityInput, gl });
     if (!capability.supported || !input.sourceElement) return { rendered: false, presentable: false, capability };
 
@@ -31,14 +34,28 @@ export class LiveDomPostProcessRenderer {
       this.preparedSourceElement = input.sourceElement;
       this.preparedCanvas = sourceCanvas;
     }
-    const rendered = this.renderer.renderElement(input.canvas, input.sourceElement, input.pass, input.width, input.height, sourceCanvas);
+    const rendered = renderer.renderElement(input.canvas, input.sourceElement, input.pass, input.width, input.height, sourceCanvas);
     if (!rendered) this.incompatibleUpload = true;
-    const presentable = rendered && this.renderer.hasVisiblePixels(input.canvas);
+    const presentable = rendered && renderer.hasVisiblePixels(input.canvas);
     return { rendered, presentable, capability: rendered ? capability : { ...capability, supported: false, reason: "missing-tex-element-image" } };
   }
 
+  private getRenderer(kind: string) {
+    if (this.renderer && this.rendererKind === kind) return this.renderer;
+    this.renderer?.destroy();
+    this.renderer = createDefaultPostProcessRenderer(kind);
+    this.rendererKind = this.renderer ? kind : null;
+    this.capabilityProbe.clear();
+    this.preparedSourceElement = null;
+    this.preparedCanvas = null;
+    this.incompatibleUpload = false;
+    return this.renderer;
+  }
+
   destroy() {
-    this.renderer.destroy();
+    this.renderer?.destroy();
+    this.renderer = null;
+    this.rendererKind = null;
     this.capabilityProbe.clear();
     this.preparedSourceElement = null;
     this.preparedCanvas = null;

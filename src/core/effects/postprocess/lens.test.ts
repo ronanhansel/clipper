@@ -9,6 +9,7 @@ import { adjustmentLayersRequireLiveDomPostProcessSource, collectLiveDomPostProc
 import { createLensExportPostProcessRenderer, createLensPostProcessRenderer, selectLensPostProcessPass, type LensPostProcessRenderer } from "./lensWebGlRenderer";
 import { withLensFrameBackground } from "./lens";
 import { selectLiveDomPostProcessPass, withPostProcessFrameBackground } from "./passes";
+import { createDefaultExportPostProcessRenderers, getDefaultPostProcessPackages } from "./registry";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -333,7 +334,7 @@ describe("lens post-process pass collection", () => {
     expect(applyAdjustmentLayersToVisualStyle(1.5, layers, 30).overlays).toBeUndefined();
     expect(passes).toHaveLength(1);
     expect(passes[0]).toMatchObject({ id: "lens:lens-postprocess", kind: lensPostProcessKind, target: "final", requiresLiveDomSource: true });
-    expect(passes[0].uniforms.focus).toEqual({ x: 0.25, y: 0.75 });
+    expect((passes[0] as ReturnType<typeof testLensPass>).uniforms.focus).toEqual({ x: 0.25, y: 0.75 });
   });
 
   it("preserves CSS-safe visual adjustments when lens is also active", () => {
@@ -373,7 +374,13 @@ describe("lens post-process pass collection", () => {
   });
 
   it("applies frame background through the generic post-process decorator", () => {
-    expect(withPostProcessFrameBackground(testLensPass(), "#369").uniforms.frameBackground).toEqual({ r: 0.2, g: 0.4, b: 0.6 });
+    expect((withPostProcessFrameBackground(testLensPass(), "#369") as ReturnType<typeof testLensPass>).uniforms.frameBackground).toEqual({ r: 0.2, g: 0.4, b: 0.6 });
+  });
+
+  it("leaves unsupported pass backgrounds unchanged through the generic decorator", () => {
+    const pass = testUnsupportedPass();
+
+    expect(withPostProcessFrameBackground(pass, "#369")).toBe(pass);
   });
 });
 
@@ -414,6 +421,16 @@ describe("export post-process routing helpers", () => {
     expect(result).toEqual({ applied: true, outputDataUrl: "data:image/png;base64,BBBB", droppedPassCount: 0 });
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({ source: image });
+  });
+
+  it("exposes lens as a default post-process package without hard-coding export call sites", () => {
+    expect(getDefaultPostProcessPackages().map((definition) => definition.kind)).toContain(lensPostProcessKind);
+  });
+
+  it("creates default export renderers from the package registry", () => {
+    const renderer = createDefaultExportPostProcessRenderers(new Map()).find((candidate) => candidate.kind === lensPostProcessKind);
+
+    expect(renderer).toMatchObject({ kind: lensPostProcessKind, maxPassesPerFrame: 1 });
   });
 
   it("decodes export sources as DOM images so WebGL unpack flip applies", async () => {
