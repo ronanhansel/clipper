@@ -3,6 +3,7 @@ import type { MouseEvent, PointerEvent, ReactNode, Ref } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Tree, type CursorProps, type DragPreviewProps, type MoveHandler, type NodeApi, type NodeRendererProps, type RowRendererProps, type TreeApi } from "react-arborist";
 import type { FrameObject, Part } from "../../core/types";
+import { arboristDndManager } from "../../lib/arboristDndManager";
 import { useDragAutoScroll } from "../../lib/useDragAutoScroll";
 
 const composeLayerRowHeight = 32;
@@ -212,6 +213,7 @@ export function ComposeLayersPanel({ part, selectedObjectIds, onSelectObjects, o
         <Tree<ComposeLayerNode>
           ref={arboristTreeRef}
           data={treeData}
+          dndManager={arboristDndManager}
           disableDrag={(node) => node.kind !== "object"}
           disableDrop={({ parentNode, dragNodes }) => parentNode.id !== "objects" || dragNodes.some((node) => node.data.kind !== "object")}
           height={treeHeight}
