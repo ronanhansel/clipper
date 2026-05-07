@@ -18,7 +18,7 @@ describe("camera", () => {
   it("ignores tracked pan markers from removed motion layers", () => {
     const part: Part = {
       ...basePart,
-      objects: [{ id: "tracker", name: "Tracker", type: "rect", selector: "[data-object-id='tracker']", bounds: { x: 100, y: 100, width: 100, height: 100 }, style: {}, motion: { duration: 4, x: [0, 400] } }],
+      objects: [{ id: "tracker", name: "Tracker", type: "rect", selector: "[data-object-id='tracker']", bounds: { x: 100, y: 100, width: 100, height: 100 }, style: {}, animations: [{ id: "tracker-x", keyframes: { x: [0, 400] }, options: { duration: 4 } }] }],
       motionMarkers: motionBlocksToMotionMarkers([{ id: "pan", effectId: "clipper.motion.pan", layerId: "removed_pan", start: 0, duration: 4, position: { x: 0, y: 0 }, followId: "tracker" }]),
     };
     const layers: TimelineMotionLayerState[] = [{ id: "clipper.motion.pan", kind: "motion" }];
@@ -29,7 +29,7 @@ describe("camera", () => {
   it("uses manual pan position after a tracker id is cleared", () => {
     const part: Part = {
       ...basePart,
-      objects: [{ id: "tracker", name: "Tracker", type: "rect", selector: "[data-object-id='tracker']", bounds: { x: 100, y: 100, width: 100, height: 100 }, style: {}, motion: { duration: 4, x: [0, 400] } }],
+      objects: [{ id: "tracker", name: "Tracker", type: "rect", selector: "[data-object-id='tracker']", bounds: { x: 100, y: 100, width: 100, height: 100 }, style: {}, animations: [{ id: "tracker-x", keyframes: { x: [0, 400] }, options: { duration: 4 } }] }],
     };
 
     const tracked = getActiveMarkerByKind([{ id: "pan", effectId: "clipper.motion.pan", kind: "pan" as const, layerId: "clipper.motion.pan", start: 0, duration: 4, position: { x: 12, y: 34 }, followId: "tracker" }], "pan", 2, part);

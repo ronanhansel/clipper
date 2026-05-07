@@ -1,6 +1,6 @@
 import { loadCompositionsFromSource } from "../../core/compositionSource";
 import { normalizeProject, serializeProjectForSave, withRequiredTimelineLayerTypes } from "../../core/project";
-import { FRAME_HEIGHT, FRAME_WIDTH, type CompositionClip, type CompositionDocument, type EditorState, type ProjectManifest, type TimelineDocument } from "../../core/types";
+import { FRAME_HEIGHT, FRAME_WIDTH, type CompositionClip, type EditorState, type ProjectManifest, type TimelineDocument } from "../../core/types";
 import { clipperHost } from "../clipperHost";
 import { getDisplayNameFromPath } from "../../core/fileNames";
 
@@ -12,6 +12,8 @@ type SaveProjectInput = {
   manifestPath: string;
   project: ProjectManifest;
 };
+
+type LoadedDirectoryComposition = CompositionClip & { loadedSource: string };
 
 class ProjectPersistenceService {
   async loadProject({ manifestPath }: LoadProjectInput) {
@@ -38,7 +40,7 @@ class ProjectPersistenceService {
     return {
       projectSnapshot: JSON.stringify(saveProject),
       compositionSourcesSnapshot: JSON.stringify(saveProject.compositionSources ?? {}),
-      sourceStatus: "Project and composition sources saved.",
+      sourceStatus: "Project and composition sources autosaved.",
     };
   }
 
@@ -68,14 +70,15 @@ async function loadDirectoryProject(manifestPath: string) {
   const rootPath = getDirectoryPath(manifestPath);
   const editableRoot = await getEditableRootPath(rootPath);
   const timelines = await loadDirectoryTimelines(editableRoot, rootPath, manifestProject.timelineOrder);
-  const compositions = await loadDirectoryCompositions(editableRoot, rootPath, manifestProject.compositionLibrary ?? []);
+  const loadedCompositions = await loadDirectoryCompositions(editableRoot, rootPath, manifestProject.compositionLibrary ?? []);
+  const compositions = loadedCompositions.map(({ loadedSource: _loadedSource, ...composition }) => composition);
   const compositionLibrary = mergeMissingCompositionMetadata({ ...manifestProject, timelines }, compositions);
   return normalizeProject({
     ...manifestProject,
     timelines,
     compositions,
     compositionLibrary,
-    compositionSources: Object.fromEntries(compositions.map((composition) => [composition.filePath, composition.source])),
+    compositionSources: Object.fromEntries(loadedCompositions.map((composition) => [composition.filePath, composition.loadedSource])),
     scenes: manifestProject.scenes ?? [],
   });
 }
@@ -134,13 +137,13 @@ async function loadDirectoryCompositions(editableRoot: string, fallbackRoot: str
       const filePath = projectPathFromDirectoryEntry(fallbackRoot, file.relativePath, "compositions");
       const manifestComposition = resolveManifestCompositionForFile(manifestCompositions, claimedManifestIds, filePath, source);
       if (manifestComposition) claimedManifestIds.add(manifestComposition.id);
-      const baseComposition = createBaseComposition(manifestComposition?.id ?? createStableCompositionId(), filePath, source);
+      const baseComposition = createBaseComposition(manifestComposition?.id ?? createStableCompositionId(), filePath);
       try {
         const document = await compositionFromProjectSource(baseComposition, source, async (relativePath) => {
           const dependencyPath = relativePath.startsWith("compositions/") ? `${editableRoot}/${relativePath}` : `${getDirectoryPath(file.path)}/${relativePath}`;
           return clipperHost.readTextFile(dependencyPath);
         });
-        return { ...document, id: baseComposition.id, filePath, sourceHash: hashCompositionSource(source), source } as CompositionDocument;
+        return { ...document, id: baseComposition.id, filePath, sourceHash: hashCompositionSource(source), loadedSource: source } as LoadedDirectoryComposition;
       } catch (error) {
         return createErroredComposition(baseComposition, source, error);
       }
@@ -211,11 +214,11 @@ function getFallbackDisplayName(name: string, relativePath: string) {
   return name;
 }
 
-function mergeMissingCompositionMetadata(manifestProject: ProjectManifest, compositions: CompositionDocument[]): CompositionClip[] {
+function mergeMissingCompositionMetadata(manifestProject: ProjectManifest, compositions: CompositionClip[]): CompositionClip[] {
   const loadedIds = new Set(compositions.map((composition) => composition.id));
   const missing = (manifestProject.compositionLibrary ?? [])
     .filter((composition) => !loadedIds.has(composition.id))
-    .map((composition) => ({ ...composition, source: undefined, sourceMissing: true }));
+    .map(({ source: _source, ...composition }) => ({ ...composition, sourceMissing: true }));
   const missingById = new Map<string, CompositionClip>(missing.map((composition) => [composition.id, composition]));
   return [...compositions, ...missingById.values()];
 }
@@ -244,7 +247,7 @@ async function saveDirectoryProject(manifestPath: string, project: ProjectManife
     assetsPath: normalized.assetsPath,
     assets: normalized.assets,
     compositionFolders: normalized.compositionFolders ?? [],
-    compositionLibrary: normalized.compositionLibrary?.map((composition) => ({ ...composition, source: undefined })) ?? [],
+    compositionLibrary: normalized.compositionLibrary?.map(({ source: _source, ...composition }) => composition) ?? [],
     timelineOrder: normalized.timelines?.map((timeline) => timeline.id) ?? [],
     compositionOrder: normalized.compositions?.map((composition) => composition.id) ?? [],
     editorState: normalized.editorState,
@@ -265,7 +268,7 @@ async function saveDirectoryProject(manifestPath: string, project: ProjectManife
 
   for (const composition of normalized.compositions ?? []) {
     if (composition.sourceMissing) continue;
-    const source = composition.source ?? normalized.compositionSources?.[composition.filePath];
+    const source = normalized.compositionSources?.[composition.filePath];
     if (source === undefined) throw new Error(`Composition ${composition.filePath} is missing source.`);
     const relativePath = safeCompositionPath(composition, rootPath);
     const fullPath = `${fileManagerDir}/${relativePath}`;
@@ -298,11 +301,10 @@ function getSourceCompositionId(source: string, fileName: string) {
   return sourceId ?? fileName.replace(/\.ts$/, "");
 }
 
-function createBaseComposition(id: string, filePath: string, source: string): CompositionDocument {
+function createBaseComposition(id: string, filePath: string): CompositionClip {
   return {
     id,
     filePath,
-    source,
     duration: 5,
     frame: { width: FRAME_WIDTH, height: FRAME_HEIGHT, style: { background: "#050505" } },
     background: { id: "background", name: "Background", style: { background: "#050505" }, elements: [] },
@@ -312,10 +314,10 @@ function createBaseComposition(id: string, filePath: string, source: string): Co
   };
 }
 
-function createErroredComposition(baseComposition: CompositionDocument, source: string, error: unknown): CompositionDocument {
+function createErroredComposition(baseComposition: CompositionClip, source: string, error: unknown): LoadedDirectoryComposition {
   return {
     ...baseComposition,
-    source,
+    loadedSource: source,
     sourceHash: hashCompositionSource(source),
     compositionError: error instanceof Error ? error.message : "Unable to load composition source.",
   };

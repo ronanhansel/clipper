@@ -2,23 +2,19 @@ import { useMemo } from "react";
 import { createAgentContext } from "../../core/agentContext";
 import { cameraTranslationToFramePoint, CAMERA_PERSPECTIVE, getLayeredCameraPreviewTransform, type CameraPreviewTransform } from "../../core/camera";
 import { getMotionMarkerViews } from "../../core/motionEffects";
-import { defaultAssets, defaultTimelineLayerState, getSceneFromProject, serializeProjectForSave, withRequiredTimelineLayerTypes } from "../../core/project";
+import { defaultAssets, defaultTimelineLayerState, getSceneFromProject, withRequiredTimelineLayerTypes } from "../../core/project";
 import { getMiddleTransitionMode, getSelectedActiveMiddleMend, getSelectedMotionMiddleSnap, getTimelineMarkerMendLayerId, getMotionMarkerMendKey, getMotionMiddleSnap, isMotionMiddleSnapActive, validateScene, type TimelineMendMarker } from "../../core/timeline";
 import { FRAME_HEIGHT, FRAME_WIDTH, type CompositionClip, type MotionEase, type MotionMarker, type ProjectManifest, type Scene, type SelectionPayload, type TimelineLayerState, type TimelineMode } from "../../core/types";
 import { TIMELINE_MOTION_PART_ID } from "../types";
 import type { MotionMarkerSelection } from "../types";
 import { deriveFramePreviewRenderModel, getFramePreviewTimelineLayers } from "./framePreviewRenderModel";
-import { getProjectContentSnapshot } from "./projectStore";
 
 export function useEditorDerivedState({
   currentSceneTime,
   focusPickZoomMarker,
   framePickPreviewPoint,
-  compositionSources,
   positionPickTranslationMarker,
   project,
-  savedCompositionSourcesSnapshot,
-  savedProjectSnapshot,
   selectedObjectId,
   selectedAdjustmentLayerId,
   selectedPartId,
@@ -32,11 +28,8 @@ export function useEditorDerivedState({
   currentSceneTime: number;
   focusPickZoomMarker: { partId: string; markerId: string } | null;
   framePickPreviewPoint: ReturnType<typeof cameraTranslationToFramePoint> | null;
-  compositionSources: Record<string, string>;
   positionPickTranslationMarker: { partId: string; markerId: string } | null;
   project: ProjectManifest;
-  savedCompositionSourcesSnapshot: string;
-  savedProjectSnapshot: string;
   selectedObjectId: string | null;
   selectedAdjustmentLayerId: string | null;
   selectedPartId: string;
@@ -84,13 +77,6 @@ export function useEditorDerivedState({
   const motionLayers = previewRenderModel.motionLayers;
   const hiddenMotionLayerIds = previewRenderModel.hiddenMotionLayerIds;
   const agentContext = useMemo(() => createAgentContext(project, scene, part, selectionPayload), [project, scene, part, selectionPayload]);
-  const persistedProject = useMemo(() => serializeProjectForSave({ ...project, compositionSources }), [compositionSources, project]);
-  const projectSnapshot = useMemo(() => getProjectContentSnapshot(persistedProject), [persistedProject]);
-  const editorStateSnapshot = useMemo(() => JSON.stringify(project.editorState), [project.editorState]);
-  const compositionSourcesSnapshot = useMemo(() => JSON.stringify(persistedProject.compositionSources ?? {}), [persistedProject.compositionSources]);
-  const hasUnsavedProjectChanges = projectSnapshot !== savedProjectSnapshot;
-  const hasUnsavedSourceChanges = compositionSourcesSnapshot !== savedCompositionSourcesSnapshot;
-  const hasUnsavedChanges = hasUnsavedProjectChanges || hasUnsavedSourceChanges;
   const isPickingZoomFocus = Boolean(focusPickZoomMarker);
   const isPickingTranslationPosition = Boolean(positionPickTranslationMarker);
   const canSelectFrameObjects = timelineMode === "compose";
@@ -156,9 +142,7 @@ export function useEditorDerivedState({
     assets,
     cameraPreviewTransform,
     canSelectFrameObjects,
-    editorStateSnapshot,
     framePickPoint,
-    hasUnsavedChanges,
     hasActiveComposition,
     inspectorAdjustmentMiddleSnap,
     inspectorCompositionMiddleSnap,
@@ -166,7 +150,6 @@ export function useEditorDerivedState({
     isPickingTranslationPosition,
     isPickingZoomFocus,
     part,
-    compositionSourcesSnapshot,
     previewTime,
     previewParts,
     renderableScene,

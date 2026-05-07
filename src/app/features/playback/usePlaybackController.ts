@@ -40,6 +40,7 @@ type PlaybackControllerOptions = {
   setIsPlaying: (isPlaying: boolean) => void;
   setPlaybackClock: (clock: PlaybackClock) => void;
   setRenderCurrentSceneTime: (time: number) => void;
+  suppressReactPreviewSync?: boolean;
   useCachedPreviewPlayback: boolean;
   hasCachedPreviewFrameAtTime?: (time: number) => boolean;
   isCachedPreviewPaintReadyAtTime?: (time: number) => boolean;
@@ -77,6 +78,7 @@ export function usePlaybackController({
   setIsPlaying,
   setPlaybackClock,
   setRenderCurrentSceneTime,
+  suppressReactPreviewSync = false,
   useCachedPreviewPlayback,
   hasCachedPreviewFrameAtTime,
   isCachedPreviewPaintReadyAtTime,
@@ -409,7 +411,7 @@ export function usePlaybackController({
       requestCachedPreviewAtTime?.(nextTime, "playback");
       const cachedPreviewFrameAvailable = useCachedPreviewPlayback && hasCachedPreviewFrameAtTime?.(nextTime) === true;
       const cachedPreviewPaintReady = cachedPreviewFrameAvailable && isCachedPreviewPaintReadyAtTime?.(nextTime) === true;
-      const shouldSyncPreviewRender = !cachedPreviewPaintReady && (shouldSyncReact || now - lastReactPreviewSyncAt >= playbackReactPreviewSyncIntervalMs);
+      const shouldSyncPreviewRender = !suppressReactPreviewSync && !cachedPreviewPaintReady && (shouldSyncReact || now - lastReactPreviewSyncAt >= playbackReactPreviewSyncIntervalMs);
 
       currentSceneTimeRef.current = nextTime;
       syncPlaybackDom(nextTime);
@@ -434,7 +436,7 @@ export function usePlaybackController({
 
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [compositions, hasCachedPreviewFrameAtTime, isCachedPreviewPaintReadyAtTime, isPlaying, playbackEnd, playbackStart, requestCachedPreviewAtTime, sceneDurationSeconds, timeline, timelineLayers, transitionLayers, useCachedPreviewPlayback, useLocalPlaybackLabels, visibleSceneAdjustmentLayers]);
+  }, [compositions, hasCachedPreviewFrameAtTime, isCachedPreviewPaintReadyAtTime, isPlaying, playbackEnd, playbackStart, requestCachedPreviewAtTime, sceneDurationSeconds, suppressReactPreviewSync, timeline, timelineLayers, transitionLayers, useCachedPreviewPlayback, useLocalPlaybackLabels, visibleSceneAdjustmentLayers]);
 
   useEffect(() => {
     if (!isPlaying) return;

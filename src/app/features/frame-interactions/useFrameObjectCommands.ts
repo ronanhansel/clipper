@@ -1,7 +1,7 @@
 import type { Dispatch, SetStateAction } from "react";
 import type { AdjustmentLayerSelection, CompositionSelection, RightPanelTab } from "../../types";
-import { selectionObjectFromFrameObject, selectionPayloadFromObjects, syncChartObjectBounds } from "../../../core/frameInteraction";
-import type { BackgroundLayer, CompositionClip, FrameObject, Part, PartFrame, RichTextSegment, SelectionPayload } from "../../../core/types";
+import { syncChartObjectBounds } from "../../../core/frameInteraction";
+import type { BackgroundLayer, CompositionClip, FrameObject, Part, PartFrame, RichTextSegment } from "../../../core/types";
 
 type FrameObjectCommandsParams = {
   part: Part;
@@ -12,10 +12,9 @@ type FrameObjectCommandsParams = {
   setRightPanelTab: Dispatch<SetStateAction<RightPanelTab>>;
   setSelectedAdjustmentLayerId: Dispatch<SetStateAction<string | null>>;
   setSelectedAdjustmentLayers: Dispatch<SetStateAction<AdjustmentLayerSelection[]>>;
-  setSelectedObjectId: Dispatch<SetStateAction<string | null>>;
   setSelectedPartId: Dispatch<SetStateAction<string>>;
   setSelectedParts: Dispatch<SetStateAction<CompositionSelection[]>>;
-  setSelectionPayload: Dispatch<SetStateAction<SelectionPayload | null>>;
+  setComposeSelectionObjects: (objects: FrameObject[]) => void;
   updateCompositionForTimelinePart: (partId: string, updater: (composition: CompositionClip) => CompositionClip) => void;
   updateSceneParts: (updater: (parts: Part[]) => Part[]) => void;
 };
@@ -29,10 +28,9 @@ export function useFrameObjectCommands({
   setRightPanelTab,
   setSelectedAdjustmentLayerId,
   setSelectedAdjustmentLayers,
-  setSelectedObjectId,
   setSelectedPartId,
   setSelectedParts,
-  setSelectionPayload,
+  setComposeSelectionObjects,
   updateCompositionForTimelinePart,
   updateSceneParts,
 }: FrameObjectCommandsParams) {
@@ -60,8 +58,7 @@ export function useFrameObjectCommands({
     setRightPanelTab("video");
     setEditingTextObjectId(null);
     if (objects.length === 0) {
-      setSelectedObjectId(null);
-      setSelectionPayload(null);
+      setComposeSelectionObjects([]);
       return;
     }
 
@@ -70,8 +67,7 @@ export function useFrameObjectCommands({
     clearMarkerSelection();
     setSelectedAdjustmentLayerId(null);
     setSelectedAdjustmentLayers([]);
-    setSelectedObjectId(objects[0].id);
-    setSelectionPayload(selectionPayloadFromObjects(objects.map(selectionObjectFromFrameObject)));
+    setComposeSelectionObjects(objects);
   }
 
   function reorderComposeObjects(objectIds: string[], targetIndex: number) {

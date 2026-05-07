@@ -42,8 +42,6 @@ export const appNoDragRegion = "[-webkit-app-region:no-drag]";
 export const buttonBase = "rounded-[8px] border border-transparent bg-[#171920] px-2.5 py-1.5 text-sm text-[#f7f7f8] transition hover:-translate-y-px hover:border-[#3b4150] hover:bg-[#20232c]";
 export const appBarButtonBase = "rounded-[7px] border border-transparent bg-[#171920] px-2 py-1 text-xs text-[#f7f7f8] transition hover:-translate-y-px hover:border-[#3b4150] hover:bg-[#20232c]";
 export const appBarActionButtonBase = `${appBarButtonBase} w-[70px]`;
-const appBarSaveButtonEnabled = "w-[70px] rounded-[7px] border border-[var(--clipper-accent-strong)] bg-[var(--clipper-accent)] px-2 py-1 text-xs font-extrabold text-[var(--clipper-accent-foreground)] transition hover:bg-[var(--clipper-accent-hover)]";
-const appBarSaveButtonDisabled = "w-[70px] cursor-not-allowed rounded-[7px] border border-[#2d313b] bg-[#171920] px-2 py-1 text-xs font-extrabold text-[#737884] opacity-70";
 export const sectionTitle = "m-0 text-[13px] font-semibold text-[#d9dbe1]";
 export const mutedCaps = "text-[12px] font-medium text-[#9b9da7]";
 export const panelCard = "grid gap-[5px] rounded-xl border border-[#2d313b] bg-[#171920] p-3 text-[13px] text-[#dfe2ea]";
@@ -76,8 +74,4 @@ export function getMonacoOptionsForDocument(_document: { language: string; sourc
   return {
     ...monacoOptions,
   } as const;
-}
-
-export function appBarSaveButtonClass(enabled: boolean) {
-  return enabled ? appBarSaveButtonEnabled : appBarSaveButtonDisabled;
 }

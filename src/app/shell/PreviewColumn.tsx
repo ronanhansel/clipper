@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState, type ComponentProps, type CSSProperties, type ReactNode, type RefObject, type UIEvent } from "react";
 import { EditorPane } from "../../components/EditorPane";
+import { selectorHandleSizePx, selectorOffsetPx } from "../config";
 import { FramePreview } from "../../components/preview/FramePreview";
 import { applyAdjustmentLayersToPostProcessPasses, applyAdjustmentLayersToVisualStyle } from "../../core/adjustments";
+import { boundsToViewport, getLayeredCameraPreviewTransform } from "../../core/camera";
 import { getLiveDomPostProcessPreflight, isLiveDomPostProcessPreviewOptedIn, type LiveDomPostProcessCapability } from "../../core/effects/postprocess/liveDomCapability";
 import { collectLiveDomPostProcessRequirement } from "../../core/effects/postprocess/liveDomRequirement";
 import { LiveDomPostProcessRenderer } from "../../core/effects/postprocess/liveDomRenderer";
 import { selectLiveDomPostProcessPass, withPostProcessFrameBackground } from "../../core/effects/postprocess/passes";
 import { createDefaultPostProcessRenderer, type PostProcessRenderer } from "../../core/effects/postprocess/registry";
 import type { AdjustmentVisualOverlay, AdjustmentVisualStyle } from "../../core/effects/types";
+import { getBoundsUnion, getFrameObjectWithPreviewBounds, insetBounds } from "../../core/frameInteraction";
 import { FRAME_HEIGHT, FRAME_WIDTH, type AdjustmentLayer, type TransitionLayer } from "../../core/types";
 import type { PrerenderCacheBlock } from "../features/preview/usePrerenderCache";
 import type { Mode } from "../types";
@@ -27,13 +30,38 @@ const livePostProcessReasonLabel: Record<LiveDomPostProcessCapability["reason"],
 };
 
 function requiresDomOverlayPreview(props: FramePreviewProps): boolean {
-  return props.focusPicking
+  return props.canSelectObjects
+    || props.focusPicking
     || props.trackerPicking
     || props.pickingTranslationPosition
     || props.pickingZoomFocus
     || props.framePickPoint !== null
     || props.dragBox !== null
-    || props.marqueeDragging;
+    || props.marqueeDragging
+    || props.selectedObjects.length > 0
+    || props.editingTextObjectId !== null;
+}
+
+function getPreviewOverlayDisplayInsets(props: FramePreviewProps) {
+  if (!requiresDomOverlayPreview(props) || props.selectedObjects.length === 0) return { left: 0, top: 0, right: 0, bottom: 0 };
+
+  const cameraTransform = props.timelineMode === "composition"
+    ? getLayeredCameraPreviewTransform(props.part, props.motionLayers, props.previewTime, { hiddenLayerIds: props.hiddenMotionLayerIds, pickingTranslationPosition: props.pickingTranslationPosition, pickingZoomFocus: props.pickingZoomFocus, resetMotionEffects: props.trackerPicking || props.focusPicking || props.pickingTranslationPosition || props.pickingZoomFocus })
+    : props.cameraTransform;
+  const selectableObjects = [...props.part.background.elements, ...props.part.objects];
+  const selectedBounds = getBoundsUnion(props.selectedObjects.map((selected) => {
+    const object = selectableObjects.find((item) => item.id === selected.id);
+    return object ? getFrameObjectWithPreviewBounds(object, props.previewTime, props.part.duration).bounds : selected.bounds;
+  }));
+  const selectedViewportBounds = insetBounds(boundsToViewport(selectedBounds, cameraTransform, props.frameScale), -selectorOffsetPx);
+  const handleBleedPx = selectorHandleSizePx;
+
+  return {
+    left: Math.max(0, -selectedViewportBounds.x + handleBleedPx),
+    top: Math.max(0, -selectedViewportBounds.y + handleBleedPx),
+    right: Math.max(0, selectedViewportBounds.x + selectedViewportBounds.width - FRAME_WIDTH * props.frameScale + handleBleedPx),
+    bottom: Math.max(0, selectedViewportBounds.y + selectedViewportBounds.height - FRAME_HEIGHT * props.frameScale + handleBleedPx),
+  };
 }
 
 type PreviewColumnProps = {
@@ -61,6 +89,7 @@ type PreviewColumnProps = {
 
 export function PreviewColumn({ blankFrameViewportStyle, children, currentSceneTimeRef, editorPaneProps, framePreviewProps, getPrerenderCacheBlockAtTime, hasActiveComposition, liveDomPostProcessMaxFps, livePostProcessPreviewEnabled, mode, onModeChange, onPointerEnter, onPointerLeave, onCachedPreviewDisplayReadyChange, prerenderCacheBlackMissDebug, prerenderCacheEnabled, onScroll, previewKey, previewRenderScale, stageRef }: PreviewColumnProps) {
   const lastActiveFramePreviewPropsRef = useRef<FramePreviewProps | null>(null);
+  const [previewOverlayHost, setPreviewOverlayHost] = useState<HTMLDivElement | null>(null);
   // Stabilize prerender renderer choice across mode switches: only
   // sync from prerenderCacheEnabled while in preview mode so the
   // active preview subtree (PrerenderVideoPreview vs FramePreview)
@@ -79,9 +108,12 @@ export function PreviewColumn({ blankFrameViewportStyle, children, currentSceneT
       ? { ...lastActiveFramePreviewPropsRef.current, frameScale: framePreviewProps.frameScale, isPlaying: framePreviewProps.isPlaying, playbackClock: framePreviewProps.playbackClock, sceneTime: framePreviewProps.sceneTime }
       : lastActiveFramePreviewPropsRef.current;
   const displayScale = stableFramePreviewProps ? stableFramePreviewProps.frameScale / previewRenderScale : 1;
-  const renderFramePreviewProps = stableFramePreviewProps ? { ...stableFramePreviewProps, frameScale: previewRenderScale } : null;
-  const previewDisplayStyle = stableFramePreviewProps ? { width: FRAME_WIDTH * stableFramePreviewProps.frameScale, height: FRAME_HEIGHT * stableFramePreviewProps.frameScale } as CSSProperties : undefined;
-  const previewRenderStyle = stableFramePreviewProps ? { backfaceVisibility: "hidden", contain: "paint", filter: displayScale === 1 ? undefined : "blur(0)", width: FRAME_WIDTH * previewRenderScale, height: FRAME_HEIGHT * previewRenderScale, transform: displayScale === 1 ? undefined : `translateZ(0) scale(${displayScale})`, transformOrigin: "top left", willChange: displayScale === 1 ? undefined : "transform" } as CSSProperties : undefined;
+  const activePreviewOverlayHost = mode === "preview" ? previewOverlayHost : null;
+  const renderFramePreviewProps = stableFramePreviewProps ? { ...stableFramePreviewProps, frameScale: previewRenderScale, previewOverlayHost: activePreviewOverlayHost, selectionOverlayScale: displayScale } : null;
+  const overlayDisplayInsets = stableFramePreviewProps ? getPreviewOverlayDisplayInsets(stableFramePreviewProps) : { left: 0, top: 0, right: 0, bottom: 0 };
+  const previewDisplayStyle = stableFramePreviewProps ? { width: FRAME_WIDTH * stableFramePreviewProps.frameScale + overlayDisplayInsets.left + overlayDisplayInsets.right, height: FRAME_HEIGHT * stableFramePreviewProps.frameScale + overlayDisplayInsets.top + overlayDisplayInsets.bottom } as CSSProperties : undefined;
+  const allowsDomOverlayOverflow = stableFramePreviewProps ? requiresDomOverlayPreview(stableFramePreviewProps) : false;
+  const previewRenderStyle = stableFramePreviewProps ? { backfaceVisibility: "hidden", contain: allowsDomOverlayOverflow ? undefined : "paint", filter: displayScale === 1 ? undefined : "blur(0)", left: overlayDisplayInsets.left, top: overlayDisplayInsets.top, width: FRAME_WIDTH * previewRenderScale, height: FRAME_HEIGHT * previewRenderScale, transform: displayScale === 1 ? undefined : `translateZ(0) scale(${displayScale})`, transformOrigin: "top left", willChange: displayScale === 1 ? undefined : "transform" } as CSSProperties : undefined;
 
   return (
     <section className="grid min-h-0 min-w-0 grid-rows-[58px_minmax(0,1fr)_58px] bg-[radial-gradient(circle_at_50%_45%,rgb(var(--clipper-accent-rgb)/0.10),transparent_30%),#141821]" data-clipper-preview-column onPointerEnter={onPointerEnter} onPointerLeave={onPointerLeave}>
@@ -117,6 +149,7 @@ export function PreviewColumn({ blankFrameViewportStyle, children, currentSceneT
         {/* Editor overlay — sibling of scroll viewport, not inside it. Not affected by preview scrollTop/scrollLeft. */}
         {mode === "editor" && editorPaneProps ? <div className="absolute inset-0 z-10"><EditorPane {...editorPaneProps} /></div> : null}
         {mode === "editor" && !editorPaneProps ? <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center p-6 text-center text-sm font-bold text-[#9b9da7]">No file is open in the editor.</div> : null}
+        {mode === "preview" ? <div ref={setPreviewOverlayHost} className="pointer-events-none absolute inset-0 z-20 overflow-hidden" data-clipper-preview-overlay-host /> : null}
       </div>
       {children}
     </section>
@@ -494,6 +527,11 @@ function LivePostProcessFramePreview({ currentSceneTimeRef, framePreviewProps, l
     liveRenderDirtyRef.current = true;
     if (!livePostProcessEnabled) clearInactiveLivePreview("not-opted-in");
   }, [livePostProcessEnabled]);
+
+  useEffect(() => {
+    liveRenderDirtyRef.current = true;
+    hideLiveCanvas();
+  }, [framePreviewProps.part]);
 
   useEffect(() => {
     const canvas = renderCanvasRef.current;

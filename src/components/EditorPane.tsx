@@ -45,12 +45,11 @@ function getClipperAccent() {
   };
 }
 
-export function EditorPane({ document, tabs, viewportState, active = true, projectDirectory, onCloseTab, onRestoreClosedTab, onSaveAll, onSelectTab, onPinTab, onSourceChange, onViewportStateChange }: { document: EditorPaneDocument; tabs: EditorPaneTab[]; viewportState?: CodeViewportState; active?: boolean; projectDirectory?: string; onCloseTab: (tabId: string) => void; onRestoreClosedTab: () => boolean; onSaveAll: () => Promise<void>; onSelectTab: (tabId: string) => void; onPinTab: (tabId: string) => void; onSourceChange: (source: string) => Promise<void>; onViewportStateChange: (sourceId: string, state: CodeViewportState) => void }) {
+export function EditorPane({ document, tabs, viewportState, active = true, projectDirectory, onCloseTab, onRestoreClosedTab, onSelectTab, onPinTab, onSourceChange, onViewportStateChange }: { document: EditorPaneDocument; tabs: EditorPaneTab[]; viewportState?: CodeViewportState; active?: boolean; projectDirectory?: string; onCloseTab: (tabId: string) => void; onRestoreClosedTab: () => boolean; onSelectTab: (tabId: string) => void; onPinTab: (tabId: string) => void; onSourceChange: (source: string) => Promise<void>; onViewportStateChange: (sourceId: string, state: CodeViewportState) => void }) {
   const [source, setSource] = useState(document.source ?? "");
   const [error, setError] = useState("");
   const [apiMissing, setApiMissing] = useState(false);
   const sourceId = document.id;
-  const saveAllRef = useRef<() => Promise<void>>(onSaveAll);
   const closeActiveTabRef = useRef<() => void>(() => onCloseTab(document.id));
   const restoreClosedTabRef = useRef(onRestoreClosedTab);
   const applySourceChangeRef = useRef(onSourceChange);
@@ -64,7 +63,6 @@ export function EditorPane({ document, tabs, viewportState, active = true, proje
   const latestViewportStateRef = useRef<CodeViewportState>(editorViewportStateCache.get(sourceId) ?? viewportState ?? { scrollLeft: 0, scrollTop: 0 });
   const editorOptions = getMonacoOptionsForDocument({ ...document, source });
 
-  useEffect(() => { saveAllRef.current = onSaveAll; }, [onSaveAll]);
   useEffect(() => { closeActiveTabRef.current = () => onCloseTab(document.id); }, [document.id, onCloseTab]);
   useEffect(() => { restoreClosedTabRef.current = onRestoreClosedTab; }, [onRestoreClosedTab]);
   useEffect(() => { applySourceChangeRef.current = onSourceChange; }, [onSourceChange]);
@@ -132,6 +130,10 @@ export function EditorPane({ document, tabs, viewportState, active = true, proje
 
   useEffect(() => {
     latestViewportStateRef.current = editorViewportStateCache.get(sourceId) ?? viewportState ?? { scrollLeft: 0, scrollTop: 0 };
+  }, [sourceId, viewportState]);
+
+  useEffect(() => {
+    latestViewportStateRef.current = editorViewportStateCache.get(sourceId) ?? viewportState ?? { scrollLeft: 0, scrollTop: 0 };
     saveMonacoViewState();
     window.cancelAnimationFrame(restoreScrollFrameRef.current);
     restoreScrollTimersRef.current.forEach((timer) => window.clearTimeout(timer));
@@ -141,7 +143,7 @@ export function EditorPane({ document, tabs, viewportState, active = true, proje
       restoreScrollPosition();
       restoreScrollTimersRef.current = [window.setTimeout(restoreScrollPosition, 0), window.setTimeout(restoreScrollPosition, 50), window.setTimeout(restoreScrollPosition, 150)];
     });
-  }, [active, sourceId, viewportState]);
+  }, [active, sourceId]);
 
   const configureMonaco: BeforeMount = (monaco) => {
     const { accent } = getClipperAccent();
@@ -188,7 +190,6 @@ export function EditorPane({ document, tabs, viewportState, active = true, proje
 
   const onEditorMount: OnMount = (editor, monaco) => {
     editorRef.current = editor;
-    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => { void saveAllRef.current(); });
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyW, () => { closeActiveTabRef.current(); });
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyT, () => { restoreClosedTabRef.current(); });
     editor.addCommand(monaco.KeyMod.Alt | monaco.KeyCode.KeyZ, () => {

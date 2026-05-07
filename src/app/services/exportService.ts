@@ -119,7 +119,7 @@ function getRenderedMediaScene(project: ProjectManifest, sceneId: string) {
 }
 
 function getCompositionSource(composition: CompositionClip, compositionSources: Record<string, string>) {
-  const source = compositionSources[composition.filePath] ?? composition.source;
+  const source = compositionSources[composition.filePath];
   if (source === undefined) throw new Error(`Composition ${composition.filePath} is missing source.`);
   return source;
 }

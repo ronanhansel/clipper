@@ -54,7 +54,7 @@ export function createCompositionInLibrary(project: ProjectManifest, composition
     project: {
       ...project,
       compositionSources: nextSources,
-      compositionLibrary: [...(project.compositionLibrary ?? []), { ...composition, source }],
+      compositionLibrary: [...(project.compositionLibrary ?? []), composition],
       compositionFolders: Array.from(new Set([...(project.compositionFolders ?? []), getDirectoryPath(filePath)])),
     },
   };
@@ -198,7 +198,7 @@ export function relinkCompositionInProject(project: ProjectManifest, composition
   if (!composition || !nextFilePath.trim()) return null;
   const rest = Object.fromEntries(Object.entries(compositionSources).filter(([path]) => path !== composition.filePath));
   const nextSources = { ...rest, [nextFilePath]: source };
-  const restoredComposition = parsedComposition ? { ...parsedComposition, id: composition.id, sourceHash: hashCompositionSource(source), source } : { ...composition, sourceHash: hashCompositionSource(source), source };
+  const { source: _source, ...restoredComposition } = parsedComposition ? { ...parsedComposition, id: composition.id, sourceHash: hashCompositionSource(source) } : { ...composition, sourceHash: hashCompositionSource(source) };
   const nextLibrary = library.map((item) => item.id === compositionId ? {
     ...restoredComposition,
     id: composition.id,

@@ -28,11 +28,12 @@ type LeftSidebarProps = {
 export function LeftSidebar({ composeMode, effectsPanelState, fileManagerProps, hasActiveComposition, leftPanelTab, osFileManagerProps, part, selectedObjectIds, timelineMode, onEffectsPanelStateChange, onLeftPanelTabChange, onReorderComposeObjects, onSelectComposeLayerObjects, onToggleComposeLayerHidden, onToggleComposeLayerLocked }: LeftSidebarProps) {
   return (
     <aside className="flex min-h-0 flex-col overflow-hidden border-r border-[#2d313b] bg-[#171920] p-4">
-      {composeMode ? (
-        hasActiveComposition
+      <div className={`min-h-0 flex-1 overflow-hidden ${composeMode ? "grid" : "pointer-events-none hidden"}`} aria-hidden={!composeMode}>
+        {hasActiveComposition
           ? <ComposeLayersPanel part={part} selectedObjectIds={selectedObjectIds} onSelectObjects={onSelectComposeLayerObjects} onHoverObject={() => undefined} onReorderObjects={onReorderComposeObjects} onToggleLayerHidden={onToggleComposeLayerHidden} onToggleLayerLocked={onToggleComposeLayerLocked} />
-          : <div className="grid h-full place-items-center rounded-[14px] border border-[#2d313b] bg-[#111319]/72 p-5 text-center text-sm font-bold text-[#737884]">Move the playhead over a composition to inspect its layers.</div>
-      ) : <>
+          : <div className="grid h-full place-items-center rounded-[14px] border border-[#2d313b] bg-[#111319]/72 p-5 text-center text-sm font-bold text-[#737884]">Move the playhead over a composition to inspect its layers.</div>}
+      </div>
+      <div className={`min-h-0 flex-1 overflow-hidden ${composeMode ? "pointer-events-none hidden" : "flex flex-col"}`} aria-hidden={composeMode}>
         <div className="mb-4 grid shrink-0 grid-cols-2 gap-1">
           <button className={`${segmentedTabBase} flex items-center justify-center gap-1.5 ${leftPanelTab === "assets" ? segmentedTabActive : segmentedTabInactive}`} onClick={() => onLeftPanelTabChange("assets")}><Folder size={14} />Assets</button>
           <button className={`${segmentedTabBase} flex items-center justify-center gap-1.5 ${leftPanelTab === "tools" ? segmentedTabActive : segmentedTabInactive}`} onClick={() => onLeftPanelTabChange("tools")}><Sparkles size={14} />Effects</button>
@@ -43,7 +44,7 @@ export function LeftSidebar({ composeMode, effectsPanelState, fileManagerProps, 
         <div className={`min-h-0 flex-1 overflow-hidden ${leftPanelTab === "tools" ? "grid" : "hidden"}`} aria-hidden={leftPanelTab !== "tools"}>
           <ToolsPanel effectsPanelState={effectsPanelState} timelineMode={timelineMode} onEffectsPanelStateChange={onEffectsPanelStateChange} />
         </div>
-      </>}
+      </div>
     </aside>
   );
 }

@@ -1,5 +1,9 @@
 # Clipper
 
+<p align="center">
+    <img src="assets/branding/banner.png" alt="Clipper banner" height="200" align="left">
+</p>
+
 Clipper is an agentic video editor framework for TypeScript-authored motion graphics. It combines an Electron desktop shell, a Vite/React editor, and project-owned composition source files so motion graphics can be authored, previewed, organized, and exported from one local workspace.
 
 Note: The app is still in development and is unsigned. I haven't bought the development certificate yet 😅
@@ -94,12 +98,6 @@ npm run dist
 Platform-specific packaging commands are available with `npm run dist:mac`, `npm run dist:win`, and `npm run dist:linux`. Packaging is configured in `electron-builder.config.cjs` with app id `app.clipper.editor`, product name `Clipper`, and build resources from `build/electron`.
 
 Generated build output is written to `dist` and `dist-electron`; packaged artifacts are produced by electron-builder according to its default output conventions and the local platform/toolchain.
-
-## macOS Release Automation
-
-The GitHub Actions workflow in `.github/workflows/macos-release.yml` builds the macOS app on pull requests, pushes to `main`, version tags, and manual dispatches. It installs with `npm ci`, runs type-checks and tests, builds the app, packages DMG/ZIP artifacts, and uploads them from CI.
-
-Tags matching `v*` also publish a GitHub Release through electron-builder. Unsigned macOS artifacts work without secrets. Signed and notarized releases can be enabled by adding `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID` as GitHub repository or environment secrets. See [docs/MACOS_RELEASE.md](docs/MACOS_RELEASE.md) for the full release process.
 
 ## Contributing
 

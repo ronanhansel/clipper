@@ -14,7 +14,6 @@ import {
 } from "./activeProjectManifest";
 import { getProjectCompositionSources } from "./projectSources";
 import { compositionApiSource } from "../../core/compositionApiSource";
-import { chartSource } from "../../core/chartSource";
 
 const bootStateReadTimeoutMs = 3000;
 
@@ -150,7 +149,6 @@ async function createMinimalProject(manifestPath: string, projectName: string): 
   }
 
   await clipperHost.writeTextFile(`${directoryPath}/composition-api.ts`, compositionApiSource);
-  await clipperHost.writeTextFile(`${directoryPath}/chart.ts`, chartSource);
   await writeProjectTsconfig(directoryPath);
 
   return {

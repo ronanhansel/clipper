@@ -25,7 +25,6 @@ type UseGlobalEditorShortcutsOptions = {
   pausePlaybackAtCurrentTime: () => void;
   presentationModeRef: { current: string | false | null };
   redoProjectChange: () => void;
-  saveAllChangesRef: { current: (() => Promise<void> | void) | null | undefined };
   selectedPartId: string;
   setFastSelectEnabled: (enabled: Setter<boolean>) => void;
   setScrubSnapEnabled: (enabled: Setter<boolean>) => void;
@@ -70,7 +69,6 @@ export function useGlobalEditorShortcuts({
   pausePlaybackAtCurrentTime,
   presentationModeRef,
   redoProjectChange,
-  saveAllChangesRef,
   selectedPartId,
   setFastSelectEnabled,
   setScrubSnapEnabled,
@@ -96,12 +94,6 @@ export function useGlobalEditorShortcuts({
     }
 
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key.toLowerCase() === "s" && (event.ctrlKey || event.metaKey)) {
-        event.preventDefault();
-        void saveAllChangesRef.current?.();
-        return;
-      }
-
       if (event.key.toLowerCase() === "w" && (event.ctrlKey || event.metaKey)) {
         if (closeActiveEditorTab()) {
           event.preventDefault();
@@ -336,5 +328,5 @@ export function useGlobalEditorShortcuts({
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
     };
-  }, [activeEditorTabId, cancelActiveSelector, closeEditorTab, copySelectedTimelineNodes, cutSelectedTimelineNodes, deleteSelectedTimelineNodes, enterFrameFullscreen, enterTheaterMode, exitPresentationMode, jumpToEnd, jumpToNextPart, jumpToStart, marqueeDraggingRef, marqueeSpacePanningRef, pasteTimelineAttributesSilently, pasteTimelineNodesSilently, pausePlaybackAtCurrentTime, presentationModeRef, redoProjectChange, restoreClosedEditorTab, saveAllChangesRef, selectedPartId, setFastSelectEnabled, setScrubSnapEnabled, showPresentationControls, stepSceneTime, togglePlayback, undoProjectChange, updateMode, updateTimelineMode]);
+  }, [activeEditorTabId, cancelActiveSelector, closeEditorTab, copySelectedTimelineNodes, cutSelectedTimelineNodes, deleteSelectedTimelineNodes, enterFrameFullscreen, enterTheaterMode, exitPresentationMode, jumpToEnd, jumpToNextPart, jumpToStart, marqueeDraggingRef, marqueeSpacePanningRef, pasteTimelineAttributesSilently, pasteTimelineNodesSilently, pausePlaybackAtCurrentTime, presentationModeRef, redoProjectChange, restoreClosedEditorTab, selectedPartId, setFastSelectEnabled, setScrubSnapEnabled, showPresentationControls, stepSceneTime, togglePlayback, undoProjectChange, updateMode, updateTimelineMode]);
 }

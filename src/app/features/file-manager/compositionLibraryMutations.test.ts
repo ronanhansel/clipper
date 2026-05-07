@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { CompositionClip, ProjectManifest } from "../../../core/types";
-import { moveCompositionInProject, relinkCompositionInProject, renameCompositionInProject, updateCompositionFilePathsInProject } from "./compositionLibraryMutations";
+import { createCompositionInLibrary, moveCompositionInProject, relinkCompositionInProject, renameCompositionInProject, updateCompositionFilePathsInProject } from "./compositionLibraryMutations";
 
 const frame = { width: 1920 as const, height: 1080 as const, style: {} };
 const background = { id: "bg", name: "Background", style: {}, elements: [] };
@@ -80,7 +80,18 @@ describe("composition library mutations", () => {
     const result = relinkCompositionInProject(projectWithClip(item), {}, item.id, "compositions/found/B.composition.ts", "source", [item], composition(item.id, "compositions/found/B.composition.ts"));
 
     expect(result?.project.compositionLibrary?.[0]).toMatchObject({ id: "composition-b", filePath: "compositions/found/B.composition.ts", sourceMissing: undefined });
+    expect(result?.project.compositionLibrary?.[0]).not.toHaveProperty("source");
     expect(result?.project.timelines?.[0].clips[0]?.compositionId).toBe("composition-b");
+    vi.unstubAllGlobals();
+  });
+
+  it("creates composition library entries without embedded source", () => {
+    vi.stubGlobal("crypto", { randomUUID: () => "id" });
+    const item = composition("composition-b", "compositions/B.composition.ts");
+    const result = createCompositionInLibrary(projectWithClip(item), {}, item, "compositions/new.composition.ts");
+
+    expect(result.project.compositionLibrary?.at(-1)).not.toHaveProperty("source");
+    expect(result.compositionSources["compositions/new.composition.ts"]).toContain("new Composition");
     vi.unstubAllGlobals();
   });
 });

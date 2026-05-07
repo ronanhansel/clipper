@@ -3,7 +3,7 @@ import { defaultTimelinePixelsPerSecond } from "../../app/config";
 import { roundTwo } from "../../core/math";
 import { getTimelineTicks } from "../../core/timeline";
 import { getDisplayNameFromPath } from "../../core/fileNames";
-import type { BackgroundLayer, FrameObject, LayerAnimation, MotionMarker, MotionTrack, Part, TimelineLayerState, TimelineViewportState, TimelinePart } from "../../core/types";
+import type { FrameObject, LayerAnimation, MotionMarker, Part, TimelineLayerState, TimelineViewportState, TimelinePart } from "../../core/types";
 import { useTimelineDragAutoScroll } from "./useTimelineDragAutoScroll";
 import { useTimelinePointerTransaction } from "./useTimelinePointerTransaction";
 import { getTimelineRowHeight, useTimelineRowResize } from "./useTimelineRowResize";
@@ -34,12 +34,10 @@ type ComposeAnimationTimelinePanelProps = {
   onTimelineLayersChange: (updater: (state: TimelineLayerState) => TimelineLayerState, options?: { history?: boolean }) => void;
   onTimelineViewportStateChange: (updater: (state: TimelineViewportState) => TimelineViewportState) => void;
   onUpdateBackgroundAnimation?: (updater: (animations: LayerAnimation[]) => LayerAnimation[]) => void;
-  onUpdateBackgroundMotion?: (updater: (motion: MotionTrack | undefined, background: BackgroundLayer) => MotionTrack | undefined) => void;
   onUpdateObjectAnimation?: (objectId: string, updater: (animations: LayerAnimation[]) => LayerAnimation[]) => void;
-  onUpdateObjectMotion?: (objectId: string, updater: (motion: MotionTrack | undefined, object: FrameObject) => MotionTrack | undefined) => void;
 };
 
-export const ComposeAnimationTimelinePanel = memo(function ComposeAnimationTimelinePanel({ currentTime, part, playbackPlayheadRef, scrubbingRef, scrubSnapEnabled, selectedObjectIds, timelineLayers, timelineViewportState, onExitCompose, onRenameLayer, onScrub, onScrubEnd, onScrubStart, onSelectObjects, onTimelineLayersChange, onTimelineViewportStateChange, onUpdateBackgroundAnimation, onUpdateBackgroundMotion, onUpdateObjectAnimation, onUpdateObjectMotion }: ComposeAnimationTimelinePanelProps) {
+export const ComposeAnimationTimelinePanel = memo(function ComposeAnimationTimelinePanel({ currentTime, part, playbackPlayheadRef, scrubbingRef, scrubSnapEnabled, selectedObjectIds, timelineLayers, timelineViewportState, onExitCompose, onRenameLayer, onScrub, onScrubEnd, onScrubStart, onSelectObjects, onTimelineLayersChange, onTimelineViewportStateChange, onUpdateBackgroundAnimation, onUpdateObjectAnimation }: ComposeAnimationTimelinePanelProps) {
   const timelineDuration = Math.max(part?.duration ?? 0.1, 10);
   const layers = useMemo(() => part ? buildComposeAnimationTimelineLayers(part) : [], [part]);
   const ticks = useMemo(() => getTimelineTicks(timelineDuration), [timelineDuration]);
@@ -144,11 +142,10 @@ export const ComposeAnimationTimelinePanel = memo(function ComposeAnimationTimel
 
   function startTimingDrag(event: PointerEvent<HTMLDivElement>, layer: ComposeAnimationTimelineLayer, action: ComposeAnimationTimingDrag["action"], animation?: LayerAnimation) {
     if (event.button !== 0) return;
-    const isAnimation = !!animation;
-    if (!isAnimation && !layer.motion) return;
-    const initialDelay = isAnimation ? (animation!.options.delay ?? 0) : (layer.motion!.delay ?? 0);
-    const initialDuration = isAnimation ? animation!.options.duration : layer.motion!.duration;
-    const markerId = isAnimation ? `${layer.id}/anim/${animation!.id}` : layer.id;
+    if (!animation) return;
+    const initialDelay = animation.options.delay ?? 0;
+    const initialDuration = animation.options.duration;
+    const markerId = `${layer.id}/anim/${animation.id}`;
     event.preventDefault();
     event.stopPropagation();
     selectLayer(layer);
@@ -173,7 +170,7 @@ export const ComposeAnimationTimelinePanel = memo(function ComposeAnimationTimel
       updateAutoScroll: updateTimingDragAutoScroll,
       stopAutoScroll: stopTimingDragAutoScroll,
       onDragStart: ({ pointerId }) => {
-        timingDragRef.current = { action, initialClientX: event.clientX, initialScrollLeft: timelineViewportRef.current?.scrollLeft ?? 0, initialDelay, initialDuration, layer, partId: composeTimelinePartId, markerId, animationId: isAnimation ? animation!.id : undefined, pointerId, snapBoundaries, snapThresholdSeconds };
+        timingDragRef.current = { action, initialClientX: event.clientX, initialScrollLeft: timelineViewportRef.current?.scrollLeft ?? 0, initialDelay, initialDuration, layer, partId: composeTimelinePartId, markerId, animationId: animation.id, pointerId, snapBoundaries, snapThresholdSeconds };
         setTimelineDragActive(true);
       },
       onPreview: ({ pointerId, clientX, snap }) => updateTimingDragFromPointer(pointerId, clientX, snap),
@@ -204,7 +201,7 @@ export const ComposeAnimationTimelinePanel = memo(function ComposeAnimationTimel
     timingDragRef.current = null;
     setTimelineDragActive(false);
     setTimelineBlockPreviews(null);
-    updateComposeAnimationLayerMotionTiming(drag.layer, next, onUpdateBackgroundMotion, onUpdateObjectMotion, onUpdateBackgroundAnimation, onUpdateObjectAnimation, drag.animationId);
+    updateComposeAnimationLayerMotionTiming(drag.layer, next, undefined, undefined, onUpdateBackgroundAnimation, onUpdateObjectAnimation, drag.animationId);
   }
 
   function updateComposeMotionFromPointer(event: PointerEvent<HTMLDivElement>, _timelinePart: TimelinePart, marker: MotionMarker, action: "move" | "start" | "end") {

@@ -80,7 +80,6 @@ export function OsFileManager({
   onReloadProject,
 }: OsFileManagerProps) {
   const [treeData, setTreeData] = useState<OsFileNode[]>([]);
-  const [loading, setLoading] = useState(true);
   const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -323,8 +322,6 @@ export function OsFileManager({
   useEffect(() => {
     let cancelled = false;
     async function load() {
-      const showInitialLoading = loadedDirectoryRef.current !== effectiveDirectory;
-      if (showInitialLoading) setLoading(true);
       try {
         const children = await loadStableDirectoryTree(effectiveDirectory);
         if (!cancelled) {
@@ -335,8 +332,6 @@ export function OsFileManager({
         }
       } catch (error) {
         if (!cancelled) toast.error(error instanceof Error ? error.message : "Unable to load project directory.");
-      } finally {
-        if (!cancelled) setLoading(false);
       }
     }
     load();
@@ -744,10 +739,7 @@ export const composition = new Composition({
       <div className="mb-2 flex items-center justify-between px-0.5">
         <h3 className="text-[13px] text-[#aeb3c1]">File Manager</h3>
       </div>
-      {loading ? (
-        <div className="px-0.5 text-[13px] text-[#737884]">Loading...</div>
-      ) : (
-        <div ref={treeContainerRef} className={`relative ${rootDropVisible ? "bg-[var(--clipper-accent-muted-surface)] shadow-[0_0_0_1px_rgba(255,255,255,0.05)_inset,0_0_0_2px_var(--clipper-accent)]" : ""}`}>
+      <div ref={treeContainerRef} className={`relative ${rootDropVisible ? "bg-[var(--clipper-accent-muted-surface)] shadow-[0_0_0_1px_rgba(255,255,255,0.05)_inset,0_0_0_2px_var(--clipper-accent)]" : ""}`}>
         <NativeTree<OsFileNode>
           ref={treeRef}
           data={data}
@@ -773,8 +765,7 @@ export const composition = new Composition({
         >
           {(props) => <OsFileTreeNode {...props} compositionLibrary={compositionLibrary} effectiveDirectory={effectiveDirectory} projectDirectory={projectDirectory} onContextMenu={openContextMenu} />}
         </NativeTree>
-        </div>
-      )}
+      </div>
       <AppContextMenu menu={contextMenu} onClose={() => setContextMenu(null)} />
     </section>
   );

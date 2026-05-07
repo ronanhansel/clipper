@@ -9,6 +9,16 @@ declare module "*.html" {
   const source: string;
   export default source;
 }
+
+declare module "*.three.js" {
+  const source: string;
+  export default source;
+}
+
+declare module "*.three.ts" {
+  const source: string;
+  export default source;
+}
 `;
 
 type MonacoTypeScriptLanguageService = {

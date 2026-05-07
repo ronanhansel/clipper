@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { createDefaultTimelineLayerState, defaultTimelineLayerState, deleteCompositionFromProject, normalizeProject, replacePartInProject, serializeProjectForSave, withRequiredTimelineLayerTypes } from "./project";
+import { compositionToSource } from "./compositionSource";
+import { applyAnimationGraphToComposition, createDefaultTimelineLayerState, defaultTimelineLayerState, deleteCompositionFromProject, getSceneFromProject, normalizeAnimationGraphState, normalizeProject, replacePartInProject, serializeProjectForSave, withRequiredTimelineLayerTypes } from "./project";
 import { motionBlocksToMotionMarkers } from "./motionEffects";
 import type { CompositionClip, ProjectManifest } from "./types";
 
@@ -47,7 +48,8 @@ describe("project normalization", () => {
     expect(normalized.timelines?.[0].clips[0].motionMarkers).toEqual([]);
     expect(normalized.timelines?.[0].motionMarkers?.[0]).toMatchObject({ id: "zoom_1", kind: "zoom", layerId: "clipper.motion.zoom", scale: 1.2 });
     expect(normalized.compositions).toHaveLength(1);
-    expect(normalized.compositions?.[0].source).toBe("export const composition = { id: 'cmp_intro' };");
+    expect(normalized.compositionSources?.[composition.filePath]).toBe("export const composition = { id: 'cmp_intro' };");
+    expect(normalized.compositions?.[0]).not.toHaveProperty("source");
   });
 
   it("migrates legacy composition prerender marks onto timeline clips", () => {
@@ -82,6 +84,72 @@ describe("project normalization", () => {
     expect(normalized.timelines?.[0].filePath).toBe("compositions/folder/tl_main.timeline.json");
     expect(normalized.timelines?.[0].settings).toEqual({ frameRate: 30 });
     expect(normalized.timelines?.[0].motionMarkers?.[0]).toMatchObject({ id: "zoom_1", kind: "zoom", effectId: "clipper.motion.zoom" });
+  });
+
+  it("uses synced source when normalizing geometry-only composition edits", () => {
+    const object = {
+      id: "title",
+      name: "Title",
+      type: "text" as const,
+      selector: "[data-object-id='title']",
+      bounds: { x: 100, y: 100, width: 300, height: 80 },
+      content: "Hello",
+      style: {},
+    };
+    const baseComposition = { ...composition, objects: [object] };
+    const baseProject = normalizeProject({
+      ...projectWithComposition(),
+      compositions: [{ ...baseComposition, source: compositionToSource(baseComposition) }],
+      compositionLibrary: [baseComposition],
+      compositionSources: { [baseComposition.filePath]: compositionToSource(baseComposition) },
+    });
+    const editedProject = replacePartInProject(baseProject, baseComposition.id, (part) => ({
+      ...part,
+      objects: part.objects.map((item) => (item.id === object.id ? { ...item, bounds: { ...item.bounds, width: 520 } } : item)),
+    }));
+    const editedPart = editedProject.compositionLibrary?.find((item) => item.id === baseComposition.id)!;
+    const normalized = normalizeProject({
+      ...editedProject,
+      compositionSources: { [baseComposition.filePath]: compositionToSource(editedPart) },
+    });
+
+    expect(getSceneFromProject(normalized, "tl_main")?.compositions[0].objects[0].bounds.width).toBe(520);
+  });
+
+  it("uses compositionSources as canonical source over stale embedded source", () => {
+    const object = {
+      id: "title",
+      name: "Title",
+      type: "text" as const,
+      selector: "[data-object-id='title']",
+      bounds: { x: 100, y: 100, width: 300, height: 80 },
+      content: "Hello",
+      style: {},
+    };
+    const baseComposition = { ...composition, objects: [object] };
+    const baseSource = compositionToSource(baseComposition);
+    const editedComposition = {
+      ...baseComposition,
+      source: baseSource,
+      objects: [{ ...object, bounds: { ...object.bounds, width: 520 } }],
+    };
+    const normalized = normalizeProject({
+      ...projectWithComposition(),
+      compositions: [editedComposition],
+      compositionLibrary: [editedComposition],
+      compositionSources: { [baseComposition.filePath]: compositionToSource(editedComposition) },
+    });
+
+    expect(getSceneFromProject(normalized, "tl_main")?.compositions[0].objects[0].bounds.width).toBe(520);
+  });
+
+  it("does not serialize embedded composition source", () => {
+    const serialized = serializeProjectForSave(projectWithComposition());
+
+    expect(serialized.compositionSources?.[composition.filePath]).toBe("export const composition = { id: 'cmp_intro' };");
+    expect(serialized.compositions?.[0]).not.toHaveProperty("source");
+    expect(serialized.compositionLibrary?.[0]).not.toHaveProperty("source");
+    expect(serialized.scenes[0]?.compositions[0]).not.toHaveProperty("source");
   });
 
   it("normalizes composition folder roots without preserving empty compositions or file-manager prefixes", () => {
@@ -225,6 +293,130 @@ describe("project normalization", () => {
     expect(deleted.compositionLibrary?.[0]).toMatchObject({ id: "cmp_intro", sourceMissing: true });
     expect(deleted.timelines?.[0].clips[0]).toMatchObject({ compositionId: "cmp_intro" });
     expect(deleted.scenes[0].compositions[0]).toMatchObject({ compositionId: "cmp_intro", sourceMissing: true });
+  });
+
+  it("applies graph animations to background elements", () => {
+    const applied = applyAnimationGraphToComposition({
+      ...composition,
+      background: {
+        ...composition.background,
+        elements: [{ id: "bg_text", name: "BG Text", type: "text", selector: ".bg", bounds: { x: 0, y: 0, width: 100, height: 40 }, style: {}, animations: [] }],
+      },
+    }, {
+      nodes: {},
+      customNodes: {
+        effect: { kind: "animation", label: "Opacity", scopeKey: "bg_text", details: { property: "opacity" } },
+        time: { kind: "time", label: "Time", scopeKey: "bg_text", details: { delay: "0s", duration: "1s" } },
+      },
+      edges: [
+        { id: "effect->time", fromNodeId: "effect", fromPort: "bottom", toNodeId: "time", toPort: "top" },
+        { id: "time->layer", fromNodeId: "time", fromPort: "bottom", toNodeId: "layer:bg_text", toPort: "top" },
+      ],
+      parameters: { effect: { from: "0", to: "1" } },
+    });
+
+    expect(applied.background.elements[0].animations?.[0]).toMatchObject({ id: "graph:effect", keyframes: { opacity: [0, 1] } });
+  });
+
+  it("normalizes graph deleted node tombstones", () => {
+    const normalized = normalizeAnimationGraphState({
+      nodes: { "animation:text:anim:opacity:opacity": { x: 1, y: 2 } },
+      customNodes: { "animation:text:anim:opacity:opacity": { kind: "animation", label: "Opacity", scopeKey: "text", details: { property: "opacity" } } },
+      edges: [{ id: "deleted->layer", fromNodeId: "animation:text:anim:opacity:opacity", fromPort: "bottom", toNodeId: "layer:text", toPort: "top" }],
+      parameters: { "animation:text:anim:opacity:opacity": { from: "0", to: "1" } },
+      deletedNodeIds: ["animation:text:anim:opacity:opacity", "animation:text:anim:opacity:opacity", ""],
+    });
+
+    expect(normalized).toMatchObject({ nodes: {}, edges: [], deletedNodeIds: ["animation:text:anim:opacity:opacity"] });
+    expect(normalized?.customNodes).toBeUndefined();
+    expect(normalized?.parameters).toBeUndefined();
+  });
+
+  it("materializes graph-authored position parameters", () => {
+    const applied = applyAnimationGraphToComposition({
+      ...composition,
+      objects: [{ id: "text", name: "Text", type: "text", selector: ".text", bounds: { x: 0, y: 0, width: 100, height: 40 }, style: {}, animations: [] }],
+    }, {
+      nodes: {},
+      customNodes: {
+        effect: { kind: "animation", label: "Position", scopeKey: "text", details: { property: "position" } },
+        time: { kind: "time", label: "Time", scopeKey: "text", details: { delay: "0s", duration: "1s" } },
+      },
+      edges: [
+        { id: "effect->time", fromNodeId: "effect", fromPort: "bottom", toNodeId: "time", toPort: "top" },
+        { id: "time->layer", fromNodeId: "time", fromPort: "bottom", toNodeId: "layer:text", toPort: "top" },
+      ],
+      parameters: { effect: { "x from": "10", "x to": "20", "y from": "30", "y to": "40" } },
+    });
+
+    expect(applied.objects[0].animations?.[0]).toMatchObject({ id: "graph:effect", keyframes: { x: [10, 20], y: [30, 40] } });
+  });
+
+  it("does not replace unsupported position-like keyframes from stale detected graph nodes", () => {
+    const applied = applyAnimationGraphToComposition({
+      ...composition,
+      objects: [{
+        id: "text",
+        name: "Text",
+        type: "text",
+        selector: ".text",
+        bounds: { x: 0, y: 0, width: 100, height: 40 },
+        style: {},
+        animations: [{ id: "z_move", keyframes: { z: [0, 100] }, options: { duration: 1, type: "tween" } }],
+      }],
+    }, {
+      nodes: {},
+      customNodes: {
+        effect: { kind: "animation", label: "Position", scopeKey: "text", details: { property: "position" } },
+        "animation:text:anim:z_move:position": { kind: "animation", label: "Position", scopeKey: "text", details: { property: "position" } },
+        time: { kind: "time", label: "Time", scopeKey: "text", details: { delay: "0s", duration: "1s" } },
+      },
+      edges: [
+        { id: "effect->time", fromNodeId: "effect", fromPort: "bottom", toNodeId: "time", toPort: "top" },
+        { id: "time->layer", fromNodeId: "time", fromPort: "bottom", toNodeId: "layer:text", toPort: "top" },
+      ],
+      parameters: { effect: { "x from": "10", "x to": "20", "y from": "30", "y to": "40" } },
+    });
+
+    expect(applied.objects[0].animations?.find((animation) => animation.id === "z_move")?.keyframes).toEqual({ z: [0, 100] });
+    expect(applied.objects[0].animations?.find((animation) => animation.id === "graph:effect")?.keyframes).toEqual({ x: [10, 20], y: [30, 40] });
+  });
+
+  it("serializes graph-authored animation only as timeline graph state", () => {
+    const bgText = { id: "bg_text", name: "BG Text", type: "text" as const, selector: ".bg", bounds: { x: 0, y: 0, width: 100, height: 40 }, style: {}, animations: [] };
+    const animationGraph = {
+      nodes: {
+        effect: { x: 0, y: 0 },
+        time: { x: 0, y: 4 },
+        "layer:bg_text": { x: 0, y: 8 },
+      },
+      customNodes: {
+        effect: { kind: "animation" as const, label: "Opacity", scopeKey: "bg_text", details: { property: "opacity" } },
+        time: { kind: "time" as const, label: "Time", scopeKey: "bg_text", details: { delay: "0s", duration: "1s" } },
+      },
+      edges: [
+        { id: "effect->time", fromNodeId: "effect", fromPort: "bottom" as const, toNodeId: "time", toPort: "top" as const },
+        { id: "time->layer", fromNodeId: "time", fromPort: "bottom" as const, toNodeId: "layer:bg_text", toPort: "top" as const },
+      ],
+      parameters: { effect: { from: "0", to: "1" } },
+    };
+    const graphComposition = {
+      ...composition,
+      background: { ...composition.background, elements: [bgText] },
+    };
+    const project = {
+      ...projectWithComposition(),
+      timelines: [{ id: "tl_main", filePath: "timelines/tl_main.timeline.json", clips: [{ id: composition.id, compositionId: composition.id, duration: composition.duration, animationGraph }], adjustmentLayers: [], settings: {} }],
+      compositions: [{ ...graphComposition, source: compositionToSource(graphComposition) }],
+      compositionLibrary: [graphComposition],
+      compositionSources: { [graphComposition.filePath]: compositionToSource(graphComposition) },
+    };
+
+    expect(getSceneFromProject(project, "tl_main")?.compositions[0].background.elements[0].animations?.[0].id).toBe("graph:effect");
+
+    const serialized = serializeProjectForSave(project);
+    expect(serialized.timelines?.[0].clips[0].animationGraph).toBeDefined();
+    expect(serialized.scenes[0].compositions[0].background.elements[0].animations).toBeUndefined();
   });
 
   it("remaps timeline clip composition references when composition path IDs change", () => {

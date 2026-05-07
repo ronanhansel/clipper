@@ -1,6 +1,6 @@
 import { roundTenth } from "./math";
 import { getMotionBlockEffectKind, getMotionMarkerViews } from "./motionEffects";
-import { getMotionTranslation } from "../render-engine/renderRuntime";
+import { getLayerAnimationsTranslation } from "./animations";
 import { isExplicitTimelineMarkerMend } from "./timeline";
 import { FRAME_HEIGHT, FRAME_WIDTH, type Bounds, type FrameObject, type MotionEase, type MotionMarker, type Part, type PerspectiveSettings, type Point, type TimelineMotionLayerState } from "./types";
 
@@ -288,7 +288,7 @@ function getMotionMarkerPosition(marker: MotionMarker, time: number, part: Part 
   if (!marker.followId || !part) return marker.position ?? { x: 0, y: 0 };
   const object = findFollowObject(part, marker.followId);
   if (!object) return marker.position ?? { x: 0, y: 0 };
-  const motion = getMotionTranslation(object.motion, time);
+  const motion = getLayerAnimationsTranslation(object.animations, time);
   const position = framePointToCameraTranslation({
     x: object.bounds.x + object.bounds.width / 2 + motion.x,
     y: object.bounds.y + object.bounds.height / 2 + motion.y,

@@ -5,7 +5,7 @@ export function getProjectCompositionSources(project: ProjectManifest) {
   const compositions = Array.from(new Map([...(project.compositionLibrary ?? []), ...(project.compositions ?? [])].map((part) => [part.filePath, part])).values()).filter((part) => !part.sourceMissing);
   const embeddedSources = project.compositionSources ?? {};
   return Object.fromEntries(compositions.map((part) => {
-    const source = embeddedSources[part.filePath] ?? part.source;
+    const source = embeddedSources[part.filePath];
     if (source === undefined) throw new Error(`Composition ${part.filePath} is missing source.`);
     return [part.filePath, source];
   }));

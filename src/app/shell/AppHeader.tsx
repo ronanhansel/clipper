@@ -1,11 +1,11 @@
 import type { MouseEvent as ReactMouseEvent } from "react";
 import { Input } from "../../components/ui/input";
-import { appBarActionButtonBase, appBarSaveButtonClass, appDragRegion, appNoDragRegion } from "../config";
+import { appBarActionButtonBase, appDragRegion, appNoDragRegion } from "../config";
 
 type AppHeaderProps = {
-  hasUnsavedChanges: boolean;
   projectName: string;
   projectNameDraft: string;
+  lastSavedAt: number | null;
   renamingProject: boolean;
   sceneName: string;
   onCancelProjectRename: () => void;
@@ -15,11 +15,13 @@ type AppHeaderProps = {
   onOpenProject: () => void;
   onProjectNameDraftChange: (name: string) => void;
   onProjectTitleContextMenu: (event: ReactMouseEvent<HTMLDivElement>) => void;
-  onSaveAll: () => void;
   onSettingsOpen: () => void;
 };
 
-export function AppHeader({ hasUnsavedChanges, projectName, projectNameDraft, renamingProject, sceneName, onCancelProjectRename, onCloseProject, onCommitProjectRename, onExportOpen, onOpenProject, onProjectNameDraftChange, onProjectTitleContextMenu, onSaveAll, onSettingsOpen }: AppHeaderProps) {
+export function AppHeader({ projectName, projectNameDraft, lastSavedAt, renamingProject, sceneName, onCancelProjectRename, onCloseProject, onCommitProjectRename, onExportOpen, onOpenProject, onProjectNameDraftChange, onProjectTitleContextMenu, onSettingsOpen }: AppHeaderProps) {
+  const savedTimeLabel = lastSavedAt ? `Saved ${formatSavedTime(lastSavedAt)}` : null;
+  const savedTimeTitle = lastSavedAt ? `Last saved at ${formatSavedTitle(lastSavedAt)}` : undefined;
+
   return (
     <header className={`${appDragRegion} relative grid grid-cols-[1fr_auto] items-center gap-[18px] border-b border-[#2d313b] bg-[rgba(22,24,31,0.98)] px-[22px]`}>
       <div />
@@ -33,8 +35,16 @@ export function AppHeader({ hasUnsavedChanges, projectName, projectNameDraft, re
         <button className={appBarActionButtonBase} title="Close project and return to welcome screen" onClick={onCloseProject}>Close</button>
         <button className={appBarActionButtonBase} title="Settings (Cmd/Ctrl+,)" onClick={onSettingsOpen}>Settings</button>
         <button className={appBarActionButtonBase} onClick={onExportOpen}>Export</button>
-        <button className={appBarSaveButtonClass(hasUnsavedChanges)} disabled={!hasUnsavedChanges} title="Save every project, timeline, inspector, and active code change (Ctrl+S or Cmd+S)" onClick={onSaveAll}>Save</button>
+        {savedTimeLabel ? <div className="ml-2 flex min-w-[92px] items-center justify-end whitespace-nowrap text-[11px] font-medium text-[#686d78]" title={savedTimeTitle}>{savedTimeLabel}</div> : null}
       </div>
     </header>
   );
+}
+
+function formatSavedTime(timestamp: number) {
+  return new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(timestamp));
+}
+
+function formatSavedTitle(timestamp: number) {
+  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "medium" }).format(new Date(timestamp));
 }

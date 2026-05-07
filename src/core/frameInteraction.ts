@@ -17,9 +17,9 @@ export type ObjectResize = {
   handle: ResizeHandle;
   partId: string;
   selectionBox: Bounds;
-  displaySelectionBox?: Bounds;
+  displaySelectionBox: Bounds;
   aspectRatio?: number;
-  objectPreviewTransforms?: Record<string, ObjectPreviewTransform>;
+  objectPreviewTransforms: Record<string, ObjectPreviewTransform>;
   objects: SelectionPayload["objects"];
   preservedObjects: SelectionPayload["objects"];
 };
@@ -27,6 +27,8 @@ export type ObjectResize = {
 export type ObjectPreviewTransform = {
   translateX: number;
   translateY: number;
+  translateXPercent: number;
+  translateYPercent: number;
   scaleX: number;
   scaleY: number;
 };
@@ -70,14 +72,13 @@ export function constrainDragDeltaToDominantAxis(delta: Point, constrained: bool
 }
 
 export function getResizedObjects(resize: ObjectResize, delta: Point, preserveAspect = false) {
-  const sourceSelectionBox = resize.selectionBox;
-  const displaySelectionBox = resize.displaySelectionBox ?? sourceSelectionBox;
+  const displaySelectionBox = resize.displaySelectionBox;
   const nextDisplaySelectionBox = getResizedBounds(displaySelectionBox, resize.handle, delta, preserveAspect ? resize.aspectRatio : undefined);
   const scaleX = displaySelectionBox.width === 0 ? 1 : nextDisplaySelectionBox.width / displaySelectionBox.width;
   const scaleY = displaySelectionBox.height === 0 ? 1 : nextDisplaySelectionBox.height / displaySelectionBox.height;
 
   return resize.objects.map((object) => {
-    const previewTransform = resize.objectPreviewTransforms?.[object.id] ?? identityPreviewTransform;
+    const previewTransform = resize.objectPreviewTransforms[object.id] ?? identityPreviewTransform;
     const objectDisplayBounds = getBoundsWithPreviewTransform(object.bounds, previewTransform);
     const displayLeft = nextDisplaySelectionBox.x + (objectDisplayBounds.x - displaySelectionBox.x) * scaleX;
     const displayRight = nextDisplaySelectionBox.x + (objectDisplayBounds.x + objectDisplayBounds.width - displaySelectionBox.x) * scaleX;
@@ -105,14 +106,14 @@ export function getResizedObjects(resize: ObjectResize, delta: Point, preserveAs
   });
 }
 
-const identityPreviewTransform: ObjectPreviewTransform = { translateX: 0, translateY: 0, scaleX: 1, scaleY: 1 };
+const identityPreviewTransform: ObjectPreviewTransform = { translateX: 0, translateY: 0, translateXPercent: 0, translateYPercent: 0, scaleX: 1, scaleY: 1 };
 
 export function getBoundsWithPreviewTransform(bounds: Bounds, transform: ObjectPreviewTransform): Bounds {
   const width = bounds.width * transform.scaleX;
   const height = bounds.height * transform.scaleY;
   return {
-    x: bounds.x + transform.translateX + (bounds.width - width) / 2,
-    y: bounds.y + transform.translateY + (bounds.height - height) / 2,
+    x: bounds.x + transform.translateX + bounds.width * transform.translateXPercent + (bounds.width - width) / 2,
+    y: bounds.y + transform.translateY + bounds.height * transform.translateYPercent + (bounds.height - height) / 2,
     width,
     height,
   };
@@ -124,8 +125,8 @@ function getBoundsWithoutPreviewTransform(bounds: Bounds, transform: ObjectPrevi
   const width = bounds.width / scaleX;
   const height = bounds.height / scaleY;
   return {
-    x: bounds.x - transform.translateX - (width - bounds.width) / 2,
-    y: bounds.y - transform.translateY - (height - bounds.height) / 2,
+    x: bounds.x - transform.translateX - width * transform.translateXPercent - (width - bounds.width) / 2,
+    y: bounds.y - transform.translateY - height * transform.translateYPercent - (height - bounds.height) / 2,
     width,
     height,
   };
@@ -225,8 +226,7 @@ export function moveBounds(bounds: Bounds, delta: Point): Bounds {
 }
 
 export function syncChartObjectBounds(object: FrameObject): FrameObject {
-  if (object.type !== "chart" || !object.chart) return object;
-  return { ...object, chart: { ...object.chart, bounds: object.bounds } };
+  return object;
 }
 
 export function getPartFrameObject(part: Part, objectId: string) {
@@ -240,30 +240,45 @@ export function getFrameObjectWithPreviewBounds(object: FrameObject, time: numbe
 
 export function getFrameObjectPreviewTransform(object: FrameObject, time: number, duration: number): ObjectPreviewTransform {
   const evaluated = evaluateFrameObject(object, time, duration, { animations: true });
-  const transform = typeof evaluated.renderStyle.transform === "string" ? evaluated.renderStyle.transform : "";
+  const animationTransform = typeof evaluated.renderStyle.transform === "string" ? evaluated.renderStyle.transform : undefined;
+  const objectTransform = typeof object.style.transform === "string" ? object.style.transform : undefined;
+  const transform = animationTransform ?? objectTransform ?? "";
   let translateX = 0;
   let translateY = 0;
+  let translateXPercent = 0;
+  let translateYPercent = 0;
   let scaleX = 1;
   let scaleY = 1;
-  const matcher = /(translate(?:X|Y)?|scale(?:X|Y)?)\(([^)]*)\)/g;
+  const matcher = /(translate(?:3d|X|Y)?|scale(?:3d|X|Y)?)\(([^)]*)\)/g;
   for (const match of transform.matchAll(matcher)) {
     const [, kind, rawArgs] = match;
-    const args = rawArgs.split(/[,\s]+/).map((value) => Number.parseFloat(value)).filter(Number.isFinite);
-    if (kind === "translate") {
-      translateX += args[0] ?? 0;
-      translateY += args[1] ?? 0;
+    const args = rawArgs.split(/[,\s]+/).filter(Boolean).map(parseTransformArgument);
+    if (kind === "translate" || kind === "translate3d") {
+      translateX += args[0]?.px ?? 0;
+      translateY += args[1]?.px ?? 0;
+      translateXPercent += args[0]?.percent ?? 0;
+      translateYPercent += args[1]?.percent ?? 0;
     } else if (kind === "translateX") {
-      translateX += args[0] ?? 0;
+      translateX += args[0]?.px ?? 0;
+      translateXPercent += args[0]?.percent ?? 0;
     } else if (kind === "translateY") {
-      translateY += args[0] ?? 0;
-    } else if (kind === "scale") {
-      scaleX *= args[0] ?? 1;
-      scaleY *= args[1] ?? args[0] ?? 1;
+      translateY += args[0]?.px ?? 0;
+      translateYPercent += args[0]?.percent ?? 0;
+    } else if (kind === "scale" || kind === "scale3d") {
+      scaleX *= args[0]?.number ?? 1;
+      scaleY *= args[1]?.number ?? args[0]?.number ?? 1;
     } else if (kind === "scaleX") {
-      scaleX *= args[0] ?? 1;
+      scaleX *= args[0]?.number ?? 1;
     } else if (kind === "scaleY") {
-      scaleY *= args[0] ?? 1;
+      scaleY *= args[0]?.number ?? 1;
     }
   }
-  return { translateX, translateY, scaleX, scaleY };
+  return { translateX, translateY, translateXPercent, translateYPercent, scaleX, scaleY };
+}
+
+function parseTransformArgument(value: string) {
+  const number = Number.parseFloat(value);
+  if (!Number.isFinite(number)) return { number: undefined, px: 0, percent: 0 };
+  if (value.trim().endsWith("%")) return { number, px: 0, percent: number / 100 };
+  return { number, px: number, percent: 0 };
 }

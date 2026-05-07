@@ -1,14 +1,29 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { defaultTimelineLayerState } from "../../core/project";
 import { timelineDisplayDuration as getTimelineDisplayDuration } from "../../core/timeline";
 import { getActiveCompositionPointerDrag, setActiveCompositionPointerDrag } from "../../lib/pointerDrag";
-import { ComposeAnimationTimelinePanel } from "./ComposeAnimationTimelinePanel";
+import { ComposeAnimationGraphPanel } from "./ComposeAnimationGraphPanel";
 import { DirectTimelinePanel } from "./DirectTimelinePanel";
 import type { TimelinePanelProps } from "./timelineTypes";
 
 export type { TimelinePanelProps } from "./timelineTypes";
 
 export function TimelinePanel(props: TimelinePanelProps) {
+  const inactivePlaybackPlayheadRef = useRef<HTMLDivElement | null>(null);
+  const lastDirectPropsRef = useRef<TimelinePanelProps>(props);
+  const lastComposePartRef = useRef(props.composeAnimationPart ?? null);
+  const lastComposeSelectedObjectIdsRef = useRef(props.selectedObjectIds ?? []);
+  const lastComposeTimeRef = useRef(props.currentSceneTime);
+  if (props.mode !== "compose") lastDirectPropsRef.current = props;
+  if (props.mode === "compose") {
+    lastComposePartRef.current = props.composeAnimationPart ?? null;
+    lastComposeSelectedObjectIdsRef.current = props.selectedObjectIds ?? [];
+    if (!props.isPlaying) lastComposeTimeRef.current = props.currentSceneTime;
+  }
+  const composePart = props.mode === "compose" ? props.composeAnimationPart ?? null : lastComposePartRef.current;
+  const composeSelectedObjectIds = props.mode === "compose" ? props.selectedObjectIds ?? [] : lastComposeSelectedObjectIdsRef.current;
+  const composeCurrentTime = props.mode === "compose" && !props.isPlaying ? props.currentSceneTime : lastComposeTimeRef.current;
+  const directProps = props.mode === "compose" ? lastDirectPropsRef.current : props;
   useEffect(() => {
     if (props.mode !== "compose") return;
 
@@ -60,9 +75,12 @@ export function TimelinePanel(props: TimelinePanelProps) {
     };
   }, [props]);
 
-  if (props.mode === "compose" && props.composeAnimationPart) {
-    return <ComposeAnimationTimelinePanel currentTime={props.currentSceneTime} part={props.composeAnimationPart ?? null} playbackPlayheadRef={props.playbackPlayheadRef} scrubbingRef={props.scrubbingRef} scrubSnapEnabled={props.scrubSnapEnabled} selectedObjectIds={props.selectedObjectIds ?? []} timelineLayers={props.timelineLayers} timelineViewportState={props.timelineViewportState} onExitCompose={props.onExitCompose ?? (() => props.onModeChange("composition"))} onRenameLayer={props.onRenameComposeAnimationLayer} onScrub={props.onScrub} onScrubStart={props.onScrubStart} onScrubEnd={props.onScrubEnd} onSelectObjects={props.onSelectComposeObjects} onTimelineLayersChange={props.onTimelineLayersChange} onTimelineViewportStateChange={props.onTimelineViewportStateChange} onUpdateBackgroundAnimation={props.onUpdateComposeBackgroundAnimation} onUpdateBackgroundMotion={props.onUpdateComposeBackgroundMotion} onUpdateObjectAnimation={props.onUpdateComposeObjectAnimation} onUpdateObjectMotion={props.onUpdateComposeObjectMotion} />;
-  }
-
-  return <DirectTimelinePanel {...props} />;
+  return <div className="relative h-full min-h-0">
+    <div className={props.mode === "compose" ? "absolute inset-0" : "pointer-events-none invisible absolute inset-0"}>
+      <ComposeAnimationGraphPanel active={props.mode === "compose"} currentTime={composeCurrentTime} isPlaying={props.isPlaying} part={composePart} playbackPlayheadRef={props.mode === "compose" ? props.playbackPlayheadRef : inactivePlaybackPlayheadRef} scrubbingRef={props.scrubbingRef} scrubSnapEnabled={props.scrubSnapEnabled} selectedObjectIds={composeSelectedObjectIds} timelineViewportState={props.timelineViewportState} onExitCompose={props.onExitCompose ?? (() => props.onModeChange("composition"))} onScrub={props.onScrub} onScrubStart={props.onScrubStart} onScrubEnd={props.onScrubEnd} onTimelineViewportStateChange={props.onTimelineViewportStateChange} onUpdateGraph={props.onUpdateComposeAnimationGraph} />
+    </div>
+    <div className={props.mode === "compose" ? "pointer-events-none invisible absolute inset-0" : "absolute inset-0"}>
+      <DirectTimelinePanel {...directProps} playbackPlayheadRef={props.mode === "compose" ? inactivePlaybackPlayheadRef : props.playbackPlayheadRef} />
+    </div>
+  </div>;
 }

@@ -1,4 +1,4 @@
-import type { LayerAnimation } from "./types";
+import type { LayerAnimation, Point } from "./types";
 import type { RenderStyle } from "../render-engine/renderRuntime";
 
 function clamp(value: number, min: number, max: number): number {
@@ -123,6 +123,17 @@ export function evaluateLayerAnimation(animation: LayerAnimation, time: number):
   }
 
   return style;
+}
+
+export function getLayerAnimationsTranslation(animations: LayerAnimation[] | undefined, time: number): Point {
+  const point = { x: 0, y: 0 };
+  for (const animation of animations ?? []) {
+    if (animation.enabled === false) continue;
+    const progress = getLayerAnimationProgress(animation, time);
+    if (animation.keyframes.x) point.x += interpolateKeyframeValues(animation.keyframes.x as readonly number[], progress);
+    if (animation.keyframes.y) point.y += interpolateKeyframeValues(animation.keyframes.y as readonly number[], progress);
+  }
+  return point;
 }
 
 export function getLayerAnimationProgress(animation: LayerAnimation, time: number): number {

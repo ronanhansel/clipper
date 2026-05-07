@@ -356,7 +356,7 @@ function buildComposeLayerTree(part: Part): ComposeLayerNode[] {
       id: "background",
       name: part.background.name || "Background",
       kind: "background",
-      animated: Boolean(part.background.motion || part.background.animations?.length),
+      animated: Boolean(part.background.animations?.length),
       children: backgroundChildren.length > 0 ? backgroundChildren : undefined,
     },
     { id: "frame", name: `${part.frame.width} x ${part.frame.height} Frame`, kind: "frame" },
@@ -368,7 +368,7 @@ function objectToNode(object: FrameObject, kind: Extract<ComposeLayerKind, "back
     id: object.id,
     name: object.name || object.id,
     kind,
-    animated: Boolean(object.motion || object.animations?.length),
+    animated: Boolean(object.animations?.length),
     object,
   };
 }

@@ -2,7 +2,7 @@ import type { MouseEvent as ReactMouseEvent, RefObject } from "react";
 import type { AdjustmentLayerSelection, CompositionSelection, MotionMarkerSelection, TimelineBlankContextTarget, TimelineNodeContextTarget } from "../../app/types";
 import type { PrerenderCacheCoverage } from "../../app/features/preview/usePrerenderCache";
 import type { TimelineMarkerMove, TimelineMarkerResize } from "../../core/timeline";
-import type { AdjustmentEffectId, AdjustmentLayer, BackgroundLayer, FrameObject, MotionEffectId, MotionEffectKind, MotionMarker, MotionTrack, Part, TimelineLayerState, TimelineMode, TimelineMotionLayerKind, TimelinePart, TimelineViewportState, TransitionEffectId, TransitionLayer } from "../../core/types";
+import type { AdjustmentEffectId, AdjustmentLayer, AnimationGraphState, FrameObject, MotionEffectId, MotionEffectKind, MotionMarker, Part, TimelineLayerState, TimelineMode, TimelineMotionLayerKind, TimelinePart, TimelineViewportState, TransitionEffectId, TransitionLayer } from "../../core/types";
 
 export type TimelinePanelProps = {
   timelineName: string;
@@ -84,11 +84,11 @@ export type TimelinePanelProps = {
   selectedObjectIds?: string[];
   onExitCompose?: () => void;
   onSelectComposeObjects?: (objects: FrameObject[]) => void;
+  onPersistComposeSelection?: (objectIds: string[]) => void;
   onRenameComposeAnimationLayer?: (layerId: string, name: string) => void;
-  onUpdateComposeBackgroundMotion?: (updater: (motion: MotionTrack | undefined, background: BackgroundLayer) => MotionTrack | undefined) => void;
-  onUpdateComposeObjectMotion?: (objectId: string, updater: (motion: MotionTrack | undefined, object: FrameObject) => MotionTrack | undefined) => void;
   onUpdateComposeBackgroundAnimation?: (updater: (animations: import("../../core/types").LayerAnimation[]) => import("../../core/types").LayerAnimation[]) => void;
   onUpdateComposeObjectAnimation?: (objectId: string, updater: (animations: import("../../core/types").LayerAnimation[]) => import("../../core/types").LayerAnimation[]) => void;
+  onUpdateComposeAnimationGraph?: (updater: (graph: AnimationGraphState | undefined) => AnimationGraphState, options?: { implicit?: boolean }) => void;
 };
 
 export type EffectDragPreview = {

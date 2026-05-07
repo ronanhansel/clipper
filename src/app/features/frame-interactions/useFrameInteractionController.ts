@@ -25,7 +25,9 @@ type FrameInteractionControllerParams = {
   focusPickZoomMarker: PickMarker;
   framePickFrameRef: RefObject<number>;
   framePickPreviewPoint: Point | null;
+  frameDisplayScale: number;
   framePreviewScale: number;
+  selectionOverlayScale: number;
   frameViewportRef: RefObject<HTMLDivElement | null>;
   liveDragSelectionIdsRef: RefObject<string>;
   marqueeDraggingRef: RefObject<boolean>;
@@ -67,7 +69,7 @@ type FrameInteractionControllerParams = {
 export function useFrameInteractionController(params: FrameInteractionControllerParams) {
   const {
     cameraPreviewTransform, cameraRef, canSelectFrameObjects, dragBox, dragBoxFrameRef, dragSelectionBoxRef, dragStart, dragStartRef,
-    focusPickZoomMarker, framePickFrameRef, framePickPreviewPoint, framePreviewScale, frameViewportRef, liveDragSelectionIdsRef,
+    focusPickZoomMarker, framePickFrameRef, framePickPreviewPoint, frameDisplayScale, framePreviewScale, selectionOverlayScale, frameViewportRef, liveDragSelectionIdsRef,
     marqueeDraggingRef, marqueeLastPointRef, marqueeSpacePanningRef, mode, objectDragDeltaRef, objectDragFrameRef, objectDragRef,
     objectResizeDeltaRef, objectResizeFrameRef, objectResizePreserveAspectRef, objectResizeRef, part, pendingDragBoxRef,
     pendingFramePickPointRef, pointPickAdjustment, positionPickTranslationMarker, previewTime, selectionPayload,
@@ -81,21 +83,23 @@ export function useFrameInteractionController(params: FrameInteractionController
   }
 
   function getFrameObjectElement(objectId: string) {
-    return frameViewportRef.current?.querySelector<HTMLElement>(`[data-object-id="${CSS.escape(objectId)}"]`) ?? null;
+    const escapedId = CSS.escape(objectId);
+    return frameViewportRef.current?.querySelector<HTMLElement>(`[data-object-id="${escapedId}"],[data-background-element-id="${escapedId}"]`) ?? null;
   }
 
   function getFrameSelectionBoxElements() {
-    return Array.from(frameViewportRef.current?.parentElement?.querySelectorAll<HTMLElement>("[data-frame-selection-box]") ?? []);
+    return Array.from(document.querySelectorAll<HTMLElement>("[data-frame-selection-box]"));
   }
 
   function getFrameSelectionBoxElement(objectId: string) {
-    return frameViewportRef.current?.parentElement?.querySelector<HTMLElement>(`[data-frame-selection-box="${CSS.escape(objectId)}"]`) ?? null;
+    return document.querySelector<HTMLElement>(`[data-frame-selection-box="${CSS.escape(objectId)}"]`);
   }
 
   function setFrameSelectionBoxDragTransform(delta: Point) {
     for (const element of getFrameSelectionBoxElements()) {
-      element.style.setProperty("--clipper-drag-x", `${delta.x * framePreviewScale * zoomScale}px`);
-      element.style.setProperty("--clipper-drag-y", `${delta.y * framePreviewScale * zoomScale}px`);
+      const scale = element.dataset.frameSelectionBoxPortal ? selectionOverlayScale : 1;
+      element.style.setProperty("--clipper-drag-x", `${delta.x * framePreviewScale * cameraPreviewTransform.scale * scale}px`);
+      element.style.setProperty("--clipper-drag-y", `${delta.y * framePreviewScale * cameraPreviewTransform.scale * scale}px`);
     }
   }
 
@@ -136,10 +140,25 @@ export function useFrameInteractionController(params: FrameInteractionController
   function setFrameSelectionBoxResizePreview(objectId: string, bounds: Bounds) {
     const object = getPartFrameObject(part, objectId);
     const previewBounds = object ? getFrameObjectWithPreviewBounds({ ...object, bounds }, previewTime, part.duration).bounds : bounds;
-    const viewportBounds = insetBounds(boundsToViewport(previewBounds, cameraPreviewTransform, framePreviewScale), -selectorOffsetPx);
-    const overlayOffset = selectorOffsetPx + selectorHandleSizePx;
+    const selectionUiScale = Math.max(selectionOverlayScale, 0.001);
+    const selectorOffset = selectorOffsetPx / selectionUiScale;
+    const selectorHandleSize = selectorHandleSizePx / selectionUiScale;
+    const viewportBounds = insetBounds(boundsToViewport(previewBounds, cameraPreviewTransform, framePreviewScale), -selectorOffset);
+    const overlayOffset = selectorOffset + selectorHandleSize;
     const element = getFrameSelectionBoxElement(objectId);
     if (!element) return;
+    if (element.dataset.frameSelectionBoxPortal) {
+      const rect = frameViewportRef.current?.getBoundingClientRect();
+      const hostRect = element.closest<HTMLElement>("[data-clipper-preview-overlay-host]")?.getBoundingClientRect();
+      if (!rect) return;
+      if (!hostRect) return;
+      const scale = rect.width / (FRAME_WIDTH * framePreviewScale);
+      element.style.left = `${rect.left - hostRect.left + viewportBounds.x * scale}px`;
+      element.style.top = `${rect.top - hostRect.top + viewportBounds.y * scale}px`;
+      element.style.width = `${viewportBounds.width * scale}px`;
+      element.style.height = `${viewportBounds.height * scale}px`;
+      return;
+    }
     element.style.left = `${viewportBounds.x + overlayOffset}px`;
     element.style.top = `${viewportBounds.y + overlayOffset}px`;
     element.style.width = `${viewportBounds.width}px`;
@@ -199,10 +218,14 @@ export function useFrameInteractionController(params: FrameInteractionController
     objectResizePreserveAspectRef.current = false;
   }
 
-  function finishCommittedObjectResize() {
+  function finishCommittedObjectResize(objects: SelectionPayload["objects"]) {
     objectResizeRef.current = null;
     objectResizeDeltaRef.current = { x: 0, y: 0 };
     objectResizePreserveAspectRef.current = false;
+    // Keep the final imperative geometry in place until React reconciles the
+    // committed bounds. Removing left/top/width/height here makes absolute text
+    // briefly fall back to its static top-left position and looks like snap-back.
+    void objects;
   }
 
   function scheduleObjectDragPreview(delta: Point) {
@@ -248,8 +271,8 @@ export function useFrameInteractionController(params: FrameInteractionController
       if (!marqueeDraggingRef.current) return;
       const nextDragBox = pendingDragBoxRef.current;
       if (nextDragBox && dragSelectionBoxRef.current) updateDragSelectionBoxElement(dragSelectionBoxRef.current, nextDragBox, framePreviewScale);
-      if (!nextDragBox || !isVisibleMarqueeBounds(nextDragBox, framePreviewScale)) return;
-      const payload = createSelectionPayload(nextDragBox, part.objects);
+      if (!nextDragBox || !isVisibleMarqueeBounds(nextDragBox, frameDisplayScale)) return;
+      const payload = createSelectionPayload(nextDragBox, [...part.background.elements, ...part.objects]);
       const nextSelectionIds = payload.objects.map((object) => object.id).join("|");
       if (nextSelectionIds === liveDragSelectionIdsRef.current) return;
       liveDragSelectionIdsRef.current = nextSelectionIds;
@@ -294,6 +317,13 @@ export function useFrameInteractionController(params: FrameInteractionController
         const nextBounds = nextBoundsById.get(object.id);
         return nextBounds ? syncChartObjectBounds({ ...object, bounds: nextBounds }) : object;
       }),
+      background: {
+        ...composition.background,
+        elements: composition.background.elements.map((object) => {
+          const nextBounds = nextBoundsById.get(object.id);
+          return nextBounds ? syncChartObjectBounds({ ...object, bounds: nextBounds }) : object;
+        }),
+      },
     }));
     updateObjectDragSelection(nextObjects);
     finishCommittedObjectDrag(drag.objects);
@@ -393,16 +423,16 @@ export function useFrameInteractionController(params: FrameInteractionController
 
     const activeObjectDrag = objectDragRef.current;
     if (activeObjectDrag && canSelectFrameObjects) {
-      const dx = (event.clientX - activeObjectDrag.origin.x) / (framePreviewScale * zoomScale);
-      const dy = (event.clientY - activeObjectDrag.origin.y) / (framePreviewScale * zoomScale);
+      const dx = (event.clientX - activeObjectDrag.origin.x) / (frameDisplayScale * cameraPreviewTransform.scale);
+      const dy = (event.clientY - activeObjectDrag.origin.y) / (frameDisplayScale * cameraPreviewTransform.scale);
       scheduleObjectDragPreview(constrainDragDeltaToDominantAxis({ x: dx, y: dy }, event.shiftKey));
       return;
     }
 
     const activeObjectResize = objectResizeRef.current;
     if (activeObjectResize && canSelectFrameObjects) {
-      const dx = (event.clientX - activeObjectResize.origin.x) / (framePreviewScale * cameraPreviewTransform.scale);
-      const dy = (event.clientY - activeObjectResize.origin.y) / (framePreviewScale * cameraPreviewTransform.scale);
+      const dx = (event.clientX - activeObjectResize.origin.x) / (frameDisplayScale * cameraPreviewTransform.scale);
+      const dy = (event.clientY - activeObjectResize.origin.y) / (frameDisplayScale * cameraPreviewTransform.scale);
       scheduleObjectResizePreview({ x: dx, y: dy }, event.shiftKey);
       return;
     }
@@ -440,11 +470,11 @@ export function useFrameInteractionController(params: FrameInteractionController
     }
 
     const finalDragBox = pendingDragBoxRef.current ?? dragBox;
-    if (!finalDragBox || !canSelectFrameObjects || !isVisibleMarqueeBounds(finalDragBox, framePreviewScale)) {
+    if (!finalDragBox || !canSelectFrameObjects || !isVisibleMarqueeBounds(finalDragBox, frameDisplayScale)) {
       clearDragBox();
       return;
     }
-    const payload = createSelectionPayload(finalDragBox, part.objects);
+    const payload = createSelectionPayload(finalDragBox, [...part.background.elements, ...part.objects]);
     if (payload.objects.length === 0) clearNodeSelection();
     else {
       setSelectionPayload(payload);
@@ -469,8 +499,9 @@ export function useFrameInteractionController(params: FrameInteractionController
     event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
     const selectedObjectIds = new Set(selectionPayload?.objects.map((item) => item.id) ?? []);
+    const selectableObjects = [...part.background.elements, ...part.objects];
     const nextSelectionObjects = selectedObjectIds.has(object.id)
-      ? part.objects.filter((item) => selectedObjectIds.has(item.id)).map(selectionObjectFromFrameObject)
+      ? selectableObjects.filter((item) => selectedObjectIds.has(item.id)).map(selectionObjectFromFrameObject)
       : [selectionObjectFromFrameObject(object)];
     const selectionBox = getBoundsUnion(nextSelectionObjects.map((item) => item.bounds));
 
@@ -488,14 +519,18 @@ export function useFrameInteractionController(params: FrameInteractionController
     if (focusPickZoomMarker || positionPickTranslationMarker) return;
     event.preventDefault();
     event.stopPropagation();
+    setEditingTextObjectId(null);
     frameViewportRef.current?.setPointerCapture(event.pointerId);
-    const preservedObjects = part.objects.filter((item) => selectionPayload.objects.some((selected) => selected.id === item.id)).map(selectionObjectFromFrameObject);
+    const preservedObjects = selectionPayload.objects
+      .map((selected) => getPartFrameObject(part, selected.id))
+      .filter((object): object is FrameObject => Boolean(object))
+      .map(selectionObjectFromFrameObject);
     const resizedObjects = objectId ? preservedObjects.filter((item) => item.id === objectId) : preservedObjects;
     if (resizedObjects.length === 0 || preservedObjects.length === 0) return;
     const selectionBox = getBoundsUnion(resizedObjects.map((item) => item.bounds));
     const objectPreviewTransforms = Object.fromEntries(resizedObjects.map((selected) => {
       const object = getPartFrameObject(part, selected.id);
-      return [selected.id, object ? getFrameObjectPreviewTransform(object, previewTime, part.duration) : { translateX: 0, translateY: 0, scaleX: 1, scaleY: 1 }];
+      return [selected.id, object ? getFrameObjectPreviewTransform(object, previewTime, part.duration) : { translateX: 0, translateY: 0, translateXPercent: 0, translateYPercent: 0, scaleX: 1, scaleY: 1 }];
     }));
     const displaySelectionBox = getBoundsUnion(resizedObjects.map((object) => getBoundsWithPreviewTransform(object.bounds, objectPreviewTransforms[object.id])));
     objectResizeRef.current = { origin: { x: event.clientX, y: event.clientY }, handle, partId: part.id, selectionBox, displaySelectionBox, aspectRatio: displaySelectionBox.width / displaySelectionBox.height, objectPreviewTransforms, objects: resizedObjects, preservedObjects };
@@ -519,11 +554,18 @@ export function useFrameInteractionController(params: FrameInteractionController
         const nextBounds = nextBoundsById.get(object.id);
         return nextBounds ? syncChartObjectBounds({ ...object, bounds: nextBounds }) : object;
       }),
+      background: {
+        ...composition.background,
+        elements: composition.background.elements.map((object) => {
+          const nextBounds = nextBoundsById.get(object.id);
+          return nextBounds ? syncChartObjectBounds({ ...object, bounds: nextBounds }) : object;
+        }),
+      },
     }));
     const nextObjectsById = new Map(nextObjects.map((object) => [object.id, object]));
     const nextSelectionObjects = resize.preservedObjects.map((object) => nextObjectsById.get(object.id) ?? object);
     updateObjectDragSelection(nextSelectionObjects);
-    finishCommittedObjectResize();
+    finishCommittedObjectResize(resize.objects);
   }
 
   function startTextObjectEdit(event: ReactMouseEvent<HTMLDivElement>, object: FrameObject) {

@@ -1,5 +1,3 @@
-import type { ChartSpec } from "./chart";
-
 export const FRAME_WIDTH = 1920;
 export const FRAME_HEIGHT = 1080;
 export const MAX_PART_DURATION_SECONDS = 60;
@@ -23,7 +21,7 @@ export type PerspectiveSettings = {
   rotateY?: number;
 };
 
-export type FrameObjectType = "rect" | "text" | "image" | "svg" | "html" | "template" | "chart";
+export type FrameObjectType = "rect" | "text" | "image" | "svg" | "html" | "template";
 
 export type MotionEase = "linear" | "easeIn" | "easeOut" | "easeInOut" | "circOut" | "backOut";
 
@@ -38,23 +36,6 @@ export type FrameTemplate = {
   kind: "html";
   source: string;
   static?: boolean;
-};
-
-export type MotionTrack = {
-  delay?: number;
-  duration: number;
-  ease?: MotionEase;
-  loop?: boolean;
-  opacity?: readonly [number, number];
-  path?: readonly Point[];
-  rotate?: readonly [number, number];
-  scale?: readonly [number, number];
-  scaleX?: readonly [number, number];
-  scaleY?: readonly [number, number];
-  skewX?: readonly [number, number];
-  skewY?: readonly [number, number];
-  x?: readonly [number, number];
-  y?: readonly [number, number];
 };
 
 export type LayerAnimation = {
@@ -108,11 +89,9 @@ export type FrameObject = {
   selector: string;
   bounds: Bounds;
   content?: string;
-  chart?: ChartSpec;
   template?: FrameTemplate;
   richText?: RichTextSegment[];
   style: Record<string, string | number>;
-  motion?: MotionTrack;
   layoutId?: string;
   hidden?: boolean;
   locked?: boolean;
@@ -130,7 +109,6 @@ export type BackgroundLayer = {
   name: string;
   style: Record<string, string | number>;
   stretchToElements?: boolean;
-  motion?: MotionTrack;
   hidden?: boolean;
   locked?: boolean;
   animations?: LayerAnimation[];
@@ -336,6 +314,7 @@ export type CompositionClip = TimelineMarkerMetadata & {
   objects: FrameObject[];
   snapshot: PartSnapshotLine[];
   motionMarkers: MotionMarker[];
+  animationGraph?: AnimationGraphState;
 };
 
 export type Part = CompositionClip;
@@ -348,9 +327,7 @@ export type Scene = {
   transitionLayers?: TransitionLayer[];
 };
 
-export type CompositionDocument = CompositionClip & {
-  source: string;
-};
+export type CompositionDocument = CompositionClip;
 
 export type TimelineClip = {
   id: string;
@@ -361,6 +338,48 @@ export type TimelineClip = {
   duration?: number;
   prerender?: boolean;
   motionMarkers?: MotionMarker[];
+  animationGraph?: AnimationGraphState;
+};
+
+export type AnimationGraphPort = "top" | "right" | "bottom" | "left";
+
+export type AnimationGraphNodePosition = {
+  x: number;
+  y: number;
+};
+
+export type AnimationGraphEdge = {
+  id: string;
+  fromNodeId: string;
+  fromPort: AnimationGraphPort;
+  toNodeId: string;
+  toPort: AnimationGraphPort;
+};
+
+export type AnimationGraphCustomNode = {
+  kind: "animation" | "time";
+  label: string;
+  scopeKey: string;
+  details?: Record<string, string>;
+};
+
+export type AnimationGraphState = {
+  nodes: Record<string, AnimationGraphNodePosition>;
+  edges: AnimationGraphEdge[];
+  customNodes?: Record<string, AnimationGraphCustomNode>;
+  parameters?: Record<string, Record<string, string>>;
+  deletedNodeIds?: string[];
+  /** Legacy shared graph viewport. New graph views should use per-layer `viewports`. */
+  viewport?: {
+    scrollLeft: number;
+    scrollTop: number;
+    zoom?: number;
+  };
+  viewports?: Record<string, {
+    scrollLeft: number;
+    scrollTop: number;
+    zoom?: number;
+  }>;
 };
 
 export type TimelineSettings = {
@@ -475,10 +494,11 @@ export type EditorState = {
   timelineMode: TimelineMode;
   mode?: "preview" | "editor" | "interactive" | "code";
   leftPanelTab?: "assets" | "tools";
-  rightPanelTab?: "video" | "motion" | "agent";
+  rightPanelTab?: "video" | "motion" | "animation" | "agent";
   selectedSceneId?: string;
   selectedTimelineId?: string;
   selectedPartId?: string;
+  selectedComposeObjectIds?: string[];
   selectedMotionMarker?: { partId: string; markerId: string } | null;
   currentSceneTime?: number;
   defaultNewMarkerDurationSeconds?: number;

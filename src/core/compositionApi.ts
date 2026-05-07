@@ -1,9 +1,4 @@
-import type { ChartSpec, ChartType } from "./chart";
-
-export type { ChartSpec, ChartType } from "./chart";
-export { defineChart } from "./chart";
-
-export type FrameObjectType = "rect" | "text" | "image" | "svg" | "html" | "template" | "chart";
+export type FrameObjectType = "rect" | "text" | "image" | "svg" | "html" | "template";
 
 export type RenderContext = {
   time: number;
@@ -30,22 +25,6 @@ export type LayerStyle = Record<string, StyleValue>;
 export type RichTextSegment = { text: string; bold: boolean; italic: boolean; underline: boolean };
 export type FrameTemplate = { kind: "html"; source: string; static?: boolean };
 export type MotionEase = "linear" | "easeIn" | "easeOut" | "easeInOut" | "circOut" | "backOut";
-export type MotionTrack = {
-  delay?: number;
-  duration: number;
-  ease?: MotionEase;
-  loop?: boolean;
-  opacity?: readonly [number, number];
-  path?: readonly { x: number; y: number }[];
-  rotate?: readonly [number, number];
-  scale?: readonly [number, number];
-  scaleX?: readonly [number, number];
-  scaleY?: readonly [number, number];
-  skewX?: readonly [number, number];
-  skewY?: readonly [number, number];
-  x?: readonly [number, number];
-  y?: readonly [number, number];
-};
 export type LayerAnimation = {
   id: string;
   name?: string;
@@ -61,11 +40,9 @@ export type RenderableProps = {
   bounds: Bounds;
   content?: string;
   text?: string;
-  chart?: ChartSpec;
   template?: FrameTemplate;
   richText?: RichTextSegment[];
   style?: LayerStyle;
-  motion?: MotionTrack;
   transform?: Transform | string;
   layoutId?: string;
   hidden?: boolean;
@@ -73,10 +50,10 @@ export type RenderableProps = {
   animations?: LayerAnimation[];
 };
 export type TextProps = Omit<RenderableProps, "content"> & { text?: string; content?: string };
-export type ChartProps = RenderableProps & { chart: ChartSpec };
-export type ComponentProps = Pick<RenderableProps, "style" | "transform" | "motion" | "animations" | "hidden" | "locked">;
+export type ComponentProps = Pick<RenderableProps, "style" | "transform" | "animations" | "hidden" | "locked">;
 export type GroupProps = ComponentProps & { children?: Renderable[] };
 export type WebLayerProps = Omit<RenderableProps, "content"> & { css?: string; html: string };
+export type ThreeLayerProps = Omit<RenderableProps, "content"> & { source: string };
 export type CompositionProps = {
   id?: string;
   name?: string;
@@ -87,7 +64,6 @@ export type CompositionProps = {
     name?: string;
     style?: LayerStyle;
     stretchToElements?: boolean;
-    motion?: MotionTrack;
     hidden?: boolean;
     locked?: boolean;
     animations?: LayerAnimation[];
@@ -132,11 +108,9 @@ export class RenderableObject {
   kind: FrameObjectType;
   bounds: Bounds;
   content?: string;
-  chart?: ChartSpec;
   template?: FrameTemplate;
   richText?: RichTextSegment[];
   style: LayerStyle;
-  motion?: MotionTrack;
   transform?: Transform | string;
   layoutId?: string;
   hidden?: boolean;
@@ -149,11 +123,9 @@ export class RenderableObject {
     this.kind = "rect";
     this.bounds = props.bounds;
     this.content = props.text ?? props.content;
-    this.chart = props.chart;
     this.template = props.template;
     this.richText = props.richText;
     this.style = props.style ?? {};
-    this.motion = props.motion;
     this.transform = props.transform;
     this.layoutId = props.layoutId;
     this.hidden = props.hidden;
@@ -206,6 +178,37 @@ export class WebLayer extends Html {
   }
 }
 
+export class ThreeLayer extends Html {
+  constructor(props: ThreeLayerProps) {
+    const escapedSource = JSON.stringify(props.source);
+    const rootId = `clipper-three-${props.id}`;
+    super({
+      ...props,
+      content: `<div id="${escapeHtmlAttribute(rootId)}" data-clipper-three-root style="width:100%;height:100%;"></div><script type="module">
+const root = document.getElementById(${JSON.stringify(rootId)});
+root.dataset.clipperThreePending = "true";
+try {
+  const THREE = await import("https://esm.sh/three@0.181.2");
+  const createScene = (0, eval)("(" + ${escapedSource} + ")");
+  if (typeof createScene !== "function") throw new Error("ThreeLayer source must evaluate to a function.");
+  const cleanup = await createScene({ THREE, root, width: root.clientWidth, height: root.clientHeight });
+  if (typeof cleanup === "function") root.__clipperThreeCleanup = cleanup;
+  root.dataset.clipperThreeReady = "true";
+} catch (error) {
+  root.dataset.clipperThreeError = error instanceof Error ? error.message : String(error);
+  root.innerHTML = '<pre style="margin:0;width:100%;height:100%;box-sizing:border-box;white-space:pre-wrap;background:#16090d;color:#ffb4b4;padding:16px;font:16px ui-monospace,monospace;">' + String(error instanceof Error ? error.message : error).replace(/[&<>]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[char]) + '</pre>';
+} finally {
+  delete root.dataset.clipperThreePending;
+}
+</script>`,
+    });
+  }
+}
+
+function escapeHtmlAttribute(value: string) {
+  return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+}
+
 export class Template extends RenderableObject {
   constructor(props: RenderableProps) {
     super(props);
@@ -213,17 +216,9 @@ export class Template extends RenderableObject {
   }
 }
 
-export class Chart extends RenderableObject {
-  constructor(props: ChartProps) {
-    super(props);
-    this.kind = "chart";
-  }
-}
-
 export class Component {
   style?: LayerStyle;
   transform?: Transform | string;
-  motion?: MotionTrack;
   animations?: LayerAnimation[];
   hidden?: boolean;
   locked?: boolean;
@@ -232,7 +227,6 @@ export class Component {
     if (props) {
       this.style = props.style;
       this.transform = props.transform;
-      this.motion = props.motion;
       this.animations = props.animations;
       this.hidden = props.hidden;
       this.locked = props.locked;

@@ -123,6 +123,8 @@ describe("project persistence service", () => {
 
     expect(project.compositionLibrary?.[0]?.compositionError).toContain("Cannot find module");
     expect(project.compositionLibrary?.[0]?.objects).toEqual([]);
+    expect(project.compositionLibrary?.[0]).not.toHaveProperty("source");
+    expect(project.compositionSources?.["compositions/broken.composition.ts"]).toContain("export const composition");
   });
 
   it("saves directory composition folders without nesting file-manager or compositions roots", async () => {
@@ -169,6 +171,50 @@ describe("project persistence service", () => {
     expect(hostMocks.createDirectory).not.toHaveBeenCalledWith("clipper/projects/hi/file-manager/compositions/compositions");
     expect(hostMocks.createDirectory).not.toHaveBeenCalledWith("clipper/projects/hi/file-manager/file-manager/compositions/title-cards");
     expect(hostMocks.writeTextFile).toHaveBeenCalledWith("clipper/projects/hi/file-manager/compositions/title.composition.ts", "source");
+  });
+
+  it("saves invalid composition source from compositionSources without embedded source", async () => {
+    hostMocks.listDirectory.mockResolvedValue([]);
+
+    const { projectPersistenceService } = await import("./projectPersistenceService");
+    await projectPersistenceService.saveProject({
+      manifestPath: "clipper/projects/hi/project.json",
+      project: {
+        id: "project",
+        name: "Project",
+        resolution: { width: 1920, height: 1080 },
+        assetsPath: "assets",
+        scenes: [],
+        compositionLibrary: [{
+          id: "bad",
+          filePath: "compositions/bad.composition.ts",
+          duration: 3,
+          frame: { width: 1920, height: 1080, style: {} },
+          background: { id: "background", name: "Background", style: {}, elements: [] },
+          objects: [],
+          snapshot: [],
+          motionMarkers: [],
+          compositionError: "Expected expression",
+        }],
+        compositions: [{
+          id: "bad",
+          filePath: "compositions/bad.composition.ts",
+          duration: 3,
+          frame: { width: 1920, height: 1080, style: {} },
+          background: { id: "background", name: "Background", style: {}, elements: [] },
+          objects: [],
+          snapshot: [],
+          motionMarkers: [],
+          compositionError: "Expected expression",
+        } as any],
+        compositionSources: { "compositions/bad.composition.ts": "export const composition =" },
+        timelines: [],
+      },
+    });
+
+    expect(hostMocks.writeTextFile).toHaveBeenCalledWith("clipper/projects/hi/file-manager/compositions/bad.composition.ts", "export const composition =");
+    const manifestWrite = hostMocks.writeTextFile.mock.calls.find(([path]) => path === "clipper/projects/hi/project.json")?.[1] ?? "";
+    expect(manifestWrite).not.toContain('"source":');
   });
 
   it("keeps a timeline clip attached to a stable composition id after the composition file moves", async () => {

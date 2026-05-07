@@ -77,6 +77,7 @@ export function RenderedMediaExportApp() {
     window.__clipperSyncExportRenderClock = async () => {
       await waitForFontsReady();
       await waitForExportRastersReady(frameViewportRef.current);
+      await waitForThreeLayersReady(frameViewportRef.current);
       const syncResult = await waitForRenderClockAnimationsReady(frameViewportRef.current);
       await nextAnimationFrame();
       return syncResult;
@@ -368,6 +369,14 @@ export function getExportRasterReadinessDiagnostics(root: HTMLElement | null) {
   const loading = Array.from(root?.querySelectorAll<HTMLImageElement>('img[data-clipper-export-svg-raster="ready"]') ?? []).filter((image) => !image.complete || image.naturalWidth === 0).slice(0, 3).map((image, index) => `loadingImage${index + 1}=${image.dataset.clipperExportSvgRasterDiagnostic ?? "unknown"}`);
   const loadingWebLayer = Array.from(root?.querySelectorAll<HTMLImageElement>('img[data-clipper-export-weblayer-flatten="ready"]') ?? []).filter((image) => !image.complete || image.naturalWidth === 0).slice(0, 3).map((image, index) => `loadingWebLayer${index + 1}=${image.dataset.clipperExportWeblayerFlattenDiagnostic ?? "unknown"}`);
   return [...pending, ...loading, ...loadingWebLayer];
+}
+
+async function waitForThreeLayersReady(root: HTMLElement | null) {
+  const deadline = performance.now() + exportFrameReadyTimeoutMs;
+  while (root?.querySelector("[data-clipper-three-pending]")) {
+    if (performance.now() > deadline) throw new Error("Timed out waiting for ThreeLayer readiness.");
+    await nextAnimationFrame();
+  }
 }
 
 function logExportDiagnostic(kind: string, details: string[]) {

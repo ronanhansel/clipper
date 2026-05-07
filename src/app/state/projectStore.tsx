@@ -14,6 +14,7 @@ export type ProjectStoreState = {
 
 export type ProjectStoreActions = {
   setProject: (project: Setter<ProjectManifest>) => void;
+  setProjectDocument: (project: ProjectManifest, compositionSources: Record<string, string>) => void;
   setSavedProjectSnapshot: (snapshot: Setter<string>) => void;
   setCompositionSources: (sources: Setter<Record<string, string>>) => void;
   setSavedCompositionSourcesSnapshot: (snapshot: Setter<string>) => void;
@@ -45,6 +46,7 @@ export function createProjectStore(initialProject: ProjectManifest, initialCompo
     compositionSources,
     savedCompositionSourcesSnapshot: JSON.stringify(compositionSources),
     setProject: createFieldSetter(set, "project"),
+    setProjectDocument: (project, compositionSources) => set((state) => (state.project === project && state.compositionSources === compositionSources ? state : { project, compositionSources })),
     setSavedProjectSnapshot: createFieldSetter(set, "savedProjectSnapshot"),
     setCompositionSources: createFieldSetter(set, "compositionSources"),
     setSavedCompositionSourcesSnapshot: createFieldSetter(set, "savedCompositionSourcesSnapshot"),
@@ -69,6 +71,7 @@ export function useProjectDocumentState() {
   return useProjectStore(useShallow((state) => ({
     project: state.project,
     setProject: state.setProject,
+    setProjectDocument: state.setProjectDocument,
     savedProjectSnapshot: state.savedProjectSnapshot,
     setSavedProjectSnapshot: state.setSavedProjectSnapshot,
     compositionSources: state.compositionSources,

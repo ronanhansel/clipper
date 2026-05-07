@@ -411,7 +411,6 @@ function getPrerenderCacheSignature(project: ProjectManifest, scene: Scene) {
       compositions: scene.compositions.map((part) => ({
         id: part.id,
         filePath: part.filePath,
-        source: part.source,
         compositionError: part.compositionError,
         sourceMissing: part.sourceMissing,
         start: part.start,

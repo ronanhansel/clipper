@@ -1,10 +1,10 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent, type RefObject, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { createPortal } from "react-dom";
 import { selectorBlue, selectorHandleSizePx, selectorOffsetPx } from "../../app/config";
 import { getRenderableTextSegments, getSelectionFormatState, normalizeEditableFormatting, renderRichTextSegments, richTextSegmentsFromElement, shouldPersistRichText, textSegmentsToEditableNodes } from "../../app/richText";
 import { applyAdjustmentLayersToVisualStyle } from "../../core/adjustments";
 import { boundsToViewport, formatCameraPreviewFilter, formatCameraPreviewTransform, getLayeredCameraPreviewTransform, type CameraPreviewTransform } from "../../core/camera";
-import { generateChartObjects, type ChartGeneratedObject } from "../../core/chart";
-import { getBoundsUnion, insetBounds, isVisibleMarqueeBounds, updateDragSelectionBoxElement, type ResizeHandle } from "../../core/frameInteraction";
+import { getBoundsUnion, getFrameObjectWithPreviewBounds, insetBounds, isVisibleMarqueeBounds, updateDragSelectionBoxElement, type ResizeHandle } from "../../core/frameInteraction";
 import { clamp } from "../../core/math";
 import { getRenderClockAttributes, getRenderClockStyle, syncDomAnimationsToRenderClock, waitForRenderClockAnimationsReady } from "../../render-engine/renderClock";
 import { evaluateBackgroundLayer, evaluateFrameObject, isTimeSensitiveFrameObject, type EvaluatedFrameObject } from "../../render-engine/renderRuntime";
@@ -23,14 +23,16 @@ export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dra
   const exportTileViewport = (arguments[0] as { exportTileViewport?: ExportTileViewport }).exportTileViewport;
   const exportTileFrameBounds = useMemo(() => exportTileViewport ? ({ x: exportTileViewport.x / frameScale, y: exportTileViewport.y / frameScale, width: exportTileViewport.width / frameScale, height: exportTileViewport.height / frameScale }) : undefined, [exportTileViewport, frameScale]);
   const viewportStyle = useMemo(() => ({ width: exportTileViewport?.width ?? FRAME_WIDTH * frameScale, height: exportTileViewport?.height ?? FRAME_HEIGHT * frameScale }) as CSSProperties, [exportTileViewport?.height, exportTileViewport?.width, frameScale]);
-  const selectionBleedPx = selectorOffsetPx + selectorHandleSizePx;
-  const viewportOverlayStyle = useMemo(() => exportTileViewport ? ({ width: exportTileViewport.width, height: exportTileViewport.height }) as CSSProperties : ({ width: FRAME_WIDTH * frameScale + selectionBleedPx * 2, height: FRAME_HEIGHT * frameScale + selectionBleedPx * 2, margin: -selectionBleedPx }) as CSSProperties, [exportTileViewport, frameScale, selectionBleedPx]);
-  const clippedViewportStyle = useMemo(() => ({ ...viewportStyle, left: exportTileViewport ? 0 : selectionBleedPx, top: exportTileViewport ? 0 : selectionBleedPx }) as CSSProperties, [exportTileViewport, selectionBleedPx, viewportStyle]);
+  const selectionOverlayScale = Math.max((arguments[0] as { selectionOverlayScale?: number }).selectionOverlayScale ?? 1, 0.001);
+  const selectionOffsetPx = selectorOffsetPx / selectionOverlayScale;
+  const selectionHandleSizePx = selectorHandleSizePx / selectionOverlayScale;
+  const selectionBleedPx = selectionOffsetPx + selectionHandleSizePx;
   const animationsEnabled = true;
   const previewParts = (arguments[0] as { previewParts?: Array<{ part: Part; start: number; previewTime: number }> }).previewParts;
   const transitionPreviewParts = (arguments[0] as { transitionPreviewParts?: { from: Array<{ part: Part; start: number; previewTime: number }>; to: Array<{ part: Part; start: number; previewTime: number }>; fromSceneTime: number; toSceneTime: number } | null }).transitionPreviewParts;
   const transitionLayers = (arguments[0] as { transitionLayers?: TransitionLayer[] }).transitionLayers;
   const renderMode = (arguments[0] as { renderMode?: "preview" | "export" }).renderMode ?? "preview";
+  const previewOverlayHost = (arguments[0] as { previewOverlayHost?: HTMLElement | null }).previewOverlayHost;
   const displayPreviewTime = previewTime;
   const displaySceneTime = sceneTime;
   const visualAdjustment = useMemo(() => applyAdjustmentLayersToVisualStyle(displaySceneTime, adjustmentLayers), [adjustmentLayers, displaySceneTime]);
@@ -51,8 +53,24 @@ export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dra
   const frameBackground = part.frame.style.background ?? "#000";
   const frameStyle = useMemo(() => ({ width: FRAME_WIDTH, height: FRAME_HEIGHT, background: frameBackground, left: exportTileViewport ? -exportTileViewport.x : 0, top: exportTileViewport ? -exportTileViewport.y : 0, transform: frameScale === 1 ? undefined : `scale(${frameScale})` }) as CSSProperties, [exportTileViewport, frameBackground, frameScale]);
   const perspectiveStageStyle = useMemo(() => ({ perspective: `${liveCameraTransform.perspective}px`, perspectiveOrigin: "center", transformStyle: "preserve-3d" }) as CSSProperties, [liveCameraTransform.perspective]);
-  const selectedBounds = useMemo(() => selectedObjects.length > 0 ? getBoundsUnion(selectedObjects.map((object) => object.bounds)) : null, [selectedObjects]);
-  const selectedViewportBounds = useMemo(() => selectedBounds ? insetBounds(boundsToViewport(selectedBounds, liveCameraTransform, frameScale), -selectorOffsetPx) : null, [frameScale, liveCameraTransform, selectedBounds]);
+  const selectableObjects = useMemo(() => [...part.background.elements, ...part.objects], [part.background.elements, part.objects]);
+  const selectedPreviewObjects = useMemo(() => selectedObjects.map((selected) => {
+    const object = selectableObjects.find((item) => item.id === selected.id);
+    return object ? { ...selected, bounds: getFrameObjectWithPreviewBounds(object, displayPreviewTime, part.duration).bounds } : selected;
+  }), [displayPreviewTime, part.duration, selectableObjects, selectedObjects]);
+  const selectedBounds = useMemo(() => selectedPreviewObjects.length > 0 ? getBoundsUnion(selectedPreviewObjects.map((object) => object.bounds)) : null, [selectedPreviewObjects]);
+  const selectedViewportBounds = useMemo(() => selectedBounds ? insetBounds(boundsToViewport(selectedBounds, liveCameraTransform, frameScale), -selectionOffsetPx) : null, [frameScale, liveCameraTransform, selectedBounds, selectionOffsetPx]);
+  const selectionOverlayInsets = useMemo(() => {
+    if (exportTileViewport || !selectedViewportBounds) return { left: 0, top: 0, right: 0, bottom: 0 };
+    return {
+      left: Math.max(selectionBleedPx, -selectedViewportBounds.x + selectionHandleSizePx),
+      top: Math.max(selectionBleedPx, -selectedViewportBounds.y + selectionHandleSizePx),
+      right: Math.max(selectionBleedPx, selectedViewportBounds.x + selectedViewportBounds.width - FRAME_WIDTH * frameScale + selectionHandleSizePx),
+      bottom: Math.max(selectionBleedPx, selectedViewportBounds.y + selectedViewportBounds.height - FRAME_HEIGHT * frameScale + selectionHandleSizePx),
+    };
+  }, [exportTileViewport, frameScale, selectedViewportBounds, selectionBleedPx, selectionHandleSizePx]);
+  const viewportOverlayStyle = useMemo(() => exportTileViewport ? ({ width: exportTileViewport.width, height: exportTileViewport.height }) as CSSProperties : ({ width: FRAME_WIDTH * frameScale + selectionOverlayInsets.left + selectionOverlayInsets.right, height: FRAME_HEIGHT * frameScale + selectionOverlayInsets.top + selectionOverlayInsets.bottom, marginLeft: -selectionOverlayInsets.left, marginTop: -selectionOverlayInsets.top, marginRight: -selectionOverlayInsets.right, marginBottom: -selectionOverlayInsets.bottom }) as CSSProperties, [exportTileViewport, frameScale, selectionOverlayInsets]);
+  const clippedViewportStyle = useMemo(() => ({ ...viewportStyle, left: exportTileViewport ? 0 : selectionOverlayInsets.left, top: exportTileViewport ? 0 : selectionOverlayInsets.top }) as CSSProperties, [exportTileViewport, selectionOverlayInsets, viewportStyle]);
   const [trackerHoverTarget, setTrackerHoverTarget] = useState<{ id: string; viewportBounds: Bounds } | null>(null);
   const [selectorHover, setSelectorHover] = useState(false);
   const selectorHoverRef = useRef(false);
@@ -60,6 +78,10 @@ export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dra
   const isUnlinkedPart = Boolean(part.sourceMissing);
   const compositionError = part.compositionError;
   const stackPreviewParts = previewParts?.length ? previewParts : [{ part, start: partStart, previewTime }];
+  const livePlaybackPartRef = useRef(part);
+  const livePlaybackClockRef = useRef(playbackClock);
+  livePlaybackPartRef.current = part;
+  livePlaybackClockRef.current = playbackClock;
 
   useEffect(() => {
     if (!cameraRef.current) return;
@@ -70,6 +92,24 @@ export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dra
     const combinedFilter = [transitionFilter, cameraFilter].filter(Boolean).join(" ");
     cameraRef.current.style.filter = combinedFilter;
   }, [cameraRef, liveCameraTransform, transitionCameraStyle]);
+
+  useEffect(() => {
+    if (!isPlaying || timelineMode !== "compose" || renderMode === "export") return;
+    let frame = 0;
+
+    function tick(now: number) {
+      const clock = livePlaybackClockRef.current;
+      const currentPart = livePlaybackPartRef.current;
+      if (clock) {
+        const liveSceneTime = clock.startedFrom + (now - clock.startedAt) / 1000;
+        applyLiveComposePreviewTime(frameViewportRef.current, currentPart, liveSceneTime - partStart);
+      }
+      frame = requestAnimationFrame(tick);
+    }
+
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [frameViewportRef, isPlaying, partStart, renderMode, timelineMode]);
 
   useLayoutEffect(() => {
     const adjustmentOverlays = useTransitionComposite ? [] : visualAdjustment.overlays ?? [];
@@ -177,8 +217,8 @@ export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dra
           {framePickPoint ? <FramePickPointOverlay point={framePickPoint} frameScale={frameScale} /> : null}
           <FramePickPointImperativeOverlay />
         </div>
-        {canSelectObjects && !isUnlinkedPart ? selectedObjects.map((object) => <SelectionOverlayBox key={object.id} objectId={object.id} bounds={object.bounds} cameraTransform={liveCameraTransform} frameScale={frameScale} highlighted={selectorHover} interactive={!marqueeDragging} overlayOffset={selectionBleedPx} onResizePointerDown={(event, handle) => onObjectResizePointerDown(event, handle, object.id)} />) : null}
       </div>
+      {canSelectObjects && !isUnlinkedPart && previewOverlayHost ? createPortal(selectedPreviewObjects.map((object) => <SelectionOverlayBox key={object.id} objectId={object.id} bounds={object.bounds} cameraTransform={liveCameraTransform} frameScale={frameScale} frameViewportRef={frameViewportRef} handleSizePx={selectionHandleSizePx} highlighted={selectorHover} interactive={!marqueeDragging} offsetPx={selectionOffsetPx} portal portalHost={previewOverlayHost} uiScale={selectionOverlayScale} onResizePointerDown={(event, handle) => onObjectResizePointerDown(event, handle, object.id)} />), previewOverlayHost) : null}
     </div>
   );
 });
@@ -204,6 +244,53 @@ function syncVisualAdjustmentOverlays(container: HTMLElement | null, overlays: A
     Object.assign(element.style, overlay.style);
     return element;
   }));
+}
+
+function applyLiveComposePreviewTime(root: HTMLElement | null, part: Part, time: number) {
+  if (!root) return;
+  if (!part.background.hidden) {
+    const evaluatedBackground = evaluateBackgroundLayer(part.background, time, part.duration, { animations: true });
+    const backgroundElement = root.querySelector<HTMLElement>(`[data-layer-id="${cssEscape(part.background.id)}"]`);
+    if (backgroundElement) applyLivePreviewLayerStyle(backgroundElement, evaluatedBackground.renderStyle);
+    for (const element of evaluatedBackground.elements) {
+      const target = root.querySelector<HTMLElement>(`[data-background-element-id="${cssEscape(element.id)}"]`);
+      if (target) applyLivePreviewObject(target, element);
+    }
+  }
+  for (const object of part.objects) {
+    const target = root.querySelector<HTMLElement>(`[data-clipper-render-object-id="${cssEscape(object.id)}"]`);
+    if (target) applyLivePreviewObject(target, evaluateFrameObject(object, time, part.duration, { animations: true }));
+  }
+}
+
+function applyLivePreviewObject(target: HTMLElement, object: EvaluatedFrameObject) {
+  applyLivePreviewObjectStyle(target, object);
+  if (object.renderContent !== undefined && object.renderContent !== object.content && target.textContent !== object.renderContent) target.textContent = object.renderContent;
+}
+
+function applyLivePreviewObjectStyle(target: HTMLElement, object: EvaluatedFrameObject) {
+  const objectTransform = typeof object.style.transform === "string" ? object.style.transform : undefined;
+  const animationTransform = typeof object.renderStyle.transform === "string" ? object.renderStyle.transform : undefined;
+  target.style.transform = `translate(var(--clipper-drag-x, 0px), var(--clipper-drag-y, 0px)) ${animationTransform ?? objectTransform ?? ""}`.trim();
+  setLiveStyleValue(target, "opacity", object.renderStyle.opacity ?? object.style.opacity);
+  setLiveStyleValue(target, "color", object.renderStyle.color ?? object.style.color);
+  setLiveStyleValue(target, "backgroundColor", object.renderStyle.backgroundColor ?? object.style.backgroundColor);
+}
+
+function applyLivePreviewLayerStyle(target: HTMLElement, style: Record<string, string | number | undefined>) {
+  setLiveStyleValue(target, "transform", style.transform);
+  setLiveStyleValue(target, "opacity", style.opacity);
+  setLiveStyleValue(target, "color", style.color);
+  setLiveStyleValue(target, "backgroundColor", style.backgroundColor);
+}
+
+function setLiveStyleValue(target: HTMLElement, key: "transform" | "opacity" | "color" | "backgroundColor", value: string | number | undefined) {
+  if (value === undefined) target.style[key] = "";
+  else target.style[key] = String(value);
+}
+
+function cssEscape(value: string) {
+  return typeof CSS !== "undefined" && typeof CSS.escape === "function" ? CSS.escape(value) : value.replace(/"/g, "\\\"");
 }
 
 function TrackerTargetOverlay({ target }: { target: { id: string; viewportBounds: Bounds } }) {
@@ -308,15 +395,16 @@ export const FrameObjectView = memo(function FrameObjectView({ animationsEnabled
   const animation = { style: evaluatedObject.renderStyle, content: evaluatedObject.renderContent };
   const editableRef = useRef<HTMLDivElement | null>(null);
   const lastCommittedTextRef = useRef<string | null>(null);
+  const wasEditingRef = useRef(false);
   const objectTransform = typeof object.style.transform === "string" ? object.style.transform : undefined;
   const animationTransform = typeof animation.style.transform === "string" ? animation.style.transform : undefined;
   const style = {
+    ...object.style,
+    ...animation.style,
     left: object.bounds.x,
     top: object.bounds.y,
     width: object.bounds.width,
     height: object.bounds.height,
-    ...object.style,
-    ...animation.style,
     transform: renderMode === "export" ? (animationTransform ?? objectTransform) : `translate(var(--clipper-drag-x, 0px), var(--clipper-drag-y, 0px)) ${animationTransform ?? objectTransform ?? ""}`.trim(),
     willChange: renderMode === "export" ? undefined : "transform",
   } as CSSProperties;
@@ -325,13 +413,17 @@ export const FrameObjectView = memo(function FrameObjectView({ animationsEnabled
   const textSegments = useMemo(() => getRenderableTextSegments(content ?? "", richText), [content, richText]);
 
   useEffect(() => {
-    if (!editing || !editableRef.current) return;
+    if (!editing || !editableRef.current) {
+      wasEditingRef.current = false;
+      return;
+    }
     const currentCommittedText = JSON.stringify({ content: object.content ?? "", richText: object.richText });
-    if (currentCommittedText === lastCommittedTextRef.current) return;
+    if (wasEditingRef.current && currentCommittedText === lastCommittedTextRef.current) return;
 
     const editable = editableRef.current;
     editable.replaceChildren(...textSegmentsToEditableNodes(getRenderableTextSegments(object.content ?? "", object.richText), Boolean(object.richText)));
     lastCommittedTextRef.current = currentCommittedText;
+    wasEditingRef.current = true;
     editable.focus();
     const selection = window.getSelection();
     const range = document.createRange();
@@ -408,13 +500,12 @@ export const FrameObjectView = memo(function FrameObjectView({ animationsEnabled
   const isLocked = Boolean(object.locked);
 
   return (
-    <div className={`absolute flex touch-none select-none flex-col justify-center whitespace-pre-line ${object.type === "chart" ? "overflow-visible" : "overflow-hidden"} ${focusPicking ? "cursor-crosshair" : editing ? "cursor-text" : "cursor-default"} ${editing ? "select-text" : ""}`} data-object-id={canSelect && !isLocked ? object.id : undefined} style={{ ...style, ...(isLocked ? { opacity: 0.6 } : {}) }} onDoubleClick={(event) => { if (!isLocked) onDoubleClick(event); }} onPointerDown={(event) => { if (!isLocked) onPointerDown(event); }}>
+    <div className={`absolute flex touch-none select-none flex-col justify-center whitespace-pre-line overflow-hidden ${focusPicking ? "cursor-crosshair" : editing ? "cursor-text" : "cursor-default"} ${editing ? "select-text" : ""}`} data-clipper-render-object-id={object.id} data-object-id={canSelect && !isLocked ? object.id : undefined} style={{ ...style, ...(isLocked ? { opacity: 0.6 } : {}) }} onDoubleClick={(event) => { if (!isLocked) onDoubleClick(event); }} onPointerDown={(event) => { if (!isLocked) onPointerDown(event); }}>
       {object.type === "text" && editing ? <div ref={editableRef} className="min-h-0 w-full whitespace-pre-wrap outline-none" contentEditable suppressContentEditableWarning onBlur={commitTextEdit} onInput={commitTextEdit} onKeyDown={onTextEditKeyDown} onPointerDown={(event) => event.stopPropagation()} /> : null}
       {object.type === "text" && !editing ? <div className="min-h-0 w-full whitespace-pre-wrap">{renderRichTextSegments(textSegments, Boolean(richText))}</div> : null}
-      {object.type === "chart" && object.chart ? <ChartObjectView animationsEnabled={animationsEnabled} object={object} duration={duration} exportTileFrameBounds={exportTileFrameBounds} frameScale={frameScale} previewTime={previewTime} renderMode={renderMode} /> : null}
       {object.type === "svg" && content ? <ExportSvgContent bounds={object.bounds} content={content} exportTileFrameBounds={exportTileFrameBounds} frameScale={frameScale} markupKind="svg" owner={{ id: object.id, name: object.name, type: object.type, layer: "object" }} renderMode={renderMode} style={style} /> : null}
-      {(object.type === "html" || object.type === "template") && content ? <div className="h-full w-full" dangerouslySetInnerHTML={{ __html: content }} /> : null}
-      {object.type !== "text" && object.type !== "svg" && object.type !== "html" && object.type !== "template" && object.type !== "chart" && content ? content : null}
+      {(object.type === "html" || object.type === "template") && content ? <HtmlContent content={content} /> : null}
+      {object.type !== "text" && object.type !== "svg" && object.type !== "html" && object.type !== "template" && content ? content : null}
     </div>
   );
 }, areFrameObjectPropsEqual);
@@ -482,7 +573,7 @@ function ExportSvgContent({ bounds, content, exportTileFrameBounds, frameScale, 
     };
   }, [bounds, content, frameScale, markupKind, rasterBounds, renderMode, shouldRasterize, sourceOffset, styleKey]);
 
-  if (!shouldRasterize) return <div className="h-full w-full" dangerouslySetInnerHTML={{ __html: content }} />;
+  if (!shouldRasterize) return <HtmlContent content={content} />;
   const diagnostic = getExportRasterDiagnostic({ bounds, exportTileFrameBounds, frameScale, markupKind, owner, rasterBounds, sourceOffset, source: raster?.source ?? "canvas-png" });
   if (error) return <div className="h-full w-full" data-clipper-export-svg-raster="failed" data-clipper-export-svg-raster-diagnostic={diagnostic} data-clipper-export-svg-raster-error={error} />;
   if (!raster) return <div className="h-full w-full" data-clipper-export-svg-raster="pending" data-clipper-export-svg-raster-diagnostic={diagnostic} />;
@@ -543,57 +634,6 @@ function formatNumber(value: number) {
   return Number.isInteger(value) ? String(value) : value.toFixed(2);
 }
 
-function ChartObjectView({ animationsEnabled, object, duration, exportTileFrameBounds, frameScale, previewTime, renderMode }: { animationsEnabled: boolean; object: FrameObject; duration: number; exportTileFrameBounds?: ExportTileFrameBounds; frameScale: number; previewTime: number; renderMode: "preview" | "export" }) {
-  const chartObjects = useMemo(() => object.chart ? generateChartObjects({ ...object.chart, bounds: object.bounds }) : [], [object.bounds, object.chart]);
-  return (
-    <div className="pointer-events-none absolute inset-0 overflow-visible" aria-hidden="true">
-      {chartObjects.map((chartObject) => <GeneratedChartObjectView key={chartObject.id} animationsEnabled={animationsEnabled} chartObject={chartObject} chartBounds={object.bounds} duration={duration} exportTileFrameBounds={exportTileFrameBounds} frameScale={frameScale} previewTime={previewTime} renderMode={renderMode} />)}
-    </div>
-  );
-}
-
-function GeneratedChartObjectView({ animationsEnabled, chartObject, chartBounds, duration, exportTileFrameBounds, frameScale, previewTime, renderMode }: { animationsEnabled: boolean; chartObject: ChartGeneratedObject; chartBounds: Bounds; duration: number; exportTileFrameBounds?: ExportTileFrameBounds; frameScale: number; previewTime: number; renderMode: "preview" | "export" }) {
-  const object = useMemo<FrameObject>(() => chartGeneratedObjectToFrameObject(chartObject), [chartObject]);
-  const evaluatedObject = useMemo(() => evaluateObjectForPreview(object, previewTime, duration, animationsEnabled), [animationsEnabled, duration, object, previewTime]);
-  const animationTransform = typeof evaluatedObject.renderStyle.transform === "string" ? evaluatedObject.renderStyle.transform : undefined;
-  const objectTransform = typeof object.style.transform === "string" ? object.style.transform : undefined;
-  const style = {
-    left: object.bounds.x - chartBounds.x,
-    top: object.bounds.y - chartBounds.y,
-    width: object.bounds.width,
-    height: object.bounds.height,
-    ...object.style,
-    ...evaluatedObject.renderStyle,
-    transform: `${animationTransform ?? objectTransform ?? ""}`.trim(),
-    willChange: renderMode === "export" ? undefined : "transform",
-  } as CSSProperties;
-  const content = evaluatedObject.renderContent ?? object.content;
-
-  return (
-    <div className="absolute flex select-none flex-col justify-center overflow-visible whitespace-pre-line" style={style}>
-      {object.type === "text" ? <div className="min-h-0 w-full whitespace-pre-wrap">{content}</div> : null}
-      {object.type === "svg" && content ? <ExportSvgContent bounds={object.bounds} content={content} exportTileFrameBounds={exportTileFrameBounds} frameScale={frameScale} markupKind="svg" owner={{ id: object.id, name: object.name, type: object.type, layer: "object" }} renderMode={renderMode} style={style} /> : null}
-      {(object.type === "html" || object.type === "template") && content ? <div className="h-full w-full" dangerouslySetInnerHTML={{ __html: content }} /> : null}
-      {object.type !== "text" && object.type !== "svg" && object.type !== "html" && object.type !== "template" && content ? content : null}
-    </div>
-  );
-}
-
-function chartGeneratedObjectToFrameObject(object: ChartGeneratedObject): FrameObject {
-  return {
-    id: object.id,
-    name: object.name ?? object.id,
-    type: object.kind,
-    selector: "",
-    bounds: object.bounds,
-    content: object.content,
-    template: object.template,
-    style: object.style,
-    motion: object.motion,
-    layoutId: object.layoutId,
-  };
-}
-
 function areFrameObjectPropsEqual(previous: { animationsEnabled: boolean; exportTileFrameBounds?: ExportTileFrameBounds; object: FrameObject; canSelect: boolean; duration: number; editing: boolean; focusPicking: boolean; frameScale: number; previewTime: number; renderMode: "preview" | "export" }, next: { animationsEnabled: boolean; exportTileFrameBounds?: ExportTileFrameBounds; object: FrameObject; canSelect: boolean; duration: number; editing: boolean; focusPicking: boolean; frameScale: number; previewTime: number; renderMode: "preview" | "export" }) {
   return previous.object === next.object
     && previous.animationsEnabled === next.animationsEnabled
@@ -608,7 +648,7 @@ function areFrameObjectPropsEqual(previous: { animationsEnabled: boolean; export
 }
 
 function areBackgroundLayerPropsEqual(previous: { animationsEnabled: boolean; background: BackgroundLayer; duration: number; exportTileFrameBounds?: ExportTileFrameBounds; frameScale: number; previewTime: number; renderMode: "preview" | "export" }, next: { animationsEnabled: boolean; background: BackgroundLayer; duration: number; exportTileFrameBounds?: ExportTileFrameBounds; frameScale: number; previewTime: number; renderMode: "preview" | "export" }) {
-  const timeSensitive = Boolean(next.background.motion) || next.background.elements.some(isPreviewTimeSensitiveObject);
+  const timeSensitive = Boolean(next.background.animations?.length) || next.background.elements.some(isPreviewTimeSensitiveObject);
   return previous.animationsEnabled === next.animationsEnabled && previous.background === next.background && previous.duration === next.duration && previous.exportTileFrameBounds === next.exportTileFrameBounds && previous.frameScale === next.frameScale && previous.renderMode === next.renderMode && (!next.animationsEnabled || !timeSensitive || previous.previewTime === next.previewTime);
 }
 
@@ -617,30 +657,67 @@ function areBackgroundElementPropsEqual(previous: { duration: number; element: E
 }
 
 function isPreviewTimeSensitiveObject(object: FrameObject) {
-  return isTimeSensitiveFrameObject(object) || object.type === "chart";
+  return isTimeSensitiveFrameObject(object);
 }
 
-export function SelectionOverlayBox({ objectId, bounds, cameraTransform, frameScale, highlighted, interactive, overlayOffset = 0, onResizePointerDown }: { objectId: string; bounds: Bounds; cameraTransform: CameraPreviewTransform; frameScale: number; highlighted: boolean; interactive: boolean; overlayOffset?: number; onResizePointerDown: (event: PointerEvent<HTMLDivElement>, handle: ResizeHandle) => void }) {
-  const viewportBounds = insetBounds(boundsToViewport(bounds, cameraTransform, frameScale), -selectorOffsetPx);
+export function SelectionOverlayBox({ objectId, bounds, cameraTransform, frameScale, frameViewportRef, handleSizePx = selectorHandleSizePx, highlighted, interactive, offsetPx = selectorOffsetPx, overlayOffset = { left: 0, top: 0 }, portal = false, portalHost, uiScale = 1, onResizePointerDown }: { objectId: string; bounds: Bounds; cameraTransform: CameraPreviewTransform; frameScale: number; frameViewportRef?: RefObject<HTMLDivElement | null>; handleSizePx?: number; highlighted: boolean; interactive: boolean; offsetPx?: number; overlayOffset?: { left: number; top: number }; portal?: boolean; portalHost?: HTMLElement | null; uiScale?: number; onResizePointerDown: (event: PointerEvent<HTMLDivElement>, handle: ResizeHandle) => void }) {
+  const boxRef = useRef<HTMLDivElement | null>(null);
+  const viewportBounds = insetBounds(boundsToViewport(bounds, cameraTransform, frameScale), -offsetPx);
+  const edgeHitThicknessPx = portal ? 12 : 12 / uiScale;
+  const edgeHitInsetPx = portal ? -4 : -4 / uiScale;
+  const edgeLineThicknessPx = portal ? (highlighted ? 2 : 1) : (highlighted ? 2 : 1) / uiScale;
   const edgeHitClass = `${interactive ? "pointer-events-auto" : "pointer-events-none"} absolute grid place-items-center`;
-  const horizontalEdgeHitClass = `${edgeHitClass} -left-1 -right-1 h-3 cursor-ns-resize`;
-  const verticalEdgeHitClass = `${edgeHitClass} -top-1 -bottom-1 w-3 cursor-ew-resize`;
-  const horizontalEdgeLineClass = `w-full opacity-95 ${highlighted ? "h-0.5" : "h-px"}`;
-  const verticalEdgeLineClass = `h-full opacity-95 ${highlighted ? "w-0.5" : "w-px"}`;
+  const horizontalEdgeHitClass = `${edgeHitClass} cursor-ns-resize`;
+  const verticalEdgeHitClass = `${edgeHitClass} cursor-ew-resize`;
+  const horizontalEdgeLineClass = "w-full opacity-95";
+  const verticalEdgeLineClass = "h-full opacity-95";
   const edgeStyle = { backgroundColor: selectorBlue };
-  const handleClass = `${interactive ? "pointer-events-auto" : "pointer-events-none"} absolute border-2 bg-white shadow-[0_1px_4px_rgba(0,0,0,0.24)]`;
-  const handleStyle = { width: selectorHandleSizePx, height: selectorHandleSizePx };
+  const horizontalEdgeHitStyle = { left: edgeHitInsetPx, right: edgeHitInsetPx, height: edgeHitThicknessPx };
+  const verticalEdgeHitStyle = { top: edgeHitInsetPx, bottom: edgeHitInsetPx, width: edgeHitThicknessPx };
+  const horizontalEdgeLineStyle = { ...edgeStyle, height: edgeLineThicknessPx };
+  const verticalEdgeLineStyle = { ...edgeStyle, width: edgeLineThicknessPx };
+  const handleClass = `${interactive ? "pointer-events-auto" : "pointer-events-none"} absolute bg-white shadow-[0_1px_4px_rgba(0,0,0,0.24)]`;
+  const handleStyle = { width: portal ? selectorHandleSizePx : handleSizePx, height: portal ? selectorHandleSizePx : handleSizePx, border: `${portal ? 2 : 2 / uiScale}px solid ${selectorBlue}` };
   const handleStyleWithColor = { ...handleStyle, borderColor: selectorBlue };
   const topLeftHandleClass = `${handleClass} left-0 top-0 -translate-x-1/2 -translate-y-1/2 cursor-nwse-resize`;
   const topRightHandleClass = `${handleClass} right-0 top-0 translate-x-1/2 -translate-y-1/2 cursor-nesw-resize`;
   const bottomRightHandleClass = `${handleClass} bottom-0 right-0 translate-x-1/2 translate-y-1/2 cursor-nwse-resize`;
   const bottomLeftHandleClass = `${handleClass} bottom-0 left-0 -translate-x-1/2 translate-y-1/2 cursor-nesw-resize`;
+  const boxStyle = portal
+    ? { left: 0, top: 0, width: 0, height: 0, position: "absolute", transform: "translate(var(--clipper-drag-x, 0px), var(--clipper-drag-y, 0px))", willChange: "left, top, width, height, transform", zIndex: 70 } as CSSProperties
+    : { left: viewportBounds.x + overlayOffset.left, top: viewportBounds.y + overlayOffset.top, width: viewportBounds.width, height: viewportBounds.height, transform: "translate(var(--clipper-drag-x, 0px), var(--clipper-drag-y, 0px))", zIndex: 70 } as CSSProperties;
+
+  useLayoutEffect(() => {
+    if (!portal || !portalHost || !frameViewportRef) return;
+    const host = portalHost;
+    const viewportRef = frameViewportRef;
+    let frameId = 0;
+
+    function syncPortalBox() {
+      const element = boxRef.current;
+      const frameViewport = viewportRef.current;
+      if (element && frameViewport) {
+        const frameRect = frameViewport.getBoundingClientRect();
+        const hostRect = host.getBoundingClientRect();
+        const scale = frameRect.width / (FRAME_WIDTH * frameScale);
+        element.style.left = `${frameRect.left - hostRect.left + viewportBounds.x * scale}px`;
+        element.style.top = `${frameRect.top - hostRect.top + viewportBounds.y * scale}px`;
+        element.style.width = `${viewportBounds.width * scale}px`;
+        element.style.height = `${viewportBounds.height * scale}px`;
+      }
+      frameId = requestAnimationFrame(syncPortalBox);
+    }
+
+    syncPortalBox();
+    return () => cancelAnimationFrame(frameId);
+  }, [frameScale, frameViewportRef, portal, portalHost, viewportBounds.height, viewportBounds.width, viewportBounds.x, viewportBounds.y]);
+
   return (
-    <div data-frame-selection-box={objectId} className="pointer-events-none absolute bg-transparent" style={{ left: viewportBounds.x + overlayOffset, top: viewportBounds.y + overlayOffset, width: viewportBounds.width, height: viewportBounds.height, transform: "translate(var(--clipper-drag-x, 0px), var(--clipper-drag-y, 0px))", zIndex: 70 }}>
-      <div className={`${horizontalEdgeHitClass} top-0 -translate-y-1/2`} onPointerDown={(event) => onResizePointerDown(event, "top")}><span className={horizontalEdgeLineClass} style={edgeStyle} /></div>
-      <div className={`${horizontalEdgeHitClass} bottom-0 translate-y-1/2`} onPointerDown={(event) => onResizePointerDown(event, "bottom")}><span className={horizontalEdgeLineClass} style={edgeStyle} /></div>
-      <div className={`${verticalEdgeHitClass} left-0 -translate-x-1/2`} onPointerDown={(event) => onResizePointerDown(event, "left")}><span className={verticalEdgeLineClass} style={edgeStyle} /></div>
-      <div className={`${verticalEdgeHitClass} right-0 translate-x-1/2`} onPointerDown={(event) => onResizePointerDown(event, "right")}><span className={verticalEdgeLineClass} style={edgeStyle} /></div>
+    <div ref={boxRef} data-frame-selection-box={objectId} data-frame-selection-box-portal={portal ? "true" : undefined} className={`${portal ? "absolute" : "absolute"} pointer-events-none bg-transparent`} style={boxStyle}>
+      <div className={`${horizontalEdgeHitClass} top-0 -translate-y-1/2`} style={horizontalEdgeHitStyle} onPointerDown={(event) => onResizePointerDown(event, "top")}><span className={horizontalEdgeLineClass} style={horizontalEdgeLineStyle} /></div>
+      <div className={`${horizontalEdgeHitClass} bottom-0 translate-y-1/2`} style={horizontalEdgeHitStyle} onPointerDown={(event) => onResizePointerDown(event, "bottom")}><span className={horizontalEdgeLineClass} style={horizontalEdgeLineStyle} /></div>
+      <div className={`${verticalEdgeHitClass} left-0 -translate-x-1/2`} style={verticalEdgeHitStyle} onPointerDown={(event) => onResizePointerDown(event, "left")}><span className={verticalEdgeLineClass} style={verticalEdgeLineStyle} /></div>
+      <div className={`${verticalEdgeHitClass} right-0 translate-x-1/2`} style={verticalEdgeHitStyle} onPointerDown={(event) => onResizePointerDown(event, "right")}><span className={verticalEdgeLineClass} style={verticalEdgeLineStyle} /></div>
       <div className={topLeftHandleClass} style={handleStyleWithColor} onPointerDown={(event) => onResizePointerDown(event, "top-left")} />
       <div className={topRightHandleClass} style={handleStyleWithColor} onPointerDown={(event) => onResizePointerDown(event, "top-right")} />
       <div className={bottomRightHandleClass} style={handleStyleWithColor} onPointerDown={(event) => onResizePointerDown(event, "bottom-right")} />
@@ -672,13 +749,17 @@ export const BackgroundLayerView = memo(function BackgroundLayerView({ animation
 
 export const BackgroundElementView = memo(function BackgroundElementView({ element, exportTileFrameBounds, frameScale, previewTime, renderMode }: { duration: number; element: EvaluatedFrameObject; exportTileFrameBounds?: ExportTileFrameBounds; frameScale: number; previewTime: number; renderMode: "preview" | "export" }) {
   const animation = { style: element.renderStyle, content: element.renderContent };
+  const objectTransform = typeof element.style.transform === "string" ? element.style.transform : undefined;
+  const animationTransform = typeof animation.style.transform === "string" ? animation.style.transform : undefined;
   const style = {
+    ...element.style,
+    ...animation.style,
     left: element.bounds.x,
     top: element.bounds.y,
     width: element.bounds.width,
     height: element.bounds.height,
-    ...element.style,
-    ...animation.style,
+    transform: renderMode === "export" ? (animationTransform ?? objectTransform) : `translate(var(--clipper-drag-x, 0px), var(--clipper-drag-y, 0px)) ${animationTransform ?? objectTransform ?? ""}`.trim(),
+    willChange: renderMode === "export" ? undefined : "transform",
   } as CSSProperties;
   const content = animation.content ?? element.content;
   const textLines = useMemo(() => content?.split("\n") ?? [], [content]);
@@ -687,7 +768,7 @@ export const BackgroundElementView = memo(function BackgroundElementView({ eleme
     <div className="absolute flex select-none flex-col justify-center overflow-hidden whitespace-pre-line" data-background-element-id={element.locked ? undefined : element.id} style={{ ...style, ...(element.locked ? { opacity: 0.6 } : {}) }}>
       {element.type === "text" ? textLines.map((line, index) => <span key={`${line}-${index}`}>{line}</span>) : null}
       {element.type === "svg" && content ? <ExportSvgContent bounds={element.bounds} content={content} exportTileFrameBounds={exportTileFrameBounds} frameScale={frameScale} markupKind="svg" owner={{ id: element.id, name: element.name, type: element.type, layer: "background" }} renderMode={renderMode} style={style} /> : null}
-      {(element.type === "html" || element.type === "template") && content ? <div className="h-full w-full" dangerouslySetInnerHTML={{ __html: content }} /> : null}
+      {(element.type === "html" || element.type === "template") && content ? <HtmlContent content={content} /> : null}
       {element.type !== "text" && element.type !== "svg" && element.type !== "html" && element.type !== "template" && content ? content : null}
     </div>
   );
@@ -695,4 +776,32 @@ export const BackgroundElementView = memo(function BackgroundElementView({ eleme
 
 function evaluateObjectForPreview(object: FrameObject, time: number, duration: number, animationsEnabled: boolean): EvaluatedFrameObject {
   return evaluateFrameObject(object, time, duration, { animations: animationsEnabled });
+}
+
+function HtmlContent({ content }: { content: string }) {
+  const ref = useRef<HTMLDivElement | null>(null);
+
+  useLayoutEffect(() => {
+    const root = ref.current;
+    if (!root) return;
+
+    root.innerHTML = content;
+    const scripts = Array.from(root.querySelectorAll("script"));
+    for (const script of scripts) {
+      const executable = document.createElement("script");
+      for (const attribute of script.attributes) executable.setAttribute(attribute.name, attribute.value);
+      executable.text = script.text;
+      script.replaceWith(executable);
+    }
+
+    return () => {
+      for (const node of Array.from(root.querySelectorAll<HTMLElement>("[data-clipper-three-root]"))) {
+        const cleanup = (node as { __clipperThreeCleanup?: unknown }).__clipperThreeCleanup;
+        if (typeof cleanup === "function") cleanup();
+      }
+      root.replaceChildren();
+    };
+  }, [content]);
+
+  return <div ref={ref} className="h-full w-full" />;
 }

@@ -9,7 +9,7 @@ type RightInspectorPanelProps = {
   onTabChange: (tab: RightPanelTab) => void;
 };
 
-const tabs: RightPanelTab[] = ["video", "motion", "agent"];
+const tabs: RightPanelTab[] = ["video", "animation", "agent"];
 
 export function RightInspectorPanel({ activeTab, children, validationErrors, onTabChange }: RightInspectorPanelProps) {
   return (

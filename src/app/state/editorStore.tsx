@@ -15,6 +15,12 @@ function normalizeMode(mode: EditorState["mode"] | undefined): Mode {
   return mode === "editor" || mode === "code" ? "editor" : "preview";
 }
 
+function normalizeRightPanelTab(tab: EditorState["rightPanelTab"] | undefined): RightPanelTab {
+  if (tab === "animation" || tab === "motion") return "animation";
+  if (tab === "agent") return "agent";
+  return "video";
+}
+
 export type EditorStoreState = {
   mode: Mode;
   timelineMode: TimelineMode;
@@ -202,7 +208,7 @@ function getInitialState(project: ProjectManifest): EditorStoreState {
     pausePlaybackOnScrub: editorState?.pausePlaybackOnScrub ?? defaultPausePlaybackOnScrub,
     fastSelectEnabled: false,
     leftPanelTab: editorState?.leftPanelTab ?? "assets",
-    rightPanelTab: editorState?.rightPanelTab ?? "video",
+    rightPanelTab: normalizeRightPanelTab(editorState?.rightPanelTab),
     sourceStatus: "Loading TypeScript composition sources...",
     appContextMenu: null,
     renamingProject: false,
@@ -351,7 +357,7 @@ export function createEditorStore(project: ProjectManifest) {
       frameZoomBarOpen: editorState.preview?.zoomBarOpen ?? defaultPreviewViewportState.zoomBarOpen,
       framePreviewScale: editorState.preview?.scale ?? defaultFramePreviewScale,
       leftPanelTab: editorState.leftPanelTab ?? "assets",
-      rightPanelTab: editorState.rightPanelTab ?? "video",
+      rightPanelTab: normalizeRightPanelTab(editorState.rightPanelTab),
       editorTabs: tabsFromEditorSession(editorState),
       closedEditorTabs: [],
       activeEditorTabId: activeTabIdFromEditorSession(editorState),

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { evaluateBackgroundLayer, evaluateFrameObject, getMotionTranslation } from "./renderRuntime";
+import { evaluateBackgroundLayer, evaluateFrameObject } from "./renderRuntime";
 import { advanceTimeSensitiveSceneTime, applyAdjustmentLayersToSceneTime, applyPlaybackAdjustmentLayersToSceneTime, applyAdjustmentLayersToVisualStyle, getSceneTimeForTimeSensitiveDisplayTime, getTimeSensitiveDisplayDuration, getTimeSensitiveDisplayTime } from "../core/adjustments";
 import { installedEffectPackages } from "../core/effects/registry";
 import { applyTransitionLayersToVisualStyle, getTransitionFinishTime, getTransitionProgress, renderTransitionSequence } from "../core/transitions";
@@ -195,10 +195,10 @@ describe("render runtime", () => {
     expect(evaluateFrameObject(object, 0, 4).timeSensitive).toBe(false);
   });
 
-  it("combines motion and template transforms deterministically", () => {
+  it("combines animations and template transforms deterministically", () => {
     const object = {
       ...baseObject,
-      motion: { duration: 4, x: [0, 100] as const, rotate: [0, 90] as const },
+      animations: [{ id: "move", keyframes: { x: [0, 100] as const, rotate: [0, 90] as const }, options: { duration: 4 } }],
       template: {
         kind: "html" as const,
         source: "() => ({ style: { transform: 'scale(2)' } })",
@@ -207,23 +207,13 @@ describe("render runtime", () => {
 
     const evaluated = evaluateFrameObject(object, 2, 4);
 
-    expect(evaluated.renderStyle.transform).toBe("translateX(50px) rotate(45.00deg) scale(2)");
+    expect(evaluated.renderStyle.transform).toBe("translateX(50px) rotate(45deg) scale(2)");
   });
 
-  it("evaluates smooth motion paths for followed objects", () => {
-    const motion = { duration: 4, path: [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }] };
-
-    const evaluated = evaluateFrameObject({ ...baseObject, motion }, 2, 4);
-    const translation = getMotionTranslation(motion, 2);
-
-    expect(evaluated.renderStyle.transform).toBe("translate(100px, 0px)");
-    expect(translation).toEqual({ x: 100, y: 0 });
-  });
-
-  it("can evaluate objects with motion disabled for static editing", () => {
+  it("can evaluate objects with animations disabled for static editing", () => {
     const object = {
       ...baseObject,
-      motion: { duration: 4, opacity: [0, 1] as const, x: [0, 100] as const },
+      animations: [{ id: "fade-move", keyframes: { opacity: [0, 1] as const, x: [0, 100] as const }, options: { duration: 4 } }],
     };
 
     const evaluated = evaluateFrameObject(object, 2, 4, { animations: false });
@@ -275,7 +265,7 @@ describe("render runtime", () => {
       stretchToElements: true,
       elements: [
         { ...baseObject, id: "left", selector: "[data-object-id='left']", bounds: { x: -100, y: 40, width: 50, height: 60 } },
-        { ...baseObject, id: "right", selector: "[data-object-id='right']", bounds: { x: 1800, y: 960, width: 260, height: 200 }, motion: { duration: 2, opacity: [0, 1] } },
+        { ...baseObject, id: "right", selector: "[data-object-id='right']", bounds: { x: 1800, y: 960, width: 260, height: 200 }, animations: [{ id: "fade", keyframes: { opacity: [0, 1] }, options: { duration: 2 } }] },
       ],
     };
 
@@ -285,13 +275,13 @@ describe("render runtime", () => {
     expect(evaluated.timeSensitive).toBe(true);
   });
 
-  it("can evaluate backgrounds with layer and element motion disabled", () => {
+  it("can evaluate backgrounds with layer and element animations disabled", () => {
     const background: BackgroundLayer = {
       id: "background",
       name: "Background",
       style: { background: "#111" },
-      motion: { duration: 2, opacity: [0, 1] },
-      elements: [{ ...baseObject, id: "element", selector: "[data-object-id='element']", motion: { duration: 2, x: [0, 100] } }],
+      animations: [{ id: "fade", keyframes: { opacity: [0, 1] }, options: { duration: 2 } }],
+      elements: [{ ...baseObject, id: "element", selector: "[data-object-id='element']", animations: [{ id: "move", keyframes: { x: [0, 100] }, options: { duration: 2 } }] }],
     };
 
     const evaluated = evaluateBackgroundLayer(background, 1, 2, { animations: false });
