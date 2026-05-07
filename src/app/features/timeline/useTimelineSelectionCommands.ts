@@ -141,7 +141,7 @@ export function useTimelineSelectionCommands({
     setSelectedObjectId(null);
     setSelectionPayload(null);
     clearMarkerSelection();
-    if (rightPanelTab === "agent") setRightPanelTab("animation");
+    if (rightPanelTab === "agent") setRightPanelTab("video");
     pausePlaybackAtCurrentTime();
   }
 
@@ -155,7 +155,7 @@ export function useTimelineSelectionCommands({
     setSelectedObjectId(null);
     setSelectionPayload(null);
     clearMarkerSelection();
-    if (rightPanelTab === "agent") setRightPanelTab("animation");
+    if (rightPanelTab === "agent") setRightPanelTab("video");
     pausePlaybackAtCurrentTime();
   }
 
@@ -174,7 +174,7 @@ export function useTimelineSelectionCommands({
     setFocusPickZoomMarker(null);
     setPositionPickTranslationMarker(null);
     setTrackerPickTranslationMarker(null);
-    if (rightPanelTab === "agent") setRightPanelTab("animation");
+    if (rightPanelTab === "agent") setRightPanelTab("video");
     pausePlaybackAtCurrentTime();
   }
 

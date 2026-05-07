@@ -16,7 +16,6 @@ function normalizeMode(mode: EditorState["mode"] | undefined): Mode {
 }
 
 function normalizeRightPanelTab(tab: EditorState["rightPanelTab"] | undefined): RightPanelTab {
-  if (tab === "animation" || tab === "motion") return "animation";
   if (tab === "agent") return "agent";
   return "video";
 }
@@ -152,6 +151,7 @@ export type EditorStoreActions = {
   updateEditorTab: (tabId: string, patch: Partial<EditorTab>) => void;
   selectEditorTab: (tabId: string) => void;
   closeEditorTab: (tabId: string) => void;
+  closeCompositionEditorTabs: () => void;
   restoreClosedEditorTab: () => boolean;
   applyEditorState: (editorState: EditorState, fallbackSceneId: string, options?: { preserveMarkerSelection?: boolean }) => void;
   clearMarkerSelection: () => void;
@@ -288,7 +288,12 @@ export function createEditorStore(project: ProjectManifest) {
     openEditorTab: (tab) => set((state) => {
       const existingTab = state.editorTabs.find((item) => item.id === tab.id);
       const pinnedTab = { ...tab, isPinned: true };
-      const editorTabs = existingTab ? state.editorTabs.map((item) => item.id === tab.id ? { ...item, ...pinnedTab } : item) : [...state.editorTabs, pinnedTab];
+      const remainingTabs = state.editorTabs.filter((item) => item.id !== tab.id);
+      const editorTabs = existingTab
+        ? [pinnedTab, ...remainingTabs]
+        : tab.isComposition
+          ? [pinnedTab, ...state.editorTabs]
+          : [...state.editorTabs, pinnedTab];
       return { editorTabs, closedEditorTabs: state.closedEditorTabs.filter((closedTab) => closedTab.id !== tab.id), activeEditorTabId: tab.id };
     }),
     openTemporaryEditorTab: (tab) => set((state) => {
@@ -311,12 +316,19 @@ export function createEditorStore(project: ProjectManifest) {
     closeEditorTab: (tabId) => set((state) => {
       const tabIndex = state.editorTabs.findIndex((tab) => tab.id === tabId);
       if (tabIndex < 0) return state;
+      if (state.editorTabs[tabIndex].isComposition) return state;
       const closedTab = toClosedEditorTab(state.editorTabs[tabIndex]);
       const editorTabs = state.editorTabs.filter((tab) => tab.id !== tabId);
       const closedEditorTabs = [closedTab, ...state.closedEditorTabs.filter((tab) => tab.id !== tabId)].slice(0, closedEditorTabStackLimit);
       if (state.activeEditorTabId !== tabId) return { editorTabs, closedEditorTabs };
       const nextActiveTab = editorTabs[Math.min(tabIndex, editorTabs.length - 1)] ?? null;
       return { editorTabs, closedEditorTabs, activeEditorTabId: nextActiveTab?.id ?? null };
+    }),
+    closeCompositionEditorTabs: () => set((state) => {
+      if (!state.editorTabs.some((tab) => tab.isComposition)) return state;
+      const editorTabs = state.editorTabs.filter((tab) => !tab.isComposition);
+      if (state.activeEditorTabId && editorTabs.some((tab) => tab.id === state.activeEditorTabId)) return { editorTabs };
+      return { editorTabs, activeEditorTabId: editorTabs[0]?.id ?? null };
     }),
     restoreClosedEditorTab: () => {
       const state = get();
@@ -511,6 +523,7 @@ export function useAppEditorState() {
     updateEditorTab: state.updateEditorTab,
     selectEditorTab: state.selectEditorTab,
     closeEditorTab: state.closeEditorTab,
+    closeCompositionEditorTabs: state.closeCompositionEditorTabs,
     restoreClosedEditorTab: state.restoreClosedEditorTab,
     openTemporaryEditorTab: state.openTemporaryEditorTab,
     pinEditorTab: state.pinEditorTab,

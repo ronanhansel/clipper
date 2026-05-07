@@ -8,9 +8,11 @@ import {
   type CSSProperties,
   type MouseEvent,
   type PointerEvent,
+  type ReactNode,
   type RefObject,
   type WheelEvent,
 } from "react";
+import { ChevronDown } from "lucide-react";
 import { createPortal } from "react-dom";
 import type { ContextMenuState } from "../../app/types";
 import {
@@ -18,11 +20,13 @@ import {
   getAnimationDefinition,
   getAnimationDefinitionCategories,
 } from "../../core/animations/registry";
+import { addAnimationGraphPresetGroupToGraph, animationGraphPresets } from "../../core/animations/presets";
 import { roundTenth } from "../../core/math";
 import { formatTime, getTimelineTicks } from "../../core/timeline";
 import type {
   AnimationGraphCustomNode,
   AnimationGraphEdge,
+  AnimationGraphGroup,
   AnimationGraphPort,
   AnimationGraphState,
   FrameObject,
@@ -63,7 +67,7 @@ type Props = {
 type GraphNode = {
   id: string;
   label: string;
-  kind: "layer" | "animation" | "time";
+  kind: "layer" | "animation" | "time" | "group" | "out";
   x: number;
   y: number;
   width: number;
@@ -93,11 +97,49 @@ type DragState =
       startY: number;
       x: number;
       y: number;
+    }
+  | {
+      kind: "marquee";
+      startClientX: number;
+      startClientY: number;
+      startX: number;
+      startY: number;
+      x: number;
+      y: number;
+      shiftKey: boolean;
+      active: boolean;
+      scale: number;
     };
 type GraphContextMenuPoint = {
   graphX: number;
   graphY: number;
   nodeId?: string;
+};
+type GraphClipboard = {
+  nodes: AnimationGraphState["nodes"];
+  customNodes: NonNullable<AnimationGraphState["customNodes"]>;
+  edges: AnimationGraphEdge[];
+  parameters?: NonNullable<AnimationGraphState["parameters"]>;
+  groups?: NonNullable<AnimationGraphState["groups"]>;
+};
+type GraphCanvasSurfaceProps = {
+  canvasRef: RefObject<HTMLCanvasElement | null>;
+  viewportRef: RefObject<HTMLDivElement | null>;
+  scrollWidth: number;
+  scrollHeight: number;
+  hoverNodeId: string | null;
+  className?: string;
+  canvasClassName?: string;
+  onScroll?: () => void;
+  onWheel?: (event: WheelEvent<HTMLDivElement>) => void;
+  onClick?: (event: MouseEvent<HTMLCanvasElement>) => void;
+  onContextMenu?: (event: MouseEvent<HTMLCanvasElement>) => void;
+  onPointerDown: (event: PointerEvent<HTMLCanvasElement>) => void;
+  onPointerMove: (event: PointerEvent<HTMLCanvasElement>) => void;
+  onPointerUp: (event: PointerEvent<HTMLCanvasElement>) => void;
+  onPointerCancel: (event: PointerEvent<HTMLCanvasElement>) => void;
+  onPointerLeave?: (event: PointerEvent<HTMLCanvasElement>) => void;
+  children?: ReactNode;
 };
 
 const gridSize = 18;
@@ -108,6 +150,7 @@ const nodeGap = 4;
 const portGap = 7;
 const connectorHoverRadius = 26;
 const connectorHitRadius = 26;
+const marqueeThreshold = 4;
 const nodeColors = {
   animationBg: "#382234",
   animationBorder: "#8a557b",
@@ -115,12 +158,42 @@ const nodeColors = {
   timeBorder: "#7ea8d8",
   layerBg: "#252b35",
   layerBorder: "#566171",
+  groupBg: "#3a2315",
+  groupBorder: "#9c6232",
+  outBg: "#28303a",
+  outBorder: "#9aa4b2",
   hoverBorder: "#a8b0bd",
   port: "#b8c0cc",
   text: "#d9dee8",
 };
 const minGraphScale = 0.35;
 const maxGraphScale = 2.5;
+const groupPopupWidth = 560;
+const groupPopupHeight = 360;
+const groupGraphPadding = 120;
+const groupSubgraphZoomEnabled = false;
+const graphParameterOptions: Record<string, readonly { value: string; label: string }[]> = {
+  ease: [
+    { value: "linear", label: "Linear" },
+    { value: "easeIn", label: "Ease in" },
+    { value: "easeOut", label: "Ease out" },
+    { value: "easeInOut", label: "Ease in-out" },
+    { value: "circOut", label: "Circ out" },
+    { value: "backOut", label: "Back out" },
+  ],
+  repeatType: [
+    { value: "loop", label: "Loop" },
+    { value: "reverse", label: "Reverse" },
+    { value: "mirror", label: "Mirror" },
+  ],
+};
+const timeParameterDefaults = {
+  delay: "0s",
+  duration: "1s",
+  ease: "linear",
+  repeat: "0",
+  repeatType: "loop",
+} satisfies Record<string, string>;
 
 function clampGraphScale(scale: number) {
   if (!Number.isFinite(scale)) return 1;
@@ -131,6 +204,92 @@ function normalizeWheelDelta(event: WheelEvent) {
   if (event.deltaMode === 1) return event.deltaY * 16;
   if (event.deltaMode === 2) return event.deltaY * 600;
   return event.deltaY;
+}
+
+function updateGraphHoverState(
+  point: { x: number; y: number },
+  nodes: GraphNode[],
+  scale: number,
+  graph: AnimationGraphState | undefined,
+  setHover: (nodeId: string | null, port: HoverConnector | null) => void,
+  setHoverEdge: (edgeId: string | null) => void,
+  edges: AnimationGraphEdge[],
+) {
+  const hoveredNode = hitNode(point, nodes, scale);
+  const connectorNode = hoveredNode ?? hitNodeLoose(point, nodes, scale) ?? null;
+  const connector = connectorNode ? getNodeHoverConnector(point, connectorNode, scale) : null;
+  setHover(hoveredNode?.id ?? null, connector);
+  setHoverEdge(connector ? null : (hitEdge(point, edges, nodes, scale)?.id ?? null));
+}
+
+function clearGraphDragState(
+  dragRef: RefObject<DragState | null>,
+  previewPositionsRef: RefObject<Record<string, { x: number; y: number }> | null>,
+  setHover: (nodeId: string | null, port: HoverConnector | null) => void,
+  setHoverEdge?: (edgeId: string | null) => void,
+) {
+  dragRef.current = null;
+  previewPositionsRef.current = null;
+  setHover(null, null);
+  setHoverEdge?.(null);
+}
+
+function getGraphEdgeDrop(
+  point: { x: number; y: number },
+  drag: Extract<DragState, { kind: "edge" }>,
+  nodes: GraphNode[],
+  scale: number,
+  graph: AnimationGraphState | undefined,
+  objects: FrameObject[],
+) {
+  return getEdgeDropTarget(point, drag.fromNodeId, nodes, scale, graph, objects);
+}
+
+function getDraggedGraphNodePosition(
+  event: PointerEvent<HTMLCanvasElement>,
+  drag: Extract<DragState, { kind: "node" }>,
+  scale: number,
+) {
+  return {
+    x: drag.startX + (event.clientX - drag.startClientX) / (gridSize * scale),
+    y: drag.startY + (event.clientY - drag.startClientY) / (gridSize * scale),
+  };
+}
+
+function hasNodeDragMoved(drag: Extract<DragState, { kind: "node" }>, position: { x: number; y: number }) {
+  return Math.abs(position.x - drag.startX) > 0.08 || Math.abs(position.y - drag.startY) > 0.08;
+}
+
+function getGroupGraphScrollLayout(nodes: GraphNode[], width: number, height: number) {
+  const rects = nodes.map(nodeRect);
+  const bounds = rects.reduce(
+    (next, rect) => ({
+      left: Math.min(next.left, rect.x),
+      top: Math.min(next.top, rect.y),
+      right: Math.max(next.right, rect.x + rect.width),
+      bottom: Math.max(next.bottom, rect.y + rect.height),
+    }),
+    { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity },
+  );
+  if (!rects.length || !Number.isFinite(bounds.left)) {
+    return { offsetX: 0, offsetY: 0, scrollWidth: width, scrollHeight: height, scrollLeft: 0, scrollTop: 0 };
+  }
+  const graphWidth = bounds.right - bounds.left;
+  const graphHeight = bounds.bottom - bounds.top;
+  const offsetX = Math.max(0, groupGraphPadding - bounds.left);
+  const offsetY = Math.max(0, groupGraphPadding - bounds.top);
+  const outNode = nodes.find((node) => node.kind === "out");
+  const targetRect = outNode ? nodeRect(outNode) : { x: bounds.left, y: bounds.top, width: graphWidth, height: graphHeight };
+  const scrollWidth = Math.max(width, bounds.right + offsetX + groupGraphPadding);
+  const scrollHeight = Math.max(height, bounds.bottom + offsetY + groupGraphPadding);
+  return {
+    offsetX,
+    offsetY,
+    scrollWidth,
+    scrollHeight,
+    scrollLeft: Math.max(0, targetRect.x + offsetX + targetRect.width / 2 - width / 2),
+    scrollTop: Math.max(0, targetRect.y + offsetY + targetRect.height / 2 - height / 2),
+  };
 }
 
 export const ComposeAnimationGraphPanel = memo(
@@ -159,19 +318,24 @@ export const ComposeAnimationGraphPanel = memo(
       string,
       { x: number; y: number }
     > | null>(null);
+    const suppressNextGraphClickRef = useRef(false);
     const pendingPopoverNodeIdRef = useRef<string | null>(null);
     const frameRef = useRef<number | null>(null);
     const activationFrameRef = useRef<number | null>(null);
     const playbackFrameRef = useRef<number | null>(null);
     const currentTimeRef = useRef(currentTime);
     const partRef = useRef<Part | null>(null);
+    const projectGraphRef = useRef<AnimationGraphState | undefined>(undefined);
     const graphRef = useRef<AnimationGraphState | undefined>(undefined);
+    const displayGraphRef = useRef<AnimationGraphState | undefined>(undefined);
     const nodesRef = useRef<GraphNode[]>([]);
     const selectedObjectsRef = useRef<FrameObject[]>([]);
     const viewInitializedRef = useRef(false);
     const hoverNodeIdRef = useRef<string | null>(null);
     const hoverConnectorRef = useRef<HoverConnector | null>(null);
     const hoverEdgeIdRef = useRef<string | null>(null);
+    const [selectedGraphNodeIds, setSelectedGraphNodeIds] = useState<string[]>([]);
+    const selectedGraphNodeIdsRef = useRef<string[]>([]);
     const [hoverNodeId, setHoverNodeId] = useState<string | null>(null);
     const [hoverConnector, setHoverConnector] = useState<HoverConnector | null>(
       null,
@@ -180,12 +344,16 @@ export const ComposeAnimationGraphPanel = memo(
     const [optimisticGraph, setOptimisticGraph] =
       useState<AnimationGraphState | null>(null);
     const [popoverNodeId, setPopoverNodeId] = useState<string | null>(null);
+    const [renamingGroupNodeId, setRenamingGroupNodeId] = useState<string | null>(null);
     const popoverNodeIdRef = useRef<string | null>(null);
     const [selectedGraphNodeId, setSelectedGraphNodeId] = useState<
       string | null
     >(null);
     const selectedGraphNodeIdRef = useRef<string | null>(null);
-    const deleteCustomNodeRef = useRef<(nodeId: string) => void>(() => undefined);
+    const deleteSelectedNodesRef = useRef<() => void>(() => undefined);
+    const copySelectedNodesRef = useRef<() => void>(() => undefined);
+    const pasteGraphNodesRef = useRef<() => void>(() => undefined);
+    const graphClipboardRef = useRef<GraphClipboard | null>(null);
     const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
     const [graphScale, setGraphScale] = useState(1);
     const graphScaleRef = useRef(1);
@@ -251,11 +419,15 @@ export const ComposeAnimationGraphPanel = memo(
       .join("|");
     partRef.current = part;
     graphRef.current = graph;
+    displayGraphRef.current = graph;
     nodesRef.current = nodes;
     selectedObjectsRef.current = selectedObjects;
     selectedGraphNodeIdRef.current = selectedGraphNodeId;
+    selectedGraphNodeIdsRef.current = selectedGraphNodeIds;
     popoverNodeIdRef.current = popoverNodeId;
-    deleteCustomNodeRef.current = deleteCustomNode;
+    deleteSelectedNodesRef.current = deleteSelectedNodes;
+    copySelectedNodesRef.current = copySelectedNodes;
+    pasteGraphNodesRef.current = pasteGraphNodes;
 
     useLayoutEffect(() => {
       setOptimisticGraph(null);
@@ -269,16 +441,26 @@ export const ComposeAnimationGraphPanel = memo(
     useEffect(() => {
       function onKeyDown(event: KeyboardEvent) {
         if (event.defaultPrevented) return;
-        if (event.key !== "Backspace" && event.key !== "Delete") return;
         if (
           isEditableKeyboardTarget(event.target) ||
           isEditableKeyboardTarget(document.activeElement)
         )
           return;
-        const selectedNodeId = selectedGraphNodeIdRef.current;
-        if (!selectedNodeId || !isCustomGraphNode(selectedNodeId, graphRef.current)) return;
+        const modifier = event.metaKey || event.ctrlKey;
+        if (modifier && event.key.toLowerCase() === "c") {
+          event.preventDefault();
+          copySelectedNodesRef.current();
+          return;
+        }
+        if (modifier && event.key.toLowerCase() === "v") {
+          event.preventDefault();
+          pasteGraphNodesRef.current();
+          return;
+        }
+        if (event.key !== "Backspace" && event.key !== "Delete") return;
+        if (!selectedGraphNodeIdsRef.current.some((id) => isCustomGraphNode(id, displayGraphRef.current))) return;
         event.preventDefault();
-        deleteCustomNodeRef.current(selectedNodeId);
+        deleteSelectedNodesRef.current();
       }
       window.addEventListener("keydown", onKeyDown);
       return () => window.removeEventListener("keydown", onKeyDown);
@@ -293,9 +475,17 @@ export const ComposeAnimationGraphPanel = memo(
     );
 
     useEffect(() => {
-      if (!optimisticGraph || !projectGraph) return;
-      if (JSON.stringify(optimisticGraph) === JSON.stringify(projectGraph))
+      if (!optimisticGraph || !projectGraph) {
+        projectGraphRef.current = projectGraph;
+        return;
+      }
+      const projectGraphChanged = projectGraphRef.current !== projectGraph;
+      if (
+        projectGraphChanged ||
+        JSON.stringify(optimisticGraph) === JSON.stringify(projectGraph)
+      )
         setOptimisticGraph(null);
+      projectGraphRef.current = projectGraph;
     }, [optimisticGraph, projectGraph]);
 
     useLayoutEffect(() => {
@@ -419,67 +609,45 @@ export const ComposeAnimationGraphPanel = memo(
       const canvas = canvasRef.current;
       const viewport = graphViewportRef.current;
       if (!canvas || !viewport) return;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-      const ratio = window.devicePixelRatio || 1;
       const scaledWidth = Math.max(1, viewport.clientWidth);
       const scaledHeight = Math.max(1, viewport.clientHeight);
-      const backingWidth = Math.round(scaledWidth * ratio);
-      const backingHeight = Math.round(scaledHeight * ratio);
-      if (canvas.width !== backingWidth) canvas.width = backingWidth;
-      if (canvas.height !== backingHeight) canvas.height = backingHeight;
-      canvas.style.width = `${scaledWidth}px`;
-      canvas.style.height = `${scaledHeight}px`;
-      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-      ctx.clearRect(0, 0, scaledWidth, scaledHeight);
-      ctx.fillStyle = "#0b0f16";
-      ctx.fillRect(0, 0, scaledWidth, scaledHeight);
-      ctx.translate(-viewport.scrollLeft, -viewport.scrollTop);
-      ctx.scale(graphScaleRef.current, graphScaleRef.current);
       const currentPart = partRef.current;
       const currentSelectedObjects = selectedObjectsRef.current;
-      if (!currentPart)
-        return drawMessage(
-          ctx,
-          graphCanvasWidth,
-          graphCanvasHeight,
-          "Move the playhead over a composition to edit its animation graph.",
-        );
+      if (!currentPart) return;
       if (currentSelectedObjects.length === 0) return;
-      const currentGraph = graphRef.current;
+      const currentGraph = displayGraphRef.current;
       const currentNodes = nodesRef.current;
       const drawNodes = currentNodes.map((node) => ({
         ...node,
+        label: node.id === renamingGroupNodeId ? "" : node.label,
         ...(previewPositionsRef.current?.[node.id] ?? {}),
       }));
-      for (const edge of getRenderableEdges(
-        currentGraph,
-        drawNodes,
-        currentSelectedObjects,
-      ))
-        drawEdge(ctx, edge, drawNodes, hoverEdgeIdRef.current === edge.id);
       const edgeDrag =
         dragRef.current?.kind === "edge" ? dragRef.current : null;
-      if (edgeDrag)
-        drawPreviewEdge(ctx, edgeDrag, {
-          x: pointerRef.current.x / graphScaleRef.current,
-          y: pointerRef.current.y / graphScaleRef.current,
-        });
-      for (const node of drawNodes)
-        drawNode(
-          ctx,
-          node,
-          hoverNodeIdRef.current === node.id,
-          selectedGraphNodeIdRef.current === node.id,
-          hoverConnectorRef.current,
-          getNodePlaybackProgress(
-            node,
-            currentGraph,
-            currentTimeRef.current,
-            drawNodes,
-            currentSelectedObjects,
-          ),
-        );
+      const marqueeDrag = dragRef.current?.kind === "marquee" ? dragRef.current : null;
+      const marqueeSelectedNodeIds = marqueeDrag?.active
+        ? getMarqueeSelectionPreviewIds(marqueeDrag, drawNodes, selectedGraphNodeIdsRef.current)
+        : selectedGraphNodeIdsRef.current;
+      drawGraphCanvas({
+        canvas,
+        viewport,
+        width: scaledWidth,
+        height: scaledHeight,
+        scale: graphScaleRef.current,
+        nodes: drawNodes,
+        edges: getRenderableEdges(currentGraph, drawNodes, currentSelectedObjects),
+        hoverNodeId: hoverNodeIdRef.current,
+        selectedNodeIds: marqueeSelectedNodeIds,
+        hoverConnector: hoverConnectorRef.current,
+        hoverEdgeId: hoverEdgeIdRef.current,
+        edgeDrag,
+        previewPoint: edgeDrag
+          ? { x: pointerRef.current.x / graphScaleRef.current, y: pointerRef.current.y / graphScaleRef.current }
+          : null,
+        progressForNode: (node) =>
+          getNodePlaybackProgress(node, currentGraph, currentTimeRef.current, drawNodes, currentSelectedObjects),
+        marqueeRect: marqueeDrag?.active ? normalizeMarqueeRect(marqueeDrag) : null,
+      });
     }
 
     function onPointerMove(event: PointerEvent<HTMLCanvasElement>) {
@@ -490,13 +658,10 @@ export const ComposeAnimationGraphPanel = memo(
         pendingPopoverNodeIdRef.current = null;
         setPopoverNodeId(null);
         updateHoverEdge(null);
-        const dx =
-          (event.clientX - drag.startClientX) / (gridSize * graphScale);
-        const dy =
-          (event.clientY - drag.startClientY) / (gridSize * graphScale);
+        const position = getDraggedGraphNodePosition(event, drag, graphScale);
         previewPositionsRef.current = {
           ...(previewPositionsRef.current ?? {}),
-          [drag.nodeId]: { x: drag.startX + dx, y: drag.startY + dy },
+          [drag.nodeId]: position,
         };
         scheduleDraw();
         return;
@@ -507,45 +672,38 @@ export const ComposeAnimationGraphPanel = memo(
         updateHoverEdge(null);
         drag.x = point.x;
         drag.y = point.y;
-        const target = getEdgeDropTarget(
+        const target = getGraphEdgeDrop(
           point,
-          drag.fromNodeId,
+          drag,
           nodesRef.current,
           graphScale,
-          graphRef.current,
+          displayGraphRef.current,
           selectedObjects,
         );
         updateHover(target?.nodeId ?? null, null);
         scheduleDraw();
         return;
       }
-      const hoveredNode = hitNode(point, nodesRef.current, graphScale);
-      const hoveredInteractiveNode =
-        hoveredNode && isInteractiveGraphNode(hoveredNode, graphRef.current)
-          ? hoveredNode
-          : null;
-      const connectorNode =
-        hoveredNode ??
-        hitNode(point, nodesRef.current, graphScale) ??
-        hitNodeLoose(point, nodesRef.current, graphScale) ??
-        null;
-      const connector = connectorNode
-        ? getNodeHoverConnector(point, connectorNode, graphScale)
-        : null;
-      updateHover(hoveredInteractiveNode?.id ?? null, connector);
-      const edge = connector
-        ? null
-        : hitEdge(
-            point,
-            getRenderableEdges(
-              graphRef.current,
-              nodesRef.current,
-              selectedObjects,
-            ),
-            nodesRef.current,
-            graphScale,
-          );
-      updateHoverEdge(edge?.id ?? null);
+      if (drag?.kind === "marquee") {
+        pendingPopoverNodeIdRef.current = null;
+        setPopoverNodeId(null);
+        updateHover(null, null);
+        updateHoverEdge(null);
+        drag.x = point.x;
+        drag.y = point.y;
+        if (!drag.active && Math.hypot(event.clientX - drag.startClientX, event.clientY - drag.startClientY) > marqueeThreshold) drag.active = true;
+        scheduleDraw();
+        return;
+      }
+      updateGraphHoverState(
+        point,
+        nodesRef.current,
+        graphScale,
+        displayGraphRef.current,
+        updateHover,
+        updateHoverEdge,
+        getRenderableEdges(displayGraphRef.current, nodesRef.current, selectedObjects),
+      );
     }
 
     function onPointerDown(event: PointerEvent<HTMLCanvasElement>) {
@@ -554,19 +712,21 @@ export const ComposeAnimationGraphPanel = memo(
       event.stopPropagation();
       setContextMenu(null);
       const point = canvasPoint(event, graphViewportRef.current);
-      const connector =
-        getActiveHoverConnector(
-          point,
-          nodesRef.current,
-          graphScale,
-          hoverConnectorRef.current,
-        ) ??
-        hitHoverConnector(
-          point,
-          nodesRef.current,
-          graphScale,
-          hoverConnectorRef.current,
-        );
+      const bodyNode = hitNode(point, nodesRef.current, graphScale);
+      const connector = bodyNode
+        ? null
+        : getActiveHoverConnector(
+            point,
+            nodesRef.current,
+            graphScale,
+            hoverConnectorRef.current,
+          ) ??
+          hitHoverConnector(
+            point,
+            nodesRef.current,
+            graphScale,
+            hoverConnectorRef.current,
+          );
       if (connector) {
         pendingPopoverNodeIdRef.current = null;
         setPopoverNodeId(null);
@@ -590,7 +750,7 @@ export const ComposeAnimationGraphPanel = memo(
       }
       const edge = hitEdge(
         point,
-        getRenderableEdges(graphRef.current, nodesRef.current, selectedObjects),
+        getRenderableEdges(displayGraphRef.current, nodesRef.current, selectedObjects),
         nodesRef.current,
         graphScale,
       );
@@ -614,6 +774,7 @@ export const ComposeAnimationGraphPanel = memo(
             graph?.customNodes,
             graphViewportKey,
           ),
+          groups: graph?.groups,
           parameters: graph?.parameters,
           deletedNodeIds: graph?.deletedNodeIds,
           viewport: graph?.viewport,
@@ -622,11 +783,24 @@ export const ComposeAnimationGraphPanel = memo(
         scheduleDraw();
         return;
       }
-      const node = hitNode(point, nodesRef.current, graphScale);
+      const node = bodyNode ?? hitNode(point, nodesRef.current, graphScale);
       if (!node) {
         pendingPopoverNodeIdRef.current = null;
         setPopoverNodeId(null);
-        selectGraphNode(null);
+        if (!event.shiftKey) selectGraphNode(null);
+        dragRef.current = {
+          kind: "marquee",
+          startClientX: event.clientX,
+          startClientY: event.clientY,
+          startX: point.x,
+          startY: point.y,
+          x: point.x,
+          y: point.y,
+          shiftKey: event.shiftKey,
+          active: false,
+          scale: graphScaleRef.current,
+        };
+        event.currentTarget.setPointerCapture(event.pointerId);
         return;
       }
       if (node.kind === "layer") {
@@ -635,16 +809,15 @@ export const ComposeAnimationGraphPanel = memo(
         selectGraphNode(node.id);
         return;
       }
-      if (
-        getPopoverDetails(node, graphRef.current?.parameters?.[node.id])
-          .length === 0
-      ) {
-        pendingPopoverNodeIdRef.current = null;
-        setPopoverNodeId(null);
-        return;
+      if (event.shiftKey) {
+        toggleGraphNodeSelection(node.id);
+      } else {
+        selectGraphNode(node.id);
       }
-      pendingPopoverNodeIdRef.current = node.id;
-      selectGraphNode(node.id);
+      const hasPopover =
+        node.kind === "group" ||
+        getPopoverDetails(node, displayGraphRef.current?.parameters?.[node.id]).length > 0;
+      pendingPopoverNodeIdRef.current = hasPopover ? node.id : null;
       setPopoverNodeId(null);
       dragRef.current = {
         kind: "node",
@@ -656,6 +829,20 @@ export const ComposeAnimationGraphPanel = memo(
       };
       previewPositionsRef.current = { [node.id]: { x: node.x, y: node.y } };
       event.currentTarget.setPointerCapture(event.pointerId);
+    }
+
+    function onClick(event: MouseEvent<HTMLCanvasElement>) {
+      if (suppressNextGraphClickRef.current) {
+        suppressNextGraphClickRef.current = false;
+        return;
+      }
+      const point = canvasPoint(event, graphViewportRef.current);
+      const node = hitNode(point, nodesRef.current, graphScale);
+      if (node?.kind !== "group" || !node.details?.groupId) return;
+      pendingPopoverNodeIdRef.current = null;
+      setPopoverNodeId(null);
+      selectGraphNode(node.id);
+      setPopoverNodeId(node.id);
     }
 
     function onPointerUp(event: PointerEvent<HTMLCanvasElement>) {
@@ -677,22 +864,32 @@ export const ComposeAnimationGraphPanel = memo(
             graph?.customNodes,
             graphViewportKey,
           ),
+          groups: graph?.groups,
           parameters: graph?.parameters,
           deletedNodeIds: graph?.deletedNodeIds,
           viewport: graph?.viewport,
           viewports: graph?.viewports,
         }));
-        const moved = position.x !== drag.startX || position.y !== drag.startY;
-        if (!moved && pendingPopoverNodeIdRef.current === drag.nodeId)
-          setPopoverNodeId(drag.nodeId);
+        const moved = hasNodeDragMoved(drag, position);
+        if (moved) {
+          suppressNextGraphClickRef.current = true;
+          selectGraphNode(null);
+        }
+        if (!moved) {
+          const node = nodesRef.current.find((item) => item.id === drag.nodeId);
+          if (pendingPopoverNodeIdRef.current === drag.nodeId) {
+            setPopoverNodeId(drag.nodeId);
+          }
+        }
       }
       if (drag?.kind === "edge") {
-        const target = getEdgeDropTarget(
+        suppressNextGraphClickRef.current = true;
+        const target = getGraphEdgeDrop(
           canvasPoint(event, graphViewportRef.current),
-          drag.fromNodeId,
+          drag,
           nodesRef.current,
           graphScale,
-          graphRef.current,
+          displayGraphRef.current,
           selectedObjects,
         );
         if (target && target.nodeId !== drag.fromNodeId) {
@@ -705,7 +902,7 @@ export const ComposeAnimationGraphPanel = memo(
           };
           const currentEdges = filterPermittedEdges(
             getRenderableEdges(
-              graphRef.current,
+              displayGraphRef.current,
               nodesRef.current,
               selectedObjects,
             ),
@@ -725,12 +922,17 @@ export const ComposeAnimationGraphPanel = memo(
               graph?.customNodes,
               graphViewportKey,
             ),
+            groups: graph?.groups,
             parameters: graph?.parameters,
             deletedNodeIds: graph?.deletedNodeIds,
             viewport: graph?.viewport,
             viewports: graph?.viewports,
           }));
         }
+      }
+      if (drag?.kind === "marquee" && drag.active) {
+        suppressNextGraphClickRef.current = true;
+        applyMarqueeSelection(drag);
       }
       pendingPopoverNodeIdRef.current = null;
       previewPositionsRef.current = null;
@@ -740,8 +942,13 @@ export const ComposeAnimationGraphPanel = memo(
     }
 
     function onPointerCancel() {
-      dragRef.current = null;
-      previewPositionsRef.current = null;
+      clearGraphDragState(dragRef, previewPositionsRef, updateHover, updateHoverEdge);
+      scheduleDraw();
+    }
+
+    function onPointerLeave() {
+      if (dragRef.current) return;
+      updateHover(null, null);
       updateHoverEdge(null);
       scheduleDraw();
     }
@@ -770,8 +977,33 @@ export const ComposeAnimationGraphPanel = memo(
 
     function selectGraphNode(nodeId: string | null) {
       selectedGraphNodeIdRef.current = nodeId;
+      selectedGraphNodeIdsRef.current = nodeId ? [nodeId] : [];
       setSelectedGraphNodeId(nodeId);
+      setSelectedGraphNodeIds(nodeId ? [nodeId] : []);
       scheduleDraw();
+    }
+
+    function toggleGraphNodeSelection(nodeId: string) {
+      const next = selectedGraphNodeIdsRef.current.includes(nodeId)
+        ? selectedGraphNodeIdsRef.current.filter((id) => id !== nodeId)
+        : [...selectedGraphNodeIdsRef.current, nodeId];
+      selectedGraphNodeIdsRef.current = next;
+      selectedGraphNodeIdRef.current = next[next.length - 1] ?? null;
+      setSelectedGraphNodeIds(next);
+      setSelectedGraphNodeId(next[next.length - 1] ?? null);
+      scheduleDraw();
+    }
+
+    function setGraphNodeSelection(nodeIds: string[]) {
+      selectedGraphNodeIdsRef.current = nodeIds;
+      selectedGraphNodeIdRef.current = nodeIds[nodeIds.length - 1] ?? null;
+      setSelectedGraphNodeIds(nodeIds);
+      setSelectedGraphNodeId(nodeIds[nodeIds.length - 1] ?? null);
+      scheduleDraw();
+    }
+
+    function applyMarqueeSelection(drag: Extract<DragState, { kind: "marquee" }>) {
+      setGraphNodeSelection(getMarqueeSelectionPreviewIds(drag, nodesRef.current, selectedGraphNodeIdsRef.current));
     }
 
     function commitGraphUpdate(
@@ -803,6 +1035,7 @@ export const ComposeAnimationGraphPanel = memo(
           graph?.customNodes,
           graphViewportKey,
         ),
+        groups: graph?.groups,
         parameters: {
           ...(graph?.parameters ?? {}),
           [nodeId]: { ...(graph?.parameters?.[nodeId] ?? {}), [key]: value },
@@ -813,6 +1046,51 @@ export const ComposeAnimationGraphPanel = memo(
       }));
     }
 
+    function updateGroupNodeParameter(groupId: string, nodeId: string, key: string, value: string) {
+      commitGraphUpdate((graph) => {
+        const group = graph?.groups?.[groupId];
+        if (!group) return graph ?? { nodes: {}, edges: [] };
+        return replaceGraphGroup(graph, groupId, {
+          ...group,
+          parameters: {
+            ...(group.parameters ?? {}),
+            [nodeId]: { ...(group.parameters?.[nodeId] ?? {}), [key]: value },
+          },
+        });
+      });
+    }
+
+    function replaceGroup(groupId: string, nextGroup: AnimationGraphGroup) {
+      commitGraphUpdate((graph) => replaceGraphGroup(graph, groupId, nextGroup));
+    }
+
+    function replaceGraphGroup(
+      graph: AnimationGraphState | undefined,
+      groupId: string,
+      nextGroup: AnimationGraphGroup,
+    ): AnimationGraphState {
+      return {
+          nodes: {
+            ...materializeGraphNodes(nodesRef.current),
+            ...(graph?.nodes ?? {}),
+          },
+          edges: getRenderableEdges(graph, nodesRef.current, selectedObjects),
+          customNodes: materializeGraphNodeDefinitions(
+            nodesRef.current,
+            graph?.customNodes,
+            graphViewportKey,
+          ),
+          groups: {
+            ...(graph?.groups ?? {}),
+            [groupId]: nextGroup,
+          },
+          parameters: graph?.parameters,
+          deletedNodeIds: graph?.deletedNodeIds,
+          viewport: graph?.viewport,
+          viewports: graph?.viewports,
+        };
+    }
+
     function openContextMenu(event: MouseEvent<HTMLCanvasElement>) {
       event.preventDefault();
       event.stopPropagation();
@@ -820,22 +1098,40 @@ export const ComposeAnimationGraphPanel = memo(
       setPopoverNodeId(null);
       const node = hitNode(point, nodesRef.current, graphScale);
       const nodeId = node?.id;
-      selectGraphNode(nodeId ?? null);
+      const previousSelectedIds = selectedGraphNodeIdsRef.current;
+      const rightClickedSelectedNode = Boolean(nodeId && previousSelectedIds.includes(nodeId));
+      if (nodeId && !rightClickedSelectedNode) selectGraphNode(nodeId);
       contextMenuPointRef.current = {
         graphX: point.x / graphScale / gridSize,
         graphY: point.y / graphScale / gridSize,
         nodeId,
       };
+      const selectedIds = rightClickedSelectedNode ? previousSelectedIds : selectedGraphNodeIdsRef.current;
       const items =
-        nodeId && isCustomGraphNode(nodeId, graphRef.current)
+        selectedIds.length > 1 && (!nodeId || selectedIds.includes(nodeId))
           ? [
+              { label: "Group", action: () => groupSelectedNodes() },
+              { label: "Copy", action: () => copySelectedNodes() },
+              { label: "Delete", danger: true, action: () => deleteSelectedNodes() },
+            ]
+          : nodeId && graphRef.current?.customNodes?.[nodeId]?.kind === "group"
+          ? [
+              { label: "Rename", action: () => renameGroupNode(nodeId) },
+              { label: "Ungroup", action: () => ungroupNode(nodeId) },
+              { label: "Copy", action: () => copySelectedNodes() },
+              { label: "Delete", danger: true, action: () => { setGraphNodeSelection([nodeId]); deleteSelectedNodes(); } },
+            ]
+          : nodeId && isCustomGraphNode(nodeId, displayGraphRef.current)
+            ? [
+              { label: "Copy", action: () => copySelectedNodes() },
               {
                 label: "Delete",
                 danger: true,
-                action: () => deleteCustomNode(nodeId),
+                action: () => { setGraphNodeSelection([nodeId]); deleteSelectedNodes(); },
               },
             ]
-          : [
+            : [
+              ...(graphClipboardRef.current ? [{ label: "Paste", action: () => pasteGraphNodes() }] : []),
               { label: "Time", action: () => addCustomNode("time") },
               ...getAnimationDefinitionCategories().map((category) => ({
                 label: category,
@@ -889,34 +1185,268 @@ export const ComposeAnimationGraphPanel = memo(
       setContextMenu(null);
     }
 
-    function deleteCustomNode(nodeId: string) {
-      if (!isCustomGraphNode(nodeId, graphRef.current)) return;
+    function addGraphPreset(presetId: string) {
+      const objectId = selectedObjects[0]?.id;
+      if (!objectId) return;
       commitGraphUpdate((graph) => {
-        const { [nodeId]: _removedNode, ...customNodes } =
-          graph?.customNodes ?? {};
-        const { [nodeId]: _removedPosition, ...nodes } = graph?.nodes ?? {};
-        const { [nodeId]: _removedParameters, ...parameters } =
-          graph?.parameters ?? {};
-        const deletedNodeIds = Array.from(
-          new Set([...(graph?.deletedNodeIds ?? []), nodeId]),
-        );
+        const layerNodeId = `layer:${objectId}`;
+        const layerPosition = graph?.nodes?.[layerNodeId] ?? nodesRef.current.find((node) => node.id === layerNodeId) ?? { x: 150, y: 25 };
+        const existingGroupCount = Object.values(graph?.customNodes ?? {}).filter((node) => node.scopeKey === objectId && node.kind === "group").length;
+        return addAnimationGraphPresetGroupToGraph(graph, presetId, objectId, {
+          x: layerPosition.x + 8 + existingGroupCount * 2,
+          y: layerPosition.y + existingGroupCount * 3,
+        });
+      });
+      setContextMenu(null);
+    }
+
+    function openGraphPresetMenu(event: MouseEvent<HTMLButtonElement>) {
+      event.stopPropagation();
+      const rect = event.currentTarget.getBoundingClientRect();
+      const estimatedMenuHeight = animationGraphPresets.length * 30 + 8;
+      setContextMenu({
+        x: rect.left,
+        y: rect.top - estimatedMenuHeight,
+        items: animationGraphPresets.map((preset) => ({
+          label: preset.label,
+          action: () => addGraphPreset(preset.id),
+        })),
+      });
+    }
+
+    function groupSelectedNodes() {
+      const selectedIds = selectedGraphNodeIdsRef.current.filter((id) => !id.startsWith("layer:"));
+      if (selectedIds.length < 2) return;
+      const selectedNodes = nodesRef.current.filter((node) => selectedIds.includes(node.id));
+      if (selectedNodes.length < 2) return;
+      const minX = Math.min(...selectedNodes.map((node) => node.x));
+      const minY = Math.min(...selectedNodes.map((node) => node.y));
+      const maxX = Math.max(...selectedNodes.map((node) => node.x + node.width));
+      const maxY = Math.max(...selectedNodes.map((node) => node.y + node.height));
+      const groupId = `group:custom:${Date.now().toString(36)}`;
+      const nodeId = `custom:group:${Date.now().toString(36)}`;
+      commitGraphUpdate((graph) => {
+        const customNodes = { ...(graph?.customNodes ?? {}) };
+        const nodes = { ...(graph?.nodes ?? {}) };
+        const parameters = { ...(graph?.parameters ?? {}) };
+        const groupCustomNodes: NonNullable<AnimationGraphState["customNodes"]> = {};
+        const groupNodes: AnimationGraphState["nodes"] = { [`${groupId}:out`]: { x: (maxX - minX) / 2, y: maxY - minY + 4 } };
+        const groupParameters: NonNullable<AnimationGraphState["parameters"]> = {};
+        for (const id of selectedIds) {
+          if (customNodes[id]) groupCustomNodes[id] = { ...customNodes[id], scopeKey: groupId };
+          const node = selectedNodes.find((item) => item.id === id);
+          if (node) groupNodes[id] = { x: node.x - minX, y: node.y - minY };
+          if (parameters[id]) groupParameters[id] = parameters[id];
+          delete customNodes[id];
+          delete nodes[id];
+          delete parameters[id];
+        }
+        const internalEdges = (graph?.edges ?? []).filter((edge) => selectedIds.includes(edge.fromNodeId) && selectedIds.includes(edge.toNodeId));
+        const externalEdges = (graph?.edges ?? []).filter((edge) => !selectedIds.includes(edge.fromNodeId) && !selectedIds.includes(edge.toNodeId));
         return {
-          nodes,
-          edges: (graph?.edges ?? []).filter(
-            (edge) => edge.fromNodeId !== nodeId && edge.toNodeId !== nodeId,
-          ),
-          customNodes: Object.keys(customNodes).length
-            ? customNodes
-            : undefined,
+          nodes: { ...nodes, [nodeId]: { x: minX + (maxX - minX) / 2, y: minY + (maxY - minY) / 2 } },
+          edges: externalEdges,
+          customNodes: { ...customNodes, [nodeId]: { kind: "group", label: "Group", scopeKey: graphViewportKey, details: { groupId } } },
+          groups: { ...(graph?.groups ?? {}), [groupId]: { id: groupId, name: "Group", nodes: groupNodes, edges: internalEdges, customNodes: groupCustomNodes, parameters: groupParameters, outNodeId: `${groupId}:out` } },
           parameters: Object.keys(parameters).length ? parameters : undefined,
-          deletedNodeIds,
+          deletedNodeIds: graph?.deletedNodeIds,
           viewport: graph?.viewport,
           viewports: graph?.viewports,
         };
       });
-      if (selectedGraphNodeIdRef.current === nodeId) selectGraphNode(null);
-      if (popoverNodeIdRef.current === nodeId) setPopoverNodeId(null);
-      contextMenuPointRef.current = null;
+      selectGraphNode(nodeId);
+      setContextMenu(null);
+    }
+
+    function ungroupNode(nodeId: string) {
+      const groupId = graphRef.current?.customNodes?.[nodeId]?.details?.groupId;
+      const group = groupId ? graphRef.current?.groups?.[groupId] : undefined;
+      const groupNode = nodesRef.current.find((node) => node.id === nodeId);
+      if (!groupId || !group || !groupNode) return;
+      commitGraphUpdate((graph) => {
+        const { [nodeId]: _node, ...customNodes } = graph?.customNodes ?? {};
+        const { [nodeId]: _pos, ...nodes } = graph?.nodes ?? {};
+        const { [groupId]: _group, ...groups } = graph?.groups ?? {};
+        const restoredNodes = Object.fromEntries(Object.entries(group.nodes).filter(([id]) => id !== group.outNodeId).map(([id, pos]) => [id, { x: groupNode.x + pos.x, y: groupNode.y + pos.y }]));
+        const restoredCustom = Object.fromEntries(Object.entries(group.customNodes ?? {}).map(([id, custom]) => [id, { ...custom, scopeKey: graphViewportKey }]));
+        const restoredIds = new Set(Object.keys(restoredNodes));
+        const internalEdges = (group.edges ?? []).filter((edge) => restoredIds.has(edge.fromNodeId) && restoredIds.has(edge.toNodeId));
+        const groupOutputSources = (group.edges ?? [])
+          .filter((edge) => edge.toNodeId === group.outNodeId && restoredIds.has(edge.fromNodeId))
+          .map((edge) => edge.fromNodeId);
+        const externalEdges = graph?.edges?.filter((edge) => edge.fromNodeId !== nodeId && edge.toNodeId !== nodeId) ?? [];
+        const bridgedOutputEdges = (graph?.edges ?? []).flatMap((edge) => {
+          if (edge.fromNodeId !== nodeId) return [];
+          return groupOutputSources.map((sourceId) => createEdge(sourceId, "bottom", edge.toNodeId, edge.toPort));
+        });
+        return {
+          nodes: { ...nodes, ...restoredNodes },
+          edges: filterPermittedEdges([...externalEdges, ...internalEdges, ...bridgedOutputEdges], nodesRef.current.filter((node) => node.id !== nodeId).concat(buildGroupGraphNodes(group).filter((node) => node.id !== group.outNodeId).map((node) => ({ ...node, x: groupNode.x + node.x, y: groupNode.y + node.y })))),
+          customNodes: { ...customNodes, ...restoredCustom },
+          groups: Object.keys(groups).length ? groups : undefined,
+          parameters: { ...(graph?.parameters ?? {}), ...(group.parameters ?? {}) },
+          deletedNodeIds: graph?.deletedNodeIds,
+          viewport: graph?.viewport,
+          viewports: graph?.viewports,
+        };
+      });
+      selectGraphNode(null);
+      setContextMenu(null);
+    }
+
+    function renameGroupNode(nodeId: string) {
+      setRenamingGroupNodeId(nodeId);
+      setContextMenu(null);
+      scheduleDraw();
+    }
+
+    function commitGroupRename(nodeId: string, nextName: string) {
+      const current = graphRef.current?.customNodes?.[nodeId];
+      const name = nextName.trim();
+      if (!current || !name) {
+        setRenamingGroupNodeId(null);
+        scheduleDraw();
+        return;
+      }
+      const groupId = current.details?.groupId;
+      commitGraphUpdate((graph) => ({
+        nodes: graph?.nodes ?? {},
+        edges: graph?.edges ?? [],
+        customNodes: { ...(graph?.customNodes ?? {}), [nodeId]: { ...current, label: name } },
+        groups: groupId && graph?.groups?.[groupId] ? { ...graph.groups, [groupId]: { ...graph.groups[groupId], name } } : graph?.groups,
+        parameters: graph?.parameters,
+        deletedNodeIds: graph?.deletedNodeIds,
+        viewport: graph?.viewport,
+        viewports: graph?.viewports,
+      }));
+      setRenamingGroupNodeId(null);
+      scheduleDraw();
+    }
+
+    function deleteSelectedNodes() {
+      const selectedIds = selectedGraphNodeIdsRef.current.filter((id) =>
+        isCustomGraphNode(id, displayGraphRef.current),
+      );
+      if (selectedIds.length === 0) return;
+      commitGraphUpdate((graph) => {
+        const nodes = { ...(graph?.nodes ?? {}) };
+        const customNodes = { ...(graph?.customNodes ?? {}) };
+        const parameters = { ...(graph?.parameters ?? {}) };
+        const groups = { ...(graph?.groups ?? {}) };
+        const selectedSet = new Set(selectedIds);
+        for (const id of selectedIds) {
+          const groupId = customNodes[id]?.details?.groupId;
+          delete nodes[id];
+          delete customNodes[id];
+          delete parameters[id];
+          if (groupId) delete groups[groupId];
+        }
+        return {
+          nodes,
+          edges: (graph?.edges ?? []).filter(
+            (edge) => !selectedSet.has(edge.fromNodeId) && !selectedSet.has(edge.toNodeId),
+          ),
+          customNodes: Object.keys(customNodes).length ? customNodes : undefined,
+          groups: Object.keys(groups).length ? groups : undefined,
+          parameters: Object.keys(parameters).length ? parameters : undefined,
+          deletedNodeIds: Array.from(new Set([...(graph?.deletedNodeIds ?? []), ...selectedIds])),
+          viewport: graph?.viewport,
+          viewports: graph?.viewports,
+        };
+      });
+      setGraphNodeSelection([]);
+      setContextMenu(null);
+    }
+
+    function copySelectedNodes() {
+      const graph = displayGraphRef.current;
+      const selectedIds = selectedGraphNodeIdsRef.current.filter((id) =>
+        isCustomGraphNode(id, graph),
+      );
+      if (!graph || selectedIds.length === 0) return;
+      const selectedSet = new Set(selectedIds);
+      const nodes = Object.fromEntries(
+        Object.entries(graph.nodes ?? {}).filter(([id]) => selectedSet.has(id)),
+      );
+      const customNodes = Object.fromEntries(
+        Object.entries(graph.customNodes ?? {}).filter(([id]) => selectedSet.has(id)),
+      );
+      const parameters = Object.fromEntries(
+        Object.entries(graph.parameters ?? {}).filter(([id]) => selectedSet.has(id)),
+      );
+      const groupIds = new Set(
+        Object.values(customNodes).map((node) => node.details?.groupId).filter(Boolean) as string[],
+      );
+      const sourceGroups = graphRef.current?.groups;
+      const groups = sourceGroups
+        ? Object.fromEntries(Object.entries(sourceGroups).filter(([id]) => groupIds.has(id)))
+        : undefined;
+      graphClipboardRef.current = {
+        nodes,
+        customNodes,
+        edges: (graph.edges ?? []).filter(
+          (edge) => selectedSet.has(edge.fromNodeId) && selectedSet.has(edge.toNodeId),
+        ),
+        parameters: Object.keys(parameters).length ? parameters : undefined,
+        groups: groups && Object.keys(groups).length ? groups : undefined,
+      };
+      setContextMenu(null);
+    }
+
+    function pasteGraphNodes() {
+      const clipboard = graphClipboardRef.current;
+      if (!clipboard || Object.keys(clipboard.customNodes).length === 0) return;
+      const suffix = Date.now().toString(36);
+      const nodeIdMap = new Map(
+        Object.keys(clipboard.customNodes).map((id, index) => [id, `${id}:copy:${suffix}:${index}`]),
+      );
+      const groupIdMap = new Map(
+        Object.keys(clipboard.groups ?? {}).map((id, index) => [id, `${id}:copy:${suffix}:${index}`]),
+      );
+      const pastedIds = Array.from(nodeIdMap.values());
+      commitGraphUpdate((graph) => {
+        const nodes = { ...(graph?.nodes ?? {}) };
+        const customNodes = { ...(graph?.customNodes ?? {}) };
+        const parameters = { ...(graph?.parameters ?? {}) };
+        const groups = { ...(graph?.groups ?? {}) };
+        for (const [oldId, newId] of nodeIdMap) {
+          const position = clipboard.nodes[oldId] ?? { x: 0, y: 0 };
+          nodes[newId] = { x: position.x + 2, y: position.y + 2 };
+          const custom = clipboard.customNodes[oldId];
+          const groupId = custom.details?.groupId;
+          customNodes[newId] = {
+            ...custom,
+            details: groupId && groupIdMap.has(groupId)
+              ? { ...(custom.details ?? {}), groupId: groupIdMap.get(groupId)! }
+              : custom.details,
+          };
+          if (clipboard.parameters?.[oldId]) parameters[newId] = clipboard.parameters[oldId];
+        }
+        for (const [oldGroupId, newGroupId] of groupIdMap) {
+          const group = clipboard.groups?.[oldGroupId];
+          if (group) groups[newGroupId] = { ...group, id: newGroupId, name: `${group.name} Copy` };
+        }
+        const edges = [
+          ...(graph?.edges ?? []),
+          ...clipboard.edges.map((edge) => ({
+            ...edge,
+            id: `${nodeIdMap.get(edge.fromNodeId) ?? edge.fromNodeId}:${edge.fromPort}->${nodeIdMap.get(edge.toNodeId) ?? edge.toNodeId}:${edge.toPort}`,
+            fromNodeId: nodeIdMap.get(edge.fromNodeId) ?? edge.fromNodeId,
+            toNodeId: nodeIdMap.get(edge.toNodeId) ?? edge.toNodeId,
+          })),
+        ];
+        return {
+          nodes,
+          edges,
+          customNodes,
+          groups: Object.keys(groups).length ? groups : graph?.groups,
+          parameters: Object.keys(parameters).length ? parameters : graph?.parameters,
+          deletedNodeIds: graph?.deletedNodeIds,
+          viewport: graph?.viewport,
+          viewports: graph?.viewports,
+        };
+      });
+      setGraphNodeSelection(pastedIds);
       setContextMenu(null);
     }
 
@@ -1019,7 +1549,7 @@ export const ComposeAnimationGraphPanel = memo(
         data-timeline-panel
         className="relative grid h-full min-h-0 select-none grid-rows-[34px_38px_minmax(0,1fr)] gap-1.5 overflow-hidden border-t border-[#1d2028] bg-[#141821] px-[22px] pb-0 pt-2.5"
       >
-        <div className="relative flex items-center justify-between text-[12px] text-[#9b9da7]">
+          <div className="relative flex items-center justify-between text-[12px] text-[#9b9da7]">
           <div
             className="relative z-10 flex rounded-full border border-[#2d313b] bg-[#111319] p-1"
             aria-label="Timeline mode"
@@ -1037,7 +1567,7 @@ export const ComposeAnimationGraphPanel = memo(
               Direct
             </button>
           </div>
-          <div className="relative z-10 flex items-center gap-3">
+          <div className="relative z-10 flex items-center gap-2">
             <button
               className="rounded-full border border-[#303746] px-2 py-1 text-[11px] font-bold text-[#c7ceda] transition hover:border-[#5f6878] hover:text-white"
               onClick={() => zoomGraphFromCenter(graphScaleRef.current / 1.15)}
@@ -1085,7 +1615,7 @@ export const ComposeAnimationGraphPanel = memo(
           />
           {delayMarkers.map((marker) => (
             <button
-              key={marker.nodeId}
+              key={marker.key}
               className="absolute top-[21px] z-50 h-1.5 w-1.5 -translate-x-1/2 rotate-45 border border-[#b9d7ff] bg-[#7ea8d8] shadow-[0_0_0_2px_rgba(126,168,216,0.14)] transition hover:scale-150"
               style={{ left: `${(marker.delay / timelineDuration) * 100}%` }}
               title={`${marker.label} delay ${formatSeconds(marker.delay)}`}
@@ -1097,44 +1627,49 @@ export const ComposeAnimationGraphPanel = memo(
             />
           ))}
         </div>
-        <div
-          ref={graphViewportRef}
-          className="clipper-hidden-scrollbar relative min-h-0 overflow-auto rounded-b-[18px] bg-[#0b0f16]"
-          onPointerDown={(event) => event.stopPropagation()}
-          onScroll={onGraphScroll}
-          onWheel={onGraphWheel}
-        >
+          <GraphCanvasSurface
+            canvasRef={canvasRef}
+            viewportRef={graphViewportRef}
+            scrollWidth={hasSelectedGraph ? graphScrollWidth : 0}
+            scrollHeight={hasSelectedGraph ? graphScrollHeight : 0}
+            hoverNodeId={hoverNodeId}
+            className="clipper-hidden-scrollbar relative min-h-0 overflow-auto rounded-b-[18px] bg-[#0b0f16]"
+            onScroll={onGraphScroll}
+            onWheel={onGraphWheel}
+            onClick={onClick}
+            onContextMenu={openContextMenu}
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+            onPointerCancel={onPointerCancel}
+            onPointerLeave={onPointerLeave}
+          >
           {hasSelectedGraph ? (
             <>
-              <div className="sticky left-0 top-0 z-10 h-0 overflow-visible">
-                <canvas
-                  ref={canvasRef}
-                  className={`block bg-[#0b0f16] ${hoverNodeId ? "cursor-pointer" : "cursor-default"}`}
-                  width={1}
-                  height={1}
-                  onContextMenu={openContextMenu}
-                  onPointerDown={onPointerDown}
-                  onPointerMove={onPointerMove}
-                  onPointerUp={onPointerUp}
-                  onPointerCancel={onPointerCancel}
-                />
-              </div>
-              <div
-                className="relative bg-[#0b0f16]"
-                style={{
-                  width: graphScrollWidth,
-                  height: graphScrollHeight,
-                }}
-                aria-hidden="true"
-              />
               {popoverNodeId ? (
                 <GraphNodePopover
                   node={nodes.find((node) => node.id === popoverNodeId) ?? null}
+                  group={
+                    graph?.groups?.[
+                      nodes.find((node) => node.id === popoverNodeId)?.details?.groupId ?? ""
+                    ]
+                  }
                   parameters={graph?.parameters?.[popoverNodeId]}
                   viewportRef={graphViewportRef}
                   graphScale={graphScale}
                   onParameterChange={updateNodeParameter}
+                  onGroupParameterChange={updateGroupNodeParameter}
+                  onGroupReplace={replaceGroup}
                   onPointerDownOutside={closePopoverOnOutsidePointer}
+                />
+              ) : null}
+              {renamingGroupNodeId ? (
+        <GraphNodeRenameInput
+                  node={nodes.find((node) => node.id === renamingGroupNodeId) ?? null}
+                  viewportRef={graphViewportRef}
+                  graphScale={graphScale}
+                  onCommit={(name) => commitGroupRename(renamingGroupNodeId, name)}
+                  onCancel={() => { setRenamingGroupNodeId(null); scheduleDraw(); }}
                 />
               ) : null}
               <AppContextMenu
@@ -1144,25 +1679,84 @@ export const ComposeAnimationGraphPanel = memo(
                   setContextMenu(null);
                 }}
               />
-              <button
-                className="sticky bottom-3 left-3 z-40 rounded-full border border-[#303746] bg-[#121722]/90 px-3 py-1.5 text-[11px] font-semibold text-[#c7ceda] shadow-[0_10px_30px_rgba(0,0,0,0.28)] transition hover:border-[#5f6878] hover:text-white"
-                title="Scroll to selected layer node at 100%"
-                onClick={focusMainLayerNode}
-                onPointerDown={(event) => event.stopPropagation()}
-              >
-                Scroll to node
-              </button>
+              <div className="sticky bottom-3 left-3 z-40 flex w-fit items-center gap-2">
+                <button
+                  className="flex items-center gap-1.5 rounded-full border border-[#303746] bg-[#121722]/90 px-3 py-1.5 text-[11px] font-semibold text-[#c7ceda] shadow-[0_10px_30px_rgba(0,0,0,0.28)] transition hover:border-[#5f6878] hover:text-white"
+                  title="Add animation graph preset"
+                  onClick={openGraphPresetMenu}
+                  onPointerDown={(event) => event.stopPropagation()}
+                >
+                  Add preset
+                  <ChevronDown className="h-3.5 w-3.5 text-[#dfe6f3]" strokeWidth={2.6} />
+                </button>
+                <button
+                  className="rounded-full border border-[#303746] bg-[#121722]/90 px-3 py-1.5 text-[11px] font-semibold text-[#c7ceda] shadow-[0_10px_30px_rgba(0,0,0,0.28)] transition hover:border-[#5f6878] hover:text-white"
+                  title="Scroll to selected layer node at 100%"
+                  onClick={focusMainLayerNode}
+                  onPointerDown={(event) => event.stopPropagation()}
+                >
+                  Scroll to node
+                </button>
+              </div>
             </>
           ) : (
             <div className="grid h-full min-h-[220px] place-items-center text-center text-sm font-semibold text-[#8b93a3]">
               Select a layer to view animation graph
             </div>
           )}
-        </div>
+        </GraphCanvasSurface>
       </footer>
     );
   },
 );
+
+function GraphCanvasSurface({
+  canvasRef,
+  viewportRef,
+  scrollWidth,
+  scrollHeight,
+  hoverNodeId,
+  className = "relative overflow-hidden bg-[#0b0f16]",
+  canvasClassName = "block bg-[#0b0f16]",
+  onScroll,
+  onWheel,
+  onClick,
+  onContextMenu,
+  onPointerDown,
+  onPointerMove,
+  onPointerUp,
+  onPointerCancel,
+  onPointerLeave,
+  children,
+}: GraphCanvasSurfaceProps) {
+  return (
+    <div
+      ref={viewportRef}
+      className={className}
+      onPointerDown={(event) => event.stopPropagation()}
+      onScroll={onScroll}
+      onWheel={onWheel}
+    >
+      <div className="sticky left-0 top-0 z-10 h-0 overflow-visible">
+        <canvas
+          ref={canvasRef}
+          className={`${canvasClassName} ${hoverNodeId ? "cursor-pointer" : "cursor-default"}`}
+          width={1}
+          height={1}
+          onClick={onClick}
+          onContextMenu={onContextMenu}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerCancel={onPointerCancel}
+          onPointerLeave={onPointerLeave}
+        />
+      </div>
+      <div className="pointer-events-none relative z-0 bg-[#0b0f16]" style={{ width: scrollWidth, height: scrollHeight }} aria-hidden="true" />
+      {children}
+    </div>
+  );
+}
 
 function GraphTimeRuler({ rulerRef, ticks, sceneDuration, onPointerDown, onPointerMove, onPointerUp, onPointerCancel }: { rulerRef: RefObject<HTMLDivElement | null>; ticks: number[]; sceneDuration: number; onPointerDown: (event: PointerEvent<HTMLDivElement>) => void; onPointerMove: (event: PointerEvent<HTMLDivElement>) => void; onPointerUp: (event: PointerEvent<HTMLDivElement>) => void; onPointerCancel: (event: PointerEvent<HTMLDivElement>) => void }) {
   const marks = useMemo(() => {
@@ -1287,19 +1881,22 @@ export function buildGraphNodes(
     ];
   });
   const derivedNodeIds = new Set(derivedNodes.map((node) => node.id));
-  const customNodes = Object.entries(graph?.customNodes ?? {})
+      const customNodes = Object.entries(graph?.customNodes ?? {})
     .filter(([, node]) => node.scopeKey === graphViewportKey)
     .filter(([id]) => !deletedNodeIds.has(id))
     .filter(([id]) => !derivedNodeIds.has(id))
-    .map(([id, node]) =>
-      createNode(
+    .map(([id, node]) => {
+      const details = node.kind === "group"
+        ? { ...(node.details ?? {}), registered: hasGroupValidOutput(graph?.groups?.[node.details?.groupId ?? ""]) ? "true" : "false" }
+        : node.details;
+      return createNode(
         id,
         node.label,
         node.kind,
         graph?.nodes[id] ?? { x: 2, y: 2 },
-        node.details,
-      ),
-    );
+        details,
+      );
+    });
   return [...derivedNodes, ...customNodes];
 }
 
@@ -1321,6 +1918,11 @@ export function getGraphContentSize(
     width: Math.max(minWidth, Math.ceil(maxRight)),
     height: Math.max(minHeight, Math.ceil(maxBottom)),
   };
+}
+
+function buildGroupGraphNodes(group: AnimationGraphGroup): GraphNode[] {
+  const nodes = Object.entries(group.customNodes ?? {}).map(([id, node]) => createNode(id, node.label, node.kind, group.nodes[id] ?? { x: 2, y: 2 }, node.details));
+  return [...nodes, createNode(group.outNodeId, "Out", "out", group.nodes[group.outNodeId] ?? { x: 6, y: 10 }, { fixed: "true" })];
 }
 
 function stripGraphViewportState(
@@ -1371,10 +1973,11 @@ function createNode(
   position: { x: number; y: number },
   details?: Record<string, string>,
 ): GraphNode {
+  const nodeKind = kind === "group" ? "group" : kind;
   return {
     id,
     label,
-    kind,
+    kind: nodeKind,
     x: position.x,
     y: position.y,
     width: getNodeGridWidth(label),
@@ -1490,16 +2093,53 @@ function getDelayMarkers(
 ) {
   const edges = getRenderableEdges(graph, nodes, objects);
   const connectedNodeIds = getConnectedToLayerNodeIds(edges, nodes);
-  return nodes.flatMap((node) => {
+  const mainMarkers = nodes.flatMap((node) => {
     if (node.kind !== "time" || !connectedNodeIds.has(node.id)) return [];
     return [
       {
         nodeId: node.id,
+        key: node.id,
         delay: Math.max(
           0,
           getTimeNodeStart(node, graph, edges, nodes, new Set()),
         ),
         label: node.label,
+      },
+    ];
+  });
+  const groupMarkers = nodes.flatMap((node) => {
+    if (node.kind !== "group" || !connectedNodeIds.has(node.id)) return [];
+    const groupId = node.details?.groupId;
+    const group = groupId ? graph?.groups?.[groupId] : undefined;
+    if (!group) return [];
+    return getDelayMarkersForGroup(node, group, graph);
+  });
+  return [...mainMarkers, ...groupMarkers];
+}
+
+function getDelayMarkersForGroup(
+  groupNode: GraphNode,
+  group: AnimationGraphGroup,
+  graph: AnimationGraphState | undefined,
+) {
+  const nodes = buildGroupGraphNodes(group);
+  const edges = filterPermittedEdges(filterRenderableEdges(group.edges ?? [], nodes), nodes);
+  const connectedNodeIds = getConnectedToGroupOutNodeIds(edges, nodes, group.outNodeId);
+  const groupGraph = {
+    ...graph,
+    nodes: group.nodes,
+    edges,
+    customNodes: group.customNodes,
+    parameters: { ...(graph?.parameters ?? {}), ...(group.parameters ?? {}) },
+  } satisfies AnimationGraphState;
+  return nodes.flatMap((node) => {
+    if (node.kind !== "time" || !connectedNodeIds.has(node.id)) return [];
+    return [
+      {
+        nodeId: groupNode.id,
+        key: `${groupNode.id}:${node.id}`,
+        delay: Math.max(0, getTimeNodeStart(node, groupGraph, edges, nodes, new Set())),
+        label: `${groupNode.label} / ${node.label}`,
       },
     ];
   });
@@ -1542,6 +2182,25 @@ function hasMaterializedCodeGraph(
   );
 }
 
+function hasGroupValidOutput(group: AnimationGraphGroup | undefined) {
+  if (!group) return false;
+  const outNodeId = group.outNodeId;
+  const reverse = new Map<string, string[]>();
+  for (const edge of group.edges ?? []) reverse.set(edge.toNodeId, [...(reverse.get(edge.toNodeId) ?? []), edge.fromNodeId]);
+  const stack = [outNodeId];
+  const visited = new Set<string>();
+  while (stack.length) {
+    const id = stack.pop()!;
+    if (visited.has(id)) continue;
+    visited.add(id);
+    for (const upstream of reverse.get(id) ?? []) {
+      if (group.customNodes?.[upstream]?.kind === "time") return true;
+      stack.push(upstream);
+    }
+  }
+  return false;
+}
+
 
 function getConnectedToLayerNodeIds(
   edges: AnimationGraphEdge[],
@@ -1567,6 +2226,29 @@ function getConnectedToLayerNodeIds(
   return connected;
 }
 
+function getConnectedToGroupOutNodeIds(
+  edges: AnimationGraphEdge[],
+  nodes: GraphNode[],
+  outNodeId: string,
+) {
+  const reverseEdges = new Map<string, string[]>();
+  for (const edge of edges)
+    reverseEdges.set(edge.toNodeId, [
+      ...(reverseEdges.get(edge.toNodeId) ?? []),
+      edge.fromNodeId,
+    ]);
+  const nodeIds = new Set(nodes.map((node) => node.id));
+  const connected = new Set<string>();
+  const stack = [outNodeId];
+  while (stack.length) {
+    const current = stack.pop()!;
+    if (connected.has(current) || !nodeIds.has(current)) continue;
+    connected.add(current);
+    for (const upstream of reverseEdges.get(current) ?? []) stack.push(upstream);
+  }
+  return connected;
+}
+
 function isPermittedGraphEdge(
   edge: AnimationGraphEdge,
   nodes: GraphNode[],
@@ -1577,10 +2259,17 @@ function isPermittedGraphEdge(
   if (!from || !to) return false;
   if (from.kind === "animation" && to.kind === "time")
     return !hasDuplicateEffectForTimeNode(from, to.id, existingEdges, nodes);
+  if (from.kind === "group" && (to.kind === "time" || to.kind === "layer"))
+    return hasRegisteredGroupOutput(from);
   if (from.kind === "time" && to.kind === "layer") return true;
+  if (from.kind === "time" && to.kind === "out") return true;
   if (from.kind === "time" && to.kind === "time")
     return !pathExists(edge.toNodeId, edge.fromNodeId, existingEdges);
   return false;
+}
+
+function hasRegisteredGroupOutput(node: GraphNode) {
+  return node.details?.registered === "true";
 }
 
 function hasDuplicateEffectForTimeNode(
@@ -1701,7 +2390,12 @@ function materializeGraphNodeDefinitions(
 ) {
   const next = { ...(existing ?? {}) };
   for (const node of nodes) {
-    if (node.kind === "layer") continue;
+    if (node.kind === "layer" || node.kind === "out") continue;
+    if (node.kind === "group" && node.details?.registered) {
+      const { registered: _registered, ...details } = node.details;
+      next[node.id] = { ...(next[node.id] ?? {}), kind: node.kind, label: node.label, scopeKey: graphViewportKey, details };
+      continue;
+    }
     next[node.id] = {
       ...(next[node.id] ?? {}),
       kind: node.kind,
@@ -1767,6 +2461,49 @@ function hitNodeLoose(
       );
     }) ?? null
   );
+}
+
+function normalizeMarqueeRect(drag: Extract<DragState, { kind: "marquee" }>) {
+  return normalizeRect(
+    { x: drag.startX / drag.scale, y: drag.startY / drag.scale },
+    { x: drag.x / drag.scale, y: drag.y / drag.scale },
+  );
+}
+
+function getMarqueeSelectionPreviewIds(
+  drag: Extract<DragState, { kind: "marquee" }>,
+  nodes: GraphNode[],
+  selectedNodeIds: string[],
+) {
+  const rect = normalizeMarqueeRect(drag);
+  const hitIds = nodes
+    .filter((node) => isMarqueeSelectableNode(node))
+    .filter((node) => rectIntersects(rect, nodeRect(node)))
+    .map((node) => node.id);
+  if (!drag.shiftKey) return hitIds;
+  const next = new Set(selectedNodeIds);
+  for (const id of hitIds) {
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+  }
+  return Array.from(next);
+}
+
+function normalizeRect(start: { x: number; y: number }, end: { x: number; y: number }) {
+  return {
+    x: Math.min(start.x, end.x),
+    y: Math.min(start.y, end.y),
+    width: Math.abs(end.x - start.x),
+    height: Math.abs(end.y - start.y),
+  };
+}
+
+function rectIntersects(a: { x: number; y: number; width: number; height: number }, b: { x: number; y: number; width: number; height: number }) {
+  return a.x <= b.x + b.width && a.x + a.width >= b.x && a.y <= b.y + b.height && a.y + a.height >= b.y;
+}
+
+function isMarqueeSelectableNode(node: GraphNode) {
+  return node.kind !== "layer" && node.kind !== "out";
 }
 function hitPort(
   point: { x: number; y: number },
@@ -1963,6 +2700,73 @@ function drawMessage(
   ctx.textAlign = "center";
   ctx.fillText(message, width / 2, height / 2);
 }
+
+function drawGraphCanvas({
+  canvas,
+  viewport,
+  width,
+  height,
+  scale,
+  scrollLeft,
+  scrollTop,
+  nodes,
+  edges,
+  hoverNodeId,
+  selectedNodeIds,
+  hoverConnector,
+  hoverEdgeId,
+  edgeDrag,
+  previewPoint,
+  progressForNode,
+  marqueeRect,
+}: {
+  canvas: HTMLCanvasElement;
+  viewport?: HTMLDivElement | null;
+  width: number;
+  height: number;
+  scale: number;
+  scrollLeft?: number;
+  scrollTop?: number;
+  nodes: GraphNode[];
+  edges: AnimationGraphEdge[];
+  hoverNodeId: string | null;
+  selectedNodeIds: string[];
+  hoverConnector: HoverConnector | null;
+  hoverEdgeId?: string | null;
+  edgeDrag?: Extract<DragState, { kind: "edge" }> | null;
+  previewPoint?: { x: number; y: number } | null;
+  progressForNode?: (node: GraphNode) => number | null;
+  marqueeRect?: { x: number; y: number; width: number; height: number } | null;
+}) {
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  const ratio = window.devicePixelRatio || 1;
+  const backingWidth = Math.round(width * ratio);
+  const backingHeight = Math.round(height * ratio);
+  if (canvas.width !== backingWidth) canvas.width = backingWidth;
+  if (canvas.height !== backingHeight) canvas.height = backingHeight;
+  canvas.style.width = `${width}px`;
+  canvas.style.height = `${height}px`;
+  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = "#0b0f16";
+  ctx.fillRect(0, 0, width, height);
+  ctx.translate(-(scrollLeft ?? viewport?.scrollLeft ?? 0), -(scrollTop ?? viewport?.scrollTop ?? 0));
+  ctx.scale(scale, scale);
+  for (const edge of edges) drawEdge(ctx, edge, nodes, hoverEdgeId === edge.id);
+  if (edgeDrag && previewPoint) drawPreviewEdge(ctx, edgeDrag, previewPoint);
+  for (const node of nodes)
+    drawNode(
+      ctx,
+      node,
+      hoverNodeId === node.id,
+      selectedNodeIds.includes(node.id),
+      hoverConnector,
+      progressForNode?.(node) ?? null,
+    );
+  if (marqueeRect) drawMarquee(ctx, marqueeRect);
+}
+
 function drawNode(
   ctx: CanvasRenderingContext2D,
   node: GraphNode,
@@ -1972,21 +2776,10 @@ function drawNode(
   progress: number | null = null,
 ) {
   const rect = nodeRect(node);
-  const bg =
-    node.kind === "animation"
-      ? nodeColors.animationBg
-      : node.kind === "time"
-        ? nodeColors.timeBg
-        : nodeColors.layerBg;
-  const border =
-    node.kind === "animation"
-      ? nodeColors.animationBorder
-      : node.kind === "time"
-        ? nodeColors.timeBorder
-        : nodeColors.layerBorder;
+  const { background: bg, border } = getGraphNodeColors(node.kind);
   ctx.fillStyle = bg;
   ctx.strokeStyle = border;
-  ctx.globalAlpha = node.kind === "time" ? 0.82 : 1;
+  ctx.globalAlpha = 1;
   ctx.lineWidth = selected ? 2.5 : hovered ? 2 : 1.5;
   if (hovered || selected) {
     ctx.shadowColor = border;
@@ -1994,6 +2787,12 @@ function drawNode(
   }
   ctx.beginPath();
   ctx.rect(rect.x, rect.y, rect.width, rect.height);
+  if (node.kind === "group") {
+    const gradient = ctx.createLinearGradient(rect.x, rect.y, rect.x + rect.width, rect.y + rect.height);
+    gradient.addColorStop(0, "#3f2717");
+    gradient.addColorStop(1, "#22150d");
+    ctx.fillStyle = gradient;
+  }
   ctx.fill();
   ctx.stroke();
   ctx.shadowBlur = 0;
@@ -2003,15 +2802,7 @@ function drawNode(
     ctx.fillRect(rect.x + 1, rect.y + 1, rect.width - 2, rect.height - 2);
   }
   if (progress !== null) {
-    const fill = ctx.createLinearGradient(
-      rect.x,
-      rect.y,
-      rect.x + rect.width,
-      rect.y,
-    );
-    fill.addColorStop(0, "rgba(42,82,122,0.72)");
-    fill.addColorStop(1, "rgba(31,61,92,0.42)");
-    ctx.fillStyle = fill;
+    ctx.fillStyle = node.kind === "group" ? "rgba(116,70,34,0.58)" : "rgba(42,82,122,0.58)";
     ctx.fillRect(
       rect.x + 1,
       rect.y + 1,
@@ -2065,6 +2856,22 @@ function drawPreviewEdge(
   point: { x: number; y: number },
 ) {
   drawArrow(ctx, { x: edge.startX, y: edge.startY }, point, "#d8dee9", false);
+}
+function drawMarquee(
+  ctx: CanvasRenderingContext2D,
+  rect: { x: number; y: number; width: number; height: number },
+) {
+  ctx.save();
+  ctx.fillStyle = "rgba(21,157,255,0.1)";
+  ctx.strokeStyle = "#159dff";
+  ctx.lineWidth = 1;
+  ctx.shadowColor = "rgba(21,157,255,0.18)";
+  ctx.shadowBlur = 0;
+  ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
+  ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
+  ctx.strokeStyle = "rgba(21,157,255,0.18)";
+  ctx.strokeRect(rect.x - 1, rect.y - 1, rect.width + 2, rect.height + 2);
+  ctx.restore();
 }
 function drawConnectorDot(
   ctx: CanvasRenderingContext2D,
@@ -2192,6 +2999,7 @@ function getNodePlaybackProgress(
   nodes: GraphNode[],
   objects: FrameObject[],
 ) {
+  if (node.kind === "group") return getGroupNodePlaybackProgress(node, graph, currentTime);
   if (node.kind !== "time") return null;
   const renderableEdges = getRenderableEdges(graph, nodes, objects);
   const parameters = graph?.parameters?.[node.id];
@@ -2205,8 +3013,89 @@ function getNodePlaybackProgress(
   const duration = parseSeconds(
     parameters?.duration ?? node.details?.duration ?? "0s",
   );
-  if (duration <= 0) return currentTime >= start ? 1 : 0;
-  return Math.min(Math.max((currentTime - start) / duration, 0), 1);
+  return getTimePlaybackProgress({
+    currentTime,
+    start,
+    duration,
+    repeat: parameters?.repeat ?? node.details?.repeat,
+    repeatType: parameters?.repeatType ?? node.details?.repeatType,
+  });
+}
+
+function getGroupNodePlaybackProgress(
+  node: GraphNode,
+  graph: AnimationGraphState | undefined,
+  currentTime: number,
+) {
+  const groupId = node.details?.groupId;
+  const group = groupId ? graph?.groups?.[groupId] : undefined;
+  if (!group) return null;
+  const nodes = buildGroupGraphNodes(group);
+  const edges = filterPermittedEdges(filterRenderableEdges(group.edges ?? [], nodes), nodes);
+  const connectedNodeIds = getConnectedToGroupOutNodeIds(edges, nodes, group.outNodeId);
+  const groupGraph = {
+    ...graph,
+    nodes: group.nodes,
+    edges,
+    customNodes: group.customNodes,
+    parameters: { ...(graph?.parameters ?? {}), ...(group.parameters ?? {}) },
+  } satisfies AnimationGraphState;
+  const progresses = nodes.flatMap((candidate) => {
+    if (candidate.kind !== "time" || !connectedNodeIds.has(candidate.id)) return [];
+    const start = getTimeNodeStart(candidate, groupGraph, edges, nodes, new Set());
+    const parameters = groupGraph.parameters?.[candidate.id];
+    return [
+      getTimePlaybackProgress({
+        currentTime,
+        start,
+        duration: getTimeNodeDuration(candidate, groupGraph),
+        repeat: parameters?.repeat ?? candidate.details?.repeat,
+        repeatType: parameters?.repeatType ?? candidate.details?.repeatType,
+      }),
+    ];
+  });
+  return progresses.length ? Math.max(...progresses) : null;
+}
+
+function getTimePlaybackProgress({
+  currentTime,
+  start,
+  duration,
+  repeat,
+  repeatType = "loop",
+}: {
+  currentTime: number;
+  start: number;
+  duration: number;
+  repeat?: string;
+  repeatType?: string;
+}) {
+  if (currentTime < start) return 0;
+  if (duration <= 0) return 1;
+  const elapsed = currentTime - start;
+  const repeatCount = parseGraphRepeatCount(repeat);
+  if (repeatCount === undefined) return Math.min(Math.max(elapsed / duration, 0), 1);
+  if (repeatCount !== Infinity) {
+    const totalDuration = duration + repeatCount * duration;
+    if (elapsed >= totalDuration) {
+      if (repeatType === "reverse" || repeatType === "mirror") return repeatCount % 2 === 0 ? 0 : 1;
+      return 1;
+    }
+  }
+  const cycleIndex = Math.floor(elapsed / duration);
+  const rawProgress = (elapsed % duration) / duration;
+  return repeatType === "reverse" || repeatType === "mirror"
+    ? cycleIndex % 2 === 1
+      ? 1 - rawProgress
+      : rawProgress
+    : rawProgress;
+}
+
+function parseGraphRepeatCount(value: string | undefined) {
+  if (value === undefined || value.trim() === "") return undefined;
+  if (value === "Infinity") return Infinity;
+  const numeric = Number.parseFloat(value);
+  return Number.isFinite(numeric) ? Math.max(0, numeric) : undefined;
 }
 
 function getTimeNodeStart(
@@ -2271,69 +3160,448 @@ function parseSeconds(value: string) {
   return Number.isFinite(numeric) ? numeric : 0;
 }
 
+function GraphNodeRenameInput({
+  node,
+  viewportRef,
+  graphScale,
+  onCommit,
+  onCancel,
+}: {
+  node: GraphNode | null;
+  viewportRef: RefObject<HTMLDivElement | null>;
+  graphScale: number;
+  onCommit: (name: string) => void;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = useState(node?.label ?? "");
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const valueRef = useRef(value);
+  useEffect(() => { valueRef.current = value; }, [value]);
+  useEffect(() => {
+    setValue(node?.label ?? "");
+    valueRef.current = node?.label ?? "";
+    requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    });
+  }, [node?.id, node?.label]);
+  useEffect(() => {
+    const commitOnOutsidePointer = (event: globalThis.PointerEvent) => {
+      if (event.target === inputRef.current) return;
+      onCommit(valueRef.current);
+    };
+    document.addEventListener("pointerdown", commitOnOutsidePointer, true);
+    return () => document.removeEventListener("pointerdown", commitOnOutsidePointer, true);
+  }, [onCommit]);
+  if (!node || !viewportRef.current) return null;
+  const viewportRect = viewportRef.current.getBoundingClientRect();
+  const rect = nodeRect(node);
+  const left = viewportRect.left + rect.x * graphScale - viewportRef.current.scrollLeft;
+  const top = viewportRect.top + rect.y * graphScale - viewportRef.current.scrollTop;
+  const width = rect.width * graphScale;
+  const height = rect.height * graphScale;
+  return createPortal(
+    <input
+      ref={inputRef}
+      className="fixed z-[6000] appearance-none border-0 px-2 text-center text-[12px] font-normal text-[#d9dee8] outline-none"
+      style={{ left: left + graphScale, top: top + graphScale, width: Math.max(1, width - graphScale * 2), height: Math.max(1, height - graphScale * 2), background: nodeColors.groupBg }}
+      value={value}
+      onChange={(event) => setValue(event.target.value)}
+      onBlur={() => onCommit(value)}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") onCommit(value);
+        if (event.key === "Escape") onCancel();
+      }}
+      onPointerDown={(event) => event.stopPropagation()}
+    />,
+    document.body,
+  );
+}
+
 function GraphNodePopover({
   node,
+  group,
   parameters,
   viewportRef,
   graphScale,
   onParameterChange,
+  onGroupParameterChange,
+  onGroupReplace,
   onPointerDownOutside,
 }: {
   node: GraphNode | null;
+  group?: AnimationGraphGroup;
   parameters?: Record<string, string>;
   viewportRef: RefObject<HTMLDivElement | null>;
   graphScale: number;
   onParameterChange: (nodeId: string, key: string, value: string) => void;
+  onGroupParameterChange?: (groupId: string, nodeId: string, key: string, value: string) => void;
+  onGroupReplace?: (groupId: string, nextGroup: AnimationGraphGroup) => void;
   onPointerDownOutside: (event: PointerEvent<HTMLDivElement>) => void;
 }) {
   if (!node) return null;
   const viewport = viewportRef.current;
   if (!viewport) return null;
   const details = getPopoverDetails(node, parameters);
-  if (details.length === 0) return null;
-  const schema = getParameterEditorSchema(node, details);
+  const isGroup = node.kind === "group";
+  if (!isGroup && details.length === 0) return null;
+  const schema = isGroup ? undefined : getParameterEditorSchema(node, details);
   const viewportRect = viewport.getBoundingClientRect();
   const rect = nodeRect(node);
-  const { width, height } = schema;
+  const width = isGroup ? Math.min(560, window.innerWidth - 32) : schema!.width;
+  const height = isGroup ? Math.min(360, window.innerHeight - 32) : schema!.height;
   const nodeLeft =
     viewportRect.left + rect.x * graphScale - viewport.scrollLeft;
   const nodeTop = viewportRect.top + rect.y * graphScale - viewport.scrollTop;
   const nodeWidth = rect.width * graphScale;
   const nodeHeightPx = rect.height * graphScale;
-  const preferredLeft = nodeLeft + nodeWidth + 12;
-  const fallbackLeft = nodeLeft - width - 12;
-  const minLeft = viewportRect.left + 8;
-  const maxLeft = viewportRect.right - width - 8;
-  const minTop = viewportRect.top + 8;
-  const maxTop = viewportRect.bottom - height - 8;
-  const left =
-    preferredLeft <= maxLeft
-      ? preferredLeft
-      : Math.max(minLeft, Math.min(fallbackLeft, maxLeft));
-  const top = Math.max(
-    minTop,
-    Math.min(nodeTop + nodeHeightPx / 2 - height / 2, maxTop),
-  );
+  const left = isGroup
+    ? Math.max(16, Math.min(nodeLeft + nodeWidth / 2 - width / 2, window.innerWidth - width - 16))
+    : (() => {
+        const preferredLeft = nodeLeft + nodeWidth + 12;
+        const fallbackLeft = nodeLeft - width - 12;
+        const minLeft = 8;
+        const maxLeft = window.innerWidth - width - 8;
+        return preferredLeft <= maxLeft
+          ? preferredLeft
+          : Math.max(minLeft, Math.min(fallbackLeft, maxLeft));
+      })();
+  const top = isGroup
+    ? Math.max(16, Math.min(nodeTop - height - 16, window.innerHeight - height - 16))
+    : (() => {
+        const minTop = 8;
+        const maxTop = window.innerHeight - height - 8;
+        return Math.max(minTop, Math.min(nodeTop + nodeHeightPx / 2 - height / 2, maxTop));
+      })();
   return createPortal(
     <div
-      className="fixed inset-0 z-[1000]"
+      className="fixed inset-0 z-[5000]"
       onPointerDown={onPointerDownOutside}
     >
-      <div
-        className="fixed rounded-xl border border-[#394255] bg-[#101620]/95 p-3 text-[11px] text-[#cbd3df] shadow-[0_16px_44px_rgba(0,0,0,0.42)] backdrop-blur"
-        style={{ left, top, width }}
+        <div
+          className={`fixed z-[5000] overflow-hidden rounded-xl border text-[11px] text-[#cbd3df] shadow-[0_16px_44px_rgba(0,0,0,0.42)] backdrop-blur ${isGroup ? "border-[#394255] bg-[#0b0f16]" : "border-[#394255] bg-[#101620]/95 p-3"}`}
+        style={{ left, top, width, height: isGroup ? height : undefined }}
         onPointerDown={(event) => event.stopPropagation()}
       >
-        <div className="mb-2 min-w-0 truncate text-[12px] font-extrabold text-white">
-          {node.label}
-        </div>
-        <GraphParameterEditor
-          schema={schema}
-          onChange={(key, value) => onParameterChange(node.id, key, value)}
-        />
+        {isGroup ? (
+          onGroupParameterChange && onGroupReplace ? (
+            <GroupSubgraphPreview group={group} groupId={node.details?.groupId} onParameterChange={onGroupParameterChange} onGroupReplace={onGroupReplace} />
+          ) : null
+        ) : (
+          <>
+            <div className="mb-2 min-w-0 truncate text-[12px] font-extrabold text-white">
+              {node.label}
+            </div>
+            <GraphParameterEditor
+              schema={schema!}
+              onChange={(key, value) => onParameterChange(node.id, key, value)}
+            />
+          </>
+        )}
       </div>
     </div>,
     document.body,
+  );
+}
+
+function GroupSubgraphPreview({
+  group,
+  groupId,
+  onParameterChange,
+  onGroupReplace,
+}: {
+  group?: AnimationGraphGroup;
+  groupId?: string;
+  onParameterChange: (groupId: string, nodeId: string, key: string, value: string) => void;
+  onGroupReplace: (groupId: string, nextGroup: AnimationGraphGroup) => void;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const dragRef = useRef<DragState | null>(null);
+  const previewPositionsRef = useRef<Record<string, { x: number; y: number }> | null>(null);
+  const hoverConnectorRef = useRef<HoverConnector | null>(null);
+  const layoutRef = useRef<{ groupId?: string; offsetX: number; offsetY: number; scrollWidth: number; scrollHeight: number; scrollLeft: number; scrollTop: number } | null>(null);
+  const graphScaleRef = useRef(1);
+  const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
+  const [hoverNodeId, setHoverNodeId] = useState<string | null>(null);
+  const [hoverConnector, setHoverConnector] = useState<HoverConnector | null>(null);
+  const [hoverEdgeId, setHoverEdgeId] = useState<string | null>(null);
+  const [popoverNodeId, setPopoverNodeId] = useState<string | null>(null);
+  const [graphScale, setGraphScale] = useState(1);
+  const zoomEnabled = groupSubgraphZoomEnabled;
+  const [localGroup, setLocalGroup] = useState(group);
+  useEffect(() => setLocalGroup(group), [group]);
+  if (!group) {
+    return (
+      <div className="grid h-[244px] place-items-center rounded-lg border border-[#394255] bg-[#0b0f16] text-center text-[12px] font-bold text-[#c08f62]">
+        Missing group data{groupId ? `: ${groupId}` : ""}
+      </div>
+    );
+  }
+  const editableGroup = localGroup ?? group;
+  const width = groupPopupWidth;
+  const height = groupPopupHeight;
+  if (layoutRef.current?.groupId !== groupId) {
+    const layout = getGroupGraphScrollLayout(buildGroupGraphNodes(editableGroup), width, height);
+    layoutRef.current = { groupId, ...layout };
+  }
+  const getGroupViewData = () => {
+    const layout = layoutRef.current ?? { offsetX: 0, offsetY: 0, scrollWidth: width, scrollHeight: height, scrollLeft: 0, scrollTop: 0 };
+    const nodes = buildGroupGraphNodes(editableGroup).map((node) => ({
+      ...node,
+      x: node.x + layout.offsetX / gridSize,
+      y: node.y + layout.offsetY / gridSize,
+      ...(previewPositionsRef.current?.[node.id] ?? {}),
+    }));
+    const displayGraph = { nodes: editableGroup.nodes, edges: editableGroup.edges ?? [], customNodes: editableGroup.customNodes, groups: undefined, parameters: editableGroup.parameters } satisfies AnimationGraphState;
+    return {
+      layout,
+      nodes,
+      displayGraph,
+      displayEdges: filterPermittedEdges(filterRenderableEdges(editableGroup.edges ?? [], nodes), nodes),
+    };
+  };
+  const { layout, nodes, displayGraph, displayEdges } = getGroupViewData();
+  const commitGroup = (nextGroup: AnimationGraphGroup) => {
+    setLocalGroup(nextGroup);
+    if (!groupId) return;
+    onGroupReplace(groupId, nextGroup);
+  };
+  const updateHover = (nodeId: string | null, port: HoverConnector | null) => {
+    setHoverNodeId(nodeId);
+    setHoverConnector(port);
+    hoverConnectorRef.current = port;
+  };
+  const setGroupScaleValue = (nextScale: number) => {
+    const clamped = clampGraphScale(nextScale);
+    graphScaleRef.current = clamped;
+    setGraphScale(clamped);
+    return clamped;
+  };
+  const zoomGroupAtPoint = (nextScale: number, clientX: number, clientY: number) => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const previousScale = graphScaleRef.current;
+    const clamped = setGroupScaleValue(nextScale);
+    const rect = viewport.getBoundingClientRect();
+    const graphX = (viewport.scrollLeft + clientX - rect.left) / previousScale;
+    const graphY = (viewport.scrollTop + clientY - rect.top) / previousScale;
+    requestAnimationFrame(() => {
+      viewport.scrollLeft = Math.max(0, graphX * clamped - (clientX - rect.left));
+      viewport.scrollTop = Math.max(0, graphY * clamped - (clientY - rect.top));
+      drawGroupCanvas();
+    });
+  };
+  const onGroupWheel = (event: WheelEvent<HTMLDivElement>) => {
+    if (zoomEnabled && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
+      event.stopPropagation();
+      zoomGroupAtPoint(graphScaleRef.current * Math.exp(-normalizeWheelDelta(event) * 0.0012), event.clientX, event.clientY);
+      return;
+    }
+    requestAnimationFrame(drawGroupCanvas);
+  };
+  const onPointerMove = (event: PointerEvent<HTMLCanvasElement>) => {
+    const point = canvasPoint(event, viewportRef.current);
+    const drag = dragRef.current;
+    if (drag?.kind === "node") {
+      setPopoverNodeId(null);
+      setHoverEdgeId(null);
+      const position = getDraggedGraphNodePosition(event, drag, graphScaleRef.current);
+      previewPositionsRef.current = { ...(previewPositionsRef.current ?? {}), [drag.nodeId]: position };
+      drawGroupCanvas();
+      return;
+    }
+    if (drag?.kind === "edge") {
+      setPopoverNodeId(null);
+      setHoverEdgeId(null);
+      drag.x = point.x;
+      drag.y = point.y;
+      const view = getGroupViewData();
+      const target = getGraphEdgeDrop(point, drag, view.nodes, graphScaleRef.current, view.displayGraph, []);
+      updateHover(target?.nodeId ?? null, null);
+      drawGroupCanvas();
+      return;
+    }
+    if (drag?.kind === "marquee") {
+      setPopoverNodeId(null);
+      setHoverEdgeId(null);
+      updateHover(null, null);
+      drag.x = point.x;
+      drag.y = point.y;
+      if (!drag.active && Math.hypot(event.clientX - drag.startClientX, event.clientY - drag.startClientY) > marqueeThreshold) drag.active = true;
+      drawGroupCanvas();
+      return;
+    }
+    const view = getGroupViewData();
+    updateGraphHoverState(point, view.nodes, graphScaleRef.current, view.displayGraph, updateHover, setHoverEdgeId, view.displayEdges);
+  };
+  const onPointerDown = (event: PointerEvent<HTMLCanvasElement>) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const point = canvasPoint(event, viewportRef.current);
+    const bodyNode = hitNode(point, nodes, graphScaleRef.current);
+    const connector = bodyNode ? null : hitHoverConnector(point, nodes, graphScaleRef.current, hoverConnectorRef.current);
+    if (connector) {
+      setPopoverNodeId(null);
+      const source = nodes.find((node) => node.id === connector.nodeId);
+      const start = source ? nodeCenter(source) : point;
+      setSelectedNodeIds([connector.nodeId]);
+      setHoverEdgeId(null);
+      dragRef.current = { kind: "edge", fromNodeId: connector.nodeId, fromPort: connector.port, startX: start.x, startY: start.y, x: point.x, y: point.y };
+      event.currentTarget.setPointerCapture(event.pointerId);
+      return;
+    }
+    const edge = hitEdge(point, displayEdges, nodes, graphScaleRef.current);
+    if (edge) {
+      setPopoverNodeId(null);
+      setHoverEdgeId(null);
+      commitGroup({ ...editableGroup, edges: (editableGroup.edges ?? []).filter((item) => item.id !== edge.id) });
+      return;
+    }
+    const node = bodyNode;
+    if (!node) {
+      setPopoverNodeId(null);
+      setSelectedNodeIds([]);
+      setHoverEdgeId(null);
+      dragRef.current = {
+        kind: "marquee",
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        startX: point.x,
+        startY: point.y,
+        x: point.x,
+        y: point.y,
+        shiftKey: event.shiftKey,
+        active: false,
+        scale: graphScaleRef.current,
+      };
+      event.currentTarget.setPointerCapture(event.pointerId);
+      return;
+    }
+    setSelectedNodeIds(event.shiftKey ? (selectedNodeIds.includes(node.id) ? selectedNodeIds.filter((id) => id !== node.id) : [...selectedNodeIds, node.id]) : [node.id]);
+    setPopoverNodeId(null);
+    setHoverEdgeId(null);
+    dragRef.current = { kind: "node", nodeId: node.id, startClientX: event.clientX, startClientY: event.clientY, startX: node.x, startY: node.y };
+    previewPositionsRef.current = { [node.id]: { x: node.x, y: node.y } };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+  const onPointerUp = (event: PointerEvent<HTMLCanvasElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const drag = dragRef.current;
+    dragRef.current = null;
+    if (drag?.kind === "node" && previewPositionsRef.current?.[drag.nodeId]) {
+      const position = previewPositionsRef.current[drag.nodeId];
+      previewPositionsRef.current = null;
+      const moved = hasNodeDragMoved(drag, position);
+      if (moved) setSelectedNodeIds([]);
+      if (!moved) {
+        const node = getGroupViewData().nodes.find((item) => item.id === drag.nodeId);
+        setPopoverNodeId(node && getPopoverDetails(node, editableGroup.parameters?.[node.id]).length > 0 ? node.id : null);
+      }
+      const view = getGroupViewData();
+      commitGroup({
+        ...editableGroup,
+        nodes: {
+          ...editableGroup.nodes,
+          [drag.nodeId]: { x: position.x - view.layout.offsetX / gridSize, y: position.y - view.layout.offsetY / gridSize },
+        },
+      });
+    }
+    if (drag?.kind === "edge") {
+      setPopoverNodeId(null);
+      const point = canvasPoint(event, viewportRef.current);
+      const view = getGroupViewData();
+      const target = getGraphEdgeDrop(point, drag, view.nodes, graphScaleRef.current, view.displayGraph, []);
+      if (target && target.nodeId !== drag.fromNodeId) {
+        const edge = createEdge(drag.fromNodeId, target.fromPort, target.nodeId, target.toPort);
+        commitGroup({ ...editableGroup, edges: filterPermittedEdges([...view.displayEdges.filter((item) => item.id !== edge.id), edge], view.nodes) });
+      }
+    }
+    if (drag?.kind === "marquee" && drag.active) {
+      setPopoverNodeId(null);
+      const view = getGroupViewData();
+      setSelectedNodeIds(getMarqueeSelectionPreviewIds(drag, view.nodes, selectedNodeIds));
+    }
+    updateHover(null, null);
+    setHoverEdgeId(null);
+  };
+  const drawGroupCanvas = () => {
+    const canvas = canvasRef.current;
+    const viewport = viewportRef.current;
+    if (!canvas || !viewport) return;
+    const view = getGroupViewData();
+    const edgeDrag = dragRef.current?.kind === "edge" ? dragRef.current : null;
+    const marqueeDrag = dragRef.current?.kind === "marquee" ? dragRef.current : null;
+    const marqueeSelectedNodeIds = marqueeDrag?.active ? getMarqueeSelectionPreviewIds(marqueeDrag, view.nodes, selectedNodeIds) : selectedNodeIds;
+    drawGraphCanvas({
+      canvas,
+      viewport,
+      width: Math.max(1, viewport.clientWidth),
+      height: Math.max(1, viewport.clientHeight),
+      scale: graphScale,
+      nodes: view.nodes,
+      edges: view.displayEdges,
+      hoverNodeId,
+      selectedNodeIds: marqueeSelectedNodeIds,
+      hoverConnector,
+      hoverEdgeId,
+      edgeDrag,
+      previewPoint: edgeDrag ? { x: edgeDrag.x, y: edgeDrag.y } : null,
+      marqueeRect: marqueeDrag?.active ? normalizeMarqueeRect(marqueeDrag) : null,
+    });
+  };
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current;
+    const layout = layoutRef.current;
+    if (!viewport || !layout || layout.groupId !== groupId) return;
+    requestAnimationFrame(() => {
+      viewport.scrollLeft = layout.scrollLeft * graphScaleRef.current;
+      viewport.scrollTop = layout.scrollTop * graphScaleRef.current;
+      drawGroupCanvas();
+    });
+  }, [groupId]);
+  useLayoutEffect(() => {
+    drawGroupCanvas();
+  });
+  return (
+    <GraphCanvasSurface
+      canvasRef={canvasRef}
+      viewportRef={viewportRef}
+      scrollWidth={layout.scrollWidth * graphScale}
+      scrollHeight={layout.scrollHeight * graphScale}
+      hoverNodeId={hoverNodeId}
+      className="clipper-hidden-scrollbar relative h-[360px] min-w-0 overflow-auto bg-[#0b0f16]"
+      onScroll={drawGroupCanvas}
+      onWheel={onGroupWheel}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={() => { setPopoverNodeId(null); clearGraphDragState(dragRef, previewPositionsRef, updateHover, setHoverEdgeId); }}
+      onPointerLeave={() => { updateHover(null, null); setHoverEdgeId(null); }}
+    >
+      {popoverNodeId ? (
+        <GraphNodePopover
+          node={nodes.find((node) => node.id === popoverNodeId) ?? null}
+          parameters={editableGroup.parameters?.[popoverNodeId]}
+          viewportRef={viewportRef}
+          graphScale={graphScale}
+          onParameterChange={(nodeId, key, value) => {
+            if (!groupId) return;
+            commitGroup({
+              ...editableGroup,
+              parameters: {
+                ...(editableGroup.parameters ?? {}),
+                [nodeId]: { ...(editableGroup.parameters?.[nodeId] ?? {}), [key]: value },
+              },
+            });
+          }}
+          onPointerDownOutside={() => setPopoverNodeId(null)}
+        />
+      ) : null}
+    </GraphCanvasSurface>
   );
 }
 
@@ -2341,6 +3609,12 @@ function getPopoverDetails(
   node: GraphNode,
   parameters?: Record<string, string>,
 ) {
+  if (node.kind === "group" || node.kind === "out") return [];
+  if (node.kind === "time") {
+    return Object.entries(timeParameterDefaults).map(
+      ([key, value]) => [key, parameters?.[key] ?? node.details?.[key] ?? value] as [string, string],
+    );
+  }
   const defaults =
     node.kind === "animation"
       ? getAnimationValueDetails(node)
@@ -2380,6 +3654,8 @@ function getParameterEditorSchema(
           key: field.key,
           label: field.label,
           value: values[field.key] ?? field.defaultValue,
+          unit: getGraphParameterUnit(field.key),
+          options: graphParameterOptions[field.key],
         })),
       })),
     };
@@ -2391,20 +3667,22 @@ function getParameterEditorSchema(
     groups: [
       {
         id: "parameters",
-        fields: details.map(([key, value]) => ({ key, label: key, value })),
+          fields: details.map(([key, value]) => ({ key, label: key, value, unit: getGraphParameterUnit(key), options: graphParameterOptions[key] })),
       },
     ],
   };
 }
 
-function isInteractiveGraphNode(
-  node: GraphNode,
-  graph: AnimationGraphState | undefined,
-) {
-  return (
-    node.kind !== "layer" &&
-    getPopoverDetails(node, graph?.parameters?.[node.id]).length > 0
-  );
+function getGraphParameterUnit(key: string) {
+  return key === "delay" || key === "duration" ? "s" : undefined;
+}
+
+function getGraphNodeColors(kind: GraphNode["kind"]) {
+  if (kind === "animation") return { background: nodeColors.animationBg, border: nodeColors.animationBorder };
+  if (kind === "time") return { background: nodeColors.timeBg, border: nodeColors.timeBorder };
+  if (kind === "group") return { background: nodeColors.groupBg, border: nodeColors.groupBorder };
+  if (kind === "out") return { background: nodeColors.outBg, border: nodeColors.outBorder };
+  return { background: nodeColors.layerBg, border: nodeColors.layerBorder };
 }
 
 function getAnimationValueDetails(node: GraphNode) {

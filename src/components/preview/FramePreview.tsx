@@ -248,6 +248,7 @@ function syncVisualAdjustmentOverlays(container: HTMLElement | null, overlays: A
 
 function applyLiveComposePreviewTime(root: HTMLElement | null, part: Part, time: number) {
   if (!root) return;
+  syncLiveComposeRenderClock(root, time);
   if (!part.background.hidden) {
     const evaluatedBackground = evaluateBackgroundLayer(part.background, time, part.duration, { animations: true });
     const backgroundElement = root.querySelector<HTMLElement>(`[data-layer-id="${cssEscape(part.background.id)}"]`);
@@ -263,6 +264,19 @@ function applyLiveComposePreviewTime(root: HTMLElement | null, part: Part, time:
   }
 }
 
+function syncLiveComposeRenderClock(root: HTMLElement, time: number) {
+  const state = { playing: true, time, mode: "preview" as const };
+  const attrs = getRenderClockAttributes(state);
+  const style = getRenderClockStyle(state);
+  const layers = root.matches("[data-clipper-render-playing]") ? [root, ...root.querySelectorAll<HTMLElement>("[data-clipper-render-playing]")] : [...root.querySelectorAll<HTMLElement>("[data-clipper-render-playing]")];
+
+  for (const layer of layers) {
+    for (const [key, value] of Object.entries(attrs)) layer.setAttribute(key, value);
+    for (const [key, value] of Object.entries(style)) layer.style.setProperty(key, String(value));
+    syncDomAnimationsToRenderClock(layer, state);
+  }
+}
+
 function applyLivePreviewObject(target: HTMLElement, object: EvaluatedFrameObject) {
   applyLivePreviewObjectStyle(target, object);
   if (object.renderContent !== undefined && object.renderContent !== object.content && target.textContent !== object.renderContent) target.textContent = object.renderContent;
@@ -271,6 +285,7 @@ function applyLivePreviewObject(target: HTMLElement, object: EvaluatedFrameObjec
 function applyLivePreviewObjectStyle(target: HTMLElement, object: EvaluatedFrameObject) {
   const objectTransform = typeof object.style.transform === "string" ? object.style.transform : undefined;
   const animationTransform = typeof object.renderStyle.transform === "string" ? object.renderStyle.transform : undefined;
+  applyLivePreviewStyle(target, object.renderStyle);
   target.style.transform = `translate(var(--clipper-drag-x, 0px), var(--clipper-drag-y, 0px)) ${animationTransform ?? objectTransform ?? ""}`.trim();
   setLiveStyleValue(target, "opacity", object.renderStyle.opacity ?? object.style.opacity);
   setLiveStyleValue(target, "color", object.renderStyle.color ?? object.style.color);
@@ -278,15 +293,24 @@ function applyLivePreviewObjectStyle(target: HTMLElement, object: EvaluatedFrame
 }
 
 function applyLivePreviewLayerStyle(target: HTMLElement, style: Record<string, string | number | undefined>) {
-  setLiveStyleValue(target, "transform", style.transform);
-  setLiveStyleValue(target, "opacity", style.opacity);
-  setLiveStyleValue(target, "color", style.color);
-  setLiveStyleValue(target, "backgroundColor", style.backgroundColor);
+  applyLivePreviewStyle(target, style);
 }
 
 function setLiveStyleValue(target: HTMLElement, key: "transform" | "opacity" | "color" | "backgroundColor", value: string | number | undefined) {
   if (value === undefined) target.style[key] = "";
   else target.style[key] = String(value);
+}
+
+function applyLivePreviewStyle(target: HTMLElement, style: Record<string, string | number | undefined>) {
+  for (const [key, value] of Object.entries(style)) {
+    const property = cssStylePropertyName(key);
+    if (value === undefined) target.style.removeProperty(property);
+    else target.style.setProperty(property, String(value));
+  }
+}
+
+function cssStylePropertyName(key: string) {
+  return key.replace(/[A-Z]/g, (match) => `-${match.toLowerCase()}`);
 }
 
 function cssEscape(value: string) {

@@ -352,6 +352,56 @@ describe("project normalization", () => {
     expect(applied.objects[0].animations?.[0]).toMatchObject({ id: "graph:effect", keyframes: { x: [10, 20], y: [30, 40] } });
   });
 
+  it("materializes connected group subgraph animations through fixed Out registration", () => {
+    const applied = applyAnimationGraphToComposition({
+      ...composition,
+      objects: [{ id: "text", name: "Text", type: "text", selector: ".text", bounds: { x: 0, y: 0, width: 100, height: 40 }, style: {}, animations: [] }],
+    }, {
+      nodes: {},
+      customNodes: {
+        groupNode: { kind: "group", label: "Scale In", scopeKey: "text", details: { groupId: "groupA" } },
+        parentTime: { kind: "time", label: "Time", scopeKey: "text", details: { delay: "0s", duration: "1s" } },
+      },
+      groups: {
+        groupA: {
+          id: "groupA",
+          name: "Scale In",
+          outNodeId: "out",
+          nodes: {},
+          customNodes: {
+            scale: { kind: "animation", label: "Scale", scopeKey: "groupA", details: { property: "scale" } },
+            time: { kind: "time", label: "Time", scopeKey: "groupA", details: { delay: "0s", duration: "0.7s" } },
+          },
+          edges: [
+            { id: "scale->time", fromNodeId: "scale", fromPort: "bottom", toNodeId: "time", toPort: "top" },
+            { id: "time->out", fromNodeId: "time", fromPort: "bottom", toNodeId: "out", toPort: "top" },
+          ],
+          parameters: { scale: { from: "0", to: "1" } },
+        },
+      },
+      edges: [
+        { id: "group->time", fromNodeId: "groupNode", fromPort: "bottom", toNodeId: "parentTime", toPort: "top" },
+        { id: "time->layer", fromNodeId: "parentTime", fromPort: "bottom", toNodeId: "layer:text", toPort: "top" },
+      ],
+    });
+
+    expect(applied.objects[0].animations?.[0]).toMatchObject({ id: "graph:groupNode:scale", keyframes: { scale: [0, 1] } });
+  });
+
+  it("keeps disconnected or unregistered group contents graph-only", () => {
+    const applied = applyAnimationGraphToComposition({
+      ...composition,
+      objects: [{ id: "text", name: "Text", type: "text", selector: ".text", bounds: { x: 0, y: 0, width: 100, height: 40 }, style: {}, animations: [] }],
+    }, {
+      nodes: {},
+      customNodes: { groupNode: { kind: "group", label: "Scale In", scopeKey: "text", details: { groupId: "groupA" } } },
+      groups: { groupA: { id: "groupA", name: "Scale In", outNodeId: "out", nodes: {}, customNodes: { scale: { kind: "animation", label: "Scale", scopeKey: "groupA", details: { property: "scale" } }, time: { kind: "time", label: "Time", scopeKey: "groupA" } }, edges: [{ id: "scale->time", fromNodeId: "scale", fromPort: "bottom", toNodeId: "time", toPort: "top" }], parameters: { scale: { from: "0", to: "1" } } } },
+      edges: [],
+    });
+
+    expect(applied.objects[0].animations).toEqual([]);
+  });
+
   it("does not replace unsupported position-like keyframes from stale detected graph nodes", () => {
     const applied = applyAnimationGraphToComposition({
       ...composition,
@@ -417,6 +467,29 @@ describe("project normalization", () => {
     const serialized = serializeProjectForSave(project);
     expect(serialized.timelines?.[0].clips[0].animationGraph).toBeDefined();
     expect(serialized.scenes[0].compositions[0].background.elements[0].animations).toBeUndefined();
+  });
+
+  it("omits graph-generated animations from editable composition source", () => {
+    const source = compositionToSource({
+      ...composition,
+      objects: [
+        {
+          id: "text",
+          name: "Text",
+          type: "text",
+          selector: ".text",
+          bounds: { x: 0, y: 0, width: 100, height: 40 },
+          style: {},
+          animations: [
+            { id: "graph:effect", keyframes: { opacity: [0, 1] }, options: { duration: 1, type: "tween" } },
+            { id: "authored", keyframes: { scale: [1, 1.1] }, options: { duration: 1, type: "tween" } },
+          ],
+        },
+      ],
+    });
+
+    expect(source).not.toContain("graph:effect");
+    expect(source).toContain("authored");
   });
 
   it("remaps timeline clip composition references when composition path IDs change", () => {

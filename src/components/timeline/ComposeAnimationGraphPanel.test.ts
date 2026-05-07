@@ -36,6 +36,23 @@ describe("getGraphAnimationSources", () => {
     ]);
   });
 
+  it("detects scale and rotate through the animation registry", () => {
+    const sources = getGraphAnimationSources({
+      id: "text",
+      name: "Text",
+      type: "text",
+      selector: ".text",
+      bounds: { x: 0, y: 0, width: 100, height: 40 },
+      style: {},
+      animations: [
+        { id: "scale", keyframes: { scale: [0.8, 1] }, options: { duration: 1, type: "tween" } },
+        { id: "rotate", keyframes: { rotate: [-12, 0] }, options: { duration: 1, type: "tween" } },
+      ],
+    });
+
+    expect(sources.map((source) => source.details.property)).toEqual(["scale", "rotate"]);
+  });
+
   it("detects position only when x or y keyframes are present", () => {
     const sources = getGraphAnimationSources({
       id: "text",

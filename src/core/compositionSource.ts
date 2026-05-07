@@ -1,5 +1,5 @@
 import * as compositionApi from "./compositionApi";
-import { FRAME_HEIGHT, FRAME_WIDTH, type BackgroundLayer, type FrameObject, type FrameObjectType, type FrameTemplate, type Part, type PartFrame } from "./types";
+import { FRAME_HEIGHT, FRAME_WIDTH, type BackgroundLayer, type FrameObject, type FrameObjectType, type FrameTemplate, type LayerAnimation, type Part, type PartFrame } from "./types";
 
 type SourceObject = {
   id: string;
@@ -77,7 +77,7 @@ function sourceBackgroundToLayer(background: SourceComposition["background"]): B
     stretchToElements: background?.stretchToElements || undefined,
     hidden: background?.hidden,
     locked: background?.locked,
-    animations: background?.animations,
+    animations: stripGraphAnimations(background?.animations),
     elements: resolveRenderables(background?.elements ?? [], compositionApi.renderContext(0, 0)).map(sourceObjectToFrameObject),
   };
 }
@@ -96,7 +96,7 @@ function sourceObjectToFrameObject(object: SourceObject): FrameObject {
     layoutId: object.layoutId,
     hidden: object.hidden,
     locked: object.locked,
-    animations: object.animations,
+    animations: stripGraphAnimations(object.animations),
   };
 }
 
@@ -109,7 +109,7 @@ export function compositionToSource(composition: Part) {
     stretchToElements: composition.background.stretchToElements,
     hidden: composition.background.hidden || undefined,
     locked: composition.background.locked || undefined,
-    animations: composition.background.animations?.length ? composition.background.animations : undefined,
+    animations: authoredAnimations(composition.background.animations),
   });
   const backgroundElements = composition.background.elements.map(frameObjectToConstructorSource);
   const backgroundSource = `{
@@ -136,7 +136,7 @@ function frameObjectToSourceObject(object: FrameObject): SourceObject {
     layoutId: object.layoutId,
     hidden: object.hidden,
     locked: object.locked,
-    animations: object.animations,
+    animations: authoredAnimations(object.animations),
   };
 }
 
@@ -152,9 +152,18 @@ function frameObjectToConstructorSource(object: FrameObject) {
     layoutId: object.layoutId,
     hidden: object.hidden || undefined,
     locked: object.locked || undefined,
-    animations: object.animations?.length ? object.animations : undefined,
+    animations: authoredAnimations(object.animations),
   });
   return `new ${frameObjectConstructorName(object)}(${tsBlock(input, 0)})`;
+}
+
+function authoredAnimations(animations: LayerAnimation[] | undefined) {
+  const authored = stripGraphAnimations(animations);
+  return authored?.length ? authored : undefined;
+}
+
+function stripGraphAnimations(animations: LayerAnimation[] | undefined) {
+  return animations?.filter((animation) => !animation.id.startsWith("graph:"));
 }
 
 function frameObjectConstructorName(object: FrameObject) {

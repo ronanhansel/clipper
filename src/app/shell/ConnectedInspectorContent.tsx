@@ -1,5 +1,5 @@
 import { AgentPanel } from "../../components/AgentPanel";
-import { AdjustmentInspector, EmptyInspector, FrameInspector, MotionInspector, ObjectAnimationInspector, ObjectInspector, TransitionInspector } from "../../components/inspector/InspectorPanels";
+import { AdjustmentInspector, EmptyInspector, FrameInspector, MotionInspector, ObjectInspector, TransitionInspector } from "../../components/inspector/InspectorPanels";
 import type { AdjustmentEffectPointControl } from "../../core/effects/types";
 import type { AdjustmentLayer, BackgroundLayer, FrameObject, MotionEase, MotionMarker, Part, PartFrame, Point, TransitionLayer } from "../../core/types";
 import type { RightPanelTab } from "../types";
@@ -117,11 +117,6 @@ export function ConnectedInspectorContent({
   onUpdatePartBackground,
 }: ConnectedInspectorContentProps) {
   if (rightPanelTab === "agent") return <AgentPanel part={part} sourceStatus={sourceStatus} agentContext={agentContext} />;
-
-  if (rightPanelTab === "animation") {
-    if (selectedObject) return <ObjectAnimationInspector object={selectedObject} onChange={onUpdateSelectedObject} />;
-    return <EmptyInspector />;
-  }
 
   if (selectedMotion && selectedMotionPart) {
     return (

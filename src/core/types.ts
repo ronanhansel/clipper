@@ -357,16 +357,27 @@ export type AnimationGraphEdge = {
 };
 
 export type AnimationGraphCustomNode = {
-  kind: "animation" | "time";
+  kind: "animation" | "time" | "group";
   label: string;
   scopeKey: string;
   details?: Record<string, string>;
+};
+
+export type AnimationGraphGroup = {
+  id: string;
+  name: string;
+  nodes: Record<string, AnimationGraphNodePosition>;
+  edges: AnimationGraphEdge[];
+  customNodes?: Record<string, AnimationGraphCustomNode>;
+  parameters?: Record<string, Record<string, string>>;
+  outNodeId: string;
 };
 
 export type AnimationGraphState = {
   nodes: Record<string, AnimationGraphNodePosition>;
   edges: AnimationGraphEdge[];
   customNodes?: Record<string, AnimationGraphCustomNode>;
+  groups?: Record<string, AnimationGraphGroup>;
   parameters?: Record<string, Record<string, string>>;
   deletedNodeIds?: string[];
   /** Legacy shared graph viewport. New graph views should use per-layer `viewports`. */

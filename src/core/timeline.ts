@@ -191,7 +191,7 @@ export function getActiveTimelinePartsAtTime(timeline: TimelinePart[], time: num
 
 export function getTimelinePreviewState({ adjustmentLayers, compositions, sceneDurationSeconds, sceneTime, timeline, timelineLayers, timelineMode, transitionLayers }: { adjustmentLayers?: AdjustmentLayer[]; compositions: CompositionClip[]; sceneDurationSeconds: number; sceneTime: number; timeline: TimelinePart[]; timelineLayers?: TimelineLayerState; timelineMode: "compose" | "composition"; transitionLayers?: TransitionLayer[] }): TimelinePreviewState {
   const compositionLookupTime = timelineMode === "compose" ? sceneTime : applyAdjustmentLayersToSceneTime(sceneTime, adjustmentLayers);
-  const timelinePartLookupTime = timelineMode === "compose" && compositionLookupTime > 0 ? compositionLookupTime - 0.000001 : compositionLookupTime;
+  const timelinePartLookupTime = (timelineMode === "compose" || compositionLookupTime >= sceneDurationSeconds) && compositionLookupTime > 0 ? compositionLookupTime - 0.000001 : compositionLookupTime;
   const activeTimelinePart = getTopTimelinePartAtTime(timeline, timelinePartLookupTime, timelineLayers);
   const activeComposition = activeTimelinePart ? compositions.find((item) => item.id === activeTimelinePart.id) ?? null : null;
   const previewParts = getPreviewStackParts(compositions, timeline, timelinePartLookupTime, compositionLookupTime, timelineLayers);

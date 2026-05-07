@@ -9,14 +9,14 @@ type RightInspectorPanelProps = {
   onTabChange: (tab: RightPanelTab) => void;
 };
 
-const tabs: RightPanelTab[] = ["video", "animation", "agent"];
+const tabs: RightPanelTab[] = ["video", "agent"];
 
 export function RightInspectorPanel({ activeTab, children, validationErrors, onTabChange }: RightInspectorPanelProps) {
   return (
     <aside className="min-h-0 overflow-auto border-l border-[#2d313b] bg-[#171920] p-4" data-inspector-panel>
       <section className="mb-3 grid gap-2.5">
         <h2 className={sectionTitle}>Inspector</h2>
-        <div className="grid grid-cols-3 gap-1">
+        <div className="grid grid-cols-2 gap-1">
           {tabs.map((tab) => <button className={`${segmentedTabBase} capitalize ${activeTab === tab ? segmentedTabActive : segmentedTabInactive}`} key={tab} onClick={() => onTabChange(tab)}>{tab}</button>)}
         </div>
       </section>

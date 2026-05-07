@@ -31,11 +31,11 @@ export function AppHeader({ projectName, projectNameDraft, lastSavedAt, renaming
         {!renamingProject ? <span className="truncate text-xs text-[#9b9da7]">{sceneName}</span> : null}
       </div>
       <div className={`${appNoDragRegion} flex justify-end gap-1.5`}>
+        {savedTimeLabel ? <div className="flex min-w-[92px] items-center justify-end whitespace-nowrap text-[11px] font-medium text-[#686d78]" title={savedTimeTitle}>{savedTimeLabel}</div> : null}
         <button className={appBarActionButtonBase} title="Open a Clipper project folder or project.json" onClick={onOpenProject}>Open</button>
         <button className={appBarActionButtonBase} title="Close project and return to welcome screen" onClick={onCloseProject}>Close</button>
         <button className={appBarActionButtonBase} title="Settings (Cmd/Ctrl+,)" onClick={onSettingsOpen}>Settings</button>
         <button className={appBarActionButtonBase} onClick={onExportOpen}>Export</button>
-        {savedTimeLabel ? <div className="ml-2 flex min-w-[92px] items-center justify-end whitespace-nowrap text-[11px] font-medium text-[#686d78]" title={savedTimeTitle}>{savedTimeLabel}</div> : null}
       </div>
     </header>
   );

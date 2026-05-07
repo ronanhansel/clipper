@@ -1,9 +1,10 @@
 import { getAnimationDefinition } from "./animations/registry";
+import { animationGraphPresets, createAnimationGraphPresetGroup } from "./animations/presets";
 import { roundTwo, sanitizeProjectNumbers } from "./math";
 import { getCanonicalMotionMarkers, getMotionMarkerViews, motionBlocksToMotionMarkers, withCanonicalMotionMarkers } from "./motionEffects";
 import { adjustmentEffectPackages, normalizeAdjustmentEffectId } from "./effects/registry";
 import { getExecutableAdjustmentLayers } from "./timeline";
-import type { AdjustmentLayer, AnimationGraphEdge, AnimationGraphPort, AnimationGraphState, AssetItem, CodeViewportState, ComposeLayoutState, CompositionClip, CompositionDocument, EditorLayoutState, EditorSessionState, EditorState, EffectsPanelState, FileManagerState, FrameObject, LayerAnimation, PartFrame, PersistedEditorTab, PreviewViewportState, ProjectManifest, Scene, TimelineDocument, TimelineLayerState, TimelineMode, TimelineViewportState, TransitionLayer } from "./types";
+import type { AdjustmentLayer, AnimationGraphCustomNode, AnimationGraphEdge, AnimationGraphGroup, AnimationGraphPort, AnimationGraphState, AssetItem, CodeViewportState, ComposeLayoutState, CompositionClip, CompositionDocument, EditorLayoutState, EditorSessionState, EditorState, EffectsPanelState, FileManagerState, FrameObject, LayerAnimation, PartFrame, PersistedEditorTab, PreviewViewportState, ProjectManifest, Scene, TimelineDocument, TimelineLayerState, TimelineMode, TimelineViewportState, TransitionLayer } from "./types";
 import { getDisplayNameFromPath } from "./fileNames";
 
 export const defaultTimelineViewportState: TimelineViewportState = { displacement: 0, zoom: 1 };
@@ -41,8 +42,7 @@ type TimelineLayerArrayKey = {
 const timelineLayerKeys = Object.keys(defaultTimelineLayerState).filter((key): key is TimelineLayerArrayKey => Array.isArray(defaultTimelineLayerState[key as keyof TimelineLayerState]));
 
 function normalizeRightPanelTab(tab: unknown) {
-  if (tab === "animation" || tab === "agent") return tab;
-  if (tab === "motion") return "animation";
+  if (tab === "agent") return tab;
   return "video";
 }
 
@@ -96,7 +96,7 @@ export function normalizeAnimationGraphState(graph: AnimationGraphState | undefi
   const customNodes = graph.customNodes && typeof graph.customNodes === "object" ? Object.fromEntries(Object.entries(graph.customNodes).flatMap(([nodeId, node]) => {
     if (deletedNodeIdSet.has(nodeId)) return [];
     if (!nodeId || !node || typeof node !== "object") return [];
-    const kind = node.kind === "animation" || node.kind === "time" ? node.kind : undefined;
+    const kind = node.kind === "animation" || node.kind === "time" || node.kind === "group" ? node.kind : undefined;
     const label = typeof node.label === "string" && node.label ? node.label : undefined;
     const scopeKey = typeof node.scopeKey === "string" && node.scopeKey ? node.scopeKey : undefined;
     if (!kind || !label || !scopeKey) return [];
@@ -104,6 +104,8 @@ export function normalizeAnimationGraphState(graph: AnimationGraphState | undefi
     return [[nodeId, { kind, label, scopeKey, details: details && Object.keys(details).length ? details : undefined }]];
   })) : undefined;
   const normalizedCustomNodes = customNodes && Object.keys(customNodes).length ? customNodes : undefined;
+  const groups = normalizeAnimationGraphGroups(graph.groups, deletedNodeIdSet);
+  const normalizedGroups = groups && Object.keys(groups).length ? groups : undefined;
   const hasGraphNode = (nodeId: string) => Boolean(nodes[nodeId] || normalizedCustomNodes?.[nodeId] || nodeId.startsWith("layer:"));
   const seenEdges = new Set<string>();
   const edges = (Array.isArray(graph.edges) ? graph.edges : []).flatMap((edge): AnimationGraphEdge[] => {
@@ -140,7 +142,59 @@ export function normalizeAnimationGraphState(graph: AnimationGraphState | undefi
     return Object.keys(nodeValues).length ? [[nodeId, nodeValues]] : [];
   })) : undefined;
   const normalizedParameters = parameters && Object.keys(parameters).length ? parameters : undefined;
-  return Object.keys(nodes).length || edges.length || normalizedCustomNodes || viewport || normalizedViewports || normalizedParameters || normalizedDeletedNodeIds ? { nodes, edges, customNodes: normalizedCustomNodes, parameters: normalizedParameters, deletedNodeIds: normalizedDeletedNodeIds, viewport, viewports: normalizedViewports } : undefined;
+  return Object.keys(nodes).length || edges.length || normalizedCustomNodes || normalizedGroups || viewport || normalizedViewports || normalizedParameters || normalizedDeletedNodeIds ? { nodes, edges, customNodes: normalizedCustomNodes, groups: normalizedGroups, parameters: normalizedParameters, deletedNodeIds: normalizedDeletedNodeIds, viewport, viewports: normalizedViewports } : undefined;
+}
+
+function normalizeAnimationGraphGroups(groups: AnimationGraphState["groups"], deletedNodeIdSet: Set<string>): Record<string, AnimationGraphGroup> | undefined {
+  if (!groups || typeof groups !== "object") return undefined;
+  return Object.fromEntries(Object.entries(groups).flatMap(([groupId, group]) => {
+    if (!groupId || !group || typeof group !== "object") return [];
+    const outNodeId = typeof group.outNodeId === "string" && group.outNodeId ? group.outNodeId : `${groupId}:out`;
+    const name = typeof group.name === "string" && group.name ? group.name : "Group";
+    const nodes = Object.fromEntries(Object.entries(group.nodes ?? {}).flatMap(([nodeId, position]) => {
+      if (!nodeId || deletedNodeIdSet.has(nodeId) || !position || typeof position !== "object") return [];
+      const x = typeof position.x === "number" && Number.isFinite(position.x) ? roundTwo(position.x) : 0;
+      const y = typeof position.y === "number" && Number.isFinite(position.y) ? roundTwo(position.y) : 0;
+      return [[nodeId, { x, y }]];
+    }));
+    if (!nodes[outNodeId]) nodes[outNodeId] = { x: 6, y: 10 };
+    const customNodes = group.customNodes && typeof group.customNodes === "object" ? Object.fromEntries(Object.entries(group.customNodes).flatMap(([nodeId, node]) => {
+      if (!nodeId || deletedNodeIdSet.has(nodeId) || !node || typeof node !== "object") return [];
+      const kind = node.kind === "animation" || node.kind === "time" || node.kind === "group" ? node.kind : undefined;
+      const label = typeof node.label === "string" && node.label ? node.label : undefined;
+      const scopeKey = typeof node.scopeKey === "string" && node.scopeKey ? node.scopeKey : groupId;
+      if (!kind || !label) return [];
+      const details = node.details && typeof node.details === "object" ? Object.fromEntries(Object.entries(node.details).flatMap(([key, value]) => typeof value === "string" ? [[key, value]] : [])) : undefined;
+      return [[nodeId, { kind, label, scopeKey, details: details && Object.keys(details).length ? details : undefined } satisfies AnimationGraphCustomNode]];
+    })) : undefined;
+    const presetId = groupId.startsWith("group:") ? groupId.split(":").slice(1, -1).join(":") : "";
+    const preset = animationGraphPresets.find((item) => item.id === presetId);
+    const repairedGroup = preset && (!customNodes || Object.keys(customNodes).length === 0) ? createAnimationGraphPresetGroup(preset, groupId) : undefined;
+    const repairedNodes = repairedGroup ? { ...repairedGroup.nodes, ...nodes } : nodes;
+    const repairedCustomNodes = repairedGroup?.customNodes ?? customNodes;
+    const hasNode = (nodeId: string) => Boolean(repairedNodes[nodeId] || repairedCustomNodes?.[nodeId] || nodeId === outNodeId);
+    const seenEdges = new Set<string>();
+    const edges = (Array.isArray(group.edges) ? group.edges : []).flatMap((edge): AnimationGraphEdge[] => {
+      if (!edge || typeof edge !== "object") return [];
+      const fromNodeId = typeof edge.fromNodeId === "string" ? edge.fromNodeId : "";
+      const toNodeId = typeof edge.toNodeId === "string" ? edge.toNodeId : "";
+      if (!fromNodeId || !toNodeId || !hasNode(fromNodeId) || !hasNode(toNodeId)) return [];
+      if (toNodeId === outNodeId && repairedCustomNodes?.[fromNodeId]?.kind !== "time") return [];
+      const fromPort = animationGraphPorts.has(edge.fromPort) ? edge.fromPort : "right";
+      const toPort = animationGraphPorts.has(edge.toPort) ? edge.toPort : "left";
+      const id = typeof edge.id === "string" && edge.id ? edge.id : `${fromNodeId}:${fromPort}->${toNodeId}:${toPort}`;
+      if (seenEdges.has(id)) return [];
+      seenEdges.add(id);
+      return [{ id, fromNodeId, fromPort, toNodeId, toPort }];
+    });
+    const parameters = group.parameters && typeof group.parameters === "object" ? Object.fromEntries(Object.entries(group.parameters).flatMap(([nodeId, values]) => {
+      if (!nodeId || !values || typeof values !== "object") return [];
+      const nodeValues = Object.fromEntries(Object.entries(values).flatMap(([key, value]) => typeof value === "string" ? [[key, value]] : []));
+      return Object.keys(nodeValues).length ? [[nodeId, nodeValues]] : [];
+    })) : undefined;
+    const repairedParameters = repairedGroup?.parameters ? { ...repairedGroup.parameters, ...(parameters ?? {}) } : parameters;
+    return [[groupId, { id: groupId, name, nodes: repairedNodes, edges: edges.length ? edges : (repairedGroup?.edges ?? []), customNodes: repairedCustomNodes && Object.keys(repairedCustomNodes).length ? repairedCustomNodes : undefined, parameters: repairedParameters && Object.keys(repairedParameters).length ? repairedParameters : undefined, outNodeId }]];
+  }));
 }
 
 function normalizeTimelineMode(mode: unknown): TimelineMode {
@@ -444,12 +498,12 @@ function getGraphLayerAnimationsForObject(object: FrameObject, graph: AnimationG
   const scopeKey = object.id;
   const customNodes = Object.entries(graph.customNodes ?? {}).filter(([, node]) => node.scopeKey === scopeKey);
   if (!customNodes.length) return [];
-  const nodeKinds = new Map<string, "animation" | "time" | "layer">([[`layer:${object.id}`, "layer"]]);
+  const nodeKinds = new Map<string, "animation" | "time" | "layer" | "group">([[`layer:${object.id}`, "layer"]]);
   for (const [nodeId, node] of customNodes) nodeKinds.set(nodeId, node.kind);
   const edges = (graph.edges ?? []).filter((edge) => nodeKinds.has(edge.fromNodeId) && nodeKinds.has(edge.toNodeId));
   const connected = getGraphConnectedToLayerNodeIds(edges, nodeKinds);
   const emittedPropertiesByTime = new Set<string>();
-  return customNodes.flatMap(([nodeId, node]) => {
+  const directAnimations = customNodes.flatMap(([nodeId, node]) => {
     if (node.kind !== "animation" || !connected.has(nodeId)) return [];
     const timeEdge = edges.find((edge) => edge.fromNodeId === nodeId && nodeKinds.get(edge.toNodeId) === "time");
     if (!timeEdge) return [];
@@ -467,8 +521,57 @@ function getGraphLayerAnimationsForObject(object: FrameObject, graph: AnimationG
       if (emittedPropertiesByTime.has(propertyTimeKey)) return [];
       emittedPropertiesByTime.add(propertyTimeKey);
     }
-    return [{ id: `graph:${nodeId}`, name: node.label, keyframes, options: { delay, duration, ease: normalizeGraphEase(ease), type: "tween" as const } }];
+    return [{ id: `graph:${nodeId}`, name: node.label, keyframes, options: getGraphTimeOptions(timeNodeId, timeNode, graph, delay) }];
   });
+  const groupAnimations = customNodes.flatMap(([nodeId, node]) => {
+    if (node.kind !== "group" || !connected.has(nodeId)) return [];
+    const groupId = node.details?.groupId;
+    const group = groupId ? graph.groups?.[groupId] : undefined;
+    return group ? getRegisteredGroupAnimations(group, graph, nodeId) : [];
+  });
+  return [...directAnimations, ...groupAnimations];
+}
+
+function getRegisteredGroupAnimations(group: AnimationGraphGroup, graph: AnimationGraphState, groupNodeId: string): LayerAnimation[] {
+  const customNodes = group.customNodes ?? {};
+  const nodeKinds = new Map<string, "animation" | "time" | "out" | "group">([[group.outNodeId, "out"]]);
+  for (const [nodeId, node] of Object.entries(customNodes)) nodeKinds.set(nodeId, node.kind);
+  const edges = (group.edges ?? []).filter((edge) => nodeKinds.has(edge.fromNodeId) && nodeKinds.has(edge.toNodeId));
+  const registered = getGroupConnectedToOutNodeIds(edges, nodeKinds, group.outNodeId);
+  const emittedPropertiesByTime = new Set<string>();
+  return Object.entries(customNodes).flatMap(([nodeId, node]) => {
+    if (node.kind !== "animation" || !registered.has(nodeId)) return [];
+    const timeEdge = edges.find((edge) => edge.fromNodeId === nodeId && nodeKinds.get(edge.toNodeId) === "time");
+    if (!timeEdge) return [];
+    const timeNodeId = timeEdge.toNodeId;
+    const timeNode = customNodes[timeNodeId];
+    if (!timeNode || !registered.has(timeNodeId)) return [];
+    const property = node.details?.property;
+    const keyframes = getGraphEffectKeyframes(nodeId, node, property, { ...graph, parameters: { ...(graph.parameters ?? {}), ...(group.parameters ?? {}) } });
+    if (!keyframes) return [];
+    if (property) {
+      const propertyTimeKey = `${timeNodeId}:${property}`;
+      if (emittedPropertiesByTime.has(propertyTimeKey)) return [];
+      emittedPropertiesByTime.add(propertyTimeKey);
+    }
+    const groupGraph = { ...graph, customNodes, parameters: { ...(graph.parameters ?? {}), ...(group.parameters ?? {}) } } satisfies AnimationGraphState;
+    const delay = getGraphTimeStart(timeNodeId, groupGraph, edges, nodeKinds, new Set());
+    return [{ id: `graph:${groupNodeId}:${nodeId}`, name: `${group.name} ${node.label}`, keyframes, options: getGraphTimeOptions(timeNodeId, timeNode, groupGraph, delay) }];
+  });
+}
+
+function getGroupConnectedToOutNodeIds(edges: AnimationGraphEdge[], nodeKinds: Map<string, "animation" | "time" | "out" | "group">, outNodeId: string) {
+  const reverse = new Map<string, string[]>();
+  for (const edge of edges) reverse.set(edge.toNodeId, [...(reverse.get(edge.toNodeId) ?? []), edge.fromNodeId]);
+  const connected = new Set<string>();
+  const stack = [outNodeId];
+  while (stack.length) {
+    const nodeId = stack.pop()!;
+    if (connected.has(nodeId)) continue;
+    connected.add(nodeId);
+    for (const upstream of reverse.get(nodeId) ?? []) stack.push(upstream);
+  }
+  return connected;
 }
 
 function getGraphEffectKeyframes(nodeId: string, node: { details?: Record<string, string> }, property: string | undefined, graph: AnimationGraphState): LayerAnimation["keyframes"] | null {
@@ -501,7 +604,7 @@ function parseGraphKeyframeValue(value: string | undefined, fallback: number) {
     : trimmed;
 }
 
-function getGraphConnectedToLayerNodeIds(edges: AnimationGraphEdge[], nodeKinds: Map<string, "animation" | "time" | "layer">) {
+function getGraphConnectedToLayerNodeIds(edges: AnimationGraphEdge[], nodeKinds: Map<string, "animation" | "time" | "layer" | "group">) {
   const reverse = new Map<string, string[]>();
   for (const edge of edges) reverse.set(edge.toNodeId, [...(reverse.get(edge.toNodeId) ?? []), edge.fromNodeId]);
   const connected = new Set<string>();
@@ -515,7 +618,7 @@ function getGraphConnectedToLayerNodeIds(edges: AnimationGraphEdge[], nodeKinds:
   return connected;
 }
 
-function getGraphTimeStart(nodeId: string, graph: AnimationGraphState, edges: AnimationGraphEdge[], nodeKinds: Map<string, "animation" | "time" | "layer">, visiting: Set<string>): number {
+function getGraphTimeStart(nodeId: string, graph: AnimationGraphState, edges: AnimationGraphEdge[], nodeKinds: Map<string, "animation" | "time" | "layer" | "group" | "out">, visiting: Set<string>): number {
   if (visiting.has(nodeId)) return 0;
   visiting.add(nodeId);
   const node = graph.customNodes?.[nodeId];
@@ -530,9 +633,19 @@ function getGraphTimeDuration(nodeId: string, graph: AnimationGraphState) {
   return parseGraphSeconds(graph.parameters?.[nodeId]?.duration ?? node?.details?.duration ?? "0s");
 }
 
+function getGraphTimeOptions(timeNodeId: string, timeNode: AnimationGraphCustomNode, graph: AnimationGraphState, delay: number): LayerAnimation["options"] {
+  const duration = parseGraphSeconds(graph.parameters?.[timeNodeId]?.duration ?? timeNode.details?.duration ?? "0s");
+  const ease = graph.parameters?.[timeNodeId]?.ease ?? timeNode.details?.ease;
+  const repeat = parseGraphRepeat(graph.parameters?.[timeNodeId]?.repeat ?? timeNode.details?.repeat);
+  const repeatType = normalizeGraphRepeatType(graph.parameters?.[timeNodeId]?.repeatType ?? timeNode.details?.repeatType);
+  return { delay, duration, ease: normalizeGraphEase(ease), type: "tween", repeat, repeatType };
+}
+
 function parseGraphSeconds(value: string) { return parseGraphNumber(value, 0); }
 function parseGraphNumber(value: string | undefined, fallback: number) { const numeric = Number.parseFloat(value ?? ""); return Number.isFinite(numeric) ? numeric : fallback; }
+function parseGraphRepeat(value: string | undefined) { if (!value || value === "0") return undefined; if (value === "Infinity") return Infinity; const numeric = Number.parseFloat(value); return Number.isFinite(numeric) ? numeric : undefined; }
 function normalizeGraphEase(value: string | undefined): LayerAnimation["options"]["ease"] { return value === "easeIn" || value === "easeOut" || value === "easeInOut" || value === "circOut" || value === "backOut" ? value : "linear"; }
+function normalizeGraphRepeatType(value: string | undefined): LayerAnimation["options"]["repeatType"] { return value === "loop" || value === "reverse" || value === "mirror" ? value : undefined; }
 
 export function serializeProjectForSave(project: ProjectManifest): ProjectManifest {
   return stripEmbeddedCompositionSources(pruneStaleAdjustmentLayers(normalizeProject(project)));

@@ -116,4 +116,21 @@ describe("frame preview render model", () => {
     expect(model.part.id).toBe("blank");
     expect(model.previewParts).toEqual([]);
   });
+
+  it("keeps the final preview frame on the last composition", () => {
+    const scene: Scene = {
+      id: "scene",
+      compositions: [
+        { id: "a", filePath: "a.ts", start: 0, duration: 2, frame, background, objects: [], snapshot: [], motionMarkers: [] },
+      ],
+    };
+
+    const model = deriveFramePreviewRenderModel({ blankPart, scene, sceneTime: 2, timelineMode: "composition" });
+
+    expect(model.activeTimelinePart?.id).toBe("a");
+    expect(model.activeComposition?.id).toBe("a");
+    expect(model.part.id).toBe("a");
+    expect(model.previewTime).toBe(2);
+    expect(model.previewParts.map((item) => [item.part.id, item.previewTime])).toEqual([["a", 2]]);
+  });
 });

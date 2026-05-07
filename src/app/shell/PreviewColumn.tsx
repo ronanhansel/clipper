@@ -148,7 +148,7 @@ export function PreviewColumn({ blankFrameViewportStyle, children, currentSceneT
 
         {/* Editor overlay — sibling of scroll viewport, not inside it. Not affected by preview scrollTop/scrollLeft. */}
         {mode === "editor" && editorPaneProps ? <div className="absolute inset-0 z-10"><EditorPane {...editorPaneProps} /></div> : null}
-        {mode === "editor" && !editorPaneProps ? <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center p-6 text-center text-sm font-bold text-[#9b9da7]">No file is open in the editor.</div> : null}
+        {mode === "editor" && !editorPaneProps ? <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center bg-[#12141a] p-6 text-center text-sm font-bold text-[#9b9da7]">No file is open in the editor.</div> : null}
         {mode === "preview" ? <div ref={setPreviewOverlayHost} className="pointer-events-none absolute inset-0 z-20 overflow-hidden" data-clipper-preview-overlay-host /> : null}
       </div>
       {children}

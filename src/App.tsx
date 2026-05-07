@@ -260,6 +260,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     updateEditorTab,
     selectEditorTab,
     closeEditorTab,
+    closeCompositionEditorTabs,
     restoreClosedEditorTab,
     setCurrentSceneTime,
     applyEditorState: applyStoredEditorState,
@@ -696,6 +697,16 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     visibleSceneAdjustmentLayers,
     wasPlayingRef,
   });
+  const scrubComposePlaybackTime = useCallback((time: number) => {
+    if (!composePlaybackRange) {
+      scrubToPlaybackDisplayTime(time);
+      return;
+    }
+
+    const duration = Math.max(composePlaybackRange.end - composePlaybackRange.start, 0);
+    const boundedTime = duration > 0 ? clamp(time, 0.000001, Math.max(duration - 0.000001, 0)) : 0;
+    scrubToSceneTime(composePlaybackRange.start + boundedTime);
+  }, [composePlaybackRange, scrubToPlaybackDisplayTime, scrubToSceneTime]);
   const {
     enterFrameFullscreen,
     enterTheaterMode,
@@ -1734,8 +1745,17 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     unsupportedReason: activeEditorTab.unsupportedReason,
     showCompositionApiStatus: Boolean(activeEditorTab.isComposition),
   } : null;
-  const editorPaneTabs: EditorPaneTab[] = editorTabs.map((tab) => ({ id: tab.id, filePath: tab.filePath, unsupportedReason: tab.unsupportedReason, isPinned: tab.isPinned }));
+  const editorPaneTabs: EditorPaneTab[] = editorTabs.map((tab) => ({ id: tab.id, filePath: tab.filePath, unsupportedReason: tab.unsupportedReason, isComposition: tab.isComposition, isPinned: tab.isPinned }));
   const activeEditorViewportState = activeEditorDocument ? project.editorState?.editor?.[activeEditorDocument.id] ?? project.editorState?.code?.[activeEditorDocument.id] : undefined;
+
+  useEffect(() => {
+    if (mode !== "editor" || !composeMode) {
+      closeCompositionEditorTabs();
+      return;
+    }
+    if (!activeTimelinePart) return;
+    openCompositionInEditor(activeTimelinePart.id);
+  }, [activeTimelinePart?.id, closeCompositionEditorTabs, composeMode, mode]);
 
   useEffect(() => {
     if (!activeEditorTab || activeEditorTab.isComposition || activeEditorTab.source !== undefined || activeEditorTab.unsupportedReason) return;
@@ -2040,7 +2060,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
         onUpdateComposition: updateCompositionMarker,
         onMoveMotionMarker: moveMotionMarker,
         onMoveMotionMarkers: moveMotionMarkers,
-        onScrub: composeMode && activeTimelinePart ? scrubToPlaybackDisplayTime : scrubToSceneTime,
+        onScrub: composeMode && activeTimelinePart ? scrubComposePlaybackTime : scrubToSceneTime,
         onScrubStart: pausePlaybackOnScrub ? pausePlaybackForTimelineScrub : () => {},
         onScrubEnd: pausePlaybackOnScrub ? resumePlaybackAfterTimelineScrub : () => {},
         onUpdateMotionMarkers: updateMotionMarkers as any,
