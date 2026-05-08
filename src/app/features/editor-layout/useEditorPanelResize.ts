@@ -1,4 +1,4 @@
-import { useEffect, useRef, type PointerEvent, type RefObject } from "react";
+import { useEffect, useRef, useState, type PointerEvent, type RefObject } from "react";
 import { defaultComposeLayoutState, defaultEditorLayoutState } from "../../../core/project";
 import type { ComposeLayoutState, EditorLayoutState, EditorState, ProjectManifest } from "../../../core/types";
 import { clamp } from "../../../core/math";
@@ -29,12 +29,14 @@ const editorPanelLayoutLimits = {
 type UseEditorPanelResizeInput = {
   appRootRef: RefObject<HTMLElement | null>;
   projectRef: RefObject<ProjectManifest>;
-  updateEditorState: (updater: (state: EditorState) => EditorState) => void;
+  updateEditorState: (updater: (state: EditorState) => EditorState, options?: { autosave?: boolean }) => void;
   scheduleImplicitFileOperationSave: (projectOverride: ProjectManifest, errorMessage?: string) => void;
 };
 
 export function useEditorPanelResize({ appRootRef, projectRef, updateEditorState, scheduleImplicitFileOperationSave }: UseEditorPanelResizeInput) {
   const editorPanelResizeRef = useRef<EditorPanelResizeDrag | null>(null);
+  const [previewEditorLayout, setPreviewEditorLayout] = useState<EditorLayoutState | null>(null);
+  const [previewComposeLayout, setPreviewComposeLayout] = useState<ComposeLayoutState | null>(null);
 
   function clampEditorLayout(layout: EditorLayoutState): EditorLayoutState {
     const availablePanelWidth = Math.max(window.innerWidth - editorPanelLayoutLimits.centerMin, editorPanelLayoutLimits.leftMin + editorPanelLayoutLimits.rightMin);
@@ -66,20 +68,20 @@ export function useEditorPanelResize({ appRootRef, projectRef, updateEditorState
     root.style.setProperty("--clipper-compose-left-panel-width", `${layout.leftPanelWidth}px`);
   }
 
-  function updateEditorLayout(layout: EditorLayoutState) {
+  function updateEditorLayout(layout: EditorLayoutState, options?: { autosave?: boolean }) {
     const nextLayout = clampEditorLayout(layout);
     const currentLayout = projectRef.current.editorState?.layout ?? defaultEditorLayoutState;
     if (JSON.stringify(nextLayout) === JSON.stringify(currentLayout)) return;
-    updateEditorState((state) => ({ ...state, layout: nextLayout }));
-    scheduleImplicitFileOperationSave(projectRef.current, "Unable to save layout.");
+    updateEditorState((state) => ({ ...state, layout: nextLayout }), { autosave: false });
+    if (options?.autosave !== false) scheduleImplicitFileOperationSave(projectRef.current, "Unable to save layout.");
   }
 
-  function updateComposeLayout(layout: ComposeLayoutState) {
+  function updateComposeLayout(layout: ComposeLayoutState, options?: { autosave?: boolean }) {
     const nextLayout = clampComposeLayout(layout);
     const currentLayout = projectRef.current.editorState?.composeLayout ?? defaultComposeLayoutState;
     if (JSON.stringify(nextLayout) === JSON.stringify(currentLayout)) return;
-    updateEditorState((state) => ({ ...state, composeLayout: nextLayout }));
-    scheduleImplicitFileOperationSave(projectRef.current, "Unable to save compose layout.");
+    updateEditorState((state) => ({ ...state, composeLayout: nextLayout }), { autosave: false });
+    if (options?.autosave !== false) scheduleImplicitFileOperationSave(projectRef.current, "Unable to save compose layout.");
   }
 
   function onEditorPanelResizeMove(event: globalThis.PointerEvent) {
@@ -106,6 +108,8 @@ export function useEditorPanelResize({ appRootRef, projectRef, updateEditorState
       drag.frame = 0;
       applyEditorLayoutCss(drag.nextLayout);
       applyComposeLayoutCss(drag.nextComposeLayout);
+      if (drag.kind === "compose-left") setPreviewComposeLayout(drag.nextComposeLayout);
+      else setPreviewEditorLayout(drag.nextLayout);
     });
   }
 
@@ -117,6 +121,10 @@ export function useEditorPanelResize({ appRootRef, projectRef, updateEditorState
     applyComposeLayoutCss(drag.nextComposeLayout);
     if (drag.kind === "compose-left") updateComposeLayout(drag.nextComposeLayout);
     else updateEditorLayout(drag.nextLayout);
+    requestAnimationFrame(() => {
+      setPreviewEditorLayout(null);
+      setPreviewComposeLayout(null);
+    });
     editorPanelResizeRef.current = null;
     document.body.style.cursor = "";
     document.body.style.userSelect = "";
@@ -134,6 +142,8 @@ export function useEditorPanelResize({ appRootRef, projectRef, updateEditorState
     const initialComposeLayout = clampComposeLayout(projectRef.current.editorState?.composeLayout ?? defaultComposeLayoutState);
     const drag: EditorPanelResizeDrag = { kind, originX: event.clientX, originY: event.clientY, initialLayout, initialComposeLayout, nextLayout: initialLayout, nextComposeLayout: initialComposeLayout, frame: 0 };
     editorPanelResizeRef.current = drag;
+    if (kind === "compose-left") setPreviewComposeLayout(initialComposeLayout);
+    else setPreviewEditorLayout(initialLayout);
     document.body.style.cursor = kind === "timeline" ? "row-resize" : "col-resize";
     document.body.style.userSelect = "none";
     window.addEventListener("pointermove", onEditorPanelResizeMove, true);
@@ -145,6 +155,8 @@ export function useEditorPanelResize({ appRootRef, projectRef, updateEditorState
     const drag = editorPanelResizeRef.current;
     if (drag?.frame) cancelAnimationFrame(drag.frame);
     editorPanelResizeRef.current = null;
+    setPreviewEditorLayout(null);
+    setPreviewComposeLayout(null);
     document.body.style.cursor = "";
     document.body.style.userSelect = "";
     window.removeEventListener("pointermove", onEditorPanelResizeMove, true);
@@ -152,5 +164,5 @@ export function useEditorPanelResize({ appRootRef, projectRef, updateEditorState
     window.removeEventListener("pointercancel", onEditorPanelResizeEnd, true);
   }, []);
 
-  return { startEditorPanelResize };
+  return { previewComposeLayout, previewEditorLayout, startEditorPanelResize };
 }

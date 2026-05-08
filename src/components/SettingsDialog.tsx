@@ -1,6 +1,6 @@
 import { RotateCcw } from "lucide-react";
 import { appBarButtonBase, defaultExportTileMapping, defaultExportWorkerMapping, defaultLiveDomPostProcessMaxFps, defaultNewMarkerDurationSeconds, defaultPausePlaybackOnScrub, defaultPrerenderBlockDurationMs, defaultPreviewRenderHeight, defaultScrubCommitThrottleMs, defaultStableSlowGridPreset, defaultStableSlowValidationSamples, defaultTimelineEndPaddingFraction, defaultTimelinePrecision, defaultVideoExportTileHeight, maxExportTileCount, maxExportWorkerCount, maxLiveDomPostProcessMaxFps, maxPrerenderBlockDurationMs, maxStableSlowValidationSamples, maxVideoExportTileHeight, minExportTileCount, minExportWorkerCount, minLiveDomPostProcessMaxFps, minPrerenderBlockDurationMs, minStableSlowValidationSamples, minVideoExportTileHeight, previewRenderHeightOptions } from "../app/config";
-import type { AppUpdateStatus, ExportTileResolutionMapping, ExportWorkerConfigurationMode, ExportWorkerResolutionMapping, SettingsSection, StableSlowGridPreset, StableSlowValidationSamples } from "../app/types";
+import type { AgentProvider, AppUpdateStatus, ExportTileResolutionMapping, ExportWorkerConfigurationMode, ExportWorkerResolutionMapping, SettingsSection, StableSlowGridPreset, StableSlowValidationSamples } from "../app/types";
 import { clamp } from "../core/math";
 import { Dialog, DialogContent } from "./ui/dialog";
 import { Input } from "./ui/input";
@@ -17,6 +17,7 @@ const stableSlowGridPresetDescriptions: Record<StableSlowGridPreset, string> = {
 
 type SettingsDialogProps = {
   activeSection: SettingsSection;
+  agentProvider: AgentProvider;
   autoDownloadUpdates: boolean;
   debugSettingsEnabled: boolean;
   exportTileMapping: ExportTileResolutionMapping;
@@ -40,6 +41,7 @@ type SettingsDialogProps = {
   updateStatus: AppUpdateStatus;
   videoExportTileHeight: number;
   onActiveSectionChange: (section: SettingsSection) => void;
+  onAgentProviderChange: (provider: AgentProvider) => void;
   onAutoDownloadUpdatesChange: (enabled: boolean) => void;
   onCheckForUpdates: () => void;
   onDownloadUpdate: () => void;
@@ -66,7 +68,7 @@ type SettingsDialogProps = {
   onVideoExportTileHeightChange: (value: number) => void;
 };
 
-export function SettingsDialog({ activeSection, autoDownloadUpdates, debugSettingsEnabled, exportTileMapping, exportWorkerConfigurationMode, exportWorkerMapping, stableSlowGridPreset, stableSlowValidationSamples, liveDomPostProcessPreviewEnabled, liveDomPostProcessRuntimeEnabled, liveDomPostProcessMaxFps, open, pausePlaybackOnScrub, prerenderCacheBlackMissDebug, prerenderCacheEnabled, prerenderBlockDurationMs, previewRenderHeight, scrubCommitThrottleMs, defaultNewMarkerDurationSeconds: markerDurationSeconds, timelineEndPaddingFraction, timelinePrecision, updateStatus, videoExportTileHeight, onActiveSectionChange, onAutoDownloadUpdatesChange, onCheckForUpdates, onDownloadUpdate, onDebugSettingsEnabledChange, onExportTileMappingChange, onExportWorkerConfigurationModeChange, onExportWorkerMappingChange, onStableSlowGridPresetChange, onStableSlowValidationSamplesChange, onInstallUpdate, onLiveDomPostProcessPreviewEnabledChange, onLiveDomPostProcessMaxFpsChange, onOpenChange, onPausePlaybackOnScrubChange, onPrerenderCacheBlackMissDebugChange, onPrerenderCacheEnabledChange, onPrerenderBlockDurationMsChange, onPreviewRenderHeightChange, onClearAllPrerenderCaches, onScrubCommitThrottleMsChange, onDefaultNewMarkerDurationSecondsChange, onTimelineEndPaddingFractionChange, onTimelinePrecisionChange, onVideoExportTileHeightChange }: SettingsDialogProps) {
+export function SettingsDialog({ activeSection, agentProvider, autoDownloadUpdates, debugSettingsEnabled, exportTileMapping, exportWorkerConfigurationMode, exportWorkerMapping, stableSlowGridPreset, stableSlowValidationSamples, liveDomPostProcessPreviewEnabled, liveDomPostProcessRuntimeEnabled, liveDomPostProcessMaxFps, open, pausePlaybackOnScrub, prerenderCacheBlackMissDebug, prerenderCacheEnabled, prerenderBlockDurationMs, previewRenderHeight, scrubCommitThrottleMs, defaultNewMarkerDurationSeconds: markerDurationSeconds, timelineEndPaddingFraction, timelinePrecision, updateStatus, videoExportTileHeight, onActiveSectionChange, onAgentProviderChange, onAutoDownloadUpdatesChange, onCheckForUpdates, onDownloadUpdate, onDebugSettingsEnabledChange, onExportTileMappingChange, onExportWorkerConfigurationModeChange, onExportWorkerMappingChange, onStableSlowGridPresetChange, onStableSlowValidationSamplesChange, onInstallUpdate, onLiveDomPostProcessPreviewEnabledChange, onLiveDomPostProcessMaxFpsChange, onOpenChange, onPausePlaybackOnScrubChange, onPrerenderCacheBlackMissDebugChange, onPrerenderCacheEnabledChange, onPrerenderBlockDurationMsChange, onPreviewRenderHeightChange, onClearAllPrerenderCaches, onScrubCommitThrottleMsChange, onDefaultNewMarkerDurationSecondsChange, onTimelineEndPaddingFractionChange, onTimelinePrecisionChange, onVideoExportTileHeightChange }: SettingsDialogProps) {
   const navItems: Array<{ id: SettingsSection; label: string }> = [
     { id: "general", label: "General" },
     { id: "playback", label: "Playback" },
@@ -172,6 +174,25 @@ export function SettingsDialog({ activeSection, autoDownloadUpdates, debugSettin
             <div className="settings-scrollbar min-h-0 overflow-y-auto overflow-x-hidden p-5 [scrollbar-gutter:stable]">
               {activeSection === "general" ? (
                 <div className="grid gap-4 rounded-xl border border-[#363b47] bg-[#1b1e26] p-4">
+                  <div className="grid gap-1.5">
+                    <strong className="text-sm text-white">Agent provider</strong>
+                    <p className="text-xs leading-5 text-[#8f939d]">Choose which coding CLI opens from folder context menus.</p>
+                  </div>
+                  <label className="grid max-w-[260px] gap-1.5 text-xs font-bold text-[#dfe2ea]" htmlFor="agent-provider">
+                    Default provider
+                    <Select value={agentProvider} onValueChange={(value) => onAgentProviderChange(value as AgentProvider)}>
+                      <SelectTrigger id="agent-provider" className="h-9">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="opencode">OpenCode</SelectItem>
+                        <SelectItem value="codex">Codex</SelectItem>
+                        <SelectItem value="claude">Claude</SelectItem>
+                        <SelectItem value="gemini">Gemini</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </label>
+                  <div className="h-px bg-[#363b47]" />
                   <div className="grid gap-1.5">
                     <strong className="text-sm text-white">Automatic updates</strong>
                     <p className="text-xs leading-5 text-[#8f939d]">Clipper can check GitHub releases in packaged builds and download available updates automatically.</p>

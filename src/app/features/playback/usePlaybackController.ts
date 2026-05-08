@@ -264,8 +264,11 @@ export function usePlaybackController({
   }
 
   function resumePlaybackAfterTimelineScrub() {
+    if (!timelineScrubPausedPlaybackRef.current) return;
+
     timelineScrubPausedPlaybackRef.current = false;
-    pausePlaybackAtCurrentTime();
+    if (isPlayingRef.current) return;
+    startPlaybackFromCurrentTime();
   }
 
   function pausePlaybackForPresentationScrub() {

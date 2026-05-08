@@ -1,7 +1,7 @@
 import { AgentPanel } from "../../components/AgentPanel";
-import { AdjustmentInspector, EmptyInspector, FrameInspector, MotionInspector, ObjectInspector, TransitionInspector } from "../../components/inspector/InspectorPanels";
+import { AdjustmentInspector, Composition3dNodeInspector, EmptyInspector, FrameInspector, MotionInspector, ObjectInspector, TransitionInspector } from "../../components/inspector/InspectorPanels";
 import type { AdjustmentEffectPointControl } from "../../core/effects/types";
-import type { AdjustmentLayer, BackgroundLayer, FrameObject, MotionEase, MotionMarker, Part, PartFrame, Point, TransitionLayer } from "../../core/types";
+import type { AdjustmentLayer, BackgroundLayer, CompositionRenderMode, FrameObject, MotionEase, MotionMarker, Part, PartFrame, Point, TransitionLayer } from "../../core/types";
 import type { RightPanelTab } from "../types";
 
 type MarkerPick = { partId: string; markerId: string } | null;
@@ -10,6 +10,7 @@ type PointPickAdjustment = { layerId: string; control: AdjustmentEffectPointCont
 type ConnectedInspectorContentProps = {
   rightPanelTab: RightPanelTab;
   part: Part;
+  composeMode: boolean;
   sourceStatus: string;
   agentContext: unknown;
   selectedMotion: MotionMarker | null | undefined;
@@ -32,6 +33,7 @@ type ConnectedInspectorContentProps = {
   sceneDurationSeconds: number;
   pointPickAdjustment: PointPickAdjustment;
   selectedPart: Part | null | undefined;
+  selectedComposition3dNodeId: string | null;
   onUpdateMotionMarker: (partId: string, markerId: string, updater: (marker: MotionMarker, part: Part) => MotionMarker) => void;
   onPreviewMotionMarker: (partId: string, markerId: string, updater: (marker: MotionMarker) => MotionMarker) => void;
   onPreviewMotionPickPoint: (point: Point | null) => void;
@@ -60,11 +62,14 @@ type ConnectedInspectorContentProps = {
   onUpdateSelectedPartDuration: (duration: number) => void;
   onUpdatePartFrame: (updater: (frame: PartFrame) => PartFrame) => void;
   onUpdatePartBackground: (updater: (background: BackgroundLayer) => BackgroundLayer) => void;
+  onUpdatePartRenderMode: (renderMode: CompositionRenderMode) => void;
+  onUpdateComposition3dGraphNodeParameter: (nodeId: string, key: string, value: string) => void;
 };
 
 export function ConnectedInspectorContent({
   rightPanelTab,
   part,
+  composeMode,
   sourceStatus,
   agentContext,
   selectedMotion,
@@ -87,6 +92,7 @@ export function ConnectedInspectorContent({
   sceneDurationSeconds,
   pointPickAdjustment,
   selectedPart,
+  selectedComposition3dNodeId,
   onUpdateMotionMarker,
   onPreviewMotionMarker,
   onPreviewMotionPickPoint,
@@ -115,6 +121,8 @@ export function ConnectedInspectorContent({
   onUpdateSelectedPartDuration,
   onUpdatePartFrame,
   onUpdatePartBackground,
+  onUpdatePartRenderMode,
+  onUpdateComposition3dGraphNodeParameter,
 }: ConnectedInspectorContentProps) {
   if (rightPanelTab === "agent") return <AgentPanel part={part} sourceStatus={sourceStatus} agentContext={agentContext} />;
 
@@ -181,7 +189,9 @@ export function ConnectedInspectorContent({
     );
   }
 
-  if (selectedPart) return <FrameInspector part={selectedPart} canSnapMiddle={canSnapCompositionMiddle} onDurationChange={onUpdateSelectedPartDuration} onFrameChange={onUpdatePartFrame} onBackgroundChange={onUpdatePartBackground} onSnapMiddle={onSnapCompositionMiddle} />;
+  if (composeMode && part.renderMode === "webgl" && selectedComposition3dNodeId) return <Composition3dNodeInspector part={part} nodeId={selectedComposition3dNodeId} onParameterChange={onUpdateComposition3dGraphNodeParameter} />;
+
+  if (selectedPart) return <FrameInspector part={selectedPart} canSnapMiddle={canSnapCompositionMiddle} onDurationChange={onUpdateSelectedPartDuration} onFrameChange={onUpdatePartFrame} onBackgroundChange={onUpdatePartBackground} onRenderModeChange={onUpdatePartRenderMode} onSnapMiddle={onSnapCompositionMiddle} />;
 
   return <EmptyInspector />;
 }

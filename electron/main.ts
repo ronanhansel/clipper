@@ -6,6 +6,7 @@ import {
   ipcMain,
   screen,
   shell,
+  clipboard,
 } from "electron";
 import {
   spawn,
@@ -30,6 +31,12 @@ const ffmpegPath = require("ffmpeg-static") as string | null;
 const isDev = process.env.VITE_DEV_SERVER_URL || !app.isPackaged;
 const renderVideoChildArgIndex = process.argv.indexOf("--render-video-child");
 const isRenderVideoChildProcess = renderVideoChildArgIndex >= 0;
+const agentProviderCommands: Record<string, string> = {
+  opencode: "opencode",
+  codex: "codex",
+  claude: "claude",
+  gemini: "gemini",
+};
 app.commandLine.appendSwitch("force-color-profile", "srgb");
 const experimentalHtmlCanvasPostProcessEnabled = process.env.CLIPPER_EXPERIMENTAL_HTML_CANVAS_POSTPROCESS === "1" || readStartupAppStateBoolean("experimentalHtmlCanvasPostProcess");
 const automaticUpdateDownloadsEnabled = readStartupAppStateBoolean("automaticUpdateDownloads", true);
@@ -200,6 +207,16 @@ type ProjectWatchPaths = {
   directories: string[];
 };
 
+type TemplateBundle = {
+  id: string;
+  slug: string;
+  title: string;
+  subtitle: string;
+  entry: string;
+  author: { name: string; github?: string; twitter?: string; email?: string };
+  files: Record<string, string>;
+};
+
 type MacFontProfile = {
   SPFontsDataType?: Array<{
     enabled?: string;
@@ -308,6 +325,108 @@ function getClipperRelativePath(filePath: string) {
   return path.relative(appRoot, resolved).split(path.sep).join("/");
 }
 
+function getAgentProviderCommand(provider: string) {
+  const command = agentProviderCommands[provider];
+  if (!command) throw new Error(`Unsupported agent provider: ${provider}`);
+  return command;
+}
+
+async function loadTemplateBundles(): Promise<TemplateBundle[]> {
+  const root = await resolveTemplatesRoot();
+  const entries = await fs.readdir(root, { withFileTypes: true }).catch(() => []);
+  const bundles = await Promise.all(entries.filter((entry) => entry.isDirectory() && entry.name.startsWith("submission-")).map((entry) => loadTemplateBundle(root, entry.name)));
+  return bundles.filter((bundle): bundle is TemplateBundle => Boolean(bundle)).sort((a, b) => a.id.localeCompare(b.id));
+}
+
+async function resolveTemplatesRoot() {
+  const candidates = [path.join(appRoot, "templates"), path.join(app.getAppPath(), "templates"), path.join(process.resourcesPath, "templates")];
+  for (const candidate of candidates) {
+    try {
+      const stat = await fs.stat(candidate);
+      if (stat.isDirectory()) return candidate;
+    } catch {
+      // Try next runtime location.
+    }
+  }
+  throw new Error("Template directory not found.");
+}
+
+async function loadTemplateBundle(root: string, folderName: string): Promise<TemplateBundle | null> {
+  const folderPath = path.join(root, folderName);
+  const manifestSource = await fs.readFile(path.join(folderPath, "manifest.yml"), "utf8").catch(() => "");
+  if (!manifestSource) return null;
+  const manifest = parseTemplateManifest(manifestSource);
+  const sourceRoot = path.join(folderPath, "source");
+  const files = await readTemplateSourceFiles(sourceRoot);
+  if (!files[manifest.entry]) throw new Error(`Template ${manifest.id} entry missing: ${manifest.entry}`);
+  return { ...manifest, files };
+}
+
+function parseTemplateManifest(source: string): Omit<TemplateBundle, "files"> {
+  const values: Record<string, string> = {};
+  const author: TemplateBundle["author"] = { name: "" };
+  let section = "";
+  for (const line of source.split(/\r?\n/)) {
+    if (!line.trim() || line.trimStart().startsWith("#")) continue;
+    const match = /^(\s*)([\w-]+):\s*(.*)$/.exec(line);
+    if (!match) continue;
+    const [, indent, key, rawValue] = match;
+    const value = unquoteYamlScalar(rawValue.trim());
+    if (!indent) {
+      section = rawValue.trim() ? "" : key;
+      if (rawValue.trim()) values[key] = value;
+    } else if (section === "author") {
+      if (key === "name" || key === "github" || key === "twitter" || key === "email") author[key] = value;
+    }
+  }
+  const id = values.id;
+  const title = values.name;
+  const entry = values.entry || "source/main.composition.ts";
+  if (!id || !title) throw new Error("Template manifest requires id and name.");
+  return { id, slug: values.slug || id, title, subtitle: values.subtitle || "", entry, author: { name: author.name || "Unknown", github: author.github || undefined, twitter: author.twitter || undefined, email: author.email || undefined } };
+}
+
+function unquoteYamlScalar(value: string) {
+  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) return value.slice(1, -1);
+  return value;
+}
+
+async function readTemplateSourceFiles(sourceRoot: string) {
+  const files: Record<string, string> = {};
+  async function visit(directoryPath: string) {
+    const entries = await fs.readdir(directoryPath, { withFileTypes: true });
+    for (const entry of entries) {
+      const entryPath = path.join(directoryPath, entry.name);
+      if (entry.isDirectory()) {
+        await visit(entryPath);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      const relativePath = `source/${path.relative(sourceRoot, entryPath).split(path.sep).join("/")}`;
+      files[relativePath] = await fs.readFile(entryPath, "utf8");
+    }
+  }
+  await visit(sourceRoot);
+  return files;
+}
+
+function openTerminalWithCommand(folderPath: string, command: string) {
+  const shellCommand = `cd ${shellQuote(folderPath)} && ${command}`;
+  if (process.platform === "darwin") {
+    spawn("osascript", ["-e", `tell application "Terminal" to do script ${JSON.stringify(shellCommand)}`], { detached: true, stdio: "ignore" }).unref();
+    return;
+  }
+  if (process.platform === "win32") {
+    spawn("cmd.exe", ["/c", "start", "cmd.exe", "/k", shellCommand], { detached: true, stdio: "ignore" }).unref();
+    return;
+  }
+  spawn("sh", ["-lc", `x-terminal-emulator -e sh -lc ${shellQuote(`${shellCommand}; exec sh`)}`], { detached: true, stdio: "ignore" }).unref();
+}
+
+function shellQuote(value: string) {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
 // ─── Instantiate RenderEngine ─────────────────────────────────────────────
 
 engine = new RenderEngine({
@@ -392,6 +511,20 @@ ipcMain.handle(
   },
 );
 
+ipcMain.handle("clipper:copy-text", async (_event, text: string) => {
+  clipboard.writeText(text);
+});
+
+ipcMain.handle(
+  "clipper:open-agent-terminal",
+  async (_event, relativePath: string, provider: string) => {
+    const folderPath = resolveClipperFile(relativePath);
+    const command = getAgentProviderCommand(provider);
+    await fs.mkdir(folderPath, { recursive: true });
+    openTerminalWithCommand(folderPath, command);
+  },
+);
+
 ipcMain.handle("clipper:trash-file", async (_event, relativePath: string) => {
   const filePath = resolveClipperFile(relativePath);
   try {
@@ -441,6 +574,8 @@ ipcMain.handle(
     }
   },
 );
+
+ipcMain.handle("clipper:list-templates", async () => loadTemplateBundles());
 
 ipcMain.handle(
   "clipper:find-project-file-by-name",
@@ -634,6 +769,10 @@ ipcMain.handle(
 
     try {
       await fs.mkdir(folderPath);
+      await fs.mkdir(path.join(folderPath, "file-manager"), { recursive: true });
+      await fs.mkdir(path.join(folderPath, "file-manager", "assets"), { recursive: true });
+      await fs.mkdir(path.join(folderPath, "file-manager", "compositions"), { recursive: true });
+      await fs.mkdir(path.join(folderPath, "file-manager", "timelines"), { recursive: true });
     } catch (error) {
       if ((error as { code?: string }).code === "EEXIST") {
         throw new Error(`A project named "${folderName}" already exists.`);

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type MutableRefObject, type RefObject } from "react";
+import { createElement, useCallback, useEffect, useRef, useState, type MutableRefObject, type RefObject } from "react";
 import { clipperHost } from "../clipperHost";
 import toast from "react-hot-toast";
 import { maxProjectHistoryActions, projectHistoryCoalesceMs } from "../config";
@@ -32,7 +32,7 @@ export type ProjectDocumentController = {
   replaceProject: (nextProject: ProjectManifest, options?: { history?: boolean; syncSources?: boolean; coalesceHistory?: boolean }) => void;
   redoProjectChange: () => Promise<void> | void;
   reloadProject: () => Promise<void>;
-  reloadProjectFromWatcher: () => Promise<void>;
+  reloadProjectFromWatcher: (changedPath?: string) => Promise<void>;
   saveAllChanges: () => Promise<void>;
   savedCompositionSourcesSnapshot: string;
   savedProjectSnapshot: string;
@@ -41,7 +41,7 @@ export type ProjectDocumentController = {
   syncCompositionSourcesFromProject: (nextProject: ProjectManifest) => void;
   undoProjectChange: () => Promise<void> | void;
   updateCompositionFromSource: (basePart: Part, source: string, options?: { syncSource?: boolean; history?: boolean }) => Promise<void>;
-  updateEditorState: (updater: (state: EditorState) => EditorState, options?: { history?: boolean; coalesceHistory?: boolean }) => void;
+  updateEditorState: (updater: (state: EditorState) => EditorState, options?: { history?: boolean; coalesceHistory?: boolean; autosave?: boolean }) => void;
   updateProject: (updater: ProjectUpdater, options?: { history?: boolean; syncSources?: boolean; coalesceHistory?: boolean }) => void;
   watchedProjectDirectory: string;
   writeEditorTextFile: (filePath: string, source: string) => Promise<void>;
@@ -75,6 +75,9 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
   const savedProjectSnapshotRef = useRef(savedProjectSnapshot);
   const editableRootCacheRef = useRef<Record<string, string>>({});
   const savedCompositionSourcesSnapshotRef = useRef(savedCompositionSourcesSnapshot);
+  const externalChangeConflictActiveRef = useRef(false);
+  const externalChangeToastIdRef = useRef<string | null>(null);
+  const suppressProjectWatcherUntilRef = useRef(0);
   const projectHistoryRef = useRef<{ past: ProjectHistoryEntry[]; future: ProjectHistoryEntry[] }>({ past: [], future: [] });
   const lastProjectHistoryAtRef = useRef(0);
   const operationQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -96,7 +99,7 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
     setProjectDocument(nextProject, nextSources);
   }
 
-  const replaceProject = useCallback((nextProject: ProjectManifest, options: { history?: boolean; syncSources?: boolean; coalesceHistory?: boolean; preservePageMode?: boolean } = {}) => {
+  const replaceProject = useCallback((nextProject: ProjectManifest, options: { history?: boolean; syncSources?: boolean; coalesceHistory?: boolean; preservePageMode?: boolean; preserveEditorState?: boolean } = {}) => {
     const currentProject = projectRef.current;
     let nextCompositionSources = nextProject.compositionSources ?? getProjectCompositionSources(nextProject);
     let normalizedProject: ProjectManifest;
@@ -107,7 +110,12 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
       nextCompositionSources = nextProject.compositionSources ?? compositionSourcesRef.current;
       normalizedProject = normalizeProject({ ...nextProject, compositionSources: nextCompositionSources });
     }
-    if (options.preservePageMode !== false) {
+    if (options.preserveEditorState) {
+      normalizedProject = normalizeProject({
+        ...normalizedProject,
+        editorState: projectRef.current.editorState ?? defaultEditorState,
+      });
+    } else if (options.preservePageMode !== false) {
       const currentEditorState = projectRef.current.editorState ?? defaultEditorState;
       normalizedProject = normalizeProject({
         ...normalizedProject,
@@ -138,7 +146,7 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
     scheduleAutosave(normalizedProject);
   }, []);
 
-  function updateEditorState(updater: (state: EditorState) => EditorState, options: { history?: boolean; coalesceHistory?: boolean } = {}) {
+  function updateEditorState(updater: (state: EditorState) => EditorState, options: { history?: boolean; coalesceHistory?: boolean; autosave?: boolean } = {}) {
     const current = projectRef.current;
     const nextProject = normalizeProject({
       ...current,
@@ -151,6 +159,7 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
     }
 
     commitProjectDocument(nextProject, compositionSourcesRef.current);
+    if (options.autosave === false) return;
     scheduleAutosave(nextProject);
   }
 
@@ -165,10 +174,49 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
   }
 
   function hasUnsavedProjectChanges(projectToCheck = projectRef.current) {
+    const snapshots = getCurrentProjectSnapshots(projectToCheck);
+    return snapshots.project !== savedProjectSnapshotRef.current || snapshots.compositionSources !== savedCompositionSourcesSnapshotRef.current;
+  }
+
+  async function hasExternalDiskChanges() {
+    const diskSnapshots = await getDiskProjectSnapshots();
+    const currentSnapshots = getCurrentProjectSnapshots();
+    if (snapshotsEqual(diskSnapshots, currentSnapshots)) {
+      markSnapshotsSaved(currentSnapshots);
+      return false;
+    }
+    return !snapshotsEqual(diskSnapshots, { project: savedProjectSnapshotRef.current, compositionSources: savedCompositionSourcesSnapshotRef.current });
+  }
+
+  function getCurrentProjectSnapshots(projectToCheck = projectRef.current): SavedSnapshots {
     const persistedProject = serializeProjectForSave({ ...projectToCheck, compositionSources: compositionSourcesRef.current });
-    const projectSnapshot = getProjectContentSnapshot(persistedProject);
-    const compositionSourcesSnapshot = JSON.stringify(persistedProject.compositionSources ?? {});
-    return projectSnapshot !== savedProjectSnapshotRef.current || compositionSourcesSnapshot !== savedCompositionSourcesSnapshotRef.current;
+    return {
+      project: getProjectContentSnapshot(persistedProject),
+      compositionSources: JSON.stringify(persistedProject.compositionSources ?? {}),
+    };
+  }
+
+  async function getDiskProjectSnapshots(): Promise<SavedSnapshots> {
+    const { project: loadedProject } = await projectPersistenceService.loadProject({ manifestPath: activeProjectManifestPathRef.current });
+    const normalizedProject = normalizeProject(loadedProject);
+    const loadedCompositionSources = getProjectCompositionSources(normalizedProject);
+    const persistedProject = serializeProjectForSave({ ...normalizedProject, compositionSources: loadedCompositionSources });
+    return {
+      project: getProjectContentSnapshot(persistedProject),
+      compositionSources: JSON.stringify(persistedProject.compositionSources ?? {}),
+    };
+  }
+
+  function snapshotsEqual(left: SavedSnapshots, right: SavedSnapshots) {
+    return left.project === right.project && left.compositionSources === right.compositionSources;
+  }
+
+  function markSnapshotsSaved(snapshots: SavedSnapshots) {
+    savedProjectSnapshotRef.current = snapshots.project;
+    savedCompositionSourcesSnapshotRef.current = snapshots.compositionSources;
+    setSavedProjectSnapshot(snapshots.project);
+    setSavedCompositionSourcesSnapshot(snapshots.compositionSources);
+    setLastSavedAt(Date.now());
   }
 
   function markLastHistoryEntryAsImplicitFileOperation() {
@@ -231,11 +279,20 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
     setSourceStatus(nextSourceStatus);
   }
 
-  const reloadProjectFromDisk = useCallback(async () => {
+  const reloadProjectFromDisk = useCallback(async (options?: { preserveEditorState?: boolean }) => {
     try {
       const { project: loadedProject } = await projectPersistenceService.loadProject({ manifestPath: activeProjectManifestPathRef.current });
       const normalizedProject = normalizeProject(loadedProject);
-      replaceProject(normalizedProject, { history: false, syncSources: false });
+      const loadedCompositionSources = getProjectCompositionSources(normalizedProject);
+      replaceProject(normalizedProject, { history: false, syncSources: false, preserveEditorState: options?.preserveEditorState });
+      const persistedProject = serializeProjectForSave({ ...normalizedProject, compositionSources: loadedCompositionSources });
+      const nextSavedProjectSnapshot = getProjectContentSnapshot(persistedProject);
+      const nextSavedCompositionSourcesSnapshot = JSON.stringify(persistedProject.compositionSources ?? {});
+      setSavedProjectSnapshot(nextSavedProjectSnapshot);
+      setSavedCompositionSourcesSnapshot(nextSavedCompositionSourcesSnapshot);
+      savedProjectSnapshotRef.current = nextSavedProjectSnapshot;
+      savedCompositionSourcesSnapshotRef.current = nextSavedCompositionSourcesSnapshot;
+      setLastSavedAt(Date.now());
       setSourceStatus("Project reloaded from disk.");
       setFileSystemRevision((r) => r + 1);
     } catch (error) {
@@ -248,17 +305,47 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
     await reloadProjectFromDisk();
   }, [reloadProjectFromDisk]);
 
-  const reloadProjectFromWatcher = useCallback(async () => {
+  const reloadProjectFromWatcher = useCallback(async (changedPath?: string) => {
     if (pendingFileOperationsRef.current > 0) return;
-    const persistedProject = serializeProjectForSave({ ...projectRef.current, compositionSources: compositionSourcesRef.current });
-    const projectSnapshot = getProjectContentSnapshot(persistedProject);
-    const compositionSourcesSnapshot = JSON.stringify(persistedProject.compositionSources ?? {});
-    if (projectSnapshot !== savedProjectSnapshotRef.current || compositionSourcesSnapshot !== savedCompositionSourcesSnapshotRef.current) {
-      setSourceStatus("External project file change detected. Autosave paused until reload.");
+    if (!isWatchedFileManagerPath(changedPath)) return;
+    if (performance.now() < suppressProjectWatcherUntilRef.current) return;
+    window.clearTimeout(implicitFileOperationSaveTimeoutRef.current);
+    implicitFileOperationSaveVersionRef.current++;
+    latestAutosaveVersionRef.current++;
+    const currentSnapshots = getCurrentProjectSnapshots();
+    const savedSnapshots = { project: savedProjectSnapshotRef.current, compositionSources: savedCompositionSourcesSnapshotRef.current };
+    const diskSnapshots = await getDiskProjectSnapshots();
+    if (snapshotsEqual(diskSnapshots, savedSnapshots)) return;
+    if (snapshotsEqual(diskSnapshots, currentSnapshots)) {
+      markSnapshotsSaved(currentSnapshots);
+      setSourceStatus(changedPath ? `Saved changes detected at ${changedPath}.` : "Saved project changes detected.");
       return;
     }
-    await reloadProjectFromDisk();
+    await reloadProjectFromDisk({ preserveEditorState: true });
   }, [reloadProjectFromDisk, setSourceStatus]);
+
+  function showExternalChangeConflict(changedPath?: string) {
+    externalChangeConflictActiveRef.current = true;
+    setSourceStatus(changedPath ? `External change detected at ${changedPath}. Choose whether to save app changes or load disk changes.` : "External project file change detected. Choose whether to save app changes or load disk changes.");
+    if (externalChangeToastIdRef.current) toast.dismiss(externalChangeToastIdRef.current);
+    externalChangeToastIdRef.current = toast.custom((t) => createElement("div", { className: `flex w-[min(420px,calc(100vw-32px))] flex-col gap-3 rounded-2xl border border-[#2d313b] bg-[#12141a] p-4 text-[#f7f7f8] shadow-2xl shadow-black/50 backdrop-blur ${t.visible ? "animate-[clipper-dialog-in_190ms_cubic-bezier(0.16,1,0.3,1)_forwards]" : "animate-[clipper-dialog-out_120ms_ease-in_forwards]"}` },
+      createElement("div", { className: "space-y-1" },
+        createElement("div", { className: "text-sm font-semibold text-white" }, "External file change conflict"),
+        createElement("div", { className: "text-xs leading-5 text-[#c5c8d2]" }, changedPath ? `${changedPath} changed on disk while app has unsaved changes.` : "Project files changed on disk while app has unsaved changes."),
+        createElement("div", { className: "text-xs leading-5 text-[#9b9da7]" }, "Applies to any watched file-manager file. Choose one. Nothing will be overwritten automatically."),
+      ),
+      createElement("div", { className: "flex justify-end gap-2" },
+        createElement("button", { className: "rounded-lg border border-[#2d313b] px-3 py-1.5 text-xs font-medium text-[#c5c8d2] hover:border-[#4a5060] hover:bg-[#20232c]", type: "button", onClick: () => toast.dismiss(t.id) }, "Decide later"),
+        createElement("button", { className: "rounded-lg border border-[#2d313b] bg-[#1a1d25] px-3 py-1.5 text-xs font-semibold text-white hover:border-[#4a5060] hover:bg-[#20232c]", type: "button", onClick: () => { externalChangeConflictActiveRef.current = false; toast.dismiss(t.id); void reloadProjectFromDisk(); } }, "Load disk changes"),
+        createElement("button", { className: "rounded-lg border border-[#2d313b] bg-[#1a1d25] px-3 py-1.5 text-xs font-semibold text-white hover:border-[#4a5060] hover:bg-[#20232c]", type: "button", onClick: () => { externalChangeConflictActiveRef.current = false; toast.dismiss(t.id); void saveProject(projectRef.current); } }, "Save app over disk"),
+      ),
+    ), { duration: Infinity });
+  }
+
+  function isWatchedFileManagerPath(changedPath?: string) {
+    if (!changedPath) return true;
+    return changedPath.includes("/file-manager/") || changedPath.startsWith("file-manager/") || changedPath.startsWith("clipper/projects/") && changedPath.includes("/file-manager/");
+  }
 
   const enqueueHistoryOperation = useCallback(<T,>(operation: () => Promise<T> | T): Promise<T> => {
     const promise = operationQueueRef.current.catch(() => {}).then(operation);
@@ -501,6 +588,20 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
     setIsFileSystemBusy(true);
     const write = async () => {
       if (!shouldApplySaveResult()) return;
+      if (autosaveVersion !== undefined && externalChangeConflictActiveRef.current) return;
+      if (autosaveVersion !== undefined) {
+        const diskSnapshots = await getDiskProjectSnapshots();
+        const savedSnapshots = { project: savedProjectSnapshotRef.current, compositionSources: savedCompositionSourcesSnapshotRef.current };
+        if (snapshotsEqual(diskSnapshots, { project: projectSnapshot, compositionSources: compositionSourcesSnapshot })) {
+          markSnapshotsSaved(diskSnapshots);
+          return;
+        }
+        if (!snapshotsEqual(diskSnapshots, savedSnapshots)) {
+          showExternalChangeConflict();
+          return;
+        }
+      }
+      suppressProjectWatcherUntilRef.current = performance.now() + 2500;
       const result = await projectPersistenceService.saveProject({ manifestPath: activeProjectManifestPathRef.current, project: persistedProject });
       if (!shouldApplySaveResult()) return;
       const nextSavedProjectSnapshot = result.projectSnapshot ? getProjectContentSnapshot(JSON.parse(result.projectSnapshot) as ProjectManifest) : projectSnapshot;

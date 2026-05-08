@@ -2,7 +2,7 @@ import { Folder, Sparkles } from "lucide-react";
 import { segmentedTabActive, segmentedTabBase, segmentedTabInactive } from "../config";
 import { ComposeLayersPanel } from "../../components/compose/ComposeLayersPanel";
 import { OsFileManager, type OsFileManagerProps } from "../../components/OsFileManager";
-import { ToolsPanel } from "../../components/ToolsPanel";
+import { Composition3dLibraryPanel, ToolsPanel } from "../../components/ToolsPanel";
 import { FileManagerWorkspace, type FileManagerWorkspaceProps } from "../features/file-manager/FileManagerWorkspace";
 import type { EditorState, FrameObject, Part, TimelineMode } from "../../core/types";
 import type { LeftPanelTab } from "../types";
@@ -26,11 +26,14 @@ type LeftSidebarProps = {
 };
 
 export function LeftSidebar({ composeMode, effectsPanelState, fileManagerProps, hasActiveComposition, leftPanelTab, osFileManagerProps, part, selectedObjectIds, timelineMode, onEffectsPanelStateChange, onLeftPanelTabChange, onReorderComposeObjects, onSelectComposeLayerObjects, onToggleComposeLayerHidden, onToggleComposeLayerLocked }: LeftSidebarProps) {
+  const isComposition3d = part.renderMode === "webgl";
   return (
     <aside className="flex min-h-0 flex-col overflow-hidden border-r border-[#2d313b] bg-[#171920] p-4">
       <div className={`min-h-0 flex-1 overflow-hidden ${composeMode ? "grid" : "pointer-events-none hidden"}`} aria-hidden={!composeMode}>
         {hasActiveComposition
-          ? <ComposeLayersPanel part={part} selectedObjectIds={selectedObjectIds} onSelectObjects={onSelectComposeLayerObjects} onHoverObject={() => undefined} onReorderObjects={onReorderComposeObjects} onToggleLayerHidden={onToggleComposeLayerHidden} onToggleLayerLocked={onToggleComposeLayerLocked} />
+          ? isComposition3d
+            ? <Composition3dLibraryPanel />
+            : <ComposeLayersPanel part={part} selectedObjectIds={selectedObjectIds} onSelectObjects={onSelectComposeLayerObjects} onHoverObject={() => undefined} onReorderObjects={onReorderComposeObjects} onToggleLayerHidden={onToggleComposeLayerHidden} onToggleLayerLocked={onToggleComposeLayerLocked} />
           : <div className="grid h-full place-items-center rounded-[14px] border border-[#2d313b] bg-[#111319]/72 p-5 text-center text-sm font-bold text-[#737884]">Move the playhead over a composition to inspect its layers.</div>}
       </div>
       <div className={`min-h-0 flex-1 overflow-hidden ${composeMode ? "pointer-events-none hidden" : "flex flex-col"}`} aria-hidden={composeMode}>

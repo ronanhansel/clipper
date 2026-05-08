@@ -1,11 +1,11 @@
 import { useEffect, useRef } from "react";
 type UseProjectFileWatcherInput = {
   manifestPath: string;
-  reloadProject: () => Promise<void>;
+  reloadProject: (changedPath?: string) => Promise<void>;
   isFileSystemBusy?: boolean;
 };
 
-const RELOAD_COOLDOWN_MS = 2000;
+const RELOAD_DEBOUNCE_MS = 250;
 
 export function useProjectFileWatcher({
   manifestPath,
@@ -13,8 +13,9 @@ export function useProjectFileWatcher({
   isFileSystemBusy,
 }: UseProjectFileWatcherInput) {
   const debounceRef = useRef(0);
+  const queuedPathRef = useRef<string | undefined>(undefined);
+  const reloadingRef = useRef(false);
   const reloadProjectRef = useRef(reloadProject);
-  const lastReloadRef = useRef(0);
   const isFileSystemBusyRef = useRef(isFileSystemBusy);
   reloadProjectRef.current = reloadProject;
   isFileSystemBusyRef.current = isFileSystemBusy;
@@ -23,16 +24,32 @@ export function useProjectFileWatcher({
 
     void window.clipper?.watchProjectFiles?.({ files: [], directories });
 
-    const cleanup = window.clipper?.onProjectFileChanged?.(() => {
+    const flushReload = async () => {
       if (isFileSystemBusyRef.current) return;
+      if (reloadingRef.current) return;
+      const changedPath = queuedPathRef.current;
+      queuedPathRef.current = undefined;
+      reloadingRef.current = true;
+      try {
+        await reloadProjectRef.current(changedPath);
+      } finally {
+        reloadingRef.current = false;
+        if (queuedPathRef.current && !isFileSystemBusyRef.current) {
+          window.clearTimeout(debounceRef.current);
+          debounceRef.current = window.setTimeout(() => {
+            void flushReload();
+          }, RELOAD_DEBOUNCE_MS);
+        }
+      }
+    };
+
+    const cleanup = window.clipper?.onProjectFileChanged?.((changedPath) => {
+      if (isFileSystemBusyRef.current) return;
+      queuedPathRef.current = changedPath;
       window.clearTimeout(debounceRef.current);
       debounceRef.current = window.setTimeout(() => {
-        const now = Date.now();
-        if (now - lastReloadRef.current < RELOAD_COOLDOWN_MS) return;
-        if (isFileSystemBusyRef.current) return;
-        lastReloadRef.current = now;
-        void reloadProjectRef.current();
-      }, 300);
+        void flushReload();
+      }, RELOAD_DEBOUNCE_MS);
     });
 
     return () => {

@@ -1,5 +1,5 @@
 import * as compositionApi from "./compositionApi";
-import { FRAME_HEIGHT, FRAME_WIDTH, type BackgroundLayer, type FrameObject, type FrameObjectType, type FrameTemplate, type LayerAnimation, type Part, type PartFrame } from "./types";
+import { FRAME_HEIGHT, FRAME_WIDTH, type BackgroundLayer, type CompositionRenderMode, type FrameObject, type FrameObjectType, type FrameTemplate, type JsonValue, type LayerAnimation, type Part, type PartFrame } from "./types";
 
 type SourceObject = {
   id: string;
@@ -19,6 +19,7 @@ type SourceObject = {
 
 type SourceComposition = {
   duration: number;
+  renderMode?: CompositionRenderMode;
   frame: {
     width: number;
     height: number;
@@ -34,6 +35,7 @@ type SourceComposition = {
     animations?: BackgroundLayer["animations"];
     elements?: SourceRenderable[];
   };
+  composition3dGraph?: JsonValue;
   render: (context: compositionApi.RenderContext) => SourceRenderable[];
 };
 
@@ -55,6 +57,8 @@ export async function compositionFromSource(baseComposition: Part, source: strin
     ...baseComposition,
     sourceMissing: undefined,
     duration: sourceComposition.duration,
+    renderMode: sourceComposition.renderMode,
+    composition3dGraph: sourceComposition.composition3dGraph as Part["composition3dGraph"],
     frame: sourceFrameToCompositionFrame(sourceComposition.frame),
     background: sourceBackgroundToLayer(sourceComposition.background),
     objects: getSourceCompositionObjects(sourceComposition).map(sourceObjectToFrameObject),
@@ -101,7 +105,10 @@ function sourceObjectToFrameObject(object: SourceObject): FrameObject {
 }
 
 export function compositionToSource(composition: Part) {
+  if (composition.renderMode === "webgl") return composition3dToSource(composition);
   const imports = Array.from(new Set(["Component", "Composition", ...composition.background.elements.map(frameObjectConstructorName), ...composition.objects.map(frameObjectConstructorName)])).sort();
+  const renderModeSource = composition.renderMode && composition.renderMode !== "dom" ? `  renderMode: ${JSON.stringify(composition.renderMode)},\n` : "";
+  const composition3dGraphSource = composition.composition3dGraph ? `  composition3dGraph: ${tsBlock(composition.composition3dGraph, 2)},\n` : "";
   const background = cleanUndefined({
     id: composition.background.id,
     name: composition.background.name,
@@ -120,7 +127,11 @@ ${backgroundElements.map((object) => indent(object, 6)).join(",\n")}
   }`;
   const objects = composition.objects.map(frameObjectToConstructorSource);
 
-  return `import { ${imports.join(", ")} } from "@clipper/composition-api";\n\nclass GeneratedCompositionObjects extends Component {\n  render() {\n    return [\n${objects.map((object) => indent(object, 6)).join(",\n")}\n    ];\n  }\n}\n\nexport const composition = new Composition({\n  duration: ${JSON.stringify(composition.duration)},\n  frame: ${tsBlock(composition.frame, 2)},\n  background: ${indent(backgroundSource, 2).trimStart()},\n  render() {\n    return [new GeneratedCompositionObjects()];\n  },\n});\n`;
+  return `import { ${imports.join(", ")} } from "@clipper/composition-api";\n\nclass GeneratedCompositionObjects extends Component {\n  render() {\n    return [\n${objects.map((object) => indent(object, 6)).join(",\n")}\n    ];\n  }\n}\n\nexport const composition = new Composition({\n  duration: ${JSON.stringify(composition.duration)},\n${renderModeSource}  frame: ${tsBlock(composition.frame, 2)},\n  background: ${indent(backgroundSource, 2).trimStart()},\n${composition3dGraphSource}  render() {\n    return [new GeneratedCompositionObjects()];\n  },\n});\n`;
+}
+
+function composition3dToSource(composition: Part) {
+  return `import { Composition3D } from "@clipper/composition-api";\n\nexport const composition = new Composition3D({\n  duration: ${JSON.stringify(composition.duration)},\n  frame: ${tsBlock(composition.frame, 2)},\n  composition3dGraph: ${tsBlock(composition.composition3dGraph ?? { nodes: {}, edges: [], customNodes: {} }, 2)},\n});\n`;
 }
 
 function frameObjectToSourceObject(object: FrameObject): SourceObject {

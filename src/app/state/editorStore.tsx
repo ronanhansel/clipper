@@ -289,11 +289,7 @@ export function createEditorStore(project: ProjectManifest) {
       const existingTab = state.editorTabs.find((item) => item.id === tab.id);
       const pinnedTab = { ...tab, isPinned: true };
       const remainingTabs = state.editorTabs.filter((item) => item.id !== tab.id);
-      const editorTabs = existingTab
-        ? [pinnedTab, ...remainingTabs]
-        : tab.isComposition
-          ? [pinnedTab, ...state.editorTabs]
-          : [...state.editorTabs, pinnedTab];
+      const editorTabs = existingTab ? [pinnedTab, ...remainingTabs] : [...state.editorTabs, pinnedTab];
       return { editorTabs, closedEditorTabs: state.closedEditorTabs.filter((closedTab) => closedTab.id !== tab.id), activeEditorTabId: tab.id };
     }),
     openTemporaryEditorTab: (tab) => set((state) => {
@@ -316,7 +312,6 @@ export function createEditorStore(project: ProjectManifest) {
     closeEditorTab: (tabId) => set((state) => {
       const tabIndex = state.editorTabs.findIndex((tab) => tab.id === tabId);
       if (tabIndex < 0) return state;
-      if (state.editorTabs[tabIndex].isComposition) return state;
       const closedTab = toClosedEditorTab(state.editorTabs[tabIndex]);
       const editorTabs = state.editorTabs.filter((tab) => tab.id !== tabId);
       const closedEditorTabs = [closedTab, ...state.closedEditorTabs.filter((tab) => tab.id !== tabId)].slice(0, closedEditorTabStackLimit);

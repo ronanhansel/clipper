@@ -47,7 +47,7 @@ import { useEditorDerivedState } from "./app/state/editorDerivedState";
 import { getFramePreviewTimelineLayers } from "./app/state/framePreviewRenderModel";
 import { EditorStoreProvider, useAppEditorState, useEditorStoreApi, type EditorTab } from "./app/state/editorStore";
 import { ProjectStoreProvider } from "./app/state/projectStore";
-import { type AdjustmentLayerSelection, type CompositionSelection, type ExportDialogTab, type ExportRenderQuality, type ExportTileResolutionMapping, type ExportWorkerConfigurationMode, type ExportWorkerResolutionMapping, type LeftPanelTab, type MediaExportFormat, type MediaExportRenderMode, type PlaybackClock, type ProjectExportFormat, type RightPanelTab, type SettingsSection, type StableSlowGridPreset, type StableSlowValidationSamples } from "./app/types";
+import { type AdjustmentLayerSelection, type AgentProvider, type CompositionSelection, type ExportDialogTab, type ExportRenderQuality, type ExportTileResolutionMapping, type ExportWorkerConfigurationMode, type ExportWorkerResolutionMapping, type LeftPanelTab, type MediaExportFormat, type MediaExportRenderMode, type PlaybackClock, type ProjectExportFormat, type RightPanelTab, type SettingsSection, type StableSlowGridPreset, type StableSlowValidationSamples } from "./app/types";
 import { applyAdjustmentLayersToVisualStyle, getTimeSensitiveDisplayDuration, getTimeSensitiveDisplayTime } from "./core/adjustments";
 import { isMarkerOnMotionLayer, type CameraPreviewTransform } from "./core/camera";
 import { liveDomPostProcessStorageKey } from "./core/effects/postprocess/liveDomCapability";
@@ -60,6 +60,7 @@ import { normalizeSymmetricTransitionLayer } from "./core/transitions";
 import { defaultComposeLayoutState, defaultEditorLayoutState, defaultPreviewViewportState, defaultTimelineLayerState, defaultTimelineMode, defaultTimelineViewportState, emptyTimelineLayerState, replacePartInProject } from "./core/project";
 import { getExecutableAdjustmentLayers, getExecutableTransitionLayers, getTopTimelinePartAtTime } from "./core/timeline";
 import type { TimelineLayerCategory } from "./core/timelineLayers";
+import { compositionFromSource } from "./core/compositionSource";
 import { FRAME_HEIGHT, FRAME_WIDTH, type AdjustmentLayer, type AnimationGraphState, type Bounds, type CompositionClip, type EditorSessionState, type EditorState, type FrameObject, type LayerAnimation, type MotionEffectKind, type Part, type Point, type ProjectManifest, type SelectionPayload, type TimelineClip, type TimelineLayerState, type TimelineViewportState } from "./core/types";
 import { FindMediaDialog } from "./components/FileManager";
 import type { EditorPaneDocument, EditorPaneTab } from "./components/EditorPane";
@@ -95,6 +96,7 @@ const appSettingKeys = {
   stableSlowValidationSamples: "clipper:stable-slow-validation-samples",
   prerenderBlockDurationMs: "clipper:prerender-block-duration-ms",
   previewRenderHeight: "clipper:preview-render-height",
+  agentProvider: "clipper:agent-provider",
 } as const;
 
 type AppSettingKey = typeof appSettingKeys[keyof typeof appSettingKeys];
@@ -202,6 +204,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
   const [prerenderCacheBlackMissDebug, setPrerenderCacheBlackMissDebugState] = useState(isPrerenderCacheBlackMissDebugEnabledByDefault);
   const [liveDomPostProcessPreviewEnabled, setLiveDomPostProcessPreviewEnabledState] = useState(isLiveDomPostProcessPreviewEnabledByDefault);
   const [motionEffectPreviewScrubActive, setMotionEffectPreviewScrubActive] = useState(false);
+  const [selectedComposition3dNodeId, setSelectedComposition3dNodeId] = useState<string | null>(null);
   const [liveDomPostProcessMaxFps, setLiveDomPostProcessMaxFpsState] = useState(getInitialLiveDomPostProcessMaxFps);
   const liveDomPostProcessRuntimeEnabled = typeof window !== "undefined" && Boolean(window.clipper?.experimentalHtmlCanvasPostProcess);
   const {
@@ -309,6 +312,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
   const [previewRenderHeight, setPreviewRenderHeightState] = useState(
     getInitialPreviewRenderHeight,
   );
+  const [agentProvider, setAgentProviderState] = useState<AgentProvider>(getInitialAgentProvider);
   const [prerenderCacheResetToken, setPrerenderCacheResetToken] = useState(0);
   const { autoDownloadUpdates, updateStatus, setAutoDownloadUpdates, checkForUpdates, downloadUpdate, installUpdate } = useAppUpdates();
 
@@ -331,6 +335,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
       setStableSlowValidationSamplesState(clampStableSlowValidationSamples(Number.parseInt(readStoredStringSetting(settings, appSettingKeys.stableSlowValidationSamples) ?? "", 10)));
       setPrerenderBlockDurationMsState(clampPrerenderBlockDurationMs(Number.parseInt(readStoredStringSetting(settings, appSettingKeys.prerenderBlockDurationMs) ?? "", 10)));
       setPreviewRenderHeightState(clampPreviewRenderHeight(Number.parseInt(readStoredStringSetting(settings, appSettingKeys.previewRenderHeight) ?? "", 10)));
+      setAgentProviderState(clampAgentProvider(readStoredStringSetting(settings, appSettingKeys.agentProvider)));
     });
     return () => {
       cancelled = true;
@@ -554,6 +559,11 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
   });
   const composeMode = timelineMode === "compose";
   const composePlaybackRange = composeMode && activeTimelinePart ? { start: activeTimelinePart.start, end: activeTimelinePart.start + part.duration, localLabels: true } : undefined;
+
+  useEffect(() => {
+    if (!composeMode) setSelectedComposition3dNodeId(null);
+  }, [composeMode]);
+
   const compositionLibrary = project.compositionLibrary ?? [];
   const timelines = project.timelines ?? [];
   const activeTimelineName = getDisplayNameFromPath(selectedSceneId ?? "");
@@ -755,6 +765,11 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     const nextSamples = clampStableSlowValidationSamples(samples);
     setStableSlowValidationSamplesState(nextSamples);
     writeStoredAppSetting(appSettingKeys.stableSlowValidationSamples, String(nextSamples));
+  }
+  function setAgentProvider(provider: AgentProvider) {
+    const nextProvider = clampAgentProvider(provider);
+    setAgentProviderState(nextProvider);
+    writeStoredAppSetting(appSettingKeys.agentProvider, nextProvider);
   }
   function setReusePrerenderCacheForExport(reuse: boolean) {
     setReusePrerenderCacheForExportState(reuse);
@@ -1191,17 +1206,48 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     if (!clipId) return;
     const applyUpdate = (current: ProjectManifest) => {
       const targetClip = current.timelines?.find((timeline) => timeline.id === scene.id)?.clips.find((clip) => clip.id === clipId);
-      const nextGraph = updater(targetClip?.animationGraph);
+      const is3dClip = targetClip?.renderMode === "webgl";
+      const currentComposition3dGraph = is3dClip ? part.composition3dGraph as import("./core/types").Composition3dGraphState | undefined : undefined;
+      const nextGraph = updater(is3dClip ? currentComposition3dGraph as AnimationGraphState | undefined : targetClip?.animationGraph);
+      const targetCompositionId = targetClip?.compositionId;
+      const targetFilePath = part.filePath;
+      const nextComposition3dGraph = is3dClip
+        ? nextGraph as import("./core/types").Composition3dGraphState
+        : nextGraph as import("./core/types").Composition3dGraphState;
+      const webglRenderMode = "webgl" as const;
       return {
         ...current,
+        compositionLibrary: is3dClip && current.compositionLibrary ? current.compositionLibrary.map((composition) => (composition.id === targetCompositionId || composition.filePath === targetFilePath ? { ...composition, renderMode: webglRenderMode, composition3dGraph: nextComposition3dGraph } : composition)) : current.compositionLibrary,
+        compositions: is3dClip && current.compositions ? current.compositions.map((composition) => (composition.id === targetCompositionId || composition.filePath === targetFilePath ? { ...composition, renderMode: webglRenderMode, composition3dGraph: nextComposition3dGraph } : composition)) : current.compositions,
         timelines: (current.timelines ?? []).map((timeline) => (timeline.id === scene.id ? {
           ...timeline,
-          clips: timeline.clips.map((clip) => (clip.id === clipId ? { ...clip, animationGraph: nextGraph } : clip)),
+          clips: timeline.clips.map((clip) => (clip.id === clipId ? (is3dClip ? { ...clip, renderMode: webglRenderMode } : { ...clip, animationGraph: nextGraph }) : clip)),
         } : timeline)),
       };
     };
     if (options?.implicit) implicitFileOperation(updateProject)(applyUpdate, { history: true });
     else updateProject(applyUpdate, { history: true });
+  }
+
+  function updateComposition3dGraphNodeParameter(nodeId: string, key: string, value: string) {
+    updateComposeAnimationGraph((graph) => ({
+      nodes: graph?.nodes ?? {},
+      edges: graph?.edges ?? [],
+      customNodes: graph?.customNodes,
+      groups: graph?.groups,
+      parameters: {
+        ...(graph?.parameters ?? {}),
+        [nodeId]: { ...(graph?.parameters?.[nodeId] ?? {}), [key]: value },
+      },
+      deletedNodeIds: graph?.deletedNodeIds,
+      viewport: graph?.viewport,
+      viewports: graph?.viewports,
+    }));
+  }
+
+  function inspectComposition3dNode(nodeId: string | null) {
+    setSelectedComposition3dNodeId(nodeId);
+    if (nodeId) setRightPanelTab("video");
   }
 
   function shiftTimelineGapMarkers(moves: { gapStart: number; gapEnd: number; delta: number; compositions: Array<{ compositionId: string; start: number }>; adjustmentLayers: Array<{ layerId: string; start: number }>; motionMarkers: Array<{ markerId: string; start: number }>; transitionLayers: Array<{ layerId: string; start: number }> }) {
@@ -1280,6 +1326,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     updateObjectById,
     updatePartBackground,
     updatePartFrame,
+    updatePartRenderMode,
     updateSelectedObject,
     updateSelectedPartDuration,
     updateTextObjectContent,
@@ -1649,7 +1696,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     updateEditorState((state) => ({ ...state, effectsPanelState }));
   }
 
-  const { startEditorPanelResize } = useEditorPanelResize({
+  const { previewComposeLayout, previewEditorLayout, startEditorPanelResize } = useEditorPanelResize({
     appRootRef,
     projectRef,
     updateEditorState,
@@ -1681,6 +1728,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
 
   const fileManagerProps = useFileManagerController({
     assets,
+    assetsPath: project.assetsPath,
     compositions: compositionLibrary,
     compositionFolders: project.compositionFolders ?? [],
     compositionRootPath: watchedProjectDirectory,
@@ -1692,8 +1740,8 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     onFindMediaRequestChange: setFindMediaRequest,
     actions: { ...fileManagerActions, reloadProject, openCompositionFile: openCompositionInEditor, openProjectFile: openProjectFileInEditor, prerenderComposition: togglePrerenderCompositionFromLibrary },
   });
-  const editorLayout = project.editorState?.layout ?? defaultEditorLayoutState;
-  const composeLayout = project.editorState?.composeLayout ?? defaultComposeLayoutState;
+  const editorLayout = previewEditorLayout ?? project.editorState?.layout ?? defaultEditorLayoutState;
+  const composeLayout = previewComposeLayout ?? project.editorState?.composeLayout ?? defaultComposeLayoutState;
   const appShellStyle = {
     "--clipper-left-panel-width": `${editorLayout.leftPanelWidth}px`,
     "--clipper-compose-left-panel-width": `${composeLayout.leftPanelWidth}px`,
@@ -1749,12 +1797,9 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
   const activeEditorViewportState = activeEditorDocument ? project.editorState?.editor?.[activeEditorDocument.id] ?? project.editorState?.code?.[activeEditorDocument.id] : undefined;
 
   useEffect(() => {
-    if (mode !== "editor" || !composeMode) {
-      closeCompositionEditorTabs();
-      return;
-    }
+    if (mode !== "editor" || !composeMode) return;
     if (!activeTimelinePart) return;
-    openCompositionInEditor(activeTimelinePart.id);
+    openCompositionInEditor(activeTimelinePart.id, { temporary: true });
   }, [activeTimelinePart?.id, closeCompositionEditorTabs, composeMode, mode]);
 
   useEffect(() => {
@@ -1784,7 +1829,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
   const isDirectoryMode = activeProjectManifestPath.endsWith(".json");
 
   async function handleFileManagerRefreshProject() {
-    await reloadProjectFromWatcher();
+    await reloadProject();
   }
 
   function handleSelectComposition(_compositionId: string) {
@@ -1801,7 +1846,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
   function openCompositionInEditor(compositionId: string, options?: { temporary?: boolean }) {
     const composition = resolveCanonicalComposition(compositionLibrary, scene.compositions, compositionId);
     if (!composition) return;
-    const tab = { id: composition.id, filePath: composition.filePath, source: compositionSources[composition.filePath] ?? "", language: "typescript", isComposition: true };
+    const tab = { id: composition.id, filePath: composition.filePath, source: compositionSources[composition.filePath] ?? "", language: getEditorLanguage(composition.filePath), isComposition: true };
     if (options?.temporary) openTemporaryEditorTab(tab);
     else openEditorTab(tab);
     updateMode("editor");
@@ -1813,11 +1858,23 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
       const relativePath = projectRelativeFilePath(filePath);
       const composition = compositionLibrary.find((item) => item.filePath === relativePath || item.filePath.endsWith(`/${relativePath}`));
       if (composition) {
-        const tab = { id: composition.id, filePath: composition.filePath, source: compositionSources[composition.filePath] ?? "", language: "typescript", isComposition: true };
+        const tab = { id: composition.id, filePath: composition.filePath, source: compositionSources[composition.filePath] ?? "", language: getEditorLanguage(composition.filePath), isComposition: true };
         if (options.temporary) openTemporaryEditorTab(tab);
         else openEditorTab(tab);
         return;
       }
+      const source = await clipperHost.readTextFile(filePath);
+      const parsedComposition = await compositionFromSource(createEditorCompositionBase(relativePath), source);
+      updateProject((current) => ({
+        ...current,
+        compositionLibrary: [...(current.compositionLibrary ?? []), parsedComposition],
+        compositions: current.compositions ? [...current.compositions, parsedComposition] : current.compositions,
+        compositionSources: { ...(current.compositionSources ?? {}), [relativePath]: source },
+      }), { history: true, syncSources: false });
+      const tab = { id: parsedComposition.id, filePath: parsedComposition.filePath, source, language: getEditorLanguage(parsedComposition.filePath), isComposition: true };
+      if (options.temporary) openTemporaryEditorTab(tab);
+      else openEditorTab(tab);
+      return;
     }
 
     const openTab = options?.temporary ? openTemporaryEditorTab : openEditorTab;
@@ -1833,6 +1890,19 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     } catch (error) {
       openTab({ id: filePath, filePath, language: "plaintext", unsupportedReason: error instanceof Error ? error.message : "Unable to open this file in the editor." });
     }
+  }
+
+  function createEditorCompositionBase(filePath: string): Part {
+    return {
+      id: filePath,
+      filePath,
+      duration: 5,
+      frame: { width: FRAME_WIDTH, height: FRAME_HEIGHT, style: {} },
+      background: { id: "background", name: "Background", style: {}, elements: [] },
+      objects: [],
+      snapshot: [],
+      motionMarkers: [],
+    };
   }
 
   function handleSelectTimeline(timelineId: string) {
@@ -1885,12 +1955,14 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
             compositionLibrary,
             selectedTimelineId: selectedSceneId,
             fileSystemRevision,
+            fileManagerState: project.editorState?.fileManagerState,
             onReloadProject: handleFileManagerRefreshProject,
             onCompositionPathMoves: fileManagerActions.updateCompositionFilePaths,
             onOpenFile: openProjectFileInEditor,
             onSelectComposition: handleSelectComposition,
             onSelectTimeline: handleSelectTimeline,
             executeFileManagerCommand,
+            onFileManagerStateChange: fileManagerActions.fileManagerStateChange,
           } : undefined}
           part={part}
           selectedObjectIds={selectedComposeObjectIds}
@@ -1934,6 +2006,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
           <ConnectedInspectorContent
             rightPanelTab={rightPanelTab}
             part={part}
+            composeMode={composeMode}
             sourceStatus={sourceStatus}
             agentContext={agentContext}
             selectedMotion={selectedMotion}
@@ -1956,6 +2029,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
             sceneDurationSeconds={sceneDurationSeconds}
             pointPickAdjustment={pointPickAdjustment}
             selectedPart={selectedPart}
+            selectedComposition3dNodeId={selectedComposition3dNodeId}
             onUpdateMotionMarker={updateMotionMarker}
             onPreviewMotionMarker={previewMotionMarker}
             onPreviewMotionPickPoint={previewMotionPickPoint}
@@ -1995,6 +2069,8 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
             onUpdateSelectedPartDuration={updateSelectedPartDuration}
             onUpdatePartFrame={updatePartFrame}
             onUpdatePartBackground={updatePartBackground}
+            onUpdatePartRenderMode={updatePartRenderMode}
+            onUpdateComposition3dGraphNodeParameter={updateComposition3dGraphNodeParameter}
           />
         </RightInspectorPanel>
 
@@ -2087,12 +2163,14 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
         onUpdateComposeBackgroundAnimation: updateComposeBackgroundAnimation,
         onUpdateComposeObjectAnimation: updateComposeObjectAnimation,
         onUpdateComposeAnimationGraph: updateComposeAnimationGraph,
+        onInspectComposition3dNode: inspectComposition3dNode,
       }}>
         <ConnectedTimelinePanel />
       </TimelineProvider>
     </main>
     <AppDialogs
       appContextMenu={appContextMenu}
+      agentProvider={agentProvider}
       autoDownloadUpdates={autoDownloadUpdates}
       debugSettingsEnabled={debugSettingsEnabled}
       defaultNewMarkerDurationSeconds={markerDurationSeconds}
@@ -2136,6 +2214,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
       videoExportProgress={videoExportProgress}
       updateStatus={updateStatus}
       onAppContextMenuClose={() => setAppContextMenu(null)}
+      onAgentProviderChange={setAgentProvider}
       onAutoDownloadUpdatesChange={(enabled) => void setAutoDownloadUpdates(enabled)}
       onCheckForUpdates={() => void checkForUpdates()}
       onDownloadUpdate={() => void downloadUpdate()}
@@ -2319,6 +2398,11 @@ function getInitialStableSlowValidationSamples(): StableSlowValidationSamples {
   return clampStableSlowValidationSamples(Number.parseInt(window.localStorage.getItem(appSettingKeys.stableSlowValidationSamples) ?? "", 10));
 }
 
+function getInitialAgentProvider(): AgentProvider {
+  if (typeof window === "undefined") return "opencode";
+  return clampAgentProvider(window.localStorage.getItem(appSettingKeys.agentProvider));
+}
+
 function getInitialPrerenderBlockDurationMs() {
   if (typeof window === "undefined") return defaultPrerenderBlockDurationMs;
   const storedValue = Number.parseInt(
@@ -2378,6 +2462,10 @@ function clampStableSlowValidationSamples(value: unknown): StableSlowValidationS
   if (!Number.isFinite(numeric)) return defaultStableSlowValidationSamples;
   const clamped = Math.min(Math.max(Math.round(numeric), minStableSlowValidationSamples), maxStableSlowValidationSamples);
   return (clamped === 2 || clamped === 3 ? clamped : 1) as StableSlowValidationSamples;
+}
+
+function clampAgentProvider(value: unknown): AgentProvider {
+  return value === "codex" || value === "claude" || value === "gemini" || value === "opencode" ? value : "opencode";
 }
 
 function clampExportWorkerCount(value: unknown, fallback: number) {

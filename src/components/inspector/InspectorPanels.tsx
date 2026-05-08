@@ -1,6 +1,6 @@
 import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, Italic, Strikethrough, Trash2, Underline } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { MAX_PART_DURATION_SECONDS, FRAME_HEIGHT, FRAME_WIDTH, type AdjustmentLayer, type BackgroundLayer, type Bounds, type FrameObject, type MotionEase, type Part, type PartFrame, type Point, type TransitionLayer } from "../../core/types";
+import { MAX_PART_DURATION_SECONDS, FRAME_HEIGHT, FRAME_WIDTH, type AdjustmentLayer, type BackgroundLayer, type Bounds, type CompositionRenderMode, type FrameObject, type MotionEase, type Part, type PartFrame, type Point, type TransitionLayer } from "../../core/types";
 import { clamp, roundTenth, roundTwo } from "../../core/math";
 import { getAdjustmentEffectPackage, getMotionEffectPackage, getTransitionEffectPackage } from "../../core/effects/registry";
 import { getTransitionMarkerTime, normalizeSymmetricTransitionLayer } from "../../core/transitions";
@@ -18,6 +18,8 @@ import { Textarea } from "../ui/textarea";
 import { ColorSelector, formatStyleLabel, getEditableColorStyleEntries, isHexColor } from "../ColorSelector";
 import { clipperHost } from "../../app/clipperHost";
 import { Coordinate2DField, PickButton } from "./Coordinate2DField";
+import type { GraphParameterEditorField, GraphParameterEditorSchema } from "../timeline/GraphParameterEditor";
+import { buildComposition3dGraphNodes, getGraphNodeParameterEditorSchema } from "../timeline/ComposeAnimationGraphPanel";
 
 const defaultFontFamily = "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
 const defaultFontOption = { value: defaultFontFamily, label: "System" };
@@ -172,7 +174,7 @@ function EaseSelectItems({ includeLinear = true, defaultInOut = false }: { inclu
   return <>{items.filter((item) => includeLinear || item.value !== "linear").map((item) => <EaseSelectItem key={item.value} {...item} />)}</>;
 }
 
-export function FrameInspector({ part, canSnapMiddle, onDurationChange, onFrameChange, onBackgroundChange, onSnapMiddle }: { part: Part; canSnapMiddle: boolean; onDurationChange: (duration: number) => void; onFrameChange: (updater: (frame: PartFrame) => PartFrame) => void; onBackgroundChange: (updater: (background: BackgroundLayer) => BackgroundLayer) => void; onSnapMiddle: () => void }) {
+export function FrameInspector({ part, canSnapMiddle, onDurationChange, onFrameChange, onBackgroundChange, onRenderModeChange, onSnapMiddle }: { part: Part; canSnapMiddle: boolean; onDurationChange: (duration: number) => void; onFrameChange: (updater: (frame: PartFrame) => PartFrame) => void; onBackgroundChange: (updater: (background: BackgroundLayer) => BackgroundLayer) => void; onRenderModeChange: (renderMode: CompositionRenderMode) => void; onSnapMiddle: () => void }) {
   const motionViews = getMotionMarkerViews(part);
   const markerEnd = Math.max(0, ...motionViews.motionMarkers.map((marker) => marker.start + marker.duration));
   const minimumDuration = roundTenth(Math.max(0.1, markerEnd));
@@ -207,6 +209,18 @@ export function FrameInspector({ part, canSnapMiddle, onDurationChange, onFrameC
   return (
     <div className="grid gap-3">
       <label className={`grid gap-1.5 ${mutedCaps}`}>Duration<Input type="number" min={minimumDuration} max={MAX_PART_DURATION_SECONDS} step={0.1} value={part.duration} onChange={(event) => updateDuration(event.target.value)} /></label>
+      <label className={`grid gap-1.5 ${mutedCaps}`}>Render mode
+        <Select value={part.renderMode ?? "dom"} onValueChange={(value) => onRenderModeChange(value as CompositionRenderMode)}>
+          <SelectTrigger><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              <SelectItem value="dom">DOM</SelectItem>
+              <SelectItem value="live-dom">Live DOM</SelectItem>
+              <SelectItem value="webgl">WebGL</SelectItem>
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+      </label>
       <label className={`grid gap-1.5 ${mutedCaps}`}>Frame background color<ColorSelector value={String(part.frame.style.background ?? "#000000")} onChange={updateFrameBackground} /></label>
       {isHexColor(String(part.background.style.background ?? "")) ? <label className={`grid gap-1.5 ${mutedCaps}`}>Layer background color<ColorSelector value={String(part.background.style.background)} onChange={updateBackgroundColor} /></label> : null}
       <label className="flex cursor-pointer items-center gap-3 rounded-[10px] border border-[#2d313b] bg-[#171920] p-3 text-sm font-bold text-[#dfe2ea] transition hover:border-[var(--clipper-accent)] hover:bg-[#20232c]">
@@ -222,6 +236,59 @@ export function FrameInspector({ part, canSnapMiddle, onDurationChange, onFrameC
       </div>
       <div className={panelCard}><span>Constant Elements</span><strong className="text-[13px]">{part.background.elements.length}</strong><small className="text-[#9b9da7]">Edit these in the composition code as background.elements.</small></div>
     </div>
+  );
+}
+
+export function Composition3dNodeInspector({ part, nodeId, onParameterChange }: { part: Part; nodeId: string; onParameterChange: (nodeId: string, key: string, value: string) => void }) {
+  const node = buildComposition3dGraphNodes(part.composition3dGraph, 5200, 900).find((item) => item.id === nodeId) ?? null;
+  const schema = node ? getGraphNodeParameterEditorSchema(node, part.composition3dGraph?.parameters?.[node.id]) : null;
+  if (!node) return <EmptyInspector />;
+  return (
+    <div className="grid gap-3">
+      {schema ? (
+        <Composition3dInspectorFields schema={schema} onChange={(key, value) => onParameterChange(node.id, key, value)} />
+      ) : (
+        <div className={`grid gap-1.5 ${mutedCaps}`}>No editable parameters.</div>
+      )}
+    </div>
+  );
+}
+
+function Composition3dInspectorFields({ schema, onChange }: { schema: GraphParameterEditorSchema; onChange: (key: string, value: string) => void }) {
+  return (
+    <div className="grid gap-3">
+      {schema.groups.map((group) => (
+        <div className="grid gap-2" key={group.id}>
+          {group.label && group.id !== "composition3d" ? <span className={mutedCaps}>{group.label}</span> : null}
+          <div className={group.columns && group.columns > 1 ? "grid grid-cols-2 gap-2" : "grid gap-3"}>
+            {group.fields.map((field) => <Composition3dInspectorField key={field.key} field={field} onChange={onChange} />)}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Composition3dInspectorField({ field, onChange }: { field: GraphParameterEditorField; onChange: (key: string, value: string) => void }) {
+  if (field.options) {
+    return (
+      <label className={`grid gap-1.5 ${mutedCaps}`}>{field.label}
+        <Select value={field.value} onValueChange={(value) => onChange(field.key, value)}>
+          <SelectTrigger><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              {field.options.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+      </label>
+    );
+  }
+
+  return (
+    <label className={`grid gap-1.5 ${mutedCaps}`}>{field.label}
+      <Input type={field.type === "number" ? "number" : "text"} value={field.value} onChange={(event) => onChange(field.key, event.target.value)} />
+    </label>
   );
 }
 

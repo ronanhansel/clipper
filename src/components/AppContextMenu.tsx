@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { appNoDragRegion } from "../app/config";
 import type { ContextMenuItem, ContextMenuState } from "../app/types";
 
@@ -23,7 +24,7 @@ export function AppContextMenu({ menu, onClose }: { menu: ContextMenuState; onCl
 
   if (!menu) return null;
 
-  return <ContextMenuPanel items={menu.items} position={{ x: menu.x, y: menu.y }} onClose={onClose} />;
+  return createPortal(<ContextMenuPanel items={menu.items} position={{ x: menu.x, y: menu.y }} onClose={onClose} />, document.body);
 }
 
 function ContextMenuPanel({ items, position, anchorRect, onClose, onPlacementChange }: { items: ContextMenuItem[]; position?: { x: number; y: number }; anchorRect?: DOMRect; onClose: () => void; onPlacementChange?: (placement: ContextMenuPlacement) => void }) {

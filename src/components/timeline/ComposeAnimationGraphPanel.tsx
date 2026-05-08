@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type DragEvent,
   type MouseEvent,
   type PointerEvent,
   type ReactNode,
@@ -15,6 +16,7 @@ import {
 import { ChevronDown } from "lucide-react";
 import { createPortal } from "react-dom";
 import type { ContextMenuState } from "../../app/types";
+import { getComposition3dPackage } from "../../core/composition3dPackages";
 import {
   animationDefinitions,
   getAnimationDefinition,
@@ -23,6 +25,7 @@ import {
 import { addAnimationGraphPresetGroupToGraph, animationGraphPresets } from "../../core/animations/presets";
 import { roundTenth } from "../../core/math";
 import { formatTime, getTimelineTicks } from "../../core/timeline";
+import { canConnectSocketTypes, getComposition3dNodeKindFromPackageId, getComposition3dSocketDefinition, graphSocketColors, type GraphCompositionMode, type SocketType } from "../../core/graphSockets";
 import type {
   AnimationGraphCustomNode,
   AnimationGraphEdge,
@@ -34,7 +37,9 @@ import type {
   Part,
 } from "../../core/types";
 import { AppContextMenu } from "../AppContextMenu";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import type { TimelineViewportState } from "../../core/types";
+import { composition3dPackagePointerDragEvent, type Composition3dPackagePointerDragDetail } from "../../lib/pointerDrag";
 import {
   GraphParameterEditor,
   type GraphParameterEditorSchema,
@@ -62,9 +67,10 @@ type Props = {
     updater: (graph: AnimationGraphState | undefined) => AnimationGraphState,
     options?: { implicit?: boolean },
   ) => void;
+  onInspectComposition3dNode?: (nodeId: string | null) => void;
 };
 
-type GraphNode = {
+export type GraphNode = {
   id: string;
   label: string;
   kind: "layer" | "animation" | "time" | "group" | "out";
@@ -122,16 +128,35 @@ type GraphClipboard = {
   parameters?: NonNullable<AnimationGraphState["parameters"]>;
   groups?: NonNullable<AnimationGraphState["groups"]>;
 };
+type EdgeRegistrationDialogState = {
+  edgeId?: string;
+  draft?: AnimationGraphEdge;
+};
+type Composition3dSocketOption = {
+  id: string;
+  label: string;
+  socket: SocketType;
+};
+type Composition3dConnectorOption = {
+  value: string;
+  label: string;
+  fromSocket: string;
+  toSocket: string;
+  compatible: boolean;
+};
 type GraphCanvasSurfaceProps = {
   canvasRef: RefObject<HTMLCanvasElement | null>;
   viewportRef: RefObject<HTMLDivElement | null>;
   scrollWidth: number;
   scrollHeight: number;
   hoverNodeId: string | null;
+  hoverEdgeId?: string | null;
   className?: string;
   canvasClassName?: string;
   onScroll?: () => void;
   onWheel?: (event: WheelEvent<HTMLDivElement>) => void;
+  onDragOver?: (event: DragEvent<HTMLDivElement>) => void;
+  onDrop?: (event: DragEvent<HTMLDivElement>) => void;
   onClick?: (event: MouseEvent<HTMLCanvasElement>) => void;
   onContextMenu?: (event: MouseEvent<HTMLCanvasElement>) => void;
   onPointerDown: (event: PointerEvent<HTMLCanvasElement>) => void;
@@ -241,8 +266,9 @@ function getGraphEdgeDrop(
   scale: number,
   graph: AnimationGraphState | undefined,
   objects: FrameObject[],
+  mode: GraphCompositionMode = "composition2d",
 ) {
-  return getEdgeDropTarget(point, drag.fromNodeId, nodes, scale, graph, objects);
+  return getEdgeDropTarget(point, drag.fromNodeId, nodes, scale, graph, objects, mode);
 }
 
 function getDraggedGraphNodePosition(
@@ -307,6 +333,7 @@ export const ComposeAnimationGraphPanel = memo(
     onScrubEnd,
     onScrubStart,
     onUpdateGraph,
+    onInspectComposition3dNode,
   }: Props) {
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const graphViewportRef = useRef<HTMLDivElement | null>(null);
@@ -355,6 +382,7 @@ export const ComposeAnimationGraphPanel = memo(
     const pasteGraphNodesRef = useRef<() => void>(() => undefined);
     const graphClipboardRef = useRef<GraphClipboard | null>(null);
     const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
+    const [edgeRegistrationDialog, setEdgeRegistrationDialog] = useState<EdgeRegistrationDialogState | null>(null);
     const [graphScale, setGraphScale] = useState(1);
     const graphScaleRef = useRef(1);
     const timelineDuration = Math.max(part?.duration ?? 0.1, 0.1);
@@ -382,7 +410,8 @@ export const ComposeAnimationGraphPanel = memo(
       onScrubStart,
       onScrubEnd,
     });
-    const projectGraph = part?.animationGraph;
+    const isComposition3d = part?.renderMode === "webgl";
+    const projectGraph = isComposition3d ? part?.composition3dGraph : part?.animationGraph;
     const graph = optimisticGraph ?? projectGraph;
     const selectableObjects = [
       ...(part?.background.elements ?? []),
@@ -393,16 +422,16 @@ export const ComposeAnimationGraphPanel = memo(
       .filter((object): object is FrameObject => Boolean(object));
     const graphViewportKey =
       selectedObjectIds.length > 0 ? selectedObjectIds.join("|") : "__empty__";
-    const graphInstanceKey = `${part?.id ?? "__none__"}:${graphViewportKey}`;
-    const hasSelectedGraph = selectedObjects.length > 0;
+    const graphInstanceKey = `${part?.id ?? "__none__"}:${isComposition3d ? "composition3d" : "composition2d"}:${graphViewportKey}`;
+    const hasSelectedGraph = isComposition3d || selectedObjects.length > 0;
     const nodes = hasSelectedGraph
-      ? buildGraphNodes(
+      ? (isComposition3d ? buildComposition3dGraphNodes(graph, baseGraphWorldWidth, baseGraphWorldHeight) : buildGraphNodes(
           selectedObjects,
           graph,
           baseGraphWorldWidth,
           baseGraphWorldHeight,
           graphViewportKey,
-        )
+        ))
       : [];
     const graphWorldSize = getGraphContentSize(
       nodes,
@@ -434,6 +463,7 @@ export const ComposeAnimationGraphPanel = memo(
       viewInitializedRef.current = false;
       selectedGraphNodeIdRef.current = null;
       setSelectedGraphNodeId(null);
+      onInspectComposition3dNode?.(null);
       graphScaleRef.current = 1;
       setGraphScale(1);
     }, [graphInstanceKey]);
@@ -543,6 +573,13 @@ export const ComposeAnimationGraphPanel = memo(
         !hasSelectedGraph
       )
         return;
+      if (isComposition3d) {
+        viewport.scrollLeft = Math.max(0, (graphScrollWidth - viewport.clientWidth) / 2);
+        viewport.scrollTop = Math.max(0, (graphScrollHeight - viewport.clientHeight) / 2);
+        scheduleDraw();
+        viewInitializedRef.current = true;
+        return;
+      }
       const selectedObjectId = selectedObjects[0]?.id;
       if (!selectedObjectId || !nodesRef.current.some((node) => node.id === `layer:${selectedObjectId}`)) return;
       centerGraphOnSelectedLayer(viewport);
@@ -605,6 +642,21 @@ export const ComposeAnimationGraphPanel = memo(
       scheduleDraw();
     }
 
+    useEffect(() => {
+      if (!isComposition3d || !active) return;
+      function onPackagePointerDrag(event: Event) {
+        const detail = (event as CustomEvent<Composition3dPackagePointerDragDetail>).detail;
+        if (!detail || detail.phase !== "drop") return;
+        const viewport = graphViewportRef.current;
+        if (!viewport) return;
+        const rect = viewport.getBoundingClientRect();
+        if (detail.clientX < rect.left || detail.clientX > rect.right || detail.clientY < rect.top || detail.clientY > rect.bottom) return;
+        dropComposition3dPackage(detail.packageId, detail.clientX - rect.left + viewport.scrollLeft, detail.clientY - rect.top + viewport.scrollTop);
+      }
+      window.addEventListener(composition3dPackagePointerDragEvent, onPackagePointerDrag);
+      return () => window.removeEventListener(composition3dPackagePointerDragEvent, onPackagePointerDrag);
+    }, [active, isComposition3d, graphScale]);
+
     function draw() {
       const canvas = canvasRef.current;
       const viewport = graphViewportRef.current;
@@ -614,7 +666,25 @@ export const ComposeAnimationGraphPanel = memo(
       const currentPart = partRef.current;
       const currentSelectedObjects = selectedObjectsRef.current;
       if (!currentPart) return;
-      if (currentSelectedObjects.length === 0) return;
+      if (!isComposition3d && currentSelectedObjects.length === 0) {
+        drawGraphCanvas({
+          canvas,
+          viewport,
+          width: scaledWidth,
+          height: scaledHeight,
+          scale: graphScaleRef.current,
+          nodes: [],
+          edges: [],
+          hoverNodeId: null,
+          selectedNodeIds: [],
+          hoverConnector: null,
+          hoverEdgeId: null,
+          edgeDrag: null,
+          previewPoint: null,
+          marqueeRect: null,
+        });
+        return;
+      }
       const currentGraph = displayGraphRef.current;
       const currentNodes = nodesRef.current;
       const drawNodes = currentNodes.map((node) => ({
@@ -645,7 +715,7 @@ export const ComposeAnimationGraphPanel = memo(
           ? { x: pointerRef.current.x / graphScaleRef.current, y: pointerRef.current.y / graphScaleRef.current }
           : null,
         progressForNode: (node) =>
-          getNodePlaybackProgress(node, currentGraph, currentTimeRef.current, drawNodes, currentSelectedObjects),
+          isComposition3d ? null : getNodePlaybackProgress(node, currentGraph, currentTimeRef.current, drawNodes, currentSelectedObjects),
         marqueeRect: marqueeDrag?.active ? normalizeMarqueeRect(marqueeDrag) : null,
       });
     }
@@ -679,6 +749,7 @@ export const ComposeAnimationGraphPanel = memo(
           graphScale,
           displayGraphRef.current,
           selectedObjects,
+          isComposition3d ? "composition3d" : "composition2d",
         );
         updateHover(target?.nodeId ?? null, null);
         scheduleDraw();
@@ -704,6 +775,40 @@ export const ComposeAnimationGraphPanel = memo(
         updateHoverEdge,
         getRenderableEdges(displayGraphRef.current, nodesRef.current, selectedObjects),
       );
+    }
+
+    function getDraggedComposition3dPackage(event: DragEvent<HTMLElement>) {
+      return event.dataTransfer.getData("application/x-clipper-composition3d-package") || event.dataTransfer.getData("text/plain");
+    }
+
+    function onComposition3dDragOver(event: DragEvent<HTMLElement>) {
+      if (!isComposition3d || !getComposition3dPackage(getDraggedComposition3dPackage(event))) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "copy";
+    }
+
+    function onComposition3dDrop(event: DragEvent<HTMLElement>) {
+      const packageId = getDraggedComposition3dPackage(event);
+      if (!isComposition3d || !getComposition3dPackage(packageId)) return;
+      event.preventDefault();
+      const rect = event.currentTarget.getBoundingClientRect();
+      dropComposition3dPackage(packageId, event.clientX - rect.left + event.currentTarget.scrollLeft, event.clientY - rect.top + event.currentTarget.scrollTop);
+    }
+
+    function dropComposition3dPackage(packageId: string, canvasX: number, canvasY: number) {
+      const pkg = getComposition3dPackage(packageId);
+      if (!pkg) return;
+      const id = `${packageId}:${Date.now().toString(36)}`;
+      const position = { x: Math.max(1, Math.round(canvasX / graphScaleRef.current / gridSize)), y: Math.max(1, Math.round(canvasY / graphScaleRef.current / gridSize)) };
+      commitGraphUpdate((graph) => ({
+        nodes: { ...materializeGraphNodes(nodesRef.current), ...(graph?.nodes ?? {}), [id]: position, "composition3d:out": { x: Math.round(baseGraphWorldWidth / gridSize / 2), y: Math.round(baseGraphWorldHeight / gridSize / 2) } },
+        edges: getRenderableEdges(graph, nodesRef.current, selectedObjects),
+        customNodes: { ...(graph?.customNodes ?? {}), [id]: { kind: "animation", label: pkg.label, scopeKey: "composition3d", details: { packageId: pkg.id } } },
+        groups: graph?.groups,
+        parameters: graph?.parameters,
+        deletedNodeIds: isComposition3d ? undefined : graph?.deletedNodeIds,
+      }));
+      selectGraphNode(id);
     }
 
     function onPointerDown(event: PointerEvent<HTMLCanvasElement>) {
@@ -759,6 +864,10 @@ export const ComposeAnimationGraphPanel = memo(
         setPopoverNodeId(null);
         selectGraphNode(null);
         updateHoverEdge(null);
+        if (isComposition3d) {
+          setEdgeRegistrationDialog({ edgeId: edge.id });
+          return;
+        }
         commitGraphUpdate((graph) => ({
           nodes: {
             ...materializeGraphNodes(nodesRef.current),
@@ -776,7 +885,7 @@ export const ComposeAnimationGraphPanel = memo(
           ),
           groups: graph?.groups,
           parameters: graph?.parameters,
-          deletedNodeIds: graph?.deletedNodeIds,
+          deletedNodeIds: isComposition3d ? undefined : graph?.deletedNodeIds,
           viewport: graph?.viewport,
           viewports: graph?.viewports,
         }));
@@ -809,14 +918,19 @@ export const ComposeAnimationGraphPanel = memo(
         selectGraphNode(node.id);
         return;
       }
+      if (node.details?.fixed === "true") {
+        selectGraphNode(node.id);
+        return;
+      }
       if (event.shiftKey) {
         toggleGraphNodeSelection(node.id);
       } else {
         selectGraphNode(node.id);
       }
-      const hasPopover =
+      const hasPopover = !isComposition3d && (
         node.kind === "group" ||
-        getPopoverDetails(node, displayGraphRef.current?.parameters?.[node.id]).length > 0;
+        getPopoverDetails(node, displayGraphRef.current?.parameters?.[node.id]).length > 0
+      );
       pendingPopoverNodeIdRef.current = hasPopover ? node.id : null;
       setPopoverNodeId(null);
       dragRef.current = {
@@ -866,7 +980,7 @@ export const ComposeAnimationGraphPanel = memo(
           ),
           groups: graph?.groups,
           parameters: graph?.parameters,
-          deletedNodeIds: graph?.deletedNodeIds,
+          deletedNodeIds: isComposition3d ? undefined : graph?.deletedNodeIds,
           viewport: graph?.viewport,
           viewports: graph?.viewports,
         }));
@@ -877,7 +991,7 @@ export const ComposeAnimationGraphPanel = memo(
         }
         if (!moved) {
           const node = nodesRef.current.find((item) => item.id === drag.nodeId);
-          if (pendingPopoverNodeIdRef.current === drag.nodeId) {
+          if (!isComposition3d && pendingPopoverNodeIdRef.current === drag.nodeId) {
             setPopoverNodeId(drag.nodeId);
           }
         }
@@ -891,15 +1005,10 @@ export const ComposeAnimationGraphPanel = memo(
           graphScale,
           displayGraphRef.current,
           selectedObjects,
+          isComposition3d ? "composition3d" : "composition2d",
         );
         if (target && target.nodeId !== drag.fromNodeId) {
-          const edge: AnimationGraphEdge = {
-            id: `${drag.fromNodeId}:${target.fromPort}->${target.nodeId}:${target.toPort}`,
-            fromNodeId: drag.fromNodeId,
-            fromPort: target.fromPort,
-            toNodeId: target.nodeId,
-            toPort: target.toPort,
-          };
+          const edge = createEdge(drag.fromNodeId, target.fromPort, target.nodeId, target.toPort);
           const currentEdges = filterPermittedEdges(
             getRenderableEdges(
               displayGraphRef.current,
@@ -907,6 +1016,7 @@ export const ComposeAnimationGraphPanel = memo(
               selectedObjects,
             ),
             nodesRef.current,
+            isComposition3d ? "composition3d" : "composition2d",
           );
           commitGraphUpdate((graph) => ({
             nodes: {
@@ -924,7 +1034,7 @@ export const ComposeAnimationGraphPanel = memo(
             ),
             groups: graph?.groups,
             parameters: graph?.parameters,
-            deletedNodeIds: graph?.deletedNodeIds,
+            deletedNodeIds: isComposition3d ? undefined : graph?.deletedNodeIds,
             viewport: graph?.viewport,
             viewports: graph?.viewports,
           }));
@@ -980,6 +1090,7 @@ export const ComposeAnimationGraphPanel = memo(
       selectedGraphNodeIdsRef.current = nodeId ? [nodeId] : [];
       setSelectedGraphNodeId(nodeId);
       setSelectedGraphNodeIds(nodeId ? [nodeId] : []);
+      onInspectComposition3dNode?.(isComposition3d ? nodeId : null);
       scheduleDraw();
     }
 
@@ -991,6 +1102,7 @@ export const ComposeAnimationGraphPanel = memo(
       selectedGraphNodeIdRef.current = next[next.length - 1] ?? null;
       setSelectedGraphNodeIds(next);
       setSelectedGraphNodeId(next[next.length - 1] ?? null);
+      onInspectComposition3dNode?.(isComposition3d ? next[next.length - 1] ?? null : null);
       scheduleDraw();
     }
 
@@ -999,6 +1111,7 @@ export const ComposeAnimationGraphPanel = memo(
       selectedGraphNodeIdRef.current = nodeIds[nodeIds.length - 1] ?? null;
       setSelectedGraphNodeIds(nodeIds);
       setSelectedGraphNodeId(nodeIds[nodeIds.length - 1] ?? null);
+      onInspectComposition3dNode?.(isComposition3d ? nodeIds[nodeIds.length - 1] ?? null : null);
       scheduleDraw();
     }
 
@@ -1012,13 +1125,15 @@ export const ComposeAnimationGraphPanel = memo(
     ) {
       const nextGraph = stripGraphViewportState(updater(graphRef.current));
       graphRef.current = nextGraph;
-      nodesRef.current = buildGraphNodes(
-        selectedObjects,
-        nextGraph,
-        graphWorldSize.width,
-        graphWorldSize.height,
-        graphViewportKey,
-      );
+      nodesRef.current = isComposition3d
+        ? buildComposition3dGraphNodes(nextGraph, graphWorldSize.width, graphWorldSize.height)
+        : buildGraphNodes(
+            selectedObjects,
+            nextGraph,
+            graphWorldSize.width,
+            graphWorldSize.height,
+            graphViewportKey,
+          );
       if (options.local !== false) setOptimisticGraph(nextGraph);
       onUpdateGraph?.(() => nextGraph, { implicit: options.implicit });
     }
@@ -1030,20 +1145,66 @@ export const ComposeAnimationGraphPanel = memo(
           ...(graph?.nodes ?? {}),
         },
         edges: getRenderableEdges(graph, nodesRef.current, selectedObjects),
-        customNodes: materializeGraphNodeDefinitions(
-          nodesRef.current,
-          graph?.customNodes,
-          graphViewportKey,
-        ),
+        customNodes: updateGraphNodeDefinitionParameter(materializeGraphNodeDefinitions(nodesRef.current, graph?.customNodes, graphViewportKey), nodeId, key, value),
         groups: graph?.groups,
         parameters: {
           ...(graph?.parameters ?? {}),
           [nodeId]: { ...(graph?.parameters?.[nodeId] ?? {}), [key]: value },
         },
-        deletedNodeIds: graph?.deletedNodeIds,
+        deletedNodeIds: isComposition3d ? undefined : graph?.deletedNodeIds,
         viewport: graph?.viewport,
         viewports: graph?.viewports,
       }));
+    }
+
+    function registerComposition3dEdge(edgeId: string, option: Composition3dConnectorOption) {
+      commitGraphUpdate((graph) => {
+        const existingEdges = getRenderableEdges(graph, nodesRef.current, selectedObjects);
+        const draft = edgeRegistrationDialog?.draft;
+        const source = draft ?? existingEdges.find((edge) => edge.id === edgeId);
+        const registered = source
+          ? createEdge(source.fromNodeId, source.fromPort, source.toNodeId, source.toPort, {
+            fromSocket: option.fromSocket,
+            toSocket: option.toSocket,
+          })
+          : null;
+        const edges = registered
+          ? [...existingEdges.filter((edge) => edge.id !== edgeId && edge.id !== registered.id), registered]
+          : existingEdges;
+        return {
+          nodes: {
+            ...materializeGraphNodes(nodesRef.current),
+            ...(graph?.nodes ?? {}),
+          },
+          edges,
+          customNodes: materializeGraphNodeDefinitions(nodesRef.current, graph?.customNodes, graphViewportKey),
+          groups: graph?.groups,
+          parameters: graph?.parameters,
+          deletedNodeIds: undefined,
+          viewport: graph?.viewport,
+          viewports: graph?.viewports,
+        };
+      });
+      setEdgeRegistrationDialog(null);
+      scheduleDraw();
+    }
+
+    function deleteComposition3dEdge(edgeId: string) {
+      commitGraphUpdate((graph) => ({
+        nodes: {
+          ...materializeGraphNodes(nodesRef.current),
+          ...(graph?.nodes ?? {}),
+        },
+        edges: getRenderableEdges(graph, nodesRef.current, selectedObjects).filter((edge) => edge.id !== edgeId),
+        customNodes: materializeGraphNodeDefinitions(nodesRef.current, graph?.customNodes, graphViewportKey),
+        groups: graph?.groups,
+        parameters: graph?.parameters,
+        deletedNodeIds: undefined,
+        viewport: graph?.viewport,
+        viewports: graph?.viewports,
+      }));
+      setEdgeRegistrationDialog(null);
+      scheduleDraw();
     }
 
     function updateGroupNodeParameter(groupId: string, nodeId: string, key: string, value: string) {
@@ -1085,7 +1246,7 @@ export const ComposeAnimationGraphPanel = memo(
             [groupId]: nextGroup,
           },
           parameters: graph?.parameters,
-          deletedNodeIds: graph?.deletedNodeIds,
+          deletedNodeIds: isComposition3d ? undefined : graph?.deletedNodeIds,
           viewport: graph?.viewport,
           viewports: graph?.viewports,
         };
@@ -1119,7 +1280,7 @@ export const ComposeAnimationGraphPanel = memo(
               { label: "Rename", action: () => renameGroupNode(nodeId) },
               { label: "Ungroup", action: () => ungroupNode(nodeId) },
               { label: "Copy", action: () => copySelectedNodes() },
-              { label: "Delete", danger: true, action: () => { setGraphNodeSelection([nodeId]); deleteSelectedNodes(); } },
+              { label: "Delete", danger: true, action: () => { setGraphNodeSelection([nodeId]); deleteGraphNodes([nodeId]); } },
             ]
           : nodeId && isCustomGraphNode(nodeId, displayGraphRef.current)
             ? [
@@ -1127,7 +1288,7 @@ export const ComposeAnimationGraphPanel = memo(
               {
                 label: "Delete",
                 danger: true,
-                action: () => { setGraphNodeSelection([nodeId]); deleteSelectedNodes(); },
+                action: () => { setGraphNodeSelection([nodeId]); deleteGraphNodes([nodeId]); },
               },
             ]
             : [
@@ -1177,7 +1338,7 @@ export const ComposeAnimationGraphPanel = memo(
         edges: graph?.edges ?? [],
         customNodes: { ...(graph?.customNodes ?? {}), [id]: node },
         parameters: graph?.parameters,
-        deletedNodeIds: graph?.deletedNodeIds?.filter((deletedId) => deletedId !== id),
+        deletedNodeIds: isComposition3d ? undefined : graph?.deletedNodeIds?.filter((deletedId) => deletedId !== id),
         viewport: graph?.viewport,
         viewports: graph?.viewports,
       }));
@@ -1249,7 +1410,7 @@ export const ComposeAnimationGraphPanel = memo(
           customNodes: { ...customNodes, [nodeId]: { kind: "group", label: "Group", scopeKey: graphViewportKey, details: { groupId } } },
           groups: { ...(graph?.groups ?? {}), [groupId]: { id: groupId, name: "Group", nodes: groupNodes, edges: internalEdges, customNodes: groupCustomNodes, parameters: groupParameters, outNodeId: `${groupId}:out` } },
           parameters: Object.keys(parameters).length ? parameters : undefined,
-          deletedNodeIds: graph?.deletedNodeIds,
+          deletedNodeIds: isComposition3d ? undefined : graph?.deletedNodeIds,
           viewport: graph?.viewport,
           viewports: graph?.viewports,
         };
@@ -1285,7 +1446,7 @@ export const ComposeAnimationGraphPanel = memo(
           customNodes: { ...customNodes, ...restoredCustom },
           groups: Object.keys(groups).length ? groups : undefined,
           parameters: { ...(graph?.parameters ?? {}), ...(group.parameters ?? {}) },
-          deletedNodeIds: graph?.deletedNodeIds,
+          deletedNodeIds: isComposition3d ? undefined : graph?.deletedNodeIds,
           viewport: graph?.viewport,
           viewports: graph?.viewports,
         };
@@ -1315,7 +1476,7 @@ export const ComposeAnimationGraphPanel = memo(
         customNodes: { ...(graph?.customNodes ?? {}), [nodeId]: { ...current, label: name } },
         groups: groupId && graph?.groups?.[groupId] ? { ...graph.groups, [groupId]: { ...graph.groups[groupId], name } } : graph?.groups,
         parameters: graph?.parameters,
-        deletedNodeIds: graph?.deletedNodeIds,
+        deletedNodeIds: isComposition3d ? undefined : graph?.deletedNodeIds,
         viewport: graph?.viewport,
         viewports: graph?.viewports,
       }));
@@ -1327,6 +1488,10 @@ export const ComposeAnimationGraphPanel = memo(
       const selectedIds = selectedGraphNodeIdsRef.current.filter((id) =>
         isCustomGraphNode(id, displayGraphRef.current),
       );
+      deleteGraphNodes(selectedIds);
+    }
+
+    function deleteGraphNodes(selectedIds: string[]) {
       if (selectedIds.length === 0) return;
       commitGraphUpdate((graph) => {
         const nodes = { ...(graph?.nodes ?? {}) };
@@ -1349,7 +1514,7 @@ export const ComposeAnimationGraphPanel = memo(
           customNodes: Object.keys(customNodes).length ? customNodes : undefined,
           groups: Object.keys(groups).length ? groups : undefined,
           parameters: Object.keys(parameters).length ? parameters : undefined,
-          deletedNodeIds: Array.from(new Set([...(graph?.deletedNodeIds ?? []), ...selectedIds])),
+          deletedNodeIds: isComposition3d ? undefined : Array.from(new Set([...(graph?.deletedNodeIds ?? []), ...selectedIds])),
           viewport: graph?.viewport,
           viewports: graph?.viewports,
         };
@@ -1441,7 +1606,7 @@ export const ComposeAnimationGraphPanel = memo(
           customNodes,
           groups: Object.keys(groups).length ? groups : graph?.groups,
           parameters: Object.keys(parameters).length ? parameters : graph?.parameters,
-          deletedNodeIds: graph?.deletedNodeIds,
+          deletedNodeIds: isComposition3d ? undefined : graph?.deletedNodeIds,
           viewport: graph?.viewport,
           viewports: graph?.viewports,
         };
@@ -1633,7 +1798,10 @@ export const ComposeAnimationGraphPanel = memo(
             scrollWidth={hasSelectedGraph ? graphScrollWidth : 0}
             scrollHeight={hasSelectedGraph ? graphScrollHeight : 0}
             hoverNodeId={hoverNodeId}
-            className="clipper-hidden-scrollbar relative min-h-0 overflow-auto rounded-b-[18px] bg-[#0b0f16]"
+            hoverEdgeId={hoverEdgeId}
+            className={`clipper-hidden-scrollbar relative min-h-0 overflow-auto rounded-b-[18px] ${isComposition3d ? "bg-[linear-gradient(180deg,#07130c_0%,#0b2012_48%,#06100a_100%)]" : "bg-[#0b0f16]"}`}
+            onDragOver={onComposition3dDragOver}
+            onDrop={onComposition3dDrop}
             onScroll={onGraphScroll}
             onWheel={onGraphWheel}
             onClick={onClick}
@@ -1650,7 +1818,7 @@ export const ComposeAnimationGraphPanel = memo(
                 <GraphNodePopover
                   node={nodes.find((node) => node.id === popoverNodeId) ?? null}
                   group={
-                    graph?.groups?.[
+                    (graph as AnimationGraphState | undefined)?.groups?.[
                       nodes.find((node) => node.id === popoverNodeId)?.details?.groupId ?? ""
                     ]
                   }
@@ -1670,6 +1838,16 @@ export const ComposeAnimationGraphPanel = memo(
                   graphScale={graphScale}
                   onCommit={(name) => commitGroupRename(renamingGroupNodeId, name)}
                   onCancel={() => { setRenamingGroupNodeId(null); scheduleDraw(); }}
+                />
+              ) : null}
+              {isComposition3d ? (
+                <Composition3dEdgeRegistrationDialog
+                  state={edgeRegistrationDialog}
+                  graph={graph}
+                  nodes={nodes}
+                  onOpenChange={(open) => { if (!open) setEdgeRegistrationDialog(null); }}
+                  onRegister={registerComposition3dEdge}
+                  onDelete={deleteComposition3dEdge}
                 />
               ) : null}
               <AppContextMenu
@@ -1716,10 +1894,13 @@ function GraphCanvasSurface({
   scrollWidth,
   scrollHeight,
   hoverNodeId,
+  hoverEdgeId,
   className = "relative overflow-hidden bg-[#0b0f16]",
   canvasClassName = "block bg-[#0b0f16]",
   onScroll,
   onWheel,
+  onDragOver,
+  onDrop,
   onClick,
   onContextMenu,
   onPointerDown,
@@ -1736,11 +1917,13 @@ function GraphCanvasSurface({
       onPointerDown={(event) => event.stopPropagation()}
       onScroll={onScroll}
       onWheel={onWheel}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
     >
       <div className="sticky left-0 top-0 z-10 h-0 overflow-visible">
         <canvas
           ref={canvasRef}
-          className={`${canvasClassName} ${hoverNodeId ? "cursor-pointer" : "cursor-default"}`}
+          className={`${canvasClassName} ${hoverNodeId || hoverEdgeId ? "cursor-pointer" : "cursor-default"}`}
           width={1}
           height={1}
           onClick={onClick}
@@ -1898,6 +2081,18 @@ export function buildGraphNodes(
       );
     });
   return [...derivedNodes, ...customNodes];
+}
+
+export function buildComposition3dGraphNodes(
+  graph: AnimationGraphState | undefined,
+  canvasWidth = 5200,
+  canvasHeight = 900,
+): GraphNode[] {
+  const outPosition = graph?.nodes["composition3d:out"] ?? { x: Math.round(canvasWidth / gridSize / 2), y: Math.round(canvasHeight / gridSize / 2) };
+  const packageNodes = Object.entries(graph?.customNodes ?? {})
+    .filter(([, node]) => node.scopeKey === "composition3d")
+    .map(([id, node]) => createNode(id, node.label, "animation", graph?.nodes[id] ?? { x: outPosition.x - 10, y: outPosition.y }, node.details));
+  return [...packageNodes, createNode("composition3d:out", "Out", "out", outPosition, { fixed: "true" })];
 }
 
 export function getGraphContentSize(
@@ -2150,6 +2345,7 @@ function getRenderableEdges(
   nodes: GraphNode[],
   objects: FrameObject[],
 ) {
+  const mode = getGraphCompositionMode(nodes);
   const automatic = hasMaterializedCodeGraph(graph, nodes)
     ? []
     : getAutoEdges(objects);
@@ -2159,6 +2355,7 @@ function getRenderableEdges(
       nodes,
     ),
     nodes,
+    mode,
   );
   return filterPermittedEdges(
     Array.from(
@@ -2167,6 +2364,7 @@ function getRenderableEdges(
       ).values(),
     ),
     nodes,
+    mode,
   );
 }
 
@@ -2253,10 +2451,12 @@ function isPermittedGraphEdge(
   edge: AnimationGraphEdge,
   nodes: GraphNode[],
   existingEdges: AnimationGraphEdge[] = [],
+  mode: GraphCompositionMode = getGraphCompositionMode(nodes),
 ) {
   const from = nodes.find((node) => node.id === edge.fromNodeId);
   const to = nodes.find((node) => node.id === edge.toNodeId);
   if (!from || !to) return false;
+  if (mode === "composition3d") return isPermittedComposition3dGraphEdge(from, to, edge, existingEdges);
   if (from.kind === "animation" && to.kind === "time")
     return !hasDuplicateEffectForTimeNode(from, to.id, existingEdges, nodes);
   if (from.kind === "group" && (to.kind === "time" || to.kind === "layer"))
@@ -2266,6 +2466,22 @@ function isPermittedGraphEdge(
   if (from.kind === "time" && to.kind === "time")
     return !pathExists(edge.toNodeId, edge.fromNodeId, existingEdges);
   return false;
+}
+
+function isPermittedComposition3dGraphEdge(
+  from: GraphNode,
+  to: GraphNode,
+  edge: AnimationGraphEdge,
+  existingEdges: AnimationGraphEdge[],
+) {
+  if (from.kind === "out") return false;
+  if (pathExists(edge.toNodeId, edge.fromNodeId, existingEdges)) return false;
+  const fromDefinition = getComposition3dSocketDefinition(getComposition3dGraphNodeKind(from));
+  const toDefinition = getComposition3dSocketDefinition(getComposition3dGraphNodeKind(to));
+  if (!fromDefinition || !toDefinition || toDefinition.accepts.length === 0) return false;
+  if (!edge.fromSocket || !edge.toSocket) return true;
+  const input = getComposition3dInputSocketOptions(to).find((option) => option.id === edge.toSocket);
+  return input ? canConnectSocketTypes(fromDefinition.output, [input.socket]) : canConnectSocketTypes(fromDefinition.output, toDefinition.accepts);
 }
 
 function hasRegisteredGroupOutput(node: GraphNode) {
@@ -2297,10 +2513,49 @@ function getGraphEffectKind(node: GraphNode) {
   return kind || null;
 }
 
-function filterPermittedEdges(edges: AnimationGraphEdge[], nodes: GraphNode[]) {
+function getGraphCompositionMode(nodes: GraphNode[]): GraphCompositionMode {
+  return nodes.some((node) => node.id === "composition3d:out" || node.details?.packageId?.startsWith("composition3d:")) ? "composition3d" : "composition2d";
+}
+
+function getComposition3dGraphNodeKind(node: GraphNode) {
+  if (node.id === "composition3d:out" || node.kind === "out") return "out";
+  return getComposition3dNodeKindFromPackageId(node.details?.packageId);
+}
+
+function getGraphNodeOutputSocketType(node: GraphNode, mode: GraphCompositionMode = "composition2d"): SocketType {
+  if (mode !== "composition3d") return "any";
+  return getComposition3dSocketDefinition(getComposition3dGraphNodeKind(node))?.output ?? "any";
+}
+
+function getGraphNodeSocketColor(node: GraphNode, mode: GraphCompositionMode = "composition2d") {
+  return graphSocketColors[getGraphNodeOutputSocketType(node, mode)];
+}
+
+function getGraphNodeRenderColors(node: GraphNode, mode: GraphCompositionMode = "composition2d") {
+  const base = getGraphNodeColors(node.kind);
+  if (mode !== "composition3d") return base;
+  return { background: nodeColors.outBg, border: nodeColors.outBorder };
+}
+
+function blendHexColors(baseHex: string, accentHex: string, amount: number) {
+  const base = hexToRgb(baseHex);
+  const accent = hexToRgb(accentHex);
+  return `rgb(${Math.round(base.red + (accent.red - base.red) * amount)}, ${Math.round(base.green + (accent.green - base.green) * amount)}, ${Math.round(base.blue + (accent.blue - base.blue) * amount)})`;
+}
+
+function hexToRgb(hex: string) {
+  const value = hex.replace("#", "");
+  return {
+    red: Number.parseInt(value.slice(0, 2), 16),
+    green: Number.parseInt(value.slice(2, 4), 16),
+    blue: Number.parseInt(value.slice(4, 6), 16),
+  };
+}
+
+function filterPermittedEdges(edges: AnimationGraphEdge[], nodes: GraphNode[], mode: GraphCompositionMode = getGraphCompositionMode(nodes)) {
   const accepted: AnimationGraphEdge[] = [];
   for (const edge of edges) {
-    if (isPermittedGraphEdge(edge, nodes, accepted)) accepted.push(edge);
+    if (isPermittedGraphEdge(edge, nodes, accepted, mode)) accepted.push(edge);
   }
   return accepted;
 }
@@ -2356,13 +2611,16 @@ function createEdge(
   fromPort: AnimationGraphPort,
   toNodeId: string,
   toPort: AnimationGraphPort,
+  registration?: Pick<AnimationGraphEdge, "fromSocket" | "toSocket">,
 ): AnimationGraphEdge {
+  const socketId = registration?.fromSocket && registration.toSocket ? `:${registration.fromSocket}->${registration.toSocket}` : "";
   return {
-    id: `${fromNodeId}:${fromPort}->${toNodeId}:${toPort}`,
+    id: `${fromNodeId}:${fromPort}->${toNodeId}:${toPort}${socketId}`,
     fromNodeId,
     fromPort,
     toNodeId,
     toPort,
+    ...registration,
   };
 }
 
@@ -2400,11 +2658,29 @@ function materializeGraphNodeDefinitions(
       ...(next[node.id] ?? {}),
       kind: node.kind,
       label: node.label,
-      scopeKey: graphViewportKey,
+      scopeKey: node.details?.packageId?.startsWith("composition3d:") ? "composition3d" : graphViewportKey,
       details: node.details,
     };
   }
   return Object.keys(next).length ? next : undefined;
+}
+
+function updateGraphNodeDefinitionParameter(
+  customNodes: AnimationGraphState["customNodes"] | undefined,
+  nodeId: string,
+  key: string,
+  value: string,
+) {
+  const current = customNodes?.[nodeId];
+  if (!current) return customNodes;
+  return {
+    ...(customNodes ?? {}),
+    [nodeId]: {
+      ...current,
+      label: key === "label" ? value : current.label,
+      details: key === "label" ? current.details : { ...(current.details ?? {}), [key]: value },
+    },
+  };
 }
 
 function nodeRect(node: GraphNode) {
@@ -2584,6 +2860,7 @@ function getEdgeDropTarget(
   scale: number,
   graph: AnimationGraphState | undefined,
   objects: FrameObject[],
+  mode: GraphCompositionMode = getGraphCompositionMode(nodes),
 ) {
   const portTarget = hitPort(point, nodes, scale);
   const nodeTarget = portTarget
@@ -2600,7 +2877,7 @@ function getEdgeDropTarget(
     ports.toPort,
   );
   const existingEdges = getRenderableEdges(graph, nodes, objects);
-  return isPermittedGraphEdge(edge, nodes, existingEdges)
+  return isPermittedGraphEdge(edge, nodes, existingEdges, mode)
     ? { nodeId: nodeTarget.id, fromPort: ports.fromPort, toPort: ports.toPort }
     : null;
 }
@@ -2753,8 +3030,9 @@ function drawGraphCanvas({
   ctx.fillRect(0, 0, width, height);
   ctx.translate(-(scrollLeft ?? viewport?.scrollLeft ?? 0), -(scrollTop ?? viewport?.scrollTop ?? 0));
   ctx.scale(scale, scale);
-  for (const edge of edges) drawEdge(ctx, edge, nodes, hoverEdgeId === edge.id);
-  if (edgeDrag && previewPoint) drawPreviewEdge(ctx, edgeDrag, previewPoint);
+  const mode = getGraphCompositionMode(nodes);
+  for (const edge of edges) drawEdge(ctx, edge, nodes, hoverEdgeId === edge.id, mode);
+  if (edgeDrag && previewPoint) drawPreviewEdge(ctx, edgeDrag, previewPoint, nodes, mode);
   for (const node of nodes)
     drawNode(
       ctx,
@@ -2763,6 +3041,7 @@ function drawGraphCanvas({
       selectedNodeIds.includes(node.id),
       hoverConnector,
       progressForNode?.(node) ?? null,
+      mode,
     );
   if (marqueeRect) drawMarquee(ctx, marqueeRect);
 }
@@ -2774,9 +3053,10 @@ function drawNode(
   selected: boolean,
   connector: HoverConnector | null,
   progress: number | null = null,
+  mode: GraphCompositionMode = "composition2d",
 ) {
   const rect = nodeRect(node);
-  const { background: bg, border } = getGraphNodeColors(node.kind);
+  const { background: bg, border } = getGraphNodeRenderColors(node, mode);
   ctx.fillStyle = bg;
   ctx.strokeStyle = border;
   ctx.globalAlpha = 1;
@@ -2830,32 +3110,38 @@ function drawNode(
     rect.y + rect.height / 2,
     rect.width - 12,
   );
-  if (connector?.nodeId === node.id) drawConnectorDot(ctx, connector.point);
+  if (connector?.nodeId === node.id) drawConnectorDot(ctx, connector.point, nodeColors.port);
 }
 function drawEdge(
   ctx: CanvasRenderingContext2D,
   edge: AnimationGraphEdge,
   nodes: GraphNode[],
   hovered = false,
+  mode: GraphCompositionMode = "composition2d",
 ) {
   const from = nodes.find((node) => node.id === edge.fromNodeId);
   const to = nodes.find((node) => node.id === edge.toNodeId);
   if (!from || !to) return;
+  const color = hovered ? "#7f8a99" : "#646b75";
   drawArrow(
     ctx,
     nodeCenter(from),
     nodeCenter(to),
-    hovered ? "#7f8a99" : "#646b75",
+    color,
     true,
     hovered,
+    mode === "composition3d" ? getComposition3dEdgeControlState(edge, from, to) : undefined,
   );
 }
 function drawPreviewEdge(
   ctx: CanvasRenderingContext2D,
   edge: Extract<DragState, { kind: "edge" }>,
   point: { x: number; y: number },
+  nodes: GraphNode[],
+  mode: GraphCompositionMode = "composition2d",
 ) {
-  drawArrow(ctx, { x: edge.startX, y: edge.startY }, point, "#d8dee9", false);
+  const color = "#d8dee9";
+  drawArrow(ctx, { x: edge.startX, y: edge.startY }, point, color, false);
 }
 function drawMarquee(
   ctx: CanvasRenderingContext2D,
@@ -2876,8 +3162,9 @@ function drawMarquee(
 function drawConnectorDot(
   ctx: CanvasRenderingContext2D,
   point: { x: number; y: number },
+  color = nodeColors.port,
 ) {
-  ctx.fillStyle = nodeColors.port;
+  ctx.fillStyle = color;
   ctx.strokeStyle = "#242b35";
   ctx.lineWidth = 2;
   ctx.beginPath();
@@ -2892,6 +3179,7 @@ function drawArrow(
   color: string,
   inlineControl: boolean,
   hovered = false,
+  controlState?: { registered: boolean; label?: string },
 ) {
   ctx.strokeStyle = color;
   ctx.lineWidth = 2.25;
@@ -2921,6 +3209,7 @@ function drawArrow(
     getEdgeControlPoint(from, to),
     Math.atan2(to.y - from.y, to.x - from.x),
     hovered,
+    controlState,
   );
 }
 function drawEdgeControl(
@@ -2928,7 +3217,9 @@ function drawEdgeControl(
   point: { x: number; y: number },
   angle: number,
   hovered = false,
+  state?: { registered: boolean; label?: string },
 ) {
+  const registered = state?.registered ?? true;
   ctx.fillStyle = hovered ? "#454b55" : "#2f3339";
   ctx.strokeStyle = hovered ? "#99a3b2" : "#535a64";
   ctx.lineWidth = 1.5;
@@ -2942,18 +3233,36 @@ function drawEdgeControl(
   ctx.stroke();
   ctx.shadowBlur = 0;
   ctx.strokeStyle = hovered ? "#ffffff" : "#d3d7de";
+  ctx.fillStyle = ctx.strokeStyle;
   ctx.lineWidth = 2;
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
-  ctx.save();
-  ctx.translate(point.x, point.y);
-  ctx.rotate(angle);
-  ctx.beginPath();
-  ctx.moveTo(-3, -5);
-  ctx.lineTo(3, 0);
-  ctx.lineTo(-3, 5);
-  ctx.stroke();
-  ctx.restore();
+  if (registered) {
+    ctx.save();
+    ctx.translate(point.x, point.y);
+    ctx.rotate(angle);
+    ctx.beginPath();
+    ctx.moveTo(-3, -5);
+    ctx.lineTo(3, 0);
+    ctx.lineTo(-3, 5);
+    ctx.stroke();
+    ctx.restore();
+  } else {
+    ctx.font = "800 16px Inter, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("!", point.x, point.y + 0.5);
+  }
+  if (registered && state?.label) {
+    ctx.font = "800 12px Inter, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = "rgba(0,0,0,0.72)";
+    ctx.strokeText(state.label, point.x, point.y + 17, 140);
+    ctx.fillStyle = "#eef2f7";
+    ctx.fillText(state.label, point.x, point.y + 17, 140);
+  }
   ctx.lineCap = "butt";
   ctx.lineJoin = "miter";
 }
@@ -3134,6 +3443,203 @@ function getTimeNodeDuration(
   return parseSeconds(
     graph?.parameters?.[node.id]?.duration ?? node.details?.duration ?? "0s",
   );
+}
+
+function Composition3dEdgeRegistrationDialog({
+  state,
+  graph,
+  nodes,
+  onOpenChange,
+  onRegister,
+  onDelete,
+}: {
+  state: EdgeRegistrationDialogState | null;
+  graph: AnimationGraphState | undefined;
+  nodes: GraphNode[];
+  onOpenChange: (open: boolean) => void;
+  onRegister: (edgeId: string, option: Composition3dConnectorOption) => void;
+  onDelete: (edgeId: string) => void;
+}) {
+  const [closing, setClosing] = useState(false);
+  useEffect(() => { if (state) setClosing(false); }, [state]);
+  const edge = state?.draft ?? (state?.edgeId ? graph?.edges?.find((item) => item.id === state.edgeId) : undefined);
+  const from = edge ? nodes.find((node) => node.id === edge.fromNodeId) : undefined;
+  const to = edge ? nodes.find((node) => node.id === edge.toNodeId) : undefined;
+  const options = from && to ? getComposition3dConnectorOptions(from, to) : [];
+  const selectedValue = edge?.fromSocket && edge.toSocket ? `${edge.fromSocket}->${edge.toSocket}` : "";
+  const selectedOption = options.find((option) => option.value === selectedValue) ?? null;
+  if (!state) return null;
+  const close = () => {
+    setClosing(true);
+    window.setTimeout(() => onOpenChange(false), 120);
+  };
+  return (
+    <div className={`fixed inset-0 z-[5000] bg-black/68 backdrop-blur-[2px] ${closing ? "animate-[clipper-dialog-overlay-out_120ms_ease-in_forwards]" : "animate-[clipper-dialog-overlay-in_180ms_ease-out_forwards]"}`} onPointerDown={close}>
+      <div className={`fixed inset-0 m-auto grid h-fit max-h-[calc(100vh-48px)] w-[min(520px,calc(100vw-32px))] gap-4 overflow-visible rounded-2xl border border-[#333b49] bg-[#111722] p-5 text-[#f7f7f8] shadow-[0_24px_90px_rgba(0,0,0,0.56)] ${closing ? "animate-[clipper-dialog-out_120ms_ease-in_forwards]" : "animate-[clipper-dialog-in_190ms_cubic-bezier(0.16,1,0.3,1)_forwards]"}`} onPointerDown={(event) => event.stopPropagation()}>
+        <button className="absolute right-4 top-4 grid size-7 place-items-center rounded-full text-[#9b9da7] outline-none transition hover:bg-[#20232c] hover:text-white" onClick={close}>
+          <span className="text-2xl leading-none">×</span>
+          <span className="sr-only">Close</span>
+        </button>
+        <div className="flex flex-col gap-1.5 pr-9">
+          <div className="text-base font-extrabold text-white">Register Connector</div>
+          <div className="text-sm leading-5 text-[#9b9da7]">Choose output/input mapping for this 3D connector.</div>
+        </div>
+        {from && to ? <Composition3dConnectorPreview from={from} to={to} edge={edge} /> : null}
+        <div className="grid gap-2">
+          <label className="grid gap-1.5 text-[11px] font-bold text-[#8d96a5]">
+            Input / output mapping
+            <Select
+              value={selectedValue}
+              onValueChange={(value) => {
+                const option = options.find((item) => item.value === value);
+                if (state && option?.compatible) onRegister(state.edgeId ?? "__draft__", option);
+              }}
+            >
+              <SelectTrigger className="h-9 rounded-lg border-[#2f3848] bg-[#0b1018] text-[12px] font-semibold text-[#e7edf7] focus:ring-0">
+                <SelectValue placeholder="Select connector mapping" />
+              </SelectTrigger>
+              <SelectContent className="z-[6000] border-[#2f3848] bg-[#101620] text-[#e7edf7]">
+                <SelectGroup>
+                  {options.map((option) => (
+                    <SelectItem key={option.value} value={option.value} disabled={!option.compatible} className={!option.compatible ? "text-[#687180] opacity-55" : undefined}>
+                      {option.label}{option.compatible ? "" : " · incompatible"}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </label>
+        </div>
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <button
+            className="rounded-lg border border-[#653438] bg-[#2a1114] px-3 py-2 text-[12px] font-extrabold text-[#ffb8bd] transition hover:border-[#b6535d] hover:bg-[#3a171b]"
+            onClick={() => { state?.edgeId ? onDelete(state.edgeId) : close(); }}
+          >
+            Delete Connector
+          </button>
+          <button
+            className="rounded-lg border border-[#323b4b] bg-[#171e2a] px-3 py-2 text-[12px] font-extrabold text-[#dce4f0] transition hover:border-[#596579] hover:bg-[#202838]"
+            onClick={close}
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function getComposition3dConnectorOptions(from: GraphNode, to: GraphNode): Composition3dConnectorOption[] {
+  const outputs = getComposition3dOutputSocketOptions(from);
+  const inputs = getComposition3dInputSocketOptions(to);
+  return outputs
+    .flatMap((output) => inputs.map((input) => ({
+      value: `${output.id}->${input.id}`,
+      label: input.label,
+      fromSocket: output.id,
+      toSocket: input.id,
+      compatible: canConnectSocketTypes(output.socket, [input.socket]),
+    })))
+    .sort((left, right) => Number(right.compatible) - Number(left.compatible) || left.label.localeCompare(right.label));
+}
+
+function Composition3dConnectorPreview({ from, to, edge }: { from: GraphNode; to: GraphNode; edge?: AnimationGraphEdge }) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  useLayoutEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const fromWidth = getNodeGridWidth(from.label);
+    const toWidth = getNodeGridWidth(to.label);
+    const width = canvas.clientWidth || 480;
+    const center = { x: width / 2, y: 60 };
+    const gap = 156;
+    const previewNodes = [
+      { ...from, width: fromWidth, x: (center.x - gap / 2 - (fromWidth * gridSize) / 2) / gridSize, y: (center.y - (nodeHeight * gridSize) / 2) / gridSize },
+      { ...to, width: toWidth, x: (center.x + gap / 2 - (toWidth * gridSize) / 2) / gridSize, y: (center.y - (nodeHeight * gridSize) / 2) / gridSize },
+    ];
+    const height = 120;
+    const ratio = window.devicePixelRatio || 1;
+    canvas.width = Math.round(width * ratio);
+    canvas.height = Math.round(height * ratio);
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    ctx.clearRect(0, 0, width, height);
+    ctx.fillStyle = "#0b0f16";
+    ctx.fillRect(0, 0, width, height);
+    drawArrow(ctx, nodeCenter(previewNodes[0]), nodeCenter(previewNodes[1]), "#646b75", true, false, { registered: true });
+    ctx.font = "800 10px Inter, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "bottom";
+    ctx.fillStyle = "#8f98a8";
+    ctx.fillText("out", nodeCenter(previewNodes[0]).x, nodeRect(previewNodes[0]).y - 8);
+    ctx.fillText(edge?.toSocket ?? "in", nodeCenter(previewNodes[1]).x, nodeRect(previewNodes[1]).y - 8);
+    for (const node of previewNodes) drawNode(ctx, node, false, false, null, null, "composition3d");
+  }, [edge?.fromSocket, edge?.toSocket, from, to]);
+  return (
+    <div className="overflow-hidden rounded-xl border border-[#273142] bg-[#0b0f16] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+      <canvas ref={canvasRef} className="block h-[120px] w-full bg-[#0b0f16]" width={420} height={120} />
+    </div>
+  );
+}
+
+function getComposition3dOutputSocketOptions(node: GraphNode): Composition3dSocketOption[] {
+  const definition = getComposition3dSocketDefinition(getComposition3dGraphNodeKind(node));
+  return definition ? [{ id: "out", label: "out", socket: definition.output }] : [];
+}
+
+function getComposition3dInputSocketOptions(node: GraphNode): Composition3dSocketOption[] {
+  const kind = getComposition3dGraphNodeKind(node);
+  const definition = getComposition3dSocketDefinition(kind);
+  if (!kind || !definition) return [];
+  if (kind === "out") return [{ id: "color", label: "color", socket: "universal" }];
+  if (kind === "texture") return [{ id: "uv", label: "uv", socket: "universal" }];
+  if (kind === "mx_noise_vec3" || kind === "split_x" || kind === "split_y" || kind === "abs" || kind === "sin" || kind === "fract") return [{ id: "value", label: "value", socket: kind === "mx_noise_vec3" || kind === "split_x" || kind === "split_y" ? "universal" : "scalar" }];
+  if (kind === "vec2") return [
+    { id: "x", label: "x", socket: "scalar" },
+    { id: "y", label: "y", socket: "scalar" },
+  ];
+  if (kind === "mix") return [
+    { id: "x", label: "x", socket: "universal" },
+    { id: "y", label: "y", socket: "universal" },
+    { id: "a", label: "a", socket: "scalar" },
+  ];
+  if (kind === "smoothstep") return [
+    { id: "edge0", label: "edge0", socket: "scalar" },
+    { id: "edge1", label: "edge1", socket: "scalar" },
+    { id: "x", label: "x", socket: "scalar" },
+  ];
+  if (kind === "clamp") return [
+    { id: "value", label: "value", socket: "scalar" },
+    { id: "min", label: "min", socket: "scalar" },
+    { id: "max", label: "max", socket: "scalar" },
+  ];
+  if (kind === "pow") return [
+    { id: "value", label: "value", socket: "scalar" },
+    { id: "exponent", label: "exponent", socket: "scalar" },
+  ];
+  if (kind === "max" || kind === "min") return [
+    { id: "in0", label: "in0", socket: "scalar" },
+    { id: "in1", label: "in1", socket: "scalar" },
+  ];
+  if (kind === "mul" || kind === "add" || kind === "sub" || kind === "div") return [
+    { id: "in0", label: "in0", socket: "universal" },
+    { id: "in1", label: "in1", socket: "universal" },
+  ];
+  return definition.accepts.length ? [{ id: "in", label: "in", socket: definition.accepts[0] }] : [];
+}
+
+function getComposition3dEdgeControlState(edge: AnimationGraphEdge, from: GraphNode, to: GraphNode) {
+  if (!edge.fromSocket || !edge.toSocket) return { registered: false };
+  const label = getComposition3dEdgeLabel(edge, from, to);
+  return { registered: true, label };
+}
+
+function getComposition3dEdgeLabel(edge: AnimationGraphEdge, _from: GraphNode, to: GraphNode) {
+  const inputLabel = getComposition3dInputSocketOptions(to).find((option) => option.id === edge.toSocket)?.label ?? edge.toSocket;
+  return inputLabel ?? "";
 }
 
 function isConnectedToLayer(
@@ -3573,6 +4079,7 @@ function GroupSubgraphPreview({
       scrollWidth={layout.scrollWidth * graphScale}
       scrollHeight={layout.scrollHeight * graphScale}
       hoverNodeId={hoverNodeId}
+      hoverEdgeId={hoverEdgeId}
       className="clipper-hidden-scrollbar relative h-[360px] min-w-0 overflow-auto bg-[#0b0f16]"
       onScroll={drawGroupCanvas}
       onWheel={onGroupWheel}
@@ -3605,11 +4112,13 @@ function GroupSubgraphPreview({
   );
 }
 
-function getPopoverDetails(
+export function getPopoverDetails(
   node: GraphNode,
   parameters?: Record<string, string>,
 ) {
   if (node.kind === "group" || node.kind === "out") return [];
+  const composition3dKind = getComposition3dGraphNodeKind(node);
+  if (composition3dKind || node.details?.packageId?.startsWith("composition3d:")) return getComposition3dPopoverDetails(composition3dKind ?? "package", node, parameters);
   if (node.kind === "time") {
     return Object.entries(timeParameterDefaults).map(
       ([key, value]) => [key, parameters?.[key] ?? node.details?.[key] ?? value] as [string, string],
@@ -3628,10 +4137,29 @@ function getPopoverDetails(
   );
 }
 
+function getComposition3dPopoverDetails(
+  kind: NonNullable<ReturnType<typeof getComposition3dGraphNodeKind>> | "package",
+  node: GraphNode,
+  parameters?: Record<string, string>,
+) {
+  const defaults: Array<[string, string]> = [["label", node.label]];
+  if (kind === "color") defaults.push(["value", "[1, 1, 1, 1]"]);
+  else if (kind === "texture") defaults.push(["asset", "assets/texture.png"]);
+  else if (kind === "time") defaults.push(["scale", "1"], ["offset", "0"]);
+  else if (kind === "mx_noise_vec3") defaults.push(["scale", "1"]);
+  else if (kind === "mix") defaults.push(["factor", "0.5"]);
+  else if (kind === "smoothstep") defaults.push(["edge0", "0"], ["edge1", "1"]);
+  else if (kind === "mul" || kind === "add") defaults.push(["amount", "1"]);
+  else defaults.push(["enabled", "1"]);
+  return defaults.map(([key, value]) => [key, parameters?.[key] ?? node.details?.[key] ?? value] as [string, string]);
+}
+
 function getParameterEditorSchema(
   node: GraphNode,
   details: Array<[string, string]>,
 ): GraphParameterEditorSchema {
+  const composition3dKind = getComposition3dGraphNodeKind(node);
+  if (composition3dKind || node.details?.packageId?.startsWith("composition3d:")) return getComposition3dParameterEditorSchema(composition3dKind ?? "package", details);
   const definition =
     node.kind === "animation"
       ? getAnimationDefinition(node.details?.property)
@@ -3671,6 +4199,47 @@ function getParameterEditorSchema(
       },
     ],
   };
+}
+
+export function getGraphNodeParameterEditorSchema(node: GraphNode, parameters?: Record<string, string>) {
+  const details = getPopoverDetails(node, parameters);
+  if (details.length === 0) return null;
+  return getParameterEditorSchema(node, details);
+}
+
+function getComposition3dParameterEditorSchema(
+  kind: NonNullable<ReturnType<typeof getComposition3dGraphNodeKind>> | "package",
+  details: Array<[string, string]>,
+): GraphParameterEditorSchema {
+  const textFields = new Set(["label", "asset", "value"]);
+  const labelByKey: Record<string, string> = {
+    asset: "Asset",
+    edge0: "Edge 0",
+    edge1: "Edge 1",
+    factor: "Factor",
+    label: "Label",
+    value: "Value",
+  };
+  return {
+    width: kind === "texture" || kind === "color" ? 260 : 220,
+    height: Math.min(260, 58 + details.length * 34),
+    groups: [
+      {
+        id: "composition3d",
+        label: "TSL parameters",
+        fields: details.map(([key, value]) => ({
+          key,
+          label: labelByKey[key] ?? titleCase(key),
+          value,
+          type: textFields.has(key) ? "text" : "number",
+        })),
+      },
+    ],
+  };
+}
+
+function titleCase(value: string) {
+  return value.replace(/([A-Z])/g, " $1").replace(/^./, (char) => char.toUpperCase());
 }
 
 function getGraphParameterUnit(key: string) {

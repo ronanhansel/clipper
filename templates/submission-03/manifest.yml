@@ -1,0 +1,15 @@
+id: submission-03
+name: Full Height Paper Study
+slug: full-height-paper-study
+subtitle: Dense full-height manuscript study copied from the hi project reference.
+entry: source/main.composition.ts
+author:
+  name: Clipper Studio
+  github: clipper
+  twitter: ""
+  email: ""
+files:
+  - source/main.composition.ts
+  - source/index.html
+  - source/style.css
+  - source/style.css.d.ts

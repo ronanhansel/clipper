@@ -1,5 +1,8 @@
 /// <reference types="vite/client" />
 
+declare module "three/webgpu";
+declare module "three/tsl";
+
 declare module "*.yml?raw" {
   const source: string;
   export default source;
@@ -20,6 +23,10 @@ declare module "*.html" {
   export default source;
 }
 
+declare module "three/webgpu";
+
+declare module "three/tsl";
+
 type LocalFontData = {
   family: string;
   fullName: string;
@@ -33,6 +40,16 @@ type ClipperUpdateStatus = {
   message: string;
   version?: string;
   downloaded?: boolean;
+};
+
+type ClipperTemplateBundle = {
+  id: string;
+  slug: string;
+  title: string;
+  subtitle: string;
+  entry: string;
+  author: { name: string; github?: string; twitter?: string; email?: string };
+  files: Record<string, string>;
 };
 
 interface Window {
@@ -50,10 +67,13 @@ interface Window {
     createDirectory: (relativePath: string) => Promise<void>;
     revealFile: (relativePath: string) => Promise<void>;
     revealAbsolutePath?: (filePath: string) => Promise<void>;
+    copyText?: (text: string) => Promise<void>;
+    openAgentTerminal?: (relativePath: string, provider: "opencode" | "codex" | "claude" | "gemini") => Promise<void>;
     trashFile: (relativePath: string) => Promise<void>;
     renameFile: (relativePath: string, nextRelativePath: string) => Promise<void>;
     copyFile: (relativePath: string, nextRelativePath: string) => Promise<void>;
     listDirectory: (relativePath: string) => Promise<{ name: string; isDirectory: boolean }[]>;
+    listTemplates?: () => Promise<ClipperTemplateBundle[]>;
     findProjectFileByName: (directoryPath: string, fileName: string) => Promise<string | null>;
     openCompositionFile: (directoryPath: string) => Promise<string | null>;
     listSystemFonts: () => Promise<string[]>;

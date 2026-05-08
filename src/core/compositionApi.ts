@@ -22,6 +22,8 @@ export type Transform = {
 export type Bounds = { x: number; y: number; width: number; height: number };
 export type StyleValue = string | number;
 export type LayerStyle = Record<string, StyleValue>;
+export type CompositionRenderMode = "dom" | "live-dom" | "webgl";
+export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 export type RichTextSegment = { text: string; bold: boolean; italic: boolean; underline: boolean };
 export type FrameTemplate = { kind: "html"; source: string; static?: boolean };
 export type MotionEase = "linear" | "easeIn" | "easeOut" | "easeInOut" | "circOut" | "backOut";
@@ -58,6 +60,7 @@ export type CompositionProps = {
   id?: string;
   name?: string;
   duration: number;
+  renderMode?: CompositionRenderMode;
   frame: { width: 1920; height: 1080; style?: LayerStyle };
   background?: {
     id?: string;
@@ -69,7 +72,14 @@ export type CompositionProps = {
     animations?: LayerAnimation[];
     elements?: Renderable[];
   };
+  composition3dGraph?: JsonValue;
   render: (context: RenderContext) => Renderable[];
+};
+
+export type Composition3DProps = Omit<CompositionProps, "render" | "renderMode" | "background"> & {
+  background?: CompositionProps["background"];
+  composition3dGraph?: JsonValue;
+  render?: (context: RenderContext) => Renderable[];
 };
 
 export function transformToCss(transform: Transform | string | undefined): string | undefined {
@@ -255,16 +265,31 @@ export class Composition {
   id?: string;
   name?: string;
   duration: number;
+  renderMode?: CompositionProps["renderMode"];
   frame: CompositionProps["frame"];
   background?: CompositionProps["background"];
+  composition3dGraph?: CompositionProps["composition3dGraph"];
   render: (context: RenderContext) => Renderable[];
 
   constructor(props: CompositionProps) {
     this.id = props.id;
     this.name = props.name;
     this.duration = props.duration;
+    this.renderMode = props.renderMode;
     this.frame = props.frame;
     this.background = props.background;
+    this.composition3dGraph = props.composition3dGraph;
     this.render = props.render;
+  }
+}
+
+export class Composition3D extends Composition {
+  constructor(props: Composition3DProps) {
+    super({
+      ...props,
+      renderMode: "webgl",
+      background: props.background ?? { id: "bg", name: "Background", style: {}, elements: [] },
+      render: props.render ?? (() => []),
+    });
   }
 }

@@ -25,10 +25,13 @@ export function TimelinePanel(props: TimelinePanelProps) {
   const composeCurrentTime = props.mode === "compose" && !props.isPlaying ? props.currentSceneTime : lastComposeTimeRef.current;
   const directProps = props.mode === "compose" ? lastDirectPropsRef.current : props;
   useEffect(() => {
-    if (props.mode !== "compose") return;
-
     function getCompositionId(event: DragEvent) {
-      return event.dataTransfer?.getData("application/x-clipper-composition") || getActiveCompositionPointerDrag()?.compositionId || "";
+      return event.dataTransfer?.getData("application/x-clipper-composition") || getActiveCompositionPointerDrag()?.compositionId || event.dataTransfer?.getData("text/plain") || "";
+    }
+
+    function hasCompositionDragData(event: DragEvent) {
+      const text = event.dataTransfer?.getData("text/plain") ?? "";
+      return Boolean(event.dataTransfer?.types.includes("application/x-clipper-composition") || getActiveCompositionPointerDrag() || isCompositionDragText(text));
     }
 
     function getTimelineDropTime(event: DragEvent) {
@@ -50,18 +53,18 @@ export function TimelinePanel(props: TimelinePanelProps) {
     }
 
     function handleDragOver(event: DragEvent) {
-      const hasCompositionDrag = Boolean(event.dataTransfer?.types.includes("application/x-clipper-composition") || getActiveCompositionPointerDrag());
-      if (!isOverTimeline(event) || !hasCompositionDrag) return;
+      if (!isOverTimeline(event) || !hasCompositionDragData(event)) return;
       event.preventDefault();
       if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
     }
 
     function handleDrop(event: DragEvent) {
-      if (!isOverTimeline(event)) return;
+      if (!isOverTimeline(event) || !hasCompositionDragData(event)) return;
       const compositionId = getCompositionId(event);
       if (!compositionId) return;
       event.preventDefault();
       event.stopPropagation();
+      (event as DragEvent & { __clipperCompositionDropHandled?: boolean }).__clipperCompositionDropHandled = true;
       props.onAddComposition(compositionId, getTargetLayerId(), getTimelineDropTime(event));
       setActiveCompositionPointerDrag(null);
       props.onModeChange("composition");
@@ -77,10 +80,14 @@ export function TimelinePanel(props: TimelinePanelProps) {
 
   return <div className="relative h-full min-h-0">
     <div className={props.mode === "compose" ? "absolute inset-0" : "pointer-events-none invisible absolute inset-0"}>
-      <ComposeAnimationGraphPanel active={props.mode === "compose"} currentTime={composeCurrentTime} isPlaying={props.isPlaying} part={composePart} playbackPlayheadRef={props.mode === "compose" ? props.playbackPlayheadRef : inactivePlaybackPlayheadRef} scrubbingRef={props.scrubbingRef} scrubSnapEnabled={props.scrubSnapEnabled} selectedObjectIds={composeSelectedObjectIds} timelineViewportState={props.timelineViewportState} onExitCompose={props.onExitCompose ?? (() => props.onModeChange("composition"))} onScrub={props.onScrub} onScrubStart={props.onScrubStart} onScrubEnd={props.onScrubEnd} onTimelineViewportStateChange={props.onTimelineViewportStateChange} onUpdateGraph={props.onUpdateComposeAnimationGraph} />
+      <ComposeAnimationGraphPanel active={props.mode === "compose"} currentTime={composeCurrentTime} isPlaying={props.isPlaying} part={composePart} playbackPlayheadRef={props.mode === "compose" ? props.playbackPlayheadRef : inactivePlaybackPlayheadRef} scrubbingRef={props.scrubbingRef} scrubSnapEnabled={props.scrubSnapEnabled} selectedObjectIds={composeSelectedObjectIds} timelineViewportState={props.timelineViewportState} onExitCompose={props.onExitCompose ?? (() => props.onModeChange("composition"))} onScrub={props.onScrub} onScrubStart={props.onScrubStart} onScrubEnd={props.onScrubEnd} onTimelineViewportStateChange={props.onTimelineViewportStateChange} onUpdateGraph={props.onUpdateComposeAnimationGraph} onInspectComposition3dNode={props.onInspectComposition3dNode} />
     </div>
     <div className={props.mode === "compose" ? "pointer-events-none invisible absolute inset-0" : "absolute inset-0"}>
       <DirectTimelinePanel {...directProps} playbackPlayheadRef={props.mode === "compose" ? inactivePlaybackPlayheadRef : props.playbackPlayheadRef} />
     </div>
   </div>;
+}
+
+function isCompositionDragText(value: string) {
+  return value.includes(".composition.ts") || value.includes(".composition.json") || value.includes(".composition3d.json");
 }

@@ -118,11 +118,24 @@ export function useCompositionTimelineCommands({
   }
 
   function addCompositionFromLibrary(compositionId: string, targetLayerId?: string, start = currentSceneTimeRef.current) {
-    const libraryComposition = compositionLibrary.find((composition) => composition.id === compositionId || (composition.filePath && getDisplayName(composition.filePath.split("/").pop() || "") === compositionId));
-    if (!libraryComposition) return;
+    const compositionKey = normalizeDroppedCompositionKey(compositionId);
+    const libraryComposition = compositionLibrary.find((composition) => {
+      const fileName = composition.filePath?.split("/").pop() ?? "";
+      const filePath = composition.filePath ?? "";
+      return composition.id === compositionKey
+        || filePath === compositionKey
+        || Boolean(filePath && compositionKey.endsWith(`/${filePath}`))
+        || Boolean(filePath && compositionKey.endsWith(`/file-manager/${filePath}`))
+        || Boolean(filePath.endsWith(`/${compositionKey}`))
+        || fileName === compositionKey
+        || getDisplayName(fileName) === compositionKey;
+    });
+    const fallbackFilePath = getCompositionFilePathFromDropKey(compositionKey);
+    if (!libraryComposition && !fallbackFilePath) return;
+    const sourceComposition = libraryComposition ?? createDroppedCompositionPlaceholder(fallbackFilePath!);
     const clipId = `clip_${Date.now().toString(36)}`;
     const layerId = targetLayerId ?? (timelineLayers.compositionLayers?.length ? timelineLayers.compositionLayers : defaultTimelineLayerState.compositionLayers!)?.[0]?.id ?? "comp";
-    const timelineComposition = { ...libraryComposition, id: clipId, compositionId: libraryComposition.compositionId ?? libraryComposition.id, start: roundToPrecision(Math.max(start, 0), timelinePrecision), layerId };
+    const timelineComposition = { ...sourceComposition, id: clipId, compositionId: sourceComposition.compositionId ?? sourceComposition.id, start: roundToPrecision(Math.max(start, 0), timelinePrecision), layerId };
     updateSceneParts((parts) => [...parts, timelineComposition]);
     setSelectedPartId(timelineComposition.id);
     clearNodeSelection();
@@ -183,5 +196,30 @@ export function useCompositionTimelineCommands({
     reorderPart,
     snapCompositionMiddle,
     updateCompositionMarker,
+  };
+}
+
+function normalizeDroppedCompositionKey(value: string) {
+  return value.replace(/^os-file:/, "").replace(/\\/g, "/").replace(/^file-manager\//, "").replace(/\.composition3d\.json$/, ".composition.ts");
+}
+
+function getCompositionFilePathFromDropKey(value: string) {
+  const fileManagerIndex = value.lastIndexOf("/file-manager/");
+  const path = fileManagerIndex >= 0 ? value.slice(fileManagerIndex + "/file-manager/".length) : value.startsWith("file-manager/") ? value.slice("file-manager/".length) : value;
+  if (!path) return null;
+  return path.endsWith(".composition.ts") || path.endsWith(".composition.json") ? path : null;
+}
+
+function createDroppedCompositionPlaceholder(filePath: string): Part {
+  return {
+    id: filePath,
+    compositionId: filePath,
+    filePath,
+    duration: 5,
+    frame: { width: 1920, height: 1080, style: { background: "#050505" } },
+    background: { id: "background", name: "Background", style: { background: "#050505" }, elements: [] },
+    objects: [],
+    snapshot: [],
+    motionMarkers: [],
   };
 }

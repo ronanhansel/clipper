@@ -13,11 +13,17 @@ export type PointerDragPreviewDetail = {
 
 export const effectPointerDragEvent = "clipper:effect-pointer-drag";
 export const effectDragPreviewEvent = "clipper:effect-drag-preview";
+export const composition3dPackagePointerDragEvent = "clipper:composition3d-package-pointer-drag";
+export const composition3dPackageDragPreviewEvent = "clipper:composition3d-package-drag-preview";
 export const compositionPointerDragEvent = "clipper:composition-pointer-drag";
 export const compositionDragPreviewEvent = "clipper:composition-drag-preview";
 
 export type EffectPointerDragDetail = ClipperPointerDragDetail<{
   effect: string;
+}>;
+
+export type Composition3dPackagePointerDragDetail = ClipperPointerDragDetail<{
+  packageId: string;
 }>;
 
 export type CompositionPointerDragDetail = ClipperPointerDragDetail<{
@@ -54,6 +60,7 @@ type StartPointerDragOptions<TPayload extends Record<string, unknown>> = {
   pointerEvent: Pick<PointerEvent, "clientX" | "clientY" | "button" | "preventDefault" | "shiftKey">;
   previewEventName?: string;
   skipPreventDefault?: boolean;
+  textColor?: string;
 };
 
 export const clipperDragGhostOffset = { x: 12, y: 12 };
@@ -61,11 +68,11 @@ export const clipperDragGhostClassName = "clipper-drag-preview pointer-events-no
 const defaultPointerDragActivationDelayMs = 160;
 let activePointerDragCleanup: (() => void) | null = null;
 
-export function getClipperDragGhostCssText(accent: string) {
-  return `position:fixed;top:0;left:0;z-index:9999;box-sizing:border-box;min-width:104px;max-width:260px;pointer-events:none;border:1px solid ${accent};border-radius:9px;background:#111319;color:#f1f3f7;padding:7px 10px;font:700 11px system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;box-shadow:0 14px 34px rgba(0,0,0,0.36),0 0 0 4px color-mix(in srgb, ${accent} 18%, transparent);will-change:transform;`;
+export function getClipperDragGhostCssText(accent: string, textColor = "#f1f3f7") {
+  return `position:fixed;top:0;left:0;z-index:9999;box-sizing:border-box;min-width:104px;max-width:260px;pointer-events:none;border:1px solid ${accent};border-radius:9px;background:#111319;color:${textColor};padding:7px 10px;font:700 11px system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;box-shadow:0 14px 34px rgba(0,0,0,0.36),0 0 0 4px color-mix(in srgb, ${accent} 18%, transparent);will-change:transform;`;
 }
 
-export function startClipperPointerDrag<TPayload extends Record<string, unknown>>({ accent, activationDelayMs = defaultPointerDragActivationDelayMs, eventName, label, payload, pointerEvent, previewEventName, skipPreventDefault }: StartPointerDragOptions<TPayload>) {
+export function startClipperPointerDrag<TPayload extends Record<string, unknown>>({ accent, activationDelayMs = defaultPointerDragActivationDelayMs, eventName, label, payload, pointerEvent, previewEventName, skipPreventDefault, textColor }: StartPointerDragOptions<TPayload>) {
   if (pointerEvent.button !== 0) return;
   if (!skipPreventDefault) pointerEvent.preventDefault();
 
@@ -81,7 +88,7 @@ export function startClipperPointerDrag<TPayload extends Record<string, unknown>
     active = true;
     ghost = document.createElement("span");
     ghost.textContent = label;
-    ghost.style.cssText = getClipperDragGhostCssText(accent);
+    ghost.style.cssText = getClipperDragGhostCssText(accent, textColor);
     document.body.appendChild(ghost);
     moveGhost(lastPointer.clientX, lastPointer.clientY);
     emitFromPointer("move", lastPointer);

@@ -160,7 +160,6 @@ export const NativeTree = forwardRef(function NativeTree<T>(props: NativeTreePro
     children,
   } = props;
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const openStateInitializedRef = useRef(false);
   const [openState, setOpenState] = useState<Record<string, boolean>>(() => initialOpenState ?? {});
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [focusedId, setFocusedId] = useState<string | null>(null);
@@ -168,6 +167,7 @@ export const NativeTree = forwardRef(function NativeTree<T>(props: NativeTreePro
   const [dragState, setDragState] = useState<{ ids: string[]; primaryId: string; mouse: { x: number; y: number } | null } | null>(null);
   const [dropTarget, setDropTarget] = useState<NativeTreeDropTarget | null>(null);
   const selectedIdsRef = useRef(selectedIds);
+  const selectionAnchorIdRef = useRef<string | null>(null);
   selectedIdsRef.current = selectedIds;
 
   const finishDrag = useCallback(() => {
@@ -176,9 +176,8 @@ export const NativeTree = forwardRef(function NativeTree<T>(props: NativeTreePro
   }, []);
 
   useEffect(() => {
-    if (openStateInitializedRef.current) return;
-    if (initialOpenState) setOpenState(initialOpenState);
-    openStateInitializedRef.current = true;
+    if (!initialOpenState) return;
+    setOpenState((current) => areRecordBooleansEqual(current, initialOpenState) ? current : initialOpenState);
   }, [initialOpenState]);
 
   const getId = (node: T) => typeof idAccessor === "function" ? idAccessor(node) : String(node[idAccessor]);
@@ -197,6 +196,7 @@ export const NativeTree = forwardRef(function NativeTree<T>(props: NativeTreePro
       return selectionChanged ? nextSelectedIds : current;
     });
     setFocusedId((current) => current && nextIds.has(current) ? current : null);
+    if (selectionAnchorIdRef.current && !nextIds.has(selectionAnchorIdRef.current)) selectionAnchorIdRef.current = nextSelectedIds[0] ?? null;
     setEditingId((current) => current && nextIds.has(current) ? current : null);
     setDragState((current) => {
       if (!current) return current;
@@ -295,18 +295,19 @@ export const NativeTree = forwardRef(function NativeTree<T>(props: NativeTreePro
     get openState() { return openState; },
     get selectedNodes() { return selectedNodes; },
     get visibleNodes() { return visibleNodes; },
-    deselectAll: () => updateSelection([]),
+    deselectAll: () => updateSelection([], null, null),
     endDrag: finishDrag,
     hideCursor: () => setDropTarget(null),
     onBlur: () => setFocusedId(null),
     open: (id: string) => setOpenState((current) => ({ ...current, [id]: true })),
-    select: (id: string) => updateSelection([id], id),
-    setSelection: (selection) => updateSelection(selection.ids, selection.mostRecent ?? selection.anchor ?? selection.ids[0] ?? null),
+    select: (id: string) => updateSelection([id], id, id),
+    setSelection: (selection) => updateSelection(selection.ids, selection.mostRecent ?? selection.anchor ?? selection.ids[0] ?? null, selection.anchor ?? selection.mostRecent ?? selection.ids[0] ?? null),
   }), [finishDrag, focusedId, openState, selectedNodes, visibleNodes]);
   apiRef.current = api;
   useImperativeHandle(ref, () => api, [api]);
 
-  function updateSelection(nextIds: string[], focusId = nextIds[0] ?? null) {
+  function updateSelection(nextIds: string[], focusId: string | null = nextIds[0] ?? null, anchorId: string | null = focusId) {
+    selectionAnchorIdRef.current = anchorId;
     setSelectedIds(nextIds);
     setFocusedId(focusId);
     window.setTimeout(() => onSelect?.(nextIds.flatMap((id) => apiRef.current.visibleNodes.find((node) => node.id === id) ?? [])), 0);
@@ -315,13 +316,16 @@ export const NativeTree = forwardRef(function NativeTree<T>(props: NativeTreePro
   function selectNode(event: MouseEvent<HTMLDivElement>, node: NativeTreeNodeApi<T>) {
     if (editingId) return;
     let nextIds = [node.id];
+    let nextAnchorId: string | null = node.id;
     if (event.metaKey || event.ctrlKey) nextIds = selectedIdsRef.current.includes(node.id) ? selectedIdsRef.current.filter((id) => id !== node.id) : [...selectedIdsRef.current, node.id];
     if (event.shiftKey && selectedIdsRef.current.length) {
-      const anchor = visibleNodes.findIndex((item) => item.id === selectedIdsRef.current[0]);
+      const anchorId = selectionAnchorIdRef.current ?? selectedIdsRef.current[0];
+      const anchor = visibleNodes.findIndex((item) => item.id === anchorId);
       const target = visibleNodes.findIndex((item) => item.id === node.id);
       if (anchor >= 0 && target >= 0) nextIds = visibleNodes.slice(Math.min(anchor, target), Math.max(anchor, target) + 1).map((item) => item.id);
+      nextAnchorId = anchorId;
     }
-    updateSelection(nextIds, node.id);
+    updateSelection(nextIds, node.id, nextAnchorId);
     onActivate?.(node, event);
   }
 
@@ -460,3 +464,9 @@ export const NativeTree = forwardRef(function NativeTree<T>(props: NativeTreePro
     {renderDragPreview?.({ id: dragState?.primaryId ?? null, isDragging: Boolean(dragState), mouse: dragState?.mouse ?? null })}
   </div>;
 }) as <T>(props: NativeTreeProps<T> & { ref?: ForwardedRef<NativeTreeApi<T> | undefined> }) => ReactNode;
+
+function areRecordBooleansEqual(left: Record<string, boolean>, right: Record<string, boolean>) {
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  return leftKeys.length === rightKeys.length && leftKeys.every((key) => left[key] === right[key]);
+}

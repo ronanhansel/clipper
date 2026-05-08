@@ -16,6 +16,7 @@ module.exports = {
   files: [
     "dist/**",
     "dist-electron/**",
+    "templates/**",
     "build/electron/icon.png",
     "package.json",
   ],

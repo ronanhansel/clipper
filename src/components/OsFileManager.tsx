@@ -1,4 +1,4 @@
-import { ChartNoAxesGantt, ChevronDown, ChevronRight, Clapperboard, File, FileCode, FileJson, Folder, FolderOpen } from "lucide-react";
+import { Box, ChartNoAxesGantt, ChevronDown, ChevronRight, Clapperboard, File, FileCode, FileJson, Folder, FolderOpen } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import toast from "react-hot-toast";
 import { isTextEditingTarget } from "../app/features/shortcuts/useGlobalEditorShortcuts";
@@ -7,7 +7,7 @@ import { clipperHost } from "../app/clipperHost";
 import { getDirectoryPath, nextNumberedName } from "../app/features/file-manager/fileManagerPaths";
 import { getDisplayName, getDragPreviewDisplayName, getFileType, nextNumberedSemanticName, reconstructFileName } from "../core/fileNames";
 import { createDefaultTimelineLayerState } from "../core/project";
-import type { CompositionClip, TimelineDocument } from "../core/types";
+import type { CompositionClip, FileManagerState, TimelineDocument } from "../core/types";
 import { getTransparentNativeDragImage } from "../lib/nativeDragImage";
 import { clipperDragGhostClassName, clipperDragGhostOffset, compositionDragPreviewEvent, compositionPointerDragEvent, dispatchClipperPointerDrag, type CompositionPointerDragDetail, type PointerDragPreviewDetail } from "../lib/pointerDrag";
 import { AppContextMenu } from "./AppContextMenu";
@@ -20,12 +20,15 @@ import { MoveCommand } from "../app/features/file-manager/operations/MoveCommand
 import type { Command } from "../app/features/file-manager/operations/Command";
 import { rebasePath, type PendingPathMove } from "../app/features/file-manager/optimisticPathRebase";
 
+const agentProviderLabels = { opencode: "OpenCode", codex: "Codex", claude: "Claude", gemini: "Gemini" } as const;
+
 export type OsFileNode = {
   id: string;
   name: string;
   path: string;
   isDirectory: boolean;
   isComposition?: boolean;
+  isComposition3d?: boolean;
   timelineId?: string;
   children?: OsFileNode[];
 };
@@ -36,11 +39,13 @@ export type OsFileManagerProps = {
   selectedCompositionId?: string;
   selectedTimelineId?: string;
   fileSystemRevision?: number;
+  fileManagerState?: FileManagerState;
   onReloadProject: () => Promise<void>;
   onSelectComposition: (compositionId: string) => void;
   onSelectTimeline: (timelineId: string) => void;
   onOpenFile: (filePath: string, options?: { isComposition?: boolean; temporary?: boolean }) => void;
   executeFileManagerCommand: (command: Command) => Promise<void>;
+  onFileManagerStateChange: (state: FileManagerState) => void;
   onCompositionPathMoves?: (moves: Array<{ oldPath: string; newPath: string }>, options?: { save?: boolean }) => void;
 };
 
@@ -72,10 +77,12 @@ export function OsFileManager({
   selectedCompositionId,
   selectedTimelineId,
   fileSystemRevision,
+  fileManagerState,
   onSelectComposition,
   onSelectTimeline,
   onOpenFile,
   executeFileManagerCommand,
+  onFileManagerStateChange,
   onCompositionPathMoves,
   onReloadProject,
 }: OsFileManagerProps) {
@@ -88,7 +95,6 @@ export function OsFileManager({
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
   const [effectiveDirectory, setEffectiveDirectory] = useState(projectDirectory);
   const loadedDirectoryRef = useRef<string | null>(null);
-  const openStateRef = useRef<Record<string, boolean>>({});
   const externalDragRef = useRef<{ node: OsFileNode; lastMouse: { x: number; y: number }; shiftKey: boolean } | null>(null);
   const externalDragFrameRef = useRef(0);
   const pendingExternalDragMoveRef = useRef<{ mouse: { x: number; y: number }; shiftKey: boolean } | null>(null);
@@ -98,7 +104,6 @@ export function OsFileManager({
   const operationProcessingRef = useRef(false);
   const nextOperationIdRef = useRef(1);
   const committedProjectReloadPendingRef = useRef(false);
-  const nextOsFileUiIdRef = useRef(1);
   const osFilePathIdsRef = useRef(new Map<string, string>());
   const [compositionLanePreviewActive, setCompositionLanePreviewActive] = useState(false);
   const [rootDropVisible, setRootDropVisible] = useState(false);
@@ -245,7 +250,7 @@ export function OsFileManager({
   const getStableOsFileUiId = useCallback((path: string) => {
     const existing = osFilePathIdsRef.current.get(path);
     if (existing) return existing;
-    const id = `os-file:${nextOsFileUiIdRef.current++}`;
+    const id = `os-file:${path}`;
     osFilePathIdsRef.current.set(path, id);
     return id;
   }, []);
@@ -367,6 +372,7 @@ export function OsFileManager({
 
   const handleFileActivate = useCallback(
     (nodeData: OsFileNode, event: ReactMouseEvent<HTMLDivElement>) => {
+      if (event.shiftKey || event.metaKey || event.ctrlKey) return;
       const fileType = getFileType(nodeData.name, nodeData.isDirectory, nodeData.isComposition);
       const displayName = getDisplayName(nodeData.name);
       const temporary = event.detail < 2;
@@ -395,27 +401,33 @@ export function OsFileManager({
       const selectedNodes = node?.isSelected ? getTopLevelOsFileNodes(node.tree.selectedNodes.map((selectedNode) => selectedNode.data)) : [];
       const shouldUseSelection = selectedNodes.length > 1;
       const targetPath = !node ? effectiveDirectory : node.data.path;
+      const agentProvider = getSelectedAgentProvider();
       if (!node || node.data.path === effectiveDirectory) {
         items.push(
           { label: "New File", action: () => void createNewFile(targetPath) },
-          { label: "New Composition", action: () => void createNewComposition(targetPath) },
+          { label: "Composition", children: getCompositionCreateMenuItems(targetPath) },
           { label: "New Timeline", action: () => void createNewTimeline(targetPath) },
           { label: "New Folder", action: () => void createNewFolder(targetPath) },
+          { label: `Open ${agentProviderLabels[agentProvider]} Here`, action: () => void clipperHost.openAgentTerminal(targetPath, agentProvider) },
+          { label: "Copy path", action: () => void copyOsPathsToClipboard([targetPath]) },
           { label: "Reveal in Finder", action: () => void clipperHost.revealFile(targetPath) }
         );
       } else if (node.data.isDirectory) {
         items.push(
           { label: "New File", action: () => void createNewFile(node.data.path) },
-          { label: "New Composition", action: () => void createNewComposition(node.data.path) },
+          { label: "Composition", children: getCompositionCreateMenuItems(node.data.path) },
           { label: "New Timeline", action: () => void createNewTimeline(node.data.path) },
           { label: "New Folder", action: () => void createNewFolder(node.data.path) },
+          { label: `Open ${agentProviderLabels[agentProvider]} Here`, action: () => void clipperHost.openAgentTerminal(node.data.path, agentProvider) },
           { label: "Rename", action: () => node.edit() },
+          { label: shouldUseSelection ? `Copy ${selectedNodes.length} paths` : "Copy path", action: () => void copyOsPathsToClipboard((shouldUseSelection ? selectedNodes : [node.data]).map((item) => item.path)) },
           { label: "Reveal in Finder", action: () => void clipperHost.revealFile(node.data.path) },
           { label: shouldUseSelection ? `Delete ${selectedNodes.length} items` : "Delete", action: () => void deleteNodes(shouldUseSelection ? selectedNodes : [node.data]), danger: true }
         );
       } else {
         items.push(
           { label: "Rename", action: () => node.edit() },
+          { label: shouldUseSelection ? `Copy ${selectedNodes.length} paths` : "Copy path", action: () => void copyOsPathsToClipboard((shouldUseSelection ? selectedNodes : [node.data]).map((item) => item.path)) },
           { label: "Reveal in Finder", action: () => void clipperHost.revealFile(node.data.path) }
         );
         if (node.data.isComposition) {
@@ -451,13 +463,31 @@ export function OsFileManager({
     }
   }
 
-  async function createNewComposition(basePath: string) {
+  function getCompositionCreateMenuItems(basePath: string) {
+    return [
+      { label: "Standard", action: () => void createNewComposition(basePath, "standard") },
+      { label: "3D (Alpha)", action: () => void createNewComposition(basePath, "3d") },
+    ];
+  }
+
+  async function createNewComposition(basePath: string, kind: "standard" | "3d" = "standard") {
     try {
       const parentPath = basePath;
       const entries = await clipperHost.listDirectory(parentPath).catch(() => []);
       const names = entries.map((e) => e.name);
-      const name = nextNumberedSemanticName("untitled", ".composition.ts", names);
-      const content = `import { Composition } from "@clipper/composition-api";
+      const name = nextNumberedSemanticName(kind === "3d" ? "untitled-3d" : "untitled", ".composition.ts", names);
+      const content = kind === "3d" ? `import { Composition3D } from "@clipper/composition-api";
+
+export const composition = new Composition3D({
+  duration: 5,
+  frame: { width: 1920, height: 1080, style: {} },
+  composition3dGraph: {
+    nodes: {},
+    edges: [],
+    customNodes: {},
+  },
+});
+` : `import { Composition } from "@clipper/composition-api";
 
 export const composition = new Composition({
   duration: 5,
@@ -465,8 +495,8 @@ export const composition = new Composition({
   background: { id: "bg", name: "Background", style: {}, elements: [] },
   render() {
     return [];
-      },
-    });
+  },
+});
 `;
       const filePath = `${parentPath}/${name}`;
       const node = { id: getStableOsFileUiId(filePath), name, path: filePath, isDirectory: false, isComposition: true };
@@ -713,18 +743,18 @@ export const composition = new Composition({
   const totalRowCount = countNodes(data);
   const treeHeight = Math.max(MIN_TREE_HEIGHT, totalRowCount * ROW_HEIGHT);
   const initialOpenState = useMemo(() => {
-    if (Object.keys(openStateRef.current).length > 0) return openStateRef.current;
+    if (fileManagerState?.openState && Object.keys(fileManagerState.openState).some((id) => id.startsWith("os-file:"))) return fileManagerState.openState;
     const topState: Record<string, boolean> = {};
     for (const node of treeData) {
       if (node.isDirectory) topState[node.id] = true;
     }
     return topState;
-  }, [treeData]);
+  }, [fileManagerState?.openState, treeData]);
 
   function handleToggle() {
     const api = treeRef.current;
     if (!api) return;
-    openStateRef.current = { ...api.openState };
+    window.setTimeout(() => onFileManagerStateChange({ ...fileManagerState, openState: { ...fileManagerState?.openState, ...treeRef.current?.openState } }), 0);
   }
 
   return (
@@ -803,6 +833,16 @@ function isDragEventInsideElement(event: globalThis.DragEvent, element: HTMLElem
 
 function isFileManagerInteractiveTarget(target: HTMLElement) {
   return Boolean(target.closest("button,input,textarea,select,[contenteditable='true'],[data-file-manager-row='true']"));
+}
+
+async function copyOsPathsToClipboard(paths: string[]) {
+  if (!paths.length) return;
+  try {
+    await clipperHost.copyText(paths.join("\n"));
+    toast.success(paths.length === 1 ? "Path copied" : `${paths.length} paths copied`);
+  } catch {
+    toast.error(paths.length === 1 ? "Unable to copy path" : "Unable to copy paths");
+  }
 }
 
 function canMoveOsFilePath(oldPath: string, newPath: string) {
@@ -905,7 +945,7 @@ function OsFileTreeNode({
 
   const isRoot = data.path === effectiveDirectory;
   const fileType = getFileType(data.name, data.isDirectory, data.isComposition);
-  const Icon = data.isDirectory ? (node.isOpen ? FolderOpen : Folder) : fileType === "composition" ? Clapperboard : fileType === "timeline" ? ChartNoAxesGantt : data.name.endsWith(".ts") ? FileCode : data.name.endsWith(".json") ? FileJson : File;
+  const Icon = data.isDirectory ? (node.isOpen ? FolderOpen : Folder) : fileType === "composition" ? (data.isComposition3d ? Box : Clapperboard) : fileType === "timeline" ? ChartNoAxesGantt : data.name.endsWith(".ts") ? FileCode : data.name.endsWith(".json") ? FileJson : File;
   const contentClass = fileType === "composition" ? "text-[#38d996]" : "text-current";
 
   function handleDragStart(event: React.DragEvent<HTMLDivElement>) {
@@ -915,7 +955,7 @@ function OsFileTreeNode({
       event.dataTransfer.setData("application/x-clipper-timeline", timelineId);
     }
     if (fileType === "composition") {
-      const compositionId = resolveOsCompositionId(compositionLibrary, data.path, projectDirectory);
+      const compositionId = resolveOsCompositionDragId(compositionLibrary, data.path, projectDirectory);
       if (compositionId) event.dataTransfer.setData("application/x-clipper-composition", compositionId);
     }
     event.dataTransfer.setDragImage(getTransparentNativeDragImage(), 0, 0);
@@ -997,13 +1037,19 @@ async function loadDirectoryTree(path: string, projectDirectory: string, getStab
   const nodes: OsFileNode[] = [];
   for (const entry of sorted) {
     const childPath = `${path}/${entry.name}`;
-    let isComposition = false;
+      let isComposition = false;
+      let isComposition3d = false;
     let timelineId: string | undefined = undefined;
     
-    if (!entry.isDirectory && childPath.endsWith(".ts")) {
+    if (!entry.isDirectory && isCompositionFilePath(childPath)) {
       try {
-        const content = await clipperHost.readTextFile(childPath);
-        isComposition = content.includes("new Composition({");
+        if (childPath.endsWith(".composition3d.json")) {
+          isComposition = true;
+        } else {
+          const content = await clipperHost.readTextFile(childPath);
+          isComposition = content.includes("new Composition({") || content.includes("new Composition3D({");
+          isComposition3d = content.includes("new Composition3D({");
+        }
       } catch {
         // Ignore read errors
       }
@@ -1023,6 +1069,7 @@ async function loadDirectoryTree(path: string, projectDirectory: string, getStab
       path: childPath,
       isDirectory: entry.isDirectory,
       isComposition,
+      isComposition3d,
       timelineId,
     };
     if (entry.isDirectory) {
@@ -1055,9 +1102,12 @@ export function resolveOsCompositionId(compositions: Pick<CompositionClip, "id" 
   return compositions.find((composition) => composition.filePath === relativePath || composition.filePath === filePath)?.id ?? null;
 }
 
+function resolveOsCompositionDragId(compositions: Pick<CompositionClip, "id" | "filePath">[], filePath: string, projectDirectory: string) {
+  return resolveOsCompositionId(compositions, filePath, projectDirectory) ?? projectRelativeFilePath(filePath, projectDirectory);
+}
+
 export function createOsCompositionDragDetail(compositions: Pick<CompositionClip, "id" | "filePath" | "duration" | "objects" | "background" | "sourceMissing">[], filePath: string, name: string, projectDirectory: string, phase: CompositionPointerDragDetail["phase"], currentMouse: { x: number; y: number }, shiftKey: boolean): CompositionPointerDragDetail | null {
-  const compositionId = resolveOsCompositionId(compositions, filePath, projectDirectory);
-  if (!compositionId) return null;
+  const compositionId = resolveOsCompositionDragId(compositions, filePath, projectDirectory);
   const metadata = resolveOsCompositionDragMetadata(compositions, compositionId);
   return {
     phase,
@@ -1073,7 +1123,7 @@ export function createOsCompositionDragDetail(compositions: Pick<CompositionClip
 }
 
 function isCompositionFilePath(filePath: string) {
-  return filePath.endsWith(".composition.ts");
+  return filePath.endsWith(".composition.ts") || filePath.endsWith(".composition3d.json");
 }
 
 export function resolveOsCompositionDragMetadata(compositions: Pick<CompositionClip, "id" | "filePath" | "duration" | "objects" | "background" | "sourceMissing">[], compositionId: string) {
@@ -1226,6 +1276,11 @@ export function preserveStableOsFileMoveIds(idByPath: Map<string, string>, nodes
 
   const existingId = idByPath.get(oldPath);
   if (existingId) idByPath.set(newPath, existingId);
+}
+
+function getSelectedAgentProvider(): keyof typeof agentProviderLabels {
+  const value = window.localStorage.getItem("clipper:agent-provider");
+  return value === "codex" || value === "claude" || value === "gemini" || value === "opencode" ? value : "opencode";
 }
 
 function registerMovedNodeIds(idByPath: Map<string, string>, node: OsFileNode, oldPath: string, newPath: string) {

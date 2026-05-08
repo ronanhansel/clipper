@@ -127,7 +127,7 @@ describe("project persistence service", () => {
     expect(project.compositionSources?.["compositions/broken.composition.ts"]).toContain("export const composition");
   });
 
-  it("saves directory composition folders without nesting file-manager or compositions roots", async () => {
+  it("does not recreate composition folders as managed roots", async () => {
     hostMocks.listDirectory.mockImplementation(async (path) => {
       if (path === "clipper/projects/hi/file-manager") return [];
       return [];
@@ -165,11 +165,45 @@ describe("project persistence service", () => {
       },
     });
 
-    expect(hostMocks.createDirectory).toHaveBeenCalledWith("clipper/projects/hi/file-manager/compositions/lower-third");
-    expect(hostMocks.createDirectory).toHaveBeenCalledWith("clipper/projects/hi/file-manager/compositions/title-cards");
-    expect(hostMocks.createDirectory).toHaveBeenCalledWith("clipper/projects/hi/file-manager/compositions/overlays");
+    expect(hostMocks.createDirectory).not.toHaveBeenCalledWith("clipper/projects/hi/file-manager/compositions/lower-third");
+    expect(hostMocks.createDirectory).not.toHaveBeenCalledWith("clipper/projects/hi/file-manager/compositions/title-cards");
+    expect(hostMocks.createDirectory).not.toHaveBeenCalledWith("clipper/projects/hi/file-manager/compositions/overlays");
     expect(hostMocks.createDirectory).not.toHaveBeenCalledWith("clipper/projects/hi/file-manager/compositions/compositions");
     expect(hostMocks.createDirectory).not.toHaveBeenCalledWith("clipper/projects/hi/file-manager/file-manager/compositions/title-cards");
+    expect(hostMocks.writeTextFile).toHaveBeenCalledWith("clipper/projects/hi/file-manager/compositions/title.composition.ts", "source");
+  });
+
+  it("does not recreate stale unreferenced New Folder composition folders", async () => {
+    hostMocks.listDirectory.mockResolvedValue([]);
+
+    const { projectPersistenceService } = await import("./projectPersistenceService");
+    await projectPersistenceService.saveProject({
+      manifestPath: "clipper/projects/hi/project.json",
+      project: {
+        id: "project",
+        name: "Project",
+        resolution: { width: 1920, height: 1080 },
+        assetsPath: "assets",
+        assets: [],
+        scenes: [],
+        compositionFolders: ["compositions/New Folder"],
+        compositionLibrary: [{
+          id: "title",
+          filePath: "compositions/title.composition.ts",
+          duration: 3,
+          frame: { width: 1920, height: 1080, style: {} },
+          background: { id: "background", name: "Background", style: {}, elements: [] },
+          objects: [],
+          snapshot: [],
+          motionMarkers: [],
+          source: "source",
+        }],
+        compositionSources: { "compositions/title.composition.ts": "source" },
+        timelines: [],
+      },
+    });
+
+    expect(hostMocks.createDirectory).not.toHaveBeenCalledWith("clipper/projects/hi/file-manager/compositions/New Folder");
     expect(hostMocks.writeTextFile).toHaveBeenCalledWith("clipper/projects/hi/file-manager/compositions/title.composition.ts", "source");
   });
 
@@ -232,7 +266,7 @@ describe("project persistence service", () => {
     const { projectPersistenceService } = await import("./projectPersistenceService");
     const { project } = await projectPersistenceService.loadProject({ manifestPath: "clipper/projects/hi/project.json" });
 
-    expect(project.timelines?.[0].clips).toEqual([{ id: "clip-b", compositionId: "composition-b", duration: 5, motionMarkers: [] }]);
+    expect(project.timelines?.[0].clips[0]).toMatchObject({ id: "clip-b", compositionId: "composition-b", duration: 5, motionMarkers: [] });
     expect(project.compositionLibrary?.find((composition) => composition.id === "composition-b")?.filePath).toBe("compositions/folder/B.composition.ts");
   });
 

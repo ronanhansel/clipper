@@ -4,6 +4,7 @@ import { buildFileManagerWorkspaceProps, type FileManagerWorkspaceProps } from "
 
 type UseFileManagerControllerInput = Pick<FileManagerProps,
   | "assets"
+  | "assetsPath"
   | "compositionFolders"
   | "compositionRootPath"
   | "compositions"

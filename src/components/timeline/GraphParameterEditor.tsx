@@ -5,6 +5,7 @@ export type GraphParameterEditorField = {
   key: string;
   label: string;
   value: string;
+  type?: "number" | "text";
   unit?: string;
   options?: readonly { value: string; label: string }[];
 };
@@ -86,6 +87,7 @@ function GraphParameterInlineField({
   onChange: (key: string, value: string) => void;
 }) {
   if (field.options) return <GraphParameterSelectField field={field} onChange={onChange} inline />;
+  if (field.type === "text") return <GraphParameterTextField field={field} onChange={onChange} inline />;
   const split = splitParameterUnit(field.value, field.unit);
   const displayValue = getNumberFieldDisplayValue(field, split.value);
   return (
@@ -115,6 +117,7 @@ function GraphParameterBoxField({
   onChange: (key: string, value: string) => void;
 }) {
   if (field.options) return <GraphParameterSelectField field={field} onChange={onChange} />;
+  if (field.type === "text") return <GraphParameterTextField field={field} onChange={onChange} />;
   const split = splitParameterUnit(field.value, field.unit);
   const displayValue = getNumberFieldDisplayValue(field, split.value);
   return (
@@ -132,6 +135,38 @@ function GraphParameterBoxField({
           onChange={(event) => commitNumberField(field, event.target.value, split.unit, onChange)}
         />
       </div>
+    </label>
+  );
+}
+
+function GraphParameterTextField({
+  field,
+  onChange,
+  inline = false,
+}: {
+  field: GraphParameterEditorField;
+  onChange: (key: string, value: string) => void;
+  inline?: boolean;
+}) {
+  const control = (
+    <Input
+      className="h-6 min-w-0 rounded border-transparent bg-[#0c121b] px-1.5 py-0 text-right text-[12px] font-semibold text-[#e4e9f2] hover:bg-[#141b27] focus:border-[#3d4b62] focus:ring-0"
+      value={field.value}
+      onChange={(event) => onChange(field.key, event.target.value)}
+    />
+  );
+  if (inline) {
+    return (
+      <label className="grid grid-cols-[78px_1fr] items-center gap-2">
+        <span className="text-[10px] font-bold text-[#7f8794]">{field.label}</span>
+        {control}
+      </label>
+    );
+  }
+  return (
+    <label className="grid gap-1">
+      <span className="text-[9px] font-bold text-[#697280]">{field.label}</span>
+      {control}
     </label>
   );
 }

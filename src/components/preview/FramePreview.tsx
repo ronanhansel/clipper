@@ -1,4 +1,4 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent, type RefObject, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { Component as ReactComponent, memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent, type ReactNode, type RefObject, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { selectorBlue, selectorHandleSizePx, selectorOffsetPx } from "../../app/config";
 import { getRenderableTextSegments, getSelectionFormatState, normalizeEditableFormatting, renderRichTextSegments, richTextSegmentsFromElement, shouldPersistRichText, textSegmentsToEditableNodes } from "../../app/richText";
@@ -13,6 +13,7 @@ import { FRAME_HEIGHT, FRAME_WIDTH, type AdjustmentLayer, type BackgroundLayer, 
 import type { AdjustmentVisualOverlay, TransitionSequenceStyle, TransitionVisualOverlay } from "../../core/effects/types";
 import type { PlaybackClock } from "../../app/types";
 import { rasterizeSvgForExport, shouldPreRasterizeSvgForExport, type SvgRasterResult } from "./exportSvgRasterCache";
+import { WebGlPipeline } from "../../render-engine/webgl/WebGlPipeline";
 
 const identityCameraTransform: CameraPreviewTransform = { x: 0, y: 0, z: 0, scale: 1, rotation: 0, rotateX: 0, rotateY: 0, perspective: 1800, motionBlur: 0 };
 
@@ -28,6 +29,7 @@ export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dra
   const selectionHandleSizePx = selectorHandleSizePx / selectionOverlayScale;
   const selectionBleedPx = selectionOffsetPx + selectionHandleSizePx;
   const animationsEnabled = true;
+  const compositionRenderMode = part.renderMode ?? "dom";
   const previewParts = (arguments[0] as { previewParts?: Array<{ part: Part; start: number; previewTime: number }> }).previewParts;
   const transitionPreviewParts = (arguments[0] as { transitionPreviewParts?: { from: Array<{ part: Part; start: number; previewTime: number }>; to: Array<{ part: Part; start: number; previewTime: number }>; fromSceneTime: number; toSceneTime: number } | null }).transitionPreviewParts;
   const transitionLayers = (arguments[0] as { transitionLayers?: TransitionLayer[] }).transitionLayers;
@@ -35,7 +37,7 @@ export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dra
   const previewOverlayHost = (arguments[0] as { previewOverlayHost?: HTMLElement | null }).previewOverlayHost;
   const displayPreviewTime = previewTime;
   const displaySceneTime = sceneTime;
-  const visualAdjustment = useMemo(() => applyAdjustmentLayersToVisualStyle(displaySceneTime, adjustmentLayers), [adjustmentLayers, displaySceneTime]);
+  const visualAdjustment = useMemo(() => compositionRenderMode === "dom" ? { overlays: [] } : applyAdjustmentLayersToVisualStyle(displaySceneTime, adjustmentLayers), [adjustmentLayers, compositionRenderMode, displaySceneTime]);
   const visualTransition = useMemo(() => applyTransitionLayersToVisualStyle(displaySceneTime, transitionLayers), [displaySceneTime, transitionLayers]);
   const activeTransitionLayer = getActiveTransitionLayer(displaySceneTime, transitionLayers);
   const transitionProgress = activeTransitionLayer ? getTransitionProgress(displaySceneTime, activeTransitionLayer) : null;
@@ -198,14 +200,18 @@ export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dra
   return (
     <div data-clipper-frame-preview-wrapper>
       <div className="relative overflow-visible" data-clipper-frame-preview-shell style={viewportOverlayStyle}>
-        <div ref={frameViewportRef} className={`absolute overflow-hidden bg-black shadow-[0_22px_70px_rgba(0,0,0,0.44)] ${!isPlaying && (focusPicking || trackerPicking) ? "cursor-crosshair ring-2 ring-[#159dff]" : ""}`} data-clipper-frame-preview style={clippedViewportStyle} onPointerDownCapture={handleFramePointerDownCapture} onPointerDown={isPlaying ? undefined : onFramePointerDown} onPointerMove={handleFramePointerMove} onPointerUp={isPlaying ? undefined : onFramePointerUp} onPointerCancel={isPlaying ? undefined : onFramePointerCancel} onPointerLeave={clearSelectorHover}>
+        <div ref={frameViewportRef} className={`absolute overflow-hidden ${!isPlaying && (focusPicking || trackerPicking) ? "cursor-crosshair ring-2 ring-[#159dff]" : ""}`} data-clipper-frame-preview style={clippedViewportStyle} onPointerDownCapture={handleFramePointerDownCapture} onPointerDown={isPlaying ? undefined : onFramePointerDown} onPointerMove={handleFramePointerMove} onPointerUp={isPlaying ? undefined : onFramePointerUp} onPointerCancel={isPlaying ? undefined : onFramePointerCancel} onPointerLeave={clearSelectorHover}>
           <div className="absolute left-0 top-0 origin-top-left overflow-hidden" data-clipper-frame-content style={frameStyle}>
             <div className="absolute inset-0" data-clipper-perspective-stage style={perspectiveStageStyle}>
               {isUnlinkedPart || compHidden || compositionError ? <div className="absolute inset-0 bg-black" ref={cameraRef}>{compositionError ? <CompositionErrorOverlay filePath={part.filePath} message={compositionError} /> : null}</div> : <div className="absolute inset-0 origin-center" ref={cameraRef} style={{ transformStyle: "preserve-3d", ...transitionCameraStyle }}>
                 <div className="absolute inset-0" data-clipper-visual-adjustments style={visualAdjustmentStyle}>
-                  {transitionPreviewParts && transitionProgress !== null
-                    ? <TransitionCompositeView adjustmentLayers={adjustmentLayers} animationsEnabled={animationsEnabled} exportTileFrameBounds={exportTileFrameBounds} frameScale={frameScale} isPlaying={isPlaying} renderMode={renderMode} sequenceStyle={transitionSequenceStyle} transitionPreviewParts={transitionPreviewParts} />
-                    : stackPreviewParts.map((item) => <CompositionLayerView key={`${item.part.id}:${item.start}`} active={item.part.id === part.id} animationsEnabled={animationsEnabled} canSelect={!isPlaying && (canSelectObjects || trackerPicking)} editingTextObjectId={editingTextObjectId} exportTileFrameBounds={exportTileFrameBounds} focusPicking={!isPlaying && (focusPicking || trackerPicking)} frameScale={frameScale} isPlaying={isPlaying} part={item.part} previewTime={item.previewTime} renderMode={renderMode} onObjectPointerDown={onObjectPointerDown} onTextEditCommit={onTextEditCommit} onTextObjectDoubleClick={onTextObjectDoubleClick} />)}
+                  <FramePreviewRenderBoundary filePath={part.filePath} resetKey={`${part.id}:${part.filePath}:${compositionError ?? ""}`}>
+                    {compositionRenderMode === "webgl"
+                      ? <WebGlPipeline graph={part.composition3dGraph} frameScale={frameScale} isPlaying={isPlaying} partDuration={part.duration} partStart={partStart} previewTime={previewTime} trimStart={part.trimStart} playbackClock={playbackClock} />
+                      : transitionPreviewParts && transitionProgress !== null
+                      ? <TransitionCompositeView adjustmentLayers={adjustmentLayers} animationsEnabled={animationsEnabled} exportTileFrameBounds={exportTileFrameBounds} frameScale={frameScale} isPlaying={isPlaying} renderMode={renderMode} sequenceStyle={transitionSequenceStyle} transitionPreviewParts={transitionPreviewParts} />
+                      : stackPreviewParts.map((item) => <CompositionLayerView key={`${item.part.id}:${item.start}`} active={item.part.id === part.id} animationsEnabled={animationsEnabled} canSelect={!isPlaying && (canSelectObjects || trackerPicking)} editingTextObjectId={editingTextObjectId} exportTileFrameBounds={exportTileFrameBounds} focusPicking={!isPlaying && (focusPicking || trackerPicking)} frameScale={frameScale} isPlaying={isPlaying} part={item.part} previewTime={item.previewTime} renderMode={renderMode} onObjectPointerDown={onObjectPointerDown} onTextEditCommit={onTextEditCommit} onTextObjectDoubleClick={onTextObjectDoubleClick} />)}
+                  </FramePreviewRenderBoundary>
                   <div ref={frameVisualAdjustmentOverlaysRef} className="pointer-events-none absolute inset-0" data-clipper-visual-adjustment-overlays="frame" style={{ zIndex: 2147483647 }} />
                 </div>
               </div>}
@@ -223,16 +229,41 @@ export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dra
   );
 });
 
-function CompositionErrorOverlay({ filePath, message }: { filePath: string; message: string }) {
+class FramePreviewRenderBoundary extends ReactComponent<{ children: ReactNode; filePath: string; resetKey: string }, { error: string | null }> {
+  state: { error: string | null } = { error: null };
+
+  static getDerivedStateFromError(error: unknown) {
+    return { error: framePreviewErrorMessage(error) };
+  }
+
+  componentDidUpdate(previousProps: { resetKey: string }) {
+    if (previousProps.resetKey !== this.props.resetKey && this.state.error) this.setState({ error: null });
+  }
+
+  componentDidCatch(error: unknown) {
+    console.error("FramePreview render failed", error);
+  }
+
+  render() {
+    if (this.state.error) return <CompositionErrorOverlay filePath={this.props.filePath} message={this.state.error} title="Preview render failed" />;
+    return this.props.children;
+  }
+}
+
+function CompositionErrorOverlay({ filePath, message, title = "Composition failed to load" }: { filePath: string; message: string; title?: string }) {
   return (
     <div className="absolute inset-0 grid place-items-center bg-[#07090d] p-16 text-[#ffd6d6]">
       <div className="max-w-[1080px] rounded-[28px] border border-[#5a222c] bg-[#1a0f13]/95 p-10 shadow-[0_26px_90px_rgba(0,0,0,0.55)]">
-        <div className="text-[22px] font-extrabold tracking-tight text-[#ff6b7a]">Composition failed to load</div>
+        <div className="text-[22px] font-extrabold tracking-tight text-[#ff6b7a]">{title}</div>
         <div className="mt-2 break-all font-mono text-[15px] text-[#a7adbb]">{filePath}</div>
         <pre className="mt-6 max-h-[560px] overflow-auto whitespace-pre-wrap rounded-[18px] border border-[#3b2a2a] bg-[#090b10] p-5 font-mono text-[20px] leading-relaxed text-[#ffd6d6]">{message}</pre>
       </div>
     </div>
   );
+}
+
+function framePreviewErrorMessage(error: unknown) {
+  return error instanceof Error ? error.stack ?? error.message : String(error);
 }
 
 function syncVisualAdjustmentOverlays(container: HTMLElement | null, overlays: AdjustmentVisualOverlay[] | undefined) {

@@ -3,6 +3,7 @@ import type { ProjectManifest } from "../core/types";
 export type Mode = "preview" | "editor";
 export type LeftPanelTab = "assets" | "tools";
 export type RightPanelTab = "video" | "agent";
+export type AgentProvider = "opencode" | "codex" | "claude" | "gemini";
 export type ProjectUpdater = ProjectManifest | ((current: ProjectManifest) => ProjectManifest);
 export type ExportDialogTab = "media" | "project";
 export type ProjectExportFormat = "project-package" | "scene-json";

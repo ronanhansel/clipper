@@ -1,0 +1,14 @@
+id: submission-01
+name: Paper Orbit
+slug: paper-orbit
+subtitle: Editorial orbit system for research, product, and thesis stories.
+entry: source/main.composition.ts
+author:
+  name: Clipper Studio
+  github: clipper
+  twitter: ""
+  email: ""
+files:
+  - source/main.composition.ts
+  - source/style.css
+  - source/style.css.d.ts

@@ -85,7 +85,7 @@ async function loadDirectoryProject(manifestPath: string) {
 
 async function loadDirectoryTimelines(editableRoot: string, fallbackRoot: string, timelineOrder?: string[]) {
   const primaryDir = editableRoot || "file-manager";
-  const fallbackDir = fallbackRoot ? `${fallbackRoot}/timelines` : "timelines";
+  const fallbackDir = editableRoot ? `${editableRoot}/timelines` : fallbackRoot ? `${fallbackRoot}/timelines` : "timelines";
 
   let timelineFiles = await listProjectFilesRecursive(primaryDir).then(files => files.filter(f => f.name.endsWith(".timeline.json")));
 
@@ -100,7 +100,7 @@ async function loadDirectoryTimelines(editableRoot: string, fallbackRoot: string
       if (JSON.stringify(document.timelineLayers) !== JSON.stringify(repairedTimelineLayers)) {
         await clipperHost.writeTextFile(file.path, `${JSON.stringify({ ...document, timelineLayers: repairedTimelineLayers }, null, 2)}\n`);
       }
-      const filePath = projectPathFromDirectoryEntry(fallbackRoot, file.relativePath, "timelines");
+      const filePath = projectPathFromDirectoryEntry(editableRoot, file.path, file.relativePath);
       return { ...document, id: filePath, filePath, timelineLayers: repairedTimelineLayers };
     })
   );
@@ -121,8 +121,8 @@ async function loadDirectoryTimelines(editableRoot: string, fallbackRoot: string
 }
 
 async function loadDirectoryCompositions(editableRoot: string, fallbackRoot: string, manifestCompositions: CompositionClip[]) {
-  const primaryDir = editableRoot ? `${editableRoot}/compositions` : "file-manager/compositions";
-  const fallbackDir = fallbackRoot ? `${fallbackRoot}/compositions` : "compositions";
+  const primaryDir = editableRoot || "file-manager";
+  const fallbackDir = editableRoot ? `${editableRoot}/compositions` : fallbackRoot ? `${fallbackRoot}/compositions` : "compositions";
 
   let compositionFiles = await listProjectFilesRecursive(primaryDir).then(files => files.filter(isCompositionSourceFile));
 
@@ -133,15 +133,17 @@ async function loadDirectoryCompositions(editableRoot: string, fallbackRoot: str
   const claimedManifestIds = new Set<string>();
   return Promise.all(
     compositionFiles.map(async (file) => {
-      const source = await clipperHost.readTextFile(file.path);
-      const filePath = projectPathFromDirectoryEntry(fallbackRoot, file.relativePath, "compositions");
+      const rawSource = await clipperHost.readTextFile(file.path);
+      const migratedSource = migrateLegacyComposition3dSource(projectPathFromDirectoryEntry(editableRoot, file.path, file.relativePath), rawSource);
+      const source = migratedSource.source;
+      const filePath = migratedSource.filePath;
       const manifestComposition = resolveManifestCompositionForFile(manifestCompositions, claimedManifestIds, filePath, source);
       if (manifestComposition) claimedManifestIds.add(manifestComposition.id);
       const baseComposition = createBaseComposition(manifestComposition?.id ?? createStableCompositionId(), filePath);
       try {
         const document = await compositionFromProjectSource(baseComposition, source, async (relativePath) => {
-          const dependencyPath = relativePath.startsWith("compositions/") ? `${editableRoot}/${relativePath}` : `${getDirectoryPath(file.path)}/${relativePath}`;
-          return clipperHost.readTextFile(dependencyPath);
+            const dependencyPath = `${editableRoot}/${relativePath}`;
+            return clipperHost.readTextFile(dependencyPath);
         });
         return { ...document, id: baseComposition.id, filePath, sourceHash: hashCompositionSource(source), loadedSource: source } as LoadedDirectoryComposition;
       } catch (error) {
@@ -172,7 +174,27 @@ function createStableCompositionId() {
 }
 
 function isCompositionSourceFile(file: { name: string }) {
-  return file.name.endsWith(".composition.ts");
+  return file.name.endsWith(".composition.ts") || file.name.endsWith(".composition3d.json");
+}
+
+function migrateLegacyComposition3dSource(filePath: string, source: string) {
+  if (!filePath.endsWith(".composition3d.json")) return { filePath, source };
+  const graph = JSON.parse(source) as CompositionClip["composition3dGraph"];
+  return {
+    filePath: filePath.replace(/\.composition3d\.json$/, ".composition.ts"),
+    source: composition3dGraphToSource(graph),
+  };
+}
+
+function composition3dGraphToSource(graph: CompositionClip["composition3dGraph"]) {
+  return `import { Composition3D } from "@clipper/composition-api";
+
+export const composition = new Composition3D({
+  duration: 5,
+  frame: { width: 1920, height: 1080, style: {} },
+  composition3dGraph: ${JSON.stringify(graph, null, 4).replace(/^/gm, "  ").trimStart()},
+});
+`;
 }
 
 const listProjectFilesRecursive = async (dir: string, baseDir: string = dir): Promise<{ name: string; path: string; relativePath: string; isDirectory: boolean }[]> => {
@@ -258,21 +280,12 @@ async function saveDirectoryProject(manifestPath: string, project: ProjectManife
   const fileManagerDir = rootPath ? `${rootPath}/file-manager` : "file-manager";
   await clipperHost.createDirectory(fileManagerDir).catch(() => {});
 
-  const savedRelativePaths = new Set<string>();
-
-  for (const folderPath of normalized.compositionFolders ?? []) {
-    const relativePath = safeCompositionFolderPath(folderPath, rootPath);
-    if (!relativePath) continue;
-    await clipperHost.createDirectory(`${fileManagerDir}/${relativePath}`).catch(() => {});
-  }
-
   for (const composition of normalized.compositions ?? []) {
     if (composition.sourceMissing) continue;
     const source = normalized.compositionSources?.[composition.filePath];
     if (source === undefined) throw new Error(`Composition ${composition.filePath} is missing source.`);
     const relativePath = safeCompositionPath(composition, rootPath);
     const fullPath = `${fileManagerDir}/${relativePath}`;
-    savedRelativePaths.add(relativePath);
     await ensureDirectoryForPath(fullPath);
     await clipperHost.writeTextFile(fullPath, source);
   }
@@ -280,19 +293,10 @@ async function saveDirectoryProject(manifestPath: string, project: ProjectManife
   for (const timeline of normalized.timelines ?? []) {
     const relativePath = safeDirectoryTimelinePath(timeline, rootPath);
     const fullPath = `${fileManagerDir}/${relativePath}`;
-    savedRelativePaths.add(relativePath);
     await ensureDirectoryForPath(fullPath);
     await clipperHost.writeTextFile(fullPath, `${JSON.stringify(timeline, null, 2)}\n`);
   }
 
-  const existingFiles = await listProjectFilesRecursive(fileManagerDir);
-  for (const file of existingFiles) {
-    if (!file.isDirectory && (file.relativePath.endsWith(".composition.ts") || file.relativePath.endsWith(".timeline.json"))) {
-      if (!savedRelativePaths.has(file.relativePath)) {
-        await clipperHost.trashFile(file.path).catch(() => {});
-      }
-    }
-  }
 }
 
 function getSourceCompositionId(source: string, fileName: string) {
@@ -328,11 +332,11 @@ function safeFileName(value: string) {
 }
 
 function safeCompositionPath(composition: CompositionClip, rootPath: string) {
-  return safeProjectFilePath(composition.filePath, rootPath, "compositions", `${safeFileName(composition.id)}.composition.ts`, ".ts");
+  return safeProjectFilePath(composition.filePath, rootPath, `${safeFileName(composition.id)}.composition.ts`, ".composition.ts");
 }
 
 function safeTimelinePath(timeline: TimelineDocument, rootPath: string) {
-  return safeProjectFilePath(timeline.filePath, rootPath, "timelines", `${safeFileName(timeline.id)}.timeline.json`, ".json");
+  return safeProjectFilePath(timeline.filePath, rootPath, `${safeFileName(timeline.id)}.timeline.json`, ".json");
 }
 
 function safeDirectoryTimelinePath(timeline: TimelineDocument, rootPath: string) {
@@ -341,18 +345,12 @@ function safeDirectoryTimelinePath(timeline: TimelineDocument, rootPath: string)
   return safeTimelinePath(timeline, rootPath);
 }
 
-function safeCompositionFolderPath(folderPath: string, rootPath: string) {
-  const relativePath = relativeProjectFilePath(folderPath, rootPath);
-  if (!relativePath || relativePath === "compositions") return "";
-  const entryPath = relativePath?.startsWith("compositions/") ? relativePath : relativePath ? `compositions/${relativePath}` : "compositions";
-  return isSafeProjectFilePath(entryPath) ? entryPath : "compositions";
-}
-
-function safeProjectFilePath(filePath: string | undefined, rootPath: string, folder: "compositions" | "timelines", fallbackFileName: string, extension: ".ts" | ".json") {
+function safeProjectFilePath(filePath: string | undefined, rootPath: string, fallbackFileName: string, extensions: string | string[]) {
   const relativePath = relativeProjectFilePath(filePath, rootPath);
-  const entryPath = relativePath?.startsWith(`${folder}/`) ? relativePath : relativePath ? `${folder}/${relativePath}` : `${folder}/${fallbackFileName}`;
-  if (entryPath.startsWith(`${folder}/`) && entryPath.endsWith(extension) && isSafeProjectFilePath(entryPath)) return entryPath;
-  return `${folder}/${fallbackFileName}`;
+  const entryPath = relativePath || fallbackFileName;
+  const allowedExtensions = Array.isArray(extensions) ? extensions : [extensions];
+  if (allowedExtensions.some((extension) => entryPath.endsWith(extension)) && isSafeProjectFilePath(entryPath)) return entryPath;
+  return fallbackFileName;
 }
 
 function relativeProjectFilePath(filePath: string | undefined, rootPath: string) {
@@ -369,10 +367,8 @@ function isSafeProjectFilePath(filePath: string) {
   return filePath.split("/").every((segment) => segment && segment !== "." && segment !== "..");
 }
 
-function projectPathFromDirectoryEntry(rootPath: string, relativePath: string, folder: "compositions" | "timelines") {
-  if (folder === "timelines" && relativePath.endsWith(".timeline.json")) return relativePath;
-  if (relativePath.startsWith(`${folder}/`)) return relativePath;
-  return `${folder}/${relativePath}`;
+function projectPathFromDirectoryEntry(rootPath: string, filePath: string, relativePath: string) {
+  return filePath.startsWith(`${rootPath}/`) ? filePath.slice(rootPath.length + 1) : relativePath;
 }
 
 function getDirectoryPath(path: string) {

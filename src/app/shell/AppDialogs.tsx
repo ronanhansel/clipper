@@ -3,10 +3,11 @@ import { AppContextMenu } from "../../components/AppContextMenu";
 import { ExportMediaDialog, VideoExportOverlay } from "../../components/export/ExportMediaDialog";
 import { SettingsDialog } from "../../components/SettingsDialog";
 import type { ProjectManifest } from "../../core/types";
-import type { AppUpdateStatus, ContextMenuState, ExportDialogTab, ExportRenderQuality, ExportTileResolutionMapping, ExportWorkerConfigurationMode, ExportWorkerResolutionMapping, MediaExportFormat, MediaExportRenderMode, ProjectExportFormat, SettingsSection, StableSlowGridPreset, StableSlowValidationSamples, VideoExportProgress } from "../types";
+import type { AgentProvider, AppUpdateStatus, ContextMenuState, ExportDialogTab, ExportRenderQuality, ExportTileResolutionMapping, ExportWorkerConfigurationMode, ExportWorkerResolutionMapping, MediaExportFormat, MediaExportRenderMode, ProjectExportFormat, SettingsSection, StableSlowGridPreset, StableSlowValidationSamples, VideoExportProgress } from "../types";
 
 type AppDialogsProps = {
   appContextMenu: ContextMenuState | null;
+  agentProvider: AgentProvider;
   autoDownloadUpdates: boolean;
   debugSettingsEnabled: boolean;
   defaultNewMarkerDurationSeconds: number;
@@ -50,6 +51,7 @@ type AppDialogsProps = {
   videoExportProgress: VideoExportProgress | null;
   updateStatus: AppUpdateStatus;
   onAppContextMenuClose: () => void;
+  onAgentProviderChange: (provider: AgentProvider) => void;
   onAutoDownloadUpdatesChange: (enabled: boolean) => void;
   onCheckForUpdates: () => void;
   onDownloadUpdate: () => void;
@@ -90,7 +92,7 @@ type AppDialogsProps = {
   onInstallUpdate: () => void;
 };
 
-export function AppDialogs({ appContextMenu, autoDownloadUpdates, debugSettingsEnabled, defaultNewMarkerDurationSeconds, exportDialogOpen, exportDialogTab, exportFrameRate, exportIncludeSources, exportProgress, exportRenderQuality, exportResolution, exportTileMapping, exportWorkerConfigurationMode, exportWorkerMapping, isExporting, liveDomPostProcessPreviewEnabled, liveDomPostProcessRuntimeEnabled, liveDomPostProcessMaxFps, mediaExportFormat, mediaExportRenderMode, stableSlowGridPreset, stableSlowValidationSamples, pausePlaybackOnScrub, partCount, prerenderCacheEnabled, prerenderCacheBlackMissDebug, prerenderBlockDurationMs, previewRenderHeight, projectExportFormat, projectName, resolution, sceneDurationSeconds, sceneName, scrubCommitThrottleMs, settingsOpen, settingsSection, timelineEndPaddingFraction, timelinePrecision, videoExportCancelling, videoExportTileHeight, videoExportProgress, updateStatus, onAppContextMenuClose, onAutoDownloadUpdatesChange, onCheckForUpdates, onDownloadUpdate, onDebugSettingsEnabledChange, onDefaultNewMarkerDurationSecondsChange, onExportDialogOpenChange, onExportDialogTabChange, onExportFrameRateChange, onExportIncludeSourcesChange, onExportRenderQualityChange, onExportResolutionChange, onExportTileMappingChange, onExportWorkerConfigurationModeChange, onExportWorkerMappingChange, onMediaExport, onMediaExportFormatChange, onMediaExportRenderModeChange, onStableSlowGridPresetChange, onStableSlowValidationSamplesChange, onLiveDomPostProcessPreviewEnabledChange, onLiveDomPostProcessMaxFpsChange, onProjectExport, onPausePlaybackOnScrubChange, onPrerenderCacheEnabledChange, onPrerenderCacheBlackMissDebugChange, onPrerenderBlockDurationMsChange, onPreviewRenderHeightChange, onClearAllPrerenderCaches, onProjectExportFormatChange, onScrubCommitThrottleMsChange, onSettingsOpenChange, onSettingsSectionChange, onTimelineEndPaddingFractionChange, onTimelinePrecisionChange, onVideoExportTileHeightChange, onVideoExportCancel, onInstallUpdate }: AppDialogsProps) {
+export function AppDialogs({ appContextMenu, agentProvider, autoDownloadUpdates, debugSettingsEnabled, defaultNewMarkerDurationSeconds, exportDialogOpen, exportDialogTab, exportFrameRate, exportIncludeSources, exportProgress, exportRenderQuality, exportResolution, exportTileMapping, exportWorkerConfigurationMode, exportWorkerMapping, isExporting, liveDomPostProcessPreviewEnabled, liveDomPostProcessRuntimeEnabled, liveDomPostProcessMaxFps, mediaExportFormat, mediaExportRenderMode, stableSlowGridPreset, stableSlowValidationSamples, pausePlaybackOnScrub, partCount, prerenderCacheEnabled, prerenderCacheBlackMissDebug, prerenderBlockDurationMs, previewRenderHeight, projectExportFormat, projectName, resolution, sceneDurationSeconds, sceneName, scrubCommitThrottleMs, settingsOpen, settingsSection, timelineEndPaddingFraction, timelinePrecision, videoExportCancelling, videoExportTileHeight, videoExportProgress, updateStatus, onAppContextMenuClose, onAgentProviderChange, onAutoDownloadUpdatesChange, onCheckForUpdates, onDownloadUpdate, onDebugSettingsEnabledChange, onDefaultNewMarkerDurationSecondsChange, onExportDialogOpenChange, onExportDialogTabChange, onExportFrameRateChange, onExportIncludeSourcesChange, onExportRenderQualityChange, onExportResolutionChange, onExportTileMappingChange, onExportWorkerConfigurationModeChange, onExportWorkerMappingChange, onMediaExport, onMediaExportFormatChange, onMediaExportRenderModeChange, onStableSlowGridPresetChange, onStableSlowValidationSamplesChange, onLiveDomPostProcessPreviewEnabledChange, onLiveDomPostProcessMaxFpsChange, onProjectExport, onPausePlaybackOnScrubChange, onPrerenderCacheEnabledChange, onPrerenderCacheBlackMissDebugChange, onPrerenderBlockDurationMsChange, onPreviewRenderHeightChange, onClearAllPrerenderCaches, onProjectExportFormatChange, onScrubCommitThrottleMsChange, onSettingsOpenChange, onSettingsSectionChange, onTimelineEndPaddingFractionChange, onTimelinePrecisionChange, onVideoExportTileHeightChange, onVideoExportCancel, onInstallUpdate }: AppDialogsProps) {
   return (
     <>
       <ExportMediaDialog
@@ -124,6 +126,7 @@ export function AppDialogs({ appContextMenu, autoDownloadUpdates, debugSettingsE
       />
       <SettingsDialog
         activeSection={settingsSection}
+        agentProvider={agentProvider}
         autoDownloadUpdates={autoDownloadUpdates}
         debugSettingsEnabled={debugSettingsEnabled}
         liveDomPostProcessPreviewEnabled={liveDomPostProcessPreviewEnabled}
@@ -147,6 +150,7 @@ export function AppDialogs({ appContextMenu, autoDownloadUpdates, debugSettingsE
         stableSlowValidationSamples={stableSlowValidationSamples}
         updateStatus={updateStatus}
         onActiveSectionChange={onSettingsSectionChange}
+        onAgentProviderChange={onAgentProviderChange}
         onAutoDownloadUpdatesChange={onAutoDownloadUpdatesChange}
         onCheckForUpdates={onCheckForUpdates}
         onDownloadUpdate={onDownloadUpdate}

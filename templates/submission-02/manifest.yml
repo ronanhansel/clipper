@@ -1,0 +1,14 @@
+id: submission-02
+name: Signal Atlas
+slug: signal-atlas
+subtitle: Narration-ready atlas with glass panels, data paths, and crisp callouts.
+entry: source/main.composition.ts
+author:
+  name: Clipper Studio
+  github: clipper
+  twitter: ""
+  email: ""
+files:
+  - source/main.composition.ts
+  - source/style.css
+  - source/style.css.d.ts

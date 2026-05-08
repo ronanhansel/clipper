@@ -103,7 +103,7 @@ export function useFileManagerProjectActions({
     if (!assetPath) return;
 
     try {
-      await navigator.clipboard.writeText(assetPath);
+      await clipperHost.copyText(assetPath);
       toast.success("Asset path copied");
     } catch {
       toast.error("Unable to copy asset path");
@@ -115,7 +115,7 @@ export function useFileManagerProjectActions({
     if (!composition) return;
 
     try {
-      await navigator.clipboard.writeText(composition.filePath);
+      await clipperHost.copyText(composition.filePath);
       toast.success("Composition path copied");
     } catch {
       toast.error("Unable to copy composition path");

@@ -492,6 +492,41 @@ describe("project normalization", () => {
     expect(source).toContain("authored");
   });
 
+  it("persists 3d graph state into editable composition source", () => {
+    const source = compositionToSource({
+      ...composition,
+      renderMode: "webgl",
+      composition3dGraph: {
+        nodes: { "composition3d:time": { x: 4, y: 5 } },
+        edges: [],
+        customNodes: { "composition3d:time": { kind: "animation", label: "Time", scopeKey: "composition3d", details: { packageId: "composition3d:time" } } },
+      },
+    });
+
+    expect(source).toContain("new Composition3D");
+    expect(source).not.toContain('renderMode: "webgl"');
+    expect(source).toContain("composition3dGraph");
+    expect(source).toContain('packageId: "composition3d:time"');
+  });
+
+  it("uses source-authored 3d graph over stale empty timeline clip graph", () => {
+    const sourceGraph = {
+      nodes: { "composition3d:time": { x: 4, y: 5 } },
+      edges: [],
+      customNodes: { "composition3d:time": { kind: "animation" as const, label: "Time", scopeKey: "composition3d", details: { packageId: "composition3d:time" } } },
+    };
+    const project = normalizeProject({
+      ...projectWithComposition(),
+      compositions: [{ ...composition, renderMode: "webgl", composition3dGraph: sourceGraph }],
+      compositionLibrary: [{ ...composition, renderMode: "webgl", composition3dGraph: sourceGraph }],
+      compositionSources: { [composition.filePath]: compositionToSource({ ...composition, renderMode: "webgl", composition3dGraph: sourceGraph }) },
+      timelines: [{ id: "tl_main", filePath: "timelines/tl_main.timeline.json", clips: [{ id: "clip", compositionId: composition.id, renderMode: "webgl", duration: composition.duration, composition3dGraph: { nodes: {}, edges: [] } } as any], adjustmentLayers: [], settings: {} }],
+    });
+
+    const scenePart = getSceneFromProject(project, "tl_main")?.compositions[0];
+    expect(scenePart?.composition3dGraph?.customNodes?.["composition3d:time"]?.label).toBe("Time");
+  });
+
   it("remaps timeline clip composition references when composition path IDs change", () => {
     const renamedPath = "compositions/renamed_intro.composition.ts";
     const renamed = replacePartInProject(projectWithComposition(), composition.id, (part) => ({ ...part, id: renamedPath, filePath: renamedPath }));

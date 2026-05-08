@@ -1,7 +1,7 @@
 import type { Dispatch, SetStateAction } from "react";
 import type { AdjustmentLayerSelection, CompositionSelection, RightPanelTab } from "../../types";
 import { syncChartObjectBounds } from "../../../core/frameInteraction";
-import type { BackgroundLayer, CompositionClip, FrameObject, Part, PartFrame, RichTextSegment } from "../../../core/types";
+import type { BackgroundLayer, CompositionClip, CompositionRenderMode, FrameObject, Part, PartFrame, RichTextSegment } from "../../../core/types";
 
 type FrameObjectCommandsParams = {
   part: Part;
@@ -98,12 +98,17 @@ export function useFrameObjectCommands({
     updateCompositionForTimelinePart(part.id, (composition) => ({ ...composition, background: updater(composition.background) }));
   }
 
+  function updatePartRenderMode(renderMode: CompositionRenderMode) {
+    updateCompositionForTimelinePart(part.id, (composition) => ({ ...composition, renderMode }));
+  }
+
   return {
     reorderComposeObjects,
     selectComposeLayerObjects,
     updateObjectById,
     updatePartBackground,
     updatePartFrame,
+    updatePartRenderMode,
     updateSelectedObject,
     updateSelectedPartDuration,
     updateTextObjectContent,

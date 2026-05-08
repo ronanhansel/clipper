@@ -4,7 +4,7 @@ import { roundTwo, sanitizeProjectNumbers } from "./math";
 import { getCanonicalMotionMarkers, getMotionMarkerViews, motionBlocksToMotionMarkers, withCanonicalMotionMarkers } from "./motionEffects";
 import { adjustmentEffectPackages, normalizeAdjustmentEffectId } from "./effects/registry";
 import { getExecutableAdjustmentLayers } from "./timeline";
-import type { AdjustmentLayer, AnimationGraphCustomNode, AnimationGraphEdge, AnimationGraphGroup, AnimationGraphPort, AnimationGraphState, AssetItem, CodeViewportState, ComposeLayoutState, CompositionClip, CompositionDocument, EditorLayoutState, EditorSessionState, EditorState, EffectsPanelState, FileManagerState, FrameObject, LayerAnimation, PartFrame, PersistedEditorTab, PreviewViewportState, ProjectManifest, Scene, TimelineDocument, TimelineLayerState, TimelineMode, TimelineViewportState, TransitionLayer } from "./types";
+import type { AdjustmentLayer, AnimationGraphCustomNode, AnimationGraphEdge, AnimationGraphGroup, AnimationGraphPort, AnimationGraphState, AssetItem, CodeViewportState, ComposeLayoutState, Composition3dGraphState, CompositionClip, CompositionDocument, CompositionRenderMode, EditorLayoutState, EditorSessionState, EditorState, EffectsPanelState, FileManagerState, FrameObject, LayerAnimation, PartFrame, PersistedEditorTab, PreviewViewportState, ProjectManifest, Scene, TimelineClip, TimelineDocument, TimelineLayerState, TimelineMode, TimelineViewportState, TransitionLayer } from "./types";
 import { getDisplayNameFromPath } from "./fileNames";
 
 export const defaultTimelineViewportState: TimelineViewportState = { displacement: 0, zoom: 1 };
@@ -117,10 +117,12 @@ export function normalizeAnimationGraphState(graph: AnimationGraphState | undefi
     if (!fromNodeId || !toNodeId || !hasGraphNode(fromNodeId) || !hasGraphNode(toNodeId)) return [];
     const fromPort = animationGraphPorts.has(edge.fromPort) ? edge.fromPort : "right";
     const toPort = animationGraphPorts.has(edge.toPort) ? edge.toPort : "left";
+    const fromSocket = typeof (edge as { fromSocket?: unknown }).fromSocket === "string" ? (edge as { fromSocket: string }).fromSocket : undefined;
+    const toSocket = typeof (edge as { toSocket?: unknown }).toSocket === "string" ? (edge as { toSocket: string }).toSocket : undefined;
     const id = typeof edge.id === "string" && edge.id ? edge.id : `${fromNodeId}:${fromPort}->${toNodeId}:${toPort}`;
     if (seenEdges.has(id)) return [];
     seenEdges.add(id);
-    return [{ id, fromNodeId, fromPort, toNodeId, toPort }];
+    return [{ id, fromNodeId, fromPort, toNodeId, toPort, fromSocket, toSocket }];
   });
   const viewport = graph.viewport && typeof graph.viewport === "object" ? {
     scrollLeft: roundTwo(Math.max(typeof graph.viewport.scrollLeft === "number" && Number.isFinite(graph.viewport.scrollLeft) ? graph.viewport.scrollLeft : 0, 0)),
@@ -182,10 +184,12 @@ function normalizeAnimationGraphGroups(groups: AnimationGraphState["groups"], de
       if (toNodeId === outNodeId && repairedCustomNodes?.[fromNodeId]?.kind !== "time") return [];
       const fromPort = animationGraphPorts.has(edge.fromPort) ? edge.fromPort : "right";
       const toPort = animationGraphPorts.has(edge.toPort) ? edge.toPort : "left";
+      const fromSocket = typeof (edge as { fromSocket?: unknown }).fromSocket === "string" ? (edge as { fromSocket: string }).fromSocket : undefined;
+      const toSocket = typeof (edge as { toSocket?: unknown }).toSocket === "string" ? (edge as { toSocket: string }).toSocket : undefined;
       const id = typeof edge.id === "string" && edge.id ? edge.id : `${fromNodeId}:${fromPort}->${toNodeId}:${toPort}`;
       if (seenEdges.has(id)) return [];
       seenEdges.add(id);
-      return [{ id, fromNodeId, fromPort, toNodeId, toPort }];
+      return [{ id, fromNodeId, fromPort, toNodeId, toPort, fromSocket, toSocket }];
     });
     const parameters = group.parameters && typeof group.parameters === "object" ? Object.fromEntries(Object.entries(group.parameters).flatMap(([nodeId, values]) => {
       if (!nodeId || !values || typeof values !== "object") return [];
@@ -199,6 +203,20 @@ function normalizeAnimationGraphGroups(groups: AnimationGraphState["groups"], de
 
 function normalizeTimelineMode(mode: unknown): TimelineMode {
   return mode === "composition" ? "composition" : "compose";
+}
+
+function normalizeCompositionRenderMode(mode: unknown): CompositionRenderMode {
+  return mode === "live-dom" || mode === "webgl" ? mode : "dom";
+}
+
+function normalizeComposition3dGraph(graph: unknown): Composition3dGraphState | undefined {
+  if (!graph || typeof graph !== "object") return undefined;
+  const source = graph as Partial<Composition3dGraphState>;
+  const nodes = source.nodes && typeof source.nodes === "object" && !Array.isArray(source.nodes) ? source.nodes : {};
+  const customNodes = source.customNodes && typeof source.customNodes === "object" && !Array.isArray(source.customNodes) ? source.customNodes : undefined;
+  const parameters = source.parameters && typeof source.parameters === "object" && !Array.isArray(source.parameters) ? source.parameters : undefined;
+  const edges = Array.isArray(source.edges) ? source.edges.filter((edge): edge is AnimationGraphState["edges"][number] => Boolean(edge && typeof edge === "object")) : [];
+  return { nodes, edges, customNodes, parameters };
 }
 
 function normalizeEditorMode(mode: unknown): "preview" | "editor" {
@@ -312,6 +330,8 @@ function normalizeComposition(composition: CompositionClip): CompositionClip {
     layerId: rest.layerId || undefined,
     sourceMissing: rest.sourceMissing || undefined,
     compositionError: typeof rest.compositionError === "string" && rest.compositionError ? rest.compositionError : undefined,
+    renderMode: normalizeCompositionRenderMode(rest.renderMode),
+    composition3dGraph: normalizeComposition3dGraph(rest.composition3dGraph),
     background: {
       ...rest.background,
       stretchToElements: rest.background.stretchToElements || undefined,
@@ -379,7 +399,9 @@ function getSceneFromProjectWithDocs(project: ProjectManifest, sceneId: string, 
   if (!timeline) return undefined;
   const compositionsById = new Map<string, CompositionClip>([
     ...getCompositionLibrary(project).map((composition): [string, CompositionClip] => [composition.id, composition]),
+    ...getCompositionLibrary(project).map((composition): [string, CompositionClip] => [composition.filePath, composition]),
     ...compositionDocs.map((composition): [string, CompositionClip] => [composition.id, composition]),
+    ...compositionDocs.map((composition): [string, CompositionClip] => [composition.filePath, composition]),
   ]);
   return {
     id: timeline.id,
@@ -389,7 +411,8 @@ function getSceneFromProjectWithDocs(project: ProjectManifest, sceneId: string, 
     compositions: timeline.clips.flatMap((clip) => {
       const composition = compositionsById.get(clip.compositionId) ?? createMissingCompositionPlaceholder(clip.compositionId, clip);
       const animationGraph = normalizeAnimationGraphState(clip.animationGraph);
-      return [{ ...applyAnimationGraphToComposition(composition, animationGraph), id: clip.id, compositionId: clip.compositionId, start: clip.start, trimStart: clip.trimStart, layerId: clip.layerId, duration: clip.duration ?? composition.duration, prerender: clip.prerender || undefined, motionMarkers: [], animationGraph }];
+      const renderMode = normalizeCompositionRenderMode(clip.renderMode ?? composition.renderMode);
+      return [{ ...applyAnimationGraphToComposition(composition, animationGraph), id: clip.id, compositionId: clip.compositionId, start: clip.start, trimStart: clip.trimStart, layerId: clip.layerId, duration: clip.duration ?? composition.duration, prerender: clip.prerender || undefined, motionMarkers: [], animationGraph, renderMode, composition3dGraph: resolveComposition3dGraphForTimelineClip(clip, composition, renderMode) }];
     }),
   };
 }
@@ -426,6 +449,8 @@ function getProjectTimelines(project: ProjectManifest, legacyPrerenderCompositio
             prerender: (clipRest.prerender || legacyPrerenderCompositionIds.has(clipRest.compositionId)) || undefined,
             motionMarkers: [],
             animationGraph: normalizeAnimationGraphState(clipRest.animationGraph),
+            renderMode: normalizeCompositionRenderMode(clipRest.renderMode),
+            composition3dGraph: undefined,
         };
       }),
       adjustmentLayers: normalizeAdjustmentLayers(rest.adjustmentLayers),
@@ -441,6 +466,7 @@ function getProjectTimelines(project: ProjectManifest, legacyPrerenderCompositio
 // Editing mutations write only to project.timelines; runtime reads use getSceneFromProject.
 function getScenesFromTimelines(timelines: TimelineDocument[], compositions: CompositionClip[]): Scene[] {
   const compositionsById = new Map(compositions.map((composition) => [composition.id, composition]));
+  for (const composition of compositions) compositionsById.set(composition.filePath, composition);
   return timelines.map((timeline) => ({
     id: timeline.id,
     adjustmentLayers: timeline.adjustmentLayers ?? [],
@@ -449,9 +475,16 @@ function getScenesFromTimelines(timelines: TimelineDocument[], compositions: Com
     compositions: timeline.clips.flatMap((clip) => {
         const composition = compositionsById.get(clip.compositionId) ?? createMissingCompositionPlaceholder(clip.compositionId, clip);
         const animationGraph = normalizeAnimationGraphState(clip.animationGraph);
-        return [{ ...applyAnimationGraphToComposition(composition, animationGraph), id: clip.id, compositionId: clip.compositionId, start: clip.start, trimStart: clip.trimStart, layerId: clip.layerId, duration: clip.duration ?? composition.duration, prerender: clip.prerender || undefined, motionMarkers: [], animationGraph }];
+        const renderMode = normalizeCompositionRenderMode(clip.renderMode ?? composition.renderMode);
+        return [{ ...applyAnimationGraphToComposition(composition, animationGraph), id: clip.id, compositionId: clip.compositionId, start: clip.start, trimStart: clip.trimStart, layerId: clip.layerId, duration: clip.duration ?? composition.duration, prerender: clip.prerender || undefined, motionMarkers: [], animationGraph, renderMode, composition3dGraph: resolveComposition3dGraphForTimelineClip(clip, composition, renderMode) }];
       }),
   }));
+}
+
+function resolveComposition3dGraphForTimelineClip(clip: TimelineClip, composition: CompositionClip, renderMode: CompositionRenderMode) {
+  const compositionGraph = normalizeComposition3dGraph(composition.composition3dGraph);
+  const clipGraph = normalizeComposition3dGraph((clip as { composition3dGraph?: unknown }).composition3dGraph);
+  return renderMode === "webgl" ? (compositionGraph ?? clipGraph) : (clipGraph ?? compositionGraph);
 }
 
 export function applyAnimationGraphToComposition(composition: CompositionClip, graph: AnimationGraphState | undefined): CompositionClip {

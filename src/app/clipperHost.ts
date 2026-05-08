@@ -1,7 +1,17 @@
-import type { AppUpdateStatus, ExportRenderQuality, ExportTileResolutionMapping, ExportWorkerResolutionMapping, MediaExportFormat, MediaExportRenderMode, StableSlowGridPreset, StableSlowValidationSamples } from "./types";
+import type { AgentProvider, AppUpdateStatus, ExportRenderQuality, ExportTileResolutionMapping, ExportWorkerResolutionMapping, MediaExportFormat, MediaExportRenderMode, StableSlowGridPreset, StableSlowValidationSamples } from "./types";
 import type { ProjectManifest } from "../core/types";
 
 type SceneManifest = ProjectManifest["scenes"][number];
+
+export type TemplateBundle = {
+  id: string;
+  slug: string;
+  title: string;
+  subtitle: string;
+  entry: string;
+  author: { name: string; github?: string; twitter?: string; email?: string };
+  files: Record<string, string>;
+};
 
 class ClipperHostService {
   private mutationQueue: Promise<void> = Promise.resolve();
@@ -51,6 +61,18 @@ class ClipperHostService {
     await window.clipper?.revealAbsolutePath?.(filePath);
   }
 
+  async copyText(text: string) {
+    if (window.clipper?.copyText) {
+      await window.clipper.copyText(text);
+      return;
+    }
+    await navigator.clipboard.writeText(text);
+  }
+
+  async openAgentTerminal(relativePath: string, provider: AgentProvider) {
+    await window.clipper?.openAgentTerminal?.(relativePath, provider);
+  }
+
   async trashFile(relativePath: string) {
     return this.enqueueMutation(async () => {
       await window.clipper?.trashFile?.(relativePath);
@@ -75,6 +97,11 @@ class ClipperHostService {
     const response = await fetch(`/__clipper_fs/list?path=${encodeURIComponent(relativePath)}`);
     if (!response.ok) return [];
     return response.json() as Promise<{ name: string; isDirectory: boolean }[]>;
+  }
+
+  async listTemplates(): Promise<TemplateBundle[]> {
+    if (window.clipper?.listTemplates) return window.clipper.listTemplates();
+    return [];
   }
 
   async findProjectFileByName(directoryPath: string, fileName: string) {

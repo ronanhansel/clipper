@@ -89,6 +89,7 @@ export type TimelinePanelProps = {
   onUpdateComposeBackgroundAnimation?: (updater: (animations: import("../../core/types").LayerAnimation[]) => import("../../core/types").LayerAnimation[]) => void;
   onUpdateComposeObjectAnimation?: (objectId: string, updater: (animations: import("../../core/types").LayerAnimation[]) => import("../../core/types").LayerAnimation[]) => void;
   onUpdateComposeAnimationGraph?: (updater: (graph: AnimationGraphState | undefined) => AnimationGraphState, options?: { implicit?: boolean }) => void;
+  onInspectComposition3dNode?: (nodeId: string | null) => void;
 };
 
 export type EffectDragPreview = {

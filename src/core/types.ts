@@ -120,6 +120,10 @@ export type PartSnapshotLine = {
   description: string;
 };
 
+export type CompositionRenderMode = "dom" | "live-dom" | "webgl";
+
+export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
+
 export type EffectCategory = "motion" | "adjustment" | "transition";
 
 export type EffectId = `${string}.${string}`;
@@ -296,6 +300,13 @@ export type TransitionLayer = TimelineMarkerMetadata & {
   effect: TransitionEffect;
 };
 
+export type Composition3dGraphState = {
+  nodes: Record<string, AnimationGraphNodePosition>;
+  edges: AnimationGraphEdge[];
+  customNodes?: Record<string, AnimationGraphCustomNode>;
+  parameters?: Record<string, Record<string, string>>;
+};
+
 export type CompositionClip = TimelineMarkerMetadata & {
   id: string;
   compositionId?: string;
@@ -315,6 +326,8 @@ export type CompositionClip = TimelineMarkerMetadata & {
   snapshot: PartSnapshotLine[];
   motionMarkers: MotionMarker[];
   animationGraph?: AnimationGraphState;
+  renderMode?: CompositionRenderMode;
+  composition3dGraph?: Composition3dGraphState;
 };
 
 export type Part = CompositionClip;
@@ -339,6 +352,7 @@ export type TimelineClip = {
   prerender?: boolean;
   motionMarkers?: MotionMarker[];
   animationGraph?: AnimationGraphState;
+  renderMode?: CompositionRenderMode;
 };
 
 export type AnimationGraphPort = "top" | "right" | "bottom" | "left";
@@ -354,6 +368,8 @@ export type AnimationGraphEdge = {
   fromPort: AnimationGraphPort;
   toNodeId: string;
   toPort: AnimationGraphPort;
+  fromSocket?: string;
+  toSocket?: string;
 };
 
 export type AnimationGraphCustomNode = {
