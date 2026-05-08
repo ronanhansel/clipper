@@ -136,9 +136,9 @@ export function PreviewColumn({ blankFrameViewportStyle, children, currentSceneT
           <div className="relative" data-clipper-fixed-preview-display style={previewDisplayStyle}>
             {renderFramePreviewProps ? (
               <div className="absolute left-0 top-0" data-clipper-fixed-preview-render style={previewRenderStyle}>
-                {displayPrerenderPreview && renderFramePreviewProps.part.renderMode !== "dom"
+                {displayPrerenderPreview && renderFramePreviewProps.part.renderMode === "webgl"
                   ? <PrerenderVideoPreview blackMissDebug={prerenderCacheBlackMissDebug} currentSceneTimeRef={currentSceneTimeRef} framePreviewProps={renderFramePreviewProps} getBlockAtTime={getPrerenderCacheBlockAtTime} liveDomPostProcessMaxFps={liveDomPostProcessMaxFps} livePostProcessPreviewEnabled={livePostProcessPreviewEnabled} onCachedPreviewDisplayReadyChange={onCachedPreviewDisplayReadyChange} />
-                  : <LivePostProcessFramePreview currentSceneTimeRef={currentSceneTimeRef} framePreviewProps={renderFramePreviewProps} liveDomPostProcessMaxFps={liveDomPostProcessMaxFps} livePostProcessEnabled={livePostProcessPreviewEnabled && renderFramePreviewProps.part.renderMode !== "dom"} />}
+                  : <LivePostProcessFramePreview currentSceneTimeRef={currentSceneTimeRef} framePreviewProps={renderFramePreviewProps} liveDomPostProcessMaxFps={liveDomPostProcessMaxFps} livePostProcessEnabled={livePostProcessPreviewEnabled && renderFramePreviewProps.part.renderMode === "live-dom"} />}
                 {!hasActiveComposition && !(mode === "editor" && !editorPaneProps) ? <div className="pointer-events-none absolute left-0 top-0 z-[2147483647] bg-black" data-clipper-stable-blank-preview-overlay style={{ width: FRAME_WIDTH * previewRenderScale, height: FRAME_HEIGHT * previewRenderScale }} /> : null}
               </div>
             ) : null}

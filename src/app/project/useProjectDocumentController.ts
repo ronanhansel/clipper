@@ -296,14 +296,19 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
     const { project: loadedProject, sourceStatus: nextSourceStatus } = await projectPersistenceService.loadProject({ manifestPath });
     const normalizedProject = normalizeProject(loadedProject);
     const loadedCompositionSources = getProjectCompositionSources(normalizedProject);
+    const persistedProject = serializeProjectForSave({ ...normalizedProject, compositionSources: loadedCompositionSources });
+    const nextSavedProjectSnapshot = getProjectContentSnapshot(persistedProject);
+    const nextSavedCompositionSourcesSnapshot = JSON.stringify(persistedProject.compositionSources ?? {});
 
     await storeActiveProjectManifestPath(manifestPath);
     setActiveProjectManifestPath(manifestPath);
     resetProjectHistory();
     replaceProject(normalizedProject, { history: false, syncSources: false, preservePageMode: false });
     applyEditorState(normalizedProject.editorState!);
-    setSavedProjectSnapshot(getProjectContentSnapshot(normalizedProject));
-    setSavedCompositionSourcesSnapshot(JSON.stringify(loadedCompositionSources));
+    setSavedProjectSnapshot(nextSavedProjectSnapshot);
+    setSavedCompositionSourcesSnapshot(nextSavedCompositionSourcesSnapshot);
+    savedProjectSnapshotRef.current = nextSavedProjectSnapshot;
+    savedCompositionSourcesSnapshotRef.current = nextSavedCompositionSourcesSnapshot;
     setLastSavedAt(Date.now());
     setSourceStatus(nextSourceStatus);
   }
