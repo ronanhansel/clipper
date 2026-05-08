@@ -219,7 +219,7 @@ export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dra
             <div ref={cameraVisualAdjustmentOverlaysRef} className="pointer-events-none absolute inset-0" data-clipper-visual-adjustment-overlays="camera" style={{ zIndex: 2147483647 }} />
           </div>
           {trackerPicking && trackerHoverTarget ? <TrackerTargetOverlay target={trackerHoverTarget} /> : null}
-          {dragBox ? <DragSelectionBox dragSelectionBoxRef={dragSelectionBoxRef} bounds={dragBox} frameScale={frameScale} visible={Boolean(showDragBox)} /> : null}
+          {dragBox ? <DragSelectionBox dragSelectionBoxRef={dragSelectionBoxRef} bounds={dragBox} frameScale={frameScale} frameViewportRef={frameViewportRef} portalHost={previewOverlayHost} uiScale={selectionOverlayScale} visible={Boolean(showDragBox)} /> : null}
           {framePickPoint ? <FramePickPointOverlay point={framePickPoint} frameScale={frameScale} /> : null}
           <FramePickPointImperativeOverlay />
         </div>
@@ -781,12 +781,18 @@ export function SelectionOverlayBox({ objectId, bounds, cameraTransform, frameSc
   );
 }
 
-export function DragSelectionBox({ dragSelectionBoxRef, bounds, frameScale, visible }: { dragSelectionBoxRef: RefObject<HTMLDivElement | null>; bounds: Bounds; frameScale: number; visible: boolean }) {
+export function DragSelectionBox({ dragSelectionBoxRef, bounds, frameScale, frameViewportRef, portalHost, uiScale, visible }: { dragSelectionBoxRef: RefObject<HTMLDivElement | null>; bounds: Bounds; frameScale: number; frameViewportRef: RefObject<HTMLDivElement | null>; portalHost?: HTMLElement | null; uiScale: number; visible: boolean }) {
   useLayoutEffect(() => {
-    if (dragSelectionBoxRef.current) updateDragSelectionBoxElement(dragSelectionBoxRef.current, bounds, frameScale, visible);
-  }, [bounds, dragSelectionBoxRef, frameScale, visible]);
+    const element = dragSelectionBoxRef.current;
+    if (!element) return;
+    const frameRect = frameViewportRef.current?.getBoundingClientRect();
+    const hostRect = portalHost?.getBoundingClientRect();
+    const offset = frameRect && hostRect ? { x: frameRect.left - hostRect.left, y: frameRect.top - hostRect.top } : { x: 0, y: 0 };
+    updateDragSelectionBoxElement(element, bounds, frameScale, visible, uiScale, offset);
+  }, [bounds, dragSelectionBoxRef, frameScale, frameViewportRef, portalHost, uiScale, visible]);
 
-  return <div ref={dragSelectionBoxRef} className="pointer-events-none absolute left-0 top-0 border bg-[#159dff]/10 opacity-100 shadow-[0_0_0_1px_rgba(21,157,255,0.18)] will-change-transform" style={{ borderColor: selectorBlue, zIndex: 69 }} />;
+  const box = <div ref={dragSelectionBoxRef} className="pointer-events-none absolute left-0 top-0 border bg-[#159dff]/10 opacity-100 will-change-transform" style={{ borderColor: selectorBlue, zIndex: 69 }} />;
+  return portalHost ? createPortal(box, portalHost) : box;
 }
 
 export const BackgroundLayerView = memo(function BackgroundLayerView({ animationsEnabled, background, duration, exportTileFrameBounds, frameScale, previewTime, renderMode }: { animationsEnabled: boolean; background: BackgroundLayer; duration: number; exportTileFrameBounds?: ExportTileFrameBounds; frameScale: number; previewTime: number; renderMode: "preview" | "export" }) {

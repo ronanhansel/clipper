@@ -1,4 +1,5 @@
 import { LiveDomTextureUploader, type LiveDomWebGlContext } from "./liveDomCapability";
+import { measurePreviewPerf } from "./perf";
 
 const vertexShaderSource = `
 attribute vec2 a_position;
@@ -36,7 +37,7 @@ export class WebGlPostProcessRenderer<TPass> {
   constructor(private readonly config: WebGlPostProcessConfig<TPass>) {}
 
   render(canvas: HTMLCanvasElement, source: TexImageSource, pass: TPass, width: number, height: number) {
-    const gl = this.ensureContext(canvas);
+    const gl = measurePreviewPerf("webgl.ensureContext", () => this.ensureContext(canvas));
     if (!gl || !this.program || !this.texture || gl.isContextLost()) return false;
 
     canvas.width = width;
@@ -46,13 +47,13 @@ export class WebGlPostProcessRenderer<TPass> {
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.texture);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
-    this.config.draw({ gl, pass, width, height, uniforms: this.uniforms });
+    measurePreviewPerf("webgl.texImage2D", () => gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source));
+    measurePreviewPerf("webgl.draw", () => this.config.draw({ gl, pass, width, height, uniforms: this.uniforms }));
     return !gl.isContextLost();
   }
 
   renderElement(canvas: HTMLCanvasElement, source: Element, pass: TPass, width: number, height: number, sourceCanvas?: HTMLCanvasElement | null) {
-    const gl = this.ensureContext(canvas);
+    const gl = measurePreviewPerf("webgl.element.ensureContext", () => this.ensureContext(canvas));
     if (!gl || !this.program || !this.texture || gl.isContextLost()) return false;
 
     canvas.width = width;
@@ -62,9 +63,10 @@ export class WebGlPostProcessRenderer<TPass> {
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.texture);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
-    if (!this.liveDomTextureUploader.upload(gl as LiveDomWebGlContext, source, sourceCanvas)) return false;
+    const uploaded = measurePreviewPerf("webgl.element.upload", () => this.liveDomTextureUploader.upload(gl as LiveDomWebGlContext, source, sourceCanvas));
+    if (!uploaded) return false;
 
-    this.config.draw({ gl, pass, width, height, uniforms: this.uniforms });
+    measurePreviewPerf("webgl.element.draw", () => this.config.draw({ gl, pass, width, height, uniforms: this.uniforms }));
     return !gl.isContextLost();
   }
 
@@ -80,7 +82,7 @@ export class WebGlPostProcessRenderer<TPass> {
     ];
     for (let index = 0; index < points.length; index += 1) {
       const [x, y] = points[index];
-      gl.readPixels(x, y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixels.subarray(index * 4, index * 4 + 4));
+      measurePreviewPerf("webgl.readPixels", () => gl.readPixels(x, y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixels.subarray(index * 4, index * 4 + 4)));
     }
     for (let index = 0; index < pixels.length; index += 4) {
       if (pixels[index] > 4 || pixels[index + 1] > 4 || pixels[index + 2] > 4 || pixels[index + 3] > 4) return true;

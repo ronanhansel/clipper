@@ -270,7 +270,13 @@ export function useFrameInteractionController(params: FrameInteractionController
       dragBoxFrameRef.current = 0;
       if (!marqueeDraggingRef.current) return;
       const nextDragBox = pendingDragBoxRef.current;
-      if (nextDragBox && dragSelectionBoxRef.current) updateDragSelectionBoxElement(dragSelectionBoxRef.current, nextDragBox, framePreviewScale);
+      if (nextDragBox && dragSelectionBoxRef.current) {
+        const overlayHost = dragSelectionBoxRef.current.closest<HTMLElement>("[data-clipper-preview-overlay-host]");
+        const frameRect = frameViewportRef.current?.getBoundingClientRect();
+        const hostRect = overlayHost?.getBoundingClientRect();
+        const offset = frameRect && hostRect ? { x: frameRect.left - hostRect.left, y: frameRect.top - hostRect.top } : { x: 0, y: 0 };
+        updateDragSelectionBoxElement(dragSelectionBoxRef.current, nextDragBox, framePreviewScale, undefined, selectionOverlayScale, offset);
+      }
       if (!nextDragBox || !isVisibleMarqueeBounds(nextDragBox, frameDisplayScale)) return;
       const payload = createSelectionPayload(nextDragBox, [...part.background.elements, ...part.objects]);
       const nextSelectionIds = payload.objects.map((object) => object.id).join("|");

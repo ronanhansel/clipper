@@ -76,6 +76,7 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
   const savedProjectSnapshotRef = useRef(savedProjectSnapshot);
   const editableRootCacheRef = useRef<Record<string, string>>({});
   const savedCompositionSourcesSnapshotRef = useRef(savedCompositionSourcesSnapshot);
+  const savedFileContentSnapshotsRef = useRef<SavedSnapshots | null>(null);
   const externalChangeConflictActiveRef = useRef(false);
   const externalChangeToastIdRef = useRef<string | null>(null);
   const suppressProjectWatcherUntilRef = useRef(0);
@@ -210,6 +211,7 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
   }
 
   function getSavedProjectFileContentSnapshots(): SavedSnapshots {
+    if (savedFileContentSnapshotsRef.current) return savedFileContentSnapshotsRef.current;
     try {
       return {
         project: getProjectFileContentSnapshot(JSON.parse(savedProjectSnapshotRef.current) as ProjectManifest),
@@ -243,6 +245,7 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
   function markSnapshotsSaved(snapshots: SavedSnapshots) {
     savedProjectSnapshotRef.current = snapshots.project;
     savedCompositionSourcesSnapshotRef.current = snapshots.compositionSources;
+    savedFileContentSnapshotsRef.current = getProjectFileContentSnapshots(JSON.parse(snapshots.project) as ProjectManifest);
     setSavedProjectSnapshot(snapshots.project);
     setSavedCompositionSourcesSnapshot(snapshots.compositionSources);
     setLastSavedAt(Date.now());
@@ -299,6 +302,7 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
     const persistedProject = serializeProjectForSave({ ...normalizedProject, compositionSources: loadedCompositionSources });
     const nextSavedProjectSnapshot = getProjectContentSnapshot(persistedProject);
     const nextSavedCompositionSourcesSnapshot = JSON.stringify(persistedProject.compositionSources ?? {});
+    const nextSavedFileContentSnapshots = getProjectFileContentSnapshots(persistedProject);
 
     await storeActiveProjectManifestPath(manifestPath);
     setActiveProjectManifestPath(manifestPath);
@@ -309,6 +313,7 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
     setSavedCompositionSourcesSnapshot(nextSavedCompositionSourcesSnapshot);
     savedProjectSnapshotRef.current = nextSavedProjectSnapshot;
     savedCompositionSourcesSnapshotRef.current = nextSavedCompositionSourcesSnapshot;
+    savedFileContentSnapshotsRef.current = nextSavedFileContentSnapshots;
     setLastSavedAt(Date.now());
     setSourceStatus(nextSourceStatus);
   }
@@ -322,10 +327,12 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
       const persistedProject = serializeProjectForSave({ ...projectRef.current, compositionSources: loadedCompositionSources });
       const nextSavedProjectSnapshot = getProjectContentSnapshot(persistedProject);
       const nextSavedCompositionSourcesSnapshot = JSON.stringify(persistedProject.compositionSources ?? {});
+      const nextSavedFileContentSnapshots = getProjectFileContentSnapshots(persistedProject);
       setSavedProjectSnapshot(nextSavedProjectSnapshot);
       setSavedCompositionSourcesSnapshot(nextSavedCompositionSourcesSnapshot);
       savedProjectSnapshotRef.current = nextSavedProjectSnapshot;
       savedCompositionSourcesSnapshotRef.current = nextSavedCompositionSourcesSnapshot;
+      savedFileContentSnapshotsRef.current = nextSavedFileContentSnapshots;
       setLastSavedAt(Date.now());
       setSourceStatus("Project reloaded from disk.");
       setFileSystemRevision((r) => r + 1);
@@ -647,6 +654,7 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
       setSavedCompositionSourcesSnapshot(nextSavedCompositionSourcesSnapshot);
       savedProjectSnapshotRef.current = nextSavedProjectSnapshot;
       savedCompositionSourcesSnapshotRef.current = nextSavedCompositionSourcesSnapshot;
+      savedFileContentSnapshotsRef.current = projectFileContentSnapshots;
       setLastSavedAt(Date.now());
       setSourceStatus(result.sourceStatus);
     };

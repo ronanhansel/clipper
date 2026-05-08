@@ -1,6 +1,7 @@
 import { createContext, useContext, useRef, type PropsWithChildren } from "react";
 import { createStore, useStore, type StoreApi } from "zustand";
 import { useShallow } from "zustand/react/shallow";
+import { serializeProjectForSave } from "../../core/project";
 import type { ProjectManifest } from "../../core/types";
 
 type Setter<T> = T | ((current: T) => T);
@@ -44,11 +45,13 @@ export function getProjectFileContentSnapshot(project: ProjectManifest) {
 
 export function createProjectStore(initialProject: ProjectManifest, initialCompositionSources: Record<string, string> = {}) {
   const compositionSources = initialProject.compositionSources ?? initialCompositionSources;
+  const persistedProject = serializeProjectForSave({ ...initialProject, compositionSources });
+  const persistedCompositionSources = persistedProject.compositionSources ?? {};
   return createStore<ProjectStore>((set) => ({
     project: initialProject,
-    savedProjectSnapshot: getProjectContentSnapshot(initialProject),
+    savedProjectSnapshot: getProjectContentSnapshot(persistedProject),
     compositionSources,
-    savedCompositionSourcesSnapshot: JSON.stringify(compositionSources),
+    savedCompositionSourcesSnapshot: JSON.stringify(persistedCompositionSources),
     setProject: createFieldSetter(set, "project"),
     setProjectDocument: (project, compositionSources) => set((state) => (state.project === project && state.compositionSources === compositionSources ? state : { project, compositionSources })),
     setSavedProjectSnapshot: createFieldSetter(set, "savedProjectSnapshot"),

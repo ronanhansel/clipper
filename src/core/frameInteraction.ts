@@ -214,11 +214,13 @@ export function isVisibleMarqueeBounds(bounds: Bounds, frameScale: number) {
   return bounds.width * frameScale >= marqueeSelectionThresholdPx || bounds.height * frameScale >= marqueeSelectionThresholdPx;
 }
 
-export function updateDragSelectionBoxElement(element: HTMLDivElement, bounds: Bounds, frameScale: number, visible = isVisibleMarqueeBounds(bounds, frameScale)) {
+export function updateDragSelectionBoxElement(element: HTMLDivElement, bounds: Bounds, frameScale: number, visible = isVisibleMarqueeBounds(bounds, frameScale), uiScale = 1, offset: Point = { x: 0, y: 0 }) {
   element.style.display = visible ? "block" : "none";
-  element.style.transform = `translate3d(${bounds.x * frameScale}px, ${bounds.y * frameScale}px, 0)`;
-  element.style.width = `${bounds.width * frameScale}px`;
-  element.style.height = `${bounds.height * frameScale}px`;
+  element.style.transform = `translate3d(${offset.x + bounds.x * frameScale * uiScale}px, ${offset.y + bounds.y * frameScale * uiScale}px, 0)`;
+  element.style.width = `${bounds.width * frameScale * uiScale}px`;
+  element.style.height = `${bounds.height * frameScale * uiScale}px`;
+  element.style.borderWidth = "1px";
+  element.style.boxShadow = "0 0 0 1px rgba(21,157,255,0.18)";
 }
 
 export function moveBounds(bounds: Bounds, delta: Point): Bounds {

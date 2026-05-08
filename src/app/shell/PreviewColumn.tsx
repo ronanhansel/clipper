@@ -7,6 +7,7 @@ import { boundsToViewport, getLayeredCameraPreviewTransform } from "../../core/c
 import { getLiveDomPostProcessPreflight, isLiveDomPostProcessPreviewOptedIn, type LiveDomPostProcessCapability } from "../../core/effects/postprocess/liveDomCapability";
 import { collectLiveDomPostProcessRequirement } from "../../core/effects/postprocess/liveDomRequirement";
 import { LiveDomPostProcessRenderer } from "../../core/effects/postprocess/liveDomRenderer";
+import { measurePreviewPerf } from "../../core/effects/postprocess/perf";
 import { selectLiveDomPostProcessPass, withPostProcessFrameBackground } from "../../core/effects/postprocess/passes";
 import { createDefaultPostProcessRenderer, type PostProcessRenderer } from "../../core/effects/postprocess/registry";
 import type { AdjustmentVisualOverlay, AdjustmentVisualStyle } from "../../core/effects/types";
@@ -234,7 +235,7 @@ function PrerenderVideoPreview({ blackMissDebug, currentSceneTimeRef, framePrevi
     }
 
     firstMissAtRef.current = null;
-    const postProcessPasses = applyAdjustmentLayersToPostProcessPasses(sceneTime, framePreviewProps.adjustmentLayers, undefined, { width: block.width, height: block.height });
+    const postProcessPasses = measurePreviewPerf("cached.applyAdjustmentLayersToPostProcessPasses", () => applyAdjustmentLayersToPostProcessPasses(sceneTime, framePreviewProps.adjustmentLayers, undefined, { width: block.width, height: block.height }));
     const { pass: webGlPostProcessPass } = selectLiveDomPostProcessPass(postProcessPasses);
     const targetDisplayMode: CachedPreviewDisplayMode = webGlPostProcessPass ? "webgl" : "canvas2d";
     const frameKey = `${targetDisplayMode}:${block.startTime}:${frame.sceneTime}:${JSON.stringify(postProcessPasses)}`;
@@ -251,7 +252,7 @@ function PrerenderVideoPreview({ blackMissDebug, currentSceneTimeRef, framePrevi
           return;
         }
         const decoratedPass = withPostProcessFrameBackground(webGlPostProcessPass, framePreviewProps.part.frame.style.background);
-        if (!renderer.render(canvas, frame.bitmap, decoratedPass, block.width, block.height)) {
+        if (!measurePreviewPerf("cached.webgl.render", () => renderer.render(canvas, frame.bitmap, decoratedPass, block.width, block.height))) {
           showDomFallback();
           return;
         }
@@ -266,7 +267,7 @@ function PrerenderVideoPreview({ blackMissDebug, currentSceneTimeRef, framePrevi
           showDomFallback();
           return;
         }
-        drawFrameImage(context, frame.bitmap, block.width, block.height);
+        measurePreviewPerf("cached.canvas2d.drawFrameImage", () => drawFrameImage(context, frame.bitmap, block.width, block.height));
       }
       lastFrameKeyRef.current = frameKey;
     }
@@ -436,7 +437,7 @@ function LivePostProcessFramePreview({ currentSceneTimeRef, framePreviewProps, l
     const canvas = renderCanvasRef.current;
     const layers = previewLayersRef.current ?? framePreviewProps.adjustmentLayers;
     const sceneTime = currentSceneTimeRef.current;
-    const requirement = collectLiveDomPostProcessRequirement({ sceneTime, layers, frameSize: { width: FRAME_WIDTH, height: FRAME_HEIGHT } });
+    const requirement = measurePreviewPerf("live.collectRequirement", () => collectLiveDomPostProcessRequirement({ sceneTime, layers, frameSize: { width: FRAME_WIDTH, height: FRAME_HEIGHT } }));
     const { pass: livePass } = selectLiveDomPostProcessPass(requirement.passes);
     const optIn = isLiveDomPostProcessPreviewOptedIn();
     if (!canvas || !livePass || !livePostProcessEnabled || !optIn) {
@@ -450,7 +451,7 @@ function LivePostProcessFramePreview({ currentSceneTimeRef, framePreviewProps, l
       updateDiagnosticReason("missing-source");
       return false;
     }
-    const preflight = getLiveDomPostProcessPreflight({ optIn, sourceElement: source, canvas });
+    const preflight = measurePreviewPerf("live.preflight", () => getLiveDomPostProcessPreflight({ optIn, sourceElement: source, canvas }));
     if (!preflight.supported) {
       keepLastLiveFrameIfAvailable();
       rendererRef.current?.destroy();
@@ -465,7 +466,7 @@ function LivePostProcessFramePreview({ currentSceneTimeRef, framePreviewProps, l
     }
 
     rendererRef.current ??= new LiveDomPostProcessRenderer();
-    const result = rendererRef.current.render({ canvas, sourceElement: source, pass: withPostProcessFrameBackground(livePass, framePreviewProps.part.frame.style.background), width: FRAME_WIDTH, height: FRAME_HEIGHT, optIn });
+    const result = measurePreviewPerf("live.renderer.render", () => rendererRef.current!.render({ canvas, sourceElement: source, pass: withPostProcessFrameBackground(livePass, framePreviewProps.part.frame.style.background), width: FRAME_WIDTH, height: FRAME_HEIGHT, optIn }));
     if (result.rendered) {
       hasValidLiveFrameRef.current = true;
       hasActivatedLiveCanvasRef.current = true;
@@ -507,7 +508,7 @@ function LivePostProcessFramePreview({ currentSceneTimeRef, framePreviewProps, l
         clearInactiveLivePreview("not-opted-in");
         return;
       }
-      const requirement = collectLiveDomPostProcessRequirement({ sceneTime: currentSceneTimeRef.current, layers: layers ?? framePreviewProps.adjustmentLayers, frameSize: { width: FRAME_WIDTH, height: FRAME_HEIGHT } });
+      const requirement = measurePreviewPerf("live.event.collectRequirement", () => collectLiveDomPostProcessRequirement({ sceneTime: currentSceneTimeRef.current, layers: layers ?? framePreviewProps.adjustmentLayers, frameSize: { width: FRAME_WIDTH, height: FRAME_HEIGHT } }));
       const { pass: livePass } = selectLiveDomPostProcessPass(requirement.passes);
       if (!livePass) clearInactiveLivePreview(null);
     };
@@ -518,7 +519,7 @@ function LivePostProcessFramePreview({ currentSceneTimeRef, framePreviewProps, l
   useEffect(() => {
     previewLayersRef.current = null;
     liveRenderDirtyRef.current = true;
-    const requirement = collectLiveDomPostProcessRequirement({ sceneTime: currentSceneTimeRef.current, layers: framePreviewProps.adjustmentLayers, frameSize: { width: FRAME_WIDTH, height: FRAME_HEIGHT } });
+    const requirement = measurePreviewPerf("live.effect.collectRequirement", () => collectLiveDomPostProcessRequirement({ sceneTime: currentSceneTimeRef.current, layers: framePreviewProps.adjustmentLayers, frameSize: { width: FRAME_WIDTH, height: FRAME_HEIGHT } }));
     const { pass: livePass } = selectLiveDomPostProcessPass(requirement.passes);
     if (!livePostProcessEnabled || !livePass) clearInactiveLivePreview(!livePostProcessEnabled ? "not-opted-in" : null);
   }, [framePreviewProps.adjustmentLayers]);
@@ -550,7 +551,7 @@ function LivePostProcessFramePreview({ currentSceneTimeRef, framePreviewProps, l
       const canvas = renderCanvasRef.current;
       const layers = previewLayersRef.current ?? framePreviewProps.adjustmentLayers;
       const sceneTime = currentSceneTimeRef.current;
-      const requirement = collectLiveDomPostProcessRequirement({ sceneTime, layers, frameSize: { width: FRAME_WIDTH, height: FRAME_HEIGHT } });
+      const requirement = measurePreviewPerf("live.raf.collectRequirement", () => collectLiveDomPostProcessRequirement({ sceneTime, layers, frameSize: { width: FRAME_WIDTH, height: FRAME_HEIGHT } }));
       const { pass: livePass } = selectLiveDomPostProcessPass(requirement.passes);
       const optIn = isLiveDomPostProcessPreviewOptedIn();
       if (!canvas || !livePass || !livePostProcessEnabled || !optIn) {
@@ -563,7 +564,8 @@ function LivePostProcessFramePreview({ currentSceneTimeRef, framePreviewProps, l
       activeLivePostProcessPassRef.current = true;
       if (enteringLivePostProcess) liveRenderDirtyRef.current = true;
       updateActiveLiveSourceRequired(requirement.requiresLiveDomSource);
-      updateLiveVisualStyle(applyAdjustmentLayersToVisualStyle(sceneTime, layers));
+      const visualStyle = measurePreviewPerf("live.applyAdjustmentLayersToVisualStyle", () => applyAdjustmentLayersToVisualStyle(sceneTime, layers));
+      updateLiveVisualStyle(visualStyle);
       keepLastLiveFrameIfAvailable();
       if (!framePreviewProps.isPlaying && lastStoppedSceneTimeRef.current !== sceneTime) {
         liveRenderDirtyRef.current = true;
