@@ -1700,7 +1700,6 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     appRootRef,
     projectRef,
     updateEditorState,
-    scheduleImplicitFileOperationSave,
   });
 
   const fileManagerActions = useFileManagerProjectActions({

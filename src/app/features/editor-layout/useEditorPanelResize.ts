@@ -30,10 +30,9 @@ type UseEditorPanelResizeInput = {
   appRootRef: RefObject<HTMLElement | null>;
   projectRef: RefObject<ProjectManifest>;
   updateEditorState: (updater: (state: EditorState) => EditorState, options?: { autosave?: boolean }) => void;
-  scheduleImplicitFileOperationSave: (projectOverride: ProjectManifest, errorMessage?: string) => void;
 };
 
-export function useEditorPanelResize({ appRootRef, projectRef, updateEditorState, scheduleImplicitFileOperationSave }: UseEditorPanelResizeInput) {
+export function useEditorPanelResize({ appRootRef, projectRef, updateEditorState }: UseEditorPanelResizeInput) {
   const editorPanelResizeRef = useRef<EditorPanelResizeDrag | null>(null);
   const [previewEditorLayout, setPreviewEditorLayout] = useState<EditorLayoutState | null>(null);
   const [previewComposeLayout, setPreviewComposeLayout] = useState<ComposeLayoutState | null>(null);
@@ -68,20 +67,18 @@ export function useEditorPanelResize({ appRootRef, projectRef, updateEditorState
     root.style.setProperty("--clipper-compose-left-panel-width", `${layout.leftPanelWidth}px`);
   }
 
-  function updateEditorLayout(layout: EditorLayoutState, options?: { autosave?: boolean }) {
+  function updateEditorLayout(layout: EditorLayoutState) {
     const nextLayout = clampEditorLayout(layout);
     const currentLayout = projectRef.current.editorState?.layout ?? defaultEditorLayoutState;
     if (JSON.stringify(nextLayout) === JSON.stringify(currentLayout)) return;
-    updateEditorState((state) => ({ ...state, layout: nextLayout }), { autosave: false });
-    if (options?.autosave !== false) scheduleImplicitFileOperationSave(projectRef.current, "Unable to save layout.");
+    updateEditorState((state) => ({ ...state, layout: nextLayout }));
   }
 
-  function updateComposeLayout(layout: ComposeLayoutState, options?: { autosave?: boolean }) {
+  function updateComposeLayout(layout: ComposeLayoutState) {
     const nextLayout = clampComposeLayout(layout);
     const currentLayout = projectRef.current.editorState?.composeLayout ?? defaultComposeLayoutState;
     if (JSON.stringify(nextLayout) === JSON.stringify(currentLayout)) return;
-    updateEditorState((state) => ({ ...state, composeLayout: nextLayout }), { autosave: false });
-    if (options?.autosave !== false) scheduleImplicitFileOperationSave(projectRef.current, "Unable to save compose layout.");
+    updateEditorState((state) => ({ ...state, composeLayout: nextLayout }));
   }
 
   function onEditorPanelResizeMove(event: globalThis.PointerEvent) {
