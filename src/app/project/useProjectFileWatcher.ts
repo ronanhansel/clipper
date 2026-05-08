@@ -25,7 +25,13 @@ export function useProjectFileWatcher({
     void window.clipper?.watchProjectFiles?.({ files: [], directories });
 
     const flushReload = async () => {
-      if (isFileSystemBusyRef.current) return;
+      if (isFileSystemBusyRef.current) {
+        window.clearTimeout(debounceRef.current);
+        debounceRef.current = window.setTimeout(() => {
+          void flushReload();
+        }, RELOAD_DEBOUNCE_MS);
+        return;
+      }
       if (reloadingRef.current) return;
       const changedPath = queuedPathRef.current;
       queuedPathRef.current = undefined;
@@ -44,7 +50,6 @@ export function useProjectFileWatcher({
     };
 
     const cleanup = window.clipper?.onProjectFileChanged?.((changedPath) => {
-      if (isFileSystemBusyRef.current) return;
       queuedPathRef.current = changedPath;
       window.clearTimeout(debounceRef.current);
       debounceRef.current = window.setTimeout(() => {

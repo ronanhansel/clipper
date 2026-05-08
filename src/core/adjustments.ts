@@ -1,6 +1,6 @@
 import type { AdjustmentLayer } from "./types";
 import { getAdjustmentEffectPackage } from "./effects/registry";
-import type { AdjustmentVisualStyle, PostProcessPass } from "./effects/types";
+import type { AdjustmentExecutionPlan, AdjustmentExecutionPlanStep, AdjustmentVisualStyle, PostProcessPass } from "./effects/types";
 
 export const defaultAdjustmentFrameRate = 30;
 
@@ -22,22 +22,49 @@ export function applyPlaybackAdjustmentLayersToSceneTime(sceneTime: number, laye
 }
 
 export function applyAdjustmentLayersToVisualStyle(sceneTime: number, layers: AdjustmentLayer[] | undefined, frameRate = defaultAdjustmentFrameRate): AdjustmentVisualStyle {
-  return getActiveAdjustmentLayers(layers, sceneTime).reduce<AdjustmentVisualStyle>((style, layer) => {
-    const nextStyle = getAdjustmentEffectPackage(layer.effect.effectId)?.applyVisualStyle?.({ sceneTime, layer, frameRate });
-    if (!nextStyle) return style;
-    return {
-      ...style,
-      ...nextStyle,
-      filter: [style.filter, nextStyle.filter].filter(Boolean).join(" ") || undefined,
-      overlays: [...(style.overlays ?? []), ...(nextStyle.overlays ?? [])],
-    };
-  }, {});
+  return getVisualStyleForAdjustmentPlan(buildAdjustmentExecutionPlan(sceneTime, layers, frameRate, undefined));
+}
+
+export function applyAdjustmentLayersToVisualStyleBeforeLayer(sceneTime: number, layers: AdjustmentLayer[] | undefined, layerId: string | undefined, frameRate = defaultAdjustmentFrameRate): AdjustmentVisualStyle {
+  return getVisualStyleForAdjustmentPlan(filterAdjustmentExecutionPlan(buildAdjustmentExecutionPlan(sceneTime, layers, frameRate, undefined), "before", layerId));
+}
+
+export function applyAdjustmentLayersToVisualStyleAfterLayer(sceneTime: number, layers: AdjustmentLayer[] | undefined, layerId: string | undefined, frameRate = defaultAdjustmentFrameRate): AdjustmentVisualStyle {
+  return getVisualStyleForAdjustmentPlan(filterAdjustmentExecutionPlan(buildAdjustmentExecutionPlan(sceneTime, layers, frameRate, undefined), "after", layerId));
 }
 
 export function applyAdjustmentLayersToPostProcessPasses(sceneTime: number, layers: AdjustmentLayer[] | undefined, frameRate = defaultAdjustmentFrameRate, frameSize: { width: number; height: number }): PostProcessPass[] {
-  return getActiveAdjustmentLayers(layers, sceneTime).flatMap((layer) => {
-    return getAdjustmentEffectPackage(layer.effect.effectId)?.collectPostProcessPasses?.({ sceneTime, layer, frameRate, frameSize }) ?? [];
+  return buildAdjustmentExecutionPlan(sceneTime, layers, frameRate, frameSize).steps.flatMap((step) => step.postProcessPasses ?? []);
+}
+
+export function buildAdjustmentExecutionPlan(sceneTime: number, layers: AdjustmentLayer[] | undefined, frameRate = defaultAdjustmentFrameRate, frameSize?: { width: number; height: number }): AdjustmentExecutionPlan {
+  const activeLayers = getActiveAdjustmentLayers(layers, sceneTime);
+  const steps = activeLayers.map<AdjustmentExecutionPlanStep>((layer) => {
+    const effect = getAdjustmentEffectPackage(layer.effect.effectId);
+    const visualStyle = effect?.applyVisualStyle?.({ sceneTime, layer, frameRate });
+    const postProcessPasses = frameSize ? effect?.collectPostProcessPasses?.({ sceneTime, layer, frameRate, frameSize }) : undefined;
+    return {
+      layer,
+      filter: visualStyle?.filter,
+      overlays: visualStyle?.overlays,
+      postProcessPasses: postProcessPasses?.length ? postProcessPasses : undefined,
+    };
   });
+  return { activeLayers, steps };
+}
+
+export function getVisualStyleForAdjustmentPlan(plan: AdjustmentExecutionPlan): AdjustmentVisualStyle {
+  return plan.steps.reduce<AdjustmentVisualStyle>((style, step) => ({
+    filter: [style.filter, step.filter].filter(Boolean).join(" ") || undefined,
+    overlays: [...(style.overlays ?? []), ...(step.overlays ?? [])],
+  }), {});
+}
+
+export function filterAdjustmentExecutionPlan(plan: AdjustmentExecutionPlan, direction: "before" | "after", layerId: string | undefined): AdjustmentExecutionPlan {
+  const layerIndex = layerId ? plan.steps.findIndex((step) => step.layer.id === layerId) : -1;
+  if (layerIndex < 0) return direction === "before" ? plan : { activeLayers: [], steps: [] };
+  const steps = direction === "before" ? plan.steps.slice(layerIndex + 1) : plan.steps.slice(0, layerIndex);
+  return { activeLayers: steps.map((step) => step.layer), steps };
 }
 
 export function getTimeSensitiveDisplayTime(sceneTime: number, layers: AdjustmentLayer[] | undefined, frameRate = defaultAdjustmentFrameRate) {

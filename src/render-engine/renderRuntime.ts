@@ -35,7 +35,8 @@ const templateCache = new Map<string, (context: TemplateRenderContext) => Templa
 
 export function evaluateFrameObject(object: FrameObject, time: number, duration: number, options: RenderEvaluationOptions = {}): EvaluatedFrameObject {
   const animationsEnabled = options.animations ?? true;
-  const layerAnimationStyle = animationsEnabled && object.animations ? evaluateLayerAnimations(object.animations, time) : {};
+  const objectAnimations = object.type === "text" ? object.animations?.filter((animation) => !animation.options.split) : object.animations;
+  const layerAnimationStyle = animationsEnabled && objectAnimations ? evaluateLayerAnimations(objectAnimations, time) : {};
   const templateRender = object.template ? renderFrameTemplate(object.template, object, time, duration) : null;
 
   const mergedMotionStyle = { ...layerAnimationStyle };

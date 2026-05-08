@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyOsFileOperations, applyPendingOsFileMoves, createOsCompositionDragDetail, preserveStableOsFileMoveIds, pruneObservedOsFileOperations, reconcilePendingOsFileMoves, renderOsFileOperationTree, renameOsFileNode, resolveOsCompositionDragMetadata, resolveOsCompositionId, retainUnobservedPendingMoves, rollbackFailedOsFileOperations, type OsFileNode, type OsFileOperation } from "./OsFileManager";
+import { applyOsFileOperations, applyPendingOsFileMoves, createOsCompositionDragDetail, preserveStableOsFileMoveIds, pruneObservedOsFileOperations, reconcilePendingOsFileMoves, renderOsFileOperationTree, renameOsFileNode, resolveOsCompositionDragMetadata, resolveOsCompositionId, retainUnobservedPendingMoves, rollbackFailedOsFileOperations, shouldSyncActiveOsFileSelection, type OsFileNode, type OsFileOperation } from "./OsFileManager";
 
 describe("resolveOsCompositionDragMetadata", () => {
   it("uses loaded composition duration and state for drag previews", () => {
@@ -62,6 +62,20 @@ describe("createOsCompositionDragDetail", () => {
       phase: "move",
       shiftKey: true,
     });
+  });
+});
+
+describe("shouldSyncActiveOsFileSelection", () => {
+  it("does not reselect the active timeline after the user selects another file", () => {
+    expect(shouldSyncActiveOsFileSelection(["os-file:/project/notes.txt"], { key: "timeline:main.timeline.json", nodeId: "timeline-node" }, "timeline:main.timeline.json", "timeline-node")).toBe(false);
+  });
+
+  it("syncs when the active timeline changes", () => {
+    expect(shouldSyncActiveOsFileSelection(["os-file:/project/notes.txt"], { key: "timeline:main.timeline.json", nodeId: "timeline-node" }, "timeline:second.timeline.json", "second-timeline-node")).toBe(true);
+  });
+
+  it("restores the active item when tree reconciliation clears selection", () => {
+    expect(shouldSyncActiveOsFileSelection([], { key: "timeline:main.timeline.json", nodeId: "timeline-node" }, "timeline:main.timeline.json", "timeline-node")).toBe(true);
   });
 });
 

@@ -2,9 +2,10 @@ import { Component as ReactComponent, memo, useEffect, useLayoutEffect, useMemo,
 import { createPortal } from "react-dom";
 import { selectorBlue, selectorHandleSizePx, selectorOffsetPx } from "../../app/config";
 import { getRenderableTextSegments, getSelectionFormatState, normalizeEditableFormatting, renderRichTextSegments, richTextSegmentsFromElement, shouldPersistRichText, textSegmentsToEditableNodes } from "../../app/richText";
+import { evaluateLayerAnimation } from "../../core/animations";
 import { applyAdjustmentLayersToVisualStyle } from "../../core/adjustments";
 import { boundsToViewport, formatCameraPreviewFilter, formatCameraPreviewTransform, getLayeredCameraPreviewTransform, type CameraPreviewTransform } from "../../core/camera";
-import { getBoundsUnion, getFrameObjectWithPreviewBounds, insetBounds, isVisibleMarqueeBounds, updateDragSelectionBoxElement, type ResizeHandle } from "../../core/frameInteraction";
+import { getFrameObjectWithPreviewBounds, insetBounds, isVisibleMarqueeBounds, updateDragSelectionBoxElement, type ObjectSnapGuide, type ResizeHandle } from "../../core/frameInteraction";
 import { clamp } from "../../core/math";
 import { getRenderClockAttributes, getRenderClockStyle, syncDomAnimationsToRenderClock, waitForRenderClockAnimationsReady } from "../../render-engine/renderClock";
 import { evaluateBackgroundLayer, evaluateFrameObject, isTimeSensitiveFrameObject, type EvaluatedFrameObject } from "../../render-engine/renderRuntime";
@@ -20,14 +21,13 @@ const identityCameraTransform: CameraPreviewTransform = { x: 0, y: 0, z: 0, scal
 type ExportTileViewport = { x: number; y: number; width: number; height: number };
 type ExportTileFrameBounds = { x: number; y: number; width: number; height: number };
 
-export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dragSelectionBoxRef, framePickPoint, focusPicking, trackerPicking, canSelectObjects, cameraTransform, frameViewportRef, frameScale, isPlaying, part, partStart, adjustmentLayers, playbackClock, previewTime, sceneTime, timelineMode, motionLayers, hiddenMotionLayerIds, pickingTranslationPosition, pickingZoomFocus, compHidden, selectedObjects, marqueeDragging, editingTextObjectId, onFramePointerCancel, onFramePointerDown, onFramePointerDownCapture, onFramePointerMove, onFramePointerUp, onObjectPointerDown, onObjectResizePointerDown, onTextEditCommit, onTextObjectDoubleClick, onTrackerTargetPick }: { cameraRef: RefObject<HTMLDivElement | null>; dragBox: Bounds | null; dragSelectionBoxRef: RefObject<HTMLDivElement | null>; framePickPoint: Point | null; focusPicking: boolean; trackerPicking: boolean; canSelectObjects: boolean; cameraTransform: CameraPreviewTransform; frameViewportRef: RefObject<HTMLDivElement | null>; frameScale: number; isPlaying: boolean; part: Part; partStart: number; adjustmentLayers?: AdjustmentLayer[]; playbackClock: PlaybackClock; previewTime: number; sceneTime: number; timelineMode: TimelineMode; motionLayers: TimelineMotionLayerState[]; hiddenMotionLayerIds?: Set<string>; pickingTranslationPosition: boolean; pickingZoomFocus: boolean; compHidden?: boolean; selectedObjects: SelectionPayload["objects"]; marqueeDragging: boolean; editingTextObjectId: string | null; onFramePointerCancel: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerDown: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerDownCapture: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerMove: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerUp: (event: PointerEvent<HTMLDivElement>) => void; onObjectPointerDown: (event: PointerEvent<HTMLDivElement>, object: FrameObject) => void; onObjectResizePointerDown: (event: PointerEvent<HTMLDivElement>, handle: ResizeHandle, objectId?: string) => void; onTextEditCommit: (objectId: string, content: string, richText?: RichTextSegment[]) => void; onTextObjectDoubleClick: (event: ReactMouseEvent<HTMLDivElement>, object: FrameObject) => void; onTrackerTargetPick: (objectId: string) => void }) {
+export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dragSelectionBoxRef, framePickPoint, focusPicking, trackerPicking, canSelectObjects, cameraTransform, frameViewportRef, frameScale, isPlaying, part, partStart, adjustmentLayers, playbackClock, previewTime, sceneTime, timelineMode, motionLayers, hiddenMotionLayerIds, pickingTranslationPosition, pickingZoomFocus, compHidden, selectedObjects, marqueeDragging, editingTextObjectId, onFramePointerCancel, onFramePointerDown, onFramePointerDownCapture, onFramePointerMove, onFramePointerUp, onObjectPointerDown, onObjectResizePointerDown, onObjectCornerRadiusChange, onTextEditCommit, onTextObjectDoubleClick, onTrackerTargetPick }: { cameraRef: RefObject<HTMLDivElement | null>; dragBox: Bounds | null; dragSelectionBoxRef: RefObject<HTMLDivElement | null>; framePickPoint: Point | null; focusPicking: boolean; trackerPicking: boolean; canSelectObjects: boolean; cameraTransform: CameraPreviewTransform; frameViewportRef: RefObject<HTMLDivElement | null>; frameScale: number; isPlaying: boolean; part: Part; partStart: number; adjustmentLayers?: AdjustmentLayer[]; playbackClock: PlaybackClock; previewTime: number; sceneTime: number; timelineMode: TimelineMode; motionLayers: TimelineMotionLayerState[]; hiddenMotionLayerIds?: Set<string>; pickingTranslationPosition: boolean; pickingZoomFocus: boolean; compHidden?: boolean; selectedObjects: SelectionPayload["objects"]; objectSnapGuides?: ObjectSnapGuide[]; marqueeDragging: boolean; editingTextObjectId: string | null; onFramePointerCancel: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerDown: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerDownCapture: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerMove: (event: PointerEvent<HTMLDivElement>) => void; onFramePointerUp: (event: PointerEvent<HTMLDivElement>) => void; onObjectPointerDown: (event: PointerEvent<HTMLDivElement>, object: FrameObject) => void; onObjectResizePointerDown: (event: PointerEvent<HTMLDivElement>, handle: ResizeHandle, objectId?: string) => void; onObjectCornerRadiusChange?: (objectId: string, radius: number) => void; onTextEditCommit: (objectId: string, content: string, richText?: RichTextSegment[]) => void; onTextObjectDoubleClick: (event: ReactMouseEvent<HTMLDivElement>, object: FrameObject) => void; onTrackerTargetPick: (objectId: string) => void }) {
   const exportTileViewport = (arguments[0] as { exportTileViewport?: ExportTileViewport }).exportTileViewport;
   const exportTileFrameBounds = useMemo(() => exportTileViewport ? ({ x: exportTileViewport.x / frameScale, y: exportTileViewport.y / frameScale, width: exportTileViewport.width / frameScale, height: exportTileViewport.height / frameScale }) : undefined, [exportTileViewport, frameScale]);
   const viewportStyle = useMemo(() => ({ width: exportTileViewport?.width ?? FRAME_WIDTH * frameScale, height: exportTileViewport?.height ?? FRAME_HEIGHT * frameScale }) as CSSProperties, [exportTileViewport?.height, exportTileViewport?.width, frameScale]);
   const selectionOverlayScale = Math.max((arguments[0] as { selectionOverlayScale?: number }).selectionOverlayScale ?? 1, 0.001);
   const selectionOffsetPx = selectorOffsetPx / selectionOverlayScale;
   const selectionHandleSizePx = selectorHandleSizePx / selectionOverlayScale;
-  const selectionBleedPx = selectionOffsetPx + selectionHandleSizePx;
   const animationsEnabled = true;
   const compositionRenderMode = part.renderMode ?? "dom";
   const previewParts = (arguments[0] as { previewParts?: Array<{ part: Part; start: number; previewTime: number }> }).previewParts;
@@ -35,9 +35,18 @@ export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dra
   const transitionLayers = (arguments[0] as { transitionLayers?: TransitionLayer[] }).transitionLayers;
   const renderMode = (arguments[0] as { renderMode?: "preview" | "export" }).renderMode ?? "preview";
   const previewOverlayHost = (arguments[0] as { previewOverlayHost?: HTMLElement | null }).previewOverlayHost;
+  const objectSnapGuides = (arguments[0] as { objectSnapGuides?: ObjectSnapGuide[] }).objectSnapGuides ?? [];
+  const composePlaybackActive = timelineMode === "compose" && isPlaying;
+  const interactiveDragBox = composePlaybackActive ? null : dragBox;
+  const interactiveFramePickPoint = composePlaybackActive ? null : framePickPoint;
+  const interactiveFocusPicking = composePlaybackActive ? false : focusPicking;
+  const interactiveTrackerPicking = composePlaybackActive ? false : trackerPicking;
+  const interactiveSelectedObjects = composePlaybackActive ? [] : selectedObjects;
+  const interactiveObjectSnapGuides = composePlaybackActive ? [] : objectSnapGuides;
+  const interactiveEditingTextObjectId = composePlaybackActive ? null : editingTextObjectId;
   const displayPreviewTime = previewTime;
   const displaySceneTime = sceneTime;
-  const visualAdjustment = useMemo(() => compositionRenderMode === "dom" ? { overlays: [] } : applyAdjustmentLayersToVisualStyle(displaySceneTime, adjustmentLayers), [adjustmentLayers, compositionRenderMode, displaySceneTime]);
+  const visualAdjustment = useMemo(() => applyAdjustmentLayersToVisualStyle(displaySceneTime, adjustmentLayers), [adjustmentLayers, displaySceneTime]);
   const visualTransition = useMemo(() => applyTransitionLayersToVisualStyle(displaySceneTime, transitionLayers), [displaySceneTime, transitionLayers]);
   const activeTransitionLayer = getActiveTransitionLayer(displaySceneTime, transitionLayers);
   const transitionProgress = activeTransitionLayer ? getTransitionProgress(displaySceneTime, activeTransitionLayer) : null;
@@ -49,41 +58,30 @@ export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dra
   const cameraVisualAdjustmentOverlaysRef = useRef<HTMLDivElement | null>(null);
   const activeCameraTransform = useMemo(() => {
     if (timelineMode !== "composition") return cameraTransform;
-    return getLayeredCameraPreviewTransform(part, motionLayers, displayPreviewTime, { hiddenLayerIds: hiddenMotionLayerIds, pickingTranslationPosition, pickingZoomFocus, resetMotionEffects: trackerPicking || focusPicking || pickingTranslationPosition || pickingZoomFocus });
-  }, [cameraTransform, displayPreviewTime, focusPicking, hiddenMotionLayerIds, motionLayers, part, pickingTranslationPosition, pickingZoomFocus, timelineMode, trackerPicking]);
+    return getLayeredCameraPreviewTransform(part, motionLayers, displayPreviewTime, { hiddenLayerIds: hiddenMotionLayerIds, pickingTranslationPosition: composePlaybackActive ? false : pickingTranslationPosition, pickingZoomFocus: composePlaybackActive ? false : pickingZoomFocus, resetMotionEffects: interactiveTrackerPicking || interactiveFocusPicking || (!composePlaybackActive && pickingTranslationPosition) || (!composePlaybackActive && pickingZoomFocus) });
+  }, [cameraTransform, composePlaybackActive, displayPreviewTime, hiddenMotionLayerIds, interactiveFocusPicking, interactiveTrackerPicking, motionLayers, part, pickingTranslationPosition, pickingZoomFocus, timelineMode]);
   const liveCameraTransform = useTransitionComposite ? identityCameraTransform : activeCameraTransform;
   const frameBackground = part.frame.style.background ?? "#000";
   const frameStyle = useMemo(() => ({ width: FRAME_WIDTH, height: FRAME_HEIGHT, background: frameBackground, left: exportTileViewport ? -exportTileViewport.x : 0, top: exportTileViewport ? -exportTileViewport.y : 0, transform: frameScale === 1 ? undefined : `scale(${frameScale})` }) as CSSProperties, [exportTileViewport, frameBackground, frameScale]);
   const perspectiveStageStyle = useMemo(() => ({ perspective: `${liveCameraTransform.perspective}px`, perspectiveOrigin: "center", transformStyle: "preserve-3d" }) as CSSProperties, [liveCameraTransform.perspective]);
   const selectableObjects = useMemo(() => [...part.background.elements, ...part.objects], [part.background.elements, part.objects]);
-  const selectedPreviewObjects = useMemo(() => selectedObjects.map((selected) => {
+  const selectedPreviewObjects = useMemo(() => interactiveSelectedObjects.map((selected) => {
     const object = selectableObjects.find((item) => item.id === selected.id);
     return object ? { ...selected, bounds: getFrameObjectWithPreviewBounds(object, displayPreviewTime, part.duration).bounds } : selected;
-  }), [displayPreviewTime, part.duration, selectableObjects, selectedObjects]);
-  const selectedBounds = useMemo(() => selectedPreviewObjects.length > 0 ? getBoundsUnion(selectedPreviewObjects.map((object) => object.bounds)) : null, [selectedPreviewObjects]);
-  const selectedViewportBounds = useMemo(() => selectedBounds ? insetBounds(boundsToViewport(selectedBounds, liveCameraTransform, frameScale), -selectionOffsetPx) : null, [frameScale, liveCameraTransform, selectedBounds, selectionOffsetPx]);
-  const selectionOverlayInsets = useMemo(() => {
-    if (exportTileViewport || !selectedViewportBounds) return { left: 0, top: 0, right: 0, bottom: 0 };
-    return {
-      left: Math.max(selectionBleedPx, -selectedViewportBounds.x + selectionHandleSizePx),
-      top: Math.max(selectionBleedPx, -selectedViewportBounds.y + selectionHandleSizePx),
-      right: Math.max(selectionBleedPx, selectedViewportBounds.x + selectedViewportBounds.width - FRAME_WIDTH * frameScale + selectionHandleSizePx),
-      bottom: Math.max(selectionBleedPx, selectedViewportBounds.y + selectedViewportBounds.height - FRAME_HEIGHT * frameScale + selectionHandleSizePx),
-    };
-  }, [exportTileViewport, frameScale, selectedViewportBounds, selectionBleedPx, selectionHandleSizePx]);
-  const viewportOverlayStyle = useMemo(() => exportTileViewport ? ({ width: exportTileViewport.width, height: exportTileViewport.height }) as CSSProperties : ({ width: FRAME_WIDTH * frameScale + selectionOverlayInsets.left + selectionOverlayInsets.right, height: FRAME_HEIGHT * frameScale + selectionOverlayInsets.top + selectionOverlayInsets.bottom, marginLeft: -selectionOverlayInsets.left, marginTop: -selectionOverlayInsets.top, marginRight: -selectionOverlayInsets.right, marginBottom: -selectionOverlayInsets.bottom }) as CSSProperties, [exportTileViewport, frameScale, selectionOverlayInsets]);
-  const clippedViewportStyle = useMemo(() => ({ ...viewportStyle, left: exportTileViewport ? 0 : selectionOverlayInsets.left, top: exportTileViewport ? 0 : selectionOverlayInsets.top }) as CSSProperties, [exportTileViewport, selectionOverlayInsets, viewportStyle]);
+  }), [displayPreviewTime, interactiveSelectedObjects, part.duration, selectableObjects]);
+  const viewportOverlayStyle = useMemo(() => exportTileViewport ? ({ width: exportTileViewport.width, height: exportTileViewport.height }) as CSSProperties : ({ width: FRAME_WIDTH * frameScale, height: FRAME_HEIGHT * frameScale }) as CSSProperties, [exportTileViewport, frameScale]);
+  const clippedViewportStyle = useMemo(() => ({ ...viewportStyle, left: 0, top: 0 }) as CSSProperties, [viewportStyle]);
   const [trackerHoverTarget, setTrackerHoverTarget] = useState<{ id: string; viewportBounds: Bounds } | null>(null);
-  const [selectorHover, setSelectorHover] = useState(false);
-  const selectorHoverRef = useRef(false);
-  const showDragBox = dragBox && isVisibleMarqueeBounds(dragBox, frameScale);
+  const [hoveredObjectId, setHoveredObjectId] = useState<string | null>(null);
+  const hoveredObjectIdRef = useRef<string | null>(null);
+  const showDragBox = interactiveDragBox && isVisibleMarqueeBounds(interactiveDragBox, frameScale);
   const isUnlinkedPart = Boolean(part.sourceMissing);
   const compositionError = part.compositionError;
-  const stackPreviewParts = previewParts?.length ? previewParts : [{ part, start: partStart, previewTime }];
   const livePlaybackPartRef = useRef(part);
   const livePlaybackClockRef = useRef(playbackClock);
   livePlaybackPartRef.current = part;
   livePlaybackClockRef.current = playbackClock;
+  const stackPreviewParts = previewParts?.length ? previewParts : [{ part, start: partStart, previewTime }];
 
   useEffect(() => {
     if (!cameraRef.current) return;
@@ -120,37 +118,46 @@ export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dra
   }, [useTransitionComposite, visualAdjustment.overlays, visualTransition.overlays]);
 
   useEffect(() => {
-    if (!trackerPicking) setTrackerHoverTarget(null);
-  }, [trackerPicking]);
+    if (!interactiveTrackerPicking) setTrackerHoverTarget(null);
+  }, [interactiveTrackerPicking]);
 
-  function updateSelectorHover(event: PointerEvent<HTMLDivElement>) {
-    if (!selectedViewportBounds || marqueeDragging) {
-      if (selectorHoverRef.current) {
-        selectorHoverRef.current = false;
-        setSelectorHover(false);
+  function updateObjectHover(event: PointerEvent<HTMLDivElement>) {
+    if (marqueeDragging) {
+      if (hoveredObjectIdRef.current) {
+        hoveredObjectIdRef.current = null;
+        setHoveredObjectId(null);
       }
       return;
     }
 
-    const rect = event.currentTarget.getBoundingClientRect();
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
-    const hovering = x >= selectedViewportBounds.x && x <= selectedViewportBounds.x + selectedViewportBounds.width && y >= selectedViewportBounds.y && y <= selectedViewportBounds.y + selectedViewportBounds.height;
-    if (hovering === selectorHoverRef.current) return;
-    selectorHoverRef.current = hovering;
-    setSelectorHover(hovering);
+    let nextId: string | null = null;
+    for (const element of document.elementsFromPoint(event.clientX, event.clientY)) {
+      const radiusHandle = element instanceof HTMLElement ? element.closest<HTMLElement>("[data-radius-handle-object-id]") : null;
+      if (radiusHandle?.dataset.radiusHandleObjectId) {
+        nextId = radiusHandle.dataset.radiusHandleObjectId;
+        break;
+      }
+      const target = element instanceof HTMLElement ? element.closest<HTMLElement>("[data-object-id]") : null;
+      if (target?.dataset.objectId) {
+        nextId = target.dataset.objectId;
+        break;
+      }
+    }
+    if (nextId === hoveredObjectIdRef.current) return;
+    hoveredObjectIdRef.current = nextId;
+    setHoveredObjectId(nextId);
   }
 
   function handleFramePointerMove(event: PointerEvent<HTMLDivElement>) {
     if (isPlaying) return;
-    if (trackerPicking) updateTrackerHover(event);
-    updateSelectorHover(event);
+    if (interactiveTrackerPicking) updateTrackerHover(event);
+    updateObjectHover(event);
     onFramePointerMove(event);
   }
 
   function handleFramePointerDownCapture(event: PointerEvent<HTMLDivElement>) {
     if (isPlaying) return;
-    if (!trackerPicking) {
+    if (!interactiveTrackerPicking) {
       onFramePointerDownCapture(event);
       return;
     }
@@ -189,10 +196,12 @@ export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dra
     return { id: "", viewportBounds: null };
   }
 
-  function clearSelectorHover() {
-    if (selectorHoverRef.current) {
-      selectorHoverRef.current = false;
-      setSelectorHover(false);
+  function clearSelectorHover(event?: PointerEvent<HTMLDivElement>) {
+    const relatedTarget = event?.relatedTarget;
+    if (relatedTarget instanceof HTMLElement && relatedTarget.closest("[data-radius-handle-object-id]")) return;
+    if (hoveredObjectIdRef.current) {
+      hoveredObjectIdRef.current = null;
+      setHoveredObjectId(null);
     }
     setTrackerHoverTarget(null);
   }
@@ -200,7 +209,7 @@ export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dra
   return (
     <div data-clipper-frame-preview-wrapper>
       <div className="relative overflow-visible" data-clipper-frame-preview-shell style={viewportOverlayStyle}>
-        <div ref={frameViewportRef} className={`absolute overflow-hidden ${!isPlaying && (focusPicking || trackerPicking) ? "cursor-crosshair ring-2 ring-[#159dff]" : ""}`} data-clipper-frame-preview style={clippedViewportStyle} onPointerDownCapture={handleFramePointerDownCapture} onPointerDown={isPlaying ? undefined : onFramePointerDown} onPointerMove={handleFramePointerMove} onPointerUp={isPlaying ? undefined : onFramePointerUp} onPointerCancel={isPlaying ? undefined : onFramePointerCancel} onPointerLeave={clearSelectorHover}>
+          <div ref={frameViewportRef} className={`absolute overflow-hidden ${!isPlaying && (interactiveFocusPicking || interactiveTrackerPicking) ? "cursor-crosshair ring-2 ring-[#159dff]" : ""}`} data-clipper-frame-preview style={clippedViewportStyle} onPointerDownCapture={handleFramePointerDownCapture} onPointerDown={isPlaying ? undefined : onFramePointerDown} onPointerMove={handleFramePointerMove} onPointerUp={isPlaying ? undefined : onFramePointerUp} onPointerCancel={isPlaying ? undefined : onFramePointerCancel} onPointerLeave={clearSelectorHover}>
           <div className="absolute left-0 top-0 origin-top-left overflow-hidden" data-clipper-frame-content style={frameStyle}>
             <div className="absolute inset-0" data-clipper-perspective-stage style={perspectiveStageStyle}>
               {isUnlinkedPart || compHidden || compositionError ? <div className="absolute inset-0 bg-black" ref={cameraRef}>{compositionError ? <CompositionErrorOverlay filePath={part.filePath} message={compositionError} /> : null}</div> : <div className="absolute inset-0 origin-center" ref={cameraRef} style={{ transformStyle: "preserve-3d", ...transitionCameraStyle }}>
@@ -210,7 +219,7 @@ export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dra
                       ? <WebGlPipeline graph={part.composition3dGraph} frameScale={frameScale} isPlaying={isPlaying} partDuration={part.duration} partStart={partStart} previewTime={previewTime} trimStart={part.trimStart} playbackClock={playbackClock} />
                       : transitionPreviewParts && transitionProgress !== null
                       ? <TransitionCompositeView adjustmentLayers={adjustmentLayers} animationsEnabled={animationsEnabled} exportTileFrameBounds={exportTileFrameBounds} frameScale={frameScale} isPlaying={isPlaying} renderMode={renderMode} sequenceStyle={transitionSequenceStyle} transitionPreviewParts={transitionPreviewParts} />
-                      : stackPreviewParts.map((item) => <CompositionLayerView key={`${item.part.id}:${item.start}`} active={item.part.id === part.id} animationsEnabled={animationsEnabled} canSelect={!isPlaying && (canSelectObjects || trackerPicking)} editingTextObjectId={editingTextObjectId} exportTileFrameBounds={exportTileFrameBounds} focusPicking={!isPlaying && (focusPicking || trackerPicking)} frameScale={frameScale} isPlaying={isPlaying} part={item.part} previewTime={item.previewTime} renderMode={renderMode} onObjectPointerDown={onObjectPointerDown} onTextEditCommit={onTextEditCommit} onTextObjectDoubleClick={onTextObjectDoubleClick} />)}
+                      : stackPreviewParts.map((item) => <CompositionLayerView key={`${item.part.id}:${item.start}`} active={item.part.id === part.id} animationsEnabled={animationsEnabled} canSelect={!isPlaying && (canSelectObjects || interactiveTrackerPicking)} editingTextObjectId={interactiveEditingTextObjectId} exportTileFrameBounds={exportTileFrameBounds} focusPicking={!isPlaying && (interactiveFocusPicking || interactiveTrackerPicking)} frameScale={frameScale} isPlaying={isPlaying} part={item.part} previewTime={item.previewTime} renderMode={renderMode} onObjectPointerDown={onObjectPointerDown} onTextEditCommit={onTextEditCommit} onTextObjectDoubleClick={onTextObjectDoubleClick} />)}
                   </FramePreviewRenderBoundary>
                   <div ref={frameVisualAdjustmentOverlaysRef} className="pointer-events-none absolute inset-0" data-clipper-visual-adjustment-overlays="frame" style={{ zIndex: 2147483647 }} />
                 </div>
@@ -218,13 +227,17 @@ export const FramePreview = memo(function FramePreview({ cameraRef, dragBox, dra
             </div>
             <div ref={cameraVisualAdjustmentOverlaysRef} className="pointer-events-none absolute inset-0" data-clipper-visual-adjustment-overlays="camera" style={{ zIndex: 2147483647 }} />
           </div>
-          {trackerPicking && trackerHoverTarget ? <TrackerTargetOverlay target={trackerHoverTarget} /> : null}
-          {dragBox ? <DragSelectionBox dragSelectionBoxRef={dragSelectionBoxRef} bounds={dragBox} frameScale={frameScale} frameViewportRef={frameViewportRef} portalHost={previewOverlayHost} uiScale={selectionOverlayScale} visible={Boolean(showDragBox)} /> : null}
-          {framePickPoint ? <FramePickPointOverlay point={framePickPoint} frameScale={frameScale} /> : null}
+          {interactiveTrackerPicking && trackerHoverTarget ? <TrackerTargetOverlay target={trackerHoverTarget} /> : null}
+          {interactiveDragBox ? <DragSelectionBox dragSelectionBoxRef={dragSelectionBoxRef} bounds={interactiveDragBox} frameScale={frameScale} frameViewportRef={frameViewportRef} portalHost={previewOverlayHost} uiScale={selectionOverlayScale} visible={Boolean(showDragBox)} /> : null}
+          {interactiveObjectSnapGuides.map((guide, index) => <SnapGuideOverlay key={`${guide.axis}:${guide.position}:${index}`} cameraTransform={liveCameraTransform} guide={guide} frameScale={frameScale} />)}
+          {interactiveFramePickPoint ? <FramePickPointOverlay point={interactiveFramePickPoint} frameScale={frameScale} /> : null}
           <FramePickPointImperativeOverlay />
         </div>
       </div>
-      {canSelectObjects && !isUnlinkedPart && previewOverlayHost ? createPortal(selectedPreviewObjects.map((object) => <SelectionOverlayBox key={object.id} objectId={object.id} bounds={object.bounds} cameraTransform={liveCameraTransform} frameScale={frameScale} frameViewportRef={frameViewportRef} handleSizePx={selectionHandleSizePx} highlighted={selectorHover} interactive={!marqueeDragging} offsetPx={selectionOffsetPx} portal portalHost={previewOverlayHost} uiScale={selectionOverlayScale} onResizePointerDown={(event, handle) => onObjectResizePointerDown(event, handle, object.id)} />), previewOverlayHost) : null}
+      {canSelectObjects && !isUnlinkedPart && previewOverlayHost ? createPortal(selectedPreviewObjects.map((object) => {
+        const source = selectableObjects.find((item) => item.id === object.id);
+        return <SelectionOverlayBox key={object.id} objectId={object.id} bounds={object.bounds} cameraTransform={liveCameraTransform} frameScale={frameScale} frameViewportRef={frameViewportRef} handleSizePx={selectionHandleSizePx} highlighted={hoveredObjectId === object.id} interactive={!marqueeDragging} offsetPx={selectionOffsetPx} portal portalHost={previewOverlayHost} radius={source?.type === "rect" ? getNumericStyleValue(source.style.borderRadius) : undefined} uiScale={selectionOverlayScale} onCornerRadiusChange={onObjectCornerRadiusChange ? (radius) => onObjectCornerRadiusChange(object.id, radius) : undefined} onResizePointerDown={(event, handle) => onObjectResizePointerDown(event, handle, object.id)} />;
+      }), previewOverlayHost) : null}
     </div>
   );
 });
@@ -358,7 +371,7 @@ function TrackerTargetOverlay({ target }: { target: { id: string; viewportBounds
   );
 }
 
-function CompositionLayerView({ active, animationsEnabled, canSelect, editingTextObjectId, exportTileFrameBounds, focusPicking, frameScale, isPlaying, part, previewTime, renderMode, onObjectPointerDown, onTextEditCommit, onTextObjectDoubleClick }: { active: boolean; animationsEnabled: boolean; canSelect: boolean; editingTextObjectId: string | null; exportTileFrameBounds?: ExportTileFrameBounds; focusPicking: boolean; frameScale: number; isPlaying: boolean; part: Part; previewTime: number; renderMode: "preview" | "export"; onObjectPointerDown: (event: PointerEvent<HTMLDivElement>, object: FrameObject) => void; onTextEditCommit: (objectId: string, content: string, richText?: RichTextSegment[]) => void; onTextObjectDoubleClick: (event: ReactMouseEvent<HTMLDivElement>, object: FrameObject) => void }) {
+ function CompositionLayerView({ active, animationsEnabled, canSelect, editingTextObjectId, exportTileFrameBounds, focusPicking, frameScale, isPlaying, part, previewTime, renderMode, onObjectPointerDown, onTextEditCommit, onTextObjectDoubleClick }: { active: boolean; animationsEnabled: boolean; canSelect: boolean; editingTextObjectId: string | null; exportTileFrameBounds?: ExportTileFrameBounds; focusPicking: boolean; frameScale: number; isPlaying: boolean; part: Part; previewTime: number; renderMode: "preview" | "export"; onObjectPointerDown: (event: PointerEvent<HTMLDivElement>, object: FrameObject) => void; onTextEditCommit: (objectId: string, content: string, richText?: RichTextSegment[], bounds?: Bounds) => void; onTextObjectDoubleClick: (event: ReactMouseEvent<HTMLDivElement>, object: FrameObject) => void }) {
   const layerRef = useRef<HTMLDivElement | null>(null);
   const renderClockState = useMemo(() => ({ playing: renderMode !== "export" && isPlaying, time: previewTime, mode: renderMode }), [isPlaying, previewTime, renderMode]);
   const renderClockStateRef = useRef(renderClockState);
@@ -375,7 +388,7 @@ function CompositionLayerView({ active, animationsEnabled, canSelect, editingTex
     <div ref={layerRef} className="absolute inset-0 overflow-hidden" {...getRenderClockAttributes(renderClockState)} style={{ ...(part.frame.style as CSSProperties), ...renderClockStyle }}>
       {!part.background.hidden && <BackgroundLayerView animationsEnabled={animationsEnabled} background={part.background} duration={part.duration} exportTileFrameBounds={exportTileFrameBounds} frameScale={frameScale} previewTime={previewTime} renderMode={renderMode} />}
       {part.objects.filter(obj => !obj.hidden && isObjectInExportTile(obj, exportTileFrameBounds)).map((object) => (
-        <FrameObjectView key={object.id} animationsEnabled={animationsEnabled} exportTileFrameBounds={exportTileFrameBounds} object={object} canSelect={active && canSelect} duration={part.duration} editing={active && !isPlaying && editingTextObjectId === object.id} focusPicking={active && focusPicking} frameScale={frameScale} previewTime={previewTime} renderMode={renderMode} onDoubleClick={(event) => { if (active && !isPlaying) onTextObjectDoubleClick(event, object); }} onPointerDown={(event) => { if (active && !isPlaying) onObjectPointerDown(event, object); }} onTextEditCommit={(content, richText) => onTextEditCommit(object.id, content, richText)} />
+        <FrameObjectView key={object.id} animationsEnabled={animationsEnabled} exportTileFrameBounds={exportTileFrameBounds} object={object} canSelect={active && canSelect} duration={part.duration} editing={active && !isPlaying && editingTextObjectId === object.id} focusPicking={active && focusPicking} frameScale={frameScale} previewTime={previewTime} renderMode={renderMode} onDoubleClick={(event) => { if (active && !isPlaying) onTextObjectDoubleClick(event, object); }} onPointerDown={(event) => { if (active && !isPlaying) onObjectPointerDown(event, object); }} onTextEditCommit={(content, richText, bounds) => onTextEditCommit(object.id, content, richText, bounds)} />
       ))}
     </div>
   );
@@ -437,6 +450,16 @@ export function FramePickPointOverlay({ point, frameScale }: { point: Point; fra
   );
 }
 
+function SnapGuideOverlay({ cameraTransform, guide, frameScale }: { cameraTransform: CameraPreviewTransform; guide: ObjectSnapGuide; frameScale: number }) {
+  const viewportBounds = guide.axis === "x"
+    ? boundsToViewport({ x: guide.position, y: 0, width: 0, height: FRAME_HEIGHT }, cameraTransform, frameScale)
+    : boundsToViewport({ x: 0, y: guide.position, width: FRAME_WIDTH, height: 0 }, cameraTransform, frameScale);
+  const style = guide.axis === "x"
+    ? { left: viewportBounds.x, top: viewportBounds.y, width: 1, height: viewportBounds.height }
+    : { left: viewportBounds.x, top: viewportBounds.y, width: viewportBounds.width, height: 1 };
+  return <div className="pointer-events-none absolute bg-red-500 shadow-[0_0_0_1px_rgba(239,68,68,0.35)]" data-clipper-object-snap-guide style={{ ...style, zIndex: 80 }} />;
+}
+
 function FramePickPointImperativeOverlay() {
   return (
     <div className="pointer-events-none absolute z-20 opacity-0" data-clipper-motion-pick-preview style={{ transform: "translate3d(0px, 0px, 0)" }}>
@@ -445,27 +468,46 @@ function FramePickPointImperativeOverlay() {
   );
 }
 
-export const FrameObjectView = memo(function FrameObjectView({ animationsEnabled, exportTileFrameBounds, object, canSelect, duration, editing, focusPicking, frameScale, previewTime, renderMode, onDoubleClick, onPointerDown, onTextEditCommit }: { animationsEnabled: boolean; exportTileFrameBounds?: ExportTileFrameBounds; object: FrameObject; canSelect: boolean; duration: number; editing: boolean; focusPicking: boolean; frameScale: number; previewTime: number; renderMode: "preview" | "export"; onDoubleClick: (event: ReactMouseEvent<HTMLDivElement>) => void; onPointerDown: (event: PointerEvent<HTMLDivElement>) => void; onTextEditCommit: (content: string, richText?: RichTextSegment[]) => void }) {
+export const FrameObjectView = memo(function FrameObjectView({ animationsEnabled, exportTileFrameBounds, object, canSelect, duration, editing, focusPicking, frameScale, previewTime, renderMode, onDoubleClick, onPointerDown, onTextEditCommit }: { animationsEnabled: boolean; exportTileFrameBounds?: ExportTileFrameBounds; object: FrameObject; canSelect: boolean; duration: number; editing: boolean; focusPicking: boolean; frameScale: number; previewTime: number; renderMode: "preview" | "export"; onDoubleClick: (event: ReactMouseEvent<HTMLDivElement>) => void; onPointerDown: (event: PointerEvent<HTMLDivElement>) => void; onTextEditCommit: (content: string, richText?: RichTextSegment[], bounds?: Bounds) => void }) {
   const evaluatedObject = useMemo(() => evaluateObjectForPreview(object, previewTime, duration, animationsEnabled), [animationsEnabled, duration, object, previewTime]);
   const animation = { style: evaluatedObject.renderStyle, content: evaluatedObject.renderContent };
+  const objectRef = useRef<HTMLDivElement | null>(null);
   const editableRef = useRef<HTMLDivElement | null>(null);
   const lastCommittedTextRef = useRef<string | null>(null);
   const wasEditingRef = useRef(false);
   const objectTransform = typeof object.style.transform === "string" ? object.style.transform : undefined;
   const animationTransform = typeof animation.style.transform === "string" ? animation.style.transform : undefined;
+  const verticalAlign = object.type === "text" ? String(object.style.verticalAlign ?? "middle") : "middle";
+  const textBoxLayout = object.type === "text" ? String(object.style.textBoxLayout ?? "fixed") : "fixed";
+  const textWrapClass = textBoxLayout === "overflow" ? "whitespace-pre" : "whitespace-pre-wrap";
   const style = {
     ...object.style,
     ...animation.style,
-    left: object.bounds.x,
-    top: object.bounds.y,
-    width: object.bounds.width,
-    height: object.bounds.height,
+    left: renderMode === "export" ? object.bounds.x : `var(--clipper-resize-left, ${object.bounds.x}px)`,
+    top: renderMode === "export" ? object.bounds.y : `var(--clipper-resize-top, ${object.bounds.y}px)`,
+    width: renderMode === "export" ? object.bounds.width : `var(--clipper-resize-width, ${object.bounds.width}px)`,
+    height: textBoxLayout === "auto-height" ? "auto" : renderMode === "export" ? object.bounds.height : `var(--clipper-resize-height, ${object.bounds.height}px)`,
+    minHeight: textBoxLayout === "auto-height" ? object.bounds.height : undefined,
+    fontSize: object.type === "text" && renderMode !== "export" ? `calc(${formatStyleLength(object.style.fontSize)} * var(--clipper-scale-preview, 1))` : object.style.fontSize,
+    borderRadius: renderMode === "export" ? object.style.borderRadius : `var(--clipper-radius-preview, ${formatStyleLength(object.style.borderRadius)})`,
     transform: renderMode === "export" ? (animationTransform ?? objectTransform) : `translate(var(--clipper-drag-x, 0px), var(--clipper-drag-y, 0px)) ${animationTransform ?? objectTransform ?? ""}`.trim(),
+    justifyContent: verticalAlign === "top" ? "flex-start" : verticalAlign === "bottom" ? "flex-end" : "center",
     willChange: renderMode === "export" ? undefined : "transform",
   } as CSSProperties;
   const content = animation.content ?? object.content;
   const richText = evaluatedObject.renderRichText;
   const textSegments = useMemo(() => getRenderableTextSegments(content ?? "", richText), [content, richText]);
+  const splitTextAnimations = animationsEnabled && object.type === "text" ? object.animations?.filter((item) => item.enabled !== false && item.options.split) ?? [] : [];
+
+  useLayoutEffect(() => {
+    const element = objectRef.current;
+    if (!element || renderMode === "export") return;
+    element.style.removeProperty("--clipper-resize-left");
+    element.style.removeProperty("--clipper-resize-top");
+    element.style.removeProperty("--clipper-resize-width");
+    element.style.removeProperty("--clipper-resize-height");
+    element.style.removeProperty("--clipper-scale-preview");
+  }, [object.bounds.height, object.bounds.width, object.bounds.x, object.bounds.y, renderMode]);
 
   useEffect(() => {
     if (!editing || !editableRef.current) {
@@ -508,9 +550,10 @@ export const FrameObjectView = memo(function FrameObjectView({ animationsEnabled
     const content = richText.map((segment) => segment.text).join("");
     const nextRichText = shouldPersistRichText(richText, object.style) ? richText : undefined;
     const nextCommittedText = JSON.stringify({ content, richText: nextRichText });
-    if (nextCommittedText === lastCommittedTextRef.current) return;
+    const nextBounds = textBoxLayout === "auto-height" ? getAutoHeightTextBounds(object, editableRef.current) : undefined;
+    if (nextCommittedText === lastCommittedTextRef.current && !nextBounds) return;
     lastCommittedTextRef.current = nextCommittedText;
-    onTextEditCommit(content, nextRichText);
+    onTextEditCommit(content, nextRichText, nextBounds);
   }
 
   function onTextEditKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
@@ -555,15 +598,98 @@ export const FrameObjectView = memo(function FrameObjectView({ animationsEnabled
   const isLocked = Boolean(object.locked);
 
   return (
-    <div className={`absolute flex touch-none select-none flex-col justify-center whitespace-pre-line overflow-hidden ${focusPicking ? "cursor-crosshair" : editing ? "cursor-text" : "cursor-default"} ${editing ? "select-text" : ""}`} data-clipper-render-object-id={object.id} data-object-id={canSelect && !isLocked ? object.id : undefined} style={{ ...style, ...(isLocked ? { opacity: 0.6 } : {}) }} onDoubleClick={(event) => { if (!isLocked) onDoubleClick(event); }} onPointerDown={(event) => { if (!isLocked) onPointerDown(event); }}>
-      {object.type === "text" && editing ? <div ref={editableRef} className="min-h-0 w-full whitespace-pre-wrap outline-none" contentEditable suppressContentEditableWarning onBlur={commitTextEdit} onInput={commitTextEdit} onKeyDown={onTextEditKeyDown} onPointerDown={(event) => event.stopPropagation()} /> : null}
-      {object.type === "text" && !editing ? <div className="min-h-0 w-full whitespace-pre-wrap">{renderRichTextSegments(textSegments, Boolean(richText))}</div> : null}
+    <div ref={objectRef} className={`absolute flex touch-none select-none flex-col whitespace-pre-line ${textBoxLayout === "fixed" ? "overflow-hidden" : "overflow-visible"} ${focusPicking ? "cursor-crosshair" : editing ? "cursor-text" : "cursor-default"} ${editing ? "select-text" : ""}`} data-clipper-render-object-id={object.id} data-object-id={canSelect && !isLocked ? object.id : undefined} style={{ ...style, ...(isLocked ? { opacity: 0.6 } : {}) }} onDoubleClick={(event) => { if (!isLocked) onDoubleClick(event); }} onPointerDown={(event) => { if (!isLocked) onPointerDown(event); }}>
+      {object.type === "text" && editing ? <div ref={editableRef} className={`min-h-0 w-full outline-none ${textWrapClass}`} contentEditable suppressContentEditableWarning onBlur={commitTextEdit} onInput={commitTextEdit} onKeyDown={onTextEditKeyDown} onPointerDown={(event) => event.stopPropagation()} /> : null}
+      {object.type === "text" && !editing ? <div className={`min-h-0 w-full ${textWrapClass}`}>{splitTextAnimations.length ? renderSplitTextSegments(textSegments, Boolean(richText), splitTextAnimations, previewTime) : renderRichTextSegments(textSegments, Boolean(richText))}</div> : null}
       {object.type === "svg" && content ? <ExportSvgContent bounds={object.bounds} content={content} exportTileFrameBounds={exportTileFrameBounds} frameScale={frameScale} markupKind="svg" owner={{ id: object.id, name: object.name, type: object.type, layer: "object" }} renderMode={renderMode} style={style} /> : null}
       {(object.type === "html" || object.type === "template") && content ? <HtmlContent content={content} /> : null}
       {object.type !== "text" && object.type !== "svg" && object.type !== "html" && object.type !== "template" && content ? content : null}
     </div>
   );
 }, areFrameObjectPropsEqual);
+
+type SplitTextToken = {
+  key: string;
+  text: string;
+  animated: boolean;
+  style: CSSProperties;
+};
+
+function renderSplitTextSegments(segments: RichTextSegment[], explicitFormatting: boolean, animations: NonNullable<FrameObject["animations"]>, time: number) {
+  const tokens = tokenizeTextSegments(segments, explicitFormatting, animations[0]?.options.split?.mode ?? "word");
+  const animatedCount = tokens.filter((token) => token.animated).length;
+  let animatedIndex = 0;
+  return tokens.map((token) => {
+    if (token.text === "\n") return <br key={token.key} />;
+    if (!token.animated) return <span key={token.key} style={token.style}>{token.text}</span>;
+    const tokenStyle = getSplitTextTokenStyle(animations, time, animatedIndex, animatedCount);
+    animatedIndex += 1;
+    return <span key={token.key} style={{ ...token.style, ...tokenStyle, display: "inline-block", whiteSpace: "pre" }}>{token.text}</span>;
+  });
+}
+
+function tokenizeTextSegments(segments: RichTextSegment[], explicitFormatting: boolean, mode: "word" | "character") {
+  const tokens: SplitTextToken[] = [];
+  segments.forEach((segment, segmentIndex) => {
+    const style = textSegmentInlineStyle(segment, explicitFormatting);
+    if (mode === "character") {
+      Array.from(segment.text).forEach((char, charIndex) => tokens.push({ key: `${segmentIndex}:char:${charIndex}`, text: char, animated: char !== "\n" && !/\s/.test(char), style }));
+      return;
+    }
+    const parts = segment.text.match(/\n|\s+|\S+/g) ?? [];
+    parts.forEach((part, partIndex) => tokens.push({ key: `${segmentIndex}:word:${partIndex}`, text: part, animated: part !== "\n" && !/^\s+$/.test(part), style }));
+  });
+  return tokens;
+}
+
+function textSegmentInlineStyle(segment: RichTextSegment, explicitFormatting: boolean): CSSProperties {
+  return {
+    fontWeight: segment.bold ? 700 : explicitFormatting ? 400 : undefined,
+    fontStyle: segment.italic ? "italic" : explicitFormatting ? "normal" : undefined,
+    textDecorationLine: segment.underline ? "underline" : explicitFormatting ? "none" : undefined,
+  };
+}
+
+function getSplitTextTokenStyle(animations: NonNullable<FrameObject["animations"]>, time: number, index: number, count: number) {
+  const combined: CSSProperties = {};
+  for (const animation of animations) {
+    const split = animation.options.split;
+    if (!split) continue;
+    const tokenOffset = getSplitTokenOrderIndex(index, count, split.order ?? "forward") * (split.stagger ?? 0);
+    const tokenTime = split.repeatScope === "item"
+      ? time - tokenOffset
+      : getSequenceRepeatTokenTime(animation, time, tokenOffset, count);
+    const style = evaluateLayerAnimation(split.repeatScope === "item" ? animation : { ...animation, options: { ...animation.options, repeat: undefined, repeatDelay: undefined } }, tokenTime);
+    for (const key in style) {
+      if (key === "transform" && combined.transform && style.transform) combined.transform = `${combined.transform} ${style.transform}`;
+      else if (style[key] !== undefined) combined[key as keyof CSSProperties] = style[key] as never;
+    }
+  }
+  return combined;
+}
+
+function getSplitTokenOrderIndex(index: number, count: number, order: "forward" | "reverse" | "center") {
+  if (order === "reverse") return count - index - 1;
+  if (order === "center") return Math.abs(index - (count - 1) / 2);
+  return index;
+}
+
+function getSequenceRepeatTokenTime(animation: NonNullable<FrameObject["animations"]>[number], time: number, tokenOffset: number, count: number) {
+  const { delay = 0, duration, repeat, repeatDelay = 0, split } = animation.options;
+  const stagger = split?.stagger ?? 0;
+  const sequenceDuration = Math.max(duration + Math.max(0, count - 1) * stagger, 0.0001);
+  const cycleDuration = sequenceDuration + repeatDelay;
+  if (time < delay) return time - tokenOffset;
+  const elapsed = time - delay;
+  if (repeat === undefined) return time - tokenOffset;
+  if (repeat !== Infinity) {
+    const totalDuration = sequenceDuration + repeat * cycleDuration;
+    if (elapsed >= totalDuration) return delay + sequenceDuration - tokenOffset;
+  }
+  const cycleElapsed = elapsed % cycleDuration;
+  if (cycleElapsed >= sequenceDuration) return delay + sequenceDuration - tokenOffset;
+  return delay + cycleElapsed - tokenOffset;
+}
 
 function isObjectInExportTile(object: FrameObject, tile: ExportTileFrameBounds | undefined): boolean {
   if (!tile) return true;
@@ -715,8 +841,14 @@ function isPreviewTimeSensitiveObject(object: FrameObject) {
   return isTimeSensitiveFrameObject(object);
 }
 
-export function SelectionOverlayBox({ objectId, bounds, cameraTransform, frameScale, frameViewportRef, handleSizePx = selectorHandleSizePx, highlighted, interactive, offsetPx = selectorOffsetPx, overlayOffset = { left: 0, top: 0 }, portal = false, portalHost, uiScale = 1, onResizePointerDown }: { objectId: string; bounds: Bounds; cameraTransform: CameraPreviewTransform; frameScale: number; frameViewportRef?: RefObject<HTMLDivElement | null>; handleSizePx?: number; highlighted: boolean; interactive: boolean; offsetPx?: number; overlayOffset?: { left: number; top: number }; portal?: boolean; portalHost?: HTMLElement | null; uiScale?: number; onResizePointerDown: (event: PointerEvent<HTMLDivElement>, handle: ResizeHandle) => void }) {
+export function SelectionOverlayBox({ objectId, bounds, cameraTransform, frameScale, frameViewportRef, handleSizePx = selectorHandleSizePx, highlighted, interactive, offsetPx = selectorOffsetPx, overlayOffset = { left: 0, top: 0 }, portal = false, portalHost, radius, uiScale = 1, onCornerRadiusChange, onResizePointerDown }: { objectId: string; bounds: Bounds; cameraTransform: CameraPreviewTransform; frameScale: number; frameViewportRef?: RefObject<HTMLDivElement | null>; handleSizePx?: number; highlighted: boolean; interactive: boolean; offsetPx?: number; overlayOffset?: { left: number; top: number }; portal?: boolean; portalHost?: HTMLElement | null; radius?: number; uiScale?: number; onCornerRadiusChange?: (radius: number) => void; onResizePointerDown: (event: PointerEvent<HTMLDivElement>, handle: ResizeHandle) => void }) {
   const boxRef = useRef<HTMLDivElement | null>(null);
+  const radiusDragRef = useRef<{ corner: "top-left" | "top-right" | "bottom-right" | "bottom-left"; startClientX: number; startClientY: number; startRadius: number; objectUnitsPerScreenPx: number } | null>(null);
+  const pendingRadiusRef = useRef<number | null>(null);
+  const [dragRadius, setDragRadius] = useState<number | null>(null);
+  const [optimisticRadius, setOptimisticRadius] = useState<number | null>(null);
+  const [radiusHandleHover, setRadiusHandleHover] = useState(false);
+  const [objectResizingActive, setObjectResizingActive] = useState(false);
   const viewportBounds = insetBounds(boundsToViewport(bounds, cameraTransform, frameScale), -offsetPx);
   const edgeHitThicknessPx = portal ? 12 : 12 / uiScale;
   const edgeHitInsetPx = portal ? -4 : -4 / uiScale;
@@ -734,13 +866,38 @@ export function SelectionOverlayBox({ objectId, bounds, cameraTransform, frameSc
   const handleClass = `${interactive ? "pointer-events-auto" : "pointer-events-none"} absolute bg-white shadow-[0_1px_4px_rgba(0,0,0,0.24)]`;
   const handleStyle = { width: portal ? selectorHandleSizePx : handleSizePx, height: portal ? selectorHandleSizePx : handleSizePx, border: `${portal ? 2 : 2 / uiScale}px solid ${selectorBlue}` };
   const handleStyleWithColor = { ...handleStyle, borderColor: selectorBlue };
+  const maxRadius = Math.max(0, Math.min(bounds.width, bounds.height) / 2);
+  const displayRadius = clamp(dragRadius ?? optimisticRadius ?? radius ?? 0, 0, maxRadius);
+  const showRadiusHandles = Boolean(!objectResizingActive && interactive && onCornerRadiusChange && radius !== undefined && (highlighted || radiusHandleHover || dragRadius !== null));
+  const objectViewportWidth = Math.max(viewportBounds.width - offsetPx * 2, 1);
+  const objectViewportHeight = Math.max(viewportBounds.height - offsetPx * 2, 1);
+  const objectLeftPercent = viewportBounds.width > 0 ? offsetPx / viewportBounds.width * 100 : 0;
+  const objectTopPercent = viewportBounds.height > 0 ? offsetPx / viewportBounds.height * 100 : 0;
+  const objectWidthPercent = viewportBounds.width > 0 ? objectViewportWidth / viewportBounds.width * 100 : 100;
+  const objectHeightPercent = viewportBounds.height > 0 ? objectViewportHeight / viewportBounds.height * 100 : 100;
+  const radiusProgressX = clamp(displayRadius / Math.max(bounds.width, 1), 0, 0.5);
+  const radiusProgressY = clamp(displayRadius / Math.max(bounds.height, 1), 0, 0.5);
+  const minRadiusHandleInsetPx = 20;
+  const minRadiusHandleInsetXPercent = viewportBounds.width > 0 ? minRadiusHandleInsetPx / viewportBounds.width * 100 : 0;
+  const minRadiusHandleInsetYPercent = viewportBounds.height > 0 ? minRadiusHandleInsetPx / viewportBounds.height * 100 : 0;
+  const radiusInsetXPercent = clamp(radiusProgressX * objectWidthPercent, minRadiusHandleInsetXPercent, objectWidthPercent / 2);
+  const radiusInsetYPercent = clamp(radiusProgressY * objectHeightPercent, minRadiusHandleInsetYPercent, objectHeightPercent / 2);
+  const radiusLeftPercent = objectLeftPercent + radiusInsetXPercent;
+  const radiusRightPercent = objectLeftPercent + objectWidthPercent - radiusInsetXPercent;
+  const radiusTopPercent = objectTopPercent + radiusInsetYPercent;
+  const radiusBottomPercent = objectTopPercent + objectHeightPercent - radiusInsetYPercent;
+  const radiusTopLeftStyle = { left: `${radiusLeftPercent}%`, top: `${radiusTopPercent}%` };
+  const radiusTopRightStyle = { left: `${radiusRightPercent}%`, top: `${radiusTopPercent}%` };
+  const radiusBottomRightStyle = { left: `${radiusRightPercent}%`, top: `${radiusBottomPercent}%` };
+  const radiusBottomLeftStyle = { left: `${radiusLeftPercent}%`, top: `${radiusBottomPercent}%` };
+  const radiusHandleClass = "absolute z-20 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[#159dff] bg-white cursor-default pointer-events-auto";
   const topLeftHandleClass = `${handleClass} left-0 top-0 -translate-x-1/2 -translate-y-1/2 cursor-nwse-resize`;
   const topRightHandleClass = `${handleClass} right-0 top-0 translate-x-1/2 -translate-y-1/2 cursor-nesw-resize`;
   const bottomRightHandleClass = `${handleClass} bottom-0 right-0 translate-x-1/2 translate-y-1/2 cursor-nwse-resize`;
   const bottomLeftHandleClass = `${handleClass} bottom-0 left-0 -translate-x-1/2 translate-y-1/2 cursor-nesw-resize`;
   const boxStyle = portal
-    ? { left: 0, top: 0, width: 0, height: 0, position: "absolute", transform: "translate(var(--clipper-drag-x, 0px), var(--clipper-drag-y, 0px))", willChange: "left, top, width, height, transform", zIndex: 70 } as CSSProperties
-    : { left: viewportBounds.x + overlayOffset.left, top: viewportBounds.y + overlayOffset.top, width: viewportBounds.width, height: viewportBounds.height, transform: "translate(var(--clipper-drag-x, 0px), var(--clipper-drag-y, 0px))", zIndex: 70 } as CSSProperties;
+    ? { left: "var(--clipper-selection-preview-left, var(--clipper-selection-base-left, 0px))", top: "var(--clipper-selection-preview-top, var(--clipper-selection-base-top, 0px))", width: "var(--clipper-selection-preview-width, var(--clipper-selection-base-width, 0px))", height: "var(--clipper-selection-preview-height, var(--clipper-selection-base-height, 0px))", position: "absolute", transform: "translate(var(--clipper-drag-x, 0px), var(--clipper-drag-y, 0px))", willChange: "left, top, width, height, transform", zIndex: 70 } as CSSProperties
+    : { left: `var(--clipper-selection-preview-left, ${viewportBounds.x + overlayOffset.left}px)`, top: `var(--clipper-selection-preview-top, ${viewportBounds.y + overlayOffset.top}px)`, width: `var(--clipper-selection-preview-width, ${viewportBounds.width}px)`, height: `var(--clipper-selection-preview-height, ${viewportBounds.height}px)`, transform: "translate(var(--clipper-drag-x, 0px), var(--clipper-drag-y, 0px))", zIndex: 70 } as CSSProperties;
 
   useLayoutEffect(() => {
     if (!portal || !portalHost || !frameViewportRef) return;
@@ -755,10 +912,10 @@ export function SelectionOverlayBox({ objectId, bounds, cameraTransform, frameSc
         const frameRect = frameViewport.getBoundingClientRect();
         const hostRect = host.getBoundingClientRect();
         const scale = frameRect.width / (FRAME_WIDTH * frameScale);
-        element.style.left = `${frameRect.left - hostRect.left + viewportBounds.x * scale}px`;
-        element.style.top = `${frameRect.top - hostRect.top + viewportBounds.y * scale}px`;
-        element.style.width = `${viewportBounds.width * scale}px`;
-        element.style.height = `${viewportBounds.height * scale}px`;
+        element.style.setProperty("--clipper-selection-base-left", `${frameRect.left - hostRect.left + viewportBounds.x * scale}px`);
+        element.style.setProperty("--clipper-selection-base-top", `${frameRect.top - hostRect.top + viewportBounds.y * scale}px`);
+        element.style.setProperty("--clipper-selection-base-width", `${viewportBounds.width * scale}px`);
+        element.style.setProperty("--clipper-selection-base-height", `${viewportBounds.height * scale}px`);
       }
       frameId = requestAnimationFrame(syncPortalBox);
     }
@@ -766,6 +923,81 @@ export function SelectionOverlayBox({ objectId, bounds, cameraTransform, frameSc
     syncPortalBox();
     return () => cancelAnimationFrame(frameId);
   }, [frameScale, frameViewportRef, portal, portalHost, viewportBounds.height, viewportBounds.width, viewportBounds.x, viewportBounds.y]);
+
+  useEffect(() => {
+    function updateObjectResizingActive(event: Event) {
+      const active = Boolean((event as CustomEvent<{ active?: boolean }>).detail?.active);
+      setObjectResizingActive(active);
+      if (active) setRadiusHandleHover(false);
+    }
+
+    window.addEventListener("clipper:object-resize-active", updateObjectResizingActive);
+    return () => window.removeEventListener("clipper:object-resize-active", updateObjectResizingActive);
+  }, []);
+
+  useEffect(() => {
+    if (optimisticRadius !== null && Math.abs((radius ?? 0) - optimisticRadius) < 0.5) setOptimisticRadius(null);
+  }, [optimisticRadius, radius]);
+
+  useEffect(() => {
+    if (dragRadius === null && optimisticRadius === null) setObjectRadiusPreview(objectId, null);
+  }, [dragRadius, objectId, optimisticRadius, radius]);
+
+  useEffect(() => {
+    if (dragRadius === null) return;
+    function stopRadiusDrag() {
+      flushRadiusChange();
+      radiusDragRef.current = null;
+      setDragRadius(null);
+    }
+    window.addEventListener("pointerup", stopRadiusDrag);
+    window.addEventListener("pointercancel", stopRadiusDrag);
+    return () => {
+      window.removeEventListener("pointerup", stopRadiusDrag);
+      window.removeEventListener("pointercancel", stopRadiusDrag);
+    };
+  }, [dragRadius]);
+
+  function flushRadiusChange() {
+    const radius = pendingRadiusRef.current;
+    pendingRadiusRef.current = null;
+    if (radius !== null) onCornerRadiusChange?.(radius);
+  }
+
+  function previewRadiusChange(radius: number) {
+    pendingRadiusRef.current = radius;
+    setObjectRadiusPreview(objectId, radius);
+  }
+
+  function updateRadiusFromPointer(event: PointerEvent<HTMLButtonElement>) {
+    const drag = radiusDragRef.current;
+    if (!drag) return;
+    const dx = event.clientX - drag.startClientX;
+    const dy = event.clientY - drag.startClientY;
+    const inwardX = drag.corner === "top-right" || drag.corner === "bottom-right" ? -dx : dx;
+    const inwardY = drag.corner === "bottom-right" || drag.corner === "bottom-left" ? -dy : dy;
+    const dominantDelta = Math.abs(inwardX) >= Math.abs(inwardY) ? inwardX : inwardY;
+    const diagonalDelta = dominantDelta * Math.SQRT2;
+    const nextRadius = Math.round(clamp(drag.startRadius + diagonalDelta * drag.objectUnitsPerScreenPx, 0, maxRadius));
+    setDragRadius(nextRadius);
+    setOptimisticRadius(nextRadius);
+    previewRadiusChange(nextRadius);
+  }
+
+  function startRadiusDrag(event: PointerEvent<HTMLButtonElement>, corner: "top-left" | "top-right" | "bottom-right" | "bottom-left") {
+    event.preventDefault();
+    event.stopPropagation();
+    const rect = boxRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const insetX = rect.width * clamp(offsetPx / Math.max(viewportBounds.width, 1), 0, 0.45);
+    const insetY = rect.height * clamp(offsetPx / Math.max(viewportBounds.height, 1), 0, 0.45);
+    const objectWidth = Math.max(rect.width - insetX * 2, 1);
+    const objectHeight = Math.max(rect.height - insetY * 2, 1);
+    const screenPxPerObjectUnit = Math.max(0.001, Math.min(objectWidth / Math.max(bounds.width, 1), objectHeight / Math.max(bounds.height, 1)));
+    radiusDragRef.current = { corner, startClientX: event.clientX, startClientY: event.clientY, startRadius: displayRadius, objectUnitsPerScreenPx: 1 / screenPxPerObjectUnit };
+    setDragRadius(displayRadius);
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
 
   return (
     <div ref={boxRef} data-frame-selection-box={objectId} data-frame-selection-box-portal={portal ? "true" : undefined} className={`${portal ? "absolute" : "absolute"} pointer-events-none bg-transparent`} style={boxStyle}>
@@ -777,8 +1009,43 @@ export function SelectionOverlayBox({ objectId, bounds, cameraTransform, frameSc
       <div className={topRightHandleClass} style={handleStyleWithColor} onPointerDown={(event) => onResizePointerDown(event, "top-right")} />
       <div className={bottomRightHandleClass} style={handleStyleWithColor} onPointerDown={(event) => onResizePointerDown(event, "bottom-right")} />
       <div className={bottomLeftHandleClass} style={handleStyleWithColor} onPointerDown={(event) => onResizePointerDown(event, "bottom-left")} />
+      {showRadiusHandles ? <>
+        {dragRadius !== null ? <div className="pointer-events-none absolute left-1/2 top-0 z-30 -translate-x-1/2 -translate-y-[calc(100%+10px)] rounded-[9px] bg-[#159dff] px-2.5 py-1 text-xs font-extrabold text-white shadow-[0_10px_26px_rgba(0,0,0,0.32)]">Radius {displayRadius}px</div> : null}
+        <button aria-label="Adjust top-left corner radius" className={radiusHandleClass} data-radius-handle-object-id={objectId} style={radiusTopLeftStyle} onPointerEnter={() => setRadiusHandleHover(true)} onPointerLeave={() => setRadiusHandleHover(false)} onPointerDown={(event) => startRadiusDrag(event, "top-left")} onPointerMove={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) updateRadiusFromPointer(event); }} />
+        <button aria-label="Adjust top-right corner radius" className={radiusHandleClass} data-radius-handle-object-id={objectId} style={radiusTopRightStyle} onPointerEnter={() => setRadiusHandleHover(true)} onPointerLeave={() => setRadiusHandleHover(false)} onPointerDown={(event) => startRadiusDrag(event, "top-right")} onPointerMove={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) updateRadiusFromPointer(event); }} />
+        <button aria-label="Adjust bottom-right corner radius" className={radiusHandleClass} data-radius-handle-object-id={objectId} style={radiusBottomRightStyle} onPointerEnter={() => setRadiusHandleHover(true)} onPointerLeave={() => setRadiusHandleHover(false)} onPointerDown={(event) => startRadiusDrag(event, "bottom-right")} onPointerMove={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) updateRadiusFromPointer(event); }} />
+        <button aria-label="Adjust bottom-left corner radius" className={radiusHandleClass} data-radius-handle-object-id={objectId} style={radiusBottomLeftStyle} onPointerEnter={() => setRadiusHandleHover(true)} onPointerLeave={() => setRadiusHandleHover(false)} onPointerDown={(event) => startRadiusDrag(event, "bottom-left")} onPointerMove={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) updateRadiusFromPointer(event); }} />
+      </> : null}
     </div>
   );
+}
+
+function getNumericStyleValue(value: string | number | undefined) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const numeric = Number.parseFloat(value);
+    return Number.isFinite(numeric) ? numeric : 0;
+  }
+  return 0;
+}
+
+function formatStyleLength(value: string | number | undefined) {
+  if (typeof value === "number" && Number.isFinite(value)) return `${value}px`;
+  if (typeof value === "string" && value.trim()) return value;
+  return "0px";
+}
+
+function getAutoHeightTextBounds(object: FrameObject, editable: HTMLElement | null): Bounds | undefined {
+  if (!editable) return undefined;
+  const measuredHeight = Math.max(object.bounds.height, Math.ceil(editable.scrollHeight));
+  return measuredHeight === object.bounds.height ? undefined : { ...object.bounds, height: measuredHeight };
+}
+
+function setObjectRadiusPreview(objectId: string, radius: number | null) {
+  const target = document.querySelector<HTMLElement>(`[data-clipper-render-object-id="${cssEscape(objectId)}"]`);
+  if (!target) return;
+  if (radius === null) target.style.removeProperty("--clipper-radius-preview");
+  else target.style.setProperty("--clipper-radius-preview", `${radius}px`);
 }
 
 export function DragSelectionBox({ dragSelectionBoxRef, bounds, frameScale, frameViewportRef, portalHost, uiScale, visible }: { dragSelectionBoxRef: RefObject<HTMLDivElement | null>; bounds: Bounds; frameScale: number; frameViewportRef: RefObject<HTMLDivElement | null>; portalHost?: HTMLElement | null; uiScale: number; visible: boolean }) {

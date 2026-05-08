@@ -463,12 +463,12 @@ export function SettingsDialog({ activeSection, agentProvider, autoDownloadUpdat
                   </div>
                   <label className="flex w-full items-start justify-between gap-5 text-xs font-bold text-[#dfe2ea]" htmlFor="live-dom-postprocess-toggle">
                     <span className="grid gap-1">
-                      <span>Use HTML-in-Canvas live post-process preview</span>
-                        <span className="font-medium leading-5 text-[#8f939d]">Enables the experimental Canvas Draw Element path for live post-process previews on supported Chromium/Canary builds. Unsupported builds keep the normal DOM/cached fallback.</span>
+                      <span>Use HTML-in-Canvas live post-process preview when optional</span>
+                        <span className="font-medium leading-5 text-[#8f939d]">Required adjustment effects such as Lens activate this path automatically. This toggle only opts into the same experimental path for optional supported previews.</span>
                     </span>
                     <Switch id="live-dom-postprocess-toggle" className="mt-0.5" checked={liveDomPostProcessPreviewEnabled} onCheckedChange={onLiveDomPostProcessPreviewEnabledChange} />
                   </label>
-                  {liveDomPostProcessPreviewEnabled !== liveDomPostProcessRuntimeEnabled ? <p className="rounded-lg border border-[#594531] bg-[#211a13] px-3 py-2 text-xs leading-5 text-[#dec39e]">Restart to apply settings.</p> : null}
+                  {liveDomPostProcessPreviewEnabled !== liveDomPostProcessRuntimeEnabled ? <p className="rounded-lg border border-[#594531] bg-[#211a13] px-3 py-2 text-xs leading-5 text-[#dec39e]">Restart to apply optional preview setting. Required effects still auto-activate when supported.</p> : null}
                   <div className="h-px bg-[#363b47]" />
                   <div className="grid gap-4">
                     <div className="grid gap-1.5">

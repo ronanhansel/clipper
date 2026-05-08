@@ -77,6 +77,7 @@ export type LensPostProcessUniforms = {
 
 export type LensPostProcessPass = {
   id: string;
+  sourceLayerId?: string;
   kind: typeof lensPostProcessKind;
   target: "final";
   requiresLiveDomSource: true;
@@ -86,6 +87,7 @@ export type LensPostProcessPass = {
 export function createLensPostProcessPass(layer: AdjustmentLayer, frameSize: { width: number; height: number }): LensPostProcessPass {
   return {
     id: `${layer.id}:lens-postprocess`,
+    sourceLayerId: layer.id,
     kind: lensPostProcessKind,
     target: "final",
     requiresLiveDomSource: true,

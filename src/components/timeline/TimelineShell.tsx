@@ -1,5 +1,5 @@
 import { Minus, Plus } from "lucide-react";
-import { useMemo, type CSSProperties, type DragEvent, type PointerEvent, type ReactNode, type RefObject } from "react";
+import { useLayoutEffect, useMemo, type CSSProperties, type DragEvent, type PointerEvent, type ReactNode, type RefObject } from "react";
 import { roundTenth } from "../../core/math";
 import type { TimelineMode } from "../../core/types";
 import { formatTime } from "../../core/timeline";
@@ -20,6 +20,7 @@ export type TimelineShellRefs = {
 export type TimelineShellProps = {
   contentWidth: number;
   currentTime: number;
+  disableDeclarativePlayhead?: boolean;
   displayDuration: number;
   dragActive?: boolean;
   dragOverlayLabel?: string;
@@ -50,7 +51,12 @@ export type TimelineShellProps = {
   renderTimelineViewport: () => ReactNode;
 };
 
-export function TimelineShell({ contentWidth, currentTime, displayDuration, dragActive = false, dragOverlayLabel, emptyContent, laneContentHeight, laneRowsStyle, layerRailWidth, playheadColor = "#ff3b30", prerenderCacheCoverage, refs, timelineName, timelineZoom, ticks, activeMode, onModeChange, onTimelineViewportScroll, onTimelineViewportDragLeave, onTimelineViewportDragOver, onTimelineViewportDrop, onTimelineZoomChange, rulerHandlers, renderLayerRail, renderTimelineViewport }: TimelineShellProps) {
+export function TimelineShell({ contentWidth, currentTime, disableDeclarativePlayhead = false, displayDuration, dragActive = false, dragOverlayLabel, emptyContent, laneContentHeight, laneRowsStyle, layerRailWidth, playheadColor = "#ff3b30", prerenderCacheCoverage, refs, timelineName, timelineZoom, ticks, activeMode, onModeChange, onTimelineViewportScroll, onTimelineViewportDragLeave, onTimelineViewportDragOver, onTimelineViewportDrop, onTimelineZoomChange, rulerHandlers, renderLayerRail, renderTimelineViewport }: TimelineShellProps) {
+  useLayoutEffect(() => {
+    if (disableDeclarativePlayhead) return;
+    refs.playbackPlayheadRef.current?.style.setProperty("--clipper-playhead-left", `${displayDuration > 0 ? (currentTime / displayDuration) * 100 : 0}%`);
+  }, [currentTime, disableDeclarativePlayhead, displayDuration, refs.playbackPlayheadRef]);
+
   return (
     <footer ref={refs.timelinePanelRef} data-timeline-panel className={`relative grid h-full min-h-0 select-none grid-rows-[34px_minmax(0,1fr)] gap-1.5 overflow-hidden border-t border-[#1d2028] bg-[#141821] px-[22px] pb-0 pt-2.5 ${dragActive ? "clipper-timeline-dragging-no-hover" : ""}`} onDragLeave={onTimelineViewportDragLeave} onDragOver={onTimelineViewportDragOver} onDrop={onTimelineViewportDrop}>
       {dragActive && dragOverlayLabel ? <div className="pointer-events-none absolute inset-0 z-50 grid place-items-center bg-[rgba(13,17,24,0.78)]"><div className="rounded-full bg-[var(--clipper-accent-muted-surface)] px-5 py-2 text-[12px] font-extrabold uppercase tracking-[0.18em] text-[var(--clipper-accent)]">{dragOverlayLabel}</div></div> : null}
@@ -67,7 +73,7 @@ export function TimelineShell({ contentWidth, currentTime, displayDuration, drag
           <button className="grid h-8 w-8 place-items-center rounded-[9px] border border-[#2d313b] bg-[#14161c] text-[#dfe2ea] hover:border-[var(--clipper-accent)]" title="Zoom timeline in" onClick={() => onTimelineZoomChange(roundTenth(timelineZoom + 0.25))}><Plus size={14} /></button>
         </div>
       </div>
-      <div ref={refs.playbackPlayheadRef} className="relative h-full min-h-0 max-h-full overflow-hidden" style={{ "--clipper-playhead-left": `${displayDuration > 0 ? (currentTime / displayDuration) * 100 : 0}%` } as CSSProperties}>
+      <div ref={refs.playbackPlayheadRef} className="relative h-full min-h-0 max-h-full overflow-hidden">
         <div className="grid h-full min-h-0 overflow-hidden" style={{ gridTemplateColumns: `${layerRailWidth}px minmax(0, 1fr)` }}>
           <div className="grid min-h-0 min-w-0 grid-rows-[38px_minmax(0,1fr)] overflow-hidden">
             <div className="flex min-w-0 items-center pr-4">

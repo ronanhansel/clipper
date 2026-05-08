@@ -5,12 +5,17 @@ import { evaluateFrameObject } from "../render-engine/renderRuntime";
 import { FRAME_HEIGHT, FRAME_WIDTH, type Bounds, type FrameObject, type Part, type Point, type SelectionPayload } from "./types";
 
 export type ResizeHandle = "top-left" | "top" | "top-right" | "right" | "bottom-right" | "bottom" | "bottom-left" | "left";
+export type ObjectResizeMode = "resize" | "scale";
 
 export type ObjectDrag = {
   origin: Point;
   partId: string;
   objects: SelectionPayload["objects"];
 };
+
+export type ObjectSnapGuide = { axis: "x" | "y"; position: number };
+
+export type ObjectDragSnapResult = { delta: Point; guides: ObjectSnapGuide[] };
 
 export type ObjectResize = {
   origin: Point;
@@ -22,6 +27,7 @@ export type ObjectResize = {
   objectPreviewTransforms: Record<string, ObjectPreviewTransform>;
   objects: SelectionPayload["objects"];
   preservedObjects: SelectionPayload["objects"];
+  mode: ObjectResizeMode;
 };
 
 export type ObjectPreviewTransform = {
@@ -71,6 +77,39 @@ export function constrainDragDeltaToDominantAxis(delta: Point, constrained: bool
   return Math.abs(delta.x) >= Math.abs(delta.y) ? { x: delta.x, y: 0 } : { x: 0, y: delta.y };
 }
 
+export function getObjectDragSnap(drag: ObjectDrag, delta: Point, snapTargets: FrameObject[], threshold: number): ObjectDragSnapResult {
+  const selectionBounds = getBoundsUnion(drag.objects.map((object) => object.bounds));
+  const selectedIds = new Set(drag.objects.map((object) => object.id));
+  const targetBounds = [
+    { x: 0, y: 0, width: FRAME_WIDTH, height: FRAME_HEIGHT },
+    ...snapTargets.filter((object) => !object.hidden && !selectedIds.has(object.id)).map((object) => object.bounds),
+  ];
+  const xStops = targetBounds.flatMap((bounds) => [bounds.x, bounds.x + bounds.width / 2, bounds.x + bounds.width]);
+  const yStops = targetBounds.flatMap((bounds) => [bounds.y, bounds.y + bounds.height / 2, bounds.y + bounds.height]);
+  const xPoints = [selectionBounds.x, selectionBounds.x + selectionBounds.width / 2, selectionBounds.x + selectionBounds.width];
+  const yPoints = [selectionBounds.y, selectionBounds.y + selectionBounds.height / 2, selectionBounds.y + selectionBounds.height];
+  const xSnap = getClosestSnapOffset(xPoints, xStops, delta.x, threshold);
+  const ySnap = getClosestSnapOffset(yPoints, yStops, delta.y, threshold);
+  const guides: ObjectSnapGuide[] = [];
+  if (xSnap) guides.push({ axis: "x", position: xSnap.position });
+  if (ySnap) guides.push({ axis: "y", position: ySnap.position });
+  return { delta: { x: delta.x + (xSnap?.offset ?? 0), y: delta.y + (ySnap?.offset ?? 0) }, guides };
+}
+
+function getClosestSnapOffset(points: number[], stops: number[], delta: number, threshold: number) {
+  let closest: { offset: number; position: number; distance: number } | null = null;
+  for (const point of points) {
+    const movedPoint = point + delta;
+    for (const stop of stops) {
+      const offset = stop - movedPoint;
+      const distance = Math.abs(offset);
+      if (distance > threshold) continue;
+      if (!closest || distance < closest.distance) closest = { offset, position: stop, distance };
+    }
+  }
+  return closest;
+}
+
 export function getResizedObjects(resize: ObjectResize, delta: Point, preserveAspect = false) {
   const displaySelectionBox = resize.displaySelectionBox;
   const nextDisplaySelectionBox = getResizedBounds(displaySelectionBox, resize.handle, delta, preserveAspect ? resize.aspectRatio : undefined);
@@ -104,6 +143,14 @@ export function getResizedObjects(resize: ObjectResize, delta: Point, preserveAs
       },
     };
   });
+}
+
+export function getObjectResizeScale(resize: ObjectResize, delta: Point, preserveAspect = false) {
+  const displaySelectionBox = resize.displaySelectionBox;
+  const nextDisplaySelectionBox = getResizedBounds(displaySelectionBox, resize.handle, delta, preserveAspect ? resize.aspectRatio : undefined);
+  const scaleX = displaySelectionBox.width === 0 ? 1 : nextDisplaySelectionBox.width / displaySelectionBox.width;
+  const scaleY = displaySelectionBox.height === 0 ? 1 : nextDisplaySelectionBox.height / displaySelectionBox.height;
+  return resize.mode === "scale" ? Math.max(0.01, Math.min(Math.abs(scaleX), Math.abs(scaleY))) : 1;
 }
 
 const identityPreviewTransform: ObjectPreviewTransform = { translateX: 0, translateY: 0, translateXPercent: 0, translateYPercent: 0, scaleX: 1, scaleY: 1 };

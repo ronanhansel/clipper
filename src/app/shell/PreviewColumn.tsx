@@ -1,17 +1,14 @@
 import { useEffect, useRef, useState, type ComponentProps, type CSSProperties, type ReactNode, type RefObject, type UIEvent } from "react";
+import { Circle, MousePointer2, MoveDiagonal2, Square, Type } from "lucide-react";
 import { EditorPane } from "../../components/EditorPane";
-import { selectorHandleSizePx, selectorOffsetPx } from "../config";
 import { FramePreview } from "../../components/preview/FramePreview";
-import { applyAdjustmentLayersToPostProcessPasses, applyAdjustmentLayersToVisualStyle } from "../../core/adjustments";
-import { boundsToViewport, getLayeredCameraPreviewTransform } from "../../core/camera";
-import { getLiveDomPostProcessPreflight, isLiveDomPostProcessPreviewOptedIn, type LiveDomPostProcessCapability } from "../../core/effects/postprocess/liveDomCapability";
-import { collectLiveDomPostProcessRequirement } from "../../core/effects/postprocess/liveDomRequirement";
+import { buildAdjustmentExecutionPlan, filterAdjustmentExecutionPlan, getVisualStyleForAdjustmentPlan } from "../../core/adjustments";
+import { getLiveDomPostProcessPreflight, type LiveDomPostProcessCapability } from "../../core/effects/postprocess/liveDomCapability";
 import { LiveDomPostProcessRenderer } from "../../core/effects/postprocess/liveDomRenderer";
 import { measurePreviewPerf } from "../../core/effects/postprocess/perf";
 import { selectLiveDomPostProcessPass, withPostProcessFrameBackground } from "../../core/effects/postprocess/passes";
 import { createDefaultPostProcessRenderer, type PostProcessRenderer } from "../../core/effects/postprocess/registry";
 import type { AdjustmentVisualOverlay, AdjustmentVisualStyle } from "../../core/effects/types";
-import { getBoundsUnion, getFrameObjectWithPreviewBounds, insetBounds } from "../../core/frameInteraction";
 import { FRAME_HEIGHT, FRAME_WIDTH, type AdjustmentLayer, type TransitionLayer } from "../../core/types";
 import type { PrerenderCacheBlock } from "../features/preview/usePrerenderCache";
 import type { Mode } from "../types";
@@ -21,15 +18,6 @@ type FramePreviewProps = ComponentProps<typeof FramePreview> & { previewParts?: 
 type CachedPreviewDisplayMode = "dom" | "canvas2d" | "webgl";
 const cachedMissGraceMs = 220;
 const domFallbackReadyToleranceSeconds = 1 / 60;
-const livePostProcessReasonLabel: Record<LiveDomPostProcessCapability["reason"], string> = {
-  available: "available",
-  "not-opted-in": "not opted in",
-  "missing-source": "missing source subtree",
-  "missing-layout-subtree": "missing canvas layoutsubtree support",
-  "missing-paint": "missing paint invalidation support",
-  "missing-tex-element-image": "missing WebGL texElementImage2D support",
-};
-
 function requiresDomOverlayPreview(props: FramePreviewProps): boolean {
   return props.canSelectObjects
     || props.focusPicking
@@ -41,28 +29,6 @@ function requiresDomOverlayPreview(props: FramePreviewProps): boolean {
     || props.marqueeDragging
     || props.selectedObjects.length > 0
     || props.editingTextObjectId !== null;
-}
-
-function getPreviewOverlayDisplayInsets(props: FramePreviewProps) {
-  if (!requiresDomOverlayPreview(props) || props.selectedObjects.length === 0) return { left: 0, top: 0, right: 0, bottom: 0 };
-
-  const cameraTransform = props.timelineMode === "composition"
-    ? getLayeredCameraPreviewTransform(props.part, props.motionLayers, props.previewTime, { hiddenLayerIds: props.hiddenMotionLayerIds, pickingTranslationPosition: props.pickingTranslationPosition, pickingZoomFocus: props.pickingZoomFocus, resetMotionEffects: props.trackerPicking || props.focusPicking || props.pickingTranslationPosition || props.pickingZoomFocus })
-    : props.cameraTransform;
-  const selectableObjects = [...props.part.background.elements, ...props.part.objects];
-  const selectedBounds = getBoundsUnion(props.selectedObjects.map((selected) => {
-    const object = selectableObjects.find((item) => item.id === selected.id);
-    return object ? getFrameObjectWithPreviewBounds(object, props.previewTime, props.part.duration).bounds : selected.bounds;
-  }));
-  const selectedViewportBounds = insetBounds(boundsToViewport(selectedBounds, cameraTransform, props.frameScale), -selectorOffsetPx);
-  const handleBleedPx = selectorHandleSizePx;
-
-  return {
-    left: Math.max(0, -selectedViewportBounds.x + handleBleedPx),
-    top: Math.max(0, -selectedViewportBounds.y + handleBleedPx),
-    right: Math.max(0, selectedViewportBounds.x + selectedViewportBounds.width - FRAME_WIDTH * props.frameScale + handleBleedPx),
-    bottom: Math.max(0, selectedViewportBounds.y + selectedViewportBounds.height - FRAME_HEIGHT * props.frameScale + handleBleedPx),
-  };
 }
 
 type PreviewColumnProps = {
@@ -86,9 +52,18 @@ type PreviewColumnProps = {
   previewKey: string;
   previewRenderScale: number;
   stageRef: ComponentProps<"div">["ref"];
+  composeToolbarProps?: ComposeToolbarProps | null;
 };
 
-export function PreviewColumn({ blankFrameViewportStyle, children, currentSceneTimeRef, editorPaneProps, framePreviewProps, getPrerenderCacheBlockAtTime, hasActiveComposition, liveDomPostProcessMaxFps, livePostProcessPreviewEnabled, mode, onModeChange, onPointerEnter, onPointerLeave, onCachedPreviewDisplayReadyChange, prerenderCacheBlackMissDebug, prerenderCacheEnabled, onScroll, previewKey, previewRenderScale, stageRef }: PreviewColumnProps) {
+type ComposeToolbarProps = {
+  onAddEllipse: () => void;
+  onAddRectangle: () => void;
+  onAddText: () => void;
+  resizeMode: "resize" | "scale";
+  onResizeModeChange: (mode: "resize" | "scale") => void;
+};
+
+export function PreviewColumn({ blankFrameViewportStyle, children, composeToolbarProps, currentSceneTimeRef, editorPaneProps, framePreviewProps, getPrerenderCacheBlockAtTime, hasActiveComposition, liveDomPostProcessMaxFps, livePostProcessPreviewEnabled, mode, onModeChange, onPointerEnter, onPointerLeave, onCachedPreviewDisplayReadyChange, prerenderCacheBlackMissDebug, prerenderCacheEnabled, onScroll, previewKey, previewRenderScale, stageRef }: PreviewColumnProps) {
   const lastActiveFramePreviewPropsRef = useRef<FramePreviewProps | null>(null);
   const [previewOverlayHost, setPreviewOverlayHost] = useState<HTMLDivElement | null>(null);
   // Stabilize prerender renderer choice across mode switches: only
@@ -111,10 +86,11 @@ export function PreviewColumn({ blankFrameViewportStyle, children, currentSceneT
   const displayScale = stableFramePreviewProps ? stableFramePreviewProps.frameScale / previewRenderScale : 1;
   const activePreviewOverlayHost = mode === "preview" ? previewOverlayHost : null;
   const renderFramePreviewProps = stableFramePreviewProps ? { ...stableFramePreviewProps, frameScale: previewRenderScale, previewOverlayHost: activePreviewOverlayHost, selectionOverlayScale: displayScale } : null;
-  const overlayDisplayInsets = stableFramePreviewProps ? getPreviewOverlayDisplayInsets(stableFramePreviewProps) : { left: 0, top: 0, right: 0, bottom: 0 };
-  const previewDisplayStyle = stableFramePreviewProps ? { width: FRAME_WIDTH * stableFramePreviewProps.frameScale + overlayDisplayInsets.left + overlayDisplayInsets.right, height: FRAME_HEIGHT * stableFramePreviewProps.frameScale + overlayDisplayInsets.top + overlayDisplayInsets.bottom } as CSSProperties : undefined;
+  const livePostProcessRequired = renderFramePreviewProps ? hasActiveLivePostProcessPass(renderFramePreviewProps, currentSceneTimeRef.current) : false;
+  const effectiveLivePostProcessPreviewEnabled = livePostProcessPreviewEnabled || livePostProcessRequired;
+  const previewDisplayStyle = stableFramePreviewProps ? { width: FRAME_WIDTH * stableFramePreviewProps.frameScale, height: FRAME_HEIGHT * stableFramePreviewProps.frameScale } as CSSProperties : undefined;
   const allowsDomOverlayOverflow = stableFramePreviewProps ? requiresDomOverlayPreview(stableFramePreviewProps) : false;
-  const previewRenderStyle = stableFramePreviewProps ? { backfaceVisibility: "hidden", contain: allowsDomOverlayOverflow ? undefined : "paint", filter: displayScale === 1 ? undefined : "blur(0)", left: overlayDisplayInsets.left, top: overlayDisplayInsets.top, width: FRAME_WIDTH * previewRenderScale, height: FRAME_HEIGHT * previewRenderScale, transform: displayScale === 1 ? undefined : `translateZ(0) scale(${displayScale})`, transformOrigin: "top left", willChange: displayScale === 1 ? undefined : "transform" } as CSSProperties : undefined;
+  const previewRenderStyle = stableFramePreviewProps ? { backfaceVisibility: "hidden", contain: allowsDomOverlayOverflow ? undefined : "paint", filter: displayScale === 1 ? undefined : "blur(0)", left: 0, top: 0, width: FRAME_WIDTH * previewRenderScale, height: FRAME_HEIGHT * previewRenderScale, transform: displayScale === 1 ? undefined : `translateZ(0) scale(${displayScale})`, transformOrigin: "top left", willChange: displayScale === 1 ? undefined : "transform" } as CSSProperties : undefined;
 
   return (
     <section className="grid min-h-0 min-w-0 grid-rows-[58px_minmax(0,1fr)_58px] bg-[radial-gradient(circle_at_50%_45%,rgb(var(--clipper-accent-rgb)/0.10),transparent_30%),#141821]" data-clipper-preview-column onPointerEnter={onPointerEnter} onPointerLeave={onPointerLeave}>
@@ -138,13 +114,13 @@ export function PreviewColumn({ blankFrameViewportStyle, children, currentSceneT
             {renderFramePreviewProps ? (
               <div className="absolute left-0 top-0" data-clipper-fixed-preview-render style={previewRenderStyle}>
                 {displayPrerenderPreview && renderFramePreviewProps.part.renderMode === "webgl"
-                  ? <PrerenderVideoPreview blackMissDebug={prerenderCacheBlackMissDebug} currentSceneTimeRef={currentSceneTimeRef} framePreviewProps={renderFramePreviewProps} getBlockAtTime={getPrerenderCacheBlockAtTime} liveDomPostProcessMaxFps={liveDomPostProcessMaxFps} livePostProcessPreviewEnabled={livePostProcessPreviewEnabled} onCachedPreviewDisplayReadyChange={onCachedPreviewDisplayReadyChange} />
-                  : <LivePostProcessFramePreview currentSceneTimeRef={currentSceneTimeRef} framePreviewProps={renderFramePreviewProps} liveDomPostProcessMaxFps={liveDomPostProcessMaxFps} livePostProcessEnabled={livePostProcessPreviewEnabled && renderFramePreviewProps.part.renderMode === "live-dom"} />}
+                  ? <PrerenderVideoPreview blackMissDebug={prerenderCacheBlackMissDebug} currentSceneTimeRef={currentSceneTimeRef} framePreviewProps={renderFramePreviewProps} getBlockAtTime={getPrerenderCacheBlockAtTime} liveDomPostProcessMaxFps={liveDomPostProcessMaxFps} livePostProcessPreviewEnabled={effectiveLivePostProcessPreviewEnabled} onCachedPreviewDisplayReadyChange={onCachedPreviewDisplayReadyChange} />
+                  : <LivePostProcessFramePreview currentSceneTimeRef={currentSceneTimeRef} framePreviewProps={renderFramePreviewProps} liveDomPostProcessMaxFps={liveDomPostProcessMaxFps} livePostProcessEnabled={effectiveLivePostProcessPreviewEnabled} />}
                 {!hasActiveComposition && !(mode === "editor" && !editorPaneProps) ? <div className="pointer-events-none absolute left-0 top-0 z-[2147483647] bg-black" data-clipper-stable-blank-preview-overlay style={{ width: FRAME_WIDTH * previewRenderScale, height: FRAME_HEIGHT * previewRenderScale }} /> : null}
               </div>
             ) : null}
           </div>
-          {!hasActiveComposition && !renderFramePreviewProps && !(mode === "editor" && !editorPaneProps) ? <div className="relative overflow-hidden bg-black shadow-[0_22px_70px_rgba(0,0,0,0.44)]" aria-label="Blank preview frame" data-clipper-blank-frame-preview style={blankFrameViewportStyle} /> : null}
+          {!hasActiveComposition && !renderFramePreviewProps && !(mode === "editor" && !editorPaneProps) ? <div className="relative overflow-hidden bg-black" aria-label="Blank preview frame" data-clipper-blank-frame-preview style={blankFrameViewportStyle} /> : null}
         </div>
 
         {/* Editor overlay — sibling of scroll viewport, not inside it. Not affected by preview scrollTop/scrollLeft. */}
@@ -152,8 +128,33 @@ export function PreviewColumn({ blankFrameViewportStyle, children, currentSceneT
         {mode === "editor" && !editorPaneProps ? <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center bg-[#12141a] p-6 text-center text-sm font-bold text-[#9b9da7]">No file is open in the editor.</div> : null}
         {mode === "preview" ? <div ref={setPreviewOverlayHost} className="pointer-events-none absolute inset-0 z-20 overflow-hidden" data-clipper-preview-overlay-host /> : null}
       </div>
-      {children}
+      <div className="relative">
+        {mode === "preview" && composeToolbarProps ? <ComposeToolbar {...composeToolbarProps} /> : null}
+        {children}
+      </div>
     </section>
+  );
+}
+
+function hasActiveLivePostProcessPass(framePreviewProps: FramePreviewProps, sceneTime: number) {
+  const plan = buildAdjustmentExecutionPlan(sceneTime, framePreviewProps.adjustmentLayers, undefined, { width: FRAME_WIDTH, height: FRAME_HEIGHT });
+  return Boolean(selectLiveDomPostProcessPass(plan.steps.flatMap((step) => step.postProcessPasses ?? [])).pass);
+}
+
+function ComposeToolbar({ onAddEllipse, onAddRectangle, onAddText, resizeMode, onResizeModeChange }: ComposeToolbarProps) {
+  const buttonClass = "grid h-8 w-8 place-items-center rounded-[7px] text-[#dfe2ea] transition hover:bg-[#262b35] hover:text-white";
+  const modeButtonClass = (active: boolean) => `grid h-8 w-8 place-items-center rounded-[7px] transition ${active ? "bg-[#262b35] text-white" : "text-[#aab0bc] hover:bg-[#262b35] hover:text-white"}`;
+  return (
+    <div className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-3 -translate-x-1/2">
+      <div className="pointer-events-auto flex items-center gap-1 rounded-[10px] border border-[#303641] bg-[#151820]/95 shadow-[0_14px_38px_rgba(0,0,0,0.36),inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur">
+        <button className={buttonClass} title="Add rectangle" onClick={onAddRectangle}><Square size={15} /></button>
+        <button className={buttonClass} title="Add ellipse" onClick={onAddEllipse}><Circle size={15} /></button>
+        <button className={buttonClass} title="Add text" onClick={onAddText}><Type size={15} /></button>
+        <div className="mx-1 h-5 w-px bg-[#313744]" />
+        <button className={modeButtonClass(resizeMode === "resize")} title="Resize bounds" aria-pressed={resizeMode === "resize"} onClick={() => onResizeModeChange("resize")}><MousePointer2 size={15} /></button>
+        <button className={modeButtonClass(resizeMode === "scale")} title="Scale contents" aria-pressed={resizeMode === "scale"} onClick={() => onResizeModeChange("scale")}><MoveDiagonal2 size={15} /></button>
+      </div>
+    </div>
   );
 }
 
@@ -163,6 +164,7 @@ function PrerenderVideoPreview({ blackMissDebug, currentSceneTimeRef, framePrevi
   const postProcessRendererRef = useRef<PostProcessRenderer | null>(null);
   const postProcessRendererKindRef = useRef<string | null>(null);
   const lastFrameKeyRef = useRef("");
+  const cachedVisualStyleKeyRef = useRef("");
   const firstMissAtRef = useRef<number | null>(null);
   const displayReadyRef = useRef(false);
   const initialDisplayMode = framePreviewProps.isPlaying ? "canvas2d" : "dom";
@@ -171,6 +173,8 @@ function PrerenderVideoPreview({ blackMissDebug, currentSceneTimeRef, framePrevi
   const frameScale = framePreviewProps.frameScale;
   const previewStyle = { width: FRAME_WIDTH * frameScale, height: FRAME_HEIGHT * frameScale } as CSSProperties;
   const cachedCanvasStyle = { width: FRAME_WIDTH, height: FRAME_HEIGHT, transform: `scale(${frameScale})`, transformOrigin: "top left" } as CSSProperties;
+  const [cachedVisualStyle, setCachedVisualStyle] = useState<AdjustmentVisualStyle>({});
+  const cachedCanvasFilterStyle = cachedVisualStyle.filter ? ({ filter: cachedVisualStyle.filter } as CSSProperties) : undefined;
 
   function updateDisplayMode(nextMode: CachedPreviewDisplayMode) {
     if (displayModeRef.current === nextMode) return;
@@ -182,6 +186,13 @@ function PrerenderVideoPreview({ blackMissDebug, currentSceneTimeRef, framePrevi
     if (displayReadyRef.current === ready) return;
     displayReadyRef.current = ready;
     onCachedPreviewDisplayReadyChange(ready);
+  }
+
+  function updateCachedVisualStyle(style: AdjustmentVisualStyle) {
+    const key = JSON.stringify(style);
+    if (cachedVisualStyleKeyRef.current === key) return;
+    cachedVisualStyleKeyRef.current = key;
+    setCachedVisualStyle(style);
   }
 
   useEffect(() => {
@@ -235,8 +246,17 @@ function PrerenderVideoPreview({ blackMissDebug, currentSceneTimeRef, framePrevi
     }
 
     firstMissAtRef.current = null;
-    const postProcessPasses = measurePreviewPerf("cached.applyAdjustmentLayersToPostProcessPasses", () => applyAdjustmentLayersToPostProcessPasses(sceneTime, framePreviewProps.adjustmentLayers, undefined, { width: block.width, height: block.height }));
+    const plan = measurePreviewPerf("cached.buildAdjustmentExecutionPlan", () => buildAdjustmentExecutionPlan(sceneTime, framePreviewProps.adjustmentLayers, undefined, { width: block.width, height: block.height }));
+    const postProcessPasses = plan.steps.flatMap((step) => step.postProcessPasses ?? []);
     const { pass: webGlPostProcessPass } = selectLiveDomPostProcessPass(postProcessPasses);
+    const cachedVisualStyle = webGlPostProcessPass
+      ? getVisualStyleForAdjustmentPlan(filterAdjustmentExecutionPlan(plan, "after", webGlPostProcessPass.sourceLayerId))
+      : getVisualStyleForAdjustmentPlan(plan);
+    if (webGlPostProcessPass && getVisualStyleForAdjustmentPlan(filterAdjustmentExecutionPlan(plan, "before", webGlPostProcessPass.sourceLayerId)).filter) {
+      showDomFallback();
+      return;
+    }
+    updateCachedVisualStyle(cachedVisualStyle);
     const targetDisplayMode: CachedPreviewDisplayMode = webGlPostProcessPass ? "webgl" : "canvas2d";
     const frameKey = `${targetDisplayMode}:${block.startTime}:${frame.sceneTime}:${JSON.stringify(postProcessPasses)}`;
     if (lastFrameKeyRef.current !== frameKey) {
@@ -324,8 +344,9 @@ function PrerenderVideoPreview({ blackMissDebug, currentSceneTimeRef, framePrevi
         <div className={`absolute left-0 top-0 ${showingCachedCanvas ? "pointer-events-none opacity-0 invisible" : "opacity-100 visible"}`} aria-hidden={showingCachedCanvas}>
           <LivePostProcessFramePreview currentSceneTimeRef={currentSceneTimeRef} framePreviewProps={framePreviewProps} liveDomPostProcessMaxFps={liveDomPostProcessMaxFps} livePostProcessEnabled={livePostProcessPreviewEnabled && displayMode === "dom"} />
         </div>
-        <canvas ref={canvas2dRef} className={`absolute left-0 top-0 bg-black shadow-[0_22px_70px_rgba(0,0,0,0.44)] ${showingCanvas2d ? "opacity-100" : "pointer-events-none opacity-0"}`} style={cachedCanvasStyle} data-clipper-prerender-canvas-preview="2d" />
-        <canvas ref={webglCanvasRef} className={`absolute left-0 top-0 bg-black shadow-[0_22px_70px_rgba(0,0,0,0.44)] ${showingWebgl ? "opacity-100" : "pointer-events-none opacity-0"}`} style={cachedCanvasStyle} data-clipper-prerender-canvas-preview="webgl" />
+        <canvas ref={canvas2dRef} className={`absolute left-0 top-0 bg-black ${showingCanvas2d ? "opacity-100" : "pointer-events-none opacity-0"}`} style={{ ...cachedCanvasStyle, ...cachedCanvasFilterStyle }} data-clipper-prerender-canvas-preview="2d" />
+        <canvas ref={webglCanvasRef} className={`absolute left-0 top-0 bg-black ${showingWebgl ? "opacity-100" : "pointer-events-none opacity-0"}`} style={{ ...cachedCanvasStyle, ...cachedCanvasFilterStyle }} data-clipper-prerender-canvas-preview="webgl" />
+        {showingCachedCanvas ? <LiveVisualOverlays overlays={cachedVisualStyle.overlays} /> : null}
       </div>
     </div>
   );
@@ -437,11 +458,12 @@ function LivePostProcessFramePreview({ currentSceneTimeRef, framePreviewProps, l
     const canvas = renderCanvasRef.current;
     const layers = previewLayersRef.current ?? framePreviewProps.adjustmentLayers;
     const sceneTime = currentSceneTimeRef.current;
-    const requirement = measurePreviewPerf("live.collectRequirement", () => collectLiveDomPostProcessRequirement({ sceneTime, layers, frameSize: { width: FRAME_WIDTH, height: FRAME_HEIGHT } }));
-    const { pass: livePass } = selectLiveDomPostProcessPass(requirement.passes);
-    const optIn = isLiveDomPostProcessPreviewOptedIn();
+      const plan = measurePreviewPerf("live.collectRequirement", () => buildAdjustmentExecutionPlan(sceneTime, layers, undefined, { width: FRAME_WIDTH, height: FRAME_HEIGHT }));
+      const passes = plan.steps.flatMap((step) => step.postProcessPasses ?? []);
+      const { pass: livePass } = selectLiveDomPostProcessPass(passes);
+    const optIn = livePostProcessEnabled;
     if (!canvas || !livePass || !livePostProcessEnabled || !optIn) {
-      updateActiveLiveSourceRequired(requirement.requiresLiveDomSource);
+      updateActiveLiveSourceRequired(passes.some((pass) => pass.requiresLiveDomSource));
       clearInactiveLivePreview(!livePostProcessEnabled || !optIn ? "not-opted-in" : null);
       return false;
     }
@@ -508,8 +530,8 @@ function LivePostProcessFramePreview({ currentSceneTimeRef, framePreviewProps, l
         clearInactiveLivePreview("not-opted-in");
         return;
       }
-      const requirement = measurePreviewPerf("live.event.collectRequirement", () => collectLiveDomPostProcessRequirement({ sceneTime: currentSceneTimeRef.current, layers: layers ?? framePreviewProps.adjustmentLayers, frameSize: { width: FRAME_WIDTH, height: FRAME_HEIGHT } }));
-      const { pass: livePass } = selectLiveDomPostProcessPass(requirement.passes);
+      const plan = measurePreviewPerf("live.event.collectRequirement", () => buildAdjustmentExecutionPlan(currentSceneTimeRef.current, layers ?? framePreviewProps.adjustmentLayers, undefined, { width: FRAME_WIDTH, height: FRAME_HEIGHT }));
+      const { pass: livePass } = selectLiveDomPostProcessPass(plan.steps.flatMap((step) => step.postProcessPasses ?? []));
       if (!livePass) clearInactiveLivePreview(null);
     };
     window.addEventListener("clipper:preview-postprocess-adjustment", handlePreview);
@@ -519,8 +541,8 @@ function LivePostProcessFramePreview({ currentSceneTimeRef, framePreviewProps, l
   useEffect(() => {
     previewLayersRef.current = null;
     liveRenderDirtyRef.current = true;
-    const requirement = measurePreviewPerf("live.effect.collectRequirement", () => collectLiveDomPostProcessRequirement({ sceneTime: currentSceneTimeRef.current, layers: framePreviewProps.adjustmentLayers, frameSize: { width: FRAME_WIDTH, height: FRAME_HEIGHT } }));
-    const { pass: livePass } = selectLiveDomPostProcessPass(requirement.passes);
+    const plan = measurePreviewPerf("live.effect.collectRequirement", () => buildAdjustmentExecutionPlan(currentSceneTimeRef.current, framePreviewProps.adjustmentLayers, undefined, { width: FRAME_WIDTH, height: FRAME_HEIGHT }));
+    const { pass: livePass } = selectLiveDomPostProcessPass(plan.steps.flatMap((step) => step.postProcessPasses ?? []));
     if (!livePostProcessEnabled || !livePass) clearInactiveLivePreview(!livePostProcessEnabled ? "not-opted-in" : null);
   }, [framePreviewProps.adjustmentLayers]);
 
@@ -551,11 +573,12 @@ function LivePostProcessFramePreview({ currentSceneTimeRef, framePreviewProps, l
       const canvas = renderCanvasRef.current;
       const layers = previewLayersRef.current ?? framePreviewProps.adjustmentLayers;
       const sceneTime = currentSceneTimeRef.current;
-      const requirement = measurePreviewPerf("live.raf.collectRequirement", () => collectLiveDomPostProcessRequirement({ sceneTime, layers, frameSize: { width: FRAME_WIDTH, height: FRAME_HEIGHT } }));
-      const { pass: livePass } = selectLiveDomPostProcessPass(requirement.passes);
-      const optIn = isLiveDomPostProcessPreviewOptedIn();
+      const plan = measurePreviewPerf("live.raf.collectRequirement", () => buildAdjustmentExecutionPlan(sceneTime, layers, undefined, { width: FRAME_WIDTH, height: FRAME_HEIGHT }));
+      const passes = plan.steps.flatMap((step) => step.postProcessPasses ?? []);
+      const { pass: livePass } = selectLiveDomPostProcessPass(passes);
+      const optIn = livePostProcessEnabled;
       if (!canvas || !livePass || !livePostProcessEnabled || !optIn) {
-        updateActiveLiveSourceRequired(requirement.requiresLiveDomSource);
+        updateActiveLiveSourceRequired(passes.some((pass) => pass.requiresLiveDomSource));
         clearInactiveLivePreview(!livePostProcessEnabled || !optIn ? "not-opted-in" : null);
         frameId = requestAnimationFrame(sync);
         return;
@@ -563,8 +586,8 @@ function LivePostProcessFramePreview({ currentSceneTimeRef, framePreviewProps, l
       const enteringLivePostProcess = !activeLivePostProcessPassRef.current;
       activeLivePostProcessPassRef.current = true;
       if (enteringLivePostProcess) liveRenderDirtyRef.current = true;
-      updateActiveLiveSourceRequired(requirement.requiresLiveDomSource);
-      const visualStyle = measurePreviewPerf("live.applyAdjustmentLayersToVisualStyle", () => applyAdjustmentLayersToVisualStyle(sceneTime, layers));
+      updateActiveLiveSourceRequired(passes.some((pass) => pass.requiresLiveDomSource));
+      const visualStyle = measurePreviewPerf("live.applyAdjustmentLayersToVisualStyle", () => getVisualStyleForAdjustmentPlan(filterAdjustmentExecutionPlan(plan, "after", livePass.sourceLayerId)));
       updateLiveVisualStyle(visualStyle);
       keepLastLiveFrameIfAvailable();
       if (!framePreviewProps.isPlaying && lastStoppedSceneTimeRef.current !== sceneTime) {
@@ -607,18 +630,22 @@ function LivePostProcessFramePreview({ currentSceneTimeRef, framePreviewProps, l
     };
   }, [currentSceneTimeRef, framePreviewProps.adjustmentLayers, livePostProcessEnabled]);
 
-  const diagnostic = diagnosticReason ? `Live post-process preview: ${livePostProcessReasonLabel[diagnosticReason]}` : undefined;
   const outputRequiresLiveSource = livePostProcessEnabled && activeLiveSourceRequired;
   const liveCanvasFilterStyle = liveVisualStyle.filter ? { filter: liveVisualStyle.filter } as CSSProperties : undefined;
+  const sourcePlan = livePostProcessEnabled
+    ? buildAdjustmentExecutionPlan(currentSceneTimeRef.current, previewLayersRef.current ?? framePreviewProps.adjustmentLayers, undefined, { width: FRAME_WIDTH, height: FRAME_HEIGHT })
+    : null;
+  const sourceLayerId = sourcePlan ? selectLiveDomPostProcessPass(sourcePlan.steps.flatMap((step) => step.postProcessPasses ?? [])).pass?.sourceLayerId : undefined;
+  const sourceAdjustmentLayers = sourcePlan && sourceLayerId ? filterAdjustmentExecutionPlan(sourcePlan, "before", sourceLayerId).activeLayers : framePreviewProps.adjustmentLayers;
 
   return (
-    <div className="relative overflow-hidden bg-black shadow-[0_22px_70px_rgba(0,0,0,0.44)]" data-clipper-live-postprocess-preview-wrapper data-clipper-live-postprocess-status={diagnosticReason ?? "ready"} ref={wrapperRef} style={previewStyle} title={diagnostic}>
+    <div className="relative overflow-hidden bg-black" data-clipper-live-postprocess-preview-wrapper data-clipper-live-postprocess-status={diagnosticReason ?? "ready"} ref={wrapperRef} style={previewStyle}>
       <div className="absolute inset-0 z-10 overflow-hidden" aria-hidden={showLiveCanvas} ref={normalPreviewRef} style={{ opacity: showLiveCanvas ? 0 : 1, pointerEvents: showLiveCanvas ? "none" : undefined, visibility: showLiveCanvas ? "hidden" : "visible" }}>
         <FramePreview {...framePreviewProps} />
       </div>
       {outputRequiresLiveSource || showLiveCanvas ? <canvas aria-hidden="true" ref={renderCanvasRef} className="pointer-events-none absolute left-0 top-0 z-0 block bg-black" data-clipper-live-postprocess-canvas="html-in-canvas" height={FRAME_HEIGHT} style={{ ...liveCanvasStyle, ...liveCanvasFilterStyle, opacity: 1, visibility: "visible" }} width={FRAME_WIDTH}>
           {outputRequiresLiveSource ? <div aria-hidden="true" className="pointer-events-none absolute" data-clipper-live-postprocess-source inert={true} ref={sourceElementRef} style={sourceCanvasStyle}>
-            <FramePreview {...sourceFramePreviewProps} />
+            <FramePreview {...sourceFramePreviewProps} adjustmentLayers={sourceAdjustmentLayers} />
           </div> : null}
         </canvas> : null}
       {showLiveCanvas ? <LiveVisualOverlays overlays={liveVisualStyle.overlays} /> : null}

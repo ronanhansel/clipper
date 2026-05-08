@@ -11,11 +11,12 @@ import { defaultTimelineMode, normalizeProject, replacePartInProject, serializeP
 import type { EditorState, Part, ProjectManifest, TimelineMode } from "../../core/types";
 import { writeStoredActiveProjectManifestPath } from "./activeProjectManifest";
 import { getProjectCompositionSources, getSyncedCompositionSources } from "./projectSources";
+import { classifyProjectAutosaveWrite, classifyProjectFileChange } from "./projectFileChangeClassifier";
 import type { Command } from "../features/file-manager/operations/Command";
 
 type ProjectHistoryEntry = { project: ProjectManifest; compositionSources: Record<string, string>; implicitFileOperation?: boolean; fileCommand?: Command };
 type SavedSnapshots = { project: string; compositionSources: string };
-type DiskSnapshotBundle = { full: SavedSnapshots; fileContent: SavedSnapshots };
+type DiskSnapshotBundle = { full: SavedSnapshots; fileContent: SavedSnapshots; projectMetadata: SavedSnapshots };
 
 export type ProjectDocumentController = {
   activeProjectManifestPath: string;
@@ -69,7 +70,7 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(() => Date.now());
   const pendingFileOperationsRef = useRef(0);
   const lastGoodProjectRef = useRef<ProjectManifest | null>(null);
-  const lastGoodSavedSnapshotsRef = useRef<SavedSnapshots | null>(null);
+  const lastGoodSavedSnapshotsRef = useRef<DiskSnapshotBundle | null>(null);
   const projectRef = useRef(project);
   const compositionSourcesRef = useRef(compositionSources);
   const activeProjectManifestPathRef = useRef(activeProjectManifestPath);
@@ -79,7 +80,6 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
   const savedFileContentSnapshotsRef = useRef<SavedSnapshots | null>(null);
   const externalChangeConflictActiveRef = useRef(false);
   const externalChangeToastIdRef = useRef<string | null>(null);
-  const suppressProjectWatcherUntilRef = useRef(0);
   const projectHistoryRef = useRef<{ past: ProjectHistoryEntry[]; future: ProjectHistoryEntry[] }>({ past: [], future: [] });
   const lastProjectHistoryAtRef = useRef(0);
   const operationQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -203,11 +203,32 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
     return getProjectFileContentSnapshots(persistedProject);
   }
 
+  function getCurrentProjectMetadataSnapshots(projectToCheck = projectRef.current): SavedSnapshots {
+    const persistedProject = serializeProjectForSave({ ...projectToCheck, compositionSources: compositionSourcesRef.current });
+    return getProjectMetadataSnapshots(persistedProject);
+  }
+
   function getProjectFileContentSnapshots(projectToCheck: ProjectManifest): SavedSnapshots {
     return {
       project: getProjectFileContentSnapshot(projectToCheck),
       compositionSources: JSON.stringify(projectToCheck.compositionSources ?? {}),
     };
+  }
+
+  function getProjectMetadataSnapshots(projectToCheck: ProjectManifest): SavedSnapshots {
+    const {
+      compositionLibrary: _compositionLibrary,
+      compositionFolders: _compositionFolders,
+      compositionOrder: _compositionOrder,
+      compositionSources: _compositionSources,
+      compositions: _compositions,
+      editorState: _editorState,
+      scenes: _scenes,
+      timelineOrder: _timelineOrder,
+      timelines: _timelines,
+      ...projectMetadata
+    } = projectToCheck;
+    return { project: JSON.stringify(projectMetadata), compositionSources: "{}" };
   }
 
   function getSavedProjectFileContentSnapshots(): SavedSnapshots {
@@ -219,6 +240,14 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
       };
     } catch {
       return { project: savedProjectSnapshotRef.current, compositionSources: savedCompositionSourcesSnapshotRef.current };
+    }
+  }
+
+  function getSavedProjectMetadataSnapshots(): SavedSnapshots {
+    try {
+      return getProjectMetadataSnapshots(JSON.parse(savedProjectSnapshotRef.current) as ProjectManifest);
+    } catch {
+      return { project: savedProjectSnapshotRef.current, compositionSources: "{}" };
     }
   }
 
@@ -235,7 +264,7 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
       project: getProjectContentSnapshot(persistedProject),
       compositionSources: JSON.stringify(persistedProject.compositionSources ?? {}),
     };
-    return { full, fileContent: getProjectFileContentSnapshots(persistedProject) };
+    return { full, fileContent: getProjectFileContentSnapshots(persistedProject), projectMetadata: getProjectMetadataSnapshots(persistedProject) };
   }
 
   function snapshotsEqual(left: SavedSnapshots, right: SavedSnapshots) {
@@ -249,6 +278,10 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
     setSavedProjectSnapshot(snapshots.project);
     setSavedCompositionSourcesSnapshot(snapshots.compositionSources);
     setLastSavedAt(Date.now());
+  }
+
+  function markFileContentSnapshotsSaved(snapshots: SavedSnapshots) {
+    savedFileContentSnapshotsRef.current = snapshots;
   }
 
   function markLastHistoryEntryAsImplicitFileOperation() {
@@ -323,11 +356,11 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
       const { project: loadedProject } = await projectPersistenceService.loadProject({ manifestPath: activeProjectManifestPathRef.current });
       const normalizedProject = normalizeProject(loadedProject);
       const loadedCompositionSources = getProjectCompositionSources(normalizedProject);
+      const persistedDiskProject = serializeProjectForSave({ ...normalizedProject, compositionSources: loadedCompositionSources });
       replaceProject(normalizedProject, { history: false, syncSources: false, preserveEditorState: options?.preserveEditorState });
-      const persistedProject = serializeProjectForSave({ ...projectRef.current, compositionSources: loadedCompositionSources });
-      const nextSavedProjectSnapshot = getProjectContentSnapshot(persistedProject);
-      const nextSavedCompositionSourcesSnapshot = JSON.stringify(persistedProject.compositionSources ?? {});
-      const nextSavedFileContentSnapshots = getProjectFileContentSnapshots(persistedProject);
+      const nextSavedProjectSnapshot = getProjectContentSnapshot(persistedDiskProject);
+      const nextSavedCompositionSourcesSnapshot = JSON.stringify(persistedDiskProject.compositionSources ?? {});
+      const nextSavedFileContentSnapshots = getProjectFileContentSnapshots(persistedDiskProject);
       setSavedProjectSnapshot(nextSavedProjectSnapshot);
       setSavedCompositionSourcesSnapshot(nextSavedCompositionSourcesSnapshot);
       savedProjectSnapshotRef.current = nextSavedProjectSnapshot;
@@ -349,7 +382,6 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
   const reloadProjectFromWatcher = useCallback(async (changedPath?: string) => {
     if (pendingFileOperationsRef.current > 0) return;
     if (!isWatchedFileManagerPath(changedPath)) return;
-    if (performance.now() < suppressProjectWatcherUntilRef.current) return;
     window.clearTimeout(implicitFileOperationSaveTimeoutRef.current);
     implicitFileOperationSaveVersionRef.current++;
     latestAutosaveVersionRef.current++;
@@ -357,13 +389,21 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
     const currentFileContentSnapshots = getCurrentProjectFileContentSnapshots();
     const savedFileContentSnapshots = getSavedProjectFileContentSnapshots();
     const diskSnapshots = await getDiskProjectSnapshotBundle();
-    if (snapshotsEqual(diskSnapshots.fileContent, savedFileContentSnapshots)) return;
-    if (snapshotsEqual(diskSnapshots.full, currentSnapshots)) {
+    const decision = classifyProjectFileChange({ currentFileContentSnapshots, currentSnapshots, diskSnapshots, hasUnsavedAppChanges: hasUnsavedProjectChanges(), savedFileContentSnapshots });
+    if (decision === "ignore") return;
+    if (decision === "mark-saved") {
       markSnapshotsSaved(currentSnapshots);
       setSourceStatus(changedPath ? `Saved changes detected at ${changedPath}.` : "Saved project changes detected.");
       return;
     }
-    if (snapshotsEqual(diskSnapshots.fileContent, currentFileContentSnapshots)) return;
+    if (decision === "mark-file-content-saved") {
+      markFileContentSnapshotsSaved(diskSnapshots.fileContent);
+      return;
+    }
+    if (decision === "conflict") {
+      showExternalChangeConflict(changedPath);
+      return;
+    }
     await reloadProjectFromDisk({ preserveEditorState: true });
   }, [reloadProjectFromDisk, setSourceStatus]);
 
@@ -380,7 +420,7 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
       createElement("div", { className: "flex justify-end gap-2" },
         createElement("button", { className: "rounded-lg border border-[#2d313b] px-3 py-1.5 text-xs font-medium text-[#c5c8d2] hover:border-[#4a5060] hover:bg-[#20232c]", type: "button", onClick: () => toast.dismiss(t.id) }, "Decide later"),
         createElement("button", { className: "rounded-lg border border-[#2d313b] bg-[#1a1d25] px-3 py-1.5 text-xs font-semibold text-white hover:border-[#4a5060] hover:bg-[#20232c]", type: "button", onClick: () => { externalChangeConflictActiveRef.current = false; toast.dismiss(t.id); void reloadProjectFromDisk(); } }, "Load disk changes"),
-        createElement("button", { className: "rounded-lg border border-[#2d313b] bg-[#1a1d25] px-3 py-1.5 text-xs font-semibold text-white hover:border-[#4a5060] hover:bg-[#20232c]", type: "button", onClick: () => { externalChangeConflictActiveRef.current = false; toast.dismiss(t.id); void saveProject(projectRef.current); } }, "Save app over disk"),
+        createElement("button", { className: "rounded-lg border border-[#2d313b] bg-[#1a1d25] px-3 py-1.5 text-xs font-semibold text-white hover:border-[#4a5060] hover:bg-[#20232c]", type: "button", onClick: () => { externalChangeConflictActiveRef.current = false; toast.dismiss(t.id); void saveProject(projectRef.current, { force: true }); } }, "Save app over disk"),
       ),
     ), { duration: Infinity });
   }
@@ -403,8 +443,12 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
     if (pendingFileOperationsRef.current === 1) {
       lastGoodProjectRef.current = projectRef.current;
       lastGoodSavedSnapshotsRef.current = {
-        project: savedProjectSnapshotRef.current,
-        compositionSources: savedCompositionSourcesSnapshotRef.current,
+        full: {
+          project: savedProjectSnapshotRef.current,
+          compositionSources: savedCompositionSourcesSnapshotRef.current,
+        },
+        fileContent: getSavedProjectFileContentSnapshots(),
+        projectMetadata: getSavedProjectMetadataSnapshots(),
       };
       setIsFileSystemBusy(true);
     }
@@ -440,10 +484,11 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
     commitProjectDocument(restored, restoredSources);
     const snapshots = lastGoodSavedSnapshotsRef.current;
     if (!snapshots) return;
-    savedProjectSnapshotRef.current = snapshots.project;
-    savedCompositionSourcesSnapshotRef.current = snapshots.compositionSources;
-    setSavedProjectSnapshot(snapshots.project);
-    setSavedCompositionSourcesSnapshot(snapshots.compositionSources);
+    savedProjectSnapshotRef.current = snapshots.full.project;
+    savedCompositionSourcesSnapshotRef.current = snapshots.full.compositionSources;
+    savedFileContentSnapshotsRef.current = snapshots.fileContent;
+    setSavedProjectSnapshot(snapshots.full.project);
+    setSavedCompositionSourcesSnapshot(snapshots.full.compositionSources);
   }
 
   function startFileSystemRecovery(cancelImplicitSave = true) {
@@ -618,13 +663,14 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
     };
   }
 
-  async function saveProject(projectToSave = projectRef.current, options: { autosaveVersion?: number; errorMessage?: string; throwOnError?: boolean } = {}) {
+  async function saveProject(projectToSave = projectRef.current, options: { autosaveVersion?: number; errorMessage?: string; force?: boolean; throwOnError?: boolean } = {}) {
     const syncedSources = projectToSave === projectRef.current ? compositionSourcesRef.current : getProjectCompositionSources(projectToSave);
     const embeddedProject = normalizeProject({ ...projectToSave, compositionSources: syncedSources });
     const persistedProject = serializeProjectForSave(embeddedProject);
     const projectSnapshot = getProjectContentSnapshot(persistedProject);
     const compositionSourcesSnapshot = JSON.stringify(persistedProject.compositionSources ?? {});
     const projectFileContentSnapshots = getProjectFileContentSnapshots(persistedProject);
+    const projectMetadataSnapshots = getProjectMetadataSnapshots(persistedProject);
     const autosaveVersion = options.autosaveVersion;
     const shouldApplySaveResult = () => autosaveVersion === undefined || autosaveVersion === latestAutosaveVersionRef.current;
 
@@ -632,22 +678,27 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
     setIsFileSystemBusy(true);
     const write = async () => {
       if (!shouldApplySaveResult()) return;
-      if (autosaveVersion !== undefined && externalChangeConflictActiveRef.current) return;
-      if (autosaveVersion !== undefined) {
+      if (!options.force && externalChangeConflictActiveRef.current) return;
+      if (!options.force) {
         const diskSnapshots = await getDiskProjectSnapshotBundle();
         const savedFileContentSnapshots = getSavedProjectFileContentSnapshots();
-        if (snapshotsEqual(diskSnapshots.full, { project: projectSnapshot, compositionSources: compositionSourcesSnapshot })) {
+        const writeDecision = classifyProjectAutosaveWrite({ diskSnapshots, savedFileContentSnapshots, savedMetadataSnapshots: getSavedProjectMetadataSnapshots(), targetFileContentSnapshots: projectFileContentSnapshots, targetMetadataSnapshots: projectMetadataSnapshots, targetSnapshots: { project: projectSnapshot, compositionSources: compositionSourcesSnapshot } });
+        if (writeDecision === "mark-saved") {
           markSnapshotsSaved(diskSnapshots.full);
           return;
         }
-        if (!snapshotsEqual(diskSnapshots.fileContent, projectFileContentSnapshots) && !snapshotsEqual(diskSnapshots.fileContent, savedFileContentSnapshots)) {
+        if (writeDecision === "mark-file-content-saved-and-write") markFileContentSnapshotsSaved(diskSnapshots.fileContent);
+        if (writeDecision === "conflict") {
           showExternalChangeConflict();
           return;
         }
       }
-      suppressProjectWatcherUntilRef.current = performance.now() + 2500;
-      const result = await projectPersistenceService.saveProject({ manifestPath: activeProjectManifestPathRef.current, project: persistedProject });
       if (!shouldApplySaveResult()) return;
+      const result = await projectPersistenceService.saveProject({ manifestPath: activeProjectManifestPathRef.current, project: persistedProject });
+      if (!shouldApplySaveResult()) {
+        markFileContentSnapshotsSaved(projectFileContentSnapshots);
+        return;
+      }
       const nextSavedProjectSnapshot = result.projectSnapshot ? getProjectContentSnapshot(JSON.parse(result.projectSnapshot) as ProjectManifest) : projectSnapshot;
       const nextSavedCompositionSourcesSnapshot = result.compositionSourcesSnapshot || compositionSourcesSnapshot;
       setSavedProjectSnapshot(nextSavedProjectSnapshot);

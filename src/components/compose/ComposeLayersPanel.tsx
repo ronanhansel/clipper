@@ -1,6 +1,7 @@
 import { Braces, ChartNoAxesColumn, ChevronRight, Code2, Eye, EyeOff, Frame, Image, Layers, Lock, Palette, PenTool, Type, Unlock } from "lucide-react";
 import type { MouseEvent, PointerEvent, ReactNode, Ref } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo } from "react";
 import { Tree, type CursorProps, type DragPreviewProps, type MoveHandler, type NodeApi, type NodeRendererProps, type RowRendererProps, type TreeApi } from "react-arborist";
 import type { FrameObject, Part } from "../../core/types";
 import { arboristDndManager } from "../../lib/arboristDndManager";
@@ -21,7 +22,13 @@ export type ComposeLayerNode = {
   children?: ComposeLayerNode[];
 };
 
-export function ComposeLayersPanel({ part, selectedObjectIds, onSelectObjects, onHoverObject, onReorderObjects, onToggleLayerHidden, onToggleLayerLocked }: { part: Part; selectedObjectIds: string[]; onSelectObjects: (objects: FrameObject[]) => void; onHoverObject: (object: FrameObject | null) => void; onReorderObjects: (objectIds: string[], targetIndex: number) => void; onToggleLayerHidden?: (layerId: string) => void; onToggleLayerLocked?: (layerId: string) => void }) {
+type ComposeLayersPanelProps = { part: Part; selectedObjectIds: string[]; onSelectObjects: (objects: FrameObject[]) => void; onSelectFrameSettings: () => void; onHoverObject: (object: FrameObject | null) => void; onReorderObjects: (objectIds: string[], targetIndex: number) => void; onToggleLayerHidden?: (layerId: string) => void; onToggleLayerLocked?: (layerId: string) => void };
+
+export function ComposeLayersPanel(props: ComposeLayersPanelProps) {
+  return <MemoizedComposeLayersPanel {...props} />;
+}
+
+const MemoizedComposeLayersPanel = memo(function ComposeLayersPanelContent({ part, selectedObjectIds, onSelectObjects, onSelectFrameSettings, onHoverObject, onReorderObjects, onToggleLayerHidden, onToggleLayerLocked }: ComposeLayersPanelProps) {
   const [openById, setOpenById] = useState<Record<string, boolean>>({ root: true, frame: true, background: true, objects: true });
   const [selectedLayerIds, setSelectedLayerIds] = useState<string[]>(selectedObjectIds);
   const [dropCursorVisible, setDropCursorVisible] = useState(false);
@@ -44,8 +51,9 @@ export function ComposeLayersPanel({ part, selectedObjectIds, onSelectObjects, o
     previousSelectedObjectIdsRef.current = selectedObjectIds;
     setSelectedLayerIds((current) => {
       if (selectedObjectIds.length > 0) return selectedObjectIds.filter((id) => findComposeLayerNode(treeData, id));
-      if (previousSelectedObjectIds.length > 0) return [];
       const preserved = current.filter((id) => findComposeLayerNode(treeData, id));
+      if (preserved.some((id) => id === "frame" || id === "background")) return preserved;
+      if (previousSelectedObjectIds.length > 0) return [];
       return preserved.length > 0 ? preserved : [];
     });
   }, [selectedObjectIds, treeData]);
@@ -86,20 +94,19 @@ export function ComposeLayersPanel({ part, selectedObjectIds, onSelectObjects, o
 
   function selectLayerNodes(nodes: NodeApi<ComposeLayerNode>[]) {
     const ids = nodes.map((node) => node.id);
-    const objectIds = nodes.flatMap((node) => (node.data.kind === "object" ? [node.id] : []));
+    const objectIds = nodes.flatMap((node) => getNodeObjects(node.data).map((object) => object.id));
     setSelectedLayerIds(ids);
     arboristTreeRef.current?.setSelection({ ids: objectIds, anchor: objectIds[0] ?? null, mostRecent: objectIds.at(-1) ?? null });
-    onSelectObjects(nodes.flatMap((node) => node.data.object ? [node.data.object] : []));
+    if (nodes.length === 1 && (nodes[0].data.kind === "background" || nodes[0].data.kind === "frame")) {
+      onSelectFrameSettings();
+      return;
+    }
+    onSelectObjects(nodes.flatMap((node) => getNodeObjects(node.data)));
   }
 
   function selectLayerFromPointer(event: PointerEvent<HTMLDivElement>, node: NodeApi<ComposeLayerNode>) {
     if (event.button !== 0) return;
     event.stopPropagation();
-    if (node.isInternal && !node.data.object && !event.metaKey && !event.ctrlKey && !event.shiftKey) {
-      toggleLayerNode(node);
-      return;
-    }
-
     if (event.shiftKey && selectedLayerIds.length > 0) {
       const visibleNodes = arboristTreeRef.current?.visibleNodes ?? [];
       const anchorId = selectedLayerIds.at(-1);
@@ -232,7 +239,7 @@ export function ComposeLayersPanel({ part, selectedObjectIds, onSelectObjects, o
       </div>
     </section>
   );
-}
+});
 
 function ProjectTreeCursor({ hidden, top, left, indent }: CursorProps & { hidden?: boolean }) {
   if (hidden) return null;
@@ -363,6 +370,11 @@ function buildComposeLayerTree(part: Part): ComposeLayerNode[] {
     },
     { id: "frame", name: `${part.frame.width} x ${part.frame.height} Frame`, kind: "frame" },
   ];
+}
+
+function getNodeObjects(node: ComposeLayerNode): FrameObject[] {
+  if (node.object) return [node.object];
+  return node.children?.flatMap(getNodeObjects) ?? [];
 }
 
 function objectToNode(object: FrameObject, kind: Extract<ComposeLayerKind, "background-object" | "object">): ComposeLayerNode {

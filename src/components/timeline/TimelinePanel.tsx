@@ -13,16 +13,14 @@ export function TimelinePanel(props: TimelinePanelProps) {
   const lastDirectPropsRef = useRef<TimelinePanelProps>(props);
   const lastComposePartRef = useRef(props.composeAnimationPart ?? null);
   const lastComposeSelectedObjectIdsRef = useRef(props.selectedObjectIds ?? []);
-  const lastComposeTimeRef = useRef(props.currentSceneTime);
   if (props.mode !== "compose") lastDirectPropsRef.current = props;
   if (props.mode === "compose") {
     lastComposePartRef.current = props.composeAnimationPart ?? null;
     lastComposeSelectedObjectIdsRef.current = props.selectedObjectIds ?? [];
-    if (!props.isPlaying) lastComposeTimeRef.current = props.currentSceneTime;
   }
   const composePart = props.mode === "compose" ? props.composeAnimationPart ?? null : lastComposePartRef.current;
   const composeSelectedObjectIds = props.mode === "compose" ? props.selectedObjectIds ?? [] : lastComposeSelectedObjectIdsRef.current;
-  const composeCurrentTime = props.mode === "compose" && !props.isPlaying ? props.currentSceneTime : lastComposeTimeRef.current;
+  const composeCurrentTime = props.currentSceneTime;
   const directProps = props.mode === "compose" ? lastDirectPropsRef.current : props;
   useEffect(() => {
     function getCompositionId(event: DragEvent) {

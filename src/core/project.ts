@@ -96,7 +96,7 @@ export function normalizeAnimationGraphState(graph: AnimationGraphState | undefi
   const customNodes = graph.customNodes && typeof graph.customNodes === "object" ? Object.fromEntries(Object.entries(graph.customNodes).flatMap(([nodeId, node]) => {
     if (deletedNodeIdSet.has(nodeId)) return [];
     if (!nodeId || !node || typeof node !== "object") return [];
-    const kind = node.kind === "animation" || node.kind === "time" || node.kind === "group" ? node.kind : undefined;
+    const kind = node.kind === "animation" || node.kind === "time" || node.kind === "split" || node.kind === "group" ? node.kind : undefined;
     const label = typeof node.label === "string" && node.label ? node.label : undefined;
     const scopeKey = typeof node.scopeKey === "string" && node.scopeKey ? node.scopeKey : undefined;
     if (!kind || !label || !scopeKey) return [];
@@ -162,7 +162,7 @@ function normalizeAnimationGraphGroups(groups: AnimationGraphState["groups"], de
     if (!nodes[outNodeId]) nodes[outNodeId] = { x: 6, y: 10 };
     const customNodes = group.customNodes && typeof group.customNodes === "object" ? Object.fromEntries(Object.entries(group.customNodes).flatMap(([nodeId, node]) => {
       if (!nodeId || deletedNodeIdSet.has(nodeId) || !node || typeof node !== "object") return [];
-      const kind = node.kind === "animation" || node.kind === "time" || node.kind === "group" ? node.kind : undefined;
+      const kind = node.kind === "animation" || node.kind === "time" || node.kind === "split" || node.kind === "group" ? node.kind : undefined;
       const label = typeof node.label === "string" && node.label ? node.label : undefined;
       const scopeKey = typeof node.scopeKey === "string" && node.scopeKey ? node.scopeKey : groupId;
       if (!kind || !label) return [];
@@ -181,7 +181,7 @@ function normalizeAnimationGraphGroups(groups: AnimationGraphState["groups"], de
       const fromNodeId = typeof edge.fromNodeId === "string" ? edge.fromNodeId : "";
       const toNodeId = typeof edge.toNodeId === "string" ? edge.toNodeId : "";
       if (!fromNodeId || !toNodeId || !hasNode(fromNodeId) || !hasNode(toNodeId)) return [];
-      if (toNodeId === outNodeId && repairedCustomNodes?.[fromNodeId]?.kind !== "time") return [];
+      if (toNodeId === outNodeId && repairedCustomNodes?.[fromNodeId]?.kind !== "time" && repairedCustomNodes?.[fromNodeId]?.kind !== "split") return [];
       const fromPort = animationGraphPorts.has(edge.fromPort) ? edge.fromPort : "right";
       const toPort = animationGraphPorts.has(edge.toPort) ? edge.toPort : "left";
       const fromSocket = typeof (edge as { fromSocket?: unknown }).fromSocket === "string" ? (edge as { fromSocket: string }).fromSocket : undefined;
@@ -206,7 +206,7 @@ function normalizeTimelineMode(mode: unknown): TimelineMode {
 }
 
 function normalizeCompositionRenderMode(mode: unknown): CompositionRenderMode {
-  return mode === "live-dom" || mode === "webgl" ? mode : "dom";
+  return mode === "webgl" ? mode : "dom";
 }
 
 function normalizeComposition3dGraph(graph: unknown): Composition3dGraphState | undefined {
@@ -531,7 +531,7 @@ function getGraphLayerAnimationsForObject(object: FrameObject, graph: AnimationG
   const scopeKey = object.id;
   const customNodes = Object.entries(graph.customNodes ?? {}).filter(([, node]) => node.scopeKey === scopeKey);
   if (!customNodes.length) return [];
-  const nodeKinds = new Map<string, "animation" | "time" | "layer" | "group">([[`layer:${object.id}`, "layer"]]);
+  const nodeKinds = new Map<string, "animation" | "time" | "split" | "layer" | "group">([[`layer:${object.id}`, "layer"]]);
   for (const [nodeId, node] of customNodes) nodeKinds.set(nodeId, node.kind);
   const edges = (graph.edges ?? []).filter((edge) => nodeKinds.has(edge.fromNodeId) && nodeKinds.has(edge.toNodeId));
   const connected = getGraphConnectedToLayerNodeIds(edges, nodeKinds);
@@ -554,7 +554,8 @@ function getGraphLayerAnimationsForObject(object: FrameObject, graph: AnimationG
       if (emittedPropertiesByTime.has(propertyTimeKey)) return [];
       emittedPropertiesByTime.add(propertyTimeKey);
     }
-    return [{ id: `graph:${nodeId}`, name: node.label, keyframes, options: getGraphTimeOptions(timeNodeId, timeNode, graph, delay) }];
+    const splitNodeId = getGraphSplitNodeIdForTarget(timeNodeId, graph, edges, nodeKinds, `layer:${object.id}`);
+    return [{ id: `graph:${nodeId}`, name: node.label, keyframes, options: getGraphTimeOptions(timeNodeId, timeNode, graph, delay, splitNodeId) }];
   });
   const groupAnimations = customNodes.flatMap(([nodeId, node]) => {
     if (node.kind !== "group" || !connected.has(nodeId)) return [];
@@ -567,7 +568,7 @@ function getGraphLayerAnimationsForObject(object: FrameObject, graph: AnimationG
 
 function getRegisteredGroupAnimations(group: AnimationGraphGroup, graph: AnimationGraphState, groupNodeId: string): LayerAnimation[] {
   const customNodes = group.customNodes ?? {};
-  const nodeKinds = new Map<string, "animation" | "time" | "out" | "group">([[group.outNodeId, "out"]]);
+  const nodeKinds = new Map<string, "animation" | "time" | "split" | "out" | "group">([[group.outNodeId, "out"]]);
   for (const [nodeId, node] of Object.entries(customNodes)) nodeKinds.set(nodeId, node.kind);
   const edges = (group.edges ?? []).filter((edge) => nodeKinds.has(edge.fromNodeId) && nodeKinds.has(edge.toNodeId));
   const registered = getGroupConnectedToOutNodeIds(edges, nodeKinds, group.outNodeId);
@@ -589,11 +590,30 @@ function getRegisteredGroupAnimations(group: AnimationGraphGroup, graph: Animati
     }
     const groupGraph = { ...graph, customNodes, parameters: { ...(graph.parameters ?? {}), ...(group.parameters ?? {}) } } satisfies AnimationGraphState;
     const delay = getGraphTimeStart(timeNodeId, groupGraph, edges, nodeKinds, new Set());
-    return [{ id: `graph:${groupNodeId}:${nodeId}`, name: `${group.name} ${node.label}`, keyframes, options: getGraphTimeOptions(timeNodeId, timeNode, groupGraph, delay) }];
+    const splitNodeId = getGraphSplitNodeIdForTarget(timeNodeId, groupGraph, edges, nodeKinds, group.outNodeId);
+    return [{ id: `graph:${groupNodeId}:${nodeId}`, name: `${group.name} ${node.label}`, keyframes, options: getGraphTimeOptions(timeNodeId, timeNode, groupGraph, delay, splitNodeId) }];
   });
 }
 
-function getGroupConnectedToOutNodeIds(edges: AnimationGraphEdge[], nodeKinds: Map<string, "animation" | "time" | "out" | "group">, outNodeId: string) {
+function getGraphSplitNodeIdForTarget(
+  timeNodeId: string,
+  graph: AnimationGraphState,
+  edges: AnimationGraphEdge[],
+  nodeKinds: Map<string, "animation" | "time" | "split" | "layer" | "group" | "out">,
+  targetNodeId: string,
+) {
+  const direct = edges.find((edge) => edge.fromNodeId === timeNodeId && edge.toNodeId === targetNodeId);
+  if (direct) return null;
+  const splitEdge = edges.find((edge) => edge.fromNodeId === timeNodeId && nodeKinds.get(edge.toNodeId) === "split");
+  if (!splitEdge) return null;
+  const splitNodeId = splitEdge.toNodeId;
+  const registered = edges.some((edge) => edge.fromNodeId === splitNodeId && edge.toNodeId === targetNodeId);
+  if (!registered) return null;
+  const splitNode = graph.customNodes?.[splitNodeId];
+  return splitNode?.kind === "split" ? splitNodeId : null;
+}
+
+function getGroupConnectedToOutNodeIds(edges: AnimationGraphEdge[], nodeKinds: Map<string, "animation" | "time" | "split" | "out" | "group">, outNodeId: string) {
   const reverse = new Map<string, string[]>();
   for (const edge of edges) reverse.set(edge.toNodeId, [...(reverse.get(edge.toNodeId) ?? []), edge.fromNodeId]);
   const connected = new Set<string>();
@@ -637,7 +657,7 @@ function parseGraphKeyframeValue(value: string | undefined, fallback: number) {
     : trimmed;
 }
 
-function getGraphConnectedToLayerNodeIds(edges: AnimationGraphEdge[], nodeKinds: Map<string, "animation" | "time" | "layer" | "group">) {
+function getGraphConnectedToLayerNodeIds(edges: AnimationGraphEdge[], nodeKinds: Map<string, "animation" | "time" | "split" | "layer" | "group">) {
   const reverse = new Map<string, string[]>();
   for (const edge of edges) reverse.set(edge.toNodeId, [...(reverse.get(edge.toNodeId) ?? []), edge.fromNodeId]);
   const connected = new Set<string>();
@@ -651,7 +671,7 @@ function getGraphConnectedToLayerNodeIds(edges: AnimationGraphEdge[], nodeKinds:
   return connected;
 }
 
-function getGraphTimeStart(nodeId: string, graph: AnimationGraphState, edges: AnimationGraphEdge[], nodeKinds: Map<string, "animation" | "time" | "layer" | "group" | "out">, visiting: Set<string>): number {
+function getGraphTimeStart(nodeId: string, graph: AnimationGraphState, edges: AnimationGraphEdge[], nodeKinds: Map<string, "animation" | "time" | "split" | "layer" | "group" | "out">, visiting: Set<string>): number {
   if (visiting.has(nodeId)) return 0;
   visiting.add(nodeId);
   const node = graph.customNodes?.[nodeId];
@@ -666,12 +686,36 @@ function getGraphTimeDuration(nodeId: string, graph: AnimationGraphState) {
   return parseGraphSeconds(graph.parameters?.[nodeId]?.duration ?? node?.details?.duration ?? "0s");
 }
 
-function getGraphTimeOptions(timeNodeId: string, timeNode: AnimationGraphCustomNode, graph: AnimationGraphState, delay: number): LayerAnimation["options"] {
+function getGraphTimeOptions(timeNodeId: string, timeNode: AnimationGraphCustomNode, graph: AnimationGraphState, delay: number, splitNodeId?: string | null): LayerAnimation["options"] {
   const duration = parseGraphSeconds(graph.parameters?.[timeNodeId]?.duration ?? timeNode.details?.duration ?? "0s");
   const ease = graph.parameters?.[timeNodeId]?.ease ?? timeNode.details?.ease;
   const repeat = parseGraphRepeat(graph.parameters?.[timeNodeId]?.repeat ?? timeNode.details?.repeat);
   const repeatType = normalizeGraphRepeatType(graph.parameters?.[timeNodeId]?.repeatType ?? timeNode.details?.repeatType);
-  return { delay, duration, ease: normalizeGraphEase(ease), type: "tween", repeat, repeatType };
+  return {
+    delay,
+    duration,
+    ease: normalizeGraphEase(ease),
+    type: "tween",
+    repeat,
+    repeatType,
+    split: splitNodeId ? getGraphSplitOptions(splitNodeId, graph) : undefined,
+  };
+}
+
+function getGraphSplitOptions(splitNodeId: string, graph: AnimationGraphState) {
+  const splitNode = graph.customNodes?.[splitNodeId];
+  if (!splitNode || splitNode.kind !== "split") return undefined;
+  const params = graph.parameters?.[splitNodeId];
+  const mode = params?.mode ?? splitNode.details?.mode;
+  if (mode !== "word" && mode !== "character") return undefined;
+  const order = params?.order ?? splitNode.details?.order;
+  const repeatScope = params?.repeatScope ?? splitNode.details?.repeatScope;
+  return {
+    mode,
+    stagger: parseGraphSeconds(params?.stagger ?? splitNode.details?.stagger ?? "0s"),
+    order: order === "reverse" || order === "center" ? order : "forward",
+    repeatScope: repeatScope === "item" ? "item" : "sequence",
+  } satisfies NonNullable<LayerAnimation["options"]["split"]>;
 }
 
 function parseGraphSeconds(value: string) { return parseGraphNumber(value, 0); }

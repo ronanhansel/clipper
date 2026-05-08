@@ -388,6 +388,28 @@ describe("project normalization", () => {
     expect(applied.objects[0].animations?.[0]).toMatchObject({ id: "graph:groupNode:scale", keyframes: { scale: [0, 1] } });
   });
 
+  it("materializes split metadata on graph-authored text animations", () => {
+    const applied = applyAnimationGraphToComposition({
+      ...composition,
+      objects: [{ id: "text", name: "Text", type: "text", selector: ".text", bounds: { x: 0, y: 0, width: 100, height: 40 }, style: {}, content: "A B C", animations: [] }],
+    }, {
+      nodes: {},
+      customNodes: {
+        effect: { kind: "animation", label: "Opacity", scopeKey: "text", details: { property: "opacity" } },
+        time: { kind: "time", label: "Time", scopeKey: "text", details: { delay: "0s", duration: "1s", repeat: "Infinity" } },
+        split: { kind: "split", label: "Split", scopeKey: "text", details: { mode: "word", stagger: "0.08s", order: "forward", repeatScope: "sequence" } },
+      },
+      edges: [
+        { id: "effect->time", fromNodeId: "effect", fromPort: "bottom", toNodeId: "time", toPort: "top" },
+        { id: "time->split", fromNodeId: "time", fromPort: "bottom", toNodeId: "split", toPort: "top" },
+        { id: "split->layer", fromNodeId: "split", fromPort: "bottom", toNodeId: "layer:text", toPort: "top" },
+      ],
+      parameters: { effect: { from: "0", to: "1" } },
+    });
+
+    expect(applied.objects[0].animations?.[0].options.split).toEqual({ mode: "word", stagger: 0.08, order: "forward", repeatScope: "sequence" });
+  });
+
   it("keeps disconnected or unregistered group contents graph-only", () => {
     const applied = applyAnimationGraphToComposition({
       ...composition,
@@ -525,6 +547,19 @@ describe("project normalization", () => {
 
     const scenePart = getSceneFromProject(project, "tl_main")?.compositions[0];
     expect(scenePart?.composition3dGraph?.customNodes?.["composition3d:time"]?.label).toBe("Time");
+  });
+
+  it("normalizes legacy live-dom compositions to dom render mode", () => {
+    const normalized = normalizeProject({
+      ...projectWithComposition(),
+      compositions: [{ ...composition, renderMode: "live-dom" as any }],
+      compositionLibrary: [{ ...composition, renderMode: "live-dom" as any }],
+      timelines: [{ id: "tl_main", filePath: "timelines/tl_main.timeline.json", clips: [{ id: "clip", compositionId: composition.id, renderMode: "live-dom" as any, duration: composition.duration } as any], adjustmentLayers: [], settings: {} }],
+    });
+
+    expect(normalized.compositions?.[0].renderMode).toBe("dom");
+    expect(normalized.compositionLibrary?.[0].renderMode).toBe("dom");
+    expect(normalized.timelines?.[0].clips[0].renderMode).toBe("dom");
   });
 
   it("remaps timeline clip composition references when composition path IDs change", () => {

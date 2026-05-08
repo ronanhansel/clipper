@@ -57,6 +57,7 @@ export type LayerAnimation = {
     skewX?: readonly [number, number] | readonly [number, number, number, ...number[]];
     skewY?: readonly [number, number] | readonly [number, number, number, ...number[]];
     transformPerspective?: readonly [number, number] | readonly [number, number, number, ...number[]];
+    blur?: readonly [number, number] | readonly [number, number, number, ...number[]];
     backgroundColor?: readonly [string, string] | readonly string[];
     color?: readonly [string, string] | readonly string[];
     pathOffset?: readonly [number, number];
@@ -76,6 +77,12 @@ export type LayerAnimation = {
     damping?: number;
     mass?: number;
     velocity?: number;
+    split?: {
+      mode: "word" | "character";
+      stagger?: number;
+      order?: "forward" | "reverse" | "center";
+      repeatScope?: "sequence" | "item";
+    };
   };
   enabled?: boolean;
 };
@@ -120,7 +127,7 @@ export type PartSnapshotLine = {
   description: string;
 };
 
-export type CompositionRenderMode = "dom" | "live-dom" | "webgl";
+export type CompositionRenderMode = "dom" | "webgl";
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 
@@ -373,7 +380,7 @@ export type AnimationGraphEdge = {
 };
 
 export type AnimationGraphCustomNode = {
-  kind: "animation" | "time" | "group";
+  kind: "animation" | "time" | "split" | "group";
   label: string;
   scopeKey: string;
   details?: Record<string, string>;

@@ -1,3 +1,4 @@
+import { useCallback, useRef } from "react";
 import { AgentPanel } from "../../components/AgentPanel";
 import { AdjustmentInspector, Composition3dNodeInspector, EmptyInspector, FrameInspector, MotionInspector, ObjectInspector, TransitionInspector } from "../../components/inspector/InspectorPanels";
 import type { AdjustmentEffectPointControl } from "../../core/effects/types";
@@ -28,6 +29,7 @@ type ConnectedInspectorContentProps = {
   positionPickMotionMarker: MarkerPick;
   trackerPickMotionMarker: MarkerPick;
   selectedObject: FrameObject | null | undefined;
+  isPlaying: boolean;
   selectedAdjustmentLayer: AdjustmentLayer | null | undefined;
   selectedTransitionLayer: TransitionLayer | null | undefined;
   sceneDurationSeconds: number;
@@ -52,6 +54,7 @@ type ConnectedInspectorContentProps = {
   onSnapAdjustmentMiddle: () => void;
   onSnapCompositionMiddle: () => void;
   onUpdateSelectedObject: (updater: (object: FrameObject) => FrameObject) => void;
+  onPreviewSelectedObject: (updater: (object: FrameObject) => FrameObject) => void;
   onUpdateAdjustmentLayer: (layerId: string, updater: (layer: AdjustmentLayer) => AdjustmentLayer) => void;
   onPreviewAdjustmentLayer: (layerId: string, updater: (layer: AdjustmentLayer) => AdjustmentLayer) => void;
   onClearAdjustmentPreview: () => void;
@@ -62,6 +65,8 @@ type ConnectedInspectorContentProps = {
   onUpdateSelectedPartDuration: (duration: number) => void;
   onUpdatePartFrame: (updater: (frame: PartFrame) => PartFrame) => void;
   onUpdatePartBackground: (updater: (background: BackgroundLayer) => BackgroundLayer) => void;
+  onPreviewPartFrame: (updater: (frame: PartFrame) => PartFrame) => void;
+  onPreviewPartBackground: (updater: (background: BackgroundLayer) => BackgroundLayer) => void;
   onUpdatePartRenderMode: (renderMode: CompositionRenderMode) => void;
   onUpdateComposition3dGraphNodeParameter: (nodeId: string, key: string, value: string) => void;
 };
@@ -87,6 +92,7 @@ export function ConnectedInspectorContent({
   positionPickMotionMarker,
   trackerPickMotionMarker,
   selectedObject,
+  isPlaying,
   selectedAdjustmentLayer,
   selectedTransitionLayer,
   sceneDurationSeconds,
@@ -111,6 +117,7 @@ export function ConnectedInspectorContent({
   onSnapAdjustmentMiddle,
   onSnapCompositionMiddle,
   onUpdateSelectedObject,
+  onPreviewSelectedObject,
   onUpdateAdjustmentLayer,
   onPreviewAdjustmentLayer,
   onClearAdjustmentPreview,
@@ -121,9 +128,21 @@ export function ConnectedInspectorContent({
   onUpdateSelectedPartDuration,
   onUpdatePartFrame,
   onUpdatePartBackground,
+  onPreviewPartFrame,
+  onPreviewPartBackground,
   onUpdatePartRenderMode,
   onUpdateComposition3dGraphNodeParameter,
 }: ConnectedInspectorContentProps) {
+  const stableSelectedObjectRef = useRef<FrameObject | null | undefined>(selectedObject);
+  const updateSelectedObjectRef = useRef(onUpdateSelectedObject);
+  const previewSelectedObjectRef = useRef(onPreviewSelectedObject);
+  if (!isPlaying) stableSelectedObjectRef.current = selectedObject;
+  updateSelectedObjectRef.current = onUpdateSelectedObject;
+  previewSelectedObjectRef.current = onPreviewSelectedObject;
+  const inspectorSelectedObject = isPlaying ? stableSelectedObjectRef.current : selectedObject;
+  const stableUpdateSelectedObject = useCallback((updater: (object: FrameObject) => FrameObject) => updateSelectedObjectRef.current(updater), []);
+  const stablePreviewSelectedObject = useCallback((updater: (object: FrameObject) => FrameObject) => previewSelectedObjectRef.current(updater), []);
+
   if (rightPanelTab === "agent") return <AgentPanel part={part} sourceStatus={sourceStatus} agentContext={agentContext} />;
 
   if (selectedMotion && selectedMotionPart) {
@@ -160,7 +179,7 @@ export function ConnectedInspectorContent({
     );
   }
 
-  if (selectedObject) return <ObjectInspector object={selectedObject} onChange={onUpdateSelectedObject} />;
+  if (inspectorSelectedObject) return <ObjectInspector object={inspectorSelectedObject} onChange={stableUpdateSelectedObject} onPreview={stablePreviewSelectedObject} />;
 
   if (selectedTransitionLayer) {
     return (
@@ -191,7 +210,7 @@ export function ConnectedInspectorContent({
 
   if (composeMode && part.renderMode === "webgl" && selectedComposition3dNodeId) return <Composition3dNodeInspector part={part} nodeId={selectedComposition3dNodeId} onParameterChange={onUpdateComposition3dGraphNodeParameter} />;
 
-  if (selectedPart) return <FrameInspector part={selectedPart} canSnapMiddle={canSnapCompositionMiddle} onDurationChange={onUpdateSelectedPartDuration} onFrameChange={onUpdatePartFrame} onBackgroundChange={onUpdatePartBackground} onRenderModeChange={onUpdatePartRenderMode} onSnapMiddle={onSnapCompositionMiddle} />;
+  if (selectedPart) return <FrameInspector part={selectedPart} canSnapMiddle={canSnapCompositionMiddle} onDurationChange={onUpdateSelectedPartDuration} onFrameChange={onUpdatePartFrame} onBackgroundChange={onUpdatePartBackground} onPreviewFrame={onPreviewPartFrame} onPreviewBackground={onPreviewPartBackground} onRenderModeChange={onUpdatePartRenderMode} onSnapMiddle={onSnapCompositionMiddle} />;
 
   return <EmptyInspector />;
 }

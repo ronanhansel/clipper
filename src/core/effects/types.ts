@@ -3,6 +3,7 @@ import type { LensPostProcessPass } from "./postprocess/lens";
 
 export type BasePostProcessPass = {
   id: string;
+  sourceLayerId?: string;
   kind: string;
   target: "final";
   requiresLiveDomSource?: boolean;
@@ -15,6 +16,18 @@ export type PostProcessPass = LensPostProcessPass | UnknownPostProcessPass;
 export type AdjustmentVisualStyle = {
   filter?: string;
   overlays?: AdjustmentVisualOverlay[];
+};
+
+export type AdjustmentExecutionPlanStep = {
+  layer: AdjustmentLayer;
+  filter?: string;
+  overlays?: AdjustmentVisualOverlay[];
+  postProcessPasses?: PostProcessPass[];
+};
+
+export type AdjustmentExecutionPlan = {
+  activeLayers: AdjustmentLayer[];
+  steps: AdjustmentExecutionPlanStep[];
 };
 
 export type AdjustmentVisualOverlay = {

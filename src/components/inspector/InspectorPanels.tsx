@@ -1,5 +1,5 @@
 import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, Italic, Strikethrough, Trash2, Underline } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { MAX_PART_DURATION_SECONDS, FRAME_HEIGHT, FRAME_WIDTH, type AdjustmentLayer, type BackgroundLayer, type Bounds, type CompositionRenderMode, type FrameObject, type MotionEase, type Part, type PartFrame, type Point, type TransitionLayer } from "../../core/types";
 import { clamp, roundTenth, roundTwo } from "../../core/math";
 import { getAdjustmentEffectPackage, getMotionEffectPackage, getTransitionEffectPackage } from "../../core/effects/registry";
@@ -174,10 +174,12 @@ function EaseSelectItems({ includeLinear = true, defaultInOut = false }: { inclu
   return <>{items.filter((item) => includeLinear || item.value !== "linear").map((item) => <EaseSelectItem key={item.value} {...item} />)}</>;
 }
 
-export function FrameInspector({ part, canSnapMiddle, onDurationChange, onFrameChange, onBackgroundChange, onRenderModeChange, onSnapMiddle }: { part: Part; canSnapMiddle: boolean; onDurationChange: (duration: number) => void; onFrameChange: (updater: (frame: PartFrame) => PartFrame) => void; onBackgroundChange: (updater: (background: BackgroundLayer) => BackgroundLayer) => void; onRenderModeChange: (renderMode: CompositionRenderMode) => void; onSnapMiddle: () => void }) {
+export function FrameInspector({ part, canSnapMiddle, onDurationChange, onFrameChange, onBackgroundChange, onPreviewFrame, onPreviewBackground, onRenderModeChange, onSnapMiddle }: { part: Part; canSnapMiddle: boolean; onDurationChange: (duration: number) => void; onFrameChange: (updater: (frame: PartFrame) => PartFrame) => void; onBackgroundChange: (updater: (background: BackgroundLayer) => BackgroundLayer) => void; onPreviewFrame?: (updater: (frame: PartFrame) => PartFrame) => void; onPreviewBackground?: (updater: (background: BackgroundLayer) => BackgroundLayer) => void; onRenderModeChange: (renderMode: CompositionRenderMode) => void; onSnapMiddle: () => void }) {
   const motionViews = getMotionMarkerViews(part);
   const markerEnd = Math.max(0, ...motionViews.motionMarkers.map((marker) => marker.start + marker.duration));
   const minimumDuration = roundTenth(Math.max(0.1, markerEnd));
+  const backgroundStyleValue = String(part.background.style.background ?? "");
+  const backgroundColorValue = isHexColor(backgroundStyleValue) ? backgroundStyleValue : "#000000";
 
   function updateDuration(value: string) {
     const numeric = Number(value);
@@ -213,16 +215,19 @@ export function FrameInspector({ part, canSnapMiddle, onDurationChange, onFrameC
         <Select value={part.renderMode ?? "dom"} onValueChange={(value) => onRenderModeChange(value as CompositionRenderMode)}>
           <SelectTrigger><SelectValue /></SelectTrigger>
           <SelectContent>
-            <SelectGroup>
-              <SelectItem value="dom">DOM</SelectItem>
-              <SelectItem value="live-dom">Live DOM</SelectItem>
-              <SelectItem value="webgl">WebGL</SelectItem>
-            </SelectGroup>
+              <SelectGroup>
+                <SelectItem value="dom">DOM</SelectItem>
+                <SelectItem value="webgl">WebGL</SelectItem>
+              </SelectGroup>
           </SelectContent>
         </Select>
       </label>
-      <label className={`grid gap-1.5 ${mutedCaps}`}>Frame background color<ColorSelector value={String(part.frame.style.background ?? "#000000")} onChange={updateFrameBackground} /></label>
-      {isHexColor(String(part.background.style.background ?? "")) ? <label className={`grid gap-1.5 ${mutedCaps}`}>Layer background color<ColorSelector value={String(part.background.style.background)} onChange={updateBackgroundColor} /></label> : null}
+      <div className={`grid gap-1.5 ${mutedCaps}`}><span>Frame color</span><ColorSelector value={String(part.frame.style.background ?? "#000000")} onChange={updateFrameBackground} onPreview={(value) => onPreviewFrame?.((frame) => ({ ...frame, style: { ...frame.style, background: value } }))} /></div>
+      <div className={`grid gap-1.5 ${mutedCaps}`}>
+        <span>Background color</span>
+        <ColorSelector value={backgroundColorValue} onChange={updateBackgroundColor} onPreview={(value) => onPreviewBackground?.((background) => ({ ...background, style: { ...background.style, background: value } }))} />
+        {!isHexColor(backgroundStyleValue) && backgroundStyleValue ? <small className="text-[11px] font-semibold normal-case tracking-normal text-[#8f96a3]">Current background is a custom style; picking a color replaces it.</small> : null}
+      </div>
       <label className="flex cursor-pointer items-center gap-3 rounded-[10px] border border-[#2d313b] bg-[#171920] p-3 text-sm font-bold text-[#dfe2ea] transition hover:border-[var(--clipper-accent)] hover:bg-[#20232c]">
         <Checkbox checked={Boolean(part.background.stretchToElements)} onCheckedChange={(checked) => updateBackgroundStretch(checked === true)} />
         <span>Stretch background</span>
@@ -326,9 +331,21 @@ function FontSelector({ value, onChange }: { value: string; onChange: (value: st
   );
 }
 
-export function ObjectInspector({ object, onChange }: { object: FrameObject; onChange: (updater: (object: FrameObject) => FrameObject) => void }) {
+export const ObjectInspector = memo(function ObjectInspector({ object, onChange, onPreview }: { object: FrameObject; onChange: (updater: (object: FrameObject) => FrameObject) => void; onPreview?: (updater: (object: FrameObject) => FrameObject) => void }) {
   const isText = object.type === "text";
+  const isRect = object.type === "rect";
+  const hasIndividualRadius = ["borderTopLeftRadius", "borderTopRightRadius", "borderBottomRightRadius", "borderBottomLeftRadius"].some((key) => object.style[key] !== undefined);
+  const [cornerRadiusExpanded, setCornerRadiusExpanded] = useState(hasIndividualRadius);
   const colorStyleEntries = getEditableColorStyleEntries(object.style).filter(([key]) => !(isText && key === "color"));
+  const opacity = getObjectStyleNumber(object.style.opacity, 1);
+  const opacityPercent = Math.round(clamp(opacity <= 1 ? opacity * 100 : opacity, 0, 100));
+  const cornerRadius = getObjectStyleNumber(object.style.borderRadius, 0);
+  const cornerRadiusFields = [
+    ["borderTopLeftRadius", "Top left"],
+    ["borderTopRightRadius", "Top right"],
+    ["borderBottomRightRadius", "Bottom right"],
+    ["borderBottomLeftRadius", "Bottom left"],
+  ] as const;
   const textColor = isHexColor(String(object.style.color ?? "")) ? String(object.style.color) : "#FFFFFF";
   const fontFamily = String(object.style.fontFamily ?? defaultFontFamily);
   const fontSize = Number(object.style.fontSize ?? 48);
@@ -338,10 +355,16 @@ export function ObjectInspector({ object, onChange }: { object: FrameObject; onC
   const lineHeight = Number(object.style.lineHeight ?? 1.1);
   const letterSpacing = Number(object.style.letterSpacing ?? 0);
   const textAlign = String(object.style.textAlign ?? "left");
+  const verticalAlign = String(object.style.verticalAlign ?? "middle");
+  const textBoxLayout = String(object.style.textBoxLayout ?? "fixed");
   const textButtonBase = "grid h-9 place-items-center rounded-[9px] border text-[#dfe2ea] transition hover:border-[var(--clipper-accent-strong)]";
 
   function updateBounds(key: keyof Bounds, value: string) {
     onChange((current) => ({ ...current, bounds: { ...current.bounds, [key]: Number(value) || 0 } }));
+  }
+
+  function previewBounds(key: keyof Bounds, value: number) {
+    onPreview?.((current) => ({ ...current, bounds: { ...current.bounds, [key]: Number.isFinite(value) ? value : 0 } }));
   }
 
   function updateStyleColor(key: string, value: string) {
@@ -358,6 +381,74 @@ export function ObjectInspector({ object, onChange }: { object: FrameObject; onC
 
   function updateStyleNumber(key: string, value: string) {
     updateStyleValue(key, Number(value) || 0);
+  }
+
+  function previewStyleNumber(key: string, value: number) {
+    onPreview?.((current) => ({ ...current, style: { ...current.style, [key]: Number.isFinite(value) ? value : 0 } }));
+  }
+
+  function updateOpacity(value: string) {
+    const percent = clamp(Number(value) || 0, 0, 100);
+    onChange((current) => {
+      const style = { ...current.style };
+      if (percent >= 100) delete style.opacity;
+      else style.opacity = roundTwo(percent / 100);
+      return { ...current, style };
+    });
+  }
+
+  function previewOpacity(value: number) {
+    const percent = clamp(Number.isFinite(value) ? value : 0, 0, 100);
+    onPreview?.((current) => {
+      const style = { ...current.style };
+      if (percent >= 100) delete style.opacity;
+      else style.opacity = roundTwo(percent / 100);
+      return { ...current, style };
+    });
+  }
+
+  function updateUniformCornerRadius(value: string) {
+    const radius = Math.max(0, Number(value) || 0);
+    onChange((current) => {
+      const { borderTopLeftRadius, borderTopRightRadius, borderBottomRightRadius, borderBottomLeftRadius, ...style } = current.style;
+      void borderTopLeftRadius; void borderTopRightRadius; void borderBottomRightRadius; void borderBottomLeftRadius;
+      const nextStyle = { ...style };
+      if (radius > 0) nextStyle.borderRadius = radius;
+      else delete nextStyle.borderRadius;
+      return { ...current, style: nextStyle };
+    });
+  }
+
+  function previewUniformCornerRadius(value: number) {
+    const radius = Math.max(0, Number.isFinite(value) ? value : 0);
+    onPreview?.((current) => {
+      const { borderTopLeftRadius, borderTopRightRadius, borderBottomRightRadius, borderBottomLeftRadius, ...style } = current.style;
+      void borderTopLeftRadius; void borderTopRightRadius; void borderBottomRightRadius; void borderBottomLeftRadius;
+      const nextStyle = { ...style };
+      if (radius > 0) nextStyle.borderRadius = radius;
+      else delete nextStyle.borderRadius;
+      return { ...current, style: nextStyle };
+    });
+  }
+
+  function updateIndividualCornerRadius(key: string, value: string) {
+    const radius = Math.max(0, Number(value) || 0);
+    onChange((current) => {
+      const style = { ...current.style };
+      if (radius > 0) style[key] = radius;
+      else delete style[key];
+      return { ...current, style };
+    });
+  }
+
+  function previewIndividualCornerRadius(key: string, value: number) {
+    const radius = Math.max(0, Number.isFinite(value) ? value : 0);
+    onPreview?.((current) => {
+      const style = { ...current.style };
+      if (radius > 0) style[key] = radius;
+      else delete style[key];
+      return { ...current, style };
+    });
   }
 
   function toggleBold() {
@@ -394,17 +485,28 @@ export function ObjectInspector({ object, onChange }: { object: FrameObject; onC
   return (
     <div className="grid gap-3">
       <div className="grid grid-cols-2 gap-2">
-        {(["x", "y", "width", "height"] as const).map((key) => <label className={`grid gap-1.5 ${mutedCaps}`} key={key}>{key}<Input type="number" value={object.bounds[key]} onChange={(event) => updateBounds(key, event.target.value)} /></label>)}
+        {(["x", "y", "width", "height"] as const).map((key) => <label className={`grid gap-1.5 ${mutedCaps}`} key={key}>{key}<Input type="number" numberScrubMode="preview" numberScrubCommitThrottleMs={16} value={object.bounds[key]} onNumberScrubPreview={(value) => previewBounds(key, value)} onChange={(event) => updateBounds(key, event.target.value)} /></label>)}
       </div>
+      {isRect ? <div className="grid gap-3 rounded-[14px] border border-[#2d313b] bg-[#111319]/72 p-3">
+        <div className="flex items-center justify-between text-[13px] font-extrabold text-[#dfe2ea]"><span>Appearance</span><span className="text-[#737884]">○</span></div>
+        <div className="grid grid-cols-[0.9fr_1fr_auto] gap-2">
+          <label className={`grid gap-1.5 ${mutedCaps}`}>Opacity<Input type="number" min={0} max={100} numberScrubMode="preview" numberScrubCommitThrottleMs={16} value={opacityPercent} onNumberScrubPreview={previewOpacity} onChange={(event) => updateOpacity(event.target.value)} /></label>
+          <label className={`grid gap-1.5 ${mutedCaps}`}>Corner radius<Input type="number" min={0} numberScrubMode="preview" numberScrubCommitThrottleMs={16} value={cornerRadius} onNumberScrubPreview={previewUniformCornerRadius} onChange={(event) => updateUniformCornerRadius(event.target.value)} /></label>
+          <button className={`mt-[22px] grid h-10 w-10 place-items-center rounded-[10px] border text-sm font-extrabold transition ${cornerRadiusExpanded ? "border-[var(--clipper-accent-strong)] bg-[rgb(var(--clipper-accent-rgb)/0.22)] text-white" : "border-[#2d313b] bg-[#171920] text-[#dfe2ea] hover:border-[var(--clipper-accent-strong)]"}`} aria-label="Toggle individual corner radius" aria-pressed={cornerRadiusExpanded} onClick={() => setCornerRadiusExpanded((current) => !current)}>⌜</button>
+        </div>
+        {cornerRadiusExpanded ? <div className="grid grid-cols-2 gap-2">
+          {cornerRadiusFields.map(([key, label]) => <label className={`grid gap-1.5 ${mutedCaps}`} key={key}>{label}<Input type="number" min={0} numberScrubMode="preview" numberScrubCommitThrottleMs={16} value={getObjectStyleNumber(object.style[key], cornerRadius)} onNumberScrubPreview={(value) => previewIndividualCornerRadius(key, value)} onChange={(event) => updateIndividualCornerRadius(key, event.target.value)} /></label>)}
+        </div> : null}
+      </div> : null}
       {isText ? <>
         <label className={`grid gap-1.5 ${mutedCaps}`}>Content<Textarea className="min-h-[104px] resize-y" value={object.content ?? ""} onChange={(event) => updateTextContent(event.target.value)} /></label>
-        <label className={`grid gap-1.5 ${mutedCaps}`}>Colour<ColorSelector value={textColor} onChange={(value) => updateStyleValue("color", value)} /></label>
+        <div className={`grid gap-1.5 ${mutedCaps}`}><span>Colour</span><ColorSelector value={textColor} onChange={(value) => updateStyleValue("color", value)} onPreview={(value) => onPreview?.((current) => ({ ...current, style: { ...current.style, color: value } }))} /></div>
         <FontSelector value={fontFamily} onChange={(value) => updateStyleValue("fontFamily", value)} />
         <div className="grid grid-cols-2 gap-2">
-          <label className={`grid gap-1.5 ${mutedCaps}`}>Size<Input type="number" min={1} value={fontSize} onChange={(event) => updateStyleNumber("fontSize", event.target.value)} /></label>
-          <label className={`grid gap-1.5 ${mutedCaps}`}>Weight<Input type="number" min={100} max={1000} step={10} value={fontWeight} onChange={(event) => updateStyleNumber("fontWeight", event.target.value)} /></label>
-          <label className={`grid gap-1.5 ${mutedCaps}`}>Line Height<Input type="number" min={0.1} step={0.05} value={lineHeight} onChange={(event) => updateStyleNumber("lineHeight", event.target.value)} /></label>
-          <label className={`grid gap-1.5 ${mutedCaps}`}>Char Spacing<Input type="number" step={0.1} value={letterSpacing} onChange={(event) => updateStyleNumber("letterSpacing", event.target.value)} /></label>
+          <label className={`grid gap-1.5 ${mutedCaps}`}>Size<Input type="number" min={1} numberScrubMode="preview" numberScrubCommitThrottleMs={16} value={fontSize} onNumberScrubPreview={(value) => previewStyleNumber("fontSize", value)} onChange={(event) => updateStyleNumber("fontSize", event.target.value)} /></label>
+          <label className={`grid gap-1.5 ${mutedCaps}`}>Weight<Input type="number" min={100} max={1000} step={10} numberScrubMode="preview" numberScrubCommitThrottleMs={16} value={fontWeight} onNumberScrubPreview={(value) => previewStyleNumber("fontWeight", value)} onChange={(event) => updateStyleNumber("fontWeight", event.target.value)} /></label>
+          <label className={`grid gap-1.5 ${mutedCaps}`}>Line Height<Input type="number" min={0.1} step={0.05} numberScrubMode="preview" numberScrubCommitThrottleMs={16} value={lineHeight} onNumberScrubPreview={(value) => previewStyleNumber("lineHeight", value)} onChange={(event) => updateStyleNumber("lineHeight", event.target.value)} /></label>
+          <label className={`grid gap-1.5 ${mutedCaps}`}>Char Spacing<Input type="number" step={0.1} numberScrubMode="preview" numberScrubCommitThrottleMs={16} value={letterSpacing} onNumberScrubPreview={(value) => previewStyleNumber("letterSpacing", value)} onChange={(event) => updateStyleNumber("letterSpacing", event.target.value)} /></label>
         </div>
         <div className="grid grid-cols-4 gap-2" aria-label="Text style">
           <button className={textButtonClass(fontWeight >= 700)} aria-label="Bold" aria-pressed={fontWeight >= 700} title="Bold" onClick={toggleBold}><Bold size={16} /></button>
@@ -418,10 +520,45 @@ export function ObjectInspector({ object, onChange }: { object: FrameObject; onC
           <button className={textButtonClass(textAlign === "right")} aria-label="Align right" aria-pressed={textAlign === "right"} title="Align right" onClick={() => updateStyleValue("textAlign", "right")}><AlignRight size={16} /></button>
           <button className={textButtonClass(textAlign === "justify")} aria-label="Justify" aria-pressed={textAlign === "justify"} title="Justify" onClick={() => updateStyleValue("textAlign", "justify")}><AlignJustify size={16} /></button>
         </div></div>
+        <div className="grid gap-1.5"><span className={mutedCaps}>Vertical Alignment</span><div className="grid grid-cols-3 gap-2" aria-label="Text vertical alignment">
+          <button className={textButtonClass(verticalAlign === "top")} aria-label="Align top" aria-pressed={verticalAlign === "top"} title="Align top" onClick={() => updateStyleValue("verticalAlign", "top")}><VerticalAlignIcon align="top" /></button>
+          <button className={textButtonClass(verticalAlign === "middle")} aria-label="Align middle" aria-pressed={verticalAlign === "middle"} title="Align middle" onClick={() => updateStyleValue("verticalAlign", "middle")}><VerticalAlignIcon align="middle" /></button>
+          <button className={textButtonClass(verticalAlign === "bottom")} aria-label="Align bottom" aria-pressed={verticalAlign === "bottom"} title="Align bottom" onClick={() => updateStyleValue("verticalAlign", "bottom")}><VerticalAlignIcon align="bottom" /></button>
+        </div></div>
+        <div className="grid gap-1.5"><span className={mutedCaps}>Layout</span><div className="grid grid-cols-3 gap-2" aria-label="Text box layout">
+          <button className={textButtonClass(textBoxLayout === "overflow")} aria-label="Fixed width, overflow" aria-pressed={textBoxLayout === "overflow"} title="Fixed width, overflow" onClick={() => updateStyleValue("textBoxLayout", "overflow")}><TextBoxLayoutIcon mode="overflow" /></button>
+          <button className={textButtonClass(textBoxLayout === "auto-height")} aria-label="Fixed width, auto height" aria-pressed={textBoxLayout === "auto-height"} title="Fixed width, auto height" onClick={() => updateStyleValue("textBoxLayout", "auto-height")}><TextBoxLayoutIcon mode="auto-height" /></button>
+          <button className={textButtonClass(textBoxLayout === "fixed")} aria-label="Fixed width and height" aria-pressed={textBoxLayout === "fixed"} title="Fixed width and height" onClick={() => updateStyleValue("textBoxLayout", "fixed")}><TextBoxLayoutIcon mode="fixed" /></button>
+        </div></div>
       </> : null}
-      {colorStyleEntries.length > 0 ? <div className="grid gap-2"><span className={mutedCaps}>Colours</span><div className="grid gap-2">{colorStyleEntries.map(([key, value]) => <label className={`grid gap-1.5 ${mutedCaps}`} key={key}>{formatStyleLabel(key)}<ColorSelector value={value} onChange={(nextValue) => updateStyleColor(key, nextValue)} /></label>)}</div></div> : null}
+      {colorStyleEntries.length > 0 ? <div className="grid gap-2"><span className={mutedCaps}>Colours</span><div className="grid gap-2">{colorStyleEntries.map(([key, value]) => <div className={`grid gap-1.5 ${mutedCaps}`} key={key}><span>{formatStyleLabel(key)}</span><ColorSelector value={value} onChange={(nextValue) => updateStyleColor(key, nextValue)} onPreview={(nextValue) => onPreview?.((current) => ({ ...current, style: { ...current.style, [key]: nextValue } }))} /></div>)}</div></div> : null}
     </div>
   );
+});
+
+function getObjectStyleNumber(value: string | number | undefined, fallback = 0) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const numeric = Number.parseFloat(value);
+    return Number.isFinite(numeric) ? numeric : fallback;
+  }
+  return fallback;
+}
+
+function VerticalAlignIcon({ align }: { align: "top" | "middle" | "bottom" }) {
+  if (align === "top") {
+    return <svg aria-hidden="true" className="h-5 w-5" fill="none" viewBox="0 0 20 20"><path d="M4 3.5h12M10 16V7M6.5 10.5 10 7l3.5 3.5" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" /></svg>;
+  }
+  if (align === "bottom") {
+    return <svg aria-hidden="true" className="h-5 w-5" fill="none" viewBox="0 0 20 20"><path d="M4 16.5h12M10 4v9M6.5 9.5 10 13l3.5-3.5" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" /></svg>;
+  }
+  return <svg aria-hidden="true" className="h-5 w-5" fill="none" viewBox="0 0 20 20"><path d="M5 10h10M10 3.5v4M7.7 5.8 10 8.1l2.3-2.3M10 16.5v-4M7.7 14.2l2.3-2.3 2.3 2.3" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" /></svg>;
+}
+
+function TextBoxLayoutIcon({ mode }: { mode: "overflow" | "auto-height" | "fixed" }) {
+  if (mode === "overflow") return <svg aria-hidden="true" className="h-5 w-5" fill="none" viewBox="0 0 20 20"><path d="M4 5.5h7M4 10h7M4 14.5h7M11 10h5M13.7 7.3 16.4 10l-2.7 2.7" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" /></svg>;
+  if (mode === "auto-height") return <svg aria-hidden="true" className="h-5 w-5" fill="none" viewBox="0 0 20 20"><path d="M4 5.5h8M4 10h8M4 14.5h8M15 3.8v12.4M12.8 6l2.2-2.2L17.2 6M12.8 14l2.2 2.2 2.2-2.2" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" /></svg>;
+  return <svg aria-hidden="true" className="h-5 w-5" fill="none" viewBox="0 0 20 20"><rect x="4" y="4" width="12" height="12" rx="1.8" stroke="currentColor" strokeWidth="1.7" /><path d="M7 8h6M7 12h6" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" /></svg>;
 }
 
 export function AdjustmentInspector({ layer, sceneDuration, pickingPointKey, canSnapMiddle, onChange, onPreviewLayer, onClearPreview, onDelete, onPickPoint, onSnapMiddle }: { layer: AdjustmentLayer; sceneDuration: number; pickingPointKey?: string | null; canSnapMiddle: boolean; onChange: (updater: (layer: AdjustmentLayer) => AdjustmentLayer) => void; onPreviewLayer?: (updater: (layer: AdjustmentLayer) => AdjustmentLayer) => void; onClearPreview?: () => void; onDelete: () => void; onPickPoint?: (control: AdjustmentEffectPointControl) => void; onSnapMiddle: () => void }) {

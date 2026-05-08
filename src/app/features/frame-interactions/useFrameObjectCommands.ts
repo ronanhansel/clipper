@@ -34,6 +34,24 @@ export function useFrameObjectCommands({
   updateCompositionForTimelinePart,
   updateSceneParts,
 }: FrameObjectCommandsParams) {
+  function createComposeObject(type: "rect" | "ellipse" | "text") {
+    const id = `${type}-${Date.now().toString(36)}`;
+    const isEllipse = type === "ellipse";
+    const isText = type === "text";
+    const object: FrameObject = {
+      id,
+      name: isText ? "Text" : isEllipse ? "Ellipse" : "Rectangle",
+      type: isText ? "text" : "rect",
+      selector: `[data-object-id='${id}']`,
+      bounds: isText ? { x: 220, y: 140, width: 320, height: 92 } : { x: 220, y: 140, width: 220, height: 140 },
+      content: isText ? "Text" : undefined,
+      style: isText
+        ? { color: "#ffffff", fontSize: 56, fontWeight: 400, lineHeight: 1.1 }
+        : { background: "#D5D5D5", ...(isEllipse ? { borderRadius: 9999 } : {}) },
+    };
+    updateCompositionForTimelinePart(part.id, (composition) => ({ ...composition, objects: [...composition.objects, object] }));
+    selectComposeLayerObjects([object]);
+  }
   function updateObjectById(objectId: string, updater: (object: FrameObject) => FrameObject) {
     updateCompositionForTimelinePart(part.id, (composition) => ({
       ...composition,
@@ -50,8 +68,8 @@ export function useFrameObjectCommands({
     updateObjectById(selectedObjectId, updater);
   }
 
-  function updateTextObjectContent(objectId: string, content: string, richText?: RichTextSegment[]) {
-    updateObjectById(objectId, (object) => (object.type === "text" ? { ...object, content, richText } : object));
+  function updateTextObjectContent(objectId: string, content: string, richText?: RichTextSegment[], bounds?: FrameObject["bounds"]) {
+    updateObjectById(objectId, (object) => (object.type === "text" ? { ...object, content, richText, bounds: bounds ?? object.bounds } : object));
   }
 
   function selectComposeLayerObjects(objects: FrameObject[]) {
@@ -102,9 +120,26 @@ export function useFrameObjectCommands({
     updateCompositionForTimelinePart(part.id, (composition) => ({ ...composition, renderMode }));
   }
 
+  function deleteComposeObjects(objectIds: string[]) {
+    const selectedIds = new Set(objectIds);
+    if (selectedIds.size === 0) return;
+    updateCompositionForTimelinePart(part.id, (composition) => ({
+      ...composition,
+      background: {
+        ...composition.background,
+        elements: composition.background.elements.filter((object) => !selectedIds.has(object.id)),
+      },
+      objects: composition.objects.filter((object) => !selectedIds.has(object.id)),
+    }));
+    setEditingTextObjectId(null);
+    setComposeSelectionObjects([]);
+  }
+
   return {
     reorderComposeObjects,
     selectComposeLayerObjects,
+    createComposeObject,
+    deleteComposeObjects,
     updateObjectById,
     updatePartBackground,
     updatePartFrame,

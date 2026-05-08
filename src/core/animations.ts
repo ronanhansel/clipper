@@ -58,6 +58,7 @@ const NUMERIC_KEYFRAME_KEYS = [
   "pathOffset",
   "pathLength",
   "pathSpacing",
+  "blur",
 ];
 
 export function evaluateLayerAnimations(animations: LayerAnimation[], time: number): RenderStyle {
@@ -102,6 +103,8 @@ export function evaluateLayerAnimation(animation: LayerAnimation, time: number):
       transforms.push(`${transformName}(${formatted}${unit})`);
     } else if (key === "opacity") {
       style.opacity = value;
+    } else if (key === "blur") {
+      style.filter = `blur(${Math.max(0, value).toFixed(2)}px)`;
     }
   }
 

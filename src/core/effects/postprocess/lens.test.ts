@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { applyAdjustmentLayersToPostProcessPasses, applyAdjustmentLayersToVisualStyle } from "../../adjustments";
+import { applyAdjustmentLayersToPostProcessPasses, applyAdjustmentLayersToVisualStyle, applyAdjustmentLayersToVisualStyleAfterLayer, applyAdjustmentLayersToVisualStyleBeforeLayer, buildAdjustmentExecutionPlan, filterAdjustmentExecutionPlan, getVisualStyleForAdjustmentPlan } from "../../adjustments";
 import type { AdjustmentLayer } from "../../types";
 import { applyExportPostProcessFrame, applyExportRawPostProcessFrame, bgraBytesToRgbaClamped, hasExportPostProcessPasses, isPngDataUrl, isValidExportPostProcessFrameResult, isValidExportRawFramePayload, isValidExportRawPostProcessFrameResult, rgbaBytesToBgra, webGlReadPixelsRgbaToTopLeftRgba, type ExportPostProcessRenderer } from "./exportFrameBridge";
 import { getLensPostProcessUniforms, getShapeMaskUniforms, lensPostProcessKind } from "./lens";
@@ -345,6 +345,55 @@ describe("lens post-process pass collection", () => {
 
     expect(applyAdjustmentLayersToPostProcessPasses(1.5, layers, 30, { width: 1920, height: 1080 })).toHaveLength(1);
     expect(applyAdjustmentLayersToVisualStyle(1.5, layers, 30).filter).toContain("blur");
+  });
+
+  it("splits visual adjustments around post-process layer for cumulative top-to-bottom output", () => {
+    const layers: AdjustmentLayer[] = [
+      lensLayer({ focusX: 25 }),
+      adjustmentLayer("blur", "clipper.adjustment.blur", { radius: 8 }),
+    ];
+    const pass = applyAdjustmentLayersToPostProcessPasses(1.5, layers, 30, { width: 1920, height: 1080 })[0];
+
+    expect(pass.sourceLayerId).toBe("lens");
+    expect(applyAdjustmentLayersToVisualStyleBeforeLayer(1.5, layers, pass.sourceLayerId, 30).filter).toBe("blur(8px)");
+    expect(applyAdjustmentLayersToVisualStyleAfterLayer(1.5, layers, pass.sourceLayerId, 30).filter).toBeUndefined();
+  });
+
+  it("keeps filters above lens on final output when blur sits above lens", () => {
+    const layers: AdjustmentLayer[] = [
+      adjustmentLayer("blur", "clipper.adjustment.blur", { radius: 8 }),
+      lensLayer({ focusX: 25 }),
+    ];
+    const pass = applyAdjustmentLayersToPostProcessPasses(1.5, layers, 30, { width: 1920, height: 1080 })[0];
+
+    expect(applyAdjustmentLayersToVisualStyleBeforeLayer(1.5, layers, pass.sourceLayerId, 30).filter).toBeUndefined();
+    expect(applyAdjustmentLayersToVisualStyleAfterLayer(1.5, layers, pass.sourceLayerId, 30).filter).toBe("blur(8px)");
+  });
+
+  it("keeps adjustment filters cumulative in timeline order", () => {
+    const layers: AdjustmentLayer[] = [
+      adjustmentLayer("colour-grade", "clipper.adjustment.colour-grade", { brightness: 15, contrast: 20, saturation: 0, hue: 0 }),
+      adjustmentLayer("blur", "clipper.adjustment.blur", { radius: 8 }),
+      adjustmentLayer("colour-grade-2", "clipper.adjustment.colour-grade", { brightness: 0, contrast: 5, saturation: 10, hue: 15 }),
+    ];
+
+    expect(applyAdjustmentLayersToVisualStyle(1.5, layers, 30).filter).toBe("blur(8px)");
+  });
+
+  it("builds a reusable execution plan with visual and post-process steps in layer order", () => {
+    const layers: AdjustmentLayer[] = [
+      adjustmentLayer("lower-blur", "clipper.adjustment.blur", { radius: 8 }),
+      lensLayer({ focusX: 25 }),
+      adjustmentLayer("upper-blur", "clipper.adjustment.blur", { radius: 4 }),
+    ];
+
+    const plan = buildAdjustmentExecutionPlan(1.5, layers, 30, { width: 1920, height: 1080 });
+    const lensStep = plan.steps.find((step) => step.layer.id === "lens");
+
+    expect(plan.steps.map((step) => step.layer.id)).toEqual(["lower-blur", "lens", "upper-blur"]);
+    expect(getVisualStyleForAdjustmentPlan(filterAdjustmentExecutionPlan(plan, "before", lensStep?.layer.id)).filter).toBe("blur(4px)");
+    expect(getVisualStyleForAdjustmentPlan(filterAdjustmentExecutionPlan(plan, "after", lensStep?.layer.id)).filter).toBe("blur(8px)");
+    expect(lensStep?.postProcessPasses?.[0]).toMatchObject({ sourceLayerId: "lens", kind: lensPostProcessKind });
   });
 
   it("ignores inactive lens layers", () => {

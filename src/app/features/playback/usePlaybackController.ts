@@ -15,8 +15,10 @@ import type { AdjustmentLayer, CompositionClip, EditorState, TimelineLayerState,
 import type { PlaybackClock } from "../../types";
 import type { EditorStore } from "../../state/editorStore";
 import type { PrerenderCacheInterestReason } from "../preview/usePrerenderCache";
+import { publishPlaybackTime } from "./playbackTimeStore";
 
 const playbackReactPreviewSyncIntervalMs = 1000 / 30;
+const composePlaybackReactPreviewSyncIntervalMs = 1000 / 60;
 
 type PlaybackControllerOptions = {
   compositions: CompositionClip[];
@@ -36,11 +38,11 @@ type PlaybackControllerOptions = {
   playbackTimeLabelRef: RefObject<HTMLSpanElement | null>;
   sceneDurationSeconds: number;
   scrubFrameRef: RefObject<number>;
+  previewRenderSyncIntervalMs?: number;
   setCurrentSceneTime: (time: number) => void;
   setIsPlaying: (isPlaying: boolean) => void;
   setPlaybackClock: (clock: PlaybackClock) => void;
   setRenderCurrentSceneTime: (time: number) => void;
-  suppressReactPreviewSync?: boolean;
   useCachedPreviewPlayback: boolean;
   hasCachedPreviewFrameAtTime?: (time: number) => boolean;
   isCachedPreviewPaintReadyAtTime?: (time: number) => boolean;
@@ -74,11 +76,11 @@ export function usePlaybackController({
   playbackTimeLabelRef,
   sceneDurationSeconds,
   scrubFrameRef,
+  previewRenderSyncIntervalMs = playbackReactPreviewSyncIntervalMs,
   setCurrentSceneTime,
   setIsPlaying,
   setPlaybackClock,
   setRenderCurrentSceneTime,
-  suppressReactPreviewSync = false,
   useCachedPreviewPlayback,
   hasCachedPreviewFrameAtTime,
   isCachedPreviewPaintReadyAtTime,
@@ -118,13 +120,14 @@ export function usePlaybackController({
   }
 
   function syncPlaybackDom(time: number) {
+    const displayTime = toPlaybackDisplayTime(time);
+    publishPlaybackTime({ sceneTime: time, displayTime, playing: isPlayingRef.current });
     if (playbackTimeLabelRef.current) playbackTimeLabelRef.current.textContent = formatPlaybackTimeLabel(time);
     const displayDuration = useLocalPlaybackLabels ? playbackDuration : timelineDisplayDuration(sceneDurationSeconds, timelineEndPaddingFraction);
     const timelineTime = useLocalPlaybackLabels ? time - playbackStart : time;
     if (playbackPlayheadRef.current) playbackPlayheadRef.current.style.setProperty("--clipper-playhead-left", `${displayDuration > 0 ? (timelineTime / displayDuration) * 100 : 0}%`);
     if (playbackPlayheadRef.current) playbackPlayheadRef.current.style.removeProperty("--clipper-playhead-x");
     if (playbackBorderScrubberRef.current) {
-      const displayTime = toPlaybackDisplayTime(time);
       const displayPlaybackDuration = getPlaybackDisplayDuration();
       const progress = displayPlaybackDuration > 0 ? `${clamp(displayTime / displayPlaybackDuration, 0, 1) * 100}%` : "0%";
       playbackBorderScrubberRef.current.max = String(Math.max(displayPlaybackDuration, 0.001));
@@ -237,6 +240,7 @@ export function usePlaybackController({
     isPlayingRef.current = false;
     updatePlaybackClock(null);
     setIsPlaying(false);
+    publishPlaybackTime({ sceneTime: settledTime, displayTime: toPlaybackDisplayTime(settledTime), playing: false });
   }
 
   function startPlaybackFromCurrentTime() {
@@ -250,6 +254,7 @@ export function usePlaybackController({
 
     updatePlaybackClock({ startedAt: performance.now(), startedFrom: currentSceneTimeRef.current });
     isPlayingRef.current = true;
+    publishPlaybackTime({ sceneTime: currentSceneTimeRef.current, displayTime: toPlaybackDisplayTime(currentSceneTimeRef.current), playing: true });
     setIsPlaying(true);
   }
 
@@ -414,7 +419,7 @@ export function usePlaybackController({
       requestCachedPreviewAtTime?.(nextTime, "playback");
       const cachedPreviewFrameAvailable = useCachedPreviewPlayback && hasCachedPreviewFrameAtTime?.(nextTime) === true;
       const cachedPreviewPaintReady = cachedPreviewFrameAvailable && isCachedPreviewPaintReadyAtTime?.(nextTime) === true;
-      const shouldSyncPreviewRender = !suppressReactPreviewSync && !cachedPreviewPaintReady && (shouldSyncReact || now - lastReactPreviewSyncAt >= playbackReactPreviewSyncIntervalMs);
+      const shouldSyncPreviewRender = !cachedPreviewPaintReady && (shouldSyncReact || now - lastReactPreviewSyncAt >= previewRenderSyncIntervalMs);
 
       currentSceneTimeRef.current = nextTime;
       syncPlaybackDom(nextTime);
@@ -439,7 +444,7 @@ export function usePlaybackController({
 
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [compositions, hasCachedPreviewFrameAtTime, isCachedPreviewPaintReadyAtTime, isPlaying, playbackEnd, playbackStart, requestCachedPreviewAtTime, sceneDurationSeconds, suppressReactPreviewSync, timeline, timelineLayers, transitionLayers, useCachedPreviewPlayback, useLocalPlaybackLabels, visibleSceneAdjustmentLayers]);
+  }, [compositions, hasCachedPreviewFrameAtTime, isCachedPreviewPaintReadyAtTime, isPlaying, playbackEnd, playbackStart, previewRenderSyncIntervalMs, requestCachedPreviewAtTime, sceneDurationSeconds, timeline, timelineLayers, transitionLayers, useCachedPreviewPlayback, useLocalPlaybackLabels, visibleSceneAdjustmentLayers]);
 
   useEffect(() => {
     if (!isPlaying) return;
@@ -473,6 +478,8 @@ export function usePlaybackController({
     updatePlaybackClock,
   };
 }
+
+export { composePlaybackReactPreviewSyncIntervalMs };
 
 function getPlaybackPreviewKey(sceneTime: number, compositions: CompositionClip[], sceneDurationSeconds: number, timeline: TimelinePart[], timelineLayers: TimelineLayerState | undefined, transitionLayers: TransitionLayer[] | undefined, adjustmentLayers: AdjustmentLayer[]) {
   const state = getTimelinePreviewState({

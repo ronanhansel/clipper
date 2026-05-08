@@ -5,7 +5,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type CSSProperties,
   type DragEvent,
   type MouseEvent,
   type PointerEvent,
@@ -73,14 +72,14 @@ type Props = {
 export type GraphNode = {
   id: string;
   label: string;
-  kind: "layer" | "animation" | "time" | "group" | "out";
+  kind: "layer" | "animation" | "time" | "split" | "group" | "out";
   x: number;
   y: number;
   width: number;
   height: number;
   details?: Record<string, string>;
 };
-type CustomNodeKind = "time" | (typeof animationDefinitions)[number]["property"];
+type CustomNodeKind = "time" | "split" | (typeof animationDefinitions)[number]["property"];
 type HoverConnector = {
   nodeId: string;
   port: AnimationGraphPort;
@@ -116,6 +115,20 @@ type DragState =
       active: boolean;
       scale: number;
     };
+type DelayMarkerDragState = {
+  marker: DelayMarker;
+  pointerId: number;
+  moved: boolean;
+};
+type DelayMarker = {
+  nodeId: string;
+  parameterNodeId: string;
+  key: string;
+  delay: number;
+  localDelay: number;
+  label: string;
+  groupId?: string;
+};
 type GraphContextMenuPoint = {
   graphX: number;
   graphY: number;
@@ -181,6 +194,8 @@ const nodeColors = {
   animationBorder: "#8a557b",
   timeBg: "#1b3143",
   timeBorder: "#7ea8d8",
+  splitBg: "#1b3143",
+  splitBorder: "#7ea8d8",
   layerBg: "#252b35",
   layerBorder: "#566171",
   groupBg: "#3a2315",
@@ -211,6 +226,19 @@ const graphParameterOptions: Record<string, readonly { value: string; label: str
     { value: "reverse", label: "Reverse" },
     { value: "mirror", label: "Mirror" },
   ],
+  mode: [
+    { value: "word", label: "Word" },
+    { value: "character", label: "Character" },
+  ],
+  order: [
+    { value: "forward", label: "Forward" },
+    { value: "reverse", label: "Reverse" },
+    { value: "center", label: "Center" },
+  ],
+  repeatScope: [
+    { value: "sequence", label: "Sequence" },
+    { value: "item", label: "Item" },
+  ],
 };
 const timeParameterDefaults = {
   delay: "0s",
@@ -218,6 +246,12 @@ const timeParameterDefaults = {
   ease: "linear",
   repeat: "0",
   repeatType: "loop",
+} satisfies Record<string, string>;
+const splitParameterDefaults = {
+  mode: "word",
+  stagger: "0.06s",
+  order: "forward",
+  repeatScope: "sequence",
 } satisfies Record<string, string>;
 
 function clampGraphScale(scale: number) {
@@ -339,6 +373,9 @@ export const ComposeAnimationGraphPanel = memo(
     const graphViewportRef = useRef<HTMLDivElement | null>(null);
     const rulerRef = useRef<HTMLDivElement | null>(null);
     const dragRef = useRef<DragState | null>(null);
+    const delayMarkerDragRef = useRef<DelayMarkerDragState | null>(null);
+    const suppressNextDelayMarkerClickRef = useRef(false);
+    const [draggingDelayMarker, setDraggingDelayMarker] = useState<{ key: string; delay: number } | null>(null);
     const pointerRef = useRef({ x: 0, y: 0 });
     const contextMenuPointRef = useRef<GraphContextMenuPoint | null>(null);
     const previewPositionsRef = useRef<Record<
@@ -349,7 +386,6 @@ export const ComposeAnimationGraphPanel = memo(
     const pendingPopoverNodeIdRef = useRef<string | null>(null);
     const frameRef = useRef<number | null>(null);
     const activationFrameRef = useRef<number | null>(null);
-    const playbackFrameRef = useRef<number | null>(null);
     const currentTimeRef = useRef(currentTime);
     const partRef = useRef<Part | null>(null);
     const projectGraphRef = useRef<AnimationGraphState | undefined>(undefined);
@@ -392,10 +428,15 @@ export const ComposeAnimationGraphPanel = memo(
     );
     const baseGraphWorldWidth = 5200;
     const baseGraphWorldHeight = 900;
+    const displayCurrentTime = currentTime;
     const playheadLeft =
       timelineDuration > 0
-        ? `${(currentTime / timelineDuration) * 100}%`
+        ? `${(displayCurrentTime / timelineDuration) * 100}%`
         : "0%";
+    useLayoutEffect(() => {
+      if (isPlaying) return;
+      playbackPlayheadRef.current?.style.setProperty("--clipper-playhead-left", playheadLeft);
+    }, [isPlaying, playbackPlayheadRef, playheadLeft]);
     const { startScrub, continueScrub, endScrub } = useTimelineScrubber({
       duration: timelineDuration,
       displayDuration: timelineDuration,
@@ -523,23 +564,9 @@ export const ComposeAnimationGraphPanel = memo(
     }, [graphCanvasHeight, graphCanvasWidth, graphScale]);
 
     useEffect(() => {
-      currentTimeRef.current = currentTime;
+      currentTimeRef.current = displayCurrentTime;
       if (active) scheduleDraw();
-    }, [active, currentTime]);
-
-    useEffect(() => {
-      if (!active || !isPlaying) return;
-      function tick() {
-        currentTimeRef.current = readPlaybackPlayheadTime() ?? currentTimeRef.current;
-        draw();
-        playbackFrameRef.current = requestAnimationFrame(tick);
-      }
-      playbackFrameRef.current = requestAnimationFrame(tick);
-      return () => {
-        if (playbackFrameRef.current !== null) cancelAnimationFrame(playbackFrameRef.current);
-        playbackFrameRef.current = null;
-      };
-    }, [active, isPlaying, timelineDuration]);
+    }, [active, displayCurrentTime]);
 
     useLayoutEffect(() => {
       if (!active) return;
@@ -626,16 +653,6 @@ export const ComposeAnimationGraphPanel = memo(
         activationFrameRef.current = remaining > 0 ? requestAnimationFrame(tick) : null;
       };
       activationFrameRef.current = requestAnimationFrame(tick);
-    }
-
-    function readPlaybackPlayheadTime() {
-      const playhead = playbackPlayheadRef.current;
-      if (!playhead || timelineDuration <= 0) return null;
-      const value = playhead.style.getPropertyValue("--clipper-playhead-left");
-      if (!value.endsWith("%")) return null;
-      const percent = Number.parseFloat(value);
-      if (!Number.isFinite(percent)) return null;
-      return Math.min(Math.max((percent / 100) * timelineDuration, 0), timelineDuration);
     }
 
     function onGraphScroll() {
@@ -1221,6 +1238,54 @@ export const ComposeAnimationGraphPanel = memo(
       });
     }
 
+    function updateDelayMarker(marker: DelayMarker, delay: number) {
+      const localDelay = Math.max(0, delay - (marker.delay - marker.localDelay));
+      if (marker.groupId) {
+        updateGroupNodeParameter(marker.groupId, marker.parameterNodeId, "delay", formatSeconds(localDelay));
+        return;
+      }
+      updateNodeParameter(marker.parameterNodeId, "delay", formatSeconds(localDelay));
+    }
+
+    function readDelayMarkerTime(event: PointerEvent<HTMLElement>) {
+      const rect = event.currentTarget.parentElement?.getBoundingClientRect();
+      if (!rect || rect.width <= 0) return 0;
+      return Math.max(0, Math.min(timelineDuration, ((event.clientX - rect.left) / rect.width) * timelineDuration));
+    }
+
+    function startDelayMarkerDrag(event: PointerEvent<HTMLButtonElement>, marker: DelayMarker) {
+      event.preventDefault();
+      event.stopPropagation();
+      delayMarkerDragRef.current = { marker, pointerId: event.pointerId, moved: false };
+      setDraggingDelayMarker({ key: marker.key, delay: marker.delay });
+      event.currentTarget.setPointerCapture(event.pointerId);
+    }
+
+    function continueDelayMarkerDrag(event: PointerEvent<HTMLButtonElement>) {
+      const drag = delayMarkerDragRef.current;
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      event.preventDefault();
+      event.stopPropagation();
+      drag.moved = true;
+      const nextDelay = readDelayMarkerTime(event);
+      setDraggingDelayMarker({ key: drag.marker.key, delay: nextDelay });
+      updateDelayMarker(drag.marker, nextDelay);
+    }
+
+    function endDelayMarkerDrag(event: PointerEvent<HTMLButtonElement>) {
+      const drag = delayMarkerDragRef.current;
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const nextDelay = readDelayMarkerTime(event);
+      delayMarkerDragRef.current = null;
+      setDraggingDelayMarker(null);
+      if (drag.moved) {
+        suppressNextDelayMarkerClickRef.current = true;
+        updateDelayMarker(drag.marker, nextDelay);
+      }
+    }
+
     function replaceGroup(groupId: string, nextGroup: AnimationGraphGroup) {
       commitGraphUpdate((graph) => replaceGraphGroup(graph, groupId, nextGroup));
     }
@@ -1293,7 +1358,10 @@ export const ComposeAnimationGraphPanel = memo(
             ]
             : [
               ...(graphClipboardRef.current ? [{ label: "Paste", action: () => pasteGraphNodes() }] : []),
-              { label: "Time", action: () => addCustomNode("time") },
+              { label: "Time", children: [
+                { label: "Time", action: () => addCustomNode("time") },
+                { label: "Split", action: () => addCustomNode("split") },
+              ] },
               ...getAnimationDefinitionCategories().map((category) => ({
                 label: category,
                 children: animationDefinitions
@@ -1323,6 +1391,13 @@ export const ComposeAnimationGraphPanel = memo(
               label: "Time",
               scopeKey: graphViewportKey,
               details: { delay: "0s", duration: "1s", ease: "linear" },
+            }
+          : kind === "split"
+          ? {
+              kind: "split" as const,
+              label: "Split",
+              scopeKey: graphViewportKey,
+              details: splitParameterDefaults,
             }
           : {
               kind: "animation" as const,
@@ -1759,7 +1834,6 @@ export const ComposeAnimationGraphPanel = memo(
         <div
           ref={playbackPlayheadRef}
           className="relative min-h-0 overflow-visible"
-          style={{ "--clipper-playhead-left": playheadLeft } as CSSProperties}
         >
           <div
             className="pointer-events-none absolute top-[12px] z-40 h-3 w-2.5 rounded-[2px] bg-[var(--clipper-accent)]"
@@ -1781,14 +1855,21 @@ export const ComposeAnimationGraphPanel = memo(
           {delayMarkers.map((marker) => (
             <button
               key={marker.key}
-              className="absolute top-[21px] z-50 h-1.5 w-1.5 -translate-x-1/2 rotate-45 border border-[#b9d7ff] bg-[#7ea8d8] shadow-[0_0_0_2px_rgba(126,168,216,0.14)] transition hover:scale-150"
-              style={{ left: `${(marker.delay / timelineDuration) * 100}%` }}
+              className="absolute top-[21px] z-50 h-1.5 w-1.5 -translate-x-1/2 rotate-45 cursor-default touch-none border border-[#b9d7ff] bg-[#7ea8d8] shadow-[0_0_0_2px_rgba(126,168,216,0.14)] transition hover:scale-150"
+              style={{ left: `${(((draggingDelayMarker?.key === marker.key ? draggingDelayMarker.delay : marker.delay) / timelineDuration) * 100)}%` }}
               title={`${marker.label} delay ${formatSeconds(marker.delay)}`}
               onClick={(event) => {
                 event.stopPropagation();
+                if (suppressNextDelayMarkerClickRef.current) {
+                  suppressNextDelayMarkerClickRef.current = false;
+                  return;
+                }
                 scrollToGraphNode(marker.nodeId);
               }}
-              onPointerDown={(event) => event.stopPropagation()}
+              onPointerDown={(event) => startDelayMarkerDrag(event, marker)}
+              onPointerMove={continueDelayMarkerDrag}
+              onPointerUp={endDelayMarkerDrag}
+              onPointerCancel={endDelayMarkerDrag}
             />
           ))}
         </div>
@@ -2293,11 +2374,10 @@ function getDelayMarkers(
     return [
       {
         nodeId: node.id,
+        parameterNodeId: node.id,
         key: node.id,
-        delay: Math.max(
-          0,
-          getTimeNodeStart(node, graph, edges, nodes, new Set()),
-        ),
+        delay: Math.max(0, getTimeNodeStart(node, graph, edges, nodes, new Set())),
+        localDelay: parseSeconds(graph?.parameters?.[node.id]?.delay ?? node.details?.delay ?? "0s"),
         label: node.label,
       },
     ];
@@ -2332,9 +2412,12 @@ function getDelayMarkersForGroup(
     return [
       {
         nodeId: groupNode.id,
+        parameterNodeId: node.id,
         key: `${groupNode.id}:${node.id}`,
         delay: Math.max(0, getTimeNodeStart(node, groupGraph, edges, nodes, new Set())),
+        localDelay: parseSeconds(group.parameters?.[node.id]?.delay ?? node.details?.delay ?? "0s"),
         label: `${groupNode.label} / ${node.label}`,
+        groupId: group.id,
       },
     ];
   });
@@ -2392,7 +2475,7 @@ function hasGroupValidOutput(group: AnimationGraphGroup | undefined) {
     if (visited.has(id)) continue;
     visited.add(id);
     for (const upstream of reverse.get(id) ?? []) {
-      if (group.customNodes?.[upstream]?.kind === "time") return true;
+      if (group.customNodes?.[upstream]?.kind === "time" || group.customNodes?.[upstream]?.kind === "split") return true;
       stack.push(upstream);
     }
   }
@@ -2459,9 +2542,11 @@ function isPermittedGraphEdge(
   if (mode === "composition3d") return isPermittedComposition3dGraphEdge(from, to, edge, existingEdges);
   if (from.kind === "animation" && to.kind === "time")
     return !hasDuplicateEffectForTimeNode(from, to.id, existingEdges, nodes);
-  if (from.kind === "group" && (to.kind === "time" || to.kind === "layer"))
+  if (from.kind === "group" && (to.kind === "time" || to.kind === "split" || to.kind === "layer"))
     return hasRegisteredGroupOutput(from);
   if (from.kind === "time" && to.kind === "layer") return true;
+  if (from.kind === "time" && to.kind === "split") return true;
+  if (from.kind === "split" && (to.kind === "layer" || to.kind === "out")) return true;
   if (from.kind === "time" && to.kind === "out") return true;
   if (from.kind === "time" && to.kind === "time")
     return !pathExists(edge.toNodeId, edge.fromNodeId, existingEdges);
@@ -3309,6 +3394,7 @@ function getNodePlaybackProgress(
   objects: FrameObject[],
 ) {
   if (node.kind === "group") return getGroupNodePlaybackProgress(node, graph, currentTime);
+  if (node.kind === "split") return getSplitNodePlaybackProgress(node, graph, currentTime, nodes, objects);
   if (node.kind !== "time") return null;
   const renderableEdges = getRenderableEdges(graph, nodes, objects);
   const parameters = graph?.parameters?.[node.id];
@@ -3329,6 +3415,64 @@ function getNodePlaybackProgress(
     repeat: parameters?.repeat ?? node.details?.repeat,
     repeatType: parameters?.repeatType ?? node.details?.repeatType,
   });
+}
+
+function getSplitNodePlaybackProgress(
+  node: GraphNode,
+  graph: AnimationGraphState | undefined,
+  currentTime: number,
+  nodes: GraphNode[],
+  objects: FrameObject[],
+) {
+  const renderableEdges = getRenderableEdges(graph, nodes, objects);
+  const parameters = graph?.parameters?.[node.id];
+  const stagger = parseSeconds(parameters?.stagger ?? node.details?.stagger ?? "0s");
+  const order = parameters?.order ?? node.details?.order ?? "forward";
+  const repeatScope = parameters?.repeatScope ?? node.details?.repeatScope ?? "sequence";
+  const mode = parameters?.mode ?? node.details?.mode ?? "word";
+  const tokenCount = getSplitNodeTokenCount(node.id, renderableEdges, objects, mode);
+  const maxOffset = getSplitMaxTokenOffset(tokenCount, stagger, order);
+  const upstreamTimes = renderableEdges
+    .filter((edge) => edge.toNodeId === node.id)
+    .map((edge) => nodes.find((candidate) => candidate.id === edge.fromNodeId))
+    .filter((candidate): candidate is GraphNode => Boolean(candidate && candidate.kind === "time"));
+  if (!upstreamTimes.length) return 0;
+  const progresses = upstreamTimes.map((timeNode) => {
+    const timeParameters = graph?.parameters?.[timeNode.id];
+    const start = getTimeNodeStart(timeNode, graph, renderableEdges, nodes, new Set());
+    const baseDuration = parseSeconds(timeParameters?.duration ?? timeNode.details?.duration ?? "0s");
+    const duration = repeatScope === "sequence" ? baseDuration + maxOffset : baseDuration;
+    return getTimePlaybackProgress({
+      currentTime,
+      start,
+      duration,
+      repeat: timeParameters?.repeat ?? timeNode.details?.repeat,
+      repeatType: timeParameters?.repeatType ?? timeNode.details?.repeatType,
+    });
+  });
+  return progresses.length ? Math.max(...progresses) : null;
+}
+
+function getSplitNodeTokenCount(splitNodeId: string, edges: AnimationGraphEdge[], objects: FrameObject[], mode: string) {
+  const layerEdges = edges.filter((edge) => edge.fromNodeId === splitNodeId && edge.toNodeId.startsWith("layer:"));
+  const countFor = (layerId: string) => {
+    const objectId = layerId.replace(/^layer:/, "");
+    const object = objects.find((item) => item.id === objectId);
+    if (!object || object.type !== "text") return 1;
+    const text = object.richText?.map((segment) => segment.text).join("") ?? object.content ?? "";
+    if (!text) return 1;
+    if (mode === "character") return Math.max(1, Array.from(text).filter((char) => char !== "\n" && !/\s/.test(char)).length);
+    return Math.max(1, (text.match(/\S+/g) ?? []).length);
+  };
+  const counts = layerEdges.map((edge) => countFor(edge.toNodeId));
+  return counts.length ? Math.max(...counts) : 1;
+}
+
+function getSplitMaxTokenOffset(count: number, stagger: number, order: string) {
+  const safeCount = Math.max(1, count);
+  const safeStagger = Math.max(0, stagger);
+  if (order === "center") return ((safeCount - 1) / 2) * safeStagger;
+  return Math.max(0, safeCount - 1) * safeStagger;
 }
 
 function getGroupNodePlaybackProgress(
@@ -3754,8 +3898,9 @@ function GraphNodePopover({
   const schema = isGroup ? undefined : getParameterEditorSchema(node, details);
   const viewportRect = viewport.getBoundingClientRect();
   const rect = nodeRect(node);
-  const width = isGroup ? Math.min(560, window.innerWidth - 32) : schema!.width;
-  const height = isGroup ? Math.min(360, window.innerHeight - 32) : schema!.height;
+  const useTimePopupStyle = !isGroup && node.kind === "time";
+  const width = isGroup ? Math.min(560, window.innerWidth - 32) : useTimePopupStyle ? 250 : schema!.width;
+  const height = isGroup ? Math.min(360, window.innerHeight - 32) : useTimePopupStyle ? 234 : schema!.height;
   const nodeLeft =
     viewportRect.left + rect.x * graphScale - viewport.scrollLeft;
   const nodeTop = viewportRect.top + rect.y * graphScale - viewport.scrollTop;
@@ -3785,8 +3930,8 @@ function GraphNodePopover({
       onPointerDown={onPointerDownOutside}
     >
         <div
-          className={`fixed z-[5000] overflow-hidden rounded-xl border text-[11px] text-[#cbd3df] shadow-[0_16px_44px_rgba(0,0,0,0.42)] backdrop-blur ${isGroup ? "border-[#394255] bg-[#0b0f16]" : "border-[#394255] bg-[#101620]/95 p-3"}`}
-        style={{ left, top, width, height: isGroup ? height : undefined }}
+          className={`fixed z-[5000] overflow-hidden border text-[11px] text-[#cbd3df] shadow-[0_16px_44px_rgba(0,0,0,0.42)] backdrop-blur ${isGroup ? "rounded-xl border-[#394255] bg-[#0b0f16]" : useTimePopupStyle ? "rounded-[18px] border-[#34435b] bg-[#0c131d]/96 px-4 py-4 shadow-[0_22px_70px_rgba(0,0,0,0.55),inset_0_1px_0_rgba(255,255,255,0.04)]" : "rounded-xl border-[#394255] bg-[#101620]/95 p-3"}`}
+        style={{ left, top, width, height: isGroup || useTimePopupStyle ? height : undefined }}
         onPointerDown={(event) => event.stopPropagation()}
       >
         {isGroup ? (
@@ -3795,11 +3940,12 @@ function GraphNodePopover({
           ) : null
         ) : (
           <>
-            <div className="mb-2 min-w-0 truncate text-[12px] font-extrabold text-white">
+            <div className={useTimePopupStyle ? "mb-4 min-w-0 truncate text-[14px] font-extrabold leading-none tracking-[-0.02em] text-[#f3f6fb]" : "mb-2 min-w-0 truncate text-[12px] font-extrabold text-white"}>
               {node.label}
             </div>
             <GraphParameterEditor
               schema={schema!}
+              variant={useTimePopupStyle ? "timePopup" : "default"}
               onChange={(key, value) => onParameterChange(node.id, key, value)}
             />
           </>
@@ -4124,6 +4270,11 @@ export function getPopoverDetails(
       ([key, value]) => [key, parameters?.[key] ?? node.details?.[key] ?? value] as [string, string],
     );
   }
+  if (node.kind === "split") {
+    return Object.entries(splitParameterDefaults).map(
+      ([key, value]) => [key, parameters?.[key] ?? node.details?.[key] ?? value] as [string, string],
+    );
+  }
   const defaults =
     node.kind === "animation"
       ? getAnimationValueDetails(node)
@@ -4243,12 +4394,13 @@ function titleCase(value: string) {
 }
 
 function getGraphParameterUnit(key: string) {
-  return key === "delay" || key === "duration" ? "s" : undefined;
+  return key === "delay" || key === "duration" || key === "stagger" ? "s" : undefined;
 }
 
 function getGraphNodeColors(kind: GraphNode["kind"]) {
   if (kind === "animation") return { background: nodeColors.animationBg, border: nodeColors.animationBorder };
   if (kind === "time") return { background: nodeColors.timeBg, border: nodeColors.timeBorder };
+  if (kind === "split") return { background: nodeColors.splitBg, border: nodeColors.splitBorder };
   if (kind === "group") return { background: nodeColors.groupBg, border: nodeColors.groupBorder };
   if (kind === "out") return { background: nodeColors.outBg, border: nodeColors.outBorder };
   return { background: nodeColors.layerBg, border: nodeColors.layerBorder };

@@ -105,6 +105,7 @@ export function OsFileManager({
   const nextOperationIdRef = useRef(1);
   const committedProjectReloadPendingRef = useRef(false);
   const osFilePathIdsRef = useRef(new Map<string, string>());
+  const syncedActiveSelectionRef = useRef<SyncedOsFileSelection>(null);
   const [compositionLanePreviewActive, setCompositionLanePreviewActive] = useState(false);
   const [rootDropVisible, setRootDropVisible] = useState(false);
 
@@ -353,19 +354,24 @@ export function OsFileManager({
     const api = treeRef.current;
     if (!api) return;
     let targetId: string | null = null;
+    let activeSelectionKey: string | null = null;
     if (selectedCompositionId) {
       const composition = compositionLibrary.find((item) => item.id === selectedCompositionId);
       const compositionPath = composition ? `${effectiveDirectory}/${composition.filePath}` : null;
       targetId = compositionPath ? findNodeByPath(treeData, compositionPath)?.id ?? null : null;
+      activeSelectionKey = `composition:${selectedCompositionId}`;
     } else if (selectedTimelineId) {
       // Find the timeline node by its internal ID
       const timelineNode = findTimelineNodeById(treeData, selectedTimelineId);
       if (timelineNode) {
         targetId = timelineNode.id;
       }
+      activeSelectionKey = `timeline:${selectedTimelineId}`;
     }
+    if (!shouldSyncActiveOsFileSelection(api.selectedNodes.map((node) => node.id), syncedActiveSelectionRef.current, activeSelectionKey, targetId)) return;
     if (targetId) {
       api.select(targetId, { align: "auto" });
+      syncedActiveSelectionRef.current = { key: activeSelectionKey!, nodeId: targetId };
       setSelectedNodeIds([targetId]);
     }
   }, [compositionLibrary, selectedCompositionId, selectedTimelineId, effectiveDirectory, treeData]);
@@ -1134,6 +1140,15 @@ export function resolveOsCompositionDragMetadata(compositions: Pick<CompositionC
     filePath: composition?.filePath,
     sourceMissing: Boolean(composition?.sourceMissing),
   };
+}
+
+type SyncedOsFileSelection = { key: string; nodeId: string } | null;
+
+export function shouldSyncActiveOsFileSelection(currentSelectedIds: string[], lastSynced: SyncedOsFileSelection, activeSelectionKey: string | null, targetId: string | null) {
+  if (!activeSelectionKey || !targetId) return false;
+  if (lastSynced?.key !== activeSelectionKey) return true;
+  if (lastSynced.nodeId !== targetId) return currentSelectedIds.length === 0 || (currentSelectedIds.length === 1 && currentSelectedIds[0] === lastSynced.nodeId);
+  return currentSelectedIds.length === 0;
 }
 
 function findNodeById(nodes: OsFileNode[], id: string): OsFileNode | null {

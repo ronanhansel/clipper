@@ -1,6 +1,6 @@
 import { Component, useLayoutEffect, useMemo, useRef, useState, type ErrorInfo, type ReactNode, type RefObject } from "react";
 import { FramePreview } from "../../components/preview/FramePreview";
-import { applyAdjustmentLayersToPostProcessPasses } from "../../core/adjustments";
+import { buildAdjustmentExecutionPlan } from "../../core/adjustments";
 import { CAMERA_PERSPECTIVE } from "../../core/camera";
 import { applyExportPostProcessFrame, applyExportRawPostProcessFrame, type ExportPostProcessFrameRequest, type ExportPostProcessFrameResult, type ExportRawPostProcessFrameRequest, type ExportRawPostProcessFrameResult } from "../../core/effects/postprocess/exportFrameBridge";
 import { withPostProcessFrameBackground } from "../../core/effects/postprocess/passes";
@@ -296,7 +296,8 @@ export function getExportPostProcessPasses(request: ExportFrameRequest): PostPro
     timelineLayers: getFramePreviewTimelineLayers(request.project, request.scene.id),
     timelineMode: "composition",
   });
-  return applyAdjustmentLayersToPostProcessPasses(request.sceneTime, previewModel.visibleAdjustmentLayers, request.frameRate, { width: exportWidth, height: exportHeight })
+  return buildAdjustmentExecutionPlan(request.sceneTime, previewModel.visibleAdjustmentLayers, request.frameRate, { width: exportWidth, height: exportHeight }).steps
+    .flatMap((step) => step.postProcessPasses ?? [])
     .map((pass) => withPostProcessFrameBackground(pass, previewModel.part.frame.style.background));
 }
 

@@ -27,10 +27,12 @@ type UseGlobalEditorShortcutsOptions = {
   redoProjectChange: () => void;
   selectedPartId: string;
   setFastSelectEnabled: (enabled: Setter<boolean>) => void;
+  setObjectResizeMode: (mode: "resize" | "scale") => void;
   setScrubSnapEnabled: (enabled: Setter<boolean>) => void;
   showPresentationControls: () => void;
   stepSceneTime: (direction: -1 | 1) => void;
   togglePlayback: () => void;
+  timelineMode: TimelineMode;
   undoProjectChange: () => void;
   updateMode: (mode: Mode) => void;
   updateTimelineMode: (mode: TimelineMode) => void;
@@ -71,10 +73,12 @@ export function useGlobalEditorShortcuts({
   redoProjectChange,
   selectedPartId,
   setFastSelectEnabled,
+  setObjectResizeMode,
   setScrubSnapEnabled,
   showPresentationControls,
   stepSceneTime,
   togglePlayback,
+  timelineMode,
   undoProjectChange,
   updateMode,
   updateTimelineMode,
@@ -210,6 +214,7 @@ export function useGlobalEditorShortcuts({
       }
 
       const isDeleteKey = event.key === "Backspace" || event.key === "Delete";
+      const timelineShortcutsEnabled = timelineMode !== "compose";
       if (textEditingTarget) return;
 
       if (!event.ctrlKey && !event.metaKey && !event.altKey) {
@@ -227,18 +232,21 @@ export function useGlobalEditorShortcuts({
       }
 
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "c") {
+        if (!timelineShortcutsEnabled) return;
         if (copySelectedTimelineNodes()) event.preventDefault();
         else if (selectedPartId) event.preventDefault();
         return;
       }
 
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "x") {
+        if (!timelineShortcutsEnabled) return;
         if (cutSelectedTimelineNodes()) event.preventDefault();
         else if (selectedPartId) event.preventDefault();
         return;
       }
 
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "v") {
+        if (!timelineShortcutsEnabled) return;
         event.preventDefault();
         if (event.altKey) {
           pasteTimelineAttributesSilently();
@@ -300,13 +308,25 @@ export function useGlobalEditorShortcuts({
         return;
       }
 
+      if (event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setObjectResizeMode("scale");
+        return;
+      }
+
+      if (event.key.toLowerCase() === "v") {
+        event.preventDefault();
+        setObjectResizeMode("resize");
+        return;
+      }
+
       if (event.key.toLowerCase() === "r") {
         event.preventDefault();
         jumpToStart();
         return;
       }
 
-      if (isDeleteKey && deleteSelectedTimelineNodes()) {
+      if (timelineShortcutsEnabled && isDeleteKey && deleteSelectedTimelineNodes()) {
         event.preventDefault();
         return;
       }
@@ -328,5 +348,5 @@ export function useGlobalEditorShortcuts({
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
     };
-  }, [activeEditorTabId, cancelActiveSelector, closeEditorTab, copySelectedTimelineNodes, cutSelectedTimelineNodes, deleteSelectedTimelineNodes, enterFrameFullscreen, enterTheaterMode, exitPresentationMode, jumpToEnd, jumpToNextPart, jumpToStart, marqueeDraggingRef, marqueeSpacePanningRef, pasteTimelineAttributesSilently, pasteTimelineNodesSilently, pausePlaybackAtCurrentTime, presentationModeRef, redoProjectChange, restoreClosedEditorTab, selectedPartId, setFastSelectEnabled, setScrubSnapEnabled, showPresentationControls, stepSceneTime, togglePlayback, undoProjectChange, updateMode, updateTimelineMode]);
+  }, [activeEditorTabId, cancelActiveSelector, closeEditorTab, copySelectedTimelineNodes, cutSelectedTimelineNodes, deleteSelectedTimelineNodes, enterFrameFullscreen, enterTheaterMode, exitPresentationMode, jumpToEnd, jumpToNextPart, jumpToStart, marqueeDraggingRef, marqueeSpacePanningRef, pasteTimelineAttributesSilently, pasteTimelineNodesSilently, pausePlaybackAtCurrentTime, presentationModeRef, redoProjectChange, restoreClosedEditorTab, selectedPartId, setFastSelectEnabled, setObjectResizeMode, setScrubSnapEnabled, showPresentationControls, stepSceneTime, timelineMode, togglePlayback, undoProjectChange, updateMode, updateTimelineMode]);
 }

@@ -1,0 +1,27 @@
+id: clipper.adjustment.pixelBlur
+category: adjustment
+name: Pixel Blur
+label: Pixel Blur
+group: Visual/Blur
+defaultDuration: 3
+defaultParams: {"amount":6,"contrast":1.08,"target":"camera"}
+paramControls:
+  - key: amount
+    label: Amount
+    type: number
+    min: 0
+    max: 18
+    step: 0.5
+    defaultValue: 6
+  - key: contrast
+    label: Contrast
+    type: number
+    min: 0.8
+    max: 2
+    step: 0.05
+    defaultValue: 1.08
+  - key: target
+    label: Target
+    type: select
+    defaultValue: camera
+    options: [{"value":"frame","label":"Frame"},{"value":"camera","label":"Camera"}]

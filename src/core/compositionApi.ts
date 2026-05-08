@@ -22,7 +22,7 @@ export type Transform = {
 export type Bounds = { x: number; y: number; width: number; height: number };
 export type StyleValue = string | number;
 export type LayerStyle = Record<string, StyleValue>;
-export type CompositionRenderMode = "dom" | "live-dom" | "webgl";
+export type CompositionRenderMode = "dom" | "webgl";
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 export type RichTextSegment = { text: string; bold: boolean; italic: boolean; underline: boolean };
 export type FrameTemplate = { kind: "html"; source: string; static?: boolean };
@@ -32,7 +32,7 @@ export type LayerAnimation = {
   name?: string;
   target?: "self" | "children";
   keyframes: Record<string, readonly number[] | readonly string[] | undefined>;
-  options: { duration: number; delay?: number; ease?: MotionEase | readonly [number, number, number, number]; repeat?: number; repeatType?: "loop" | "reverse" | "mirror"; repeatDelay?: number; type?: "tween" | "spring" | "inertia"; bounce?: number; stiffness?: number; damping?: number; mass?: number; velocity?: number };
+  options: { duration: number; delay?: number; ease?: MotionEase | readonly [number, number, number, number]; repeat?: number; repeatType?: "loop" | "reverse" | "mirror"; repeatDelay?: number; type?: "tween" | "spring" | "inertia"; bounce?: number; stiffness?: number; damping?: number; mass?: number; velocity?: number; split?: { mode: "word" | "character"; stagger?: number; order?: "forward" | "reverse" | "center"; repeatScope?: "sequence" | "item" } };
   enabled?: boolean;
 };
 export type Renderable = RenderableObject | Component | Group | null | undefined | false | Renderable[];

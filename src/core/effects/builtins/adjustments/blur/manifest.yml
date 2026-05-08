@@ -2,7 +2,7 @@ id: clipper.adjustment.blur
 category: adjustment
 name: Blur
 label: Blur
-group: Visual
+group: Visual/Blur
 defaultDuration: 3
 defaultParams: {"radius":6}
 paramControls:

@@ -3,7 +3,7 @@ import { selectorHandleSizePx, selectorOffsetPx } from "../../config";
 import type { RightPanelTab } from "../../types";
 import { boundsToViewport, framePointToCameraTranslation, type CameraPreviewTransform } from "../../../core/camera";
 import type { AdjustmentEffectPointControl } from "../../../core/effects/types";
-import { constrainDragDeltaToDominantAxis, getBoundsUnion, getBoundsWithPreviewTransform, getDraggedObjects, getFrameObjectPreviewTransform, getFrameObjectWithPreviewBounds, getPartFrameObject, getResizedObjects, insetBounds, isVisibleMarqueeBounds, moveBounds, selectionObjectFromFrameObject, selectionPayloadFromObjects, syncChartObjectBounds, updateDragSelectionBoxElement, type ObjectDrag, type ObjectResize, type ResizeHandle } from "../../../core/frameInteraction";
+import { constrainDragDeltaToDominantAxis, getBoundsUnion, getBoundsWithPreviewTransform, getDraggedObjects, getFrameObjectPreviewTransform, getFrameObjectWithPreviewBounds, getObjectDragSnap, getObjectResizeScale, getPartFrameObject, getResizedObjects, insetBounds, isVisibleMarqueeBounds, moveBounds, selectionObjectFromFrameObject, selectionPayloadFromObjects, syncChartObjectBounds, updateDragSelectionBoxElement, type ObjectDrag, type ObjectResize, type ObjectResizeMode, type ObjectSnapGuide, type ResizeHandle } from "../../../core/frameInteraction";
 import { boundsToPoints, createSelectionPayload, framePointFromClient, normalizeBounds } from "../../../core/geometry";
 import { clamp, roundTwo } from "../../../core/math";
 import { FRAME_HEIGHT, FRAME_WIDTH, type AdjustmentLayer, type Bounds, type CompositionClip, type FrameObject, type Part, type Point, type SelectionPayload } from "../../../core/types";
@@ -37,8 +37,10 @@ type FrameInteractionControllerParams = {
   objectDragDeltaRef: RefObject<Point>;
   objectDragFrameRef: RefObject<number>;
   objectDragRef: RefObject<ObjectDrag | null>;
+  objectSnapGuidesRef: RefObject<ObjectSnapGuide[]>;
   objectResizeDeltaRef: RefObject<Point>;
   objectResizeFrameRef: RefObject<number>;
+  objectResizeMode: ObjectResizeMode;
   objectResizePreserveAspectRef: RefObject<boolean>;
   objectResizeRef: RefObject<ObjectResize | null>;
   part: Part;
@@ -52,14 +54,17 @@ type FrameInteractionControllerParams = {
   zoomScale: number;
   clearMarkerSelection: () => void;
   clearNodeSelection: () => void;
+  onSelectFrameSettings: () => void;
   setDragBox: Dispatch<SetStateAction<Bounds | null>>;
   setDragStart: Dispatch<SetStateAction<Point | null>>;
   setEditingTextObjectId: Dispatch<SetStateAction<string | null>>;
   setFramePickPreviewPoint: Dispatch<SetStateAction<Point | null>>;
   setMarqueeDragging: Dispatch<SetStateAction<boolean>>;
+  setObjectResizingActive: Dispatch<SetStateAction<boolean>>;
   setRightPanelTab: Dispatch<SetStateAction<RightPanelTab>>;
   setSelectedObjectId: Dispatch<SetStateAction<string | null>>;
   setSelectionPayload: Dispatch<SetStateAction<SelectionPayload | null>>;
+  setObjectSnapGuides: Dispatch<SetStateAction<ObjectSnapGuide[]>>;
   updateAdjustmentLayer: (layerId: string, updater: (layer: AdjustmentLayer) => AdjustmentLayer) => void;
   updateCompositionForTimelinePart: (partId: string, updater: (composition: CompositionClip) => CompositionClip) => void;
   updateTranslationMarker: (partId: string, markerId: string, updater: (marker: import("../../../core/types").MotionMarker) => import("../../../core/types").MotionMarker) => void;
@@ -70,16 +75,29 @@ export function useFrameInteractionController(params: FrameInteractionController
   const {
     cameraPreviewTransform, cameraRef, canSelectFrameObjects, dragBox, dragBoxFrameRef, dragSelectionBoxRef, dragStart, dragStartRef,
     focusPickZoomMarker, framePickFrameRef, framePickPreviewPoint, frameDisplayScale, framePreviewScale, selectionOverlayScale, frameViewportRef, liveDragSelectionIdsRef,
-    marqueeDraggingRef, marqueeLastPointRef, marqueeSpacePanningRef, mode, objectDragDeltaRef, objectDragFrameRef, objectDragRef,
-    objectResizeDeltaRef, objectResizeFrameRef, objectResizePreserveAspectRef, objectResizeRef, part, pendingDragBoxRef,
+    marqueeDraggingRef, marqueeLastPointRef, marqueeSpacePanningRef, mode, objectDragDeltaRef, objectDragFrameRef, objectDragRef, objectSnapGuidesRef,
+    objectResizeDeltaRef, objectResizeFrameRef, objectResizeMode, objectResizePreserveAspectRef, objectResizeRef, part, pendingDragBoxRef,
     pendingFramePickPointRef, pointPickAdjustment, positionPickTranslationMarker, previewTime, selectionPayload,
-    trackerPickTranslationMarker, zoomScale, clearMarkerSelection, clearNodeSelection, setDragBox, setDragStart, setEditingTextObjectId,
-    setFramePickPreviewPoint, setMarqueeDragging, setRightPanelTab, setSelectedObjectId, setSelectionPayload, updateAdjustmentLayer,
+    trackerPickTranslationMarker, zoomScale, clearMarkerSelection, clearNodeSelection, onSelectFrameSettings, setDragBox, setDragStart, setEditingTextObjectId,
+    setFramePickPreviewPoint, setMarqueeDragging, setObjectResizingActive, setObjectSnapGuides, setRightPanelTab, setSelectedObjectId, setSelectionPayload, updateAdjustmentLayer,
     updateCompositionForTimelinePart, updateTranslationMarker, updateZoomMarkerFocusGroup,
   } = params;
 
   function updateObjectDragSelection(nextObjects: SelectionPayload["objects"]) {
     setSelectionPayload(selectionPayloadFromObjects(nextObjects));
+  }
+
+  function updateObjectSnapGuides(guides: ObjectSnapGuide[]) {
+    const current = objectSnapGuidesRef.current;
+    if (current.length === guides.length && current.every((guide, index) => guide.axis === guides[index]?.axis && guide.position === guides[index]?.position)) return;
+    objectSnapGuidesRef.current = guides;
+    setObjectSnapGuides(guides);
+  }
+
+  function clearObjectSnapGuides() {
+    if (objectSnapGuidesRef.current.length === 0) return;
+    objectSnapGuidesRef.current = [];
+    setObjectSnapGuides([]);
   }
 
   function getFrameObjectElement(objectId: string) {
@@ -120,20 +138,27 @@ export function useFrameInteractionController(params: FrameInteractionController
   function setObjectResizePreview(objectId: string, bounds: Bounds) {
     const element = getFrameObjectElement(objectId);
     if (!element) return;
-    element.style.left = `${bounds.x}px`;
-    element.style.top = `${bounds.y}px`;
-    element.style.width = `${bounds.width}px`;
-    element.style.height = `${bounds.height}px`;
+    element.style.setProperty("--clipper-resize-left", `${bounds.x}px`);
+    element.style.setProperty("--clipper-resize-top", `${bounds.y}px`);
+    element.style.setProperty("--clipper-resize-width", `${bounds.width}px`);
+    element.style.setProperty("--clipper-resize-height", `${bounds.height}px`);
+  }
+
+  function setObjectScalePreview(objectId: string, scale: number) {
+    const element = getFrameObjectElement(objectId);
+    if (!element) return;
+    element.style.setProperty("--clipper-scale-preview", String(scale));
   }
 
   function clearObjectResizePreviews(objects: SelectionPayload["objects"]) {
     for (const object of objects) {
       const element = getFrameObjectElement(object.id);
       if (!element) continue;
-      element.style.removeProperty("left");
-      element.style.removeProperty("top");
-      element.style.removeProperty("width");
-      element.style.removeProperty("height");
+      element.style.removeProperty("--clipper-resize-left");
+      element.style.removeProperty("--clipper-resize-top");
+      element.style.removeProperty("--clipper-resize-width");
+      element.style.removeProperty("--clipper-resize-height");
+      element.style.removeProperty("--clipper-scale-preview");
     }
   }
 
@@ -153,24 +178,24 @@ export function useFrameInteractionController(params: FrameInteractionController
       if (!rect) return;
       if (!hostRect) return;
       const scale = rect.width / (FRAME_WIDTH * framePreviewScale);
-      element.style.left = `${rect.left - hostRect.left + viewportBounds.x * scale}px`;
-      element.style.top = `${rect.top - hostRect.top + viewportBounds.y * scale}px`;
-      element.style.width = `${viewportBounds.width * scale}px`;
-      element.style.height = `${viewportBounds.height * scale}px`;
+      element.style.setProperty("--clipper-selection-preview-left", `${rect.left - hostRect.left + viewportBounds.x * scale}px`);
+      element.style.setProperty("--clipper-selection-preview-top", `${rect.top - hostRect.top + viewportBounds.y * scale}px`);
+      element.style.setProperty("--clipper-selection-preview-width", `${viewportBounds.width * scale}px`);
+      element.style.setProperty("--clipper-selection-preview-height", `${viewportBounds.height * scale}px`);
       return;
     }
-    element.style.left = `${viewportBounds.x + overlayOffset}px`;
-    element.style.top = `${viewportBounds.y + overlayOffset}px`;
-    element.style.width = `${viewportBounds.width}px`;
-    element.style.height = `${viewportBounds.height}px`;
+    element.style.setProperty("--clipper-selection-preview-left", `${viewportBounds.x + overlayOffset}px`);
+    element.style.setProperty("--clipper-selection-preview-top", `${viewportBounds.y + overlayOffset}px`);
+    element.style.setProperty("--clipper-selection-preview-width", `${viewportBounds.width}px`);
+    element.style.setProperty("--clipper-selection-preview-height", `${viewportBounds.height}px`);
   }
 
   function clearFrameSelectionBoxResizePreview() {
     for (const element of getFrameSelectionBoxElements()) {
-      element.style.removeProperty("left");
-      element.style.removeProperty("top");
-      element.style.removeProperty("width");
-      element.style.removeProperty("height");
+      element.style.removeProperty("--clipper-selection-preview-left");
+      element.style.removeProperty("--clipper-selection-preview-top");
+      element.style.removeProperty("--clipper-selection-preview-width");
+      element.style.removeProperty("--clipper-selection-preview-height");
     }
   }
 
@@ -193,9 +218,12 @@ export function useFrameInteractionController(params: FrameInteractionController
       const resize = objectResizeRef.current;
       if (!resize) return;
 
-      const nextObjects = getResizedObjects(resize, objectResizeDeltaRef.current, objectResizePreserveAspectRef.current);
+      const preserveAspect = objectResizePreserveAspectRef.current || resize.mode === "scale";
+      const nextObjects = getResizedObjects(resize, objectResizeDeltaRef.current, preserveAspect);
+      const scale = getObjectResizeScale(resize, objectResizeDeltaRef.current, preserveAspect);
       for (const object of nextObjects) {
         setObjectResizePreview(object.id, object.bounds);
+        setObjectScalePreview(object.id, scale);
         setFrameSelectionBoxResizePreview(object.id, object.bounds);
       }
     });
@@ -216,12 +244,16 @@ export function useFrameInteractionController(params: FrameInteractionController
     objectResizeRef.current = null;
     objectResizeDeltaRef.current = { x: 0, y: 0 };
     objectResizePreserveAspectRef.current = false;
+    setObjectResizingActive(false);
+    window.dispatchEvent(new CustomEvent("clipper:object-resize-active", { detail: { active: false } }));
   }
 
   function finishCommittedObjectResize(objects: SelectionPayload["objects"]) {
     objectResizeRef.current = null;
     objectResizeDeltaRef.current = { x: 0, y: 0 };
     objectResizePreserveAspectRef.current = false;
+    setObjectResizingActive(false);
+    window.dispatchEvent(new CustomEvent("clipper:object-resize-active", { detail: { active: false } }));
     // Keep the final imperative geometry in place until React reconciles the
     // committed bounds. Removing left/top/width/height here makes absolute text
     // briefly fall back to its static top-left position and looks like snap-back.
@@ -251,6 +283,7 @@ export function useFrameInteractionController(params: FrameInteractionController
     clearFrameSelectionBoxDragTransform();
     objectDragRef.current = null;
     objectDragDeltaRef.current = { x: 0, y: 0 };
+    clearObjectSnapGuides();
   }
 
   function finishCommittedObjectDrag(objects: SelectionPayload["objects"]) {
@@ -260,6 +293,7 @@ export function useFrameInteractionController(params: FrameInteractionController
       clearObjectDragTransforms(objects);
       clearFrameSelectionBoxDragTransform();
     });
+    clearObjectSnapGuides();
   }
 
   function scheduleDragBox(nextBounds: Bounds) {
@@ -355,6 +389,7 @@ export function useFrameInteractionController(params: FrameInteractionController
     pendingDragBoxRef.current = { x: point.x, y: point.y, width: 0, height: 0 };
     liveDragSelectionIdsRef.current = "";
     marqueeDraggingRef.current = true;
+    onSelectFrameSettings();
     setMarqueeDragging(true);
     setDragStart(point);
     setDragBox({ x: point.x, y: point.y, width: 0, height: 0 });
@@ -431,7 +466,15 @@ export function useFrameInteractionController(params: FrameInteractionController
     if (activeObjectDrag && canSelectFrameObjects) {
       const dx = (event.clientX - activeObjectDrag.origin.x) / (frameDisplayScale * cameraPreviewTransform.scale);
       const dy = (event.clientY - activeObjectDrag.origin.y) / (frameDisplayScale * cameraPreviewTransform.scale);
-      scheduleObjectDragPreview(constrainDragDeltaToDominantAxis({ x: dx, y: dy }, event.shiftKey));
+      const constrainedDelta = constrainDragDeltaToDominantAxis({ x: dx, y: dy }, event.shiftKey);
+      if (event.metaKey || event.ctrlKey) {
+        const snap = getObjectDragSnap(activeObjectDrag, constrainedDelta, [...part.background.elements, ...part.objects], 8 / Math.max(frameDisplayScale * cameraPreviewTransform.scale, 0.001));
+        scheduleObjectDragPreview(snap.delta);
+        updateObjectSnapGuides(snap.guides);
+      } else {
+        scheduleObjectDragPreview(constrainedDelta);
+        clearObjectSnapGuides();
+      }
       return;
     }
 
@@ -539,8 +582,10 @@ export function useFrameInteractionController(params: FrameInteractionController
       return [selected.id, object ? getFrameObjectPreviewTransform(object, previewTime, part.duration) : { translateX: 0, translateY: 0, translateXPercent: 0, translateYPercent: 0, scaleX: 1, scaleY: 1 }];
     }));
     const displaySelectionBox = getBoundsUnion(resizedObjects.map((object) => getBoundsWithPreviewTransform(object.bounds, objectPreviewTransforms[object.id])));
-    objectResizeRef.current = { origin: { x: event.clientX, y: event.clientY }, handle, partId: part.id, selectionBox, displaySelectionBox, aspectRatio: displaySelectionBox.width / displaySelectionBox.height, objectPreviewTransforms, objects: resizedObjects, preservedObjects };
+    objectResizeRef.current = { origin: { x: event.clientX, y: event.clientY }, handle, partId: part.id, selectionBox, displaySelectionBox, aspectRatio: displaySelectionBox.width / displaySelectionBox.height, objectPreviewTransforms, objects: resizedObjects, preservedObjects, mode: objectResizeMode };
     objectResizeDeltaRef.current = { x: 0, y: 0 };
+    setObjectResizingActive(true);
+    window.dispatchEvent(new CustomEvent("clipper:object-resize-active", { detail: { active: true } }));
   }
 
   function commitObjectResize() {
@@ -552,19 +597,21 @@ export function useFrameInteractionController(params: FrameInteractionController
       objectResizeFrameRef.current = 0;
     }
 
-    const nextObjects = getResizedObjects(resize, objectResizeDeltaRef.current, objectResizePreserveAspectRef.current);
+    const preserveAspect = objectResizePreserveAspectRef.current || resize.mode === "scale";
+    const nextObjects = getResizedObjects(resize, objectResizeDeltaRef.current, preserveAspect);
+    const scale = getObjectResizeScale(resize, objectResizeDeltaRef.current, preserveAspect);
     const nextBoundsById = new Map(nextObjects.map((object) => [object.id, object.bounds]));
     updateCompositionForTimelinePart(resize.partId, (composition) => ({
       ...composition,
       objects: composition.objects.map((object) => {
         const nextBounds = nextBoundsById.get(object.id);
-        return nextBounds ? syncChartObjectBounds({ ...object, bounds: nextBounds }) : object;
+        return nextBounds ? syncChartObjectBounds(scaleFrameObject({ ...object, bounds: nextBounds }, scale)) : object;
       }),
       background: {
         ...composition.background,
         elements: composition.background.elements.map((object) => {
           const nextBounds = nextBoundsById.get(object.id);
-          return nextBounds ? syncChartObjectBounds({ ...object, bounds: nextBounds }) : object;
+          return nextBounds ? syncChartObjectBounds(scaleFrameObject({ ...object, bounds: nextBounds }, scale)) : object;
         }),
       },
     }));
@@ -600,4 +647,16 @@ export function useFrameInteractionController(params: FrameInteractionController
     startTextObjectEdit,
     syncObjectResizeAspectPreview,
   };
+}
+
+function scaleFrameObject(object: FrameObject, scale: number): FrameObject {
+  if (scale === 1 || object.type !== "text") return object;
+  const fontSize = toFiniteNumber(object.style.fontSize);
+  if (fontSize === null) return object;
+  return { ...object, style: { ...object.style, fontSize: Math.max(1, Math.round(fontSize * scale * 100) / 100) } };
+}
+
+function toFiniteNumber(value: string | number | undefined) {
+  const number = typeof value === "number" ? value : typeof value === "string" ? Number.parseFloat(value) : NaN;
+  return Number.isFinite(number) ? number : null;
 }
