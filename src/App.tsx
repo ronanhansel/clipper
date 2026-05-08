@@ -1696,8 +1696,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     updateEditorState((state) => ({ ...state, effectsPanelState }));
   }
 
-  const { previewComposeLayout, previewEditorLayout, startEditorPanelResize } = useEditorPanelResize({
-    appRootRef,
+  const { previewEditorLayout, startEditorPanelResize } = useEditorPanelResize({
     projectRef,
     updateEditorState,
   });
@@ -1740,10 +1739,8 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     actions: { ...fileManagerActions, reloadProject, openCompositionFile: openCompositionInEditor, openProjectFile: openProjectFileInEditor, prerenderComposition: togglePrerenderCompositionFromLibrary },
   });
   const editorLayout = previewEditorLayout ?? project.editorState?.layout ?? defaultEditorLayoutState;
-  const composeLayout = previewComposeLayout ?? project.editorState?.composeLayout ?? defaultComposeLayoutState;
   const appShellStyle = {
     "--clipper-left-panel-width": `${editorLayout.leftPanelWidth}px`,
-    "--clipper-compose-left-panel-width": `${composeLayout.leftPanelWidth}px`,
     "--clipper-right-panel-width": `${editorLayout.rightPanelWidth}px`,
     "--clipper-timeline-height": `${editorLayout.timelineHeight}px`,
     "--clipper-presentation-width": `${presentationViewport.width}px`,
@@ -1751,7 +1748,7 @@ function AppContent({ initialProjectManifestPath, initialSourceStatus, onClosePr
     "--clipper-presentation-scale": presentationViewport.scale,
     gridTemplateRows: `48px minmax(0, 1fr) var(--clipper-timeline-height)`,
   } as CSSProperties;
-  const editorShellStyle = { gridTemplateColumns: `${composeMode ? "var(--clipper-compose-left-panel-width)" : "var(--clipper-left-panel-width)"} minmax(640px, 1fr) var(--clipper-right-panel-width)` } as CSSProperties;
+  const editorShellStyle = { gridTemplateColumns: "var(--clipper-left-panel-width) minmax(640px, 1fr) var(--clipper-right-panel-width)" } as CSSProperties;
   const presentationTime = currentSceneTime;
   const presentationProgress = sceneDurationSeconds > 0 ? `${clamp(presentationTime / sceneDurationSeconds, 0, 1) * 100}%` : "0%";
   const presentationScrubberStyle = { "--clipper-presentation-progress": presentationProgress } as CSSProperties;

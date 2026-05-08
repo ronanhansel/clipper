@@ -34,6 +34,10 @@ function createFieldSetter<T extends keyof ProjectStoreState>(set: StoreApi<Proj
 }
 
 export function getProjectContentSnapshot(project: ProjectManifest) {
+  return JSON.stringify(project);
+}
+
+export function getProjectFileContentSnapshot(project: ProjectManifest) {
   const { editorState: _editorState, ...contentProject } = project;
   return JSON.stringify(contentProject);
 }

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type PointerEvent, type RefObject } from "react";
-import { defaultComposeLayoutState, defaultEditorLayoutState } from "../../../core/project";
-import type { ComposeLayoutState, EditorLayoutState, EditorState, ProjectManifest } from "../../../core/types";
+import { defaultEditorLayoutState } from "../../../core/project";
+import type { EditorLayoutState, EditorState, ProjectManifest } from "../../../core/types";
 import { clamp } from "../../../core/math";
 
 export type EditorPanelResizeKind = "left" | "compose-left" | "right" | "timeline";
@@ -10,9 +10,7 @@ type EditorPanelResizeDrag = {
   originX: number;
   originY: number;
   initialLayout: EditorLayoutState;
-  initialComposeLayout: ComposeLayoutState;
   nextLayout: EditorLayoutState;
-  nextComposeLayout: ComposeLayoutState;
   frame: number;
 };
 
@@ -27,15 +25,13 @@ const editorPanelLayoutLimits = {
 };
 
 type UseEditorPanelResizeInput = {
-  appRootRef: RefObject<HTMLElement | null>;
   projectRef: RefObject<ProjectManifest>;
   updateEditorState: (updater: (state: EditorState) => EditorState, options?: { autosave?: boolean }) => void;
 };
 
-export function useEditorPanelResize({ appRootRef, projectRef, updateEditorState }: UseEditorPanelResizeInput) {
+export function useEditorPanelResize({ projectRef, updateEditorState }: UseEditorPanelResizeInput) {
   const editorPanelResizeRef = useRef<EditorPanelResizeDrag | null>(null);
   const [previewEditorLayout, setPreviewEditorLayout] = useState<EditorLayoutState | null>(null);
-  const [previewComposeLayout, setPreviewComposeLayout] = useState<ComposeLayoutState | null>(null);
 
   function clampEditorLayout(layout: EditorLayoutState): EditorLayoutState {
     const availablePanelWidth = Math.max(window.innerWidth - editorPanelLayoutLimits.centerMin, editorPanelLayoutLimits.leftMin + editorPanelLayoutLimits.rightMin);
@@ -46,39 +42,11 @@ export function useEditorPanelResize({ appRootRef, projectRef, updateEditorState
     return { leftPanelWidth, rightPanelWidth, timelineHeight };
   }
 
-  function clampComposeLayout(layout: ComposeLayoutState): ComposeLayoutState {
-    const currentLayout = projectRef.current.editorState?.layout ?? defaultEditorLayoutState;
-    const availablePanelWidth = Math.max(window.innerWidth - editorPanelLayoutLimits.centerMin, editorPanelLayoutLimits.leftMin + editorPanelLayoutLimits.rightMin);
-    const maxLeftPanelWidth = Math.min(editorPanelLayoutLimits.leftMax, availablePanelWidth - currentLayout.rightPanelWidth);
-    return { leftPanelWidth: Math.round(clamp(layout.leftPanelWidth, editorPanelLayoutLimits.leftMin, maxLeftPanelWidth)) };
-  }
-
-  function applyEditorLayoutCss(layout: EditorLayoutState) {
-    const root = appRootRef.current;
-    if (!root) return;
-    root.style.setProperty("--clipper-left-panel-width", `${layout.leftPanelWidth}px`);
-    root.style.setProperty("--clipper-right-panel-width", `${layout.rightPanelWidth}px`);
-    root.style.setProperty("--clipper-timeline-height", `${layout.timelineHeight}px`);
-  }
-
-  function applyComposeLayoutCss(layout: ComposeLayoutState) {
-    const root = appRootRef.current;
-    if (!root) return;
-    root.style.setProperty("--clipper-compose-left-panel-width", `${layout.leftPanelWidth}px`);
-  }
-
   function updateEditorLayout(layout: EditorLayoutState) {
     const nextLayout = clampEditorLayout(layout);
     const currentLayout = projectRef.current.editorState?.layout ?? defaultEditorLayoutState;
-    if (JSON.stringify(nextLayout) === JSON.stringify(currentLayout)) return;
+    if (editorLayoutsEqual(nextLayout, currentLayout)) return;
     updateEditorState((state) => ({ ...state, layout: nextLayout }));
-  }
-
-  function updateComposeLayout(layout: ComposeLayoutState) {
-    const nextLayout = clampComposeLayout(layout);
-    const currentLayout = projectRef.current.editorState?.composeLayout ?? defaultComposeLayoutState;
-    if (JSON.stringify(nextLayout) === JSON.stringify(currentLayout)) return;
-    updateEditorState((state) => ({ ...state, composeLayout: nextLayout }));
   }
 
   function onEditorPanelResizeMove(event: globalThis.PointerEvent) {
@@ -89,24 +57,16 @@ export function useEditorPanelResize({ appRootRef, projectRef, updateEditorState
     const deltaY = event.clientY - drag.originY;
     const nextLayout = clampEditorLayout({
       ...drag.initialLayout,
-      leftPanelWidth: drag.kind === "left" ? drag.initialLayout.leftPanelWidth + deltaX : drag.initialLayout.leftPanelWidth,
+      leftPanelWidth: drag.kind === "left" || drag.kind === "compose-left" ? drag.initialLayout.leftPanelWidth + deltaX : drag.initialLayout.leftPanelWidth,
       rightPanelWidth: drag.kind === "right" ? drag.initialLayout.rightPanelWidth - deltaX : drag.initialLayout.rightPanelWidth,
       timelineHeight: drag.kind === "timeline" ? drag.initialLayout.timelineHeight - deltaY : drag.initialLayout.timelineHeight,
     });
-    const nextComposeLayout = clampComposeLayout({
-      ...drag.initialComposeLayout,
-      leftPanelWidth: drag.kind === "compose-left" ? drag.initialComposeLayout.leftPanelWidth + deltaX : drag.initialComposeLayout.leftPanelWidth,
-    });
     drag.nextLayout = nextLayout;
-    drag.nextComposeLayout = nextComposeLayout;
     if (drag.frame) return;
 
     drag.frame = requestAnimationFrame(() => {
       drag.frame = 0;
-      applyEditorLayoutCss(drag.nextLayout);
-      applyComposeLayoutCss(drag.nextComposeLayout);
-      if (drag.kind === "compose-left") setPreviewComposeLayout(drag.nextComposeLayout);
-      else setPreviewEditorLayout(drag.nextLayout);
+      setPreviewEditorLayout(drag.nextLayout);
     });
   }
 
@@ -114,14 +74,8 @@ export function useEditorPanelResize({ appRootRef, projectRef, updateEditorState
     const drag = editorPanelResizeRef.current;
     if (!drag) return;
     if (drag.frame) cancelAnimationFrame(drag.frame);
-    applyEditorLayoutCss(drag.nextLayout);
-    applyComposeLayoutCss(drag.nextComposeLayout);
-    if (drag.kind === "compose-left") updateComposeLayout(drag.nextComposeLayout);
-    else updateEditorLayout(drag.nextLayout);
-    requestAnimationFrame(() => {
-      setPreviewEditorLayout(null);
-      setPreviewComposeLayout(null);
-    });
+    setPreviewEditorLayout(drag.nextLayout);
+    updateEditorLayout(drag.nextLayout);
     editorPanelResizeRef.current = null;
     document.body.style.cursor = "";
     document.body.style.userSelect = "";
@@ -136,11 +90,9 @@ export function useEditorPanelResize({ appRootRef, projectRef, updateEditorState
     event.stopPropagation();
 
     const initialLayout = clampEditorLayout(projectRef.current.editorState?.layout ?? defaultEditorLayoutState);
-    const initialComposeLayout = clampComposeLayout(projectRef.current.editorState?.composeLayout ?? defaultComposeLayoutState);
-    const drag: EditorPanelResizeDrag = { kind, originX: event.clientX, originY: event.clientY, initialLayout, initialComposeLayout, nextLayout: initialLayout, nextComposeLayout: initialComposeLayout, frame: 0 };
+    const drag: EditorPanelResizeDrag = { kind, originX: event.clientX, originY: event.clientY, initialLayout, nextLayout: initialLayout, frame: 0 };
     editorPanelResizeRef.current = drag;
-    if (kind === "compose-left") setPreviewComposeLayout(initialComposeLayout);
-    else setPreviewEditorLayout(initialLayout);
+    setPreviewEditorLayout(initialLayout);
     document.body.style.cursor = kind === "timeline" ? "row-resize" : "col-resize";
     document.body.style.userSelect = "none";
     window.addEventListener("pointermove", onEditorPanelResizeMove, true);
@@ -148,12 +100,17 @@ export function useEditorPanelResize({ appRootRef, projectRef, updateEditorState
     window.addEventListener("pointercancel", onEditorPanelResizeEnd, true);
   }
 
+  const committedEditorLayout = projectRef.current.editorState?.layout ?? defaultEditorLayoutState;
+
+  useEffect(() => {
+    if (!editorPanelResizeRef.current && previewEditorLayout && editorLayoutsEqual(previewEditorLayout, committedEditorLayout)) setPreviewEditorLayout(null);
+  }, [committedEditorLayout.leftPanelWidth, committedEditorLayout.rightPanelWidth, committedEditorLayout.timelineHeight, previewEditorLayout]);
+
   useEffect(() => () => {
     const drag = editorPanelResizeRef.current;
     if (drag?.frame) cancelAnimationFrame(drag.frame);
     editorPanelResizeRef.current = null;
     setPreviewEditorLayout(null);
-    setPreviewComposeLayout(null);
     document.body.style.cursor = "";
     document.body.style.userSelect = "";
     window.removeEventListener("pointermove", onEditorPanelResizeMove, true);
@@ -161,5 +118,9 @@ export function useEditorPanelResize({ appRootRef, projectRef, updateEditorState
     window.removeEventListener("pointercancel", onEditorPanelResizeEnd, true);
   }, []);
 
-  return { previewComposeLayout, previewEditorLayout, startEditorPanelResize };
+  return { previewEditorLayout, startEditorPanelResize };
+}
+
+function editorLayoutsEqual(left: EditorLayoutState, right: EditorLayoutState) {
+  return left.leftPanelWidth === right.leftPanelWidth && left.rightPanelWidth === right.rightPanelWidth && left.timelineHeight === right.timelineHeight;
 }

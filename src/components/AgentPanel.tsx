@@ -149,7 +149,7 @@ function TemplateDialog({ loadError, open, selectedTemplate, selectedTemplateId,
             <DialogHeader className="mb-3"><DialogTitle>Templates</DialogTitle></DialogHeader>
             {loadError ? <div className="mb-3 rounded-xl border border-[#3b2a2a] bg-[#1a0f10] p-3 text-xs leading-5 text-[#ffb4b4]">{loadError}</div> : null}
             <div className="grid gap-2">
-              {templates.map((template) => <button key={template.id} className={`grid gap-1 rounded-xl border px-3 py-3 text-left transition ${selectedTemplateId === template.id ? "border-[var(--clipper-accent)] bg-[#0f1117] text-white" : "border-[#2d313b] bg-[#171920] text-[#9297a3] hover:bg-[#1e222c] hover:text-[#dfe2ea]"}`} onClick={() => onSelectTemplate(template.id)}><span className="text-sm font-extrabold">{template.title}</span>{template.author.github ? <span className="text-xs font-medium text-[#6f7684]">{template.author.github}</span> : null}</button>)}
+              {templates.map((template) => <button key={template.id} className={`grid gap-1 rounded-xl border px-3 py-3 text-left transition ${selectedTemplateId === template.id ? "border-[var(--clipper-accent)] bg-[#0f1117] text-white" : "border-[#2d313b] bg-[#171920] text-[#9297a3] hover:bg-[#1e222c] hover:text-[#dfe2ea]"}`} onClick={() => onSelectTemplate(template.id)}><span className="text-sm font-extrabold">{template.title}</span>{template.author.github ? <span className="text-xs font-medium leading-4 text-[#6f7684]">{template.title} • {template.author.github}</span> : null}</button>)}
             </div>
           </aside>
           <main className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-3 p-5">
@@ -308,8 +308,16 @@ function formatTime(time: number) {
 }
 
 function getProjectRoot(filePath: string) {
-  const index = filePath.indexOf("/file-manager/");
-  return index >= 0 ? filePath.slice(0, index) : filePath.split("/").slice(0, -1).join("/");
+  const relativePath = normalizeClipperPath(filePath);
+  const index = relativePath.indexOf("/file-manager/");
+  return index >= 0 ? `${relativePath.slice(0, index)}/file-manager` : relativePath.split("/").slice(0, -1).join("/");
+}
+
+function normalizeClipperPath(filePath: string) {
+  const normalized = filePath.split("\\").join("/");
+  const clipperIndex = normalized.indexOf("clipper/");
+  if (clipperIndex >= 0) return normalized.slice(clipperIndex);
+  return normalized.startsWith("/") ? normalized.replace(/^\/+/, "") : `clipper/${normalized}`;
 }
 
 async function nextAvailableTemplateFolder(projectRoot: string, slug: string) {

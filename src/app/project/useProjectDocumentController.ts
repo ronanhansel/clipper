@@ -4,7 +4,7 @@ import toast from "react-hot-toast";
 import { maxProjectHistoryActions, projectHistoryCoalesceMs } from "../config";
 import { getDirectoryPath } from "../features/file-manager/fileManagerPaths";
 import { getEditableRootPath, projectPersistenceService } from "../services/projectPersistenceService";
-import { getProjectContentSnapshot, useProjectDocumentState } from "../state/projectStore";
+import { getProjectContentSnapshot, getProjectFileContentSnapshot, useProjectDocumentState } from "../state/projectStore";
 import type { Mode, ProjectUpdater } from "../types";
 import { compositionFromSource } from "../../core/compositionSource";
 import { defaultTimelineMode, normalizeProject, replacePartInProject, serializeProjectForSave } from "../../core/project";
@@ -15,6 +15,7 @@ import type { Command } from "../features/file-manager/operations/Command";
 
 type ProjectHistoryEntry = { project: ProjectManifest; compositionSources: Record<string, string>; implicitFileOperation?: boolean; fileCommand?: Command };
 type SavedSnapshots = { project: string; compositionSources: string };
+type DiskSnapshotBundle = { full: SavedSnapshots; fileContent: SavedSnapshots };
 
 export type ProjectDocumentController = {
   activeProjectManifestPath: string;
@@ -179,13 +180,13 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
   }
 
   async function hasExternalDiskChanges() {
-    const diskSnapshots = await getDiskProjectSnapshots();
+    const diskSnapshots = await getDiskProjectSnapshotBundle();
     const currentSnapshots = getCurrentProjectSnapshots();
-    if (snapshotsEqual(diskSnapshots, currentSnapshots)) {
+    if (snapshotsEqual(diskSnapshots.full, currentSnapshots)) {
       markSnapshotsSaved(currentSnapshots);
       return false;
     }
-    return !snapshotsEqual(diskSnapshots, { project: savedProjectSnapshotRef.current, compositionSources: savedCompositionSourcesSnapshotRef.current });
+    return !snapshotsEqual(diskSnapshots.fileContent, getSavedProjectFileContentSnapshots());
   }
 
   function getCurrentProjectSnapshots(projectToCheck = projectRef.current): SavedSnapshots {
@@ -196,15 +197,43 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
     };
   }
 
+  function getCurrentProjectFileContentSnapshots(projectToCheck = projectRef.current): SavedSnapshots {
+    const persistedProject = serializeProjectForSave({ ...projectToCheck, compositionSources: compositionSourcesRef.current });
+    return getProjectFileContentSnapshots(persistedProject);
+  }
+
+  function getProjectFileContentSnapshots(projectToCheck: ProjectManifest): SavedSnapshots {
+    return {
+      project: getProjectFileContentSnapshot(projectToCheck),
+      compositionSources: JSON.stringify(projectToCheck.compositionSources ?? {}),
+    };
+  }
+
+  function getSavedProjectFileContentSnapshots(): SavedSnapshots {
+    try {
+      return {
+        project: getProjectFileContentSnapshot(JSON.parse(savedProjectSnapshotRef.current) as ProjectManifest),
+        compositionSources: savedCompositionSourcesSnapshotRef.current,
+      };
+    } catch {
+      return { project: savedProjectSnapshotRef.current, compositionSources: savedCompositionSourcesSnapshotRef.current };
+    }
+  }
+
   async function getDiskProjectSnapshots(): Promise<SavedSnapshots> {
+    return (await getDiskProjectSnapshotBundle()).full;
+  }
+
+  async function getDiskProjectSnapshotBundle(): Promise<DiskSnapshotBundle> {
     const { project: loadedProject } = await projectPersistenceService.loadProject({ manifestPath: activeProjectManifestPathRef.current });
     const normalizedProject = normalizeProject(loadedProject);
     const loadedCompositionSources = getProjectCompositionSources(normalizedProject);
     const persistedProject = serializeProjectForSave({ ...normalizedProject, compositionSources: loadedCompositionSources });
-    return {
+    const full = {
       project: getProjectContentSnapshot(persistedProject),
       compositionSources: JSON.stringify(persistedProject.compositionSources ?? {}),
     };
+    return { full, fileContent: getProjectFileContentSnapshots(persistedProject) };
   }
 
   function snapshotsEqual(left: SavedSnapshots, right: SavedSnapshots) {
@@ -285,7 +314,7 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
       const normalizedProject = normalizeProject(loadedProject);
       const loadedCompositionSources = getProjectCompositionSources(normalizedProject);
       replaceProject(normalizedProject, { history: false, syncSources: false, preserveEditorState: options?.preserveEditorState });
-      const persistedProject = serializeProjectForSave({ ...normalizedProject, compositionSources: loadedCompositionSources });
+      const persistedProject = serializeProjectForSave({ ...projectRef.current, compositionSources: loadedCompositionSources });
       const nextSavedProjectSnapshot = getProjectContentSnapshot(persistedProject);
       const nextSavedCompositionSourcesSnapshot = JSON.stringify(persistedProject.compositionSources ?? {});
       setSavedProjectSnapshot(nextSavedProjectSnapshot);
@@ -313,14 +342,16 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
     implicitFileOperationSaveVersionRef.current++;
     latestAutosaveVersionRef.current++;
     const currentSnapshots = getCurrentProjectSnapshots();
-    const savedSnapshots = { project: savedProjectSnapshotRef.current, compositionSources: savedCompositionSourcesSnapshotRef.current };
-    const diskSnapshots = await getDiskProjectSnapshots();
-    if (snapshotsEqual(diskSnapshots, savedSnapshots)) return;
-    if (snapshotsEqual(diskSnapshots, currentSnapshots)) {
+    const currentFileContentSnapshots = getCurrentProjectFileContentSnapshots();
+    const savedFileContentSnapshots = getSavedProjectFileContentSnapshots();
+    const diskSnapshots = await getDiskProjectSnapshotBundle();
+    if (snapshotsEqual(diskSnapshots.fileContent, savedFileContentSnapshots)) return;
+    if (snapshotsEqual(diskSnapshots.full, currentSnapshots)) {
       markSnapshotsSaved(currentSnapshots);
       setSourceStatus(changedPath ? `Saved changes detected at ${changedPath}.` : "Saved project changes detected.");
       return;
     }
+    if (snapshotsEqual(diskSnapshots.fileContent, currentFileContentSnapshots)) return;
     await reloadProjectFromDisk({ preserveEditorState: true });
   }, [reloadProjectFromDisk, setSourceStatus]);
 
@@ -581,6 +612,7 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
     const persistedProject = serializeProjectForSave(embeddedProject);
     const projectSnapshot = getProjectContentSnapshot(persistedProject);
     const compositionSourcesSnapshot = JSON.stringify(persistedProject.compositionSources ?? {});
+    const projectFileContentSnapshots = getProjectFileContentSnapshots(persistedProject);
     const autosaveVersion = options.autosaveVersion;
     const shouldApplySaveResult = () => autosaveVersion === undefined || autosaveVersion === latestAutosaveVersionRef.current;
 
@@ -590,13 +622,13 @@ export function useProjectDocumentController({ applyStoredEditorState, centerPre
       if (!shouldApplySaveResult()) return;
       if (autosaveVersion !== undefined && externalChangeConflictActiveRef.current) return;
       if (autosaveVersion !== undefined) {
-        const diskSnapshots = await getDiskProjectSnapshots();
-        const savedSnapshots = { project: savedProjectSnapshotRef.current, compositionSources: savedCompositionSourcesSnapshotRef.current };
-        if (snapshotsEqual(diskSnapshots, { project: projectSnapshot, compositionSources: compositionSourcesSnapshot })) {
-          markSnapshotsSaved(diskSnapshots);
+        const diskSnapshots = await getDiskProjectSnapshotBundle();
+        const savedFileContentSnapshots = getSavedProjectFileContentSnapshots();
+        if (snapshotsEqual(diskSnapshots.full, { project: projectSnapshot, compositionSources: compositionSourcesSnapshot })) {
+          markSnapshotsSaved(diskSnapshots.full);
           return;
         }
-        if (!snapshotsEqual(diskSnapshots, savedSnapshots)) {
+        if (!snapshotsEqual(diskSnapshots.fileContent, projectFileContentSnapshots) && !snapshotsEqual(diskSnapshots.fileContent, savedFileContentSnapshots)) {
           showExternalChangeConflict();
           return;
         }
