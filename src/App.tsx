@@ -213,11 +213,6 @@ import {
   fileManagerFindMediaEvent,
   type FileManagerFindMediaDetail,
 } from "./lib/fileManagerEvents";
-import { scan } from "react-scan";
-
-scan({
-  enabled: true,
-});
 
 const defaultEditorState: EditorState = {
   timeline: defaultTimelineViewportState,

@@ -1565,6 +1565,20 @@ export const DirectTimelinePanel = memo(function DirectTimelinePanel({
       : [{ part, marker }];
   }
 
+  function getMotionSelectionTarget(selection: MotionMarkerSelection) {
+    const selectedPart = [...timelineMotionViews, ...motionTimeline].find(
+      (item) => item.id === selection.partId,
+    );
+    const selectedMarker = selectedPart?.motionMarkers.find(
+      (item) => item.id === selection.markerId,
+    );
+    return selectedPart &&
+      selectedMarker &&
+      !isMotionMarkerLocked(selectedMarker)
+      ? { part: selectedPart, marker: selectedMarker }
+      : null;
+  }
+
   function selectedAdjustmentResizeTargets(layer: AdjustmentLayer) {
     if (isAdjustmentLocked(layer)) return [];
     if (!selectedAdjustmentLayerIds.has(layer.id)) return [layer];
@@ -1641,19 +1655,16 @@ export const DirectTimelinePanel = memo(function DirectTimelinePanel({
         });
     }
     for (const selection of selectedMotionMarkers) {
-      const part = motionTimeline.find((item) => item.id === selection.partId);
-      const marker = part?.motionMarkers.find(
-        (item) => item.id === selection.markerId,
-      );
-      if (part && marker && !isMotionMarkerLocked(marker))
+      const target = getMotionSelectionTarget(selection);
+      if (target)
         items.push({
-          id: `${part.id}:${marker.id}`,
+          id: `${target.part.id}:${target.marker.id}`,
           kind: "motion",
-          partId: part.id,
-          markerId: marker.id,
-          start: part.start + marker.start,
-          duration: marker.duration,
-          layerId: getMotionMarkerLayerId(marker),
+          partId: target.part.id,
+          markerId: target.marker.id,
+          start: target.part.start + target.marker.start,
+          duration: target.marker.duration,
+          layerId: getMotionMarkerLayerId(target.marker),
         });
     }
     return items;
@@ -1693,12 +1704,8 @@ export const DirectTimelinePanel = memo(function DirectTimelinePanel({
         items.push({ kind: "composition", part });
     }
     for (const selection of selectedMotionMarkers) {
-      const part = motionTimeline.find((item) => item.id === selection.partId);
-      const marker = part?.motionMarkers.find(
-        (item) => item.id === selection.markerId,
-      );
-      if (part && marker && !isMotionMarkerLocked(marker))
-        items.push({ kind: "motion", part, marker });
+      const target = getMotionSelectionTarget(selection);
+      if (target) items.push({ kind: "motion", ...target });
     }
     return items;
   }
@@ -1817,7 +1824,9 @@ export const DirectTimelinePanel = memo(function DirectTimelinePanel({
     ): Array<AbsoluteTimelineMarker<MotionMarker>> {
       const resizedMarkers = motions.flatMap(({ part, marker }) => {
         const absoluteMarkers = getAbsoluteTimelineMarkerResizeMarkers(
-          motionTimeline,
+          part.id === TIMELINE_MOTION_PART_ID
+            ? motionTimeline
+            : timelineMotionViews,
           { part, marker },
         );
         return getAbsoluteMarkerResizeState(

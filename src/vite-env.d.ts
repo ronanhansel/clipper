@@ -27,6 +27,13 @@ declare module "three/webgpu";
 
 declare module "three/tsl";
 
+declare namespace React {
+  interface CanvasHTMLAttributes<T> {
+    layoutSubtree?: string;
+    layoutsubtree?: string;
+  }
+}
+
 type LocalFontData = {
   family: string;
   fullName: string;
@@ -201,7 +208,7 @@ interface Window {
           totalFrames: number;
           percent: number;
           status: string;
-          method?: "renderer" | "stable-slow";
+          method?: "renderer" | "draw-element" | "stable-slow";
         },
       ) => void,
     ) => () => void;

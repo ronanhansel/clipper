@@ -58,7 +58,7 @@ export type TimelineBlankContextTarget = {
   time: number;
   compositionLayerId?: string;
 };
-export type VideoExportMethod = "renderer" | "stable-slow";
+export type VideoExportMethod = "renderer" | "draw-element" | "stable-slow";
 export type VideoExportProgress = {
   frame: number;
   totalFrames: number;

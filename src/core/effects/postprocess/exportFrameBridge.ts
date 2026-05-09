@@ -362,7 +362,7 @@ function createCanvasFromRawFrame(
   return canvas;
 }
 
-function readCanvasToRawFrame(
+export function readCanvasToRawFrame(
   canvas: HTMLCanvasElement,
   width: number,
   height: number,

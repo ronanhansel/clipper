@@ -31,11 +31,13 @@ export const EXPORT_CHROMIUM_ARGS = [
   "--num-raster-threads=8",
   "--js-flags=--max-old-space-size=4096",
   "--force-color-profile=srgb",
+  "--enable-blink-features=HTMLCanvasElementDrawElement",
+  "--enable-features=CanvasDrawElement",
 ] as const;
 
 // ─── Video export types ─────────────────────────────────────────────────
 
-export type VideoExportMethod = "renderer" | "stable-slow";
+export type VideoExportMethod = "renderer" | "draw-element" | "stable-slow";
 export type ExportRenderMode = "renderer" | "stable-slow";
 export type StableSlowGridPreset = "relaxed" | "balanced" | "safe" | "extreme";
 export type StableSlowValidationSamples = 1 | 2 | 3;

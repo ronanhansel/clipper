@@ -145,11 +145,13 @@ export function CompositionTimelineBlock({
   }
 
   function leftResizePointerDown(event: PointerEvent<HTMLDivElement>) {
+    event.preventDefault();
     event.stopPropagation();
     onLeftResize?.(event);
   }
 
   function rightResizePointerDown(event: PointerEvent<HTMLDivElement>) {
+    event.preventDefault();
     event.stopPropagation();
     onRightResize?.(event);
   }
@@ -666,11 +668,13 @@ export function TimelineBlock({
   }
 
   function leftResizePointerDown(event: PointerEvent<HTMLDivElement>) {
+    event.preventDefault();
     event.stopPropagation();
     onLeftResize(event);
   }
 
   function rightResizePointerDown(event: PointerEvent<HTMLDivElement>) {
+    event.preventDefault();
     event.stopPropagation();
     onRightResize(event);
   }

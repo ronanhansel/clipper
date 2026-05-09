@@ -335,16 +335,6 @@ async function captureRenderedExportFrame(
   }
 
   const postProcessPasses = getExportPostProcessPasses(syncResult);
-  if (postProcessPasses.length > 0) {
-    return captureAndPostProcessFullExportFrame(
-      window,
-      postProcessPasses,
-      frameIndex,
-      sceneTime,
-      exportWidth,
-      exportHeight,
-    );
-  }
   if (payload.renderSurface === "preview-cache") {
     return captureFullPreviewCacheFrame(
       window,
@@ -362,6 +352,32 @@ async function captureRenderedExportFrame(
       exportWidth,
       exportHeight,
       stableSlowState,
+    );
+  }
+  try {
+    const drawElementFrame = await captureDrawElementExportFrame(
+      window,
+      frameIndex,
+      sceneTime,
+      exportWidth,
+      exportHeight,
+      postProcessPasses,
+    );
+    console.log(`[clipper export] mode=draw-element frame=${frameIndex + 1}`);
+    return drawElementFrame;
+  } catch (error) {
+    console.warn(
+      `[clipper export] draw-element capture failed on frame ${frameIndex + 1}; falling back to ${postProcessPasses.length > 0 ? "post-process capture" : "adaptive capture"}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  if (postProcessPasses.length > 0) {
+    return captureAndPostProcessFullExportFrame(
+      window,
+      postProcessPasses,
+      frameIndex,
+      sceneTime,
+      exportWidth,
+      exportHeight,
     );
   }
   return captureAdaptiveExportFrame(
@@ -612,6 +628,36 @@ function getExportPostProcessPasses(
   return Array.isArray(syncResult.postProcessPasses)
     ? syncResult.postProcessPasses
     : [];
+}
+
+async function captureDrawElementExportFrame(
+  window: BrowserWindow,
+  frameIndex: number,
+  sceneTime: number,
+  width: number,
+  height: number,
+  passes: unknown[],
+): Promise<Buffer> {
+  const result = (await withTimeout(
+    window.webContents.executeJavaScript(
+      `window.__clipperCaptureDrawElementExportFrame(${JSON.stringify({ width, height, passes })})`,
+      true,
+    ),
+    EXPORT_RENDERER_FRAME_TIMEOUT_MS,
+    `Timed out waiting for DrawElement export frame ${frameIndex + 1} at ${sceneTime.toFixed(3)}s.`,
+  )) as {
+    width?: unknown;
+    height?: unknown;
+    pixelFormat?: unknown;
+    data?: unknown;
+    dataBase64?: string;
+  };
+  if (!isValidRawFramePayload(result, width, height)) {
+    throw new Error(
+      `DrawElement export returned an invalid raw frame for frame ${frameIndex + 1}.`,
+    );
+  }
+  return rawPostProcessFrameToBgraBuffer(result);
 }
 
 async function captureAndPostProcessFullExportFrame(
@@ -960,6 +1006,31 @@ function isValidRawPostProcessResult(
   if (frame.pixelFormat !== "bgra" && frame.pixelFormat !== "rgba")
     return false;
   return getRawPostProcessFrameDataLength(frame) === width * height * 4;
+}
+
+function isValidRawFramePayload(
+  frame: unknown,
+  width: number,
+  height: number,
+): frame is {
+  width: number;
+  height: number;
+  pixelFormat: "bgra" | "rgba";
+  data?: unknown;
+  dataBase64?: string;
+} {
+  if (!frame || typeof frame !== "object") return false;
+  const candidate = frame as {
+    width?: unknown;
+    height?: unknown;
+    pixelFormat?: unknown;
+    data?: unknown;
+    dataBase64?: string;
+  };
+  if (candidate.width !== width || candidate.height !== height) return false;
+  if (candidate.pixelFormat !== "bgra" && candidate.pixelFormat !== "rgba")
+    return false;
+  return getRawPostProcessFrameDataLength(candidate) === width * height * 4;
 }
 
 function rawPostProcessFrameToBgraBuffer(frame: {

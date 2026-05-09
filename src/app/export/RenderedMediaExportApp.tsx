@@ -14,8 +14,11 @@ import { CAMERA_PERSPECTIVE } from "../../core/camera";
 import {
   applyExportPostProcessFrame,
   applyExportRawPostProcessFrame,
+  readCanvasToRawFrame,
+  rgbaBytesToBgra,
   type ExportPostProcessFrameRequest,
   type ExportPostProcessFrameResult,
+  type ExportRawFramePayload,
   type ExportRawPostProcessFrameRequest,
   type ExportRawPostProcessFrameResult,
 } from "../../core/effects/postprocess/exportFrameBridge";
@@ -71,6 +74,11 @@ declare global {
     __clipperApplyExportRawPostProcessFrame?: (
       request: ExportRawPostProcessFrameRequest,
     ) => Promise<ExportRawPostProcessFrameResult>;
+    __clipperCaptureDrawElementExportFrame?: (request?: {
+      width?: number;
+      height?: number;
+      passes?: PostProcessPass[];
+    }) => Promise<ExportRawFramePayload>;
   }
 }
 
@@ -114,6 +122,7 @@ export function RenderedMediaExportApp() {
   const cameraRef = useRef<HTMLDivElement | null>(null);
   const frameViewportRef = useRef<HTMLDivElement | null>(null);
   const dragSelectionBoxRef = useRef<HTMLDivElement | null>(null);
+  const drawElementCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const postProcessRenderersRef = useRef<Map<string, PostProcessRenderer>>(
     new Map(),
   );
@@ -161,6 +170,27 @@ export function RenderedMediaExportApp() {
           postProcessRenderersRef.current,
         ),
       );
+    };
+    window.__clipperCaptureDrawElementExportFrame = async (captureRequest) => {
+      await nextAnimationFrame();
+      const sourceFrame = captureDrawElementExportFrame(
+        frameViewportRef.current,
+        drawElementCanvasRef.current,
+      );
+      if (!captureRequest?.passes?.length) return sourceFrame;
+      const result = await applyExportRawPostProcessFrame(
+        {
+          width: captureRequest.width ?? sourceFrame.width,
+          height: captureRequest.height ?? sourceFrame.height,
+          sourceFrame,
+          passes: captureRequest.passes,
+        },
+        createDefaultExportPostProcessRenderers(
+          postProcessRenderersRef.current,
+        ),
+      );
+      if (!result.applied) return sourceFrame;
+      return normalizeExportFramePayloadForBridge(result.outputFrame);
     };
 
     // ── Transferable port bridge handler ────────────────────────────────
@@ -255,6 +285,7 @@ export function RenderedMediaExportApp() {
       delete window.__clipperSyncExportRenderClock;
       delete window.__clipperApplyExportPostProcessFrame;
       delete window.__clipperApplyExportRawPostProcessFrame;
+      delete window.__clipperCaptureDrawElementExportFrame;
     };
   }, []);
 
@@ -312,6 +343,16 @@ export function RenderedMediaExportApp() {
           )}
         </ExportRenderErrorBoundary>
       </div>
+      <canvas
+        aria-hidden="true"
+        ref={drawElementCanvasRef}
+        className="pointer-events-none absolute left-0 top-0 -z-10 block opacity-0"
+        data-clipper-draw-element-export-canvas="alpha"
+        height={viewportHeight}
+        layoutSubtree=""
+        style={{ width: viewportWidth, height: viewportHeight }}
+        width={viewportWidth}
+      />
     </main>
   );
 }
@@ -321,6 +362,77 @@ function destroyPostProcessRenderers(
 ) {
   for (const renderer of renderers.values()) renderer.destroy();
   renderers.clear();
+}
+
+function captureDrawElementExportFrame(
+  sourceElement: Element | null,
+  canvas: HTMLCanvasElement | null,
+): ExportRawFramePayload {
+  if (!sourceElement || !canvas)
+    throw new Error("DrawElement export capture source is not mounted.");
+  const context = canvas.getContext("2d") as
+    | (CanvasRenderingContext2D & {
+        drawElementImage?: (
+          element: Element,
+          x: number,
+          y: number,
+          width: number,
+          height: number,
+        ) => unknown;
+      })
+    | null;
+  if (!context || typeof context.drawElementImage !== "function")
+    throw new Error(
+      "DrawElement export capture is unavailable in this browser.",
+    );
+
+  const width = Math.max(1, Math.round(canvas.width));
+  const height = Math.max(1, Math.round(canvas.height));
+  context.clearRect(0, 0, width, height);
+  context.drawElementImage(sourceElement, 0, 0, width, height);
+  return readCanvasToRawFrame(canvas, width, height);
+}
+
+function normalizeExportFramePayloadForBridge(
+  frame: ExportRawFramePayload,
+): ExportRawFramePayload {
+  const bytes = getExportRawFrameBytes(frame);
+  const outputBytes =
+    frame.pixelFormat === "bgra" ? bytes : rgbaBytesToBgra(bytes);
+  return {
+    width: frame.width,
+    height: frame.height,
+    pixelFormat: "bgra",
+    dataBase64: bytesToBase64(outputBytes),
+  };
+}
+
+function getExportRawFrameBytes(frame: ExportRawFramePayload) {
+  if (frame.data instanceof Uint8Array) return frame.data;
+  if (frame.data instanceof ArrayBuffer) return new Uint8Array(frame.data);
+  if (Array.isArray(frame.data)) return new Uint8Array(frame.data);
+  if (typeof frame.dataBase64 === "string")
+    return base64ToBytes(frame.dataBase64);
+  throw new Error("DrawElement export frame did not include pixel data.");
+}
+
+function bytesToBase64(bytes: Uint8Array) {
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(
+      ...bytes.subarray(offset, offset + chunkSize),
+    );
+  }
+  return btoa(binary);
+}
+
+function base64ToBytes(base64: string) {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1)
+    bytes[index] = binary.charCodeAt(index);
+  return bytes;
 }
 
 function ExportFramePreview({

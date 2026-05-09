@@ -455,14 +455,20 @@ export function useMotionMarkerCommands({
   }
 
   function resizeMotionMarkers(resizes: TimelineMarkerResize[]) {
-    if (
-      resizes.some((resize) => resize.sourcePartId === TIMELINE_MOTION_PART_ID)
-    ) {
+    const sceneResizes = resizes.filter(
+      (resize) => resize.sourcePartId === TIMELINE_MOTION_PART_ID,
+    );
+    const partResizes = resizes.filter(
+      (resize) => resize.sourcePartId !== TIMELINE_MOTION_PART_ID,
+    );
+    if (sceneResizes.length > 0) {
       updateSceneMotionMarkers((markers) => {
         const resizeById = new Map(
-          resizes.map((resize) => [resize.markerId, resize]),
+          sceneResizes.map((resize) => [resize.markerId, resize]),
         );
-        const insertedIds = new Set(resizes.map((resize) => resize.markerId));
+        const insertedIds = new Set(
+          sceneResizes.map((resize) => resize.markerId),
+        );
         const nextMarkers = markers.map((marker) => {
           const resize = resizeById.get(marker.id);
           return resize
@@ -478,8 +484,8 @@ export function useMotionMarkerCommands({
           insertedIds,
         ) as SceneMotionMarkerUpdate;
       });
-      return;
     }
+    if (partResizes.length === 0) return;
     updateSceneParts((parts) => {
       const timelineParts = buildLinearTimeline({
         ...scene,
@@ -491,7 +497,7 @@ export function useMotionMarkerCommands({
       >();
       const targetResizesByPart = new Map<string, TimelineMarkerResize[]>();
       const removeKeysByPart = new Map<string, Set<string>>();
-      for (const resize of resizes) {
+      for (const resize of partResizes) {
         const sourcePart = parts.find(
           (item) => item.id === resize.sourcePartId,
         );

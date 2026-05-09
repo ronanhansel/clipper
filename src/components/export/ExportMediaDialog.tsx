@@ -55,18 +55,18 @@ const RENDER_QUALITY_OPTIONS: {
 ];
 const RENDER_MODE_OPTIONS: DropdownOption<MediaExportRenderMode>[] = [
   {
-    label: "Adaptive renderer",
+    label: "DrawElement",
     value: "renderer",
-    description: "Fast default export pipeline",
+    description: "GPU/compositor capture with fallback",
     tooltip:
-      "Uses Clipper's supervised renderer with adaptive full-frame or tiled capture. Best for most scenes because it balances speed, memory use, and output quality automatically.",
+      "Uses the experimental canvas drawElementImage capture path first, then falls back to Clipper's adaptive full-frame or tiled capture if unsupported or unstable.",
   },
   {
-    label: "Safe capture",
+    label: "Stable Slow",
     value: "stable-slow",
-    description: "Slow validation pipeline",
+    description: "Validation-sampled tiled capture",
     tooltip:
-      "Uses the conservative capture path for scenes that stress Chromium's compositor, such as dense SVG or heavy WebLayer compositions. It is slower, but prioritizes deterministic frame capture.",
+      "Uses Clipper's validation-sampled tile grid for scenes that stress Chromium's compositor, such as dense SVG or heavy WebLayer compositions. It is slower, but verifies repeated captures for deterministic output.",
   },
 ];
 
@@ -240,7 +240,7 @@ export function ExportMediaDialog({
                 value={
                   RENDER_MODE_OPTIONS.find(
                     (o) => o.value === mediaExportRenderMode,
-                  )?.label ?? "Adaptive renderer"
+                  )?.label ?? "DrawElement"
                 }
                 options={RENDER_MODE_OPTIONS}
                 selectedValue={mediaExportRenderMode}

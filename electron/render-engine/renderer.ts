@@ -308,11 +308,11 @@ export class RenderEngine {
 
       const startupStatus =
         workerCount > 1
-          ? `Renderer: capturing frames with ${workerCount} worker(s)`
-          : "Renderer: capturing frames";
+          ? `DrawElement: capturing frames with ${workerCount} worker(s)`
+          : "DrawElement: capturing frames";
       reportStatus(
         exportRenderMode === "stable-slow"
-          ? "Stable slow renderer: validating captured tiles"
+          ? "Stable Slow: validation-sampled tiled capture"
           : startupStatus,
         exportRenderMode,
       );
