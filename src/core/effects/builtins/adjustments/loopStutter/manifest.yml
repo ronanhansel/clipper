@@ -4,7 +4,7 @@ name: Loop / Stutter
 label: Loop / Stutter
 group: Timing
 defaultDuration: 3
-defaultParams: {"window":0.5}
+defaultParams: { "window": 0.5 }
 paramControls:
   - key: window
     label: Loop Window

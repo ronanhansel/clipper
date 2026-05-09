@@ -25,10 +25,15 @@ export type BootProject = {
 };
 
 async function loadBootProject(): Promise<BootProject> {
-  const manifestPath = await withBootStateTimeout(readStoredActiveProjectManifestPath(), null);
+  const manifestPath = await withBootStateTimeout(
+    readStoredActiveProjectManifestPath(),
+    null,
+  );
   if (!manifestPath) throw new Error("NO_STORED_PROJECT");
 
-  const { project } = await projectPersistenceService.loadProject({ manifestPath });
+  const { project } = await projectPersistenceService.loadProject({
+    manifestPath,
+  });
   const normalizedProject = normalizeProject(project);
 
   try {
@@ -45,14 +50,20 @@ async function loadBootProject(): Promise<BootProject> {
   };
 }
 
-async function withBootStateTimeout<T>(promise: Promise<T>, fallback: T): Promise<T> {
+async function withBootStateTimeout<T>(
+  promise: Promise<T>,
+  fallback: T,
+): Promise<T> {
   let timeout = 0;
   if (typeof window === "undefined") return promise;
   try {
     return await Promise.race([
       promise,
       new Promise<T>((resolve) => {
-        timeout = window.setTimeout(() => resolve(fallback), bootStateReadTimeoutMs);
+        timeout = window.setTimeout(
+          () => resolve(fallback),
+          bootStateReadTimeoutMs,
+        );
       }),
     ]);
   } finally {
@@ -103,11 +114,19 @@ async function writeProjectTsconfig(projectDir: string) {
     },
     include: ["file-manager/compositions/**/*.ts"],
   };
-  await clipperHost.writeTextFile(`${projectDir}/tsconfig.json`, `${JSON.stringify(tsconfig, null, 2)}\n`);
+  await clipperHost.writeTextFile(
+    `${projectDir}/tsconfig.json`,
+    `${JSON.stringify(tsconfig, null, 2)}\n`,
+  );
 }
 
-async function createMinimalProject(manifestPath: string, projectName: string): Promise<BootProject> {
-  const directoryPath = manifestPath.endsWith("/project.json") ? manifestPath.slice(0, -"/project.json".length) : manifestPath.replace(/\.json$/i, "");
+async function createMinimalProject(
+  manifestPath: string,
+  projectName: string,
+): Promise<BootProject> {
+  const directoryPath = manifestPath.endsWith("/project.json")
+    ? manifestPath.slice(0, -"/project.json".length)
+    : manifestPath.replace(/\.json$/i, "");
   const manifestOutPath = `${directoryPath}/project.json`;
   const minimalProject: ProjectManifest = {
     id: crypto.randomUUID(),
@@ -126,7 +145,9 @@ async function createMinimalProject(manifestPath: string, projectName: string): 
 
   await clipperHost.createDirectory(directoryPath);
   await clipperHost.createDirectory(`${directoryPath}/file-manager`);
-  await clipperHost.createDirectory(`${directoryPath}/file-manager/compositions`);
+  await clipperHost.createDirectory(
+    `${directoryPath}/file-manager/compositions`,
+  );
   await clipperHost.createDirectory(`${directoryPath}/file-manager/timelines`);
   await clipperHost.createDirectory(`${directoryPath}/file-manager/assets`);
 
@@ -142,13 +163,22 @@ async function createMinimalProject(manifestPath: string, projectName: string): 
     editorState: normalized.editorState,
     scenes: [],
   };
-  await clipperHost.writeTextFile(manifestOutPath, `${JSON.stringify(metadataProject, null, 2)}\n`);
+  await clipperHost.writeTextFile(
+    manifestOutPath,
+    `${JSON.stringify(metadataProject, null, 2)}\n`,
+  );
 
   for (const timeline of normalized.timelines ?? []) {
-    await clipperHost.writeTextFile(`${directoryPath}/file-manager/timelines/${timeline.id}.timeline.json`, `${JSON.stringify(timeline, null, 2)}\n`);
+    await clipperHost.writeTextFile(
+      `${directoryPath}/file-manager/timelines/${timeline.id}.timeline.json`,
+      `${JSON.stringify(timeline, null, 2)}\n`,
+    );
   }
 
-  await clipperHost.writeTextFile(`${directoryPath}/composition-api.ts`, compositionApiSource);
+  await clipperHost.writeTextFile(
+    `${directoryPath}/composition-api.ts`,
+    compositionApiSource,
+  );
   await writeProjectTsconfig(directoryPath);
 
   return {
@@ -178,7 +208,10 @@ export function useActiveProjectBoot() {
         setBootProject(loadedProject);
       } catch (error) {
         if (cancelled) return;
-        const message = error instanceof Error ? error.message : "Unable to open the active project.";
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Unable to open the active project.";
         if (message === "NO_STORED_PROJECT") {
           setIsWelcome(true);
         } else {
@@ -190,7 +223,9 @@ export function useActiveProjectBoot() {
       }
     }
     boot();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   async function openProjectFromBoot() {
@@ -198,7 +233,9 @@ export function useActiveProjectBoot() {
       const manifestPath = await clipperHost.openProjectManifest();
       if (!manifestPath) return;
 
-      const { project } = await projectPersistenceService.loadProject({ manifestPath });
+      const { project } = await projectPersistenceService.loadProject({
+        manifestPath,
+      });
       const normalizedProject = normalizeProject(project);
       await writeStoredActiveProjectManifestPath(manifestPath);
       await addRecentProject(manifestPath, projectNameFromPath(manifestPath));
@@ -213,7 +250,9 @@ export function useActiveProjectBoot() {
       setBootError(null);
       setIsWelcome(false);
     } catch (error) {
-      setBootError(error instanceof Error ? error.message : "Unable to open project.");
+      setBootError(
+        error instanceof Error ? error.message : "Unable to open project.",
+      );
     }
   }
 
@@ -224,7 +263,10 @@ export function useActiveProjectBoot() {
       if (!manifestPath) return false;
       const booted = await createMinimalProject(manifestPath, projectName);
       await writeStoredActiveProjectManifestPath(booted.manifestPath);
-      await addRecentProject(booted.manifestPath, projectNameFromPath(booted.manifestPath));
+      await addRecentProject(
+        booted.manifestPath,
+        projectNameFromPath(booted.manifestPath),
+      );
       const recents = await readRecentProjects();
       setRecentProjects(recents);
       setBootProject(booted);
@@ -232,7 +274,9 @@ export function useActiveProjectBoot() {
       setIsWelcome(false);
       return true;
     } catch (error) {
-      setBootError(error instanceof Error ? error.message : "Unable to create project.");
+      setBootError(
+        error instanceof Error ? error.message : "Unable to create project.",
+      );
       return false;
     }
   }
@@ -255,7 +299,9 @@ export function useActiveProjectBoot() {
       const recents = await readRecentProjects();
       setRecentProjects(recents);
     } catch (error) {
-      setBootError(error instanceof Error ? error.message : "Unable to delete project.");
+      setBootError(
+        error instanceof Error ? error.message : "Unable to delete project.",
+      );
     }
   }
 
@@ -263,7 +309,8 @@ export function useActiveProjectBoot() {
     try {
       const manifestPath = project.path;
 
-      const { project: loadedProject } = await projectPersistenceService.loadProject({ manifestPath });
+      const { project: loadedProject } =
+        await projectPersistenceService.loadProject({ manifestPath });
       const normalizedProject = normalizeProject(loadedProject);
       await writeStoredActiveProjectManifestPath(manifestPath);
       await addRecentProject(manifestPath, project.name);
@@ -278,7 +325,9 @@ export function useActiveProjectBoot() {
       setBootError(null);
       setIsWelcome(false);
     } catch (error) {
-      setBootError(error instanceof Error ? error.message : "Unable to open project.");
+      setBootError(
+        error instanceof Error ? error.message : "Unable to open project.",
+      );
     }
   }
 
@@ -289,5 +338,15 @@ export function useActiveProjectBoot() {
     setIsWelcome(true);
   }
 
-  return { bootError, bootProject, isWelcome, recentProjects, openProjectFromBoot, createNewProject, openRecentProject, deleteRecentProject, closeProject };
+  return {
+    bootError,
+    bootProject,
+    isWelcome,
+    recentProjects,
+    openProjectFromBoot,
+    createNewProject,
+    openRecentProject,
+    deleteRecentProject,
+    closeProject,
+  };
 }

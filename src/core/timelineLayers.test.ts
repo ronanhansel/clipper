@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { applyTimelineBlockPreview, clearTimelineBlockPreview } from "./timelineLayers";
+import {
+  applyTimelineBlockPreview,
+  clearTimelineBlockPreview,
+} from "./timelineLayers";
 
 describe("timeline block previews", () => {
   it("previews width without losing the original inline width", () => {

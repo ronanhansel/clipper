@@ -13,10 +13,27 @@ type FramePreviewZoomCommandsOptions = {
   setFrameZoomBarOpen: (open: Setter<boolean>) => void;
 };
 
-export function useFramePreviewZoomCommands({ centerPreviewScrollRef, framePreviewScale, frameZoomBarOpen, frameZoomControlRef, setFramePreviewScale, setFrameZoomBarOpen }: FramePreviewZoomCommandsOptions) {
+export function useFramePreviewZoomCommands({
+  centerPreviewScrollRef,
+  framePreviewScale,
+  frameZoomBarOpen,
+  frameZoomControlRef,
+  setFramePreviewScale,
+  setFrameZoomBarOpen,
+}: FramePreviewZoomCommandsOptions) {
   const framePreviewScaleRef = useRef(framePreviewScale);
   const wheelZoomFrameRef = useRef(0);
-  const pendingWheelZoomRef = useRef<{ anchorX: number; anchorY: number; clientX: number; clientY: number; contentX: number; contentY: number; previousScale: number; scale: number; viewport: HTMLDivElement } | null>(null);
+  const pendingWheelZoomRef = useRef<{
+    anchorX: number;
+    anchorY: number;
+    clientX: number;
+    clientY: number;
+    contentX: number;
+    contentY: number;
+    previousScale: number;
+    scale: number;
+    viewport: HTMLDivElement;
+  } | null>(null);
 
   useEffect(() => {
     framePreviewScaleRef.current = framePreviewScale;
@@ -31,61 +48,92 @@ export function useFramePreviewZoomCommands({ centerPreviewScrollRef, framePrevi
     }
 
     document.addEventListener("pointerdown", dismissFrameZoomBar, true);
-    return () => document.removeEventListener("pointerdown", dismissFrameZoomBar, true);
+    return () =>
+      document.removeEventListener("pointerdown", dismissFrameZoomBar, true);
   }, [frameZoomBarOpen, frameZoomControlRef, setFrameZoomBarOpen]);
 
-  useEffect(() => () => {
-    if (wheelZoomFrameRef.current) cancelAnimationFrame(wheelZoomFrameRef.current);
-  }, []);
+  useEffect(
+    () => () => {
+      if (wheelZoomFrameRef.current)
+        cancelAnimationFrame(wheelZoomFrameRef.current);
+    },
+    [],
+  );
 
-  const updateFramePreviewScale = useCallback((nextScale: number) => {
-    const clampedScale = roundTwo(clamp(nextScale, 0.25, 5));
-    framePreviewScaleRef.current = clampedScale;
-    setFramePreviewScale(clampedScale);
-  }, [setFramePreviewScale]);
-
-  const zoomFramePreviewAtPoint = useCallback((scaleMultiplier: number, clientX: number, clientY: number) => {
-    const viewport = centerPreviewScrollRef.current;
-    const previousScale = framePreviewScaleRef.current;
-    const clampedScale = clamp(previousScale * scaleMultiplier, 0.25, 5);
-    if (!viewport) {
+  const updateFramePreviewScale = useCallback(
+    (nextScale: number) => {
+      const clampedScale = roundTwo(clamp(nextScale, 0.25, 5));
       framePreviewScaleRef.current = clampedScale;
       setFramePreviewScale(clampedScale);
-      return;
-    }
+    },
+    [setFramePreviewScale],
+  );
 
-    const rect = viewport.getBoundingClientRect();
-    const anchorX = clientX - rect.left;
-    const anchorY = clientY - rect.top;
-    if (!previousScale || clampedScale === previousScale) {
-      updateFramePreviewScale(clampedScale);
-      return;
-    }
+  const zoomFramePreviewAtPoint = useCallback(
+    (scaleMultiplier: number, clientX: number, clientY: number) => {
+      const viewport = centerPreviewScrollRef.current;
+      const previousScale = framePreviewScaleRef.current;
+      const clampedScale = clamp(previousScale * scaleMultiplier, 0.25, 5);
+      if (!viewport) {
+        framePreviewScaleRef.current = clampedScale;
+        setFramePreviewScale(clampedScale);
+        return;
+      }
 
-    const contentX = viewport.scrollLeft + anchorX;
-    const contentY = viewport.scrollTop + anchorY;
+      const rect = viewport.getBoundingClientRect();
+      const anchorX = clientX - rect.left;
+      const anchorY = clientY - rect.top;
+      if (!previousScale || clampedScale === previousScale) {
+        updateFramePreviewScale(clampedScale);
+        return;
+      }
 
-    framePreviewScaleRef.current = clampedScale;
-    pendingWheelZoomRef.current = { anchorX, anchorY, clientX, clientY, contentX, contentY, previousScale, scale: clampedScale, viewport };
-    if (wheelZoomFrameRef.current) return;
+      const contentX = viewport.scrollLeft + anchorX;
+      const contentY = viewport.scrollTop + anchorY;
 
-    wheelZoomFrameRef.current = requestAnimationFrame(() => {
-      wheelZoomFrameRef.current = 0;
-      const pending = pendingWheelZoomRef.current;
-      pendingWheelZoomRef.current = null;
-      if (!pending) return;
-      const latestViewport = centerPreviewScrollRef.current;
-      if (latestViewport !== pending.viewport) return;
-      flushSync(() => setFramePreviewScale(pending.scale));
-      const ratio = pending.scale / pending.previousScale;
-      latestViewport.scrollLeft = Math.max(pending.contentX * ratio - pending.anchorX, 0);
-      latestViewport.scrollTop = Math.max(pending.contentY * ratio - pending.anchorY, 0);
-    });
-  }, [centerPreviewScrollRef, setFramePreviewScale]);
+      framePreviewScaleRef.current = clampedScale;
+      pendingWheelZoomRef.current = {
+        anchorX,
+        anchorY,
+        clientX,
+        clientY,
+        contentX,
+        contentY,
+        previousScale,
+        scale: clampedScale,
+        viewport,
+      };
+      if (wheelZoomFrameRef.current) return;
+
+      wheelZoomFrameRef.current = requestAnimationFrame(() => {
+        wheelZoomFrameRef.current = 0;
+        const pending = pendingWheelZoomRef.current;
+        pendingWheelZoomRef.current = null;
+        if (!pending) return;
+        const latestViewport = centerPreviewScrollRef.current;
+        if (latestViewport !== pending.viewport) return;
+        flushSync(() => setFramePreviewScale(pending.scale));
+        const ratio = pending.scale / pending.previousScale;
+        latestViewport.scrollLeft = Math.max(
+          pending.contentX * ratio - pending.anchorX,
+          0,
+        );
+        latestViewport.scrollTop = Math.max(
+          pending.contentY * ratio - pending.anchorY,
+          0,
+        );
+      });
+    },
+    [centerPreviewScrollRef, setFramePreviewScale],
+  );
 
   const toggleFrameZoomBar = useCallback(() => {
     setFrameZoomBarOpen((current) => !current);
   }, [setFrameZoomBarOpen]);
 
-  return { toggleFrameZoomBar, updateFramePreviewScale, zoomFramePreviewAtPoint };
+  return {
+    toggleFrameZoomBar,
+    updateFramePreviewScale,
+    zoomFramePreviewAtPoint,
+  };
 }

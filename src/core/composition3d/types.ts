@@ -1,4 +1,26 @@
-export type Composition3dNodeKind = "time" | "uv" | "texture" | "color" | "mx_noise_vec3" | "split_x" | "split_y" | "vec2" | "mul" | "add" | "sub" | "div" | "abs" | "max" | "min" | "pow" | "sin" | "fract" | "clamp" | "mix" | "smoothstep" | "out";
+export type Composition3dNodeKind =
+  | "time"
+  | "uv"
+  | "texture"
+  | "color"
+  | "mx_noise_vec3"
+  | "split_x"
+  | "split_y"
+  | "vec2"
+  | "mul"
+  | "add"
+  | "sub"
+  | "div"
+  | "abs"
+  | "max"
+  | "min"
+  | "pow"
+  | "sin"
+  | "fract"
+  | "clamp"
+  | "mix"
+  | "smoothstep"
+  | "out";
 
 export type Composition3dValue = number | string | readonly number[];
 

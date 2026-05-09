@@ -4,7 +4,7 @@ name: Saturation
 label: Saturation
 group: Visual
 defaultDuration: 3
-defaultParams: {"amount":1.25}
+defaultParams: { "amount": 1.25 }
 paramControls:
   - key: amount
     label: Amount

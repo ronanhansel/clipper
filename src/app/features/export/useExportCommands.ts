@@ -1,6 +1,16 @@
 import { useEffect, useRef, type MutableRefObject } from "react";
 import { exportService } from "../../services/exportService";
-import type { ExportRenderQuality, ExportTileResolutionMapping, ExportWorkerResolutionMapping, MediaExportFormat, MediaExportRenderMode, ProjectExportFormat, StableSlowGridPreset, StableSlowValidationSamples, VideoExportProgress } from "../../types";
+import type {
+  ExportRenderQuality,
+  ExportTileResolutionMapping,
+  ExportWorkerResolutionMapping,
+  MediaExportFormat,
+  MediaExportRenderMode,
+  ProjectExportFormat,
+  StableSlowGridPreset,
+  StableSlowValidationSamples,
+  VideoExportProgress,
+} from "../../types";
 import type { ProjectManifest } from "../../../core/types";
 
 type UseExportCommandsInput = {
@@ -89,7 +99,9 @@ export function useExportCommands({
 
       setExportDialogOpen(false);
     } catch (error) {
-      notifyError(error instanceof Error ? error.message : "Unable to export project.");
+      notifyError(
+        error instanceof Error ? error.message : "Unable to export project.",
+      );
     } finally {
       setIsExporting(false);
     }
@@ -105,15 +117,49 @@ export function useExportCommands({
     try {
       await saveAllChanges();
       const currentProject = projectRef.current;
-      const { scene: currentScene, durationSeconds, totalFrames, defaultFileName } = exportService.prepareRenderedMediaExport({ project: currentProject, sceneId: selectedSceneId, frameRate: exportFrameRate, mediaExportFormat });
+      const {
+        scene: currentScene,
+        durationSeconds,
+        totalFrames,
+        defaultFileName,
+      } = exportService.prepareRenderedMediaExport({
+        project: currentProject,
+        sceneId: selectedSceneId,
+        frameRate: exportFrameRate,
+        mediaExportFormat,
+      });
       setExportDialogOpen(false);
       setExportProgress(`Rendering ${totalFrames} frames`);
-      setVideoExportProgress({ frame: 0, totalFrames, percent: 0, status: "Preparing export..." });
-      const exportPath = await exportService.renderVideoExport(exportId, defaultFileName, currentProject, manifestPath, currentScene, durationSeconds, videoExportTileHeight, reusePrerenderCacheForExport, exportFrameRate, exportResolution, mediaExportFormat, exportRenderQuality, exportWorkerMapping, exportTileMapping, mediaExportRenderMode, stableSlowGridPreset, stableSlowValidationSamples);
+      setVideoExportProgress({
+        frame: 0,
+        totalFrames,
+        percent: 0,
+        status: "Preparing export...",
+      });
+      const exportPath = await exportService.renderVideoExport(
+        exportId,
+        defaultFileName,
+        currentProject,
+        manifestPath,
+        currentScene,
+        durationSeconds,
+        videoExportTileHeight,
+        reusePrerenderCacheForExport,
+        exportFrameRate,
+        exportResolution,
+        mediaExportFormat,
+        exportRenderQuality,
+        exportWorkerMapping,
+        exportTileMapping,
+        mediaExportRenderMode,
+        stableSlowGridPreset,
+        stableSlowValidationSamples,
+      );
       if (!exportPath) return;
       notifyRenderedMedia(exportPath);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Unable to render media.";
+      const message =
+        error instanceof Error ? error.message : "Unable to render media.";
       if (!message.includes("Video export cancelled.")) notifyError(message);
     } finally {
       setIsExporting(false);

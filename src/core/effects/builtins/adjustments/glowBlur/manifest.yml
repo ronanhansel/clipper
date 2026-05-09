@@ -4,7 +4,8 @@ name: Glow Blur
 label: Glow Blur
 group: Visual/Blur
 defaultDuration: 3
-defaultParams: {"amount":10,"brightness":1.1,"opacity":0.65,"target":"camera"}
+defaultParams:
+  { "amount": 10, "brightness": 1.1, "opacity": 0.65, "target": "camera" }
 paramControls:
   - key: amount
     label: Amount
@@ -31,4 +32,4 @@ paramControls:
     label: Target
     type: select
     defaultValue: camera
-    options: [{"value":"frame","label":"Frame"},{"value":"camera","label":"Camera"}]
+    options: [{ "value": "frame", "label": "Frame" }, { "value": "camera", "label": "Camera" }]

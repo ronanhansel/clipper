@@ -4,7 +4,7 @@ name: Brightness
 label: Brightness
 group: Visual
 defaultDuration: 3
-defaultParams: {"amount":1.15}
+defaultParams: { "amount": 1.15 }
 paramControls:
   - key: amount
     label: Amount

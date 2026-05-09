@@ -1,4 +1,4 @@
-import { LiveDomTextureUploader, type LiveDomWebGlContext } from "./liveDomCapability";
+import { captureLiveDomElementToCanvas } from "./liveDomCapability";
 import { measurePreviewPerf } from "./perf";
 
 const vertexShaderSource = `
@@ -30,15 +30,24 @@ export class WebGlPostProcessRenderer<TPass> {
   private canvas: HTMLCanvasElement | null = null;
   private program: WebGLProgram | null = null;
   private texture: WebGLTexture | null = null;
+  private liveDomCaptureCanvas: HTMLCanvasElement | null = null;
   private buffers: WebGLBuffer[] = [];
   private uniforms: Record<string, WebGLUniformLocation | null> = {};
-  private readonly liveDomTextureUploader = new LiveDomTextureUploader();
 
   constructor(private readonly config: WebGlPostProcessConfig<TPass>) {}
 
-  render(canvas: HTMLCanvasElement, source: TexImageSource, pass: TPass, width: number, height: number) {
-    const gl = measurePreviewPerf("webgl.ensureContext", () => this.ensureContext(canvas));
-    if (!gl || !this.program || !this.texture || gl.isContextLost()) return false;
+  render(
+    canvas: HTMLCanvasElement,
+    source: TexImageSource,
+    pass: TPass,
+    width: number,
+    height: number,
+  ) {
+    const gl = measurePreviewPerf("webgl.ensureContext", () =>
+      this.ensureContext(canvas),
+    );
+    if (!gl || !this.program || !this.texture || gl.isContextLost())
+      return false;
 
     canvas.width = width;
     canvas.height = height;
@@ -47,14 +56,35 @@ export class WebGlPostProcessRenderer<TPass> {
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.texture);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
-    measurePreviewPerf("webgl.texImage2D", () => gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source));
-    measurePreviewPerf("webgl.draw", () => this.config.draw({ gl, pass, width, height, uniforms: this.uniforms }));
+    measurePreviewPerf("webgl.texImage2D", () =>
+      gl.texImage2D(
+        gl.TEXTURE_2D,
+        0,
+        gl.RGBA,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        source,
+      ),
+    );
+    measurePreviewPerf("webgl.draw", () =>
+      this.config.draw({ gl, pass, width, height, uniforms: this.uniforms }),
+    );
     return !gl.isContextLost();
   }
 
-  renderElement(canvas: HTMLCanvasElement, source: Element, pass: TPass, width: number, height: number, sourceCanvas?: HTMLCanvasElement | null) {
-    const gl = measurePreviewPerf("webgl.element.ensureContext", () => this.ensureContext(canvas));
-    if (!gl || !this.program || !this.texture || gl.isContextLost()) return false;
+  renderElement(
+    canvas: HTMLCanvasElement,
+    source: Element,
+    pass: TPass,
+    width: number,
+    height: number,
+    sourceCanvas?: HTMLCanvasElement | null,
+  ) {
+    const gl = measurePreviewPerf("webgl.element.ensureContext", () =>
+      this.ensureContext(canvas),
+    );
+    if (!gl || !this.program || !this.texture || gl.isContextLost())
+      return false;
 
     canvas.width = width;
     canvas.height = height;
@@ -63,16 +93,38 @@ export class WebGlPostProcessRenderer<TPass> {
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.texture);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
-    const uploaded = measurePreviewPerf("webgl.element.upload", () => this.liveDomTextureUploader.upload(gl as LiveDomWebGlContext, source, sourceCanvas));
-    if (!uploaded) return false;
+    const captureCanvas = this.getLiveDomCaptureCanvas();
+    const captured = measurePreviewPerf("webgl.element.drawElementImage", () =>
+      captureLiveDomElementToCanvas(
+        source,
+        sourceCanvas,
+        captureCanvas,
+        width,
+        height,
+      ),
+    );
+    if (!captured) return false;
+    measurePreviewPerf("webgl.element.texImage2D", () =>
+      gl.texImage2D(
+        gl.TEXTURE_2D,
+        0,
+        gl.RGBA,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        captureCanvas,
+      ),
+    );
 
-    measurePreviewPerf("webgl.element.draw", () => this.config.draw({ gl, pass, width, height, uniforms: this.uniforms }));
+    measurePreviewPerf("webgl.element.draw", () =>
+      this.config.draw({ gl, pass, width, height, uniforms: this.uniforms }),
+    );
     return !gl.isContextLost();
   }
 
   hasVisiblePixels(canvas: HTMLCanvasElement) {
     const gl = this.gl;
-    if (!gl || gl.isContextLost() || canvas.width <= 0 || canvas.height <= 0) return false;
+    if (!gl || gl.isContextLost() || canvas.width <= 0 || canvas.height <= 0)
+      return false;
     const pixels = new Uint8Array(16);
     const points = [
       [Math.floor(canvas.width / 2), Math.floor(canvas.height / 2)],
@@ -82,16 +134,32 @@ export class WebGlPostProcessRenderer<TPass> {
     ];
     for (let index = 0; index < points.length; index += 1) {
       const [x, y] = points[index];
-      measurePreviewPerf("webgl.readPixels", () => gl.readPixels(x, y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixels.subarray(index * 4, index * 4 + 4)));
+      measurePreviewPerf("webgl.readPixels", () =>
+        gl.readPixels(
+          x,
+          y,
+          1,
+          1,
+          gl.RGBA,
+          gl.UNSIGNED_BYTE,
+          pixels.subarray(index * 4, index * 4 + 4),
+        ),
+      );
     }
     for (let index = 0; index < pixels.length; index += 4) {
-      if (pixels[index] > 4 || pixels[index + 1] > 4 || pixels[index + 2] > 4 || pixels[index + 3] > 4) return true;
+      if (
+        pixels[index] > 4 ||
+        pixels[index + 1] > 4 ||
+        pixels[index + 2] > 4 ||
+        pixels[index + 3] > 4
+      )
+        return true;
     }
     return false;
   }
 
   getLiveDomContext(canvas: HTMLCanvasElement) {
-    return this.ensureContext(canvas) as LiveDomWebGlContext | null;
+    return this.ensureContext(canvas);
   }
 
   destroy() {
@@ -101,15 +169,29 @@ export class WebGlPostProcessRenderer<TPass> {
       if (this.program) this.gl.deleteProgram(this.program);
     }
     this.clearHandles();
-    this.liveDomTextureUploader.clear();
+  }
+
+  private getLiveDomCaptureCanvas() {
+    if (!this.liveDomCaptureCanvas)
+      this.liveDomCaptureCanvas = document.createElement("canvas");
+    return this.liveDomCaptureCanvas;
   }
 
   private ensureContext(canvas: HTMLCanvasElement) {
     if (this.gl && this.canvas !== canvas) this.destroy();
     if (this.gl) return this.gl.isContextLost() ? null : this.gl;
-    const gl = canvas.getContext("webgl", { alpha: true, antialias: false, depth: false, preserveDrawingBuffer: true });
+    const gl = canvas.getContext("webgl", {
+      alpha: true,
+      antialias: false,
+      depth: false,
+      preserveDrawingBuffer: true,
+    });
     if (!gl) return null;
-    const program = createProgram(gl, vertexShaderSource, this.config.fragmentShaderSource);
+    const program = createProgram(
+      gl,
+      vertexShaderSource,
+      this.config.fragmentShaderSource,
+    );
     if (!program) return null;
     gl.useProgram(program);
 
@@ -141,8 +223,15 @@ export class WebGlPostProcessRenderer<TPass> {
     this.canvas = canvas;
     this.program = program;
     this.texture = texture;
-    this.buffers = buffers.filter((buffer): buffer is WebGLBuffer => Boolean(buffer));
-    this.uniforms = Object.fromEntries(this.config.uniformNames.map((name) => [name, gl.getUniformLocation(program, name)]));
+    this.buffers = buffers.filter((buffer): buffer is WebGLBuffer =>
+      Boolean(buffer),
+    );
+    this.uniforms = Object.fromEntries(
+      this.config.uniformNames.map((name) => [
+        name,
+        gl.getUniformLocation(program, name),
+      ]),
+    );
     return gl;
   }
 
@@ -156,7 +245,11 @@ export class WebGlPostProcessRenderer<TPass> {
   }
 }
 
-function bindBuffer(gl: WebGLRenderingContext, attribute: number, values: number[]) {
+function bindBuffer(
+  gl: WebGLRenderingContext,
+  attribute: number,
+  values: number[],
+) {
   const buffer = gl.createBuffer();
   if (!buffer || attribute < 0) return null;
   gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
@@ -166,7 +259,11 @@ function bindBuffer(gl: WebGLRenderingContext, attribute: number, values: number
   return buffer;
 }
 
-function createProgram(gl: WebGLRenderingContext, vertexSource: string, fragmentSource: string) {
+function createProgram(
+  gl: WebGLRenderingContext,
+  vertexSource: string,
+  fragmentSource: string,
+) {
   const vertexShader = createShader(gl, gl.VERTEX_SHADER, vertexSource);
   const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fragmentSource);
   if (!vertexShader || !fragmentShader) {

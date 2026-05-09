@@ -1,4 +1,12 @@
-import type { AdjustmentEffectDefinition, AdjustmentLayer, MotionBlock, MotionEffectDefinition, TransitionEffectDefinition, TransitionLayer, Point } from "../types";
+import type {
+  AdjustmentEffectDefinition,
+  AdjustmentLayer,
+  MotionBlock,
+  MotionEffectDefinition,
+  TransitionEffectDefinition,
+  TransitionLayer,
+  Point,
+} from "../types";
 import type { LensPostProcessPass } from "./postprocess/lens";
 
 export type BasePostProcessPass = {
@@ -9,7 +17,8 @@ export type BasePostProcessPass = {
   requiresLiveDomSource?: boolean;
 };
 
-export type UnknownPostProcessPass = BasePostProcessPass & Record<string, unknown>;
+export type UnknownPostProcessPass = BasePostProcessPass &
+  Record<string, unknown>;
 
 export type PostProcessPass = LensPostProcessPass | UnknownPostProcessPass;
 
@@ -63,7 +72,9 @@ export type AdjustmentEffectDisableCondition = {
   and?: AdjustmentEffectDisableCondition[];
 };
 
-export type AdjustmentEffectSection = string | { key: string; label: string; description?: string };
+export type AdjustmentEffectSection =
+  | string
+  | { key: string; label: string; description?: string };
 
 export type AdjustmentEffectNumberParamControl = {
   key: string;
@@ -112,7 +123,10 @@ export type AdjustmentEffectBooleanParamControl = {
   inlineGroup?: string;
 };
 
-export type AdjustmentEffectParamControl = AdjustmentEffectNumberParamControl | AdjustmentEffectSelectParamControl | AdjustmentEffectBooleanParamControl;
+export type AdjustmentEffectParamControl =
+  | AdjustmentEffectNumberParamControl
+  | AdjustmentEffectSelectParamControl
+  | AdjustmentEffectBooleanParamControl;
 
 export type AdjustmentEffectPointControl = {
   label: string;
@@ -148,7 +162,9 @@ export type MotionMendTransitionSelectControl = {
   options: readonly { value: string; label: string }[];
 };
 
-export type MotionMendTransitionParamControl = MotionMendTransitionNumberControl | MotionMendTransitionSelectControl;
+export type MotionMendTransitionParamControl =
+  | MotionMendTransitionNumberControl
+  | MotionMendTransitionSelectControl;
 
 export type MotionMendTransitionOption = {
   key: string;
@@ -158,7 +174,14 @@ export type MotionMendTransitionOption = {
 };
 
 export type MotionEffectPackage = MotionEffectDefinition & {
-  createDefaultBlock(input: { id: string; layerId: string; start: number; duration: number; focus: Point; position: Point }): MotionBlock;
+  createDefaultBlock(input: {
+    id: string;
+    layerId: string;
+    start: number;
+    duration: number;
+    focus: Point;
+    position: Point;
+  }): MotionBlock;
   mendTransitionOptions?: readonly MotionMendTransitionOption[];
 };
 
@@ -167,18 +190,59 @@ export type AdjustmentEffectPackage = AdjustmentEffectDefinition & {
   pointControls?: readonly AdjustmentEffectPointControl[];
   timeSensitive?: boolean;
   requiresLiveDomPostProcessSource?: boolean;
-  createDefaultLayer(input: { id: string; layerId?: string; start: number; duration: number }): AdjustmentLayer;
-  applySceneTime?(input: { sceneTime: number; layer: AdjustmentLayer; frameRate: number }): number;
-  applyVisualStyle?(input: { sceneTime: number; layer: AdjustmentLayer; frameRate: number }): AdjustmentVisualStyle;
-  collectPostProcessPasses?(input: { sceneTime: number; layer: AdjustmentLayer; frameRate: number; frameSize: { width: number; height: number } }): PostProcessPass[];
-  getDisplayElapsed?(input: { elapsed: number; layer: AdjustmentLayer; frameRate: number }): number;
+  createDefaultLayer(input: {
+    id: string;
+    layerId?: string;
+    start: number;
+    duration: number;
+  }): AdjustmentLayer;
+  applySceneTime?(input: {
+    sceneTime: number;
+    layer: AdjustmentLayer;
+    frameRate: number;
+  }): number;
+  applyVisualStyle?(input: {
+    sceneTime: number;
+    layer: AdjustmentLayer;
+    frameRate: number;
+  }): AdjustmentVisualStyle;
+  collectPostProcessPasses?(input: {
+    sceneTime: number;
+    layer: AdjustmentLayer;
+    frameRate: number;
+    frameSize: { width: number; height: number };
+  }): PostProcessPass[];
+  getDisplayElapsed?(input: {
+    elapsed: number;
+    layer: AdjustmentLayer;
+    frameRate: number;
+  }): number;
   validate?(layer: AdjustmentLayer): string | null;
 };
 
 export type TransitionEffectPackage = TransitionEffectDefinition & {
-  createDefaultLayer(input: { id: string; layerId?: string; start: number; duration: number; midPoint: number }): TransitionLayer;
-  applyVisualStyle?(input: { sceneTime: number; layer: TransitionLayer; frameRate: number; progress: number }): TransitionVisualStyle;
-  renderSequence?(input: { sceneTime: number; layer: TransitionLayer; frameRate: number; progress: number }): TransitionSequenceStyle;
+  createDefaultLayer(input: {
+    id: string;
+    layerId?: string;
+    start: number;
+    duration: number;
+    midPoint: number;
+  }): TransitionLayer;
+  applyVisualStyle?(input: {
+    sceneTime: number;
+    layer: TransitionLayer;
+    frameRate: number;
+    progress: number;
+  }): TransitionVisualStyle;
+  renderSequence?(input: {
+    sceneTime: number;
+    layer: TransitionLayer;
+    frameRate: number;
+    progress: number;
+  }): TransitionSequenceStyle;
 };
 
-export type EffectPackage = MotionEffectPackage | AdjustmentEffectPackage | TransitionEffectPackage;
+export type EffectPackage =
+  | MotionEffectPackage
+  | AdjustmentEffectPackage
+  | TransitionEffectPackage;

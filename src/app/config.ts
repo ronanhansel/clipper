@@ -1,4 +1,9 @@
-export { defaultZoomDuration, marqueeSelectionThresholdPx, minimumObjectResizeSide, minimumZoomDuration } from "../core/editorConstants";
+export {
+  defaultZoomDuration,
+  marqueeSelectionThresholdPx,
+  minimumObjectResizeSide,
+  minimumZoomDuration,
+} from "../core/editorConstants";
 
 export const videoExportFrameRate = 30;
 export const defaultVideoExportTileHeight = 270;
@@ -21,7 +26,8 @@ export const defaultFramePreviewScale = 0.5;
 export const defaultPreviewRenderHeight = 1080;
 export const previewRenderHeightOptions = [540, 720, 1080, 1440, 2160] as const;
 export const minPreviewRenderHeight = previewRenderHeightOptions[0];
-export const maxPreviewRenderHeight = previewRenderHeightOptions[previewRenderHeightOptions.length - 1];
+export const maxPreviewRenderHeight =
+  previewRenderHeightOptions[previewRenderHeightOptions.length - 1];
 export const selectorOffsetPx = 0;
 export const selectorHandleSizePx = 8;
 export const selectorBlue = "#159dff";
@@ -39,15 +45,20 @@ export const projectHistoryCoalesceMs = 700;
 
 export const appDragRegion = "[-webkit-app-region:drag] select-none";
 export const appNoDragRegion = "[-webkit-app-region:no-drag]";
-export const buttonBase = "rounded-[8px] border border-transparent bg-[#171920] px-2.5 py-1.5 text-sm text-[#f7f7f8] transition hover:-translate-y-px hover:border-[#3b4150] hover:bg-[#20232c]";
-export const appBarButtonBase = "rounded-[7px] border border-transparent bg-[#171920] px-2 py-1 text-xs text-[#f7f7f8] transition hover:-translate-y-px hover:border-[#3b4150] hover:bg-[#20232c]";
+export const buttonBase =
+  "rounded-[8px] border border-transparent bg-[#171920] px-2.5 py-1.5 text-sm text-[#f7f7f8] transition hover:-translate-y-px hover:border-[#3b4150] hover:bg-[#20232c]";
+export const appBarButtonBase =
+  "rounded-[7px] border border-transparent bg-[#171920] px-2 py-1 text-xs text-[#f7f7f8] transition hover:-translate-y-px hover:border-[#3b4150] hover:bg-[#20232c]";
 export const appBarActionButtonBase = `${appBarButtonBase} w-[70px]`;
 export const sectionTitle = "m-0 text-[13px] font-semibold text-[#d9dbe1]";
 export const mutedCaps = "text-[12px] font-medium text-[#9b9da7]";
-export const panelCard = "grid gap-[5px] rounded-xl border border-[#2d313b] bg-[#171920] p-3 text-[13px] text-[#dfe2ea]";
-export const segmentedTabBase = "rounded-[8px] px-2 py-1.5 text-sm font-bold transition";
+export const panelCard =
+  "grid gap-[5px] rounded-xl border border-[#2d313b] bg-[#171920] p-3 text-[13px] text-[#dfe2ea]";
+export const segmentedTabBase =
+  "rounded-[8px] px-2 py-1.5 text-sm font-bold transition";
 export const segmentedTabActive = "bg-[#272b36] text-white";
-export const segmentedTabInactive = "bg-[#191c24] text-[#9b9da7] hover:text-white";
+export const segmentedTabInactive =
+  "bg-[#191c24] text-[#9b9da7] hover:text-white";
 
 export const monacoOptions = {
   automaticLayout: true,
@@ -55,7 +66,8 @@ export const monacoOptions = {
   cursorBlinking: "blink",
   cursorSmoothCaretAnimation: "off",
   foldingHighlight: false,
-  fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+  fontFamily:
+    "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
   fontSize: 12,
   glyphMargin: false,
   hideCursorInOverviewRuler: true,
@@ -70,7 +82,10 @@ export const monacoOptions = {
   wordWrap: "off",
 } as const;
 
-export function getMonacoOptionsForDocument(_document: { language: string; source?: string }) {
+export function getMonacoOptionsForDocument(_document: {
+  language: string;
+  source?: string;
+}) {
   return {
     ...monacoOptions,
   } as const;

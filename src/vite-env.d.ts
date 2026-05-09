@@ -34,7 +34,15 @@ type LocalFontData = {
   style: string;
 };
 
-type ClipperUpdateStatusKind = "idle" | "checking" | "available" | "not-available" | "downloading" | "downloaded" | "error" | "unsupported";
+type ClipperUpdateStatusKind =
+  | "idle"
+  | "checking"
+  | "available"
+  | "not-available"
+  | "downloading"
+  | "downloaded"
+  | "error"
+  | "unsupported";
 type ClipperUpdateStatus = {
   kind: ClipperUpdateStatusKind;
   message: string;
@@ -68,26 +76,108 @@ interface Window {
     revealFile: (relativePath: string) => Promise<void>;
     revealAbsolutePath?: (filePath: string) => Promise<void>;
     copyText?: (text: string) => Promise<void>;
-    openAgentTerminal?: (relativePath: string, provider: "opencode" | "codex" | "claude" | "gemini") => Promise<void>;
+    openAgentTerminal?: (
+      relativePath: string,
+      provider: "opencode" | "codex" | "claude" | "gemini",
+    ) => Promise<void>;
     trashFile: (relativePath: string) => Promise<void>;
-    renameFile: (relativePath: string, nextRelativePath: string) => Promise<void>;
+    renameFile: (
+      relativePath: string,
+      nextRelativePath: string,
+    ) => Promise<void>;
     copyFile: (relativePath: string, nextRelativePath: string) => Promise<void>;
-    listDirectory: (relativePath: string) => Promise<{ name: string; isDirectory: boolean }[]>;
+    listDirectory: (
+      relativePath: string,
+    ) => Promise<{ name: string; isDirectory: boolean }[]>;
     listTemplates?: () => Promise<ClipperTemplateBundle[]>;
-    findProjectFileByName: (directoryPath: string, fileName: string) => Promise<string | null>;
+    findProjectFileByName: (
+      directoryPath: string,
+      fileName: string,
+    ) => Promise<string | null>;
     openCompositionFile: (directoryPath: string) => Promise<string | null>;
     listSystemFonts: () => Promise<string[]>;
     openProjectManifest: () => Promise<string | null>;
     createProject: (projectName: string) => Promise<string | null>;
-    exportMediaFile: (defaultFileName: string, content: string) => Promise<string | null>;
-    exportBinaryFile: (defaultFileName: string, base64Content: string) => Promise<string | null>;
-    startVideoExport: (defaultFileName: string, frameRate: number, width: number, height: number) => Promise<{ sessionId: string; filePath: string } | null>;
-    writeVideoFrame: (sessionId: string, frameData: Uint8ClampedArray) => Promise<void>;
+    exportMediaFile: (
+      defaultFileName: string,
+      content: string,
+    ) => Promise<string | null>;
+    exportBinaryFile: (
+      defaultFileName: string,
+      base64Content: string,
+    ) => Promise<string | null>;
+    startVideoExport: (
+      defaultFileName: string,
+      frameRate: number,
+      width: number,
+      height: number,
+    ) => Promise<{ sessionId: string; filePath: string } | null>;
+    writeVideoFrame: (
+      sessionId: string,
+      frameData: Uint8ClampedArray,
+    ) => Promise<void>;
     finishVideoExport: (sessionId: string) => Promise<string>;
     cancelVideoExport: (sessionId: string) => Promise<void>;
-    renderVideoExport: (exportId: string, defaultFileName: string, project: unknown, manifestPath: string, scene: unknown, frameRate: number, durationSeconds: number, tileHeight: number, reusePrerenderCache: boolean, exportWidth?: number, exportHeight?: number, mediaExportFormat?: string, exportRenderQuality?: string, exportWorkerMapping?: unknown, exportTileMapping?: unknown, exportRenderMode?: string, stableSlowGridPreset?: string, stableSlowValidationSamples?: number) => Promise<string | null>;
-    prerenderFrame: (project: unknown, manifestPath: string, scene: unknown, sceneTime: number, sceneDuration: number, frameRate: number, tileHeight: number, blockDurationMs: number, frameRange?: { startFrame: number; endFrame: number }) => Promise<Array<{ width: number; height: number; pixelFormat: "bgra"; sceneTime: number; frameRate: number; data: Uint8Array }>>;
-    prerenderVideoBlock: (project: unknown, manifestPath: string, scene: unknown, sceneTime: number, sceneDuration: number, frameRate: number, tileHeight: number, blockDurationMs: number) => Promise<{ width: number; height: number; mimeType: string; startTime: number; duration: number; startFrame: number; endFrame: number; frameRate: number; data: string }>;
+    renderVideoExport: (
+      exportId: string,
+      defaultFileName: string,
+      project: unknown,
+      manifestPath: string,
+      scene: unknown,
+      frameRate: number,
+      durationSeconds: number,
+      tileHeight: number,
+      reusePrerenderCache: boolean,
+      exportWidth?: number,
+      exportHeight?: number,
+      mediaExportFormat?: string,
+      exportRenderQuality?: string,
+      exportWorkerMapping?: unknown,
+      exportTileMapping?: unknown,
+      exportRenderMode?: string,
+      stableSlowGridPreset?: string,
+      stableSlowValidationSamples?: number,
+    ) => Promise<string | null>;
+    prerenderFrame: (
+      project: unknown,
+      manifestPath: string,
+      scene: unknown,
+      sceneTime: number,
+      sceneDuration: number,
+      frameRate: number,
+      tileHeight: number,
+      blockDurationMs: number,
+      frameRange?: { startFrame: number; endFrame: number },
+    ) => Promise<
+      Array<{
+        width: number;
+        height: number;
+        pixelFormat: "bgra";
+        sceneTime: number;
+        frameRate: number;
+        data: Uint8Array;
+      }>
+    >;
+    prerenderVideoBlock: (
+      project: unknown,
+      manifestPath: string,
+      scene: unknown,
+      sceneTime: number,
+      sceneDuration: number,
+      frameRate: number,
+      tileHeight: number,
+      blockDurationMs: number,
+    ) => Promise<{
+      width: number;
+      height: number;
+      mimeType: string;
+      startTime: number;
+      duration: number;
+      startFrame: number;
+      endFrame: number;
+      frameRate: number;
+      data: string;
+    }>;
     clearPrerenderCache: (manifestPath: string) => Promise<void>;
     clearAllPrerenderCaches: () => Promise<{ clearedCount: number }>;
     cancelRenderVideoExport: (exportId: string) => Promise<void>;
@@ -99,16 +189,38 @@ interface Window {
     setWindowFullscreen: (fullscreen: boolean) => Promise<boolean>;
     toggleWindowFullscreen: () => Promise<boolean>;
     watchTextFiles: (relativePaths: string[]) => Promise<void>;
-    watchProjectFiles: (watchPaths: { files: string[]; directories: string[] }) => Promise<void>;
-    onVideoExportProgress: (callback: (exportId: string, progress: { frame: number; totalFrames: number; percent: number; status: string; method?: "renderer" | "stable-slow" }) => void) => () => void;
+    watchProjectFiles: (watchPaths: {
+      files: string[];
+      directories: string[];
+    }) => Promise<void>;
+    onVideoExportProgress: (
+      callback: (
+        exportId: string,
+        progress: {
+          frame: number;
+          totalFrames: number;
+          percent: number;
+          status: string;
+          method?: "renderer" | "stable-slow";
+        },
+      ) => void,
+    ) => () => void;
     onTextFileChanged: (callback: (relativePath: string) => void) => () => void;
-    onProjectFileChanged: (callback: (relativePath: string) => void) => () => void;
-    onModeShortcut: (callback: (key: "1" | "2" | "3" | "4") => void) => () => void;
+    onProjectFileChanged: (
+      callback: (relativePath: string) => void,
+    ) => () => void;
+    onModeShortcut: (
+      callback: (key: "1" | "2" | "3" | "4") => void,
+    ) => () => void;
     onSettingsShortcut: (callback: () => void) => () => void;
     onCloseEditorTabShortcut: (callback: () => void) => () => void;
     onRestoreEditorTabShortcut: (callback: () => void) => () => void;
-    onWindowFullscreenChange: (callback: (fullscreen: boolean) => void) => () => void;
-    onUpdateStatus?: (callback: (status: ClipperUpdateStatus) => void) => () => void;
+    onWindowFullscreenChange: (
+      callback: (fullscreen: boolean) => void,
+    ) => () => void;
+    onUpdateStatus?: (
+      callback: (status: ClipperUpdateStatus) => void,
+    ) => () => void;
   };
 }
 

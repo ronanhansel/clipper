@@ -9,7 +9,11 @@ export function rebasePath(path: string, moves: PendingPathMove[]) {
 
   while (!seen.has(currentPath)) {
     seen.add(currentPath);
-    const move = moves.find((candidate) => currentPath === candidate.oldPath || currentPath.startsWith(`${candidate.oldPath}/`));
+    const move = moves.find(
+      (candidate) =>
+        currentPath === candidate.oldPath ||
+        currentPath.startsWith(`${candidate.oldPath}/`),
+    );
     if (!move) break;
     currentPath = `${move.newPath}${currentPath.slice(move.oldPath.length)}`;
   }

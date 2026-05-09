@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { getDisplayName, getDragPreviewDisplayName, getFileType, reconstructFileName, isSemanticFile, nextNumberedSemanticName } from "./fileNames";
+import {
+  getDisplayName,
+  getDragPreviewDisplayName,
+  getFileType,
+  reconstructFileName,
+  isSemanticFile,
+  nextNumberedSemanticName,
+} from "./fileNames";
 
 describe("fileNames helpers", () => {
   describe("getDisplayName", () => {
@@ -59,18 +66,26 @@ describe("fileNames helpers", () => {
     });
 
     it("uses the basename for paths and leaves normal extensions intact", () => {
-      expect(getDragPreviewDisplayName("/tmp/project/intro.composition")).toBe("intro");
-      expect(getDragPreviewDisplayName("/tmp/project/README.md")).toBe("README.md");
+      expect(getDragPreviewDisplayName("/tmp/project/intro.composition")).toBe(
+        "intro",
+      );
+      expect(getDragPreviewDisplayName("/tmp/project/README.md")).toBe(
+        "README.md",
+      );
     });
   });
 
   describe("reconstructFileName", () => {
     it("should add .composition.ts if original had it", () => {
-      expect(reconstructFileName("hero", "intro.composition.ts")).toBe("hero.composition.ts");
+      expect(reconstructFileName("hero", "intro.composition.ts")).toBe(
+        "hero.composition.ts",
+      );
     });
 
     it("should add .timeline.json if original had it", () => {
-      expect(reconstructFileName("outro", "main.timeline.json")).toBe("outro.timeline.json");
+      expect(reconstructFileName("outro", "main.timeline.json")).toBe(
+        "outro.timeline.json",
+      );
     });
 
     it("should leave misc files alone", () => {
@@ -95,12 +110,23 @@ describe("fileNames helpers", () => {
 
   describe("nextNumberedSemanticName", () => {
     it("should return base name if not taken", () => {
-      expect(nextNumberedSemanticName("untitled", ".composition.ts", [])).toBe("untitled.composition.ts");
+      expect(nextNumberedSemanticName("untitled", ".composition.ts", [])).toBe(
+        "untitled.composition.ts",
+      );
     });
 
     it("should return numbered name if taken", () => {
-      expect(nextNumberedSemanticName("untitled", ".composition.ts", ["untitled.composition.ts"])).toBe("untitled 2.composition.ts");
-      expect(nextNumberedSemanticName("untitled", ".composition.ts", ["untitled.composition.ts", "untitled 2.composition.ts"])).toBe("untitled 3.composition.ts");
+      expect(
+        nextNumberedSemanticName("untitled", ".composition.ts", [
+          "untitled.composition.ts",
+        ]),
+      ).toBe("untitled 2.composition.ts");
+      expect(
+        nextNumberedSemanticName("untitled", ".composition.ts", [
+          "untitled.composition.ts",
+          "untitled 2.composition.ts",
+        ]),
+      ).toBe("untitled 3.composition.ts");
     });
   });
 });

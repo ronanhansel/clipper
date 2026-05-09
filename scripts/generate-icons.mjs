@@ -11,7 +11,10 @@ const root = path.resolve(import.meta.dirname, "..");
 const iconsDir = path.join(root, "build", "icons");
 const electronResourcesDir = path.join(root, "build", "electron");
 const publicDir = path.join(root, "public");
-const flattenedSourcePng = path.join(iconsDir, "icon-iOS-Default-1024x1024@1x.png");
+const flattenedSourcePng = path.join(
+  iconsDir,
+  "icon-iOS-Default-1024x1024@1x.png",
+);
 const iconsetDir = path.join(iconsDir, "icon.iconset");
 const canvasSize = 1024;
 const artworkSize = 840;
@@ -38,20 +41,27 @@ async function renderPng(size, outputPath) {
       background: { r: 0, g: 0, b: 0, alpha: 0 },
     },
   })
-    .composite([{
-      input: await sharp(flattenedSourcePng)
-        .resize(Math.round(artworkSize * scale), Math.round(artworkSize * scale))
-        .png()
-        .toBuffer(),
-      gravity: "center",
-    }])
+    .composite([
+      {
+        input: await sharp(flattenedSourcePng)
+          .resize(
+            Math.round(artworkSize * scale),
+            Math.round(artworkSize * scale),
+          )
+          .png()
+          .toBuffer(),
+        gravity: "center",
+      },
+    ])
     .png()
     .toFile(outputPath);
 }
 
 async function main() {
   if (!existsSync(flattenedSourcePng)) {
-    throw new Error(`Missing flattened icon source: ${flattenedSourcePng}. Export the flattened PNG from Apple Icon Composer to build/icons/icon-iOS-Default-1024x1024@1x.png.`);
+    throw new Error(
+      `Missing flattened icon source: ${flattenedSourcePng}. Export the flattened PNG from Apple Icon Composer to build/icons/icon-iOS-Default-1024x1024@1x.png.`,
+    );
   }
   await fs.mkdir(iconsDir, { recursive: true });
   await fs.mkdir(electronResourcesDir, { recursive: true });
@@ -60,20 +70,44 @@ async function main() {
   await fs.mkdir(iconsetDir, { recursive: true });
 
   await renderPng(1024, path.join(iconsDir, "icon.png"));
-  await fs.copyFile(path.join(iconsDir, "icon.png"), path.join(publicDir, "icon.png"));
+  await fs.copyFile(
+    path.join(iconsDir, "icon.png"),
+    path.join(publicDir, "icon.png"),
+  );
 
-  await Promise.all(iconsetSizes.map(([size, name]) => renderPng(size, path.join(iconsetDir, name))));
-  await execFileAsync("iconutil", ["-c", "icns", iconsetDir, "-o", path.join(iconsDir, "icon.icns")]);
+  await Promise.all(
+    iconsetSizes.map(([size, name]) =>
+      renderPng(size, path.join(iconsetDir, name)),
+    ),
+  );
+  await execFileAsync("iconutil", [
+    "-c",
+    "icns",
+    iconsetDir,
+    "-o",
+    path.join(iconsDir, "icon.icns"),
+  ]);
 
-  const icoPngs = await Promise.all([16, 32, 48, 64, 128, 256].map(async (size) => {
-    const outputPath = path.join(iconsetDir, `icon_${size}x${size}.ico.png`);
-    await renderPng(size, outputPath);
-    return outputPath;
-  }));
+  const icoPngs = await Promise.all(
+    [16, 32, 48, 64, 128, 256].map(async (size) => {
+      const outputPath = path.join(iconsetDir, `icon_${size}x${size}.ico.png`);
+      await renderPng(size, outputPath);
+      return outputPath;
+    }),
+  );
   await fs.writeFile(path.join(iconsDir, "icon.ico"), await pngToIco(icoPngs));
-  await fs.copyFile(path.join(iconsDir, "icon.png"), path.join(electronResourcesDir, "icon.png"));
-  await fs.copyFile(path.join(iconsDir, "icon.icns"), path.join(electronResourcesDir, "icon.icns"));
-  await fs.copyFile(path.join(iconsDir, "icon.ico"), path.join(electronResourcesDir, "icon.ico"));
+  await fs.copyFile(
+    path.join(iconsDir, "icon.png"),
+    path.join(electronResourcesDir, "icon.png"),
+  );
+  await fs.copyFile(
+    path.join(iconsDir, "icon.icns"),
+    path.join(electronResourcesDir, "icon.icns"),
+  );
+  await fs.copyFile(
+    path.join(iconsDir, "icon.ico"),
+    path.join(electronResourcesDir, "icon.ico"),
+  );
   await fs.rm(iconsetDir, { recursive: true, force: true });
 }
 

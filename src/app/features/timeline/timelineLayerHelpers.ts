@@ -1,4 +1,8 @@
-import type { Part, TimelineClip, TimelineMotionLayerKind } from "../../../core/types";
+import type {
+  Part,
+  TimelineClip,
+  TimelineMotionLayerKind,
+} from "../../../core/types";
 
 export function timelineClipFromPart(item: Part): TimelineClip {
   return {
@@ -26,8 +30,14 @@ export function createBlankMotionLayer() {
   return { id: "motion", kind: "empty" as const, name: "Motion" };
 }
 
-export function createMotionTimelineLayer(kind: TimelineMotionLayerKind = "empty") {
-  return { id: `motion_${Date.now().toString(36)}`, kind: kind === "empty" ? "empty" : "motion", name: kind === "empty" ? "New Motion" : "Motion" } as const;
+export function createMotionTimelineLayer(
+  kind: TimelineMotionLayerKind = "empty",
+) {
+  return {
+    id: `motion_${Date.now().toString(36)}`,
+    kind: kind === "empty" ? "empty" : "motion",
+    name: kind === "empty" ? "New Motion" : "Motion",
+  } as const;
 }
 
 export function createAdjustmentTimelineLayer() {

@@ -14,7 +14,14 @@ class FullHeightPaperStage extends Component {
         css: paperStyles,
         html: paperHtml,
         style: { transform: "translateZ(0)" },
-        animations: [{ id: "full-height-paper-study-renderer-motion", name: "Motion", keyframes: { y: [100, 0], opacity: [0, 1] }, options: { duration: 1.2, ease: "easeOut" } }]
+        animations: [
+          {
+            id: "full-height-paper-study-renderer-motion",
+            name: "Motion",
+            keyframes: { y: [100, 0], opacity: [0, 1] },
+            options: { duration: 1.2, ease: "easeOut" },
+          },
+        ],
       }),
     ];
   }
@@ -23,7 +30,12 @@ class FullHeightPaperStage extends Component {
 export const composition = new Composition({
   duration: 9,
   frame: { width: 1920, height: 1080, style: { background: PAPER } },
-  background: { id: "background", name: "Neutral Paper Table", style: { background: PAPER }, elements: [] },
+  background: {
+    id: "background",
+    name: "Neutral Paper Table",
+    style: { background: PAPER },
+    elements: [],
+  },
   render() {
     return [new FullHeightPaperStage()];
   },

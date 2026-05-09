@@ -1,6 +1,15 @@
-import { startTransition, useEffect, useMemo, useRef, type RefObject } from "react";
+import {
+  startTransition,
+  useEffect,
+  useMemo,
+  useRef,
+  type RefObject,
+} from "react";
 import type { StoreApi } from "zustand";
-import { numberInputScrubEndEvent, numberInputScrubStartEvent } from "../../../components/ui/input";
+import {
+  numberInputScrubEndEvent,
+  numberInputScrubStartEvent,
+} from "../../../components/ui/input";
 import {
   advanceTimeSensitiveSceneTime,
   applyPlaybackAdjustmentLayersToSceneTime,
@@ -10,8 +19,19 @@ import {
   getTimeSensitiveDisplayTime,
 } from "../../../core/adjustments";
 import { clamp, roundTwo } from "../../../core/math";
-import { formatTime, getTimelinePreviewState, timelineDisplayDuration } from "../../../core/timeline";
-import type { AdjustmentLayer, CompositionClip, EditorState, TimelineLayerState, TimelinePart, TransitionLayer } from "../../../core/types";
+import {
+  formatTime,
+  getTimelinePreviewState,
+  timelineDisplayDuration,
+} from "../../../core/timeline";
+import type {
+  AdjustmentLayer,
+  CompositionClip,
+  EditorState,
+  TimelineLayerState,
+  TimelinePart,
+  TransitionLayer,
+} from "../../../core/types";
 import type { PlaybackClock } from "../../types";
 import type { EditorStore } from "../../state/editorStore";
 import type { PrerenderCacheInterestReason } from "../preview/usePrerenderCache";
@@ -46,7 +66,10 @@ type PlaybackControllerOptions = {
   useCachedPreviewPlayback: boolean;
   hasCachedPreviewFrameAtTime?: (time: number) => boolean;
   isCachedPreviewPaintReadyAtTime?: (time: number) => boolean;
-  requestCachedPreviewAtTime?: (time: number, reason: PrerenderCacheInterestReason) => void;
+  requestCachedPreviewAtTime?: (
+    time: number,
+    reason: PrerenderCacheInterestReason,
+  ) => void;
   timeline: TimelinePart[];
   timelineLayers?: TimelineLayerState;
   timelineEndPaddingFraction: number;
@@ -95,7 +118,19 @@ export function usePlaybackController({
   visibleSceneAdjustmentLayers,
   wasPlayingRef,
 }: PlaybackControllerOptions) {
-  const visibleSceneAdjustmentSignature = useMemo(() => JSON.stringify(visibleSceneAdjustmentLayers.map((layer) => ({ id: layer.id, layerId: layer.layerId, start: layer.start, duration: layer.duration, effect: layer.effect }))), [visibleSceneAdjustmentLayers]);
+  const visibleSceneAdjustmentSignature = useMemo(
+    () =>
+      JSON.stringify(
+        visibleSceneAdjustmentLayers.map((layer) => ({
+          id: layer.id,
+          layerId: layer.layerId,
+          start: layer.start,
+          duration: layer.duration,
+          effect: layer.effect,
+        })),
+      ),
+    [visibleSceneAdjustmentLayers],
+  );
   const playbackStart = playbackRange?.start ?? 0;
   const playbackEnd = playbackRange?.end ?? sceneDurationSeconds;
   const playbackDuration = Math.max(playbackEnd - playbackStart, 0);
@@ -108,55 +143,121 @@ export function usePlaybackController({
   }
 
   function toPlaybackDisplayTime(time: number) {
-    return useLocalPlaybackLabels ? clamp(time - playbackStart, 0, playbackDuration) : getTimeSensitiveDisplayTime(time, visibleSceneAdjustmentLayers);
+    return useLocalPlaybackLabels
+      ? clamp(time - playbackStart, 0, playbackDuration)
+      : getTimeSensitiveDisplayTime(time, visibleSceneAdjustmentLayers);
   }
 
   function toSceneTimeFromPlaybackDisplay(displayTime: number) {
-    return useLocalPlaybackLabels ? playbackStart + clamp(displayTime, 0, playbackDuration) : getSceneTimeForTimeSensitiveDisplayTime(displayTime, sceneDurationSeconds, visibleSceneAdjustmentLayers);
+    return useLocalPlaybackLabels
+      ? playbackStart + clamp(displayTime, 0, playbackDuration)
+      : getSceneTimeForTimeSensitiveDisplayTime(
+          displayTime,
+          sceneDurationSeconds,
+          visibleSceneAdjustmentLayers,
+        );
   }
 
   function getPlaybackDisplayDuration() {
-    return useLocalPlaybackLabels ? playbackDuration : getTimeSensitiveDisplayDuration(sceneDurationSeconds, visibleSceneAdjustmentLayers);
+    return useLocalPlaybackLabels
+      ? playbackDuration
+      : getTimeSensitiveDisplayDuration(
+          sceneDurationSeconds,
+          visibleSceneAdjustmentLayers,
+        );
   }
 
   function syncPlaybackDom(time: number) {
     const displayTime = toPlaybackDisplayTime(time);
-    publishPlaybackTime({ sceneTime: time, displayTime, playing: isPlayingRef.current });
-    if (playbackTimeLabelRef.current) playbackTimeLabelRef.current.textContent = formatPlaybackTimeLabel(time);
-    const displayDuration = useLocalPlaybackLabels ? playbackDuration : timelineDisplayDuration(sceneDurationSeconds, timelineEndPaddingFraction);
+    publishPlaybackTime({
+      sceneTime: time,
+      displayTime,
+      playing: isPlayingRef.current,
+    });
+    if (playbackTimeLabelRef.current)
+      playbackTimeLabelRef.current.textContent = formatPlaybackTimeLabel(time);
+    const displayDuration = useLocalPlaybackLabels
+      ? playbackDuration
+      : timelineDisplayDuration(
+          sceneDurationSeconds,
+          timelineEndPaddingFraction,
+        );
     const timelineTime = useLocalPlaybackLabels ? time - playbackStart : time;
-    if (playbackPlayheadRef.current) playbackPlayheadRef.current.style.setProperty("--clipper-playhead-left", `${displayDuration > 0 ? (timelineTime / displayDuration) * 100 : 0}%`);
-    if (playbackPlayheadRef.current) playbackPlayheadRef.current.style.removeProperty("--clipper-playhead-x");
+    if (playbackPlayheadRef.current)
+      playbackPlayheadRef.current.style.setProperty(
+        "--clipper-playhead-left",
+        `${displayDuration > 0 ? (timelineTime / displayDuration) * 100 : 0}%`,
+      );
+    if (playbackPlayheadRef.current)
+      playbackPlayheadRef.current.style.removeProperty("--clipper-playhead-x");
     if (playbackBorderScrubberRef.current) {
       const displayPlaybackDuration = getPlaybackDisplayDuration();
-      const progress = displayPlaybackDuration > 0 ? `${clamp(displayTime / displayPlaybackDuration, 0, 1) * 100}%` : "0%";
-      playbackBorderScrubberRef.current.max = String(Math.max(displayPlaybackDuration, 0.001));
-      playbackBorderScrubberRef.current.value = String(clamp(displayTime, 0, displayPlaybackDuration));
-      playbackBorderScrubberRef.current.style.setProperty("--clipper-playback-progress", progress);
-      playbackBorderScrubberRef.current.setAttribute("aria-valuenow", String(clamp(displayTime, 0, displayPlaybackDuration)));
+      const progress =
+        displayPlaybackDuration > 0
+          ? `${clamp(displayTime / displayPlaybackDuration, 0, 1) * 100}%`
+          : "0%";
+      playbackBorderScrubberRef.current.max = String(
+        Math.max(displayPlaybackDuration, 0.001),
+      );
+      playbackBorderScrubberRef.current.value = String(
+        clamp(displayTime, 0, displayPlaybackDuration),
+      );
+      playbackBorderScrubberRef.current.style.setProperty(
+        "--clipper-playback-progress",
+        progress,
+      );
+      playbackBorderScrubberRef.current.setAttribute(
+        "aria-valuenow",
+        String(clamp(displayTime, 0, displayPlaybackDuration)),
+      );
     }
   }
 
   function syncFrameVisualAdjustmentDom(time: number) {
-    const element = frameViewportRef.current?.querySelector<HTMLElement>("[data-clipper-visual-adjustments]");
+    const element = frameViewportRef.current?.querySelector<HTMLElement>(
+      "[data-clipper-visual-adjustments]",
+    );
     if (!element) return;
-    const style = applyAdjustmentLayersToVisualStyle(time, visibleSceneAdjustmentLayers);
+    const style = applyAdjustmentLayersToVisualStyle(
+      time,
+      visibleSceneAdjustmentLayers,
+    );
     if (style.filter) element.style.filter = String(style.filter);
     else element.style.removeProperty("filter");
-    syncVisualAdjustmentOverlayDom("frame", style.overlays?.filter((overlay) => overlay.target === "frame"));
-    syncVisualAdjustmentOverlayDom("camera", style.overlays?.filter((overlay) => (overlay.target ?? "camera") === "camera"));
+    syncVisualAdjustmentOverlayDom(
+      "frame",
+      style.overlays?.filter((overlay) => overlay.target === "frame"),
+    );
+    syncVisualAdjustmentOverlayDom(
+      "camera",
+      style.overlays?.filter(
+        (overlay) => (overlay.target ?? "camera") === "camera",
+      ),
+    );
   }
 
-  function syncVisualAdjustmentOverlayDom(target: "frame" | "camera", overlays: NonNullable<ReturnType<typeof applyAdjustmentLayersToVisualStyle>["overlays"]> | undefined) {
-    const overlaysElement = frameViewportRef.current?.querySelector<HTMLElement>(`[data-clipper-visual-adjustment-overlays="${target}"]`);
+  function syncVisualAdjustmentOverlayDom(
+    target: "frame" | "camera",
+    overlays:
+      | NonNullable<
+          ReturnType<typeof applyAdjustmentLayersToVisualStyle>["overlays"]
+        >
+      | undefined,
+  ) {
+    const overlaysElement =
+      frameViewportRef.current?.querySelector<HTMLElement>(
+        `[data-clipper-visual-adjustment-overlays="${target}"]`,
+      );
     if (!overlaysElement) return;
-    overlaysElement.replaceChildren(...(overlays ?? []).map((overlay) => {
-      const overlayElement = document.createElement("div");
-      overlayElement.className = "pointer-events-none absolute inset-0";
-      overlayElement.style.zIndex = "2147483647";
-      Object.assign(overlayElement.style, overlay.style);
-      return overlayElement;
-    }));
+    overlaysElement.replaceChildren(
+      ...(overlays ?? []).map((overlay) => {
+        const overlayElement = document.createElement("div");
+        overlayElement.className = "pointer-events-none absolute inset-0";
+        overlayElement.style.zIndex = "2147483647";
+        Object.assign(overlayElement.style, overlay.style);
+        return overlayElement;
+      }),
+    );
   }
 
   function formatPlaybackTimeLabel(time: number) {
@@ -176,10 +277,17 @@ export function usePlaybackController({
 
   function commitPlayheadEditorState(time: number) {
     const currentSceneTime = roundTwo(clampPlaybackTime(time));
-    updateEditorState((state) => (state.currentSceneTime === currentSceneTime ? state : { ...state, currentSceneTime }));
+    updateEditorState((state) =>
+      state.currentSceneTime === currentSceneTime
+        ? state
+        : { ...state, currentSceneTime },
+    );
   }
 
-  function requestCachedPreviewInterest(time: number, reason: PrerenderCacheInterestReason) {
+  function requestCachedPreviewInterest(
+    time: number,
+    reason: PrerenderCacheInterestReason,
+  ) {
     if (reason !== "scrub") {
       requestCachedPreviewAtTime?.(time, reason);
       return;
@@ -192,7 +300,8 @@ export function usePlaybackController({
       scrubCacheFrameRef.current = 0;
       const cachedTime = pendingScrubCacheTimeRef.current;
       pendingScrubCacheTimeRef.current = null;
-      if (cachedTime !== null) requestCachedPreviewAtTime?.(cachedTime, "scrub");
+      if (cachedTime !== null)
+        requestCachedPreviewAtTime?.(cachedTime, "scrub");
     });
   }
 
@@ -209,7 +318,11 @@ export function usePlaybackController({
     }
 
     currentSceneTimeRef.current = nextTime;
-    if (isPlayingRef.current) updatePlaybackClock({ startedAt: performance.now(), startedFrom: nextTime });
+    if (isPlayingRef.current)
+      updatePlaybackClock({
+        startedAt: performance.now(),
+        startedFrom: nextTime,
+      });
     if (!timelineScrubbingRef.current) syncPlaybackDom(nextTime);
     else if (!useLocalPlaybackLabels) syncFrameVisualAdjustmentDom(nextTime);
 
@@ -240,11 +353,18 @@ export function usePlaybackController({
     isPlayingRef.current = false;
     updatePlaybackClock(null);
     setIsPlaying(false);
-    publishPlaybackTime({ sceneTime: settledTime, displayTime: toPlaybackDisplayTime(settledTime), playing: false });
+    publishPlaybackTime({
+      sceneTime: settledTime,
+      displayTime: toPlaybackDisplayTime(settledTime),
+      playing: false,
+    });
   }
 
   function startPlaybackFromCurrentTime() {
-    if (currentSceneTimeRef.current >= playbackEnd || currentSceneTimeRef.current < playbackStart) {
+    if (
+      currentSceneTimeRef.current >= playbackEnd ||
+      currentSceneTimeRef.current < playbackStart
+    ) {
       currentSceneTimeRef.current = playbackStart;
       requestCachedPreviewInterest(playbackStart, "playback");
       syncPlaybackDom(playbackStart);
@@ -252,9 +372,16 @@ export function usePlaybackController({
       setRenderCurrentSceneTime(playbackStart);
     }
 
-    updatePlaybackClock({ startedAt: performance.now(), startedFrom: currentSceneTimeRef.current });
+    updatePlaybackClock({
+      startedAt: performance.now(),
+      startedFrom: currentSceneTimeRef.current,
+    });
     isPlayingRef.current = true;
-    publishPlaybackTime({ sceneTime: currentSceneTimeRef.current, displayTime: toPlaybackDisplayTime(currentSceneTimeRef.current), playing: true });
+    publishPlaybackTime({
+      sceneTime: currentSceneTimeRef.current,
+      displayTime: toPlaybackDisplayTime(currentSceneTimeRef.current),
+      playing: true,
+    });
     setIsPlaying(true);
   }
 
@@ -320,7 +447,9 @@ export function usePlaybackController({
       return;
     }
 
-    const nextPart = timeline.find((item) => item.start > currentSceneTimeRef.current + 0.001);
+    const nextPart = timeline.find(
+      (item) => item.start > currentSceneTimeRef.current + 0.001,
+    );
     scrubToSceneTime(nextPart?.start ?? sceneDurationSeconds);
   }
 
@@ -353,14 +482,21 @@ export function usePlaybackController({
       const settledTime = currentSceneTimeRef.current;
       syncPlaybackDom(settledTime);
       commitPlayheadEditorState(settledTime);
-      if (Math.abs(settledTime - currentSceneTime) >= 0.001) setCurrentSceneTime(settledTime);
+      if (Math.abs(settledTime - currentSceneTime) >= 0.001)
+        setCurrentSceneTime(settledTime);
       return;
     }
 
     if (timelineScrubbingRef.current) return;
     currentSceneTimeRef.current = currentSceneTime;
     syncPlaybackDom(currentSceneTime);
-  }, [currentSceneTime, isPlaying, sceneDurationSeconds, timelineEndPaddingFraction, visibleSceneAdjustmentLayers]);
+  }, [
+    currentSceneTime,
+    isPlaying,
+    sceneDurationSeconds,
+    timelineEndPaddingFraction,
+    visibleSceneAdjustmentLayers,
+  ]);
 
   useEffect(() => {
     if (timelineScrubbingRef.current) return;
@@ -386,40 +522,95 @@ export function usePlaybackController({
       startPlaybackFromCurrentTime();
     }
 
-    window.addEventListener(numberInputScrubStartEvent, pausePlaybackForNumberScrub);
-    window.addEventListener(numberInputScrubEndEvent, resumePlaybackAfterNumberScrub);
+    window.addEventListener(
+      numberInputScrubStartEvent,
+      pausePlaybackForNumberScrub,
+    );
+    window.addEventListener(
+      numberInputScrubEndEvent,
+      resumePlaybackAfterNumberScrub,
+    );
     return () => {
-      window.removeEventListener(numberInputScrubStartEvent, pausePlaybackForNumberScrub);
-      window.removeEventListener(numberInputScrubEndEvent, resumePlaybackAfterNumberScrub);
+      window.removeEventListener(
+        numberInputScrubStartEvent,
+        pausePlaybackForNumberScrub,
+      );
+      window.removeEventListener(
+        numberInputScrubEndEvent,
+        resumePlaybackAfterNumberScrub,
+      );
     };
   }, [sceneDurationSeconds]);
 
-  useEffect(() => () => {
-    if (scrubFrameRef.current) cancelAnimationFrame(scrubFrameRef.current);
-  }, [scrubFrameRef]);
+  useEffect(
+    () => () => {
+      if (scrubFrameRef.current) cancelAnimationFrame(scrubFrameRef.current);
+    },
+    [scrubFrameRef],
+  );
 
-  useEffect(() => () => {
-    if (scrubCacheFrameRef.current) cancelAnimationFrame(scrubCacheFrameRef.current);
-  }, []);
+  useEffect(
+    () => () => {
+      if (scrubCacheFrameRef.current)
+        cancelAnimationFrame(scrubCacheFrameRef.current);
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!isPlaying) return;
-    let lastCommittedPreviewKey = getPlaybackPreviewKey(currentSceneTimeRef.current, compositions, sceneDurationSeconds, timeline, timelineLayers, transitionLayers, visibleSceneAdjustmentLayers);
+    let lastCommittedPreviewKey = getPlaybackPreviewKey(
+      currentSceneTimeRef.current,
+      compositions,
+      sceneDurationSeconds,
+      timeline,
+      timelineLayers,
+      transitionLayers,
+      visibleSceneAdjustmentLayers,
+    );
     let lastReactPreviewSyncAt = 0;
     let frame = 0;
 
     function tick(now: number) {
-      const clock = playbackClockRef.current ?? { startedAt: now, startedFrom: currentSceneTimeRef.current };
+      const clock = playbackClockRef.current ?? {
+        startedAt: now,
+        startedFrom: currentSceneTimeRef.current,
+      };
       playbackClockRef.current = clock;
       const nextTime = useLocalPlaybackLabels
-        ? clamp(clock.startedFrom + (now - clock.startedAt) / 1000, playbackStart, playbackEnd)
-        : advanceTimeSensitiveSceneTime(clock.startedFrom, (now - clock.startedAt) / 1000, sceneDurationSeconds, visibleSceneAdjustmentLayers);
-      const nextPreviewKey = getPlaybackPreviewKey(nextTime, compositions, sceneDurationSeconds, timeline, timelineLayers, transitionLayers, visibleSceneAdjustmentLayers);
-      const shouldSyncReact = nextPreviewKey !== lastCommittedPreviewKey || nextTime >= playbackEnd;
+        ? clamp(
+            clock.startedFrom + (now - clock.startedAt) / 1000,
+            playbackStart,
+            playbackEnd,
+          )
+        : advanceTimeSensitiveSceneTime(
+            clock.startedFrom,
+            (now - clock.startedAt) / 1000,
+            sceneDurationSeconds,
+            visibleSceneAdjustmentLayers,
+          );
+      const nextPreviewKey = getPlaybackPreviewKey(
+        nextTime,
+        compositions,
+        sceneDurationSeconds,
+        timeline,
+        timelineLayers,
+        transitionLayers,
+        visibleSceneAdjustmentLayers,
+      );
+      const shouldSyncReact =
+        nextPreviewKey !== lastCommittedPreviewKey || nextTime >= playbackEnd;
       requestCachedPreviewAtTime?.(nextTime, "playback");
-      const cachedPreviewFrameAvailable = useCachedPreviewPlayback && hasCachedPreviewFrameAtTime?.(nextTime) === true;
-      const cachedPreviewPaintReady = cachedPreviewFrameAvailable && isCachedPreviewPaintReadyAtTime?.(nextTime) === true;
-      const shouldSyncPreviewRender = !cachedPreviewPaintReady && (shouldSyncReact || now - lastReactPreviewSyncAt >= previewRenderSyncIntervalMs);
+      const cachedPreviewFrameAvailable =
+        useCachedPreviewPlayback &&
+        hasCachedPreviewFrameAtTime?.(nextTime) === true;
+      const cachedPreviewPaintReady =
+        cachedPreviewFrameAvailable &&
+        isCachedPreviewPaintReadyAtTime?.(nextTime) === true;
+      const shouldSyncPreviewRender =
+        !cachedPreviewPaintReady &&
+        (shouldSyncReact ||
+          now - lastReactPreviewSyncAt >= previewRenderSyncIntervalMs);
 
       currentSceneTimeRef.current = nextTime;
       syncPlaybackDom(nextTime);
@@ -444,11 +635,30 @@ export function usePlaybackController({
 
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [compositions, hasCachedPreviewFrameAtTime, isCachedPreviewPaintReadyAtTime, isPlaying, playbackEnd, playbackStart, previewRenderSyncIntervalMs, requestCachedPreviewAtTime, sceneDurationSeconds, timeline, timelineLayers, transitionLayers, useCachedPreviewPlayback, useLocalPlaybackLabels, visibleSceneAdjustmentLayers]);
+  }, [
+    compositions,
+    hasCachedPreviewFrameAtTime,
+    isCachedPreviewPaintReadyAtTime,
+    isPlaying,
+    playbackEnd,
+    playbackStart,
+    previewRenderSyncIntervalMs,
+    requestCachedPreviewAtTime,
+    sceneDurationSeconds,
+    timeline,
+    timelineLayers,
+    transitionLayers,
+    useCachedPreviewPlayback,
+    useLocalPlaybackLabels,
+    visibleSceneAdjustmentLayers,
+  ]);
 
   useEffect(() => {
     if (!isPlaying) return;
-    updatePlaybackClock({ startedAt: performance.now(), startedFrom: currentSceneTimeRef.current });
+    updatePlaybackClock({
+      startedAt: performance.now(),
+      startedFrom: currentSceneTimeRef.current,
+    });
   }, [isPlaying, visibleSceneAdjustmentSignature]);
 
   useEffect(() => {
@@ -481,7 +691,15 @@ export function usePlaybackController({
 
 export { composePlaybackReactPreviewSyncIntervalMs };
 
-function getPlaybackPreviewKey(sceneTime: number, compositions: CompositionClip[], sceneDurationSeconds: number, timeline: TimelinePart[], timelineLayers: TimelineLayerState | undefined, transitionLayers: TransitionLayer[] | undefined, adjustmentLayers: AdjustmentLayer[]) {
+function getPlaybackPreviewKey(
+  sceneTime: number,
+  compositions: CompositionClip[],
+  sceneDurationSeconds: number,
+  timeline: TimelinePart[],
+  timelineLayers: TimelineLayerState | undefined,
+  transitionLayers: TransitionLayer[] | undefined,
+  adjustmentLayers: AdjustmentLayer[],
+) {
   const state = getTimelinePreviewState({
     adjustmentLayers,
     compositions,
@@ -492,7 +710,15 @@ function getPlaybackPreviewKey(sceneTime: number, compositions: CompositionClip[
     timelineMode: "composition",
     transitionLayers,
   });
-  const stackKey = state.previewParts.map((item) => `${item.part.id}:${item.start}`).join("|");
-  const transitionKey = state.transitionPreviewParts ? [state.transitionPreviewParts.from, state.transitionPreviewParts.to].map((parts) => parts.map((item) => `${item.part.id}:${item.start}`).join("|")).join(">") : "";
+  const stackKey = state.previewParts
+    .map((item) => `${item.part.id}:${item.start}`)
+    .join("|");
+  const transitionKey = state.transitionPreviewParts
+    ? [state.transitionPreviewParts.from, state.transitionPreviewParts.to]
+        .map((parts) =>
+          parts.map((item) => `${item.part.id}:${item.start}`).join("|"),
+        )
+        .join(">")
+    : "";
   return `${state.activeTimelinePart?.id ?? ""}:${stackKey}:${transitionKey}`;
 }

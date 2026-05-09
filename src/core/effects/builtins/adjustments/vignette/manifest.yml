@@ -4,13 +4,13 @@ name: Vignette
 label: Vignette
 group: Overlay
 defaultDuration: 3
-defaultParams: {"intensity":0.42,"softness":0.64,"focusX":50,"focusY":50,"target":"camera"}
+defaultParams: { "intensity": 0.42, "softness": 0.64, "focusX": 50, "focusY": 50, "target": "camera" }
 paramControls:
   - key: target
     label: Target
     type: select
     defaultValue: camera
-    options: [{"value":"camera","label":"Camera"},{"value":"frame","label":"Frame"}]
+    options: [{ "value": "camera", "label": "Camera" }, { "value": "frame", "label": "Frame" }]
   - key: intensity
     label: Intensity
     type: number

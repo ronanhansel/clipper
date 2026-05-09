@@ -1,5 +1,18 @@
 import * as compositionApi from "./compositionApi";
-import { FRAME_HEIGHT, FRAME_WIDTH, type AnimationGraphState, type BackgroundLayer, type CompositionRenderMode, type FrameObject, type FrameObjectType, type FrameTemplate, type JsonValue, type LayerAnimation, type Part, type PartFrame } from "./types";
+import {
+  FRAME_HEIGHT,
+  FRAME_WIDTH,
+  type AnimationGraphState,
+  type BackgroundLayer,
+  type CompositionRenderMode,
+  type FrameObject,
+  type FrameObjectType,
+  type FrameTemplate,
+  type JsonValue,
+  type LayerAnimation,
+  type Part,
+  type PartFrame,
+} from "./types";
 
 type SourceObject = {
   id: string;
@@ -40,34 +53,71 @@ type SourceComposition = {
   render: (context: compositionApi.RenderContext) => SourceRenderable[];
 };
 
-type ResolvedSourceComposition = SourceComposition & { objects: SourceObject[] };
+type ResolvedSourceComposition = SourceComposition & {
+  objects: SourceObject[];
+};
 
 type SourceExports = { composition?: unknown };
 
-type SourceRenderable = compositionApi.RenderableObject | compositionApi.Component | compositionApi.Group | null | undefined | false | SourceRenderable[];
+type SourceRenderable =
+  | compositionApi.RenderableObject
+  | compositionApi.Component
+  | compositionApi.Group
+  | null
+  | undefined
+  | false
+  | SourceRenderable[];
 
-export async function loadCompositionsFromSource(compositions: Part[], readFile: (relativePath: string) => Promise<string>) {
-  const loaded = await Promise.all(compositions.map(async (composition) => compositionFromSource(composition, await readFile(composition.filePath), readFile)));
+export async function loadCompositionsFromSource(
+  compositions: Part[],
+  readFile: (relativePath: string) => Promise<string>,
+) {
+  const loaded = await Promise.all(
+    compositions.map(async (composition) =>
+      compositionFromSource(
+        composition,
+        await readFile(composition.filePath),
+        readFile,
+      ),
+    ),
+  );
   return loaded;
 }
 
-export async function compositionFromSource(baseComposition: Part, source: string, readFile?: (relativePath: string) => Promise<string>): Promise<Part> {
-  const sourceComposition = await evaluateCompositionSource(source, 0, baseComposition.duration, baseComposition.filePath, readFile);
+export async function compositionFromSource(
+  baseComposition: Part,
+  source: string,
+  readFile?: (relativePath: string) => Promise<string>,
+): Promise<Part> {
+  const sourceComposition = await evaluateCompositionSource(
+    source,
+    0,
+    baseComposition.duration,
+    baseComposition.filePath,
+    readFile,
+  );
 
   return {
     ...baseComposition,
     sourceMissing: undefined,
     duration: sourceComposition.duration,
     renderMode: sourceComposition.renderMode,
-    animationGraph: sourceComposition.animationGraph as AnimationGraphState | undefined,
-    composition3dGraph: sourceComposition.composition3dGraph as Part["composition3dGraph"],
+    animationGraph: sourceComposition.animationGraph as
+      | AnimationGraphState
+      | undefined,
+    composition3dGraph:
+      sourceComposition.composition3dGraph as Part["composition3dGraph"],
     frame: sourceFrameToCompositionFrame(sourceComposition.frame),
     background: sourceBackgroundToLayer(sourceComposition.background),
-    objects: getSourceCompositionObjects(sourceComposition).map(sourceObjectToFrameObject),
+    objects: getSourceCompositionObjects(sourceComposition).map(
+      sourceObjectToFrameObject,
+    ),
   };
 }
 
-function sourceFrameToCompositionFrame(frame: SourceComposition["frame"]): PartFrame {
+function sourceFrameToCompositionFrame(
+  frame: SourceComposition["frame"],
+): PartFrame {
   return {
     width: FRAME_WIDTH,
     height: FRAME_HEIGHT,
@@ -75,7 +125,9 @@ function sourceFrameToCompositionFrame(frame: SourceComposition["frame"]): PartF
   };
 }
 
-function sourceBackgroundToLayer(background: SourceComposition["background"]): BackgroundLayer {
+function sourceBackgroundToLayer(
+  background: SourceComposition["background"],
+): BackgroundLayer {
   return {
     id: background?.id ?? "background",
     name: background?.name ?? "Background",
@@ -84,7 +136,10 @@ function sourceBackgroundToLayer(background: SourceComposition["background"]): B
     hidden: background?.hidden,
     locked: background?.locked,
     animations: stripGraphAnimations(background?.animations),
-    elements: resolveRenderables(background?.elements ?? [], compositionApi.renderContext(0, 0)).map(sourceObjectToFrameObject),
+    elements: resolveRenderables(
+      background?.elements ?? [],
+      compositionApi.renderContext(0, 0),
+    ).map(sourceObjectToFrameObject),
   };
 }
 
@@ -107,11 +162,26 @@ function sourceObjectToFrameObject(object: SourceObject): FrameObject {
 }
 
 export function compositionToSource(composition: Part) {
-  if (composition.renderMode === "webgl") return composition3dToSource(composition);
-  const imports = Array.from(new Set(["Component", "Composition", ...composition.background.elements.map(frameObjectConstructorName), ...composition.objects.map(frameObjectConstructorName)])).sort();
-  const renderModeSource = composition.renderMode && composition.renderMode !== "dom" ? `  renderMode: ${JSON.stringify(composition.renderMode)},\n` : "";
-  const animationGraphSource = composition.animationGraph ? `  animationGraph: ${tsBlock(composition.animationGraph, 2)},\n` : "";
-  const composition3dGraphSource = composition.composition3dGraph ? `  composition3dGraph: ${tsBlock(composition.composition3dGraph, 2)},\n` : "";
+  if (composition.renderMode === "webgl")
+    return composition3dToSource(composition);
+  const imports = Array.from(
+    new Set([
+      "Component",
+      "Composition",
+      ...composition.background.elements.map(frameObjectConstructorName),
+      ...composition.objects.map(frameObjectConstructorName),
+    ]),
+  ).sort();
+  const renderModeSource =
+    composition.renderMode && composition.renderMode !== "dom"
+      ? `  renderMode: ${JSON.stringify(composition.renderMode)},\n`
+      : "";
+  const animationGraphSource = composition.animationGraph
+    ? `  animationGraph: ${tsBlock(composition.animationGraph, 2)},\n`
+    : "";
+  const composition3dGraphSource = composition.composition3dGraph
+    ? `  composition3dGraph: ${tsBlock(composition.composition3dGraph, 2)},\n`
+    : "";
   const background = cleanUndefined({
     id: composition.background.id,
     name: composition.background.name,
@@ -121,7 +191,9 @@ export function compositionToSource(composition: Part) {
     locked: composition.background.locked || undefined,
     animations: authoredAnimations(composition.background.animations),
   });
-  const backgroundElements = composition.background.elements.map(frameObjectToConstructorSource);
+  const backgroundElements = composition.background.elements.map(
+    frameObjectToConstructorSource,
+  );
   const backgroundSource = `{
     ${tsBlock(background, 4).slice(2, -1).trimEnd()},
     elements: [
@@ -159,7 +231,9 @@ function frameObjectToConstructorSource(object: FrameObject) {
     id: object.id,
     name: object.name,
     bounds: object.bounds,
-    ...(object.type === "text" ? { text: object.content } : { content: object.content }),
+    ...(object.type === "text"
+      ? { text: object.content }
+      : { content: object.content }),
     template: object.template,
     richText: object.richText,
     style: object.style,
@@ -201,13 +275,28 @@ function tsLiteral(value: unknown, padding = 0): string {
 
   if (Array.isArray(value)) {
     if (value.length === 0) return "[]";
-    if (value.every((entry) => entry === null || typeof entry !== "object")) return `[${value.map((entry) => tsLiteral(entry)).join(", ")}]`;
-    return `[` + `\n${value.map((entry) => `${nextIndent}${tsLiteral(entry, padding + 2)}`).join(",\n")}\n${currentIndent}]`;
+    if (value.every((entry) => entry === null || typeof entry !== "object"))
+      return `[${value.map((entry) => tsLiteral(entry)).join(", ")}]`;
+    return (
+      `[` +
+      `\n${value.map((entry) => `${nextIndent}${tsLiteral(entry, padding + 2)}`).join(",\n")}\n${currentIndent}]`
+    );
   }
 
-  const entries = Object.entries(value).filter(([, entry]) => entry !== undefined);
+  const entries = Object.entries(value).filter(
+    ([, entry]) => entry !== undefined,
+  );
   if (entries.length === 0) return "{}";
-  if (entries.length <= 4 && entries.every(([, entry]) => entry === null || typeof entry !== "object" || (Array.isArray(entry) && entry.every((item) => item === null || typeof item !== "object")))) {
+  if (
+    entries.length <= 4 &&
+    entries.every(
+      ([, entry]) =>
+        entry === null ||
+        typeof entry !== "object" ||
+        (Array.isArray(entry) &&
+          entry.every((item) => item === null || typeof item !== "object")),
+    )
+  ) {
     return `{ ${entries.map(([key, entry]) => `${tsKey(key)}: ${tsLiteral(entry)}`).join(", ")} }`;
   }
 
@@ -219,19 +308,38 @@ function tsKey(key: string) {
 }
 
 function cleanUndefined<T extends Record<string, unknown>>(value: T): T {
-  return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined)) as T;
+  return Object.fromEntries(
+    Object.entries(value).filter(([, entry]) => entry !== undefined),
+  ) as T;
 }
 
 function indent(value: string, spaces: number) {
   const prefix = " ".repeat(spaces);
-  return value.split("\n").map((line) => `${prefix}${line}`).join("\n");
+  return value
+    .split("\n")
+    .map((line) => `${prefix}${line}`)
+    .join("\n");
 }
 
-async function evaluateCompositionSource(source: string, time: number, duration: number, sourcePath = "", readFile?: (relativePath: string) => Promise<string>): Promise<ResolvedSourceComposition> {
+async function evaluateCompositionSource(
+  source: string,
+  time: number,
+  duration: number,
+  sourcePath = "",
+  readFile?: (relativePath: string) => Promise<string>,
+): Promise<ResolvedSourceComposition> {
   const ts = await import("typescript");
   const textImports = new Map<string, string>();
-  const sourceWithTextImports = await inlineTextImports(source, sourcePath, readFile, textImports);
-  const strippedSource = sourceWithTextImports.replace(/^\s*import\s+[^;]+;\s*$/gm, "");
+  const sourceWithTextImports = await inlineTextImports(
+    source,
+    sourcePath,
+    readFile,
+    textImports,
+  );
+  const strippedSource = sourceWithTextImports.replace(
+    /^\s*import\s+[^;]+;\s*$/gm,
+    "",
+  );
   const transpiled = ts.transpileModule(strippedSource, {
     compilerOptions: {
       jsx: ts.JsxEmit.ReactJSX,
@@ -242,14 +350,28 @@ async function evaluateCompositionSource(source: string, time: number, duration:
   const exports = {} as SourceExports;
   const apiEntries = Object.entries(compositionApi);
 
-  Function("exports", ...apiEntries.map(([key]) => key), `${transpiled}\nreturn exports;`)(exports, ...apiEntries.map(([, value]) => value));
+  Function(
+    "exports",
+    ...apiEntries.map(([key]) => key),
+    `${transpiled}\nreturn exports;`,
+  )(exports, ...apiEntries.map(([, value]) => value));
 
-  return normalizeSourceComposition(assertSourceComposition(exports.composition), time, duration);
+  return normalizeSourceComposition(
+    assertSourceComposition(exports.composition),
+    time,
+    duration,
+  );
 }
 
-async function inlineTextImports(source: string, sourcePath: string, readFile: ((relativePath: string) => Promise<string>) | undefined, textImports: Map<string, string>) {
+async function inlineTextImports(
+  source: string,
+  sourcePath: string,
+  readFile: ((relativePath: string) => Promise<string>) | undefined,
+  textImports: Map<string, string>,
+) {
   if (!readFile) return source;
-  const textImportPattern = /^\s*import\s+(\w+)\s+from\s+["'](.+\.(?:css|html|three\.(?:js|ts)))["'];?\s*$/gm;
+  const textImportPattern =
+    /^\s*import\s+(\w+)\s+from\s+["'](.+\.(?:css|html|three\.(?:js|ts)))["'];?\s*$/gm;
   const replacements: Array<{ start: number; end: number; value: string }> = [];
 
   for (const match of source.matchAll(textImportPattern)) {
@@ -262,15 +384,26 @@ async function inlineTextImports(source: string, sourcePath: string, readFile: (
       importedSource = await readFile(resolvedPath);
       textImports.set(resolvedPath, importedSource);
     }
-    replacements.push({ start: match.index, end: match.index + match[0].length, value: `const ${identifier} = ${JSON.stringify(importedSource)};` });
+    replacements.push({
+      start: match.index,
+      end: match.index + match[0].length,
+      value: `const ${identifier} = ${JSON.stringify(importedSource)};`,
+    });
   }
 
-  return replacements.reduceRight((current, replacement) => `${current.slice(0, replacement.start)}${replacement.value}${current.slice(replacement.end)}`, source);
+  return replacements.reduceRight(
+    (current, replacement) =>
+      `${current.slice(0, replacement.start)}${replacement.value}${current.slice(replacement.end)}`,
+    source,
+  );
 }
 
 function resolveRelativeSourcePath(sourcePath: string, importPath: string) {
   if (!importPath.startsWith(".")) return importPath;
-  const parts = `${sourcePath.includes("/") ? sourcePath.slice(0, sourcePath.lastIndexOf("/")) : ""}/${importPath}`.split("/");
+  const parts =
+    `${sourcePath.includes("/") ? sourcePath.slice(0, sourcePath.lastIndexOf("/")) : ""}/${importPath}`.split(
+      "/",
+    );
   const resolved: string[] = [];
   for (const part of parts) {
     if (!part || part === ".") continue;
@@ -281,75 +414,169 @@ function resolveRelativeSourcePath(sourcePath: string, importPath: string) {
 }
 
 function assertSourceComposition(value: unknown): SourceComposition {
-  if (!value || typeof value !== "object") throw new Error("Composition source must export a composition object.");
+  if (!value || typeof value !== "object")
+    throw new Error("Composition source must export a composition object.");
   const composition = value as Partial<SourceComposition>;
 
-  if (typeof composition.duration !== "number") throw new Error("Composition source is missing numeric duration.");
-  if (!composition.frame || composition.frame.width !== FRAME_WIDTH || composition.frame.height !== FRAME_HEIGHT) throw new Error("Composition source must use a 1920x1080 frame.");
-  if (typeof composition.render !== "function") throw new Error("Composition source must define render() and return class-based renderables.");
+  if (typeof composition.duration !== "number")
+    throw new Error("Composition source is missing numeric duration.");
+  if (
+    !composition.frame ||
+    composition.frame.width !== FRAME_WIDTH ||
+    composition.frame.height !== FRAME_HEIGHT
+  )
+    throw new Error("Composition source must use a 1920x1080 frame.");
+  if (typeof composition.render !== "function")
+    throw new Error(
+      "Composition source must define render() and return class-based renderables.",
+    );
 
   return composition as SourceComposition;
 }
 
-function normalizeSourceComposition(composition: SourceComposition, time: number, duration: number): ResolvedSourceComposition {
-  const context = compositionApi.renderContext(time, duration || composition.duration);
+function normalizeSourceComposition(
+  composition: SourceComposition,
+  time: number,
+  duration: number,
+): ResolvedSourceComposition {
+  const context = compositionApi.renderContext(
+    time,
+    duration || composition.duration,
+  );
   return {
     ...composition,
-    background: composition.background ? {
-      ...composition.background,
-      elements: resolveRenderables(composition.background.elements ?? [], context),
-    } : composition.background,
+    background: composition.background
+      ? {
+          ...composition.background,
+          elements: resolveRenderables(
+            composition.background.elements ?? [],
+            context,
+          ),
+        }
+      : composition.background,
     objects: resolveRenderables(composition.render(context), context),
   };
 }
 
-function getSourceCompositionObjects(composition: ResolvedSourceComposition): SourceObject[] {
+function getSourceCompositionObjects(
+  composition: ResolvedSourceComposition,
+): SourceObject[] {
   return composition.objects;
 }
 
-function resolveRenderables(renderables: SourceRenderable[] | SourceRenderable, context: compositionApi.RenderContext, inherited?: { style?: FrameObject["style"]; transform?: string; animations?: FrameObject["animations"]; hidden?: boolean; locked?: boolean }): SourceObject[] {
-  if (!Array.isArray(renderables)) return resolveRenderables([renderables], context, inherited);
+function resolveRenderables(
+  renderables: SourceRenderable[] | SourceRenderable,
+  context: compositionApi.RenderContext,
+  inherited?: {
+    style?: FrameObject["style"];
+    transform?: string;
+    animations?: FrameObject["animations"];
+    hidden?: boolean;
+    locked?: boolean;
+  },
+): SourceObject[] {
+  if (!Array.isArray(renderables))
+    return resolveRenderables([renderables], context, inherited);
 
   return renderables.flatMap((renderable) => {
     if (!renderable) return [];
-    if (Array.isArray(renderable)) return resolveRenderables(renderable, context, inherited);
+    if (Array.isArray(renderable))
+      return resolveRenderables(renderable, context, inherited);
     if (isComponentLike(renderable)) {
       const nextInherited = isGroupLike(renderable)
-        ? mergeInherited(inherited, renderable.style, renderable.transform, renderable.animations, renderable.hidden, renderable.locked)
+        ? mergeInherited(
+            inherited,
+            renderable.style,
+            renderable.transform,
+            renderable.animations,
+            renderable.hidden,
+            renderable.locked,
+          )
         : inherited;
-      return resolveRenderables(renderable.render(context), context, nextInherited);
+      return resolveRenderables(
+        renderable.render(context),
+        context,
+        nextInherited,
+      );
     }
-    if (isRenderableObject(renderable)) return [applyInheritedToSourceObject(renderable, inherited)];
-    throw new Error("Composition render() must return Component, Group, or renderable class instances. Plain object renderables are no longer supported.");
+    if (isRenderableObject(renderable))
+      return [applyInheritedToSourceObject(renderable, inherited)];
+    throw new Error(
+      "Composition render() must return Component, Group, or renderable class instances. Plain object renderables are no longer supported.",
+    );
   });
 }
 
-function isComponentLike(value: unknown): value is { render: (context: compositionApi.RenderContext) => SourceRenderable[] } {
-  return Boolean(value && typeof value === "object" && typeof (value as { render?: unknown }).render === "function");
+function isComponentLike(value: unknown): value is {
+  render: (context: compositionApi.RenderContext) => SourceRenderable[];
+} {
+  return Boolean(
+    value &&
+    typeof value === "object" &&
+    typeof (value as { render?: unknown }).render === "function",
+  );
 }
 
 function isGroupLike(value: unknown): value is compositionApi.Group {
   return value instanceof compositionApi.Group;
 }
 
-function isRenderableObject(value: unknown): value is compositionApi.RenderableObject {
+function isRenderableObject(
+  value: unknown,
+): value is compositionApi.RenderableObject {
   return value instanceof compositionApi.RenderableObject;
 }
 
-function mergeInherited(inherited: { style?: FrameObject["style"]; transform?: string; animations?: FrameObject["animations"]; hidden?: boolean; locked?: boolean } | undefined, style: FrameObject["style"] | undefined, transform: compositionApi.Transform | string | undefined, animations?: FrameObject["animations"], hidden?: boolean, locked?: boolean) {
+function mergeInherited(
+  inherited:
+    | {
+        style?: FrameObject["style"];
+        transform?: string;
+        animations?: FrameObject["animations"];
+        hidden?: boolean;
+        locked?: boolean;
+      }
+    | undefined,
+  style: FrameObject["style"] | undefined,
+  transform: compositionApi.Transform | string | undefined,
+  animations?: FrameObject["animations"],
+  hidden?: boolean,
+  locked?: boolean,
+) {
   return {
     style: { ...(inherited?.style ?? {}), ...(style ?? {}) },
-    transform: joinTransforms(inherited?.transform, compositionApi.transformToCss(transform)),
+    transform: joinTransforms(
+      inherited?.transform,
+      compositionApi.transformToCss(transform),
+    ),
     animations: animations ?? inherited?.animations,
     hidden: hidden ?? inherited?.hidden,
     locked: locked ?? inherited?.locked,
   };
 }
 
-function applyInheritedToSourceObject(object: SourceObject, inherited: { style?: FrameObject["style"]; transform?: string; animations?: FrameObject["animations"]; hidden?: boolean; locked?: boolean } | undefined): SourceObject {
+function applyInheritedToSourceObject(
+  object: SourceObject,
+  inherited:
+    | {
+        style?: FrameObject["style"];
+        transform?: string;
+        animations?: FrameObject["animations"];
+        hidden?: boolean;
+        locked?: boolean;
+      }
+    | undefined,
+): SourceObject {
   const ownTransform = compositionApi.transformToCss(object.transform);
-  const styleTransform = typeof object.style?.transform === "string" ? object.style.transform : undefined;
-  const transform = joinTransforms(inherited?.transform, styleTransform, ownTransform);
+  const styleTransform =
+    typeof object.style?.transform === "string"
+      ? object.style.transform
+      : undefined;
+  const transform = joinTransforms(
+    inherited?.transform,
+    styleTransform,
+    ownTransform,
+  );
   return {
     ...object,
     style: {
@@ -368,5 +595,8 @@ function joinTransforms(...values: Array<string | undefined>) {
 }
 
 function titleFromId(id: string) {
-  return id.split("-").map((word) => `${word.charAt(0).toUpperCase()}${word.slice(1)}`).join(" ");
+  return id
+    .split("-")
+    .map((word) => `${word.charAt(0).toUpperCase()}${word.slice(1)}`)
+    .join(" ");
 }

@@ -95,7 +95,11 @@ export async function renderSceneToRawFrames(
     totalWarnings: 0,
   };
   let fullFrameExportCaptureDisabled = false;
-  const stableSlowState: StableSlowCaptureState = { profileIndex: 0, preset: payload.stableSlowGridPreset ?? "safe", validationSamples: payload.stableSlowValidationSamples ?? 1 };
+  const stableSlowState: StableSlowCaptureState = {
+    profileIndex: 0,
+    preset: payload.stableSlowGridPreset ?? "safe",
+    validationSamples: payload.stableSlowValidationSamples ?? 1,
+  };
   try {
     rendererWindow.webContents.setZoomFactor(1);
     rendererWindow.webContents.setVisualZoomLevelLimits(1, 1).catch(() => {});
@@ -123,7 +127,10 @@ export async function renderSceneToRawFrames(
           payload.frameRate,
           payload.durationSeconds,
         );
-        const useTileAwareRender = (payload.exportRenderMode ?? "renderer") !== "stable-slow" && payload.renderSurface !== "preview-cache" && exportWidth * exportHeight > MAX_FULL_FRAME_EXPORT_CAPTURE_PIXELS;
+        const useTileAwareRender =
+          (payload.exportRenderMode ?? "renderer") !== "stable-slow" &&
+          payload.renderSurface !== "preview-cache" &&
+          exportWidth * exportHeight > MAX_FULL_FRAME_EXPORT_CAPTURE_PIXELS;
         const frame = useTileAwareRender
           ? await captureAdaptiveExportFrame(
               rendererWindow,
@@ -137,7 +144,9 @@ export async function renderSceneToRawFrames(
               exportHeight,
               deps,
               () => fullFrameExportCaptureDisabled,
-              () => { fullFrameExportCaptureDisabled = true; },
+              () => {
+                fullFrameExportCaptureDisabled = true;
+              },
             )
           : await captureRenderedExportFrame(
               rendererWindow,
@@ -150,7 +159,9 @@ export async function renderSceneToRawFrames(
               payload.exportRenderMode ?? "renderer",
               stableSlowState,
               () => fullFrameExportCaptureDisabled,
-              () => { fullFrameExportCaptureDisabled = true; },
+              () => {
+                fullFrameExportCaptureDisabled = true;
+              },
             );
         if (shouldStop?.())
           return {
@@ -178,17 +189,20 @@ export async function renderSceneToRawFrames(
   } finally {
     const bridgePort = exportPostProcessBridgePorts.get(rendererWindow);
     if (bridgePort) {
-      try { bridgePort.close(); } catch { /* ignore */ }
+      try {
+        bridgePort.close();
+      } catch {
+        /* ignore */
+      }
       exportPostProcessBridgePorts.delete(rendererWindow);
       exportPostProcessBridgeBroken.delete(rendererWindow);
     }
     rendererWindow.destroy();
   }
-  const frameCount =
-    await deps.countContiguousSupervisedFrameFiles(
-      payload.outputPath,
-      payload.frameRange,
-    );
+  const frameCount = await deps.countContiguousSupervisedFrameFiles(
+    payload.outputPath,
+    payload.frameRange,
+  );
   if (
     frameCount !==
     payload.frameRange.endFrame - payload.frameRange.startFrame
@@ -216,7 +230,10 @@ const EXPORT_WINDOW_PRELOAD_PATH = (() => {
 
 const MAX_FULL_FRAME_EXPORT_CAPTURE_PIXELS = 3840 * 2160;
 const STABLE_SLOW_FULL_WIDTH = Number.MAX_SAFE_INTEGER;
-const STABLE_SLOW_GRID_PROFILE_SETS: Record<StableSlowGridPreset, readonly { width: number; height: number }[]> = {
+const STABLE_SLOW_GRID_PROFILE_SETS: Record<
+  StableSlowGridPreset,
+  readonly { width: number; height: number }[]
+> = {
   relaxed: [
     { width: STABLE_SLOW_FULL_WIDTH, height: 540 },
     { width: STABLE_SLOW_FULL_WIDTH, height: 360 },
@@ -254,8 +271,14 @@ const STABLE_SLOW_GRID_PROFILE_SETS: Record<StableSlowGridPreset, readonly { wid
 const STABLE_SLOW_MAX_DIFFERING_PIXEL_RATIO = 0.00001;
 const STABLE_SLOW_MAX_AVERAGE_BYTE_DELTA = 0.0005;
 
-function createExportRendererWindow(width: number, height: number): BrowserWindow {
-  const initialHeight = width * height > MAX_FULL_FRAME_EXPORT_CAPTURE_PIXELS ? Math.min(height, 1080) : height;
+function createExportRendererWindow(
+  width: number,
+  height: number,
+): BrowserWindow {
+  const initialHeight =
+    width * height > MAX_FULL_FRAME_EXPORT_CAPTURE_PIXELS
+      ? Math.min(height, 1080)
+      : height;
   return new BrowserWindow({
     width,
     height: initialHeight,
@@ -264,17 +287,19 @@ function createExportRendererWindow(width: number, height: number): BrowserWindo
     focusable: false,
     frame: false,
     skipTaskbar: true,
-  backgroundColor: "#000000",
-  transparent: false,
-  title: "Clipper Renderer",
-  webPreferences: {
-    backgroundThrottling: false,
-    contextIsolation: true,
-    nodeIntegration: false,
-    zoomFactor: 1,
-    ...(EXPORT_WINDOW_PRELOAD_PATH ? { preload: EXPORT_WINDOW_PRELOAD_PATH } : {}),
-  },
-});
+    backgroundColor: "#000000",
+    transparent: false,
+    title: "Clipper Renderer",
+    webPreferences: {
+      backgroundThrottling: false,
+      contextIsolation: true,
+      nodeIntegration: false,
+      zoomFactor: 1,
+      ...(EXPORT_WINDOW_PRELOAD_PATH
+        ? { preload: EXPORT_WINDOW_PRELOAD_PATH }
+        : {}),
+    },
+  });
 }
 
 // ─── Frame capture helpers ──────────────────────────────────────────────
@@ -330,7 +355,14 @@ async function captureRenderedExportFrame(
     );
   }
   if (exportRenderMode === "stable-slow") {
-    return captureStableSlowExportFrame(window, frameIndex, sceneTime, exportWidth, exportHeight, stableSlowState);
+    return captureStableSlowExportFrame(
+      window,
+      frameIndex,
+      sceneTime,
+      exportWidth,
+      exportHeight,
+      stableSlowState,
+    );
   }
   return captureAdaptiveExportFrame(
     window,
@@ -385,7 +417,17 @@ async function captureTiledExportFrame(
   for (const tile of getExportCaptureTiles(tileHeight, width, height, deps)) {
     const exportTile = { ...tile, fullWidth: width, fullHeight: height };
     await applyTiledExportCaptureViewport(window, tile);
-    const syncResult = await renderExportFrame(window, project, scene, sceneTime, frameRate, "export", width, height, exportTile);
+    const syncResult = await renderExportFrame(
+      window,
+      project,
+      scene,
+      sceneTime,
+      frameRate,
+      "export",
+      width,
+      height,
+      exportTile,
+    );
     if (syncResult.failedCount > 0) {
       throw new Error(
         `Supervised renderer failed to pin ${syncResult.failedCount} animation(s) for tile ${tile.x}-${tile.y} at ${sceneTime.toFixed(3)}s after ${syncResult.passCount} sync pass(es).`,
@@ -416,55 +458,139 @@ async function captureAdaptiveExportFrame(
   isFullFrameDisabled: () => boolean,
   disableFullFrame: () => void,
 ): Promise<Buffer> {
-  const shouldTryFullFrameCapture = width * height <= MAX_FULL_FRAME_EXPORT_CAPTURE_PIXELS;
+  const shouldTryFullFrameCapture =
+    width * height <= MAX_FULL_FRAME_EXPORT_CAPTURE_PIXELS;
   if (shouldTryFullFrameCapture && !isFullFrameDisabled()) {
     try {
-      return await captureFullExportFrameImageAsBgra(window, frameIndex, sceneTime, "full export", width, height);
+      return await captureFullExportFrameImageAsBgra(
+        window,
+        frameIndex,
+        sceneTime,
+        "full export",
+        width,
+        height,
+      );
     } catch (error) {
       disableFullFrame();
-      console.warn(`[clipper export] full-frame capture failed on frame ${frameIndex + 1}; falling back to tiled capture: ${error instanceof Error ? error.message : String(error)}`);
+      console.warn(
+        `[clipper export] full-frame capture failed on frame ${frameIndex + 1}; falling back to tiled capture: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
-  return captureTiledExportFrame(window, project, scene, frameIndex, sceneTime, frameRate, tileHeight, width, height, deps);
+  return captureTiledExportFrame(
+    window,
+    project,
+    scene,
+    frameIndex,
+    sceneTime,
+    frameRate,
+    tileHeight,
+    width,
+    height,
+    deps,
+  );
 }
 
-type StableSlowCaptureState = { profileIndex: number; preset: StableSlowGridPreset; validationSamples: StableSlowValidationSamples };
+type StableSlowCaptureState = {
+  profileIndex: number;
+  preset: StableSlowGridPreset;
+  validationSamples: StableSlowValidationSamples;
+};
 
-async function captureStableSlowExportFrame(window: BrowserWindow, frameIndex: number, sceneTime: number, width: number, height: number, captureState: StableSlowCaptureState): Promise<Buffer> {
+async function captureStableSlowExportFrame(
+  window: BrowserWindow,
+  frameIndex: number,
+  sceneTime: number,
+  width: number,
+  height: number,
+  captureState: StableSlowCaptureState,
+): Promise<Buffer> {
   const frame = Buffer.allocUnsafe(width * height * 4);
   const profiles = STABLE_SLOW_GRID_PROFILE_SETS[captureState.preset];
   while (captureState.profileIndex < profiles.length) {
     const profile = profiles[captureState.profileIndex]!;
     try {
-      console.log(`[clipper export] mode=stable-slow frame=${frameIndex + 1} grid=${formatStableSlowProfile(profile, width)} samples=${captureState.validationSamples}`);
-      for (const tile of getStableSlowExportCaptureTiles(width, height, profile)) {
-        const tileBitmap = await captureStableSlowTile(window, tile, frameIndex, sceneTime, captureState.validationSamples);
+      console.log(
+        `[clipper export] mode=stable-slow frame=${frameIndex + 1} grid=${formatStableSlowProfile(profile, width)} samples=${captureState.validationSamples}`,
+      );
+      for (const tile of getStableSlowExportCaptureTiles(
+        width,
+        height,
+        profile,
+      )) {
+        const tileBitmap = await captureStableSlowTile(
+          window,
+          tile,
+          frameIndex,
+          sceneTime,
+          captureState.validationSamples,
+        );
         stitchBgraTile(frame, tileBitmap, tile, width);
       }
       return frame;
     } catch (error) {
-      if (captureState.profileIndex >= profiles.length - 1 || !isStableSlowTileReductionSignal(error)) throw error;
+      if (
+        captureState.profileIndex >= profiles.length - 1 ||
+        !isStableSlowTileReductionSignal(error)
+      )
+        throw error;
       captureState.profileIndex += 1;
       const nextProfile = profiles[captureState.profileIndex]!;
-      console.warn(`[clipper export] mode=stable-slow reducing grid after frame ${frameIndex + 1} to ${formatStableSlowProfile(nextProfile, width)}: ${error instanceof Error ? error.message : String(error)}`);
+      console.warn(
+        `[clipper export] mode=stable-slow reducing grid after frame ${frameIndex + 1} to ${formatStableSlowProfile(nextProfile, width)}: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
-  throw new Error(`Stable slow export exhausted ${captureState.preset} grid profiles (${profiles.map((profile) => formatStableSlowProfile(profile, width)).join(" -> ")}) for frame ${frameIndex + 1}.`);
+  throw new Error(
+    `Stable slow export exhausted ${captureState.preset} grid profiles (${profiles.map((profile) => formatStableSlowProfile(profile, width)).join(" -> ")}) for frame ${frameIndex + 1}.`,
+  );
 }
 
-async function captureStableSlowTile(window: BrowserWindow, tile: ExportCaptureTile, frameIndex: number, sceneTime: number, validationSamples: StableSlowValidationSamples): Promise<Buffer> {
+async function captureStableSlowTile(
+  window: BrowserWindow,
+  tile: ExportCaptureTile,
+  frameIndex: number,
+  sceneTime: number,
+  validationSamples: StableSlowValidationSamples,
+): Promise<Buffer> {
   let lastError: unknown;
   for (let attempt = 1; attempt <= EXPORT_CAPTURE_TILE_RETRIES; attempt += 1) {
     try {
       await applyStableSlowExportCaptureViewport(window, tile);
       const samples: Buffer[] = [];
-      for (let sampleIndex = 0; sampleIndex < validationSamples; sampleIndex += 1) {
-        const syncResult = await syncExportRenderClock(window, sceneTime, `stable slow frame ${frameIndex + 1} tile ${formatTileRange(tile)} sample ${sampleIndex + 1}`);
-        if (syncResult.failedCount > 0) throw new ExportTileUnstableError(`Stable slow export failed to repin ${syncResult.failedCount} animation(s) before frame ${frameIndex + 1} tile ${formatTileRange(tile)} sample ${sampleIndex + 1}.`);
-        samples.push(await captureStableSlowTileBitmap(window, tile, frameIndex, sceneTime));
+      for (
+        let sampleIndex = 0;
+        sampleIndex < validationSamples;
+        sampleIndex += 1
+      ) {
+        const syncResult = await syncExportRenderClock(
+          window,
+          sceneTime,
+          `stable slow frame ${frameIndex + 1} tile ${formatTileRange(tile)} sample ${sampleIndex + 1}`,
+        );
+        if (syncResult.failedCount > 0)
+          throw new ExportTileUnstableError(
+            `Stable slow export failed to repin ${syncResult.failedCount} animation(s) before frame ${frameIndex + 1} tile ${formatTileRange(tile)} sample ${sampleIndex + 1}.`,
+          );
+        samples.push(
+          await captureStableSlowTileBitmap(
+            window,
+            tile,
+            frameIndex,
+            sceneTime,
+          ),
+        );
       }
-      for (let sampleIndex = 1; sampleIndex < samples.length; sampleIndex += 1) {
-        validateMatchingExportBitmaps(samples[0]!, samples[sampleIndex]!, `Captured stable slow frame ${frameIndex + 1} tile ${formatTileRange(tile)} changed between validation samples at pinned time ${sceneTime.toFixed(3)}s`);
+      for (
+        let sampleIndex = 1;
+        sampleIndex < samples.length;
+        sampleIndex += 1
+      ) {
+        validateMatchingExportBitmaps(
+          samples[0]!,
+          samples[sampleIndex]!,
+          `Captured stable slow frame ${frameIndex + 1} tile ${formatTileRange(tile)} changed between validation samples at pinned time ${sceneTime.toFixed(3)}s`,
+        );
       }
       return samples[0]!;
     } catch (error) {
@@ -473,12 +599,19 @@ async function captureStableSlowTile(window: BrowserWindow, tile: ExportCaptureT
     }
   }
   if (lastError instanceof ExportTileUnstableError) throw lastError;
-  const message = lastError instanceof Error ? lastError.message : String(lastError);
-  throw new Error(`Failed to capture stable slow frame ${frameIndex + 1} tile ${formatTileRange(tile)} at ${sceneTime.toFixed(3)}s after ${EXPORT_CAPTURE_TILE_RETRIES} attempt(s): ${message}`);
+  const message =
+    lastError instanceof Error ? lastError.message : String(lastError);
+  throw new Error(
+    `Failed to capture stable slow frame ${frameIndex + 1} tile ${formatTileRange(tile)} at ${sceneTime.toFixed(3)}s after ${EXPORT_CAPTURE_TILE_RETRIES} attempt(s): ${message}`,
+  );
 }
 
-function getExportPostProcessPasses(syncResult: ExportFrameRenderResult): unknown[] {
-  return Array.isArray(syncResult.postProcessPasses) ? syncResult.postProcessPasses : [];
+function getExportPostProcessPasses(
+  syncResult: ExportFrameRenderResult,
+): unknown[] {
+  return Array.isArray(syncResult.postProcessPasses)
+    ? syncResult.postProcessPasses
+    : [];
 }
 
 async function captureAndPostProcessFullExportFrame(
@@ -489,8 +622,20 @@ async function captureAndPostProcessFullExportFrame(
   width: number,
   height: number,
 ): Promise<Buffer> {
-  const image = await captureFullExportFrameImage(window, frameIndex, sceneTime, "post-process source", width, height);
-  const sourceBitmap = getBgraBitmap(image, width, height, `post-process source frame ${frameIndex + 1}`);
+  const image = await captureFullExportFrameImage(
+    window,
+    frameIndex,
+    sceneTime,
+    "post-process source",
+    width,
+    height,
+  );
+  const sourceBitmap = getBgraBitmap(
+    image,
+    width,
+    height,
+    `post-process source frame ${frameIndex + 1}`,
+  );
 
   // ── Primary path: transferable MessagePort bridge (zero-copy) ──────
 
@@ -506,14 +651,22 @@ async function captureAndPostProcessFullExportFrame(
         frameIndex,
         sceneTime,
       );
-      const droppedPassCount = typeof result.droppedPassCount === "number" ? result.droppedPassCount : 0;
-      if (droppedPassCount > 0) console.warn(`[clipper export] postprocess dropped ${droppedPassCount} additional pass(es) on frame ${frameIndex + 1}.`);
+      const droppedPassCount =
+        typeof result.droppedPassCount === "number"
+          ? result.droppedPassCount
+          : 0;
+      if (droppedPassCount > 0)
+        console.warn(
+          `[clipper export] postprocess dropped ${droppedPassCount} additional pass(es) on frame ${frameIndex + 1}.`,
+        );
       return resultToBgraBuffer(result.outputFrame);
     } catch (error) {
       // Bridge failed — fall through to base64 fallback.
       // Keep the bridge marked as broken so subsequent frames skip it.
       markExportPostProcessBridgeBroken(window);
-      console.warn(`[clipper export] port bridge failed for frame ${frameIndex + 1}, falling back to base64 route: ${error instanceof Error ? error.message : error}`);
+      console.warn(
+        `[clipper export] port bridge failed for frame ${frameIndex + 1}, falling back to base64 route: ${error instanceof Error ? error.message : error}`,
+      );
     }
   }
 
@@ -525,27 +678,42 @@ async function captureAndPostProcessFullExportFrame(
     pixelFormat: "bgra",
     dataBase64: sourceBitmap.toString("base64"),
   };
-  const result = await withTimeout(
+  const result = (await withTimeout(
     window.webContents.executeJavaScript(
       `window.__clipperApplyExportRawPostProcessFrame(${JSON.stringify({ width, height, sourceFrame, passes })})`,
       true,
     ),
     EXPORT_RENDERER_FRAME_TIMEOUT_MS,
     `Timed out applying export post-process for frame ${frameIndex + 1} at ${sceneTime.toFixed(3)}s.`,
-  ) as { applied?: unknown; outputFrame?: unknown; droppedPassCount?: unknown };
+  )) as {
+    applied?: unknown;
+    outputFrame?: unknown;
+    droppedPassCount?: unknown;
+  };
   if (!isValidRawPostProcessResult(result, width, height)) {
-    throw new Error(`Export post-process failed to return a processed raw frame for ${passes.length} active pass(es) on frame ${frameIndex + 1} at ${sceneTime.toFixed(3)}s.`);
+    throw new Error(
+      `Export post-process failed to return a processed raw frame for ${passes.length} active pass(es) on frame ${frameIndex + 1} at ${sceneTime.toFixed(3)}s.`,
+    );
   }
-  const droppedPassCount = typeof result.droppedPassCount === "number" ? result.droppedPassCount : 0;
-  if (droppedPassCount > 0) console.warn(`[clipper export] postprocess dropped ${droppedPassCount} additional pass(es) on frame ${frameIndex + 1}.`);
+  const droppedPassCount =
+    typeof result.droppedPassCount === "number" ? result.droppedPassCount : 0;
+  if (droppedPassCount > 0)
+    console.warn(
+      `[clipper export] postprocess dropped ${droppedPassCount} additional pass(es) on frame ${frameIndex + 1}.`,
+    );
   return rawPostProcessFrameToBgraBuffer(result.outputFrame);
 }
 
 // ─── Transferable port bridge ──────────────────────────────────────────────
 
-const exportPostProcessBridgePorts = new WeakMap<BrowserWindow, MessagePortMain>();
+const exportPostProcessBridgePorts = new WeakMap<
+  BrowserWindow,
+  MessagePortMain
+>();
 
-function getExportPostProcessBridge(window: BrowserWindow): MessagePortMain | null {
+function getExportPostProcessBridge(
+  window: BrowserWindow,
+): MessagePortMain | null {
   // Return cached port if bridge was established and not marked broken.
   if (exportPostProcessBridgePorts.has(window)) {
     const port = exportPostProcessBridgePorts.get(window);
@@ -576,7 +744,11 @@ function markExportPostProcessBridgeBroken(window: BrowserWindow): void {
   exportPostProcessBridgeBroken.add(window);
   const port = exportPostProcessBridgePorts.get(window);
   if (port) {
-    try { port.close(); } catch { /* ignore */ }
+    try {
+      port.close();
+    } catch {
+      /* ignore */
+    }
     exportPostProcessBridgePorts.delete(window);
   }
 }
@@ -589,7 +761,15 @@ function sendRawFrameViaPort(
   passes: unknown[],
   frameIndex: number,
   sceneTime: number,
-): Promise<{ outputFrame: { width: number; height: number; pixelFormat: "bgra" | "rgba"; data: ArrayBuffer }; droppedPassCount: number }> {
+): Promise<{
+  outputFrame: {
+    width: number;
+    height: number;
+    pixelFormat: "bgra" | "rgba";
+    data: ArrayBuffer;
+  };
+  droppedPassCount: number;
+}> {
   // Copy the buffer so the original is preserved for the base64 fallback
   // route in case the port bridge fails after transfer.
   const transferBuffer = Buffer.from(sourceBitmap);
@@ -599,29 +779,52 @@ function sendRawFrameViaPort(
       const requestId = `${Date.now()}-${frameIndex}-${Math.random().toString(36).slice(2)}`;
 
       const handleMessage = (event: { data: unknown }) => {
-        const msg = event.data as { type?: string; requestId?: string; applied?: unknown; pixelFormat?: unknown; droppedPassCount?: unknown; resultData?: unknown } | null;
+        const msg = event.data as {
+          type?: string;
+          requestId?: string;
+          applied?: unknown;
+          pixelFormat?: unknown;
+          droppedPassCount?: unknown;
+          resultData?: unknown;
+        } | null;
         if (!msg || msg.requestId !== requestId) return;
 
         port.removeListener("message", handleMessage);
 
-        if (msg.type !== "clipper:export-postprocess-result" || msg.applied !== true) {
-          reject(new Error(
-            msg.type !== "clipper:export-postprocess-result"
-              ? `Unexpected port message type "${String(msg.type)}" on frame ${frameIndex + 1}.`
-              : `Export post-process port bridge reported no passes applied on frame ${frameIndex + 1}.`,
-          ));
+        if (
+          msg.type !== "clipper:export-postprocess-result" ||
+          msg.applied !== true
+        ) {
+          reject(
+            new Error(
+              msg.type !== "clipper:export-postprocess-result"
+                ? `Unexpected port message type "${String(msg.type)}" on frame ${frameIndex + 1}.`
+                : `Export post-process port bridge reported no passes applied on frame ${frameIndex + 1}.`,
+            ),
+          );
           return;
         }
 
         const pixelFormat = msg.pixelFormat;
         if (pixelFormat !== "bgra" && pixelFormat !== "rgba") {
-          reject(new Error(`Export post-process port bridge returned unsupported pixel format "${String(pixelFormat)}" on frame ${frameIndex + 1}.`));
+          reject(
+            new Error(
+              `Export post-process port bridge returned unsupported pixel format "${String(pixelFormat)}" on frame ${frameIndex + 1}.`,
+            ),
+          );
           return;
         }
 
         const resultData = msg.resultData;
-        if (!(resultData instanceof ArrayBuffer) || resultData.byteLength !== width * height * 4) {
-          reject(new Error(`Export post-process port bridge returned invalid pixel data on frame ${frameIndex + 1}.`));
+        if (
+          !(resultData instanceof ArrayBuffer) ||
+          resultData.byteLength !== width * height * 4
+        ) {
+          reject(
+            new Error(
+              `Export post-process port bridge returned invalid pixel data on frame ${frameIndex + 1}.`,
+            ),
+          );
           return;
         }
 
@@ -632,7 +835,8 @@ function sendRawFrameViaPort(
             pixelFormat,
             data: resultData,
           },
-          droppedPassCount: typeof msg.droppedPassCount === "number" ? msg.droppedPassCount : 0,
+          droppedPassCount:
+            typeof msg.droppedPassCount === "number" ? msg.droppedPassCount : 0,
         });
       };
 
@@ -659,7 +863,12 @@ function sendRawFrameViaPort(
   );
 }
 
-function resultToBgraBuffer(frame: { width: number; height: number; pixelFormat: "bgra" | "rgba"; data: ArrayBuffer }): Buffer {
+function resultToBgraBuffer(frame: {
+  width: number;
+  height: number;
+  pixelFormat: "bgra" | "rgba";
+  data: ArrayBuffer;
+}): Buffer {
   const bytes = new Uint8Array(frame.data);
   if (frame.pixelFormat === "bgra") return Buffer.from(bytes);
   const output = Buffer.allocUnsafe(bytes.byteLength);
@@ -696,21 +905,70 @@ async function captureFullExportFrameImageAsBgra(
   width: number,
   height: number,
 ): Promise<Buffer> {
-  const image = await captureFullExportFrameImage(window, frameIndex, sceneTime, label, width, height);
-  return getBgraBitmap(image, width, height, `${label} frame ${frameIndex + 1}`);
+  const image = await captureFullExportFrameImage(
+    window,
+    frameIndex,
+    sceneTime,
+    label,
+    width,
+    height,
+  );
+  return getBgraBitmap(
+    image,
+    width,
+    height,
+    `${label} frame ${frameIndex + 1}`,
+  );
 }
 
-function isValidRawPostProcessResult(result: unknown, width: number, height: number): result is { applied: true; outputFrame: { width: number; height: number; pixelFormat: "bgra" | "rgba"; data?: unknown; dataBase64?: string }; droppedPassCount: number } {
+function isValidRawPostProcessResult(
+  result: unknown,
+  width: number,
+  height: number,
+): result is {
+  applied: true;
+  outputFrame: {
+    width: number;
+    height: number;
+    pixelFormat: "bgra" | "rgba";
+    data?: unknown;
+    dataBase64?: string;
+  };
+  droppedPassCount: number;
+} {
   if (!result || typeof result !== "object") return false;
-  const candidate = result as { applied?: unknown; outputFrame?: unknown; droppedPassCount?: unknown };
-  if (candidate.applied !== true || typeof candidate.droppedPassCount !== "number" || !candidate.outputFrame || typeof candidate.outputFrame !== "object") return false;
-  const frame = candidate.outputFrame as { width?: unknown; height?: unknown; pixelFormat?: unknown; data?: unknown; dataBase64?: unknown };
+  const candidate = result as {
+    applied?: unknown;
+    outputFrame?: unknown;
+    droppedPassCount?: unknown;
+  };
+  if (
+    candidate.applied !== true ||
+    typeof candidate.droppedPassCount !== "number" ||
+    !candidate.outputFrame ||
+    typeof candidate.outputFrame !== "object"
+  )
+    return false;
+  const frame = candidate.outputFrame as {
+    width?: unknown;
+    height?: unknown;
+    pixelFormat?: unknown;
+    data?: unknown;
+    dataBase64?: unknown;
+  };
   if (frame.width !== width || frame.height !== height) return false;
-  if (frame.pixelFormat !== "bgra" && frame.pixelFormat !== "rgba") return false;
+  if (frame.pixelFormat !== "bgra" && frame.pixelFormat !== "rgba")
+    return false;
   return getRawPostProcessFrameDataLength(frame) === width * height * 4;
 }
 
-function rawPostProcessFrameToBgraBuffer(frame: { width: number; height: number; pixelFormat: "bgra" | "rgba"; data?: unknown; dataBase64?: string }): Buffer {
+function rawPostProcessFrameToBgraBuffer(frame: {
+  width: number;
+  height: number;
+  pixelFormat: "bgra" | "rgba";
+  data?: unknown;
+  dataBase64?: string;
+}): Buffer {
   const bytes = getRawPostProcessFrameData(frame);
   if (frame.pixelFormat === "bgra") return Buffer.from(bytes);
   const output = Buffer.allocUnsafe(bytes.byteLength);
@@ -723,20 +981,34 @@ function rawPostProcessFrameToBgraBuffer(frame: { width: number; height: number;
   return output;
 }
 
-function getRawPostProcessFrameData(frame: { data?: unknown; dataBase64?: string }): Uint8Array {
+function getRawPostProcessFrameData(frame: {
+  data?: unknown;
+  dataBase64?: string;
+}): Uint8Array {
   if (frame.data instanceof Uint8Array) return frame.data;
   if (frame.data instanceof ArrayBuffer) return new Uint8Array(frame.data);
-  if (ArrayBuffer.isView(frame.data)) return new Uint8Array(frame.data.buffer, frame.data.byteOffset, frame.data.byteLength);
+  if (ArrayBuffer.isView(frame.data))
+    return new Uint8Array(
+      frame.data.buffer,
+      frame.data.byteOffset,
+      frame.data.byteLength,
+    );
   if (Array.isArray(frame.data)) return new Uint8Array(frame.data);
-  if (typeof frame.dataBase64 === "string") return Buffer.from(frame.dataBase64, "base64");
+  if (typeof frame.dataBase64 === "string")
+    return Buffer.from(frame.dataBase64, "base64");
   return new Uint8Array();
 }
 
-function getRawPostProcessFrameDataLength(frame: { data?: unknown; dataBase64?: unknown }): number {
-  if (frame.data instanceof Uint8Array || frame.data instanceof ArrayBuffer) return frame.data.byteLength;
+function getRawPostProcessFrameDataLength(frame: {
+  data?: unknown;
+  dataBase64?: unknown;
+}): number {
+  if (frame.data instanceof Uint8Array || frame.data instanceof ArrayBuffer)
+    return frame.data.byteLength;
   if (ArrayBuffer.isView(frame.data)) return frame.data.byteLength;
   if (Array.isArray(frame.data)) return frame.data.length;
-  if (typeof frame.dataBase64 === "string") return Buffer.byteLength(frame.dataBase64, "base64");
+  if (typeof frame.dataBase64 === "string")
+    return Buffer.byteLength(frame.dataBase64, "base64");
   return -1;
 }
 
@@ -798,9 +1070,13 @@ async function applyTiledExportCaptureViewport(
   );
 }
 
-async function applyStableSlowExportCaptureViewport(window: BrowserWindow, tile: ExportCaptureTile): Promise<void> {
+async function applyStableSlowExportCaptureViewport(
+  window: BrowserWindow,
+  tile: ExportCaptureTile,
+): Promise<void> {
   const [currentWidth, currentHeight] = window.getContentSize();
-  if (currentWidth !== tile.width || currentHeight !== tile.height) window.setContentSize(tile.width, tile.height, false);
+  if (currentWidth !== tile.width || currentHeight !== tile.height)
+    window.setContentSize(tile.width, tile.height, false);
   await withTimeout(
     window.webContents.executeJavaScript(
       `(() => {
@@ -849,24 +1125,42 @@ function getExportCaptureTiles(
   return tiles;
 }
 
-function getExportMaxTileWidth(frameWidth: number, frameHeight: number): number {
-  if (frameWidth * frameHeight <= MAX_FULL_FRAME_EXPORT_CAPTURE_PIXELS) return frameWidth;
+function getExportMaxTileWidth(
+  frameWidth: number,
+  frameHeight: number,
+): number {
+  if (frameWidth * frameHeight <= MAX_FULL_FRAME_EXPORT_CAPTURE_PIXELS)
+    return frameWidth;
   return Math.min(frameWidth, 2560);
 }
 
-function getStableSlowExportCaptureTiles(frameWidth: number, frameHeight: number, profile: { width: number; height: number }): ExportCaptureTile[] {
+function getStableSlowExportCaptureTiles(
+  frameWidth: number,
+  frameHeight: number,
+  profile: { width: number; height: number },
+): ExportCaptureTile[] {
   const tiles: ExportCaptureTile[] = [];
   const tileWidth = Math.min(profile.width, frameWidth);
   const tileHeight = Math.min(profile.height, frameHeight);
   for (let y = 0; y < frameHeight; y += tileHeight) {
     for (let x = 0; x < frameWidth; x += tileWidth) {
-      tiles.push({ x, y, width: Math.min(tileWidth, frameWidth - x), height: Math.min(tileHeight, frameHeight - y), fullWidth: frameWidth, fullHeight: frameHeight });
+      tiles.push({
+        x,
+        y,
+        width: Math.min(tileWidth, frameWidth - x),
+        height: Math.min(tileHeight, frameHeight - y),
+        fullWidth: frameWidth,
+        fullHeight: frameHeight,
+      });
     }
   }
   return tiles;
 }
 
-function formatStableSlowProfile(profile: { width: number; height: number }, frameWidth: number): string {
+function formatStableSlowProfile(
+  profile: { width: number; height: number },
+  frameWidth: number,
+): string {
   return `${profile.width >= STABLE_SLOW_FULL_WIDTH ? "full" : String(Math.min(profile.width, frameWidth))}x${profile.height}`;
 }
 
@@ -876,10 +1170,17 @@ function isStableSlowTileReductionSignal(error: unknown): boolean {
   return /bitmap length|image size|memory|timed out/i.test(error.message);
 }
 
-function validateMatchingExportBitmaps(first: Buffer, second: Buffer, message: string): void {
+function validateMatchingExportBitmaps(
+  first: Buffer,
+  second: Buffer,
+  message: string,
+): void {
   if (first.equals(second)) return;
   const diff = getBitmapDiffStats(first, second);
-  if (!isAcceptableStableSlowReadbackDrift(diff)) throw new ExportTileUnstableError(`${message} (${formatBitmapDiffStats(diff)}).`);
+  if (!isAcceptableStableSlowReadbackDrift(diff))
+    throw new ExportTileUnstableError(
+      `${message} (${formatBitmapDiffStats(diff)}).`,
+    );
 }
 
 function getBitmapDiffStats(left: Buffer, right: Buffer) {
@@ -895,15 +1196,30 @@ function getBitmapDiffStats(left: Buffer, right: Buffer) {
       if (delta > maxDelta) maxDelta = delta;
     }
   }
-  const pixels = Math.max(1, Math.ceil(Math.max(left.byteLength, right.byteLength) / 4));
-  return { differingBytes, differingPixelRatio: differingBytes / 4 / pixels, averageByteDelta: totalDelta / Math.max(1, length), maxDelta };
+  const pixels = Math.max(
+    1,
+    Math.ceil(Math.max(left.byteLength, right.byteLength) / 4),
+  );
+  return {
+    differingBytes,
+    differingPixelRatio: differingBytes / 4 / pixels,
+    averageByteDelta: totalDelta / Math.max(1, length),
+    maxDelta,
+  };
 }
 
-function isAcceptableStableSlowReadbackDrift(diff: ReturnType<typeof getBitmapDiffStats>): boolean {
-  return diff.differingPixelRatio <= STABLE_SLOW_MAX_DIFFERING_PIXEL_RATIO && diff.averageByteDelta <= STABLE_SLOW_MAX_AVERAGE_BYTE_DELTA;
+function isAcceptableStableSlowReadbackDrift(
+  diff: ReturnType<typeof getBitmapDiffStats>,
+): boolean {
+  return (
+    diff.differingPixelRatio <= STABLE_SLOW_MAX_DIFFERING_PIXEL_RATIO &&
+    diff.averageByteDelta <= STABLE_SLOW_MAX_AVERAGE_BYTE_DELTA
+  );
 }
 
-function formatBitmapDiffStats(diff: ReturnType<typeof getBitmapDiffStats>): string {
+function formatBitmapDiffStats(
+  diff: ReturnType<typeof getBitmapDiffStats>,
+): string {
   return `${diff.differingBytes} differing bytes, ${(diff.differingPixelRatio * 100).toFixed(4)}% pixel-equivalent ratio, avg byte delta ${diff.averageByteDelta.toFixed(4)}, max byte delta ${diff.maxDelta}`;
 }
 
@@ -918,21 +1234,43 @@ class ExportTileUnstableError extends Error {
   }
 }
 
-async function syncExportRenderClock(window: BrowserWindow, sceneTime: number, context: string): Promise<ExportFrameRenderResult> {
+async function syncExportRenderClock(
+  window: BrowserWindow,
+  sceneTime: number,
+  context: string,
+): Promise<ExportFrameRenderResult> {
   return withTimeout(
-    window.webContents.executeJavaScript("window.__clipperSyncExportRenderClock && window.__clipperSyncExportRenderClock()", true),
+    window.webContents.executeJavaScript(
+      "window.__clipperSyncExportRenderClock && window.__clipperSyncExportRenderClock()",
+      true,
+    ),
     EXPORT_RENDERER_FRAME_TIMEOUT_MS,
     `Timed out syncing render clock for ${context} at ${sceneTime.toFixed(3)}s.`,
   );
 }
 
-async function captureStableSlowTileBitmap(window: BrowserWindow, tile: ExportCaptureTile, frameIndex: number, sceneTime: number): Promise<Buffer> {
+async function captureStableSlowTileBitmap(
+  window: BrowserWindow,
+  tile: ExportCaptureTile,
+  frameIndex: number,
+  sceneTime: number,
+): Promise<Buffer> {
   const image = await withTimeout(
-    window.webContents.capturePage({ x: 0, y: 0, width: tile.width, height: tile.height }),
+    window.webContents.capturePage({
+      x: 0,
+      y: 0,
+      width: tile.width,
+      height: tile.height,
+    }),
     EXPORT_CAPTURE_TILE_TIMEOUT_MS,
     `Timed out capturing stable slow frame ${frameIndex + 1} tile ${formatTileRange(tile)} at ${sceneTime.toFixed(3)}s.`,
   );
-  return getBgraBitmap(image, tile.width, tile.height, `stable slow frame ${frameIndex + 1} tile ${formatTileRange(tile)}`);
+  return getBgraBitmap(
+    image,
+    tile.width,
+    tile.height,
+    `stable slow frame ${frameIndex + 1} tile ${formatTileRange(tile)}`,
+  );
 }
 
 async function captureExportTileWithRetries(
@@ -1038,10 +1376,7 @@ function getExportFrameTime(
   frameRate: number,
   durationSeconds: number,
 ): number {
-  return Math.min(
-    frameIndex / frameRate,
-    Math.max(durationSeconds - 0.001, 0),
-  );
+  return Math.min(frameIndex / frameRate, Math.max(durationSeconds - 0.001, 0));
 }
 
 // ─── OOM warning monitoring ─────────────────────────────────────────────
@@ -1055,8 +1390,7 @@ function watchExportOutOfMemoryWarnings(
     markExportOomWarning(state, message, "console");
   };
   window.webContents.on("console-message", handleConsoleMessage);
-  return () =>
-    window.webContents.off("console-message", handleConsoleMessage);
+  return () => window.webContents.off("console-message", handleConsoleMessage);
 }
 
 function watchExportNativeStderrWarnings(
@@ -1066,10 +1400,7 @@ function watchExportNativeStderrWarnings(
     process.stderr,
   ) as typeof process.stderr.write;
   let handlingStderr = false;
-  process.stderr.write = ((
-    chunk: string | Uint8Array,
-    ...args: unknown[]
-  ) => {
+  process.stderr.write = ((chunk: string | Uint8Array, ...args: unknown[]) => {
     if (!handlingStderr) {
       handlingStderr = true;
       try {

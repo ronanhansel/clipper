@@ -1,4 +1,14 @@
-import type { AgentProvider, AppUpdateStatus, ExportRenderQuality, ExportTileResolutionMapping, ExportWorkerResolutionMapping, MediaExportFormat, MediaExportRenderMode, StableSlowGridPreset, StableSlowValidationSamples } from "./types";
+import type {
+  AgentProvider,
+  AppUpdateStatus,
+  ExportRenderQuality,
+  ExportTileResolutionMapping,
+  ExportWorkerResolutionMapping,
+  MediaExportFormat,
+  MediaExportRenderMode,
+  StableSlowGridPreset,
+  StableSlowValidationSamples,
+} from "./types";
 import type { ProjectManifest } from "../core/types";
 
 type SceneManifest = ProjectManifest["scenes"][number];
@@ -25,8 +35,13 @@ class ClipperHostService {
   async readTextFile(relativePath: string) {
     if (window.clipper) return window.clipper.readTextFile(relativePath);
 
-    const response = await fetch(`/__clipper_fs/read?path=${encodeURIComponent(relativePath)}`);
-    if (!response.ok) throw new Error((await response.text()) || "Unable to load composition file.");
+    const response = await fetch(
+      `/__clipper_fs/read?path=${encodeURIComponent(relativePath)}`,
+    );
+    if (!response.ok)
+      throw new Error(
+        (await response.text()) || "Unable to load composition file.",
+      );
     return response.text();
   }
 
@@ -37,13 +52,19 @@ class ClipperHostService {
         return;
       }
 
-      const response = await fetch(`/__clipper_fs/write?path=${encodeURIComponent(relativePath)}`, {
-        method: "POST",
-        headers: { "Content-Type": "text/plain; charset=utf-8" },
-        body: content,
-      });
+      const response = await fetch(
+        `/__clipper_fs/write?path=${encodeURIComponent(relativePath)}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "text/plain; charset=utf-8" },
+          body: content,
+        },
+      );
 
-      if (!response.ok) throw new Error((await response.text()) || "Unable to save composition file.");
+      if (!response.ok)
+        throw new Error(
+          (await response.text()) || "Unable to save composition file.",
+        );
     });
   }
 
@@ -91,10 +112,15 @@ class ClipperHostService {
     });
   }
 
-  async listDirectory(relativePath: string): Promise<{ name: string; isDirectory: boolean }[]> {
-    if (window.clipper?.listDirectory) return window.clipper.listDirectory(relativePath);
+  async listDirectory(
+    relativePath: string,
+  ): Promise<{ name: string; isDirectory: boolean }[]> {
+    if (window.clipper?.listDirectory)
+      return window.clipper.listDirectory(relativePath);
 
-    const response = await fetch(`/__clipper_fs/list?path=${encodeURIComponent(relativePath)}`);
+    const response = await fetch(
+      `/__clipper_fs/list?path=${encodeURIComponent(relativePath)}`,
+    );
     if (!response.ok) return [];
     return response.json() as Promise<{ name: string; isDirectory: boolean }[]>;
   }
@@ -105,7 +131,8 @@ class ClipperHostService {
   }
 
   async findProjectFileByName(directoryPath: string, fileName: string) {
-    if (window.clipper?.findProjectFileByName) return window.clipper.findProjectFileByName(directoryPath, fileName);
+    if (window.clipper?.findProjectFileByName)
+      return window.clipper.findProjectFileByName(directoryPath, fileName);
     return findFileByNameWithListDirectory(this, directoryPath, fileName);
   }
 
@@ -124,7 +151,9 @@ class ClipperHostService {
         const family = font.family.trim();
         if (family) families.add(family);
       }
-      return [...families].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+      return [...families].sort((a, b) =>
+        a.localeCompare(b, undefined, { sensitivity: "base" }),
+      );
     } catch {
       return [];
     }
@@ -137,24 +166,111 @@ class ClipperHostService {
 
   async createProject(projectName: string) {
     if (!window.clipper?.createProject) {
-      throw new Error("Electron app needs to be restarted to apply the latest updates.");
+      throw new Error(
+        "Electron app needs to be restarted to apply the latest updates.",
+      );
     }
     return window.clipper.createProject(projectName);
   }
 
-  async renderVideoExport(exportId: string, defaultFileName: string, project: ProjectManifest, manifestPath: string, scene: SceneManifest, frameRate: number, durationSeconds: number, tileHeight: number, reusePrerenderCache: boolean, exportWidth?: number, exportHeight?: number, mediaExportFormat?: MediaExportFormat, exportRenderQuality?: ExportRenderQuality, exportWorkerMapping?: ExportWorkerResolutionMapping, exportTileMapping?: ExportTileResolutionMapping, exportRenderMode?: MediaExportRenderMode, stableSlowGridPreset?: StableSlowGridPreset, stableSlowValidationSamples?: StableSlowValidationSamples) {
-    if (!window.clipper?.renderVideoExport) throw new Error("Video export requires the Clipper desktop app. Restart the app if this was just updated.");
-    return window.clipper.renderVideoExport(exportId, defaultFileName, project, manifestPath, scene, frameRate, durationSeconds, tileHeight, reusePrerenderCache, exportWidth, exportHeight, mediaExportFormat, exportRenderQuality, exportWorkerMapping, exportTileMapping, exportRenderMode, stableSlowGridPreset, stableSlowValidationSamples);
+  async renderVideoExport(
+    exportId: string,
+    defaultFileName: string,
+    project: ProjectManifest,
+    manifestPath: string,
+    scene: SceneManifest,
+    frameRate: number,
+    durationSeconds: number,
+    tileHeight: number,
+    reusePrerenderCache: boolean,
+    exportWidth?: number,
+    exportHeight?: number,
+    mediaExportFormat?: MediaExportFormat,
+    exportRenderQuality?: ExportRenderQuality,
+    exportWorkerMapping?: ExportWorkerResolutionMapping,
+    exportTileMapping?: ExportTileResolutionMapping,
+    exportRenderMode?: MediaExportRenderMode,
+    stableSlowGridPreset?: StableSlowGridPreset,
+    stableSlowValidationSamples?: StableSlowValidationSamples,
+  ) {
+    if (!window.clipper?.renderVideoExport)
+      throw new Error(
+        "Video export requires the Clipper desktop app. Restart the app if this was just updated.",
+      );
+    return window.clipper.renderVideoExport(
+      exportId,
+      defaultFileName,
+      project,
+      manifestPath,
+      scene,
+      frameRate,
+      durationSeconds,
+      tileHeight,
+      reusePrerenderCache,
+      exportWidth,
+      exportHeight,
+      mediaExportFormat,
+      exportRenderQuality,
+      exportWorkerMapping,
+      exportTileMapping,
+      exportRenderMode,
+      stableSlowGridPreset,
+      stableSlowValidationSamples,
+    );
   }
 
-  async prerenderFrame(project: ProjectManifest, manifestPath: string, scene: SceneManifest, sceneTime: number, sceneDuration: number, frameRate: number, tileHeight: number, blockDurationMs: number, frameRange?: { startFrame: number; endFrame: number }) {
-    if (!window.clipper?.prerenderFrame) throw new Error("Prerender cache requires the Clipper desktop app. Restart the app if this was just updated.");
-    return window.clipper.prerenderFrame(project, manifestPath, scene, sceneTime, sceneDuration, frameRate, tileHeight, blockDurationMs, frameRange);
+  async prerenderFrame(
+    project: ProjectManifest,
+    manifestPath: string,
+    scene: SceneManifest,
+    sceneTime: number,
+    sceneDuration: number,
+    frameRate: number,
+    tileHeight: number,
+    blockDurationMs: number,
+    frameRange?: { startFrame: number; endFrame: number },
+  ) {
+    if (!window.clipper?.prerenderFrame)
+      throw new Error(
+        "Prerender cache requires the Clipper desktop app. Restart the app if this was just updated.",
+      );
+    return window.clipper.prerenderFrame(
+      project,
+      manifestPath,
+      scene,
+      sceneTime,
+      sceneDuration,
+      frameRate,
+      tileHeight,
+      blockDurationMs,
+      frameRange,
+    );
   }
 
-  async prerenderVideoBlock(project: ProjectManifest, manifestPath: string, scene: SceneManifest, sceneTime: number, sceneDuration: number, frameRate: number, tileHeight: number, blockDurationMs: number) {
-    if (!window.clipper?.prerenderVideoBlock) throw new Error("Prerender video cache requires the Clipper desktop app. Restart the app if this was just updated.");
-    return window.clipper.prerenderVideoBlock(project, manifestPath, scene, sceneTime, sceneDuration, frameRate, tileHeight, blockDurationMs);
+  async prerenderVideoBlock(
+    project: ProjectManifest,
+    manifestPath: string,
+    scene: SceneManifest,
+    sceneTime: number,
+    sceneDuration: number,
+    frameRate: number,
+    tileHeight: number,
+    blockDurationMs: number,
+  ) {
+    if (!window.clipper?.prerenderVideoBlock)
+      throw new Error(
+        "Prerender video cache requires the Clipper desktop app. Restart the app if this was just updated.",
+      );
+    return window.clipper.prerenderVideoBlock(
+      project,
+      manifestPath,
+      scene,
+      sceneTime,
+      sceneDuration,
+      frameRate,
+      tileHeight,
+      blockDurationMs,
+    );
   }
 
   async clearPrerenderCache(manifestPath: string) {
@@ -162,7 +278,10 @@ class ClipperHostService {
   }
 
   async clearAllPrerenderCaches() {
-    if (!window.clipper?.clearAllPrerenderCaches) throw new Error("Clearing all prerender caches requires the Clipper desktop app. Restart the app if this was just updated.");
+    if (!window.clipper?.clearAllPrerenderCaches)
+      throw new Error(
+        "Clearing all prerender caches requires the Clipper desktop app. Restart the app if this was just updated.",
+      );
     return window.clipper.clearAllPrerenderCaches();
   }
 
@@ -176,10 +295,13 @@ class ClipperHostService {
   }
 
   async getUpdateStatus(): Promise<AppUpdateStatus> {
-    return window.clipper?.getUpdateStatus?.() ?? {
-      kind: "unsupported",
-      message: "Updates are only available in the packaged Clipper desktop app.",
-    };
+    return (
+      window.clipper?.getUpdateStatus?.() ?? {
+        kind: "unsupported",
+        message:
+          "Updates are only available in the packaged Clipper desktop app.",
+      }
+    );
   }
 
   async setAutoDownloadUpdates(enabled: boolean): Promise<AppUpdateStatus> {
@@ -206,14 +328,26 @@ class ClipperHostService {
 
 export const clipperHost = new ClipperHostService();
 
-async function findFileByNameWithListDirectory(host: ClipperHostService, directoryPath: string, fileName: string): Promise<string | null> {
+async function findFileByNameWithListDirectory(
+  host: ClipperHostService,
+  directoryPath: string,
+  fileName: string,
+): Promise<string | null> {
   const entries = await host.listDirectory(directoryPath).catch(() => []);
   const normalizedFileName = fileName.toLocaleLowerCase();
   for (const entry of entries) {
     const entryPath = `${directoryPath}/${entry.name}`;
-    if (!entry.isDirectory && entry.name.toLocaleLowerCase() === normalizedFileName) return entryPath;
+    if (
+      !entry.isDirectory &&
+      entry.name.toLocaleLowerCase() === normalizedFileName
+    )
+      return entryPath;
     if (entry.isDirectory) {
-      const matchedPath = await findFileByNameWithListDirectory(host, entryPath, fileName);
+      const matchedPath = await findFileByNameWithListDirectory(
+        host,
+        entryPath,
+        fileName,
+      );
       if (matchedPath) return matchedPath;
     }
   }

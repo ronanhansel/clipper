@@ -1,6 +1,15 @@
-import type { AdjustmentEffectId, AdjustmentEffectParams, AdjustmentLayer } from "../../../types";
+import type {
+  AdjustmentEffectId,
+  AdjustmentEffectParams,
+  AdjustmentLayer,
+} from "../../../types";
 
-export function createAdjustmentLayer(input: { id: string; layerId?: string; start: number; duration: number }, name: string, effectId: AdjustmentEffectId, params: AdjustmentEffectParams): AdjustmentLayer {
+export function createAdjustmentLayer(
+  input: { id: string; layerId?: string; start: number; duration: number },
+  name: string,
+  effectId: AdjustmentEffectId,
+  params: AdjustmentEffectParams,
+): AdjustmentLayer {
   return {
     id: input.id,
     layerId: input.layerId,
@@ -11,12 +20,22 @@ export function createAdjustmentLayer(input: { id: string; layerId?: string; sta
   };
 }
 
-export function getNumericParam(layer: Pick<AdjustmentLayer, "effect">, key: string, fallback: number) {
+export function getNumericParam(
+  layer: Pick<AdjustmentLayer, "effect">,
+  key: string,
+  fallback: number,
+) {
   const value = Number(layer.effect.params?.[key]);
   return Number.isFinite(value) ? value : fallback;
 }
 
-export function getClampedParam(layer: Pick<AdjustmentLayer, "effect">, key: string, fallback: number, min: number, max: number) {
+export function getClampedParam(
+  layer: Pick<AdjustmentLayer, "effect">,
+  key: string,
+  fallback: number,
+  min: number,
+  max: number,
+) {
   return clamp(getNumericParam(layer, key, fallback), min, max);
 }
 

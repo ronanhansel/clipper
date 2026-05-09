@@ -5,7 +5,10 @@ const hostMocks = vi.hoisted(() => ({
   writeTextFile: vi.fn<(path: string, content: string) => Promise<void>>(),
   createDirectory: vi.fn<(path: string) => Promise<void>>(),
   trashFile: vi.fn<(path: string) => Promise<void>>(),
-  listDirectory: vi.fn<(path: string) => Promise<{ name: string; isDirectory: boolean }[]>>(),
+  listDirectory:
+    vi.fn<
+      (path: string) => Promise<{ name: string; isDirectory: boolean }[]>
+    >(),
 }));
 
 vi.mock("../clipperHost", () => ({
@@ -44,7 +47,10 @@ describe("project persistence service", () => {
           scenes: [],
         });
       }
-      if (path === "clipper/projects/hi/file-manager/compositions/effect.composition.ts") {
+      if (
+        path ===
+        "clipper/projects/hi/file-manager/compositions/effect.composition.ts"
+      ) {
         return `
           import { Composition, WebLayer, html } from "@clipper/composition-api";
           import styles from "./effect.css";
@@ -59,28 +65,39 @@ describe("project persistence service", () => {
           });
         `;
       }
-      if (path === "clipper/projects/hi/file-manager/compositions/effect.css") return ".effect { opacity: 0.5; }";
-      if (path === "clipper/projects/hi/file-manager/compositions/effect.html") return `<div class="effect"></div>`;
+      if (path === "clipper/projects/hi/file-manager/compositions/effect.css")
+        return ".effect { opacity: 0.5; }";
+      if (path === "clipper/projects/hi/file-manager/compositions/effect.html")
+        return `<div class="effect"></div>`;
       throw new Error(`Unexpected read ${path}`);
     });
     hostMocks.listDirectory.mockImplementation(async (path) => {
-      if (path === "clipper/projects/hi") return [{ name: "file-manager", isDirectory: true }];
+      if (path === "clipper/projects/hi")
+        return [{ name: "file-manager", isDirectory: true }];
       if (path === "clipper/projects/hi/file-manager/timelines") return [];
-      if (path === "clipper/projects/hi/file-manager/compositions") return [
-        { name: "effect.composition.ts", isDirectory: false },
-        { name: "effect.css", isDirectory: false },
-        { name: "effect.html", isDirectory: false },
-        { name: "effect.css.d.ts", isDirectory: false },
-        { name: "css-modules.d.ts", isDirectory: false },
-      ];
+      if (path === "clipper/projects/hi/file-manager/compositions")
+        return [
+          { name: "effect.composition.ts", isDirectory: false },
+          { name: "effect.css", isDirectory: false },
+          { name: "effect.html", isDirectory: false },
+          { name: "effect.css.d.ts", isDirectory: false },
+          { name: "css-modules.d.ts", isDirectory: false },
+        ];
       return [];
     });
 
-    const { projectPersistenceService } = await import("./projectPersistenceService");
-    const { project } = await projectPersistenceService.loadProject({ manifestPath: "clipper/projects/hi/project.json" });
+    const { projectPersistenceService } =
+      await import("./projectPersistenceService");
+    const { project } = await projectPersistenceService.loadProject({
+      manifestPath: "clipper/projects/hi/project.json",
+    });
 
-    expect(project.compositionLibrary?.[0]?.objects[0]?.content).toContain(".effect { opacity: 0.5; }");
-    expect(project.compositionLibrary?.[0]?.objects[0]?.content).toContain('<div class="effect"></div>');
+    expect(project.compositionLibrary?.[0]?.objects[0]?.content).toContain(
+      ".effect { opacity: 0.5; }",
+    );
+    expect(project.compositionLibrary?.[0]?.objects[0]?.content).toContain(
+      '<div class="effect"></div>',
+    );
   });
 
   it("keeps loading when a directory composition dependency is missing", async () => {
@@ -95,7 +112,10 @@ describe("project persistence service", () => {
           scenes: [],
         });
       }
-      if (path === "clipper/projects/hi/file-manager/compositions/broken.composition.ts") {
+      if (
+        path ===
+        "clipper/projects/hi/file-manager/compositions/broken.composition.ts"
+      ) {
         return `
           import { Composition, Rect } from "@clipper/composition-api";
           import styles from "./missing.css";
@@ -112,19 +132,28 @@ describe("project persistence service", () => {
       throw new Error(`Cannot find module ${path}`);
     });
     hostMocks.listDirectory.mockImplementation(async (path) => {
-      if (path === "clipper/projects/hi") return [{ name: "file-manager", isDirectory: true }];
+      if (path === "clipper/projects/hi")
+        return [{ name: "file-manager", isDirectory: true }];
       if (path === "clipper/projects/hi/file-manager/timelines") return [];
-      if (path === "clipper/projects/hi/file-manager/compositions") return [{ name: "broken.composition.ts", isDirectory: false }];
+      if (path === "clipper/projects/hi/file-manager/compositions")
+        return [{ name: "broken.composition.ts", isDirectory: false }];
       return [];
     });
 
-    const { projectPersistenceService } = await import("./projectPersistenceService");
-    const { project } = await projectPersistenceService.loadProject({ manifestPath: "clipper/projects/hi/project.json" });
+    const { projectPersistenceService } =
+      await import("./projectPersistenceService");
+    const { project } = await projectPersistenceService.loadProject({
+      manifestPath: "clipper/projects/hi/project.json",
+    });
 
-    expect(project.compositionLibrary?.[0]?.compositionError).toContain("Cannot find module");
+    expect(project.compositionLibrary?.[0]?.compositionError).toContain(
+      "Cannot find module",
+    );
     expect(project.compositionLibrary?.[0]?.objects).toEqual([]);
     expect(project.compositionLibrary?.[0]).not.toHaveProperty("source");
-    expect(project.compositionSources?.["compositions/broken.composition.ts"]).toContain("export const composition");
+    expect(
+      project.compositionSources?.["compositions/broken.composition.ts"],
+    ).toContain("export const composition");
   });
 
   it("does not recreate composition folders as managed roots", async () => {
@@ -133,7 +162,8 @@ describe("project persistence service", () => {
       return [];
     });
 
-    const { projectPersistenceService } = await import("./projectPersistenceService");
+    const { projectPersistenceService } =
+      await import("./projectPersistenceService");
     await projectPersistenceService.saveProject({
       manifestPath: "clipper/projects/hi/project.json",
       project: {
@@ -149,34 +179,55 @@ describe("project persistence service", () => {
           "file-manager/compositions/title-cards",
           "clipper/projects/hi/file-manager/compositions/overlays",
         ],
-        compositionLibrary: [{
-          id: "compositions/title.composition.ts",
-          filePath: "compositions/title.composition.ts",
-          duration: 3,
-          frame: { width: 1920, height: 1080, style: {} },
-          background: { id: "background", name: "Background", style: {}, elements: [] },
-          objects: [],
-          snapshot: [],
-          motionMarkers: [],
-          source: "source",
-        }],
+        compositionLibrary: [
+          {
+            id: "compositions/title.composition.ts",
+            filePath: "compositions/title.composition.ts",
+            duration: 3,
+            frame: { width: 1920, height: 1080, style: {} },
+            background: {
+              id: "background",
+              name: "Background",
+              style: {},
+              elements: [],
+            },
+            objects: [],
+            snapshot: [],
+            motionMarkers: [],
+            source: "source",
+          },
+        ],
         compositionSources: { "compositions/title.composition.ts": "source" },
         timelines: [],
       },
     });
 
-    expect(hostMocks.createDirectory).not.toHaveBeenCalledWith("clipper/projects/hi/file-manager/compositions/lower-third");
-    expect(hostMocks.createDirectory).not.toHaveBeenCalledWith("clipper/projects/hi/file-manager/compositions/title-cards");
-    expect(hostMocks.createDirectory).not.toHaveBeenCalledWith("clipper/projects/hi/file-manager/compositions/overlays");
-    expect(hostMocks.createDirectory).not.toHaveBeenCalledWith("clipper/projects/hi/file-manager/compositions/compositions");
-    expect(hostMocks.createDirectory).not.toHaveBeenCalledWith("clipper/projects/hi/file-manager/file-manager/compositions/title-cards");
-    expect(hostMocks.writeTextFile).toHaveBeenCalledWith("clipper/projects/hi/file-manager/compositions/title.composition.ts", "source");
+    expect(hostMocks.createDirectory).not.toHaveBeenCalledWith(
+      "clipper/projects/hi/file-manager/compositions/lower-third",
+    );
+    expect(hostMocks.createDirectory).not.toHaveBeenCalledWith(
+      "clipper/projects/hi/file-manager/compositions/title-cards",
+    );
+    expect(hostMocks.createDirectory).not.toHaveBeenCalledWith(
+      "clipper/projects/hi/file-manager/compositions/overlays",
+    );
+    expect(hostMocks.createDirectory).not.toHaveBeenCalledWith(
+      "clipper/projects/hi/file-manager/compositions/compositions",
+    );
+    expect(hostMocks.createDirectory).not.toHaveBeenCalledWith(
+      "clipper/projects/hi/file-manager/file-manager/compositions/title-cards",
+    );
+    expect(hostMocks.writeTextFile).toHaveBeenCalledWith(
+      "clipper/projects/hi/file-manager/compositions/title.composition.ts",
+      "source",
+    );
   });
 
   it("does not recreate stale unreferenced New Folder composition folders", async () => {
     hostMocks.listDirectory.mockResolvedValue([]);
 
-    const { projectPersistenceService } = await import("./projectPersistenceService");
+    const { projectPersistenceService } =
+      await import("./projectPersistenceService");
     await projectPersistenceService.saveProject({
       manifestPath: "clipper/projects/hi/project.json",
       project: {
@@ -187,30 +238,43 @@ describe("project persistence service", () => {
         assets: [],
         scenes: [],
         compositionFolders: ["compositions/New Folder"],
-        compositionLibrary: [{
-          id: "title",
-          filePath: "compositions/title.composition.ts",
-          duration: 3,
-          frame: { width: 1920, height: 1080, style: {} },
-          background: { id: "background", name: "Background", style: {}, elements: [] },
-          objects: [],
-          snapshot: [],
-          motionMarkers: [],
-          source: "source",
-        }],
+        compositionLibrary: [
+          {
+            id: "title",
+            filePath: "compositions/title.composition.ts",
+            duration: 3,
+            frame: { width: 1920, height: 1080, style: {} },
+            background: {
+              id: "background",
+              name: "Background",
+              style: {},
+              elements: [],
+            },
+            objects: [],
+            snapshot: [],
+            motionMarkers: [],
+            source: "source",
+          },
+        ],
         compositionSources: { "compositions/title.composition.ts": "source" },
         timelines: [],
       },
     });
 
-    expect(hostMocks.createDirectory).not.toHaveBeenCalledWith("clipper/projects/hi/file-manager/compositions/New Folder");
-    expect(hostMocks.writeTextFile).toHaveBeenCalledWith("clipper/projects/hi/file-manager/compositions/title.composition.ts", "source");
+    expect(hostMocks.createDirectory).not.toHaveBeenCalledWith(
+      "clipper/projects/hi/file-manager/compositions/New Folder",
+    );
+    expect(hostMocks.writeTextFile).toHaveBeenCalledWith(
+      "clipper/projects/hi/file-manager/compositions/title.composition.ts",
+      "source",
+    );
   });
 
   it("saves invalid composition source from compositionSources without embedded source", async () => {
     hostMocks.listDirectory.mockResolvedValue([]);
 
-    const { projectPersistenceService } = await import("./projectPersistenceService");
+    const { projectPersistenceService } =
+      await import("./projectPersistenceService");
     await projectPersistenceService.saveProject({
       manifestPath: "clipper/projects/hi/project.json",
       project: {
@@ -219,35 +283,57 @@ describe("project persistence service", () => {
         resolution: { width: 1920, height: 1080 },
         assetsPath: "assets",
         scenes: [],
-        compositionLibrary: [{
-          id: "bad",
-          filePath: "compositions/bad.composition.ts",
-          duration: 3,
-          frame: { width: 1920, height: 1080, style: {} },
-          background: { id: "background", name: "Background", style: {}, elements: [] },
-          objects: [],
-          snapshot: [],
-          motionMarkers: [],
-          compositionError: "Expected expression",
-        }],
-        compositions: [{
-          id: "bad",
-          filePath: "compositions/bad.composition.ts",
-          duration: 3,
-          frame: { width: 1920, height: 1080, style: {} },
-          background: { id: "background", name: "Background", style: {}, elements: [] },
-          objects: [],
-          snapshot: [],
-          motionMarkers: [],
-          compositionError: "Expected expression",
-        } as any],
-        compositionSources: { "compositions/bad.composition.ts": "export const composition =" },
+        compositionLibrary: [
+          {
+            id: "bad",
+            filePath: "compositions/bad.composition.ts",
+            duration: 3,
+            frame: { width: 1920, height: 1080, style: {} },
+            background: {
+              id: "background",
+              name: "Background",
+              style: {},
+              elements: [],
+            },
+            objects: [],
+            snapshot: [],
+            motionMarkers: [],
+            compositionError: "Expected expression",
+          },
+        ],
+        compositions: [
+          {
+            id: "bad",
+            filePath: "compositions/bad.composition.ts",
+            duration: 3,
+            frame: { width: 1920, height: 1080, style: {} },
+            background: {
+              id: "background",
+              name: "Background",
+              style: {},
+              elements: [],
+            },
+            objects: [],
+            snapshot: [],
+            motionMarkers: [],
+            compositionError: "Expected expression",
+          } as any,
+        ],
+        compositionSources: {
+          "compositions/bad.composition.ts": "export const composition =",
+        },
         timelines: [],
       },
     });
 
-    expect(hostMocks.writeTextFile).toHaveBeenCalledWith("clipper/projects/hi/file-manager/compositions/bad.composition.ts", "export const composition =");
-    const manifestWrite = hostMocks.writeTextFile.mock.calls.find(([path]) => path === "clipper/projects/hi/project.json")?.[1] ?? "";
+    expect(hostMocks.writeTextFile).toHaveBeenCalledWith(
+      "clipper/projects/hi/file-manager/compositions/bad.composition.ts",
+      "export const composition =",
+    );
+    const manifestWrite =
+      hostMocks.writeTextFile.mock.calls.find(
+        ([path]) => path === "clipper/projects/hi/project.json",
+      )?.[1] ?? "";
     expect(manifestWrite).not.toContain('"source":');
   });
 
@@ -255,37 +341,80 @@ describe("project persistence service", () => {
     const source = compositionSource("Moved");
     mockDirectoryProject({
       manifest: {
-        compositionLibrary: [compositionRecord("composition-b", "compositions/B.composition.ts", source)],
+        compositionLibrary: [
+          compositionRecord(
+            "composition-b",
+            "compositions/B.composition.ts",
+            source,
+          ),
+        ],
       },
       files: {
         "file-manager/compositions/folder/B.composition.ts": source,
-        "file-manager/main.timeline.json": JSON.stringify({ id: "main.timeline.json", clips: [{ id: "clip-b", compositionId: "composition-b", duration: 5 }] }),
+        "file-manager/main.timeline.json": JSON.stringify({
+          id: "main.timeline.json",
+          clips: [
+            { id: "clip-b", compositionId: "composition-b", duration: 5 },
+          ],
+        }),
       },
     });
 
-    const { projectPersistenceService } = await import("./projectPersistenceService");
-    const { project } = await projectPersistenceService.loadProject({ manifestPath: "clipper/projects/hi/project.json" });
+    const { projectPersistenceService } =
+      await import("./projectPersistenceService");
+    const { project } = await projectPersistenceService.loadProject({
+      manifestPath: "clipper/projects/hi/project.json",
+    });
 
-    expect(project.timelines?.[0].clips[0]).toMatchObject({ id: "clip-b", compositionId: "composition-b", duration: 5, motionMarkers: [] });
-    expect(project.compositionLibrary?.find((composition) => composition.id === "composition-b")?.filePath).toBe("compositions/folder/B.composition.ts");
+    expect(project.timelines?.[0].clips[0]).toMatchObject({
+      id: "clip-b",
+      compositionId: "composition-b",
+      duration: 5,
+      motionMarkers: [],
+    });
+    expect(
+      project.compositionLibrary?.find(
+        (composition) => composition.id === "composition-b",
+      )?.filePath,
+    ).toBe("compositions/folder/B.composition.ts");
   });
 
   it("marks a deleted linked composition missing while preserving timeline clips", async () => {
     const source = compositionSource("Deleted");
     mockDirectoryProject({
       manifest: {
-        compositionLibrary: [compositionRecord("composition-b", "compositions/B.composition.ts", source)],
+        compositionLibrary: [
+          compositionRecord(
+            "composition-b",
+            "compositions/B.composition.ts",
+            source,
+          ),
+        ],
       },
       files: {
-        "file-manager/main.timeline.json": JSON.stringify({ id: "main.timeline.json", clips: [{ id: "clip-b", compositionId: "composition-b", duration: 5 }] }),
+        "file-manager/main.timeline.json": JSON.stringify({
+          id: "main.timeline.json",
+          clips: [
+            { id: "clip-b", compositionId: "composition-b", duration: 5 },
+          ],
+        }),
       },
     });
 
-    const { projectPersistenceService } = await import("./projectPersistenceService");
-    const { project } = await projectPersistenceService.loadProject({ manifestPath: "clipper/projects/hi/project.json" });
+    const { projectPersistenceService } =
+      await import("./projectPersistenceService");
+    const { project } = await projectPersistenceService.loadProject({
+      manifestPath: "clipper/projects/hi/project.json",
+    });
 
-    expect(project.timelines?.[0].clips[0]?.compositionId).toBe("composition-b");
-    expect(project.compositionLibrary?.find((composition) => composition.id === "composition-b")).toMatchObject({
+    expect(project.timelines?.[0].clips[0]?.compositionId).toBe(
+      "composition-b",
+    );
+    expect(
+      project.compositionLibrary?.find(
+        (composition) => composition.id === "composition-b",
+      ),
+    ).toMatchObject({
       filePath: "compositions/B.composition.ts",
       sourceMissing: true,
     });
@@ -296,24 +425,53 @@ describe("project persistence service", () => {
     const sourceB = compositionSource("B");
     mockDirectoryProject({
       manifest: {
-        compositionLibrary: [compositionRecord("composition-a", "compositions/A.composition.ts", sourceA), compositionRecord("composition-b", "compositions/B.composition.ts", sourceB)],
+        compositionLibrary: [
+          compositionRecord(
+            "composition-a",
+            "compositions/A.composition.ts",
+            sourceA,
+          ),
+          compositionRecord(
+            "composition-b",
+            "compositions/B.composition.ts",
+            sourceB,
+          ),
+        ],
       },
       files: {
         "file-manager/compositions/A.composition.ts": sourceA,
         "file-manager/compositions/B-renamed.composition.ts": sourceB,
-        "file-manager/main.timeline.json": JSON.stringify({ id: "main.timeline.json", clips: [{ id: "clip-b", compositionId: "composition-b", duration: 5 }] }),
+        "file-manager/main.timeline.json": JSON.stringify({
+          id: "main.timeline.json",
+          clips: [
+            { id: "clip-b", compositionId: "composition-b", duration: 5 },
+          ],
+        }),
       },
     });
 
-    const { projectPersistenceService } = await import("./projectPersistenceService");
-    const { project } = await projectPersistenceService.loadProject({ manifestPath: "clipper/projects/hi/project.json" });
+    const { projectPersistenceService } =
+      await import("./projectPersistenceService");
+    const { project } = await projectPersistenceService.loadProject({
+      manifestPath: "clipper/projects/hi/project.json",
+    });
 
-    expect(project.timelines?.[0].clips.map((clip) => clip.compositionId)).toEqual(["composition-b"]);
-    expect(project.scenes[0]?.compositions.map((clip) => clip.compositionId)).toEqual(["composition-b"]);
+    expect(
+      project.timelines?.[0].clips.map((clip) => clip.compositionId),
+    ).toEqual(["composition-b"]);
+    expect(
+      project.scenes[0]?.compositions.map((clip) => clip.compositionId),
+    ).toEqual(["composition-b"]);
   });
 });
 
-function mockDirectoryProject({ manifest, files }: { manifest?: Record<string, unknown>; files: Record<string, string> }) {
+function mockDirectoryProject({
+  manifest,
+  files,
+}: {
+  manifest?: Record<string, unknown>;
+  files: Record<string, string>;
+}) {
   hostMocks.readTextFile.mockImplementation(async (path) => {
     if (path === "clipper/projects/hi/project.json") {
       return JSON.stringify({
@@ -331,8 +489,12 @@ function mockDirectoryProject({ manifest, files }: { manifest?: Record<string, u
     throw new Error(`Unexpected read ${path}`);
   });
   hostMocks.listDirectory.mockImplementation(async (path) => {
-    if (path === "clipper/projects/hi") return [{ name: "file-manager", isDirectory: true }];
-    const relativeDirectory = path === "clipper/projects/hi/file-manager" ? "file-manager" : path.slice("clipper/projects/hi/".length);
+    if (path === "clipper/projects/hi")
+      return [{ name: "file-manager", isDirectory: true }];
+    const relativeDirectory =
+      path === "clipper/projects/hi/file-manager"
+        ? "file-manager"
+        : path.slice("clipper/projects/hi/".length);
     const prefix = `${relativeDirectory}/`;
     const entries = new Map<string, boolean>();
     for (const filePath of Object.keys(files)) {
@@ -352,7 +514,12 @@ function compositionRecord(id: string, filePath: string, source: string) {
     sourceHash: hashCompositionSource(source),
     duration: 5,
     frame: { width: 1920, height: 1080, style: {} },
-    background: { id: "background", name: "Background", style: {}, elements: [] },
+    background: {
+      id: "background",
+      name: "Background",
+      style: {},
+      elements: [],
+    },
     objects: [],
     snapshot: [],
     motionMarkers: [],

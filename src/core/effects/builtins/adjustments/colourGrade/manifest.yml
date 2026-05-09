@@ -4,7 +4,7 @@ name: Colour Grade
 label: Colour Grade
 group: Visual
 defaultDuration: 3
-defaultParams: {"brightness":0,"contrast":0,"saturation":0,"hue":0}
+defaultParams: { "brightness": 0, "contrast": 0, "saturation": 0, "hue": 0 }
 paramControls:
   - key: brightness
     label: Brightness

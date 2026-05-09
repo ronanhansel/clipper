@@ -7,10 +7,16 @@ export type FileManagerFindMediaDetail = {
 
 let pendingFileManagerFindMedia: FileManagerFindMediaDetail | null = null;
 
-export function requestFileManagerFindMedia(detail: FileManagerFindMediaDetail) {
+export function requestFileManagerFindMedia(
+  detail: FileManagerFindMediaDetail,
+) {
   pendingFileManagerFindMedia = detail;
   window.setTimeout(() => {
-    window.dispatchEvent(new CustomEvent<FileManagerFindMediaDetail>(fileManagerFindMediaEvent, { detail }));
+    window.dispatchEvent(
+      new CustomEvent<FileManagerFindMediaDetail>(fileManagerFindMediaEvent, {
+        detail,
+      }),
+    );
   }, 0);
 }
 

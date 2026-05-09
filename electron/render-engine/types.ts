@@ -12,7 +12,8 @@ export const EXPORT_PROCESS_STOP_TIMEOUT_MS = 1200;
 export const DEFAULT_PRERENDER_BLOCK_DURATION_MS = 200;
 export const MIN_PRERENDER_BLOCK_DURATION_MS = 20;
 export const MAX_PRERENDER_BLOCK_DURATION_MS = 1000;
-export const PRERENDER_VIDEO_BLOCK_MIME_TYPE = 'video/mp4; codecs="avc1.42E028"';
+export const PRERENDER_VIDEO_BLOCK_MIME_TYPE =
+  'video/mp4; codecs="avc1.42E028"';
 export const PRERENDER_VIDEO_BLOCK_CODEC_VERSION = 2;
 
 export const EXPORT_CHROMIUM_ARGS = [
@@ -56,7 +57,14 @@ export type RenderSceneToVideoOptions = {
   reusePrerenderCache?: boolean;
   exportWidth?: number;
   exportHeight?: number;
-  exportFormat?: "prores-422-hq" | "prores-4444" | "dnxhr-hqx" | "mov" | "h264-high" | "mp4" | "webm";
+  exportFormat?:
+    | "prores-422-hq"
+    | "prores-4444"
+    | "dnxhr-hqx"
+    | "mov"
+    | "h264-high"
+    | "mp4"
+    | "webm";
   exportRenderQuality?: "standard" | "high" | "ultra";
   exportWorkerMapping?: { hd?: number; qhd?: number; uhd?: number };
   exportTileMapping?: { hd?: number; qhd?: number; uhd?: number };

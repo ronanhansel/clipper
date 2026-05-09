@@ -1,126 +1,126 @@
 .signal-atlas-stage {
-    position: relative;
-    width: 100%;
-    height: 100%;
-    overflow: hidden;
-    border: 1px solid rgba(18, 16, 12, 0.13);
-    border-radius: 38px;
-    background:
-        linear-gradient(
-            135deg,
-            rgba(255, 255, 255, 0.55),
-            rgba(255, 255, 255, 0.2)
-        ),
-        radial-gradient(
-            circle at 30% 38%,
-            rgba(37, 99, 166, 0.18),
-            transparent 28%
-        ),
-        radial-gradient(
-            circle at 72% 48%,
-            rgba(204, 132, 33, 0.18),
-            transparent 30%
-        );
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.62);
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border: 1px solid rgba(18, 16, 12, 0.13);
+  border-radius: 38px;
+  background:
+    linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.55),
+      rgba(255, 255, 255, 0.2)
+    ),
+    radial-gradient(
+      circle at 30% 38%,
+      rgba(37, 99, 166, 0.18),
+      transparent 28%
+    ),
+    radial-gradient(
+      circle at 72% 48%,
+      rgba(204, 132, 33, 0.18),
+      transparent 30%
+    );
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.62);
 }
 
 .signal-map {
-    position: absolute;
-    left: 92px;
-    top: 70px;
-    width: 760px;
-    height: 350px;
-    border-radius: 30px;
-    background:
-        linear-gradient(90deg, rgba(18, 16, 12, 0.07) 1px, transparent 1px),
-        linear-gradient(rgba(18, 16, 12, 0.06) 1px, transparent 1px);
-    background-size: 72px 72px;
+  position: absolute;
+  left: 92px;
+  top: 70px;
+  width: 760px;
+  height: 350px;
+  border-radius: 30px;
+  background:
+    linear-gradient(90deg, rgba(18, 16, 12, 0.07) 1px, transparent 1px),
+    linear-gradient(rgba(18, 16, 12, 0.06) 1px, transparent 1px);
+  background-size: 72px 72px;
 }
 
 .signal-map::before {
-    position: absolute;
-    inset: 92px 58px 96px 68px;
-    border-top: 8px solid rgba(37, 99, 166, 0.72);
-    border-right: 8px solid rgba(204, 132, 33, 0.72);
-    border-radius: 50%;
-    content: "";
-    transform: rotate(-8deg);
+  position: absolute;
+  inset: 92px 58px 96px 68px;
+  border-top: 8px solid rgba(37, 99, 166, 0.72);
+  border-right: 8px solid rgba(204, 132, 33, 0.72);
+  border-radius: 50%;
+  content: "";
+  transform: rotate(-8deg);
 }
 
 .signal-map i {
-    position: absolute;
-    width: 22px;
-    height: 22px;
-    border-radius: 999px;
-    background: #2563a6;
-    box-shadow: 0 0 0 12px rgba(37, 99, 166, 0.12);
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: #2563a6;
+  box-shadow: 0 0 0 12px rgba(37, 99, 166, 0.12);
 }
 
 .signal-map i:nth-child(1) {
-    left: 96px;
-    top: 212px;
+  left: 96px;
+  top: 212px;
 }
 .signal-map i:nth-child(2) {
-    left: 310px;
-    top: 122px;
-    background: #cc8421;
-    box-shadow: 0 0 0 12px rgba(204, 132, 33, 0.14);
+  left: 310px;
+  top: 122px;
+  background: #cc8421;
+  box-shadow: 0 0 0 12px rgba(204, 132, 33, 0.14);
 }
 .signal-map i:nth-child(3) {
-    right: 164px;
-    top: 196px;
+  right: 164px;
+  top: 196px;
 }
 .signal-map i:nth-child(4) {
-    right: 72px;
-    top: 88px;
-    background: #15120d;
-    box-shadow: 0 0 0 12px rgba(21, 18, 13, 0.1);
+  right: 72px;
+  top: 88px;
+  background: #15120d;
+  box-shadow: 0 0 0 12px rgba(21, 18, 13, 0.1);
 }
 
 .signal-panel {
-    position: absolute;
-    right: 92px;
-    top: 74px;
-    display: grid;
-    width: 374px;
-    gap: 10px;
-    border: 1px solid rgba(18, 16, 12, 0.14);
-    border-radius: 28px;
-    background: rgba(247, 244, 234, 0.68);
-    padding: 30px;
+  position: absolute;
+  right: 92px;
+  top: 74px;
+  display: grid;
+  width: 374px;
+  gap: 10px;
+  border: 1px solid rgba(18, 16, 12, 0.14);
+  border-radius: 28px;
+  background: rgba(247, 244, 234, 0.68);
+  padding: 30px;
 }
 
 .signal-panel small {
-    color: rgba(18, 16, 12, 0.52);
-    font:
-        800 13px/1 Avenir Next,
-        Manrope,
-        sans-serif;
-    letter-spacing: 0.22em;
-    text-transform: uppercase;
+  color: rgba(18, 16, 12, 0.52);
+  font:
+    800 13px/1 Avenir Next,
+    Manrope,
+    sans-serif;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
 }
 
 .signal-panel strong {
-    color: #15120d;
-    font:
-        300 78px/0.92 Cinzel,
-        Georgia,
-        serif;
-    letter-spacing: 0.05em;
+  color: #15120d;
+  font:
+    300 78px/0.92 Cinzel,
+    Georgia,
+    serif;
+  letter-spacing: 0.05em;
 }
 
 .signal-panel span,
 .signal-note {
-    color: rgba(18, 16, 12, 0.62);
-    font:
-        700 18px/1.55 Manrope,
-        Avenir Next,
-        sans-serif;
+  color: rgba(18, 16, 12, 0.62);
+  font:
+    700 18px/1.55 Manrope,
+    Avenir Next,
+    sans-serif;
 }
 
 .signal-note {
-    position: absolute;
-    right: 100px;
-    bottom: 78px;
-    width: 430px;
+  position: absolute;
+  right: 100px;
+  bottom: 78px;
+  width: 430px;
 }

@@ -18,7 +18,11 @@ import { contextBridge } from "electron";
 
 declare const window: {
   addEventListener(type: string, listener: (event: MessageEvent) => void): void;
-  postMessage(message: unknown, targetOrigin: string, transfer?: ArrayBuffer[]): void;
+  postMessage(
+    message: unknown,
+    targetOrigin: string,
+    transfer?: ArrayBuffer[],
+  ): void;
 };
 declare class MessagePort {
   addEventListener(type: string, listener: (event: MessageEvent) => void): void;

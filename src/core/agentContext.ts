@@ -3,7 +3,12 @@ import { buildLinearTimeline } from "./timeline";
 import { getMotionMarkerViews } from "./motionEffects";
 import { getDisplayNameFromPath } from "./fileNames";
 
-export function createAgentContext(project: ProjectManifest, scene: Scene, part: Part, selection: SelectionPayload | null) {
+export function createAgentContext(
+  project: ProjectManifest,
+  scene: Scene,
+  part: Part,
+  selection: SelectionPayload | null,
+) {
   const partMotionViews = getMotionMarkerViews(part);
   return {
     project: {

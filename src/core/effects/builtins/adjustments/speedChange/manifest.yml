@@ -5,7 +5,7 @@ label: Speed Change
 group: Timing
 tags: ["blocksMending"]
 defaultDuration: 3
-defaultParams: {"speed":0.5}
+defaultParams: { "speed": 0.5 }
 timeSensitive: true
 paramControls:
   - key: speed

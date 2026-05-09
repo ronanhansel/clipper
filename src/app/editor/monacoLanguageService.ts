@@ -31,13 +31,18 @@ type MonacoTypeScriptLanguageService = {
       typescriptDefaults: {
         setCompilerOptions: (options: Record<string, unknown>) => void;
         addExtraLib: (content: string, filePath?: string) => unknown;
-        setDiagnosticsOptions: (options: { noSemanticValidation: boolean; noSyntaxValidation: boolean }) => void;
+        setDiagnosticsOptions: (options: {
+          noSemanticValidation: boolean;
+          noSyntaxValidation: boolean;
+        }) => void;
       };
     };
   };
 };
 
-export function configureMonacoTypeScriptLanguageService(monaco: MonacoTypeScriptLanguageService) {
+export function configureMonacoTypeScriptLanguageService(
+  monaco: MonacoTypeScriptLanguageService,
+) {
   monaco.languages.typescript.typescriptDefaults.setCompilerOptions({
     allowArbitraryExtensions: true,
     allowNonTsExtensions: true,
@@ -49,7 +54,16 @@ export function configureMonacoTypeScriptLanguageService(monaco: MonacoTypeScrip
     strict: true,
     target: monaco.languages.typescript.ScriptTarget.ES2022,
   });
-  monaco.languages.typescript.typescriptDefaults.addExtraLib(compositionApiSource, "file:///clipper/projects/composition-api.ts");
-  monaco.languages.typescript.typescriptDefaults.addExtraLib(textImportDeclarationSource, "file:///clipper/projects/text-imports.d.ts");
-  monaco.languages.typescript.typescriptDefaults.setDiagnosticsOptions({ noSemanticValidation: false, noSyntaxValidation: false });
+  monaco.languages.typescript.typescriptDefaults.addExtraLib(
+    compositionApiSource,
+    "file:///clipper/projects/composition-api.ts",
+  );
+  monaco.languages.typescript.typescriptDefaults.addExtraLib(
+    textImportDeclarationSource,
+    "file:///clipper/projects/text-imports.d.ts",
+  );
+  monaco.languages.typescript.typescriptDefaults.setDiagnosticsOptions({
+    noSemanticValidation: false,
+    noSyntaxValidation: false,
+  });
 }

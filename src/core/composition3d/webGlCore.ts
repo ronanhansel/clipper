@@ -11,7 +11,13 @@ export type Composition3dWebGlCoreOptions = {
   loadTexture?: (asset: string) => unknown;
 };
 
-export function createComposition3dWebGlCore({ graph, root, width, height, loadTexture = defaultLoadTexture }: Composition3dWebGlCoreOptions) {
+export function createComposition3dWebGlCore({
+  graph,
+  root,
+  width,
+  height,
+  loadTexture = defaultLoadTexture,
+}: Composition3dWebGlCoreOptions) {
   const renderer = new THREE.WebGPURenderer({ antialias: true });
   renderer.setSize(width, height);
   root.appendChild(renderer.domElement);
@@ -21,7 +27,10 @@ export function createComposition3dWebGlCore({ graph, root, width, height, loadT
   camera.position.z = 1;
 
   const material = new THREE.MeshBasicNodeMaterial();
-  material.colorNode = compileComposition3dGraphToTsl(graph, { tsl, loadTexture }) as never;
+  material.colorNode = compileComposition3dGraphToTsl(graph, {
+    tsl,
+    loadTexture,
+  }) as never;
 
   const mesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material);
   scene.add(mesh);

@@ -1,5 +1,14 @@
-import { getTimelineDragDeltaSeconds, getTimelineBlockTiming, type TimelineBlockTimingAction } from "../../core/timelineBlockTiming";
-import type { FrameObject, LayerAnimation, MotionMarker, Part } from "../../core/types";
+import {
+  getTimelineDragDeltaSeconds,
+  getTimelineBlockTiming,
+  type TimelineBlockTimingAction,
+} from "../../core/timelineBlockTiming";
+import type {
+  FrameObject,
+  LayerAnimation,
+  MotionMarker,
+  Part,
+} from "../../core/types";
 import type { TimelinePartMotionView } from "./timelineTypes";
 
 export type ComposeAnimationTimelineLayer = {
@@ -25,17 +34,41 @@ export type ComposeAnimationTimingDrag = {
   snapThresholdSeconds: number;
 };
 
-export function buildComposeAnimationTimelineLayers(part: Part): ComposeAnimationTimelineLayer[] {
+export function buildComposeAnimationTimelineLayers(
+  part: Part,
+): ComposeAnimationTimelineLayer[] {
   return [
-    ...[...part.objects].reverse().map((object) => ({ id: object.id, name: object.name || object.id, kind: "object" as const, animations: object.animations, object })),
-    ...[...part.background.elements].reverse().map((object) => ({ id: object.id, name: object.name || object.id, kind: "background-object" as const, animations: object.animations, object })),
-    { id: part.background.id, name: part.background.name || "Background", kind: "background" as const, animations: part.background.animations },
+    ...[...part.objects].reverse().map((object) => ({
+      id: object.id,
+      name: object.name || object.id,
+      kind: "object" as const,
+      animations: object.animations,
+      object,
+    })),
+    ...[...part.background.elements].reverse().map((object) => ({
+      id: object.id,
+      name: object.name || object.id,
+      kind: "background-object" as const,
+      animations: object.animations,
+      object,
+    })),
+    {
+      id: part.background.id,
+      name: part.background.name || "Background",
+      kind: "background" as const,
+      animations: part.background.animations,
+    },
   ];
 }
 
-export function buildComposeAnimationMotionTimelinePart(part: Part, layers: ComposeAnimationTimelineLayer[], timelineDuration: number): TimelinePartMotionView {
+export function buildComposeAnimationMotionTimelinePart(
+  part: Part,
+  layers: ComposeAnimationTimelineLayer[],
+  timelineDuration: number,
+): TimelinePartMotionView {
   const motionMarkers: MotionMarker[] = layers.flatMap((layer) => {
-    return (layer.animations ?? []).map((animation): MotionMarker => ({
+    return (layer.animations ?? []).map(
+      (animation): MotionMarker => ({
         id: `${layer.id}/anim/${animation.id}`,
         name: animation.name || "Animation",
         layerId: layer.id,
@@ -46,7 +79,8 @@ export function buildComposeAnimationMotionTimelinePart(part: Part, layers: Comp
         position: { x: 0, y: 0 },
         scale: 1,
         focus: { x: 0.5, y: 0.5 },
-    }));
+      }),
+    );
   });
 
   return {
@@ -58,33 +92,53 @@ export function buildComposeAnimationMotionTimelinePart(part: Part, layers: Comp
   };
 }
 
-export function getComposeAnimationSnapBoundaries(layers: ComposeAnimationTimelineLayer[], timelineDuration: number) {
-  return Array.from(new Set([
-    0,
-    timelineDuration,
-    ...layers.flatMap((layer) => {
-      const boundaries: number[] = [];
-      if (layer.animations) {
-        for (const animation of layer.animations) {
-          boundaries.push(animation.options.delay ?? 0, (animation.options.delay ?? 0) + animation.options.duration);
+export function getComposeAnimationSnapBoundaries(
+  layers: ComposeAnimationTimelineLayer[],
+  timelineDuration: number,
+) {
+  return Array.from(
+    new Set([
+      0,
+      timelineDuration,
+      ...layers.flatMap((layer) => {
+        const boundaries: number[] = [];
+        if (layer.animations) {
+          for (const animation of layer.animations) {
+            boundaries.push(
+              animation.options.delay ?? 0,
+              (animation.options.delay ?? 0) + animation.options.duration,
+            );
+          }
         }
-      }
-      return boundaries;
-    }),
-  ])).sort((left, right) => left - right);
+        return boundaries;
+      }),
+    ]),
+  ).sort((left, right) => left - right);
 }
 
-export function getComposeAnimationTimingDelta(drag: ComposeAnimationTimingDrag, clientX: number, scrollLeft: number, contentWidth: number, timelineDuration: number) {
+export function getComposeAnimationTimingDelta(
+  drag: ComposeAnimationTimingDrag,
+  clientX: number,
+  scrollLeft: number,
+  contentWidth: number,
+  timelineDuration: number,
+) {
   return getTimelineDragDeltaSeconds({
     initialClientX: drag.initialClientX,
     clientX,
     initialScrollLeft: drag.initialScrollLeft,
     scrollLeft,
-    pixelsPerSecond: Math.max(contentWidth, 1) / Math.max(timelineDuration, 0.0001),
+    pixelsPerSecond:
+      Math.max(contentWidth, 1) / Math.max(timelineDuration, 0.0001),
   });
 }
 
-export function getNextComposeAnimationTiming(drag: ComposeAnimationTimingDrag, deltaSeconds: number, timelineDuration: number, snap: boolean) {
+export function getNextComposeAnimationTiming(
+  drag: ComposeAnimationTimingDrag,
+  deltaSeconds: number,
+  timelineDuration: number,
+  snap: boolean,
+) {
   const timing = getTimelineBlockTiming({
     action: drag.action,
     initialStart: drag.initialDelay,
@@ -95,7 +149,11 @@ export function getNextComposeAnimationTiming(drag: ComposeAnimationTimingDrag, 
     snapBoundaries: drag.snapBoundaries,
     snapThresholdSeconds: drag.snapThresholdSeconds,
   });
-  return { delay: timing.start, duration: timing.duration, guideTime: timing.guideTime };
+  return {
+    delay: timing.start,
+    duration: timing.duration,
+    guideTime: timing.guideTime,
+  };
 }
 
 export function updateComposeAnimationLayerMotionTiming(
@@ -103,14 +161,29 @@ export function updateComposeAnimationLayerMotionTiming(
   timing: { delay: number; duration: number },
   _onUpdateBackgroundMotion?: never,
   _onUpdateObjectMotion?: never,
-  onUpdateBackgroundAnimation?: (updater: (animations: LayerAnimation[]) => LayerAnimation[]) => void,
-  onUpdateObjectAnimation?: (objectId: string, updater: (animations: LayerAnimation[]) => LayerAnimation[]) => void,
+  onUpdateBackgroundAnimation?: (
+    updater: (animations: LayerAnimation[]) => LayerAnimation[],
+  ) => void,
+  onUpdateObjectAnimation?: (
+    objectId: string,
+    updater: (animations: LayerAnimation[]) => LayerAnimation[],
+  ) => void,
   animationId?: string,
 ) {
   if (animationId) {
-    const updater = (animations: LayerAnimation[]) => animations.map((anim) =>
-      anim.id === animationId ? { ...anim, options: { ...anim.options, delay: timing.delay || undefined, duration: timing.duration } } : anim
-    );
+    const updater = (animations: LayerAnimation[]) =>
+      animations.map((anim) =>
+        anim.id === animationId
+          ? {
+              ...anim,
+              options: {
+                ...anim.options,
+                delay: timing.delay || undefined,
+                duration: timing.duration,
+              },
+            }
+          : anim,
+      );
     if (layer.kind === "background") {
       onUpdateBackgroundAnimation?.(updater);
     } else if (layer.object) {

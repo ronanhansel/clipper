@@ -10,15 +10,17 @@ export const vignetteLogic = {
     const clearStop = Math.round(softness * 62);
 
     return {
-      overlays: [{
-        id: `${layer.id}:vignette`,
-        target: getOverlayTarget(layer),
-        style: {
-          backgroundImage: `radial-gradient(ellipse at ${focusX}% ${focusY}%, transparent 0 ${clearStop}%, rgba(0,0,0,0.88) 100%)`,
-          mixBlendMode: "multiply",
-          opacity: intensity,
+      overlays: [
+        {
+          id: `${layer.id}:vignette`,
+          target: getOverlayTarget(layer),
+          style: {
+            backgroundImage: `radial-gradient(ellipse at ${focusX}% ${focusY}%, transparent 0 ${clearStop}%, rgba(0,0,0,0.88) 100%)`,
+            mixBlendMode: "multiply",
+            opacity: intensity,
+          },
         },
-      }],
+      ],
     };
   },
 } as const satisfies Partial<Pick<AdjustmentEffectPackage, "applyVisualStyle">>;

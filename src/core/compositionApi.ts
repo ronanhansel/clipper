@@ -1,4 +1,10 @@
-export type FrameObjectType = "rect" | "text" | "image" | "svg" | "html" | "template";
+export type FrameObjectType =
+  | "rect"
+  | "text"
+  | "image"
+  | "svg"
+  | "html"
+  | "template";
 
 export type RenderContext = {
   time: number;
@@ -23,19 +29,62 @@ export type Bounds = { x: number; y: number; width: number; height: number };
 export type StyleValue = string | number;
 export type LayerStyle = Record<string, StyleValue>;
 export type CompositionRenderMode = "dom" | "webgl";
-export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
-export type RichTextSegment = { text: string; bold: boolean; italic: boolean; underline: boolean };
+export type JsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | JsonValue[]
+  | { [key: string]: JsonValue };
+export type RichTextSegment = {
+  text: string;
+  bold: boolean;
+  italic: boolean;
+  underline: boolean;
+};
 export type FrameTemplate = { kind: "html"; source: string; static?: boolean };
-export type MotionEase = "linear" | "easeIn" | "easeOut" | "easeInOut" | "circOut" | "backOut";
+export type MotionEase =
+  | "linear"
+  | "easeIn"
+  | "easeOut"
+  | "easeInOut"
+  | "circOut"
+  | "backOut";
 export type LayerAnimation = {
   id: string;
   name?: string;
   target?: "self" | "children";
   keyframes: Record<string, readonly number[] | readonly string[] | undefined>;
-  options: { duration: number; delay?: number; ease?: MotionEase | readonly [number, number, number, number]; repeat?: number; repeatType?: "loop" | "reverse" | "mirror"; repeatDelay?: number; type?: "tween" | "spring" | "inertia"; bounce?: number; stiffness?: number; damping?: number; mass?: number; velocity?: number; split?: { mode: "word" | "character"; stagger?: number; order?: "forward" | "reverse" | "center"; repeatScope?: "sequence" | "item" } };
+  options: {
+    duration: number;
+    delay?: number;
+    ease?: MotionEase | readonly [number, number, number, number];
+    repeat?: number;
+    repeatType?: "loop" | "reverse" | "mirror";
+    repeatDelay?: number;
+    type?: "tween" | "spring" | "inertia";
+    bounce?: number;
+    stiffness?: number;
+    damping?: number;
+    mass?: number;
+    velocity?: number;
+    split?: {
+      mode: "word" | "character";
+      stagger?: number;
+      order?: "forward" | "reverse" | "center";
+      repeatScope?: "sequence" | "item";
+    };
+  };
   enabled?: boolean;
 };
-export type Renderable = RenderableObject | Component | Group | null | undefined | false | Renderable[];
+export type Renderable =
+  | RenderableObject
+  | Component
+  | Group
+  | null
+  | undefined
+  | false
+  | Renderable[];
 export type RenderableProps = {
   id: string;
   name?: string;
@@ -51,11 +100,22 @@ export type RenderableProps = {
   locked?: boolean;
   animations?: LayerAnimation[];
 };
-export type TextProps = Omit<RenderableProps, "content"> & { text?: string; content?: string };
-export type ComponentProps = Pick<RenderableProps, "style" | "transform" | "animations" | "hidden" | "locked">;
+export type TextProps = Omit<RenderableProps, "content"> & {
+  text?: string;
+  content?: string;
+};
+export type ComponentProps = Pick<
+  RenderableProps,
+  "style" | "transform" | "animations" | "hidden" | "locked"
+>;
 export type GroupProps = ComponentProps & { children?: Renderable[] };
-export type WebLayerProps = Omit<RenderableProps, "content"> & { css?: string; html: string };
-export type ThreeLayerProps = Omit<RenderableProps, "content"> & { source: string };
+export type WebLayerProps = Omit<RenderableProps, "content"> & {
+  css?: string;
+  html: string;
+};
+export type ThreeLayerProps = Omit<RenderableProps, "content"> & {
+  source: string;
+};
 export type CompositionProps = {
   id?: string;
   name?: string;
@@ -77,19 +137,30 @@ export type CompositionProps = {
   render: (context: RenderContext) => Renderable[];
 };
 
-export type Composition3DProps = Omit<CompositionProps, "render" | "renderMode" | "background"> & {
+export type Composition3DProps = Omit<
+  CompositionProps,
+  "render" | "renderMode" | "background"
+> & {
   background?: CompositionProps["background"];
   animationGraph?: JsonValue;
   composition3dGraph?: JsonValue;
   render?: (context: RenderContext) => Renderable[];
 };
 
-export function transformToCss(transform: Transform | string | undefined): string | undefined {
+export function transformToCss(
+  transform: Transform | string | undefined,
+): string | undefined {
   if (typeof transform === "string") return transform;
   if (!transform) return undefined;
   const parts: string[] = [];
-  if (transform.x !== undefined || transform.y !== undefined || transform.z !== undefined) {
-    parts.push(`translate3d(${transform.x ?? 0}px, ${transform.y ?? 0}px, ${transform.z ?? 0}px)`);
+  if (
+    transform.x !== undefined ||
+    transform.y !== undefined ||
+    transform.z !== undefined
+  ) {
+    parts.push(
+      `translate3d(${transform.x ?? 0}px, ${transform.y ?? 0}px, ${transform.z ?? 0}px)`,
+    );
   }
   if (transform.rotate !== undefined) {
     parts.push(`rotate(${transform.rotate}deg)`);
@@ -218,7 +289,10 @@ try {
 }
 
 function escapeHtmlAttribute(value: string) {
-  return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;");
 }
 
 export class Template extends RenderableObject {
@@ -292,7 +366,12 @@ export class Composition3D extends Composition {
     super({
       ...props,
       renderMode: "webgl",
-      background: props.background ?? { id: "bg", name: "Background", style: {}, elements: [] },
+      background: props.background ?? {
+        id: "bg",
+        name: "Background",
+        style: {},
+        elements: [],
+      },
       render: props.render ?? (() => []),
     });
   }

@@ -15,8 +15,13 @@ type DecodePrerenderFramesResponse = {
 };
 
 type WorkerScope = {
-  onmessage: ((event: MessageEvent<DecodePrerenderFramesRequest>) => void) | null;
-  postMessage: (message: DecodePrerenderFramesResponse, transfer: Transferable[]) => void;
+  onmessage:
+    | ((event: MessageEvent<DecodePrerenderFramesRequest>) => void)
+    | null;
+  postMessage: (
+    message: DecodePrerenderFramesResponse,
+    transfer: Transferable[],
+  ) => void;
 };
 
 const workerScope = self as unknown as WorkerScope;
@@ -27,7 +32,10 @@ workerScope.onmessage = (event: MessageEvent<DecodePrerenderFramesRequest>) => {
     return { sceneTime: frame.sceneTime, data: decoded.buffer };
   });
   workerScope.postMessage(
-    { id: event.data.id, frames: decodedFrames } satisfies DecodePrerenderFramesResponse,
+    {
+      id: event.data.id,
+      frames: decodedFrames,
+    } satisfies DecodePrerenderFramesResponse,
     decodedFrames.map((frame) => frame.data),
   );
 };
@@ -43,9 +51,15 @@ function bgraToRgbaClamped(source: Uint8Array) {
   }
   for (let index = 0; index < source.byteLength; index += 4) {
     const alpha = source[index + 3];
-    bytes[index] = hasTransparency ? unpremultiplyColorChannel(source[index + 2], alpha) : source[index + 2];
-    bytes[index + 1] = hasTransparency ? unpremultiplyColorChannel(source[index + 1], alpha) : source[index + 1];
-    bytes[index + 2] = hasTransparency ? unpremultiplyColorChannel(source[index], alpha) : source[index];
+    bytes[index] = hasTransparency
+      ? unpremultiplyColorChannel(source[index + 2], alpha)
+      : source[index + 2];
+    bytes[index + 1] = hasTransparency
+      ? unpremultiplyColorChannel(source[index + 1], alpha)
+      : source[index + 1];
+    bytes[index + 2] = hasTransparency
+      ? unpremultiplyColorChannel(source[index], alpha)
+      : source[index];
     bytes[index + 3] = alpha;
   }
   return bytes;
@@ -53,5 +67,5 @@ function bgraToRgbaClamped(source: Uint8Array) {
 
 function unpremultiplyColorChannel(value: number, alpha: number) {
   if (alpha === 0 || alpha === 255) return value;
-  return Math.min(Math.round(value * 255 / alpha), 255);
+  return Math.min(Math.round((value * 255) / alpha), 255);
 }

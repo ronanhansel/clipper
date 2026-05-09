@@ -4,7 +4,7 @@ name: Contrast
 label: Contrast
 group: Visual
 defaultDuration: 3
-defaultParams: {"amount":1.2}
+defaultParams: { "amount": 1.2 }
 paramControls:
   - key: amount
     label: Amount

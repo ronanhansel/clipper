@@ -45,7 +45,9 @@ export function isEditorTarget(target: HTMLElement | null) {
 export const isCodeEditorTarget = isEditorTarget;
 
 export function isTextEditingTarget(target: HTMLElement | null) {
-  const editable = target?.closest("input, textarea, select, [contenteditable='true']") as HTMLElement | null;
+  const editable = target?.closest(
+    "input, textarea, select, [contenteditable='true']",
+  ) as HTMLElement | null;
   if (!editable) return false;
   return !(editable instanceof HTMLInputElement && editable.type === "range");
 }
@@ -141,7 +143,12 @@ export function useGlobalEditorShortcuts({
       }
 
       const target = event.target as HTMLElement | null;
-      if (!event.ctrlKey && !event.metaKey && !event.altKey && presentationModeRef.current) {
+      if (
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.altKey &&
+        presentationModeRef.current
+      ) {
         const key = event.key.toLowerCase();
         if (key === "escape" || key === "f" || key === "t") {
           event.preventDefault();
@@ -190,7 +197,11 @@ export function useGlobalEditorShortcuts({
       const textEditingTarget = isTextEditingTarget(target);
       if (event.key === "Escape" && textEditingTarget) return;
 
-      if (textEditingTarget && (event.ctrlKey || event.metaKey) && (event.key.toLowerCase() === "z" || event.key.toLowerCase() === "y")) {
+      if (
+        textEditingTarget &&
+        (event.ctrlKey || event.metaKey) &&
+        (event.key.toLowerCase() === "z" || event.key.toLowerCase() === "y")
+      ) {
         return;
       }
 
@@ -326,7 +337,11 @@ export function useGlobalEditorShortcuts({
         return;
       }
 
-      if (timelineShortcutsEnabled && isDeleteKey && deleteSelectedTimelineNodes()) {
+      if (
+        timelineShortcutsEnabled &&
+        isDeleteKey &&
+        deleteSelectedTimelineNodes()
+      ) {
         event.preventDefault();
         return;
       }
@@ -336,9 +351,16 @@ export function useGlobalEditorShortcuts({
       if (event.code === "Space") marqueeSpacePanningRef.current = false;
     }
 
-    const unsubscribeModeShortcut = window.clipper?.onModeShortcut(switchModeShortcut);
-    const unsubscribeCloseEditorTabShortcut = window.clipper?.onCloseEditorTabShortcut?.(() => { closeActiveEditorTab(); });
-    const unsubscribeRestoreEditorTabShortcut = window.clipper?.onRestoreEditorTabShortcut?.(() => { restoreClosedEditorTab(); });
+    const unsubscribeModeShortcut =
+      window.clipper?.onModeShortcut(switchModeShortcut);
+    const unsubscribeCloseEditorTabShortcut =
+      window.clipper?.onCloseEditorTabShortcut?.(() => {
+        closeActiveEditorTab();
+      });
+    const unsubscribeRestoreEditorTabShortcut =
+      window.clipper?.onRestoreEditorTabShortcut?.(() => {
+        restoreClosedEditorTab();
+      });
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
     return () => {
@@ -348,5 +370,37 @@ export function useGlobalEditorShortcuts({
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
     };
-  }, [activeEditorTabId, cancelActiveSelector, closeEditorTab, copySelectedTimelineNodes, cutSelectedTimelineNodes, deleteSelectedTimelineNodes, enterFrameFullscreen, enterTheaterMode, exitPresentationMode, jumpToEnd, jumpToNextPart, jumpToStart, marqueeDraggingRef, marqueeSpacePanningRef, pasteTimelineAttributesSilently, pasteTimelineNodesSilently, pausePlaybackAtCurrentTime, presentationModeRef, redoProjectChange, restoreClosedEditorTab, selectedPartId, setFastSelectEnabled, setObjectResizeMode, setScrubSnapEnabled, showPresentationControls, stepSceneTime, timelineMode, togglePlayback, undoProjectChange, updateMode, updateTimelineMode]);
+  }, [
+    activeEditorTabId,
+    cancelActiveSelector,
+    closeEditorTab,
+    copySelectedTimelineNodes,
+    cutSelectedTimelineNodes,
+    deleteSelectedTimelineNodes,
+    enterFrameFullscreen,
+    enterTheaterMode,
+    exitPresentationMode,
+    jumpToEnd,
+    jumpToNextPart,
+    jumpToStart,
+    marqueeDraggingRef,
+    marqueeSpacePanningRef,
+    pasteTimelineAttributesSilently,
+    pasteTimelineNodesSilently,
+    pausePlaybackAtCurrentTime,
+    presentationModeRef,
+    redoProjectChange,
+    restoreClosedEditorTab,
+    selectedPartId,
+    setFastSelectEnabled,
+    setObjectResizeMode,
+    setScrubSnapEnabled,
+    showPresentationControls,
+    stepSceneTime,
+    timelineMode,
+    togglePlayback,
+    undoProjectChange,
+    updateMode,
+    updateTimelineMode,
+  ]);
 }

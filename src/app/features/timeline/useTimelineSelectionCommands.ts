@@ -1,5 +1,16 @@
-import { TIMELINE_MOTION_PART_ID, type AdjustmentLayerSelection, type CompositionSelection, type MotionMarkerSelection, type RightPanelTab } from "../../types";
-import type { Part, SelectionPayload, TimelineMode, TimelinePart } from "../../../core/types";
+import {
+  TIMELINE_MOTION_PART_ID,
+  type AdjustmentLayerSelection,
+  type CompositionSelection,
+  type MotionMarkerSelection,
+  type RightPanelTab,
+} from "../../types";
+import type {
+  Part,
+  SelectionPayload,
+  TimelineMode,
+  TimelinePart,
+} from "../../../core/types";
 
 type MarkerSelection = { partId: string; markerId: string } | null;
 
@@ -90,7 +101,9 @@ export function useTimelineSelectionCommands({
     const timelinePart = timeline.find((item) => item.id === partId);
     if (!timelinePart) return;
     const currentTime = currentSceneTimeRef.current;
-    const insidePart = currentTime >= timelinePart.start && currentTime < timelinePart.start + timelinePart.duration;
+    const insidePart =
+      currentTime >= timelinePart.start &&
+      currentTime < timelinePart.start + timelinePart.duration;
     selectPart(partId);
     if (!insidePart) scrubToSceneTime(timelinePart.start);
     updateTimelineMode("compose");
@@ -128,7 +141,8 @@ export function useTimelineSelectionCommands({
     setSelectionPayload(null);
     setFocusPickZoomMarker(null);
     pausePlaybackAtCurrentTime();
-    if (primarySelection && primarySelection.partId !== TIMELINE_MOTION_PART_ID) setSelectedPartId(primarySelection.partId);
+    if (primarySelection && primarySelection.partId !== TIMELINE_MOTION_PART_ID)
+      setSelectedPartId(primarySelection.partId);
   }
 
   function selectAdjustmentLayer(layerId: string) {
@@ -163,7 +177,9 @@ export function useTimelineSelectionCommands({
     const primaryMotion = selection.motionMarkers.at(-1) ?? null;
     const primaryPart = selection.compositions.at(-1) ?? null;
     setSelectedAdjustmentLayers(selection.adjustmentLayers);
-    setSelectedAdjustmentLayerId(selection.adjustmentLayers.at(-1)?.layerId ?? null);
+    setSelectedAdjustmentLayerId(
+      selection.adjustmentLayers.at(-1)?.layerId ?? null,
+    );
     setSelectedParts(selection.compositions);
     setSelectedMotionMarkers(selection.motionMarkers);
     setSelectedMotionMarker(primaryMotion);

@@ -10,20 +10,22 @@ export const filmScratchesLogic = {
     const spacing = Math.max(72, 180 / density);
 
     return {
-      overlays: [{
-        id: `${layer.id}:film-scratches`,
-        target: getOverlayTarget(layer),
-        style: {
-          backgroundImage: [
-            "repeating-linear-gradient(90deg, transparent 0 92px, rgba(255,255,255,0.78) 94px 95px, transparent 97px 178px)",
-            "repeating-linear-gradient(90deg, transparent 0 154px, rgba(0,0,0,0.34) 157px 158px, transparent 160px 246px)",
-          ].join(","),
-          backgroundPosition: `${jitter}px 0, ${-jitter * 1.7}px 0`,
-          backgroundSize: `${spacing}px 100%, ${spacing * 1.45}px 100%`,
-          mixBlendMode: "screen",
-          opacity: intensity,
+      overlays: [
+        {
+          id: `${layer.id}:film-scratches`,
+          target: getOverlayTarget(layer),
+          style: {
+            backgroundImage: [
+              "repeating-linear-gradient(90deg, transparent 0 92px, rgba(255,255,255,0.78) 94px 95px, transparent 97px 178px)",
+              "repeating-linear-gradient(90deg, transparent 0 154px, rgba(0,0,0,0.34) 157px 158px, transparent 160px 246px)",
+            ].join(","),
+            backgroundPosition: `${jitter}px 0, ${-jitter * 1.7}px 0`,
+            backgroundSize: `${spacing}px 100%, ${spacing * 1.45}px 100%`,
+            mixBlendMode: "screen",
+            opacity: intensity,
+          },
         },
-      }],
+      ],
     };
   },
 } as const satisfies Partial<Pick<AdjustmentEffectPackage, "applyVisualStyle">>;

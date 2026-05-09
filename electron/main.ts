@@ -8,9 +8,7 @@ import {
   shell,
   clipboard,
 } from "electron";
-import {
-  spawn,
-} from "node:child_process";
+import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { watch, type FSWatcher } from "node:fs";
 import fs from "node:fs/promises";
@@ -19,12 +17,18 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
 import { RenderEngine } from "./render-engine/renderer.js";
-import type { ExportFrameRange, ProjectManifest, Scene } from "./render-engine/types.js";
+import type {
+  ExportFrameRange,
+  ProjectManifest,
+  Scene,
+} from "./render-engine/types.js";
 import { UpdateService } from "./updateService.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 app.setName("Clipper");
-const appRoot = app.isPackaged ? app.getPath("userData") : path.resolve(__dirname, "..");
+const appRoot = app.isPackaged
+  ? app.getPath("userData")
+  : path.resolve(__dirname, "..");
 const appStatePath = "clipper/app-state.json";
 const require = createRequire(import.meta.url);
 const ffmpegPath = require("ffmpeg-static") as string | null;
@@ -38,25 +42,42 @@ const agentProviderCommands: Record<string, string> = {
   gemini: "gemini",
 };
 app.commandLine.appendSwitch("force-color-profile", "srgb");
-const experimentalHtmlCanvasPostProcessEnabled = process.env.CLIPPER_EXPERIMENTAL_HTML_CANVAS_POSTPROCESS === "1" || readStartupAppStateBoolean("experimentalHtmlCanvasPostProcess");
-const automaticUpdateDownloadsEnabled = readStartupAppStateBoolean("automaticUpdateDownloads", true);
+const experimentalHtmlCanvasPostProcessEnabled =
+  process.env.CLIPPER_EXPERIMENTAL_HTML_CANVAS_POSTPROCESS === "1" ||
+  readStartupAppStateBoolean("experimentalHtmlCanvasPostProcess");
+const automaticUpdateDownloadsEnabled = readStartupAppStateBoolean(
+  "automaticUpdateDownloads",
+  true,
+);
 const defaultWindowBounds = { width: 1440, height: 960 };
 const minWindowBounds = { width: 1200, height: 760 };
 if (experimentalHtmlCanvasPostProcessEnabled) {
-  app.commandLine.appendSwitch("enable-blink-features", "HTMLCanvasElementDrawElement");
+  // Alpha live DOM post-process path: enables canvas[layoutsubtree] + ctx.drawElementImage() capture.
+  app.commandLine.appendSwitch(
+    "enable-blink-features",
+    "HTMLCanvasElementDrawElement",
+  );
   app.commandLine.appendSwitch("enable-features", "CanvasDrawElement");
 }
-if (isRenderVideoChildProcess && process.platform === "darwin") app.setActivationPolicy("accessory");
+if (isRenderVideoChildProcess && process.platform === "darwin")
+  app.setActivationPolicy("accessory");
 
 const textFileWatchers = new Map<number, FSWatcher[]>();
 let appShuttingDown = false;
 const appShuttingDownRef = { current: appShuttingDown };
-Object.defineProperty(appShuttingDownRef, "current", { get: () => appShuttingDown, set: (v) => { appShuttingDown = v; } });
+Object.defineProperty(appShuttingDownRef, "current", {
+  get: () => appShuttingDown,
+  set: (v) => {
+    appShuttingDown = v;
+  },
+});
 const appIconPath = path.resolve(__dirname, "../build/electron/icon.png");
 
 function readStartupAppStateBoolean(key: string, fallback = false) {
   try {
-    const state = JSON.parse(readFileSync(path.join(appRoot, appStatePath), "utf8")) as Record<string, unknown>;
+    const state = JSON.parse(
+      readFileSync(path.join(appRoot, appStatePath), "utf8"),
+    ) as Record<string, unknown>;
     return typeof state[key] === "boolean" ? state[key] === true : fallback;
   } catch {
     return fallback;
@@ -70,9 +91,12 @@ const updateService = new UpdateService({
   autoDownload: automaticUpdateDownloadsEnabled,
   readAutoDownload: async () => {
     const state = await readAppState();
-    return typeof state.automaticUpdateDownloads === "boolean" ? state.automaticUpdateDownloads : true;
+    return typeof state.automaticUpdateDownloads === "boolean"
+      ? state.automaticUpdateDownloads
+      : true;
   },
-  writeAutoDownload: async (enabled) => writeAppState({ automaticUpdateDownloads: enabled }),
+  writeAutoDownload: async (enabled) =>
+    writeAppState({ automaticUpdateDownloads: enabled }),
 });
 
 // ─── Helper functions ─────────────────────────────────────────────────────
@@ -92,11 +116,23 @@ async function writeAppState(updates: Record<string, unknown>) {
   const merged = { ...state };
   for (const [key, value] of Object.entries(updates)) {
     if (value === undefined || value === null) delete merged[key];
-    else if (key === "settings" && value && typeof value === "object" && !Array.isArray(value)) {
-      const previousSettings = merged.settings && typeof merged.settings === "object" && !Array.isArray(merged.settings) ? merged.settings as Record<string, unknown> : {};
-      merged.settings = { ...previousSettings, ...(value as Record<string, unknown>) };
-    }
-    else merged[key] = value;
+    else if (
+      key === "settings" &&
+      value &&
+      typeof value === "object" &&
+      !Array.isArray(value)
+    ) {
+      const previousSettings =
+        merged.settings &&
+        typeof merged.settings === "object" &&
+        !Array.isArray(merged.settings)
+          ? (merged.settings as Record<string, unknown>)
+          : {};
+      merged.settings = {
+        ...previousSettings,
+        ...(value as Record<string, unknown>),
+      };
+    } else merged[key] = value;
   }
   await fs.mkdir(path.dirname(resolveClipperFile(appStatePath)), {
     recursive: true,
@@ -153,15 +189,16 @@ function restoreWindowBounds(bounds: unknown) {
     height: candidate.height,
   };
   const displays = screen.getAllDisplays();
-  const matchingDisplay = displays.find((display) => {
-    const workArea = display.workArea;
-    return (
-      candidateBounds.x < workArea.x + workArea.width &&
-      candidateBounds.x + candidateBounds.width > workArea.x &&
-      candidateBounds.y < workArea.y + workArea.height &&
-      candidateBounds.y + candidateBounds.height > workArea.y
-    );
-  }) ?? screen.getPrimaryDisplay();
+  const matchingDisplay =
+    displays.find((display) => {
+      const workArea = display.workArea;
+      return (
+        candidateBounds.x < workArea.x + workArea.width &&
+        candidateBounds.x + candidateBounds.width > workArea.x &&
+        candidateBounds.y < workArea.y + workArea.height &&
+        candidateBounds.y + candidateBounds.height > workArea.y
+      );
+    }) ?? screen.getPrimaryDisplay();
   const workArea = matchingDisplay.workArea;
   const width = Math.min(
     Math.max(candidateBounds.width, minWindowBounds.width),
@@ -186,20 +223,39 @@ function restoreWindowBounds(bounds: unknown) {
 function installRendererStartupDiagnostics(window: BrowserWindow) {
   if (isDev) return;
 
-  window.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedUrl) => {
-    console.error("[clipper] renderer failed to load", { errorCode, errorDescription, validatedUrl });
-  });
+  window.webContents.on(
+    "did-fail-load",
+    (_event, errorCode, errorDescription, validatedUrl) => {
+      console.error("[clipper] renderer failed to load", {
+        errorCode,
+        errorDescription,
+        validatedUrl,
+      });
+    },
+  );
   window.webContents.on("render-process-gone", (_event, details) => {
     console.error("[clipper] renderer process gone", details);
   });
-  window.webContents.on("console-message", (_event, level, message, line, sourceId) => {
-    if (level < 2) return;
-    console.error("[clipper] renderer console", { level, message, line, sourceId });
-  });
+  window.webContents.on(
+    "console-message",
+    (_event, level, message, line, sourceId) => {
+      if (level < 2) return;
+      console.error("[clipper] renderer console", {
+        level,
+        message,
+        line,
+        sourceId,
+      });
+    },
+  );
 }
 
 function isAllowedWindowPermission(permission: string) {
-  return permission === "local-fonts" || permission === "pointerLock" || permission === "pointer-lock";
+  return (
+    permission === "local-fonts" ||
+    permission === "pointerLock" ||
+    permission === "pointer-lock"
+  );
 }
 
 type ProjectWatchPaths = {
@@ -333,13 +389,27 @@ function getAgentProviderCommand(provider: string) {
 
 async function loadTemplateBundles(): Promise<TemplateBundle[]> {
   const root = await resolveTemplatesRoot();
-  const entries = await fs.readdir(root, { withFileTypes: true }).catch(() => []);
-  const bundles = await Promise.all(entries.filter((entry) => entry.isDirectory() && entry.name.startsWith("submission-")).map((entry) => loadTemplateBundle(root, entry.name)));
-  return bundles.filter((bundle): bundle is TemplateBundle => Boolean(bundle)).sort((a, b) => a.id.localeCompare(b.id));
+  const entries = await fs
+    .readdir(root, { withFileTypes: true })
+    .catch(() => []);
+  const bundles = await Promise.all(
+    entries
+      .filter(
+        (entry) => entry.isDirectory() && entry.name.startsWith("submission-"),
+      )
+      .map((entry) => loadTemplateBundle(root, entry.name)),
+  );
+  return bundles
+    .filter((bundle): bundle is TemplateBundle => Boolean(bundle))
+    .sort((a, b) => a.id.localeCompare(b.id));
 }
 
 async function resolveTemplatesRoot() {
-  const candidates = [path.join(appRoot, "templates"), path.join(app.getAppPath(), "templates"), path.join(process.resourcesPath, "templates")];
+  const candidates = [
+    path.join(appRoot, "templates"),
+    path.join(app.getAppPath(), "templates"),
+    path.join(process.resourcesPath, "templates"),
+  ];
   for (const candidate of candidates) {
     try {
       const stat = await fs.stat(candidate);
@@ -351,14 +421,20 @@ async function resolveTemplatesRoot() {
   throw new Error("Template directory not found.");
 }
 
-async function loadTemplateBundle(root: string, folderName: string): Promise<TemplateBundle | null> {
+async function loadTemplateBundle(
+  root: string,
+  folderName: string,
+): Promise<TemplateBundle | null> {
   const folderPath = path.join(root, folderName);
-  const manifestSource = await fs.readFile(path.join(folderPath, "manifest.yml"), "utf8").catch(() => "");
+  const manifestSource = await fs
+    .readFile(path.join(folderPath, "manifest.yml"), "utf8")
+    .catch(() => "");
   if (!manifestSource) return null;
   const manifest = parseTemplateManifest(manifestSource);
   const sourceRoot = path.join(folderPath, "source");
   const files = await readTemplateSourceFiles(sourceRoot);
-  if (!files[manifest.entry]) throw new Error(`Template ${manifest.id} entry missing: ${manifest.entry}`);
+  if (!files[manifest.entry])
+    throw new Error(`Template ${manifest.id} entry missing: ${manifest.entry}`);
   return { ...manifest, files };
 }
 
@@ -376,18 +452,40 @@ function parseTemplateManifest(source: string): Omit<TemplateBundle, "files"> {
       section = rawValue.trim() ? "" : key;
       if (rawValue.trim()) values[key] = value;
     } else if (section === "author") {
-      if (key === "name" || key === "github" || key === "twitter" || key === "email") author[key] = value;
+      if (
+        key === "name" ||
+        key === "github" ||
+        key === "twitter" ||
+        key === "email"
+      )
+        author[key] = value;
     }
   }
   const id = values.id;
   const title = values.name;
   const entry = values.entry || "source/main.composition.ts";
   if (!id || !title) throw new Error("Template manifest requires id and name.");
-  return { id, slug: values.slug || id, title, subtitle: values.subtitle || "", entry, author: { name: author.name || "Unknown", github: author.github || undefined, twitter: author.twitter || undefined, email: author.email || undefined } };
+  return {
+    id,
+    slug: values.slug || id,
+    title,
+    subtitle: values.subtitle || "",
+    entry,
+    author: {
+      name: author.name || "Unknown",
+      github: author.github || undefined,
+      twitter: author.twitter || undefined,
+      email: author.email || undefined,
+    },
+  };
 }
 
 function unquoteYamlScalar(value: string) {
-  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) return value.slice(1, -1);
+  if (
+    (value.startsWith('"') && value.endsWith('"')) ||
+    (value.startsWith("'") && value.endsWith("'"))
+  )
+    return value.slice(1, -1);
   return value;
 }
 
@@ -413,14 +511,31 @@ async function readTemplateSourceFiles(sourceRoot: string) {
 function openTerminalWithCommand(folderPath: string, command: string) {
   const shellCommand = `cd ${shellQuote(folderPath)} && ${command}`;
   if (process.platform === "darwin") {
-    spawn("osascript", ["-e", `tell application "Terminal" to do script ${JSON.stringify(shellCommand)}`], { detached: true, stdio: "ignore" }).unref();
+    spawn(
+      "osascript",
+      [
+        "-e",
+        `tell application "Terminal" to do script ${JSON.stringify(shellCommand)}`,
+      ],
+      { detached: true, stdio: "ignore" },
+    ).unref();
     return;
   }
   if (process.platform === "win32") {
-    spawn("cmd.exe", ["/c", "start", "cmd.exe", "/k", shellCommand], { detached: true, stdio: "ignore" }).unref();
+    spawn("cmd.exe", ["/c", "start", "cmd.exe", "/k", shellCommand], {
+      detached: true,
+      stdio: "ignore",
+    }).unref();
     return;
   }
-  spawn("sh", ["-lc", `x-terminal-emulator -e sh -lc ${shellQuote(`${shellCommand}; exec sh`)}`], { detached: true, stdio: "ignore" }).unref();
+  spawn(
+    "sh",
+    [
+      "-lc",
+      `x-terminal-emulator -e sh -lc ${shellQuote(`${shellCommand}; exec sh`)}`,
+    ],
+    { detached: true, stdio: "ignore" },
+  ).unref();
 }
 
 function shellQuote(value: string) {
@@ -435,7 +550,8 @@ engine = new RenderEngine({
   resolveClipperFile,
   loadExportWindow: async (window: BrowserWindow) => {
     if (isDev) {
-      const baseUrl = process.env.VITE_DEV_SERVER_URL ?? "http://127.0.0.1:5173";
+      const baseUrl =
+        process.env.VITE_DEV_SERVER_URL ?? "http://127.0.0.1:5173";
       await window.loadURL(`${baseUrl}?clipperExport=1`);
       return;
     }
@@ -467,22 +583,39 @@ ipcMain.handle(
 
 ipcMain.handle("clipper:read-app-state", async () => readAppState());
 
-ipcMain.handle("clipper:write-app-state", async (_event, updates: Record<string, unknown>) => {
-  await writeAppState(updates);
-});
+ipcMain.handle(
+  "clipper:write-app-state",
+  async (_event, updates: Record<string, unknown>) => {
+    await writeAppState(updates);
+  },
+);
 
-ipcMain.handle("clipper:get-update-status", async () => updateService.getStatus());
+ipcMain.handle("clipper:get-update-status", async () =>
+  updateService.getStatus(),
+);
 
-ipcMain.handle("clipper:set-auto-download-updates", async (_event, enabled: unknown) => {
-  if (typeof enabled !== "boolean") throw new TypeError("clipper:set-auto-download-updates expects a boolean value.");
-  return updateService.setAutoDownload(enabled);
-});
+ipcMain.handle(
+  "clipper:set-auto-download-updates",
+  async (_event, enabled: unknown) => {
+    if (typeof enabled !== "boolean")
+      throw new TypeError(
+        "clipper:set-auto-download-updates expects a boolean value.",
+      );
+    return updateService.setAutoDownload(enabled);
+  },
+);
 
-ipcMain.handle("clipper:check-for-updates", async () => updateService.checkForUpdates());
+ipcMain.handle("clipper:check-for-updates", async () =>
+  updateService.checkForUpdates(),
+);
 
-ipcMain.handle("clipper:download-update", async () => updateService.downloadUpdate());
+ipcMain.handle("clipper:download-update", async () =>
+  updateService.downloadUpdate(),
+);
 
-ipcMain.handle("clipper:install-update", async () => updateService.installUpdate());
+ipcMain.handle("clipper:install-update", async () =>
+  updateService.installUpdate(),
+);
 
 ipcMain.handle(
   "clipper:write-text-file",
@@ -738,7 +871,9 @@ ipcMain.handle("clipper:open-project-manifest", async () => {
       return null;
     }
   }
-  return path.basename(selectedPath) === "project.json" ? getClipperRelativePath(selectedPath) : null;
+  return path.basename(selectedPath) === "project.json"
+    ? getClipperRelativePath(selectedPath)
+    : null;
 });
 
 function validateProjectFolderName(name: string): string | null {
@@ -769,10 +904,18 @@ ipcMain.handle(
 
     try {
       await fs.mkdir(folderPath);
-      await fs.mkdir(path.join(folderPath, "file-manager"), { recursive: true });
-      await fs.mkdir(path.join(folderPath, "file-manager", "assets"), { recursive: true });
-      await fs.mkdir(path.join(folderPath, "file-manager", "compositions"), { recursive: true });
-      await fs.mkdir(path.join(folderPath, "file-manager", "timelines"), { recursive: true });
+      await fs.mkdir(path.join(folderPath, "file-manager"), {
+        recursive: true,
+      });
+      await fs.mkdir(path.join(folderPath, "file-manager", "assets"), {
+        recursive: true,
+      });
+      await fs.mkdir(path.join(folderPath, "file-manager", "compositions"), {
+        recursive: true,
+      });
+      await fs.mkdir(path.join(folderPath, "file-manager", "timelines"), {
+        recursive: true,
+      });
     } catch (error) {
       if ((error as { code?: string }).code === "EEXIST") {
         throw new Error(`A project named "${folderName}" already exists.`);
@@ -837,7 +980,13 @@ ipcMain.handle(
 
     if (canceled || !filePath) return null;
 
-    const { sessionId } = engine.startVideoExport(defaultFileName, frameRate, width, height, filePath);
+    const { sessionId } = engine.startVideoExport(
+      defaultFileName,
+      frameRate,
+      width,
+      height,
+      filePath,
+    );
     return { sessionId, filePath };
   },
 );
@@ -888,13 +1037,42 @@ ipcMain.handle(
     stableSlowGridPreset?: unknown,
     stableSlowValidationSamples?: unknown,
   ) => {
-    type MediaExportFormat = "prores-422-hq" | "prores-4444" | "dnxhr-hqx" | "mov" | "h264-high" | "mp4" | "webm";
-    const knownFormats = new Set<string>(["prores-422-hq", "prores-4444", "dnxhr-hqx", "mov", "h264-high", "mp4", "webm"]);
+    type MediaExportFormat =
+      | "prores-422-hq"
+      | "prores-4444"
+      | "dnxhr-hqx"
+      | "mov"
+      | "h264-high"
+      | "mp4"
+      | "webm";
+    const knownFormats = new Set<string>([
+      "prores-422-hq",
+      "prores-4444",
+      "dnxhr-hqx",
+      "mov",
+      "h264-high",
+      "mp4",
+      "webm",
+    ]);
     const defaultExtension = path.extname(defaultFileName).toLowerCase();
-    const inferredFormat = defaultExtension === ".webm" ? "webm" : defaultExtension === ".mp4" ? "mp4" : "prores-422-hq";
-    const format = (knownFormats.has(mediaExportFormat ?? "") ? mediaExportFormat : inferredFormat) as MediaExportFormat;
+    const inferredFormat =
+      defaultExtension === ".webm"
+        ? "webm"
+        : defaultExtension === ".mp4"
+          ? "mp4"
+          : "prores-422-hq";
+    const format = (
+      knownFormats.has(mediaExportFormat ?? "")
+        ? mediaExportFormat
+        : inferredFormat
+    ) as MediaExportFormat;
     const renderQuality = normalizeExportRenderQuality(exportRenderQuality);
-    const extension = format === "webm" ? ".webm" : format === "h264-high" || format === "mp4" ? ".mp4" : ".mov";
+    const extension =
+      format === "webm"
+        ? ".webm"
+        : format === "h264-high" || format === "mp4"
+          ? ".mp4"
+          : ".mov";
     const defaultPath = withMediaExportExtension(defaultFileName, extension);
     const filters = getMediaExportDialogFilters(format);
     const title = getMediaExportDialogTitle(format);
@@ -924,9 +1102,13 @@ ipcMain.handle(
         exportRenderQuality: renderQuality,
         exportWorkerMapping: normalizeExportWorkerMapping(exportWorkerMapping),
         exportTileMapping: normalizeExportTileMapping(exportTileMapping),
-        exportRenderMode: exportRenderMode === "stable-slow" ? "stable-slow" : "renderer",
-        stableSlowGridPreset: normalizeStableSlowGridPreset(stableSlowGridPreset),
-        stableSlowValidationSamples: normalizeStableSlowValidationSamples(stableSlowValidationSamples),
+        exportRenderMode:
+          exportRenderMode === "stable-slow" ? "stable-slow" : "renderer",
+        stableSlowGridPreset:
+          normalizeStableSlowGridPreset(stableSlowGridPreset),
+        stableSlowValidationSamples: normalizeStableSlowValidationSamples(
+          stableSlowValidationSamples,
+        ),
         onProgress: (progress) =>
           event.sender.send(
             "clipper:video-export-progress",
@@ -940,12 +1122,18 @@ ipcMain.handle(
   },
 );
 
-function normalizeExportRenderQuality(value: string | undefined): "standard" | "high" | "ultra" {
+function normalizeExportRenderQuality(
+  value: string | undefined,
+): "standard" | "high" | "ultra" {
   return value === "standard" || value === "ultra" ? value : "high";
 }
 
-function normalizeStableSlowGridPreset(value: unknown): "relaxed" | "balanced" | "safe" | "extreme" {
-  return value === "relaxed" || value === "balanced" || value === "extreme" ? value : "safe";
+function normalizeStableSlowGridPreset(
+  value: unknown,
+): "relaxed" | "balanced" | "safe" | "extreme" {
+  return value === "relaxed" || value === "balanced" || value === "extreme"
+    ? value
+    : "safe";
 }
 
 function normalizeStableSlowValidationSamples(value: unknown): 1 | 2 | 3 {
@@ -953,7 +1141,9 @@ function normalizeStableSlowValidationSamples(value: unknown): 1 | 2 | 3 {
   return numeric === 2 || numeric === 3 ? numeric : 1;
 }
 
-function normalizeExportTileMapping(value: unknown): { hd?: number; qhd?: number; uhd?: number } | undefined {
+function normalizeExportTileMapping(
+  value: unknown,
+): { hd?: number; qhd?: number; uhd?: number } | undefined {
   if (!value || typeof value !== "object") return undefined;
   const source = value as Record<string, unknown>;
   return {
@@ -963,8 +1153,15 @@ function normalizeExportTileMapping(value: unknown): { hd?: number; qhd?: number
   };
 }
 
-function normalizeExportWorkerMapping(value: unknown): { hd: number; qhd: number; uhd: number } {
-  const candidate = value && typeof value === "object" ? value as { hd?: unknown; qhd?: unknown; uhd?: unknown } : {};
+function normalizeExportWorkerMapping(value: unknown): {
+  hd: number;
+  qhd: number;
+  uhd: number;
+} {
+  const candidate =
+    value && typeof value === "object"
+      ? (value as { hd?: unknown; qhd?: unknown; uhd?: unknown })
+      : {};
   return {
     hd: normalizeExportWorkerCount(candidate.hd, 2),
     qhd: normalizeExportWorkerCount(candidate.qhd, 2),
@@ -984,7 +1181,16 @@ function normalizeExportWorkerCount(value: unknown, fallback: number) {
   return Math.min(Math.max(Math.round(numeric), 1), 8);
 }
 
-function getMediaExportDialogFilters(format: "prores-422-hq" | "prores-4444" | "dnxhr-hqx" | "mov" | "h264-high" | "mp4" | "webm") {
+function getMediaExportDialogFilters(
+  format:
+    | "prores-422-hq"
+    | "prores-4444"
+    | "dnxhr-hqx"
+    | "mov"
+    | "h264-high"
+    | "mp4"
+    | "webm",
+) {
   switch (format) {
     case "webm":
       return [{ name: "WebM Video", extensions: ["webm"] }];
@@ -1003,22 +1209,43 @@ function getMediaExportDialogFilters(format: "prores-422-hq" | "prores-4444" | "
   }
 }
 
-function getMediaExportDialogTitle(format: "prores-422-hq" | "prores-4444" | "dnxhr-hqx" | "mov" | "h264-high" | "mp4" | "webm") {
+function getMediaExportDialogTitle(
+  format:
+    | "prores-422-hq"
+    | "prores-4444"
+    | "dnxhr-hqx"
+    | "mov"
+    | "h264-high"
+    | "mp4"
+    | "webm",
+) {
   switch (format) {
-    case "webm": return "Export WebM video";
-    case "h264-high": return "Export high-quality H.264 video";
-    case "mp4": return "Export MP4 video";
-    case "prores-4444": return "Export ProRes 4444 video";
-    case "dnxhr-hqx": return "Export DNxHR HQX video";
-    case "mov": return "Export uncompressed MOV video";
-    default: return "Export ProRes 422 HQ video";
+    case "webm":
+      return "Export WebM video";
+    case "h264-high":
+      return "Export high-quality H.264 video";
+    case "mp4":
+      return "Export MP4 video";
+    case "prores-4444":
+      return "Export ProRes 4444 video";
+    case "dnxhr-hqx":
+      return "Export DNxHR HQX video";
+    case "mov":
+      return "Export uncompressed MOV video";
+    default:
+      return "Export ProRes 422 HQ video";
   }
 }
 
-function withMediaExportExtension(filePath: string, extension: ".mov" | ".mp4" | ".webm") {
+function withMediaExportExtension(
+  filePath: string,
+  extension: ".mov" | ".mp4" | ".webm",
+) {
   const parsed = path.parse(filePath);
   const knownExtensions = new Set([".mov", ".mp4", ".webm"]);
-  const baseName = knownExtensions.has(parsed.ext.toLowerCase()) ? parsed.name : parsed.base;
+  const baseName = knownExtensions.has(parsed.ext.toLowerCase())
+    ? parsed.name
+    : parsed.base;
   return path.join(parsed.dir, `${baseName}${extension}`);
 }
 
@@ -1037,7 +1264,17 @@ ipcMain.handle(
     frameRange?: ExportFrameRange,
   ) => {
     return withTimeout(
-      engine.prerenderFrame(project, manifestPath, scene, sceneTime, sceneDuration, frameRate, tileHeight, blockDurationMs, frameRange),
+      engine.prerenderFrame(
+        project,
+        manifestPath,
+        scene,
+        sceneTime,
+        sceneDuration,
+        frameRate,
+        tileHeight,
+        blockDurationMs,
+        frameRange,
+      ),
       12000,
       `Timed out prerendering frame at ${sceneTime.toFixed(3)}s in the main process.`,
     );
@@ -1058,7 +1295,16 @@ ipcMain.handle(
     blockDurationMs?: number,
   ) => {
     return withTimeout(
-      engine.prerenderVideoBlock(project, manifestPath, scene, sceneTime, sceneDuration, frameRate, tileHeight, blockDurationMs),
+      engine.prerenderVideoBlock(
+        project,
+        manifestPath,
+        scene,
+        sceneTime,
+        sceneDuration,
+        frameRate,
+        tileHeight,
+        blockDurationMs,
+      ),
       30000,
       `Timed out prerendering video block at ${sceneTime.toFixed(3)}s in the main process.`,
     );
@@ -1099,7 +1345,9 @@ async function createWindow() {
     titleBarStyle: "hiddenInset",
     transparent: false,
     webPreferences: {
-      additionalArguments: experimentalHtmlCanvasPostProcessEnabled ? ["clipperExperimentalHtmlCanvasPostProcess=1"] : [],
+      additionalArguments: experimentalHtmlCanvasPostProcessEnabled
+        ? ["clipperExperimentalHtmlCanvasPostProcess=1"]
+        : [],
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
@@ -1294,9 +1542,7 @@ app.whenReady().then(async () => {
   if (isRenderVideoChildProcess) {
     const payloadPath = process.argv[renderVideoChildArgIndex + 1];
     if (!payloadPath)
-      throw new Error(
-        "Usage: electron . --render-video-child <payload.json>",
-      );
+      throw new Error("Usage: electron . --render-video-child <payload.json>");
     await engine.runRenderVideoChildIfRequested(payloadPath);
     app.quit();
     return;

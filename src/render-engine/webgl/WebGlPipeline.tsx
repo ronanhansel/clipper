@@ -1,9 +1,31 @@
 import { useEffect, useRef, useState } from "react";
 import type { PlaybackClock } from "../../app/types";
-import { FRAME_HEIGHT, FRAME_WIDTH, type Composition3dGraphState } from "../../core/types";
+import {
+  FRAME_HEIGHT,
+  FRAME_WIDTH,
+  type Composition3dGraphState,
+} from "../../core/types";
 import { WebGlCore } from "./WebGlCore";
 
-export function WebGlPipeline({ graph, frameScale, isPlaying, partDuration, partStart, previewTime, trimStart, playbackClock }: { graph?: Composition3dGraphState; frameScale: number; isPlaying: boolean; partDuration: number; partStart: number; previewTime: number; trimStart?: number; playbackClock: PlaybackClock }) {
+export function WebGlPipeline({
+  graph,
+  frameScale,
+  isPlaying,
+  partDuration,
+  partStart,
+  previewTime,
+  trimStart,
+  playbackClock,
+}: {
+  graph?: Composition3dGraphState;
+  frameScale: number;
+  isPlaying: boolean;
+  partDuration: number;
+  partStart: number;
+  previewTime: number;
+  trimStart?: number;
+  playbackClock: PlaybackClock;
+}) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const coreRef = useRef<WebGlCore | null>(null);
   const [renderError, setRenderError] = useState<unknown>(null);
@@ -27,7 +49,15 @@ export function WebGlPipeline({ graph, frameScale, isPlaying, partDuration, part
 
   function getCurrentRenderTime() {
     if (!isPlayingRef.current) return previewTimeRef.current;
-    return getPlaybackPreviewTime(playbackClockRef.current, performance.now(), partStartRef.current, trimStartRef.current, partDurationRef.current) ?? previewTimeRef.current;
+    return (
+      getPlaybackPreviewTime(
+        playbackClockRef.current,
+        performance.now(),
+        partStartRef.current,
+        trimStartRef.current,
+        partDurationRef.current,
+      ) ?? previewTimeRef.current
+    );
   }
 
   useEffect(() => {
@@ -48,9 +78,12 @@ export function WebGlPipeline({ graph, frameScale, isPlaying, partDuration, part
       }
       frameId = requestAnimationFrame(renderLoop);
     };
-    void core.init().then(() => {
-      if (!disposed) renderLoop();
-    }).catch((error) => console.warn("WebGL renderer init failed", error));
+    void core
+      .init()
+      .then(() => {
+        if (!disposed) renderLoop();
+      })
+      .catch((error) => console.warn("WebGL renderer init failed", error));
     return () => {
       disposed = true;
       cancelAnimationFrame(frameId);
@@ -65,10 +98,24 @@ export function WebGlPipeline({ graph, frameScale, isPlaying, partDuration, part
     coreRef.current?.resize(width, height);
   }, [frameScale]);
 
-  return <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" width={Math.round(FRAME_WIDTH * frameScale)} height={Math.round(FRAME_HEIGHT * frameScale)} data-clipper-webgl-preview />;
+  return (
+    <canvas
+      ref={canvasRef}
+      className="absolute inset-0 h-full w-full"
+      width={Math.round(FRAME_WIDTH * frameScale)}
+      height={Math.round(FRAME_HEIGHT * frameScale)}
+      data-clipper-webgl-preview
+    />
+  );
 }
 
-function getPlaybackPreviewTime(clock: PlaybackClock, now: number, partStart: number, trimStart: number, duration: number) {
+function getPlaybackPreviewTime(
+  clock: PlaybackClock,
+  now: number,
+  partStart: number,
+  trimStart: number,
+  duration: number,
+) {
   if (!clock) return null;
   const sceneTime = clock.startedFrom + (now - clock.startedAt) / 1000;
   return Math.min(Math.max(sceneTime - partStart + trimStart, 0), duration);

@@ -1,8 +1,15 @@
-import type { FileManagerProps, FileManagerTreeSnapshot } from "../../../components/FileManager";
+import type {
+  FileManagerProps,
+  FileManagerTreeSnapshot,
+} from "../../../components/FileManager";
 import type { EditorState } from "../../../core/types";
-import { buildFileManagerWorkspaceProps, type FileManagerWorkspaceProps } from "./FileManagerWorkspace";
+import {
+  buildFileManagerWorkspaceProps,
+  type FileManagerWorkspaceProps,
+} from "./FileManagerWorkspace";
 
-type UseFileManagerControllerInput = Pick<FileManagerProps,
+type UseFileManagerControllerInput = Pick<
+  FileManagerProps,
   | "assets"
   | "assetsPath"
   | "compositionFolders"
@@ -32,7 +39,9 @@ type UseFileManagerControllerInput = Pick<FileManagerProps,
     dropFiles: FileManagerProps["onDropFiles"];
     duplicateAsset: FileManagerProps["onDuplicateAsset"];
     duplicateComposition: FileManagerProps["onDuplicateComposition"];
-    fileManagerStateChange: (fileManagerState: EditorState["fileManagerState"]) => void;
+    fileManagerStateChange: (
+      fileManagerState: EditorState["fileManagerState"],
+    ) => void;
     moveComposition: FileManagerProps["onMoveComposition"];
     moveTimeline: FileManagerProps["onMoveTimeline"];
     prerenderComposition?: FileManagerProps["onPrerenderComposition"];
@@ -51,10 +60,16 @@ type UseFileManagerControllerInput = Pick<FileManagerProps,
     openProjectFile: NonNullable<FileManagerProps["onOpenProjectFile"]>;
     renameProjectFile: FileManagerProps["onRenameProjectFile"];
   };
-  implicitFileOperation: <T extends unknown[]>(operation: (...args: T) => void) => (...args: T) => void;
+  implicitFileOperation: <T extends unknown[]>(
+    operation: (...args: T) => void,
+  ) => (...args: T) => void;
 };
 
-export function useFileManagerController({ actions, implicitFileOperation, ...state }: UseFileManagerControllerInput): FileManagerWorkspaceProps {
+export function useFileManagerController({
+  actions,
+  implicitFileOperation,
+  ...state
+}: UseFileManagerControllerInput): FileManagerWorkspaceProps {
   return buildFileManagerWorkspaceProps({
     ...state,
     actions: {
@@ -63,13 +78,17 @@ export function useFileManagerController({ actions, implicitFileOperation, ...st
       copyAsset: actions.copyAsset,
       copyCompositionPath: actions.copyCompositionPath,
       createComposition: implicitFileOperation(actions.createComposition),
-      createCompositionFolder: implicitFileOperation(actions.createCompositionFolder),
+      createCompositionFolder: implicitFileOperation(
+        actions.createCompositionFolder,
+      ),
       createProjectFile: actions.createProjectFile,
       createFolder: implicitFileOperation(actions.createFolder),
       createTimeline: implicitFileOperation(actions.createTimeline),
       deleteAsset: implicitFileOperation(actions.deleteAsset),
       deleteComposition: implicitFileOperation(actions.deleteComposition),
-      deleteCompositionFolder: implicitFileOperation(actions.deleteCompositionFolder),
+      deleteCompositionFolder: implicitFileOperation(
+        actions.deleteCompositionFolder,
+      ),
       deleteProjectFile: actions.deleteProjectFile,
       deleteTimeline: implicitFileOperation(actions.deleteTimeline),
       dropFiles: implicitFileOperation(actions.dropFiles),
@@ -81,7 +100,9 @@ export function useFileManagerController({ actions, implicitFileOperation, ...st
       prerenderComposition: actions.prerenderComposition,
       renameAsset: implicitFileOperation(actions.renameAsset),
       renameComposition: implicitFileOperation(actions.renameComposition),
-      renameCompositionFolder: implicitFileOperation(actions.renameCompositionFolder),
+      renameCompositionFolder: implicitFileOperation(
+        actions.renameCompositionFolder,
+      ),
       renameProjectFile: actions.renameProjectFile,
       renameTimeline: implicitFileOperation(actions.renameTimeline),
       revealAssetRoot: actions.revealAssetRoot,

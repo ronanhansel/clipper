@@ -12,7 +12,7 @@ export class DeleteCommand implements Command {
 
   constructor(
     targets: DeleteCommandTarget[],
-    private projectRoot: string
+    private projectRoot: string,
   ) {
     const timestamp = Date.now();
     this.targets = targets.map((target, index) => ({
@@ -22,16 +22,30 @@ export class DeleteCommand implements Command {
   }
 
   get label() {
-    return this.targets.length === 1 ? `Delete "${this.targets[0].name}"` : `Delete ${this.targets.length} items`;
+    return this.targets.length === 1
+      ? `Delete "${this.targets[0].name}"`
+      : `Delete ${this.targets.length} items`;
   }
 
   async execute() {
-    await clipperHost.createDirectory(`${this.projectRoot}/.clipper-trash`).catch(() => {});
-    await performRenames(this.targets.map((target) => ({ oldPath: target.path, newPath: target.trashPath })));
+    await clipperHost
+      .createDirectory(`${this.projectRoot}/.clipper-trash`)
+      .catch(() => {});
+    await performRenames(
+      this.targets.map((target) => ({
+        oldPath: target.path,
+        newPath: target.trashPath,
+      })),
+    );
   }
 
   async undo() {
-    await performRenames(this.targets.map((target) => ({ oldPath: target.trashPath, newPath: target.path })));
+    await performRenames(
+      this.targets.map((target) => ({
+        oldPath: target.trashPath,
+        newPath: target.path,
+      })),
+    );
   }
 
   async redo() {
@@ -39,7 +53,9 @@ export class DeleteCommand implements Command {
   }
 }
 
-async function performRenames(renames: Array<{ oldPath: string; newPath: string }>) {
+async function performRenames(
+  renames: Array<{ oldPath: string; newPath: string }>,
+) {
   const applied: Array<{ oldPath: string; newPath: string }> = [];
 
   try {
@@ -57,7 +73,10 @@ async function performRenames(renames: Array<{ oldPath: string; newPath: string 
       }
     }
     if (rollbackErrors.length > 0) {
-      throw new AggregateError([error, ...rollbackErrors], "Delete failed and rollback was incomplete.");
+      throw new AggregateError(
+        [error, ...rollbackErrors],
+        "Delete failed and rollback was incomplete.",
+      );
     }
     throw error;
   }

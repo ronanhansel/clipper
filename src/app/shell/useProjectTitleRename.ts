@@ -2,7 +2,9 @@ import { useRef, type MouseEvent as ReactMouseEvent } from "react";
 import type { ContextMenuState } from "../types";
 import type { ProjectManifest } from "../../core/types";
 
-type UpdateProject = (updater: (current: ProjectManifest) => ProjectManifest) => void;
+type UpdateProject = (
+  updater: (current: ProjectManifest) => ProjectManifest,
+) => void;
 
 type ProjectTitleRenameOptions = {
   projectName: string;
@@ -14,7 +16,15 @@ type ProjectTitleRenameOptions = {
   updateProject: UpdateProject;
 };
 
-export function useProjectTitleRename({ projectName, projectNameDraft, projectRef, setAppContextMenu, setProjectNameDraft, setRenamingProject, updateProject }: ProjectTitleRenameOptions) {
+export function useProjectTitleRename({
+  projectName,
+  projectNameDraft,
+  projectRef,
+  setAppContextMenu,
+  setProjectNameDraft,
+  setRenamingProject,
+  updateProject,
+}: ProjectTitleRenameOptions) {
   const projectRenameCancelledRef = useRef(false);
 
   function startProjectRename() {

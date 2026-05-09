@@ -1,12 +1,34 @@
 import { useCallback, useRef } from "react";
 import { AgentPanel } from "../../components/AgentPanel";
-import { AdjustmentInspector, Composition3dNodeInspector, EmptyInspector, FrameInspector, MotionInspector, ObjectInspector, TransitionInspector } from "../../components/inspector/InspectorPanels";
+import {
+  AdjustmentInspector,
+  Composition3dNodeInspector,
+  EmptyInspector,
+  FrameInspector,
+  MotionInspector,
+  ObjectInspector,
+  TransitionInspector,
+} from "../../components/inspector/InspectorPanels";
 import type { AdjustmentEffectPointControl } from "../../core/effects/types";
-import type { AdjustmentLayer, BackgroundLayer, CompositionRenderMode, FrameObject, MotionEase, MotionMarker, Part, PartFrame, Point, TransitionLayer } from "../../core/types";
+import type {
+  AdjustmentLayer,
+  BackgroundLayer,
+  CompositionRenderMode,
+  FrameObject,
+  MotionEase,
+  MotionMarker,
+  Part,
+  PartFrame,
+  Point,
+  TransitionLayer,
+} from "../../core/types";
 import type { RightPanelTab } from "../types";
 
 type MarkerPick = { partId: string; markerId: string } | null;
-type PointPickAdjustment = { layerId: string; control: AdjustmentEffectPointControl } | null;
+type PointPickAdjustment = {
+  layerId: string;
+  control: AdjustmentEffectPointControl;
+} | null;
 
 type ConnectedInspectorContentProps = {
   rightPanelTab: RightPanelTab;
@@ -36,15 +58,33 @@ type ConnectedInspectorContentProps = {
   pointPickAdjustment: PointPickAdjustment;
   selectedPart: Part | null | undefined;
   selectedComposition3dNodeId: string | null;
-  onUpdateMotionMarker: (partId: string, markerId: string, updater: (marker: MotionMarker, part: Part) => MotionMarker) => void;
-  onPreviewMotionMarker: (partId: string, markerId: string, updater: (marker: MotionMarker) => MotionMarker) => void;
+  onUpdateMotionMarker: (
+    partId: string,
+    markerId: string,
+    updater: (marker: MotionMarker, part: Part) => MotionMarker,
+  ) => void;
+  onPreviewMotionMarker: (
+    partId: string,
+    markerId: string,
+    updater: (marker: MotionMarker) => MotionMarker,
+  ) => void;
   onPreviewMotionPickPoint: (point: Point | null) => void;
   onMotionPreviewScrubStart: () => void;
   onMotionPreviewScrubEnd: () => void;
   onClearMotionPreview: () => void;
-  onUpdateMotionMarkerFocusGroup: (partId: string, markerId: string, focus: Point) => void;
-  onUpdateSelectedMotionSnap: (key: "snapIn" | "snapOut", enabled: boolean) => void;
-  onUpdateMotionMiddleTransition: (part: Part, mode: "instant" | "transition") => void;
+  onUpdateMotionMarkerFocusGroup: (
+    partId: string,
+    markerId: string,
+    focus: Point,
+  ) => void;
+  onUpdateSelectedMotionSnap: (
+    key: "snapIn" | "snapOut",
+    enabled: boolean,
+  ) => void;
+  onUpdateMotionMiddleTransition: (
+    part: Part,
+    mode: "instant" | "transition",
+  ) => void;
   onUpdateMotionMiddleEase: (part: Part, ease: MotionEase | undefined) => void;
   onDeleteMotionMarker: (partId: string, markerId: string) => void;
   onStartMotionFocusPick: (partId: string, markerId: string) => void;
@@ -53,22 +93,46 @@ type ConnectedInspectorContentProps = {
   onSnapMotionMiddle: (part: Part) => void;
   onSnapAdjustmentMiddle: () => void;
   onSnapCompositionMiddle: () => void;
-  onUpdateSelectedObject: (updater: (object: FrameObject) => FrameObject) => void;
-  onPreviewSelectedObject: (updater: (object: FrameObject) => FrameObject) => void;
-  onUpdateAdjustmentLayer: (layerId: string, updater: (layer: AdjustmentLayer) => AdjustmentLayer) => void;
-  onPreviewAdjustmentLayer: (layerId: string, updater: (layer: AdjustmentLayer) => AdjustmentLayer) => void;
+  onUpdateSelectedObject: (
+    updater: (object: FrameObject) => FrameObject,
+  ) => void;
+  onPreviewSelectedObject: (
+    updater: (object: FrameObject) => FrameObject,
+  ) => void;
+  onUpdateAdjustmentLayer: (
+    layerId: string,
+    updater: (layer: AdjustmentLayer) => AdjustmentLayer,
+  ) => void;
+  onPreviewAdjustmentLayer: (
+    layerId: string,
+    updater: (layer: AdjustmentLayer) => AdjustmentLayer,
+  ) => void;
   onClearAdjustmentPreview: () => void;
   onDeleteAdjustmentLayer: (layerId: string) => void;
-  onUpdateTransitionLayer: (layerId: string, updater: (layer: TransitionLayer) => TransitionLayer) => void;
+  onUpdateTransitionLayer: (
+    layerId: string,
+    updater: (layer: TransitionLayer) => TransitionLayer,
+  ) => void;
   onDeleteTransitionLayer: (layerId: string) => void;
-  onStartAdjustmentPointPick: (layerId: string, control: AdjustmentEffectPointControl) => void;
+  onStartAdjustmentPointPick: (
+    layerId: string,
+    control: AdjustmentEffectPointControl,
+  ) => void;
   onUpdateSelectedPartDuration: (duration: number) => void;
   onUpdatePartFrame: (updater: (frame: PartFrame) => PartFrame) => void;
-  onUpdatePartBackground: (updater: (background: BackgroundLayer) => BackgroundLayer) => void;
+  onUpdatePartBackground: (
+    updater: (background: BackgroundLayer) => BackgroundLayer,
+  ) => void;
   onPreviewPartFrame: (updater: (frame: PartFrame) => PartFrame) => void;
-  onPreviewPartBackground: (updater: (background: BackgroundLayer) => BackgroundLayer) => void;
+  onPreviewPartBackground: (
+    updater: (background: BackgroundLayer) => BackgroundLayer,
+  ) => void;
   onUpdatePartRenderMode: (renderMode: CompositionRenderMode) => void;
-  onUpdateComposition3dGraphNodeParameter: (nodeId: string, key: string, value: string) => void;
+  onUpdateComposition3dGraphNodeParameter: (
+    nodeId: string,
+    key: string,
+    value: string,
+  ) => void;
 };
 
 export function ConnectedInspectorContent({
@@ -133,17 +197,36 @@ export function ConnectedInspectorContent({
   onUpdatePartRenderMode,
   onUpdateComposition3dGraphNodeParameter,
 }: ConnectedInspectorContentProps) {
-  const stableSelectedObjectRef = useRef<FrameObject | null | undefined>(selectedObject);
+  const stableSelectedObjectRef = useRef<FrameObject | null | undefined>(
+    selectedObject,
+  );
   const updateSelectedObjectRef = useRef(onUpdateSelectedObject);
   const previewSelectedObjectRef = useRef(onPreviewSelectedObject);
   if (!isPlaying) stableSelectedObjectRef.current = selectedObject;
   updateSelectedObjectRef.current = onUpdateSelectedObject;
   previewSelectedObjectRef.current = onPreviewSelectedObject;
-  const inspectorSelectedObject = isPlaying ? stableSelectedObjectRef.current : selectedObject;
-  const stableUpdateSelectedObject = useCallback((updater: (object: FrameObject) => FrameObject) => updateSelectedObjectRef.current(updater), []);
-  const stablePreviewSelectedObject = useCallback((updater: (object: FrameObject) => FrameObject) => previewSelectedObjectRef.current(updater), []);
+  const inspectorSelectedObject = isPlaying
+    ? stableSelectedObjectRef.current
+    : selectedObject;
+  const stableUpdateSelectedObject = useCallback(
+    (updater: (object: FrameObject) => FrameObject) =>
+      updateSelectedObjectRef.current(updater),
+    [],
+  );
+  const stablePreviewSelectedObject = useCallback(
+    (updater: (object: FrameObject) => FrameObject) =>
+      previewSelectedObjectRef.current(updater),
+    [],
+  );
 
-  if (rightPanelTab === "agent") return <AgentPanel part={part} sourceStatus={sourceStatus} agentContext={agentContext} />;
+  if (rightPanelTab === "agent")
+    return (
+      <AgentPanel
+        part={part}
+        sourceStatus={sourceStatus}
+        agentContext={agentContext}
+      />
+    );
 
   if (selectedMotion && selectedMotionPart) {
     return (
@@ -156,36 +239,84 @@ export function ConnectedInspectorContent({
         middleSnapActive={selectedMotionPartMiddleSnapActive}
         middleEase={selectedMotionPartMiddleEase}
         middleTransitionMode={selectedMotionPartMiddleTransitionMode}
-        pickingFocus={focusPickMotionMarker?.partId === selectedMotionPart.id && focusPickMotionMarker.markerId === selectedMotion.id}
-        pickingPosition={positionPickMotionMarker?.partId === selectedMotionPart.id && positionPickMotionMarker.markerId === selectedMotion.id}
-        pickingTracker={trackerPickMotionMarker?.partId === selectedMotionPart.id && trackerPickMotionMarker.markerId === selectedMotion.id}
+        pickingFocus={
+          focusPickMotionMarker?.partId === selectedMotionPart.id &&
+          focusPickMotionMarker.markerId === selectedMotion.id
+        }
+        pickingPosition={
+          positionPickMotionMarker?.partId === selectedMotionPart.id &&
+          positionPickMotionMarker.markerId === selectedMotion.id
+        }
+        pickingTracker={
+          trackerPickMotionMarker?.partId === selectedMotionPart.id &&
+          trackerPickMotionMarker.markerId === selectedMotion.id
+        }
         canSnapMiddle={canSnapMotionMiddle}
-        onChange={(updater) => onUpdateMotionMarker(selectedMotionPart.id, selectedMotion.id, updater)}
-        onPreviewMarker={(updater) => onPreviewMotionMarker(selectedMotionPart.id, selectedMotion.id, updater)}
+        onChange={(updater) =>
+          onUpdateMotionMarker(
+            selectedMotionPart.id,
+            selectedMotion.id,
+            updater,
+          )
+        }
+        onPreviewMarker={(updater) =>
+          onPreviewMotionMarker(
+            selectedMotionPart.id,
+            selectedMotion.id,
+            updater,
+          )
+        }
         onPreviewPickPoint={onPreviewMotionPickPoint}
         onPreviewScrubStart={onMotionPreviewScrubStart}
         onPreviewScrubEnd={onMotionPreviewScrubEnd}
         onClearPreview={onClearMotionPreview}
-        onChangeFocus={(focus) => onUpdateMotionMarkerFocusGroup(selectedMotionPart.id, selectedMotion.id, focus)}
+        onChangeFocus={(focus) =>
+          onUpdateMotionMarkerFocusGroup(
+            selectedMotionPart.id,
+            selectedMotion.id,
+            focus,
+          )
+        }
         onChangeSelectedSnap={onUpdateSelectedMotionSnap}
-        onChangeMiddleTransition={(mode) => onUpdateMotionMiddleTransition(selectedMotionPart, mode)}
-        onChangeMiddleEase={(ease) => onUpdateMotionMiddleEase(selectedMotionPart, ease)}
-        onDelete={() => onDeleteMotionMarker(selectedMotionPart.id, selectedMotion.id)}
-        onPickFocus={() => onStartMotionFocusPick(selectedMotionPart.id, selectedMotion.id)}
-        onPickPosition={() => onStartMotionPositionPick(selectedMotionPart.id, selectedMotion.id)}
-        onPickTracker={() => onStartMotionTrackerPick(selectedMotionPart.id, selectedMotion.id)}
+        onChangeMiddleTransition={(mode) =>
+          onUpdateMotionMiddleTransition(selectedMotionPart, mode)
+        }
+        onChangeMiddleEase={(ease) =>
+          onUpdateMotionMiddleEase(selectedMotionPart, ease)
+        }
+        onDelete={() =>
+          onDeleteMotionMarker(selectedMotionPart.id, selectedMotion.id)
+        }
+        onPickFocus={() =>
+          onStartMotionFocusPick(selectedMotionPart.id, selectedMotion.id)
+        }
+        onPickPosition={() =>
+          onStartMotionPositionPick(selectedMotionPart.id, selectedMotion.id)
+        }
+        onPickTracker={() =>
+          onStartMotionTrackerPick(selectedMotionPart.id, selectedMotion.id)
+        }
         onSnapMiddle={() => onSnapMotionMiddle(selectedMotionPart)}
       />
     );
   }
 
-  if (inspectorSelectedObject) return <ObjectInspector object={inspectorSelectedObject} onChange={stableUpdateSelectedObject} onPreview={stablePreviewSelectedObject} />;
+  if (inspectorSelectedObject)
+    return (
+      <ObjectInspector
+        object={inspectorSelectedObject}
+        onChange={stableUpdateSelectedObject}
+        onPreview={stablePreviewSelectedObject}
+      />
+    );
 
   if (selectedTransitionLayer) {
     return (
       <TransitionInspector
         layer={selectedTransitionLayer}
-        onChange={(updater) => onUpdateTransitionLayer(selectedTransitionLayer.id, updater)}
+        onChange={(updater) =>
+          onUpdateTransitionLayer(selectedTransitionLayer.id, updater)
+        }
         onDelete={() => onDeleteTransitionLayer(selectedTransitionLayer.id)}
       />
     );
@@ -196,21 +327,51 @@ export function ConnectedInspectorContent({
       <AdjustmentInspector
         layer={selectedAdjustmentLayer}
         sceneDuration={sceneDurationSeconds}
-        pickingPointKey={pointPickAdjustment?.layerId === selectedAdjustmentLayer.id ? `${pointPickAdjustment.control.xKey}:${pointPickAdjustment.control.yKey}` : null}
+        pickingPointKey={
+          pointPickAdjustment?.layerId === selectedAdjustmentLayer.id
+            ? `${pointPickAdjustment.control.xKey}:${pointPickAdjustment.control.yKey}`
+            : null
+        }
         canSnapMiddle={canSnapAdjustmentMiddle}
-        onChange={(updater) => onUpdateAdjustmentLayer(selectedAdjustmentLayer.id, updater)}
-        onPreviewLayer={(updater) => onPreviewAdjustmentLayer(selectedAdjustmentLayer.id, updater)}
+        onChange={(updater) =>
+          onUpdateAdjustmentLayer(selectedAdjustmentLayer.id, updater)
+        }
+        onPreviewLayer={(updater) =>
+          onPreviewAdjustmentLayer(selectedAdjustmentLayer.id, updater)
+        }
         onClearPreview={onClearAdjustmentPreview}
         onDelete={() => onDeleteAdjustmentLayer(selectedAdjustmentLayer.id)}
-        onPickPoint={(control) => onStartAdjustmentPointPick(selectedAdjustmentLayer.id, control)}
+        onPickPoint={(control) =>
+          onStartAdjustmentPointPick(selectedAdjustmentLayer.id, control)
+        }
         onSnapMiddle={onSnapAdjustmentMiddle}
       />
     );
   }
 
-  if (composeMode && part.renderMode === "webgl" && selectedComposition3dNodeId) return <Composition3dNodeInspector part={part} nodeId={selectedComposition3dNodeId} onParameterChange={onUpdateComposition3dGraphNodeParameter} />;
+  if (composeMode && part.renderMode === "webgl" && selectedComposition3dNodeId)
+    return (
+      <Composition3dNodeInspector
+        part={part}
+        nodeId={selectedComposition3dNodeId}
+        onParameterChange={onUpdateComposition3dGraphNodeParameter}
+      />
+    );
 
-  if (selectedPart) return <FrameInspector part={selectedPart} canSnapMiddle={canSnapCompositionMiddle} onDurationChange={onUpdateSelectedPartDuration} onFrameChange={onUpdatePartFrame} onBackgroundChange={onUpdatePartBackground} onPreviewFrame={onPreviewPartFrame} onPreviewBackground={onPreviewPartBackground} onRenderModeChange={onUpdatePartRenderMode} onSnapMiddle={onSnapCompositionMiddle} />;
+  if (selectedPart)
+    return (
+      <FrameInspector
+        part={selectedPart}
+        canSnapMiddle={canSnapCompositionMiddle}
+        onDurationChange={onUpdateSelectedPartDuration}
+        onFrameChange={onUpdatePartFrame}
+        onBackgroundChange={onUpdatePartBackground}
+        onPreviewFrame={onPreviewPartFrame}
+        onPreviewBackground={onPreviewPartBackground}
+        onRenderModeChange={onUpdatePartRenderMode}
+        onSnapMiddle={onSnapCompositionMiddle}
+      />
+    );
 
   return <EmptyInspector />;
 }

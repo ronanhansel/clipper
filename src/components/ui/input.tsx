@@ -1,4 +1,14 @@
-import { useEffect, useRef, useState, type ChangeEvent, type ComponentProps, type FocusEvent, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type ComponentProps,
+  type FocusEvent,
+  type KeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent,
+} from "react";
 import { cn } from "../../lib/utils";
 
 const pixelsPerScrubStep = 12;
@@ -37,7 +47,10 @@ type NumberScrubState = {
   value: number;
 };
 
-type PendingNumberScrubState = Omit<NumberScrubState, "initialBodyCursor" | "initialInputCursor" | "lastCommitAt" | "remainder"> & {
+type PendingNumberScrubState = Omit<
+  NumberScrubState,
+  "initialBodyCursor" | "initialInputCursor" | "lastCommitAt" | "remainder"
+> & {
   lockRequested?: boolean;
   movementX: number;
   movementY: number;
@@ -45,14 +58,31 @@ type PendingNumberScrubState = Omit<NumberScrubState, "initialBodyCursor" | "ini
   originY: number;
 };
 
-export function Input({ className, type = "text", numberScrubMode = "commit", numberScrubCommitThrottleMs = defaultNumberScrubCommitThrottleMs, onBlur, onChange, onDoubleClick, onFocus, onKeyDown, onNumberScrubPreview, onNumberScrubStart, onNumberScrubEnd, onPointerDown, ...props }: InputProps) {
+export function Input({
+  className,
+  type = "text",
+  numberScrubMode = "commit",
+  numberScrubCommitThrottleMs = defaultNumberScrubCommitThrottleMs,
+  onBlur,
+  onChange,
+  onDoubleClick,
+  onFocus,
+  onKeyDown,
+  onNumberScrubPreview,
+  onNumberScrubStart,
+  onNumberScrubEnd,
+  onPointerDown,
+  ...props
+}: InputProps) {
   const scrubRef = useRef<NumberScrubState | null>(null);
   const pendingScrubRef = useRef<PendingNumberScrubState | null>(null);
   const focusedValueRef = useRef<string | null>(null);
   const [focused, setFocused] = useState(false);
   const { resetValue, ...inputProps } = props;
   const hasReset = resetValue !== undefined;
-  const canReset = resetValue !== undefined && String(props.value ?? "") !== String(resetValue);
+  const canReset =
+    resetValue !== undefined &&
+    String(props.value ?? "") !== String(resetValue);
 
   useEffect(() => {
     if (type !== "number") return;
@@ -79,7 +109,10 @@ export function Input({ className, type = "text", numberScrubMode = "commit", nu
       window.dispatchEvent(new Event(numberInputScrubEndEvent));
     }
 
-    function startScrub(pending: PendingNumberScrubState, initialRemainder = 0) {
+    function startScrub(
+      pending: PendingNumberScrubState,
+      initialRemainder = 0,
+    ) {
       const { input } = pending;
       const initialInputCursor = input.style.cursor;
       const initialBodyCursor = document.body.style.cursor;
@@ -112,8 +145,12 @@ export function Input({ className, type = "text", numberScrubMode = "commit", nu
           pending.movementX += event.movementX;
           pending.movementY += event.movementY;
         }
-        const deltaX = pointerLocked ? pending.movementX : event.clientX - pending.originX;
-        const deltaY = pointerLocked ? pending.movementY : event.clientY - pending.originY;
+        const deltaX = pointerLocked
+          ? pending.movementX
+          : event.clientX - pending.originX;
+        const deltaY = pointerLocked
+          ? pending.movementY
+          : event.clientY - pending.originY;
         if (Math.hypot(deltaX, deltaY) < numberScrubActivationDistance) return;
 
         event.preventDefault();
@@ -133,11 +170,17 @@ export function Input({ className, type = "text", numberScrubMode = "commit", nu
       scrub.remainder = delta - wholeSteps;
       if (wholeSteps === 0) return;
 
-      const nextValue = clampInputValue(scrub.input, scrub.value + wholeSteps * scrub.step);
+      const nextValue = clampInputValue(
+        scrub.input,
+        scrub.value + wholeSteps * scrub.step,
+      );
       if (nextValue === scrub.value) return;
 
       scrub.value = nextValue;
-      setNativeInputValue(scrub.input, formatScrubValue(nextValue, scrub.decimals));
+      setNativeInputValue(
+        scrub.input,
+        formatScrubValue(nextValue, scrub.decimals),
+      );
 
       if (scrub.mode === "continuous") {
         const now = performance.now();
@@ -179,7 +222,10 @@ export function Input({ className, type = "text", numberScrubMode = "commit", nu
       document.removeEventListener("mousemove", updateScrub);
       document.removeEventListener("mouseup", stopScrubOnMouseUp);
       document.removeEventListener("keydown", stopScrubOnEscape, true);
-      document.removeEventListener("pointerlockchange", stopScrubOnPointerUnlock);
+      document.removeEventListener(
+        "pointerlockchange",
+        stopScrubOnPointerUnlock,
+      );
       cancelPendingScrub();
       if (scrubRef.current) stopScrub(false);
     };
@@ -192,7 +238,8 @@ export function Input({ className, type = "text", numberScrubMode = "commit", nu
     }
 
     onPointerDown?.(event);
-    if (event.defaultPrevented || type !== "number" || event.button !== 0) return;
+    if (event.defaultPrevented || type !== "number" || event.button !== 0)
+      return;
 
     const input = event.currentTarget;
     if (props.disabled || props.readOnly) return;
@@ -223,7 +270,11 @@ export function Input({ className, type = "text", numberScrubMode = "commit", nu
 
   function blurOnConfirmKey(event: KeyboardEvent<HTMLInputElement>) {
     onKeyDown?.(event);
-    if (event.defaultPrevented || (event.key !== "Enter" && event.key !== "Escape")) return;
+    if (
+      event.defaultPrevented ||
+      (event.key !== "Enter" && event.key !== "Escape")
+    )
+      return;
     if (event.key === "Escape") {
       event.preventDefault();
       event.stopPropagation();
@@ -246,7 +297,8 @@ export function Input({ className, type = "text", numberScrubMode = "commit", nu
   }
 
   function clearFocusedValue(event: FocusEvent<HTMLInputElement>) {
-    if (type === "number") clampAndCommitInputValue(event.currentTarget, onChange);
+    if (type === "number")
+      clampAndCommitInputValue(event.currentTarget, onChange);
     onBlur?.(event);
     setFocused(false);
     focusedValueRef.current = null;
@@ -279,12 +331,43 @@ export function Input({ className, type = "text", numberScrubMode = "commit", nu
         onPointerDown={startNumberScrub}
         {...inputProps}
       />
-      {focused && hasReset ? <button aria-label="Reset field" className={cn("absolute right-1 top-1/2 grid h-5 w-5 -translate-y-1/2 place-items-center rounded-[6px] text-[#9da3b2] transition", canReset ? "hover:bg-[#252936] hover:text-white" : "cursor-default opacity-45")} disabled={!canReset} type="button" onMouseDown={(event) => event.preventDefault()} onClick={resetInputValue}>
-        <svg aria-hidden="true" className="h-3 w-3" fill="none" viewBox="0 0 16 16">
-          <path d="M4.2 5.2A4.5 4.5 0 1 1 3.5 10" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
-          <path d="M4.2 2.5v2.7h2.7" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
-        </svg>
-      </button> : null}
+      {focused && hasReset ? (
+        <button
+          aria-label="Reset field"
+          className={cn(
+            "absolute right-1 top-1/2 grid h-5 w-5 -translate-y-1/2 place-items-center rounded-[6px] text-[#9da3b2] transition",
+            canReset
+              ? "hover:bg-[#252936] hover:text-white"
+              : "cursor-default opacity-45",
+          )}
+          disabled={!canReset}
+          type="button"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={resetInputValue}
+        >
+          <svg
+            aria-hidden="true"
+            className="h-3 w-3"
+            fill="none"
+            viewBox="0 0 16 16"
+          >
+            <path
+              d="M4.2 5.2A4.5 4.5 0 1 1 3.5 10"
+              stroke="currentColor"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth="1.7"
+            />
+            <path
+              d="M4.2 2.5v2.7h2.7"
+              stroke="currentColor"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth="1.7"
+            />
+          </svg>
+        </button>
+      ) : null}
     </span>
   );
 }
@@ -307,7 +390,9 @@ function getPointerLockTarget(input: HTMLInputElement): HTMLElement {
 
 function ownsPointerLock(input: HTMLInputElement) {
   const lockedElement = input.ownerDocument.pointerLockElement;
-  return lockedElement === input || lockedElement === getPointerLockTarget(input);
+  return (
+    lockedElement === input || lockedElement === getPointerLockTarget(input)
+  );
 }
 
 function getInputStep(input: HTMLInputElement) {
@@ -324,16 +409,25 @@ function getStepDecimals(step: number) {
 function clampInputValue(input: HTMLInputElement, value: number) {
   const min = input.min === "" ? -Infinity : Number(input.min);
   const max = input.max === "" ? Infinity : Number(input.max);
-  return Math.min(Math.max(value, Number.isFinite(min) ? min : -Infinity), Number.isFinite(max) ? max : Infinity);
+  return Math.min(
+    Math.max(value, Number.isFinite(min) ? min : -Infinity),
+    Number.isFinite(max) ? max : Infinity,
+  );
 }
 
 function formatScrubValue(value: number, decimals: number) {
   if (decimals === 0) return String(Math.round(value));
-  return value.toFixed(decimals).replace(/\.0+$/, "").replace(/(\.\d*?)0+$/, "$1");
+  return value
+    .toFixed(decimals)
+    .replace(/\.0+$/, "")
+    .replace(/(\.\d*?)0+$/, "$1");
 }
 
 function setNativeInputValue(input: HTMLInputElement, value: string) {
-  const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+  const valueSetter = Object.getOwnPropertyDescriptor(
+    HTMLInputElement.prototype,
+    "value",
+  )?.set;
   valueSetter?.call(input, value);
 }
 
@@ -341,21 +435,37 @@ function commitInputValue(input: HTMLInputElement) {
   input.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
-function clampAndCommitInputValue(input: HTMLInputElement, onChange?: ComponentProps<"input">["onChange"]) {
+function clampAndCommitInputValue(
+  input: HTMLInputElement,
+  onChange?: ComponentProps<"input">["onChange"],
+) {
   const value = Number(input.value);
   if (!Number.isFinite(value)) return;
   const clamped = clampInputValue(input, value);
   if (clamped === value) return;
-  setNativeInputValue(input, formatScrubValue(clamped, getStepDecimals(getInputStep(input))));
+  setNativeInputValue(
+    input,
+    formatScrubValue(clamped, getStepDecimals(getInputStep(input))),
+  );
   commitInputValue(input);
-  onChange?.({ target: input, currentTarget: input } as ChangeEvent<HTMLInputElement>);
+  onChange?.({
+    target: input,
+    currentTarget: input,
+  } as ChangeEvent<HTMLInputElement>);
 }
 
-function restoreInputValue(input: HTMLInputElement, value: string | null, onChange?: ComponentProps<"input">["onChange"]) {
+function restoreInputValue(
+  input: HTMLInputElement,
+  value: string | null,
+  onChange?: ComponentProps<"input">["onChange"],
+) {
   if (value === null || input.value === value) return;
   setNativeInputValue(input, value);
   commitInputValue(input);
-  onChange?.({ target: input, currentTarget: input } as ChangeEvent<HTMLInputElement>);
+  onChange?.({
+    target: input,
+    currentTarget: input,
+  } as ChangeEvent<HTMLInputElement>);
 }
 
 function restoreScrubValue(scrub: NumberScrubState) {

@@ -9,17 +9,21 @@ const defaultUpdateStatus: AppUpdateStatus = {
 
 export function useAppUpdates() {
   const [autoDownloadUpdates, setAutoDownloadUpdatesState] = useState(true);
-  const [updateStatus, setUpdateStatus] = useState<AppUpdateStatus>(defaultUpdateStatus);
+  const [updateStatus, setUpdateStatus] =
+    useState<AppUpdateStatus>(defaultUpdateStatus);
 
   useEffect(() => {
     let cancelled = false;
     void window.clipper?.readAppState?.().then((state) => {
-      if (!cancelled && typeof state.automaticUpdateDownloads === "boolean") setAutoDownloadUpdatesState(state.automaticUpdateDownloads);
+      if (!cancelled && typeof state.automaticUpdateDownloads === "boolean")
+        setAutoDownloadUpdatesState(state.automaticUpdateDownloads);
     });
     void clipperHost.getUpdateStatus().then((status) => {
       if (!cancelled) setUpdateStatus(status);
     });
-    const unsubscribe = clipperHost.onUpdateStatus((status) => setUpdateStatus(status));
+    const unsubscribe = clipperHost.onUpdateStatus((status) =>
+      setUpdateStatus(status),
+    );
     return () => {
       cancelled = true;
       unsubscribe();
@@ -43,5 +47,12 @@ export function useAppUpdates() {
     setUpdateStatus(await clipperHost.installUpdate());
   }
 
-  return { autoDownloadUpdates, updateStatus, setAutoDownloadUpdates, checkForUpdates, downloadUpdate, installUpdate };
+  return {
+    autoDownloadUpdates,
+    updateStatus,
+    setAutoDownloadUpdates,
+    checkForUpdates,
+    downloadUpdate,
+    installUpdate,
+  };
 }

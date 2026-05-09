@@ -15,18 +15,20 @@ export const lightLeakLogic = {
     const blue = Math.round(36 + warmth * 26);
 
     return {
-      overlays: [{
-        id: `${layer.id}:light-leak`,
-        target: getOverlayTarget(layer),
-        style: {
-          backgroundImage: [
-            `radial-gradient(circle at ${centerX}% ${centerY}%, rgba(${red},${green},${blue},0.95) 0, rgba(${red},${green},${blue},0.42) 18%, transparent 46%)`,
-            "linear-gradient(90deg, rgba(255,226,143,0.58), transparent 28%)",
-          ].join(","),
-          mixBlendMode: "screen",
-          opacity: intensity,
+      overlays: [
+        {
+          id: `${layer.id}:light-leak`,
+          target: getOverlayTarget(layer),
+          style: {
+            backgroundImage: [
+              `radial-gradient(circle at ${centerX}% ${centerY}%, rgba(${red},${green},${blue},0.95) 0, rgba(${red},${green},${blue},0.42) 18%, transparent 46%)`,
+              "linear-gradient(90deg, rgba(255,226,143,0.58), transparent 28%)",
+            ].join(","),
+            mixBlendMode: "screen",
+            opacity: intensity,
+          },
         },
-      }],
+      ],
     };
   },
 } as const satisfies Partial<Pick<AdjustmentEffectPackage, "applyVisualStyle">>;

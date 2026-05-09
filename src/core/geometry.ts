@@ -21,24 +21,42 @@ export function normalizeBounds(start: Point, end: Point): Bounds {
 }
 
 export function intersects(a: Bounds, b: Bounds) {
-  return a.x <= b.x + b.width && a.x + a.width >= b.x && a.y <= b.y + b.height && a.y + a.height >= b.y;
+  return (
+    a.x <= b.x + b.width &&
+    a.x + a.width >= b.x &&
+    a.y <= b.y + b.height &&
+    a.y + a.height >= b.y
+  );
 }
 
-export function createSelectionPayload(selectionBox: Bounds, objects: FrameObject[]): SelectionPayload {
+export function createSelectionPayload(
+  selectionBox: Bounds,
+  objects: FrameObject[],
+): SelectionPayload {
   return {
     selectionBox,
     coordinates: boundsToPoints(selectionBox),
-    objects: objects.filter((object) => !object.hidden && !object.locked && intersects(selectionBox, object.bounds)).map((object) => ({
-      id: object.id,
-      name: object.name,
-      selector: object.selector,
-      bounds: object.bounds,
-      type: object.type,
-    })),
+    objects: objects
+      .filter(
+        (object) =>
+          !object.hidden &&
+          !object.locked &&
+          intersects(selectionBox, object.bounds),
+      )
+      .map((object) => ({
+        id: object.id,
+        name: object.name,
+        selector: object.selector,
+        bounds: object.bounds,
+        type: object.type,
+      })),
   };
 }
 
-export function framePointFromClient(event: Pick<MouseEvent, "clientX" | "clientY">, element: HTMLElement) {
+export function framePointFromClient(
+  event: Pick<MouseEvent, "clientX" | "clientY">,
+  element: HTMLElement,
+) {
   const rect = element.getBoundingClientRect();
   return {
     x: Math.round(((event.clientX - rect.left) / rect.width) * 1920),

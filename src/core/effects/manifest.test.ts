@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { createAdjustmentEffectPackage, createTransitionEffectPackage } from "./manifest";
+import {
+  createAdjustmentEffectPackage,
+  createTransitionEffectPackage,
+} from "./manifest";
 
 describe("effect manifest parsing", () => {
   it("parses explicit groups and derives the slash group path", () => {
@@ -46,6 +49,13 @@ defaultDuration: 2
 defaultParams: {}
 `);
 
-    expect(effect.createDefaultLayer({ id: "transition-1", start: 0, duration: 2, midPoint: 1 }).effect.params?.ease).toBe("easeInOut");
+    expect(
+      effect.createDefaultLayer({
+        id: "transition-1",
+        start: 0,
+        duration: 2,
+        midPoint: 1,
+      }).effect.params?.ease,
+    ).toBe("easeInOut");
   });
 });

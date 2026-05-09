@@ -1,6 +1,10 @@
 import * as SelectPrimitive from "@radix-ui/react-select";
 import { Check, ChevronDown, ChevronUp } from "lucide-react";
-import { type ComponentPropsWithoutRef, type ElementRef, forwardRef } from "react";
+import {
+  type ComponentPropsWithoutRef,
+  type ElementRef,
+  forwardRef,
+} from "react";
 import { cn } from "../../lib/utils";
 
 export const Select = SelectPrimitive.Root;
@@ -31,7 +35,14 @@ export const SelectScrollUpButton = forwardRef<
   ElementRef<typeof SelectPrimitive.ScrollUpButton>,
   ComponentPropsWithoutRef<typeof SelectPrimitive.ScrollUpButton>
 >(({ className, ...props }, ref) => (
-  <SelectPrimitive.ScrollUpButton ref={ref} className={cn("flex cursor-pointer items-center justify-center py-1", className)} {...props}>
+  <SelectPrimitive.ScrollUpButton
+    ref={ref}
+    className={cn(
+      "flex cursor-pointer items-center justify-center py-1",
+      className,
+    )}
+    {...props}
+  >
     <ChevronUp className="size-4" />
   </SelectPrimitive.ScrollUpButton>
 ));
@@ -41,11 +52,19 @@ export const SelectScrollDownButton = forwardRef<
   ElementRef<typeof SelectPrimitive.ScrollDownButton>,
   ComponentPropsWithoutRef<typeof SelectPrimitive.ScrollDownButton>
 >(({ className, ...props }, ref) => (
-  <SelectPrimitive.ScrollDownButton ref={ref} className={cn("flex cursor-pointer items-center justify-center py-1", className)} {...props}>
+  <SelectPrimitive.ScrollDownButton
+    ref={ref}
+    className={cn(
+      "flex cursor-pointer items-center justify-center py-1",
+      className,
+    )}
+    {...props}
+  >
     <ChevronDown className="size-4" />
   </SelectPrimitive.ScrollDownButton>
 ));
-SelectScrollDownButton.displayName = SelectPrimitive.ScrollDownButton.displayName;
+SelectScrollDownButton.displayName =
+  SelectPrimitive.ScrollDownButton.displayName;
 
 export const SelectContent = forwardRef<
   ElementRef<typeof SelectPrimitive.Content>,
@@ -56,14 +75,22 @@ export const SelectContent = forwardRef<
       ref={ref}
       className={cn(
         "relative z-[90] max-h-96 min-w-[8rem] cursor-pointer overflow-hidden rounded-[10px] border border-[#2d313b] bg-[#11141a] text-[#f7f7f8] shadow-[0_18px_60px_rgba(0,0,0,0.42)] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
-        position === "popper" && "data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1",
+        position === "popper" &&
+          "data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1",
         className,
       )}
       position={position}
       {...props}
     >
       <SelectScrollUpButton />
-      <SelectPrimitive.Viewport className={cn("p-1", position === "popper" && "min-w-[var(--radix-select-trigger-width)]")}>{children}</SelectPrimitive.Viewport>
+      <SelectPrimitive.Viewport
+        className={cn(
+          "p-1",
+          position === "popper" && "min-w-[var(--radix-select-trigger-width)]",
+        )}
+      >
+        {children}
+      </SelectPrimitive.Viewport>
       <SelectScrollDownButton />
     </SelectPrimitive.Content>
   </SelectPrimitive.Portal>
@@ -77,7 +104,7 @@ export const SelectItem = forwardRef<
   <SelectPrimitive.Item
     ref={ref}
     className={cn(
-        "relative flex w-full cursor-pointer select-none items-center rounded-[7px] py-1.5 pl-7 pr-2 text-xs font-semibold outline-none transition focus:bg-[#20232c] focus:text-white data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+      "relative flex w-full cursor-pointer select-none items-center rounded-[7px] py-1.5 pl-7 pr-2 text-xs font-semibold outline-none transition focus:bg-[#20232c] focus:text-white data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
       className,
     )}
     {...props}

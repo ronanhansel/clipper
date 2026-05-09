@@ -1,14 +1,45 @@
-import { Component, useLayoutEffect, useMemo, useRef, useState, type ErrorInfo, type ReactNode, type RefObject } from "react";
+import {
+  Component,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ErrorInfo,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import { FramePreview } from "../../components/preview/FramePreview";
 import { buildAdjustmentExecutionPlan } from "../../core/adjustments";
 import { CAMERA_PERSPECTIVE } from "../../core/camera";
-import { applyExportPostProcessFrame, applyExportRawPostProcessFrame, type ExportPostProcessFrameRequest, type ExportPostProcessFrameResult, type ExportRawPostProcessFrameRequest, type ExportRawPostProcessFrameResult } from "../../core/effects/postprocess/exportFrameBridge";
+import {
+  applyExportPostProcessFrame,
+  applyExportRawPostProcessFrame,
+  type ExportPostProcessFrameRequest,
+  type ExportPostProcessFrameResult,
+  type ExportRawPostProcessFrameRequest,
+  type ExportRawPostProcessFrameResult,
+} from "../../core/effects/postprocess/exportFrameBridge";
 import { withPostProcessFrameBackground } from "../../core/effects/postprocess/passes";
-import { createDefaultExportPostProcessRenderers, type PostProcessRenderer } from "../../core/effects/postprocess/registry";
+import {
+  createDefaultExportPostProcessRenderers,
+  type PostProcessRenderer,
+} from "../../core/effects/postprocess/registry";
 import type { PostProcessPass } from "../../core/effects/types";
-import { waitForRenderClockAnimationsReady, type RenderClockReadinessResult } from "../../render-engine/renderClock";
-import { FRAME_HEIGHT, FRAME_WIDTH, type CompositionClip, type ProjectManifest, type Scene } from "../../core/types";
-import { deriveFramePreviewRenderModel, getFramePreviewTimelineLayers } from "../state/framePreviewRenderModel";
+import {
+  waitForRenderClockAnimationsReady,
+  type RenderClockReadinessResult,
+} from "../../render-engine/renderClock";
+import {
+  FRAME_HEIGHT,
+  FRAME_WIDTH,
+  type CompositionClip,
+  type ProjectManifest,
+  type Scene,
+} from "../../core/types";
+import {
+  deriveFramePreviewRenderModel,
+  getFramePreviewTimelineLayers,
+} from "../state/framePreviewRenderModel";
 
 type ExportFrameRequest = {
   project: ProjectManifest;
@@ -30,10 +61,16 @@ type ExportFrameRequest = {
 
 declare global {
   interface Window {
-    __clipperRenderExportFrame?: (request: ExportFrameRequest) => Promise<ExportFrameRenderResult>;
+    __clipperRenderExportFrame?: (
+      request: ExportFrameRequest,
+    ) => Promise<ExportFrameRenderResult>;
     __clipperSyncExportRenderClock?: () => Promise<RenderClockReadinessResult>;
-    __clipperApplyExportPostProcessFrame?: (request: ExportPostProcessFrameRequest) => Promise<ExportPostProcessFrameResult>;
-    __clipperApplyExportRawPostProcessFrame?: (request: ExportRawPostProcessFrameRequest) => Promise<ExportRawPostProcessFrameResult>;
+    __clipperApplyExportPostProcessFrame?: (
+      request: ExportPostProcessFrameRequest,
+    ) => Promise<ExportPostProcessFrameResult>;
+    __clipperApplyExportRawPostProcessFrame?: (
+      request: ExportRawPostProcessFrameRequest,
+    ) => Promise<ExportRawPostProcessFrameResult>;
   }
 }
 
@@ -41,7 +78,17 @@ type ExportFrameRenderResult = RenderClockReadinessResult & {
   postProcessPasses: PostProcessPass[];
 };
 
-const identityCameraTransform = { x: 0, y: 0, z: 0, scale: 1, rotation: 0, rotateX: 0, rotateY: 0, perspective: CAMERA_PERSPECTIVE, motionBlur: 0 };
+const identityCameraTransform = {
+  x: 0,
+  y: 0,
+  z: 0,
+  scale: 1,
+  rotation: 0,
+  rotateX: 0,
+  rotateY: 0,
+  perspective: CAMERA_PERSPECTIVE,
+  motionBlur: 0,
+};
 const noopPointerHandler = () => {};
 const noopObjectPointerHandler = () => {};
 const noopObjectResizeHandler = () => {};
@@ -50,7 +97,11 @@ const noopTextDoubleClick = () => {};
 const noopTrackerPick = () => {};
 const exportFrameReadyTimeoutMs = 5000;
 
-type PendingFrameRequest = { resolve: (result: ExportFrameRenderResult) => void; reject: (error: Error) => void; timeoutId: number };
+type PendingFrameRequest = {
+  resolve: (result: ExportFrameRenderResult) => void;
+  reject: (error: Error) => void;
+  timeoutId: number;
+};
 type ExportFramePreviewRefs = {
   cameraRef: RefObject<HTMLDivElement | null>;
   dragSelectionBoxRef: RefObject<HTMLDivElement | null>;
@@ -63,30 +114,53 @@ export function RenderedMediaExportApp() {
   const cameraRef = useRef<HTMLDivElement | null>(null);
   const frameViewportRef = useRef<HTMLDivElement | null>(null);
   const dragSelectionBoxRef = useRef<HTMLDivElement | null>(null);
-  const postProcessRenderersRef = useRef<Map<string, PostProcessRenderer>>(new Map());
+  const postProcessRenderersRef = useRef<Map<string, PostProcessRenderer>>(
+    new Map(),
+  );
 
   useLayoutEffect(() => {
-    window.__clipperRenderExportFrame = (nextRequest) => new Promise((resolve, reject) => {
-      rejectPendingFrame(pendingRequestRef, new Error("Superseded by a newer export frame request."));
-      const timeoutId = window.setTimeout(() => {
-        rejectPendingFrame(pendingRequestRef, new Error(`Timed out waiting ${exportFrameReadyTimeoutMs}ms for export frame render.`));
-      }, exportFrameReadyTimeoutMs);
-      pendingRequestRef.current = { resolve, reject, timeoutId };
-      setRequest(nextRequest);
-    });
+    window.__clipperRenderExportFrame = (nextRequest) =>
+      new Promise((resolve, reject) => {
+        rejectPendingFrame(
+          pendingRequestRef,
+          new Error("Superseded by a newer export frame request."),
+        );
+        const timeoutId = window.setTimeout(() => {
+          rejectPendingFrame(
+            pendingRequestRef,
+            new Error(
+              `Timed out waiting ${exportFrameReadyTimeoutMs}ms for export frame render.`,
+            ),
+          );
+        }, exportFrameReadyTimeoutMs);
+        pendingRequestRef.current = { resolve, reject, timeoutId };
+        setRequest(nextRequest);
+      });
     window.__clipperSyncExportRenderClock = async () => {
       await waitForFontsReady();
       await waitForExportRastersReady(frameViewportRef.current);
       await waitForThreeLayersReady(frameViewportRef.current);
-      const syncResult = await waitForRenderClockAnimationsReady(frameViewportRef.current);
+      const syncResult = await waitForRenderClockAnimationsReady(
+        frameViewportRef.current,
+      );
       await nextAnimationFrame();
       return syncResult;
     };
     window.__clipperApplyExportPostProcessFrame = (postProcessRequest) => {
-      return applyExportPostProcessFrame(postProcessRequest, createDefaultExportPostProcessRenderers(postProcessRenderersRef.current));
+      return applyExportPostProcessFrame(
+        postProcessRequest,
+        createDefaultExportPostProcessRenderers(
+          postProcessRenderersRef.current,
+        ),
+      );
     };
     window.__clipperApplyExportRawPostProcessFrame = (postProcessRequest) => {
-      return applyExportRawPostProcessFrame(postProcessRequest, createDefaultExportPostProcessRenderers(postProcessRenderersRef.current));
+      return applyExportRawPostProcessFrame(
+        postProcessRequest,
+        createDefaultExportPostProcessRenderers(
+          postProcessRenderersRef.current,
+        ),
+      );
     };
 
     // ── Transferable port bridge handler ────────────────────────────────
@@ -114,17 +188,25 @@ export function RenderedMediaExportApp() {
           {
             width,
             height,
-            sourceFrame: { width, height, pixelFormat: pixelFormat as "bgra" | "rgba", data: sourceData },
+            sourceFrame: {
+              width,
+              height,
+              pixelFormat: pixelFormat as "bgra" | "rgba",
+              data: sourceData,
+            },
             passes,
           },
-          createDefaultExportPostProcessRenderers(postProcessRenderersRef.current),
+          createDefaultExportPostProcessRenderers(
+            postProcessRenderersRef.current,
+          ),
         );
 
         const resultData =
           result.outputFrame.data instanceof Uint8Array
             ? result.outputFrame.data.buffer.slice(
                 result.outputFrame.data.byteOffset,
-                result.outputFrame.data.byteOffset + result.outputFrame.data.byteLength,
+                result.outputFrame.data.byteOffset +
+                  result.outputFrame.data.byteLength,
               )
             : result.outputFrame.data instanceof ArrayBuffer
               ? result.outputFrame.data
@@ -163,7 +245,10 @@ export function RenderedMediaExportApp() {
 
     return () => {
       bridgeActive = false;
-      rejectPendingFrame(pendingRequestRef, new Error("Export renderer unmounted before frame completed."));
+      rejectPendingFrame(
+        pendingRequestRef,
+        new Error("Export renderer unmounted before frame completed."),
+      );
       destroyPostProcessRenderers(postProcessRenderersRef.current);
       window.removeEventListener("message", handleBridgeFrame);
       delete window.__clipperRenderExportFrame;
@@ -178,8 +263,14 @@ export function RenderedMediaExportApp() {
     let cancelled = false;
     const waitForFrame = async () => {
       try {
-        const syncResult = (await window.__clipperSyncExportRenderClock?.()) ?? await waitForRenderClockAnimationsReady(frameViewportRef.current);
-        if (!cancelled) resolvePendingFrame(pendingRequestRef, { ...syncResult, postProcessPasses: getExportPostProcessPasses(request) });
+        const syncResult =
+          (await window.__clipperSyncExportRenderClock?.()) ??
+          (await waitForRenderClockAnimationsReady(frameViewportRef.current));
+        if (!cancelled)
+          resolvePendingFrame(pendingRequestRef, {
+            ...syncResult,
+            postProcessPasses: getExportPostProcessPasses(request),
+          });
       } catch (error) {
         if (!cancelled) rejectPendingFrame(pendingRequestRef, toError(error));
       }
@@ -190,26 +281,55 @@ export function RenderedMediaExportApp() {
     };
   }, [request]);
 
-  const viewportWidth = request?.exportTile?.width ?? request?.exportWidth ?? FRAME_WIDTH;
-  const viewportHeight = request?.exportTile?.height ?? request?.exportHeight ?? FRAME_HEIGHT;
+  const viewportWidth =
+    request?.exportTile?.width ?? request?.exportWidth ?? FRAME_WIDTH;
+  const viewportHeight =
+    request?.exportTile?.height ?? request?.exportHeight ?? FRAME_HEIGHT;
 
   return (
-    <main className="relative overflow-hidden bg-black" style={{ width: viewportWidth, height: viewportHeight }}>
-      <div className="absolute left-0 top-0 overflow-hidden bg-black" style={{ width: viewportWidth, height: viewportHeight }}>
-        <ExportRenderErrorBoundary onError={(error) => rejectPendingFrame(pendingRequestRef, error)} resetKey={request ? `${request.scene.id}:${request.sceneTime}` : "empty"}>
-          {request ? <ExportFramePreview key={request.scene.id} refs={{ cameraRef, dragSelectionBoxRef, frameViewportRef }} request={request} /> : <div className="h-full w-full bg-black" />}
+    <main
+      className="relative overflow-hidden bg-black"
+      style={{ width: viewportWidth, height: viewportHeight }}
+    >
+      <div
+        className="absolute left-0 top-0 overflow-hidden bg-black"
+        style={{ width: viewportWidth, height: viewportHeight }}
+      >
+        <ExportRenderErrorBoundary
+          onError={(error) => rejectPendingFrame(pendingRequestRef, error)}
+          resetKey={
+            request ? `${request.scene.id}:${request.sceneTime}` : "empty"
+          }
+        >
+          {request ? (
+            <ExportFramePreview
+              key={request.scene.id}
+              refs={{ cameraRef, dragSelectionBoxRef, frameViewportRef }}
+              request={request}
+            />
+          ) : (
+            <div className="h-full w-full bg-black" />
+          )}
         </ExportRenderErrorBoundary>
       </div>
     </main>
   );
 }
 
-function destroyPostProcessRenderers(renderers: Map<string, PostProcessRenderer>) {
+function destroyPostProcessRenderers(
+  renderers: Map<string, PostProcessRenderer>,
+) {
   for (const renderer of renderers.values()) renderer.destroy();
   renderers.clear();
 }
 
-function ExportFramePreview({ refs, request }: { refs: ExportFramePreviewRefs; request: ExportFrameRequest }) {
+function ExportFramePreview({
+  refs,
+  request,
+}: {
+  refs: ExportFramePreviewRefs;
+  request: ExportFrameRequest;
+}) {
   const frameScale = getExportFrameScale(request);
   const framePreviewProps = useMemo(() => {
     const { project, scene, sceneTime, frameRate } = request;
@@ -222,7 +342,8 @@ function ExportFramePreview({ refs, request }: { refs: ExportFramePreviewRefs; r
       timelineMode: "composition",
     });
     const activeTimelinePart = previewModel.activeTimelinePart;
-    const partStart = activeTimelinePart?.start ?? previewModel.adjustedSceneTime;
+    const partStart =
+      activeTimelinePart?.start ?? previewModel.adjustedSceneTime;
 
     return {
       cameraRef: refs.cameraRef,
@@ -235,16 +356,26 @@ function ExportFramePreview({ refs, request }: { refs: ExportFramePreviewRefs; r
       cameraTransform: identityCameraTransform,
       frameViewportRef: refs.frameViewportRef,
       frameScale,
-      exportTileViewport: request.exportTile ? { x: request.exportTile.x, y: request.exportTile.y, width: request.exportTile.width, height: request.exportTile.height } : undefined,
+      exportTileViewport: request.exportTile
+        ? {
+            x: request.exportTile.x,
+            y: request.exportTile.y,
+            width: request.exportTile.width,
+            height: request.exportTile.height,
+          }
+        : undefined,
       isPlaying: false,
-      renderMode: request.renderMode ?? "export" as const,
+      renderMode: request.renderMode ?? ("export" as const),
       part: previewModel.part,
       partStart,
       previewParts: previewModel.previewParts,
       transitionPreviewParts: previewModel.transitionPreviewParts,
       adjustmentLayers: previewModel.visibleAdjustmentLayers,
       transitionLayers: previewModel.transitionLayers,
-      playbackClock: { startedAt: 0, startedFrom: previewModel.adjustedSceneTime - partStart },
+      playbackClock: {
+        startedAt: 0,
+        startedFrom: previewModel.adjustedSceneTime - partStart,
+      },
       previewTime: previewModel.previewTime,
       sceneTime,
       timelineMode: "composition" as const,
@@ -267,52 +398,100 @@ function ExportFramePreview({ refs, request }: { refs: ExportFramePreviewRefs; r
       onTextObjectDoubleClick: noopTextDoubleClick,
       onTrackerTargetPick: noopTrackerPick,
     };
-  }, [frameScale, refs.cameraRef, refs.dragSelectionBoxRef, refs.frameViewportRef, request]);
+  }, [
+    frameScale,
+    refs.cameraRef,
+    refs.dragSelectionBoxRef,
+    refs.frameViewportRef,
+    request,
+  ]);
 
-  return framePreviewProps ? <FramePreview {...framePreviewProps} /> : <div className="h-full w-full bg-black" />;
+  return framePreviewProps ? (
+    <FramePreview {...framePreviewProps} />
+  ) : (
+    <div className="h-full w-full bg-black" />
+  );
 }
 
-export function getExportFrameScale(request: { exportWidth?: number; exportHeight?: number }) {
+export function getExportFrameScale(request: {
+  exportWidth?: number;
+  exportHeight?: number;
+}) {
   const widthScale = (request.exportWidth ?? FRAME_WIDTH) / FRAME_WIDTH;
   const heightScale = (request.exportHeight ?? FRAME_HEIGHT) / FRAME_HEIGHT;
-  if (!Number.isFinite(widthScale) || !Number.isFinite(heightScale) || widthScale <= 0 || heightScale <= 0) return 1;
+  if (
+    !Number.isFinite(widthScale) ||
+    !Number.isFinite(heightScale) ||
+    widthScale <= 0 ||
+    heightScale <= 0
+  )
+    return 1;
   return Math.min(widthScale, heightScale);
 }
 
 function getExportFullSize(request: ExportFrameRequest) {
   return {
     width: request.exportTile?.fullWidth ?? request.exportWidth ?? FRAME_WIDTH,
-    height: request.exportTile?.fullHeight ?? request.exportHeight ?? FRAME_HEIGHT,
+    height:
+      request.exportTile?.fullHeight ?? request.exportHeight ?? FRAME_HEIGHT,
   };
 }
 
-export function getExportPostProcessPasses(request: ExportFrameRequest): PostProcessPass[] {
-  const { width: exportWidth, height: exportHeight } = getExportFullSize(request);
+export function getExportPostProcessPasses(
+  request: ExportFrameRequest,
+): PostProcessPass[] {
+  const { width: exportWidth, height: exportHeight } =
+    getExportFullSize(request);
   const previewModel = deriveFramePreviewRenderModel({
     blankPart: blankPreviewComposition,
     frameRate: request.frameRate,
     scene: request.scene,
     sceneTime: request.sceneTime,
-    timelineLayers: getFramePreviewTimelineLayers(request.project, request.scene.id),
+    timelineLayers: getFramePreviewTimelineLayers(
+      request.project,
+      request.scene.id,
+    ),
     timelineMode: "composition",
   });
-  return buildAdjustmentExecutionPlan(request.sceneTime, previewModel.visibleAdjustmentLayers, request.frameRate, { width: exportWidth, height: exportHeight }).steps
-    .flatMap((step) => step.postProcessPasses ?? [])
-    .map((pass) => withPostProcessFrameBackground(pass, previewModel.part.frame.style.background));
+  return buildAdjustmentExecutionPlan(
+    request.sceneTime,
+    previewModel.visibleAdjustmentLayers,
+    request.frameRate,
+    { width: exportWidth, height: exportHeight },
+  )
+    .steps.flatMap((step) => step.postProcessPasses ?? [])
+    .map((pass) =>
+      withPostProcessFrameBackground(
+        pass,
+        previewModel.part.frame.style.background,
+      ),
+    );
 }
 
 const blankPreviewComposition: CompositionClip = {
   id: "__blank_export_preview__",
   filePath: "",
   duration: 1,
-  frame: { width: FRAME_WIDTH, height: FRAME_HEIGHT, style: { background: "#050505" } },
-  background: { id: "background", name: "Background", style: { background: "#050505" }, elements: [] },
+  frame: {
+    width: FRAME_WIDTH,
+    height: FRAME_HEIGHT,
+    style: { background: "#050505" },
+  },
+  background: {
+    id: "background",
+    name: "Background",
+    style: { background: "#050505" },
+    elements: [],
+  },
   objects: [],
   snapshot: [],
   motionMarkers: [],
 };
 
-function resolvePendingFrame(ref: { current: PendingFrameRequest | null }, result: ExportFrameRenderResult) {
+function resolvePendingFrame(
+  ref: { current: PendingFrameRequest | null },
+  result: ExportFrameRenderResult,
+) {
   const pending = ref.current;
   if (!pending) return;
   ref.current = null;
@@ -320,7 +499,10 @@ function resolvePendingFrame(ref: { current: PendingFrameRequest | null }, resul
   pending.resolve(result);
 }
 
-function rejectPendingFrame(ref: { current: PendingFrameRequest | null }, error: Error) {
+function rejectPendingFrame(
+  ref: { current: PendingFrameRequest | null },
+  error: Error,
+) {
   const pending = ref.current;
   if (!pending) return;
   ref.current = null;
@@ -339,25 +521,46 @@ export async function waitForExportSvgRastersReady(root: HTMLElement | null) {
 export async function waitForExportRastersReady(root: HTMLElement | null) {
   const deadline = performance.now() + exportFrameReadyTimeoutMs;
   while (true) {
-    const failed = root?.querySelector<HTMLElement>('[data-clipper-export-svg-raster="failed"]');
+    const failed = root?.querySelector<HTMLElement>(
+      '[data-clipper-export-svg-raster="failed"]',
+    );
     if (failed) {
-      const message = failed.dataset.clipperExportSvgRasterError || "Export SVG rasterization failed.";
+      const message =
+        failed.dataset.clipperExportSvgRasterError ||
+        "Export SVG rasterization failed.";
       logExportDiagnostic("raster-failed", [message]);
       throw new Error(message);
     }
-    const failedWebLayerFlatten = root?.querySelector<HTMLElement>('[data-clipper-export-weblayer-flatten="failed"]');
+    const failedWebLayerFlatten = root?.querySelector<HTMLElement>(
+      '[data-clipper-export-weblayer-flatten="failed"]',
+    );
     if (failedWebLayerFlatten) {
-      const message = failedWebLayerFlatten.dataset.clipperExportWeblayerFlattenError || "Export WebLayer flattening failed.";
+      const message =
+        failedWebLayerFlatten.dataset.clipperExportWeblayerFlattenError ||
+        "Export WebLayer flattening failed.";
       logExportDiagnostic("weblayer-flatten-failed", [message]);
       throw new Error(message);
     }
-    const pending = root?.querySelector('[data-clipper-export-svg-raster="pending"]');
-    const loadingImage = Array.from(root?.querySelectorAll<HTMLImageElement>('img[data-clipper-export-svg-raster="ready"]') ?? []).find((image) => !image.complete || image.naturalWidth === 0);
-    const loadingWebLayerImage = Array.from(root?.querySelectorAll<HTMLImageElement>('img[data-clipper-export-weblayer-flatten="ready"]') ?? []).find((image) => !image.complete || image.naturalWidth === 0);
+    const pending = root?.querySelector(
+      '[data-clipper-export-svg-raster="pending"]',
+    );
+    const loadingImage = Array.from(
+      root?.querySelectorAll<HTMLImageElement>(
+        'img[data-clipper-export-svg-raster="ready"]',
+      ) ?? [],
+    ).find((image) => !image.complete || image.naturalWidth === 0);
+    const loadingWebLayerImage = Array.from(
+      root?.querySelectorAll<HTMLImageElement>(
+        'img[data-clipper-export-weblayer-flatten="ready"]',
+      ) ?? [],
+    ).find((image) => !image.complete || image.naturalWidth === 0);
     if (!pending && !loadingImage && !loadingWebLayerImage) return;
     if (performance.now() > deadline) {
       const details = getExportRasterReadinessDiagnostics(root);
-      const message = ["Timed out waiting for export raster/WebLayer readiness.", ...details].join(" ");
+      const message = [
+        "Timed out waiting for export raster/WebLayer readiness.",
+        ...details,
+      ].join(" ");
       logExportDiagnostic("raster-timeout", [message]);
       throw new Error(message);
     }
@@ -366,22 +569,56 @@ export async function waitForExportRastersReady(root: HTMLElement | null) {
 }
 
 export function getExportRasterReadinessDiagnostics(root: HTMLElement | null) {
-  const pending = Array.from(root?.querySelectorAll<HTMLElement>('[data-clipper-export-svg-raster="pending"]') ?? []).slice(0, 3).map((element, index) => `pending${index + 1}=${element.dataset.clipperExportSvgRasterDiagnostic ?? "unknown"}`);
-  const loading = Array.from(root?.querySelectorAll<HTMLImageElement>('img[data-clipper-export-svg-raster="ready"]') ?? []).filter((image) => !image.complete || image.naturalWidth === 0).slice(0, 3).map((image, index) => `loadingImage${index + 1}=${image.dataset.clipperExportSvgRasterDiagnostic ?? "unknown"}`);
-  const loadingWebLayer = Array.from(root?.querySelectorAll<HTMLImageElement>('img[data-clipper-export-weblayer-flatten="ready"]') ?? []).filter((image) => !image.complete || image.naturalWidth === 0).slice(0, 3).map((image, index) => `loadingWebLayer${index + 1}=${image.dataset.clipperExportWeblayerFlattenDiagnostic ?? "unknown"}`);
+  const pending = Array.from(
+    root?.querySelectorAll<HTMLElement>(
+      '[data-clipper-export-svg-raster="pending"]',
+    ) ?? [],
+  )
+    .slice(0, 3)
+    .map(
+      (element, index) =>
+        `pending${index + 1}=${element.dataset.clipperExportSvgRasterDiagnostic ?? "unknown"}`,
+    );
+  const loading = Array.from(
+    root?.querySelectorAll<HTMLImageElement>(
+      'img[data-clipper-export-svg-raster="ready"]',
+    ) ?? [],
+  )
+    .filter((image) => !image.complete || image.naturalWidth === 0)
+    .slice(0, 3)
+    .map(
+      (image, index) =>
+        `loadingImage${index + 1}=${image.dataset.clipperExportSvgRasterDiagnostic ?? "unknown"}`,
+    );
+  const loadingWebLayer = Array.from(
+    root?.querySelectorAll<HTMLImageElement>(
+      'img[data-clipper-export-weblayer-flatten="ready"]',
+    ) ?? [],
+  )
+    .filter((image) => !image.complete || image.naturalWidth === 0)
+    .slice(0, 3)
+    .map(
+      (image, index) =>
+        `loadingWebLayer${index + 1}=${image.dataset.clipperExportWeblayerFlattenDiagnostic ?? "unknown"}`,
+    );
   return [...pending, ...loading, ...loadingWebLayer];
 }
 
 async function waitForThreeLayersReady(root: HTMLElement | null) {
   const deadline = performance.now() + exportFrameReadyTimeoutMs;
   while (root?.querySelector("[data-clipper-three-pending]")) {
-    if (performance.now() > deadline) throw new Error("Timed out waiting for ThreeLayer readiness.");
+    if (performance.now() > deadline)
+      throw new Error("Timed out waiting for ThreeLayer readiness.");
     await nextAnimationFrame();
   }
 }
 
 function logExportDiagnostic(kind: string, details: string[]) {
-  console.error(["CLIPPER_EXPORT_DIAGNOSTIC", `kind=${kind}`, ...details].join(" ").slice(0, 2000));
+  console.error(
+    ["CLIPPER_EXPORT_DIAGNOSTIC", `kind=${kind}`, ...details]
+      .join(" ")
+      .slice(0, 2000),
+  );
 }
 
 async function waitForFontsReady() {
@@ -394,7 +631,10 @@ function toError(error: unknown) {
   return error instanceof Error ? error : new Error(String(error));
 }
 
-class ExportRenderErrorBoundary extends Component<{ children: ReactNode; onError: (error: Error) => void; resetKey: string }, { error: Error | null }> {
+class ExportRenderErrorBoundary extends Component<
+  { children: ReactNode; onError: (error: Error) => void; resetKey: string },
+  { error: Error | null }
+> {
   state = { error: null };
 
   static getDerivedStateFromError(error: Error) {
@@ -406,7 +646,8 @@ class ExportRenderErrorBoundary extends Component<{ children: ReactNode; onError
   }
 
   componentDidUpdate(previousProps: { resetKey: string }) {
-    if (previousProps.resetKey !== this.props.resetKey && this.state.error) this.setState({ error: null });
+    if (previousProps.resetKey !== this.props.resetKey && this.state.error)
+      this.setState({ error: null });
   }
 
   render() {

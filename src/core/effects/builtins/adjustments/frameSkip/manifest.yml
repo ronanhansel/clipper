@@ -4,7 +4,7 @@ name: Frame Skip
 label: Frame Skip
 group: Timing
 defaultDuration: 3
-defaultParams: {"every":2}
+defaultParams: { "every": 2 }
 paramControls:
   - key: every
     label: Frame Step

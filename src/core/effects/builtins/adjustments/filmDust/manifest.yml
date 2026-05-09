@@ -4,13 +4,14 @@ name: Film Dust
 label: Film Dust
 group: Overlay
 defaultDuration: 3
-defaultParams: {"intensity":0.28,"density":1,"drift":1,"target":"camera"}
+defaultParams:
+  { "intensity": 0.28, "density": 1, "drift": 1, "target": "camera" }
 paramControls:
   - key: target
     label: Target
     type: select
     defaultValue: camera
-    options: [{"value":"camera","label":"Camera"},{"value":"frame","label":"Frame"}]
+    options: [{ "value": "camera", "label": "Camera" }, { "value": "frame", "label": "Frame" }]
   - key: intensity
     label: Intensity
     type: number

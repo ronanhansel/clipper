@@ -2074,9 +2074,8 @@ function AppContent({
       );
       const nextGraph = updater(
         is3dClip
-          ? ((currentComposition?.composition3dGraph ?? part.composition3dGraph) as
-              | AnimationGraphState
-              | undefined)
+          ? ((currentComposition?.composition3dGraph ??
+              part.composition3dGraph) as AnimationGraphState | undefined)
           : currentComposition?.animationGraph,
       );
       const updateComposition = (composition: CompositionClip) => {
@@ -2097,14 +2096,12 @@ function AppContent({
       const webglRenderMode = "webgl" as const;
       return {
         ...current,
-        compositionLibrary:
-          current.compositionLibrary
-            ? current.compositionLibrary.map(updateComposition)
-            : current.compositionLibrary,
-        compositions:
-          current.compositions
-            ? current.compositions.map(updateComposition)
-            : current.compositions,
+        compositionLibrary: current.compositionLibrary
+          ? current.compositionLibrary.map(updateComposition)
+          : current.compositionLibrary,
+        compositions: current.compositions
+          ? current.compositions.map(updateComposition)
+          : current.compositions,
         timelines: (current.timelines ?? []).map((timeline) =>
           timeline.id === scene.id
             ? {
@@ -2988,10 +2985,18 @@ function AppContent({
       (selectedObjectId ? [selectedObjectId] : []),
     [selectedObjectId, selectionPayload],
   );
-  const leftSidebarPlaybackInputRef = useRef({ part, selectedComposeObjectIds });
-  if (!isPlaying) leftSidebarPlaybackInputRef.current = { part, selectedComposeObjectIds };
-  const leftSidebarPart = isPlaying ? leftSidebarPlaybackInputRef.current.part : part;
-  const leftSidebarSelectedObjectIds = isPlaying ? leftSidebarPlaybackInputRef.current.selectedComposeObjectIds : selectedComposeObjectIds;
+  const leftSidebarPlaybackInputRef = useRef({
+    part,
+    selectedComposeObjectIds,
+  });
+  if (!isPlaying)
+    leftSidebarPlaybackInputRef.current = { part, selectedComposeObjectIds };
+  const leftSidebarPart = isPlaying
+    ? leftSidebarPlaybackInputRef.current.part
+    : part;
+  const leftSidebarSelectedObjectIds = isPlaying
+    ? leftSidebarPlaybackInputRef.current.selectedComposeObjectIds
+    : selectedComposeObjectIds;
   useEffect(() => {
     function deleteSelectedComposeLayers(event: KeyboardEvent) {
       if (

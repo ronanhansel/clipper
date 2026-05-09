@@ -1,13 +1,39 @@
 import { useRef, useState } from "react";
 import { appBarButtonBase, mutedCaps } from "../../app/config";
-import type { ExportDialogTab, ExportRenderQuality, MediaExportFormat, MediaExportRenderMode, ProjectExportFormat, VideoExportProgress } from "../../app/types";
+import type {
+  ExportDialogTab,
+  ExportRenderQuality,
+  MediaExportFormat,
+  MediaExportRenderMode,
+  ProjectExportFormat,
+  VideoExportProgress,
+} from "../../app/types";
 import { clamp } from "../../core/math";
 import { formatTime } from "../../core/timeline";
 import type { ProjectManifest } from "../../core/types";
 import { Checkbox } from "../ui/checkbox";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../ui/dialog";
-import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../ui/select";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "../ui/tooltip";
 
 const RESOLUTION_OPTIONS: { label: string; width: number; height: number }[] = [
   { label: "1920 × 1080 (HD)", width: 1920, height: 1080 },
@@ -18,19 +44,95 @@ const RESOLUTION_OPTIONS: { label: string; width: number; height: number }[] = [
 const FRAME_RATE_OPTIONS = [24, 30, 60] as const;
 
 const BASELINE_HD30_PIXELS_PER_SECOND = 1920 * 1080 * 30;
-const RENDER_QUALITY_OPTIONS: { label: string; value: ExportRenderQuality; scale: number }[] = [
+const RENDER_QUALITY_OPTIONS: {
+  label: string;
+  value: ExportRenderQuality;
+  scale: number;
+}[] = [
   { label: "Standard", value: "standard", scale: 1 },
   { label: "High", value: "high", scale: 2 },
   { label: "Ultra", value: "ultra", scale: 3 },
 ];
 const RENDER_MODE_OPTIONS: DropdownOption<MediaExportRenderMode>[] = [
-  { label: "Adaptive renderer", value: "renderer", description: "Fast default export pipeline", tooltip: "Uses Clipper's supervised renderer with adaptive full-frame or tiled capture. Best for most scenes because it balances speed, memory use, and output quality automatically." },
-  { label: "Safe capture", value: "stable-slow", description: "Slow validation pipeline", tooltip: "Uses the conservative capture path for scenes that stress Chromium's compositor, such as dense SVG or heavy WebLayer compositions. It is slower, but prioritizes deterministic frame capture." },
+  {
+    label: "Adaptive renderer",
+    value: "renderer",
+    description: "Fast default export pipeline",
+    tooltip:
+      "Uses Clipper's supervised renderer with adaptive full-frame or tiled capture. Best for most scenes because it balances speed, memory use, and output quality automatically.",
+  },
+  {
+    label: "Safe capture",
+    value: "stable-slow",
+    description: "Slow validation pipeline",
+    tooltip:
+      "Uses the conservative capture path for scenes that stress Chromium's compositor, such as dense SVG or heavy WebLayer compositions. It is slower, but prioritizes deterministic frame capture.",
+  },
 ];
 
-export function ExportMediaDialog({ activeTab, durationSeconds, exportFrameRate, exportRenderQuality, exportResolution, exporting, includeSources, mediaExportFormat, mediaExportRenderMode, open, partCount, progress, projectFormat, projectName, resolution, sceneName, onExportFrameRateChange, onExportRenderQualityChange, onExportResolutionChange, onIncludeSourcesChange, onMediaExport, onMediaExportFormatChange, onMediaExportRenderModeChange, onOpenChange, onProjectExport, onProjectFormatChange, onTabChange }: { activeTab: ExportDialogTab; durationSeconds: number; exportFrameRate: number; exportRenderQuality: ExportRenderQuality; exportResolution: { width: number; height: number }; exporting: boolean; includeSources: boolean; mediaExportFormat: MediaExportFormat; mediaExportRenderMode: MediaExportRenderMode; open: boolean; partCount: number; progress: string | null; projectFormat: ProjectExportFormat; projectName: string; resolution: ProjectManifest["resolution"]; sceneName: string; onExportFrameRateChange: (fps: number) => void; onExportRenderQualityChange: (quality: ExportRenderQuality) => void; onExportResolutionChange: (res: { width: number; height: number }) => void; onIncludeSourcesChange: (includeSources: boolean) => void; onMediaExport: () => void; onMediaExportFormatChange: (format: MediaExportFormat) => void; onMediaExportRenderModeChange: (mode: MediaExportRenderMode) => void; onOpenChange: (open: boolean) => void; onProjectExport: () => void; onProjectFormatChange: (format: ProjectExportFormat) => void; onTabChange: (tab: ExportDialogTab) => void }) {
-  const tabButtonClass = (tab: ExportDialogTab) => `rounded-[8px] px-3 py-1.5 text-xs font-extrabold transition ${activeTab === tab ? "bg-[#202b37] text-white shadow-[inset_0_0_0_1px_#2d4052]" : "text-[#9b9da7] hover:bg-[#20232c] hover:text-white"}`;
-  const mediaFormatOptions = buildMediaFormatOptions(exportResolution, exportFrameRate);
+export function ExportMediaDialog({
+  activeTab,
+  durationSeconds,
+  exportFrameRate,
+  exportRenderQuality,
+  exportResolution,
+  exporting,
+  includeSources,
+  mediaExportFormat,
+  mediaExportRenderMode,
+  open,
+  partCount,
+  progress,
+  projectFormat,
+  projectName,
+  resolution,
+  sceneName,
+  onExportFrameRateChange,
+  onExportRenderQualityChange,
+  onExportResolutionChange,
+  onIncludeSourcesChange,
+  onMediaExport,
+  onMediaExportFormatChange,
+  onMediaExportRenderModeChange,
+  onOpenChange,
+  onProjectExport,
+  onProjectFormatChange,
+  onTabChange,
+}: {
+  activeTab: ExportDialogTab;
+  durationSeconds: number;
+  exportFrameRate: number;
+  exportRenderQuality: ExportRenderQuality;
+  exportResolution: { width: number; height: number };
+  exporting: boolean;
+  includeSources: boolean;
+  mediaExportFormat: MediaExportFormat;
+  mediaExportRenderMode: MediaExportRenderMode;
+  open: boolean;
+  partCount: number;
+  progress: string | null;
+  projectFormat: ProjectExportFormat;
+  projectName: string;
+  resolution: ProjectManifest["resolution"];
+  sceneName: string;
+  onExportFrameRateChange: (fps: number) => void;
+  onExportRenderQualityChange: (quality: ExportRenderQuality) => void;
+  onExportResolutionChange: (res: { width: number; height: number }) => void;
+  onIncludeSourcesChange: (includeSources: boolean) => void;
+  onMediaExport: () => void;
+  onMediaExportFormatChange: (format: MediaExportFormat) => void;
+  onMediaExportRenderModeChange: (mode: MediaExportRenderMode) => void;
+  onOpenChange: (open: boolean) => void;
+  onProjectExport: () => void;
+  onProjectFormatChange: (format: ProjectExportFormat) => void;
+  onTabChange: (tab: ExportDialogTab) => void;
+}) {
+  const tabButtonClass = (tab: ExportDialogTab) =>
+    `rounded-[8px] px-3 py-1.5 text-xs font-extrabold transition ${activeTab === tab ? "bg-[#202b37] text-white shadow-[inset_0_0_0_1px_#2d4052]" : "text-[#9b9da7] hover:bg-[#20232c] hover:text-white"}`;
+  const mediaFormatOptions = buildMediaFormatOptions(
+    exportResolution,
+    exportFrameRate,
+  );
   const renderQualityOptions = buildRenderQualityOptions(exportResolution);
 
   return (
@@ -45,8 +147,18 @@ export function ExportMediaDialog({ activeTab, durationSeconds, exportFrameRate,
 
         <div className="grid gap-4">
           <div className="grid grid-cols-2 gap-1 rounded-[10px] border border-[#2d313b] bg-[#15171e] p-1">
-            <button className={tabButtonClass("media")} onClick={() => onTabChange("media")}>Render video</button>
-            <button className={tabButtonClass("project")} onClick={() => onTabChange("project")}>Export project</button>
+            <button
+              className={tabButtonClass("media")}
+              onClick={() => onTabChange("media")}
+            >
+              Render video
+            </button>
+            <button
+              className={tabButtonClass("project")}
+              onClick={() => onTabChange("project")}
+            >
+              Export project
+            </button>
           </div>
 
           <div className="grid grid-cols-3 gap-2 rounded-xl border border-[#2d313b] bg-[#171920] p-3">
@@ -54,54 +166,146 @@ export function ExportMediaDialog({ activeTab, durationSeconds, exportFrameRate,
             <ExportStat label="Scene" value={sceneName} />
             <ExportStat label="Duration" value={formatTime(durationSeconds)} />
             {activeTab === "media" ? (
-              <ExportStatDropdown label="Resolution" value={`${exportResolution.width} × ${exportResolution.height}`} options={buildResolutionOptions(exportResolution, resolution)} selectedValue={formatResolutionKey(exportResolution)} onChange={(value) => { const [w, h] = value.split("x").map(Number); onExportResolutionChange({ width: w, height: h }); }} />
+              <ExportStatDropdown
+                label="Resolution"
+                value={`${exportResolution.width} × ${exportResolution.height}`}
+                options={buildResolutionOptions(exportResolution, resolution)}
+                selectedValue={formatResolutionKey(exportResolution)}
+                onChange={(value) => {
+                  const [w, h] = value.split("x").map(Number);
+                  onExportResolutionChange({ width: w, height: h });
+                }}
+              />
             ) : (
-              <ExportStat label="Resolution" value={`${resolution.width} × ${resolution.height}`} />
+              <ExportStat
+                label="Resolution"
+                value={`${resolution.width} × ${resolution.height}`}
+              />
             )}
             {activeTab === "media" ? (
-              <ExportStatDropdown popoverMinWidth="130px" label="Frame rate" value={`${exportFrameRate} fps`} options={FRAME_RATE_OPTIONS.map((f) => ({ label: `${f} fps`, value: String(f) }))} selectedValue={String(exportFrameRate)} onChange={(value) => onExportFrameRateChange(Number(value))} />
+              <ExportStatDropdown
+                popoverMinWidth="130px"
+                label="Frame rate"
+                value={`${exportFrameRate} fps`}
+                options={FRAME_RATE_OPTIONS.map((f) => ({
+                  label: `${f} fps`,
+                  value: String(f),
+                }))}
+                selectedValue={String(exportFrameRate)}
+                onChange={(value) => onExportFrameRateChange(Number(value))}
+              />
             ) : (
               <ExportStat label="Compositions" value={`${partCount}`} />
             )}
             {activeTab === "media" ? (
-              <ExportStatDropdown popoverMinWidth="260px" label="Export format" value={mediaFormatOptions.find((o) => o.value === mediaExportFormat)?.label ?? "MOV ProRes 422 HQ"} options={mediaFormatOptions} selectedValue={mediaExportFormat} onChange={(value) => onMediaExportFormatChange(value as MediaExportFormat)} />
+              <ExportStatDropdown
+                popoverMinWidth="260px"
+                label="Export format"
+                value={
+                  mediaFormatOptions.find((o) => o.value === mediaExportFormat)
+                    ?.label ?? "MOV ProRes 422 HQ"
+                }
+                options={mediaFormatOptions}
+                selectedValue={mediaExportFormat}
+                onChange={(value) =>
+                  onMediaExportFormatChange(value as MediaExportFormat)
+                }
+              />
             ) : (
-              <ExportStat label="Export format" value={formatProjectExportLabel(projectFormat)} />
+              <ExportStat
+                label="Export format"
+                value={formatProjectExportLabel(projectFormat)}
+              />
             )}
             {activeTab === "media" ? (
-              <ExportStatDropdown popoverMinWidth="260px" label="Render quality" value={renderQualityOptions.find((o) => o.value === exportRenderQuality)?.label ?? "High"} options={renderQualityOptions} selectedValue={exportRenderQuality} onChange={(value) => onExportRenderQualityChange(value as ExportRenderQuality)} />
+              <ExportStatDropdown
+                popoverMinWidth="260px"
+                label="Render quality"
+                value={
+                  renderQualityOptions.find(
+                    (o) => o.value === exportRenderQuality,
+                  )?.label ?? "High"
+                }
+                options={renderQualityOptions}
+                selectedValue={exportRenderQuality}
+                onChange={(value) =>
+                  onExportRenderQualityChange(value as ExportRenderQuality)
+                }
+              />
             ) : null}
             {activeTab === "media" ? (
-              <ExportStatDropdown popoverMinWidth="260px" label="Export pipeline" value={RENDER_MODE_OPTIONS.find((o) => o.value === mediaExportRenderMode)?.label ?? "Adaptive renderer"} options={RENDER_MODE_OPTIONS} selectedValue={mediaExportRenderMode} onChange={(value) => onMediaExportRenderModeChange(value as MediaExportRenderMode)} />
+              <ExportStatDropdown
+                popoverMinWidth="260px"
+                label="Export pipeline"
+                value={
+                  RENDER_MODE_OPTIONS.find(
+                    (o) => o.value === mediaExportRenderMode,
+                  )?.label ?? "Adaptive renderer"
+                }
+                options={RENDER_MODE_OPTIONS}
+                selectedValue={mediaExportRenderMode}
+                onChange={(value) =>
+                  onMediaExportRenderModeChange(value as MediaExportRenderMode)
+                }
+              />
             ) : null}
           </div>
 
           {activeTab === "media" ? (
             <div>
-              {progress ? <span className="rounded-lg bg-[#10131a] px-3 py-2 text-xs font-bold text-[var(--clipper-accent-strong)]">{progress}</span> : null}
+              {progress ? (
+                <span className="rounded-lg bg-[#10131a] px-3 py-2 text-xs font-bold text-[var(--clipper-accent-strong)]">
+                  {progress}
+                </span>
+              ) : null}
             </div>
           ) : (
             <>
-              <label className="grid gap-1.5 text-xs font-bold text-[#dfe2ea]" htmlFor="export-format">
+              <label
+                className="grid gap-1.5 text-xs font-bold text-[#dfe2ea]"
+                htmlFor="export-format"
+              >
                 Format
-                <Select value={projectFormat} onValueChange={(value) => onProjectFormatChange(value as ProjectExportFormat)}>
+                <Select
+                  value={projectFormat}
+                  onValueChange={(value) =>
+                    onProjectFormatChange(value as ProjectExportFormat)
+                  }
+                >
                   <SelectTrigger id="export-format" className="h-9">
                     <SelectValue placeholder="Choose export format" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectGroup>
-                      <SelectItem value="project-package">Clipper project package (.project.json)</SelectItem>
-                      <SelectItem value="scene-json">Scene JSON only (.scene.json)</SelectItem>
+                      <SelectItem value="project-package">
+                        Clipper project package (.project.json)
+                      </SelectItem>
+                      <SelectItem value="scene-json">
+                        Scene JSON only (.scene.json)
+                      </SelectItem>
                     </SelectGroup>
                   </SelectContent>
                 </Select>
               </label>
 
               <label className="flex items-start gap-3 rounded-xl border border-[#2d313b] bg-[#171920] p-3 text-sm text-[#dfe2ea]">
-                <Checkbox checked={projectFormat === "project-package" && includeSources} disabled={projectFormat === "scene-json"} onCheckedChange={(checked) => onIncludeSourcesChange(checked === true)} />
+                <Checkbox
+                  checked={
+                    projectFormat === "project-package" && includeSources
+                  }
+                  disabled={projectFormat === "scene-json"}
+                  onCheckedChange={(checked) =>
+                    onIncludeSourcesChange(checked === true)
+                  }
+                />
                 <span className="grid gap-1 leading-5">
-                  <span className="font-bold text-white">Include TypeScript part sources</span>
-                  <span className="text-xs text-[#9b9da7]">Embeds source text for each composition part so exports can be audited or regenerated later.</span>
+                  <span className="font-bold text-white">
+                    Include TypeScript part sources
+                  </span>
+                  <span className="text-xs text-[#9b9da7]">
+                    Embeds source text for each composition part so exports can
+                    be audited or regenerated later.
+                  </span>
                 </span>
               </label>
             </>
@@ -109,9 +313,23 @@ export function ExportMediaDialog({ activeTab, durationSeconds, exportFrameRate,
         </div>
 
         <DialogFooter>
-          <button className={`${appBarButtonBase} w-[96px] px-3 py-2 text-sm`} disabled={exporting} onClick={() => onOpenChange(false)}>Cancel</button>
-          <button className="inline-flex w-[112px] items-center justify-center rounded-[9px] border border-[var(--clipper-accent)] bg-[var(--clipper-accent)] px-3 py-2 text-sm font-extrabold text-[var(--clipper-accent-foreground)] transition hover:bg-[var(--clipper-accent-hover)] disabled:cursor-not-allowed disabled:opacity-60" disabled={exporting} onClick={activeTab === "media" ? onMediaExport : onProjectExport}>
-            {exporting ? "Working" : activeTab === "media" ? "Render" : "Export"}
+          <button
+            className={`${appBarButtonBase} w-[96px] px-3 py-2 text-sm`}
+            disabled={exporting}
+            onClick={() => onOpenChange(false)}
+          >
+            Cancel
+          </button>
+          <button
+            className="inline-flex w-[112px] items-center justify-center rounded-[9px] border border-[var(--clipper-accent)] bg-[var(--clipper-accent)] px-3 py-2 text-sm font-extrabold text-[var(--clipper-accent-foreground)] transition hover:bg-[var(--clipper-accent-hover)] disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={exporting}
+            onClick={activeTab === "media" ? onMediaExport : onProjectExport}
+          >
+            {exporting
+              ? "Working"
+              : activeTab === "media"
+                ? "Render"
+                : "Export"}
           </button>
         </DialogFooter>
       </DialogContent>
@@ -119,18 +337,49 @@ export function ExportMediaDialog({ activeTab, durationSeconds, exportFrameRate,
   );
 }
 
-function ExportStat({ label, value, warning = false }: { label: string; value: string; warning?: boolean }) {
+function ExportStat({
+  label,
+  value,
+  warning = false,
+}: {
+  label: string;
+  value: string;
+  warning?: boolean;
+}) {
   return (
     <div className="min-w-0 rounded-lg bg-[#1c1f28]/70 p-2">
       <span className={mutedCaps}>{label}</span>
-      <strong className={`mt-1 block truncate text-sm ${warning ? "text-[#ffbf66]" : "text-[#c8cdd6]"}`}>{value}</strong>
+      <strong
+        className={`mt-1 block truncate text-sm ${warning ? "text-[#ffbf66]" : "text-[#c8cdd6]"}`}
+      >
+        {value}
+      </strong>
     </div>
   );
 }
 
-type DropdownOption<T extends string = string> = { label: string; value: T; description?: string; tooltip?: string };
+type DropdownOption<T extends string = string> = {
+  label: string;
+  value: T;
+  description?: string;
+  tooltip?: string;
+};
 
-function ExportStatDropdown({ label, value, options, selectedValue, onChange, popoverMinWidth = "200px" }: { label: string; value: string; options: DropdownOption[]; selectedValue: string; onChange: (value: string) => void; popoverMinWidth?: string }) {
+function ExportStatDropdown({
+  label,
+  value,
+  options,
+  selectedValue,
+  onChange,
+  popoverMinWidth = "200px",
+}: {
+  label: string;
+  value: string;
+  options: DropdownOption[];
+  selectedValue: string;
+  onChange: (value: string) => void;
+  popoverMinWidth?: string;
+}) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
 
@@ -142,25 +391,46 @@ function ExportStatDropdown({ label, value, options, selectedValue, onChange, po
         onClick={() => setOpen(!open)}
       >
         <span className={mutedCaps}>{label}</span>
-        <strong className="mt-1 block truncate text-sm text-white">{value}</strong>
+        <strong className="mt-1 block truncate text-sm text-white">
+          {value}
+        </strong>
       </button>
       {open ? (
         <>
-          <div className="fixed inset-0 z-[90]" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 z-[91] mt-1 max-h-[min(320px,calc(100vh-160px))] min-w-[var(--stat-popover-min-w)] max-w-[calc(100vw-2rem)] overflow-y-auto rounded-lg border border-[#2d313b] bg-[#15171e] p-1 shadow-[0_18px_60px_rgba(0,0,0,0.45)]" style={{ "--stat-popover-min-w": popoverMinWidth } as React.CSSProperties}>
+          <div
+            className="fixed inset-0 z-[90]"
+            onClick={() => setOpen(false)}
+          />
+          <div
+            className="absolute left-0 z-[91] mt-1 max-h-[min(320px,calc(100vh-160px))] min-w-[var(--stat-popover-min-w)] max-w-[calc(100vw-2rem)] overflow-y-auto rounded-lg border border-[#2d313b] bg-[#15171e] p-1 shadow-[0_18px_60px_rgba(0,0,0,0.45)]"
+            style={
+              { "--stat-popover-min-w": popoverMinWidth } as React.CSSProperties
+            }
+          >
             <TooltipProvider delayDuration={400} skipDelayDuration={100}>
               {options.map((opt) => {
                 const item = (
                   <button
                     key={opt.value}
                     className={`flex w-full items-center gap-3 rounded-md px-2.5 py-1.5 text-left text-xs font-bold transition ${opt.value === selectedValue ? "text-[var(--clipper-accent-strong)]" : "text-[#dfe2ea] hover:bg-[#20232c] hover:text-white"}`}
-                    onClick={() => { onChange(opt.value); setOpen(false); }}
+                    onClick={() => {
+                      onChange(opt.value);
+                      setOpen(false);
+                    }}
                   >
                     <span className="grid min-w-0 flex-1 gap-0.5">
                       <span className="whitespace-nowrap">{opt.label}</span>
-                      {opt.description ? <span className="whitespace-nowrap text-[10px] font-semibold text-[#8e929d]">{opt.description}</span> : null}
+                      {opt.description ? (
+                        <span className="whitespace-nowrap text-[10px] font-semibold text-[#8e929d]">
+                          {opt.description}
+                        </span>
+                      ) : null}
                     </span>
-                    {opt.value === selectedValue ? <span className="text-[var(--clipper-accent-strong)]">✓</span> : null}
+                    {opt.value === selectedValue ? (
+                      <span className="text-[var(--clipper-accent-strong)]">
+                        ✓
+                      </span>
+                    ) : null}
                   </button>
                 );
 
@@ -169,7 +439,11 @@ function ExportStatDropdown({ label, value, options, selectedValue, onChange, po
                 return (
                   <Tooltip key={opt.value}>
                     <TooltipTrigger asChild>{item}</TooltipTrigger>
-                    <TooltipContent side="right" align="center" className="max-w-[240px]">
+                    <TooltipContent
+                      side="right"
+                      align="center"
+                      className="max-w-[240px]"
+                    >
                       {opt.tooltip}
                     </TooltipContent>
                   </Tooltip>
@@ -183,7 +457,10 @@ function ExportStatDropdown({ label, value, options, selectedValue, onChange, po
   );
 }
 
-function buildResolutionOptions(current: { width: number; height: number }, project: ProjectManifest["resolution"]): { label: string; value: string }[] {
+function buildResolutionOptions(
+  current: { width: number; height: number },
+  project: ProjectManifest["resolution"],
+): { label: string; value: string }[] {
   const projectKey = formatResolutionKey(project);
   const seen = new Set<string>();
   const result: { label: string; value: string }[] = [];
@@ -211,7 +488,10 @@ function formatResolutionKey(r: { width: number; height: number }) {
   return `${r.width}x${r.height}`;
 }
 
-function buildRenderQualityOptions(resolution: { width: number; height: number }): DropdownOption<ExportRenderQuality>[] {
+function buildRenderQualityOptions(resolution: {
+  width: number;
+  height: number;
+}): DropdownOption<ExportRenderQuality>[] {
   return RENDER_QUALITY_OPTIONS.map((option) => ({
     label: option.label,
     value: option.value,
@@ -219,16 +499,51 @@ function buildRenderQualityOptions(resolution: { width: number; height: number }
   }));
 }
 
-function buildMediaFormatOptions(resolution: { width: number; height: number }, frameRate: number): DropdownOption<MediaExportFormat>[] {
-  const scale = (resolution.width * resolution.height * frameRate) / BASELINE_HD30_PIXELS_PER_SECOND;
+function buildMediaFormatOptions(
+  resolution: { width: number; height: number },
+  frameRate: number,
+): DropdownOption<MediaExportFormat>[] {
+  const scale =
+    (resolution.width * resolution.height * frameRate) /
+    BASELINE_HD30_PIXELS_PER_SECOND;
   return [
-    { label: "MOV ProRes 422 HQ", value: "prores-422-hq", description: formatEstimatedDataRate(27.5 * scale) },
-    { label: "MOV ProRes 4444", value: "prores-4444", description: formatEstimatedDataRate(41.25 * scale) },
-    { label: "MOV DNxHR HQX", value: "dnxhr-hqx", description: formatEstimatedDataRate(27.5 * scale) },
-    { label: "MOV Uncompressed BGRA", value: "mov", description: formatEstimatedDataRate((resolution.width * resolution.height * 4 * frameRate) / 1_000_000) },
-    { label: "MP4 H.264 High Quality", value: "h264-high", description: "CRF 12, variable MB/s" },
-    { label: "MP4 (H.264)", value: "mp4", description: formatEstimatedDataRate(1.5) },
-    { label: "WebM (VP9)", value: "webm", description: "CRF 30, variable MB/s" },
+    {
+      label: "MOV ProRes 422 HQ",
+      value: "prores-422-hq",
+      description: formatEstimatedDataRate(27.5 * scale),
+    },
+    {
+      label: "MOV ProRes 4444",
+      value: "prores-4444",
+      description: formatEstimatedDataRate(41.25 * scale),
+    },
+    {
+      label: "MOV DNxHR HQX",
+      value: "dnxhr-hqx",
+      description: formatEstimatedDataRate(27.5 * scale),
+    },
+    {
+      label: "MOV Uncompressed BGRA",
+      value: "mov",
+      description: formatEstimatedDataRate(
+        (resolution.width * resolution.height * 4 * frameRate) / 1_000_000,
+      ),
+    },
+    {
+      label: "MP4 H.264 High Quality",
+      value: "h264-high",
+      description: "CRF 12, variable MB/s",
+    },
+    {
+      label: "MP4 (H.264)",
+      value: "mp4",
+      description: formatEstimatedDataRate(1.5),
+    },
+    {
+      label: "WebM (VP9)",
+      value: "webm",
+      description: "CRF 30, variable MB/s",
+    },
   ];
 }
 
@@ -252,20 +567,39 @@ function formatProjectExportLabel(format: ProjectExportFormat) {
   return format === "scene-json" ? "Scene JSON" : "Project package";
 }
 
-export function VideoExportOverlay({ cancelling, progress, onCancel }: { cancelling: boolean; progress: VideoExportProgress; onCancel: () => void }) {
+export function VideoExportOverlay({
+  cancelling,
+  progress,
+  onCancel,
+}: {
+  cancelling: boolean;
+  progress: VideoExportProgress;
+  onCancel: () => void;
+}) {
   const percent = clamp(progress.percent, 0, 100);
 
   return (
     <div className="fixed inset-0 z-[100] grid place-items-center bg-[#050609]/95 backdrop-blur-[3px] animate-[clipper-export-fade-in_180ms_ease-out_both]">
       <div className="grid w-[min(300px,calc(100vw-48px))] justify-items-center gap-3 text-center">
         <div className="grid w-full gap-2.5">
-          <h2 className="m-0 text-[17px] font-extrabold text-white">Exporting video • {percent}%</h2>
+          <h2 className="m-0 text-[17px] font-extrabold text-white">
+            Exporting video • {percent}%
+          </h2>
           <div className="h-1 w-full overflow-hidden rounded-full bg-[#242936]">
-            <div className="h-full rounded-full bg-white transition-[width] duration-200 ease-out" style={{ width: `${percent}%` }} />
+            <div
+              className="h-full rounded-full bg-white transition-[width] duration-200 ease-out"
+              style={{ width: `${percent}%` }}
+            />
           </div>
-          <span className="text-xs font-semibold text-[#8e929d]">{cancelling ? "Stopping export..." : progress.status}</span>
+          <span className="text-xs font-semibold text-[#8e929d]">
+            {cancelling ? "Stopping export..." : progress.status}
+          </span>
         </div>
-        <button className="mt-5 rounded-[8px] border border-[#20242d] bg-[#0c0e13] px-4 py-2 text-xs font-semibold text-white transition hover:border-[#343a47] hover:bg-[#11141b] disabled:cursor-not-allowed disabled:opacity-55" disabled={cancelling} onClick={onCancel}>
+        <button
+          className="mt-5 rounded-[8px] border border-[#20242d] bg-[#0c0e13] px-4 py-2 text-xs font-semibold text-white transition hover:border-[#343a47] hover:bg-[#11141b] disabled:cursor-not-allowed disabled:opacity-55"
+          disabled={cancelling}
+          onClick={onCancel}
+        >
           {cancelling ? "Stopping" : "Stop export"}
         </button>
       </div>

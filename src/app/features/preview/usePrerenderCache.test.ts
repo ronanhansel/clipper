@@ -45,19 +45,45 @@ describe("prerender cache invalidation", () => {
     const previous = signature(baseScene);
     const next = signature({
       ...baseScene,
-      adjustmentLayers: [{ id: "grade", name: "Grade", start: 2.2, duration: 1.1, effect: { effectId: "clipper.adjustment.colourGrade", params: { saturation: 80 } } }],
+      adjustmentLayers: [
+        {
+          id: "grade",
+          name: "Grade",
+          start: 2.2,
+          duration: 1.1,
+          effect: {
+            effectId: "clipper.adjustment.colourGrade",
+            params: { saturation: 80 },
+          },
+        },
+      ],
     });
 
-    expect(getPrerenderInvalidationRanges(previous, next, 10, 1)).toEqual([{ start: 2, end: 4 }]);
+    expect(getPrerenderInvalidationRanges(previous, next, 10, 1)).toEqual([
+      { start: 2, end: 4 },
+    ]);
   });
 
   it("invalidates from speed marker start through the timeline tail", () => {
     const previous = signature(baseScene);
     const next = signature({
       ...baseScene,
-      adjustmentLayers: [{ id: "speed", name: "Speed", start: 3, duration: 2, effect: { effectId: "clipper.adjustment.speedChange", params: { speed: 0.5 } } }],
+      adjustmentLayers: [
+        {
+          id: "speed",
+          name: "Speed",
+          start: 3,
+          duration: 2,
+          effect: {
+            effectId: "clipper.adjustment.speedChange",
+            params: { speed: 0.5 },
+          },
+        },
+      ],
     });
 
-    expect(getPrerenderInvalidationRanges(previous, next, 10, 1)).toEqual([{ start: 3, end: 10 }]);
+    expect(getPrerenderInvalidationRanges(previous, next, 10, 1)).toEqual([
+      { start: 3, end: 10 },
+    ]);
   });
 });

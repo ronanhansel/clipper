@@ -4,13 +4,13 @@ name: Light Leak
 label: Light Leak
 group: Overlay
 defaultDuration: 3
-defaultParams: {"intensity":0.34,"warmth":1,"drift":0.8,"focusX":12,"focusY":28,"target":"camera"}
+defaultParams: { "intensity": 0.34, "warmth": 1, "drift": 0.8, "focusX": 12, "focusY": 28, "target": "camera" }
 paramControls:
   - key: target
     label: Target
     type: select
     defaultValue: camera
-    options: [{"value":"camera","label":"Camera"},{"value":"frame","label":"Frame"}]
+    options: [{ "value": "camera", "label": "Camera" }, { "value": "frame", "label": "Frame" }]
   - key: intensity
     label: Intensity
     type: number

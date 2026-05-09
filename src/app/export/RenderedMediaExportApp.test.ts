@@ -1,11 +1,31 @@
 import { describe, expect, it, vi } from "vitest";
 import { lensPostProcessKind } from "../../core/effects/postprocess/lens";
-import type { AdjustmentLayer, CompositionClip, PartFrame, ProjectManifest, Scene } from "../../core/types";
+import type {
+  AdjustmentLayer,
+  CompositionClip,
+  PartFrame,
+  ProjectManifest,
+  Scene,
+} from "../../core/types";
 import { FRAME_HEIGHT, FRAME_WIDTH } from "../../core/types";
-import { getExportFrameScale, getExportPostProcessPasses, getExportRasterReadinessDiagnostics, waitForExportSvgRastersReady } from "./RenderedMediaExportApp";
+import {
+  getExportFrameScale,
+  getExportPostProcessPasses,
+  getExportRasterReadinessDiagnostics,
+  waitForExportSvgRastersReady,
+} from "./RenderedMediaExportApp";
 
-const frame: PartFrame = { width: FRAME_WIDTH, height: FRAME_HEIGHT, style: { background: "#336699" } };
-const background = { id: "background", name: "Background", style: { background: "#336699" }, elements: [] };
+const frame: PartFrame = {
+  width: FRAME_WIDTH,
+  height: FRAME_HEIGHT,
+  style: { background: "#336699" },
+};
+const background = {
+  id: "background",
+  name: "Background",
+  style: { background: "#336699" },
+  elements: [],
+};
 
 describe("export post-process pass derivation", () => {
   it("preserves the no-postprocess route when no pass is active", () => {
@@ -20,14 +40,21 @@ describe("export post-process pass derivation", () => {
     const passes = getExportPostProcessPasses(testRequest(scene, 1.5));
 
     expect(passes).toHaveLength(1);
-    expect(passes[0]).toMatchObject({ kind: lensPostProcessKind, uniforms: { frameBackground: { r: 0.2, g: 0.4, b: 0.6 } } });
+    expect(passes[0]).toMatchObject({
+      kind: lensPostProcessKind,
+      uniforms: { frameBackground: { r: 0.2, g: 0.4, b: 0.6 } },
+    });
   });
 });
 
 describe("export frame scale", () => {
   it("uses selected export resolution to scale the render surface", () => {
-    expect(getExportFrameScale({ exportWidth: 3840, exportHeight: 2160 })).toBe(2);
-    expect(getExportFrameScale({ exportWidth: 2560, exportHeight: 1440 })).toBeCloseTo(4 / 3);
+    expect(getExportFrameScale({ exportWidth: 3840, exportHeight: 2160 })).toBe(
+      2,
+    );
+    expect(
+      getExportFrameScale({ exportWidth: 2560, exportHeight: 1440 }),
+    ).toBeCloseTo(4 / 3);
   });
 
   it("falls back to native composition scale for invalid export sizes", () => {
@@ -37,29 +64,45 @@ describe("export frame scale", () => {
 
 describe("export raster readiness", () => {
   it("rejects failed export raster markers instead of allowing raw DOM capture", async () => {
-    const failed = { dataset: { clipperExportSvgRasterError: "Browser failed to decode SVG for export rasterization" } };
+    const failed = {
+      dataset: {
+        clipperExportSvgRasterError:
+          "Browser failed to decode SVG for export rasterization",
+      },
+    };
     const root = fakeRasterRoot({ failed });
 
-    await expect(waitForExportSvgRastersReady(root)).rejects.toThrow("Browser failed to decode SVG for export rasterization");
+    await expect(waitForExportSvgRastersReady(root)).rejects.toThrow(
+      "Browser failed to decode SVG for export rasterization",
+    );
   });
 
   it("rejects missing WebLayer flatten overrides instead of allowing raw DOM capture", async () => {
-    const failedWebLayer = { dataset: { clipperExportWeblayerFlattenError: "Export WebLayer flatten override missing. owner=object:html:hair" } };
+    const failedWebLayer = {
+      dataset: {
+        clipperExportWeblayerFlattenError:
+          "Export WebLayer flatten override missing. owner=object:html:hair",
+      },
+    };
     const root = fakeRasterRoot({ failedWebLayer });
 
-    await expect(waitForExportSvgRastersReady(root)).rejects.toThrow("Export WebLayer flatten override missing");
+    await expect(waitForExportSvgRastersReady(root)).rejects.toThrow(
+      "Export WebLayer flatten override missing",
+    );
   });
 
   it("waits for ready raster images to finish decoding", async () => {
     const image = { complete: false, naturalWidth: 0 };
     const root = fakeRasterRoot({ images: [image] });
     const previousAnimationFrame = globalThis.requestAnimationFrame;
-    globalThis.requestAnimationFrame = vi.fn((callback: FrameRequestCallback) => {
-      image.complete = true;
-      image.naturalWidth = 320;
-      callback(0);
-      return 1;
-    });
+    globalThis.requestAnimationFrame = vi.fn(
+      (callback: FrameRequestCallback) => {
+        image.complete = true;
+        image.naturalWidth = 320;
+        callback(0);
+        return 1;
+      },
+    );
 
     await waitForExportSvgRastersReady(root);
 
@@ -68,12 +111,34 @@ describe("export raster readiness", () => {
   });
 
   it("reports bounded pending raster diagnostics", () => {
-    const root = fakeRasterRoot({ pendingList: [
-      { dataset: { clipperExportSvgRasterDiagnostic: "owner=object:html:a raster=100x100" } },
-      { dataset: { clipperExportSvgRasterDiagnostic: "owner=object:svg:b raster=200x200" } },
-      { dataset: { clipperExportSvgRasterDiagnostic: "owner=background:html:c raster=300x300" } },
-      { dataset: { clipperExportSvgRasterDiagnostic: "owner=object:html:d raster=400x400" } },
-    ] });
+    const root = fakeRasterRoot({
+      pendingList: [
+        {
+          dataset: {
+            clipperExportSvgRasterDiagnostic:
+              "owner=object:html:a raster=100x100",
+          },
+        },
+        {
+          dataset: {
+            clipperExportSvgRasterDiagnostic:
+              "owner=object:svg:b raster=200x200",
+          },
+        },
+        {
+          dataset: {
+            clipperExportSvgRasterDiagnostic:
+              "owner=background:html:c raster=300x300",
+          },
+        },
+        {
+          dataset: {
+            clipperExportSvgRasterDiagnostic:
+              "owner=object:html:d raster=400x400",
+          },
+        },
+      ],
+    });
 
     expect(getExportRasterReadinessDiagnostics(root)).toEqual([
       "pending1=owner=object:html:a raster=100x100",
@@ -83,9 +148,18 @@ describe("export raster readiness", () => {
   });
 
   it("reports bounded WebLayer image decode diagnostics", () => {
-    const root = fakeRasterRoot({ webLayerImages: [
-      { complete: false, naturalWidth: 0, dataset: { clipperExportWeblayerFlattenDiagnostic: "owner=object:html:a capture=100x100" } },
-    ] });
+    const root = fakeRasterRoot({
+      webLayerImages: [
+        {
+          complete: false,
+          naturalWidth: 0,
+          dataset: {
+            clipperExportWeblayerFlattenDiagnostic:
+              "owner=object:html:a capture=100x100",
+          },
+        },
+      ],
+    });
 
     expect(getExportRasterReadinessDiagnostics(root)).toEqual([
       "loadingWebLayer1=owner=object:html:a capture=100x100",
@@ -93,10 +167,38 @@ describe("export raster readiness", () => {
   });
 });
 
-function fakeRasterRoot({ failed = null, failedWebLayer = null, pending = null, pendingList = [], images = [], webLayerImages = [] }: { failed?: unknown; failedWebLayer?: unknown; pending?: unknown; pendingList?: unknown[]; images?: unknown[]; webLayerImages?: unknown[] }) {
+function fakeRasterRoot({
+  failed = null,
+  failedWebLayer = null,
+  pending = null,
+  pendingList = [],
+  images = [],
+  webLayerImages = [],
+}: {
+  failed?: unknown;
+  failedWebLayer?: unknown;
+  pending?: unknown;
+  pendingList?: unknown[];
+  images?: unknown[];
+  webLayerImages?: unknown[];
+}) {
   return {
-    querySelector: (selector: string) => selector.includes("weblayer") && selector.includes('="failed"') ? failedWebLayer : selector.includes('="failed"') ? failed : selector.includes('="pending"') ? pending : null,
-    querySelectorAll: (selector: string) => selector.includes('="pending"') ? pendingList : selector.includes("weblayer") && selector.includes('="ready"') ? webLayerImages : selector.includes('="ready"') ? images : [],
+    querySelector: (selector: string) =>
+      selector.includes("weblayer") && selector.includes('="failed"')
+        ? failedWebLayer
+        : selector.includes('="failed"')
+          ? failed
+          : selector.includes('="pending"')
+            ? pending
+            : null,
+    querySelectorAll: (selector: string) =>
+      selector.includes('="pending"')
+        ? pendingList
+        : selector.includes("weblayer") && selector.includes('="ready"')
+          ? webLayerImages
+          : selector.includes('="ready"')
+            ? images
+            : [],
   } as unknown as HTMLElement;
 }
 
@@ -105,7 +207,22 @@ function testRequest(scene: Scene, sceneTime = 0) {
 }
 
 function testProject(sceneId: string): ProjectManifest {
-  return { id: "project", name: "Project", resolution: { width: FRAME_WIDTH, height: FRAME_HEIGHT }, assetsPath: "assets", scenes: [], timelines: [{ id: sceneId, clips: [], timelineLayers: { adjustmentLayers: [{ id: "clipper.adjustment.lens" }] } }] };
+  return {
+    id: "project",
+    name: "Project",
+    resolution: { width: FRAME_WIDTH, height: FRAME_HEIGHT },
+    assetsPath: "assets",
+    scenes: [],
+    timelines: [
+      {
+        id: sceneId,
+        clips: [],
+        timelineLayers: {
+          adjustmentLayers: [{ id: "clipper.adjustment.lens" }],
+        },
+      },
+    ],
+  };
 }
 
 function testScene(overrides: Partial<Scene> = {}): Scene {
@@ -113,9 +230,27 @@ function testScene(overrides: Partial<Scene> = {}): Scene {
 }
 
 function testComposition(): CompositionClip {
-  return { id: "composition", filePath: "composition.ts", start: 0, duration: 3, frame, background, objects: [], snapshot: [], motionMarkers: [] };
+  return {
+    id: "composition",
+    filePath: "composition.ts",
+    start: 0,
+    duration: 3,
+    frame,
+    background,
+    objects: [],
+    snapshot: [],
+    motionMarkers: [],
+  };
 }
 
-function lensLayer(params: AdjustmentLayer["effect"]["params"]): AdjustmentLayer {
-  return { id: "lens", name: "Lens", start: 1, duration: 2, effect: { effectId: "clipper.adjustment.lens", params } };
+function lensLayer(
+  params: AdjustmentLayer["effect"]["params"],
+): AdjustmentLayer {
+  return {
+    id: "lens",
+    name: "Lens",
+    start: 1,
+    duration: 2,
+    effect: { effectId: "clipper.adjustment.lens", params },
+  };
 }

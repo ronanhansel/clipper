@@ -1,6 +1,9 @@
 import { lensPostProcessKind, type LensPostProcessPass } from "./lens";
 import type { ExportPostProcessRenderer } from "./exportFrameBridge";
-import { WebGlPostProcessRenderer, type WebGlPostProcessDrawInput } from "./webGlRenderer";
+import {
+  WebGlPostProcessRenderer,
+  type WebGlPostProcessDrawInput,
+} from "./webGlRenderer";
 import type { PostProcessPass } from "../types";
 
 const fragmentShaderSource = `
@@ -90,7 +93,8 @@ const lensUniformNames = [
   "u_chromaMaskFeather",
 ] as const;
 
-export type LensPostProcessRenderer = WebGlPostProcessRenderer<LensPostProcessPass>;
+export type LensPostProcessRenderer =
+  WebGlPostProcessRenderer<LensPostProcessPass>;
 
 export function createLensPostProcessRenderer(): LensPostProcessRenderer {
   return new WebGlPostProcessRenderer({
@@ -101,20 +105,35 @@ export function createLensPostProcessRenderer(): LensPostProcessRenderer {
 }
 
 export function selectLensPostProcessPass(passes: PostProcessPass[]) {
-  const lensPasses = passes.filter((pass): pass is LensPostProcessPass => pass.kind === lensPostProcessKind);
-  return { pass: lensPasses[0] ?? null, droppedPassCount: Math.max(0, lensPasses.length - 1) };
-}
-
-export function createLensExportPostProcessRenderer(renderer: LensPostProcessRenderer): ExportPostProcessRenderer<LensPostProcessPass> {
+  const lensPasses = passes.filter(
+    (pass): pass is LensPostProcessPass => pass.kind === lensPostProcessKind,
+  );
   return {
-    kind: lensPostProcessKind,
-    maxPassesPerFrame: 1,
-    unavailableMessage: "Export post-process WebGL renderer is unavailable for active Lens pass.",
-    render: ({ canvas, source, pass, width, height }) => renderer.render(canvas, source, pass, width, height),
+    pass: lensPasses[0] ?? null,
+    droppedPassCount: Math.max(0, lensPasses.length - 1),
   };
 }
 
-function drawLensPass({ gl, pass, width, height, uniforms }: WebGlPostProcessDrawInput<LensPostProcessPass>) {
+export function createLensExportPostProcessRenderer(
+  renderer: LensPostProcessRenderer,
+): ExportPostProcessRenderer<LensPostProcessPass> {
+  return {
+    kind: lensPostProcessKind,
+    maxPassesPerFrame: 1,
+    unavailableMessage:
+      "Export post-process WebGL renderer is unavailable for active Lens pass.",
+    render: ({ canvas, source, pass, width, height }) =>
+      renderer.render(canvas, source, pass, width, height),
+  };
+}
+
+function drawLensPass({
+  gl,
+  pass,
+  width,
+  height,
+  uniforms,
+}: WebGlPostProcessDrawInput<LensPostProcessPass>) {
   const values = pass.uniforms;
   const mask = values.chromaticAberrationMask;
   gl.uniform1i(uniforms.u_image, 0);
@@ -124,11 +143,19 @@ function drawLensPass({ gl, pass, width, height, uniforms }: WebGlPostProcessDra
   gl.uniform1f(uniforms.u_softness, values.softness);
   gl.uniform1f(uniforms.u_magnification, values.magnification);
   gl.uniform1f(uniforms.u_distortion, values.distortion);
-  gl.uniform1f(uniforms.u_chromaticAberrationPixels, values.chromaticAberrationPixels);
+  gl.uniform1f(
+    uniforms.u_chromaticAberrationPixels,
+    values.chromaticAberrationPixels,
+  );
   gl.uniform1f(uniforms.u_rimWidth, values.rimWidth);
   gl.uniform1f(uniforms.u_rimOpacity, values.rimOpacity);
   gl.uniform1f(uniforms.u_dimAmount, values.dimAmount);
-  gl.uniform3f(uniforms.u_frameBackground, values.frameBackground.r, values.frameBackground.g, values.frameBackground.b);
+  gl.uniform3f(
+    uniforms.u_frameBackground,
+    values.frameBackground.r,
+    values.frameBackground.g,
+    values.frameBackground.b,
+  );
   gl.uniform1f(uniforms.u_chromaMaskEnabled, mask.enabled ? 1 : 0);
   gl.uniform1f(uniforms.u_chromaMaskPreview, mask.preview ? 1 : 0);
   gl.uniform1f(uniforms.u_chromaMaskApplyInside, mask.applyInside ? 1 : 0);

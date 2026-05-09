@@ -1,4 +1,10 @@
-import { useEffect, useRef, type Dispatch, type PointerEvent, type SetStateAction } from "react";
+import {
+  useEffect,
+  useRef,
+  type Dispatch,
+  type PointerEvent,
+  type SetStateAction,
+} from "react";
 import { clamp } from "../../core/math";
 
 type TimelineRowResizeEdge = "top" | "bottom";
@@ -19,18 +25,34 @@ type TimelineRowResizeTransaction = {
   cancel: () => void;
 };
 
-export function getTimelineRowHeight(rowHeights: Record<string, number>, key: string) {
+export function getTimelineRowHeight(
+  rowHeights: Record<string, number>,
+  key: string,
+) {
   return clamp(Math.round(rowHeights[key] ?? 58), 42, 140);
 }
 
-export function useTimelineRowResize({ rowHeights, setPreviewRowHeights, onCommitRowHeights, onCanResizeRow, onDragActiveChange }: TimelineRowResizeOptions) {
+export function useTimelineRowResize({
+  rowHeights,
+  setPreviewRowHeights,
+  onCommitRowHeights,
+  onCanResizeRow,
+  onDragActiveChange,
+}: TimelineRowResizeOptions) {
   const activeResizeRef = useRef<TimelineRowResizeTransaction | null>(null);
 
-  useEffect(() => () => {
-    activeResizeRef.current?.cancel();
-  }, []);
+  useEffect(
+    () => () => {
+      activeResizeRef.current?.cancel();
+    },
+    [],
+  );
 
-  function startTimelineRowResize(event: PointerEvent<HTMLElement>, rowKey: string, edge: TimelineRowResizeEdge = "bottom") {
+  function startTimelineRowResize(
+    event: PointerEvent<HTMLElement>,
+    rowKey: string,
+    edge: TimelineRowResizeEdge = "bottom",
+  ) {
     if (onCanResizeRow && !onCanResizeRow(rowKey)) return;
     activeResizeRef.current?.cancel();
     event.preventDefault();
@@ -46,7 +68,11 @@ export function useTimelineRowResize({ rowHeights, setPreviewRowHeights, onCommi
 
     function update(clientY: number) {
       const deltaY = clientY - startY;
-      const height = clamp(Math.round(initialHeight + (edge === "top" ? -deltaY : deltaY)), 42, 140);
+      const height = clamp(
+        Math.round(initialHeight + (edge === "top" ? -deltaY : deltaY)),
+        42,
+        140,
+      );
       nextHeights = { ...initialHeights, [rowKey]: height };
       setPreviewRowHeights(nextHeights);
     }
@@ -64,7 +90,8 @@ export function useTimelineRowResize({ rowHeights, setPreviewRowHeights, onCommi
       activeResizeRef.current = null;
       onDragActiveChange?.(false);
       setPreviewRowHeights(null);
-      if (target.hasPointerCapture(pointerId)) target.releasePointerCapture(pointerId);
+      if (target.hasPointerCapture(pointerId))
+        target.releasePointerCapture(pointerId);
       if (commit) onCommitRowHeights(nextHeights);
     }
 
@@ -76,7 +103,13 @@ export function useTimelineRowResize({ rowHeights, setPreviewRowHeights, onCommi
       cleanupResize(false);
     }
 
-    const transaction: TimelineRowResizeTransaction = { move, pointerId, target, up, cancel };
+    const transaction: TimelineRowResizeTransaction = {
+      move,
+      pointerId,
+      target,
+      up,
+      cancel,
+    };
     activeResizeRef.current = transaction;
 
     window.addEventListener("pointermove", move);

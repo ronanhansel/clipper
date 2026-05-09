@@ -61,7 +61,10 @@ const NUMERIC_KEYFRAME_KEYS = [
   "blur",
 ];
 
-export function evaluateLayerAnimations(animations: LayerAnimation[], time: number): RenderStyle {
+export function evaluateLayerAnimations(
+  animations: LayerAnimation[],
+  time: number,
+): RenderStyle {
   const combined: RenderStyle = {};
 
   for (const animation of animations) {
@@ -72,7 +75,11 @@ export function evaluateLayerAnimations(animations: LayerAnimation[], time: numb
 
     for (const key in style) {
       if (beforeStart && combined[key] !== undefined) continue;
-      if (key === "transform" && combined.transform !== undefined && style.transform !== undefined) {
+      if (
+        key === "transform" &&
+        combined.transform !== undefined &&
+        style.transform !== undefined
+      ) {
         if (beforeStart) continue;
         combined.transform = `${combined.transform} ${style.transform}`;
       } else if (style[key] !== undefined) {
@@ -84,7 +91,10 @@ export function evaluateLayerAnimations(animations: LayerAnimation[], time: numb
   return combined;
 }
 
-export function evaluateLayerAnimation(animation: LayerAnimation, time: number): RenderStyle {
+export function evaluateLayerAnimation(
+  animation: LayerAnimation,
+  time: number,
+): RenderStyle {
   const progress = getLayerAnimationProgress(animation, time);
   const { keyframes } = animation;
   const style: RenderStyle = {};
@@ -94,7 +104,10 @@ export function evaluateLayerAnimation(animation: LayerAnimation, time: number):
     const values = keyframes[key as keyof typeof keyframes];
     if (!values || !Array.isArray(values) || values.length < 2) continue;
 
-    const value = interpolateKeyframeValues(values as readonly number[], progress);
+    const value = interpolateKeyframeValues(
+      values as readonly number[],
+      progress,
+    );
     const transformName = TRANSFORM_MAP[key];
 
     if (transformName) {
@@ -111,8 +124,15 @@ export function evaluateLayerAnimation(animation: LayerAnimation, time: number):
     }
   }
 
-  if (keyframes.transformPerspective && Array.isArray(keyframes.transformPerspective) && keyframes.transformPerspective.length >= 2) {
-    const value = interpolateKeyframeValues(keyframes.transformPerspective as readonly number[], progress);
+  if (
+    keyframes.transformPerspective &&
+    Array.isArray(keyframes.transformPerspective) &&
+    keyframes.transformPerspective.length >= 2
+  ) {
+    const value = interpolateKeyframeValues(
+      keyframes.transformPerspective as readonly number[],
+      progress,
+    );
     transforms.unshift(`perspective(${Math.round(value)}px)`);
   }
 
@@ -120,7 +140,10 @@ export function evaluateLayerAnimation(animation: LayerAnimation, time: number):
     const values = keyframes[key as keyof typeof keyframes];
     if (!values || !Array.isArray(values) || values.length < 2) continue;
 
-    const index = Math.min(Math.floor(progress * (values.length - 1)), values.length - 1);
+    const index = Math.min(
+      Math.floor(progress * (values.length - 1)),
+      values.length - 1,
+    );
     style[key] = values[index] as string;
   }
 
@@ -131,19 +154,39 @@ export function evaluateLayerAnimation(animation: LayerAnimation, time: number):
   return style;
 }
 
-export function getLayerAnimationsTranslation(animations: LayerAnimation[] | undefined, time: number): Point {
+export function getLayerAnimationsTranslation(
+  animations: LayerAnimation[] | undefined,
+  time: number,
+): Point {
   const point = { x: 0, y: 0 };
   for (const animation of animations ?? []) {
     if (animation.enabled === false) continue;
     const progress = getLayerAnimationProgress(animation, time);
-    if (animation.keyframes.x) point.x += interpolateKeyframeValues(animation.keyframes.x as readonly number[], progress);
-    if (animation.keyframes.y) point.y += interpolateKeyframeValues(animation.keyframes.y as readonly number[], progress);
+    if (animation.keyframes.x)
+      point.x += interpolateKeyframeValues(
+        animation.keyframes.x as readonly number[],
+        progress,
+      );
+    if (animation.keyframes.y)
+      point.y += interpolateKeyframeValues(
+        animation.keyframes.y as readonly number[],
+        progress,
+      );
   }
   return point;
 }
 
-export function getLayerAnimationProgress(animation: LayerAnimation, time: number): number {
-  const { delay = 0, duration, repeat, repeatType = "loop", repeatDelay = 0 } = animation.options;
+export function getLayerAnimationProgress(
+  animation: LayerAnimation,
+  time: number,
+): number {
+  const {
+    delay = 0,
+    duration,
+    repeat,
+    repeatType = "loop",
+    repeatDelay = 0,
+  } = animation.options;
 
   if (time < delay) return 0;
 
@@ -191,7 +234,10 @@ export function getLayerAnimationProgress(animation: LayerAnimation, time: numbe
   return easeAnimationProgress(rawProgress, animation.options.ease);
 }
 
-export function interpolateKeyframeValues(keyframes: readonly number[], progress: number): number {
+export function interpolateKeyframeValues(
+  keyframes: readonly number[],
+  progress: number,
+): number {
   if (keyframes.length === 0) return 0;
   if (keyframes.length === 1) return keyframes[0];
 
@@ -203,7 +249,10 @@ export function interpolateKeyframeValues(keyframes: readonly number[], progress
   return lerp(keyframes[index], keyframes[index + 1], t);
 }
 
-export function easeAnimationProgress(progress: number, ease?: string | readonly number[]): number {
+export function easeAnimationProgress(
+  progress: number,
+  ease?: string | readonly number[],
+): number {
   if (ease === "linear" || ease === undefined) return progress;
   if (ease === "easeIn") return progress * progress * progress;
   if (ease === "easeOut" || ease === "circOut") return easeOutCubic(progress);
@@ -220,14 +269,24 @@ function easeOutCubic(value: number): number {
 }
 
 function easeInOutCubic(value: number): number {
-  return value < 0.5 ? 4 * value * value * value : 1 - Math.pow(-2 * value + 2, 3) / 2;
+  return value < 0.5
+    ? 4 * value * value * value
+    : 1 - Math.pow(-2 * value + 2, 3) / 2;
 }
 
 function backOut(value: number): number {
-  return 1 + 2.70158 * Math.pow(value - 1, 3) + 1.70158 * Math.pow(value - 1, 2);
+  return (
+    1 + 2.70158 * Math.pow(value - 1, 3) + 1.70158 * Math.pow(value - 1, 2)
+  );
 }
 
-function cubicBezierEase(progress: number, x1: number, y1: number, x2: number, y2: number): number {
+function cubicBezierEase(
+  progress: number,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+): number {
   if (progress <= 0) return 0;
   if (progress >= 1) return 1;
 

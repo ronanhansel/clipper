@@ -10,8 +10,11 @@ export type RecentProject = {
 
 async function readAppState(): Promise<Record<string, unknown>> {
   try {
-    if (typeof window !== "undefined" && window.clipper?.readAppState) return window.clipper.readAppState();
-    const state = JSON.parse(await clipperHost.readTextFile(appStatePath)) as Record<string, unknown>;
+    if (typeof window !== "undefined" && window.clipper?.readAppState)
+      return window.clipper.readAppState();
+    const state = JSON.parse(
+      await clipperHost.readTextFile(appStatePath),
+    ) as Record<string, unknown>;
     return typeof state === "object" && state !== null ? state : {};
   } catch {
     return {};
@@ -29,28 +32,42 @@ async function writeAppState(updates: Record<string, unknown>) {
     if (value === undefined || value === null) delete merged[key];
     else merged[key] = value;
   }
-  await clipperHost.writeTextFile(appStatePath, `${JSON.stringify(merged, null, 2)}\n`);
+  await clipperHost.writeTextFile(
+    appStatePath,
+    `${JSON.stringify(merged, null, 2)}\n`,
+  );
 }
 
-export async function readStoredActiveProjectManifestPath(): Promise<string | null> {
+export async function readStoredActiveProjectManifestPath(): Promise<
+  string | null
+> {
   try {
     const state = await readAppState();
     const path = state.activeProjectManifestPath;
-    if (typeof path === "string" && path.startsWith("clipper/") && path.endsWith(".json")) {
+    if (
+      typeof path === "string" &&
+      path.startsWith("clipper/") &&
+      path.endsWith(".json")
+    ) {
       return path;
     }
-    if (typeof window !== "undefined" && window.clipper?.readAppState) return null;
+    if (typeof window !== "undefined" && window.clipper?.readAppState)
+      return null;
   } catch {
     // New installs will not have app-state.json yet.
   }
 
-  const localStoragePath = localStorage.getItem(activeProjectManifestStorageKey);
+  const localStoragePath = localStorage.getItem(
+    activeProjectManifestStorageKey,
+  );
   if (localStoragePath?.endsWith(".json")) return localStoragePath;
 
   return null;
 }
 
-export async function writeStoredActiveProjectManifestPath(manifestPath: string) {
+export async function writeStoredActiveProjectManifestPath(
+  manifestPath: string,
+) {
   localStorage.setItem(activeProjectManifestStorageKey, manifestPath);
   await writeAppState({ activeProjectManifestPath: manifestPath });
 }
@@ -64,11 +81,19 @@ export async function readRecentProjects(): Promise<RecentProject[]> {
   try {
     const state = await readAppState();
     if (Array.isArray(state.recentProjects)) {
-      return (state.recentProjects as RecentProject[]).filter(
-        (r) => r && typeof r.path === "string" && r.path.endsWith(".json") && typeof r.name === "string"
-      ).slice(0, 10);
+      return (state.recentProjects as RecentProject[])
+        .filter(
+          (r) =>
+            r &&
+            typeof r.path === "string" &&
+            r.path.endsWith(".json") &&
+            typeof r.name === "string",
+        )
+        .slice(0, 10);
     }
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
   return [];
 }
 

@@ -19,15 +19,20 @@ export function usePresentationController({
   scrubToSceneTime,
   updateMode,
 }: PresentationControllerOptions) {
-  const [presentationMode, setPresentationMode] = useState<PresentationMode>(null);
-  const [presentationControlsVisible, setPresentationControlsVisible] = useState(false);
-  const [presentationViewport, setPresentationViewport] = useState(() => getPresentationViewport(window.innerWidth));
+  const [presentationMode, setPresentationMode] =
+    useState<PresentationMode>(null);
+  const [presentationControlsVisible, setPresentationControlsVisible] =
+    useState(false);
+  const [presentationViewport, setPresentationViewport] = useState(() =>
+    getPresentationViewport(window.innerWidth),
+  );
   const presentationModeRef = useRef<PresentationMode>(presentationMode);
   const presentationControlsTimeoutRef = useRef(0);
 
   useEffect(() => {
     return window.clipper?.onWindowFullscreenChange?.((fullscreen) => {
-      if (!fullscreen && presentationModeRef.current === "frame") setPresentationMode(null);
+      if (!fullscreen && presentationModeRef.current === "frame")
+        setPresentationMode(null);
     });
   }, []);
 
@@ -38,13 +43,15 @@ export function usePresentationController({
   useEffect(() => {
     function updatePresentationViewport() {
       const rect = centerPreviewScrollRef.current?.getBoundingClientRect();
-      const width = rect?.width || window.visualViewport?.width || window.innerWidth;
+      const width =
+        rect?.width || window.visualViewport?.width || window.innerWidth;
       setPresentationViewport(getPresentationViewport(width));
     }
 
     updatePresentationViewport();
     const resizeObserver = new ResizeObserver(updatePresentationViewport);
-    if (centerPreviewScrollRef.current) resizeObserver.observe(centerPreviewScrollRef.current);
+    if (centerPreviewScrollRef.current)
+      resizeObserver.observe(centerPreviewScrollRef.current);
     window.addEventListener("resize", updatePresentationViewport);
     return () => {
       resizeObserver.disconnect();
@@ -54,16 +61,30 @@ export function usePresentationController({
 
   useEffect(() => {
     function clearRendererFullscreenPresentation() {
-      if (!document.fullscreenElement && presentationModeRef.current === "frame") setPresentationMode(null);
+      if (
+        !document.fullscreenElement &&
+        presentationModeRef.current === "frame"
+      )
+        setPresentationMode(null);
     }
 
-    document.addEventListener("fullscreenchange", clearRendererFullscreenPresentation);
-    return () => document.removeEventListener("fullscreenchange", clearRendererFullscreenPresentation);
+    document.addEventListener(
+      "fullscreenchange",
+      clearRendererFullscreenPresentation,
+    );
+    return () =>
+      document.removeEventListener(
+        "fullscreenchange",
+        clearRendererFullscreenPresentation,
+      );
   }, []);
 
-  useEffect(() => () => {
-    window.clearTimeout(presentationControlsTimeoutRef.current);
-  }, []);
+  useEffect(
+    () => () => {
+      window.clearTimeout(presentationControlsTimeoutRef.current);
+    },
+    [],
+  );
 
   async function setElectronWindowFullscreen(fullscreen: boolean) {
     if (window.clipper?.setWindowFullscreen) {
@@ -75,15 +96,20 @@ export function usePresentationController({
       }
     }
 
-    if (!fullscreen && document.fullscreenElement) await document.exitFullscreen();
-    if (fullscreen && !document.fullscreenElement) await appRootRef.current?.requestFullscreen();
+    if (!fullscreen && document.fullscreenElement)
+      await document.exitFullscreen();
+    if (fullscreen && !document.fullscreenElement)
+      await appRootRef.current?.requestFullscreen();
   }
 
   function showPresentationControls() {
     if (!presentationModeRef.current) return;
     setPresentationControlsVisible(true);
     window.clearTimeout(presentationControlsTimeoutRef.current);
-    presentationControlsTimeoutRef.current = window.setTimeout(() => setPresentationControlsVisible(false), 2200);
+    presentationControlsTimeoutRef.current = window.setTimeout(
+      () => setPresentationControlsVisible(false),
+      2200,
+    );
   }
 
   async function enterPresentationMode(nextMode: "frame" | "theater") {
@@ -92,7 +118,10 @@ export function usePresentationController({
     presentationModeRef.current = nextMode;
     setPresentationMode(nextMode);
     setPresentationControlsVisible(true);
-    presentationControlsTimeoutRef.current = window.setTimeout(() => setPresentationControlsVisible(false), 2200);
+    presentationControlsTimeoutRef.current = window.setTimeout(
+      () => setPresentationControlsVisible(false),
+      2200,
+    );
     if (nextMode === "frame") {
       await setElectronWindowFullscreen(true);
     }

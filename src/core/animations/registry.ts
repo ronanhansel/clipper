@@ -15,7 +15,10 @@ export const installedAnimationDefinitions = [
 ] as const satisfies readonly AnimationDefinition[];
 
 export const animationDefinitionRegistry = new Map(
-  installedAnimationDefinitions.map((definition) => [definition.property, definition]),
+  installedAnimationDefinitions.map((definition) => [
+    definition.property,
+    definition,
+  ]),
 );
 
 export const animationDefinitions = installedAnimationDefinitions;
@@ -25,5 +28,9 @@ export function getAnimationDefinition(property: string | undefined) {
 }
 
 export function getAnimationDefinitionCategories() {
-  return Array.from(new Set(installedAnimationDefinitions.map((definition) => definition.category)));
+  return Array.from(
+    new Set(
+      installedAnimationDefinitions.map((definition) => definition.category),
+    ),
+  );
 }

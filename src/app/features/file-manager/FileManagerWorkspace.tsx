@@ -1,9 +1,14 @@
-import { FileManager, type FileManagerProps, type FileManagerTreeSnapshot } from "../../../components/FileManager";
+import {
+  FileManager,
+  type FileManagerProps,
+  type FileManagerTreeSnapshot,
+} from "../../../components/FileManager";
 import type { EditorState } from "../../../core/types";
 
 export type FileManagerWorkspaceProps = FileManagerProps;
 
-export type BuildFileManagerWorkspacePropsInput = Omit<FileManagerProps,
+export type BuildFileManagerWorkspacePropsInput = Omit<
+  FileManagerProps,
   | "onAddComposition"
   | "onApplyTreeSnapshot"
   | "onCopyAsset"
@@ -58,7 +63,9 @@ export type BuildFileManagerWorkspacePropsInput = Omit<FileManagerProps,
     dropFiles: FileManagerProps["onDropFiles"];
     duplicateAsset: FileManagerProps["onDuplicateAsset"];
     duplicateComposition: FileManagerProps["onDuplicateComposition"];
-    fileManagerStateChange: (fileManagerState: EditorState["fileManagerState"]) => void;
+    fileManagerStateChange: (
+      fileManagerState: EditorState["fileManagerState"],
+    ) => void;
     moveComposition: FileManagerProps["onMoveComposition"];
     moveTimeline: FileManagerProps["onMoveTimeline"];
     prerenderComposition?: FileManagerProps["onPrerenderComposition"];
@@ -79,7 +86,10 @@ export type BuildFileManagerWorkspacePropsInput = Omit<FileManagerProps,
   };
 };
 
-export function buildFileManagerWorkspaceProps({ actions, ...state }: BuildFileManagerWorkspacePropsInput): FileManagerWorkspaceProps {
+export function buildFileManagerWorkspaceProps({
+  actions,
+  ...state
+}: BuildFileManagerWorkspacePropsInput): FileManagerWorkspaceProps {
   return {
     ...state,
     onAddComposition: actions.addComposition,
@@ -130,7 +140,10 @@ export function FileManagerWorkspace(props: FileManagerWorkspaceProps) {
   }
 
   function handleDrop(event: React.DragEvent) {
-    if (event.dataTransfer.types.includes("Files") && event.dataTransfer.files.length > 0) {
+    if (
+      event.dataTransfer.types.includes("Files") &&
+      event.dataTransfer.files.length > 0
+    ) {
       event.preventDefault();
       event.stopPropagation();
       props.onDropFiles(event.dataTransfer.files);
@@ -138,7 +151,11 @@ export function FileManagerWorkspace(props: FileManagerWorkspaceProps) {
   }
 
   return (
-    <div onDragOverCapture={handleDragOver} onDropCapture={handleDrop} className="min-h-0 min-w-0">
+    <div
+      onDragOverCapture={handleDragOver}
+      onDropCapture={handleDrop}
+      className="min-h-0 min-w-0"
+    >
       <FileManager {...props} />
     </div>
   );

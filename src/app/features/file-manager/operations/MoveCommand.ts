@@ -4,9 +4,7 @@ import type { Command } from "./Command";
 export class MoveCommand implements Command {
   private moves: Array<{ oldPath: string; newPath: string }>;
 
-  constructor(
-    moves: Array<{ oldPath: string; newPath: string }>
-  ) {
+  constructor(moves: Array<{ oldPath: string; newPath: string }>) {
     this.moves = moves.filter(isValidMovePath);
   }
 
@@ -19,7 +17,9 @@ export class MoveCommand implements Command {
   }
 
   async undo() {
-    await performMoves(this.moves.map((m) => ({ oldPath: m.newPath, newPath: m.oldPath })));
+    await performMoves(
+      this.moves.map((m) => ({ oldPath: m.newPath, newPath: m.oldPath })),
+    );
   }
 
   async redo() {
@@ -27,7 +27,9 @@ export class MoveCommand implements Command {
   }
 }
 
-async function performMoves(moves: Array<{ oldPath: string; newPath: string }>) {
+async function performMoves(
+  moves: Array<{ oldPath: string; newPath: string }>,
+) {
   const applied: Array<{ oldPath: string; newPath: string }> = [];
 
   try {
@@ -47,14 +49,20 @@ async function performMoves(moves: Array<{ oldPath: string; newPath: string }>) 
       }
     }
     if (rollbackErrors.length > 0) {
-      throw new AggregateError([error, ...rollbackErrors], "Move failed and rollback was incomplete.");
+      throw new AggregateError(
+        [error, ...rollbackErrors],
+        "Move failed and rollback was incomplete.",
+      );
     }
     throw error;
   }
 }
 
 function isValidMovePath(move: { oldPath: string; newPath: string }) {
-  return move.oldPath !== move.newPath && !move.newPath.startsWith(`${move.oldPath}/`);
+  return (
+    move.oldPath !== move.newPath &&
+    !move.newPath.startsWith(`${move.oldPath}/`)
+  );
 }
 
 async function ensureParentDirectory(path: string) {

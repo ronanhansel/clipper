@@ -4,7 +4,7 @@ name: Hue Rotate
 label: Hue Rotate
 group: Visual
 defaultDuration: 3
-defaultParams: {"degrees":30}
+defaultParams: { "degrees": 30 }
 paramControls:
   - key: degrees
     label: Degrees

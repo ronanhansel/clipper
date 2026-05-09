@@ -4,7 +4,7 @@ name: Pixel Blur
 label: Pixel Blur
 group: Visual/Blur
 defaultDuration: 3
-defaultParams: {"amount":6,"contrast":1.08,"target":"camera"}
+defaultParams: { "amount": 6, "contrast": 1.08, "target": "camera" }
 paramControls:
   - key: amount
     label: Amount
@@ -24,4 +24,4 @@ paramControls:
     label: Target
     type: select
     defaultValue: camera
-    options: [{"value":"frame","label":"Frame"},{"value":"camera","label":"Camera"}]
+    options: [{ "value": "frame", "label": "Frame" }, { "value": "camera", "label": "Camera" }]

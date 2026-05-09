@@ -11,7 +11,13 @@ type EditorModeCommandsOptions = {
   updateEditorState: UpdateEditorState;
 };
 
-export function useEditorModeCommands({ modeRef, timelineModeRef, setMode, setTimelineMode, updateEditorState }: EditorModeCommandsOptions) {
+export function useEditorModeCommands({
+  modeRef,
+  timelineModeRef,
+  setMode,
+  setTimelineMode,
+  updateEditorState,
+}: EditorModeCommandsOptions) {
   function updateTimelineMode(nextMode: TimelineMode) {
     timelineModeRef.current = nextMode;
     setTimelineMode(nextMode);
@@ -19,7 +25,11 @@ export function useEditorModeCommands({ modeRef, timelineModeRef, setMode, setTi
       modeRef.current = "preview";
       setMode("preview");
     }
-    updateEditorState((state) => ({ ...state, timelineMode: nextMode, mode: nextMode === "compose" ? "preview" : state.mode }));
+    updateEditorState((state) => ({
+      ...state,
+      timelineMode: nextMode,
+      mode: nextMode === "compose" ? "preview" : state.mode,
+    }));
   }
 
   function updateMode(nextMode: Mode) {

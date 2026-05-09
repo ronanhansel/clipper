@@ -5,4 +5,4 @@ label: Swipe
 group: Push
 tags: ["blocksOverlap"]
 defaultDuration: 2
-defaultParams: {"ease":"linear","transitionTime":2}
+defaultParams: { "ease": "linear", "transitionTime": 2 }

@@ -1,0 +1,7 @@
+agent-log/
+clipper/
+dist/
+dist-electron/
+node_modules/
+src/core/effects/builtins/**/manifest.yml
+templates/**/manifest.yml

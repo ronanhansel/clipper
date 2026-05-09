@@ -6,7 +6,7 @@ export class CreateCommand implements Command {
     private path: string,
     private name: string,
     private isDirectory: boolean,
-    private content?: string
+    private content?: string,
   ) {}
 
   get label() {

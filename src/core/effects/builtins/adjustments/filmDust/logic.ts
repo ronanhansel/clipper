@@ -11,21 +11,23 @@ export const filmDustLogic = {
     const scale = Math.max(1, 38 / density);
 
     return {
-      overlays: [{
-        id: `${layer.id}:film-dust`,
-        target: getOverlayTarget(layer),
-        style: {
-          backgroundImage: [
-            "radial-gradient(circle at 14% 18%, rgba(255,255,255,0.95) 0 0.9px, transparent 1.4px)",
-            "radial-gradient(circle at 72% 36%, rgba(255,255,255,0.75) 0 0.7px, transparent 1.2px)",
-            "radial-gradient(circle at 42% 78%, rgba(0,0,0,0.5) 0 0.8px, transparent 1.5px)",
-          ].join(","),
-          backgroundPosition: `${offsetX}px ${offsetY}px, ${-offsetY}px ${offsetX}px, ${offsetY / 2}px ${-offsetX / 2}px`,
-          backgroundSize: `${scale}px ${scale}px, ${scale * 1.7}px ${scale * 1.7}px, ${scale * 2.3}px ${scale * 2.3}px`,
-          mixBlendMode: "screen",
-          opacity: intensity,
+      overlays: [
+        {
+          id: `${layer.id}:film-dust`,
+          target: getOverlayTarget(layer),
+          style: {
+            backgroundImage: [
+              "radial-gradient(circle at 14% 18%, rgba(255,255,255,0.95) 0 0.9px, transparent 1.4px)",
+              "radial-gradient(circle at 72% 36%, rgba(255,255,255,0.75) 0 0.7px, transparent 1.2px)",
+              "radial-gradient(circle at 42% 78%, rgba(0,0,0,0.5) 0 0.8px, transparent 1.5px)",
+            ].join(","),
+            backgroundPosition: `${offsetX}px ${offsetY}px, ${-offsetY}px ${offsetX}px, ${offsetY / 2}px ${-offsetX / 2}px`,
+            backgroundSize: `${scale}px ${scale}px, ${scale * 1.7}px ${scale * 1.7}px, ${scale * 2.3}px ${scale * 2.3}px`,
+            mixBlendMode: "screen",
+            opacity: intensity,
+          },
         },
-      }],
+      ],
     };
   },
 } as const satisfies Partial<Pick<AdjustmentEffectPackage, "applyVisualStyle">>;

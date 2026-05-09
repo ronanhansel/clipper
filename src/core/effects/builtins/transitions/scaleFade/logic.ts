@@ -1,6 +1,9 @@
 import type { TransitionEffectPackage } from "../../../types";
 
-export const scaleFadeTransitionLogic: Pick<TransitionEffectPackage, "renderSequence"> = {
+export const scaleFadeTransitionLogic: Pick<
+  TransitionEffectPackage,
+  "renderSequence"
+> = {
   renderSequence: ({ progress }) => {
     const t = Math.max(0, Math.min(1, progress));
     return {

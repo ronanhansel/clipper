@@ -1,34 +1,84 @@
-import type { AdjustmentEffectDefinition, MotionEffectDefinition, TransitionEffectDefinition } from "../types";
-import type { AdjustmentEffectPackage, MotionEffectPackage, TransitionEffectPackage } from "./types";
+import type {
+  AdjustmentEffectDefinition,
+  MotionEffectDefinition,
+  TransitionEffectDefinition,
+} from "../types";
+import type {
+  AdjustmentEffectPackage,
+  MotionEffectPackage,
+  TransitionEffectPackage,
+} from "./types";
 import { createAdjustmentLayer } from "./builtins/adjustments/helpers";
 
 type MotionEffectManifest = MotionEffectDefinition;
 type AdjustmentEffectManifest = AdjustmentEffectDefinition;
 type TransitionEffectManifest = TransitionEffectDefinition;
 
-type YamlValue = string | number | boolean | null | YamlValue[] | { [key: string]: YamlValue };
+type YamlValue =
+  | string
+  | number
+  | boolean
+  | null
+  | YamlValue[]
+  | { [key: string]: YamlValue };
 
-export type MotionEffectLogic = Pick<MotionEffectPackage, "createDefaultBlock" | "mendTransitionOptions">;
+export type MotionEffectLogic = Pick<
+  MotionEffectPackage,
+  "createDefaultBlock" | "mendTransitionOptions"
+>;
 
-export type AdjustmentEffectLogic = Partial<Pick<AdjustmentEffectPackage, "applySceneTime" | "applyVisualStyle" | "collectPostProcessPasses" | "getDisplayElapsed" | "requiresLiveDomPostProcessSource" | "timeSensitive" | "validate">>;
+export type AdjustmentEffectLogic = Partial<
+  Pick<
+    AdjustmentEffectPackage,
+    | "applySceneTime"
+    | "applyVisualStyle"
+    | "collectPostProcessPasses"
+    | "getDisplayElapsed"
+    | "requiresLiveDomPostProcessSource"
+    | "timeSensitive"
+    | "validate"
+  >
+>;
 
-export type TransitionEffectLogic = Partial<Pick<TransitionEffectPackage, "applyVisualStyle" | "renderSequence">>;
+export type TransitionEffectLogic = Partial<
+  Pick<TransitionEffectPackage, "applyVisualStyle" | "renderSequence">
+>;
 
-export function createMotionEffectPackage(manifestSource: string, logic: MotionEffectLogic): MotionEffectPackage {
-  return { ...parseEffectManifest<MotionEffectManifest>(manifestSource), ...logic };
-}
-
-export function createAdjustmentEffectPackage(manifestSource: string, logic: AdjustmentEffectLogic = {}): AdjustmentEffectPackage {
-  const manifest = parseEffectManifest<AdjustmentEffectManifest>(manifestSource);
+export function createMotionEffectPackage(
+  manifestSource: string,
+  logic: MotionEffectLogic,
+): MotionEffectPackage {
   return {
-    ...manifest,
+    ...parseEffectManifest<MotionEffectManifest>(manifestSource),
     ...logic,
-    createDefaultLayer: (input) => createAdjustmentLayer(input, manifest.name, manifest.id, manifest.defaultParams),
   };
 }
 
-export function createTransitionEffectPackage(manifestSource: string, logic: TransitionEffectLogic = {}): TransitionEffectPackage {
-  const manifest = parseEffectManifest<TransitionEffectManifest>(manifestSource);
+export function createAdjustmentEffectPackage(
+  manifestSource: string,
+  logic: AdjustmentEffectLogic = {},
+): AdjustmentEffectPackage {
+  const manifest =
+    parseEffectManifest<AdjustmentEffectManifest>(manifestSource);
+  return {
+    ...manifest,
+    ...logic,
+    createDefaultLayer: (input) =>
+      createAdjustmentLayer(
+        input,
+        manifest.name,
+        manifest.id,
+        manifest.defaultParams,
+      ),
+  };
+}
+
+export function createTransitionEffectPackage(
+  manifestSource: string,
+  logic: TransitionEffectLogic = {},
+): TransitionEffectPackage {
+  const manifest =
+    parseEffectManifest<TransitionEffectManifest>(manifestSource);
   return {
     ...manifest,
     ...logic,
@@ -39,7 +89,10 @@ export function createTransitionEffectPackage(manifestSource: string, logic: Tra
       start: input.start,
       duration: input.duration,
       midPoint: input.midPoint,
-      effect: { effectId: manifest.id, params: { ease: "easeInOut", ...manifest.defaultParams } },
+      effect: {
+        effectId: manifest.id,
+        params: { ease: "easeInOut", ...manifest.defaultParams },
+      },
     }),
   };
 }
@@ -47,7 +100,10 @@ export function createTransitionEffectPackage(manifestSource: string, logic: Tra
 function parseEffectManifest<T>(source: string): T {
   const lines = source.split(/\r?\n/);
   const root: Record<string, YamlValue> = {};
-  const stack: { indent: number; value: Record<string, YamlValue> | YamlValue[] }[] = [{ indent: -1, value: root }];
+  const stack: {
+    indent: number;
+    value: Record<string, YamlValue> | YamlValue[];
+  }[] = [{ indent: -1, value: root }];
 
   for (const rawLine of lines) {
     const withoutComment = rawLine.replace(/\s+#.*$/, "");
@@ -55,18 +111,21 @@ function parseEffectManifest<T>(source: string): T {
     const indent = withoutComment.match(/^\s*/)?.[0].length ?? 0;
     const line = withoutComment.trim();
 
-    while (stack.length > 1 && indent <= stack[stack.length - 1].indent) stack.pop();
+    while (stack.length > 1 && indent <= stack[stack.length - 1].indent)
+      stack.pop();
 
     const parent = stack[stack.length - 1].value;
     if (line.startsWith("- ")) {
-      if (!Array.isArray(parent)) throw new Error(`Invalid manifest list item: ${rawLine}`);
+      if (!Array.isArray(parent))
+        throw new Error(`Invalid manifest list item: ${rawLine}`);
       const item = parseListItem(line.slice(2));
       parent.push(item);
       if (isRecord(item)) stack.push({ indent, value: item });
       continue;
     }
 
-    if (Array.isArray(parent)) throw new Error(`Invalid manifest object field inside list: ${rawLine}`);
+    if (Array.isArray(parent))
+      throw new Error(`Invalid manifest object field inside list: ${rawLine}`);
     const separator = line.indexOf(":");
     if (separator < 0) throw new Error(`Invalid manifest line: ${rawLine}`);
 
@@ -89,16 +148,26 @@ function parseEffectManifest<T>(source: string): T {
 function normalizeEffectGroups(root: Record<string, YamlValue>) {
   const groups = root.groups;
   if (Array.isArray(groups)) {
-    const normalized = groups.map((group) => String(group).trim()).filter(Boolean);
+    const normalized = groups
+      .map((group) => String(group).trim())
+      .filter(Boolean);
     root.groups = normalized;
     root.group = normalized.join("/");
     return;
   }
 
-  if (typeof root.group === "string") root.groups = root.group.split("/").map((group) => group.trim()).filter(Boolean);
+  if (typeof root.group === "string")
+    root.groups = root.group
+      .split("/")
+      .map((group) => group.trim())
+      .filter(Boolean);
 }
 
-function getNextContainer(lines: string[], currentLine: string, currentIndent: number): Record<string, YamlValue> | YamlValue[] {
+function getNextContainer(
+  lines: string[],
+  currentLine: string,
+  currentIndent: number,
+): Record<string, YamlValue> | YamlValue[] {
   const start = lines.indexOf(currentLine) + 1;
   for (const line of lines.slice(start)) {
     if (!line.trim()) continue;
@@ -118,7 +187,8 @@ function parseListItem(source: string): YamlValue {
 }
 
 function parseScalarOrInline(source: string): YamlValue {
-  if (source.startsWith("{") || source.startsWith("[")) return JSON.parse(source);
+  if (source.startsWith("{") || source.startsWith("["))
+    return JSON.parse(source);
   if (source === "true") return true;
   if (source === "false") return false;
   if (source === "null") return null;

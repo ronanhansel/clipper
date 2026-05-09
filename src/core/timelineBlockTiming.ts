@@ -37,7 +37,11 @@ export type TimelineBlockMoveItem = {
   duration: number;
 };
 
-export function getTimelineSnapGuideTime(time: number, boundaries: number[], snapThresholdSeconds: number) {
+export function getTimelineSnapGuideTime(
+  time: number,
+  boundaries: number[],
+  snapThresholdSeconds: number,
+) {
   let guideTime: number | null = null;
   let nearestDistance = snapThresholdSeconds;
   for (const boundary of boundaries) {
@@ -50,7 +54,13 @@ export function getTimelineSnapGuideTime(time: number, boundaries: number[], sna
   return guideTime;
 }
 
-export function getTimelineBlockSnap(start: number, duration: number, boundaries: number[], snapThresholdSeconds: number, edgePreference: TimelineBlockSnapEdgePreference = "nearest"): TimelineBlockSnapResult {
+export function getTimelineBlockSnap(
+  start: number,
+  duration: number,
+  boundaries: number[],
+  snapThresholdSeconds: number,
+  edgePreference: TimelineBlockSnapEdgePreference = "nearest",
+): TimelineBlockSnapResult {
   let nearestStartDistance = snapThresholdSeconds;
   let nearestStartBoundary: number | null = null;
 
@@ -76,30 +86,51 @@ export function getTimelineBlockSnap(start: number, duration: number, boundaries
   }
 
   if (edgePreference === "end" && nearestEndBoundary !== null) {
-    return { start: nearestEndBoundary - duration, guideTime: nearestEndBoundary };
+    return {
+      start: nearestEndBoundary - duration,
+      guideTime: nearestEndBoundary,
+    };
   }
 
   // "nearest" fallback: pick whichever edge candidate is closest
-  const startDist = nearestStartBoundary !== null ? nearestStartDistance : Number.POSITIVE_INFINITY;
-  const endDist = nearestEndBoundary !== null ? nearestEndDistance : Number.POSITIVE_INFINITY;
+  const startDist =
+    nearestStartBoundary !== null
+      ? nearestStartDistance
+      : Number.POSITIVE_INFINITY;
+  const endDist =
+    nearestEndBoundary !== null ? nearestEndDistance : Number.POSITIVE_INFINITY;
 
   if (startDist <= endDist && nearestStartBoundary !== null) {
     return { start: nearestStartBoundary, guideTime: nearestStartBoundary };
   }
 
   if (nearestEndBoundary !== null) {
-    return { start: nearestEndBoundary - duration, guideTime: nearestEndBoundary };
+    return {
+      start: nearestEndBoundary - duration,
+      guideTime: nearestEndBoundary,
+    };
   }
 
   return { start, guideTime: null };
 }
 
-export function getTimelineDragDeltaSeconds(input: { initialClientX: number; clientX: number; initialScrollLeft: number; scrollLeft: number; pixelsPerSecond: number }) {
+export function getTimelineDragDeltaSeconds(input: {
+  initialClientX: number;
+  clientX: number;
+  initialScrollLeft: number;
+  scrollLeft: number;
+  pixelsPerSecond: number;
+}) {
   const scrollDeltaPixels = input.scrollLeft - input.initialScrollLeft;
-  return (input.clientX + scrollDeltaPixels - input.initialClientX) / Math.max(input.pixelsPerSecond, 0.0001);
+  return (
+    (input.clientX + scrollDeltaPixels - input.initialClientX) /
+    Math.max(input.pixelsPerSecond, 0.0001)
+  );
 }
 
-export function getTimelineBlockTiming(input: TimelineBlockTimingInput): TimelineBlockTimingResult {
+export function getTimelineBlockTiming(
+  input: TimelineBlockTimingInput,
+): TimelineBlockTimingResult {
   const minDuration = input.minDuration ?? 0.1;
   const moveMinStart = input.moveMinStart ?? 0;
   const moveMaxStartMode = input.moveMaxStartMode ?? "contain";
@@ -111,15 +142,26 @@ export function getTimelineBlockTiming(input: TimelineBlockTimingInput): Timelin
   const r = (v: number) => roundToPrecision(v, precision);
 
   if (input.action === "move") {
-    const maxStart = moveMaxStartMode === "contain"
-      ? Math.max(input.timelineDuration - input.initialDuration, moveMinStart)
-      : moveMaxStartMode === "start"
-        ? Math.max(input.timelineDuration, moveMinStart)
-        : Number.POSITIVE_INFINITY;
-    let start = clamp(input.initialStart + input.deltaSeconds, moveMinStart, maxStart);
+    const maxStart =
+      moveMaxStartMode === "contain"
+        ? Math.max(input.timelineDuration - input.initialDuration, moveMinStart)
+        : moveMaxStartMode === "start"
+          ? Math.max(input.timelineDuration, moveMinStart)
+          : Number.POSITIVE_INFINITY;
+    let start = clamp(
+      input.initialStart + input.deltaSeconds,
+      moveMinStart,
+      maxStart,
+    );
     let guideTime: number | null = null;
     if (input.snap) {
-      const snapped = getTimelineBlockSnap(start, input.initialDuration, snapBoundaries, snapThresholdSeconds, input.moveSnapEdge);
+      const snapped = getTimelineBlockSnap(
+        start,
+        input.initialDuration,
+        snapBoundaries,
+        snapThresholdSeconds,
+        input.moveSnapEdge,
+      );
       start = clamp(snapped.start, moveMinStart, maxStart);
       guideTime = snapped.guideTime;
     }
@@ -131,20 +173,43 @@ export function getTimelineBlockTiming(input: TimelineBlockTimingInput): Timelin
     let start = clamp(input.initialStart + input.deltaSeconds, 0, maxStart);
     let guideTime: number | null = null;
     if (input.snap) {
-      guideTime = getTimelineSnapGuideTime(start, snapBoundaries, snapThresholdSeconds);
+      guideTime = getTimelineSnapGuideTime(
+        start,
+        snapBoundaries,
+        snapThresholdSeconds,
+      );
       start = clamp(guideTime ?? start, 0, maxStart);
     }
-    return { start: r(start), duration: r(Math.max(initialEnd - start, minDuration)), guideTime };
+    return {
+      start: r(start),
+      duration: r(Math.max(initialEnd - start, minDuration)),
+      guideTime,
+    };
   }
 
-  const maxEnd = endMaxMode === "timeline" ? input.timelineDuration : Number.POSITIVE_INFINITY;
-  let end = clamp(initialEnd + input.deltaSeconds, input.initialStart + minDuration, maxEnd);
+  const maxEnd =
+    endMaxMode === "timeline"
+      ? input.timelineDuration
+      : Number.POSITIVE_INFINITY;
+  let end = clamp(
+    initialEnd + input.deltaSeconds,
+    input.initialStart + minDuration,
+    maxEnd,
+  );
   let guideTime: number | null = null;
   if (input.snap) {
-    guideTime = getTimelineSnapGuideTime(end, snapBoundaries, snapThresholdSeconds);
+    guideTime = getTimelineSnapGuideTime(
+      end,
+      snapBoundaries,
+      snapThresholdSeconds,
+    );
     end = clamp(guideTime ?? end, input.initialStart + minDuration, maxEnd);
   }
-  return { start: r(input.initialStart), duration: r(Math.max(end - input.initialStart, minDuration)), guideTime };
+  return {
+    start: r(input.initialStart),
+    duration: r(Math.max(end - input.initialStart, minDuration)),
+    guideTime,
+  };
 }
 
 export function getTimelineGroupMoveTiming(input: {
@@ -161,17 +226,21 @@ export function getTimelineGroupMoveTiming(input: {
 }): { deltaSeconds: number; guideTime: number | null } {
   if (input.items.length === 0) return { deltaSeconds: 0, guideTime: null };
   const minStart = Math.min(...input.items.map((item) => item.start));
-  const maxEnd = Math.max(...input.items.map((item) => item.start + item.duration));
+  const maxEnd = Math.max(
+    ...input.items.map((item) => item.start + item.duration),
+  );
   const moveMinStart = input.moveMinStart ?? 0;
   const moveMaxStartMode = input.moveMaxStartMode ?? "contain";
-  const maxStart = moveMaxStartMode === "contain"
-    ? Math.max(input.timelineDuration - (maxEnd - minStart), moveMinStart)
-    : moveMaxStartMode === "start"
-      ? Math.max(input.timelineDuration, moveMinStart)
-      : Number.POSITIVE_INFINITY;
+  const maxStart =
+    moveMaxStartMode === "contain"
+      ? Math.max(input.timelineDuration - (maxEnd - minStart), moveMinStart)
+      : moveMaxStartMode === "start"
+        ? Math.max(input.timelineDuration, moveMinStart)
+        : Number.POSITIVE_INFINITY;
   const precision = input.precision ?? 2;
   const r = (v: number) => roundToPrecision(v, precision);
-  const clampDelta = (delta: number) => clamp(minStart + delta, moveMinStart, maxStart) - minStart;
+  const clampDelta = (delta: number) =>
+    clamp(minStart + delta, moveMinStart, maxStart) - minStart;
 
   const unsnappedDelta = clampDelta(input.deltaSeconds);
   let deltaSeconds = unsnappedDelta;

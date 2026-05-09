@@ -39,23 +39,74 @@ export { getFrameSkipEvery, quantizeFrameSkipTime } from "./frameSkip/logic";
 export { getLoopWindow } from "./loopStutter/logic";
 export { getSpeed } from "./speedChange/logic";
 
-export const blurEffect = createAdjustmentEffectPackage(blurManifest, blurLogic);
-export const boomerangEffect = createAdjustmentEffectPackage(boomerangManifest, boomerangLogic);
-export const colourGradeEffect = createAdjustmentEffectPackage(colourGradeManifest, colourGradeLogic);
-export const directionalBlurEffect = createAdjustmentEffectPackage(directionalBlurManifest, directionalBlurLogic);
-export const filmDustEffect = createAdjustmentEffectPackage(filmDustManifest, filmDustLogic);
-export const filmScratchesEffect = createAdjustmentEffectPackage(filmScratchesManifest, filmScratchesLogic);
-export const frameSkipEffect = createAdjustmentEffectPackage(frameSkipManifest, frameSkipLogic);
-export const freezeFrameEffect = createAdjustmentEffectPackage(freezeFrameManifest, freezeFrameLogic);
-export const glowBlurEffect = createAdjustmentEffectPackage(glowBlurManifest, glowBlurLogic);
-export const lightLeakEffect = createAdjustmentEffectPackage(lightLeakManifest, lightLeakLogic);
-export const lensEffect = createAdjustmentEffectPackage(lensManifest, lensLogic);
-export const loopStutterEffect = createAdjustmentEffectPackage(loopStutterManifest, loopStutterLogic);
-export const pixelBlurEffect = createAdjustmentEffectPackage(pixelBlurManifest, pixelBlurLogic);
-export const radialBlurEffect = createAdjustmentEffectPackage(radialBlurManifest, radialBlurLogic);
-export const reverseEffect = createAdjustmentEffectPackage(reverseManifest, reverseLogic);
-export const speedChangeEffect = createAdjustmentEffectPackage(speedChangeManifest, speedChangeLogic);
-export const vignetteEffect = createAdjustmentEffectPackage(vignetteManifest, vignetteLogic);
+export const blurEffect = createAdjustmentEffectPackage(
+  blurManifest,
+  blurLogic,
+);
+export const boomerangEffect = createAdjustmentEffectPackage(
+  boomerangManifest,
+  boomerangLogic,
+);
+export const colourGradeEffect = createAdjustmentEffectPackage(
+  colourGradeManifest,
+  colourGradeLogic,
+);
+export const directionalBlurEffect = createAdjustmentEffectPackage(
+  directionalBlurManifest,
+  directionalBlurLogic,
+);
+export const filmDustEffect = createAdjustmentEffectPackage(
+  filmDustManifest,
+  filmDustLogic,
+);
+export const filmScratchesEffect = createAdjustmentEffectPackage(
+  filmScratchesManifest,
+  filmScratchesLogic,
+);
+export const frameSkipEffect = createAdjustmentEffectPackage(
+  frameSkipManifest,
+  frameSkipLogic,
+);
+export const freezeFrameEffect = createAdjustmentEffectPackage(
+  freezeFrameManifest,
+  freezeFrameLogic,
+);
+export const glowBlurEffect = createAdjustmentEffectPackage(
+  glowBlurManifest,
+  glowBlurLogic,
+);
+export const lightLeakEffect = createAdjustmentEffectPackage(
+  lightLeakManifest,
+  lightLeakLogic,
+);
+export const lensEffect = createAdjustmentEffectPackage(
+  lensManifest,
+  lensLogic,
+);
+export const loopStutterEffect = createAdjustmentEffectPackage(
+  loopStutterManifest,
+  loopStutterLogic,
+);
+export const pixelBlurEffect = createAdjustmentEffectPackage(
+  pixelBlurManifest,
+  pixelBlurLogic,
+);
+export const radialBlurEffect = createAdjustmentEffectPackage(
+  radialBlurManifest,
+  radialBlurLogic,
+);
+export const reverseEffect = createAdjustmentEffectPackage(
+  reverseManifest,
+  reverseLogic,
+);
+export const speedChangeEffect = createAdjustmentEffectPackage(
+  speedChangeManifest,
+  speedChangeLogic,
+);
+export const vignetteEffect = createAdjustmentEffectPackage(
+  vignetteManifest,
+  vignetteLogic,
+);
 
 export const builtInAdjustmentEffects = [
   frameSkipEffect,

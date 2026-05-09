@@ -9,10 +9,22 @@ import { rotateMotionLogic } from "./rotate/logic";
 import zoomManifest from "./zoom/manifest.yml?raw";
 import { zoomMotionLogic } from "./zoom/logic";
 
-export const panMotionEffect = createMotionEffectPackage(panManifest, panMotionLogic);
-export const perspectiveMotionEffect = createMotionEffectPackage(perspectiveManifest, perspectiveMotionLogic);
-export const rotateMotionEffect = createMotionEffectPackage(rotateManifest, rotateMotionLogic);
-export const zoomMotionEffect = createMotionEffectPackage(zoomManifest, zoomMotionLogic);
+export const panMotionEffect = createMotionEffectPackage(
+  panManifest,
+  panMotionLogic,
+);
+export const perspectiveMotionEffect = createMotionEffectPackage(
+  perspectiveManifest,
+  perspectiveMotionLogic,
+);
+export const rotateMotionEffect = createMotionEffectPackage(
+  rotateManifest,
+  rotateMotionLogic,
+);
+export const zoomMotionEffect = createMotionEffectPackage(
+  zoomManifest,
+  zoomMotionLogic,
+);
 
 export const builtInMotionEffects = [
   zoomMotionEffect,

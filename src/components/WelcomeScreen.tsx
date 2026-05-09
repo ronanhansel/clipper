@@ -1,7 +1,13 @@
 import { useState, useRef, useEffect } from "react";
 import { Trash2 } from "lucide-react";
 import type { RecentProject } from "../app/project/activeProjectManifest";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "./ui/dialog";
 import { Input } from "./ui/input";
 
 type WelcomeScreenProps = {
@@ -13,7 +19,14 @@ type WelcomeScreenProps = {
   onOpenRecentProject: (project: RecentProject) => void;
 };
 
-export function WelcomeScreen({ error, recentProjects, onCreateNewProject, onDeleteRecentProject, onOpenProject, onOpenRecentProject }: WelcomeScreenProps) {
+export function WelcomeScreen({
+  error,
+  recentProjects,
+  onCreateNewProject,
+  onDeleteRecentProject,
+  onOpenProject,
+  onOpenRecentProject,
+}: WelcomeScreenProps) {
   const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -56,7 +69,11 @@ export function WelcomeScreen({ error, recentProjects, onCreateNewProject, onDel
 
   function handleDeleteProject(e: React.MouseEvent, project: RecentProject) {
     e.stopPropagation();
-    if (window.confirm(`Delete "${project.name}"? The project files will be moved to the Bin.`)) {
+    if (
+      window.confirm(
+        `Delete "${project.name}"? The project files will be moved to the Bin.`,
+      )
+    ) {
       onDeleteRecentProject(project);
     }
   }
@@ -66,9 +83,7 @@ export function WelcomeScreen({ error, recentProjects, onCreateNewProject, onDel
       <section className="grid w-[360px] gap-6">
         <div className="grid gap-3 text-center">
           <h1 className="text-2xl font-bold tracking-tight">Clipper</h1>
-          {error ? (
-            <p className="text-sm text-[#a7adbb]">{error}</p>
-          ) : null}
+          {error ? <p className="text-sm text-[#a7adbb]">{error}</p> : null}
         </div>
 
         <div className="grid gap-3">
@@ -139,7 +154,11 @@ export function WelcomeScreen({ error, recentProjects, onCreateNewProject, onDel
                   onChange={(e) => setNewProjectName(e.target.value)}
                   onKeyDown={handleInputKeyDown}
                   placeholder="My Awesome Video"
-                  className={nameError && newProjectName ? "border-red-500 focus-visible:ring-red-500" : ""}
+                  className={
+                    nameError && newProjectName
+                      ? "border-red-500 focus-visible:ring-red-500"
+                      : ""
+                  }
                 />
                 {nameError && newProjectName && (
                   <p className="text-xs text-red-500">{nameError}</p>
@@ -175,15 +194,17 @@ export function WelcomeScreen({ error, recentProjects, onCreateNewProject, onDel
 function validateProjectName(name: string): string | null {
   if (!name) return "Project name cannot be empty.";
   if (/^\s|\s$/.test(name)) return "Name cannot start or end with whitespace.";
-  
+
   if (name === "." || name === "..") return "Invalid project name.";
-  if (/[\x00-\x1F]/.test(name)) return "Name cannot contain control characters.";
-  if (/[<>:"\/\\|?*]/.test(name)) return 'Name cannot contain < > : " / \\ | ? *';
-  
+  if (/[\x00-\x1F]/.test(name))
+    return "Name cannot contain control characters.";
+  if (/[<>:"\/\\|?*]/.test(name))
+    return 'Name cannot contain < > : " / \\ | ? *';
+
   const reserved = /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\..*)?$/i;
   if (reserved.test(name)) return `"${name}" is a reserved system name.`;
-  
+
   if (name.endsWith(".")) return "Name cannot end with a dot.";
-  
+
   return null;
 }

@@ -1,10 +1,29 @@
-import { marqueeSelectionThresholdPx, minimumObjectResizeSide } from "./editorConstants";
+import {
+  marqueeSelectionThresholdPx,
+  minimumObjectResizeSide,
+} from "./editorConstants";
 import { boundsToPoints } from "./geometry";
 import { clamp } from "./math";
 import { evaluateFrameObject } from "../render-engine/renderRuntime";
-import { FRAME_HEIGHT, FRAME_WIDTH, type Bounds, type FrameObject, type Part, type Point, type SelectionPayload } from "./types";
+import {
+  FRAME_HEIGHT,
+  FRAME_WIDTH,
+  type Bounds,
+  type FrameObject,
+  type Part,
+  type Point,
+  type SelectionPayload,
+} from "./types";
 
-export type ResizeHandle = "top-left" | "top" | "top-right" | "right" | "bottom-right" | "bottom" | "bottom-left" | "left";
+export type ResizeHandle =
+  | "top-left"
+  | "top"
+  | "top-right"
+  | "right"
+  | "bottom-right"
+  | "bottom"
+  | "bottom-left"
+  | "left";
 export type ObjectResizeMode = "resize" | "scale";
 
 export type ObjectDrag = {
@@ -39,7 +58,9 @@ export type ObjectPreviewTransform = {
   scaleY: number;
 };
 
-export function selectionObjectFromFrameObject(object: FrameObject): SelectionPayload["objects"][number] {
+export function selectionObjectFromFrameObject(
+  object: FrameObject,
+): SelectionPayload["objects"][number] {
   return {
     id: object.id,
     name: object.name,
@@ -66,69 +87,152 @@ export function getDraggedObjects(drag: ObjectDrag, delta: Point) {
     ...object,
     bounds: {
       ...object.bounds,
-      x: Math.round(clamp(object.bounds.x + delta.x, -object.bounds.width, FRAME_WIDTH)),
-      y: Math.round(clamp(object.bounds.y + delta.y, -object.bounds.height, FRAME_HEIGHT)),
+      x: Math.round(
+        clamp(object.bounds.x + delta.x, -object.bounds.width, FRAME_WIDTH),
+      ),
+      y: Math.round(
+        clamp(object.bounds.y + delta.y, -object.bounds.height, FRAME_HEIGHT),
+      ),
     },
   }));
 }
 
-export function constrainDragDeltaToDominantAxis(delta: Point, constrained: boolean): Point {
+export function constrainDragDeltaToDominantAxis(
+  delta: Point,
+  constrained: boolean,
+): Point {
   if (!constrained) return delta;
-  return Math.abs(delta.x) >= Math.abs(delta.y) ? { x: delta.x, y: 0 } : { x: 0, y: delta.y };
+  return Math.abs(delta.x) >= Math.abs(delta.y)
+    ? { x: delta.x, y: 0 }
+    : { x: 0, y: delta.y };
 }
 
-export function getObjectDragSnap(drag: ObjectDrag, delta: Point, snapTargets: FrameObject[], threshold: number): ObjectDragSnapResult {
-  const selectionBounds = getBoundsUnion(drag.objects.map((object) => object.bounds));
+export function getObjectDragSnap(
+  drag: ObjectDrag,
+  delta: Point,
+  snapTargets: FrameObject[],
+  threshold: number,
+): ObjectDragSnapResult {
+  const selectionBounds = getBoundsUnion(
+    drag.objects.map((object) => object.bounds),
+  );
   const selectedIds = new Set(drag.objects.map((object) => object.id));
   const targetBounds = [
     { x: 0, y: 0, width: FRAME_WIDTH, height: FRAME_HEIGHT },
-    ...snapTargets.filter((object) => !object.hidden && !selectedIds.has(object.id)).map((object) => object.bounds),
+    ...snapTargets
+      .filter((object) => !object.hidden && !selectedIds.has(object.id))
+      .map((object) => object.bounds),
   ];
-  const xStops = targetBounds.flatMap((bounds) => [bounds.x, bounds.x + bounds.width / 2, bounds.x + bounds.width]);
-  const yStops = targetBounds.flatMap((bounds) => [bounds.y, bounds.y + bounds.height / 2, bounds.y + bounds.height]);
-  const xPoints = [selectionBounds.x, selectionBounds.x + selectionBounds.width / 2, selectionBounds.x + selectionBounds.width];
-  const yPoints = [selectionBounds.y, selectionBounds.y + selectionBounds.height / 2, selectionBounds.y + selectionBounds.height];
+  const xStops = targetBounds.flatMap((bounds) => [
+    bounds.x,
+    bounds.x + bounds.width / 2,
+    bounds.x + bounds.width,
+  ]);
+  const yStops = targetBounds.flatMap((bounds) => [
+    bounds.y,
+    bounds.y + bounds.height / 2,
+    bounds.y + bounds.height,
+  ]);
+  const xPoints = [
+    selectionBounds.x,
+    selectionBounds.x + selectionBounds.width / 2,
+    selectionBounds.x + selectionBounds.width,
+  ];
+  const yPoints = [
+    selectionBounds.y,
+    selectionBounds.y + selectionBounds.height / 2,
+    selectionBounds.y + selectionBounds.height,
+  ];
   const xSnap = getClosestSnapOffset(xPoints, xStops, delta.x, threshold);
   const ySnap = getClosestSnapOffset(yPoints, yStops, delta.y, threshold);
   const guides: ObjectSnapGuide[] = [];
   if (xSnap) guides.push({ axis: "x", position: xSnap.position });
   if (ySnap) guides.push({ axis: "y", position: ySnap.position });
-  return { delta: { x: delta.x + (xSnap?.offset ?? 0), y: delta.y + (ySnap?.offset ?? 0) }, guides };
+  return {
+    delta: {
+      x: delta.x + (xSnap?.offset ?? 0),
+      y: delta.y + (ySnap?.offset ?? 0),
+    },
+    guides,
+  };
 }
 
-function getClosestSnapOffset(points: number[], stops: number[], delta: number, threshold: number) {
-  let closest: { offset: number; position: number; distance: number } | null = null;
+function getClosestSnapOffset(
+  points: number[],
+  stops: number[],
+  delta: number,
+  threshold: number,
+) {
+  let closest: { offset: number; position: number; distance: number } | null =
+    null;
   for (const point of points) {
     const movedPoint = point + delta;
     for (const stop of stops) {
       const offset = stop - movedPoint;
       const distance = Math.abs(offset);
       if (distance > threshold) continue;
-      if (!closest || distance < closest.distance) closest = { offset, position: stop, distance };
+      if (!closest || distance < closest.distance)
+        closest = { offset, position: stop, distance };
     }
   }
   return closest;
 }
 
-export function getResizedObjects(resize: ObjectResize, delta: Point, preserveAspect = false) {
+export function getResizedObjects(
+  resize: ObjectResize,
+  delta: Point,
+  preserveAspect = false,
+) {
   const displaySelectionBox = resize.displaySelectionBox;
-  const nextDisplaySelectionBox = getResizedBounds(displaySelectionBox, resize.handle, delta, preserveAspect ? resize.aspectRatio : undefined);
-  const scaleX = displaySelectionBox.width === 0 ? 1 : nextDisplaySelectionBox.width / displaySelectionBox.width;
-  const scaleY = displaySelectionBox.height === 0 ? 1 : nextDisplaySelectionBox.height / displaySelectionBox.height;
+  const nextDisplaySelectionBox = getResizedBounds(
+    displaySelectionBox,
+    resize.handle,
+    delta,
+    preserveAspect ? resize.aspectRatio : undefined,
+  );
+  const scaleX =
+    displaySelectionBox.width === 0
+      ? 1
+      : nextDisplaySelectionBox.width / displaySelectionBox.width;
+  const scaleY =
+    displaySelectionBox.height === 0
+      ? 1
+      : nextDisplaySelectionBox.height / displaySelectionBox.height;
 
   return resize.objects.map((object) => {
-    const previewTransform = resize.objectPreviewTransforms[object.id] ?? identityPreviewTransform;
-    const objectDisplayBounds = getBoundsWithPreviewTransform(object.bounds, previewTransform);
-    const displayLeft = nextDisplaySelectionBox.x + (objectDisplayBounds.x - displaySelectionBox.x) * scaleX;
-    const displayRight = nextDisplaySelectionBox.x + (objectDisplayBounds.x + objectDisplayBounds.width - displaySelectionBox.x) * scaleX;
-    const displayTop = nextDisplaySelectionBox.y + (objectDisplayBounds.y - displaySelectionBox.y) * scaleY;
-    const displayBottom = nextDisplaySelectionBox.y + (objectDisplayBounds.y + objectDisplayBounds.height - displaySelectionBox.y) * scaleY;
-    const sourceBounds = getBoundsWithoutPreviewTransform({
-      x: Math.min(displayLeft, displayRight - minimumObjectResizeSide),
-      y: Math.min(displayTop, displayBottom - minimumObjectResizeSide),
-      width: Math.max(minimumObjectResizeSide, displayRight - displayLeft),
-      height: Math.max(minimumObjectResizeSide, displayBottom - displayTop),
-    }, previewTransform);
+    const previewTransform =
+      resize.objectPreviewTransforms[object.id] ?? identityPreviewTransform;
+    const objectDisplayBounds = getBoundsWithPreviewTransform(
+      object.bounds,
+      previewTransform,
+    );
+    const displayLeft =
+      nextDisplaySelectionBox.x +
+      (objectDisplayBounds.x - displaySelectionBox.x) * scaleX;
+    const displayRight =
+      nextDisplaySelectionBox.x +
+      (objectDisplayBounds.x +
+        objectDisplayBounds.width -
+        displaySelectionBox.x) *
+        scaleX;
+    const displayTop =
+      nextDisplaySelectionBox.y +
+      (objectDisplayBounds.y - displaySelectionBox.y) * scaleY;
+    const displayBottom =
+      nextDisplaySelectionBox.y +
+      (objectDisplayBounds.y +
+        objectDisplayBounds.height -
+        displaySelectionBox.y) *
+        scaleY;
+    const sourceBounds = getBoundsWithoutPreviewTransform(
+      {
+        x: Math.min(displayLeft, displayRight - minimumObjectResizeSide),
+        y: Math.min(displayTop, displayBottom - minimumObjectResizeSide),
+        width: Math.max(minimumObjectResizeSide, displayRight - displayLeft),
+        height: Math.max(minimumObjectResizeSide, displayBottom - displayTop),
+      },
+      previewTransform,
+    );
     const left = Math.round(sourceBounds.x);
     const right = Math.round(sourceBounds.x + sourceBounds.width);
     const top = Math.round(sourceBounds.y);
@@ -145,46 +249,99 @@ export function getResizedObjects(resize: ObjectResize, delta: Point, preserveAs
   });
 }
 
-export function getObjectResizeScale(resize: ObjectResize, delta: Point, preserveAspect = false) {
+export function getObjectResizeScale(
+  resize: ObjectResize,
+  delta: Point,
+  preserveAspect = false,
+) {
   const displaySelectionBox = resize.displaySelectionBox;
-  const nextDisplaySelectionBox = getResizedBounds(displaySelectionBox, resize.handle, delta, preserveAspect ? resize.aspectRatio : undefined);
-  const scaleX = displaySelectionBox.width === 0 ? 1 : nextDisplaySelectionBox.width / displaySelectionBox.width;
-  const scaleY = displaySelectionBox.height === 0 ? 1 : nextDisplaySelectionBox.height / displaySelectionBox.height;
-  return resize.mode === "scale" ? Math.max(0.01, Math.min(Math.abs(scaleX), Math.abs(scaleY))) : 1;
+  const nextDisplaySelectionBox = getResizedBounds(
+    displaySelectionBox,
+    resize.handle,
+    delta,
+    preserveAspect ? resize.aspectRatio : undefined,
+  );
+  const scaleX =
+    displaySelectionBox.width === 0
+      ? 1
+      : nextDisplaySelectionBox.width / displaySelectionBox.width;
+  const scaleY =
+    displaySelectionBox.height === 0
+      ? 1
+      : nextDisplaySelectionBox.height / displaySelectionBox.height;
+  return resize.mode === "scale"
+    ? Math.max(0.01, Math.min(Math.abs(scaleX), Math.abs(scaleY)))
+    : 1;
 }
 
-const identityPreviewTransform: ObjectPreviewTransform = { translateX: 0, translateY: 0, translateXPercent: 0, translateYPercent: 0, scaleX: 1, scaleY: 1 };
+const identityPreviewTransform: ObjectPreviewTransform = {
+  translateX: 0,
+  translateY: 0,
+  translateXPercent: 0,
+  translateYPercent: 0,
+  scaleX: 1,
+  scaleY: 1,
+};
 
-export function getBoundsWithPreviewTransform(bounds: Bounds, transform: ObjectPreviewTransform): Bounds {
+export function getBoundsWithPreviewTransform(
+  bounds: Bounds,
+  transform: ObjectPreviewTransform,
+): Bounds {
   const width = bounds.width * transform.scaleX;
   const height = bounds.height * transform.scaleY;
   return {
-    x: bounds.x + transform.translateX + bounds.width * transform.translateXPercent + (bounds.width - width) / 2,
-    y: bounds.y + transform.translateY + bounds.height * transform.translateYPercent + (bounds.height - height) / 2,
+    x:
+      bounds.x +
+      transform.translateX +
+      bounds.width * transform.translateXPercent +
+      (bounds.width - width) / 2,
+    y:
+      bounds.y +
+      transform.translateY +
+      bounds.height * transform.translateYPercent +
+      (bounds.height - height) / 2,
     width,
     height,
   };
 }
 
-function getBoundsWithoutPreviewTransform(bounds: Bounds, transform: ObjectPreviewTransform): Bounds {
+function getBoundsWithoutPreviewTransform(
+  bounds: Bounds,
+  transform: ObjectPreviewTransform,
+): Bounds {
   const scaleX = transform.scaleX || 1;
   const scaleY = transform.scaleY || 1;
   const width = bounds.width / scaleX;
   const height = bounds.height / scaleY;
   return {
-    x: bounds.x - transform.translateX - width * transform.translateXPercent - (width - bounds.width) / 2,
-    y: bounds.y - transform.translateY - height * transform.translateYPercent - (height - bounds.height) / 2,
+    x:
+      bounds.x -
+      transform.translateX -
+      width * transform.translateXPercent -
+      (width - bounds.width) / 2,
+    y:
+      bounds.y -
+      transform.translateY -
+      height * transform.translateYPercent -
+      (height - bounds.height) / 2,
     width,
     height,
   };
 }
 
-export function selectionPayloadFromObjects(objects: SelectionPayload["objects"]): SelectionPayload {
+export function selectionPayloadFromObjects(
+  objects: SelectionPayload["objects"],
+): SelectionPayload {
   const selectionBox = getBoundsUnion(objects.map((object) => object.bounds));
   return { selectionBox, coordinates: boundsToPoints(selectionBox), objects };
 }
 
-export function getResizedBounds(bounds: Bounds, handle: ResizeHandle, delta: Point, aspectRatio?: number): Bounds {
+export function getResizedBounds(
+  bounds: Bounds,
+  handle: ResizeHandle,
+  delta: Point,
+  aspectRatio?: number,
+): Bounds {
   const leftAnchored = handle.includes("left");
   const rightAnchored = handle.includes("right");
   const topAnchored = handle.includes("top");
@@ -208,7 +365,11 @@ export function getResizedBounds(bounds: Bounds, handle: ResizeHandle, delta: Po
   if (aspectRatio && Number.isFinite(aspectRatio) && aspectRatio > 0) {
     const width = Math.max(minimumObjectResizeSide, nextRight - nextLeft);
     const height = Math.max(minimumObjectResizeSide, nextBottom - nextTop);
-    const widthDriven = handle === "left" || handle === "right" || (handle.includes("left") || handle.includes("right")) && Math.abs(delta.x) >= Math.abs(delta.y);
+    const widthDriven =
+      handle === "left" ||
+      handle === "right" ||
+      ((handle.includes("left") || handle.includes("right")) &&
+        Math.abs(delta.x) >= Math.abs(delta.y));
     if (widthDriven) {
       const nextHeight = width / aspectRatio;
       if (topAnchored) nextTop = nextBottom - nextHeight;
@@ -235,10 +396,18 @@ export function getResizedBounds(bounds: Bounds, handle: ResizeHandle, delta: Po
   nextTop = clamp(nextTop, -FRAME_HEIGHT, FRAME_HEIGHT * 2);
   nextBottom = clamp(nextBottom, -FRAME_HEIGHT, FRAME_HEIGHT * 2);
 
-  const left = Math.round(Math.min(nextLeft, nextRight - minimumObjectResizeSide));
-  const rightEdge = Math.round(Math.max(nextRight, left + minimumObjectResizeSide));
-  const top = Math.round(Math.min(nextTop, nextBottom - minimumObjectResizeSide));
-  const bottomEdge = Math.round(Math.max(nextBottom, top + minimumObjectResizeSide));
+  const left = Math.round(
+    Math.min(nextLeft, nextRight - minimumObjectResizeSide),
+  );
+  const rightEdge = Math.round(
+    Math.max(nextRight, left + minimumObjectResizeSide),
+  );
+  const top = Math.round(
+    Math.min(nextTop, nextBottom - minimumObjectResizeSide),
+  );
+  const bottomEdge = Math.round(
+    Math.max(nextBottom, top + minimumObjectResizeSide),
+  );
 
   return {
     x: left,
@@ -258,10 +427,20 @@ export function insetBounds(bounds: Bounds, inset: number): Bounds {
 }
 
 export function isVisibleMarqueeBounds(bounds: Bounds, frameScale: number) {
-  return bounds.width * frameScale >= marqueeSelectionThresholdPx || bounds.height * frameScale >= marqueeSelectionThresholdPx;
+  return (
+    bounds.width * frameScale >= marqueeSelectionThresholdPx ||
+    bounds.height * frameScale >= marqueeSelectionThresholdPx
+  );
 }
 
-export function updateDragSelectionBoxElement(element: HTMLDivElement, bounds: Bounds, frameScale: number, visible = isVisibleMarqueeBounds(bounds, frameScale), uiScale = 1, offset: Point = { x: 0, y: 0 }) {
+export function updateDragSelectionBoxElement(
+  element: HTMLDivElement,
+  bounds: Bounds,
+  frameScale: number,
+  visible = isVisibleMarqueeBounds(bounds, frameScale),
+  uiScale = 1,
+  offset: Point = { x: 0, y: 0 },
+) {
   element.style.display = visible ? "block" : "none";
   element.style.transform = `translate3d(${offset.x + bounds.x * frameScale * uiScale}px, ${offset.y + bounds.y * frameScale * uiScale}px, 0)`;
   element.style.width = `${bounds.width * frameScale * uiScale}px`;
@@ -279,18 +458,41 @@ export function syncChartObjectBounds(object: FrameObject): FrameObject {
 }
 
 export function getPartFrameObject(part: Part, objectId: string) {
-  return part.objects.find((object) => object.id === objectId) ?? part.background.elements.find((object) => object.id === objectId) ?? null;
+  return (
+    part.objects.find((object) => object.id === objectId) ??
+    part.background.elements.find((object) => object.id === objectId) ??
+    null
+  );
 }
 
-export function getFrameObjectWithPreviewBounds(object: FrameObject, time: number, duration: number): FrameObject {
-  const previewBounds = getBoundsWithPreviewTransform(object.bounds, getFrameObjectPreviewTransform(object, time, duration));
+export function getFrameObjectWithPreviewBounds(
+  object: FrameObject,
+  time: number,
+  duration: number,
+): FrameObject {
+  const previewBounds = getBoundsWithPreviewTransform(
+    object.bounds,
+    getFrameObjectPreviewTransform(object, time, duration),
+  );
   return { ...object, bounds: previewBounds };
 }
 
-export function getFrameObjectPreviewTransform(object: FrameObject, time: number, duration: number): ObjectPreviewTransform {
-  const evaluated = evaluateFrameObject(object, time, duration, { animations: true });
-  const animationTransform = typeof evaluated.renderStyle.transform === "string" ? evaluated.renderStyle.transform : undefined;
-  const objectTransform = typeof object.style.transform === "string" ? object.style.transform : undefined;
+export function getFrameObjectPreviewTransform(
+  object: FrameObject,
+  time: number,
+  duration: number,
+): ObjectPreviewTransform {
+  const evaluated = evaluateFrameObject(object, time, duration, {
+    animations: true,
+  });
+  const animationTransform =
+    typeof evaluated.renderStyle.transform === "string"
+      ? evaluated.renderStyle.transform
+      : undefined;
+  const objectTransform =
+    typeof object.style.transform === "string"
+      ? object.style.transform
+      : undefined;
   const transform = animationTransform ?? objectTransform ?? "";
   let translateX = 0;
   let translateY = 0;
@@ -301,7 +503,10 @@ export function getFrameObjectPreviewTransform(object: FrameObject, time: number
   const matcher = /(translate(?:3d|X|Y)?|scale(?:3d|X|Y)?)\(([^)]*)\)/g;
   for (const match of transform.matchAll(matcher)) {
     const [, kind, rawArgs] = match;
-    const args = rawArgs.split(/[,\s]+/).filter(Boolean).map(parseTransformArgument);
+    const args = rawArgs
+      .split(/[,\s]+/)
+      .filter(Boolean)
+      .map(parseTransformArgument);
     if (kind === "translate" || kind === "translate3d") {
       translateX += args[0]?.px ?? 0;
       translateY += args[1]?.px ?? 0;
@@ -322,12 +527,20 @@ export function getFrameObjectPreviewTransform(object: FrameObject, time: number
       scaleY *= args[0]?.number ?? 1;
     }
   }
-  return { translateX, translateY, translateXPercent, translateYPercent, scaleX, scaleY };
+  return {
+    translateX,
+    translateY,
+    translateXPercent,
+    translateYPercent,
+    scaleX,
+    scaleY,
+  };
 }
 
 function parseTransformArgument(value: string) {
   const number = Number.parseFloat(value);
   if (!Number.isFinite(number)) return { number: undefined, px: 0, percent: 0 };
-  if (value.trim().endsWith("%")) return { number, px: 0, percent: number / 100 };
+  if (value.trim().endsWith("%"))
+    return { number, px: 0, percent: number / 100 };
   return { number, px: number, percent: 0 };
 }

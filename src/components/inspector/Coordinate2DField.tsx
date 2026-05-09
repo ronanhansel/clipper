@@ -33,22 +33,56 @@ type Coordinate2DFieldProps = {
   y: CoordinateAxis;
 };
 
-export function Coordinate2DField({ className, disabledReason, label, onPick, pickLabel, picking = false, x, y }: Coordinate2DFieldProps) {
+export function Coordinate2DField({
+  className,
+  disabledReason,
+  label,
+  onPick,
+  pickLabel,
+  picking = false,
+  x,
+  y,
+}: Coordinate2DFieldProps) {
   const disabled = Boolean(disabledReason) || Boolean(x.disabled && y.disabled);
 
   return (
-    <div className={cn("grid gap-1.5", disabled ? "opacity-50" : "", className)} title={disabledReason}>
+    <div
+      className={cn("grid gap-1.5", disabled ? "opacity-50" : "", className)}
+      title={disabledReason}
+    >
       <span className={mutedCaps}>{label}</span>
-      <div className={cn("grid items-end gap-2", onPick ? "grid-cols-[minmax(0,1fr)_minmax(0,1fr)_40px]" : "grid-cols-2")}>
+      <div
+        className={cn(
+          "grid items-end gap-2",
+          onPick
+            ? "grid-cols-[minmax(0,1fr)_minmax(0,1fr)_40px]"
+            : "grid-cols-2",
+        )}
+      >
         <CoordinateAxisInput axis={x} fallbackLabel="X" fieldLabel={label} />
         <CoordinateAxisInput axis={y} fallbackLabel="Y" fieldLabel={label} />
-        {onPick ? <PickButton active={picking} disabled={disabled} label={pickLabel ?? `Pick ${label.toLowerCase()} from frame`} onClick={onPick} /> : null}
+        {onPick ? (
+          <PickButton
+            active={picking}
+            disabled={disabled}
+            label={pickLabel ?? `Pick ${label.toLowerCase()} from frame`}
+            onClick={onPick}
+          />
+        ) : null}
       </div>
     </div>
   );
 }
 
-function CoordinateAxisInput({ axis, fallbackLabel, fieldLabel }: { axis: CoordinateAxis; fallbackLabel: "X" | "Y"; fieldLabel: string }) {
+function CoordinateAxisInput({
+  axis,
+  fallbackLabel,
+  fieldLabel,
+}: {
+  axis: CoordinateAxis;
+  fallbackLabel: "X" | "Y";
+  fieldLabel: string;
+}) {
   const axisLabel = axis.label ?? fallbackLabel;
 
   return (
@@ -74,7 +108,17 @@ function CoordinateAxisInput({ axis, fallbackLabel, fieldLabel }: { axis: Coordi
   );
 }
 
-export function PickButton({ active = false, disabled = false, label, onClick }: { active?: boolean; disabled?: boolean; label: string; onClick?: () => void }) {
+export function PickButton({
+  active = false,
+  disabled = false,
+  label,
+  onClick,
+}: {
+  active?: boolean;
+  disabled?: boolean;
+  label: string;
+  onClick?: () => void;
+}) {
   return (
     <button
       className={cn(

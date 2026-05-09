@@ -19,7 +19,11 @@ export class WebGlCore {
   constructor(private readonly canvas: HTMLCanvasElement) {}
 
   async init() {
-    const renderer = new THREE.WebGPURenderer({ canvas: this.canvas, alpha: true, antialias: true });
+    const renderer = new THREE.WebGPURenderer({
+      canvas: this.canvas,
+      alpha: true,
+      antialias: true,
+    });
     await renderer.init();
     const scene = new THREE.Scene();
     const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10);
@@ -37,25 +41,45 @@ export class WebGlCore {
 
   resize(width: number, height: number) {
     if (!this.renderer || this.disposed) return;
-    (this.renderer as { setSize: (width: number, height: number, updateStyle?: boolean) => void }).setSize(width, height, false);
+    (
+      this.renderer as {
+        setSize: (width: number, height: number, updateStyle?: boolean) => void;
+      }
+    ).setSize(width, height, false);
   }
 
   render(graph: Composition3dGraphState | undefined, time: number) {
-    if (!this.renderer || !this.scene || !this.camera || !this.material || this.disposed) return;
+    if (
+      !this.renderer ||
+      !this.scene ||
+      !this.camera ||
+      !this.material ||
+      this.disposed
+    )
+      return;
     if (this.timeUniform) this.timeUniform.value = time;
     if (!this.hasCompiledGraph || graph !== this.previousGraph) {
-      const material = this.material as { colorNode: unknown; needsUpdate: boolean };
+      const material = this.material as {
+        colorNode: unknown;
+        needsUpdate: boolean;
+      };
       material.colorNode = compileMaterialColorNode(graph, this.timeUniform);
       material.needsUpdate = true;
       this.hasCompiledGraph = true;
       this.previousGraph = graph;
     }
-    void (this.renderer as { renderAsync: (scene: unknown, camera: unknown) => Promise<unknown> }).renderAsync(this.scene, this.camera);
+    void (
+      this.renderer as {
+        renderAsync: (scene: unknown, camera: unknown) => Promise<unknown>;
+      }
+    ).renderAsync(this.scene, this.camera);
   }
 
   dispose() {
     this.disposed = true;
-    (this.mesh as { geometry?: { dispose?: () => void } } | null)?.geometry?.dispose?.();
+    (
+      this.mesh as { geometry?: { dispose?: () => void } } | null
+    )?.geometry?.dispose?.();
     (this.material as { dispose?: () => void } | null)?.dispose?.();
     (this.renderer as { dispose?: () => void } | null)?.dispose?.();
     this.camera = null;
@@ -67,19 +91,34 @@ export class WebGlCore {
   }
 }
 
-function compileMaterialColorNode(graph: Composition3dGraphState | undefined, timeUniform: unknown) {
+function compileMaterialColorNode(
+  graph: Composition3dGraphState | undefined,
+  timeUniform: unknown,
+) {
   const compilerGraph = getCompilerGraph(graph);
-  return compileComposition3dGraphToTsl(compilerGraph, { tsl, time: timeUniform, loadTexture: (asset) => new THREE.TextureLoader().load(asset) });
+  return compileComposition3dGraphToTsl(compilerGraph, {
+    tsl,
+    time: timeUniform,
+    loadTexture: (asset) => new THREE.TextureLoader().load(asset),
+  });
 }
 
-function getCompilerGraph(graph: Composition3dGraphState | undefined): Composition3dGraph {
+function getCompilerGraph(
+  graph: Composition3dGraphState | undefined,
+): Composition3dGraph {
   const candidate = editorGraphToComposition3dGraph(graph);
   if (candidate && isCompilerGraph(candidate)) return candidate;
   return defaultCompilerGraph;
 }
 
 function isCompilerGraph(value: unknown): value is Composition3dGraph {
-  return Boolean(value && typeof value === "object" && (value as { version?: unknown }).version === 1 && Array.isArray((value as { nodes?: unknown }).nodes) && typeof (value as { outNodeId?: unknown }).outNodeId === "string");
+  return Boolean(
+    value &&
+    typeof value === "object" &&
+    (value as { version?: unknown }).version === 1 &&
+    Array.isArray((value as { nodes?: unknown }).nodes) &&
+    typeof (value as { outNodeId?: unknown }).outNodeId === "string",
+  );
 }
 
 const defaultCompilerGraph: Composition3dGraph = {

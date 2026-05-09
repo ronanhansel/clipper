@@ -5,7 +5,9 @@ const hostMocks = vi.hoisted(() => ({
   writeTextFile: vi.fn<(path: string, content: string) => Promise<void>>(),
 }));
 
-function mockElectronClipper(overrides: Partial<Window["clipper"]> = {}): Window["clipper"] {
+function mockElectronClipper(
+  overrides: Partial<Window["clipper"]> = {},
+): Window["clipper"] {
   return {
     platform: "darwin",
     readTextFile: vi.fn(),
@@ -60,8 +62,12 @@ function installLocalStorageMock() {
     value: {
       clear: () => storage.clear(),
       getItem: (key: string) => storage.get(key) ?? null,
-      removeItem: (key: string) => { storage.delete(key); },
-      setItem: (key: string, value: string) => { storage.set(key, value); },
+      removeItem: (key: string) => {
+        storage.delete(key);
+      },
+      setItem: (key: string, value: string) => {
+        storage.set(key, value);
+      },
     },
   });
 }
@@ -88,9 +94,13 @@ describe("active project manifest state", () => {
       readAppState: vi.fn(async () => ({})),
       writeAppState: vi.fn(),
     });
-    localStorage.setItem("clipper.activeProjectManifestPath", "clipper/projects/missing/project.json");
+    localStorage.setItem(
+      "clipper.activeProjectManifestPath",
+      "clipper/projects/missing/project.json",
+    );
 
-    const { readStoredActiveProjectManifestPath } = await import("./activeProjectManifest");
+    const { readStoredActiveProjectManifestPath } =
+      await import("./activeProjectManifest");
 
     await expect(readStoredActiveProjectManifestPath()).resolves.toBeNull();
   });
@@ -98,15 +108,25 @@ describe("active project manifest state", () => {
   it("clears active project through Electron app-state deletion sentinel", async () => {
     const writeAppState = vi.fn(async () => undefined);
     window.clipper = mockElectronClipper({
-      readAppState: vi.fn(async () => ({ activeProjectManifestPath: "clipper/projects/old/project.json" })),
+      readAppState: vi.fn(async () => ({
+        activeProjectManifestPath: "clipper/projects/old/project.json",
+      })),
       writeAppState,
     });
-    localStorage.setItem("clipper.activeProjectManifestPath", "clipper/projects/old/project.json");
+    localStorage.setItem(
+      "clipper.activeProjectManifestPath",
+      "clipper/projects/old/project.json",
+    );
 
-    const { clearStoredActiveProjectManifestPath } = await import("./activeProjectManifest");
+    const { clearStoredActiveProjectManifestPath } =
+      await import("./activeProjectManifest");
     await clearStoredActiveProjectManifestPath();
 
-    expect(writeAppState).toHaveBeenCalledWith({ activeProjectManifestPath: null });
-    expect(localStorage.getItem("clipper.activeProjectManifestPath")).toBeNull();
+    expect(writeAppState).toHaveBeenCalledWith({
+      activeProjectManifestPath: null,
+    });
+    expect(
+      localStorage.getItem("clipper.activeProjectManifestPath"),
+    ).toBeNull();
   });
 });

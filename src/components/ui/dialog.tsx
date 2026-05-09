@@ -1,6 +1,10 @@
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
-import { type ComponentPropsWithoutRef, type ElementRef, forwardRef } from "react";
+import {
+  type ComponentPropsWithoutRef,
+  type ElementRef,
+  forwardRef,
+} from "react";
 import { cn } from "../../lib/utils";
 
 export const Dialog = DialogPrimitive.Root;
@@ -14,7 +18,10 @@ export const DialogOverlay = forwardRef<
 >(({ className, ...props }, ref) => (
   <DialogPrimitive.Overlay
     ref={ref}
-    className={cn("fixed inset-0 z-[80] bg-black/68 backdrop-blur-[2px] data-[state=closed]:animate-[clipper-dialog-overlay-out_120ms_ease-in_forwards] data-[state=open]:animate-[clipper-dialog-overlay-in_180ms_ease-out_forwards]", className)}
+    className={cn(
+      "fixed inset-0 z-[80] bg-black/68 backdrop-blur-[2px] data-[state=closed]:animate-[clipper-dialog-overlay-out_120ms_ease-in_forwards] data-[state=open]:animate-[clipper-dialog-overlay-in_180ms_ease-out_forwards]",
+      className,
+    )}
     {...props}
   />
 ));
@@ -22,7 +29,9 @@ DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
 
 export const DialogContent = forwardRef<
   ElementRef<typeof DialogPrimitive.Content>,
-  ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & { showCloseButton?: boolean }
+  ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & {
+    showCloseButton?: boolean;
+  }
 >(({ className, children, showCloseButton = true, ...props }, ref) => (
   <DialogPortal>
     <DialogOverlay />
@@ -46,22 +55,50 @@ export const DialogContent = forwardRef<
 ));
 DialogContent.displayName = DialogPrimitive.Content.displayName;
 
-export function DialogHeader({ className, ...props }: ComponentPropsWithoutRef<"div">) {
-  return <div className={cn("flex flex-col gap-1.5 pr-9", className)} {...props} />;
+export function DialogHeader({
+  className,
+  ...props
+}: ComponentPropsWithoutRef<"div">) {
+  return (
+    <div className={cn("flex flex-col gap-1.5 pr-9", className)} {...props} />
+  );
 }
 
-export function DialogFooter({ className, ...props }: ComponentPropsWithoutRef<"div">) {
-  return <div className={cn("flex flex-col-reverse gap-2 sm:flex-row sm:justify-end", className)} {...props} />;
+export function DialogFooter({
+  className,
+  ...props
+}: ComponentPropsWithoutRef<"div">) {
+  return (
+    <div
+      className={cn(
+        "flex flex-col-reverse gap-2 sm:flex-row sm:justify-end",
+        className,
+      )}
+      {...props}
+    />
+  );
 }
 
 export const DialogTitle = forwardRef<
   ElementRef<typeof DialogPrimitive.Title>,
   ComponentPropsWithoutRef<typeof DialogPrimitive.Title>
->(({ className, ...props }, ref) => <DialogPrimitive.Title ref={ref} className={cn("text-base font-extrabold text-white", className)} {...props} />);
+>(({ className, ...props }, ref) => (
+  <DialogPrimitive.Title
+    ref={ref}
+    className={cn("text-base font-extrabold text-white", className)}
+    {...props}
+  />
+));
 DialogTitle.displayName = DialogPrimitive.Title.displayName;
 
 export const DialogDescription = forwardRef<
   ElementRef<typeof DialogPrimitive.Description>,
   ComponentPropsWithoutRef<typeof DialogPrimitive.Description>
->(({ className, ...props }, ref) => <DialogPrimitive.Description ref={ref} className={cn("text-sm leading-5 text-[#9b9da7]", className)} {...props} />);
+>(({ className, ...props }, ref) => (
+  <DialogPrimitive.Description
+    ref={ref}
+    className={cn("text-sm leading-5 text-[#9b9da7]", className)}
+    {...props}
+  />
+));
 DialogDescription.displayName = DialogPrimitive.Description.displayName;

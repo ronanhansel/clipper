@@ -7,9 +7,18 @@ import { scaleFadeTransitionLogic } from "./scaleFade/logic";
 import swipeManifest from "./swipe/manifest.yml?raw";
 import { swipeTransitionLogic } from "./swipe/logic";
 
-export const fadeTransitionEffect = createTransitionEffectPackage(fadeManifest, fadeTransitionLogic);
-export const scaleFadeTransitionEffect = createTransitionEffectPackage(scaleFadeManifest, scaleFadeTransitionLogic);
-export const swipeTransitionEffect = createTransitionEffectPackage(swipeManifest, swipeTransitionLogic);
+export const fadeTransitionEffect = createTransitionEffectPackage(
+  fadeManifest,
+  fadeTransitionLogic,
+);
+export const scaleFadeTransitionEffect = createTransitionEffectPackage(
+  scaleFadeManifest,
+  scaleFadeTransitionLogic,
+);
+export const swipeTransitionEffect = createTransitionEffectPackage(
+  swipeManifest,
+  swipeTransitionLogic,
+);
 
 export const builtInTransitionEffects = [
   swipeTransitionEffect,

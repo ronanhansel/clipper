@@ -26,8 +26,7 @@ describe("raw frame export post-process bridge (transferable data path)", () => 
   it("accepts raw ArrayBuffer payloads (the transferable port format)", () => {
     const buffer = new ArrayBuffer(16);
     new Uint8Array(buffer).set([
-      1, 2, 3, 255, 4, 5, 6, 255,
-      7, 8, 9, 255, 10, 11, 12, 255,
+      1, 2, 3, 255, 4, 5, 6, 255, 7, 8, 9, 255, 10, 11, 12, 255,
     ]);
 
     const payload: ExportRawFramePayload = {
@@ -67,15 +66,42 @@ describe("raw frame export post-process bridge (transferable data path)", () => 
   it("validates bridge result format", () => {
     const outputFrame = rgbaFrame(new Uint8Array(16));
 
-    expect(isValidExportRawPostProcessFrameResult({ applied: true, outputFrame, droppedPassCount: 0 }, 2, 2)).toBe(true);
-    expect(isValidExportRawPostProcessFrameResult({ applied: false, outputFrame, droppedPassCount: 0 }, 2, 2)).toBe(false);
-    expect(isValidExportRawPostProcessFrameResult({ applied: true, outputFrame: { ...outputFrame, pixelFormat: "rgb" as const }, droppedPassCount: 0 }, 2, 2)).toBe(false);
+    expect(
+      isValidExportRawPostProcessFrameResult(
+        { applied: true, outputFrame, droppedPassCount: 0 },
+        2,
+        2,
+      ),
+    ).toBe(true);
+    expect(
+      isValidExportRawPostProcessFrameResult(
+        { applied: false, outputFrame, droppedPassCount: 0 },
+        2,
+        2,
+      ),
+    ).toBe(false);
+    expect(
+      isValidExportRawPostProcessFrameResult(
+        {
+          applied: true,
+          outputFrame: { ...outputFrame, pixelFormat: "rgb" as const },
+          droppedPassCount: 0,
+        },
+        2,
+        2,
+      ),
+    ).toBe(false);
   });
 
   it("preserves no-pass direct route for raw payloads", async () => {
     const sourceFrame = bgraFrame(new Uint8Array(16));
 
-    await expect(applyExportRawPostProcessFrame({ width: 2, height: 2, sourceFrame, passes: [] }, [])).resolves.toEqual({
+    await expect(
+      applyExportRawPostProcessFrame(
+        { width: 2, height: 2, sourceFrame, passes: [] },
+        [],
+      ),
+    ).resolves.toEqual({
       applied: false,
       outputFrame: sourceFrame,
       droppedPassCount: 0,
@@ -103,7 +129,10 @@ describe("raw frame export post-process bridge (transferable data path)", () => 
     expect(isValidExportRawFramePayload(payload, 2, 2)).toBe(true);
 
     // bogus format
-    const bad = { ...payload, pixelFormat: "rgb" } as unknown as ExportRawFramePayload;
+    const bad = {
+      ...payload,
+      pixelFormat: "rgb",
+    } as unknown as ExportRawFramePayload;
     expect(isValidExportRawFramePayload(bad)).toBe(false);
   });
 });

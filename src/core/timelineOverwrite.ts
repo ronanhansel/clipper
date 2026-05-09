@@ -22,7 +22,17 @@ export type TimelineSplitRange = {
   end: number;
 };
 
-export function splitMarkerAcrossTimelineRanges<T extends TimelineOverwriteMarker>(marker: T, absoluteStart: number, ranges: TimelineSplitRange[], options: { layerId?: string; createId: (marker: T, segmentIndex: number) => string }) {
+export function splitMarkerAcrossTimelineRanges<
+  T extends TimelineOverwriteMarker,
+>(
+  marker: T,
+  absoluteStart: number,
+  ranges: TimelineSplitRange[],
+  options: {
+    layerId?: string;
+    createId: (marker: T, segmentIndex: number) => string;
+  },
+) {
   const absoluteEnd = absoluteStart + marker.duration;
   let segmentIndex = 0;
 
@@ -33,7 +43,8 @@ export function splitMarkerAcrossTimelineRanges<T extends TimelineOverwriteMarke
 
     const segmentMarker = {
       ...marker,
-      id: segmentIndex === 0 ? marker.id : options.createId(marker, segmentIndex),
+      id:
+        segmentIndex === 0 ? marker.id : options.createId(marker, segmentIndex),
       layerId: options.layerId ?? marker.layerId,
       start: roundTenth(segmentStart - range.start),
       duration: roundTenth(segmentEnd - segmentStart),
@@ -46,37 +57,82 @@ export function splitMarkerAcrossTimelineRanges<T extends TimelineOverwriteMarke
   });
 }
 
-export function getInsertedOverwriteRanges(markers: TimelineOverwriteMarker[], insertedIds: Set<string>): TimelineOverwriteRange[] {
+export function getInsertedOverwriteRanges(
+  markers: TimelineOverwriteMarker[],
+  insertedIds: Set<string>,
+): TimelineOverwriteRange[] {
   return markers
     .filter((marker) => insertedIds.has(marker.id))
-    .map((marker) => ({ id: marker.id, layerId: marker.layerId ?? "", start: marker.start, end: marker.start + marker.duration }));
+    .map((marker) => ({
+      id: marker.id,
+      layerId: marker.layerId ?? "",
+      start: marker.start,
+      end: marker.start + marker.duration,
+    }));
 }
 
-export function overwriteTimelineMarkers<T extends TimelineOverwriteMarker>(markers: T[], overwriteRanges: TimelineOverwriteRange[], options: { createSplitId: (marker: T, range: TimelineOverwriteRange, index: number) => string }) {
+export function overwriteTimelineMarkers<T extends TimelineOverwriteMarker>(
+  markers: T[],
+  overwriteRanges: TimelineOverwriteRange[],
+  options: {
+    createSplitId: (
+      marker: T,
+      range: TimelineOverwriteRange,
+      index: number,
+    ) => string;
+  },
+) {
   let splitIndex = 0;
   let nextMarkers = markers;
   const insertedIds = new Set(overwriteRanges.map((range) => range.id));
 
   for (const range of overwriteRanges) {
     nextMarkers = nextMarkers.flatMap((marker) => {
-      if (insertedIds.has(marker.id) || (marker.layerId ?? "") !== range.layerId) return [marker];
+      if (
+        insertedIds.has(marker.id) ||
+        (marker.layerId ?? "") !== range.layerId
+      )
+        return [marker];
       splitIndex += 1;
-      return trimMarkerForOverwrite(marker, range.start, range.end, options.createSplitId(marker, range, splitIndex));
+      return trimMarkerForOverwrite(
+        marker,
+        range.start,
+        range.end,
+        options.createSplitId(marker, range, splitIndex),
+      );
     });
   }
 
   return nextMarkers;
 }
 
-function trimMarkerForOverwrite<T extends TimelineOverwriteMarker>(marker: T, overwriteStart: number, overwriteEnd: number, splitId: string) {
+function trimMarkerForOverwrite<T extends TimelineOverwriteMarker>(
+  marker: T,
+  overwriteStart: number,
+  overwriteEnd: number,
+  splitId: string,
+) {
   const markerStart = marker.start;
   const markerEnd = marker.start + marker.duration;
-  if (overwriteEnd <= markerStart || overwriteStart >= markerEnd) return [marker];
+  if (overwriteEnd <= markerStart || overwriteStart >= markerEnd)
+    return [marker];
 
   const segments: T[] = [];
   const leftDuration = overwriteStart - markerStart;
   const rightDuration = markerEnd - overwriteEnd;
-  if (leftDuration >= 0.1) segments.push({ ...marker, duration: roundTenth(leftDuration), snapOut: undefined });
-  if (rightDuration >= 0.1) segments.push({ ...marker, id: splitId, start: roundTenth(overwriteEnd), duration: roundTenth(rightDuration), snapIn: undefined });
+  if (leftDuration >= 0.1)
+    segments.push({
+      ...marker,
+      duration: roundTenth(leftDuration),
+      snapOut: undefined,
+    });
+  if (rightDuration >= 0.1)
+    segments.push({
+      ...marker,
+      id: splitId,
+      start: roundTenth(overwriteEnd),
+      duration: roundTenth(rightDuration),
+      snapIn: undefined,
+    });
   return segments;
 }

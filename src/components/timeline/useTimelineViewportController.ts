@@ -7,10 +7,18 @@ export type TimelineViewportControllerOptions = {
   currentTime: number;
   displayDuration: number;
   timelineViewportState: TimelineViewportState;
-  onTimelineViewportStateChange: (updater: (state: TimelineViewportState) => TimelineViewportState) => void;
+  onTimelineViewportStateChange: (
+    updater: (state: TimelineViewportState) => TimelineViewportState,
+  ) => void;
 };
 
-export function useTimelineViewportController({ contentWidth, currentTime, displayDuration, timelineViewportState, onTimelineViewportStateChange }: TimelineViewportControllerOptions) {
+export function useTimelineViewportController({
+  contentWidth,
+  currentTime,
+  displayDuration,
+  timelineViewportState,
+  onTimelineViewportStateChange,
+}: TimelineViewportControllerOptions) {
   const timelineRef = useRef<HTMLDivElement | null>(null);
   const timelineViewportRef = useRef<HTMLDivElement | null>(null);
   const timelineLayerRailRef = useRef<HTMLDivElement | null>(null);
@@ -26,8 +34,13 @@ export function useTimelineViewportController({ contentWidth, currentTime, displ
     const viewport = timelineViewportRef.current;
     if (!viewport) return;
 
-    if (restoredTimelineDisplacementRef.current !== timelineViewportState.displacement) viewport.scrollLeft = timelineViewportState.displacement;
-    restoredTimelineDisplacementRef.current = timelineViewportState.displacement;
+    if (
+      restoredTimelineDisplacementRef.current !==
+      timelineViewportState.displacement
+    )
+      viewport.scrollLeft = timelineViewportState.displacement;
+    restoredTimelineDisplacementRef.current =
+      timelineViewportState.displacement;
   }, [contentWidth, timelineViewportState.displacement]);
 
   function updateTimelineZoom(nextZoom: number) {
@@ -41,7 +54,8 @@ export function useTimelineViewportController({ contentWidth, currentTime, displ
   function saveTimelineDisplacement() {
     const viewport = timelineViewportRef.current;
     const displacement = Math.max(Math.round(viewport?.scrollLeft ?? 0), 0);
-    if (timelineLayerRailRef.current) timelineLayerRailRef.current.style.transform = `translate3d(0, ${-(viewport?.scrollTop ?? 0)}px, 0)`;
+    if (timelineLayerRailRef.current)
+      timelineLayerRailRef.current.style.transform = `translate3d(0, ${-(viewport?.scrollTop ?? 0)}px, 0)`;
     restoredTimelineDisplacementRef.current = displacement;
     onTimelineViewportStateChange((state) => ({ ...state, displacement }));
   }
@@ -60,13 +74,21 @@ export function useTimelineViewportController({ contentWidth, currentTime, displ
     const railContainer = timelineLayerRailRef.current?.parentElement;
     if (!railContainer) return;
 
-    railContainer.addEventListener("wheel", scrollTimelineFromLayerRail, { passive: false });
-    return () => railContainer.removeEventListener("wheel", scrollTimelineFromLayerRail);
+    railContainer.addEventListener("wheel", scrollTimelineFromLayerRail, {
+      passive: false,
+    });
+    return () =>
+      railContainer.removeEventListener("wheel", scrollTimelineFromLayerRail);
   });
 
   function updateTimelineSnapGuide(time: number | null) {
     const element = timelineSnapGuideRef.current;
-    if (!element || time === null || displayDuration <= 0 || Math.abs(time - currentTime) < 0.0001) {
+    if (
+      !element ||
+      time === null ||
+      displayDuration <= 0 ||
+      Math.abs(time - currentTime) < 0.0001
+    ) {
       clearTimelineSnapGuide();
       return;
     }
@@ -76,7 +98,8 @@ export function useTimelineViewportController({ contentWidth, currentTime, displ
   }
 
   function clearTimelineSnapGuide() {
-    if (timelineSnapGuideRef.current) timelineSnapGuideRef.current.style.display = "none";
+    if (timelineSnapGuideRef.current)
+      timelineSnapGuideRef.current.style.display = "none";
   }
 
   return {

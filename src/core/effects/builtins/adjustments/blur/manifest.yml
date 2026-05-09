@@ -4,7 +4,7 @@ name: Blur
 label: Blur
 group: Visual/Blur
 defaultDuration: 3
-defaultParams: {"radius":6}
+defaultParams: { "radius": 6 }
 paramControls:
   - key: radius
     label: Radius

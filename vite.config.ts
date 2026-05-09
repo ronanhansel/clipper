@@ -12,8 +12,13 @@ function resolveClipperFile(root: string, relativePath: string) {
   const resolved = path.resolve(root, relativePath);
   const clipperRoot = path.join(root, "clipper");
 
-  if (resolved !== clipperRoot && !resolved.startsWith(`${clipperRoot}${path.sep}`)) {
-    throw new Error("Clipper file access is restricted to the clipper directory.");
+  if (
+    resolved !== clipperRoot &&
+    !resolved.startsWith(`${clipperRoot}${path.sep}`)
+  ) {
+    throw new Error(
+      "Clipper file access is restricted to the clipper directory.",
+    );
   }
 
   return resolved;
@@ -23,84 +28,127 @@ function clipperBrowserFilesystemBridge(): Plugin {
   return {
     name: "clipper-browser-filesystem-bridge",
     configureServer(server) {
-      server.middlewares.use("/__clipper_fs/read", async (request, response) => {
-        try {
-          const requestUrl = new URL(request.url ?? "", "http://localhost");
-          const relativePath = requestUrl.searchParams.get("path");
+      server.middlewares.use(
+        "/__clipper_fs/read",
+        async (request, response) => {
+          try {
+            const requestUrl = new URL(request.url ?? "", "http://localhost");
+            const relativePath = requestUrl.searchParams.get("path");
 
-          if (!relativePath) {
-            response.statusCode = 400;
-            response.end("Missing path.");
+            if (!relativePath) {
+              response.statusCode = 400;
+              response.end("Missing path.");
+              return;
+            }
+
+            const content = await fs.readFile(
+              resolveClipperFile(server.config.root, relativePath),
+              "utf8",
+            );
+            response.setHeader("Content-Type", "text/plain; charset=utf-8");
+            response.end(content);
+          } catch (error) {
+            response.statusCode = 500;
+            response.end(
+              error instanceof Error
+                ? error.message
+                : "Unable to read part file.",
+            );
+          }
+        },
+      );
+
+      server.middlewares.use(
+        "/__clipper_fs/write",
+        async (request, response) => {
+          if (request.method !== "POST") {
+            response.statusCode = 405;
+            response.end("Method not allowed.");
             return;
           }
 
-          const content = await fs.readFile(resolveClipperFile(server.config.root, relativePath), "utf8");
-          response.setHeader("Content-Type", "text/plain; charset=utf-8");
-          response.end(content);
-        } catch (error) {
-          response.statusCode = 500;
-          response.end(error instanceof Error ? error.message : "Unable to read part file.");
-        }
-      });
+          try {
+            const requestUrl = new URL(request.url ?? "", "http://localhost");
+            const relativePath = requestUrl.searchParams.get("path");
 
-      server.middlewares.use("/__clipper_fs/write", async (request, response) => {
-        if (request.method !== "POST") {
-          response.statusCode = 405;
-          response.end("Method not allowed.");
-          return;
-        }
+            if (!relativePath) {
+              response.statusCode = 400;
+              response.end("Missing path.");
+              return;
+            }
 
-        try {
-          const requestUrl = new URL(request.url ?? "", "http://localhost");
-          const relativePath = requestUrl.searchParams.get("path");
+            const chunks: Buffer[] = [];
+            for await (const chunk of request) {
+              chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+            }
 
-          if (!relativePath) {
-            response.statusCode = 400;
-            response.end("Missing path.");
+            const filePath = resolveClipperFile(
+              server.config.root,
+              relativePath,
+            );
+            await fs.mkdir(path.dirname(filePath), { recursive: true });
+            await fs.writeFile(
+              filePath,
+              Buffer.concat(chunks).toString("utf8"),
+              "utf8",
+            );
+            response.statusCode = 204;
+            response.end();
+          } catch (error) {
+            response.statusCode = 500;
+            response.end(
+              error instanceof Error
+                ? error.message
+                : "Unable to save part file.",
+            );
+          }
+        },
+      );
+
+      server.middlewares.use(
+        "/__clipper_fs/list",
+        async (request, response) => {
+          if (request.method !== "GET") {
+            response.statusCode = 405;
+            response.end("Method not allowed.");
             return;
           }
 
-          const chunks: Buffer[] = [];
-          for await (const chunk of request) {
-            chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+          try {
+            const requestUrl = new URL(request.url ?? "", "http://localhost");
+            const relativePath = requestUrl.searchParams.get("path");
+
+            if (!relativePath) {
+              response.statusCode = 400;
+              response.end("Missing path.");
+              return;
+            }
+
+            const entries = await fs.readdir(
+              resolveClipperFile(server.config.root, relativePath),
+              { withFileTypes: true },
+            );
+            response.setHeader("Content-Type", "application/json");
+            response.end(
+              JSON.stringify(
+                entries
+                  .sort((a, b) => a.name.localeCompare(b.name))
+                  .map((entry) => ({
+                    name: entry.name,
+                    isDirectory: entry.isDirectory(),
+                  })),
+              ),
+            );
+          } catch (error) {
+            response.statusCode = 500;
+            response.end(
+              error instanceof Error
+                ? error.message
+                : "Unable to list directory.",
+            );
           }
-
-          const filePath = resolveClipperFile(server.config.root, relativePath);
-          await fs.mkdir(path.dirname(filePath), { recursive: true });
-          await fs.writeFile(filePath, Buffer.concat(chunks).toString("utf8"), "utf8");
-          response.statusCode = 204;
-          response.end();
-        } catch (error) {
-          response.statusCode = 500;
-          response.end(error instanceof Error ? error.message : "Unable to save part file.");
-        }
-      });
-
-      server.middlewares.use("/__clipper_fs/list", async (request, response) => {
-        if (request.method !== "GET") {
-          response.statusCode = 405;
-          response.end("Method not allowed.");
-          return;
-        }
-
-        try {
-          const requestUrl = new URL(request.url ?? "", "http://localhost");
-          const relativePath = requestUrl.searchParams.get("path");
-
-          if (!relativePath) {
-            response.statusCode = 400;
-            response.end("Missing path.");
-            return;
-          }
-
-          const entries = await fs.readdir(resolveClipperFile(server.config.root, relativePath), { withFileTypes: true });
-          response.setHeader("Content-Type", "application/json");
-          response.end(JSON.stringify(entries.sort((a, b) => a.name.localeCompare(b.name)).map((entry) => ({ name: entry.name, isDirectory: entry.isDirectory() }))));
-        } catch (error) {
-          response.statusCode = 500;
-          response.end(error instanceof Error ? error.message : "Unable to list directory.");
-        }
-      });
+        },
+      );
     },
   };
 }

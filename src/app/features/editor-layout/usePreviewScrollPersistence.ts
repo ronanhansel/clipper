@@ -9,7 +9,10 @@ type PreviewScrollPersistenceOptions = {
   updateEditorState: UpdateEditorState;
 };
 
-export function usePreviewScrollPersistence({ centerPreviewScrollRef, updateEditorState }: PreviewScrollPersistenceOptions) {
+export function usePreviewScrollPersistence({
+  centerPreviewScrollRef,
+  updateEditorState,
+}: PreviewScrollPersistenceOptions) {
   const scrollFrameRef = useRef(0);
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingScrollRef = useRef<{ left: number; top: number } | null>(null);

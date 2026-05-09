@@ -9,7 +9,12 @@ export type DragAutoScrollOptions = {
   maxDelta?: number;
 };
 
-export function useDragAutoScroll({ getScrollElement, axis = "both", edgeSize = 36, maxDelta = 14 }: DragAutoScrollOptions) {
+export function useDragAutoScroll({
+  getScrollElement,
+  axis = "both",
+  edgeSize = 36,
+  maxDelta = 14,
+}: DragAutoScrollOptions) {
   const pointerRef = useRef<{ clientX: number; clientY: number } | null>(null);
   const frameRef = useRef(0);
   const callbackRef = useRef<(() => void) | null>(null);
@@ -35,15 +40,35 @@ export function useDragAutoScroll({ getScrollElement, axis = "both", edgeSize = 
       const rect = element.getBoundingClientRect();
       const scrollX = axis === "both" || axis === "x";
       const scrollY = axis === "both" || axis === "y";
-      const deltaX = scrollX ? getEdgeScrollDelta(pointer.clientX, rect.left, rect.right, edgeSize, maxDelta) : 0;
-      const deltaY = scrollY ? getEdgeScrollDelta(pointer.clientY, rect.top, rect.bottom, edgeSize, maxDelta) : 0;
+      const deltaX = scrollX
+        ? getEdgeScrollDelta(
+            pointer.clientX,
+            rect.left,
+            rect.right,
+            edgeSize,
+            maxDelta,
+          )
+        : 0;
+      const deltaY = scrollY
+        ? getEdgeScrollDelta(
+            pointer.clientY,
+            rect.top,
+            rect.bottom,
+            edgeSize,
+            maxDelta,
+          )
+        : 0;
 
       if (deltaX !== 0 || deltaY !== 0) {
         const previousLeft = element.scrollLeft;
         const previousTop = element.scrollTop;
         element.scrollLeft += deltaX;
         element.scrollTop += deltaY;
-        if (element.scrollLeft !== previousLeft || element.scrollTop !== previousTop) callbackRef.current?.();
+        if (
+          element.scrollLeft !== previousLeft ||
+          element.scrollTop !== previousTop
+        )
+          callbackRef.current?.();
       }
 
       frameRef.current = window.requestAnimationFrame(tick);
@@ -52,7 +77,11 @@ export function useDragAutoScroll({ getScrollElement, axis = "both", edgeSize = 
     frameRef.current = window.requestAnimationFrame(tick);
   }
 
-  function updateDragAutoScroll(clientX: number, clientY: number, onScroll?: () => void) {
+  function updateDragAutoScroll(
+    clientX: number,
+    clientY: number,
+    onScroll?: () => void,
+  ) {
     pointerRef.current = { clientX, clientY };
     callbackRef.current = onScroll ?? null;
     scheduleDragAutoScroll();
@@ -61,8 +90,20 @@ export function useDragAutoScroll({ getScrollElement, axis = "both", edgeSize = 
   return { updateDragAutoScroll, stopDragAutoScroll };
 }
 
-function getEdgeScrollDelta(pointer: number, min: number, max: number, edgeSize: number, maxDelta: number) {
-  if (pointer < min + edgeSize) return -Math.ceil(Math.min(1, (min + edgeSize - pointer) / edgeSize) * maxDelta);
-  if (pointer > max - edgeSize) return Math.ceil(Math.min(1, (pointer - (max - edgeSize)) / edgeSize) * maxDelta);
+function getEdgeScrollDelta(
+  pointer: number,
+  min: number,
+  max: number,
+  edgeSize: number,
+  maxDelta: number,
+) {
+  if (pointer < min + edgeSize)
+    return -Math.ceil(
+      Math.min(1, (min + edgeSize - pointer) / edgeSize) * maxDelta,
+    );
+  if (pointer > max - edgeSize)
+    return Math.ceil(
+      Math.min(1, (pointer - (max - edgeSize)) / edgeSize) * maxDelta,
+    );
   return 0;
 }

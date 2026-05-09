@@ -4,7 +4,7 @@ name: Directional Blur
 label: Directional Blur
 group: Visual/Blur
 defaultDuration: 3
-defaultParams: {"amount":10,"angle":0,"opacity":0.9,"target":"camera"}
+defaultParams: { "amount": 10, "angle": 0, "opacity": 0.9, "target": "camera" }
 paramControls:
   - key: amount
     label: Amount
@@ -31,4 +31,4 @@ paramControls:
     label: Target
     type: select
     defaultValue: camera
-    options: [{"value":"frame","label":"Frame"},{"value":"camera","label":"Camera"}]
+    options: [{ "value": "frame", "label": "Frame" }, { "value": "camera", "label": "Camera" }]

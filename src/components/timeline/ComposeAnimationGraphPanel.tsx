@@ -916,9 +916,15 @@ export const ComposeAnimationGraphPanel = memo(
         setPopoverNodeId(null);
         updateHoverEdge(null);
         const position = getDraggedGraphNodePosition(event, drag, graphScale);
-        const delta = { x: position.x - drag.startX, y: position.y - drag.startY };
+        const delta = {
+          x: position.x - drag.startX,
+          y: position.y - drag.startY,
+        };
         previewPositionsRef.current = Object.fromEntries(
-          Object.entries(drag.nodeStartPositions).map(([nodeId, start]) => [nodeId, { x: start.x + delta.x, y: start.y + delta.y }]),
+          Object.entries(drag.nodeStartPositions).map(([nodeId, start]) => [
+            nodeId,
+            { x: start.x + delta.x, y: start.y + delta.y },
+          ]),
         );
         scheduleDraw();
         return;
@@ -1165,7 +1171,8 @@ export const ComposeAnimationGraphPanel = memo(
       if (event.shiftKey) {
         toggleGraphNodeSelection(node.id);
       } else {
-        if (!selectedGraphNodeIdsRef.current.includes(node.id)) selectGraphNode(node.id);
+        if (!selectedGraphNodeIdsRef.current.includes(node.id))
+          selectGraphNode(node.id);
       }
       const hasPopover =
         !isComposition3d &&
@@ -1185,8 +1192,12 @@ export const ComposeAnimationGraphPanel = memo(
         startY: node.y,
         nodeStartPositions: Object.fromEntries(
           dragSelectionIds.flatMap((id) => {
-            const selectedNode = nodesRef.current.find((item) => item.id === id);
-            return selectedNode ? [[id, { x: selectedNode.x, y: selectedNode.y }]] : [];
+            const selectedNode = nodesRef.current.find(
+              (item) => item.id === id,
+            );
+            return selectedNode
+              ? [[id, { x: selectedNode.x, y: selectedNode.y }]]
+              : [];
           }),
         ),
       };
@@ -1853,7 +1864,12 @@ export const ComposeAnimationGraphPanel = memo(
           if (customNodes[id])
             groupCustomNodes[id] = { ...customNodes[id], scopeKey: groupId };
           const node = selectedNodes.find((item) => item.id === id);
-          if (!groupCustomNodes[id] && node && node.kind !== "layer" && node.kind !== "out")
+          if (
+            !groupCustomNodes[id] &&
+            node &&
+            node.kind !== "layer" &&
+            node.kind !== "out"
+          )
             groupCustomNodes[id] = {
               kind: node.kind,
               label: node.label,
@@ -1894,8 +1910,15 @@ export const ComposeAnimationGraphPanel = memo(
         );
         for (const edge of incomingEdges) {
           if (customNodes[edge.fromNodeId]) continue;
-          const sourceNode = nodesRef.current.find((node) => node.id === edge.fromNodeId);
-          if (!sourceNode || sourceNode.kind === "layer" || sourceNode.kind === "out") continue;
+          const sourceNode = nodesRef.current.find(
+            (node) => node.id === edge.fromNodeId,
+          );
+          if (
+            !sourceNode ||
+            sourceNode.kind === "layer" ||
+            sourceNode.kind === "out"
+          )
+            continue;
           customNodes[edge.fromNodeId] = {
             kind: sourceNode.kind,
             label: sourceNode.label,
@@ -1904,10 +1927,16 @@ export const ComposeAnimationGraphPanel = memo(
           };
         }
         const boundaryEdges = [
-          ...incomingEdges.map((edge) => createEdge(edge.fromNodeId, edge.fromPort, nodeId, "top")),
-          ...outgoingEdges.map((edge) => createEdge(nodeId, "bottom", edge.toNodeId, edge.toPort)),
+          ...incomingEdges.map((edge) =>
+            createEdge(edge.fromNodeId, edge.fromPort, nodeId, "top"),
+          ),
+          ...outgoingEdges.map((edge) =>
+            createEdge(nodeId, "bottom", edge.toNodeId, edge.toPort),
+          ),
         ];
-        const groupOutputEdges = outgoingEdges.map((edge) => createEdge(edge.fromNodeId, edge.fromPort, `${groupId}:out`, "top"));
+        const groupOutputEdges = outgoingEdges.map((edge) =>
+          createEdge(edge.fromNodeId, edge.fromPort, `${groupId}:out`, "top"),
+        );
         return {
           nodes: {
             ...nodes,
@@ -1916,7 +1945,21 @@ export const ComposeAnimationGraphPanel = memo(
               y: minY + (maxY - minY) / 2,
             },
           },
-          edges: filterPermittedEdges([...externalEdges, ...boundaryEdges], nodesRef.current.filter((node) => !selectedIds.includes(node.id)).concat({ id: nodeId, label: "Group", kind: "group", x: minX + (maxX - minX) / 2, y: minY + (maxY - minY) / 2, width: maxNodeWidth, height: nodeHeight, details: { groupId, registered: "true" } })),
+          edges: filterPermittedEdges(
+            [...externalEdges, ...boundaryEdges],
+            nodesRef.current
+              .filter((node) => !selectedIds.includes(node.id))
+              .concat({
+                id: nodeId,
+                label: "Group",
+                kind: "group",
+                x: minX + (maxX - minX) / 2,
+                y: minY + (maxY - minY) / 2,
+                width: maxNodeWidth,
+                height: nodeHeight,
+                details: { groupId, registered: "true" },
+              }),
+          ),
           customNodes: {
             ...customNodes,
             [nodeId]: {
@@ -1934,7 +1977,25 @@ export const ComposeAnimationGraphPanel = memo(
               nodes: groupNodes,
               edges: [
                 ...incomingEdges,
-                ...filterPermittedEdges([...internalEdges, ...groupOutputEdges], [...selectedNodes.map((node) => ({ ...node, x: node.x - minX, y: node.y - minY })), { id: `${groupId}:out`, label: "Out", kind: "out", x: (maxX - minX) / 2, y: maxY - minY + 4, width: minNodeWidth, height: nodeHeight }]),
+                ...filterPermittedEdges(
+                  [...internalEdges, ...groupOutputEdges],
+                  [
+                    ...selectedNodes.map((node) => ({
+                      ...node,
+                      x: node.x - minX,
+                      y: node.y - minY,
+                    })),
+                    {
+                      id: `${groupId}:out`,
+                      label: "Out",
+                      kind: "out",
+                      x: (maxX - minX) / 2,
+                      y: maxY - minY + 4,
+                      width: minNodeWidth,
+                      height: nodeHeight,
+                    },
+                  ],
+                ),
               ],
               customNodes: groupCustomNodes,
               parameters: groupParameters,
@@ -1942,7 +2003,9 @@ export const ComposeAnimationGraphPanel = memo(
             },
           },
           parameters: Object.keys(parameters).length ? parameters : undefined,
-          deletedNodeIds: isComposition3d ? undefined : Array.from(deletedNodeIds),
+          deletedNodeIds: isComposition3d
+            ? undefined
+            : Array.from(deletedNodeIds),
           viewport: graph?.viewport,
           viewports: graph?.viewports,
         };
@@ -2008,7 +2071,12 @@ export const ComposeAnimationGraphPanel = memo(
         return {
           nodes: { ...nodes, ...restoredNodes },
           edges: filterPermittedEdges(
-            [...externalEdges, ...incomingEdges, ...internalEdges, ...bridgedOutputEdges],
+            [
+              ...externalEdges,
+              ...incomingEdges,
+              ...internalEdges,
+              ...bridgedOutputEdges,
+            ],
             nodesRef.current
               .filter((node) => node.id !== nodeId)
               .concat(
@@ -2027,7 +2095,9 @@ export const ComposeAnimationGraphPanel = memo(
             ...(graph?.parameters ?? {}),
             ...(group.parameters ?? {}),
           },
-          deletedNodeIds: isComposition3d ? undefined : Array.from(deletedNodeIds),
+          deletedNodeIds: isComposition3d
+            ? undefined
+            : Array.from(deletedNodeIds),
           viewport: graph?.viewport,
           viewports: graph?.viewports,
         };
@@ -2429,8 +2499,9 @@ export const ComposeAnimationGraphPanel = memo(
           {delayMarkers.map((marker, index) => {
             const colocatedIndex = delayMarkers
               .slice(0, index)
-              .filter((item) => Math.abs(item.delay - marker.delay) < 0.0001)
-              .length;
+              .filter(
+                (item) => Math.abs(item.delay - marker.delay) < 0.0001,
+              ).length;
             return (
               <button
                 key={marker.key}
@@ -2448,10 +2519,22 @@ export const ComposeAnimationGraphPanel = memo(
                   }
                   scrollToGraphNode(marker.nodeId);
                 }}
-                onPointerDown={marker.draggable === false ? undefined : (event) => startDelayMarkerDrag(event, marker)}
-                onPointerMove={marker.draggable === false ? undefined : continueDelayMarkerDrag}
-                onPointerUp={marker.draggable === false ? undefined : endDelayMarkerDrag}
-                onPointerCancel={marker.draggable === false ? undefined : endDelayMarkerDrag}
+                onPointerDown={
+                  marker.draggable === false
+                    ? undefined
+                    : (event) => startDelayMarkerDrag(event, marker)
+                }
+                onPointerMove={
+                  marker.draggable === false
+                    ? undefined
+                    : continueDelayMarkerDrag
+                }
+                onPointerUp={
+                  marker.draggable === false ? undefined : endDelayMarkerDrag
+                }
+                onPointerCancel={
+                  marker.draggable === false ? undefined : endDelayMarkerDrag
+                }
               />
             );
           })}
@@ -2479,7 +2562,11 @@ export const ComposeAnimationGraphPanel = memo(
           {hasSelectedGraph ? (
             <>
               <GraphNodePopover
-                node={popoverNodeId ? nodes.find((node) => node.id === popoverNodeId) ?? null : null}
+                node={
+                  popoverNodeId
+                    ? (nodes.find((node) => node.id === popoverNodeId) ?? null)
+                    : null
+                }
                 graph={graph}
                 group={
                   popoverNodeId
@@ -2489,7 +2576,9 @@ export const ComposeAnimationGraphPanel = memo(
                       ]
                     : undefined
                 }
-                parameters={popoverNodeId ? graph?.parameters?.[popoverNodeId] : undefined}
+                parameters={
+                  popoverNodeId ? graph?.parameters?.[popoverNodeId] : undefined
+                }
                 viewportRef={graphViewportRef}
                 graphScale={graphScale}
                 currentTime={currentTime}
@@ -2927,7 +3016,9 @@ function buildGroupGraphContextNodes(
   const externalIds = new Set(
     (group.edges ?? []).flatMap((edge) => [edge.fromNodeId, edge.toNodeId]),
   );
-  const derivedNodes = objects.flatMap((object) => getAnimationNodeDescriptors(object));
+  const derivedNodes = objects.flatMap((object) =>
+    getAnimationNodeDescriptors(object),
+  );
   const externalNodes = Array.from(externalIds).flatMap((id) => {
     if (nodeIds.has(id)) return [];
     const customNode = graph?.customNodes?.[id];
@@ -2974,11 +3065,21 @@ function buildGroupEquivalentGraphContext(
     : [];
   for (const edge of [...parentSources, ...parentTargets]) {
     if (!nodesById.has(edge.toNodeId)) {
-      const node = getGraphContextNode(edge.toNodeId, graph, objects, parentNodes);
+      const node = getGraphContextNode(
+        edge.toNodeId,
+        graph,
+        objects,
+        parentNodes,
+      );
       if (node) nodesById.set(node.id, node);
     }
     if (!nodesById.has(edge.fromNodeId)) {
-      const sourceNode = getGraphContextNode(edge.fromNodeId, graph, objects, parentNodes);
+      const sourceNode = getGraphContextNode(
+        edge.fromNodeId,
+        graph,
+        objects,
+        parentNodes,
+      );
       if (sourceNode) nodesById.set(sourceNode.id, sourceNode);
     }
   }
@@ -3012,16 +3113,23 @@ function buildGroupEquivalentGraphContext(
       })
     : null;
   const edges = filterPermittedEdges(
-    filterRenderableEdges(
-      expanded?.edges ?? group.edges ?? [],
-      nodes,
-    ),
+    filterRenderableEdges(expanded?.edges ?? group.edges ?? [], nodes),
     nodes,
   );
   const customNodes = Object.fromEntries(
     nodes.flatMap((node) => {
       if (node.kind === "layer" || node.kind === "out") return [];
-      return [[node.id, { kind: node.kind, label: node.label, scopeKey: group.id, details: node.details }]];
+      return [
+        [
+          node.id,
+          {
+            kind: node.kind,
+            label: node.label,
+            scopeKey: group.id,
+            details: node.details,
+          },
+        ],
+      ];
     }),
   ) satisfies NonNullable<AnimationGraphState["customNodes"]>;
   return { nodes, edges, customNodes };
@@ -3046,10 +3154,24 @@ function getGraphContextNode(
     );
   for (const object of objects) {
     if (nodeId === `layer:${object.id}`)
-      return createNode(nodeId, object.name || object.id, "layer", { x: 0, y: 0 }, { type: object.type });
-    const descriptor = getAnimationNodeDescriptors(object).find((item) => item.id === nodeId);
+      return createNode(
+        nodeId,
+        object.name || object.id,
+        "layer",
+        { x: 0, y: 0 },
+        { type: object.type },
+      );
+    const descriptor = getAnimationNodeDescriptors(object).find(
+      (item) => item.id === nodeId,
+    );
     if (descriptor)
-      return createNode(nodeId, descriptor.label, descriptor.kind, graph?.nodes[nodeId] ?? { x: 0, y: 0 }, descriptor.details);
+      return createNode(
+        nodeId,
+        descriptor.label,
+        descriptor.kind,
+        graph?.nodes[nodeId] ?? { x: 0, y: 0 },
+        descriptor.details,
+      );
   }
   return null;
 }
@@ -3220,24 +3342,60 @@ function getDelayMarkers(
   nodes: GraphNode[],
   graph: AnimationGraphState | undefined,
 ): DelayMarker[] {
-  const timingContext = buildGraphEquivalentTimingContext(graph, nodes, objects);
+  const timingContext = buildGraphEquivalentTimingContext(
+    graph,
+    nodes,
+    objects,
+  );
   const edges = timingContext.edges;
-  const connectedNodeIds = getConnectedToLayerNodeIds(edges, timingContext.nodes);
-  const roles = getTemporalNodeRoles(timingContext.nodes, timingContext.graph, objects);
+  const connectedNodeIds = getConnectedToLayerNodeIds(
+    edges,
+    timingContext.nodes,
+  );
+  const roles = getTemporalNodeRoles(
+    timingContext.nodes,
+    timingContext.graph,
+    objects,
+  );
   const mainMarkers = nodes.flatMap((node) => {
-    if ((node.kind !== "time" && node.kind !== "split") || roles.get(node.id) !== "active" || !connectedNodeIds.has(node.id)) return [];
-    const timingNode = timingContext.nodes.find((candidate) => candidate.id === node.id) ?? node;
-    const delay = node.kind === "time"
-      ? getTimeNodeStart(timingNode, timingContext.graph, edges, timingContext.nodes, objects, new Set())
-      : getModifierNodeStart(timingNode, timingContext.graph, edges, timingContext.nodes, objects);
+    if (
+      (node.kind !== "time" && node.kind !== "split") ||
+      roles.get(node.id) !== "active" ||
+      !connectedNodeIds.has(node.id)
+    )
+      return [];
+    const timingNode =
+      timingContext.nodes.find((candidate) => candidate.id === node.id) ?? node;
+    const delay =
+      node.kind === "time"
+        ? getTimeNodeStart(
+            timingNode,
+            timingContext.graph,
+            edges,
+            timingContext.nodes,
+            objects,
+            new Set(),
+          )
+        : getModifierNodeStart(
+            timingNode,
+            timingContext.graph,
+            edges,
+            timingContext.nodes,
+            objects,
+          );
     return [
       {
         nodeId: node.id,
-        parameterNodeId: node.kind === "time" ? node.id : getModifierSourceTimeNodeId(node.id, edges, nodes) ?? node.id,
+        parameterNodeId:
+          node.kind === "time"
+            ? node.id
+            : (getModifierSourceTimeNodeId(node.id, edges, nodes) ?? node.id),
         key: node.id,
         delay: Math.max(0, delay),
         localDelay: parseSeconds(
-          timingContext.graph?.parameters?.[node.id]?.delay ?? node.details?.delay ?? "0s",
+          timingContext.graph?.parameters?.[node.id]?.delay ??
+            node.details?.delay ??
+            "0s",
         ),
         label: node.label,
         draggable: node.kind === "time",
@@ -3276,7 +3434,10 @@ function getDelayMarkersForGroup(
     nodes,
     group.outNodeId,
   );
-  const parentConnectedNodeIds = getConnectedToLayerNodeIds(parentEdges, parentNodes);
+  const parentConnectedNodeIds = getConnectedToLayerNodeIds(
+    parentEdges,
+    parentNodes,
+  );
   const groupGraph = {
     ...graph,
     nodes: group.nodes,
@@ -3438,7 +3599,9 @@ function isPermittedGraphEdge(
   if (from.kind === "animation" && to.kind === "time")
     return !hasDuplicateEffectForTimeNode(from, to.id, existingEdges, nodes);
   if (
-    (from.kind === "animation" || from.kind === "time" || from.kind === "split") &&
+    (from.kind === "animation" ||
+      from.kind === "time" ||
+      from.kind === "split") &&
     to.kind === "group"
   )
     return hasRegisteredGroupOutput(to);
@@ -4160,7 +4323,8 @@ function drawNode(
     ctx.fillRect(rect.x + 1, rect.y + 1, rect.width - 2, rect.height - 2);
   }
   if (progress !== null && temporalRole !== "modified") {
-    ctx.fillStyle = node.kind === "group" ? "rgba(116,70,34,0.58)" : "rgba(42,82,122,0.58)";
+    ctx.fillStyle =
+      node.kind === "group" ? "rgba(116,70,34,0.58)" : "rgba(42,82,122,0.58)";
     ctx.fillRect(
       rect.x + 1,
       rect.y + 1,
@@ -4397,11 +4561,30 @@ function getGraphPlaybackDrawSemantics({
   currentTime: number;
   disabled?: boolean;
 }) {
-  if (disabled) return { temporalRoles: new Map<string, TemporalNodeRole>(), progressForNode: () => null };
-  const timingContext = buildGraphEquivalentTimingContext(graph, contextNodes, objects);
+  if (disabled)
+    return {
+      temporalRoles: new Map<string, TemporalNodeRole>(),
+      progressForNode: () => null,
+    };
+  const timingContext = buildGraphEquivalentTimingContext(
+    graph,
+    contextNodes,
+    objects,
+  );
   return {
-    temporalRoles: getTemporalNodeRoles(timingContext.nodes, timingContext.graph, objects),
-    progressForNode: (node: GraphNode) => getNodePlaybackProgress(node, timingContext.graph, currentTime, timingContext.nodes, objects),
+    temporalRoles: getTemporalNodeRoles(
+      timingContext.nodes,
+      timingContext.graph,
+      objects,
+    ),
+    progressForNode: (node: GraphNode) =>
+      getNodePlaybackProgress(
+        node,
+        timingContext.graph,
+        currentTime,
+        timingContext.nodes,
+        objects,
+      ),
   };
 }
 
@@ -4426,7 +4609,11 @@ function buildGraphEquivalentTimingContext(
     const groupId = node.details?.groupId;
     const group = groupId ? graph?.groups?.[groupId] : undefined;
     if (!group) continue;
-    for (const groupNode of buildGroupGraphContextNodes(group, graph, objects)) {
+    for (const groupNode of buildGroupGraphContextNodes(
+      group,
+      graph,
+      objects,
+    )) {
       if (!nodesById.has(groupNode.id)) nodesById.set(groupNode.id, groupNode);
     }
   }
@@ -4463,7 +4650,13 @@ function getNodePlaybackProgress(
     return getTimePlaybackProgress({
       currentTime,
       start: getModifierNodeStart(node, graph, renderableEdges, nodes, objects),
-      duration: getModifierNodeDuration(node, graph, renderableEdges, nodes, objects),
+      duration: getModifierNodeDuration(
+        node,
+        graph,
+        renderableEdges,
+        nodes,
+        objects,
+      ),
     });
   }
   if (node.kind !== "time") return null;
@@ -4579,14 +4772,20 @@ function getSplitNodeTokenCount(
   return counts.length ? Math.max(...counts) : 1;
 }
 
-function graphPathReachesNode(startNodeId: string, targetNodeId: string, edges: AnimationGraphEdge[]) {
+function graphPathReachesNode(
+  startNodeId: string,
+  targetNodeId: string,
+  edges: AnimationGraphEdge[],
+) {
   const stack = [startNodeId];
   const visited = new Set<string>();
   while (stack.length) {
     const nodeId = stack.pop()!;
     if (visited.has(nodeId)) continue;
     visited.add(nodeId);
-    for (const edge of edges.filter((candidate) => candidate.fromNodeId === nodeId)) {
+    for (const edge of edges.filter(
+      (candidate) => candidate.fromNodeId === nodeId,
+    )) {
       if (edge.toNodeId === targetNodeId) return true;
       if (!edge.toNodeId.startsWith("layer:")) stack.push(edge.toNodeId);
     }
@@ -4694,7 +4893,11 @@ function getModifierSourceTimeNodeId(
   edges: AnimationGraphEdge[],
   nodes: GraphNode[],
 ) {
-  return edges.find((edge) => edge.toNodeId === modifierId && nodes.find((node) => node.id === edge.fromNodeId)?.kind === "time")?.fromNodeId;
+  return edges.find(
+    (edge) =>
+      edge.toNodeId === modifierId &&
+      nodes.find((node) => node.id === edge.fromNodeId)?.kind === "time",
+  )?.fromNodeId;
 }
 
 function getModifierSourceGroupNodeId(
@@ -4702,7 +4905,11 @@ function getModifierSourceGroupNodeId(
   edges: AnimationGraphEdge[],
   nodes: GraphNode[],
 ) {
-  return edges.find((edge) => edge.toNodeId === modifierId && nodes.find((node) => node.id === edge.fromNodeId)?.kind === "group")?.fromNodeId;
+  return edges.find(
+    (edge) =>
+      edge.toNodeId === modifierId &&
+      nodes.find((node) => node.id === edge.fromNodeId)?.kind === "group",
+  )?.fromNodeId;
 }
 
 function getModifierNodeStart(
@@ -4712,13 +4919,34 @@ function getModifierNodeStart(
   nodes: GraphNode[],
   objects: FrameObject[],
 ) {
-  const sourceTimeId = getModifierSourceTimeNodeId(modifierNode.id, edges, nodes);
-  const sourceTimeNode = sourceTimeId ? nodes.find((node) => node.id === sourceTimeId && node.kind === "time") : undefined;
+  const sourceTimeId = getModifierSourceTimeNodeId(
+    modifierNode.id,
+    edges,
+    nodes,
+  );
+  const sourceTimeNode = sourceTimeId
+    ? nodes.find((node) => node.id === sourceTimeId && node.kind === "time")
+    : undefined;
   if (sourceTimeNode)
-    return getTimeNodeStart(sourceTimeNode, graph, edges, nodes, objects, new Set());
-  const sourceGroupId = getModifierSourceGroupNodeId(modifierNode.id, edges, nodes);
-  const sourceGroupNode = sourceGroupId ? nodes.find((node) => node.id === sourceGroupId && node.kind === "group") : undefined;
-  return sourceGroupNode ? getGroupOutputTimeStart(sourceGroupNode, graph, objects) : 0;
+    return getTimeNodeStart(
+      sourceTimeNode,
+      graph,
+      edges,
+      nodes,
+      objects,
+      new Set(),
+    );
+  const sourceGroupId = getModifierSourceGroupNodeId(
+    modifierNode.id,
+    edges,
+    nodes,
+  );
+  const sourceGroupNode = sourceGroupId
+    ? nodes.find((node) => node.id === sourceGroupId && node.kind === "group")
+    : undefined;
+  return sourceGroupNode
+    ? getGroupOutputTimeStart(sourceGroupNode, graph, objects)
+    : 0;
 }
 
 function getModifierNodeDuration(
@@ -4728,11 +4956,30 @@ function getModifierNodeDuration(
   nodes: GraphNode[],
   objects: FrameObject[],
 ) {
-  const sourceTimeId = getModifierSourceTimeNodeId(modifierNode.id, edges, nodes);
-  if (sourceTimeId) return getEffectiveTimeNodeDuration(sourceTimeId, graph, edges, nodes, objects);
-  const sourceGroupId = getModifierSourceGroupNodeId(modifierNode.id, edges, nodes);
-  const sourceGroupNode = sourceGroupId ? nodes.find((node) => node.id === sourceGroupId && node.kind === "group") : undefined;
-  return sourceGroupNode ? getGroupOutputTimeDuration(sourceGroupNode, graph, objects) : 0;
+  const sourceTimeId = getModifierSourceTimeNodeId(
+    modifierNode.id,
+    edges,
+    nodes,
+  );
+  if (sourceTimeId)
+    return getEffectiveTimeNodeDuration(
+      sourceTimeId,
+      graph,
+      edges,
+      nodes,
+      objects,
+    );
+  const sourceGroupId = getModifierSourceGroupNodeId(
+    modifierNode.id,
+    edges,
+    nodes,
+  );
+  const sourceGroupNode = sourceGroupId
+    ? nodes.find((node) => node.id === sourceGroupId && node.kind === "group")
+    : undefined;
+  return sourceGroupNode
+    ? getGroupOutputTimeDuration(sourceGroupNode, graph, objects)
+    : 0;
 }
 
 function getGroupOutputTimeStart(
@@ -4779,11 +5026,30 @@ function getGroupOutputTimeSemantics(
     parameters: { ...(graph?.parameters ?? {}), ...(group.parameters ?? {}) },
   } satisfies AnimationGraphState;
   return nodes.flatMap((candidate) => {
-    if (group.customNodes?.[candidate.id]?.kind !== "time" || !connectedNodeIds.has(candidate.id)) return [];
-    return [{
-      start: getTimeNodeStart(candidate, groupGraph, edges, nodes, objects, new Set()),
-      duration: getEffectiveTimeNodeDuration(candidate.id, groupGraph, edges, nodes, objects),
-    }];
+    if (
+      group.customNodes?.[candidate.id]?.kind !== "time" ||
+      !connectedNodeIds.has(candidate.id)
+    )
+      return [];
+    return [
+      {
+        start: getTimeNodeStart(
+          candidate,
+          groupGraph,
+          edges,
+          nodes,
+          objects,
+          new Set(),
+        ),
+        duration: getEffectiveTimeNodeDuration(
+          candidate.id,
+          groupGraph,
+          edges,
+          nodes,
+          objects,
+        ),
+      },
+    ];
   });
 }
 
@@ -4814,7 +5080,10 @@ function getGroupNodePlaybackProgress(
     parameters: { ...(graph?.parameters ?? {}), ...(group.parameters ?? {}) },
   } satisfies AnimationGraphState;
   const progresses = nodes.flatMap((candidate) => {
-    if (group.customNodes?.[candidate.id]?.kind !== "time" || !connectedNodeIds.has(candidate.id))
+    if (
+      group.customNodes?.[candidate.id]?.kind !== "time" ||
+      !connectedNodeIds.has(candidate.id)
+    )
       return [];
     const start = getTimeNodeStart(
       candidate,
@@ -5406,7 +5675,10 @@ function GraphNodePopover({
     parameters?: Record<string, string>;
   } | null>(node ? { node, group, parameters } : null);
   const [closing, setClosing] = useState(false);
-  const [measuredSize, setMeasuredSize] = useState<{ width: number; height: number } | null>(null);
+  const [measuredSize, setMeasuredSize] = useState<{
+    width: number;
+    height: number;
+  } | null>(null);
   useEffect(() => {
     if (closeTimeoutRef.current !== null) {
       window.clearTimeout(closeTimeoutRef.current);
@@ -5463,7 +5735,9 @@ function GraphNodePopover({
   const details = getPopoverDetails(activeNode, activeParameters);
   const isGroup = activeNode.kind === "group";
   if (!isGroup && details.length === 0) return null;
-  const schema = isGroup ? undefined : getParameterEditorSchema(activeNode, details);
+  const schema = isGroup
+    ? undefined
+    : getParameterEditorSchema(activeNode, details);
   const viewportRect = viewport.getBoundingClientRect();
   const boundaryPadding = 8;
   const boundaryRect = {
@@ -5533,8 +5807,8 @@ function GraphNodePopover({
         );
       })();
   if (!closing) openPositionRef.current = { left, top };
-  const renderedLeft = closing ? openPositionRef.current?.left ?? left : left;
-  const renderedTop = closing ? openPositionRef.current?.top ?? top : top;
+  const renderedLeft = closing ? (openPositionRef.current?.left ?? left) : left;
+  const renderedTop = closing ? (openPositionRef.current?.top ?? top) : top;
   return createPortal(
     <div
       className="fixed inset-0 z-[5000]"
@@ -5579,7 +5853,9 @@ function GraphNodePopover({
             <GraphParameterEditor
               schema={schema!}
               variant={useTimePopupStyle ? "timePopup" : "default"}
-              onChange={(key, value) => onParameterChange(activeNode.id, key, value)}
+              onChange={(key, value) =>
+                onParameterChange(activeNode.id, key, value)
+              }
             />
           </>
         )}
@@ -6061,9 +6337,15 @@ function GroupSubgraphPreview({
       }}
     >
       <GraphNodePopover
-        node={popoverNodeId ? nodes.find((node) => node.id === popoverNodeId) ?? null : null}
+        node={
+          popoverNodeId
+            ? (nodes.find((node) => node.id === popoverNodeId) ?? null)
+            : null
+        }
         graph={displayGraph}
-        parameters={popoverNodeId ? editableGroup.parameters?.[popoverNodeId] : undefined}
+        parameters={
+          popoverNodeId ? editableGroup.parameters?.[popoverNodeId] : undefined
+        }
         viewportRef={viewportRef}
         graphScale={graphScale}
         currentTime={currentTime}
@@ -6221,14 +6503,20 @@ function getParameterEditorEstimatedHeight(
 ) {
   const hasSectionLabels = groups.some((group) => group.label);
   if (!hasSectionLabels) {
-    const fieldCount = groups.reduce((count, group) => count + group.fields.length, 0);
+    const fieldCount = groups.reduce(
+      (count, group) => count + group.fields.length,
+      0,
+    );
     return 56 + fieldCount * 34;
   }
-  return 72 + groups.reduce((height, group) => {
-    const columns = Math.max(1, group.columns ?? 1);
-    const rows = Math.ceil(group.fields.length / columns);
-    return height + (group.label ? 22 : 0) + rows * 58 + 16;
-  }, 0);
+  return (
+    72 +
+    groups.reduce((height, group) => {
+      const columns = Math.max(1, group.columns ?? 1);
+      const rows = Math.ceil(group.fields.length / columns);
+      return height + (group.label ? 22 : 0) + rows * 58 + 16;
+    }, 0)
+  );
 }
 
 export function getGraphNodeParameterEditorSchema(

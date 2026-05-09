@@ -4,7 +4,7 @@ name: Radial Blur
 label: Radial Blur
 group: Visual/Blur
 defaultDuration: 3
-defaultParams: {"amount":10,"focusX":50,"focusY":50,"radius":34,"softness":22,"target":"camera"}
+defaultParams: { "amount": 10, "focusX": 50, "focusY": 50, "radius": 34, "softness": 22, "target": "camera" }
 paramControls:
   - key: amount
     label: Amount
@@ -45,4 +45,4 @@ paramControls:
     label: Target
     type: select
     defaultValue: camera
-    options: [{"value":"frame","label":"Frame"},{"value":"camera","label":"Camera"}]
+    options: [{ "value": "frame", "label": "Frame" }, { "value": "camera", "label": "Camera" }]

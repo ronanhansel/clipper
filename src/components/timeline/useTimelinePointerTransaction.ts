@@ -14,10 +14,17 @@ type StartTimelinePointerTransactionOptions = {
   event: PointerEvent<HTMLElement>;
   activationThreshold?: number;
   capturePointer?: boolean;
-  updateAutoScroll?: (clientX: number, onScroll: () => void, clientY?: number) => void;
+  updateAutoScroll?: (
+    clientX: number,
+    onScroll: () => void,
+    clientY?: number,
+  ) => void;
   stopAutoScroll?: () => void;
   onPreview: (state: TimelinePointerTransactionState) => void;
-  onCommit: (state: TimelinePointerTransactionState, event: globalThis.PointerEvent) => void;
+  onCommit: (
+    state: TimelinePointerTransactionState,
+    event: globalThis.PointerEvent,
+  ) => void;
   onCancel?: (state: TimelinePointerTransactionState) => void;
   onDragStart?: (state: TimelinePointerTransactionState) => void;
   onDragEnd?: (state: TimelinePointerTransactionState) => void;
@@ -29,10 +36,17 @@ type ActiveTimelinePointerTransaction = {
   capturePointer: boolean;
   frame: number;
   state: TimelinePointerTransactionState;
-  updateAutoScroll?: (clientX: number, onScroll: () => void, clientY?: number) => void;
+  updateAutoScroll?: (
+    clientX: number,
+    onScroll: () => void,
+    clientY?: number,
+  ) => void;
   stopAutoScroll?: () => void;
   onPreview: (state: TimelinePointerTransactionState) => void;
-  onCommit: (state: TimelinePointerTransactionState, event: globalThis.PointerEvent) => void;
+  onCommit: (
+    state: TimelinePointerTransactionState,
+    event: globalThis.PointerEvent,
+  ) => void;
   onCancel?: (state: TimelinePointerTransactionState) => void;
   onDragStart?: (state: TimelinePointerTransactionState) => void;
   onDragEnd?: (state: TimelinePointerTransactionState) => void;
@@ -85,12 +99,27 @@ export function useTimelinePointerTransaction() {
     window.removeEventListener("pointerup", active.up);
     window.removeEventListener("pointercancel", active.cancel);
     active.stopAutoScroll?.();
-    if (active.capturePointer && active.target.hasPointerCapture(active.pointerId)) active.target.releasePointerCapture(active.pointerId);
+    if (
+      active.capturePointer &&
+      active.target.hasPointerCapture(active.pointerId)
+    )
+      active.target.releasePointerCapture(active.pointerId);
     if (runCancel) active.onCancel?.(active.state);
     if (active.state.hasDragged) active.onDragEnd?.(active.state);
   }
 
-  function startTimelinePointerTransaction({ event, activationThreshold = 4, capturePointer = false, updateAutoScroll, stopAutoScroll, onPreview, onCommit, onCancel, onDragStart, onDragEnd }: StartTimelinePointerTransactionOptions) {
+  function startTimelinePointerTransaction({
+    event,
+    activationThreshold = 4,
+    capturePointer = false,
+    updateAutoScroll,
+    stopAutoScroll,
+    onPreview,
+    onCommit,
+    onCancel,
+    onDragStart,
+    onDragEnd,
+  }: StartTimelinePointerTransactionOptions) {
     cleanupTimelinePointerTransaction(true);
 
     const target = event.currentTarget;
@@ -106,7 +135,10 @@ export function useTimelinePointerTransaction() {
 
     function activateIfNeeded(active: ActiveTimelinePointerTransaction) {
       if (active.state.hasDragged) return true;
-      const distance = Math.max(Math.abs(active.state.clientX - active.state.initialClientX), Math.abs(active.state.clientY - active.state.initialClientY));
+      const distance = Math.max(
+        Math.abs(active.state.clientX - active.state.initialClientX),
+        Math.abs(active.state.clientY - active.state.initialClientY),
+      );
       if (distance < activationThreshold) return false;
       active.state.hasDragged = true;
       active.onDragStart?.(active.state);
@@ -120,7 +152,11 @@ export function useTimelinePointerTransaction() {
       active.state.clientY = pointerEvent.clientY;
       active.state.snap = shiftPressedRef.current || pointerEvent.shiftKey;
       if (!activateIfNeeded(active)) return;
-      active.updateAutoScroll?.(active.state.clientX, () => scheduleTimelinePointerPreview(activeRef), active.state.clientY);
+      active.updateAutoScroll?.(
+        active.state.clientX,
+        () => scheduleTimelinePointerPreview(activeRef),
+        active.state.clientY,
+      );
       scheduleTimelinePointerPreview(activeRef);
     }
 
@@ -172,10 +208,16 @@ export function useTimelinePointerTransaction() {
     window.addEventListener("pointercancel", cancel);
   }
 
-  return { startTimelinePointerTransaction, cancelTimelinePointerTransaction: () => cleanupTimelinePointerTransaction(true) };
+  return {
+    startTimelinePointerTransaction,
+    cancelTimelinePointerTransaction: () =>
+      cleanupTimelinePointerTransaction(true),
+  };
 }
 
-function scheduleTimelinePointerPreview(activeRef: RefObject<ActiveTimelinePointerTransaction | null>) {
+function scheduleTimelinePointerPreview(
+  activeRef: RefObject<ActiveTimelinePointerTransaction | null>,
+) {
   const active = activeRef.current;
   if (!active || active.frame) return;
   active.frame = window.requestAnimationFrame(() => {

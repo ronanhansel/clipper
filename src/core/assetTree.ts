@@ -1,17 +1,32 @@
 import type { AssetItem } from "./types";
 
 export type AssetSortMode = "folders-first" | "name-asc" | "name-desc";
-export type AssetDropIntent = { targetId: string; action: "before" | "after" | "inside" };
+export type AssetDropIntent = {
+  targetId: string;
+  action: "before" | "after" | "inside";
+};
 
-export function updateAssetTree(items: AssetItem[], assetId: string, updater: (item: AssetItem) => AssetItem): AssetItem[] {
+export function updateAssetTree(
+  items: AssetItem[],
+  assetId: string,
+  updater: (item: AssetItem) => AssetItem,
+): AssetItem[] {
   return items.map((item) => {
     if (item.id === assetId) return updater(item);
     if (!item.children) return item;
-    return { ...item, children: updateAssetTree(item.children, assetId, updater) };
+    return {
+      ...item,
+      children: updateAssetTree(item.children, assetId, updater),
+    };
   });
 }
 
-export function getAssetPath(items: AssetItem[], assetId: string, basePath: string, parents: string[] = []): string | null {
+export function getAssetPath(
+  items: AssetItem[],
+  assetId: string,
+  basePath: string,
+  parents: string[] = [],
+): string | null {
   for (const item of items) {
     const path = [...parents, item.name];
     if (item.id === assetId) return item.path ?? [basePath, ...path].join("/");
@@ -23,7 +38,11 @@ export function getAssetPath(items: AssetItem[], assetId: string, basePath: stri
   return null;
 }
 
-export function getParentAssetId(items: AssetItem[], assetId: string, parentId: string | null = null): string | null {
+export function getParentAssetId(
+  items: AssetItem[],
+  assetId: string,
+  parentId: string | null = null,
+): string | null {
   for (const item of items) {
     if (item.id === assetId) return parentId;
     if (item.children) {
@@ -34,9 +53,14 @@ export function getParentAssetId(items: AssetItem[], assetId: string, parentId: 
   return null;
 }
 
-export function duplicateAssetTree(items: AssetItem[], assetId: string): AssetItem[] {
+export function duplicateAssetTree(
+  items: AssetItem[],
+  assetId: string,
+): AssetItem[] {
   return items.flatMap((item) => {
-    const nextItem = item.children ? { ...item, children: duplicateAssetTree(item.children, assetId) } : item;
+    const nextItem = item.children
+      ? { ...item, children: duplicateAssetTree(item.children, assetId) }
+      : item;
     if (item.id !== assetId) return [nextItem];
     return [nextItem, duplicateAssetItem(item)];
   });
@@ -52,48 +76,95 @@ function duplicateAssetItem(item: AssetItem): AssetItem {
   };
 }
 
-export function appendAssetsToFolder(items: AssetItem[], folderId: string, assets: AssetItem[]): AssetItem[] {
+export function appendAssetsToFolder(
+  items: AssetItem[],
+  folderId: string,
+  assets: AssetItem[],
+): AssetItem[] {
   return items.map((item) => {
-    if (item.id === folderId && item.kind === "folder") return { ...item, children: [...(item.children ?? []), ...assets] };
+    if (item.id === folderId && item.kind === "folder")
+      return { ...item, children: [...(item.children ?? []), ...assets] };
     if (!item.children) return item;
-    return { ...item, children: appendAssetsToFolder(item.children, folderId, assets) };
+    return {
+      ...item,
+      children: appendAssetsToFolder(item.children, folderId, assets),
+    };
   });
 }
 
-export function moveAssetTree(items: AssetItem[], sourceId: string, intent: AssetDropIntent): AssetItem[] {
-  if (sourceId === intent.targetId || assetContainsId(items, sourceId, intent.targetId)) return items;
+export function moveAssetTree(
+  items: AssetItem[],
+  sourceId: string,
+  intent: AssetDropIntent,
+): AssetItem[] {
+  if (
+    sourceId === intent.targetId ||
+    assetContainsId(items, sourceId, intent.targetId)
+  )
+    return items;
 
   const removed = removeAsset(items, sourceId);
   if (!removed.removed) return items;
-  if (intent.action === "inside") return appendAssetsToFolder(removed.items, intent.targetId, [removed.removed]);
+  if (intent.action === "inside")
+    return appendAssetsToFolder(removed.items, intent.targetId, [
+      removed.removed,
+    ]);
 
-  const inserted = insertAssetNear(removed.items, intent.targetId, removed.removed, intent.action);
-  return inserted.inserted ? inserted.items : [...inserted.items, removed.removed];
+  const inserted = insertAssetNear(
+    removed.items,
+    intent.targetId,
+    removed.removed,
+    intent.action,
+  );
+  return inserted.inserted
+    ? inserted.items
+    : [...inserted.items, removed.removed];
 }
 
-export function sortAssetsInParent(items: AssetItem[], parentFolderId: string | null, mode: AssetSortMode): AssetItem[] {
+export function sortAssetsInParent(
+  items: AssetItem[],
+  parentFolderId: string | null,
+  mode: AssetSortMode,
+): AssetItem[] {
   if (!parentFolderId) return sortAssetItems(items, mode);
   return items.map((item) => {
-    if (item.id === parentFolderId && item.kind === "folder") return { ...item, children: sortAssetItems(item.children ?? [], mode) };
+    if (item.id === parentFolderId && item.kind === "folder")
+      return { ...item, children: sortAssetItems(item.children ?? [], mode) };
     if (!item.children) return item;
-    return { ...item, children: sortAssetsInParent(item.children, parentFolderId, mode) };
+    return {
+      ...item,
+      children: sortAssetsInParent(item.children, parentFolderId, mode),
+    };
   });
 }
 
 function sortAssetItems(items: AssetItem[], mode: AssetSortMode): AssetItem[] {
   return [...items].sort((a, b) => {
-    if (mode === "folders-first" && a.kind !== b.kind) return a.kind === "folder" ? -1 : 1;
-    const comparison = a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" });
+    if (mode === "folders-first" && a.kind !== b.kind)
+      return a.kind === "folder" ? -1 : 1;
+    const comparison = a.name.localeCompare(b.name, undefined, {
+      numeric: true,
+      sensitivity: "base",
+    });
     return mode === "name-desc" ? -comparison : comparison;
   });
 }
 
-function assetContainsId(items: AssetItem[], sourceId: string, targetId: string): boolean {
+function assetContainsId(
+  items: AssetItem[],
+  sourceId: string,
+  targetId: string,
+): boolean {
   const source = findAsset(items, sourceId);
-  return source?.children ? Boolean(findAsset(source.children, targetId)) : false;
+  return source?.children
+    ? Boolean(findAsset(source.children, targetId))
+    : false;
 }
 
-export function findAsset(items: AssetItem[], assetId: string): AssetItem | null {
+export function findAsset(
+  items: AssetItem[],
+  assetId: string,
+): AssetItem | null {
   for (const item of items) {
     if (item.id === assetId) return item;
     if (item.children) {
@@ -104,7 +175,10 @@ export function findAsset(items: AssetItem[], assetId: string): AssetItem | null
   return null;
 }
 
-export function removeAsset(items: AssetItem[], assetId: string): { items: AssetItem[]; removed: AssetItem | null } {
+export function removeAsset(
+  items: AssetItem[],
+  assetId: string,
+): { items: AssetItem[]; removed: AssetItem | null } {
   let removed: AssetItem | null = null;
   const nextItems = items.flatMap((item) => {
     if (item.id === assetId) {
@@ -119,7 +193,12 @@ export function removeAsset(items: AssetItem[], assetId: string): { items: Asset
   return { items: nextItems, removed };
 }
 
-function insertAssetNear(items: AssetItem[], targetId: string, asset: AssetItem, action: "before" | "after"): { items: AssetItem[]; inserted: boolean } {
+function insertAssetNear(
+  items: AssetItem[],
+  targetId: string,
+  asset: AssetItem,
+  action: "before" | "after",
+): { items: AssetItem[]; inserted: boolean } {
   const nextItems: AssetItem[] = [];
   let inserted = false;
   for (const item of items) {

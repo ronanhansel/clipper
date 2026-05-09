@@ -30,15 +30,28 @@ export class VideoExportSessionManager {
     height: number,
     filePath: string,
   ): { sessionId: string; ffmpeg: ChildProcessWithoutNullStreams } {
-    if (!this.ffmpegPath) throw new Error("The bundled ffmpeg binary is unavailable.");
+    if (!this.ffmpegPath)
+      throw new Error("The bundled ffmpeg binary is unavailable.");
     const sessionId = this.generateId();
     const ffmpeg = spawn(this.ffmpegPath, [
-      "-y", "-f", "rawvideo", "-pix_fmt", "rgba",
-      "-s", `${width}x${height}`,
-      "-r", String(frameRate),
-      "-i", "-", "-an",
-      "-c:v", "libx264", "-pix_fmt", "yuv420p",
-      "-movflags", "+faststart",
+      "-y",
+      "-f",
+      "rawvideo",
+      "-pix_fmt",
+      "rgba",
+      "-s",
+      `${width}x${height}`,
+      "-r",
+      String(frameRate),
+      "-i",
+      "-",
+      "-an",
+      "-c:v",
+      "libx264",
+      "-pix_fmt",
+      "yuv420p",
+      "-movflags",
+      "+faststart",
       filePath,
     ]);
     ffmpeg.stdin.setMaxListeners(0);
@@ -54,15 +67,25 @@ export class VideoExportSessionManager {
       ffmpeg.once("close", (code) => {
         this.videoExportSessions.delete(sessionId);
         if (code === 0) resolve(null);
-        else resolve(stderr.trim() || `ffmpeg exited with code ${code ?? "unknown"}.`);
+        else
+          resolve(
+            stderr.trim() || `ffmpeg exited with code ${code ?? "unknown"}.`,
+          );
       });
     });
 
-    this.videoExportSessions.set(sessionId, { process: ffmpeg, outputPath: filePath, closePromise });
+    this.videoExportSessions.set(sessionId, {
+      process: ffmpeg,
+      outputPath: filePath,
+      closePromise,
+    });
     return { sessionId, ffmpeg };
   }
 
-  async writeVideoFrame(sessionId: string, frameData: Uint8Array): Promise<void> {
+  async writeVideoFrame(
+    sessionId: string,
+    frameData: Uint8Array,
+  ): Promise<void> {
     const session = this.videoExportSessions.get(sessionId);
     if (!session) throw new Error("Video export session is not active.");
     const frame = Buffer.from(frameData);

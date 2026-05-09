@@ -7,7 +7,7 @@ export class RenameCommand implements Command {
 
   constructor(
     private oldPath: string,
-    private newName: string
+    private newName: string,
   ) {
     const parentPath = getDirectoryPath(oldPath);
     this.newPath = parentPath ? `${parentPath}/${newName}` : newName;

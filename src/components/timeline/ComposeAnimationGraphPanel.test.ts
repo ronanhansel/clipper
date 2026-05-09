@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildGraphNodes, getGraphAnimationSources, getGraphContentSize } from "./ComposeAnimationGraphPanel";
+import {
+  buildGraphNodes,
+  getGraphAnimationSources,
+  getGraphContentSize,
+} from "./ComposeAnimationGraphPanel";
 
 describe("getGraphContentSize", () => {
   it("keeps the base graph size when nodes fit inside it", () => {
@@ -25,9 +29,21 @@ describe("getGraphAnimationSources", () => {
       bounds: { x: 0, y: 0, width: 100, height: 40 },
       style: {},
       animations: [
-        { id: "opacity", keyframes: { opacity: [0, 1] }, options: { duration: 1, type: "tween" } },
-        { id: "z-only", keyframes: { z: [0, 100] }, options: { duration: 1, type: "tween" } },
-        { id: "path-only", keyframes: { pathOffset: [0, 1] }, options: { duration: 1, type: "tween" } },
+        {
+          id: "opacity",
+          keyframes: { opacity: [0, 1] },
+          options: { duration: 1, type: "tween" },
+        },
+        {
+          id: "z-only",
+          keyframes: { z: [0, 100] },
+          options: { duration: 1, type: "tween" },
+        },
+        {
+          id: "path-only",
+          keyframes: { pathOffset: [0, 1] },
+          options: { duration: 1, type: "tween" },
+        },
       ],
     });
 
@@ -45,12 +61,23 @@ describe("getGraphAnimationSources", () => {
       bounds: { x: 0, y: 0, width: 100, height: 40 },
       style: {},
       animations: [
-        { id: "scale", keyframes: { scale: [0.8, 1] }, options: { duration: 1, type: "tween" } },
-        { id: "rotate", keyframes: { rotate: [-12, 0] }, options: { duration: 1, type: "tween" } },
+        {
+          id: "scale",
+          keyframes: { scale: [0.8, 1] },
+          options: { duration: 1, type: "tween" },
+        },
+        {
+          id: "rotate",
+          keyframes: { rotate: [-12, 0] },
+          options: { duration: 1, type: "tween" },
+        },
       ],
     });
 
-    expect(sources.map((source) => source.details.property)).toEqual(["scale", "rotate"]);
+    expect(sources.map((source) => source.details.property)).toEqual([
+      "scale",
+      "rotate",
+    ]);
   });
 
   it("detects position only when x or y keyframes are present", () => {
@@ -62,7 +89,11 @@ describe("getGraphAnimationSources", () => {
       bounds: { x: 0, y: 0, width: 100, height: 40 },
       style: {},
       animations: [
-        { id: "move", keyframes: { x: [10, 20], y: [30, 40], z: [0, 100] }, options: { duration: 1, type: "tween" } },
+        {
+          id: "move",
+          keyframes: { x: [10, 20], y: [30, 40], z: [0, 100] },
+          options: { duration: 1, type: "tween" },
+        },
       ],
     });
 
@@ -80,17 +111,23 @@ describe("getGraphAnimationSources", () => {
 describe("buildGraphNodes", () => {
   it("does not recreate a deleted materialized code-defined node from layer animations", () => {
     const nodes = buildGraphNodes(
-      [{
-        id: "text",
-        name: "Text",
-        type: "text",
-        selector: ".text",
-        bounds: { x: 0, y: 0, width: 100, height: 40 },
-        style: {},
-        animations: [
-          { id: "opacity", keyframes: { opacity: [0, 1] }, options: { duration: 1, type: "tween" } },
-        ],
-      }],
+      [
+        {
+          id: "text",
+          name: "Text",
+          type: "text",
+          selector: ".text",
+          bounds: { x: 0, y: 0, width: 100, height: 40 },
+          style: {},
+          animations: [
+            {
+              id: "opacity",
+              keyframes: { opacity: [0, 1] },
+              options: { duration: 1, type: "tween" },
+            },
+          ],
+        },
+      ],
       {
         nodes: {},
         edges: [],
@@ -98,9 +135,6 @@ describe("buildGraphNodes", () => {
       },
     );
 
-    expect(nodes.map((node) => node.id)).toEqual([
-      "time:text:0",
-      "layer:text",
-    ]);
+    expect(nodes.map((node) => node.id)).toEqual(["time:text:0", "layer:text"]);
   });
 });

@@ -84,7 +84,10 @@ export type LensPostProcessPass = {
   uniforms: LensPostProcessUniforms;
 };
 
-export function createLensPostProcessPass(layer: AdjustmentLayer, frameSize: { width: number; height: number }): LensPostProcessPass {
+export function createLensPostProcessPass(
+  layer: AdjustmentLayer,
+  frameSize: { width: number; height: number },
+): LensPostProcessPass {
   return {
     id: `${layer.id}:lens-postprocess`,
     sourceLayerId: layer.id,
@@ -95,8 +98,17 @@ export function createLensPostProcessPass(layer: AdjustmentLayer, frameSize: { w
   };
 }
 
-export function withLensFrameBackground(pass: LensPostProcessPass, background: unknown): LensPostProcessPass {
-  return { ...pass, uniforms: { ...pass.uniforms, frameBackground: parseLensFrameBackground(background) } };
+export function withLensFrameBackground(
+  pass: LensPostProcessPass,
+  background: unknown,
+): LensPostProcessPass {
+  return {
+    ...pass,
+    uniforms: {
+      ...pass.uniforms,
+      frameBackground: parseLensFrameBackground(background),
+    },
+  };
 }
 
 export function parseLensFrameBackground(background: unknown) {
@@ -104,15 +116,35 @@ export function parseLensFrameBackground(background: unknown) {
   const value = background.trim();
   const hex = value.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i)?.[1];
   if (hex) {
-    const full = hex.length === 3 ? hex.split("").map((char) => `${char}${char}`).join("") : hex;
-    return { r: Number.parseInt(full.slice(0, 2), 16) / 255, g: Number.parseInt(full.slice(2, 4), 16) / 255, b: Number.parseInt(full.slice(4, 6), 16) / 255 };
+    const full =
+      hex.length === 3
+        ? hex
+            .split("")
+            .map((char) => `${char}${char}`)
+            .join("")
+        : hex;
+    return {
+      r: Number.parseInt(full.slice(0, 2), 16) / 255,
+      g: Number.parseInt(full.slice(2, 4), 16) / 255,
+      b: Number.parseInt(full.slice(4, 6), 16) / 255,
+    };
   }
-  const rgb = value.match(/^rgba?\((\d+(?:\.\d+)?),\s*(\d+(?:\.\d+)?),\s*(\d+(?:\.\d+)?)/i);
-  if (rgb) return { r: clampColor(Number(rgb[1]) / 255), g: clampColor(Number(rgb[2]) / 255), b: clampColor(Number(rgb[3]) / 255) };
+  const rgb = value.match(
+    /^rgba?\((\d+(?:\.\d+)?),\s*(\d+(?:\.\d+)?),\s*(\d+(?:\.\d+)?)/i,
+  );
+  if (rgb)
+    return {
+      r: clampColor(Number(rgb[1]) / 255),
+      g: clampColor(Number(rgb[2]) / 255),
+      b: clampColor(Number(rgb[3]) / 255),
+    };
   return { r: 0, g: 0, b: 0 };
 }
 
-export function getLensPostProcessUniforms(layer: Pick<AdjustmentLayer, "effect">, frameSize: { width: number; height: number }): LensPostProcessUniforms {
+export function getLensPostProcessUniforms(
+  layer: Pick<AdjustmentLayer, "effect">,
+  frameSize: { width: number; height: number },
+): LensPostProcessUniforms {
   const width = positiveFinite(frameSize.width, 1);
   const height = positiveFinite(frameSize.height, 1);
   const radiusPercent = getClampedParam(layer, "radius", 34, 1, 200);
@@ -123,25 +155,42 @@ export function getLensPostProcessUniforms(layer: Pick<AdjustmentLayer, "effect"
       x: getFiniteParam(layer, "focusX", 50) / 100,
       y: getFiniteParam(layer, "focusY", 50) / 100,
     },
-    radiusPixels: Math.max(1, width * radiusPercent / 100),
+    radiusPixels: Math.max(1, (width * radiusPercent) / 100),
     softness: getFiniteParam(layer, "softness", 0.62),
     magnification: getFiniteParam(layer, "magnification", 1.12),
     distortion,
-    chromaticAberrationPixels: getFiniteParam(layer, "chromaticAberration", 0.55),
+    chromaticAberrationPixels: getFiniteParam(
+      layer,
+      "chromaticAberration",
+      0.55,
+    ),
     rimWidth: getFiniteParam(layer, "rimWidth", 0.18),
     rimOpacity: getFiniteParam(layer, "rimOpacity", 0.48),
     dimAmount: getFiniteParam(layer, "dimAmount", 0.28),
     frameBackground: { r: 0, g: 0, b: 0 },
-    chromaticAberrationMask: getShapeMaskUniforms(layer, chromaticAberrationMaskConfig),
+    chromaticAberrationMask: getShapeMaskUniforms(
+      layer,
+      chromaticAberrationMaskConfig,
+    ),
   };
 }
 
-function getFiniteParam(layer: Pick<AdjustmentLayer, "effect">, key: string, fallback: number) {
+function getFiniteParam(
+  layer: Pick<AdjustmentLayer, "effect">,
+  key: string,
+  fallback: number,
+) {
   const value = Number(layer.effect.params?.[key]);
   return Number.isFinite(value) ? value : fallback;
 }
 
-function getClampedParam(layer: Pick<AdjustmentLayer, "effect">, key: string, fallback: number, min: number, max: number) {
+function getClampedParam(
+  layer: Pick<AdjustmentLayer, "effect">,
+  key: string,
+  fallback: number,
+  min: number,
+  max: number,
+) {
   const value = Number(layer.effect.params?.[key]);
   return clamp(Number.isFinite(value) ? value : fallback, min, max);
 }
@@ -162,19 +211,42 @@ export function getShapeMaskUniforms(
   layer: Pick<AdjustmentLayer, "effect">,
   config: ShapeMaskParamConfig = chromaticAberrationMaskConfig,
 ): ShapeMaskUniforms {
-  const { enabledKey, previewKey, invertKey, shapeKey, focusXKey, focusYKey, radiusKey, radiusXKey, radiusYKey, featherKey, fallbacks } = config;
+  const {
+    enabledKey,
+    previewKey,
+    invertKey,
+    shapeKey,
+    focusXKey,
+    focusYKey,
+    radiusKey,
+    radiusXKey,
+    radiusYKey,
+    featherKey,
+    fallbacks,
+  } = config;
 
-  const enabled = Boolean(layer.effect.params?.[enabledKey] ?? fallbacks.enabled);
-  const preview = Boolean(layer.effect.params?.[previewKey] ?? fallbacks.preview);
+  const enabled = Boolean(
+    layer.effect.params?.[enabledKey] ?? fallbacks.enabled,
+  );
+  const preview = Boolean(
+    layer.effect.params?.[previewKey] ?? fallbacks.preview,
+  );
   const invert = Boolean(layer.effect.params?.[invertKey] ?? fallbacks.invert);
   const applyInside = !invert;
 
   const rawShape = String(layer.effect.params?.[shapeKey] ?? "");
-  const shape: "circular" | "ellipsoid" = rawShape === "ellipsoid" ? "ellipsoid" : "circular";
+  const shape: "circular" | "ellipsoid" =
+    rawShape === "ellipsoid" ? "ellipsoid" : "circular";
 
   const radius = getFiniteParam(layer, radiusKey, fallbacks.radius);
-  const radiusX = shape === "ellipsoid" ? getFiniteParam(layer, radiusXKey, fallbacks.radiusX) : radius;
-  const radiusY = shape === "ellipsoid" ? getFiniteParam(layer, radiusYKey, fallbacks.radiusY) : radius;
+  const radiusX =
+    shape === "ellipsoid"
+      ? getFiniteParam(layer, radiusXKey, fallbacks.radiusX)
+      : radius;
+  const radiusY =
+    shape === "ellipsoid"
+      ? getFiniteParam(layer, radiusYKey, fallbacks.radiusY)
+      : radius;
   const feather = getFiniteParam(layer, featherKey, fallbacks.feather);
   const focusX = getFiniteParam(layer, focusXKey, fallbacks.focusX);
   const focusY = getFiniteParam(layer, focusYKey, fallbacks.focusY);
