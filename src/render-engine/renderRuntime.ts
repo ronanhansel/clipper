@@ -1,5 +1,6 @@
 import { evaluateLayerAnimations } from "../core/animations";
 import {
+  type AnimationGraphState,
   FRAME_HEIGHT,
   FRAME_WIDTH,
   type BackgroundLayer,
@@ -38,6 +39,7 @@ export type EvaluatedBackgroundLayer = Omit<BackgroundLayer, "elements"> & {
 
 export type RenderEvaluationOptions = {
   animations?: boolean;
+  bgGraph?: AnimationGraphState;
 };
 
 const templateCache = new Map<
@@ -106,13 +108,18 @@ export function evaluateBackgroundLayer(
     animationsEnabled && background.animations
       ? evaluateLayerAnimations(background.animations, time)
       : {};
+  const backgroundGraphStyle = compileBackgroundGraphStyle(options.bgGraph, time);
+  const baseFillStyle = hasBackgroundGraphSources(options.bgGraph)
+    ? stripBackgroundPaintStyle(background.style)
+    : background.style;
 
   return {
     ...background,
     elements,
     renderStyle: { ...layerAnimationStyle },
     fillStyle: {
-      ...background.style,
+      ...baseFillStyle,
+      ...backgroundGraphStyle,
       left: fillBounds.x,
       top: fillBounds.y,
       width: fillBounds.width,
@@ -123,6 +130,160 @@ export function evaluateBackgroundLayer(
       (Boolean(background.animations?.length) ||
         elements.some((element) => element.timeSensitive)),
   };
+}
+
+export function getConnectedBackgroundSourceIds(
+  graph: AnimationGraphState | undefined,
+) {
+  const backgroundNodeIds = new Set(
+    Object.entries(graph?.customNodes ?? {})
+      .filter(([, node]) => node.scopeKey === "background")
+      .map(([id]) => id),
+  );
+  return new Set(
+    (graph?.edges ?? [])
+      .filter(
+        (edge) =>
+          edge.toNodeId === "layer:background" &&
+          backgroundNodeIds.has(edge.fromNodeId),
+      )
+      .map((edge) => edge.fromNodeId),
+  );
+}
+
+function hasBackgroundGraphSources(graph: AnimationGraphState | undefined) {
+  return Object.values(graph?.customNodes ?? {}).some(
+    (node) => node.scopeKey === "background",
+  );
+}
+
+function stripBackgroundPaintStyle(style: RenderStyle) {
+  const {
+    background: _background,
+    backgroundColor: _backgroundColor,
+    backgroundImage: _backgroundImage,
+    backgroundPosition: _backgroundPosition,
+    backgroundSize: _backgroundSize,
+    backgroundRepeat: _backgroundRepeat,
+    ...rest
+  } = style;
+  return rest;
+}
+
+export function compileBackgroundGraphStyle(
+  graph: AnimationGraphState | undefined,
+  time = 0,
+): RenderStyle {
+  if (!graph?.customNodes) return {};
+  const entries = Object.entries(graph.customNodes).filter(
+    ([, node]) => node.scopeKey === "background",
+  );
+  const nodeIds = new Set(entries.map(([id]) => id));
+  const sourceEdgeTargets = getConnectedBackgroundSourceIds(graph);
+  if (sourceEdgeTargets.size === 0) return {};
+  const style: RenderStyle = {};
+  const backgroundImages: string[] = [];
+  const backgroundSizes: string[] = [];
+  const backgroundPositions: string[] = [];
+  for (const [nodeId, node] of entries) {
+    if (
+      !sourceEdgeTargets.has(nodeId) &&
+      node.kind !== "oscillate" &&
+      node.kind !== "time"
+    )
+      continue;
+    const details = node.details ?? {};
+    const oscillation = getBackgroundNodeOscillation(
+      graph,
+      nodeIds,
+      nodeId,
+      time,
+    );
+    if (node.kind === "bgSolid") {
+      style.backgroundColor = details.color ?? "#050505";
+      continue;
+    }
+    if (node.kind === "bgGradient") {
+      const type = details.type ?? "linear";
+      const stops = details.stops ?? "#0b1020 0%, #3949ab 100%";
+      const angle = details.angle ?? "135deg";
+      const center = details.center ?? "center";
+      backgroundImages.push(
+        type === "radial"
+          ? `radial-gradient(circle at ${center}, ${stops})`
+          : type === "conic"
+            ? `conic-gradient(from ${angle}, ${stops})`
+            : `linear-gradient(${angle}, ${stops})`,
+      );
+      if (oscillation) {
+        backgroundSizes.push(details.backgroundSize ?? "140% 140%");
+        backgroundPositions.push(`${50 + oscillation}% ${50 - oscillation}%`);
+      } else {
+        backgroundSizes.push(details.backgroundSize ?? "auto");
+        backgroundPositions.push("center");
+      }
+      continue;
+    }
+    if (node.kind === "bgPattern") {
+      const color = details.color ?? "rgba(255,255,255,0.18)";
+      const base = details.base ?? "transparent";
+      const size = details.size ?? "32px";
+      const pattern = details.pattern ?? "dots";
+      if (base !== "transparent") style.backgroundColor = base;
+      const position = oscillation ? `${oscillation}px 0` : "0 0";
+      if (pattern === "grid") {
+        backgroundImages.push(
+          `linear-gradient(${color} 1px, transparent 1px)`,
+          `linear-gradient(90deg, ${color} 1px, transparent 1px)`,
+        );
+        backgroundSizes.push(`${size} ${size}`, `${size} ${size}`);
+        backgroundPositions.push(position, position);
+      } else {
+        backgroundImages.push(
+          pattern === "stripes"
+            ? `repeating-linear-gradient(45deg, ${color} 0 2px, transparent 2px ${size})`
+            : `radial-gradient(circle, ${color} 1.5px, transparent 1.6px)`,
+        );
+        backgroundSizes.push(`${size} ${size}`);
+        backgroundPositions.push(position);
+      }
+    }
+  }
+  if (backgroundImages.length) {
+    style.backgroundImage = backgroundImages.join(", ");
+    style.backgroundSize = backgroundSizes.join(", ");
+    style.backgroundPosition = backgroundPositions.join(", ");
+  }
+  return style;
+}
+
+export function getBackgroundNodeOscillation(
+  graph: AnimationGraphState | undefined,
+  nodeIds: Set<string>,
+  targetNodeId: string | undefined,
+  time: number,
+) {
+  if (!targetNodeId) return 0;
+  const oscillateNodeIds = (graph?.edges ?? [])
+    .filter(
+      (edge) => edge.toNodeId === targetNodeId && nodeIds.has(edge.fromNodeId),
+    )
+    .map((edge) => edge.fromNodeId);
+  return oscillateNodeIds.reduce((sum, nodeId) => {
+    const node = graph?.customNodes?.[nodeId];
+    if (node?.kind !== "oscillate") return sum;
+    return sum + getBackgroundOscillation(node.details, time);
+  }, 0);
+}
+
+function getBackgroundOscillation(
+  details: Record<string, string> | undefined,
+  time: number,
+) {
+  const amount = Number(details?.amount ?? 0);
+  const speed = Number(details?.speed ?? 1);
+  if (!Number.isFinite(amount) || !Number.isFinite(speed)) return 0;
+  return Math.sin(time * speed * Math.PI * 2) * amount;
 }
 
 export function isTimeSensitiveFrameObject(object: FrameObject) {

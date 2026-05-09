@@ -1,8 +1,27 @@
 import type { Composition3dNodeKind } from "./composition3d/types";
 
-export type GraphCompositionMode = "composition2d" | "composition3d";
+export type GraphCompositionMode =
+  | "composition2d"
+  | "composition3d"
+  | "background";
 
 export type SocketType = "universal" | "scalar" | "any";
+
+export type BackgroundGraphNodeKind =
+  | "layer"
+  | "time"
+  | "oscillate"
+  | "bgSolid"
+  | "bgGradient"
+  | "bgPattern"
+  | "bg3d";
+
+export type BackgroundGraphNodeRole =
+  | "target"
+  | "time"
+  | "modifier"
+  | "source"
+  | "animatedSource";
 
 export const graphSocketColors: Record<SocketType, string> = {
   universal: "#2f80ff",
@@ -27,6 +46,51 @@ export const composition2dSocketSettings = {
     { from: "time", to: "time" },
   ],
 } as const;
+
+export const backgroundGraphSocketSettings = {
+  roles: {
+    layer: "target",
+    time: "time",
+    oscillate: "modifier",
+    bgSolid: "source",
+    bgGradient: "animatedSource",
+    bgPattern: "animatedSource",
+    bg3d: "animatedSource",
+  },
+  rules: [
+    { from: "time", to: "modifier" },
+    { from: "modifier", to: "animatedSource" },
+    { from: "source", to: "target" },
+    { from: "animatedSource", to: "target" },
+  ],
+} as const satisfies {
+  roles: Record<BackgroundGraphNodeKind, BackgroundGraphNodeRole>;
+  rules: readonly {
+    from: BackgroundGraphNodeRole;
+    to: BackgroundGraphNodeRole;
+  }[];
+};
+
+export function getBackgroundGraphNodeRole(
+  kind: string,
+): BackgroundGraphNodeRole | null {
+  return Object.prototype.hasOwnProperty.call(
+    backgroundGraphSocketSettings.roles,
+    kind,
+  )
+    ? backgroundGraphSocketSettings.roles[kind as BackgroundGraphNodeKind]
+    : null;
+}
+
+export function canConnectBackgroundGraphNodeRoles(
+  from: BackgroundGraphNodeRole | null,
+  to: BackgroundGraphNodeRole | null,
+) {
+  if (!from || !to) return false;
+  return backgroundGraphSocketSettings.rules.some(
+    (rule) => rule.from === from && rule.to === to,
+  );
+}
 
 export const composition3dSocketSettings = {
   time: { output: "scalar", accepts: [] },

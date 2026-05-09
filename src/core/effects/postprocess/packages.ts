@@ -1,8 +1,20 @@
+import { filmBurnTransitionPostProcessKind } from "./filmBurnTransition";
+import {
+  createFilmBurnTransitionExportPostProcessRenderer,
+  createFilmBurnTransitionPostProcessRenderer,
+  type FilmBurnTransitionPostProcessRenderer,
+} from "./filmBurnTransitionWebGlRenderer";
 import {
   lensPostProcessKind,
   withLensFrameBackground,
   type LensPostProcessPass,
 } from "./lens";
+import { lightLeakBandsTransitionPostProcessKind } from "./lightLeakBandsTransition";
+import {
+  createLightLeakBandsTransitionExportPostProcessRenderer,
+  createLightLeakBandsTransitionPostProcessRenderer,
+  type LightLeakBandsTransitionPostProcessRenderer,
+} from "./lightLeakBandsTransitionWebGlRenderer";
 import {
   createLensExportPostProcessRenderer,
   createLensPostProcessRenderer,
@@ -20,6 +32,24 @@ import type { PostProcessPass } from "../types";
 import type { PostProcessPackage } from "./registry";
 
 export const builtInPostProcessPackages = [
+  {
+    kind: filmBurnTransitionPostProcessKind,
+    createRenderer: () =>
+      createFilmBurnTransitionPostProcessRenderer() as PostProcessRenderer,
+    createExportRenderer: (renderer) =>
+      createFilmBurnTransitionExportPostProcessRenderer(
+        renderer as FilmBurnTransitionPostProcessRenderer,
+      ) as ExportPostProcessRenderer,
+  },
+  {
+    kind: lightLeakBandsTransitionPostProcessKind,
+    createRenderer: () =>
+      createLightLeakBandsTransitionPostProcessRenderer() as PostProcessRenderer,
+    createExportRenderer: (renderer) =>
+      createLightLeakBandsTransitionExportPostProcessRenderer(
+        renderer as LightLeakBandsTransitionPostProcessRenderer,
+      ) as ExportPostProcessRenderer,
+  },
   {
     kind: lensPostProcessKind,
     createRenderer: () =>

@@ -1,9 +1,5 @@
 import type { AdjustmentEffectPackage } from "../../../types";
-import {
-  getClampedParam,
-  getOverlayTarget,
-  getNumericParam,
-} from "../helpers";
+import { getClampedParam, getOverlayTarget, getNumericParam } from "../helpers";
 import { createPracticalArtifactOverlays } from "../practicalArtifacts";
 import {
   getShapeMaskUniforms,

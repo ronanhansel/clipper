@@ -1,11 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import { lensPostProcessKind } from "../../core/effects/postprocess/lens";
+import { filmBurnTransitionPostProcessKind } from "../../core/effects/postprocess/filmBurnTransition";
 import type {
   AdjustmentLayer,
   CompositionClip,
   PartFrame,
   ProjectManifest,
   Scene,
+  TransitionLayer,
 } from "../../core/types";
 import { FRAME_HEIGHT, FRAME_WIDTH } from "../../core/types";
 import {
@@ -43,6 +45,19 @@ describe("export post-process pass derivation", () => {
     expect(passes[0]).toMatchObject({
       kind: lensPostProcessKind,
       uniforms: { frameBackground: { r: 0.2, g: 0.4, b: 0.6 } },
+    });
+  });
+
+  it("includes transition post-process passes through the generic export path", () => {
+    const scene = testScene({ transitionLayers: [filmBurnLayer()] });
+
+    const passes = getExportPostProcessPasses(testRequest(scene, 1));
+
+    expect(passes).toHaveLength(1);
+    expect(passes[0]).toMatchObject({
+      kind: filmBurnTransitionPostProcessKind,
+      sourceLayerId: "film-burn",
+      uniforms: { progress: 0.5 },
     });
   });
 });
@@ -219,6 +234,7 @@ function testProject(sceneId: string): ProjectManifest {
         clips: [],
         timelineLayers: {
           adjustmentLayers: [{ id: "clipper.adjustment.lens" }],
+          transitionLayers: [{ id: "clipper.transition.filmBurn" }],
         },
       },
     ],
@@ -252,5 +268,19 @@ function lensLayer(
     start: 1,
     duration: 2,
     effect: { effectId: "clipper.adjustment.lens", params },
+  };
+}
+
+function filmBurnLayer(): TransitionLayer {
+  return {
+    id: "film-burn",
+    name: "Film Burn",
+    start: 0,
+    duration: 2,
+    midPoint: 1,
+    effect: {
+      effectId: "clipper.transition.filmBurn",
+      params: { ease: "linear" },
+    },
   };
 }

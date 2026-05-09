@@ -266,7 +266,12 @@ export function normalizeAnimationGraphState(
               node.kind === "animation" ||
               node.kind === "time" ||
               node.kind === "split" ||
-              node.kind === "group"
+              node.kind === "group" ||
+              node.kind === "bgSolid" ||
+              node.kind === "bgGradient" ||
+              node.kind === "bgPattern" ||
+              node.kind === "bg3d" ||
+              node.kind === "oscillate"
                 ? node.kind
                 : undefined;
             const label =
@@ -896,6 +901,7 @@ function normalizeComposition(composition: CompositionClip): CompositionClip {
         ? rest.compositionError
         : undefined,
     animationGraph: normalizeAnimationGraphState(rest.animationGraph),
+    bgGraph: normalizeAnimationGraphState(rest.bgGraph),
     renderMode: normalizeCompositionRenderMode(rest.renderMode),
     composition3dGraph: normalizeComposition3dGraph(rest.composition3dGraph),
     background: {
@@ -1045,6 +1051,7 @@ function getSceneFromProjectWithDocs(
       const animationGraph = normalizeAnimationGraphState(
         composition.animationGraph,
       );
+      const bgGraph = normalizeAnimationGraphState(composition.bgGraph);
       const renderMode = normalizeCompositionRenderMode(
         clip.renderMode ?? composition.renderMode,
       );
@@ -1060,6 +1067,7 @@ function getSceneFromProjectWithDocs(
           prerender: clip.prerender || undefined,
           motionMarkers: [],
           animationGraph,
+          bgGraph,
           renderMode,
           composition3dGraph: resolveComposition3dGraphForTimelineClip(
             clip,
@@ -1172,6 +1180,7 @@ function getScenesFromTimelines(
       const animationGraph = normalizeAnimationGraphState(
         composition.animationGraph,
       );
+      const bgGraph = normalizeAnimationGraphState(composition.bgGraph);
       const renderMode = normalizeCompositionRenderMode(
         clip.renderMode ?? composition.renderMode,
       );
@@ -1187,6 +1196,7 @@ function getScenesFromTimelines(
           prerender: clip.prerender || undefined,
           motionMarkers: [],
           animationGraph,
+          bgGraph,
           renderMode,
           composition3dGraph: resolveComposition3dGraphForTimelineClip(
             clip,
@@ -1410,13 +1420,18 @@ function getGraphLayerAnimationsForObject(
   graph: AnimationGraphState,
 ): LayerAnimation[] {
   const expanded = expandAnimationGraphGroupsForObject(graph, object);
-  const customNodes = Object.entries(expanded.customNodes);
+  const customNodes = Object.entries(expanded.customNodes).filter(([, node]) =>
+    isObjectAnimationGraphNodeKind(node.kind),
+  );
   if (!customNodes.length) return [];
   const nodeKinds = new Map<
     string,
     "animation" | "time" | "split" | "layer" | "group"
   >([[`layer:${object.id}`, "layer"]]);
-  for (const [nodeId, node] of customNodes) nodeKinds.set(nodeId, node.kind);
+  for (const [nodeId, node] of customNodes) {
+    if (!isObjectAnimationGraphNodeKind(node.kind)) continue;
+    nodeKinds.set(nodeId, node.kind);
+  }
   const edges = expanded.edges.filter(
     (edge) => nodeKinds.has(edge.fromNodeId) && nodeKinds.has(edge.toNodeId),
   );
@@ -1511,15 +1526,25 @@ function getRegisteredGroupAnimations(
 ): LayerAnimation[] {
   const customNodes = {
     ...(object ? getDerivedAnimationGraphCustomNodes(object) : {}),
-    ...(graph.customNodes ?? {}),
-    ...(group.customNodes ?? {}),
+    ...Object.fromEntries(
+      Object.entries(graph.customNodes ?? {}).filter(([, node]) =>
+        isObjectAnimationGraphNodeKind(node.kind),
+      ),
+    ),
+    ...Object.fromEntries(
+      Object.entries(group.customNodes ?? {}).filter(([, node]) =>
+        isObjectAnimationGraphNodeKind(node.kind),
+      ),
+    ),
   };
   const nodeKinds = new Map<
     string,
     "animation" | "time" | "split" | "out" | "group"
   >([[group.outNodeId, "out"]]);
-  for (const [nodeId, node] of Object.entries(customNodes))
+  for (const [nodeId, node] of Object.entries(customNodes)) {
+    if (!isObjectAnimationGraphNodeKind(node.kind)) continue;
     nodeKinds.set(nodeId, node.kind);
+  }
   const edges = (group.edges ?? []).filter(
     (edge) => nodeKinds.has(edge.fromNodeId) && nodeKinds.has(edge.toNodeId),
   );
@@ -1585,6 +1610,17 @@ function getRegisteredGroupAnimations(
       },
     ];
   });
+}
+
+function isObjectAnimationGraphNodeKind(
+  kind: AnimationGraphCustomNode["kind"],
+): kind is "animation" | "time" | "split" | "group" {
+  return (
+    kind === "animation" ||
+    kind === "time" ||
+    kind === "split" ||
+    kind === "group"
+  );
 }
 
 function getGraphSplitNodeIdForTarget(

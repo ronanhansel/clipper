@@ -5244,6 +5244,7 @@ export const DirectTimelinePanel = memo(function DirectTimelinePanel({
                       const markerTags = getEffectPackage(
                         layer.effect.effectId,
                       )?.timelineTags;
+                      const primaryMarkerTag = markerTags?.[0];
                       const stripeHeight = Math.max(
                         layerRowHeights[index] ?? 0,
                         laneContentHeight - (layerRowStarts[index] ?? 0),
@@ -5254,13 +5255,16 @@ export const DirectTimelinePanel = memo(function DirectTimelinePanel({
                       const stripeEdge = blocked
                         ? "rgba(248,113,113,0.36)"
                         : "rgba(255,184,112,0.32)";
+                      const transitionWidthPercent =
+                        (previewLayer.duration / timelineDisplayDuration) * 100;
+                      const showTransitionLabel = transitionWidthPercent >= 1.8;
                       return (
                         <div
                           data-timeline-control
                           data-timeline-marker-kind="transition"
                           data-timeline-transition-id={layer.id}
                           key={layer.id}
-                          className={`pointer-events-none absolute top-0 box-border min-w-[18px] ${selected ? "z-30" : "z-10"}`}
+                          className={`pointer-events-none absolute top-0 box-border ${selected ? "z-30" : "z-10"}`}
                           style={{
                             left: `${(previewLayer.start / timelineDisplayDuration) * 100}%`,
                             width: `calc(${(previewLayer.duration / timelineDisplayDuration) * 100}% + var(--clipper-transition-resize-width, 0px))`,
@@ -5280,17 +5284,27 @@ export const DirectTimelinePanel = memo(function DirectTimelinePanel({
                                 : "inset 0 0 0 1px rgba(255,255,255,0.08)",
                             }}
                           />
-                          <div
-                            className="pointer-events-none absolute right-1.5 top-0 flex items-center justify-center"
-                            style={{ height: stripeHeight }}
-                          >
-                            <span
-                              className="whitespace-nowrap text-[10px] font-extrabold uppercase tracking-[0.16em] text-white/45 [writing-mode:vertical-rl]"
-                              title={layer.name}
+                          {showTransitionLabel ? (
+                            <div
+                              className="pointer-events-none absolute inset-x-0 top-0 flex h-full flex-col items-end justify-center gap-1.5 overflow-hidden pr-1.5"
+                              style={{ height: stripeHeight }}
                             >
-                              {layer.name}
-                            </span>
-                          </div>
+                              {primaryMarkerTag?.label ? (
+                                <span
+                                  className="inline-flex items-center rounded-[3px] border border-white/25 bg-black/24 px-0.5 py-1 text-[8px] font-black uppercase leading-none tracking-[0.12em] text-white/85 shadow-[0_1px_2px_rgba(0,0,0,0.25)] [writing-mode:vertical-rl]"
+                                  title={primaryMarkerTag.title ?? primaryMarkerTag.label}
+                                >
+                                  {primaryMarkerTag.label}
+                                </span>
+                              ) : null}
+                              <span
+                                className="whitespace-nowrap text-[10px] font-extrabold uppercase tracking-[0.16em] text-white/45 [writing-mode:vertical-rl]"
+                                title={layer.name}
+                              >
+                                {layer.name}
+                              </span>
+                            </div>
+                          ) : null}
                           <div
                             className={`pointer-events-auto absolute inset-x-0 top-0 h-full cursor-grab rounded-[3px] border backdrop-blur-[1px] active:cursor-grabbing ${row.locked ? "opacity-45" : selected ? "opacity-95" : "opacity-80"}`}
                             role="button"
@@ -5328,9 +5342,6 @@ export const DirectTimelinePanel = memo(function DirectTimelinePanel({
                             }
                           >
                             <span className="sr-only">{layer.name}</span>
-                            <span className="absolute left-1.5 top-1.5">
-                              <TimelineMarkerTags tags={markerTags} />
-                            </span>
                             <span className="pointer-events-none absolute left-1/2 top-1/2 h-4 w-px -translate-x-1/2 -translate-y-1/2 bg-white/30" />
                           </div>
                           <div

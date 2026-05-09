@@ -39,6 +39,7 @@ import {
 import type {
   AdjustmentVisualOverlay,
   AdjustmentVisualStyle,
+  PostProcessPass,
 } from "../../core/effects/types";
 import {
   FRAME_HEIGHT,
@@ -61,6 +62,7 @@ type FramePreviewProps = ComponentProps<typeof FramePreview> & {
     to: PreviewStackPart[];
     fromSceneTime: number;
     toSceneTime: number;
+    postProcessPasses: PostProcessPass[];
   } | null;
   transitionLayers?: TransitionLayer[];
 };
@@ -80,6 +82,16 @@ function requiresDomOverlayPreview(props: FramePreviewProps): boolean {
     props.selectedObjects.length > 0 ||
     props.editingTextObjectId !== null
   );
+}
+
+function getPreviewPostProcessPasses(
+  plan: ReturnType<typeof buildAdjustmentExecutionPlan>,
+  props: FramePreviewProps,
+) {
+  return [
+    ...plan.steps.flatMap((step) => step.postProcessPasses ?? []),
+    ...(props.transitionPreviewParts?.postProcessPasses ?? []),
+  ];
 }
 
 type PreviewColumnProps = {
@@ -180,8 +192,11 @@ export function PreviewColumn({
         selectionOverlayScale: displayScale,
       }
     : null;
+  const renderDirectFramePreview =
+    renderFramePreviewProps?.timelineMode === "compose";
   const livePostProcessRequired = renderFramePreviewProps
-    ? hasActiveLivePostProcessPass(
+    ? !renderDirectFramePreview &&
+      hasActiveLivePostProcessPass(
         renderFramePreviewProps,
         currentSceneTimeRef.current,
       )
@@ -265,8 +280,10 @@ export function PreviewColumn({
                 data-clipper-fixed-preview-render
                 style={previewRenderStyle}
               >
-                {displayPrerenderPreview &&
-                renderFramePreviewProps.part.renderMode === "webgl" ? (
+                {renderDirectFramePreview ? (
+                  <FramePreview {...renderFramePreviewProps} />
+                ) : displayPrerenderPreview &&
+                  renderFramePreviewProps.part.renderMode === "webgl" ? (
                   <PrerenderVideoPreview
                     blackMissDebug={prerenderCacheBlackMissDebug}
                     currentSceneTimeRef={currentSceneTimeRef}
@@ -357,7 +374,7 @@ function hasActiveLivePostProcessPass(
   );
   return Boolean(
     selectLiveDomPostProcessPasses(
-      plan.steps.flatMap((step) => step.postProcessPasses ?? []),
+      getPreviewPostProcessPasses(plan, framePreviewProps),
     ).length,
   );
 }
@@ -544,8 +561,9 @@ function PrerenderVideoPreview({
         { width: block.width, height: block.height },
       ),
     );
-    const postProcessPasses = plan.steps.flatMap(
-      (step) => step.postProcessPasses ?? [],
+    const postProcessPasses = getPreviewPostProcessPasses(
+      plan,
+      framePreviewProps,
     );
     const webGlPostProcessPasses =
       selectLiveDomPostProcessPasses(postProcessPasses);
@@ -911,7 +929,7 @@ function LivePostProcessFramePreview({
         height: FRAME_HEIGHT,
       }),
     );
-    const passes = plan.steps.flatMap((step) => step.postProcessPasses ?? []);
+    const passes = getPreviewPostProcessPasses(plan, framePreviewProps);
     const livePasses = selectLiveDomPostProcessPasses(passes);
     const optIn = livePostProcessEnabled;
     if (!canvas || !livePasses.length || !livePostProcessEnabled || !optIn) {
@@ -1023,7 +1041,7 @@ function LivePostProcessFramePreview({
         ),
       );
       const livePasses = selectLiveDomPostProcessPasses(
-        plan.steps.flatMap((step) => step.postProcessPasses ?? []),
+        getPreviewPostProcessPasses(plan, framePreviewProps),
       );
       if (!livePasses.length) clearInactiveLivePreview(null);
     };
@@ -1054,7 +1072,7 @@ function LivePostProcessFramePreview({
       ),
     );
     const livePasses = selectLiveDomPostProcessPasses(
-      plan.steps.flatMap((step) => step.postProcessPasses ?? []),
+      getPreviewPostProcessPasses(plan, framePreviewProps),
     );
     if (!livePostProcessEnabled || !livePasses.length)
       clearInactiveLivePreview(!livePostProcessEnabled ? "not-opted-in" : null);
@@ -1094,7 +1112,7 @@ function LivePostProcessFramePreview({
           height: FRAME_HEIGHT,
         }),
       );
-      const passes = plan.steps.flatMap((step) => step.postProcessPasses ?? []);
+      const passes = getPreviewPostProcessPasses(plan, framePreviewProps);
       const livePasses = selectLiveDomPostProcessPasses(passes);
       const lastLivePass = livePasses.at(-1);
       const optIn = livePostProcessEnabled;
@@ -1198,7 +1216,7 @@ function LivePostProcessFramePreview({
     : null;
   const sourceLayerId = sourcePlan
     ? selectLiveDomPostProcessPasses(
-        sourcePlan.steps.flatMap((step) => step.postProcessPasses ?? []),
+        getPreviewPostProcessPasses(sourcePlan, framePreviewProps),
       )[0]?.sourceLayerId
     : undefined;
   const sourceAdjustmentLayers =

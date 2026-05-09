@@ -26,6 +26,7 @@ import type {
   TimelinePart,
   TransitionLayer,
 } from "../../core/types";
+import type { PostProcessPass } from "../../core/effects/types";
 
 export type FramePreviewRenderModel = {
   activeComposition: CompositionClip | null;
@@ -46,6 +47,7 @@ export type FramePreviewRenderModel = {
     to: TimelinePreviewStackPart[];
     fromSceneTime: number;
     toSceneTime: number;
+    postProcessPasses: PostProcessPass[];
   } | null;
   visibleAdjustmentLayers: NonNullable<Scene["adjustmentLayers"]>;
 };
@@ -53,6 +55,7 @@ export type FramePreviewRenderModel = {
 export function deriveFramePreviewRenderModel({
   blankPart,
   frameRate,
+  previewTransitionLayers,
   scene,
   sceneTime,
   timelineLayers,
@@ -60,24 +63,35 @@ export function deriveFramePreviewRenderModel({
 }: {
   blankPart: CompositionClip;
   frameRate?: number;
+  previewTransitionLayers?: Scene["transitionLayers"];
   scene: Scene;
   sceneTime: number;
   timelineLayers?: TimelineLayerState;
   timelineMode: TimelineMode;
 }): FramePreviewRenderModel {
   const timelineLayerState = withRequiredTimelineLayerTypes(timelineLayers);
-  const visibleAdjustmentLayers = getExecutableAdjustmentLayers(
+  const effectiveTransitionLayers =
+    previewTransitionLayers ?? scene.transitionLayers;
+  const sceneAdjustmentLayers = getExecutableAdjustmentLayers(
     scene.adjustmentLayers,
     timelineLayerState,
   );
-  const renderableScene = getRenderableScene(scene, timelineLayerState);
+  const visibleAdjustmentLayers =
+    timelineMode === "compose" ? [] : sceneAdjustmentLayers;
+  const renderableScene = getRenderableScene(
+    { ...scene, transitionLayers: effectiveTransitionLayers },
+    timelineLayerState,
+  );
   const timeline = buildLinearTimeline(renderableScene);
   const sceneDurationSeconds = getSceneDuration(renderableScene);
-  const adjustedSceneTime = applyAdjustmentLayersToSceneTime(
-    sceneTime,
-    visibleAdjustmentLayers,
-    frameRate,
-  );
+  const adjustedSceneTime =
+    timelineMode === "compose"
+      ? sceneTime
+      : applyAdjustmentLayersToSceneTime(
+          sceneTime,
+          visibleAdjustmentLayers,
+          frameRate,
+        );
   const previewState = getTimelinePreviewState({
     adjustmentLayers: [],
     compositions: renderableScene.compositions,
@@ -114,6 +128,7 @@ export function deriveFramePreviewRenderModel({
           previewState.transitionPreviewParts.to,
           sceneMotionViews.motionMarkers,
         ),
+        postProcessPasses: previewState.transitionPreviewParts.postProcessPasses,
       }
     : null;
 
@@ -133,7 +148,7 @@ export function deriveFramePreviewRenderModel({
     timeline,
     timelineLayerState,
     transitionLayers: getExecutableTransitionLayers(
-      scene.transitionLayers,
+      effectiveTransitionLayers,
       timelineLayerState,
     ),
     transitionPreviewParts,

@@ -370,6 +370,13 @@ export type AdjustmentLayer = TimelineMarkerMetadata & {
 export type TransitionEffectParams = Record<string, unknown> & {
   ease?: MotionEase;
   transitionTime?: number;
+  bandCount?: number;
+  drift?: number;
+  flicker?: number;
+  intensity?: number;
+  seed?: number;
+  softness?: number;
+  warmth?: number;
 };
 
 export type TransitionEffectDefinition = {
@@ -426,6 +433,7 @@ export type CompositionClip = TimelineMarkerMetadata & {
   snapshot: PartSnapshotLine[];
   motionMarkers: MotionMarker[];
   animationGraph?: AnimationGraphState;
+  bgGraph?: AnimationGraphState;
   renderMode?: CompositionRenderMode;
   composition3dGraph?: Composition3dGraphState;
 };
@@ -472,7 +480,16 @@ export type AnimationGraphEdge = {
 };
 
 export type AnimationGraphCustomNode = {
-  kind: "animation" | "time" | "split" | "group";
+  kind:
+    | "animation"
+    | "time"
+    | "split"
+    | "group"
+    | "bgSolid"
+    | "bgGradient"
+    | "bgPattern"
+    | "bg3d"
+    | "oscillate";
   label: string;
   scopeKey: string;
   details?: Record<string, string>;
@@ -699,6 +716,6 @@ export type SelectionPayload = {
     name: string;
     selector: string;
     bounds: Bounds;
-    type: FrameObjectType;
+    type: FrameObjectType | "background";
   }>;
 };

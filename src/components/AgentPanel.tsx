@@ -5,7 +5,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Copy, Pause, Play } from "lucide-react";
+import { Check, Copy, Pause, Play } from "lucide-react";
 import { buttonBase } from "../app/config";
 import { clipperHost, type TemplateBundle } from "../app/clipperHost";
 import { compositionFromSource } from "../core/compositionSource";
@@ -59,6 +59,8 @@ export function AgentPanel({
   const [templatesError, setTemplatesError] = useState<string | null>(null);
   const [templatesOpen, setTemplatesOpen] = useState(false);
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
+  const [skillCopied, setSkillCopied] = useState(false);
+  const copiedResetRef = useRef<number | null>(null);
   const selectedTemplate =
     templates.find((template) => template.id === selectedTemplateId) ??
     templates[0];
@@ -88,6 +90,27 @@ export function AgentPanel({
     };
   }, []);
 
+  useEffect(
+    () => () => {
+      if (copiedResetRef.current !== null) {
+        window.clearTimeout(copiedResetRef.current);
+      }
+    },
+    [],
+  );
+
+  async function handleCopySkill() {
+    await clipperHost.copyText(defaultSkill.source);
+    setSkillCopied(true);
+    if (copiedResetRef.current !== null) {
+      window.clearTimeout(copiedResetRef.current);
+    }
+    copiedResetRef.current = window.setTimeout(() => {
+      setSkillCopied(false);
+      copiedResetRef.current = null;
+    }, 1400);
+  }
+
   return (
     <div className="grid gap-4">
       <section>
@@ -100,12 +123,16 @@ export function AgentPanel({
               <span className="truncate">SKILL.md</span>
             </div>
             <button
-              className="grid size-8 shrink-0 place-items-center rounded-lg text-[#b8bac4] transition hover:bg-[#20232b] hover:text-white"
-              aria-label="Copy skill"
+              className={`grid size-8 shrink-0 place-items-center rounded-lg transition active:scale-95 ${skillCopied ? "bg-[#1e3a2d] text-[#86efac]" : "text-[#b8bac4] hover:bg-[#20232b] hover:text-white"}`}
+              aria-label={skillCopied ? "Copied skill" : "Copy skill"}
               type="button"
-              onClick={() => copyText(defaultSkill.source)}
+              onClick={() => void handleCopySkill()}
             >
-              <Copy size={15} />
+              <span
+                className={`transition duration-200 ${skillCopied ? "scale-110" : "scale-100"}`}
+              >
+                {skillCopied ? <Check size={15} /> : <Copy size={15} />}
+              </span>
             </button>
           </div>
           <pre className="m-0 max-h-72 overflow-auto whitespace-pre-wrap break-words p-5 font-mono text-[12px] leading-6 text-[#d9dbe3]">
@@ -213,7 +240,7 @@ function TemplateDialog({
     setSaveError(null);
     setSavingSource(true);
     try {
-      const projectRoot = getProjectRoot(currentFilePath);
+      const projectRoot = getProjectTemplateSourceRoot(currentFilePath);
       const folderPath = await nextAvailableTemplateFolder(
         projectRoot,
         selectedTemplate.slug,
@@ -526,12 +553,15 @@ function formatTime(time: number) {
   return `0:${String(seconds).padStart(2, "0")}`;
 }
 
-function getProjectRoot(filePath: string) {
+function getProjectTemplateSourceRoot(filePath: string) {
   const relativePath = normalizeClipperPath(filePath);
   const index = relativePath.indexOf("/file-manager/");
-  return index >= 0
-    ? `${relativePath.slice(0, index)}/file-manager`
-    : relativePath.split("/").slice(0, -1).join("/");
+  if (index < 0) {
+    throw new Error(
+      "Cannot find project file-manager for current composition.",
+    );
+  }
+  return `${relativePath.slice(0, index)}/file-manager/compositions`;
 }
 
 function normalizeClipperPath(filePath: string) {
@@ -553,10 +583,6 @@ async function nextAvailableTemplateFolder(projectRoot: string, slug: string) {
     index += 1;
   }
   return `${projectRoot}/${candidate}`;
-}
-
-function copyText(value: string) {
-  void clipperHost.copyText(value);
 }
 
 function errorMessage(error: unknown) {

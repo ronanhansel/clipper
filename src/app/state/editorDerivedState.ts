@@ -47,6 +47,7 @@ export function useEditorDerivedState({
   currentSceneTime,
   focusPickZoomMarker,
   framePickPreviewPoint,
+  previewTransitionLayers,
   positionPickTranslationMarker,
   project,
   selectedObjectId,
@@ -64,6 +65,7 @@ export function useEditorDerivedState({
   framePickPreviewPoint: ReturnType<
     typeof cameraTranslationToFramePoint
   > | null;
+  previewTransitionLayers?: Scene["transitionLayers"];
   positionPickTranslationMarker: { partId: string; markerId: string } | null;
   project: ProjectManifest;
   selectedObjectId: string | null;
@@ -94,12 +96,19 @@ export function useEditorDerivedState({
     () =>
       deriveFramePreviewRenderModel({
         blankPart: blankPreviewComposition,
+        previewTransitionLayers,
         scene,
         sceneTime: currentSceneTime,
         timelineLayers: timelineLayerState,
         timelineMode,
       }),
-    [currentSceneTime, scene, timelineLayerState, timelineMode],
+    [
+      currentSceneTime,
+      previewTransitionLayers,
+      scene,
+      timelineLayerState,
+      timelineMode,
+    ],
   );
   const renderableScene = previewRenderModel.renderableScene;
   const timeline = previewRenderModel.timeline;

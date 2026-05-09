@@ -88,6 +88,7 @@ export type TransitionSequenceStyle = {
   frameStyle?: Record<string, string | number>;
   aStyle?: Record<string, string | number>;
   bStyle?: Record<string, string | number>;
+  postProcessPasses?: PostProcessPass[];
 };
 
 export type TransitionVisualOverlay = {
@@ -218,6 +219,36 @@ export type MotionMendTransitionOption = {
   paramControls: readonly MotionMendTransitionParamControl[];
 };
 
+export type TransitionEffectNumberParamControl = {
+  key: string;
+  label: string;
+  type: "number";
+  min?: number;
+  max?: number;
+  step?: number;
+  defaultValue: number;
+};
+
+export type TransitionEffectSelectParamControl = {
+  key: string;
+  label: string;
+  type: "select";
+  defaultValue: string;
+  options: readonly { value: string; label: string }[];
+};
+
+export type TransitionEffectBooleanParamControl = {
+  key: string;
+  label: string;
+  type: "boolean";
+  defaultValue: boolean;
+};
+
+export type TransitionEffectParamControl =
+  | TransitionEffectNumberParamControl
+  | TransitionEffectSelectParamControl
+  | TransitionEffectBooleanParamControl;
+
 export type MotionEffectPackage = MotionEffectDefinition & {
   createDefaultBlock(input: {
     id: string;
@@ -266,6 +297,7 @@ export type AdjustmentEffectPackage = AdjustmentEffectDefinition & {
 };
 
 export type TransitionEffectPackage = TransitionEffectDefinition & {
+  paramControls?: readonly TransitionEffectParamControl[];
   createDefaultLayer(input: {
     id: string;
     layerId?: string;
@@ -284,6 +316,7 @@ export type TransitionEffectPackage = TransitionEffectDefinition & {
     layer: TransitionLayer;
     frameRate: number;
     progress: number;
+    frameSize?: { width: number; height: number };
   }): TransitionSequenceStyle;
 };
 

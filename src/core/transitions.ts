@@ -1,5 +1,6 @@
 import { getTransitionEffectPackage } from "./effects/registry";
 import type {
+  PostProcessPass,
   TransitionSequenceStyle,
   TransitionVisualStyle,
 } from "./effects/types";
@@ -51,6 +52,7 @@ export function renderTransitionSequence(
   sceneTime: number,
   layer: TransitionLayer,
   frameRate = defaultTransitionFrameRate,
+  frameSize?: { width: number; height: number },
 ): TransitionSequenceStyle {
   const progress = getTransitionProgress(sceneTime, layer);
   return (
@@ -59,8 +61,25 @@ export function renderTransitionSequence(
       layer,
       frameRate,
       progress,
+      frameSize,
     }) ?? defaultTransitionSequenceStyle(progress)
   );
+}
+
+export function getTransitionPostProcessPasses(
+  sceneTime: number,
+  layer: TransitionLayer | null | undefined,
+  frameRate = defaultTransitionFrameRate,
+  frameSize?: { width: number; height: number },
+): PostProcessPass[] {
+  if (!layer) return [];
+  const sequence = renderTransitionSequence(
+    sceneTime,
+    layer,
+    frameRate,
+    frameSize,
+  );
+  return sequence.postProcessPasses ?? [];
 }
 
 export function getTransitionFinishTime(layer: TransitionLayer) {

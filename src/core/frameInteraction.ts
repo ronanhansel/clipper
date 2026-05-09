@@ -8,6 +8,7 @@ import { evaluateFrameObject } from "../render-engine/renderRuntime";
 import {
   FRAME_HEIGHT,
   FRAME_WIDTH,
+  type BackgroundLayer,
   type Bounds,
   type FrameObject,
   type Part,
@@ -68,6 +69,52 @@ export function selectionObjectFromFrameObject(
     bounds: object.bounds,
     type: object.type,
   };
+}
+
+export function selectionObjectFromBackgroundLayer(
+  background: BackgroundLayer,
+): SelectionPayload["objects"][number] {
+  return {
+    id: background.id,
+    name: "Background",
+    selector: `[data-layer-id="${background.id}"]`,
+    bounds: getBackgroundLayerBounds(background),
+    type: "background",
+  };
+}
+
+export function frameObjectFromBackgroundLayer(
+  background: BackgroundLayer,
+): FrameObject {
+  return {
+    id: background.id,
+    name: "Background",
+    type: "rect",
+    selector: `[data-layer-id="${background.id}"]`,
+    bounds: getBackgroundLayerBounds(background),
+    style: background.style,
+    hidden: background.hidden,
+    locked: background.locked,
+    animations: background.animations,
+  };
+}
+
+function getBackgroundLayerBounds(background: BackgroundLayer): Bounds {
+  if (!background.stretchToElements || background.elements.length === 0)
+    return { x: 0, y: 0, width: FRAME_WIDTH, height: FRAME_HEIGHT };
+
+  const bounds = background.elements.map((element) => element.bounds);
+  const left = Math.min(0, ...bounds.map((item) => item.x));
+  const top = Math.min(0, ...bounds.map((item) => item.y));
+  const right = Math.max(
+    FRAME_WIDTH,
+    ...bounds.map((item) => item.x + item.width),
+  );
+  const bottom = Math.max(
+    FRAME_HEIGHT,
+    ...bounds.map((item) => item.y + item.height),
+  );
+  return { x: left, y: top, width: right - left, height: bottom - top };
 }
 
 export function getBoundsUnion(bounds: Bounds[]): Bounds {

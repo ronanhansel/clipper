@@ -26,7 +26,8 @@ import {
   addAnimationGraphPresetGroupToGraph,
   animationGraphPresets,
 } from "../../core/animations/presets";
-import { roundTenth } from "../../core/math";
+import { roundTenth, roundTwo } from "../../core/math";
+import { frameObjectFromBackgroundLayer } from "../../core/frameInteraction";
 import { formatTime, getTimelineTicks } from "../../core/timeline";
 import {
   getAnimationGraphTemporalStart,
@@ -34,7 +35,9 @@ import {
 } from "../../core/animationGraphSequencing";
 import { expandAnimationGraphGroups } from "../../core/animationGraphGroups";
 import {
+  canConnectBackgroundGraphNodeRoles,
   canConnectSocketTypes,
+  getBackgroundGraphNodeRole,
   getComposition3dNodeKindFromPackageId,
   getComposition3dSocketDefinition,
   graphSocketColors,
@@ -98,7 +101,18 @@ type Props = {
 export type GraphNode = {
   id: string;
   label: string;
-  kind: "layer" | "animation" | "time" | "split" | "group" | "out";
+  kind:
+    | "layer"
+    | "animation"
+    | "time"
+    | "split"
+    | "group"
+    | "out"
+    | "bgSolid"
+    | "bgGradient"
+    | "bgPattern"
+    | "bg3d"
+    | "oscillate";
   x: number;
   y: number;
   width: number;
@@ -108,6 +122,11 @@ export type GraphNode = {
 type CustomNodeKind =
   | "time"
   | "split"
+  | "bgSolid"
+  | "bgGradient"
+  | "bgPattern"
+  | "bg3d"
+  | "oscillate"
   | (typeof animationDefinitions)[number]["property"];
 type HoverConnector = {
   nodeId: string;
@@ -483,6 +502,7 @@ export const ComposeAnimationGraphPanel = memo(
     const projectGraphRef = useRef<AnimationGraphState | undefined>(undefined);
     const graphRef = useRef<AnimationGraphState | undefined>(undefined);
     const displayGraphRef = useRef<AnimationGraphState | undefined>(undefined);
+    const pendingGraphSyncRef = useRef<AnimationGraphState | null>(null);
     const nodesRef = useRef<GraphNode[]>([]);
     const selectedObjectsRef = useRef<FrameObject[]>([]);
     const viewInitializedRef = useRef(false);
@@ -552,20 +572,40 @@ export const ComposeAnimationGraphPanel = memo(
       onScrubEnd,
     });
     const isComposition3d = part?.renderMode === "webgl";
+    const isBackgroundGraph =
+      !isComposition3d &&
+      Boolean(
+        part &&
+        selectedObjectIds.length === 1 &&
+        selectedObjectIds[0] === part.background.id,
+      );
     const projectGraph = isComposition3d
       ? part?.composition3dGraph
-      : part?.animationGraph;
+      : isBackgroundGraph
+        ? part?.bgGraph
+        : part?.animationGraph;
     const graph = optimisticGraph ?? projectGraph;
-    const selectableObjects = [
-      ...(part?.background.elements ?? []),
-      ...(part?.objects ?? []),
-    ];
+    const selectableObjects = part
+      ? [
+          frameObjectFromBackgroundLayer(part.background),
+          ...part.background.elements,
+          ...part.objects,
+        ]
+      : [];
     const selectedObjects = selectedObjectIds
       .map((id) => selectableObjects.find((object) => object.id === id))
       .filter((object): object is FrameObject => Boolean(object));
     const graphViewportKey =
       selectedObjectIds.length > 0 ? selectedObjectIds.join("|") : "__empty__";
-    const graphInstanceKey = `${part?.id ?? "__none__"}:${isComposition3d ? "composition3d" : "composition2d"}:${graphViewportKey}`;
+    const graphMode: GraphCompositionMode = isComposition3d
+      ? "composition3d"
+      : isBackgroundGraph
+        ? "background"
+        : "composition2d";
+    const customNodeScopeKey = isBackgroundGraph
+      ? "background"
+      : graphViewportKey;
+    const graphInstanceKey = `${part?.id ?? "__none__"}:${isComposition3d ? "composition3d" : isBackgroundGraph ? "background" : "composition2d"}:${graphViewportKey}`;
     const hasSelectedGraph = isComposition3d || selectedObjects.length > 0;
     const nodes = hasSelectedGraph
       ? isComposition3d
@@ -611,6 +651,7 @@ export const ComposeAnimationGraphPanel = memo(
 
     useLayoutEffect(() => {
       setOptimisticGraph(null);
+      pendingGraphSyncRef.current = null;
       viewInitializedRef.current = false;
       selectedGraphNodeIdRef.current = null;
       setSelectedGraphNodeId(null);
@@ -661,14 +702,17 @@ export const ComposeAnimationGraphPanel = memo(
     );
 
     useEffect(() => {
-      if (!optimisticGraph || !projectGraph) {
-        projectGraphRef.current = projectGraph;
-        return;
+      if (projectGraphRef.current !== projectGraph) {
+        const pendingGraph = pendingGraphSyncRef.current;
+        if (!pendingGraph) {
+          setOptimisticGraph(null);
+        } else if (arePersistedGraphsEqual(projectGraph, pendingGraph)) {
+          pendingGraphSyncRef.current = null;
+          setOptimisticGraph(null);
+        }
       }
-      if (JSON.stringify(optimisticGraph) === JSON.stringify(projectGraph))
-        setOptimisticGraph(null);
       projectGraphRef.current = projectGraph;
-    }, [optimisticGraph, projectGraph]);
+    }, [projectGraph]);
 
     useLayoutEffect(() => {
       draw();
@@ -942,7 +986,7 @@ export const ComposeAnimationGraphPanel = memo(
           graphScale,
           displayGraphRef.current,
           selectedObjects,
-          isComposition3d ? "composition3d" : "composition2d",
+          graphMode,
         );
         updateHover(target?.nodeId ?? null, null);
         scheduleDraw();
@@ -1124,7 +1168,7 @@ export const ComposeAnimationGraphPanel = memo(
           customNodes: materializeGraphNodeDefinitions(
             nodesRef.current,
             graph?.customNodes,
-            graphViewportKey,
+            customNodeScopeKey,
           ),
           groups: graph?.groups,
           parameters: graph?.parameters,
@@ -1236,7 +1280,7 @@ export const ComposeAnimationGraphPanel = memo(
           customNodes: materializeGraphNodeDefinitions(
             nodesRef.current,
             graph?.customNodes,
-            graphViewportKey,
+            customNodeScopeKey,
           ),
           groups: graph?.groups,
           parameters: graph?.parameters,
@@ -1268,7 +1312,7 @@ export const ComposeAnimationGraphPanel = memo(
           graphScale,
           displayGraphRef.current,
           selectedObjects,
-          isComposition3d ? "composition3d" : "composition2d",
+          graphMode,
         );
         if (target && target.nodeId !== drag.fromNodeId) {
           const edge = createEdge(
@@ -1284,7 +1328,7 @@ export const ComposeAnimationGraphPanel = memo(
               selectedObjects,
             ),
             nodesRef.current,
-            isComposition3d ? "composition3d" : "composition2d",
+            graphMode,
           );
           commitGraphUpdate((graph) => ({
             nodes: {
@@ -1298,7 +1342,7 @@ export const ComposeAnimationGraphPanel = memo(
             customNodes: materializeGraphNodeDefinitions(
               nodesRef.current,
               graph?.customNodes,
-              graphViewportKey,
+              customNodeScopeKey,
             ),
             groups: graph?.groups,
             parameters: graph?.parameters,
@@ -1410,6 +1454,7 @@ export const ComposeAnimationGraphPanel = memo(
     ) {
       const nextGraph = stripGraphViewportState(updater(graphRef.current));
       graphRef.current = nextGraph;
+      pendingGraphSyncRef.current = nextGraph;
       nodesRef.current = isComposition3d
         ? buildComposition3dGraphNodes(
             nextGraph,
@@ -1438,7 +1483,7 @@ export const ComposeAnimationGraphPanel = memo(
           materializeGraphNodeDefinitions(
             nodesRef.current,
             graph?.customNodes,
-            graphViewportKey,
+            customNodeScopeKey,
           ),
           nodeId,
           key,
@@ -1497,7 +1542,7 @@ export const ComposeAnimationGraphPanel = memo(
           customNodes: materializeGraphNodeDefinitions(
             nodesRef.current,
             graph?.customNodes,
-            graphViewportKey,
+            customNodeScopeKey,
           ),
           groups: graph?.groups,
           parameters: graph?.parameters,
@@ -1524,7 +1569,7 @@ export const ComposeAnimationGraphPanel = memo(
         customNodes: materializeGraphNodeDefinitions(
           nodesRef.current,
           graph?.customNodes,
-          graphViewportKey,
+          customNodeScopeKey,
         ),
         groups: graph?.groups,
         parameters: graph?.parameters,
@@ -1648,7 +1693,7 @@ export const ComposeAnimationGraphPanel = memo(
         customNodes: materializeGraphNodeDefinitions(
           nodesRef.current,
           graph?.customNodes,
-          graphViewportKey,
+          customNodeScopeKey,
         ),
         groups: {
           ...(graph?.groups ?? {}),
@@ -1723,21 +1768,94 @@ export const ComposeAnimationGraphPanel = memo(
                     ? [{ label: "Paste", action: () => pasteGraphNodes() }]
                     : []),
                   {
-                    label: "Time",
+                    label: "Animate",
                     children: [
                       { label: "Time", action: () => addCustomNode("time") },
-                      { label: "Split", action: () => addCustomNode("split") },
+                      ...(isBackgroundGraph
+                        ? [
+                            {
+                              label: "Oscillate",
+                              action: () => addCustomNode("oscillate"),
+                            },
+                          ]
+                        : [
+                            {
+                              label: "Split",
+                              action: () => addCustomNode("split"),
+                            },
+                          ]),
                     ],
                   },
-                  ...getAnimationDefinitionCategories().map((category) => ({
-                    label: category,
-                    children: animationDefinitions
-                      .filter((definition) => definition.category === category)
-                      .map((definition) => ({
-                        label: definition.label,
-                        action: () => addCustomNode(definition.property),
-                      })),
-                  })),
+                  ...(isBackgroundGraph
+                    ? [
+                        {
+                          label: "2D",
+                          children: [
+                            {
+                              label: "Solid Color",
+                              action: () => addCustomNode("bgSolid"),
+                            },
+                            {
+                              label: "Gradient",
+                              action: () => addCustomNode("bgGradient"),
+                            },
+                            {
+                              label: "Pattern",
+                              action: () => addCustomNode("bgPattern"),
+                            },
+                          ],
+                        },
+                        {
+                          label: "3D",
+                          children: [
+                            {
+                              label: "Waves",
+                              action: () => addBg3dPreset("waves", "Waves"),
+                            },
+                            {
+                              label: "Plane",
+                              action: () => addBg3dPreset("plane", "Plane"),
+                            },
+                            {
+                              label: "Particles",
+                              action: () =>
+                                addBg3dPreset("particles", "Particles"),
+                            },
+                            {
+                              label: "Aurora",
+                              action: () => addBg3dPreset("aurora", "Aurora"),
+                            },
+                            {
+                              label: "Ribbons",
+                              action: () => addBg3dPreset("ribbons", "Ribbons"),
+                            },
+                            {
+                              label: "Orbital",
+                              action: () => addBg3dPreset("orbital", "Orbital"),
+                            },
+                            {
+                              label: "Grid Tunnel",
+                              action: () =>
+                                addBg3dPreset("gridTunnel", "Grid Tunnel"),
+                            },
+                            {
+                              label: "Caustic",
+                              action: () => addBg3dPreset("caustic", "Caustic"),
+                            },
+                          ],
+                        },
+                      ]
+                    : getAnimationDefinitionCategories().map((category) => ({
+                        label: category,
+                        children: animationDefinitions
+                          .filter(
+                            (definition) => definition.category === category,
+                          )
+                          .map((definition) => ({
+                            label: definition.label,
+                            action: () => addCustomNode(definition.property),
+                          })),
+                      }))),
                 ];
       setContextMenu({
         x: event.clientX,
@@ -1746,30 +1864,98 @@ export const ComposeAnimationGraphPanel = memo(
       });
     }
 
-    function addCustomNode(kind: CustomNodeKind) {
+    function addBg3dPreset(preset: string, label: string) {
+      addCustomNode("bg3d", {
+        label,
+        details: {
+          preset,
+          color: preset === "caustic" ? "#6ee7ff" : "#5b7cff",
+          accent: preset === "aurora" ? "#7cffc7" : "#9fd0ff",
+          speed: "1",
+          intensity: preset === "particles" ? "1.4" : "1",
+          wireframe: preset === "particles" ? "0" : "1",
+        },
+      });
+    }
+
+    function addCustomNode(
+      kind: CustomNodeKind,
+      override?: { label?: string; details?: Record<string, string> },
+    ) {
       const point = contextMenuPointRef.current;
       if (!point) return;
       const id = `custom:${kind}:${Date.now().toString(36)}`;
       const definition = getAnimationDefinition(kind);
-      const node: AnimationGraphCustomNode =
-        kind === "time"
+      const bgDefaults: Record<string, AnimationGraphCustomNode> = {
+        bgSolid: {
+          kind: "bgSolid",
+          label: "Solid Color",
+          scopeKey: "background",
+          details: { color: "#050505" },
+        },
+        bgGradient: {
+          kind: "bgGradient",
+          label: "Gradient",
+          scopeKey: "background",
+          details: {
+            type: "linear",
+            angle: "135deg",
+            center: "center",
+            stops: "#0b1020 0%, #3949ab 100%",
+          },
+        },
+        bgPattern: {
+          kind: "bgPattern",
+          label: "Pattern",
+          scopeKey: "background",
+          details: {
+            pattern: "dots",
+            color: "rgba(255,255,255,0.18)",
+            base: "transparent",
+            size: "32px",
+          },
+        },
+        bg3d: {
+          kind: "bg3d",
+          label: override?.label ?? "3D Background",
+          scopeKey: "background",
+          details: {
+            preset: "waves",
+            color: "#5b7cff",
+            accent: "#9fd0ff",
+            speed: "1",
+            intensity: "1",
+            wireframe: "1",
+            ...(override?.details ?? {}),
+          },
+        },
+        oscillate: {
+          kind: "oscillate",
+          label: "Oscillate",
+          scopeKey: "background",
+          details: { amount: "1", speed: "1" },
+        },
+      };
+      const node: AnimationGraphCustomNode = bgDefaults[kind]
+        ? bgDefaults[kind]
+        : kind === "time"
           ? {
               kind: "time" as const,
               label: "Time",
-              scopeKey: graphViewportKey,
+              scopeKey: isBackgroundGraph ? "background" : graphViewportKey,
               details: { delay: "0s", duration: "1s", ease: "linear" },
             }
           : kind === "split"
             ? {
                 kind: "split" as const,
                 label: "Split",
-                scopeKey: graphViewportKey,
+                scopeKey: isBackgroundGraph ? "background" : graphViewportKey,
                 details: splitParameterDefaults,
               }
             : {
                 kind: "animation" as const,
                 label: definition?.label ?? formatPropertyLabel(kind),
-                scopeKey: graphViewportKey,
+                scopeKey: isBackgroundGraph ? "background" : graphViewportKey,
                 details: { property: kind },
               };
       commitGraphUpdate((graph) => ({
@@ -1922,7 +2108,7 @@ export const ComposeAnimationGraphPanel = memo(
           customNodes[edge.fromNodeId] = {
             kind: sourceNode.kind,
             label: sourceNode.label,
-            scopeKey: graphViewportKey,
+            scopeKey: customNodeScopeKey,
             details: sourceNode.details,
           };
         }
@@ -1965,7 +2151,7 @@ export const ComposeAnimationGraphPanel = memo(
             [nodeId]: {
               kind: "group",
               label: "Group",
-              scopeKey: graphViewportKey,
+              scopeKey: customNodeScopeKey,
               details: { groupId },
             },
           },
@@ -2037,7 +2223,7 @@ export const ComposeAnimationGraphPanel = memo(
         const restoredCustom = Object.fromEntries(
           Object.entries(group.customNodes ?? {}).map(([id, custom]) => [
             id,
-            { ...custom, scopeKey: graphViewportKey },
+            { ...custom, scopeKey: customNodeScopeKey },
           ]),
         );
         const restoredIds = new Set(Object.keys(restoredNodes));
@@ -2834,6 +3020,11 @@ export function buildGraphNodes(
   canvasHeight = 900,
   graphViewportKey = "__empty__",
 ): GraphNode[] {
+  const isBackgroundViewport =
+    objects.length === 1 && objects[0]?.id === "background";
+  const customNodeScopeKey = isBackgroundViewport
+    ? "background"
+    : graphViewportKey;
   const deletedNodeIds = new Set(graph?.deletedNodeIds ?? []);
   const verticalStackHeight = nodeHeight * 3 + nodeGap * 2;
   const stackStartY = Math.max(
@@ -2910,7 +3101,7 @@ export function buildGraphNodes(
   });
   const derivedNodeIds = new Set(derivedNodes.map((node) => node.id));
   const customNodes = Object.entries(graph?.customNodes ?? {})
-    .filter(([, node]) => node.scopeKey === graphViewportKey)
+    .filter(([, node]) => node.scopeKey === customNodeScopeKey)
     .filter(([id]) => !deletedNodeIds.has(id))
     .filter(([id]) => !derivedNodeIds.has(id))
     .map(([id, node]) => {
@@ -3180,7 +3371,19 @@ function stripGraphViewportState(
   graph: AnimationGraphState,
 ): AnimationGraphState {
   const { viewport: _viewport, viewports: _viewports, ...rest } = graph;
-  return rest;
+  return { ...rest, nodes: roundGraphNodePositions(rest.nodes) };
+}
+
+function arePersistedGraphsEqual(
+  left: AnimationGraphState | undefined | null,
+  right: AnimationGraphState | undefined | null,
+) {
+  return (
+    JSON.stringify(
+      stripGraphViewportState(left ?? { nodes: {}, edges: [] }),
+    ) ===
+    JSON.stringify(stripGraphViewportState(right ?? { nodes: {}, edges: [] }))
+  );
 }
 
 function isEditableKeyboardTarget(target: EventTarget | null) {
@@ -3596,6 +3799,8 @@ function isPermittedGraphEdge(
   if (!from || !to) return false;
   if (mode === "composition3d")
     return isPermittedComposition3dGraphEdge(from, to, edge, existingEdges);
+  if (mode === "background")
+    return isPermittedBackgroundGraphEdge(from, to, edge, existingEdges);
   if (from.kind === "animation" && to.kind === "time")
     return !hasDuplicateEffectForTimeNode(from, to.id, existingEdges, nodes);
   if (
@@ -3648,6 +3853,19 @@ function isPermittedComposition3dGraphEdge(
     : canConnectSocketTypes(fromDefinition.output, toDefinition.accepts);
 }
 
+function isPermittedBackgroundGraphEdge(
+  from: GraphNode,
+  to: GraphNode,
+  edge: AnimationGraphEdge,
+  existingEdges: AnimationGraphEdge[],
+) {
+  if (pathExists(edge.toNodeId, edge.fromNodeId, existingEdges)) return false;
+  return canConnectBackgroundGraphNodeRoles(
+    getBackgroundGraphNodeRole(from.kind),
+    getBackgroundGraphNodeRole(to.kind),
+  );
+}
+
 function hasRegisteredGroupOutput(node: GraphNode) {
   return node.details?.registered === "true";
 }
@@ -3678,6 +3896,18 @@ function getGraphEffectKind(node: GraphNode) {
 }
 
 function getGraphCompositionMode(nodes: GraphNode[]): GraphCompositionMode {
+  if (
+    nodes.some(
+      (node) =>
+        node.id === "layer:background" ||
+        node.kind === "bgSolid" ||
+        node.kind === "bgGradient" ||
+        node.kind === "bgPattern" ||
+        node.kind === "bg3d" ||
+        node.kind === "oscillate",
+    )
+  )
+    return "background";
   return nodes.some(
     (node) =>
       node.id === "composition3d:out" ||
@@ -3718,7 +3948,9 @@ function getGraphNodeRenderColors(
   const base = getGraphNodeColors(node.kind);
   if (
     mode !== "composition3d" &&
-    (node.kind === "time" || node.kind === "split") &&
+    (node.kind === "time" ||
+      node.kind === "split" ||
+      node.kind === "oscillate") &&
     temporalRole === "modified"
   )
     return {
@@ -3836,8 +4068,23 @@ function formatPropertyLabel(property: string) {
 }
 function materializeGraphNodes(nodes: GraphNode[]) {
   return Object.fromEntries(
-    nodes.map((node) => [node.id, { x: node.x, y: node.y }]),
+    nodes.map((node) => [node.id, roundGraphNodePosition(node)]),
   );
+}
+
+function roundGraphNodePositions(
+  nodes: AnimationGraphState["nodes"] | undefined,
+) {
+  return Object.fromEntries(
+    Object.entries(nodes ?? {}).map(([id, position]) => [
+      id,
+      roundGraphNodePosition(position),
+    ]),
+  );
+}
+
+function roundGraphNodePosition(position: { x: number; y: number }) {
+  return { x: roundTwo(position.x), y: roundTwo(position.y) };
 }
 
 function materializeGraphNodeDefinitions(
@@ -4881,10 +5128,16 @@ function getDirectTemporalModifier(
   const edge = edges.find(
     (candidate) =>
       candidate.fromNodeId === nodeId &&
-      nodes.find((node) => node.id === candidate.toNodeId)?.kind === "split",
+      ["split", "oscillate"].includes(
+        nodes.find((node) => node.id === candidate.toNodeId)?.kind ?? "",
+      ),
   );
   return edge
-    ? nodes.find((node) => node.id === edge.toNodeId && node.kind === "split")
+    ? nodes.find(
+        (node) =>
+          node.id === edge.toNodeId &&
+          (node.kind === "split" || node.kind === "oscillate"),
+      )
     : undefined;
 }
 
@@ -6402,6 +6655,17 @@ export function getPopoverDetails(
         ],
     );
   }
+  if (
+    node.kind === "bgSolid" ||
+    node.kind === "bgGradient" ||
+    node.kind === "bgPattern" ||
+    node.kind === "bg3d" ||
+    node.kind === "oscillate"
+  ) {
+    return Object.entries(node.details ?? {}).map(
+      ([key, value]) => [key, parameters?.[key] ?? value] as [string, string],
+    );
+  }
   const defaults =
     node.kind === "animation"
       ? getAnimationValueDetails(node)
@@ -6479,6 +6743,197 @@ function getParameterEditorSchema(
       })),
     };
   }
+
+  if (node.kind === "bgSolid")
+    return {
+      width: 220,
+      height: 96,
+      groups: [
+        {
+          id: "solid",
+          fields: [
+            {
+              key: "color",
+              label: "color",
+              value: details[0]?.[1] ?? "#050505",
+              type: "color",
+            },
+          ],
+        },
+      ],
+    };
+  if (node.kind === "bgGradient")
+    return {
+      width: 260,
+      height: 222,
+      groups: [
+        {
+          id: "gradient",
+          fields: [
+            {
+              key: "type",
+              label: "type",
+              value: Object.fromEntries(details).type ?? "linear",
+              options: [
+                { value: "linear", label: "Linear" },
+                { value: "radial", label: "Radial" },
+                { value: "conic", label: "Conic" },
+              ],
+            },
+            {
+              key: "angle",
+              label: "angle",
+              value: Object.fromEntries(details).angle ?? "135deg",
+              type: "text",
+            },
+            {
+              key: "center",
+              label: "center",
+              value: Object.fromEntries(details).center ?? "center",
+              type: "text",
+            },
+            {
+              key: "backgroundSize",
+              label: "bg size",
+              value: Object.fromEntries(details).backgroundSize ?? "140% 140%",
+              type: "text",
+            },
+            {
+              key: "stops",
+              label: "stops",
+              value:
+                Object.fromEntries(details).stops ?? "#0b1020 0%, #3949ab 100%",
+              type: "text",
+            },
+          ],
+        },
+      ],
+    };
+  if (node.kind === "bgPattern")
+    return {
+      width: 260,
+      height: 196,
+      groups: [
+        {
+          id: "pattern",
+          fields: [
+            {
+              key: "pattern",
+              label: "pattern",
+              value: Object.fromEntries(details).pattern ?? "dots",
+              options: [
+                { value: "dots", label: "Dots" },
+                { value: "grid", label: "Grid" },
+                { value: "stripes", label: "Stripes" },
+              ],
+            },
+            {
+              key: "color",
+              label: "color",
+              value:
+                Object.fromEntries(details).color ?? "rgba(255,255,255,0.18)",
+              type: "color",
+            },
+            {
+              key: "base",
+              label: "base",
+              value: Object.fromEntries(details).base ?? "transparent",
+              type: "color",
+            },
+            {
+              key: "size",
+              label: "size",
+              value: Object.fromEntries(details).size ?? "32px",
+              type: "number",
+              unit: "px",
+            },
+          ],
+        },
+      ],
+    };
+  if (node.kind === "bg3d")
+    return {
+      width: 280,
+      height: 238,
+      groups: [
+        {
+          id: "three",
+          label: "3D background",
+          fields: [
+            {
+              key: "preset",
+              label: "preset",
+              value: Object.fromEntries(details).preset ?? "waves",
+              options: [
+                { value: "waves", label: "Waves" },
+                { value: "plane", label: "Plane" },
+                { value: "particles", label: "Particles" },
+                { value: "aurora", label: "Aurora" },
+                { value: "ribbons", label: "Ribbons" },
+                { value: "orbital", label: "Orbital" },
+                { value: "gridTunnel", label: "Grid Tunnel" },
+                { value: "caustic", label: "Caustic" },
+              ],
+            },
+            {
+              key: "color",
+              label: "color",
+              value: Object.fromEntries(details).color ?? "#5b7cff",
+              type: "color",
+            },
+            {
+              key: "accent",
+              label: "accent",
+              value: Object.fromEntries(details).accent ?? "#9fd0ff",
+              type: "color",
+            },
+            {
+              key: "speed",
+              label: "speed",
+              value: Object.fromEntries(details).speed ?? "1",
+            },
+            {
+              key: "intensity",
+              label: "intensity",
+              value: Object.fromEntries(details).intensity ?? "1",
+            },
+            {
+              key: "wireframe",
+              label: "wireframe",
+              value: Object.fromEntries(details).wireframe ?? "1",
+              options: [
+                { value: "1", label: "On" },
+                { value: "0", label: "Off" },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+  if (node.kind === "oscillate")
+    return {
+      width: 220,
+      height: 128,
+      groups: [
+        {
+          id: "osc",
+          fields: [
+            {
+              key: "amount",
+              label: "amount",
+              value: Object.fromEntries(details).amount ?? "1",
+              type: "text",
+            },
+            {
+              key: "speed",
+              label: "speed",
+              value: Object.fromEntries(details).speed ?? "1",
+              type: "text",
+            },
+          ],
+        },
+      ],
+    };
 
   return {
     width: 210,
@@ -6580,6 +7035,8 @@ function getGraphNodeColors(kind: GraphNode["kind"]) {
       border: nodeColors.animationBorder,
     };
   if (kind === "time")
+    return { background: nodeColors.timeBg, border: nodeColors.timeBorder };
+  if (kind === "oscillate")
     return { background: nodeColors.timeBg, border: nodeColors.timeBorder };
   if (kind === "split")
     return { background: nodeColors.splitBg, border: nodeColors.splitBorder };

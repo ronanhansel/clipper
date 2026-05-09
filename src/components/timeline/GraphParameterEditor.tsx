@@ -7,12 +7,13 @@ import {
   SelectValue,
 } from "../ui/select";
 import { Input } from "../ui/input";
+import { ColorSelector } from "../ColorSelector";
 
 export type GraphParameterEditorField = {
   key: string;
   label: string;
   value: string;
-  type?: "number" | "text";
+  type?: "number" | "text" | "color";
   unit?: string;
   options?: readonly { value: string; label: string }[];
 };
@@ -145,6 +146,15 @@ function GraphParameterInlineField({
         inline
       />
     );
+  if (field.type === "color")
+    return (
+      <GraphParameterColorField
+        field={field}
+        variant={variant}
+        onChange={onChange}
+        inline
+      />
+    );
   const split = splitParameterUnit(field.value, field.unit);
   const displayValue = getNumberFieldDisplayValue(field, split.value);
   const isTimePopup = variant === "timePopup";
@@ -232,6 +242,14 @@ function GraphParameterBoxField({
         onChange={onChange}
       />
     );
+  if (field.type === "color")
+    return (
+      <GraphParameterColorField
+        field={field}
+        variant={variant}
+        onChange={onChange}
+      />
+    );
   const split = splitParameterUnit(field.value, field.unit);
   const displayValue = getNumberFieldDisplayValue(field, split.value);
   return (
@@ -287,6 +305,56 @@ function GraphParameterTextField({
         onChange(field.key, (event.target as HTMLInputElement).value)
       }
       onChange={(event) => onChange(field.key, event.target.value)}
+    />
+  );
+  if (inline) {
+    return (
+      <label
+        className={
+          isTimePopup
+            ? "grid grid-cols-[76px_1fr] items-center gap-2"
+            : "grid grid-cols-[78px_1fr] items-center gap-2"
+        }
+      >
+        <span
+          className={
+            isTimePopup
+              ? "text-[11px] font-extrabold leading-none tracking-[-0.02em] text-[#8e97a7]"
+              : "text-[10px] font-bold text-[#7f8794]"
+          }
+        >
+          {field.label}
+        </span>
+        {control}
+      </label>
+    );
+  }
+  return (
+    <label className="grid gap-1">
+      <span className="text-[9px] font-bold text-[#697280]">{field.label}</span>
+      {control}
+    </label>
+  );
+}
+
+function GraphParameterColorField({
+  field,
+  variant,
+  onChange,
+  inline = false,
+}: {
+  field: GraphParameterEditorField;
+  variant: GraphParameterEditorVariant;
+  onChange: (key: string, value: string) => void;
+  inline?: boolean;
+}) {
+  const isTimePopup = variant === "timePopup";
+  const control = (
+    <ColorSelector
+      value={field.value}
+      variant="compact"
+      onChange={(value) => onChange(field.key, value)}
+      onPreview={(value) => onChange(field.key, value)}
     />
   );
   if (inline) {

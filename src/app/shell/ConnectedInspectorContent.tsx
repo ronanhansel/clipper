@@ -113,6 +113,11 @@ type ConnectedInspectorContentProps = {
     layerId: string,
     updater: (layer: TransitionLayer) => TransitionLayer,
   ) => void;
+  onPreviewTransitionLayer: (
+    layerId: string,
+    updater: (layer: TransitionLayer) => TransitionLayer,
+  ) => void;
+  onClearTransitionPreview: () => void;
   onDeleteTransitionLayer: (layerId: string) => void;
   onStartAdjustmentPointPick: (
     layerId: string,
@@ -187,6 +192,8 @@ export function ConnectedInspectorContent({
   onClearAdjustmentPreview,
   onDeleteAdjustmentLayer,
   onUpdateTransitionLayer,
+  onPreviewTransitionLayer,
+  onClearTransitionPreview,
   onDeleteTransitionLayer,
   onStartAdjustmentPointPick,
   onUpdateSelectedPartDuration,
@@ -317,6 +324,10 @@ export function ConnectedInspectorContent({
         onChange={(updater) =>
           onUpdateTransitionLayer(selectedTransitionLayer.id, updater)
         }
+        onPreviewLayer={(updater) =>
+          onPreviewTransitionLayer(selectedTransitionLayer.id, updater)
+        }
+        onClearPreview={onClearTransitionPreview}
         onDelete={() => onDeleteTransitionLayer(selectedTransitionLayer.id)}
       />
     );

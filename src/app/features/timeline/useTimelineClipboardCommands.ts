@@ -92,7 +92,10 @@ type AdjustmentMaskParamKeys = {
   feather: string;
 };
 
-const adjustmentMaskParamKeysByEffectId: Record<string, AdjustmentMaskParamKeys> = {
+const adjustmentMaskParamKeysByEffectId: Record<
+  string,
+  AdjustmentMaskParamKeys
+> = {
   "clipper.adjustment.filmEmulation": {
     enabled: "useMask",
     preview: "maskPreview",
@@ -1554,7 +1557,9 @@ export function useTimelineClipboardCommands({
             deleteTimelineClipboardNodes(menuClipboard);
           },
         },
-        hasCopiedMask ? { label: "Paste", children: [pasteItem, pasteMaskItem] } : pasteItem,
+        hasCopiedMask
+          ? { label: "Paste", children: [pasteItem, pasteMaskItem] }
+          : pasteItem,
         {
           label: "Paste Attributes",
           action: () => {

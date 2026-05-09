@@ -76,7 +76,7 @@ Logic lives in package `logic.ts` or direct package declaration, never in compon
 
 - Motion: `createDefaultBlock(input)` creates `MotionBlock`; optional `mendTransitionOptions` declares mending UI/options.
 - Adjustment: `applySceneTime(input)` remaps scene time; `applyVisualStyle(input)` returns CSS-safe filters/overlays; `collectPostProcessPasses(input)` returns post-process pass data; `getDisplayElapsed(input)` controls display time; `validate(layer)` returns error string or `null`; `timeSensitive` and `requiresLiveDomPostProcessSource` flag runtime behavior.
-- Transition: `applyVisualStyle(input)` returns frame/camera/overlay style; `renderSequence(input)` returns A/B sequence styles.
+- Transition: `applyVisualStyle(input)` returns frame/camera/overlay style; `renderSequence(input)` returns A/B sequence styles and may return shared WebGL `postProcessPasses` for full-frame transition composites.
 - Hooks receive typed scene/layer/frame inputs and return data, not renderer instances or component nodes.
 - Preview and export must consume same package data path; if parity is impossible, validation must reject unsupported behavior.
 
@@ -153,13 +153,13 @@ Category declaration timeline metadata currently supports:
 
 ## Inspector Controls
 
-`src/components/inspector/EffectControls.tsx` renders manifest-declared adjustment controls. It owns generic rendering for number, select, boolean, point controls, sections, inline groups, inline toggles, visibility, disabled reasons, and preview scrubbing.
+`src/components/inspector/EffectControls.tsx` renders manifest-declared adjustment controls. It owns generic rendering for number, select, boolean, point controls, sections, inline groups, inline toggles, visibility, disabled reasons, and preview scrubbing. `TransitionInspector` renders manifest-declared transition `paramControls` for number/select/boolean controls alongside legacy name/duration/ease fields.
 
 - Use `EffectControls` or extend its shared schema for new generic controls.
 - Keep inspector panes compact: group related parameters into named popover sections and pair same-kind parameters with `inlineGroup` instead of adding long single-column rows. Never render grouped controls as inline cards inside the inspector.
 - For primary-plus-advanced layouts, keep the primary field in the main inspector row and attach the popover with `inlineSectionTrigger`; put secondary controls inside that section, using `disabledWhen` instead of hiding controls when a local enable toggle is off.
 - Do not reintroduce adjustment-specific control rendering inside `InspectorPanels.tsx`.
-- Motion and transition inspectors still contain legacy field layouts for saved marker/layer models. Future motion/transition control work should add package-level schemas first, then reuse shared control primitives.
+- Motion inspectors still contain legacy field layouts for saved marker/layer models. Transition packages can declare `paramControls` for package-owned parameters; future transition point/section controls should extend the shared schema first, then reuse shared control primitives.
 
 ## UI And Layout Rules
 
@@ -193,14 +193,16 @@ Adjustment example:
 Transition example:
 
 1. Add manifest/default params.
-2. Add `applyVisualStyle()` or `renderSequence()`.
-3. Register package and test timeline/export behavior.
+2. Add `paramControls` for configurable transition params when needed.
+3. Add `applyVisualStyle()` or `renderSequence()`.
+4. If transition needs WebGL, have `renderSequence()` emit `postProcessPasses` and register matching post-process package.
+5. Register package and test timeline/export behavior.
 
 Post-process example:
 
 1. Define pass data and renderer/export bridge.
 2. Register `PostProcessPackage` by `kind`.
-3. Have adjustment logic emit passes with matching `kind`.
+3. Have adjustment logic emit passes with matching `kind`, or transition `renderSequence()` emit matching passes for transition composites.
 
 Limits:
 

@@ -40,6 +40,7 @@ import {
 import type {
   AdjustmentEffectPointControl,
   MotionMendTransitionOption,
+  TransitionEffectParamControl,
 } from "../../core/effects/types";
 import { getMotionMarkerViews } from "../../core/motionEffects";
 import { cameraTranslationToFramePoint } from "../../core/camera";
@@ -1560,15 +1561,31 @@ export function EmptyInspector() {
 export function TransitionInspector({
   layer,
   onChange,
+  onPreviewLayer,
+  onClearPreview,
   onDelete,
 }: {
   layer: TransitionLayer;
   onChange: (updater: (layer: TransitionLayer) => TransitionLayer) => void;
+  onPreviewLayer?: (updater: (layer: TransitionLayer) => TransitionLayer) => void;
+  onClearPreview?: () => void;
   onDelete: () => void;
 }) {
   const effect = getTransitionEffectPackage(layer.effect.effectId);
   const ease = (layer.effect.params?.ease as MotionEase) ?? "easeInOut";
   const markerTime = getTransitionMarkerTime(layer);
+
+  function getParamValue(control: TransitionEffectParamControl) {
+    const value = layer.effect.params?.[control.key];
+    if (control.type === "boolean")
+      return typeof value === "boolean" ? value : control.defaultValue;
+    if (control.type === "select")
+      return typeof value === "string" ? value : control.defaultValue;
+    if (control.key === "seed") return getTransitionSeedValue(control, value);
+    return typeof value === "number" && Number.isFinite(value)
+      ? value
+      : control.defaultValue;
+  }
 
   function updateName(value: string) {
     onChange((current) => ({ ...current, name: value }));
@@ -1586,6 +1603,94 @@ export function TransitionInspector({
         params: { ...current.effect.params, ease: easeValue },
       },
     }));
+  }
+
+  function updateParam(control: TransitionEffectParamControl, value: unknown) {
+    const nextValue =
+      control.type === "number"
+        ? getTransitionParamNumericValue(control, String(value))
+        : control.type === "boolean"
+          ? value === true
+          : String(value);
+    onChange((current) => ({
+      ...current,
+      effect: {
+        ...current.effect,
+        params: { ...current.effect.params, [control.key]: nextValue },
+      },
+    }));
+  }
+
+  function previewParam(
+    control: Extract<TransitionEffectParamControl, { type: "number" }>,
+    value: number,
+  ) {
+    const nextValue = getTransitionParamNumericValue(control, String(value));
+    onPreviewLayer?.((current) => ({
+      ...current,
+      effect: {
+        ...current.effect,
+        params: { ...current.effect.params, [control.key]: nextValue },
+      },
+    }));
+  }
+
+  function renderParamControl(control: TransitionEffectParamControl) {
+    if (control.type === "boolean") {
+      return (
+        <label
+          className="flex cursor-pointer items-center gap-3 rounded-[10px] border border-[#2d313b] bg-[#171920] p-3 text-sm font-bold text-[#dfe2ea] transition hover:border-[var(--clipper-accent)] hover:bg-[#20232c]"
+          key={control.key}
+        >
+          <Checkbox
+            checked={Boolean(getParamValue(control))}
+            onCheckedChange={(checked) =>
+              updateParam(control, checked === true)
+            }
+          />
+          <span>{control.label}</span>
+        </label>
+      );
+    }
+
+    return (
+      <label className={`grid gap-1.5 ${mutedCaps}`} key={control.key}>
+        {control.label}
+        {control.type === "select" ? (
+          <Select
+            value={String(getParamValue(control))}
+            onValueChange={(value) => updateParam(control, value)}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                {control.options.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        ) : (
+          <Input
+            type="number"
+            min={control.min}
+            max={control.max}
+            step={control.step}
+            value={getParamValue(control) as number}
+            resetValue={control.defaultValue}
+            numberScrubMode="preview"
+            numberScrubCommitThrottleMs={16}
+            onChange={(event) => updateParam(control, event.target.value)}
+            onNumberScrubPreview={(value) => previewParam(control, value)}
+            onNumberScrubEnd={onClearPreview}
+          />
+        )}
+      </label>
+    );
   }
 
   return (
@@ -1663,6 +1768,23 @@ export function TransitionInspector({
           </SelectContent>
         </Select>
       </label>
+      {effect?.paramControls?.length ? (
+        <>
+          <div className="flex items-center justify-between">
+            <span className="text-[12px] font-medium text-[#9b9da7]">
+              Effect Settings
+            </span>
+            {effect.timelineTags?.length ? (
+              <span className="rounded-[3px] border border-white/20 bg-black/24 px-1.5 py-1 text-[9px] font-black uppercase leading-none tracking-[0.12em] text-white/80">
+                {effect.timelineTags[0]?.label}
+              </span>
+            ) : null}
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            {effect.paramControls.map((control) => renderParamControl(control))}
+          </div>
+        </>
+      ) : null}
       <button
         className="flex items-center justify-center gap-2 rounded-[10px] border border-[#3b2a2a] bg-[#231516] px-[13px] py-[9px] text-sm font-medium text-[#ffb4b4] transition hover:border-[#6b3838] hover:bg-[#301b1d]"
         onClick={onDelete}
@@ -1672,6 +1794,37 @@ export function TransitionInspector({
       </button>
     </div>
   );
+}
+
+function getTransitionParamNumericValue(
+  control: Extract<TransitionEffectParamControl, { type: "number" }>,
+  value: string,
+) {
+  const fallback = control.defaultValue;
+  let numeric = Number(value);
+  if (!Number.isFinite(numeric)) numeric = fallback;
+  if (typeof control.min === "number") numeric = Math.max(control.min, numeric);
+  if (typeof control.max === "number") numeric = Math.min(control.max, numeric);
+  if (control.step && Number.isInteger(control.step)) numeric = Math.round(numeric);
+  return numeric;
+}
+
+function getTransitionSeedValue(
+  control: TransitionEffectParamControl,
+  value: unknown,
+) {
+  if (control.type !== "number") return control.defaultValue;
+  if (typeof value !== "number" || !Number.isFinite(value))
+    return control.defaultValue;
+  if (
+    control.step &&
+    Number.isInteger(control.step) &&
+    Number.isInteger(control.defaultValue) &&
+    value > 0 &&
+    value < 1
+  )
+    return Math.round(value * 100);
+  return value;
 }
 
 export function MotionInspector({

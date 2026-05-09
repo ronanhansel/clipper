@@ -240,6 +240,66 @@ describe("frame preview render model", () => {
     ).toEqual([["a", 0.5]]);
   });
 
+  it("isolates compose preview from scene adjustment layers", () => {
+    const scene: Scene = {
+      id: "scene",
+      compositions: [
+        {
+          id: "a",
+          filePath: "a.ts",
+          start: 0,
+          duration: 2,
+          frame,
+          background,
+          objects: [],
+          snapshot: [],
+          motionMarkers: [],
+        },
+        {
+          id: "b",
+          filePath: "b.ts",
+          start: 2,
+          duration: 2,
+          frame,
+          background,
+          objects: [],
+          snapshot: [],
+          motionMarkers: [],
+        },
+      ],
+      adjustmentLayers: [
+        {
+          id: "film",
+          layerId: "adjust",
+          name: "Film Emulation",
+          start: 0,
+          duration: 4,
+          effect: { effectId: "clipper.adjustment.filmEmulation", params: {} },
+        },
+        {
+          id: "freeze",
+          layerId: "adjust",
+          name: "Freeze",
+          start: 0,
+          duration: 4,
+          effect: { effectId: "clipper.adjustment.freezeFrame", params: {} },
+        },
+      ],
+    };
+
+    const model = deriveFramePreviewRenderModel({
+      blankPart,
+      scene,
+      sceneTime: 3,
+      timelineMode: "compose",
+    });
+
+    expect(model.visibleAdjustmentLayers).toEqual([]);
+    expect(model.adjustedSceneTime).toBe(3);
+    expect(model.activeTimelinePart?.id).toBe("b");
+    expect(model.previewTime).toBe(1);
+  });
+
   it("applies clip trim starts to active preview timing", () => {
     const scene: Scene = {
       id: "scene",

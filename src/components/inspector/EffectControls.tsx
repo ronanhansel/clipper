@@ -367,11 +367,7 @@ export function EffectControls({
     });
   }
 
-  return (
-    <>
-      {renderSectionItems(orderedItems)}
-    </>
-  );
+  return <>{renderSectionItems(orderedItems)}</>;
 
   function renderSectionPopoverButton(sectionKey: string) {
     const section = sectionMap.get(sectionKey);

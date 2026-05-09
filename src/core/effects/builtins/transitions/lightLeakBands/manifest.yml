@@ -1,0 +1,59 @@
+id: clipper.transition.lightLeakBands
+category: transition
+name: Light Leak Bands
+label: Light Leak Bands
+group: Practical
+tags: ["blocksOverlap"]
+timelineTags: [{ "kind": "text", "label": "GL", "title": "WebGL post-process" }]
+defaultDuration: 1.5
+defaultParams: { "ease": "linear", "transitionTime": 1.5, "intensity": 0.78, "softness": 0.34, "bandCount": 4, "drift": 0.62, "warmth": 0.74, "flicker": 0.22, "seed": 53 }
+paramControls:
+  - key: intensity
+    label: Intensity
+    type: number
+    min: 0
+    max: 1
+    step: 0.01
+    defaultValue: 0.78
+  - key: softness
+    label: Softness
+    type: number
+    min: 0.02
+    max: 1
+    step: 0.01
+    defaultValue: 0.34
+  - key: bandCount
+    label: Light Scratches
+    type: number
+    min: 1
+    max: 12
+    step: 1
+    defaultValue: 4
+  - key: drift
+    label: Swoop Drift
+    type: number
+    min: -2
+    max: 2
+    step: 0.01
+    defaultValue: 0.62
+  - key: warmth
+    label: Warmth
+    type: number
+    min: -1
+    max: 1
+    step: 0.01
+    defaultValue: 0.74
+  - key: flicker
+    label: Flicker
+    type: number
+    min: 0
+    max: 1
+    step: 0.01
+    defaultValue: 0.22
+  - key: seed
+    label: Seed
+    type: number
+    min: 0
+    max: 1000
+    step: 1
+    defaultValue: 53

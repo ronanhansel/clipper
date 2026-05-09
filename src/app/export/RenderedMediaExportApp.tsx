@@ -43,6 +43,10 @@ import {
   deriveFramePreviewRenderModel,
   getFramePreviewTimelineLayers,
 } from "../state/framePreviewRenderModel";
+import {
+  getActiveTransitionLayers,
+  getTransitionPostProcessPasses,
+} from "../../core/transitions";
 
 type ExportFrameRequest = {
   project: ProjectManifest;
@@ -565,19 +569,27 @@ export function getExportPostProcessPasses(
     ),
     timelineMode: "composition",
   });
-  return buildAdjustmentExecutionPlan(
+  const transitionPasses = getTransitionPostProcessPasses(
     request.sceneTime,
-    previewModel.visibleAdjustmentLayers,
+    getActiveTransitionLayers(
+      previewModel.transitionLayers,
+      request.sceneTime,
+    )[0],
     request.frameRate,
     { width: exportWidth, height: exportHeight },
-  )
-    .steps.flatMap((step) => step.postProcessPasses ?? [])
-    .map((pass) =>
-      withPostProcessFrameBackground(
-        pass,
-        previewModel.part.frame.style.background,
-      ),
-    );
+  );
+  return [
+    ...buildAdjustmentExecutionPlan(
+      request.sceneTime,
+      previewModel.visibleAdjustmentLayers,
+      request.frameRate,
+      { width: exportWidth, height: exportHeight },
+    )
+      .steps.flatMap((step) => step.postProcessPasses ?? []),
+    ...transitionPasses,
+  ].map((pass) =>
+    withPostProcessFrameBackground(pass, previewModel.part.frame.style.background),
+  );
 }
 
 const blankPreviewComposition: CompositionClip = {

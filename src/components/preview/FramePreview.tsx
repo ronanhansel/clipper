@@ -38,6 +38,7 @@ import {
   type CameraPreviewTransform,
 } from "../../core/camera";
 import {
+  frameObjectFromBackgroundLayer,
   getFrameObjectWithPreviewBounds,
   insetBounds,
   isVisibleMarqueeBounds,
@@ -55,6 +56,8 @@ import {
 import {
   evaluateBackgroundLayer,
   evaluateFrameObject,
+  getConnectedBackgroundSourceIds,
+  getBackgroundNodeOscillation,
   isTimeSensitiveFrameObject,
   type EvaluatedFrameObject,
 } from "../../render-engine/renderRuntime";
@@ -67,6 +70,7 @@ import {
 import {
   FRAME_HEIGHT,
   FRAME_WIDTH,
+  type AnimationGraphCustomNode,
   type AdjustmentLayer,
   type BackgroundLayer,
   type Bounds,
@@ -81,6 +85,7 @@ import {
 } from "../../core/types";
 import type {
   AdjustmentVisualOverlay,
+  PostProcessPass,
   TransitionSequenceStyle,
   TransitionVisualOverlay,
 } from "../../core/effects/types";
@@ -253,6 +258,7 @@ export const FramePreview = memo(function FramePreview({
         to: Array<{ part: Part; start: number; previewTime: number }>;
         fromSceneTime: number;
         toSceneTime: number;
+        postProcessPasses: PostProcessPass[];
       } | null;
     }
   ).transitionPreviewParts;
@@ -308,7 +314,15 @@ export const FramePreview = memo(function FramePreview({
   const transitionSequenceStyle = useMemo(
     () =>
       activeTransitionLayer
-        ? renderTransitionSequence(displaySceneTime, activeTransitionLayer)
+        ? renderTransitionSequence(
+            displaySceneTime,
+            activeTransitionLayer,
+            30,
+            {
+              width: FRAME_WIDTH,
+              height: FRAME_HEIGHT,
+            },
+          )
         : undefined,
     [activeTransitionLayer, displaySceneTime],
   );
@@ -745,6 +759,8 @@ export const FramePreview = memo(function FramePreview({
                             frameScale={frameScale}
                             isPlaying={isPlaying}
                             part={item.part}
+                            partStart={item.start}
+                            playbackClock={playbackClock}
                             previewTime={item.previewTime}
                             renderMode={renderMode}
                             onObjectPointerDown={onObjectPointerDown}
@@ -939,7 +955,7 @@ function applyLiveComposePreviewTime(
       part.background,
       time,
       part.duration,
-      { animations: true },
+      { animations: true, bgGraph: part.bgGraph },
     );
     const backgroundElement = root.querySelector<HTMLElement>(
       `[data-layer-id="${cssEscape(part.background.id)}"]`,
@@ -948,6 +964,14 @@ function applyLiveComposePreviewTime(
       applyLivePreviewLayerStyle(
         backgroundElement,
         evaluatedBackground.renderStyle,
+      );
+    const backgroundFillElement = root.querySelector<HTMLElement>(
+      `[data-background-fill-id="${cssEscape(part.background.id)}"]`,
+    );
+    if (backgroundFillElement)
+      applyLivePreviewStyle(
+        backgroundFillElement,
+        evaluatedBackground.fillStyle,
       );
     for (const element of evaluatedBackground.elements) {
       const target = root.querySelector<HTMLElement>(
@@ -1106,6 +1130,8 @@ function CompositionLayerView({
   frameScale,
   isPlaying,
   part,
+  partStart,
+  playbackClock,
   previewTime,
   renderMode,
   onObjectPointerDown,
@@ -1121,6 +1147,8 @@ function CompositionLayerView({
   frameScale: number;
   isPlaying: boolean;
   part: Part;
+  partStart: number;
+  playbackClock: PlaybackClock;
   previewTime: number;
   renderMode: "preview" | "export";
   onObjectPointerDown: (
@@ -1174,11 +1202,23 @@ function CompositionLayerView({
         <BackgroundLayerView
           animationsEnabled={animationsEnabled}
           background={part.background}
+          bgGraph={part.bgGraph}
+          canSelect={active && canSelect}
           duration={part.duration}
           exportTileFrameBounds={exportTileFrameBounds}
           frameScale={frameScale}
+          isPlaying={isPlaying}
+          partStart={partStart}
+          playbackClock={playbackClock}
           previewTime={previewTime}
           renderMode={renderMode}
+          onPointerDown={(event) => {
+            if (active && !isPlaying)
+              onObjectPointerDown(
+                event,
+                frameObjectFromBackgroundLayer(part.background),
+              );
+          }}
         />
       )}
       {part.objects
@@ -1197,6 +1237,7 @@ function CompositionLayerView({
             editing={active && !isPlaying && editingTextObjectId === object.id}
             focusPicking={active && focusPicking}
             frameScale={frameScale}
+            isPlaying={isPlaying}
             previewTime={previewTime}
             renderMode={renderMode}
             onDoubleClick={(event) => {
@@ -1334,6 +1375,8 @@ function TimelineSequenceView({
           frameScale={frameScale}
           isPlaying={isPlaying}
           part={item.part}
+          partStart={item.start}
+          playbackClock={null}
           previewTime={item.previewTime}
           renderMode={renderMode}
           onObjectPointerDown={noopObjectPointerDown}
@@ -1478,6 +1521,7 @@ export const FrameObjectView = memo(function FrameObjectView({
   editing,
   focusPicking,
   frameScale,
+  isPlaying,
   previewTime,
   renderMode,
   onDoubleClick,
@@ -1492,6 +1536,7 @@ export const FrameObjectView = memo(function FrameObjectView({
   editing: boolean;
   focusPicking: boolean;
   frameScale: number;
+  isPlaying: boolean;
   previewTime: number;
   renderMode: "preview" | "export";
   onDoubleClick: (event: ReactMouseEvent<HTMLDivElement>) => void;
@@ -2352,36 +2397,75 @@ function areBackgroundLayerPropsEqual(
   previous: {
     animationsEnabled: boolean;
     background: BackgroundLayer;
+    bgGraph?: Part["bgGraph"];
     duration: number;
     exportTileFrameBounds?: ExportTileFrameBounds;
     frameScale: number;
+    isPlaying: boolean;
+    partStart: number;
+    playbackClock: PlaybackClock;
     previewTime: number;
     renderMode: "preview" | "export";
   },
   next: {
     animationsEnabled: boolean;
     background: BackgroundLayer;
+    bgGraph?: Part["bgGraph"];
     duration: number;
     exportTileFrameBounds?: ExportTileFrameBounds;
     frameScale: number;
+    isPlaying: boolean;
+    partStart: number;
+    playbackClock: PlaybackClock;
     previewTime: number;
     renderMode: "preview" | "export";
   },
 ) {
   const timeSensitive =
     Boolean(next.background.animations?.length) ||
+    isTimeSensitiveBackgroundGraph(next.bgGraph) ||
     next.background.elements.some(isPreviewTimeSensitiveObject);
   return (
     previous.animationsEnabled === next.animationsEnabled &&
     previous.background === next.background &&
+    previous.bgGraph === next.bgGraph &&
     previous.duration === next.duration &&
     previous.exportTileFrameBounds === next.exportTileFrameBounds &&
     previous.frameScale === next.frameScale &&
+    previous.isPlaying === next.isPlaying &&
+    previous.partStart === next.partStart &&
+    previous.playbackClock === next.playbackClock &&
     previous.renderMode === next.renderMode &&
     (!next.animationsEnabled ||
       !timeSensitive ||
       previous.previewTime === next.previewTime)
   );
+}
+
+function isTimeSensitiveBackgroundGraph(graph: Part["bgGraph"] | undefined) {
+  const customNodes = graph?.customNodes ?? {};
+  const connectedSourceIds = getConnectedBackgroundSourceIds(graph);
+  if (
+    Array.from(connectedSourceIds).some(
+      (nodeId) => customNodes[nodeId]?.kind === "bg3d",
+    )
+  )
+    return true;
+  const backgroundNodeIds = new Set(
+    Object.entries(customNodes)
+      .filter(([, node]) => node.scopeKey === "background")
+      .map(([id]) => id),
+  );
+  return (graph?.edges ?? []).some((edge) => {
+    const from = customNodes[edge.fromNodeId];
+    const to = customNodes[edge.toNodeId];
+    return (
+      backgroundNodeIds.has(edge.fromNodeId) &&
+      backgroundNodeIds.has(edge.toNodeId) &&
+      from?.kind === "time" &&
+      to?.kind === "oscillate"
+    );
+  });
 }
 
 function areBackgroundElementPropsEqual(
@@ -3004,37 +3088,67 @@ export function DragSelectionBox({
 export const BackgroundLayerView = memo(function BackgroundLayerView({
   animationsEnabled,
   background,
+  bgGraph,
+  canSelect,
   duration,
   exportTileFrameBounds,
   frameScale,
   previewTime,
+  partStart,
+  playbackClock,
   renderMode,
+  onPointerDown,
 }: {
   animationsEnabled: boolean;
   background: BackgroundLayer;
+  bgGraph?: Part["bgGraph"];
+  canSelect?: boolean;
   duration: number;
   exportTileFrameBounds?: ExportTileFrameBounds;
   frameScale: number;
+  isPlaying: boolean;
+  partStart: number;
+  playbackClock: PlaybackClock;
   previewTime: number;
   renderMode: "preview" | "export";
+  onPointerDown?: (event: PointerEvent<HTMLDivElement>) => void;
 }) {
   const evaluatedBackground = useMemo(
     () =>
       evaluateBackgroundLayer(background, previewTime, duration, {
         animations: animationsEnabled,
+        bgGraph,
       }),
-    [animationsEnabled, background, duration, previewTime],
+    [animationsEnabled, background, bgGraph, duration, previewTime],
   );
   const layerStyle = evaluatedBackground.renderStyle as CSSProperties;
   const fillStyle = evaluatedBackground.fillStyle as CSSProperties;
+  const connectedBackgroundSourceIds = useMemo(
+    () => getConnectedBackgroundSourceIds(bgGraph),
+    [bgGraph],
+  );
 
   return (
     <div
-      className={`pointer-events-none absolute inset-0 ${background.stretchToElements ? "overflow-visible" : "overflow-hidden"}`}
+      className={`${canSelect ? "pointer-events-auto" : "pointer-events-none"} absolute inset-0 ${background.stretchToElements ? "overflow-visible" : "overflow-hidden"}`}
       data-layer-id={background.id}
+      onPointerDown={
+        canSelect && !background.locked ? onPointerDown : undefined
+      }
       style={layerStyle}
     >
-      <div className="absolute" style={fillStyle} />
+      <div
+        className="absolute"
+        data-background-fill-id={background.id}
+        style={fillStyle}
+      />
+      <BackgroundThreeCanvas
+        connectedSourceIds={connectedBackgroundSourceIds}
+        graph={bgGraph}
+        partStart={partStart}
+        playbackClock={playbackClock}
+        previewTime={previewTime}
+      />
       {evaluatedBackground.elements
         .filter(
           (element) =>
@@ -3055,6 +3169,412 @@ export const BackgroundLayerView = memo(function BackgroundLayerView({
     </div>
   );
 }, areBackgroundLayerPropsEqual);
+
+function BackgroundThreeCanvas({
+  connectedSourceIds,
+  graph,
+  partStart,
+  playbackClock,
+  previewTime,
+}: {
+  connectedSourceIds: Set<string>;
+  graph?: Part["bgGraph"];
+  partStart: number;
+  playbackClock: PlaybackClock;
+  previewTime: number;
+}) {
+  const activeEntries = Object.entries(graph?.customNodes ?? {}).filter(
+    ([id, node]) =>
+      node.scopeKey === "background" &&
+      node.kind === "bg3d" &&
+      connectedSourceIds.has(id),
+  );
+  if (!activeEntries.length) return null;
+  return (
+    <>
+      {activeEntries.map(([nodeId, node], index) => (
+        <BackgroundThreeCanvasLayer
+          graph={graph}
+          key={nodeId}
+          node={node}
+          nodeId={nodeId}
+          partStart={partStart}
+          playbackClock={playbackClock}
+          previewTime={previewTime}
+          zIndex={index + 1}
+        />
+      ))}
+    </>
+  );
+}
+
+function BackgroundThreeCanvasLayer({
+  graph,
+  node,
+  nodeId,
+  partStart,
+  playbackClock,
+  previewTime,
+  zIndex,
+}: {
+  graph?: Part["bgGraph"];
+  node: AnimationGraphCustomNode;
+  nodeId: string;
+  partStart: number;
+  playbackClock: PlaybackClock;
+  previewTime: number;
+  zIndex: number;
+}) {
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const previewTimeRef = useRef(previewTime);
+  const graphRef = useRef(graph);
+  const playbackClockRef = useRef(playbackClock);
+  const partStartRef = useRef(partStart);
+  useEffect(() => {
+    previewTimeRef.current = previewTime;
+  }, [previewTime]);
+  useEffect(() => {
+    graphRef.current = graph;
+  }, [graph]);
+  useEffect(() => {
+    playbackClockRef.current = playbackClock;
+    partStartRef.current = partStart;
+  }, [partStart, playbackClock]);
+  const nodeDetailsKey = JSON.stringify(node.details ?? {});
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    let disposed = false;
+    let frameId = 0;
+    let cleanup: (() => void) | undefined;
+    root.dataset.clipperThreePending = "true";
+    import("three")
+      .then((THREE) => {
+        if (disposed) return;
+        const details = node.details ?? {};
+        const color = details.color ?? "#5b7cff";
+        const accent = details.accent ?? "#9fd0ff";
+        const preset = details.preset ?? "waves";
+        const speed = Number(details.speed ?? 1) || 1;
+        const intensity = Number(details.intensity ?? 1) || 1;
+        const wireframe = details.wireframe !== "0";
+        const width = root.clientWidth || FRAME_WIDTH;
+        const height = root.clientHeight || FRAME_HEIGHT;
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(
+          48,
+          width / height,
+          0.1,
+          100,
+        );
+        camera.position.z = 5;
+        const renderer = new THREE.WebGLRenderer({
+          alpha: true,
+          antialias: true,
+        });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+        renderer.setSize(width, height);
+        renderer.domElement.style.display = "block";
+        renderer.domElement.style.width = "100%";
+        renderer.domElement.style.height = "100%";
+        root.replaceChildren(renderer.domElement);
+        scene.add(new THREE.AmbientLight(0xffffff, 0.45));
+        const keyLight = new THREE.PointLight(accent, 1.25 * intensity, 9);
+        keyLight.position.set(1.8, 1.6, 3.2);
+        scene.add(keyLight);
+        const backLight = new THREE.PointLight(color, 0.9 * intensity, 8);
+        backLight.position.set(-2.2, -1.4, 2.4);
+        scene.add(backLight);
+        const geometries: Array<{ dispose: () => void }> = [];
+        const materials: Array<{ dispose: () => void }> = [];
+        const meshes: Array<{
+          mesh: any;
+          seed: number;
+          kind: string;
+          baseY?: number;
+          baseX?: number;
+        }> = [];
+        const addMesh = (mesh: any, kind: string, seed = meshes.length) => {
+          meshes.push({
+            mesh,
+            kind,
+            seed,
+            baseX: mesh.position.x,
+            baseY: mesh.position.y,
+          });
+          scene.add(mesh);
+          return mesh;
+        };
+        const trackGeometry = <T extends { dispose: () => void }>(
+          geometry: T,
+        ) => {
+          geometries.push(geometry);
+          return geometry;
+        };
+        const trackMaterial = <T extends { dispose: () => void }>(
+          material: T,
+        ) => {
+          materials.push(material);
+          return material;
+        };
+        const glowMaterial = (value: string, opacity: number) =>
+          trackMaterial(
+            new THREE.MeshBasicMaterial({
+              blending: THREE.AdditiveBlending,
+              color: value,
+              depthWrite: false,
+              side: THREE.DoubleSide,
+              transparent: true,
+              opacity,
+              wireframe,
+            }),
+          );
+        const litMaterial = (value: string, opacity: number) =>
+          trackMaterial(
+            new THREE.MeshPhongMaterial({
+              color: value,
+              emissive: value,
+              emissiveIntensity: 0.18 * intensity,
+              shininess: 82,
+              side: THREE.DoubleSide,
+              transparent: true,
+              opacity,
+              wireframe,
+            }),
+          );
+        if (preset === "particles") {
+          const geometry = trackGeometry(
+            new THREE.SphereGeometry(0.035 * Math.max(intensity, 0.4), 10, 10),
+          );
+          const material = glowMaterial(color, 0.82);
+          for (let index = 0; index < 140; index += 1) {
+            const particle = new THREE.Mesh(geometry, material);
+            particle.position.set(
+              (Math.random() - 0.5) * 10,
+              (Math.random() - 0.5) * 6,
+              (Math.random() - 0.5) * 4,
+            );
+            addMesh(particle, "particle", index);
+          }
+        } else if (preset === "aurora") {
+          for (let index = 0; index < 5; index += 1) {
+            const mesh = new THREE.Mesh(
+              trackGeometry(new THREE.PlaneGeometry(9.5, 2.2, 56, 10)),
+              glowMaterial(index % 2 ? accent : color, 0.16),
+            );
+            mesh.position.y = -1.7 + index * 0.82;
+            mesh.position.z = -0.5 - index * 0.08;
+            mesh.rotation.z = -0.18 + index * 0.08;
+            addMesh(mesh, "aurora", index);
+          }
+        } else if (preset === "ribbons") {
+          for (let index = 0; index < 7; index += 1) {
+            const curve = new THREE.CatmullRomCurve3(
+              Array.from(
+                { length: 7 },
+                (_, point) =>
+                  new THREE.Vector3(
+                    -4.6 + point * 1.55,
+                    Math.sin(point * 0.9 + index) * 0.75,
+                    Math.cos(point * 0.7 + index) * 0.45,
+                  ),
+              ),
+            );
+            const mesh = new THREE.Mesh(
+              trackGeometry(
+                new THREE.TubeGeometry(
+                  curve,
+                  72,
+                  0.018 + index * 0.002,
+                  8,
+                  false,
+                ),
+              ),
+              glowMaterial(index % 2 ? accent : color, 0.36),
+            );
+            mesh.position.y = (index - 3) * 0.36;
+            addMesh(mesh, "ribbon", index);
+          }
+        } else if (preset === "orbital") {
+          for (let index = 0; index < 6; index += 1) {
+            const mesh = new THREE.Mesh(
+              trackGeometry(
+                new THREE.TorusGeometry(
+                  1.1 + index * 0.32,
+                  0.01 + index * 0.003,
+                  8,
+                  96,
+                ),
+              ),
+              glowMaterial(index % 2 ? accent : color, 0.28),
+            );
+            mesh.rotation.x = Math.PI / 2.5 + index * 0.24;
+            mesh.rotation.y = index * 0.36;
+            addMesh(mesh, "orbital", index);
+          }
+          const core = new THREE.Mesh(
+            trackGeometry(new THREE.IcosahedronGeometry(0.34, 2)),
+            litMaterial(accent, 0.5),
+          );
+          addMesh(core, "core", 9);
+        } else if (preset === "gridTunnel") {
+          for (let index = 0; index < 18; index += 1) {
+            const mesh = new THREE.Mesh(
+              trackGeometry(new THREE.PlaneGeometry(7.5, 4.4, 8, 5)),
+              glowMaterial(index % 2 ? accent : color, 0.08),
+            );
+            mesh.position.z = -index * 0.36;
+            mesh.scale.setScalar(0.45 + index * 0.08);
+            addMesh(mesh, "gridTunnel", index);
+          }
+        } else if (preset === "caustic") {
+          const base = new THREE.Mesh(
+            trackGeometry(new THREE.PlaneGeometry(9.5, 5.6, 72, 42)),
+            litMaterial(color, 0.24),
+          );
+          addMesh(base, "caustic", 0);
+          const shimmer = new THREE.Mesh(
+            trackGeometry(new THREE.PlaneGeometry(8.4, 4.8, 48, 28)),
+            glowMaterial(accent, 0.2),
+          );
+          shimmer.position.z = 0.18;
+          addMesh(shimmer, "caustic", 1);
+        } else {
+          const geometry = trackGeometry(
+            new THREE.PlaneGeometry(10, 6, 48, 24),
+          );
+          const mesh = new THREE.Mesh(geometry, litMaterial(color, 0.34));
+          const accentMesh = new THREE.Mesh(
+            trackGeometry(new THREE.PlaneGeometry(8, 4.8, 24, 12)),
+            glowMaterial(accent, 0.18),
+          );
+          addMesh(mesh, preset === "plane" ? "plane" : "waves", 0);
+          addMesh(accentMesh, "accentPlane", 1);
+        }
+        const animate = () => {
+          if (disposed) return;
+          frameId = requestAnimationFrame(animate);
+          const clock = playbackClockRef.current;
+          const t = clock
+            ? clock.startedFrom +
+              (performance.now() - clock.startedAt) / 1000 -
+              partStartRef.current
+            : (readRenderClockTime(root) ?? previewTimeRef.current);
+          const currentGraph = graphRef.current;
+          const nodeIds = new Set(
+            Object.entries(currentGraph?.customNodes ?? {})
+              .filter(([, node]) => node.scopeKey === "background")
+              .map(([id]) => id),
+          );
+          const osc =
+            getBackgroundNodeOscillation(currentGraph, nodeIds, nodeId, t) *
+            0.01;
+          for (const item of meshes) {
+            const mesh = item.mesh;
+            if (item.kind === "particle") {
+              mesh.position.y += 0.0025 * speed * intensity;
+              mesh.rotation.z += 0.01 * speed;
+              if (mesh.position.y > 3.4) mesh.position.y = -3.4;
+              mesh.position.x =
+                (item.baseX ?? 0) + Math.sin(t + item.seed) * 0.018 * intensity;
+              continue;
+            }
+            if (item.kind === "aurora") {
+              mesh.position.y =
+                (item.baseY ?? 0) + Math.sin(t * speed + item.seed) * 0.16;
+              mesh.rotation.z = -0.18 + item.seed * 0.08 + osc * 0.18;
+              const positions = mesh.geometry.attributes.position;
+              for (let index = 0; index < positions.count; index += 1) {
+                const x = positions.getX(index);
+                positions.setZ(
+                  index,
+                  Math.sin(x * 1.2 + t * speed * 1.8 + item.seed) *
+                    0.16 *
+                    intensity,
+                );
+              }
+              positions.needsUpdate = true;
+              continue;
+            }
+            if (item.kind === "ribbon") {
+              mesh.rotation.z = Math.sin(t * 0.3 * speed + item.seed) * 0.2;
+              mesh.position.y =
+                (item.baseY ?? 0) + Math.sin(t * speed + item.seed) * 0.12;
+              continue;
+            }
+            if (item.kind === "orbital") {
+              mesh.rotation.z = t * speed * (0.18 + item.seed * 0.025) + osc;
+              mesh.rotation.x += 0.0008 * speed * (item.seed + 1);
+              continue;
+            }
+            if (item.kind === "core") {
+              mesh.rotation.x = t * 0.35 * speed;
+              mesh.rotation.y = t * 0.48 * speed + osc;
+              mesh.scale.setScalar(1 + Math.sin(t * speed * 1.5) * 0.08);
+              continue;
+            }
+            if (item.kind === "gridTunnel") {
+              mesh.position.z = ((item.seed * -0.36 + t * speed * 0.5) % 6) - 4;
+              mesh.rotation.z = osc * 0.2;
+              continue;
+            }
+            mesh.rotation.z = t * 0.12 * speed + osc;
+            mesh.rotation.x =
+              Math.sin(t * 0.8 * speed + item.seed) * 0.2 * intensity;
+            if (item.kind === "waves" || item.kind === "caustic") {
+              const positions = mesh.geometry.attributes.position;
+              for (let index = 0; index < positions.count; index += 1) {
+                const x = positions.getX(index);
+                const y = positions.getY(index);
+                positions.setZ(
+                  index,
+                  Math.sin(x * 0.8 + t * speed * 1.4 + item.seed) *
+                    0.12 *
+                    intensity +
+                    Math.cos(y * 1.1 + t * speed) * 0.08 * intensity,
+                );
+              }
+              positions.needsUpdate = true;
+            }
+          }
+          renderer.render(scene, camera);
+        };
+        animate();
+        delete root.dataset.clipperThreePending;
+        root.dataset.clipperThreeReady = "true";
+        cleanup = () => {
+          cancelAnimationFrame(frameId);
+          geometries.forEach((geometry) => geometry.dispose());
+          materials.forEach((material) => material.dispose());
+          renderer.dispose();
+          root.replaceChildren();
+        };
+      })
+      .catch((error) => {
+        root.dataset.clipperThreeError =
+          error instanceof Error ? error.message : String(error);
+        delete root.dataset.clipperThreePending;
+      });
+    return () => {
+      disposed = true;
+      cleanup?.();
+    };
+  }, [nodeDetailsKey, nodeId]);
+  return (
+    <div
+      ref={rootRef}
+      className="pointer-events-none absolute inset-0"
+      data-clipper-three-root
+      style={{ zIndex }}
+    />
+  );
+}
+
+function readRenderClockTime(root: HTMLElement) {
+  const clockRoot = root.closest<HTMLElement>("[data-clipper-render-time]");
+  const time = Number(clockRoot?.dataset.clipperRenderTime);
+  return Number.isFinite(time) ? time : null;
+}
 
 export const BackgroundElementView = memo(function BackgroundElementView({
   element,

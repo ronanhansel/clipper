@@ -28,6 +28,7 @@ import {
   type TreeApi,
 } from "react-arborist";
 import type { FrameObject, Part } from "../../core/types";
+import { frameObjectFromBackgroundLayer } from "../../core/frameInteraction";
 import { arboristDndManager } from "../../lib/arboristDndManager";
 import { useDragAutoScroll } from "../../lib/useDragAutoScroll";
 
@@ -48,6 +49,7 @@ export type ComposeLayerNode = {
   kind: ComposeLayerKind;
   animated?: boolean;
   object?: FrameObject;
+  part?: Part;
   children?: ComposeLayerNode[];
 };
 
@@ -203,7 +205,7 @@ const MemoizedComposeLayersPanel = memo(function ComposeLayersPanelContent({
     });
     if (
       nodes.length === 1 &&
-      (nodes[0].data.kind === "background" || nodes[0].data.kind === "frame")
+      nodes[0].data.kind === "frame"
     ) {
       onSelectFrameSettings();
       return;
@@ -724,6 +726,7 @@ function buildComposeLayerTree(part: Part): ComposeLayerNode[] {
       name: part.background.name || "Background",
       kind: "background",
       animated: Boolean(part.background.animations?.length),
+      part,
       children: backgroundChildren.length > 0 ? backgroundChildren : undefined,
     },
     {
@@ -736,6 +739,8 @@ function buildComposeLayerTree(part: Part): ComposeLayerNode[] {
 
 function getNodeObjects(node: ComposeLayerNode): FrameObject[] {
   if (node.object) return [node.object];
+  if (node.kind === "background" && node.part)
+    return [frameObjectFromBackgroundLayer(node.part.background)];
   return node.children?.flatMap(getNodeObjects) ?? [];
 }
 

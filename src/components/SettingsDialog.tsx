@@ -543,7 +543,7 @@ export function SettingsDialog({
                   <div className="h-px bg-[#363b47]" />
                   <div className="grid gap-1.5">
                     <strong className="text-sm text-white">
-                      Preview render resolution
+                      Preview resolution
                     </strong>
                     <p className="text-xs leading-5 text-[#8f939d]">
                       Keeps the actual preview render surface fixed while zoom
@@ -555,7 +555,7 @@ export function SettingsDialog({
                     className="grid max-w-[260px] gap-1.5 text-xs font-bold text-[#dfe2ea]"
                     htmlFor="preview-render-resolution"
                   >
-                    Render resolution
+                    Preview resolution
                     <span className="flex items-center gap-2">
                       <Select
                         value={String(previewRenderHeight)}

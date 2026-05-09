@@ -147,8 +147,10 @@ import {
 } from "./core/camera";
 import { liveDomPostProcessStorageKey } from "./core/effects/postprocess/liveDomCapability";
 import {
+  frameObjectFromBackgroundLayer,
   getBoundsUnion,
   getPartFrameObject,
+  selectionObjectFromBackgroundLayer,
   selectionObjectFromFrameObject,
   selectionPayloadFromObjects,
   type ObjectDrag,
@@ -788,6 +790,11 @@ function AppContent({
   const motionPickPreviewFrameRef = useRef(0);
   const pendingAdjustmentPreviewRef = useRef<AdjustmentLayer[] | null>(null);
   const adjustmentPreviewFrameRef = useRef(0);
+  const pendingTransitionPreviewRef = useRef<TransitionLayer[] | null>(null);
+  const transitionPreviewFrameRef = useRef(0);
+  const [previewTransitionLayers, setPreviewTransitionLayers] = useState<
+    TransitionLayer[] | null
+  >(null);
   const timelineModeRef = useRef(timelineMode);
   const frameInteractionControllerRef =
     useRef<FrameInteractionController | null>(null);
@@ -990,6 +997,7 @@ function AppContent({
     currentSceneTime,
     focusPickZoomMarker,
     framePickPreviewPoint,
+    previewTransitionLayers,
     positionPickTranslationMarker,
     project,
     selectedObjectId,
@@ -1133,6 +1141,32 @@ function AppContent({
     if (adjustmentPreviewFrameRef.current) {
       cancelAnimationFrame(adjustmentPreviewFrameRef.current);
       adjustmentPreviewFrameRef.current = 0;
+    }
+  }
+
+  function previewTransitionLayer(
+    layerId: string,
+    updater: (layer: TransitionLayer) => TransitionLayer,
+  ) {
+    const nextLayers = visibleSceneTransitionLayers.map((layer) =>
+      layer.id === layerId ? updater(layer) : layer,
+    );
+    pendingTransitionPreviewRef.current = nextLayers;
+    if (transitionPreviewFrameRef.current) return;
+    transitionPreviewFrameRef.current = requestAnimationFrame(() => {
+      transitionPreviewFrameRef.current = 0;
+      const layers = pendingTransitionPreviewRef.current;
+      if (!layers) return;
+      setPreviewTransitionLayers(layers);
+    });
+  }
+
+  function clearTransitionPreview() {
+    pendingTransitionPreviewRef.current = null;
+    setPreviewTransitionLayers(null);
+    if (transitionPreviewFrameRef.current) {
+      cancelAnimationFrame(transitionPreviewFrameRef.current);
+      transitionPreviewFrameRef.current = 0;
     }
   }
 
@@ -1683,6 +1717,8 @@ function AppContent({
     setSelectionPayload((current) => {
       if (!current?.objects.length) return current;
       const nextObjects = current.objects.flatMap((selected) => {
+        if (selected.id === part.background.id)
+          return [selectionObjectFromBackgroundLayer(part.background)];
         const object =
           part.objects.find((item) => item.id === selected.id) ??
           part.background.elements.find((item) => item.id === selected.id);
@@ -1730,12 +1766,18 @@ function AppContent({
     )
       return;
     const selectedIds =
-      project.editorState?.selectedComposeObjectIds?.filter((id) =>
-        part.objects.some((object) => object.id === id),
+      project.editorState?.selectedComposeObjectIds?.filter(
+        (id) =>
+          id === part.background.id ||
+          part.objects.some((object) => object.id === id),
       ) ?? [];
     if (selectedIds.length === 0) return;
     const selectedObjects = selectedIds
-      .map((id) => part.objects.find((object) => object.id === id))
+      .map((id) =>
+        id === part.background.id
+          ? frameObjectFromBackgroundLayer(part.background)
+          : part.objects.find((object) => object.id === id),
+      )
       .filter((object): object is FrameObject => Boolean(object));
     if (selectedObjects.length === 0) return;
     setComposeSelectionObjects(selectedObjects);
@@ -2057,6 +2099,10 @@ function AppContent({
         ?.clips.find((clip) => clip.id === clipId);
       if (!targetClip) return current;
       const is3dClip = (targetClip.renderMode ?? part.renderMode) === "webgl";
+      const isBackgroundGraph =
+        !is3dClip &&
+        selectedComposeObjectIds.length === 1 &&
+        selectedComposeObjectIds[0] === part.background.id;
       const targetCompositionId = targetClip.compositionId;
       const targetFilePath = part.filePath;
       const currentComposition = [
@@ -2071,11 +2117,14 @@ function AppContent({
         is3dClip
           ? ((currentComposition?.composition3dGraph ??
               part.composition3dGraph) as AnimationGraphState | undefined)
+          : isBackgroundGraph
+            ? (currentComposition?.bgGraph ?? part.bgGraph)
           : currentComposition?.animationGraph,
       );
       const updateComposition = (composition: CompositionClip) => {
         if (
           composition.id !== targetCompositionId &&
+          composition.id !== clipId &&
           composition.filePath !== targetFilePath
         )
           return composition;
@@ -2086,17 +2135,26 @@ function AppContent({
             composition3dGraph:
               nextGraph as import("./core/types").Composition3dGraphState,
           };
+        if (isBackgroundGraph) return { ...composition, bgGraph: nextGraph };
         return { ...composition, animationGraph: nextGraph };
       };
       const webglRenderMode = "webgl" as const;
       return {
         ...current,
-        compositionLibrary: current.compositionLibrary
-          ? current.compositionLibrary.map(updateComposition)
-          : current.compositionLibrary,
-        compositions: current.compositions
-          ? current.compositions.map(updateComposition)
-          : current.compositions,
+          compositionLibrary: current.compositionLibrary
+            ? current.compositionLibrary.map(updateComposition)
+            : current.compositionLibrary,
+          compositions: current.compositions
+            ? current.compositions.map(updateComposition)
+            : current.compositions,
+          scenes: current.scenes.map((sceneItem) =>
+            sceneItem.id === scene.id
+              ? {
+                  ...sceneItem,
+                  compositions: sceneItem.compositions.map(updateComposition),
+                }
+              : sceneItem,
+          ),
         timelines: (current.timelines ?? []).map((timeline) =>
           timeline.id === scene.id
             ? {
@@ -2114,8 +2172,11 @@ function AppContent({
       };
     };
     if (options?.implicit)
-      implicitFileOperation(updateProject)(applyUpdate, { history: true });
-    else updateProject(applyUpdate, { history: true });
+      implicitFileOperation(updateProject)(applyUpdate, {
+        history: true,
+        syncSources: true,
+      });
+    else updateProject(applyUpdate, { history: true, syncSources: true });
   }
 
   function updateComposition3dGraphNodeParameter(
@@ -3692,7 +3753,7 @@ function AppContent({
               selectedObject={selectedObject}
               selectedAdjustmentLayer={selectedAdjustmentLayer}
               selectedTransitionLayer={
-                scene.transitionLayers?.find(
+                (previewTransitionLayers ?? scene.transitionLayers)?.find(
                   (l) => l.id === selectedTransitionLayerId,
                 ) ?? null
               }
@@ -3732,6 +3793,8 @@ function AppContent({
               onClearAdjustmentPreview={clearAdjustmentPreview}
               onDeleteAdjustmentLayer={deleteAdjustmentLayer}
               onUpdateTransitionLayer={updateTransitionLayer}
+              onPreviewTransitionLayer={previewTransitionLayer}
+              onClearTransitionPreview={clearTransitionPreview}
               onDeleteTransitionLayer={(layerId) => {
                 updateProject(
                   (current) => ({

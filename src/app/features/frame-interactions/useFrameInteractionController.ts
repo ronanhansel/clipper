@@ -889,6 +889,7 @@ export function useFrameInteractionController(
       coordinates: boundsToPoints(selectionBox),
       objects: nextSelectionObjects,
     });
+    if (object.id === part.background.id) return;
     const nextDrag = {
       origin: { x: event.clientX, y: event.clientY },
       partId: part.id,
