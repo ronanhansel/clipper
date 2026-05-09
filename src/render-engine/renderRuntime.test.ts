@@ -347,6 +347,53 @@ describe("render runtime", () => {
     ).toBeUndefined();
   });
 
+  it("builds a deterministic film emulation look from modular artifact overlays", () => {
+    const layers: AdjustmentLayer[] = [
+      {
+        id: "film",
+        name: "Film Emulation",
+        start: 0,
+        duration: 4,
+        effect: {
+          effectId: "clipper.adjustment.filmEmulation" as const,
+          params: {
+            intensity: 0.8,
+            target: "frame",
+            stock: "fadedArchive",
+            grain: 0.5,
+            dust: 0.3,
+            scratches: 0.2,
+            halation: 0.4,
+            flicker: 0,
+            gateWeave: 0,
+            vignette: 0.25,
+            seed: 42,
+          },
+        },
+      },
+    ];
+
+    const style = applyAdjustmentLayersToVisualStyle(1.25, layers, 30);
+
+    expect(style.filter).toContain("brightness(");
+    expect(style.filter).toContain("sepia(");
+    expect(style.overlays?.map((overlay) => overlay.id)).toEqual([
+      "film:film-emulation-grain",
+      "film:film-emulation-damage",
+      "film:film-emulation-halation",
+      "film:film-emulation-gate",
+    ]);
+    expect(style.overlays?.map((overlay) => overlay.target)).toEqual([
+      "frame",
+      "frame",
+      "frame",
+      "frame",
+    ]);
+    expect(style.overlays?.[0].style.backgroundImage).toContain(
+      "data:image/svg+xml",
+    );
+  });
+
   it("keeps swipe transition visual styles separate from sequence animation", () => {
     const layers = [
       {

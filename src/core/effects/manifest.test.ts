@@ -4,6 +4,16 @@ import {
   createAdjustmentEffectPackage,
   createTransitionEffectPackage,
 } from "./manifest";
+import { builtInAdjustmentEffects } from "./builtins/adjustments";
+import {
+  getEffectCategoryAccent,
+  getEffectCategoryIcon,
+  getEffectCategoryLabel,
+  getEffectLibrarySections,
+  getEffectPackage,
+  registerEffectCategoryMetadata,
+  registerEffectPackage,
+} from "./registry";
 
 describe("effect manifest parsing", () => {
   it("parses explicit groups and derives the slash group path", () => {
@@ -57,5 +67,58 @@ defaultParams: {}
         midPoint: 1,
       }).effect.params?.ease,
     ).toBe("easeInOut");
+  });
+
+  it("groups practical prebuilt effects together", () => {
+    const groupsById = new Map(
+      builtInAdjustmentEffects.map((effect) => [effect.id, effect.group]),
+    );
+
+    expect(groupsById.get("clipper.adjustment.lens")).toBe("Practical");
+    expect(groupsById.get("clipper.adjustment.filmEmulation")).toBe(
+      "Practical",
+    );
+    expect(groupsById.get("clipper.adjustment.vhsTracking")).toBe("Practical");
+  });
+
+  it("registers effect packages into lookup and library sections", () => {
+    const effect = createAdjustmentEffectPackage(`
+id: test.adjustment.external
+category: adjustment
+name: External Adjustment
+label: External Adjustment
+groups:
+  - External
+  - Analog
+defaultDuration: 2
+defaultParams: {}
+`);
+
+    registerEffectPackage(effect);
+
+    expect(getEffectPackage("test.adjustment.external")).toBe(effect);
+    expect(
+      getEffectLibrarySections()
+        .find((section) => section.category === "adjustment")
+        ?.packages.map((definition) => definition.id),
+    ).toContain("test.adjustment.external");
+  });
+
+  it("exposes registry metadata for effect library categories", () => {
+    registerEffectCategoryMetadata({
+      category: "motion",
+      label: "Move",
+      accent: "#123456",
+      icon: "motion",
+      libraryOrder: 2,
+    });
+
+    expect(getEffectCategoryLabel("motion")).toBe("Move");
+    expect(getEffectCategoryAccent("motion")).toBe("#123456");
+    expect(getEffectCategoryIcon("motion")).toBe("motion");
+    expect(
+      getEffectLibrarySections().find((section) => section.category === "motion")
+        ?.metadata,
+    ).toMatchObject({ label: "Move", accent: "#123456", icon: "motion" });
   });
 });

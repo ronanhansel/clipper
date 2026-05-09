@@ -118,6 +118,7 @@ export function CompositionTimelineBlock({
   onLeftResize?: (event: PointerEvent<HTMLDivElement>) => void;
   onRightResize?: (event: PointerEvent<HTMLDivElement>) => void;
 }) {
+  const suppressNextClickRef = useRef(false);
   const fillClass = preview ? "top-0" : "inset-y-0";
   const interactivityClass = preview ? "pointer-events-none z-30" : "";
   const surfaceClass = blocked
@@ -145,15 +146,30 @@ export function CompositionTimelineBlock({
   }
 
   function leftResizePointerDown(event: PointerEvent<HTMLDivElement>) {
+    suppressNextClickRef.current = true;
     event.preventDefault();
     event.stopPropagation();
     onLeftResize?.(event);
   }
 
   function rightResizePointerDown(event: PointerEvent<HTMLDivElement>) {
+    suppressNextClickRef.current = true;
     event.preventDefault();
     event.stopPropagation();
     onRightResize?.(event);
+  }
+
+  function resizeClick(event: ReactMouseEvent<HTMLDivElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  function blockClick() {
+    if (suppressNextClickRef.current) {
+      suppressNextClickRef.current = false;
+      return;
+    }
+    onClick?.();
   }
 
   return (
@@ -165,7 +181,7 @@ export function CompositionTimelineBlock({
       tabIndex={0}
       className={`absolute ${fillClass} ${interactivityClass} box-border flex min-w-[34px] cursor-default items-end justify-between gap-2 overflow-hidden rounded-[3px] px-3 py-2 text-left text-[13px] leading-none shadow-[inset_1px_0_0_rgb(0_0_0/0.55),inset_-1px_0_0_rgb(0_0_0/0.55)] before:absolute before:left-1/2 before:top-2 before:-translate-x-1/2 before:text-[12px] before:font-extrabold before:text-white/25 before:content-['Clip'] ${surfaceClass} ${stateClass}`}
       style={style}
-      onClick={locked ? undefined : onClick}
+      onClick={locked ? undefined : blockClick}
       onDoubleClick={locked ? undefined : onDoubleClick}
       onPointerDown={blockPointerDown}
       onContextMenu={locked ? undefined : onContextMenu}
@@ -188,12 +204,14 @@ export function CompositionTimelineBlock({
       </small>
       <div
         className={`absolute left-0 top-0 bottom-0 w-2 ${leftResizeEnabled && !locked ? "cursor-ew-resize" : "pointer-events-none cursor-default"}`}
+        onClick={resizeClick}
         onPointerDown={
           leftResizeEnabled && !locked ? leftResizePointerDown : undefined
         }
       />
       <div
         className={`absolute right-0 top-0 bottom-0 w-2 ${rightResizeEnabled && !locked ? "cursor-ew-resize" : "pointer-events-none cursor-default"}`}
+        onClick={resizeClick}
         onPointerDown={
           rightResizeEnabled && !locked ? rightResizePointerDown : undefined
         }
@@ -629,6 +647,7 @@ export function TimelineBlock({
   onRightResize: (event: PointerEvent<HTMLDivElement>) => void;
   onContextMenu: (event: ReactMouseEvent<HTMLElement>) => void;
 }) {
+  const suppressNextClickRef = useRef(false);
   const variantClass =
     variant === "adjustment"
       ? "min-w-[34px] text-left font-extrabold"
@@ -668,15 +687,30 @@ export function TimelineBlock({
   }
 
   function leftResizePointerDown(event: PointerEvent<HTMLDivElement>) {
+    suppressNextClickRef.current = true;
     event.preventDefault();
     event.stopPropagation();
     onLeftResize(event);
   }
 
   function rightResizePointerDown(event: PointerEvent<HTMLDivElement>) {
+    suppressNextClickRef.current = true;
     event.preventDefault();
     event.stopPropagation();
     onRightResize(event);
+  }
+
+  function resizeClick(event: ReactMouseEvent<HTMLDivElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  function blockClick() {
+    if (suppressNextClickRef.current) {
+      suppressNextClickRef.current = false;
+      return;
+    }
+    onClick();
   }
 
   return (
@@ -687,7 +721,7 @@ export function TimelineBlock({
       tabIndex={0}
       className={`absolute inset-y-0 box-border cursor-default overflow-hidden rounded-[3px] px-3 py-2 text-xs ${radiusClass} ${variantClass} ${selectionClass}`}
       style={blockStyle}
-      onClick={locked ? undefined : onClick}
+      onClick={locked ? undefined : blockClick}
       onPointerDown={blockPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -697,6 +731,7 @@ export function TimelineBlock({
       {children}
       <div
         className={`absolute left-0 top-0 bottom-0 w-2 ${leftResizeEnabled && !locked ? "cursor-ew-resize" : "pointer-events-none cursor-default"}`}
+        onClick={resizeClick}
         onPointerDown={
           leftResizeEnabled && !locked ? leftResizePointerDown : undefined
         }
@@ -705,6 +740,7 @@ export function TimelineBlock({
       </div>
       <div
         className={`absolute right-0 top-0 bottom-0 w-2 ${rightResizeEnabled && !locked ? "cursor-ew-resize" : "pointer-events-none cursor-default"}`}
+        onClick={resizeClick}
         onPointerDown={
           rightResizeEnabled && !locked ? rightResizePointerDown : undefined
         }

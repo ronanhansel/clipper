@@ -4,10 +4,10 @@ import {
   type Composition3dPackageDefinition,
 } from "../core/composition3dPackages";
 import {
-  adjustmentEffectPackages,
-  installedEffectPackages,
-  motionEffectPackages,
-  transitionEffectPackages,
+  getEffectCategoryAccent,
+  getEffectCategoryIcon,
+  getEffectLibrarySections,
+  getEffectPackage,
 } from "../core/effects/registry";
 import {
   getComposition3dNodeKindFromPackageId,
@@ -41,10 +41,6 @@ import {
   type NativeTreeNodeRendererProps,
 } from "./tree/NativeTree";
 
-const defaultEffectAccent = "#6f7684";
-const transitionEffectAccent = "#ff8c42";
-const adjustmentEffectAccent = "#a78bfa";
-const motionEffectAccent = "#1bb8c9";
 const EFFECT_ROW_HEIGHT = 30;
 const EFFECT_TREE_INDENT = 24;
 const effectButtonClass =
@@ -76,27 +72,6 @@ type Composition3dTreeNode =
       name: string;
     };
 
-const effectDragLabels: Record<string, string> = {
-  ...Object.fromEntries(
-    installedEffectPackages.map((definition) => [
-      definition.id,
-      definition.label,
-    ]),
-  ),
-};
-
-const effectDragAccents: Record<string, string> = Object.fromEntries(
-  installedEffectPackages.map((definition) => [
-    definition.id,
-    definition.category === "transition"
-      ? transitionEffectAccent
-      : definition.category === "motion"
-        ? motionEffectAccent
-        : definition.category === "adjustment"
-          ? adjustmentEffectAccent
-          : defaultEffectAccent,
-  ]),
-);
 const defaultOpenComposition3dGroupPaths = new Set([
   "Scene",
   "Scene/Camera",
@@ -287,11 +262,12 @@ export function ToolsPanel({
   ) => void;
 }) {
   const isCompositionMode = timelineMode === "composition";
-  const defaultOpenEffectGroups = new Set([
-    ...collectEffectGroupPaths(adjustmentEffectPackages),
-    ...collectEffectGroupPaths(motionEffectPackages),
-    ...collectEffectGroupPaths(transitionEffectPackages),
-  ]);
+  const effectLibrarySections = getEffectLibrarySections();
+  const defaultOpenEffectGroups = new Set(
+    effectLibrarySections.flatMap((section) =>
+      collectEffectGroupPaths(section.packages),
+    ),
+  );
   const openEffectGroups = new Set(
     Object.entries(
       effectsPanelState?.openGroups ??
@@ -307,10 +283,13 @@ export function ToolsPanel({
     event: PointerEvent<HTMLButtonElement>,
     effect: string,
   ) {
+    const definition = getEffectPackage(effect);
     startClipperPointerDrag({
-      accent: effectDragAccents[effect] ?? defaultEffectAccent,
+      accent: definition
+        ? getEffectCategoryAccent(definition.category)
+        : getEffectCategoryAccent("adjustment"),
       eventName: effectPointerDragEvent,
-      label: effectDragLabels[effect] ?? effect,
+      label: definition?.label ?? effect,
       payload: { effect },
       pointerEvent: event,
       previewEventName: effectDragPreviewEvent,
@@ -355,32 +334,28 @@ export function ToolsPanel({
     );
   }
 
-  const adjustmentEffectTree = buildEffectGroupTree(adjustmentEffectPackages);
-  const motionEffectTree = buildEffectGroupTree(motionEffectPackages);
-  const transitionEffectTree = buildEffectGroupTree(transitionEffectPackages);
+  const effectSectionTrees = effectLibrarySections.map((section) => ({
+    ...section,
+    tree: buildEffectGroupTree(section.packages),
+  }));
 
   return (
     <section className="grid min-h-0 flex-1 overflow-hidden">
       {isCompositionMode ? (
-        <div className="grid min-h-0 grid-rows-3 gap-2 overflow-hidden">
-          <div className={effectGroupClass}>
-            <span className={effectGroupLabelClass}>Transition</span>
-            <div className={effectListClass}>
-              {renderEffectTree(transitionEffectTree)}
+        <div
+          className="grid min-h-0 gap-2 overflow-hidden"
+          style={{
+            gridTemplateRows: `repeat(${effectSectionTrees.length}, minmax(0, 1fr))`,
+          }}
+        >
+          {effectSectionTrees.map((section) => (
+            <div className={effectGroupClass} key={section.category}>
+              <span className={effectGroupLabelClass}>{section.label}</span>
+              <div className={effectListClass}>
+                {renderEffectTree(section.tree)}
+              </div>
             </div>
-          </div>
-          <div className={effectGroupClass}>
-            <span className={effectGroupLabelClass}>Adjust</span>
-            <div className={effectListClass}>
-              {renderEffectTree(adjustmentEffectTree)}
-            </div>
-          </div>
-          <div className={effectGroupClass}>
-            <span className={effectGroupLabelClass}>Motion</span>
-            <div className={effectListClass}>
-              {renderEffectTree(motionEffectTree)}
-            </div>
-          </div>
+          ))}
         </div>
       ) : null}
       {!isCompositionMode ? (
@@ -510,12 +485,9 @@ function EffectTreeRow({
     );
   }
 
-  const EffectIcon =
-    data.effect.category === "motion"
-      ? WaveTriangleIcon
-      : data.effect.category === "transition"
-        ? ArrowLeftRight
-        : CardsIcon;
+  const EffectIcon = getEffectIconComponent(
+    getEffectCategoryIcon(data.effect.category),
+  );
   return (
     <button
       className={`${effectButtonClass} h-full w-full cursor-grab active:cursor-grabbing`}
@@ -527,6 +499,12 @@ function EffectTreeRow({
       <span className="truncate px-1">{data.effect.label}</span>
     </button>
   );
+}
+
+function getEffectIconComponent(icon: string) {
+  if (icon === "motion") return WaveTriangleIcon;
+  if (icon === "transition") return ArrowLeftRight;
+  return CardsIcon;
 }
 
 function countEffectTreeRows(

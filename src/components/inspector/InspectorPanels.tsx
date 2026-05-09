@@ -65,6 +65,7 @@ import {
   DialogTitle,
 } from "../ui/dialog";
 import { Input } from "../ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import {
   Select,
   SelectContent,
@@ -1452,6 +1453,9 @@ export function AdjustmentInspector({
   onSnapMiddle: () => void;
 }) {
   const effect = getAdjustmentEffectPackage(layer.effect.effectId);
+  const [openControlSectionKey, setOpenControlSectionKey] = useState<
+    string | null
+  >(null);
 
   function updateText(key: "name", value: string) {
     onChange((current) => ({ ...current, [key]: value }));
@@ -1664,8 +1668,13 @@ export function AdjustmentInspector({
       {(() => {
         // Resolve section metadata (string shorthand -> { key, label })
         function sectionMeta(
-          sec: string | { key: string; label: string; description?: string },
-        ): { key: string; label: string; description?: string } {
+          sec: NonNullable<AdjustmentEffectParamControl["section"]>,
+        ): {
+          key: string;
+          label: string;
+          description?: string;
+          display?: "panel" | "dialog";
+        } {
           return typeof sec === "string" ? { key: sec, label: sec } : sec;
         }
 
@@ -1792,6 +1801,7 @@ export function AdjustmentInspector({
         type SectionBucket = {
           label: string;
           description?: string;
+          display?: "panel" | "dialog";
           items: { key: string; inlineGroup?: string; node: ReactNode }[];
         };
         const sectionMap = new Map<string, SectionBucket>();
@@ -1810,6 +1820,7 @@ export function AdjustmentInspector({
               bucket = {
                 label: sec.label,
                 description: sec.description,
+                display: sec.display,
                 items: [],
               };
               sectionMap.set(sec.key, bucket);
@@ -1836,6 +1847,7 @@ export function AdjustmentInspector({
               bucket = {
                 label: sec.label,
                 description: sec.description,
+                display: sec.display,
                 items: [],
               };
               sectionMap.set(sec.key, bucket);
@@ -1889,22 +1901,39 @@ export function AdjustmentInspector({
         return (
           <>
             {unsectionedParamNodes}
-            {Array.from(sectionMap.entries()).map(([sectionKey, section]) => (
-              <div
-                key={sectionKey}
-                className="rounded-xl border border-[#2d313b] bg-[#141821]/60 p-3 grid gap-2.5"
-              >
-                <span className="text-[11px] font-extrabold text-[#9b9da7] uppercase tracking-wider">
-                  {section.label}
-                </span>
-                {section.description ? (
-                  <small className="text-[10px] text-[#737884] -mt-1.5">
-                    {section.description}
-                  </small>
-                ) : null}
-                {renderSectionItems(section.items)}
-              </div>
-            ))}
+            {Array.from(sectionMap.entries()).map(([sectionKey, section]) =>
+              section.display === "dialog" ? (
+                <Popover
+                  key={sectionKey}
+                  open={openControlSectionKey === sectionKey}
+                  onOpenChange={(open) =>
+                    setOpenControlSectionKey(open ? sectionKey : null)
+                  }
+                >
+                  <PopoverTrigger asChild>
+                    <button
+                      className="rounded-[8px] border border-[#2d313b] bg-[#171920] px-2.5 py-1.5 text-left text-[11px] font-bold text-[#dfe2ea] transition hover:border-[var(--clipper-accent)] hover:bg-[#20232c]"
+                      type="button"
+                    >
+                      {section.label}
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent align="start" side="left">
+                    {renderSectionItems(section.items)}
+                  </PopoverContent>
+                </Popover>
+              ) : (
+                <div
+                  key={sectionKey}
+                  className="rounded-xl border border-[#2d313b] bg-[#141821]/60 p-3 grid gap-2.5"
+                >
+                  <span className="text-[11px] font-extrabold text-[#9b9da7] uppercase tracking-wider">
+                    {section.label}
+                  </span>
+                  {renderSectionItems(section.items)}
+                </div>
+              ),
+            )}
             {unsectionedPointNodes}
           </>
         );

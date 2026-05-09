@@ -1,0 +1,188 @@
+id: clipper.adjustment.filmEmulation
+category: adjustment
+name: Film Emulation
+label: Film Emulation
+group: Practical
+defaultDuration: 3
+defaultParams: { "intensity": 0.82, "target": "camera", "stock": "warmNegative", "grain": 0.54, "grainSize": 1, "dust": 0.18, "scratches": 0.12, "halation": 0.34, "flicker": 0.18, "gateWeave": 0.1, "vignette": 0.22, "warmth": 0.42, "contrast": 0.18, "saturation": -0.08, "fade": 0.1, "motionSpeed": 1, "grainSpeed": 1, "dustSpeed": 1, "scratchSpeed": 1, "flickerSpeed": 1, "weaveSpeed": 1, "seed": 17 }
+paramControls:
+  - key: target
+    label: Target
+    type: select
+    defaultValue: camera
+    options: [{ "value": "camera", "label": "Camera" }, { "value": "frame", "label": "Frame" }]
+  - key: stock
+    label: Stock
+    type: select
+    defaultValue: warmNegative
+    options:
+      - value: warmNegative
+        label: Warm Negative
+      - value: printFilm
+        label: Print Film
+      - value: reversal
+        label: Reversal
+      - value: fadedArchive
+        label: Faded Archive
+      - value: monochrome
+        label: Monochrome
+  - key: intensity
+    label: Intensity
+    type: number
+    min: 0
+    max: 1
+    step: 0.01
+    defaultValue: 0.82
+  - key: grain
+    label: Grain
+    type: number
+    min: 0
+    max: 1.4
+    step: 0.01
+    defaultValue: 0.54
+  - key: grainSize
+    label: Grain Size
+    type: number
+    min: 0.35
+    max: 3
+    step: 0.05
+    defaultValue: 1
+  - key: halation
+    label: Halation
+    type: number
+    min: 0
+    max: 1
+    step: 0.01
+    defaultValue: 0.34
+  - key: dust
+    label: Dust
+    type: number
+    min: 0
+    max: 1
+    step: 0.01
+    defaultValue: 0.18
+  - key: scratches
+    label: Scratches
+    type: number
+    min: 0
+    max: 1
+    step: 0.01
+    defaultValue: 0.12
+  - key: flicker
+    label: Flicker
+    type: number
+    min: 0
+    max: 1
+    step: 0.01
+    defaultValue: 0.18
+  - key: motionSpeed
+    label: Speed
+    type: number
+    min: 0
+    max: 4
+    step: 0.05
+    defaultValue: 1
+  - key: gateWeave
+    label: Gate Weave
+    type: number
+    min: 0
+    max: 1
+    step: 0.01
+    defaultValue: 0.1
+  - key: vignette
+    label: Vignette
+    type: number
+    min: 0
+    max: 1
+    step: 0.01
+    defaultValue: 0.22
+  - key: warmth
+    label: Warmth
+    type: number
+    min: -1
+    max: 1
+    step: 0.01
+    defaultValue: 0.42
+  - key: contrast
+    label: Contrast
+    type: number
+    min: -1
+    max: 1
+    step: 0.01
+    defaultValue: 0.18
+  - key: saturation
+    label: Saturation
+    type: number
+    min: -1
+    max: 1
+    step: 0.01
+    defaultValue: -0.08
+  - key: fade
+    label: Fade
+    type: number
+    min: 0
+    max: 1
+    step: 0.01
+    defaultValue: 0.1
+  - key: seed
+    label: Seed
+    type: number
+    min: 1
+    max: 9999
+    step: 1
+    defaultValue: 17
+  - key: grainSpeed
+    label: Grain Speed
+    type: number
+    min: 0
+    max: 4
+    step: 0.05
+    defaultValue: 1
+    section:
+      key: filmEmulationSpeed
+      label: Speed
+      display: dialog
+  - key: dustSpeed
+    label: Dust Speed
+    type: number
+    min: 0
+    max: 4
+    step: 0.05
+    defaultValue: 1
+    section:
+      key: filmEmulationSpeed
+      label: Speed
+      display: dialog
+  - key: scratchSpeed
+    label: Scratch Speed
+    type: number
+    min: 0
+    max: 4
+    step: 0.05
+    defaultValue: 1
+    section:
+      key: filmEmulationSpeed
+      label: Speed
+      display: dialog
+  - key: flickerSpeed
+    label: Flicker Speed
+    type: number
+    min: 0
+    max: 4
+    step: 0.05
+    defaultValue: 1
+    section:
+      key: filmEmulationSpeed
+      label: Speed
+      display: dialog
+  - key: weaveSpeed
+    label: Weave Speed
+    type: number
+    min: 0
+    max: 4
+    step: 0.05
+    defaultValue: 1
+    section:
+      key: filmEmulationSpeed
+      label: Speed
+      display: dialog

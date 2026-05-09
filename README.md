@@ -108,6 +108,7 @@ Contributions are welcome. To keep the project maintainable:
 - Reuse existing React components and themed UI primitives where possible.
 - Keep shared editor/project state in the existing scoped Zustand stores instead of adding deep prop chains.
 - Place reusable domain logic in `src/core` or focused modules under `src/app` rather than growing large React components.
+- Add effects through package manifests, logic modules, and registry APIs documented in `docs/EFFECT_PACKAGES.md`; do not hardcode effect-specific UI/export branches.
 - Preserve the class/render-based composition authoring API for project-owned source files.
 - Update the relevant versioned memory file under `agent-log/` when making project changes.
 

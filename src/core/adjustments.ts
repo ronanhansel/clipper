@@ -158,8 +158,8 @@ export function filterAdjustmentExecutionPlan(
     return direction === "before" ? plan : { activeLayers: [], steps: [] };
   const steps =
     direction === "before"
-      ? plan.steps.slice(layerIndex + 1)
-      : plan.steps.slice(0, layerIndex);
+      ? plan.steps.slice(0, layerIndex)
+      : plan.steps.slice(layerIndex + 1);
   return { activeLayers: steps.map((step) => step.layer), steps };
 }
 

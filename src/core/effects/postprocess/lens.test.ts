@@ -52,8 +52,11 @@ import {
 } from "./passes";
 import {
   createDefaultExportPostProcessRenderers,
+  createDefaultPostProcessRenderer,
   getDefaultPostProcessPackages,
+  registerPostProcessPackage,
 } from "./registry";
+import { vhsTrackingPostProcessKind } from "./vhsTracking";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -604,8 +607,8 @@ describe("lens post-process pass collection", () => {
 
   it("preserves CSS-safe visual adjustments when lens is also active", () => {
     const layers: AdjustmentLayer[] = [
-      lensLayer({ focusX: 25 }),
       adjustmentLayer("blur", "clipper.adjustment.blur", { radius: 8 }),
+      lensLayer({ focusX: 25 }),
     ];
 
     expect(
@@ -621,8 +624,8 @@ describe("lens post-process pass collection", () => {
 
   it("splits visual adjustments around post-process layer for cumulative top-to-bottom output", () => {
     const layers: AdjustmentLayer[] = [
-      lensLayer({ focusX: 25 }),
       adjustmentLayer("blur", "clipper.adjustment.blur", { radius: 8 }),
+      lensLayer({ focusX: 25 }),
     ];
     const pass = applyAdjustmentLayersToPostProcessPasses(1.5, layers, 30, {
       width: 1920,
@@ -650,8 +653,8 @@ describe("lens post-process pass collection", () => {
 
   it("keeps filters above lens on final output when blur sits above lens", () => {
     const layers: AdjustmentLayer[] = [
-      adjustmentLayer("blur", "clipper.adjustment.blur", { radius: 8 }),
       lensLayer({ focusX: 25 }),
+      adjustmentLayer("blur", "clipper.adjustment.blur", { radius: 8 }),
     ];
     const pass = applyAdjustmentLayersToPostProcessPasses(1.5, layers, 30, {
       width: 1920,
@@ -674,6 +677,45 @@ describe("lens post-process pass collection", () => {
         30,
       ).filter,
     ).toBe("blur(8px)");
+  });
+
+  it("wraps film emulation overlays below lens into the lens source", () => {
+    const layers: AdjustmentLayer[] = [
+      adjustmentLayer("film", "clipper.adjustment.filmEmulation", {
+        grain: 0.4,
+        dust: 0.4,
+        scratches: 0.3,
+        halation: 0.2,
+        target: "camera",
+      }),
+      lensLayer({ focusX: 25 }),
+    ];
+    const pass = applyAdjustmentLayersToPostProcessPasses(1.5, layers, 30, {
+      width: 1920,
+      height: 1080,
+    })[0];
+
+    expect(
+      applyAdjustmentLayersToVisualStyleBeforeLayer(
+        1.5,
+        layers,
+        pass.sourceLayerId,
+        30,
+      ).overlays?.map((overlay) => overlay.id),
+    ).toEqual([
+      "film:film-emulation-grain",
+      "film:film-emulation-damage",
+      "film:film-emulation-halation",
+      "film:film-emulation-gate",
+    ]);
+    expect(
+      applyAdjustmentLayersToVisualStyleAfterLayer(
+        1.5,
+        layers,
+        pass.sourceLayerId,
+        30,
+      ).overlays,
+    ).toBeUndefined();
   });
 
   it("keeps adjustment filters cumulative in timeline order", () => {
@@ -720,12 +762,12 @@ describe("lens post-process pass collection", () => {
       getVisualStyleForAdjustmentPlan(
         filterAdjustmentExecutionPlan(plan, "before", lensStep?.layer.id),
       ).filter,
-    ).toBe("blur(4px)");
+    ).toBe("blur(8px)");
     expect(
       getVisualStyleForAdjustmentPlan(
         filterAdjustmentExecutionPlan(plan, "after", lensStep?.layer.id),
       ).filter,
-    ).toBe("blur(8px)");
+    ).toBe("blur(4px)");
     expect(lensStep?.postProcessPasses?.[0]).toMatchObject({
       sourceLayerId: "lens",
       kind: lensPostProcessKind,
@@ -910,6 +952,41 @@ describe("export post-process routing helpers", () => {
     expect(
       getDefaultPostProcessPackages().map((definition) => definition.kind),
     ).toContain(lensPostProcessKind);
+  });
+
+  it("exposes VHS tracking as a default post-process package", () => {
+    expect(
+      getDefaultPostProcessPackages().map((definition) => definition.kind),
+    ).toContain(vhsTrackingPostProcessKind);
+    expect(
+      createDefaultPostProcessRenderer(vhsTrackingPostProcessKind),
+    ).not.toBe(null);
+    expect(
+      createDefaultExportPostProcessRenderers(new Map()).some(
+        (renderer) => renderer.kind === vhsTrackingPostProcessKind,
+      ),
+    ).toBe(true);
+  });
+
+  it("registers post-process packages without editing preview or export call sites", () => {
+    registerPostProcessPackage({
+      kind: "test.postprocess.dynamic",
+      createRenderer: () =>
+        createDefaultPostProcessRenderer(lensPostProcessKind)!,
+      createExportRenderer: () => ({
+        kind: "test.postprocess.dynamic",
+        render: () => true,
+      }),
+    });
+
+    expect(
+      createDefaultPostProcessRenderer("test.postprocess.dynamic"),
+    ).not.toBe(null);
+    expect(
+      createDefaultExportPostProcessRenderers(new Map()).some(
+        (renderer) => renderer.kind === "test.postprocess.dynamic",
+      ),
+    ).toBe(true);
   });
 
   it("creates default export renderers from the package registry", () => {

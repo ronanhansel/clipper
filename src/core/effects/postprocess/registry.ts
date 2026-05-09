@@ -1,13 +1,4 @@
-import {
-  lensPostProcessKind,
-  withLensFrameBackground,
-  type LensPostProcessPass,
-} from "./lens";
-import {
-  createLensExportPostProcessRenderer,
-  createLensPostProcessRenderer,
-  type LensPostProcessRenderer,
-} from "./lensWebGlRenderer";
+import { builtInPostProcessPackages } from "./packages";
 import type { ExportPostProcessRenderer } from "./exportFrameBridge";
 import type { WebGlPostProcessRenderer } from "./webGlRenderer";
 import type { PostProcessPass } from "../types";
@@ -25,25 +16,22 @@ export type PostProcessPackage<
   withFrameBackground?: (pass: TPass, background: unknown) => TPass;
 };
 
-const defaultPostProcessPackages: readonly PostProcessPackage[] = [
-  {
-    kind: lensPostProcessKind,
-    createRenderer: () =>
-      createLensPostProcessRenderer() as PostProcessRenderer,
-    createExportRenderer: (renderer) =>
-      createLensExportPostProcessRenderer(
-        renderer as LensPostProcessRenderer,
-      ) as ExportPostProcessRenderer,
-    withFrameBackground: (pass, background) =>
-      withLensFrameBackground(
-        pass as LensPostProcessPass,
-        background,
-      ) as PostProcessPass,
-  },
+const postProcessPackages: PostProcessPackage[] = [
+  ...builtInPostProcessPackages,
 ];
 
+export function registerPostProcessPackage(
+  packageDefinition: PostProcessPackage,
+) {
+  const index = postProcessPackages.findIndex(
+    (candidate) => candidate.kind === packageDefinition.kind,
+  );
+  if (index >= 0) postProcessPackages[index] = packageDefinition;
+  else postProcessPackages.push(packageDefinition);
+}
+
 export function getDefaultPostProcessPackages(): readonly PostProcessPackage[] {
-  return defaultPostProcessPackages;
+  return postProcessPackages;
 }
 
 export function createDefaultPostProcessRenderer(

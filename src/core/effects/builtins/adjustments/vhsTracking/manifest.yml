@@ -1,0 +1,92 @@
+id: clipper.adjustment.vhsTracking
+category: adjustment
+name: VHS Tracking
+label: VHS Tracking
+group: Practical
+defaultDuration: 3
+defaultParams: { "intensity": 0.72, "speed": 1, "horizontalTear": 0.72, "verticalRoll": 0.22, "jitter": 0.42, "bandSize": 0.18, "chromaShift": 2.4, "scanlines": 0.28, "noise": 0.16, "dropout": 0.16, "tapeStretch": 0.2, "seed": 23 }
+paramControls:
+  - key: intensity
+    label: Intensity
+    type: number
+    min: 0
+    max: 1.5
+    step: 0.01
+    defaultValue: 0.72
+  - key: speed
+    label: Speed
+    type: number
+    min: 0
+    max: 5
+    step: 0.05
+    defaultValue: 1
+  - key: horizontalTear
+    label: Horizontal Tear
+    type: number
+    min: 0
+    max: 1.5
+    step: 0.01
+    defaultValue: 0.72
+  - key: verticalRoll
+    label: Vertical Roll
+    type: number
+    min: -1
+    max: 1
+    step: 0.01
+    defaultValue: 0.22
+  - key: jitter
+    label: Jitter
+    type: number
+    min: 0
+    max: 1.5
+    step: 0.01
+    defaultValue: 0.42
+  - key: bandSize
+    label: Tracking Band Size
+    type: number
+    min: 0.02
+    max: 0.65
+    step: 0.01
+    defaultValue: 0.18
+  - key: chromaShift
+    label: Chroma Shift px
+    type: number
+    min: -24
+    max: 24
+    step: 0.5
+    defaultValue: 2.4
+  - key: scanlines
+    label: Scanlines
+    type: number
+    min: 0
+    max: 1
+    step: 0.01
+    defaultValue: 0.28
+  - key: noise
+    label: Snow Noise
+    type: number
+    min: 0
+    max: 1
+    step: 0.01
+    defaultValue: 0.16
+  - key: dropout
+    label: Dropout
+    type: number
+    min: 0
+    max: 1
+    step: 0.01
+    defaultValue: 0.16
+  - key: tapeStretch
+    label: Tape Stretch
+    type: number
+    min: 0
+    max: 1
+    step: 0.01
+    defaultValue: 0.2
+  - key: seed
+    label: Seed
+    type: number
+    min: 1
+    max: 9999
+    step: 1
+    defaultValue: 23

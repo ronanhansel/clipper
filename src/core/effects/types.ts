@@ -7,7 +7,6 @@ import type {
   TransitionLayer,
   Point,
 } from "../types";
-import type { LensPostProcessPass } from "./postprocess/lens";
 
 export type BasePostProcessPass = {
   id: string;
@@ -20,7 +19,7 @@ export type BasePostProcessPass = {
 export type UnknownPostProcessPass = BasePostProcessPass &
   Record<string, unknown>;
 
-export type PostProcessPass = LensPostProcessPass | UnknownPostProcessPass;
+export type PostProcessPass = UnknownPostProcessPass;
 
 export type AdjustmentVisualStyle = {
   filter?: string;
@@ -74,7 +73,12 @@ export type AdjustmentEffectDisableCondition = {
 
 export type AdjustmentEffectSection =
   | string
-  | { key: string; label: string; description?: string };
+  | {
+      key: string;
+      label: string;
+      description?: string;
+      display?: "panel" | "dialog";
+    };
 
 export type AdjustmentEffectNumberParamControl = {
   key: string;

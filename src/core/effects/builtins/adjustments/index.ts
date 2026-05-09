@@ -8,6 +8,8 @@ import colourGradeManifest from "./colourGrade/manifest.yml?raw";
 import { colourGradeLogic } from "./colourGrade/logic";
 import directionalBlurManifest from "./directionalBlur/manifest.yml?raw";
 import { directionalBlurLogic } from "./directionalBlur/logic";
+import filmEmulationManifest from "./filmEmulation/manifest.yml?raw";
+import { filmEmulationLogic } from "./filmEmulation/logic";
 import filmDustManifest from "./filmDust/manifest.yml?raw";
 import { filmDustLogic } from "./filmDust/logic";
 import filmScratchesManifest from "./filmScratches/manifest.yml?raw";
@@ -34,6 +36,8 @@ import speedChangeManifest from "./speedChange/manifest.yml?raw";
 import { speedChangeLogic } from "./speedChange/logic";
 import vignetteManifest from "./vignette/manifest.yml?raw";
 import { vignetteLogic } from "./vignette/logic";
+import vhsTrackingManifest from "./vhsTracking/manifest.yml?raw";
+import { vhsTrackingLogic } from "./vhsTracking/logic";
 
 export { getFrameSkipEvery, quantizeFrameSkipTime } from "./frameSkip/logic";
 export { getLoopWindow } from "./loopStutter/logic";
@@ -54,6 +58,10 @@ export const colourGradeEffect = createAdjustmentEffectPackage(
 export const directionalBlurEffect = createAdjustmentEffectPackage(
   directionalBlurManifest,
   directionalBlurLogic,
+);
+export const filmEmulationEffect = createAdjustmentEffectPackage(
+  filmEmulationManifest,
+  filmEmulationLogic,
 );
 export const filmDustEffect = createAdjustmentEffectPackage(
   filmDustManifest,
@@ -107,6 +115,10 @@ export const vignetteEffect = createAdjustmentEffectPackage(
   vignetteManifest,
   vignetteLogic,
 );
+export const vhsTrackingEffect = createAdjustmentEffectPackage(
+  vhsTrackingManifest,
+  vhsTrackingLogic,
+);
 
 export const builtInAdjustmentEffects = [
   frameSkipEffect,
@@ -121,9 +133,11 @@ export const builtInAdjustmentEffects = [
   radialBlurEffect,
   glowBlurEffect,
   pixelBlurEffect,
+  filmEmulationEffect,
   filmDustEffect,
   filmScratchesEffect,
   vignetteEffect,
   lightLeakEffect,
   lensEffect,
+  vhsTrackingEffect,
 ] as const satisfies readonly AdjustmentEffectPackage[];

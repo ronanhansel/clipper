@@ -19,6 +19,7 @@ Clipper is a desktop-first Electron and Vite editor for TypeScript-authored moti
 - Move deterministic project transformations and timeline/render calculations into `src/core` with direct tests.
 - Use shared UI primitives for fundamentals instead of one-off browser controls or inline control implementations.
 - Prefer small named modules over large files with unrelated constants, state mutation, rendering, and platform I/O.
+- Effects are package-first. Add manifests, logic, controls, render/export hooks, and tests through package registries instead of hardcoding package ids in app panels or export paths. See `docs/EFFECT_PACKAGES.md`.
 
 ## State Management
 

@@ -1548,17 +1548,8 @@ export const DirectTimelinePanel = memo(function DirectTimelinePanel({
     if (!selectedMotionKeys.has(`${part.id}:${marker.id}`))
       return [{ part, marker }];
     const targets = selectedMotionMarkers.flatMap((selection) => {
-      const selectedPart = motionTimeline.find(
-        (item) => item.id === selection.partId,
-      );
-      const selectedMarker = selectedPart?.motionMarkers.find(
-        (item) => item.id === selection.markerId,
-      );
-      return selectedPart &&
-        selectedMarker &&
-        !isMotionMarkerLocked(selectedMarker)
-        ? [{ part: selectedPart, marker: selectedMarker }]
-        : [];
+      const target = getMotionSelectionTarget(selection);
+      return target ? [target] : [];
     });
     return targets.length > 0
       ? uniqueTimelineResizeTargets(targets)
@@ -1822,22 +1813,32 @@ export const DirectTimelinePanel = memo(function DirectTimelinePanel({
     function buildNextMotions(
       effectiveDelta: number,
     ): Array<AbsoluteTimelineMarker<MotionMarker>> {
-      const resizedMarkers = motions.flatMap(({ part, marker }) => {
+      const resizedMarkers = motions.map(({ part, marker }) => {
         const absoluteMarkers = getAbsoluteTimelineMarkerResizeMarkers(
           part.id === TIMELINE_MOTION_PART_ID
             ? motionTimeline
             : timelineMotionViews,
           { part, marker },
         );
-        return getAbsoluteMarkerResizeState(
+        const resized = getAbsoluteMarkerResizeState(
           absoluteMarkers,
           marker.id,
           part.id,
           action,
           effectiveDelta,
         );
+        return (
+          resized.find(
+            (item) => item.id === marker.id && item.sourcePartId === part.id,
+          ) ?? null
+        );
       });
-      return uniqueAbsoluteTimelineMarkers(resizedMarkers);
+      return uniqueAbsoluteTimelineMarkers(
+        resizedMarkers.filter(
+          (marker): marker is AbsoluteTimelineMarker<MotionMarker> =>
+            Boolean(marker),
+        ),
+      );
     }
 
     function getNextState(clientX: number, snap: boolean) {
@@ -1936,7 +1937,12 @@ export const DirectTimelinePanel = memo(function DirectTimelinePanel({
     part: TimelinePart;
     marker: MotionMarker;
   }) {
-    return getAbsoluteTimelineMarkerResizeMarkers(motionTimeline, target);
+    return getAbsoluteTimelineMarkerResizeMarkers(
+      target.part.id === TIMELINE_MOTION_PART_ID
+        ? motionTimeline
+        : timelineMotionViews,
+      target,
+    );
   }
 
   function getAbsoluteMarkerResizeState<
