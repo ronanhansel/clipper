@@ -68,9 +68,12 @@ export function evaluateLayerAnimations(animations: LayerAnimation[], time: numb
     if (animation.enabled === false) continue;
 
     const style = evaluateLayerAnimation(animation, time);
+    const beforeStart = time < (animation.options.delay ?? 0);
 
     for (const key in style) {
+      if (beforeStart && combined[key] !== undefined) continue;
       if (key === "transform" && combined.transform !== undefined && style.transform !== undefined) {
+        if (beforeStart) continue;
         combined.transform = `${combined.transform} ${style.transform}`;
       } else if (style[key] !== undefined) {
         combined[key] = style[key];

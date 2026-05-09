@@ -2060,50 +2060,50 @@ function AppContent({
       const targetClip = current.timelines
         ?.find((timeline) => timeline.id === scene.id)
         ?.clips.find((clip) => clip.id === clipId);
-      const is3dClip = targetClip?.renderMode === "webgl";
-      const currentComposition3dGraph = is3dClip
-        ? (part.composition3dGraph as
-            | import("./core/types").Composition3dGraphState
-            | undefined)
-        : undefined;
+      if (!targetClip) return current;
+      const is3dClip = (targetClip.renderMode ?? part.renderMode) === "webgl";
+      const targetCompositionId = targetClip.compositionId;
+      const targetFilePath = part.filePath;
+      const currentComposition = [
+        ...(current.compositionLibrary ?? []),
+        ...(current.compositions ?? []),
+      ].find(
+        (composition) =>
+          composition.id === targetCompositionId ||
+          composition.filePath === targetFilePath,
+      );
       const nextGraph = updater(
         is3dClip
-          ? (currentComposition3dGraph as AnimationGraphState | undefined)
-          : targetClip?.animationGraph,
+          ? ((currentComposition?.composition3dGraph ?? part.composition3dGraph) as
+              | AnimationGraphState
+              | undefined)
+          : currentComposition?.animationGraph,
       );
-      const targetCompositionId = targetClip?.compositionId;
-      const targetFilePath = part.filePath;
-      const nextComposition3dGraph = is3dClip
-        ? (nextGraph as import("./core/types").Composition3dGraphState)
-        : (nextGraph as import("./core/types").Composition3dGraphState);
+      const updateComposition = (composition: CompositionClip) => {
+        if (
+          composition.id !== targetCompositionId &&
+          composition.filePath !== targetFilePath
+        )
+          return composition;
+        if (is3dClip)
+          return {
+            ...composition,
+            renderMode: webglRenderMode,
+            composition3dGraph:
+              nextGraph as import("./core/types").Composition3dGraphState,
+          };
+        return { ...composition, animationGraph: nextGraph };
+      };
       const webglRenderMode = "webgl" as const;
       return {
         ...current,
         compositionLibrary:
-          is3dClip && current.compositionLibrary
-            ? current.compositionLibrary.map((composition) =>
-                composition.id === targetCompositionId ||
-                composition.filePath === targetFilePath
-                  ? {
-                      ...composition,
-                      renderMode: webglRenderMode,
-                      composition3dGraph: nextComposition3dGraph,
-                    }
-                  : composition,
-              )
+          current.compositionLibrary
+            ? current.compositionLibrary.map(updateComposition)
             : current.compositionLibrary,
         compositions:
-          is3dClip && current.compositions
-            ? current.compositions.map((composition) =>
-                composition.id === targetCompositionId ||
-                composition.filePath === targetFilePath
-                  ? {
-                      ...composition,
-                      renderMode: webglRenderMode,
-                      composition3dGraph: nextComposition3dGraph,
-                    }
-                  : composition,
-              )
+          current.compositions
+            ? current.compositions.map(updateComposition)
             : current.compositions,
         timelines: (current.timelines ?? []).map((timeline) =>
           timeline.id === scene.id
@@ -2113,7 +2113,7 @@ function AppContent({
                   clip.id === clipId
                     ? is3dClip
                       ? { ...clip, renderMode: webglRenderMode }
-                      : { ...clip, animationGraph: nextGraph }
+                      : clip
                     : clip,
                 ),
               }

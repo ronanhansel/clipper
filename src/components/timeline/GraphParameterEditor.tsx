@@ -36,12 +36,12 @@ export function GraphParameterEditor({
 }) {
   const isTimePopup = variant === "timePopup";
   return (
-    <div className={isTimePopup ? "grid gap-3" : "grid gap-3"}>
+    <div className={isTimePopup ? "grid gap-2 overflow-visible" : "grid gap-3 overflow-visible"}>
       {schema.groups.map((group) =>
         group.label ? (
           <GraphParameterGroup key={group.id} group={group} variant={variant} onChange={onChange} />
         ) : (
-          <div key={group.id} className={isTimePopup ? "grid gap-2" : "grid gap-1"}>
+          <div key={group.id} className={isTimePopup ? "grid gap-1.5" : "grid gap-1"}>
             {group.fields.map((field) => (
               <GraphParameterInlineField
                 key={field.key}
@@ -68,12 +68,12 @@ function GraphParameterGroup({
 }) {
   const isTimePopup = variant === "timePopup";
   return (
-    <div className={isTimePopup ? "grid gap-2" : "grid gap-1.5"}>
+    <div className={isTimePopup ? "grid gap-1.5" : "grid gap-1.5"}>
       <div className={isTimePopup ? "text-[14px] font-extrabold leading-none text-[#f3f6fb]" : "text-[10px] font-bold text-[#7f8794]"}>
         {group.label}
       </div>
       <div
-        className={isTimePopup ? "grid gap-2" : "grid gap-2"}
+        className={isTimePopup ? "grid gap-1.5" : "grid gap-2"}
         style={{ gridTemplateColumns: `repeat(${group.columns ?? 1}, minmax(0, 1fr))` }}
       >
         {group.fields.map((field) => (
@@ -104,11 +104,11 @@ function GraphParameterInlineField({
   const displayValue = getNumberFieldDisplayValue(field, split.value);
   const isTimePopup = variant === "timePopup";
   return (
-    <label className={isTimePopup ? "grid grid-cols-[86px_minmax(0,1fr)] items-center gap-2.5" : "grid grid-cols-[78px_minmax(0,1fr)] items-center gap-2"}>
+    <label className={isTimePopup ? "grid grid-cols-[76px_minmax(0,1fr)] items-center gap-2" : "grid grid-cols-[78px_minmax(0,1fr)] items-center gap-2"}>
       <span className={isTimePopup ? "text-[11px] font-extrabold leading-none tracking-[-0.02em] text-[#8e97a7]" : "text-[10px] font-bold text-[#7f8794]"}>
         {field.label}
       </span>
-      <div className={isTimePopup ? "grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-1.5 rounded-[7px] border border-transparent bg-[#0a1019]/70 px-2 py-1 transition focus-within:border-[#526582] focus-within:bg-[#0b1018]" : "grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-2 rounded border border-transparent bg-transparent px-1 transition hover:bg-[#141b27] focus-within:border-[#3d4b62] focus-within:bg-[#0b1018]"}>
+      <div className={isTimePopup ? "grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-1.5 rounded-[7px] border border-transparent bg-[#0a1019]/70 px-2 py-0.5 transition focus-within:border-[#526582] focus-within:bg-[#0b1018]" : "grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-2 rounded border border-transparent bg-transparent px-1 transition hover:bg-[#141b27] focus-within:border-[#3d4b62] focus-within:bg-[#0b1018]"}>
         <span className={isTimePopup ? "min-w-[10px] text-left text-[11px] font-extrabold leading-none text-[#8e97a7]" : "min-w-[12px] text-left text-[10px] font-bold text-[#7f8794]"}>
           {split.unit}
         </span>
@@ -182,7 +182,7 @@ function GraphParameterTextField({
   );
   if (inline) {
     return (
-      <label className={isTimePopup ? "grid grid-cols-[86px_1fr] items-center gap-2.5" : "grid grid-cols-[78px_1fr] items-center gap-2"}>
+      <label className={isTimePopup ? "grid grid-cols-[76px_1fr] items-center gap-2" : "grid grid-cols-[78px_1fr] items-center gap-2"}>
         <span className={isTimePopup ? "text-[11px] font-extrabold leading-none tracking-[-0.02em] text-[#8e97a7]" : "text-[10px] font-bold text-[#7f8794]"}>{field.label}</span>
         {control}
       </label>
@@ -214,7 +214,7 @@ function GraphParameterSelectField({
   const isTimePopup = variant === "timePopup";
   const control = (
     <Select value={field.value} onValueChange={(value) => onChange(field.key, value)}>
-      <SelectTrigger className={isTimePopup ? "h-7 flex-row-reverse justify-start rounded-[7px] border-transparent bg-[#0a1019]/70 px-2 text-[11px] font-extrabold leading-none text-[#f0f4fb] hover:bg-[#0c1420] focus:border-[#526582] focus:ring-0 [&>span]:ml-auto [&>span]:text-right" : "h-6 flex-row-reverse justify-start rounded border-transparent bg-[#0c121b] px-1.5 text-[12px] font-semibold text-[#e4e9f2] hover:bg-[#141b27] focus:border-[#3d4b62] focus:ring-0 [&>span]:ml-auto [&>span]:text-right"}>
+      <SelectTrigger className={isTimePopup ? "h-6 flex-row-reverse justify-start rounded-[7px] border-transparent bg-[#0a1019]/70 px-2 text-[11px] font-extrabold leading-none text-[#f0f4fb] hover:bg-[#0c1420] focus:border-[#526582] focus:ring-0 [&>span]:ml-auto [&>span]:text-right" : "h-6 flex-row-reverse justify-start rounded border-transparent bg-[#0c121b] px-1.5 text-[12px] font-semibold text-[#e4e9f2] hover:bg-[#141b27] focus:border-[#3d4b62] focus:ring-0 [&>span]:ml-auto [&>span]:text-right"}>
         <SelectValue />
       </SelectTrigger>
       <SelectContent className="z-[6000]">
@@ -230,7 +230,7 @@ function GraphParameterSelectField({
   );
   if (inline) {
     return (
-      <label className={isTimePopup ? "grid grid-cols-[86px_1fr] items-center gap-2.5" : "grid grid-cols-[78px_1fr] items-center gap-2"}>
+      <label className={isTimePopup ? "grid grid-cols-[76px_1fr] items-center gap-2" : "grid grid-cols-[78px_1fr] items-center gap-2"}>
         <span className={isTimePopup ? "text-[11px] font-extrabold leading-none tracking-[-0.02em] text-[#8e97a7]" : "text-[10px] font-bold text-[#7f8794]"}>{field.label}</span>
         {control}
       </label>

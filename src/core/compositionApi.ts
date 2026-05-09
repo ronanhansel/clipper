@@ -72,12 +72,14 @@ export type CompositionProps = {
     animations?: LayerAnimation[];
     elements?: Renderable[];
   };
+  animationGraph?: JsonValue;
   composition3dGraph?: JsonValue;
   render: (context: RenderContext) => Renderable[];
 };
 
 export type Composition3DProps = Omit<CompositionProps, "render" | "renderMode" | "background"> & {
   background?: CompositionProps["background"];
+  animationGraph?: JsonValue;
   composition3dGraph?: JsonValue;
   render?: (context: RenderContext) => Renderable[];
 };
@@ -268,6 +270,7 @@ export class Composition {
   renderMode?: CompositionProps["renderMode"];
   frame: CompositionProps["frame"];
   background?: CompositionProps["background"];
+  animationGraph?: CompositionProps["animationGraph"];
   composition3dGraph?: CompositionProps["composition3dGraph"];
   render: (context: RenderContext) => Renderable[];
 
@@ -278,6 +281,7 @@ export class Composition {
     this.renderMode = props.renderMode;
     this.frame = props.frame;
     this.background = props.background;
+    this.animationGraph = props.animationGraph;
     this.composition3dGraph = props.composition3dGraph;
     this.render = props.render;
   }

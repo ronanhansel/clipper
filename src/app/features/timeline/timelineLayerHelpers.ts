@@ -10,7 +10,6 @@ export function timelineClipFromPart(item: Part): TimelineClip {
     duration: item.duration,
     prerender: item.prerender || undefined,
     motionMarkers: item.motionMarkers ?? [],
-    animationGraph: item.animationGraph,
     renderMode: item.renderMode,
   };
 }

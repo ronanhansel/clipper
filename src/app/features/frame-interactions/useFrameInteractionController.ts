@@ -289,10 +289,9 @@ export function useFrameInteractionController(params: FrameInteractionController
   function finishCommittedObjectDrag(objects: SelectionPayload["objects"]) {
     objectDragRef.current = null;
     objectDragDeltaRef.current = { x: 0, y: 0 };
-    requestAnimationFrame(() => {
-      clearObjectDragTransforms(objects);
-      clearFrameSelectionBoxDragTransform();
-    });
+    // Leave committed drag offsets on the object and selection DOM until their
+    // bounds props update; each render component clears them in layout effect.
+    void objects;
     clearObjectSnapGuides();
   }
 

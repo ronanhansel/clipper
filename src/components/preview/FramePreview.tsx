@@ -502,6 +502,8 @@ export const FrameObjectView = memo(function FrameObjectView({ animationsEnabled
   useLayoutEffect(() => {
     const element = objectRef.current;
     if (!element || renderMode === "export") return;
+    element.style.removeProperty("--clipper-drag-x");
+    element.style.removeProperty("--clipper-drag-y");
     element.style.removeProperty("--clipper-resize-left");
     element.style.removeProperty("--clipper-resize-top");
     element.style.removeProperty("--clipper-resize-width");
@@ -659,7 +661,9 @@ function getSplitTextTokenStyle(animations: NonNullable<FrameObject["animations"
     const tokenTime = split.repeatScope === "item"
       ? time - tokenOffset
       : getSequenceRepeatTokenTime(animation, time, tokenOffset, count);
-    const style = evaluateLayerAnimation(split.repeatScope === "item" ? animation : { ...animation, options: { ...animation.options, repeat: undefined, repeatDelay: undefined } }, tokenTime);
+    const beforeStart = tokenTime < (animation.options.delay ?? 0);
+    const effectiveTime = beforeStart ? (animation.options.delay ?? 0) : tokenTime;
+    const style = evaluateLayerAnimation(split.repeatScope === "item" ? animation : { ...animation, options: { ...animation.options, repeat: undefined, repeatDelay: undefined } }, effectiveTime);
     for (const key in style) {
       if (key === "transform" && combined.transform && style.transform) combined.transform = `${combined.transform} ${style.transform}`;
       else if (style[key] !== undefined) combined[key as keyof CSSProperties] = style[key] as never;
@@ -900,6 +904,13 @@ export function SelectionOverlayBox({ objectId, bounds, cameraTransform, frameSc
     : { left: `var(--clipper-selection-preview-left, ${viewportBounds.x + overlayOffset.left}px)`, top: `var(--clipper-selection-preview-top, ${viewportBounds.y + overlayOffset.top}px)`, width: `var(--clipper-selection-preview-width, ${viewportBounds.width}px)`, height: `var(--clipper-selection-preview-height, ${viewportBounds.height}px)`, transform: "translate(var(--clipper-drag-x, 0px), var(--clipper-drag-y, 0px))", zIndex: 70 } as CSSProperties;
 
   useLayoutEffect(() => {
+    const element = boxRef.current;
+    if (!element) return;
+    element.style.removeProperty("--clipper-drag-x");
+    element.style.removeProperty("--clipper-drag-y");
+  }, [bounds.height, bounds.width, bounds.x, bounds.y]);
+
+  useLayoutEffect(() => {
     if (!portal || !portalHost || !frameViewportRef) return;
     const host = portalHost;
     const viewportRef = frameViewportRef;
@@ -1076,6 +1087,7 @@ export const BackgroundLayerView = memo(function BackgroundLayerView({ animation
 }, areBackgroundLayerPropsEqual);
 
 export const BackgroundElementView = memo(function BackgroundElementView({ element, exportTileFrameBounds, frameScale, previewTime, renderMode }: { duration: number; element: EvaluatedFrameObject; exportTileFrameBounds?: ExportTileFrameBounds; frameScale: number; previewTime: number; renderMode: "preview" | "export" }) {
+  const elementRef = useRef<HTMLDivElement | null>(null);
   const animation = { style: element.renderStyle, content: element.renderContent };
   const objectTransform = typeof element.style.transform === "string" ? element.style.transform : undefined;
   const animationTransform = typeof animation.style.transform === "string" ? animation.style.transform : undefined;
@@ -1092,8 +1104,15 @@ export const BackgroundElementView = memo(function BackgroundElementView({ eleme
   const content = animation.content ?? element.content;
   const textLines = useMemo(() => content?.split("\n") ?? [], [content]);
 
+  useLayoutEffect(() => {
+    const target = elementRef.current;
+    if (!target || renderMode === "export") return;
+    target.style.removeProperty("--clipper-drag-x");
+    target.style.removeProperty("--clipper-drag-y");
+  }, [element.bounds.x, element.bounds.y, renderMode]);
+
   return (
-    <div className="absolute flex select-none flex-col justify-center overflow-hidden whitespace-pre-line" data-background-element-id={element.locked ? undefined : element.id} style={{ ...style, ...(element.locked ? { opacity: 0.6 } : {}) }}>
+    <div ref={elementRef} className="absolute flex select-none flex-col justify-center overflow-hidden whitespace-pre-line" data-background-element-id={element.locked ? undefined : element.id} style={{ ...style, ...(element.locked ? { opacity: 0.6 } : {}) }}>
       {element.type === "text" ? textLines.map((line, index) => <span key={`${line}-${index}`}>{line}</span>) : null}
       {element.type === "svg" && content ? <ExportSvgContent bounds={element.bounds} content={content} exportTileFrameBounds={exportTileFrameBounds} frameScale={frameScale} markupKind="svg" owner={{ id: element.id, name: element.name, type: element.type, layer: "background" }} renderMode={renderMode} style={style} /> : null}
       {(element.type === "html" || element.type === "template") && content ? <HtmlContent content={content} /> : null}

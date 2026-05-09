@@ -358,7 +358,6 @@ export type TimelineClip = {
   duration?: number;
   prerender?: boolean;
   motionMarkers?: MotionMarker[];
-  animationGraph?: AnimationGraphState;
   renderMode?: CompositionRenderMode;
 };
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compositionToSource } from "./compositionSource";
+import { compositionFromSource, compositionToSource } from "./compositionSource";
 import { applyAnimationGraphToComposition, createDefaultTimelineLayerState, defaultTimelineLayerState, deleteCompositionFromProject, getSceneFromProject, normalizeAnimationGraphState, normalizeProject, replacePartInProject, serializeProjectForSave, withRequiredTimelineLayerTypes } from "./project";
 import { motionBlocksToMotionMarkers } from "./motionEffects";
 import type { CompositionClip, ProjectManifest } from "./types";
@@ -388,6 +388,420 @@ describe("project normalization", () => {
     expect(applied.objects[0].animations?.[0]).toMatchObject({ id: "graph:groupNode:scale", keyframes: { scale: [0, 1] } });
   });
 
+  it("keeps grouped graph-authored nodes behavior-equivalent to direct graph nodes", () => {
+    const part = {
+      ...composition,
+      objects: [{ id: "text", name: "Text", type: "text" as const, selector: ".text", bounds: { x: 0, y: 0, width: 100, height: 40 }, style: {}, animations: [] }],
+    };
+    const direct = applyAnimationGraphToComposition(part, {
+      nodes: {},
+      customNodes: {
+        effect: { kind: "animation", label: "Opacity", scopeKey: "text", details: { property: "opacity" } },
+        time: { kind: "time", label: "Time", scopeKey: "text", details: { delay: "1.2s", duration: "0.7s" } },
+      },
+      edges: [
+        { id: "effect->time", fromNodeId: "effect", fromPort: "bottom", toNodeId: "time", toPort: "top" },
+        { id: "time->layer", fromNodeId: "time", fromPort: "bottom", toNodeId: "layer:text", toPort: "top" },
+      ],
+      parameters: { effect: { from: "0", to: "1" } },
+    });
+    const grouped = applyAnimationGraphToComposition(part, {
+      nodes: {},
+      customNodes: {
+        groupNode: { kind: "group", label: "Group", scopeKey: "text", details: { groupId: "groupA" } },
+      },
+      groups: {
+        groupA: {
+          id: "groupA",
+          name: "Group",
+          outNodeId: "out",
+          nodes: {},
+          customNodes: {
+            effect: { kind: "animation", label: "Opacity", scopeKey: "groupA", details: { property: "opacity" } },
+            time: { kind: "time", label: "Time", scopeKey: "groupA", details: { delay: "1.2s", duration: "0.7s" } },
+          },
+          edges: [
+            { id: "effect->time", fromNodeId: "effect", fromPort: "bottom", toNodeId: "time", toPort: "top" },
+            { id: "time->out", fromNodeId: "time", fromPort: "bottom", toNodeId: "out", toPort: "top" },
+          ],
+          parameters: { effect: { from: "0", to: "1" } },
+        },
+      },
+      edges: [{ id: "group->layer", fromNodeId: "groupNode", fromPort: "bottom", toNodeId: "layer:text", toPort: "top" }],
+    });
+
+    const directAnimation = direct.objects[0].animations?.[0];
+    const groupedAnimation = grouped.objects[0].animations?.[0];
+    expect(groupedAnimation).toMatchObject({ keyframes: directAnimation?.keyframes, options: directAnimation?.options });
+  });
+
+  it("keeps grouped derived time nodes connected to their source layer animation", () => {
+    const part = {
+      ...composition,
+      objects: [{
+        id: "text",
+        name: "Text",
+        type: "text" as const,
+        selector: ".text",
+        bounds: { x: 0, y: 0, width: 100, height: 40 },
+        style: {},
+        animations: [{ id: "fade", keyframes: { opacity: [0, 1] as const }, options: { delay: 1.2, duration: 0.7, type: "tween" as const } }],
+      }],
+    };
+    const grouped = applyAnimationGraphToComposition(part, {
+      nodes: {},
+      customNodes: {
+        groupNode: { kind: "group", label: "Group", scopeKey: "text", details: { groupId: "groupA" } },
+      },
+      groups: {
+        groupA: {
+          id: "groupA",
+          name: "Group",
+          outNodeId: "out",
+          nodes: {},
+          customNodes: {
+            "time:text:0": { kind: "time", label: "Time", scopeKey: "groupA", details: { delay: "1.2s", duration: "0.7s" } },
+          },
+          edges: [
+            { id: "animation:text:anim:fade:opacity->time:text:0", fromNodeId: "animation:text:anim:fade:opacity", fromPort: "bottom", toNodeId: "time:text:0", toPort: "top" },
+            { id: "time:text:0->out", fromNodeId: "time:text:0", fromPort: "bottom", toNodeId: "out", toPort: "top" },
+          ],
+        },
+      },
+      edges: [
+        { id: "animation:text:anim:fade:opacity->groupNode", fromNodeId: "animation:text:anim:fade:opacity", fromPort: "bottom", toNodeId: "groupNode", toPort: "top" },
+        { id: "groupNode->layer:text", fromNodeId: "groupNode", fromPort: "bottom", toNodeId: "layer:text", toPort: "top" },
+      ],
+    });
+
+    expect(grouped.objects[0].animations).toHaveLength(1);
+    expect(grouped.objects[0].animations?.[0]).toMatchObject({ keyframes: { opacity: [0, 1] }, options: { delay: 1.2, duration: 0.7 } });
+  });
+
+  it("keeps grouped temporal chains delay-equivalent to the ungrouped graph", () => {
+    const part = {
+      ...composition,
+      objects: [{ id: "text", name: "Text", type: "text" as const, selector: ".text", bounds: { x: 0, y: 0, width: 100, height: 40 }, style: {}, animations: [] }],
+    };
+    const direct = applyAnimationGraphToComposition(part, {
+      nodes: {},
+      customNodes: {
+        effect: { kind: "animation", label: "Opacity", scopeKey: "text", details: { property: "opacity" } },
+        anchor: { kind: "time", label: "Anchor", scopeKey: "text", details: { delay: "1.2s", duration: "0.4s" } },
+        time: { kind: "time", label: "Time", scopeKey: "text", details: { delay: "0.3s", duration: "0.7s" } },
+      },
+      edges: [
+        { id: "effect->time", fromNodeId: "effect", fromPort: "bottom", toNodeId: "time", toPort: "top" },
+        { id: "anchor->time", fromNodeId: "anchor", fromPort: "bottom", toNodeId: "time", toPort: "top" },
+        { id: "time->layer", fromNodeId: "time", fromPort: "bottom", toNodeId: "layer:text", toPort: "top" },
+      ],
+      parameters: { effect: { from: "0", to: "1" } },
+    });
+    const grouped = applyAnimationGraphToComposition(part, {
+      nodes: {},
+      customNodes: {
+        anchor: { kind: "time", label: "Anchor", scopeKey: "text", details: { delay: "1.2s", duration: "0.4s" } },
+        groupNode: { kind: "group", label: "Group", scopeKey: "text", details: { groupId: "groupA" } },
+      },
+      groups: {
+        groupA: {
+          id: "groupA",
+          name: "Group",
+          outNodeId: "out",
+          nodes: {},
+          customNodes: {
+            effect: { kind: "animation", label: "Opacity", scopeKey: "groupA", details: { property: "opacity" } },
+            time: { kind: "time", label: "Time", scopeKey: "groupA", details: { delay: "0.3s", duration: "0.7s" } },
+          },
+          edges: [
+            { id: "effect->time", fromNodeId: "effect", fromPort: "bottom", toNodeId: "time", toPort: "top" },
+            { id: "anchor->time", fromNodeId: "anchor", fromPort: "bottom", toNodeId: "time", toPort: "top" },
+            { id: "time->out", fromNodeId: "time", fromPort: "bottom", toNodeId: "out", toPort: "top" },
+          ],
+          parameters: { effect: { from: "0", to: "1" } },
+        },
+      },
+      edges: [
+        { id: "anchor->group", fromNodeId: "anchor", fromPort: "bottom", toNodeId: "groupNode", toPort: "top" },
+        { id: "group->layer", fromNodeId: "groupNode", fromPort: "bottom", toNodeId: "layer:text", toPort: "top" },
+      ],
+    });
+
+    const directAnimation = direct.objects[0].animations?.[0];
+    const groupedAnimation = grouped.objects[0].animations?.[0];
+    expect(groupedAnimation).toMatchObject({ keyframes: directAnimation?.keyframes, options: directAnimation?.options });
+  });
+
+  it("keeps grouped time nodes feeding external splits behavior-equivalent", () => {
+    const part = {
+      ...composition,
+      objects: [{ id: "text", name: "Text", type: "text" as const, selector: ".text", bounds: { x: 0, y: 0, width: 100, height: 40 }, style: {}, content: "One two three", animations: [] }],
+    };
+    const direct = applyAnimationGraphToComposition(part, {
+      nodes: {},
+      customNodes: {
+        effect: { kind: "animation", label: "Opacity", scopeKey: "text", details: { property: "opacity" } },
+        time: { kind: "time", label: "Time", scopeKey: "text", details: { delay: "1.2s", duration: "0.7s" } },
+        split: { kind: "split", label: "Split", scopeKey: "text", details: { mode: "word", stagger: "0.08s", order: "forward", repeatScope: "sequence" } },
+      },
+      edges: [
+        { id: "effect->time", fromNodeId: "effect", fromPort: "bottom", toNodeId: "time", toPort: "top" },
+        { id: "time->split", fromNodeId: "time", fromPort: "bottom", toNodeId: "split", toPort: "top" },
+        { id: "split->layer", fromNodeId: "split", fromPort: "bottom", toNodeId: "layer:text", toPort: "top" },
+      ],
+      parameters: { effect: { from: "0", to: "1" } },
+    });
+    const grouped = applyAnimationGraphToComposition(part, {
+      nodes: {},
+      customNodes: {
+        groupNode: { kind: "group", label: "Group", scopeKey: "text", details: { groupId: "groupA" } },
+        split: { kind: "split", label: "Split", scopeKey: "text", details: { mode: "word", stagger: "0.08s", order: "forward", repeatScope: "sequence" } },
+      },
+      groups: {
+        groupA: {
+          id: "groupA",
+          name: "Group",
+          outNodeId: "out",
+          nodes: {},
+          customNodes: {
+            effect: { kind: "animation", label: "Opacity", scopeKey: "groupA", details: { property: "opacity" } },
+            time: { kind: "time", label: "Time", scopeKey: "groupA", details: { delay: "1.2s", duration: "0.7s" } },
+          },
+          edges: [
+            { id: "effect->time", fromNodeId: "effect", fromPort: "bottom", toNodeId: "time", toPort: "top" },
+            { id: "time->out", fromNodeId: "time", fromPort: "bottom", toNodeId: "out", toPort: "top" },
+          ],
+          parameters: { effect: { from: "0", to: "1" } },
+        },
+      },
+      edges: [
+        { id: "group->split", fromNodeId: "groupNode", fromPort: "bottom", toNodeId: "split", toPort: "top" },
+        { id: "split->layer", fromNodeId: "split", fromPort: "bottom", toNodeId: "layer:text", toPort: "top" },
+      ],
+    });
+
+    const directAnimation = direct.objects[0].animations?.[0];
+    const groupedAnimation = grouped.objects[0].animations?.[0];
+    expect(groupedAnimation).toMatchObject({ keyframes: directAnimation?.keyframes, options: directAnimation?.options });
+  });
+
+  it("bridges group output into downstream time stacking like direct time to time", () => {
+    const part = {
+      ...composition,
+      objects: [{ id: "text", name: "Text", type: "text" as const, selector: ".text", bounds: { x: 0, y: 0, width: 100, height: 40 }, style: {}, animations: [] }],
+    };
+    const direct = applyAnimationGraphToComposition(part, {
+      nodes: {},
+      customNodes: {
+        enter: { kind: "animation", label: "Enter", scopeKey: "text", details: { property: "opacity" } },
+        exit: { kind: "animation", label: "Exit", scopeKey: "text", details: { property: "blur" } },
+        enterTime: { kind: "time", label: "Enter Time", scopeKey: "text", details: { delay: "0s", duration: "1s" } },
+        exitTime: { kind: "time", label: "Exit Time", scopeKey: "text", details: { delay: "0.2s", duration: "0.5s" } },
+      },
+      edges: [
+        { id: "enter->time", fromNodeId: "enter", fromPort: "bottom", toNodeId: "enterTime", toPort: "top" },
+        { id: "enterTime->layer", fromNodeId: "enterTime", fromPort: "bottom", toNodeId: "layer:text", toPort: "top" },
+        { id: "exit->time", fromNodeId: "exit", fromPort: "bottom", toNodeId: "exitTime", toPort: "top" },
+        { id: "enterTime->exitTime", fromNodeId: "enterTime", fromPort: "bottom", toNodeId: "exitTime", toPort: "top" },
+        { id: "exitTime->layer", fromNodeId: "exitTime", fromPort: "bottom", toNodeId: "layer:text", toPort: "top" },
+      ],
+      parameters: { enter: { from: "0", to: "1" }, exit: { from: "0", to: "8" } },
+    });
+    const grouped = applyAnimationGraphToComposition(part, {
+      nodes: {},
+      customNodes: {
+        groupNode: { kind: "group", label: "Group", scopeKey: "text", details: { groupId: "groupA" } },
+        exit: { kind: "animation", label: "Exit", scopeKey: "text", details: { property: "blur" } },
+        exitTime: { kind: "time", label: "Exit Time", scopeKey: "text", details: { delay: "0.2s", duration: "0.5s" } },
+      },
+      groups: {
+        groupA: {
+          id: "groupA",
+          name: "Group",
+          outNodeId: "out",
+          nodes: {},
+          customNodes: {
+            enter: { kind: "animation", label: "Enter", scopeKey: "groupA", details: { property: "opacity" } },
+            enterTime: { kind: "time", label: "Enter Time", scopeKey: "groupA", details: { delay: "0s", duration: "1s" } },
+          },
+          edges: [
+            { id: "enter->time", fromNodeId: "enter", fromPort: "bottom", toNodeId: "enterTime", toPort: "top" },
+            { id: "enterTime->out", fromNodeId: "enterTime", fromPort: "bottom", toNodeId: "out", toPort: "top" },
+          ],
+          parameters: { enter: { from: "0", to: "1" } },
+        },
+      },
+      edges: [
+        { id: "group->layer", fromNodeId: "groupNode", fromPort: "bottom", toNodeId: "layer:text", toPort: "top" },
+        { id: "exit->time", fromNodeId: "exit", fromPort: "bottom", toNodeId: "exitTime", toPort: "top" },
+        { id: "group->exitTime", fromNodeId: "groupNode", fromPort: "bottom", toNodeId: "exitTime", toPort: "top" },
+        { id: "exitTime->layer", fromNodeId: "exitTime", fromPort: "bottom", toNodeId: "layer:text", toPort: "top" },
+      ],
+    });
+
+    const directExitAnimation = direct.objects[0].animations?.find((animation) => animation.id === "graph:exit");
+    const groupedExitAnimation = grouped.objects[0].animations?.find((animation) => animation.id === "graph:exit");
+    expect(groupedExitAnimation?.options.delay).toBeCloseTo(directExitAnimation?.options.delay ?? 0);
+  });
+
+  it("supports absolute time scheduling without upstream stacking", () => {
+    const applied = applyAnimationGraphToComposition({
+      ...composition,
+      objects: [{ id: "text", name: "Text", type: "text" as const, selector: ".text", bounds: { x: 0, y: 0, width: 100, height: 40 }, style: {}, animations: [] }],
+    }, {
+      nodes: {},
+      customNodes: {
+        intro: { kind: "time", label: "Intro", scopeKey: "text", details: { delay: "1s", duration: "2s" } },
+        effect: { kind: "animation", label: "Opacity", scopeKey: "text", details: { property: "opacity" } },
+        exit: { kind: "time", label: "Exit", scopeKey: "text", details: { delay: "0.5s", duration: "0.7s", schedule: "absolute" } },
+      },
+      edges: [
+        { id: "effect->exit", fromNodeId: "effect", fromPort: "bottom", toNodeId: "exit", toPort: "top" },
+        { id: "intro->exit", fromNodeId: "intro", fromPort: "bottom", toNodeId: "exit", toPort: "top" },
+        { id: "exit->layer", fromNodeId: "exit", fromPort: "bottom", toNodeId: "layer:text", toPort: "top" },
+      ],
+      parameters: { effect: { from: "0", to: "1" } },
+    });
+
+    expect(applied.objects[0].animations?.[0].options.delay).toBeCloseTo(0.5);
+  });
+
+  it("keeps relative time scheduling as the default upstream stack", () => {
+    const applied = applyAnimationGraphToComposition({
+      ...composition,
+      objects: [{ id: "text", name: "Text", type: "text" as const, selector: ".text", bounds: { x: 0, y: 0, width: 100, height: 40 }, style: {}, animations: [] }],
+    }, {
+      nodes: {},
+      customNodes: {
+        intro: { kind: "time", label: "Intro", scopeKey: "text", details: { delay: "1s", duration: "2s" } },
+        effect: { kind: "animation", label: "Opacity", scopeKey: "text", details: { property: "opacity" } },
+        exit: { kind: "time", label: "Exit", scopeKey: "text", details: { delay: "0.5s", duration: "0.7s" } },
+      },
+      edges: [
+        { id: "effect->exit", fromNodeId: "effect", fromPort: "bottom", toNodeId: "exit", toPort: "top" },
+        { id: "intro->exit", fromNodeId: "intro", fromPort: "bottom", toNodeId: "exit", toPort: "top" },
+        { id: "exit->layer", fromNodeId: "exit", fromPort: "bottom", toNodeId: "layer:text", toPort: "top" },
+      ],
+      parameters: { effect: { from: "0", to: "1" } },
+    });
+
+    expect(applied.objects[0].animations?.[0].options.delay).toBeCloseTo(3.5);
+  });
+
+  it("keeps grouped absolute downstream time equivalent to flattened graph", () => {
+    const part = {
+      ...composition,
+      objects: [{ id: "text", name: "Text", type: "text" as const, selector: ".text", bounds: { x: 0, y: 0, width: 100, height: 40 }, style: {}, animations: [] }],
+    };
+    const direct = applyAnimationGraphToComposition(part, {
+      nodes: {},
+      customNodes: {
+        enter: { kind: "animation", label: "Enter", scopeKey: "text", details: { property: "opacity" } },
+        exit: { kind: "animation", label: "Exit", scopeKey: "text", details: { property: "blur" } },
+        enterTime: { kind: "time", label: "Enter Time", scopeKey: "text", details: { delay: "0s", duration: "1s" } },
+        exitTime: { kind: "time", label: "Exit Time", scopeKey: "text", details: { delay: "0.2s", duration: "0.5s", schedule: "absolute" } },
+      },
+      edges: [
+        { id: "enter->time", fromNodeId: "enter", fromPort: "bottom", toNodeId: "enterTime", toPort: "top" },
+        { id: "enterTime->layer", fromNodeId: "enterTime", fromPort: "bottom", toNodeId: "layer:text", toPort: "top" },
+        { id: "exit->time", fromNodeId: "exit", fromPort: "bottom", toNodeId: "exitTime", toPort: "top" },
+        { id: "enterTime->exitTime", fromNodeId: "enterTime", fromPort: "bottom", toNodeId: "exitTime", toPort: "top" },
+        { id: "exitTime->layer", fromNodeId: "exitTime", fromPort: "bottom", toNodeId: "layer:text", toPort: "top" },
+      ],
+      parameters: { enter: { from: "0", to: "1" }, exit: { from: "0", to: "8" } },
+    });
+    const grouped = applyAnimationGraphToComposition(part, {
+      nodes: {},
+      customNodes: {
+        groupNode: { kind: "group", label: "Group", scopeKey: "text", details: { groupId: "groupA" } },
+        exit: { kind: "animation", label: "Exit", scopeKey: "text", details: { property: "blur" } },
+        exitTime: { kind: "time", label: "Exit Time", scopeKey: "text", details: { delay: "0.2s", duration: "0.5s", schedule: "absolute" } },
+      },
+      groups: {
+        groupA: {
+          id: "groupA",
+          name: "Group",
+          outNodeId: "out",
+          nodes: {},
+          customNodes: {
+            enter: { kind: "animation", label: "Enter", scopeKey: "groupA", details: { property: "opacity" } },
+            enterTime: { kind: "time", label: "Enter Time", scopeKey: "groupA", details: { delay: "0s", duration: "1s" } },
+          },
+          edges: [
+            { id: "enter->time", fromNodeId: "enter", fromPort: "bottom", toNodeId: "enterTime", toPort: "top" },
+            { id: "enterTime->out", fromNodeId: "enterTime", fromPort: "bottom", toNodeId: "out", toPort: "top" },
+          ],
+          parameters: { enter: { from: "0", to: "1" } },
+        },
+      },
+      edges: [
+        { id: "group->layer", fromNodeId: "groupNode", fromPort: "bottom", toNodeId: "layer:text", toPort: "top" },
+        { id: "exit->time", fromNodeId: "exit", fromPort: "bottom", toNodeId: "exitTime", toPort: "top" },
+        { id: "group->exitTime", fromNodeId: "groupNode", fromPort: "bottom", toNodeId: "exitTime", toPort: "top" },
+        { id: "exitTime->layer", fromNodeId: "exitTime", fromPort: "bottom", toNodeId: "layer:text", toPort: "top" },
+      ],
+    });
+
+    const directExitAnimation = direct.objects[0].animations?.find((animation) => animation.id === "graph:exit");
+    const groupedExitAnimation = grouped.objects[0].animations?.find((animation) => animation.id === "graph:exit");
+    expect(groupedExitAnimation?.options.delay).toBeCloseTo(directExitAnimation?.options.delay ?? 0);
+    expect(groupedExitAnimation?.options.delay).toBeCloseTo(0.2);
+  });
+
+  it("bridges parent time input into grouped output timing", () => {
+    const part = {
+      ...composition,
+      objects: [{ id: "text", name: "Text", type: "text" as const, selector: ".text", bounds: { x: 0, y: 0, width: 100, height: 40 }, style: {}, animations: [] }],
+    };
+    const direct = applyAnimationGraphToComposition(part, {
+      nodes: {},
+      customNodes: {
+        anchor: { kind: "time", label: "Anchor", scopeKey: "text", details: { delay: "0.5s", duration: "0.4s" } },
+        effect: { kind: "animation", label: "Opacity", scopeKey: "text", details: { property: "opacity" } },
+        time: { kind: "time", label: "Time", scopeKey: "text", details: { delay: "0.2s", duration: "1s" } },
+      },
+      edges: [
+        { id: "effect->time", fromNodeId: "effect", fromPort: "bottom", toNodeId: "time", toPort: "top" },
+        { id: "anchor->time", fromNodeId: "anchor", fromPort: "bottom", toNodeId: "time", toPort: "top" },
+        { id: "time->layer", fromNodeId: "time", fromPort: "bottom", toNodeId: "layer:text", toPort: "top" },
+      ],
+      parameters: { effect: { from: "0", to: "1" } },
+    });
+    const grouped = applyAnimationGraphToComposition(part, {
+      nodes: {},
+      customNodes: {
+        anchor: { kind: "time", label: "Anchor", scopeKey: "text", details: { delay: "0.5s", duration: "0.4s" } },
+        groupNode: { kind: "group", label: "Group", scopeKey: "text", details: { groupId: "groupA" } },
+      },
+      groups: {
+        groupA: {
+          id: "groupA",
+          name: "Group",
+          outNodeId: "out",
+          nodes: {},
+          customNodes: {
+            effect: { kind: "animation", label: "Opacity", scopeKey: "groupA", details: { property: "opacity" } },
+            time: { kind: "time", label: "Time", scopeKey: "groupA", details: { delay: "0.2s", duration: "1s" } },
+          },
+          edges: [
+            { id: "effect->time", fromNodeId: "effect", fromPort: "bottom", toNodeId: "time", toPort: "top" },
+            { id: "group->time", fromNodeId: "groupNode", fromPort: "bottom", toNodeId: "time", toPort: "top" },
+            { id: "time->out", fromNodeId: "time", fromPort: "bottom", toNodeId: "out", toPort: "top" },
+          ],
+          parameters: { effect: { from: "0", to: "1" } },
+        },
+      },
+      edges: [
+        { id: "anchor->group", fromNodeId: "anchor", fromPort: "bottom", toNodeId: "groupNode", toPort: "top" },
+        { id: "group->layer", fromNodeId: "groupNode", fromPort: "bottom", toNodeId: "layer:text", toPort: "top" },
+      ],
+    });
+
+    const directAnimation = direct.objects[0].animations?.[0];
+    const groupedAnimation = grouped.objects[0].animations?.[0];
+    expect(groupedAnimation).toMatchObject({ keyframes: directAnimation?.keyframes, options: directAnimation?.options });
+  });
+
   it("materializes split metadata on graph-authored text animations", () => {
     const applied = applyAnimationGraphToComposition({
       ...composition,
@@ -408,6 +822,61 @@ describe("project normalization", () => {
     });
 
     expect(applied.objects[0].animations?.[0].options.split).toEqual({ mode: "word", stagger: 0.08, order: "forward", repeatScope: "sequence" });
+  });
+
+  it("stacks downstream time nodes after upstream split sequence duration", () => {
+    const applied = applyAnimationGraphToComposition({
+      ...composition,
+      objects: [{ id: "text", name: "Text", type: "text", selector: ".text", bounds: { x: 0, y: 0, width: 100, height: 40 }, style: {}, content: "A B C", animations: [] }],
+    }, {
+      nodes: {},
+      customNodes: {
+        enter: { kind: "animation", label: "Enter", scopeKey: "text", details: { property: "opacity" } },
+        exit: { kind: "animation", label: "Exit", scopeKey: "text", details: { property: "blur" } },
+        enterTime: { kind: "time", label: "Enter Time", scopeKey: "text", details: { delay: "0s", duration: "1s" } },
+        split: { kind: "split", label: "Split", scopeKey: "text", details: { mode: "word", stagger: "0.1s", order: "forward", repeatScope: "sequence" } },
+        exitTime: { kind: "time", label: "Exit Time", scopeKey: "text", details: { delay: "0.2s", duration: "0.5s" } },
+      },
+      edges: [
+        { id: "enter->time", fromNodeId: "enter", fromPort: "bottom", toNodeId: "enterTime", toPort: "top" },
+        { id: "time->split", fromNodeId: "enterTime", fromPort: "bottom", toNodeId: "split", toPort: "top" },
+        { id: "split->layer", fromNodeId: "split", fromPort: "bottom", toNodeId: "layer:text", toPort: "top" },
+        { id: "exit->time", fromNodeId: "exit", fromPort: "bottom", toNodeId: "exitTime", toPort: "top" },
+        { id: "split->exitTime", fromNodeId: "split", fromPort: "bottom", toNodeId: "exitTime", toPort: "top" },
+        { id: "exitTime->layer", fromNodeId: "exitTime", fromPort: "bottom", toNodeId: "layer:text", toPort: "top" },
+      ],
+      parameters: { enter: { from: "0", to: "1" }, exit: { from: "0", to: "8" } },
+    });
+
+    const exitAnimation = applied.objects[0].animations?.find((animation) => animation.id === "graph:exit");
+    expect(exitAnimation?.options.delay).toBeCloseTo(1.4);
+  });
+
+  it("keeps split metadata when split output feeds a downstream time before the layer", () => {
+    const applied = applyAnimationGraphToComposition({
+      ...composition,
+      objects: [{ id: "text", name: "Text", type: "text", selector: ".text", bounds: { x: 0, y: 0, width: 100, height: 40 }, style: {}, content: "A B C", animations: [] }],
+    }, {
+      nodes: {},
+      customNodes: {
+        enter: { kind: "animation", label: "Enter", scopeKey: "text", details: { property: "opacity" } },
+        exit: { kind: "animation", label: "Exit", scopeKey: "text", details: { property: "blur" } },
+        enterTime: { kind: "time", label: "Enter Time", scopeKey: "text", details: { delay: "0s", duration: "1s" } },
+        split: { kind: "split", label: "Split", scopeKey: "text", details: { mode: "word", stagger: "0.1s", order: "forward", repeatScope: "sequence" } },
+        exitTime: { kind: "time", label: "Exit Time", scopeKey: "text", details: { delay: "0s", duration: "0.5s" } },
+      },
+      edges: [
+        { id: "enter->time", fromNodeId: "enter", fromPort: "bottom", toNodeId: "enterTime", toPort: "top" },
+        { id: "time->split", fromNodeId: "enterTime", fromPort: "bottom", toNodeId: "split", toPort: "top" },
+        { id: "split->exitTime", fromNodeId: "split", fromPort: "bottom", toNodeId: "exitTime", toPort: "top" },
+        { id: "exit->time", fromNodeId: "exit", fromPort: "bottom", toNodeId: "exitTime", toPort: "top" },
+        { id: "exitTime->layer", fromNodeId: "exitTime", fromPort: "bottom", toNodeId: "layer:text", toPort: "top" },
+      ],
+      parameters: { enter: { from: "0", to: "1" }, exit: { from: "0", to: "8" } },
+    });
+
+    const enterAnimation = applied.objects[0].animations?.find((animation) => animation.id === "graph:enter");
+    expect(enterAnimation?.options.split).toEqual({ mode: "word", stagger: 0.1, order: "forward", repeatScope: "sequence" });
   });
 
   it("keeps disconnected or unregistered group contents graph-only", () => {
@@ -454,7 +923,7 @@ describe("project normalization", () => {
     expect(applied.objects[0].animations?.find((animation) => animation.id === "graph:effect")?.keyframes).toEqual({ x: [10, 20], y: [30, 40] });
   });
 
-  it("serializes graph-authored animation only as timeline graph state", () => {
+  it("serializes graph-authored animation only as composition graph state", () => {
     const bgText = { id: "bg_text", name: "BG Text", type: "text" as const, selector: ".bg", bounds: { x: 0, y: 0, width: 100, height: 40 }, style: {}, animations: [] };
     const animationGraph = {
       nodes: {
@@ -474,11 +943,12 @@ describe("project normalization", () => {
     };
     const graphComposition = {
       ...composition,
+      animationGraph,
       background: { ...composition.background, elements: [bgText] },
     };
     const project = {
       ...projectWithComposition(),
-      timelines: [{ id: "tl_main", filePath: "timelines/tl_main.timeline.json", clips: [{ id: composition.id, compositionId: composition.id, duration: composition.duration, animationGraph }], adjustmentLayers: [], settings: {} }],
+      timelines: [{ id: "tl_main", filePath: "timelines/tl_main.timeline.json", clips: [{ id: composition.id, compositionId: composition.id, duration: composition.duration }], adjustmentLayers: [], settings: {} }],
       compositions: [{ ...graphComposition, source: compositionToSource(graphComposition) }],
       compositionLibrary: [graphComposition],
       compositionSources: { [graphComposition.filePath]: compositionToSource(graphComposition) },
@@ -487,8 +957,66 @@ describe("project normalization", () => {
     expect(getSceneFromProject(project, "tl_main")?.compositions[0].background.elements[0].animations?.[0].id).toBe("graph:effect");
 
     const serialized = serializeProjectForSave(project);
-    expect(serialized.timelines?.[0].clips[0].animationGraph).toBeDefined();
+    expect(serialized.timelines?.[0].clips[0]).not.toHaveProperty("animationGraph");
+    expect(serialized.compositions?.[0].animationGraph).toBeDefined();
+    expect(serialized.compositionSources?.[graphComposition.filePath]).toContain("animationGraph");
     expect(serialized.scenes[0].compositions[0].background.elements[0].animations).toBeUndefined();
+  });
+
+  it("loads 2d animation graph state from composition source", async () => {
+    const source = compositionToSource({
+      ...composition,
+      animationGraph: {
+        nodes: {
+          effect: { x: 1, y: 2 },
+          time: { x: 3, y: 4 },
+          "layer:text": { x: 5, y: 6 },
+        },
+        customNodes: {
+          effect: { kind: "animation", label: "Opacity", scopeKey: "text", details: { property: "opacity" } },
+          time: { kind: "time", label: "Time", scopeKey: "text", details: { delay: "0s", duration: "1s" } },
+        },
+        edges: [
+          { id: "effect->time", fromNodeId: "effect", fromPort: "bottom", toNodeId: "time", toPort: "top" },
+          { id: "time->layer", fromNodeId: "time", fromPort: "bottom", toNodeId: "layer:text", toPort: "top" },
+        ],
+        parameters: { effect: { from: "0", to: "1" } },
+      },
+      objects: [{ id: "text", name: "Text", type: "text", selector: ".text", bounds: { x: 0, y: 0, width: 100, height: 40 }, style: {} }],
+    });
+
+    const loaded = await compositionFromSource(composition, source);
+
+    expect(loaded.animationGraph?.customNodes?.effect?.label).toBe("Opacity");
+    expect(loaded.animationGraph?.edges.map((edge) => edge.id)).toEqual(["effect->time", "time->layer"]);
+    expect(loaded.objects[0].animations).toBeUndefined();
+  });
+
+  it("ignores legacy timeline clip animation graph state", () => {
+    const bgText = { id: "bg_text", name: "BG Text", type: "text" as const, selector: ".bg", bounds: { x: 0, y: 0, width: 100, height: 40 }, style: {}, animations: [] };
+    const legacyClipGraph = {
+      nodes: { effect: { x: 0, y: 0 }, time: { x: 0, y: 4 }, "layer:bg_text": { x: 0, y: 8 } },
+      customNodes: {
+        effect: { kind: "animation" as const, label: "Opacity", scopeKey: "bg_text", details: { property: "opacity" } },
+        time: { kind: "time" as const, label: "Time", scopeKey: "bg_text", details: { delay: "0s", duration: "1s" } },
+      },
+      edges: [
+        { id: "effect->time", fromNodeId: "effect", fromPort: "bottom" as const, toNodeId: "time", toPort: "top" as const },
+        { id: "time->layer", fromNodeId: "time", fromPort: "bottom" as const, toNodeId: "layer:bg_text", toPort: "top" as const },
+      ],
+      parameters: { effect: { from: "0", to: "1" } },
+    };
+    const graphComposition = { ...composition, background: { ...composition.background, elements: [bgText] } };
+    const project = normalizeProject({
+      ...projectWithComposition(),
+      timelines: [{ id: "tl_main", filePath: "timelines/tl_main.timeline.json", clips: [{ id: composition.id, compositionId: composition.id, duration: composition.duration, animationGraph: legacyClipGraph } as any], adjustmentLayers: [], settings: {} }],
+      compositions: [{ ...graphComposition, source: compositionToSource(graphComposition) }],
+      compositionLibrary: [graphComposition],
+      compositionSources: { [graphComposition.filePath]: compositionToSource(graphComposition) },
+    });
+
+    expect(project.timelines?.[0].clips[0]).not.toHaveProperty("animationGraph");
+    expect(getSceneFromProject(project, "tl_main")?.compositions[0].background.elements[0].animations ?? []).toEqual([]);
   });
 
   it("omits graph-generated animations from editable composition source", () => {
