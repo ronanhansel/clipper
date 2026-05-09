@@ -91,7 +91,7 @@ describe("export service", () => {
       project,
       sceneId: "scene",
     });
-    hostMocks.renderVideoExport.mockResolvedValue("/tmp/export.mov");
+    hostMocks.renderVideoExport.mockResolvedValue("/tmp/export.mp4");
     await exportService.renderVideoExport(
       "export-id",
       prepared.defaultFileName,
@@ -110,7 +110,7 @@ describe("export service", () => {
     expect(prepared.totalFrames).toBe(60);
     expect(hostMocks.renderVideoExport).toHaveBeenLastCalledWith(
       "export-id",
-      "export-project-scene.mov",
+      "export-project-scene.mp4",
       expect.any(Object),
       "clipper/projects/export/project.json",
       expect.objectContaining({
@@ -124,7 +124,7 @@ describe("export service", () => {
       true,
       FRAME_WIDTH,
       FRAME_HEIGHT,
-      "prores-422-hq",
+      "mp4",
       "high",
       undefined,
       undefined,

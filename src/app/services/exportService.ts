@@ -53,8 +53,8 @@ export const MEDIA_EXPORT_FORMAT_LABELS: Record<MediaExportFormat, string> = {
   "prores-4444": "ProRes 4444",
   "dnxhr-hqx": "DNxHR HQX",
   mov: "MOV Uncompressed",
-  "h264-high": "H.264 High Quality",
-  mp4: "MP4",
+  "h264-high": "MP4 H.264 HQ",
+  mp4: "MP4 H.264 Fast",
   webm: "WebM",
 };
 
@@ -62,13 +62,12 @@ export const MEDIA_EXPORT_FORMAT_OPTIONS: {
   label: string;
   value: MediaExportFormat;
 }[] = [
+  { label: "MP4 H.264 Fast", value: "mp4" },
+  { label: "MP4 H.264 HQ", value: "h264-high" },
+  { label: "WebM (VP9)", value: "webm" },
   { label: "MOV ProRes 422 HQ", value: "prores-422-hq" },
   { label: "MOV ProRes 4444", value: "prores-4444" },
   { label: "MOV DNxHR HQX", value: "dnxhr-hqx" },
-  { label: "MOV Uncompressed BGRA", value: "mov" },
-  { label: "MP4 H.264 High Quality", value: "h264-high" },
-  { label: "MP4 (H.264)", value: "mp4" },
-  { label: "WebM (VP9)", value: "webm" },
 ];
 
 export function getMediaExportFileExtension(format: MediaExportFormat): string {
@@ -156,7 +155,7 @@ class ExportService {
     mediaExportFormat,
   }: PrepareRenderedMediaInput & { mediaExportFormat?: MediaExportFormat }) {
     const _frameRate = frameRate ?? videoExportFrameRate;
-    const _format = mediaExportFormat ?? "prores-422-hq";
+    const _format = mediaExportFormat ?? "mp4";
     const exportProject = serializeProjectForSave(project);
     const scene = getRenderedMediaScene(exportProject, sceneId);
     const durationSeconds = getRenderedMediaSceneDuration(
@@ -197,7 +196,7 @@ class ExportService {
   ) {
     const _frameRate = frameRate ?? videoExportFrameRate;
     const _resolution = exportResolution ?? project.resolution;
-    const _format = mediaExportFormat ?? "prores-422-hq";
+    const _format = mediaExportFormat ?? "mp4";
     const exportProject = serializeProjectForSave(project);
     return clipperHost.renderVideoExport(
       exportId,

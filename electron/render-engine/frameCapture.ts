@@ -54,6 +54,7 @@ export interface FrameCaptureDeps {
     frameIndex: number,
   ) => string;
   clampExportTileHeight: (value: number, maxHeight?: number) => number;
+  sendFrame?: (frameIndex: number, frame: Buffer) => Promise<void>;
 }
 
 // ─── Exported pure helpers (also used by RenderEngine) ───────────────────
@@ -174,7 +175,8 @@ export async function renderSceneToRawFrames(
           frame,
           deps,
         );
-        console.log(`[clipper export-frame] frame=${frameIndex + 1}`);
+        if (!deps.sendFrame)
+          console.log(`[clipper export-frame] frame=${frameIndex + 1}`);
         onFrameCaptured?.(frameIndex);
         if (shouldStop?.())
           return {
@@ -1415,6 +1417,10 @@ async function writeSupervisedFrameOutput(
   frame: Buffer,
   deps: FrameCaptureDeps,
 ): Promise<void> {
+  if (deps.sendFrame) {
+    await deps.sendFrame(frameIndex, frame);
+    return;
+  }
   const framePath = deps.getSupervisedFrameOutputPath(outputPath, frameIndex);
   const tempFramePath = `${framePath}.tmp-${process.pid}`;
   await fs.writeFile(tempFramePath, frame);

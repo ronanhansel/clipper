@@ -1195,7 +1195,7 @@ function getMediaExportDialogFilters(
     case "webm":
       return [{ name: "WebM Video", extensions: ["webm"] }];
     case "h264-high":
-      return [{ name: "MP4 H.264 High Quality", extensions: ["mp4"] }];
+      return [{ name: "MP4 H.264 HQ", extensions: ["mp4"] }];
     case "mp4":
       return [{ name: "MP4 Video", extensions: ["mp4"] }];
     case "prores-4444":

@@ -254,7 +254,7 @@ export function ExportMediaDialog({
           {activeTab === "media" ? (
             <div>
               {progress ? (
-                <span className="rounded-lg bg-[#10131a] px-3 py-2 text-xs font-bold text-[var(--clipper-accent-strong)]">
+                <span className="block whitespace-pre-line rounded-lg bg-[#10131a] px-3 py-2 text-xs font-bold text-[var(--clipper-accent-strong)]">
                   {progress}
                 </span>
               ) : null}
@@ -508,6 +508,21 @@ function buildMediaFormatOptions(
     BASELINE_HD30_PIXELS_PER_SECOND;
   return [
     {
+      label: "MP4 H.264 Fast",
+      value: "mp4",
+      description: formatEstimatedDataRate(1.5 * scale),
+    },
+    {
+      label: "MP4 H.264 HQ",
+      value: "h264-high",
+      description: formatEstimatedDataRate(2.25 * scale),
+    },
+    {
+      label: "WebM (VP9)",
+      value: "webm",
+      description: formatEstimatedDataRate(1.2 * scale),
+    },
+    {
       label: "MOV ProRes 422 HQ",
       value: "prores-422-hq",
       description: formatEstimatedDataRate(27.5 * scale),
@@ -521,28 +536,6 @@ function buildMediaFormatOptions(
       label: "MOV DNxHR HQX",
       value: "dnxhr-hqx",
       description: formatEstimatedDataRate(27.5 * scale),
-    },
-    {
-      label: "MOV Uncompressed BGRA",
-      value: "mov",
-      description: formatEstimatedDataRate(
-        (resolution.width * resolution.height * 4 * frameRate) / 1_000_000,
-      ),
-    },
-    {
-      label: "MP4 H.264 High Quality",
-      value: "h264-high",
-      description: "CRF 12, variable MB/s",
-    },
-    {
-      label: "MP4 (H.264)",
-      value: "mp4",
-      description: formatEstimatedDataRate(1.5),
-    },
-    {
-      label: "WebM (VP9)",
-      value: "webm",
-      description: "CRF 30, variable MB/s",
     },
   ];
 }
@@ -576,7 +569,16 @@ export function VideoExportOverlay({
   progress: VideoExportProgress;
   onCancel: () => void;
 }) {
-  const percent = clamp(progress.percent, 0, 100);
+  const percent = clamp(
+    Math.max(
+      progress.percent,
+      progress.totalFrames > 0
+        ? Math.round((progress.frame / progress.totalFrames) * 100)
+        : 0,
+    ),
+    0,
+    100,
+  );
 
   return (
     <div className="fixed inset-0 z-[100] grid place-items-center bg-[#050609]/95 backdrop-blur-[3px] animate-[clipper-export-fade-in_180ms_ease-out_both]">
@@ -591,7 +593,7 @@ export function VideoExportOverlay({
               style={{ width: `${percent}%` }}
             />
           </div>
-          <span className="text-xs font-semibold text-[#8e929d]">
+          <span className="whitespace-pre-line text-xs font-semibold text-[#8e929d]">
             {cancelling ? "Stopping export..." : progress.status}
           </span>
         </div>

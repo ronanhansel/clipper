@@ -422,7 +422,7 @@ function AppContent({
     useState(isPrerenderCacheReuseEnabledByDefault);
   const [exportFrameRate, setExportFrameRate] = useState(videoExportFrameRate);
   const [mediaExportFormat, setMediaExportFormat] =
-    useState<MediaExportFormat>("prores-422-hq");
+    useState<MediaExportFormat>("mp4");
   const [mediaExportRenderMode, setMediaExportRenderMode] =
     useState<MediaExportRenderMode>("renderer");
   const [exportRenderQuality, setExportRenderQuality] =

@@ -183,6 +183,12 @@ export type ExportChildStopMessage = {
   reason: ExportChildStopReason;
 };
 
+export type ExportChildFrameMessage = {
+  type: "clipper:export-frame";
+  frameIndex: number;
+  frame: Uint8Array | Buffer;
+};
+
 export function isExportChildStopMessage(
   message: unknown,
 ): message is ExportChildStopMessage {
@@ -191,6 +197,18 @@ export function isExportChildStopMessage(
   return (
     candidate.type === "clipper:stop-render-child" &&
     candidate.reason === "cancel"
+  );
+}
+
+export function isExportChildFrameMessage(
+  message: unknown,
+): message is ExportChildFrameMessage {
+  if (!message || typeof message !== "object") return false;
+  const candidate = message as Partial<ExportChildFrameMessage>;
+  return (
+    candidate.type === "clipper:export-frame" &&
+    typeof candidate.frameIndex === "number" &&
+    (candidate.frame instanceof Uint8Array || Buffer.isBuffer(candidate.frame))
   );
 }
 

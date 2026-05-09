@@ -27,6 +27,7 @@ import {
   PRERENDER_VIDEO_BLOCK_CODEC_VERSION,
   EXPORT_CHROMIUM_ARGS,
   isExportChildStopMessage,
+  isExportChildFrameMessage,
   type VideoExportMethod,
   type VideoExportProgress,
   type ExportSource,
@@ -34,6 +35,7 @@ import {
   type ExportFrameRange,
   type SupervisedRenderPayload,
   type SupervisedRenderResult,
+  type ExportChildFrameMessage,
   type PrerenderedFrame,
   type PrerenderedVideoBlock,
   type PrerenderCachePaths,
@@ -159,7 +161,7 @@ export class RenderEngine {
       tileHeight = DEFAULT_EXPORT_TILE_HEIGHT,
       exportWidth = FRAME_WIDTH,
       exportHeight = FRAME_HEIGHT,
-      exportFormat = "prores-422-hq",
+      exportFormat = "mp4",
       exportRenderQuality = "high",
       exportWorkerMapping,
       exportTileMapping,
@@ -179,7 +181,12 @@ export class RenderEngine {
       exportTileMapping,
     );
     await fs.mkdir(path.dirname(outputPath), { recursive: true });
-    const encoder = this.getVideoEncoderArgs(exportFormat);
+    const encoder = this.getVideoEncoderArgs(
+      exportFormat,
+      exportWidth,
+      exportHeight,
+    );
+    const encoderProgressLine = `${encoder.label} ${encoder.backend}${encoder.fallbackReason ? `\nFallback: ${encoder.fallbackReason}` : ""}`;
     const totalFrames = Math.max(1, Math.ceil(durationSeconds * frameRate));
     const frameRange: ExportFrameRange = {
       startFrame: 0,
@@ -194,11 +201,16 @@ export class RenderEngine {
       frame: 0,
       totalFrames,
       percent: 0,
-      status: `Preparing ${encoder.label} export...`,
+      status: `Preparing ${encoder.label} export...\n ${encoderProgressLine}`,
     });
     console.log(
-      `[clipper export] source=${source} total-frames=${totalFrames} tile-height=${captureTileHeight} output=${exportWidth}x${exportHeight} capture=${captureWidth}x${captureHeight} quality=${exportRenderQuality}`,
+      `[clipper export] source=${source} total-frames=${totalFrames} tile-height=${captureTileHeight} output=${exportWidth}x${exportHeight} capture=${captureWidth}x${captureHeight} quality=${exportRenderQuality} encoder=${encoder.label} backend=${encoder.backend}`,
     );
+    if (encoder.fallbackReason) {
+      console.warn(
+        `[clipper export] encoder-fallback format=${exportFormat} encoder=${encoder.label}: ${encoder.fallbackReason}`,
+      );
+    }
 
     const ffmpeg = spawn(this.ffmpegPath, [
       "-y",
@@ -257,7 +269,10 @@ export class RenderEngine {
       onProgress?.({
         frame: encodedFrameCount,
         totalFrames,
-        percent: Math.round((encodedFrameCount / totalFrames) * 100),
+        percent: this.getVideoExportProgressPercent(
+          encodedFrameCount,
+          totalFrames,
+        ),
         status,
         method,
       });
@@ -276,12 +291,15 @@ export class RenderEngine {
       encodedFrameCount += 1;
       const status =
         workerCount > 1
-          ? `Encoding frame ${encodedFrameCount} of ${totalFrames} (${capturedFrameCount} captured)`
-          : `Encoding frame ${encodedFrameCount} of ${totalFrames}`;
+          ? `Encoding frame ${encodedFrameCount} of ${totalFrames} (${capturedFrameCount} captured)\n ${encoderProgressLine}`
+          : `Encoding frame ${encodedFrameCount} of ${totalFrames}\n ${encoderProgressLine}`;
       onProgress?.({
         frame: encodedFrameCount,
         totalFrames,
-        percent: Math.round((encodedFrameCount / totalFrames) * 100),
+        percent: this.getVideoExportProgressPercent(
+          encodedFrameCount,
+          totalFrames,
+        ),
         status,
         method,
       });
@@ -301,10 +319,7 @@ export class RenderEngine {
         frameRange,
         workerCount,
       );
-      const workerRenderRanges = workerRanges.map((range) => ({
-        startFrame: frameRange.startFrame,
-        endFrame: range.endFrame,
-      }));
+      const workerRenderRanges = workerRanges;
 
       const startupStatus =
         workerCount > 1
@@ -330,22 +345,31 @@ export class RenderEngine {
         workerTempDirs.map((d) => fs.mkdir(d, { recursive: true })),
       );
 
-      // Build frame-index → outputPath lookup and worker-index map
-      const frameOutputPathMap = new Map<number, string>();
+      // Build frame-index → worker lookup for ordered ffmpeg streaming.
       const frameWorkerIndexMap = new Map<number, number>();
       for (let w = 0; w < workerRanges.length; w += 1) {
-        const outputPath = this.getSupervisedFrameRangeOutputPath(
-          workerTempDirs[w],
-        );
         for (
           let f = workerRanges[w].startFrame;
           f < workerRanges[w].endFrame;
           f += 1
-        ) {
-          frameOutputPathMap.set(f, outputPath);
+        )
           frameWorkerIndexMap.set(f, w);
-        }
       }
+
+      // Track per-worker completion / error
+      const workerStates: {
+        done: boolean;
+        error: unknown;
+        nativeWarningDetected: boolean;
+        nativeWarningCount: number;
+        frames: Map<number, Buffer>;
+      }[] = workerRenderRanges.map(() => ({
+        done: false,
+        error: null,
+        nativeWarningDetected: false,
+        nativeWarningCount: 0,
+        frames: new Map(),
+      }));
 
       // Launch all workers concurrently
       const workerFutures = workerRenderRanges.map((range, i) =>
@@ -359,7 +383,7 @@ export class RenderEngine {
           totalFrames,
           captureTileHeight,
           source,
-          reportCapturedFrameProgress,
+          undefined,
           exportId,
           range,
           "export",
@@ -368,21 +392,12 @@ export class RenderEngine {
           exportRenderMode,
           stableSlowGridPreset,
           stableSlowValidationSamples,
+          (frameIndex, frame) => {
+            workerStates[i].frames.set(frameIndex, frame);
+            reportCapturedFrameProgress(frameIndex, exportRenderMode);
+          },
         ),
       );
-
-      // Track per-worker completion / error
-      const workerStates: {
-        done: boolean;
-        error: unknown;
-        nativeWarningDetected: boolean;
-        nativeWarningCount: number;
-      }[] = workerFutures.map(() => ({
-        done: false,
-        error: null,
-        nativeWarningDetected: false,
-        nativeWarningCount: 0,
-      }));
       workerFutures.forEach((promise, i) => {
         promise.then(
           (result) => {
@@ -419,18 +434,19 @@ export class RenderEngine {
       for (let frameIndex = 0; frameIndex < totalFrames; frameIndex += 1) {
         this.throwIfVideoRenderCancelled(exportId);
 
-        const outputPath = frameOutputPathMap.get(frameIndex)!;
-        const framePath = this.getSupervisedFrameOutputPath(
-          outputPath,
-          frameIndex,
-        );
         const workerIdx = frameWorkerIndexMap.get(frameIndex)!;
 
-        // Wait for the frame file to be written by its worker
+        let frameBuffer: Buffer | null = null;
         while (true) {
           this.throwIfVideoRenderCancelled(exportId);
 
           const ws = workerStates[workerIdx];
+          frameBuffer = ws.frames.get(frameIndex) ?? null;
+          if (frameBuffer) {
+            ws.frames.delete(frameIndex);
+            break;
+          }
+
           if (ws.done && ws.error) {
             if (exportId) {
               this.cancelledVideoRenders.add(exportId);
@@ -442,29 +458,27 @@ export class RenderEngine {
             throw ws.error;
           }
 
-          const stat = await fs.stat(framePath).catch(() => null);
-          if (stat && stat.size === expectedFrameSize) break;
-
-          if (ws.done && !ws.error && !stat) {
+          if (ws.done && !ws.error) {
             throw new Error(
-              `Worker ${workerIdx} completed but frame ${frameIndex} file not found.`,
+              `Worker ${workerIdx} completed but frame ${frameIndex} was not delivered.`,
             );
           }
 
           await new Promise((r) => setTimeout(r, 5));
         }
 
-        // Read and pipe to ffmpeg
-        const frameBuffer = await fs.readFile(framePath);
+        if (frameBuffer.byteLength !== expectedFrameSize) {
+          throw new Error(
+            `Worker ${workerIdx} delivered frame ${frameIndex} with ${frameBuffer.byteLength} bytes; expected ${expectedFrameSize}.`,
+          );
+        }
+
         if (pendingFrameWrite) await pendingFrameWrite;
         pendingFrameWrite = this.writeProcessInput(
           ffmpeg,
           frameBuffer,
           exportId,
         );
-
-        // Delete frame file to reduce disk usage
-        await fs.rm(framePath, { force: true }).catch(() => undefined);
 
         // Write to prerender cache while streaming
         if (cacheKey) {
@@ -486,14 +500,6 @@ export class RenderEngine {
         }
 
         reportEncodedFrameProgress(exportRenderMode);
-      }
-
-      // Clean up remaining frame files from all workers
-      for (let w = 0; w < workerTempDirs.length; w += 1) {
-        await this.removeSupervisedFrameOutputs(
-          this.getSupervisedFrameRangeOutputPath(workerTempDirs[w]),
-          workerRenderRanges[w],
-        ).catch(() => undefined);
       }
 
       // Wait for all workers to finish and collect native warnings
@@ -775,6 +781,10 @@ export class RenderEngine {
         payload,
         undefined,
         () => childRenderCancelled,
+        process.send
+          ? (frameIndex, frame) =>
+              this.sendRawFrameToParentProcess(frameIndex, frame)
+          : undefined,
       );
     } catch (error) {
       if (childRenderCancelled) return true;
@@ -797,6 +807,7 @@ export class RenderEngine {
     payload: SupervisedRenderPayload,
     onFrameCaptured?: (frameIndex: number) => void,
     shouldStop?: () => boolean,
+    sendFrame?: (frameIndex: number, frame: Buffer) => Promise<void>,
   ): Promise<{ nativeWarningDetected: boolean; nativeWarningCount: number }> {
     return renderSceneToRawFramesFromCapture(
       payload,
@@ -807,10 +818,30 @@ export class RenderEngine {
         getSupervisedFrameOutputPath:
           this.getSupervisedFrameOutputPath.bind(this),
         clampExportTileHeight: this.clampExportTileHeight.bind(this),
+        sendFrame,
       },
       onFrameCaptured,
       shouldStop,
     );
+  }
+
+  private sendRawFrameToParentProcess(
+    frameIndex: number,
+    frame: Buffer,
+  ): Promise<void> {
+    const send = process.send;
+    if (!send) return Promise.resolve();
+    return new Promise<void>((resolve, reject) => {
+      const message: ExportChildFrameMessage = {
+        type: "clipper:export-frame",
+        frameIndex,
+        frame,
+      };
+      send.call(process, message, (error: Error | null | undefined) => {
+        if (error) reject(error);
+        else resolve();
+      });
+    });
   }
 
   // ── Video encoder helpers ────────────────────────────────────────────
@@ -845,10 +876,19 @@ export class RenderEngine {
       | "h264-high"
       | "mp4"
       | "webm" = "prores-422-hq",
-  ): { label: string; args: string[]; movflags?: string } {
+    width: number = FRAME_WIDTH,
+    height: number = FRAME_HEIGHT,
+  ): {
+    label: string;
+    backend: string;
+    args: string[];
+    movflags?: string;
+    fallbackReason?: string;
+  } {
     if (format === "prores-422-hq") {
       return {
         label: "ProRes 422 HQ",
+        backend: "CPU (prores_ks)",
         args: [
           "-c:v",
           "prores_ks",
@@ -864,6 +904,7 @@ export class RenderEngine {
     if (format === "prores-4444") {
       return {
         label: "ProRes 4444",
+        backend: "CPU (prores_ks)",
         args: [
           "-c:v",
           "prores_ks",
@@ -879,6 +920,7 @@ export class RenderEngine {
     if (format === "dnxhr-hqx") {
       return {
         label: "DNxHR HQX",
+        backend: "CPU (dnxhd)",
         args: [
           "-c:v",
           "dnxhd",
@@ -892,12 +934,14 @@ export class RenderEngine {
     if (format === "mov") {
       return {
         label: "Uncompressed BGRA",
+        backend: "CPU/raw write (rawvideo)",
         args: ["-c:v", "rawvideo", "-pix_fmt", "bgra"],
       };
     }
     if (format === "webm") {
       return {
         label: "VP9",
+        backend: "CPU (libvpx-vp9)",
         args: [
           "-c:v",
           "libvpx-vp9",
@@ -915,33 +959,36 @@ export class RenderEngine {
       };
     }
     if (format === "h264-high") {
-      return {
-        label: "x264 High Quality",
-        args: [
-          "-c:v",
-          "libx264",
-          "-preset",
-          "slow",
-          "-crf",
-          "12",
-          "-pix_fmt",
-          "yuv420p",
-        ],
-        movflags: "+faststart",
-      };
+      return this.getHardwareH264EncoderArgs(width, height, "high");
     }
+    return this.getHardwareH264EncoderArgs(width, height, "fast");
+  }
+
+  private getHardwareH264EncoderArgs(
+    width: number,
+    height: number,
+    quality: "fast" | "high",
+  ): {
+    label: string;
+    backend: string;
+    args: string[];
+    movflags: string;
+    fallbackReason?: string;
+  } {
     const supportedEncoders = this.getSupportedHardwareEncoders();
+    const bitrate = this.getH264HardwareBitrate(width, height, quality);
     if (
       process.platform === "darwin" &&
       supportedEncoders.has("h264_videotoolbox")
     ) {
       return {
-        label: "VideoToolbox",
+        label: quality === "high" ? "MP4 H.264 HQ" : "MP4 H.264 Fast",
+        backend: `GPU/hardware (VideoToolbox h264_videotoolbox, ${bitrate})`,
         args: [
           "-c:v",
           "h264_videotoolbox",
           "-b:v",
-          "12M",
+          bitrate,
           "-allow_sw",
           "0",
           "-pix_fmt",
@@ -950,20 +997,116 @@ export class RenderEngine {
         movflags: "+faststart",
       };
     }
+    if (supportedEncoders.has("h264_nvenc")) {
+      return {
+        label: quality === "high" ? "MP4 H.264 HQ" : "MP4 H.264 Fast",
+        backend: `GPU/hardware (NVIDIA NVENC h264_nvenc, ${bitrate})`,
+        args: [
+          "-c:v",
+          "h264_nvenc",
+          "-b:v",
+          bitrate,
+          "-preset",
+          quality === "high" ? "p5" : "p3",
+          "-pix_fmt",
+          "yuv420p",
+        ],
+        movflags: "+faststart",
+      };
+    }
+    if (supportedEncoders.has("h264_qsv")) {
+      return {
+        label: quality === "high" ? "MP4 H.264 HQ" : "MP4 H.264 Fast",
+        backend: `GPU/hardware (Intel Quick Sync h264_qsv, ${bitrate})`,
+        args: [
+          "-c:v",
+          "h264_qsv",
+          "-b:v",
+          bitrate,
+          "-preset",
+          quality === "high" ? "slow" : "veryfast",
+          "-pix_fmt",
+          "yuv420p",
+        ],
+        movflags: "+faststart",
+      };
+    }
+    if (supportedEncoders.has("h264_amf")) {
+      return {
+        label: quality === "high" ? "MP4 H.264 HQ" : "MP4 H.264 Fast",
+        backend: `GPU/hardware (AMD AMF h264_amf, ${bitrate})`,
+        args: [
+          "-c:v",
+          "h264_amf",
+          "-b:v",
+          bitrate,
+          "-quality",
+          quality === "high" ? "quality" : "speed",
+          "-pix_fmt",
+          "yuv420p",
+        ],
+        movflags: "+faststart",
+      };
+    }
+    if (supportedEncoders.has("h264_vaapi")) {
+      return {
+        label: quality === "high" ? "MP4 H.264 HQ" : "MP4 H.264 Fast",
+        backend: `GPU/hardware (VAAPI h264_vaapi, ${bitrate})`,
+        args: [
+          "-vaapi_device",
+          "/dev/dri/renderD128",
+          "-vf",
+          "format=nv12,hwupload",
+          "-c:v",
+          "h264_vaapi",
+          "-b:v",
+          bitrate,
+          "-pix_fmt",
+          "yuv420p",
+        ],
+        movflags: "+faststart",
+      };
+    }
     return {
-      label: "x264",
+      label: quality === "high" ? "MP4 H.264 HQ" : "MP4 H.264 Fast",
+      backend: `CPU fallback (libx264, ${quality === "high" ? "CRF 14" : "CRF 18"})`,
       args: [
         "-c:v",
         "libx264",
         "-preset",
-        "veryfast",
+        quality === "high" ? "medium" : "veryfast",
         "-crf",
-        "18",
+        quality === "high" ? "14" : "18",
         "-pix_fmt",
         "yuv420p",
       ],
       movflags: "+faststart",
+      fallbackReason:
+        "No supported hardware H.264 encoder was detected by ffmpeg; using CPU libx264 instead.",
     };
+  }
+
+  private getH264HardwareBitrate(
+    width: number,
+    height: number,
+    quality: "fast" | "high",
+  ): string {
+    const pixels = Math.max(1, width * height);
+    const hdPixels = 1920 * 1080;
+    const baseMbps = quality === "high" ? 18 : 12;
+    const mbps = Math.max(8, Math.round(baseMbps * (pixels / hdPixels)));
+    return `${mbps}M`;
+  }
+
+  private getVideoExportProgressPercent(
+    encodedFrameCount: number,
+    totalFrames: number,
+  ): number {
+    if (!Number.isFinite(totalFrames) || totalFrames <= 0) return 0;
+    return Math.min(
+      100,
+      Math.max(0, Math.round((encodedFrameCount / totalFrames) * 100)),
+    );
   }
 
   // ── Cancel handling ──────────────────────────────────────────────────
@@ -1159,6 +1302,7 @@ export class RenderEngine {
     exportRenderMode: SupervisedRenderPayload["exportRenderMode"] = "renderer",
     stableSlowGridPreset: SupervisedRenderPayload["stableSlowGridPreset"] = "safe",
     stableSlowValidationSamples: SupervisedRenderPayload["stableSlowValidationSamples"] = 1,
+    onFrameDelivered?: (frameIndex: number, frame: Buffer) => void,
   ): Promise<SupervisedRenderResult> {
     const _exportWidth = exportWidth ?? FRAME_WIDTH;
     const _exportHeight = exportHeight ?? FRAME_HEIGHT;
@@ -1198,7 +1342,11 @@ export class RenderEngine {
         ["--render-video-child", payloadPath],
         electronArgs,
       ),
-      { env: { ...process.env }, stdio: ["ignore", "pipe", "pipe", "ipc"] },
+      {
+        env: { ...process.env },
+        serialization: "advanced",
+        stdio: ["ignore", "pipe", "pipe", "ipc"],
+      },
     );
     if (!child.stdout || !child.stderr)
       throw new Error("Supervised export child did not expose output streams.");
@@ -1285,6 +1433,10 @@ export class RenderEngine {
         );
       }
     };
+    child.on("message", (message) => {
+      if (!isExportChildFrameMessage(message)) return;
+      onFrameDelivered?.(message.frameIndex, Buffer.from(message.frame));
+    });
     child.stdout.on("data", (chunk: Buffer) => inspectChunk(chunk, "stdout"));
     child.stderr.on("data", (chunk: Buffer) => inspectChunk(chunk, "stderr"));
     const nativeLogPoll = setInterval(() => {
@@ -1333,6 +1485,13 @@ export class RenderEngine {
     if (cancelledWhileWaiting || childStopReason === "cancel")
       throw new Error("Video export cancelled.");
     this.throwIfVideoRenderCancelled(exportId);
+    if (onFrameDelivered) {
+      if (exitCode !== 0)
+        throw new Error(
+          `Supervised export child failed with code ${exitCode ?? "unknown"}: ${summarizeChildRenderOutput(stderr || stdout || nativeLog)}`,
+        );
+      return { outputPath, nativeWarningDetected, nativeWarningCount };
+    }
     const frameCount = await this.countContiguousSupervisedFrameFiles(
       outputPath,
       frameRange,
