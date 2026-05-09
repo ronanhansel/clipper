@@ -66,6 +66,59 @@ type SceneTimelineClipboardState = {
   transitionLayers?: TransitionLayer[];
 };
 
+type TimelineMaskClipboard = {
+  enabled: boolean;
+  preview: boolean;
+  invert: boolean;
+  shape: "circular" | "ellipsoid";
+  focusX: number;
+  focusY: number;
+  radius: number;
+  radiusX: number;
+  radiusY: number;
+  feather: number;
+};
+
+type AdjustmentMaskParamKeys = {
+  enabled: string;
+  preview: string;
+  invert: string;
+  shape: string;
+  focusX: string;
+  focusY: string;
+  radius: string;
+  radiusX: string;
+  radiusY: string;
+  feather: string;
+};
+
+const adjustmentMaskParamKeysByEffectId: Record<string, AdjustmentMaskParamKeys> = {
+  "clipper.adjustment.filmEmulation": {
+    enabled: "useMask",
+    preview: "maskPreview",
+    invert: "maskInvert",
+    shape: "maskShape",
+    focusX: "maskFocusX",
+    focusY: "maskFocusY",
+    radius: "maskRadius",
+    radiusX: "maskRadiusX",
+    radiusY: "maskRadiusY",
+    feather: "maskFeather",
+  },
+  "clipper.adjustment.lens": {
+    enabled: "chromaticAberrationUseMask",
+    preview: "chromaticAberrationMaskPreview",
+    invert: "chromaticAberrationMaskInvert",
+    shape: "chromaticAberrationMaskShape",
+    focusX: "chromaticAberrationMaskFocusX",
+    focusY: "chromaticAberrationMaskFocusY",
+    radius: "chromaticAberrationMaskRadius",
+    radiusX: "chromaticAberrationMaskRadiusX",
+    radiusY: "chromaticAberrationMaskRadiusY",
+    feather: "chromaticAberrationMaskFeather",
+  },
+};
+
 type UseTimelineClipboardCommandsInput = {
   currentSceneTimeRef: { current: number };
   scene: SceneTimelineClipboardState;
@@ -129,6 +182,64 @@ function pastedTimelineNodeId(prefix: string, index: number) {
 
 function getMotionMarkers(item: { motionMarkers?: MotionMarker[] }) {
   return getMotionMarkerViews(item).motionMarkers;
+}
+
+function getAdjustmentMaskParamKeys(
+  layer: Pick<AdjustmentLayer, "effect"> | null | undefined,
+) {
+  if (!layer) return null;
+  return adjustmentMaskParamKeysByEffectId[layer.effect.effectId] ?? null;
+}
+
+function getAdjustmentMaskClipboard(
+  layer: Pick<AdjustmentLayer, "effect"> | null | undefined,
+): TimelineMaskClipboard | null {
+  const keys = getAdjustmentMaskParamKeys(layer);
+  if (!keys || !layer) return null;
+  const params = layer.effect.params ?? {};
+  return {
+    enabled: Boolean(params[keys.enabled]),
+    preview: Boolean(params[keys.preview]),
+    invert: Boolean(params[keys.invert]),
+    shape: params[keys.shape] === "ellipsoid" ? "ellipsoid" : "circular",
+    focusX: finiteMaskNumber(params[keys.focusX], 50),
+    focusY: finiteMaskNumber(params[keys.focusY], 50),
+    radius: finiteMaskNumber(params[keys.radius], 200),
+    radiusX: finiteMaskNumber(params[keys.radiusX], 200),
+    radiusY: finiteMaskNumber(params[keys.radiusY], 200),
+    feather: finiteMaskNumber(params[keys.feather], 20),
+  };
+}
+
+function applyAdjustmentMaskClipboard(
+  layer: AdjustmentLayer,
+  clipboard: TimelineMaskClipboard,
+): AdjustmentLayer {
+  const keys = getAdjustmentMaskParamKeys(layer);
+  if (!keys) return layer;
+  return {
+    ...layer,
+    effect: {
+      ...layer.effect,
+      params: {
+        ...layer.effect.params,
+        [keys.enabled]: clipboard.enabled,
+        [keys.preview]: clipboard.preview,
+        [keys.invert]: clipboard.invert,
+        [keys.shape]: clipboard.shape,
+        [keys.focusX]: clipboard.focusX,
+        [keys.focusY]: clipboard.focusY,
+        [keys.radius]: clipboard.radius,
+        [keys.radiusX]: clipboard.radiusX,
+        [keys.radiusY]: clipboard.radiusY,
+        [keys.feather]: clipboard.feather,
+      },
+    },
+  };
+}
+
+function finiteMaskNumber(value: unknown, fallback: number) {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
 function applyAdjustmentSettings(
@@ -293,6 +404,7 @@ export function useTimelineClipboardCommands({
   updateSceneTransitionLayers,
 }: UseTimelineClipboardCommandsInput) {
   const timelineNodeClipboardRef = useRef<TimelineNodeClipboard | null>(null);
+  const timelineMaskClipboardRef = useRef<TimelineMaskClipboard | null>(null);
 
   function getSelectedTimelineNodeClipboard(
     showToast = false,
@@ -1281,6 +1393,23 @@ export function useTimelineClipboardCommands({
     return false;
   }
 
+  function pasteTimelineMask(targetLayerId: string | null) {
+    const clipboard = timelineMaskClipboardRef.current;
+    if (!clipboard || !targetLayerId) return false;
+    const targetLayer = (scene.adjustmentLayers ?? []).find(
+      (layer) => layer.id === targetLayerId,
+    );
+    if (!getAdjustmentMaskParamKeys(targetLayer)) return false;
+    updateSceneAdjustmentLayers((layers) =>
+      layers.map((layer) =>
+        layer.id === targetLayerId
+          ? applyAdjustmentMaskClipboard(layer, clipboard)
+          : layer,
+      ),
+    );
+    return true;
+  }
+
   function pasteTimelineNodesSilently() {
     pasteTimelineNodesAt();
   }
@@ -1356,6 +1485,46 @@ export function useTimelineClipboardCommands({
     const menuClipboard = targetAlreadySelected
       ? getSelectedTimelineNodeClipboard()
       : getTimelineNodeClipboardForTarget(target);
+    const targetAdjustmentLayer =
+      target.kind === "adjustment"
+        ? (scene.adjustmentLayers ?? []).find(
+            (layer) => layer.id === target.layerId,
+          )
+        : null;
+    const menuMaskClipboard = getAdjustmentMaskClipboard(targetAdjustmentLayer);
+    const hasCopiedMask = Boolean(timelineMaskClipboardRef.current);
+    const targetSupportsMask = Boolean(
+      getAdjustmentMaskParamKeys(targetAdjustmentLayer),
+    );
+    const copyItem = {
+      label: "Copy",
+      action: () => {
+        if (!menuClipboard) return;
+        timelineNodeClipboardRef.current = menuClipboard;
+      },
+    };
+    const copyMaskItem = {
+      label: "Copy Mask",
+      action: () => {
+        if (!menuMaskClipboard) return;
+        timelineMaskClipboardRef.current = menuMaskClipboard;
+      },
+      disabled: !menuMaskClipboard,
+    };
+    const pasteItem = {
+      label: "Paste",
+      action: () => {
+        pasteTimelineNodesAt(target.time, target.compositionLayerId);
+      },
+      disabled: !timelineNodeClipboardRef.current,
+    };
+    const pasteMaskItem = {
+      label: "Paste Mask",
+      action: () => {
+        pasteTimelineMask(targetAdjustmentLayer?.id ?? null);
+      },
+      disabled: !hasCopiedMask || !targetSupportsMask,
+    };
     const targetPart =
       target.kind === "part"
         ? timeline.find((part) => part.id === target.partId)
@@ -1374,13 +1543,9 @@ export function useTimelineClipboardCommands({
       x: event.clientX,
       y: event.clientY,
       items: [
-        {
-          label: "Copy",
-          action: () => {
-            if (!menuClipboard) return;
-            timelineNodeClipboardRef.current = menuClipboard;
-          },
-        },
+        menuMaskClipboard
+          ? { label: "Copy", children: [copyItem, copyMaskItem] }
+          : copyItem,
         {
           label: "Cut",
           action: () => {
@@ -1389,13 +1554,7 @@ export function useTimelineClipboardCommands({
             deleteTimelineClipboardNodes(menuClipboard);
           },
         },
-        {
-          label: "Paste",
-          action: () => {
-            pasteTimelineNodesAt(target.time, target.compositionLayerId);
-          },
-          disabled: !timelineNodeClipboardRef.current,
-        },
+        hasCopiedMask ? { label: "Paste", children: [pasteItem, pasteMaskItem] } : pasteItem,
         {
           label: "Paste Attributes",
           action: () => {

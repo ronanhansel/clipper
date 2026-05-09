@@ -1408,7 +1408,7 @@ export function FramePickPointOverlay({
         transform: `translate3d(${point.x * frameScale}px, ${point.y * frameScale}px, 0)`,
       }}
     >
-      <span className="absolute left-1/2 top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/80 bg-[#159dff] shadow-[0_2px_8px_rgba(0,0,0,0.38)]" />
+      <span className="absolute left-1/2 top-1/2 h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white/80 bg-[#159dff] shadow-[0_2px_10px_rgba(0,0,0,0.42)]" />
     </div>
   );
 }
@@ -1464,7 +1464,7 @@ function FramePickPointImperativeOverlay() {
       data-clipper-motion-pick-preview
       style={{ transform: "translate3d(0px, 0px, 0)" }}
     >
-      <span className="absolute left-1/2 top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/80 bg-[#159dff] shadow-[0_2px_8px_rgba(0,0,0,0.38)]" />
+      <span className="absolute left-1/2 top-1/2 h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white/80 bg-[#159dff] shadow-[0_2px_10px_rgba(0,0,0,0.42)]" />
     </div>
   );
 }

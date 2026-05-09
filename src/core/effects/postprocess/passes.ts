@@ -9,6 +9,10 @@ export function selectLiveDomPostProcessPass(passes: PostProcessPass[]) {
   };
 }
 
+export function selectLiveDomPostProcessPasses(passes: PostProcessPass[]) {
+  return passes.filter((pass) => pass.requiresLiveDomSource);
+}
+
 export function withPostProcessFrameBackground(
   pass: PostProcessPass,
   background: unknown,

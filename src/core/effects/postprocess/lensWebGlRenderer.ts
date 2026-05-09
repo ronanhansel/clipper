@@ -5,6 +5,7 @@ import {
   type WebGlPostProcessDrawInput,
 } from "./webGlRenderer";
 import type { PostProcessPass } from "../types";
+import { shapeMaskPreviewOpacity, shapeMaskPreviewRgb } from "../shapeMask";
 
 const fragmentShaderSource = `
 precision highp float;
@@ -66,7 +67,7 @@ void main() {
   color += vec3(0.22) * rim * u_rimOpacity;
   if (u_chromaMaskPreview > 0.5 && u_chromaMaskEnabled > 0.5) {
     float maskFactor = u_chromaMaskApplyInside > 0.5 ? shapeMaskCoverage : (1.0 - shapeMaskCoverage);
-    color = mix(color, vec3(1.0, 0.35, 0.35), maskFactor * 0.35);
+    color = mix(color, vec3(${shapeMaskPreviewRgb.r}, ${shapeMaskPreviewRgb.g}, ${shapeMaskPreviewRgb.b}), maskFactor * ${shapeMaskPreviewOpacity});
   }
   gl_FragColor = vec4(color, 1.0);
 }

@@ -4,7 +4,7 @@ name: Film Emulation
 label: Film Emulation
 group: Practical
 defaultDuration: 3
-defaultParams: { "intensity": 0.82, "target": "camera", "stock": "warmNegative", "grain": 0.54, "grainSize": 1, "dust": 0.18, "scratches": 0.12, "halation": 0.34, "flicker": 0.18, "gateWeave": 0.1, "vignette": 0.22, "warmth": 0.42, "contrast": 0.18, "saturation": -0.08, "fade": 0.1, "motionSpeed": 1, "grainSpeed": 1, "dustSpeed": 1, "scratchSpeed": 1, "flickerSpeed": 1, "weaveSpeed": 1, "seed": 17 }
+defaultParams: { "intensity": 0.82, "target": "camera", "stock": "warmNegative", "grain": 0.54, "grainSize": 1, "dust": 0.18, "dustSize": 1, "dustShape": 0.45, "scratches": 0.12, "scratchLength": 1, "scratchRoughness": 0.6, "halation": 0.34, "flicker": 0.18, "gateWeave": 0.1, "vignette": 0.22, "warmth": 0.42, "contrast": 0.18, "saturation": -0.08, "fade": 0.1, "motionSpeed": 1, "grainSpeed": 1, "dustSpeed": 1, "scratchSpeed": 1, "flickerSpeed": 1, "weaveSpeed": 1, "useMask": false, "maskPreview": false, "maskInvert": false, "maskShape": "circular", "maskFocusX": 50, "maskFocusY": 50, "maskRadius": 220, "maskRadiusX": 220, "maskRadiusY": 220, "maskFeather": 40, "seed": 17 }
 paramControls:
   - key: target
     label: Target
@@ -33,48 +33,15 @@ paramControls:
     max: 1
     step: 0.01
     defaultValue: 0.82
-  - key: grain
-    label: Grain
-    type: number
-    min: 0
-    max: 1.4
-    step: 0.01
-    defaultValue: 0.54
-  - key: grainSize
-    label: Grain Size
-    type: number
-    min: 0.35
-    max: 3
-    step: 0.05
-    defaultValue: 1
-  - key: halation
-    label: Halation
-    type: number
-    min: 0
-    max: 1
-    step: 0.01
-    defaultValue: 0.34
-  - key: dust
-    label: Dust
-    type: number
-    min: 0
-    max: 1
-    step: 0.01
-    defaultValue: 0.18
-  - key: scratches
-    label: Scratches
-    type: number
-    min: 0
-    max: 1
-    step: 0.01
-    defaultValue: 0.12
-  - key: flicker
-    label: Flicker
-    type: number
-    min: 0
-    max: 1
-    step: 0.01
-    defaultValue: 0.18
+  - key: useMask
+    label: Use mask
+    type: boolean
+    defaultValue: false
+    section:
+      key: filmEmulationArtifacts
+      label: Artifacts
+      display: dialog
+      inlineGroup: filmEmulationTopButtons
   - key: motionSpeed
     label: Speed
     type: number
@@ -82,6 +49,247 @@ paramControls:
     max: 4
     step: 0.05
     defaultValue: 1
+    section:
+      key: filmEmulationSpeed
+      label: Speed
+      display: dialog
+      inlineGroup: filmEmulationTopButtons
+  - key: grain
+    label: Grain
+    type: number
+    min: 0
+    max: 1.4
+    step: 0.01
+    defaultValue: 0.54
+    inlineGroup: artifactGrain
+    section:
+      key: filmEmulationArtifacts
+      label: Artifacts
+      display: dialog
+  - key: grainSize
+    label: Grain Size
+    type: number
+    min: 0.35
+    max: 3
+    step: 0.05
+    defaultValue: 1
+    inlineGroup: artifactGrain
+    section:
+      key: filmEmulationArtifacts
+      label: Artifacts
+      display: dialog
+  - key: dust
+    label: Dust
+    type: number
+    min: 0
+    max: 1
+    step: 0.01
+    defaultValue: 0.18
+    inlineGroup: artifactDustAmount
+    section:
+      key: filmEmulationArtifacts
+      label: Artifacts
+      display: dialog
+  - key: scratches
+    label: Scratches
+    type: number
+    min: 0
+    max: 1
+    step: 0.01
+    defaultValue: 0.12
+    inlineGroup: artifactDustAmount
+    section:
+      key: filmEmulationArtifacts
+      label: Artifacts
+      display: dialog
+  - key: dustSize
+    label: Dust Size
+    type: number
+    min: 0.25
+    max: 3
+    step: 0.05
+    defaultValue: 1
+    inlineGroup: artifactDustShape
+    section:
+      key: filmEmulationArtifacts
+      label: Artifacts
+      display: dialog
+  - key: dustShape
+    label: Dust Shape
+    type: number
+    min: 0
+    max: 1
+    step: 0.01
+    defaultValue: 0.45
+    inlineGroup: artifactDustShape
+    section:
+      key: filmEmulationArtifacts
+      label: Artifacts
+      display: dialog
+  - key: scratchLength
+    label: Scratch Length
+    type: number
+    min: 0.25
+    max: 2.5
+    step: 0.05
+    defaultValue: 1
+    inlineGroup: artifactScratchShape
+    section:
+      key: filmEmulationArtifacts
+      label: Artifacts
+      display: dialog
+  - key: scratchRoughness
+    label: Scratch Roughness
+    type: number
+    min: 0
+    max: 1
+    step: 0.01
+    defaultValue: 0.6
+    inlineGroup: artifactScratchShape
+    section:
+      key: filmEmulationArtifacts
+      label: Artifacts
+      display: dialog
+  - key: halation
+    label: Halation
+    type: number
+    min: 0
+    max: 1
+    step: 0.01
+    defaultValue: 0.34
+    inlineGroup: artifactLight
+    section:
+      key: filmEmulationArtifacts
+      label: Artifacts
+      display: dialog
+  - key: flicker
+    label: Flicker
+    type: number
+    min: 0
+    max: 1
+    step: 0.01
+    defaultValue: 0.18
+    inlineGroup: artifactLight
+    section:
+      key: filmEmulationArtifacts
+      label: Artifacts
+      display: dialog
+  - key: maskInvert
+    label: Invert
+    type: boolean
+    defaultValue: false
+    inlineGroup: maskToggles
+    section:
+      key: filmEmulationArtifacts
+      label: Artifacts
+      display: dialog
+    disabledWhen:
+      key: useMask
+      truthy: false
+      reason: Enable Use mask to edit mask inversion.
+  - key: maskPreview
+    label: Preview
+    type: boolean
+    defaultValue: false
+    inlineGroup: maskToggles
+    section:
+      key: filmEmulationArtifacts
+      label: Artifacts
+      display: dialog
+    disabledWhen:
+      key: useMask
+      truthy: false
+      reason: Enable Use mask to edit mask preview.
+  - key: maskShape
+    label: Mask
+    type: select
+    defaultValue: circular
+    options:
+      - value: circular
+        label: Circular
+      - value: ellipsoid
+        label: Ellipsoid
+    section:
+      key: filmEmulationArtifacts
+      label: Artifacts
+      display: dialog
+    disabledWhen:
+      key: useMask
+      truthy: false
+      reason: Enable Use mask to edit mask shape.
+  - key: maskRadius
+    label: Mask Radius
+    type: number
+    min: 1
+    max: 2000
+    step: 1
+    defaultValue: 220
+    inlineGroup: maskRadiusCircular
+    section:
+      key: filmEmulationArtifacts
+      label: Artifacts
+      display: dialog
+    disabledWhen:
+      or:
+        - key: useMask
+          truthy: false
+        - key: maskShape
+          equals: ellipsoid
+      reason: Enable Use mask to edit mask radius.
+  - key: maskFeather
+    label: Mask Feather
+    type: number
+    min: 0
+    max: 1000
+    step: 1
+    defaultValue: 40
+    inlineGroup: maskRadiusCircular
+    section:
+      key: filmEmulationArtifacts
+      label: Artifacts
+      display: dialog
+    disabledWhen:
+      key: useMask
+      truthy: false
+      reason: Enable Use mask to edit mask feather.
+  - key: maskRadiusX
+    label: Mask Radius X
+    type: number
+    min: 1
+    max: 2000
+    step: 1
+    defaultValue: 220
+    inlineGroup: maskEllipsoidRadius
+    section:
+      key: filmEmulationArtifacts
+      label: Artifacts
+      display: dialog
+    disabledWhen:
+      or:
+        - key: useMask
+          truthy: false
+        - key: maskShape
+          equals: circular
+      reason: Enable Use mask to edit mask radius.
+  - key: maskRadiusY
+    label: Mask Radius Y
+    type: number
+    min: 1
+    max: 2000
+    step: 1
+    defaultValue: 220
+    inlineGroup: maskEllipsoidRadius
+    section:
+      key: filmEmulationArtifacts
+      label: Artifacts
+      display: dialog
+    disabledWhen:
+      or:
+        - key: useMask
+          truthy: false
+        - key: maskShape
+          equals: circular
+      reason: Enable Use mask to edit mask radius.
   - key: gateWeave
     label: Gate Weave
     type: number
@@ -138,10 +346,12 @@ paramControls:
     max: 4
     step: 0.05
     defaultValue: 1
+    inlineGroup: speedArtifactA
     section:
       key: filmEmulationSpeed
       label: Speed
       display: dialog
+      inlineGroup: filmEmulationTopButtons
   - key: dustSpeed
     label: Dust Speed
     type: number
@@ -149,6 +359,7 @@ paramControls:
     max: 4
     step: 0.05
     defaultValue: 1
+    inlineGroup: speedArtifactA
     section:
       key: filmEmulationSpeed
       label: Speed
@@ -160,6 +371,7 @@ paramControls:
     max: 4
     step: 0.05
     defaultValue: 1
+    inlineGroup: speedArtifactB
     section:
       key: filmEmulationSpeed
       label: Speed
@@ -171,6 +383,7 @@ paramControls:
     max: 4
     step: 0.05
     defaultValue: 1
+    inlineGroup: speedArtifactB
     section:
       key: filmEmulationSpeed
       label: Speed
@@ -186,3 +399,19 @@ paramControls:
       key: filmEmulationSpeed
       label: Speed
       display: dialog
+pointControls:
+  - label: Mask Focal Point
+    xKey: maskFocusX
+    yKey: maskFocusY
+    xDefault: 50
+    yDefault: 50
+    coordinateSpace: percent
+    pickLabel: Pick Mask Focal Point
+    section:
+      key: filmEmulationArtifacts
+      label: Artifacts
+      display: dialog
+    disabledWhen:
+      key: useMask
+      truthy: false
+      reason: Enable Use mask to edit mask focal point.

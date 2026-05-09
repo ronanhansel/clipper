@@ -1,4 +1,9 @@
 import type { AdjustmentVisualOverlay } from "../../../effects/types";
+import {
+  getShapeMaskOverlayStyle,
+  shapeMaskPreviewCssColor,
+  type ShapeMaskUniforms,
+} from "../../shapeMask";
 
 type OverlayTarget = AdjustmentVisualOverlay["target"];
 
@@ -12,7 +17,11 @@ export type PracticalArtifactInput = {
   grain: number;
   grainSize: number;
   dust: number;
+  dustSize: number;
+  dustShape: number;
   scratches: number;
+  scratchLength: number;
+  scratchRoughness: number;
   halation: number;
   flicker: number;
   gateWeave: number;
@@ -24,16 +33,12 @@ export type PracticalArtifactInput = {
   scratchSpeed: number;
   flickerSpeed: number;
   weaveSpeed: number;
+  mask: ShapeMaskUniforms;
 };
 
 export function createPracticalArtifactOverlays(
   input: PracticalArtifactInput,
 ): AdjustmentVisualOverlay[] {
-  const baseFrameIndex = getFrameIndex(
-    input.sceneTime,
-    input.frameRate,
-    input.motionSpeed,
-  );
   const grainFrameIndex = getFrameIndex(
     input.sceneTime,
     input.frameRate,
@@ -64,12 +69,14 @@ export function createPracticalArtifactOverlays(
   const weaveX = jitter(seed + 31, weaveFrameIndex, input.gateWeave) * 5;
   const weaveY = jitter(seed + 47, weaveFrameIndex, input.gateWeave) * 3;
   const overlays: AdjustmentVisualOverlay[] = [];
+  const maskStyle = getShapeMaskOverlayStyle(input.mask);
 
   if (input.grain > 0) {
     overlays.push({
       id: `${input.id}:film-emulation-grain`,
       target: input.target,
       style: {
+        ...maskStyle,
         backgroundImage: createNoiseSvgDataUri({
           seed: seed + grainFrameIndex * 13,
           size: Math.round(72 + input.grainSize * 34),
@@ -89,11 +96,16 @@ export function createPracticalArtifactOverlays(
       id: `${input.id}:film-emulation-damage`,
       target: input.target,
       style: {
+        ...maskStyle,
         backgroundImage: createDamageSvgDataUri({
           seed: seed + Math.floor(dustFrameIndex / 2) * 19,
           scratchSeed: seed + Math.floor(scratchFrameIndex / 2) * 23,
           dust: input.dust,
+          dustSize: input.dustSize,
+          dustShape: input.dustShape,
           scratches: input.scratches,
+          scratchLength: input.scratchLength,
+          scratchRoughness: input.scratchRoughness,
           warmth: input.warmth,
         }),
         backgroundSize: "cover",
@@ -111,6 +123,7 @@ export function createPracticalArtifactOverlays(
       id: `${input.id}:film-emulation-halation`,
       target: input.target,
       style: {
+        ...maskStyle,
         backgroundImage: [
           "radial-gradient(circle at 18% 22%, rgba(255,99,55,0.42) 0, rgba(255,120,64,0.22) 11%, transparent 32%)",
           "radial-gradient(circle at 78% 18%, rgba(255,78,42,0.34) 0, rgba(255,146,74,0.18) 13%, transparent 36%)",
@@ -127,6 +140,7 @@ export function createPracticalArtifactOverlays(
       id: `${input.id}:film-emulation-gate`,
       target: input.target,
       style: {
+        ...maskStyle,
         backgroundImage: [
           "radial-gradient(ellipse at 50% 50%, transparent 0 52%, rgba(34,18,12,0.42) 100%)",
           "linear-gradient(90deg, rgba(0,0,0,0.22), transparent 4%, transparent 96%, rgba(0,0,0,0.22))",
@@ -137,6 +151,18 @@ export function createPracticalArtifactOverlays(
         opacity: round(
           input.intensity * (input.vignette * 0.58 + (1 - flicker) * 0.5),
         ),
+      },
+    });
+  }
+
+  if (input.mask.enabled && input.mask.preview) {
+    overlays.push({
+      id: `${input.id}:film-emulation-mask-preview`,
+      target: input.target,
+      style: {
+        ...maskStyle,
+        background: shapeMaskPreviewCssColor,
+        mixBlendMode: "normal",
       },
     });
   }
@@ -181,7 +207,11 @@ function createDamageSvgDataUri(input: {
   seed: number;
   scratchSeed: number;
   dust: number;
+  dustSize: number;
+  dustShape: number;
   scratches: number;
+  scratchLength: number;
+  scratchRoughness: number;
   warmth: number;
 }) {
   let random = mulberry32(input.seed);
@@ -194,13 +224,24 @@ function createDamageSvgDataUri(input: {
     const x = round(random() * width);
     const y = round(random() * height);
     const radius = round(
-      0.25 + Math.pow(random(), 2.1) * (2.2 + input.dust * 1.8),
+      (0.25 + Math.pow(random(), 2.1) * (2.2 + input.dust * 1.8)) *
+        input.dustSize,
     );
     const alpha = round((0.16 + random() * 0.62) * input.dust);
     const channel = random() > 0.23 ? 255 : 18;
-    marks.push(
-      `<circle cx="${x}" cy="${y}" r="${radius}" fill="rgb(${channel},${channel},${channel})" opacity="${alpha}"/>`,
-    );
+    const rough = input.dustShape;
+    if (rough > 0.08 && random() < rough) {
+      const rx = round(radius * (0.65 + random() * (0.8 + rough * 0.9)));
+      const ry = round(radius * (0.45 + random() * (0.7 + rough * 0.8)));
+      const rotation = round(random() * 180);
+      marks.push(
+        `<ellipse cx="${x}" cy="${y}" rx="${rx}" ry="${ry}" fill="rgb(${channel},${channel},${channel})" opacity="${alpha}" transform="rotate(${rotation} ${x} ${y})"/>`,
+      );
+    } else {
+      marks.push(
+        `<circle cx="${x}" cy="${y}" r="${radius}" fill="rgb(${channel},${channel},${channel})" opacity="${alpha}"/>`,
+      );
+    }
   }
   const scratchCount = Math.round(input.scratches * 13);
   for (let index = 0; index < scratchCount; index += 1) {
@@ -215,14 +256,19 @@ function createScratchMark(
   random: () => number,
   width: number,
   height: number,
-  input: { scratches: number; warmth: number },
+  input: {
+    scratches: number;
+    scratchLength: number;
+    scratchRoughness: number;
+    warmth: number;
+  },
 ) {
   const x = round(random() * width);
   const y = round(random() * height);
-  const length = 34 + random() * 142;
-  const segments = 5 + Math.floor(random() * 9);
-  const tilt = (random() - 0.5) * 10;
-  const raggedness = 1.6 + random() * 5.6;
+  const length = (34 + random() * 142) * input.scratchLength;
+  const segments = 5 + Math.floor(random() * (6 + input.scratchRoughness * 8));
+  const tilt = (random() - 0.5) * (4 + input.scratchRoughness * 14);
+  const raggedness = 0.8 + input.scratchRoughness * (1.6 + random() * 7.4);
   const red = Math.round(226 + input.warmth * 18);
   const stroke = `rgb(${red},232,218)`;
   const strokeWidth = round(0.22 + Math.pow(random(), 1.9) * 1.28);
@@ -231,19 +277,25 @@ function createScratchMark(
 
   for (let pointIndex = 0; pointIndex <= segments; pointIndex += 1) {
     const t = pointIndex / segments;
-    const split = pointIndex > 0 && pointIndex < segments && random() < 0.18;
+    const split =
+      pointIndex > 0 &&
+      pointIndex < segments &&
+      random() < 0.08 + input.scratchRoughness * 0.22;
     const nick = split ? ` M` : pointIndex === 0 ? `M` : ` L`;
     const px = round(x + tilt * t + (random() - 0.5) * raggedness);
     const py = round(y + length * t + (random() - 0.5) * raggedness * 1.8);
     points.push(`${nick} ${px} ${py}`);
   }
 
-  const chips = Array.from({ length: Math.floor(random() * 4) }, () => {
-    const t = random();
-    const cx = round(x + tilt * t + (random() - 0.5) * 7);
-    const cy = round(y + length * t + (random() - 0.5) * 7);
-    return `<ellipse cx="${cx}" cy="${cy}" rx="${round(0.35 + random() * 1.8)}" ry="${round(0.18 + random() * 0.8)}" fill="${stroke}" opacity="${round(alpha * (0.28 + random() * 0.5))}" transform="rotate(${round(-8 + random() * 16)} ${cx} ${cy})"/>`;
-  }).join("");
+  const chips = Array.from(
+    { length: Math.floor(random() * (1 + input.scratchRoughness * 5)) },
+    () => {
+      const t = random();
+      const cx = round(x + tilt * t + (random() - 0.5) * 7);
+      const cy = round(y + length * t + (random() - 0.5) * 7);
+      return `<ellipse cx="${cx}" cy="${cy}" rx="${round(0.35 + random() * 1.8)}" ry="${round(0.18 + random() * 0.8)}" fill="${stroke}" opacity="${round(alpha * (0.28 + random() * 0.5))}" transform="rotate(${round(-8 + random() * 16)} ${cx} ${cy})"/>`;
+    },
+  ).join("");
 
   return `<path d="${points.join("")}" fill="none" stroke="${stroke}" stroke-width="${strokeWidth}" stroke-linecap="butt" stroke-linejoin="miter" stroke-dasharray="${round(12 + random() * 38)} ${round(1 + random() * 12)} ${round(1 + random() * 10)} ${round(2 + random() * 18)}" opacity="${alpha}"/>${chips}`;
 }

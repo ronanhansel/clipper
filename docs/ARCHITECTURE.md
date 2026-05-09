@@ -19,7 +19,11 @@ Clipper is a desktop-first Electron and Vite editor for TypeScript-authored moti
 - Move deterministic project transformations and timeline/render calculations into `src/core` with direct tests.
 - Use shared UI primitives for fundamentals instead of one-off browser controls or inline control implementations.
 - Prefer small named modules over large files with unrelated constants, state mutation, rendering, and platform I/O.
-- Effects are package-first. Add manifests, logic, controls, render/export hooks, and tests through package registries instead of hardcoding package ids in app panels or export paths. See `docs/EFFECT_PACKAGES.md`.
+- Effects are package-first. Add manifests, logic, controls, render/export hooks, timeline metadata, and tests through package/category registries instead of hardcoding package ids, colors, durations, or UI controls in app panels, timeline code, preview, or export paths. See `docs/EFFECT_PACKAGES.md`.
+
+## Effects Boundary
+
+Effect-specific behavior belongs behind `src/core/effects` package declarations and registries. React panels may render category sections, manifest controls, and drag rows from metadata, but must not know package ids for inspector controls, preview/export routing, or timeline behavior. Preview and export should consume same package hooks and post-process declarations so package behavior stays testable outside app shell.
 
 ## State Management
 

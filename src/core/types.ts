@@ -219,6 +219,19 @@ export type TimelineMarkerMetadata = {
   snapOut?: boolean;
 };
 
+export type TimelineMarkerTag =
+  | {
+      kind: "text";
+      label: string;
+      title?: string;
+    }
+  | {
+      kind: "icon";
+      icon: string;
+      label?: string;
+      title?: string;
+    };
+
 export type MotionBlock = TimelineMarkerMetadata & {
   id: string;
   name?: string;
@@ -254,6 +267,7 @@ export type MotionEffectDefinition = {
   group: string;
   groups?: readonly string[];
   tags?: readonly EffectManifestTag[];
+  timelineTags?: readonly TimelineMarkerTag[];
   defaultDuration: number;
 };
 
@@ -289,6 +303,8 @@ export type AdjustmentEffectParams = Record<string, unknown> & {
   warmth?: number;
   window?: number;
   dust?: number;
+  dustShape?: number;
+  dustSize?: number;
   fade?: number;
   flicker?: number;
   gateWeave?: number;
@@ -298,6 +314,8 @@ export type AdjustmentEffectParams = Record<string, unknown> & {
   halation?: number;
   motionSpeed?: number;
   scratches?: number;
+  scratchLength?: number;
+  scratchRoughness?: number;
   scratchSpeed?: number;
   seed?: number;
   stock?: string;
@@ -325,6 +343,7 @@ export type AdjustmentEffectDefinition = {
   group: string;
   groups?: readonly string[];
   tags?: readonly EffectManifestTag[];
+  timelineTags?: readonly TimelineMarkerTag[];
   defaultDuration: number;
   defaultParams: AdjustmentEffectParams;
 };
@@ -361,6 +380,7 @@ export type TransitionEffectDefinition = {
   group: string;
   groups?: readonly string[];
   tags?: readonly EffectManifestTag[];
+  timelineTags?: readonly TimelineMarkerTag[];
   defaultDuration: number;
   defaultParams: TransitionEffectParams;
 };

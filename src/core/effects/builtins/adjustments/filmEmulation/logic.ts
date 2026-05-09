@@ -1,6 +1,38 @@
 import type { AdjustmentEffectPackage } from "../../../types";
-import { getClampedParam, getOverlayTarget, getNumericParam } from "../helpers";
+import {
+  getClampedParam,
+  getOverlayTarget,
+  getNumericParam,
+} from "../helpers";
 import { createPracticalArtifactOverlays } from "../practicalArtifacts";
+import {
+  getShapeMaskUniforms,
+  type ShapeMaskParamConfig,
+} from "../../../shapeMask";
+
+const artifactMaskConfig: ShapeMaskParamConfig = {
+  enabledKey: "useMask",
+  previewKey: "maskPreview",
+  invertKey: "maskInvert",
+  shapeKey: "maskShape",
+  focusXKey: "maskFocusX",
+  focusYKey: "maskFocusY",
+  radiusKey: "maskRadius",
+  radiusXKey: "maskRadiusX",
+  radiusYKey: "maskRadiusY",
+  featherKey: "maskFeather",
+  fallbacks: {
+    enabled: false,
+    preview: false,
+    invert: false,
+    radius: 220,
+    radiusX: 220,
+    radiusY: 220,
+    feather: 40,
+    focusX: 50,
+    focusY: 50,
+  },
+};
 
 const stockLooks = {
   warmNegative: {
@@ -78,7 +110,11 @@ export const filmEmulationLogic = {
         grain: getClampedParam(layer, "grain", 0.54, 0, 1.4),
         grainSize: getClampedParam(layer, "grainSize", 1, 0.35, 3),
         dust: getClampedParam(layer, "dust", 0.18, 0, 1),
+        dustSize: getClampedParam(layer, "dustSize", 1, 0.25, 3),
+        dustShape: getClampedParam(layer, "dustShape", 0.45, 0, 1),
         scratches: getClampedParam(layer, "scratches", 0.12, 0, 1),
+        scratchLength: getClampedParam(layer, "scratchLength", 1, 0.25, 2.5),
+        scratchRoughness: getClampedParam(layer, "scratchRoughness", 0.6, 0, 1),
         halation: getClampedParam(layer, "halation", 0.34, 0, 1),
         flicker: getClampedParam(layer, "flicker", 0.18, 0, 1),
         gateWeave: getClampedParam(layer, "gateWeave", 0.1, 0, 1),
@@ -90,6 +126,7 @@ export const filmEmulationLogic = {
         scratchSpeed: getClampedParam(layer, "scratchSpeed", 1, 0, 4),
         flickerSpeed: getClampedParam(layer, "flickerSpeed", 1, 0, 4),
         weaveSpeed: getClampedParam(layer, "weaveSpeed", 1, 0, 4),
+        mask: getShapeMaskUniforms(layer, artifactMaskConfig),
       }),
     };
   },

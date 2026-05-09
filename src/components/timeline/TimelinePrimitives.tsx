@@ -11,9 +11,24 @@ import {
   type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
-import { Eye, EyeOff, Lock, MoreVertical, Unlock, Zap } from "lucide-react";
-import { getEffectPackage } from "../../core/effects/registry";
-import type { EffectTimelineGradient } from "../../core/types";
+import {
+  Cpu,
+  Eye,
+  EyeOff,
+  Lock,
+  MoreVertical,
+  Unlock,
+  Zap,
+} from "lucide-react";
+import {
+  getEffectPackage,
+  getEffectTimelineAdornments,
+  getEffectTimelineGradient,
+} from "../../core/effects/registry";
+import type {
+  EffectTimelineGradient,
+  TimelineMarkerTag,
+} from "../../core/types";
 import { Input } from "../ui/input";
 import type { EffectDragPreview } from "./timelineTypes";
 
@@ -44,17 +59,14 @@ export function EffectDragPreviewBlock({
     to: "#991b1b",
     text: "#ffffff",
   };
+  const variant = getTimelineVariantFromPreviewCategory(preview.category);
   const gradient = preview.blocked
     ? blockedGradient
-    : getDefaultTimelineGradient(
-        preview.category === "transition"
-          ? "transition"
-          : preview.category === "motion"
-            ? "motion"
-            : preview.category === "adjustment"
-              ? "adjustment"
-              : "composition",
-      );
+    : getDefaultTimelineGradient(variant);
+  const adornment =
+    variant === "composition"
+      ? undefined
+      : getEffectTimelineAdornments(variant);
   const effect = preview.effectId
     ? getEffectPackage(preview.effectId)
     : undefined;
@@ -67,7 +79,7 @@ export function EffectDragPreviewBlock({
       className="pointer-events-none absolute left-0 top-0 z-30 box-border min-w-[18px] overflow-hidden rounded-[3px] px-3 py-2 text-xs font-bold opacity-55 shadow-[inset_1px_0_0_rgb(0_0_0/0.55),inset_-1px_0_0_rgb(0_0_0/0.55)]"
       style={timelineGradientStyle(gradient)}
     >
-      {preview.category === "transition" ? (
+      {adornment === "center-divider" ? (
         <span className="absolute left-1/2 top-1/2 h-[calc(100%-10px)] w-px -translate-x-1/2 -translate-y-1/2 bg-white/65 shadow-[0_0_8px_rgba(255,255,255,0.45)]" />
       ) : null}
       <span className="block overflow-hidden text-ellipsis whitespace-nowrap">
@@ -218,6 +230,41 @@ export function CompositionTimelineBlock({
       />
     </div>
   );
+}
+
+export function TimelineMarkerTags({
+  tags,
+}: {
+  tags?: readonly TimelineMarkerTag[];
+}) {
+  if (!tags?.length) return null;
+  return (
+    <span className="pointer-events-none mt-1 flex min-w-0 flex-wrap items-center gap-1">
+      {tags.map((tag, index) => (
+        <TimelineMarkerTagPill tag={tag} key={`${tag.kind}-${index}`} />
+      ))}
+    </span>
+  );
+}
+
+function TimelineMarkerTagPill({ tag }: { tag: TimelineMarkerTag }) {
+  const title = tag.title ?? (tag.kind === "text" ? tag.label : tag.label);
+  const label = tag.kind === "text" ? tag.label : tag.label;
+  return (
+    <span
+      className="inline-flex h-[15px] max-w-full items-center gap-1 rounded-[3px] border border-white/25 bg-black/24 px-1.5 text-[9px] font-black uppercase leading-none tracking-[0.12em] text-white/85 shadow-[0_1px_2px_rgba(0,0,0,0.25)]"
+      title={title}
+    >
+      {tag.kind === "icon" ? renderTimelineTagIcon(tag.icon) : null}
+      {label ? <span className="truncate">{label}</span> : null}
+    </span>
+  );
+}
+
+function renderTimelineTagIcon(icon: string) {
+  if (icon === "gl" || icon === "webgl")
+    return <Cpu size={9} strokeWidth={2.8} aria-hidden="true" />;
+  return <span aria-hidden="true">{icon.slice(0, 2).toUpperCase()}</span>;
 }
 
 export function LayerLabel({
@@ -528,15 +575,20 @@ export function LayerResizeSeparator({
 export function getDefaultTimelineGradient(
   variant: "adjustment" | "composition" | "motion" | "transition",
 ): EffectTimelineGradient {
-  if (variant === "transition")
-    return { from: "#ff8c42", to: "#cc5500", text: "#ffffff" };
   if (variant === "composition")
     return { from: "#38a86d", to: "#17603c", text: "#ffffff" };
-  if (variant === "motion")
-    return { from: "#1bb8c9", to: "#087482", text: "#ffffff" };
-  if (variant === "adjustment")
-    return { from: "#a78bfa", to: "#6d28d9", text: "#ffffff" };
+  const gradient = getEffectTimelineGradient(variant);
+  if (gradient) return gradient;
   return { from: "#6f7684", to: "#424854", text: "#f0f2f6" };
+}
+
+function getTimelineVariantFromPreviewCategory(
+  category: EffectDragPreview["category"],
+) {
+  if (category === "transition") return "transition";
+  if (category === "motion") return "motion";
+  if (category === "adjustment") return "adjustment";
+  return "composition";
 }
 
 export function timelineGradientStyle(

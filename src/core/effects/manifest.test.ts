@@ -6,11 +6,20 @@ import {
 } from "./manifest";
 import { builtInAdjustmentEffects } from "./builtins/adjustments";
 import {
+  builtInEffectCategoryDeclarations,
+  getDefaultEffectPackageId,
+  getEffectCategoryDeclaration,
   getEffectCategoryAccent,
   getEffectCategoryIcon,
   getEffectCategoryLabel,
   getEffectLibrarySections,
   getEffectPackage,
+  getEffectPackageTimelineDefaultDuration,
+  getEffectPackageTimelineLaneCategory,
+  getFallbackEffectPackageId,
+  getEffectTimelineAdornments,
+  getEffectTimelineDropMode,
+  getEffectTimelineGradient,
   registerEffectCategoryMetadata,
   registerEffectPackage,
 } from "./registry";
@@ -111,14 +120,83 @@ defaultParams: {}
       accent: "#123456",
       icon: "motion",
       libraryOrder: 2,
+      timeline: {
+        laneCategory: "motion",
+        previewCategory: "motion",
+        gradient: { from: "#123456", to: "#012345", text: "#ffffff" },
+        dropMode: "point",
+      },
     });
 
     expect(getEffectCategoryLabel("motion")).toBe("Move");
     expect(getEffectCategoryAccent("motion")).toBe("#123456");
     expect(getEffectCategoryIcon("motion")).toBe("motion");
+    expect(getEffectTimelineGradient("motion")).toEqual({
+      from: "#123456",
+      to: "#012345",
+      text: "#ffffff",
+    });
+    expect(getEffectTimelineDropMode("motion")).toBe("point");
     expect(
-      getEffectLibrarySections().find((section) => section.category === "motion")
-        ?.metadata,
+      getEffectLibrarySections().find(
+        (section) => section.category === "motion",
+      )?.metadata,
     ).toMatchObject({ label: "Move", accent: "#123456", icon: "motion" });
+  });
+
+  it("resolves timeline metadata through effect package categories", () => {
+    const transition = createTransitionEffectPackage(`
+id: test.transition.timeline
+category: transition
+name: Timeline Transition
+label: Timeline Transition
+group: Transitions
+defaultDuration: 1.25
+defaultParams: {}
+`);
+
+    registerEffectPackage(transition);
+
+    expect(getEffectPackageTimelineLaneCategory(transition.id)).toBe(
+      "transition",
+    );
+    expect(getEffectPackageTimelineDefaultDuration(transition.id)).toBe(1.25);
+    expect(getEffectTimelineAdornments("transition")).toBe("center-divider");
+  });
+
+  it("exposes built-in category declarations with defaults", () => {
+    expect(
+      builtInEffectCategoryDeclarations.map((item) => item.category),
+    ).toEqual(["transition", "adjustment", "motion"]);
+    expect(getEffectCategoryDeclaration("adjustment")?.timeline).toMatchObject({
+      label: "Adjustment",
+      defaultLayerName: "Adjustments",
+      laneCategory: "adjust",
+      dropMode: "placement",
+    });
+    expect(getDefaultEffectPackageId("adjustment")).toBe(
+      builtInAdjustmentEffects[0].id,
+    );
+    expect(getFallbackEffectPackageId("adjustment")).toBe(
+      builtInAdjustmentEffects[0].id,
+    );
+  });
+
+  it("parses timeline marker tags", () => {
+    const effect = createAdjustmentEffectPackage(`
+id: test.timeline-tags
+category: adjustment
+name: Timeline Tags
+label: Timeline Tags
+group: Practical
+timelineTags: [{ "kind": "text", "label": "GL", "title": "WebGL post-process" }, { "kind": "icon", "icon": "webgl", "label": "GPU" }]
+defaultDuration: 2
+defaultParams: {}
+`);
+
+    expect(effect.timelineTags).toEqual([
+      { kind: "text", label: "GL", title: "WebGL post-process" },
+      { kind: "icon", icon: "webgl", label: "GPU" },
+    ]);
   });
 });

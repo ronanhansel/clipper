@@ -1,30 +1,11 @@
 import type { AdjustmentLayer } from "../../types";
+import {
+  getShapeMaskUniforms as getSharedShapeMaskUniforms,
+  type ShapeMaskParamConfig,
+  type ShapeMaskUniforms,
+} from "../shapeMask";
 
 export const lensPostProcessKind = "clipper.postprocess.lens" as const;
-
-export type ShapeMaskParamConfig = {
-  enabledKey: string;
-  previewKey: string;
-  invertKey: string;
-  shapeKey: string;
-  focusXKey: string;
-  focusYKey: string;
-  radiusKey: string;
-  radiusXKey: string;
-  radiusYKey: string;
-  featherKey: string;
-  fallbacks: {
-    enabled: boolean;
-    preview: boolean;
-    invert: boolean;
-    radius: number;
-    radiusX: number;
-    radiusY: number;
-    feather: number;
-    focusX: number;
-    focusY: number;
-  };
-};
 
 export const chromaticAberrationMaskConfig: ShapeMaskParamConfig = {
   enabledKey: "chromaticAberrationUseMask",
@@ -48,17 +29,6 @@ export const chromaticAberrationMaskConfig: ShapeMaskParamConfig = {
     focusX: 50,
     focusY: 50,
   },
-};
-
-export type ShapeMaskUniforms = {
-  enabled: boolean;
-  preview: boolean;
-  applyInside: boolean;
-  shape: "circular" | "ellipsoid";
-  focus: { x: number; y: number };
-  radiusX: number;
-  radiusY: number;
-  feather: number;
 };
 
 export type LensPostProcessUniforms = {
@@ -211,54 +181,5 @@ export function getShapeMaskUniforms(
   layer: Pick<AdjustmentLayer, "effect">,
   config: ShapeMaskParamConfig = chromaticAberrationMaskConfig,
 ): ShapeMaskUniforms {
-  const {
-    enabledKey,
-    previewKey,
-    invertKey,
-    shapeKey,
-    focusXKey,
-    focusYKey,
-    radiusKey,
-    radiusXKey,
-    radiusYKey,
-    featherKey,
-    fallbacks,
-  } = config;
-
-  const enabled = Boolean(
-    layer.effect.params?.[enabledKey] ?? fallbacks.enabled,
-  );
-  const preview = Boolean(
-    layer.effect.params?.[previewKey] ?? fallbacks.preview,
-  );
-  const invert = Boolean(layer.effect.params?.[invertKey] ?? fallbacks.invert);
-  const applyInside = !invert;
-
-  const rawShape = String(layer.effect.params?.[shapeKey] ?? "");
-  const shape: "circular" | "ellipsoid" =
-    rawShape === "ellipsoid" ? "ellipsoid" : "circular";
-
-  const radius = getFiniteParam(layer, radiusKey, fallbacks.radius);
-  const radiusX =
-    shape === "ellipsoid"
-      ? getFiniteParam(layer, radiusXKey, fallbacks.radiusX)
-      : radius;
-  const radiusY =
-    shape === "ellipsoid"
-      ? getFiniteParam(layer, radiusYKey, fallbacks.radiusY)
-      : radius;
-  const feather = getFiniteParam(layer, featherKey, fallbacks.feather);
-  const focusX = getFiniteParam(layer, focusXKey, fallbacks.focusX);
-  const focusY = getFiniteParam(layer, focusYKey, fallbacks.focusY);
-
-  return {
-    enabled,
-    preview,
-    applyInside,
-    shape,
-    focus: { x: focusX / 100, y: focusY / 100 },
-    radiusX: Math.max(1, radiusX),
-    radiusY: Math.max(1, radiusY),
-    feather: Math.max(0, feather),
-  };
+  return getSharedShapeMaskUniforms(layer, config);
 }

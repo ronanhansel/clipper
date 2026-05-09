@@ -184,15 +184,21 @@ export function getExecutableAdjustmentLayers(
   timelineLayers: TimelineLayerState | undefined,
   options: { includeHiddenRows?: boolean } = {},
 ) {
-  const rowIds = new Set(
-    (timelineLayers?.adjustmentLayers ?? [])
-      .filter((layer) => options.includeHiddenRows || !layer.hidden)
-      .map((layer) => layer.id),
+  const visibleRows = (timelineLayers?.adjustmentLayers ?? []).filter(
+    (layer) => options.includeHiddenRows || !layer.hidden,
+  );
+  const rowIds = new Set(visibleRows.map((layer) => layer.id));
+  const rowOrder = new Map(
+    visibleRows.map((layer, index) => [layer.id, index]),
   );
   if (rowIds.size === 0) return [];
-  return (layers ?? []).filter((layer) =>
-    rowIds.has(getAdjustmentLayerRowId(layer)),
-  );
+  return (layers ?? [])
+    .filter((layer) => rowIds.has(getAdjustmentLayerRowId(layer)))
+    .sort((left, right) => {
+      const leftRow = rowOrder.get(getAdjustmentLayerRowId(left)) ?? 0;
+      const rightRow = rowOrder.get(getAdjustmentLayerRowId(right)) ?? 0;
+      return rightRow - leftRow;
+    });
 }
 
 export function getExecutableTransitionLayers(

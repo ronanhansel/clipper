@@ -4,20 +4,19 @@ import {
   type DragEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent,
-  type RefObject,
 } from "react";
-import type {
-  TimelineNodeContextTarget,
-  TimelineSelectionDrag,
-} from "../../app/types";
+import type { TimelineNodeContextTarget } from "../../app/types";
 import { getMotionEffectPackage } from "../../core/effects/registry";
 import {
   isMotionMarkerOnLayerId,
   isTimelineMarkerMendedEdge,
 } from "../../core/timeline";
 import type { MotionMarker, TimelinePart } from "../../core/types";
-import { TimelineBlock, TimelineLayerLane } from "./TimelinePrimitives";
-import { TimelineSelectionBox } from "./TimelineSelectionBox";
+import {
+  TimelineBlock,
+  TimelineLayerLane,
+  TimelineMarkerTags,
+} from "./TimelinePrimitives";
 import {
   timelineBlockPreviewKey,
   type TimelineBlockPreviewMap,
@@ -40,8 +39,6 @@ export function MotionLane({
   sceneDuration,
   overflowVisible,
   timelineBlockPreviews,
-  motionSelectionDrag,
-  motionSelectionBoxRef,
   selectedMotionKeys,
   selectedMotionMarkerId,
   selectedMotionMarkerPartId,
@@ -62,8 +59,6 @@ export function MotionLane({
   sceneDuration: number;
   overflowVisible: boolean;
   timelineBlockPreviews: TimelineBlockPreviewMap | null;
-  motionSelectionDrag: TimelineSelectionDrag | null;
-  motionSelectionBoxRef: RefObject<HTMLDivElement | null>;
   selectedMotionKeys: Set<string>;
   selectedMotionMarkerId: string | null;
   selectedMotionMarkerPartId: string | null;
@@ -125,18 +120,13 @@ export function MotionLane({
       onPointerCancel={onEndSelection}
       onContextMenu={onOpenBlankContextMenu}
     >
-      {motionSelectionDrag ? (
-        <TimelineSelectionBox
-          boxRef={motionSelectionBoxRef}
-          drag={motionSelectionDrag}
-        />
-      ) : null}
       {timeline.flatMap((timelinePart) =>
         timelinePart.motionMarkers
           .filter((marker) => isMotionMarkerOnLayerId(marker, layerId))
           .map((marker) => {
             const effectKind = marker.kind as string;
             const effectId = marker.effectId ?? `clipper.motion.${marker.kind}`;
+            const effectPackage = getMotionEffectPackage(effectId);
             const markerKey = timelineBlockPreviewKey(
               "motion",
               timelinePart.id,
@@ -211,8 +201,11 @@ export function MotionLane({
                 leftHandle={leftIndicator}
                 rightHandle={rightIndicator}
               >
-                <span className="pointer-events-none block overflow-hidden text-ellipsis whitespace-nowrap">
-                  {getMotionMarkerTimelineLabel(marker, effectId)}
+                <span className="pointer-events-none flex min-w-0 flex-col items-start overflow-hidden">
+                  <span className="block max-w-full overflow-hidden text-ellipsis whitespace-nowrap">
+                    {getMotionMarkerTimelineLabel(marker, effectId)}
+                  </span>
+                  <TimelineMarkerTags tags={effectPackage?.timelineTags} />
                 </span>
                 {marker.kind === "pan" && marker.followId ? (
                   <Link2

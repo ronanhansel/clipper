@@ -47,7 +47,7 @@ import {
 } from "./lensWebGlRenderer";
 import { withLensFrameBackground } from "./lens";
 import {
-  selectLiveDomPostProcessPass,
+  selectLiveDomPostProcessPasses,
   withPostProcessFrameBackground,
 } from "./passes";
 import {
@@ -519,7 +519,7 @@ describe("live DOM post-process capability", () => {
     const result = renderer.render({
       canvas,
       sourceElement: source,
-      pass: testLensPass(),
+      passes: [testLensPass()],
       width: 1920,
       height: 1080,
       optIn: true,
@@ -528,6 +528,34 @@ describe("live DOM post-process capability", () => {
     expect(result.rendered).toBe(true);
     expect(drawCalls).toContainEqual([source, 0, 0, 1920, 1080]);
     expect(texImageSources.at(-1)).not.toBe(source);
+    renderer.destroy();
+  });
+
+  it("stacks live DOM post-process passes in order", () => {
+    installLiveDomCaptureCanvasMock();
+    const source = fakeSource({});
+    const texImageSources: unknown[] = [];
+    const canvas = fakeCanvasElement({
+      layoutSubtree: true,
+      context2d: fakeDrawElementContext({ calls: [] }),
+    });
+    canvas.context.texImage2D = (...args: unknown[]) => {
+      texImageSources.push(args.at(-1));
+    };
+    const renderer = new LiveDomPostProcessRenderer();
+
+    const result = renderer.render({
+      canvas,
+      sourceElement: source,
+      passes: [testLensPass(), { ...testLensPass(), id: "test:lens-2" }],
+      width: 1920,
+      height: 1080,
+      optIn: true,
+    });
+
+    expect(result.rendered).toBe(true);
+    expect(texImageSources.length).toBeGreaterThan(0);
+    expect(texImageSources[0]).not.toBe(source);
     renderer.destroy();
   });
 
@@ -550,7 +578,7 @@ describe("live DOM post-process capability", () => {
       renderer.render({
         canvas,
         sourceElement: source,
-        pass: testLensPass(),
+        passes: [testLensPass()],
         width: 1920,
         height: 1080,
         optIn: true,
@@ -565,7 +593,7 @@ describe("live DOM post-process capability", () => {
       renderer.render({
         canvas,
         sourceElement: source,
-        pass: testLensPass(),
+        passes: [testLensPass()],
         width: 1920,
         height: 1080,
         optIn: true,
@@ -831,7 +859,7 @@ describe("lens post-process pass collection", () => {
     });
   });
 
-  it("selects live DOM post-process passes independently of lens kind", () => {
+  it("selects ordered live DOM post-process passes independently of lens kind", () => {
     const passes = applyAdjustmentLayersToPostProcessPasses(
       1.5,
       [
@@ -842,10 +870,10 @@ describe("lens post-process pass collection", () => {
       { width: 1920, height: 1080 },
     );
 
-    expect(selectLiveDomPostProcessPass(passes)).toMatchObject({
-      pass: { id: "lens:lens-postprocess", requiresLiveDomSource: true },
-      droppedPassCount: 1,
-    });
+    expect(selectLiveDomPostProcessPasses(passes)).toMatchObject([
+      { id: "lens:lens-postprocess", requiresLiveDomSource: true },
+      { id: "lens-2:lens-postprocess", requiresLiveDomSource: true },
+    ]);
   });
 
   it("applies frame background through the generic post-process decorator", () => {
@@ -1286,7 +1314,7 @@ function installLiveDomCaptureCanvasMock() {
     createElement: (tagName: string) => {
       if (tagName !== "canvas")
         throw new Error(`Unexpected test element: ${tagName}`);
-      return fakeCanvas({ context2d: fakeDrawElementContext({}) });
+      return fakeCanvasElement({ context2d: fakeDrawElementContext({}) });
     },
   });
 }

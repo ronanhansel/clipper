@@ -11,6 +11,7 @@ import {
   expandExplicitTimelineMarkerMendIds,
   getActiveTimelinePartsAtTime,
   getAdjustmentPlacement,
+  getExecutableAdjustmentLayers,
   getExecutableTransitionLayers,
   getMendedMarkerDragItems,
   getMotionMarkerMendKey,
@@ -344,6 +345,36 @@ describe("timeline model", () => {
     expect(renderable.adjustmentLayers).toEqual([]);
     expect(renderable.motionMarkers).toEqual([]);
     expect(renderable.transitionLayers).toEqual([]);
+  });
+
+  it("orders executable adjustment layers bottom-to-top by timeline row", () => {
+    const layers = [
+      {
+        id: "vhs",
+        name: "VHS Tracking",
+        layerId: "clipper.adjustment.vhsTracking",
+        start: 0,
+        duration: 3,
+        effect: { effectId: "clipper.adjustment.vhsTracking" as const },
+      },
+      {
+        id: "lens",
+        name: "Lens",
+        layerId: "clipper.adjustment.lens",
+        start: 0,
+        duration: 3,
+        effect: { effectId: "clipper.adjustment.lens" as const },
+      },
+    ];
+
+    expect(
+      getExecutableAdjustmentLayers(layers, {
+        adjustmentLayers: [
+          { id: "clipper.adjustment.vhsTracking" },
+          { id: "clipper.adjustment.lens" },
+        ],
+      }).map((layer) => layer.id),
+    ).toEqual(["lens", "vhs"]);
   });
 
   it("filters transition layers by visible row state", () => {

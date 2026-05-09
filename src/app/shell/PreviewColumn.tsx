@@ -29,7 +29,7 @@ import {
 import { LiveDomPostProcessRenderer } from "../../core/effects/postprocess/liveDomRenderer";
 import { measurePreviewPerf } from "../../core/effects/postprocess/perf";
 import {
-  selectLiveDomPostProcessPass,
+  selectLiveDomPostProcessPasses,
   withPostProcessFrameBackground,
 } from "../../core/effects/postprocess/passes";
 import {
@@ -356,9 +356,9 @@ function hasActiveLivePostProcessPass(
     { width: FRAME_WIDTH, height: FRAME_HEIGHT },
   );
   return Boolean(
-    selectLiveDomPostProcessPass(
+    selectLiveDomPostProcessPasses(
       plan.steps.flatMap((step) => step.postProcessPasses ?? []),
-    ).pass,
+    ).length,
   );
 }
 
@@ -434,8 +434,10 @@ function PrerenderVideoPreview({
 }) {
   const canvas2dRef = useRef<HTMLCanvasElement | null>(null);
   const webglCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const postProcessRendererRef = useRef<PostProcessRenderer | null>(null);
-  const postProcessRendererKindRef = useRef<string | null>(null);
+  const webglScratchCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const postProcessRenderersRef = useRef<Map<string, PostProcessRenderer>>(
+    new Map(),
+  );
   const lastFrameKeyRef = useRef("");
   const cachedVisualStyleKeyRef = useRef("");
   const firstMissAtRef = useRef<number | null>(null);
@@ -507,23 +509,17 @@ function PrerenderVideoPreview({
   );
 
   function getPostProcessRenderer(kind: string) {
-    if (
-      postProcessRendererRef.current &&
-      postProcessRendererKindRef.current === kind
-    )
-      return postProcessRendererRef.current;
-    destroyCachedPostProcessRenderer();
-    postProcessRendererRef.current = createDefaultPostProcessRenderer(kind);
-    postProcessRendererKindRef.current = postProcessRendererRef.current
-      ? kind
-      : null;
-    return postProcessRendererRef.current;
+    const existing = postProcessRenderersRef.current.get(kind);
+    if (existing) return existing;
+    const renderer = createDefaultPostProcessRenderer(kind);
+    if (renderer) postProcessRenderersRef.current.set(kind, renderer);
+    return renderer;
   }
 
   function destroyCachedPostProcessRenderer() {
-    postProcessRendererRef.current?.destroy();
-    postProcessRendererRef.current = null;
-    postProcessRendererKindRef.current = null;
+    for (const renderer of postProcessRenderersRef.current.values())
+      renderer.destroy();
+    postProcessRenderersRef.current.clear();
   }
 
   function drawCachedFrameAtTime(sceneTime: number) {
@@ -551,24 +547,25 @@ function PrerenderVideoPreview({
     const postProcessPasses = plan.steps.flatMap(
       (step) => step.postProcessPasses ?? [],
     );
-    const { pass: webGlPostProcessPass } =
-      selectLiveDomPostProcessPass(postProcessPasses);
-    const cachedVisualStyle = webGlPostProcessPass
+    const webGlPostProcessPasses =
+      selectLiveDomPostProcessPasses(postProcessPasses);
+    const lastWebGlPass = webGlPostProcessPasses.at(-1);
+    const cachedVisualStyle = lastWebGlPass
       ? getVisualStyleForAdjustmentPlan(
           filterAdjustmentExecutionPlan(
             plan,
             "after",
-            webGlPostProcessPass.sourceLayerId,
+            lastWebGlPass.sourceLayerId,
           ),
         )
       : getVisualStyleForAdjustmentPlan(plan);
     if (
-      webGlPostProcessPass &&
+      webGlPostProcessPasses.length > 0 &&
       getVisualStyleForAdjustmentPlan(
         filterAdjustmentExecutionPlan(
           plan,
           "before",
-          webGlPostProcessPass.sourceLayerId,
+          webGlPostProcessPasses[0]?.sourceLayerId,
         ),
       ).filter
     ) {
@@ -576,37 +573,29 @@ function PrerenderVideoPreview({
       return;
     }
     updateCachedVisualStyle(cachedVisualStyle);
-    const targetDisplayMode: CachedPreviewDisplayMode = webGlPostProcessPass
-      ? "webgl"
-      : "canvas2d";
+    const targetDisplayMode: CachedPreviewDisplayMode =
+      webGlPostProcessPasses.length > 0 ? "webgl" : "canvas2d";
     const frameKey = `${targetDisplayMode}:${block.startTime}:${frame.sceneTime}:${JSON.stringify(postProcessPasses)}`;
     if (lastFrameKeyRef.current !== frameKey) {
-      if (webGlPostProcessPass) {
+      if (webGlPostProcessPasses.length > 0) {
         const canvas = webglCanvasRef.current;
         if (!canvas) {
           showDomFallback();
           return;
         }
-        const renderer = getPostProcessRenderer(webGlPostProcessPass.kind);
-        if (!renderer) {
-          showDomFallback();
-          return;
-        }
-        const decoratedPass = withPostProcessFrameBackground(
-          webGlPostProcessPass,
-          framePreviewProps.part.frame.style.background,
-        );
-        if (
-          !measurePreviewPerf("cached.webgl.render", () =>
-            renderer.render(
-              canvas,
-              frame.bitmap,
-              decoratedPass,
-              block.width,
-              block.height,
+        const rendered = renderCachedPostProcessPasses({
+          canvas,
+          source: frame.bitmap,
+          passes: webGlPostProcessPasses.map((pass) =>
+            withPostProcessFrameBackground(
+              pass,
+              framePreviewProps.part.frame.style.background,
             ),
-          )
-        ) {
+          ),
+          width: block.width,
+          height: block.height,
+        });
+        if (!rendered) {
           showDomFallback();
           return;
         }
@@ -632,6 +621,42 @@ function PrerenderVideoPreview({
     }
     updateDisplayMode(targetDisplayMode);
     updateDisplayReady(true);
+  }
+
+  function renderCachedPostProcessPasses(input: {
+    canvas: HTMLCanvasElement;
+    source: TexImageSource;
+    passes: ReturnType<typeof selectLiveDomPostProcessPasses>;
+    width: number;
+    height: number;
+  }) {
+    let sourceFrame = input.source;
+    webglScratchCanvasRef.current ??= document.createElement("canvas");
+    const scratchCanvases = [
+      canvas2dRef.current,
+      webglScratchCanvasRef.current,
+    ].filter((canvas): canvas is HTMLCanvasElement => Boolean(canvas));
+    for (let index = 0; index < input.passes.length; index += 1) {
+      const pass = input.passes[index];
+      const renderer = getPostProcessRenderer(pass.kind);
+      if (!renderer) return false;
+      const isLast = index === input.passes.length - 1;
+      const outputCanvas = isLast
+        ? input.canvas
+        : (scratchCanvases[index % scratchCanvases.length] ?? input.canvas);
+      const rendered = measurePreviewPerf("cached.webgl.render", () =>
+        renderer.render(
+          outputCanvas,
+          sourceFrame,
+          pass,
+          input.width,
+          input.height,
+        ),
+      );
+      if (!rendered) return false;
+      sourceFrame = outputCanvas;
+    }
+    return true;
   }
 
   function showDomFallback() {
@@ -887,9 +912,9 @@ function LivePostProcessFramePreview({
       }),
     );
     const passes = plan.steps.flatMap((step) => step.postProcessPasses ?? []);
-    const { pass: livePass } = selectLiveDomPostProcessPass(passes);
+    const livePasses = selectLiveDomPostProcessPasses(passes);
     const optIn = livePostProcessEnabled;
-    if (!canvas || !livePass || !livePostProcessEnabled || !optIn) {
+    if (!canvas || !livePasses.length || !livePostProcessEnabled || !optIn) {
       updateActiveLiveSourceRequired(
         passes.some((pass) => pass.requiresLiveDomSource),
       );
@@ -935,9 +960,11 @@ function LivePostProcessFramePreview({
         canvas,
         sourceCanvas: sourceCanvasRef.current ?? canvas,
         sourceElement: source,
-        pass: withPostProcessFrameBackground(
-          livePass,
-          framePreviewProps.part.frame.style.background,
+        passes: livePasses.map((pass) =>
+          withPostProcessFrameBackground(
+            pass,
+            framePreviewProps.part.frame.style.background,
+          ),
         ),
         width: FRAME_WIDTH,
         height: FRAME_HEIGHT,
@@ -995,10 +1022,10 @@ function LivePostProcessFramePreview({
           { width: FRAME_WIDTH, height: FRAME_HEIGHT },
         ),
       );
-      const { pass: livePass } = selectLiveDomPostProcessPass(
+      const livePasses = selectLiveDomPostProcessPasses(
         plan.steps.flatMap((step) => step.postProcessPasses ?? []),
       );
-      if (!livePass) clearInactiveLivePreview(null);
+      if (!livePasses.length) clearInactiveLivePreview(null);
     };
     window.addEventListener(
       "clipper:preview-postprocess-adjustment",
@@ -1026,10 +1053,10 @@ function LivePostProcessFramePreview({
         { width: FRAME_WIDTH, height: FRAME_HEIGHT },
       ),
     );
-    const { pass: livePass } = selectLiveDomPostProcessPass(
+    const livePasses = selectLiveDomPostProcessPasses(
       plan.steps.flatMap((step) => step.postProcessPasses ?? []),
     );
-    if (!livePostProcessEnabled || !livePass)
+    if (!livePostProcessEnabled || !livePasses.length)
       clearInactiveLivePreview(!livePostProcessEnabled ? "not-opted-in" : null);
   }, [framePreviewProps.adjustmentLayers]);
 
@@ -1068,9 +1095,10 @@ function LivePostProcessFramePreview({
         }),
       );
       const passes = plan.steps.flatMap((step) => step.postProcessPasses ?? []);
-      const { pass: livePass } = selectLiveDomPostProcessPass(passes);
+      const livePasses = selectLiveDomPostProcessPasses(passes);
+      const lastLivePass = livePasses.at(-1);
       const optIn = livePostProcessEnabled;
-      if (!canvas || !livePass || !livePostProcessEnabled || !optIn) {
+      if (!canvas || !livePasses.length || !livePostProcessEnabled || !optIn) {
         updateActiveLiveSourceRequired(
           passes.some((pass) => pass.requiresLiveDomSource),
         );
@@ -1093,7 +1121,7 @@ function LivePostProcessFramePreview({
             filterAdjustmentExecutionPlan(
               plan,
               "after",
-              livePass.sourceLayerId,
+              lastLivePass?.sourceLayerId,
             ),
           ),
       );
@@ -1169,9 +1197,9 @@ function LivePostProcessFramePreview({
       )
     : null;
   const sourceLayerId = sourcePlan
-    ? selectLiveDomPostProcessPass(
+    ? selectLiveDomPostProcessPasses(
         sourcePlan.steps.flatMap((step) => step.postProcessPasses ?? []),
-      ).pass?.sourceLayerId
+      )[0]?.sourceLayerId
     : undefined;
   const sourceAdjustmentLayers =
     sourcePlan && sourceLayerId

@@ -1,6 +1,8 @@
 import type {
   AdjustmentEffectDefinition,
   AdjustmentLayer,
+  EffectCategory,
+  EffectId,
   MotionBlock,
   MotionEffectDefinition,
   TransitionEffectDefinition,
@@ -20,6 +22,37 @@ export type UnknownPostProcessPass = BasePostProcessPass &
   Record<string, unknown>;
 
 export type PostProcessPass = UnknownPostProcessPass;
+
+export type EffectCategoryLibraryMetadata = {
+  label: string;
+  accent: string;
+  icon: string;
+  libraryOrder: number;
+};
+
+export type EffectCategoryTimelineMetadata = {
+  label: string;
+  defaultLayerName?: string;
+  defaultDuration?: number;
+};
+
+export type EffectCategoryDefaults = {
+  defaultPackageId?: EffectId;
+  fallbackPackageId?: EffectId;
+};
+
+export type EffectCategoryValidationInput = {
+  packageDefinition: EffectPackage;
+  categoryDeclaration: EffectCategoryDeclaration;
+};
+
+export type EffectCategoryDeclaration = {
+  category: EffectCategory;
+  library: EffectCategoryLibraryMetadata;
+  timeline: EffectCategoryTimelineMetadata;
+  defaults?: EffectCategoryDefaults;
+  validatePackage?(input: EffectCategoryValidationInput): string | null;
+};
 
 export type AdjustmentVisualStyle = {
   filter?: string;
@@ -69,6 +102,7 @@ export type AdjustmentEffectDisableCondition = {
   equals?: string | number | boolean;
   reason?: string;
   and?: AdjustmentEffectDisableCondition[];
+  or?: AdjustmentEffectDisableCondition[];
 };
 
 export type AdjustmentEffectSection =
@@ -77,8 +111,16 @@ export type AdjustmentEffectSection =
       key: string;
       label: string;
       description?: string;
-      display?: "panel" | "dialog";
+      display?: "dialog";
+      inlineGroup?: string;
     };
+
+export type AdjustmentEffectInlineSectionTrigger = {
+  label: string;
+  icon?: "settings";
+  iconOnly?: boolean;
+  section: AdjustmentEffectSection;
+};
 
 export type AdjustmentEffectNumberParamControl = {
   key: string;
@@ -89,9 +131,9 @@ export type AdjustmentEffectNumberParamControl = {
   step?: number;
   defaultValue: number;
   disabledWhen?: AdjustmentEffectDisableCondition;
-  visibleWhen?: AdjustmentEffectDisableCondition;
   section?: AdjustmentEffectSection;
   inlineGroup?: string;
+  inlineSectionTrigger?: AdjustmentEffectInlineSectionTrigger;
   inlineToggle?: {
     label: string;
     key: string;
@@ -106,9 +148,9 @@ export type AdjustmentEffectSelectParamControl = {
   defaultValue: string;
   options: readonly { value: string; label: string }[];
   disabledWhen?: AdjustmentEffectDisableCondition;
-  visibleWhen?: AdjustmentEffectDisableCondition;
   section?: AdjustmentEffectSection;
   inlineGroup?: string;
+  inlineSectionTrigger?: AdjustmentEffectInlineSectionTrigger;
   inlineToggle?: {
     label: string;
     key: string;
@@ -122,9 +164,9 @@ export type AdjustmentEffectBooleanParamControl = {
   type: "boolean";
   defaultValue: boolean;
   disabledWhen?: AdjustmentEffectDisableCondition;
-  visibleWhen?: AdjustmentEffectDisableCondition;
   section?: AdjustmentEffectSection;
   inlineGroup?: string;
+  inlineSectionTrigger?: AdjustmentEffectInlineSectionTrigger;
 };
 
 export type AdjustmentEffectParamControl =
@@ -143,7 +185,6 @@ export type AdjustmentEffectPointControl = {
   coordinateSpace: "percent" | "frame";
   pickLabel?: string;
   disabledWhen?: AdjustmentEffectDisableCondition;
-  visibleWhen?: AdjustmentEffectDisableCondition;
   section?: AdjustmentEffectSection;
   inlineGroup?: string;
 };

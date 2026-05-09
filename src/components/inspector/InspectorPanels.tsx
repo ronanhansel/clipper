@@ -9,14 +9,7 @@ import {
   Trash2,
   Underline,
 } from "lucide-react";
-import {
-  memo,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import {
   MAX_PART_DURATION_SECONDS,
   FRAME_HEIGHT,
@@ -35,6 +28,8 @@ import {
 import { clamp, roundTenth, roundTwo } from "../../core/math";
 import {
   getAdjustmentEffectPackage,
+  defaultMotionEffectPackage,
+  getMotionEffectByKind,
   getMotionEffectPackage,
   getTransitionEffectPackage,
 } from "../../core/effects/registry";
@@ -43,16 +38,10 @@ import {
   normalizeSymmetricTransitionLayer,
 } from "../../core/transitions";
 import type {
-  AdjustmentEffectDisableCondition,
-  AdjustmentEffectNumberParamControl,
-  AdjustmentEffectParamControl,
   AdjustmentEffectPointControl,
   MotionMendTransitionOption,
 } from "../../core/effects/types";
-import {
-  getMotionBlockEffectKind,
-  getMotionMarkerViews,
-} from "../../core/motionEffects";
+import { getMotionMarkerViews } from "../../core/motionEffects";
 import { cameraTranslationToFramePoint } from "../../core/camera";
 import type { MotionMarker } from "../../core/types";
 import { minimumZoomDuration, mutedCaps, panelCard } from "../../app/config";
@@ -65,7 +54,6 @@ import {
   DialogTitle,
 } from "../ui/dialog";
 import { Input } from "../ui/input";
-import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import {
   Select,
   SelectContent,
@@ -89,6 +77,7 @@ import {
 } from "../ColorSelector";
 import { clipperHost } from "../../app/clipperHost";
 import { Coordinate2DField, PickButton } from "./Coordinate2DField";
+import { EffectControls } from "./EffectControls";
 import type {
   GraphParameterEditorField,
   GraphParameterEditorSchema,
@@ -538,20 +527,21 @@ export function FrameInspector({
           onChange={(event) => updateBackgroundStyle(event.target.value)}
         />
       </label>
-      <div className="grid gap-2">
-        <span className={mutedCaps}>Mend</span>
+      {canSnapMiddle ? (
         <div className="grid gap-2">
-          <button
-            className={snapButtonClass(false, canSnapMiddle)}
-            disabled={!canSnapMiddle}
-            title="Mend adjacent compositions"
-            aria-pressed={false}
-            onClick={onSnapMiddle}
-          >
-            Mend
-          </button>
+          <span className={mutedCaps}>Mend</span>
+          <div className="grid gap-2">
+            <button
+              className={snapButtonClass(false, canSnapMiddle)}
+              title="Mend adjacent compositions"
+              aria-pressed={false}
+              onClick={onSnapMiddle}
+            >
+              Mend
+            </button>
+          </div>
         </div>
-      </div>
+      ) : null}
       <div className={panelCard}>
         <span>Constant Elements</span>
         <strong className="text-[13px]">
@@ -1453,9 +1443,6 @@ export function AdjustmentInspector({
   onSnapMiddle: () => void;
 }) {
   const effect = getAdjustmentEffectPackage(layer.effect.effectId);
-  const [openControlSectionKey, setOpenControlSectionKey] = useState<
-    string | null
-  >(null);
 
   function updateText(key: "name", value: string) {
     onChange((current) => ({ ...current, [key]: value }));
@@ -1478,154 +1465,6 @@ export function AdjustmentInspector({
         ),
       };
     });
-  }
-
-  function getParamValue(control: AdjustmentEffectParamControl) {
-    const value = layer.effect.params?.[control.key];
-    if (control.type === "boolean")
-      return typeof value === "boolean" ? value : control.defaultValue;
-    if (control.type === "select")
-      return typeof value === "string" ? value : control.defaultValue;
-    return typeof value === "number" && Number.isFinite(value)
-      ? value
-      : control.defaultValue;
-  }
-
-  function updateBooleanParam(key: string, value: boolean) {
-    onChange((current) => ({
-      ...current,
-      effect: {
-        ...current.effect,
-        params: { ...current.effect.params, [key]: value },
-      },
-    }));
-  }
-
-  function getInlineToggleValue(key: string, defaultValue: boolean) {
-    const value = layer.effect.params?.[key];
-    return typeof value === "boolean" ? value : defaultValue;
-  }
-
-  function updateParam(control: AdjustmentEffectParamControl, value: string) {
-    if (
-      control.type === "boolean" ||
-      isAdjustmentControlDisabled(layer, control.disabledWhen)
-    )
-      return;
-    if (control.type === "select") {
-      onChange((current) => ({
-        ...current,
-        effect: {
-          ...current.effect,
-          params: { ...current.effect.params, [control.key]: value },
-        },
-      }));
-      return;
-    }
-
-    const numeric = getParamNumericValue(control, value);
-    onChange((current) => ({
-      ...current,
-      effect: {
-        ...current.effect,
-        params: { ...current.effect.params, [control.key]: numeric },
-      },
-    }));
-  }
-
-  function previewParam(control: AdjustmentEffectParamControl, value: number) {
-    if (
-      control.type === "boolean" ||
-      control.type === "select" ||
-      isAdjustmentControlDisabled(layer, control.disabledWhen)
-    )
-      return;
-    const numeric = getParamNumericValue(control, String(value));
-    onPreviewLayer?.((current) => ({
-      ...current,
-      effect: {
-        ...current.effect,
-        params: { ...current.effect.params, [control.key]: numeric },
-      },
-    }));
-  }
-
-  function getParamNumericValue(
-    control: Extract<AdjustmentEffectParamControl, { type: "number" }>,
-    value: string,
-  ) {
-    const fallback = control.defaultValue;
-    let numeric = Number(value);
-    if (!Number.isFinite(numeric)) numeric = fallback;
-    if (typeof control.min === "number")
-      numeric = Math.max(control.min, numeric);
-    if (typeof control.max === "number")
-      numeric = Math.min(control.max, numeric);
-    if (control.step && Number.isInteger(control.step))
-      numeric = Math.round(numeric);
-    return numeric;
-  }
-
-  function getPointValue(
-    control: AdjustmentEffectPointControl,
-    axis: "x" | "y",
-  ) {
-    const key = axis === "x" ? control.xKey : control.yKey;
-    const fallback = axis === "x" ? control.xDefault : control.yDefault;
-    const value = Number(layer.effect.params?.[key]);
-    return Number.isFinite(value) ? value : fallback;
-  }
-
-  function updatePointParam(
-    control: AdjustmentEffectPointControl,
-    axis: "x" | "y",
-    value: string,
-  ) {
-    if (isAdjustmentControlDisabled(layer, control.disabledWhen)) return;
-    const key = axis === "x" ? control.xKey : control.yKey;
-    const numeric = getPointNumericValue(control, axis, value);
-    if (numeric === null) return;
-    onChange((current) => ({
-      ...current,
-      effect: {
-        ...current.effect,
-        params: { ...current.effect.params, [key]: numeric },
-      },
-    }));
-  }
-
-  function previewPointParam(
-    control: AdjustmentEffectPointControl,
-    axis: "x" | "y",
-    value: number,
-  ) {
-    if (isAdjustmentControlDisabled(layer, control.disabledWhen)) return;
-    const key = axis === "x" ? control.xKey : control.yKey;
-    const numeric = getPointNumericValue(control, axis, String(value));
-    if (numeric === null) return;
-    onPreviewLayer?.((current) => ({
-      ...current,
-      effect: {
-        ...current.effect,
-        params: { ...current.effect.params, [key]: numeric },
-      },
-    }));
-  }
-
-  function getPointNumericValue(
-    control: AdjustmentEffectPointControl,
-    axis: "x" | "y",
-    value: string,
-  ) {
-    const numeric = Number(value);
-    if (!Number.isFinite(numeric)) return null;
-    const max =
-      control.coordinateSpace === "percent"
-        ? 100
-        : axis === "x"
-          ? FRAME_WIDTH
-          : FRAME_HEIGHT;
-    return roundTwo(clamp(numeric, 0, max));
   }
 
   return (
@@ -1665,293 +1504,30 @@ export function AdjustmentInspector({
         Effect
         <Input value={effect?.label ?? layer.effect.effectId} readOnly />
       </label>
-      {(() => {
-        // Resolve section metadata (string shorthand -> { key, label })
-        function sectionMeta(
-          sec: NonNullable<AdjustmentEffectParamControl["section"]>,
-        ): {
-          key: string;
-          label: string;
-          description?: string;
-          display?: "panel" | "dialog";
-        } {
-          return typeof sec === "string" ? { key: sec, label: sec } : sec;
-        }
-
-        // Single row renderers
-        function renderParam(
-          control: AdjustmentEffectParamControl,
-          compact?: boolean,
-        ): ReactNode {
-          const disabledReason = getAdjustmentControlDisabledReason(
-            layer,
-            control.disabledWhen,
-          );
-          if (control.type === "boolean") {
-            return (
-              <label
-                className={`flex cursor-pointer items-center rounded-[10px] border border-[#2d313b] bg-[#171920] text-[#dfe2ea] font-bold transition hover:border-[var(--clipper-accent)] hover:bg-[#20232c] ${compact ? "gap-1.5 px-2 py-1.5 text-[11px]" : "gap-3 p-3 text-sm"}`}
-                key={control.key}
-                title={disabledReason}
-              >
-                <Checkbox
-                  checked={Boolean(getParamValue(control))}
-                  disabled={Boolean(disabledReason)}
-                  onCheckedChange={(checked) =>
-                    updateBooleanParam(control.key, checked === true)
-                  }
-                />
-                <span>{control.label}</span>
-              </label>
-            );
-          }
-          const inlineToggle = control.inlineToggle;
-          return (
-            <label
-              className={`grid gap-1.5 ${mutedCaps} ${disabledReason ? "opacity-50" : ""}`}
-              key={control.key}
-              title={disabledReason}
-            >
-              {inlineToggle ? (
-                <span className="flex items-center justify-between">
-                  <span>{control.label}</span>
-                  <span className="flex items-center gap-2 text-[11px] font-medium text-[#9b9da7]">
-                    {inlineToggle.label}
-                    <Checkbox
-                      checked={getInlineToggleValue(
-                        inlineToggle.key,
-                        inlineToggle.defaultValue,
-                      )}
-                      onCheckedChange={(checked) =>
-                        updateBooleanParam(inlineToggle.key, checked === true)
-                      }
-                    />
-                  </span>
-                </span>
-              ) : (
-                control.label
-              )}
-              {control.type === "select" ? (
-                <Select
-                  value={String(getParamValue(control))}
-                  onValueChange={(value) => updateParam(control, value)}
-                  disabled={Boolean(disabledReason)}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectGroup>
-                      {control.options.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-              ) : (
-                <Input
-                  type={control.type}
-                  min={control.min}
-                  max={control.max}
-                  step={control.step}
-                  value={getParamValue(control) as number}
-                  resetValue={
-                    (control as AdjustmentEffectNumberParamControl).defaultValue
-                  }
-                  numberScrubMode="preview"
-                  numberScrubCommitThrottleMs={16}
-                  disabled={Boolean(disabledReason)}
-                  onChange={(event) => updateParam(control, event.target.value)}
-                  onNumberScrubEnd={onClearPreview}
-                  onNumberScrubPreview={(value) => previewParam(control, value)}
-                />
-              )}
-            </label>
-          );
-        }
-
-        function renderPoint(control: AdjustmentEffectPointControl): ReactNode {
-          const disabledReason = getAdjustmentControlDisabledReason(
-            layer,
-            control.disabledWhen,
-          );
-          return (
-            <AdjustmentPointControlField
-              control={control}
-              disabledReason={disabledReason}
-              key={`${control.xKey}:${control.yKey}`}
-              picking={pickingPointKey === `${control.xKey}:${control.yKey}`}
-              xValue={getPointValue(control, "x")}
-              yValue={getPointValue(control, "y")}
-              onPick={() => onPickPoint?.(control)}
-              onScrubEnd={onClearPreview}
-              onScrubPreview={(axis, value) =>
-                previewPointParam(control, axis, value)
-              }
-              onValueChange={(axis, value) =>
-                updatePointParam(control, axis, value)
-              }
-            />
-          );
-        }
-
-        // Collect visible items into sections + unsectioned buckets
-        type SectionBucket = {
-          label: string;
-          description?: string;
-          display?: "panel" | "dialog";
-          items: { key: string; inlineGroup?: string; node: ReactNode }[];
-        };
-        const sectionMap = new Map<string, SectionBucket>();
-        const unsectionedParamNodes: ReactNode[] = [];
-        const unsectionedPointNodes: ReactNode[] = [];
-
-        for (const control of effect?.paramControls ?? []) {
-          if (getAdjustmentControlHiddenReason(layer, control.visibleWhen))
-            continue;
-          const node = renderParam(control, Boolean(control.inlineGroup));
-          if (!node) continue;
-          if (control.section) {
-            const sec = sectionMeta(control.section);
-            let bucket = sectionMap.get(sec.key);
-            if (!bucket) {
-              bucket = {
-                label: sec.label,
-                description: sec.description,
-                display: sec.display,
-                items: [],
-              };
-              sectionMap.set(sec.key, bucket);
-            }
-            bucket.items.push({
-              key: control.key,
-              inlineGroup: control.inlineGroup,
-              node,
-            });
-          } else {
-            unsectionedParamNodes.push(node);
-          }
-        }
-
-        for (const control of effect?.pointControls ?? []) {
-          if (getAdjustmentControlHiddenReason(layer, control.visibleWhen))
-            continue;
-          const node = renderPoint(control);
-          if (!node) continue;
-          if (control.section) {
-            const sec = sectionMeta(control.section);
-            let bucket = sectionMap.get(sec.key);
-            if (!bucket) {
-              bucket = {
-                label: sec.label,
-                description: sec.description,
-                display: sec.display,
-                items: [],
-              };
-              sectionMap.set(sec.key, bucket);
-            }
-            bucket.items.push({
-              key: `${control.xKey}:${control.yKey}`,
-              inlineGroup: control.inlineGroup,
-              node,
-            });
-          } else {
-            unsectionedPointNodes.push(node);
-          }
-        }
-
-        // Flatten section items: consecutive same-inlineGroup items go into a two-column row
-        function renderSectionItems(
-          items: SectionBucket["items"],
-        ): ReactNode[] {
-          const result: ReactNode[] = [];
-          for (let i = 0; i < items.length; i++) {
-            const item = items[i];
-            if (item.inlineGroup !== undefined) {
-              const group: ReactNode[] = [item.node];
-              while (
-                i + 1 < items.length &&
-                items[i + 1].inlineGroup === item.inlineGroup
-              ) {
-                i++;
-                group.push(items[i].node);
-              }
-              result.push(
-                <div
-                  key={group
-                    .map(
-                      (_, idx) =>
-                        items[i - group.length + 1 + idx]?.key ?? String(idx),
-                    )
-                    .join(":")}
-                  className="grid grid-cols-2 gap-2"
-                >
-                  {group}
-                </div>,
-              );
-            } else {
-              result.push(item.node);
-            }
-          }
-          return result;
-        }
-
-        return (
-          <>
-            {unsectionedParamNodes}
-            {Array.from(sectionMap.entries()).map(([sectionKey, section]) =>
-              section.display === "dialog" ? (
-                <Popover
-                  key={sectionKey}
-                  open={openControlSectionKey === sectionKey}
-                  onOpenChange={(open) =>
-                    setOpenControlSectionKey(open ? sectionKey : null)
-                  }
-                >
-                  <PopoverTrigger asChild>
-                    <button
-                      className="rounded-[8px] border border-[#2d313b] bg-[#171920] px-2.5 py-1.5 text-left text-[11px] font-bold text-[#dfe2ea] transition hover:border-[var(--clipper-accent)] hover:bg-[#20232c]"
-                      type="button"
-                    >
-                      {section.label}
-                    </button>
-                  </PopoverTrigger>
-                  <PopoverContent align="start" side="left">
-                    {renderSectionItems(section.items)}
-                  </PopoverContent>
-                </Popover>
-              ) : (
-                <div
-                  key={sectionKey}
-                  className="rounded-xl border border-[#2d313b] bg-[#141821]/60 p-3 grid gap-2.5"
-                >
-                  <span className="text-[11px] font-extrabold text-[#9b9da7] uppercase tracking-wider">
-                    {section.label}
-                  </span>
-                  {renderSectionItems(section.items)}
-                </div>
-              ),
-            )}
-            {unsectionedPointNodes}
-          </>
-        );
-      })()}
-      <div className="grid gap-2">
-        <span className={mutedCaps}>Mend</span>
+      <EffectControls
+        effect={effect}
+        layer={layer}
+        pickingPointKey={pickingPointKey}
+        onChange={onChange}
+        onPreviewLayer={onPreviewLayer}
+        onClearPreview={onClearPreview}
+        onPickPoint={onPickPoint}
+      />
+      {canSnapMiddle ? (
         <div className="grid gap-2">
-          <button
-            className={snapButtonClass(false, canSnapMiddle)}
-            disabled={!canSnapMiddle}
-            title="Mend adjacent adjustment layers"
-            aria-pressed={false}
-            onClick={onSnapMiddle}
-          >
-            Mend
-          </button>
+          <span className={mutedCaps}>Mend</span>
+          <div className="grid gap-2">
+            <button
+              className={snapButtonClass(false, canSnapMiddle)}
+              title="Mend adjacent adjustment layers"
+              aria-pressed={false}
+              onClick={onSnapMiddle}
+            >
+              Mend
+            </button>
+          </div>
         </div>
-      </div>
+      ) : null}
       <button
         className="flex items-center justify-center gap-2 rounded-[10px] border border-[#3b2a2a] bg-[#231516] px-[13px] py-[9px] text-sm font-medium text-[#ffb4b4] transition hover:border-[#6b3838] hover:bg-[#301b1d]"
         onClick={onDelete}
@@ -1961,120 +1537,6 @@ export function AdjustmentInspector({
       </button>
     </div>
   );
-}
-
-function AdjustmentPointControlField({
-  control,
-  disabledReason,
-  picking,
-  xValue,
-  yValue,
-  onPick,
-  onScrubEnd,
-  onScrubPreview,
-  onValueChange,
-}: {
-  control: AdjustmentEffectPointControl;
-  disabledReason?: string;
-  picking: boolean;
-  xValue: number;
-  yValue: number;
-  onPick: () => void;
-  onScrubEnd?: () => void;
-  onScrubPreview?: (axis: "x" | "y", value: number) => void;
-  onValueChange: (axis: "x" | "y", value: string) => void;
-}) {
-  const percentSpace = control.coordinateSpace === "percent";
-  const disabled = Boolean(disabledReason);
-
-  return (
-    <Coordinate2DField
-      disabledReason={disabledReason}
-      label={control.label}
-      pickLabel={
-        disabledReason ??
-        control.pickLabel ??
-        `Pick ${control.label.toLowerCase()} from frame`
-      }
-      picking={picking}
-      x={{
-        ariaLabel: control.xLabel ?? `${control.label} X`,
-        disabled,
-        label: control.xLabel ?? "X",
-        max: percentSpace ? 100 : FRAME_WIDTH,
-        min: 0,
-        numberScrubMode: "preview",
-        onChange: (value) => onValueChange("x", value),
-        onNumberScrubEnd: onScrubEnd,
-        onNumberScrubPreview: (value) => onScrubPreview?.("x", value),
-        resetValue: control.xDefault,
-        step: percentSpace ? 0.5 : 1,
-        value: xValue,
-      }}
-      y={{
-        ariaLabel: control.yLabel ?? `${control.label} Y`,
-        disabled,
-        label: control.yLabel ?? "Y",
-        max: percentSpace ? 100 : FRAME_HEIGHT,
-        min: 0,
-        numberScrubMode: "preview",
-        onChange: (value) => onValueChange("y", value),
-        onNumberScrubEnd: onScrubEnd,
-        onNumberScrubPreview: (value) => onScrubPreview?.("y", value),
-        resetValue: control.yDefault,
-        step: percentSpace ? 0.5 : 1,
-        value: yValue,
-      }}
-      onPick={onPick}
-    />
-  );
-}
-
-function conditionPredicate(
-  layer: AdjustmentLayer,
-  condition: AdjustmentEffectDisableCondition,
-): boolean {
-  if (condition.and) {
-    return condition.and.every((sub) => conditionPredicate(layer, sub));
-  }
-  if (!condition.key) return true;
-  const value = layer.effect.params?.[condition.key];
-  if ("equals" in condition) return value === condition.equals;
-  return condition.truthy ? Boolean(value) : !value;
-}
-
-function getAdjustmentControlDisabledReason(
-  layer: AdjustmentLayer,
-  condition: AdjustmentEffectDisableCondition | undefined,
-): string | undefined {
-  if (!condition) return undefined;
-  const disabled = conditionPredicate(layer, condition);
-  return disabled
-    ? (condition.reason ?? "Disabled by current settings.")
-    : undefined;
-}
-
-function isAdjustmentControlDisabled(
-  layer: AdjustmentLayer,
-  condition: AdjustmentEffectDisableCondition | undefined,
-) {
-  return Boolean(getAdjustmentControlDisabledReason(layer, condition));
-}
-
-function getAdjustmentControlHiddenReason(
-  layer: AdjustmentLayer,
-  condition: AdjustmentEffectDisableCondition | undefined,
-): string | undefined {
-  if (!condition) return undefined;
-  const satisfied = conditionPredicate(layer, condition);
-  return satisfied ? undefined : "Hidden: condition not met.";
-}
-
-function isAdjustmentControlHidden(
-  layer: AdjustmentLayer,
-  condition: AdjustmentEffectDisableCondition | undefined,
-) {
-  return Boolean(getAdjustmentControlHiddenReason(layer, condition));
 }
 
 function snapButtonClass(active: boolean, enabled = true) {
@@ -2275,13 +1737,8 @@ export function MotionInspector({
   const markerKind = marker.kind;
   const effectId =
     marker.effectId ??
-    (markerKind === "zoom"
-      ? "clipper.motion.zoom"
-      : markerKind === "rotate"
-        ? "clipper.motion.rotate"
-        : markerKind === "perspective"
-          ? "clipper.motion.perspective"
-          : "clipper.motion.pan");
+    getMotionEffectByKind(markerKind)?.id ??
+    defaultMotionEffectPackage.id;
   const defaultName = getMotionEffectPackage(effectId)?.label ?? "Motion";
   const positionDisabledReason =
     markerKind === "pan" && marker.followId
@@ -2716,21 +2173,23 @@ export function MotionInspector({
             Snap out
           </button>
         </div>
-        <div className="grid gap-2">
-          <button
-            className={snapButtonClass(middleSnapActive, canSnapMiddle)}
-            disabled={!canSnapMiddle}
-            title={
-              middleSnapActive
-                ? "Unmend the neighboring edges"
-                : "Mend the neighboring edges"
-            }
-            aria-pressed={middleSnapActive}
-            onClick={onSnapMiddle}
-          >
-            {middleSnapActive ? "Unmend" : "Mend"}
-          </button>
-        </div>
+        {canSnapMiddle || middleSnapActive ? (
+          <div className="grid gap-2">
+            <button
+              className={snapButtonClass(middleSnapActive, canSnapMiddle)}
+              disabled={!canSnapMiddle && !middleSnapActive}
+              title={
+                middleSnapActive
+                  ? "Unmend the neighboring edges"
+                  : "Mend the neighboring edges"
+              }
+              aria-pressed={middleSnapActive}
+              onClick={onSnapMiddle}
+            >
+              {middleSnapActive ? "Unmend" : "Mend"}
+            </button>
+          </div>
+        ) : null}
         {middleSnapActive ? (
           <div className="grid gap-1.5">
             <span className={mutedCaps}>Mend handoff</span>

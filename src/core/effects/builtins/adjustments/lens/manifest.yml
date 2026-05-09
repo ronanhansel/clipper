@@ -3,6 +3,7 @@ category: adjustment
 name: Lens
 label: Lens
 group: Practical
+timelineTags: [{ "kind": "text", "label": "GL", "title": "WebGL post-process" }]
 defaultDuration: 3
 defaultParams: { "focusX": 50, "focusY": 50, "radius": 34, "softness": 0.62, "magnification": 1.12, "distortion": 0.32, "chromaticAberration": 0.55, "rimWidth": 0.18, "rimOpacity": 0.48, "dimAmount": 0.28, "chromaticAberrationUseMask": false, "chromaticAberrationMaskPreview": false, "chromaticAberrationMaskInvert": false, "chromaticAberrationMaskShape": "circular", "chromaticAberrationMaskFocusX": 50, "chromaticAberrationMaskFocusY": 50, "chromaticAberrationMaskRadius": 200, "chromaticAberrationMaskRadiusX": 200, "chromaticAberrationMaskRadiusY": 200, "chromaticAberrationMaskFeather": 20 }
 paramControls:
@@ -41,34 +42,50 @@ paramControls:
     max: 96
     step: 1
     defaultValue: 0.55
-    inlineToggle:
-      label: Use mask
-      key: chromaticAberrationUseMask
-      defaultValue: false
-  - key: chromaticAberrationMaskPreview
-    label: Preview mask
+    inlineSectionTrigger:
+      label: Advanced settings
+      icon: settings
+      iconOnly: true
+      section:
+        key: chromaticAberration
+        label: Chromatic Aberration
+        display: dialog
+  - key: chromaticAberrationUseMask
+    label: Use mask
     type: boolean
     defaultValue: false
     section:
       key: chromaticAberration
       label: Chromatic Aberration
-    inlineGroup: maskToggles
-    visibleWhen:
-      key: chromaticAberrationUseMask
-      truthy: true
+      display: dialog
   - key: chromaticAberrationMaskInvert
-    label: Invert mask
+    label: Invert
     type: boolean
     defaultValue: false
     section:
       key: chromaticAberration
       label: Chromatic Aberration
+      display: dialog
     inlineGroup: maskToggles
-    visibleWhen:
+    disabledWhen:
       key: chromaticAberrationUseMask
-      truthy: true
+      truthy: false
+      reason: Enable Use mask to edit mask inversion.
+  - key: chromaticAberrationMaskPreview
+    label: Preview
+    type: boolean
+    defaultValue: false
+    section:
+      key: chromaticAberration
+      label: Chromatic Aberration
+      display: dialog
+    inlineGroup: maskToggles
+    disabledWhen:
+      key: chromaticAberrationUseMask
+      truthy: false
+      reason: Enable Use mask to edit mask preview.
   - key: chromaticAberrationMaskShape
-    label: Mask Shape
+    label: Mask
     type: select
     defaultValue: circular
     options:
@@ -79,9 +96,11 @@ paramControls:
     section:
       key: chromaticAberration
       label: Chromatic Aberration
-    visibleWhen:
+      display: dialog
+    disabledWhen:
       key: chromaticAberrationUseMask
-      truthy: true
+      truthy: false
+      reason: Enable Use mask to edit mask shape.
   - key: chromaticAberrationMaskRadius
     label: Mask Radius
     type: number
@@ -92,44 +111,15 @@ paramControls:
     section:
       key: chromaticAberration
       label: Chromatic Aberration
-    visibleWhen:
-      and:
+      display: dialog
+    inlineGroup: maskRadiusCircular
+    disabledWhen:
+      or:
         - key: chromaticAberrationUseMask
-          truthy: true
-        - key: chromaticAberrationMaskShape
-          equals: circular
-  - key: chromaticAberrationMaskRadiusX
-    label: Mask Radius X
-    type: number
-    min: 1
-    max: 2000
-    step: 1
-    defaultValue: 200
-    section:
-      key: chromaticAberration
-      label: Chromatic Aberration
-    visibleWhen:
-      and:
-        - key: chromaticAberrationUseMask
-          truthy: true
+          truthy: false
         - key: chromaticAberrationMaskShape
           equals: ellipsoid
-  - key: chromaticAberrationMaskRadiusY
-    label: Mask Radius Y
-    type: number
-    min: 1
-    max: 2000
-    step: 1
-    defaultValue: 200
-    section:
-      key: chromaticAberration
-      label: Chromatic Aberration
-    visibleWhen:
-      and:
-        - key: chromaticAberrationUseMask
-          truthy: true
-        - key: chromaticAberrationMaskShape
-          equals: ellipsoid
+      reason: Enable Use mask to edit mask radius.
   - key: chromaticAberrationMaskFeather
     label: Mask Feather
     type: number
@@ -140,9 +130,50 @@ paramControls:
     section:
       key: chromaticAberration
       label: Chromatic Aberration
-    visibleWhen:
+      display: dialog
+    inlineGroup: maskRadiusCircular
+    disabledWhen:
       key: chromaticAberrationUseMask
-      truthy: true
+      truthy: false
+      reason: Enable Use mask to edit mask feather.
+  - key: chromaticAberrationMaskRadiusX
+    label: Mask Radius X
+    type: number
+    min: 1
+    max: 2000
+    step: 1
+    defaultValue: 200
+    section:
+      key: chromaticAberration
+      label: Chromatic Aberration
+      display: dialog
+    inlineGroup: maskEllipsoidRadius
+    disabledWhen:
+      or:
+        - key: chromaticAberrationUseMask
+          truthy: false
+        - key: chromaticAberrationMaskShape
+          equals: circular
+      reason: Enable Use mask to edit mask radius.
+  - key: chromaticAberrationMaskRadiusY
+    label: Mask Radius Y
+    type: number
+    min: 1
+    max: 2000
+    step: 1
+    defaultValue: 200
+    section:
+      key: chromaticAberration
+      label: Chromatic Aberration
+      display: dialog
+    inlineGroup: maskEllipsoidRadius
+    disabledWhen:
+      or:
+        - key: chromaticAberrationUseMask
+          truthy: false
+        - key: chromaticAberrationMaskShape
+          equals: circular
+      reason: Enable Use mask to edit mask radius.
   - key: rimWidth
     label: Rim Width
     type: number
@@ -182,6 +213,8 @@ pointControls:
     section:
       key: chromaticAberration
       label: Chromatic Aberration
-    visibleWhen:
+      display: dialog
+    disabledWhen:
       key: chromaticAberrationUseMask
-      truthy: true
+      truthy: false
+      reason: Enable Use mask to edit mask focal point.
