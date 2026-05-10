@@ -238,6 +238,57 @@ describe("timeline model", () => {
     ).toEqual([["b", 0.75]]);
   });
 
+  it("applies global timing adjustments to transition timing", () => {
+    const adjustedScene: Scene = {
+      ...scene,
+      compositions: [
+        { ...scene.compositions[0], start: 0, duration: 8 },
+        { ...scene.compositions[1], start: 4, duration: 4 },
+      ],
+      adjustmentLayers: [
+        {
+          id: "slow",
+          name: "Slow",
+          start: 0,
+          duration: 8,
+          effect: {
+            effectId: "clipper.adjustment.speedChange",
+            params: { speed: 0.5 },
+          },
+        },
+      ],
+      transitionLayers: [
+        {
+          id: "transition",
+          name: "Swipe",
+          layerId: "transition",
+          start: 2,
+          duration: 2,
+          midPoint: 1,
+          effect: { effectId: "clipper.transition.swipe" },
+        },
+      ],
+    };
+
+    const previewState = getTimelinePreviewState({
+      adjustmentLayers: adjustedScene.adjustmentLayers,
+      compositions: adjustedScene.compositions,
+      sceneDurationSeconds: sceneDuration(adjustedScene),
+      sceneTime: 5,
+      timeline: buildLinearTimeline(adjustedScene),
+      timelineMode: "composition",
+      transitionLayers: adjustedScene.transitionLayers,
+    });
+
+    expect(previewState.transitionPreviewParts).toBeTruthy();
+    expect(previewState.transitionPreviewParts?.fromSceneTime).toBeCloseTo(
+      2.0625,
+    );
+    expect(
+      previewState.transitionPreviewParts?.from.map((item) => item.previewTime),
+    ).toEqual([1.03125]);
+  });
+
   it("offsets composition preview time by the clip trim start", () => {
     const trimmedScene: Scene = {
       ...scene,

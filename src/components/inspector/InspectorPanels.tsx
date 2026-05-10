@@ -104,6 +104,7 @@ const easePreviewItems = [
   { value: "linear", label: "Linear", ease: "linear" as const },
   { value: "easeIn", label: "Ease in", ease: "easeIn" as const },
   { value: "easeOut", label: "Ease out", ease: "easeOut" as const },
+  { value: "inAndOut", label: "In and out", ease: "inAndOut" as const },
   { value: "expoIn", label: "Expo in", ease: "expoIn" as const },
   { value: "expoOut", label: "Expo out", ease: "expoOut" as const },
   { value: "circOut", label: "Circ out", ease: "circOut" as const },
@@ -158,6 +159,7 @@ function easePreviewProgress(value: number, ease: MotionEase) {
     return value < 0.5
       ? 4 * value * value * value
       : 1 - Math.pow(-2 * value + 2, 3) / 2;
+  if (ease === "inAndOut") return inAndOutEase(value);
   if (ease === "expoIn") {
     if (value <= 0) return 0;
     return Math.pow(2, 10 * value - 10);
@@ -171,6 +173,14 @@ function easePreviewProgress(value: number, ease: MotionEase) {
       1 + 2.70158 * Math.pow(value - 1, 3) + 1.70158 * Math.pow(value - 1, 2)
     );
   return value;
+}
+
+function inAndOutEase(value: number) {
+  if (value <= 0) return 0;
+  if (value >= 1) return 1;
+  return value < 0.5
+    ? Math.pow(2, 20 * value - 10) / 2
+    : (2 - Math.pow(2, -20 * value + 10)) / 2;
 }
 
 function easePreviewPath(ease: MotionEase) {
@@ -1460,6 +1470,10 @@ export function TransitionInspector({
     const value = layer.effect.params?.[control.key];
     if (control.type === "boolean")
       return typeof value === "boolean" ? value : control.defaultValue;
+    if (control.type === "color")
+      return typeof value === "string" && isHexColor(value)
+        ? value
+        : control.defaultValue;
     if (control.type === "select")
       return typeof value === "string" ? value : control.defaultValue;
     if (control.key === "seed") return getTransitionSeedValue(control, value);
@@ -1486,13 +1500,42 @@ export function TransitionInspector({
     }));
   }
 
+  function commitDuration(value: string) {
+    const numeric = Number.parseFloat(value);
+    if (!Number.isFinite(numeric)) return;
+    onChange((current) => {
+      const duration = clamp(numeric, 0.1, MAX_PART_DURATION_SECONDS);
+      return normalizeSymmetricTransitionLayer({
+        ...current,
+        start: getTransitionMarkerTime(current) - duration / 2,
+        duration,
+      });
+    });
+  }
+
+  function commitMarkerTime(value: string) {
+    const numeric = Number.parseFloat(value);
+    if (!Number.isFinite(numeric)) return;
+    onChange((current) =>
+      normalizeSymmetricTransitionLayer({
+        ...current,
+        start:
+          clamp(numeric, 0, MAX_PART_DURATION_SECONDS) - current.duration / 2,
+      }),
+    );
+  }
+
   function updateParam(control: TransitionEffectParamControl, value: unknown) {
     const nextValue =
       control.type === "number"
         ? getTransitionParamNumericValue(control, String(value))
         : control.type === "boolean"
           ? value === true
-          : String(value);
+          : control.type === "color"
+            ? isHexColor(String(value))
+              ? String(value)
+              : control.defaultValue
+            : String(value);
     onChange((current) => ({
       ...current,
       effect: {
@@ -1530,6 +1573,22 @@ export function TransitionInspector({
             }
           />
           <span>{control.label}</span>
+        </label>
+      );
+    }
+
+    if (control.type === "color") {
+      return (
+        <label
+          className={`col-span-2 grid gap-1.5 ${mutedCaps}`}
+          key={control.key}
+        >
+          {control.label}
+          <ColorSelector
+            value={String(getParamValue(control))}
+            onChange={(value) => updateParam(control, value)}
+            pickerMode="solid"
+          />
         </label>
       );
     }
@@ -1593,18 +1652,7 @@ export function TransitionInspector({
             max={MAX_PART_DURATION_SECONDS}
             step={0.1}
             value={roundTwo(layer.duration)}
-            onChange={(event) => {
-              const value = Number.parseFloat(event.target.value);
-              if (Number.isFinite(value))
-                onChange((current) => {
-                  const duration = clamp(value, 0.1, MAX_PART_DURATION_SECONDS);
-                  return normalizeSymmetricTransitionLayer({
-                    ...current,
-                    start: getTransitionMarkerTime(current) - duration / 2,
-                    duration,
-                  });
-                });
-            }}
+            onChange={(event) => commitDuration(event.target.value)}
           />
         </label>
         <label className={`grid gap-1.5 ${mutedCaps}`}>
@@ -1615,18 +1663,7 @@ export function TransitionInspector({
             max={MAX_PART_DURATION_SECONDS}
             step={0.1}
             value={roundTwo(markerTime)}
-            onChange={(event) => {
-              const value = Number.parseFloat(event.target.value);
-              if (Number.isFinite(value))
-                onChange((current) =>
-                  normalizeSymmetricTransitionLayer({
-                    ...current,
-                    start:
-                      clamp(value, 0, MAX_PART_DURATION_SECONDS) -
-                      current.duration / 2,
-                  }),
-                );
-            }}
+            onChange={(event) => commitMarkerTime(event.target.value)}
           />
         </label>
       </div>

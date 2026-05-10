@@ -34,6 +34,7 @@ export type MotionEase =
   | "easeIn"
   | "easeOut"
   | "easeInOut"
+  | "inAndOut"
   | "expoIn"
   | "expoOut"
   | "circOut"

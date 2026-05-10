@@ -960,7 +960,6 @@ export function useTimelineClipboardCommands({
         const pastedLayers = adjustmentNodes.map((node, index) => ({
           ...node.layer,
           id: pastedTimelineNodeId("adj", index),
-          name: `${node.layer.name} copy`,
           start: roundToPrecision(
             clamp(
               shiftedPasteStart + node.absoluteStart - sourceStart,
@@ -986,7 +985,6 @@ export function useTimelineClipboardCommands({
         const pastedLayers = transitionNodes.map((node, index) => ({
           ...node.layer,
           id: pastedTimelineNodeId("trn", index),
-          name: `${node.layer.name} copy`,
           start: roundToPrecision(
             clamp(
               shiftedPasteStart + node.absoluteStart - sourceStart,
@@ -1133,7 +1131,6 @@ export function useTimelineClipboardCommands({
         return {
           ...node.layer,
           id: pastedTimelineNodeId("adj", index),
-          name: `${node.layer.name} copy`,
           start: roundToPrecision(start, timelinePrecision),
         };
       });
@@ -1157,7 +1154,6 @@ export function useTimelineClipboardCommands({
         return {
           ...node.layer,
           id: pastedTimelineNodeId("trn", index),
-          name: `${node.layer.name} copy`,
           start,
         };
       });

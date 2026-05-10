@@ -50,10 +50,14 @@ const templatePreviewBase = (template: TemplateBundle): Part => ({
 
 export function AgentPanel({
   part,
+  projectDirectory,
+  onReloadProject,
 }: {
   part: Part;
+  projectDirectory?: string;
   sourceStatus: string;
   agentContext: unknown;
+  onReloadProject?: () => Promise<void>;
 }) {
   const [templates, setTemplates] = useState<TemplateBundle[]>([]);
   const [templatesError, setTemplatesError] = useState<string | null>(null);
@@ -160,6 +164,8 @@ export function AgentPanel({
         onOpenChange={setTemplatesOpen}
         onSelectTemplate={setSelectedTemplateId}
         currentFilePath={part.filePath}
+        projectDirectory={projectDirectory}
+        onReloadProject={onReloadProject}
       />
     </div>
   );
@@ -172,8 +178,10 @@ function TemplateDialog({
   selectedTemplateId,
   templates,
   currentFilePath,
+  projectDirectory,
   onOpenChange,
   onSelectTemplate,
+  onReloadProject,
 }: {
   loadError: string | null;
   open: boolean;
@@ -181,8 +189,10 @@ function TemplateDialog({
   selectedTemplateId: string;
   templates: TemplateBundle[];
   currentFilePath: string;
+  projectDirectory?: string;
   onOpenChange: (open: boolean) => void;
   onSelectTemplate: (id: string) => void;
+  onReloadProject?: () => Promise<void>;
 }) {
   const [previewPart, setPreviewPart] = useState<Part | undefined>();
   const [previewError, setPreviewError] = useState<string | null>(null);
@@ -240,7 +250,10 @@ function TemplateDialog({
     setSaveError(null);
     setSavingSource(true);
     try {
-      const projectRoot = getProjectTemplateSourceRoot(currentFilePath);
+      const projectRoot = getProjectTemplateSourceRoot(
+        currentFilePath,
+        projectDirectory,
+      );
       const folderPath = await nextAvailableTemplateFolder(
         projectRoot,
         selectedTemplate.slug,
@@ -254,6 +267,7 @@ function TemplateDialog({
           ),
         ),
       );
+      await onReloadProject?.();
       setSaveError(null);
       onOpenChange(false);
     } catch (error) {
@@ -553,7 +567,12 @@ function formatTime(time: number) {
   return `0:${String(seconds).padStart(2, "0")}`;
 }
 
-function getProjectTemplateSourceRoot(filePath: string) {
+function getProjectTemplateSourceRoot(
+  filePath: string,
+  projectDirectory?: string,
+) {
+  if (projectDirectory)
+    return `${normalizeClipperPath(projectDirectory)}/file-manager`;
   const relativePath = normalizeClipperPath(filePath);
   const index = relativePath.indexOf("/file-manager/");
   if (index < 0) {
@@ -561,7 +580,7 @@ function getProjectTemplateSourceRoot(filePath: string) {
       "Cannot find project file-manager for current composition.",
     );
   }
-  return `${relativePath.slice(0, index)}/file-manager/compositions`;
+  return `${relativePath.slice(0, index)}/file-manager`;
 }
 
 function normalizeClipperPath(filePath: string) {

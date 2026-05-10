@@ -3,7 +3,7 @@ import { getSyncedCompositionSources } from "./projectSources";
 import type { CompositionClip, ProjectManifest } from "../../core/types";
 
 describe("project source sync", () => {
-  it("does not regenerate composition source for graph-only changes", () => {
+  it("regenerates composition source for graph-only changes", () => {
     const source = "export const composition = null;";
     const composition = createComposition();
     const previousProject = createProject(composition, source);
@@ -19,7 +19,8 @@ describe("project source sync", () => {
       [composition.filePath]: source,
     });
 
-    expect(sources[composition.filePath]).toBe(source);
+    expect(sources[composition.filePath]).toContain("bgGraph");
+    expect(sources[composition.filePath]).toContain("paper");
   });
 });
 
@@ -45,7 +46,12 @@ function createComposition(): CompositionClip {
     filePath: "compositions/main.composition.ts",
     duration: 5,
     frame: { width: 1920, height: 1080, style: {} },
-    background: { id: "background", name: "Background", style: {}, elements: [] },
+    background: {
+      id: "background",
+      name: "Background",
+      style: {},
+      elements: [],
+    },
     objects: [],
     snapshot: [],
     motionMarkers: [],

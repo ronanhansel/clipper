@@ -476,9 +476,9 @@ export const composition = new Composition({
       x: 8,
       y: 9,
     });
-    expect(
-      project.compositionSources?.["compositions/B.composition.ts"],
-    ).toBe(source);
+    expect(project.compositionSources?.["compositions/B.composition.ts"]).toBe(
+      source,
+    );
   });
 
   it("marks a deleted linked composition missing while preserving timeline clips", async () => {

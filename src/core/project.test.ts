@@ -2730,7 +2730,9 @@ export const composition = new Composition({
     const project = normalizeProject({
       ...projectWithComposition(),
       compositionLibrary: [composition],
-      compositions: [{ ...composition, source: compositionToSource(composition) }],
+      compositions: [
+        { ...composition, source: compositionToSource(composition) },
+      ],
       compositionSources: {
         [composition.filePath]: compositionToSource(composition),
       },
@@ -2800,14 +2802,17 @@ export const composition = new Composition({
       compositions: [{ ...composition, animationGraph: staleGraph }],
     });
     const transactionProject = applyCompositionGraphTransaction(baseProject, {
-        clipId: composition.id,
-        compositionId: composition.id,
-        filePath: composition.filePath,
-        graph: latestGraph,
-        mode: "composition2d",
-      });
+      clipId: composition.id,
+      compositionId: composition.id,
+      filePath: composition.filePath,
+      graph: latestGraph,
+      mode: "composition2d",
+    });
     const currentProject = normalizeProject(transactionProject);
-    carryCompositionGraphTransactionRevisions(transactionProject, currentProject);
+    carryCompositionGraphTransactionRevisions(
+      transactionProject,
+      currentProject,
+    );
     const staleSourceProject = normalizeProject({
       ...currentProject,
       compositionLibrary: [{ ...composition, animationGraph: staleGraph }],
@@ -2861,12 +2866,18 @@ export const composition = new Composition({
       mode: "composition2d",
     });
     const firstNormalized = normalizeProject(transactionProject);
-    carryCompositionGraphTransactionRevisions(transactionProject, firstNormalized);
+    carryCompositionGraphTransactionRevisions(
+      transactionProject,
+      firstNormalized,
+    );
     const secondNormalized = normalizeProject({
       ...firstNormalized,
       editorState: firstNormalized.editorState,
     });
-    carryCompositionGraphTransactionRevisions(firstNormalized, secondNormalized);
+    carryCompositionGraphTransactionRevisions(
+      firstNormalized,
+      secondNormalized,
+    );
     const staleProject = normalizeProject({
       ...secondNormalized,
       compositionLibrary: [{ ...composition, animationGraph: staleGraph }],
@@ -2901,14 +2912,17 @@ export const composition = new Composition({
       compositions: [{ ...composition, bgGraph: staleGraph }],
     });
     const transactionProject = applyCompositionGraphTransaction(baseProject, {
-        clipId: composition.id,
-        compositionId: composition.id,
-        filePath: composition.filePath,
-        graph: latestGraph,
-        mode: "background",
-      });
+      clipId: composition.id,
+      compositionId: composition.id,
+      filePath: composition.filePath,
+      graph: latestGraph,
+      mode: "background",
+    });
     const currentProject = normalizeProject(transactionProject);
-    carryCompositionGraphTransactionRevisions(transactionProject, currentProject);
+    carryCompositionGraphTransactionRevisions(
+      transactionProject,
+      currentProject,
+    );
     const staleProject = normalizeProject({
       ...currentProject,
       compositionLibrary: [{ ...composition, bgGraph: staleGraph }],
@@ -2931,7 +2945,11 @@ export const composition = new Composition({
   });
 
   it("preserves newer 3D graph transaction and webgl render mode", () => {
-    const staleGraph = { nodes: { scene: { x: 1, y: 2 } }, edges: [], customNodes: {} };
+    const staleGraph = {
+      nodes: { scene: { x: 1, y: 2 } },
+      edges: [],
+      customNodes: {},
+    };
     const latestGraph = {
       nodes: { scene: { x: 70, y: 80 } },
       edges: [],
@@ -2947,14 +2965,17 @@ export const composition = new Composition({
       ],
     });
     const transactionProject = applyCompositionGraphTransaction(baseProject, {
-        clipId: composition.id,
-        compositionId: composition.id,
-        filePath: composition.filePath,
-        graph: latestGraph,
-        mode: "composition3d",
-      });
+      clipId: composition.id,
+      compositionId: composition.id,
+      filePath: composition.filePath,
+      graph: latestGraph,
+      mode: "composition3d",
+    });
     const currentProject = normalizeProject(transactionProject);
-    carryCompositionGraphTransactionRevisions(transactionProject, currentProject);
+    carryCompositionGraphTransactionRevisions(
+      transactionProject,
+      currentProject,
+    );
     const staleProject = normalizeProject({
       ...currentProject,
       compositionLibrary: [
@@ -2965,7 +2986,10 @@ export const composition = new Composition({
       ],
       timelines: currentProject.timelines?.map((timeline) => ({
         ...timeline,
-        clips: timeline.clips.map((clip) => ({ ...clip, renderMode: "dom" as const })),
+        clips: timeline.clips.map((clip) => ({
+          ...clip,
+          renderMode: "dom" as const,
+        })),
       })),
     });
 
@@ -2974,16 +2998,22 @@ export const composition = new Composition({
       staleProject,
     );
 
-    expect(preserved.compositions?.[0].composition3dGraph?.nodes.scene).toEqual({
-      x: 70,
-      y: 80,
-    });
+    expect(preserved.compositions?.[0].composition3dGraph?.nodes.scene).toEqual(
+      {
+        x: 70,
+        y: 80,
+      },
+    );
     expect(preserved.compositions?.[0].renderMode).toBe("webgl");
     expect(preserved.timelines?.[0].clips[0].renderMode).toBe("webgl");
   });
 
   it("does not match composition graph transactions by colliding clip id", () => {
-    const nextGraph = { nodes: { effect: { x: 5, y: 6 } }, edges: [], customNodes: {} };
+    const nextGraph = {
+      nodes: { effect: { x: 5, y: 6 } },
+      edges: [],
+      customNodes: {},
+    };
     const project = normalizeProject({
       ...projectWithComposition(),
       compositionLibrary: [composition],
@@ -3027,7 +3057,9 @@ export const composition = new Composition({
     const project = normalizeProject({
       ...projectWithComposition(),
       compositionLibrary: [composition],
-      compositions: [{ ...composition, source: compositionToSource(composition) }],
+      compositions: [
+        { ...composition, source: compositionToSource(composition) },
+      ],
       compositionSources: {
         [composition.filePath]: compositionToSource(composition),
       },

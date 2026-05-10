@@ -202,6 +202,12 @@ export type TimelinePanelProps = {
   ) => void;
   composeAnimationPart?: Part | null;
   selectedObjectIds?: string[];
+  selectedGraphNodeIds?: string[];
+  onComposeGraphScopeChange?: (
+    scopeKey: string | null,
+    validNodeIds: string[],
+  ) => void;
+  onSelectGraphNodes?: (nodeIds: string[]) => void;
   onExitCompose?: () => void;
   onSelectComposeObjects?: (objects: FrameObject[]) => void;
   onPersistComposeSelection?: (objectIds: string[]) => void;

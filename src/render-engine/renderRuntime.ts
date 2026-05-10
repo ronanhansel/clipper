@@ -476,6 +476,7 @@ export function easeProgress(value: number, ease: MotionEase | undefined) {
   if (ease === "easeOut" || ease === "circOut") return easeOutCubic(value);
   if (ease === "easeIn") return value * value * value;
   if (ease === "easeInOut") return easeInOutCubic(value);
+  if (ease === "inAndOut") return inAndOutEase(value);
   if (ease === "expoIn") return expoIn(value);
   if (ease === "expoOut") return expoOut(value);
   if (ease === "backOut") return backOut(value);
@@ -495,6 +496,14 @@ function easeInOutCubic(value: number) {
 function expoIn(value: number) {
   if (value <= 0) return 0;
   return Math.pow(2, 10 * value - 10);
+}
+
+function inAndOutEase(value: number) {
+  if (value <= 0) return 0;
+  if (value >= 1) return 1;
+  return value < 0.5
+    ? Math.pow(2, 20 * value - 10) / 2
+    : (2 - Math.pow(2, -20 * value + 10)) / 2;
 }
 
 function expoOut(value: number) {

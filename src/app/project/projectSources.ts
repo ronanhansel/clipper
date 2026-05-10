@@ -71,18 +71,5 @@ function compositionSourceFieldsEqual(
   previousPart: CompositionClip,
   nextPart: CompositionClip,
 ) {
-  return (
-    JSON.stringify(withoutGraphState(previousPart)) ===
-    JSON.stringify(withoutGraphState(nextPart))
-  );
-}
-
-function withoutGraphState<T extends Record<string, unknown>>(composition: T) {
-  const {
-    animationGraph: _animationGraph,
-    bgGraph: _bgGraph,
-    composition3dGraph: _composition3dGraph,
-    ...rest
-  } = composition;
-  return rest;
+  return JSON.stringify(previousPart) === JSON.stringify(nextPart);
 }

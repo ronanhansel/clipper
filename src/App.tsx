@@ -205,6 +205,7 @@ import {
   type SelectionPayload,
   type TimelineClip,
   type TimelineLayerState,
+  type TransitionLayer,
   type TimelineViewportState,
 } from "./core/types";
 import { FindMediaDialog } from "./components/FileManager";
@@ -449,9 +450,6 @@ function AppContent({
   const [objectResizeMode, setObjectResizeMode] = useState<"resize" | "scale">(
     "resize",
   );
-  const [selectedGraphNodeId, setSelectedGraphNodeId] = useState<string | null>(
-    null,
-  );
   const [liveDomPostProcessMaxFps, setLiveDomPostProcessMaxFpsState] = useState(
     getInitialLiveDomPostProcessMaxFps,
   );
@@ -471,6 +469,11 @@ function AppContent({
     setSelectedParts,
     selectedObjectId,
     setSelectedObjectId,
+    selectedComposeObjectIds,
+    setSelectedComposeObjectIds,
+    selectedGraphNodeIds,
+    setSelectedGraphNodeIds,
+    setComposeGraphScope,
     editingTextObjectId,
     setEditingTextObjectId,
     selectedMotionMarker,
@@ -566,7 +569,8 @@ function AppContent({
     setCurrentSceneTime,
     applyEditorState: applyStoredEditorState,
     clearMarkerSelection: clearStoredMarkerSelection,
-    clearNodeSelection: clearStoredNodeSelection,
+    clearDirectSelection,
+    clearComposeSelection,
   } = useAppEditorState();
   const cameraRef = useRef<HTMLDivElement | null>(null);
   const appRootRef = useRef<HTMLElement | null>(null);
@@ -965,6 +969,7 @@ function AppContent({
 
   const {
     activeTimelinePart,
+    adjustedSceneTime,
     agentContext,
     assets = [],
     cameraPreviewTransform,
@@ -1001,7 +1006,7 @@ function AppContent({
     currentSceneTime,
     focusPickZoomMarker,
     framePickPreviewPoint,
-    previewTransitionLayers,
+    previewTransitionLayers: previewTransitionLayers ?? undefined,
     positionPickTranslationMarker,
     project,
     selectedObjectId,
@@ -1030,9 +1035,9 @@ function AppContent({
     ? composePlaybackRangeRef.current
     : nextComposePlaybackRange;
 
-  useEffect(() => {
-    if (!composeMode) setSelectedGraphNodeId(null);
-  }, [composeMode]);
+  const selectedGraphNodeId = composeMode
+    ? (selectedGraphNodeIds.at(-1) ?? null)
+    : null;
 
   const compositionLibrary = project.compositionLibrary ?? [];
   const timelines = project.timelines ?? [];
@@ -1695,24 +1700,17 @@ function AppContent({
   useEffect(() => {
     if (
       selectedPartId &&
+      timelineMode !== "compose" &&
       activeTimelinePart &&
       activeTimelinePart.id !== selectedPartId
     ) {
       setSelectedObjectId(null);
       setSelectionPayload(null);
     }
-  }, [activeTimelinePart, selectedMotionMarker, selectedPartId]);
+  }, [activeTimelinePart, selectedMotionMarker, selectedPartId, timelineMode]);
 
   useEffect(() => {
-    if (timelineMode === "compose") {
-      clearMarkerSelection();
-      setSelectedPartId("");
-      setSelectedParts([]);
-      return;
-    }
-
-    setSelectedObjectId(null);
-    setSelectionPayload(null);
+    if (timelineMode === "compose") return;
     clearObjectDrag();
     clearDragBox();
   }, [timelineMode]);
@@ -1768,7 +1766,7 @@ function AppContent({
     if (
       timelineMode !== "compose" ||
       selectionPayload?.objects.length ||
-      selectedObjectId
+      selectedComposeObjectIds.length > 0
     )
       return;
     const selectedIds =
@@ -1791,6 +1789,7 @@ function AppContent({
     part.objects,
     project.editorState?.selectedComposeObjectIds,
     selectedObjectId,
+    selectedComposeObjectIds,
     selectionPayload,
     timelineMode,
   ]);
@@ -1890,7 +1889,7 @@ function AppContent({
     timeline,
     cancelFramePickPreview,
     clearStoredMarkerSelection,
-    clearStoredNodeSelection,
+    clearStoredNodeSelection: clearDirectSelection,
     pausePlaybackAtCurrentTime,
     scrubToSceneTime,
     setFocusPickZoomMarker,
@@ -1898,14 +1897,12 @@ function AppContent({
     setRightPanelTab,
     setSelectedAdjustmentLayerId,
     setSelectedAdjustmentLayers,
-    setSelectedObjectId,
     setSelectedPartId,
     setSelectedParts,
     setSelectedMotionMarker,
     setSelectedMotionMarkers,
     setSelectedTransitionLayerId,
     setSelectedTransitionLayers,
-    setSelectionPayload,
     setTrackerPickTranslationMarker,
     updateTimelineMode,
   });
@@ -2149,12 +2146,14 @@ function AppContent({
     if (options?.implicit)
       implicitFileOperation(updateProject)(applyUpdate, {
         history: options.history !== false,
-        syncSources: false,
+        syncSources: true,
+        historyGroup: `graph:${clipId}:${options?.mode ?? "auto"}`,
       });
     else
       updateProject(applyUpdate, {
         history: options?.history !== false,
-        syncSources: false,
+        syncSources: true,
+        historyGroup: `graph:${clipId}:${options?.mode ?? "auto"}`,
       });
   }
 
@@ -2171,7 +2170,6 @@ function AppContent({
   }
 
   function inspectGraphNode(nodeId: string | null) {
-    setSelectedGraphNodeId(nodeId);
     if (nodeId) setRightPanelTab("video");
   }
 
@@ -2303,6 +2301,7 @@ function AppContent({
   }
 
   function persistComposeSelection(objectIds: string[]) {
+    setSelectedComposeObjectIds(objectIds);
     implicitFileOperation(updateEditorState)((state) => ({
       ...state,
       selectedComposeObjectIds: objectIds.length ? objectIds : undefined,
@@ -2312,12 +2311,14 @@ function AppContent({
   function setComposeSelectionObjects(objects: FrameObject[]) {
     if (objects.length === 0) {
       setSelectedObjectId(null);
+      setSelectedGraphNodeIds([]);
       setSelectionPayload(null);
       persistComposeSelection([]);
       return;
     }
 
     setSelectedObjectId(objects[0].id);
+    setSelectedGraphNodeIds([]);
     setSelectionPayload(
       selectionPayloadFromObjects(objects.map(selectionObjectFromFrameObject)),
     );
@@ -2328,6 +2329,7 @@ function AppContent({
     setRightPanelTab("video");
     setEditingTextObjectId(null);
     setSelectedObjectId(null);
+    setSelectedGraphNodeIds([]);
     setSelectionPayload(null);
     persistComposeSelection([]);
     clearMarkerSelection();
@@ -2647,11 +2649,9 @@ function AppContent({
     scene,
     timelineLayers,
     clearMarkerSelection,
-    clearNodeSelection,
-    setSelectedObjectId,
+    clearNodeSelection: clearDirectSelection,
     setSelectedPartId,
     setSelectedParts,
-    setSelectionPayload,
     timelinePrecision,
     updateSceneParts,
   });
@@ -2749,7 +2749,7 @@ function AppContent({
     trackerPickTranslationMarker,
     zoomScale,
     clearMarkerSelection,
-    clearNodeSelection,
+    clearNodeSelection: clearComposeSelection,
     onSelectFrameSettings: selectComposeFrameSettings,
     setDragBox,
     setDragStart,
@@ -2759,6 +2759,7 @@ function AppContent({
     setObjectResizingActive,
     setObjectSnapGuides,
     setRightPanelTab,
+    setSelectedComposeObjectIds,
     setSelectedObjectId,
     setSelectionPayload,
     updateAdjustmentLayer,
@@ -2879,7 +2880,7 @@ function AppContent({
   const fileManagerActions = useFileManagerProjectActions({
     addCompositionFromLibrary,
     assets,
-    clearNodeSelection,
+    clearNodeSelection: clearDirectSelection,
     compositionLibrary,
     compositionSourcesRef,
     defaultEditorState,
@@ -3006,12 +3007,6 @@ function AppContent({
     (pointPickAdjustment
       ? (framePickPreviewPoint ?? adjustmentFramePickPoint)
       : framePickPoint) ?? null;
-  const selectedComposeObjectIds = useMemo(
-    () =>
-      selectionPayload?.objects.map((object) => object.id) ??
-      (selectedObjectId ? [selectedObjectId] : []),
-    [selectedObjectId, selectionPayload],
-  );
   const selectedGraphObject =
     composeMode && selectedComposeObjectIds[0] === part.background.id
       ? frameObjectFromBackgroundLayer(part.background)
@@ -3117,9 +3112,8 @@ function AppContent({
     updateCompositionForTimelinePart,
   ]);
   useEffect(() => {
-    const selectedIds =
-      selectionPayload?.objects.map((object) => object.id) ??
-      (selectedObjectId ? [selectedObjectId] : null);
+    const selectedIds: string[] | null =
+      timelineMode === "compose" ? selectedComposeObjectIds : null;
     if (!selectedIds) return;
     const persistedIds = project.editorState?.selectedComposeObjectIds ?? [];
     if (
@@ -3130,8 +3124,8 @@ function AppContent({
     persistComposeSelection(selectedIds);
   }, [
     project.editorState?.selectedComposeObjectIds,
-    selectedObjectId,
-    selectionPayload,
+    selectedComposeObjectIds,
+    timelineMode,
   ]);
   const projectDirectory = activeProjectManifestPath.endsWith(".json")
     ? getDirectoryPath(activeProjectManifestPath)
@@ -3399,7 +3393,7 @@ function AppContent({
       selectedTimelineId: timelineId,
       currentSceneTime: 0,
     }));
-    clearNodeSelection();
+    clearDirectSelection();
     setSelectedPartId("");
     setCurrentSceneTime(0);
   }
@@ -3557,7 +3551,7 @@ function AppContent({
                   : [],
               playbackClock,
               previewTime,
-              sceneTime: currentSceneTime,
+              sceneTime: adjustedSceneTime,
               timelineMode,
               motionLayers:
                 hasPreviewComposition && !composeMode ? motionLayers : [],
@@ -3703,6 +3697,7 @@ function AppContent({
             <ConnectedInspectorContent
               rightPanelTab={rightPanelTab}
               part={part}
+              projectDirectory={watchedProjectDirectory}
               composeMode={composeMode}
               sourceStatus={sourceStatus}
               agentContext={agentContext}
@@ -3799,6 +3794,7 @@ function AppContent({
               onPreviewPartBackground={previewPartBackground}
               onUpdatePartRenderMode={updatePartRenderMode}
               onUpdateGraphNodeParameter={updateGraphNodeParameter}
+              onReloadProject={reloadProject}
             />
           </RightInspectorPanel>
         </EditorWorkspace>
@@ -3898,6 +3894,9 @@ function AppContent({
             onUpdateTransitionLayer: updateTransitionLayer,
             composeAnimationPart: hasActiveComposition ? part : null,
             selectedObjectIds: selectedComposeObjectIds,
+            selectedGraphNodeIds,
+            onComposeGraphScopeChange: setComposeGraphScope,
+            onSelectGraphNodes: setSelectedGraphNodeIds,
             onExitCompose: () => updateTimelineMode("composition"),
             onSelectComposeObjects: selectComposeLayerObjects,
             onPersistComposeSelection: persistComposeSelection,

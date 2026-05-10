@@ -33,6 +33,7 @@ type PointPickAdjustment = {
 type ConnectedInspectorContentProps = {
   rightPanelTab: RightPanelTab;
   part: Part;
+  projectDirectory?: string;
   composeMode: boolean;
   sourceStatus: string;
   agentContext: unknown;
@@ -143,11 +144,13 @@ type ConnectedInspectorContentProps = {
       mode?: import("../../core/graphSockets").GraphCompositionMode;
     },
   ) => void;
+  onReloadProject?: () => Promise<void>;
 };
 
 export function ConnectedInspectorContent({
   rightPanelTab,
   part,
+  projectDirectory,
   composeMode,
   sourceStatus,
   agentContext,
@@ -206,6 +209,7 @@ export function ConnectedInspectorContent({
   onUpdatePartBackground,
   onUpdatePartRenderMode,
   onUpdateGraphNodeParameter,
+  onReloadProject,
 }: ConnectedInspectorContentProps) {
   const stableSelectedObjectRef = useRef<FrameObject | null | undefined>(
     selectedObject,
@@ -233,8 +237,10 @@ export function ConnectedInspectorContent({
     return (
       <AgentPanel
         part={part}
+        projectDirectory={projectDirectory}
         sourceStatus={sourceStatus}
         agentContext={agentContext}
+        onReloadProject={onReloadProject}
       />
     );
 

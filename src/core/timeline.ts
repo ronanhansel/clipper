@@ -453,8 +453,8 @@ export function getTimelinePreviewState({
   );
   const transitionLayer = transitionLayers?.find(
     (layer) =>
-      sceneTime >= layer.start &&
-      sceneTime < layer.start + getTransitionFinishTime(layer),
+      compositionLookupTime >= layer.start &&
+      compositionLookupTime < layer.start + getTransitionFinishTime(layer),
   );
   const transitionMidTime = transitionLayer
     ? clamp(getTransitionMarkerTime(transitionLayer), 0, sceneDurationSeconds)
@@ -467,7 +467,7 @@ export function getTimelinePreviewState({
       )
     : 0;
   const transitionProgress = transitionLayer
-    ? getTransitionProgress(sceneTime, transitionLayer)
+    ? getTransitionProgress(compositionLookupTime, transitionLayer)
     : 0;
   const transitionFromSceneTime = transitionLayer
     ? clamp(

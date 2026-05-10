@@ -84,6 +84,7 @@ type Props = {
   scrubbingRef: RefObject<boolean>;
   scrubSnapEnabled: boolean;
   selectedObjectIds: string[];
+  selectedGraphNodeIds: string[];
   timelineViewportState: TimelineViewportState;
   onExitCompose: () => void;
   onScrub: (time: number) => void;
@@ -96,6 +97,11 @@ type Props = {
     updater: (graph: AnimationGraphState | undefined) => AnimationGraphState,
     options?: { implicit?: boolean; mode?: GraphCompositionMode },
   ) => void;
+  onComposeGraphScopeChange?: (
+    scopeKey: string | null,
+    validNodeIds: string[],
+  ) => void;
+  onSelectGraphNodes?: (nodeIds: string[]) => void;
   onInspectGraphNode?: (nodeId: string | null) => void;
 };
 
@@ -257,6 +263,8 @@ const nodeColors = {
   layerBorder: "#566171",
   groupBg: "#3a2315",
   groupBorder: "#9c6232",
+  threeBg: "#183326",
+  threeBorder: "#4fa36a",
   outBg: "#28303a",
   outBorder: "#9aa4b2",
   hoverBorder: "#a8b0bd",
@@ -278,6 +286,7 @@ const graphParameterOptions: Record<
     { value: "easeIn", label: "Ease in" },
     { value: "easeOut", label: "Ease out" },
     { value: "easeInOut", label: "Ease in-out" },
+    { value: "inAndOut", label: "In and out" },
     { value: "expoIn", label: "Expo in" },
     { value: "expoOut", label: "Expo out" },
     { value: "circOut", label: "Circ out" },
@@ -515,11 +524,14 @@ export const ComposeAnimationGraphPanel = memo(
     scrubbingRef,
     scrubSnapEnabled,
     selectedObjectIds,
+    selectedGraphNodeIds,
     onExitCompose,
     onScrub,
     onScrubEnd,
     onScrubStart,
     onUpdateGraph,
+    onComposeGraphScopeChange,
+    onSelectGraphNodes,
     onInspectGraphNode,
   }: Props) {
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -555,9 +567,6 @@ export const ComposeAnimationGraphPanel = memo(
     const hoverNodeIdRef = useRef<string | null>(null);
     const hoverConnectorRef = useRef<HoverConnector | null>(null);
     const hoverEdgeIdRef = useRef<string | null>(null);
-    const [selectedGraphNodeIds, setSelectedGraphNodeIds] = useState<string[]>(
-      [],
-    );
     const selectedGraphNodeIdsRef = useRef<string[]>([]);
     const [hoverNodeId, setHoverNodeId] = useState<string | null>(null);
     const [hoverConnector, setHoverConnector] = useState<HoverConnector | null>(
@@ -572,9 +581,6 @@ export const ComposeAnimationGraphPanel = memo(
       string | null
     >(null);
     const popoverNodeIdRef = useRef<string | null>(null);
-    const [selectedGraphNodeId, setSelectedGraphNodeId] = useState<
-      string | null
-    >(null);
     const selectedGraphNodeIdRef = useRef<string | null>(null);
     const deleteSelectedNodesRef = useRef<() => void>(() => undefined);
     const copySelectedNodesRef = useRef<() => void>(() => undefined);
@@ -691,7 +697,7 @@ export const ComposeAnimationGraphPanel = memo(
     displayGraphRef.current = graph;
     nodesRef.current = nodes;
     selectedObjectsRef.current = selectedObjects;
-    selectedGraphNodeIdRef.current = selectedGraphNodeId;
+    selectedGraphNodeIdRef.current = selectedGraphNodeIds.at(-1) ?? null;
     selectedGraphNodeIdsRef.current = selectedGraphNodeIds;
     popoverNodeIdRef.current = popoverNodeId;
     deleteSelectedNodesRef.current = deleteSelectedNodes;
@@ -702,12 +708,21 @@ export const ComposeAnimationGraphPanel = memo(
       setOptimisticGraph(null);
       pendingGraphSyncRef.current = null;
       viewInitializedRef.current = false;
-      selectedGraphNodeIdRef.current = null;
-      setSelectedGraphNodeId(null);
-      onInspectGraphNode?.(null);
       graphScaleRef.current = 1;
       setGraphScale(1);
     }, [graphInstanceKey]);
+
+    useEffect(() => {
+      onComposeGraphScopeChange?.(
+        hasSelectedGraph ? graphInstanceKey : null,
+        nodes.map((node) => node.id),
+      );
+    }, [graphInstanceKey, hasSelectedGraph, nodeLayoutKey]);
+
+    useEffect(() => {
+      onInspectGraphNode?.(selectedGraphNodeIds.at(-1) ?? null);
+      scheduleDraw();
+    }, [selectedGraphNodeIds.join("|")]);
 
     useEffect(() => {
       function onKeyDown(event: KeyboardEvent) {
@@ -728,6 +743,7 @@ export const ComposeAnimationGraphPanel = memo(
           pasteGraphNodesRef.current();
           return;
         }
+        if (modifier) return;
         if (event.key !== "Backspace" && event.key !== "Delete") return;
         if (
           !selectedGraphNodeIdsRef.current.some((id) =>
@@ -856,7 +872,7 @@ export const ComposeAnimationGraphPanel = memo(
         hoverNodeId,
         hoverConnector,
         hoverEdgeId,
-        selectedGraphNodeId,
+        selectedGraphNodeIds.join("|"),
         graphScale,
       ],
     );
@@ -1452,34 +1468,26 @@ export const ComposeAnimationGraphPanel = memo(
       setHoverEdgeId(edgeId);
     }
 
-    function selectGraphNode(nodeId: string | null) {
-      selectedGraphNodeIdRef.current = nodeId;
-      selectedGraphNodeIdsRef.current = nodeId ? [nodeId] : [];
-      setSelectedGraphNodeId(nodeId);
-      setSelectedGraphNodeIds(nodeId ? [nodeId] : []);
-      onInspectGraphNode?.(nodeId);
+    function commitGraphNodeSelection(nodeIds: string[]) {
+      selectedGraphNodeIdsRef.current = nodeIds;
+      selectedGraphNodeIdRef.current = nodeIds.at(-1) ?? null;
+      onSelectGraphNodes?.(nodeIds);
       scheduleDraw();
+    }
+
+    function selectGraphNode(nodeId: string | null) {
+      commitGraphNodeSelection(nodeId ? [nodeId] : []);
     }
 
     function toggleGraphNodeSelection(nodeId: string) {
       const next = selectedGraphNodeIdsRef.current.includes(nodeId)
         ? selectedGraphNodeIdsRef.current.filter((id) => id !== nodeId)
         : [...selectedGraphNodeIdsRef.current, nodeId];
-      selectedGraphNodeIdsRef.current = next;
-      selectedGraphNodeIdRef.current = next[next.length - 1] ?? null;
-      setSelectedGraphNodeIds(next);
-      setSelectedGraphNodeId(next[next.length - 1] ?? null);
-      onInspectGraphNode?.(next[next.length - 1] ?? null);
-      scheduleDraw();
+      commitGraphNodeSelection(next);
     }
 
     function setGraphNodeSelection(nodeIds: string[]) {
-      selectedGraphNodeIdsRef.current = nodeIds;
-      selectedGraphNodeIdRef.current = nodeIds[nodeIds.length - 1] ?? null;
-      setSelectedGraphNodeIds(nodeIds);
-      setSelectedGraphNodeId(nodeIds[nodeIds.length - 1] ?? null);
-      onInspectGraphNode?.(nodeIds[nodeIds.length - 1] ?? null);
-      scheduleDraw();
+      commitGraphNodeSelection(nodeIds);
     }
 
     function applyMarqueeSelection(
@@ -1945,7 +1953,7 @@ export const ComposeAnimationGraphPanel = memo(
         },
         bgThreeCode: {
           kind: "bgThreeCode",
-          label: override?.label ?? "Three.js Code",
+          label: override?.label ?? "Three.js",
           scopeKey: "background",
           details: {
             ref: "background",
@@ -7058,6 +7066,8 @@ function getGraphNodeColors(kind: GraphNode["kind"]) {
     return { background: nodeColors.timeBg, border: nodeColors.timeBorder };
   if (kind === "split")
     return { background: nodeColors.splitBg, border: nodeColors.splitBorder };
+  if (kind === "bgThreeCode")
+    return { background: nodeColors.threeBg, border: nodeColors.threeBorder };
   if (kind === "group")
     return { background: nodeColors.groupBg, border: nodeColors.groupBorder };
   if (kind === "out")

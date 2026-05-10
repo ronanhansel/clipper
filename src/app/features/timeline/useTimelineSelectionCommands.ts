@@ -5,12 +5,7 @@ import {
   type MotionMarkerSelection,
   type RightPanelTab,
 } from "../../types";
-import type {
-  Part,
-  SelectionPayload,
-  TimelineMode,
-  TimelinePart,
-} from "../../../core/types";
+import type { TimelineMode, TimelinePart } from "../../../core/types";
 
 type MarkerSelection = { partId: string; markerId: string } | null;
 
@@ -35,14 +30,12 @@ type UseTimelineSelectionCommandsInput = {
   setRightPanelTab: (tab: RightPanelTab) => void;
   setSelectedAdjustmentLayerId: (id: string | null) => void;
   setSelectedAdjustmentLayers: (selection: AdjustmentLayerSelection[]) => void;
-  setSelectedObjectId: (id: string | null) => void;
   setSelectedPartId: (id: string) => void;
   setSelectedParts: (selection: CompositionSelection[]) => void;
   setSelectedMotionMarker: (selection: MarkerSelection) => void;
   setSelectedMotionMarkers: (selection: MotionMarkerSelection[]) => void;
   setSelectedTransitionLayerId: (id: string | null) => void;
   setSelectedTransitionLayers: (selection: Array<{ layerId: string }>) => void;
-  setSelectionPayload: (payload: SelectionPayload | null) => void;
   setTrackerPickTranslationMarker: (selection: MarkerSelection) => void;
   updateTimelineMode: (mode: TimelineMode) => void;
 };
@@ -61,14 +54,12 @@ export function useTimelineSelectionCommands({
   setRightPanelTab,
   setSelectedAdjustmentLayerId,
   setSelectedAdjustmentLayers,
-  setSelectedObjectId,
   setSelectedPartId,
   setSelectedParts,
   setSelectedMotionMarker,
   setSelectedMotionMarkers,
   setSelectedTransitionLayerId,
   setSelectedTransitionLayers,
-  setSelectionPayload,
   setTrackerPickTranslationMarker,
   updateTimelineMode,
 }: UseTimelineSelectionCommandsInput) {
@@ -91,9 +82,7 @@ export function useTimelineSelectionCommands({
     setSelectedAdjustmentLayers([]);
     setSelectedTransitionLayerId(null);
     setSelectedTransitionLayers([]);
-    setSelectedObjectId(null);
     clearMarkerSelection();
-    setSelectionPayload(null);
     pausePlaybackAtCurrentTime();
   }
 
@@ -121,8 +110,6 @@ export function useTimelineSelectionCommands({
     setSelectedParts([]);
     setPositionPickTranslationMarker(null);
     setTrackerPickTranslationMarker(null);
-    setSelectedObjectId(null);
-    setSelectionPayload(null);
     pausePlaybackAtCurrentTime();
   }
 
@@ -137,8 +124,6 @@ export function useTimelineSelectionCommands({
     setSelectedMotionMarker(primarySelection);
     setPositionPickTranslationMarker(null);
     setTrackerPickTranslationMarker(null);
-    setSelectedObjectId(null);
-    setSelectionPayload(null);
     setFocusPickZoomMarker(null);
     pausePlaybackAtCurrentTime();
     if (primarySelection && primarySelection.partId !== TIMELINE_MOTION_PART_ID)
@@ -152,8 +137,6 @@ export function useTimelineSelectionCommands({
     setSelectedParts([]);
     setSelectedTransitionLayerId(null);
     setSelectedTransitionLayers([]);
-    setSelectedObjectId(null);
-    setSelectionPayload(null);
     clearMarkerSelection();
     if (rightPanelTab === "agent") setRightPanelTab("video");
     pausePlaybackAtCurrentTime();
@@ -166,8 +149,6 @@ export function useTimelineSelectionCommands({
     setSelectedParts([]);
     setSelectedTransitionLayerId(null);
     setSelectedTransitionLayers([]);
-    setSelectedObjectId(null);
-    setSelectionPayload(null);
     clearMarkerSelection();
     if (rightPanelTab === "agent") setRightPanelTab("video");
     pausePlaybackAtCurrentTime();
@@ -185,8 +166,6 @@ export function useTimelineSelectionCommands({
     setSelectedMotionMarker(primaryMotion);
     setSelectedPartId(primaryPart?.partId ?? "");
     setSelectedTransitionLayers(selection.transitionLayers);
-    setSelectedObjectId(null);
-    setSelectionPayload(null);
     setFocusPickZoomMarker(null);
     setPositionPickTranslationMarker(null);
     setTrackerPickTranslationMarker(null);

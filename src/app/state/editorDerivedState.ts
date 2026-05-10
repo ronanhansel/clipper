@@ -430,6 +430,7 @@ export function useEditorDerivedState({
 
   return {
     activeTimelinePart,
+    adjustedSceneTime,
     agentContext,
     assets,
     cameraPreviewTransform,

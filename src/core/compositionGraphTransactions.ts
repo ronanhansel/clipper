@@ -14,7 +14,10 @@ export type CompositionGraphTransaction = {
   graph: AnimationGraphState;
 };
 
-const compositionGraphRevisionByGraph = new WeakMap<AnimationGraphState, number>();
+const compositionGraphRevisionByGraph = new WeakMap<
+  AnimationGraphState,
+  number
+>();
 const compositionGraphRevisionBySignature = new Map<string, number>();
 let compositionGraphRevisionSequence = 0;
 
@@ -54,7 +57,8 @@ function getCompositionGraphRevision(graph: AnimationGraphState | undefined) {
   const signatureRevision = compositionGraphRevisionBySignature.get(
     getCompositionGraphSignature(graph),
   );
-  if (signatureRevision) compositionGraphRevisionByGraph.set(graph, signatureRevision);
+  if (signatureRevision)
+    compositionGraphRevisionByGraph.set(graph, signatureRevision);
   return signatureRevision ?? 0;
 }
 
@@ -64,9 +68,15 @@ function markCompositionGraphRevision(graph: AnimationGraphState) {
   return revision;
 }
 
-function setCompositionGraphRevision(graph: AnimationGraphState, revision: number) {
+function setCompositionGraphRevision(
+  graph: AnimationGraphState,
+  revision: number,
+) {
   compositionGraphRevisionByGraph.set(graph, revision);
-  compositionGraphRevisionBySignature.set(getCompositionGraphSignature(graph), revision);
+  compositionGraphRevisionBySignature.set(
+    getCompositionGraphSignature(graph),
+    revision,
+  );
 }
 
 export function applyCompositionGraphTransaction(
@@ -78,7 +88,11 @@ export function applyCompositionGraphTransaction(
     if (!compositionMatchesGraphTransaction(composition, transaction))
       return composition;
     setCompositionGraphRevision(transaction.graph, revision);
-    return setCompositionGraph(composition, transaction.mode, transaction.graph);
+    return setCompositionGraph(
+      composition,
+      transaction.mode,
+      transaction.graph,
+    );
   };
 
   return {
@@ -112,17 +126,23 @@ export function carryCompositionGraphTransactionRevisions(
   const findSourceComposition = (composition: CompositionClip) =>
     sourceCompositions.find(
       (source) =>
-        source.id === composition.id || source.filePath === composition.filePath,
+        source.id === composition.id ||
+        source.filePath === composition.filePath,
     );
   const carryComposition = (composition: CompositionClip) => {
     const sourceComposition = findSourceComposition(composition);
     if (!sourceComposition) return;
-    for (const mode of ["composition2d", "background", "composition3d"] as const) {
+    for (const mode of [
+      "composition2d",
+      "background",
+      "composition3d",
+    ] as const) {
       const revision = getCompositionGraphRevision(
         getCompositionGraph(sourceComposition, mode),
       );
       const targetGraph = getCompositionGraph(composition, mode);
-      if (revision && targetGraph) setCompositionGraphRevision(targetGraph, revision);
+      if (revision && targetGraph)
+        setCompositionGraphRevision(targetGraph, revision);
     }
   };
   targetProject.compositionLibrary?.forEach(carryComposition);
@@ -144,7 +164,8 @@ export function preserveNewerCompositionGraphTransactions(
   const findCurrentComposition = (composition: CompositionClip) =>
     currentCompositions.find(
       (current) =>
-        current.id === composition.id || current.filePath === composition.filePath,
+        current.id === composition.id ||
+        current.filePath === composition.filePath,
     );
   const graphWasPreserved = new Set<string>();
   const preserveComposition = (composition: CompositionClip) => {
@@ -169,7 +190,8 @@ export function preserveNewerCompositionGraphTransactions(
 
   return {
     ...nextProject,
-    compositionLibrary: nextProject.compositionLibrary?.map(preserveComposition),
+    compositionLibrary:
+      nextProject.compositionLibrary?.map(preserveComposition),
     compositions: nextProject.compositions?.map(preserveComposition),
     scenes: nextProject.scenes.map((scene) => ({
       ...scene,
@@ -178,7 +200,8 @@ export function preserveNewerCompositionGraphTransactions(
     timelines: nextProject.timelines?.map((timeline) => ({
       ...timeline,
       clips: timeline.clips.map((clip) =>
-        clip.compositionId && graphWasPreserved.has(`${clip.compositionId}:composition3d`)
+        clip.compositionId &&
+        graphWasPreserved.has(`${clip.compositionId}:composition3d`)
           ? { ...clip, renderMode: "webgl" as const }
           : clip,
       ),
@@ -191,7 +214,8 @@ function compositionMatchesGraphTransaction(
   transaction: CompositionGraphTransaction,
 ) {
   return Boolean(
-    (transaction.compositionId && composition.id === transaction.compositionId) ||
-      composition.filePath === transaction.filePath,
+    (transaction.compositionId &&
+      composition.id === transaction.compositionId) ||
+    composition.filePath === transaction.filePath,
   );
 }

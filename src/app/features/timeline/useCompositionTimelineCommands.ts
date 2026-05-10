@@ -9,11 +9,7 @@ import {
 import { roundToPrecision, roundTenth } from "../../../core/math";
 import { getDisplayName } from "../../../core/fileNames";
 import type { CompositionSelection } from "../../types";
-import type {
-  Part,
-  SelectionPayload,
-  TimelineLayerState,
-} from "../../../core/types";
+import type { Part, TimelineLayerState } from "../../../core/types";
 
 type UpdateSceneParts = (updater: (compositions: Part[]) => Part[]) => void;
 
@@ -27,10 +23,8 @@ type UseCompositionTimelineCommandsInput = {
   timelineLayers: TimelineLayerState;
   clearMarkerSelection: () => void;
   clearNodeSelection: () => void;
-  setSelectedObjectId: (id: string | null) => void;
   setSelectedPartId: (id: string) => void;
   setSelectedParts: (selection: CompositionSelection[]) => void;
-  setSelectionPayload: (payload: SelectionPayload | null) => void;
   timelinePrecision: number;
   updateSceneParts: UpdateSceneParts;
 };
@@ -42,10 +36,8 @@ export function useCompositionTimelineCommands({
   timelineLayers,
   clearMarkerSelection,
   clearNodeSelection,
-  setSelectedObjectId,
   setSelectedPartId,
   setSelectedParts,
-  setSelectionPayload,
   timelinePrecision,
   updateSceneParts,
 }: UseCompositionTimelineCommandsInput) {
@@ -198,8 +190,6 @@ export function useCompositionTimelineCommands({
     );
     setSelectedPartId(nextSelection);
     setSelectedParts(nextSelection ? [{ partId: nextSelection }] : []);
-    setSelectedObjectId(null);
-    setSelectionPayload(null);
     clearMarkerSelection();
   }
 

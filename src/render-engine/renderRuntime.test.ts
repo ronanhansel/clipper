@@ -31,6 +31,12 @@ const baseObject: FrameObject = {
   style: {},
 };
 
+function getScale(transform: unknown) {
+  const match =
+    typeof transform === "string" ? /scale\(([^)]+)\)/.exec(transform) : null;
+  return match ? Number(match[1]) : Number.NaN;
+}
+
 describe("render runtime", () => {
   it("requires installed effect packages to declare folder groups", () => {
     expect(
@@ -451,6 +457,59 @@ describe("render runtime", () => {
     expect(getTransitionProgress(10, layer)).toBe(1);
   });
 
+  it("nests zoom transition frames on the same in-and-out scale curve", () => {
+    const layer = {
+      id: "zoom",
+      name: "Zoom",
+      start: 0,
+      duration: 10,
+      midPoint: 5,
+      effect: {
+        effectId: "clipper.transition.zoomIn" as const,
+        params: {
+          direction: "in" as const,
+          ease: "inAndOut" as const,
+          zoom: 2,
+          cutPoint: 0.8,
+        },
+      },
+    };
+
+    const atCut = renderTransitionSequence(8, layer, 30);
+    const afterCut = renderTransitionSequence(9, layer, 30);
+
+    expect(atCut.aStyle?.opacity).toBe(0);
+    expect(atCut.bStyle?.opacity).toBe(1);
+    expect(getScale(atCut.bStyle?.transform)).toBeCloseTo(
+      getScale(atCut.aStyle?.transform) / 2,
+    );
+    expect(getScale(afterCut.bStyle?.transform)).toBeGreaterThan(
+      getScale(atCut.bStyle?.transform),
+    );
+  });
+
+  it("uses zoom transition background color behind scaled frames", () => {
+    const layer = {
+      id: "zoom",
+      name: "Zoom",
+      start: 0,
+      duration: 10,
+      midPoint: 5,
+      effect: {
+        effectId: "clipper.transition.zoomIn" as const,
+        params: {
+          direction: "in" as const,
+          zoom: 2,
+          backgroundColor: "#444444",
+        },
+      },
+    };
+
+    expect(renderTransitionSequence(4, layer, 30).frameStyle).toMatchObject({
+      backgroundColor: "#444444",
+    });
+  });
+
   it("uses package-owned point params for light leak focus", () => {
     const layers: AdjustmentLayer[] = [
       {
@@ -667,9 +726,9 @@ describe("render runtime", () => {
           {
             id: "paper-to-bg",
             fromNodeId: "paper",
-            fromPort: "out",
+            fromPort: "right",
             toNodeId: "layer:background",
-            toPort: "in",
+            toPort: "left",
           },
         ],
         customNodes: {
@@ -744,9 +803,9 @@ describe("render runtime", () => {
           {
             id: "paper-to-bg",
             fromNodeId: "paper",
-            fromPort: "out",
+            fromPort: "right",
             toNodeId: "layer:background",
-            toPort: "in",
+            toPort: "left",
           },
         ],
         customNodes: {

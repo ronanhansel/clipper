@@ -257,6 +257,7 @@ export function easeAnimationProgress(
   if (ease === "easeIn") return progress * progress * progress;
   if (ease === "easeOut" || ease === "circOut") return easeOutCubic(progress);
   if (ease === "easeInOut") return easeInOutCubic(progress);
+  if (ease === "inAndOut") return inAndOutEase(progress);
   if (ease === "expoIn") return expoIn(progress);
   if (ease === "expoOut") return expoOut(progress);
   if (ease === "backOut") return backOut(progress);
@@ -279,6 +280,14 @@ function easeInOutCubic(value: number): number {
 function expoIn(value: number): number {
   if (value <= 0) return 0;
   return Math.pow(2, 10 * value - 10);
+}
+
+function inAndOutEase(value: number): number {
+  if (value <= 0) return 0;
+  if (value >= 1) return 1;
+  return value < 0.5
+    ? Math.pow(2, 20 * value - 10) / 2
+    : (2 - Math.pow(2, -20 * value + 10)) / 2;
 }
 
 function expoOut(value: number): number {

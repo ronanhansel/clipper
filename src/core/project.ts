@@ -1778,6 +1778,7 @@ function normalizeGraphEase(
   return value === "easeIn" ||
     value === "easeOut" ||
     value === "easeInOut" ||
+    value === "inAndOut" ||
     value === "expoIn" ||
     value === "expoOut" ||
     value === "circOut" ||

@@ -95,7 +95,9 @@ export function getShapeMaskUniforms(
   };
 }
 
-export function getShapeMaskOverlayStyle(mask: ShapeMaskUniforms) {
+export function getShapeMaskOverlayStyle(
+  mask: ShapeMaskUniforms,
+): Record<string, string> {
   if (!mask.enabled) return {};
   const center = `${round(mask.focus.x * 100)}% ${round(mask.focus.y * 100)}%`;
   const visible = mask.applyInside ? "#000" : "transparent";

@@ -210,13 +210,7 @@ function GraphParameterInlineField({
     );
   const split = splitParameterUnit(field.value, field.unit);
   const displayValue = getNumberFieldDisplayValue(field, split.value);
-  const [focused, setFocused] = useState(false);
-  const [draftValue, setDraftValue] = useState(displayValue);
-  useEffect(() => {
-    if (!focused) setDraftValue(displayValue);
-  }, [displayValue, focused]);
-  const inputValue = focused ? draftValue : displayValue;
-  const canScrub = field.key !== "repeat" && inputValue !== "";
+  const canScrub = field.key !== "repeat" && displayValue !== "";
   const isTimePopup = variant === "timePopup";
   const isInspector = variant === "inspector";
   return (
@@ -274,33 +268,19 @@ function GraphParameterInlineField({
                 ? "h-5 min-w-0 border-0 bg-transparent px-0 py-0 text-right text-[11px] font-extrabold leading-none text-[#f0f4fb] [appearance:textfield] focus:border-0 focus:ring-0 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                 : "h-6 min-w-0 border-0 bg-transparent px-0 py-0 text-right text-[12px] font-semibold text-[#e4e9f2] focus:border-0 focus:ring-0"
           }
-          value={inputValue}
+          value={displayValue}
           onFocus={() => {
-            setFocused(true);
-            setDraftValue(displayValue);
             editSessionActiveRef.current = false;
-          }}
-          onBlur={() => {
-            setFocused(false);
-            editSessionActiveRef.current = false;
-          }}
-          onInput={(event) => {
-            setDraftValue((event.target as HTMLInputElement).value);
-            commitNumberField(
-              field,
-              (event.target as HTMLInputElement).value,
-              split.unit,
-              commitEditSessionChange,
-            );
           }}
           onChange={(event) => {
-            setDraftValue(event.target.value);
             commitNumberField(
               field,
               event.target.value,
               split.unit,
               commitEditSessionChange,
+              { clamp: true },
             );
+            editSessionActiveRef.current = false;
           }}
         />
       </div>
@@ -357,13 +337,7 @@ function GraphParameterBoxField({
     );
   const split = splitParameterUnit(field.value, field.unit);
   const displayValue = getNumberFieldDisplayValue(field, split.value);
-  const [focused, setFocused] = useState(false);
-  const [draftValue, setDraftValue] = useState(displayValue);
-  useEffect(() => {
-    if (!focused) setDraftValue(displayValue);
-  }, [displayValue, focused]);
-  const inputValue = focused ? draftValue : displayValue;
-  const canScrub = field.key !== "repeat" && inputValue !== "";
+  const canScrub = field.key !== "repeat" && displayValue !== "";
   return (
     <label className={variant === "inspector" ? "grid gap-1.5" : "grid gap-1"}>
       <span
@@ -403,33 +377,19 @@ function GraphParameterBoxField({
               ? `${split.unit ? "pl-11" : ""} h-8 min-w-0 text-right`
               : "h-6 min-w-0 border-0 bg-transparent px-0 py-0 text-right text-[12px] font-semibold text-[#e4e9f2] focus:border-0 focus:ring-0"
           }
-          value={inputValue}
+          value={displayValue}
           onFocus={() => {
-            setFocused(true);
-            setDraftValue(displayValue);
             editSessionActiveRef.current = false;
-          }}
-          onBlur={() => {
-            setFocused(false);
-            editSessionActiveRef.current = false;
-          }}
-          onInput={(event) => {
-            setDraftValue((event.target as HTMLInputElement).value);
-            commitNumberField(
-              field,
-              (event.target as HTMLInputElement).value,
-              split.unit,
-              commitEditSessionChange,
-            );
           }}
           onChange={(event) => {
-            setDraftValue(event.target.value);
             commitNumberField(
               field,
               event.target.value,
               split.unit,
               commitEditSessionChange,
+              { clamp: true },
             );
+            editSessionActiveRef.current = false;
           }}
         />
       </div>
@@ -753,10 +713,11 @@ function commitNumberField(
   value: string,
   unit: string,
   onChange: GraphParameterChange,
+  options: { clamp?: boolean } = {},
 ) {
   if (!isAllowedNumberInput(value, field.key === "repeat")) return;
-  const clampedValue = clampNumberFieldValue(field, value);
-  onChange(field.key, `${clampedValue}${unit}`);
+  const nextValue = options.clamp ? clampNumberFieldValue(field, value) : value;
+  onChange(field.key, `${nextValue}${unit}`);
 }
 
 function clampNumberFieldValue(
@@ -764,7 +725,7 @@ function clampNumberFieldValue(
   value: string,
 ) {
   if (value === "" || value.toLowerCase() === "infinity") return value;
-  const numeric = Number.parseFloat(value);
+  const numeric = Number.parseFloat(value.replace(",", "."));
   if (!Number.isFinite(numeric)) return value;
   const min = field.min ?? -Infinity;
   const max = field.max ?? Infinity;
@@ -783,7 +744,7 @@ function isAllowedNumberInput(value: string, allowInfinity: boolean) {
   if (allowInfinity && "Infinity".toLowerCase().startsWith(value.toLowerCase()))
     return true;
   return (
-    /^-?\d*(?:\.\d*)?$/.test(value) &&
+    /^-?\d*(?:[.,]\d*)?$/.test(value) &&
     value !== "-" &&
     value !== "." &&
     value !== "-."

@@ -5,6 +5,7 @@ import {
   type ChangeEvent,
   type ComponentProps,
   type FocusEvent,
+  type InputEvent,
   type KeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent,
@@ -76,8 +77,10 @@ export function Input({
 }: InputProps) {
   const scrubRef = useRef<NumberScrubState | null>(null);
   const pendingScrubRef = useRef<PendingNumberScrubState | null>(null);
+  const committingNumberValueRef = useRef(false);
   const focusedValueRef = useRef<string | null>(null);
   const [focused, setFocused] = useState(false);
+  const [numberDraftValue, setNumberDraftValue] = useState<string | null>(null);
   const { resetValue, ...inputProps } = props;
   const hasReset = resetValue !== undefined;
   const canReset =
@@ -102,7 +105,7 @@ export function Input({
       scrub.input.style.cursor = scrub.initialInputCursor;
       document.body.style.cursor = scrub.initialBodyCursor;
       if (restore) restoreScrubValue(scrub);
-      else if (commit) commitInputValue(scrub.input);
+      else if (commit) commitNumberInputValue(scrub.input);
       scrub.onEnd?.();
       scrubRef.current = null;
       if (ownsPointerLock(scrub.input)) document.exitPointerLock();
@@ -170,9 +173,9 @@ export function Input({
       scrub.remainder = delta - wholeSteps;
       if (wholeSteps === 0) return;
 
-      const nextValue = clampInputValue(
-        scrub.input,
-        scrub.value + wholeSteps * scrub.step,
+      const nextValue = roundNumberToDecimals(
+        clampInputValue(scrub.input, scrub.value + wholeSteps * scrub.step),
+        scrub.decimals,
       );
       if (nextValue === scrub.value) return;
 
@@ -186,7 +189,7 @@ export function Input({
         const now = performance.now();
         if (now - scrub.lastCommitAt >= scrub.throttleMs) {
           scrub.lastCommitAt = now;
-          commitInputValue(scrub.input);
+          commitNumberInputValue(scrub.input);
         }
       } else if (scrub.mode === "preview") {
         scrub.onPreview?.(nextValue);
@@ -244,7 +247,7 @@ export function Input({
     const input = event.currentTarget;
     if (props.disabled || props.readOnly) return;
 
-    const value = Number(input.value);
+    const value = parseInputNumber(input.value);
     if (!Number.isFinite(value)) return;
 
     const step = getInputStep(input);
@@ -293,6 +296,7 @@ export function Input({
   function rememberFocusedValue(event: FocusEvent<HTMLInputElement>) {
     setFocused(true);
     focusedValueRef.current = event.currentTarget.value;
+    if (type === "number") setNumberDraftValue(event.currentTarget.value);
     onFocus?.(event);
   }
 
@@ -302,6 +306,31 @@ export function Input({
     onBlur?.(event);
     setFocused(false);
     focusedValueRef.current = null;
+    setNumberDraftValue(null);
+  }
+
+  function changeInputValue(event: ChangeEvent<HTMLInputElement>) {
+    if (type === "number" && focused && !committingNumberValueRef.current) {
+      setNumberDraftValue(normalizeNumberDraftValue(event.target.value));
+      return;
+    }
+    onChange?.(event);
+  }
+
+  function inputInputValue(event: InputEvent<HTMLInputElement>) {
+    if (type === "number" && focused && !committingNumberValueRef.current) {
+      setNumberDraftValue(
+        normalizeNumberDraftValue((event.target as HTMLInputElement).value),
+      );
+      return;
+    }
+    inputProps.onInput?.(event);
+  }
+
+  function commitNumberInputValue(input: HTMLInputElement) {
+    committingNumberValueRef.current = true;
+    commitInputValue(input);
+    committingNumberValueRef.current = false;
   }
 
   function resetInputValue() {
@@ -312,12 +341,19 @@ export function Input({
   }
 
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const displayedValue =
+    type === "number" && focused && numberDraftValue !== null
+      ? numberDraftValue
+      : formatNumberInputValue(inputProps.value, props.step);
+  const renderedType = type === "number" ? "text" : type;
 
   return (
     <span className="relative block w-full">
       <input
         ref={inputRef}
-        type={type}
+        type={renderedType}
+        {...inputProps}
+        inputMode={type === "number" ? "decimal" : inputProps.inputMode}
         className={cn(
           "flex h-8 w-full rounded-[8px] border border-[#2d313b] bg-[#171920] px-2 py-1.5 text-xs font-semibold text-white outline-none transition placeholder:text-[#69707f] focus:border-[var(--clipper-accent)] focus:ring-2 focus:ring-[rgb(var(--clipper-accent-rgb)/0.2)] disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-[#ff6b6b] aria-invalid:ring-[#ff6b6b]/20",
           canReset ? "pr-8" : "",
@@ -326,10 +362,11 @@ export function Input({
         onBlur={clearFocusedValue}
         onDoubleClick={selectNumberOnDoubleClick}
         onKeyDown={blurOnConfirmKey}
-        onChange={onChange}
+        value={displayedValue}
+        onChange={changeInputValue}
         onFocus={rememberFocusedValue}
+        onInput={inputInputValue}
         onPointerDown={startNumberScrub}
-        {...inputProps}
       />
       {focused && hasReset ? (
         <button
@@ -403,7 +440,7 @@ function getInputStep(input: HTMLInputElement) {
 
 function getStepDecimals(step: number) {
   const [, decimals = ""] = String(step).split(".");
-  return decimals.length;
+  return Math.min(decimals.length, 2);
 }
 
 function clampInputValue(input: HTMLInputElement, value: number) {
@@ -415,12 +452,43 @@ function clampInputValue(input: HTMLInputElement, value: number) {
   );
 }
 
+function parseInputNumber(value: string) {
+  return Number(value);
+}
+
+function normalizeNumberDraftValue(value: string) {
+  return value.replace(/,/g, ".");
+}
+
 function formatScrubValue(value: number, decimals: number) {
   if (decimals === 0) return String(Math.round(value));
-  return value
+  return roundNumberToDecimals(value, decimals)
     .toFixed(decimals)
     .replace(/\.0+$/, "")
     .replace(/(\.\d*?)0+$/, "$1");
+}
+
+function roundNumberToDecimals(value: number, decimals: number) {
+  const factor = 10 ** Math.min(Math.max(decimals, 0), 2);
+  return Math.round(value * factor) / factor;
+}
+
+function getStepDecimalsFromValue(step: ComponentProps<"input">["step"]) {
+  if (step === undefined || step === "any") return 2;
+  const numericStep = Number(step);
+  return Number.isFinite(numericStep) && numericStep > 0
+    ? getStepDecimals(numericStep)
+    : 2;
+}
+
+function formatNumberInputValue(
+  value: ComponentProps<"input">["value"],
+  step: ComponentProps<"input">["step"],
+) {
+  if (value === undefined || value === null || value === "") return value;
+  const numeric = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(numeric)) return value;
+  return formatScrubValue(numeric, getStepDecimalsFromValue(step));
 }
 
 function setNativeInputValue(input: HTMLInputElement, value: string) {
@@ -439,14 +507,14 @@ function clampAndCommitInputValue(
   input: HTMLInputElement,
   onChange?: ComponentProps<"input">["onChange"],
 ) {
-  const value = Number(input.value);
+  const value = parseInputNumber(input.value);
   if (!Number.isFinite(value)) return;
   const clamped = clampInputValue(input, value);
-  if (clamped === value) return;
-  setNativeInputValue(
-    input,
-    formatScrubValue(clamped, getStepDecimals(getInputStep(input))),
+  const formatted = formatScrubValue(
+    clamped,
+    getStepDecimals(getInputStep(input)),
   );
+  if (input.value !== formatted) setNativeInputValue(input, formatted);
   commitInputValue(input);
   onChange?.({
     target: input,

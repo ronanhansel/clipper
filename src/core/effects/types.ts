@@ -244,10 +244,18 @@ export type TransitionEffectBooleanParamControl = {
   defaultValue: boolean;
 };
 
+export type TransitionEffectColorParamControl = {
+  key: string;
+  label: string;
+  type: "color";
+  defaultValue: string;
+};
+
 export type TransitionEffectParamControl =
   | TransitionEffectNumberParamControl
   | TransitionEffectSelectParamControl
-  | TransitionEffectBooleanParamControl;
+  | TransitionEffectBooleanParamControl
+  | TransitionEffectColorParamControl;
 
 export type MotionEffectPackage = MotionEffectDefinition & {
   createDefaultBlock(input: {

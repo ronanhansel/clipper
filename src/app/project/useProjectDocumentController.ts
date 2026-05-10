@@ -52,6 +52,7 @@ import {
 type ProjectHistoryEntry = {
   project: ProjectManifest;
   compositionSources: Record<string, string>;
+  historyGroup?: string;
   implicitFileOperation?: boolean;
   fileCommand?: Command;
 };
@@ -83,6 +84,7 @@ export type ProjectDocumentController = {
       history?: boolean;
       syncSources?: boolean;
       coalesceHistory?: boolean;
+      historyGroup?: string;
     },
   ) => void;
   redoProjectChange: () => Promise<void> | void;
@@ -112,6 +114,7 @@ export type ProjectDocumentController = {
     options?: {
       history?: boolean;
       coalesceHistory?: boolean;
+      historyGroup?: string;
       autosave?: boolean;
     },
   ) => void;
@@ -121,6 +124,7 @@ export type ProjectDocumentController = {
       history?: boolean;
       syncSources?: boolean;
       coalesceHistory?: boolean;
+      historyGroup?: string;
     },
   ) => void;
   watchedProjectDirectory: string;
@@ -223,8 +227,10 @@ export function useProjectDocumentController({
         history?: boolean;
         syncSources?: boolean;
         coalesceHistory?: boolean;
+        historyGroup?: string;
         preservePageMode?: boolean;
         preserveEditorState?: boolean;
+        preserveNewerGraphTransactions?: boolean;
       } = {},
     ) => {
       const currentProject = projectRef.current;
@@ -242,7 +248,10 @@ export function useProjectDocumentController({
           ...nextProject,
           compositionSources: nextCompositionSources,
         });
-        carryCompositionGraphTransactionRevisions(nextProject, normalizedProject);
+        carryCompositionGraphTransactionRevisions(
+          nextProject,
+          normalizedProject,
+        );
       } else {
         nextCompositionSources =
           nextProject.compositionSources ?? compositionSourcesRef.current;
@@ -250,12 +259,16 @@ export function useProjectDocumentController({
           ...nextProject,
           compositionSources: nextCompositionSources,
         });
-        carryCompositionGraphTransactionRevisions(nextProject, normalizedProject);
+        carryCompositionGraphTransactionRevisions(
+          nextProject,
+          normalizedProject,
+        );
       }
-      normalizedProject = preserveNewerCompositionGraphTransactions(
-        currentProject,
-        normalizedProject,
-      );
+      if (options.preserveNewerGraphTransactions)
+        normalizedProject = preserveNewerCompositionGraphTransactions(
+          currentProject,
+          normalizedProject,
+        );
       if (options.preserveEditorState) {
         const preEditorStateProject = normalizedProject;
         normalizedProject = normalizeProject({
@@ -304,8 +317,10 @@ export function useProjectDocumentController({
         const now = Date.now();
         const isCoalescedAction =
           options.coalesceHistory !== false &&
+          options.historyGroup !== undefined &&
           now - lastProjectHistoryAtRef.current < projectHistoryCoalesceMs &&
-          projectHistoryRef.current.past.length > 0;
+          projectHistoryRef.current.past.at(-1)?.historyGroup ===
+            options.historyGroup;
         projectHistoryRef.current = {
           past: isCoalescedAction
             ? projectHistoryRef.current.past
@@ -314,6 +329,7 @@ export function useProjectDocumentController({
                 {
                   project: currentProject,
                   compositionSources: compositionSourcesRef.current,
+                  historyGroup: options.historyGroup,
                 },
               ].slice(-maxProjectHistoryActions),
           future: [],
@@ -335,6 +351,7 @@ export function useProjectDocumentController({
     options: {
       history?: boolean;
       coalesceHistory?: boolean;
+      historyGroup?: string;
       autosave?: boolean;
     } = {},
   ) {
@@ -353,6 +370,7 @@ export function useProjectDocumentController({
         history: true,
         syncSources: false,
         coalesceHistory: options.coalesceHistory,
+        historyGroup: options.historyGroup,
       });
       return;
     }
@@ -368,6 +386,7 @@ export function useProjectDocumentController({
       history?: boolean;
       syncSources?: boolean;
       coalesceHistory?: boolean;
+      historyGroup?: string;
     },
   ) {
     const nextProject =
@@ -661,6 +680,7 @@ export function useProjectDocumentController({
           history: false,
           syncSources: false,
           preserveEditorState: options?.preserveEditorState,
+          preserveNewerGraphTransactions: true,
         });
         const nextSavedProjectSnapshot =
           getProjectContentSnapshot(persistedDiskProject);
@@ -994,11 +1014,7 @@ export function useProjectDocumentController({
         return;
       }
 
-      // Detect file operations before applying undo
-      const restoredProject = preserveNewerCompositionGraphTransactions(
-        projectRef.current,
-        preserveCurrentPageMode(previousEntry.project),
-      );
+      const restoredProject = preserveCurrentPageMode(previousEntry.project);
 
       projectHistoryRef.current = {
         past: projectHistoryRef.current.past.slice(0, -1),
@@ -1046,11 +1062,7 @@ export function useProjectDocumentController({
         return;
       }
 
-      // Detect file operations before applying redo
-      const restoredProject = preserveNewerCompositionGraphTransactions(
-        projectRef.current,
-        preserveCurrentPageMode(nextEntry.project),
-      );
+      const restoredProject = preserveCurrentPageMode(nextEntry.project);
 
       projectHistoryRef.current = {
         past: [

@@ -116,6 +116,7 @@ type FrameInteractionControllerParams = {
   setMarqueeDragging: Dispatch<SetStateAction<boolean>>;
   setObjectResizingActive: Dispatch<SetStateAction<boolean>>;
   setRightPanelTab: Dispatch<SetStateAction<RightPanelTab>>;
+  setSelectedComposeObjectIds: Dispatch<SetStateAction<string[]>>;
   setSelectedObjectId: Dispatch<SetStateAction<string | null>>;
   setSelectionPayload: Dispatch<SetStateAction<SelectionPayload | null>>;
   setObjectSnapGuides: Dispatch<SetStateAction<ObjectSnapGuide[]>>;
@@ -194,6 +195,7 @@ export function useFrameInteractionController(
     setObjectResizingActive,
     setObjectSnapGuides,
     setRightPanelTab,
+    setSelectedComposeObjectIds,
     setSelectedObjectId,
     setSelectionPayload,
     updateAdjustmentLayer,
@@ -203,6 +205,7 @@ export function useFrameInteractionController(
   } = params;
 
   function updateObjectDragSelection(nextObjects: SelectionPayload["objects"]) {
+    setSelectedComposeObjectIds(nextObjects.map((object) => object.id));
     setSelectionPayload(selectionPayloadFromObjects(nextObjects));
   }
 
@@ -543,6 +546,7 @@ export function useFrameInteractionController(
       liveDragSelectionIdsRef.current = nextSelectionIds;
       startTransition(() => {
         setSelectionPayload(payload.objects.length > 0 ? payload : null);
+        setSelectedComposeObjectIds(payload.objects.map((object) => object.id));
         setSelectedObjectId(payload.objects[0]?.id ?? null);
       });
     });
@@ -845,6 +849,7 @@ export function useFrameInteractionController(
     if (payload.objects.length === 0) clearNodeSelection();
     else {
       setSelectionPayload(payload);
+      setSelectedComposeObjectIds(payload.objects.map((object) => object.id));
       setSelectedObjectId(payload.objects[0]?.id ?? null);
     }
     clearMarkerSelection();
@@ -883,6 +888,7 @@ export function useFrameInteractionController(
     );
 
     setSelectedObjectId(object.id);
+    setSelectedComposeObjectIds(nextSelectionObjects.map((item) => item.id));
     clearMarkerSelection();
     setSelectionPayload({
       selectionBox,
@@ -1045,6 +1051,7 @@ export function useFrameInteractionController(
     event.preventDefault();
     event.stopPropagation();
     setSelectedObjectId(object.id);
+    setSelectedComposeObjectIds([object.id]);
     clearMarkerSelection();
     setSelectionPayload({
       selectionBox: object.bounds,
