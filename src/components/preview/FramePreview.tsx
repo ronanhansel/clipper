@@ -1973,8 +1973,9 @@ function getSplitTextTokenStyle(
     const split = animation.options.split;
     if (!split) continue;
     const tokenOffset =
+      split.tokenDelays?.[index] ??
       getSplitTokenOrderIndex(index, count, split.order ?? "forward") *
-      (split.stagger ?? 0);
+        (split.stagger ?? 0);
     const tokenTime =
       split.repeatScope === "item"
         ? time - tokenOffset

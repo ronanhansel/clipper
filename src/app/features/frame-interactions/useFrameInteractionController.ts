@@ -393,6 +393,15 @@ export function useFrameInteractionController(
     }
   }
 
+  function pinCommittedObjectDragPreview(objects: SelectionPayload["objects"]) {
+    for (const object of objects) {
+      setObjectResizePreview(object.id, object.bounds);
+      setObjectDragTransform(object.id, { x: 0, y: 0 });
+      setFrameSelectionBoxResizePreview(object.id, object.bounds);
+    }
+    setFrameSelectionBoxDragTransform({ x: 0, y: 0 });
+  }
+
   function scheduleObjectResizePreview(delta: Point, preserveAspect = false) {
     objectResizeDeltaRef.current = delta;
     objectResizePreserveAspectRef.current = preserveAspect;
@@ -580,6 +589,7 @@ export function useFrameInteractionController(
     }
 
     const nextObjects = getDraggedObjects(drag, objectDragDeltaRef.current);
+    pinCommittedObjectDragPreview(nextObjects);
     const nextBoundsById = new Map(
       nextObjects.map((object) => [object.id, object.bounds]),
     );

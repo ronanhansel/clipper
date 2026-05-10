@@ -127,6 +127,7 @@ export type LayerAnimation = {
       stagger?: number;
       order?: "forward" | "reverse" | "center";
       repeatScope?: "sequence" | "item";
+      tokenDelays?: Record<number, number>;
     };
   };
   enabled?: boolean;
@@ -488,6 +489,7 @@ export type AnimationGraphCustomNode = {
     | "animation"
     | "time"
     | "split"
+    | "condition"
     | "group"
     | "bgSolid"
     | "bgGradient"
@@ -507,6 +509,7 @@ export type AnimationGraphGroup = {
   edges: AnimationGraphEdge[];
   customNodes?: Record<string, AnimationGraphCustomNode>;
   parameters?: Record<string, Record<string, string>>;
+  inNodeId?: string;
   outNodeId: string;
 };
 

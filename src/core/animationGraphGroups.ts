@@ -56,8 +56,9 @@ export function expandAnimationGraphGroups({
     const outputEdges = (group.edges ?? []).filter(
       (edge) => edge.toNodeId === group.outNodeId,
     );
+    const inputNodeId = group.inNodeId ?? groupNodeId;
     const inputEdges = (group.edges ?? []).filter(
-      (edge) => edge.fromNodeId === groupNodeId,
+      (edge) => edge.fromNodeId === inputNodeId,
     );
     const parentSources = parentEdges.filter(
       (edge) => edge.toNodeId === groupNodeId,
@@ -69,7 +70,7 @@ export function expandAnimationGraphGroups({
     expandedEdges.push(
       ...(group.edges ?? []).filter(
         (edge) =>
-          edge.toNodeId !== group.outNodeId && edge.fromNodeId !== groupNodeId,
+          edge.toNodeId !== group.outNodeId && edge.fromNodeId !== inputNodeId,
       ),
     );
     for (const inputEdge of inputEdges) {
@@ -80,6 +81,10 @@ export function expandAnimationGraphGroups({
             sourceEdge.fromPort,
             inputEdge.toNodeId,
             inputEdge.toPort,
+            {
+              fromSocket: sourceEdge.fromSocket ?? inputEdge.fromSocket,
+              toSocket: inputEdge.toSocket ?? sourceEdge.toSocket,
+            },
           ),
         );
       }
@@ -92,6 +97,10 @@ export function expandAnimationGraphGroups({
             outputEdge.fromPort,
             targetEdge.toNodeId,
             targetEdge.toPort,
+            {
+              fromSocket: outputEdge.fromSocket ?? targetEdge.fromSocket,
+              toSocket: targetEdge.toSocket ?? outputEdge.toSocket,
+            },
           ),
         );
       }
@@ -118,12 +127,19 @@ function createAnimationGraphEdge(
   fromPort: AnimationGraphEdge["fromPort"],
   toNodeId: string,
   toPort: AnimationGraphEdge["toPort"],
+  registration?: Pick<AnimationGraphEdge, "fromSocket" | "toSocket">,
 ): AnimationGraphEdge {
   return {
-    id: `${fromNodeId}:${fromPort}->${toNodeId}:${toPort}`,
+    id:
+      `${fromNodeId}:${fromPort}->${toNodeId}:${toPort}` +
+      (registration?.fromSocket && registration.toSocket
+        ? `:${registration.fromSocket}->${registration.toSocket}`
+        : ""),
     fromNodeId,
     fromPort,
     toNodeId,
     toPort,
+    fromSocket: registration?.fromSocket,
+    toSocket: registration?.toSocket,
   };
 }

@@ -115,7 +115,7 @@ function GraphParameterGroup({
     <div
       className={
         variant === "inspector"
-          ? "grid gap-3"
+          ? `grid gap-3 ${group.id.startsWith("condition-rule-") ? "border-t border-[#2d313b] pt-3" : ""}`
           : isTimePopup
             ? "grid gap-1.5"
             : "grid gap-1.5"
@@ -167,6 +167,8 @@ function GraphParameterInlineField({
   onChange: GraphParameterChange;
 }) {
   const editSessionActiveRef = useRef(false);
+  const [focused, setFocused] = useState(false);
+  const [draftValue, setDraftValue] = useState<string | null>(null);
   function commitEditSessionChange(key: string, value: string) {
     const history = !editSessionActiveRef.current;
     editSessionActiveRef.current = true;
@@ -210,9 +212,12 @@ function GraphParameterInlineField({
     );
   const split = splitParameterUnit(field.value, field.unit);
   const displayValue = getNumberFieldDisplayValue(field, split.value);
-  const canScrub = field.key !== "repeat" && displayValue !== "";
   const isTimePopup = variant === "timePopup";
   const isInspector = variant === "inspector";
+  const inputValue = isInspector && focused && draftValue !== null
+    ? draftValue
+    : displayValue;
+  const canScrub = field.key !== "repeat" && displayValue !== "";
   return (
     <label
       className={
@@ -255,11 +260,12 @@ function GraphParameterInlineField({
           {split.unit}
         </span>
         <Input
-          type={canScrub ? "number" : "text"}
+          type={isInspector ? "text" : canScrub ? "number" : "text"}
+          inputMode={isInspector && canScrub ? "decimal" : undefined}
           min={field.min}
           max={field.max}
           step={getNumberFieldStep(field)}
-          numberScrubMode={canScrub ? "continuous" : undefined}
+          numberScrubMode={!isInspector && canScrub ? "continuous" : undefined}
           numberScrubCommitThrottleMs={16}
           className={
             isInspector
@@ -268,11 +274,19 @@ function GraphParameterInlineField({
                 ? "h-5 min-w-0 border-0 bg-transparent px-0 py-0 text-right text-[11px] font-extrabold leading-none text-[#f0f4fb] [appearance:textfield] focus:border-0 focus:ring-0 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                 : "h-6 min-w-0 border-0 bg-transparent px-0 py-0 text-right text-[12px] font-semibold text-[#e4e9f2] focus:border-0 focus:ring-0"
           }
-          value={displayValue}
+          value={inputValue}
           onFocus={() => {
+            setFocused(true);
+            setDraftValue(displayValue);
+            editSessionActiveRef.current = false;
+          }}
+          onBlur={() => {
+            setFocused(false);
+            setDraftValue(null);
             editSessionActiveRef.current = false;
           }}
           onChange={(event) => {
+            if (isInspector) setDraftValue(event.target.value);
             commitNumberField(
               field,
               event.target.value,
@@ -303,6 +317,8 @@ function GraphParameterBoxField({
     editSessionActiveRef.current = true;
     onChange(key, value, { history });
   }
+  const [focused, setFocused] = useState(false);
+  const [draftValue, setDraftValue] = useState<string | null>(null);
   if (field.options)
     return (
       <GraphParameterSelectField
@@ -337,6 +353,9 @@ function GraphParameterBoxField({
     );
   const split = splitParameterUnit(field.value, field.unit);
   const displayValue = getNumberFieldDisplayValue(field, split.value);
+  const inputValue = variant === "inspector" && focused && draftValue !== null
+    ? draftValue
+    : displayValue;
   const canScrub = field.key !== "repeat" && displayValue !== "";
   return (
     <label className={variant === "inspector" ? "grid gap-1.5" : "grid gap-1"}>
@@ -366,22 +385,33 @@ function GraphParameterBoxField({
           {split.unit}
         </span>
         <Input
-          type={canScrub ? "number" : "text"}
+          type={variant === "inspector" ? "text" : canScrub ? "number" : "text"}
+          inputMode={variant === "inspector" && canScrub ? "decimal" : undefined}
           min={field.min}
           max={field.max}
           step={getNumberFieldStep(field)}
-          numberScrubMode={canScrub ? "continuous" : undefined}
+          numberScrubMode={
+            variant !== "inspector" && canScrub ? "continuous" : undefined
+          }
           numberScrubCommitThrottleMs={16}
           className={
             variant === "inspector"
               ? `${split.unit ? "pl-11" : ""} h-8 min-w-0 text-right`
               : "h-6 min-w-0 border-0 bg-transparent px-0 py-0 text-right text-[12px] font-semibold text-[#e4e9f2] focus:border-0 focus:ring-0"
           }
-          value={displayValue}
+          value={inputValue}
           onFocus={() => {
+            setFocused(true);
+            setDraftValue(displayValue);
+            editSessionActiveRef.current = false;
+          }}
+          onBlur={() => {
+            setFocused(false);
+            setDraftValue(null);
             editSessionActiveRef.current = false;
           }}
           onChange={(event) => {
+            if (variant === "inspector") setDraftValue(event.target.value);
             commitNumberField(
               field,
               event.target.value,
@@ -730,6 +760,7 @@ function clampNumberFieldValue(
   const min = field.min ?? -Infinity;
   const max = field.max ?? Infinity;
   const clamped = Math.min(Math.max(numeric, min), max);
+  if (numeric === clamped && /[.,]/.test(value)) return value;
   return Number.isInteger(clamped)
     ? String(clamped)
     : String(roundNumber(clamped));
@@ -743,11 +774,11 @@ function isAllowedNumberInput(value: string, allowInfinity: boolean) {
   if (value === "") return true;
   if (allowInfinity && "Infinity".toLowerCase().startsWith(value.toLowerCase()))
     return true;
+  if (value === "." || value === "-." || value === "," || value === "-,")
+    return true;
   return (
     /^-?\d*(?:[.,]\d*)?$/.test(value) &&
-    value !== "-" &&
-    value !== "." &&
-    value !== "-."
+    value !== "-"
   );
 }
 

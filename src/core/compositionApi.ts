@@ -76,6 +76,7 @@ export type LayerAnimation = {
       stagger?: number;
       order?: "forward" | "reverse" | "center";
       repeatScope?: "sequence" | "item";
+      tokenDelays?: Record<number, number>;
     };
   };
   enabled?: boolean;

@@ -1766,13 +1766,17 @@ function AppContent({
     if (
       timelineMode !== "compose" ||
       selectionPayload?.objects.length ||
-      selectedComposeObjectIds.length > 0
+      selectedObjectId
     )
       return;
     const selectedIds =
-      project.editorState?.selectedComposeObjectIds?.filter(
+      (selectedComposeObjectIds.length > 0
+        ? selectedComposeObjectIds
+        : project.editorState?.selectedComposeObjectIds
+      )?.filter(
         (id) =>
           id === part.background.id ||
+          part.background.elements.some((object) => object.id === id) ||
           part.objects.some((object) => object.id === id),
       ) ?? [];
     if (selectedIds.length === 0) return;
@@ -1780,7 +1784,8 @@ function AppContent({
       .map((id) =>
         id === part.background.id
           ? frameObjectFromBackgroundLayer(part.background)
-          : part.objects.find((object) => object.id === id),
+          : (part.background.elements.find((object) => object.id === id) ??
+            part.objects.find((object) => object.id === id)),
       )
       .filter((object): object is FrameObject => Boolean(object));
     if (selectedObjects.length === 0) return;
