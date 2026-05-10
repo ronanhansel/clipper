@@ -16,6 +16,9 @@ export type GraphParameterEditorField = {
   value: string;
   type?: "number" | "text" | "color" | "gradient";
   unit?: string;
+  min?: number;
+  max?: number;
+  step?: number;
   options?: readonly { value: string; label: string }[];
 };
 
@@ -259,6 +262,8 @@ function GraphParameterInlineField({
         </span>
         <Input
           type={canScrub ? "number" : "text"}
+          min={field.min}
+          max={field.max}
           step={getNumberFieldStep(field)}
           numberScrubMode={canScrub ? "continuous" : undefined}
           numberScrubCommitThrottleMs={16}
@@ -388,6 +393,8 @@ function GraphParameterBoxField({
         </span>
         <Input
           type={canScrub ? "number" : "text"}
+          min={field.min}
+          max={field.max}
           step={getNumberFieldStep(field)}
           numberScrubMode={canScrub ? "continuous" : undefined}
           numberScrubCommitThrottleMs={16}
@@ -748,7 +755,27 @@ function commitNumberField(
   onChange: GraphParameterChange,
 ) {
   if (!isAllowedNumberInput(value, field.key === "repeat")) return;
-  onChange(field.key, `${value}${unit}`);
+  const clampedValue = clampNumberFieldValue(field, value);
+  onChange(field.key, `${clampedValue}${unit}`);
+}
+
+function clampNumberFieldValue(
+  field: GraphParameterEditorField,
+  value: string,
+) {
+  if (value === "" || value.toLowerCase() === "infinity") return value;
+  const numeric = Number.parseFloat(value);
+  if (!Number.isFinite(numeric)) return value;
+  const min = field.min ?? -Infinity;
+  const max = field.max ?? Infinity;
+  const clamped = Math.min(Math.max(numeric, min), max);
+  return Number.isInteger(clamped)
+    ? String(clamped)
+    : String(roundNumber(clamped));
+}
+
+function roundNumber(value: number) {
+  return Math.round(value * 1000) / 1000;
 }
 
 function isAllowedNumberInput(value: string, allowInfinity: boolean) {
@@ -764,7 +791,9 @@ function isAllowedNumberInput(value: string, allowInfinity: boolean) {
 }
 
 function getNumberFieldStep(field: GraphParameterEditorField) {
-  return field.key === "delay" || field.key === "duration" ? 0.1 : 1;
+  return (
+    field.step ?? (field.key === "delay" || field.key === "duration" ? 0.1 : 1)
+  );
 }
 
 function splitParameterUnit(value: string, fallbackUnit = "") {

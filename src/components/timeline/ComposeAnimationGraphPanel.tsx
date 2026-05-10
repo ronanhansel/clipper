@@ -6714,6 +6714,9 @@ function getParameterEditorSchema(
           label: field.label,
           value: values[field.key] ?? field.defaultValue,
           unit: getGraphParameterUnit(field.key),
+          min: field.min,
+          max: field.max,
+          step: field.step,
           options: graphParameterOptions[field.key],
         })),
       })),
@@ -6795,6 +6798,9 @@ function getParameterEditorSchema(
               value: Object.fromEntries(details).size ?? "32px",
               type: "number",
               unit: "px",
+              min: 1,
+              max: 512,
+              step: 1,
             },
           ],
         },
@@ -6821,12 +6827,18 @@ function getParameterEditorSchema(
               value: Object.fromEntries(details).size ?? "1920px",
               type: "number",
               unit: "px",
+              min: 16,
+              max: 4096,
+              step: 1,
             },
             {
               key: "seed",
               label: "seed",
               value: Object.fromEntries(details).seed ?? "11",
               type: "number",
+              min: 1,
+              max: 999,
+              step: 1,
             },
           ],
         },
@@ -6839,12 +6851,18 @@ function getParameterEditorSchema(
               label: "grain",
               value: Object.fromEntries(details).grainAmount ?? "0.04",
               type: "number",
+              min: 0,
+              max: 1,
+              step: 0.01,
             },
             {
               key: "grainScale",
               label: "grain scale",
               value: Object.fromEntries(details).grainScale ?? "4.5",
               type: "number",
+              min: 0.1,
+              max: 24,
+              step: 0.1,
             },
           ],
         },
@@ -6857,18 +6875,27 @@ function getParameterEditorSchema(
               label: "crumple",
               value: Object.fromEntries(details).crumpleAmount ?? "0.4",
               type: "number",
+              min: 0,
+              max: 2,
+              step: 0.01,
             },
             {
               key: "crumpleScale",
               label: "crease size",
               value: Object.fromEntries(details).crumpleScale ?? "0.01",
               type: "number",
+              min: 0.001,
+              max: 0.1,
+              step: 0.001,
             },
             {
               key: "crumpleShape",
               label: "shape",
               value: Object.fromEntries(details).crumpleShape ?? "5",
               type: "number",
+              min: 1,
+              max: 8,
+              step: 1,
             },
           ],
         },
@@ -6893,13 +6920,19 @@ function getParameterEditorSchema(
               key: "amount",
               label: "amount",
               value: Object.fromEntries(details).amount ?? "1",
-              type: "text",
+              type: "number",
+              min: -1000,
+              max: 1000,
+              step: 0.1,
             },
             {
               key: "speed",
               label: "speed",
               value: Object.fromEntries(details).speed ?? "1",
-              type: "text",
+              type: "number",
+              min: -20,
+              max: 20,
+              step: 0.1,
             },
           ],
         },
@@ -6917,6 +6950,7 @@ function getParameterEditorSchema(
           label: key,
           value,
           unit: getGraphParameterUnit(key),
+          ...getFallbackGraphNumberFieldBounds(key),
           options: graphParameterOptions[key],
         })),
       },
@@ -6981,6 +7015,7 @@ function getComposition3dParameterEditorSchema(
           label: labelByKey[key] ?? titleCase(key),
           value,
           type: textFields.has(key) ? "text" : "number",
+          ...getFallbackGraphNumberFieldBounds(key),
         })),
       },
     ],
@@ -6997,6 +7032,18 @@ function getGraphParameterUnit(key: string) {
   return key === "delay" || key === "duration" || key === "stagger"
     ? "s"
     : undefined;
+}
+
+function getFallbackGraphNumberFieldBounds(key: string) {
+  if (key === "delay") return { min: 0, max: 120, step: 0.1 };
+  if (key === "duration") return { min: 0.01, max: 120, step: 0.1 };
+  if (key === "stagger") return { min: 0, max: 60, step: 0.05 };
+  if (key === "repeat") return { min: 0, max: 999, step: 1 };
+  if (key === "edge0" || key === "edge1" || key === "factor")
+    return { min: 0, max: 1, step: 0.01 };
+  if (key === "amount") return { min: -1000, max: 1000, step: 0.1 };
+  if (key === "speed") return { min: -20, max: 20, step: 0.1 };
+  return undefined;
 }
 
 function getGraphNodeColors(kind: GraphNode["kind"]) {

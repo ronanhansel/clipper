@@ -267,12 +267,12 @@ const blankRenderedMediaComposition: CompositionClip = {
   frame: {
     width: FRAME_WIDTH,
     height: FRAME_HEIGHT,
-    style: { background: "#050505" },
+    style: {},
   },
   background: {
     id: "background",
     name: "Background",
-    style: { background: "#050505" },
+    style: {},
     elements: [],
   },
   objects: [],

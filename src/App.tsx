@@ -184,6 +184,7 @@ import {
 } from "./core/timeline";
 import type { TimelineLayerCategory } from "./core/timelineLayers";
 import { compositionFromSource } from "./core/compositionSource";
+import { applyCompositionGraphTransaction } from "./core/compositionGraphTransactions";
 import {
   FRAME_HEIGHT,
   FRAME_WIDTH,
@@ -2117,17 +2118,15 @@ function AppContent({
             : "composition2d");
       const targetCompositionId = targetClip.compositionId;
       const targetFilePath = part.filePath;
-      const currentComposition = [
+      const fallbackComposition = [
         ...(current.compositionLibrary ?? []),
         ...(current.compositions ?? []),
-      ].find((composition) => composition.id === targetCompositionId);
-      const fallbackComposition =
-        currentComposition ??
-        [
-          ...(current.compositionLibrary ?? []),
-          ...(current.compositions ?? []),
-          ...current.scenes.flatMap((sceneItem) => sceneItem.compositions),
-        ].find((composition) => composition.filePath === targetFilePath);
+        ...current.scenes.flatMap((sceneItem) => sceneItem.compositions),
+      ].find(
+        (composition) =>
+          composition.id === targetCompositionId ||
+          composition.filePath === targetFilePath,
+      );
       const getCompositionGraph = (
         composition: CompositionClip | undefined,
       ) => {
@@ -2139,56 +2138,13 @@ function AppContent({
         return composition?.animationGraph ?? part.animationGraph;
       };
       const nextGraph = updater(getCompositionGraph(fallbackComposition));
-      const updateComposition = (composition: CompositionClip) => {
-        if (
-          composition.id !== targetCompositionId &&
-          composition.id !== clipId &&
-          composition.filePath !== targetFilePath
-        )
-          return composition;
-        if (graphMode === "composition3d")
-          return {
-            ...composition,
-            renderMode: webglRenderMode,
-            composition3dGraph:
-              nextGraph as import("./core/types").Composition3dGraphState,
-          };
-        if (graphMode === "background")
-          return { ...composition, bgGraph: nextGraph };
-        return { ...composition, animationGraph: nextGraph };
-      };
-      const webglRenderMode = "webgl" as const;
-      return {
-        ...current,
-        compositionLibrary: current.compositionLibrary
-          ? current.compositionLibrary.map(updateComposition)
-          : current.compositionLibrary,
-        compositions: current.compositions
-          ? current.compositions.map(updateComposition)
-          : current.compositions,
-        scenes: current.scenes.map((sceneItem) =>
-          sceneItem.id === scene.id
-            ? {
-                ...sceneItem,
-                compositions: sceneItem.compositions.map(updateComposition),
-              }
-            : sceneItem,
-        ),
-        timelines: (current.timelines ?? []).map((timeline) =>
-          timeline.id === scene.id
-            ? {
-                ...timeline,
-                clips: timeline.clips.map((clip) =>
-                  clip.id === clipId
-                    ? graphMode === "composition3d"
-                      ? { ...clip, renderMode: webglRenderMode }
-                      : clip
-                    : clip,
-                ),
-              }
-            : timeline,
-        ),
-      };
+      return applyCompositionGraphTransaction(current, {
+        clipId,
+        compositionId: targetCompositionId,
+        filePath: targetFilePath,
+        graph: nextGraph,
+        mode: graphMode,
+      });
     };
     if (options?.implicit)
       implicitFileOperation(updateProject)(applyUpdate, {

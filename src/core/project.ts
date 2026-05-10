@@ -897,7 +897,7 @@ function stripGeneratedGraphAnimations<T extends FrameObject>(
 const missingCompositionFrame: PartFrame = {
   width: 1920,
   height: 1080,
-  style: { background: "#050505" },
+  style: {},
 };
 
 function createMissingCompositionPlaceholder(
@@ -913,7 +913,7 @@ function createMissingCompositionPlaceholder(
     background: {
       id: "missing-background",
       name: "Missing media",
-      style: { background: "#050505" },
+      style: {},
       elements: [],
     },
     objects: [],
@@ -1573,8 +1573,16 @@ function getGraphEffectKeyframes(
   const definition = getAnimationDefinition(property);
   if (definition)
     return definition.materializeKeyframes({
-      readNumber: (key, fallback) =>
-        parseGraphNumber(parameters[key] ?? details[key], fallback),
+      readNumber: (key, fallback) => {
+        const field = definition.fieldGroups
+          .flatMap((group) => group.fields)
+          .find((item) => item.key === key);
+        const value = parseGraphNumber(
+          parameters[key] ?? details[key],
+          fallback,
+        );
+        return clampGraphControllerNumber(value, field?.min, field?.max);
+      },
     });
   if (property) {
     const key = property === "background" ? "backgroundColor" : property;
@@ -1586,6 +1594,14 @@ function getGraphEffectKeyframes(
     } as LayerAnimation["keyframes"];
   }
   return null;
+}
+
+function clampGraphControllerNumber(
+  value: number,
+  min: number | undefined,
+  max: number | undefined,
+) {
+  return Math.min(Math.max(value, min ?? -Infinity), max ?? Infinity);
 }
 
 function parseGraphKeyframeValue(value: string | undefined, fallback: number) {

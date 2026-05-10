@@ -3,6 +3,7 @@ import {
   compositionFromSource,
   compositionToSource,
 } from "./compositionSource";
+import { applyCompositionGraphTransaction } from "./compositionGraphTransactions";
 import {
   applyAnimationGraphToComposition,
   createDefaultTimelineLayerState,
@@ -2660,6 +2661,114 @@ export const composition = new Composition({
       getSceneFromProject(project, "tl_main")?.compositions[0].background
         .elements[0].animations ?? [],
     ).toEqual([]);
+  });
+
+  it("keeps composition-owned graph state over stale source graph", () => {
+    const staleGraph = {
+      nodes: { effect: { x: 1, y: 1 } },
+      edges: [],
+      customNodes: {
+        effect: {
+          kind: "animation" as const,
+          label: "Opacity",
+          scopeKey: "text",
+          details: { property: "opacity" },
+        },
+      },
+    };
+    const latestGraph = {
+      nodes: { effect: { x: 9, y: 12 } },
+      edges: [],
+      customNodes: staleGraph.customNodes,
+    };
+    const source = compositionToSource({
+      ...composition,
+      animationGraph: staleGraph,
+    });
+    const project = normalizeProject({
+      ...projectWithComposition(),
+      compositionLibrary: [{ ...composition, animationGraph: latestGraph }],
+      compositions: [{ ...composition, animationGraph: latestGraph, source }],
+      compositionSources: { [composition.filePath]: source },
+      timelines: [
+        {
+          id: "tl_main",
+          filePath: "timelines/tl_main.timeline.json",
+          clips: [
+            {
+              id: "clip",
+              compositionId: composition.id,
+              duration: composition.duration,
+            },
+          ],
+          adjustmentLayers: [],
+          settings: {},
+        },
+      ],
+    });
+
+    const scenePart = getSceneFromProject(project, "tl_main")?.compositions[0];
+    expect(scenePart?.animationGraph?.nodes.effect).toEqual({ x: 9, y: 12 });
+  });
+
+  it("applies composition graph transactions to every canonical copy", () => {
+    const nextGraph = {
+      nodes: { paper: { x: 7, y: 8 } },
+      edges: [],
+      customNodes: {
+        paper: {
+          kind: "bgPaper" as const,
+          label: "Paper",
+          scopeKey: "background",
+        },
+      },
+    };
+    const project = normalizeProject({
+      ...projectWithComposition(),
+      compositionLibrary: [composition],
+      compositions: [{ ...composition, source: compositionToSource(composition) }],
+      compositionSources: {
+        [composition.filePath]: compositionToSource(composition),
+      },
+      timelines: [
+        {
+          id: "tl_main",
+          filePath: "timelines/tl_main.timeline.json",
+          clips: [
+            {
+              id: "clip",
+              compositionId: composition.id,
+              duration: composition.duration,
+            },
+          ],
+          adjustmentLayers: [],
+          settings: {},
+        },
+      ],
+    });
+
+    const updated = normalizeProject(
+      applyCompositionGraphTransaction(project, {
+        clipId: "clip",
+        compositionId: composition.id,
+        filePath: composition.filePath,
+        graph: nextGraph,
+        mode: "background",
+      }),
+    );
+
+    expect(updated.compositionLibrary?.[0].bgGraph?.nodes.paper).toEqual({
+      x: 7,
+      y: 8,
+    });
+    expect(updated.compositions?.[0].bgGraph?.nodes.paper).toEqual({
+      x: 7,
+      y: 8,
+    });
+    expect(
+      getSceneFromProject(updated, "tl_main")?.compositions[0].bgGraph?.nodes
+        .paper,
+    ).toEqual({ x: 7, y: 8 });
   });
 
   it("omits graph-generated animations from editable composition source", () => {

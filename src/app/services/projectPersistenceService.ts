@@ -426,12 +426,12 @@ function createMissingCompositionPlaceholder(
     frame: {
       width: FRAME_WIDTH,
       height: FRAME_HEIGHT,
-      style: { background: "#050505" },
+      style: {},
     },
     background: {
       id: "missing-background",
       name: "Missing media",
-      style: { background: "#050505" },
+      style: {},
       elements: [],
     },
     objects: [],
@@ -513,12 +513,12 @@ function createBaseComposition(id: string, filePath: string): CompositionClip {
     frame: {
       width: FRAME_WIDTH,
       height: FRAME_HEIGHT,
-      style: { background: "#050505" },
+      style: {},
     },
     background: {
       id: "background",
       name: "Background",
-      style: { background: "#050505" },
+      style: {},
       elements: [],
     },
     objects: [],

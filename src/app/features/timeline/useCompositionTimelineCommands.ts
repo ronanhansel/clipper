@@ -398,11 +398,11 @@ function createDroppedCompositionPlaceholder(filePath: string): Part {
     compositionId: filePath,
     filePath,
     duration: 5,
-    frame: { width: 1920, height: 1080, style: { background: "#050505" } },
+    frame: { width: 1920, height: 1080, style: {} },
     background: {
       id: "background",
       name: "Background",
-      style: { background: "#050505" },
+      style: {},
       elements: [],
     },
     objects: [],

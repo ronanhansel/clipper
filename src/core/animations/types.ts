@@ -4,6 +4,9 @@ export type AnimationControllerField = {
   key: string;
   label: string;
   defaultValue: string;
+  min?: number;
+  max?: number;
+  step?: number;
 };
 
 export type AnimationControllerFieldGroup = {

@@ -71,11 +71,11 @@ export function createCompositionInLibrary(
     id: createStableCompositionId(),
     filePath,
     duration: 3,
-    frame: { width: 1920, height: 1080, style: { background: "#050505" } },
+    frame: { width: 1920, height: 1080, style: {} },
     background: {
       id: "background",
       name: "Background",
-      style: { background: "transparent" },
+      style: {},
       elements: [],
     },
     objects: [],

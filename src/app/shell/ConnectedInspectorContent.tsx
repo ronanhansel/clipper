@@ -203,10 +203,7 @@ export function ConnectedInspectorContent({
   onDeleteTransitionLayer,
   onStartAdjustmentPointPick,
   onUpdateSelectedPartDuration,
-  onUpdatePartFrame,
   onUpdatePartBackground,
-  onPreviewPartFrame,
-  onPreviewPartBackground,
   onUpdatePartRenderMode,
   onUpdateGraphNodeParameter,
 }: ConnectedInspectorContentProps) {
@@ -382,10 +379,7 @@ export function ConnectedInspectorContent({
         part={selectedPart}
         canSnapMiddle={canSnapCompositionMiddle}
         onDurationChange={onUpdateSelectedPartDuration}
-        onFrameChange={onUpdatePartFrame}
         onBackgroundChange={onUpdatePartBackground}
-        onPreviewFrame={onPreviewPartFrame}
-        onPreviewBackground={onPreviewPartBackground}
         onRenderModeChange={onUpdatePartRenderMode}
         onSnapMiddle={onSnapCompositionMiddle}
       />

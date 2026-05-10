@@ -386,22 +386,14 @@ export function FrameInspector({
   part,
   canSnapMiddle,
   onDurationChange,
-  onFrameChange,
   onBackgroundChange,
-  onPreviewFrame,
-  onPreviewBackground,
   onRenderModeChange,
   onSnapMiddle,
 }: {
   part: Part;
   canSnapMiddle: boolean;
   onDurationChange: (duration: number) => void;
-  onFrameChange: (updater: (frame: PartFrame) => PartFrame) => void;
   onBackgroundChange: (
-    updater: (background: BackgroundLayer) => BackgroundLayer,
-  ) => void;
-  onPreviewFrame?: (updater: (frame: PartFrame) => PartFrame) => void;
-  onPreviewBackground?: (
     updater: (background: BackgroundLayer) => BackgroundLayer,
   ) => void;
   onRenderModeChange: (renderMode: CompositionRenderMode) => void;
@@ -415,11 +407,6 @@ export function FrameInspector({
     ),
   );
   const minimumDuration = roundTenth(Math.max(0.1, markerEnd));
-  const backgroundStyleValue = String(part.background.style.background ?? "");
-  const backgroundColorValue = isHexColor(backgroundStyleValue)
-    ? backgroundStyleValue
-    : "#000000";
-
   function updateDuration(value: string) {
     const numeric = Number(value);
     if (!Number.isFinite(numeric)) return;
@@ -428,36 +415,11 @@ export function FrameInspector({
     );
   }
 
-  function updateFrameBackground(value: string) {
-    onFrameChange((frame) => ({
-      ...frame,
-      style: { ...frame.style, background: value },
-    }));
-  }
-
-  function updateBackgroundColor(value: string) {
-    onBackgroundChange((background) => ({
-      ...background,
-      style: { ...background.style, background: value },
-    }));
-  }
-
   function updateBackgroundStretch(checked: boolean) {
     onBackgroundChange((background) => ({
       ...background,
       stretchToElements: checked || undefined,
     }));
-  }
-
-  function updateBackgroundStyle(value: string) {
-    try {
-      const style = value.trim()
-        ? (JSON.parse(value) as BackgroundLayer["style"])
-        : {};
-      onBackgroundChange((background) => ({ ...background, style }));
-    } catch {
-      // Keep the textarea editable while the user is midway through JSON syntax.
-    }
   }
 
   return (
@@ -492,37 +454,6 @@ export function FrameInspector({
           </SelectContent>
         </Select>
       </label>
-      <div className={`grid gap-1.5 ${mutedCaps}`}>
-        <span>Frame color</span>
-        <ColorSelector
-          value={String(part.frame.style.background ?? "#000000")}
-          onChange={updateFrameBackground}
-          onPreview={(value) =>
-            onPreviewFrame?.((frame) => ({
-              ...frame,
-              style: { ...frame.style, background: value },
-            }))
-          }
-        />
-      </div>
-      <div className={`grid gap-1.5 ${mutedCaps}`}>
-        <span>Background color</span>
-        <ColorSelector
-          value={backgroundColorValue}
-          onChange={updateBackgroundColor}
-          onPreview={(value) =>
-            onPreviewBackground?.((background) => ({
-              ...background,
-              style: { ...background.style, background: value },
-            }))
-          }
-        />
-        {!isHexColor(backgroundStyleValue) && backgroundStyleValue ? (
-          <small className="text-[11px] font-semibold normal-case tracking-normal text-[#8f96a3]">
-            Current background is a custom style; picking a color replaces it.
-          </small>
-        ) : null}
-      </div>
       <label className="flex cursor-pointer items-center gap-3 rounded-[10px] border border-[#2d313b] bg-[#171920] p-3 text-sm font-bold text-[#dfe2ea] transition hover:border-[var(--clipper-accent)] hover:bg-[#20232c]">
         <Checkbox
           checked={Boolean(part.background.stretchToElements)}
@@ -531,14 +462,6 @@ export function FrameInspector({
           }
         />
         <span>Stretch background</span>
-      </label>
-      <label className={`grid gap-1.5 ${mutedCaps}`}>
-        Background style JSON
-        <Textarea
-          className="min-h-[120px] resize-y font-mono"
-          value={JSON.stringify(part.background.style, null, 2)}
-          onChange={(event) => updateBackgroundStyle(event.target.value)}
-        />
       </label>
       {canSnapMiddle ? (
         <div className="grid gap-2">
@@ -555,15 +478,6 @@ export function FrameInspector({
           </div>
         </div>
       ) : null}
-      <div className={panelCard}>
-        <span>Constant Elements</span>
-        <strong className="text-[13px]">
-          {part.background.elements.length}
-        </strong>
-        <small className="text-[#9b9da7]">
-          Edit these in the composition code as background.elements.
-        </small>
-      </div>
     </div>
   );
 }
