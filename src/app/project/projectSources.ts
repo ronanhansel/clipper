@@ -1,5 +1,5 @@
 import { compositionToSource } from "../../core/compositionSource";
-import type { ProjectManifest } from "../../core/types";
+import type { CompositionClip, ProjectManifest } from "../../core/types";
 
 export function getProjectCompositionSources(project: ProjectManifest) {
   const compositions = Array.from(
@@ -46,10 +46,7 @@ export function getSyncedCompositionSources(
   for (const nextPart of nextParts) {
     if (nextPart.sourceMissing) continue;
     const previousPart = previousPartsByPath.get(nextPart.filePath);
-    if (
-      previousPart &&
-      JSON.stringify(previousPart) === JSON.stringify(nextPart)
-    )
+    if (previousPart && compositionSourceFieldsEqual(previousPart, nextPart))
       continue;
     if (nextPart.threeBackgrounds && nextSources[nextPart.filePath]) continue;
     nextSources[nextPart.filePath] = compositionToSource(nextPart);
@@ -68,4 +65,24 @@ export function getSyncedCompositionSources(
   }
 
   return changed ? nextSources : currentSources;
+}
+
+function compositionSourceFieldsEqual(
+  previousPart: CompositionClip,
+  nextPart: CompositionClip,
+) {
+  return (
+    JSON.stringify(withoutGraphState(previousPart)) ===
+    JSON.stringify(withoutGraphState(nextPart))
+  );
+}
+
+function withoutGraphState<T extends Record<string, unknown>>(composition: T) {
+  const {
+    animationGraph: _animationGraph,
+    bgGraph: _bgGraph,
+    composition3dGraph: _composition3dGraph,
+    ...rest
+  } = composition;
+  return rest;
 }

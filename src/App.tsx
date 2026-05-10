@@ -2149,12 +2149,12 @@ function AppContent({
     if (options?.implicit)
       implicitFileOperation(updateProject)(applyUpdate, {
         history: options.history !== false,
-        syncSources: true,
+        syncSources: false,
       });
     else
       updateProject(applyUpdate, {
         history: options?.history !== false,
-        syncSources: true,
+        syncSources: false,
       });
   }
 

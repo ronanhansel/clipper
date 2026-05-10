@@ -44,6 +44,10 @@ import {
   classifyProjectFileChange,
 } from "./projectFileChangeClassifier";
 import type { Command } from "../features/file-manager/operations/Command";
+import {
+  carryCompositionGraphTransactionRevisions,
+  preserveNewerCompositionGraphTransactions,
+} from "../../core/compositionGraphTransactions";
 
 type ProjectHistoryEntry = {
   project: ProjectManifest;
@@ -238,6 +242,7 @@ export function useProjectDocumentController({
           ...nextProject,
           compositionSources: nextCompositionSources,
         });
+        carryCompositionGraphTransactionRevisions(nextProject, normalizedProject);
       } else {
         nextCompositionSources =
           nextProject.compositionSources ?? compositionSourcesRef.current;
@@ -245,15 +250,26 @@ export function useProjectDocumentController({
           ...nextProject,
           compositionSources: nextCompositionSources,
         });
+        carryCompositionGraphTransactionRevisions(nextProject, normalizedProject);
       }
+      normalizedProject = preserveNewerCompositionGraphTransactions(
+        currentProject,
+        normalizedProject,
+      );
       if (options.preserveEditorState) {
+        const preEditorStateProject = normalizedProject;
         normalizedProject = normalizeProject({
           ...normalizedProject,
           editorState: projectRef.current.editorState ?? defaultEditorState,
         });
+        carryCompositionGraphTransactionRevisions(
+          preEditorStateProject,
+          normalizedProject,
+        );
       } else if (options.preservePageMode !== false) {
         const currentEditorState =
           projectRef.current.editorState ?? defaultEditorState;
+        const prePageModeProject = normalizedProject;
         normalizedProject = normalizeProject({
           ...normalizedProject,
           editorState: {
@@ -263,6 +279,10 @@ export function useProjectDocumentController({
             timelineMode: timelineModeRef.current,
           },
         });
+        carryCompositionGraphTransactionRevisions(
+          prePageModeProject,
+          normalizedProject,
+        );
       }
       const sortedSources = (sources: Record<string, string> | undefined) =>
         sources
@@ -975,7 +995,10 @@ export function useProjectDocumentController({
       }
 
       // Detect file operations before applying undo
-      const restoredProject = preserveCurrentPageMode(previousEntry.project);
+      const restoredProject = preserveNewerCompositionGraphTransactions(
+        projectRef.current,
+        preserveCurrentPageMode(previousEntry.project),
+      );
 
       projectHistoryRef.current = {
         past: projectHistoryRef.current.past.slice(0, -1),
@@ -1024,7 +1047,10 @@ export function useProjectDocumentController({
       }
 
       // Detect file operations before applying redo
-      const restoredProject = preserveCurrentPageMode(nextEntry.project);
+      const restoredProject = preserveNewerCompositionGraphTransactions(
+        projectRef.current,
+        preserveCurrentPageMode(nextEntry.project),
+      );
 
       projectHistoryRef.current = {
         past: [

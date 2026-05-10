@@ -3,7 +3,11 @@ import {
   compositionFromSource,
   compositionToSource,
 } from "./compositionSource";
-import { applyCompositionGraphTransaction } from "./compositionGraphTransactions";
+import {
+  applyCompositionGraphTransaction,
+  carryCompositionGraphTransactionRevisions,
+  preserveNewerCompositionGraphTransactions,
+} from "./compositionGraphTransactions";
 import {
   applyAnimationGraphToComposition,
   createDefaultTimelineLayerState,
@@ -2769,6 +2773,292 @@ export const composition = new Composition({
       getSceneFromProject(updated, "tl_main")?.compositions[0].bgGraph?.nodes
         .paper,
     ).toEqual({ x: 7, y: 8 });
+  });
+
+  it("preserves newer graph transaction over stale source project graph", () => {
+    const staleGraph = {
+      nodes: { effect: { x: 1, y: 2 } },
+      edges: [],
+      customNodes: {},
+    };
+    const latestGraph = {
+      nodes: { effect: { x: 90, y: 120 }, output: { x: 180, y: 120 } },
+      edges: [
+        {
+          id: "edge",
+          fromNodeId: "effect",
+          fromPort: "right" as const,
+          toNodeId: "output",
+          toPort: "left" as const,
+        },
+      ],
+      customNodes: {},
+    };
+    const baseProject = normalizeProject({
+      ...projectWithComposition(),
+      compositionLibrary: [{ ...composition, animationGraph: staleGraph }],
+      compositions: [{ ...composition, animationGraph: staleGraph }],
+    });
+    const transactionProject = applyCompositionGraphTransaction(baseProject, {
+        clipId: composition.id,
+        compositionId: composition.id,
+        filePath: composition.filePath,
+        graph: latestGraph,
+        mode: "composition2d",
+      });
+    const currentProject = normalizeProject(transactionProject);
+    carryCompositionGraphTransactionRevisions(transactionProject, currentProject);
+    const staleSourceProject = normalizeProject({
+      ...currentProject,
+      compositionLibrary: [{ ...composition, animationGraph: staleGraph }],
+      compositions: [{ ...composition, animationGraph: staleGraph }],
+    });
+
+    const preserved = preserveNewerCompositionGraphTransactions(
+      currentProject,
+      staleSourceProject,
+    );
+
+    expect(preserved.compositions?.[0].animationGraph?.nodes.effect).toEqual({
+      x: 90,
+      y: 120,
+    });
+    expect(preserved.compositions?.[0].animationGraph?.edges).toEqual([
+      {
+        id: "edge",
+        fromNodeId: "effect",
+        fromPort: "right",
+        toNodeId: "output",
+        toPort: "left",
+      },
+    ]);
+    expect(
+      preserved.compositionLibrary?.[0].animationGraph?.nodes.effect,
+    ).toEqual({ x: 90, y: 120 });
+  });
+
+  it("preserves transaction revision after a second normalize clone", () => {
+    const staleGraph = {
+      nodes: { effect: { x: 1, y: 2 } },
+      edges: [],
+      customNodes: {},
+    };
+    const latestGraph = {
+      nodes: { effect: { x: 140, y: 160 } },
+      edges: [],
+      customNodes: {},
+    };
+    const baseProject = normalizeProject({
+      ...projectWithComposition(),
+      compositionLibrary: [{ ...composition, animationGraph: staleGraph }],
+      compositions: [{ ...composition, animationGraph: staleGraph }],
+    });
+    const transactionProject = applyCompositionGraphTransaction(baseProject, {
+      clipId: composition.id,
+      compositionId: composition.id,
+      filePath: composition.filePath,
+      graph: latestGraph,
+      mode: "composition2d",
+    });
+    const firstNormalized = normalizeProject(transactionProject);
+    carryCompositionGraphTransactionRevisions(transactionProject, firstNormalized);
+    const secondNormalized = normalizeProject({
+      ...firstNormalized,
+      editorState: firstNormalized.editorState,
+    });
+    carryCompositionGraphTransactionRevisions(firstNormalized, secondNormalized);
+    const staleProject = normalizeProject({
+      ...secondNormalized,
+      compositionLibrary: [{ ...composition, animationGraph: staleGraph }],
+      compositions: [{ ...composition, animationGraph: staleGraph }],
+    });
+
+    const preserved = preserveNewerCompositionGraphTransactions(
+      secondNormalized,
+      staleProject,
+    );
+
+    expect(preserved.compositions?.[0].animationGraph?.nodes.effect).toEqual({
+      x: 140,
+      y: 160,
+    });
+  });
+
+  it("preserves newer background graph transaction over stale project graph", () => {
+    const staleGraph = {
+      nodes: { paper: { x: 1, y: 2 } },
+      edges: [],
+      customNodes: {},
+    };
+    const latestGraph = {
+      nodes: { paper: { x: 33, y: 44 } },
+      edges: [],
+      customNodes: {},
+    };
+    const baseProject = normalizeProject({
+      ...projectWithComposition(),
+      compositionLibrary: [{ ...composition, bgGraph: staleGraph }],
+      compositions: [{ ...composition, bgGraph: staleGraph }],
+    });
+    const transactionProject = applyCompositionGraphTransaction(baseProject, {
+        clipId: composition.id,
+        compositionId: composition.id,
+        filePath: composition.filePath,
+        graph: latestGraph,
+        mode: "background",
+      });
+    const currentProject = normalizeProject(transactionProject);
+    carryCompositionGraphTransactionRevisions(transactionProject, currentProject);
+    const staleProject = normalizeProject({
+      ...currentProject,
+      compositionLibrary: [{ ...composition, bgGraph: staleGraph }],
+      compositions: [{ ...composition, bgGraph: staleGraph }],
+    });
+
+    const preserved = preserveNewerCompositionGraphTransactions(
+      currentProject,
+      staleProject,
+    );
+
+    expect(preserved.compositions?.[0].bgGraph?.nodes.paper).toEqual({
+      x: 33,
+      y: 44,
+    });
+    expect(preserved.compositionLibrary?.[0].bgGraph?.nodes.paper).toEqual({
+      x: 33,
+      y: 44,
+    });
+  });
+
+  it("preserves newer 3D graph transaction and webgl render mode", () => {
+    const staleGraph = { nodes: { scene: { x: 1, y: 2 } }, edges: [], customNodes: {} };
+    const latestGraph = {
+      nodes: { scene: { x: 70, y: 80 } },
+      edges: [],
+      customNodes: {},
+    };
+    const baseProject = normalizeProject({
+      ...projectWithComposition(),
+      compositionLibrary: [
+        { ...composition, renderMode: "dom", composition3dGraph: staleGraph },
+      ],
+      compositions: [
+        { ...composition, renderMode: "dom", composition3dGraph: staleGraph },
+      ],
+    });
+    const transactionProject = applyCompositionGraphTransaction(baseProject, {
+        clipId: composition.id,
+        compositionId: composition.id,
+        filePath: composition.filePath,
+        graph: latestGraph,
+        mode: "composition3d",
+      });
+    const currentProject = normalizeProject(transactionProject);
+    carryCompositionGraphTransactionRevisions(transactionProject, currentProject);
+    const staleProject = normalizeProject({
+      ...currentProject,
+      compositionLibrary: [
+        { ...composition, renderMode: "dom", composition3dGraph: staleGraph },
+      ],
+      compositions: [
+        { ...composition, renderMode: "dom", composition3dGraph: staleGraph },
+      ],
+      timelines: currentProject.timelines?.map((timeline) => ({
+        ...timeline,
+        clips: timeline.clips.map((clip) => ({ ...clip, renderMode: "dom" as const })),
+      })),
+    });
+
+    const preserved = preserveNewerCompositionGraphTransactions(
+      currentProject,
+      staleProject,
+    );
+
+    expect(preserved.compositions?.[0].composition3dGraph?.nodes.scene).toEqual({
+      x: 70,
+      y: 80,
+    });
+    expect(preserved.compositions?.[0].renderMode).toBe("webgl");
+    expect(preserved.timelines?.[0].clips[0].renderMode).toBe("webgl");
+  });
+
+  it("does not match composition graph transactions by colliding clip id", () => {
+    const nextGraph = { nodes: { effect: { x: 5, y: 6 } }, edges: [], customNodes: {} };
+    const project = normalizeProject({
+      ...projectWithComposition(),
+      compositionLibrary: [composition],
+      compositions: [{ ...composition, id: "clip_collision" }],
+    });
+
+    const updated = applyCompositionGraphTransaction(project, {
+      clipId: "clip_collision",
+      compositionId: "missing_composition",
+      filePath: "missing/file.ts",
+      graph: nextGraph,
+      mode: "composition2d",
+    });
+
+    expect(updated.compositions?.[0].animationGraph).toBeUndefined();
+  });
+
+  it("keeps move/connect graph state in canonical project graph", () => {
+    const movedConnectedGraph = {
+      nodes: {
+        paper: { x: 44, y: 55 },
+        output: { x: 200, y: 80 },
+      },
+      edges: [
+        {
+          id: "paper-output",
+          fromNodeId: "paper",
+          fromPort: "right" as const,
+          toNodeId: "output",
+          toPort: "left" as const,
+        },
+      ],
+      customNodes: {
+        paper: {
+          kind: "bgPaper" as const,
+          label: "Paper",
+          scopeKey: "background",
+        },
+      },
+    };
+    const project = normalizeProject({
+      ...projectWithComposition(),
+      compositionLibrary: [composition],
+      compositions: [{ ...composition, source: compositionToSource(composition) }],
+      compositionSources: {
+        [composition.filePath]: compositionToSource(composition),
+      },
+    });
+
+    const updated = normalizeProject(
+      applyCompositionGraphTransaction(project, {
+        clipId: composition.id,
+        compositionId: composition.id,
+        filePath: composition.filePath,
+        graph: movedConnectedGraph,
+        mode: "background",
+      }),
+    );
+
+    expect(updated.compositions?.[0].bgGraph?.nodes.paper).toEqual({
+      x: 44,
+      y: 55,
+    });
+    expect(updated.compositions?.[0].bgGraph?.edges).toEqual([
+      {
+        id: "paper-output",
+        fromNodeId: "paper",
+        fromPort: "right",
+        toNodeId: "output",
+        toPort: "left",
+      },
+    ]);
+    expect(
+      getSceneFromProject(updated, "tl_main")?.compositions[0].bgGraph,
+    ).toEqual(updated.compositions?.[0].bgGraph);
   });
 
   it("omits graph-generated animations from editable composition source", () => {

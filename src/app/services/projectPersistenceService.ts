@@ -264,6 +264,13 @@ async function loadDirectoryCompositions(
           ...document,
           id: baseComposition.id,
           filePath,
+          animationGraph:
+            manifestComposition?.animationGraph ?? document.animationGraph,
+          bgGraph: manifestComposition?.bgGraph ?? document.bgGraph,
+          composition3dGraph:
+            manifestComposition?.composition3dGraph ??
+            document.composition3dGraph,
+          renderMode: manifestComposition?.renderMode ?? document.renderMode,
           sourceHash: hashCompositionSource(source),
           loadedSource: source,
         } as LoadedDirectoryComposition;
