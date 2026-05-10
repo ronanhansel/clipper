@@ -156,6 +156,66 @@ describe("project persistence service", () => {
     ).toContain("export const composition");
   });
 
+  it("ignores trashed composition files when loading directory projects", async () => {
+    hostMocks.readTextFile.mockImplementation(async (path) => {
+      if (path === "clipper/projects/hi/project.json") {
+        return JSON.stringify({
+          id: "project",
+          name: "Project",
+          resolution: { width: 1920, height: 1080 },
+          assetsPath: "assets",
+          timelineOrder: [],
+          scenes: [],
+          compositionLibrary: [
+            {
+              id: "composition-deleted",
+              filePath: "compositions/deleted.composition.ts",
+              sourceMissing: true,
+              duration: 5,
+              frame: { width: 1920, height: 1080, style: {} },
+              background: {
+                id: "background",
+                name: "Background",
+                style: {},
+                elements: [],
+              },
+              objects: [],
+              snapshot: [],
+              motionMarkers: [],
+            },
+          ],
+        });
+      }
+      throw new Error(`Unexpected read ${path}`);
+    });
+    hostMocks.listDirectory.mockImplementation(async (path) => {
+      if (path === "clipper/projects/hi")
+        return [{ name: "file-manager", isDirectory: true }];
+      if (path === "clipper/projects/hi/file-manager")
+        return [{ name: ".clipper-trash", isDirectory: true }];
+      if (path === "clipper/projects/hi/file-manager/timelines") return [];
+      if (path === "clipper/projects/hi/file-manager/compositions") return [];
+      if (path.includes(".clipper-trash"))
+        return [{ name: "deleted.composition.ts", isDirectory: false }];
+      return [];
+    });
+
+    const { projectPersistenceService } =
+      await import("./projectPersistenceService");
+    const { project } = await projectPersistenceService.loadProject({
+      manifestPath: "clipper/projects/hi/project.json",
+    });
+
+    expect(project.compositionLibrary?.[0]).toMatchObject({
+      id: "composition-deleted",
+      filePath: "compositions/deleted.composition.ts",
+      sourceMissing: true,
+    });
+    expect(hostMocks.readTextFile).not.toHaveBeenCalledWith(
+      "clipper/projects/hi/file-manager/.clipper-trash/deleted.composition.ts",
+    );
+  });
+
   it("does not recreate composition folders as managed roots", async () => {
     hostMocks.listDirectory.mockImplementation(async (path) => {
       if (path === "clipper/projects/hi/file-manager") return [];

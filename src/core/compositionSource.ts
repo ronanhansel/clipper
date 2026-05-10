@@ -50,6 +50,7 @@ type SourceComposition = {
   };
   animationGraph?: JsonValue;
   bgGraph?: JsonValue;
+  threeBackgrounds?: Record<string, unknown>;
   composition3dGraph?: JsonValue;
   render: (context: compositionApi.RenderContext) => SourceRenderable[];
 };
@@ -58,7 +59,7 @@ type ResolvedSourceComposition = SourceComposition & {
   objects: SourceObject[];
 };
 
-type SourceExports = { composition?: unknown };
+type SourceExports = { composition?: unknown; [key: string]: unknown };
 
 type SourceRenderable =
   | compositionApi.RenderableObject
@@ -107,6 +108,7 @@ export async function compositionFromSource(
       | AnimationGraphState
       | undefined,
     bgGraph: sourceComposition.bgGraph as AnimationGraphState | undefined,
+    threeBackgrounds: sourceComposition.threeBackgrounds,
     composition3dGraph:
       sourceComposition.composition3dGraph as Part["composition3dGraph"],
     frame: sourceFrameToCompositionFrame(sourceComposition.frame),
@@ -335,17 +337,39 @@ async function evaluateCompositionSource(
 ): Promise<ResolvedSourceComposition> {
   const ts = await import("typescript");
   const textImports = new Map<string, string>();
+  const moduleCache = new Map<string, SourceExports>();
+  const exports = await evaluateSourceModule(
+    source,
+    sourcePath,
+    readFile,
+    ts,
+    textImports,
+    moduleCache,
+  );
+  return normalizeSourceComposition(
+    assertSourceComposition(exports.composition),
+    time,
+    duration,
+  );
+}
+
+async function evaluateSourceModule(
+  source: string,
+  sourcePath: string,
+  readFile: ((relativePath: string) => Promise<string>) | undefined,
+  ts: typeof import("typescript"),
+  textImports: Map<string, string>,
+  moduleCache: Map<string, SourceExports>,
+): Promise<SourceExports> {
+  const cached = moduleCache.get(sourcePath);
+  if (cached) return cached;
   const sourceWithTextImports = await inlineTextImports(
     source,
     sourcePath,
     readFile,
     textImports,
   );
-  const strippedSource = sourceWithTextImports.replace(
-    /^\s*import\s+[^;]+;\s*$/gm,
-    "",
-  );
-  const transpiled = ts.transpileModule(strippedSource, {
+  const transpiled = ts.transpileModule(sourceWithTextImports, {
     compilerOptions: {
       jsx: ts.JsxEmit.ReactJSX,
       module: ts.ModuleKind.CommonJS,
@@ -353,19 +377,68 @@ async function evaluateCompositionSource(
     },
   }).outputText;
   const exports = {} as SourceExports;
-  const apiEntries = Object.entries(compositionApi);
+  moduleCache.set(sourcePath, exports);
+  const module = { exports };
+  const requireModule = (specifier: string) => {
+    if (specifier === "@clipper/composition-api") return compositionApi;
+    if (!specifier.startsWith("."))
+      throw new Error(`Unsupported composition import: ${specifier}`);
+    if (!readFile)
+      throw new Error(
+        `Cannot resolve composition import without readFile: ${specifier}`,
+      );
+    const resolvedPath = resolveRelativeSourcePath(
+      sourcePath,
+      specifier,
+    ).replace(/\.(js|ts)$/, "");
+    throw new Error(
+      `Async composition import was not preloaded: ${resolvedPath}`,
+    );
+  };
 
+  const importSpecifiers = getRelativeImportSpecifiers(sourceWithTextImports);
+  const resolvedImports = new Map<string, SourceExports>();
+  for (const specifier of importSpecifiers) {
+    if (!readFile) continue;
+    const resolvedPath = resolveRelativeSourcePath(sourcePath, specifier);
+    const sourceFilePath = resolvedPath.match(/\.(js|ts)$/)
+      ? resolvedPath
+      : `${resolvedPath}.ts`;
+    const importedSource = await readFile(sourceFilePath);
+    resolvedImports.set(
+      specifier,
+      await evaluateSourceModule(
+        importedSource,
+        sourceFilePath,
+        readFile,
+        ts,
+        textImports,
+        moduleCache,
+      ),
+    );
+  }
   Function(
     "exports",
-    ...apiEntries.map(([key]) => key),
-    `${transpiled}\nreturn exports;`,
-  )(exports, ...apiEntries.map(([, value]) => value));
+    "module",
+    "require",
+    transpiled,
+  )(exports, module, (specifier: string) => {
+    if (specifier === "@clipper/composition-api") return compositionApi;
+    const imported = resolvedImports.get(specifier);
+    if (imported) return imported;
+    return requireModule(specifier);
+  });
+  return module.exports as SourceExports;
+}
 
-  return normalizeSourceComposition(
-    assertSourceComposition(exports.composition),
-    time,
-    duration,
-  );
+function getRelativeImportSpecifiers(source: string) {
+  return Array.from(
+    source.matchAll(/^\s*import\s+[^;]+\s+from\s+["'](.+)["'];?\s*$/gm),
+  )
+    .map((match) => match[1])
+    .filter((specifier): specifier is string =>
+      Boolean(specifier?.startsWith(".")),
+    );
 }
 
 async function inlineTextImports(

@@ -149,7 +149,7 @@ export function TimelinePanel(props: TimelinePanelProps) {
           onScrubEnd={props.onScrubEnd}
           onTimelineViewportStateChange={props.onTimelineViewportStateChange}
           onUpdateGraph={props.onUpdateComposeAnimationGraph}
-          onInspectComposition3dNode={props.onInspectComposition3dNode}
+          onInspectGraphNode={props.onInspectGraphNode}
         />
       </div>
       <div

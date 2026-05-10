@@ -217,6 +217,38 @@ export function updateCompositionFilePathsInProject(
 
   let changed = false;
   let nextSources = compositionSources;
+  const trashedPaths = pathMoves
+    .filter((move) => isClipperTrashPath(move.newPath))
+    .map((move) => move.oldPath);
+  if (trashedPaths.length > 0) {
+    const trashedCompositionIds = new Set(
+      library
+        .filter((composition) =>
+          trashedPaths.some((path) =>
+            isSameOrChildPath(composition.filePath, path),
+          ),
+        )
+        .map((composition) => composition.id),
+    );
+    if (trashedCompositionIds.size > 0) {
+      changed = true;
+      nextSources = Object.fromEntries(
+        Object.entries(nextSources).filter(
+          ([path]) =>
+            !trashedPaths.some((trashedPath) =>
+              isSameOrChildPath(path, trashedPath),
+            ),
+        ),
+      );
+      return {
+        compositionSources: nextSources,
+        project: markCompositionsMissingInProject(
+          { ...project, compositionSources: nextSources },
+          trashedCompositionIds,
+        ),
+      };
+    }
+  }
   const remapComposition = <T extends Part>(composition: T): T => {
     const nextFilePath = remapMovedFilePath(composition.filePath, pathMoves);
     if (nextFilePath === composition.filePath) return composition;
@@ -240,6 +272,29 @@ export function updateCompositionFilePathsInProject(
       compositionLibrary: nextLibrary,
     },
   };
+}
+
+function isClipperTrashPath(path: string) {
+  return (
+    path === ".clipper-trash" ||
+    path.startsWith(".clipper-trash/") ||
+    path.includes("/.clipper-trash/")
+  );
+}
+
+function isSameOrChildPath(path: string, parentPath: string) {
+  return path === parentPath || path.startsWith(`${parentPath}/`);
+}
+
+function markCompositionsMissingInProject(
+  project: ProjectManifest,
+  compositionIds: Set<string>,
+): ProjectManifest {
+  let nextProject = project;
+  for (const compositionId of compositionIds) {
+    nextProject = deleteCompositionFromProject(nextProject, compositionId);
+  }
+  return nextProject;
 }
 
 function remapMovedFilePath(
@@ -366,9 +421,9 @@ export function deleteCompositionFileFromProject(
     compositionSources;
   return {
     compositionSources: nextSources,
-    project: deleteCompositionFromProject(
+    project: markCompositionsMissingInProject(
       { ...project, compositionSources: nextSources },
-      compositionId,
+      new Set([compositionId]),
     ),
   };
 }

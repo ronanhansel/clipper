@@ -118,5 +118,8 @@ function getPlaybackPreviewTime(
 ) {
   if (!clock) return null;
   const sceneTime = clock.startedFrom + (now - clock.startedAt) / 1000;
-  return Math.min(Math.max(sceneTime - partStart + trimStart, 0), duration);
+  return Math.min(
+    Math.max(sceneTime - partStart + trimStart, 0),
+    duration + trimStart,
+  );
 }

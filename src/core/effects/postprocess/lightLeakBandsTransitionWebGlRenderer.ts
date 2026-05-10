@@ -53,8 +53,11 @@ float scratchField(vec2 uv, float p) {
     float width = mix(0.0025, 0.03, hash(vec2(fi + 3.1, u_seed * 0.31)) * u_softness);
     float feather = width * mix(1.8, 4.2, hash(vec2(fi + 5.9, u_seed * 0.27)));
     float streak = verticalStreak(uv, center, width, feather);
-    float broken = step(0.22, noise(vec2(fi * 7.1, floor(uv.y * 22.0) + p * 9.0)));
-    result += streak * broken;
+    float coarseBreakup = noise(vec2(fi * 7.1, uv.y * 8.0 + p * 5.0));
+    float fineBreakup = noise(vec2(fi * 13.9 + 4.0, uv.y * 31.0 + p * 17.0));
+    float continuity = mix(0.38, 1.0, coarseBreakup);
+    float sparkle = mix(0.82, 1.18, fineBreakup);
+    result += streak * continuity * sparkle;
   }
   return clamp(result, 0.0, 1.0);
 }

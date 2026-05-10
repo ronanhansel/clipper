@@ -332,6 +332,38 @@ describe("frame preview render model", () => {
     ).toEqual([["a", 1.75]]);
   });
 
+  it("keeps local preview time past visible duration for left-trimmed clips", () => {
+    const scene: Scene = {
+      id: "scene",
+      compositions: [
+        {
+          id: "a",
+          filePath: "a.ts",
+          start: 4,
+          trimStart: 4,
+          duration: 1,
+          frame,
+          background,
+          objects: [],
+          snapshot: [],
+          motionMarkers: [],
+        },
+      ],
+    };
+
+    const model = deriveFramePreviewRenderModel({
+      blankPart,
+      scene,
+      sceneTime: 4.5,
+      timelineMode: "composition",
+    });
+
+    expect(model.previewTime).toBe(4.5);
+    expect(
+      model.previewParts.map((item) => [item.part.id, item.previewTime]),
+    ).toEqual([["a", 4.5]]);
+  });
+
   it("keeps intentional timeline gaps renderable with the blank fallback", () => {
     const scene: Scene = {
       id: "scene",

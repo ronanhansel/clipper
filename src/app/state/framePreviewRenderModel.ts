@@ -128,7 +128,8 @@ export function deriveFramePreviewRenderModel({
           previewState.transitionPreviewParts.to,
           sceneMotionViews.motionMarkers,
         ),
-        postProcessPasses: previewState.transitionPreviewParts.postProcessPasses,
+        postProcessPasses:
+          previewState.transitionPreviewParts.postProcessPasses,
       }
     : null;
 

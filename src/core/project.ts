@@ -1,7 +1,4 @@
-import {
-  animationDefinitions,
-  getAnimationDefinition,
-} from "./animations/registry";
+import { getAnimationDefinition } from "./animations/registry";
 import {
   animationGraphPresets,
   createAnimationGraphPresetGroup,
@@ -227,23 +224,8 @@ export function normalizeAnimationGraphState(
   graph: AnimationGraphState | undefined,
 ): AnimationGraphState | undefined {
   if (!graph || typeof graph !== "object") return undefined;
-  const deletedNodeIds = Array.isArray(graph.deletedNodeIds)
-    ? Array.from(
-        new Set(
-          graph.deletedNodeIds.filter(
-            (nodeId): nodeId is string =>
-              typeof nodeId === "string" && nodeId.length > 0,
-          ),
-        ),
-      )
-    : undefined;
-  const normalizedDeletedNodeIds = deletedNodeIds?.length
-    ? deletedNodeIds
-    : undefined;
-  const deletedNodeIdSet = new Set(normalizedDeletedNodeIds ?? []);
   const nodes = Object.fromEntries(
     Object.entries(graph.nodes ?? {}).flatMap(([nodeId, position]) => {
-      if (deletedNodeIdSet.has(nodeId)) return [];
       if (!nodeId || !position || typeof position !== "object") return [];
       const x =
         typeof position.x === "number" && Number.isFinite(position.x)
@@ -260,7 +242,6 @@ export function normalizeAnimationGraphState(
     graph.customNodes && typeof graph.customNodes === "object"
       ? Object.fromEntries(
           Object.entries(graph.customNodes).flatMap(([nodeId, node]) => {
-            if (deletedNodeIdSet.has(nodeId)) return [];
             if (!nodeId || !node || typeof node !== "object") return [];
             const kind =
               node.kind === "animation" ||
@@ -270,7 +251,8 @@ export function normalizeAnimationGraphState(
               node.kind === "bgSolid" ||
               node.kind === "bgGradient" ||
               node.kind === "bgPattern" ||
-              node.kind === "bg3d" ||
+              node.kind === "bgPaper" ||
+              node.kind === "bgThreeCode" ||
               node.kind === "oscillate"
                 ? node.kind
                 : undefined;
@@ -310,7 +292,7 @@ export function normalizeAnimationGraphState(
       : undefined;
   const normalizedCustomNodes =
     customNodes && Object.keys(customNodes).length ? customNodes : undefined;
-  const groups = normalizeAnimationGraphGroups(graph.groups, deletedNodeIdSet);
+  const groups = normalizeAnimationGraphGroups(graph.groups);
   const normalizedGroups =
     groups && Object.keys(groups).length ? groups : undefined;
   const hasGraphNode = (nodeId: string) =>
@@ -326,8 +308,6 @@ export function normalizeAnimationGraphState(
       const fromNodeId =
         typeof edge.fromNodeId === "string" ? edge.fromNodeId : "";
       const toNodeId = typeof edge.toNodeId === "string" ? edge.toNodeId : "";
-      if (deletedNodeIdSet.has(fromNodeId) || deletedNodeIdSet.has(toNodeId))
-        return [];
       if (
         fromNodeId.startsWith("enter:") ||
         fromNodeId.startsWith("exit:") ||
@@ -432,7 +412,6 @@ export function normalizeAnimationGraphState(
     graph.parameters && typeof graph.parameters === "object"
       ? Object.fromEntries(
           Object.entries(graph.parameters).flatMap(([nodeId, values]) => {
-            if (deletedNodeIdSet.has(nodeId)) return [];
             if (!nodeId || !values || typeof values !== "object") return [];
             const nodeValues = Object.fromEntries(
               Object.entries(values).flatMap(([key, value]) =>
@@ -451,15 +430,13 @@ export function normalizeAnimationGraphState(
     normalizedGroups ||
     viewport ||
     normalizedViewports ||
-    normalizedParameters ||
-    normalizedDeletedNodeIds
+    normalizedParameters
     ? {
         nodes,
         edges,
         customNodes: normalizedCustomNodes,
         groups: normalizedGroups,
         parameters: normalizedParameters,
-        deletedNodeIds: normalizedDeletedNodeIds,
         viewport,
         viewports: normalizedViewports,
       }
@@ -468,7 +445,6 @@ export function normalizeAnimationGraphState(
 
 function normalizeAnimationGraphGroups(
   groups: AnimationGraphState["groups"],
-  deletedNodeIdSet: Set<string>,
 ): Record<string, AnimationGraphGroup> | undefined {
   if (!groups || typeof groups !== "object") return undefined;
   return Object.fromEntries(
@@ -482,13 +458,7 @@ function normalizeAnimationGraphGroups(
         typeof group.name === "string" && group.name ? group.name : "Group";
       const nodes = Object.fromEntries(
         Object.entries(group.nodes ?? {}).flatMap(([nodeId, position]) => {
-          if (
-            !nodeId ||
-            deletedNodeIdSet.has(nodeId) ||
-            !position ||
-            typeof position !== "object"
-          )
-            return [];
+          if (!nodeId || !position || typeof position !== "object") return [];
           const x =
             typeof position.x === "number" && Number.isFinite(position.x)
               ? roundTwo(position.x)
@@ -505,13 +475,7 @@ function normalizeAnimationGraphGroups(
         group.customNodes && typeof group.customNodes === "object"
           ? Object.fromEntries(
               Object.entries(group.customNodes).flatMap(([nodeId, node]) => {
-                if (
-                  !nodeId ||
-                  deletedNodeIdSet.has(nodeId) ||
-                  !node ||
-                  typeof node !== "object"
-                )
-                  return [];
+                if (!nodeId || !node || typeof node !== "object") return [];
                 const kind =
                   node.kind === "animation" ||
                   node.kind === "time" ||
@@ -902,6 +866,7 @@ function normalizeComposition(composition: CompositionClip): CompositionClip {
         : undefined,
     animationGraph: normalizeAnimationGraphState(rest.animationGraph),
     bgGraph: normalizeAnimationGraphState(rest.bgGraph),
+    threeBackgrounds: rest.threeBackgrounds,
     renderMode: normalizeCompositionRenderMode(rest.renderMode),
     composition3dGraph: normalizeComposition3dGraph(rest.composition3dGraph),
     background: {
@@ -988,12 +953,22 @@ function getCompositionDocuments(project: ProjectManifest) {
     ...(project.compositionLibrary ?? []),
     ...(project.compositions ?? []),
   ];
+  const graphStateById = new Map(
+    compositions.flatMap((composition) => [
+      [composition.id, composition],
+      [composition.filePath, composition],
+    ]),
+  );
   return Array.from(
     new Map(
       compositions
         .map((composition) => [
           composition.id,
-          normalizeCompositionDocument(composition, sources),
+          mergeCompositionDocumentGraphState(
+            normalizeCompositionDocument(composition, sources),
+            graphStateById.get(composition.id) ??
+              graphStateById.get(composition.filePath),
+          ),
         ])
         .filter(
           (entry): entry is [string, CompositionDocument] =>
@@ -1001,6 +976,23 @@ function getCompositionDocuments(project: ProjectManifest) {
         ),
     ).values(),
   );
+}
+
+function mergeCompositionDocumentGraphState(
+  document: CompositionDocument | undefined,
+  state: CompositionClip | undefined,
+): CompositionDocument | undefined {
+  if (!document || !state) return document;
+  return {
+    ...document,
+    animationGraph:
+      normalizeAnimationGraphState(state.animationGraph) ??
+      document.animationGraph,
+    bgGraph: normalizeAnimationGraphState(state.bgGraph) ?? document.bgGraph,
+    composition3dGraph:
+      normalizeComposition3dGraph(state.composition3dGraph) ??
+      document.composition3dGraph,
+  };
 }
 
 export { getCompositionDocuments };
@@ -1068,6 +1060,7 @@ function getSceneFromProjectWithDocs(
           motionMarkers: [],
           animationGraph,
           bgGraph,
+          threeBackgrounds: composition.threeBackgrounds,
           renderMode,
           composition3dGraph: resolveComposition3dGraphForTimelineClip(
             clip,
@@ -1197,6 +1190,7 @@ function getScenesFromTimelines(
           motionMarkers: [],
           animationGraph,
           bgGraph,
+          threeBackgrounds: composition.threeBackgrounds,
           renderMode,
           composition3dGraph: resolveComposition3dGraphForTimelineClip(
             clip,
@@ -1235,14 +1229,11 @@ export function applyAnimationGraphToComposition(
     const graphAnimations = graph
       ? getGraphLayerAnimationsForObject(object, graph)
       : [];
-    const graphOwnedAnimationIds = graph
-      ? getGraphOwnedAnimationIds(object, graph)
-      : new Set<string>();
-    const baseAnimations = (object.animations ?? []).filter(
-      (animation) =>
-        !animation.id.startsWith("graph:") &&
-        !graphOwnedAnimationIds.has(animation.id),
-    );
+    const baseAnimations = graph
+      ? []
+      : (object.animations ?? []).filter(
+          (animation) => !animation.id.startsWith("graph:"),
+        );
     if (
       !graphAnimations.length &&
       baseAnimations.length === (object.animations ?? []).length
@@ -1255,14 +1246,11 @@ export function applyAnimationGraphToComposition(
       const graphAnimations = graph
         ? getGraphLayerAnimationsForObject(object, graph)
         : [];
-      const graphOwnedAnimationIds = graph
-        ? getGraphOwnedAnimationIds(object, graph)
-        : new Set<string>();
-      const baseAnimations = (object.animations ?? []).filter(
-        (animation) =>
-          !animation.id.startsWith("graph:") &&
-          !graphOwnedAnimationIds.has(animation.id),
-      );
+      const baseAnimations = graph
+        ? []
+        : (object.animations ?? []).filter(
+            (animation) => !animation.id.startsWith("graph:"),
+          );
       if (
         !graphAnimations.length &&
         baseAnimations.length === (object.animations ?? []).length
@@ -1287,132 +1275,6 @@ export function applyAnimationGraphToComposition(
         },
       }
     : composition;
-}
-
-function getGraphOwnedAnimationIds(
-  object: FrameObject,
-  graph: AnimationGraphState,
-) {
-  const prefix = `animation:${object.id}:anim:`;
-  const animationsById = new Map(
-    (object.animations ?? []).map((animation) => [animation.id, animation]),
-  );
-  const ownedNodeEntries = [
-    ...Object.entries(graph.customNodes ?? {}),
-    ...Object.values(graph.groups ?? {}).flatMap((group) =>
-      Object.entries(group.customNodes ?? {}),
-    ),
-    ...Object.values(graph.groups ?? {}).flatMap((group) =>
-      (group.edges ?? []).flatMap((edge) => {
-        const node =
-          getDerivedAnimationGraphCustomNodes(object)[edge.fromNodeId];
-        return node ? [[edge.fromNodeId, node] as const] : [];
-      }),
-    ),
-  ];
-  return new Set(
-    ownedNodeEntries.flatMap(([nodeId, node]) => {
-      const property = node.details?.property;
-      if (!property || !nodeId.startsWith(prefix)) return [];
-      const suffix = `:${property}`;
-      if (!nodeId.endsWith(suffix)) return [];
-      const animationId = nodeId.slice(prefix.length, -suffix.length);
-      const animation = animationsById.get(animationId);
-      const definition = getAnimationDefinition(property);
-      if (!animation || !definition?.getDetails(animation)) return [];
-      return [animationId];
-    }),
-  );
-}
-
-function getDerivedAnimationGraphCustomNodes(
-  object: FrameObject,
-): Record<string, AnimationGraphCustomNode> {
-  const sources = (object.animations ?? [])
-    .filter((animation) => !animation.id.startsWith("graph:"))
-    .flatMap((animation) =>
-      getAnimationDefinitionEntries(animation).map(
-        ({ property, label, details }) => ({
-          animation,
-          property,
-          label,
-          details,
-        }),
-      ),
-    );
-  const timeKeys = Array.from(
-    new Set(
-      sources.map(
-        ({ animation }) =>
-          `${roundGraphNumber(animation.options.delay ?? 0)}:${roundGraphNumber(animation.options.duration)}`,
-      ),
-    ),
-  );
-  const entries: Array<[string, AnimationGraphCustomNode]> = [
-    ...timeKeys.map((timeKey, index): [string, AnimationGraphCustomNode] => {
-      const source = sources.find(
-        ({ animation }) =>
-          `${roundGraphNumber(animation.options.delay ?? 0)}:${roundGraphNumber(animation.options.duration)}` ===
-          timeKey,
-      )!;
-      return [
-        `time:${object.id}:${index}`,
-        {
-          kind: "time" as const,
-          label: "Time",
-          scopeKey: object.id,
-          details: {
-            delay: formatGraphSeconds(source.animation.options.delay ?? 0),
-            duration: formatGraphSeconds(source.animation.options.duration),
-            ease: String(source.animation.options.ease ?? "linear"),
-          },
-        },
-      ];
-    }),
-    ...sources.map(
-      ({
-        animation,
-        property,
-        label,
-        details,
-      }): [string, AnimationGraphCustomNode] => [
-        `animation:${object.id}:anim:${animation.id}:${property}`,
-        {
-          kind: "animation" as const,
-          label,
-          scopeKey: object.id,
-          details,
-        },
-      ],
-    ),
-  ];
-  return Object.fromEntries(entries);
-}
-
-function getAnimationDefinitionEntries(animation: LayerAnimation) {
-  const entries: Array<{
-    property: string;
-    label: string;
-    details: Record<string, string>;
-  }> = [];
-  for (const definition of animationDefinitions) {
-    const details = definition.getDetails(animation);
-    if (details)
-      entries.push({
-        property: definition.property,
-        label: definition.label,
-        details,
-      });
-  }
-  return entries;
-}
-
-function formatGraphSeconds(value: number) {
-  return `${roundGraphNumber(value)}s`;
-}
-
-function roundGraphNumber(value: number) {
-  return Math.round(value * 1000) / 1000;
 }
 
 function getGraphLayerAnimationsForObject(
@@ -1501,14 +1363,12 @@ function expandAnimationGraphGroupsForObject(
   graph: AnimationGraphState,
   object: FrameObject,
 ) {
-  const baseCustomNodes: NonNullable<AnimationGraphState["customNodes"]> = {
-    ...getDerivedAnimationGraphCustomNodes(object),
-    ...Object.fromEntries(
+  const baseCustomNodes: NonNullable<AnimationGraphState["customNodes"]> =
+    Object.fromEntries(
       Object.entries(graph.customNodes ?? {}).filter(
         ([, node]) => node.scopeKey === object.id,
       ),
-    ),
-  };
+    );
   return expandAnimationGraphGroups({
     graph,
     baseCustomNodes,
@@ -1525,7 +1385,6 @@ function getRegisteredGroupAnimations(
   object?: FrameObject,
 ): LayerAnimation[] {
   const customNodes = {
-    ...(object ? getDerivedAnimationGraphCustomNodes(object) : {}),
     ...Object.fromEntries(
       Object.entries(graph.customNodes ?? {}).filter(([, node]) =>
         isObjectAnimationGraphNodeKind(node.kind),
@@ -1903,6 +1762,8 @@ function normalizeGraphEase(
   return value === "easeIn" ||
     value === "easeOut" ||
     value === "easeInOut" ||
+    value === "expoIn" ||
+    value === "expoOut" ||
     value === "circOut" ||
     value === "backOut"
     ? value

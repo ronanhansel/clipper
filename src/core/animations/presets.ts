@@ -324,11 +324,6 @@ export function addAnimationGraphPresetGroupToGraph(
   const groupId = `group:${preset.id}:${idSuffix}`;
   const nodeId = `custom:group:${idSuffix}`;
   const group = createAnimationGraphPresetGroup(preset, groupId);
-  const restoredNodeIds = new Set([
-    nodeId,
-    ...Object.keys(group.nodes),
-    ...Object.keys(group.customNodes ?? {}),
-  ]);
   return {
     nodes: { ...(graph?.nodes ?? {}), [nodeId]: position },
     edges: graph?.edges ?? [],
@@ -343,9 +338,6 @@ export function addAnimationGraphPresetGroupToGraph(
     },
     groups: { ...(graph?.groups ?? {}), [groupId]: group },
     parameters: graph?.parameters,
-    deletedNodeIds: graph?.deletedNodeIds?.filter(
-      (deletedId) => !restoredNodeIds.has(deletedId),
-    ),
     viewport: graph?.viewport,
     viewports: graph?.viewports,
   };

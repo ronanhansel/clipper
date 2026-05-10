@@ -34,6 +34,8 @@ export type MotionEase =
   | "easeIn"
   | "easeOut"
   | "easeInOut"
+  | "expoIn"
+  | "expoOut"
   | "circOut"
   | "backOut";
 
@@ -434,6 +436,7 @@ export type CompositionClip = TimelineMarkerMetadata & {
   motionMarkers: MotionMarker[];
   animationGraph?: AnimationGraphState;
   bgGraph?: AnimationGraphState;
+  threeBackgrounds?: Record<string, unknown>;
   renderMode?: CompositionRenderMode;
   composition3dGraph?: Composition3dGraphState;
 };
@@ -488,7 +491,8 @@ export type AnimationGraphCustomNode = {
     | "bgSolid"
     | "bgGradient"
     | "bgPattern"
-    | "bg3d"
+    | "bgPaper"
+    | "bgThreeCode"
     | "oscillate";
   label: string;
   scopeKey: string;
@@ -511,7 +515,6 @@ export type AnimationGraphState = {
   customNodes?: Record<string, AnimationGraphCustomNode>;
   groups?: Record<string, AnimationGraphGroup>;
   parameters?: Record<string, Record<string, string>>;
-  deletedNodeIds?: string[];
   /** Legacy shared graph viewport. New graph views should use per-layer `viewports`. */
   viewport?: {
     scrollLeft: number;

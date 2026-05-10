@@ -8,6 +8,7 @@ import {
 } from "../../core/camera";
 import { getMotionMarkerViews } from "../../core/motionEffects";
 import {
+  applyAnimationGraphToComposition,
   defaultAssets,
   defaultTimelineLayerState,
   getSceneFromProject,
@@ -121,17 +122,43 @@ export function useEditorDerivedState({
     [renderableScene.motionMarkers],
   );
   const part = previewRenderModel.part;
+  const previewTime = previewRenderModel.previewTime;
+  const selectedPart =
+    scene.compositions.find((item) => item.id === selectedPartId) ?? null;
+  const composeFilePart = useMemo(
+    () =>
+      timelineMode === "compose"
+        ? getComposeFilePart(project, activeComposition ?? selectedPart)
+        : null,
+    [activeComposition, project, selectedPart, timelineMode],
+  );
+  const displayPart = composeFilePart ?? part;
+  const displayPreviewTime =
+    composeFilePart && timelineMode === "compose"
+      ? Math.min(
+          Math.max(
+            activeTimelinePart
+              ? currentSceneTime -
+                  (activeTimelinePart.start ?? 0) +
+                  (activeTimelinePart.trimStart ?? 0)
+              : currentSceneTime,
+            0,
+          ),
+          composeFilePart.duration,
+        )
+      : previewTime;
   const hasActiveComposition = Boolean(activeComposition);
   const previewParts = previewRenderModel.previewParts;
   const transitionPreviewParts = previewRenderModel.transitionPreviewParts;
-  const previewTime = previewRenderModel.previewTime;
   const selectedAdjustmentLayer =
     scene.adjustmentLayers?.find(
       (layer) => layer.id === selectedAdjustmentLayerId,
     ) ?? null;
   const selectedObject =
-    part.objects.find((object) => object.id === selectedObjectId) ??
-    part.background.elements.find((object) => object.id === selectedObjectId) ??
+    displayPart.objects.find((object) => object.id === selectedObjectId) ??
+    displayPart.background.elements.find(
+      (object) => object.id === selectedObjectId,
+    ) ??
     null;
   const timelineMotionPart: CompositionClip = useMemo(
     () => ({
@@ -178,8 +205,6 @@ export function useEditorDerivedState({
         (marker) => marker.id === selectedMotionMarker?.markerId,
       ) ?? null)
     : null;
-  const selectedPart =
-    scene.compositions.find((item) => item.id === selectedPartId) ?? null;
   const validationErrors = useMemo(
     () => validateScene(renderableScene),
     [renderableScene],
@@ -187,8 +212,8 @@ export function useEditorDerivedState({
   const motionLayers = previewRenderModel.motionLayers;
   const hiddenMotionLayerIds = previewRenderModel.hiddenMotionLayerIds;
   const agentContext = useMemo(
-    () => createAgentContext(project, scene, part, selectionPayload),
-    [project, scene, part, selectionPayload],
+    () => createAgentContext(project, scene, displayPart, selectionPayload),
+    [project, scene, displayPart, selectionPayload],
   );
   const isPickingZoomFocus = Boolean(focusPickZoomMarker);
   const isPickingTranslationPosition = Boolean(positionPickTranslationMarker);
@@ -214,19 +239,24 @@ export function useEditorDerivedState({
   const cameraPreviewTransform = useMemo(
     () =>
       timelineMode === "composition"
-        ? getLayeredCameraPreviewTransform(part, motionLayers, previewTime, {
-            hiddenLayerIds: hiddenMotionLayerIds,
-            pickingTranslationPosition: isPickingTranslationPosition,
-            pickingZoomFocus: isPickingZoomFocus,
-          })
+        ? getLayeredCameraPreviewTransform(
+            displayPart,
+            motionLayers,
+            displayPreviewTime,
+            {
+              hiddenLayerIds: hiddenMotionLayerIds,
+              pickingTranslationPosition: isPickingTranslationPosition,
+              pickingZoomFocus: isPickingZoomFocus,
+            },
+          )
         : identityCameraPreview,
     [
       hiddenMotionLayerIds,
       isPickingTranslationPosition,
       isPickingZoomFocus,
       motionLayers,
-      previewTime,
-      part,
+      displayPreviewTime,
+      displayPart,
       timelineMode,
     ],
   );
@@ -248,9 +278,9 @@ export function useEditorDerivedState({
   const currentPartSelectedMotionIds = useMemo(
     () =>
       selectedMotionMarkers
-        .filter((selection) => selection.partId === part.id)
+        .filter((selection) => selection.partId === displayPart.id)
         .map(timelineMarkerKey),
-    [part.id, selectedMotionMarkers],
+    [displayPart.id, selectedMotionMarkers],
   );
   const selectedMotionPartSelectedMotionIds = useMemo(
     () =>
@@ -411,8 +441,8 @@ export function useEditorDerivedState({
     inspectorMotionMiddleSnap,
     isPickingTranslationPosition,
     isPickingZoomFocus,
-    part,
-    previewTime,
+    part: displayPart,
+    previewTime: displayPreviewTime,
     previewParts,
     renderableScene,
     transitionPreviewParts,
@@ -455,6 +485,34 @@ export function useEditorDerivedState({
     validationErrors,
     zoomScale,
   };
+}
+
+function getComposeFilePart(
+  project: ProjectManifest,
+  timelinePart: CompositionClip | null,
+) {
+  if (!timelinePart) return null;
+  const composition = [
+    ...(project.compositionLibrary ?? []),
+    ...(project.compositions ?? []),
+  ].find(
+    (item) =>
+      item.id === timelinePart.compositionId ||
+      item.id === timelinePart.id ||
+      item.filePath === timelinePart.filePath,
+  );
+  if (!composition) return null;
+  return {
+    ...applyAnimationGraphToComposition(
+      composition,
+      composition.animationGraph,
+    ),
+    start: undefined,
+    trimStart: undefined,
+    layerId: undefined,
+    prerender: undefined,
+    compositionId: composition.id,
+  } satisfies CompositionClip;
 }
 
 const blankPreviewComposition: CompositionClip = {

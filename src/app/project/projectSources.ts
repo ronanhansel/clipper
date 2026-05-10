@@ -51,6 +51,7 @@ export function getSyncedCompositionSources(
       JSON.stringify(previousPart) === JSON.stringify(nextPart)
     )
       continue;
+    if (nextPart.threeBackgrounds && nextSources[nextPart.filePath]) continue;
     nextSources[nextPart.filePath] = compositionToSource(nextPart);
     changed = true;
   }

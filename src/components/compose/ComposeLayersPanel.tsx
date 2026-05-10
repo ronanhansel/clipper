@@ -32,8 +32,8 @@ import { frameObjectFromBackgroundLayer } from "../../core/frameInteraction";
 import { arboristDndManager } from "../../lib/arboristDndManager";
 import { useDragAutoScroll } from "../../lib/useDragAutoScroll";
 
-const composeLayerRowHeight = 32;
-const composeLayerIndent = 18;
+const composeLayerRowHeight = 30;
+const composeLayerIndent = 24;
 const composeLayerMinDropHeight = 360;
 
 type ComposeLayerKind =
@@ -126,6 +126,15 @@ const MemoizedComposeLayersPanel = memo(function ComposeLayersPanelContent({
     const previousSelectedObjectIds = previousSelectedObjectIdsRef.current;
     previousSelectedObjectIdsRef.current = selectedObjectIds;
     setSelectedLayerIds((current) => {
+      const preservedAggregateIds = current.filter((id) => {
+        const node = findComposeLayerNode(treeData, id);
+        if (!node || node.object) return false;
+        return haveSameIds(
+          getNodeObjects(node).map((object) => object.id),
+          selectedObjectIds,
+        );
+      });
+      if (preservedAggregateIds.length > 0) return preservedAggregateIds;
       if (selectedObjectIds.length > 0)
         return selectedObjectIds.filter((id) =>
           findComposeLayerNode(treeData, id),
@@ -133,7 +142,12 @@ const MemoizedComposeLayersPanel = memo(function ComposeLayersPanelContent({
       const preserved = current.filter((id) =>
         findComposeLayerNode(treeData, id),
       );
-      if (preserved.some((id) => id === "frame" || id === "background"))
+      if (
+        preserved.some((id) => {
+          const node = findComposeLayerNode(treeData, id);
+          return node?.kind === "frame" || node?.kind === "background";
+        })
+      )
         return preserved;
       if (previousSelectedObjectIds.length > 0) return [];
       return preserved.length > 0 ? preserved : [];
@@ -203,10 +217,7 @@ const MemoizedComposeLayersPanel = memo(function ComposeLayersPanelContent({
       anchor: objectIds[0] ?? null,
       mostRecent: objectIds.at(-1) ?? null,
     });
-    if (
-      nodes.length === 1 &&
-      nodes[0].data.kind === "frame"
-    ) {
+    if (nodes.length === 1 && nodes[0].data.kind === "frame") {
       onSelectFrameSettings();
       return;
     }
@@ -351,7 +362,7 @@ const MemoizedComposeLayersPanel = memo(function ComposeLayersPanelContent({
 
   return (
     <section
-      className="flex min-h-0 flex-1 flex-col overflow-hidden"
+      className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[14px] border border-dashed border-[#303646] bg-[#151821] p-3"
       onPointerLeave={() => onHoverObject(null)}
       onPointerDown={(event) => {
         if (
@@ -362,14 +373,12 @@ const MemoizedComposeLayersPanel = memo(function ComposeLayersPanelContent({
         }
       }}
     >
-      <div className="mb-3 grid gap-1.5">
-        <h2 className="text-[13px] font-extrabold tracking-normal text-[#9b9da7]">
-          Layers
-        </h2>
+      <div className="mb-2 flex items-center justify-between px-0.5">
+        <h2 className="text-[13px] text-[#aeb3c1]">Layers</h2>
       </div>
       <div
         data-compose-layers-panel
-        className="timeline-scrollbar min-h-0 flex-1 overflow-auto rounded-[14px] border border-[#2d313b] bg-[#111319]/72 p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]"
+        className="timeline-scrollbar min-h-0 flex-1 overflow-auto"
       >
         <div
           ref={treeRef}
@@ -512,7 +521,7 @@ function ComposeLayerRow({
     <div
       ref={data.kind === "object" ? dragHandle : undefined}
       data-compose-layer-row="true"
-      className={`group flex h-full items-center gap-2 border border-transparent px-2 py-0 text-[12px] font-bold leading-none transition ${selected ? "bg-[rgb(var(--clipper-accent-rgb)/0.16)] text-white" : "text-[#dfe2ea] hover:bg-[#1a1d26]"} ${hidden ? "opacity-50" : ""}`}
+      className={`group box-border grid h-full min-w-0 cursor-pointer select-none grid-cols-[16px_18px_minmax(0,1fr)_auto_auto] items-center gap-1.5 border px-1.5 text-[13px] transition ${selected ? "border-transparent bg-[#242733] text-white" : "border-transparent text-[#dfe2ea] hover:bg-[#20232c]"} ${hidden ? "opacity-50" : ""}`}
       style={style}
       onPointerEnter={() => onHoverObject(data.object ?? null)}
       onPointerDownCapture={
@@ -533,7 +542,7 @@ function ComposeLayerRow({
       onPointerDown={(event) => onSelectLayer(event, node)}
     >
       <button
-        className={`grid h-full w-5 shrink-0 place-items-center rounded text-[#737884] ${node.isInternal ? "" : "pointer-events-none opacity-0"}`}
+        className={`grid h-4 w-4 place-items-center rounded text-current hover:bg-black/15 ${node.isInternal ? "" : "pointer-events-none opacity-0"}`}
         onClick={(event) => {
           event.stopPropagation();
           onToggleLayer(node);
@@ -541,13 +550,13 @@ function ComposeLayerRow({
         tabIndex={node.isInternal ? 0 : -1}
       >
         <ChevronRight
-          size={13}
+          size={14}
           className={`transition-transform ${expanded ? "rotate-90" : ""}`}
         />
       </button>
       <LayerIcon node={data} />
       <span
-        className={`min-w-0 flex-1 truncate ${data.animated ? "text-[#5599ff]" : ""}`}
+        className={`min-w-0 overflow-hidden text-ellipsis whitespace-nowrap px-1 ${data.animated ? "text-[#5599ff]" : ""}`}
         title={data.name}
       >
         {data.name}
@@ -722,7 +731,7 @@ function buildComposeLayerTree(part: Part): ComposeLayerNode[] {
       children: objectChildren.length > 0 ? objectChildren : undefined,
     },
     {
-      id: "background",
+      id: part.background.id,
       name: part.background.name || "Background",
       kind: "background",
       animated: Boolean(part.background.animations?.length),
@@ -769,6 +778,12 @@ function findComposeLayerNode(
     if (child) return child;
   }
   return null;
+}
+
+function haveSameIds(left: string[], right: string[]): boolean {
+  if (left.length !== right.length) return false;
+  const rightIds = new Set(right);
+  return left.every((id) => rightIds.has(id));
 }
 
 function countComposeLayerNodes(nodes: ComposeLayerNode[]): number {

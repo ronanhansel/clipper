@@ -7,6 +7,7 @@ export const opacityAnimation: AnimationDefinition = {
   fieldGroups: [
     {
       id: "parameters",
+      columns: 2,
       fields: [
         { key: "from", label: "from", defaultValue: "0" },
         { key: "to", label: "to", defaultValue: "1" },

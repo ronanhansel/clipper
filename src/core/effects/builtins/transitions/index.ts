@@ -10,6 +10,8 @@ import scaleFadeManifest from "./scaleFade/manifest.yml?raw";
 import { scaleFadeTransitionLogic } from "./scaleFade/logic";
 import swipeManifest from "./swipe/manifest.yml?raw";
 import { swipeTransitionLogic } from "./swipe/logic";
+import zoomInManifest from "./zoomIn/manifest.yml?raw";
+import { zoomInTransitionLogic } from "./zoomIn/logic";
 
 export const fadeTransitionEffect = createTransitionEffectPackage(
   fadeManifest,
@@ -31,9 +33,14 @@ export const swipeTransitionEffect = createTransitionEffectPackage(
   swipeManifest,
   swipeTransitionLogic,
 );
+export const zoomInTransitionEffect = createTransitionEffectPackage(
+  zoomInManifest,
+  zoomInTransitionLogic,
+);
 
 export const builtInTransitionEffects = [
   swipeTransitionEffect,
+  zoomInTransitionEffect,
   filmBurnTransitionEffect,
   lightLeakBandsTransitionEffect,
   fadeTransitionEffect,

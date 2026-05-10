@@ -1,0 +1,39 @@
+id: clipper.transition.zoomIn
+category: transition
+name: Zoom
+label: Zoom
+group: Fast
+tags: ["blocksOverlap"]
+defaultDuration: 1
+defaultParams: { "ease": "expoIn", "transitionTime": 1, "direction": "in", "zoom": 1.72, "cutPoint": 0.88, "fadeSoftness": 0 }
+paramControls:
+  - key: direction
+    label: Direction
+    type: select
+    defaultValue: in
+    options:
+      - value: in
+        label: Zoom In
+      - value: out
+        label: Zoom Out
+  - key: zoom
+    label: Zoom
+    type: number
+    min: 1
+    max: 3
+    step: 0.01
+    defaultValue: 1.42
+  - key: cutPoint
+    label: Cut Point
+    type: number
+    min: 0.4
+    max: 0.95
+    step: 0.01
+    defaultValue: 0.88
+  - key: fadeSoftness
+    label: Fade Softness
+    type: number
+    min: 0
+    max: 0.5
+    step: 0.01
+    defaultValue: 0

@@ -511,7 +511,7 @@ export const FramePreview = memo(function FramePreview({
         applyLiveComposePreviewTime(
           frameViewportRef.current,
           currentPart,
-          liveSceneTime - partStart,
+          liveSceneTime - partStart + (currentPart.trimStart ?? 0),
         );
       }
       frame = requestAnimationFrame(tick);
@@ -1203,6 +1203,7 @@ function CompositionLayerView({
           animationsEnabled={animationsEnabled}
           background={part.background}
           bgGraph={part.bgGraph}
+          threeBackgrounds={part.threeBackgrounds}
           canSelect={active && canSelect}
           duration={part.duration}
           exportTileFrameBounds={exportTileFrameBounds}
@@ -2398,6 +2399,7 @@ function areBackgroundLayerPropsEqual(
     animationsEnabled: boolean;
     background: BackgroundLayer;
     bgGraph?: Part["bgGraph"];
+    threeBackgrounds?: Part["threeBackgrounds"];
     duration: number;
     exportTileFrameBounds?: ExportTileFrameBounds;
     frameScale: number;
@@ -2411,6 +2413,7 @@ function areBackgroundLayerPropsEqual(
     animationsEnabled: boolean;
     background: BackgroundLayer;
     bgGraph?: Part["bgGraph"];
+    threeBackgrounds?: Part["threeBackgrounds"];
     duration: number;
     exportTileFrameBounds?: ExportTileFrameBounds;
     frameScale: number;
@@ -2429,6 +2432,7 @@ function areBackgroundLayerPropsEqual(
     previous.animationsEnabled === next.animationsEnabled &&
     previous.background === next.background &&
     previous.bgGraph === next.bgGraph &&
+    previous.threeBackgrounds === next.threeBackgrounds &&
     previous.duration === next.duration &&
     previous.exportTileFrameBounds === next.exportTileFrameBounds &&
     previous.frameScale === next.frameScale &&
@@ -2447,7 +2451,7 @@ function isTimeSensitiveBackgroundGraph(graph: Part["bgGraph"] | undefined) {
   const connectedSourceIds = getConnectedBackgroundSourceIds(graph);
   if (
     Array.from(connectedSourceIds).some(
-      (nodeId) => customNodes[nodeId]?.kind === "bg3d",
+      (nodeId) => customNodes[nodeId]?.kind === "bgThreeCode",
     )
   )
     return true;
@@ -3089,6 +3093,7 @@ export const BackgroundLayerView = memo(function BackgroundLayerView({
   animationsEnabled,
   background,
   bgGraph,
+  threeBackgrounds,
   canSelect,
   duration,
   exportTileFrameBounds,
@@ -3102,6 +3107,7 @@ export const BackgroundLayerView = memo(function BackgroundLayerView({
   animationsEnabled: boolean;
   background: BackgroundLayer;
   bgGraph?: Part["bgGraph"];
+  threeBackgrounds?: Part["threeBackgrounds"];
   canSelect?: boolean;
   duration: number;
   exportTileFrameBounds?: ExportTileFrameBounds;
@@ -3148,6 +3154,7 @@ export const BackgroundLayerView = memo(function BackgroundLayerView({
         partStart={partStart}
         playbackClock={playbackClock}
         previewTime={previewTime}
+        threeBackgrounds={threeBackgrounds}
       />
       {evaluatedBackground.elements
         .filter(
@@ -3176,17 +3183,19 @@ function BackgroundThreeCanvas({
   partStart,
   playbackClock,
   previewTime,
+  threeBackgrounds,
 }: {
   connectedSourceIds: Set<string>;
   graph?: Part["bgGraph"];
   partStart: number;
   playbackClock: PlaybackClock;
   previewTime: number;
+  threeBackgrounds?: Part["threeBackgrounds"];
 }) {
   const activeEntries = Object.entries(graph?.customNodes ?? {}).filter(
     ([id, node]) =>
       node.scopeKey === "background" &&
-      node.kind === "bg3d" &&
+      node.kind === "bgThreeCode" &&
       connectedSourceIds.has(id),
   );
   if (!activeEntries.length) return null;
@@ -3201,6 +3210,7 @@ function BackgroundThreeCanvas({
           partStart={partStart}
           playbackClock={playbackClock}
           previewTime={previewTime}
+          threeBackgrounds={threeBackgrounds}
           zIndex={index + 1}
         />
       ))}
@@ -3215,6 +3225,7 @@ function BackgroundThreeCanvasLayer({
   partStart,
   playbackClock,
   previewTime,
+  threeBackgrounds,
   zIndex,
 }: {
   graph?: Part["bgGraph"];
@@ -3223,6 +3234,7 @@ function BackgroundThreeCanvasLayer({
   partStart: number;
   playbackClock: PlaybackClock;
   previewTime: number;
+  threeBackgrounds?: Part["threeBackgrounds"];
   zIndex: number;
 }) {
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -3251,13 +3263,6 @@ function BackgroundThreeCanvasLayer({
     import("three")
       .then((THREE) => {
         if (disposed) return;
-        const details = node.details ?? {};
-        const color = details.color ?? "#5b7cff";
-        const accent = details.accent ?? "#9fd0ff";
-        const preset = details.preset ?? "waves";
-        const speed = Number(details.speed ?? 1) || 1;
-        const intensity = Number(details.intensity ?? 1) || 1;
-        const wireframe = details.wireframe !== "0";
         const width = root.clientWidth || FRAME_WIDTH;
         const height = root.clientHeight || FRAME_HEIGHT;
         const scene = new THREE.Scene();
@@ -3278,179 +3283,23 @@ function BackgroundThreeCanvasLayer({
         renderer.domElement.style.width = "100%";
         renderer.domElement.style.height = "100%";
         root.replaceChildren(renderer.domElement);
-        scene.add(new THREE.AmbientLight(0xffffff, 0.45));
-        const keyLight = new THREE.PointLight(accent, 1.25 * intensity, 9);
-        keyLight.position.set(1.8, 1.6, 3.2);
-        scene.add(keyLight);
-        const backLight = new THREE.PointLight(color, 0.9 * intensity, 8);
-        backLight.position.set(-2.2, -1.4, 2.4);
-        scene.add(backLight);
-        const geometries: Array<{ dispose: () => void }> = [];
-        const materials: Array<{ dispose: () => void }> = [];
-        const meshes: Array<{
-          mesh: any;
-          seed: number;
-          kind: string;
-          baseY?: number;
-          baseX?: number;
-        }> = [];
-        const addMesh = (mesh: any, kind: string, seed = meshes.length) => {
-          meshes.push({
-            mesh,
-            kind,
-            seed,
-            baseX: mesh.position.x,
-            baseY: mesh.position.y,
-          });
-          scene.add(mesh);
-          return mesh;
-        };
-        const trackGeometry = <T extends { dispose: () => void }>(
-          geometry: T,
-        ) => {
-          geometries.push(geometry);
-          return geometry;
-        };
-        const trackMaterial = <T extends { dispose: () => void }>(
-          material: T,
-        ) => {
-          materials.push(material);
-          return material;
-        };
-        const glowMaterial = (value: string, opacity: number) =>
-          trackMaterial(
-            new THREE.MeshBasicMaterial({
-              blending: THREE.AdditiveBlending,
-              color: value,
-              depthWrite: false,
-              side: THREE.DoubleSide,
-              transparent: true,
-              opacity,
-              wireframe,
-            }),
+        const backgroundRef = node.details?.ref ?? "background";
+        const createScene = resolveThreeBackgroundFactory(
+          threeBackgrounds?.[backgroundRef],
+        );
+        if (!createScene)
+          throw new Error(
+            `Three.js background ref not found: ${backgroundRef}`,
           );
-        const litMaterial = (value: string, opacity: number) =>
-          trackMaterial(
-            new THREE.MeshPhongMaterial({
-              color: value,
-              emissive: value,
-              emissiveIntensity: 0.18 * intensity,
-              shininess: 82,
-              side: THREE.DoubleSide,
-              transparent: true,
-              opacity,
-              wireframe,
-            }),
-          );
-        if (preset === "particles") {
-          const geometry = trackGeometry(
-            new THREE.SphereGeometry(0.035 * Math.max(intensity, 0.4), 10, 10),
-          );
-          const material = glowMaterial(color, 0.82);
-          for (let index = 0; index < 140; index += 1) {
-            const particle = new THREE.Mesh(geometry, material);
-            particle.position.set(
-              (Math.random() - 0.5) * 10,
-              (Math.random() - 0.5) * 6,
-              (Math.random() - 0.5) * 4,
-            );
-            addMesh(particle, "particle", index);
-          }
-        } else if (preset === "aurora") {
-          for (let index = 0; index < 5; index += 1) {
-            const mesh = new THREE.Mesh(
-              trackGeometry(new THREE.PlaneGeometry(9.5, 2.2, 56, 10)),
-              glowMaterial(index % 2 ? accent : color, 0.16),
-            );
-            mesh.position.y = -1.7 + index * 0.82;
-            mesh.position.z = -0.5 - index * 0.08;
-            mesh.rotation.z = -0.18 + index * 0.08;
-            addMesh(mesh, "aurora", index);
-          }
-        } else if (preset === "ribbons") {
-          for (let index = 0; index < 7; index += 1) {
-            const curve = new THREE.CatmullRomCurve3(
-              Array.from(
-                { length: 7 },
-                (_, point) =>
-                  new THREE.Vector3(
-                    -4.6 + point * 1.55,
-                    Math.sin(point * 0.9 + index) * 0.75,
-                    Math.cos(point * 0.7 + index) * 0.45,
-                  ),
-              ),
-            );
-            const mesh = new THREE.Mesh(
-              trackGeometry(
-                new THREE.TubeGeometry(
-                  curve,
-                  72,
-                  0.018 + index * 0.002,
-                  8,
-                  false,
-                ),
-              ),
-              glowMaterial(index % 2 ? accent : color, 0.36),
-            );
-            mesh.position.y = (index - 3) * 0.36;
-            addMesh(mesh, "ribbon", index);
-          }
-        } else if (preset === "orbital") {
-          for (let index = 0; index < 6; index += 1) {
-            const mesh = new THREE.Mesh(
-              trackGeometry(
-                new THREE.TorusGeometry(
-                  1.1 + index * 0.32,
-                  0.01 + index * 0.003,
-                  8,
-                  96,
-                ),
-              ),
-              glowMaterial(index % 2 ? accent : color, 0.28),
-            );
-            mesh.rotation.x = Math.PI / 2.5 + index * 0.24;
-            mesh.rotation.y = index * 0.36;
-            addMesh(mesh, "orbital", index);
-          }
-          const core = new THREE.Mesh(
-            trackGeometry(new THREE.IcosahedronGeometry(0.34, 2)),
-            litMaterial(accent, 0.5),
-          );
-          addMesh(core, "core", 9);
-        } else if (preset === "gridTunnel") {
-          for (let index = 0; index < 18; index += 1) {
-            const mesh = new THREE.Mesh(
-              trackGeometry(new THREE.PlaneGeometry(7.5, 4.4, 8, 5)),
-              glowMaterial(index % 2 ? accent : color, 0.08),
-            );
-            mesh.position.z = -index * 0.36;
-            mesh.scale.setScalar(0.45 + index * 0.08);
-            addMesh(mesh, "gridTunnel", index);
-          }
-        } else if (preset === "caustic") {
-          const base = new THREE.Mesh(
-            trackGeometry(new THREE.PlaneGeometry(9.5, 5.6, 72, 42)),
-            litMaterial(color, 0.24),
-          );
-          addMesh(base, "caustic", 0);
-          const shimmer = new THREE.Mesh(
-            trackGeometry(new THREE.PlaneGeometry(8.4, 4.8, 48, 28)),
-            glowMaterial(accent, 0.2),
-          );
-          shimmer.position.z = 0.18;
-          addMesh(shimmer, "caustic", 1);
-        } else {
-          const geometry = trackGeometry(
-            new THREE.PlaneGeometry(10, 6, 48, 24),
-          );
-          const mesh = new THREE.Mesh(geometry, litMaterial(color, 0.34));
-          const accentMesh = new THREE.Mesh(
-            trackGeometry(new THREE.PlaneGeometry(8, 4.8, 24, 12)),
-            glowMaterial(accent, 0.18),
-          );
-          addMesh(mesh, preset === "plane" ? "plane" : "waves", 0);
-          addMesh(accentMesh, "accentPlane", 1);
-        }
+        const update = createScene({
+          THREE,
+          root,
+          scene,
+          camera,
+          renderer,
+          width,
+          height,
+        });
         const animate = () => {
           if (disposed) return;
           frameId = requestAnimationFrame(animate);
@@ -3460,83 +3309,8 @@ function BackgroundThreeCanvasLayer({
               (performance.now() - clock.startedAt) / 1000 -
               partStartRef.current
             : (readRenderClockTime(root) ?? previewTimeRef.current);
-          const currentGraph = graphRef.current;
-          const nodeIds = new Set(
-            Object.entries(currentGraph?.customNodes ?? {})
-              .filter(([, node]) => node.scopeKey === "background")
-              .map(([id]) => id),
-          );
-          const osc =
-            getBackgroundNodeOscillation(currentGraph, nodeIds, nodeId, t) *
-            0.01;
-          for (const item of meshes) {
-            const mesh = item.mesh;
-            if (item.kind === "particle") {
-              mesh.position.y += 0.0025 * speed * intensity;
-              mesh.rotation.z += 0.01 * speed;
-              if (mesh.position.y > 3.4) mesh.position.y = -3.4;
-              mesh.position.x =
-                (item.baseX ?? 0) + Math.sin(t + item.seed) * 0.018 * intensity;
-              continue;
-            }
-            if (item.kind === "aurora") {
-              mesh.position.y =
-                (item.baseY ?? 0) + Math.sin(t * speed + item.seed) * 0.16;
-              mesh.rotation.z = -0.18 + item.seed * 0.08 + osc * 0.18;
-              const positions = mesh.geometry.attributes.position;
-              for (let index = 0; index < positions.count; index += 1) {
-                const x = positions.getX(index);
-                positions.setZ(
-                  index,
-                  Math.sin(x * 1.2 + t * speed * 1.8 + item.seed) *
-                    0.16 *
-                    intensity,
-                );
-              }
-              positions.needsUpdate = true;
-              continue;
-            }
-            if (item.kind === "ribbon") {
-              mesh.rotation.z = Math.sin(t * 0.3 * speed + item.seed) * 0.2;
-              mesh.position.y =
-                (item.baseY ?? 0) + Math.sin(t * speed + item.seed) * 0.12;
-              continue;
-            }
-            if (item.kind === "orbital") {
-              mesh.rotation.z = t * speed * (0.18 + item.seed * 0.025) + osc;
-              mesh.rotation.x += 0.0008 * speed * (item.seed + 1);
-              continue;
-            }
-            if (item.kind === "core") {
-              mesh.rotation.x = t * 0.35 * speed;
-              mesh.rotation.y = t * 0.48 * speed + osc;
-              mesh.scale.setScalar(1 + Math.sin(t * speed * 1.5) * 0.08);
-              continue;
-            }
-            if (item.kind === "gridTunnel") {
-              mesh.position.z = ((item.seed * -0.36 + t * speed * 0.5) % 6) - 4;
-              mesh.rotation.z = osc * 0.2;
-              continue;
-            }
-            mesh.rotation.z = t * 0.12 * speed + osc;
-            mesh.rotation.x =
-              Math.sin(t * 0.8 * speed + item.seed) * 0.2 * intensity;
-            if (item.kind === "waves" || item.kind === "caustic") {
-              const positions = mesh.geometry.attributes.position;
-              for (let index = 0; index < positions.count; index += 1) {
-                const x = positions.getX(index);
-                const y = positions.getY(index);
-                positions.setZ(
-                  index,
-                  Math.sin(x * 0.8 + t * speed * 1.4 + item.seed) *
-                    0.12 *
-                    intensity +
-                    Math.cos(y * 1.1 + t * speed) * 0.08 * intensity,
-                );
-              }
-              positions.needsUpdate = true;
-            }
-          }
+          if (typeof update === "function")
+            update({ time: t, graph: graphRef.current, nodeId });
           renderer.render(scene, camera);
         };
         animate();
@@ -3544,8 +3318,12 @@ function BackgroundThreeCanvasLayer({
         root.dataset.clipperThreeReady = "true";
         cleanup = () => {
           cancelAnimationFrame(frameId);
-          geometries.forEach((geometry) => geometry.dispose());
-          materials.forEach((material) => material.dispose());
+          scene.traverse((object: any) => {
+            object.geometry?.dispose?.();
+            if (Array.isArray(object.material))
+              object.material.forEach((material: any) => material.dispose?.());
+            else object.material?.dispose?.();
+          });
           renderer.dispose();
           root.replaceChildren();
         };
@@ -3568,6 +3346,45 @@ function BackgroundThreeCanvasLayer({
       style={{ zIndex }}
     />
   );
+}
+
+function resolveThreeBackgroundFactory(value: unknown) {
+  if (typeof value === "function") {
+    if (
+      value.prototype &&
+      typeof value.prototype === "object" &&
+      Object.getOwnPropertyNames(value.prototype).length > 1
+    ) {
+      return (context: Record<string, unknown>) => {
+        const instance = new (value as new (
+          ctx: Record<string, unknown>,
+        ) => unknown)(context) as {
+          createScene?: (ctx: Record<string, unknown>) => unknown;
+          update?: (ctx: Record<string, unknown>) => unknown;
+        };
+        const setup = instance.createScene?.(context);
+        if (typeof setup === "function") return setup;
+        if (typeof instance.update === "function")
+          return (frame: Record<string, unknown>) => instance.update?.(frame);
+        return undefined;
+      };
+    }
+    return value as (context: Record<string, unknown>) => unknown;
+  }
+  if (value && typeof value === "object") {
+    const instance = value as {
+      createScene?: (ctx: Record<string, unknown>) => unknown;
+      update?: (ctx: Record<string, unknown>) => unknown;
+    };
+    return (context: Record<string, unknown>) => {
+      const setup = instance.createScene?.(context);
+      if (typeof setup === "function") return setup;
+      if (typeof instance.update === "function")
+        return (frame: Record<string, unknown>) => instance.update?.(frame);
+      return undefined;
+    };
+  }
+  return null;
 }
 
 function readRenderClockTime(root: HTMLElement) {

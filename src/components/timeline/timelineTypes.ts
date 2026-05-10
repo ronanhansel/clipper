@@ -7,6 +7,7 @@ import type {
   TimelineNodeContextTarget,
 } from "../../app/types";
 import type { PrerenderCacheCoverage } from "../../app/features/preview/usePrerenderCache";
+import type { GraphCompositionMode } from "../../core/graphSockets";
 import type {
   TimelineMarkerMove,
   TimelineMarkerResize,
@@ -218,9 +219,13 @@ export type TimelinePanelProps = {
   ) => void;
   onUpdateComposeAnimationGraph?: (
     updater: (graph: AnimationGraphState | undefined) => AnimationGraphState,
-    options?: { implicit?: boolean },
+    options?: {
+      implicit?: boolean;
+      mode?: GraphCompositionMode;
+      history?: boolean;
+    },
   ) => void;
-  onInspectComposition3dNode?: (nodeId: string | null) => void;
+  onInspectGraphNode?: (nodeId: string | null) => void;
 };
 
 export type EffectDragPreview = {

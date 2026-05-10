@@ -19,7 +19,11 @@ describe("light leak bands transition post-process", () => {
     expect(lightLeakBandsTransitionEffect.id).toBe(
       "clipper.transition.lightLeakBands",
     );
-    expect(lightLeakBandsTransitionEffect.paramControls?.map((control) => control.key)).toEqual([
+    expect(
+      lightLeakBandsTransitionEffect.paramControls?.map(
+        (control) => control.key,
+      ),
+    ).toEqual([
       "intensity",
       "softness",
       "bandCount",
@@ -48,7 +52,7 @@ describe("light leak bands transition post-process", () => {
             softness: -2,
             bandCount: 99,
             drift: -9,
-      warmth: -7,
+            warmth: -7,
             flicker: -1,
             seed: 2001,
           },

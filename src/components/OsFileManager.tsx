@@ -976,13 +976,21 @@ export const composition = new Composition({
         name: node.name,
         isDirectory: node.isDirectory,
       }));
+      const deletePathMoves = targets.map((target, index) =>
+        projectRelativeMove(
+          projectDirectory,
+          target.path,
+          `${effectiveDirectory}/.clipper-trash/${Date.now()}_${index}_${target.name}`,
+        ),
+      );
+      onCompositionPathMoves?.(deletePathMoves);
       enqueueOperation({
         kind: "delete",
         command: new DeleteCommand(targets, effectiveDirectory),
+        projectPathMoves: deletePathMoves,
         apply: (nodes) => removeNodes(nodes, nodesToDelete),
         isObserved: (nodes) =>
           targets.every((target) => !findNodeByPath(nodes, target.path)),
-        reloadProjectAfterCommit: true,
       });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Unable to delete.");

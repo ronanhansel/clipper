@@ -2,7 +2,7 @@ id: clipper.transition.swipe
 category: transition
 name: Swipe
 label: Swipe
-group: Push
+group: Fast
 tags: ["blocksOverlap"]
 defaultDuration: 2
 defaultParams: { "ease": "linear", "transitionTime": 2 }

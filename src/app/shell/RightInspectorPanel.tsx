@@ -16,6 +16,11 @@ type RightInspectorPanelProps = {
 
 const tabs: RightPanelTab[] = ["video", "agent"];
 
+const tabLabels: Record<RightPanelTab, string> = {
+  video: "inspect",
+  agent: "agent",
+};
+
 export function RightInspectorPanel({
   activeTab,
   children,
@@ -28,7 +33,6 @@ export function RightInspectorPanel({
       data-inspector-panel
     >
       <section className="mb-3 grid gap-2.5">
-        <h2 className={sectionTitle}>Inspector</h2>
         <div className="grid grid-cols-2 gap-1">
           {tabs.map((tab) => (
             <button
@@ -36,7 +40,7 @@ export function RightInspectorPanel({
               key={tab}
               onClick={() => onTabChange(tab)}
             >
-              {tab}
+              {tabLabels[tab]}
             </button>
           ))}
         </div>

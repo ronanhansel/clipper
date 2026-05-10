@@ -638,6 +638,142 @@ describe("render runtime", () => {
     expect(evaluated.timeSensitive).toBe(true);
   });
 
+  it("keeps direct background color until a connected background graph source paints", () => {
+    const background: BackgroundLayer = {
+      id: "background",
+      name: "Background",
+      style: { background: "#123456" },
+      elements: [],
+    };
+
+    const unconnected = evaluateBackgroundLayer(background, 0, 2, {
+      bgGraph: {
+        nodes: {},
+        edges: [],
+        customNodes: {
+          paper: {
+            kind: "bgPaper",
+            label: "Paper Simulation",
+            scopeKey: "background",
+            details: { color: "#f3ead8" },
+          },
+        },
+      },
+    });
+    const connected = evaluateBackgroundLayer(background, 0, 2, {
+      bgGraph: {
+        nodes: {},
+        edges: [
+          {
+            id: "paper-to-bg",
+            fromNodeId: "paper",
+            fromPort: "out",
+            toNodeId: "layer:background",
+            toPort: "in",
+          },
+        ],
+        customNodes: {
+          paper: {
+            kind: "bgPaper",
+            label: "Paper Simulation",
+            scopeKey: "background",
+            details: { color: "#f3ead8" },
+          },
+        },
+      },
+    });
+
+    expect(unconnected.fillStyle.background).toBe("#123456");
+    expect(connected.fillStyle.background).toBeUndefined();
+    expect(connected.fillStyle.backgroundColor).toBe("#f3ead8");
+    expect(connected.fillStyle.backgroundImage).toContain("data:image/svg+xml");
+    expect(connected.fillStyle.backgroundImage).toContain("feTurbulence");
+    expect(connected.fillStyle.backgroundImage).toContain("feDiffuseLighting");
+    expect(connected.fillStyle.backgroundImage).not.toContain(
+      "repeating-linear-gradient",
+    );
+  });
+
+  it("resolves background graph targets using the actual background layer id", () => {
+    const background: BackgroundLayer = {
+      id: "bg",
+      name: "Background",
+      style: { background: "#000000" },
+      elements: [],
+    };
+
+    const evaluated = evaluateBackgroundLayer(background, 0, 2, {
+      bgGraph: {
+        nodes: {},
+        edges: [
+          {
+            id: "paper-to-bg",
+            fromNodeId: "paper",
+            fromPort: "right",
+            toNodeId: "layer:bg",
+            toPort: "left",
+          },
+        ],
+        customNodes: {
+          paper: {
+            kind: "bgPaper",
+            label: "Paper Simulation",
+            scopeKey: "background",
+            details: { color: "#f3ead8" },
+          },
+        },
+      },
+    });
+
+    expect(evaluated.fillStyle.background).toBeUndefined();
+    expect(evaluated.fillStyle.backgroundColor).toBe("#f3ead8");
+  });
+
+  it("passes paper graph parameters into the generated SVG texture", () => {
+    const background: BackgroundLayer = {
+      id: "background",
+      name: "Background",
+      style: { background: "#000000" },
+      elements: [],
+    };
+
+    const evaluated = evaluateBackgroundLayer(background, 0, 2, {
+      bgGraph: {
+        nodes: {},
+        edges: [
+          {
+            id: "paper-to-bg",
+            fromNodeId: "paper",
+            fromPort: "out",
+            toNodeId: "layer:background",
+            toPort: "in",
+          },
+        ],
+        customNodes: {
+          paper: {
+            kind: "bgPaper",
+            label: "Paper Simulation",
+            scopeKey: "background",
+            details: {
+              color: "#eeeeee",
+              size: "480",
+              seed: "21",
+              grainAmount: "0.4",
+              crumpleScale: "0.02",
+            },
+          },
+        },
+      },
+    });
+
+    const backgroundImage = String(evaluated.fillStyle.backgroundImage);
+    const decoded = decodeURIComponent(backgroundImage);
+    expect(evaluated.fillStyle.backgroundSize).toBe("480px 480px");
+    expect(decoded).toContain('fill="#eeeeee"');
+    expect(decoded).toContain('seed="21"');
+    expect(decoded).toContain('baseFrequency="0.02"');
+  });
+
   it("can evaluate backgrounds with layer and element animations disabled", () => {
     const background: BackgroundLayer = {
       id: "background",

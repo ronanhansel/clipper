@@ -5292,7 +5292,10 @@ export const DirectTimelinePanel = memo(function DirectTimelinePanel({
                               {primaryMarkerTag?.label ? (
                                 <span
                                   className="inline-flex items-center rounded-[3px] border border-white/25 bg-black/24 px-0.5 py-1 text-[8px] font-black uppercase leading-none tracking-[0.12em] text-white/85 shadow-[0_1px_2px_rgba(0,0,0,0.25)] [writing-mode:vertical-rl]"
-                                  title={primaryMarkerTag.title ?? primaryMarkerTag.label}
+                                  title={
+                                    primaryMarkerTag.title ??
+                                    primaryMarkerTag.label
+                                  }
                                 >
                                   {primaryMarkerTag.label}
                                 </span>

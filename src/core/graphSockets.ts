@@ -14,7 +14,8 @@ export type BackgroundGraphNodeKind =
   | "bgSolid"
   | "bgGradient"
   | "bgPattern"
-  | "bg3d";
+  | "bgPaper"
+  | "bgThreeCode";
 
 export type BackgroundGraphNodeRole =
   | "target"
@@ -55,7 +56,8 @@ export const backgroundGraphSocketSettings = {
     bgSolid: "source",
     bgGradient: "animatedSource",
     bgPattern: "animatedSource",
-    bg3d: "animatedSource",
+    bgPaper: "animatedSource",
+    bgThreeCode: "animatedSource",
   },
   rules: [
     { from: "time", to: "modifier" },

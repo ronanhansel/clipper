@@ -25,6 +25,7 @@ import {
   type Point,
   type TransitionLayer,
 } from "../../core/types";
+import type { GraphCompositionMode } from "../../core/graphSockets";
 import { clamp, roundTenth, roundTwo } from "../../core/math";
 import {
   getAdjustmentEffectPackage,
@@ -79,11 +80,9 @@ import {
 import { clipperHost } from "../../app/clipperHost";
 import { Coordinate2DField, PickButton } from "./Coordinate2DField";
 import { EffectControls } from "./EffectControls";
-import type {
-  GraphParameterEditorField,
-  GraphParameterEditorSchema,
-} from "../timeline/GraphParameterEditor";
+import { GraphParameterEditor } from "../timeline/GraphParameterEditor";
 import {
+  buildGraphNodes,
   buildComposition3dGraphNodes,
   getGraphNodeParameterEditorSchema,
 } from "../timeline/ComposeAnimationGraphPanel";
@@ -94,7 +93,8 @@ const defaultFontOption = { value: defaultFontFamily, label: "System" };
 const defaultMotionEaseSelectValue = "default";
 const easePreviewHoverDelayMs = 600;
 const easePreviewSkipDelayMs = 900;
-const easePreviewDuration = "1.45s";
+const easePreviewDuration = "1.85s";
+const easePreviewMotionPortion = 0.78;
 const easePreviewItems = [
   {
     value: defaultMotionEaseSelectValue,
@@ -104,6 +104,8 @@ const easePreviewItems = [
   { value: "linear", label: "Linear", ease: "linear" as const },
   { value: "easeIn", label: "Ease in", ease: "easeIn" as const },
   { value: "easeOut", label: "Ease out", ease: "easeOut" as const },
+  { value: "expoIn", label: "Expo in", ease: "expoIn" as const },
+  { value: "expoOut", label: "Expo out", ease: "expoOut" as const },
   { value: "circOut", label: "Circ out", ease: "circOut" as const },
   { value: "backOut", label: "Back out", ease: "backOut" as const },
 ];
@@ -156,6 +158,14 @@ function easePreviewProgress(value: number, ease: MotionEase) {
     return value < 0.5
       ? 4 * value * value * value
       : 1 - Math.pow(-2 * value + 2, 3) / 2;
+  if (ease === "expoIn") {
+    if (value <= 0) return 0;
+    return Math.pow(2, 10 * value - 10);
+  }
+  if (ease === "expoOut") {
+    if (value >= 1) return 1;
+    return 1 - Math.pow(2, -10 * value);
+  }
   if (ease === "backOut")
     return (
       1 + 2.70158 * Math.pow(value - 1, 3) + 1.70158 * Math.pow(value - 1, 2)
@@ -179,17 +189,19 @@ function easePreviewSampleValues(
   map: (time: number, progress: number) => number,
 ) {
   const segments = 80;
-  return Array.from({ length: segments + 1 }, (_, index) => {
+  const values = Array.from({ length: segments + 1 }, (_, index) => {
     const time = index / segments;
     return map(time, easePreviewProgress(time, ease)).toFixed(2);
-  }).join(";");
+  });
+  return [...values, values[values.length - 1]].join(";");
 }
 
 function easePreviewKeyTimes() {
   const segments = 80;
-  return Array.from({ length: segments + 1 }, (_, index) =>
-    (index / segments).toFixed(3),
-  ).join(";");
+  const keyTimes = Array.from({ length: segments + 1 }, (_, index) =>
+    ((index / segments) * easePreviewMotionPortion).toFixed(3),
+  );
+  return [...keyTimes, "1.000"].join(";");
 }
 
 function EaseSelectItem({
@@ -556,32 +568,64 @@ export function FrameInspector({
   );
 }
 
-export function Composition3dNodeInspector({
+export function GraphNodeInspector({
   part,
+  selectedObject,
   nodeId,
   onParameterChange,
 }: {
   part: Part;
+  selectedObject: FrameObject | null;
   nodeId: string;
-  onParameterChange: (nodeId: string, key: string, value: string) => void;
+  onParameterChange: (
+    nodeId: string,
+    key: string,
+    value: string,
+    options?: { history?: boolean; mode?: GraphCompositionMode },
+  ) => void;
 }) {
+  const isComposition3d = part.renderMode === "webgl";
+  const isBackgroundGraph =
+    !isComposition3d && selectedObject?.id === part.background.id;
+  const graph = isComposition3d
+    ? part.composition3dGraph
+    : isBackgroundGraph
+      ? part.bgGraph
+      : part.animationGraph;
+  const graphMode: GraphCompositionMode = isComposition3d
+    ? "composition3d"
+    : isBackgroundGraph
+      ? "background"
+      : "composition2d";
+  const objects = selectedObject ? [selectedObject] : [];
   const node =
-    buildComposition3dGraphNodes(part.composition3dGraph, 5200, 900).find(
-      (item) => item.id === nodeId,
-    ) ?? null;
+    (isComposition3d
+      ? buildComposition3dGraphNodes(graph, 5200, 900)
+      : buildGraphNodes(
+          objects,
+          graph,
+          5200,
+          900,
+          selectedObject?.id ?? "__empty__",
+          isBackgroundGraph ? "background" : "composition2d",
+        )
+    ).find((item) => item.id === nodeId) ?? null;
   const schema = node
-    ? getGraphNodeParameterEditorSchema(
-        node,
-        part.composition3dGraph?.parameters?.[node.id],
-      )
+    ? getGraphNodeParameterEditorSchema(node, graph?.parameters?.[node.id])
     : null;
   if (!node) return <EmptyInspector />;
   return (
     <div className="grid gap-3">
       {schema ? (
-        <Composition3dInspectorFields
+        <GraphParameterEditor
           schema={schema}
-          onChange={(key, value) => onParameterChange(node.id, key, value)}
+          variant="inspector"
+          onChange={(key, value, options) =>
+            onParameterChange(node.id, key, value, {
+              ...options,
+              mode: graphMode,
+            })
+          }
         />
       ) : (
         <div className={`grid gap-1.5 ${mutedCaps}`}>
@@ -589,85 +633,6 @@ export function Composition3dNodeInspector({
         </div>
       )}
     </div>
-  );
-}
-
-function Composition3dInspectorFields({
-  schema,
-  onChange,
-}: {
-  schema: GraphParameterEditorSchema;
-  onChange: (key: string, value: string) => void;
-}) {
-  return (
-    <div className="grid gap-3">
-      {schema.groups.map((group) => (
-        <div className="grid gap-2" key={group.id}>
-          {group.label && group.id !== "composition3d" ? (
-            <span className={mutedCaps}>{group.label}</span>
-          ) : null}
-          <div
-            className={
-              group.columns && group.columns > 1
-                ? "grid grid-cols-2 gap-2"
-                : "grid gap-3"
-            }
-          >
-            {group.fields.map((field) => (
-              <Composition3dInspectorField
-                key={field.key}
-                field={field}
-                onChange={onChange}
-              />
-            ))}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function Composition3dInspectorField({
-  field,
-  onChange,
-}: {
-  field: GraphParameterEditorField;
-  onChange: (key: string, value: string) => void;
-}) {
-  if (field.options) {
-    return (
-      <label className={`grid gap-1.5 ${mutedCaps}`}>
-        {field.label}
-        <Select
-          value={field.value}
-          onValueChange={(value) => onChange(field.key, value)}
-        >
-          <SelectTrigger>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectGroup>
-              {field.options.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectGroup>
-          </SelectContent>
-        </Select>
-      </label>
-    );
-  }
-
-  return (
-    <label className={`grid gap-1.5 ${mutedCaps}`}>
-      {field.label}
-      <Input
-        type={field.type === "number" ? "number" : "text"}
-        value={field.value}
-        onChange={(event) => onChange(field.key, event.target.value)}
-      />
-    </label>
   );
 }
 
@@ -1567,7 +1532,9 @@ export function TransitionInspector({
 }: {
   layer: TransitionLayer;
   onChange: (updater: (layer: TransitionLayer) => TransitionLayer) => void;
-  onPreviewLayer?: (updater: (layer: TransitionLayer) => TransitionLayer) => void;
+  onPreviewLayer?: (
+    updater: (layer: TransitionLayer) => TransitionLayer,
+  ) => void;
   onClearPreview?: () => void;
   onDelete: () => void;
 }) {
@@ -1805,7 +1772,8 @@ function getTransitionParamNumericValue(
   if (!Number.isFinite(numeric)) numeric = fallback;
   if (typeof control.min === "number") numeric = Math.max(control.min, numeric);
   if (typeof control.max === "number") numeric = Math.min(control.max, numeric);
-  if (control.step && Number.isInteger(control.step)) numeric = Math.round(numeric);
+  if (control.step && Number.isInteger(control.step))
+    numeric = Math.round(numeric);
   return numeric;
 }
 

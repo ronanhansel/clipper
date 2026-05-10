@@ -7,6 +7,7 @@ export const scaleAnimation: AnimationDefinition = {
   fieldGroups: [
     {
       id: "parameters",
+      columns: 2,
       fields: [
         { key: "from", label: "from", defaultValue: "1" },
         { key: "to", label: "to", defaultValue: "1" },

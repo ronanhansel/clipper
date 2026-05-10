@@ -48,6 +48,8 @@ export type MotionEase =
   | "easeIn"
   | "easeOut"
   | "easeInOut"
+  | "expoIn"
+  | "expoOut"
   | "circOut"
   | "backOut";
 export type LayerAnimation = {
@@ -116,6 +118,7 @@ export type WebLayerProps = Omit<RenderableProps, "content"> & {
 export type ThreeLayerProps = Omit<RenderableProps, "content"> & {
   source: string;
 };
+export type ThreeBackgroundFactory = new (...args: unknown[]) => unknown;
 export type CompositionProps = {
   id?: string;
   name?: string;
@@ -134,6 +137,7 @@ export type CompositionProps = {
   };
   animationGraph?: JsonValue;
   bgGraph?: JsonValue;
+  threeBackgrounds?: Record<string, ThreeBackgroundFactory | object | Function>;
   composition3dGraph?: JsonValue;
   render: (context: RenderContext) => Renderable[];
 };
@@ -145,6 +149,7 @@ export type Composition3DProps = Omit<
   background?: CompositionProps["background"];
   animationGraph?: JsonValue;
   bgGraph?: JsonValue;
+  threeBackgrounds?: CompositionProps["threeBackgrounds"];
   composition3dGraph?: JsonValue;
   render?: (context: RenderContext) => Renderable[];
 };
@@ -348,6 +353,7 @@ export class Composition {
   background?: CompositionProps["background"];
   animationGraph?: CompositionProps["animationGraph"];
   bgGraph?: CompositionProps["bgGraph"];
+  threeBackgrounds?: CompositionProps["threeBackgrounds"];
   composition3dGraph?: CompositionProps["composition3dGraph"];
   render: (context: RenderContext) => Renderable[];
 
@@ -360,6 +366,7 @@ export class Composition {
     this.background = props.background;
     this.animationGraph = props.animationGraph;
     this.bgGraph = props.bgGraph;
+    this.threeBackgrounds = props.threeBackgrounds;
     this.composition3dGraph = props.composition3dGraph;
     this.render = props.render;
   }

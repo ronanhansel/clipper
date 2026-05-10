@@ -591,45 +591,6 @@ describe("project normalization", () => {
     });
   });
 
-  it("normalizes graph deleted node tombstones", () => {
-    const normalized = normalizeAnimationGraphState({
-      nodes: { "animation:text:anim:opacity:opacity": { x: 1, y: 2 } },
-      customNodes: {
-        "animation:text:anim:opacity:opacity": {
-          kind: "animation",
-          label: "Opacity",
-          scopeKey: "text",
-          details: { property: "opacity" },
-        },
-      },
-      edges: [
-        {
-          id: "deleted->layer",
-          fromNodeId: "animation:text:anim:opacity:opacity",
-          fromPort: "bottom",
-          toNodeId: "layer:text",
-          toPort: "top",
-        },
-      ],
-      parameters: {
-        "animation:text:anim:opacity:opacity": { from: "0", to: "1" },
-      },
-      deletedNodeIds: [
-        "animation:text:anim:opacity:opacity",
-        "animation:text:anim:opacity:opacity",
-        "",
-      ],
-    });
-
-    expect(normalized).toMatchObject({
-      nodes: {},
-      edges: [],
-      deletedNodeIds: ["animation:text:anim:opacity:opacity"],
-    });
-    expect(normalized?.customNodes).toBeUndefined();
-    expect(normalized?.parameters).toBeUndefined();
-  });
-
   it("materializes graph-authored position parameters", () => {
     const applied = applyAnimationGraphToComposition(
       {
@@ -908,7 +869,7 @@ describe("project normalization", () => {
     });
   });
 
-  it("keeps grouped derived time nodes connected to their source layer animation", () => {
+  it("keeps grouped graph-owned time nodes connected to their source layer animation", () => {
     const part = {
       ...composition,
       objects: [
@@ -919,13 +880,7 @@ describe("project normalization", () => {
           selector: ".text",
           bounds: { x: 0, y: 0, width: 100, height: 40 },
           style: {},
-          animations: [
-            {
-              id: "fade",
-              keyframes: { opacity: [0, 1] as const },
-              options: { delay: 1.2, duration: 0.7, type: "tween" as const },
-            },
-          ],
+          animations: [],
         },
       ],
     };
@@ -946,6 +901,12 @@ describe("project normalization", () => {
           outNodeId: "out",
           nodes: {},
           customNodes: {
+            "animation:text:anim:fade:opacity": {
+              kind: "animation",
+              label: "Opacity",
+              scopeKey: "groupA",
+              details: { property: "opacity", from: "0", to: "1" },
+            },
             "time:text:0": {
               kind: "time",
               label: "Time",
@@ -2328,7 +2289,7 @@ describe("project normalization", () => {
     expect(applied.objects[0].animations).toEqual([]);
   });
 
-  it("does not replace unsupported position-like keyframes from stale detected graph nodes", () => {
+  it("uses graph-owned animations instead of stale direct object animations", () => {
     const applied = applyAnimationGraphToComposition(
       {
         ...composition,
@@ -2402,8 +2363,8 @@ describe("project normalization", () => {
     expect(
       applied.objects[0].animations?.find(
         (animation) => animation.id === "z_move",
-      )?.keyframes,
-    ).toEqual({ z: [0, 100] });
+      ),
+    ).toBeUndefined();
     expect(
       applied.objects[0].animations?.find(
         (animation) => animation.id === "graph:effect",
@@ -2569,6 +2530,48 @@ describe("project normalization", () => {
       "time->layer",
     ]);
     expect(loaded.objects[0].animations).toBeUndefined();
+  });
+
+  it("loads composition-owned three background registry from source imports", async () => {
+    const source = `import { Composition } from "@clipper/composition-api";
+import { AuroraBackground } from "./backgrounds/AuroraBackground";
+
+export const composition = new Composition({
+  duration: 5,
+  frame: { width: 1920, height: 1080, style: {} },
+  background: { style: {}, elements: [] },
+  bgGraph: {
+    nodes: { three: { x: 0, y: 0 } },
+    edges: [],
+    customNodes: {
+      three: {
+        kind: "bgThreeCode",
+        label: "Aurora",
+        scopeKey: "background",
+        details: { ref: "aurora" },
+      },
+    },
+  },
+  threeBackgrounds: { aurora: AuroraBackground },
+  render() { return []; },
+});`;
+    const imported = `export class AuroraBackground {
+  createScene() {
+    return () => undefined;
+  }
+}`;
+
+    const loaded = await compositionFromSource(
+      composition,
+      source,
+      async (path) => {
+        expect(path).toBe("compositions/backgrounds/AuroraBackground.ts");
+        return imported;
+      },
+    );
+
+    expect(typeof loaded.threeBackgrounds?.aurora).toBe("function");
+    expect(loaded.bgGraph?.customNodes?.three?.details?.ref).toBe("aurora");
   });
 
   it("ignores legacy timeline clip animation graph state", () => {

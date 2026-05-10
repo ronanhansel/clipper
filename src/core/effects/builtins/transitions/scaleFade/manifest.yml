@@ -5,4 +5,19 @@ label: Scale Fade
 group: Dissolve
 tags: ["blocksOverlap"]
 defaultDuration: 2
-defaultParams: { "ease": "linear", "transitionTime": 2 }
+defaultParams: { "ease": "linear", "transitionTime": 2, "scaleOut": 1.08, "scaleIn": 1.08 }
+paramControls:
+  - key: scaleOut
+    label: Scale Out
+    type: number
+    min: 0.5
+    max: 2
+    step: 0.01
+    defaultValue: 1.08
+  - key: scaleIn
+    label: Scale In
+    type: number
+    min: 0.5
+    max: 2
+    step: 0.01
+    defaultValue: 1.08

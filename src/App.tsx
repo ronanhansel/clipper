@@ -158,6 +158,8 @@ import {
   type ObjectSnapGuide,
 } from "./core/frameInteraction";
 import { boundsToPoints } from "./core/geometry";
+import { updateAnimationGraphNodeParameter } from "./core/graphParameters";
+import type { GraphCompositionMode } from "./core/graphSockets";
 import { clamp, roundToPrecision, roundTenth } from "./core/math";
 import type {
   AdjustmentEffectPointControl,
@@ -446,8 +448,9 @@ function AppContent({
   const [objectResizeMode, setObjectResizeMode] = useState<"resize" | "scale">(
     "resize",
   );
-  const [selectedComposition3dNodeId, setSelectedComposition3dNodeId] =
-    useState<string | null>(null);
+  const [selectedGraphNodeId, setSelectedGraphNodeId] = useState<string | null>(
+    null,
+  );
   const [liveDomPostProcessMaxFps, setLiveDomPostProcessMaxFpsState] = useState(
     getInitialLiveDomPostProcessMaxFps,
   );
@@ -1027,7 +1030,7 @@ function AppContent({
     : nextComposePlaybackRange;
 
   useEffect(() => {
-    if (!composeMode) setSelectedComposition3dNodeId(null);
+    if (!composeMode) setSelectedGraphNodeId(null);
   }, [composeMode]);
 
   const compositionLibrary = project.compositionLibrary ?? [];
@@ -1702,6 +1705,8 @@ function AppContent({
   useEffect(() => {
     if (timelineMode === "compose") {
       clearMarkerSelection();
+      setSelectedPartId("");
+      setSelectedParts([]);
       return;
     }
 
@@ -2089,7 +2094,11 @@ function AppContent({
 
   function updateComposeAnimationGraph(
     updater: (graph: AnimationGraphState | undefined) => AnimationGraphState,
-    options?: { implicit?: boolean },
+    options?: {
+      implicit?: boolean;
+      mode?: GraphCompositionMode;
+      history?: boolean;
+    },
   ) {
     const clipId = activeTimelinePart?.id;
     if (!clipId) return;
@@ -2098,29 +2107,38 @@ function AppContent({
         ?.find((timeline) => timeline.id === scene.id)
         ?.clips.find((clip) => clip.id === clipId);
       if (!targetClip) return current;
-      const is3dClip = (targetClip.renderMode ?? part.renderMode) === "webgl";
-      const isBackgroundGraph =
-        !is3dClip &&
-        selectedComposeObjectIds.length === 1 &&
-        selectedComposeObjectIds[0] === part.background.id;
+      const graphMode: GraphCompositionMode =
+        options?.mode ??
+        ((targetClip.renderMode ?? part.renderMode) === "webgl"
+          ? "composition3d"
+          : selectedComposeObjectIds.length === 1 &&
+              selectedComposeObjectIds[0] === part.background.id
+            ? "background"
+            : "composition2d");
       const targetCompositionId = targetClip.compositionId;
       const targetFilePath = part.filePath;
       const currentComposition = [
         ...(current.compositionLibrary ?? []),
         ...(current.compositions ?? []),
-      ].find(
-        (composition) =>
-          composition.id === targetCompositionId ||
-          composition.filePath === targetFilePath,
-      );
-      const nextGraph = updater(
-        is3dClip
-          ? ((currentComposition?.composition3dGraph ??
-              part.composition3dGraph) as AnimationGraphState | undefined)
-          : isBackgroundGraph
-            ? (currentComposition?.bgGraph ?? part.bgGraph)
-          : currentComposition?.animationGraph,
-      );
+      ].find((composition) => composition.id === targetCompositionId);
+      const fallbackComposition =
+        currentComposition ??
+        [
+          ...(current.compositionLibrary ?? []),
+          ...(current.compositions ?? []),
+          ...current.scenes.flatMap((sceneItem) => sceneItem.compositions),
+        ].find((composition) => composition.filePath === targetFilePath);
+      const getCompositionGraph = (
+        composition: CompositionClip | undefined,
+      ) => {
+        if (graphMode === "composition3d")
+          return (composition?.composition3dGraph ??
+            part.composition3dGraph) as AnimationGraphState | undefined;
+        if (graphMode === "background")
+          return composition?.bgGraph ?? part.bgGraph;
+        return composition?.animationGraph ?? part.animationGraph;
+      };
+      const nextGraph = updater(getCompositionGraph(fallbackComposition));
       const updateComposition = (composition: CompositionClip) => {
         if (
           composition.id !== targetCompositionId &&
@@ -2128,40 +2146,41 @@ function AppContent({
           composition.filePath !== targetFilePath
         )
           return composition;
-        if (is3dClip)
+        if (graphMode === "composition3d")
           return {
             ...composition,
             renderMode: webglRenderMode,
             composition3dGraph:
               nextGraph as import("./core/types").Composition3dGraphState,
           };
-        if (isBackgroundGraph) return { ...composition, bgGraph: nextGraph };
+        if (graphMode === "background")
+          return { ...composition, bgGraph: nextGraph };
         return { ...composition, animationGraph: nextGraph };
       };
       const webglRenderMode = "webgl" as const;
       return {
         ...current,
-          compositionLibrary: current.compositionLibrary
-            ? current.compositionLibrary.map(updateComposition)
-            : current.compositionLibrary,
-          compositions: current.compositions
-            ? current.compositions.map(updateComposition)
-            : current.compositions,
-          scenes: current.scenes.map((sceneItem) =>
-            sceneItem.id === scene.id
-              ? {
-                  ...sceneItem,
-                  compositions: sceneItem.compositions.map(updateComposition),
-                }
-              : sceneItem,
-          ),
+        compositionLibrary: current.compositionLibrary
+          ? current.compositionLibrary.map(updateComposition)
+          : current.compositionLibrary,
+        compositions: current.compositions
+          ? current.compositions.map(updateComposition)
+          : current.compositions,
+        scenes: current.scenes.map((sceneItem) =>
+          sceneItem.id === scene.id
+            ? {
+                ...sceneItem,
+                compositions: sceneItem.compositions.map(updateComposition),
+              }
+            : sceneItem,
+        ),
         timelines: (current.timelines ?? []).map((timeline) =>
           timeline.id === scene.id
             ? {
                 ...timeline,
                 clips: timeline.clips.map((clip) =>
                   clip.id === clipId
-                    ? is3dClip
+                    ? graphMode === "composition3d"
                       ? { ...clip, renderMode: webglRenderMode }
                       : clip
                     : clip,
@@ -2173,34 +2192,30 @@ function AppContent({
     };
     if (options?.implicit)
       implicitFileOperation(updateProject)(applyUpdate, {
-        history: true,
+        history: options.history !== false,
         syncSources: true,
       });
-    else updateProject(applyUpdate, { history: true, syncSources: true });
+    else
+      updateProject(applyUpdate, {
+        history: options?.history !== false,
+        syncSources: true,
+      });
   }
 
-  function updateComposition3dGraphNodeParameter(
+  function updateGraphNodeParameter(
     nodeId: string,
     key: string,
     value: string,
+    options?: { history?: boolean; mode?: GraphCompositionMode },
   ) {
-    updateComposeAnimationGraph((graph) => ({
-      nodes: graph?.nodes ?? {},
-      edges: graph?.edges ?? [],
-      customNodes: graph?.customNodes,
-      groups: graph?.groups,
-      parameters: {
-        ...(graph?.parameters ?? {}),
-        [nodeId]: { ...(graph?.parameters?.[nodeId] ?? {}), [key]: value },
-      },
-      deletedNodeIds: graph?.deletedNodeIds,
-      viewport: graph?.viewport,
-      viewports: graph?.viewports,
-    }));
+    updateComposeAnimationGraph(
+      (graph) => updateAnimationGraphNodeParameter(graph, nodeId, key, value),
+      options,
+    );
   }
 
-  function inspectComposition3dNode(nodeId: string | null) {
-    setSelectedComposition3dNodeId(nodeId);
+  function inspectGraphNode(nodeId: string | null) {
+    setSelectedGraphNodeId(nodeId);
     if (nodeId) setRightPanelTab("video");
   }
 
@@ -3041,6 +3056,10 @@ function AppContent({
       (selectedObjectId ? [selectedObjectId] : []),
     [selectedObjectId, selectionPayload],
   );
+  const selectedGraphObject =
+    composeMode && selectedComposeObjectIds[0] === part.background.id
+      ? frameObjectFromBackgroundLayer(part.background)
+      : (selectedObject ?? null);
   const leftSidebarPlaybackInputRef = useRef({
     part,
     selectedComposeObjectIds,
@@ -3565,7 +3584,7 @@ function AppContent({
               frameScale: displayFramePreviewScale,
               isPlaying,
               part,
-              partStart: activeTimelinePart?.start ?? 0,
+              partStart: composeMode ? 0 : (activeTimelinePart?.start ?? 0),
               previewParts:
                 hasPreviewComposition && !composeMode ? previewParts : [],
               transitionPreviewParts:
@@ -3751,6 +3770,7 @@ function AppContent({
               trackerPickMotionMarker={trackerPickTranslationMarker}
               isPlaying={isPlaying}
               selectedObject={selectedObject}
+              selectedGraphObject={selectedGraphObject}
               selectedAdjustmentLayer={selectedAdjustmentLayer}
               selectedTransitionLayer={
                 (previewTransitionLayers ?? scene.transitionLayers)?.find(
@@ -3760,7 +3780,7 @@ function AppContent({
               sceneDurationSeconds={sceneDurationSeconds}
               pointPickAdjustment={pointPickAdjustment}
               selectedPart={selectedPart}
-              selectedComposition3dNodeId={selectedComposition3dNodeId}
+              selectedGraphNodeId={selectedGraphNodeId}
               onUpdateMotionMarker={updateMotionMarker}
               onPreviewMotionMarker={previewMotionMarker}
               onPreviewMotionPickPoint={previewMotionPickPoint}
@@ -3822,9 +3842,7 @@ function AppContent({
               onPreviewPartFrame={previewPartFrame}
               onPreviewPartBackground={previewPartBackground}
               onUpdatePartRenderMode={updatePartRenderMode}
-              onUpdateComposition3dGraphNodeParameter={
-                updateComposition3dGraphNodeParameter
-              }
+              onUpdateGraphNodeParameter={updateGraphNodeParameter}
             />
           </RightInspectorPanel>
         </EditorWorkspace>
@@ -3932,7 +3950,7 @@ function AppContent({
               updateComposeBackgroundAnimation,
             onUpdateComposeObjectAnimation: updateComposeObjectAnimation,
             onUpdateComposeAnimationGraph: updateComposeAnimationGraph,
-            onInspectComposition3dNode: inspectComposition3dNode,
+            onInspectGraphNode: inspectGraphNode,
           }}
         >
           <ConnectedTimelinePanel />

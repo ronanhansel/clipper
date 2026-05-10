@@ -584,11 +584,13 @@ export function getExportPostProcessPasses(
       previewModel.visibleAdjustmentLayers,
       request.frameRate,
       { width: exportWidth, height: exportHeight },
-    )
-      .steps.flatMap((step) => step.postProcessPasses ?? []),
+    ).steps.flatMap((step) => step.postProcessPasses ?? []),
     ...transitionPasses,
   ].map((pass) =>
-    withPostProcessFrameBackground(pass, previewModel.part.frame.style.background),
+    withPostProcessFrameBackground(
+      pass,
+      previewModel.part.frame.style.background,
+    ),
   );
 }
 

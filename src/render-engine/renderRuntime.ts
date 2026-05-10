@@ -42,6 +42,9 @@ export type RenderEvaluationOptions = {
   bgGraph?: AnimationGraphState;
 };
 
+const paperTextureWidth = 1920;
+const paperTextureHeight = 1080;
+
 const templateCache = new Map<
   string,
   (context: TemplateRenderContext) => TemplateRenderResult
@@ -108,8 +111,11 @@ export function evaluateBackgroundLayer(
     animationsEnabled && background.animations
       ? evaluateLayerAnimations(background.animations, time)
       : {};
-  const backgroundGraphStyle = compileBackgroundGraphStyle(options.bgGraph, time);
-  const baseFillStyle = hasBackgroundGraphSources(options.bgGraph)
+  const backgroundGraphStyle = compileBackgroundGraphStyle(
+    options.bgGraph,
+    time,
+  );
+  const baseFillStyle = hasBackgroundGraphPaintStyle(backgroundGraphStyle)
     ? stripBackgroundPaintStyle(background.style)
     : background.style;
 
@@ -144,16 +150,18 @@ export function getConnectedBackgroundSourceIds(
     (graph?.edges ?? [])
       .filter(
         (edge) =>
-          edge.toNodeId === "layer:background" &&
+          edge.toNodeId.startsWith("layer:") &&
           backgroundNodeIds.has(edge.fromNodeId),
       )
       .map((edge) => edge.fromNodeId),
   );
 }
 
-function hasBackgroundGraphSources(graph: AnimationGraphState | undefined) {
-  return Object.values(graph?.customNodes ?? {}).some(
-    (node) => node.scopeKey === "background",
+function hasBackgroundGraphPaintStyle(style: RenderStyle) {
+  return Boolean(
+    style.background !== undefined ||
+    style.backgroundColor !== undefined ||
+    style.backgroundImage !== undefined,
   );
 }
 
@@ -209,11 +217,12 @@ export function compileBackgroundGraphStyle(
       const angle = details.angle ?? "135deg";
       const center = details.center ?? "center";
       backgroundImages.push(
-        type === "radial"
-          ? `radial-gradient(circle at ${center}, ${stops})`
-          : type === "conic"
-            ? `conic-gradient(from ${angle}, ${stops})`
-            : `linear-gradient(${angle}, ${stops})`,
+        details.gradient ??
+          (type === "radial"
+            ? `radial-gradient(circle at ${center}, ${stops})`
+            : type === "conic"
+              ? `conic-gradient(from ${angle}, ${stops})`
+              : `linear-gradient(${angle}, ${stops})`),
       );
       if (oscillation) {
         backgroundSizes.push(details.backgroundSize ?? "140% 140%");
@@ -247,6 +256,19 @@ export function compileBackgroundGraphStyle(
         backgroundSizes.push(`${size} ${size}`);
         backgroundPositions.push(position);
       }
+      continue;
+    }
+    if (node.kind === "bgPaper") {
+      const color = details.color ?? "#f5f5f2";
+      const scale = formatPaperTextureSize(details.size ?? details.scale);
+      const position = oscillation
+        ? `${oscillation * 0.6}px ${oscillation * -0.4}px`
+        : "center";
+      style.backgroundColor = color;
+      backgroundImages.push(`url("${createPaperTextureDataUrl(details)}")`);
+      backgroundSizes.push(`${scale} ${scale}`);
+      backgroundPositions.push(position);
+      style.backgroundRepeat = "repeat";
     }
   }
   if (backgroundImages.length) {
@@ -255,6 +277,77 @@ export function compileBackgroundGraphStyle(
     style.backgroundPosition = backgroundPositions.join(", ");
   }
   return style;
+}
+
+function formatPaperTextureSize(value: string | undefined) {
+  const fallback = "360px";
+  if (!value) return fallback;
+  const trimmed = value.trim();
+  if (/^-?\d+(?:\.\d+)?$/.test(trimmed)) return `${trimmed}px`;
+  if (/^-?\d+(?:\.\d+)?(?:px|rem|em|%|vw|vh|vmin|vmax)$/i.test(trimmed))
+    return trimmed;
+  return fallback;
+}
+
+function createPaperTextureDataUrl(details: Record<string, string>) {
+  const color = details.color ?? "#ffffff";
+  const seed = clampNumber(Number(details.seed ?? 11), 1, 999, 11);
+  const grainAmount = clampNumber(
+    Number(details.grainAmount ?? 0.04),
+    0,
+    1,
+    0.04,
+  );
+  const grainScale = clampNumber(
+    Number(details.grainScale ?? 4.5),
+    0.1,
+    15,
+    4.5,
+  );
+  const crumpleAmount = clampNumber(
+    Number(details.crumpleAmount ?? 0.4),
+    0,
+    1,
+    0.4,
+  );
+  const crumpleScale = clampNumber(
+    Number(details.crumpleScale ?? 0.01),
+    0.0001,
+    0.1,
+    0.01,
+  );
+  const crumpleShape = Math.round(
+    clampNumber(Number(details.crumpleShape ?? 5), 1, 8, 5),
+  );
+
+  const surfaceScale = roundThree(crumpleAmount * 12);
+  const diffuseConstant = 1.35;
+  const grainFrequency = roundThree(grainScale * 0.5);
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${paperTextureWidth}" height="${paperTextureHeight}" viewBox="0 0 ${paperTextureWidth} ${paperTextureHeight}" color-interpolation-filters="sRGB"><defs><filter id="paper" x="0" y="0" width="100%" height="100%"><feTurbulence type="fractalNoise" baseFrequency="${crumpleScale}" numOctaves="${crumpleShape}" seed="${seed}" stitchTiles="stitch" result="crumpleNoise"/><feDiffuseLighting in="crumpleNoise" surfaceScale="${surfaceScale}" diffuseConstant="${diffuseConstant}" lighting-color="#ffffff" result="light"><feDistantLight azimuth="315" elevation="45"/></feDiffuseLighting><feBlend in="SourceGraphic" in2="light" mode="multiply" result="crumpled"/><feTurbulence type="fractalNoise" baseFrequency="${grainFrequency}" numOctaves="1" seed="${seed + 1}" stitchTiles="stitch" result="grainNoise"/><feColorMatrix in="grainNoise" type="saturate" values="0" result="grainMono"/><feComponentTransfer in="grainMono" result="grain"><feFuncR type="linear" slope="${grainAmount}" intercept="${roundThree(1 - grainAmount)}"/><feFuncG type="linear" slope="${grainAmount}" intercept="${roundThree(1 - grainAmount)}"/><feFuncB type="linear" slope="${grainAmount}" intercept="${roundThree(1 - grainAmount)}"/></feComponentTransfer><feBlend in="crumpled" in2="grain" mode="multiply" result="papered"/></filter></defs><rect width="100%" height="100%" fill="${escapeSvgAttribute(color)}" filter="url(#paper)"/></svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+function clampNumber(
+  value: number,
+  min: number,
+  max: number,
+  fallback: number,
+) {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, value));
+}
+
+function roundThree(value: number) {
+  return Math.round(value * 1000) / 1000;
+}
+
+function escapeSvgAttribute(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
 
 export function getBackgroundNodeOscillation(
@@ -383,6 +476,8 @@ export function easeProgress(value: number, ease: MotionEase | undefined) {
   if (ease === "easeOut" || ease === "circOut") return easeOutCubic(value);
   if (ease === "easeIn") return value * value * value;
   if (ease === "easeInOut") return easeInOutCubic(value);
+  if (ease === "expoIn") return expoIn(value);
+  if (ease === "expoOut") return expoOut(value);
   if (ease === "backOut") return backOut(value);
   return value;
 }
@@ -395,6 +490,16 @@ function easeInOutCubic(value: number) {
   return value < 0.5
     ? 4 * value * value * value
     : 1 - Math.pow(-2 * value + 2, 3) / 2;
+}
+
+function expoIn(value: number) {
+  if (value <= 0) return 0;
+  return Math.pow(2, 10 * value - 10);
+}
+
+function expoOut(value: number) {
+  if (value >= 1) return 1;
+  return 1 - Math.pow(2, -10 * value);
 }
 
 function backOut(value: number) {

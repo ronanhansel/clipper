@@ -50,10 +50,11 @@ export function getCompositionPreviewTime(
   composition: Pick<CompositionClip, "duration" | "start" | "trimStart">,
   sceneTime: number,
 ) {
+  const trimStart = composition.trimStart ?? 0;
   return clamp(
-    sceneTime - (composition.start ?? 0) + (composition.trimStart ?? 0),
+    sceneTime - (composition.start ?? 0) + trimStart,
     0,
-    composition.duration,
+    composition.duration + trimStart,
   );
 }
 

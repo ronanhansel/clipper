@@ -350,6 +350,7 @@ const listProjectFilesRecursive = async (
     isDirectory: boolean;
   }[] = [];
   for (const entry of entries) {
+    if (entry.isDirectory && entry.name === ".clipper-trash") continue;
     const fullPath = `${dir}/${entry.name}`;
     const relativePath =
       baseDir === dir ? entry.name : fullPath.slice(baseDir.length + 1);

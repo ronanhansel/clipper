@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import {
   Select,
   SelectContent,
@@ -13,7 +14,7 @@ export type GraphParameterEditorField = {
   key: string;
   label: string;
   value: string;
-  type?: "number" | "text" | "color";
+  type?: "number" | "text" | "color" | "gradient";
   unit?: string;
   options?: readonly { value: string; label: string }[];
 };
@@ -31,7 +32,12 @@ export type GraphParameterEditorSchema = {
   groups: GraphParameterEditorGroup[];
 };
 
-type GraphParameterEditorVariant = "default" | "timePopup";
+type GraphParameterEditorVariant = "default" | "inspector" | "timePopup";
+type GraphParameterChange = (
+  key: string,
+  value: string,
+  options?: { history?: boolean },
+) => void;
 
 export function GraphParameterEditor({
   schema,
@@ -39,10 +45,17 @@ export function GraphParameterEditor({
   variant = "default",
 }: {
   schema: GraphParameterEditorSchema;
-  onChange: (key: string, value: string) => void;
+  onChange: GraphParameterChange;
   variant?: GraphParameterEditorVariant;
 }) {
+  const editSessionActiveRef = useRef(false);
+  function commitEditSessionChange(key: string, value: string) {
+    const history = !editSessionActiveRef.current;
+    editSessionActiveRef.current = true;
+    onChange(key, value, { history });
+  }
   const isTimePopup = variant === "timePopup";
+  const isInspector = variant === "inspector";
   return (
     <div
       className={
@@ -86,22 +99,44 @@ function GraphParameterGroup({
 }: {
   group: GraphParameterEditorGroup;
   variant: GraphParameterEditorVariant;
-  onChange: (key: string, value: string) => void;
+  onChange: GraphParameterChange;
 }) {
+  const editSessionActiveRef = useRef(false);
+  function commitEditSessionChange(key: string, value: string) {
+    const history = !editSessionActiveRef.current;
+    editSessionActiveRef.current = true;
+    onChange(key, value, { history });
+  }
   const isTimePopup = variant === "timePopup";
   return (
-    <div className={isTimePopup ? "grid gap-1.5" : "grid gap-1.5"}>
+    <div
+      className={
+        variant === "inspector"
+          ? "grid gap-3"
+          : isTimePopup
+            ? "grid gap-1.5"
+            : "grid gap-1.5"
+      }
+    >
       <div
         className={
-          isTimePopup
-            ? "text-[14px] font-extrabold leading-none text-[#f3f6fb]"
-            : "text-[10px] font-bold text-[#7f8794]"
+          variant === "inspector"
+            ? "text-[13px] font-extrabold text-[#9da3b2]"
+            : isTimePopup
+              ? "text-[14px] font-extrabold leading-none text-[#f3f6fb]"
+              : "text-[10px] font-bold text-[#7f8794]"
         }
       >
         {group.label}
       </div>
       <div
-        className={isTimePopup ? "grid gap-1.5" : "grid gap-2"}
+        className={
+          variant === "inspector"
+            ? "grid gap-4"
+            : isTimePopup
+              ? "grid gap-1.5"
+              : "grid gap-2"
+        }
         style={{
           gridTemplateColumns: `repeat(${group.columns ?? 1}, minmax(0, 1fr))`,
         }}
@@ -126,8 +161,14 @@ function GraphParameterInlineField({
 }: {
   field: GraphParameterEditorField;
   variant: GraphParameterEditorVariant;
-  onChange: (key: string, value: string) => void;
+  onChange: GraphParameterChange;
 }) {
+  const editSessionActiveRef = useRef(false);
+  function commitEditSessionChange(key: string, value: string) {
+    const history = !editSessionActiveRef.current;
+    editSessionActiveRef.current = true;
+    onChange(key, value, { history });
+  }
   if (field.options)
     return (
       <GraphParameterSelectField
@@ -155,62 +196,107 @@ function GraphParameterInlineField({
         inline
       />
     );
+  if (field.type === "gradient")
+    return (
+      <GraphParameterGradientField
+        field={field}
+        variant={variant}
+        onChange={onChange}
+        inline
+      />
+    );
   const split = splitParameterUnit(field.value, field.unit);
   const displayValue = getNumberFieldDisplayValue(field, split.value);
+  const [focused, setFocused] = useState(false);
+  const [draftValue, setDraftValue] = useState(displayValue);
+  useEffect(() => {
+    if (!focused) setDraftValue(displayValue);
+  }, [displayValue, focused]);
+  const inputValue = focused ? draftValue : displayValue;
+  const canScrub = field.key !== "repeat" && inputValue !== "";
   const isTimePopup = variant === "timePopup";
+  const isInspector = variant === "inspector";
   return (
     <label
       className={
-        isTimePopup
-          ? "grid grid-cols-[76px_minmax(0,1fr)] items-center gap-2"
-          : "grid grid-cols-[78px_minmax(0,1fr)] items-center gap-2"
+        isInspector
+          ? "grid gap-1.5"
+          : isTimePopup
+            ? "grid grid-cols-[76px_minmax(0,1fr)] items-center gap-2"
+            : "grid grid-cols-[78px_minmax(0,1fr)] items-center gap-2"
       }
     >
       <span
         className={
-          isTimePopup
-            ? "text-[11px] font-extrabold leading-none tracking-[-0.02em] text-[#8e97a7]"
-            : "text-[10px] font-bold text-[#7f8794]"
+          isInspector
+            ? "text-[12px] font-bold text-[#8f96a3]"
+            : isTimePopup
+              ? "text-[11px] font-extrabold leading-none tracking-[-0.02em] text-[#8e97a7]"
+              : "text-[10px] font-bold text-[#7f8794]"
         }
       >
         {field.label}
       </span>
       <div
         className={
-          isTimePopup
-            ? "grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-1.5 rounded-[7px] border border-transparent bg-[#0a1019]/70 px-2 py-0.5 transition focus-within:border-[#526582] focus-within:bg-[#0b1018]"
-            : "grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-2 rounded border border-transparent bg-transparent px-1 transition hover:bg-[#141b27] focus-within:border-[#3d4b62] focus-within:bg-[#0b1018]"
+          isInspector
+            ? "relative min-w-0"
+            : isTimePopup
+              ? "grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-1.5 rounded-[7px] border border-transparent bg-[#0a1019]/70 px-2 py-0.5 transition focus-within:border-[#526582] focus-within:bg-[#0b1018]"
+              : "grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-2 rounded border border-transparent bg-transparent px-1 transition hover:bg-[#141b27] focus-within:border-[#3d4b62] focus-within:bg-[#0b1018]"
         }
       >
         <span
           className={
-            isTimePopup
-              ? "min-w-[10px] text-left text-[11px] font-extrabold leading-none text-[#8e97a7]"
-              : "min-w-[12px] text-left text-[10px] font-bold text-[#7f8794]"
+            isInspector
+              ? "pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-[12px] font-extrabold text-[#8f96a3]"
+              : isTimePopup
+                ? "min-w-[10px] text-left text-[11px] font-extrabold leading-none text-[#8e97a7]"
+                : "min-w-[12px] text-left text-[10px] font-bold text-[#7f8794]"
           }
         >
           {split.unit}
         </span>
         <Input
-          type="text"
+          type={canScrub ? "number" : "text"}
           step={getNumberFieldStep(field)}
+          numberScrubMode={canScrub ? "continuous" : undefined}
+          numberScrubCommitThrottleMs={16}
           className={
-            isTimePopup
-              ? "h-5 min-w-0 border-0 bg-transparent px-0 py-0 text-right text-[11px] font-extrabold leading-none text-[#f0f4fb] [appearance:textfield] focus:border-0 focus:ring-0 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-              : "h-6 min-w-0 border-0 bg-transparent px-0 py-0 text-right text-[12px] font-semibold text-[#e4e9f2] focus:border-0 focus:ring-0"
+            isInspector
+              ? `${split.unit ? "pl-11" : ""} h-8 min-w-0 text-right`
+              : isTimePopup
+                ? "h-5 min-w-0 border-0 bg-transparent px-0 py-0 text-right text-[11px] font-extrabold leading-none text-[#f0f4fb] [appearance:textfield] focus:border-0 focus:ring-0 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                : "h-6 min-w-0 border-0 bg-transparent px-0 py-0 text-right text-[12px] font-semibold text-[#e4e9f2] focus:border-0 focus:ring-0"
           }
-          value={displayValue}
-          onInput={(event) =>
+          value={inputValue}
+          onFocus={() => {
+            setFocused(true);
+            setDraftValue(displayValue);
+            editSessionActiveRef.current = false;
+          }}
+          onBlur={() => {
+            setFocused(false);
+            editSessionActiveRef.current = false;
+          }}
+          onInput={(event) => {
+            setDraftValue((event.target as HTMLInputElement).value);
             commitNumberField(
               field,
               (event.target as HTMLInputElement).value,
               split.unit,
-              onChange,
-            )
-          }
-          onChange={(event) =>
-            commitNumberField(field, event.target.value, split.unit, onChange)
-          }
+              commitEditSessionChange,
+            );
+          }}
+          onChange={(event) => {
+            setDraftValue(event.target.value);
+            commitNumberField(
+              field,
+              event.target.value,
+              split.unit,
+              commitEditSessionChange,
+            );
+          }}
         />
       </div>
     </label>
@@ -224,8 +310,14 @@ function GraphParameterBoxField({
 }: {
   field: GraphParameterEditorField;
   variant: GraphParameterEditorVariant;
-  onChange: (key: string, value: string) => void;
+  onChange: GraphParameterChange;
 }) {
+  const editSessionActiveRef = useRef(false);
+  function commitEditSessionChange(key: string, value: string) {
+    const history = !editSessionActiveRef.current;
+    editSessionActiveRef.current = true;
+    onChange(key, value, { history });
+  }
   if (field.options)
     return (
       <GraphParameterSelectField
@@ -250,31 +342,88 @@ function GraphParameterBoxField({
         onChange={onChange}
       />
     );
+  if (field.type === "gradient")
+    return (
+      <GraphParameterGradientField
+        field={field}
+        variant={variant}
+        onChange={onChange}
+      />
+    );
   const split = splitParameterUnit(field.value, field.unit);
   const displayValue = getNumberFieldDisplayValue(field, split.value);
+  const [focused, setFocused] = useState(false);
+  const [draftValue, setDraftValue] = useState(displayValue);
+  useEffect(() => {
+    if (!focused) setDraftValue(displayValue);
+  }, [displayValue, focused]);
+  const inputValue = focused ? draftValue : displayValue;
+  const canScrub = field.key !== "repeat" && inputValue !== "";
   return (
-    <label className="grid gap-1">
-      <span className="text-[9px] font-bold text-[#697280]">{field.label}</span>
-      <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2 rounded border border-transparent bg-[#0c121b] px-1.5 transition hover:bg-[#141b27] focus-within:border-[#3d4b62] focus-within:bg-[#0b1018]">
-        <span className="min-w-[10px] text-left text-[10px] font-bold text-[#7f8794]">
+    <label className={variant === "inspector" ? "grid gap-1.5" : "grid gap-1"}>
+      <span
+        className={
+          variant === "inspector"
+            ? "text-[12px] font-bold text-[#8f96a3]"
+            : "text-[9px] font-bold text-[#697280]"
+        }
+      >
+        {field.label}
+      </span>
+      <div
+        className={
+          variant === "inspector"
+            ? "relative min-w-0"
+            : "grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2 rounded border border-transparent bg-[#0c121b] px-1.5 transition hover:bg-[#141b27] focus-within:border-[#3d4b62] focus-within:bg-[#0b1018]"
+        }
+      >
+        <span
+          className={
+            variant === "inspector"
+              ? "pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-[12px] font-extrabold text-[#8f96a3]"
+              : "min-w-[10px] text-left text-[10px] font-bold text-[#7f8794]"
+          }
+        >
           {split.unit}
         </span>
         <Input
-          type="text"
+          type={canScrub ? "number" : "text"}
           step={getNumberFieldStep(field)}
-          className="h-6 min-w-0 border-0 bg-transparent px-0 py-0 text-right text-[12px] font-semibold text-[#e4e9f2] focus:border-0 focus:ring-0"
-          value={displayValue}
-          onInput={(event) =>
+          numberScrubMode={canScrub ? "continuous" : undefined}
+          numberScrubCommitThrottleMs={16}
+          className={
+            variant === "inspector"
+              ? `${split.unit ? "pl-11" : ""} h-8 min-w-0 text-right`
+              : "h-6 min-w-0 border-0 bg-transparent px-0 py-0 text-right text-[12px] font-semibold text-[#e4e9f2] focus:border-0 focus:ring-0"
+          }
+          value={inputValue}
+          onFocus={() => {
+            setFocused(true);
+            setDraftValue(displayValue);
+            editSessionActiveRef.current = false;
+          }}
+          onBlur={() => {
+            setFocused(false);
+            editSessionActiveRef.current = false;
+          }}
+          onInput={(event) => {
+            setDraftValue((event.target as HTMLInputElement).value);
             commitNumberField(
               field,
               (event.target as HTMLInputElement).value,
               split.unit,
-              onChange,
-            )
-          }
-          onChange={(event) =>
-            commitNumberField(field, event.target.value, split.unit, onChange)
-          }
+              commitEditSessionChange,
+            );
+          }}
+          onChange={(event) => {
+            setDraftValue(event.target.value);
+            commitNumberField(
+              field,
+              event.target.value,
+              split.unit,
+              commitEditSessionChange,
+            );
+          }}
         />
       </div>
     </label>
@@ -289,38 +438,72 @@ function GraphParameterTextField({
 }: {
   field: GraphParameterEditorField;
   variant: GraphParameterEditorVariant;
-  onChange: (key: string, value: string) => void;
+  onChange: GraphParameterChange;
   inline?: boolean;
 }) {
+  const editSessionActiveRef = useRef(false);
+  function commitEditSessionChange(key: string, value: string) {
+    const history = !editSessionActiveRef.current;
+    editSessionActiveRef.current = true;
+    onChange(key, value, { history });
+  }
   const isTimePopup = variant === "timePopup";
+  const [focused, setFocused] = useState(false);
+  const [draftValue, setDraftValue] = useState(field.value);
+  useEffect(() => {
+    if (!focused) setDraftValue(field.value);
+  }, [field.value, focused]);
+  const inputValue = focused ? draftValue : field.value;
   const control = (
     <Input
       className={
-        isTimePopup
-          ? "h-7 min-w-0 rounded-[7px] border-transparent bg-[#0a1019]/70 px-2 py-0 text-right text-[11px] font-extrabold leading-none text-[#f0f4fb] focus:border-[#526582] focus:ring-0"
-          : "h-6 min-w-0 rounded border-transparent bg-[#0c121b] px-1.5 py-0 text-right text-[12px] font-semibold text-[#e4e9f2] hover:bg-[#141b27] focus:border-[#3d4b62] focus:ring-0"
+        variant === "inspector"
+          ? "h-8 min-w-0 text-right"
+          : isTimePopup
+            ? "h-7 min-w-0 rounded-[7px] border-transparent bg-[#0a1019]/70 px-2 py-0 text-right text-[11px] font-extrabold leading-none text-[#f0f4fb] focus:border-[#526582] focus:ring-0"
+            : "h-6 min-w-0 rounded border-transparent bg-[#0c121b] px-1.5 py-0 text-right text-[12px] font-semibold text-[#e4e9f2] hover:bg-[#141b27] focus:border-[#3d4b62] focus:ring-0"
       }
-      value={field.value}
-      onInput={(event) =>
-        onChange(field.key, (event.target as HTMLInputElement).value)
-      }
-      onChange={(event) => onChange(field.key, event.target.value)}
+      value={inputValue}
+      onFocus={() => {
+        setFocused(true);
+        setDraftValue(field.value);
+        editSessionActiveRef.current = false;
+      }}
+      onBlur={() => {
+        setFocused(false);
+        editSessionActiveRef.current = false;
+      }}
+      onInput={(event) => {
+        setDraftValue((event.target as HTMLInputElement).value);
+        commitEditSessionChange(
+          field.key,
+          (event.target as HTMLInputElement).value,
+        );
+      }}
+      onChange={(event) => {
+        setDraftValue(event.target.value);
+        commitEditSessionChange(field.key, event.target.value);
+      }}
     />
   );
   if (inline) {
     return (
       <label
         className={
-          isTimePopup
-            ? "grid grid-cols-[76px_1fr] items-center gap-2"
-            : "grid grid-cols-[78px_1fr] items-center gap-2"
+          variant === "inspector"
+            ? "grid gap-1.5"
+            : isTimePopup
+              ? "grid grid-cols-[76px_1fr] items-center gap-2"
+              : "grid grid-cols-[78px_1fr] items-center gap-2"
         }
       >
         <span
           className={
-            isTimePopup
-              ? "text-[11px] font-extrabold leading-none tracking-[-0.02em] text-[#8e97a7]"
-              : "text-[10px] font-bold text-[#7f8794]"
+            variant === "inspector"
+              ? "text-[12px] font-bold text-[#8f96a3]"
+              : isTimePopup
+                ? "text-[11px] font-extrabold leading-none tracking-[-0.02em] text-[#8e97a7]"
+                : "text-[10px] font-bold text-[#7f8794]"
           }
         >
           {field.label}
@@ -330,8 +513,16 @@ function GraphParameterTextField({
     );
   }
   return (
-    <label className="grid gap-1">
-      <span className="text-[9px] font-bold text-[#697280]">{field.label}</span>
+    <label className={variant === "inspector" ? "grid gap-1.5" : "grid gap-1"}>
+      <span
+        className={
+          variant === "inspector"
+            ? "text-[12px] font-bold text-[#8f96a3]"
+            : "text-[9px] font-bold text-[#697280]"
+        }
+      >
+        {field.label}
+      </span>
       {control}
     </label>
   );
@@ -345,32 +536,36 @@ function GraphParameterColorField({
 }: {
   field: GraphParameterEditorField;
   variant: GraphParameterEditorVariant;
-  onChange: (key: string, value: string) => void;
+  onChange: GraphParameterChange;
   inline?: boolean;
 }) {
   const isTimePopup = variant === "timePopup";
   const control = (
     <ColorSelector
       value={field.value}
-      variant="compact"
+      variant={variant === "inspector" ? "default" : "compact"}
       onChange={(value) => onChange(field.key, value)}
-      onPreview={(value) => onChange(field.key, value)}
+      onPreview={(value) => onChange(field.key, value, { history: false })}
     />
   );
   if (inline) {
     return (
       <label
         className={
-          isTimePopup
-            ? "grid grid-cols-[76px_1fr] items-center gap-2"
-            : "grid grid-cols-[78px_1fr] items-center gap-2"
+          variant === "inspector"
+            ? "grid gap-1.5"
+            : isTimePopup
+              ? "grid grid-cols-[76px_1fr] items-center gap-2"
+              : "grid grid-cols-[78px_1fr] items-center gap-2"
         }
       >
         <span
           className={
-            isTimePopup
-              ? "text-[11px] font-extrabold leading-none tracking-[-0.02em] text-[#8e97a7]"
-              : "text-[10px] font-bold text-[#7f8794]"
+            variant === "inspector"
+              ? "text-[12px] font-bold text-[#8f96a3]"
+              : isTimePopup
+                ? "text-[11px] font-extrabold leading-none tracking-[-0.02em] text-[#8e97a7]"
+                : "text-[10px] font-bold text-[#7f8794]"
           }
         >
           {field.label}
@@ -380,8 +575,79 @@ function GraphParameterColorField({
     );
   }
   return (
-    <label className="grid gap-1">
-      <span className="text-[9px] font-bold text-[#697280]">{field.label}</span>
+    <label className={variant === "inspector" ? "grid gap-1.5" : "grid gap-1"}>
+      <span
+        className={
+          variant === "inspector"
+            ? "text-[12px] font-bold text-[#8f96a3]"
+            : "text-[9px] font-bold text-[#697280]"
+        }
+      >
+        {field.label}
+      </span>
+      {control}
+    </label>
+  );
+}
+
+function GraphParameterGradientField({
+  field,
+  variant,
+  onChange,
+  inline = false,
+}: {
+  field: GraphParameterEditorField;
+  variant: GraphParameterEditorVariant;
+  onChange: GraphParameterChange;
+  inline?: boolean;
+}) {
+  const isTimePopup = variant === "timePopup";
+  const control = (
+    <ColorSelector
+      value={field.value}
+      variant={variant === "inspector" ? "default" : "compact"}
+      pickerMode="gradient"
+      onChange={(value) => onChange(field.key, value)}
+      onPreview={(value) => onChange(field.key, value, { history: false })}
+    />
+  );
+  if (inline) {
+    return (
+      <label
+        className={
+          variant === "inspector"
+            ? "grid gap-1.5"
+            : isTimePopup
+              ? "grid grid-cols-[76px_1fr] items-center gap-2"
+              : "grid grid-cols-[78px_1fr] items-center gap-2"
+        }
+      >
+        <span
+          className={
+            variant === "inspector"
+              ? "text-[12px] font-bold text-[#8f96a3]"
+              : isTimePopup
+                ? "text-[11px] font-extrabold leading-none tracking-[-0.02em] text-[#8e97a7]"
+                : "text-[10px] font-bold text-[#7f8794]"
+          }
+        >
+          {field.label}
+        </span>
+        {control}
+      </label>
+    );
+  }
+  return (
+    <label className={variant === "inspector" ? "grid gap-1.5" : "grid gap-1"}>
+      <span
+        className={
+          variant === "inspector"
+            ? "text-[12px] font-bold text-[#8f96a3]"
+            : "text-[9px] font-bold text-[#697280]"
+        }
+      >
+        {field.label}
+      </span>
       {control}
     </label>
   );
@@ -402,7 +668,7 @@ function GraphParameterSelectField({
 }: {
   field: GraphParameterEditorField;
   variant: GraphParameterEditorVariant;
-  onChange: (key: string, value: string) => void;
+  onChange: GraphParameterChange;
   inline?: boolean;
 }) {
   const isTimePopup = variant === "timePopup";
@@ -413,9 +679,11 @@ function GraphParameterSelectField({
     >
       <SelectTrigger
         className={
-          isTimePopup
-            ? "h-6 flex-row-reverse justify-start rounded-[7px] border-transparent bg-[#0a1019]/70 px-2 text-[11px] font-extrabold leading-none text-[#f0f4fb] hover:bg-[#0c1420] focus:border-[#526582] focus:ring-0 [&>span]:ml-auto [&>span]:text-right"
-            : "h-6 flex-row-reverse justify-start rounded border-transparent bg-[#0c121b] px-1.5 text-[12px] font-semibold text-[#e4e9f2] hover:bg-[#141b27] focus:border-[#3d4b62] focus:ring-0 [&>span]:ml-auto [&>span]:text-right"
+          variant === "inspector"
+            ? "h-8"
+            : isTimePopup
+              ? "h-6 flex-row-reverse justify-start rounded-[7px] border-transparent bg-[#0a1019]/70 px-2 text-[11px] font-extrabold leading-none text-[#f0f4fb] hover:bg-[#0c1420] focus:border-[#526582] focus:ring-0 [&>span]:ml-auto [&>span]:text-right"
+              : "h-6 flex-row-reverse justify-start rounded border-transparent bg-[#0c121b] px-1.5 text-[12px] font-semibold text-[#e4e9f2] hover:bg-[#141b27] focus:border-[#3d4b62] focus:ring-0 [&>span]:ml-auto [&>span]:text-right"
         }
       >
         <SelectValue />
@@ -435,16 +703,20 @@ function GraphParameterSelectField({
     return (
       <label
         className={
-          isTimePopup
-            ? "grid grid-cols-[76px_1fr] items-center gap-2"
-            : "grid grid-cols-[78px_1fr] items-center gap-2"
+          variant === "inspector"
+            ? "grid gap-1.5"
+            : isTimePopup
+              ? "grid grid-cols-[76px_1fr] items-center gap-2"
+              : "grid grid-cols-[78px_1fr] items-center gap-2"
         }
       >
         <span
           className={
-            isTimePopup
-              ? "text-[11px] font-extrabold leading-none tracking-[-0.02em] text-[#8e97a7]"
-              : "text-[10px] font-bold text-[#7f8794]"
+            variant === "inspector"
+              ? "text-[12px] font-bold text-[#8f96a3]"
+              : isTimePopup
+                ? "text-[11px] font-extrabold leading-none tracking-[-0.02em] text-[#8e97a7]"
+                : "text-[10px] font-bold text-[#7f8794]"
           }
         >
           {field.label}
@@ -454,8 +726,16 @@ function GraphParameterSelectField({
     );
   }
   return (
-    <label className="grid gap-1">
-      <span className="text-[9px] font-bold text-[#697280]">{field.label}</span>
+    <label className={variant === "inspector" ? "grid gap-1.5" : "grid gap-1"}>
+      <span
+        className={
+          variant === "inspector"
+            ? "text-[12px] font-bold text-[#8f96a3]"
+            : "text-[9px] font-bold text-[#697280]"
+        }
+      >
+        {field.label}
+      </span>
       {control}
     </label>
   );
@@ -465,7 +745,7 @@ function commitNumberField(
   field: GraphParameterEditorField,
   value: string,
   unit: string,
-  onChange: (key: string, value: string) => void,
+  onChange: GraphParameterChange,
 ) {
   if (!isAllowedNumberInput(value, field.key === "repeat")) return;
   onChange(field.key, `${value}${unit}`);

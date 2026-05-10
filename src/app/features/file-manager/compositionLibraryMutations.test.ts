@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { CompositionClip, ProjectManifest } from "../../../core/types";
 import {
   createCompositionInLibrary,
+  deleteCompositionFileFromProject,
   moveCompositionInProject,
   relinkCompositionInProject,
   renameCompositionInProject,
@@ -166,6 +167,42 @@ describe("composition library mutations", () => {
     });
   });
 
+  it("treats moves into clipper trash as missing media", () => {
+    const item = composition("composition-b", "compositions/B.composition.ts");
+    const result = updateCompositionFilePathsInProject(
+      {
+        ...projectWithClip(item),
+        compositions: [{ ...item, source: "source", start: 0 }],
+        scenes: [
+          {
+            id: "timeline",
+            compositions: [
+              { ...item, id: "clip", compositionId: item.id, start: 0 },
+            ],
+          },
+        ],
+      },
+      { [item.filePath]: "source" },
+      [
+        {
+          oldPath: "compositions/B.composition.ts",
+          newPath: ".clipper-trash/123_0_B.composition.ts",
+        },
+      ],
+      [item],
+    );
+
+    expect(result?.compositionSources).toEqual({});
+    expect(result?.project.compositionLibrary?.[0]).toMatchObject({
+      id: item.id,
+      filePath: item.filePath,
+      sourceMissing: true,
+    });
+    expect(result?.project.timelines?.[0].clips[0]?.compositionId).toBe(
+      item.id,
+    );
+  });
+
   it("relinks a missing composition by updating its path only", () => {
     vi.stubGlobal("crypto", { randomUUID: () => "id" });
     const item = {
@@ -194,6 +231,37 @@ describe("composition library mutations", () => {
       "composition-b",
     );
     vi.unstubAllGlobals();
+  });
+
+  it("deletes composition files and marks timeline media missing", () => {
+    const item = composition("composition-b", "compositions/B.composition.ts");
+    const result = deleteCompositionFileFromProject(
+      {
+        ...projectWithClip(item),
+        compositions: [{ ...item, source: "source", start: 0 }],
+        scenes: [
+          {
+            id: "timeline",
+            compositions: [
+              { ...item, id: "clip", compositionId: item.id, start: 0 },
+            ],
+          },
+        ],
+      },
+      { [item.filePath]: "source" },
+      item.id,
+      [item],
+    );
+
+    expect(result?.compositionSources).toEqual({});
+    expect(result?.project.compositionLibrary?.[0]).toMatchObject({
+      id: item.id,
+      filePath: item.filePath,
+      sourceMissing: true,
+    });
+    expect(result?.project.timelines?.[0].clips[0]?.compositionId).toBe(
+      item.id,
+    );
   });
 
   it("creates composition library entries without embedded source", () => {

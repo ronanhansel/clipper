@@ -2,7 +2,7 @@ import { useCallback, useRef } from "react";
 import { AgentPanel } from "../../components/AgentPanel";
 import {
   AdjustmentInspector,
-  Composition3dNodeInspector,
+  GraphNodeInspector,
   EmptyInspector,
   FrameInspector,
   MotionInspector,
@@ -51,13 +51,14 @@ type ConnectedInspectorContentProps = {
   positionPickMotionMarker: MarkerPick;
   trackerPickMotionMarker: MarkerPick;
   selectedObject: FrameObject | null | undefined;
+  selectedGraphObject: FrameObject | null | undefined;
   isPlaying: boolean;
   selectedAdjustmentLayer: AdjustmentLayer | null | undefined;
   selectedTransitionLayer: TransitionLayer | null | undefined;
   sceneDurationSeconds: number;
   pointPickAdjustment: PointPickAdjustment;
   selectedPart: Part | null | undefined;
-  selectedComposition3dNodeId: string | null;
+  selectedGraphNodeId: string | null;
   onUpdateMotionMarker: (
     partId: string,
     markerId: string,
@@ -133,10 +134,14 @@ type ConnectedInspectorContentProps = {
     updater: (background: BackgroundLayer) => BackgroundLayer,
   ) => void;
   onUpdatePartRenderMode: (renderMode: CompositionRenderMode) => void;
-  onUpdateComposition3dGraphNodeParameter: (
+  onUpdateGraphNodeParameter: (
     nodeId: string,
     key: string,
     value: string,
+    options?: {
+      history?: boolean;
+      mode?: import("../../core/graphSockets").GraphCompositionMode;
+    },
   ) => void;
 };
 
@@ -161,13 +166,14 @@ export function ConnectedInspectorContent({
   positionPickMotionMarker,
   trackerPickMotionMarker,
   selectedObject,
+  selectedGraphObject,
   isPlaying,
   selectedAdjustmentLayer,
   selectedTransitionLayer,
   sceneDurationSeconds,
   pointPickAdjustment,
   selectedPart,
-  selectedComposition3dNodeId,
+  selectedGraphNodeId,
   onUpdateMotionMarker,
   onPreviewMotionMarker,
   onPreviewMotionPickPoint,
@@ -202,7 +208,7 @@ export function ConnectedInspectorContent({
   onPreviewPartFrame,
   onPreviewPartBackground,
   onUpdatePartRenderMode,
-  onUpdateComposition3dGraphNodeParameter,
+  onUpdateGraphNodeParameter,
 }: ConnectedInspectorContentProps) {
   const stableSelectedObjectRef = useRef<FrameObject | null | undefined>(
     selectedObject,
@@ -308,6 +314,16 @@ export function ConnectedInspectorContent({
     );
   }
 
+  if (composeMode && selectedGraphNodeId)
+    return (
+      <GraphNodeInspector
+        part={part}
+        selectedObject={selectedGraphObject ?? null}
+        nodeId={selectedGraphNodeId}
+        onParameterChange={onUpdateGraphNodeParameter}
+      />
+    );
+
   if (inspectorSelectedObject)
     return (
       <ObjectInspector
@@ -359,15 +375,6 @@ export function ConnectedInspectorContent({
       />
     );
   }
-
-  if (composeMode && part.renderMode === "webgl" && selectedComposition3dNodeId)
-    return (
-      <Composition3dNodeInspector
-        part={part}
-        nodeId={selectedComposition3dNodeId}
-        onParameterChange={onUpdateComposition3dGraphNodeParameter}
-      />
-    );
 
   if (selectedPart)
     return (
