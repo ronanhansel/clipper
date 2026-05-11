@@ -38,9 +38,35 @@ export function validateAnimationGraph(graph: AnimationGraph) {
     });
   }
 
+  const edgeIds = new Map<string, AnimationGraphEdge>();
+  const edgeEndpoints = new Map<string, AnimationGraphEdge>();
   const singleInputConnections = new Map<string, AnimationGraphEdge>();
 
   for (const edge of graph.edges) {
+    if (edgeIds.has(edge.id)) {
+      diagnostics.push({
+        severity: "error",
+        message: `Edge id "${edge.id}" must be unique.`,
+        edgeId: edge.id,
+      });
+    } else {
+      edgeIds.set(edge.id, edge);
+    }
+
+    const endpointKey = `${edge.from.nodeId}:${edge.from.portId}->${edge.to.nodeId}:${edge.to.portId}`;
+    if (edgeEndpoints.has(endpointKey)) {
+      diagnostics.push({
+        severity: "error",
+        message: "Graph already contains this exact connection.",
+        edgeId: edge.id,
+        nodeId: edge.to.nodeId,
+        portId: edge.to.portId,
+        outputId: edge.from.portId,
+      });
+    } else {
+      edgeEndpoints.set(endpointKey, edge);
+    }
+
     const fromNode = graph.nodes[edge.from.nodeId];
     const toNode = graph.nodes[edge.to.nodeId];
     if (!fromNode) {

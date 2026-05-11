@@ -2,7 +2,6 @@ import * as compositionApi from "./compositionApi";
 import {
   FRAME_HEIGHT,
   FRAME_WIDTH,
-  type AnimationGraphState,
   type BackgroundLayer,
   type CompositionRenderMode,
   type FrameObject,
@@ -50,9 +49,6 @@ type SourceComposition = {
     elements?: SourceRenderable[];
   };
   animationGraph?: JsonValue;
-  bgGraph?: JsonValue;
-  threeBackgrounds?: Record<string, unknown>;
-  composition3dGraph?: JsonValue;
   render: (context: compositionApi.RenderContext) => SourceRenderable[];
 };
 
@@ -106,10 +102,6 @@ export async function compositionFromSource(
     duration: sourceComposition.duration,
     renderMode: sourceComposition.renderMode,
     animationGraph: sourceComposition.animationGraph as Part["animationGraph"],
-    bgGraph: sourceComposition.bgGraph as AnimationGraphState | undefined,
-    threeBackgrounds: sourceComposition.threeBackgrounds,
-    composition3dGraph:
-      sourceComposition.composition3dGraph as Part["composition3dGraph"],
     frame: sourceFrameToCompositionFrame(sourceComposition.frame),
     background: sourceBackgroundToLayer(sourceComposition.background),
     objects: getSourceCompositionObjects(sourceComposition).map(
@@ -165,8 +157,6 @@ function sourceObjectToFrameObject(object: SourceObject): FrameObject {
 }
 
 export function compositionToSource(composition: Part) {
-  if (composition.renderMode === "webgl")
-    return composition3dToSource(composition);
   const imports = Array.from(
     new Set([
       "Component",
@@ -177,17 +167,13 @@ export function compositionToSource(composition: Part) {
     ]),
   ).sort();
   const renderModeSource =
-    composition.renderMode && composition.renderMode !== "dom"
+    composition.renderMode &&
+    composition.renderMode !== "dom" &&
+    composition.renderMode !== "webgl"
       ? `  renderMode: ${JSON.stringify(composition.renderMode)},\n`
       : "";
   const animationGraphSource = composition.animationGraph
     ? `  animationGraph: ${tsBlock(composition.animationGraph, 2)},\n`
-    : "";
-  const bgGraphSource = composition.bgGraph
-    ? `  bgGraph: ${tsBlock(composition.bgGraph, 2)},\n`
-    : "";
-  const composition3dGraphSource = composition.composition3dGraph
-    ? `  composition3dGraph: ${tsBlock(composition.composition3dGraph, 2)},\n`
     : "";
   const background = cleanUndefined({
     id: composition.background.id,
@@ -209,11 +195,7 @@ ${backgroundElements.map((object) => indent(object, 6)).join(",\n")}
   }`;
   const objects = composition.objects.map(frameObjectToConstructorSource);
 
-  return `import { ${imports.join(", ")} } from "@clipper/composition-api";\n\nclass GeneratedCompositionObjects extends Component {\n  render() {\n    return [\n${objects.map((object) => indent(object, 6)).join(",\n")}\n    ];\n  }\n}\n\nexport const composition = new Composition({\n  duration: ${JSON.stringify(composition.duration)},\n${renderModeSource}  frame: ${tsBlock(composition.frame, 2)},\n  background: ${indent(backgroundSource, 2).trimStart()},\n${animationGraphSource}${bgGraphSource}${composition3dGraphSource}  render() {\n    return [new GeneratedCompositionObjects()];\n  },\n});\n`;
-}
-
-function composition3dToSource(composition: Part) {
-  return `import { Composition3D } from "@clipper/composition-api";\n\nexport const composition = new Composition3D({\n  duration: ${JSON.stringify(composition.duration)},\n  frame: ${tsBlock(composition.frame, 2)},\n  bgGraph: ${tsBlock(composition.bgGraph ?? { nodes: {}, edges: [], customNodes: {} }, 2)},\n  composition3dGraph: ${tsBlock(composition.composition3dGraph ?? { nodes: {}, edges: [], customNodes: {} }, 2)},\n});\n`;
+  return `import { ${imports.join(", ")} } from "@clipper/composition-api";\n\nclass GeneratedCompositionObjects extends Component {\n  render() {\n    return [\n${objects.map((object) => indent(object, 6)).join(",\n")}\n    ];\n  }\n}\n\nexport const composition = new Composition({\n  duration: ${JSON.stringify(composition.duration)},\n${renderModeSource}  frame: ${tsBlock(composition.frame, 2)},\n  background: ${indent(backgroundSource, 2).trimStart()},\n${animationGraphSource}  render() {\n    return [new GeneratedCompositionObjects()];\n  },\n});\n`;
 }
 
 function frameObjectToSourceObject(object: FrameObject): SourceObject {

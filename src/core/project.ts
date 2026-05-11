@@ -20,7 +20,6 @@ import type {
   AssetItem,
   CodeViewportState,
   ComposeLayoutState,
-  Composition3dGraphState,
   CompositionClip,
   CompositionDocument,
   CompositionRenderMode,
@@ -255,11 +254,6 @@ export function normalizeAnimationGraphState(
                     rawKind === "split" ||
                     rawKind === "condition" ||
                     rawKind === "group" ||
-                    rawKind === "bgSolid" ||
-                    rawKind === "bgGradient" ||
-                    rawKind === "bgPattern" ||
-                    rawKind === "bgPaper" ||
-                    rawKind === "bgThreeCode" ||
                     rawKind === "oscillate"
                   ? rawKind
                   : undefined;
@@ -791,38 +785,6 @@ function normalizeCompositionRenderMode(mode: unknown): CompositionRenderMode {
   return mode === "webgl" ? mode : "dom";
 }
 
-function normalizeComposition3dGraph(
-  graph: unknown,
-): Composition3dGraphState | undefined {
-  if (!graph || typeof graph !== "object") return undefined;
-  const source = graph as Partial<Composition3dGraphState>;
-  const nodes =
-    source.nodes &&
-    typeof source.nodes === "object" &&
-    !Array.isArray(source.nodes)
-      ? source.nodes
-      : {};
-  const customNodes =
-    source.customNodes &&
-    typeof source.customNodes === "object" &&
-    !Array.isArray(source.customNodes)
-      ? source.customNodes
-      : undefined;
-  const parameters =
-    source.parameters &&
-    typeof source.parameters === "object" &&
-    !Array.isArray(source.parameters)
-      ? source.parameters
-      : undefined;
-  const edges = Array.isArray(source.edges)
-    ? source.edges.filter(
-        (edge): edge is AnimationGraphState["edges"][number] =>
-          Boolean(edge && typeof edge === "object"),
-      )
-    : [];
-  return { nodes, edges, customNodes, parameters };
-}
-
 function normalizeEditorMode(mode: unknown): "preview" | "editor" {
   return mode === "editor" || mode === "code" ? "editor" : "preview";
 }
@@ -1018,10 +980,7 @@ function normalizeComposition(composition: CompositionClip): CompositionClip {
     animationGraph:
       normalizeTypedAnimationGraphState(rest.animationGraph) ??
       createDefaultComposition2dGraphForComposition(rest),
-    bgGraph: normalizeAnimationGraphState(rest.bgGraph),
-    threeBackgrounds: rest.threeBackgrounds,
     renderMode: normalizeCompositionRenderMode(rest.renderMode),
-    composition3dGraph: normalizeComposition3dGraph(rest.composition3dGraph),
     background: {
       ...rest.background,
       stretchToElements: rest.background.stretchToElements || undefined,
@@ -1150,10 +1109,6 @@ function mergeCompositionDocumentGraphState(
     animationGraph:
       normalizeTypedAnimationGraphState(state.animationGraph) ??
       document.animationGraph,
-    bgGraph: normalizeAnimationGraphState(state.bgGraph) ?? document.bgGraph,
-    composition3dGraph:
-      normalizeComposition3dGraph(state.composition3dGraph) ??
-      document.composition3dGraph,
   };
 }
 
@@ -1205,7 +1160,6 @@ function getSceneFromProjectWithDocs(
       const animationGraph = normalizeTypedAnimationGraphState(
         composition.animationGraph,
       );
-      const bgGraph = normalizeAnimationGraphState(composition.bgGraph);
       const renderMode = normalizeCompositionRenderMode(
         clip.renderMode ?? composition.renderMode,
       );
@@ -1221,14 +1175,7 @@ function getSceneFromProjectWithDocs(
           prerender: clip.prerender || undefined,
           motionMarkers: [],
           animationGraph,
-          bgGraph,
-          threeBackgrounds: composition.threeBackgrounds,
           renderMode,
-          composition3dGraph: resolveComposition3dGraphForTimelineClip(
-            clip,
-            composition,
-            renderMode,
-          ),
         },
       ];
     }),
@@ -1297,7 +1244,6 @@ function getProjectTimelines(
             undefined,
           motionMarkers: [],
           renderMode: normalizeCompositionRenderMode(clipRest.renderMode),
-          composition3dGraph: undefined,
         };
       }),
       adjustmentLayers: normalizeAdjustmentLayers(rest.adjustmentLayers),
@@ -1335,7 +1281,6 @@ function getScenesFromTimelines(
       const animationGraph = normalizeTypedAnimationGraphState(
         composition.animationGraph,
       );
-      const bgGraph = normalizeAnimationGraphState(composition.bgGraph);
       const renderMode = normalizeCompositionRenderMode(
         clip.renderMode ?? composition.renderMode,
       );
@@ -1351,34 +1296,11 @@ function getScenesFromTimelines(
           prerender: clip.prerender || undefined,
           motionMarkers: [],
           animationGraph,
-          bgGraph,
-          threeBackgrounds: composition.threeBackgrounds,
           renderMode,
-          composition3dGraph: resolveComposition3dGraphForTimelineClip(
-            clip,
-            composition,
-            renderMode,
-          ),
         },
       ];
     }),
   }));
-}
-
-function resolveComposition3dGraphForTimelineClip(
-  clip: TimelineClip,
-  composition: CompositionClip,
-  renderMode: CompositionRenderMode,
-) {
-  const compositionGraph = normalizeComposition3dGraph(
-    composition.composition3dGraph,
-  );
-  const clipGraph = normalizeComposition3dGraph(
-    (clip as { composition3dGraph?: unknown }).composition3dGraph,
-  );
-  return renderMode === "webgl"
-    ? (compositionGraph ?? clipGraph)
-    : (clipGraph ?? compositionGraph);
 }
 
 export function applyAnimationGraphToComposition(

@@ -14,19 +14,11 @@ export type PointerDragPreviewDetail = {
 
 export const effectPointerDragEvent = "clipper:effect-pointer-drag";
 export const effectDragPreviewEvent = "clipper:effect-drag-preview";
-export const composition3dPackagePointerDragEvent =
-  "clipper:composition3d-package-pointer-drag";
-export const composition3dPackageDragPreviewEvent =
-  "clipper:composition3d-package-drag-preview";
 export const compositionPointerDragEvent = "clipper:composition-pointer-drag";
 export const compositionDragPreviewEvent = "clipper:composition-drag-preview";
 
 export type EffectPointerDragDetail = ClipperPointerDragDetail<{
   effect: string;
-}>;
-
-export type Composition3dPackagePointerDragDetail = ClipperPointerDragDetail<{
-  packageId: string;
 }>;
 
 export type CompositionPointerDragDetail = ClipperPointerDragDetail<{

@@ -10,10 +10,7 @@ import {
   OsFileManager,
   type OsFileManagerProps,
 } from "../../components/OsFileManager";
-import {
-  Composition3dLibraryPanel,
-  ToolsPanel,
-} from "../../components/ToolsPanel";
+import { ToolsPanel } from "../../components/ToolsPanel";
 import {
   FileManagerWorkspace,
   type FileManagerWorkspaceProps,
@@ -73,7 +70,6 @@ const MemoizedLeftSidebar = memo(
     onToggleComposeLayerHidden,
     onToggleComposeLayerLocked,
   }: LeftSidebarProps) {
-    const isComposition3d = part.renderMode === "webgl";
     return (
       <aside className="flex min-h-0 flex-col overflow-hidden border-r border-[#2d313b] bg-[#171920] p-4">
         <div
@@ -81,20 +77,16 @@ const MemoizedLeftSidebar = memo(
           aria-hidden={!composeMode}
         >
           {hasActiveComposition ? (
-            isComposition3d ? (
-              <Composition3dLibraryPanel />
-            ) : (
-              <ComposeLayersPanel
-                part={part}
-                selectedObjectIds={selectedObjectIds}
-                onSelectObjects={onSelectComposeLayerObjects}
-                onSelectFrameSettings={onSelectComposeFrameSettings}
-                onHoverObject={noopHoverObject}
-                onReorderObjects={onReorderComposeObjects}
-                onToggleLayerHidden={onToggleComposeLayerHidden}
-                onToggleLayerLocked={onToggleComposeLayerLocked}
-              />
-            )
+            <ComposeLayersPanel
+              part={part}
+              selectedObjectIds={selectedObjectIds}
+              onSelectObjects={onSelectComposeLayerObjects}
+              onSelectFrameSettings={onSelectComposeFrameSettings}
+              onHoverObject={noopHoverObject}
+              onReorderObjects={onReorderComposeObjects}
+              onToggleLayerHidden={onToggleComposeLayerHidden}
+              onToggleLayerLocked={onToggleComposeLayerLocked}
+            />
           ) : (
             <div className="grid h-full place-items-center rounded-[14px] border border-[#2d313b] bg-[#111319]/72 p-5 text-center text-sm font-bold text-[#737884]">
               Move the playhead over a composition to inspect its layers.

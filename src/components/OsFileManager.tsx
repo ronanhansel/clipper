@@ -1,5 +1,4 @@
 import {
-  Box,
   ChartNoAxesGantt,
   ChevronDown,
   ChevronRight,
@@ -84,7 +83,6 @@ export type OsFileNode = {
   path: string;
   isDirectory: boolean;
   isComposition?: boolean;
-  isComposition3d?: boolean;
   timelineId?: string;
   children?: OsFileNode[];
 };
@@ -811,20 +809,13 @@ export function OsFileManager({
   function getCompositionCreateMenuItems(basePath: string) {
     return [
       {
-        label: "Standard",
-        action: () => void createNewComposition(basePath, "standard"),
-      },
-      {
-        label: "3D (Alpha)",
-        action: () => void createNewComposition(basePath, "3d"),
+        label: "Composition",
+        action: () => void createNewComposition(basePath),
       },
     ];
   }
 
-  async function createNewComposition(
-    basePath: string,
-    kind: "standard" | "3d" = "standard",
-  ) {
+  async function createNewComposition(basePath: string) {
     try {
       const parentPath = basePath;
       const entries = await clipperHost
@@ -832,25 +823,11 @@ export function OsFileManager({
         .catch(() => []);
       const names = entries.map((e) => e.name);
       const name = nextNumberedSemanticName(
-        kind === "3d" ? "untitled-3d" : "untitled",
+        "untitled",
         ".composition.ts",
         names,
       );
-      const content =
-        kind === "3d"
-          ? `import { Composition3D } from "@clipper/composition-api";
-
-export const composition = new Composition3D({
-  duration: 5,
-  frame: { width: 1920, height: 1080, style: {} },
-  composition3dGraph: {
-    nodes: {},
-    edges: [],
-    customNodes: {},
-  },
-});
-`
-          : `import { Composition } from "@clipper/composition-api";
+      const content = `import { Composition } from "@clipper/composition-api";
 
 export const composition = new Composition({
   duration: 5,
@@ -1623,9 +1600,7 @@ function OsFileTreeNode({
       ? FolderOpen
       : Folder
     : fileType === "composition"
-      ? data.isComposition3d
-        ? Box
-        : Clapperboard
+      ? Clapperboard
       : fileType === "timeline"
         ? ChartNoAxesGantt
         : data.name.endsWith(".ts")
@@ -1745,20 +1720,12 @@ async function loadDirectoryTree(
   for (const entry of sorted) {
     const childPath = `${path}/${entry.name}`;
     let isComposition = false;
-    let isComposition3d = false;
     let timelineId: string | undefined = undefined;
 
     if (!entry.isDirectory && isCompositionFilePath(childPath)) {
       try {
-        if (childPath.endsWith(".composition3d.json")) {
-          isComposition = true;
-        } else {
-          const content = await clipperHost.readTextFile(childPath);
-          isComposition =
-            content.includes("new Composition({") ||
-            content.includes("new Composition3D({");
-          isComposition3d = content.includes("new Composition3D({");
-        }
+        const content = await clipperHost.readTextFile(childPath);
+        isComposition = content.includes("new Composition({");
       } catch {
         // Ignore read errors
       }
@@ -1778,7 +1745,6 @@ async function loadDirectoryTree(
       path: childPath,
       isDirectory: entry.isDirectory,
       isComposition,
-      isComposition3d,
       timelineId,
     };
     if (entry.isDirectory) {
@@ -1883,10 +1849,7 @@ export function createOsCompositionDragDetail(
 }
 
 function isCompositionFilePath(filePath: string) {
-  return (
-    filePath.endsWith(".composition.ts") ||
-    filePath.endsWith(".composition3d.json")
-  );
+  return filePath.endsWith(".composition.ts");
 }
 
 export function resolveOsCompositionDragMetadata(

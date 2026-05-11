@@ -223,7 +223,7 @@ describe("buildGraphNodes", () => {
       style: {},
       animations: [],
     };
-    const graph = {
+    const graph: StrictAnimationGraph = {
       id: "graph:text",
       sourceObjectId: "text",
       nodes: {
@@ -439,6 +439,49 @@ describe("composition2d layer graph selection", () => {
     expect(JSON.stringify(updated)).not.toMatch(
       /fromNodeId|fromPort|toNodeId|toPort|customNodes|parameters|groups|layers/,
     );
+  });
+
+  it("strict module save binds graph identity to selected source object", () => {
+    const graph = saveStrictComposition2dGraph(
+      {
+        nodes: {
+          source: createTypedAnimationGraphNode(
+            "source",
+            "source",
+            { x: 0, y: 0 },
+            { objectId: "new-source" },
+            "Source",
+          ),
+          out: createTypedAnimationGraphNode(
+            "out",
+            "out",
+            { x: 200, y: 0 },
+            {},
+            "Out",
+          ),
+        },
+        edges: [
+          {
+            id: "source:out->out:in",
+            from: { nodeId: "source", portId: "out" },
+            to: { nodeId: "out", portId: "in" },
+          },
+        ],
+      },
+      {
+        id: "graph:old-source",
+        sourceObjectId: "old-source",
+        nodes: {},
+        edges: [],
+      },
+      "new-source",
+    );
+
+    expect(graph).toMatchObject({
+      id: "graph:new-source",
+      sourceObjectId: "new-source",
+    });
+    expect(graph.edges).toHaveLength(1);
   });
 
   it("strict module contains no legacy boundary symbols", () => {
@@ -919,7 +962,7 @@ describe("composition2d strict Phase 5 editor behavior", () => {
           to: { nodeId: "composition2d:out", portId: "in" },
         },
       ],
-    } as AnimationGraphState;
+    } satisfies StrictAnimationGraph;
     const object = {
       ...textObject,
       id: "text-mp13s444",
@@ -1036,6 +1079,49 @@ describe("composition2d strict Phase 5 editor behavior", () => {
         } as StrictAnimationGraphEdge,
       ]).map((port) => port.id),
     ).toEqual(["in", "default", "output:1", "new-output"]);
+  });
+
+  it("keeps strict condition inspector output values aligned with port ids", () => {
+    const condition = createTypedAnimationGraphNode(
+      "condition",
+      "condition",
+      { x: 1, y: 2 },
+      {
+        outputs: [{ id: "output:1", label: "Output 1" }],
+        rules: [{ action: "sendToOutput", output: "output:1" }],
+      },
+      "Condition",
+    );
+    const schema = getStrictComposition2dParameterEditorSchema(
+      {
+        id: "condition",
+        label: "Condition",
+        kind: "condition",
+        x: 1,
+        y: 2,
+        width: 8,
+        height: 2,
+        typedNode: condition,
+      },
+      [
+        {
+          id: "condition:output:1->out:in",
+          from: { nodeId: "condition", portId: "output:1" },
+          to: { nodeId: "out", portId: "in" },
+        } satisfies StrictAnimationGraphEdge,
+      ],
+    );
+    const outputField = schema?.groups[0].fields.find(
+      (field) => field.key === "outputPort",
+    );
+
+    expect(outputField).toMatchObject({ value: "output:1" });
+    expect(outputField?.options?.map((option) => option.value)).toContain(
+      "output:1",
+    );
+    expect(outputField?.options?.map((option) => option.value)).not.toContain(
+      "1",
+    );
   });
 
   it("renders strict node inspector fields from definition controls", () => {

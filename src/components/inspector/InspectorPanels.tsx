@@ -83,7 +83,6 @@ import { EffectControls } from "./EffectControls";
 import { GraphParameterEditor } from "../timeline/GraphParameterEditor";
 import {
   buildGraphNodes,
-  buildComposition3dGraphNodes,
   getSelectedComposition2dLayerGraph,
   getGraphNodeParameterEditorSchema,
   getRenderableEdges,
@@ -514,35 +513,22 @@ export function GraphNodeInspector({
     },
   ) => void;
 }) {
-  const isComposition3d = part.renderMode === "webgl";
-  const isBackgroundGraph =
-    !isComposition3d && selectedObject?.id === part.background.id;
-  const graph = isComposition3d
-    ? part.composition3dGraph
-    : isBackgroundGraph
-      ? part.bgGraph
-      : part.animationGraph;
-  const graphMode: GraphCompositionMode = isComposition3d
-    ? "composition3d"
-    : isBackgroundGraph
-      ? "background"
-      : "composition2d";
+  const graph = part.animationGraph;
+  const graphMode: GraphCompositionMode = "composition2d";
   const objects = selectedObject ? [selectedObject] : [];
   const displayGraph = getSelectedComposition2dLayerGraph(
     graph as any,
-    !isComposition3d && !isBackgroundGraph ? selectedObject?.id : undefined,
+    selectedObject?.id,
     graphMode,
   );
-  const nodes = isComposition3d
-    ? buildComposition3dGraphNodes(graph as any, 5200, 900)
-    : buildGraphNodes(
-        objects,
-        displayGraph,
-        5200,
-        900,
-        selectedObject?.id ?? "__empty__",
-        isBackgroundGraph ? "background" : "composition2d",
-      );
+  const nodes = buildGraphNodes(
+    objects,
+    displayGraph,
+    5200,
+    900,
+    selectedObject?.id ?? "__empty__",
+    "composition2d",
+  );
   const node = nodes.find((item) => item.id === nodeId) ?? null;
   const schema = node
     ? getGraphNodeParameterEditorSchema(

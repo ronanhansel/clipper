@@ -139,7 +139,6 @@ export type WebLayerProps = Omit<RenderableProps, "content"> & {
 export type ThreeLayerProps = Omit<RenderableProps, "content"> & {
   source: string;
 };
-export type ThreeBackgroundFactory = new (...args: unknown[]) => unknown;
 export type CompositionProps = {
   id?: string;
   name?: string;
@@ -157,22 +156,7 @@ export type CompositionProps = {
     elements?: Renderable[];
   };
   animationGraph?: AnimationGraph | JsonValue;
-  bgGraph?: JsonValue;
-  threeBackgrounds?: Record<string, ThreeBackgroundFactory | object | Function>;
-  composition3dGraph?: JsonValue;
   render: (context: RenderContext) => Renderable[];
-};
-
-export type Composition3DProps = Omit<
-  CompositionProps,
-  "render" | "renderMode" | "background"
-> & {
-  background?: CompositionProps["background"];
-  animationGraph?: CompositionProps["animationGraph"];
-  bgGraph?: JsonValue;
-  threeBackgrounds?: CompositionProps["threeBackgrounds"];
-  composition3dGraph?: JsonValue;
-  render?: (context: RenderContext) => Renderable[];
 };
 
 export function transformToCss(
@@ -373,9 +357,6 @@ export class Composition {
   frame: CompositionProps["frame"];
   background?: CompositionProps["background"];
   animationGraph?: CompositionProps["animationGraph"];
-  bgGraph?: CompositionProps["bgGraph"];
-  threeBackgrounds?: CompositionProps["threeBackgrounds"];
-  composition3dGraph?: CompositionProps["composition3dGraph"];
   render: (context: RenderContext) => Renderable[];
 
   constructor(props: CompositionProps) {
@@ -386,26 +367,7 @@ export class Composition {
     this.frame = props.frame;
     this.background = props.background;
     this.animationGraph = props.animationGraph;
-    this.bgGraph = props.bgGraph;
-    this.threeBackgrounds = props.threeBackgrounds;
-    this.composition3dGraph = props.composition3dGraph;
     this.render = props.render;
-  }
-}
-
-export class Composition3D extends Composition {
-  constructor(props: Composition3DProps) {
-    super({
-      ...props,
-      renderMode: "webgl",
-      background: props.background ?? {
-        id: "bg",
-        name: "Background",
-        style: {},
-        elements: [],
-      },
-      render: props.render ?? (() => []),
-    });
   }
 }
 

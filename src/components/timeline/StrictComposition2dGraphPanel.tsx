@@ -93,8 +93,11 @@ export function saveStrictComposition2dGraph(
     }),
   );
   const baseGraph = {
-    id: currentGraph?.id ?? `graph:${sourceObjectId}`,
-    sourceObjectId: currentGraph?.sourceObjectId ?? sourceObjectId,
+    id:
+      currentGraph?.sourceObjectId === sourceObjectId
+        ? currentGraph.id
+        : `graph:${sourceObjectId}`,
+    sourceObjectId,
     nodes,
     edges: [],
     viewport: editorGraph.viewport ?? currentGraph?.viewport,
@@ -656,7 +659,7 @@ function getConditionOutputSockets(
 }
 
 function readConditionOutputSocket(portId: string | undefined) {
-  return portId?.match(/^output:(.+)$/)?.[1];
+  return portId?.startsWith("output:") ? portId : undefined;
 }
 
 function getNextStrictConditionOutputPortId(

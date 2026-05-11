@@ -1,6 +1,5 @@
 import { evaluateLayerAnimations } from "../core/animations";
 import {
-  type AnimationGraphState,
   FRAME_HEIGHT,
   FRAME_WIDTH,
   type BackgroundLayer,
@@ -39,11 +38,7 @@ export type EvaluatedBackgroundLayer = Omit<BackgroundLayer, "elements"> & {
 
 export type RenderEvaluationOptions = {
   animations?: boolean;
-  bgGraph?: AnimationGraphState;
 };
-
-const paperTextureWidth = 1920;
-const paperTextureHeight = 1080;
 
 const templateCache = new Map<
   string,
@@ -111,21 +106,12 @@ export function evaluateBackgroundLayer(
     animationsEnabled && background.animations
       ? evaluateLayerAnimations(background.animations, time)
       : {};
-  const backgroundGraphStyle = compileBackgroundGraphStyle(
-    options.bgGraph,
-    time,
-  );
-  const baseFillStyle = hasBackgroundGraphPaintStyle(backgroundGraphStyle)
-    ? stripBackgroundPaintStyle(background.style)
-    : background.style;
-
   return {
     ...background,
     elements,
     renderStyle: { ...layerAnimationStyle },
     fillStyle: {
-      ...baseFillStyle,
-      ...backgroundGraphStyle,
+      ...background.style,
       left: fillBounds.x,
       top: fillBounds.y,
       width: fillBounds.width,
@@ -136,247 +122,6 @@ export function evaluateBackgroundLayer(
       (Boolean(background.animations?.length) ||
         elements.some((element) => element.timeSensitive)),
   };
-}
-
-export function getConnectedBackgroundSourceIds(
-  graph: AnimationGraphState | undefined,
-) {
-  const backgroundNodeIds = new Set(
-    Object.entries(graph?.customNodes ?? {})
-      .filter(([, node]) => node.scopeKey === "background")
-      .map(([id]) => id),
-  );
-  return new Set(
-    (graph?.edges ?? [])
-      .filter(
-        (edge) =>
-          edge.toNodeId.startsWith("layer:") &&
-          backgroundNodeIds.has(edge.fromNodeId),
-      )
-      .map((edge) => edge.fromNodeId),
-  );
-}
-
-function hasBackgroundGraphPaintStyle(style: RenderStyle) {
-  return Boolean(
-    style.background !== undefined ||
-    style.backgroundColor !== undefined ||
-    style.backgroundImage !== undefined,
-  );
-}
-
-function stripBackgroundPaintStyle(style: RenderStyle) {
-  const {
-    background: _background,
-    backgroundColor: _backgroundColor,
-    backgroundImage: _backgroundImage,
-    backgroundPosition: _backgroundPosition,
-    backgroundSize: _backgroundSize,
-    backgroundRepeat: _backgroundRepeat,
-    ...rest
-  } = style;
-  return rest;
-}
-
-export function compileBackgroundGraphStyle(
-  graph: AnimationGraphState | undefined,
-  time = 0,
-): RenderStyle {
-  if (!graph?.customNodes) return {};
-  const entries = Object.entries(graph.customNodes).filter(
-    ([, node]) => node.scopeKey === "background",
-  );
-  const nodeIds = new Set(entries.map(([id]) => id));
-  const sourceEdgeTargets = getConnectedBackgroundSourceIds(graph);
-  if (sourceEdgeTargets.size === 0) return {};
-  const style: RenderStyle = {};
-  const backgroundImages: string[] = [];
-  const backgroundSizes: string[] = [];
-  const backgroundPositions: string[] = [];
-  for (const [nodeId, node] of entries) {
-    if (
-      !sourceEdgeTargets.has(nodeId) &&
-      node.kind !== "oscillate" &&
-      node.kind !== "time"
-    )
-      continue;
-    const details = node.details ?? {};
-    const oscillation = getBackgroundNodeOscillation(
-      graph,
-      nodeIds,
-      nodeId,
-      time,
-    );
-    if (node.kind === "bgSolid") {
-      style.backgroundColor = details.color ?? "#050505";
-      continue;
-    }
-    if (node.kind === "bgGradient") {
-      const type = details.type ?? "linear";
-      const stops = details.stops ?? "#0b1020 0%, #3949ab 100%";
-      const angle = details.angle ?? "135deg";
-      const center = details.center ?? "center";
-      backgroundImages.push(
-        details.gradient ??
-          (type === "radial"
-            ? `radial-gradient(circle at ${center}, ${stops})`
-            : type === "conic"
-              ? `conic-gradient(from ${angle}, ${stops})`
-              : `linear-gradient(${angle}, ${stops})`),
-      );
-      if (oscillation) {
-        backgroundSizes.push(details.backgroundSize ?? "140% 140%");
-        backgroundPositions.push(`${50 + oscillation}% ${50 - oscillation}%`);
-      } else {
-        backgroundSizes.push(details.backgroundSize ?? "auto");
-        backgroundPositions.push("center");
-      }
-      continue;
-    }
-    if (node.kind === "bgPattern") {
-      const color = details.color ?? "rgba(255,255,255,0.18)";
-      const base = details.base ?? "transparent";
-      const size = details.size ?? "32px";
-      const pattern = details.pattern ?? "dots";
-      if (base !== "transparent") style.backgroundColor = base;
-      const position = oscillation ? `${oscillation}px 0` : "0 0";
-      if (pattern === "grid") {
-        backgroundImages.push(
-          `linear-gradient(${color} 1px, transparent 1px)`,
-          `linear-gradient(90deg, ${color} 1px, transparent 1px)`,
-        );
-        backgroundSizes.push(`${size} ${size}`, `${size} ${size}`);
-        backgroundPositions.push(position, position);
-      } else {
-        backgroundImages.push(
-          pattern === "stripes"
-            ? `repeating-linear-gradient(45deg, ${color} 0 2px, transparent 2px ${size})`
-            : `radial-gradient(circle, ${color} 1.5px, transparent 1.6px)`,
-        );
-        backgroundSizes.push(`${size} ${size}`);
-        backgroundPositions.push(position);
-      }
-      continue;
-    }
-    if (node.kind === "bgPaper") {
-      const color = details.color ?? "#f5f5f2";
-      const scale = formatPaperTextureSize(details.size ?? details.scale);
-      const position = oscillation
-        ? `${oscillation * 0.6}px ${oscillation * -0.4}px`
-        : "center";
-      style.backgroundColor = color;
-      backgroundImages.push(`url("${createPaperTextureDataUrl(details)}")`);
-      backgroundSizes.push(`${scale} ${scale}`);
-      backgroundPositions.push(position);
-      style.backgroundRepeat = "repeat";
-    }
-  }
-  if (backgroundImages.length) {
-    style.backgroundImage = backgroundImages.join(", ");
-    style.backgroundSize = backgroundSizes.join(", ");
-    style.backgroundPosition = backgroundPositions.join(", ");
-  }
-  return style;
-}
-
-function formatPaperTextureSize(value: string | undefined) {
-  const fallback = "360px";
-  if (!value) return fallback;
-  const trimmed = value.trim();
-  if (/^-?\d+(?:\.\d+)?$/.test(trimmed)) return `${trimmed}px`;
-  if (/^-?\d+(?:\.\d+)?(?:px|rem|em|%|vw|vh|vmin|vmax)$/i.test(trimmed))
-    return trimmed;
-  return fallback;
-}
-
-function createPaperTextureDataUrl(details: Record<string, string>) {
-  const color = details.color ?? "#ffffff";
-  const seed = clampNumber(Number(details.seed ?? 11), 1, 999, 11);
-  const grainAmount = clampNumber(
-    Number(details.grainAmount ?? 0.04),
-    0,
-    1,
-    0.04,
-  );
-  const grainScale = clampNumber(
-    Number(details.grainScale ?? 4.5),
-    0.1,
-    15,
-    4.5,
-  );
-  const crumpleAmount = clampNumber(
-    Number(details.crumpleAmount ?? 0.4),
-    0,
-    1,
-    0.4,
-  );
-  const crumpleScale = clampNumber(
-    Number(details.crumpleScale ?? 0.01),
-    0.0001,
-    0.1,
-    0.01,
-  );
-  const crumpleShape = Math.round(
-    clampNumber(Number(details.crumpleShape ?? 5), 1, 8, 5),
-  );
-
-  const surfaceScale = roundThree(crumpleAmount * 12);
-  const diffuseConstant = 1.35;
-  const grainFrequency = roundThree(grainScale * 0.5);
-
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${paperTextureWidth}" height="${paperTextureHeight}" viewBox="0 0 ${paperTextureWidth} ${paperTextureHeight}" color-interpolation-filters="sRGB"><defs><filter id="paper" x="0" y="0" width="100%" height="100%"><feTurbulence type="fractalNoise" baseFrequency="${crumpleScale}" numOctaves="${crumpleShape}" seed="${seed}" stitchTiles="stitch" result="crumpleNoise"/><feDiffuseLighting in="crumpleNoise" surfaceScale="${surfaceScale}" diffuseConstant="${diffuseConstant}" lighting-color="#ffffff" result="light"><feDistantLight azimuth="315" elevation="45"/></feDiffuseLighting><feBlend in="SourceGraphic" in2="light" mode="multiply" result="crumpled"/><feTurbulence type="fractalNoise" baseFrequency="${grainFrequency}" numOctaves="1" seed="${seed + 1}" stitchTiles="stitch" result="grainNoise"/><feColorMatrix in="grainNoise" type="saturate" values="0" result="grainMono"/><feComponentTransfer in="grainMono" result="grain"><feFuncR type="linear" slope="${grainAmount}" intercept="${roundThree(1 - grainAmount)}"/><feFuncG type="linear" slope="${grainAmount}" intercept="${roundThree(1 - grainAmount)}"/><feFuncB type="linear" slope="${grainAmount}" intercept="${roundThree(1 - grainAmount)}"/></feComponentTransfer><feBlend in="crumpled" in2="grain" mode="multiply" result="papered"/></filter></defs><rect width="100%" height="100%" fill="${escapeSvgAttribute(color)}" filter="url(#paper)"/></svg>`;
-  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
-}
-
-function clampNumber(
-  value: number,
-  min: number,
-  max: number,
-  fallback: number,
-) {
-  if (!Number.isFinite(value)) return fallback;
-  return Math.min(max, Math.max(min, value));
-}
-
-function roundThree(value: number) {
-  return Math.round(value * 1000) / 1000;
-}
-
-function escapeSvgAttribute(value: string) {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/"/g, "&quot;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
-
-export function getBackgroundNodeOscillation(
-  graph: AnimationGraphState | undefined,
-  nodeIds: Set<string>,
-  targetNodeId: string | undefined,
-  time: number,
-) {
-  if (!targetNodeId) return 0;
-  const oscillateNodeIds = (graph?.edges ?? [])
-    .filter(
-      (edge) => edge.toNodeId === targetNodeId && nodeIds.has(edge.fromNodeId),
-    )
-    .map((edge) => edge.fromNodeId);
-  return oscillateNodeIds.reduce((sum, nodeId) => {
-    const node = graph?.customNodes?.[nodeId];
-    if (node?.kind !== "oscillate") return sum;
-    return sum + getBackgroundOscillation(node.details, time);
-  }, 0);
-}
-
-function getBackgroundOscillation(
-  details: Record<string, string> | undefined,
-  time: number,
-) {
-  const amount = Number(details?.amount ?? 0);
-  const speed = Number(details?.speed ?? 1);
-  if (!Number.isFinite(amount) || !Number.isFinite(speed)) return 0;
-  return Math.sin(time * speed * Math.PI * 2) * amount;
 }
 
 export function isTimeSensitiveFrameObject(object: FrameObject) {

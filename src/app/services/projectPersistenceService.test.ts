@@ -439,48 +439,6 @@ describe("project persistence service", () => {
     ).toBe("compositions/folder/B.composition.ts");
   });
 
-  it("loads manifest graph metadata over stale source graph without changing source code", async () => {
-    const source = `import { Composition } from "@clipper/composition-api";
-export const composition = new Composition({
-  duration: 5,
-  frame: { width: 1920, height: 1080, style: {} },
-  background: { style: {}, elements: [] },
-  bgGraph: { nodes: { paper: { x: 1, y: 1 } }, edges: [] },
-  render() { return []; },
-});`;
-    mockDirectoryProject({
-      manifest: {
-        compositionLibrary: [
-          {
-            ...compositionRecord(
-              "composition-b",
-              "compositions/B.composition.ts",
-              source,
-            ),
-            bgGraph: { nodes: { paper: { x: 8, y: 9 } }, edges: [] },
-          },
-        ],
-      },
-      files: {
-        "file-manager/compositions/B.composition.ts": source,
-      },
-    });
-
-    const { projectPersistenceService } =
-      await import("./projectPersistenceService");
-    const { project } = await projectPersistenceService.loadProject({
-      manifestPath: "clipper/projects/hi/project.json",
-    });
-
-    expect(project.compositionLibrary?.[0].bgGraph?.nodes.paper).toEqual({
-      x: 8,
-      y: 9,
-    });
-    expect(project.compositionSources?.["compositions/B.composition.ts"]).toBe(
-      source,
-    );
-  });
-
   it("marks a deleted linked composition missing while preserving timeline clips", async () => {
     const source = compositionSource("Deleted");
     mockDirectoryProject({

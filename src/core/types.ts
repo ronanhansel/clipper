@@ -415,13 +415,6 @@ export type TransitionLayer = TimelineMarkerMetadata & {
   effect: TransitionEffect;
 };
 
-export type Composition3dGraphState = {
-  nodes: Record<string, AnimationGraphNodePosition>;
-  edges: AnimationGraphEdge[];
-  customNodes?: Record<string, AnimationGraphCustomNode>;
-  parameters?: Record<string, Record<string, string>>;
-};
-
 export type CompositionClip = TimelineMarkerMetadata & {
   id: string;
   compositionId?: string;
@@ -441,10 +434,7 @@ export type CompositionClip = TimelineMarkerMetadata & {
   snapshot: PartSnapshotLine[];
   motionMarkers: MotionMarker[];
   animationGraph?: StrictAnimationGraph;
-  bgGraph?: AnimationGraphState;
-  threeBackgrounds?: Record<string, unknown>;
   renderMode?: CompositionRenderMode;
-  composition3dGraph?: Composition3dGraphState;
 };
 
 export type Part = CompositionClip;
@@ -628,11 +618,6 @@ export type AnimationGraphCustomNode = {
     | "split"
     | "condition"
     | "group"
-    | "bgSolid"
-    | "bgGradient"
-    | "bgPattern"
-    | "bgPaper"
-    | "bgThreeCode"
     | "oscillate";
   label: string;
   scopeKey: string;

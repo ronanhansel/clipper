@@ -234,17 +234,12 @@ async function loadDirectoryCompositions(
   const claimedManifestIds = new Set<string>();
   return Promise.all(
     compositionFiles.map(async (file) => {
-      const rawSource = await clipperHost.readTextFile(file.path);
-      const migratedSource = migrateLegacyComposition3dSource(
-        projectPathFromDirectoryEntry(
-          editableRoot,
-          file.path,
-          file.relativePath,
-        ),
-        rawSource,
+      const source = await clipperHost.readTextFile(file.path);
+      const filePath = projectPathFromDirectoryEntry(
+        editableRoot,
+        file.path,
+        file.relativePath,
       );
-      const source = migratedSource.source;
-      const filePath = migratedSource.filePath;
       const manifestComposition = resolveManifestCompositionForFile(
         manifestCompositions,
         claimedManifestIds,
@@ -271,10 +266,6 @@ async function loadDirectoryCompositions(
           filePath,
           animationGraph:
             manifestComposition?.animationGraph ?? document.animationGraph,
-          bgGraph: manifestComposition?.bgGraph ?? document.bgGraph,
-          composition3dGraph:
-            manifestComposition?.composition3dGraph ??
-            document.composition3dGraph,
           renderMode: manifestComposition?.renderMode ?? document.renderMode,
           sourceHash: hashCompositionSource(source),
           loadedSource: source,
@@ -318,32 +309,7 @@ function createStableCompositionId() {
 }
 
 function isCompositionSourceFile(file: { name: string }) {
-  return (
-    file.name.endsWith(".composition.ts") ||
-    file.name.endsWith(".composition3d.json")
-  );
-}
-
-function migrateLegacyComposition3dSource(filePath: string, source: string) {
-  if (!filePath.endsWith(".composition3d.json")) return { filePath, source };
-  const graph = JSON.parse(source) as CompositionClip["composition3dGraph"];
-  return {
-    filePath: filePath.replace(/\.composition3d\.json$/, ".composition.ts"),
-    source: composition3dGraphToSource(graph),
-  };
-}
-
-function composition3dGraphToSource(
-  graph: CompositionClip["composition3dGraph"],
-) {
-  return `import { Composition3D } from "@clipper/composition-api";
-
-export const composition = new Composition3D({
-  duration: 5,
-  frame: { width: 1920, height: 1080, style: {} },
-  composition3dGraph: ${JSON.stringify(graph, null, 4).replace(/^/gm, "  ").trimStart()},
-});
-`;
+  return file.name.endsWith(".composition.ts");
 }
 
 const listProjectFilesRecursive = async (

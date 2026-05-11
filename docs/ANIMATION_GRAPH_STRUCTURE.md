@@ -5,8 +5,8 @@ This document describes current strict composition2d animation graph architectur
 ## Scope
 
 - Applies to `CompositionClip.animationGraph` for composition2d only.
-- Background and composition3d graphs keep their separate legacy formats.
 - Legacy composition2d socket/state formats are not accepted on active strict runtime/editor paths.
+- Removed legacy non-2D graph paths are not part of the target architecture. New 2D animation graph work should land in the strict typed DAG and compiler path described here.
 
 ## Persisted Graph
 

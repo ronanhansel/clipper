@@ -364,8 +364,7 @@ function normalizeDroppedCompositionKey(value: string) {
   return value
     .replace(/^os-file:/, "")
     .replace(/\\/g, "/")
-    .replace(/^file-manager\//, "")
-    .replace(/\.composition3d\.json$/, ".composition.ts");
+    .replace(/^file-manager\//, "");
 }
 
 function getCompositionFilePathFromDropKey(value: string) {

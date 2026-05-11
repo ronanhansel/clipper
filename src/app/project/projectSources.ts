@@ -49,7 +49,6 @@ export function getSyncedCompositionSources(
   for (const nextPart of nextParts) {
     if (nextPart.sourceMissing) continue;
     const previousPart = previousPartsByPath.get(nextPart.filePath);
-    if (nextPart.threeBackgrounds && nextSources[nextPart.filePath]) continue;
     const nextSource = compositionToSource(nextPart);
     if (
       previousPart &&

@@ -54,8 +54,6 @@ import {
 import {
   evaluateBackgroundLayer,
   evaluateFrameObject,
-  getConnectedBackgroundSourceIds,
-  getBackgroundNodeOscillation,
   isTimeSensitiveFrameObject,
   type EvaluatedFrameObject,
 } from "../../render-engine/renderRuntime";
@@ -68,7 +66,6 @@ import {
 import {
   FRAME_HEIGHT,
   FRAME_WIDTH,
-  type AnimationGraphCustomNode,
   type AdjustmentLayer,
   type BackgroundLayer,
   type Bounds,
@@ -98,7 +95,6 @@ import {
   shouldPreRasterizeSvgForExport,
   type SvgRasterResult,
 } from "./exportSvgRasterCache";
-import { WebGlPipeline } from "../../render-engine/webgl/WebGlPipeline";
 
 const identityCameraTransform: CameraPreviewTransform = {
   x: 0,
@@ -248,7 +244,6 @@ export const FramePreview = memo(function FramePreview({
   const selectionOffsetPx = selectorOffsetPx / selectionOverlayScale;
   const selectionHandleSizePx = selectorHandleSizePx / selectionOverlayScale;
   const animationsEnabled = true;
-  const compositionRenderMode = part.renderMode ?? "dom";
   const previewParts = (
     arguments[0] as {
       previewParts?: Array<{ part: Part; start: number; previewTime: number }>;
@@ -696,19 +691,7 @@ export const FramePreview = memo(function FramePreview({
                       filePath={part.filePath}
                       resetKey={`${part.id}:${part.filePath}:${compositionError ?? ""}`}
                     >
-                      {compositionRenderMode === "webgl" ? (
-                        <WebGlPipeline
-                          graph={part.composition3dGraph}
-                          frameScale={frameScale}
-                          isPlaying={isPlaying}
-                          partDuration={part.duration}
-                          partStart={partStart}
-                          previewTime={previewTime}
-                          trimStart={part.trimStart}
-                          playbackClock={playbackClock}
-                        />
-                      ) : transitionPreviewParts &&
-                        transitionProgress !== null ? (
+                      {transitionPreviewParts && transitionProgress !== null ? (
                         <TransitionCompositeView
                           adjustmentLayers={adjustmentLayers}
                           animationsEnabled={animationsEnabled}
@@ -935,7 +918,7 @@ function applyLiveComposePreviewTime(
       part.background,
       time,
       part.duration,
-      { animations: true, bgGraph: part.bgGraph },
+      { animations: true },
     );
     const backgroundElement = root.querySelector<HTMLElement>(
       `[data-layer-id="${cssEscape(part.background.id)}"]`,
@@ -1182,15 +1165,10 @@ function CompositionLayerView({
         <BackgroundLayerView
           animationsEnabled={animationsEnabled}
           background={part.background}
-          bgGraph={part.bgGraph}
-          threeBackgrounds={part.threeBackgrounds}
           canSelect={active && canSelect}
           duration={part.duration}
           exportTileFrameBounds={exportTileFrameBounds}
           frameScale={frameScale}
-          isPlaying={isPlaying}
-          partStart={partStart}
-          playbackClock={playbackClock}
           previewTime={previewTime}
           renderMode={renderMode}
           onPointerDown={undefined}
@@ -2447,78 +2425,36 @@ function areBackgroundLayerPropsEqual(
   previous: {
     animationsEnabled: boolean;
     background: BackgroundLayer;
-    bgGraph?: Part["bgGraph"];
-    threeBackgrounds?: Part["threeBackgrounds"];
     duration: number;
     exportTileFrameBounds?: ExportTileFrameBounds;
     frameScale: number;
-    isPlaying: boolean;
-    partStart: number;
-    playbackClock: PlaybackClock;
     previewTime: number;
     renderMode: "preview" | "export";
   },
   next: {
     animationsEnabled: boolean;
     background: BackgroundLayer;
-    bgGraph?: Part["bgGraph"];
-    threeBackgrounds?: Part["threeBackgrounds"];
     duration: number;
     exportTileFrameBounds?: ExportTileFrameBounds;
     frameScale: number;
-    isPlaying: boolean;
-    partStart: number;
-    playbackClock: PlaybackClock;
     previewTime: number;
     renderMode: "preview" | "export";
   },
 ) {
   const timeSensitive =
     Boolean(next.background.animations?.length) ||
-    isTimeSensitiveBackgroundGraph(next.bgGraph) ||
     next.background.elements.some(isPreviewTimeSensitiveObject);
   return (
     previous.animationsEnabled === next.animationsEnabled &&
     previous.background === next.background &&
-    previous.bgGraph === next.bgGraph &&
-    previous.threeBackgrounds === next.threeBackgrounds &&
     previous.duration === next.duration &&
     previous.exportTileFrameBounds === next.exportTileFrameBounds &&
     previous.frameScale === next.frameScale &&
-    previous.isPlaying === next.isPlaying &&
-    previous.partStart === next.partStart &&
-    previous.playbackClock === next.playbackClock &&
     previous.renderMode === next.renderMode &&
     (!next.animationsEnabled ||
       !timeSensitive ||
       previous.previewTime === next.previewTime)
   );
-}
-
-function isTimeSensitiveBackgroundGraph(graph: Part["bgGraph"] | undefined) {
-  const customNodes = graph?.customNodes ?? {};
-  const connectedSourceIds = getConnectedBackgroundSourceIds(graph);
-  if (
-    Array.from(connectedSourceIds).some(
-      (nodeId) => customNodes[nodeId]?.kind === "bgThreeCode",
-    )
-  )
-    return true;
-  const backgroundNodeIds = new Set(
-    Object.entries(customNodes)
-      .filter(([, node]) => node.scopeKey === "background")
-      .map(([id]) => id),
-  );
-  return (graph?.edges ?? []).some((edge) => {
-    const from = customNodes[edge.fromNodeId];
-    const to = customNodes[edge.toNodeId];
-    return (
-      backgroundNodeIds.has(edge.fromNodeId) &&
-      backgroundNodeIds.has(edge.toNodeId) &&
-      from?.kind === "time" &&
-      to?.kind === "oscillate"
-    );
-  });
 }
 
 function areBackgroundElementPropsEqual(
@@ -3146,29 +3082,20 @@ export function DragSelectionBox({
 export const BackgroundLayerView = memo(function BackgroundLayerView({
   animationsEnabled,
   background,
-  bgGraph,
-  threeBackgrounds,
   canSelect,
   duration,
   exportTileFrameBounds,
   frameScale,
   previewTime,
-  partStart,
-  playbackClock,
   renderMode,
   onPointerDown,
 }: {
   animationsEnabled: boolean;
   background: BackgroundLayer;
-  bgGraph?: Part["bgGraph"];
-  threeBackgrounds?: Part["threeBackgrounds"];
   canSelect?: boolean;
   duration: number;
   exportTileFrameBounds?: ExportTileFrameBounds;
   frameScale: number;
-  isPlaying: boolean;
-  partStart: number;
-  playbackClock: PlaybackClock;
   previewTime: number;
   renderMode: "preview" | "export";
   onPointerDown?: (event: PointerEvent<HTMLDivElement>) => void;
@@ -3177,16 +3104,11 @@ export const BackgroundLayerView = memo(function BackgroundLayerView({
     () =>
       evaluateBackgroundLayer(background, previewTime, duration, {
         animations: animationsEnabled,
-        bgGraph,
       }),
-    [animationsEnabled, background, bgGraph, duration, previewTime],
+    [animationsEnabled, background, duration, previewTime],
   );
   const layerStyle = evaluatedBackground.renderStyle as CSSProperties;
   const fillStyle = evaluatedBackground.fillStyle as CSSProperties;
-  const connectedBackgroundSourceIds = useMemo(
-    () => getConnectedBackgroundSourceIds(bgGraph),
-    [bgGraph],
-  );
 
   return (
     <div
@@ -3201,14 +3123,6 @@ export const BackgroundLayerView = memo(function BackgroundLayerView({
         className="absolute"
         data-background-fill-id={background.id}
         style={fillStyle}
-      />
-      <BackgroundThreeCanvas
-        connectedSourceIds={connectedBackgroundSourceIds}
-        graph={bgGraph}
-        partStart={partStart}
-        playbackClock={playbackClock}
-        previewTime={previewTime}
-        threeBackgrounds={threeBackgrounds}
       />
       {evaluatedBackground.elements
         .filter(
@@ -3230,222 +3144,6 @@ export const BackgroundLayerView = memo(function BackgroundLayerView({
     </div>
   );
 }, areBackgroundLayerPropsEqual);
-
-function BackgroundThreeCanvas({
-  connectedSourceIds,
-  graph,
-  partStart,
-  playbackClock,
-  previewTime,
-  threeBackgrounds,
-}: {
-  connectedSourceIds: Set<string>;
-  graph?: Part["bgGraph"];
-  partStart: number;
-  playbackClock: PlaybackClock;
-  previewTime: number;
-  threeBackgrounds?: Part["threeBackgrounds"];
-}) {
-  const activeEntries = Object.entries(graph?.customNodes ?? {}).filter(
-    ([id, node]) =>
-      node.scopeKey === "background" &&
-      node.kind === "bgThreeCode" &&
-      connectedSourceIds.has(id),
-  );
-  if (!activeEntries.length) return null;
-  return (
-    <>
-      {activeEntries.map(([nodeId, node], index) => (
-        <BackgroundThreeCanvasLayer
-          graph={graph}
-          key={nodeId}
-          node={node}
-          nodeId={nodeId}
-          partStart={partStart}
-          playbackClock={playbackClock}
-          previewTime={previewTime}
-          threeBackgrounds={threeBackgrounds}
-          zIndex={index + 1}
-        />
-      ))}
-    </>
-  );
-}
-
-function BackgroundThreeCanvasLayer({
-  graph,
-  node,
-  nodeId,
-  partStart,
-  playbackClock,
-  previewTime,
-  threeBackgrounds,
-  zIndex,
-}: {
-  graph?: Part["bgGraph"];
-  node: AnimationGraphCustomNode;
-  nodeId: string;
-  partStart: number;
-  playbackClock: PlaybackClock;
-  previewTime: number;
-  threeBackgrounds?: Part["threeBackgrounds"];
-  zIndex: number;
-}) {
-  const rootRef = useRef<HTMLDivElement | null>(null);
-  const previewTimeRef = useRef(previewTime);
-  const graphRef = useRef(graph);
-  const playbackClockRef = useRef(playbackClock);
-  const partStartRef = useRef(partStart);
-  useEffect(() => {
-    previewTimeRef.current = previewTime;
-  }, [previewTime]);
-  useEffect(() => {
-    graphRef.current = graph;
-  }, [graph]);
-  useEffect(() => {
-    playbackClockRef.current = playbackClock;
-    partStartRef.current = partStart;
-  }, [partStart, playbackClock]);
-  const nodeDetailsKey = JSON.stringify(node.details ?? {});
-  useLayoutEffect(() => {
-    const root = rootRef.current;
-    if (!root) return;
-    let disposed = false;
-    let frameId = 0;
-    let cleanup: (() => void) | undefined;
-    root.dataset.clipperThreePending = "true";
-    import("three")
-      .then((THREE) => {
-        if (disposed) return;
-        const width = root.clientWidth || FRAME_WIDTH;
-        const height = root.clientHeight || FRAME_HEIGHT;
-        const scene = new THREE.Scene();
-        const camera = new THREE.PerspectiveCamera(
-          48,
-          width / height,
-          0.1,
-          100,
-        );
-        camera.position.z = 5;
-        const renderer = new THREE.WebGLRenderer({
-          alpha: true,
-          antialias: true,
-        });
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-        renderer.setSize(width, height);
-        renderer.domElement.style.display = "block";
-        renderer.domElement.style.width = "100%";
-        renderer.domElement.style.height = "100%";
-        root.replaceChildren(renderer.domElement);
-        const backgroundRef = node.details?.ref ?? "background";
-        const createScene = resolveThreeBackgroundFactory(
-          threeBackgrounds?.[backgroundRef],
-        );
-        if (!createScene)
-          throw new Error(
-            `Three.js background ref not found: ${backgroundRef}`,
-          );
-        const update = createScene({
-          THREE,
-          root,
-          scene,
-          camera,
-          renderer,
-          width,
-          height,
-        });
-        const animate = () => {
-          if (disposed) return;
-          frameId = requestAnimationFrame(animate);
-          const clock = playbackClockRef.current;
-          const t = clock
-            ? clock.startedFrom +
-              (performance.now() - clock.startedAt) / 1000 -
-              partStartRef.current
-            : (readRenderClockTime(root) ?? previewTimeRef.current);
-          if (typeof update === "function")
-            update({ time: t, graph: graphRef.current, nodeId });
-          renderer.render(scene, camera);
-        };
-        animate();
-        delete root.dataset.clipperThreePending;
-        root.dataset.clipperThreeReady = "true";
-        cleanup = () => {
-          cancelAnimationFrame(frameId);
-          scene.traverse((object: any) => {
-            object.geometry?.dispose?.();
-            if (Array.isArray(object.material))
-              object.material.forEach((material: any) => material.dispose?.());
-            else object.material?.dispose?.();
-          });
-          renderer.dispose();
-          root.replaceChildren();
-        };
-      })
-      .catch((error) => {
-        root.dataset.clipperThreeError =
-          error instanceof Error ? error.message : String(error);
-        delete root.dataset.clipperThreePending;
-      });
-    return () => {
-      disposed = true;
-      cleanup?.();
-    };
-  }, [nodeDetailsKey, nodeId]);
-  return (
-    <div
-      ref={rootRef}
-      className="pointer-events-none absolute inset-0"
-      data-clipper-three-root
-      style={{ zIndex }}
-    />
-  );
-}
-
-function resolveThreeBackgroundFactory(value: unknown) {
-  if (typeof value === "function") {
-    if (
-      value.prototype &&
-      typeof value.prototype === "object" &&
-      Object.getOwnPropertyNames(value.prototype).length > 1
-    ) {
-      return (context: Record<string, unknown>) => {
-        const instance = new (value as new (
-          ctx: Record<string, unknown>,
-        ) => unknown)(context) as {
-          createScene?: (ctx: Record<string, unknown>) => unknown;
-          update?: (ctx: Record<string, unknown>) => unknown;
-        };
-        const setup = instance.createScene?.(context);
-        if (typeof setup === "function") return setup;
-        if (typeof instance.update === "function")
-          return (frame: Record<string, unknown>) => instance.update?.(frame);
-        return undefined;
-      };
-    }
-    return value as (context: Record<string, unknown>) => unknown;
-  }
-  if (value && typeof value === "object") {
-    const instance = value as {
-      createScene?: (ctx: Record<string, unknown>) => unknown;
-      update?: (ctx: Record<string, unknown>) => unknown;
-    };
-    return (context: Record<string, unknown>) => {
-      const setup = instance.createScene?.(context);
-      if (typeof setup === "function") return setup;
-      if (typeof instance.update === "function")
-        return (frame: Record<string, unknown>) => instance.update?.(frame);
-      return undefined;
-    };
-  }
-  return null;
-}
-
-function readRenderClockTime(root: HTMLElement) {
-  const clockRoot = root.closest<HTMLElement>("[data-clipper-render-time]");
-  const time = Number(clockRoot?.dataset.clipperRenderTime);
-  return Number.isFinite(time) ? time : null;
-}
 
 export const BackgroundElementView = memo(function BackgroundElementView({
   element,

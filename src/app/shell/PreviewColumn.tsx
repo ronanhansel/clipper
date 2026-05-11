@@ -282,8 +282,7 @@ export function PreviewColumn({
               >
                 {renderDirectFramePreview ? (
                   <FramePreview {...renderFramePreviewProps} />
-                ) : displayPrerenderPreview &&
-                  renderFramePreviewProps.part.renderMode === "webgl" ? (
+                ) : displayPrerenderPreview ? (
                   <PrerenderVideoPreview
                     blackMissDebug={prerenderCacheBlackMissDebug}
                     currentSceneTimeRef={currentSceneTimeRef}

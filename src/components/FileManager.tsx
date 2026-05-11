@@ -1,5 +1,4 @@
 import {
-  Box,
   ChartNoAxesGantt,
   ChevronDown,
   ChevronRight,
@@ -1597,7 +1596,6 @@ function UnifiedTreeNode({
       });
       return;
     }
-    const isComposition3d = data.composition.renderMode === "webgl";
     onOpenMenu({
       x: event.clientX,
       y: event.clientY,
@@ -1635,7 +1633,7 @@ function UnifiedTreeNode({
             }),
         },
         {
-          label: isComposition3d ? "3D (Alpha)" : "Composition",
+          label: "Composition",
           disabled: true,
         },
         {
@@ -1653,9 +1651,7 @@ function UnifiedTreeNode({
       : data.kind === "timeline"
         ? ChartNoAxesGantt
         : data.kind === "composition"
-          ? data.composition.renderMode === "webgl"
-            ? Box
-            : Clapperboard
+          ? Clapperboard
           : Folder;
   const contentClass =
     data.kind === "composition"
@@ -1782,9 +1778,7 @@ function UnifiedTreeDragPreview({
       : node.kind === "timeline"
         ? ChartNoAxesGantt
         : node.kind === "composition"
-          ? node.composition.renderMode === "webgl"
-            ? Box
-            : Clapperboard
+          ? Clapperboard
           : Folder;
   const contentClass =
     node.kind === "composition" ? "text-[#38d996]" : "text-current";

@@ -2139,14 +2139,7 @@ function AppContent({
         ?.find((timeline) => timeline.id === scene.id)
         ?.clips.find((clip) => clip.id === clipId);
       if (!targetClip) return current;
-      const graphMode: GraphCompositionMode =
-        options?.mode ??
-        ((targetClip.renderMode ?? part.renderMode) === "webgl"
-          ? "composition3d"
-          : selectedComposeObjectIds.length === 1 &&
-              selectedComposeObjectIds[0] === part.background.id
-            ? "background"
-            : "composition2d");
+      const graphMode: GraphCompositionMode = "composition2d";
       const targetCompositionId = targetClip.compositionId;
       const targetFilePath = part.filePath;
       const fallbackComposition = [
@@ -2161,11 +2154,6 @@ function AppContent({
       const getCompositionGraph = (
         composition: CompositionClip | undefined,
       ) => {
-        if (graphMode === "composition3d")
-          return (composition?.composition3dGraph ??
-            part.composition3dGraph) as AnimationGraphState | undefined;
-        if (graphMode === "background")
-          return composition?.bgGraph ?? part.bgGraph;
         return (composition?.animationGraph ?? part.animationGraph) as any;
       };
       const nextGraph = updater(getCompositionGraph(fallbackComposition));

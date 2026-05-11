@@ -126,6 +126,31 @@ describe("strict animation graph foundation", () => {
     );
   });
 
+  it("rejects duplicate edge identities and exact endpoint pairs", () => {
+    const graph = validGraph();
+    graph.edges.push(
+      {
+        id: "time-out",
+        from: { nodeId: "source", portId: "out" },
+        to: { nodeId: "out", portId: "in" },
+      },
+      {
+        id: "source-time-copy",
+        from: { nodeId: "source", portId: "out" },
+        to: { nodeId: "time", portId: "in" },
+      },
+    );
+
+    expect(
+      validateAnimationGraph(graph).map((diagnostic) => diagnostic.message),
+    ).toEqual(
+      expect.arrayContaining([
+        'Edge id "time-out" must be unique.',
+        "Graph already contains this exact connection.",
+      ]),
+    );
+  });
+
   it("declares effect parameter conflict metadata as port cardinality", () => {
     const definition = createEffectAnimationGraphNodeDefinition({
       ...fakeEffectPackage,

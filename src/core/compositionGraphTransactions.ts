@@ -2,7 +2,6 @@ import type { GraphCompositionMode } from "./graphSockets";
 import { compositionToSource } from "./compositionSource";
 import type {
   AnimationGraphState,
-  Composition3dGraphState,
   CompositionClip,
   ProjectManifest,
   TypedAnimationGraphState,
@@ -12,8 +11,7 @@ import type { AnimationGraph as StrictAnimationGraph } from "./animationGraph/ty
 type CompositionGraphState =
   | StrictAnimationGraph
   | TypedAnimationGraphState
-  | AnimationGraphState
-  | Composition3dGraphState;
+  | AnimationGraphState;
 
 export type CompositionGraphTransaction = {
   compositionId?: string;
@@ -38,26 +36,16 @@ function getCompositionGraphSignature(
 
 function getCompositionGraph(
   composition: CompositionClip,
-  mode: GraphCompositionMode,
+  _mode: GraphCompositionMode,
 ) {
-  if (mode === "composition3d") return composition.composition3dGraph;
-  if (mode === "background") return composition.bgGraph;
   return composition.animationGraph;
 }
 
 function setCompositionGraph(
   composition: CompositionClip,
-  mode: GraphCompositionMode,
+  _mode: GraphCompositionMode,
   graph: CompositionGraphState,
 ) {
-  if (mode === "composition3d")
-    return {
-      ...composition,
-      renderMode: "webgl" as const,
-      composition3dGraph: graph as Composition3dGraphState,
-    };
-  if (mode === "background")
-    return { ...composition, bgGraph: graph as AnimationGraphState };
   return { ...composition, animationGraph: graph as StrictAnimationGraph };
 }
 
@@ -94,6 +82,7 @@ export function applyCompositionGraphTransaction(
   project: ProjectManifest,
   transaction: CompositionGraphTransaction,
 ): ProjectManifest {
+  if (transaction.mode !== "composition2d") return project;
   const revision = markCompositionGraphRevision(transaction.graph);
   const updatedSources = { ...(project.compositionSources ?? {}) };
   const updateComposition = (composition: CompositionClip) => {
@@ -120,14 +109,7 @@ export function applyCompositionGraphTransaction(
       ...scene,
       compositions: scene.compositions.map(updateComposition),
     })),
-    timelines: project.timelines?.map((timeline) => ({
-      ...timeline,
-      clips: timeline.clips.map((clip) =>
-        clip.id === transaction.clipId && transaction.mode === "composition3d"
-          ? { ...clip, renderMode: "webgl" as const }
-          : clip,
-      ),
-    })),
+    timelines: project.timelines,
   };
 }
 
@@ -149,11 +131,7 @@ export function carryCompositionGraphTransactionRevisions(
   const carryComposition = (composition: CompositionClip) => {
     const sourceComposition = findSourceComposition(composition);
     if (!sourceComposition) return;
-    for (const mode of [
-      "composition2d",
-      "background",
-      "composition3d",
-    ] as const) {
+    for (const mode of ["composition2d"] as const) {
       const revision = getCompositionGraphRevision(
         getCompositionGraph(sourceComposition, mode),
       );
@@ -184,11 +162,10 @@ export function preserveNewerCompositionGraphTransactions(
         current.id === composition.id ||
         current.filePath === composition.filePath,
     );
-  const graphWasPreserved = new Set<string>();
   const preserveComposition = (composition: CompositionClip) => {
     const currentComposition = findCurrentComposition(composition);
     if (!currentComposition) return composition;
-    return (["composition2d", "background", "composition3d"] as const).reduce(
+    return (["composition2d"] as const).reduce(
       (nextComposition, mode) => {
         const currentGraph = getCompositionGraph(currentComposition, mode);
         const nextGraph = getCompositionGraph(nextComposition, mode);
@@ -197,8 +174,6 @@ export function preserveNewerCompositionGraphTransactions(
           getCompositionGraphRevision(nextGraph)
         )
           return nextComposition;
-        graphWasPreserved.add(`${composition.id}:${mode}`);
-        graphWasPreserved.add(`${composition.filePath}:${mode}`);
         return setCompositionGraph(nextComposition, mode, currentGraph!);
       },
       composition,
@@ -214,15 +189,7 @@ export function preserveNewerCompositionGraphTransactions(
       ...scene,
       compositions: scene.compositions.map(preserveComposition),
     })),
-    timelines: nextProject.timelines?.map((timeline) => ({
-      ...timeline,
-      clips: timeline.clips.map((clip) =>
-        clip.compositionId &&
-        graphWasPreserved.has(`${clip.compositionId}:composition3d`)
-          ? { ...clip, renderMode: "webgl" as const }
-          : clip,
-      ),
-    })),
+    timelines: nextProject.timelines,
   };
 }
 
