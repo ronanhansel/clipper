@@ -40,6 +40,7 @@ Practical visual effects should include all reusable artifact logic in package/c
 - `group` or `groups` controls effect library placement. Prefer `groups` for nested menus.
 - `defaultParams` must include every inspector control default.
 - `paramControls` and `pointControls` drive inspector UI. Do not hardcode controls in React panels.
+- `graph` optionally declares strict animation graph metadata: `label`, `acceptedStructureKinds`, `defaultParams`, and `paramControls`. Graph effect nodes are discovered from this metadata through registry APIs.
 - Use shared control types from `src/core/effects/types.ts`; extend those types before inventing UI-specific shapes.
 
 ## Manifest Parser Limits
@@ -89,6 +90,7 @@ Use these APIs instead of editing call sites:
 - `registerEffectCategoryDeclaration(declaration)` registers category library/timeline/default metadata.
 - `registerEffectCategoryMetadata(metadata)` updates category library metadata while preserving existing timeline/default metadata.
 - `getEffectPackage(effectId)` and category-specific getters resolve packages.
+- `getGraphEffectPackages()` resolves effect packages that expose strict graph metadata.
 - `getEffectLibrarySections()` drives effect library sections and labels.
 - `getEffectTimelineMetadata(category)` drives timeline style/drop/lane metadata.
 - `getEffectPackageTimelineDefaultDuration(effectId)` resolves package default duration before timeline fallback duration.

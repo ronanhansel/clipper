@@ -4,11 +4,13 @@ import type {
   TypedAnimationGraphState,
 } from "../types";
 import type { TypedAnimationGraphNode } from "../types";
+import { animationGraphNodeRegistry } from "./registry";
 
 const friendlyTypeLabels: Record<AnimationGraphValueType, string> = {
   "Structure.Shape": "Shape",
   "Structure.TextObject": "Text",
   "Structure.RichTextObject": "Rich Text",
+  "Structure.TextTokens": "Text Tokens",
   "Structure.Object": "Object",
   "Value.String": "String",
   "Value.Number": "Number",
@@ -65,9 +67,7 @@ export function getTypedAnimationGraphConnectionError(
   fromSocketId?: string,
   toSocketId?: string,
 ) {
-  const fromSocket = fromSocketId
-    ? fromNode.outputs.find((socket) => socket.id === fromSocketId)
-    : fromNode.outputs[0];
+  const fromSocket = resolveOutputSocket(fromNode, fromSocketId);
   if (!fromSocket)
     return fromSocketId
       ? `${fromNode.label} has no output socket "${fromSocketId}".`
@@ -88,6 +88,20 @@ export function getTypedAnimationGraphConnectionError(
     ? friendlyAccepts(toSocket.accepts)
     : friendlyType(toSocket.type);
   return `Cannot connect ${friendlyType(fromSocket.type)} to ${accepted}.`;
+}
+
+function resolveOutputSocket(
+  fromNode: TypedAnimationGraphNode,
+  fromSocketId: string | undefined,
+) {
+  if (!fromSocketId) return fromNode.outputs[0];
+  return (
+    fromNode.outputs.find((socket) => socket.id === fromSocketId) ??
+    (animationGraphNodeRegistry.get(fromNode.kind)?.getNextOutputSocket &&
+    fromSocketId.startsWith("output:")
+      ? fromNode.outputs.find((socket) => socket.id === "output:1")
+      : undefined)
+  );
 }
 
 function areTypedSocketsCompatible(

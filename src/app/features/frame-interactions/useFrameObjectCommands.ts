@@ -5,7 +5,6 @@ import type {
   RightPanelTab,
 } from "../../types";
 import { syncChartObjectBounds } from "../../../core/frameInteraction";
-import { pruneTypedAnimationGraphForObjects } from "../../../core/project";
 import type {
   BackgroundLayer,
   CompositionClip,
@@ -208,10 +207,13 @@ export function useFrameObjectCommands({
           ),
         },
         objects,
-        animationGraph: pruneTypedAnimationGraphForObjects(
-          composition.animationGraph,
-          objects,
-        ),
+        animationGraph:
+          composition.animationGraph &&
+          "sourceObjectId" in composition.animationGraph
+            ? selectedIds.has(composition.animationGraph.sourceObjectId)
+              ? undefined
+              : composition.animationGraph
+            : undefined,
       };
     });
     setEditingTextObjectId(null);

@@ -2166,7 +2166,7 @@ function AppContent({
             part.composition3dGraph) as AnimationGraphState | undefined;
         if (graphMode === "background")
           return composition?.bgGraph ?? part.bgGraph;
-        return composition?.animationGraph ?? part.animationGraph;
+        return (composition?.animationGraph ?? part.animationGraph) as any;
       };
       const nextGraph = updater(getCompositionGraph(fallbackComposition));
       return applyCompositionGraphTransaction(current, {
@@ -2197,13 +2197,19 @@ function AppContent({
     nodeId: string,
     key: string,
     value: string,
-    options?: { history?: boolean; mode?: GraphCompositionMode },
+    options?: {
+      history?: boolean;
+      mode?: GraphCompositionMode;
+      layerId?: string;
+    },
   ) {
     updateComposeAnimationGraph((graph) => {
       const layerId =
-        options?.mode === "composition2d" &&
-        selectedComposeObjectIds.length === 1
-          ? selectedComposeObjectIds[0]
+        options?.mode === "composition2d"
+          ? (options.layerId ??
+            (selectedComposeObjectIds.length === 1
+              ? selectedComposeObjectIds[0]
+              : undefined))
           : undefined;
       if (layerId) {
         const layerGraph = getSelectedComposition2dLayerGraph(
@@ -2216,7 +2222,7 @@ function AppContent({
           updateAnimationGraphNodeParameter(layerGraph, nodeId, key, value),
           layerId,
           "composition2d",
-        );
+        ) as any;
       }
       return updateAnimationGraphNodeParameter(graph, nodeId, key, value);
     }, options);

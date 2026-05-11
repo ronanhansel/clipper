@@ -11,15 +11,11 @@
     "forceConsistentCasingInFileNames": true,
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "paths": {
-      "@clipper/composition-api": ["./clipper/projects/composition-api.ts"],
-      "@clipper/*": ["./clipper/projects/*"]
-    },
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
     "jsx": "react-jsx"
   },
-  "include": ["src", "clipper/projects/**/*.ts"],
+  "include": ["src"],
   "references": []
 }

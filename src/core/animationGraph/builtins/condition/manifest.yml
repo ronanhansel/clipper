@@ -1,0 +1,37 @@
+id: clipper.animationGraph.condition
+kind: condition
+name: Condition
+label: Condition
+connectionRules: ["typedSockets", "acyclic", "activeConditionOutput"]
+flow: { "transparent": true }
+inputs:
+  - id: source
+    label: Source
+    type: Structure.TextObject
+    accepts:
+      [
+        "Structure.TextObject",
+        "Structure.RichTextObject",
+        "Structure.TextTokens",
+        "Value.String",
+        "Value.Number",
+      ]
+  - id: controller
+    label: Controller
+    type: AnimationController
+outputs:
+  - id: matched
+    label: Matched
+    type: Structure.RichTextObject
+  - id: output:1
+    label: Output 1
+    type: AnimationController
+  - id: output:2
+    label: Output 2
+    type: AnimationController
+  - id: output:3
+    label: Output 3
+    type: AnimationController
+  - id: output:4
+    label: Output 4
+    type: AnimationController

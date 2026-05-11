@@ -1941,6 +1941,7 @@ function getSplitTextTokenStyle(
   for (const animation of animations) {
     const split = animation.options.split;
     if (!split) continue;
+    if (split.tokenIndexes && !split.tokenIndexes.includes(index)) continue;
     const tokenOffset =
       split.tokenDelays?.[index] ??
       getSplitTokenOrderIndex(index, count, split.order ?? "forward") *

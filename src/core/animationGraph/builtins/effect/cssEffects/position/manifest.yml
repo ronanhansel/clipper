@@ -1,0 +1,57 @@
+{
+  "property": "position",
+  "label": "Position",
+  "category": "Effect",
+  "popover": { "width": 238, "height": 164 },
+  "fieldGroups":
+    [
+      {
+        "id": "x",
+        "label": "X",
+        "columns": 2,
+        "fields":
+          [
+            {
+              "key": "x from",
+              "label": "from",
+              "defaultValue": "0",
+              "min": -10000,
+              "max": 10000,
+              "step": 1,
+            },
+            {
+              "key": "x to",
+              "label": "to",
+              "defaultValue": "0",
+              "min": -10000,
+              "max": 10000,
+              "step": 1,
+            },
+          ],
+      },
+      {
+        "id": "y",
+        "label": "Y",
+        "columns": 2,
+        "fields":
+          [
+            {
+              "key": "y from",
+              "label": "from",
+              "defaultValue": "0",
+              "min": -10000,
+              "max": 10000,
+              "step": 1,
+            },
+            {
+              "key": "y to",
+              "label": "to",
+              "defaultValue": "0",
+              "min": -10000,
+              "max": 10000,
+              "step": 1,
+            },
+          ],
+      },
+    ],
+}

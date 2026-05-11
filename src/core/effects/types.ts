@@ -1,4 +1,9 @@
 import type {
+  AnimationController,
+  EffectInstruction,
+  StructureStream,
+} from "../animationGraph/types";
+import type {
   AdjustmentEffectDefinition,
   AdjustmentLayer,
   EffectCategory,
@@ -8,7 +13,18 @@ import type {
   TransitionEffectDefinition,
   TransitionLayer,
   Point,
+  LayerAnimation,
 } from "../types";
+
+export type EffectGraphRuntimeAdapterInput = {
+  effect: EffectInstruction;
+  controller: AnimationController;
+  target: StructureStream;
+};
+
+export type EffectGraphRuntimeAdapter = (
+  input: EffectGraphRuntimeAdapterInput,
+) => Pick<LayerAnimation, "keyframes"> | null;
 
 export type BasePostProcessPass = {
   id: string;
@@ -219,6 +235,19 @@ export type MotionMendTransitionOption = {
   paramControls: readonly MotionMendTransitionParamControl[];
 };
 
+export type EffectGraphParamControl =
+  | AdjustmentEffectParamControl
+  | TransitionEffectParamControl
+  | MotionMendTransitionParamControl;
+
+export type EffectGraphMetadata = {
+  label?: string;
+  acceptedStructureKinds: readonly ("text" | "richText" | "shape" | "object")[];
+  defaultParams?: Record<string, unknown>;
+  paramControls?: readonly EffectGraphParamControl[];
+  runtimeAdapter?: EffectGraphRuntimeAdapter;
+};
+
 export type TransitionEffectNumberParamControl = {
   key: string;
   label: string;
@@ -258,6 +287,7 @@ export type TransitionEffectParamControl =
   | TransitionEffectColorParamControl;
 
 export type MotionEffectPackage = MotionEffectDefinition & {
+  graph?: EffectGraphMetadata;
   createDefaultBlock(input: {
     id: string;
     layerId: string;
@@ -270,6 +300,7 @@ export type MotionEffectPackage = MotionEffectDefinition & {
 };
 
 export type AdjustmentEffectPackage = AdjustmentEffectDefinition & {
+  graph?: EffectGraphMetadata;
   paramControls?: readonly AdjustmentEffectParamControl[];
   pointControls?: readonly AdjustmentEffectPointControl[];
   timeSensitive?: boolean;
@@ -305,6 +336,7 @@ export type AdjustmentEffectPackage = AdjustmentEffectDefinition & {
 };
 
 export type TransitionEffectPackage = TransitionEffectDefinition & {
+  graph?: EffectGraphMetadata;
   paramControls?: readonly TransitionEffectParamControl[];
   createDefaultLayer(input: {
     id: string;

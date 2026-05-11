@@ -14,7 +14,7 @@ export type GraphParameterEditorField = {
   key: string;
   label: string;
   value: string;
-  type?: "number" | "text" | "color" | "gradient";
+  type?: "number" | "text" | "color" | "gradient" | "button";
   unit?: string;
   min?: number;
   max?: number;
@@ -210,6 +210,8 @@ function GraphParameterInlineField({
         inline
       />
     );
+  if (field.type === "button")
+    return <GraphParameterButtonField field={field} onChange={onChange} />;
   const split = splitParameterUnit(field.value, field.unit);
   const displayValue = getNumberFieldDisplayValue(field, split.value);
   const isTimePopup = variant === "timePopup";
@@ -355,6 +357,8 @@ function GraphParameterBoxField({
         onChange={onChange}
       />
     );
+  if (field.type === "button")
+    return <GraphParameterButtonField field={field} onChange={onChange} />;
   const split = splitParameterUnit(field.value, field.unit);
   const displayValue = getNumberFieldDisplayValue(field, split.value);
   const isInspector = variant === "inspector";
@@ -431,6 +435,24 @@ function GraphParameterBoxField({
         />
       </div>
     </label>
+  );
+}
+
+function GraphParameterButtonField({
+  field,
+  onChange,
+}: {
+  field: GraphParameterEditorField;
+  onChange: GraphParameterChange;
+}) {
+  return (
+    <button
+      type="button"
+      className="h-9 rounded-lg border border-[#344155] bg-[#111926] px-3 text-[12px] font-extrabold text-[#dce4f0] transition hover:border-[#596b85] hover:bg-[#172234]"
+      onClick={() => onChange(field.key, field.value, { history: true })}
+    >
+      {field.label}
+    </button>
   );
 }
 

@@ -2,6 +2,8 @@ import type { AdjustmentEffectPackage } from "../../types";
 import { createAdjustmentEffectPackage } from "../../manifest";
 import blurManifest from "./blur/manifest.yml?raw";
 import { blurLogic } from "./blur/logic";
+import opacityManifest from "./opacity/manifest.yml?raw";
+import { opacityLogic } from "./opacity/logic";
 import boomerangManifest from "./boomerang/manifest.yml?raw";
 import { boomerangLogic } from "./boomerang/logic";
 import colourGradeManifest from "./colourGrade/manifest.yml?raw";
@@ -46,6 +48,10 @@ export { getSpeed } from "./speedChange/logic";
 export const blurEffect = createAdjustmentEffectPackage(
   blurManifest,
   blurLogic,
+);
+export const opacityEffect = createAdjustmentEffectPackage(
+  opacityManifest,
+  opacityLogic,
 );
 export const boomerangEffect = createAdjustmentEffectPackage(
   boomerangManifest,
@@ -128,6 +134,7 @@ export const builtInAdjustmentEffects = [
   reverseEffect,
   boomerangEffect,
   colourGradeEffect,
+  opacityEffect,
   blurEffect,
   directionalBlurEffect,
   radialBlurEffect,

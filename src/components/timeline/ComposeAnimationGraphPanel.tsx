@@ -22,11 +22,11 @@ import {
   type AnimationControllerFieldGroup,
   getAnimationDefinition,
   getAnimationDefinitionCategories,
-} from "../../core/animations/registry";
+} from "../../core/animationGraph/builtins/effect/cssEffects/registry";
 import {
   addAnimationGraphPresetGroupToGraph,
   animationGraphPresets,
-} from "../../core/animations/presets";
+} from "../../core/animationGraph/presets";
 import { roundTenth, roundTwo } from "../../core/math";
 import { frameObjectFromBackgroundLayer } from "../../core/frameInteraction";
 import { formatTime, getTimelineTicks } from "../../core/timeline";
@@ -35,11 +35,22 @@ import {
   type AnimationGraphTemporalNode,
 } from "../../core/animationGraphSequencing";
 import { expandAnimationGraphGroups } from "../../core/animationGraphGroups";
-import {
-  canConnectTypedAnimationGraphNodes,
-  getTypedAnimationGraphConnectionError,
-} from "../../core/animationGraph/compatibility";
+import { getTypedAnimationGraphConnectionError } from "../../core/animationGraph/compatibility";
+import { isPermittedComposition2dAnimationGraphEdge } from "../../core/animationGraph/connectionRules";
 import { createTypedAnimationGraphNode } from "../../core/animationGraph/nodeRegistry";
+import {
+  animationGraphNodeRegistry,
+  getAnimationGraphNodeDefinition,
+} from "../../core/animationGraph/registry";
+import { validateAnimationGraph } from "../../core/animationGraph/validation";
+import { getGraphPortCompatibilityError } from "../../core/animationGraph/portCompatibility";
+import { compileAnimationGraph } from "../../core/animationGraph/compiler";
+import type {
+  AnimationGraph as StrictAnimationGraph,
+  AnimationGraphEdge as StrictAnimationGraphEdge,
+  AnimationGraphNode as StrictAnimationGraphNode,
+  GraphPortDefinition,
+} from "../../core/animationGraph/types";
 import { updateAnimationGraphNodeParameter } from "../../core/graphParameters";
 import {
   canConnectBackgroundGraphNodeRoles,
@@ -156,6 +167,8 @@ type HoverConnector = {
   port: AnimationGraphPort;
   point: { x: number; y: number };
   fromSocket?: string;
+  portId?: string;
+  dynamicFromSocket?: boolean;
 };
 type DragState =
   | {
@@ -173,6 +186,7 @@ type DragState =
       fromNodeId: string;
       fromPort: AnimationGraphPort;
       fromSocket?: string;
+      portId?: string;
       fromNode: GraphNode;
       startX: number;
       startY: number;
@@ -292,6 +306,13 @@ const minGraphScale = 0.35;
 const maxGraphScale = 2.5;
 const groupGraphPadding = 120;
 const composition2dOutNodeId = "composition2d:out";
+const composition2dEffectKinds: Record<string, string> = {
+  opacity: "effect:clipper.adjustment.opacity",
+  position: "effect:clipper.motion.pan",
+  scale: "effect:clipper.motion.zoom",
+  rotate: "effect:clipper.motion.rotate",
+  blur: "effect:clipper.adjustment.blur",
+};
 const groupSubgraphZoomEnabled = true;
 const baseGraphWorldWidth = 5200;
 const baseGraphWorldHeight = 900;
@@ -398,7 +419,7 @@ function updateGraphHoverState(
   const connectorNode =
     hoveredNode ?? hitNodeLoose(point, nodes, scale) ?? null;
   const connector = connectorNode
-    ? getNodeHoverConnector(point, connectorNode, scale)
+    ? getNodeHoverConnector(point, connectorNode, scale, edges)
     : null;
   setHover(hoveredNode?.id ?? null, connector);
   setHoverEdge(
@@ -458,6 +479,24 @@ function getGraphEdgeDropEdge(
   const fromNode =
     nodes.find((node) => node.id === drag.fromNodeId) ?? drag.fromNode;
   if (!fromNode) return null;
+  if (mode === "composition2d") {
+    const strictEdge = createStrictComposition2dEdgeFromDrag(
+      drag,
+      fromNode,
+      nodeTarget,
+      portTarget?.portId,
+      getRenderableEdges(graph, nodes, objects),
+    );
+    if (!strictEdge) return null;
+    return isPermittedGraphEdge(
+      strictEdgeToEditorEdge(strictEdge),
+      nodes,
+      getRenderableEdges(graph, nodes, objects),
+      mode,
+    )
+      ? (strictEdge as any)
+      : null;
+  }
   const existingEdges = getRenderableEdges(graph, nodes, objects);
   const ports = getBestEdgePorts(fromNode, nodeTarget);
   const edge = createEdge(
@@ -465,7 +504,7 @@ function getGraphEdgeDropEdge(
     ports.fromPort,
     nodeTarget.id,
     ports.toPort,
-    drag.fromSocket ? { fromSocket: drag.fromSocket } : undefined,
+    getGraphEdgeSocketRegistration(drag, existingEdges),
   );
   if (isPermittedGraphEdge(edge, nodes, existingEdges, mode)) return edge;
   if (mode !== "background") return null;
@@ -479,6 +518,21 @@ function getGraphEdgeDropEdge(
   return isPermittedGraphEdge(reverseEdge, nodes, existingEdges, mode)
     ? reverseEdge
     : null;
+}
+
+function getGraphEdgeSocketRegistration(
+  drag: Extract<DragState, { kind: "edge" }>,
+  existingEdges: readonly AnimationGraphEdge[],
+) {
+  if (!drag.fromSocket) return undefined;
+  if (drag.fromSocket === "output:next") {
+    const fromSocket = getNextGraphNodeOutputSocket(
+      drag.fromNode,
+      existingEdges,
+    );
+    return fromSocket ? { fromSocket } : undefined;
+  }
+  return { fromSocket: drag.fromSocket };
 }
 
 function hasGraphEdgeDropTarget(
@@ -505,6 +559,19 @@ function getGraphEdgeDropError(
   const fromNode =
     nodes.find((node) => node.id === drag.fromNodeId) ?? drag.fromNode;
   const toNode = nodes.find((node) => node.id === targetId);
+  if (
+    fromNode &&
+    toNode &&
+    getGraphCompositionMode(nodes) === "composition2d"
+  ) {
+    return getStrictComposition2dConnectionError(
+      fromNode,
+      toNode,
+      drag.portId ?? drag.fromSocket,
+      portTarget?.portId,
+      existingEdges,
+    );
+  }
   if (!fromNode?.typedNode || !toNode?.typedNode) return null;
   if (hasDuplicateEffectMixInput(fromNode, toNode, existingEdges, nodes))
     return "Effect Mix already has that CSS effect.";
@@ -756,7 +823,7 @@ export const ComposeAnimationGraphPanel = memo(
         ? selectedObjects[0].id
         : undefined;
     const graph = getSelectedComposition2dLayerGraph(
-      fullGraph,
+      fullGraph as any,
       selectedLayerGraphId,
       graphMode,
     );
@@ -797,7 +864,7 @@ export const ComposeAnimationGraphPanel = memo(
       )
       .join("|");
     partRef.current = part;
-    graphRef.current = fullGraph;
+    graphRef.current = fullGraph as any;
     displayGraphRef.current = graph;
     nodesRef.current = nodes;
     selectedObjectsRef.current = selectedObjects;
@@ -880,17 +947,10 @@ export const ComposeAnimationGraphPanel = memo(
 
     useEffect(() => {
       if (projectGraphRef.current !== projectGraph) {
-        const pendingGraph = pendingGraphSyncRef.current;
-        if (!pendingGraph) {
-          setOptimisticGraph(null);
-        } else if (arePersistedGraphsEqual(projectGraph, pendingGraph)) {
-          pendingGraphSyncRef.current = null;
-          setOptimisticGraph(null);
-        } else {
-          setOptimisticGraph(pendingGraph);
-        }
+        pendingGraphSyncRef.current = null;
+        setOptimisticGraph(null);
       }
-      projectGraphRef.current = projectGraph;
+      projectGraphRef.current = projectGraph as any;
     }, [projectGraph]);
 
     useLayoutEffect(() => {
@@ -1172,7 +1232,7 @@ export const ComposeAnimationGraphPanel = memo(
           selectedObjects,
           graphMode,
         );
-        updateHover(edge?.toNodeId ?? null, null);
+        updateHover(edge ? getEditorEdgeToNodeId(edge as any) : null, null);
         scheduleDraw();
         return;
       }
@@ -1293,12 +1353,22 @@ export const ComposeAnimationGraphPanel = memo(
             nodesRef.current,
             graphScale,
             hoverConnectorRef.current,
+            getRenderableEdges(
+              displayGraphRef.current,
+              nodesRef.current,
+              selectedObjects,
+            ),
           ) ??
           hitHoverConnector(
             point,
             nodesRef.current,
             graphScale,
             hoverConnectorRef.current,
+            getRenderableEdges(
+              displayGraphRef.current,
+              nodesRef.current,
+              selectedObjects,
+            ),
           ));
       if (connector) {
         setActiveGroupNodeId(null);
@@ -1313,7 +1383,26 @@ export const ComposeAnimationGraphPanel = memo(
           kind: "edge",
           fromNodeId: connector.nodeId,
           fromPort: connector.port,
-          fromSocket: connector.fromSocket,
+          fromSocket: connector.dynamicFromSocket
+            ? graphMode === "composition2d"
+              ? getNextStrictConditionOutputPortId(
+                  sourceNode,
+                  getRenderableEdges(
+                    displayGraphRef.current,
+                    nodesRef.current,
+                    selectedObjects,
+                  ),
+                )
+              : getNextGraphNodeOutputSocket(
+                  sourceNode,
+                  getRenderableEdges(
+                    displayGraphRef.current,
+                    nodesRef.current,
+                    selectedObjects,
+                  ),
+                )
+            : connector.fromSocket,
+          portId: connector.portId,
           fromNode: sourceNode,
           startX: start.x,
           startY: start.y,
@@ -1495,7 +1584,7 @@ export const ComposeAnimationGraphPanel = memo(
             },
             edges: [
               ...currentEdges.filter((item) => item.id !== edge.id),
-              edge,
+              edge as AnimationGraphEdge,
             ],
             customNodes: materializeGraphNodeDefinitions(
               nodesRef.current,
@@ -1625,8 +1714,8 @@ export const ComposeAnimationGraphPanel = memo(
       options: { local?: boolean; implicit?: boolean } = {},
     ) {
       const nextGraph = applyGraphDraft(updater);
-      if (options.local !== false) setOptimisticGraph(nextGraph);
-      onUpdateGraph?.(() => nextGraph, {
+      if (options.local !== false) setOptimisticGraph(nextGraph as any);
+      onUpdateGraph?.(() => nextGraph as any, {
         implicit: options.implicit,
         mode: graphMode,
       });
@@ -1648,13 +1737,13 @@ export const ComposeAnimationGraphPanel = memo(
         selectedLayerGraphId,
         graphMode,
       );
-      graphRef.current = nextGraph;
+      graphRef.current = nextGraph as any;
       displayGraphRef.current = nextLayerGraph;
-      pendingGraphSyncRef.current = nextGraph;
+      pendingGraphSyncRef.current = nextGraph as any;
       setGraphDraftRevision((revision) => revision + 1);
       nodesRef.current = isComposition3d
         ? buildComposition3dGraphNodes(
-            nextGraph,
+            nextGraph as any,
             graphWorldSize.width,
             graphWorldSize.height,
           )
@@ -1674,6 +1763,33 @@ export const ComposeAnimationGraphPanel = memo(
     }
 
     function updateNodeParameter(nodeId: string, key: string, value: string) {
+      const node = nodesRef.current.find((item) => item.id === nodeId);
+      if (graphMode === "composition2d" && node?.kind === "condition") {
+        commitGraphUpdate((graph) =>
+          updateStrictConditionNodeParameter(
+            {
+              nodes: {
+                ...(graph?.nodes ?? {}),
+                ...materializeGraphNodes(nodesRef.current, graph?.nodes),
+              },
+              edges: getRenderableEdges(
+                graph,
+                nodesRef.current,
+                selectedObjects,
+              ),
+              customNodes: graph?.customNodes,
+              groups: graph?.groups,
+              parameters: graph?.parameters,
+              viewport: graph?.viewport,
+              viewports: graph?.viewports,
+            },
+            nodeId,
+            key,
+            value,
+          ),
+        );
+        return;
+      }
       commitGraphUpdate((graph) =>
         updateAnimationGraphNodeParameter(
           {
@@ -2201,10 +2317,15 @@ export const ComposeAnimationGraphPanel = memo(
         ).filter(
           (node) => node.scopeKey === objectId && node.kind === "group",
         ).length;
-        return addAnimationGraphPresetGroupToGraph(graph, presetId, objectId, {
-          x: layerPosition.x + 8 + existingGroupCount * 2,
-          y: layerPosition.y + existingGroupCount * 3,
-        });
+        return addAnimationGraphPresetGroupToGraph(
+          graph as StrictAnimationGraph | undefined,
+          presetId,
+          objectId,
+          {
+            x: layerPosition.x + 8 + existingGroupCount * 2,
+            y: layerPosition.y + existingGroupCount * 3,
+          },
+        ) as unknown as AnimationGraphState;
       });
       setContextMenu(null);
     }
@@ -2867,6 +2988,11 @@ export const ComposeAnimationGraphPanel = memo(
     const activeGroup = activeGroupId
       ? (graph as AnimationGraphState | undefined)?.groups?.[activeGroupId]
       : undefined;
+    const compileErrors = isStrictComposition2dGraph(graph)
+      ? compileAnimationGraph(graph).diagnostics.filter(
+          (diagnostic) => diagnostic.severity === "error",
+        )
+      : [];
 
     return (
       <footer
@@ -2906,6 +3032,14 @@ export const ComposeAnimationGraphPanel = memo(
           >
             Graph {graphEnabled ? "On" : "Off"}
           </button>
+          {compileErrors.length > 0 ? (
+            <div
+              className="relative z-10 max-w-[360px] truncate rounded-full border border-[#6b2b2b] bg-[#2a1414] px-3 py-1 text-[11px] font-bold text-[#ffb7b7]"
+              title={compileErrors.map((item) => item.message).join("\n")}
+            >
+              Graph compile error: {compileErrors[0]?.message}
+            </div>
+          ) : null}
           <div className="relative z-10 flex items-center gap-2">
             <button
               className="rounded-full border border-[#303746] px-2 py-1 text-[11px] font-bold text-[#c7ceda] transition hover:border-[#5f6878] hover:text-white"
@@ -3295,7 +3429,24 @@ export function buildGraphNodes(
     2,
     Math.round((canvasHeight / gridSize - verticalStackHeight) / 2),
   );
+  const strictSourceObjectIds =
+    mode === "composition2d"
+      ? new Set(
+          Object.values(graph?.nodes ?? {}).flatMap((node) =>
+            node &&
+            typeof node === "object" &&
+            "kind" in node &&
+            (node as { kind?: unknown }).kind === "source" &&
+            "config" in node &&
+            typeof (node as { config?: { objectId?: unknown } }).config
+              ?.objectId === "string"
+              ? [(node as { config: { objectId: string } }).config.objectId]
+              : [],
+          ),
+        )
+      : null;
   const derivedNodes = objects.flatMap((object, index) => {
+    if (strictSourceObjectIds?.has(object.id)) return [];
     const layerWidth = getNodeGridWidth(object.name || object.id);
     const descriptors = graph ? [] : getAnimationNodeDescriptors(object);
     const clusterWidth = getObjectClusterWidth(object);
@@ -3740,51 +3891,187 @@ function stripGraphViewportState(
 }
 
 export function getSelectedComposition2dLayerGraph(
-  graph: AnimationGraphState | undefined,
+  graph: AnimationGraphState | StrictAnimationGraph | undefined,
   layerId: string | undefined,
   mode: GraphCompositionMode,
 ): AnimationGraphState | undefined {
-  if (mode !== "composition2d" || !layerId) return graph;
-  const typedGraph = graph as TypedAnimationGraphState | undefined;
-  const layer = typedGraph?.layers?.find((item) => item.id === layerId);
-  return layer
-    ? {
-        ...(graph ?? {}),
-        nodes: layer.nodes,
-        edges: layer.edges,
-        customNodes: layer.customNodes,
-        groups: layer.groups,
-        parameters: layer.parameters,
-      }
-    : undefined;
+  if (mode !== "composition2d" || !layerId)
+    return graph as AnimationGraphState | undefined;
+  if (isStrictComposition2dGraph(graph)) return strictGraphToEditorGraph(graph);
+  return undefined;
 }
 
 export function setSelectedComposition2dLayerGraph(
-  graph: AnimationGraphState | undefined,
+  graph: AnimationGraphState | StrictAnimationGraph | undefined,
   layerGraph: AnimationGraphState,
   layerId: string | undefined,
   mode: GraphCompositionMode,
-): AnimationGraphState {
+): AnimationGraphState | StrictAnimationGraph {
   if (mode !== "composition2d" || !layerId) return layerGraph;
-  const typedGraph = graph as TypedAnimationGraphState | undefined;
-  const layers = [...(typedGraph?.layers ?? [])];
-  const nextLayer = {
-    id: layerId,
-    nodes: layerGraph.nodes as TypedAnimationGraphState["nodes"],
-    edges: layerGraph.edges,
-    customNodes: layerGraph.customNodes,
-    groups: layerGraph.groups,
-    parameters: layerGraph.parameters,
-  };
-  const layerIndex = layers.findIndex((item) => item.id === layerId);
-  if (layerIndex >= 0) layers[layerIndex] = nextLayer;
-  else layers.push(nextLayer);
+  return editorGraphToStrictGraph(layerGraph, graph, layerId);
+}
+
+function isStrictComposition2dGraph(
+  graph: AnimationGraphState | StrictAnimationGraph | undefined,
+): graph is StrictAnimationGraph {
+  return Boolean(graph && "sourceObjectId" in graph);
+}
+
+function strictGraphToEditorGraph(
+  graph: StrictAnimationGraph,
+): AnimationGraphState {
   return {
-    ...(graph ?? { nodes: {}, edges: [] }),
-    nodes: {},
+    nodes: Object.fromEntries(
+      Object.entries(graph.nodes).map(([id, node]) => [
+        id,
+        {
+          id,
+          kind: node.kind,
+          label: getAnimationGraphNodeDefinition(node.kind)?.label ?? node.kind,
+          position: node.position,
+          x: node.position.x,
+          y: node.position.y,
+          inputs: [],
+          outputs: [],
+          config: node.config,
+        },
+      ]),
+    ) as AnimationGraphState["nodes"],
+    edges: graph.edges.map(strictEdgeToEditorEdge),
+    viewport: graph.viewport,
+  };
+}
+
+function strictEdgeToEditorEdge(
+  edge: StrictAnimationGraphEdge,
+): AnimationGraphEdge {
+  return {
+    id: edge.id,
+    fromNodeId: edge.from.nodeId,
+    fromPort: "right",
+    toNodeId: edge.to.nodeId,
+    toPort: "left",
+    fromSocket: edge.from.portId,
+    toSocket: edge.to.portId,
+    from: edge.from,
+    to: edge.to,
+  } as AnimationGraphEdge & StrictAnimationGraphEdge;
+}
+
+function editorGraphToStrictGraph(
+  layerGraph: AnimationGraphState,
+  currentGraph: AnimationGraphState | StrictAnimationGraph | undefined,
+  layerId: string,
+): StrictAnimationGraph {
+  const existing = isStrictComposition2dGraph(currentGraph)
+    ? currentGraph
+    : undefined;
+  const nodes = Object.fromEntries(
+    Object.entries(layerGraph.nodes ?? {}).flatMap(([id, node]) => {
+      const strictNode = editorNodeToStrictNode(id, node);
+      return strictNode ? [[id, strictNode]] : [];
+    }),
+  );
+  const baseGraph = {
+    id: existing?.id ?? `graph:${layerId}`,
+    sourceObjectId: existing?.sourceObjectId ?? layerId,
+    nodes,
     edges: [],
-    layers,
-  } as AnimationGraphState;
+    viewport: layerGraph.viewport ?? existing?.viewport,
+  } satisfies StrictAnimationGraph;
+  return {
+    ...baseGraph,
+    edges: keepValidStrictComposition2dEdges(
+      baseGraph,
+      (layerGraph.edges ?? []).flatMap(strictOnlyEdge),
+    ),
+  };
+}
+
+function keepValidStrictComposition2dEdges(
+  graph: StrictAnimationGraph,
+  edges: StrictAnimationGraphEdge[],
+) {
+  const accepted: StrictAnimationGraphEdge[] = [];
+  for (const edge of edges) {
+    const diagnostics = validateAnimationGraph({
+      ...graph,
+      edges: [...accepted, edge],
+    });
+    if (diagnostics.some((diagnostic) => diagnostic.edgeId === edge.id))
+      continue;
+    accepted.push(edge);
+  }
+  return accepted;
+}
+
+function editorNodeToStrictNode(
+  id: string,
+  node: AnimationGraphState["nodes"][string],
+): StrictAnimationGraphNode | null {
+  if (!node || typeof node !== "object" || !("kind" in node)) return null;
+  const typed = node as TypedAnimationGraphNode;
+  const rawKind = (node as { kind?: string }).kind;
+  const effectNode = getStrictEffectNodeFromEditorNode(id, typed, rawKind);
+  if (effectNode) return effectNode;
+  if (rawKind === "layer") {
+    const objectId = id.startsWith("layer:") ? id.slice("layer:".length) : id;
+    return {
+      id,
+      kind: "source",
+      position: roundGraphNodePosition(typed.position ?? node),
+      config: { objectId },
+    };
+  }
+  return {
+    id,
+    kind: rawKind ?? "unknown",
+    position: roundGraphNodePosition(typed.position ?? node),
+    config: typed.config ?? {},
+  };
+}
+
+function getStrictEffectNodeFromEditorNode(
+  id: string,
+  typed: TypedAnimationGraphNode,
+  rawKind: string | undefined,
+): StrictAnimationGraphNode | null {
+  if (rawKind !== "effect" && rawKind !== "effectMix") return null;
+  const legacyEffect =
+    typed.kind === "effect" && typed.config.effects.length === 1
+      ? typed.config.effects[0]
+      : null;
+  const details = (typed as { details?: Record<string, string> }).details;
+  const property = legacyEffect?.property ?? details?.property;
+  const strictKind = property ? composition2dEffectKinds[property] : undefined;
+  if (!strictKind) return null;
+  return {
+    id,
+    kind: strictKind,
+    position: roundGraphNodePosition(typed.position ?? typed),
+    config: { params: legacyEffect?.values ?? details ?? {} },
+  };
+}
+
+function strictOnlyEdge(edge: AnimationGraphEdge): StrictAnimationGraphEdge[] {
+  const strict = edge as AnimationGraphEdge & Partial<StrictAnimationGraphEdge>;
+  const from = strict.from;
+  const to = strict.to;
+  if (!from || !to || !from.nodeId || !from.portId || !to.nodeId || !to.portId)
+    return [];
+  return [
+    {
+      id: edge.id || `${from.nodeId}:${from.portId}->${to.nodeId}:${to.portId}`,
+      from,
+      to,
+    },
+  ];
+}
+
+function getEditorEdgeToNodeId(
+  edge: AnimationGraphEdge | StrictAnimationGraphEdge,
+) {
+  return "to" in edge ? edge.to.nodeId : edge.toNodeId;
 }
 
 function roundGraphNodes(nodes: AnimationGraphState["nodes"] | undefined) {
@@ -3802,18 +4089,6 @@ function roundGraphNodes(nodes: AnimationGraphState["nodes"] | undefined) {
       }
       return [id, roundGraphNodePosition(node)];
     }),
-  );
-}
-
-function arePersistedGraphsEqual(
-  left: AnimationGraphState | undefined | null,
-  right: AnimationGraphState | undefined | null,
-) {
-  return (
-    JSON.stringify(
-      stripGraphViewportState(left ?? { nodes: {}, edges: [] }),
-    ) ===
-    JSON.stringify(stripGraphViewportState(right ?? { nodes: {}, edges: [] }))
   );
 }
 
@@ -3864,14 +4139,15 @@ function createNode(
     ? createTypedAnimationGraphNode(id, typedKind, position, details, label)
     : undefined;
   if (typedNode?.kind === "source") {
-    const outputType = getTypedSourceOutputType(details?.type);
+    const sourceStructureType = getTypedSourceOutputType(details?.type);
     typedNode.outputs = typedNode.outputs.map((socket) =>
-      socket.id === "structure" ? { ...socket, type: outputType } : socket,
+      socket.id === "structure"
+        ? { ...socket, type: sourceStructureType }
+        : socket,
     );
     typedNode.config = {
       ...typedNode.config,
       objectId: id.startsWith("layer:") ? id.slice("layer:".length) : id,
-      outputType,
     };
   }
   return {
@@ -4273,7 +4549,7 @@ function getConditionDelayMarkers(
   });
 }
 
-function getRenderableEdges(
+export function getRenderableEdges(
   graph: AnimationGraphState | undefined,
   nodes: GraphNode[],
   objects: FrameObject[],
@@ -4288,7 +4564,7 @@ function getRenderableEdges(
     nodes,
     mode,
   );
-  return filterPermittedEdges(
+  const renderable = filterPermittedEdges(
     Array.from(
       new Map(
         [...automatic, ...persisted].map((edge) => [edge.id, edge]),
@@ -4297,6 +4573,32 @@ function getRenderableEdges(
     nodes,
     mode,
   );
+  return mode === "composition2d"
+    ? renderable
+    : normalizeRenderableConditionEdgeSockets(renderable, nodes);
+}
+
+function normalizeRenderableConditionEdgeSockets(
+  edges: AnimationGraphEdge[],
+  nodes: GraphNode[],
+) {
+  return edges.map((edge) => {
+    const from = nodes.find((node) => node.id === edge.fromNodeId);
+    if (from?.kind !== "condition" || edge.fromSocket) return edge;
+    const routeId = makeLegacyConditionRouteId(edge.id);
+    return {
+      ...edge,
+      fromSocket: `output:${routeId}`,
+      id: `${edge.id}:output:${routeId}`,
+    };
+  });
+}
+
+function makeLegacyConditionRouteId(value: string) {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1)
+    hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
+  return hash.toString(36).padStart(2, "0").slice(-2);
 }
 
 function hasGroupValidOutput(group: AnimationGraphGroup | undefined) {
@@ -4373,39 +4675,41 @@ function isPermittedGraphEdge(
     return isPermittedComposition3dGraphEdge(from, to, edge, existingEdges);
   if (mode === "background")
     return isPermittedBackgroundGraphEdge(from, to, edge, existingEdges);
-  if (from.kind === "out") return false;
-  if (pathExists(edge.toNodeId, edge.fromNodeId, existingEdges)) return false;
-  if (!canConnectComposition2dSockets(from, to, edge)) return false;
+  const strictPermitted = isPermittedStrictComposition2dGraphEdge(
+    edge,
+    from,
+    to,
+    existingEdges,
+  );
+  if (!strictPermitted) return false;
   if (hasDuplicateEffectMixInput(from, to, existingEdges, nodes)) return false;
-  if (from.kind === "layer" && to.kind === "group")
-    return hasRegisteredGroupOutput(to);
-  if (
-    (from.kind === "effect" ||
-      from.kind === "effectMix" ||
-      from.kind === "time" ||
-      from.kind === "split" ||
-      from.kind === "condition") &&
-    to.kind === "group"
-  )
-    return hasRegisteredGroupOutput(to);
-  if (from.kind === "group") return hasRegisteredGroupOutput(from);
-  if (from.kind === "effect" && to.kind === "time")
-    return !hasDuplicateEffectForTimeNode(from, to.id, existingEdges, nodes);
-  return true;
+  if ((edge as Partial<StrictAnimationGraphEdge>).from) return true;
+  return isPermittedComposition2dAnimationGraphEdge(edge, nodes, existingEdges);
 }
 
-function canConnectComposition2dSockets(
+function isPermittedStrictComposition2dGraphEdge(
+  edge: AnimationGraphEdge,
   from: GraphNode,
   to: GraphNode,
-  edge: AnimationGraphEdge,
+  existingEdges: AnimationGraphEdge[],
 ) {
-  if (!from.typedNode || !to.typedNode) return false;
-  return canConnectTypedAnimationGraphNodes(
-    from.typedNode,
-    to.typedNode,
-    edge.fromSocket,
-    edge.toSocket,
+  if (pathExists(edge.toNodeId, edge.fromNodeId, existingEdges)) return false;
+  if (
+    from.kind === "condition" &&
+    !edge.fromSocket &&
+    !getStrictEdgeFromPortId(edge)
+  )
+    return false;
+  const fromPort = getStrictComposition2dOutputPort(
+    from,
+    edge.fromSocket ?? getStrictEdgeFromPortId(edge),
+    existingEdges,
   );
+  const toPort = getStrictComposition2dInputPort(
+    to,
+    edge.toSocket ?? getStrictEdgeToPortId(edge),
+  );
+  return !getGraphPortCompatibilityError(fromPort, toPort);
 }
 
 function isPermittedComposition3dGraphEdge(
@@ -4446,29 +4750,6 @@ function isPermittedBackgroundGraphEdge(
   );
 }
 
-function hasRegisteredGroupOutput(node: GraphNode) {
-  return node.details?.registered === "true";
-}
-
-function hasDuplicateEffectForTimeNode(
-  node: GraphNode,
-  timeNodeId: string,
-  existingEdges: AnimationGraphEdge[],
-  nodes: GraphNode[],
-) {
-  const effectKind = getGraphEffectKind(node);
-  if (!effectKind) return false;
-  return existingEdges.some((edge) => {
-    if (edge.toNodeId !== timeNodeId || edge.fromNodeId === node.id)
-      return false;
-    const existingNode = nodes.find((item) => item.id === edge.fromNodeId);
-    return (
-      existingNode?.kind === "effect" &&
-      getGraphEffectKind(existingNode) === effectKind
-    );
-  });
-}
-
 function hasDuplicateEffectMixInput(
   from: GraphNode,
   to: GraphNode,
@@ -4502,15 +4783,20 @@ function getUpstreamCssEffectProperties(
     visited.add(currentId);
     const node = nodes.find((candidate) => candidate.id === currentId);
     if (!node || !isCssEffectNode(node)) continue;
-    for (const property of getCssEffectProperties(node)) properties.add(property);
-    for (const edge of edges.filter((candidate) => candidate.toNodeId === currentId))
+    for (const property of getCssEffectProperties(node))
+      properties.add(property);
+    for (const edge of edges.filter(
+      (candidate) => candidate.toNodeId === currentId,
+    ))
       stack.push(edge.fromNodeId);
   }
   return properties;
 }
 
 function isEffectMixNode(node: GraphNode) {
-  return node.typedNode?.kind === "effect" && !node.typedNode.config.effects.length;
+  return (
+    node.typedNode?.kind === "effect" && !node.typedNode.config.effects.length
+  );
 }
 
 function isCssEffectNode(node: GraphNode) {
@@ -4699,6 +4985,315 @@ function createEdge(
   };
 }
 
+function createStrictComposition2dEdgeFromDrag(
+  drag: Extract<DragState, { kind: "edge" }>,
+  fromNode: GraphNode,
+  toNode: GraphNode,
+  toPortId: string | undefined,
+  existingEdges: readonly AnimationGraphEdge[],
+): StrictAnimationGraphEdge {
+  const fromPort = getStrictComposition2dOutputPort(
+    fromNode,
+    drag.portId ?? drag.fromSocket,
+    existingEdges,
+  );
+  const toPort = getStrictComposition2dInputPort(toNode, toPortId);
+  const from = { nodeId: fromNode.id, portId: fromPort?.id ?? "" };
+  const to = { nodeId: toNode.id, portId: toPort?.id ?? "" };
+  return {
+    id: `${from.nodeId}:${from.portId}->${to.nodeId}:${to.portId}`,
+    from,
+    to,
+  };
+}
+
+export function getStrictComposition2dPorts(
+  node: GraphNode,
+  edges: readonly AnimationGraphEdge[] = [],
+) {
+  const strictNode = toStrictComposition2dNode(node);
+  if (!strictNode) return [];
+  const ports =
+    getAnimationGraphNodeDefinition(strictNode.kind)?.getPorts(strictNode) ??
+    [];
+  if (node.kind !== "condition") return ports;
+  const usedOutputIds = new Set(
+    edges
+      .filter((edge) => edge.fromNodeId === node.id)
+      .map((edge) => edge.fromSocket ?? getStrictEdgeFromPortId(edge))
+      .filter((id): id is string => Boolean(id)),
+  );
+  const dynamicPorts = Array.from(usedOutputIds)
+    .filter((id) => id !== "default")
+    .filter((id) => !ports.some((port) => port.id === id))
+    .map((id) => ({
+      id,
+      label: id.replace(/^output:/, "Output "),
+      direction: "output" as const,
+      cardinality: "multi" as const,
+      type: { kind: "animation" as const },
+      role: "condition-output" as const,
+    }));
+  return [
+    ...ports.filter(
+      (port) => port.id !== "default" || usedOutputIds.has("default"),
+    ),
+    ...dynamicPorts,
+    {
+      id: "output:next",
+      label: "New Output",
+      direction: "output" as const,
+      cardinality: "multi" as const,
+      type: { kind: "animation" as const },
+      role: "condition-output" as const,
+    },
+  ];
+}
+
+export function getStrictComposition2dConnectionError(
+  fromNode: GraphNode,
+  toNode: GraphNode,
+  fromPortId: string | undefined,
+  toPortId: string | undefined,
+  existingEdges: readonly AnimationGraphEdge[] = [],
+) {
+  const fromPort = getStrictComposition2dOutputPort(
+    fromNode,
+    fromPortId,
+    existingEdges,
+  );
+  const toPort = getStrictComposition2dInputPort(toNode, toPortId);
+  return getGraphPortCompatibilityError(fromPort, toPort);
+}
+
+function getStrictEdgeFromPortId(edge: AnimationGraphEdge) {
+  return (edge as Partial<StrictAnimationGraphEdge>).from?.portId;
+}
+
+function getStrictEdgeToPortId(edge: AnimationGraphEdge) {
+  return (edge as Partial<StrictAnimationGraphEdge>).to?.portId;
+}
+
+export function updateStrictConditionNodeParameter(
+  graph: AnimationGraphState,
+  nodeId: string,
+  key: string,
+  value: string,
+): AnimationGraphState {
+  const current = graph.nodes[nodeId];
+  if (!current || typeof current !== "object" || !("kind" in current))
+    return graph;
+  const node = current as TypedAnimationGraphNode;
+  if (node.kind !== "condition") return graph;
+  const config = normalizeStrictConditionEditorConfig(node.config);
+  const values = strictConditionConfigToEditorValues(config);
+  let nextValues = { ...values, [key]: value };
+  if (key === "conditionCount")
+    nextValues = resizeConditionEditorValues(nextValues, value);
+  if (key === "__deleteCondition")
+    nextValues = deleteConditionEditorRule(
+      nextValues,
+      Number.parseInt(value, 10),
+    );
+  const nextConfig = editorValuesToStrictConditionConfig(
+    nextValues,
+    config.outputs,
+  );
+  return {
+    ...graph,
+    nodes: {
+      ...graph.nodes,
+      [nodeId]: createTypedAnimationGraphNode(
+        nodeId,
+        "condition",
+        node.position,
+        nextConfig,
+        node.label,
+      ) as AnimationGraphState["nodes"][string],
+    },
+    parameters: graph.parameters,
+  };
+}
+
+function normalizeStrictConditionEditorConfig(config: unknown) {
+  const raw =
+    typeof config === "object" && config !== null
+      ? (config as { outputs?: unknown; rules?: unknown })
+      : {};
+  const outputs = Array.isArray(raw.outputs)
+    ? raw.outputs.flatMap((output) =>
+        output && typeof output === "object" && "id" in output
+          ? [
+              {
+                id: String((output as { id: unknown }).id),
+                label: String(
+                  (output as { label?: unknown }).label ??
+                    String((output as { id: unknown }).id).replace(
+                      /^output:/,
+                      "Output ",
+                    ),
+                ),
+              },
+            ]
+          : [],
+      )
+    : [];
+  const rules = Array.isArray(raw.rules) ? raw.rules : [];
+  return { outputs, rules };
+}
+
+function strictConditionConfigToEditorValues(
+  config: ReturnType<typeof normalizeStrictConditionEditorConfig>,
+) {
+  const values: Record<string, string> = {
+    conditionCount: String(Math.max(1, config.rules.length || 1)),
+  };
+  config.rules.forEach((rule, index) => {
+    if (!rule || typeof rule !== "object") return;
+    const suffix = index === 0 ? "" : String(index + 1);
+    const raw = rule as Record<string, unknown>;
+    values[`matchType${suffix}`] = "textEquals";
+    values[`value${suffix}`] = String(raw.value ?? "");
+    values[`action${suffix}`] = String(raw.action ?? "setDelay");
+    values[`delay${suffix}`] = formatSeconds(Number(raw.delay ?? 0));
+    values[`outputPort${suffix}`] = String(
+      raw.output ?? config.outputs[index]?.id ?? `output:${index + 1}`,
+    );
+  });
+  return values;
+}
+
+function editorValuesToStrictConditionConfig(
+  values: Record<string, string>,
+  previousOutputs: readonly { id: string; label: string }[],
+) {
+  const count = Math.min(
+    4,
+    Math.max(1, Number.parseInt(values.conditionCount ?? "1", 10) || 1),
+  );
+  const outputIds = new Set<string>();
+  const rules = Array.from({ length: count }, (_, index) => {
+    const suffix = index === 0 ? "" : String(index + 1);
+    const action = values[`action${suffix}`] ?? "setDelay";
+    const output = values[`outputPort${suffix}`] || `output:${index + 1}`;
+    if (action !== "setDelay") outputIds.add(output);
+    return {
+      target: "value" as const,
+      operator: "equals" as const,
+      value: values[`value${suffix}`] ?? "",
+      action: action as "setDelay" | "sendToOutput" | "duplicateToOutput",
+      output,
+      delay: parseSeconds(values[`delay${suffix}`] ?? "0s"),
+    };
+  });
+  return {
+    outputs: Array.from(outputIds).map((id) => ({
+      id,
+      label: id.replace(/^output:/, "Output "),
+    })),
+    rules,
+  };
+}
+
+function resizeConditionEditorValues(
+  values: Record<string, string>,
+  count: string,
+) {
+  return { ...values, conditionCount: count };
+}
+
+function deleteConditionEditorRule(
+  values: Record<string, string>,
+  index: number,
+) {
+  const count = Math.min(
+    4,
+    Math.max(1, Number.parseInt(values.conditionCount ?? "1", 10) || 1),
+  );
+  if (index <= 1 || index > count) return values;
+  const next: Record<string, string> = {
+    ...values,
+    conditionCount: String(count - 1),
+  };
+  for (let current = index; current < count; current += 1) {
+    const from = current === 1 ? "" : String(current + 1);
+    const to = current === 1 ? "" : String(current);
+    for (const key of ["matchType", "value", "action", "outputPort", "delay"])
+      next[`${key}${to}`] = values[`${key}${from}`] ?? "";
+  }
+  const last = count === 1 ? "" : String(count);
+  for (const key of ["matchType", "value", "action", "outputPort", "delay"])
+    delete next[`${key}${last}`];
+  return next;
+}
+
+function getStrictComposition2dOutputPort(
+  node: GraphNode,
+  preferredPortId: string | undefined,
+  edges: readonly AnimationGraphEdge[] = [],
+) {
+  const ports = getStrictComposition2dPorts(node, edges).filter(
+    (port) => port.direction === "output",
+  );
+  if (preferredPortId && preferredPortId !== "output:next")
+    return ports.find((port) => port.id === preferredPortId);
+  if (preferredPortId === "output:next") {
+    const next = getNextStrictConditionOutputPortId(node, edges);
+    return ports.find((port) => port.id === next);
+  }
+  return ports[0];
+}
+
+function getStrictComposition2dInputPort(
+  node: GraphNode,
+  preferredPortId: string | undefined,
+) {
+  const ports = getStrictComposition2dPorts(node).filter(
+    (port) => port.direction === "input",
+  );
+  return ports.find((port) => port.id === preferredPortId) ?? ports[0];
+}
+
+function getNextStrictConditionOutputPortId(
+  node: GraphNode,
+  edges: readonly AnimationGraphEdge[],
+) {
+  if (node.kind !== "condition") return undefined;
+  const used = new Set(
+    edges
+      .filter((edge) => edge.fromNodeId === node.id)
+      .map((edge) => edge.fromSocket)
+      .filter((id): id is string => Boolean(id)),
+  );
+  for (let index = 1; index <= used.size + 1; index += 1) {
+    const id = `output:${index}`;
+    if (!used.has(id)) return id;
+  }
+  return "output:1";
+}
+
+function toStrictComposition2dNode(
+  node: GraphNode,
+): StrictAnimationGraphNode | null {
+  const kind = node.typedNode?.kind ?? getComposition2dTypedNodeKind(node.kind);
+  if (!kind || kind === "group") return null;
+  const config =
+    node.typedNode?.config ?? getStrictComposition2dDefaultConfig(node, kind);
+  return { id: node.id, kind, position: { x: node.x, y: node.y }, config };
+}
+
+function getStrictComposition2dDefaultConfig(
+  node: GraphNode,
+  kind: Exclude<TypedAnimationGraphNode["kind"], "group">,
+) {
+  if (kind === "source") return { objectId: node.id.replace(/^layer:/, "") };
+  return (
+    getAnimationGraphNodeDefinition(kind)?.createDefaultConfig({
+      graphId: "editor",
+    }) ?? {}
+  );
+}
+
 function getNodeGridWidth(label: string) {
   return Math.min(
     maxNodeWidth,
@@ -4717,19 +5312,6 @@ function materializeGraphNodes(
   return Object.fromEntries(
     nodes.map((node) => {
       const position = roundGraphNodePosition(node);
-      if (
-        node.typedNode &&
-        !node.details?.packageId?.startsWith("composition3d:")
-      )
-        return [
-          node.id,
-          {
-            ...node.typedNode,
-            position,
-            x: position.x,
-            y: position.y,
-          },
-        ];
       const current = existing?.[node.id];
       if (
         current &&
@@ -4741,6 +5323,19 @@ function materializeGraphNodes(
           node.id,
           {
             ...(current as TypedAnimationGraphNode),
+            position,
+            x: position.x,
+            y: position.y,
+          },
+        ];
+      if (
+        node.typedNode &&
+        !node.details?.packageId?.startsWith("composition3d:")
+      )
+        return [
+          node.id,
+          {
+            ...node.typedNode,
             position,
             x: position.x,
             y: position.y,
@@ -4952,6 +5547,7 @@ function hitHoverConnector(
   nodes: GraphNode[],
   scale = 1,
   preferred: HoverConnector | null,
+  edges: readonly AnimationGraphEdge[] = [],
 ): HoverConnector | null {
   const graphPoint = { x: point.x / scale, y: point.y / scale };
   const activePreferred = getActiveHoverConnector(
@@ -4959,6 +5555,7 @@ function hitHoverConnector(
     nodes,
     scale,
     preferred,
+    edges,
   );
   if (
     activePreferred &&
@@ -4970,7 +5567,7 @@ function hitHoverConnector(
     return activePreferred;
   for (const node of nodes) {
     if (!hitNodeLoose(point, [node], scale)) continue;
-    const connector = getNodeHoverConnector(point, node, scale);
+    const connector = getNodeHoverConnector(point, node, scale, edges);
     if (!connector) continue;
     if (
       Math.hypot(
@@ -4987,11 +5584,12 @@ function getActiveHoverConnector(
   nodes: GraphNode[],
   scale = 1,
   preferred: HoverConnector | null,
+  edges: readonly AnimationGraphEdge[] = [],
 ): HoverConnector | null {
   if (!preferred) return null;
   const node = nodes.find((item) => item.id === preferred.nodeId);
   if (!node) return null;
-  return getNodeHoverConnector(point, node, scale);
+  return getNodeHoverConnector(point, node, scale, edges);
 }
 function hitEdge(
   point: { x: number; y: number },
@@ -5028,6 +5626,39 @@ function getEdgeDropTarget(
   if (!nodeTarget || nodeTarget.id === fromNodeId) return null;
   const fromNode = nodes.find((node) => node.id === fromNodeId);
   if (!fromNode) return null;
+  if (mode === "composition2d") {
+    const edge = createStrictComposition2dEdgeFromDrag(
+      {
+        kind: "edge",
+        fromNodeId,
+        fromPort: "right",
+        fromSocket: undefined,
+        portId: undefined,
+        fromNode,
+        startX: 0,
+        startY: 0,
+        x: point.x,
+        y: point.y,
+      },
+      fromNode,
+      nodeTarget,
+      portTarget?.portId,
+      getRenderableEdges(graph, nodes, objects),
+    );
+    const existingEdges = getRenderableEdges(graph, nodes, objects);
+    return isPermittedGraphEdge(
+      strictEdgeToEditorEdge(edge),
+      nodes,
+      existingEdges,
+      mode,
+    )
+      ? {
+          nodeId: nodeTarget.id,
+          fromPort: "right" as const,
+          toPort: "left" as const,
+        }
+      : null;
+  }
   const ports = getBestEdgePorts(fromNode, nodeTarget);
   const edge = createEdge(
     fromNodeId,
@@ -5058,6 +5689,7 @@ function getNodeHoverConnector(
   point: { x: number; y: number },
   node: GraphNode,
   scale = 1,
+  edges: readonly AnimationGraphEdge[] = [],
 ): HoverConnector | null {
   const graphPoint = { x: point.x / scale, y: point.y / scale };
   const rect = nodeRect(node);
@@ -5079,21 +5711,43 @@ function getNodeHoverConnector(
     return null;
   const withinX = graphPoint.x >= rect.x && graphPoint.x <= right;
   const withinY = graphPoint.y >= rect.y && graphPoint.y <= bottom;
-  if (node.kind === "condition" && graphPoint.x > right && withinY) {
-    const count = getGraphNodeOutputPortCount(node);
-    const index = Math.min(
-      count - 1,
-      Math.max(
-        0,
-        Math.round(((graphPoint.y - rect.y) / rect.height) * (count + 1) - 1),
-      ),
-    );
-    const y = rect.y + ((index + 1) / (count + 1)) * rect.height;
+  const strictPorts = getStrictComposition2dPorts(node, edges);
+  if (strictPorts.length) {
+    const closest = strictPorts
+      .map((port) => ({ port, point: strictPortPoint(node, port, edges) }))
+      .sort(
+        (a, b) =>
+          Math.hypot(graphPoint.x - a.point.x, graphPoint.y - a.point.y) -
+          Math.hypot(graphPoint.x - b.point.x, graphPoint.y - b.point.y),
+      )[0];
+    if (
+      closest &&
+      Math.hypot(
+        graphPoint.x - closest.point.x,
+        graphPoint.y - closest.point.y,
+      ) <= connectorHitRadius
+    )
+      return {
+        nodeId: node.id,
+        port: closest.port.direction === "output" ? "right" : "left",
+        point: closest.point,
+        fromSocket: closest.port.id,
+        portId: closest.port.id,
+        dynamicFromSocket:
+          node.kind === "condition" && closest.port.id === "output:next",
+      };
+  }
+  if (
+    hasGraphNodeDynamicOutputSockets(node) &&
+    graphPoint.x > right &&
+    withinY
+  ) {
     return {
       nodeId: node.id,
       port: "right",
-      point: { x: right + portGap, y },
-      fromSocket: `output:${index + 1}`,
+      point: { x: right + portGap, y: graphPoint.y },
+      fromSocket: "output:next",
+      dynamicFromSocket: true,
     };
   }
   if (withinX) {
@@ -5226,6 +5880,7 @@ function drawGraphCanvas({
       progressForNode?.(node) ?? null,
       temporalRoles?.get(node.id),
       mode,
+      edges,
     );
   if (marqueeRect) drawMarquee(ctx, marqueeRect);
 }
@@ -5239,6 +5894,7 @@ function drawNode(
   progress: number | null = null,
   temporalRole: TemporalNodeRole | undefined,
   mode: GraphCompositionMode = "composition2d",
+  edges: readonly AnimationGraphEdge[] = [],
 ) {
   const rect = nodeRect(node);
   const { background: bg, border } = getGraphNodeRenderColors(
@@ -5307,42 +5963,102 @@ function drawNode(
     rect.y + rect.height / 2,
     rect.width - 12,
   );
-  drawOutputPortLabels(ctx, node, rect);
+  for (const port of getStrictComposition2dPorts(node, edges))
+    drawConnectorDot(
+      ctx,
+      strictPortPoint(node, port, edges),
+      getStrictPortColor(port),
+    );
   if (connector?.nodeId === node.id)
     drawConnectorDot(ctx, connector.point, nodeColors.port);
 }
 
-function drawOutputPortLabels(
-  ctx: CanvasRenderingContext2D,
+function strictPortPoint(
   node: GraphNode,
-  rect: { x: number; y: number; width: number; height: number },
+  port: GraphPortDefinition,
+  edges: readonly AnimationGraphEdge[] = [],
 ) {
-  const count = getGraphNodeOutputPortCount(node);
-  if (count <= 1) return;
-  ctx.save();
-  ctx.font = "9px Inter, sans-serif";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  for (let index = 0; index < count; index += 1) {
-    const y = rect.y + ((index + 1) / (count + 1)) * rect.height;
-    const x = rect.x + rect.width + portGap;
-    ctx.fillStyle = "#0b0f16";
-    ctx.beginPath();
-    ctx.arc(x, y, 7, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = nodeColors.port;
-    ctx.lineWidth = 1;
-    ctx.stroke();
-    ctx.fillStyle = "#dfe6f3";
-    ctx.fillText(String(index + 1), x, y + 0.5);
-  }
-  ctx.restore();
+  const rect = nodeRect(node);
+  const ports = getStrictComposition2dPorts(node, edges).filter(
+    (candidate) => candidate.direction === port.direction,
+  );
+  const index = Math.max(
+    0,
+    ports.findIndex((candidate) => candidate.id === port.id),
+  );
+  return {
+    x:
+      port.direction === "output"
+        ? rect.x + rect.width + portGap
+        : rect.x - portGap,
+    y: rect.y + ((index + 1) * rect.height) / (ports.length + 1),
+  };
 }
 
-function getGraphNodeOutputPortCount(node: GraphNode) {
-  if (node.kind !== "condition") return 1;
-  const raw = node.details?.conditionCount ?? "1";
-  return Math.min(4, Math.max(1, Number.parseInt(raw, 10) || 1));
+function getStrictPortColor(port: GraphPortDefinition) {
+  if (port.type.kind === "value") return "#b48cff";
+  if (port.type.kind === "anyValue") return "#d49cff";
+  return nodeColors.port;
+}
+
+function hasGraphNodeDynamicOutputSockets(node: GraphNode) {
+  return Boolean(
+    animationGraphNodeRegistry.get(node.kind)?.getNextOutputSocket,
+  );
+}
+
+function getNextGraphNodeOutputSocket(
+  node: GraphNode,
+  edges: readonly AnimationGraphEdge[],
+) {
+  return animationGraphNodeRegistry
+    .get(node.kind)
+    ?.getNextOutputSocket?.(node, edges);
+}
+
+function getConditionOutputOptions(
+  node: GraphNode,
+  edges: readonly AnimationGraphEdge[],
+) {
+  const configOutputs =
+    node.typedNode?.kind === "condition"
+      ? normalizeStrictConditionEditorConfig(node.typedNode.config).outputs.map(
+          (output) => output.id,
+        )
+      : [];
+  const sockets = Array.from(
+    new Set([
+      ...configOutputs,
+      ...getConditionOutputSockets(node.id, edges),
+      getNextStrictConditionOutputPortId(node, edges) ?? "output:1",
+    ]),
+  ).filter((id) => id !== "default");
+  return sockets.map((socket, index) => ({
+    value: socket,
+    label: socket.replace(/^output:/, "Output ") || `Output ${index + 1}`,
+  }));
+}
+
+function getConditionOutputSockets(
+  nodeId: string,
+  edges: readonly AnimationGraphEdge[],
+) {
+  return Array.from(
+    new Set(
+      edges
+        .filter((edge) => edge.fromNodeId === nodeId)
+        .map((edge) =>
+          readConditionOutputSocket(
+            edge.fromSocket ?? getStrictEdgeFromPortId(edge),
+          ),
+        )
+        .filter((socket): socket is string => Boolean(socket)),
+    ),
+  );
+}
+
+function readConditionOutputSocket(socketId: string | undefined) {
+  return socketId?.match(/^output:(.+)$/)?.[1];
 }
 function drawEdge(
   ctx: CanvasRenderingContext2D,
@@ -5376,24 +6092,19 @@ function getComposition2dEdgeControlState(
 ) {
   const from = nodes.find((node) => node.id === edge.fromNodeId);
   if (from?.kind !== "condition") return undefined;
-  return { registered: true, label: getConditionEdgeOutputLabel(edge, edges) };
+  const label = getConditionEdgeOutputLabel(edge, edges);
+  return { registered: Boolean(label), label };
 }
 
 function getConditionEdgeOutputLabel(
   edge: AnimationGraphEdge,
   edges: AnimationGraphEdge[],
 ) {
-  const socketMatch = edge.fromSocket?.match(/^output:(\d+)$/);
-  if (socketMatch) return socketMatch[1];
-  const outgoing = edges.filter(
-    (candidate) => candidate.fromNodeId === edge.fromNodeId,
-  );
-  return String(
-    Math.max(
-      1,
-      outgoing.findIndex((candidate) => candidate.id === edge.id) + 1,
-    ),
-  );
+  const socket = readConditionOutputSocket(edge.fromSocket);
+  if (!socket) return undefined;
+  const sockets = getConditionOutputSockets(edge.fromNodeId, edges);
+  const index = sockets.indexOf(socket);
+  return index >= 0 ? String(index + 1) : undefined;
 }
 function drawPreviewEdge(
   ctx: CanvasRenderingContext2D,
@@ -6936,6 +7647,7 @@ function GroupSubgraphPreview({
         fromNodeId: connector.nodeId,
         fromPort: connector.port,
         fromSocket: connector.fromSocket,
+        portId: connector.portId,
         fromNode: source,
         startX: start.x,
         startY: start.y,
@@ -7261,6 +7973,7 @@ function getComposition3dPopoverDetails(
 function getParameterEditorSchema(
   node: GraphNode,
   details: Array<[string, string]>,
+  edges: readonly AnimationGraphEdge[] = [],
 ): GraphParameterEditorSchema {
   function legacyGradientDetailsToValue(detailsMap: Record<string, string>) {
     const type = detailsMap.type ?? "linear";
@@ -7351,13 +8064,20 @@ function getParameterEditorSchema(
       ],
     };
   if (node.kind === "condition") {
-    const values = Object.fromEntries(details);
+    const values =
+      node.typedNode?.kind === "condition"
+        ? strictConditionConfigToEditorValues(
+            normalizeStrictConditionEditorConfig(node.typedNode.config),
+          )
+        : Object.fromEntries(details);
+    const outputOptions = getConditionOutputOptions(node, edges);
     const count = Math.min(
       4,
       Math.max(1, Number.parseInt(values.conditionCount ?? "1", 10) || 1),
     );
     const ruleGroups = Array.from({ length: count }, (_, index) => {
       const suffix = index === 0 ? "" : String(index + 1);
+      const action = values[`action${suffix}`] ?? "setDelay";
       return {
         id: `condition-rule-${index + 1}`,
         label: `Condition ${index + 1}`,
@@ -7377,44 +8097,67 @@ function getParameterEditorSchema(
           {
             key: `action${suffix}`,
             label: "action",
-            value: values[`action${suffix}`] ?? "setDelay",
+            value: action,
             options: graphParameterOptions.action,
           },
-          {
-            key: `outputPort${suffix}`,
-            label: "output",
-            value: values[`outputPort${suffix}`] ?? String(index + 1),
-            options: graphParameterOptions.outputPort,
-          },
-          {
-            key: `delay${suffix}`,
-            label: "delay",
-            value: values[`delay${suffix}`] ?? "0s",
-            type: "number" as const,
-            unit: "s",
-            min: 0,
-            max: 120,
-            step: 0.1,
-          },
+          ...(action === "setDelay"
+            ? [
+                {
+                  key: `delay${suffix}`,
+                  label: "delay",
+                  value: values[`delay${suffix}`] ?? "0s",
+                  type: "number" as const,
+                  unit: "s",
+                  min: 0,
+                  max: 120,
+                  step: 0.1,
+                },
+              ]
+            : [
+                {
+                  key: `outputPort${suffix}`,
+                  label: "output",
+                  value:
+                    values[`outputPort${suffix}`] ??
+                    outputOptions[Math.min(index, outputOptions.length - 1)]
+                      ?.value ??
+                    "",
+                  options: outputOptions,
+                },
+              ]),
+          ...(index > 0
+            ? [
+                {
+                  key: "__deleteCondition",
+                  label: "Trash",
+                  value: String(index + 1),
+                  type: "button" as const,
+                },
+              ]
+            : []),
         ],
       };
     });
     return {
       width: 240,
-      height: 96 + count * 286,
+      height: 96 + count * 232,
       groups: [
-        {
-          id: "condition",
-          fields: [
-            {
-              key: "conditionCount",
-              label: "conditions",
-              value: String(count),
-              options: graphParameterOptions.conditionCount,
-            },
-          ],
-        },
         ...ruleGroups,
+        ...(count < 4
+          ? [
+              {
+                id: "condition-add",
+                fields: [
+                  {
+                    key: "conditionCount",
+                    label: "+ Add condition",
+                    value: String(count + 1),
+                    type: "button" as const,
+                  },
+                ],
+              },
+            ]
+          : []),
       ],
     };
   }
@@ -7639,10 +8382,11 @@ function getParameterEditorEstimatedHeight(
 export function getGraphNodeParameterEditorSchema(
   node: GraphNode,
   parameters?: Record<string, string>,
+  edges: readonly AnimationGraphEdge[] = [],
 ) {
   const details = getPopoverDetails(node, parameters);
   if (details.length === 0) return null;
-  return getParameterEditorSchema(node, details);
+  return getParameterEditorSchema(node, details, edges);
 }
 
 function getComposition3dParameterEditorSchema(

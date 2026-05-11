@@ -86,6 +86,7 @@ import {
   buildComposition3dGraphNodes,
   getSelectedComposition2dLayerGraph,
   getGraphNodeParameterEditorSchema,
+  getRenderableEdges,
 } from "../timeline/ComposeAnimationGraphPanel";
 
 const defaultFontFamily =
@@ -506,7 +507,11 @@ export function GraphNodeInspector({
     nodeId: string,
     key: string,
     value: string,
-    options?: { history?: boolean; mode?: GraphCompositionMode },
+    options?: {
+      history?: boolean;
+      mode?: GraphCompositionMode;
+      layerId?: string;
+    },
   ) => void;
 }) {
   const isComposition3d = part.renderMode === "webgl";
@@ -524,26 +529,28 @@ export function GraphNodeInspector({
       : "composition2d";
   const objects = selectedObject ? [selectedObject] : [];
   const displayGraph = getSelectedComposition2dLayerGraph(
-    graph,
+    graph as any,
     !isComposition3d && !isBackgroundGraph ? selectedObject?.id : undefined,
     graphMode,
   );
-  const node =
-    (isComposition3d
-      ? buildComposition3dGraphNodes(graph, 5200, 900)
-      : buildGraphNodes(
-          objects,
-          displayGraph,
-          5200,
-          900,
-          selectedObject?.id ?? "__empty__",
-          isBackgroundGraph ? "background" : "composition2d",
-        )
-    ).find((item) => item.id === nodeId) ?? null;
+  const nodes = isComposition3d
+    ? buildComposition3dGraphNodes(graph as any, 5200, 900)
+    : buildGraphNodes(
+        objects,
+        displayGraph,
+        5200,
+        900,
+        selectedObject?.id ?? "__empty__",
+        isBackgroundGraph ? "background" : "composition2d",
+      );
+  const node = nodes.find((item) => item.id === nodeId) ?? null;
   const schema = node
     ? getGraphNodeParameterEditorSchema(
         node,
         displayGraph?.parameters?.[node.id],
+        displayGraph
+          ? getRenderableEdges(displayGraph, nodes, objects)
+          : undefined,
       )
     : null;
   if (!node) return <EmptyInspector />;
@@ -557,6 +564,8 @@ export function GraphNodeInspector({
             onParameterChange(node.id, key, value, {
               ...options,
               mode: graphMode,
+              layerId:
+                graphMode === "composition2d" ? selectedObject?.id : undefined,
             })
           }
         />

@@ -368,6 +368,14 @@ export function getEffectPackagesByCategory(
   );
 }
 
+export function getGraphEffectPackages() {
+  return effectPackages.filter((definition) => definition.graph);
+}
+
+export function getGraphEffectRuntimeAdapter(effectId: string) {
+  return getEffectPackage(effectId)?.graph?.runtimeAdapter;
+}
+
 export function getEffectDragType(effectId: string) {
   return `application/x-clipper-effect-${effectId.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`;
 }

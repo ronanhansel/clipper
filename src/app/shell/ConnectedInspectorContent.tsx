@@ -142,6 +142,7 @@ type ConnectedInspectorContentProps = {
     options?: {
       history?: boolean;
       mode?: import("../../core/graphSockets").GraphCompositionMode;
+      layerId?: string;
     },
   ) => void;
   onReloadProject?: () => Promise<void>;

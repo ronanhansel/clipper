@@ -7,6 +7,12 @@ export function updateAnimationGraphNodeParameter(
   key: string,
   value: string,
 ): AnimationGraphState {
+  if (key === "__deleteCondition")
+    return deleteAnimationGraphCondition(
+      graph,
+      nodeId,
+      Number.parseInt(value, 10),
+    );
   return {
     nodes: updateAnimationGraphTypedNodeParameter(
       graph?.nodes,
@@ -31,11 +37,86 @@ export function updateAnimationGraphNodeParameter(
   };
 }
 
+function deleteAnimationGraphCondition(
+  graph: AnimationGraphState | undefined,
+  nodeId: string,
+  index: number,
+): AnimationGraphState {
+  const currentParameters = graph?.parameters?.[nodeId] ?? {};
+  const currentNode = graph?.nodes?.[nodeId];
+  const nodeConfig =
+    currentNode && typeof currentNode === "object" && "config" in currentNode
+      ? ((currentNode as TypedAnimationGraphNode).config as Record<
+          string,
+          string
+        >)
+      : {};
+  const merged = { ...nodeConfig, ...currentParameters };
+  const count = Math.min(
+    4,
+    Math.max(1, Number.parseInt(merged.conditionCount ?? "1", 10) || 1),
+  );
+  if (index <= 1 || index > count) return graph ?? { nodes: {}, edges: [] };
+  const nextParameters = shiftConditionParameters(merged, index, count);
+  return {
+    nodes: updateAnimationGraphTypedNodeParameter(
+      graph?.nodes,
+      nodeId,
+      "conditionCount",
+      nextParameters.conditionCount,
+      nextParameters,
+    ),
+    edges: graph?.edges ?? [],
+    customNodes: updateAnimationGraphCustomNodeConditionParameters(
+      graph?.customNodes,
+      nodeId,
+      nextParameters,
+    ),
+    groups: graph?.groups,
+    parameters: {
+      ...(graph?.parameters ?? {}),
+      [nodeId]: nextParameters,
+    },
+    viewport: graph?.viewport,
+    viewports: graph?.viewports,
+  };
+}
+
+function shiftConditionParameters(
+  values: Record<string, string>,
+  removeIndex: number,
+  count: number,
+) {
+  const keys = ["matchType", "value", "action", "outputPort", "delay"];
+  const next: Record<string, string> = {
+    ...values,
+    conditionCount: String(count - 1),
+  };
+  for (let index = removeIndex; index < count; index += 1) {
+    const fromSuffix = conditionSuffix(index + 1);
+    const toSuffix = conditionSuffix(index);
+    for (const key of keys) {
+      const fromKey = `${key}${fromSuffix}`;
+      const toKey = `${key}${toSuffix}`;
+      if (values[fromKey] !== undefined) next[toKey] = values[fromKey];
+      else delete next[toKey];
+    }
+  }
+  const lastSuffix = conditionSuffix(count);
+  for (const key of keys) delete next[`${key}${lastSuffix}`];
+  return next;
+}
+
+function conditionSuffix(index: number) {
+  return index === 1 ? "" : String(index);
+}
+
 function updateAnimationGraphTypedNodeParameter(
   nodes: AnimationGraphState["nodes"] | undefined,
   nodeId: string,
   key: string,
   value: string,
+  replacementConfig?: Record<string, string>,
 ) {
   const current = nodes?.[nodeId];
   if (!current || typeof current !== "object" || !("kind" in current))
@@ -66,9 +147,22 @@ function updateAnimationGraphTypedNodeParameter(
       nodeId,
       node.kind,
       node.position,
-      { ...(node.config as object), [key]: value },
+      replacementConfig ?? { ...(node.config as object), [key]: value },
       key === "label" ? value : node.label,
     ),
+  };
+}
+
+function updateAnimationGraphCustomNodeConditionParameters(
+  customNodes: AnimationGraphState["customNodes"] | undefined,
+  nodeId: string,
+  parameters: Record<string, string>,
+) {
+  const current = customNodes?.[nodeId];
+  if (!current) return customNodes;
+  return {
+    ...(customNodes ?? {}),
+    [nodeId]: { ...current, details: parameters },
   };
 }
 

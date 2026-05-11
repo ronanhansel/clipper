@@ -60,6 +60,7 @@ type AnimationGraphValueType =
   | "Structure.Shape"
   | "Structure.TextObject"
   | "Structure.RichTextObject"
+  | "Structure.TextTokens"
   | "Structure.Object"
   | "Value.String"
   | "Value.Number"
@@ -77,6 +78,7 @@ Meaning:
 - `Structure.Shape`: drawable shape/line-like objects, such as rects, SVG, circles, polygons.
 - `Structure.TextObject`: text object with style, bounds, and raw text/rich text content.
 - `Structure.RichTextObject`: split/tokenized text units that can be controlled individually.
+- `Structure.TextTokens`: explicit token stream emitted by Split and consumed by temporal/effect graph logic for per-token animation scheduling.
 - `Structure.Object`: generic renderable/HTML-like object.
 - `Value.*`: primitive values and primitive arrays.
 - `Effect.CSSEffect`: current animation effect output, backed by CSS/motion keyframes.
@@ -367,18 +369,17 @@ Background and composition3d graphs continue through existing validation paths.
 Compile entry:
 
 ```ts
-compileTypedAnimationGraphForObject(object, graph): LayerAnimation[]
+compileAnimationGraphForObject(object, graph): AnimationGraphObjectCompileResult
 ```
 
 Flow:
 
-1. Filter graph nodes to typed nodes relevant to current object.
-2. Find `out` node.
-3. Walk reverse edges to collect nodes connected upstream of `Out`.
-4. For each connected `animation` node, find related `time` node.
-5. Materialize keyframes from animation definition/config.
-6. Compute controller options from time/split/condition path.
-7. Emit `LayerAnimation` for object.
+1. Require strict `AnimationGraph` with `sourceObjectId` matching current object.
+2. Validate strict nodes, typed endpoints, port compatibility, reachability, and cycles.
+3. Execute from `Source` in topological order using strict `from`/`to` edge endpoints.
+4. Route streams by explicit port ids only.
+5. Aggregate animation streams at `Out`.
+6. Convert supported effect instructions into `LayerAnimation` compatibility output.
 
 ## Example
 

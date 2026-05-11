@@ -7,8 +7,10 @@ import type {
   ProjectManifest,
   TypedAnimationGraphState,
 } from "./types";
+import type { AnimationGraph as StrictAnimationGraph } from "./animationGraph/types";
 
 type CompositionGraphState =
+  | StrictAnimationGraph
   | TypedAnimationGraphState
   | AnimationGraphState
   | Composition3dGraphState;
@@ -56,7 +58,7 @@ function setCompositionGraph(
     };
   if (mode === "background")
     return { ...composition, bgGraph: graph as AnimationGraphState };
-  return { ...composition, animationGraph: graph as TypedAnimationGraphState };
+  return { ...composition, animationGraph: graph as StrictAnimationGraph };
 }
 
 function getCompositionGraphRevision(graph: CompositionGraphState | undefined) {

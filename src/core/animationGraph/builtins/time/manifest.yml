@@ -1,0 +1,28 @@
+id: clipper.animationGraph.time
+kind: time
+name: Time
+label: Time
+connectionRules: ["typedSockets", "acyclic"]
+flow: { "producesController": true, "timingMode": "stack", "transparent": true }
+inputs:
+  - id: structure
+    label: Structure
+    type: Structure.Object
+    accepts:
+      [
+        "Structure.Shape",
+        "Structure.TextObject",
+        "Structure.RichTextObject",
+        "Structure.TextTokens",
+        "Structure.Object",
+      ]
+  - id: controller
+    label: AnimationController
+    type: AnimationController
+outputs:
+  - id: structure
+    label: Structure
+    type: Structure.Object
+  - id: controller
+    label: AnimationController
+    type: AnimationController

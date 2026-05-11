@@ -1,7 +1,3 @@
-import {
-  animationGraphPresets,
-  createAnimationGraphPresetGroup,
-} from "./animations/presets";
 import { roundTwo, sanitizeProjectNumbers } from "./math";
 import {
   getCanonicalMotionMarkers,
@@ -46,15 +42,20 @@ import type {
   TimelineMode,
   TimelineViewportState,
   TransitionLayer,
-  TypedAnimationGraphNode,
   TypedAnimationGraphState,
 } from "./types";
 import { getDisplayNameFromPath } from "./fileNames";
 import {
-  compileTypedAnimationGraphForObject,
-  isTypedAnimationGraphObjectConnectedToOut,
+  compileAnimationGraphForObject,
+  isAnimationGraphObjectConnectedToOut,
+  type AnimationGraphObjectCompileResult,
 } from "./animationGraph/compiler";
-import { createTypedAnimationGraphNode } from "./animationGraph/nodeRegistry";
+import { validateAnimationGraph } from "./animationGraph/validation";
+import type {
+  AnimationGraph as StrictAnimationGraph,
+  AnimationGraphEdge as StrictAnimationGraphEdge,
+  AnimationGraphNode as StrictAnimationGraphNode,
+} from "./animationGraph/types";
 
 export const defaultTimelineViewportState: TimelineViewportState = {
   displacement: 0,
@@ -450,200 +451,124 @@ export function normalizeAnimationGraphState(
 }
 
 export function normalizeTypedAnimationGraphState(
-  graph: TypedAnimationGraphState | undefined,
-): TypedAnimationGraphState | undefined {
-  if (!graph || typeof graph !== "object") return undefined;
-  const normalizeNodes = (rawNodes: unknown) =>
-    Object.fromEntries(
-      Object.entries(
-        rawNodes && typeof rawNodes === "object" ? rawNodes : {},
-      ).flatMap(([nodeId, node]) => {
-        if (!nodeId || !node || typeof node !== "object") return [];
-        const kind = isTypedAnimationGraphNodeKind(node.kind)
-          ? node.kind
-          : undefined;
-        if (!kind || node.id !== nodeId) return [];
-        const position = normalizeGraphPosition(node.position);
-        const config =
-          node.config && typeof node.config === "object" ? node.config : {};
-        const label = typeof node.label === "string" ? node.label : undefined;
-        return [
-          [
-            nodeId,
-            createTypedAnimationGraphNode(
-              nodeId,
-              kind,
-              position,
-              config,
-              label,
-            ),
-          ],
-        ];
-      }),
-    ) as Record<string, TypedAnimationGraphNode>;
-  const normalizeEdges = (
-    rawEdges: unknown,
-    nodes: Record<string, TypedAnimationGraphNode>,
-  ) => {
-    const hasGraphNode = (nodeId: string) => Boolean(nodes[nodeId]);
-    const seenEdges = new Set<string>();
-    return (Array.isArray(rawEdges) ? rawEdges : []).flatMap(
-      (edge): AnimationGraphEdge[] => {
-        if (!edge || typeof edge !== "object") return [];
-        const fromNodeId =
-          typeof edge.fromNodeId === "string" ? edge.fromNodeId : "";
-        const toNodeId = typeof edge.toNodeId === "string" ? edge.toNodeId : "";
-        if (
-          !fromNodeId ||
-          !toNodeId ||
-          !hasGraphNode(fromNodeId) ||
-          !hasGraphNode(toNodeId)
-        )
-          return [];
-        const fromPort = animationGraphPorts.has(edge.fromPort)
-          ? edge.fromPort
-          : "right";
-        const toPort = animationGraphPorts.has(edge.toPort)
-          ? edge.toPort
-          : "left";
-        const fromSocket =
-          typeof (edge as { fromSocket?: unknown }).fromSocket === "string"
-            ? (edge as { fromSocket: string }).fromSocket
-            : undefined;
-        const toSocket =
-          typeof (edge as { toSocket?: unknown }).toSocket === "string"
-            ? (edge as { toSocket: string }).toSocket
-            : undefined;
-        const id =
-          typeof edge.id === "string" && edge.id
-            ? edge.id
-            : `${fromNodeId}:${fromSocket ?? fromPort}->${toNodeId}:${toSocket ?? toPort}`;
-        if (seenEdges.has(id)) return [];
-        seenEdges.add(id);
-        return [
-          { id, fromNodeId, fromPort, toNodeId, toPort, fromSocket, toSocket },
-        ];
-      },
-    );
-  };
-  const legacyNodes = normalizeNodes(graph.nodes);
-  const legacyEdges = normalizeEdges(graph.edges, legacyNodes);
-  const rawLayers = Array.isArray(graph.layers) ? graph.layers : [];
-  const normalizedLayers = rawLayers.flatMap((layer) => {
-    if (!layer || typeof layer !== "object") return [];
-    const id = typeof layer.id === "string" ? layer.id : "";
-    if (!id) return [];
-    const nodes = normalizeNodes(layer.nodes);
-    const edges = normalizeEdges(layer.edges, nodes);
-    return Object.keys(nodes).length || edges.length
-      ? [
-          {
-            id,
-            nodes,
-            edges,
-            customNodes:
-              layer.customNodes && typeof layer.customNodes === "object"
-                ? (layer.customNodes as TypedAnimationGraphState["customNodes"])
-                : undefined,
-            groups: normalizeAnimationGraphGroups(layer.groups),
-            parameters:
-              layer.parameters && typeof layer.parameters === "object"
-                ? (layer.parameters as TypedAnimationGraphState["parameters"])
-                : undefined,
-          },
-        ]
-      : [];
-  });
-  const layers = normalizedLayers.length
-    ? normalizedLayers
-    : migrateFlatTypedAnimationGraphLayers(legacyNodes, legacyEdges);
-  return layers.length || Object.keys(legacyNodes).length || legacyEdges.length
-    ? {
-        nodes: {},
-        edges: [],
-        layers,
-        customNodes:
-          graph.customNodes && typeof graph.customNodes === "object"
-            ? (graph.customNodes as TypedAnimationGraphState["customNodes"])
-            : undefined,
-        groups: normalizeAnimationGraphGroups(graph.groups),
-        parameters:
-          graph.parameters && typeof graph.parameters === "object"
-            ? (graph.parameters as TypedAnimationGraphState["parameters"])
-            : undefined,
-        viewport: normalizeGraphViewport(graph.viewport),
-        viewports: normalizeGraphViewports(graph.viewports),
-      }
-    : undefined;
+  graph: TypedAnimationGraphState | StrictAnimationGraph | undefined,
+): StrictAnimationGraph | undefined {
+  return normalizeStrictAnimationGraph(graph);
 }
 
-function migrateFlatTypedAnimationGraphLayers(
-  nodes: Record<string, TypedAnimationGraphNode>,
-  edges: AnimationGraphEdge[],
-) {
-  const sourceNodes = Object.values(nodes).filter(
-    (node): node is Extract<TypedAnimationGraphNode, { kind: "source" }> =>
-      node.kind === "source" && Boolean(node.config.objectId),
-  );
-  return sourceNodes.map((source) => {
-    const layerGraph = keepTypedAnimationGraphBranch(nodes, edges, source.id);
-    return { id: source.config.objectId, ...layerGraph };
-  });
-}
-
-function keepTypedAnimationGraphBranch(
-  nodes: Record<string, TypedAnimationGraphNode>,
-  edges: AnimationGraphEdge[],
-  sourceNodeId: string,
-) {
-  const outNodeIds = new Set(
-    Object.values(nodes).flatMap((node) =>
-      node.kind === "out" ? [node.id] : [],
-    ),
-  );
-  const neighbors = new Map<string, Set<string>>();
-  for (const edge of edges) {
-    if (outNodeIds.has(edge.fromNodeId) || outNodeIds.has(edge.toNodeId))
-      continue;
-    if (!neighbors.has(edge.fromNodeId))
-      neighbors.set(edge.fromNodeId, new Set());
-    if (!neighbors.has(edge.toNodeId)) neighbors.set(edge.toNodeId, new Set());
-    neighbors.get(edge.fromNodeId)!.add(edge.toNodeId);
-    neighbors.get(edge.toNodeId)!.add(edge.fromNodeId);
-  }
-  const keepNodeIds = new Set([sourceNodeId, ...outNodeIds]);
-  const stack = [sourceNodeId];
-  while (stack.length) {
-    const nodeId = stack.pop()!;
-    for (const next of neighbors.get(nodeId) ?? []) {
-      if (keepNodeIds.has(next)) continue;
-      keepNodeIds.add(next);
-      stack.push(next);
-    }
-  }
+export function createDefaultComposition2dAnimationGraph(
+  object: FrameObject,
+): StrictAnimationGraph {
+  const sourceId = `source:${object.id}`;
+  const outId = "composition2d:out";
   return {
-    nodes: Object.fromEntries(
-      Object.entries(nodes).filter(([nodeId]) => keepNodeIds.has(nodeId)),
-    ) as Record<string, TypedAnimationGraphNode>,
-    edges: edges.filter(
-      (edge) =>
-        keepNodeIds.has(edge.fromNodeId) && keepNodeIds.has(edge.toNodeId),
-    ),
+    id: `graph:${object.id}`,
+    sourceObjectId: object.id,
+    nodes: {
+      [sourceId]: {
+        id: sourceId,
+        kind: "source",
+        position: { x: 60, y: 12 },
+        config: { objectId: object.id },
+      },
+      [outId]: {
+        id: outId,
+        kind: "out",
+        position: { x: 74, y: 12 },
+        config: {},
+      },
+    },
+    edges: [
+      {
+        id: `${sourceId}:out->${outId}:in`,
+        from: { nodeId: sourceId, portId: "out" },
+        to: { nodeId: outId, portId: "in" },
+      },
+    ],
   };
 }
 
-function isTypedAnimationGraphNodeKind(
-  kind: string | undefined,
-): kind is TypedAnimationGraphNode["kind"] {
-  return (
-    kind === "source" ||
-    kind === "time" ||
-    kind === "split" ||
-    kind === "condition" ||
-    kind === "effect" ||
-    kind === "group" ||
-    kind === "out"
+function normalizeStrictAnimationGraph(
+  graph: unknown,
+): StrictAnimationGraph | undefined {
+  if (!graph || typeof graph !== "object") return undefined;
+  const sourceObjectId = (graph as { sourceObjectId?: unknown }).sourceObjectId;
+  if (typeof sourceObjectId !== "string" || !sourceObjectId) return undefined;
+  const id =
+    typeof (graph as { id?: unknown }).id === "string" &&
+    (graph as { id: string }).id
+      ? (graph as { id: string }).id
+      : `graph:${sourceObjectId}`;
+  const nodes = Object.fromEntries(
+    Object.entries(
+      (graph as { nodes?: unknown }).nodes &&
+        typeof (graph as { nodes?: unknown }).nodes === "object"
+        ? (graph as { nodes: Record<string, unknown> }).nodes
+        : {},
+    ).flatMap(([nodeId, node]) => {
+      if (!nodeId || !node || typeof node !== "object") return [];
+      const kind = (node as { kind?: unknown }).kind;
+      if (typeof kind !== "string" || !kind) return [];
+      return [
+        [
+          nodeId,
+          {
+            id: nodeId,
+            kind,
+            position: normalizeGraphPosition(
+              (node as { position?: unknown }).position,
+            ),
+            config: (node as { config?: unknown }).config ?? {},
+          } satisfies StrictAnimationGraphNode,
+        ],
+      ];
+    }),
   );
+  const edges = (
+    Array.isArray((graph as { edges?: unknown }).edges)
+      ? (graph as { edges: unknown[] }).edges
+      : []
+  ).flatMap((edge): StrictAnimationGraphEdge[] => {
+    if (!edge || typeof edge !== "object") return [];
+    const from = (edge as { from?: unknown }).from;
+    const to = (edge as { to?: unknown }).to;
+    if (!from || typeof from !== "object" || !to || typeof to !== "object")
+      return [];
+    const fromNodeId = (from as { nodeId?: unknown }).nodeId;
+    const fromPortId = (from as { portId?: unknown }).portId;
+    const toNodeId = (to as { nodeId?: unknown }).nodeId;
+    const toPortId = (to as { portId?: unknown }).portId;
+    if (
+      typeof fromNodeId !== "string" ||
+      typeof fromPortId !== "string" ||
+      typeof toNodeId !== "string" ||
+      typeof toPortId !== "string"
+    )
+      return [];
+    return [
+      {
+        id:
+          typeof (edge as { id?: unknown }).id === "string" &&
+          (edge as { id: string }).id
+            ? (edge as { id: string }).id
+            : `${fromNodeId}:${fromPortId}->${toNodeId}:${toPortId}`,
+        from: { nodeId: fromNodeId, portId: fromPortId },
+        to: { nodeId: toNodeId, portId: toPortId },
+      },
+    ];
+  });
+  const normalized = {
+    id,
+    sourceObjectId,
+    nodes,
+    edges,
+    viewport: normalizeGraphViewport((graph as { viewport?: any }).viewport),
+  };
+  return validateAnimationGraph(normalized).some(
+    (diagnostic) => diagnostic.severity === "error",
+  )
+    ? undefined
+    : normalized;
 }
 
 function normalizeGraphPosition(position: unknown) {
@@ -767,18 +692,8 @@ function normalizeAnimationGraphGroups(
               }),
             )
           : undefined;
-      const presetId = groupId.startsWith("group:")
-        ? groupId.split(":").slice(1, -1).join(":")
-        : "";
-      const preset = animationGraphPresets.find((item) => item.id === presetId);
-      const repairedGroup =
-        preset && (!customNodes || Object.keys(customNodes).length === 0)
-          ? createAnimationGraphPresetGroup(preset, groupId)
-          : undefined;
-      const repairedNodes = repairedGroup
-        ? { ...repairedGroup.nodes, ...nodes }
-        : nodes;
-      const repairedCustomNodes = repairedGroup?.customNodes ?? customNodes;
+      const repairedNodes = nodes;
+      const repairedCustomNodes = customNodes;
       const hasNode = (nodeId: string) =>
         Boolean(
           repairedNodes[nodeId] ||
@@ -849,9 +764,7 @@ function normalizeAnimationGraphGroups(
               }),
             )
           : undefined;
-      const repairedParameters = repairedGroup?.parameters
-        ? { ...repairedGroup.parameters, ...(parameters ?? {}) }
-        : parameters;
+      const repairedParameters = parameters;
       return [
         [
           groupId,
@@ -859,7 +772,7 @@ function normalizeAnimationGraphGroups(
             id: groupId,
             name,
             nodes: repairedNodes,
-            edges: edges.length ? edges : (repairedGroup?.edges ?? []),
+            edges,
             customNodes:
               repairedCustomNodes && Object.keys(repairedCustomNodes).length
                 ? repairedCustomNodes
@@ -1108,7 +1021,9 @@ function normalizeComposition(composition: CompositionClip): CompositionClip {
       typeof rest.compositionError === "string" && rest.compositionError
         ? rest.compositionError
         : undefined,
-    animationGraph: normalizeTypedAnimationGraphState(rest.animationGraph),
+    animationGraph:
+      normalizeTypedAnimationGraphState(rest.animationGraph) ??
+      createDefaultComposition2dGraphForComposition(rest),
     bgGraph: normalizeAnimationGraphState(rest.bgGraph),
     threeBackgrounds: rest.threeBackgrounds,
     renderMode: normalizeCompositionRenderMode(rest.renderMode),
@@ -1121,6 +1036,15 @@ function normalizeComposition(composition: CompositionClip): CompositionClip {
     objects,
     ...motionCollections,
   };
+}
+
+function createDefaultComposition2dGraphForComposition(
+  composition: CompositionClip,
+) {
+  if (normalizeCompositionRenderMode(composition.renderMode) === "webgl")
+    return undefined;
+  const object = (composition.objects ?? [])[0];
+  return object ? createDefaultComposition2dAnimationGraph(object) : undefined;
 }
 
 function stripGeneratedGraphAnimations<T extends FrameObject>(
@@ -1465,57 +1389,53 @@ function resolveComposition3dGraphForTimelineClip(
 
 export function applyAnimationGraphToComposition(
   composition: CompositionClip,
-  graph: TypedAnimationGraphState | undefined,
+  graph: StrictAnimationGraph | undefined,
 ): CompositionClip {
   if (!composition.objects?.length && !composition.background.elements.length)
     return composition;
   const nextObjects = composition.objects.map((object) => {
-    const graphAnimations = graph
-      ? getGraphLayerAnimationsForObject(object, graph)
-      : [];
-    const baseAnimations = graph
-      ? []
-      : (object.animations ?? []).filter(
-          (animation) => !animation.id.startsWith("graph:"),
-        );
+    const graphCompile = graph
+      ? compileGraphForObject(object, graph)
+      : undefined;
+    const graphAnimations = graphCompile?.animations ?? [];
+    const baseAnimations = (object.animations ?? []).filter(
+      (animation) => !animation.id.startsWith("graph:"),
+    );
     if (
       !graphAnimations.length &&
       baseAnimations.length === (object.animations ?? []).length
     )
-      return graph &&
-        !isTypedAnimationGraphObjectConnectedToOut(object.id, graph)
+      return graph && !isAnimationGraphObjectConnectedToOut(object.id, graph)
         ? { ...object, hidden: true, animations: [] }
         : object;
     return {
       ...object,
       hidden: graph
-        ? !isTypedAnimationGraphObjectConnectedToOut(object.id, graph)
+        ? !isAnimationGraphObjectConnectedToOut(object.id, graph)
         : object.hidden,
       animations: [...baseAnimations, ...graphAnimations],
     };
   });
   const nextBackgroundElements = composition.background.elements.map(
     (object) => {
-      const graphAnimations = graph
-        ? getGraphLayerAnimationsForObject(object, graph)
-        : [];
-      const baseAnimations = graph
-        ? []
-        : (object.animations ?? []).filter(
-            (animation) => !animation.id.startsWith("graph:"),
-          );
+      const graphCompile = graph
+        ? compileGraphForObject(object, graph)
+        : undefined;
+      const graphAnimations = graphCompile?.animations ?? [];
+      const baseAnimations = (object.animations ?? []).filter(
+        (animation) => !animation.id.startsWith("graph:"),
+      );
       if (
         !graphAnimations.length &&
         baseAnimations.length === (object.animations ?? []).length
       )
-        return graph &&
-          !isTypedAnimationGraphObjectConnectedToOut(object.id, graph)
+        return graph && !isAnimationGraphObjectConnectedToOut(object.id, graph)
           ? { ...object, hidden: true, animations: [] }
           : object;
       return {
         ...object,
         hidden: graph
-          ? !isTypedAnimationGraphObjectConnectedToOut(object.id, graph)
+          ? !isAnimationGraphObjectConnectedToOut(object.id, graph)
           : object.hidden,
         animations: [...baseAnimations, ...graphAnimations],
       };
@@ -1540,72 +1460,19 @@ export function applyAnimationGraphToComposition(
 }
 
 export function pruneTypedAnimationGraphForObjects(
-  graph: TypedAnimationGraphState | undefined,
+  graph: StrictAnimationGraph | undefined,
   objects: readonly FrameObject[],
-): TypedAnimationGraphState | undefined {
+): StrictAnimationGraph | undefined {
   if (!graph) return undefined;
-  const normalizedGraph = normalizeTypedAnimationGraphState(graph);
-  if (!normalizedGraph) return undefined;
   const objectIds = new Set(objects.map((object) => object.id));
-  if (normalizedGraph.layers?.length) {
-    const layers = normalizedGraph.layers.filter((layer) =>
-      objectIds.has(layer.id),
-    );
-    return layers.length
-      ? { ...normalizedGraph, nodes: {}, edges: [], layers }
-      : undefined;
-  }
-  const sourceNodeIds = Object.values(normalizedGraph.nodes).flatMap((node) =>
-    node.kind === "source" && objectIds.has(node.config.objectId)
-      ? [node.id]
-      : [],
-  );
-  if (sourceNodeIds.length === 0) return undefined;
-
-  const outNodeIds = new Set(
-    Object.values(normalizedGraph.nodes).flatMap((node) =>
-      node.kind === "out" ? [node.id] : [],
-    ),
-  );
-  const neighbors = new Map<string, Set<string>>();
-  for (const edge of normalizedGraph.edges) {
-    if (outNodeIds.has(edge.fromNodeId) || outNodeIds.has(edge.toNodeId))
-      continue;
-    if (!neighbors.has(edge.fromNodeId))
-      neighbors.set(edge.fromNodeId, new Set());
-    if (!neighbors.has(edge.toNodeId)) neighbors.set(edge.toNodeId, new Set());
-    neighbors.get(edge.fromNodeId)!.add(edge.toNodeId);
-    neighbors.get(edge.toNodeId)!.add(edge.fromNodeId);
-  }
-
-  const keepNodeIds = new Set([...sourceNodeIds, ...outNodeIds]);
-  const stack = [...sourceNodeIds];
-  while (stack.length) {
-    const nodeId = stack.pop()!;
-    for (const next of neighbors.get(nodeId) ?? []) {
-      if (keepNodeIds.has(next)) continue;
-      keepNodeIds.add(next);
-      stack.push(next);
-    }
-  }
-
-  const nodes = Object.fromEntries(
-    Object.entries(normalizedGraph.nodes).filter(([nodeId]) =>
-      keepNodeIds.has(nodeId),
-    ),
-  ) as TypedAnimationGraphState["nodes"];
-  const edges = normalizedGraph.edges.filter(
-    (edge) =>
-      keepNodeIds.has(edge.fromNodeId) && keepNodeIds.has(edge.toNodeId),
-  );
-  return { ...normalizedGraph, nodes, edges };
+  return objectIds.has(graph.sourceObjectId) ? graph : undefined;
 }
 
-function getGraphLayerAnimationsForObject(
+function compileGraphForObject(
   object: FrameObject,
-  graph: TypedAnimationGraphState,
-): LayerAnimation[] {
-  return compileTypedAnimationGraphForObject(object, graph);
+  graph: StrictAnimationGraph,
+): AnimationGraphObjectCompileResult {
+  return compileAnimationGraphForObject(object, graph);
 }
 
 export function serializeProjectForSave(

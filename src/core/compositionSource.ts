@@ -105,9 +105,7 @@ export async function compositionFromSource(
     sourceMissing: undefined,
     duration: sourceComposition.duration,
     renderMode: sourceComposition.renderMode,
-    animationGraph: sourceComposition.animationGraph as
-      | TypedAnimationGraphState
-      | undefined,
+    animationGraph: sourceComposition.animationGraph as Part["animationGraph"],
     bgGraph: sourceComposition.bgGraph as AnimationGraphState | undefined,
     threeBackgrounds: sourceComposition.threeBackgrounds,
     composition3dGraph:
@@ -183,7 +181,7 @@ export function compositionToSource(composition: Part) {
       ? `  renderMode: ${JSON.stringify(composition.renderMode)},\n`
       : "";
   const animationGraphSource = composition.animationGraph
-    ? `  animationGraph: ${typedAnimationGraphToSource(composition.animationGraph, 2)},\n`
+    ? `  animationGraph: ${tsBlock(composition.animationGraph, 2)},\n`
     : "";
   const bgGraphSource = composition.bgGraph
     ? `  bgGraph: ${tsBlock(composition.bgGraph, 2)},\n`
@@ -280,7 +278,35 @@ function typedAnimationGraphToSource(
   graph: TypedAnimationGraphState,
   padding: number,
 ): string {
-  return `defineAnimationGraph(${tsBlock(graph, padding)})`;
+  return `defineAnimationGraph(${tsBlock(compactTypedAnimationGraph(graph), padding)})`;
+}
+
+function compactTypedAnimationGraph(graph: TypedAnimationGraphState) {
+  return {
+    ...graph,
+    nodes: compactTypedAnimationGraphNodes(graph.nodes),
+    layers: graph.layers?.map((layer) => ({
+      ...layer,
+      nodes: compactTypedAnimationGraphNodes(layer.nodes),
+    })),
+  };
+}
+
+function compactTypedAnimationGraphNodes(
+  nodes: TypedAnimationGraphState["nodes"],
+) {
+  return Object.fromEntries(
+    Object.entries(nodes).map(([nodeId, node]) => [
+      nodeId,
+      {
+        id: node.id,
+        kind: node.kind,
+        label: node.label,
+        position: node.position,
+        config: node.config,
+      },
+    ]),
+  );
 }
 
 function tsBlock(value: unknown, padding: number) {

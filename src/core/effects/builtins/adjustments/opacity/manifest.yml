@@ -1,0 +1,22 @@
+id: clipper.adjustment.opacity
+category: adjustment
+name: Opacity
+label: Opacity
+group: Visual/Opacity
+defaultDuration: 3
+defaultParams: { "from": 1, "to": 0 }
+paramControls:
+  - key: from
+    label: From
+    type: number
+    min: 0
+    max: 1
+    step: 0.01
+    defaultValue: 1
+  - key: to
+    label: To
+    type: number
+    min: 0
+    max: 1
+    step: 0.01
+    defaultValue: 0

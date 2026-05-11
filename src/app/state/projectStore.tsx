@@ -94,7 +94,14 @@ export function createProjectStore(
   }));
 }
 
-const ProjectStoreContext = createContext<StoreApi<ProjectStore> | null>(null);
+const projectStoreContextKey = "__clipperProjectStoreContext";
+const projectStoreGlobal = globalThis as typeof globalThis &
+  Record<
+    string,
+    ReturnType<typeof createContext<StoreApi<ProjectStore> | null>> | undefined
+  >;
+const ProjectStoreContext = (projectStoreGlobal[projectStoreContextKey] ??=
+  createContext<StoreApi<ProjectStore> | null>(null));
 
 export function ProjectStoreProvider({
   children,

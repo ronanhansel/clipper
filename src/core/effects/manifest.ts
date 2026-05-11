@@ -24,7 +24,7 @@ type YamlValue =
 
 export type MotionEffectLogic = Pick<
   MotionEffectPackage,
-  "createDefaultBlock" | "mendTransitionOptions"
+  "createDefaultBlock" | "mendTransitionOptions" | "graph"
 >;
 
 export type AdjustmentEffectLogic = Partial<
@@ -37,11 +37,12 @@ export type AdjustmentEffectLogic = Partial<
     | "requiresLiveDomPostProcessSource"
     | "timeSensitive"
     | "validate"
+    | "graph"
   >
 >;
 
 export type TransitionEffectLogic = Partial<
-  Pick<TransitionEffectPackage, "applyVisualStyle" | "renderSequence">
+  Pick<TransitionEffectPackage, "applyVisualStyle" | "renderSequence" | "graph">
 >;
 
 export function createMotionEffectPackage(

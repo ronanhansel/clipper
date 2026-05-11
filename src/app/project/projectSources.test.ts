@@ -1,11 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { createTypedAnimationGraphNode } from "../../core/animationGraph/nodeRegistry";
 import { compositionToSource } from "../../core/compositionSource";
-import type {
-  CompositionClip,
-  ProjectManifest,
-  TypedAnimationGraphState,
-} from "../../core/types";
+import type { CompositionClip, ProjectManifest } from "../../core/types";
+import type { AnimationGraph } from "../../core/animationGraph/types";
 import { getSyncedCompositionSources } from "./projectSources";
 
 const composition: CompositionClip = {
@@ -24,28 +20,38 @@ const composition: CompositionClip = {
   motionMarkers: [],
 };
 
-function graph(from: string): TypedAnimationGraphState {
-  const layer = {
-    id: "text",
+function graph(from: string): AnimationGraph {
+  return {
+    id: "graph:text",
+    sourceObjectId: "text",
     nodes: {
-      source: createTypedAnimationGraphNode(
-        "source",
-        "source",
-        { x: 0, y: 0 },
-        { objectId: "text", outputType: "Structure.TextObject" },
-      ),
-      scale: createTypedAnimationGraphNode(
-        "scale",
-        "effect",
-        { x: 10, y: 0 },
-        { effects: [{ property: "scale", values: {}, from, to: "10" }] },
-        "Scale",
-      ),
-      out: createTypedAnimationGraphNode("out", "out", { x: 20, y: 0 }),
+      source: {
+        id: "source",
+        kind: "source",
+        position: { x: 0, y: 0 },
+        config: { objectId: "text" },
+      },
+      scale: {
+        id: "scale",
+        kind: "effect:clipper.motion.zoom",
+        position: { x: 10, y: 0 },
+        config: { effectId: "clipper.motion.zoom", params: { scale: from } },
+      },
+      out: { id: "out", kind: "out", position: { x: 20, y: 0 }, config: {} },
     },
-    edges: [],
+    edges: [
+      {
+        id: "source:out->scale:in",
+        from: { nodeId: "source", portId: "out" },
+        to: { nodeId: "scale", portId: "in" },
+      },
+      {
+        id: "scale:out->out:in",
+        from: { nodeId: "scale", portId: "out" },
+        to: { nodeId: "out", portId: "in" },
+      },
+    ],
   };
-  return { nodes: {}, edges: [], layers: [layer] };
 }
 
 function project(part: CompositionClip): ProjectManifest {
@@ -75,12 +81,12 @@ describe("getSyncedCompositionSources", () => {
       { [composition.filePath]: staleSource },
     );
 
-    expect(sources[composition.filePath]).toContain('from: "2"');
-    expect(sources[composition.filePath]).toContain(
-      'outputType: "Structure.TextObject"',
-    );
-    expect(sources[composition.filePath]).toContain("defineAnimationGraph({");
-    expect(sources[composition.filePath]).toContain("layers: [");
+    expect(sources[composition.filePath]).toContain('scale: "2"');
+    expect(sources[composition.filePath]).not.toContain("outputType");
+    expect(sources[composition.filePath]).toContain("animationGraph: {");
+    expect(sources[composition.filePath]).toContain('sourceObjectId: "text"');
+    expect(sources[composition.filePath]).not.toContain("inputs:");
+    expect(sources[composition.filePath]).not.toContain("outputs:");
     expect(sources[composition.filePath]).not.toContain("new AnimationGraph");
     expect(sources[composition.filePath]).not.toContain("new SourceNode");
   });

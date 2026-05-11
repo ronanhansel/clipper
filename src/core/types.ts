@@ -1,3 +1,5 @@
+import type { AnimationGraph as StrictAnimationGraph } from "./animationGraph/types";
+
 export const FRAME_WIDTH = 1920;
 export const FRAME_HEIGHT = 1080;
 export const MAX_PART_DURATION_SECONDS = 60;
@@ -128,6 +130,7 @@ export type LayerAnimation = {
       order?: "forward" | "reverse" | "center";
       repeatScope?: "sequence" | "item";
       tokenDelays?: Record<number, number>;
+      tokenIndexes?: number[];
     };
   };
   enabled?: boolean;
@@ -436,7 +439,7 @@ export type CompositionClip = TimelineMarkerMetadata & {
   objects: FrameObject[];
   snapshot: PartSnapshotLine[];
   motionMarkers: MotionMarker[];
-  animationGraph?: TypedAnimationGraphState;
+  animationGraph?: StrictAnimationGraph;
   bgGraph?: AnimationGraphState;
   threeBackgrounds?: Record<string, unknown>;
   renderMode?: CompositionRenderMode;
@@ -488,6 +491,7 @@ export type AnimationGraphValueType =
   | "Structure.Shape"
   | "Structure.TextObject"
   | "Structure.RichTextObject"
+  | "Structure.TextTokens"
   | "Structure.Object"
   | "Value.String"
   | "Value.Number"
@@ -528,11 +532,11 @@ export type AnimationGraphConditionRule = {
   operator: "equals" | "contains" | "notContains" | "gt" | "lt" | "gte" | "lte";
   value: string | number;
   action: "setDelay" | "sendToOutput" | "duplicateToOutput";
-  output: number;
+  output: string;
   delay?: number;
 };
 
-export type AnimationGraphConditionConfig = {
+export type LegacyAnimationGraphConditionConfig = {
   rules: AnimationGraphConditionRule[];
 };
 
@@ -561,7 +565,7 @@ export type TypedAnimationGraphNodeBase<Kind extends string, Config> = {
 
 export type AnimationGraphSourceNode = TypedAnimationGraphNodeBase<
   "source",
-  { objectId: string; outputType?: AnimationGraphValueType }
+  { objectId: string }
 >;
 export type AnimationGraphTimeNode = TypedAnimationGraphNodeBase<
   "time",
@@ -573,7 +577,7 @@ export type AnimationGraphSplitNode = TypedAnimationGraphNodeBase<
 >;
 export type AnimationGraphConditionNode = TypedAnimationGraphNodeBase<
   "condition",
-  AnimationGraphConditionConfig
+  LegacyAnimationGraphConditionConfig
 >;
 export type AnimationGraphAnimationNode = TypedAnimationGraphNodeBase<
   "effect",

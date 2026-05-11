@@ -1,4 +1,4 @@
-import type { LayerAnimation } from "../types";
+import type { LayerAnimation } from "../../../../types";
 
 export type AnimationControllerField = {
   key: string;
@@ -31,3 +31,13 @@ export type AnimationDefinition = {
     context: AnimationMaterializationContext,
   ) => LayerAnimation["keyframes"];
 };
+
+export type AnimationManifest = Pick<
+  AnimationDefinition,
+  "property" | "label" | "category" | "popover" | "fieldGroups"
+>;
+
+export type AnimationLogic = Pick<
+  AnimationDefinition,
+  "getDetails" | "materializeKeyframes"
+>;

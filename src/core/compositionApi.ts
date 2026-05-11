@@ -36,6 +36,25 @@ export type JsonValue =
   | string
   | JsonValue[]
   | { [key: string]: JsonValue };
+export type AnimationGraph = {
+  id: string;
+  sourceObjectId: string;
+  nodes: Record<
+    string,
+    {
+      id: string;
+      kind: string;
+      position: { x: number; y: number };
+      config: unknown;
+    }
+  >;
+  edges: {
+    id: string;
+    from: { nodeId: string; portId: string };
+    to: { nodeId: string; portId: string };
+  }[];
+  viewport?: { scrollLeft: number; scrollTop: number; zoom?: number };
+};
 export type RichTextSegment = {
   text: string;
   bold: boolean;
@@ -137,7 +156,7 @@ export type CompositionProps = {
     animations?: LayerAnimation[];
     elements?: Renderable[];
   };
-  animationGraph?: TypedAnimationGraphState | JsonValue;
+  animationGraph?: AnimationGraph | JsonValue;
   bgGraph?: JsonValue;
   threeBackgrounds?: Record<string, ThreeBackgroundFactory | object | Function>;
   composition3dGraph?: JsonValue;
@@ -353,7 +372,7 @@ export class Composition {
   renderMode?: CompositionProps["renderMode"];
   frame: CompositionProps["frame"];
   background?: CompositionProps["background"];
-  animationGraph?: TypedAnimationGraphState | JsonValue;
+  animationGraph?: CompositionProps["animationGraph"];
   bgGraph?: CompositionProps["bgGraph"];
   threeBackgrounds?: CompositionProps["threeBackgrounds"];
   composition3dGraph?: CompositionProps["composition3dGraph"];
@@ -398,6 +417,7 @@ export type AnimationGraphValueType =
   | "Structure.Shape"
   | "Structure.TextObject"
   | "Structure.RichTextObject"
+  | "Structure.TextTokens"
   | "Structure.Object"
   | "Value.String"
   | "Value.Number"
@@ -450,7 +470,7 @@ export type AnimationGraphConditionRule = {
   operator: "equals" | "contains" | "notContains" | "gt" | "lt" | "gte" | "lte";
   value: string | number;
   action: "setDelay" | "sendToOutput" | "duplicateToOutput";
-  output: number;
+  output: string;
   delay?: number;
 };
 
@@ -485,7 +505,7 @@ export type AnimationGraphNodeBase<Kind extends string, Config> = {
 
 export type AnimationGraphSourceNode = AnimationGraphNodeBase<
   "source",
-  { objectId: string; outputType?: AnimationGraphValueType }
+  { objectId: string }
 >;
 export type AnimationGraphTimeNode = AnimationGraphNodeBase<
   "time",
@@ -528,11 +548,11 @@ export type TypedAnimationGraphNode =
   | AnimationGraphOutNode;
 
 export type TypedAnimationGraphState = {
-  nodes: Record<string, TypedAnimationGraphNode>;
+  nodes: Record<string, TypedAnimationGraphNode | CompactAnimationGraphNode>;
   edges: AnimationGraphEdge[];
   layers?: Array<{
     id: string;
-    nodes: Record<string, TypedAnimationGraphNode>;
+    nodes: Record<string, TypedAnimationGraphNode | CompactAnimationGraphNode>;
     edges: AnimationGraphEdge[];
   }>;
   customNodes?: Record<string, JsonValue>;
@@ -540,6 +560,14 @@ export type TypedAnimationGraphState = {
   groups?: Record<string, JsonValue>;
   viewport?: JsonValue;
   viewports?: JsonValue;
+};
+
+export type CompactAnimationGraphNode = {
+  id: string;
+  kind: TypedAnimationGraphNode["kind"];
+  label?: string;
+  position: AnimationGraphNodePosition;
+  config?: JsonValue;
 };
 
 export function defineAnimationGraph<T extends TypedAnimationGraphState>(

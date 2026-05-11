@@ -1,14 +1,19 @@
-import type {
-  AnimationGraphCustomNode,
-  AnimationGraphEdge,
-  AnimationGraphGroup,
-  AnimationGraphState,
-} from "../types";
+import type { AnimationGraph, AnimationGraphNode } from "./types";
 
 export type AnimationGraphPresetEffect = {
   property: "opacity" | "position" | "scale" | "rotate";
   label: string;
   parameters: Record<string, string>;
+};
+
+const presetEffectKinds: Record<
+  AnimationGraphPresetEffect["property"],
+  string
+> = {
+  opacity: "effect:clipper.adjustment.opacity",
+  position: "effect:clipper.motion.pan",
+  scale: "effect:clipper.motion.zoom",
+  rotate: "effect:clipper.motion.rotate",
 };
 
 export type AnimationGraphPresetDefinition = {
@@ -250,18 +255,40 @@ export const animationGraphPresets: readonly AnimationGraphPresetDefinition[] =
     },
   ];
 
-export function createAnimationGraphPresetGroup(
-  preset: AnimationGraphPresetDefinition,
-  groupId: string,
-): AnimationGraphGroup {
-  const timeId = `${groupId}:time:0`;
-  const outId = `${groupId}:out`;
-  const customNodes: Record<string, AnimationGraphCustomNode> = {
+export function addAnimationGraphPresetGroupToGraph(
+  graph: AnimationGraph | undefined,
+  presetId: string,
+  sourceObjectId: string,
+  position: { x: number; y: number },
+  idSuffix = Date.now().toString(36),
+): AnimationGraph {
+  const preset = animationGraphPresets.find((item) => item.id === presetId);
+  if (!preset) {
+    return (
+      graph ?? {
+        id: `graph:${sourceObjectId}`,
+        sourceObjectId,
+        nodes: {},
+        edges: [],
+      }
+    );
+  }
+  const prefix = `preset:${preset.id}:${idSuffix}`;
+  const sourceId = `${prefix}:source`;
+  const timeId = `${prefix}:time`;
+  const outId = `${prefix}:out`;
+  const nodes: Record<string, AnimationGraphNode> = {
+    [sourceId]: {
+      id: sourceId,
+      kind: "source",
+      position,
+      config: { objectId: sourceObjectId },
+    },
     [timeId]: {
+      id: timeId,
       kind: "time",
-      label: "Time",
-      scopeKey: groupId,
-      details: {
+      position: { x: position.x + 5, y: position.y },
+      config: {
         delay: preset.delay ?? "0s",
         duration: preset.duration,
         ease: preset.ease ?? "linear",
@@ -269,76 +296,49 @@ export function createAnimationGraphPresetGroup(
         repeatType: preset.repeatType ?? "loop",
       },
     },
+    [outId]: {
+      id: outId,
+      kind: "out",
+      position: {
+        x: position.x + 10 + preset.effects.length * 5,
+        y: position.y,
+      },
+      config: {},
+    },
   };
-  const nodes: AnimationGraphGroup["nodes"] = {
-    [timeId]: { x: 6, y: 6 },
-    [outId]: { x: 6, y: 10 },
-  };
-  const parameters: NonNullable<AnimationGraphGroup["parameters"]> = {};
-  const edges: AnimationGraphEdge[] = [];
+  const edges: AnimationGraph["edges"] = [
+    {
+      id: `${sourceId}:out->${timeId}:in`,
+      from: { nodeId: sourceId, portId: "out" },
+      to: { nodeId: timeId, portId: "in" },
+    },
+  ];
+  let previousId = timeId;
   preset.effects.forEach((effect, index) => {
-    const effectId = `${groupId}:effect:${index}:${effect.property}`;
-    customNodes[effectId] = {
-      kind: "effect",
-      label: effect.label,
-      scopeKey: groupId,
-      details: { property: effect.property },
+    const effectId = `${prefix}:effect:${index}:${effect.property}`;
+    nodes[effectId] = {
+      id: effectId,
+      kind: presetEffectKinds[effect.property],
+      position: { x: position.x + 10 + index * 5, y: position.y },
+      config: { params: effect.parameters },
     };
-    nodes[effectId] = { x: 2 + index * 5, y: 2 };
-    parameters[effectId] = effect.parameters;
     edges.push({
-      id: `${effectId}:bottom->${timeId}:top`,
-      fromNodeId: effectId,
-      fromPort: "bottom",
-      toNodeId: timeId,
-      toPort: "top",
+      id: `${previousId}:out->${effectId}:in`,
+      from: { nodeId: previousId, portId: "out" },
+      to: { nodeId: effectId, portId: "in" },
     });
+    previousId = effectId;
   });
   edges.push({
-    id: `${timeId}:bottom->${outId}:top`,
-    fromNodeId: timeId,
-    fromPort: "bottom",
-    toNodeId: outId,
-    toPort: "top",
+    id: `${previousId}:out->${outId}:in`,
+    from: { nodeId: previousId, portId: "out" },
+    to: { nodeId: outId, portId: "in" },
   });
   return {
-    id: groupId,
-    name: preset.label,
-    nodes,
-    edges,
-    customNodes,
-    parameters,
-    outNodeId: outId,
-  };
-}
-
-export function addAnimationGraphPresetGroupToGraph(
-  graph: AnimationGraphState | undefined,
-  presetId: string,
-  scopeKey: string,
-  position: { x: number; y: number },
-  idSuffix = Date.now().toString(36),
-): AnimationGraphState {
-  const preset = animationGraphPresets.find((item) => item.id === presetId);
-  if (!preset) return graph ?? { nodes: {}, edges: [] };
-  const groupId = `group:${preset.id}:${idSuffix}`;
-  const nodeId = `custom:group:${idSuffix}`;
-  const group = createAnimationGraphPresetGroup(preset, groupId);
-  return {
-    nodes: { ...(graph?.nodes ?? {}), [nodeId]: position },
-    edges: graph?.edges ?? [],
-    customNodes: {
-      ...(graph?.customNodes ?? {}),
-      [nodeId]: {
-        kind: "group",
-        label: preset.label,
-        scopeKey,
-        details: { groupId },
-      },
-    },
-    groups: { ...(graph?.groups ?? {}), [groupId]: group },
-    parameters: graph?.parameters,
+    id: graph?.id ?? `graph:${sourceObjectId}`,
+    sourceObjectId: graph?.sourceObjectId ?? sourceObjectId,
+    nodes: { ...(graph?.nodes ?? {}), ...nodes },
+    edges: [...(graph?.edges ?? []), ...edges],
     viewport: graph?.viewport,
-    viewports: graph?.viewports,
   };
 }

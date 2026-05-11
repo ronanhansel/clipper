@@ -1,0 +1,13 @@
+id: clipper.animationGraph.group
+kind: group
+name: Group
+label: Group
+connectionRules: ["typedSockets", "acyclic", "registeredGroupOutput"]
+inputs:
+  - id: controller
+    label: Controller
+    type: AnimationController
+outputs:
+  - id: effect
+    label: CSS Effect
+    type: Effect.CSSEffect
