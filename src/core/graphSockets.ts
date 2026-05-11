@@ -49,36 +49,56 @@ export const composition2dSocketSettings = {
   defaultSocket: "any",
   sockets: {
     layer: { output: "renderable", accepts: [] },
-    animation: { output: "renderable", accepts: ["renderable", "time", "token", "any"] },
+    effect: {
+      output: "renderable",
+      accepts: ["renderable", "time", "token", "any"],
+    },
+    effectMix: {
+      output: "renderable",
+      accepts: ["renderable", "time", "token", "any"],
+    },
     time: { output: "time", accepts: ["renderable", "time", "any"] },
     split: { output: "token", accepts: ["renderable", "time", "token", "any"] },
     condition: { output: "token", accepts: ["token", "any"] },
-    group: { output: "renderable", accepts: ["renderable", "time", "token", "any"] },
-    out: { output: "renderable", accepts: ["renderable", "time", "token", "any"] },
+    group: {
+      output: "renderable",
+      accepts: ["renderable", "time", "token", "any"],
+    },
+    out: {
+      output: "renderable",
+      accepts: ["renderable", "time", "token", "any"],
+    },
   },
   rules: [
-    { from: "animation", to: "time" },
+    { from: "effect", to: "time" },
+    { from: "effect", to: "out" },
+    { from: "effectMix", to: "time" },
+    { from: "effectMix", to: "out" },
     { from: "layer", to: "time" },
     { from: "layer", to: "group" },
     { from: "group", to: "time" },
-    { from: "group", to: "animation" },
+    { from: "group", to: "effect" },
+    { from: "group", to: "effectMix" },
     { from: "group", to: "out" },
     { from: "layer", to: "out" },
     { from: "time", to: "out" },
-    { from: "time", to: "animation" },
+    { from: "time", to: "effect" },
+    { from: "time", to: "effectMix" },
     { from: "time", to: "time" },
     { from: "time", to: "split" },
     { from: "split", to: "condition" },
-    { from: "split", to: "animation" },
-    { from: "condition", to: "animation" },
+    { from: "split", to: "effect" },
+    { from: "split", to: "effectMix" },
+    { from: "condition", to: "effect" },
+    { from: "condition", to: "effectMix" },
     { from: "condition", to: "time" },
     { from: "condition", to: "out" },
-    { from: "animation", to: "out" },
     { from: "split", to: "out" },
   ],
 } as const;
 
-export type Composition2dNodeKind = keyof typeof composition2dSocketSettings.sockets;
+export type Composition2dNodeKind =
+  keyof typeof composition2dSocketSettings.sockets;
 
 export function getComposition2dSocketDefinition(
   kind: string | null | undefined,

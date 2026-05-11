@@ -20,7 +20,6 @@ import {
   getBoundsWithPreviewTransform,
   getDraggedObjects,
   getFrameObjectPreviewTransform,
-  getFrameObjectWithPreviewBounds,
   getObjectDragSnap,
   getObjectResizeScale,
   getPartFrameObject,
@@ -252,17 +251,18 @@ export function useFrameInteractionController(
   }
 
   function setFrameSelectionBoxDragTransform(delta: Point) {
+    const frameRect = frameViewportRef.current?.getBoundingClientRect();
+    const actualFrameScale = frameRect
+      ? frameRect.width / FRAME_WIDTH
+      : framePreviewScale;
     for (const element of getFrameSelectionBoxElements()) {
-      const scale = element.dataset.frameSelectionBoxPortal
-        ? selectionOverlayScale
-        : 1;
       element.style.setProperty(
         "--clipper-drag-x",
-        `${delta.x * framePreviewScale * cameraPreviewTransform.scale * scale}px`,
+        `${delta.x * actualFrameScale * cameraPreviewTransform.scale}px`,
       );
       element.style.setProperty(
         "--clipper-drag-y",
-        `${delta.y * framePreviewScale * cameraPreviewTransform.scale * scale}px`,
+        `${delta.y * actualFrameScale * cameraPreviewTransform.scale}px`,
       );
     }
   }
@@ -309,23 +309,11 @@ export function useFrameInteractionController(
   }
 
   function setFrameSelectionBoxResizePreview(objectId: string, bounds: Bounds) {
-    const object = getPartFrameObject(part, objectId);
-    const previewBounds = object
-      ? getFrameObjectWithPreviewBounds(
-          { ...object, bounds },
-          previewTime,
-          part.duration,
-        ).bounds
-      : bounds;
     const selectionUiScale = Math.max(selectionOverlayScale, 0.001);
     const selectorOffset = selectorOffsetPx / selectionUiScale;
     const selectorHandleSize = selectorHandleSizePx / selectionUiScale;
     const viewportBounds = insetBounds(
-      boundsToViewport(
-        previewBounds,
-        cameraPreviewTransform,
-        framePreviewScale,
-      ),
+      boundsToViewport(bounds, cameraPreviewTransform, framePreviewScale),
       -selectorOffset,
     );
     const overlayOffset = selectorOffset + selectorHandleSize;
@@ -882,6 +870,7 @@ export function useFrameInteractionController(
     if (mode !== "preview" || !canSelectFrameObjects || object.locked) return;
     if (focusPickZoomMarker || positionPickTranslationMarker) return;
     setEditingTextObjectId(null);
+    clearDragBox();
     event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
     const selectedObjectIds = new Set(

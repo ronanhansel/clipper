@@ -85,6 +85,7 @@ export type ProjectDocumentController = {
       syncSources?: boolean;
       coalesceHistory?: boolean;
       historyGroup?: string;
+      preserveNewerGraphTransactions?: boolean;
     },
   ) => void;
   redoProjectChange: () => Promise<void> | void;
@@ -125,6 +126,7 @@ export type ProjectDocumentController = {
       syncSources?: boolean;
       coalesceHistory?: boolean;
       historyGroup?: string;
+      preserveNewerGraphTransactions?: boolean;
     },
   ) => void;
   watchedProjectDirectory: string;
@@ -209,12 +211,14 @@ export function useProjectDocumentController({
   const latestAutosaveVersionRef = useRef(0);
   const autosaveBusyReleaseTimeoutRef = useRef(0);
   const sourceUpdateVersionRef = useRef<Record<string, number>>({});
+  const projectDocumentVersionRef = useRef(0);
   const watchedProjectDirectory = getDirectoryPath(activeProjectManifestPath);
 
   function commitProjectDocument(
     nextProject: ProjectManifest,
     nextSources: Record<string, string>,
   ) {
+    projectDocumentVersionRef.current++;
     projectRef.current = nextProject;
     compositionSourcesRef.current = nextSources;
     setProjectDocument(nextProject, nextSources);
@@ -269,6 +273,25 @@ export function useProjectDocumentController({
           currentProject,
           normalizedProject,
         );
+      if (
+        options.syncSources !== false &&
+        options.preserveNewerGraphTransactions
+      ) {
+        nextCompositionSources = getSyncedCompositionSources(
+          normalizedProject,
+          currentProject,
+          nextCompositionSources,
+        );
+        const preSourceResyncProject = normalizedProject;
+        normalizedProject = normalizeProject({
+          ...normalizedProject,
+          compositionSources: nextCompositionSources,
+        });
+        carryCompositionGraphTransactionRevisions(
+          preSourceResyncProject,
+          normalizedProject,
+        );
+      }
       if (options.preserveEditorState) {
         const preEditorStateProject = normalizedProject;
         normalizedProject = normalizeProject({
@@ -387,6 +410,7 @@ export function useProjectDocumentController({
       syncSources?: boolean;
       coalesceHistory?: boolean;
       historyGroup?: string;
+      preserveNewerGraphTransactions?: boolean;
     },
   ) {
     const nextProject =
@@ -1092,6 +1116,7 @@ export function useProjectDocumentController({
   ) {
     const sourceVersion =
       (sourceUpdateVersionRef.current[basePart.filePath] ?? 0) + 1;
+    const sourceBaseProjectVersion = projectDocumentVersionRef.current;
     sourceUpdateVersionRef.current = {
       ...sourceUpdateVersionRef.current,
       [basePart.filePath]: sourceVersion,
@@ -1124,6 +1149,7 @@ export function useProjectDocumentController({
     }
     if (sourceUpdateVersionRef.current[basePart.filePath] !== sourceVersion)
       return;
+    if (projectDocumentVersionRef.current !== sourceBaseProjectVersion) return;
     const nextProject = replacePartInProject(
       { ...projectRef.current, compositionSources: nextSources },
       compositionId,
@@ -1138,6 +1164,7 @@ export function useProjectDocumentController({
     replaceProject(nextProject, {
       history: options.history,
       syncSources: options.syncSource !== false,
+      preserveNewerGraphTransactions: true,
     });
     setSourceStatus(
       nextPart.compositionError

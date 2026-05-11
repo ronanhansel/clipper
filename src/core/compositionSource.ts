@@ -12,6 +12,7 @@ import {
   type LayerAnimation,
   type Part,
   type PartFrame,
+  type TypedAnimationGraphState,
 } from "./types";
 
 type SourceObject = {
@@ -105,7 +106,7 @@ export async function compositionFromSource(
     duration: sourceComposition.duration,
     renderMode: sourceComposition.renderMode,
     animationGraph: sourceComposition.animationGraph as
-      | AnimationGraphState
+      | TypedAnimationGraphState
       | undefined,
     bgGraph: sourceComposition.bgGraph as AnimationGraphState | undefined,
     threeBackgrounds: sourceComposition.threeBackgrounds,
@@ -172,6 +173,7 @@ export function compositionToSource(composition: Part) {
     new Set([
       "Component",
       "Composition",
+      ...(composition.animationGraph ? ["defineAnimationGraph"] : []),
       ...composition.background.elements.map(frameObjectConstructorName),
       ...composition.objects.map(frameObjectConstructorName),
     ]),
@@ -181,7 +183,7 @@ export function compositionToSource(composition: Part) {
       ? `  renderMode: ${JSON.stringify(composition.renderMode)},\n`
       : "";
   const animationGraphSource = composition.animationGraph
-    ? `  animationGraph: ${tsBlock(composition.animationGraph, 2)},\n`
+    ? `  animationGraph: ${typedAnimationGraphToSource(composition.animationGraph, 2)},\n`
     : "";
   const bgGraphSource = composition.bgGraph
     ? `  bgGraph: ${tsBlock(composition.bgGraph, 2)},\n`
@@ -268,6 +270,17 @@ function frameObjectConstructorName(object: FrameObject) {
   if (object.type === "html") return "Html";
   if (object.type === "template") return "Template";
   return "Rect";
+}
+
+// ---------------------------------------------------------------------------
+// Typed Effect Graph Source Generation
+// ---------------------------------------------------------------------------
+
+function typedAnimationGraphToSource(
+  graph: TypedAnimationGraphState,
+  padding: number,
+): string {
+  return `defineAnimationGraph(${tsBlock(graph, padding)})`;
 }
 
 function tsBlock(value: unknown, padding: number) {

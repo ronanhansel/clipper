@@ -78,6 +78,10 @@ import { PresentationControls } from "./app/shell/PresentationControls";
 import { RightInspectorPanel } from "./app/shell/RightInspectorPanel";
 import { useEditorViewportState } from "./app/shell/useEditorViewportState";
 import { useEditorModeCommands } from "./app/shell/useEditorModeCommands";
+import {
+  getSelectedComposition2dLayerGraph,
+  setSelectedComposition2dLayerGraph,
+} from "./components/timeline/ComposeAnimationGraphPanel";
 import { useProjectTitleRename } from "./app/shell/useProjectTitleRename";
 import {
   defaultExportTileMapping,
@@ -416,6 +420,7 @@ function AppContent({
   const [currentSceneTime, setRenderCurrentSceneTime] = useState(
     () => editorStore.getState().currentSceneTime,
   );
+  const [composeGraphEnabled, setComposeGraphEnabled] = useState(true);
   const [trackerPickTranslationMarker, setTrackerPickTranslationMarker] =
     useState<{ partId: string; markerId: string } | null>(null);
   const [pointPickAdjustment, setPointPickAdjustment] = useState<{
@@ -1016,6 +1021,7 @@ function AppContent({
     selectedMotionMarker,
     selectedMotionMarkers,
     selectionPayload,
+    composeGraphEnabled,
     timelineMode,
   });
   const composeMode = timelineMode === "compose";
@@ -1354,6 +1360,28 @@ function AppContent({
     updateMode,
   });
   const previewSelectionObjects = selectionPayload?.objects ?? [];
+  const visiblePreviewObjectIds = new Set([
+    ...(part?.background.hidden ? [] : [part?.background.id].filter(Boolean)),
+    ...(part?.background.elements ?? [])
+      .filter((object) => !object.hidden)
+      .map((object) => object.id),
+    ...(part?.objects ?? [])
+      .filter((object) => !object.hidden)
+      .map((object) => object.id),
+  ]);
+  const graphAuthoritativePreviewSelectionObjects =
+    composeMode && composeGraphEnabled
+      ? previewSelectionObjects.filter((object) =>
+          visiblePreviewObjectIds.has(object.id),
+        )
+      : previewSelectionObjects;
+  const graphAuthoritativeEditingTextObjectId =
+    composeMode &&
+    composeGraphEnabled &&
+    editingTextObjectId &&
+    !visiblePreviewObjectIds.has(editingTextObjectId)
+      ? null
+      : editingTextObjectId;
   function setVideoExportTileHeight(value: number) {
     const nextValue = clampVideoExportTileHeight(value);
     setVideoExportTileHeightState(nextValue);
@@ -1832,6 +1860,7 @@ function AppContent({
     if (!marqueeDragging) return;
 
     function clearMarqueeAfterPointerRelease() {
+      if (objectDragRef.current) return;
       requestAnimationFrame(() => clearDragBox());
     }
 
@@ -2121,9 +2150,9 @@ function AppContent({
       const targetCompositionId = targetClip.compositionId;
       const targetFilePath = part.filePath;
       const fallbackComposition = [
+        ...current.scenes.flatMap((sceneItem) => sceneItem.compositions),
         ...(current.compositionLibrary ?? []),
         ...(current.compositions ?? []),
-        ...current.scenes.flatMap((sceneItem) => sceneItem.compositions),
       ].find(
         (composition) =>
           composition.id === targetCompositionId ||
@@ -2153,12 +2182,14 @@ function AppContent({
         history: options.history !== false,
         syncSources: true,
         historyGroup: `graph:${clipId}:${options?.mode ?? "auto"}`,
+        preserveNewerGraphTransactions: true,
       });
     else
       updateProject(applyUpdate, {
         history: options?.history !== false,
         syncSources: true,
         historyGroup: `graph:${clipId}:${options?.mode ?? "auto"}`,
+        preserveNewerGraphTransactions: true,
       });
   }
 
@@ -2168,10 +2199,27 @@ function AppContent({
     value: string,
     options?: { history?: boolean; mode?: GraphCompositionMode },
   ) {
-    updateComposeAnimationGraph(
-      (graph) => updateAnimationGraphNodeParameter(graph, nodeId, key, value),
-      options,
-    );
+    updateComposeAnimationGraph((graph) => {
+      const layerId =
+        options?.mode === "composition2d" &&
+        selectedComposeObjectIds.length === 1
+          ? selectedComposeObjectIds[0]
+          : undefined;
+      if (layerId) {
+        const layerGraph = getSelectedComposition2dLayerGraph(
+          graph,
+          layerId,
+          "composition2d",
+        );
+        return setSelectedComposition2dLayerGraph(
+          graph,
+          updateAnimationGraphNodeParameter(layerGraph, nodeId, key, value),
+          layerId,
+          "composition2d",
+        );
+      }
+      return updateAnimationGraphNodeParameter(graph, nodeId, key, value);
+    }, options);
   }
 
   function inspectGraphNode(nodeId: string | null) {
@@ -3575,13 +3623,13 @@ function AppContent({
                   ? activeCompositionHidden
                   : false,
               selectedObjects: hasPreviewComposition
-                ? previewSelectionObjects
+                ? graphAuthoritativePreviewSelectionObjects
                 : [],
               objectSnapGuides: hasPreviewComposition ? objectSnapGuides : [],
               marqueeDragging: hasPreviewComposition && marqueeDragging,
               editingTextObjectId:
                 hasPreviewComposition && !isPlaying
-                  ? editingTextObjectId
+                  ? graphAuthoritativeEditingTextObjectId
                   : null,
               onFramePointerCancel,
               onFramePointerDown,
@@ -3898,6 +3946,8 @@ function AppContent({
             onShiftTimelineGapMarkers: shiftTimelineGapMarkers,
             onUpdateTransitionLayer: updateTransitionLayer,
             composeAnimationPart: hasActiveComposition ? part : null,
+            composeGraphEnabled,
+            onComposeGraphEnabledChange: setComposeGraphEnabled,
             selectedObjectIds: selectedComposeObjectIds,
             selectedGraphNodeIds,
             onComposeGraphScopeChange: setComposeGraphScope,

@@ -38,8 +38,6 @@ import {
   type CameraPreviewTransform,
 } from "../../core/camera";
 import {
-  frameObjectFromBackgroundLayer,
-  getFrameObjectWithPreviewBounds,
   insetBounds,
   isVisibleMarqueeBounds,
   updateDragSelectionBoxElement,
@@ -418,30 +416,7 @@ export const FramePreview = memo(function FramePreview({
     () => [...part.background.elements, ...part.objects],
     [part.background.elements, part.objects],
   );
-  const selectedPreviewObjects = useMemo(
-    () =>
-      interactiveSelectedObjects.map((selected) => {
-        const object = selectableObjects.find(
-          (item) => item.id === selected.id,
-        );
-        return object
-          ? {
-              ...selected,
-              bounds: getFrameObjectWithPreviewBounds(
-                object,
-                displayPreviewTime,
-                part.duration,
-              ).bounds,
-            }
-          : selected;
-      }),
-    [
-      displayPreviewTime,
-      interactiveSelectedObjects,
-      part.duration,
-      selectableObjects,
-    ],
-  );
+  const selectedPreviewObjects = interactiveSelectedObjects;
   const viewportOverlayStyle = useMemo(
     () =>
       exportTileViewport
@@ -1213,13 +1188,7 @@ function CompositionLayerView({
           playbackClock={playbackClock}
           previewTime={previewTime}
           renderMode={renderMode}
-          onPointerDown={(event) => {
-            if (active && !isPlaying)
-              onObjectPointerDown(
-                event,
-                frameObjectFromBackgroundLayer(part.background),
-              );
-          }}
+          onPointerDown={undefined}
         />
       )}
       {part.objects
@@ -2705,6 +2674,10 @@ export function SelectionOverlayBox({
     if (!element) return;
     element.style.removeProperty("--clipper-drag-x");
     element.style.removeProperty("--clipper-drag-y");
+    element.style.removeProperty("--clipper-selection-preview-left");
+    element.style.removeProperty("--clipper-selection-preview-top");
+    element.style.removeProperty("--clipper-selection-preview-width");
+    element.style.removeProperty("--clipper-selection-preview-height");
   }, [bounds.height, bounds.width, bounds.x, bounds.y]);
 
   useLayoutEffect(() => {
@@ -2717,8 +2690,8 @@ export function SelectionOverlayBox({
       const element = boxRef.current;
       const frameViewport = viewportRef.current;
       if (element && frameViewport) {
-        const frameRect = frameViewport.getBoundingClientRect();
         const hostRect = host.getBoundingClientRect();
+        const frameRect = frameViewport.getBoundingClientRect();
         const scale = frameRect.width / (FRAME_WIDTH * frameScale);
         element.style.setProperty(
           "--clipper-selection-base-left",
@@ -2747,6 +2720,7 @@ export function SelectionOverlayBox({
     frameViewportRef,
     portal,
     portalHost,
+    objectId,
     viewportBounds.height,
     viewportBounds.width,
     viewportBounds.x,

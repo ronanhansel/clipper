@@ -84,6 +84,7 @@ import { GraphParameterEditor } from "../timeline/GraphParameterEditor";
 import {
   buildGraphNodes,
   buildComposition3dGraphNodes,
+  getSelectedComposition2dLayerGraph,
   getGraphNodeParameterEditorSchema,
 } from "../timeline/ComposeAnimationGraphPanel";
 
@@ -522,12 +523,17 @@ export function GraphNodeInspector({
       ? "background"
       : "composition2d";
   const objects = selectedObject ? [selectedObject] : [];
+  const displayGraph = getSelectedComposition2dLayerGraph(
+    graph,
+    !isComposition3d && !isBackgroundGraph ? selectedObject?.id : undefined,
+    graphMode,
+  );
   const node =
     (isComposition3d
       ? buildComposition3dGraphNodes(graph, 5200, 900)
       : buildGraphNodes(
           objects,
-          graph,
+          displayGraph,
           5200,
           900,
           selectedObject?.id ?? "__empty__",
@@ -535,7 +541,10 @@ export function GraphNodeInspector({
         )
     ).find((item) => item.id === nodeId) ?? null;
   const schema = node
-    ? getGraphNodeParameterEditorSchema(node, graph?.parameters?.[node.id])
+    ? getGraphNodeParameterEditorSchema(
+        node,
+        displayGraph?.parameters?.[node.id],
+      )
     : null;
   if (!node) return <EmptyInspector />;
   return (

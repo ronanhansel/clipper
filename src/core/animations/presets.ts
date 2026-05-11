@@ -279,7 +279,7 @@ export function createAnimationGraphPresetGroup(
   preset.effects.forEach((effect, index) => {
     const effectId = `${groupId}:effect:${index}:${effect.property}`;
     customNodes[effectId] = {
-      kind: "animation",
+      kind: "effect",
       label: effect.label,
       scopeKey: groupId,
       details: { property: effect.property },

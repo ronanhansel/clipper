@@ -344,7 +344,9 @@ export function Input({
   const displayedValue =
     type === "number" && focused && numberDraftValue !== null
       ? numberDraftValue
-      : formatNumberInputValue(inputProps.value, props.step);
+      : type === "number"
+        ? formatNumberInputValue(inputProps.value, props.step)
+        : inputProps.value;
   const renderedType = type === "number" ? "text" : type;
 
   return (

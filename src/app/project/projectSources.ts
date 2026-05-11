@@ -5,8 +5,9 @@ export function getProjectCompositionSources(project: ProjectManifest) {
   const compositions = Array.from(
     new Map(
       [
-        ...(project.compositionLibrary ?? []),
+        ...project.scenes.flatMap((scene) => scene.compositions),
         ...(project.compositions ?? []),
+        ...(project.compositionLibrary ?? []),
       ].map((part) => [part.filePath, part]),
     ).values(),
   ).filter((part) => !part.sourceMissing);
@@ -31,25 +32,32 @@ export function getSyncedCompositionSources(
   const nextParts = Array.from(
     new Map(
       [
-        ...(nextProject.compositionLibrary ?? []),
+        ...nextProject.scenes.flatMap((scene) => scene.compositions),
         ...(nextProject.compositions ?? []),
+        ...(nextProject.compositionLibrary ?? []),
       ].map((item) => [item.filePath, item]),
     ).values(),
   );
   const previousPartsByPath = new Map(
     [
-      ...(previousProject?.compositionLibrary ?? []),
+      ...(previousProject?.scenes.flatMap((scene) => scene.compositions) ?? []),
       ...(previousProject?.compositions ?? []),
+      ...(previousProject?.compositionLibrary ?? []),
     ].map((item) => [item.filePath, item]),
   );
 
   for (const nextPart of nextParts) {
     if (nextPart.sourceMissing) continue;
     const previousPart = previousPartsByPath.get(nextPart.filePath);
-    if (previousPart && compositionSourceFieldsEqual(previousPart, nextPart))
-      continue;
     if (nextPart.threeBackgrounds && nextSources[nextPart.filePath]) continue;
-    nextSources[nextPart.filePath] = compositionToSource(nextPart);
+    const nextSource = compositionToSource(nextPart);
+    if (
+      previousPart &&
+      compositionSourceFieldsEqual(previousPart, nextPart) &&
+      nextSources[nextPart.filePath] === nextSource
+    )
+      continue;
+    nextSources[nextPart.filePath] = nextSource;
     changed = true;
   }
 

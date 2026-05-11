@@ -201,12 +201,14 @@ export type TimelinePanelProps = {
     updater: (layer: TransitionLayer) => TransitionLayer,
   ) => void;
   composeAnimationPart?: Part | null;
+  composeGraphEnabled?: boolean;
   selectedObjectIds?: string[];
   selectedGraphNodeIds?: string[];
   onComposeGraphScopeChange?: (
     scopeKey: string | null,
     validNodeIds: string[],
   ) => void;
+  onComposeGraphEnabledChange?: (enabled: boolean) => void;
   onSelectGraphNodes?: (nodeIds: string[]) => void;
   onExitCompose?: () => void;
   onSelectComposeObjects?: (objects: FrameObject[]) => void;

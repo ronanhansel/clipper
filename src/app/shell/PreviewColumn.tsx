@@ -352,7 +352,7 @@ export function PreviewColumn({
           />
         ) : null}
       </div>
-      <div className="relative">
+      <div className="relative h-full">
         {mode === "preview" && composeToolbarProps ? (
           <ComposeToolbar {...composeToolbarProps} />
         ) : null}

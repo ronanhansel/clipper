@@ -76,7 +76,7 @@ export function PlaybackBar({
 }: PlaybackBarProps) {
   return (
     <div
-      className="relative grid grid-cols-[1fr_auto_1fr] items-center border-t border-[#2d313b] bg-[#171920] px-7"
+      className="relative grid h-full grid-cols-[1fr_auto_1fr] items-center border-t border-[#2d313b] bg-[#171920] px-7"
       data-clipper-playback-bar
     >
       <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-0">

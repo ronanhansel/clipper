@@ -214,9 +214,7 @@ function GraphParameterInlineField({
   const displayValue = getNumberFieldDisplayValue(field, split.value);
   const isTimePopup = variant === "timePopup";
   const isInspector = variant === "inspector";
-  const inputValue = isInspector && focused && draftValue !== null
-    ? draftValue
-    : displayValue;
+  const inputValue = focused && draftValue !== null ? draftValue : displayValue;
   const canScrub = field.key !== "repeat" && displayValue !== "";
   return (
     <label
@@ -260,8 +258,8 @@ function GraphParameterInlineField({
           {split.unit}
         </span>
         <Input
-          type={isInspector ? "text" : canScrub ? "number" : "text"}
-          inputMode={isInspector && canScrub ? "decimal" : undefined}
+          type="text"
+          inputMode={canScrub ? "decimal" : undefined}
           min={field.min}
           max={field.max}
           step={getNumberFieldStep(field)}
@@ -280,21 +278,27 @@ function GraphParameterInlineField({
             setDraftValue(displayValue);
             editSessionActiveRef.current = false;
           }}
-          onBlur={() => {
+          onBlur={(event) => {
+            if (draftValue !== null) {
+              commitNumberField(
+                field,
+                event.currentTarget.value,
+                split.unit,
+                commitEditSessionChange,
+                { clamp: true },
+              );
+            }
             setFocused(false);
             setDraftValue(null);
             editSessionActiveRef.current = false;
           }}
           onChange={(event) => {
-            if (isInspector) setDraftValue(event.target.value);
-            commitNumberField(
-              field,
-              event.target.value,
-              split.unit,
-              commitEditSessionChange,
-              { clamp: true },
-            );
-            editSessionActiveRef.current = false;
+            const value = event.target.value;
+            if (!isAllowedNumberInput(value, field.key === "repeat")) return;
+            setDraftValue(value);
+          }}
+          onKeyDown={(event) => {
+            event.stopPropagation();
           }}
         />
       </div>
@@ -353,15 +357,14 @@ function GraphParameterBoxField({
     );
   const split = splitParameterUnit(field.value, field.unit);
   const displayValue = getNumberFieldDisplayValue(field, split.value);
-  const inputValue = variant === "inspector" && focused && draftValue !== null
-    ? draftValue
-    : displayValue;
+  const isInspector = variant === "inspector";
+  const inputValue = focused && draftValue !== null ? draftValue : displayValue;
   const canScrub = field.key !== "repeat" && displayValue !== "";
   return (
-    <label className={variant === "inspector" ? "grid gap-1.5" : "grid gap-1"}>
+    <label className={isInspector ? "grid gap-1.5" : "grid gap-1"}>
       <span
         className={
-          variant === "inspector"
+          isInspector
             ? "text-[12px] font-bold text-[#8f96a3]"
             : "text-[9px] font-bold text-[#697280]"
         }
@@ -370,14 +373,14 @@ function GraphParameterBoxField({
       </span>
       <div
         className={
-          variant === "inspector"
+          isInspector
             ? "relative min-w-0"
             : "grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2 rounded border border-transparent bg-[#0c121b] px-1.5 transition hover:bg-[#141b27] focus-within:border-[#3d4b62] focus-within:bg-[#0b1018]"
         }
       >
         <span
           className={
-            variant === "inspector"
+            isInspector
               ? "pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-[12px] font-extrabold text-[#8f96a3]"
               : "min-w-[10px] text-left text-[10px] font-bold text-[#7f8794]"
           }
@@ -385,17 +388,15 @@ function GraphParameterBoxField({
           {split.unit}
         </span>
         <Input
-          type={variant === "inspector" ? "text" : canScrub ? "number" : "text"}
-          inputMode={variant === "inspector" && canScrub ? "decimal" : undefined}
+          type="text"
+          inputMode={canScrub ? "decimal" : undefined}
           min={field.min}
           max={field.max}
           step={getNumberFieldStep(field)}
-          numberScrubMode={
-            variant !== "inspector" && canScrub ? "continuous" : undefined
-          }
+          numberScrubMode={!isInspector && canScrub ? "continuous" : undefined}
           numberScrubCommitThrottleMs={16}
           className={
-            variant === "inspector"
+            isInspector
               ? `${split.unit ? "pl-11" : ""} h-8 min-w-0 text-right`
               : "h-6 min-w-0 border-0 bg-transparent px-0 py-0 text-right text-[12px] font-semibold text-[#e4e9f2] focus:border-0 focus:ring-0"
           }
@@ -405,21 +406,27 @@ function GraphParameterBoxField({
             setDraftValue(displayValue);
             editSessionActiveRef.current = false;
           }}
-          onBlur={() => {
+          onBlur={(event) => {
+            if (draftValue !== null) {
+              commitNumberField(
+                field,
+                event.currentTarget.value,
+                split.unit,
+                commitEditSessionChange,
+                { clamp: true },
+              );
+            }
             setFocused(false);
             setDraftValue(null);
             editSessionActiveRef.current = false;
           }}
           onChange={(event) => {
-            if (variant === "inspector") setDraftValue(event.target.value);
-            commitNumberField(
-              field,
-              event.target.value,
-              split.unit,
-              commitEditSessionChange,
-              { clamp: true },
-            );
-            editSessionActiveRef.current = false;
+            const value = event.target.value;
+            if (!isAllowedNumberInput(value, field.key === "repeat")) return;
+            setDraftValue(value);
+          }}
+          onKeyDown={(event) => {
+            event.stopPropagation();
           }}
         />
       </div>
@@ -776,10 +783,7 @@ function isAllowedNumberInput(value: string, allowInfinity: boolean) {
     return true;
   if (value === "." || value === "-." || value === "," || value === "-,")
     return true;
-  return (
-    /^-?\d*(?:[.,]\d*)?$/.test(value) &&
-    value !== "-"
-  );
+  return /^-?\d*(?:[.,]\d*)?$/.test(value) && value !== "-";
 }
 
 function getNumberFieldStep(field: GraphParameterEditorField) {

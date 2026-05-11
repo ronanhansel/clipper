@@ -78,6 +78,9 @@ export function EditorPane({
   const [source, setSource] = useState(document.source ?? "");
   const [error, setError] = useState("");
   const [apiMissing, setApiMissing] = useState(false);
+  const sourceRef = useRef(source);
+  const editingRef = useRef(false);
+  const editingTimeoutRef = useRef(0);
   const sourceId = document.id;
   const closeActiveTabRef = useRef<() => void>(() => onCloseTab(document.id));
   const restoreClosedTabRef = useRef(onRestoreClosedTab);
@@ -115,6 +118,10 @@ export function EditorPane({
   useEffect(() => {
     activeRef.current = active;
   }, [active]);
+
+  useEffect(() => {
+    sourceRef.current = source;
+  }, [source]);
 
   useEffect(() => {
     if (!projectDirectory || !document.showCompositionApiStatus) return;
@@ -252,10 +259,25 @@ export function EditorPane({
 
   useEffect(() => {
     setError("");
-    setSource(document.source ?? "");
+    const nextSource = document.source ?? "";
+    if (nextSource === sourceRef.current) return;
+    if (editingRef.current) return;
+    if (editorRef.current?.getValue() === nextSource) {
+      sourceRef.current = nextSource;
+      return;
+    }
+    setSource(nextSource);
+    sourceRef.current = nextSource;
   }, [document.source, sourceId]);
 
   function updateSource(nextSource: string) {
+    if (nextSource === sourceRef.current) return;
+    sourceRef.current = nextSource;
+    editingRef.current = true;
+    window.clearTimeout(editingTimeoutRef.current);
+    editingTimeoutRef.current = window.setTimeout(() => {
+      editingRef.current = false;
+    }, 2000);
     setSource(nextSource);
     applySourceChangeRef
       .current(nextSource)
@@ -276,6 +298,12 @@ export function EditorPane({
     });
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyT, () => {
       restoreClosedTabRef.current();
+    });
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+      void editor
+        .getAction("editor.action.formatDocument")
+        ?.run()
+        .then(() => updateSource(editor.getValue()));
     });
     editor.addCommand(monaco.KeyMod.Alt | monaco.KeyCode.KeyZ, () => {
       wordWrapRef.current = wordWrapRef.current === "off" ? "on" : "off";

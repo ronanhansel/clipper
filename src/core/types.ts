@@ -436,7 +436,7 @@ export type CompositionClip = TimelineMarkerMetadata & {
   objects: FrameObject[];
   snapshot: PartSnapshotLine[];
   motionMarkers: MotionMarker[];
-  animationGraph?: AnimationGraphState;
+  animationGraph?: TypedAnimationGraphState;
   bgGraph?: AnimationGraphState;
   threeBackgrounds?: Record<string, unknown>;
   renderMode?: CompositionRenderMode;
@@ -484,9 +484,141 @@ export type AnimationGraphEdge = {
   toSocket?: string;
 };
 
+export type AnimationGraphValueType =
+  | "Structure.Shape"
+  | "Structure.TextObject"
+  | "Structure.RichTextObject"
+  | "Structure.Object"
+  | "Value.String"
+  | "Value.Number"
+  | "Value.Color"
+  | "Value.Boolean"
+  | "Value.StringArray"
+  | "Value.NumberArray"
+  | "Effect.CSSEffect"
+  | "AnimationController"
+  | "CompiledAnimation";
+
+export type TypedAnimationGraphSocket = {
+  id: string;
+  label: string;
+  type: AnimationGraphValueType;
+  accepts?: readonly AnimationGraphValueType[];
+};
+
+export type AnimationGraphTimeConfig = {
+  delay: number;
+  duration: number;
+  ease: MotionEase;
+  repeat?: number;
+  repeatType?: "loop" | "reverse" | "mirror";
+  schedule: "relative" | "absolute";
+};
+
+export type AnimationGraphSplitConfig = {
+  mode: "word" | "character" | "pattern";
+  pattern?: string;
+  stagger: number;
+  order: "forward" | "reverse" | "center";
+  repeatScope: "sequence" | "item";
+};
+
+export type AnimationGraphConditionRule = {
+  target: "value" | "type";
+  operator: "equals" | "contains" | "notContains" | "gt" | "lt" | "gte" | "lte";
+  value: string | number;
+  action: "setDelay" | "sendToOutput" | "duplicateToOutput";
+  output: number;
+  delay?: number;
+};
+
+export type AnimationGraphConditionConfig = {
+  rules: AnimationGraphConditionRule[];
+};
+
+export type AnimationGraphCssEffectConfig = {
+  property: string;
+  from?: string | number;
+  to?: string | number;
+  values: Record<string, string | number | boolean>;
+};
+
+export type AnimationGraphAnimationConfig = {
+  effects: AnimationGraphCssEffectConfig[];
+};
+
+export type TypedAnimationGraphNodeBase<Kind extends string, Config> = {
+  id: string;
+  kind: Kind;
+  label: string;
+  position: AnimationGraphNodePosition;
+  x: number;
+  y: number;
+  inputs: readonly TypedAnimationGraphSocket[];
+  outputs: readonly TypedAnimationGraphSocket[];
+  config: Config;
+};
+
+export type AnimationGraphSourceNode = TypedAnimationGraphNodeBase<
+  "source",
+  { objectId: string; outputType?: AnimationGraphValueType }
+>;
+export type AnimationGraphTimeNode = TypedAnimationGraphNodeBase<
+  "time",
+  AnimationGraphTimeConfig
+>;
+export type AnimationGraphSplitNode = TypedAnimationGraphNodeBase<
+  "split",
+  AnimationGraphSplitConfig
+>;
+export type AnimationGraphConditionNode = TypedAnimationGraphNodeBase<
+  "condition",
+  AnimationGraphConditionConfig
+>;
+export type AnimationGraphAnimationNode = TypedAnimationGraphNodeBase<
+  "effect",
+  AnimationGraphAnimationConfig
+>;
+export type AnimationGraphGroupNode = TypedAnimationGraphNodeBase<
+  "group",
+  { groupId: string }
+>;
+export type AnimationGraphOutNode = TypedAnimationGraphNodeBase<"out", {}>;
+
+export type TypedAnimationGraphNode =
+  | AnimationGraphSourceNode
+  | AnimationGraphTimeNode
+  | AnimationGraphSplitNode
+  | AnimationGraphConditionNode
+  | AnimationGraphAnimationNode
+  | AnimationGraphGroupNode
+  | AnimationGraphOutNode;
+
+export type TypedAnimationGraphLayerState = {
+  id: string;
+  nodes: Record<string, TypedAnimationGraphNode>;
+  edges: AnimationGraphEdge[];
+  customNodes?: Record<string, AnimationGraphCustomNode>;
+  parameters?: Record<string, Record<string, string>>;
+  groups?: Record<string, AnimationGraphGroup>;
+};
+
+export type TypedAnimationGraphState = {
+  /** Compatibility shell. Composition2d graph data is owned by `layers`. */
+  nodes: Record<string, TypedAnimationGraphNode>;
+  edges: AnimationGraphEdge[];
+  layers?: TypedAnimationGraphLayerState[];
+  customNodes?: Record<string, AnimationGraphCustomNode>;
+  parameters?: Record<string, Record<string, string>>;
+  groups?: Record<string, AnimationGraphGroup>;
+  viewport?: AnimationGraphState["viewport"];
+  viewports?: AnimationGraphState["viewports"];
+};
+
 export type AnimationGraphCustomNode = {
   kind:
-    | "animation"
+    | "effect"
+    | "effectMix"
     | "time"
     | "split"
     | "condition"

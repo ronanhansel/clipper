@@ -5,6 +5,7 @@ import type {
   RightPanelTab,
 } from "../../types";
 import { syncChartObjectBounds } from "../../../core/frameInteraction";
+import { pruneTypedAnimationGraphForObjects } from "../../../core/project";
 import type {
   BackgroundLayer,
   CompositionClip,
@@ -120,16 +121,16 @@ export function useFrameObjectCommands({
   function selectComposeLayerObjects(objects: FrameObject[]) {
     setRightPanelTab("video");
     setEditingTextObjectId(null);
-    if (objects.length === 0) {
-      setComposeSelectionObjects([]);
-      return;
-    }
-
     setSelectedPartId("");
     setSelectedParts([]);
     clearMarkerSelection();
     setSelectedAdjustmentLayerId(null);
     setSelectedAdjustmentLayers([]);
+    if (objects.length === 0) {
+      setComposeSelectionObjects([]);
+      return;
+    }
+
     setComposeSelectionObjects(objects);
   }
 
@@ -194,18 +195,25 @@ export function useFrameObjectCommands({
   function deleteComposeObjects(objectIds: string[]) {
     const selectedIds = new Set(objectIds);
     if (selectedIds.size === 0) return;
-    updateCompositionForTimelinePart(part.id, (composition) => ({
-      ...composition,
-      background: {
-        ...composition.background,
-        elements: composition.background.elements.filter(
-          (object) => !selectedIds.has(object.id),
-        ),
-      },
-      objects: composition.objects.filter(
+    updateCompositionForTimelinePart(part.id, (composition) => {
+      const objects = composition.objects.filter(
         (object) => !selectedIds.has(object.id),
-      ),
-    }));
+      );
+      return {
+        ...composition,
+        background: {
+          ...composition.background,
+          elements: composition.background.elements.filter(
+            (object) => !selectedIds.has(object.id),
+          ),
+        },
+        objects,
+        animationGraph: pruneTypedAnimationGraphForObjects(
+          composition.animationGraph,
+          objects,
+        ),
+      };
+    });
     setEditingTextObjectId(null);
     setComposeSelectionObjects([]);
   }

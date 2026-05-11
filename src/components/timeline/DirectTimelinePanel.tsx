@@ -1084,6 +1084,7 @@ export const DirectTimelinePanel = memo(function DirectTimelinePanel({
   }
 
   useEffect(() => {
+    if (mode === "compose") return;
     if (!selectedTimelineGap) return;
     const selectedGap: TimelineBlankGapSelection = selectedTimelineGap;
 
@@ -1107,6 +1108,7 @@ export const DirectTimelinePanel = memo(function DirectTimelinePanel({
     return () => window.removeEventListener("keydown", closeGapFromKeyboard);
   }, [
     selectedTimelineGap,
+    mode,
     timeline,
     adjustmentLayers,
     motionTimeline,

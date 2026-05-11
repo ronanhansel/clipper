@@ -1,27 +1,36 @@
 import type { GraphCompositionMode } from "./graphSockets";
+import { compositionToSource } from "./compositionSource";
 import type {
   AnimationGraphState,
   Composition3dGraphState,
   CompositionClip,
   ProjectManifest,
+  TypedAnimationGraphState,
 } from "./types";
+
+type CompositionGraphState =
+  | TypedAnimationGraphState
+  | AnimationGraphState
+  | Composition3dGraphState;
 
 export type CompositionGraphTransaction = {
   compositionId?: string;
   clipId?: string;
   filePath: string;
   mode: GraphCompositionMode;
-  graph: AnimationGraphState;
+  graph: CompositionGraphState;
 };
 
 const compositionGraphRevisionByGraph = new WeakMap<
-  AnimationGraphState,
+  CompositionGraphState,
   number
 >();
 const compositionGraphRevisionBySignature = new Map<string, number>();
 let compositionGraphRevisionSequence = 0;
 
-function getCompositionGraphSignature(graph: AnimationGraphState | undefined) {
+function getCompositionGraphSignature(
+  graph: CompositionGraphState | undefined,
+) {
   return graph ? JSON.stringify(graph) : "";
 }
 
@@ -29,8 +38,7 @@ function getCompositionGraph(
   composition: CompositionClip,
   mode: GraphCompositionMode,
 ) {
-  if (mode === "composition3d")
-    return composition.composition3dGraph as AnimationGraphState | undefined;
+  if (mode === "composition3d") return composition.composition3dGraph;
   if (mode === "background") return composition.bgGraph;
   return composition.animationGraph;
 }
@@ -38,7 +46,7 @@ function getCompositionGraph(
 function setCompositionGraph(
   composition: CompositionClip,
   mode: GraphCompositionMode,
-  graph: AnimationGraphState,
+  graph: CompositionGraphState,
 ) {
   if (mode === "composition3d")
     return {
@@ -46,11 +54,12 @@ function setCompositionGraph(
       renderMode: "webgl" as const,
       composition3dGraph: graph as Composition3dGraphState,
     };
-  if (mode === "background") return { ...composition, bgGraph: graph };
-  return { ...composition, animationGraph: graph };
+  if (mode === "background")
+    return { ...composition, bgGraph: graph as AnimationGraphState };
+  return { ...composition, animationGraph: graph as TypedAnimationGraphState };
 }
 
-function getCompositionGraphRevision(graph: AnimationGraphState | undefined) {
+function getCompositionGraphRevision(graph: CompositionGraphState | undefined) {
   if (!graph) return 0;
   const graphRevision = compositionGraphRevisionByGraph.get(graph);
   if (graphRevision) return graphRevision;
@@ -62,14 +71,14 @@ function getCompositionGraphRevision(graph: AnimationGraphState | undefined) {
   return signatureRevision ?? 0;
 }
 
-function markCompositionGraphRevision(graph: AnimationGraphState) {
+function markCompositionGraphRevision(graph: CompositionGraphState) {
   const revision = ++compositionGraphRevisionSequence;
   setCompositionGraphRevision(graph, revision);
   return revision;
 }
 
 function setCompositionGraphRevision(
-  graph: AnimationGraphState,
+  graph: CompositionGraphState,
   revision: number,
 ) {
   compositionGraphRevisionByGraph.set(graph, revision);
@@ -84,19 +93,25 @@ export function applyCompositionGraphTransaction(
   transaction: CompositionGraphTransaction,
 ): ProjectManifest {
   const revision = markCompositionGraphRevision(transaction.graph);
+  const updatedSources = { ...(project.compositionSources ?? {}) };
   const updateComposition = (composition: CompositionClip) => {
     if (!compositionMatchesGraphTransaction(composition, transaction))
       return composition;
     setCompositionGraphRevision(transaction.graph, revision);
-    return setCompositionGraph(
+    const updatedComposition = setCompositionGraph(
       composition,
       transaction.mode,
       transaction.graph,
     );
+    if (!updatedComposition.sourceMissing)
+      updatedSources[updatedComposition.filePath] =
+        compositionToSource(updatedComposition);
+    return updatedComposition;
   };
 
   return {
     ...project,
+    compositionSources: updatedSources,
     compositionLibrary: project.compositionLibrary?.map(updateComposition),
     compositions: project.compositions?.map(updateComposition),
     scenes: project.scenes.map((scene) => ({

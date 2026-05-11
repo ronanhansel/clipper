@@ -58,6 +58,7 @@ export function useEditorDerivedState({
   selectedMotionMarker,
   selectedMotionMarkers,
   selectionPayload,
+  composeGraphEnabled,
   timelineMode,
   timelineLayers,
 }: {
@@ -76,6 +77,7 @@ export function useEditorDerivedState({
   selectedMotionMarker: { partId: string; markerId: string } | null;
   selectedMotionMarkers: MotionMarkerSelection[];
   selectionPayload: SelectionPayload | null;
+  composeGraphEnabled: boolean;
   timelineMode: TimelineMode;
   timelineLayers?: TimelineLayerState;
 }) {
@@ -128,9 +130,19 @@ export function useEditorDerivedState({
   const composeFilePart = useMemo(
     () =>
       timelineMode === "compose"
-        ? getComposeFilePart(project, activeComposition ?? selectedPart)
+        ? getComposeFilePart(
+            project,
+            activeComposition ?? selectedPart,
+            composeGraphEnabled,
+          )
         : null,
-    [activeComposition, project, selectedPart, timelineMode],
+    [
+      activeComposition,
+      composeGraphEnabled,
+      project,
+      selectedPart,
+      timelineMode,
+    ],
   );
   const displayPart = composeFilePart ?? part;
   const displayPreviewTime =
@@ -491,6 +503,7 @@ export function useEditorDerivedState({
 function getComposeFilePart(
   project: ProjectManifest,
   timelinePart: CompositionClip | null,
+  composeGraphEnabled: boolean,
 ) {
   if (!timelinePart) return null;
   const composition = [
@@ -504,10 +517,12 @@ function getComposeFilePart(
   );
   if (!composition) return null;
   return {
-    ...applyAnimationGraphToComposition(
-      composition,
-      composition.animationGraph,
-    ),
+    ...(composeGraphEnabled
+      ? applyAnimationGraphToComposition(
+          composition,
+          composition.animationGraph,
+        )
+      : composition),
     start: undefined,
     trimStart: undefined,
     layerId: undefined,

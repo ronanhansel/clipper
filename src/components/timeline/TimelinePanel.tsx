@@ -140,6 +140,7 @@ export function TimelinePanel(props: TimelinePanelProps) {
           scrubbingRef={props.scrubbingRef}
           scrubSnapEnabled={props.scrubSnapEnabled}
           selectedObjectIds={composeSelectedObjectIds}
+          graphEnabled={props.composeGraphEnabled ?? true}
           selectedGraphNodeIds={props.selectedGraphNodeIds ?? []}
           timelineViewportState={props.timelineViewportState}
           onExitCompose={
@@ -151,6 +152,7 @@ export function TimelinePanel(props: TimelinePanelProps) {
           onTimelineViewportStateChange={props.onTimelineViewportStateChange}
           onUpdateGraph={props.onUpdateComposeAnimationGraph}
           onComposeGraphScopeChange={props.onComposeGraphScopeChange}
+          onGraphEnabledChange={props.onComposeGraphEnabledChange}
           onSelectGraphNodes={props.onSelectGraphNodes}
           onInspectGraphNode={props.onInspectGraphNode}
         />
@@ -164,6 +166,7 @@ export function TimelinePanel(props: TimelinePanelProps) {
       >
         <DirectTimelinePanel
           {...directProps}
+          mode={props.mode}
           playbackPlayheadRef={
             props.mode === "compose"
               ? inactivePlaybackPlayheadRef

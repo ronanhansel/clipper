@@ -1,4 +1,5 @@
 import { loadCompositionsFromSource } from "../../core/compositionSource";
+import { compositionApiSource } from "../../core/compositionApiSource";
 import {
   normalizeProject,
   serializeProjectForSave,
@@ -92,6 +93,10 @@ async function loadDirectoryProject(manifestPath: string) {
   const content = await clipperHost.readTextFile(manifestPath);
   const manifestProject = JSON.parse(content) as ProjectManifest;
   const rootPath = getDirectoryPath(manifestPath);
+  if (rootPath)
+    await clipperHost
+      .writeTextFile(`${rootPath}/composition-api.ts`, compositionApiSource)
+      .catch(() => {});
   const editableRoot = await getEditableRootPath(rootPath);
   const timelines = await loadDirectoryTimelines(
     editableRoot,
@@ -477,6 +482,11 @@ async function saveDirectoryProject(
 
   const fileManagerDir = rootPath ? `${rootPath}/file-manager` : "file-manager";
   await clipperHost.createDirectory(fileManagerDir).catch(() => {});
+  if (rootPath)
+    await clipperHost.writeTextFile(
+      `${rootPath}/composition-api.ts`,
+      compositionApiSource,
+    );
 
   for (const composition of normalized.compositions ?? []) {
     if (composition.sourceMissing) continue;
