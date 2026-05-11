@@ -46,6 +46,7 @@ export const panMendTransitionOptions = [
 export const panMotionLogic = {
   graph: {
     label: "Position",
+    editorAliases: ["position"],
     acceptedStructureKinds: ["text", "richText", "shape", "object"],
     defaultParams: { x: 0, y: 0 },
     paramControls: [

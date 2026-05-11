@@ -1,21 +1,32 @@
 import { describe, expect, it } from "vitest";
+import strictComposition2dGraphPanelSource from "./StrictComposition2dGraphPanel.tsx?raw";
 import {
   buildGraphNodes,
   getGraphAnimationSources,
+  getGraphEdgeDropEdge,
   getGraphContentSize,
   getRenderableEdges,
   getSelectedComposition2dLayerGraph,
-  getStrictComposition2dConnectionError,
-  getStrictComposition2dPorts,
   setSelectedComposition2dLayerGraph,
   updateStrictConditionNodeParameter,
 } from "./ComposeAnimationGraphPanel";
+import {
+  getStrictComposition2dCanvasDiagnostics,
+  getStrictComposition2dConnectionError,
+  getStrictComposition2dParameterEditorSchema,
+  getStrictComposition2dPorts,
+  saveStrictComposition2dGraph,
+  updateStrictComposition2dNodeParameter,
+} from "./StrictComposition2dGraphPanel";
 import type {
   AnimationGraphState,
   TypedAnimationGraphState,
 } from "../../core/types";
 import { createTypedAnimationGraphNode } from "../../core/animationGraph/nodeRegistry";
-import type { AnimationGraphEdge as StrictAnimationGraphEdge } from "../../core/animationGraph/types";
+import type {
+  AnimationGraph as StrictAnimationGraph,
+  AnimationGraphEdge as StrictAnimationGraphEdge,
+} from "../../core/animationGraph/types";
 import { addAnimationGraphPresetGroupToGraph } from "../../core/animationGraph/presets";
 
 describe("getGraphContentSize", () => {
@@ -32,7 +43,121 @@ describe("getGraphContentSize", () => {
   });
 });
 
+describe("getStrictComposition2dCanvasDiagnostics", () => {
+  it("maps node diagnostics and trace summaries for inspector use", () => {
+    const result = getStrictComposition2dCanvasDiagnostics({
+      diagnostics: [
+        {
+          severity: "warning",
+          message: "Dropped output.",
+          nodeId: "condition",
+          portId: "matched",
+          outputId: "matched",
+        },
+      ],
+      trace: {
+        events: [
+          {
+            type: "node",
+            nodeId: "condition",
+            nodeKind: "condition",
+            inputs: {},
+            outputs: {
+              matched: [
+                {
+                  streamId: "s1",
+                  kind: "animation",
+                  domain: "textToken",
+                  structureKind: "richText",
+                  tokenCount: 2,
+                  maskCount: 2,
+                  effectCount: 1,
+                  controllerSummary:
+                    "start 0, delay 0, duration 1, ease easeOut",
+                },
+              ],
+            },
+          },
+          {
+            type: "edge",
+            edgeId: "condition:matched->out:in",
+            from: { nodeId: "condition", portId: "matched" },
+            to: { nodeId: "out", portId: "in" },
+            streams: [
+              {
+                streamId: "s1",
+                kind: "animation",
+                domain: "textToken",
+                structureKind: "richText",
+                tokenCount: 2,
+                maskCount: 2,
+                effectCount: 1,
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(result.nodes.get("condition")?.messages).toEqual([
+      "Dropped output.",
+    ]);
+    expect(result.nodes.get("condition")?.traces).toEqual([
+      "matched: animation textToken richText 2t 2m 1fx start 0, delay 0, duration 1, ease easeOut",
+    ]);
+    expect(result.edges.get("condition:matched->out:in")?.label).toBe(
+      "animation textToken richText 2t 2m 1fx",
+    );
+  });
+});
+
 describe("buildGraphNodes", () => {
+  it("sanitizes non-finite strict node positions before canvas layout", () => {
+    const nodes = buildGraphNodes(
+      [
+        {
+          id: "text",
+          name: "Text",
+          type: "text",
+          selector: ".text",
+          bounds: { x: 0, y: 0, width: 100, height: 40 },
+          style: {},
+          animations: [],
+        },
+      ],
+      {
+        id: "graph",
+        sourceObjectId: "text",
+        nodes: {
+          "source:text": {
+            id: "source:text",
+            kind: "source",
+            position: { x: Number.NaN, y: Number.POSITIVE_INFINITY },
+            config: { objectId: "text" },
+          },
+          "composition2d:out": {
+            id: "composition2d:out",
+            kind: "out",
+            position: { x: Number.NEGATIVE_INFINITY, y: Number.NaN },
+            config: {},
+          },
+        },
+        edges: [],
+      } as unknown as AnimationGraphState,
+    );
+
+    expect(
+      nodes.every((node) => Number.isFinite(node.x) && Number.isFinite(node.y)),
+    ).toBe(true);
+    expect(nodes.find((node) => node.id === "source:text")).toMatchObject({
+      x: 0,
+      y: 0,
+    });
+    const out = nodes.find((node) => node.id === "composition2d:out");
+    expect(Number.isFinite(out?.x)).toBe(true);
+    expect(Number.isFinite(out?.y)).toBe(true);
+  });
+
   it("renders only the strict source and out for a new composition2d graph", () => {
     const nodes = buildGraphNodes(
       [
@@ -86,6 +211,69 @@ describe("buildGraphNodes", () => {
     expect(nodes.find((node) => node.id === "composition2d:out")).toMatchObject(
       { x: 74, y: 12 },
     );
+  });
+
+  it("creates a strict Source to Out edge when dropped on Out", () => {
+    const object = {
+      id: "text",
+      name: "Text",
+      type: "text" as const,
+      selector: ".text",
+      bounds: { x: 0, y: 0, width: 100, height: 40 },
+      style: {},
+      animations: [],
+    };
+    const graph = {
+      id: "graph:text",
+      sourceObjectId: "text",
+      nodes: {
+        "source:text": {
+          id: "source:text",
+          kind: "source",
+          position: { x: 60, y: 12 },
+          config: { objectId: "text" },
+        },
+        "composition2d:out": {
+          id: "composition2d:out",
+          kind: "out",
+          position: { x: 68, y: 12 },
+          config: {},
+        },
+      },
+      edges: [],
+    } satisfies StrictAnimationGraph;
+    const nodes = buildGraphNodes([object], graph as any);
+    const out = nodes.find((node) => node.id === "composition2d:out")!;
+    const source = nodes.find((node) => node.id === "source:text")!;
+
+    const edge = getGraphEdgeDropEdge(
+      {
+        x: (out.x + out.width / 2) * 18,
+        y: (out.y + out.height / 2) * 18,
+      },
+      {
+        kind: "edge",
+        fromNodeId: source.id,
+        fromPort: "right",
+        fromSocket: "out",
+        portId: "out",
+        fromNode: source,
+        startX: 0,
+        startY: 0,
+        x: 0,
+        y: 0,
+      },
+      nodes,
+      1,
+      graph,
+      [object],
+      "composition2d",
+    ) as StrictAnimationGraphEdge | null;
+
+    expect(edge).toMatchObject({
+      from: { nodeId: "source:text", portId: "out" },
+      to: { nodeId: "composition2d:out", portId: "in" },
+    });
   });
 
   it("uses persisted layer node positions when graph owns layout", () => {
@@ -171,6 +359,148 @@ describe("buildGraphNodes", () => {
 });
 
 describe("composition2d layer graph selection", () => {
+  it("strict module save drops legacy-shaped edges and never emits legacy fields", () => {
+    const graph = saveStrictComposition2dGraph(
+      {
+        nodes: {
+          source: createTypedAnimationGraphNode(
+            "source",
+            "source",
+            { x: 1, y: 2 },
+            { objectId: "text" },
+            "Source",
+          ),
+          out: createTypedAnimationGraphNode(
+            "out",
+            "out",
+            { x: 3, y: 2 },
+            {},
+            "Out",
+          ),
+        },
+        edges: [
+          {
+            id: "legacy",
+            fromNodeId: "source",
+            fromPort: "right",
+            toNodeId: "out",
+            toPort: "left",
+          },
+          {
+            id: "strict",
+            from: { nodeId: "source", portId: "out" },
+            to: { nodeId: "out", portId: "in" },
+          },
+        ],
+      },
+      undefined,
+      "text",
+    );
+
+    expect(graph.edges).toEqual([
+      {
+        id: "strict",
+        from: { nodeId: "source", portId: "out" },
+        to: { nodeId: "out", portId: "in" },
+      },
+    ]);
+    expect(JSON.stringify(graph)).not.toMatch(
+      /fromNodeId|fromPort|toNodeId|toPort|customNodes|parameters|groups|layers/,
+    );
+  });
+
+  it("strict module update preserves strict graph shape", () => {
+    const graph = saveStrictComposition2dGraph(
+      {
+        nodes: {
+          opacity: createTypedAnimationGraphNode(
+            "opacity",
+            "effect",
+            { x: 1, y: 2 },
+            { effects: [{ property: "opacity", values: { from: 0, to: 1 } }] },
+            "Opacity",
+          ),
+        },
+        edges: [],
+      },
+      undefined,
+      "text",
+    );
+    const updated = updateStrictComposition2dNodeParameter(
+      graph,
+      "opacity",
+      "from",
+      "0.5",
+    );
+
+    expect(updated.nodes.opacity.config).toMatchObject({
+      params: { from: 0.5, to: 1 },
+    });
+    expect(JSON.stringify(updated)).not.toMatch(
+      /fromNodeId|fromPort|toNodeId|toPort|customNodes|parameters|groups|layers/,
+    );
+  });
+
+  it("strict module contains no legacy boundary symbols", () => {
+    const source = strictComposition2dGraphPanelSource;
+
+    expect(source).not.toMatch(
+      /AnimationGraphState|TypedAnimationGraphState|customNodes|parameters|groups|fromSocket|toSocket|output:next|animationGraph\/compatibility/,
+    );
+  });
+
+  it("keeps selected composition2d graph on strict edge endpoints", () => {
+    const graph: StrictAnimationGraph = {
+      id: "graph:text",
+      sourceObjectId: "text",
+      nodes: {
+        "source:text": {
+          id: "source:text",
+          kind: "source",
+          position: { x: 1, y: 2 },
+          config: { objectId: "text" },
+        },
+        "composition2d:out": {
+          id: "composition2d:out",
+          kind: "out",
+          position: { x: 5, y: 2 },
+          config: {},
+        },
+      },
+      edges: [
+        {
+          id: "source:text:out->composition2d:out:in",
+          from: { nodeId: "source:text", portId: "out" },
+          to: { nodeId: "composition2d:out", portId: "in" },
+        },
+      ],
+    };
+
+    const selected = getSelectedComposition2dLayerGraph(
+      graph,
+      "text",
+      "composition2d",
+    );
+    const renderable = getRenderableEdges(
+      selected,
+      buildGraphNodes([], selected, 5200, 900, "text", "composition2d"),
+      [],
+    );
+
+    expect(selected).toBe(graph);
+    expect(renderable).toEqual(graph.edges);
+    expect(JSON.stringify({ selected, renderable })).not.toMatch(
+      /fromSocket|toSocket|fromNodeId|toNodeId/,
+    );
+  });
+
+  it("does not expose removed strict-to-legacy bridge helpers", async () => {
+    const panel = await import("./ComposeAnimationGraphPanel");
+
+    expect("strictGraphToEditorGraph" in panel).toBe(false);
+    expect("strictEdgeToEditorEdge" in panel).toBe(false);
+  });
+
   it("adds presets as strict composition2d nodes and edges only", () => {
     const graph = addAnimationGraphPresetGroupToGraph(
       undefined,
@@ -232,12 +562,6 @@ describe("composition2d layer graph selection", () => {
       edges: [
         {
           id: "source:text:out->composition2d:out:in",
-          fromNodeId: "source:text",
-          fromPort: "right" as const,
-          toNodeId: "composition2d:out",
-          toPort: "left" as const,
-          fromSocket: "out",
-          toSocket: "in",
           from: { nodeId: "source:text", portId: "out" },
           to: { nodeId: "composition2d:out", portId: "in" },
         },
@@ -270,6 +594,47 @@ describe("composition2d layer graph selection", () => {
     expect("layers" in nextGraph).toBe(false);
     expect("customNodes" in nextGraph).toBe(false);
     expect("parameters" in nextGraph).toBe(false);
+    expect(JSON.stringify(nextGraph)).not.toMatch(/fromSocket|toSocket/);
+  });
+
+  it("rejects editor edges whose legacy sockets disagree with strict endpoints", () => {
+    const sourceText = createTypedAnimationGraphNode(
+      "source:text",
+      "source",
+      { x: 10, y: 20 },
+      { objectId: "text" },
+      "Source",
+    );
+    const out = createTypedAnimationGraphNode(
+      "composition2d:out",
+      "out",
+      { x: 20, y: 20 },
+      {},
+      "Out",
+    );
+    const nextGraph = setSelectedComposition2dLayerGraph(
+      undefined,
+      {
+        nodes: { "source:text": sourceText, "composition2d:out": out },
+        edges: [
+          {
+            id: "source:text:out->composition2d:out:in",
+            fromNodeId: "source:text",
+            fromPort: "right",
+            toNodeId: "composition2d:out",
+            toPort: "left",
+            fromSocket: "output:next",
+            toSocket: "in",
+            from: { nodeId: "source:text", portId: "out" },
+            to: { nodeId: "composition2d:out", portId: "in" },
+          } as AnimationGraphState["edges"][number] & StrictAnimationGraphEdge,
+        ],
+      } as AnimationGraphState,
+      "text",
+      "composition2d",
+    );
+
+    expect(nextGraph.edges).toEqual([]);
   });
 
   it("writes new composition2d effect nodes as package-backed strict nodes", () => {
@@ -490,7 +855,7 @@ describe("composition2d strict Phase 5 editor behavior", () => {
           toPort: "left",
         },
       ],
-    } as AnimationGraphState;
+    } as unknown as AnimationGraphState;
     const nodes = buildGraphNodes([textObject], graph);
 
     expect(getRenderableEdges(graph, nodes, [textObject])).toEqual([]);
@@ -527,6 +892,41 @@ describe("composition2d strict Phase 5 editor behavior", () => {
       fromSocket: "output:1",
       toSocket: "in",
     });
+  });
+
+  it("renders strict source to out edges from saved graph data", () => {
+    const graph = {
+      id: "graph:text-mp13s444",
+      sourceObjectId: "text-mp13s444",
+      nodes: {
+        "source:text-mp13s444": {
+          id: "source:text-mp13s444",
+          kind: "source",
+          position: { x: 60, y: 12 },
+          config: { objectId: "text-mp13s444" },
+        },
+        "composition2d:out": {
+          id: "composition2d:out",
+          kind: "out",
+          position: { x: 74, y: 12 },
+          config: {},
+        },
+      },
+      edges: [
+        {
+          id: "source:text-mp13s444:out->composition2d:out:in",
+          from: { nodeId: "source:text-mp13s444", portId: "out" },
+          to: { nodeId: "composition2d:out", portId: "in" },
+        },
+      ],
+    } as AnimationGraphState;
+    const object = {
+      ...textObject,
+      id: "text-mp13s444",
+    };
+    const nodes = buildGraphNodes([object], graph);
+
+    expect(getRenderableEdges(graph, nodes, [object])).toEqual(graph.edges);
   });
 
   it("persists condition outputs and rules in strict node config", () => {
@@ -625,23 +1025,122 @@ describe("composition2d strict Phase 5 editor behavior", () => {
     expect(getStrictComposition2dPorts(node).map((port) => port.id)).toEqual([
       "in",
       "output:1",
-      "output:next",
+      "new-output",
     ]);
     expect(
       getStrictComposition2dPorts(node, [
         {
           id: "condition:default->out:in",
-          fromNodeId: "condition",
-          fromPort: "right",
-          toNodeId: "out",
-          toPort: "left",
-          fromSocket: "default",
-          toSocket: "in",
           from: { nodeId: "condition", portId: "default" },
           to: { nodeId: "out", portId: "in" },
-        } as AnimationGraphState["edges"][number] & StrictAnimationGraphEdge,
+        } as StrictAnimationGraphEdge,
       ]).map((port) => port.id),
-    ).toEqual(["in", "default", "output:1", "output:next"]);
+    ).toEqual(["in", "default", "output:1", "new-output"]);
+  });
+
+  it("renders strict node inspector fields from definition controls", () => {
+    const time = createTypedAnimationGraphNode(
+      "time",
+      "time",
+      { x: 1, y: 2 },
+      { delay: 0.25, duration: 2, ease: "easeOut", schedule: "absolute" },
+      "Time",
+    );
+    const schema = getStrictComposition2dParameterEditorSchema({
+      id: "time",
+      label: "Time",
+      kind: "time",
+      x: 1,
+      y: 2,
+      width: 8,
+      height: 2,
+      typedNode: time,
+    });
+
+    expect(schema?.groups[0].fields.map((field) => field.key)).toEqual([
+      "delay",
+      "duration",
+      "ease",
+      "schedule",
+    ]);
+    expect(schema?.groups[0].fields[0]).toMatchObject({
+      key: "delay",
+      value: "0.25",
+      unit: "s",
+    });
+  });
+
+  it("renders and updates package-backed effect params from metadata controls", () => {
+    const graph = {
+      id: "graph:text",
+      sourceObjectId: "text",
+      nodes: {
+        opacity: {
+          id: "opacity",
+          kind: "effect:clipper.adjustment.opacity",
+          position: { x: 1, y: 2 },
+          config: {
+            effectId: "clipper.adjustment.opacity",
+            params: { from: 0, to: 1 },
+          },
+        },
+      },
+      edges: [],
+    } satisfies StrictAnimationGraph;
+    const schema = getStrictComposition2dParameterEditorSchema({
+      id: "opacity",
+      label: "Opacity",
+      kind: "effect",
+      x: 1,
+      y: 2,
+      width: 8,
+      height: 2,
+      typedNode: graph.nodes.opacity as any,
+    });
+
+    const next = updateStrictComposition2dNodeParameter(
+      graph,
+      "opacity",
+      "from",
+      "0.5",
+    );
+
+    expect(schema?.groups[0].fields.map((field) => field.key)).toEqual([
+      "from",
+      "to",
+    ]);
+    expect((next.nodes.opacity as any).config.params.from).toBe(0.5);
+  });
+
+  it("ignores strict node parameter updates outside definition controls", () => {
+    const graph = {
+      id: "graph:text",
+      sourceObjectId: "text",
+      nodes: {
+        opacity: {
+          id: "opacity",
+          kind: "effect:clipper.adjustment.opacity",
+          position: { x: 1, y: 2 },
+          config: {
+            effectId: "clipper.adjustment.opacity",
+            params: { from: 0, to: 1 },
+          },
+        },
+      },
+      edges: [],
+    } satisfies StrictAnimationGraph;
+
+    const next = updateStrictComposition2dNodeParameter(
+      graph,
+      "opacity",
+      "notDeclared",
+      "0.5",
+    );
+
+    expect(next).toBe(graph);
+    expect(
+      (next.nodes.opacity as any).config.params.notDeclared,
+    ).toBeUndefined();
   });
 });
 
@@ -730,6 +1229,73 @@ describe("getGraphAnimationSources", () => {
       "x to": "20",
       "y from": "30",
       "y to": "40",
+    });
+  });
+});
+
+describe("getStrictComposition2dCanvasDiagnostics", () => {
+  it("maps strict compile diagnostics to node badges and edge warnings", () => {
+    const result = getStrictComposition2dCanvasDiagnostics({
+      diagnostics: [
+        {
+          severity: "error",
+          message: "Missing source",
+          nodeId: "source:text",
+        },
+        {
+          severity: "warning",
+          message: "Port mismatch",
+          edgeId: "source:text:out->composition2d:out:in",
+        },
+      ],
+    });
+
+    expect(result.status).toBe("error");
+    expect(result.nodes.get("source:text")).toMatchObject({
+      count: 1,
+      errorCount: 1,
+      warningCount: 0,
+      messages: ["Missing source"],
+    });
+    expect(
+      result.edges.get("source:text:out->composition2d:out:in")?.diagnostic,
+    ).toMatchObject({ message: "Port mismatch" });
+  });
+
+  it("maps compiler trace edge routes to stream debug summaries", () => {
+    const result = getStrictComposition2dCanvasDiagnostics({
+      diagnostics: [],
+      trace: {
+        events: [
+          {
+            type: "edge",
+            edgeId: "split:out->blur:in",
+            from: { nodeId: "split", portId: "out" },
+            to: { nodeId: "blur", portId: "in" },
+            streams: [
+              {
+                streamId: "s1",
+                kind: "animation",
+                structureKind: "richText",
+                tokenCount: 3,
+                effectCount: 2,
+                controller: {
+                  start: 0,
+                  delay: 0.2,
+                  duration: 1.5,
+                  ease: "easeInOut",
+                },
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(result.status).toBe("ok");
+    expect(result.edges.get("split:out->blur:in")).toMatchObject({
+      streams: ["animation richText 3t 2fx 0/0.2/1.5"],
+      label: "animation richText 3t 2fx 0/0.2/1.5",
     });
   });
 });

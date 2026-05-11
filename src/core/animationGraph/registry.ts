@@ -6,6 +6,8 @@ import {
   isAnimationStream,
 } from "./builtins/helpers";
 import { conditionNodeDefinition } from "./builtins/condition/definition";
+import { macroNodeDefinition } from "./builtins/macro/definition";
+import { geometryNodeDefinitions } from "./builtins/geometry/definition";
 import { outNodeDefinition } from "./builtins/out/definition";
 import { sourceNodeDefinition } from "./builtins/source/definition";
 import { splitNodeDefinition } from "./builtins/split/definition";
@@ -15,8 +17,12 @@ import type { EffectPackage } from "../effects/types";
 import { getGraphEffectPackages } from "../effects/registry";
 import type {
   AnimationController,
+  AnimationGraphDiagnostic,
   AnimationGraphNodeDefinition,
   AnimationGraphNodePackage,
+  Field,
+  GraphStream,
+  ValueStream,
   ValueStreamType,
 } from "./types";
 
@@ -79,10 +85,38 @@ export function createEffectAnimationGraphNodeDefinition(
 ): AnimationGraphNodeDefinition {
   const graphMetadata = effectPackage.graph;
   const acceptedStructureKinds = graphMetadata?.acceptedStructureKinds;
+  const controls = getGraphParamControls(effectPackage);
   return {
     kind: `effect:${effectPackage.id}`,
     label: graphMetadata?.label ?? effectPackage.label,
     category: "effect",
+    ...(controls.length
+      ? {
+          controls: [
+            {
+              id: "parameters",
+              fields: controls.map((control) => ({
+                key: control.key,
+                label: control.label,
+                type:
+                  control.type === "number"
+                    ? ("number" as const)
+                    : control.type === "boolean"
+                      ? undefined
+                      : control.type === "color"
+                        ? ("color" as const)
+                        : undefined,
+                defaultValue: control.defaultValue,
+                min: "min" in control ? control.min : undefined,
+                max: "max" in control ? control.max : undefined,
+                step: "step" in control ? control.step : undefined,
+                options:
+                  control.type === "select" ? control.options : undefined,
+              })),
+            },
+          ],
+        }
+      : {}),
     getPorts: () => [
       animationInputPort("in", "In", acceptedStructureKinds),
       ...getGraphParameterPorts(effectPackage),
@@ -106,18 +140,20 @@ export function createEffectAnimationGraphNodeDefinition(
       };
     },
     execute: ({ node, inputs }) => {
+      const parameterResult = getGraphValueInputParams(effectPackage, inputs);
       const config = node.config as { params?: Record<string, unknown> };
       const params = {
         ...getGraphDefaultParams(effectPackage),
         ...(config?.params ?? {}),
-        ...getGraphValueInputParams(effectPackage, inputs),
+        ...parameterResult.params,
       };
-      const output = (inputs.get("in") ?? [])
-        .filter(isAnimationStream)
-        .filter(
-          (stream) =>
-            acceptedStructureKinds?.includes(stream.structure.kind) ?? true,
-        )
+      const inputStreams = (inputs.get("in") ?? []).filter(isAnimationStream);
+      const unsupported = inputStreams.filter(
+        (stream) =>
+          !(acceptedStructureKinds?.includes(stream.structure.kind) ?? true),
+      );
+      const output = inputStreams
+        .filter((stream) => !unsupported.includes(stream))
         .map((stream, index) => {
           const next = cloneAnimationStream(stream, `${node.id}:out:${index}`);
           next.effects.push({
@@ -129,7 +165,21 @@ export function createEffectAnimationGraphNodeDefinition(
           });
           return next;
         });
-      return { outputs: new Map([["out", output]]) };
+      return {
+        outputs: new Map([["out", output]]),
+        diagnostics: [
+          ...parameterResult.diagnostics.map((diagnostic) => ({
+            ...diagnostic,
+            nodeId: node.id,
+          })),
+          ...unsupported.map((stream) => ({
+            severity: "error" as const,
+            message: `Effect package "${effectPackage.id}" does not support "${stream.structure.kind}" streams.`,
+            nodeId: node.id,
+            portId: "in",
+          })),
+        ],
+      };
     },
   };
 }
@@ -147,6 +197,8 @@ registerAnimationGraphNodeDefinitions([
   timeNodeDefinition,
   splitNodeDefinition,
   conditionNodeDefinition,
+  macroNodeDefinition,
+  ...geometryNodeDefinitions,
   ...valueNodeDefinitions,
   outNodeDefinition,
   ...getGraphEffectPackages().map(createEffectAnimationGraphNodeDefinition),
@@ -157,8 +209,20 @@ function getGraphParameterPorts(effectPackage: EffectPackage) {
     id: control.key,
     label: control.label,
     direction: "input" as const,
-    cardinality: "single" as const,
-    type: { kind: "value" as const, valueType: getValueType(control.type) },
+    cardinality:
+      effectPackage.graph?.paramPorts?.[control.key]?.conflict === "multi"
+        ? ("multi" as const)
+        : ("single" as const),
+    type: effectPackage.graph?.paramPorts?.[control.key]?.acceptsField
+      ? { kind: "anyValue" as const }
+      : {
+          kind: "value" as const,
+          valueType: getGraphParamValueType(
+            effectPackage,
+            control.key,
+            control.type,
+          ),
+        },
     role: "parameter" as const,
   }));
 }
@@ -193,16 +257,41 @@ function getGraphDefaultParams(effectPackage: EffectPackage) {
 
 function getGraphValueInputParams(
   effectPackage: EffectPackage,
-  inputs: ReadonlyMap<string, readonly unknown[]>,
+  inputs: ReadonlyMap<string, readonly GraphStream[]>,
 ) {
-  return Object.fromEntries(
-    getGraphParamControls(effectPackage).flatMap((control) => {
-      const stream = inputs.get(control.key)?.[0];
-      return stream && typeof stream === "object" && "value" in stream
-        ? [[control.key, stream.value]]
-        : [];
-    }),
-  );
+  const params: Record<string, unknown> = {};
+  const diagnostics: AnimationGraphDiagnostic[] = [];
+  for (const control of getGraphParamControls(effectPackage)) {
+    const streams = (inputs.get(control.key) ?? []).filter(
+      isValueOrFieldStream,
+    );
+    if (!streams.length) continue;
+    const metadata = effectPackage.graph?.paramPorts?.[control.key];
+    const conflict = metadata?.conflict ?? "single";
+    if (streams.length > 1 && conflict !== "multi") {
+      diagnostics.push({
+        severity: conflict === "error" ? "error" : "warning",
+        message: `Parameter port "${control.key}" received ${streams.length} values; using first value.`,
+        portId: control.key,
+      });
+    }
+    const accepted = streams.filter((stream) =>
+      acceptsParamStream(effectPackage, control.key, control.type, stream),
+    );
+    if (accepted.length !== streams.length) {
+      diagnostics.push({
+        severity: "error",
+        message: `Parameter port "${control.key}" received incompatible value type.`,
+        portId: control.key,
+      });
+    }
+    if (!accepted.length) continue;
+    params[control.key] =
+      conflict === "multi"
+        ? accepted.map(readParamStreamValue)
+        : readParamStreamValue(accepted[0]);
+  }
+  return { params, diagnostics };
 }
 
 function getValueType(controlType: string): ValueStreamType {
@@ -210,6 +299,43 @@ function getValueType(controlType: string): ValueStreamType {
   if (controlType === "color") return "color";
   if (controlType === "select") return "string";
   return "number";
+}
+
+function getGraphParamValueType(
+  effectPackage: EffectPackage,
+  key: string,
+  controlType: string,
+) {
+  return (
+    effectPackage.graph?.paramPorts?.[key]?.valueType ??
+    getValueType(controlType)
+  );
+}
+
+function isValueOrFieldStream(stream: GraphStream): stream is ValueStream {
+  return "valueType" in stream && "value" in stream;
+}
+
+function acceptsParamStream(
+  effectPackage: EffectPackage,
+  key: string,
+  controlType: string,
+  stream: ValueStream,
+) {
+  const metadata = effectPackage.graph?.paramPorts?.[key];
+  if (isFieldValue(stream.value) && metadata?.acceptsField !== true)
+    return false;
+  return (
+    stream.valueType === getGraphParamValueType(effectPackage, key, controlType)
+  );
+}
+
+function readParamStreamValue(stream: ValueStream) {
+  return stream.value;
+}
+
+function isFieldValue(value: unknown): value is Field {
+  return typeof value === "object" && value !== null && "kind" in value;
 }
 
 function cloneAnimationController(

@@ -14,6 +14,22 @@ export const splitNodeDefinition: AnimationGraphNodeDefinition = {
   kind: "split",
   label: "Split",
   category: "control",
+  controls: [
+    {
+      id: "split",
+      fields: [
+        {
+          key: "mode",
+          label: "mode",
+          defaultValue: "word",
+          options: [
+            { value: "word", label: "Word" },
+            { value: "character", label: "Character" },
+          ],
+        },
+      ],
+    },
+  ],
   getPorts: () => [
     animationInputPort("in", "In", ["text"]),
     animationOutputPort("tokens", "Tokens", ["richText"]),
@@ -43,10 +59,15 @@ export const splitNodeDefinition: AnimationGraphNodeDefinition = {
         cloneAnimationStream(stream, `${input.node.id}:tokens:${index}`, {
           kind: "richText",
           objectId: stream.structure.objectId,
+          domain: "textToken",
           tokenIndexes: Array.from(
             { length: tokenCount },
             (_, tokenIndex) => tokenIndex,
           ),
+          selection: {
+            domain: "textToken",
+            mask: Array.from({ length: tokenCount }, () => true),
+          },
         }),
       );
     return { outputs: new Map([["tokens", streams]]) };

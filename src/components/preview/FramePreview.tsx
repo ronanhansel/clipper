@@ -87,6 +87,11 @@ import type {
   TransitionSequenceStyle,
   TransitionVisualOverlay,
 } from "../../core/effects/types";
+import type {
+  GeneratedGeometry,
+  GeometryPath,
+  GeometryShape,
+} from "../../core/animationGraph/types";
 import type { PlaybackClock } from "../../app/types";
 import {
   rasterizeSvgForExport,
@@ -1815,6 +1820,17 @@ export const FrameObjectView = memo(function FrameObjectView({
           style={style}
         />
       ) : null}
+      {object.generatedGeometry?.length ? (
+        <svg
+          className="pointer-events-none absolute inset-0 h-full w-full overflow-visible"
+          viewBox={`${object.bounds.x} ${object.bounds.y} ${object.bounds.width} ${object.bounds.height}`}
+          aria-hidden="true"
+        >
+          {object.generatedGeometry.flatMap((geometry, index) =>
+            renderGeneratedGeometry(geometry, `geometry:${object.id}:${index}`),
+          )}
+        </svg>
+      ) : null}
       {(object.type === "html" || object.type === "template") && content ? (
         <HtmlContent content={content} />
       ) : null}
@@ -1835,6 +1851,68 @@ type SplitTextToken = {
   animated: boolean;
   style: CSSProperties;
 };
+
+function renderGeneratedGeometry(geometry: GeneratedGeometry, key: string) {
+  if (geometry.type === "shape") return renderGeneratedShape(geometry, key);
+  if (geometry.type === "path") return renderGeneratedPath(geometry, key);
+  if (geometry.type === "shapeGroup")
+    return [
+      ...geometry.shapes.flatMap((shape, index) =>
+        renderGeneratedShape(shape, `${key}:shape:${index}`),
+      ),
+      ...(geometry.instances ?? []).flatMap((instance, index) => (
+        <g
+          key={`${key}:instance:${index}`}
+          transform={`translate(${instance.position.x} ${instance.position.y}) rotate(${((instance.rotation ?? 0) * 180) / Math.PI}) scale(${instance.scale ?? 1})`}
+          opacity={instance.opacity}
+          fill={instance.color}
+        >
+          {instance.shape.type === "shape"
+            ? renderGeneratedShape(
+                instance.shape,
+                `${key}:instance:${index}:shape`,
+              )
+            : renderGeneratedPath(
+                instance.shape,
+                `${key}:instance:${index}:path`,
+              )}
+        </g>
+      )),
+    ];
+  return [];
+}
+
+function renderGeneratedShape(shape: GeometryShape, key: string) {
+  return shape.paths.flatMap((path, index) =>
+    renderGeneratedPath(path, `${key}:path:${index}`, shape),
+  );
+}
+
+function renderGeneratedPath(
+  path: GeometryPath,
+  key: string,
+  shape?: GeometryShape,
+) {
+  if (!path.points.length) return [];
+  const [first, ...rest] = path.points;
+  const d = [
+    `M ${first.x} ${first.y}`,
+    ...rest.map((point) => `L ${point.x} ${point.y}`),
+    path.closed ? "Z" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  return [
+    <path
+      key={key}
+      d={d}
+      fill={path.closed ? (shape?.color ?? "currentColor") : "none"}
+      stroke={path.closed ? "none" : (shape?.color ?? "currentColor")}
+      strokeWidth={path.strokeWidth ?? 1}
+      opacity={shape?.opacity}
+    />,
+  ];
+}
 
 function renderSplitTextSegments(
   segments: RichTextSegment[],

@@ -2,6 +2,7 @@ import type {
   AnimationController,
   EffectInstruction,
   StructureStream,
+  ValueStreamType,
 } from "../animationGraph/types";
 import type {
   AdjustmentEffectDefinition,
@@ -240,11 +241,28 @@ export type EffectGraphParamControl =
   | TransitionEffectParamControl
   | MotionMendTransitionParamControl;
 
+export type EffectGraphParamPortMode = "single" | "multi" | "error";
+
+export type EffectGraphParamPortMetadata = {
+  valueType?: ValueStreamType;
+  acceptsValueStream?: boolean;
+  acceptsField?: boolean;
+  conflict?: EffectGraphParamPortMode;
+};
+
 export type EffectGraphMetadata = {
   label?: string;
-  acceptedStructureKinds: readonly ("text" | "richText" | "shape" | "object")[];
+  editorAliases?: readonly string[];
+  acceptedStructureKinds: readonly (
+    | "text"
+    | "richText"
+    | "shape"
+    | "object"
+    | "geometry"
+  )[];
   defaultParams?: Record<string, unknown>;
   paramControls?: readonly EffectGraphParamControl[];
+  paramPorts?: Record<string, EffectGraphParamPortMetadata>;
   runtimeAdapter?: EffectGraphRuntimeAdapter;
 };
 

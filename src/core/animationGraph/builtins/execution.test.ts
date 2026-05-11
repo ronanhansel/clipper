@@ -35,6 +35,7 @@ describe("built-in animation graph node execution", () => {
     const tokens = stream("tokens", {
       kind: "richText",
       objectId: "object-1",
+      domain: "textToken",
       tokenIndexes: [0, 1],
     });
     const result = timeNodeDefinition.execute(
@@ -114,7 +115,9 @@ describe("built-in animation graph node execution", () => {
     ).toEqual({
       kind: "richText",
       objectId: "object-1",
+      domain: "textToken",
       tokenIndexes: [0, 1, 2],
+      selection: { domain: "textToken", mask: [true, true, true] },
     });
     expect(result.outputs.has("out")).toBe(false);
   });
@@ -123,6 +126,7 @@ describe("built-in animation graph node execution", () => {
     const input = stream("tokens", {
       kind: "richText",
       objectId: "object-1",
+      domain: "textToken",
       tokenIndexes: [0, 1, 2],
     });
     const result = conditionNodeDefinition.execute(

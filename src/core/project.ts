@@ -474,17 +474,11 @@ export function createDefaultComposition2dAnimationGraph(
       [outId]: {
         id: outId,
         kind: "out",
-        position: { x: 74, y: 12 },
+        position: { x: 68, y: 12 },
         config: {},
       },
     },
-    edges: [
-      {
-        id: `${sourceId}:out->${outId}:in`,
-        from: { nodeId: sourceId, portId: "out" },
-        to: { nodeId: outId, portId: "in" },
-      },
-    ],
+    edges: [],
   };
 }
 
@@ -1398,11 +1392,13 @@ export function applyAnimationGraphToComposition(
       ? compileGraphForObject(object, graph)
       : undefined;
     const graphAnimations = graphCompile?.animations ?? [];
+    const generatedGeometry = graphCompile?.generatedGeometry ?? [];
     const baseAnimations = (object.animations ?? []).filter(
       (animation) => !animation.id.startsWith("graph:"),
     );
     if (
       !graphAnimations.length &&
+      !generatedGeometry.length &&
       baseAnimations.length === (object.animations ?? []).length
     )
       return graph && !isAnimationGraphObjectConnectedToOut(object.id, graph)
@@ -1414,6 +1410,9 @@ export function applyAnimationGraphToComposition(
         ? !isAnimationGraphObjectConnectedToOut(object.id, graph)
         : object.hidden,
       animations: [...baseAnimations, ...graphAnimations],
+      generatedGeometry: generatedGeometry.length
+        ? generatedGeometry
+        : undefined,
     };
   });
   const nextBackgroundElements = composition.background.elements.map(
@@ -1422,11 +1421,13 @@ export function applyAnimationGraphToComposition(
         ? compileGraphForObject(object, graph)
         : undefined;
       const graphAnimations = graphCompile?.animations ?? [];
+      const generatedGeometry = graphCompile?.generatedGeometry ?? [];
       const baseAnimations = (object.animations ?? []).filter(
         (animation) => !animation.id.startsWith("graph:"),
       );
       if (
         !graphAnimations.length &&
+        !generatedGeometry.length &&
         baseAnimations.length === (object.animations ?? []).length
       )
         return graph && !isAnimationGraphObjectConnectedToOut(object.id, graph)
@@ -1438,6 +1439,9 @@ export function applyAnimationGraphToComposition(
           ? !isAnimationGraphObjectConnectedToOut(object.id, graph)
           : object.hidden,
         animations: [...baseAnimations, ...graphAnimations],
+        generatedGeometry: generatedGeometry.length
+          ? generatedGeometry
+          : undefined,
       };
     },
   );
@@ -1500,17 +1504,28 @@ function stripEmbeddedCompositionSources(
       compositions: scene.compositions.map(
         ({ source: _source, ...composition }) => ({
           ...composition,
-          objects: stripGeneratedGraphAnimations(composition.objects ?? []),
+          objects: stripGeneratedGraphGeometry(
+            stripGeneratedGraphAnimations(composition.objects ?? []),
+          ),
           background: {
             ...composition.background,
-            elements: stripGeneratedGraphAnimations(
-              composition.background.elements ?? [],
+            elements: stripGeneratedGraphGeometry(
+              stripGeneratedGraphAnimations(
+                composition.background.elements ?? [],
+              ),
             ),
           },
         }),
       ),
     })),
   };
+}
+
+function stripGeneratedGraphGeometry(objects: FrameObject[]) {
+  return objects.map(
+    ({ generatedGeometry: _generatedGeometry, ...object }) =>
+      object as FrameObject,
+  );
 }
 
 function pruneStaleAdjustmentLayers(project: ProjectManifest): ProjectManifest {
@@ -1697,7 +1712,10 @@ function normalizeProjectEditorState(
       project.editorState?.composeTimeline,
     ),
     timelineMode,
-    mode: normalizeEditorMode(project.editorState?.mode),
+    mode:
+      timelineMode === "compose"
+        ? "preview"
+        : normalizeEditorMode(project.editorState?.mode),
     leftPanelTab:
       project.editorState?.leftPanelTab === "tools" ? "tools" : "assets",
     rightPanelTab: normalizeRightPanelTab(project.editorState?.rightPanelTab),

@@ -17,6 +17,58 @@ export const timeNodeDefinition: AnimationGraphNodeDefinition = {
   kind: "time",
   label: "Time",
   category: "control",
+  controls: [
+    {
+      id: "timing",
+      fields: [
+        {
+          key: "delay",
+          label: "delay",
+          type: "number",
+          defaultValue: 0,
+          min: 0,
+          max: 120,
+          step: 0.1,
+          unit: "s",
+        },
+        {
+          key: "duration",
+          label: "duration",
+          type: "number",
+          defaultValue: 1,
+          min: 0.01,
+          max: 120,
+          step: 0.1,
+          unit: "s",
+        },
+        {
+          key: "ease",
+          label: "ease",
+          defaultValue: "linear",
+          options: [
+            { value: "linear", label: "Linear" },
+            { value: "easeIn", label: "Ease in" },
+            { value: "easeOut", label: "Ease out" },
+            { value: "easeInOut", label: "Ease in-out" },
+            { value: "inAndOut", label: "In and out" },
+            { value: "expoIn", label: "Expo in" },
+            { value: "expoOut", label: "Expo out" },
+            { value: "circOut", label: "Circ out" },
+            { value: "backOut", label: "Back out" },
+          ],
+        },
+        {
+          key: "schedule",
+          label: "schedule",
+          defaultValue: "relative",
+          options: [
+            { value: "relative", label: "Relative" },
+            { value: "absolute", label: "Absolute" },
+          ],
+        },
+      ],
+    },
+  ],
   getPorts: () => [
     animationInputPort("in", "In"),
     animationOutputPort("out", "Out"),

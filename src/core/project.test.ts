@@ -25,6 +25,10 @@ import {
 } from "./project";
 import { motionBlocksToMotionMarkers } from "./motionEffects";
 import { createTypedAnimationGraphNode } from "./animationGraph/nodeRegistry";
+import {
+  compileAnimationGraphForObject,
+  planAnimationGraphProgram,
+} from "./animationGraph/compiler";
 import type {
   AnimationGraphEdge,
   CompositionClip,
@@ -213,12 +217,7 @@ describe("project normalization", () => {
         "source:text": { kind: "source", config: { objectId: "text" } },
         "composition2d:out": { kind: "out", config: {} },
       },
-      edges: [
-        {
-          from: { nodeId: "source:text", portId: "out" },
-          to: { nodeId: "composition2d:out", portId: "in" },
-        },
-      ],
+      edges: [],
     });
     expect(graph?.customNodes).toBeUndefined();
     expect(graph?.parameters).toBeUndefined();
@@ -470,11 +469,39 @@ describe("project normalization", () => {
         ...projectWithComposition(),
         editorState: {
           timeline: { displacement: 0, zoom: 1 },
-          timelineMode: "compose",
+          timelineMode: "composition",
           mode: "code",
         },
       }).editorState?.mode,
     ).toBe("editor");
+  });
+
+  it("restores compose timeline sessions in preview mode", () => {
+    const normalized = normalizeProject({
+      ...projectWithComposition(),
+      editorState: {
+        timeline: { displacement: 0, zoom: 1 },
+        timelineMode: "compose",
+        mode: "editor",
+      },
+    });
+
+    expect(normalized.editorState?.timelineMode).toBe("compose");
+    expect(normalized.editorState?.mode).toBe("preview");
+  });
+
+  it("preserves editor mode for direct timeline sessions", () => {
+    const normalized = normalizeProject({
+      ...projectWithComposition(),
+      editorState: {
+        timeline: { displacement: 0, zoom: 1 },
+        timelineMode: "composition",
+        mode: "editor",
+      },
+    });
+
+    expect(normalized.editorState?.timelineMode).toBe("composition");
+    expect(normalized.editorState?.mode).toBe("editor");
   });
 
   it("normalizes persisted editor sessions without runtime source data", () => {
@@ -767,6 +794,213 @@ describe("project normalization", () => {
       keyframes: { opacity: [1, 0] },
       options: { split: { tokenIndexes: [0, 1] } },
     });
+  });
+
+  it("removes stale graph animations when strict source is disconnected from Out", () => {
+    const applied = applyAnimationGraphToComposition(
+      {
+        ...composition,
+        objects: [
+          {
+            id: "text",
+            name: "Text",
+            type: "text",
+            selector: ".text",
+            content: "a b",
+            bounds: { x: 0, y: 0, width: 100, height: 40 },
+            style: {},
+            animations: [
+              { id: "graph:old", name: "Old", keyframes: { opacity: [1, 0] } },
+            ],
+          },
+        ],
+      },
+      {
+        id: "graph:text",
+        sourceObjectId: "text",
+        nodes: {
+          source: {
+            id: "source",
+            kind: "source",
+            position: { x: 0, y: 0 },
+            config: { objectId: "text" },
+          },
+          out: { id: "out", kind: "out", position: { x: 0, y: 0 }, config: {} },
+        },
+        edges: [],
+      },
+    );
+
+    expect(applied.objects[0].animations).toEqual([]);
+    expect(applied.objects[0].hidden).toBe(true);
+  });
+
+  it("materializes preview/export graph animations from shared compiler adapter output", () => {
+    const object = {
+      id: "text",
+      name: "Text",
+      type: "text",
+      selector: ".text",
+      content: "a b",
+      bounds: { x: 0, y: 0, width: 100, height: 40 },
+      style: {},
+      animations: [
+        { id: "manual", name: "Manual", keyframes: { opacity: [0, 1] } },
+      ],
+    };
+    const graph = {
+      id: "graph:text",
+      sourceObjectId: "text",
+      nodes: {
+        source: {
+          id: "source",
+          kind: "source",
+          position: { x: 0, y: 0 },
+          config: { objectId: "text" },
+        },
+        split: {
+          id: "split",
+          kind: "split",
+          position: { x: 0, y: 0 },
+          config: { mode: "word" },
+        },
+        time: {
+          id: "time",
+          kind: "time",
+          position: { x: 0, y: 0 },
+          config: { delay: 0.1, duration: 2 },
+        },
+        pan: {
+          id: "pan",
+          kind: "effect:clipper.motion.pan",
+          position: { x: 0, y: 0 },
+          config: { params: { x: 12, y: -4 } },
+        },
+        out: { id: "out", kind: "out", position: { x: 0, y: 0 }, config: {} },
+      },
+      edges: [
+        {
+          id: "source->split",
+          from: { nodeId: "source", portId: "out" },
+          to: { nodeId: "split", portId: "in" },
+        },
+        {
+          id: "split->time",
+          from: { nodeId: "split", portId: "tokens" },
+          to: { nodeId: "time", portId: "in" },
+        },
+        {
+          id: "time->pan",
+          from: { nodeId: "time", portId: "out" },
+          to: { nodeId: "pan", portId: "in" },
+        },
+        {
+          id: "pan->out",
+          from: { nodeId: "pan", portId: "out" },
+          to: { nodeId: "out", portId: "in" },
+        },
+      ],
+    };
+
+    const compiled = compileAnimationGraphForObject(object, graph);
+    const savedGraph = JSON.parse(JSON.stringify(graph));
+    const savedCompiled = compileAnimationGraphForObject(object, savedGraph);
+    const applied = applyAnimationGraphToComposition(
+      { ...composition, objects: [object] },
+      graph,
+    );
+    const appliedFromSaved = applyAnimationGraphToComposition(
+      { ...composition, objects: [object] },
+      savedGraph,
+    );
+
+    expect(compiled.diagnostics).toEqual([]);
+    expect(savedCompiled.diagnostics).toEqual([]);
+    expect(planAnimationGraphProgram(savedGraph)).toEqual(
+      planAnimationGraphProgram(graph),
+    );
+    expect(savedCompiled.program).toEqual(compiled.program);
+    expect(savedCompiled.streams).toEqual(compiled.streams);
+    expect(savedCompiled.animations).toEqual(compiled.animations);
+    expect(compiled.animations).toEqual([
+      {
+        id: "graph:pan:effect:0",
+        name: "clipper.motion.pan",
+        keyframes: { x: [0, 12], y: [0, -4] },
+        options: {
+          delay: 0.1,
+          duration: 2,
+          ease: "linear",
+          type: "tween",
+          repeat: undefined,
+          repeatType: undefined,
+          split: { mode: "word", stagger: 0, tokenIndexes: [0, 1] },
+        },
+      },
+    ]);
+    expect(applied.objects[0].animations).toEqual([
+      { id: "manual", name: "Manual", keyframes: { opacity: [0, 1] } },
+      ...compiled.animations,
+    ]);
+    expect(appliedFromSaved.objects[0].animations).toEqual(
+      applied.objects[0].animations,
+    );
+  });
+
+  it("bridges compiled geometry into preview/export object output without persisting it", () => {
+    const object = {
+      id: "shape-host",
+      name: "Shape Host",
+      type: "rect",
+      selector: ".shape-host",
+      bounds: { x: 100, y: 200, width: 400, height: 120 },
+      style: {},
+    };
+    const graph = {
+      id: "graph",
+      sourceObjectId: object.id,
+      nodes: {
+        source: {
+          id: "source",
+          kind: "source",
+          position: { x: 0, y: 0 },
+          config: { objectId: object.id },
+        },
+        rect: {
+          id: "rect",
+          kind: "geometry:rectangle",
+          position: { x: 0, y: 0 },
+          config: { width: 200, height: 60, color: "#22c55e" },
+        },
+        out: { id: "out", kind: "out", position: { x: 0, y: 0 }, config: {} },
+      },
+      edges: [
+        {
+          id: "source->rect",
+          from: { nodeId: "source", portId: "out" },
+          to: { nodeId: "rect", portId: "in" },
+        },
+        {
+          id: "rect->out",
+          from: { nodeId: "rect", portId: "out" },
+          to: { nodeId: "out", portId: "in" },
+        },
+      ],
+    };
+
+    const applied = applyAnimationGraphToComposition(
+      { ...composition, objects: [object] },
+      graph,
+    );
+    const saved = serializeProjectForSave({
+      ...projectWithComposition(),
+      scenes: [{ id: "scene", name: "Scene", compositions: [applied] }],
+    });
+
+    expect(applied.objects[0].generatedGeometry).toEqual([
+      expect.objectContaining({ type: "shape", color: "#22c55e" }),
+    ]);
+    expect(JSON.stringify(saved)).not.toContain("generatedGeometry");
   });
 
   it("preserves non-source object animations when strict graph targets another object", () => {

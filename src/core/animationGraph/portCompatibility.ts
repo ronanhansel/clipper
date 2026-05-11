@@ -40,6 +40,12 @@ export function areGraphPortTypesCompatible(
       (toType.kind === "value" && fromType.valueType === toType.valueType)
     );
   }
+  if (fromType.kind === "field") {
+    return (
+      toType.kind === "anyValue" ||
+      (toType.kind === "field" && fromType.valueType === toType.valueType)
+    );
+  }
   if (fromType.kind !== "animation" || toType.kind !== "animation")
     return false;
   if (!toType.structures?.length || !fromType.structures?.length) return true;
@@ -60,6 +66,9 @@ export function validateAnimationGraphEdgePorts(input: {
           severity: "error" as const,
           message,
           edgeId: input.edge.id,
+          nodeId: input.toPort ? input.edge.to.nodeId : input.edge.from.nodeId,
+          portId: input.toPort ? input.edge.to.portId : input.edge.from.portId,
+          outputId: input.fromPort ? input.edge.from.portId : undefined,
         },
       ]
     : [];
@@ -67,6 +76,7 @@ export function validateAnimationGraphEdgePorts(input: {
 
 function formatGraphPortType(type: GraphPortType) {
   if (type.kind === "value") return `Value.${type.valueType}`;
+  if (type.kind === "field") return `Field.${type.valueType}`;
   if (type.kind === "anyValue") return "Value";
   return type.structures?.length
     ? `Animation.${type.structures.join("|")}`

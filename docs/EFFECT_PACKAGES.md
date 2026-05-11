@@ -209,6 +209,7 @@ Post-process example:
 Limits:
 
 - No runtime plugin loader, npm auto-discovery, sandbox, remote install flow, or user-managed package directory exists yet.
+- Programmatic animation graph creation is exposed only through internal TypeScript modules such as `src/core/animationGraph/builder.ts`; it is not a runtime plugin loader and does not execute user scripts.
 - External contribution means code loaded by app build/runtime and registered through in-process APIs.
 - Effects cannot add bespoke inspector widgets, panel sections, timeline lanes, or export branches without first adding generic package metadata and shared UI/runtime support.
 

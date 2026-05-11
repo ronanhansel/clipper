@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { lensPostProcessKind } from "../../core/effects/postprocess/lens";
 import { filmBurnTransitionPostProcessKind } from "../../core/effects/postprocess/filmBurnTransition";
+import { FrameObjectView } from "../../components/preview/FramePreview";
 import type {
   AdjustmentLayer,
   CompositionClip,
@@ -10,6 +13,10 @@ import type {
   TransitionLayer,
 } from "../../core/types";
 import { FRAME_HEIGHT, FRAME_WIDTH } from "../../core/types";
+import {
+  deriveFramePreviewRenderModel,
+  getFramePreviewTimelineLayers,
+} from "../state/framePreviewRenderModel";
 import {
   getExportFrameScale,
   getExportPostProcessPasses,
@@ -74,6 +81,86 @@ describe("export frame scale", () => {
 
   it("falls back to native composition scale for invalid export sizes", () => {
     expect(getExportFrameScale({ exportWidth: 0, exportHeight: 2160 })).toBe(1);
+  });
+});
+
+describe("export generated geometry", () => {
+  const generatedGeometryObject = {
+    id: "shape-host",
+    name: "Shape Host",
+    type: "rect" as const,
+    selector: ".shape-host",
+    bounds: { x: 0, y: 0, width: 320, height: 120 },
+    style: {},
+    generatedGeometry: [
+      {
+        type: "shape" as const,
+        color: "#22c55e",
+        paths: [
+          {
+            type: "path" as const,
+            closed: true,
+            points: [
+              { x: 0, y: 0 },
+              { x: 120, y: 0 },
+              { x: 120, y: 40 },
+              { x: 0, y: 40 },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+
+  it("passes compiled generated geometry through the export preview model", () => {
+    const scene = testScene({
+      compositions: [
+        {
+          ...testComposition(),
+          objects: [generatedGeometryObject],
+        },
+      ],
+    });
+
+    const previewModel = deriveFramePreviewRenderModel({
+      blankPart: testComposition(),
+      frameRate: 30,
+      scene,
+      sceneTime: 0,
+      timelineLayers: getFramePreviewTimelineLayers(
+        testProject(scene.id),
+        scene.id,
+      ),
+      timelineMode: "composition",
+    });
+
+    expect(previewModel.part.objects[0].generatedGeometry).toEqual([
+      expect.objectContaining({ type: "shape", color: "#22c55e" }),
+    ]);
+  });
+
+  it("renders generated geometry into export FramePreview markup", () => {
+    const markup = renderToStaticMarkup(
+      createElement(FrameObjectView, {
+        animationsEnabled: false,
+        object: generatedGeometryObject,
+        canSelect: false,
+        duration: 3,
+        editing: false,
+        focusPicking: false,
+        frameScale: 1,
+        isPlaying: false,
+        previewTime: 0,
+        renderMode: "export",
+        onDoubleClick: () => {},
+        onPointerDown: () => {},
+        onTextEditCommit: () => {},
+      }),
+    );
+
+    expect(markup).toContain("<svg");
+    expect(markup).toContain('fill="#22c55e"');
+    expect(markup).toContain("M 0 0 L 120 0 L 120 40 L 0 40 Z");
   });
 });
 

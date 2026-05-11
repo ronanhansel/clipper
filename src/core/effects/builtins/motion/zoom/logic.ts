@@ -5,6 +5,7 @@ import { createMotionBlock } from "../helpers";
 export const zoomMotionLogic = {
   graph: {
     label: "Scale",
+    editorAliases: ["scale"],
     acceptedStructureKinds: ["text", "richText", "shape", "object"],
     defaultParams: { scale: 1.8 },
     paramControls: [

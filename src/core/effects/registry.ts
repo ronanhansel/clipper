@@ -372,6 +372,12 @@ export function getGraphEffectPackages() {
   return effectPackages.filter((definition) => definition.graph);
 }
 
+export function getGraphEffectPackageByEditorAlias(alias: string) {
+  return getGraphEffectPackages().find((definition) =>
+    definition.graph?.editorAliases?.includes(alias),
+  );
+}
+
 export function getGraphEffectRuntimeAdapter(effectId: string) {
   return getEffectPackage(effectId)?.graph?.runtimeAdapter;
 }

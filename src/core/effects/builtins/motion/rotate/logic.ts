@@ -4,6 +4,8 @@ import { createMotionBlock } from "../helpers";
 
 export const rotateMotionLogic = {
   graph: {
+    label: "Rotate",
+    editorAliases: ["rotate"],
     acceptedStructureKinds: ["text", "richText", "shape", "object"],
     defaultParams: { rotation: 15 },
     paramControls: [

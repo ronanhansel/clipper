@@ -125,6 +125,35 @@ describe("strict animation graph foundation", () => {
       ]),
     );
   });
+
+  it("declares effect parameter conflict metadata as port cardinality", () => {
+    const definition = createEffectAnimationGraphNodeDefinition({
+      ...fakeEffectPackage,
+      graph: {
+        acceptedStructureKinds: ["text"],
+        paramControls: [
+          { key: "single", label: "Single", type: "number", defaultValue: 0 },
+          { key: "multi", label: "Multi", type: "number", defaultValue: 0 },
+          { key: "strict", label: "Strict", type: "number", defaultValue: 0 },
+        ],
+        paramPorts: {
+          multi: { conflict: "multi" },
+          strict: { conflict: "error" },
+        },
+      },
+    });
+
+    const ports = definition.getPorts(node("effect", definition.kind));
+    expect(ports.find((port) => port.id === "single")).toMatchObject({
+      cardinality: "single",
+    });
+    expect(ports.find((port) => port.id === "multi")).toMatchObject({
+      cardinality: "multi",
+    });
+    expect(ports.find((port) => port.id === "strict")).toMatchObject({
+      cardinality: "single",
+    });
+  });
 });
 
 function validGraph(): AnimationGraph {

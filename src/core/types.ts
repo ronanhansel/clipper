@@ -157,6 +157,7 @@ export type FrameObject = {
   hidden?: boolean;
   locked?: boolean;
   animations?: LayerAnimation[];
+  generatedGeometry?: import("./animationGraph/types").GeneratedGeometry[];
 };
 
 export type PartFrame = {

@@ -12,6 +12,12 @@ export const sourceNodeDefinition: AnimationGraphNodeDefinition = {
   kind: "source",
   label: "Source",
   category: "control",
+  controls: [
+    {
+      id: "source",
+      fields: [{ key: "objectId", label: "object", defaultValue: "" }],
+    },
+  ],
   getPorts: () => [animationOutputPort("out", "Out")],
   createDefaultConfig: (context) => ({
     objectId: context.sourceObjectId ?? "",

@@ -2,10 +2,19 @@ import type {
   AnimationGraphConditionConfig,
   AnimationGraphNodeDefinition,
   AnimationStream,
+  AttributeContext,
+  Field,
   GraphPortId,
   GraphStream,
+  AnimationGraphDiagnostic,
   ValueStream,
 } from "../../types";
+import {
+  attributeField,
+  compareField,
+  constantField,
+  evaluateBooleanMask,
+} from "../../fields";
 import {
   animationInputPort,
   animationOutputPort,
@@ -36,46 +45,85 @@ export const conditionNodeDefinition: AnimationGraphNodeDefinition = {
     const config = normalizeConditionConfig(input.node.config);
     const connected = context.connectedOutputPorts ?? new Set<GraphPortId>();
     const outputStreams = new Map<GraphPortId, GraphStream[]>();
+    const diagnostics: AnimationGraphDiagnostic[] = [];
     const push = (portId: GraphPortId, stream: GraphStream) => {
-      if (!connected.has(portId)) return;
+      if (!connected.has(portId)) {
+        diagnostics.push({
+          severity: "warning",
+          message: `Condition output "${portId}" is disconnected; matching streams were dropped.`,
+          nodeId: input.node.id,
+          portId,
+          outputId: portId,
+        });
+        return;
+      }
       outputStreams.set(portId, [...(outputStreams.get(portId) ?? []), stream]);
     };
 
     for (const stream of input.inputs.get("in") ?? []) {
       if (isRichTextAnimationStream(stream)) {
-        routeRichTextStream(
-          stream,
-          config,
-          push,
-          input.node.id,
-          getTokens(context),
+        diagnostics.push(
+          ...routeRichTextStream(
+            stream,
+            config,
+            push,
+            input.node.id,
+            getTokens(context),
+          ),
         );
       } else if (isAnimationStream(stream) || isValueStream(stream)) {
         routeWholeStream(stream, config, push, input.node.id);
       }
     }
 
-    return { outputs: outputStreams };
+    return { outputs: outputStreams, diagnostics };
   },
 };
 
 function routeRichTextStream(
   stream: AnimationStream & {
-    structure: { kind: "richText"; objectId: string; tokenIndexes: number[] };
+    structure: {
+      kind: "richText";
+      objectId: string;
+      domain: "textToken";
+      tokenIndexes: number[];
+    };
   },
   config: AnimationGraphConditionConfig,
   push: (portId: GraphPortId, stream: GraphStream) => void,
   nodeId: string,
   tokens: readonly string[],
 ) {
+  const diagnostics: AnimationGraphDiagnostic[] = [];
   const defaultIndexes: number[] = [];
   const sent = new Map<GraphPortId, number[]>();
   const duplicated = new Map<GraphPortId, number[]>();
+  const contexts = stream.structure.tokenIndexes.map((tokenIndex) =>
+    createTextTokenContext(
+      stream.structure.objectId,
+      tokenIndex,
+      tokens[tokenIndex] ?? tokenIndex,
+    ),
+  );
+  const ruleMasks = config.rules.map((rule) => {
+    const result = evaluateBooleanMask(ruleToField(rule), {
+      domain: "textToken",
+      items: contexts,
+    });
+    diagnostics.push(...result.diagnostics);
+    return result.mask;
+  });
 
-  for (const tokenIndex of stream.structure.tokenIndexes) {
+  for (
+    let activeIndex = 0;
+    activeIndex < stream.structure.tokenIndexes.length;
+    activeIndex += 1
+  ) {
+    const tokenIndex = stream.structure.tokenIndexes[activeIndex];
     let moved = false;
-    for (const rule of config.rules) {
-      if (!matchesRule(tokens[tokenIndex] ?? tokenIndex, rule)) continue;
+    for (let ruleIndex = 0; ruleIndex < config.rules.length; ruleIndex += 1) {
+      const rule = config.rules[ruleIndex];
+      if (!ruleMasks[ruleIndex]?.[activeIndex]) continue;
       if (rule.action === "duplicateToOutput") {
         duplicated.set(rule.output, [
           ...(duplicated.get(rule.output) ?? []),
@@ -98,6 +146,7 @@ function routeRichTextStream(
     push(portId, richTextSubset(stream, nodeId, portId, tokenIndexes));
   if (defaultIndexes.length)
     push("default", richTextSubset(stream, nodeId, "default", defaultIndexes));
+  return diagnostics;
 }
 
 function getTokens(
@@ -108,6 +157,24 @@ function getTokens(
     context.sourceObject?.content ??
     "";
   return text.match(/\S+/g) ?? [];
+}
+
+function createTextTokenContext(
+  objectId: string,
+  index: number,
+  value: string | number,
+): AttributeContext {
+  return { objectId, index, value, type: "textToken" };
+}
+
+function ruleToField(
+  rule: AnimationGraphConditionConfig["rules"][number],
+): Field<boolean> {
+  return compareField(
+    attributeField(rule.target === "type" ? "type" : "value"),
+    rule.operator,
+    constantField(rule.value),
+  );
 }
 
 function routeWholeStream(
@@ -170,6 +237,12 @@ function richTextSubset(
     {
       ...stream.structure,
       tokenIndexes,
+      selection: {
+        domain: "textToken",
+        mask: stream.structure.tokenIndexes.map((tokenIndex) =>
+          tokenIndexes.includes(tokenIndex),
+        ),
+      },
     },
   );
 }
@@ -177,7 +250,12 @@ function richTextSubset(
 function isRichTextAnimationStream(
   stream: GraphStream,
 ): stream is AnimationStream & {
-  structure: { kind: "richText"; objectId: string; tokenIndexes: number[] };
+  structure: {
+    kind: "richText";
+    objectId: string;
+    domain: "textToken";
+    tokenIndexes: number[];
+  };
 } {
   return isAnimationStream(stream) && stream.structure.kind === "richText";
 }
