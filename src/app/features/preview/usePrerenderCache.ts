@@ -124,6 +124,7 @@ export function usePrerenderCache({
   const fullCacheKeyRef = useRef("");
   const idleTimerRef = useRef<number | null>(null);
   const autoPrerenderPausedUntilRef = useRef(0);
+  const playbackInterestBlockStartRef = useRef<number | null>(null);
   const decoderRef = useRef<PrerenderFrameDecoder | null>(null);
   const nextManualJobIdRef = useRef(1);
   const manualJobsRef = useRef(new Map<number, ManualPrerenderJob>());
@@ -187,6 +188,7 @@ export function usePrerenderCache({
     cacheSignatureRef.current = cacheSignature;
     fullCacheKeyRef.current = fullCacheKey;
     generationRef.current += 1;
+    playbackInterestBlockStartRef.current = null;
     if (!previousSignature || fullReset) {
       closePrerenderCacheBlocks(cacheRef.current);
       queuedRef.current = [];
@@ -240,6 +242,19 @@ export function usePrerenderCache({
       )
         return;
       const generation = generationRef.current;
+      const currentBlockStart = getBlockStartTime(
+        time,
+        request.sceneDuration,
+        videoExportFrameRate,
+        blockDurationSeconds,
+      );
+      if (
+        reason === "playback" &&
+        playbackInterestBlockStartRef.current === currentBlockStart
+      )
+        return;
+      if (reason === "playback")
+        playbackInterestBlockStartRef.current = currentBlockStart;
       const radiusBlocks =
         reason === "playback" ? activeRadiusBlocks : reason === "scrub" ? 1 : 2;
       const blockStarts = getPrerenderScheduleBlockStarts(

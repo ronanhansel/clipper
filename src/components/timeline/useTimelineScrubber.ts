@@ -64,7 +64,6 @@ export function useTimelineScrubber({
   const scrubSnapRef = useRef(false);
   const scrubAutoScrollFrameRef = useRef(0);
   const scrubEffectFrameRef = useRef(0);
-  const scrubEffectTimeoutRef = useRef(0);
   const scrubPreviewFrameRef = useRef(0);
   const pendingScrubPreviewRef = useRef<{
     clientX: number;
@@ -80,6 +79,7 @@ export function useTimelineScrubber({
   const scrubCommitTimeoutRef = useRef(0);
   const lastScrubCommitAtRef = useRef(0);
   const activeScrubRef = useRef<ActiveScrub | null>(null);
+  const scrubStartedRef = useRef(false);
 
   useEffect(
     () => () => {
@@ -89,8 +89,6 @@ export function useTimelineScrubber({
         window.cancelAnimationFrame(scrubAutoScrollFrameRef.current);
       if (scrubEffectFrameRef.current)
         window.cancelAnimationFrame(scrubEffectFrameRef.current);
-      if (scrubEffectTimeoutRef.current)
-        window.clearTimeout(scrubEffectTimeoutRef.current);
       if (scrubCommitTimeoutRef.current)
         window.clearTimeout(scrubCommitTimeoutRef.current);
 
@@ -102,7 +100,6 @@ export function useTimelineScrubber({
       scrubSnapRef.current = false;
       scrubAutoScrollFrameRef.current = 0;
       scrubEffectFrameRef.current = 0;
-      scrubEffectTimeoutRef.current = 0;
       scrubPreviewFrameRef.current = 0;
       pendingScrubPreviewRef.current = null;
       pendingScrubEffectRef.current = null;
@@ -110,6 +107,7 @@ export function useTimelineScrubber({
       latestScrubPreviewTimeRef.current = null;
       scrubCommitTimeoutRef.current = 0;
       activeScrubRef.current = null;
+      scrubStartedRef.current = false;
       scrubbingRef.current = false;
       onShiftSnapActiveChange?.(false);
     },
@@ -206,10 +204,6 @@ export function useTimelineScrubber({
       window.cancelAnimationFrame(scrubEffectFrameRef.current);
       scrubEffectFrameRef.current = 0;
     }
-    if (scrubEffectTimeoutRef.current) {
-      window.clearTimeout(scrubEffectTimeoutRef.current);
-      scrubEffectTimeoutRef.current = 0;
-    }
 
     const next = pendingScrubEffectRef.current;
     pendingScrubEffectRef.current = null;
@@ -222,14 +216,11 @@ export function useTimelineScrubber({
     commit: "throttled" | "immediate",
   ) {
     pendingScrubEffectRef.current = { time, commit };
-    if (scrubEffectFrameRef.current || scrubEffectTimeoutRef.current) return;
+    if (scrubEffectFrameRef.current) return;
 
     scrubEffectFrameRef.current = window.requestAnimationFrame(() => {
       scrubEffectFrameRef.current = 0;
-      scrubEffectTimeoutRef.current = window.setTimeout(() => {
-        scrubEffectTimeoutRef.current = 0;
-        flushPendingScrubEffect();
-      }, 0);
+      flushPendingScrubEffect();
     });
   }
 
@@ -244,10 +235,7 @@ export function useTimelineScrubber({
     if (effect === "sync") {
       if (scrubEffectFrameRef.current)
         window.cancelAnimationFrame(scrubEffectFrameRef.current);
-      if (scrubEffectTimeoutRef.current)
-        window.clearTimeout(scrubEffectTimeoutRef.current);
       scrubEffectFrameRef.current = 0;
-      scrubEffectTimeoutRef.current = 0;
       pendingScrubEffectRef.current = null;
       applyScrubEffect(time, commit);
       return;
@@ -338,11 +326,13 @@ export function useTimelineScrubber({
     scrubbingRef.current = true;
     event.currentTarget.setPointerCapture(event.pointerId);
     activeScrubRef.current = {
-      dragging: false,
+      dragging: true,
       startClientX: event.clientX,
       pointerId: event.pointerId,
       target: event.currentTarget,
     };
+    scrubStartedRef.current = true;
+    onScrubStart();
     scrubFromPointer(event);
   }
 
@@ -370,6 +360,8 @@ export function useTimelineScrubber({
       event.currentTarget.releasePointerCapture(event.pointerId);
     const wasDragging = activeScrubRef.current?.dragging === true;
     activeScrubRef.current = null;
+    const scrubStarted = scrubStartedRef.current;
+    scrubStartedRef.current = false;
     scrubbingRef.current = false;
     if (scrubClientXRef.current !== null)
       updateScrubFromClientX(
@@ -382,7 +374,7 @@ export function useTimelineScrubber({
     latestScrubPreviewTimeRef.current = null;
     onShiftSnapActiveChange?.(false);
     stopScrubAutoScroll();
-    if (wasDragging) onScrubEnd();
+    if (wasDragging || scrubStarted) onScrubEnd();
   }
 
   return {

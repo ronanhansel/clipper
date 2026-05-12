@@ -11,10 +11,7 @@ import { useEditorPanelResize } from "./app/features/editor-layout/useEditorPane
 import { useFramePreviewZoomCommands } from "./app/features/editor-layout/useFramePreviewZoomCommands";
 import { usePreviewScrollPersistence } from "./app/features/editor-layout/usePreviewScrollPersistence";
 import { useExportCommands } from "./app/features/export/useExportCommands";
-import {
-  composePlaybackReactPreviewSyncIntervalMs,
-  usePlaybackController,
-} from "./app/features/playback/usePlaybackController";
+import { usePlaybackController } from "./app/features/playback/usePlaybackController";
 import {
   usePrerenderCache,
   type PrerenderManualCompositionRange,
@@ -1298,8 +1295,6 @@ function AppContent({
     currentSceneTimeRef,
     editorStore,
     frameViewportRef,
-    hasCachedPreviewFrameAtTime: prerenderCache.hasFrameAtTime,
-    isCachedPreviewPaintReadyAtTime: () => cachedPreviewDisplayReadyRef.current,
     isPlaying,
     isPlayingRef,
     numberInputScrubPausedPlaybackRef,
@@ -1308,9 +1303,6 @@ function AppContent({
     playbackClockRef,
     playbackPlayheadRef,
     playbackTimeLabelRef,
-    previewRenderSyncIntervalMs: composeMode
-      ? composePlaybackReactPreviewSyncIntervalMs
-      : undefined,
     presentationScrubPausedPlaybackRef,
     sceneDurationSeconds,
     scrubFrameRef,
@@ -1319,7 +1311,6 @@ function AppContent({
     setPlaybackClock,
     setRenderCurrentSceneTime,
     requestCachedPreviewAtTime: prerenderCache.requestCacheAtTime,
-    useCachedPreviewPlayback: cachedPreviewPlaybackEnabled,
     timeline,
     timelineLayers,
     timelineEndPaddingFraction,

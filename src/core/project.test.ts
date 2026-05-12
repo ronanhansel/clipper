@@ -835,6 +835,114 @@ describe("project normalization", () => {
     expect(applied.objects[0].hidden).toBe(true);
   });
 
+  it("keeps strict source visible when Source reaches Out without effects", () => {
+    const applied = applyAnimationGraphToComposition(
+      {
+        ...composition,
+        objects: [
+          {
+            id: "text",
+            name: "Text",
+            type: "text",
+            selector: ".text",
+            content: "a b",
+            bounds: { x: 0, y: 0, width: 100, height: 40 },
+            style: {},
+            animations: [],
+          },
+        ],
+      },
+      {
+        id: "graph:text",
+        sourceObjectId: "text",
+        nodes: {
+          source: {
+            id: "source",
+            kind: "source",
+            position: { x: 0, y: 0 },
+            config: { objectId: "text" },
+          },
+          out: { id: "out", kind: "out", position: { x: 0, y: 0 }, config: {} },
+        },
+        edges: [
+          {
+            id: "source->out",
+            from: { nodeId: "source", portId: "out" },
+            to: { nodeId: "out", portId: "in" },
+          },
+        ],
+      },
+    );
+
+    expect(applied.objects[0].animations).toEqual([]);
+    expect(applied.objects[0].hidden).toBeUndefined();
+  });
+
+  it("does not leak base object when graph output has no compiled source stream", () => {
+    const applied = applyAnimationGraphToComposition(
+      {
+        ...composition,
+        objects: [
+          {
+            id: "text",
+            name: "Text",
+            type: "text",
+            selector: ".text",
+            content: "a b",
+            bounds: { x: 0, y: 0, width: 100, height: 40 },
+            style: {},
+            animations: [],
+          },
+        ],
+      },
+      {
+        id: "graph:text",
+        sourceObjectId: "text",
+        nodes: {
+          source: {
+            id: "source",
+            kind: "source",
+            position: { x: 0, y: 0 },
+            config: { objectId: "text" },
+          },
+          opacity: {
+            id: "opacity",
+            kind: "effect:clipper.adjustment.opacity",
+            position: { x: 0, y: 0 },
+            config: { params: { from: 1, to: 0 } },
+          },
+          blur: {
+            id: "blur",
+            kind: "effect:clipper.adjustment.blur",
+            position: { x: 0, y: 0 },
+            config: { params: { radius: 12 } },
+          },
+          out: { id: "out", kind: "out", position: { x: 0, y: 0 }, config: {} },
+        },
+        edges: [
+          {
+            id: "source->opacity",
+            from: { nodeId: "source", portId: "out" },
+            to: { nodeId: "opacity", portId: "in" },
+          },
+          {
+            id: "opacity->out",
+            from: { nodeId: "opacity", portId: "out" },
+            to: { nodeId: "out", portId: "in" },
+          },
+          {
+            id: "blur->out",
+            from: { nodeId: "blur", portId: "out" },
+            to: { nodeId: "out", portId: "in" },
+          },
+        ],
+      },
+    );
+
+    expect(applied.objects[0].animations).toEqual([]);
+    expect(applied.objects[0].hidden).toBe(true);
+  });
+
   it("materializes preview/export graph animations from shared compiler adapter output", () => {
     const object = {
       id: "text",

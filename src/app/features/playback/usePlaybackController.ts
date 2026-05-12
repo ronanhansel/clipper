@@ -12,7 +12,6 @@ import {
 } from "../../../components/ui/input";
 import {
   advanceTimeSensitiveSceneTime,
-  applyPlaybackAdjustmentLayersToSceneTime,
   applyAdjustmentLayersToVisualStyle,
   getSceneTimeForTimeSensitiveDisplayTime,
   getTimeSensitiveDisplayDuration,
@@ -43,9 +42,6 @@ import type { EditorStore } from "../../state/editorStore";
 import type { PrerenderCacheInterestReason } from "../preview/usePrerenderCache";
 import { publishPlaybackTime } from "./playbackTimeStore";
 
-const playbackReactPreviewSyncIntervalMs = 1000 / 30;
-const composePlaybackReactPreviewSyncIntervalMs = 1000 / 60;
-
 type PlaybackControllerOptions = {
   compositions: CompositionClip[];
   playbackRange?: { start: number; end: number; localLabels?: boolean };
@@ -64,14 +60,10 @@ type PlaybackControllerOptions = {
   playbackTimeLabelRef: RefObject<HTMLSpanElement | null>;
   sceneDurationSeconds: number;
   scrubFrameRef: RefObject<number>;
-  previewRenderSyncIntervalMs?: number;
   setCurrentSceneTime: (time: number) => void;
   setIsPlaying: (isPlaying: boolean) => void;
   setPlaybackClock: (clock: PlaybackClock) => void;
   setRenderCurrentSceneTime: (time: number) => void;
-  useCachedPreviewPlayback: boolean;
-  hasCachedPreviewFrameAtTime?: (time: number) => boolean;
-  isCachedPreviewPaintReadyAtTime?: (time: number) => boolean;
   requestCachedPreviewAtTime?: (
     time: number,
     reason: PrerenderCacheInterestReason,
@@ -105,14 +97,10 @@ export function usePlaybackController({
   playbackTimeLabelRef,
   sceneDurationSeconds,
   scrubFrameRef,
-  previewRenderSyncIntervalMs = playbackReactPreviewSyncIntervalMs,
   setCurrentSceneTime,
   setIsPlaying,
   setPlaybackClock,
   setRenderCurrentSceneTime,
-  useCachedPreviewPlayback,
-  hasCachedPreviewFrameAtTime,
-  isCachedPreviewPaintReadyAtTime,
   requestCachedPreviewAtTime,
   timeline,
   timelineLayers,
@@ -173,14 +161,21 @@ export function usePlaybackController({
         );
   }
 
-  function syncPlaybackDom(time: number) {
+  function syncPlaybackDom(
+    time: number,
+    source: "idle" | "playback" | "scrub" = isPlayingRef.current
+      ? "playback"
+      : "idle",
+  ) {
     const displayTime = toPlaybackDisplayTime(time);
     publishPlaybackTime({
       sceneTime: time,
       displayTime,
       playing: isPlayingRef.current,
+      source,
     });
     syncPlaybackRenderClockDom(time);
+    if (!useLocalPlaybackLabels) syncFrameVisualAdjustmentDom(time);
     if (playbackTimeLabelRef.current)
       playbackTimeLabelRef.current.textContent = formatPlaybackTimeLabel(time);
     const displayDuration = useLocalPlaybackLabels
@@ -338,8 +333,14 @@ export function usePlaybackController({
         startedAt: performance.now(),
         startedFrom: nextTime,
       });
-    if (!timelineScrubbingRef.current) syncPlaybackDom(nextTime);
+    if (!timelineScrubbingRef.current) syncPlaybackDom(nextTime, "scrub");
     else {
+      publishPlaybackTime({
+        sceneTime: nextTime,
+        displayTime: toPlaybackDisplayTime(nextTime),
+        playing: isPlayingRef.current,
+        source: "scrub",
+      });
       syncPlaybackRenderClockDom(nextTime);
       if (!useLocalPlaybackLabels) syncFrameVisualAdjustmentDom(nextTime);
     }
@@ -375,6 +376,7 @@ export function usePlaybackController({
       sceneTime: settledTime,
       displayTime: toPlaybackDisplayTime(settledTime),
       playing: false,
+      source: "idle",
     });
   }
 
@@ -385,7 +387,7 @@ export function usePlaybackController({
     ) {
       currentSceneTimeRef.current = playbackStart;
       requestCachedPreviewInterest(playbackStart, "playback");
-      syncPlaybackDom(playbackStart);
+      syncPlaybackDom(playbackStart, "playback");
       setCurrentSceneTime(playbackStart);
       setRenderCurrentSceneTime(playbackStart);
     }
@@ -399,6 +401,7 @@ export function usePlaybackController({
       sceneTime: currentSceneTimeRef.current,
       displayTime: toPlaybackDisplayTime(currentSceneTimeRef.current),
       playing: true,
+      source: "playback",
     });
     setIsPlaying(true);
   }
@@ -498,7 +501,7 @@ export function usePlaybackController({
     if (wasPlayingRef.current) {
       wasPlayingRef.current = false;
       const settledTime = currentSceneTimeRef.current;
-      syncPlaybackDom(settledTime);
+      syncPlaybackDom(settledTime, "idle");
       commitPlayheadEditorState(settledTime);
       if (Math.abs(settledTime - currentSceneTime) >= 0.001)
         setCurrentSceneTime(settledTime);
@@ -507,7 +510,7 @@ export function usePlaybackController({
 
     if (timelineScrubbingRef.current) return;
     currentSceneTimeRef.current = currentSceneTime;
-    syncPlaybackDom(currentSceneTime);
+    syncPlaybackDom(currentSceneTime, "idle");
   }, [
     currentSceneTime,
     isPlaying,
@@ -586,7 +589,6 @@ export function usePlaybackController({
       transitionLayers,
       visibleSceneAdjustmentLayers,
     );
-    let lastReactPreviewSyncAt = 0;
     let frame = 0;
 
     function tick(now: number) {
@@ -619,26 +621,12 @@ export function usePlaybackController({
       const shouldSyncReact =
         nextPreviewKey !== lastCommittedPreviewKey || nextTime >= playbackEnd;
       requestCachedPreviewAtTime?.(nextTime, "playback");
-      const cachedPreviewFrameAvailable =
-        useCachedPreviewPlayback &&
-        hasCachedPreviewFrameAtTime?.(nextTime) === true;
-      const cachedPreviewPaintReady =
-        cachedPreviewFrameAvailable &&
-        isCachedPreviewPaintReadyAtTime?.(nextTime) === true;
-      const shouldSyncPreviewRender =
-        !cachedPreviewPaintReady &&
-        (shouldSyncReact ||
-          now - lastReactPreviewSyncAt >= previewRenderSyncIntervalMs);
 
       currentSceneTimeRef.current = nextTime;
-      syncPlaybackDom(nextTime);
-
-      if (shouldSyncPreviewRender) {
-        lastReactPreviewSyncAt = now;
-        startTransition(() => setRenderCurrentSceneTime(nextTime));
-      }
+      syncPlaybackDom(nextTime, "playback");
 
       if (shouldSyncReact) {
+        startTransition(() => setRenderCurrentSceneTime(nextTime));
         lastCommittedPreviewKey = nextPreviewKey;
         startTransition(() => setCurrentSceneTime(nextTime));
       }
@@ -655,18 +643,14 @@ export function usePlaybackController({
     return () => cancelAnimationFrame(frame);
   }, [
     compositions,
-    hasCachedPreviewFrameAtTime,
-    isCachedPreviewPaintReadyAtTime,
     isPlaying,
     playbackEnd,
     playbackStart,
-    previewRenderSyncIntervalMs,
     requestCachedPreviewAtTime,
     sceneDurationSeconds,
     timeline,
     timelineLayers,
     transitionLayers,
-    useCachedPreviewPlayback,
     useLocalPlaybackLabels,
     visibleSceneAdjustmentLayers,
   ]);
@@ -707,8 +691,6 @@ export function usePlaybackController({
   };
 }
 
-export { composePlaybackReactPreviewSyncIntervalMs };
-
 export function syncRenderClockLayersToSceneTime(
   root: ParentNode | null,
   sceneTime: number,
@@ -731,10 +713,38 @@ export function syncRenderClockLayersToSceneTime(
     const style = getRenderClockStyle(state);
     for (const [key, value] of Object.entries(style))
       layer.style.setProperty(key, String(value));
-    syncDomAnimationsToRenderClock(layer, state);
+    if (shouldSyncRenderClockAnimations(layer, state))
+      syncDomAnimationsToRenderClock(layer, state);
     synced += 1;
   }
   return synced;
+}
+
+const renderClockLayerState = new WeakMap<
+  HTMLElement,
+  { playing: boolean; time: number; sampledAt: number }
+>();
+const renderClockPlaybackJumpToleranceMs = 40;
+
+function shouldSyncRenderClockAnimations(
+  layer: HTMLElement,
+  state: RenderClockState,
+) {
+  const now = performance.now();
+  const previous = renderClockLayerState.get(layer);
+  renderClockLayerState.set(layer, {
+    playing: state.playing,
+    time: state.time,
+    sampledAt: now,
+  });
+  if (!state.playing) return true;
+  if (!previous?.playing) return true;
+  const elapsedClockMs = (state.time - previous.time) * 1000;
+  const elapsedWallMs = now - previous.sampledAt;
+  return (
+    elapsedClockMs < -renderClockPlaybackJumpToleranceMs ||
+    Math.abs(elapsedClockMs - elapsedWallMs) > renderClockPlaybackJumpToleranceMs
+  );
 }
 
 function getPlaybackPreviewKey(

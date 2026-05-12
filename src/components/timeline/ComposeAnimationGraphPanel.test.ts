@@ -14,7 +14,6 @@ import {
   getStrictGraphNodeMenuGroups,
   getVisibleStrictComposition2dPorts,
   setSelectedComposition2dLayerGraph,
-  updateStrictConditionNodeParameter,
 } from "./ComposeAnimationGraphPanel";
 import {
   getStrictComposition2dCanvasDiagnostics,
@@ -1634,17 +1633,25 @@ describe("composition2d strict Phase 5 editor behavior", () => {
       "Condition",
     );
     const base = {
+      id: "graph:text",
+      sourceObjectId: "text",
       nodes: { condition },
       edges: [],
-    } as AnimationGraphState;
+    } as StrictAnimationGraph;
 
-    const withAction = updateStrictConditionNodeParameter(
+    const withValue = updateStrictComposition2dNodeParameter(
       base,
+      "condition",
+      "value",
+      "headline",
+    );
+    const withAction = updateStrictComposition2dNodeParameter(
+      withValue,
       "condition",
       "action",
       "sendToOutput",
     );
-    const withOutput = updateStrictConditionNodeParameter(
+    const withOutput = updateStrictComposition2dNodeParameter(
       withAction,
       "condition",
       "outputPort",
@@ -1655,10 +1662,15 @@ describe("composition2d strict Phase 5 editor behavior", () => {
     expect(next).toMatchObject({
       config: {
         outputs: [{ id: "output:stable", label: "Output stable" }],
-        rules: [{ action: "sendToOutput", output: "output:stable" }],
+        rules: [
+          {
+            action: "sendToOutput",
+            output: "output:stable",
+            value: "headline",
+          },
+        ],
       },
     });
-    expect(withOutput.parameters).toBeUndefined();
   });
 
   it("returns strict composition2d incompatibility error used by toast path", () => {
@@ -1699,7 +1711,7 @@ describe("composition2d strict Phase 5 editor behavior", () => {
     ).toContain("Cannot connect");
   });
 
-  it("exposes strict condition ports for canvas rendering without legacy fallback", () => {
+  it("keeps one visible strict condition animation output square", () => {
     const condition = createTypedAnimationGraphNode(
       "condition",
       "condition",
@@ -1718,20 +1730,21 @@ describe("composition2d strict Phase 5 editor behavior", () => {
       typedNode: condition,
     };
 
-    expect(getStrictComposition2dPorts(node).map((port) => port.id)).toEqual([
-      "in",
-      "output:1",
-      "new-output",
-    ]);
+    const edges = [
+      {
+        id: "condition:default->out:in",
+        from: { nodeId: "condition", portId: "default" },
+        to: { nodeId: "out", portId: "in" },
+      } as StrictAnimationGraphEdge,
+    ];
+
+    expect(getStrictComposition2dPorts(node, edges).map((port) => port.id))
+      .toEqual(["in", "default", "output:1", "new-output"]);
     expect(
-      getStrictComposition2dPorts(node, [
-        {
-          id: "condition:default->out:in",
-          from: { nodeId: "condition", portId: "default" },
-          to: { nodeId: "out", portId: "in" },
-        } as StrictAnimationGraphEdge,
-      ]).map((port) => port.id),
-    ).toEqual(["in", "default", "output:1", "new-output"]);
+      getVisibleStrictComposition2dPorts(node, edges as any).map(
+        (port) => port.id,
+      ),
+    ).toEqual(["in", "new-output"]);
   });
 
   it("keeps strict condition inspector output values aligned with port ids", () => {

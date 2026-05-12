@@ -91,8 +91,8 @@ import type {
 } from "../../core/animationGraph/types";
 import type { PlaybackClock } from "../../app/types";
 import {
-  getPlaybackTimeSnapshot,
-  subscribePlaybackTime,
+  getMasterTimelineClockSnapshot,
+  subscribeMasterTimelineClock,
 } from "../../app/features/playback/playbackTimeStore";
 import {
   rasterizeSvgForExport,
@@ -474,14 +474,13 @@ export const FramePreview = memo(function FramePreview({
   }, [cameraRef, liveCameraTransform, transitionCameraStyle]);
 
   useEffect(() => {
-    if (!isPlaying || timelineMode !== "compose" || renderMode === "export")
-      return;
+    if (renderMode === "export") return;
 
     function syncFromPlaybackTime() {
-      const snapshot = getPlaybackTimeSnapshot();
-      if (!snapshot.playing) return;
+      const snapshot = getMasterTimelineClockSnapshot();
+      if (!snapshot.playing && snapshot.source !== "scrub") return;
       const currentPart = livePlaybackPartRef.current;
-      applyLiveComposePreviewTime(
+      applyLivePartPreviewTime(
         frameViewportRef.current,
         currentPart,
         snapshot.sceneTime - partStart + (currentPart.trimStart ?? 0),
@@ -489,8 +488,8 @@ export const FramePreview = memo(function FramePreview({
     }
 
     syncFromPlaybackTime();
-    return subscribePlaybackTime(syncFromPlaybackTime);
-  }, [frameViewportRef, isPlaying, partStart, renderMode, timelineMode]);
+    return subscribeMasterTimelineClock(syncFromPlaybackTime);
+  }, [frameViewportRef, partStart, renderMode]);
 
   useLayoutEffect(() => {
     const adjustmentOverlays = useTransitionComposite
@@ -902,7 +901,7 @@ function syncVisualAdjustmentOverlays(
   );
 }
 
-function applyLiveComposePreviewTime(
+function applyLivePartPreviewTime(
   root: HTMLElement | null,
   part: Part,
   time: number,
@@ -1509,7 +1508,7 @@ export const FrameObjectView = memo(function FrameObjectView({
   const objectRef = useRef<HTMLDivElement | null>(null);
   const editableRef = useRef<HTMLDivElement | null>(null);
   const lastCommittedTextRef = useRef<string | null>(null);
-  const wasEditingRef = useRef(false);
+  const editingObjectIdRef = useRef<string | null>(null);
   const objectTransform =
     typeof object.style.transform === "string"
       ? object.style.transform
@@ -1604,18 +1603,14 @@ export const FrameObjectView = memo(function FrameObjectView({
 
   useEffect(() => {
     if (!editing || !editableRef.current) {
-      wasEditingRef.current = false;
+      editingObjectIdRef.current = null;
       return;
     }
+    if (editingObjectIdRef.current === object.id) return;
     const currentCommittedText = JSON.stringify({
       content: object.content ?? "",
       richText: object.richText,
     });
-    if (
-      wasEditingRef.current &&
-      currentCommittedText === lastCommittedTextRef.current
-    )
-      return;
 
     const editable = editableRef.current;
     editable.replaceChildren(
@@ -1625,7 +1620,7 @@ export const FrameObjectView = memo(function FrameObjectView({
       ),
     );
     lastCommittedTextRef.current = currentCommittedText;
-    wasEditingRef.current = true;
+    editingObjectIdRef.current = object.id;
     editable.focus();
     const selection = window.getSelection();
     const range = document.createRange();
@@ -1756,7 +1751,6 @@ export const FrameObjectView = memo(function FrameObjectView({
           contentEditable
           suppressContentEditableWarning
           onBlur={commitTextEdit}
-          onInput={commitTextEdit}
           onKeyDown={onTextEditKeyDown}
           onPointerDown={(event) => event.stopPropagation()}
         />

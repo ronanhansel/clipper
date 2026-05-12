@@ -2,11 +2,13 @@ import { getAnimationGraphNodeDefinition } from "../../core/animationGraph/regis
 import { validateAnimationGraph } from "../../core/animationGraph/validation";
 import type {
   AnimationGraph,
+  AnimationGraphConditionConfig,
   AnimationGraphDiagnostic,
   AnimationGraphEdge,
   AnimationGraphExecutionTrace,
   AnimationGraphNode,
   AnimationGraphStreamTrace,
+  FieldOperator,
 } from "../../core/animationGraph/types";
 import { getGraphEffectPackageByEditorAlias } from "../../core/effects/registry";
 import { getGraphPortCompatibilityError } from "../../core/animationGraph/portCompatibility";
@@ -136,6 +138,18 @@ export function updateStrictComposition2dNodeParameter(
       },
     };
   const definition = getAnimationGraphNodeDefinition(node.kind);
+  if (node.kind === "condition") {
+    return {
+      ...graph,
+      nodes: {
+        ...graph.nodes,
+        [nodeId]: {
+          ...node,
+          config: updateStrictConditionControlConfig(node.config, key, value),
+        },
+      },
+    };
+  }
   if (!definition?.controls) return graph;
   if (!isStrictControlKey(definition.controls, key)) return graph;
   const nextConfig = updateStrictNodeControlConfig(
@@ -179,6 +193,18 @@ export function updateStrictComposition2dEditorNodeParameter(
       },
     };
   const definition = getAnimationGraphNodeDefinition(node.kind ?? "unknown");
+  if (node.kind === "condition") {
+    return {
+      ...graph,
+      nodes: {
+        ...(graph.nodes ?? {}),
+        [nodeId]: {
+          ...node,
+          config: updateStrictConditionControlConfig(node.config, key, value),
+        },
+      },
+    };
+  }
   if (!definition?.controls) return graph;
   if (!isStrictControlKey(definition.controls, key)) return graph;
   const nextConfig = updateStrictNodeControlConfig(
@@ -584,6 +610,24 @@ function getStrictControlFieldValue(
   return String(value ?? "");
 }
 
+function updateStrictConditionControlConfig(
+  config: unknown,
+  key: string,
+  value: string,
+): AnimationGraphConditionConfig {
+  const normalized = normalizeStrictConditionEditorConfig(config);
+  const values = strictConditionConfigToEditorValues(normalized);
+  let nextValues = { ...values, [key]: value };
+  if (key === "conditionCount")
+    nextValues = resizeConditionEditorValues(nextValues, value);
+  if (key === "__deleteCondition")
+    nextValues = deleteConditionEditorRule(
+      nextValues,
+      Number.parseInt(value, 10),
+    );
+  return editorValuesToStrictConditionConfig(nextValues);
+}
+
 function getStrictConditionParameterEditorSchema(
   node: StrictComposition2dCanvasNode,
   edges: readonly AnimationGraphEdge[],
@@ -827,9 +871,101 @@ function strictConditionConfigToEditorValues(
   return values;
 }
 
+function editorValuesToStrictConditionConfig(
+  values: Record<string, string>,
+): AnimationGraphConditionConfig {
+  const count = Math.min(
+    4,
+    Math.max(1, Number.parseInt(values.conditionCount ?? "1", 10) || 1),
+  );
+  const outputIds = new Set<string>();
+  const rules = Array.from({ length: count }, (_, index) => {
+    const suffix = index === 0 ? "" : String(index + 1);
+    const action = readStrictConditionAction(values[`action${suffix}`]);
+    const output = values[`outputPort${suffix}`] || `output:${index + 1}`;
+    if (action !== "setDelay") outputIds.add(output);
+    return {
+      target: "value" as const,
+      operator: readStrictConditionOperator(values[`matchType${suffix}`]),
+      value: values[`value${suffix}`] ?? "",
+      action,
+      output,
+      delay: parseSeconds(values[`delay${suffix}`] ?? "0s"),
+    };
+  });
+  return {
+    outputs: Array.from(outputIds).map((id) => ({
+      id,
+      label: id.replace(/^output:/, "Output "),
+    })),
+    rules,
+  };
+}
+
+function readStrictConditionAction(
+  value: string | undefined,
+): AnimationGraphConditionConfig["rules"][number]["action"] {
+  return value === "sendToOutput" || value === "duplicateToOutput"
+    ? value
+    : "setDelay";
+}
+
+function readStrictConditionOperator(value: string | undefined): FieldOperator {
+  return value === "textIncludes" ? "contains" : "equals";
+}
+
+function resizeConditionEditorValues(
+  values: Record<string, string>,
+  count: string,
+) {
+  return { ...values, conditionCount: count };
+}
+
+function deleteConditionEditorRule(
+  values: Record<string, string>,
+  index: number,
+) {
+  const count = Math.min(
+    4,
+    Math.max(1, Number.parseInt(values.conditionCount ?? "1", 10) || 1),
+  );
+  if (index <= 1 || index > count) return values;
+  const next: Record<string, string> = {
+    ...values,
+    conditionCount: String(count - 1),
+  };
+  for (let current = index; current < count; current += 1) {
+    const from = current === 1 ? "" : String(current + 1);
+    const to = current === 1 ? "" : String(current);
+    for (const field of [
+      "matchType",
+      "value",
+      "action",
+      "outputPort",
+      "delay",
+    ])
+      next[`${field}${to}`] = values[`${field}${from}`] ?? "";
+  }
+  const last = count === 1 ? "" : String(count);
+  for (const field of [
+    "matchType",
+    "value",
+    "action",
+    "outputPort",
+    "delay",
+  ])
+    delete next[`${field}${last}`];
+  return next;
+}
+
 function formatSeconds(value: number) {
   if (!Number.isFinite(value)) return "0s";
   return `${Math.round(value * 1000) / 1000}s`;
+}
+
+function parseSeconds(value: string) {
+  const numeric = Number.parseFloat(value);
+  return Number.isFinite(numeric) ? numeric : 0;
 }
 
 const matchTypeOptions = [

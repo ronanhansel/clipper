@@ -15,6 +15,10 @@ import {
 import { ChevronDown } from "lucide-react";
 import { createPortal } from "react-dom";
 import toast from "react-hot-toast";
+import {
+  getMasterTimelineClockSnapshot,
+  subscribeMasterTimelineClock,
+} from "../../app/features/playback/playbackTimeStore";
 import type { ContextMenuState } from "../../app/types";
 import {
   animationDefinitions,
@@ -800,6 +804,10 @@ export const ComposeAnimationGraphPanel = memo(
     const partRef = useRef<Part | null>(null);
     const projectGraphRef = useRef<AnimationGraphState | undefined>(undefined);
     const graphRef = useRef<AnimationGraphState | undefined>(undefined);
+    const lastKnownGraphRef = useRef<
+      AnimationGraphState | StrictAnimationGraph | null
+    >(null);
+    const lastKnownGraphInstanceKeyRef = useRef<string | null>(null);
     const displayGraphRef = useRef<AnimationGraphState | undefined>(undefined);
     const strictDisplayGraphRef = useRef<StrictAnimationGraph | undefined>(
       undefined,
@@ -868,8 +876,6 @@ export const ComposeAnimationGraphPanel = memo(
       onScrubEnd,
     });
     const projectGraph = part?.animationGraph;
-    const fullGraph =
-      pendingGraphSyncRef.current ?? optimisticGraph ?? projectGraph;
     const selectableObjects = part
       ? [...part.background.elements, ...part.objects]
       : [];
@@ -883,6 +889,20 @@ export const ComposeAnimationGraphPanel = memo(
       graphMode === "composition2d" && selectedObjects.length === 1
         ? selectedObjects[0].id
         : undefined;
+    const graphInstanceKey = `${part?.id ?? "__none__"}:composition2d:${graphViewportKey}`;
+    const scopedLastKnownGraph =
+      lastKnownGraphInstanceKeyRef.current === graphInstanceKey
+        ? lastKnownGraphRef.current
+        : null;
+    const fullGraph =
+      pendingGraphSyncRef.current ??
+      optimisticGraph ??
+      getGraphWithLastKnownFallback(
+        projectGraph,
+        scopedLastKnownGraph,
+        selectedLayerGraphId,
+        graphMode,
+      );
     const graph =
       selectedObjects.length === 1
         ? getSelectedComposition2dDisplayGraph(
@@ -897,7 +917,6 @@ export const ComposeAnimationGraphPanel = memo(
           );
     const legacyGraph = undefined;
     const customNodeScopeKey = graphViewportKey;
-    const graphInstanceKey = `${part?.id ?? "__none__"}:composition2d:${graphViewportKey}`;
     const hasSelectedGraph = selectedObjects.length > 0;
     const nodes = hasSelectedGraph
       ? buildGraphNodes(
@@ -933,6 +952,17 @@ export const ComposeAnimationGraphPanel = memo(
       .join("|");
     partRef.current = part;
     graphRef.current = fullGraph as any;
+    if (
+      selectedLayerGraphId &&
+      getSelectedComposition2dLayerGraph(
+        fullGraph,
+        selectedLayerGraphId,
+        graphMode,
+      )
+    ) {
+      lastKnownGraphRef.current = fullGraph ?? null;
+      lastKnownGraphInstanceKeyRef.current = graphInstanceKey;
+    }
     if (isStrictComposition2dGraph(graph)) {
       strictDisplayGraphRef.current = graph;
       displayGraphRef.current = undefined;
@@ -1031,6 +1061,18 @@ export const ComposeAnimationGraphPanel = memo(
       currentTimeRef.current = displayCurrentTime;
       if (active) scheduleDraw();
     }, [active, displayCurrentTime]);
+
+    useEffect(() => {
+      if (!active) return;
+      function syncFromMasterClock() {
+        const snapshot = getMasterTimelineClockSnapshot();
+        if (!snapshot.playing && snapshot.source !== "scrub") return;
+        currentTimeRef.current = snapshot.sceneTime;
+        scheduleDraw();
+      }
+      syncFromMasterClock();
+      return subscribeMasterTimelineClock(syncFromMasterClock);
+    }, [active]);
 
     useLayoutEffect(() => {
       if (!active) return;
@@ -1206,7 +1248,7 @@ export const ComposeAnimationGraphPanel = memo(
             }
           : null,
         ...getGraphPlaybackDrawSemantics({
-          graph: displayGraphRef.current,
+          graph: currentGraph as AnimationGraphState | undefined,
           nodes: drawNodes,
           objects: currentSelectedObjects,
           currentTime: currentTimeRef.current,
@@ -1655,10 +1697,16 @@ export const ComposeAnimationGraphPanel = memo(
       updater: (graph: StrictAnimationGraph) => StrictAnimationGraph,
       options: { local?: boolean; implicit?: boolean } = {},
     ) {
-      const baseGraph = pendingGraphSyncRef.current ?? graphRef.current;
       const sourceObject =
         selectedObjects.length === 1 ? selectedObjects[0] : undefined;
       if (!sourceObject) return;
+      const baseGraph =
+        pendingGraphSyncRef.current ??
+        graphRef.current ??
+        (lastKnownGraphInstanceKeyRef.current === graphInstanceKey
+          ? lastKnownGraphRef.current
+          : null) ??
+        undefined;
       const currentGraph = getSelectedComposition2dLayerGraph(
         baseGraph,
         sourceObject.id,
@@ -1680,7 +1728,7 @@ export const ComposeAnimationGraphPanel = memo(
         graphMode,
       );
       if (isStrictComposition2dGraph(nextGraph)) {
-        graphRef.current = undefined;
+        graphRef.current = nextGraph as any;
         pendingGraphSyncRef.current = null;
       } else {
         graphRef.current = nextGraph;
@@ -1688,6 +1736,8 @@ export const ComposeAnimationGraphPanel = memo(
       }
       strictDisplayGraphRef.current = nextLayerGraph;
       displayGraphRef.current = undefined;
+      lastKnownGraphRef.current = nextGraph;
+      lastKnownGraphInstanceKeyRef.current = graphInstanceKey;
       if (options.local !== false) setOptimisticGraph(nextGraph);
       onUpdateGraph?.(() => nextGraph, {
         implicit: options.implicit,
@@ -1707,7 +1757,13 @@ export const ComposeAnimationGraphPanel = memo(
     function applyGraphDraft(
       updater: (graph: GraphUpdateState | undefined) => GraphUpdateState,
     ) {
-      const baseGraph = pendingGraphSyncRef.current ?? graphRef.current;
+      const baseGraph =
+        pendingGraphSyncRef.current ??
+        graphRef.current ??
+        (lastKnownGraphInstanceKeyRef.current === graphInstanceKey
+          ? lastKnownGraphRef.current
+          : null) ??
+        undefined;
       const baseLayerGraph = getSelectedComposition2dLayerGraph(
         baseGraph,
         selectedLayerGraphId,
@@ -1732,6 +1788,8 @@ export const ComposeAnimationGraphPanel = memo(
         displayGraphRef.current = nextLayerGraph as AnimationGraphState;
       }
       pendingGraphSyncRef.current = nextGraph as any;
+      lastKnownGraphRef.current = nextGraph as any;
+      lastKnownGraphInstanceKeyRef.current = graphInstanceKey;
       setGraphDraftRevision((revision) => revision + 1);
       nodesRef.current = buildGraphNodes(
         selectedObjects,
@@ -3970,6 +4028,55 @@ function stripGraphViewportState(
   } as AnimationGraphState;
 }
 
+function getGraphWithLastKnownFallback(
+  graph: AnimationGraphState | StrictAnimationGraph | undefined,
+  lastKnownGraph: AnimationGraphState | StrictAnimationGraph | null,
+  layerId: string | undefined,
+  mode: GraphCompositionMode,
+): AnimationGraphState | StrictAnimationGraph | undefined {
+  if (mode !== "composition2d" || !layerId) return graph;
+  const currentLayerGraph = getSelectedComposition2dLayerGraph(
+    graph,
+    layerId,
+    mode,
+  );
+  const lastLayerGraph = getSelectedComposition2dLayerGraph(
+    lastKnownGraph ?? undefined,
+    layerId,
+    mode,
+  );
+  if (!currentLayerGraph && lastLayerGraph) return lastKnownGraph ?? undefined;
+  if (
+    currentLayerGraph &&
+    lastLayerGraph &&
+    isDefaultComposition2dDisplayGraph(currentLayerGraph, layerId) &&
+    !isDefaultComposition2dDisplayGraph(lastLayerGraph, layerId)
+  )
+    return lastKnownGraph ?? undefined;
+  return graph;
+}
+
+function isDefaultComposition2dDisplayGraph(
+  graph: AnimationGraphState | StrictAnimationGraph,
+  layerId: string,
+) {
+  if (!isStrictComposition2dGraph(graph)) return false;
+  const sourceId = `source:${layerId}`;
+  const outId = composition2dOutNodeId;
+  const nodeIds = Object.keys(graph.nodes ?? {});
+  return (
+    graph.sourceObjectId === layerId &&
+    nodeIds.length === 2 &&
+    nodeIds.includes(sourceId) &&
+    nodeIds.includes(outId) &&
+    (graph.edges ?? []).length === 1 &&
+    graph.edges[0]?.from.nodeId === sourceId &&
+    graph.edges[0]?.from.portId === "out" &&
+    graph.edges[0]?.to.nodeId === outId &&
+    graph.edges[0]?.to.portId === "in"
+  );
+}
+
 export function getSelectedComposition2dLayerGraph(
   graph: AnimationGraphState | StrictAnimationGraph | undefined,
   layerId: string | undefined,
@@ -6008,6 +6115,13 @@ export function getVisibleStrictComposition2dPorts(
   edges: readonly RenderableGraphEdge[] = [],
 ) {
   const ports = getStrictComposition2dPorts(node, edges);
+  const conditionOutputBusId =
+    node.kind === "condition"
+      ? (ports.find(
+          (port) =>
+            port.direction === "output" && port.id === "new-output",
+        )?.id ?? null)
+      : null;
   const hiddenParameterInputIds = new Set(
     ports
       .filter(
@@ -6023,7 +6137,17 @@ export function getVisibleStrictComposition2dPorts(
       )
       .map((port) => port.id),
   );
-  return ports.filter((port) => !hiddenParameterInputIds.has(port.id));
+  return ports.filter((port) => {
+    if (hiddenParameterInputIds.has(port.id)) return false;
+    if (
+      conditionOutputBusId &&
+      port.direction === "output" &&
+      port.type.kind === "animation" &&
+      port.id !== conditionOutputBusId
+    )
+      return false;
+    return true;
+  });
 }
 
 function getStrictInputBusPortId(port: GraphPortDefinition) {
@@ -6201,6 +6325,15 @@ function getVisiblePortForStrictPortId(
   const rawPort = getStrictComposition2dPorts(node, edges).find(
     (candidate) => candidate.id === portId && candidate.direction === direction,
   );
+  if (
+    rawPort?.direction === "output" &&
+    node.kind === "condition" &&
+    rawPort.type.kind === "animation"
+  )
+    return getVisibleStrictComposition2dPorts(node, edges).find(
+      (candidate) =>
+        candidate.direction === "output" && candidate.id === "new-output",
+    );
   if (!rawPort || rawPort.direction !== "input") return null;
   return getVisibleStrictComposition2dPorts(node, edges).find(
     (candidate) =>

@@ -1,36 +1,57 @@
-type PlaybackTimeSnapshot = {
+export type MasterTimelineClockSnapshot = {
   sceneTime: number;
   displayTime: number;
   playing: boolean;
+  source: "idle" | "playback" | "scrub";
+  updatedAt: number;
 };
 
 type Listener = () => void;
 
-let snapshot: PlaybackTimeSnapshot = {
+let snapshot: MasterTimelineClockSnapshot = {
   sceneTime: 0,
   displayTime: 0,
   playing: false,
+  source: "idle",
+  updatedAt: 0,
 };
 const listeners = new Set<Listener>();
 
-export function getPlaybackTimeSnapshot() {
+export function getMasterTimelineClockSnapshot() {
   return snapshot;
 }
 
-export function subscribePlaybackTime(listener: Listener) {
+export function subscribeMasterTimelineClock(listener: Listener) {
   listeners.add(listener);
   return () => {
     listeners.delete(listener);
   };
 }
 
-export function publishPlaybackTime(next: PlaybackTimeSnapshot) {
+export function publishMasterTimelineClock(
+  next: Omit<MasterTimelineClockSnapshot, "updatedAt"> & {
+    updatedAt?: number;
+  },
+) {
+  const nextSnapshot = {
+    ...next,
+    updatedAt: next.updatedAt ?? readClockNow(),
+  };
   if (
-    snapshot.sceneTime === next.sceneTime &&
-    snapshot.displayTime === next.displayTime &&
-    snapshot.playing === next.playing
+    snapshot.sceneTime === nextSnapshot.sceneTime &&
+    snapshot.displayTime === nextSnapshot.displayTime &&
+    snapshot.playing === nextSnapshot.playing &&
+    snapshot.source === nextSnapshot.source
   )
     return;
-  snapshot = next;
+  snapshot = nextSnapshot;
   for (const listener of listeners) listener();
+}
+
+export const getPlaybackTimeSnapshot = getMasterTimelineClockSnapshot;
+export const subscribePlaybackTime = subscribeMasterTimelineClock;
+export const publishPlaybackTime = publishMasterTimelineClock;
+
+function readClockNow() {
+  return typeof performance === "undefined" ? Date.now() : performance.now();
 }

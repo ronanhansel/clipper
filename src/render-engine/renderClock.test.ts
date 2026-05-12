@@ -86,6 +86,24 @@ describe("render clock", () => {
     expect(animation.play).toHaveBeenCalledOnce();
   });
 
+  it("repins playing animations when drift exceeds two high-refresh frames", () => {
+    const animation = { currentTime: 0, play: vi.fn(), pause: vi.fn() };
+
+    syncDomAnimationListToRenderClock([animation], {
+      playing: true,
+      time: 0.25,
+    });
+    animation.currentTime = 560;
+    const result = syncDomAnimationListToRenderClock([animation], {
+      playing: true,
+      time: 0.5,
+    });
+
+    expect(result.pinnedCount).toBe(1);
+    expect(animation.currentTime).toBe(500);
+    expect(animation.play).toHaveBeenCalledOnce();
+  });
+
   it("pins animations inside shadow-root HTML layers", () => {
     const hostAnimation = { currentTime: 0, play: vi.fn(), pause: vi.fn() };
     const shadowAnimation = { currentTime: 0, play: vi.fn(), pause: vi.fn() };

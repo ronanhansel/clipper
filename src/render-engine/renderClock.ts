@@ -113,7 +113,7 @@ const renderClockPlayState = new WeakMap<
   DomAnimationLike,
   { playing: boolean }
 >();
-const renderClockResyncThresholdMs = 80;
+const renderClockResyncThresholdMs = 24;
 
 function getAnimationPhaseOffset(animation: DomAnimationLike) {
   const cached = renderClockPhaseOffset.get(animation);

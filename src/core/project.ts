@@ -1342,7 +1342,7 @@ export function applyAnimationGraphToComposition(
       !generatedGeometry.length &&
       baseAnimations.length === (object.animations ?? []).length
     )
-      return graph && !isAnimationGraphObjectConnectedToOut(object.id, graph)
+      return graph && !hasGraphObjectOutput(object, graph, graphCompile)
         ? { ...object, hidden: true, animations: [] }
         : object;
     return {
@@ -1371,7 +1371,7 @@ export function applyAnimationGraphToComposition(
       !generatedGeometry.length &&
       baseAnimations.length === (object.animations ?? []).length
     )
-      return graph && !isAnimationGraphObjectConnectedToOut(object.id, graph)
+      return graph && !hasGraphObjectOutput(object, graph, graphCompile)
         ? { ...object, hidden: true, animations: [] }
         : object;
     return {
@@ -1406,6 +1406,21 @@ export function applyAnimationGraphToComposition(
         },
       }
     : composition;
+}
+
+function hasGraphObjectOutput(
+  object: FrameObject,
+  graph: StrictAnimationGraph,
+  compile: AnimationGraphObjectCompileResult | undefined,
+) {
+  if (graph.sourceObjectId !== object.id) return true;
+  return Boolean(
+    compile?.streams.some((stream) =>
+      stream.renderObject
+        ? stream.renderObject.id === object.id
+        : "objectId" in stream.structure && stream.structure.objectId === object.id,
+    ),
+  );
 }
 
 export function pruneTypedAnimationGraphForObjects(
