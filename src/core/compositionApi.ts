@@ -280,7 +280,9 @@ export class ThreeLayer extends Html {
     super({
       ...props,
       content: `<div id="${escapeHtmlAttribute(rootId)}" data-clipper-three-root style="width:100%;height:100%;"></div><script type="module">
-const root = document.getElementById(${JSON.stringify(rootId)});
+const script = document.currentScript;
+const container = script ? script.getRootNode() : document;
+const root = container.querySelector("#" + ${JSON.stringify(rootId)});
 root.dataset.clipperThreePending = "true";
 try {
   const THREE = await import("https://esm.sh/three@0.181.2");

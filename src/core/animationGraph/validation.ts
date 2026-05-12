@@ -23,6 +23,7 @@ export function validateAnimationGraph(graph: AnimationGraph) {
       continue;
     }
     definitions.set(node.id, definition);
+    diagnostics.push(...validateNodeConfig(definition, node));
   }
 
   validateExactNodeKind(
@@ -119,6 +120,51 @@ export function validateAnimationGraph(graph: AnimationGraph) {
     }
   }
 
+  return diagnostics;
+}
+
+function validateNodeConfig(
+  definition: AnimationGraphNodeDefinition,
+  node: AnimationGraph["nodes"][string],
+) {
+  const diagnostics: AnimationGraphDiagnostic[] = [];
+  const config =
+    typeof node.config === "object" && node.config !== null
+      ? (node.config as Record<string, unknown>)
+      : {};
+  const params =
+    typeof config.params === "object" && config.params !== null
+      ? (config.params as Record<string, unknown>)
+      : undefined;
+  for (const group of definition.controls ?? []) {
+    for (const field of group.fields) {
+      const value = params?.[field.key] ?? config[field.key];
+      if (value === undefined || value === "") continue;
+      if (
+        field.type === "number" &&
+        (typeof value !== "number" || !Number.isFinite(value))
+      ) {
+        diagnostics.push({
+          severity: "error",
+          message: `Invalid number for "${field.key}". Using default ${field.defaultValue}.`,
+          nodeId: node.id,
+          portId: field.key,
+        });
+      }
+    }
+  }
+  if (
+    (node.kind === "value:noise" || node.kind === "value:random") &&
+    "seed" in config &&
+    !Number.isFinite(Number(config.seed))
+  ) {
+    diagnostics.push({
+      severity: "error",
+      message: 'Invalid number for "seed". Using default 0.',
+      nodeId: node.id,
+      portId: "seed",
+    });
+  }
   return diagnostics;
 }
 

@@ -11,6 +11,7 @@ import {
   getAnimationGraphNodeDefinition,
   registerEffectAnimationGraphNodeDefinition,
 } from "./registry";
+import { validateAnimationGraph } from "./validation";
 import { registerEffectPackage } from "../effects/registry";
 import type { AdjustmentEffectPackage } from "../effects/types";
 import type { AnimationGraph, GraphStream, ValueStream } from "./types";
@@ -213,7 +214,7 @@ describe("compileAnimationGraph", () => {
     });
   });
 
-  it("rejects geometry output that is not rooted in Source", () => {
+  it("compiles rootless geometry as graph-owned virtual object", () => {
     const result = compileAnimationGraph(
       graph(
         {
@@ -225,15 +226,72 @@ describe("compileAnimationGraph", () => {
       ),
     );
 
+    expect(result.diagnostics).toEqual([]);
     expect(result.generatedGeometry).toEqual([]);
-    expect(result.diagnostics).toContainEqual(
+    expect(result.generatedObjects).toEqual([
       expect.objectContaining({
-        severity: "error",
-        message: 'Required input port "in" is disconnected.',
-        nodeId: "rect",
-        portId: "in",
+        id: "graph:graph:rect",
+        generatedByGraph: true,
+        generatedGeometry: [expect.objectContaining({ type: "shape" })],
       }),
+    ]);
+  });
+
+  it("compiles graph-owned text node into virtual render object", () => {
+    const result = compileAnimationGraph(
+      graph(
+        {
+          source: node("source", "source"),
+          text: node("text", "virtual:text", {
+            content: "Hello",
+            x: 24,
+            y: 32,
+            width: 240,
+            height: 80,
+          }),
+          out: node("out", "out"),
+        },
+        [edge("text", "out", "out")],
+      ),
     );
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.generatedObjects).toEqual([
+      expect.objectContaining({
+        id: "graph:graph:text",
+        type: "text",
+        content: "Hello",
+        bounds: { x: 24, y: 32, width: 240, height: 80 },
+      }),
+    ]);
+  });
+
+  it("uses Out renderOrder config for generated object z-order", () => {
+    const result = compileAnimationGraph(
+      graph(
+        {
+          source: node("source", "source"),
+          back: node("back", "geometry:rectangle", { width: 100 }),
+          front: node("front", "virtual:text", { content: "Top" }),
+          out: node("out", "out", { renderOrder: ["front-edge", "back-edge"] }),
+        },
+        [
+          {
+            ...edge("back", "out", "out"),
+            id: "back-edge",
+          },
+          {
+            ...edge("front", "out", "out"),
+            id: "front-edge",
+          },
+        ],
+      ),
+    );
+
+    expect(result.generatedObjects.map((object) => object.id)).toEqual([
+      "graph:graph:front",
+      "graph:graph:back",
+    ]);
   });
 
   it("evaluates geometry fields with compile time and frame context", () => {
@@ -657,7 +715,7 @@ describe("compileAnimationGraph", () => {
     expect(result.animations[0].options.split?.tokenIndexes).toEqual([1]);
   });
 
-  it("uses value and math nodes to drive opacity, position, and blur parameters", () => {
+  it("uses value and math nodes to drive static opacity, position, and blur parameters without time", () => {
     const result = compileAnimationGraph(
       graph(
         {
@@ -699,10 +757,62 @@ describe("compileAnimationGraph", () => {
       result.diagnostics.filter((item) => item.severity === "error"),
     ).toEqual([]);
     expect(result.animations.map((animation) => animation.keyframes)).toEqual([
-      { x: [0, 40], y: [0, 15] },
-      { opacity: [1, 0.35] },
-      { blur: [0, 12] },
+      { x: [40, 40], y: [15, 15] },
+      { opacity: [0.35, 0.35] },
+      { blur: [12, 12] },
     ]);
+  });
+
+  it("uses explicit time nodes to animate graph effect parameters", () => {
+    const result = compileAnimationGraph(
+      graph(
+        {
+          source: node("source", "source", { objectId: "text" }),
+          time: node("time", "time", { duration: 2 }),
+          blur: node("blur", "effect:clipper.adjustment.blur", {
+            params: { radius: 20 },
+          }),
+          out: node("out", "out"),
+        },
+        [
+          edge("source", "out", "time"),
+          edge("time", "out", "blur"),
+          edge("blur", "out", "out"),
+        ],
+      ),
+      { sourceObject: textObject },
+    );
+
+    expect(result.animations[0]).toMatchObject({
+      keyframes: { blur: [0, 20] },
+      options: { duration: 2 },
+    });
+  });
+
+  it("applies downstream time nodes to effects already on the stream", () => {
+    const result = compileAnimationGraph(
+      graph(
+        {
+          source: node("source", "source", { objectId: "text" }),
+          blur: node("blur", "effect:clipper.adjustment.blur", {
+            params: { radius: 20 },
+          }),
+          time: node("time", "time", { duration: 2 }),
+          out: node("out", "out"),
+        },
+        [
+          edge("source", "out", "blur"),
+          edge("blur", "out", "time"),
+          edge("time", "out", "out"),
+        ],
+      ),
+      { sourceObject: textObject },
+    );
+
+    expect(result.animations[0]).toMatchObject({
+      keyframes: { blur: [0, 20] },
+      options: { duration: 2 },
+    });
   });
 
   it("uses condition comparison to drive effect parameters", () => {
@@ -741,7 +851,7 @@ describe("compileAnimationGraph", () => {
     );
 
     expect(result.animations[0]).toMatchObject({
-      keyframes: { blur: [0, 8] },
+      keyframes: { blur: [8, 8] },
       options: { split: { tokenIndexes: [0, 2] } },
     });
   });
@@ -875,6 +985,169 @@ describe("compileAnimationGraph", () => {
     expect(execute("value:noise", "noiseA")?.value).not.toEqual(
       execute("value:noise", "noiseB")?.value,
     );
+  });
+
+  it("reports invalid random seed config and evaluates with default seed", () => {
+    const definition = getAnimationGraphNodeDefinition("value:noise")!;
+    const graph: AnimationGraph = {
+      id: "invalid-seed",
+      sourceObjectId: "text",
+      nodes: {
+        source: node("source", "source", { objectId: "text" }),
+        noise: node("noise", "value:noise", {
+          min: 0,
+          max: 1,
+          sample: 0,
+          seed: "3dsa",
+        }),
+        out: node("out", "out"),
+      },
+      edges: [],
+    };
+    const result = definition.execute(
+      {
+        node: node("noise", "value:noise", {
+          min: 0,
+          max: 1,
+          sample: 0,
+          seed: "3dsa",
+        }),
+        inputs: new Map(),
+      },
+      emptyCompileContext,
+    );
+    const fallbackResult = definition.execute(
+      {
+        node: node("noise", "value:noise", {
+          min: 0,
+          max: 1,
+          sample: 0,
+          seed: 0,
+        }),
+        inputs: new Map(),
+      },
+      emptyCompileContext,
+    );
+
+    expect(validateAnimationGraph(graph)).toContainEqual({
+      severity: "error",
+      message: 'Invalid number for "seed". Using default 0.',
+      nodeId: "noise",
+      portId: "seed",
+    });
+    expect(valueStream(result.outputs.get("value")?.[0])?.value).toBe(
+      valueStream(fallbackResult.outputs.get("value")?.[0])?.value,
+    );
+  });
+
+  it("lets procedural value nodes read explicit typed number inputs", () => {
+    const numberInput = (id: string, value: number): ValueStream => ({
+      id,
+      valueType: "number",
+      value,
+    });
+    const executeNoise = (sample: number) =>
+      valueStream(
+        getAnimationGraphNodeDefinition("value:noise")
+          ?.execute(
+            {
+              node: node("noise", "value:noise", {
+                min: 0,
+                max: 1,
+                sample: 0,
+                seed: "same",
+              }),
+              inputs: new Map([
+                ["min", [numberInput("min", 10)]],
+                ["max", [numberInput("max", 20)]],
+                ["sample", [numberInput("sample", sample)]],
+              ]),
+            },
+            emptyCompileContext,
+          )
+          .outputs.get("value")?.[0],
+      )?.value;
+
+    expect(
+      getAnimationGraphNodeDefinition("value:noise")
+        ?.getPorts(node("noise", "value:noise"))
+        .map((port) => port.id),
+    ).toEqual(["input:number", "min", "max", "sample", "value"]);
+    expect(executeNoise(12)).toEqual(executeNoise(12));
+    expect(executeNoise(12)).not.toEqual(executeNoise(13));
+    expect(Number(executeNoise(12))).toBeGreaterThanOrEqual(10);
+    expect(Number(executeNoise(12))).toBeLessThanOrEqual(20);
+  });
+
+  it("emits deterministic time value nodes from compile context", () => {
+    const seconds = valueStream(
+      getAnimationGraphNodeDefinition("value:time:seconds")
+        ?.execute(
+          { node: node("seconds", "value:time:seconds"), inputs: new Map() },
+          { graph: graph({}, []), time: 2.5, frame: 75 },
+        )
+        .outputs.get("value")?.[0],
+    );
+    const frame = valueStream(
+      getAnimationGraphNodeDefinition("value:time:frame")
+        ?.execute(
+          { node: node("frame", "value:time:frame"), inputs: new Map() },
+          { graph: graph({}, []), time: 2.5, frame: 75 },
+        )
+        .outputs.get("value")?.[0],
+    );
+    const oscillator = valueStream(
+      getAnimationGraphNodeDefinition("value:time:oscillator")
+        ?.execute(
+          {
+            node: node("osc", "value:time:oscillator", {
+              frequency: 0.25,
+              amplitude: 10,
+              offset: 20,
+              phase: 0,
+            }),
+            inputs: new Map(),
+          },
+          { graph: graph({}, []), time: 1, frame: 30 },
+        )
+        .outputs.get("value")?.[0],
+    );
+
+    expect(seconds?.value).toBe(2.5);
+    expect(frame?.value).toBe(75);
+    expect(oscillator?.value).toBeCloseTo(30);
+  });
+
+  it("recomputes time value effect parameters from compile time", () => {
+    const inputGraph = graph(
+      {
+        source: node("source", "source", { objectId: "text" }),
+        seconds: node("seconds", "value:time:seconds"),
+        blur: node("blur", "effect:clipper.adjustment.blur", {
+          params: { radius: 0 },
+        }),
+        out: node("out", "out"),
+      },
+      [
+        edge("source", "out", "blur"),
+        edge("seconds", "value", "blur", "radius"),
+        edge("blur", "out", "out"),
+      ],
+    );
+
+    const atOne = compileAnimationGraph(inputGraph, {
+      sourceObject: textObject,
+      time: 1,
+      frame: 30,
+    });
+    const atTwo = compileAnimationGraph(inputGraph, {
+      sourceObject: textObject,
+      time: 2,
+      frame: 60,
+    });
+
+    expect(atOne.animations[0].keyframes).toEqual({ blur: [1, 1] });
+    expect(atTwo.animations[0].keyframes).toEqual({ blur: [2, 2] });
   });
 
   it("applies downstream time to matched condition branch", () => {
@@ -1206,11 +1479,11 @@ describe("compileAnimationGraph", () => {
 
     expect(result.diagnostics).toEqual([]);
     expect(result.animations.map((animation) => animation.keyframes)).toEqual([
-      { opacity: [1, 0.25] },
-      { x: [0, 10], y: [0, 5] },
-      { scale: [1, 1.5] },
-      { rotate: [0, 30] },
-      { blur: [0, 8] },
+      { opacity: [0.25, 0.25] },
+      { x: [10, 10], y: [5, 5] },
+      { scale: [1.5, 1.5] },
+      { rotate: [30, 30] },
+      { blur: [8, 8] },
     ]);
   });
 
@@ -1510,6 +1783,35 @@ describe("compileAnimationGraph", () => {
     ]);
   });
 
+  it("coalesces unreachable branch warnings by source output", () => {
+    const result = compileAnimationGraph(
+      graph(
+        {
+          source: node("source", "source", { objectId: "text" }),
+          live: node("live", "time"),
+          deadA: node("deadA", "time"),
+          deadB: node("deadB", "time"),
+          out: node("out", "out"),
+        },
+        [
+          edge("source", "out", "live"),
+          edge("live", "out", "out"),
+          edge("source", "out", "deadA"),
+          edge("source", "out", "deadB"),
+        ],
+      ),
+      { sourceObject: textObject },
+    );
+
+    expect(
+      result.diagnostics.filter(
+        (diagnostic) =>
+          diagnostic.message ===
+          'Branch from "source:out" does not reach Out and will not affect output.',
+      ),
+    ).toHaveLength(1);
+  });
+
   it("records operation kinds for planned value, branch, stream, effect, and output work", () => {
     const inputGraph = graph(
       {
@@ -1594,7 +1896,7 @@ describe("compileAnimationGraph", () => {
     ]);
     expect(result.animations).toHaveLength(1);
     expect(result.animations[0]).toMatchObject({
-      keyframes: { opacity: [1, 0] },
+      keyframes: { opacity: [0, 0] },
       options: { split: { tokenIndexes: [0, 2] } },
     });
   });

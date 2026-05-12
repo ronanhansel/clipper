@@ -48,6 +48,7 @@ import {
   compileAnimationGraphForObject,
   isAnimationGraphObjectConnectedToOut,
   type AnimationGraphObjectCompileResult,
+  type AnimationGraphCompileOptions,
 } from "./animationGraph/compiler";
 import { validateAnimationGraph } from "./animationGraph/validation";
 import type {
@@ -1312,15 +1313,27 @@ function getScenesFromTimelines(
 export function applyAnimationGraphToComposition(
   composition: CompositionClip,
   graph: StrictAnimationGraph | undefined,
+  options: Omit<AnimationGraphCompileOptions, "sourceObject" | "trace"> = {},
 ): CompositionClip {
-  if (!composition.objects?.length && !composition.background.elements.length)
+  if (
+    !graph &&
+    !composition.objects?.length &&
+    !composition.background.elements.length
+  )
     return composition;
-  const nextObjects = composition.objects.map((object) => {
+  const baseObjects = stripGraphGeneratedObjects(composition.objects ?? []);
+  const baseBackgroundElements = stripGraphGeneratedObjects(
+    composition.background.elements ?? [],
+  );
+  const generatedObjects: FrameObject[] = [];
+  const generatedBackgroundElements: FrameObject[] = [];
+  const nextObjects = baseObjects.map((object) => {
     const graphCompile = graph
-      ? compileGraphForObject(object, graph)
+      ? compileGraphForObject(object, graph, options)
       : undefined;
     const graphAnimations = graphCompile?.animations ?? [];
     const generatedGeometry = graphCompile?.generatedGeometry ?? [];
+    generatedObjects.push(...(graphCompile?.generatedObjects ?? []));
     const baseAnimations = (object.animations ?? []).filter(
       (animation) => !animation.id.startsWith("graph:"),
     );
@@ -1343,49 +1356,53 @@ export function applyAnimationGraphToComposition(
         : undefined,
     };
   });
-  const nextBackgroundElements = composition.background.elements.map(
-    (object) => {
-      const graphCompile = graph
-        ? compileGraphForObject(object, graph)
-        : undefined;
-      const graphAnimations = graphCompile?.animations ?? [];
-      const generatedGeometry = graphCompile?.generatedGeometry ?? [];
-      const baseAnimations = (object.animations ?? []).filter(
-        (animation) => !animation.id.startsWith("graph:"),
-      );
-      if (
-        !graphAnimations.length &&
-        !generatedGeometry.length &&
-        baseAnimations.length === (object.animations ?? []).length
-      )
-        return graph && !isAnimationGraphObjectConnectedToOut(object.id, graph)
-          ? { ...object, hidden: true, animations: [] }
-          : object;
-      return {
-        ...object,
-        hidden: graph
-          ? !isAnimationGraphObjectConnectedToOut(object.id, graph)
-          : object.hidden,
-        animations: [...baseAnimations, ...graphAnimations],
-        generatedGeometry: generatedGeometry.length
-          ? generatedGeometry
-          : undefined,
-      };
-    },
-  );
+  const nextBackgroundElements = baseBackgroundElements.map((object) => {
+    const graphCompile = graph
+      ? compileGraphForObject(object, graph, options)
+      : undefined;
+    const graphAnimations = graphCompile?.animations ?? [];
+    const generatedGeometry = graphCompile?.generatedGeometry ?? [];
+    generatedBackgroundElements.push(...(graphCompile?.generatedObjects ?? []));
+    const baseAnimations = (object.animations ?? []).filter(
+      (animation) => !animation.id.startsWith("graph:"),
+    );
+    if (
+      !graphAnimations.length &&
+      !generatedGeometry.length &&
+      baseAnimations.length === (object.animations ?? []).length
+    )
+      return graph && !isAnimationGraphObjectConnectedToOut(object.id, graph)
+        ? { ...object, hidden: true, animations: [] }
+        : object;
+    return {
+      ...object,
+      hidden: graph
+        ? !isAnimationGraphObjectConnectedToOut(object.id, graph)
+        : object.hidden,
+      animations: [...baseAnimations, ...graphAnimations],
+      generatedGeometry: generatedGeometry.length
+        ? generatedGeometry
+        : undefined,
+    };
+  });
   const objectsChanged = nextObjects.some(
-    (object, index) => object !== composition.objects[index],
+    (object, index) => object !== baseObjects[index],
   );
   const backgroundChanged = nextBackgroundElements.some(
-    (object, index) => object !== composition.background.elements[index],
+    (object, index) => object !== baseBackgroundElements[index],
   );
-  return objectsChanged || backgroundChanged
+  const hasGeneratedObjects =
+    generatedObjects.length > 0 ||
+    generatedBackgroundElements.length > 0 ||
+    baseObjects.length !== (composition.objects ?? []).length ||
+    baseBackgroundElements.length !== composition.background.elements.length;
+  return objectsChanged || backgroundChanged || hasGeneratedObjects
     ? {
         ...composition,
-        objects: nextObjects,
+        objects: [...nextObjects, ...generatedObjects],
         background: {
           ...composition.background,
-          elements: nextBackgroundElements,
+          elements: [...nextBackgroundElements, ...generatedBackgroundElements],
         },
       }
     : composition;
@@ -1403,8 +1420,9 @@ export function pruneTypedAnimationGraphForObjects(
 function compileGraphForObject(
   object: FrameObject,
   graph: StrictAnimationGraph,
+  options: Omit<AnimationGraphCompileOptions, "sourceObject" | "trace"> = {},
 ): AnimationGraphObjectCompileResult {
-  return compileAnimationGraphForObject(object, graph);
+  return compileAnimationGraphForObject(object, graph, options);
 }
 
 export function serializeProjectForSave(
@@ -1450,10 +1468,14 @@ function stripEmbeddedCompositionSources(
 }
 
 function stripGeneratedGraphGeometry(objects: FrameObject[]) {
-  return objects.map(
+  return stripGraphGeneratedObjects(objects).map(
     ({ generatedGeometry: _generatedGeometry, ...object }) =>
       object as FrameObject,
   );
+}
+
+function stripGraphGeneratedObjects(objects: FrameObject[]) {
+  return objects.filter((object) => !object.generatedByGraph);
 }
 
 function pruneStaleAdjustmentLayers(project: ProjectManifest): ProjectManifest {

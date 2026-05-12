@@ -13,6 +13,7 @@ import { sourceNodeDefinition } from "./builtins/source/definition";
 import { splitNodeDefinition } from "./builtins/split/definition";
 import { timeNodeDefinition } from "./builtins/time/definition";
 import { valueNodeDefinitions } from "./builtins/value/definition";
+import { virtualNodeDefinitions } from "./builtins/virtual/definition";
 import type { EffectPackage } from "../effects/types";
 import { getGraphEffectPackages } from "../effects/registry";
 import type {
@@ -21,6 +22,7 @@ import type {
   AnimationGraphNodeDefinition,
   AnimationGraphNodePackage,
   Field,
+  GraphPortDefinition,
   GraphStream,
   ValueStream,
   ValueStreamType,
@@ -118,7 +120,14 @@ export function createEffectAnimationGraphNodeDefinition(
         }
       : {}),
     getPorts: () => [
-      animationInputPort("in", "In", acceptedStructureKinds),
+      animationInputPort(
+        "in",
+        "In",
+        acceptedStructureKinds,
+        undefined,
+        "multi",
+      ),
+      ...getGraphParameterTypeBusPorts(effectPackage),
       ...getGraphParameterPorts(effectPackage),
       animationOutputPort("out", "Out", acceptedStructureKinds),
     ],
@@ -199,6 +208,7 @@ registerAnimationGraphNodeDefinitions([
   conditionNodeDefinition,
   macroNodeDefinition,
   ...geometryNodeDefinitions,
+  ...virtualNodeDefinitions,
   ...valueNodeDefinitions,
   outNodeDefinition,
   ...getGraphEffectPackages().map(createEffectAnimationGraphNodeDefinition),
@@ -225,6 +235,66 @@ function getGraphParameterPorts(effectPackage: EffectPackage) {
         },
     role: "parameter" as const,
   }));
+}
+
+function getGraphParameterTypeBusPorts(effectPackage: EffectPackage) {
+  const ports = new Map<string, GraphPortDefinition>();
+  for (const control of getGraphParamControls(effectPackage)) {
+    const type = effectPackage.graph?.paramPorts?.[control.key]?.acceptsField
+      ? ("anyValue" as const)
+      : getGraphParamValueType(effectPackage, control.key, control.type);
+    const key = typeof type === "string" ? `value:${type}` : type;
+    if (ports.has(key)) continue;
+    ports.set(
+      key,
+      type === "anyValue"
+        ? anyValueInputPort("input:anyValue", "Value Inputs", "multi")
+        : valueInputPort(
+            `input:${type}`,
+            `${formatValueTypeLabel(type)} Inputs`,
+            type,
+            "multi",
+          ),
+    );
+  }
+  return Array.from(ports.values());
+}
+
+function valueInputPort(
+  id: string,
+  label: string,
+  valueType: ValueStreamType,
+  cardinality: GraphPortDefinition["cardinality"] = "single",
+): GraphPortDefinition {
+  return {
+    id,
+    label,
+    direction: "input",
+    cardinality,
+    type: { kind: "value", valueType },
+    role: "parameter",
+  };
+}
+
+function anyValueInputPort(
+  id: string,
+  label: string,
+  cardinality: GraphPortDefinition["cardinality"] = "single",
+): GraphPortDefinition {
+  return {
+    id,
+    label,
+    direction: "input",
+    cardinality,
+    type: { kind: "anyValue" },
+    role: "parameter",
+  };
+}
+
+function formatValueTypeLabel(valueType: ValueStreamType) {
+  return valueType
+    .replace(/Array$/, " Array")
+    .replace(/^[a-z]/, (match) => match.toUpperCase());
 }
 
 function getGraphParamControls(effectPackage: EffectPackage) {

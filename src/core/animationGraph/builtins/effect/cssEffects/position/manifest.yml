@@ -2,7 +2,6 @@
   "property": "position",
   "label": "Position",
   "category": "Effect",
-  "popover": { "width": 238, "height": 164 },
   "fieldGroups":
     [
       {

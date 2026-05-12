@@ -659,7 +659,7 @@ export function OsFileManager({
           { label: "New File", action: () => void createNewFile(targetPath) },
           {
             label: "Composition",
-            children: getCompositionCreateMenuItems(targetPath),
+            action: () => void createNewComposition(targetPath),
           },
           {
             label: "New Timeline",
@@ -691,7 +691,7 @@ export function OsFileManager({
           },
           {
             label: "Composition",
-            children: getCompositionCreateMenuItems(node.data.path),
+            action: () => void createNewComposition(node.data.path),
           },
           {
             label: "New Timeline",
@@ -804,15 +804,6 @@ export function OsFileManager({
         error instanceof Error ? error.message : "Unable to create file.",
       );
     }
-  }
-
-  function getCompositionCreateMenuItems(basePath: string) {
-    return [
-      {
-        label: "Composition",
-        action: () => void createNewComposition(basePath),
-      },
-    ];
   }
 
   async function createNewComposition(basePath: string) {

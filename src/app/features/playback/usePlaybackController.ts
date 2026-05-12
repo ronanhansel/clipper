@@ -24,6 +24,12 @@ import {
   getTimelinePreviewState,
   timelineDisplayDuration,
 } from "../../../core/timeline";
+import {
+  getRenderClockAttributes,
+  getRenderClockStyle,
+  syncDomAnimationsToRenderClock,
+  type RenderClockState,
+} from "../../../render-engine/renderClock";
 import type {
   AdjustmentLayer,
   CompositionClip,
@@ -174,6 +180,7 @@ export function usePlaybackController({
       displayTime,
       playing: isPlayingRef.current,
     });
+    syncPlaybackRenderClockDom(time);
     if (playbackTimeLabelRef.current)
       playbackTimeLabelRef.current.textContent = formatPlaybackTimeLabel(time);
     const displayDuration = useLocalPlaybackLabels
@@ -211,6 +218,14 @@ export function usePlaybackController({
         String(clamp(displayTime, 0, displayPlaybackDuration)),
       );
     }
+  }
+
+  function syncPlaybackRenderClockDom(sceneTime: number) {
+    syncRenderClockLayersToSceneTime(
+      frameViewportRef.current,
+      sceneTime,
+      isPlayingRef.current,
+    );
   }
 
   function syncFrameVisualAdjustmentDom(time: number) {
@@ -324,7 +339,10 @@ export function usePlaybackController({
         startedFrom: nextTime,
       });
     if (!timelineScrubbingRef.current) syncPlaybackDom(nextTime);
-    else if (!useLocalPlaybackLabels) syncFrameVisualAdjustmentDom(nextTime);
+    else {
+      syncPlaybackRenderClockDom(nextTime);
+      if (!useLocalPlaybackLabels) syncFrameVisualAdjustmentDom(nextTime);
+    }
 
     if (timelineScrubbingRef.current) {
       startTransition(() => setRenderCurrentSceneTime(nextTime));
@@ -690,6 +708,34 @@ export function usePlaybackController({
 }
 
 export { composePlaybackReactPreviewSyncIntervalMs };
+
+export function syncRenderClockLayersToSceneTime(
+  root: ParentNode | null,
+  sceneTime: number,
+  playing: boolean,
+) {
+  if (!root) return 0;
+  let synced = 0;
+  for (const layer of root.querySelectorAll<HTMLElement>(
+    "[data-clipper-render-clock-layer]",
+  )) {
+    const offset = Number(layer.dataset.clipperRenderClockOffset ?? 0);
+    const state: RenderClockState = {
+      playing,
+      time: Math.max(sceneTime + (Number.isFinite(offset) ? offset : 0), 0),
+      mode: "preview",
+    };
+    const attrs = getRenderClockAttributes(state);
+    for (const [key, value] of Object.entries(attrs))
+      layer.setAttribute(key, value);
+    const style = getRenderClockStyle(state);
+    for (const [key, value] of Object.entries(style))
+      layer.style.setProperty(key, String(value));
+    syncDomAnimationsToRenderClock(layer, state);
+    synced += 1;
+  }
+  return synced;
+}
 
 function getPlaybackPreviewKey(
   sceneTime: number,

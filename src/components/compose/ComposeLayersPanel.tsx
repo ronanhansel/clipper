@@ -28,6 +28,7 @@ import {
   type TreeApi,
 } from "react-arborist";
 import type { FrameObject, Part } from "../../core/types";
+import type { AnimationGraph } from "../../core/animationGraph/types";
 import { frameObjectFromBackgroundLayer } from "../../core/frameInteraction";
 import { arboristDndManager } from "../../lib/arboristDndManager";
 import { useDragAutoScroll } from "../../lib/useDragAutoScroll";
@@ -41,6 +42,7 @@ type ComposeLayerKind =
   | "frame"
   | "background"
   | "background-object"
+  | "graph-output"
   | "object";
 
 export type ComposeLayerNode = {
@@ -48,6 +50,8 @@ export type ComposeLayerNode = {
   name: string;
   kind: ComposeLayerKind;
   animated?: boolean;
+  graphFrame?: boolean;
+  graphOutputEdgeId?: string;
   object?: FrameObject;
   part?: Part;
   children?: ComposeLayerNode[];
@@ -60,6 +64,7 @@ type ComposeLayersPanelProps = {
   onSelectFrameSettings: () => void;
   onHoverObject: (object: FrameObject | null) => void;
   onReorderObjects: (objectIds: string[], targetIndex: number) => void;
+  onReorderGraphFrameOutputs?: (objectId: string, edgeIds: string[]) => void;
   onToggleLayerHidden?: (layerId: string) => void;
   onToggleLayerLocked?: (layerId: string) => void;
 };
@@ -75,6 +80,7 @@ const MemoizedComposeLayersPanel = memo(function ComposeLayersPanelContent({
   onSelectFrameSettings,
   onHoverObject,
   onReorderObjects,
+  onReorderGraphFrameOutputs,
   onToggleLayerHidden,
   onToggleLayerLocked,
 }: ComposeLayersPanelProps) {
@@ -125,33 +131,14 @@ const MemoizedComposeLayersPanel = memo(function ComposeLayersPanelContent({
   useEffect(() => {
     const previousSelectedObjectIds = previousSelectedObjectIdsRef.current;
     previousSelectedObjectIdsRef.current = selectedObjectIds;
-    setSelectedLayerIds((current) => {
-      const preservedAggregateIds = current.filter((id) => {
-        const node = findComposeLayerNode(treeData, id);
-        if (!node || node.object) return false;
-        return haveSameIds(
-          getNodeObjects(node).map((object) => object.id),
-          selectedObjectIds,
-        );
-      });
-      if (preservedAggregateIds.length > 0) return preservedAggregateIds;
-      if (selectedObjectIds.length > 0)
-        return selectedObjectIds.filter((id) =>
-          findComposeLayerNode(treeData, id),
-        );
-      const preserved = current.filter((id) =>
-        findComposeLayerNode(treeData, id),
-      );
-      if (
-        preserved.some((id) => {
-          const node = findComposeLayerNode(treeData, id);
-          return node?.kind === "frame" || node?.kind === "background";
-        })
-      )
-        return preserved;
-      if (previousSelectedObjectIds.length > 0) return [];
-      return preserved.length > 0 ? preserved : [];
-    });
+    setSelectedLayerIds((current) =>
+      syncComposeSelectedLayerIds(
+        current,
+        selectedObjectIds,
+        previousSelectedObjectIds,
+        treeData,
+      ),
+    );
   }, [selectedObjectIds, treeData]);
 
   const updateDragPosition = useCallback(
@@ -181,6 +168,32 @@ const MemoizedComposeLayersPanel = memo(function ComposeLayersPanelContent({
     parentId,
     index,
   }) => {
+    const frameNode = parentId
+      ? findComposeLayerNode(treeData, parentId)
+      : null;
+    if (frameNode?.graphFrame && frameNode.object) {
+      const objectId = frameNode.object.id;
+      const currentEdgeIds =
+        frameNode?.children?.flatMap((child) =>
+          child.graphOutputEdgeId ? [child.graphOutputEdgeId] : [],
+        ) ?? [];
+      const movingEdgeIds = new Set(
+        dragIds.flatMap((id) => {
+          const node = findComposeLayerNode(treeData, id);
+          return node?.graphOutputEdgeId ? [node.graphOutputEdgeId] : [];
+        }),
+      );
+      if (!movingEdgeIds.size) return;
+      const moving = currentEdgeIds.filter((id) => movingEdgeIds.has(id));
+      const remaining = currentEdgeIds.filter((id) => !movingEdgeIds.has(id));
+      const boundedIndex = Math.max(0, Math.min(index, remaining.length));
+      onReorderGraphFrameOutputs?.(objectId, [
+        ...remaining.slice(0, boundedIndex),
+        ...moving,
+        ...remaining.slice(boundedIndex),
+      ]);
+      return;
+    }
     if (parentId !== "objects") return;
     const remainingObjectCount = part.objects.length - dragIds.length;
     onReorderObjects(
@@ -213,9 +226,9 @@ const MemoizedComposeLayersPanel = memo(function ComposeLayersPanelContent({
     );
     setSelectedLayerIds(ids);
     arboristTreeRef.current?.setSelection({
-      ids: objectIds,
-      anchor: objectIds[0] ?? null,
-      mostRecent: objectIds.at(-1) ?? null,
+      ids,
+      anchor: ids[0] ?? null,
+      mostRecent: ids.at(-1) ?? null,
     });
     if (nodes.length === 1 && nodes[0].data.kind === "frame") {
       onSelectFrameSettings();
@@ -393,10 +406,15 @@ const MemoizedComposeLayersPanel = memo(function ComposeLayersPanelContent({
             ref={arboristTreeRef}
             data={treeData}
             dndManager={arboristDndManager}
-            disableDrag={(node) => node.kind !== "object"}
+            disableDrag={(node) =>
+              node.kind !== "object" && node.kind !== "graph-output"
+            }
             disableDrop={({ parentNode, dragNodes }) =>
-              parentNode.id !== "objects" ||
-              dragNodes.some((node) => node.data.kind !== "object")
+              parentNode.id === "objects"
+                ? dragNodes.some((node) => node.data.kind !== "object")
+                : parentNode.data.graphFrame
+                  ? dragNodes.some((node) => node.data.kind !== "graph-output")
+                  : true
             }
             height={treeHeight}
             indent={composeLayerIndent}
@@ -516,6 +534,7 @@ function ComposeLayerRow({
   const expanded = openById[node.id] ?? node.isOpen;
   const hidden = data.object?.hidden;
   const locked = data.object?.locked;
+  const objectLayerId = data.object?.id ?? data.id;
 
   return (
     <div
@@ -568,7 +587,7 @@ function ComposeLayerRow({
             title={hidden ? "Show layer" : "Hide layer"}
             onClick={(event) => {
               event.stopPropagation();
-              onToggleLayerHidden?.(data.id);
+              onToggleLayerHidden?.(objectLayerId);
             }}
             onPointerDown={(event) => {
               event.stopPropagation();
@@ -581,7 +600,7 @@ function ComposeLayerRow({
             title={locked ? "Unlock layer" : "Lock layer"}
             onClick={(event) => {
               event.stopPropagation();
-              onToggleLayerLocked?.(data.id);
+              onToggleLayerLocked?.(objectLayerId);
             }}
             onPointerDown={(event) => {
               event.stopPropagation();
@@ -651,6 +670,7 @@ function LayerIcon({ node }: { node: ComposeLayerNode }) {
   const className = "h-3.5 w-3.5 shrink-0 text-current";
   const objectType = node.object?.type;
 
+  if (node.graphFrame) return <Frame className={className} />;
   if (objectType === "rect") return <RectLayerIcon className={className} />;
   if (objectType === "text") return <Type className={className} />;
   if (objectType === "image") return <Image className={className} />;
@@ -715,13 +735,11 @@ function TemplateLayerIcon({ className }: { className: string }) {
   );
 }
 
-function buildComposeLayerTree(part: Part): ComposeLayerNode[] {
+export function buildComposeLayerTree(part: Part): ComposeLayerNode[] {
   const objectChildren = [...part.objects]
+    .filter((object) => !object.generatedByGraph)
     .reverse()
-    .map((object) => objectToNode(object, "object"));
-  const backgroundChildren = [...part.background.elements]
-    .reverse()
-    .map((object) => objectToNode(object, "background-object"));
+    .map((object) => objectToNode(object, "object", part));
 
   return [
     {
@@ -730,14 +748,7 @@ function buildComposeLayerTree(part: Part): ComposeLayerNode[] {
       kind: "root",
       children: objectChildren.length > 0 ? objectChildren : undefined,
     },
-    {
-      id: part.background.id,
-      name: part.background.name || "Background",
-      kind: "background",
-      animated: Boolean(part.background.animations?.length),
-      part,
-      children: backgroundChildren.length > 0 ? backgroundChildren : undefined,
-    },
+    backgroundToNode(part),
     {
       id: "frame",
       name: `${part.frame.width} x ${part.frame.height} Frame`,
@@ -753,17 +764,209 @@ function getNodeObjects(node: ComposeLayerNode): FrameObject[] {
   return node.children?.flatMap(getNodeObjects) ?? [];
 }
 
+export function syncComposeSelectedLayerIds(
+  current: string[],
+  selectedObjectIds: string[],
+  previousSelectedObjectIds: string[],
+  treeData: ComposeLayerNode[],
+) {
+  const preservedAggregateIds = current.filter((id) => {
+    const node = findComposeLayerNode(treeData, id);
+    if (!node || node.object) return false;
+    return haveSameIds(
+      getNodeObjects(node).map((object) => object.id),
+      selectedObjectIds,
+    );
+  });
+  if (preservedAggregateIds.length > 0) return preservedAggregateIds;
+  const preservedObjectPresentationIds = current.filter((id) => {
+    const node = findComposeLayerNode(treeData, id);
+    return node?.object && haveSameIds([node.object.id], selectedObjectIds);
+  });
+  if (preservedObjectPresentationIds.length > 0)
+    return preservedObjectPresentationIds;
+  if (selectedObjectIds.length > 0)
+    return selectedObjectIds.flatMap((id) => {
+      const node = findPreferredObjectLayerNode(treeData, id);
+      return node ? [node.id] : [];
+    });
+  const preserved = current.filter((id) => findComposeLayerNode(treeData, id));
+  if (
+    preserved.some((id) => {
+      const node = findComposeLayerNode(treeData, id);
+      return node?.kind === "frame" || node?.kind === "background";
+    })
+  )
+    return preserved;
+  if (previousSelectedObjectIds.length > 0) return [];
+  return preserved.length > 0 ? preserved : [];
+}
+
 function objectToNode(
   object: FrameObject,
   kind: Extract<ComposeLayerKind, "background-object" | "object">,
+  part?: Part,
 ): ComposeLayerNode {
+  const graphOutputs =
+    part && kind === "object"
+      ? getGraphFrameOutputNodes(object, part.animationGraph)
+      : [];
   return {
     id: object.id,
     name: object.name || object.id,
     kind,
     animated: Boolean(object.animations?.length),
+    graphFrame: graphOutputs.length > 0,
     object,
+    children: graphOutputs.length > 0 ? graphOutputs : undefined,
   };
+}
+
+function backgroundToNode(part: Part): ComposeLayerNode {
+  const backgroundChildren = [...part.background.elements]
+    .filter((object) => !object.generatedByGraph)
+    .reverse()
+    .map((object) => objectToNode(object, "background-object", part));
+  return {
+    id: part.background.id,
+    name: part.background.name || "Background",
+    kind: "background",
+    graphFrame: false,
+    animated: Boolean(part.background.animations?.length),
+    part,
+    children: backgroundChildren.length > 0 ? backgroundChildren : undefined,
+  };
+}
+
+export function getGraphFrameOutputNodes(
+  object: FrameObject,
+  graph: AnimationGraph | undefined,
+): ComposeLayerNode[] {
+  if (!isGraphFrameObject(object, graph)) return [];
+  if (!graph) return [];
+  const outNodeIds = new Set(
+    Object.values(graph.nodes)
+      .filter((node) => node.kind === "out")
+      .map((node) => node.id),
+  );
+  const inputEdges = graph.edges.filter((edge) =>
+    outNodeIds.has(edge.to.nodeId),
+  );
+  const configured = readGraphOutRenderOrder(graph);
+  const byId = new Map(inputEdges.map((edge) => [edge.id, edge]));
+  const orderedEdges = [
+    ...configured.flatMap((edgeId) => {
+      const edge = byId.get(edgeId);
+      if (!edge) return [];
+      byId.delete(edgeId);
+      return [edge];
+    }),
+    ...inputEdges.filter((edge) => byId.has(edge.id)),
+  ].filter((edge) => {
+    const node = graph.nodes[edge.from.nodeId];
+    return (
+      node?.kind === "source" || isLayerableGraphOutputNodeKind(node?.kind)
+    );
+  });
+  return orderedEdges.map((edge) => {
+    const node = graph.nodes[edge.from.nodeId];
+    const isSource = node?.kind === "source";
+    return {
+      id: `graph-output:${object.id}:${edge.id}`,
+      name: isSource
+        ? object.name || object.id
+        : getGraphNodeLayerName(edge.from.nodeId, node?.kind),
+      kind: "graph-output",
+      graphOutputEdgeId: edge.id,
+      object: isSource ? object : undefined,
+    };
+  });
+}
+
+function readGraphOutRenderOrder(graph: AnimationGraph) {
+  const outNode = Object.values(graph.nodes).find(
+    (node) => node.kind === "out",
+  );
+  if (typeof outNode?.config !== "object" || outNode.config === null) return [];
+  const order = (outNode.config as { renderOrder?: unknown }).renderOrder;
+  return Array.isArray(order)
+    ? order.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
+function getGraphNodeLayerName(nodeId: string, kind: string | undefined) {
+  if (!kind) return nodeId;
+  return graphNodeLayerLabels[kind] ?? kind.replace(/^[^:]+:/, "");
+}
+
+const graphNodeLayerLabels: Record<string, string> = {
+  "geometry:rectangle": "Rectangle",
+  "geometry:circle": "Circle",
+  "geometry:ellipse": "Ellipse",
+  "geometry:polygon": "Polygon",
+  "geometry:line": "Line",
+  "geometry:path": "Path",
+  "geometry:star": "Star",
+  "geometry:grid": "Grid",
+  "geometry:dotGrid": "Dot Grid",
+  "virtual:text": "Text",
+};
+
+export function isGraphFrameObject(
+  object: Pick<FrameObject, "id">,
+  graph: AnimationGraph | undefined,
+): graph is AnimationGraph {
+  if (!graph || graph.sourceObjectId !== object.id) return false;
+  const graphOwnedNodeIds = new Set(
+    Object.values(graph.nodes)
+      .filter((node) => isGraphOwnedSourceNodeKind(node.kind))
+      .map((node) => node.id),
+  );
+  if (!graphOwnedNodeIds.size) return false;
+  const outNodeIds = new Set(
+    Object.values(graph.nodes)
+      .filter((node) => node.kind === "out")
+      .map((node) => node.id),
+  );
+  if (!outNodeIds.size) return false;
+  const outgoing = new Map<string, string[]>();
+  for (const edge of graph.edges) {
+    const next = outgoing.get(edge.from.nodeId) ?? [];
+    next.push(edge.to.nodeId);
+    outgoing.set(edge.from.nodeId, next);
+  }
+  const stack = [...graphOwnedNodeIds];
+  const seen = new Set<string>();
+  while (stack.length) {
+    const nodeId = stack.pop()!;
+    if (seen.has(nodeId)) continue;
+    seen.add(nodeId);
+    if (outNodeIds.has(nodeId)) return true;
+    stack.push(...(outgoing.get(nodeId) ?? []));
+  }
+  return false;
+}
+
+function isGraphOwnedSourceNodeKind(kind: string) {
+  return kind.startsWith("virtual:") || isRootGeometryNodeKind(kind);
+}
+
+function isLayerableGraphOutputNodeKind(kind: string | undefined) {
+  return Boolean(kind && isGraphOwnedSourceNodeKind(kind));
+}
+
+function isRootGeometryNodeKind(kind: string) {
+  return (
+    kind === "geometry:rectangle" ||
+    kind === "geometry:circle" ||
+    kind === "geometry:ellipse" ||
+    kind === "geometry:polygon" ||
+    kind === "geometry:line" ||
+    kind === "geometry:path" ||
+    kind === "geometry:star" ||
+    kind === "geometry:grid" ||
+    kind === "geometry:dotGrid"
+  );
 }
 
 function findComposeLayerNode(
@@ -778,6 +981,34 @@ function findComposeLayerNode(
     if (child) return child;
   }
   return null;
+}
+
+function findPreferredObjectLayerNode(
+  nodes: ComposeLayerNode[],
+  objectId: string,
+): ComposeLayerNode | null {
+  const exact = findComposeLayerNode(nodes, objectId);
+  const objectMatches = findComposeObjectLayerNodes(nodes, objectId);
+  return (
+    objectMatches.find(
+      (node) => node.kind === "graph-output" || node.kind === "object",
+    ) ??
+    exact ??
+    objectMatches[0] ??
+    null
+  );
+}
+
+function findComposeObjectLayerNodes(
+  nodes: ComposeLayerNode[],
+  objectId: string,
+): ComposeLayerNode[] {
+  return nodes.flatMap((node) => [
+    ...(node.object?.id === objectId ? [node] : []),
+    ...(node.children
+      ? findComposeObjectLayerNodes(node.children, objectId)
+      : []),
+  ]);
 }
 
 function haveSameIds(left: string[], right: string[]): boolean {

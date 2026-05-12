@@ -32,7 +32,6 @@ import {
   resolveCanonicalComposition,
 } from "./app/features/file-manager/compositionIdentity";
 import { getDirectoryPath } from "./app/features/file-manager/fileManagerPaths";
-import { useFileManagerController } from "./app/features/file-manager/useFileManagerController";
 import { useFileManagerProjectActions } from "./app/features/file-manager/useFileManagerProjectActions";
 import {
   useFrameInteractionController,
@@ -162,7 +161,17 @@ import {
   type ObjectSnapGuide,
 } from "./core/frameInteraction";
 import { boundsToPoints } from "./core/geometry";
+import {
+  getGraphSelectionObject,
+  getGraphSelectionObjectIds,
+} from "./core/graphSelection";
 import { updateAnimationGraphNodeParameter } from "./core/graphParameters";
+import { updateStrictComposition2dNodeParameter } from "./components/timeline/StrictComposition2dGraphPanel";
+import {
+  bindStrictGraphInputParameter,
+  isGraphInputExpression,
+  unbindStrictGraphInputParameter,
+} from "./core/graphParameterBindings";
 import type { GraphCompositionMode } from "./core/graphSockets";
 import { clamp, roundToPrecision, roundTenth } from "./core/math";
 import type {
@@ -189,6 +198,7 @@ import {
 import type { TimelineLayerCategory } from "./core/timelineLayers";
 import { compositionFromSource } from "./core/compositionSource";
 import { applyCompositionGraphTransaction } from "./core/compositionGraphTransactions";
+import type { AnimationGraph as StrictAnimationGraph } from "./core/animationGraph/types";
 import {
   FRAME_HEIGHT,
   FRAME_WIDTH,
@@ -212,7 +222,7 @@ import {
   type TransitionLayer,
   type TimelineViewportState,
 } from "./core/types";
-import { FindMediaDialog } from "./components/FileManager";
+import { FindMediaDialog } from "./components/FindMediaDialog";
 import type {
   EditorPaneDocument,
   EditorPaneTab,
@@ -1048,9 +1058,6 @@ function AppContent({
   const compositionLibrary = project.compositionLibrary ?? [];
   const timelines = project.timelines ?? [];
   const activeTimelineName = getDisplayNameFromPath(selectedSceneId ?? "");
-  const timelineCompositionIds = new Set(
-    scene.compositions.map((composition) => composition.id),
-  );
   const hasActiveTimeline = timelines.some((t) => t.id === selectedSceneId);
   const storedTimelineLayers = getFramePreviewTimelineLayers(
     project,
@@ -2125,7 +2132,9 @@ function AppContent({
   }
 
   function updateComposeAnimationGraph(
-    updater: (graph: AnimationGraphState | undefined) => AnimationGraphState,
+    updater: (
+      graph: AnimationGraphState | StrictAnimationGraph | undefined,
+    ) => AnimationGraphState | StrictAnimationGraph,
     options?: {
       implicit?: boolean;
       mode?: GraphCompositionMode;
@@ -2153,9 +2162,8 @@ function AppContent({
       );
       const getCompositionGraph = (
         composition: CompositionClip | undefined,
-      ) => {
-        return (composition?.animationGraph ?? part.animationGraph) as any;
-      };
+      ): StrictAnimationGraph | undefined =>
+        composition?.animationGraph ?? part.animationGraph;
       const nextGraph = updater(getCompositionGraph(fallbackComposition));
       return applyCompositionGraphTransaction(current, {
         clipId,
@@ -2200,24 +2208,104 @@ function AppContent({
               : undefined))
           : undefined;
       if (layerId) {
+        if (isStrictCompositionGraphForObject(graph, layerId))
+          if (isGraphInputExpression(value))
+            return bindStrictGraphInputParameter(graph, nodeId, key, value);
+        if (isStrictCompositionGraphForObject(graph, layerId))
+          return updateStrictComposition2dNodeParameter(
+            unbindStrictGraphInputParameter(graph, nodeId, key),
+            nodeId,
+            key,
+            value,
+          );
         const layerGraph = getSelectedComposition2dLayerGraph(
           graph,
           layerId,
           "composition2d",
         );
+        const nextLayerGraph = updateAnimationGraphNodeParameter(
+          layerGraph,
+          nodeId,
+          key,
+          value,
+        );
         return setSelectedComposition2dLayerGraph(
           graph,
-          updateAnimationGraphNodeParameter(layerGraph, nodeId, key, value),
+          nextLayerGraph,
           layerId,
           "composition2d",
-        ) as any;
+        ) as AnimationGraphState | StrictAnimationGraph;
       }
-      return updateAnimationGraphNodeParameter(graph, nodeId, key, value);
+      if (isStrictCompositionGraph(graph))
+        if (isGraphInputExpression(value))
+          return bindStrictGraphInputParameter(graph, nodeId, key, value);
+      if (isStrictCompositionGraph(graph))
+        return updateStrictComposition2dNodeParameter(
+          unbindStrictGraphInputParameter(graph, nodeId, key),
+          nodeId,
+          key,
+          value,
+        );
+      return updateAnimationGraphNodeParameter(
+        graph as AnimationGraphState | undefined,
+        nodeId,
+        key,
+        value,
+      );
     }, options);
+  }
+
+  function reorderGraphFrameOutputs(objectId: string, edgeIds: string[]) {
+    updateComposeAnimationGraph(
+      (graph) => {
+        if (!isStrictCompositionGraphForObject(graph, objectId))
+          return graph ?? { nodes: {}, edges: [] };
+        const strictGraph = graph;
+        const nodes = Object.fromEntries(
+          Object.entries(strictGraph.nodes).map(([nodeId, node]) => {
+            if (node.kind !== "out") return [nodeId, node];
+            return [
+              nodeId,
+              {
+                ...node,
+                config: {
+                  ...(typeof node.config === "object" && node.config
+                    ? node.config
+                    : {}),
+                  renderOrder: edgeIds,
+                },
+              },
+            ];
+          }),
+        );
+        return { ...strictGraph, nodes };
+      },
+      { history: true, mode: "composition2d" },
+    );
   }
 
   function inspectGraphNode(nodeId: string | null) {
     if (nodeId) setRightPanelTab("video");
+  }
+
+  function isStrictCompositionGraphForObject(
+    graph: AnimationGraphState | StrictAnimationGraph | undefined,
+    objectId: string,
+  ): graph is StrictAnimationGraph {
+    return isStrictCompositionGraph(graph) && graph.sourceObjectId === objectId;
+  }
+
+  function isStrictCompositionGraph(
+    graph: AnimationGraphState | StrictAnimationGraph | undefined,
+  ): graph is StrictAnimationGraph {
+    return Boolean(
+      graph &&
+      typeof graph === "object" &&
+      "sourceObjectId" in graph &&
+      typeof graph.sourceObjectId === "string" &&
+      "edges" in graph &&
+      Array.isArray(graph.edges),
+    );
   }
 
   function shiftTimelineGapMarkers(moves: {
@@ -2417,11 +2505,15 @@ function AppContent({
   function previewSelectedObject(
     updater: (object: FrameObject) => FrameObject,
   ) {
-    if (!selectedObject) return;
-    const next = updater(selectedObject);
-    const target = frameViewportRef.current?.querySelector<HTMLElement>(
-      `[data-clipper-render-object-id="${cssEscape(next.id)}"]`,
-    );
+    const source = selectedObject ?? (composeMode ? selectedGraphObject : null);
+    if (!source) return;
+    const next = updater(source);
+    const selector =
+      next.id === part.background.id
+        ? `[data-layer-id="${cssEscape(next.id)}"]`
+        : `[data-clipper-render-object-id="${cssEscape(next.id)}"]`;
+    const target =
+      frameViewportRef.current?.querySelector<HTMLElement>(selector);
     if (!target) return;
     target.style.left = `${next.bounds.x}px`;
     target.style.top = `${next.bounds.y}px`;
@@ -2947,26 +3039,6 @@ function AppContent({
     scheduleImplicitFileOperationSave,
   });
 
-  const fileManagerProps = useFileManagerController({
-    assets,
-    assetsPath: project.assetsPath,
-    compositions: compositionLibrary,
-    compositionFolders: project.compositionFolders ?? [],
-    compositionRootPath: watchedProjectDirectory,
-    fileManagerState: project.editorState?.fileManagerState,
-    findMediaRequest,
-    implicitFileOperation,
-    timelines,
-    timelineCompositionIds,
-    onFindMediaRequestChange: setFindMediaRequest,
-    actions: {
-      ...fileManagerActions,
-      reloadProject,
-      openCompositionFile: openCompositionInEditor,
-      openProjectFile: openProjectFileInEditor,
-      prerenderComposition: togglePrerenderCompositionFromLibrary,
-    },
-  });
   const editorLayout =
     previewEditorLayout ??
     project.editorState?.layout ??
@@ -3054,10 +3126,14 @@ function AppContent({
     (pointPickAdjustment
       ? (framePickPreviewPoint ?? adjustmentFramePickPoint)
       : framePickPoint) ?? null;
-  const selectedGraphObject =
-    composeMode && selectedComposeObjectIds[0] === part.background.id
-      ? frameObjectFromBackgroundLayer(part.background)
-      : (selectedObject ?? null);
+  const selectedGraphObjectIds = composeMode
+    ? getGraphSelectionObjectIds(part, selectedComposeObjectIds).filter(
+        (id) => id !== part.background.id,
+      )
+    : selectedComposeObjectIds;
+  const selectedGraphObject = composeMode
+    ? (getGraphSelectionObject(part, selectedComposeObjectIds[0]) ?? null)
+    : (selectedObject ?? null);
   const leftSidebarPlaybackInputRef = useRef({
     part,
     selectedComposeObjectIds,
@@ -3276,8 +3352,6 @@ function AppContent({
     onCloseProject();
   }
 
-  const isDirectoryMode = activeProjectManifestPath.endsWith(".json");
-
   async function handleFileManagerRefreshProject() {
     await reloadProject();
   }
@@ -3495,36 +3569,32 @@ function AppContent({
           <LeftSidebar
             composeMode={composeMode}
             effectsPanelState={project.editorState?.effectsPanelState}
-            fileManagerProps={fileManagerProps}
             hasActiveComposition={hasActiveComposition}
             isPlaying={isPlaying}
             leftPanelTab={leftPanelTab}
-            osFileManagerProps={
-              isDirectoryMode
-                ? {
-                    projectDirectory: watchedProjectDirectory,
-                    compositionLibrary,
-                    selectedTimelineId: selectedSceneId,
-                    fileSystemRevision,
-                    fileManagerState: project.editorState?.fileManagerState,
-                    onReloadProject: handleFileManagerRefreshProject,
-                    onCompositionPathMoves:
-                      fileManagerActions.updateCompositionFilePaths,
-                    onOpenFile: openProjectFileInEditor,
-                    onSelectComposition: handleSelectComposition,
-                    onSelectTimeline: handleSelectTimeline,
-                    executeFileManagerCommand,
-                    onFileManagerStateChange:
-                      fileManagerActions.fileManagerStateChange,
-                  }
-                : undefined
-            }
+            osFileManagerProps={{
+              projectDirectory: watchedProjectDirectory,
+              compositionLibrary,
+              selectedTimelineId: selectedSceneId,
+              fileSystemRevision,
+              fileManagerState: project.editorState?.fileManagerState,
+              onReloadProject: handleFileManagerRefreshProject,
+              onCompositionPathMoves:
+                fileManagerActions.updateCompositionFilePaths,
+              onOpenFile: openProjectFileInEditor,
+              onSelectComposition: handleSelectComposition,
+              onSelectTimeline: handleSelectTimeline,
+              executeFileManagerCommand,
+              onFileManagerStateChange:
+                fileManagerActions.fileManagerStateChange,
+            }}
             part={leftSidebarPart}
             selectedObjectIds={leftSidebarSelectedObjectIds}
             timelineMode={timelineMode}
             onEffectsPanelStateChange={updateEffectsPanelState}
             onLeftPanelTabChange={setLeftPanelTab}
             onReorderComposeObjects={reorderComposeObjects}
+            onReorderGraphFrameOutputs={reorderGraphFrameOutputs}
             onSelectComposeLayerObjects={selectComposeLayerObjects}
             onSelectComposeFrameSettings={selectComposeFrameSettings}
             onToggleComposeLayerHidden={toggleComposeLayerHidden}
@@ -3945,7 +4015,7 @@ function AppContent({
             composeAnimationPart: hasActiveComposition ? part : null,
             composeGraphEnabled,
             onComposeGraphEnabledChange: setComposeGraphEnabled,
-            selectedObjectIds: selectedComposeObjectIds,
+            selectedObjectIds: selectedGraphObjectIds,
             selectedGraphNodeIds,
             onComposeGraphScopeChange: setComposeGraphScope,
             onSelectGraphNodes: setSelectedGraphNodeIds,

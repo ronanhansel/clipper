@@ -58,6 +58,7 @@ describe("built-in animation graph node execution", () => {
         duration: 3,
         ease: "easeOut",
         schedule: "relative",
+        timeDriven: true,
       },
       {
         start: 0,
@@ -65,6 +66,7 @@ describe("built-in animation graph node execution", () => {
         duration: 3,
         ease: "easeOut",
         schedule: "relative",
+        timeDriven: true,
       },
     ]);
   });

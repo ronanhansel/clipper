@@ -23,6 +23,7 @@ type CompileResult = {
   streams: AnimationStream[];
   animations: LayerAnimation[];
   generatedGeometry: GeneratedGeometry[];
+  generatedObjects: FrameObject[];
   diagnostics: AnimationGraphDiagnostic[];
   program?: AnimationGraphProgram;
   trace?: AnimationGraphExecutionTrace;
@@ -30,7 +31,7 @@ type CompileResult = {
 
 export type AnimationGraphObjectCompileResult = CompileResult;
 
-type StrictCompileOptions = {
+export type AnimationGraphCompileOptions = {
   sourceObject?: FrameObject;
   trace?: boolean;
   time?: number;
@@ -41,7 +42,7 @@ type PortKey = `${string}:${string}`;
 
 export function compileAnimationGraph(
   graph: AnimationGraph,
-  options: StrictCompileOptions = {},
+  options: AnimationGraphCompileOptions = {},
 ): CompileResult {
   const program = planAnimationGraphProgram(graph);
   const diagnostics = [...program.diagnostics];
@@ -50,6 +51,7 @@ export function compileAnimationGraph(
       streams: [],
       animations: [],
       generatedGeometry: [],
+      generatedObjects: [],
       diagnostics,
       program,
     };
@@ -60,6 +62,7 @@ export function compileAnimationGraph(
     program.edgeIds.includes(edge.id),
   );
   const outgoing = groupEdgesByOutput(plannedEdges);
+  const incomingEdgeStreams = new Map<string, GraphStream[]>();
   const traceEvents: AnimationGraphExecutionTrace["events"] = [];
   const source = Object.values(graph.nodes).find(
     (node) => node.kind === "source",
@@ -70,6 +73,7 @@ export function compileAnimationGraph(
       streams: [],
       animations: [],
       generatedGeometry: [],
+      generatedObjects: [],
       diagnostics,
       program,
     };
@@ -103,6 +107,7 @@ export function compileAnimationGraph(
         const streams = result.get(edge.from.portId) ?? [];
         if (!streams.length) continue;
         const key = portKey(edge.to.nodeId, edge.to.portId);
+        incomingEdgeStreams.set(edge.id, [...streams]);
         incoming.set(key, [...(incoming.get(key) ?? []), ...streams]);
       }
       return;
@@ -115,6 +120,11 @@ export function compileAnimationGraph(
       if (port.direction === "input")
         inputs.set(port.id, incoming.get(portKey(node.id, port.id)) ?? []);
     }
+    if (node.kind === "out")
+      inputs.set(
+        "in",
+        getOrderedOutStreams(node, plannedEdges, incomingEdgeStreams, incoming),
+      );
     const connectedOutputPorts = new Set(
       (outgoing.get(node.id) ?? []).map((edge) => edge.from.portId),
     );
@@ -152,6 +162,7 @@ export function compileAnimationGraph(
       const streams = result.outputs.get(edge.from.portId) ?? [];
       if (!streams.length) continue;
       const key = portKey(edge.to.nodeId, edge.to.portId);
+      incomingEdgeStreams.set(edge.id, [...streams]);
       incoming.set(key, [...(incoming.get(key) ?? []), ...streams]);
       if (options.trace)
         traceEvents.push({
@@ -171,8 +182,14 @@ export function compileAnimationGraph(
 
   return {
     streams: outStreams,
-    animations: compileStreamsToLayerAnimations(outStreams, diagnostics),
-    generatedGeometry: compileStreamsToGeneratedGeometry(outStreams),
+    animations: compileStreamsToLayerAnimations(
+      outStreams.filter((stream) => !stream.renderObject),
+      diagnostics,
+    ),
+    generatedGeometry: compileStreamsToGeneratedGeometry(
+      outStreams.filter((stream) => !stream.renderObject),
+    ),
+    generatedObjects: compileStreamsToGeneratedObjects(outStreams, diagnostics),
     diagnostics,
     program,
     ...(options.trace ? { trace: { events: traceEvents } } : {}),
@@ -183,7 +200,7 @@ function executeMacroNode(
   parentGraph: AnimationGraph,
   node: AnimationGraphNode,
   inputs: ReadonlyMap<GraphPortId, readonly GraphStream[]>,
-  options: StrictCompileOptions,
+  options: AnimationGraphCompileOptions,
   diagnostics: AnimationGraphDiagnostic[],
 ) {
   const config = node.config as AnimationGraphMacroNodeConfig;
@@ -450,15 +467,17 @@ export function planAnimationGraphProgram(
 export function compileAnimationGraphForObject(
   object: FrameObject,
   graph: AnimationGraph,
+  options: Omit<AnimationGraphCompileOptions, "sourceObject"> = {},
 ): AnimationGraphObjectCompileResult {
   if (graph.sourceObjectId !== object.id)
     return {
       streams: [],
       animations: [],
       generatedGeometry: [],
+      generatedObjects: [],
       diagnostics: [],
     };
-  return compileAnimationGraph(graph, { sourceObject: object });
+  return compileAnimationGraph(graph, { ...options, sourceObject: object });
 }
 
 export function isAnimationGraphObjectConnectedToOut(
@@ -506,6 +525,75 @@ function compileStreamsToGeneratedGeometry(streams: AnimationStream[]) {
   );
 }
 
+function compileStreamsToGeneratedObjects(
+  streams: AnimationStream[],
+  diagnostics: AnimationGraphDiagnostic[],
+) {
+  const seen = new Set<string>();
+  return streams.flatMap((stream) => {
+    if (!stream.renderObject || seen.has(stream.renderObject.id)) return [];
+    seen.add(stream.renderObject.id);
+    const geometry =
+      stream.structure.kind === "geometry" ? stream.structure.geometry : null;
+    const bounds =
+      stream.structure.kind === "geometry"
+        ? stream.structure.bounds
+        : stream.renderObject.bounds;
+    return [
+      {
+        ...stream.renderObject,
+        bounds,
+        animations: [
+          ...(stream.renderObject.animations ?? []).filter(
+            (animation) => !animation.id.startsWith("graph:"),
+          ),
+          ...compileStreamsToLayerAnimations([stream], diagnostics),
+        ],
+        generatedGeometry: geometry
+          ? [geometry]
+          : stream.renderObject.generatedGeometry,
+        generatedByGraph: true,
+      },
+    ];
+  });
+}
+
+function getOrderedOutStreams(
+  node: AnimationGraphNode,
+  edges: StrictAnimationGraphEdge[],
+  incomingEdgeStreams: ReadonlyMap<string, readonly GraphStream[]>,
+  incoming: ReadonlyMap<PortKey, readonly GraphStream[]>,
+) {
+  const inputEdges = edges.filter(
+    (edge) => edge.to.nodeId === node.id && edge.to.portId === "in",
+  );
+  const configured = readOutRenderOrder(node.config);
+  const byId = new Map(inputEdges.map((edge) => [edge.id, edge]));
+  const orderedEdges = [
+    ...configured.flatMap((edgeId) => {
+      const edge = byId.get(edgeId);
+      if (!edge) return [];
+      byId.delete(edgeId);
+      return [edge];
+    }),
+    ...inputEdges.filter((edge) => byId.has(edge.id)),
+  ];
+  const streams = orderedEdges.flatMap((edge) => [
+    ...(incomingEdgeStreams.get(edge.id) ?? []),
+  ]);
+  return streams.length
+    ? streams
+    : (incoming.get(portKey(node.id, "in")) ?? []);
+}
+
+function readOutRenderOrder(config: unknown) {
+  if (typeof config !== "object" || config === null) return [];
+  const order = (config as { renderOrder?: unknown }).renderOrder;
+  return Array.isArray(order)
+    ? order.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
 function effectInstructionToRuntime(
   effect: EffectInstruction,
   diagnostics: AnimationGraphDiagnostic[],
@@ -516,13 +604,29 @@ function effectInstructionToRuntime(
     controller: effect.controller,
     target: effect.target,
   });
-  if (runtime) return runtime;
+  if (runtime)
+    return effect.controller.timeDriven
+      ? runtime
+      : collapseRuntimeToStaticKeyframes(runtime);
   diagnostics.push({
     severity: "warning",
     message: `Effect package "${effect.effectId}" does not provide a graph runtime adapter for LayerAnimation compatibility.`,
     outputId: effect.id,
   });
   return null;
+}
+
+function collapseRuntimeToStaticKeyframes(
+  runtime: Pick<LayerAnimation, "keyframes">,
+): Pick<LayerAnimation, "keyframes"> {
+  const keyframes = Object.fromEntries(
+    Object.entries(runtime.keyframes).map(([key, values]) => {
+      if (!Array.isArray(values) || values.length === 0) return [key, values];
+      const last = values[values.length - 1];
+      return [key, [last, last]];
+    }),
+  );
+  return { keyframes: keyframes as LayerAnimation["keyframes"] };
 }
 
 function controllerToOptions(
@@ -568,8 +672,12 @@ function diagnoseUnplannedBranches(
 ) {
   const diagnostics: AnimationGraphDiagnostic[] = [];
   const planned = new Set(plannedEdgeIds);
+  const reportedBranches = new Set<string>();
   for (const edge of graph.edges) {
     if (planned.has(edge.id)) continue;
+    const branchKey = portKey(edge.from.nodeId, edge.from.portId);
+    if (reportedBranches.has(branchKey)) continue;
+    reportedBranches.add(branchKey);
     diagnostics.push({
       severity: "warning",
       message: `Branch from "${edge.from.nodeId}:${edge.from.portId}" does not reach Out and will not affect output.`,
@@ -691,7 +799,22 @@ function operationKindForNode(nodeKind: string): GraphOperationKind {
 
 function isRequiredInputPort(portId: string, nodeKind: string) {
   if (nodeKind === "out") return false;
+  if (portId === "in" && isRootableGeometryNode(nodeKind)) return false;
   return portId === "in";
+}
+
+function isRootableGeometryNode(nodeKind: string) {
+  return (
+    nodeKind === "geometry:rectangle" ||
+    nodeKind === "geometry:circle" ||
+    nodeKind === "geometry:ellipse" ||
+    nodeKind === "geometry:polygon" ||
+    nodeKind === "geometry:line" ||
+    nodeKind === "geometry:path" ||
+    nodeKind === "geometry:star" ||
+    nodeKind === "geometry:grid" ||
+    nodeKind === "geometry:dotGrid"
+  );
 }
 
 function reachableStrictNodes(

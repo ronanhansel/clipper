@@ -2,6 +2,7 @@ import type {
   AnimationGraphEdge as LegacyAnimationGraphEdge,
   AnimationGraphValueType,
   EffectId,
+  FrameObject,
   FrameObjectType,
   MotionEase,
   TypedAnimationGraphNode,
@@ -265,6 +266,7 @@ export type AnimationController = {
   duration: number;
   ease: MotionEase;
   schedule: "relative" | "absolute";
+  timeDriven?: boolean;
   repeat?: {
     count: number | "infinite";
     delay: number;
@@ -290,6 +292,7 @@ export type AnimationStream = {
   structure: StructureStream;
   controller: AnimationController;
   effects: EffectInstruction[];
+  renderObject?: FrameObject;
 };
 
 export type ValueStream = {
@@ -412,6 +415,8 @@ export type CompileContext = {
     type: FrameObjectType;
     content?: string;
     richText?: readonly { text: string }[];
+    bounds?: { x: number; y: number; width: number; height: number };
+    style?: Record<string, string | number>;
   };
   time?: number;
   frame?: number;

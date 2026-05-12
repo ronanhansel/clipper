@@ -94,7 +94,11 @@ export const timeNodeDefinition: AnimationGraphNodeDefinition = {
           stream as never,
           `${input.node.id}:out:${index}`,
         );
-        next.controller = { ...next.controller, ...patch };
+        next.controller = { ...next.controller, ...patch, timeDriven: true };
+        next.effects = next.effects.map((effect) => ({
+          ...effect,
+          controller: { ...effect.controller, ...patch, timeDriven: true },
+        }));
         return next;
       });
     return { outputs: new Map([["out", streams]]) };
@@ -111,6 +115,7 @@ function normalizeTimeConfig(config: object): Partial<AnimationController> {
       readString(config, "schedule", "relative") === "absolute"
         ? "absolute"
         : "relative",
+    timeDriven: true,
     ...(repeat
       ? { repeat: { count: repeat, delay: 0, mode: readRepeatMode(config) } }
       : {}),

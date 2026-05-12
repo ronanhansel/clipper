@@ -38,20 +38,26 @@ export function buildComposeAnimationTimelineLayers(
   part: Part,
 ): ComposeAnimationTimelineLayer[] {
   return [
-    ...[...part.objects].reverse().map((object) => ({
-      id: object.id,
-      name: object.name || object.id,
-      kind: "object" as const,
-      animations: object.animations,
-      object,
-    })),
-    ...[...part.background.elements].reverse().map((object) => ({
-      id: object.id,
-      name: object.name || object.id,
-      kind: "background-object" as const,
-      animations: object.animations,
-      object,
-    })),
+    ...[...part.objects]
+      .filter((object) => !object.generatedByGraph)
+      .reverse()
+      .map((object) => ({
+        id: object.id,
+        name: object.name || object.id,
+        kind: "object" as const,
+        animations: object.animations,
+        object,
+      })),
+    ...[...part.background.elements]
+      .filter((object) => !object.generatedByGraph)
+      .reverse()
+      .map((object) => ({
+        id: object.id,
+        name: object.name || object.id,
+        kind: "background-object" as const,
+        animations: object.animations,
+        object,
+      })),
     {
       id: part.background.id,
       name: part.background.name || "Background",

@@ -1,5 +1,4 @@
-import type { FileManagerTreeSnapshot } from "../../../components/FileManager";
-import type { EditorState, Part, ProjectManifest } from "../../../core/types";
+import type { Part, ProjectManifest } from "../../../core/types";
 import { getDirectoryPath, reorderByIntent } from "./fileManagerPaths";
 
 export type CompositionSourceMutationResult = {
@@ -318,101 +317,6 @@ export function deleteCompositionFolderFromProject(
           ? { ...item, source: undefined, sourceMissing: true }
           : item,
       ),
-    },
-  };
-}
-
-export function applyFileManagerTreeSnapshotToProject(
-  project: ProjectManifest,
-  compositionSources: Record<string, string>,
-  compositionLibrary: Part[],
-  snapshot: FileManagerTreeSnapshot,
-  defaultEditorState: EditorState,
-): CompositionSourceMutationResult {
-  const library = project.compositionLibrary ?? compositionLibrary;
-  const timelines = project.timelines ?? [];
-  let nextSources = compositionSources;
-
-  for (const composition of library) {
-    const nextFilePath = snapshot.compositionFilePaths[composition.id];
-    if (!nextFilePath || nextFilePath === composition.filePath) continue;
-    const source = nextSources[composition.filePath];
-    const { [composition.filePath]: _removed, ...rest } = nextSources;
-    nextSources =
-      source === undefined ? rest : { ...rest, [nextFilePath]: source };
-  }
-
-  const timelineIdMap = new Map<string, string>();
-  for (const timeline of timelines) {
-    const nextFilePath = snapshot.timelineFilePaths[timeline.id];
-    if (!nextFilePath || nextFilePath === timeline.filePath) continue;
-    timelineIdMap.set(timeline.id, nextFilePath);
-  }
-
-  const nextCompositionById = new Map(
-    library.map((composition) => {
-      const nextPath =
-        snapshot.compositionFilePaths[composition.id] ?? composition.filePath;
-      return [composition.id, { ...composition, filePath: nextPath }];
-    }),
-  );
-
-  const nextTimelineById = new Map(
-    timelines.map((timeline) => {
-      const nextPath =
-        snapshot.timelineFilePaths[timeline.id] ?? timeline.filePath;
-      return [
-        timeline.id,
-        {
-          ...timeline,
-          id: nextPath,
-          filePath: nextPath,
-        },
-      ];
-    }),
-  );
-
-  const orderedCompositionIds = new Set(snapshot.compositionOrder);
-  const orderedTimelineIds = new Set(snapshot.timelineOrder);
-
-  const nextCompositionLibrary = [
-    ...snapshot.compositionOrder.flatMap(
-      (id) => nextCompositionById.get(id) ?? [],
-    ),
-    ...library
-      .filter((composition) => !orderedCompositionIds.has(composition.id))
-      .map(
-        (composition) => nextCompositionById.get(composition.id) ?? composition,
-      ),
-  ];
-
-  const nextTimelines = [
-    ...snapshot.timelineOrder.flatMap((id) => nextTimelineById.get(id) ?? []),
-    ...timelines
-      .filter((timeline) => !orderedTimelineIds.has(timeline.id))
-      .map((timeline) => nextTimelineById.get(timeline.id) ?? timeline),
-  ];
-
-  return {
-    compositionSources: nextSources,
-    project: {
-      ...project,
-      assets: snapshot.assets,
-      compositionSources: nextSources,
-      compositionFolders: snapshot.compositionFolders,
-      editorState: {
-        ...(project.editorState ?? defaultEditorState),
-        fileManagerState: snapshot.fileManagerState,
-        selectedSceneId:
-          timelineIdMap.get(project.editorState?.selectedSceneId ?? "") ??
-          project.editorState?.selectedSceneId,
-        selectedTimelineId:
-          timelineIdMap.get(project.editorState?.selectedTimelineId ?? "") ??
-          project.editorState?.selectedTimelineId,
-        selectedPartId: project.editorState?.selectedPartId,
-      },
-      compositionLibrary: nextCompositionLibrary,
-      timelines: nextTimelines,
     },
   };
 }

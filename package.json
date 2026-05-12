@@ -1,6 +1,6 @@
 {
   "name": "clipper",
-  "version": "0.2.15",
+  "version": "0.2.16",
   "description": "Agentic video editor framework for TypeScript-authored motion graphics.",
   "license": "MIT",
   "repository": {

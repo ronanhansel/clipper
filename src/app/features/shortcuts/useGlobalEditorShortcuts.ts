@@ -46,10 +46,17 @@ export const isCodeEditorTarget = isEditorTarget;
 
 export function isTextEditingTarget(target: HTMLElement | null) {
   const editable = target?.closest(
-    "input, textarea, select, [contenteditable='true']",
+    "input, textarea, select, [contenteditable]:not([contenteditable='false']), [role='textbox'], .monaco-editor, .cm-editor",
   ) as HTMLElement | null;
   if (!editable) return false;
   return !(editable instanceof HTMLInputElement && editable.type === "range");
+}
+
+function isTextEditingEvent(event: KeyboardEvent) {
+  return (
+    isTextEditingTarget(event.target as HTMLElement | null) ||
+    isTextEditingTarget(document.activeElement as HTMLElement | null)
+  );
 }
 
 export function useGlobalEditorShortcuts({
@@ -100,6 +107,10 @@ export function useGlobalEditorShortcuts({
     }
 
     function onKeyDown(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      const textEditingTarget = isTextEditingEvent(event);
+      if (textEditingTarget) return;
+
       if (event.key.toLowerCase() === "w" && (event.ctrlKey || event.metaKey)) {
         if (closeActiveEditorTab()) {
           event.preventDefault();
@@ -142,7 +153,6 @@ export function useGlobalEditorShortcuts({
         }
       }
 
-      const target = event.target as HTMLElement | null;
       if (
         !event.ctrlKey &&
         !event.metaKey &&
@@ -194,17 +204,6 @@ export function useGlobalEditorShortcuts({
 
       if (isCodeEditorTarget(target)) return;
 
-      const textEditingTarget = isTextEditingTarget(target);
-      if (event.key === "Escape" && textEditingTarget) return;
-
-      if (
-        textEditingTarget &&
-        (event.ctrlKey || event.metaKey) &&
-        (event.key.toLowerCase() === "z" || event.key.toLowerCase() === "y")
-      ) {
-        return;
-      }
-
       if (event.key === "Escape" && cancelActiveSelector()) {
         event.preventDefault();
         event.stopPropagation();
@@ -226,7 +225,6 @@ export function useGlobalEditorShortcuts({
 
       const isDeleteKey = event.key === "Backspace" || event.key === "Delete";
       const timelineShortcutsEnabled = timelineMode !== "compose";
-      if (textEditingTarget) return;
 
       if (!event.ctrlKey && !event.metaKey && !event.altKey) {
         if (event.key.toLowerCase() === "f") {

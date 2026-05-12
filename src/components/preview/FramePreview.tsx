@@ -91,6 +91,10 @@ import type {
 } from "../../core/animationGraph/types";
 import type { PlaybackClock } from "../../app/types";
 import {
+  getPlaybackTimeSnapshot,
+  subscribePlaybackTime,
+} from "../../app/features/playback/playbackTimeStore";
+import {
   rasterizeSvgForExport,
   shouldPreRasterizeSvgForExport,
   type SvgRasterResult,
@@ -136,7 +140,6 @@ export const FramePreview = memo(function FramePreview({
   part,
   partStart,
   adjustmentLayers,
-  playbackClock,
   previewTime,
   sceneTime,
   timelineMode,
@@ -446,9 +449,7 @@ export const FramePreview = memo(function FramePreview({
   const isUnlinkedPart = Boolean(part.sourceMissing);
   const compositionError = part.compositionError;
   const livePlaybackPartRef = useRef(part);
-  const livePlaybackClockRef = useRef(playbackClock);
   livePlaybackPartRef.current = part;
-  livePlaybackClockRef.current = playbackClock;
   const stackPreviewParts = previewParts?.length
     ? previewParts
     : [{ part, start: partStart, previewTime }];
@@ -475,25 +476,20 @@ export const FramePreview = memo(function FramePreview({
   useEffect(() => {
     if (!isPlaying || timelineMode !== "compose" || renderMode === "export")
       return;
-    let frame = 0;
 
-    function tick(now: number) {
-      const clock = livePlaybackClockRef.current;
+    function syncFromPlaybackTime() {
+      const snapshot = getPlaybackTimeSnapshot();
+      if (!snapshot.playing) return;
       const currentPart = livePlaybackPartRef.current;
-      if (clock) {
-        const liveSceneTime =
-          clock.startedFrom + (now - clock.startedAt) / 1000;
-        applyLiveComposePreviewTime(
-          frameViewportRef.current,
-          currentPart,
-          liveSceneTime - partStart + (currentPart.trimStart ?? 0),
-        );
-      }
-      frame = requestAnimationFrame(tick);
+      applyLiveComposePreviewTime(
+        frameViewportRef.current,
+        currentPart,
+        snapshot.sceneTime - partStart + (currentPart.trimStart ?? 0),
+      );
     }
 
-    frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
+    syncFromPlaybackTime();
+    return subscribePlaybackTime(syncFromPlaybackTime);
   }, [frameViewportRef, isPlaying, partStart, renderMode, timelineMode]);
 
   useLayoutEffect(() => {
@@ -722,8 +718,7 @@ export const FramePreview = memo(function FramePreview({
                             frameScale={frameScale}
                             isPlaying={isPlaying}
                             part={item.part}
-                            partStart={item.start}
-                            playbackClock={playbackClock}
+                            renderClockSceneTime={displaySceneTime}
                             previewTime={item.previewTime}
                             renderMode={renderMode}
                             onObjectPointerDown={onObjectPointerDown}
@@ -787,6 +782,7 @@ export const FramePreview = memo(function FramePreview({
               const source = selectableObjects.find(
                 (item) => item.id === object.id,
               );
+              const isBackgroundSelection = object.id === part.background.id;
               return (
                 <SelectionOverlayBox
                   key={object.id}
@@ -797,18 +793,18 @@ export const FramePreview = memo(function FramePreview({
                   frameViewportRef={frameViewportRef}
                   handleSizePx={selectionHandleSizePx}
                   highlighted={hoveredObjectId === object.id}
-                  interactive={!marqueeDragging}
+                  interactive={!marqueeDragging && !isBackgroundSelection}
                   offsetPx={selectionOffsetPx}
                   portal
                   portalHost={previewOverlayHost}
                   radius={
-                    source?.type === "rect"
+                    !isBackgroundSelection && source?.type === "rect"
                       ? getNumericStyleValue(source.style.borderRadius)
                       : undefined
                   }
                   uiScale={selectionOverlayScale}
                   onCornerRadiusChange={
-                    onObjectCornerRadiusChange
+                    !isBackgroundSelection && onObjectCornerRadiusChange
                       ? (radius) =>
                           onObjectCornerRadiusChange(object.id, radius)
                       : undefined
@@ -912,7 +908,6 @@ function applyLiveComposePreviewTime(
   time: number,
 ) {
   if (!root) return;
-  syncLiveComposeRenderClock(root, time);
   if (!part.background.hidden) {
     const evaluatedBackground = evaluateBackgroundLayer(
       part.background,
@@ -955,24 +950,18 @@ function applyLiveComposePreviewTime(
   }
 }
 
-function syncLiveComposeRenderClock(root: HTMLElement, time: number) {
-  const state = { playing: true, time, mode: "preview" as const };
-  const attrs = getRenderClockAttributes(state);
-  const style = getRenderClockStyle(state);
-  const layers = root.matches("[data-clipper-render-playing]")
-    ? [
-        root,
-        ...root.querySelectorAll<HTMLElement>("[data-clipper-render-playing]"),
-      ]
-    : [...root.querySelectorAll<HTMLElement>("[data-clipper-render-playing]")];
-
-  for (const layer of layers) {
-    for (const [key, value] of Object.entries(attrs))
-      layer.setAttribute(key, value);
-    for (const [key, value] of Object.entries(style))
-      layer.style.setProperty(key, String(value));
-    syncDomAnimationsToRenderClock(layer, state);
-  }
+function applyRenderClockStateToElement(
+  element: HTMLElement | null,
+  state: { playing: boolean; time: number; mode: "preview" | "export" },
+  attrs = getRenderClockAttributes(state),
+  style = getRenderClockStyle(state),
+) {
+  if (!element) return;
+  for (const [key, value] of Object.entries(attrs))
+    element.setAttribute(key, value);
+  for (const [key, value] of Object.entries(style))
+    element.style.setProperty(key, String(value));
+  syncDomAnimationsToRenderClock(element, state);
 }
 
 function applyLivePreviewObject(
@@ -1093,8 +1082,7 @@ function CompositionLayerView({
   frameScale,
   isPlaying,
   part,
-  partStart,
-  playbackClock,
+  renderClockSceneTime,
   previewTime,
   renderMode,
   onObjectPointerDown,
@@ -1110,8 +1098,7 @@ function CompositionLayerView({
   frameScale: number;
   isPlaying: boolean;
   part: Part;
-  partStart: number;
-  playbackClock: PlaybackClock;
+  renderClockSceneTime: number;
   previewTime: number;
   renderMode: "preview" | "export";
   onObjectPointerDown: (
@@ -1146,7 +1133,7 @@ function CompositionLayerView({
 
   useLayoutEffect(() => {
     renderClockStateRef.current = renderClockState;
-    syncDomAnimationsToRenderClock(layerRef.current, renderClockState);
+    applyRenderClockStateToElement(layerRef.current, renderClockState);
   }, [renderClockState]);
 
   useLayoutEffect(
@@ -1158,6 +1145,8 @@ function CompositionLayerView({
     <div
       ref={layerRef}
       className="absolute inset-0 overflow-hidden"
+      data-clipper-render-clock-layer
+      data-clipper-render-clock-offset={previewTime - renderClockSceneTime}
       {...getRenderClockAttributes(renderClockState)}
       style={{ ...(part.frame.style as CSSProperties), ...renderClockStyle }}
     >
@@ -1269,6 +1258,7 @@ function TransitionCompositeView({
           isPlaying={isPlaying}
           parts={transitionPreviewParts.from}
           renderMode={renderMode}
+          sceneTime={transitionPreviewParts.fromSceneTime}
           sequenceKey="from"
         />
       </div>
@@ -1287,6 +1277,7 @@ function TransitionCompositeView({
           isPlaying={isPlaying}
           parts={transitionPreviewParts.to}
           renderMode={renderMode}
+          sceneTime={transitionPreviewParts.toSceneTime}
           sequenceKey="to"
         />
       </div>
@@ -1302,6 +1293,7 @@ function TimelineSequenceView({
   isPlaying,
   parts,
   renderMode,
+  sceneTime,
   sequenceKey,
 }: {
   adjustment: ReturnType<typeof applyAdjustmentLayersToVisualStyle>;
@@ -1311,6 +1303,7 @@ function TimelineSequenceView({
   isPlaying: boolean;
   parts: Array<{ part: Part; start: number; previewTime: number }>;
   renderMode: "preview" | "export";
+  sceneTime: number;
   sequenceKey: string;
 }) {
   const visualStyle = { filter: adjustment.filter } as CSSProperties;
@@ -1328,8 +1321,7 @@ function TimelineSequenceView({
           frameScale={frameScale}
           isPlaying={isPlaying}
           part={item.part}
-          partStart={item.start}
-          playbackClock={null}
+          renderClockSceneTime={sceneTime}
           previewTime={item.previewTime}
           renderMode={renderMode}
           onObjectPointerDown={noopObjectPointerDown}
@@ -2662,12 +2654,10 @@ export function SelectionOverlayBox({
   const bottomLeftHandleClass = `${handleClass} bottom-0 left-0 -translate-x-1/2 translate-y-1/2 cursor-nesw-resize`;
   const boxStyle = portal
     ? ({
-        left: "var(--clipper-selection-preview-left, var(--clipper-selection-base-left, 0px))",
-        top: "var(--clipper-selection-preview-top, var(--clipper-selection-base-top, 0px))",
-        width:
-          "var(--clipper-selection-preview-width, var(--clipper-selection-base-width, 0px))",
-        height:
-          "var(--clipper-selection-preview-height, var(--clipper-selection-base-height, 0px))",
+        left: `var(--clipper-selection-preview-left, var(--clipper-selection-base-left, ${viewportBounds.x + overlayOffset.left}px))`,
+        top: `var(--clipper-selection-preview-top, var(--clipper-selection-base-top, ${viewportBounds.y + overlayOffset.top}px))`,
+        width: `var(--clipper-selection-preview-width, var(--clipper-selection-base-width, ${viewportBounds.width}px))`,
+        height: `var(--clipper-selection-preview-height, var(--clipper-selection-base-height, ${viewportBounds.height}px))`,
         position: "absolute",
         transform:
           "translate(var(--clipper-drag-x, 0px), var(--clipper-drag-y, 0px))",
@@ -3249,21 +3239,28 @@ function evaluateObjectForPreview(
   });
 }
 
-function HtmlContent({ content }: { content: string }) {
+export function HtmlContent({ content }: { content: string }) {
   const ref = useRef<HTMLDivElement | null>(null);
 
   useLayoutEffect(() => {
-    const root = ref.current;
-    if (!root) return;
+    const host = ref.current;
+    if (!host) return;
+    const root = host.shadowRoot ?? host.attachShadow({ mode: "open" });
 
-    root.innerHTML = content;
-    const scripts = Array.from(root.querySelectorAll("script"));
-    for (const script of scripts) {
-      const executable = document.createElement("script");
-      for (const attribute of script.attributes)
-        executable.setAttribute(attribute.name, attribute.value);
-      executable.text = script.text;
-      script.replaceWith(executable);
+    try {
+      root.innerHTML = content;
+      const scripts = Array.from(root.querySelectorAll("script"));
+      for (const script of scripts) {
+        const executable = document.createElement("script");
+        for (const attribute of script.attributes)
+          executable.setAttribute(attribute.name, attribute.value);
+        executable.text = script.text;
+        script.replaceWith(executable);
+      }
+    } catch (caught) {
+      root.replaceChildren(
+        createHtmlContentError(framePreviewErrorMessage(caught)),
+      );
     }
 
     return () => {
@@ -3278,5 +3275,15 @@ function HtmlContent({ content }: { content: string }) {
     };
   }, [content]);
 
-  return <div ref={ref} className="h-full w-full" />;
+  return (
+    <div ref={ref} className="h-full w-full" data-clipper-shadow-render-root />
+  );
+}
+
+function createHtmlContentError(message: string) {
+  const pre = document.createElement("pre");
+  pre.className =
+    "m-0 h-full w-full overflow-auto whitespace-pre-wrap bg-[#16090d] p-4 font-mono text-[14px] leading-relaxed text-[#ffb4b4]";
+  pre.textContent = message;
+  return pre;
 }

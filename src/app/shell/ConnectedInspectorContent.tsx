@@ -223,6 +223,9 @@ export function ConnectedInspectorContent({
   const inspectorSelectedObject = isPlaying
     ? stableSelectedObjectRef.current
     : selectedObject;
+  const composeInspectorObject = composeMode
+    ? (selectedGraphObject ?? null)
+    : (inspectorSelectedObject ?? null);
   const stableUpdateSelectedObject = useCallback(
     (updater: (object: FrameObject) => FrameObject) =>
       updateSelectedObjectRef.current(updater),
@@ -318,20 +321,27 @@ export function ConnectedInspectorContent({
     );
   }
 
-  if (composeMode && selectedGraphNodeId)
+  if (
+    composeMode &&
+    selectedGraphNodeId &&
+    selectedGraphObject?.id !== part.background.id
+  )
     return (
       <GraphNodeInspector
         part={part}
         selectedObject={selectedGraphObject ?? null}
         nodeId={selectedGraphNodeId}
         onParameterChange={onUpdateGraphNodeParameter}
+        onSourceObjectChange={stableUpdateSelectedObject}
+        onSourceObjectPreview={stablePreviewSelectedObject}
       />
     );
 
-  if (inspectorSelectedObject)
+  if (composeInspectorObject)
     return (
       <ObjectInspector
-        object={inspectorSelectedObject}
+        object={composeInspectorObject}
+        lockBounds={composeInspectorObject.id === part.background.id}
         onChange={stableUpdateSelectedObject}
         onPreview={stablePreviewSelectedObject}
       />

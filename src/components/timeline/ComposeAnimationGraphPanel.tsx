@@ -12,7 +12,7 @@ import {
   type RefObject,
   type WheelEvent,
 } from "react";
-import { AlertTriangle, ChevronDown } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { createPortal } from "react-dom";
 import toast from "react-hot-toast";
 import type { ContextMenuState } from "../../app/types";
@@ -27,7 +27,6 @@ import {
   animationGraphPresets,
 } from "../../core/animationGraph/presets";
 import { roundTenth, roundTwo } from "../../core/math";
-import { frameObjectFromBackgroundLayer } from "../../core/frameInteraction";
 import { formatTime, getTimelineTicks } from "../../core/timeline";
 import {
   getAnimationGraphTemporalStart,
@@ -80,6 +79,13 @@ import {
 import type { TimelineViewportState } from "../../core/types";
 import type { GraphParameterEditorSchema } from "./GraphParameterEditor";
 import {
+  bindStrictGraphInputParameter,
+  getStrictGraphInputBindingExpression,
+  getStrictGraphInputBindingOptions,
+  isGraphInputExpression,
+  unbindStrictGraphInputParameter,
+} from "../../core/graphParameterBindings";
+import {
   isStrictComposition2dGraph,
   createStrictComposition2dEdgeFromDrag,
   getEmptyStrictComposition2dCanvasDiagnostics,
@@ -88,10 +94,11 @@ import {
   getStrictComposition2dParameterEditorSchema,
   getStrictComposition2dPorts,
   saveStrictComposition2dGraph,
-  updateStrictComposition2dEditorNodeParameter,
+  updateStrictComposition2dNodeParameter,
   type StrictComposition2dCanvasDiagnostics,
   type StrictComposition2dEdgeDebugSummary,
   type StrictComposition2dEditorGraph,
+  type StrictComposition2dNodeDiagnosticSummary,
 } from "./StrictComposition2dGraphPanel";
 import { useTimelineScrubber } from "./useTimelineScrubber";
 
@@ -115,7 +122,9 @@ type Props = {
     updater: (state: TimelineViewportState) => TimelineViewportState,
   ) => void;
   onUpdateGraph?: (
-    updater: (graph: AnimationGraphState | undefined) => AnimationGraphState,
+    updater: (
+      graph: AnimationGraphState | StrictAnimationGraph | undefined,
+    ) => AnimationGraphState | StrictAnimationGraph,
     options?: { implicit?: boolean; mode?: GraphCompositionMode },
   ) => void;
   onComposeGraphScopeChange?: (
@@ -862,11 +871,7 @@ export const ComposeAnimationGraphPanel = memo(
     const fullGraph =
       pendingGraphSyncRef.current ?? optimisticGraph ?? projectGraph;
     const selectableObjects = part
-      ? [
-          frameObjectFromBackgroundLayer(part.background),
-          ...part.background.elements,
-          ...part.objects,
-        ]
+      ? [...part.background.elements, ...part.objects]
       : [];
     const selectedObjects = selectedObjectIds
       .map((id) => selectableObjects.find((object) => object.id === id))
@@ -878,11 +883,18 @@ export const ComposeAnimationGraphPanel = memo(
       graphMode === "composition2d" && selectedObjects.length === 1
         ? selectedObjects[0].id
         : undefined;
-    const graph = getSelectedComposition2dLayerGraph(
-      fullGraph,
-      selectedLayerGraphId,
-      graphMode,
-    );
+    const graph =
+      selectedObjects.length === 1
+        ? getSelectedComposition2dDisplayGraph(
+            fullGraph,
+            selectedObjects[0],
+            graphMode,
+          )
+        : getSelectedComposition2dLayerGraph(
+            fullGraph,
+            selectedLayerGraphId,
+            graphMode,
+          );
     const legacyGraph = undefined;
     const customNodeScopeKey = graphViewportKey;
     const graphInstanceKey = `${part?.id ?? "__none__"}:composition2d:${graphViewportKey}`;
@@ -906,7 +918,14 @@ export const ComposeAnimationGraphPanel = memo(
     const graphCanvasHeight = graphWorldSize.height;
     const graphScrollWidth = graphWorldSize.width * graphScale;
     const graphScrollHeight = graphWorldSize.height * graphScale;
-    const delayMarkers = getDelayMarkers(selectedObjects, nodes, graph);
+    const legacyEditorGraph = isStrictComposition2dGraph(graph)
+      ? undefined
+      : (graph as AnimationGraphState | undefined);
+    const delayMarkers = getDelayMarkers(
+      selectedObjects,
+      nodes,
+      legacyEditorGraph,
+    );
     const nodeLayoutKey = nodes
       .map(
         (node) => `${node.id}:${node.x},${node.y},${node.width},${node.height}`,
@@ -1632,6 +1651,59 @@ export const ComposeAnimationGraphPanel = memo(
       });
     }
 
+    function commitStrictGraphUpdate(
+      updater: (graph: StrictAnimationGraph) => StrictAnimationGraph,
+      options: { local?: boolean; implicit?: boolean } = {},
+    ) {
+      const baseGraph = pendingGraphSyncRef.current ?? graphRef.current;
+      const sourceObject =
+        selectedObjects.length === 1 ? selectedObjects[0] : undefined;
+      if (!sourceObject) return;
+      const currentGraph = getSelectedComposition2dLayerGraph(
+        baseGraph,
+        sourceObject.id,
+        graphMode,
+      );
+      if (!isStrictComposition2dGraph(currentGraph)) return;
+      const updatedGraph = updater(currentGraph);
+      const nextLayerGraph: StrictAnimationGraph = {
+        id: updatedGraph.id,
+        sourceObjectId: updatedGraph.sourceObjectId,
+        nodes: updatedGraph.nodes,
+        edges: updatedGraph.edges,
+        macros: updatedGraph.macros,
+      };
+      const nextGraph = setSelectedComposition2dLayerGraph(
+        baseGraph,
+        nextLayerGraph,
+        sourceObject.id,
+        graphMode,
+      );
+      if (isStrictComposition2dGraph(nextGraph)) {
+        graphRef.current = undefined;
+        pendingGraphSyncRef.current = null;
+      } else {
+        graphRef.current = nextGraph;
+        pendingGraphSyncRef.current = nextGraph;
+      }
+      strictDisplayGraphRef.current = nextLayerGraph;
+      displayGraphRef.current = undefined;
+      if (options.local !== false) setOptimisticGraph(nextGraph);
+      onUpdateGraph?.(() => nextGraph, {
+        implicit: options.implicit,
+        mode: graphMode,
+      });
+      setGraphDraftRevision((revision) => revision + 1);
+      nodesRef.current = buildGraphNodes(
+        selectedObjects,
+        nextLayerGraph,
+        graphWorldSize.width,
+        graphWorldSize.height,
+        graphViewportKey,
+        graphMode,
+      );
+    }
+
     function applyGraphDraft(
       updater: (graph: GraphUpdateState | undefined) => GraphUpdateState,
     ) {
@@ -1679,25 +1751,15 @@ export const ComposeAnimationGraphPanel = memo(
     function updateNodeParameter(nodeId: string, key: string, value: string) {
       const node = nodesRef.current.find((item) => item.id === nodeId);
       if (graphMode === "composition2d" && node?.typedNode) {
-        commitGraphUpdate(
-          (graph) =>
-            updateStrictComposition2dEditorNodeParameter(
-              {
-                nodes: {
-                  ...(graph?.nodes ?? {}),
-                  ...materializeGraphNodes(nodesRef.current, graph?.nodes),
-                },
-                edges: getRenderableEdges(
-                  graph,
-                  nodesRef.current,
-                  selectedObjects,
-                ),
-                viewport: graph?.viewport,
-              } satisfies StrictComposition2dEditorGraph,
-              nodeId,
-              key,
-              value,
-            ) as AnimationGraphState,
+        commitStrictGraphUpdate((graph) =>
+          isGraphInputExpression(value)
+            ? bindStrictGraphInputParameter(graph, nodeId, key, value)
+            : updateStrictComposition2dNodeParameter(
+                unbindStrictGraphInputParameter(graph, nodeId, key),
+                nodeId,
+                key,
+                value,
+              ),
         );
         return;
       }
@@ -2722,13 +2784,11 @@ export const ComposeAnimationGraphPanel = memo(
       : null;
     const activeGroupId = activeGroupNode?.details?.groupId;
     const activeGroup = activeGroupId
-      ? (graph as AnimationGraphState | undefined)?.groups?.[activeGroupId]
+      ? legacyEditorGraph?.groups?.[activeGroupId]
       : undefined;
-    const compileStatus = isStrictComposition2dGraph(
-      graph as StrictAnimationGraph | undefined,
-    )
+    const compileStatus = isStrictComposition2dGraph(graph)
       ? getStrictComposition2dCanvasDiagnostics(
-          compileAnimationGraph(graph as unknown as StrictAnimationGraph, {
+          compileAnimationGraph(graph, {
             trace: true,
           }),
         )
@@ -2896,7 +2956,7 @@ export const ComposeAnimationGraphPanel = memo(
             </div>
             <GroupSubgraphPreview
               group={activeGroup}
-              graph={graph}
+              graph={legacyEditorGraph}
               groupNodeId={activeGroupNode.id}
               groupId={activeGroupId}
               currentTime={currentTime}
@@ -3059,24 +3119,42 @@ function GraphIssueIndicator({
     >
       {errorCount > 0 ? (
         <button
-          className="grid h-8 min-w-8 place-items-center rounded-full border border-[#303746] bg-[#321414]/96 px-2 text-[12px] font-black tabular-nums text-[#ffb7b7] shadow-[0_14px_36px_rgba(0,0,0,0.36)] transition hover:border-[#667186] hover:text-white"
-          title="Show graph errors"
+          className="relative grid h-8 w-8 place-items-center text-[14px] font-black tabular-nums text-[#ffb7b7] drop-shadow-[0_14px_18px_rgba(0,0,0,0.36)] transition hover:text-white"
+          title={`Show ${errorCount} graph error${errorCount === 1 ? "" : "s"}`}
           onClick={() =>
             onToggle((type) => (type === "error" ? null : "error"))
           }
         >
-          {errorCount}
+          <svg
+            className="absolute inset-0 h-8 w-8 overflow-visible"
+            viewBox="0 0 32 32"
+            aria-hidden="true"
+          >
+            <polygon
+              points="10,1 22,1 31,10 31,22 22,31 10,31 1,22 1,10"
+              fill="#321414"
+              fillOpacity="0.96"
+              stroke="#ff5c5c"
+              strokeWidth="1.5"
+            />
+            <polygon
+              points="10,1 22,1 31,10 31,22 22,31 10,31 1,22 1,10"
+              fill="none"
+              stroke="rgba(255,92,92,0.12)"
+              strokeWidth="4"
+            />
+          </svg>
+          <span className="relative z-10">{errorCount}</span>
         </button>
       ) : null}
       {warningCount > 0 ? (
         <button
-          className="flex h-8 items-center gap-1.5 rounded-full border border-[#303746] bg-[#1b1710]/95 px-3 text-[11px] font-extrabold text-[#ffd88a] shadow-[0_14px_36px_rgba(0,0,0,0.36)] transition hover:border-[#667186] hover:text-[#fff0c2]"
-          title="Show graph warnings"
+          className="grid h-8 w-8 place-items-center rounded-full border border-[#f5c84b] bg-[#1b1710]/95 text-[14px] font-black tabular-nums text-[#ffd88a] shadow-[0_0_0_2px_rgba(245,200,75,0.12),0_14px_36px_rgba(0,0,0,0.36)] transition hover:border-[#ffe18a] hover:text-[#fff0c2]"
+          title={`Show ${warningCount} graph warning${warningCount === 1 ? "" : "s"}`}
           onClick={() =>
             onToggle((type) => (type === "warning" ? null : "warning"))
           }
         >
-          <AlertTriangle className="h-3.5 w-3.5" strokeWidth={2.5} />
           {warningCount}
         </button>
       ) : null}
@@ -3152,14 +3230,12 @@ function GraphIssuePanel({
   return createPortal(
     <div
       ref={panelRef}
-      className={`fixed z-[1000] grid origin-bottom-right gap-2 rounded-lg border border-[#303746] bg-[#11151d]/98 p-2.5 text-[11px] text-[#d6d9e1] shadow-[0_24px_70px_rgba(0,0,0,0.48)] transition duration-150 ease-out ${
-        closing ? "scale-[0.98] opacity-0" : "scale-100 opacity-100"
-      }`}
+      className={`fixed z-[1000] grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-2 overflow-hidden rounded-lg border border-[#303746] bg-[#11151d]/98 p-2.5 text-[11px] text-[#d6d9e1] shadow-[0_24px_70px_rgba(0,0,0,0.48)] transition duration-150 ease-out ${closing ? "origin-bottom-right scale-[0.98] opacity-0" : "origin-bottom-right scale-100 opacity-100"}`}
       style={{ right, bottom, width: panelWidth, maxHeight }}
       role="dialog"
       aria-label={renderedType === "error" ? "Graph errors" : "Graph warnings"}
     >
-      <div className="flex items-center justify-between gap-3 border-b border-[#252b37] pb-2">
+      <div className="flex items-center gap-3 border-b border-[#252b37] pb-2">
         <div
           className={`flex items-center gap-2 font-extrabold ${
             renderedType === "error" ? "text-[#ffb7b7]" : "text-[#ffd88a]"
@@ -3168,18 +3244,16 @@ function GraphIssuePanel({
           {issues.length} {renderedType === "error" ? "error" : "warning"}
           {issues.length === 1 ? "" : "s"}
         </div>
-        <button
-          className="rounded border border-[#313845] px-1.5 py-0.5 text-[10px] font-bold text-[#aeb6c4] transition hover:border-[#667186] hover:text-white"
-          onClick={onClose}
-        >
-          x
-        </button>
       </div>
-      <div className="clipper-hidden-scrollbar grid gap-2 overflow-auto pr-1">
+      <div className="clipper-hidden-scrollbar grid min-h-0 gap-2 overflow-y-auto pr-1">
         {issues.map((warning, index) => (
           <div
             key={`${warning.message}:${warning.nodeId ?? ""}:${warning.edgeId ?? ""}:${index}`}
-            className="rounded-md border border-[#303746] bg-[#171d28] p-2 shadow-[0_8px_24px_rgba(0,0,0,0.22)]"
+            className={`rounded-md border p-2 shadow-[0_8px_24px_rgba(0,0,0,0.22)] ${
+              warning.severity === "error"
+                ? "border-[#7a2c31] bg-[#2a1417]"
+                : "border-[#735a20] bg-[#251f11]"
+            }`}
           >
             <div
               className={`mb-1 text-[10px] font-extrabold uppercase tracking-[0.08em] ${
@@ -3397,21 +3471,7 @@ export function buildGraphNodes(
     Math.round((canvasHeight / gridSize - verticalStackHeight) / 2),
   );
   const strictSourceObjectIds =
-    mode === "composition2d"
-      ? new Set(
-          Object.values(graph?.nodes ?? {}).flatMap((node) =>
-            node &&
-            typeof node === "object" &&
-            "kind" in node &&
-            (node as { kind?: unknown }).kind === "source" &&
-            "config" in node &&
-            typeof (node as { config?: { objectId?: unknown } }).config
-              ?.objectId === "string"
-              ? [(node as { config: { objectId: string } }).config.objectId]
-              : [],
-          ),
-        )
-      : null;
+    mode === "composition2d" ? getStrictGraphSourceObjectIds(graph) : null;
   const derivedNodes = objects.flatMap((object, index) => {
     if (strictSourceObjectIds?.has(object.id)) return [];
     const layerWidth = getNodeGridWidth(object.name || object.id);
@@ -3478,7 +3538,7 @@ export function buildGraphNodes(
       }),
       createNode(
         layerId,
-        mode === "composition2d" ? "Source" : object.name || object.id,
+        object.name || object.id,
         "layer",
         getGraphNodePositionOrDefault(graph?.nodes[layerId], {
           x: layerX,
@@ -3540,7 +3600,11 @@ export function buildGraphNodes(
     )
     .map(([id, node]) => {
       const typed = node as TypedAnimationGraphNode;
-      return createNodeFromTypedNode(id, typed);
+      return createNodeFromTypedNode(
+        id,
+        typed,
+        getStrictSourceNodeLabel(typed, graph, objects),
+      );
     });
   if (mode !== "composition2d") return [...derivedNodes, ...customNodes];
   const sourceNodes = derivedNodes.filter((node) => node.kind === "layer");
@@ -3568,6 +3632,36 @@ export function buildGraphNodes(
       undefined,
     ),
   ];
+}
+
+export function getStrictGraphSourceObjectIds(
+  graph: AnimationGraphState | StrictAnimationGraph | undefined,
+) {
+  if (!graph) return new Set<string>();
+  const fallbackSourceObjectId = isStrictComposition2dGraph(graph)
+    ? graph.sourceObjectId
+    : undefined;
+  return new Set(
+    Object.values(graph.nodes ?? {}).flatMap((node) => {
+      if (
+        !node ||
+        typeof node !== "object" ||
+        !("kind" in node) ||
+        (node as { kind?: unknown }).kind !== "source"
+      )
+        return [];
+      const objectId =
+        "config" in node &&
+        typeof (node as { config?: { objectId?: unknown } }).config
+          ?.objectId === "string"
+          ? (node as { config: { objectId: string } }).config.objectId
+          : fallbackSourceObjectId;
+      return [
+        ...(objectId ? [objectId] : []),
+        ...(fallbackSourceObjectId ? [fallbackSourceObjectId] : []),
+      ];
+    }),
+  );
 }
 
 function getGraphNodePositionOrDefault(
@@ -3884,8 +3978,54 @@ export function getSelectedComposition2dLayerGraph(
   if (mode !== "composition2d" || !layerId)
     return graph as AnimationGraphState | undefined;
   if (isStrictComposition2dGraph(graph))
-    return graph as unknown as AnimationGraphState;
+    return graph.sourceObjectId === layerId
+      ? (graph as unknown as AnimationGraphState)
+      : undefined;
   return undefined;
+}
+
+export function getSelectedComposition2dDisplayGraph(
+  graph: AnimationGraphState | StrictAnimationGraph | undefined,
+  object: FrameObject | undefined,
+  mode: GraphCompositionMode,
+): AnimationGraphState | StrictAnimationGraph | undefined {
+  if (!object) return undefined;
+  return (
+    getSelectedComposition2dLayerGraph(graph, object.id, mode) ??
+    createDefaultComposition2dDisplayGraph(object)
+  );
+}
+
+function createDefaultComposition2dDisplayGraph(
+  object: FrameObject,
+): StrictAnimationGraph {
+  const sourceId = `source:${object.id}`;
+  const outId = composition2dOutNodeId;
+  return {
+    id: `graph:${object.id}`,
+    sourceObjectId: object.id,
+    nodes: {
+      [sourceId]: {
+        id: sourceId,
+        kind: "source",
+        position: { x: 60, y: 12 },
+        config: { objectId: object.id },
+      },
+      [outId]: {
+        id: outId,
+        kind: "out",
+        position: { x: 68, y: 12 },
+        config: {},
+      },
+    },
+    edges: [
+      {
+        id: `${sourceId}:out->${outId}:in`,
+        from: { nodeId: sourceId, portId: "out" },
+        to: { nodeId: outId, portId: "in" },
+      },
+    ],
+  };
 }
 
 export function setSelectedComposition2dLayerGraph(
@@ -3896,10 +4036,20 @@ export function setSelectedComposition2dLayerGraph(
 ): AnimationGraphState | StrictAnimationGraph {
   if (mode !== "composition2d" || !layerId) return layerGraph;
   return saveStrictComposition2dGraph(
-    layerGraph as StrictComposition2dEditorGraph,
+    toStrictComposition2dEditorGraph(layerGraph),
     isStrictComposition2dGraph(graph) ? graph : undefined,
     layerId,
   );
+}
+
+function toStrictComposition2dEditorGraph(
+  graph: AnimationGraphState | StrictAnimationGraph,
+): StrictComposition2dEditorGraph {
+  return {
+    nodes: graph.nodes,
+    edges: graph.edges,
+    viewport: graph.viewport,
+  };
 }
 
 function getEditorEdgeToNodeId(
@@ -4033,8 +4183,10 @@ function createNodeFromTypedNode(
   id: string,
   typed: StrictAnimationGraphNode &
     Partial<Pick<TypedAnimationGraphNode, "label" | "x" | "y">>,
+  labelOverride?: string,
 ): GraphNode {
   const label =
+    labelOverride ??
     typed.label ??
     getAnimationGraphNodeDefinition(typed.kind)?.label ??
     typed.kind;
@@ -4061,6 +4213,28 @@ function createNodeFromTypedNode(
   };
 }
 
+function getStrictSourceNodeLabel(
+  typed: StrictAnimationGraphNode,
+  graph: AnimationGraphState | StrictAnimationGraph | undefined,
+  objects: readonly FrameObject[],
+) {
+  if (typed.kind !== "source") return undefined;
+  const configuredObjectId =
+    typed.config &&
+    typeof typed.config === "object" &&
+    "objectId" in typed.config &&
+    typeof (typed.config as { objectId?: unknown }).objectId === "string"
+      ? (typed.config as { objectId: string }).objectId
+      : undefined;
+  const fallbackObjectId = isStrictComposition2dGraph(graph)
+    ? graph.sourceObjectId
+    : undefined;
+  const object =
+    objects.find((item) => item.id === configuredObjectId) ??
+    objects.find((item) => item.id === fallbackObjectId);
+  return object?.name || object?.id;
+}
+
 function createStrictAnimationGraphNode(
   id: string,
   kind: string,
@@ -4083,7 +4257,8 @@ function isCanvasSupportedStrictNodeKind(kind: string) {
     kind === "condition" ||
     kind.startsWith("value:") ||
     kind.startsWith("effect:") ||
-    kind.startsWith("geometry:")
+    kind.startsWith("geometry:") ||
+    kind.startsWith("virtual:")
   );
 }
 
@@ -4764,10 +4939,10 @@ function getGraphNodeOutputSocketType(
   if (node.typedNode && isLegacyTypedAnimationGraphNode(node.typedNode))
     return mapTypedValueToSocketType(node.typedNode.outputs[0]?.type);
   const strictOutput =
-    getStrictComposition2dPorts(node)
+    getVisibleStrictComposition2dPorts(node)
       .filter((port) => port.direction === "output")
       .find((port) => port.role === "main") ??
-    getStrictComposition2dPorts(node).find(
+    getVisibleStrictComposition2dPorts(node).find(
       (port) => port.direction === "output",
     );
   if (strictOutput?.type.kind === "animation") return "renderable";
@@ -4809,6 +4984,15 @@ function getGraphNodeRenderColors(
       border: nodeColors.modifierBorder,
     };
   return base;
+}
+
+function getGraphNodeDiagnosticSeverity(
+  diagnostic: StrictComposition2dNodeDiagnosticSummary | undefined,
+) {
+  if (!diagnostic) return null;
+  if (diagnostic.errorCount > 0) return "error";
+  if (diagnostic.warningCount > 0) return "warning";
+  return null;
 }
 
 function blendHexColors(baseHex: string, accentHex: string, amount: number) {
@@ -5515,7 +5699,7 @@ function getNodeHoverConnector(
     return null;
   const withinX = graphPoint.x >= rect.x && graphPoint.x <= right;
   const withinY = graphPoint.y >= rect.y && graphPoint.y <= bottom;
-  const strictPorts = getStrictComposition2dPorts(node, edges);
+  const strictPorts = getVisibleStrictComposition2dPorts(node, edges);
   if (strictPorts.length) {
     const closest = strictPorts
       .map((port) => ({
@@ -5718,6 +5902,7 @@ function drawGraphCanvas({
       temporalRoles?.get(node.id),
       mode,
       edges,
+      diagnostics?.nodes.get(node.id),
     );
   if (marqueeRect) drawMarquee(ctx, marqueeRect);
 }
@@ -5732,20 +5917,28 @@ function drawNode(
   temporalRole: TemporalNodeRole | undefined,
   mode: GraphCompositionMode = "composition2d",
   edges: readonly AnimationGraphEdge[] = [],
+  diagnostic?: StrictComposition2dNodeDiagnosticSummary,
 ) {
   const rect = nodeRect(node);
-  const { background: bg, border } = getGraphNodeRenderColors(
-    node,
-    mode,
-    temporalRole,
-  );
+  const baseColors = getGraphNodeRenderColors(node, mode, temporalRole);
+  const severity = getGraphNodeDiagnosticSeverity(diagnostic);
+  const issueAccent =
+    severity === "error"
+      ? "#ff5c5c"
+      : severity === "warning"
+        ? "#f5c84b"
+        : null;
+  const bg = issueAccent
+    ? blendHexColors(baseColors.background, issueAccent, 0.18)
+    : baseColors.background;
+  const border = issueAccent ?? baseColors.border;
   ctx.fillStyle = bg;
   ctx.strokeStyle = border;
   ctx.globalAlpha = 1;
   ctx.lineWidth = selected ? 2.5 : hovered ? 2 : 1.5;
-  if (hovered || selected) {
+  if (hovered || selected || issueAccent) {
     ctx.shadowColor = border;
-    ctx.shadowBlur = selected ? 18 : 14;
+    ctx.shadowBlur = selected ? 18 : issueAccent ? 16 : 14;
   }
   ctx.beginPath();
   ctx.rect(rect.x, rect.y, rect.width, rect.height);
@@ -5800,7 +5993,7 @@ function drawNode(
     rect.y + rect.height / 2,
     rect.width - 12,
   );
-  for (const port of getStrictComposition2dPorts(node, edges))
+  for (const port of getVisibleStrictComposition2dPorts(node, edges))
     drawPortSquare(
       ctx,
       strictPortPoint(node, port, edges),
@@ -5810,13 +6003,43 @@ function drawNode(
     drawConnectorDot(ctx, connector.point, "#f3f6fb");
 }
 
+export function getVisibleStrictComposition2dPorts(
+  node: GraphNode,
+  edges: readonly RenderableGraphEdge[] = [],
+) {
+  const ports = getStrictComposition2dPorts(node, edges);
+  const hiddenParameterInputIds = new Set(
+    ports
+      .filter(
+        (port) =>
+          port.direction === "input" &&
+          port.role === "parameter" &&
+          port.id !== getStrictInputBusPortId(port) &&
+          ports.some(
+            (candidate) =>
+              candidate.direction === "input" &&
+              candidate.id === getStrictInputBusPortId(port),
+          ),
+      )
+      .map((port) => port.id),
+  );
+  return ports.filter((port) => !hiddenParameterInputIds.has(port.id));
+}
+
+function getStrictInputBusPortId(port: GraphPortDefinition) {
+  if (port.type.kind === "value") return `input:${port.type.valueType}`;
+  if (port.type.kind === "anyValue") return "input:anyValue";
+  if (port.type.kind === "field") return `input:field:${port.type.valueType}`;
+  return port.id;
+}
+
 function strictPortPoint(
   node: GraphNode,
   port: GraphPortDefinition,
   edges: readonly RenderableGraphEdge[] = [],
 ) {
   const rect = nodeRect(node);
-  const ports = getStrictComposition2dPorts(node, edges).filter(
+  const ports = getVisibleStrictComposition2dPorts(node, edges).filter(
     (candidate) => candidate.direction === port.direction,
   );
   const index = Math.max(
@@ -5960,12 +6183,30 @@ function getEdgeEndpointPoint(
     endpoint === "from"
       ? getEditorEdgeFromSocket(edge)
       : getEditorEdgeToSocket(edge);
-  const port = getStrictComposition2dPorts(node, edges).find(
-    (candidate) =>
-      candidate.id === portId &&
-      candidate.direction === (endpoint === "from" ? "output" : "input"),
-  );
+  const port = getVisiblePortForStrictPortId(node, portId, endpoint, edges);
   return port ? strictPortPoint(node, port, edges) : nodeCenter(node);
+}
+
+function getVisiblePortForStrictPortId(
+  node: GraphNode,
+  portId: string | undefined,
+  endpoint: "from" | "to",
+  edges: readonly RenderableGraphEdge[],
+) {
+  const direction = endpoint === "from" ? "output" : "input";
+  const visiblePort = getVisibleStrictComposition2dPorts(node, edges).find(
+    (candidate) => candidate.id === portId && candidate.direction === direction,
+  );
+  if (visiblePort) return visiblePort;
+  const rawPort = getStrictComposition2dPorts(node, edges).find(
+    (candidate) => candidate.id === portId && candidate.direction === direction,
+  );
+  if (!rawPort || rawPort.direction !== "input") return null;
+  return getVisibleStrictComposition2dPorts(node, edges).find(
+    (candidate) =>
+      candidate.direction === "input" &&
+      candidate.id === getStrictInputBusPortId(rawPort),
+  );
 }
 
 function getEdgeSegmentColors(
@@ -5978,12 +6219,13 @@ function getEdgeSegmentColors(
   if (mode !== "composition2d") return undefined;
   const fromPortId = getEditorEdgeFromSocket(edge);
   const toPortId = getEditorEdgeToSocket(edge);
-  const fromPort = getStrictComposition2dPorts(fromNode, edges).find(
-    (port) => port.id === fromPortId && port.direction === "output",
+  const fromPort = getVisiblePortForStrictPortId(
+    fromNode,
+    fromPortId,
+    "from",
+    edges,
   );
-  const toPort = getStrictComposition2dPorts(toNode, edges).find(
-    (port) => port.id === toPortId && port.direction === "input",
-  );
+  const toPort = getVisiblePortForStrictPortId(toNode, toPortId, "to", edges);
   if (!fromPort || !toPort) return undefined;
   return {
     from: getStrictPortColor(fromPort),
@@ -7479,7 +7721,7 @@ function GroupSubgraphPreview({
   );
 }
 
-export function getPopoverDetails(
+export function getGraphNodeParameterDetails(
   node: GraphNode,
   parameters?: Record<string, string>,
 ) {
@@ -7546,8 +7788,8 @@ function getParameterEditorSchema(
       definition.fieldGroups,
     );
     return {
-      width: definition.popover?.width ?? 210,
-      height: Math.max(definition.popover?.height ?? 0, calculatedHeight),
+      width: 210,
+      height: calculatedHeight,
       groups: definition.fieldGroups.map((group) => ({
         id: group.id,
         label: group.label,
@@ -7739,12 +7981,44 @@ export function getGraphNodeParameterEditorSchema(
   node: GraphNode,
   parameters?: Record<string, string>,
   edges: readonly AnimationGraphEdge[] = [],
+  graph?: StrictAnimationGraph,
 ) {
   const strictSchema = getStrictComposition2dParameterEditorSchema(node, edges);
-  if (strictSchema) return strictSchema;
-  const details = getPopoverDetails(node, parameters);
+  if (strictSchema)
+    return graph
+      ? decorateStrictGraphInputBindings(strictSchema, node.id, graph)
+      : strictSchema;
+  const details = getGraphNodeParameterDetails(node, parameters);
   if (details.length === 0) return null;
   return getParameterEditorSchema(node, details, edges);
+}
+
+function decorateStrictGraphInputBindings(
+  schema: GraphParameterEditorSchema,
+  nodeId: string,
+  graph: StrictAnimationGraph,
+): GraphParameterEditorSchema {
+  return {
+    ...schema,
+    groups: schema.groups.map((group) => ({
+      ...group,
+      fields: group.fields.map((field) => {
+        const bindingOptions = getStrictGraphInputBindingOptions(
+          graph,
+          nodeId,
+          field.key,
+        );
+        if (!bindingOptions.length) return field;
+        return {
+          ...field,
+          value:
+            getStrictGraphInputBindingExpression(graph, nodeId, field.key) ??
+            field.value,
+          bindingOptions,
+        };
+      }),
+    })),
+  };
 }
 
 function getGraphParameterUnit(key: string) {

@@ -119,34 +119,10 @@ export function useEditorDerivedState({
   const adjustedSceneTime = previewRenderModel.adjustedSceneTime;
   const activeTimelinePart = previewRenderModel.activeTimelinePart;
   const activeComposition = previewRenderModel.activeComposition;
-  const sceneMotionViews = useMemo(
-    () => getMotionMarkerViews(renderableScene),
-    [renderableScene.motionMarkers],
-  );
-  const part = previewRenderModel.part;
-  const previewTime = previewRenderModel.previewTime;
   const selectedPart =
     scene.compositions.find((item) => item.id === selectedPartId) ?? null;
-  const composeFilePart = useMemo(
-    () =>
-      timelineMode === "compose"
-        ? getComposeFilePart(
-            project,
-            activeComposition ?? selectedPart,
-            composeGraphEnabled,
-          )
-        : null,
-    [
-      activeComposition,
-      composeGraphEnabled,
-      project,
-      selectedPart,
-      timelineMode,
-    ],
-  );
-  const displayPart = composeFilePart ?? part;
-  const displayPreviewTime =
-    composeFilePart && timelineMode === "compose"
+  const composePreviewTime =
+    timelineMode === "compose"
       ? Math.min(
           Math.max(
             activeTimelinePart
@@ -156,8 +132,38 @@ export function useEditorDerivedState({
               : currentSceneTime,
             0,
           ),
-          composeFilePart.duration,
+          (activeComposition ?? selectedPart)?.duration ?? 0,
         )
+      : previewRenderModel.previewTime;
+  const sceneMotionViews = useMemo(
+    () => getMotionMarkerViews(renderableScene),
+    [renderableScene.motionMarkers],
+  );
+  const part = previewRenderModel.part;
+  const previewTime = previewRenderModel.previewTime;
+  const composeFilePart = useMemo(
+    () =>
+      timelineMode === "compose"
+        ? getComposeFilePart(
+            project,
+            activeComposition ?? selectedPart,
+            composeGraphEnabled,
+            composePreviewTime,
+          )
+        : null,
+    [
+      activeComposition,
+      composeGraphEnabled,
+      composePreviewTime,
+      project,
+      selectedPart,
+      timelineMode,
+    ],
+  );
+  const displayPart = composeFilePart ?? part;
+  const displayPreviewTime =
+    composeFilePart && timelineMode === "compose"
+      ? composePreviewTime
       : previewTime;
   const hasActiveComposition = Boolean(activeComposition);
   const previewParts = previewRenderModel.previewParts;
@@ -504,6 +510,7 @@ function getComposeFilePart(
   project: ProjectManifest,
   timelinePart: CompositionClip | null,
   composeGraphEnabled: boolean,
+  previewTime = 0,
 ) {
   if (!timelinePart) return null;
   const composition = [
@@ -521,6 +528,10 @@ function getComposeFilePart(
       ? applyAnimationGraphToComposition(
           composition,
           composition.animationGraph,
+          {
+            time: previewTime,
+            frame: Math.max(0, Math.round(previewTime * 30)),
+          },
         )
       : composition),
     start: undefined,

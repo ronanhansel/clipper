@@ -83,13 +83,20 @@ import {
 } from "../timeline/EaseSelectItems";
 import {
   buildGraphNodes,
+  getSelectedComposition2dDisplayGraph,
   getSelectedComposition2dLayerGraph,
   getGraphNodeParameterEditorSchema,
   getRenderableEdges,
+  type GraphNode,
 } from "../timeline/ComposeAnimationGraphPanel";
+import { isStrictComposition2dGraph } from "../timeline/StrictComposition2dGraphPanel";
+import {
+  graphicBoundsKeys,
+  graphicDefaultFontFamily,
+  graphicTextDefaults,
+} from "../../core/graphics/inspectorSettings";
 
-const defaultFontFamily =
-  "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+const defaultFontFamily = graphicDefaultFontFamily;
 const defaultFontOption = { value: defaultFontFamily, label: "System" };
 type FontOption = { value: string; label: string };
 
@@ -226,6 +233,8 @@ export function GraphNodeInspector({
   selectedObject,
   nodeId,
   onParameterChange,
+  onSourceObjectChange,
+  onSourceObjectPreview,
 }: {
   part: Part;
   selectedObject: FrameObject | null;
@@ -240,15 +249,23 @@ export function GraphNodeInspector({
       layerId?: string;
     },
   ) => void;
+  onSourceObjectChange?: (
+    updater: (object: FrameObject) => FrameObject,
+  ) => void;
+  onSourceObjectPreview?: (
+    updater: (object: FrameObject) => FrameObject,
+  ) => void;
 }) {
   const graph = part.animationGraph;
   const graphMode: GraphCompositionMode = "composition2d";
   const objects = selectedObject ? [selectedObject] : [];
-  const displayGraph = getSelectedComposition2dLayerGraph(
-    graph as any,
-    selectedObject?.id,
-    graphMode,
-  );
+  const displayGraph = selectedObject
+    ? getSelectedComposition2dDisplayGraph(
+        graph as any,
+        selectedObject,
+        graphMode,
+      )
+    : getSelectedComposition2dLayerGraph(graph as any, undefined, graphMode);
   const nodes = buildGraphNodes(
     objects,
     displayGraph,
@@ -258,16 +275,35 @@ export function GraphNodeInspector({
     "composition2d",
   );
   const node = nodes.find((item) => item.id === nodeId) ?? null;
+  if (!node) return <EmptyInspector />;
+  if (
+    isGraphSourceObjectInspectorNode(node) &&
+    selectedObject &&
+    onSourceObjectChange
+  )
+    return (
+      <ObjectInspector
+        object={selectedObject}
+        onChange={onSourceObjectChange}
+        onPreview={onSourceObjectPreview}
+      />
+    );
+  const graphParameters =
+    displayGraph && !isStrictComposition2dGraph(displayGraph)
+      ? displayGraph.parameters?.[node.id]
+      : undefined;
   const schema = node
     ? getGraphNodeParameterEditorSchema(
         node,
-        displayGraph?.parameters?.[node.id],
+        graphParameters,
         displayGraph
           ? getRenderableEdges(displayGraph, nodes, objects)
           : undefined,
+        displayGraph && isStrictComposition2dGraph(displayGraph)
+          ? displayGraph
+          : undefined,
       )
     : null;
-  if (!node) return <EmptyInspector />;
   return (
     <div className="grid gap-3">
       {schema ? (
@@ -290,6 +326,12 @@ export function GraphNodeInspector({
       )}
     </div>
   );
+}
+
+export function isGraphSourceObjectInspectorNode(
+  node: Pick<GraphNode, "kind" | "typedNode">,
+) {
+  return node.typedNode?.kind === "source" || node.kind === "layer";
 }
 
 function FontSelector({
@@ -343,50 +385,65 @@ function FontSelector({
 
 export const ObjectInspector = memo(function ObjectInspector({
   object,
+  lockBounds = false,
   onChange,
   onPreview,
 }: {
   object: FrameObject;
+  lockBounds?: boolean;
   onChange: (updater: (object: FrameObject) => FrameObject) => void;
   onPreview?: (updater: (object: FrameObject) => FrameObject) => void;
 }) {
   const isText = object.type === "text";
   const isRect = object.type === "rect";
-  const hasIndividualRadius = [
-    "borderTopLeftRadius",
-    "borderTopRightRadius",
-    "borderBottomRightRadius",
-    "borderBottomLeftRadius",
-  ].some((key) => object.style[key] !== undefined);
-  const [cornerRadiusExpanded, setCornerRadiusExpanded] =
-    useState(hasIndividualRadius);
   const colorStyleEntries = getEditableColorStyleEntries(object.style).filter(
-    ([key]) => !(isText && key === "color"),
+    ([key]) =>
+      !(isText && key === "color") &&
+      !(isRect && (key === "background" || key === "backgroundColor")),
   );
-  const opacity = getObjectStyleNumber(object.style.opacity, 1);
-  const opacityPercent = Math.round(
-    clamp(opacity <= 1 ? opacity * 100 : opacity, 0, 100),
-  );
-  const cornerRadius = getObjectStyleNumber(object.style.borderRadius, 0);
-  const cornerRadiusFields = [
-    ["borderTopLeftRadius", "Top left"],
-    ["borderTopRightRadius", "Top right"],
-    ["borderBottomRightRadius", "Bottom right"],
-    ["borderBottomLeftRadius", "Bottom left"],
-  ] as const;
+  const rectBackground =
+    typeof object.style.background === "string"
+      ? object.style.background
+      : typeof object.style.backgroundColor === "string"
+        ? object.style.backgroundColor
+        : "#D5D5D5";
+  const rectBackgroundKey =
+    typeof object.style.backgroundColor === "string"
+      ? "backgroundColor"
+      : "background";
   const textColor = isHexColor(String(object.style.color ?? ""))
     ? String(object.style.color)
-    : "#FFFFFF";
-  const fontFamily = String(object.style.fontFamily ?? defaultFontFamily);
-  const fontSize = Number(object.style.fontSize ?? 48);
-  const fontWeight = Number(object.style.fontWeight ?? 400);
-  const fontStyle = String(object.style.fontStyle ?? "normal");
-  const textDecoration = String(object.style.textDecoration ?? "none");
-  const lineHeight = Number(object.style.lineHeight ?? 1.1);
-  const letterSpacing = Number(object.style.letterSpacing ?? 0);
-  const textAlign = String(object.style.textAlign ?? "left");
-  const verticalAlign = String(object.style.verticalAlign ?? "middle");
-  const textBoxLayout = String(object.style.textBoxLayout ?? "fixed");
+    : graphicTextDefaults.color;
+  const fontFamily = String(
+    object.style.fontFamily ?? graphicTextDefaults.fontFamily,
+  );
+  const fontSize = Number(
+    object.style.fontSize ?? graphicTextDefaults.fontSize,
+  );
+  const fontWeight = Number(
+    object.style.fontWeight ?? graphicTextDefaults.fontWeight,
+  );
+  const fontStyle = String(
+    object.style.fontStyle ?? graphicTextDefaults.fontStyle,
+  );
+  const textDecoration = String(
+    object.style.textDecoration ?? graphicTextDefaults.textDecoration,
+  );
+  const lineHeight = Number(
+    object.style.lineHeight ?? graphicTextDefaults.lineHeight,
+  );
+  const letterSpacing = Number(
+    object.style.letterSpacing ?? graphicTextDefaults.letterSpacing,
+  );
+  const textAlign = String(
+    object.style.textAlign ?? graphicTextDefaults.textAlign,
+  );
+  const verticalAlign = String(
+    object.style.verticalAlign ?? graphicTextDefaults.verticalAlign,
+  );
+  const textBoxLayout = String(
+    object.style.textBoxLayout ?? graphicTextDefaults.textBoxLayout,
+  );
   const textButtonBase =
     "grid h-9 place-items-center rounded-[9px] border text-[#dfe2ea] transition hover:border-[var(--clipper-accent-strong)]";
 
@@ -437,88 +494,6 @@ export const ObjectInspector = memo(function ObjectInspector({
     }));
   }
 
-  function updateOpacity(value: string) {
-    const percent = clamp(Number(value) || 0, 0, 100);
-    onChange((current) => {
-      const style = { ...current.style };
-      if (percent >= 100) delete style.opacity;
-      else style.opacity = roundTwo(percent / 100);
-      return { ...current, style };
-    });
-  }
-
-  function previewOpacity(value: number) {
-    const percent = clamp(Number.isFinite(value) ? value : 0, 0, 100);
-    onPreview?.((current) => {
-      const style = { ...current.style };
-      if (percent >= 100) delete style.opacity;
-      else style.opacity = roundTwo(percent / 100);
-      return { ...current, style };
-    });
-  }
-
-  function updateUniformCornerRadius(value: string) {
-    const radius = Math.max(0, Number(value) || 0);
-    onChange((current) => {
-      const {
-        borderTopLeftRadius,
-        borderTopRightRadius,
-        borderBottomRightRadius,
-        borderBottomLeftRadius,
-        ...style
-      } = current.style;
-      void borderTopLeftRadius;
-      void borderTopRightRadius;
-      void borderBottomRightRadius;
-      void borderBottomLeftRadius;
-      const nextStyle = { ...style };
-      if (radius > 0) nextStyle.borderRadius = radius;
-      else delete nextStyle.borderRadius;
-      return { ...current, style: nextStyle };
-    });
-  }
-
-  function previewUniformCornerRadius(value: number) {
-    const radius = Math.max(0, Number.isFinite(value) ? value : 0);
-    onPreview?.((current) => {
-      const {
-        borderTopLeftRadius,
-        borderTopRightRadius,
-        borderBottomRightRadius,
-        borderBottomLeftRadius,
-        ...style
-      } = current.style;
-      void borderTopLeftRadius;
-      void borderTopRightRadius;
-      void borderBottomRightRadius;
-      void borderBottomLeftRadius;
-      const nextStyle = { ...style };
-      if (radius > 0) nextStyle.borderRadius = radius;
-      else delete nextStyle.borderRadius;
-      return { ...current, style: nextStyle };
-    });
-  }
-
-  function updateIndividualCornerRadius(key: string, value: string) {
-    const radius = Math.max(0, Number(value) || 0);
-    onChange((current) => {
-      const style = { ...current.style };
-      if (radius > 0) style[key] = radius;
-      else delete style[key];
-      return { ...current, style };
-    });
-  }
-
-  function previewIndividualCornerRadius(key: string, value: number) {
-    const radius = Math.max(0, Number.isFinite(value) ? value : 0);
-    onPreview?.((current) => {
-      const style = { ...current.style };
-      if (radius > 0) style[key] = radius;
-      else delete style[key];
-      return { ...current, style };
-    });
-  }
-
   function toggleBold() {
     updateStyleValue("fontWeight", fontWeight >= 700 ? 400 : 700);
   }
@@ -559,89 +534,39 @@ export const ObjectInspector = memo(function ObjectInspector({
 
   return (
     <div className="grid gap-3">
-      <div className="grid grid-cols-2 gap-2">
-        {(["x", "y", "width", "height"] as const).map((key) => (
-          <label className={`grid gap-1.5 ${mutedCaps}`} key={key}>
-            {key}
-            <Input
-              type="number"
-              numberScrubMode="preview"
-              numberScrubCommitThrottleMs={16}
-              value={object.bounds[key]}
-              onNumberScrubPreview={(value) => previewBounds(key, value)}
-              onChange={(event) => updateBounds(key, event.target.value)}
-            />
-          </label>
-        ))}
-      </div>
+      {lockBounds ? null : (
+        <div className="grid grid-cols-2 gap-2">
+          {graphicBoundsKeys.map((key) => (
+            <label className={`grid gap-1.5 ${mutedCaps}`} key={key}>
+              {key}
+              <Input
+                type="number"
+                numberScrubMode="preview"
+                numberScrubCommitThrottleMs={16}
+                value={object.bounds[key]}
+                onNumberScrubPreview={(value) => previewBounds(key, value)}
+                onChange={(event) => updateBounds(key, event.target.value)}
+              />
+            </label>
+          ))}
+        </div>
+      )}
       {isRect ? (
-        <div className="grid gap-3 rounded-[14px] border border-[#2d313b] bg-[#111319]/72 p-3">
-          <div className="flex items-center justify-between text-[13px] font-extrabold text-[#dfe2ea]">
-            <span>Appearance</span>
-            <span className="text-[#737884]">○</span>
-          </div>
-          <div className="grid grid-cols-[0.9fr_1fr_auto] gap-2">
-            <label className={`grid gap-1.5 ${mutedCaps}`}>
-              Opacity
-              <Input
-                type="number"
-                min={0}
-                max={100}
-                numberScrubMode="preview"
-                numberScrubCommitThrottleMs={16}
-                value={opacityPercent}
-                onNumberScrubPreview={previewOpacity}
-                onChange={(event) => updateOpacity(event.target.value)}
-              />
-            </label>
-            <label className={`grid gap-1.5 ${mutedCaps}`}>
-              Corner radius
-              <Input
-                type="number"
-                min={0}
-                numberScrubMode="preview"
-                numberScrubCommitThrottleMs={16}
-                value={cornerRadius}
-                onNumberScrubPreview={previewUniformCornerRadius}
-                onChange={(event) =>
-                  updateUniformCornerRadius(event.target.value)
-                }
-              />
-            </label>
-            <button
-              className={`mt-[22px] grid h-10 w-10 place-items-center rounded-[10px] border text-sm font-extrabold transition ${cornerRadiusExpanded ? "border-[var(--clipper-accent-strong)] bg-[rgb(var(--clipper-accent-rgb)/0.22)] text-white" : "border-[#2d313b] bg-[#171920] text-[#dfe2ea] hover:border-[var(--clipper-accent-strong)]"}`}
-              aria-label="Toggle individual corner radius"
-              aria-pressed={cornerRadiusExpanded}
-              onClick={() => setCornerRadiusExpanded((current) => !current)}
-            >
-              ⌜
-            </button>
-          </div>
-          {cornerRadiusExpanded ? (
-            <div className="grid grid-cols-2 gap-2">
-              {cornerRadiusFields.map(([key, label]) => (
-                <label className={`grid gap-1.5 ${mutedCaps}`} key={key}>
-                  {label}
-                  <Input
-                    type="number"
-                    min={0}
-                    numberScrubMode="preview"
-                    numberScrubCommitThrottleMs={16}
-                    value={getObjectStyleNumber(
-                      object.style[key],
-                      cornerRadius,
-                    )}
-                    onNumberScrubPreview={(value) =>
-                      previewIndividualCornerRadius(key, value)
-                    }
-                    onChange={(event) =>
-                      updateIndividualCornerRadius(key, event.target.value)
-                    }
-                  />
-                </label>
-              ))}
-            </div>
-          ) : null}
+        <div className={`grid gap-1.5 ${mutedCaps}`}>
+          <span>Background</span>
+          <ColorSelector
+            value={rectBackground}
+            allowAlpha
+            onChange={(nextValue) =>
+              updateStyleColor(rectBackgroundKey, nextValue)
+            }
+            onPreview={(nextValue) =>
+              onPreview?.((current) => ({
+                ...current,
+                style: { ...current.style, [rectBackgroundKey]: nextValue },
+              }))
+            }
+          />
         </div>
       ) : null}
       {isText ? (
@@ -916,18 +841,6 @@ export const ObjectInspector = memo(function ObjectInspector({
     </div>
   );
 });
-
-function getObjectStyleNumber(
-  value: string | number | undefined,
-  fallback = 0,
-) {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string") {
-    const numeric = Number.parseFloat(value);
-    return Number.isFinite(numeric) ? numeric : fallback;
-  }
-  return fallback;
-}
 
 function VerticalAlignIcon({ align }: { align: "top" | "middle" | "bottom" }) {
   if (align === "top") {

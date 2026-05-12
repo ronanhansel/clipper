@@ -20,6 +20,7 @@ describe("animation definition registry", () => {
         group.fields.map((field) => field.key),
       ),
     ).toEqual(["x from", "x to", "y from", "y to"]);
+    expect(position).not.toHaveProperty("popover");
     expect(opacity.fieldGroups[0].fields.map((field) => field.key)).toEqual([
       "from",
       "to",

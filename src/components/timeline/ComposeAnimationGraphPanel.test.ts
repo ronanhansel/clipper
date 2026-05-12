@@ -9,8 +9,10 @@ import {
   getGraphPointerDownConnector,
   getGraphContentSize,
   getRenderableEdges,
+  getSelectedComposition2dDisplayGraph,
   getSelectedComposition2dLayerGraph,
   getStrictGraphNodeMenuGroups,
+  getVisibleStrictComposition2dPorts,
   setSelectedComposition2dLayerGraph,
   updateStrictConditionNodeParameter,
 } from "./ComposeAnimationGraphPanel";
@@ -36,6 +38,7 @@ import {
   getAnimationGraphNodeDefinition,
   getAnimationGraphNodeDefinitions,
 } from "../../core/animationGraph/registry";
+import { bindStrictGraphInputParameter } from "../../core/graphParameterBindings";
 
 type GraphMenuTestGroup = {
   entries: readonly { value: { kind: string } }[];
@@ -218,12 +221,15 @@ describe("buildGraphNodes", () => {
           kind === "condition" ||
           kind.startsWith("value:") ||
           kind.startsWith("effect:") ||
-          kind.startsWith("geometry:"),
+          kind.startsWith("geometry:") ||
+          kind.startsWith("virtual:"),
       )
       .filter((kind) => !["source", "out", "macro"].includes(kind));
 
     expect([...menuKinds].sort()).toEqual([...expectedKinds].sort());
     expect(menuKinds).toContain("effect:clipper.motion.zoom");
+    expect(menuKinds).toContain("virtual:text");
+    expect(menuKinds).toContain("geometry:dotGrid");
     expect(menuKinds).not.toContain("source");
     expect(menuKinds).not.toContain("out");
   });
@@ -352,6 +358,79 @@ describe("buildGraphNodes", () => {
     );
   });
 
+  it("does not show another object's strict graph for selected text", () => {
+    const graph = {
+      id: "graph:background",
+      sourceObjectId: "background",
+      nodes: {
+        source: {
+          id: "source",
+          kind: "source",
+          position: { x: 60, y: 12 },
+          config: { objectId: "background" },
+        },
+        "composition2d:out": {
+          id: "composition2d:out",
+          kind: "out",
+          position: { x: 74, y: 12 },
+          config: {},
+        },
+      },
+      edges: [
+        {
+          id: "noise:1:value->opacity:to",
+          from: { nodeId: "noise:1", portId: "value" },
+          to: { nodeId: "opacity", portId: "to" },
+        },
+      ],
+    } satisfies StrictAnimationGraph;
+
+    expect(
+      getSelectedComposition2dLayerGraph(graph, "text", "composition2d"),
+    ).toBeUndefined();
+  });
+
+  it("builds clean default Source to Out display graph for objects without matching graph", () => {
+    const object = {
+      id: "text",
+      name: "Text",
+      type: "text" as const,
+      selector: ".text",
+      bounds: { x: 0, y: 0, width: 100, height: 40 },
+      style: {},
+      animations: [],
+    };
+    const graph = getSelectedComposition2dDisplayGraph(
+      undefined,
+      object,
+      "composition2d",
+    );
+    const nodes = buildGraphNodes(
+      [object],
+      graph,
+      5200,
+      900,
+      "text",
+      "composition2d",
+    );
+    const edges = getRenderableEdges(graph, nodes, [object]);
+
+    expect(nodes.map((node) => node.id).sort()).toEqual([
+      "composition2d:out",
+      "source:text",
+    ]);
+    expect(nodes.find((node) => node.id === "source:text")).toMatchObject({
+      label: "Text",
+    });
+    expect(edges).toEqual([
+      {
+        id: "source:text:out->composition2d:out:in",
+        from: { nodeId: "source:text", portId: "out" },
+        to: { nodeId: "composition2d:out", portId: "in" },
+      },
+    ]);
+  });
+
   it("creates a strict Source to Out edge when dropped on Out", () => {
     const object = {
       id: "text",
@@ -419,22 +498,22 @@ describe("buildGraphNodes", () => {
     const nodes = buildGraphNodes(
       [
         {
-          id: "background",
-          name: "Background",
+          id: "text",
+          name: "Text",
           type: "rect",
-          selector: "[data-layer-id='background']",
+          selector: ".text",
           bounds: { x: 0, y: 0, width: 1920, height: 1080 },
           style: {},
           animations: [],
         },
       ],
       {
-        nodes: { "layer:background": { x: 12, y: 34 } },
+        nodes: { "layer:text": { x: 12, y: 34 } },
         edges: [],
       },
     );
 
-    expect(nodes.find((node) => node.id === "layer:background")).toMatchObject({
+    expect(nodes.find((node) => node.id === "layer:text")).toMatchObject({
       x: 12,
       y: 34,
     });
@@ -1818,6 +1897,270 @@ describe("composition2d strict Phase 5 editor behavior", () => {
     expect(blurSchema?.groups[0].fields).toMatchObject([
       { key: "radius", value: "6" },
     ]);
+  });
+
+  it("shows compatible graph inputs beside strict parameter fields", () => {
+    const addDefinition = getAnimationGraphNodeDefinition("value:math:add")!;
+    const graph: StrictAnimationGraph = {
+      id: "graph:text",
+      sourceObjectId: "text",
+      nodes: {
+        "noise:1": {
+          id: "noise:1",
+          kind: "value:noise",
+          position: { x: 1, y: 2 },
+          config: { seed: 1, min: 0, max: 1, frequency: 1 },
+        },
+        add: {
+          id: "add",
+          kind: "value:math:add",
+          position: { x: 3, y: 4 },
+          config: addDefinition.createDefaultConfig({ graphId: "test" }),
+        },
+      },
+      edges: [
+        {
+          id: "noise:1:value->add:b",
+          from: { nodeId: "noise:1", portId: "value" },
+          to: { nodeId: "add", portId: "b" },
+        },
+      ],
+    };
+    const schema = getGraphNodeParameterEditorSchema(
+      {
+        id: "add",
+        label: "Add",
+        kind: "value:math:add",
+        x: 1,
+        y: 2,
+        width: 8,
+        height: 2,
+        details: {},
+        typedNode: graph.nodes.add,
+      },
+      undefined,
+      [],
+      graph,
+    );
+
+    expect(
+      schema?.groups[0].fields
+        .find((field) => field.key === "a")
+        ?.bindingOptions?.map((option) => option.expression),
+    ).toEqual(["input.noise1"]);
+  });
+
+  it("shows active input expression when strict parameter field is connected", () => {
+    const addDefinition = getAnimationGraphNodeDefinition("value:math:add")!;
+    const graph = bindStrictGraphInputParameter(
+      {
+        id: "graph:text",
+        sourceObjectId: "text",
+        nodes: {
+          "noise:1": {
+            id: "noise:1",
+            kind: "value:noise",
+            position: { x: 1, y: 2 },
+            config: { seed: 1, min: 0, max: 1, frequency: 1 },
+          },
+          add: {
+            id: "add",
+            kind: "value:math:add",
+            position: { x: 3, y: 4 },
+            config: addDefinition.createDefaultConfig({ graphId: "test" }),
+          },
+        },
+        edges: [],
+      },
+      "add",
+      "a",
+      "input.noise1",
+    );
+    const schema = getGraphNodeParameterEditorSchema(
+      {
+        id: "add",
+        label: "Add",
+        kind: "value:math:add",
+        x: 1,
+        y: 2,
+        width: 8,
+        height: 2,
+        details: {},
+        typedNode: graph.nodes.add,
+      },
+      undefined,
+      undefined,
+      graph,
+    );
+
+    expect(
+      schema?.groups[0].fields.find((field) => field.key === "a")?.value,
+    ).toBe("input.noise1");
+  });
+
+  it("shows typed procedural inputs on value noise nodes", () => {
+    const noiseDefinition = getAnimationGraphNodeDefinition("value:noise")!;
+    const noiseNode = {
+      id: "noise:1",
+      kind: "value:noise",
+      position: { x: 0, y: 0 },
+      config: {},
+    };
+
+    expect(
+      noiseDefinition
+        .getPorts(noiseNode)
+        .map((port) => `${port.direction}:${port.id}`),
+    ).toEqual([
+      "input:input:number",
+      "input:min",
+      "input:max",
+      "input:sample",
+      "output:value",
+    ]);
+    expect(
+      getVisibleStrictComposition2dPorts({
+        id: "noise:1",
+        label: "Noise",
+        kind: "value:noise",
+        x: 0,
+        y: 0,
+        width: 8,
+        height: 2,
+        typedNode: noiseNode,
+      }).map((port) => `${port.direction}:${port.id}`),
+    ).toEqual(["input:input:number", "output:value"]);
+  });
+
+  it("renders graph-owned graphic controls from shared primitive settings", () => {
+    const textDefinition = getAnimationGraphNodeDefinition("virtual:text")!;
+    const rectangleDefinition =
+      getAnimationGraphNodeDefinition("geometry:rectangle")!;
+    const circleDefinition =
+      getAnimationGraphNodeDefinition("geometry:circle")!;
+
+    const textSchema = getGraphNodeParameterEditorSchema({
+      id: "text",
+      label: "Text",
+      kind: "virtual:text",
+      x: 1,
+      y: 2,
+      width: 8,
+      height: 2,
+      details: {},
+      typedNode: {
+        id: "text",
+        kind: "virtual:text",
+        position: { x: 1, y: 2 },
+        config: textDefinition.createDefaultConfig({ graphId: "test" }),
+      } as any,
+    });
+    const rectangleSchema = getGraphNodeParameterEditorSchema({
+      id: "rectangle",
+      label: "Rectangle",
+      kind: "geometry:rectangle",
+      x: 1,
+      y: 2,
+      width: 8,
+      height: 2,
+      details: {},
+      typedNode: {
+        id: "rectangle",
+        kind: "geometry:rectangle",
+        position: { x: 1, y: 2 },
+        config: rectangleDefinition.createDefaultConfig({ graphId: "test" }),
+      } as any,
+    });
+    const circleSchema = getGraphNodeParameterEditorSchema({
+      id: "circle",
+      label: "Circle",
+      kind: "geometry:circle",
+      x: 1,
+      y: 2,
+      width: 8,
+      height: 2,
+      details: {},
+      typedNode: {
+        id: "circle",
+        kind: "geometry:circle",
+        position: { x: 1, y: 2 },
+        config: circleDefinition.createDefaultConfig({ graphId: "test" }),
+      } as any,
+    });
+
+    expect(textSchema?.groups.flatMap((group) => group.fields)).toMatchObject([
+      { key: "content", value: "Text" },
+      { key: "x", value: "0" },
+      { key: "y", value: "0" },
+      { key: "width", value: "320" },
+      { key: "height", value: "96" },
+      { key: "color", value: "#ffffff" },
+      { key: "fontSize", value: "48" },
+      expect.objectContaining({ key: "fontFamily" }),
+      { key: "fontWeight", value: "700" },
+      { key: "lineHeight", value: "1.1" },
+      { key: "letterSpacing", value: "0" },
+    ]);
+    expect(
+      rectangleSchema?.groups.flatMap((group) => group.fields),
+    ).toMatchObject([
+      { key: "x", value: "0" },
+      { key: "y", value: "0" },
+      { key: "width", value: "100" },
+      { key: "height", value: "100" },
+      { key: "color", value: "#ffffff" },
+      { key: "opacity", value: "1" },
+      { key: "cornerRadius", value: "0" },
+    ]);
+    expect(circleSchema?.groups.flatMap((group) => group.fields)).toMatchObject(
+      [
+        { key: "x", value: "0" },
+        { key: "y", value: "0" },
+        { key: "radius", value: "50" },
+        { key: "color", value: "#ffffff" },
+        { key: "opacity", value: "1" },
+      ],
+    );
+    expect(
+      circleSchema?.groups.flatMap((group) =>
+        group.fields.map((field) => field.key),
+      ),
+    ).not.toContain("width");
+  });
+
+  it("does not expose Out input ordering in the graph inspector", () => {
+    const schema = getGraphNodeParameterEditorSchema(
+      {
+        id: "out",
+        label: "Out",
+        kind: "out",
+        x: 1,
+        y: 2,
+        width: 4,
+        height: 2,
+        typedNode: {
+          id: "out",
+          kind: "out",
+          position: { x: 1, y: 2 },
+          config: { renderOrder: ["text->out", "rect->out"] },
+        } as any,
+      },
+      undefined,
+      [
+        {
+          id: "rect->out",
+          from: { nodeId: "rect", portId: "out" },
+          to: { nodeId: "out", portId: "in" },
+        },
+        {
+          id: "text->out",
+          from: { nodeId: "text", portId: "out" },
+          to: { nodeId: "out", portId: "in" },
+        },
+      ] as any,
+    );
+
+    expect(schema).toBeNull();
   });
 
   it("ignores strict node parameter updates outside definition controls", () => {

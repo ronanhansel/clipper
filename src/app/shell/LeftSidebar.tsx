@@ -11,10 +11,6 @@ import {
   type OsFileManagerProps,
 } from "../../components/OsFileManager";
 import { ToolsPanel } from "../../components/ToolsPanel";
-import {
-  FileManagerWorkspace,
-  type FileManagerWorkspaceProps,
-} from "../features/file-manager/FileManagerWorkspace";
 import type {
   EditorState,
   FrameObject,
@@ -26,11 +22,10 @@ import type { LeftPanelTab } from "../types";
 type LeftSidebarProps = {
   composeMode: boolean;
   effectsPanelState: EditorState["effectsPanelState"];
-  fileManagerProps: FileManagerWorkspaceProps;
   hasActiveComposition: boolean;
   isPlaying: boolean;
   leftPanelTab: LeftPanelTab;
-  osFileManagerProps?: OsFileManagerProps;
+  osFileManagerProps: OsFileManagerProps;
   part: Part;
   selectedObjectIds: string[];
   timelineMode: TimelineMode;
@@ -39,6 +34,7 @@ type LeftSidebarProps = {
   ) => void;
   onLeftPanelTabChange: (tab: LeftPanelTab) => void;
   onReorderComposeObjects: (objectIds: string[], targetIndex: number) => void;
+  onReorderGraphFrameOutputs?: (objectId: string, edgeIds: string[]) => void;
   onSelectComposeLayerObjects: (objects: FrameObject[]) => void;
   onSelectComposeFrameSettings: () => void;
   onToggleComposeLayerHidden?: (layerId: string) => void;
@@ -55,7 +51,6 @@ const MemoizedLeftSidebar = memo(
   function LeftSidebarContent({
     composeMode,
     effectsPanelState,
-    fileManagerProps,
     hasActiveComposition,
     leftPanelTab,
     osFileManagerProps,
@@ -65,6 +60,7 @@ const MemoizedLeftSidebar = memo(
     onEffectsPanelStateChange,
     onLeftPanelTabChange,
     onReorderComposeObjects,
+    onReorderGraphFrameOutputs,
     onSelectComposeLayerObjects,
     onSelectComposeFrameSettings,
     onToggleComposeLayerHidden,
@@ -84,6 +80,7 @@ const MemoizedLeftSidebar = memo(
               onSelectFrameSettings={onSelectComposeFrameSettings}
               onHoverObject={noopHoverObject}
               onReorderObjects={onReorderComposeObjects}
+              onReorderGraphFrameOutputs={onReorderGraphFrameOutputs}
               onToggleLayerHidden={onToggleComposeLayerHidden}
               onToggleLayerLocked={onToggleComposeLayerLocked}
             />
@@ -117,11 +114,7 @@ const MemoizedLeftSidebar = memo(
             className={`min-h-0 flex-1 overflow-hidden ${leftPanelTab === "assets" ? "grid" : "hidden"}`}
             aria-hidden={leftPanelTab !== "assets"}
           >
-            {osFileManagerProps ? (
-              <OsFileManager {...osFileManagerProps} />
-            ) : (
-              <FileManagerWorkspace {...fileManagerProps} />
-            )}
+            <OsFileManager {...osFileManagerProps} />
           </div>
           <div
             className={`min-h-0 flex-1 overflow-hidden ${leftPanelTab === "tools" ? "grid" : "hidden"}`}
@@ -153,7 +146,6 @@ const MemoizedLeftSidebar = memo(
       );
     return (
       prev.effectsPanelState === next.effectsPanelState &&
-      prev.fileManagerProps === next.fileManagerProps &&
       prev.osFileManagerProps === next.osFileManagerProps
     );
   },

@@ -1,6 +1,7 @@
 import { evaluateField } from "../../fields";
 import type {
   AnimationGraphDiagnostic,
+  AnimationGraphControlGroup,
   AnimationGraphNodeDefinition,
   AnimationStream,
   AttributeContext,
@@ -14,6 +15,7 @@ import type {
   GeometryShapeGroup,
   StructureStream,
 } from "../../types";
+import type { FrameObject } from "../../../types";
 import {
   animationInputPort,
   animationOutputPort,
@@ -23,6 +25,13 @@ import {
   readNumber,
   readString,
 } from "../helpers";
+import {
+  graphicCircleControlGroups,
+  graphicControlDefaults,
+  graphicHighlightControlGroups,
+  graphicHighlightDefaults,
+  graphicRectangleControlGroups,
+} from "../../../graphics/inspectorSettings";
 
 type Bounds = { x: number; y: number; width: number; height: number };
 type GeometryConfig = Record<string, unknown>;
@@ -32,15 +41,42 @@ type GeometryStream = AnimationStream & {
 
 const geometryKinds = ["geometry"] as const;
 
+const genericGeometryControlGroups = [
+  {
+    id: "geometry",
+    fields: [
+      { key: "x", label: "x", type: "number", defaultValue: 0 },
+      { key: "y", label: "y", type: "number", defaultValue: 0 },
+      { key: "width", label: "width", type: "number", defaultValue: 100 },
+      { key: "height", label: "height", type: "number", defaultValue: 100 },
+      { key: "points", label: "points", type: "number", defaultValue: 5 },
+      {
+        key: "color",
+        label: "color",
+        type: "color",
+        defaultValue: "#ffffff",
+      },
+      { key: "opacity", label: "opacity", type: "number", defaultValue: 1 },
+    ],
+  },
+] satisfies readonly AnimationGraphControlGroup[];
+
 const geometryBaseNodeDefinitions: AnimationGraphNodeDefinition[] = [
-  primitive("geometry:rectangle", "Rectangle", rectangle),
-  primitive("geometry:circle", "Circle", circle),
+  primitive(
+    "geometry:rectangle",
+    "Rectangle",
+    rectangle,
+    graphicRectangleControlGroups,
+  ),
+  primitive("geometry:circle", "Circle", circle, graphicCircleControlGroups),
   primitive("geometry:ellipse", "Ellipse", ellipse),
   primitive("geometry:polygon", "Polygon", polygon),
   primitive("geometry:line", "Line", line),
   primitive("geometry:path", "Path", path),
   primitive("geometry:star", "Star", star),
   primitive("geometry:grid", "Grid", grid as never),
+  primitive("geometry:dotGrid", "Dot Grid", dotGrid as never),
+  highlightBoxDefinition(),
   transform("geometry:translate", "Translate", (point, config, item) => ({
     ...point,
     x: point.x + fieldNumber(config, "x", item, 0),
@@ -149,63 +185,116 @@ function primitive(
     source: AnimationStream,
     context: CompileContext,
   ) => GeneratedGeometry,
+  controls?: readonly AnimationGraphControlGroup[],
 ): AnimationGraphNodeDefinition {
+  const controlGroups = controls ?? genericGeometryControlGroups;
   return {
     kind,
     label,
     category: "control",
     menuPath: `Geometry:Primitives:${label}`,
-    controls: [
-      {
-        id: "geometry",
-        fields: [
-          { key: "width", label: "width", type: "number", defaultValue: 100 },
-          { key: "height", label: "height", type: "number", defaultValue: 100 },
-          { key: "points", label: "points", type: "number", defaultValue: 5 },
-          {
-            key: "color",
-            label: "color",
-            type: "color",
-            defaultValue: "#ffffff",
-          },
-          { key: "opacity", label: "opacity", type: "number", defaultValue: 1 },
-        ],
-      },
-    ],
+    controls: controlGroups,
     getPorts: () => [
       animationInputPort("in", "In"),
       animationOutputPort("out", "Out", geometryKinds),
     ],
-    createDefaultConfig: () => ({}),
+    createDefaultConfig: () => graphicControlDefaults(controlGroups),
     normalizeConfig: (config) =>
       typeof config === "object" && config ? config : {},
     execute: ({ node, inputs }, context) => {
       const diagnostics: AnimationGraphDiagnostic[] = [];
-      const output = (inputs.get("in") ?? [])
-        .filter(isAnimationStream)
-        .flatMap((input, index) => {
-          const geometry = create(
+      const inputStreams = (inputs.get("in") ?? []).filter(isAnimationStream);
+      const output = inputStreams.flatMap((input, index) => {
+        const geometry = create(node.config as GeometryConfig, input, context);
+        const structure = geometryStructure(
+          input.structure.objectId,
+          geometry,
+          "shape",
+        );
+        const output = cloneAnimationStream(
+          input,
+          `${node.id}:out:${index}`,
+          structure,
+        );
+        if (input.renderObject)
+          output.renderObject = createGeometryRenderObject(
+            `graph:${context.graph.id}:${node.id}:${index}`,
+            node.id,
+            geometry,
+            structure.bounds,
+          );
+        return output;
+      });
+      if (!inputStreams.length)
+        output.push(
+          createRootGeometryStream(
+            node.id,
             node.config as GeometryConfig,
-            input,
+            create(node.config as GeometryConfig, rootInput(node.id), context),
             context,
-          );
-          return cloneAnimationStream(
-            input,
-            `${node.id}:out:${index}`,
-            geometryStructure(input.structure.objectId, geometry, "shape"),
-          );
-        });
-      if (!output.length)
-        diagnostics.push({
-          severity: "error",
-          message: `Geometry primitive "${kind}" requires Source input.`,
-          nodeId: node.id,
-          portId: "in",
-        });
+          ),
+        );
       return {
         outputs: new Map([["out", output]]),
         diagnostics,
       };
+    },
+  };
+}
+
+function highlightBoxDefinition(): AnimationGraphNodeDefinition {
+  return {
+    kind: "geometry:highlightBox",
+    label: "Highlight Box",
+    category: "control",
+    menuPath: "Geometry:Text:Highlight Box",
+    controls: graphicHighlightControlGroups,
+    getPorts: () => [
+      animationInputPort("in", "In", ["text", "richText", "object", "shape"]),
+      animationOutputPort("out", "Out", geometryKinds),
+    ],
+    createDefaultConfig: () =>
+      graphicControlDefaults(graphicHighlightControlGroups),
+    normalizeConfig: (config) =>
+      typeof config === "object" && config ? config : {},
+    execute: ({ node, inputs }, context) => {
+      const output = (inputs.get("in") ?? [])
+        .filter(isAnimationStream)
+        .map((input, index) => {
+          const bounds = getStreamBounds(input, context);
+          const padding = readNumber(
+            node.config as GeometryConfig,
+            "padding",
+            graphicHighlightDefaults.padding,
+          );
+          const geometry = rectangle({
+            ...(node.config as GeometryConfig),
+            width: bounds.width + padding * 2,
+            height: bounds.height + padding * 2,
+          });
+          const translated = translateGeometry(geometry, {
+            x: bounds.x + bounds.width / 2,
+            y: bounds.y + bounds.height / 2,
+          });
+          const structure = geometryStructure(
+            input.structure.objectId,
+            translated,
+            "shape",
+          );
+          const output = cloneAnimationStream(
+            input,
+            `${node.id}:out:${index}`,
+            structure,
+          );
+          output.renderObject = createGeometryRenderObject(
+            `graph:${context.graph.id}:${node.id}:${index}`,
+            node.id,
+            translated,
+            structure.bounds,
+          );
+          return output;
+        });
+      return { outputs: new Map([["out", output]]) };
     },
   };
 }
@@ -463,6 +552,33 @@ export const geometryNodeDefinitions: AnimationGraphNodeDefinition[] = [
 function rectangle(config: GeometryConfig): GeometryShape {
   const w = readNumber(config, "width", 100),
     h = readNumber(config, "height", 100);
+  const radius = Math.min(
+    Math.max(0, readNumber(config, "cornerRadius", 0)),
+    w / 2,
+    h / 2,
+  );
+  if (radius > 0) {
+    const segments = 6;
+    const corners = [
+      { cx: w / 2 - radius, cy: -h / 2 + radius, start: -Math.PI / 2 },
+      { cx: w / 2 - radius, cy: h / 2 - radius, start: 0 },
+      { cx: -w / 2 + radius, cy: h / 2 - radius, start: Math.PI / 2 },
+      { cx: -w / 2 + radius, cy: -h / 2 + radius, start: Math.PI },
+    ];
+    return shape(
+      corners.flatMap((corner) =>
+        Array.from({ length: segments + 1 }, (_, index) => {
+          const angle = corner.start + (index / segments) * (Math.PI / 2);
+          return {
+            x: corner.cx + Math.cos(angle) * radius,
+            y: corner.cy + Math.sin(angle) * radius,
+          };
+        }),
+      ),
+      true,
+      config,
+    );
+  }
   return shape(
     [
       { x: -w / 2, y: -h / 2 },
@@ -556,6 +672,27 @@ function grid(config: GeometryConfig): GeometryShapeGroup {
     ),
   );
 }
+function dotGrid(config: GeometryConfig): GeometryShapeGroup {
+  const columns = Math.max(1, Math.round(readNumber(config, "columns", 12)));
+  const rows = Math.max(1, Math.round(readNumber(config, "rows", 8)));
+  const spacingX = readNumber(config, "spacingX", 28);
+  const spacingY = readNumber(config, "spacingY", 28);
+  const radius = readNumber(config, "radius", 4);
+  const dot = circle({ ...config, radius });
+  return group(
+    [],
+    Array.from({ length: columns * rows }, (_, index) => ({
+      shape: dot,
+      position: {
+        x: (index % columns) * spacingX,
+        y: Math.floor(index / columns) * spacingY,
+      },
+      scale: 1,
+      opacity: readNumber(config, "opacity", 1),
+      color: readString(config, "color", "#ffffff"),
+    })),
+  );
+}
 function shape(
   points: GeometryPoint[],
   closed: boolean,
@@ -591,20 +728,137 @@ function stream(
     effects: [],
   };
 }
+function rootInput(nodeId: string): AnimationStream {
+  return {
+    id: `${nodeId}:root`,
+    structure: { kind: "object", objectId: nodeId },
+    controller: { ...defaultAnimationController },
+    effects: [],
+  };
+}
+function createRootGeometryStream(
+  nodeId: string,
+  config: GeometryConfig,
+  geometry: GeneratedGeometry,
+  context: CompileContext,
+): AnimationStream {
+  const shifted = translateRootGeometry(config, geometry);
+  const structure = geometryStructure(
+    `graph:${context.graph.id}:${nodeId}`,
+    shifted,
+    "shape",
+  );
+  return {
+    id: `${nodeId}:out:0`,
+    structure,
+    controller: { ...defaultAnimationController },
+    effects: [],
+    renderObject: createGeometryRenderObject(
+      `graph:${context.graph.id}:${nodeId}`,
+      nodeId,
+      shifted,
+      structure.bounds,
+    ),
+  };
+}
+function createGeometryRenderObject(
+  objectId: string,
+  nodeId: string,
+  geometry: GeneratedGeometry,
+  bounds: Bounds,
+): FrameObject {
+  return {
+    id: objectId,
+    name: nodeId,
+    type: "rect",
+    selector: `.${objectId.replace(/[^a-zA-Z0-9_-]/g, "-")}`,
+    bounds,
+    style: {
+      backgroundColor: "transparent",
+      color: "currentColor",
+    },
+    generatedGeometry: [geometry],
+    generatedByGraph: true,
+  };
+}
+function translateRootGeometry(
+  config: GeometryConfig,
+  geometry: GeneratedGeometry,
+): GeneratedGeometry {
+  const bounds = geometryStructure("root", geometry, "shape").bounds;
+  const offset = {
+    x: readNumber(config, "x", -bounds.x),
+    y: readNumber(config, "y", -bounds.y),
+  };
+  return translateGeometry(geometry, offset);
+}
+function translateGeometry(
+  geometry: GeneratedGeometry,
+  offset: { x: number; y: number },
+): GeneratedGeometry {
+  const mapPoint = (point: GeometryPoint) => ({
+    ...point,
+    x: point.x + offset.x,
+    y: point.y + offset.y,
+  });
+  if (geometry.type === "path")
+    return { ...geometry, points: geometry.points.map(mapPoint) };
+  if (geometry.type === "shape")
+    return {
+      ...geometry,
+      paths: geometry.paths.map((path) => ({
+        ...path,
+        points: path.points.map(mapPoint),
+      })),
+    };
+  if (geometry.type === "shapeGroup")
+    return {
+      ...geometry,
+      shapes: geometry.shapes.map(
+        (item) => translateGeometry(item, offset) as GeometryShape,
+      ),
+      instances: geometry.instances?.map((instance) => ({
+        ...instance,
+        position: {
+          x: instance.position.x + offset.x,
+          y: instance.position.y + offset.y,
+        },
+      })),
+    };
+  return { ...geometry, vertices: geometry.vertices.map(mapPoint) };
+}
+function getStreamBounds(
+  input: AnimationStream,
+  context: CompileContext,
+): Bounds {
+  if (input.structure.kind === "geometry") return input.structure.bounds;
+  if (input.renderObject?.bounds) return input.renderObject.bounds;
+  if (
+    context.sourceObject?.id === input.structure.objectId &&
+    context.sourceObject.bounds
+  )
+    return context.sourceObject.bounds;
+  return { x: 0, y: 0, width: 100, height: 40 };
+}
 function cloneGeometryStream(
   input: GeometryStream,
   id: string,
   geometry: GeneratedGeometry,
 ) {
-  return cloneAnimationStream(
-    input,
-    id,
-    geometryStructure(
-      input.structure.objectId,
-      geometry,
-      geometryDomain(input.structure.domain),
-    ),
+  const structure = geometryStructure(
+    input.structure.objectId,
+    geometry,
+    geometryDomain(input.structure.domain),
   );
+  const output = cloneAnimationStream(input, id, structure);
+  if (input.renderObject)
+    output.renderObject = createGeometryRenderObject(
+      input.renderObject.id,
+      input.renderObject.name,
+      geometry,
+      structure.bounds,
+    );
+  return output;
 }
 function isGeometryStream(stream: AnimationStream): stream is GeometryStream {
   return stream.structure.kind === "geometry";

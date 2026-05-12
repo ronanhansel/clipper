@@ -169,6 +169,9 @@ describe("strict animation graph foundation", () => {
     });
 
     const ports = definition.getPorts(node("effect", definition.kind));
+    expect(ports.find((port) => port.id === "in")).toMatchObject({
+      cardinality: "multi",
+    });
     expect(ports.find((port) => port.id === "single")).toMatchObject({
       cardinality: "single",
     });

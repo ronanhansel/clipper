@@ -128,6 +128,9 @@ const compareOperators = [
 
 export const valueNodeDefinitions = [
   ...valueSpecs.map(createValueNodeDefinition),
+  createTimeSecondsNodeDefinition(),
+  createTimeFrameNodeDefinition(),
+  createOscillatorNodeDefinition(),
   ...mathOperators.map(createMathNodeDefinition),
   ...compareOperators.map((operator) =>
     createCompareNodeDefinition(
@@ -145,6 +148,137 @@ export const valueNodeDefinitions = [
   createRandomNodeDefinition("value:random", "Random", false),
   createRandomNodeDefinition("value:noise", "Noise", true),
 ];
+
+function createTimeSecondsNodeDefinition(): AnimationGraphNodeDefinition {
+  return {
+    kind: "value:time:seconds",
+    label: "Time Seconds",
+    category: "value",
+    menuPath: "Value:Time:Seconds",
+    getPorts: () => [valueOutputPort("number")],
+    createDefaultConfig: () => ({}),
+    normalizeConfig: (config) =>
+      typeof config === "object" && config !== null ? config : {},
+    execute: ({ node }, context) => ({
+      outputs: new Map([
+        [
+          "value",
+          [
+            valueStream(
+              `${node.id}:value`,
+              "number",
+              readFiniteNumber(context.time, 0),
+            ),
+          ],
+        ],
+      ]),
+    }),
+  };
+}
+
+function createTimeFrameNodeDefinition(): AnimationGraphNodeDefinition {
+  return {
+    kind: "value:time:frame",
+    label: "Frame",
+    category: "value",
+    menuPath: "Value:Time:Frame",
+    getPorts: () => [valueOutputPort("number")],
+    createDefaultConfig: () => ({}),
+    normalizeConfig: (config) =>
+      typeof config === "object" && config !== null ? config : {},
+    execute: ({ node }, context) => ({
+      outputs: new Map([
+        [
+          "value",
+          [
+            valueStream(
+              `${node.id}:value`,
+              "number",
+              readFiniteNumber(context.frame, 0),
+            ),
+          ],
+        ],
+      ]),
+    }),
+  };
+}
+
+function createOscillatorNodeDefinition(): AnimationGraphNodeDefinition {
+  return {
+    kind: "value:time:oscillator",
+    label: "Oscillator",
+    category: "value",
+    menuPath: "Value:Time:Oscillator",
+    controls: [
+      {
+        id: "oscillator",
+        fields: [
+          numberField("frequency", "Frequency", 1),
+          numberField("amplitude", "Amplitude", 1),
+          numberField("offset", "Offset", 0),
+          numberField("phase", "Phase", 0),
+        ],
+      },
+    ],
+    getPorts: () => [
+      numberInputBusPort(),
+      numberInputPort("frequency"),
+      numberInputPort("amplitude"),
+      numberInputPort("offset"),
+      numberInputPort("phase"),
+      valueOutputPort("number"),
+    ],
+    createDefaultConfig: () => ({
+      frequency: 1,
+      amplitude: 1,
+      offset: 0,
+      phase: 0,
+    }),
+    normalizeConfig: (config) =>
+      typeof config === "object" && config !== null
+        ? config
+        : { frequency: 1, amplitude: 1, offset: 0, phase: 0 },
+    execute: ({ node, inputs }, context) => {
+      const time = readFiniteNumber(context.time, 0);
+      const frequency = readNumberInput(
+        inputs,
+        "frequency",
+        readConfigNumber(node.config, "frequency", 1),
+      );
+      const amplitude = readNumberInput(
+        inputs,
+        "amplitude",
+        readConfigNumber(node.config, "amplitude", 1),
+      );
+      const offset = readNumberInput(
+        inputs,
+        "offset",
+        readConfigNumber(node.config, "offset", 0),
+      );
+      const phase = readNumberInput(
+        inputs,
+        "phase",
+        readConfigNumber(node.config, "phase", 0),
+      );
+      return {
+        outputs: new Map([
+          [
+            "value",
+            [
+              valueStream(
+                `${node.id}:value`,
+                "number",
+                offset +
+                  Math.sin((time * frequency + phase) * Math.PI * 2) *
+                    amplitude,
+              ),
+            ],
+          ],
+        ]),
+      };
+    },
+  };
+}
 
 function createMathNodeDefinition(
   spec: (typeof mathOperators)[number],
@@ -167,6 +301,7 @@ function createMathNodeDefinition(
       },
     ],
     getPorts: () => [
+      numberInputBusPort(),
       ...spec.inputs.map(numberInputPort),
       valueOutputPort("number"),
     ],
@@ -277,6 +412,7 @@ function createCombineVectorNodeDefinition(): AnimationGraphNodeDefinition {
       },
     ],
     getPorts: () => [
+      numberInputBusPort(),
       numberInputPort("x"),
       numberInputPort("y"),
       valueOutputPort("vector"),
@@ -336,8 +472,8 @@ function createCombineColorNodeDefinition(): AnimationGraphNodeDefinition {
       },
     ],
     getPorts: () =>
-      ["r", "g", "b", "a"]
-        .map(numberInputPort)
+      [numberInputBusPort()]
+        .concat(["r", "g", "b", "a"].map(numberInputPort))
         .concat(valueOutputPort("color")),
     createDefaultConfig: () => ({ r: 255, g: 255, b: 255, a: 1 }),
     normalizeConfig: (config) =>
@@ -458,20 +594,28 @@ function createRandomNodeDefinition(
         fields: [
           numberField("min", "Min", 0),
           numberField("max", "Max", 1),
+          ...(noise ? [numberField("sample", "Sample", 0)] : []),
           { key: "seed", label: "Seed", type: "text", defaultValue: "0" },
         ],
       },
     ],
     getPorts: () => [
+      numberInputBusPort(),
       numberInputPort("min"),
       numberInputPort("max"),
+      ...(noise ? [numberInputPort("sample")] : []),
       valueOutputPort("number"),
     ],
-    createDefaultConfig: () => ({ min: 0, max: 1, seed: "0" }),
+    createDefaultConfig: () => ({
+      min: 0,
+      max: 1,
+      ...(noise ? { sample: 0 } : {}),
+      seed: "0",
+    }),
     normalizeConfig: (config) =>
       typeof config === "object" && config !== null
         ? config
-        : { min: 0, max: 1, seed: "0" },
+        : { min: 0, max: 1, ...(noise ? { sample: 0 } : {}), seed: "0" },
     execute: ({ node, inputs }) => {
       const min = readNumberInput(
         inputs,
@@ -483,8 +627,17 @@ function createRandomNodeDefinition(
         "max",
         readConfigNumber(node.config, "max", 1),
       );
-      const seed = String(readConfigValue(node.config, "seed", "0"));
-      const random = seededRandom(`${seed}:${noise ? node.id : "random"}`);
+      const sample = noise
+        ? readNumberInput(
+            inputs,
+            "sample",
+            readConfigNumber(node.config, "sample", 0),
+          )
+        : 0;
+      const seed = readConfigNumber(node.config, "seed", 0);
+      const random = seededRandom(
+        noise ? `${seed}:${node.id}:${sample}` : `${seed}:random`,
+      );
       return {
         outputs: new Map([
           [
@@ -590,6 +743,17 @@ function numberInputPort(id: string): GraphPortDefinition {
   };
 }
 
+function numberInputBusPort(): GraphPortDefinition {
+  return {
+    id: "input:number",
+    label: "Number Inputs",
+    direction: "input",
+    cardinality: "multi",
+    type: { kind: "value", valueType: "number" },
+    role: "parameter",
+  };
+}
+
 function anyValueInputPort(id: string, label: string): GraphPortDefinition {
   return {
     id,
@@ -644,14 +808,24 @@ function readConfigNumber(config: unknown, key: string, fallback: number) {
   return Number.isFinite(value) ? value : fallback;
 }
 
+function readFiniteNumber(value: unknown, fallback: number) {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : fallback;
+}
+
 function readNumberInput(
   inputs: ReadonlyMap<string, readonly GraphStream[]>,
   key: string,
   fallback: number,
 ) {
-  const stream = inputs.get(key)?.find(isValueStream);
-  const value = Number(stream?.value ?? fallback);
-  return Number.isFinite(value) ? value : fallback;
+  const stream = inputs
+    .get(key)
+    ?.find((item): item is ValueStream => isValueStream(item));
+  if (!stream) return fallback;
+  if (stream.valueType !== "number") return fallback;
+  return typeof stream.value === "number" && Number.isFinite(stream.value)
+    ? stream.value
+    : fallback;
 }
 
 function readAnyValueInput(

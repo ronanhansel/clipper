@@ -19,6 +19,7 @@ export function ColorSelector({
   onPreview,
   variant = "default",
   pickerMode = "solid",
+  allowAlpha = false,
   allowGradient,
 }: {
   value: string;
@@ -26,6 +27,7 @@ export function ColorSelector({
   onPreview?: (value: string) => void;
   variant?: "default" | "compact";
   pickerMode?: "solid" | "gradient" | "solid-gradient";
+  allowAlpha?: boolean;
   /** @deprecated use pickerMode="solid-gradient" */
   allowGradient?: boolean;
 }) {
@@ -45,12 +47,16 @@ export function ColorSelector({
     top: number;
   } | null>(null);
   const [gradientDraft, setGradientDraft] = useState(parseGradientValue(value));
+  const initialSolidColor = parseSolidColor(value);
   const [draft, setDraft] = useState(
-    normalizeHexColor(gradientDraft.stops[0]?.color ?? value),
+    normalizeHexColor(gradientDraft.stops[0]?.color ?? initialSolidColor.hex),
   );
   const [hue, setHue] = useState(
-    hexToHsv(normalizeHexColor(gradientDraft.stops[0]?.color ?? value)).h,
+    hexToHsv(
+      normalizeHexColor(gradientDraft.stops[0]?.color ?? initialSolidColor.hex),
+    ).h,
   );
+  const [alpha, setAlpha] = useState(initialSolidColor.alpha);
   const [mode, setMode] = useState<"solid" | "gradient">(
     resolvedPickerMode === "gradient" ||
       (resolvedPickerMode === "solid-gradient" && isGradientValue(value))
@@ -59,6 +65,7 @@ export function ColorSelector({
   );
   const nextColorRef = useRef(draft);
   const nextHueRef = useRef(hue);
+  const nextAlphaRef = useRef(alpha);
   const changeFrameRef = useRef(0);
   const previewFrameRef = useRef(0);
   const draggingRef = useRef(false);
@@ -69,12 +76,15 @@ export function ColorSelector({
     if (resolvedPickerMode === "gradient") setMode("gradient");
     else if (resolvedPickerMode === "solid") setMode("solid");
     else if (isGradientValue(value)) setMode("gradient");
-    const next = normalizeHexColor(value);
+    const nextSolid = parseSolidColor(value);
+    const next = nextSolid.hex;
     const nextHue = hexToHsv(next).h;
     setDraft(next);
     setHue(nextHue);
+    setAlpha(nextSolid.alpha);
     nextColorRef.current = next;
     nextHueRef.current = nextHue;
+    nextAlphaRef.current = nextSolid.alpha;
     moveDots(hexToHsv(next), nextHue);
   }, [resolvedPickerMode, value]);
 
@@ -175,26 +185,38 @@ export function ColorSelector({
       hueDotRef.current.style.left = `${(nextHue / 360) * 100}%`;
   }
 
-  function scheduleChange(next: string, nextHue = nextHueRef.current) {
+  function scheduleChange(
+    next: string,
+    nextHue = nextHueRef.current,
+    nextAlpha = nextAlphaRef.current,
+  ) {
     nextColorRef.current = next;
     nextHueRef.current = nextHue;
+    nextAlphaRef.current = nextAlpha;
     moveDots(hexToHsv(next), nextHue);
+    const formatted = formatSolidColor(next, allowAlpha ? nextAlpha : 100);
 
     if (!previewFrameRef.current) {
       previewFrameRef.current = requestAnimationFrame(() => {
         previewFrameRef.current = 0;
         setDraft(nextColorRef.current);
         setHue(nextHueRef.current);
+        setAlpha(nextAlphaRef.current);
       });
     }
     if (draggingRef.current) {
-      onPreview?.(nextColorRef.current);
+      onPreview?.(formatted);
       return;
     }
     if (changeFrameRef.current) return;
     changeFrameRef.current = requestAnimationFrame(() => {
       changeFrameRef.current = 0;
-      onChange(nextColorRef.current);
+      onChange(
+        formatSolidColor(
+          nextColorRef.current,
+          allowAlpha ? nextAlphaRef.current : 100,
+        ),
+      );
     });
   }
 
@@ -202,7 +224,12 @@ export function ColorSelector({
     draggingRef.current = false;
     if (changeFrameRef.current) cancelAnimationFrame(changeFrameRef.current);
     changeFrameRef.current = 0;
-    onChange(nextColorRef.current);
+    onChange(
+      formatSolidColor(
+        nextColorRef.current,
+        allowAlpha ? nextAlphaRef.current : 100,
+      ),
+    );
   }
 
   function pickFromBoard(event: PointerEvent<HTMLDivElement>) {
@@ -252,9 +279,11 @@ export function ColorSelector({
     onChange(formatted);
   }
 
-  const hsv = hexToHsv(draft);
   const isCompact = variant === "compact";
-  const compactLabel = draft.toUpperCase();
+  const displayColor = formatSolidColor(draft, allowAlpha ? alpha : 100);
+  const compactLabel = allowAlpha
+    ? `${draft.toUpperCase()} ${alpha}%`
+    : draft.toUpperCase();
   const pickerPanel = open ? (
     <div
       ref={popupRef}
@@ -296,6 +325,8 @@ export function ColorSelector({
       {mode === "solid" ? (
         <SolidColorPickerPanel
           value={draft}
+          alpha={alpha}
+          allowAlpha={allowAlpha}
           variant={variant}
           onChange={scheduleChange}
           onCommit={commitDragChange}
@@ -341,7 +372,7 @@ export function ColorSelector({
                 background:
                   mode === "gradient"
                     ? formatGradientValue(gradientDraft)
-                    : draft,
+                    : displayColor,
               }}
             />
             {mode === "gradient" ? (
@@ -350,7 +381,7 @@ export function ColorSelector({
               <Palette size={isCompact ? 11 : 14} />
             )}
             <span className={isCompact ? "min-w-0 truncate" : undefined}>
-              {isCompact ? compactLabel : draft}
+              {isCompact ? compactLabel : displayColor}
             </span>
           </span>
         </button>
@@ -397,6 +428,47 @@ export function isHexColor(value: string) {
   );
 }
 
+function isEditableColorValue(value: string) {
+  return isHexColor(value) || parseRgbaColor(value) !== null;
+}
+
+function parseSolidColor(value: string) {
+  const rgba = parseRgbaColor(value);
+  if (rgba) {
+    return {
+      hex: rgbToHex(rgba.red, rgba.green, rgba.blue),
+      alpha: Math.round(rgba.alpha * 100),
+    };
+  }
+  return { hex: normalizeHexColor(value), alpha: 100 };
+}
+
+function parseRgbaColor(value: string) {
+  const match = value
+    .trim()
+    .match(
+      /^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})(?:\s*,\s*(\d*\.?\d+))?\s*\)$/i,
+    );
+  if (!match) return null;
+  return {
+    red: clampColorChannel(Number(match[1])),
+    green: clampColorChannel(Number(match[2])),
+    blue: clampColorChannel(Number(match[3])),
+    alpha: clamp(Number(match[4] ?? "1"), 0, 1),
+  };
+}
+
+function formatSolidColor(hex: string, alpha: number) {
+  const normalized = normalizeHexColor(hex);
+  const percent = clampPercent(String(alpha));
+  if (percent >= 100) return normalized;
+  const channels = normalized.slice(1);
+  const red = parseInt(channels.slice(0, 2), 16);
+  const green = parseInt(channels.slice(2, 4), 16);
+  const blue = parseInt(channels.slice(4, 6), 16);
+  return `rgba(${red}, ${green}, ${blue}, ${(percent / 100).toFixed(2)})`;
+}
+
 export function getEditableColorStyleEntries(
   style: Record<string, string | number>,
 ) {
@@ -409,7 +481,9 @@ export function getEditableColorStyleEntries(
     "stroke",
   ]);
   return Object.entries(style).flatMap(([key, value]) =>
-    colorKeys.has(key) && typeof value === "string" && isHexColor(value)
+    colorKeys.has(key) &&
+    typeof value === "string" &&
+    isEditableColorValue(value)
       ? [[key, value] as [string, string]]
       : [],
   );
@@ -431,13 +505,17 @@ type GradientValue = {
 
 function SolidColorPickerPanel({
   value,
+  alpha = 100,
+  allowAlpha = false,
   variant,
   onChange,
   onCommit,
 }: {
   value: string;
+  alpha?: number;
+  allowAlpha?: boolean;
   variant: "default" | "compact";
-  onChange: (value: string, hue?: number) => void;
+  onChange: (value: string, hue?: number, alpha?: number) => void;
   onCommit?: () => void;
 }) {
   const boardRectRef = useRef<DOMRect | null>(null);
@@ -446,6 +524,7 @@ function SolidColorPickerPanel({
   const hueDotRef = useRef<HTMLSpanElement | null>(null);
   const [draft, setDraft] = useState(normalizeHexColor(value));
   const [hue, setHue] = useState(hexToHsv(normalizeHexColor(value)).h);
+  const [alphaDraft, setAlphaDraft] = useState(clampPercent(String(alpha)));
   const isCompact = variant === "compact";
 
   useEffect(() => {
@@ -453,8 +532,9 @@ function SolidColorPickerPanel({
     const nextHue = hexToHsv(next).h;
     setDraft(next);
     setHue(nextHue);
+    setAlphaDraft(clampPercent(String(alpha)));
     moveDots(hexToHsv(next), nextHue);
-  }, [value]);
+  }, [alpha, value]);
 
   function moveDots(
     nextHsv: { h: number; s: number; v: number },
@@ -468,11 +548,12 @@ function SolidColorPickerPanel({
       hueDotRef.current.style.left = `${(nextHue / 360) * 100}%`;
   }
 
-  function apply(next: string, nextHue = hue) {
+  function apply(next: string, nextHue = hue, nextAlpha = alphaDraft) {
     setDraft(next);
     setHue(nextHue);
+    setAlphaDraft(nextAlpha);
     moveDots(hexToHsv(next), nextHue);
-    onChange(next, nextHue);
+    onChange(next, nextHue, nextAlpha);
   }
 
   function pickFromBoard(event: PointerEvent<HTMLDivElement>) {
@@ -578,6 +659,30 @@ function SolidColorPickerPanel({
         className={isCompact ? "h-7 text-xs" : undefined}
         onChange={(event) => apply(normalizeHexColor(event.target.value))}
       />
+      {allowAlpha ? (
+        <label className="grid gap-1 text-[11px] font-extrabold text-[#aeb6c4]">
+          Alpha
+          <div className="grid grid-cols-[minmax(0,1fr)_54px] gap-2">
+            <input
+              className="h-7 accent-[var(--clipper-accent)]"
+              type="range"
+              min={0}
+              max={100}
+              value={alphaDraft}
+              onChange={(event) =>
+                apply(draft, hue, clampPercent(event.target.value))
+              }
+            />
+            <Input
+              className="h-7 px-1.5 text-center text-xs"
+              value={alphaDraft}
+              onChange={(event) =>
+                apply(draft, hue, clampPercent(event.target.value))
+              }
+            />
+          </div>
+        </label>
+      ) : null}
     </>
   );
 }

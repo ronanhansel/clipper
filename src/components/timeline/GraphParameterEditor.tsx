@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type DragEvent } from "react";
 import {
   Select,
   SelectContent,
@@ -11,17 +11,24 @@ import { Input } from "../ui/input";
 import { ColorSelector } from "../ColorSelector";
 import { EaseSelectItems } from "./EaseSelectItems";
 import { TooltipProvider } from "../ui/tooltip";
+import {
+  isGraphInputExpression,
+  isPotentialGraphInputExpression,
+  type GraphInputBindingOption,
+} from "../../core/graphParameterBindings";
 
 export type GraphParameterEditorField = {
   key: string;
   label: string;
   value: string;
-  type?: "number" | "text" | "color" | "gradient" | "button";
+  type?: "number" | "text" | "color" | "gradient" | "button" | "order";
   unit?: string;
   min?: number;
   max?: number;
   step?: number;
   options?: readonly { value: string; label: string }[];
+  items?: readonly { value: string; label: string }[];
+  bindingOptions?: readonly GraphInputBindingOption[];
 };
 
 export type GraphParameterEditorGroup = {
@@ -53,14 +60,12 @@ export function GraphParameterEditor({
   onChange: GraphParameterChange;
   variant?: GraphParameterEditorVariant;
 }) {
-  const editSessionActiveRef = useRef(false);
-  function commitEditSessionChange(key: string, value: string) {
-    const history = !editSessionActiveRef.current;
-    editSessionActiveRef.current = true;
-    onChange(key, value, { history });
-  }
   const isTimePopup = variant === "timePopup";
   const isInspector = variant === "inspector";
+  const bindingOptions = getGraphParameterBindingOptions(schema);
+  const [dragInputExpression, setDragInputExpression] = useState<string | null>(
+    null,
+  );
   return (
     <div
       className={
@@ -76,6 +81,7 @@ export function GraphParameterEditor({
             group={group}
             variant={variant}
             onChange={onChange}
+            dragInputExpression={dragInputExpression}
           />
         ) : (
           <div
@@ -88,11 +94,17 @@ export function GraphParameterEditor({
                 field={field}
                 variant={variant}
                 onChange={onChange}
+                dragInputExpression={dragInputExpression}
               />
             ))}
           </div>
         ),
       )}
+      <GraphParameterInputPalette
+        options={bindingOptions}
+        sticky={isInspector}
+        onDragInputChange={setDragInputExpression}
+      />
     </div>
   );
 }
@@ -101,10 +113,12 @@ function GraphParameterGroup({
   group,
   variant,
   onChange,
+  dragInputExpression,
 }: {
   group: GraphParameterEditorGroup;
   variant: GraphParameterEditorVariant;
   onChange: GraphParameterChange;
+  dragInputExpression: string | null;
 }) {
   const editSessionActiveRef = useRef(false);
   function commitEditSessionChange(key: string, value: string) {
@@ -152,6 +166,7 @@ function GraphParameterGroup({
             field={field}
             variant={variant}
             onChange={onChange}
+            dragInputExpression={dragInputExpression}
           />
         ))}
       </div>
@@ -163,18 +178,32 @@ function GraphParameterInlineField({
   field,
   variant,
   onChange,
+  dragInputExpression,
 }: {
   field: GraphParameterEditorField;
   variant: GraphParameterEditorVariant;
   onChange: GraphParameterChange;
+  dragInputExpression: string | null;
 }) {
   const editSessionActiveRef = useRef(false);
   const [focused, setFocused] = useState(false);
   const [draftValue, setDraftValue] = useState<string | null>(null);
+  const [dropHover, setDropHover] = useState(false);
+  useEffect(() => {
+    if (!dragInputExpression) setDropHover(false);
+  }, [dragInputExpression]);
   function commitEditSessionChange(key: string, value: string) {
     const history = !editSessionActiveRef.current;
     editSessionActiveRef.current = true;
     onChange(key, value, { history });
+  }
+  function bindDroppedInput(event: DragEvent) {
+    const value = readDroppedGraphInput(event);
+    if (value) event.preventDefault();
+    if (!value || !canBindGraphInput(field, value)) return;
+    event.preventDefault();
+    setDropHover(false);
+    onChange(field.key, value, { history: true });
   }
   if (field.options)
     return (
@@ -214,14 +243,33 @@ function GraphParameterInlineField({
     );
   if (field.type === "button")
     return <GraphParameterButtonField field={field} onChange={onChange} />;
+  if (field.type === "order")
+    return <GraphParameterOrderField field={field} onChange={onChange} />;
   const split = splitParameterUnit(field.value, field.unit);
-  const displayValue = getNumberFieldDisplayValue(field, split.value);
+  const displayValue = isGraphInputExpression(field.value)
+    ? field.value
+    : getNumberFieldDisplayValue(field, split.value);
   const isTimePopup = variant === "timePopup";
   const isInspector = variant === "inspector";
   const inputValue = focused && draftValue !== null ? draftValue : displayValue;
-  const canScrub = field.key !== "repeat" && displayValue !== "";
+  const canScrub =
+    field.key !== "repeat" &&
+    displayValue !== "" &&
+    !isGraphInputExpression(displayValue);
+  const dropActive = Boolean(
+    dragInputExpression && canBindGraphInput(field, dragInputExpression),
+  );
+  const dropInputClass = dropHover
+    ? "border-[#64e6a2] bg-[#143326] shadow-[0_0_0_1px_rgba(100,230,162,0.45)]"
+    : dropActive
+      ? "border-[#8d6cff] bg-[#1f1a35]"
+      : "";
   return (
     <label
+      onDragOver={(event) => {
+        if (dropActive) event.preventDefault();
+      }}
+      onDrop={bindDroppedInput}
       className={
         isInspector
           ? "grid gap-1.5"
@@ -271,7 +319,7 @@ function GraphParameterInlineField({
           numberScrubCommitThrottleMs={16}
           className={
             isInspector
-              ? `${split.unit ? "pl-11" : ""} h-8 min-w-0 text-right`
+              ? `${split.unit ? "pl-11" : ""} h-8 min-w-0 text-right ${dropInputClass}`
               : isTimePopup
                 ? "h-5 min-w-0 border-0 bg-transparent px-0 py-0 text-right text-[11px] font-extrabold leading-none text-[#f0f4fb] [appearance:textfield] focus:border-0 focus:ring-0 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                 : "h-6 min-w-0 border-0 bg-transparent px-0 py-0 text-right text-[12px] font-semibold text-[#e4e9f2] focus:border-0 focus:ring-0"
@@ -298,9 +346,27 @@ function GraphParameterInlineField({
           }}
           onChange={(event) => {
             const value = event.target.value;
-            if (!isAllowedNumberInput(value, field.key === "repeat")) return;
+            if (
+              !isAllowedNumberInput(value, field.key === "repeat") &&
+              !isPotentialGraphInputExpression(value)
+            )
+              return;
             setDraftValue(value);
           }}
+          onDragOver={(event) => {
+            if (dropActive) {
+              event.preventDefault();
+              setDropHover(true);
+            }
+          }}
+          onDragEnter={(event) => {
+            if (dropActive) {
+              event.preventDefault();
+              setDropHover(true);
+            }
+          }}
+          onDragLeave={() => setDropHover(false)}
+          onDrop={bindDroppedInput}
           onKeyDown={(event) => {
             event.stopPropagation();
           }}
@@ -310,20 +376,97 @@ function GraphParameterInlineField({
   );
 }
 
+function GraphParameterOrderField({
+  field,
+  onChange,
+}: {
+  field: GraphParameterEditorField;
+  onChange: GraphParameterChange;
+}) {
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const items = field.items ?? [];
+  function commitOrder(nextItems: readonly { value: string; label: string }[]) {
+    onChange(field.key, JSON.stringify(nextItems.map((item) => item.value)), {
+      history: true,
+    });
+  }
+  function moveItem(from: number, to: number) {
+    if (from === to || from < 0 || to < 0) return;
+    const next = [...items];
+    const [item] = next.splice(from, 1);
+    if (!item) return;
+    next.splice(to, 0, item);
+    commitOrder(next);
+  }
+  return (
+    <div className="grid gap-1.5">
+      <span className="text-[12px] font-bold text-[#8f96a3]">
+        {field.label}
+      </span>
+      <div className="grid gap-1">
+        {items.length ? (
+          items.map((item, index) => (
+            <button
+              key={item.value}
+              type="button"
+              draggable
+              onDragStart={(event) => {
+                setDragIndex(index);
+                event.dataTransfer.effectAllowed = "move";
+              }}
+              onDragOver={(event) => {
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "move";
+              }}
+              onDrop={(event) => {
+                event.preventDefault();
+                moveItem(dragIndex ?? index, index);
+                setDragIndex(null);
+              }}
+              onDragEnd={() => setDragIndex(null)}
+              className="cursor-grab rounded-[6px] border border-[#30343d] bg-[#171a21] px-2 py-1.5 text-left text-[12px] font-bold text-[#dfe2ea] active:cursor-grabbing"
+            >
+              {item.label}
+            </button>
+          ))
+        ) : (
+          <div className="rounded-[6px] border border-[#30343d] bg-[#171a21] px-2 py-1.5 text-[12px] font-bold text-[#8f96a3]">
+            No inputs
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function GraphParameterBoxField({
   field,
   variant,
   onChange,
+  dragInputExpression,
 }: {
   field: GraphParameterEditorField;
   variant: GraphParameterEditorVariant;
   onChange: GraphParameterChange;
+  dragInputExpression: string | null;
 }) {
   const editSessionActiveRef = useRef(false);
+  const [dropHover, setDropHover] = useState(false);
+  useEffect(() => {
+    if (!dragInputExpression) setDropHover(false);
+  }, [dragInputExpression]);
   function commitEditSessionChange(key: string, value: string) {
     const history = !editSessionActiveRef.current;
     editSessionActiveRef.current = true;
     onChange(key, value, { history });
+  }
+  function bindDroppedInput(event: DragEvent) {
+    const value = readDroppedGraphInput(event);
+    if (value) event.preventDefault();
+    if (!value || !canBindGraphInput(field, value)) return;
+    event.preventDefault();
+    setDropHover(false);
+    onChange(field.key, value, { history: true });
   }
   const [focused, setFocused] = useState(false);
   const [draftValue, setDraftValue] = useState<string | null>(null);
@@ -361,13 +504,34 @@ function GraphParameterBoxField({
     );
   if (field.type === "button")
     return <GraphParameterButtonField field={field} onChange={onChange} />;
+  if (field.type === "order")
+    return <GraphParameterOrderField field={field} onChange={onChange} />;
   const split = splitParameterUnit(field.value, field.unit);
-  const displayValue = getNumberFieldDisplayValue(field, split.value);
+  const displayValue = isGraphInputExpression(field.value)
+    ? field.value
+    : getNumberFieldDisplayValue(field, split.value);
   const isInspector = variant === "inspector";
   const inputValue = focused && draftValue !== null ? draftValue : displayValue;
-  const canScrub = field.key !== "repeat" && displayValue !== "";
+  const canScrub =
+    field.key !== "repeat" &&
+    displayValue !== "" &&
+    !isGraphInputExpression(displayValue);
+  const dropActive = Boolean(
+    dragInputExpression && canBindGraphInput(field, dragInputExpression),
+  );
+  const dropInputClass = dropHover
+    ? "border-[#64e6a2] bg-[#143326] shadow-[0_0_0_1px_rgba(100,230,162,0.45)]"
+    : dropActive
+      ? "border-[#8d6cff] bg-[#1f1a35]"
+      : "";
   return (
-    <label className={isInspector ? "grid gap-1.5" : "grid gap-1"}>
+    <label
+      onDragOver={(event) => {
+        if (dropActive) event.preventDefault();
+      }}
+      onDrop={bindDroppedInput}
+      className={isInspector ? "grid gap-1.5" : "grid gap-1"}
+    >
       <span
         className={
           isInspector
@@ -403,7 +567,7 @@ function GraphParameterBoxField({
           numberScrubCommitThrottleMs={16}
           className={
             isInspector
-              ? `${split.unit ? "pl-11" : ""} h-8 min-w-0 text-right`
+              ? `${split.unit ? "pl-11" : ""} h-8 min-w-0 text-right ${dropInputClass}`
               : "h-6 min-w-0 border-0 bg-transparent px-0 py-0 text-right text-[12px] font-semibold text-[#e4e9f2] focus:border-0 focus:ring-0"
           }
           value={inputValue}
@@ -428,9 +592,27 @@ function GraphParameterBoxField({
           }}
           onChange={(event) => {
             const value = event.target.value;
-            if (!isAllowedNumberInput(value, field.key === "repeat")) return;
+            if (
+              !isAllowedNumberInput(value, field.key === "repeat") &&
+              !isPotentialGraphInputExpression(value)
+            )
+              return;
             setDraftValue(value);
           }}
+          onDragOver={(event) => {
+            if (dropActive) {
+              event.preventDefault();
+              setDropHover(true);
+            }
+          }}
+          onDragEnter={(event) => {
+            if (dropActive) {
+              event.preventDefault();
+              setDropHover(true);
+            }
+          }}
+          onDragLeave={() => setDropHover(false)}
+          onDrop={bindDroppedInput}
           onKeyDown={(event) => {
             event.stopPropagation();
           }}
@@ -782,9 +964,98 @@ function commitNumberField(
   onChange: GraphParameterChange,
   options: { clamp?: boolean } = {},
 ) {
+  if (isGraphInputExpression(value)) {
+    const expression = value.trim();
+    if (canBindGraphInput(field, expression)) onChange(field.key, expression);
+    return;
+  }
   if (!isAllowedNumberInput(value, field.key === "repeat")) return;
   const nextValue = options.clamp ? clampNumberFieldValue(field, value) : value;
   onChange(field.key, `${nextValue}${unit}`);
+}
+
+function GraphParameterInputPalette({
+  options,
+  sticky,
+  onDragInputChange,
+}: {
+  options: readonly GraphInputBindingOption[];
+  sticky: boolean;
+  onDragInputChange: (expression: string | null) => void;
+}) {
+  if (!options.length) return null;
+  return (
+    <div
+      className={
+        sticky
+          ? "sticky bottom-0 z-20 -mx-1 mt-1 border-t border-[#2d313b] bg-[#171920]/95 px-1 pb-1.5 pt-2 backdrop-blur"
+          : "mt-1"
+      }
+    >
+      <div className="mb-1 text-[10px] font-extrabold uppercase tracking-[0.08em] text-[#777f8f]">
+        Available inputs
+      </div>
+      <div className="flex min-w-0 flex-wrap gap-1">
+        {options.map((option) => {
+          return (
+            <button
+              key={`${option.nodeId}:${option.portId}`}
+              type="button"
+              draggable
+              className="cursor-grab rounded border border-[#343a49] bg-[#151923] px-1.5 py-0.5 text-[10px] font-bold text-[#a8afbd] hover:border-[#6f61d7] hover:text-[#e7e3ff] active:cursor-grabbing"
+              title={`${option.label} -> ${option.expression}`}
+              onDragStart={(event) => {
+                event.dataTransfer.effectAllowed = "copy";
+                event.dataTransfer.setData(
+                  "application/x-clipper-graph-input",
+                  option.expression,
+                );
+                event.dataTransfer.setData("text/plain", option.expression);
+                onDragInputChange(option.expression);
+              }}
+              onDragEnd={() => onDragInputChange(null)}
+            >
+              {option.expression}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function getGraphParameterBindingOptions(schema: GraphParameterEditorSchema) {
+  const options = new Map<string, GraphInputBindingOption>();
+  for (const group of schema.groups) {
+    for (const field of group.fields) {
+      for (const option of field.bindingOptions ?? []) {
+        if (!options.has(option.expression))
+          options.set(option.expression, option);
+      }
+    }
+  }
+  return [...options.values()];
+}
+
+function readDroppedGraphInput(event: DragEvent) {
+  const value =
+    event.dataTransfer.getData("application/x-clipper-graph-input") ||
+    event.dataTransfer.getData("text/plain");
+  return isGraphInputExpression(value) ? value : null;
+}
+
+function hasDroppedGraphInput(
+  event: DragEvent,
+  field: GraphParameterEditorField,
+) {
+  const value = readDroppedGraphInput(event);
+  return Boolean(value && canBindGraphInput(field, value));
+}
+
+function canBindGraphInput(field: GraphParameterEditorField, value: string) {
+  return Boolean(
+    field.bindingOptions?.some((item) => item.expression === value),
+  );
 }
 
 function clampNumberFieldValue(

@@ -1,8 +1,7 @@
 import type { MutableRefObject } from "react";
 import toast from "react-hot-toast";
-import type { FileManagerTreeSnapshot } from "../../../components/FileManager";
 import { compositionFromSource } from "../../../core/compositionSource";
-import { getAssetPath } from "../../../core/assetTree";
+import { getAssetPath, type AssetSortMode } from "../../../core/assetTree";
 import type {
   AssetItem,
   CompositionClip,
@@ -13,7 +12,6 @@ import type {
 } from "../../../core/types";
 import type { ProjectUpdater } from "../../types";
 import { clipperHost } from "../../clipperHost";
-import type { BuildFileManagerWorkspacePropsInput } from "./FileManagerWorkspace";
 import { getDirectoryPath, nextNumberedName } from "./fileManagerPaths";
 import {
   createAssetFolderInProject,
@@ -34,7 +32,6 @@ import {
   updateCompositionFilePathsInProject,
 } from "./compositionLibraryMutations";
 import {
-  applyFileManagerTreeSnapshotToProject,
   deleteCompositionFolderFromProject,
   renameCompositionFolderInProject,
 } from "./compositionFolderMutations";
@@ -52,16 +49,6 @@ import { CreateCommand } from "./operations/CreateCommand";
 import { DeleteCommand } from "./operations/DeleteCommand";
 import { RenameCommand } from "./operations/RenameCommand";
 import type { Command } from "./operations/Command";
-
-type FileManagerProjectActions = Omit<
-  BuildFileManagerWorkspacePropsInput["actions"],
-  "reloadProject"
-> & {
-  updateCompositionFilePaths: (
-    moves: Array<{ oldPath: string; newPath: string }>,
-    options?: { save?: boolean },
-  ) => void;
-};
 
 type UseFileManagerProjectActionsInput = {
   assets: AssetItem[];
@@ -124,7 +111,7 @@ export function useFileManagerProjectActions({
   watchedProjectDirectory,
   executeFileManagerCommand,
   scheduleImplicitFileOperationSave,
-}: UseFileManagerProjectActionsInput): FileManagerProjectActions {
+}: UseFileManagerProjectActionsInput) {
   function syncCompositionResult(result: {
     project: ProjectManifest;
     compositionSources: Record<string, string>;
@@ -448,21 +435,6 @@ export function useFileManagerProjectActions({
     if (result) syncCompositionResult(result);
   }
 
-  function applyFileManagerTreeSnapshot(snapshot: FileManagerTreeSnapshot) {
-    const result = applyFileManagerTreeSnapshotToProject(
-      projectRef.current,
-      compositionSourcesRef.current,
-      compositionLibrary,
-      snapshot,
-      defaultEditorState,
-    );
-    if (result.compositionSources !== compositionSourcesRef.current) {
-      compositionSourcesRef.current = result.compositionSources;
-      setCompositionSources(result.compositionSources);
-    }
-    updateProject(result.project, { syncSources: false });
-  }
-
   function updateFileManagerState(
     fileManagerState: EditorState["fileManagerState"],
   ) {
@@ -564,10 +536,7 @@ export function useFileManagerProjectActions({
     updateProject((current) => deleteAssetFromProject(current, assetId));
   }
 
-  function sortAssets(
-    parentFolderId: string | null,
-    mode: Parameters<FileManagerProjectActions["sortAssets"]>[1],
-  ) {
+  function sortAssets(parentFolderId: string | null, mode: AssetSortMode) {
     updateProject((current) =>
       sortAssetsInProject(current, parentFolderId, mode),
     );
@@ -575,7 +544,6 @@ export function useFileManagerProjectActions({
 
   return {
     addComposition: addCompositionFromLibrary,
-    applyTreeSnapshot: applyFileManagerTreeSnapshot,
     copyAsset: copyAssetPath,
     copyCompositionPath,
     createComposition,

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   getRenderClockAttributes,
   getRenderClockStyle,
+  syncDomAnimationsToRenderClock,
   syncDomAnimationListToRenderClock,
   waitForRenderClockAnimationsReady,
 } from "./renderClock";
@@ -23,7 +24,7 @@ describe("render clock", () => {
     });
   });
 
-  it("pins nested DOM animations to render time and play state", () => {
+  it("pins paused DOM animations and starts playing animations from render time", () => {
     const play = vi.fn();
     const pause = vi.fn();
     const animation = { currentTime: 0, play, pause };
@@ -40,8 +41,8 @@ describe("render clock", () => {
     });
 
     expect(animation.currentTime).toBe(2500);
-    expect(pause).toHaveBeenCalledTimes(2);
-    expect(play).not.toHaveBeenCalled();
+    expect(pause).toHaveBeenCalledOnce();
+    expect(play).toHaveBeenCalledOnce();
   });
 
   it("preserves each CSS animation phase offset while pinning to render time", () => {
@@ -65,21 +66,52 @@ describe("render clock", () => {
     expect(lateAnimation.currentTime).toBe(3875);
   });
 
-  it("keeps browser animations paused even while preview playback advances", () => {
+  it("lets browser animations run between master-clock resyncs during preview playback", () => {
     const animation = { currentTime: 0, play: vi.fn(), pause: vi.fn() };
 
-    syncDomAnimationListToRenderClock([animation], {
+    const first = syncDomAnimationListToRenderClock([animation], {
       playing: true,
       time: 0.25,
     });
-    syncDomAnimationListToRenderClock([animation], {
+    animation.currentTime = 505;
+    const second = syncDomAnimationListToRenderClock([animation], {
       playing: true,
       time: 0.5,
     });
 
-    expect(animation.currentTime).toBe(500);
-    expect(animation.pause).toHaveBeenCalledTimes(2);
-    expect(animation.play).not.toHaveBeenCalled();
+    expect(first.pinnedCount).toBe(1);
+    expect(second.pinnedCount).toBe(0);
+    expect(animation.currentTime).toBe(505);
+    expect(animation.pause).not.toHaveBeenCalled();
+    expect(animation.play).toHaveBeenCalledOnce();
+  });
+
+  it("pins animations inside shadow-root HTML layers", () => {
+    const hostAnimation = { currentTime: 0, play: vi.fn(), pause: vi.fn() };
+    const shadowAnimation = { currentTime: 0, play: vi.fn(), pause: vi.fn() };
+    const shadowRoot = {
+      getAnimations: vi.fn(() => [shadowAnimation as unknown as Animation]),
+      querySelectorAll: vi.fn(() => []),
+    } as unknown as ShadowRoot;
+    const shadowHost = { shadowRoot } as unknown as Element;
+    const root = {
+      getAnimations: vi.fn(() => [hostAnimation as unknown as Animation]),
+      querySelectorAll: vi.fn((selector: string) =>
+        selector === "[data-clipper-shadow-render-root]" ? [shadowHost] : [],
+      ),
+    } as unknown as Element;
+
+    const result = syncDomAnimationsToRenderClock(root, {
+      playing: false,
+      time: 1.5,
+    });
+
+    expect(result.animationCount).toBe(2);
+    expect(result.pinnedCount).toBe(2);
+    expect(hostAnimation.currentTime).toBe(1500);
+    expect(shadowAnimation.currentTime).toBe(1500);
+    expect(hostAnimation.pause).toHaveBeenCalledOnce();
+    expect(shadowAnimation.pause).toHaveBeenCalledOnce();
   });
 
   it("clamps negative render time before pinning DOM animations", () => {

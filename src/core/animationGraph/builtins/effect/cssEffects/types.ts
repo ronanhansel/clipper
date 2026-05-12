@@ -24,7 +24,6 @@ export type AnimationDefinition = {
   property: string;
   label: string;
   category: string;
-  popover?: { width: number; height: number };
   fieldGroups: AnimationControllerFieldGroup[];
   getDetails: (animation: LayerAnimation) => Record<string, string> | null;
   materializeKeyframes: (
@@ -34,7 +33,7 @@ export type AnimationDefinition = {
 
 export type AnimationManifest = Pick<
   AnimationDefinition,
-  "property" | "label" | "category" | "popover" | "fieldGroups"
+  "property" | "label" | "category" | "fieldGroups"
 >;
 
 export type AnimationLogic = Pick<

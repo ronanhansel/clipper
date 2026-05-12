@@ -791,7 +791,7 @@ describe("project normalization", () => {
     expect(applied.objects[0].animations).toHaveLength(1);
     expect(applied.objects[0].animations?.[0]).toMatchObject({
       id: "graph:opacity:effect:0",
-      keyframes: { opacity: [1, 0] },
+      keyframes: { opacity: [0, 0] },
       options: { split: { tokenIndexes: [0, 1] } },
     });
   });
@@ -1001,6 +1001,143 @@ describe("project normalization", () => {
       expect.objectContaining({ type: "shape", color: "#22c55e" }),
     ]);
     expect(JSON.stringify(saved)).not.toContain("generatedGeometry");
+  });
+
+  it("passes preview time into graph value parameters", () => {
+    const object = {
+      id: "text",
+      name: "Text",
+      type: "text",
+      selector: ".text",
+      content: "Title",
+      bounds: { x: 0, y: 0, width: 100, height: 40 },
+      style: {},
+      animations: [],
+    };
+    const graph = {
+      id: "graph:text",
+      sourceObjectId: "text",
+      nodes: {
+        source: typedNode("source", "source", { objectId: "text" }),
+        seconds: {
+          id: "seconds",
+          kind: "value:time:seconds",
+          position: { x: 0, y: 0 },
+          config: {},
+        },
+        blur: {
+          id: "blur",
+          kind: "effect:clipper.adjustment.blur",
+          position: { x: 0, y: 0 },
+          config: { params: { radius: 0 } },
+        },
+        out: typedNode("out", "out"),
+      },
+      edges: [
+        {
+          id: "source->blur",
+          from: { nodeId: "source", portId: "out" },
+          to: { nodeId: "blur", portId: "in" },
+        },
+        {
+          id: "seconds->blur",
+          from: { nodeId: "seconds", portId: "value" },
+          to: { nodeId: "blur", portId: "radius" },
+        },
+        {
+          id: "blur->out",
+          from: { nodeId: "blur", portId: "out" },
+          to: { nodeId: "out", portId: "in" },
+        },
+      ],
+    };
+
+    const applied = applyAnimationGraphToComposition(
+      { ...composition, objects: [object] },
+      graph,
+      { time: 3, frame: 90 },
+    );
+
+    expect(applied.objects[0].animations?.[0].keyframes).toEqual({
+      blur: [3, 3],
+    });
+  });
+
+  it("adds graph-owned virtual objects to preview/export output without persisting them", () => {
+    const object = {
+      id: "text",
+      name: "Text",
+      type: "text",
+      selector: ".text",
+      content: "host",
+      bounds: { x: 0, y: 0, width: 100, height: 40 },
+      style: {},
+    } as const;
+    const graph = {
+      id: "graph",
+      sourceObjectId: object.id,
+      nodes: {
+        source: {
+          id: "source",
+          kind: "source",
+          position: { x: 0, y: 0 },
+          config: { objectId: object.id },
+        },
+        title: {
+          id: "title",
+          kind: "virtual:text",
+          position: { x: 0, y: 0 },
+          config: { content: "Graph text", x: 12, y: 20 },
+        },
+        dots: {
+          id: "dots",
+          kind: "geometry:dotGrid",
+          position: { x: 0, y: 0 },
+          config: { columns: 2, rows: 2, radius: 3 },
+        },
+        out: {
+          id: "out",
+          kind: "out",
+          position: { x: 0, y: 0 },
+          config: { renderOrder: ["dots->out", "title->out"] },
+        },
+      },
+      edges: [
+        {
+          id: "title->out",
+          from: { nodeId: "title", portId: "out" },
+          to: { nodeId: "out", portId: "in" },
+        },
+        {
+          id: "dots->out",
+          from: { nodeId: "dots", portId: "out" },
+          to: { nodeId: "out", portId: "in" },
+        },
+      ],
+    };
+
+    const applied = applyAnimationGraphToComposition(
+      { ...composition, objects: [object] },
+      graph,
+    );
+    const saved = serializeProjectForSave({
+      ...projectWithComposition(),
+      scenes: [{ id: "scene", name: "Scene", compositions: [applied] }],
+    });
+
+    expect(applied.objects.map((item) => item.id)).toEqual([
+      "text",
+      "graph:graph:dots",
+      "graph:graph:title",
+    ]);
+    expect(applied.objects[1].generatedByGraph).toBe(true);
+    expect(applied.objects[2]).toMatchObject({
+      type: "text",
+      content: "Graph text",
+      generatedByGraph: true,
+    });
+    expect(JSON.stringify(saved)).not.toContain("generatedByGraph");
+    expect(JSON.stringify(saved)).not.toContain("Graph text");
   });
 
   it("preserves non-source object animations when strict graph targets another object", () => {

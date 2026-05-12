@@ -8,6 +8,7 @@ import type {
 } from "../../app/types";
 import type { PrerenderCacheCoverage } from "../../app/features/preview/usePrerenderCache";
 import type { GraphCompositionMode } from "../../core/graphSockets";
+import type { AnimationGraph as StrictAnimationGraph } from "../../core/animationGraph/types";
 import type {
   TimelineMarkerMove,
   TimelineMarkerResize,
@@ -226,7 +227,9 @@ export type TimelinePanelProps = {
     ) => import("../../core/types").LayerAnimation[],
   ) => void;
   onUpdateComposeAnimationGraph?: (
-    updater: (graph: AnimationGraphState | undefined) => AnimationGraphState,
+    updater: (
+      graph: AnimationGraphState | StrictAnimationGraph | undefined,
+    ) => AnimationGraphState | StrictAnimationGraph,
     options?: {
       implicit?: boolean;
       mode?: GraphCompositionMode;

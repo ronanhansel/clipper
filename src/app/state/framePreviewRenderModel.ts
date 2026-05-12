@@ -4,6 +4,7 @@ import {
   motionBlocksToMotionMarkers,
 } from "../../core/motionEffects";
 import {
+  applyAnimationGraphToComposition,
   defaultTimelineLayerState,
   withRequiredTimelineLayerTypes,
 } from "../../core/project";
@@ -103,7 +104,11 @@ export function deriveFramePreviewRenderModel({
     transitionLayers: renderableScene.transitionLayers,
   });
   const activeTimelinePart = previewState.activeTimelinePart;
-  const basePart = previewState.activeComposition ?? blankPart;
+  const basePart = compileCompositionGraphForPreview(
+    previewState.activeComposition ?? blankPart,
+    previewState.previewTime,
+    frameRate,
+  );
   const partStart = activeTimelinePart?.start ?? 0;
   const sceneMotionViews = getMotionMarkerViews(renderableScene);
   const shiftedMotionMarkers = getShiftedSceneMotionMarkers(
@@ -114,18 +119,24 @@ export function deriveFramePreviewRenderModel({
     ? timelineLayerState.motionLayers
     : defaultTimelineLayerState.motionLayers!;
   const previewParts = withSceneMotionPreviewParts(
-    previewState.previewParts,
+    previewState.previewParts.map((item) =>
+      compilePreviewStackPartGraph(item, frameRate),
+    ),
     sceneMotionViews.motionMarkers,
   );
   const transitionPreviewParts = previewState.transitionPreviewParts
     ? {
         ...previewState.transitionPreviewParts,
         from: withSceneMotionPreviewParts(
-          previewState.transitionPreviewParts.from,
+          previewState.transitionPreviewParts.from.map((item) =>
+            compilePreviewStackPartGraph(item, frameRate),
+          ),
           sceneMotionViews.motionMarkers,
         ),
         to: withSceneMotionPreviewParts(
-          previewState.transitionPreviewParts.to,
+          previewState.transitionPreviewParts.to.map((item) =>
+            compilePreviewStackPartGraph(item, frameRate),
+          ),
           sceneMotionViews.motionMarkers,
         ),
         postProcessPasses:
@@ -155,6 +166,43 @@ export function deriveFramePreviewRenderModel({
     transitionPreviewParts,
     visibleAdjustmentLayers,
   };
+}
+
+function compilePreviewStackPartGraph(
+  item: TimelinePreviewStackPart,
+  frameRate: number | undefined,
+): TimelinePreviewStackPart {
+  return {
+    ...item,
+    part: compileCompositionGraphForPreview(
+      item.part,
+      item.previewTime,
+      frameRate,
+    ),
+  };
+}
+
+function compileCompositionGraphForPreview(
+  composition: CompositionClip,
+  previewTime: number,
+  frameRate: number | undefined,
+): CompositionClip {
+  return applyAnimationGraphToComposition(
+    composition,
+    composition.animationGraph,
+    {
+      time: previewTime,
+      frame: readFrameIndex(previewTime, frameRate),
+    },
+  );
+}
+
+function readFrameIndex(time: number, frameRate: number | undefined) {
+  const effectiveFrameRate =
+    typeof frameRate === "number" && Number.isFinite(frameRate) && frameRate > 0
+      ? frameRate
+      : 30;
+  return Math.max(0, Math.round(time * effectiveFrameRate));
 }
 
 export function getFramePreviewTimelineLayers(

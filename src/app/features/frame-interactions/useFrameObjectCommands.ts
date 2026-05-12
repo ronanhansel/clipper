@@ -4,7 +4,10 @@ import type {
   CompositionSelection,
   RightPanelTab,
 } from "../../types";
-import { syncChartObjectBounds } from "../../../core/frameInteraction";
+import {
+  frameObjectFromBackgroundLayer,
+  syncChartObjectBounds,
+} from "../../../core/frameInteraction";
 import type {
   BackgroundLayer,
   CompositionClip,
@@ -83,20 +86,37 @@ export function useFrameObjectCommands({
   ) {
     updateCompositionForTimelinePart(part.id, (composition) => ({
       ...composition,
-      background: {
-        ...composition.background,
-        elements: composition.background.elements.map((object) =>
-          object.id === objectId
-            ? syncChartObjectBounds(updater(object))
-            : object,
-        ),
-      },
+      background:
+        objectId === composition.background.id
+          ? updateBackgroundFromFrameObject(composition.background, updater)
+          : {
+              ...composition.background,
+              elements: composition.background.elements.map((object) =>
+                object.id === objectId
+                  ? syncChartObjectBounds(updater(object))
+                  : object,
+              ),
+            },
       objects: composition.objects.map((object) =>
         object.id === objectId
           ? syncChartObjectBounds(updater(object))
           : object,
       ),
     }));
+  }
+
+  function updateBackgroundFromFrameObject(
+    background: BackgroundLayer,
+    updater: (object: FrameObject) => FrameObject,
+  ): BackgroundLayer {
+    const next = updater(frameObjectFromBackgroundLayer(background));
+    return {
+      ...background,
+      style: next.style,
+      hidden: next.hidden,
+      locked: next.locked,
+      animations: next.animations,
+    };
   }
 
   function updateSelectedObject(updater: (object: FrameObject) => FrameObject) {

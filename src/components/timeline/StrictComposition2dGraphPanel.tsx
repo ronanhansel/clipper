@@ -119,6 +119,22 @@ export function updateStrictComposition2dNodeParameter(
 ): AnimationGraph {
   const node = graph.nodes[nodeId];
   if (!node) return graph;
+  if (node.kind === "out" && key === "renderOrder")
+    return {
+      ...graph,
+      nodes: {
+        ...graph.nodes,
+        [nodeId]: {
+          ...node,
+          config: {
+            ...(typeof node.config === "object" && node.config
+              ? node.config
+              : {}),
+            renderOrder: parseRenderOrderValue(value),
+          },
+        },
+      },
+    };
   const definition = getAnimationGraphNodeDefinition(node.kind);
   if (!definition?.controls) return graph;
   if (!isStrictControlKey(definition.controls, key)) return graph;
@@ -146,6 +162,22 @@ export function updateStrictComposition2dEditorNodeParameter(
   if (!current || typeof current !== "object" || !("kind" in current))
     return graph;
   const node = current as StrictEditorNode;
+  if (node.kind === "out" && key === "renderOrder")
+    return {
+      ...graph,
+      nodes: {
+        ...(graph.nodes ?? {}),
+        [nodeId]: {
+          ...node,
+          config: {
+            ...(typeof node.config === "object" && node.config
+              ? node.config
+              : {}),
+            renderOrder: parseRenderOrderValue(value),
+          },
+        },
+      },
+    };
   const definition = getAnimationGraphNodeDefinition(node.kind ?? "unknown");
   if (!definition?.controls) return graph;
   if (!isStrictControlKey(definition.controls, key)) return graph;
@@ -398,6 +430,17 @@ export function getStrictComposition2dParameterEditorSchema(
       })),
     })),
   } as unknown as GraphParameterEditorSchema;
+}
+
+function parseRenderOrderValue(value: string) {
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === "string")
+      : [];
+  } catch {
+    return [];
+  }
 }
 
 function keepValidStrictComposition2dEdges(

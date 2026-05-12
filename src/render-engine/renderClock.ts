@@ -44,10 +44,9 @@ export function syncDomAnimationsToRenderClock(
   root: Element | null,
   state: RenderClockState,
 ) {
-  if (!root || typeof root.getAnimations !== "function")
-    return emptyRenderClockSyncResult();
+  if (!root) return emptyRenderClockSyncResult();
   return syncDomAnimationListToRenderClock(
-    root.getAnimations({ subtree: true }),
+    getRenderClockAnimations(root),
     state,
   );
 }
@@ -62,24 +61,59 @@ export function syncDomAnimationListToRenderClock(
   for (const animation of animations) {
     const phaseOffset =
       state.mode === "export" ? 0 : getAnimationPhaseOffset(animation);
+    const targetTime = Math.max(renderTime + phaseOffset, 0);
+    if (state.playing && state.mode !== "export") {
+      const previous = renderClockPlayState.get(animation);
+      const currentTime =
+        typeof animation.currentTime === "number" &&
+        Number.isFinite(animation.currentTime)
+          ? animation.currentTime
+          : null;
+      const drift =
+        currentTime === null ? Infinity : Math.abs(currentTime - targetTime);
+      if (!previous?.playing || drift > renderClockResyncThresholdMs) {
+        try {
+          animation.currentTime = targetTime;
+          result.pinnedCount += 1;
+        } catch {
+          result.failedCount += 1;
+        }
+      }
+      if (!previous?.playing) {
+        try {
+          animation.play();
+        } catch {
+          // Keep playback driven by future clock syncs if the browser refuses play().
+        }
+      }
+      renderClockPlayState.set(animation, { playing: true });
+      if (animation.ready) result.pendingReadyCount += 1;
+      continue;
+    }
     try {
       animation.pause();
     } catch {
       // Keep pinning time even if the browser refuses to pause a generated animation.
     }
     try {
-      animation.currentTime = Math.max(renderTime + phaseOffset, 0);
+      animation.currentTime = targetTime;
       result.pinnedCount += 1;
     } catch {
       // Some browser-generated animations can reject currentTime updates before they are ready.
       result.failedCount += 1;
     }
+    renderClockPlayState.set(animation, { playing: false });
     if (animation.ready) result.pendingReadyCount += 1;
   }
   return result;
 }
 
 const renderClockPhaseOffset = new WeakMap<DomAnimationLike, number>();
+const renderClockPlayState = new WeakMap<
+  DomAnimationLike,
+  { playing: boolean }
+>();
+const renderClockResyncThresholdMs = 80;
 
 function getAnimationPhaseOffset(animation: DomAnimationLike) {
   const cached = renderClockPhaseOffset.get(animation);
@@ -121,10 +155,8 @@ export async function waitForRenderClockAnimationsReady(
 
     for (const layer of layers) {
       const state = getRenderClockStateFromElement(layer);
-      if (!state || typeof layer.getAnimations !== "function") continue;
-      const animations = layer.getAnimations({
-        subtree: true,
-      }) as DomAnimationLike[];
+      if (!state) continue;
+      const animations = getRenderClockAnimations(layer);
       mergeRenderClockSyncResult(
         aggregate,
         syncDomAnimationListToRenderClock(animations, state),
@@ -167,7 +199,56 @@ function getRenderClockLayers(root: ParentNode | null) {
     root.matches(selector)
       ? [root as Element]
       : [];
-  return [...layers, ...root.querySelectorAll(selector)];
+  return [...layers, ...querySelectorAllIncludingShadow(root, selector)];
+}
+
+function getRenderClockAnimations(root: Element) {
+  const animations = new Set<DomAnimationLike>();
+  if (typeof root.getAnimations === "function") {
+    for (const animation of getAnimationsForRenderClock(root) as
+      | DomAnimationLike[]
+      | Animation[])
+      animations.add(animation);
+  }
+  for (const shadowRoot of getShadowRoots(root)) {
+    if (typeof shadowRoot.getAnimations !== "function") continue;
+    for (const animation of getAnimationsForRenderClock(shadowRoot) as
+      | DomAnimationLike[]
+      | Animation[])
+      animations.add(animation);
+  }
+  return [...animations];
+}
+
+function getAnimationsForRenderClock(root: Element | ShadowRoot): Animation[] {
+  return (
+    root as unknown as {
+      getAnimations: (options?: { subtree?: boolean }) => Animation[];
+    }
+  ).getAnimations({ subtree: true });
+}
+
+function getShadowRoots(root: ParentNode) {
+  const roots: ShadowRoot[] = [];
+  for (const element of querySelectorAllIncludingShadow(
+    root,
+    "[data-clipper-shadow-render-root]",
+  )) {
+    if (element.shadowRoot) roots.push(element.shadowRoot);
+  }
+  return roots;
+}
+
+function querySelectorAllIncludingShadow(root: ParentNode, selector: string) {
+  if (typeof root.querySelectorAll !== "function") return [];
+  const matches = [...root.querySelectorAll<Element>(selector)];
+  for (const element of root.querySelectorAll<Element>("*")) {
+    if (!element.shadowRoot) continue;
+    matches.push(
+      ...querySelectorAllIncludingShadow(element.shadowRoot, selector),
+    );
+  }
+  return matches;
 }
 
 function getRenderClockStateFromElement(
