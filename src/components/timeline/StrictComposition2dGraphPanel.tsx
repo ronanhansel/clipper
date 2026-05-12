@@ -323,12 +323,31 @@ export function getStrictComposition2dOutputPort(
     (port) => port.direction === "output",
   );
   if (preferredPortId && preferredPortId !== newConditionOutputPortId)
-    return ports.find((port) => port.id === preferredPortId);
+    return (
+      ports.find((port) => port.id === preferredPortId) ??
+      (node.kind === "condition" && preferredPortId.startsWith("output:")
+        ? createStrictConditionOutputPort(preferredPortId)
+        : undefined)
+    );
   if (preferredPortId === newConditionOutputPortId) {
-    const next = getNextStrictConditionOutputPortId(node, edges);
-    return ports.find((port) => port.id === next);
+    const next = getNextStrictConditionOutputPortId(node, edges) ?? "output:1";
+    return (
+      ports.find((port) => port.id === next) ??
+      createStrictConditionOutputPort(next)
+    );
   }
   return ports[0];
+}
+
+function createStrictConditionOutputPort(id: string) {
+  return {
+    id,
+    label: id.replace(/^output:/, "Output "),
+    direction: "output" as const,
+    cardinality: "multi" as const,
+    type: { kind: "animation" as const },
+    role: "condition-output" as const,
+  };
 }
 
 export function getStrictComposition2dInputPort(
@@ -666,7 +685,7 @@ function getNextStrictConditionOutputPortId(
   node: StrictComposition2dCanvasNode,
   edges: readonly AnimationGraphEdge[],
 ) {
-  if (node.kind !== "condition") return undefined;
+  if (node.kind !== "condition") return "output:1";
   const used = new Set(
     edges
       .filter((edge) => edge.from.nodeId === node.id)

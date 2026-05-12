@@ -3072,14 +3072,16 @@ function AppContent({
     : selectedComposeObjectIds;
   useEffect(() => {
     function deleteSelectedComposeLayers(event: KeyboardEvent) {
+      if (event.key !== "Backspace" && event.key !== "Delete") return;
+      if (event.defaultPrevented) return;
       if (
         !composeMode ||
         mode !== "preview" ||
         editingTextObjectId ||
+        selectedGraphNodeIds.length > 0 ||
         selectedComposeObjectIds.length === 0
       )
         return;
-      if (event.key !== "Backspace" && event.key !== "Delete") return;
       if (isEditableKeyboardTarget(event.target)) return;
       event.preventDefault();
       deleteComposeObjects(selectedComposeObjectIds);
@@ -3094,6 +3096,7 @@ function AppContent({
     editingTextObjectId,
     mode,
     selectedComposeObjectIds,
+    selectedGraphNodeIds.length,
   ]);
   useEffect(() => {
     function copyPasteComposeObjects(event: KeyboardEvent) {

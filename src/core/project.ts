@@ -472,7 +472,13 @@ export function createDefaultComposition2dAnimationGraph(
         config: {},
       },
     },
-    edges: [],
+    edges: [
+      {
+        id: `${sourceId}:out->${outId}:in`,
+        from: { nodeId: sourceId, portId: "out" },
+        to: { nodeId: outId, portId: "in" },
+      },
+    ],
   };
 }
 

@@ -24,7 +24,10 @@ const forbiddenTerms = [
 describe("removed graph paths", () => {
   it("keeps deleted non-2D graph symbols out of source and docs", () => {
     const matches: string[] = [];
-    for (const filePath of walk([join(repoRoot, "src"), join(repoRoot, "docs")])) {
+    for (const filePath of walk([
+      join(repoRoot, "src"),
+      join(repoRoot, "docs"),
+    ])) {
       if (filePath.endsWith("noLegacyGraphPaths.test.ts")) continue;
       const source = readFileSync(filePath, "utf8");
       for (const term of forbiddenTerms) {

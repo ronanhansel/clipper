@@ -3,10 +3,14 @@ import strictComposition2dGraphPanelSource from "./StrictComposition2dGraphPanel
 import {
   buildGraphNodes,
   getGraphAnimationSources,
+  getGraphEdgesAfterEdgeDrop,
   getGraphEdgeDropEdge,
+  getGraphNodeParameterEditorSchema,
+  getGraphPointerDownConnector,
   getGraphContentSize,
   getRenderableEdges,
   getSelectedComposition2dLayerGraph,
+  getStrictGraphNodeMenuGroups,
   setSelectedComposition2dLayerGraph,
   updateStrictConditionNodeParameter,
 } from "./ComposeAnimationGraphPanel";
@@ -28,6 +32,10 @@ import type {
   AnimationGraphEdge as StrictAnimationGraphEdge,
 } from "../../core/animationGraph/types";
 import { addAnimationGraphPresetGroupToGraph } from "../../core/animationGraph/presets";
+import {
+  getAnimationGraphNodeDefinition,
+  getAnimationGraphNodeDefinitions,
+} from "../../core/animationGraph/registry";
 
 describe("getGraphContentSize", () => {
   it("keeps the base graph size when nodes fit inside it", () => {
@@ -112,6 +120,58 @@ describe("getStrictComposition2dCanvasDiagnostics", () => {
 });
 
 describe("buildGraphNodes", () => {
+  it("starts connector drags only from explicit connector area", () => {
+    const node = {
+      id: "source:text",
+      label: "Text",
+      kind: "layer",
+      x: 4,
+      y: 4,
+      width: 6,
+      height: 2,
+    };
+    const insideRightEdge = {
+      x: (node.x + node.width) * 18 - 1,
+      y: (node.y + node.height / 2) * 18,
+    };
+    const outsideConnector = {
+      x: (node.x + node.width) * 18 + 14,
+      y: (node.y + node.height / 2) * 18,
+    };
+
+    expect(getGraphPointerDownConnector(insideRightEdge, [node])).toBeNull();
+    expect(
+      getGraphPointerDownConnector(outsideConnector, [node]),
+    ).toMatchObject({
+      nodeId: "source:text",
+    });
+  });
+
+  it("lists addable strict registry nodes in the graph menu", () => {
+    const menuKinds = new Set(
+      getStrictGraphNodeMenuGroups().flatMap((group) =>
+        group.nodes.map((node) => node.kind),
+      ),
+    );
+    const expectedKinds = getAnimationGraphNodeDefinitions()
+      .map((definition) => definition.kind)
+      .filter(
+        (kind) =>
+          kind === "time" ||
+          kind === "split" ||
+          kind === "condition" ||
+          kind.startsWith("value:") ||
+          kind.startsWith("effect:") ||
+          kind.startsWith("geometry:"),
+      )
+      .filter((kind) => !["source", "out", "macro"].includes(kind));
+
+    expect([...menuKinds].sort()).toEqual([...expectedKinds].sort());
+    expect(menuKinds).toContain("effect:clipper.motion.zoom");
+    expect(menuKinds).not.toContain("source");
+    expect(menuKinds).not.toContain("out");
+  });
+
   it("sanitizes non-finite strict node positions before canvas layout", () => {
     const nodes = buildGraphNodes(
       [
@@ -356,9 +416,309 @@ describe("buildGraphNodes", () => {
       expect.arrayContaining(["effect", "mix"]),
     );
   });
+
+  it("keeps disconnected strict typed chains visible while editing", () => {
+    const scaleDefinition = getAnimationGraphNodeDefinition(
+      "effect:clipper.motion.zoom",
+    )!;
+    const graph = {
+      id: "graph:text",
+      sourceObjectId: "text",
+      nodes: {
+        "source:text": {
+          id: "source:text",
+          kind: "source",
+          position: { x: 2, y: 2 },
+          config: { objectId: "text" },
+        },
+        time: {
+          id: "time",
+          kind: "time",
+          position: { x: 8, y: 2 },
+          config: { delay: 0, duration: 1, ease: "linear" },
+        },
+        scale: {
+          id: "scale",
+          kind: "effect:clipper.motion.zoom",
+          position: { x: 14, y: 2 },
+          config: scaleDefinition.createDefaultConfig({ graphId: "test" }),
+        },
+        "composition2d:out": {
+          id: "composition2d:out",
+          kind: "out",
+          position: { x: 20, y: 2 },
+          config: {},
+        },
+      },
+      edges: [
+        {
+          id: "time:out->scale:in",
+          from: { nodeId: "time", portId: "out" },
+          to: { nodeId: "scale", portId: "in" },
+        },
+      ],
+    } satisfies StrictAnimationGraph;
+
+    const nodes = buildGraphNodes(
+      [
+        {
+          id: "text",
+          name: "Text",
+          type: "text",
+          selector: ".text",
+          bounds: { x: 0, y: 0, width: 100, height: 40 },
+          style: {},
+          animations: [],
+        },
+      ],
+      graph,
+      5200,
+      900,
+      "text",
+      "composition2d",
+    );
+
+    expect(nodes.map((node) => node.id)).toEqual(
+      expect.arrayContaining(["time", "scale"]),
+    );
+    expect(getRenderableEdges(graph, nodes, [])).toEqual(graph.edges);
+  });
+
+  it("keeps prior strict edge when adding another edge from current graph", () => {
+    const scaleDefinition = getAnimationGraphNodeDefinition(
+      "effect:clipper.motion.zoom",
+    )!;
+    const blurDefinition = getAnimationGraphNodeDefinition(
+      "effect:clipper.adjustment.blur",
+    )!;
+    const graph = {
+      id: "graph:text",
+      sourceObjectId: "text",
+      nodes: {
+        "source:text": {
+          id: "source:text",
+          kind: "source",
+          position: { x: 2, y: 2 },
+          config: { objectId: "text" },
+        },
+        time: {
+          id: "time",
+          kind: "time",
+          position: { x: 8, y: 2 },
+          config: { delay: 0, duration: 1, ease: "linear" },
+        },
+        scale: {
+          id: "scale",
+          kind: "effect:clipper.motion.zoom",
+          position: { x: 14, y: 2 },
+          config: scaleDefinition.createDefaultConfig({ graphId: "test" }),
+        },
+        blur: {
+          id: "blur",
+          kind: "effect:clipper.adjustment.blur",
+          position: { x: 20, y: 2 },
+          config: blurDefinition.createDefaultConfig({ graphId: "test" }),
+        },
+        "composition2d:out": {
+          id: "composition2d:out",
+          kind: "out",
+          position: { x: 26, y: 2 },
+          config: {},
+        },
+      },
+      edges: [
+        {
+          id: "time:out->scale:in",
+          from: { nodeId: "time", portId: "out" },
+          to: { nodeId: "scale", portId: "in" },
+        },
+      ],
+    } satisfies StrictAnimationGraph;
+    const object = {
+      id: "text",
+      name: "Text",
+      type: "text" as const,
+      selector: ".text",
+      bounds: { x: 0, y: 0, width: 100, height: 40 },
+      style: {},
+      animations: [],
+    };
+    const nodes = buildGraphNodes(
+      [object],
+      graph,
+      5200,
+      900,
+      "text",
+      "composition2d",
+    );
+    const scale = nodes.find((node) => node.id === "scale")!;
+    const blur = nodes.find((node) => node.id === "blur")!;
+    const currentEdges = getRenderableEdges(graph, nodes, [object]);
+    const nextEdge = getGraphEdgeDropEdge(
+      {
+        x: (blur.x + blur.width / 2) * 18,
+        y: (blur.y + blur.height / 2) * 18,
+      },
+      {
+        kind: "edge",
+        fromNodeId: scale.id,
+        fromPort: "right",
+        portId: "out",
+        fromNode: scale,
+        startX: 0,
+        startY: 0,
+        x: 0,
+        y: 0,
+      },
+      nodes,
+      1,
+      graph,
+      [object],
+      "composition2d",
+    ) as StrictAnimationGraphEdge | null;
+
+    expect(nextEdge).toMatchObject({
+      from: { nodeId: "scale", portId: "out" },
+      to: { nodeId: "blur", portId: "in" },
+    });
+    expect(
+      getGraphEdgesAfterEdgeDrop(
+        nextEdge!,
+        graph,
+        nodes,
+        [object],
+        "composition2d",
+      ),
+    ).toEqual([...currentEdges, nextEdge]);
+  });
 });
 
 describe("composition2d layer graph selection", () => {
+  it("keeps source to scale to out as a strict graph chain", () => {
+    const scaleDefinition = getAnimationGraphNodeDefinition(
+      "effect:clipper.motion.zoom",
+    )!;
+    const graph = {
+      id: "graph:text",
+      sourceObjectId: "text",
+      nodes: {
+        "source:text": {
+          id: "source:text",
+          kind: "source",
+          position: { x: 2, y: 2 },
+          config: { objectId: "text" },
+        },
+        scale: {
+          id: "scale",
+          kind: "effect:clipper.motion.zoom",
+          position: { x: 10, y: 2 },
+          config: scaleDefinition.createDefaultConfig({ graphId: "test" }),
+        },
+        "composition2d:out": {
+          id: "composition2d:out",
+          kind: "out",
+          position: { x: 18, y: 2 },
+          config: {},
+        },
+      },
+      edges: [],
+    } satisfies StrictAnimationGraph;
+    const object = {
+      id: "text",
+      name: "Text",
+      type: "text" as const,
+      selector: ".text",
+      bounds: { x: 0, y: 0, width: 100, height: 40 },
+      style: {},
+      animations: [],
+    };
+    const nodes = buildGraphNodes(
+      [object],
+      graph,
+      5200,
+      900,
+      "text",
+      "composition2d",
+    );
+    const source = nodes.find((node) => node.id === "source:text")!;
+    const scale = nodes.find((node) => node.id === "scale")!;
+    const out = nodes.find((node) => node.id === "composition2d:out")!;
+    const scaleCenter = {
+      x: (scale.x + scale.width / 2) * 18,
+      y: (scale.y + scale.height / 2) * 18,
+    };
+    const outCenter = {
+      x: (out.x + out.width / 2) * 18,
+      y: (out.y + out.height / 2) * 18,
+    };
+
+    const sourceToScale = getGraphEdgeDropEdge(
+      scaleCenter,
+      {
+        kind: "edge",
+        fromNodeId: source.id,
+        fromPort: "right",
+        portId: "out",
+        fromNode: source,
+        startX: 0,
+        startY: 0,
+        x: 0,
+        y: 0,
+      },
+      nodes,
+      1,
+      graph,
+      [object],
+      "composition2d",
+    ) as StrictAnimationGraphEdge | null;
+    expect(sourceToScale).toMatchObject({
+      from: { nodeId: "source:text", portId: "out" },
+      to: { nodeId: "scale", portId: "in" },
+    });
+
+    const graphWithFirstEdge = {
+      ...graph,
+      edges: [sourceToScale!],
+    };
+    const scaleToOut = getGraphEdgeDropEdge(
+      outCenter,
+      {
+        kind: "edge",
+        fromNodeId: scale.id,
+        fromPort: "right",
+        portId: "out",
+        fromNode: scale,
+        startX: 0,
+        startY: 0,
+        x: 0,
+        y: 0,
+      },
+      nodes,
+      1,
+      graphWithFirstEdge,
+      [object],
+      "composition2d",
+    ) as StrictAnimationGraphEdge | null;
+    expect(scaleToOut).toMatchObject({
+      from: { nodeId: "scale", portId: "out" },
+      to: { nodeId: "composition2d:out", portId: "in" },
+    });
+
+    const saved = saveStrictComposition2dGraph(
+      {
+        nodes: graph.nodes,
+        edges: [sourceToScale!, scaleToOut!],
+      },
+      graph,
+      "text",
+    );
+
+    expect(saved.edges).toEqual([sourceToScale, scaleToOut]);
+    expect(JSON.stringify(saved)).not.toMatch(
+      /fromNodeId|toNodeId|customNodes/,
+    );
+  });
+
   it("strict module save drops legacy-shaped edges and never emits legacy fields", () => {
     const graph = saveStrictComposition2dGraph(
       {
@@ -937,6 +1297,141 @@ describe("composition2d strict Phase 5 editor behavior", () => {
     });
   });
 
+  it("creates concrete strict condition output ports from new output drag", () => {
+    const condition = createTypedAnimationGraphNode(
+      "condition",
+      "condition",
+      { x: 8, y: 2 },
+      { outputs: [], rules: [] },
+      "Condition",
+    );
+    const graph = {
+      id: "graph:text",
+      sourceObjectId: "text",
+      nodes: {
+        condition,
+        "composition2d:out": createTypedAnimationGraphNode(
+          "composition2d:out",
+          "out",
+          { x: 16, y: 2 },
+          {},
+          "Out",
+        ),
+      },
+      edges: [],
+    } satisfies StrictAnimationGraph;
+    const nodes = buildGraphNodes([textObject], graph);
+    const conditionNode = nodes.find((node) => node.id === "condition")!;
+    const out = nodes.find((node) => node.id === "composition2d:out")!;
+    const edge = getGraphEdgeDropEdge(
+      {
+        x: (out.x + out.width / 2) * 18,
+        y: (out.y + out.height / 2) * 18,
+      },
+      {
+        kind: "edge",
+        fromNodeId: conditionNode.id,
+        fromPort: "right",
+        portId: "new-output",
+        fromNode: conditionNode,
+        startX: 0,
+        startY: 0,
+        x: 0,
+        y: 0,
+      },
+      nodes,
+      1,
+      graph,
+      [textObject],
+      "composition2d",
+    ) as StrictAnimationGraphEdge | null;
+
+    expect(edge).toMatchObject({
+      from: { nodeId: "condition", portId: "output:1" },
+      to: { nodeId: "composition2d:out", portId: "in" },
+    });
+  });
+
+  it("persists new condition output config when saving condition to time edge", () => {
+    const condition = createTypedAnimationGraphNode(
+      "condition",
+      "condition",
+      { x: 8, y: 2 },
+      { outputs: [], rules: [] },
+      "Condition",
+    );
+    const time = createTypedAnimationGraphNode(
+      "time",
+      "time",
+      { x: 16, y: 2 },
+      { delay: 0, duration: 1, ease: "linear" },
+      "Time",
+    );
+    const graph = {
+      id: "graph:text",
+      sourceObjectId: "text",
+      nodes: {
+        condition,
+        time,
+        "composition2d:out": createTypedAnimationGraphNode(
+          "composition2d:out",
+          "out",
+          { x: 24, y: 2 },
+          {},
+          "Out",
+        ),
+      },
+      edges: [],
+    } satisfies StrictAnimationGraph;
+    const nodes = buildGraphNodes([textObject], graph);
+    const conditionNode = nodes.find((node) => node.id === "condition")!;
+    const timeNode = nodes.find((node) => node.id === "time")!;
+    const edge = getGraphEdgeDropEdge(
+      {
+        x: (timeNode.x + timeNode.width / 2) * 18,
+        y: (timeNode.y + timeNode.height / 2) * 18,
+      },
+      {
+        kind: "edge",
+        fromNodeId: conditionNode.id,
+        fromPort: "right",
+        portId: "new-output",
+        fromNode: conditionNode,
+        startX: 0,
+        startY: 0,
+        x: 0,
+        y: 0,
+      },
+      nodes,
+      1,
+      graph,
+      [textObject],
+      "composition2d",
+    ) as StrictAnimationGraphEdge | null;
+    const saved = saveStrictComposition2dGraph(
+      {
+        nodes: {
+          ...graph.nodes,
+          condition: {
+            ...graph.nodes.condition,
+            config: {
+              ...graph.nodes.condition.config,
+              outputs: [{ id: "output:1", label: "Output 1" }],
+            },
+          },
+        },
+        edges: [edge!],
+      },
+      graph,
+      "text",
+    );
+
+    expect(saved.edges).toEqual([edge]);
+    expect((saved.nodes.condition.config as any).outputs).toEqual([
+      { id: "output:1", label: "Output 1" },
+    ]);
+  });
+
   it("renders strict source to out edges from saved graph data", () => {
     const graph = {
       id: "graph:text-mp13s444",
@@ -1196,6 +1691,54 @@ describe("composition2d strict Phase 5 editor behavior", () => {
       "to",
     ]);
     expect((next.nodes.opacity as any).config.params.from).toBe(0.5);
+  });
+
+  it("renders package-backed effect params through the graph inspector schema", () => {
+    const scaleDefinition = getAnimationGraphNodeDefinition(
+      "effect:clipper.motion.zoom",
+    )!;
+    const blurDefinition = getAnimationGraphNodeDefinition(
+      "effect:clipper.adjustment.blur",
+    )!;
+    const scaleSchema = getGraphNodeParameterEditorSchema({
+      id: "scale",
+      label: "Scale",
+      kind: "effect",
+      x: 1,
+      y: 2,
+      width: 8,
+      height: 2,
+      details: {},
+      typedNode: {
+        id: "scale",
+        kind: "effect:clipper.motion.zoom",
+        position: { x: 1, y: 2 },
+        config: scaleDefinition.createDefaultConfig({ graphId: "test" }),
+      } as any,
+    });
+    const blurSchema = getGraphNodeParameterEditorSchema({
+      id: "blur",
+      label: "Blur",
+      kind: "effect",
+      x: 1,
+      y: 2,
+      width: 8,
+      height: 2,
+      details: {},
+      typedNode: {
+        id: "blur",
+        kind: "effect:clipper.adjustment.blur",
+        position: { x: 1, y: 2 },
+        config: blurDefinition.createDefaultConfig({ graphId: "test" }),
+      } as any,
+    });
+
+    expect(scaleSchema?.groups[0].fields).toMatchObject([
+      { key: "scale", value: "1.8" },
+    ]);
+    expect(blurSchema?.groups[0].fields).toMatchObject([
+      { key: "radius", value: "6" },
+    ]);
   });
 
   it("ignores strict node parameter updates outside definition controls", () => {

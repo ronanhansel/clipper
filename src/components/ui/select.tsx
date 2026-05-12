@@ -4,8 +4,13 @@ import {
   type ComponentPropsWithoutRef,
   type ElementRef,
   forwardRef,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
 } from "react";
 import { cn } from "../../lib/utils";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./tooltip";
 
 export const Select = SelectPrimitive.Root;
 export const SelectGroup = SelectPrimitive.Group;
@@ -97,24 +102,310 @@ export const SelectContent = forwardRef<
 ));
 SelectContent.displayName = SelectPrimitive.Content.displayName;
 
+type SelectItemEase =
+  | "linear"
+  | "easeIn"
+  | "easeOut"
+  | "easeInOut"
+  | "inAndOut"
+  | "expoIn"
+  | "expoOut"
+  | "circOut"
+  | "backOut";
+
+type SelectItemProps = ComponentPropsWithoutRef<typeof SelectPrimitive.Item> & {
+  variant?: "default" | "ease";
+  ease?: SelectItemEase;
+  previewLabel?: string;
+};
+
+const easePreviewHoverDelayMs = 600;
+const easePreviewSkipDelayMs = 900;
+const easePreviewDuration = "1.85s";
+const easePreviewMotionPortion = 0.78;
+let lastEasePreviewOpenTime = 0;
+
+function selectItemEaseFromValue(value: string | undefined): SelectItemEase {
+  return value === "easeIn" ||
+    value === "easeOut" ||
+    value === "easeInOut" ||
+    value === "inAndOut" ||
+    value === "expoIn" ||
+    value === "expoOut" ||
+    value === "circOut" ||
+    value === "backOut"
+    ? value
+    : "linear";
+}
+
+function easePreviewProgress(value: number, ease: SelectItemEase) {
+  if (ease === "easeOut" || ease === "circOut")
+    return 1 - Math.pow(1 - value, 3);
+  if (ease === "easeIn") return value * value * value;
+  if (ease === "easeInOut")
+    return value < 0.5
+      ? 4 * value * value * value
+      : 1 - Math.pow(-2 * value + 2, 3) / 2;
+  if (ease === "inAndOut") return inAndOutEase(value);
+  if (ease === "expoIn") {
+    if (value <= 0) return 0;
+    return Math.pow(2, 10 * value - 10);
+  }
+  if (ease === "expoOut") {
+    if (value >= 1) return 1;
+    return 1 - Math.pow(2, -10 * value);
+  }
+  if (ease === "backOut")
+    return (
+      1 + 2.70158 * Math.pow(value - 1, 3) + 1.70158 * Math.pow(value - 1, 2)
+    );
+  return value;
+}
+
+function inAndOutEase(value: number) {
+  if (value <= 0) return 0;
+  if (value >= 1) return 1;
+  return value < 0.5
+    ? Math.pow(2, 20 * value - 10) / 2
+    : (2 - Math.pow(2, -20 * value + 10)) / 2;
+}
+
+function easePreviewPath(ease: SelectItemEase) {
+  const width = 132;
+  const height = 72;
+  const segments = 96;
+  return Array.from({ length: segments + 1 }, (_, index) => {
+    const x = index / segments;
+    const y = 1 - easePreviewProgress(x, ease);
+    return `${index === 0 ? "M" : "L"} ${(x * width).toFixed(2)} ${(y * height).toFixed(2)}`;
+  }).join(" ");
+}
+
+function easePreviewSampleValues(
+  ease: SelectItemEase,
+  map: (time: number, progress: number) => number,
+) {
+  const segments = 80;
+  const values = Array.from({ length: segments + 1 }, (_, index) => {
+    const time = index / segments;
+    return map(time, easePreviewProgress(time, ease)).toFixed(2);
+  });
+  return [...values, values[values.length - 1]].join(";");
+}
+
+function easePreviewKeyTimes() {
+  const segments = 80;
+  const keyTimes = Array.from({ length: segments + 1 }, (_, index) =>
+    ((index / segments) * easePreviewMotionPortion).toFixed(3),
+  );
+  return [...keyTimes, "1.000"].join(";");
+}
+
 export const SelectItem = forwardRef<
   ElementRef<typeof SelectPrimitive.Item>,
-  ComponentPropsWithoutRef<typeof SelectPrimitive.Item>
->(({ className, children, ...props }, ref) => (
-  <SelectPrimitive.Item
-    ref={ref}
-    className={cn(
-      "relative flex w-full cursor-pointer select-none items-center rounded-[7px] py-1.5 pl-7 pr-2 text-xs font-semibold outline-none transition focus:bg-[#20232c] focus:text-white data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+  SelectItemProps
+>(
+  (
+    {
       className,
-    )}
-    {...props}
-  >
-    <span className="absolute left-2 flex size-4 items-center justify-center">
-      <SelectPrimitive.ItemIndicator>
-        <Check className="size-4 text-[var(--clipper-accent)]" />
-      </SelectPrimitive.ItemIndicator>
-    </span>
-    <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
-  </SelectPrimitive.Item>
-));
+      children,
+      variant = "default",
+      ease,
+      previewLabel,
+      value,
+      onPointerEnter,
+      onPointerLeave,
+      onPointerDown,
+      ...props
+    },
+    ref,
+  ) => {
+    const [previewOpen, setPreviewOpen] = useState(false);
+    const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const previewEase =
+      variant === "ease" ? (ease ?? selectItemEaseFromValue(value)) : null;
+    const label =
+      previewLabel ?? (typeof children === "string" ? children : value);
+    const preview = useMemo(() => {
+      if (!previewEase) return null;
+      const graphKeyTimes = easePreviewKeyTimes();
+      return {
+        path: easePreviewPath(previewEase),
+        graphKeyTimes,
+        graphXValues: easePreviewSampleValues(
+          previewEase,
+          (time) => time * 132,
+        ),
+        graphYValues: easePreviewSampleValues(
+          previewEase,
+          (_time, progress) => (1 - progress) * 72,
+        ),
+        railXValues: easePreviewSampleValues(
+          previewEase,
+          (_time, progress) => 6 + progress * 142,
+        ),
+      };
+    }, [previewEase]);
+
+    function clearPreviewTimer() {
+      if (!previewTimerRef.current) return;
+      clearTimeout(previewTimerRef.current);
+      previewTimerRef.current = null;
+    }
+
+    function openPreviewAfterDelay() {
+      if (!preview) return;
+      clearPreviewTimer();
+      if (Date.now() - lastEasePreviewOpenTime <= easePreviewSkipDelayMs) {
+        setPreviewOpen(true);
+        lastEasePreviewOpenTime = Date.now();
+        return;
+      }
+
+      previewTimerRef.current = setTimeout(() => {
+        setPreviewOpen(true);
+        lastEasePreviewOpenTime = Date.now();
+        previewTimerRef.current = null;
+      }, easePreviewHoverDelayMs);
+    }
+
+    function closePreview() {
+      clearPreviewTimer();
+      setPreviewOpen(false);
+    }
+
+    useEffect(() => closePreview, []);
+
+    const item = (
+      <SelectPrimitive.Item
+        ref={ref}
+        className={cn(
+          "relative flex w-full cursor-pointer select-none items-center rounded-[7px] py-1.5 pl-7 pr-2 text-xs font-semibold outline-none transition focus:bg-[#20232c] focus:text-white data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+          className,
+        )}
+        value={value}
+        onPointerEnter={(event) => {
+          onPointerEnter?.(event);
+          if (!event.defaultPrevented) openPreviewAfterDelay();
+        }}
+        onPointerLeave={(event) => {
+          onPointerLeave?.(event);
+          closePreview();
+        }}
+        onPointerDown={(event) => {
+          onPointerDown?.(event);
+          closePreview();
+        }}
+        {...props}
+      >
+        <span className="absolute left-2 flex size-4 items-center justify-center">
+          <SelectPrimitive.ItemIndicator>
+            <Check className="size-4 text-[var(--clipper-accent)]" />
+          </SelectPrimitive.ItemIndicator>
+        </span>
+        <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
+      </SelectPrimitive.Item>
+    );
+
+    if (!preview || variant !== "ease") return item;
+
+    return (
+      <Tooltip open={previewOpen}>
+        <TooltipTrigger asChild>{item}</TooltipTrigger>
+        <TooltipContent
+          side="right"
+          align="center"
+          sideOffset={16}
+          className="w-[190px] max-w-none overflow-hidden rounded-[8px] border-[#343946] bg-[#10131a] p-0 shadow-[0_22px_70px_rgba(0,0,0,0.54)] data-[state=instant-open]:animate-[clipper-tooltip-in_160ms_cubic-bezier(0.16,1,0.3,1)_forwards]"
+        >
+          <div className="border-b border-[#252a35] bg-[radial-gradient(circle_at_72%_0%,rgb(var(--clipper-accent-rgb)/0.18),transparent_42%),linear-gradient(180deg,#171b24,#10131a)] px-3 py-2">
+            <strong className="block text-[11px] font-extrabold text-white">
+              {label}
+            </strong>
+            <span className="mt-0.5 block text-[10px] font-medium text-[#8d94a3]">
+              Timing preview
+            </span>
+          </div>
+          <div className="grid gap-3 px-3 py-3">
+            <svg
+              viewBox="0 0 132 72"
+              className="h-[82px] w-full overflow-visible"
+              aria-hidden="true"
+            >
+              <path
+                d="M 0 72 L 132 0"
+                stroke="#2d3340"
+                strokeDasharray="3 5"
+                strokeWidth="1.2"
+              />
+              <path
+                d="M 0 72 L 0 0 M 0 72 L 132 72"
+                stroke="#3a404c"
+                strokeWidth="1"
+              />
+              <path
+                d={preview.path}
+                fill="none"
+                stroke="var(--clipper-accent)"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="3"
+              />
+              <circle
+                r="4.5"
+                fill="#37d6c2"
+                filter="drop-shadow(0 0 8px rgba(55,214,194,0.75))"
+              >
+                <animate
+                  attributeName="cx"
+                  dur={easePreviewDuration}
+                  repeatCount="indefinite"
+                  keyTimes={preview.graphKeyTimes}
+                  values={preview.graphXValues}
+                />
+                <animate
+                  attributeName="cy"
+                  dur={easePreviewDuration}
+                  repeatCount="indefinite"
+                  keyTimes={preview.graphKeyTimes}
+                  values={preview.graphYValues}
+                />
+              </circle>
+            </svg>
+            <svg
+              viewBox="0 0 154 12"
+              className="h-3 w-full overflow-visible"
+              aria-hidden="true"
+            >
+              <line
+                x1="6"
+                y1="6"
+                x2="148"
+                y2="6"
+                stroke="#252a35"
+                strokeLinecap="round"
+                strokeWidth="4"
+              />
+              <circle
+                cx="6"
+                cy="6"
+                r="6"
+                fill="var(--clipper-accent)"
+                filter="drop-shadow(0 0 10px rgb(var(--clipper-accent-rgb)/0.45))"
+              >
+                <animate
+                  attributeName="cx"
+                  dur={easePreviewDuration}
+                  repeatCount="indefinite"
+                  keyTimes={preview.graphKeyTimes}
+                  values={preview.railXValues}
+                />
+              </circle>
+            </svg>
+          </div>
+        </TooltipContent>
+      </Tooltip>
+    );
+  },
+);
 SelectItem.displayName = SelectPrimitive.Item.displayName;

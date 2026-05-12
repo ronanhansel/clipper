@@ -5594,8 +5594,7 @@ export const DirectTimelinePanel = memo(function DirectTimelinePanel({
 
 function isCompositionDragText(value: string) {
   return (
-    value.includes(".composition.ts") ||
-    value.includes(".composition.json")
+    value.includes(".composition.ts") || value.includes(".composition.json")
   );
 }
 

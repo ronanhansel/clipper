@@ -9,7 +9,7 @@ import {
   Trash2,
   Underline,
 } from "lucide-react";
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import {
   MAX_PART_DURATION_SECONDS,
   FRAME_HEIGHT,
@@ -64,12 +64,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../ui/select";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "../ui/tooltip";
+import { TooltipProvider } from "../ui/tooltip";
 import { Textarea } from "../ui/textarea";
 import {
   ColorSelector,
@@ -82,6 +77,11 @@ import { Coordinate2DField, PickButton } from "./Coordinate2DField";
 import { EffectControls } from "./EffectControls";
 import { GraphParameterEditor } from "../timeline/GraphParameterEditor";
 import {
+  defaultMotionEaseSelectValue,
+  EaseSelectItems,
+  motionEaseSelectValue,
+} from "../timeline/EaseSelectItems";
+import {
   buildGraphNodes,
   getSelectedComposition2dLayerGraph,
   getGraphNodeParameterEditorSchema,
@@ -91,32 +91,6 @@ import {
 const defaultFontFamily =
   "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
 const defaultFontOption = { value: defaultFontFamily, label: "System" };
-const defaultMotionEaseSelectValue = "default";
-const easePreviewHoverDelayMs = 600;
-const easePreviewSkipDelayMs = 900;
-const easePreviewDuration = "1.85s";
-const easePreviewMotionPortion = 0.78;
-const easePreviewItems = [
-  {
-    value: defaultMotionEaseSelectValue,
-    label: "Ease in-out",
-    ease: "easeInOut" as const,
-  },
-  { value: "linear", label: "Linear", ease: "linear" as const },
-  { value: "easeIn", label: "Ease in", ease: "easeIn" as const },
-  { value: "easeOut", label: "Ease out", ease: "easeOut" as const },
-  { value: "inAndOut", label: "In and out", ease: "inAndOut" as const },
-  { value: "expoIn", label: "Expo in", ease: "expoIn" as const },
-  { value: "expoOut", label: "Expo out", ease: "expoOut" as const },
-  { value: "circOut", label: "Circ out", ease: "circOut" as const },
-  { value: "backOut", label: "Back out", ease: "backOut" as const },
-];
-const explicitEasePreviewItems = easePreviewItems.map((item) =>
-  item.ease === "easeInOut" ? { ...item, value: "easeInOut" } : item,
-);
-
-let lastEasePreviewOpenTime = 0;
-
 type FontOption = { value: string; label: string };
 
 let cachedSystemFontOptions: FontOption[] | null = null;
@@ -144,252 +118,6 @@ function formatFontValueLabel(value: string) {
       .split(",")[0]
       ?.trim()
       .replace(/^['"]|['"]$/g, "") || value
-  );
-}
-
-function motionEaseSelectValue(ease: MotionEase | undefined, explicit = false) {
-  if (explicit) return ease ?? "";
-  return ease && ease !== "easeInOut" ? ease : defaultMotionEaseSelectValue;
-}
-
-function easePreviewProgress(value: number, ease: MotionEase) {
-  if (ease === "easeOut" || ease === "circOut")
-    return 1 - Math.pow(1 - value, 3);
-  if (ease === "easeIn") return value * value * value;
-  if (ease === "easeInOut")
-    return value < 0.5
-      ? 4 * value * value * value
-      : 1 - Math.pow(-2 * value + 2, 3) / 2;
-  if (ease === "inAndOut") return inAndOutEase(value);
-  if (ease === "expoIn") {
-    if (value <= 0) return 0;
-    return Math.pow(2, 10 * value - 10);
-  }
-  if (ease === "expoOut") {
-    if (value >= 1) return 1;
-    return 1 - Math.pow(2, -10 * value);
-  }
-  if (ease === "backOut")
-    return (
-      1 + 2.70158 * Math.pow(value - 1, 3) + 1.70158 * Math.pow(value - 1, 2)
-    );
-  return value;
-}
-
-function inAndOutEase(value: number) {
-  if (value <= 0) return 0;
-  if (value >= 1) return 1;
-  return value < 0.5
-    ? Math.pow(2, 20 * value - 10) / 2
-    : (2 - Math.pow(2, -20 * value + 10)) / 2;
-}
-
-function easePreviewPath(ease: MotionEase) {
-  const width = 132;
-  const height = 72;
-  const segments = 96;
-  return Array.from({ length: segments + 1 }, (_, index) => {
-    const x = index / segments;
-    const y = 1 - easePreviewProgress(x, ease);
-    return `${index === 0 ? "M" : "L"} ${(x * width).toFixed(2)} ${(y * height).toFixed(2)}`;
-  }).join(" ");
-}
-
-function easePreviewSampleValues(
-  ease: MotionEase,
-  map: (time: number, progress: number) => number,
-) {
-  const segments = 80;
-  const values = Array.from({ length: segments + 1 }, (_, index) => {
-    const time = index / segments;
-    return map(time, easePreviewProgress(time, ease)).toFixed(2);
-  });
-  return [...values, values[values.length - 1]].join(";");
-}
-
-function easePreviewKeyTimes() {
-  const segments = 80;
-  const keyTimes = Array.from({ length: segments + 1 }, (_, index) =>
-    ((index / segments) * easePreviewMotionPortion).toFixed(3),
-  );
-  return [...keyTimes, "1.000"].join(";");
-}
-
-function EaseSelectItem({
-  value,
-  label,
-  ease,
-}: {
-  value: string;
-  label: string;
-  ease: MotionEase;
-}) {
-  const [previewOpen, setPreviewOpen] = useState(false);
-  const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const path = easePreviewPath(ease);
-  const graphKeyTimes = easePreviewKeyTimes();
-  const graphXValues = easePreviewSampleValues(ease, (time) => time * 132);
-  const graphYValues = easePreviewSampleValues(
-    ease,
-    (_time, progress) => (1 - progress) * 72,
-  );
-  const railXValues = easePreviewSampleValues(
-    ease,
-    (_time, progress) => 6 + progress * 142,
-  );
-
-  function clearPreviewTimer() {
-    if (!previewTimerRef.current) return;
-    clearTimeout(previewTimerRef.current);
-    previewTimerRef.current = null;
-  }
-
-  function openPreviewAfterDelay() {
-    clearPreviewTimer();
-    if (Date.now() - lastEasePreviewOpenTime <= easePreviewSkipDelayMs) {
-      setPreviewOpen(true);
-      lastEasePreviewOpenTime = Date.now();
-      return;
-    }
-
-    previewTimerRef.current = setTimeout(() => {
-      setPreviewOpen(true);
-      lastEasePreviewOpenTime = Date.now();
-      previewTimerRef.current = null;
-    }, easePreviewHoverDelayMs);
-  }
-
-  function closePreview() {
-    clearPreviewTimer();
-    setPreviewOpen(false);
-  }
-
-  useEffect(() => closePreview, []);
-
-  return (
-    <Tooltip open={previewOpen}>
-      <TooltipTrigger asChild>
-        <SelectItem
-          value={value}
-          onPointerEnter={openPreviewAfterDelay}
-          onPointerLeave={closePreview}
-          onPointerDown={closePreview}
-        >
-          {label}
-        </SelectItem>
-      </TooltipTrigger>
-      <TooltipContent
-        side="right"
-        align="center"
-        sideOffset={16}
-        className="w-[190px] max-w-none overflow-hidden rounded-[8px] border-[#343946] bg-[#10131a] p-0 shadow-[0_22px_70px_rgba(0,0,0,0.54)] data-[state=instant-open]:animate-[clipper-tooltip-in_160ms_cubic-bezier(0.16,1,0.3,1)_forwards]"
-      >
-        <div className="border-b border-[#252a35] bg-[radial-gradient(circle_at_72%_0%,rgb(var(--clipper-accent-rgb)/0.18),transparent_42%),linear-gradient(180deg,#171b24,#10131a)] px-3 py-2">
-          <strong className="block text-[11px] font-extrabold text-white">
-            {label}
-          </strong>
-          <span className="mt-0.5 block text-[10px] font-medium text-[#8d94a3]">
-            Timing preview
-          </span>
-        </div>
-        <div className="grid gap-3 px-3 py-3">
-          <svg
-            viewBox="0 0 132 72"
-            className="h-[82px] w-full overflow-visible"
-            aria-hidden="true"
-          >
-            <path
-              d="M 0 72 L 132 0"
-              stroke="#2d3340"
-              strokeDasharray="3 5"
-              strokeWidth="1.2"
-            />
-            <path
-              d="M 0 72 L 0 0 M 0 72 L 132 72"
-              stroke="#3a404c"
-              strokeWidth="1"
-            />
-            <path
-              d={path}
-              fill="none"
-              stroke="var(--clipper-accent)"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth="3"
-            />
-            <circle
-              r="4.5"
-              fill="#37d6c2"
-              filter="drop-shadow(0 0 8px rgba(55,214,194,0.75))"
-            >
-              <animate
-                attributeName="cx"
-                dur={easePreviewDuration}
-                repeatCount="indefinite"
-                keyTimes={graphKeyTimes}
-                values={graphXValues}
-              />
-              <animate
-                attributeName="cy"
-                dur={easePreviewDuration}
-                repeatCount="indefinite"
-                keyTimes={graphKeyTimes}
-                values={graphYValues}
-              />
-            </circle>
-          </svg>
-          <svg
-            viewBox="0 0 154 12"
-            className="h-3 w-full overflow-visible"
-            aria-hidden="true"
-          >
-            <line
-              x1="6"
-              y1="6"
-              x2="148"
-              y2="6"
-              stroke="#252a35"
-              strokeLinecap="round"
-              strokeWidth="4"
-            />
-            <circle
-              cx="6"
-              cy="6"
-              r="6"
-              fill="var(--clipper-accent)"
-              filter="drop-shadow(0 0 10px rgb(var(--clipper-accent-rgb)/0.45))"
-            >
-              <animate
-                attributeName="cx"
-                dur={easePreviewDuration}
-                repeatCount="indefinite"
-                keyTimes={graphKeyTimes}
-                values={railXValues}
-              />
-            </circle>
-          </svg>
-        </div>
-      </TooltipContent>
-    </Tooltip>
-  );
-}
-
-function EaseSelectItems({
-  includeLinear = true,
-  defaultInOut = false,
-}: {
-  includeLinear?: boolean;
-  defaultInOut?: boolean;
-}) {
-  const items = defaultInOut ? easePreviewItems : explicitEasePreviewItems;
-  return (
-    <>
-      {items
-        .filter((item) => includeLinear || item.value !== "linear")
-        .map((item) => (
-          <EaseSelectItem key={item.value} {...item} />
-        ))}
-    </>
   );
 }
 

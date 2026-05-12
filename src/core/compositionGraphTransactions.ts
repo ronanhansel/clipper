@@ -165,19 +165,16 @@ export function preserveNewerCompositionGraphTransactions(
   const preserveComposition = (composition: CompositionClip) => {
     const currentComposition = findCurrentComposition(composition);
     if (!currentComposition) return composition;
-    return (["composition2d"] as const).reduce(
-      (nextComposition, mode) => {
-        const currentGraph = getCompositionGraph(currentComposition, mode);
-        const nextGraph = getCompositionGraph(nextComposition, mode);
-        if (
-          getCompositionGraphRevision(currentGraph) <=
-          getCompositionGraphRevision(nextGraph)
-        )
-          return nextComposition;
-        return setCompositionGraph(nextComposition, mode, currentGraph!);
-      },
-      composition,
-    );
+    return (["composition2d"] as const).reduce((nextComposition, mode) => {
+      const currentGraph = getCompositionGraph(currentComposition, mode);
+      const nextGraph = getCompositionGraph(nextComposition, mode);
+      if (
+        getCompositionGraphRevision(currentGraph) <=
+        getCompositionGraphRevision(nextGraph)
+      )
+        return nextComposition;
+      return setCompositionGraph(nextComposition, mode, currentGraph!);
+    }, composition);
   };
 
   return {

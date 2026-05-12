@@ -9,6 +9,8 @@ import {
 } from "../ui/select";
 import { Input } from "../ui/input";
 import { ColorSelector } from "../ColorSelector";
+import { EaseSelectItems } from "./EaseSelectItems";
+import { TooltipProvider } from "../ui/tooltip";
 
 export type GraphParameterEditorField = {
   key: string;
@@ -715,13 +717,19 @@ function GraphParameterSelectField({
         <SelectValue />
       </SelectTrigger>
       <SelectContent className="z-[6000]">
-        <SelectGroup>
-          {field.options?.map((option) => (
-            <SelectItem key={option.value} value={option.value}>
-              {option.label}
-            </SelectItem>
-          ))}
-        </SelectGroup>
+        <TooltipProvider delayDuration={1000} skipDelayDuration={0}>
+          <SelectGroup>
+            {field.key === "ease" ? (
+              <EaseSelectItems />
+            ) : (
+              field.options?.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))
+            )}
+          </SelectGroup>
+        </TooltipProvider>
       </SelectContent>
     </Select>
   );

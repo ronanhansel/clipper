@@ -627,6 +627,7 @@ export function createEditorStore(project: ProjectManifest) {
           : editorState.selectedMotionMarker
             ? [editorState.selectedMotionMarker]
             : [],
+        selectedComposeObjectIds: editorState.selectedComposeObjectIds ?? [],
         selectedObjectId: null,
         editingTextObjectId: null,
         selectedAdjustmentLayerId: null,

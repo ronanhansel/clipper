@@ -217,11 +217,39 @@ describe("project normalization", () => {
         "source:text": { kind: "source", config: { objectId: "text" } },
         "composition2d:out": { kind: "out", config: {} },
       },
-      edges: [],
+      edges: [
+        {
+          id: "source:text:out->composition2d:out:in",
+          from: { nodeId: "source:text", portId: "out" },
+          to: { nodeId: "composition2d:out", portId: "in" },
+        },
+      ],
     });
     expect(graph?.customNodes).toBeUndefined();
     expect(graph?.parameters).toBeUndefined();
     expect(graph?.layers).toBeUndefined();
+  });
+
+  it("keeps objects visible with the default strict composition2d graph", () => {
+    const object = {
+      id: "text",
+      name: "Text",
+      type: "text" as const,
+      selector: "[data-object-id='text']",
+      bounds: { x: 0, y: 0, width: 100, height: 40 },
+      style: {},
+    };
+    const project = normalizeProject({
+      ...projectWithComposition(),
+      compositions: [{ ...composition, objects: [object] }],
+    });
+    const normalizedComposition = project.compositions?.[0];
+    const applied = applyAnimationGraphToComposition(
+      normalizedComposition,
+      normalizedComposition.animationGraph,
+    );
+
+    expect(applied.objects[0].hidden).toBeUndefined();
   });
 
   it("normalizes timeline clips and composition documents", () => {
@@ -1133,6 +1161,70 @@ describe("project normalization", () => {
       "effect->out",
     ]);
     expect(loaded.objects[0].animations).toBeUndefined();
+  });
+
+  it("round trips strict source to scale to out graph through composition source", async () => {
+    const strictGraph = {
+      id: "graph:text",
+      sourceObjectId: "text",
+      nodes: {
+        "source:text": {
+          id: "source:text",
+          kind: "source",
+          position: { x: 2, y: 2 },
+          config: { objectId: "text" },
+        },
+        scale: {
+          id: "scale",
+          kind: "effect:clipper.motion.zoom",
+          position: { x: 10, y: 2 },
+          config: {
+            effectId: "clipper.motion.zoom",
+            params: { scale: 1.4 },
+          },
+        },
+        "composition2d:out": {
+          id: "composition2d:out",
+          kind: "out",
+          position: { x: 18, y: 2 },
+          config: {},
+        },
+      },
+      edges: [
+        {
+          id: "source:text:out->scale:in",
+          from: { nodeId: "source:text", portId: "out" },
+          to: { nodeId: "scale", portId: "in" },
+        },
+        {
+          id: "scale:out->composition2d:out:in",
+          from: { nodeId: "scale", portId: "out" },
+          to: { nodeId: "composition2d:out", portId: "in" },
+        },
+      ],
+    };
+    const source = compositionToSource({
+      ...composition,
+      animationGraph: strictGraph,
+      objects: [
+        {
+          id: "text",
+          name: "Text",
+          type: "text",
+          selector: ".text",
+          bounds: { x: 0, y: 0, width: 100, height: 40 },
+          style: {},
+        },
+      ],
+    });
+
+    const loaded = await compositionFromSource(composition, source);
+
+    expect(source).toContain('"effect:clipper.motion.zoom"');
+    expect(loaded.animationGraph).toEqual(strictGraph);
+    expect(JSON.stringify(loaded.animationGraph)).not.toMatch(
+      /fromNodeId|fromPort|toNodeId|toPort|customNodes|parameters|groups|layers/,
+    );
   });
 
   it("ignores legacy timeline clip effect graph state", () => {

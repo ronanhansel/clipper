@@ -180,7 +180,6 @@ export function TimelinePanel(props: TimelinePanelProps) {
 
 function isCompositionDragText(value: string) {
   return (
-    value.includes(".composition.ts") ||
-    value.includes(".composition.json")
+    value.includes(".composition.ts") || value.includes(".composition.json")
   );
 }
