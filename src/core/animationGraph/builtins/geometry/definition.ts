@@ -154,6 +154,7 @@ function primitive(
     kind,
     label,
     category: "control",
+    menuPath: `Geometry:Primitives:${label}`,
     controls: [
       {
         id: "geometry",
@@ -221,15 +222,19 @@ function transform(
     },
   ) => GeometryPoint,
 ): AnimationGraphNodeDefinition {
-  return pipe(kind, label, (input, config, context) =>
-    mapGeometry(input, (point, index, count, stream) =>
-      mapPoint(
-        point,
-        config,
-        pointItem(point, index, count, stream, context),
-        stream,
+  return pipe(
+    kind,
+    label,
+    (input, config, context) =>
+      mapGeometry(input, (point, index, count, stream) =>
+        mapPoint(
+          point,
+          config,
+          pointItem(point, index, count, stream, context),
+          stream,
+        ),
       ),
-    ),
+    `Geometry:Transform:${label}`,
   );
 }
 
@@ -238,12 +243,16 @@ function pathOp(
   label: string,
   mapPath: (path: GeometryPath, config: GeometryConfig) => GeometryPath,
 ): AnimationGraphNodeDefinition {
-  return pipe(kind, label, (input, config) =>
-    mapGeometry(
-      input,
-      (_point) => _point,
-      (path) => mapPath(path, config),
-    ),
+  return pipe(
+    kind,
+    label,
+    (input, config) =>
+      mapGeometry(
+        input,
+        (_point) => _point,
+        (path) => mapPath(path, config),
+      ),
+    `Geometry:Path:${label}`,
   );
 }
 
@@ -257,11 +266,13 @@ function pipe(
     config: GeometryConfig,
     context: CompileContext,
   ) => GeneratedGeometry,
+  menuPath?: string,
 ): AnimationGraphNodeDefinition {
   return {
     kind,
     label,
     category: "control",
+    menuPath,
     getPorts: () => [
       animationInputPort("in", "In", geometryKinds),
       animationOutputPort("out", "Out", geometryKinds),
@@ -304,12 +315,14 @@ const pointsOnPathDefinition = pipe(
     );
     return group(paths.map((path) => ({ type: "shape", paths: [path] })));
   },
+  "Geometry:Points:Points On Path",
 );
 
 const instanceDefinition: AnimationGraphNodeDefinition = {
   kind: "geometry:instanceOnPoints",
   label: "Instance On Points",
   category: "control",
+  menuPath: "Geometry:Points:Instance On Points",
   getPorts: () => [
     animationInputPort("shape", "Shape", geometryKinds),
     animationInputPort("points", "Points", geometryKinds),
@@ -379,6 +392,7 @@ const collectDefinition: AnimationGraphNodeDefinition = {
   kind: "geometry:collect",
   label: "Collect Geometry",
   category: "control",
+  menuPath: "Geometry:Collection:Collect Geometry",
   getPorts: () => [
     animationInputPort("in", "In", geometryKinds, undefined, "multi"),
     animationOutputPort("out", "Out", geometryKinds),
@@ -432,8 +446,18 @@ export const geometryNodeDefinitions: AnimationGraphNodeDefinition[] = [
   pointsOnPathDefinition,
   instanceDefinition,
   collectDefinition,
-  { ...collectDefinition, kind: "geometry:merge", label: "Merge Geometry" },
-  { ...collectDefinition, kind: "geometry:group", label: "Group Geometry" },
+  {
+    ...collectDefinition,
+    kind: "geometry:merge",
+    label: "Merge Geometry",
+    menuPath: "Geometry:Collection:Merge Geometry",
+  },
+  {
+    ...collectDefinition,
+    kind: "geometry:group",
+    label: "Group Geometry",
+    menuPath: "Geometry:Collection:Group Geometry",
+  },
 ];
 
 function rectangle(config: GeometryConfig): GeometryShape {

@@ -451,6 +451,7 @@ export type AnimationGraphNodeDefinition = {
   kind: string;
   label: string;
   category: "control" | "value" | "effect";
+  menuPath?: string;
   controls?: readonly AnimationGraphControlGroup[];
   getPorts(node: AnimationGraphNode): GraphPortDefinition[];
   createDefaultConfig(context: NodeCreationContext): unknown;

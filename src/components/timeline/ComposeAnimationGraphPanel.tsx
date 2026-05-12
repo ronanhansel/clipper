@@ -71,6 +71,12 @@ import type {
   TypedAnimationGraphState,
 } from "../../core/types";
 import { AppContextMenu } from "../AppContextMenu";
+import {
+  buildPathMenuTree,
+  createPathContextMenuChildren,
+  createPathContextMenuItems,
+  type PathMenuNode,
+} from "../ui/pathContextMenu";
 import type { TimelineViewportState } from "../../core/types";
 import type { GraphParameterEditorSchema } from "./GraphParameterEditor";
 import {
@@ -245,6 +251,7 @@ const portGap = 7;
 const strictPortSize = 8;
 const connectorHoverRadius = 26;
 const connectorHitRadius = 16;
+const edgeControlHitRadius = 14;
 const marqueeThreshold = 4;
 const nodeColors = {
   animationBg: "#382234",
@@ -355,28 +362,34 @@ const conditionParameterDefaults = {
 
 const hiddenAddNodeKinds = new Set(["source", "out", "macro"]);
 
+type StrictGraphNodeMenuItem = { kind: string; label: string };
+type StrictGraphNodeMenuGroup = PathMenuNode<StrictGraphNodeMenuItem>;
+
 export function getStrictGraphNodeMenuGroups() {
-  const groups = new Map<
-    string,
-    { label: string; nodes: Array<{ kind: string; label: string }> }
-  >();
-  for (const definition of getAnimationGraphNodeDefinitions()) {
-    if (hiddenAddNodeKinds.has(definition.kind)) continue;
-    if (!isCanvasSupportedStrictNodeKind(definition.kind)) continue;
-    const label = formatGraphNodeCategoryLabel(definition);
-    const group = groups.get(label) ?? { label, nodes: [] };
-    group.nodes.push({ kind: definition.kind, label: definition.label });
-    groups.set(label, group);
-  }
-  return Array.from(groups.values()).map((group) => ({
-    ...group,
-    nodes: group.nodes.sort((left, right) =>
-      left.label.localeCompare(right.label),
-    ),
-  }));
+  return buildPathMenuTree(
+    getAnimationGraphNodeDefinitions()
+      .filter((definition) => !hiddenAddNodeKinds.has(definition.kind))
+      .filter((definition) => isCanvasSupportedStrictNodeKind(definition.kind))
+      .map((definition) => ({
+        path: getStrictGraphNodeMenuPath(definition),
+        value: { kind: definition.kind, label: definition.label },
+      })),
+  );
 }
 
-function formatGraphNodeCategoryLabel(definition: {
+function getStrictGraphNodeMenuPath(definition: {
+  label: string;
+  category: string;
+  kind: string;
+  menuPath?: string;
+}) {
+  return (
+    definition.menuPath ??
+    `${getGraphNodeMenuRootLabel(definition)}:${definition.label}`
+  );
+}
+
+function getGraphNodeMenuRootLabel(definition: {
   category: string;
   kind: string;
 }) {
@@ -406,6 +419,12 @@ function updateGraphHoverState(
   edges: AnimationGraphEdge[],
 ) {
   const hoveredNode = hitNode(point, nodes, scale);
+  const edge = hoveredNode ? null : hitEdge(point, edges, nodes, scale);
+  if (edge) {
+    setHover(null, null);
+    setHoverEdge(edge.id);
+    return;
+  }
   const connectorNode =
     hoveredNode ?? hitNodeLoose(point, nodes, scale) ?? null;
   const connector = hoveredNode
@@ -414,9 +433,7 @@ function updateGraphHoverState(
       ? getNodeHoverConnector(point, connectorNode, scale, edges)
       : null;
   setHover(hoveredNode?.id ?? null, connector);
-  setHoverEdge(
-    connector ? null : (hitEdge(point, edges, nodes, scale)?.id ?? null),
-  );
+  setHoverEdge(null);
 }
 
 function clearGraphDragState(
@@ -1901,10 +1918,9 @@ export const ComposeAnimationGraphPanel = memo(
                     : []),
                   ...getStrictGraphNodeMenuGroups().map((group) => ({
                     label: group.label,
-                    children: group.nodes.map((node) => ({
-                      label: node.label,
-                      action: () => addStrictGraphNode(node.kind, node.label),
-                    })),
+                    children: createPathContextMenuChildren(group, (node) =>
+                      addStrictGraphNode(node.kind, node.label),
+                    ),
                   })),
                 ];
       setContextMenu({
@@ -5339,6 +5355,7 @@ export function getGraphPointerDownConnector(
   edges: readonly AnimationGraphEdge[] = [],
 ): HoverConnector | null {
   if (hitNode(point, nodes, scale)) return null;
+  if (hitEdge(point, edges as RenderableGraphEdge[], nodes, scale)) return null;
   return (
     getActiveHoverConnector(point, nodes, scale, preferred, edges) ??
     hitHoverConnector(point, nodes, scale, preferred, edges)
@@ -5400,16 +5417,20 @@ function hitEdge(
   scale = 1,
 ) {
   const graphPoint = { x: point.x / scale, y: point.y / scale };
+  const mode = getGraphCompositionMode(nodes);
   for (const edge of edges) {
     const from = nodes.find(
       (node) => node.id === getEditorEdgeFromNodeId(edge),
     );
     const to = nodes.find((node) => node.id === getEditorEdgeToNodeId(edge));
     if (!from || !to) continue;
-    const start = nodeCenter(from);
-    const end = nodeCenter(to);
+    const start = getEdgeEndpointPoint(from, edge, "from", edges, mode);
+    const end = getEdgeEndpointPoint(to, edge, "to", edges, mode);
     const control = getEdgeControlPoint(start, end);
-    if (Math.hypot(graphPoint.x - control.x, graphPoint.y - control.y) <= 14)
+    if (
+      Math.hypot(graphPoint.x - control.x, graphPoint.y - control.y) <=
+      edgeControlHitRadius
+    )
       return edge;
   }
   return null;
@@ -7214,6 +7235,7 @@ function GroupSubgraphPreview({
       nodes,
       graphScaleRef.current,
       hoverConnectorRef.current,
+      displayEdges,
     );
     if (connector) {
       const source = nodes.find((node) => node.id === connector.nodeId);

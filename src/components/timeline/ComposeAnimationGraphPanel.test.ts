@@ -37,6 +37,20 @@ import {
   getAnimationGraphNodeDefinitions,
 } from "../../core/animationGraph/registry";
 
+type GraphMenuTestGroup = {
+  entries: readonly { value: { kind: string } }[];
+  children?: readonly GraphMenuTestGroup[];
+};
+
+function flattenGraphMenuKinds(
+  groups: readonly GraphMenuTestGroup[],
+): string[] {
+  return groups.flatMap((group) => [
+    ...group.entries.map((entry) => entry.value.kind),
+    ...flattenGraphMenuKinds(group.children ?? []),
+  ]);
+}
+
 describe("getGraphContentSize", () => {
   it("keeps the base graph size when nodes fit inside it", () => {
     expect(
@@ -147,11 +161,53 @@ describe("buildGraphNodes", () => {
     });
   });
 
+  it("does not start connector drags from an edge center control", () => {
+    const source = {
+      id: "source",
+      label: "Source",
+      kind: "layer",
+      x: 4,
+      y: 4,
+      width: 6,
+      height: 2,
+    };
+    const out = {
+      id: "out",
+      label: "Out",
+      kind: "out",
+      x: 11,
+      y: 4,
+      width: 3,
+      height: 2,
+    };
+    const edge = {
+      id: "source:out->out:in",
+      from: { nodeId: "source", portId: "out" },
+      to: { nodeId: "out", portId: "in" },
+    } satisfies StrictAnimationGraphEdge;
+    const edgeCenter = {
+      x: ((source.x + source.width) * 18 + out.x * 18) / 2,
+      y: (source.y + source.height / 2) * 18,
+    };
+
+    expect(
+      getGraphPointerDownConnector(edgeCenter, [source, out]),
+    ).toMatchObject({
+      nodeId: "source",
+    });
+    expect(
+      getGraphPointerDownConnector(edgeCenter, [source, out], 1, null, [
+        edge,
+      ] as any),
+    ).toBeNull();
+  });
+
   it("lists addable strict registry nodes in the graph menu", () => {
     const menuKinds = new Set(
-      getStrictGraphNodeMenuGroups().flatMap((group) =>
-        group.nodes.map((node) => node.kind),
-      ),
+      getStrictGraphNodeMenuGroups().flatMap((group) => [
+        ...group.entries.map((entry) => entry.value.kind),
+        ...flattenGraphMenuKinds(group.children),
+      ]),
     );
     const expectedKinds = getAnimationGraphNodeDefinitions()
       .map((definition) => definition.kind)
@@ -170,6 +226,29 @@ describe("buildGraphNodes", () => {
     expect(menuKinds).toContain("effect:clipper.motion.zoom");
     expect(menuKinds).not.toContain("source");
     expect(menuKinds).not.toContain("out");
+  });
+
+  it("nests value and geometry graph menu nodes into subgroups", () => {
+    const groups = getStrictGraphNodeMenuGroups();
+    const value = groups.find((group) => group.label === "Value");
+    const geometry = groups.find((group) => group.label === "Geometry");
+
+    expect(value?.children.map((group) => group.label)).toEqual(
+      expect.arrayContaining(["Constants", "Math", "Compare", "Combine"]),
+    );
+    expect(
+      value?.children
+        .find((group) => group.label === "Math")
+        ?.entries.map((entry) => entry.value.kind),
+    ).toContain("value:math:add");
+    expect(geometry?.children.map((group) => group.label)).toEqual(
+      expect.arrayContaining(["Primitives", "Transform", "Path", "Points"]),
+    );
+    expect(
+      geometry?.children
+        .find((group) => group.label === "Primitives")
+        ?.entries.map((entry) => entry.value.kind),
+    ).toContain("geometry:rectangle");
   });
 
   it("sanitizes non-finite strict node positions before canvas layout", () => {

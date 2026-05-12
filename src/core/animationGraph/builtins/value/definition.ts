@@ -43,6 +43,7 @@ export function createValueNodeDefinition(
     kind: spec.kind,
     label: spec.label,
     category: "value",
+    menuPath: `Value:Constants:${spec.label}`,
     controls: [{ id: "value", fields: spec.fields }],
     getPorts: () => [valueOutputPort(spec.valueType)],
     createDefaultConfig: () => ({ value: spec.defaultValue }),
@@ -152,6 +153,7 @@ function createMathNodeDefinition(
     kind: spec.kind,
     label: spec.label,
     category: "value",
+    menuPath: `Value:Math:${spec.label}`,
     controls: [
       {
         id: "math",
@@ -216,6 +218,7 @@ function createCompareNodeDefinition(
     kind,
     label,
     category: "value",
+    menuPath: `Value:Compare:${label}`,
     controls: [
       {
         id: "compare",
@@ -266,6 +269,7 @@ function createCombineVectorNodeDefinition(): AnimationGraphNodeDefinition {
     kind: "value:combine:vector",
     label: "Combine Vector",
     category: "value",
+    menuPath: "Value:Combine:Combine Vector",
     controls: [
       {
         id: "vector",
@@ -319,6 +323,7 @@ function createCombineColorNodeDefinition(): AnimationGraphNodeDefinition {
     kind: "value:combine:color",
     label: "Combine Color",
     category: "value",
+    menuPath: "Value:Combine:Combine Color",
     controls: [
       {
         id: "color",
@@ -395,6 +400,7 @@ function createArrayNodeDefinition(
     kind: `value:combine:${valueType}Array`,
     label: `Combine ${valueType === "number" ? "Number" : "String"} Array`,
     category: "value",
+    menuPath: `Value:Combine:Combine ${valueType === "number" ? "Number" : "String"} Array`,
     controls: [
       {
         id: "array",
@@ -445,6 +451,7 @@ function createRandomNodeDefinition(
     kind,
     label,
     category: "value",
+    menuPath: `Value:Random:${label}`,
     controls: [
       {
         id: "random",
@@ -507,6 +514,7 @@ function passthroughSplit(
     kind,
     label,
     category: "value",
+    menuPath: `Value:Split:${label}`,
     getPorts: () => [
       {
         id: "value",
