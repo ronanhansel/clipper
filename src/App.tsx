@@ -19,6 +19,7 @@ import {
 import { usePresentationController } from "./app/features/presentation/usePresentationController";
 import {
   isEditorTarget,
+  isTextEditingTarget,
   useGlobalEditorShortcuts,
 } from "./app/features/shortcuts/useGlobalEditorShortcuts";
 import { useSettingsShortcut } from "./app/features/shortcuts/useSettingsShortcut";
@@ -608,6 +609,33 @@ function AppContent({
   const [exportWorkerMapping, setExportWorkerMappingState] = useState(
     getInitialExportWorkerMapping,
   );
+
+  useEffect(() => {
+    function blurPointerFocusedControl(event: PointerEvent) {
+      if (event.pointerType === "keyboard") return;
+      const target = event.target as HTMLElement | null;
+      const control = target?.closest(
+        "button, [role='button'], [role='switch'], [role='checkbox'], [role='combobox'], [data-radix-select-trigger]",
+      ) as HTMLElement | null;
+      if (!control || isTextEditingTarget(control)) return;
+      requestAnimationFrame(() => {
+        const active = document.activeElement as HTMLElement | null;
+        if (active && (active === control || control.contains(active)))
+          active.blur();
+      });
+    }
+
+    document.addEventListener("pointerup", blurPointerFocusedControl, true);
+    document.addEventListener("click", blurPointerFocusedControl, true);
+    return () => {
+      document.removeEventListener(
+        "pointerup",
+        blurPointerFocusedControl,
+        true,
+      );
+      document.removeEventListener("click", blurPointerFocusedControl, true);
+    };
+  }, []);
   const [exportWorkerConfigurationMode, setExportWorkerConfigurationModeState] =
     useState<ExportWorkerConfigurationMode>(
       getInitialExportWorkerConfigurationMode,
@@ -2157,6 +2185,7 @@ function AppContent({
         composition?.animationGraph ?? part.animationGraph;
       const nextGraph = updater(getCompositionGraph(fallbackComposition));
       return applyCompositionGraphTransaction(current, {
+        origin: "canvas",
         clipId,
         compositionId: targetCompositionId,
         filePath: targetFilePath,
@@ -2169,14 +2198,12 @@ function AppContent({
         history: options.history !== false,
         syncSources: true,
         historyGroup: `graph:${clipId}:${options?.mode ?? "auto"}`,
-        preserveNewerGraphTransactions: true,
       });
     else
       updateProject(applyUpdate, {
         history: options?.history !== false,
         syncSources: true,
         historyGroup: `graph:${clipId}:${options?.mode ?? "auto"}`,
-        preserveNewerGraphTransactions: true,
       });
   }
 

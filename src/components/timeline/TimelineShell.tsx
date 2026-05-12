@@ -23,6 +23,7 @@ export type TimelineShellRefs = {
   timelineLayerRailRef: RefObject<HTMLDivElement | null>;
   timelineSnapGuideRef: RefObject<HTMLDivElement | null>;
   timelinePanelRef?: RefObject<HTMLElement | null>;
+  scrubbingRef?: RefObject<boolean>;
 };
 
 export type TimelineShellProps = {
@@ -89,6 +90,7 @@ export function TimelineShell({
 }: TimelineShellProps) {
   useLayoutEffect(() => {
     if (disableDeclarativePlayhead) return;
+    if (refs.scrubbingRef?.current) return;
     refs.playbackPlayheadRef.current?.style.setProperty(
       "--clipper-playhead-left",
       `${displayDuration > 0 ? (currentTime / displayDuration) * 100 : 0}%`,

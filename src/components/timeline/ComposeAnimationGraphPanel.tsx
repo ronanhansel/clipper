@@ -140,6 +140,17 @@ type Props = {
   onInspectGraphNode?: (nodeId: string | null) => void;
 };
 
+export function getComposeGraphDisplayTime(
+  sceneTime: number,
+  partStart: number,
+  partDuration: number,
+) {
+  return Math.min(
+    Math.max(sceneTime - partStart, 0),
+    Math.max(partDuration, 0),
+  );
+}
+
 export type GraphNode = {
   id: string;
   label: string;
@@ -802,7 +813,9 @@ export const ComposeAnimationGraphPanel = memo(
     const activationFrameRef = useRef<number | null>(null);
     const currentTimeRef = useRef(currentTime);
     const partRef = useRef<Part | null>(null);
-    const projectGraphRef = useRef<AnimationGraphState | undefined>(undefined);
+    const projectGraphRef = useRef<
+      AnimationGraphState | StrictAnimationGraph | undefined
+    >(undefined);
     const graphRef = useRef<AnimationGraphState | undefined>(undefined);
     const lastKnownGraphRef = useRef<
       AnimationGraphState | StrictAnimationGraph | null
@@ -845,11 +858,16 @@ export const ComposeAnimationGraphPanel = memo(
     const [graphScale, setGraphScale] = useState(1);
     const graphScaleRef = useRef(1);
     const timelineDuration = Math.max(part?.duration ?? 0.1, 0.1);
+    const timelineStart = part?.start ?? 0;
     const ticks = useMemo(
       () => getTimelineTicks(timelineDuration),
       [timelineDuration],
     );
-    const displayCurrentTime = currentTime;
+    const displayCurrentTime = getComposeGraphDisplayTime(
+      currentTime,
+      timelineStart,
+      timelineDuration,
+    );
     const playheadLeft =
       timelineDuration > 0
         ? `${(displayCurrentTime / timelineDuration) * 100}%`
@@ -894,15 +912,22 @@ export const ComposeAnimationGraphPanel = memo(
       lastKnownGraphInstanceKeyRef.current === graphInstanceKey
         ? lastKnownGraphRef.current
         : null;
-    const fullGraph =
-      pendingGraphSyncRef.current ??
-      optimisticGraph ??
-      getGraphWithLastKnownFallback(
-        projectGraph,
-        scopedLastKnownGraph,
-        selectedLayerGraphId,
-        graphMode,
-      );
+    const projectGraphChanged = projectGraphRef.current !== projectGraph;
+    const fullGraph = projectGraphChanged
+      ? getGraphWithLastKnownFallback(
+          projectGraph,
+          null,
+          selectedLayerGraphId,
+          graphMode,
+        )
+      : (pendingGraphSyncRef.current ??
+        optimisticGraph ??
+        getGraphWithLastKnownFallback(
+          projectGraph,
+          scopedLastKnownGraph,
+          selectedLayerGraphId,
+          graphMode,
+        ));
     const graph =
       selectedObjects.length === 1
         ? getSelectedComposition2dDisplayGraph(
@@ -981,6 +1006,14 @@ export const ComposeAnimationGraphPanel = memo(
     useLayoutEffect(() => {
       setOptimisticGraph(null);
       pendingGraphSyncRef.current = null;
+      lastKnownGraphRef.current = projectGraph ?? null;
+      lastKnownGraphInstanceKeyRef.current = graphInstanceKey;
+      projectGraphRef.current = projectGraph;
+    }, [graphInstanceKey, projectGraph]);
+
+    useLayoutEffect(() => {
+      setOptimisticGraph(null);
+      pendingGraphSyncRef.current = null;
       viewInitializedRef.current = false;
       graphScaleRef.current = 1;
       setGraphScale(1);
@@ -1045,34 +1078,41 @@ export const ComposeAnimationGraphPanel = memo(
       [],
     );
 
-    useEffect(() => {
-      if (projectGraphRef.current !== projectGraph) {
-        pendingGraphSyncRef.current = null;
-        setOptimisticGraph(null);
-      }
-      projectGraphRef.current = projectGraph as any;
-    }, [projectGraph]);
-
     useLayoutEffect(() => {
       draw();
     }, [graphCanvasHeight, graphCanvasWidth, graphScale, graphDraftRevision]);
 
     useEffect(() => {
+      const snapshot = getMasterTimelineClockSnapshot();
+      const liveClockTime = getComposeGraphDisplayTime(
+        snapshot.sceneTime,
+        timelineStart,
+        timelineDuration,
+      );
+      if (
+        (snapshot.playing || snapshot.source === "scrub") &&
+        Math.abs(displayCurrentTime - liveClockTime) >= 0.001
+      )
+        return;
       currentTimeRef.current = displayCurrentTime;
       if (active) scheduleDraw();
-    }, [active, displayCurrentTime]);
+    }, [active, displayCurrentTime, timelineDuration, timelineStart]);
 
     useEffect(() => {
       if (!active) return;
       function syncFromMasterClock() {
         const snapshot = getMasterTimelineClockSnapshot();
         if (!snapshot.playing && snapshot.source !== "scrub") return;
-        currentTimeRef.current = snapshot.sceneTime;
+        currentTimeRef.current = getComposeGraphDisplayTime(
+          snapshot.sceneTime,
+          timelineStart,
+          timelineDuration,
+        );
         scheduleDraw();
       }
       syncFromMasterClock();
       return subscribeMasterTimelineClock(syncFromMasterClock);
-    }, [active]);
+    }, [active, timelineDuration, timelineStart]);
 
     useLayoutEffect(() => {
       if (!active) return;
@@ -3648,6 +3688,7 @@ export function buildGraphNodes(
     .filter(
       ([id, node]) =>
         (!visibleTypedNodeIds || visibleTypedNodeIds.has(id)) &&
+        !id.startsWith("expr:") &&
         !derivedNodeIds.has(id) &&
         !customNodeIds.has(id) &&
         id !== composition2dOutNodeId &&
@@ -6118,8 +6159,7 @@ export function getVisibleStrictComposition2dPorts(
   const conditionOutputBusId =
     node.kind === "condition"
       ? (ports.find(
-          (port) =>
-            port.direction === "output" && port.id === "new-output",
+          (port) => port.direction === "output" && port.id === "new-output",
         )?.id ?? null)
       : null;
   const hiddenParameterInputIds = new Set(

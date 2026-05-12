@@ -4964,6 +4964,7 @@ export const DirectTimelinePanel = memo(function DirectTimelinePanel({
         timelineLayerRailRef,
         timelineSnapGuideRef,
         timelinePanelRef,
+        scrubbingRef,
       }}
       timelineName={timelineName}
       timelineZoom={timelineZoom}

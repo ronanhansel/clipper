@@ -362,7 +362,16 @@ export function useTimelineScrubber({
     activeScrubRef.current = null;
     const scrubStarted = scrubStartedRef.current;
     scrubStartedRef.current = false;
-    scrubbingRef.current = false;
+    const finalScrubTime =
+      scrubClientXRef.current !== null
+        ? timeFromClientX(
+            visibleScrubClientX(scrubClientXRef.current),
+            scrubSnapRef.current,
+          )
+        : null;
+    // Final scrub fires while scrubbingRef is still true so
+    // scrubToSceneTime uses the lightweight scrub path instead of
+    // the non-scrubbing path that immediately commits React state.
     if (scrubClientXRef.current !== null)
       updateScrubFromClientX(
         scrubClientXRef.current,
@@ -371,6 +380,10 @@ export function useTimelineScrubber({
         "sync",
       );
     else flushPendingScrubEffect();
+    scrubbingRef.current = false;
+    // Same time as above, now through the non-scrubbing path so
+    // canonical editor state commits after live scrub feedback settles.
+    if (finalScrubTime !== null) onScrub(finalScrubTime);
     latestScrubPreviewTimeRef.current = null;
     onShiftSnapActiveChange?.(false);
     stopScrubAutoScroll();

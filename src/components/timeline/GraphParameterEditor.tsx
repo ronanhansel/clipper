@@ -16,6 +16,7 @@ import {
   isPotentialGraphInputExpression,
   type GraphInputBindingOption,
 } from "../../core/graphParameterBindings";
+import { getGraphMathExpressionAliases } from "../../core/graphInputExpression";
 
 export type GraphParameterEditorField = {
   key: string;
@@ -1053,8 +1054,10 @@ function hasDroppedGraphInput(
 }
 
 function canBindGraphInput(field: GraphParameterEditorField, value: string) {
-  return Boolean(
-    field.bindingOptions?.some((item) => item.expression === value),
+  const aliases = getGraphMathExpressionAliases(value);
+  if (!aliases.length) return isGraphInputExpression(value);
+  return aliases.every((alias) =>
+    field.bindingOptions?.some((item) => item.alias === alias),
   );
 }
 

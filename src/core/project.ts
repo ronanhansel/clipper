@@ -50,7 +50,6 @@ import {
   type AnimationGraphObjectCompileResult,
   type AnimationGraphCompileOptions,
 } from "./animationGraph/compiler";
-import { validateAnimationGraph } from "./animationGraph/validation";
 import type {
   AnimationGraph as StrictAnimationGraph,
   AnimationGraphEdge as StrictAnimationGraphEdge,
@@ -552,18 +551,24 @@ function normalizeStrictAnimationGraph(
       },
     ];
   });
+  const edgeIds = new Set<string>();
+  const edgeEndpoints = new Set<string>();
+  const graphEdges = edges.filter((edge) => {
+    if (!nodes[edge.from.nodeId] || !nodes[edge.to.nodeId]) return false;
+    const endpointKey = `${edge.from.nodeId}:${edge.from.portId}->${edge.to.nodeId}:${edge.to.portId}`;
+    if (edgeIds.has(edge.id) || edgeEndpoints.has(endpointKey)) return false;
+    edgeIds.add(edge.id);
+    edgeEndpoints.add(endpointKey);
+    return true;
+  });
   const normalized = {
     id,
     sourceObjectId,
     nodes,
-    edges,
+    edges: graphEdges,
     viewport: normalizeGraphViewport((graph as { viewport?: any }).viewport),
   };
-  return validateAnimationGraph(normalized).some(
-    (diagnostic) => diagnostic.severity === "error",
-  )
-    ? undefined
-    : normalized;
+  return normalized;
 }
 
 function normalizeGraphPosition(position: unknown) {
@@ -1418,7 +1423,8 @@ function hasGraphObjectOutput(
     compile?.streams.some((stream) =>
       stream.renderObject
         ? stream.renderObject.id === object.id
-        : "objectId" in stream.structure && stream.structure.objectId === object.id,
+        : "objectId" in stream.structure &&
+          stream.structure.objectId === object.id,
     ),
   );
 }

@@ -7,6 +7,7 @@ import type {
 } from "./types";
 import { validateAnimationGraphEdgePorts } from "./portCompatibility";
 import { getAnimationGraphNodeDefinition } from "./registry";
+import { isGraphMathExpression } from "../graphInputExpression";
 
 export function validateAnimationGraph(graph: AnimationGraph) {
   const diagnostics: AnimationGraphDiagnostic[] = [];
@@ -142,7 +143,8 @@ function validateNodeConfig(
       if (value === undefined || value === "") continue;
       if (
         field.type === "number" &&
-        (typeof value !== "number" || !Number.isFinite(value))
+        (typeof value !== "number" || !Number.isFinite(value)) &&
+        (typeof value !== "string" || !isGraphMathExpression(value))
       ) {
         diagnostics.push({
           severity: "error",

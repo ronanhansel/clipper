@@ -452,6 +452,7 @@ export const ComposeAnimationTimelinePanel = memo(
             timelineViewportRef,
             timelineLayerRailRef,
             timelineSnapGuideRef,
+            scrubbingRef,
           }}
           timelineName="Compose"
           timelineZoom={timelineZoom}
@@ -491,6 +492,7 @@ export const ComposeAnimationTimelinePanel = memo(
           timelineViewportRef,
           timelineLayerRailRef,
           timelineSnapGuideRef,
+          scrubbingRef,
         }}
         timelineName={getDisplayNameFromPath(part.filePath)}
         timelineZoom={timelineZoom}

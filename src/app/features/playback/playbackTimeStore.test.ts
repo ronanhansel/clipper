@@ -19,13 +19,16 @@ describe("master timeline clock store", () => {
     });
 
     expect(listener).toHaveBeenCalledOnce();
-    expect(getMasterTimelineClockSnapshot()).toEqual({
+    const snapshot = getMasterTimelineClockSnapshot();
+    expect(snapshot).toEqual({
       sceneTime: 1.25,
       displayTime: 1,
       playing: true,
       source: "playback",
       updatedAt: 20,
+      sequence: snapshot.sequence,
     });
+    expect(snapshot.sequence).toBeGreaterThan(0);
 
     unsubscribe();
   });

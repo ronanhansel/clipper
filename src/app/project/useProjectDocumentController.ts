@@ -45,7 +45,9 @@ import {
 } from "./projectFileChangeClassifier";
 import type { Command } from "../features/file-manager/operations/Command";
 import {
+  applyCompositionGraphTransaction,
   carryCompositionGraphTransactionRevisions,
+  getCompositionGraphRevision,
   preserveNewerCompositionGraphTransactions,
 } from "../../core/compositionGraphTransactions";
 
@@ -1117,16 +1119,16 @@ export function useProjectDocumentController({
     const sourceVersion =
       (sourceUpdateVersionRef.current[basePart.filePath] ?? 0) + 1;
     const sourceBaseProjectVersion = projectDocumentVersionRef.current;
+    const sourceBaseGraphRevision = getCompositionGraphRevision(
+      basePart.animationGraph,
+    );
     sourceUpdateVersionRef.current = {
       ...sourceUpdateVersionRef.current,
       [basePart.filePath]: sourceVersion,
     };
-    const nextSources = {
-      ...compositionSourcesRef.current,
-      [basePart.filePath]: source,
-    };
     const compositionId = basePart.compositionId ?? basePart.id;
     let nextPart: Part;
+    let parseError: string | undefined;
     try {
       nextPart = await compositionFromSource(
         { ...basePart, id: compositionId },
@@ -1138,33 +1140,63 @@ export function useProjectDocumentController({
         error instanceof Error
           ? error.message
           : "Unable to preview composition source.";
+      parseError = message;
       nextPart = {
         ...basePart,
         id: compositionId,
         compositionError: message,
-        background: { ...basePart.background, elements: [] },
-        objects: [],
-        snapshot: [],
       };
     }
     if (sourceUpdateVersionRef.current[basePart.filePath] !== sourceVersion)
       return;
     if (projectDocumentVersionRef.current !== sourceBaseProjectVersion) return;
-    const nextProject = replacePartInProject(
-      { ...projectRef.current, compositionSources: nextSources },
+    if (parseError) {
+      const nextProject = replacePartInProject(
+        projectRef.current,
+        compositionId,
+        (currentPart) => ({
+          ...currentPart,
+          compositionError: parseError,
+        }),
+      );
+
+      replaceProject(nextProject, {
+        history: options.history,
+        syncSources: false,
+      });
+      setSourceStatus(`Preview failed for ${basePart.filePath}.`);
+      return;
+    }
+
+    const parsedGraph = nextPart.animationGraph;
+    let nextProject = replacePartInProject(
+      {
+        ...projectRef.current,
+        compositionSources: compositionSourcesRef.current,
+      },
       compositionId,
       (currentPart) => ({
         ...nextPart,
-        compositionError: nextPart.compositionError,
+        compositionError: undefined,
+        animationGraph: currentPart.animationGraph,
         motionMarkers: currentPart.motionMarkers,
         snapshot: currentPart.snapshot,
       }),
     );
+    if (parsedGraph) {
+      nextProject = applyCompositionGraphTransaction(nextProject, {
+        origin: "source",
+        baseRevision: sourceBaseGraphRevision,
+        compositionId,
+        filePath: basePart.filePath,
+        graph: parsedGraph,
+        mode: "composition2d",
+      });
+    }
 
     replaceProject(nextProject, {
       history: options.history,
-      syncSources: options.syncSource !== false,
-      preserveNewerGraphTransactions: true,
+      syncSources: false,
     });
     setSourceStatus(
       nextPart.compositionError

@@ -14,6 +14,8 @@ type CompositionGraphState =
   | AnimationGraphState;
 
 export type CompositionGraphTransaction = {
+  origin: "canvas" | "source" | "project-load";
+  baseRevision?: number;
   compositionId?: string;
   clipId?: string;
   filePath: string;
@@ -49,7 +51,9 @@ function setCompositionGraph(
   return { ...composition, animationGraph: graph as StrictAnimationGraph };
 }
 
-function getCompositionGraphRevision(graph: CompositionGraphState | undefined) {
+export function getCompositionGraphRevision(
+  graph: CompositionGraphState | undefined,
+) {
   if (!graph) return 0;
   const graphRevision = compositionGraphRevisionByGraph.get(graph);
   if (graphRevision) return graphRevision;
@@ -61,7 +65,10 @@ function getCompositionGraphRevision(graph: CompositionGraphState | undefined) {
   return signatureRevision ?? 0;
 }
 
-function markCompositionGraphRevision(graph: CompositionGraphState) {
+export function markCompositionGraphRevision(
+  graph: CompositionGraphState,
+  _origin: CompositionGraphTransaction["origin"],
+) {
   const revision = ++compositionGraphRevisionSequence;
   setCompositionGraphRevision(graph, revision);
   return revision;
@@ -83,8 +90,28 @@ export function applyCompositionGraphTransaction(
   transaction: CompositionGraphTransaction,
 ): ProjectManifest {
   if (transaction.mode !== "composition2d") return project;
-  const revision = markCompositionGraphRevision(transaction.graph);
   const updatedSources = { ...(project.compositionSources ?? {}) };
+  const matchingCompositions = [
+    ...(project.compositionLibrary ?? []),
+    ...(project.compositions ?? []),
+    ...project.scenes.flatMap((scene) => scene.compositions),
+  ].filter((composition) =>
+    compositionMatchesGraphTransaction(composition, transaction),
+  );
+  if (
+    transaction.baseRevision !== undefined &&
+    matchingCompositions.some(
+      (composition) =>
+        getCompositionGraphRevision(
+          getCompositionGraph(composition, transaction.mode),
+        ) > transaction.baseRevision!,
+    )
+  )
+    return project;
+  const revision = markCompositionGraphRevision(
+    transaction.graph,
+    transaction.origin,
+  );
   const updateComposition = (composition: CompositionClip) => {
     if (!compositionMatchesGraphTransaction(composition, transaction))
       return composition;

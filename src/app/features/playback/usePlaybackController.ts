@@ -130,6 +130,7 @@ export function usePlaybackController({
   const playbackDuration = Math.max(playbackEnd - playbackStart, 0);
   const useLocalPlaybackLabels = Boolean(playbackRange?.localLabels);
   const pendingScrubCacheTimeRef = useRef<number | null>(null);
+  const lastTimelineScrubTimeRef = useRef<number | null>(null);
   const scrubCacheFrameRef = useRef(0);
 
   function clampPlaybackTime(time: number) {
@@ -317,6 +318,8 @@ export function usePlaybackController({
 
   function scrubToSceneTime(time: number) {
     const nextTime = clampPlaybackTime(time);
+    if (timelineScrubbingRef.current)
+      lastTimelineScrubTimeRef.current = nextTime;
     requestCachedPreviewInterest(nextTime, "scrub");
     if (Math.abs(nextTime - currentSceneTimeRef.current) < 0.001) {
       if (!timelineScrubbingRef.current) {
@@ -361,6 +364,16 @@ export function usePlaybackController({
       commitPlayheadEditorState(committedTime);
       startTransition(() => setCurrentSceneTime(committedTime));
     });
+  }
+
+  function shouldIgnoreStalePostTimelineScrubTime(time: number) {
+    const scrubTime = lastTimelineScrubTimeRef.current;
+    if (scrubTime === null) return false;
+    if (Math.abs(time - scrubTime) < 0.001) {
+      lastTimelineScrubTimeRef.current = null;
+      return false;
+    }
+    return Math.abs(currentSceneTimeRef.current - scrubTime) < 0.001;
   }
 
   function pausePlaybackAtCurrentTime() {
@@ -509,6 +522,7 @@ export function usePlaybackController({
     }
 
     if (timelineScrubbingRef.current) return;
+    if (shouldIgnoreStalePostTimelineScrubTime(currentSceneTime)) return;
     currentSceneTimeRef.current = currentSceneTime;
     syncPlaybackDom(currentSceneTime, "idle");
   }, [
@@ -521,8 +535,9 @@ export function usePlaybackController({
 
   useEffect(() => {
     if (timelineScrubbingRef.current) return;
+    if (shouldIgnoreStalePostTimelineScrubTime(currentSceneTime)) return;
     commitPlayheadEditorState(currentSceneTime);
-  }, [currentSceneTime]);
+  }, [currentSceneTime, timelineScrubbingRef]);
 
   useEffect(() => {
     function pausePlaybackForNumberScrub() {
@@ -592,6 +607,7 @@ export function usePlaybackController({
     let frame = 0;
 
     function tick(now: number) {
+      if (!isPlayingRef.current || timelineScrubbingRef.current) return;
       const clock = playbackClockRef.current ?? {
         startedAt: now,
         startedFrom: currentSceneTimeRef.current,
@@ -743,7 +759,8 @@ function shouldSyncRenderClockAnimations(
   const elapsedWallMs = now - previous.sampledAt;
   return (
     elapsedClockMs < -renderClockPlaybackJumpToleranceMs ||
-    Math.abs(elapsedClockMs - elapsedWallMs) > renderClockPlaybackJumpToleranceMs
+    Math.abs(elapsedClockMs - elapsedWallMs) >
+      renderClockPlaybackJumpToleranceMs
   );
 }
 

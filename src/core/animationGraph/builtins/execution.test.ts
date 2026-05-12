@@ -93,6 +93,92 @@ describe("built-in animation graph node execution", () => {
     });
   });
 
+  it("relative Time accumulates start after prior time-driven controller", () => {
+    const priorTimed = stream("timed", { kind: "text", objectId: "object-1" });
+    priorTimed.controller = {
+      start: 0,
+      delay: 2,
+      duration: 3,
+      ease: "easeOut",
+      schedule: "relative",
+      timeDriven: true,
+    };
+    const result = timeNodeDefinition.execute(
+      {
+        node: node("time2", "time", { delay: 1, duration: 2, ease: "linear" }),
+        inputs: new Map([["in", [priorTimed]]]),
+      },
+      context(),
+    );
+
+    const out = result.outputs.get("out")?.filter(isAnimationStream) ?? [];
+    expect(out).toHaveLength(1);
+    expect(out[0].controller).toEqual({
+      start: 5,
+      delay: 1,
+      duration: 2,
+      ease: "linear",
+      schedule: "relative",
+      timeDriven: true,
+    });
+  });
+
+  it("absolute Time does not accumulate start", () => {
+    const priorTimed = stream("timed", { kind: "text", objectId: "object-1" });
+    priorTimed.controller = {
+      start: 0,
+      delay: 2,
+      duration: 3,
+      ease: "easeOut",
+      schedule: "relative",
+      timeDriven: true,
+    };
+    const result = timeNodeDefinition.execute(
+      {
+        node: node("time2", "time", {
+          delay: 0.5,
+          duration: 1,
+          ease: "linear",
+          schedule: "absolute",
+        }),
+        inputs: new Map([["in", [priorTimed]]]),
+      },
+      context(),
+    );
+
+    const out = result.outputs.get("out")?.filter(isAnimationStream) ?? [];
+    expect(out[0].controller.start).toBe(0);
+    expect(out[0].controller.delay).toBe(0.5);
+  });
+
+  it("Time does not overwrite upstream effect controllers", () => {
+    const whole = stream("whole", { kind: "text", objectId: "object-1" });
+    whole.effects.push({
+      id: "blur:effect:0",
+      effectId: "clipper.adjustment.blur",
+      params: { radius: 20 },
+      target: whole.structure,
+      controller: {
+        start: 0,
+        delay: 1,
+        duration: 2,
+        ease: "easeIn",
+        schedule: "relative",
+      },
+    });
+    const result = timeNodeDefinition.execute(
+      {
+        node: node("time", "time", { delay: 0, duration: 3, ease: "easeOut" }),
+        inputs: new Map([["in", [whole]]]),
+      },
+      context(),
+    );
+
+    const out = result.outputs.get("out")?.filter(isAnimationStream) ?? [];
+    expect(out[0].effects[0].controller.ease).toBe("easeIn");
+    expect(out[0].effects[0].controller.duration).toBe(2);
+  });
+
   it("Split emits only tokenized rich text streams", () => {
     const result = splitNodeDefinition.execute(
       {

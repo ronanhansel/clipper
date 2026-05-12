@@ -1,6 +1,12 @@
 import { getAnimationGraphNodeDefinition } from "./registry";
 import { validateAnimationGraph } from "./validation";
 import { getGraphEffectRuntimeAdapter } from "../effects/registry";
+import {
+  evaluateGraphInputExpression,
+  getStrictGraphInputAlias,
+  isGraphInputExpression,
+} from "../graphParameterBindings";
+import { isValueStream } from "./builtins/helpers";
 import type {
   AnimationGraph,
   AnimationGraphDiagnostic,
@@ -16,6 +22,7 @@ import type {
   GraphPortId,
   GraphStream,
   GeneratedGeometry,
+  ValueStream,
 } from "./types";
 import type { FrameObject, LayerAnimation } from "../types";
 
@@ -38,6 +45,18 @@ export type AnimationGraphCompileOptions = {
   frame?: number;
 };
 
+export type AnimationGraphRuntimePlan = {
+  graph: AnimationGraph;
+  sourceObject?: FrameObject;
+  program: AnimationGraphProgram;
+  diagnostics: AnimationGraphDiagnostic[];
+};
+
+export type AnimationGraphRuntimeEvaluationInput = {
+  time: number;
+  frame: number;
+};
+
 type PortKey = `${string}:${string}`;
 
 export function compileAnimationGraph(
@@ -45,6 +64,38 @@ export function compileAnimationGraph(
   options: AnimationGraphCompileOptions = {},
 ): CompileResult {
   const program = planAnimationGraphProgram(graph);
+  return executeAnimationGraphProgram(graph, program, options);
+}
+
+export function createAnimationGraphRuntimePlan(
+  graph: AnimationGraph,
+  sourceObject?: FrameObject,
+): AnimationGraphRuntimePlan {
+  const program = planAnimationGraphProgram(graph);
+  return {
+    graph,
+    sourceObject,
+    program,
+    diagnostics: program.diagnostics,
+  };
+}
+
+export function evaluateAnimationGraphRuntime(
+  plan: AnimationGraphRuntimePlan,
+  input: AnimationGraphRuntimeEvaluationInput,
+): CompileResult {
+  return executeAnimationGraphProgram(plan.graph, plan.program, {
+    sourceObject: plan.sourceObject,
+    time: input.time,
+    frame: input.frame,
+  });
+}
+
+function executeAnimationGraphProgram(
+  graph: AnimationGraph,
+  program: AnimationGraphProgram,
+  options: AnimationGraphCompileOptions = {},
+): CompileResult {
   const diagnostics = [...program.diagnostics];
   if (diagnostics.some((diagnostic) => diagnostic.severity === "error")) {
     return {
@@ -125,11 +176,18 @@ export function compileAnimationGraph(
         "in",
         getOrderedOutStreams(node, plannedEdges, incomingEdgeStreams, incoming),
       );
+    const resolvedInputs = resolveGraphInputExpressions(
+      graph,
+      node,
+      inputs,
+      plannedEdges,
+      incomingEdgeStreams,
+    );
     const connectedOutputPorts = new Set(
       (outgoing.get(node.id) ?? []).map((edge) => edge.from.portId),
     );
     const result = definition.execute(
-      { node, inputs },
+      { node, inputs: resolvedInputs },
       {
         graph,
         sourceObject: options.sourceObject,
@@ -304,6 +362,64 @@ function executeMacroNode(
   return outputs;
 }
 
+function resolveGraphInputExpressions(
+  graph: AnimationGraph,
+  node: AnimationGraphNode,
+  inputs: ReadonlyMap<GraphPortId, readonly GraphStream[]>,
+  edges: readonly StrictAnimationGraphEdge[],
+  incomingEdgeStreams: ReadonlyMap<string, readonly GraphStream[]>,
+) {
+  const resolved = new Map<GraphPortId, readonly GraphStream[]>(inputs);
+  for (const [portId, streams] of inputs) {
+    const expression = readNodeConfigValue(node, portId);
+    if (typeof expression !== "string" || !isGraphInputExpression(expression))
+      continue;
+    const valueStreams = [
+      ...streams.filter(isValueStream),
+      ...getAliasedInputValueStreams(
+        graph,
+        node.id,
+        edges,
+        incomingEdgeStreams,
+      ),
+    ];
+    const evaluated = evaluateGraphInputExpression(expression, valueStreams);
+    if (evaluated) resolved.set(portId, [evaluated]);
+  }
+  return resolved;
+}
+
+function getAliasedInputValueStreams(
+  graph: AnimationGraph,
+  nodeId: string,
+  edges: readonly StrictAnimationGraphEdge[],
+  incomingEdgeStreams: ReadonlyMap<string, readonly GraphStream[]>,
+) {
+  return edges
+    .filter((edge) => edge.to.nodeId === nodeId)
+    .flatMap((edge) => {
+      const source = graph.nodes[edge.from.nodeId];
+      if (!source) return [];
+      const alias = getStrictGraphInputAlias(graph, source, edge.from.portId);
+      return (incomingEdgeStreams.get(edge.id) ?? [])
+        .filter(isValueStream)
+        .map((stream) => ({ ...stream, id: `input.${alias}:${stream.id}` }));
+    });
+}
+
+function readNodeConfigValue(node: AnimationGraphNode, key: string) {
+  const config = node.config;
+  if (!config || typeof config !== "object") return undefined;
+  if (
+    "params" in config &&
+    config.params &&
+    typeof config.params === "object" &&
+    key in config.params
+  )
+    return (config.params as Record<string, unknown>)[key];
+  return key in config ? (config as Record<string, unknown>)[key] : undefined;
+}
+
 function validateMacroGraph(
   macro: NonNullable<AnimationGraph["macros"]>[string],
   macroNodeId: string,
@@ -386,20 +502,7 @@ function createDefaultValueStream(
 export function planAnimationGraphProgram(
   graph: AnimationGraph,
 ): AnimationGraphProgram {
-  const diagnostics = [
-    ...validateAnimationGraph(graph),
-    ...validateReachabilityAndCycles(graph),
-  ];
-  if (diagnostics.some((diagnostic) => diagnostic.message.includes("cycles")))
-    return {
-      operations: [],
-      nodeIds: [],
-      edgeIds: [],
-      outNodeIds: Object.values(graph.nodes)
-        .filter((node) => node.kind === "out")
-        .map((node) => node.id),
-      diagnostics,
-    };
+  const diagnostics = [...validateAnimationGraph(graph)];
   const outNodes = Object.values(graph.nodes).filter(
     (node) => node.kind === "out",
   );
@@ -435,6 +538,20 @@ export function planAnimationGraphProgram(
       stack.push(...dependencies);
     }
   }
+
+  const cycleDiagnostics = validateReachabilityAndCycles(
+    graph,
+    requiredEdgeIds,
+  );
+  diagnostics.push(...cycleDiagnostics);
+  if (cycleDiagnostics.some((diagnostic) => diagnostic.severity === "error"))
+    return {
+      operations: [],
+      nodeIds: [],
+      edgeIds: [],
+      outNodeIds: outNodes.map((node) => node.id),
+      diagnostics,
+    };
 
   const orderedNodes = topoPlannedNodes(
     graph,
@@ -634,7 +751,10 @@ function controllerToOptions(
   structure: AnimationStream["structure"],
 ): LayerAnimation["options"] {
   return {
-    delay: controller.start + controller.delay,
+    delay:
+      controller.schedule === "absolute"
+        ? controller.delay
+        : controller.start + controller.delay,
     duration: controller.duration,
     ease: controller.ease,
     type: "tween",
@@ -654,9 +774,19 @@ function controllerToOptions(
   };
 }
 
-function validateReachabilityAndCycles(graph: AnimationGraph) {
+function validateReachabilityAndCycles(
+  graph: AnimationGraph,
+  edgeIds?: ReadonlySet<string>,
+) {
   const diagnostics: AnimationGraphDiagnostic[] = [];
-  const cycleNodeId = findCycleNodeId(graph);
+  const cycleNodeId = findCycleNodeId(
+    edgeIds
+      ? {
+          ...graph,
+          edges: graph.edges.filter((edge) => edgeIds.has(edge.id)),
+        }
+      : graph,
+  );
   if (cycleNodeId)
     diagnostics.push({
       severity: "error",

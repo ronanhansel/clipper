@@ -1,11 +1,18 @@
 import { areGraphPortsCompatible } from "./animationGraph/portCompatibility";
 import { getAnimationGraphNodeDefinition } from "./animationGraph/registry";
+import {
+  evaluateGraphMathExpression,
+  getGraphMathExpressionAliases,
+  isGraphMathExpression,
+  isPotentialGraphMathExpression,
+} from "./graphInputExpression";
 import type {
   AnimationGraph,
   AnimationGraphEdge,
   AnimationGraphNode,
   GraphPortDefinition,
   GraphPortId,
+  ValueStream,
 } from "./animationGraph/types";
 
 export type GraphInputBindingOption = {
@@ -17,11 +24,13 @@ export type GraphInputBindingOption = {
 };
 
 export function isGraphInputExpression(value: string) {
-  return /^input\.[A-Za-z][A-Za-z0-9_]*$/.test(value.trim());
+  const trimmed = value.trim();
+  if (/^-?\d*(?:[.,]\d+)?$/.test(trimmed) && /\d/.test(trimmed)) return false;
+  return isGraphMathExpression(value);
 }
 
 export function isPotentialGraphInputExpression(value: string) {
-  return "input.".startsWith(value) || /^input\.[A-Za-z0-9_]*$/.test(value);
+  return isPotentialGraphMathExpression(value);
 }
 
 export function getStrictGraphInputBindingOptions(
@@ -59,7 +68,7 @@ function getStrictGraphInputBindingOptionsInternal(
       )
       .filter((port) => areGraphPortsCompatible(port, targetPort))
       .map((port) => {
-        const alias = getStableGraphInputAlias(graph, node, port.id);
+        const alias = getStrictGraphInputAlias(graph, node, port.id);
         return {
           alias,
           expression: `input.${alias}`,
@@ -77,6 +86,15 @@ export function getStrictGraphInputBindingExpression(
   targetNodeId: string,
   targetPortId: GraphPortId,
 ) {
+  const configExpression = readNodeConfigValue(
+    graph?.nodes[targetNodeId],
+    targetPortId,
+  );
+  if (
+    typeof configExpression === "string" &&
+    isGraphInputExpression(configExpression)
+  )
+    return configExpression;
   const edge = getStrictGraphInputBindingEdge(
     graph,
     targetNodeId,
@@ -85,7 +103,7 @@ export function getStrictGraphInputBindingExpression(
   if (!edge || !graph) return null;
   const source = graph.nodes[edge.from.nodeId];
   if (!source) return null;
-  return `input.${getStableGraphInputAlias(graph, source, edge.from.portId)}`;
+  return `input.${getStrictGraphInputAlias(graph, source, edge.from.portId)}`;
 }
 
 export function bindStrictGraphInputParameter(
@@ -94,39 +112,77 @@ export function bindStrictGraphInputParameter(
   targetPortId: GraphPortId,
   expression: string,
 ): AnimationGraph {
-  const alias = readGraphInputAlias(expression);
-  if (!alias) return graph;
-  const option = getStrictGraphInputBindingOptionsInternal(
+  if (!isGraphInputExpression(expression)) return graph;
+  const aliases = getGraphMathExpressionAliases(expression);
+  const options = getStrictGraphInputBindingOptionsInternal(
     graph,
     targetNodeId,
     targetPortId,
     { connectedOnly: false },
-  ).find((item) => item.alias === alias);
-  if (!option) return graph;
+  ).filter((item) => aliases.includes(item.alias));
+  if (aliases.length && options.length !== aliases.length) return graph;
+  const baseGraph = unbindStrictGraphInputParameter(
+    graph,
+    targetNodeId,
+    targetPortId,
+  );
   const targetPort = getNodePort(
-    graph.nodes[targetNodeId],
+    baseGraph.nodes[targetNodeId],
     targetPortId,
     "input",
   );
-  const edge: AnimationGraphEdge = {
-    id: `${option.nodeId}:${option.portId}->${targetNodeId}:${targetPortId}`,
+  const dependencyPortId = getExpressionDependencyPortId(
+    baseGraph.nodes[targetNodeId],
+    targetPortId,
+    targetPort?.cardinality === "single" && aliases.length !== 1,
+  );
+  const edges = options.map((option) => ({
+    id:
+      dependencyPortId === targetPortId
+        ? `${option.nodeId}:${option.portId}->${targetNodeId}:${targetPortId}`
+        : `${option.nodeId}:${option.portId}->${targetNodeId}:${dependencyPortId}:expr:${targetPortId}`,
     from: { nodeId: option.nodeId, portId: option.portId },
-    to: { nodeId: targetNodeId, portId: targetPortId },
-  };
+    to: { nodeId: targetNodeId, portId: dependencyPortId },
+  }));
   return {
-    ...graph,
-    edges: [
-      ...graph.edges.filter(
-        (item) =>
-          item.id !== edge.id &&
-          !(
-            targetPort?.cardinality !== "multi" &&
-            item.to.nodeId === targetNodeId &&
-            item.to.portId === targetPortId
-          ),
+    ...baseGraph,
+    nodes: updateNodeConfigValue(
+      baseGraph.nodes,
+      targetNodeId,
+      targetPortId,
+      expression.trim(),
+    ),
+    edges: [...baseGraph.edges, ...edges],
+  };
+}
+
+export function evaluateGraphInputExpression(
+  expression: string,
+  streams: readonly ValueStream[],
+): ValueStream | null {
+  const stream = streams[0];
+  if (!isGraphInputExpression(expression)) return null;
+  const directAlias = expression
+    .trim()
+    .match(/^input\.([A-Za-z_][A-Za-z0-9_]*)$/);
+  if (!stream && directAlias) return null;
+  if (directAlias) return stream;
+  const variables = Object.fromEntries(
+    streams
+      .map(
+        (item) => [readAliasFromStreamId(item.id), Number(item.value)] as const,
+      )
+      .filter((item): item is readonly [string, number] =>
+        Boolean(item[0] && Number.isFinite(item[1])),
       ),
-      edge,
-    ],
+  );
+  const value = evaluateGraphMathExpression(expression, variables);
+  if (value === null) return null;
+  return {
+    ...(stream ?? { id: "expression", valueType: "number" as const }),
+    id: `${stream?.id ?? "expression"}:expr`,
+    valueType: "number",
+    value,
   };
 }
 
@@ -139,7 +195,11 @@ export function unbindStrictGraphInputParameter(
     ...graph,
     edges: graph.edges.filter(
       (edge) =>
-        !(edge.to.nodeId === targetNodeId && edge.to.portId === targetPortId),
+        !(
+          edge.to.nodeId === targetNodeId &&
+          (edge.to.portId === targetPortId ||
+            edge.id.endsWith(`:expr:${targetPortId}`))
+        ),
     ),
   };
 }
@@ -157,10 +217,67 @@ function getStrictGraphInputBindingEdge(
   );
 }
 
-function readGraphInputAlias(value: string) {
-  return isGraphInputExpression(value)
-    ? value.trim().slice("input.".length)
-    : null;
+function readNodeConfigValue(
+  node: AnimationGraphNode | undefined,
+  key: string,
+) {
+  const config = node?.config;
+  if (!config || typeof config !== "object") return undefined;
+  if (
+    "params" in config &&
+    config.params &&
+    typeof config.params === "object" &&
+    key in config.params
+  )
+    return (config.params as Record<string, unknown>)[key];
+  return key in config ? (config as Record<string, unknown>)[key] : undefined;
+}
+
+function updateNodeConfigValue(
+  nodes: AnimationGraph["nodes"],
+  nodeId: string,
+  key: string,
+  value: string,
+) {
+  const node = nodes[nodeId];
+  if (!node) return nodes;
+  const config =
+    node.config && typeof node.config === "object" ? node.config : {};
+  const nextConfig =
+    "params" in config && config.params && typeof config.params === "object"
+      ? {
+          ...config,
+          params: { ...config.params, [key]: value },
+        }
+      : { ...config, [key]: value };
+  return {
+    ...nodes,
+    [nodeId]: { ...node, config: nextConfig },
+  };
+}
+
+function getExpressionDependencyPortId(
+  node: AnimationGraphNode | undefined,
+  targetPortId: GraphPortId,
+  preferMulti: boolean,
+) {
+  if (!preferMulti) return targetPortId;
+  const ports =
+    getAnimationGraphNodeDefinition(node?.kind ?? "")
+      ?.getPorts(node as AnimationGraphNode)
+      .filter((port) => port.direction === "input") ?? [];
+  return (
+    ports.find(
+      (port) =>
+        port.cardinality === "multi" &&
+        port.type.kind === "value" &&
+        port.type.valueType === "number",
+    )?.id ?? targetPortId
+  );
+}
+
+function readAliasFromStreamId(id: string) {
+  return id.match(/^input\.([A-Za-z_][A-Za-z0-9_]*)/)?.[1] ?? "";
 }
 
 function getNodeOutputPorts(node: AnimationGraphNode) {
@@ -182,7 +299,7 @@ function getNodePort(
     .find((port) => port.id === portId && port.direction === direction);
 }
 
-function getStableGraphInputAlias(
+export function getStrictGraphInputAlias(
   graph: AnimationGraph,
   node: AnimationGraphNode,
   portId: GraphPortId,

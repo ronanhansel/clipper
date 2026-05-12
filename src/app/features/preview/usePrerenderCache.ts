@@ -6,6 +6,7 @@ import {
   videoExportFrameRate,
 } from "../../config";
 import { clipperHost } from "../../clipperHost";
+import { getMasterTimelineClockSnapshot } from "../playback/playbackTimeStore";
 import { getAdjustmentEffectPackage } from "../../../core/effects/registry";
 import { getTopTimelinePartAtTime } from "../../../core/timeline";
 import type {
@@ -32,8 +33,10 @@ type PrerenderFrameDecodeResponse = {
 type PrerenderQueueItem = {
   start: number;
   durationMs: number;
+  clockSequence?: number;
   frameRange?: { startFrame: number; endFrame: number };
   manualJobId?: number;
+  reason?: PrerenderCacheInterestReason;
 };
 type ManualPrerenderJob = {
   errors: string[];
@@ -242,6 +245,7 @@ export function usePrerenderCache({
       )
         return;
       const generation = generationRef.current;
+      const clockSequence = getMasterTimelineClockSnapshot().sequence;
       const currentBlockStart = getBlockStartTime(
         time,
         request.sceneDuration,
@@ -292,6 +296,8 @@ export function usePrerenderCache({
           nextQueue.unshift({
             start: blockStart,
             durationMs: request.blockDurationMs,
+            clockSequence,
+            reason,
           });
           queueChanged = true;
         }
@@ -358,6 +364,7 @@ export function usePrerenderCache({
             1000,
           frameRange,
           manualJobId,
+          clockSequence: getMasterTimelineClockSnapshot().sequence,
         });
         queuedRanges += 1;
       }
@@ -456,6 +463,14 @@ export function usePrerenderCache({
           closePrerenderFrames(bitmapFrames);
           break;
         }
+        if (
+          nextItem.reason === "scrub" &&
+          nextItem.clockSequence !== undefined &&
+          getMasterTimelineClockSnapshot().sequence > nextItem.clockSequence
+        ) {
+          closePrerenderFrames(bitmapFrames);
+          continue;
+        }
         if (bitmapFrames.length === 0)
           throw new Error(
             "Prerendered frame block decoded to no drawable frames.",
@@ -552,6 +567,8 @@ export function usePrerenderCache({
         queuedRef.current.push({
           start: blockStart,
           durationMs: request.blockDurationMs,
+          clockSequence: getMasterTimelineClockSnapshot().sequence,
+          reason: "idle",
         });
         changed = true;
         break;

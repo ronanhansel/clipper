@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   bindStrictGraphInputParameter,
+  evaluateGraphInputExpression,
   getStrictGraphInputBindingExpression,
   getStrictGraphInputBindingOptions,
+  isGraphInputExpression,
+  isPotentialGraphInputExpression,
   unbindStrictGraphInputParameter,
 } from "./graphParameterBindings";
 import type { AnimationGraph } from "./animationGraph/types";
@@ -42,6 +45,30 @@ describe("graph parameter bindings", () => {
     );
   });
 
+  it("binds arithmetic input aliases without generating math nodes", () => {
+    const graph = createGraph();
+
+    const next = bindStrictGraphInputParameter(
+      graph,
+      "add",
+      "a",
+      "input.noise1 * 8",
+    );
+
+    expect(next.edges).toContainEqual({
+      id: "noise:1:value->add:a",
+      from: { nodeId: "noise:1", portId: "value" },
+      to: { nodeId: "add", portId: "a" },
+    });
+    expect(next.nodes["expr:add:a"]).toBeUndefined();
+    expect((next.nodes.add.config as { a?: unknown }).a).toBe(
+      "input.noise1 * 8",
+    );
+    expect(getStrictGraphInputBindingExpression(next, "add", "a")).toBe(
+      "input.noise1 * 8",
+    );
+  });
+
   it("unbinds parameter edges when a field returns to a scalar value", () => {
     const graph = bindStrictGraphInputParameter(
       createGraph(),
@@ -60,6 +87,38 @@ describe("graph parameter bindings", () => {
       from: { nodeId: "noise:1", portId: "value" },
       to: { nodeId: "add", portId: "b" },
     });
+  });
+
+  it("removes arithmetic expression edges when unbinding expression fields", () => {
+    const graph = bindStrictGraphInputParameter(
+      createGraph(),
+      "add",
+      "a",
+      "input.noise1 / 2",
+    );
+
+    const next = unbindStrictGraphInputParameter(graph, "add", "a");
+
+    expect(next.nodes["expr:add:a"]).toBeUndefined();
+    expect(next.edges).not.toContainEqual(
+      expect.objectContaining({ to: { nodeId: "add", portId: "a" } }),
+    );
+  });
+
+  it("allows arithmetic input expressions as permissive field drafts", () => {
+    expect(isPotentialGraphInputExpression("input.noise1 *")).toBe(true);
+    expect(isPotentialGraphInputExpression("input.noise1 * 8")).toBe(true);
+    expect(isPotentialGraphInputExpression("sqrt(input.noise1")).toBe(true);
+    expect(isGraphInputExpression("sqrt(input.noise1) + pow(2, 3)")).toBe(true);
+  });
+
+  it("evaluates safe math expressions over aliased input streams", () => {
+    const result = evaluateGraphInputExpression(
+      "sqrt(input.noise1) + pow(2, 3)",
+      [{ id: "input.noise1:noise:1:value", valueType: "number", value: 16 }],
+    );
+
+    expect(result?.value).toBe(12);
   });
 
   it("hides disconnected value nodes from inspector input options", () => {

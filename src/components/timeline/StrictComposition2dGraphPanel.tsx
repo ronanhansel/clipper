@@ -937,23 +937,11 @@ function deleteConditionEditorRule(
   for (let current = index; current < count; current += 1) {
     const from = current === 1 ? "" : String(current + 1);
     const to = current === 1 ? "" : String(current);
-    for (const field of [
-      "matchType",
-      "value",
-      "action",
-      "outputPort",
-      "delay",
-    ])
+    for (const field of ["matchType", "value", "action", "outputPort", "delay"])
       next[`${field}${to}`] = values[`${field}${from}`] ?? "";
   }
   const last = count === 1 ? "" : String(count);
-  for (const field of [
-    "matchType",
-    "value",
-    "action",
-    "outputPort",
-    "delay",
-  ])
+  for (const field of ["matchType", "value", "action", "outputPort", "delay"])
     delete next[`${field}${last}`];
   return next;
 }

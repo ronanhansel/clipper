@@ -789,7 +789,7 @@ describe("compileAnimationGraph", () => {
     });
   });
 
-  it("applies downstream time nodes to effects already on the stream", () => {
+  it("does not apply downstream time nodes to effects already on the stream", () => {
     const result = compileAnimationGraph(
       graph(
         {
@@ -810,8 +810,84 @@ describe("compileAnimationGraph", () => {
     );
 
     expect(result.animations[0]).toMatchObject({
-      keyframes: { blur: [0, 20] },
-      options: { duration: 2 },
+      keyframes: { blur: [20, 20] },
+      options: { duration: 1 },
+    });
+  });
+
+  it("accumulates relative time nodes for sequential effects", () => {
+    const result = compileAnimationGraph(
+      graph(
+        {
+          source: node("source", "source", { objectId: "text" }),
+          firstTime: node("firstTime", "time", { duration: 1 }),
+          blur: node("blur", "effect:clipper.adjustment.blur", {
+            params: { radius: 20 },
+          }),
+          secondTime: node("secondTime", "time", { duration: 2 }),
+          opacity: node("opacity", "effect:clipper.adjustment.opacity", {
+            params: { from: 1, to: 0 },
+          }),
+          out: node("out", "out"),
+        },
+        [
+          edge("source", "out", "firstTime"),
+          edge("firstTime", "out", "blur"),
+          edge("blur", "out", "secondTime"),
+          edge("secondTime", "out", "opacity"),
+          edge("opacity", "out", "out"),
+        ],
+      ),
+      { sourceObject: textObject },
+    );
+
+    expect(result.animations).toEqual([
+      expect.objectContaining({
+        name: "clipper.adjustment.blur",
+        keyframes: { blur: [0, 20] },
+        options: expect.objectContaining({ delay: 0, duration: 1 }),
+      }),
+      expect.objectContaining({
+        name: "clipper.adjustment.opacity",
+        keyframes: { opacity: [1, 0] },
+        options: expect.objectContaining({ delay: 1, duration: 2 }),
+      }),
+    ]);
+  });
+
+  it("uses absolute time nodes from graph start", () => {
+    const result = compileAnimationGraph(
+      graph(
+        {
+          source: node("source", "source", { objectId: "text" }),
+          firstTime: node("firstTime", "time", { duration: 1 }),
+          blur: node("blur", "effect:clipper.adjustment.blur", {
+            params: { radius: 20 },
+          }),
+          secondTime: node("secondTime", "time", {
+            delay: 0.25,
+            duration: 2,
+            schedule: "absolute",
+          }),
+          opacity: node("opacity", "effect:clipper.adjustment.opacity", {
+            params: { from: 1, to: 0 },
+          }),
+          out: node("out", "out"),
+        },
+        [
+          edge("source", "out", "firstTime"),
+          edge("firstTime", "out", "blur"),
+          edge("blur", "out", "secondTime"),
+          edge("secondTime", "out", "opacity"),
+          edge("opacity", "out", "out"),
+        ],
+      ),
+      { sourceObject: textObject },
+    );
+
+    expect(result.animations[1]).toMatchObject({
+      name: "clipper.adjustment.opacity",
+      options: expect.objectContaining({ delay: 0.25, duration: 2 }),
     });
   });
 
@@ -1148,6 +1224,32 @@ describe("compileAnimationGraph", () => {
 
     expect(atOne.animations[0].keyframes).toEqual({ blur: [1, 1] });
     expect(atTwo.animations[0].keyframes).toEqual({ blur: [2, 2] });
+  });
+
+  it("evaluates inline graph input math expressions for effect parameters", () => {
+    const inputGraph = graph(
+      {
+        source: node("source", "source", { objectId: "text" }),
+        seconds: node("seconds", "value:time:seconds"),
+        blur: node("blur", "effect:clipper.adjustment.blur", {
+          params: { radius: "sqrt(4) + pow(2, 3) + input.seconds1 * 6" },
+        }),
+        out: node("out", "out"),
+      },
+      [
+        edge("source", "out", "blur"),
+        edge("seconds", "value", "blur", "radius"),
+        edge("blur", "out", "out"),
+      ],
+    );
+
+    const result = compileAnimationGraph(inputGraph, {
+      sourceObject: textObject,
+      time: 2,
+      frame: 60,
+    });
+
+    expect(result.animations[0].keyframes).toEqual({ blur: [22, 22] });
   });
 
   it("applies downstream time to matched condition branch", () => {
@@ -1971,6 +2073,31 @@ describe("compileAnimationGraph", () => {
     expect(result.program?.operations).toEqual([]);
     expect(result.streams).toEqual([]);
     expect(result.animations).toEqual([]);
+  });
+
+  it("ignores unreachable cycles when planning live output", () => {
+    const result = compileAnimationGraph(
+      graph(
+        {
+          source: node("source", "source", { objectId: "text" }),
+          liveTime: node("liveTime", "time"),
+          deadTime: node("deadTime", "time"),
+          out: node("out", "out"),
+        },
+        [
+          edge("source", "out", "liveTime"),
+          edge("liveTime", "out", "out"),
+          edge("deadTime", "out", "deadTime"),
+        ],
+      ),
+      { sourceObject: textObject },
+    );
+
+    expect(
+      result.diagnostics.some((item) => item.message.includes("cycles")),
+    ).toBe(false);
+    expect(result.program?.nodeIds).toEqual(["source", "liveTime", "out"]);
+    expect(result.streams).toHaveLength(1);
   });
 
   it("allows disconnected Out as empty graph output", () => {

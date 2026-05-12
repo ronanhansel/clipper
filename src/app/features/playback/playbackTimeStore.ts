@@ -1,4 +1,5 @@
 export type MasterTimelineClockSnapshot = {
+  sequence: number;
   sceneTime: number;
   displayTime: number;
   playing: boolean;
@@ -9,6 +10,7 @@ export type MasterTimelineClockSnapshot = {
 type Listener = () => void;
 
 let snapshot: MasterTimelineClockSnapshot = {
+  sequence: 0,
   sceneTime: 0,
   displayTime: 0,
   playing: false,
@@ -29,7 +31,8 @@ export function subscribeMasterTimelineClock(listener: Listener) {
 }
 
 export function publishMasterTimelineClock(
-  next: Omit<MasterTimelineClockSnapshot, "updatedAt"> & {
+  next: Omit<MasterTimelineClockSnapshot, "sequence" | "updatedAt"> & {
+    sequence?: number;
     updatedAt?: number;
   },
 ) {
@@ -44,7 +47,10 @@ export function publishMasterTimelineClock(
     snapshot.source === nextSnapshot.source
   )
     return;
-  snapshot = nextSnapshot;
+  snapshot = {
+    ...nextSnapshot,
+    sequence: next.sequence ?? snapshot.sequence + 1,
+  };
   for (const listener of listeners) listener();
 }
 

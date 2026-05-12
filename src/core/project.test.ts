@@ -7,6 +7,7 @@ import {
 import {
   applyCompositionGraphTransaction,
   carryCompositionGraphTransactionRevisions,
+  getCompositionGraphRevision,
   preserveNewerCompositionGraphTransactions,
 } from "./compositionGraphTransactions";
 import {
@@ -193,6 +194,122 @@ describe("project normalization", () => {
     );
 
     expect(normalizeTypedAnimationGraphState(graph)).toBeUndefined();
+  });
+
+  it("keeps strict composition2d graph when one edge points at a missing node", () => {
+    const graph = {
+      id: "graph:text",
+      sourceObjectId: "text",
+      nodes: {
+        "source:text": {
+          id: "source:text",
+          kind: "source",
+          position: { x: 1, y: 2 },
+          config: { objectId: "text" },
+        },
+        scale: {
+          id: "scale",
+          kind: "effect:clipper.motion.zoom",
+          position: { x: 4, y: 2 },
+          config: { params: { from: 1, to: 2 } },
+        },
+        "composition2d:out": {
+          id: "composition2d:out",
+          kind: "out",
+          position: { x: 8, y: 2 },
+          config: {},
+        },
+      },
+      edges: [
+        {
+          id: "source:text:out->scale:in",
+          from: { nodeId: "source:text", portId: "out" },
+          to: { nodeId: "scale", portId: "in" },
+        },
+        {
+          id: "scale:out->missing:in",
+          from: { nodeId: "scale", portId: "out" },
+          to: { nodeId: "missing", portId: "in" },
+        },
+      ],
+    };
+
+    const normalized = normalizeTypedAnimationGraphState(graph);
+
+    expect(normalized?.nodes.scale).toMatchObject({
+      kind: "effect:clipper.motion.zoom",
+      position: { x: 4, y: 2 },
+    });
+    expect(normalized?.edges).toEqual([
+      {
+        id: "source:text:out->scale:in",
+        from: { nodeId: "source:text", portId: "out" },
+        to: { nodeId: "scale", portId: "in" },
+      },
+    ]);
+  });
+
+  it("does not replace strict graph with default graph when an edge has an invalid port", () => {
+    const object = {
+      id: "text",
+      name: "Text",
+      type: "text" as const,
+      selector: "[data-object-id='text']",
+      bounds: { x: 0, y: 0, width: 100, height: 40 },
+      style: {},
+    };
+    const graph = {
+      id: "graph:text",
+      sourceObjectId: "text",
+      nodes: {
+        "source:text": {
+          id: "source:text",
+          kind: "source",
+          position: { x: 1, y: 2 },
+          config: { objectId: "text" },
+        },
+        scale: {
+          id: "scale",
+          kind: "effect:clipper.motion.zoom",
+          position: { x: 4, y: 2 },
+          config: { params: { from: 1, to: 2 } },
+        },
+        "composition2d:out": {
+          id: "composition2d:out",
+          kind: "out",
+          position: { x: 8, y: 2 },
+          config: {},
+        },
+      },
+      edges: [
+        {
+          id: "source:text:bad->scale:in",
+          from: { nodeId: "source:text", portId: "bad" },
+          to: { nodeId: "scale", portId: "in" },
+        },
+      ],
+    };
+
+    const project = normalizeProject({
+      ...projectWithComposition(),
+      compositionLibrary: [
+        { ...composition, objects: [object], animationGraph: graph },
+      ],
+      compositions: [
+        { ...composition, objects: [object], animationGraph: graph },
+      ],
+    });
+
+    expect(
+      project.compositionLibrary?.[0].animationGraph?.nodes.scale,
+    ).toBeDefined();
+    expect(project.compositionLibrary?.[0].animationGraph?.edges).toEqual([
+      {
+        id: "source:text:bad->scale:in",
+        from: { nodeId: "source:text", portId: "bad" },
+        to: { nodeId: "scale", portId: "in" },
+      },
+    ]);
   });
 
   it("creates default strict composition2d graph for eligible objects", () => {
@@ -1610,6 +1727,7 @@ describe("project normalization", () => {
     });
 
     const updated = applyCompositionGraphTransaction(baseProject, {
+      origin: "canvas",
       clipId: composition.id,
       compositionId: composition.id,
       filePath: composition.filePath,
@@ -1622,6 +1740,73 @@ describe("project normalization", () => {
     );
     expect(updated.compositionSources?.[composition.filePath]).not.toContain(
       "outputType",
+    );
+  });
+
+  it("rejects stale source graph transactions and accepts current source revisions", () => {
+    const baseProject = normalizeProject({
+      ...projectWithComposition(),
+      compositionLibrary: [composition],
+      compositions: [composition],
+      compositionSources: {
+        [composition.filePath]: compositionToSource({
+          ...composition,
+          animationGraph: simpleTypedAnimationGraph("text", "opacity", {
+            from: "0",
+            to: "1",
+          }),
+        }),
+      },
+    });
+    const baseRevision = getCompositionGraphRevision(
+      baseProject.compositionLibrary?.[0].animationGraph,
+    );
+    const canvasProject = applyCompositionGraphTransaction(baseProject, {
+      origin: "canvas",
+      baseRevision,
+      compositionId: composition.id,
+      filePath: composition.filePath,
+      graph: simpleTypedAnimationGraph("text", "opacity", {
+        from: "2",
+        to: "3",
+      }),
+      mode: "composition2d",
+    });
+    const canvasRevision = getCompositionGraphRevision(
+      canvasProject.compositionLibrary?.[0].animationGraph,
+    );
+
+    const staleSourceProject = applyCompositionGraphTransaction(canvasProject, {
+      origin: "source",
+      baseRevision,
+      compositionId: composition.id,
+      filePath: composition.filePath,
+      graph: simpleTypedAnimationGraph("text", "opacity", {
+        from: "9",
+        to: "10",
+      }),
+      mode: "composition2d",
+    });
+
+    expect(staleSourceProject).toBe(canvasProject);
+    expect(
+      staleSourceProject.compositionSources?.[composition.filePath],
+    ).toContain("from: 2");
+
+    const sourceProject = applyCompositionGraphTransaction(canvasProject, {
+      origin: "source",
+      baseRevision: canvasRevision,
+      compositionId: composition.id,
+      filePath: composition.filePath,
+      graph: simpleTypedAnimationGraph("text", "opacity", {
+        from: "4",
+        to: "5",
+      }),
+      mode: "composition2d",
+    });
+
+    expect(sourceProject.compositionSources?.[composition.filePath]).toContain(
+      "from: 4",
     );
   });
 

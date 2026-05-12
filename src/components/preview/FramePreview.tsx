@@ -18,6 +18,7 @@ import {
   selectorBlue,
   selectorHandleSizePx,
   selectorOffsetPx,
+  videoExportFrameRate,
 } from "../../app/config";
 import {
   getRenderableTextSegments,
@@ -85,10 +86,16 @@ import type {
   TransitionVisualOverlay,
 } from "../../core/effects/types";
 import type {
+  AnimationGraph,
   GeneratedGeometry,
   GeometryPath,
   GeometryShape,
 } from "../../core/animationGraph/types";
+import {
+  createAnimationGraphRuntimePlan,
+  evaluateAnimationGraphRuntime,
+  type AnimationGraphRuntimePlan,
+} from "../../core/animationGraph/compiler";
 import type { PlaybackClock } from "../../app/types";
 import {
   getMasterTimelineClockSnapshot,
@@ -293,8 +300,16 @@ export const FramePreview = memo(function FramePreview({
   const interactiveEditingTextObjectId = composePlaybackActive
     ? null
     : editingTextObjectId;
-  const displayPreviewTime = previewTime;
-  const displaySceneTime = sceneTime;
+  const liveClockSnapshot = getMasterTimelineClockSnapshot();
+  const useLiveClockRenderTime =
+    (liveClockSnapshot.playing || liveClockSnapshot.source === "scrub") &&
+    Math.abs(liveClockSnapshot.sceneTime - sceneTime) >= 0.001;
+  const displaySceneTime = useLiveClockRenderTime
+    ? liveClockSnapshot.sceneTime
+    : sceneTime;
+  const displayPreviewTime = useLiveClockRenderTime
+    ? displaySceneTime - partStart + (part.trimStart ?? 0)
+    : previewTime;
   const visualAdjustment = useMemo(
     () =>
       applyAdjustmentLayersToVisualStyle(displaySceneTime, adjustmentLayers),
@@ -907,6 +922,7 @@ function applyLivePartPreviewTime(
   time: number,
 ) {
   if (!root) return;
+  const liveGraphPatches = evaluateLiveGraphObjectPatches(part, time);
   if (!part.background.hidden) {
     const evaluatedBackground = evaluateBackgroundLayer(
       part.background,
@@ -931,22 +947,134 @@ function applyLivePartPreviewTime(
         evaluatedBackground.fillStyle,
       );
     for (const element of evaluatedBackground.elements) {
+      const liveGraphPatch = liveGraphPatches.get(element.id);
       const target = root.querySelector<HTMLElement>(
         `[data-background-element-id="${cssEscape(element.id)}"]`,
       );
-      if (target) applyLivePreviewObject(target, element);
+      if (target) applyLivePreviewObject(target, liveGraphPatch ?? element);
     }
   }
   for (const object of part.objects) {
+    const liveGraphPatch = liveGraphPatches.get(object.id);
     const target = root.querySelector<HTMLElement>(
       `[data-clipper-render-object-id="${cssEscape(object.id)}"]`,
     );
     if (target)
       applyLivePreviewObject(
         target,
-        evaluateFrameObject(object, time, part.duration, { animations: true }),
+        liveGraphPatch ??
+          evaluateFrameObject(object, time, part.duration, {
+            animations: true,
+          }),
       );
   }
+}
+
+const liveGraphRuntimePlanCache = new WeakMap<
+  AnimationGraph,
+  Map<string, { signature: string; plan: AnimationGraphRuntimePlan }>
+>();
+
+function evaluateLiveGraphObjectPatches(part: Part, time: number) {
+  const patches = new Map<string, EvaluatedFrameObject>();
+  const graph = part.animationGraph;
+  if (!graph) return patches;
+  const sourceObject = findPartObjectById(part, graph.sourceObjectId);
+  if (!sourceObject) return patches;
+  const baseSourceObject = stripLiveGraphObjectOutput(sourceObject);
+  const plan = getLiveGraphRuntimePlan(graph, baseSourceObject);
+  const compiled = evaluateAnimationGraphRuntime(plan, {
+    time,
+    frame: readLiveGraphFrameIndex(time),
+  });
+  if (
+    compiled.diagnostics.some((diagnostic) => diagnostic.severity === "error")
+  )
+    return patches;
+
+  const graphAnimations = compiled.animations;
+  const generatedGeometry = compiled.generatedGeometry;
+  const hasSourceOutput = compiled.streams.some((stream) =>
+    stream.renderObject
+      ? stream.renderObject.id === baseSourceObject.id
+      : "objectId" in stream.structure &&
+        stream.structure.objectId === baseSourceObject.id,
+  );
+  const liveSourceObject: FrameObject = {
+    ...baseSourceObject,
+    hidden: !hasSourceOutput,
+    animations: [...(baseSourceObject.animations ?? []), ...graphAnimations],
+    generatedGeometry: generatedGeometry.length ? generatedGeometry : undefined,
+  };
+  patches.set(
+    liveSourceObject.id,
+    evaluateFrameObject(liveSourceObject, time, part.duration, {
+      animations: true,
+    }),
+  );
+  for (const generatedObject of compiled.generatedObjects) {
+    patches.set(
+      generatedObject.id,
+      evaluateFrameObject(generatedObject, time, part.duration, {
+        animations: true,
+      }),
+    );
+  }
+  return patches;
+}
+
+function getLiveGraphRuntimePlan(
+  graph: AnimationGraph,
+  sourceObject: FrameObject,
+) {
+  let graphPlans = liveGraphRuntimePlanCache.get(graph);
+  if (!graphPlans) {
+    graphPlans = new Map();
+    liveGraphRuntimePlanCache.set(graph, graphPlans);
+  }
+  const signature = getLiveGraphSourceObjectSignature(sourceObject);
+  const cached = graphPlans.get(sourceObject.id);
+  if (cached?.signature === signature) return cached.plan;
+  const plan = createAnimationGraphRuntimePlan(graph, sourceObject);
+  graphPlans.set(sourceObject.id, { signature, plan });
+  return plan;
+}
+
+function findPartObjectById(part: Part, objectId: string) {
+  return (
+    part.objects.find((object) => object.id === objectId) ??
+    part.background.elements.find((object) => object.id === objectId) ??
+    null
+  );
+}
+
+function stripLiveGraphObjectOutput(object: FrameObject): FrameObject {
+  return {
+    ...object,
+    hidden: object.generatedByGraph ? object.hidden : false,
+    animations: (object.animations ?? []).filter(
+      (animation) => !animation.id.startsWith("graph:"),
+    ),
+    generatedGeometry: undefined,
+  };
+}
+
+function getLiveGraphSourceObjectSignature(object: FrameObject) {
+  return JSON.stringify({
+    id: object.id,
+    type: object.type,
+    content: object.content,
+    richText: object.richText,
+    bounds: object.bounds,
+    style: object.style,
+    animations: (object.animations ?? []).filter(
+      (animation) => !animation.id.startsWith("graph:"),
+    ),
+  });
+}
+
+function readLiveGraphFrameIndex(time: number) {
+  return Math.max(0, Math.round(time * videoExportFrameRate));
 }
 
 function applyRenderClockStateToElement(

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import strictComposition2dGraphPanelSource from "./StrictComposition2dGraphPanel.tsx?raw";
 import {
   buildGraphNodes,
+  getComposeGraphDisplayTime,
   getGraphAnimationSources,
   getGraphEdgesAfterEdgeDrop,
   getGraphEdgeDropEdge,
@@ -64,6 +65,14 @@ describe("getGraphContentSize", () => {
     expect(
       getGraphContentSize([{ x: 310, y: 55, width: 6, height: 2 }], 5200, 900),
     ).toEqual({ width: 5832, height: 1170 });
+  });
+});
+
+describe("getComposeGraphDisplayTime", () => {
+  it("maps scene time into local composition graph time", () => {
+    expect(getComposeGraphDisplayTime(12, 10, 5)).toBe(2);
+    expect(getComposeGraphDisplayTime(8, 10, 5)).toBe(0);
+    expect(getComposeGraphDisplayTime(18, 10, 5)).toBe(5);
   });
 });
 
@@ -1738,8 +1747,9 @@ describe("composition2d strict Phase 5 editor behavior", () => {
       } as StrictAnimationGraphEdge,
     ];
 
-    expect(getStrictComposition2dPorts(node, edges).map((port) => port.id))
-      .toEqual(["in", "default", "output:1", "new-output"]);
+    expect(
+      getStrictComposition2dPorts(node, edges).map((port) => port.id),
+    ).toEqual(["in", "default", "output:1", "new-output"]);
     expect(
       getVisibleStrictComposition2dPorts(node, edges as any).map(
         (port) => port.id,
