@@ -5,7 +5,7 @@ import {
   getActiveCompositionPointerDrag,
   setActiveCompositionPointerDrag,
 } from "../../lib/pointerDrag";
-import { ComposeAnimationGraphPanel } from "./ComposeAnimationGraphPanel";
+import { ComposeAnimationTimelinePanel } from "./ComposeAnimationTimelinePanel";
 import { DirectTimelinePanel } from "./DirectTimelinePanel";
 import type { TimelinePanelProps } from "./timelineTypes";
 
@@ -127,8 +127,7 @@ export function TimelinePanel(props: TimelinePanelProps) {
             : "pointer-events-none invisible absolute inset-0"
         }
       >
-        <ComposeAnimationGraphPanel
-          active={props.mode === "compose"}
+        <ComposeAnimationTimelinePanel
           currentTime={composeCurrentTime}
           isPlaying={props.isPlaying}
           part={composePart}
@@ -140,21 +139,21 @@ export function TimelinePanel(props: TimelinePanelProps) {
           scrubbingRef={props.scrubbingRef}
           scrubSnapEnabled={props.scrubSnapEnabled}
           selectedObjectIds={composeSelectedObjectIds}
-          graphEnabled={props.composeGraphEnabled ?? true}
-          selectedGraphNodeIds={props.selectedGraphNodeIds ?? []}
+          timelineLayers={props.timelineLayers}
           timelineViewportState={props.timelineViewportState}
           onExitCompose={
             props.onExitCompose ?? (() => props.onModeChange("composition"))
           }
+          onRenameLayer={props.onRenameComposeAnimationLayer}
+          setAppContextMenu={props.setAppContextMenu}
           onScrub={props.onScrub}
           onScrubStart={props.onScrubStart}
           onScrubEnd={props.onScrubEnd}
+          onSelectObjects={props.onSelectComposeObjects}
+          onTimelineLayersChange={props.onTimelineLayersChange}
           onTimelineViewportStateChange={props.onTimelineViewportStateChange}
-          onUpdateGraph={props.onUpdateComposeAnimationGraph}
-          onComposeGraphScopeChange={props.onComposeGraphScopeChange}
-          onGraphEnabledChange={props.onComposeGraphEnabledChange}
-          onSelectGraphNodes={props.onSelectGraphNodes}
-          onInspectGraphNode={props.onInspectGraphNode}
+          onUpdateBackgroundAnimation={props.onUpdateComposeBackgroundAnimation}
+          onUpdateObjectAnimation={props.onUpdateComposeObjectAnimation}
         />
       </div>
       <div

@@ -9,7 +9,7 @@ import {
   Trash2,
   Underline,
 } from "lucide-react";
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   MAX_PART_DURATION_SECONDS,
   FRAME_HEIGHT,
@@ -19,13 +19,13 @@ import {
   type Bounds,
   type CompositionRenderMode,
   type FrameObject,
+  type LayerAnimation,
   type MotionEase,
   type Part,
   type PartFrame,
   type Point,
   type TransitionLayer,
 } from "../../core/types";
-import type { GraphCompositionMode } from "../../core/graphSockets";
 import { clamp, roundTenth, roundTwo } from "../../core/math";
 import {
   getAdjustmentEffectPackage,
@@ -75,26 +75,28 @@ import {
 import { clipperHost } from "../../app/clipperHost";
 import { Coordinate2DField, PickButton } from "./Coordinate2DField";
 import { EffectControls } from "./EffectControls";
-import { GraphParameterEditor } from "../timeline/GraphParameterEditor";
 import {
   defaultMotionEaseSelectValue,
   EaseSelectItems,
   motionEaseSelectValue,
 } from "../timeline/EaseSelectItems";
 import {
-  buildGraphNodes,
-  getSelectedComposition2dDisplayGraph,
-  getSelectedComposition2dLayerGraph,
-  getGraphNodeParameterEditorSchema,
-  getRenderableEdges,
-  type GraphNode,
-} from "../timeline/ComposeAnimationGraphPanel";
-import { isStrictComposition2dGraph } from "../timeline/StrictComposition2dGraphPanel";
-import {
   graphicBoundsKeys,
   graphicDefaultFontFamily,
   graphicTextDefaults,
 } from "../../core/graphics/inspectorSettings";
+import {
+  getComposeAnimationAttributeKeyframeAtTime,
+  getComposeAnimationAttributeTracks,
+  getNearestComposeAnimationKeyframeValue,
+  removeComposeAnimationAttributeKeyframe,
+  upsertComposeAnimationAttributeKeyframe,
+  type ComposeAnimationAttributeKey,
+} from "../timeline/composeAnimationModel";
+import {
+  getMasterTimelineClockSnapshot,
+  subscribeMasterTimelineClock,
+} from "../../app/features/playback/playbackTimeStore";
 
 const defaultFontFamily = graphicDefaultFontFamily;
 const defaultFontOption = { value: defaultFontFamily, label: "System" };
@@ -228,112 +230,6 @@ export function FrameInspector({
   );
 }
 
-export function GraphNodeInspector({
-  part,
-  selectedObject,
-  nodeId,
-  onParameterChange,
-  onSourceObjectChange,
-  onSourceObjectPreview,
-}: {
-  part: Part;
-  selectedObject: FrameObject | null;
-  nodeId: string;
-  onParameterChange: (
-    nodeId: string,
-    key: string,
-    value: string,
-    options?: {
-      history?: boolean;
-      mode?: GraphCompositionMode;
-      layerId?: string;
-    },
-  ) => void;
-  onSourceObjectChange?: (
-    updater: (object: FrameObject) => FrameObject,
-  ) => void;
-  onSourceObjectPreview?: (
-    updater: (object: FrameObject) => FrameObject,
-  ) => void;
-}) {
-  const graph = part.animationGraph;
-  const graphMode: GraphCompositionMode = "composition2d";
-  const objects = selectedObject ? [selectedObject] : [];
-  const displayGraph = selectedObject
-    ? getSelectedComposition2dDisplayGraph(
-        graph as any,
-        selectedObject,
-        graphMode,
-      )
-    : getSelectedComposition2dLayerGraph(graph as any, undefined, graphMode);
-  const nodes = buildGraphNodes(
-    objects,
-    displayGraph,
-    5200,
-    900,
-    selectedObject?.id ?? "__empty__",
-    "composition2d",
-  );
-  const node = nodes.find((item) => item.id === nodeId) ?? null;
-  if (!node) return <EmptyInspector />;
-  if (
-    isGraphSourceObjectInspectorNode(node) &&
-    selectedObject &&
-    onSourceObjectChange
-  )
-    return (
-      <ObjectInspector
-        object={selectedObject}
-        onChange={onSourceObjectChange}
-        onPreview={onSourceObjectPreview}
-      />
-    );
-  const graphParameters =
-    displayGraph && !isStrictComposition2dGraph(displayGraph)
-      ? displayGraph.parameters?.[node.id]
-      : undefined;
-  const schema = node
-    ? getGraphNodeParameterEditorSchema(
-        node,
-        graphParameters,
-        displayGraph
-          ? getRenderableEdges(displayGraph, nodes, objects)
-          : undefined,
-        displayGraph && isStrictComposition2dGraph(displayGraph)
-          ? displayGraph
-          : undefined,
-      )
-    : null;
-  return (
-    <div className="grid gap-3">
-      {schema ? (
-        <GraphParameterEditor
-          schema={schema}
-          variant="inspector"
-          onChange={(key, value, options) =>
-            onParameterChange(node.id, key, value, {
-              ...options,
-              mode: graphMode,
-              layerId:
-                graphMode === "composition2d" ? selectedObject?.id : undefined,
-            })
-          }
-        />
-      ) : (
-        <div className={`grid gap-1.5 ${mutedCaps}`}>
-          No editable parameters.
-        </div>
-      )}
-    </div>
-  );
-}
-
-export function isGraphSourceObjectInspectorNode(
-  node: Pick<GraphNode, "kind" | "typedNode">,
-) {
-  return node.typedNode?.kind === "source" || node.kind === "layer";
-}
-
 function FontSelector({
   value,
   onChange,
@@ -385,15 +281,44 @@ function FontSelector({
 
 export const ObjectInspector = memo(function ObjectInspector({
   object,
+  currentTime = 0,
+  disableNumberScrub = false,
   lockBounds = false,
   onChange,
   onPreview,
 }: {
   object: FrameObject;
+  currentTime?: number;
+  disableNumberScrub?: boolean;
   lockBounds?: boolean;
   onChange: (updater: (object: FrameObject) => FrameObject) => void;
   onPreview?: (updater: (object: FrameObject) => FrameObject) => void;
 }) {
+  // In compose mode, subscribe to the live scrub clock but only re-render
+  // when the time changes at 3-decimal precision (matching keyframe storage).
+  const lastRoundedRef = useRef(Math.round(currentTime * 1000) / 1000);
+  const liveTimeRef = useRef(currentTime);
+  const liveTimeSnapshot = useSyncExternalStore(
+    (onStoreChange) => {
+      if (!disableNumberScrub) return () => {};
+      return subscribeMasterTimelineClock(() => {
+        const snap = getMasterTimelineClockSnapshot();
+        if (snap.source !== "scrub") return;
+        const rounded = Math.round(snap.displayTime * 1000) / 1000;
+        if (rounded === lastRoundedRef.current) return;
+        lastRoundedRef.current = rounded;
+        liveTimeRef.current = snap.displayTime;
+        onStoreChange();
+      });
+    },
+    () => lastRoundedRef.current,
+  );
+  const effectiveTime = disableNumberScrub
+    ? (getMasterTimelineClockSnapshot().source === "scrub"
+        ? liveTimeRef.current
+        : currentTime)
+    : currentTime;
+  void liveTimeSnapshot; // consumed via liveTimeRef to avoid stale closure
   const isText = object.type === "text";
   const isRect = object.type === "rect";
   const colorStyleEntries = getEditableColorStyleEntries(object.style).filter(
@@ -532,25 +457,343 @@ export const ObjectInspector = memo(function ObjectInspector({
     return `${textButtonBase} ${active ? "border-[var(--clipper-accent-strong)] bg-[rgb(var(--clipper-accent-rgb)/0.12)] text-white" : "border-[#2d313b] bg-[#171920]"}`;
   }
 
+  function keyframeValue(
+    key: ComposeAnimationAttributeKey,
+    fallback: number | string,
+  ) {
+    const layer = {
+      id: object.id,
+      name: object.name || object.id,
+      kind: "object" as const,
+      object,
+      animations: object.animations,
+    };
+    const track = getComposeAnimationAttributeTracks(layer).find(
+      (item) => item.key === key,
+    );
+    return track
+      ? (getNearestComposeAnimationKeyframeValue(track, effectiveTime) ??
+          fallback)
+      : fallback;
+  }
+
+  function keyframeAtCurrentTime(key: ComposeAnimationAttributeKey) {
+    const layer = {
+      id: object.id,
+      name: object.name || object.id,
+      kind: "object" as const,
+      object,
+      animations: object.animations,
+    };
+    const track = getComposeAnimationAttributeTracks(layer).find(
+      (item) => item.key === key,
+    );
+    return track
+      ? getComposeAnimationAttributeKeyframeAtTime(track, effectiveTime)
+      : null;
+  }
+
+  function updateObjectAnimations(
+    updater: (animations: LayerAnimation[]) => LayerAnimation[],
+  ) {
+    onChange((current) => ({
+      ...current,
+      animations: updater(current.animations ?? []),
+    }));
+  }
+
+  function toggleKeyframe(
+    key: ComposeAnimationAttributeKey,
+    value: number | string,
+  ) {
+    const existing = keyframeAtCurrentTime(key);
+    updateObjectAnimations((animations) =>
+      existing
+        ? removeComposeAnimationAttributeKeyframe(
+            animations,
+            key,
+            existing.time,
+            MAX_PART_DURATION_SECONDS,
+          )
+        : upsertComposeAnimationAttributeKeyframe(
+            animations,
+            key,
+            value,
+            effectiveTime,
+            MAX_PART_DURATION_SECONDS,
+          ),
+    );
+  }
+
+  function commitKeyframedValue(
+    key: ComposeAnimationAttributeKey | undefined,
+    value: string,
+    fallbackCommit: (value: string) => void,
+    type: "number" | "text",
+  ) {
+    fallbackCommit(value);
+    if (!key) return;
+    const nextValue = type === "number" ? Number(value) : value;
+    if (type === "number" && !Number.isFinite(nextValue)) return;
+    updateObjectAnimations((animations) =>
+      upsertComposeAnimationAttributeKeyframe(
+        animations,
+        key,
+        nextValue,
+        effectiveTime,
+        MAX_PART_DURATION_SECONDS,
+      ),
+    );
+  }
+
+  function KeyframedInput({
+    label,
+    animationKey,
+    value,
+    type = "number",
+    min,
+    max,
+    step,
+    onCommit,
+    onPreviewNumber,
+  }: {
+    label: string;
+    animationKey?: ComposeAnimationAttributeKey;
+    value: number | string;
+    type?: "number" | "text";
+    min?: number;
+    max?: number;
+    step?: number;
+    onCommit: (value: string) => void;
+    onPreviewNumber?: (value: number) => void;
+  }) {
+    const fieldValue = animationKey
+      ? keyframeValue(animationKey, value)
+      : value;
+    const active = animationKey
+      ? Boolean(keyframeAtCurrentTime(animationKey))
+      : false;
+    return (
+      <label className={`grid gap-1.5 ${mutedCaps}`}>
+        {label}
+        <span className="relative block">
+          <Input
+            className={`pr-8 ${active ? "border-white" : ""}`}
+            type={type}
+            min={min}
+            max={max}
+            step={step}
+            numberScrubMode={
+              type === "number"
+                ? disableNumberScrub
+                  ? "none"
+                  : "preview"
+                : undefined
+            }
+            numberScrubCommitThrottleMs={16}
+            value={fieldValue}
+            onNumberScrubPreview={
+              disableNumberScrub ? undefined : onPreviewNumber
+            }
+            onChange={(event) =>
+              commitKeyframedValue(
+                animationKey,
+                event.target.value,
+                onCommit,
+                type,
+              )
+            }
+          />
+          {animationKey ? (
+            <button
+              aria-label={
+                active
+                  ? `Remove ${label} keyframe at playhead`
+                  : `Add ${label} keyframe at playhead`
+              }
+              aria-pressed={active}
+              className={`absolute right-3 top-1/2 h-2 w-2 -translate-y-1/2 rotate-45 rounded-[1px] border transition hover:scale-125 ${
+                active
+                  ? "border-white bg-white shadow-[0_0_0_1px_rgba(255,255,255,0.16)]"
+                  : "border-[#6f7684] bg-[#12151d] hover:border-white"
+              }`}
+              title={
+                active
+                  ? `Remove ${label} keyframe at playhead`
+                  : `Add ${label} keyframe at playhead`
+              }
+              type="button"
+              onClick={(event) => {
+                event.preventDefault();
+                toggleKeyframe(animationKey, fieldValue);
+              }}
+            />
+          ) : null}
+        </span>
+      </label>
+    );
+  }
+
   return (
     <div className="grid gap-3">
       {lockBounds ? null : (
         <div className="grid grid-cols-2 gap-2">
           {graphicBoundsKeys.map((key) => (
-            <label className={`grid gap-1.5 ${mutedCaps}`} key={key}>
-              {key}
-              <Input
-                type="number"
-                numberScrubMode="preview"
-                numberScrubCommitThrottleMs={16}
-                value={object.bounds[key]}
-                onNumberScrubPreview={(value) => previewBounds(key, value)}
-                onChange={(event) => updateBounds(key, event.target.value)}
-              />
-            </label>
+            <KeyframedInput
+              key={key}
+              label={key}
+              animationKey={key}
+              value={object.bounds[key]}
+              onPreviewNumber={(value) => previewBounds(key, value)}
+              onCommit={(value) => updateBounds(key, value)}
+            />
           ))}
         </div>
       )}
+      <div className="grid gap-2">
+        <span className={mutedCaps}>Effects</span>
+        <div className="grid grid-cols-2 gap-2">
+          <KeyframedInput
+            label="Opacity"
+            animationKey="opacity"
+            value={Number(object.style.opacity ?? 1)}
+            min={0}
+            max={1}
+            step={0.01}
+            onPreviewNumber={(value) => previewStyleNumber("opacity", value)}
+            onCommit={(value) => updateStyleNumber("opacity", value)}
+          />
+          <KeyframedInput
+            label="Blur"
+            animationKey="blur"
+            value={0}
+            min={0}
+            step={0.1}
+            onCommit={() => undefined}
+          />
+          <KeyframedInput
+            label="Scale"
+            animationKey="scale"
+            value={1}
+            min={0}
+            step={0.01}
+            onCommit={() => undefined}
+          />
+          <KeyframedInput
+            label="Scale X"
+            animationKey="scaleX"
+            value={1}
+            min={0}
+            step={0.01}
+            onCommit={() => undefined}
+          />
+          <KeyframedInput
+            label="Scale Y"
+            animationKey="scaleY"
+            value={1}
+            min={0}
+            step={0.01}
+            onCommit={() => undefined}
+          />
+          <KeyframedInput
+            label="Rotation"
+            animationKey="rotate"
+            value={0}
+            step={1}
+            onCommit={() => undefined}
+          />
+          <KeyframedInput
+            label="Rotate X"
+            animationKey="rotateX"
+            value={0}
+            step={1}
+            onCommit={() => undefined}
+          />
+          <KeyframedInput
+            label="Rotate Y"
+            animationKey="rotateY"
+            value={0}
+            step={1}
+            onCommit={() => undefined}
+          />
+          <KeyframedInput
+            label="Rotate Z"
+            animationKey="rotateZ"
+            value={0}
+            step={1}
+            onCommit={() => undefined}
+          />
+          <KeyframedInput
+            label="Skew X"
+            animationKey="skewX"
+            value={0}
+            step={1}
+            onCommit={() => undefined}
+          />
+          <KeyframedInput
+            label="Skew Y"
+            animationKey="skewY"
+            value={0}
+            step={1}
+            onCommit={() => undefined}
+          />
+          <KeyframedInput
+            label="Perspective"
+            animationKey="transformPerspective"
+            value={0}
+            min={0}
+            step={1}
+            onCommit={() => undefined}
+          />
+          <KeyframedInput
+            label="Z"
+            animationKey="z"
+            value={0}
+            step={1}
+            onCommit={() => undefined}
+          />
+          <KeyframedInput
+            label="Path Offset"
+            animationKey="pathOffset"
+            value={0}
+            step={0.01}
+            onCommit={() => undefined}
+          />
+          <KeyframedInput
+            label="Path Length"
+            animationKey="pathLength"
+            value={1}
+            min={0}
+            step={0.01}
+            onCommit={() => undefined}
+          />
+          <KeyframedInput
+            label="Path Spacing"
+            animationKey="pathSpacing"
+            value={0}
+            step={0.01}
+            onCommit={() => undefined}
+          />
+          <KeyframedInput
+            label="Colour"
+            animationKey="color"
+            value={String(object.style.color ?? textColor)}
+            type="text"
+            onCommit={(value) => updateStyleValue("color", value)}
+          />
+          <KeyframedInput
+            label="Background"
+            animationKey="backgroundColor"
+            value={String(
+              object.style.backgroundColor ??
+                object.style.background ??
+                rectBackground,
+            )}
+            type="text"
+            onCommit={(value) => updateStyleValue("backgroundColor", value)}
+          />
+        </div>
+      </div>
       {isRect ? (
         <div className={`grid gap-1.5 ${mutedCaps}`}>
           <span>Background</span>

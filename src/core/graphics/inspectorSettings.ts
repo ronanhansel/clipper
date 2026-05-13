@@ -1,10 +1,22 @@
-import type {
-  AnimationGraphControlField,
-  AnimationGraphControlGroup,
-} from "../animationGraph/types";
-
 export const graphicDefaultFontFamily =
   "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+
+type GraphicControlField = {
+  key: string;
+  label: string;
+  type: "number" | "color" | "text";
+  defaultValue: string | number;
+  min?: number;
+  max?: number;
+  step?: number;
+};
+
+type GraphicControlGroup = {
+  id: string;
+  label: string;
+  columns?: number;
+  fields: readonly GraphicControlField[];
+};
 
 export const graphicBoundsKeys = ["x", "y", "width", "height"] as const;
 
@@ -61,7 +73,7 @@ export const graphicHighlightDefaults = {
 const positionFields = [
   { key: "x", label: "x", type: "number", defaultValue: 0 },
   { key: "y", label: "y", type: "number", defaultValue: 0 },
-] satisfies readonly AnimationGraphControlField[];
+] satisfies readonly GraphicControlField[];
 
 const sizeFields = [
   { key: "width", label: "width", type: "number", defaultValue: 100, min: 0 },
@@ -72,7 +84,7 @@ const sizeFields = [
     defaultValue: 100,
     min: 0,
   },
-] satisfies readonly AnimationGraphControlField[];
+] satisfies readonly GraphicControlField[];
 
 const appearanceFields = [
   {
@@ -90,7 +102,7 @@ const appearanceFields = [
     max: 1,
     step: 0.01,
   },
-] satisfies readonly AnimationGraphControlField[];
+] satisfies readonly GraphicControlField[];
 
 export const graphicRectangleControlGroups = [
   {
@@ -113,7 +125,7 @@ export const graphicRectangleControlGroups = [
       },
     ],
   },
-] satisfies readonly AnimationGraphControlGroup[];
+] satisfies readonly GraphicControlGroup[];
 
 export const graphicCircleControlGroups = [
   {
@@ -136,7 +148,7 @@ export const graphicCircleControlGroups = [
     label: "Appearance",
     fields: appearanceFields,
   },
-] satisfies readonly AnimationGraphControlGroup[];
+] satisfies readonly GraphicControlGroup[];
 
 export const graphicTextControlGroups = [
   {
@@ -233,7 +245,7 @@ export const graphicTextControlGroups = [
       },
     ],
   },
-] satisfies readonly AnimationGraphControlGroup[];
+] satisfies readonly GraphicControlGroup[];
 
 export const graphicHighlightControlGroups = [
   {
@@ -264,11 +276,9 @@ export const graphicHighlightControlGroups = [
       },
     ],
   },
-] satisfies readonly AnimationGraphControlGroup[];
+] satisfies readonly GraphicControlGroup[];
 
-export function graphicControlDefaults(
-  groups: readonly AnimationGraphControlGroup[],
-) {
+export function graphicControlDefaults(groups: readonly GraphicControlGroup[]) {
   return Object.fromEntries(
     groups.flatMap((group) =>
       group.fields.map((field) => [field.key, field.defaultValue]),

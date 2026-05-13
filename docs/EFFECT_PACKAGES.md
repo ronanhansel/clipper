@@ -40,7 +40,6 @@ Practical visual effects should include all reusable artifact logic in package/c
 - `group` or `groups` controls effect library placement. Prefer `groups` for nested menus.
 - `defaultParams` must include every inspector control default.
 - `paramControls` and `pointControls` drive inspector UI. Do not hardcode controls in React panels.
-- `graph` optionally declares strict animation graph metadata: `label`, `acceptedStructureKinds`, `defaultParams`, and `paramControls`. Graph effect nodes are discovered from this metadata through registry APIs.
 - Use shared control types from `src/core/effects/types.ts`; extend those types before inventing UI-specific shapes.
 
 ## Manifest Parser Limits
@@ -90,7 +89,6 @@ Use these APIs instead of editing call sites:
 - `registerEffectCategoryDeclaration(declaration)` registers category library/timeline/default metadata.
 - `registerEffectCategoryMetadata(metadata)` updates category library metadata while preserving existing timeline/default metadata.
 - `getEffectPackage(effectId)` and category-specific getters resolve packages.
-- `getGraphEffectPackages()` resolves effect packages that expose strict graph metadata.
 - `getEffectLibrarySections()` drives effect library sections and labels.
 - `getEffectTimelineMetadata(category)` drives timeline style/drop/lane metadata.
 - `getEffectPackageTimelineDefaultDuration(effectId)` resolves package default duration before timeline fallback duration.
@@ -209,7 +207,6 @@ Post-process example:
 Limits:
 
 - No runtime plugin loader, npm auto-discovery, sandbox, remote install flow, or user-managed package directory exists yet.
-- Programmatic animation graph creation is exposed only through internal TypeScript modules such as `src/core/animationGraph/builder.ts`; it is not a runtime plugin loader and does not execute user scripts.
 - External contribution means code loaded by app build/runtime and registered through in-process APIs.
 - Effects cannot add bespoke inspector widgets, panel sections, timeline lanes, or export branches without first adding generic package metadata and shared UI/runtime support.
 

@@ -276,6 +276,7 @@ export function LayerLabel({
   compactControls,
   hideHiddenControl = false,
   hideLockControl,
+  centered = false,
   menuOpen,
   canMoveDown = true,
   canMoveUp = true,
@@ -305,6 +306,7 @@ export function LayerLabel({
   compactControls: boolean;
   hideHiddenControl?: boolean;
   hideLockControl: boolean;
+  centered?: boolean;
   menuOpen?: boolean;
   canMoveDown?: boolean;
   canMoveUp?: boolean;
@@ -408,7 +410,7 @@ export function LayerLabel({
 
   return (
     <div
-      className={`relative grid h-full grid-cols-[minmax(0,1fr)_auto] items-start gap-2 pt-2 transition ${hidden ? "opacity-45" : locked ? "opacity-70" : ""}`}
+      className={`relative grid h-full grid-cols-[minmax(0,1fr)_auto] ${centered ? "items-center" : "items-start pt-2"} gap-2 transition ${hidden ? "opacity-45" : locked ? "opacity-70" : ""}`}
       onDragOver={locked ? undefined : onEffectDragOver}
       onDrop={locked ? undefined : onEffectDrop}
     >

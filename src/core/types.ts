@@ -1,5 +1,3 @@
-import type { AnimationGraph as StrictAnimationGraph } from "./animationGraph/types";
-
 export const FRAME_WIDTH = 1920;
 export const FRAME_HEIGHT = 1080;
 export const MAX_PART_DURATION_SECONDS = 60;
@@ -67,6 +65,12 @@ export type LayerAnimation = {
       | readonly [number, number]
       | readonly [number, number, number, ...number[]];
     y?:
+      | readonly [number, number]
+      | readonly [number, number, number, ...number[]];
+    width?:
+      | readonly [number, number]
+      | readonly [number, number, number, ...number[]];
+    height?:
       | readonly [number, number]
       | readonly [number, number, number, ...number[]];
     z?:
@@ -157,8 +161,6 @@ export type FrameObject = {
   hidden?: boolean;
   locked?: boolean;
   animations?: LayerAnimation[];
-  generatedGeometry?: import("./animationGraph/types").GeneratedGeometry[];
-  generatedByGraph?: boolean;
 };
 
 export type PartFrame = {
@@ -434,7 +436,6 @@ export type CompositionClip = TimelineMarkerMetadata & {
   objects: FrameObject[];
   snapshot: PartSnapshotLine[];
   motionMarkers: MotionMarker[];
-  animationGraph?: StrictAnimationGraph;
   renderMode?: CompositionRenderMode;
 };
 
@@ -460,202 +461,6 @@ export type TimelineClip = {
   prerender?: boolean;
   motionMarkers?: MotionMarker[];
   renderMode?: CompositionRenderMode;
-};
-
-export type AnimationGraphPort = "top" | "right" | "bottom" | "left";
-
-export type AnimationGraphNodePosition = {
-  x: number;
-  y: number;
-};
-
-export type AnimationGraphEdge = {
-  id: string;
-  fromNodeId: string;
-  fromPort: AnimationGraphPort;
-  toNodeId: string;
-  toPort: AnimationGraphPort;
-  fromSocket?: string;
-  toSocket?: string;
-};
-
-export type AnimationGraphValueType =
-  | "Structure.Shape"
-  | "Structure.TextObject"
-  | "Structure.RichTextObject"
-  | "Structure.TextTokens"
-  | "Structure.Object"
-  | "Value.String"
-  | "Value.Number"
-  | "Value.Color"
-  | "Value.Boolean"
-  | "Value.StringArray"
-  | "Value.NumberArray"
-  | "Effect.CSSEffect"
-  | "AnimationController"
-  | "CompiledAnimation";
-
-export type TypedAnimationGraphSocket = {
-  id: string;
-  label: string;
-  type: AnimationGraphValueType;
-  accepts?: readonly AnimationGraphValueType[];
-};
-
-export type AnimationGraphTimeConfig = {
-  delay: number;
-  duration: number;
-  ease: MotionEase;
-  repeat?: number;
-  repeatType?: "loop" | "reverse" | "mirror";
-  schedule: "relative" | "absolute";
-};
-
-export type AnimationGraphSplitConfig = {
-  mode: "word" | "character" | "pattern";
-  pattern?: string;
-  stagger: number;
-  order: "forward" | "reverse" | "center";
-  repeatScope: "sequence" | "item";
-};
-
-export type AnimationGraphConditionRule = {
-  target: "value" | "type";
-  operator: "equals" | "contains" | "notContains" | "gt" | "lt" | "gte" | "lte";
-  value: string | number;
-  action: "setDelay" | "sendToOutput" | "duplicateToOutput";
-  output: string;
-  delay?: number;
-};
-
-export type LegacyAnimationGraphConditionConfig = {
-  rules: AnimationGraphConditionRule[];
-};
-
-export type AnimationGraphCssEffectConfig = {
-  property: string;
-  from?: string | number;
-  to?: string | number;
-  values: Record<string, string | number | boolean>;
-};
-
-export type AnimationGraphAnimationConfig = {
-  effects: AnimationGraphCssEffectConfig[];
-};
-
-export type TypedAnimationGraphNodeBase<Kind extends string, Config> = {
-  id: string;
-  kind: Kind;
-  label: string;
-  position: AnimationGraphNodePosition;
-  x: number;
-  y: number;
-  inputs: readonly TypedAnimationGraphSocket[];
-  outputs: readonly TypedAnimationGraphSocket[];
-  config: Config;
-};
-
-export type AnimationGraphSourceNode = TypedAnimationGraphNodeBase<
-  "source",
-  { objectId: string }
->;
-export type AnimationGraphTimeNode = TypedAnimationGraphNodeBase<
-  "time",
-  AnimationGraphTimeConfig
->;
-export type AnimationGraphSplitNode = TypedAnimationGraphNodeBase<
-  "split",
-  AnimationGraphSplitConfig
->;
-export type AnimationGraphConditionNode = TypedAnimationGraphNodeBase<
-  "condition",
-  LegacyAnimationGraphConditionConfig
->;
-export type AnimationGraphAnimationNode = TypedAnimationGraphNodeBase<
-  "effect",
-  AnimationGraphAnimationConfig
->;
-export type AnimationGraphGroupNode = TypedAnimationGraphNodeBase<
-  "group",
-  { groupId: string }
->;
-export type AnimationGraphOutNode = TypedAnimationGraphNodeBase<"out", {}>;
-
-export type TypedAnimationGraphNode =
-  | AnimationGraphSourceNode
-  | AnimationGraphTimeNode
-  | AnimationGraphSplitNode
-  | AnimationGraphConditionNode
-  | AnimationGraphAnimationNode
-  | AnimationGraphGroupNode
-  | AnimationGraphOutNode;
-
-export type TypedAnimationGraphLayerState = {
-  id: string;
-  nodes: Record<string, TypedAnimationGraphNode>;
-  edges: AnimationGraphEdge[];
-  customNodes?: Record<string, AnimationGraphCustomNode>;
-  parameters?: Record<string, Record<string, string>>;
-  groups?: Record<string, AnimationGraphGroup>;
-};
-
-export type TypedAnimationGraphState = {
-  /** Compatibility shell. Composition2d graph data is owned by `layers`. */
-  nodes: Record<string, TypedAnimationGraphNode>;
-  edges: AnimationGraphEdge[];
-  layers?: TypedAnimationGraphLayerState[];
-  customNodes?: Record<string, AnimationGraphCustomNode>;
-  parameters?: Record<string, Record<string, string>>;
-  groups?: Record<string, AnimationGraphGroup>;
-  viewport?: AnimationGraphState["viewport"];
-  viewports?: AnimationGraphState["viewports"];
-};
-
-export type AnimationGraphCustomNode = {
-  kind:
-    | "effect"
-    | "effectMix"
-    | "time"
-    | "split"
-    | "condition"
-    | "group"
-    | "oscillate";
-  label: string;
-  scopeKey: string;
-  details?: Record<string, string>;
-};
-
-export type AnimationGraphGroup = {
-  id: string;
-  name: string;
-  nodes: Record<string, AnimationGraphNodePosition>;
-  edges: AnimationGraphEdge[];
-  customNodes?: Record<string, AnimationGraphCustomNode>;
-  parameters?: Record<string, Record<string, string>>;
-  inNodeId?: string;
-  outNodeId: string;
-};
-
-export type AnimationGraphState = {
-  nodes: Record<string, AnimationGraphNodePosition>;
-  edges: AnimationGraphEdge[];
-  customNodes?: Record<string, AnimationGraphCustomNode>;
-  groups?: Record<string, AnimationGraphGroup>;
-  parameters?: Record<string, Record<string, string>>;
-  /** Legacy shared graph viewport. New graph views should use per-layer `viewports`. */
-  viewport?: {
-    scrollLeft: number;
-    scrollTop: number;
-    zoom?: number;
-  };
-  viewports?: Record<
-    string,
-    {
-      scrollLeft: number;
-      scrollTop: number;
-      zoom?: number;
-    }
-  >;
 };
 
 export type TimelineSettings = {

@@ -85,17 +85,6 @@ import type {
   TransitionSequenceStyle,
   TransitionVisualOverlay,
 } from "../../core/effects/types";
-import type {
-  AnimationGraph,
-  GeneratedGeometry,
-  GeometryPath,
-  GeometryShape,
-} from "../../core/animationGraph/types";
-import {
-  createAnimationGraphRuntimePlan,
-  evaluateAnimationGraphRuntime,
-  type AnimationGraphRuntimePlan,
-} from "../../core/animationGraph/compiler";
 import type { PlaybackClock } from "../../app/types";
 import {
   getMasterTimelineClockSnapshot,
@@ -132,44 +121,7 @@ type ExportTileFrameBounds = {
   height: number;
 };
 
-export const FramePreview = memo(function FramePreview({
-  cameraRef,
-  dragBox,
-  dragSelectionBoxRef,
-  framePickPoint,
-  focusPicking,
-  trackerPicking,
-  canSelectObjects,
-  cameraTransform,
-  frameViewportRef,
-  frameScale,
-  isPlaying,
-  part,
-  partStart,
-  adjustmentLayers,
-  previewTime,
-  sceneTime,
-  timelineMode,
-  motionLayers,
-  hiddenMotionLayerIds,
-  pickingTranslationPosition,
-  pickingZoomFocus,
-  compHidden,
-  selectedObjects,
-  marqueeDragging,
-  editingTextObjectId,
-  onFramePointerCancel,
-  onFramePointerDown,
-  onFramePointerDownCapture,
-  onFramePointerMove,
-  onFramePointerUp,
-  onObjectPointerDown,
-  onObjectResizePointerDown,
-  onObjectCornerRadiusChange,
-  onTextEditCommit,
-  onTextObjectDoubleClick,
-  onTrackerTargetPick,
-}: {
+type FramePreviewProps = {
   cameraRef: RefObject<HTMLDivElement | null>;
   dragBox: Bounds | null;
   dragSelectionBoxRef: RefObject<HTMLDivElement | null>;
@@ -222,7 +174,46 @@ export const FramePreview = memo(function FramePreview({
     object: FrameObject,
   ) => void;
   onTrackerTargetPick: (objectId: string) => void;
-}) {
+};
+
+export const FramePreview = memo(function FramePreview({
+  cameraRef,
+  dragBox,
+  dragSelectionBoxRef,
+  framePickPoint,
+  focusPicking,
+  trackerPicking,
+  canSelectObjects,
+  cameraTransform,
+  frameViewportRef,
+  frameScale,
+  isPlaying,
+  part,
+  partStart,
+  adjustmentLayers,
+  previewTime,
+  sceneTime,
+  timelineMode,
+  motionLayers,
+  hiddenMotionLayerIds,
+  pickingTranslationPosition,
+  pickingZoomFocus,
+  compHidden,
+  selectedObjects,
+  marqueeDragging,
+  editingTextObjectId,
+  onFramePointerCancel,
+  onFramePointerDown,
+  onFramePointerDownCapture,
+  onFramePointerMove,
+  onFramePointerUp,
+  onObjectPointerDown,
+  onObjectResizePointerDown,
+  onObjectCornerRadiusChange,
+  onTextEditCommit,
+  onTextObjectDoubleClick,
+  onTrackerTargetPick,
+}: FramePreviewProps) {
   const exportTileViewport = (
     arguments[0] as { exportTileViewport?: ExportTileViewport }
   ).exportTileViewport;
@@ -834,7 +825,32 @@ export const FramePreview = memo(function FramePreview({
         : null}
     </div>
   );
-});
+}, areFramePreviewPropsEqual);
+
+function areFramePreviewPropsEqual(
+  prev: FramePreviewProps,
+  next: FramePreviewProps,
+): boolean {
+  // During scrubbing the render clock drives visual updates imperatively.
+  // Skip React re-renders when only time-derived props changed.
+  if (getMasterTimelineClockSnapshot().source === "scrub") {
+    const timeOnlyChange =
+      prev.sceneTime !== next.sceneTime ||
+      prev.previewTime !== next.previewTime;
+    if (timeOnlyChange) {
+      // Check every other prop is unchanged
+      const keys = Object.keys(next) as (keyof typeof next)[];
+      const nonTimeChanged = keys.some(
+        (k) =>
+          k !== "sceneTime" &&
+          k !== "previewTime" &&
+          prev[k] !== next[k],
+      );
+      if (!nonTimeChanged) return true;
+    }
+  }
+  return false;
+}
 
 class FramePreviewRenderBoundary extends ReactComponent<
   { children: ReactNode; filePath: string; resetKey: string },
@@ -922,7 +938,6 @@ function applyLivePartPreviewTime(
   time: number,
 ) {
   if (!root) return;
-  const liveGraphPatches = evaluateLiveGraphObjectPatches(part, time);
   if (!part.background.hidden) {
     const evaluatedBackground = evaluateBackgroundLayer(
       part.background,
@@ -947,134 +962,24 @@ function applyLivePartPreviewTime(
         evaluatedBackground.fillStyle,
       );
     for (const element of evaluatedBackground.elements) {
-      const liveGraphPatch = liveGraphPatches.get(element.id);
       const target = root.querySelector<HTMLElement>(
         `[data-background-element-id="${cssEscape(element.id)}"]`,
       );
-      if (target) applyLivePreviewObject(target, liveGraphPatch ?? element);
+      if (target) applyLivePreviewObject(target, element);
     }
   }
   for (const object of part.objects) {
-    const liveGraphPatch = liveGraphPatches.get(object.id);
     const target = root.querySelector<HTMLElement>(
       `[data-clipper-render-object-id="${cssEscape(object.id)}"]`,
     );
     if (target)
       applyLivePreviewObject(
         target,
-        liveGraphPatch ??
-          evaluateFrameObject(object, time, part.duration, {
-            animations: true,
-          }),
+        evaluateFrameObject(object, time, part.duration, {
+          animations: true,
+        }),
       );
   }
-}
-
-const liveGraphRuntimePlanCache = new WeakMap<
-  AnimationGraph,
-  Map<string, { signature: string; plan: AnimationGraphRuntimePlan }>
->();
-
-function evaluateLiveGraphObjectPatches(part: Part, time: number) {
-  const patches = new Map<string, EvaluatedFrameObject>();
-  const graph = part.animationGraph;
-  if (!graph) return patches;
-  const sourceObject = findPartObjectById(part, graph.sourceObjectId);
-  if (!sourceObject) return patches;
-  const baseSourceObject = stripLiveGraphObjectOutput(sourceObject);
-  const plan = getLiveGraphRuntimePlan(graph, baseSourceObject);
-  const compiled = evaluateAnimationGraphRuntime(plan, {
-    time,
-    frame: readLiveGraphFrameIndex(time),
-  });
-  if (
-    compiled.diagnostics.some((diagnostic) => diagnostic.severity === "error")
-  )
-    return patches;
-
-  const graphAnimations = compiled.animations;
-  const generatedGeometry = compiled.generatedGeometry;
-  const hasSourceOutput = compiled.streams.some((stream) =>
-    stream.renderObject
-      ? stream.renderObject.id === baseSourceObject.id
-      : "objectId" in stream.structure &&
-        stream.structure.objectId === baseSourceObject.id,
-  );
-  const liveSourceObject: FrameObject = {
-    ...baseSourceObject,
-    hidden: !hasSourceOutput,
-    animations: [...(baseSourceObject.animations ?? []), ...graphAnimations],
-    generatedGeometry: generatedGeometry.length ? generatedGeometry : undefined,
-  };
-  patches.set(
-    liveSourceObject.id,
-    evaluateFrameObject(liveSourceObject, time, part.duration, {
-      animations: true,
-    }),
-  );
-  for (const generatedObject of compiled.generatedObjects) {
-    patches.set(
-      generatedObject.id,
-      evaluateFrameObject(generatedObject, time, part.duration, {
-        animations: true,
-      }),
-    );
-  }
-  return patches;
-}
-
-function getLiveGraphRuntimePlan(
-  graph: AnimationGraph,
-  sourceObject: FrameObject,
-) {
-  let graphPlans = liveGraphRuntimePlanCache.get(graph);
-  if (!graphPlans) {
-    graphPlans = new Map();
-    liveGraphRuntimePlanCache.set(graph, graphPlans);
-  }
-  const signature = getLiveGraphSourceObjectSignature(sourceObject);
-  const cached = graphPlans.get(sourceObject.id);
-  if (cached?.signature === signature) return cached.plan;
-  const plan = createAnimationGraphRuntimePlan(graph, sourceObject);
-  graphPlans.set(sourceObject.id, { signature, plan });
-  return plan;
-}
-
-function findPartObjectById(part: Part, objectId: string) {
-  return (
-    part.objects.find((object) => object.id === objectId) ??
-    part.background.elements.find((object) => object.id === objectId) ??
-    null
-  );
-}
-
-function stripLiveGraphObjectOutput(object: FrameObject): FrameObject {
-  return {
-    ...object,
-    hidden: object.generatedByGraph ? object.hidden : false,
-    animations: (object.animations ?? []).filter(
-      (animation) => !animation.id.startsWith("graph:"),
-    ),
-    generatedGeometry: undefined,
-  };
-}
-
-function getLiveGraphSourceObjectSignature(object: FrameObject) {
-  return JSON.stringify({
-    id: object.id,
-    type: object.type,
-    content: object.content,
-    richText: object.richText,
-    bounds: object.bounds,
-    style: object.style,
-    animations: (object.animations ?? []).filter(
-      (animation) => !animation.id.startsWith("graph:"),
-    ),
-  });
-}
-
-function readLiveGraphFrameIndex(time: number) {
-  return Math.max(0, Math.round(time * videoExportFrameRate));
 }
 
 function applyRenderClockStateToElement(
@@ -1645,6 +1550,16 @@ export const FrameObjectView = memo(function FrameObjectView({
     typeof animation.style.transform === "string"
       ? animation.style.transform
       : undefined;
+  const animationWidth =
+    typeof animation.style.width === "number" ||
+    typeof animation.style.width === "string"
+      ? animation.style.width
+      : undefined;
+  const animationHeight =
+    typeof animation.style.height === "number" ||
+    typeof animation.style.height === "string"
+      ? animation.style.height
+      : undefined;
   const verticalAlign =
     object.type === "text"
       ? String(object.style.verticalAlign ?? "middle")
@@ -1668,14 +1583,16 @@ export const FrameObjectView = memo(function FrameObjectView({
         : `var(--clipper-resize-top, ${object.bounds.y}px)`,
     width:
       renderMode === "export"
-        ? object.bounds.width
-        : `var(--clipper-resize-width, ${object.bounds.width}px)`,
+        ? (animationWidth ?? object.bounds.width)
+        : (animationWidth ??
+          `var(--clipper-resize-width, ${object.bounds.width}px)`),
     height:
       textBoxLayout === "auto-height"
         ? "auto"
         : renderMode === "export"
-          ? object.bounds.height
-          : `var(--clipper-resize-height, ${object.bounds.height}px)`,
+          ? (animationHeight ?? object.bounds.height)
+          : (animationHeight ??
+            `var(--clipper-resize-height, ${object.bounds.height}px)`),
     minHeight:
       textBoxLayout === "auto-height" ? object.bounds.height : undefined,
     fontSize:
@@ -1912,17 +1829,6 @@ export const FrameObjectView = memo(function FrameObjectView({
           style={style}
         />
       ) : null}
-      {object.generatedGeometry?.length ? (
-        <svg
-          className="pointer-events-none absolute inset-0 h-full w-full overflow-visible"
-          viewBox={`${object.bounds.x} ${object.bounds.y} ${object.bounds.width} ${object.bounds.height}`}
-          aria-hidden="true"
-        >
-          {object.generatedGeometry.flatMap((geometry, index) =>
-            renderGeneratedGeometry(geometry, `geometry:${object.id}:${index}`),
-          )}
-        </svg>
-      ) : null}
       {(object.type === "html" || object.type === "template") && content ? (
         <HtmlContent content={content} />
       ) : null}
@@ -1943,68 +1849,6 @@ type SplitTextToken = {
   animated: boolean;
   style: CSSProperties;
 };
-
-function renderGeneratedGeometry(geometry: GeneratedGeometry, key: string) {
-  if (geometry.type === "shape") return renderGeneratedShape(geometry, key);
-  if (geometry.type === "path") return renderGeneratedPath(geometry, key);
-  if (geometry.type === "shapeGroup")
-    return [
-      ...geometry.shapes.flatMap((shape, index) =>
-        renderGeneratedShape(shape, `${key}:shape:${index}`),
-      ),
-      ...(geometry.instances ?? []).flatMap((instance, index) => (
-        <g
-          key={`${key}:instance:${index}`}
-          transform={`translate(${instance.position.x} ${instance.position.y}) rotate(${((instance.rotation ?? 0) * 180) / Math.PI}) scale(${instance.scale ?? 1})`}
-          opacity={instance.opacity}
-          fill={instance.color}
-        >
-          {instance.shape.type === "shape"
-            ? renderGeneratedShape(
-                instance.shape,
-                `${key}:instance:${index}:shape`,
-              )
-            : renderGeneratedPath(
-                instance.shape,
-                `${key}:instance:${index}:path`,
-              )}
-        </g>
-      )),
-    ];
-  return [];
-}
-
-function renderGeneratedShape(shape: GeometryShape, key: string) {
-  return shape.paths.flatMap((path, index) =>
-    renderGeneratedPath(path, `${key}:path:${index}`, shape),
-  );
-}
-
-function renderGeneratedPath(
-  path: GeometryPath,
-  key: string,
-  shape?: GeometryShape,
-) {
-  if (!path.points.length) return [];
-  const [first, ...rest] = path.points;
-  const d = [
-    `M ${first.x} ${first.y}`,
-    ...rest.map((point) => `L ${point.x} ${point.y}`),
-    path.closed ? "Z" : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
-  return [
-    <path
-      key={key}
-      d={d}
-      fill={path.closed ? (shape?.color ?? "currentColor") : "none"}
-      stroke={path.closed ? "none" : (shape?.color ?? "currentColor")}
-      strokeWidth={path.strokeWidth ?? 1}
-      opacity={shape?.opacity}
-    />,
-  ];
-}
 
 function renderSplitTextSegments(
   segments: RichTextSegment[],

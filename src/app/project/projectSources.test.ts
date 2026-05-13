@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { compositionToSource } from "../../core/compositionSource";
 import type { CompositionClip, ProjectManifest } from "../../core/types";
-import type { AnimationGraph } from "../../core/animationGraph/types";
 import { getSyncedCompositionSources } from "./projectSources";
 
 const composition: CompositionClip = {
@@ -20,40 +19,6 @@ const composition: CompositionClip = {
   motionMarkers: [],
 };
 
-function graph(from: string): AnimationGraph {
-  return {
-    id: "graph:text",
-    sourceObjectId: "text",
-    nodes: {
-      source: {
-        id: "source",
-        kind: "source",
-        position: { x: 0, y: 0 },
-        config: { objectId: "text" },
-      },
-      scale: {
-        id: "scale",
-        kind: "effect:clipper.motion.zoom",
-        position: { x: 10, y: 0 },
-        config: { effectId: "clipper.motion.zoom", params: { scale: from } },
-      },
-      out: { id: "out", kind: "out", position: { x: 20, y: 0 }, config: {} },
-    },
-    edges: [
-      {
-        id: "source:out->scale:in",
-        from: { nodeId: "source", portId: "out" },
-        to: { nodeId: "scale", portId: "in" },
-      },
-      {
-        id: "scale:out->out:in",
-        from: { nodeId: "scale", portId: "out" },
-        to: { nodeId: "out", portId: "in" },
-      },
-    ],
-  };
-}
-
 function project(part: CompositionClip): ProjectManifest {
   return {
     id: "proj_test",
@@ -68,11 +33,48 @@ function project(part: CompositionClip): ProjectManifest {
 }
 
 describe("getSyncedCompositionSources", () => {
-  it("regenerates stale source even when composition snapshots match", () => {
-    const currentPart = { ...composition, animationGraph: graph("2") };
+  it("regenerates stale source when timeline animation data changes", () => {
+    const currentPart: CompositionClip = {
+      ...composition,
+      objects: [
+        {
+          id: "text",
+          name: "Text",
+          type: "text",
+          selector: "[data-object-id='text']",
+          bounds: { x: 0, y: 0, width: 100, height: 40 },
+          style: {},
+          animations: [
+            {
+              id: "scale",
+              name: "Scale",
+              keyframes: { scale: [1, 2] },
+              options: { duration: 1 },
+            },
+          ],
+        },
+      ],
+    };
     const staleSource = compositionToSource({
       ...composition,
-      animationGraph: graph("0"),
+      objects: [
+        {
+          id: "text",
+          name: "Text",
+          type: "text",
+          selector: "[data-object-id='text']",
+          bounds: { x: 0, y: 0, width: 100, height: 40 },
+          style: {},
+          animations: [
+            {
+              id: "scale",
+              name: "Scale",
+              keyframes: { scale: [1, 0] },
+              options: { duration: 1 },
+            },
+          ],
+        },
+      ],
     });
 
     const sources = getSyncedCompositionSources(
@@ -81,14 +83,9 @@ describe("getSyncedCompositionSources", () => {
       { [composition.filePath]: staleSource },
     );
 
-    expect(sources[composition.filePath]).toContain('scale: "2"');
-    expect(sources[composition.filePath]).not.toContain("outputType");
-    expect(sources[composition.filePath]).toContain("animationGraph: {");
-    expect(sources[composition.filePath]).toContain('sourceObjectId: "text"');
-    expect(sources[composition.filePath]).not.toContain("inputs:");
-    expect(sources[composition.filePath]).not.toContain("outputs:");
-    expect(sources[composition.filePath]).not.toContain("new AnimationGraph");
-    expect(sources[composition.filePath]).not.toContain("new SourceNode");
+    expect(sources[composition.filePath]).toContain('"scale"');
+    expect(sources[composition.filePath]).toContain("2");
+    expect(sources[composition.filePath]).not.toContain("animationGraph");
   });
 
   it("uses library composition over stale scene copy for source sync", () => {

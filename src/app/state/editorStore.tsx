@@ -66,9 +66,6 @@ export type EditorStoreState = {
   selectedParts: CompositionSelection[];
   selectedObjectId: string | null;
   selectedComposeObjectIds: string[];
-  composeGraphScopeKey: string | null;
-  selectedGraphNodeIds: string[];
-  composeGraphNodeSelections: Record<string, string[]>;
   editingTextObjectId: string | null;
   selectedMotionMarker: MarkerSelection;
   selectedMotionMarkers: MotionMarkerSelection[];
@@ -155,11 +152,6 @@ export type EditorStoreActions = {
   setSelectedParts: (parts: Setter<CompositionSelection[]>) => void;
   setSelectedObjectId: (objectId: Setter<string | null>) => void;
   setSelectedComposeObjectIds: (objectIds: Setter<string[]>) => void;
-  setComposeGraphScope: (
-    scopeKey: string | null,
-    validNodeIds: string[],
-  ) => void;
-  setSelectedGraphNodeIds: (nodeIds: Setter<string[]>) => void;
   setEditingTextObjectId: (objectId: Setter<string | null>) => void;
   setSelectedMotionMarker: (selection: Setter<MarkerSelection>) => void;
   setSelectedMotionMarkers: (
@@ -269,9 +261,6 @@ function getInitialState(project: ProjectManifest): EditorStoreState {
       : [],
     selectedObjectId: null,
     selectedComposeObjectIds: editorState?.selectedComposeObjectIds ?? [],
-    composeGraphScopeKey: null,
-    selectedGraphNodeIds: [],
-    composeGraphNodeSelections: {},
     editingTextObjectId: null,
     selectedMotionMarker: editorState?.selectedMotionMarker ?? null,
     selectedMotionMarkers: editorState?.selectedMotionMarker
@@ -348,60 +337,6 @@ export function createEditorStore(project: ProjectManifest) {
       set,
       "selectedComposeObjectIds",
     ),
-    setComposeGraphScope: (scopeKey, validNodeIds) =>
-      set((state) => {
-        if (!scopeKey) {
-          if (
-            !state.composeGraphScopeKey &&
-            state.selectedGraphNodeIds.length === 0
-          )
-            return state;
-          return { composeGraphScopeKey: null, selectedGraphNodeIds: [] };
-        }
-        const valid = new Set(validNodeIds);
-        const restored = (
-          state.composeGraphNodeSelections[scopeKey] ?? []
-        ).filter((id) => valid.has(id));
-        const nextSelections =
-          restored.length ===
-          (state.composeGraphNodeSelections[scopeKey] ?? []).length
-            ? state.composeGraphNodeSelections
-            : { ...state.composeGraphNodeSelections, [scopeKey]: restored };
-        if (
-          state.composeGraphScopeKey === scopeKey &&
-          state.selectedGraphNodeIds.length === restored.length &&
-          state.selectedGraphNodeIds.every(
-            (id, index) => id === restored[index],
-          ) &&
-          nextSelections === state.composeGraphNodeSelections
-        )
-          return state;
-        return {
-          composeGraphScopeKey: scopeKey,
-          selectedGraphNodeIds: restored,
-          composeGraphNodeSelections: nextSelections,
-        };
-      }),
-    setSelectedGraphNodeIds: (setter) =>
-      set((state) => {
-        const next = resolveSetter(state.selectedGraphNodeIds, setter);
-        const nextSelections = state.composeGraphScopeKey
-          ? {
-              ...state.composeGraphNodeSelections,
-              [state.composeGraphScopeKey]: next,
-            }
-          : state.composeGraphNodeSelections;
-        if (
-          state.selectedGraphNodeIds.length === next.length &&
-          state.selectedGraphNodeIds.every((id, index) => id === next[index]) &&
-          nextSelections === state.composeGraphNodeSelections
-        )
-          return state;
-        return {
-          selectedGraphNodeIds: next,
-          composeGraphNodeSelections: nextSelections,
-        };
-      }),
     setEditingTextObjectId: createFieldSetter(set, "editingTextObjectId"),
     setSelectedMotionMarker: createFieldSetter(set, "selectedMotionMarker"),
     setSelectedMotionMarkers: createFieldSetter(set, "selectedMotionMarkers"),
@@ -681,20 +616,13 @@ export function createEditorStore(project: ProjectManifest) {
         framePickPreviewPoint: null,
       }),
     clearComposeSelection: () =>
-      set((state) => ({
+      set({
         editingTextObjectId: null,
         selectedObjectId: null,
         selectedComposeObjectIds: [],
-        selectedGraphNodeIds: [],
-        composeGraphNodeSelections: state.composeGraphScopeKey
-          ? {
-              ...state.composeGraphNodeSelections,
-              [state.composeGraphScopeKey]: [],
-            }
-          : state.composeGraphNodeSelections,
         selectionPayload: null,
         framePickPreviewPoint: null,
-      })),
+      }),
     clearNodeSelection: () => get().clearDirectSelection(),
   }));
 }
@@ -747,9 +675,6 @@ export function useAppEditorState() {
       setSelectedObjectId: state.setSelectedObjectId,
       selectedComposeObjectIds: state.selectedComposeObjectIds,
       setSelectedComposeObjectIds: state.setSelectedComposeObjectIds,
-      selectedGraphNodeIds: state.selectedGraphNodeIds,
-      setSelectedGraphNodeIds: state.setSelectedGraphNodeIds,
-      setComposeGraphScope: state.setComposeGraphScope,
       editingTextObjectId: state.editingTextObjectId,
       setEditingTextObjectId: state.setEditingTextObjectId,
       selectedMotionMarker: state.selectedMotionMarker,

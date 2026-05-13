@@ -368,20 +368,6 @@ export function getEffectPackagesByCategory(
   );
 }
 
-export function getGraphEffectPackages() {
-  return effectPackages.filter((definition) => definition.graph);
-}
-
-export function getGraphEffectPackageByEditorAlias(alias: string) {
-  return getGraphEffectPackages().find((definition) =>
-    definition.graph?.editorAliases?.includes(alias),
-  );
-}
-
-export function getGraphEffectRuntimeAdapter(effectId: string) {
-  return getEffectPackage(effectId)?.graph?.runtimeAdapter;
-}
-
 export function getEffectDragType(effectId: string) {
   return `application/x-clipper-effect-${effectId.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`;
 }

@@ -75,10 +75,6 @@ import { PresentationControls } from "./app/shell/PresentationControls";
 import { RightInspectorPanel } from "./app/shell/RightInspectorPanel";
 import { useEditorViewportState } from "./app/shell/useEditorViewportState";
 import { useEditorModeCommands } from "./app/shell/useEditorModeCommands";
-import {
-  getSelectedComposition2dLayerGraph,
-  setSelectedComposition2dLayerGraph,
-} from "./components/timeline/ComposeAnimationGraphPanel";
 import { useProjectTitleRename } from "./app/shell/useProjectTitleRename";
 import {
   defaultExportTileMapping,
@@ -159,18 +155,6 @@ import {
   type ObjectSnapGuide,
 } from "./core/frameInteraction";
 import { boundsToPoints } from "./core/geometry";
-import {
-  getGraphSelectionObject,
-  getGraphSelectionObjectIds,
-} from "./core/graphSelection";
-import { updateAnimationGraphNodeParameter } from "./core/graphParameters";
-import { updateStrictComposition2dNodeParameter } from "./components/timeline/StrictComposition2dGraphPanel";
-import {
-  bindStrictGraphInputParameter,
-  isGraphInputExpression,
-  unbindStrictGraphInputParameter,
-} from "./core/graphParameterBindings";
-import type { GraphCompositionMode } from "./core/graphSockets";
 import { clamp, roundToPrecision, roundTenth } from "./core/math";
 import type {
   AdjustmentEffectPointControl,
@@ -195,13 +179,10 @@ import {
 } from "./core/timeline";
 import type { TimelineLayerCategory } from "./core/timelineLayers";
 import { compositionFromSource } from "./core/compositionSource";
-import { applyCompositionGraphTransaction } from "./core/compositionGraphTransactions";
-import type { AnimationGraph as StrictAnimationGraph } from "./core/animationGraph/types";
 import {
   FRAME_HEIGHT,
   FRAME_WIDTH,
   type AdjustmentLayer,
-  type AnimationGraphState,
   type BackgroundLayer,
   type Bounds,
   type CompositionClip,
@@ -428,7 +409,6 @@ function AppContent({
   const [currentSceneTime, setRenderCurrentSceneTime] = useState(
     () => editorStore.getState().currentSceneTime,
   );
-  const [composeGraphEnabled, setComposeGraphEnabled] = useState(true);
   const [trackerPickTranslationMarker, setTrackerPickTranslationMarker] =
     useState<{ partId: string; markerId: string } | null>(null);
   const [pointPickAdjustment, setPointPickAdjustment] = useState<{
@@ -484,9 +464,6 @@ function AppContent({
     setSelectedObjectId,
     selectedComposeObjectIds,
     setSelectedComposeObjectIds,
-    selectedGraphNodeIds,
-    setSelectedGraphNodeIds,
-    setComposeGraphScope,
     editingTextObjectId,
     setEditingTextObjectId,
     selectedMotionMarker,
@@ -1056,7 +1033,6 @@ function AppContent({
     selectedMotionMarker,
     selectedMotionMarkers,
     selectionPayload,
-    composeGraphEnabled,
     timelineMode,
   });
   const composeMode = timelineMode === "compose";
@@ -1075,10 +1051,6 @@ function AppContent({
   const composePlaybackRange = isPlaying
     ? composePlaybackRangeRef.current
     : nextComposePlaybackRange;
-
-  const selectedGraphNodeId = composeMode
-    ? (selectedGraphNodeIds.at(-1) ?? null)
-    : null;
 
   const compositionLibrary = project.compositionLibrary ?? [];
   const timelines = project.timelines ?? [];
@@ -1386,28 +1358,6 @@ function AppContent({
     updateMode,
   });
   const previewSelectionObjects = selectionPayload?.objects ?? [];
-  const visiblePreviewObjectIds = new Set([
-    ...(part?.background.hidden ? [] : [part?.background.id].filter(Boolean)),
-    ...(part?.background.elements ?? [])
-      .filter((object) => !object.hidden)
-      .map((object) => object.id),
-    ...(part?.objects ?? [])
-      .filter((object) => !object.hidden)
-      .map((object) => object.id),
-  ]);
-  const graphAuthoritativePreviewSelectionObjects =
-    composeMode && composeGraphEnabled
-      ? previewSelectionObjects.filter((object) =>
-          visiblePreviewObjectIds.has(object.id),
-        )
-      : previewSelectionObjects;
-  const graphAuthoritativeEditingTextObjectId =
-    composeMode &&
-    composeGraphEnabled &&
-    editingTextObjectId &&
-    !visiblePreviewObjectIds.has(editingTextObjectId)
-      ? null
-      : editingTextObjectId;
   function setVideoExportTileHeight(value: number) {
     const nextValue = clampVideoExportTileHeight(value);
     setVideoExportTileHeightState(nextValue);
@@ -2150,182 +2100,6 @@ function AppContent({
     );
   }
 
-  function updateComposeAnimationGraph(
-    updater: (
-      graph: AnimationGraphState | StrictAnimationGraph | undefined,
-    ) => AnimationGraphState | StrictAnimationGraph,
-    options?: {
-      implicit?: boolean;
-      mode?: GraphCompositionMode;
-      history?: boolean;
-    },
-  ) {
-    const clipId = activeTimelinePart?.id;
-    if (!clipId) return;
-    const applyUpdate = (current: ProjectManifest) => {
-      const targetClip = current.timelines
-        ?.find((timeline) => timeline.id === scene.id)
-        ?.clips.find((clip) => clip.id === clipId);
-      if (!targetClip) return current;
-      const graphMode: GraphCompositionMode = "composition2d";
-      const targetCompositionId = targetClip.compositionId;
-      const targetFilePath = part.filePath;
-      const fallbackComposition = [
-        ...current.scenes.flatMap((sceneItem) => sceneItem.compositions),
-        ...(current.compositionLibrary ?? []),
-        ...(current.compositions ?? []),
-      ].find(
-        (composition) =>
-          composition.id === targetCompositionId ||
-          composition.filePath === targetFilePath,
-      );
-      const getCompositionGraph = (
-        composition: CompositionClip | undefined,
-      ): StrictAnimationGraph | undefined =>
-        composition?.animationGraph ?? part.animationGraph;
-      const nextGraph = updater(getCompositionGraph(fallbackComposition));
-      return applyCompositionGraphTransaction(current, {
-        origin: "canvas",
-        clipId,
-        compositionId: targetCompositionId,
-        filePath: targetFilePath,
-        graph: nextGraph,
-        mode: graphMode,
-      });
-    };
-    if (options?.implicit)
-      implicitFileOperation(updateProject)(applyUpdate, {
-        history: options.history !== false,
-        syncSources: true,
-        historyGroup: `graph:${clipId}:${options?.mode ?? "auto"}`,
-      });
-    else
-      updateProject(applyUpdate, {
-        history: options?.history !== false,
-        syncSources: true,
-        historyGroup: `graph:${clipId}:${options?.mode ?? "auto"}`,
-      });
-  }
-
-  function updateGraphNodeParameter(
-    nodeId: string,
-    key: string,
-    value: string,
-    options?: {
-      history?: boolean;
-      mode?: GraphCompositionMode;
-      layerId?: string;
-    },
-  ) {
-    updateComposeAnimationGraph((graph) => {
-      const layerId =
-        options?.mode === "composition2d"
-          ? (options.layerId ??
-            (selectedComposeObjectIds.length === 1
-              ? selectedComposeObjectIds[0]
-              : undefined))
-          : undefined;
-      if (layerId) {
-        if (isStrictCompositionGraphForObject(graph, layerId))
-          if (isGraphInputExpression(value))
-            return bindStrictGraphInputParameter(graph, nodeId, key, value);
-        if (isStrictCompositionGraphForObject(graph, layerId))
-          return updateStrictComposition2dNodeParameter(
-            unbindStrictGraphInputParameter(graph, nodeId, key),
-            nodeId,
-            key,
-            value,
-          );
-        const layerGraph = getSelectedComposition2dLayerGraph(
-          graph,
-          layerId,
-          "composition2d",
-        );
-        const nextLayerGraph = updateAnimationGraphNodeParameter(
-          layerGraph,
-          nodeId,
-          key,
-          value,
-        );
-        return setSelectedComposition2dLayerGraph(
-          graph,
-          nextLayerGraph,
-          layerId,
-          "composition2d",
-        ) as AnimationGraphState | StrictAnimationGraph;
-      }
-      if (isStrictCompositionGraph(graph))
-        if (isGraphInputExpression(value))
-          return bindStrictGraphInputParameter(graph, nodeId, key, value);
-      if (isStrictCompositionGraph(graph))
-        return updateStrictComposition2dNodeParameter(
-          unbindStrictGraphInputParameter(graph, nodeId, key),
-          nodeId,
-          key,
-          value,
-        );
-      return updateAnimationGraphNodeParameter(
-        graph as AnimationGraphState | undefined,
-        nodeId,
-        key,
-        value,
-      );
-    }, options);
-  }
-
-  function reorderGraphFrameOutputs(objectId: string, edgeIds: string[]) {
-    updateComposeAnimationGraph(
-      (graph) => {
-        if (!isStrictCompositionGraphForObject(graph, objectId))
-          return graph ?? { nodes: {}, edges: [] };
-        const strictGraph = graph;
-        const nodes = Object.fromEntries(
-          Object.entries(strictGraph.nodes).map(([nodeId, node]) => {
-            if (node.kind !== "out") return [nodeId, node];
-            return [
-              nodeId,
-              {
-                ...node,
-                config: {
-                  ...(typeof node.config === "object" && node.config
-                    ? node.config
-                    : {}),
-                  renderOrder: edgeIds,
-                },
-              },
-            ];
-          }),
-        );
-        return { ...strictGraph, nodes };
-      },
-      { history: true, mode: "composition2d" },
-    );
-  }
-
-  function inspectGraphNode(nodeId: string | null) {
-    if (nodeId) setRightPanelTab("video");
-  }
-
-  function isStrictCompositionGraphForObject(
-    graph: AnimationGraphState | StrictAnimationGraph | undefined,
-    objectId: string,
-  ): graph is StrictAnimationGraph {
-    return isStrictCompositionGraph(graph) && graph.sourceObjectId === objectId;
-  }
-
-  function isStrictCompositionGraph(
-    graph: AnimationGraphState | StrictAnimationGraph | undefined,
-  ): graph is StrictAnimationGraph {
-    return Boolean(
-      graph &&
-      typeof graph === "object" &&
-      "sourceObjectId" in graph &&
-      typeof graph.sourceObjectId === "string" &&
-      "edges" in graph &&
-      Array.isArray(graph.edges),
-    );
-  }
-
   function shiftTimelineGapMarkers(moves: {
     gapStart: number;
     gapEnd: number;
@@ -2464,14 +2238,12 @@ function AppContent({
   function setComposeSelectionObjects(objects: FrameObject[]) {
     if (objects.length === 0) {
       setSelectedObjectId(null);
-      setSelectedGraphNodeIds([]);
       setSelectionPayload(null);
       persistComposeSelection([]);
       return;
     }
 
     setSelectedObjectId(objects[0].id);
-    setSelectedGraphNodeIds([]);
     setSelectionPayload(
       selectionPayloadFromObjects(objects.map(selectionObjectFromFrameObject)),
     );
@@ -2482,7 +2254,6 @@ function AppContent({
     setRightPanelTab("video");
     setEditingTextObjectId(null);
     setSelectedObjectId(null);
-    setSelectedGraphNodeIds([]);
     setSelectionPayload(null);
     persistComposeSelection([]);
     clearMarkerSelection();
@@ -2523,7 +2294,7 @@ function AppContent({
   function previewSelectedObject(
     updater: (object: FrameObject) => FrameObject,
   ) {
-    const source = selectedObject ?? (composeMode ? selectedGraphObject : null);
+    const source = selectedObject;
     if (!source) return;
     const next = updater(source);
     const selector =
@@ -3144,14 +2915,6 @@ function AppContent({
     (pointPickAdjustment
       ? (framePickPreviewPoint ?? adjustmentFramePickPoint)
       : framePickPoint) ?? null;
-  const selectedGraphObjectIds = composeMode
-    ? getGraphSelectionObjectIds(part, selectedComposeObjectIds).filter(
-        (id) => id !== part.background.id,
-      )
-    : selectedComposeObjectIds;
-  const selectedGraphObject = composeMode
-    ? (getGraphSelectionObject(part, selectedComposeObjectIds[0]) ?? null)
-    : (selectedObject ?? null);
   const leftSidebarPlaybackInputRef = useRef({
     part,
     selectedComposeObjectIds,
@@ -3172,7 +2935,6 @@ function AppContent({
         !composeMode ||
         mode !== "preview" ||
         editingTextObjectId ||
-        selectedGraphNodeIds.length > 0 ||
         selectedComposeObjectIds.length === 0
       )
         return;
@@ -3190,7 +2952,6 @@ function AppContent({
     editingTextObjectId,
     mode,
     selectedComposeObjectIds,
-    selectedGraphNodeIds.length,
   ]);
   useEffect(() => {
     function copyPasteComposeObjects(event: KeyboardEvent) {
@@ -3612,7 +3373,6 @@ function AppContent({
             onEffectsPanelStateChange={updateEffectsPanelState}
             onLeftPanelTabChange={setLeftPanelTab}
             onReorderComposeObjects={reorderComposeObjects}
-            onReorderGraphFrameOutputs={reorderGraphFrameOutputs}
             onSelectComposeLayerObjects={selectComposeLayerObjects}
             onSelectComposeFrameSettings={selectComposeFrameSettings}
             onToggleComposeLayerHidden={toggleComposeLayerHidden}
@@ -3708,13 +3468,13 @@ function AppContent({
                   ? activeCompositionHidden
                   : false,
               selectedObjects: hasPreviewComposition
-                ? graphAuthoritativePreviewSelectionObjects
+                ? previewSelectionObjects
                 : [],
               objectSnapGuides: hasPreviewComposition ? objectSnapGuides : [],
               marqueeDragging: hasPreviewComposition && marqueeDragging,
               editingTextObjectId:
                 hasPreviewComposition && !isPlaying
-                  ? graphAuthoritativeEditingTextObjectId
+                  ? editingTextObjectId
                   : null,
               onFramePointerCancel,
               onFramePointerDown,
@@ -3859,17 +3619,16 @@ function AppContent({
               trackerPickMotionMarker={trackerPickTranslationMarker}
               isPlaying={isPlaying}
               selectedObject={selectedObject}
-              selectedGraphObject={selectedGraphObject}
               selectedAdjustmentLayer={selectedAdjustmentLayer}
               selectedTransitionLayer={
                 (previewTransitionLayers ?? scene.transitionLayers)?.find(
                   (l) => l.id === selectedTransitionLayerId,
                 ) ?? null
               }
+              currentSceneTime={composeMode ? previewTime : currentSceneTime}
               sceneDurationSeconds={sceneDurationSeconds}
               pointPickAdjustment={pointPickAdjustment}
               selectedPart={selectedPart}
-              selectedGraphNodeId={selectedGraphNodeId}
               onUpdateMotionMarker={updateMotionMarker}
               onPreviewMotionMarker={previewMotionMarker}
               onPreviewMotionPickPoint={previewMotionPickPoint}
@@ -3931,7 +3690,6 @@ function AppContent({
               onPreviewPartFrame={previewPartFrame}
               onPreviewPartBackground={previewPartBackground}
               onUpdatePartRenderMode={updatePartRenderMode}
-              onUpdateGraphNodeParameter={updateGraphNodeParameter}
               onReloadProject={reloadProject}
             />
           </RightInspectorPanel>
@@ -4031,12 +3789,7 @@ function AppContent({
             onShiftTimelineGapMarkers: shiftTimelineGapMarkers,
             onUpdateTransitionLayer: updateTransitionLayer,
             composeAnimationPart: hasActiveComposition ? part : null,
-            composeGraphEnabled,
-            onComposeGraphEnabledChange: setComposeGraphEnabled,
-            selectedObjectIds: selectedGraphObjectIds,
-            selectedGraphNodeIds,
-            onComposeGraphScopeChange: setComposeGraphScope,
-            onSelectGraphNodes: setSelectedGraphNodeIds,
+            selectedObjectIds: selectedComposeObjectIds,
             onExitCompose: () => updateTimelineMode("composition"),
             onSelectComposeObjects: selectComposeLayerObjects,
             onPersistComposeSelection: persistComposeSelection,
@@ -4044,8 +3797,7 @@ function AppContent({
             onUpdateComposeBackgroundAnimation:
               updateComposeBackgroundAnimation,
             onUpdateComposeObjectAnimation: updateComposeObjectAnimation,
-            onUpdateComposeAnimationGraph: updateComposeAnimationGraph,
-            onInspectGraphNode: inspectGraphNode,
+            setAppContextMenu,
           }}
         >
           <ConnectedTimelinePanel />

@@ -264,8 +264,6 @@ async function loadDirectoryCompositions(
           ...document,
           id: baseComposition.id,
           filePath,
-          animationGraph:
-            manifestComposition?.animationGraph ?? document.animationGraph,
           renderMode: manifestComposition?.renderMode ?? document.renderMode,
           sourceHash: hashCompositionSource(source),
           loadedSource: source,

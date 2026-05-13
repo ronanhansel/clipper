@@ -36,25 +36,6 @@ export type JsonValue =
   | string
   | JsonValue[]
   | { [key: string]: JsonValue };
-export type AnimationGraph = {
-  id: string;
-  sourceObjectId: string;
-  nodes: Record<
-    string,
-    {
-      id: string;
-      kind: string;
-      position: { x: number; y: number };
-      config: unknown;
-    }
-  >;
-  edges: {
-    id: string;
-    from: { nodeId: string; portId: string };
-    to: { nodeId: string; portId: string };
-  }[];
-  viewport?: { scrollLeft: number; scrollTop: number; zoom?: number };
-};
 export type RichTextSegment = {
   text: string;
   bold: boolean;
@@ -155,7 +136,6 @@ export type CompositionProps = {
     animations?: LayerAnimation[];
     elements?: Renderable[];
   };
-  animationGraph?: AnimationGraph | JsonValue;
   render: (context: RenderContext) => Renderable[];
 };
 
@@ -358,7 +338,6 @@ export class Composition {
   renderMode?: CompositionProps["renderMode"];
   frame: CompositionProps["frame"];
   background?: CompositionProps["background"];
-  animationGraph?: CompositionProps["animationGraph"];
   render: (context: RenderContext) => Renderable[];
 
   constructor(props: CompositionProps) {
@@ -368,174 +347,6 @@ export class Composition {
     this.renderMode = props.renderMode;
     this.frame = props.frame;
     this.background = props.background;
-    this.animationGraph = props.animationGraph;
     this.render = props.render;
   }
-}
-
-// ---------------------------------------------------------------------------
-// Typed Effect Graph API
-// ---------------------------------------------------------------------------
-
-export type AnimationGraphValueType =
-  | "Structure.Shape"
-  | "Structure.TextObject"
-  | "Structure.RichTextObject"
-  | "Structure.TextTokens"
-  | "Structure.Object"
-  | "Value.String"
-  | "Value.Number"
-  | "Value.Color"
-  | "Value.Boolean"
-  | "Value.StringArray"
-  | "Value.NumberArray"
-  | "Effect.CSSEffect"
-  | "AnimationController"
-  | "CompiledAnimation";
-
-export type AnimationGraphSocket = {
-  id: string;
-  label: string;
-  type: AnimationGraphValueType;
-  accepts?: readonly AnimationGraphValueType[];
-};
-
-export type AnimationGraphPort = "top" | "right" | "bottom" | "left";
-
-export type AnimationGraphEdge = {
-  id: string;
-  fromNodeId: string;
-  fromPort: AnimationGraphPort;
-  toNodeId: string;
-  toPort: AnimationGraphPort;
-  fromSocket?: string;
-  toSocket?: string;
-};
-
-export type AnimationGraphTimeConfig = {
-  delay?: number;
-  duration?: number;
-  ease?: MotionEase;
-  repeat?: number;
-  repeatType?: "loop" | "reverse" | "mirror";
-  schedule?: "relative" | "absolute";
-};
-
-export type AnimationGraphSplitConfig = {
-  mode?: "word" | "character" | "pattern";
-  pattern?: string;
-  stagger?: number;
-  order?: "forward" | "reverse" | "center";
-  repeatScope?: "sequence" | "item";
-};
-
-export type AnimationGraphConditionRule = {
-  target: "value" | "type";
-  operator: "equals" | "contains" | "notContains" | "gt" | "lt" | "gte" | "lte";
-  value: string | number;
-  action: "setDelay" | "sendToOutput" | "duplicateToOutput";
-  output: string;
-  delay?: number;
-};
-
-export type AnimationGraphConditionConfig = {
-  rules: AnimationGraphConditionRule[];
-};
-
-export type AnimationGraphCssEffect = {
-  property: string;
-  from?: string | number;
-  to?: string | number;
-  values?: Record<string, string | number | boolean>;
-};
-
-export type AnimationGraphEffectConfig = {
-  effects: AnimationGraphCssEffect[];
-};
-
-export type AnimationGraphNodePosition = { x: number; y: number };
-
-export type AnimationGraphNodeBase<Kind extends string, Config> = {
-  id: string;
-  kind: Kind;
-  label: string;
-  position: AnimationGraphNodePosition;
-  x: number;
-  y: number;
-  inputs: readonly AnimationGraphSocket[];
-  outputs: readonly AnimationGraphSocket[];
-  config: Config;
-};
-
-export type AnimationGraphSourceNode = AnimationGraphNodeBase<
-  "source",
-  { objectId: string }
->;
-export type AnimationGraphTimeNode = AnimationGraphNodeBase<
-  "time",
-  Required<
-    Pick<AnimationGraphTimeConfig, "delay" | "duration" | "ease" | "schedule">
-  > &
-    Pick<AnimationGraphTimeConfig, "repeat" | "repeatType">
->;
-export type AnimationGraphSplitNode = AnimationGraphNodeBase<
-  "split",
-  Required<
-    Pick<
-      AnimationGraphSplitConfig,
-      "mode" | "stagger" | "order" | "repeatScope"
-    >
-  > &
-    Pick<AnimationGraphSplitConfig, "pattern">
->;
-export type AnimationGraphConditionNode = AnimationGraphNodeBase<
-  "condition",
-  AnimationGraphConditionConfig
->;
-export type AnimationGraphAnimationNode = AnimationGraphNodeBase<
-  "effect",
-  AnimationGraphEffectConfig
->;
-export type AnimationGraphGroupNode = AnimationGraphNodeBase<
-  "group",
-  { groupId: string }
->;
-export type AnimationGraphOutNode = AnimationGraphNodeBase<"out", {}>;
-
-export type TypedAnimationGraphNode =
-  | AnimationGraphSourceNode
-  | AnimationGraphTimeNode
-  | AnimationGraphSplitNode
-  | AnimationGraphConditionNode
-  | AnimationGraphAnimationNode
-  | AnimationGraphGroupNode
-  | AnimationGraphOutNode;
-
-export type TypedAnimationGraphState = {
-  nodes: Record<string, TypedAnimationGraphNode | CompactAnimationGraphNode>;
-  edges: AnimationGraphEdge[];
-  layers?: Array<{
-    id: string;
-    nodes: Record<string, TypedAnimationGraphNode | CompactAnimationGraphNode>;
-    edges: AnimationGraphEdge[];
-  }>;
-  customNodes?: Record<string, JsonValue>;
-  parameters?: Record<string, Record<string, string>>;
-  groups?: Record<string, JsonValue>;
-  viewport?: JsonValue;
-  viewports?: JsonValue;
-};
-
-export type CompactAnimationGraphNode = {
-  id: string;
-  kind: TypedAnimationGraphNode["kind"];
-  label?: string;
-  position: AnimationGraphNodePosition;
-  config?: JsonValue;
-};
-
-export function defineAnimationGraph<T extends TypedAnimationGraphState>(
-  graph: T,
-): T {
-  return graph;
 }

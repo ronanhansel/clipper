@@ -31,4 +31,19 @@ describe("evaluateLayerAnimations", () => {
 
     expect(evaluateLayerAnimations(animations, 0.5).opacity).toBe(1);
   });
+
+  it("evaluates keyframed size properties for inspector diamonds", () => {
+    const animations: LayerAnimation[] = [
+      {
+        id: "resize",
+        keyframes: { width: [100, 220], height: [40, 80] },
+        options: { duration: 2 },
+      },
+    ];
+
+    expect(evaluateLayerAnimations(animations, 1)).toMatchObject({
+      width: 160,
+      height: 60,
+    });
+  });
 });

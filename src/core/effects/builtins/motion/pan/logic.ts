@@ -1,5 +1,4 @@
 import type { MotionEffectPackage } from "../../../types";
-import { numberParam } from "../../graphRuntime";
 import { createMotionBlock } from "../helpers";
 
 export const panMendTransitionOptions = [
@@ -44,22 +43,6 @@ export const panMendTransitionOptions = [
 ] as const;
 
 export const panMotionLogic = {
-  graph: {
-    label: "Position",
-    editorAliases: ["position"],
-    acceptedStructureKinds: ["text", "richText", "shape", "object"],
-    defaultParams: { x: 0, y: 0 },
-    paramControls: [
-      { key: "x", label: "X", type: "number", defaultValue: 0 },
-      { key: "y", label: "Y", type: "number", defaultValue: 0 },
-    ],
-    runtimeAdapter: ({ effect }) => ({
-      keyframes: {
-        x: [0, numberParam(effect.params.x, 0)],
-        y: [0, numberParam(effect.params.y, 0)],
-      },
-    }),
-  },
   createDefaultBlock: (input) =>
     createMotionBlock(input, "clipper.motion.pan", {
       position: input.position,
@@ -67,5 +50,5 @@ export const panMotionLogic = {
   mendTransitionOptions: panMendTransitionOptions,
 } as const satisfies Pick<
   MotionEffectPackage,
-  "graph" | "createDefaultBlock" | "mendTransitionOptions"
+  "createDefaultBlock" | "mendTransitionOptions"
 >;

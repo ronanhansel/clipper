@@ -45,6 +45,8 @@ const NUMERIC_KEYFRAME_KEYS = [
   "opacity",
   "x",
   "y",
+  "width",
+  "height",
   "z",
   "scale",
   "scaleX",
@@ -121,6 +123,8 @@ export function evaluateLayerAnimation(
       style.opacity = value;
     } else if (key === "blur") {
       style.filter = `blur(${Math.max(0, value).toFixed(2)}px)`;
+    } else if (key === "width" || key === "height") {
+      style[key] = Math.max(0, value);
     }
   }
 

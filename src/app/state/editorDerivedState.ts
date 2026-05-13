@@ -8,7 +8,6 @@ import {
 } from "../../core/camera";
 import { getMotionMarkerViews } from "../../core/motionEffects";
 import {
-  applyAnimationGraphToComposition,
   defaultAssets,
   defaultTimelineLayerState,
   getSceneFromProject,
@@ -40,7 +39,8 @@ import {
 import { TIMELINE_MOTION_PART_ID } from "../types";
 import type { MotionMarkerSelection } from "../types";
 import {
-  deriveFramePreviewRenderModel,
+  deriveFramePreviewRenderModelFromContext,
+  deriveFramePreviewSceneContext,
   getFramePreviewTimelineLayers,
 } from "./framePreviewRenderModel";
 
@@ -58,7 +58,6 @@ export function useEditorDerivedState({
   selectedMotionMarker,
   selectedMotionMarkers,
   selectionPayload,
-  composeGraphEnabled,
   timelineMode,
   timelineLayers,
 }: {
@@ -77,7 +76,6 @@ export function useEditorDerivedState({
   selectedMotionMarker: { partId: string; markerId: string } | null;
   selectedMotionMarkers: MotionMarkerSelection[];
   selectionPayload: SelectionPayload | null;
-  composeGraphEnabled: boolean;
   timelineMode: TimelineMode;
   timelineLayers?: TimelineLayerState;
 }) {
@@ -95,23 +93,25 @@ export function useEditorDerivedState({
       ),
     [project, selectedSceneId, timelineLayers],
   );
-  const previewRenderModel = useMemo(
+  const previewSceneContext = useMemo(
     () =>
-      deriveFramePreviewRenderModel({
+      deriveFramePreviewSceneContext({
         blankPart: blankPreviewComposition,
         previewTransitionLayers,
         scene,
-        sceneTime: currentSceneTime,
         timelineLayers: timelineLayerState,
         timelineMode,
       }),
-    [
-      currentSceneTime,
-      previewTransitionLayers,
-      scene,
-      timelineLayerState,
-      timelineMode,
-    ],
+    [previewTransitionLayers, scene, timelineLayerState, timelineMode],
+  );
+  const previewRenderModel = useMemo(
+    () =>
+      deriveFramePreviewRenderModelFromContext(
+        previewSceneContext,
+        currentSceneTime,
+        timelineMode,
+      ),
+    [currentSceneTime, previewSceneContext, timelineMode],
   );
   const renderableScene = previewRenderModel.renderableScene;
   const timeline = previewRenderModel.timeline;
@@ -144,21 +144,9 @@ export function useEditorDerivedState({
   const composeFilePart = useMemo(
     () =>
       timelineMode === "compose"
-        ? getComposeFilePart(
-            project,
-            activeComposition ?? selectedPart,
-            composeGraphEnabled,
-            composePreviewTime,
-          )
+        ? getComposeFilePart(project, activeComposition ?? selectedPart)
         : null,
-    [
-      activeComposition,
-      composeGraphEnabled,
-      composePreviewTime,
-      project,
-      selectedPart,
-      timelineMode,
-    ],
+    [activeComposition, project, selectedPart, timelineMode],
   );
   const displayPart = composeFilePart ?? part;
   const displayPreviewTime =
@@ -509,8 +497,6 @@ export function useEditorDerivedState({
 function getComposeFilePart(
   project: ProjectManifest,
   timelinePart: CompositionClip | null,
-  composeGraphEnabled: boolean,
-  previewTime = 0,
 ) {
   if (!timelinePart) return null;
   const composition = [
@@ -524,16 +510,7 @@ function getComposeFilePart(
   );
   if (!composition) return null;
   return {
-    ...(composeGraphEnabled
-      ? applyAnimationGraphToComposition(
-          composition,
-          composition.animationGraph,
-          {
-            time: previewTime,
-            frame: Math.max(0, Math.round(previewTime * 30)),
-          },
-        )
-      : composition),
+    ...composition,
     start: undefined,
     trimStart: undefined,
     layerId: undefined,

@@ -34,7 +34,6 @@ type LeftSidebarProps = {
   ) => void;
   onLeftPanelTabChange: (tab: LeftPanelTab) => void;
   onReorderComposeObjects: (objectIds: string[], targetIndex: number) => void;
-  onReorderGraphFrameOutputs?: (objectId: string, edgeIds: string[]) => void;
   onSelectComposeLayerObjects: (objects: FrameObject[]) => void;
   onSelectComposeFrameSettings: () => void;
   onToggleComposeLayerHidden?: (layerId: string) => void;
@@ -60,7 +59,6 @@ const MemoizedLeftSidebar = memo(
     onEffectsPanelStateChange,
     onLeftPanelTabChange,
     onReorderComposeObjects,
-    onReorderGraphFrameOutputs,
     onSelectComposeLayerObjects,
     onSelectComposeFrameSettings,
     onToggleComposeLayerHidden,
@@ -80,7 +78,6 @@ const MemoizedLeftSidebar = memo(
               onSelectFrameSettings={onSelectComposeFrameSettings}
               onHoverObject={noopHoverObject}
               onReorderObjects={onReorderComposeObjects}
-              onReorderGraphFrameOutputs={onReorderGraphFrameOutputs}
               onToggleLayerHidden={onToggleComposeLayerHidden}
               onToggleLayerLocked={onToggleComposeLayerLocked}
             />

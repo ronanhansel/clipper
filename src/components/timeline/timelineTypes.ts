@@ -2,13 +2,12 @@ import type { MouseEvent as ReactMouseEvent, RefObject } from "react";
 import type {
   AdjustmentLayerSelection,
   CompositionSelection,
+  ContextMenuState,
   MotionMarkerSelection,
   TimelineBlankContextTarget,
   TimelineNodeContextTarget,
 } from "../../app/types";
 import type { PrerenderCacheCoverage } from "../../app/features/preview/usePrerenderCache";
-import type { GraphCompositionMode } from "../../core/graphSockets";
-import type { AnimationGraph as StrictAnimationGraph } from "../../core/animationGraph/types";
 import type {
   TimelineMarkerMove,
   TimelineMarkerResize,
@@ -16,7 +15,6 @@ import type {
 import type {
   AdjustmentEffectId,
   AdjustmentLayer,
-  AnimationGraphState,
   FrameObject,
   MotionEffectId,
   MotionEffectKind,
@@ -202,15 +200,7 @@ export type TimelinePanelProps = {
     updater: (layer: TransitionLayer) => TransitionLayer,
   ) => void;
   composeAnimationPart?: Part | null;
-  composeGraphEnabled?: boolean;
   selectedObjectIds?: string[];
-  selectedGraphNodeIds?: string[];
-  onComposeGraphScopeChange?: (
-    scopeKey: string | null,
-    validNodeIds: string[],
-  ) => void;
-  onComposeGraphEnabledChange?: (enabled: boolean) => void;
-  onSelectGraphNodes?: (nodeIds: string[]) => void;
   onExitCompose?: () => void;
   onSelectComposeObjects?: (objects: FrameObject[]) => void;
   onPersistComposeSelection?: (objectIds: string[]) => void;
@@ -226,17 +216,7 @@ export type TimelinePanelProps = {
       animations: import("../../core/types").LayerAnimation[],
     ) => import("../../core/types").LayerAnimation[],
   ) => void;
-  onUpdateComposeAnimationGraph?: (
-    updater: (
-      graph: AnimationGraphState | StrictAnimationGraph | undefined,
-    ) => AnimationGraphState | StrictAnimationGraph,
-    options?: {
-      implicit?: boolean;
-      mode?: GraphCompositionMode;
-      history?: boolean;
-    },
-  ) => void;
-  onInspectGraphNode?: (nodeId: string | null) => void;
+  setAppContextMenu?: (menu: ContextMenuState) => void;
 };
 
 export type EffectDragPreview = {

@@ -44,12 +44,6 @@ import {
   classifyProjectFileChange,
 } from "./projectFileChangeClassifier";
 import type { Command } from "../features/file-manager/operations/Command";
-import {
-  applyCompositionGraphTransaction,
-  carryCompositionGraphTransactionRevisions,
-  getCompositionGraphRevision,
-  preserveNewerCompositionGraphTransactions,
-} from "../../core/compositionGraphTransactions";
 
 type ProjectHistoryEntry = {
   project: ProjectManifest;
@@ -87,7 +81,6 @@ export type ProjectDocumentController = {
       syncSources?: boolean;
       coalesceHistory?: boolean;
       historyGroup?: string;
-      preserveNewerGraphTransactions?: boolean;
     },
   ) => void;
   redoProjectChange: () => Promise<void> | void;
@@ -128,7 +121,6 @@ export type ProjectDocumentController = {
       syncSources?: boolean;
       coalesceHistory?: boolean;
       historyGroup?: string;
-      preserveNewerGraphTransactions?: boolean;
     },
   ) => void;
   watchedProjectDirectory: string;
@@ -236,7 +228,6 @@ export function useProjectDocumentController({
         historyGroup?: string;
         preservePageMode?: boolean;
         preserveEditorState?: boolean;
-        preserveNewerGraphTransactions?: boolean;
       } = {},
     ) => {
       const currentProject = projectRef.current;
@@ -254,10 +245,6 @@ export function useProjectDocumentController({
           ...nextProject,
           compositionSources: nextCompositionSources,
         });
-        carryCompositionGraphTransactionRevisions(
-          nextProject,
-          normalizedProject,
-        );
       } else {
         nextCompositionSources =
           nextProject.compositionSources ?? compositionSourcesRef.current;
@@ -265,49 +252,15 @@ export function useProjectDocumentController({
           ...nextProject,
           compositionSources: nextCompositionSources,
         });
-        carryCompositionGraphTransactionRevisions(
-          nextProject,
-          normalizedProject,
-        );
-      }
-      if (options.preserveNewerGraphTransactions)
-        normalizedProject = preserveNewerCompositionGraphTransactions(
-          currentProject,
-          normalizedProject,
-        );
-      if (
-        options.syncSources !== false &&
-        options.preserveNewerGraphTransactions
-      ) {
-        nextCompositionSources = getSyncedCompositionSources(
-          normalizedProject,
-          currentProject,
-          nextCompositionSources,
-        );
-        const preSourceResyncProject = normalizedProject;
-        normalizedProject = normalizeProject({
-          ...normalizedProject,
-          compositionSources: nextCompositionSources,
-        });
-        carryCompositionGraphTransactionRevisions(
-          preSourceResyncProject,
-          normalizedProject,
-        );
       }
       if (options.preserveEditorState) {
-        const preEditorStateProject = normalizedProject;
         normalizedProject = normalizeProject({
           ...normalizedProject,
           editorState: projectRef.current.editorState ?? defaultEditorState,
         });
-        carryCompositionGraphTransactionRevisions(
-          preEditorStateProject,
-          normalizedProject,
-        );
       } else if (options.preservePageMode !== false) {
         const currentEditorState =
           projectRef.current.editorState ?? defaultEditorState;
-        const prePageModeProject = normalizedProject;
         normalizedProject = normalizeProject({
           ...normalizedProject,
           editorState: {
@@ -317,10 +270,6 @@ export function useProjectDocumentController({
             timelineMode: timelineModeRef.current,
           },
         });
-        carryCompositionGraphTransactionRevisions(
-          prePageModeProject,
-          normalizedProject,
-        );
       }
       const sortedSources = (sources: Record<string, string> | undefined) =>
         sources
@@ -412,7 +361,6 @@ export function useProjectDocumentController({
       syncSources?: boolean;
       coalesceHistory?: boolean;
       historyGroup?: string;
-      preserveNewerGraphTransactions?: boolean;
     },
   ) {
     const nextProject =
@@ -706,7 +654,6 @@ export function useProjectDocumentController({
           history: false,
           syncSources: false,
           preserveEditorState: options?.preserveEditorState,
-          preserveNewerGraphTransactions: true,
         });
         const nextSavedProjectSnapshot =
           getProjectContentSnapshot(persistedDiskProject);
@@ -1119,9 +1066,6 @@ export function useProjectDocumentController({
     const sourceVersion =
       (sourceUpdateVersionRef.current[basePart.filePath] ?? 0) + 1;
     const sourceBaseProjectVersion = projectDocumentVersionRef.current;
-    const sourceBaseGraphRevision = getCompositionGraphRevision(
-      basePart.animationGraph,
-    );
     sourceUpdateVersionRef.current = {
       ...sourceUpdateVersionRef.current,
       [basePart.filePath]: sourceVersion,
@@ -1168,8 +1112,7 @@ export function useProjectDocumentController({
       return;
     }
 
-    const parsedGraph = nextPart.animationGraph;
-    let nextProject = replacePartInProject(
+    const nextProject = replacePartInProject(
       {
         ...projectRef.current,
         compositionSources: compositionSourcesRef.current,
@@ -1178,21 +1121,10 @@ export function useProjectDocumentController({
       (currentPart) => ({
         ...nextPart,
         compositionError: undefined,
-        animationGraph: currentPart.animationGraph,
         motionMarkers: currentPart.motionMarkers,
         snapshot: currentPart.snapshot,
       }),
     );
-    if (parsedGraph) {
-      nextProject = applyCompositionGraphTransaction(nextProject, {
-        origin: "source",
-        baseRevision: sourceBaseGraphRevision,
-        compositionId,
-        filePath: basePart.filePath,
-        graph: parsedGraph,
-        mode: "composition2d",
-      });
-    }
 
     replaceProject(nextProject, {
       history: options.history,

@@ -19,7 +19,7 @@ const defaultNumberScrubCommitThrottleMs = 80;
 export const numberInputScrubStartEvent = "clipper:number-input-scrub-start";
 export const numberInputScrubEndEvent = "clipper:number-input-scrub-end";
 
-type NumberScrubMode = "commit" | "continuous" | "preview";
+type NumberScrubMode = "commit" | "continuous" | "preview" | "none";
 
 type InputProps = ComponentProps<"input"> & {
   numberScrubMode?: NumberScrubMode;
@@ -88,7 +88,7 @@ export function Input({
     String(props.value ?? "") !== String(resetValue);
 
   useEffect(() => {
-    if (type !== "number") return;
+    if (type !== "number" || numberScrubMode === "none") return;
 
     function cancelPendingScrub() {
       const pending = pendingScrubRef.current;
@@ -232,7 +232,7 @@ export function Input({
       cancelPendingScrub();
       if (scrubRef.current) stopScrub(false);
     };
-  }, [type]);
+  }, [numberScrubMode, type]);
 
   function startNumberScrub(event: PointerEvent<HTMLInputElement>) {
     if (type === "number" && isNumberInputSpinnerHit(event)) {
@@ -241,7 +241,12 @@ export function Input({
     }
 
     onPointerDown?.(event);
-    if (event.defaultPrevented || type !== "number" || event.button !== 0)
+    if (
+      event.defaultPrevented ||
+      type !== "number" ||
+      numberScrubMode === "none" ||
+      event.button !== 0
+    )
       return;
 
     const input = event.currentTarget;

@@ -4,7 +4,6 @@ import {
   motionBlocksToMotionMarkers,
 } from "../../core/motionEffects";
 import {
-  applyAnimationGraphToComposition,
   defaultTimelineLayerState,
   withRequiredTimelineLayerTypes,
 } from "../../core/project";
@@ -53,6 +52,76 @@ export type FramePreviewRenderModel = {
   visibleAdjustmentLayers: NonNullable<Scene["adjustmentLayers"]>;
 };
 
+// Time-independent portion of the render model — expensive to compute,
+// only changes when scene/layers/mode change (not on every scrub tick).
+export type FramePreviewSceneContext = {
+  blankPart: CompositionClip;
+  frameRate: number | undefined;
+  hiddenMotionLayerIds: Set<string>;
+  motionLayers: TimelineMotionLayerState[];
+  renderableScene: Scene;
+  sceneDurationSeconds: number;
+  sceneMotionMarkers: ReturnType<typeof getMotionMarkerViews>["motionMarkers"];
+  timeline: TimelinePart[];
+  timelineLayerState: TimelineLayerState;
+  transitionLayers: TransitionLayer[];
+  visibleAdjustmentLayers: NonNullable<Scene["adjustmentLayers"]>;
+};
+
+export function deriveFramePreviewSceneContext({
+  blankPart,
+  frameRate,
+  previewTransitionLayers,
+  scene,
+  timelineLayers,
+  timelineMode,
+}: {
+  blankPart: CompositionClip;
+  frameRate?: number;
+  previewTransitionLayers?: Scene["transitionLayers"];
+  scene: Scene;
+  timelineLayers?: TimelineLayerState;
+  timelineMode: TimelineMode;
+}): FramePreviewSceneContext {
+  const timelineLayerState = withRequiredTimelineLayerTypes(timelineLayers);
+  const effectiveTransitionLayers =
+    previewTransitionLayers ?? scene.transitionLayers;
+  const sceneAdjustmentLayers = getExecutableAdjustmentLayers(
+    scene.adjustmentLayers,
+    timelineLayerState,
+  );
+  const visibleAdjustmentLayers =
+    timelineMode === "compose" ? [] : sceneAdjustmentLayers;
+  const renderableScene = getRenderableScene(
+    { ...scene, transitionLayers: effectiveTransitionLayers },
+    timelineLayerState,
+  );
+  const timeline = buildLinearTimeline(renderableScene);
+  const sceneDurationSeconds = getSceneDuration(renderableScene);
+  const sceneMotionMarkers = getMotionMarkerViews(renderableScene).motionMarkers;
+  const motionLayers = timelineLayerState.motionLayers?.length
+    ? timelineLayerState.motionLayers
+    : defaultTimelineLayerState.motionLayers!;
+  return {
+    blankPart,
+    frameRate,
+    hiddenMotionLayerIds: new Set(
+      motionLayers.filter((layer) => layer.hidden).map((layer) => layer.id),
+    ),
+    motionLayers,
+    renderableScene,
+    sceneDurationSeconds,
+    sceneMotionMarkers,
+    timeline,
+    timelineLayerState,
+    transitionLayers: getExecutableTransitionLayers(
+      effectiveTransitionLayers,
+      timelineLayerState,
+    ),
+    visibleAdjustmentLayers,
+  };
+}
+
 export function deriveFramePreviewRenderModel({
   blankPart,
   frameRate,
@@ -70,21 +139,35 @@ export function deriveFramePreviewRenderModel({
   timelineLayers?: TimelineLayerState;
   timelineMode: TimelineMode;
 }): FramePreviewRenderModel {
-  const timelineLayerState = withRequiredTimelineLayerTypes(timelineLayers);
-  const effectiveTransitionLayers =
-    previewTransitionLayers ?? scene.transitionLayers;
-  const sceneAdjustmentLayers = getExecutableAdjustmentLayers(
-    scene.adjustmentLayers,
+  const ctx = deriveFramePreviewSceneContext({
+    blankPart,
+    frameRate,
+    previewTransitionLayers,
+    scene,
+    timelineLayers,
+    timelineMode,
+  });
+  return deriveFramePreviewRenderModelFromContext(ctx, sceneTime, timelineMode);
+}
+
+export function deriveFramePreviewRenderModelFromContext(
+  ctx: FramePreviewSceneContext,
+  sceneTime: number,
+  timelineMode: TimelineMode,
+): FramePreviewRenderModel {
+  const {
+    blankPart,
+    frameRate,
+    hiddenMotionLayerIds,
+    motionLayers,
+    renderableScene,
+    sceneDurationSeconds,
+    sceneMotionMarkers,
+    timeline,
     timelineLayerState,
-  );
-  const visibleAdjustmentLayers =
-    timelineMode === "compose" ? [] : sceneAdjustmentLayers;
-  const renderableScene = getRenderableScene(
-    { ...scene, transitionLayers: effectiveTransitionLayers },
-    timelineLayerState,
-  );
-  const timeline = buildLinearTimeline(renderableScene);
-  const sceneDurationSeconds = getSceneDuration(renderableScene);
+    transitionLayers,
+    visibleAdjustmentLayers,
+  } = ctx;
   const adjustedSceneTime =
     timelineMode === "compose"
       ? sceneTime
@@ -104,40 +187,26 @@ export function deriveFramePreviewRenderModel({
     transitionLayers: renderableScene.transitionLayers,
   });
   const activeTimelinePart = previewState.activeTimelinePart;
-  const basePart = compileCompositionGraphForPreview(
-    previewState.activeComposition ?? blankPart,
-    previewState.previewTime,
-    frameRate,
-  );
+  const basePart = previewState.activeComposition ?? blankPart;
   const partStart = activeTimelinePart?.start ?? 0;
-  const sceneMotionViews = getMotionMarkerViews(renderableScene);
   const shiftedMotionMarkers = getShiftedSceneMotionMarkers(
-    sceneMotionViews.motionMarkers,
+    sceneMotionMarkers,
     partStart,
   );
-  const motionLayers = timelineLayerState.motionLayers?.length
-    ? timelineLayerState.motionLayers
-    : defaultTimelineLayerState.motionLayers!;
   const previewParts = withSceneMotionPreviewParts(
-    previewState.previewParts.map((item) =>
-      compilePreviewStackPartGraph(item, frameRate),
-    ),
-    sceneMotionViews.motionMarkers,
+    previewState.previewParts,
+    sceneMotionMarkers,
   );
   const transitionPreviewParts = previewState.transitionPreviewParts
     ? {
         ...previewState.transitionPreviewParts,
         from: withSceneMotionPreviewParts(
-          previewState.transitionPreviewParts.from.map((item) =>
-            compilePreviewStackPartGraph(item, frameRate),
-          ),
-          sceneMotionViews.motionMarkers,
+          previewState.transitionPreviewParts.from,
+          sceneMotionMarkers,
         ),
         to: withSceneMotionPreviewParts(
-          previewState.transitionPreviewParts.to.map((item) =>
-            compilePreviewStackPartGraph(item, frameRate),
-          ),
-          sceneMotionViews.motionMarkers,
+          previewState.transitionPreviewParts.to,
+          sceneMotionMarkers,
         ),
         postProcessPasses:
           previewState.transitionPreviewParts.postProcessPasses,
@@ -148,9 +217,7 @@ export function deriveFramePreviewRenderModel({
     activeComposition: previewState.activeComposition,
     activeTimelinePart,
     adjustedSceneTime,
-    hiddenMotionLayerIds: new Set(
-      motionLayers.filter((layer) => layer.hidden).map((layer) => layer.id),
-    ),
+    hiddenMotionLayerIds,
     motionLayers,
     part: { ...basePart, motionMarkers: shiftedMotionMarkers },
     previewParts,
@@ -159,50 +226,10 @@ export function deriveFramePreviewRenderModel({
     sceneDurationSeconds,
     timeline,
     timelineLayerState,
-    transitionLayers: getExecutableTransitionLayers(
-      effectiveTransitionLayers,
-      timelineLayerState,
-    ),
+    transitionLayers,
     transitionPreviewParts,
     visibleAdjustmentLayers,
   };
-}
-
-function compilePreviewStackPartGraph(
-  item: TimelinePreviewStackPart,
-  frameRate: number | undefined,
-): TimelinePreviewStackPart {
-  return {
-    ...item,
-    part: compileCompositionGraphForPreview(
-      item.part,
-      item.previewTime,
-      frameRate,
-    ),
-  };
-}
-
-function compileCompositionGraphForPreview(
-  composition: CompositionClip,
-  previewTime: number,
-  frameRate: number | undefined,
-): CompositionClip {
-  return applyAnimationGraphToComposition(
-    composition,
-    composition.animationGraph,
-    {
-      time: previewTime,
-      frame: readFrameIndex(previewTime, frameRate),
-    },
-  );
-}
-
-function readFrameIndex(time: number, frameRate: number | undefined) {
-  const effectiveFrameRate =
-    typeof frameRate === "number" && Number.isFinite(frameRate) && frameRate > 0
-      ? frameRate
-      : 30;
-  return Math.max(0, Math.round(time * effectiveFrameRate));
 }
 
 export function getFramePreviewTimelineLayers(

@@ -2,7 +2,6 @@ import { useCallback, useRef } from "react";
 import { AgentPanel } from "../../components/AgentPanel";
 import {
   AdjustmentInspector,
-  GraphNodeInspector,
   EmptyInspector,
   FrameInspector,
   MotionInspector,
@@ -52,14 +51,13 @@ type ConnectedInspectorContentProps = {
   positionPickMotionMarker: MarkerPick;
   trackerPickMotionMarker: MarkerPick;
   selectedObject: FrameObject | null | undefined;
-  selectedGraphObject: FrameObject | null | undefined;
   isPlaying: boolean;
   selectedAdjustmentLayer: AdjustmentLayer | null | undefined;
   selectedTransitionLayer: TransitionLayer | null | undefined;
+  currentSceneTime: number;
   sceneDurationSeconds: number;
   pointPickAdjustment: PointPickAdjustment;
   selectedPart: Part | null | undefined;
-  selectedGraphNodeId: string | null;
   onUpdateMotionMarker: (
     partId: string,
     markerId: string,
@@ -135,16 +133,6 @@ type ConnectedInspectorContentProps = {
     updater: (background: BackgroundLayer) => BackgroundLayer,
   ) => void;
   onUpdatePartRenderMode: (renderMode: CompositionRenderMode) => void;
-  onUpdateGraphNodeParameter: (
-    nodeId: string,
-    key: string,
-    value: string,
-    options?: {
-      history?: boolean;
-      mode?: import("../../core/graphSockets").GraphCompositionMode;
-      layerId?: string;
-    },
-  ) => void;
   onReloadProject?: () => Promise<void>;
 };
 
@@ -170,14 +158,13 @@ export function ConnectedInspectorContent({
   positionPickMotionMarker,
   trackerPickMotionMarker,
   selectedObject,
-  selectedGraphObject,
   isPlaying,
   selectedAdjustmentLayer,
   selectedTransitionLayer,
+  currentSceneTime,
   sceneDurationSeconds,
   pointPickAdjustment,
   selectedPart,
-  selectedGraphNodeId,
   onUpdateMotionMarker,
   onPreviewMotionMarker,
   onPreviewMotionPickPoint,
@@ -209,7 +196,6 @@ export function ConnectedInspectorContent({
   onUpdateSelectedPartDuration,
   onUpdatePartBackground,
   onUpdatePartRenderMode,
-  onUpdateGraphNodeParameter,
   onReloadProject,
 }: ConnectedInspectorContentProps) {
   const stableSelectedObjectRef = useRef<FrameObject | null | undefined>(
@@ -224,7 +210,7 @@ export function ConnectedInspectorContent({
     ? stableSelectedObjectRef.current
     : selectedObject;
   const composeInspectorObject = composeMode
-    ? (selectedGraphObject ?? null)
+    ? (selectedObject ?? null)
     : (inspectorSelectedObject ?? null);
   const stableUpdateSelectedObject = useCallback(
     (updater: (object: FrameObject) => FrameObject) =>
@@ -321,26 +307,12 @@ export function ConnectedInspectorContent({
     );
   }
 
-  if (
-    composeMode &&
-    selectedGraphNodeId &&
-    selectedGraphObject?.id !== part.background.id
-  )
-    return (
-      <GraphNodeInspector
-        part={part}
-        selectedObject={selectedGraphObject ?? null}
-        nodeId={selectedGraphNodeId}
-        onParameterChange={onUpdateGraphNodeParameter}
-        onSourceObjectChange={stableUpdateSelectedObject}
-        onSourceObjectPreview={stablePreviewSelectedObject}
-      />
-    );
-
   if (composeInspectorObject)
     return (
       <ObjectInspector
         object={composeInspectorObject}
+        currentTime={currentSceneTime}
+        disableNumberScrub={composeMode}
         lockBounds={composeInspectorObject.id === part.background.id}
         onChange={stableUpdateSelectedObject}
         onPreview={stablePreviewSelectedObject}

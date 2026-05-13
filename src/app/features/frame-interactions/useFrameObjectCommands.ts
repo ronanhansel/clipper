@@ -227,13 +227,6 @@ export function useFrameObjectCommands({
           ),
         },
         objects,
-        animationGraph:
-          composition.animationGraph &&
-          "sourceObjectId" in composition.animationGraph
-            ? selectedIds.has(composition.animationGraph.sourceObjectId)
-              ? undefined
-              : composition.animationGraph
-            : undefined,
       };
     });
     setEditingTextObjectId(null);

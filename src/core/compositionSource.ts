@@ -7,11 +7,8 @@ import {
   type FrameObject,
   type FrameObjectType,
   type FrameTemplate,
-  type JsonValue,
-  type LayerAnimation,
   type Part,
   type PartFrame,
-  type TypedAnimationGraphState,
 } from "./types";
 
 type SourceObject = {
@@ -48,7 +45,6 @@ type SourceComposition = {
     animations?: BackgroundLayer["animations"];
     elements?: SourceRenderable[];
   };
-  animationGraph?: JsonValue;
   render: (context: compositionApi.RenderContext) => SourceRenderable[];
 };
 
@@ -101,7 +97,6 @@ export async function compositionFromSource(
     sourceMissing: undefined,
     duration: sourceComposition.duration,
     renderMode: sourceComposition.renderMode,
-    animationGraph: sourceComposition.animationGraph as Part["animationGraph"],
     frame: sourceFrameToCompositionFrame(sourceComposition.frame),
     background: sourceBackgroundToLayer(sourceComposition.background),
     objects: getSourceCompositionObjects(sourceComposition).map(
@@ -130,7 +125,7 @@ function sourceBackgroundToLayer(
     stretchToElements: background?.stretchToElements || undefined,
     hidden: background?.hidden,
     locked: background?.locked,
-    animations: stripGraphAnimations(background?.animations),
+    animations: background?.animations,
     elements: resolveRenderables(
       background?.elements ?? [],
       compositionApi.renderContext(0, 0),
@@ -152,7 +147,7 @@ function sourceObjectToFrameObject(object: SourceObject): FrameObject {
     layoutId: object.layoutId,
     hidden: object.hidden,
     locked: object.locked,
-    animations: stripGraphAnimations(object.animations),
+    animations: object.animations,
   };
 }
 
@@ -161,7 +156,6 @@ export function compositionToSource(composition: Part) {
     new Set([
       "Component",
       "Composition",
-      ...(composition.animationGraph ? ["defineAnimationGraph"] : []),
       ...composition.background.elements.map(frameObjectConstructorName),
       ...composition.objects.map(frameObjectConstructorName),
     ]),
@@ -172,9 +166,6 @@ export function compositionToSource(composition: Part) {
     composition.renderMode !== "webgl"
       ? `  renderMode: ${JSON.stringify(composition.renderMode)},\n`
       : "";
-  const animationGraphSource = composition.animationGraph
-    ? `  animationGraph: ${tsBlock(composition.animationGraph, 2)},\n`
-    : "";
   const background = cleanUndefined({
     id: composition.background.id,
     name: composition.background.name,
@@ -182,7 +173,7 @@ export function compositionToSource(composition: Part) {
     stretchToElements: composition.background.stretchToElements,
     hidden: composition.background.hidden || undefined,
     locked: composition.background.locked || undefined,
-    animations: authoredAnimations(composition.background.animations),
+    animations: composition.background.animations,
   });
   const backgroundElements = composition.background.elements.map(
     frameObjectToConstructorSource,
@@ -195,7 +186,7 @@ ${backgroundElements.map((object) => indent(object, 6)).join(",\n")}
   }`;
   const objects = composition.objects.map(frameObjectToConstructorSource);
 
-  return `import { ${imports.join(", ")} } from "@clipper/composition-api";\n\nclass GeneratedCompositionObjects extends Component {\n  render() {\n    return [\n${objects.map((object) => indent(object, 6)).join(",\n")}\n    ];\n  }\n}\n\nexport const composition = new Composition({\n  duration: ${JSON.stringify(composition.duration)},\n${renderModeSource}  frame: ${tsBlock(composition.frame, 2)},\n  background: ${indent(backgroundSource, 2).trimStart()},\n${animationGraphSource}  render() {\n    return [new GeneratedCompositionObjects()];\n  },\n});\n`;
+  return `import { ${imports.join(", ")} } from "@clipper/composition-api";\n\nclass GeneratedCompositionObjects extends Component {\n  render() {\n    return [\n${objects.map((object) => indent(object, 6)).join(",\n")}\n    ];\n  }\n}\n\nexport const composition = new Composition({\n  duration: ${JSON.stringify(composition.duration)},\n${renderModeSource}  frame: ${tsBlock(composition.frame, 2)},\n  background: ${indent(backgroundSource, 2).trimStart()},\n  render() {\n    return [new GeneratedCompositionObjects()];\n  },\n});\n`;
 }
 
 function frameObjectToSourceObject(object: FrameObject): SourceObject {
@@ -211,7 +202,7 @@ function frameObjectToSourceObject(object: FrameObject): SourceObject {
     layoutId: object.layoutId,
     hidden: object.hidden,
     locked: object.locked,
-    animations: authoredAnimations(object.animations),
+    animations: object.animations,
   };
 }
 
@@ -229,18 +220,9 @@ function frameObjectToConstructorSource(object: FrameObject) {
     layoutId: object.layoutId,
     hidden: object.hidden || undefined,
     locked: object.locked || undefined,
-    animations: authoredAnimations(object.animations),
+    animations: object.animations,
   });
   return `new ${frameObjectConstructorName(object)}(${tsBlock(input, 0)})`;
-}
-
-function authoredAnimations(animations: LayerAnimation[] | undefined) {
-  const authored = stripGraphAnimations(animations);
-  return authored?.length ? authored : undefined;
-}
-
-function stripGraphAnimations(animations: LayerAnimation[] | undefined) {
-  return animations?.filter((animation) => !animation.id.startsWith("graph:"));
 }
 
 function frameObjectConstructorName(object: FrameObject) {
@@ -250,45 +232,6 @@ function frameObjectConstructorName(object: FrameObject) {
   if (object.type === "html") return "Html";
   if (object.type === "template") return "Template";
   return "Rect";
-}
-
-// ---------------------------------------------------------------------------
-// Typed Effect Graph Source Generation
-// ---------------------------------------------------------------------------
-
-function typedAnimationGraphToSource(
-  graph: TypedAnimationGraphState,
-  padding: number,
-): string {
-  return `defineAnimationGraph(${tsBlock(compactTypedAnimationGraph(graph), padding)})`;
-}
-
-function compactTypedAnimationGraph(graph: TypedAnimationGraphState) {
-  return {
-    ...graph,
-    nodes: compactTypedAnimationGraphNodes(graph.nodes),
-    layers: graph.layers?.map((layer) => ({
-      ...layer,
-      nodes: compactTypedAnimationGraphNodes(layer.nodes),
-    })),
-  };
-}
-
-function compactTypedAnimationGraphNodes(
-  nodes: TypedAnimationGraphState["nodes"],
-) {
-  return Object.fromEntries(
-    Object.entries(nodes).map(([nodeId, node]) => [
-      nodeId,
-      {
-        id: node.id,
-        kind: node.kind,
-        label: node.label,
-        position: node.position,
-        config: node.config,
-      },
-    ]),
-  );
 }
 
 function tsBlock(value: unknown, padding: number) {
