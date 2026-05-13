@@ -375,12 +375,9 @@ function localDrawPoint(point: Point, bounds: Bounds) {
 }
 
 function getPathSegmentPoints(segments: PathSegment[]) {
-  return segments.flatMap((segment) => [
-    segment.start,
-    segment.c1,
-    segment.c2,
-    segment.end,
-  ]).filter((point): point is Point => Boolean(point));
+  return segments
+    .flatMap((segment) => [segment.start, segment.c1, segment.c2, segment.end])
+    .filter((point): point is Point => Boolean(point));
 }
 
 function buildNormalizedPathFromSegments(
@@ -391,7 +388,8 @@ function buildNormalizedPathFromSegments(
     .map((segment, index) => {
       const start = localDrawPoint(segment.start, bounds);
       const end = localDrawPoint(segment.end, bounds);
-      const move = index === 0 ? `M ${start.x.toFixed(2)} ${start.y.toFixed(2)} ` : "";
+      const move =
+        index === 0 ? `M ${start.x.toFixed(2)} ${start.y.toFixed(2)} ` : "";
       if (segment.kind === "curve" && segment.c1 && segment.c2) {
         const c1 = localDrawPoint(segment.c1, bounds);
         const c2 = localDrawPoint(segment.c2, bounds);
@@ -430,7 +428,11 @@ function getLastPathPoint(draft: PathDraft) {
   return draft.segments[draft.segments.length - 1]?.end ?? draft.start;
 }
 
-function createPathSegment(start: Point, end: Point, curve: boolean): PathSegment {
+function createPathSegment(
+  start: Point,
+  end: Point,
+  curve: boolean,
+): PathSegment {
   if (!curve) return { kind: "line", start, end };
   const dx = end.x - start.x;
   const dy = end.y - start.y;
@@ -3014,6 +3016,33 @@ function AppContent({
     selectComposeLayerObjects([object]);
   }
 
+  function commitTldrawSvgObject(svg: string, bounds: Bounds, label: string) {
+    if (!part) return;
+    const id = `tldraw-${Date.now().toString(36)}`;
+    const object: FrameObject = {
+      id,
+      name: label === "tldraw shape" ? "Drawing shape" : "Drawing",
+      type: "svg",
+      selector: `[data-object-id='${id}']`,
+      bounds: {
+        x: Math.round(bounds.x),
+        y: Math.round(bounds.y),
+        width: Math.max(1, Math.round(bounds.width)),
+        height: Math.max(1, Math.round(bounds.height)),
+      },
+      content: svg,
+      style: {
+        background: "transparent",
+        overflow: "visible",
+      },
+    };
+    updateCompositionForTimelinePart(part.id, (composition) => ({
+      ...composition,
+      objects: [...composition.objects, object],
+    }));
+    selectComposeLayerObjects([object]);
+  }
+
   function updatePathObjectControl(
     objectId: string,
     segmentIndex: number,
@@ -3036,7 +3065,8 @@ function AppContent({
         segment.start = point;
       } else if (control === "end") {
         segment.end = point;
-        if (segments[segmentIndex + 1]) segments[segmentIndex + 1].start = point;
+        if (segments[segmentIndex + 1])
+          segments[segmentIndex + 1].start = point;
       } else if (control === "c1" || control === "c2") {
         segment.kind = "curve";
         segment[control] = point;
@@ -3188,16 +3218,23 @@ function AppContent({
   function handleShapeToolPointerUp(event: React.PointerEvent<HTMLDivElement>) {
     const tool = activeToolRef.current;
     const draft = pathDraftRef.current;
-    if (tool && draft?.pointerId === event.pointerId && isBezierDrawTool(tool)) {
+    if (
+      tool &&
+      draft?.pointerId === event.pointerId &&
+      isBezierDrawTool(tool)
+    ) {
       const el = event.currentTarget;
       const end = framePointFromClient(event.nativeEvent, el);
       const segmentStart = getLastPathPoint(draft);
       const downPoint = draft.downPoint ?? segmentStart;
       const curve = Math.hypot(end.x - downPoint.x, end.y - downPoint.y) >= 3;
-      const segment = draft.current ?? createPathSegment(segmentStart, end, curve);
+      const segment =
+        draft.current ?? createPathSegment(segmentStart, end, curve);
       if (
-        Math.hypot(segment.end.x - segment.start.x, segment.end.y - segment.start.y) >=
-        3
+        Math.hypot(
+          segment.end.x - segment.start.x,
+          segment.end.y - segment.start.y,
+        ) >= 3
       )
         draft.segments.push(segment);
       draft.pointerId = null;
@@ -4115,6 +4152,9 @@ function AppContent({
               onObjectPointerDown: startObjectDrag,
               onObjectResizePointerDown: startObjectResize,
               onPathControlPointerDown: handlePathControlPointerDown,
+              onTldrawSvgCommit: composeMode
+                ? commitTldrawSvgObject
+                : undefined,
               onObjectCornerRadiusChange: (objectId, radius) =>
                 updateObjectById(objectId, (object) => {
                   const {
@@ -4157,16 +4197,7 @@ function AppContent({
             stageRef={centerPreviewScrollRef}
             onModeChange={handleModeChange}
             onScroll={saveCenterPreviewScroll}
-            composeToolbarProps={
-              composeMode && mode === "preview" && hasPreviewComposition
-                ? {
-                    activeTool,
-                    onActiveToolChange: setActiveTool,
-                    resizeMode: objectResizeMode,
-                    onResizeModeChange: setObjectResizeMode,
-                  }
-                : null
-            }
+            composeToolbarProps={null}
             playbackBarProps={{
               currentSceneTime,
               fastSelectEnabled,

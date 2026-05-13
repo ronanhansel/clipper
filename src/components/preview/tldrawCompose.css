@@ -1,0 +1,103 @@
+[data-clipper-tldraw-compose-overlay] {
+  --tl-radius-2: 6px;
+  --tl-radius-3: 7px;
+  --tl-radius-4: 8px;
+  --tl-color-panel: #151820;
+  --tl-color-low: #11141a;
+  --tl-color-background: #0c0e13;
+  --tl-color-divider: #2d313b;
+  --tl-color-muted-2: #242936;
+  --tl-color-selected: var(--clipper-accent);
+  --tl-color-selected-contrast: var(--clipper-accent-foreground);
+  --tl-color-text: #f7f7f8;
+  --tl-shadow-2: 0 12px 34px rgba(0, 0, 0, 0.38);
+  --tl-shadow-3: 0 16px 42px rgba(0, 0, 0, 0.44);
+}
+
+[data-clipper-tldraw-compose-overlay] .tlui-main-toolbar {
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: 8px 0 0 8px;
+}
+
+[data-clipper-tldraw-compose-overlay] .tlui-main-toolbar__inner {
+  gap: 4px;
+}
+
+[data-clipper-tldraw-compose-overlay] .tlui-main-toolbar__tools,
+[data-clipper-tldraw-compose-overlay] .tlui-menu {
+  border: 1px solid #2d313b;
+}
+
+[data-clipper-tldraw-compose-overlay] .tlui-row {
+  padding: 1px;
+}
+
+[data-clipper-tldraw-compose-overlay] .tlui-row > * {
+  margin-left: 0;
+  margin-right: 0;
+}
+
+[data-clipper-tldraw-compose-overlay] .tlui-button__tool,
+[data-clipper-tldraw-compose-overlay] .tlui-main-toolbar__overflow,
+[data-clipper-tldraw-compose-overlay] .tlui-main-toolbar__lock-button {
+  width: 32px;
+  height: 32px;
+}
+
+[data-clipper-tldraw-compose-overlay] .tlui-button__tool::after,
+[data-clipper-tldraw-compose-overlay] .tlui-main-toolbar__lock-button::after {
+  inset: 3px;
+  border-radius: 6px;
+}
+
+[data-clipper-tldraw-compose-overlay] .tlui-icon {
+  width: 15px;
+  height: 15px;
+}
+
+[data-clipper-tldraw-compose-overlay] .tlui-main-toolbar--horizontal {
+  padding-bottom: 0;
+}
+
+[data-clipper-tldraw-compose-overlay]
+  .tlui-main-toolbar--horizontal
+  .tlui-main-toolbar__overflow {
+  width: 32px;
+  margin-left: 0;
+}
+
+[data-clipper-tldraw-compose-overlay]
+  .tlui-main-toolbar--horizontal
+  .tlui-main-toolbar__extras {
+  height: 32px;
+  top: 0;
+}
+
+[data-clipper-tldraw-compose-overlay] .tlui-button__menu,
+[data-clipper-tldraw-compose-overlay] .tlui-button__low {
+  min-height: 28px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+
+[data-clipper-tldraw-compose-overlay]
+  .tlui-button__menu
+  > .tlui-icon
+  + .tlui-button__label {
+  margin-left: 6px;
+}
+
+[data-clipper-tldraw-compose-overlay] .tlui-button__label,
+[data-clipper-tldraw-compose-overlay] .tlui-kbd {
+  font-size: 11px;
+}
+
+[data-clipper-tldraw-compose-overlay] .tlui-menu {
+  max-width: 240px;
+  max-height: 320px;
+}
+
+[data-clipper-tldraw-compose-overlay] .tlui-menu__group {
+  border-color: #2d313b;
+}

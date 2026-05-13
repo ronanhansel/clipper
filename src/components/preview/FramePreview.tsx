@@ -2,6 +2,7 @@ import {
   Component as ReactComponent,
   Fragment,
   memo,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -15,6 +16,16 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { createPortal } from "react-dom";
+import {
+  DefaultToolbar,
+  Editor as TldrawEditor,
+  Tldraw,
+  ToolbarItem,
+  type TLComponents,
+  type TLUiOverrides,
+} from "tldraw";
+import "tldraw/tldraw.css";
+import "./tldrawCompose.css";
 import {
   selectorBlue,
   selectorHandleSizePx,
@@ -172,6 +183,7 @@ type FramePreviewProps = {
     segmentIndex: number,
     control: "start" | "end" | "c1" | "c2",
   ) => void;
+  onTldrawSvgCommit?: (svg: string, bounds: Bounds, label: string) => void;
   onObjectCornerRadiusChange?: (objectId: string, radius: number) => void;
   onTextEditCommit: (
     objectId: string,
@@ -239,6 +251,7 @@ export const FramePreview = memo(function FramePreview({
   onObjectPointerDown,
   onObjectResizePointerDown,
   onPathControlPointerDown,
+  onTldrawSvgCommit,
   onObjectCornerRadiusChange,
   onTextEditCommit,
   onTextObjectDoubleClick,
@@ -811,6 +824,12 @@ export const FramePreview = memo(function FramePreview({
             />
           ) : null}
           <FramePickPointImperativeOverlay />
+          {timelineMode === "compose" && !isPlaying && onTldrawSvgCommit ? (
+            <TldrawComposeOverlay
+              frameScale={frameScale}
+              onCommit={onTldrawSvgCommit}
+            />
+          ) : null}
           {shapeDrawPreview &&
           activeShapeTool &&
           shapeDrawPreview.bounds.width > 0 &&
@@ -1537,6 +1556,139 @@ function FramePickPointImperativeOverlay() {
   );
 }
 
+const tldrawComposeComponents: TLComponents = {
+  Toolbar: TldrawComposeToolbar,
+  MainMenu: null,
+  PageMenu: null,
+  Minimap: null,
+  StylePanel: null,
+  NavigationPanel: null,
+  HelpMenu: null,
+  ZoomMenu: null,
+  ActionsMenu: null,
+  DebugMenu: null,
+  DebugPanel: null,
+  QuickActions: null,
+};
+
+function TldrawComposeToolbar() {
+  return (
+    <DefaultToolbar maxItems={28} maxSizePx={980} minItems={8} minSizePx={260}>
+      <ToolbarItem tool="select" />
+      <ToolbarItem tool="hand" />
+      <ToolbarItem tool="draw" />
+      <ToolbarItem tool="eraser" />
+      <ToolbarItem tool="arrow" />
+      <ToolbarItem tool="text" />
+      <ToolbarItem tool="asset" />
+      <ToolbarItem tool="rectangle" />
+      <ToolbarItem tool="ellipse" />
+      <ToolbarItem tool="triangle" />
+      <ToolbarItem tool="diamond" />
+      <ToolbarItem tool="pentagon" />
+      <ToolbarItem tool="hexagon" />
+      <ToolbarItem tool="octagon" />
+      <ToolbarItem tool="oval" />
+      <ToolbarItem tool="rhombus" />
+      <ToolbarItem tool="rhombus-2" />
+      <ToolbarItem tool="trapezoid" />
+      <ToolbarItem tool="star" />
+      <ToolbarItem tool="cloud" />
+      <ToolbarItem tool="heart" />
+      <ToolbarItem tool="x-box" />
+      <ToolbarItem tool="check-box" />
+      <ToolbarItem tool="arrow-left" />
+      <ToolbarItem tool="arrow-up" />
+      <ToolbarItem tool="arrow-down" />
+      <ToolbarItem tool="arrow-right" />
+      <ToolbarItem tool="line" />
+      <ToolbarItem tool="highlight" />
+      <ToolbarItem tool="laser" />
+      <ToolbarItem tool="frame" />
+    </DefaultToolbar>
+  );
+}
+
+const tldrawComposeOverrides: TLUiOverrides = {
+  tools(_editor, tools) {
+    const next = { ...tools };
+    delete next.note;
+    return next;
+  },
+};
+
+function TldrawComposeOverlay({
+  frameScale,
+  onCommit,
+}: {
+  frameScale: number;
+  onCommit: (svg: string, bounds: Bounds, label: string) => void;
+}) {
+  const editorRef = useRef<TldrawEditor | null>(null);
+  const [hasShapes, setHasShapes] = useState(false);
+
+  const handleMount = useCallback((editor: TldrawEditor) => {
+    editorRef.current = editor;
+    editor.setCurrentTool("select");
+    const cleanup = editor.store.listen(
+      () => setHasShapes(editor.getCurrentPageShapes().length > 0),
+      { source: "user", scope: "document" },
+    );
+    return () => cleanup();
+  }, []);
+
+  async function commitTldrawPage() {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const shapes = editor.getCurrentPageShapes();
+    if (!shapes.length) return;
+    const pageBounds = editor.getCurrentPageBounds();
+    const exported = await editor.getSvgString(shapes, {
+      background: false,
+      padding: 0,
+      scale: 1,
+    });
+    if (!exported || !pageBounds) return;
+    onCommit(
+      exported.svg,
+      {
+        x: pageBounds.x / frameScale,
+        y: pageBounds.y / frameScale,
+        width: exported.width / frameScale,
+        height: exported.height / frameScale,
+      },
+      shapes.length === 1 ? "tldraw shape" : "tldraw drawing",
+    );
+    editor.deleteShapes(shapes);
+    setHasShapes(false);
+  }
+
+  return (
+    <div
+      className="absolute inset-0 z-[60] overflow-hidden"
+      data-clipper-tldraw-compose-overlay
+    >
+      <Tldraw
+        autoFocus={false}
+        components={tldrawComposeComponents}
+        onMount={handleMount}
+        overrides={tldrawComposeOverrides}
+      />
+      <button
+        className={`absolute right-3 top-3 z-[70] rounded-[8px] border border-[#2d313b] px-3 py-1.5 text-[11px] font-bold shadow-[0_12px_34px_rgba(0,0,0,0.38)] transition ${
+          hasShapes
+            ? "bg-[var(--clipper-accent)] text-[var(--clipper-accent-foreground)]"
+            : "pointer-events-none bg-[#171920] text-[#69707f]"
+        }`}
+        disabled={!hasShapes}
+        onClick={commitTldrawPage}
+      >
+        Add to scene
+      </button>
+    </div>
+  );
+}
+
 type EditablePathSegment = {
   kind: "line" | "curve";
   start: Point;
@@ -1576,7 +1728,13 @@ function PathEditOverlay({
   if (!segments?.length) return null;
   const controls = segments.flatMap((segment, index) => [
     ...(index === 0
-      ? [{ control: "start" as const, point: segment.start, segmentIndex: index }]
+      ? [
+          {
+            control: "start" as const,
+            point: segment.start,
+            segmentIndex: index,
+          },
+        ]
       : []),
     ...(segment.kind === "curve" && segment.c1
       ? [{ control: "c1" as const, point: segment.c1, segmentIndex: index }]
@@ -1649,7 +1807,10 @@ function ShapeDrawPreviewOverlay({
     const path =
       preview.path ??
       (tool === "pencil"
-        ? (preview.points?.length ? preview.points : [preview.start, preview.end])
+        ? (preview.points?.length
+            ? preview.points
+            : [preview.start, preview.end]
+          )
             .map((point, index) => {
               const normalized = pointToViewBox(point);
               return `${index === 0 ? "M" : "L"} ${normalized.x.toFixed(2)} ${normalized.y.toFixed(2)}`;
@@ -1703,7 +1864,11 @@ function ShapeDrawPreviewOverlay({
             fontSize="12"
             fontWeight="600"
           >
-            <textPath href="#clipper-draw-preview-path" startOffset="50%" textAnchor="middle">
+            <textPath
+              href="#clipper-draw-preview-path"
+              startOffset="50%"
+              textAnchor="middle"
+            >
               Text on path
             </textPath>
           </text>
