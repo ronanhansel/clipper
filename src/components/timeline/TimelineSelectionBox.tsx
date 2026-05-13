@@ -2,6 +2,32 @@ import { useLayoutEffect, type RefObject } from "react";
 import type { TimelineSelectionDrag } from "../../app/types";
 import { clamp } from "../../core/math";
 
+export const timelineMarqueeSelectionClassName =
+  "pointer-events-none absolute border border-[#159dff] bg-[#159dff]/10 shadow-[0_0_0_1px_rgba(21,157,255,0.18)]";
+
+export function MarqueeSelectionBox({
+  left,
+  top,
+  width,
+  height,
+  className = "",
+  zIndexClassName = "z-40",
+}: {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  className?: string;
+  zIndexClassName?: string;
+}) {
+  return (
+    <div
+      className={`${timelineMarqueeSelectionClassName} ${zIndexClassName} ${className}`}
+      style={{ left, top, width, height }}
+    />
+  );
+}
+
 export function TimelineSelectionBox({
   boxRef,
   drag,
@@ -18,7 +44,7 @@ export function TimelineSelectionBox({
   return (
     <div
       ref={boxRef}
-      className="pointer-events-none absolute left-0 top-0 z-40 border border-[#159dff] bg-[#159dff]/10 shadow-[0_0_0_1px_rgba(21,157,255,0.18)] will-change-transform"
+      className={`${timelineMarqueeSelectionClassName} left-0 top-0 z-40 will-change-transform`}
       style={{ display: "none" }}
     />
   );

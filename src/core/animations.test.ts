@@ -46,4 +46,40 @@ describe("evaluateLayerAnimations", () => {
       height: 60,
     });
   });
+
+  it("tweens between inspector-created keyframe diamonds as one property track", () => {
+    const animations: LayerAnimation[] = [
+      {
+        id: "keyframe:opacity:start",
+        keyframes: { opacity: [1, 1] },
+        options: { duration: 0.1, ease: "linear" },
+      },
+      {
+        id: "keyframe:opacity:end",
+        keyframes: { opacity: [0, 0] },
+        options: { delay: 1, duration: 0.1, ease: "linear" },
+      },
+    ];
+
+    expect(evaluateLayerAnimations(animations, 0.5).opacity).toBeCloseTo(0.5);
+  });
+
+  it("uses the segment start keyframe ease when tweening timeline tracks", () => {
+    const animations: LayerAnimation[] = [
+      {
+        id: "keyframe:opacity:start",
+        keyframes: { opacity: [0, 0] },
+        options: { duration: 0.1, ease: [0.42, 0, 1, 1] },
+      },
+      {
+        id: "keyframe:opacity:end",
+        keyframes: { opacity: [1, 1] },
+        options: { delay: 1, duration: 0.1, ease: "linear" },
+      },
+    ];
+
+    const opacity = evaluateLayerAnimations(animations, 0.5).opacity;
+    expect(opacity).toBeGreaterThan(0);
+    expect(opacity).toBeLessThan(0.5);
+  });
 });

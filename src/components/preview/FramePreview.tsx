@@ -1,5 +1,6 @@
 import {
   Component as ReactComponent,
+  Fragment,
   memo,
   useEffect,
   useLayoutEffect,
@@ -154,6 +155,8 @@ type FramePreviewProps = {
   onFramePointerDownCapture: (event: PointerEvent<HTMLDivElement>) => void;
   onFramePointerMove: (event: PointerEvent<HTMLDivElement>) => void;
   onFramePointerUp: (event: PointerEvent<HTMLDivElement>) => void;
+  activeShapeTool?: ComposeDrawTool | null;
+  shapeDrawPreview?: ShapeDrawPreview | null;
   onObjectPointerDown: (
     event: PointerEvent<HTMLDivElement>,
     object: FrameObject,
@@ -162,6 +165,12 @@ type FramePreviewProps = {
     event: PointerEvent<HTMLDivElement>,
     handle: ResizeHandle,
     objectId?: string,
+  ) => void;
+  onPathControlPointerDown?: (
+    event: PointerEvent<HTMLButtonElement>,
+    objectId: string,
+    segmentIndex: number,
+    control: "start" | "end" | "c1" | "c2",
   ) => void;
   onObjectCornerRadiusChange?: (objectId: string, radius: number) => void;
   onTextEditCommit: (
@@ -174,6 +183,26 @@ type FramePreviewProps = {
     object: FrameObject,
   ) => void;
   onTrackerTargetPick: (objectId: string) => void;
+};
+
+type ComposeDrawTool =
+  | "rect"
+  | "line"
+  | "arrow"
+  | "ellipse"
+  | "polygon"
+  | "star"
+  | "pen"
+  | "pencil"
+  | "text"
+  | "textPath";
+
+type ShapeDrawPreview = {
+  bounds: Bounds;
+  start: Point;
+  end: Point;
+  points?: Point[];
+  path?: string;
 };
 
 export const FramePreview = memo(function FramePreview({
@@ -209,10 +238,13 @@ export const FramePreview = memo(function FramePreview({
   onFramePointerUp,
   onObjectPointerDown,
   onObjectResizePointerDown,
+  onPathControlPointerDown,
   onObjectCornerRadiusChange,
   onTextEditCommit,
   onTextObjectDoubleClick,
   onTrackerTargetPick,
+  activeShapeTool,
+  shapeDrawPreview,
 }: FramePreviewProps) {
   const exportTileViewport = (
     arguments[0] as { exportTileViewport?: ExportTileViewport }
@@ -645,7 +677,7 @@ export const FramePreview = memo(function FramePreview({
       >
         <div
           ref={frameViewportRef}
-          className={`absolute overflow-hidden ${!isPlaying && (interactiveFocusPicking || interactiveTrackerPicking) ? "cursor-crosshair ring-2 ring-[#159dff]" : ""}`}
+          className={`absolute overflow-hidden ${!isPlaying && (interactiveFocusPicking || interactiveTrackerPicking) ? "cursor-crosshair ring-2 ring-[#159dff]" : activeShapeTool ? "cursor-crosshair" : ""}`}
           data-clipper-frame-preview
           style={clippedViewportStyle}
           onPointerDownCapture={handleFramePointerDownCapture}
@@ -779,6 +811,16 @@ export const FramePreview = memo(function FramePreview({
             />
           ) : null}
           <FramePickPointImperativeOverlay />
+          {shapeDrawPreview &&
+          activeShapeTool &&
+          shapeDrawPreview.bounds.width > 0 &&
+          shapeDrawPreview.bounds.height > 0 ? (
+            <ShapeDrawPreviewOverlay
+              preview={shapeDrawPreview}
+              frameScale={frameScale}
+              tool={activeShapeTool}
+            />
+          ) : null}
         </div>
       </div>
       {canSelectObjects && !isUnlinkedPart && previewOverlayHost
@@ -789,35 +831,44 @@ export const FramePreview = memo(function FramePreview({
               );
               const isBackgroundSelection = object.id === part.background.id;
               return (
-                <SelectionOverlayBox
-                  key={object.id}
-                  objectId={object.id}
-                  bounds={object.bounds}
-                  cameraTransform={liveCameraTransform}
-                  frameScale={frameScale}
-                  frameViewportRef={frameViewportRef}
-                  handleSizePx={selectionHandleSizePx}
-                  highlighted={hoveredObjectId === object.id}
-                  interactive={!marqueeDragging && !isBackgroundSelection}
-                  offsetPx={selectionOffsetPx}
-                  portal
-                  portalHost={previewOverlayHost}
-                  radius={
-                    !isBackgroundSelection && source?.type === "rect"
-                      ? getNumericStyleValue(source.style.borderRadius)
-                      : undefined
-                  }
-                  uiScale={selectionOverlayScale}
-                  onCornerRadiusChange={
-                    !isBackgroundSelection && onObjectCornerRadiusChange
-                      ? (radius) =>
-                          onObjectCornerRadiusChange(object.id, radius)
-                      : undefined
-                  }
-                  onResizePointerDown={(event, handle) =>
-                    onObjectResizePointerDown(event, handle, object.id)
-                  }
-                />
+                <Fragment key={object.id}>
+                  <SelectionOverlayBox
+                    objectId={object.id}
+                    bounds={object.bounds}
+                    cameraTransform={liveCameraTransform}
+                    frameScale={frameScale}
+                    frameViewportRef={frameViewportRef}
+                    handleSizePx={selectionHandleSizePx}
+                    highlighted={hoveredObjectId === object.id}
+                    interactive={!marqueeDragging && !isBackgroundSelection}
+                    offsetPx={selectionOffsetPx}
+                    portal
+                    portalHost={previewOverlayHost}
+                    radius={
+                      !isBackgroundSelection && source?.type === "rect"
+                        ? getNumericStyleValue(source.style.borderRadius)
+                        : undefined
+                    }
+                    uiScale={selectionOverlayScale}
+                    onCornerRadiusChange={
+                      !isBackgroundSelection && onObjectCornerRadiusChange
+                        ? (radius) =>
+                            onObjectCornerRadiusChange(object.id, radius)
+                        : undefined
+                    }
+                    onResizePointerDown={(event, handle) =>
+                      onObjectResizePointerDown(event, handle, object.id)
+                    }
+                  />
+                  {source && onPathControlPointerDown ? (
+                    <PathEditOverlay
+                      cameraTransform={liveCameraTransform}
+                      frameScale={frameScale}
+                      object={source}
+                      onPathControlPointerDown={onPathControlPointerDown}
+                    />
+                  ) : null}
+                </Fragment>
               );
             }),
             previewOverlayHost,
@@ -841,10 +892,7 @@ function areFramePreviewPropsEqual(
       // Check every other prop is unchanged
       const keys = Object.keys(next) as (keyof typeof next)[];
       const nonTimeChanged = keys.some(
-        (k) =>
-          k !== "sceneTime" &&
-          k !== "previewTime" &&
-          prev[k] !== next[k],
+        (k) => k !== "sceneTime" && k !== "previewTime" && prev[k] !== next[k],
       );
       if (!nonTimeChanged) return true;
     }
@@ -1486,6 +1534,198 @@ function FramePickPointImperativeOverlay() {
     >
       <span className="absolute left-1/2 top-1/2 h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white/80 bg-[#159dff] shadow-[0_2px_10px_rgba(0,0,0,0.42)]" />
     </div>
+  );
+}
+
+type EditablePathSegment = {
+  kind: "line" | "curve";
+  start: Point;
+  end: Point;
+  c1?: Point;
+  c2?: Point;
+};
+
+function parseEditablePath(object: FrameObject) {
+  const raw = object.style.clipperPath;
+  if (typeof raw !== "string") return null;
+  try {
+    const parsed = JSON.parse(raw) as {
+      segments?: EditablePathSegment[];
+    };
+    if (!Array.isArray(parsed.segments)) return null;
+    return parsed.segments;
+  } catch {
+    return null;
+  }
+}
+
+function PathEditOverlay({
+  cameraTransform,
+  frameScale,
+  object,
+  onPathControlPointerDown,
+}: {
+  cameraTransform: CameraPreviewTransform;
+  frameScale: number;
+  object: FrameObject;
+  onPathControlPointerDown: NonNullable<
+    FramePreviewProps["onPathControlPointerDown"]
+  >;
+}) {
+  const segments = parseEditablePath(object);
+  if (!segments?.length) return null;
+  const controls = segments.flatMap((segment, index) => [
+    ...(index === 0
+      ? [{ control: "start" as const, point: segment.start, segmentIndex: index }]
+      : []),
+    ...(segment.kind === "curve" && segment.c1
+      ? [{ control: "c1" as const, point: segment.c1, segmentIndex: index }]
+      : []),
+    ...(segment.kind === "curve" && segment.c2
+      ? [{ control: "c2" as const, point: segment.c2, segmentIndex: index }]
+      : []),
+    { control: "end" as const, point: segment.end, segmentIndex: index },
+  ]);
+  return (
+    <>
+      {controls.map(({ control, point, segmentIndex }, index) => {
+        const viewport = boundsToViewport(
+          { x: point.x, y: point.y, width: 0, height: 0 },
+          cameraTransform,
+          frameScale,
+        );
+        const isHandle = control === "c1" || control === "c2";
+        return (
+          <button
+            key={`${object.id}:${index}:${control}`}
+            className={`absolute z-[95] grid -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border outline-none transition ${
+              isHandle
+                ? "h-2.5 w-2.5 border-[#8fbff7] bg-[#11141a]"
+                : "h-3.5 w-3.5 border-white/80 bg-[#159dff]"
+            }`}
+            style={{ left: viewport.x, top: viewport.y }}
+            title={isHandle ? "Drag Bezier handle" : "Drag path joint"}
+            onPointerDown={(event) => {
+              event.stopPropagation();
+              onPathControlPointerDown(event, object.id, segmentIndex, control);
+            }}
+          />
+        );
+      })}
+    </>
+  );
+}
+
+function ShapeDrawPreviewOverlay({
+  preview,
+  frameScale,
+  tool,
+}: {
+  preview: ShapeDrawPreview;
+  frameScale: number;
+  tool: ComposeDrawTool;
+}) {
+  const { bounds } = preview;
+  const style = {
+    left: bounds.x * frameScale,
+    top: bounds.y * frameScale,
+    width: bounds.width * frameScale,
+    height: bounds.height * frameScale,
+  } as CSSProperties;
+
+  if (
+    tool === "line" ||
+    tool === "arrow" ||
+    tool === "pen" ||
+    tool === "pencil" ||
+    tool === "textPath"
+  ) {
+    const pointToViewBox = (point: Point) => ({
+      x: ((point.x - bounds.x) / Math.max(bounds.width, 1)) * 100,
+      y: ((point.y - bounds.y) / Math.max(bounds.height, 1)) * 100,
+    });
+    const start = pointToViewBox(preview.start);
+    const end = pointToViewBox(preview.end);
+    const path =
+      preview.path ??
+      (tool === "pencil"
+        ? (preview.points?.length ? preview.points : [preview.start, preview.end])
+            .map((point, index) => {
+              const normalized = pointToViewBox(point);
+              return `${index === 0 ? "M" : "L"} ${normalized.x.toFixed(2)} ${normalized.y.toFixed(2)}`;
+            })
+            .join(" ")
+        : tool === "pen" || tool === "textPath"
+          ? `M ${start.x.toFixed(2)} ${start.y.toFixed(2)} C ${((start.x + end.x) / 2).toFixed(2)} ${start.y.toFixed(2)}, ${((start.x + end.x) / 2).toFixed(2)} ${end.y.toFixed(2)}, ${end.x.toFixed(2)} ${end.y.toFixed(2)}`
+          : `M ${start.x.toFixed(2)} ${start.y.toFixed(2)} L ${end.x.toFixed(2)} ${end.y.toFixed(2)}`);
+    return (
+      <svg
+        className="pointer-events-none absolute z-50 overflow-visible"
+        style={style}
+        viewBox="0 0 100 100"
+        preserveAspectRatio="none"
+      >
+        <defs>
+          <marker
+            id="clipper-draw-preview-arrow"
+            markerHeight="7"
+            markerWidth="7"
+            orient="auto"
+            refX="6"
+            refY="3.5"
+          >
+            <path d="M0,0 L7,3.5 L0,7 Z" fill="#159dff" />
+          </marker>
+        </defs>
+        <path
+          d={path}
+          fill="none"
+          id="clipper-draw-preview-path"
+          markerEnd={
+            tool === "arrow" ? "url(#clipper-draw-preview-arrow)" : undefined
+          }
+          stroke="#159dff"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={tool === "pencil" ? 4 : 3}
+          vectorEffect="non-scaling-stroke"
+        />
+        {tool === "pen" || tool === "textPath" ? (
+          <>
+            <circle cx={start.x} cy={start.y} fill="#159dff" r="3.4" />
+            <circle cx={end.x} cy={end.y} fill="#159dff" r="3.4" />
+          </>
+        ) : null}
+        {tool === "textPath" ? (
+          <text
+            fill="#ffffff"
+            fontFamily="system-ui, sans-serif"
+            fontSize="12"
+            fontWeight="600"
+          >
+            <textPath href="#clipper-draw-preview-path" startOffset="50%" textAnchor="middle">
+              Text on path
+            </textPath>
+          </text>
+        ) : null}
+      </svg>
+    );
+  }
+
+  return (
+    <div
+      className="pointer-events-none absolute z-50 border-2 border-[#159dff] bg-[#159dff]/10"
+      style={{
+        ...style,
+        borderRadius: tool === "ellipse" ? "9999px" : undefined,
+        clipPath:
+          tool === "polygon"
+            ? "polygon(50% 0%, 100% 38%, 82% 100%, 18% 100%, 0% 38%)"
+            : tool === "star"
+              ? "polygon(50% 0%, 61% 35%, 98% 35%, 68% 56%, 79% 91%, 50% 70%, 21% 91%, 32% 56%, 2% 35%, 39% 35%)"
+              : undefined,
+      }}
+    />
   );
 }
 

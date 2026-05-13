@@ -9,11 +9,19 @@ import {
   type UIEvent,
 } from "react";
 import {
+  ArrowUpRight,
   Circle,
-  MousePointer2,
+  ChevronDown,
+  Minus,
   MoveDiagonal2,
+  MousePointer2 as PointerIcon,
+  PenTool,
+  Pentagon,
+  Pencil,
   Square,
+  Star,
   Type,
+  Waypoints,
 } from "lucide-react";
 import { EditorPane } from "../../components/EditorPane";
 import { FramePreview } from "../../components/preview/FramePreview";
@@ -119,12 +127,69 @@ type PreviewColumnProps = {
 };
 
 type ComposeToolbarProps = {
-  onAddEllipse: () => void;
-  onAddRectangle: () => void;
-  onAddText: () => void;
+  activeTool: ComposeDrawTool | null;
+  onActiveToolChange: (tool: ComposeDrawTool | null) => void;
   resizeMode: "resize" | "scale";
   onResizeModeChange: (mode: "resize" | "scale") => void;
 };
+
+type ComposeDrawTool =
+  | "rect"
+  | "line"
+  | "arrow"
+  | "ellipse"
+  | "polygon"
+  | "star"
+  | "pen"
+  | "pencil"
+  | "text"
+  | "textPath";
+
+type ToolbarTool = {
+  tool: ComposeDrawTool;
+  label: string;
+  shortcut?: string;
+  icon: ReactNode;
+};
+
+const shapeTools: ToolbarTool[] = [
+  {
+    tool: "rect",
+    label: "Rectangle",
+    shortcut: "R",
+    icon: <Square size={17} />,
+  },
+  { tool: "line", label: "Line", shortcut: "L", icon: <Minus size={18} /> },
+  {
+    tool: "arrow",
+    label: "Arrow",
+    shortcut: "Shift L",
+    icon: <ArrowUpRight size={18} />,
+  },
+  {
+    tool: "ellipse",
+    label: "Ellipse",
+    shortcut: "O",
+    icon: <Circle size={17} />,
+  },
+  { tool: "polygon", label: "Polygon", icon: <Pentagon size={18} /> },
+  { tool: "star", label: "Star", icon: <Star size={18} /> },
+];
+
+const penTools: ToolbarTool[] = [
+  { tool: "pen", label: "Pen", shortcut: "P", icon: <PenTool size={18} /> },
+  {
+    tool: "pencil",
+    label: "Pencil",
+    shortcut: "Shift P",
+    icon: <Pencil size={18} />,
+  },
+];
+
+const textTools: ToolbarTool[] = [
+  { tool: "text", label: "Text", shortcut: "T", icon: <Type size={19} /> },
+  { tool: "textPath", label: "Text on path", icon: <Waypoints size={18} /> },
+];
 
 export function PreviewColumn({
   blankFrameViewportStyle,
@@ -379,50 +444,156 @@ function hasActiveLivePostProcessPass(
 }
 
 function ComposeToolbar({
-  onAddEllipse,
-  onAddRectangle,
-  onAddText,
+  activeTool,
+  onActiveToolChange,
   resizeMode,
   onResizeModeChange,
 }: ComposeToolbarProps) {
-  const buttonClass =
-    "grid h-8 w-8 place-items-center rounded-[7px] text-[#dfe2ea] transition hover:bg-[#262b35] hover:text-white";
+  const [openMenu, setOpenMenu] = useState<"shapes" | "pen" | "text" | null>(
+    null,
+  );
+  const [lastShapeTool, setLastShapeTool] = useState<ComposeDrawTool>("rect");
+  const [lastPenTool, setLastPenTool] = useState<ComposeDrawTool>("pen");
+  const [lastTextTool, setLastTextTool] = useState<ComposeDrawTool>("text");
+  const activeShapeTool = shapeTools.find((item) => item.tool === activeTool);
+  const activePenTool = penTools.find((item) => item.tool === activeTool);
+  const activeTextTool = textTools.find((item) => item.tool === activeTool);
+  const currentShapeTool =
+    activeShapeTool ?? shapeTools.find((item) => item.tool === lastShapeTool)!;
+  const currentPenTool =
+    activePenTool ?? penTools.find((item) => item.tool === lastPenTool)!;
+  const currentTextTool =
+    activeTextTool ?? textTools.find((item) => item.tool === lastTextTool)!;
+
+  const toolButtonClass = (active: boolean) =>
+    `grid h-8 w-8 place-items-center rounded-[7px] outline-none transition focus-visible:ring-2 focus-visible:ring-[rgb(var(--clipper-accent-rgb)/0.32)] ${active ? "bg-[var(--clipper-accent)] text-[var(--clipper-accent-foreground)] shadow-[0_0_0_3px_rgb(var(--clipper-accent-rgb)/0.12)]" : "text-[#dfe2ea] hover:bg-[#20232c] hover:text-white"}`;
+  const menuButtonClass = (active: boolean) =>
+    `grid h-8 w-4 place-items-center rounded-[6px] outline-none transition focus-visible:ring-2 focus-visible:ring-[rgb(var(--clipper-accent-rgb)/0.32)] ${active ? "bg-[#252a35] text-white" : "text-[#9b9da7] hover:bg-[#20232c] hover:text-white"}`;
   const modeButtonClass = (active: boolean) =>
-    `grid h-8 w-8 place-items-center rounded-[7px] transition ${active ? "bg-[#262b35] text-white" : "text-[#aab0bc] hover:bg-[#262b35] hover:text-white"}`;
+    `grid h-8 w-8 place-items-center rounded-[7px] outline-none transition focus-visible:ring-2 focus-visible:ring-[rgb(var(--clipper-accent-rgb)/0.32)] ${active ? "bg-[#252a35] text-white" : "text-[#aab0bc] hover:bg-[#20232c] hover:text-white"}`;
+
+  function selectTool(tool: ToolbarTool) {
+    if (shapeTools.some((item) => item.tool === tool.tool))
+      setLastShapeTool(tool.tool);
+    if (penTools.some((item) => item.tool === tool.tool))
+      setLastPenTool(tool.tool);
+    if (textTools.some((item) => item.tool === tool.tool))
+      setLastTextTool(tool.tool);
+    onActiveToolChange(tool.tool);
+    setOpenMenu(null);
+  }
+
+  function renderMenu(
+    menu: "shapes" | "pen" | "text",
+    tools: ToolbarTool[],
+    widthClass: string,
+  ) {
+    if (openMenu !== menu) return null;
+    return (
+      <div
+        className={`absolute bottom-full left-0 mb-2 rounded-[10px] border border-[#2d313b] bg-[#11141a] p-1.5 text-[#f7f7f8] shadow-[0_18px_60px_rgba(0,0,0,0.42)] ${widthClass}`}
+      >
+        <div className="grid gap-0.5">
+          {tools.map((item) => (
+            <button
+              key={item.tool}
+              className="grid h-7 grid-cols-[14px_22px_minmax(0,1fr)_auto] items-center gap-1.5 rounded-[6px] px-1.5 text-left text-[11px] font-semibold leading-none text-[#dfe2ea] outline-none transition hover:bg-[#20232c] hover:text-white focus-visible:bg-[#20232c] focus-visible:text-white"
+              onClick={() => selectTool(item)}
+            >
+              <span className="grid place-items-center text-[11px] text-[var(--clipper-accent)]">
+                {activeTool === item.tool ? "✓" : null}
+              </span>
+              <span className="grid place-items-center [&_svg]:size-4">
+                {item.icon}
+              </span>
+              <span className="min-w-0 truncate">{item.label}</span>
+              <span className="text-[10px] font-semibold text-[#69707f]">
+                {item.shortcut ?? ""}
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-3 -translate-x-1/2">
-      <div className="pointer-events-auto flex items-center gap-1 rounded-[10px] border border-[#303641] bg-[#151820]/95 shadow-[0_14px_38px_rgba(0,0,0,0.36),inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur">
-        <button
-          className={buttonClass}
-          title="Add rectangle"
-          onClick={onAddRectangle}
-        >
-          <Square size={15} />
-        </button>
-        <button
-          className={buttonClass}
-          title="Add ellipse"
-          onClick={onAddEllipse}
-        >
-          <Circle size={15} />
-        </button>
-        <button className={buttonClass} title="Add text" onClick={onAddText}>
-          <Type size={15} />
-        </button>
-        <div className="mx-1 h-5 w-px bg-[#313744]" />
+      <div className="pointer-events-auto flex items-center gap-0.5 rounded-[10px] border border-[#2d313b] bg-[#151820]/95 p-1 shadow-[0_14px_38px_rgba(0,0,0,0.36),inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur">
+        <div className="relative flex items-center gap-1">
+          {renderMenu("shapes", shapeTools, "w-[224px]")}
+          <button
+            className={toolButtonClass(Boolean(activeShapeTool))}
+            title={`Draw ${currentShapeTool.label.toLowerCase()}`}
+            aria-pressed={Boolean(activeShapeTool)}
+            onClick={() => selectTool(currentShapeTool)}
+          >
+            {currentShapeTool.icon}
+          </button>
+          <button
+            className={menuButtonClass(openMenu === "shapes")}
+            title="Shape tools"
+            onClick={() => setOpenMenu(openMenu === "shapes" ? null : "shapes")}
+          >
+            <ChevronDown size={15} />
+          </button>
+        </div>
+        <div className="relative flex items-center gap-1">
+          {renderMenu("pen", penTools, "w-[188px]")}
+          <button
+            className={toolButtonClass(Boolean(activePenTool))}
+            title={currentPenTool.label}
+            aria-pressed={Boolean(activePenTool)}
+            onClick={() => selectTool(currentPenTool)}
+          >
+            {currentPenTool.icon}
+          </button>
+          <button
+            className={menuButtonClass(openMenu === "pen")}
+            title="Pen tools"
+            onClick={() => setOpenMenu(openMenu === "pen" ? null : "pen")}
+          >
+            <ChevronDown size={15} />
+          </button>
+        </div>
+        <div className="relative flex items-center gap-1">
+          {renderMenu("text", textTools, "w-[196px]")}
+          <button
+            className={toolButtonClass(Boolean(activeTextTool))}
+            title={currentTextTool.label}
+            aria-pressed={Boolean(activeTextTool)}
+            onClick={() => selectTool(currentTextTool)}
+          >
+            {currentTextTool.icon}
+          </button>
+          <button
+            className={menuButtonClass(openMenu === "text")}
+            title="Text tools"
+            onClick={() => setOpenMenu(openMenu === "text" ? null : "text")}
+          >
+            <ChevronDown size={15} />
+          </button>
+        </div>
+        <div className="mx-1 h-6 w-px bg-[#313744]" />
         <button
           className={modeButtonClass(resizeMode === "resize")}
           title="Resize bounds"
           aria-pressed={resizeMode === "resize"}
-          onClick={() => onResizeModeChange("resize")}
+          onClick={() => {
+            onActiveToolChange(null);
+            onResizeModeChange("resize");
+          }}
         >
-          <MousePointer2 size={15} />
+          <PointerIcon size={17} />
         </button>
         <button
           className={modeButtonClass(resizeMode === "scale")}
           title="Scale contents"
           aria-pressed={resizeMode === "scale"}
-          onClick={() => onResizeModeChange("scale")}
+          onClick={() => {
+            onActiveToolChange(null);
+            onResizeModeChange("scale");
+          }}
         >
           <MoveDiagonal2 size={15} />
         </button>

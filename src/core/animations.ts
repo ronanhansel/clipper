@@ -39,7 +39,7 @@ const TRANSFORM_UNITS: Record<string, string> = {
   skewY: "deg",
 };
 
-const COLOR_KEYFRAME_KEYS = ["color", "backgroundColor"];
+const COLOR_KEYFRAME_KEYS = ["color", "backgroundColor"] as const;
 
 const NUMERIC_KEYFRAME_KEYS = [
   "opacity",
@@ -61,36 +61,204 @@ const NUMERIC_KEYFRAME_KEYS = [
   "pathLength",
   "pathSpacing",
   "blur",
-];
+] as const;
+
+const PERSPECTIVE_KEYFRAME_KEY = "transformPerspective";
+
+type NumericKeyframeKey =
+  | (typeof NUMERIC_KEYFRAME_KEYS)[number]
+  | typeof PERSPECTIVE_KEYFRAME_KEY;
+
+type ColorKeyframeKey = (typeof COLOR_KEYFRAME_KEYS)[number];
+
+type LayerAnimationEase = LayerAnimation["options"]["ease"];
+
+type NumericTrackPoint = {
+  time: number;
+  value: number;
+  ease?: LayerAnimationEase;
+};
+
+type ColorTrackPoint = {
+  time: number;
+  value: string;
+};
 
 export function evaluateLayerAnimations(
   animations: LayerAnimation[],
   time: number,
 ): RenderStyle {
-  const combined: RenderStyle = {};
+  return evaluateAuthoritativeLayerAnimationTracks(
+    animations.filter((animation) => animation.enabled !== false),
+    time,
+  );
+}
+
+function evaluateAuthoritativeLayerAnimationTracks(
+  animations: LayerAnimation[],
+  time: number,
+): RenderStyle {
+  const numericTracks = new Map<NumericKeyframeKey, NumericTrackPoint[]>();
+  const colorTracks = new Map<ColorKeyframeKey, ColorTrackPoint[]>();
 
   for (const animation of animations) {
-    if (animation.enabled === false) continue;
+    collectNumericTrackPoints(animation, numericTracks);
+    collectColorTrackPoints(animation, colorTracks);
+  }
 
-    const style = evaluateLayerAnimation(animation, time);
-    const beforeStart = time < (animation.options.delay ?? 0);
+  const style: RenderStyle = {};
+  const transforms: string[] = [];
+  const perspectiveTrack = numericTracks.get(PERSPECTIVE_KEYFRAME_KEY);
+  if (perspectiveTrack?.length) {
+    const value = interpolateNumericTrack(perspectiveTrack, time);
+    transforms.push(`perspective(${Math.round(value)}px)`);
+  }
 
-    for (const key in style) {
-      if (beforeStart && combined[key] !== undefined) continue;
-      if (
-        key === "transform" &&
-        combined.transform !== undefined &&
-        style.transform !== undefined
-      ) {
-        if (beforeStart) continue;
-        combined.transform = `${combined.transform} ${style.transform}`;
-      } else if (style[key] !== undefined) {
-        combined[key] = style[key];
-      }
+  for (const key of NUMERIC_KEYFRAME_KEYS) {
+    const points = numericTracks.get(key);
+    if (!points?.length) continue;
+    const value = interpolateNumericTrack(points, time);
+    const transformName = TRANSFORM_MAP[key];
+    if (transformName) {
+      const unit = TRANSFORM_UNITS[key];
+      const formatted =
+        key === "scale" || key === "scaleX" || key === "scaleY"
+          ? value.toFixed(4)
+          : Math.round(value);
+      transforms.push(`${transformName}(${formatted}${unit})`);
+    } else if (key === "opacity") {
+      style.opacity = value;
+    } else if (key === "blur") {
+      style.filter = `blur(${Math.max(0, value).toFixed(2)}px)`;
+    } else if (key === "width" || key === "height") {
+      style[key] = Math.max(0, value);
     }
   }
 
-  return combined;
+  for (const key of COLOR_KEYFRAME_KEYS) {
+    const points = colorTracks.get(key);
+    if (!points?.length) continue;
+    style[key] = evaluateColorTrack(points, time);
+  }
+
+  if (transforms.length > 0) style.transform = transforms.join(" ");
+  return style;
+}
+
+function collectNumericTrackPoints(
+  animation: LayerAnimation,
+  tracks: Map<NumericKeyframeKey, NumericTrackPoint[]>,
+) {
+  for (const key of NUMERIC_KEYFRAME_KEYS) {
+    const values = animation.keyframes[key];
+    if (!values || !Array.isArray(values) || values.length < 2) continue;
+    addNumericTrackPoints(tracks, key, animation, values as readonly number[]);
+  }
+  const perspectiveValues = animation.keyframes.transformPerspective;
+  if (
+    perspectiveValues &&
+    Array.isArray(perspectiveValues) &&
+    perspectiveValues.length >= 2
+  ) {
+    addNumericTrackPoints(
+      tracks,
+      PERSPECTIVE_KEYFRAME_KEY,
+      animation,
+      perspectiveValues as readonly number[],
+    );
+  }
+}
+
+function addNumericTrackPoints(
+  tracks: Map<NumericKeyframeKey, NumericTrackPoint[]>,
+  key: NumericKeyframeKey,
+  animation: LayerAnimation,
+  values: readonly number[],
+) {
+  const points = tracks.get(key) ?? [];
+  const delay = animation.options.delay ?? 0;
+  const duration = animation.options.duration;
+  const lastIndex = Math.max(values.length - 1, 1);
+  const singleSyntheticKeyframe =
+    values.length === 2 && values[0] === values[1];
+  values.forEach((value, index) => {
+    if (singleSyntheticKeyframe && index > 0) return;
+    points.push({
+      time: delay + (duration * index) / lastIndex,
+      value,
+      ease: animation.options.ease,
+    });
+  });
+  tracks.set(key, points);
+}
+
+function collectColorTrackPoints(
+  animation: LayerAnimation,
+  tracks: Map<ColorKeyframeKey, ColorTrackPoint[]>,
+) {
+  for (const key of COLOR_KEYFRAME_KEYS) {
+    const values = animation.keyframes[key];
+    if (!values || !Array.isArray(values) || values.length < 2) continue;
+    const points = tracks.get(key) ?? [];
+    const delay = animation.options.delay ?? 0;
+    const duration = animation.options.duration;
+    const lastIndex = Math.max(values.length - 1, 1);
+    const singleSyntheticKeyframe =
+      values.length === 2 && values[0] === values[1];
+    values.forEach((value, index) => {
+      if (singleSyntheticKeyframe && index > 0) return;
+      points.push({
+        time: delay + (duration * index) / lastIndex,
+        value,
+      });
+    });
+    tracks.set(key, points);
+  }
+}
+
+function sortedNumericTrack(points: NumericTrackPoint[]) {
+  return [...points].sort((left, right) => left.time - right.time);
+}
+
+function sortedColorTrack(points: ColorTrackPoint[]) {
+  return [...points].sort((left, right) => left.time - right.time);
+}
+
+function interpolateNumericTrack(
+  points: NumericTrackPoint[],
+  time: number,
+): number {
+  const sorted = sortedNumericTrack(points);
+  if (sorted.length === 0) return 0;
+  if (sorted.length === 1 || time <= sorted[0].time) return sorted[0].value;
+  const last = sorted[sorted.length - 1];
+  if (time >= last.time) return last.value;
+
+  for (let index = 0; index < sorted.length - 1; index += 1) {
+    const start = sorted[index];
+    const end = sorted[index + 1];
+    if (time < start.time || time > end.time) continue;
+    const duration = end.time - start.time;
+    if (duration <= 0) return end.value;
+    const progress = easeAnimationProgress(
+      (time - start.time) / duration,
+      start.ease,
+    );
+    return lerp(start.value, end.value, progress);
+  }
+
+  return last.value;
+}
+
+function evaluateColorTrack(points: ColorTrackPoint[], time: number): string {
+  const sorted = sortedColorTrack(points);
+  if (sorted.length === 0) return "";
+  let value = sorted[0].value;
+  for (const point of sorted) {
+    if (point.time > time) break;
+    value = point.value;
+  }
+  return value;
 }
 
 export function evaluateLayerAnimation(

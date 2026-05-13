@@ -30,6 +30,7 @@ import { useTimelineScrubber } from "./useTimelineScrubber";
 import { useTimelineViewportController } from "./useTimelineViewportController";
 import { LayerLabel } from "./TimelinePrimitives";
 import { TimelineShell } from "./TimelineShell";
+import { MarqueeSelectionBox } from "./TimelineSelectionBox";
 import { MotionLane } from "./MotionLane";
 import {
   timelineBlockPreviewKey,
@@ -886,6 +887,11 @@ export const ComposeAnimationTimelinePanel = memo(
                     ? getComposeRowHeight(row, easeRowHeights)
                     : composeTimelineRowHeight
                 }
+                easeExpanded={
+                  row.kind === "attribute"
+                    ? expandedEaseTrackIds.has(row.id)
+                    : false
+                }
                 overviewDragPreview={
                   overviewDragPreview?.layerId === row.layer.id
                     ? overviewDragPreview
@@ -1068,9 +1074,12 @@ function ComposeKeyframeMarquee({
   const width = Math.abs(marquee.currentContentX - marquee.startContentX);
   const height = Math.abs(marquee.currentContentY - marquee.startContentY);
   return (
-    <div
-      className="pointer-events-none absolute z-50 rounded-[3px] border border-[var(--clipper-accent)] bg-[rgb(var(--clipper-accent-rgb)/0.14)] shadow-[0_0_0_1px_rgb(var(--clipper-accent-rgb)/0.18)]"
-      style={{ left, top, width, height }}
+    <MarqueeSelectionBox
+      left={left}
+      top={top}
+      width={width}
+      height={height}
+      zIndexClassName="z-50"
     />
   );
 }
@@ -1137,11 +1146,9 @@ function ComposeTimelineRailRow({
       window.addEventListener("pointerup", onUp);
     }
     return (
-      <div className="relative flex h-full items-center border-t border-[#202633] pl-8 pr-3 text-[11px] font-bold text-[#687386]">
-        <span className="h-px w-3 bg-[#2a3040]" />
-        <span className="ml-2 truncate">Ease</span>
+      <div className="relative flex h-full items-center border-b border-[#202633] pl-8 pr-3 text-[11px] font-bold text-[#687386]">
         <div
-          className="absolute bottom-0 left-0 right-0 h-1 cursor-ns-resize opacity-0 hover:opacity-100 hover:bg-[var(--clipper-accent,#6c8ef5)] transition-opacity"
+          className="absolute bottom-0 left-0 right-0 h-1 cursor-pointer opacity-0 hover:opacity-100 hover:bg-[var(--clipper-accent,#6c8ef5)] transition-opacity"
           onPointerDown={startRailResize}
         />
       </div>
@@ -1151,19 +1158,16 @@ function ComposeTimelineRailRow({
   if (row.kind === "attribute") {
     return (
       <div
-        className="flex h-full items-center gap-2 border-t border-[#202633] pl-8 pr-3 text-[11px] font-bold text-[#8f98a8]"
+        className={`flex h-full items-center gap-2 border-t border-[#202633] pl-8 pr-3 text-[11px] font-bold text-[#8f98a8]${easeExpanded ? "" : " border-b"}`}
         onContextMenu={(event) => onOpenPresetContextMenu(event, row.layer)}
       >
         <span className="h-px w-3 bg-[#3a4352]" />
         <span className="truncate" title={row.track.label}>
           {row.track.label}
         </span>
-        <span className="ml-auto rounded-[4px] border border-[#2b3340] px-1.5 py-0.5 text-[10px] font-black tabular-nums text-[#687386]">
-          {row.track.keyframes.length}
-        </span>
         <button
           data-timeline-control
-          className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-[3px] transition ${easeExpanded ? "bg-[#202633] text-[#dfe2ea]" : "text-[#687386] hover:bg-[#202633] hover:text-[#8f98a8]"}`}
+          className={`ml-auto flex h-4 w-4 shrink-0 items-center justify-center rounded-[3px] transition ${easeExpanded ? "bg-[#202633] text-[#dfe2ea]" : "text-[#687386] hover:bg-[#202633] hover:text-[#8f98a8]"}`}
           title={easeExpanded ? "Hide ease editor" : "Show ease editor"}
           onClick={() => onToggleEaseExpanded(row.id)}
           onPointerDown={(e) => e.stopPropagation()}
@@ -1230,6 +1234,7 @@ function ComposeTimelineViewportRow({
   contentWidth,
   timelineRef,
   easeRowHeight,
+  easeExpanded,
   overviewDragPreview,
   onSelectLayer,
   onOpenPresetContextMenu,
@@ -1249,6 +1254,7 @@ function ComposeTimelineViewportRow({
   contentWidth: number;
   timelineRef: RefObject<HTMLDivElement | null>;
   easeRowHeight: number;
+  easeExpanded: boolean;
   overviewDragPreview: { originalTime: number; time: number } | null;
   onSelectLayer: (layer: ComposeAnimationTimelineLayer) => void;
   onOpenPresetContextMenu: (
@@ -1287,12 +1293,15 @@ function ComposeTimelineViewportRow({
         height={easeRowHeight}
         contentWidth={contentWidth}
         timelineRef={timelineRef}
+        overviewDragPreview={overviewDragPreview}
         onApplyEase={(animationId, ease) =>
           onApplyEase(row.layer, animationId, ease)
         }
         onMoveKeyframesAtTime={(originalTime, newTime) =>
           onMoveKeyframesAtTime(row.layer, originalTime, newTime)
         }
+        onDragPreview={onOverviewDragPreview}
+        onDragEnd={onOverviewDragEnd}
         onResize={(height) => onResizeEaseRow(row.id, height)}
         setAppContextMenu={setAppContextMenu}
       />
@@ -1319,6 +1328,7 @@ function ComposeTimelineViewportRow({
           }
           onDragPreview={onOverviewDragPreview}
           onDragEnd={onOverviewDragEnd}
+          easeExpanded={easeExpanded}
         />
       </div>
     );
@@ -1326,7 +1336,7 @@ function ComposeTimelineViewportRow({
 
   return (
     <div
-      className="relative h-full"
+      className="relative h-full border-t border-b border-[#202633]"
       onContextMenu={(event) => onOpenPresetContextMenu(event, row.layer)}
       onPointerDown={(event) => {
         const target = event.target as HTMLElement;
@@ -1346,6 +1356,7 @@ function ComposeTimelineViewportRow({
         overviewDragPreview={overviewDragPreview}
         selectedKeyframeIds={selectedKeyframeIds}
         onSelectKeyframeIds={onSelectKeyframeIds}
+        onSelectLayer={() => onSelectLayer(row.layer)}
         onMoveKeyframesAtTime={(originalTime, newTime) =>
           onMoveKeyframesAtTime(row.layer, originalTime, newTime)
         }
@@ -1366,6 +1377,7 @@ function ComposeLayerKeyframeOverview({
   overviewDragPreview,
   selectedKeyframeIds,
   onSelectKeyframeIds,
+  onSelectLayer,
   onMoveKeyframesAtTime,
   onDragPreview,
   onDragEnd,
@@ -1379,6 +1391,7 @@ function ComposeLayerKeyframeOverview({
   overviewDragPreview: { originalTime: number; time: number } | null;
   selectedKeyframeIds: Set<string>;
   onSelectKeyframeIds: (ids: string[], additive: boolean) => void;
+  onSelectLayer: () => void;
   onMoveKeyframesAtTime: (originalTime: number, newTime: number) => void;
   onDragPreview: (originalTime: number, time: number) => void;
   onDragEnd: () => void;
@@ -1403,6 +1416,7 @@ function ComposeLayerKeyframeOverview({
   ) {
     event.preventDefault();
     event.stopPropagation();
+    onSelectLayer();
     const ids = composeLayerTimeSelectionIds(layerId, layer, keyframe.time);
     onSelectKeyframeIds(ids, event.shiftKey || event.metaKey || event.ctrlKey);
     startTimelinePointerTransaction({
@@ -1464,7 +1478,7 @@ function ComposeLayerKeyframeOverview({
             data-timeline-control
             className={`absolute top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-[1px] border transition hover:scale-125 ${
               selected
-                ? "border-[var(--clipper-accent)] bg-white shadow-[0_0_0_3px_rgb(var(--clipper-accent-rgb)/0.45)]"
+                ? "border-[#159dff] bg-[#159dff] shadow-[0_0_0_3px_rgba(21,157,255,0.24)]"
                 : "border-white bg-white shadow-[0_0_0_2px_rgba(255,255,255,0.12)]"
             }`}
             style={{
@@ -1497,6 +1511,7 @@ function ComposeAttributeKeyframeLane({
   onMoveKeyframe,
   onDragPreview,
   onDragEnd,
+  easeExpanded,
 }: {
   layerId: string;
   trackKey: ComposeAnimationAttributeKey;
@@ -1512,6 +1527,7 @@ function ComposeAttributeKeyframeLane({
   onMoveKeyframe: (animationId: string, newTime: number) => void;
   onDragPreview: (originalTime: number, time: number) => void;
   onDragEnd: () => void;
+  easeExpanded: boolean;
 }) {
   const { startTimelinePointerTransaction } = useTimelinePointerTransaction();
   const dragRef = useRef<{
@@ -1536,6 +1552,7 @@ function ComposeAttributeKeyframeLane({
   ) {
     event.preventDefault();
     event.stopPropagation();
+    onSelect();
     onSelectKeyframeIds(
       [
         composeKeyframeSelectionId(
@@ -1587,7 +1604,7 @@ function ComposeAttributeKeyframeLane({
 
   return (
     <div
-      className="relative h-full border-t border-[#202633] bg-[#111722]"
+      className={`relative h-full border-t border-[#202633] bg-[#111722]${easeExpanded ? "" : " border-b"}`}
       onPointerDown={(event) => {
         const target = event.target as HTMLElement;
         if (!target.closest("[data-timeline-control]")) {
@@ -1619,7 +1636,7 @@ function ComposeAttributeKeyframeLane({
             data-timeline-control
             className={`absolute top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-[1px] border transition hover:scale-125 ${
               selected
-                ? "border-[var(--clipper-accent)] bg-white shadow-[0_0_0_3px_rgb(var(--clipper-accent-rgb)/0.45)]"
+                ? "border-[#159dff] bg-[#159dff] shadow-[0_0_0_3px_rgba(21,157,255,0.24)]"
                 : "border-white bg-white shadow-[0_0_0_2px_rgba(255,255,255,0.14)]"
             }`}
             title={`${keyframe.time.toFixed(2)}s: ${String(keyframe.value)}`}
@@ -1719,8 +1736,11 @@ function ComposeEaseLane({
   height,
   contentWidth,
   timelineRef,
+  overviewDragPreview,
   onApplyEase,
   onMoveKeyframesAtTime,
+  onDragPreview,
+  onDragEnd,
   onResize,
   setAppContextMenu,
 }: {
@@ -1730,11 +1750,14 @@ function ComposeEaseLane({
   height: number;
   contentWidth: number;
   timelineRef: RefObject<HTMLDivElement | null>;
+  overviewDragPreview: { originalTime: number; time: number } | null;
   onApplyEase: (
     animationId: string,
     ease: MotionEase | readonly [number, number, number, number],
   ) => void;
   onMoveKeyframesAtTime: (originalTime: number, newTime: number) => void;
+  onDragPreview: (originalTime: number, time: number) => void;
+  onDragEnd: () => void;
   onResize: (height: number) => void;
   setAppContextMenu:
     | ((menu: import("../../app/types").ContextMenuState) => void)
@@ -1744,8 +1767,8 @@ function ComposeEaseLane({
   const laneRef = useRef<HTMLDivElement | null>(null);
   const [selectedSegIndex, setSelectedSegIndex] = useState<number | null>(null);
   const [dragPreview, setDragPreview] = useState<{
-    segIndex: number;
-    isStart: boolean;
+    originalTime: number;
+    time: number;
     xFrac: number;
   } | null>(null);
   const [handlePreview, setHandlePreview] = useState<{
@@ -1826,6 +1849,13 @@ function ComposeEaseLane({
   const svgH = Math.max(height - 2, 1);
   const drawH = svgH - pad * 2;
 
+  function getDisplayXFrac(time: number, fallback: number) {
+    const preview = dragPreview ?? overviewDragPreview;
+    return preview && Math.abs(preview.originalTime - time) < 0.001
+      ? Math.max(0, Math.min(1, preview.time / timelineDuration))
+      : fallback;
+  }
+
   function startDotDrag(
     event: ReactPointerEvent<HTMLButtonElement>,
     segIndex: number,
@@ -1847,10 +1877,11 @@ function ComposeEaseLane({
       onPreview: ({ clientX }) => {
         const newTime = timeFromClientX(clientX);
         setDragPreview({
-          segIndex,
-          isStart,
+          originalTime,
+          time: newTime,
           xFrac: timelineDuration > 0 ? newTime / timelineDuration : 0,
         });
+        onDragPreview(originalTime, newTime);
       },
       onCommit: ({ clientX, hasDragged }) => {
         setDragPreview(null);
@@ -1861,9 +1892,11 @@ function ComposeEaseLane({
       },
       onCancel: () => {
         setDragPreview(null);
+        onDragEnd();
       },
       onDragEnd: () => {
         setDragPreview(null);
+        onDragEnd();
       },
     });
   }
@@ -1927,7 +1960,7 @@ function ComposeEaseLane({
   return (
     <div
       ref={laneRef}
-      className="relative border-t border-[#1a2030] bg-[#0d1018]"
+      className="relative border-b border-[#1a2030] bg-[#0d1018]"
       style={{ height }}
     >
       {/* Grid lines + bezier handle lines */}
@@ -1963,13 +1996,19 @@ function ComposeEaseLane({
           if (selectedSegIndex !== i) return null;
           const svgY0 = pad + (1 - seg.normY0) * drawH;
           const svgY1 = pad + (1 - seg.normY1) * drawH;
-          const [cp1x, cp1y, cp2x, cp2y] = seg.controlPoints;
-          const h1x = `${(seg.x0Frac + cp1x * (seg.x1Frac - seg.x0Frac)) * 100}%`;
+          const controlPoints =
+            handlePreview?.segIndex === i
+              ? handlePreview.controlPoints
+              : seg.controlPoints;
+          const [cp1x, cp1y, cp2x, cp2y] = controlPoints;
+          const displayX0Frac = getDisplayXFrac(seg.x0Time, seg.x0Frac);
+          const displayX1Frac = getDisplayXFrac(seg.x1Time, seg.x1Frac);
+          const h1x = `${(displayX0Frac + cp1x * (displayX1Frac - displayX0Frac)) * 100}%`;
           const h1y = svgY0 + cp1y * (svgY1 - svgY0);
-          const h2x = `${(seg.x0Frac + cp2x * (seg.x1Frac - seg.x0Frac)) * 100}%`;
+          const h2x = `${(displayX0Frac + cp2x * (displayX1Frac - displayX0Frac)) * 100}%`;
           const h2y = svgY0 + cp2y * (svgY1 - svgY0);
-          const x0Pct = `${seg.x0Frac * 100}%`;
-          const x1Pct = `${seg.x1Frac * 100}%`;
+          const x0Pct = `${displayX0Frac * 100}%`;
+          const x1Pct = `${displayX1Frac * 100}%`;
           return (
             <g key={`handles-${i}`}>
               <line
@@ -2008,7 +2047,9 @@ function ComposeEaseLane({
             <line
               x1={0}
               y1={pad + (1 - segments[0].normY0) * drawH}
-              x2={segments[0].x0Frac * 1000}
+              x2={
+                getDisplayXFrac(segments[0].x0Time, segments[0].x0Frac) * 1000
+              }
               y2={pad + (1 - segments[0].normY0) * drawH}
               stroke="var(--clipper-accent,#6c8ef5)"
               strokeWidth="2"
@@ -2016,7 +2057,12 @@ function ComposeEaseLane({
               vectorEffect="non-scaling-stroke"
             />
             <line
-              x1={segments[segments.length - 1].x1Frac * 1000}
+              x1={
+                getDisplayXFrac(
+                  segments[segments.length - 1].x1Time,
+                  segments[segments.length - 1].x1Frac,
+                ) * 1000
+              }
               y1={pad + (1 - segments[segments.length - 1].normY1) * drawH}
               x2={1000}
               y2={pad + (1 - segments[segments.length - 1].normY1) * drawH}
@@ -2028,25 +2074,17 @@ function ComposeEaseLane({
           </>
         ) : null}
         {segments.map((seg, i) => {
-          const displayX0Frac =
-            dragPreview?.segIndex === i && dragPreview.isStart
-              ? dragPreview.xFrac
-              : seg.x0Frac;
-          const displayX1Frac =
-            dragPreview?.segIndex === i && !dragPreview.isStart
-              ? dragPreview.xFrac
-              : seg.x1Frac;
+          const displayX0Frac = getDisplayXFrac(seg.x0Time, seg.x0Frac);
+          const displayX1Frac = getDisplayXFrac(seg.x1Time, seg.x1Frac);
           const x0 = displayX0Frac * 1000;
           const x1 = displayX1Frac * 1000;
           const svgY0 = pad + (1 - seg.normY0) * drawH;
           const svgY1 = pad + (1 - seg.normY1) * drawH;
-          const path = buildEaseSvgPath(
-            seg.controlPoints,
-            x0,
-            svgY0,
-            x1,
-            svgY1,
-          );
+          const controlPoints =
+            handlePreview?.segIndex === i
+              ? handlePreview.controlPoints
+              : seg.controlPoints;
+          const path = buildEaseSvgPath(controlPoints, x0, svgY0, x1, svgY1);
           return (
             <path
               key={`curve-${i}`}
@@ -2068,17 +2106,15 @@ function ComposeEaseLane({
         preserveAspectRatio="none"
       >
         {segments.map((seg, i) => {
-          const x0 = seg.x0Frac * 1000;
-          const x1 = seg.x1Frac * 1000;
+          const x0 = getDisplayXFrac(seg.x0Time, seg.x0Frac) * 1000;
+          const x1 = getDisplayXFrac(seg.x1Time, seg.x1Frac) * 1000;
           const svgY0 = pad + (1 - seg.normY0) * drawH;
           const svgY1 = pad + (1 - seg.normY1) * drawH;
-          const path = buildEaseSvgPath(
-            seg.controlPoints,
-            x0,
-            svgY0,
-            x1,
-            svgY1,
-          );
+          const controlPoints =
+            handlePreview?.segIndex === i
+              ? handlePreview.controlPoints
+              : seg.controlPoints;
+          const path = buildEaseSvgPath(controlPoints, x0, svgY0, x1, svgY1);
           return (
             <path
               key={`hit-${i}`}
@@ -2086,7 +2122,7 @@ function ComposeEaseLane({
               fill="none"
               stroke="transparent"
               strokeWidth="12"
-              style={{ cursor: "context-menu" }}
+              style={{ cursor: "pointer" }}
               onContextMenu={(e) =>
                 openEaseContextMenu(e, seg.startAnimationId)
               }
@@ -2096,25 +2132,23 @@ function ComposeEaseLane({
       </svg>
       {/* HTML button overlays for dots — proper pointer capture + hover */}
       {segments.map((seg, i) => {
-        const displayX0Frac =
-          dragPreview?.segIndex === i && dragPreview.isStart
-            ? dragPreview.xFrac
-            : seg.x0Frac;
-        const displayX1Frac =
-          dragPreview?.segIndex === i && !dragPreview.isStart
-            ? dragPreview.xFrac
-            : seg.x1Frac;
+        const displayX0Frac = getDisplayXFrac(seg.x0Time, seg.x0Frac);
+        const displayX1Frac = getDisplayXFrac(seg.x1Time, seg.x1Frac);
         const svgY0 = pad + (1 - seg.normY0) * drawH;
         const svgY1 = pad + (1 - seg.normY1) * drawH;
         const isSelected = selectedSegIndex === i;
         const dotColor = isSelected
           ? "#ffffff"
           : "var(--clipper-accent,#6c8ef5)";
-        const [cp1x, cp1y, cp2x, cp2y] = seg.controlPoints;
-        const h1xFrac = seg.x0Frac + cp1x * (seg.x1Frac - seg.x0Frac);
+        const controlPoints =
+          handlePreview?.segIndex === i
+            ? handlePreview.controlPoints
+            : seg.controlPoints;
+        const [cp1x, cp1y, cp2x, cp2y] = controlPoints;
+        const h1xFrac = displayX0Frac + cp1x * (displayX1Frac - displayX0Frac);
         const h1y =
           pad + (1 - (seg.normY0 + cp1y * (seg.normY1 - seg.normY0))) * drawH;
-        const h2xFrac = seg.x0Frac + cp2x * (seg.x1Frac - seg.x0Frac);
+        const h2xFrac = displayX0Frac + cp2x * (displayX1Frac - displayX0Frac);
         const h2y =
           pad + (1 - (seg.normY0 + cp2y * (seg.normY1 - seg.normY0))) * drawH;
         const handlePad = 8;
@@ -2131,7 +2165,7 @@ function ComposeEaseLane({
                 top: svgY0,
                 background: dotColor,
                 border: "1.5px solid #0d1018",
-                cursor: "grab",
+                cursor: "pointer",
               }}
               onPointerDown={(e) => startDotDrag(e, i, true)}
               onContextMenu={(e) =>
@@ -2147,7 +2181,7 @@ function ComposeEaseLane({
                 top: svgY1,
                 background: dotColor,
                 border: "1.5px solid #0d1018",
-                cursor: "grab",
+                cursor: "pointer",
               }}
               onPointerDown={(e) => startDotDrag(e, i, false)}
               onContextMenu={(e) =>
@@ -2159,27 +2193,27 @@ function ComposeEaseLane({
               <>
                 <button
                   data-timeline-control
-                  className="absolute z-50 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-[2px] transition-transform hover:scale-125 focus:outline-none"
+                  className="absolute z-50 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-[1px] transition-transform hover:scale-125 focus:outline-none"
                   style={{
                     left: `${h1xFrac * 100}%`,
                     top: h1ButtonY,
                     background: "#0d1018",
                     border: "1.5px solid var(--clipper-accent,#6c8ef5)",
                     boxShadow: "0 0 0 2px rgba(108,142,245,0.2)",
-                    cursor: "grab",
+                    cursor: "pointer",
                   }}
                   onPointerDown={(e) => startHandleDrag(e, i, 0)}
                 />
                 <button
                   data-timeline-control
-                  className="absolute z-50 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-[2px] transition-transform hover:scale-125 focus:outline-none"
+                  className="absolute z-50 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-[1px] transition-transform hover:scale-125 focus:outline-none"
                   style={{
                     left: `${h2xFrac * 100}%`,
                     top: h2ButtonY,
                     background: "#0d1018",
                     border: "1.5px solid var(--clipper-accent,#6c8ef5)",
                     boxShadow: "0 0 0 2px rgba(108,142,245,0.2)",
-                    cursor: "grab",
+                    cursor: "pointer",
                   }}
                   onPointerDown={(e) => startHandleDrag(e, i, 1)}
                 />

@@ -31,6 +31,7 @@ import type { FrameObject, Part } from "../../core/types";
 import { frameObjectFromBackgroundLayer } from "../../core/frameInteraction";
 import { arboristDndManager } from "../../lib/arboristDndManager";
 import { useDragAutoScroll } from "../../lib/useDragAutoScroll";
+import { MarqueeSelectionBox } from "../timeline/TimelineSelectionBox";
 
 const composeLayerRowHeight = 30;
 const composeLayerIndent = 24;
@@ -611,9 +612,12 @@ function ComposeLayerMarquee({
   const width = Math.abs(marquee.currentX - marquee.startX);
   const height = Math.abs(marquee.currentY - marquee.startY);
   return (
-    <div
-      className="pointer-events-none absolute z-30 border border-[#159dff] bg-[#159dff]/10 shadow-[0_0_0_1px_rgba(21,157,255,0.18)]"
-      style={{ left, top, width, height }}
+    <MarqueeSelectionBox
+      left={left}
+      top={top}
+      width={width}
+      height={height}
+      zIndexClassName="z-30"
     />
   );
 }
