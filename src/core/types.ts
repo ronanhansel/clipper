@@ -27,7 +27,8 @@ export type FrameObjectType =
   | "image"
   | "svg"
   | "html"
-  | "template";
+  | "template"
+  | "null";
 
 export type MotionEase =
   | "linear"
@@ -158,6 +159,7 @@ export type FrameObject = {
   richText?: RichTextSegment[];
   style: Record<string, string | number>;
   layoutId?: string;
+  parentId?: string;
   hidden?: boolean;
   locked?: boolean;
   animations?: LayerAnimation[];

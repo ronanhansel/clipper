@@ -37,6 +37,7 @@ export type TimelineShellProps = {
   laneContentHeight: number;
   laneRowsStyle: CSSProperties;
   layerRailWidth: number;
+  layerHeaderContent?: ReactNode;
   playheadColor?: string;
   prerenderCacheCoverage?: PrerenderCacheCoverage | null;
   refs: TimelineShellRefs;
@@ -71,6 +72,7 @@ export function TimelineShell({
   laneContentHeight,
   laneRowsStyle,
   layerRailWidth,
+  layerHeaderContent,
   playheadColor = "#ff3b30",
   prerenderCacheCoverage,
   refs,
@@ -181,12 +183,14 @@ export function TimelineShell({
         >
           <div className="grid min-h-0 min-w-0 grid-rows-[38px_minmax(0,1fr)] overflow-hidden">
             <div className="flex min-w-0 items-center pr-4">
-              <span
-                className="min-w-0 truncate text-[13px] font-extrabold text-[#dfe2ea]"
-                title={timelineName}
-              >
-                {timelineName}
-              </span>
+              {layerHeaderContent ?? (
+                <span
+                  className="min-w-0 truncate text-[13px] font-extrabold text-[#dfe2ea]"
+                  title={timelineName}
+                >
+                  {timelineName}
+                </span>
+              )}
             </div>
             <div className="min-h-0 overflow-hidden">
               <div

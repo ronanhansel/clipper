@@ -487,11 +487,17 @@ export function updateDragSelectionBoxElement(
   visible = isVisibleMarqueeBounds(bounds, frameScale),
   uiScale = 1,
   offset: Point = { x: 0, y: 0 },
+  displayBounds: Bounds = {
+    x: bounds.x * frameScale,
+    y: bounds.y * frameScale,
+    width: bounds.width * frameScale,
+    height: bounds.height * frameScale,
+  },
 ) {
   element.style.display = visible ? "block" : "none";
-  element.style.transform = `translate3d(${offset.x + bounds.x * frameScale * uiScale}px, ${offset.y + bounds.y * frameScale * uiScale}px, 0)`;
-  element.style.width = `${bounds.width * frameScale * uiScale}px`;
-  element.style.height = `${bounds.height * frameScale * uiScale}px`;
+  element.style.transform = `translate3d(${offset.x + displayBounds.x * uiScale}px, ${offset.y + displayBounds.y * uiScale}px, 0)`;
+  element.style.width = `${displayBounds.width * uiScale}px`;
+  element.style.height = `${displayBounds.height * uiScale}px`;
   element.style.borderWidth = "1px";
   element.style.boxShadow = "0 0 0 1px rgba(21,157,255,0.18)";
 }

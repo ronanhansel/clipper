@@ -149,11 +149,13 @@ export function TimelinePanel(props: TimelinePanelProps) {
           onScrub={props.onScrub}
           onScrubStart={props.onScrubStart}
           onScrubEnd={props.onScrubEnd}
+          onInspectObject={props.onInspectComposeObject}
           onSelectObjects={props.onSelectComposeObjects}
           onTimelineLayersChange={props.onTimelineLayersChange}
           onTimelineViewportStateChange={props.onTimelineViewportStateChange}
           onUpdateBackgroundAnimation={props.onUpdateComposeBackgroundAnimation}
           onUpdateObjectAnimation={props.onUpdateComposeObjectAnimation}
+          onUpdateObject={props.onUpdateComposeObject}
         />
       </div>
       <div

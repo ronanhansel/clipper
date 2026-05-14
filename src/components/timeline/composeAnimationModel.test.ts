@@ -6,6 +6,7 @@ import {
   getComposeAnimationAttributeKeyframeAtTime,
   getComposeAnimationAttributeTracks,
   getComposeAnimationLayerKeyframes,
+  getComposeParentOptions,
   getNearestComposeAnimationKeyframeValue,
   removeComposeAnimationAttributeKeyframe,
   removeComposeAnimationKeyframeSelections,
@@ -94,6 +95,28 @@ describe("buildComposeAnimationTimelineLayers", () => {
     ).toEqual([1, 3, 5]);
   });
 
+  it("builds parent options with layer numbers and cycle prevention", () => {
+    const child = { ...frameObject("child"), parentId: "parent" };
+    const parent = { ...frameObject("parent") };
+    const grandchild = { ...frameObject("grandchild"), parentId: "child" };
+    const layers = buildComposeAnimationTimelineLayers(
+      partWithObjects([child, parent, grandchild]),
+    );
+
+    expect(layers.map((layer) => `${layer.number}:${layer.id}`)).toEqual([
+      "1:grandchild",
+      "2:parent",
+      "3:child",
+      "4:background",
+    ]);
+    expect(
+      getComposeParentOptions(layers, "parent").map((layer) => layer.id),
+    ).toEqual([]);
+    expect(
+      getComposeParentOptions(layers, "child").map((layer) => layer.id),
+    ).toEqual(["parent"]);
+  });
+
   it("creates single-attribute keyframe animations at the playhead", () => {
     const animation = createComposeAnimationAttributeKeyframeAnimation(
       "opacity",
@@ -133,6 +156,26 @@ describe("buildComposeAnimationTimelineLayers", () => {
       value: 0.5,
     });
     expect(getComposeAnimationAttributeKeyframeAtTime(track, 2.8)).toBeNull();
+  });
+
+  it("uses keyframe time, not duplicate values, for nearest attribute value", () => {
+    const object = {
+      ...frameObject("shape"),
+      animations: [
+        {
+          id: "move",
+          name: "Move",
+          keyframes: { x: [0, 100, 0] as const },
+          options: { delay: 1, duration: 4 },
+        },
+      ],
+    };
+    const [layer] = buildComposeAnimationTimelineLayers(
+      partWithObjects([object]),
+    );
+    const [track] = getComposeAnimationAttributeTracks(layer);
+
+    expect(getNearestComposeAnimationKeyframeValue(track, 4.9)).toBe(0);
   });
 
   it("updates an existing keyframe when playhead time already matches", () => {

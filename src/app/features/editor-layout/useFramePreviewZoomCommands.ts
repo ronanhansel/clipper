@@ -90,8 +90,12 @@ export function useFramePreviewZoomCommands({
 
       const contentX = viewport.scrollLeft + anchorX;
       const contentY = viewport.scrollTop + anchorY;
+      const ratio = clampedScale / previousScale;
 
       framePreviewScaleRef.current = clampedScale;
+      flushSync(() => setFramePreviewScale(clampedScale));
+      viewport.scrollLeft = Math.max(contentX * ratio - anchorX, 0);
+      viewport.scrollTop = Math.max(contentY * ratio - anchorY, 0);
       pendingWheelZoomRef.current = {
         anchorX,
         anchorY,

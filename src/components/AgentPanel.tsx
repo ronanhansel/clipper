@@ -472,6 +472,7 @@ function TemplateLivePreview({
             onFramePointerDown={() => {}}
             onFramePointerDownCapture={() => {}}
             onFramePointerMove={() => {}}
+            onFramePointerLeave={() => {}}
             onFramePointerUp={() => {}}
             onObjectPointerDown={() => {}}
             onObjectResizePointerDown={() => {}}

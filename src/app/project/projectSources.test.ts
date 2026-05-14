@@ -88,6 +88,39 @@ describe("getSyncedCompositionSources", () => {
     expect(sources[composition.filePath]).not.toContain("animationGraph");
   });
 
+  it("syncs compose parent links into generated composition source", () => {
+    const currentPart: CompositionClip = {
+      ...composition,
+      objects: [
+        {
+          id: "parent",
+          name: "Parent",
+          type: "null",
+          selector: "[data-object-id='parent']",
+          bounds: { x: 0, y: 0, width: 80, height: 80 },
+          style: {},
+        },
+        {
+          id: "child",
+          name: "Child",
+          type: "rect",
+          selector: "[data-object-id='child']",
+          bounds: { x: 120, y: 0, width: 100, height: 100 },
+          style: { background: "#fff" },
+          parentId: "parent",
+        },
+      ],
+    };
+
+    const sources = getSyncedCompositionSources(
+      project(currentPart),
+      undefined,
+      {},
+    );
+
+    expect(sources[composition.filePath]).toContain('parentId: "parent"');
+  });
+
   it("uses library composition over stale scene copy for source sync", () => {
     const staleScenePart = {
       ...composition,

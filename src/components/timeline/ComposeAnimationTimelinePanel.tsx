@@ -9,7 +9,8 @@ import {
   type PointerEvent,
   type RefObject,
 } from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { createPortal } from "react-dom";
+import { ChevronDown, ChevronRight, Goal } from "lucide-react";
 import type { ContextMenuState } from "../../app/types";
 import { defaultTimelinePixelsPerSecond } from "../../app/config";
 import { roundTwo } from "../../core/math";
@@ -33,6 +34,14 @@ import { TimelineShell } from "./TimelineShell";
 import { MarqueeSelectionBox } from "./TimelineSelectionBox";
 import { MotionLane } from "./MotionLane";
 import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../ui/select";
+import {
   timelineBlockPreviewKey,
   type TimelineBlockPreviewMap,
 } from "./timelineBlockPreview";
@@ -45,6 +54,7 @@ import {
   getComposeAnimationLayerKeyframes,
   getComposeAnimationAttributeTracks,
   buildComposeAnimationTimelineLayers,
+  getComposeParentOptions,
   getComposeAnimationSnapBoundaries,
   getComposeAnimationTimingDelta,
   getNextComposeAnimationTiming,
@@ -78,6 +88,7 @@ type ComposeAnimationTimelinePanelProps = {
   onScrub: (time: number) => void;
   onScrubStart: () => void;
   onScrubEnd: () => void;
+  onInspectObject?: (object: FrameObject | null) => void;
   onSelectObjects?: (objects: FrameObject[]) => void;
   onTimelineLayersChange: (
     updater: (state: TimelineLayerState) => TimelineLayerState,
@@ -92,6 +103,10 @@ type ComposeAnimationTimelinePanelProps = {
   onUpdateObjectAnimation?: (
     objectId: string,
     updater: (animations: LayerAnimation[]) => LayerAnimation[],
+  ) => void;
+  onUpdateObject?: (
+    objectId: string,
+    updater: (object: FrameObject) => FrameObject,
   ) => void;
   setAppContextMenu?: (menu: ContextMenuState) => void;
 };
@@ -117,6 +132,14 @@ type ComposeKeyframeMarqueeDrag = {
   currentContentY: number;
   additive: boolean;
   initialSelectedIds: Set<string>;
+};
+
+type ComposePickWhipDrag = {
+  childLayerId: string;
+  startX: number;
+  startY: number;
+  currentX: number;
+  currentY: number;
 };
 
 function composeKeyframeSelectionId(
@@ -155,11 +178,13 @@ export const ComposeAnimationTimelinePanel = memo(
     onScrub,
     onScrubEnd,
     onScrubStart,
+    onInspectObject,
     onSelectObjects,
     onTimelineLayersChange,
     onTimelineViewportStateChange,
     onUpdateBackgroundAnimation,
     onUpdateObjectAnimation,
+    onUpdateObject,
     setAppContextMenu,
   }: ComposeAnimationTimelinePanelProps) {
     const partDuration = part?.duration ?? 0.1;
@@ -220,6 +245,12 @@ export const ComposeAnimationTimelinePanel = memo(
     const [keyframeMarquee, setKeyframeMarquee] =
       useState<ComposeKeyframeMarqueeDrag | null>(null);
     const keyframeMarqueeRef = useRef<ComposeKeyframeMarqueeDrag | null>(null);
+    const [pickWhipDrag, setPickWhipDrag] =
+      useState<ComposePickWhipDrag | null>(null);
+    const pickWhipDragRef = useRef<ComposePickWhipDrag | null>(null);
+    const [pickWhipDropLayerId, setPickWhipDropLayerId] = useState<
+      string | null
+    >(null);
     const rows = useMemo(
       () =>
         buildComposeAnimationTimelineRows(
@@ -265,7 +296,7 @@ export const ComposeAnimationTimelinePanel = memo(
         ),
       [contentWidth, easeRowHeights, partDuration, rows, timelineRowStarts],
     );
-    const layerRailWidth = 260;
+    const layerRailWidth = 430;
     const composeTimelinePartId = part?.id ?? "compose-animation";
     const composeMotionTimeline = useMemo<TimelinePartMotionView[]>(
       () =>
@@ -499,6 +530,114 @@ export const ComposeAnimationTimelinePanel = memo(
 
     function selectLayer(layer: ComposeAnimationTimelineLayer) {
       onSelectObjects?.(layer.object ? [layer.object] : []);
+    }
+
+    function inspectLayer(layer: ComposeAnimationTimelineLayer) {
+      onInspectObject?.(layer.object ?? null);
+    }
+
+    function setLayerParent(childLayerId: string, parentLayerId: string) {
+      if (!onUpdateObject) return;
+      const child = layers.find((layer) => layer.id === childLayerId);
+      if (!child?.object) return;
+      const nextParentId = parentLayerId || undefined;
+      const parentOptions = getComposeParentOptions(layers, childLayerId);
+      if (
+        nextParentId &&
+        !parentOptions.some((layer) => layer.id === nextParentId)
+      )
+        return;
+      onUpdateObject(childLayerId, (object) => ({
+        ...object,
+        parentId: nextParentId,
+      }));
+    }
+
+    function startPickWhipDrag(
+      event: ReactPointerEvent<HTMLElement>,
+      childLayerId: string,
+    ) {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const rect = event.currentTarget.getBoundingClientRect();
+      const startX = rect.left + rect.width / 2;
+      const startY = rect.top + rect.height / 2;
+      const next: ComposePickWhipDrag = {
+        childLayerId,
+        startX,
+        startY,
+        currentX: event.clientX,
+        currentY: event.clientY,
+      };
+      pickWhipDragRef.current = next;
+      setPickWhipDrag(next);
+      event.currentTarget.setPointerCapture(event.pointerId);
+
+      function update(moveEvent: globalThis.PointerEvent) {
+        const active = pickWhipDragRef.current;
+        if (!active) return;
+        const updated = {
+          ...active,
+          currentX: moveEvent.clientX,
+          currentY: moveEvent.clientY,
+        };
+        pickWhipDragRef.current = updated;
+        setPickWhipDrag(updated);
+        setPickWhipDropLayerId(
+          getPickWhipTargetLayerId(
+            moveEvent.clientX,
+            moveEvent.clientY,
+            active.childLayerId,
+          ),
+        );
+      }
+
+      function finish(upEvent: globalThis.PointerEvent) {
+        const active = pickWhipDragRef.current;
+        pickWhipDragRef.current = null;
+        setPickWhipDrag(null);
+        setPickWhipDropLayerId(null);
+        window.removeEventListener("pointermove", update);
+        window.removeEventListener("pointerup", finish);
+        window.removeEventListener("pointercancel", cancel);
+        if (!active || upEvent.type === "pointercancel") return;
+        const targetLayerId = getPickWhipTargetLayerId(
+          upEvent.clientX,
+          upEvent.clientY,
+          active.childLayerId,
+        );
+        if (!targetLayerId) return;
+        setLayerParent(active.childLayerId, targetLayerId);
+      }
+
+      function cancel(cancelEvent: globalThis.PointerEvent) {
+        finish(cancelEvent);
+      }
+
+      window.addEventListener("pointermove", update);
+      window.addEventListener("pointerup", finish);
+      window.addEventListener("pointercancel", cancel);
+    }
+
+    function getPickWhipTargetLayerId(
+      clientX: number,
+      clientY: number,
+      childLayerId: string,
+    ) {
+      const targetLayerId = document
+        .elementsFromPoint(clientX, clientY)
+        .map((element) =>
+          element instanceof HTMLElement
+            ? element.closest<HTMLElement>(
+                "[data-compose-parent-drop-layer-id]",
+              )
+            : null,
+        )
+        .find((element) => element?.dataset.composeParentDropLayerId)
+        ?.dataset.composeParentDropLayerId;
+      if (!targetLayerId || targetLayerId === childLayerId) return null;
+      return targetLayerId;
     }
 
     function startLayerNameEdit(layerId: string, name: string) {
@@ -769,6 +908,7 @@ export const ComposeAnimationTimelinePanel = memo(
           laneContentHeight={laneContentHeight}
           laneRowsStyle={laneRowsStyle}
           layerRailWidth={layerRailWidth}
+          layerHeaderContent={<ComposeTimelineLayerHeader />}
           playheadColor="var(--clipper-accent)"
           refs={{
             playbackPlayheadRef,
@@ -809,6 +949,7 @@ export const ComposeAnimationTimelinePanel = memo(
         laneContentHeight={laneContentHeight}
         laneRowsStyle={laneRowsStyle}
         layerRailWidth={layerRailWidth}
+        layerHeaderContent={<ComposeTimelineLayerHeader />}
         playheadColor="var(--clipper-accent)"
         refs={{
           playbackPlayheadRef,
@@ -869,8 +1010,15 @@ export const ComposeAnimationTimelinePanel = memo(
                 onResizeEaseRow={(rowId, height) =>
                   setEaseRowHeights((prev) => ({ ...prev, [rowId]: height }))
                 }
+                parentOptions={getComposeParentOptions(layers, row.layer.id)}
+                onSetLayerParent={setLayerParent}
+                onStartPickWhipDrag={startPickWhipDrag}
+                pickWhipDropActive={pickWhipDropLayerId === row.layer.id}
               />
             ))}
+            {pickWhipDrag ? (
+              <ComposePickWhipDragLine drag={pickWhipDrag} />
+            ) : null}
           </>
         )}
         renderTimelineViewport={() => (
@@ -897,7 +1045,6 @@ export const ComposeAnimationTimelinePanel = memo(
                     ? overviewDragPreview
                     : null
                 }
-                onSelectLayer={selectLayer}
                 onOpenPresetContextMenu={openComposePresetContextMenu}
                 onApplyEase={(layer, animationId, ease) =>
                   applyEaseToTrack(layer, animationId, ease)
@@ -957,6 +1104,7 @@ export const ComposeAnimationTimelinePanel = memo(
                 onOverviewDragEnd={() => setOverviewDragPreview(null)}
                 selectedKeyframeIds={selectedKeyframeIds}
                 onSelectKeyframeIds={selectKeyframeIds}
+                onInspectLayer={inspectLayer}
                 onStartKeyframeMarquee={startKeyframeMarquee}
                 setAppContextMenu={setAppContextMenu}
               />
@@ -1084,6 +1232,39 @@ function ComposeKeyframeMarquee({
   );
 }
 
+function ComposeTimelineLayerHeader() {
+  return (
+    <div className="grid h-full min-w-0 flex-1 grid-cols-[32px_36px_minmax(0,1fr)_170px] items-center border-b border-[#2d313b] text-[10px] font-extrabold uppercase text-[#7f8796]">
+      <span />
+      <span className="text-center">#</span>
+      <span className="truncate px-1">Layer Name</span>
+      <span className="truncate px-2">Parent & Link</span>
+    </div>
+  );
+}
+
+function ComposePickWhipDragLine({ drag }: { drag: ComposePickWhipDrag }) {
+  if (typeof document === "undefined") return null;
+  return createPortal(
+    <svg
+      aria-hidden="true"
+      className="pointer-events-none fixed inset-0 z-[90] h-screen w-screen"
+    >
+      <line
+        x1={drag.startX}
+        y1={drag.startY}
+        x2={drag.currentX}
+        y2={drag.currentY}
+        stroke="white"
+        strokeLinecap="round"
+        strokeWidth="2"
+      />
+      <circle cx={drag.currentX} cy={drag.currentY} fill="white" r="3" />
+    </svg>,
+    document.body,
+  );
+}
+
 function ComposeTimelineRailRow({
   row,
   compact,
@@ -1100,6 +1281,10 @@ function ComposeTimelineRailRow({
   onToggleExpanded,
   onToggleEaseExpanded,
   onResizeEaseRow,
+  parentOptions,
+  onSetLayerParent,
+  onStartPickWhipDrag,
+  pickWhipDropActive,
 }: {
   row: ComposeAnimationTimelineRow;
   compact: boolean;
@@ -1119,6 +1304,13 @@ function ComposeTimelineRailRow({
   onToggleExpanded: (layerId: string) => void;
   onToggleEaseExpanded: (attributeRowId: string) => void;
   onResizeEaseRow: (rowId: string, height: number) => void;
+  parentOptions: ComposeAnimationTimelineLayer[];
+  onSetLayerParent: (childLayerId: string, parentLayerId: string) => void;
+  onStartPickWhipDrag: (
+    event: ReactPointerEvent<HTMLElement>,
+    childLayerId: string,
+  ) => void;
+  pickWhipDropActive: boolean;
 }) {
   if (row.kind === "ease") {
     const resizeDragRef = { startY: 0, startHeight: 0 };
@@ -1158,7 +1350,7 @@ function ComposeTimelineRailRow({
   if (row.kind === "attribute") {
     return (
       <div
-        className={`flex h-full items-center gap-2 border-t border-[#202633] pl-8 pr-3 text-[11px] font-bold text-[#8f98a8]${easeExpanded ? "" : " border-b"}`}
+        className={`flex h-full items-center gap-2 border-t border-[#202633] pl-8 pr-3 text-[11px] font-bold text-[#8f98a8]${easeExpanded ? "" : " border-b"} ${row.layer.object?.hidden ? "opacity-35" : ""}`}
         onContextMenu={(event) => onOpenPresetContextMenu(event, row.layer)}
       >
         <span className="h-px w-3 bg-[#3a4352]" />
@@ -1190,7 +1382,10 @@ function ComposeTimelineRailRow({
 
   return (
     <div
-      className="grid grid-cols-[32px_minmax(0,1fr)] items-center"
+      className={`grid h-full grid-cols-[32px_36px_minmax(0,1fr)_170px] items-center border border-transparent border-b-[#202633] transition ${row.layer.object?.hidden ? "opacity-40" : ""} ${pickWhipDropActive ? "border-[#159dff] bg-[#159dff]/10 shadow-[inset_0_0_0_1px_rgba(21,157,255,0.45)]" : ""}`}
+      data-compose-parent-drop-layer-id={
+        row.layer.object ? row.layer.id : undefined
+      }
       onContextMenu={(event) => onOpenPresetContextMenu(event, row.layer)}
     >
       <button
@@ -1206,9 +1401,15 @@ function ComposeTimelineRailRow({
           <ChevronRight size={13} strokeWidth={2.6} />
         )}
       </button>
+      <span
+        className="justify-self-center text-[11px] font-extrabold tabular-nums text-[#8f98a8]"
+        title={`Layer ${row.layer.number}`}
+      >
+        {row.layer.number}
+      </span>
       <LayerLabel
         editing={editingLayerId === row.layer.id}
-        hidden={false}
+        hidden={Boolean(row.layer.object?.hidden)}
         locked={false}
         compactControls={compact}
         hideLockControl
@@ -1224,8 +1425,75 @@ function ComposeTimelineRailRow({
         onToggleHidden={() => undefined}
         onToggleLocked={() => undefined}
       />
+      <ComposeParentLinkControl
+        layer={row.layer}
+        parentOptions={parentOptions}
+        onSetLayerParent={onSetLayerParent}
+        onStartPickWhipDrag={onStartPickWhipDrag}
+      />
     </div>
   );
+}
+
+function ComposeParentLinkControl({
+  layer,
+  parentOptions,
+  onSetLayerParent,
+  onStartPickWhipDrag,
+}: {
+  layer: ComposeAnimationTimelineLayer;
+  parentOptions: ComposeAnimationTimelineLayer[];
+  onSetLayerParent: (childLayerId: string, parentLayerId: string) => void;
+  onStartPickWhipDrag: (
+    event: ReactPointerEvent<HTMLElement>,
+    childLayerId: string,
+  ) => void;
+}) {
+  if (!layer.object) {
+    return <span className="px-2 text-[11px] font-bold text-[#555d6c]">-</span>;
+  }
+
+  return (
+    <div className="grid min-w-0 grid-cols-[24px_minmax(0,1fr)] items-center gap-1 pr-2">
+      <span
+        data-timeline-control
+        className="grid h-5 w-5 touch-none place-items-center rounded-[4px] text-[#9aa3b4] transition hover:bg-[#202633] hover:text-[#dfe2ea] active:text-white"
+        title="Drag pick whip to a layer name to set parent"
+        onPointerDown={(event) => onStartPickWhipDrag(event, layer.id)}
+      >
+        <PickWhipIcon />
+      </span>
+      <Select
+        value={layer.object.parentId ?? "none"}
+        onValueChange={(value) =>
+          onSetLayerParent(layer.id, value === "none" ? "" : value)
+        }
+      >
+        <SelectTrigger
+          data-timeline-control
+          className="h-6 min-w-0 rounded-[4px] bg-[#111319] px-1.5 text-[11px] font-bold text-[#c7ccd8]"
+          title="Parent layer"
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectGroup>
+            <SelectItem value="none">None</SelectItem>
+            {parentOptions.map((option) => (
+              <SelectItem key={option.id} value={option.id}>
+                {option.number}. {option.name}
+              </SelectItem>
+            ))}
+          </SelectGroup>
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
+function PickWhipIcon() {
+  return <Goal aria-hidden="true" className="h-4 w-4" strokeWidth={1.7} />;
 }
 
 function ComposeTimelineViewportRow({
@@ -1236,7 +1504,6 @@ function ComposeTimelineViewportRow({
   easeRowHeight,
   easeExpanded,
   overviewDragPreview,
-  onSelectLayer,
   onOpenPresetContextMenu,
   onApplyEase,
   onResizeEaseRow,
@@ -1246,6 +1513,7 @@ function ComposeTimelineViewportRow({
   onOverviewDragEnd,
   selectedKeyframeIds,
   onSelectKeyframeIds,
+  onInspectLayer,
   onStartKeyframeMarquee,
   setAppContextMenu,
 }: {
@@ -1256,7 +1524,6 @@ function ComposeTimelineViewportRow({
   easeRowHeight: number;
   easeExpanded: boolean;
   overviewDragPreview: { originalTime: number; time: number } | null;
-  onSelectLayer: (layer: ComposeAnimationTimelineLayer) => void;
   onOpenPresetContextMenu: (
     event: ReactMouseEvent<HTMLElement>,
     layer: ComposeAnimationTimelineLayer,
@@ -1281,6 +1548,7 @@ function ComposeTimelineViewportRow({
   onOverviewDragEnd: () => void;
   selectedKeyframeIds: Set<string>;
   onSelectKeyframeIds: (ids: string[], additive: boolean) => void;
+  onInspectLayer: (layer: ComposeAnimationTimelineLayer) => void;
   onStartKeyframeMarquee: (event: PointerEvent<HTMLDivElement>) => void;
   setAppContextMenu?: (menu: ContextMenuState) => void;
 }) {
@@ -1310,7 +1578,10 @@ function ComposeTimelineViewportRow({
 
   if (row.kind === "attribute") {
     return (
-      <div onContextMenu={(event) => onOpenPresetContextMenu(event, row.layer)}>
+      <div
+        className={row.layer.object?.hidden ? "opacity-35" : undefined}
+        onContextMenu={(event) => onOpenPresetContextMenu(event, row.layer)}
+      >
         <ComposeAttributeKeyframeLane
           layerId={row.layer.id}
           trackKey={row.track.key}
@@ -1320,7 +1591,7 @@ function ComposeTimelineViewportRow({
           timelineRef={timelineRef}
           overviewDragPreview={overviewDragPreview}
           selectedKeyframeIds={selectedKeyframeIds}
-          onSelect={() => onSelectLayer(row.layer)}
+          onInspect={() => onInspectLayer(row.layer)}
           onSelectKeyframeIds={onSelectKeyframeIds}
           onStartKeyframeMarquee={onStartKeyframeMarquee}
           onMoveKeyframe={(animationId, newTime) =>
@@ -1336,12 +1607,12 @@ function ComposeTimelineViewportRow({
 
   return (
     <div
-      className="relative h-full border-t border-b border-[#202633]"
+      className={`relative h-full border-t border-b border-[#202633] ${row.layer.object?.hidden ? "opacity-35" : ""}`}
       onContextMenu={(event) => onOpenPresetContextMenu(event, row.layer)}
       onPointerDown={(event) => {
         const target = event.target as HTMLElement;
         if (!target.closest("[data-timeline-control]")) {
-          onSelectLayer(row.layer);
+          onInspectLayer(row.layer);
           onStartKeyframeMarquee(event);
         }
       }}
@@ -1356,7 +1627,7 @@ function ComposeTimelineViewportRow({
         overviewDragPreview={overviewDragPreview}
         selectedKeyframeIds={selectedKeyframeIds}
         onSelectKeyframeIds={onSelectKeyframeIds}
-        onSelectLayer={() => onSelectLayer(row.layer)}
+        onInspectLayer={() => onInspectLayer(row.layer)}
         onMoveKeyframesAtTime={(originalTime, newTime) =>
           onMoveKeyframesAtTime(row.layer, originalTime, newTime)
         }
@@ -1377,7 +1648,7 @@ function ComposeLayerKeyframeOverview({
   overviewDragPreview,
   selectedKeyframeIds,
   onSelectKeyframeIds,
-  onSelectLayer,
+  onInspectLayer,
   onMoveKeyframesAtTime,
   onDragPreview,
   onDragEnd,
@@ -1391,7 +1662,7 @@ function ComposeLayerKeyframeOverview({
   overviewDragPreview: { originalTime: number; time: number } | null;
   selectedKeyframeIds: Set<string>;
   onSelectKeyframeIds: (ids: string[], additive: boolean) => void;
-  onSelectLayer: () => void;
+  onInspectLayer: () => void;
   onMoveKeyframesAtTime: (originalTime: number, newTime: number) => void;
   onDragPreview: (originalTime: number, time: number) => void;
   onDragEnd: () => void;
@@ -1416,7 +1687,7 @@ function ComposeLayerKeyframeOverview({
   ) {
     event.preventDefault();
     event.stopPropagation();
-    onSelectLayer();
+    onInspectLayer();
     const ids = composeLayerTimeSelectionIds(layerId, layer, keyframe.time);
     onSelectKeyframeIds(ids, event.shiftKey || event.metaKey || event.ctrlKey);
     startTimelinePointerTransaction({
@@ -1505,7 +1776,7 @@ function ComposeAttributeKeyframeLane({
   timelineRef,
   overviewDragPreview,
   selectedKeyframeIds,
-  onSelect,
+  onInspect,
   onSelectKeyframeIds,
   onStartKeyframeMarquee,
   onMoveKeyframe,
@@ -1521,7 +1792,7 @@ function ComposeAttributeKeyframeLane({
   timelineRef: RefObject<HTMLDivElement | null>;
   overviewDragPreview: { originalTime: number; time: number } | null;
   selectedKeyframeIds: Set<string>;
-  onSelect: () => void;
+  onInspect: () => void;
   onSelectKeyframeIds: (ids: string[], additive: boolean) => void;
   onStartKeyframeMarquee: (event: PointerEvent<HTMLDivElement>) => void;
   onMoveKeyframe: (animationId: string, newTime: number) => void;
@@ -1552,7 +1823,7 @@ function ComposeAttributeKeyframeLane({
   ) {
     event.preventDefault();
     event.stopPropagation();
-    onSelect();
+    onInspect();
     onSelectKeyframeIds(
       [
         composeKeyframeSelectionId(
@@ -1608,7 +1879,7 @@ function ComposeAttributeKeyframeLane({
       onPointerDown={(event) => {
         const target = event.target as HTMLElement;
         if (!target.closest("[data-timeline-control]")) {
-          onSelect();
+          onInspect();
           onStartKeyframeMarquee(event);
         }
       }}
@@ -1646,7 +1917,7 @@ function ComposeAttributeKeyframeLane({
             onClick={(event) => {
               if (dragRef.current) return;
               event.stopPropagation();
-              onSelect();
+              onInspect();
             }}
             onPointerDown={(event) => startKeyframeDrag(event, keyframe)}
           />

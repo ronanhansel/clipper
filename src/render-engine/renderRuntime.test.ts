@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { evaluateBackgroundLayer, evaluateFrameObject } from "./renderRuntime";
+import {
+  buildFrameObjectParentTransformLookup,
+  evaluateBackgroundLayer,
+  evaluateFrameObject,
+} from "./renderRuntime";
 import {
   advanceTimeSensitiveSceneTime,
   applyAdjustmentLayersToSceneTime,
@@ -598,6 +602,45 @@ describe("render runtime", () => {
     const evaluated = evaluateFrameObject(object, 2, 4);
 
     expect(evaluated.renderStyle.transform).toBe(
+      "translateX(50px) rotate(45deg) scale(2)",
+    );
+  });
+
+  it("builds parent transforms from evaluated parent keyframes", () => {
+    const parent = {
+      ...baseObject,
+      id: "parent",
+      name: "Parent",
+      style: { transform: "scale(2)" },
+      animations: [
+        {
+          id: "parent-move",
+          keyframes: { x: [0, 100] as const, rotate: [0, 90] as const },
+          options: { duration: 4 },
+        },
+      ],
+    };
+    const child = {
+      ...baseObject,
+      id: "child",
+      name: "Child",
+      parentId: "parent",
+      animations: [
+        {
+          id: "child-move",
+          keyframes: { x: [0, 40] as const },
+          options: { duration: 4 },
+        },
+      ],
+    };
+
+    const transforms = buildFrameObjectParentTransformLookup(
+      [parent, child],
+      2,
+      4,
+    );
+
+    expect(transforms.get("child")).toBe(
       "translateX(50px) rotate(45deg) scale(2)",
     );
   });

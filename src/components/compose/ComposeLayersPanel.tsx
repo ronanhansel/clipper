@@ -14,6 +14,15 @@ import {
   Type,
   Unlock,
 } from "lucide-react";
+import {
+  ArrowIcon,
+  EllipseIcon,
+  LineIcon,
+  NullObjectIcon,
+  PolygonIcon,
+  RectIcon,
+  StarIcon,
+} from "../ShapeIcons";
 import type { MouseEvent, PointerEvent, ReactNode, Ref } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { memo } from "react";
@@ -637,11 +646,32 @@ function getComposeLayersScrollElement(tree: HTMLElement | null) {
 function LayerIcon({ node }: { node: ComposeLayerNode }) {
   const className = "h-3.5 w-3.5 shrink-0 text-current";
   const objectType = node.object?.type;
+  const objectName = node.object?.name;
 
-  if (objectType === "rect") return <RectLayerIcon className={className} />;
+  if (objectType === "rect") {
+    const style = node.object?.style ?? {};
+    if (style.borderRadius === 9999)
+      return <EllipseIcon className={className} />;
+    if (
+      typeof style.clipPath === "string" &&
+      style.clipPath.includes("50% 0%, 100% 38%")
+    )
+      return <PolygonIcon className={className} />;
+    if (
+      typeof style.clipPath === "string" &&
+      style.clipPath.includes("50% 0%, 61% 35%")
+    )
+      return <StarIcon className={className} />;
+    return <RectIcon className={className} />;
+  }
   if (objectType === "text") return <Type className={className} />;
   if (objectType === "image") return <Image className={className} />;
-  if (objectType === "svg") return <PenTool className={className} />;
+  if (objectType === "svg") {
+    if (objectName === "Arrow") return <ArrowIcon className={className} />;
+    if (objectName === "Line") return <LineIcon className={className} />;
+    return <PenTool className={className} />;
+  }
+  if (objectType === "null") return <NullObjectIcon className={className} />;
   if (objectType === "html") return <Code2 className={className} />;
   if (objectType === "template")
     return <TemplateLayerIcon className={className} />;
@@ -651,27 +681,6 @@ function LayerIcon({ node }: { node: ComposeLayerNode }) {
   if (node.kind === "frame") return <Frame className={className} />;
   if (node.kind === "background") return <Palette className={className} />;
   return <Braces className={className} />;
-}
-
-function RectLayerIcon({ className }: { className: string }) {
-  return (
-    <svg
-      className={className}
-      fill="none"
-      viewBox="0 0 24 24"
-      aria-hidden="true"
-    >
-      <rect
-        x="5"
-        y="6"
-        width="14"
-        height="12"
-        rx="2"
-        stroke="currentColor"
-        strokeWidth="2"
-      />
-    </svg>
-  );
 }
 
 function TemplateLayerIcon({ className }: { className: string }) {

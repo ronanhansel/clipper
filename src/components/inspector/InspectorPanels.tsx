@@ -9,7 +9,15 @@ import {
   Trash2,
   Underline,
 } from "lucide-react";
-import { memo, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import {
+  Fragment,
+  memo,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import {
   MAX_PART_DURATION_SECONDS,
   FRAME_HEIGHT,
@@ -26,6 +34,7 @@ import {
   type Point,
   type TransitionLayer,
 } from "../../core/types";
+import { evaluateLayerAnimations } from "../../core/animations";
 import { clamp, roundTenth, roundTwo } from "../../core/math";
 import {
   getAdjustmentEffectPackage,
@@ -97,10 +106,25 @@ import {
   getMasterTimelineClockSnapshot,
   subscribeMasterTimelineClock,
 } from "../../app/features/playback/playbackTimeStore";
+import { livePreviewScrubCommitThrottleMs } from "../../app/services/scrubInteractionService";
 
 const defaultFontFamily = graphicDefaultFontFamily;
 const defaultFontOption = { value: defaultFontFamily, label: "System" };
 type FontOption = { value: string; label: string };
+type BoundsAnimationKey = keyof Bounds;
+
+function isBoundsAnimationKey(
+  key: ComposeAnimationAttributeKey,
+): key is BoundsAnimationKey {
+  return key === "x" || key === "y" || key === "width" || key === "height";
+}
+
+function readTransformPixelValue(transform: string | undefined, name: string) {
+  const match = transform?.match(
+    new RegExp(`${name}\\((-?\\d+(?:\\.\\d+)?)px\\)`),
+  );
+  return match ? Number(match[1]) : null;
+}
 
 let cachedSystemFontOptions: FontOption[] | null = null;
 let systemFontOptionsRequest: Promise<FontOption[]> | null = null;
@@ -282,14 +306,14 @@ function FontSelector({
 export const ObjectInspector = memo(function ObjectInspector({
   object,
   currentTime = 0,
-  disableNumberScrub = false,
+  liveScrubClock = false,
   lockBounds = false,
   onChange,
   onPreview,
 }: {
   object: FrameObject;
   currentTime?: number;
-  disableNumberScrub?: boolean;
+  liveScrubClock?: boolean;
   lockBounds?: boolean;
   onChange: (updater: (object: FrameObject) => FrameObject) => void;
   onPreview?: (updater: (object: FrameObject) => FrameObject) => void;
@@ -300,7 +324,7 @@ export const ObjectInspector = memo(function ObjectInspector({
   const liveTimeRef = useRef(currentTime);
   const liveTimeSnapshot = useSyncExternalStore(
     (onStoreChange) => {
-      if (!disableNumberScrub) return () => {};
+      if (!liveScrubClock) return () => {};
       return subscribeMasterTimelineClock(() => {
         const snap = getMasterTimelineClockSnapshot();
         if (snap.source !== "scrub") return;
@@ -313,10 +337,10 @@ export const ObjectInspector = memo(function ObjectInspector({
     },
     () => lastRoundedRef.current,
   );
-  const effectiveTime = disableNumberScrub
-    ? (getMasterTimelineClockSnapshot().source === "scrub"
-        ? liveTimeRef.current
-        : currentTime)
+  const effectiveTime = liveScrubClock
+    ? getMasterTimelineClockSnapshot().source === "scrub"
+      ? liveTimeRef.current
+      : currentTime
     : currentTime;
   void liveTimeSnapshot; // consumed via liveTimeRef to avoid stale closure
   const isText = object.type === "text";
@@ -461,9 +485,18 @@ export const ObjectInspector = memo(function ObjectInspector({
     key: ComposeAnimationAttributeKey,
     fallback: number | string,
   ) {
+    const evaluatedBoundsValue = getEvaluatedBoundsAnimationValue(key);
+    if (
+      evaluatedBoundsValue !== null &&
+      typeof fallback === "number" &&
+      (key === "x" || key === "y" || key === "width" || key === "height")
+    ) {
+      return evaluatedBoundsValue;
+    }
     const layer = {
       id: object.id,
       name: object.name || object.id,
+      number: 1,
       kind: "object" as const,
       object,
       animations: object.animations,
@@ -471,16 +504,37 @@ export const ObjectInspector = memo(function ObjectInspector({
     const track = getComposeAnimationAttributeTracks(layer).find(
       (item) => item.key === key,
     );
-    return track
+    const value = track
       ? (getNearestComposeAnimationKeyframeValue(track, effectiveTime) ??
-          fallback)
+        fallback)
       : fallback;
+    return value;
+  }
+
+  function getEvaluatedBoundsAnimationValue(key: ComposeAnimationAttributeKey) {
+    if (key !== "x" && key !== "y" && key !== "width" && key !== "height") {
+      return null;
+    }
+    const style = evaluateLayerAnimations(
+      object.animations ?? [],
+      effectiveTime,
+    );
+    if (key === "width" || key === "height") {
+      const value = style[key];
+      return typeof value === "number" ? value : null;
+    }
+    const offset = readTransformPixelValue(
+      typeof style.transform === "string" ? style.transform : undefined,
+      key === "x" ? "translateX" : "translateY",
+    );
+    return offset === null ? null : object.bounds[key] + offset;
   }
 
   function keyframeAtCurrentTime(key: ComposeAnimationAttributeKey) {
     const layer = {
       id: object.id,
       name: object.name || object.id,
+      number: 1,
       kind: "object" as const,
       object,
       animations: object.animations,
@@ -525,28 +579,112 @@ export const ObjectInspector = memo(function ObjectInspector({
     );
   }
 
+  function upsertKeyframeValues(
+    entries: readonly {
+      key: ComposeAnimationAttributeKey;
+      value: number | string;
+    }[],
+  ) {
+    updateObjectAnimations((animations) =>
+      entries.reduce(
+        (next, entry) =>
+          upsertComposeAnimationAttributeKeyframe(
+            next,
+            entry.key,
+            toStoredKeyframeValue(entry.key, entry.value),
+            effectiveTime,
+            MAX_PART_DURATION_SECONDS,
+          ),
+        animations,
+      ),
+    );
+  }
+
+  function toStoredKeyframeValue(
+    key: ComposeAnimationAttributeKey,
+    value: number | string,
+  ) {
+    if (
+      (key === "x" || key === "y") &&
+      typeof value === "number" &&
+      typeof object.bounds[key] === "number"
+    ) {
+      return value - object.bounds[key];
+    }
+    return value;
+  }
+
+  function removeKeyframesAtCurrentTime(
+    keys: readonly ComposeAnimationAttributeKey[],
+  ) {
+    updateObjectAnimations((animations) =>
+      keys.reduce((next, key) => {
+        const existing = keyframeAtCurrentTime(key);
+        if (!existing) return next;
+        return removeComposeAnimationAttributeKeyframe(
+          next,
+          key,
+          existing.time,
+          MAX_PART_DURATION_SECONDS,
+        );
+      }, animations),
+    );
+  }
+
+  function toggleLinkedKeyframes(
+    keys: readonly [BoundsAnimationKey, BoundsAnimationKey],
+    values: readonly [number | string, number | string],
+  ) {
+    const hasAny = keys.some((key) => Boolean(keyframeAtCurrentTime(key)));
+    if (hasAny) {
+      removeKeyframesAtCurrentTime(keys);
+      return;
+    }
+    upsertKeyframeValues([
+      { key: keys[0], value: values[0] },
+      { key: keys[1], value: values[1] },
+    ]);
+  }
+
   function commitKeyframedValue(
     key: ComposeAnimationAttributeKey | undefined,
     value: string,
     fallbackCommit: (value: string) => void,
     type: "number" | "text",
   ) {
-    fallbackCommit(value);
     if (!key) return;
     const nextValue = type === "number" ? Number(value) : value;
     if (type === "number" && !Number.isFinite(nextValue)) return;
-    updateObjectAnimations((animations) =>
-      upsertComposeAnimationAttributeKeyframe(
-        animations,
-        key,
-        nextValue,
-        effectiveTime,
-        MAX_PART_DURATION_SECONDS,
-      ),
-    );
+    if (key !== "x" && key !== "y") fallbackCommit(value);
+    upsertKeyframeValues([{ key, value: nextValue }]);
   }
 
-  function KeyframedInput({
+  function commitLinkedKeyframedValue(
+    keys: readonly [BoundsAnimationKey, BoundsAnimationKey],
+    changedKey: BoundsAnimationKey,
+    value: string,
+    fallbackCommit: (value: string) => void,
+  ) {
+    const nextValue = Number(value);
+    if (!Number.isFinite(nextValue)) return;
+    const [firstKey, secondKey] = keys;
+    if (firstKey !== "x" && secondKey !== "y") fallbackCommit(value);
+    const firstValue =
+      changedKey === firstKey
+        ? nextValue
+        : Number(keyframeValue(firstKey, object.bounds[firstKey]));
+    const secondValue =
+      changedKey === secondKey
+        ? nextValue
+        : Number(keyframeValue(secondKey, object.bounds[secondKey]));
+    if (!Number.isFinite(firstValue) || !Number.isFinite(secondValue)) return;
+    upsertKeyframeValues([
+      { key: firstKey, value: firstValue },
+      { key: secondKey, value: secondValue },
+    ]);
+  }
+
+  function renderKeyframedInput({
     label,
     animationKey,
     value,
@@ -556,6 +694,7 @@ export const ObjectInspector = memo(function ObjectInspector({
     step,
     onCommit,
     onPreviewNumber,
+    linkedKeys,
   }: {
     label: string;
     animationKey?: ComposeAnimationAttributeKey;
@@ -566,13 +705,16 @@ export const ObjectInspector = memo(function ObjectInspector({
     step?: number;
     onCommit: (value: string) => void;
     onPreviewNumber?: (value: number) => void;
+    linkedKeys?: readonly [BoundsAnimationKey, BoundsAnimationKey];
   }) {
     const fieldValue = animationKey
       ? keyframeValue(animationKey, value)
       : value;
-    const active = animationKey
-      ? Boolean(keyframeAtCurrentTime(animationKey))
-      : false;
+    const active = linkedKeys
+      ? linkedKeys.some((key) => Boolean(keyframeAtCurrentTime(key)))
+      : animationKey
+        ? Boolean(keyframeAtCurrentTime(animationKey))
+        : false;
     return (
       <label className={`grid gap-1.5 ${mutedCaps}`}>
         {label}
@@ -583,25 +725,30 @@ export const ObjectInspector = memo(function ObjectInspector({
             min={min}
             max={max}
             step={step}
-            numberScrubMode={
-              type === "number"
-                ? disableNumberScrub
-                  ? "none"
-                  : "preview"
-                : undefined
-            }
-            numberScrubCommitThrottleMs={16}
+            numberScrubMode={type === "number" ? "preview" : undefined}
+            numberScrubCommitThrottleMs={livePreviewScrubCommitThrottleMs}
             value={fieldValue}
-            onNumberScrubPreview={
-              disableNumberScrub ? undefined : onPreviewNumber
+            onNumberScrubCommit={
+              type === "number" ? (value) => onCommit(String(value)) : undefined
             }
+            onNumberScrubPreview={onPreviewNumber}
             onChange={(event) =>
-              commitKeyframedValue(
-                animationKey,
-                event.target.value,
-                onCommit,
-                type,
-              )
+              linkedKeys &&
+              animationKey &&
+              type === "number" &&
+              isBoundsAnimationKey(animationKey)
+                ? commitLinkedKeyframedValue(
+                    linkedKeys,
+                    animationKey,
+                    event.target.value,
+                    onCommit,
+                  )
+                : commitKeyframedValue(
+                    animationKey,
+                    event.target.value,
+                    onCommit,
+                    type,
+                  )
             }
           />
           {animationKey ? (
@@ -623,8 +770,25 @@ export const ObjectInspector = memo(function ObjectInspector({
                   : `Add ${label} keyframe at playhead`
               }
               type="button"
+              onMouseDown={(event) => {
+                // Keep focused input from blurring/re-rendering before click toggles.
+                event.preventDefault();
+              }}
               onClick={(event) => {
                 event.preventDefault();
+                if (linkedKeys && animationKey) {
+                  const [firstKey, secondKey] = linkedKeys;
+                  const firstValue = keyframeValue(
+                    firstKey,
+                    object.bounds[firstKey],
+                  );
+                  const secondValue = keyframeValue(
+                    secondKey,
+                    object.bounds[secondKey],
+                  );
+                  toggleLinkedKeyframes(linkedKeys, [firstValue, secondValue]);
+                  return;
+                }
                 toggleKeyframe(animationKey, fieldValue);
               }}
             />
@@ -639,159 +803,166 @@ export const ObjectInspector = memo(function ObjectInspector({
       {lockBounds ? null : (
         <div className="grid grid-cols-2 gap-2">
           {graphicBoundsKeys.map((key) => (
-            <KeyframedInput
-              key={key}
-              label={key}
-              animationKey={key}
-              value={object.bounds[key]}
-              onPreviewNumber={(value) => previewBounds(key, value)}
-              onCommit={(value) => updateBounds(key, value)}
-            />
+            <Fragment key={key}>
+              {renderKeyframedInput({
+                label: key,
+                animationKey: key,
+                linkedKeys:
+                  key === "x" || key === "y"
+                    ? ["x", "y"]
+                    : key === "width" || key === "height"
+                      ? ["width", "height"]
+                      : undefined,
+                value: object.bounds[key],
+                onPreviewNumber: (value) => previewBounds(key, value),
+                onCommit: (value) => updateBounds(key, value),
+              })}
+            </Fragment>
           ))}
         </div>
       )}
       <div className="grid gap-2">
         <span className={mutedCaps}>Effects</span>
         <div className="grid grid-cols-2 gap-2">
-          <KeyframedInput
-            label="Opacity"
-            animationKey="opacity"
-            value={Number(object.style.opacity ?? 1)}
-            min={0}
-            max={1}
-            step={0.01}
-            onPreviewNumber={(value) => previewStyleNumber("opacity", value)}
-            onCommit={(value) => updateStyleNumber("opacity", value)}
-          />
-          <KeyframedInput
-            label="Blur"
-            animationKey="blur"
-            value={0}
-            min={0}
-            step={0.1}
-            onCommit={() => undefined}
-          />
-          <KeyframedInput
-            label="Scale"
-            animationKey="scale"
-            value={1}
-            min={0}
-            step={0.01}
-            onCommit={() => undefined}
-          />
-          <KeyframedInput
-            label="Scale X"
-            animationKey="scaleX"
-            value={1}
-            min={0}
-            step={0.01}
-            onCommit={() => undefined}
-          />
-          <KeyframedInput
-            label="Scale Y"
-            animationKey="scaleY"
-            value={1}
-            min={0}
-            step={0.01}
-            onCommit={() => undefined}
-          />
-          <KeyframedInput
-            label="Rotation"
-            animationKey="rotate"
-            value={0}
-            step={1}
-            onCommit={() => undefined}
-          />
-          <KeyframedInput
-            label="Rotate X"
-            animationKey="rotateX"
-            value={0}
-            step={1}
-            onCommit={() => undefined}
-          />
-          <KeyframedInput
-            label="Rotate Y"
-            animationKey="rotateY"
-            value={0}
-            step={1}
-            onCommit={() => undefined}
-          />
-          <KeyframedInput
-            label="Rotate Z"
-            animationKey="rotateZ"
-            value={0}
-            step={1}
-            onCommit={() => undefined}
-          />
-          <KeyframedInput
-            label="Skew X"
-            animationKey="skewX"
-            value={0}
-            step={1}
-            onCommit={() => undefined}
-          />
-          <KeyframedInput
-            label="Skew Y"
-            animationKey="skewY"
-            value={0}
-            step={1}
-            onCommit={() => undefined}
-          />
-          <KeyframedInput
-            label="Perspective"
-            animationKey="transformPerspective"
-            value={0}
-            min={0}
-            step={1}
-            onCommit={() => undefined}
-          />
-          <KeyframedInput
-            label="Z"
-            animationKey="z"
-            value={0}
-            step={1}
-            onCommit={() => undefined}
-          />
-          <KeyframedInput
-            label="Path Offset"
-            animationKey="pathOffset"
-            value={0}
-            step={0.01}
-            onCommit={() => undefined}
-          />
-          <KeyframedInput
-            label="Path Length"
-            animationKey="pathLength"
-            value={1}
-            min={0}
-            step={0.01}
-            onCommit={() => undefined}
-          />
-          <KeyframedInput
-            label="Path Spacing"
-            animationKey="pathSpacing"
-            value={0}
-            step={0.01}
-            onCommit={() => undefined}
-          />
-          <KeyframedInput
-            label="Colour"
-            animationKey="color"
-            value={String(object.style.color ?? textColor)}
-            type="text"
-            onCommit={(value) => updateStyleValue("color", value)}
-          />
-          <KeyframedInput
-            label="Background"
-            animationKey="backgroundColor"
-            value={String(
+          {renderKeyframedInput({
+            label: "Opacity",
+            animationKey: "opacity",
+            value: Number(object.style.opacity ?? 1),
+            min: 0,
+            max: 1,
+            step: 0.01,
+            onPreviewNumber: (value) => previewStyleNumber("opacity", value),
+            onCommit: (value) => updateStyleNumber("opacity", value),
+          })}
+          {renderKeyframedInput({
+            label: "Blur",
+            animationKey: "blur",
+            value: 0,
+            min: 0,
+            step: 0.1,
+            onCommit: () => undefined,
+          })}
+          {renderKeyframedInput({
+            label: "Scale",
+            animationKey: "scale",
+            value: 1,
+            min: 0,
+            step: 0.01,
+            onCommit: () => undefined,
+          })}
+          {renderKeyframedInput({
+            label: "Scale X",
+            animationKey: "scaleX",
+            value: 1,
+            min: 0,
+            step: 0.01,
+            onCommit: () => undefined,
+          })}
+          {renderKeyframedInput({
+            label: "Scale Y",
+            animationKey: "scaleY",
+            value: 1,
+            min: 0,
+            step: 0.01,
+            onCommit: () => undefined,
+          })}
+          {renderKeyframedInput({
+            label: "Rotation",
+            animationKey: "rotate",
+            value: 0,
+            step: 1,
+            onCommit: () => undefined,
+          })}
+          {renderKeyframedInput({
+            label: "Rotate X",
+            animationKey: "rotateX",
+            value: 0,
+            step: 1,
+            onCommit: () => undefined,
+          })}
+          {renderKeyframedInput({
+            label: "Rotate Y",
+            animationKey: "rotateY",
+            value: 0,
+            step: 1,
+            onCommit: () => undefined,
+          })}
+          {renderKeyframedInput({
+            label: "Rotate Z",
+            animationKey: "rotateZ",
+            value: 0,
+            step: 1,
+            onCommit: () => undefined,
+          })}
+          {renderKeyframedInput({
+            label: "Skew X",
+            animationKey: "skewX",
+            value: 0,
+            step: 1,
+            onCommit: () => undefined,
+          })}
+          {renderKeyframedInput({
+            label: "Skew Y",
+            animationKey: "skewY",
+            value: 0,
+            step: 1,
+            onCommit: () => undefined,
+          })}
+          {renderKeyframedInput({
+            label: "Perspective",
+            animationKey: "transformPerspective",
+            value: 0,
+            min: 0,
+            step: 1,
+            onCommit: () => undefined,
+          })}
+          {renderKeyframedInput({
+            label: "Z",
+            animationKey: "z",
+            value: 0,
+            step: 1,
+            onCommit: () => undefined,
+          })}
+          {renderKeyframedInput({
+            label: "Path Offset",
+            animationKey: "pathOffset",
+            value: 0,
+            step: 0.01,
+            onCommit: () => undefined,
+          })}
+          {renderKeyframedInput({
+            label: "Path Length",
+            animationKey: "pathLength",
+            value: 1,
+            min: 0,
+            step: 0.01,
+            onCommit: () => undefined,
+          })}
+          {renderKeyframedInput({
+            label: "Path Spacing",
+            animationKey: "pathSpacing",
+            value: 0,
+            step: 0.01,
+            onCommit: () => undefined,
+          })}
+          {renderKeyframedInput({
+            label: "Colour",
+            animationKey: "color",
+            value: String(object.style.color ?? textColor),
+            type: "text",
+            onCommit: (value) => updateStyleValue("color", value),
+          })}
+          {renderKeyframedInput({
+            label: "Background",
+            animationKey: "backgroundColor",
+            value: String(
               object.style.backgroundColor ??
                 object.style.background ??
                 rectBackground,
-            )}
-            type="text"
-            onCommit={(value) => updateStyleValue("backgroundColor", value)}
-          />
+            ),
+            type: "text",
+            onCommit: (value) => updateStyleValue("backgroundColor", value),
+          })}
         </div>
       </div>
       {isRect ? (
@@ -846,7 +1017,7 @@ export const ObjectInspector = memo(function ObjectInspector({
                 type="number"
                 min={1}
                 numberScrubMode="preview"
-                numberScrubCommitThrottleMs={16}
+                numberScrubCommitThrottleMs={livePreviewScrubCommitThrottleMs}
                 value={fontSize}
                 onNumberScrubPreview={(value) =>
                   previewStyleNumber("fontSize", value)
@@ -864,7 +1035,7 @@ export const ObjectInspector = memo(function ObjectInspector({
                 max={1000}
                 step={10}
                 numberScrubMode="preview"
-                numberScrubCommitThrottleMs={16}
+                numberScrubCommitThrottleMs={livePreviewScrubCommitThrottleMs}
                 value={fontWeight}
                 onNumberScrubPreview={(value) =>
                   previewStyleNumber("fontWeight", value)
@@ -881,7 +1052,7 @@ export const ObjectInspector = memo(function ObjectInspector({
                 min={0.1}
                 step={0.05}
                 numberScrubMode="preview"
-                numberScrubCommitThrottleMs={16}
+                numberScrubCommitThrottleMs={livePreviewScrubCommitThrottleMs}
                 value={lineHeight}
                 onNumberScrubPreview={(value) =>
                   previewStyleNumber("lineHeight", value)
@@ -897,7 +1068,7 @@ export const ObjectInspector = memo(function ObjectInspector({
                 type="number"
                 step={0.1}
                 numberScrubMode="preview"
-                numberScrubCommitThrottleMs={16}
+                numberScrubCommitThrottleMs={livePreviewScrubCommitThrottleMs}
                 value={letterSpacing}
                 onNumberScrubPreview={(value) =>
                   previewStyleNumber("letterSpacing", value)
@@ -1511,7 +1682,7 @@ export function TransitionInspector({
             value={getParamValue(control) as number}
             resetValue={control.defaultValue}
             numberScrubMode="preview"
-            numberScrubCommitThrottleMs={16}
+            numberScrubCommitThrottleMs={livePreviewScrubCommitThrottleMs}
             onChange={(event) => updateParam(control, event.target.value)}
             onNumberScrubPreview={(value) => previewParam(control, value)}
             onNumberScrubEnd={onClearPreview}
@@ -1922,7 +2093,7 @@ export function MotionInspector({
             <Input
               type="number"
               numberScrubMode="preview"
-              numberScrubCommitThrottleMs={16}
+              numberScrubCommitThrottleMs={livePreviewScrubCommitThrottleMs}
               resetValue={15}
               step={1}
               value={marker.rotation ?? 0}
@@ -1939,7 +2110,7 @@ export function MotionInspector({
               <Input
                 type="number"
                 numberScrubMode="preview"
-                numberScrubCommitThrottleMs={16}
+                numberScrubCommitThrottleMs={livePreviewScrubCommitThrottleMs}
                 resetValue={0}
                 step={1}
                 value={marker.perspective?.z ?? 0}
@@ -1954,7 +2125,7 @@ export function MotionInspector({
               <Input
                 type="number"
                 numberScrubMode="preview"
-                numberScrubCommitThrottleMs={16}
+                numberScrubCommitThrottleMs={livePreviewScrubCommitThrottleMs}
                 resetValue={8}
                 step={1}
                 value={marker.perspective?.rotateX ?? 0}
@@ -2063,7 +2234,7 @@ export function MotionInspector({
           <Input
             type="number"
             numberScrubMode="preview"
-            numberScrubCommitThrottleMs={16}
+            numberScrubCommitThrottleMs={livePreviewScrubCommitThrottleMs}
             resetValue={0}
             step={1}
             value={marker.perspective?.rotateY ?? 0}
@@ -2305,7 +2476,7 @@ function MendVisualSection({
                   value={getParamValue(control)}
                   resetValue={control.defaultValue}
                   numberScrubMode="continuous"
-                  numberScrubCommitThrottleMs={16}
+                  numberScrubCommitThrottleMs={livePreviewScrubCommitThrottleMs}
                   onChange={(event) =>
                     updateParamValue(control, event.target.value)
                   }

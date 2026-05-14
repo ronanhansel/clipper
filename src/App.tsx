@@ -6,6 +6,7 @@ import {
   useState,
   type CSSProperties,
 } from "react";
+import { flushSync } from "react-dom";
 import toast from "react-hot-toast";
 import { useEditorPanelResize } from "./app/features/editor-layout/useEditorPanelResize";
 import { useFramePreviewZoomCommands } from "./app/features/editor-layout/useFramePreviewZoomCommands";
@@ -156,6 +157,11 @@ import {
 } from "./core/frameInteraction";
 import { boundsToPoints, framePointFromClient } from "./core/geometry";
 import { clamp, roundToPrecision, roundTenth } from "./core/math";
+import {
+  getPathGeometryBounds,
+  getPathGeometryRenderPoints,
+  transformPathGeometrySegmentsToBounds,
+} from "./core/pathGeometry";
 import type {
   AdjustmentEffectPointControl,
   AdjustmentVisualOverlay,
@@ -261,7 +267,8 @@ type ComposeDrawTool =
   | "pen"
   | "pencil"
   | "text"
-  | "textPath";
+  | "textPath"
+  | "null";
 
 type ShapeDrawPreview = {
   bounds: Bounds;
@@ -269,6 +276,8 @@ type ShapeDrawPreview = {
   end: Point;
   points?: Point[];
   path?: string;
+  joints?: Point[];
+  handles?: Array<{ anchor: Point; handle: Point }>;
 };
 
 type PathSegment = {
@@ -286,11 +295,17 @@ type PathDraft = {
   pointerId: number | null;
   downPoint: Point | null;
   current: PathSegment | null;
+  outHandle: Point | null;
+  previewPoint: Point | null;
+  anchor: Point | null;
+  closed: boolean;
+  disconnected: boolean;
 };
 
 type ClipperPathStyle = {
   tool: "pen" | "textPath";
   segments: PathSegment[];
+  closed?: boolean;
 };
 
 function isSvgDrawTool(tool: ComposeDrawTool) {
@@ -339,6 +354,8 @@ function getDrawToolName(tool: ComposeDrawTool) {
       return "Text";
     case "textPath":
       return "Text on path";
+    case "null":
+      return "Null object";
   }
 }
 
@@ -374,24 +391,64 @@ function localDrawPoint(point: Point, bounds: Bounds) {
   };
 }
 
-function getPathSegmentPoints(segments: PathSegment[]) {
-  return segments.flatMap((segment) => [
-    segment.start,
-    segment.c1,
-    segment.c2,
-    segment.end,
-  ]).filter((point): point is Point => Boolean(point));
+function getCubicPoint(
+  start: Point,
+  c1: Point,
+  c2: Point,
+  end: Point,
+  t: number,
+) {
+  const mt = 1 - t;
+  const mt2 = mt * mt;
+  const t2 = t * t;
+  return {
+    x:
+      mt2 * mt * start.x +
+      3 * mt2 * t * c1.x +
+      3 * mt * t2 * c2.x +
+      t2 * t * end.x,
+    y:
+      mt2 * mt * start.y +
+      3 * mt2 * t * c1.y +
+      3 * mt * t2 * c2.y +
+      t2 * t * end.y,
+  };
+}
+
+function getPathSegmentRenderPoints(segments: PathSegment[]) {
+  return segments.flatMap((segment) => {
+    if (segment.kind !== "curve" || !segment.c1 || !segment.c2) {
+      return [segment.start, segment.end];
+    }
+    return Array.from({ length: 25 }, (_, index) =>
+      getCubicPoint(
+        segment.start,
+        segment.c1!,
+        segment.c2!,
+        segment.end,
+        index / 24,
+      ),
+    );
+  });
 }
 
 function buildNormalizedPathFromSegments(
   segments: PathSegment[],
   bounds: Bounds,
+  closed = false,
 ) {
-  return segments
+  const path = segments
     .map((segment, index) => {
       const start = localDrawPoint(segment.start, bounds);
       const end = localDrawPoint(segment.end, bounds);
-      const move = index === 0 ? `M ${start.x.toFixed(2)} ${start.y.toFixed(2)} ` : "";
+      const previous = segments[index - 1];
+      const startsSubpath =
+        index === 0 ||
+        !previous ||
+        getPointDistance(previous.end, segment.start) >= 0.5;
+      const move = startsSubpath
+        ? `M ${start.x.toFixed(2)} ${start.y.toFixed(2)} `
+        : "";
       if (segment.kind === "curve" && segment.c1 && segment.c2) {
         const c1 = localDrawPoint(segment.c1, bounds);
         const c2 = localDrawPoint(segment.c2, bounds);
@@ -400,14 +457,35 @@ function buildNormalizedPathFromSegments(
       return `${move}L ${end.x.toFixed(2)} ${end.y.toFixed(2)}`;
     })
     .join(" ");
+  return closed ? `${path} Z` : path;
 }
 
-function getPenPathData(segments: PathSegment[]) {
-  const points = getPathSegmentPoints(segments);
+function getPenPathData(segments: PathSegment[], closed = false) {
+  const bounds = getPathGeometryBounds(segments);
+  return {
+    bounds,
+    path: buildNormalizedPathFromSegments(segments, bounds, closed),
+  };
+}
+
+function getPenPreviewData(
+  segments: PathSegment[],
+  handles: Array<{ anchor: Point; handle: Point }> = [],
+  joints: Point[] = [],
+  closed = false,
+) {
+  const points = [
+    ...getPathGeometryRenderPoints(segments),
+    ...handles.flatMap(({ anchor, handle }) => [anchor, handle]),
+    ...joints,
+  ];
   const bounds = getDirectedDrawBounds(points);
   return {
     bounds,
-    path: buildNormalizedPathFromSegments(segments, bounds),
+    path:
+      segments.length > 0
+        ? buildNormalizedPathFromSegments(segments, bounds, closed)
+        : "",
   };
 }
 
@@ -427,20 +505,134 @@ function parseClipperPathStyle(value: string | number | undefined) {
 }
 
 function getLastPathPoint(draft: PathDraft) {
-  return draft.segments[draft.segments.length - 1]?.end ?? draft.start;
+  return (
+    draft.anchor ??
+    draft.segments[draft.segments.length - 1]?.end ??
+    draft.start
+  );
 }
 
-function createPathSegment(start: Point, end: Point, curve: boolean): PathSegment {
-  if (!curve) return { kind: "line", start, end };
-  const dx = end.x - start.x;
-  const dy = end.y - start.y;
+function createPathSegment(
+  start: Point,
+  end: Point,
+  c1?: Point | null,
+  c2?: Point | null,
+): PathSegment {
+  const hasC1 = c1 && Math.hypot(c1.x - start.x, c1.y - start.y) >= 0.5;
+  const hasC2 = c2 && Math.hypot(c2.x - end.x, c2.y - end.y) >= 0.5;
+  if (!hasC1 && !hasC2) return { kind: "line", start, end };
   return {
     kind: "curve",
     start,
     end,
-    c1: { x: start.x + dx * 0.35, y: start.y + dy * 0.05 },
-    c2: { x: start.x + dx * 0.65, y: start.y + dy * 0.95 },
+    c1: c1 ?? start,
+    c2: c2 ?? end,
   };
+}
+
+function getMirroredPoint(anchor: Point, handle: Point) {
+  return { x: anchor.x * 2 - handle.x, y: anchor.y * 2 - handle.y };
+}
+
+function getPointDistance(left: Point, right: Point) {
+  return Math.hypot(left.x - right.x, left.y - right.y);
+}
+
+function getDraftPreviewSegments(draft: PathDraft) {
+  const last = getLastPathPoint(draft);
+  const previewPoint = draft.previewPoint;
+  if (
+    !previewPoint ||
+    draft.closed ||
+    draft.disconnected ||
+    getPointDistance(last, previewPoint) < 0.5
+  )
+    return draft.segments;
+  return [
+    ...draft.segments,
+    createPathSegment(last, previewPoint, draft.outHandle, null),
+  ];
+}
+
+function getPathSegmentJoints(segments: PathSegment[]) {
+  if (segments.length === 0) return [];
+  return [segments[0].start, ...segments.map((segment) => segment.end)];
+}
+
+function getDraftJoints(draft: PathDraft, segments = draft.segments) {
+  const joints = getPathSegmentJoints(segments);
+  const anchor = draft.anchor;
+  if (
+    anchor &&
+    !joints.some((point) => getPointDistance(point, anchor) < 0.5)
+  ) {
+    joints.push(anchor);
+  }
+  return joints;
+}
+
+function getPathDraftSnapPoint(draft: PathDraft, point: Point) {
+  const snapTargets = getDraftJoints(draft);
+  return (
+    snapTargets.find((target) => getPointDistance(target, point) <= 8) ?? point
+  );
+}
+
+function smoothPencilPoints(points: Point[]) {
+  if (points.length < 4) return points;
+  let smoothed = points;
+  for (let pass = 0; pass < 2; pass += 1) {
+    const next: Point[] = [smoothed[0]];
+    for (let index = 0; index < smoothed.length - 1; index += 1) {
+      const current = smoothed[index];
+      const following = smoothed[index + 1];
+      next.push(
+        {
+          x: current.x * 0.75 + following.x * 0.25,
+          y: current.y * 0.75 + following.y * 0.25,
+        },
+        {
+          x: current.x * 0.25 + following.x * 0.75,
+          y: current.y * 0.25 + following.y * 0.75,
+        },
+      );
+    }
+    next.push(smoothed[smoothed.length - 1]);
+    smoothed = next;
+  }
+  return smoothed;
+}
+
+function buildSmoothPencilPath(points: Point[], bounds: Bounds) {
+  if (points.length === 0) return "";
+  if (points.length < 3) {
+    return points
+      .map((point, index) => {
+        const local = localDrawPoint(point, bounds);
+        return `${index === 0 ? "M" : "L"} ${local.x.toFixed(2)} ${local.y.toFixed(2)}`;
+      })
+      .join(" ");
+  }
+  const [first, ...rest] = points;
+  const firstLocal = localDrawPoint(first, bounds);
+  const commands = [`M ${firstLocal.x.toFixed(2)} ${firstLocal.y.toFixed(2)}`];
+  for (let index = 0; index < rest.length - 1; index += 1) {
+    const control = localDrawPoint(rest[index], bounds);
+    const next = rest[index + 1];
+    const midpoint = localDrawPoint(
+      {
+        x: (rest[index].x + next.x) / 2,
+        y: (rest[index].y + next.y) / 2,
+      },
+      bounds,
+    );
+    commands.push(
+      `Q ${control.x.toFixed(2)} ${control.y.toFixed(2)}, ${midpoint.x.toFixed(2)} ${midpoint.y.toFixed(2)}`,
+    );
+  }
+  const last = localDrawPoint(points[points.length - 1], bounds);
+  commands.push(`L ${last.x.toFixed(2)} ${last.y.toFixed(2)}`);
+  return commands.join(" ");
 }
 
 function getPathDrawData(
@@ -449,18 +641,14 @@ function getPathDrawData(
   end: Point,
   points: Point[] = [start, end],
 ) {
-  const sourcePoints = tool === "pencil" ? points : [start, end];
+  const pencilPoints = tool === "pencil" ? smoothPencilPoints(points) : points;
+  const sourcePoints = tool === "pencil" ? pencilPoints : [start, end];
   const bounds = getDirectedDrawBounds(sourcePoints);
   const localStart = localDrawPoint(start, bounds);
   const localEnd = localDrawPoint(end, bounds);
   const path =
     tool === "pencil"
-      ? points
-          .map((point, index) => {
-            const local = localDrawPoint(point, bounds);
-            return `${index === 0 ? "M" : "L"} ${local.x.toFixed(2)} ${local.y.toFixed(2)}`;
-          })
-          .join(" ")
+      ? buildSmoothPencilPath(pencilPoints, bounds)
       : tool === "pen" || tool === "textPath"
         ? `M ${localStart.x.toFixed(2)} ${localStart.y.toFixed(2)} C ${((localStart.x + localEnd.x) / 2).toFixed(2)} ${localStart.y.toFixed(2)}, ${((localStart.x + localEnd.x) / 2).toFixed(2)} ${localEnd.y.toFixed(2)}, ${localEnd.x.toFixed(2)} ${localEnd.y.toFixed(2)}`
         : `M ${localStart.x.toFixed(2)} ${localStart.y.toFixed(2)} L ${localEnd.x.toFixed(2)} ${localEnd.y.toFixed(2)}`;
@@ -482,10 +670,14 @@ function getSvgDrawContent(
   const marker = tool === "arrow" ? ' marker-end="url(#arrowhead)"' : "";
   const textPath =
     tool === "textPath"
-      ? `<text fill="#ffffff" font-family="system-ui, sans-serif" font-size="16" font-weight="500"><textPath href="#draw-path" startOffset="50%" text-anchor="middle">Text on path</textPath></text>`
+      ? `<text fill="#ffffff" font-family="system-ui, sans-serif" font-size="48" font-weight="500"><textPath href="#draw-path" startOffset="50%" text-anchor="middle">Text on path</textPath></text>`
       : "";
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 ${Math.max(1, viewBoxBounds.width)} ${Math.max(1, viewBoxBounds.height)}" preserveAspectRatio="none" style="display:block;overflow:visible"><defs><marker id="arrowhead" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth" viewBox="0 0 8 8" preserveAspectRatio="xMidYMid meet"><path d="M0,0 L8,4 L0,8 Z" fill="#D5D5D5"/></marker></defs><path id="draw-path" d="${drawPath}" fill="none" stroke="#D5D5D5" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"${marker}/>${textPath}</svg>`;
+}
+
+function isTextPathObject(object: FrameObject) {
+  return parseClipperPathStyle(object.style.clipperPath)?.tool === "textPath";
 }
 
 const unsupportedEditorExtensions = new Set([
@@ -693,6 +885,7 @@ function AppContent({
     useState<ShapeDrawPreview | null>(null);
   const shapeDrawPreviewRef = useRef<ShapeDrawPreview | null>(null);
   const shapeDrawPreviewFrameRef = useRef(0);
+  const pendingComposeSelectionObjectIdsRef = useRef<string[]>([]);
   const [liveDomPostProcessMaxFps, setLiveDomPostProcessMaxFpsState] = useState(
     getInitialLiveDomPostProcessMaxFps,
   );
@@ -1988,6 +2181,8 @@ function AppContent({
         return null;
       }
 
+      if (timelineMode === "compose") return current;
+
       const unchanged = nextObjects.every((object, index) => {
         const previous = current.objects[index];
         return (
@@ -2014,7 +2209,23 @@ function AppContent({
     });
 
     if (selectedObjectMissing) setSelectedObjectId(null);
-  }, [part.background.elements, part.objects]);
+  }, [part.background.elements, part.objects, timelineMode]);
+
+  useEffect(() => {
+    const pendingIds = pendingComposeSelectionObjectIdsRef.current;
+    if (pendingIds.length === 0) return;
+    const pendingObjects = pendingIds
+      .map((id) =>
+        id === part.background.id
+          ? frameObjectFromBackgroundLayer(part.background)
+          : (part.background.elements.find((object) => object.id === id) ??
+            part.objects.find((object) => object.id === id)),
+      )
+      .filter((object): object is FrameObject => Boolean(object));
+    if (pendingObjects.length !== pendingIds.length) return;
+    pendingComposeSelectionObjectIdsRef.current = [];
+    setComposeSelectionObjects(pendingObjects);
+  }, [part.background, part.background.elements, part.objects]);
 
   useEffect(() => {
     if (
@@ -2500,6 +2711,21 @@ function AppContent({
     persistComposeSelection(objects.map((object) => object.id));
   }
 
+  function inspectComposeObject(object: FrameObject | null) {
+    setRightPanelTab("video");
+    setEditingTextObjectId(null);
+    setSelectedObjectId(object?.id ?? null);
+    setSelectionPayload(null);
+    persistComposeSelection([]);
+    clearMarkerSelection();
+    setSelectedAdjustmentLayerId(null);
+    setSelectedAdjustmentLayers([]);
+    setSelectedPartId("");
+    setSelectedParts([]);
+    setSelectedTransitionLayerId(null);
+    setSelectedTransitionLayers([]);
+  }
+
   function selectComposeFrameSettings() {
     setRightPanelTab("video");
     setEditingTextObjectId(null);
@@ -2558,6 +2784,11 @@ function AppContent({
     target.style.top = `${next.bounds.y}px`;
     target.style.width = `${next.bounds.width}px`;
     target.style.height = `${next.bounds.height}px`;
+    window.dispatchEvent(
+      new CustomEvent("clipper:object-preview-bounds", {
+        detail: { bounds: next.bounds, objectId: next.id },
+      }),
+    );
     for (const [key, value] of Object.entries(next.style)) {
       if (value === undefined)
         target.style.removeProperty(cssStylePropertyName(key));
@@ -2617,6 +2848,13 @@ function AppContent({
       ...object,
       animations: updater(object.animations ?? []),
     }));
+  }
+
+  function updateComposeObject(
+    objectId: string,
+    updater: (object: FrameObject) => FrameObject,
+  ) {
+    updateObjectById(objectId, updater);
   }
 
   function updateComposeBackgroundAnimation(
@@ -2769,6 +3007,7 @@ function AppContent({
       selectedParts.length ||
       selectedObjectId ||
       selectionPayload ||
+      selectedComposeObjectIds.length ||
       selectedMotionMarker ||
       selectedMotionMarkers.length ||
       selectedAdjustmentLayerId ||
@@ -2787,6 +3026,7 @@ function AppContent({
     setSelectedParts([]);
     setSelectedObjectId(null);
     setSelectionPayload(null);
+    persistComposeSelection([]);
     setSelectedMotionMarker(null);
     setSelectedMotionMarkers([]);
     setSelectedAdjustmentLayerId(null);
@@ -2960,6 +3200,160 @@ function AppContent({
   // Keep activeToolRef in sync for use inside pointer handlers
   activeToolRef.current = activeTool;
 
+  useEffect(() => {
+    if (activeTool === "pen" || activeTool === "textPath") return;
+    pathDraftRef.current = null;
+    shapeDrawPreviewRef.current = null;
+    setShapeDrawPreview(null);
+  }, [activeTool]);
+
+  function addNullObjectToFrameCenter() {
+    if (!part) return;
+    const size = 30;
+    const id = `null-${Date.now().toString(36)}`;
+    const object: FrameObject = {
+      id,
+      name: "Null object",
+      type: "null",
+      selector: `[data-object-id='${id}']`,
+      bounds: {
+        x: Math.round((FRAME_WIDTH - size) / 2),
+        y: Math.round((FRAME_HEIGHT - size) / 2),
+        width: size,
+        height: size,
+      },
+      style: {
+        background: "transparent",
+      },
+    };
+    updateCompositionForTimelinePart(part.id, (composition) => ({
+      ...composition,
+      objects: [...composition.objects, object],
+    }));
+    pendingComposeSelectionObjectIdsRef.current = [object.id];
+    persistComposeSelection([object.id]);
+    activeToolRef.current = null;
+    setActiveTool(null);
+  }
+
+  function createTextObjectAtPoint(point: Point) {
+    if (!part) return;
+    const width = 440;
+    const height = 120;
+    const id = `text-${Date.now().toString(36)}`;
+    const object: FrameObject = {
+      id,
+      name: "Text",
+      type: "text",
+      selector: `[data-object-id='${id}']`,
+      bounds: {
+        x: Math.round(point.x),
+        y: Math.round(point.y),
+        width,
+        height,
+      },
+      content: "Text",
+      style: {
+        color: "#ffffff",
+        fontSize: 72,
+        fontWeight: 400,
+        lineHeight: 1.1,
+      },
+    };
+    updateCompositionForTimelinePart(part.id, (composition) => ({
+      ...composition,
+      objects: [...composition.objects, object],
+    }));
+    pendingComposeSelectionObjectIdsRef.current = [object.id];
+    persistComposeSelection([object.id]);
+    setEditingTextObjectId(object.id);
+    activeToolRef.current = null;
+    setActiveTool(null);
+  }
+
+  useEffect(() => {
+    function handleComposeToolShortcut(event: KeyboardEvent) {
+      if (!composeMode || mode !== "preview" || !hasPreviewComposition) return;
+      if (
+        event.defaultPrevented ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.altKey
+      )
+        return;
+      if (isTextEditingTarget(event.target as HTMLElement | null)) return;
+
+      const key = event.key.toLowerCase();
+      let nextTool: ComposeDrawTool | null | undefined;
+      let nextResizeMode: "resize" | "scale" | undefined;
+
+      if (key === "v" && !event.shiftKey) {
+        nextTool = null;
+        nextResizeMode = "resize";
+      } else if (key === "k" && !event.shiftKey) {
+        nextTool = null;
+        nextResizeMode = "scale";
+      } else if (key === "r" && !event.shiftKey) {
+        nextTool = "rect";
+      } else if (key === "l") {
+        nextTool = event.shiftKey ? "arrow" : "line";
+      } else if (key === "o" && !event.shiftKey) {
+        nextTool = "ellipse";
+      } else if (key === "p") {
+        nextTool = event.shiftKey ? "pencil" : "pen";
+      } else if (key === "t" && !event.shiftKey) {
+        nextTool = "text";
+      } else if (key === "n" && !event.shiftKey) {
+        addNullObjectToFrameCenter();
+        nextTool = null;
+      }
+
+      if (nextTool === undefined && nextResizeMode === undefined) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      if (nextResizeMode) setObjectResizeMode(nextResizeMode);
+      activeToolRef.current = nextTool ?? null;
+      setActiveTool(nextTool ?? null);
+    }
+
+    window.addEventListener("keydown", handleComposeToolShortcut, true);
+    return () =>
+      window.removeEventListener("keydown", handleComposeToolShortcut, true);
+  }, [composeMode, hasPreviewComposition, mode]);
+
+  useEffect(() => {
+    function handlePenDraftKeyDown(event: KeyboardEvent) {
+      const draft = pathDraftRef.current;
+      if (!draft || (draft.tool !== "pen" && draft.tool !== "textPath")) return;
+      if (isTextEditingTarget(event.target as HTMLElement | null)) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        if (draft.tool === "textPath" && draft.segments.length > 0) {
+          commitPathDraftObject(draft);
+          pathDraftRef.current = null;
+          shapeDrawPreviewRef.current = null;
+          setShapeDrawPreview(null);
+          return;
+        }
+        draft.disconnected = true;
+        draft.previewPoint = null;
+        draft.outHandle = null;
+        shapeDrawPreviewRef.current = null;
+        setShapeDrawPreview(null);
+      } else if (event.key === "Enter" && draft.segments.length > 0) {
+        event.preventDefault();
+        commitPathDraftObject(draft);
+        pathDraftRef.current = null;
+        shapeDrawPreviewRef.current = null;
+        setShapeDrawPreview(null);
+      }
+    }
+    window.addEventListener("keydown", handlePenDraftKeyDown);
+    return () => window.removeEventListener("keydown", handlePenDraftKeyDown);
+  });
+
   function computeShapeDrawBox(
     start: { x: number; y: number },
     end: { x: number; y: number },
@@ -2981,7 +3375,7 @@ function AppContent({
 
   function commitPathDraftObject(draft: PathDraft) {
     if (!part || draft.segments.length === 0) return;
-    const { bounds, path } = getPenPathData(draft.segments);
+    const { bounds, path } = getPenPathData(draft.segments, draft.closed);
     const id = `${draft.tool}-${Date.now().toString(36)}`;
     const end = getLastPathPoint(draft);
     const object: FrameObject = {
@@ -3004,6 +3398,7 @@ function AppContent({
         clipperPath: JSON.stringify({
           tool: draft.tool,
           segments: draft.segments,
+          closed: draft.closed,
         }),
       },
     };
@@ -3011,7 +3406,11 @@ function AppContent({
       ...composition,
       objects: [...composition.objects, object],
     }));
-    selectComposeLayerObjects([object]);
+    pendingComposeSelectionObjectIdsRef.current = [object.id];
+    persistComposeSelection([object.id]);
+    if (draft.tool === "textPath") setEditingTextObjectId(object.id);
+    activeToolRef.current = null;
+    setActiveTool(null);
   }
 
   function updatePathObjectControl(
@@ -3019,38 +3418,154 @@ function AppContent({
     segmentIndex: number,
     control: "start" | "end" | "c1" | "c2",
     point: Point,
+    options?: {
+      history?: boolean;
+      syncSources?: boolean;
+      coalesceHistory?: boolean;
+    },
+  ) {
+    updateObjectById(
+      objectId,
+      (object) => {
+        const pathStyle = parseClipperPathStyle(object.style.clipperPath);
+        if (!pathStyle) return object;
+        const segments = transformPathGeometrySegmentsToBounds(
+          pathStyle.segments.map((segment) => ({
+            ...segment,
+            start: { ...segment.start },
+            end: { ...segment.end },
+            c1: segment.c1 ? { ...segment.c1 } : undefined,
+            c2: segment.c2 ? { ...segment.c2 } : undefined,
+          })),
+          object.bounds,
+        );
+        const segment = segments[segmentIndex];
+        if (!segment) return object;
+        if (control === "start" && segmentIndex === 0) {
+          segment.start = point;
+          if (pathStyle.closed && segments.length > 1) {
+            segments[segments.length - 1].end = point;
+          }
+        } else if (control === "end") {
+          segment.end = point;
+          if (segments[segmentIndex + 1]) {
+            segments[segmentIndex + 1].start = point;
+          } else if (pathStyle.closed && segmentIndex === segments.length - 1) {
+            segments[0].start = point;
+          }
+        } else if (control === "c1" || control === "c2") {
+          segment.kind = "curve";
+          segment[control] = point;
+          if (!segment.c1) segment.c1 = segment.start;
+          if (!segment.c2) segment.c2 = segment.end;
+        }
+        const { bounds, path } = getPenPathData(
+          segments,
+          Boolean(pathStyle.closed),
+        );
+        const end = segments[segments.length - 1]?.end ?? segment.end;
+        return {
+          ...object,
+          bounds,
+          content: getSvgDrawContent(
+            pathStyle.tool,
+            segments[0]?.start ?? point,
+            end,
+            undefined,
+            path,
+            bounds,
+          ),
+          style: {
+            ...object.style,
+            clipperPath: JSON.stringify({ ...pathStyle, segments }),
+          },
+        };
+      },
+      options,
+    );
+  }
+
+  function mergePathSegments(left: PathSegment, right: PathSegment) {
+    if (left.kind === "line" && right.kind === "line") {
+      return createPathSegment(left.start, right.end);
+    }
+    return createPathSegment(
+      left.start,
+      right.end,
+      left.kind === "curve" ? left.c1 : left.start,
+      right.kind === "curve" ? right.c2 : right.end,
+    );
+  }
+
+  function removePathJoint(
+    segments: PathSegment[],
+    segmentIndex: number,
+    control: "start" | "end" | "c1" | "c2",
+    closed: boolean,
+  ) {
+    if (control !== "start" && control !== "end") return segments;
+    if (segments.length <= 1) return segments;
+    if (control === "start" && segmentIndex === 0) {
+      if (!closed) return segments.slice(1);
+      const first = segments[0];
+      const last = segments[segments.length - 1];
+      return [...segments.slice(1, -1), mergePathSegments(last, first)];
+    }
+    if (control !== "end") return segments;
+    if (closed && segmentIndex === segments.length - 1) {
+      const first = segments[0];
+      const last = segments[segments.length - 1];
+      return [...segments.slice(1, -1), mergePathSegments(last, first)];
+    }
+    if (segmentIndex === segments.length - 1) return segments.slice(0, -1);
+    const current = segments[segmentIndex];
+    const next = segments[segmentIndex + 1];
+    return [
+      ...segments.slice(0, segmentIndex),
+      mergePathSegments(current, next),
+      ...segments.slice(segmentIndex + 2),
+    ];
+  }
+
+  function deletePathObjectJoint(
+    objectId: string,
+    segmentIndex: number,
+    control: "start" | "end" | "c1" | "c2",
   ) {
     updateObjectById(objectId, (object) => {
       const pathStyle = parseClipperPathStyle(object.style.clipperPath);
       if (!pathStyle) return object;
-      const segments = pathStyle.segments.map((segment) => ({
-        ...segment,
-        start: { ...segment.start },
-        end: { ...segment.end },
-        c1: segment.c1 ? { ...segment.c1 } : undefined,
-        c2: segment.c2 ? { ...segment.c2 } : undefined,
-      }));
-      const segment = segments[segmentIndex];
-      if (!segment) return object;
-      if (control === "start" && segmentIndex === 0) {
-        segment.start = point;
-      } else if (control === "end") {
-        segment.end = point;
-        if (segments[segmentIndex + 1]) segments[segmentIndex + 1].start = point;
-      } else if (control === "c1" || control === "c2") {
-        segment.kind = "curve";
-        segment[control] = point;
-        if (!segment.c1) segment.c1 = segment.start;
-        if (!segment.c2) segment.c2 = segment.end;
+      const segments = transformPathGeometrySegmentsToBounds(
+        pathStyle.segments.map((segment) => ({
+          ...segment,
+          start: { ...segment.start },
+          end: { ...segment.end },
+          c1: segment.c1 ? { ...segment.c1 } : undefined,
+          c2: segment.c2 ? { ...segment.c2 } : undefined,
+        })),
+        object.bounds,
+      );
+      const nextSegments = removePathJoint(
+        segments,
+        segmentIndex,
+        control,
+        Boolean(pathStyle.closed),
+      );
+      if (
+        nextSegments === segments ||
+        nextSegments.length === segments.length
+      ) {
+        return object;
       }
-      const { bounds, path } = getPenPathData(segments);
-      const end = segments[segments.length - 1]?.end ?? segment.end;
+      const closed = Boolean(pathStyle.closed) && nextSegments.length > 1;
+      const { bounds, path } = getPenPathData(nextSegments, closed);
+      const end = nextSegments[nextSegments.length - 1]?.end ?? bounds;
       return {
         ...object,
         bounds,
         content: getSvgDrawContent(
           pathStyle.tool,
-          segments[0]?.start ?? point,
+          nextSegments[0]?.start ?? bounds,
           end,
           undefined,
           path,
@@ -3058,10 +3573,36 @@ function AppContent({
         ),
         style: {
           ...object.style,
-          clipperPath: JSON.stringify({ ...pathStyle, segments }),
+          clipperPath: JSON.stringify({
+            ...pathStyle,
+            segments: nextSegments,
+            closed,
+          }),
         },
       };
     });
+  }
+
+  function updateTextPathOffset(
+    objectId: string,
+    offset: number,
+    options?: { history?: boolean },
+  ) {
+    updateObjectById(
+      objectId,
+      (object) => {
+        if (!isTextPathObject(object) || !object.content) return object;
+        const nextOffset = `${Math.max(0, Math.min(100, offset)).toFixed(2)}%`;
+        return {
+          ...object,
+          content: object.content.replace(
+            /(<textPath\b[^>]*\sstartOffset=")([^"]+)(")/,
+            `$1${nextOffset}$3`,
+          ),
+        };
+      },
+      options,
+    );
   }
 
   function handlePathControlPointerDown(
@@ -3076,16 +3617,44 @@ function AppContent({
     if (!frameElement) return;
     const target = event.currentTarget;
     target.setPointerCapture(event.pointerId);
+    const startClientPoint = { x: event.clientX, y: event.clientY };
+    let latestPoint = framePointFromClient(event.nativeEvent, frameElement);
+    let frameId = 0;
+    let moved = false;
+    const flushPreview = () => {
+      frameId = 0;
+      flushSync(() => {
+        updatePathObjectControl(objectId, segmentIndex, control, latestPoint, {
+          history: false,
+        });
+      });
+    };
     const move = (nativeEvent: PointerEvent) => {
-      updatePathObjectControl(
-        objectId,
-        segmentIndex,
-        control,
-        framePointFromClient(nativeEvent, frameElement),
-      );
+      const deltaX = nativeEvent.clientX - startClientPoint.x;
+      const deltaY = nativeEvent.clientY - startClientPoint.y;
+      if (Math.hypot(deltaX, deltaY) > 3) {
+        moved = true;
+      }
+      if (!moved) return;
+      latestPoint = framePointFromClient(nativeEvent, frameElement);
+      if (!frameId) frameId = requestAnimationFrame(flushPreview);
     };
     const up = (nativeEvent: PointerEvent) => {
-      move(nativeEvent);
+      if (frameId) {
+        cancelAnimationFrame(frameId);
+        frameId = 0;
+      }
+      if (!moved && (control === "start" || control === "end")) {
+        deletePathObjectJoint(objectId, segmentIndex, control);
+      } else {
+        updatePathObjectControl(
+          objectId,
+          segmentIndex,
+          control,
+          framePointFromClient(nativeEvent, frameElement),
+          { history: true },
+        );
+      }
       target.releasePointerCapture(event.pointerId);
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
@@ -3101,31 +3670,49 @@ function AppContent({
     if (!tool) return false;
     if (event.button !== 0) return false;
     const el = event.currentTarget;
-    const point = framePointFromClient(event.nativeEvent, el);
+    const rawPoint = framePointFromClient(event.nativeEvent, el);
+    if (tool === "text") {
+      createTextObjectAtPoint(rawPoint);
+      return true;
+    }
     if (isBezierDrawTool(tool)) {
       const draft =
         pathDraftRef.current?.tool === tool
           ? pathDraftRef.current
           : {
               tool,
-              start: point,
+              start: rawPoint,
               segments: [],
               pointerId: null,
               downPoint: null,
               current: null,
+              outHandle: null,
+              previewPoint: null,
+              anchor: null,
+              closed: false,
+              disconnected: false,
             };
+      const point = getPathDraftSnapPoint(draft, rawPoint);
+      if (draft.segments.length === 0 && !draft.anchor) {
+        draft.anchor = point;
+      }
+      if (draft.disconnected) {
+        draft.anchor = point;
+        draft.outHandle = null;
+      }
       draft.pointerId = event.pointerId;
       draft.downPoint = point;
       draft.current = null;
+      draft.previewPoint = point;
       pathDraftRef.current = draft;
       el.setPointerCapture(event.pointerId);
       return true;
     }
     shapeDrawStartRef.current = {
-      x: point.x,
-      y: point.y,
+      x: rawPoint.x,
+      y: rawPoint.y,
       pointerId: event.pointerId,
-      points: [point],
+      points: [rawPoint],
     };
     el.setPointerCapture(event.pointerId);
     return true;
@@ -3138,20 +3725,118 @@ function AppContent({
     const tool = activeToolRef.current;
     if (!tool) return false;
     const el = event.currentTarget;
-    const end = framePointFromClient(event.nativeEvent, el);
+    const rawEnd = framePointFromClient(event.nativeEvent, el);
     const draft = pathDraftRef.current;
+    const end =
+      draft && isBezierDrawTool(tool)
+        ? getPathDraftSnapPoint(draft, rawEnd)
+        : rawEnd;
+    if (!draft && isBezierDrawTool(tool)) {
+      shapeDrawPreviewRef.current = {
+        bounds: getDirectedDrawBounds([end]),
+        start: end,
+        end,
+        path: "",
+        joints: [end],
+      };
+      if (!shapeDrawPreviewFrameRef.current) {
+        shapeDrawPreviewFrameRef.current = requestAnimationFrame(() => {
+          shapeDrawPreviewFrameRef.current = 0;
+          setShapeDrawPreview(shapeDrawPreviewRef.current);
+        });
+      }
+      return true;
+    }
+    if (draft && draft.pointerId === null && isBezierDrawTool(tool)) {
+      draft.previewPoint = end;
+      const previewSegments = getDraftPreviewSegments(draft);
+      const handles = draft.outHandle
+        ? [{ anchor: getLastPathPoint(draft), handle: draft.outHandle }]
+        : [];
+      const joints = getDraftJoints(draft, previewSegments);
+      if (
+        joints.length > 0 ||
+        previewSegments.length > 0 ||
+        handles.length > 0
+      ) {
+        const { bounds, path } = getPenPreviewData(
+          previewSegments,
+          handles,
+          joints,
+          draft.closed,
+        );
+        shapeDrawPreviewRef.current = {
+          bounds,
+          start: draft.start,
+          end,
+          path,
+          joints,
+          handles: handles.length > 0 ? handles : undefined,
+        };
+        if (!shapeDrawPreviewFrameRef.current) {
+          shapeDrawPreviewFrameRef.current = requestAnimationFrame(() => {
+            shapeDrawPreviewFrameRef.current = 0;
+            setShapeDrawPreview(shapeDrawPreviewRef.current);
+          });
+        }
+      }
+      return true;
+    }
     if (draft?.pointerId === event.pointerId && isBezierDrawTool(tool)) {
       const segmentStart = getLastPathPoint(draft);
       const downPoint = draft.downPoint ?? segmentStart;
-      const curve = Math.hypot(end.x - downPoint.x, end.y - downPoint.y) >= 3;
-      draft.current = createPathSegment(segmentStart, end, curve);
-      const previewSegments = [...draft.segments, draft.current];
-      const { bounds, path } = getPenPathData(previewSegments);
+      const draggedHandle =
+        getPointDistance(rawEnd, downPoint) >= 3 ? rawEnd : null;
+      const incomingHandle = draggedHandle
+        ? getMirroredPoint(downPoint, draggedHandle)
+        : null;
+      draft.current =
+        getPointDistance(segmentStart, downPoint) >= 0.5
+          ? createPathSegment(
+              segmentStart,
+              downPoint,
+              draft.outHandle,
+              incomingHandle,
+            )
+          : null;
+      draft.previewPoint = downPoint;
+      const previewSegments = draft.current
+        ? [...draft.segments, draft.current]
+        : draft.segments;
+      const handles = [
+        ...(draft.current?.c1
+          ? [{ anchor: segmentStart, handle: draft.current.c1 }]
+          : []),
+        ...(draft.current?.c2
+          ? [{ anchor: downPoint, handle: draft.current.c2 }]
+          : []),
+        ...(incomingHandle && !draft.current
+          ? [{ anchor: downPoint, handle: incomingHandle }]
+          : []),
+        ...(draggedHandle
+          ? [{ anchor: downPoint, handle: draggedHandle }]
+          : []),
+      ];
+      const joints = getDraftJoints(draft, previewSegments);
+      if (
+        previewSegments.length === 0 &&
+        handles.length === 0 &&
+        joints.length === 0
+      )
+        return true;
+      const { bounds, path } = getPenPreviewData(
+        previewSegments,
+        handles,
+        joints,
+        draft.closed,
+      );
       shapeDrawPreviewRef.current = {
         bounds,
         start: draft.start,
-        end,
+        end: downPoint,
         path,
+        joints,
+        handles: handles.length > 0 ? handles : undefined,
       };
       if (!shapeDrawPreviewFrameRef.current) {
         shapeDrawPreviewFrameRef.current = requestAnimationFrame(() => {
@@ -3167,14 +3852,17 @@ function AppContent({
       const distance = Math.hypot(end.x - lastPoint.x, end.y - lastPoint.y);
       if (distance >= 2) start.points.push(end);
     }
-    const bounds = isPathDrawTool(tool)
-      ? getPathDrawData(tool, start, end, start.points).bounds
-      : computeShapeDrawBox(start, end, event.shiftKey);
+    const drawData = isPathDrawTool(tool)
+      ? getPathDrawData(tool, start, end, start.points)
+      : null;
+    const bounds =
+      drawData?.bounds ?? computeShapeDrawBox(start, end, event.shiftKey);
     shapeDrawPreviewRef.current = {
       bounds,
       start,
       end,
       points: tool === "pencil" ? [...start.points] : undefined,
+      path: tool === "pencil" ? drawData?.path : undefined,
     };
     if (!shapeDrawPreviewFrameRef.current) {
       shapeDrawPreviewFrameRef.current = requestAnimationFrame(() => {
@@ -3188,18 +3876,50 @@ function AppContent({
   function handleShapeToolPointerUp(event: React.PointerEvent<HTMLDivElement>) {
     const tool = activeToolRef.current;
     const draft = pathDraftRef.current;
-    if (tool && draft?.pointerId === event.pointerId && isBezierDrawTool(tool)) {
+    if (
+      tool &&
+      draft?.pointerId === event.pointerId &&
+      isBezierDrawTool(tool)
+    ) {
       const el = event.currentTarget;
-      const end = framePointFromClient(event.nativeEvent, el);
+      const rawEnd = framePointFromClient(event.nativeEvent, el);
       const segmentStart = getLastPathPoint(draft);
       const downPoint = draft.downPoint ?? segmentStart;
-      const curve = Math.hypot(end.x - downPoint.x, end.y - downPoint.y) >= 3;
-      const segment = draft.current ?? createPathSegment(segmentStart, end, curve);
-      if (
-        Math.hypot(segment.end.x - segment.start.x, segment.end.y - segment.start.y) >=
-        3
-      )
-        draft.segments.push(segment);
+      const draggedHandle =
+        getPointDistance(rawEnd, downPoint) >= 3 ? rawEnd : null;
+      const incomingHandle = draggedHandle
+        ? getMirroredPoint(downPoint, draggedHandle)
+        : null;
+      const disconnectedStart = draft.disconnected;
+      const segment =
+        draft.current ??
+        (!disconnectedStart && getPointDistance(segmentStart, downPoint) >= 0.5
+          ? createPathSegment(
+              segmentStart,
+              downPoint,
+              draft.outHandle,
+              incomingHandle,
+            )
+          : null);
+      const closing =
+        draft.segments.length >= 2 &&
+        getPointDistance(downPoint, draft.start) <= 8;
+      if (segment && getPointDistance(segment.end, segment.start) >= 3) {
+        draft.segments.push(
+          closing
+            ? {
+                ...segment,
+                end: draft.start,
+                c2: incomingHandle ?? draft.start,
+              }
+            : segment,
+        );
+      }
+      draft.anchor = downPoint;
+      draft.outHandle = draggedHandle;
+      draft.previewPoint = closing ? null : downPoint;
+      draft.closed = closing;
+      draft.disconnected = false;
       draft.pointerId = null;
       draft.downPoint = null;
       draft.current = null;
@@ -3213,12 +3933,24 @@ function AppContent({
         shapeDrawPreviewRef.current = null;
         setShapeDrawPreview(null);
       } else if (draft.segments.length > 0) {
-        const { bounds, path } = getPenPathData(draft.segments);
+        const previewSegments = getDraftPreviewSegments(draft);
+        const handles = draft.outHandle
+          ? [{ anchor: getLastPathPoint(draft), handle: draft.outHandle }]
+          : [];
+        const joints = getDraftJoints(draft, previewSegments);
+        const { bounds, path } = getPenPreviewData(
+          previewSegments,
+          handles,
+          joints,
+          draft.closed,
+        );
         shapeDrawPreviewRef.current = {
           bounds,
           start: draft.start,
-          end: getLastPathPoint(draft),
+          end: draft.previewPoint ?? getLastPathPoint(draft),
           path,
+          joints,
+          handles: handles.length > 0 ? handles : undefined,
         };
         setShapeDrawPreview(shapeDrawPreviewRef.current);
       }
@@ -3250,12 +3982,13 @@ function AppContent({
 
     const isEllipse = tool === "ellipse";
     const isText = tool === "text";
+    const isNullObject = tool === "null";
     const isSvg = isSvgDrawTool(tool);
     const id = `${tool}-${Date.now().toString(36)}`;
     const object: FrameObject = {
       id,
       name: getDrawToolName(tool),
-      type: isText ? "text" : isSvg ? "svg" : "rect",
+      type: isText ? "text" : isNullObject ? "null" : isSvg ? "svg" : "rect",
       selector: `[data-object-id='${id}']`,
       bounds: {
         x,
@@ -3271,27 +4004,31 @@ function AppContent({
             fontWeight: 400,
             lineHeight: 1.1,
           }
-        : isSvg
+        : isNullObject
           ? {
               background: "transparent",
-              overflow: "visible",
             }
-          : {
-              background: "#D5D5D5",
-              ...(isEllipse ? { borderRadius: 9999 } : {}),
-              ...(tool === "polygon"
-                ? {
-                    clipPath:
-                      "polygon(50% 0%, 100% 38%, 82% 100%, 18% 100%, 0% 38%)",
-                  }
-                : {}),
-              ...(tool === "star"
-                ? {
-                    clipPath:
-                      "polygon(50% 0%, 61% 35%, 98% 35%, 68% 56%, 79% 91%, 50% 70%, 21% 91%, 32% 56%, 2% 35%, 39% 35%)",
-                  }
-                : {}),
-            },
+          : isSvg
+            ? {
+                background: "transparent",
+                overflow: "visible",
+              }
+            : {
+                background: "#D5D5D5",
+                ...(isEllipse ? { borderRadius: 9999 } : {}),
+                ...(tool === "polygon"
+                  ? {
+                      clipPath:
+                        "polygon(50% 0%, 100% 38%, 82% 100%, 18% 100%, 0% 38%)",
+                    }
+                  : {}),
+                ...(tool === "star"
+                  ? {
+                      clipPath:
+                        "polygon(50% 0%, 61% 35%, 98% 35%, 68% 56%, 79% 91%, 50% 70%, 21% 91%, 32% 56%, 2% 35%, 39% 35%)",
+                    }
+                  : {}),
+              },
     };
     if (isSvg) object.content = getSvgDrawContent(tool, start, end, points);
     if (part) {
@@ -3299,7 +4036,10 @@ function AppContent({
         ...composition,
         objects: [...composition.objects, object],
       }));
-      selectComposeLayerObjects([object]);
+      pendingComposeSelectionObjectIdsRef.current = [object.id];
+      persistComposeSelection([object.id]);
+      activeToolRef.current = null;
+      setActiveTool(null);
     }
     return true;
   }
@@ -3327,6 +4067,7 @@ function AppContent({
     event: React.PointerEvent<HTMLDivElement>,
   ) {
     shapeDrawStartRef.current = null;
+    pathDraftRef.current = null;
     shapeDrawPreviewRef.current = null;
     if (shapeDrawPreviewFrameRef.current) {
       cancelAnimationFrame(shapeDrawPreviewFrameRef.current);
@@ -3334,6 +4075,18 @@ function AppContent({
     }
     setShapeDrawPreview(null);
     onFramePointerCancel(event);
+  }
+
+  function wrappedOnFramePointerLeave(
+    event: React.PointerEvent<HTMLDivElement>,
+  ) {
+    shapeDrawPreviewRef.current = null;
+    if (shapeDrawPreviewFrameRef.current) {
+      cancelAnimationFrame(shapeDrawPreviewFrameRef.current);
+      shapeDrawPreviewFrameRef.current = 0;
+    }
+    setShapeDrawPreview(null);
+    onFramePointerMove(event);
   }
 
   const {
@@ -4111,6 +4864,7 @@ function AppContent({
               onFramePointerDown: wrappedOnFramePointerDown,
               onFramePointerDownCapture,
               onFramePointerMove: wrappedOnFramePointerMove,
+              onFramePointerLeave: wrappedOnFramePointerLeave,
               onFramePointerUp: wrappedOnFramePointerUp,
               onObjectPointerDown: startObjectDrag,
               onObjectResizePointerDown: startObjectResize,
@@ -4134,6 +4888,8 @@ function AppContent({
                   return { ...object, style: nextStyle };
                 }),
               onTextEditCommit: updateTextObjectContent,
+              onTextEditEnd: () => setEditingTextObjectId(null),
+              onTextPathOffsetChange: updateTextPathOffset,
               onTextObjectDoubleClick: startTextObjectEdit,
               onTrackerTargetPick: commitTranslationTrackerPick,
             }}
@@ -4161,6 +4917,7 @@ function AppContent({
               composeMode && mode === "preview" && hasPreviewComposition
                 ? {
                     activeTool,
+                    onAddNullObject: addNullObjectToFrameCenter,
                     onActiveToolChange: setActiveTool,
                     resizeMode: objectResizeMode,
                     onResizeModeChange: setObjectResizeMode,
@@ -4422,12 +5179,14 @@ function AppContent({
             composeAnimationPart: hasActiveComposition ? part : null,
             selectedObjectIds: selectedComposeObjectIds,
             onExitCompose: () => updateTimelineMode("composition"),
+            onInspectComposeObject: inspectComposeObject,
             onSelectComposeObjects: selectComposeLayerObjects,
             onPersistComposeSelection: persistComposeSelection,
             onRenameComposeAnimationLayer: renameComposeAnimationLayer,
             onUpdateComposeBackgroundAnimation:
               updateComposeBackgroundAnimation,
             onUpdateComposeObjectAnimation: updateComposeObjectAnimation,
+            onUpdateComposeObject: updateComposeObject,
             setAppContextMenu,
           }}
         >

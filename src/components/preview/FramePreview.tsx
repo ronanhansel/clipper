@@ -48,12 +48,20 @@ import {
 } from "../../core/frameInteraction";
 import { clamp } from "../../core/math";
 import {
+  getFramePortalOverlayTransform,
+  viewportBoundsToPortal,
+  viewportPointToPortal,
+  type FramePortalOverlayTransform,
+} from "../../core/overlayGeometry";
+import { transformPathGeometrySegmentsToBounds } from "../../core/pathGeometry";
+import {
   getRenderClockAttributes,
   getRenderClockStyle,
   syncDomAnimationsToRenderClock,
   waitForRenderClockAnimationsReady,
 } from "../../render-engine/renderClock";
 import {
+  buildFrameObjectParentTransformLookup,
   evaluateBackgroundLayer,
   evaluateFrameObject,
   isTimeSensitiveFrameObject,
@@ -154,6 +162,7 @@ type FramePreviewProps = {
   onFramePointerDown: (event: PointerEvent<HTMLDivElement>) => void;
   onFramePointerDownCapture: (event: PointerEvent<HTMLDivElement>) => void;
   onFramePointerMove: (event: PointerEvent<HTMLDivElement>) => void;
+  onFramePointerLeave: (event: PointerEvent<HTMLDivElement>) => void;
   onFramePointerUp: (event: PointerEvent<HTMLDivElement>) => void;
   activeShapeTool?: ComposeDrawTool | null;
   shapeDrawPreview?: ShapeDrawPreview | null;
@@ -178,6 +187,12 @@ type FramePreviewProps = {
     content: string,
     richText?: RichTextSegment[],
   ) => void;
+  onTextEditEnd?: () => void;
+  onTextPathOffsetChange?: (
+    objectId: string,
+    offset: number,
+    options?: { history?: boolean },
+  ) => void;
   onTextObjectDoubleClick: (
     event: ReactMouseEvent<HTMLDivElement>,
     object: FrameObject,
@@ -195,7 +210,12 @@ type ComposeDrawTool =
   | "pen"
   | "pencil"
   | "text"
-  | "textPath";
+  | "textPath"
+  | "null";
+
+function isPenDrawTool(tool: ComposeDrawTool | null | undefined) {
+  return tool === "pen" || tool === "pencil" || tool === "textPath";
+}
 
 type ShapeDrawPreview = {
   bounds: Bounds;
@@ -203,6 +223,8 @@ type ShapeDrawPreview = {
   end: Point;
   points?: Point[];
   path?: string;
+  joints?: Point[];
+  handles?: Array<{ anchor: Point; handle: Point }>;
 };
 
 export const FramePreview = memo(function FramePreview({
@@ -235,12 +257,15 @@ export const FramePreview = memo(function FramePreview({
   onFramePointerDown,
   onFramePointerDownCapture,
   onFramePointerMove,
+  onFramePointerLeave,
   onFramePointerUp,
   onObjectPointerDown,
   onObjectResizePointerDown,
   onPathControlPointerDown,
   onObjectCornerRadiusChange,
   onTextEditCommit,
+  onTextEditEnd,
+  onTextPathOffsetChange,
   onTextObjectDoubleClick,
   onTrackerTargetPick,
   activeShapeTool,
@@ -484,6 +509,14 @@ export const FramePreview = memo(function FramePreview({
   const showDragBox =
     interactiveDragBox &&
     isVisibleMarqueeBounds(interactiveDragBox, frameScale);
+  const showShapeDrawPreview = Boolean(
+    shapeDrawPreview &&
+    activeShapeTool &&
+    (shapeDrawPreview.bounds.width > 0 ||
+      shapeDrawPreview.bounds.height > 0 ||
+      (shapeDrawPreview.joints?.length ?? 0) > 0 ||
+      (shapeDrawPreview.handles?.length ?? 0) > 0),
+  );
   const isUnlinkedPart = Boolean(part.sourceMissing);
   const compositionError = part.compositionError;
   const livePlaybackPartRef = useRef(part);
@@ -677,7 +710,7 @@ export const FramePreview = memo(function FramePreview({
       >
         <div
           ref={frameViewportRef}
-          className={`absolute overflow-hidden ${!isPlaying && (interactiveFocusPicking || interactiveTrackerPicking) ? "cursor-crosshair ring-2 ring-[#159dff]" : activeShapeTool ? "cursor-crosshair" : ""}`}
+          className={`absolute overflow-hidden ${!isPlaying && (interactiveFocusPicking || interactiveTrackerPicking) ? "cursor-crosshair ring-2 ring-[#159dff]" : activeShapeTool === "text" ? "cursor-text" : activeShapeTool ? "cursor-crosshair" : ""}`}
           data-clipper-frame-preview
           style={clippedViewportStyle}
           onPointerDownCapture={handleFramePointerDownCapture}
@@ -685,7 +718,10 @@ export const FramePreview = memo(function FramePreview({
           onPointerMove={handleFramePointerMove}
           onPointerUp={isPlaying ? undefined : onFramePointerUp}
           onPointerCancel={isPlaying ? undefined : onFramePointerCancel}
-          onPointerLeave={clearSelectorHover}
+          onPointerLeave={(event) => {
+            clearSelectorHover(event);
+            onFramePointerLeave(event);
+          }}
         >
           <div
             className="absolute left-0 top-0 origin-top-left overflow-hidden"
@@ -741,6 +777,7 @@ export const FramePreview = memo(function FramePreview({
                             key={`${item.part.id}:${item.start}`}
                             active={item.part.id === part.id}
                             animationsEnabled={animationsEnabled}
+                            activeShapeTool={activeShapeTool}
                             canSelect={
                               !isPlaying &&
                               (canSelectObjects || interactiveTrackerPicking)
@@ -760,6 +797,7 @@ export const FramePreview = memo(function FramePreview({
                             renderMode={renderMode}
                             onObjectPointerDown={onObjectPointerDown}
                             onTextEditCommit={onTextEditCommit}
+                            onTextEditEnd={onTextEditEnd}
                             onTextObjectDoubleClick={onTextObjectDoubleClick}
                           />
                         ))
@@ -789,6 +827,7 @@ export const FramePreview = memo(function FramePreview({
             <DragSelectionBox
               dragSelectionBoxRef={dragSelectionBoxRef}
               bounds={interactiveDragBox}
+              cameraTransform={liveCameraTransform}
               frameScale={frameScale}
               frameViewportRef={frameViewportRef}
               portalHost={previewOverlayHost}
@@ -811,10 +850,7 @@ export const FramePreview = memo(function FramePreview({
             />
           ) : null}
           <FramePickPointImperativeOverlay />
-          {shapeDrawPreview &&
-          activeShapeTool &&
-          shapeDrawPreview.bounds.width > 0 &&
-          shapeDrawPreview.bounds.height > 0 ? (
+          {showShapeDrawPreview && shapeDrawPreview && activeShapeTool ? (
             <ShapeDrawPreviewOverlay
               preview={shapeDrawPreview}
               frameScale={frameScale}
@@ -823,6 +859,21 @@ export const FramePreview = memo(function FramePreview({
           ) : null}
         </div>
       </div>
+      {showShapeDrawPreview &&
+      shapeDrawPreview &&
+      activeShapeTool &&
+      previewOverlayHost
+        ? createPortal(
+            <ShapeDrawPreviewControlsOverlay
+              cameraTransform={liveCameraTransform}
+              frameScale={frameScale}
+              frameViewportRef={frameViewportRef}
+              preview={shapeDrawPreview}
+              portalHost={previewOverlayHost}
+            />,
+            previewOverlayHost,
+          )
+        : null}
       {canSelectObjects && !isUnlinkedPart && previewOverlayHost
         ? createPortal(
             selectedPreviewObjects.map((object) => {
@@ -830,11 +881,12 @@ export const FramePreview = memo(function FramePreview({
                 (item) => item.id === object.id,
               );
               const isBackgroundSelection = object.id === part.background.id;
+              const liveBounds = source?.bounds ?? object.bounds;
               return (
                 <Fragment key={object.id}>
                   <SelectionOverlayBox
                     objectId={object.id}
-                    bounds={object.bounds}
+                    bounds={liveBounds}
                     cameraTransform={liveCameraTransform}
                     frameScale={frameScale}
                     frameViewportRef={frameViewportRef}
@@ -848,6 +900,9 @@ export const FramePreview = memo(function FramePreview({
                       !isBackgroundSelection && source?.type === "rect"
                         ? getNumericStyleValue(source.style.borderRadius)
                         : undefined
+                    }
+                    resizable={
+                      !isBackgroundSelection && source?.type !== "null"
                     }
                     uiScale={selectionOverlayScale}
                     onCornerRadiusChange={
@@ -864,8 +919,23 @@ export const FramePreview = memo(function FramePreview({
                     <PathEditOverlay
                       cameraTransform={liveCameraTransform}
                       frameScale={frameScale}
+                      frameViewportRef={frameViewportRef}
                       object={source}
                       onPathControlPointerDown={onPathControlPointerDown}
+                      portalHost={previewOverlayHost}
+                    />
+                  ) : null}
+                  {source &&
+                  !editingTextObjectId &&
+                  isEditableTextPathObject(source) &&
+                  onTextPathOffsetChange ? (
+                    <TextPathOffsetHandle
+                      cameraTransform={liveCameraTransform}
+                      frameScale={frameScale}
+                      frameViewportRef={frameViewportRef}
+                      object={source}
+                      onTextPathOffsetChange={onTextPathOffsetChange}
+                      portalHost={previewOverlayHost}
                     />
                   ) : null}
                 </Fragment>
@@ -975,6 +1045,7 @@ function syncVisualAdjustmentOverlays(
       element.className = "pointer-events-none absolute inset-0";
       element.style.zIndex = "2147483647";
       Object.assign(element.style, overlay.style);
+      element.style.pointerEvents = "none";
       return element;
     }),
   );
@@ -1016,6 +1087,12 @@ function applyLivePartPreviewTime(
       if (target) applyLivePreviewObject(target, element);
     }
   }
+  const parentTransforms = buildFrameObjectParentTransformLookup(
+    part.objects,
+    time,
+    part.duration,
+    true,
+  );
   for (const object of part.objects) {
     const target = root.querySelector<HTMLElement>(
       `[data-clipper-render-object-id="${cssEscape(object.id)}"]`,
@@ -1026,6 +1103,7 @@ function applyLivePartPreviewTime(
         evaluateFrameObject(object, time, part.duration, {
           animations: true,
         }),
+        parentTransforms.get(object.id),
       );
   }
 }
@@ -1047,8 +1125,9 @@ function applyRenderClockStateToElement(
 function applyLivePreviewObject(
   target: HTMLElement,
   object: EvaluatedFrameObject,
+  parentTransform?: string,
 ) {
-  applyLivePreviewObjectStyle(target, object);
+  applyLivePreviewObjectStyle(target, object, parentTransform);
   if (
     object.renderContent !== undefined &&
     object.renderContent !== object.content &&
@@ -1060,6 +1139,7 @@ function applyLivePreviewObject(
 function applyLivePreviewObjectStyle(
   target: HTMLElement,
   object: EvaluatedFrameObject,
+  parentTransform?: string,
 ) {
   const objectTransform =
     typeof object.style.transform === "string"
@@ -1071,7 +1151,7 @@ function applyLivePreviewObjectStyle(
       : undefined;
   applyLivePreviewStyle(target, object.renderStyle);
   target.style.transform =
-    `translate(var(--clipper-drag-x, 0px), var(--clipper-drag-y, 0px)) ${animationTransform ?? objectTransform ?? ""}`.trim();
+    `${parentTransform ?? ""} translate(var(--clipper-drag-x, 0px), var(--clipper-drag-y, 0px)) ${animationTransform ?? objectTransform ?? ""}`.trim();
   setLiveStyleValue(
     target,
     "opacity",
@@ -1154,6 +1234,7 @@ function TrackerTargetOverlay({
 
 function CompositionLayerView({
   active,
+  activeShapeTool,
   animationsEnabled,
   canSelect,
   editingTextObjectId,
@@ -1167,9 +1248,11 @@ function CompositionLayerView({
   renderMode,
   onObjectPointerDown,
   onTextEditCommit,
+  onTextEditEnd,
   onTextObjectDoubleClick,
 }: {
   active: boolean;
+  activeShapeTool?: ComposeDrawTool | null;
   animationsEnabled: boolean;
   canSelect: boolean;
   editingTextObjectId: string | null;
@@ -1191,6 +1274,7 @@ function CompositionLayerView({
     richText?: RichTextSegment[],
     bounds?: Bounds,
   ) => void;
+  onTextEditEnd?: () => void;
   onTextObjectDoubleClick: (
     event: ReactMouseEvent<HTMLDivElement>,
     object: FrameObject,
@@ -1254,6 +1338,12 @@ function CompositionLayerView({
             animationsEnabled={animationsEnabled}
             exportTileFrameBounds={exportTileFrameBounds}
             object={object}
+            parentTransform={buildFrameObjectParentTransformLookup(
+              part.objects,
+              previewTime,
+              part.duration,
+              animationsEnabled,
+            ).get(object.id)}
             canSelect={active && canSelect}
             duration={part.duration}
             editing={active && !isPlaying && editingTextObjectId === object.id}
@@ -1263,14 +1353,37 @@ function CompositionLayerView({
             previewTime={previewTime}
             renderMode={renderMode}
             onDoubleClick={(event) => {
-              if (active && !isPlaying) onTextObjectDoubleClick(event, object);
+              if (
+                active &&
+                !isPlaying &&
+                (activeShapeTool === "text" || activeShapeTool === null)
+              )
+                onTextObjectDoubleClick(event, object);
             }}
             onPointerDown={(event) => {
+              if (active && !isPlaying && isPenDrawTool(activeShapeTool)) {
+                event.preventDefault();
+                event.stopPropagation();
+                return;
+              }
+              if (
+                active &&
+                !isPlaying &&
+                activeShapeTool === "text" &&
+                (object.type === "text" || isEditableTextPathObject(object))
+              ) {
+                onTextObjectDoubleClick(
+                  event as unknown as ReactMouseEvent<HTMLDivElement>,
+                  object,
+                );
+                return;
+              }
               if (active && !isPlaying) onObjectPointerDown(event, object);
             }}
             onTextEditCommit={(content, richText, bounds) =>
               onTextEditCommit(object.id, content, richText, bounds)
             }
+            onTextEditEnd={onTextEditEnd}
           />
         ))}
     </div>
@@ -1413,7 +1526,11 @@ function TimelineSequenceView({
         <div
           key={overlay.id}
           className="pointer-events-none absolute inset-0"
-          style={{ zIndex: 2147483647, ...overlay.style }}
+          style={{
+            zIndex: 2147483647,
+            ...overlay.style,
+            pointerEvents: "none",
+          }}
         />
       ))}
     </div>
@@ -1537,6 +1654,142 @@ function FramePickPointImperativeOverlay() {
   );
 }
 
+function TextPathOffsetHandle({
+  cameraTransform,
+  frameScale,
+  frameViewportRef,
+  object,
+  onTextPathOffsetChange,
+  portalHost,
+}: {
+  cameraTransform: CameraPreviewTransform;
+  frameScale: number;
+  frameViewportRef: RefObject<HTMLDivElement | null>;
+  object: FrameObject;
+  onTextPathOffsetChange: (
+    objectId: string,
+    offset: number,
+    options?: { history?: boolean },
+  ) => void;
+  portalHost: HTMLElement;
+}) {
+  const handleRef = useRef<HTMLButtonElement | null>(null);
+  const offset = getTextPathOffset(object.content);
+
+  useLayoutEffect(() => {
+    const host = portalHost;
+    let frameId = 0;
+    function sync() {
+      const handle = handleRef.current;
+      const viewport = frameViewportRef.current;
+      if (handle && viewport) {
+        const bounds = boundsToViewport(
+          object.bounds,
+          cameraTransform,
+          frameScale,
+        );
+        const pointBounds = {
+          x: bounds.x + bounds.width * (offset / 100),
+          y: bounds.y + bounds.height / 2,
+          width: 0,
+          height: 0,
+        };
+        const portalPoint = viewportBoundsToPortal(
+          pointBounds,
+          getFramePortalOverlayTransform(
+            viewport.getBoundingClientRect(),
+            host.getBoundingClientRect(),
+            frameScale,
+          ),
+        );
+        handle.style.setProperty(
+          "--clipper-text-path-offset-x",
+          `${portalPoint.x}px`,
+        );
+        handle.style.setProperty(
+          "--clipper-text-path-offset-y",
+          `${portalPoint.y}px`,
+        );
+      }
+      frameId = requestAnimationFrame(sync);
+    }
+    sync();
+    return () => cancelAnimationFrame(frameId);
+  }, [
+    cameraTransform,
+    frameScale,
+    frameViewportRef,
+    object.bounds,
+    offset,
+    portalHost,
+  ]);
+
+  function startDrag(event: PointerEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    const startClientX = event.clientX;
+    const startOffset = offset;
+    const startLeft = handleRef.current?.style.getPropertyValue(
+      "--clipper-text-path-offset-x",
+    );
+    const bounds = boundsToViewport(object.bounds, cameraTransform, frameScale);
+    const pxPerPercent = Math.max(bounds.width / 100, 0.1);
+    const target = event.currentTarget;
+    target.setPointerCapture(event.pointerId);
+    let latestOffset = startOffset;
+    let frameId = 0;
+    const move = (nativeEvent: globalThis.PointerEvent) => {
+      latestOffset = clamp(
+        startOffset + (nativeEvent.clientX - startClientX) / pxPerPercent,
+        0,
+        100,
+      );
+      if (startLeft) {
+        target.style.setProperty(
+          "--clipper-text-path-offset-x",
+          `calc(${startLeft} + ${(latestOffset - startOffset) * pxPerPercent}px)`,
+        );
+      }
+      const textPath =
+        frameViewportRef.current?.querySelector<SVGTextPathElement>(
+          `[data-clipper-render-object-id="${cssEscape(object.id)}"] textPath`,
+        );
+      textPath?.setAttribute("startOffset", `${latestOffset.toFixed(2)}%`);
+      if (!frameId) {
+        frameId = requestAnimationFrame(() => {
+          frameId = 0;
+          onTextPathOffsetChange(object.id, latestOffset, { history: false });
+        });
+      }
+    };
+    const up = () => {
+      if (frameId) cancelAnimationFrame(frameId);
+      onTextPathOffsetChange(object.id, latestOffset, { history: true });
+      target.releasePointerCapture(event.pointerId);
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  }
+
+  return (
+    <button
+      ref={handleRef}
+      className="pointer-events-auto absolute h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[#159dff] bg-white shadow-[0_2px_10px_rgba(0,0,0,0.35)]"
+      data-text-path-offset-handle={object.id}
+      onPointerDown={startDrag}
+      style={{
+        left: "var(--clipper-text-path-offset-x, -9999px)",
+        top: "var(--clipper-text-path-offset-y, -9999px)",
+        zIndex: 2147483647,
+      }}
+      title="Move text along path"
+      type="button"
+    />
+  );
+}
+
 type EditablePathSegment = {
   kind: "line" | "curve";
   start: Point;
@@ -1550,61 +1803,537 @@ function parseEditablePath(object: FrameObject) {
   if (typeof raw !== "string") return null;
   try {
     const parsed = JSON.parse(raw) as {
+      tool?: string;
       segments?: EditablePathSegment[];
     };
     if (!Array.isArray(parsed.segments)) return null;
-    return parsed.segments;
+    return transformPathGeometrySegmentsToBounds(
+      parsed.segments,
+      object.bounds,
+    );
   } catch {
     return null;
   }
 }
 
-function PathEditOverlay({
+function isEditableTextPathObject(object: FrameObject) {
+  const raw = object.style.clipperPath;
+  if (typeof raw !== "string") return false;
+  try {
+    return (JSON.parse(raw) as { tool?: string }).tool === "textPath";
+  } catch {
+    return false;
+  }
+}
+
+function getCubicPoint(
+  start: Point,
+  c1: Point,
+  c2: Point,
+  end: Point,
+  t: number,
+) {
+  const mt = 1 - t;
+  return {
+    x:
+      mt * mt * mt * start.x +
+      3 * mt * mt * t * c1.x +
+      3 * mt * t * t * c2.x +
+      t * t * t * end.x,
+    y:
+      mt * mt * mt * start.y +
+      3 * mt * mt * t * c1.y +
+      3 * mt * t * t * c2.y +
+      t * t * t * end.y,
+  };
+}
+
+function getEditableSegmentHitLines(
+  segment: EditablePathSegment,
+  segmentIndex: number,
+) {
+  if (segment.kind !== "curve" || !segment.c1 || !segment.c2) {
+    return [
+      {
+        key: `${segmentIndex}:0`,
+        segmentIndex,
+        from: segment.start,
+        to: segment.end,
+      },
+    ];
+  }
+
+  const steps = 24;
+  const points = Array.from({ length: steps + 1 }, (_, index) =>
+    getCubicPoint(
+      segment.start,
+      segment.c1!,
+      segment.c2!,
+      segment.end,
+      index / steps,
+    ),
+  );
+  return points.slice(0, -1).map((from, index) => ({
+    key: `${segmentIndex}:${index}`,
+    segmentIndex,
+    from,
+    to: points[index + 1],
+  }));
+}
+
+function getTextPathEditableContent(content: string | undefined) {
+  if (!content) return "Text on path";
+  const match = content.match(/<textPath\b[^>]*>([\s\S]*?)<\/textPath>/);
+  return decodeXmlText(match?.[1]?.trim() || "Text on path");
+}
+
+function getTextPathOffset(content: string | undefined) {
+  if (!content) return 50;
+  const match = content.match(/<textPath\b[^>]*\sstartOffset="([^"]+)"/);
+  const raw = match?.[1] ?? "50%";
+  const value = Number.parseFloat(raw);
+  return Number.isFinite(value) ? clamp(value, 0, 100) : 50;
+}
+
+function decodeXmlText(value: string) {
+  return value
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">")
+    .replaceAll("&amp;", "&");
+}
+
+const identityPortalOverlayTransform: FramePortalOverlayTransform = {
+  left: 0,
+  top: 0,
+  scale: 1,
+};
+
+const objectPreviewBoundsById = new Map<string, Bounds>();
+
+function updateObjectPreviewBoundsCache(event: Event) {
+  const detail = (event as CustomEvent<{ bounds?: Bounds; objectId?: string }>)
+    .detail;
+  if (!detail?.objectId || !detail.bounds) return null;
+  objectPreviewBoundsById.set(detail.objectId, detail.bounds);
+  return detail;
+}
+
+function clearObjectPreviewBoundsCache() {
+  objectPreviewBoundsById.clear();
+}
+
+function getPreviewAdjustedPathPoint(
+  point: Point,
+  objectId: string | undefined,
+  objectBounds: Bounds | undefined,
+) {
+  if (!objectId || !objectBounds) return point;
+  const previewBounds = objectPreviewBoundsById.get(objectId);
+  if (!previewBounds) return point;
+  return {
+    x:
+      previewBounds.x +
+      ((point.x - objectBounds.x) / Math.max(objectBounds.width, 1)) *
+        previewBounds.width,
+    y:
+      previewBounds.y +
+      ((point.y - objectBounds.y) / Math.max(objectBounds.height, 1)) *
+        previewBounds.height,
+  };
+}
+
+function getCurrentFramePortalOverlayTransform({
+  frameScale,
+  frameViewportRef,
+  portalHost,
+}: {
+  frameScale: number;
+  frameViewportRef: RefObject<HTMLDivElement | null>;
+  portalHost: HTMLElement;
+}) {
+  const frameElement = frameViewportRef.current;
+  if (!frameElement) return identityPortalOverlayTransform;
+  return getFramePortalOverlayTransform(
+    frameElement.getBoundingClientRect(),
+    portalHost.getBoundingClientRect(),
+    frameScale,
+  );
+}
+
+function setPathPortalPointVars(
+  element: HTMLElement,
+  point: Point,
+  cameraTransform: CameraPreviewTransform,
+  frameScale: number,
+  overlayTransform: FramePortalOverlayTransform,
+) {
+  const viewport = boundsToViewport(
+    { x: point.x, y: point.y, width: 0, height: 0 },
+    cameraTransform,
+    frameScale,
+  );
+  const portal = viewportPointToPortal(viewport, overlayTransform);
+  element.style.setProperty("--clipper-path-left", `${portal.x}px`);
+  element.style.setProperty("--clipper-path-top", `${portal.y}px`);
+  return portal;
+}
+
+function readPathPortalPoint(element: HTMLElement, prefix: "from" | "to" | "") {
+  const x =
+    prefix === ""
+      ? Number(element.dataset.frameX)
+      : Number(element.dataset[`frame${prefix === "from" ? "From" : "To"}X`]);
+  const y =
+    prefix === ""
+      ? Number(element.dataset.frameY)
+      : Number(element.dataset[`frame${prefix === "from" ? "From" : "To"}Y`]);
+  return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
+}
+
+function usePortalPathOverlaySync({
   cameraTransform,
   frameScale,
-  object,
-  onPathControlPointerDown,
+  frameViewportRef,
+  objectBounds,
+  objectId,
+  portalHost,
+  rootRef,
 }: {
   cameraTransform: CameraPreviewTransform;
   frameScale: number;
+  frameViewportRef: RefObject<HTMLDivElement | null>;
+  objectBounds?: Bounds;
+  objectId?: string;
+  portalHost: HTMLElement;
+  rootRef: RefObject<HTMLElement | null>;
+}) {
+  useLayoutEffect(() => {
+    let frameId = 0;
+    function syncPathOverlay() {
+      const root = rootRef.current;
+      if (root) {
+        const overlayTransform = getCurrentFramePortalOverlayTransform({
+          frameScale,
+          frameViewportRef,
+          portalHost,
+        });
+        for (const element of root.querySelectorAll<HTMLElement>(
+          "[data-frame-path-point]",
+        )) {
+          const point = readPathPortalPoint(element, "");
+          if (point) {
+            setPathPortalPointVars(
+              element,
+              getPreviewAdjustedPathPoint(point, objectId, objectBounds),
+              cameraTransform,
+              frameScale,
+              overlayTransform,
+            );
+          }
+        }
+        for (const element of root.querySelectorAll<HTMLElement>(
+          "[data-frame-path-line]",
+        )) {
+          const from = readPathPortalPoint(element, "from");
+          const to = readPathPortalPoint(element, "to");
+          if (!from || !to) continue;
+          const adjustedFrom = getPreviewAdjustedPathPoint(
+            from,
+            objectId,
+            objectBounds,
+          );
+          const adjustedTo = getPreviewAdjustedPathPoint(
+            to,
+            objectId,
+            objectBounds,
+          );
+          const portalFrom = setPathPortalPointVars(
+            element,
+            adjustedFrom,
+            cameraTransform,
+            frameScale,
+            overlayTransform,
+          );
+          const portalTo = viewportPointToPortal(
+            boundsToViewport(
+              { x: adjustedTo.x, y: adjustedTo.y, width: 0, height: 0 },
+              cameraTransform,
+              frameScale,
+            ),
+            overlayTransform,
+          );
+          const dx = portalTo.x - portalFrom.x;
+          const dy = portalTo.y - portalFrom.y;
+          element.style.setProperty(
+            "--clipper-path-line-width",
+            `${Math.hypot(dx, dy)}px`,
+          );
+          element.style.setProperty(
+            "--clipper-path-line-angle",
+            `${(Math.atan2(dy, dx) * 180) / Math.PI}deg`,
+          );
+        }
+      }
+      frameId = requestAnimationFrame(syncPathOverlay);
+    }
+    syncPathOverlay();
+    return () => cancelAnimationFrame(frameId);
+  }, [
+    cameraTransform,
+    frameScale,
+    frameViewportRef,
+    objectBounds,
+    objectId,
+    portalHost,
+    rootRef,
+  ]);
+
+  useEffect(() => {
+    if (!objectId) return;
+    function updatePreviewBounds(event: Event) {
+      updateObjectPreviewBoundsCache(event);
+    }
+    window.addEventListener(
+      "clipper:object-preview-bounds",
+      updatePreviewBounds,
+    );
+    window.addEventListener(
+      "clipper:number-input-scrub-end",
+      clearObjectPreviewBoundsCache,
+    );
+    return () => {
+      window.removeEventListener(
+        "clipper:object-preview-bounds",
+        updatePreviewBounds,
+      );
+      window.removeEventListener(
+        "clipper:number-input-scrub-end",
+        clearObjectPreviewBoundsCache,
+      );
+    };
+  }, [objectId]);
+}
+
+function PathEditOverlay({
+  cameraTransform,
+  frameScale,
+  frameViewportRef,
+  object,
+  onPathControlPointerDown,
+  portalHost,
+}: {
+  cameraTransform: CameraPreviewTransform;
+  frameScale: number;
+  frameViewportRef: RefObject<HTMLDivElement | null>;
   object: FrameObject;
   onPathControlPointerDown: NonNullable<
     FramePreviewProps["onPathControlPointerDown"]
   >;
+  portalHost: HTMLElement;
 }) {
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [selectedSegmentIndex, setSelectedSegmentIndex] = useState<
+    number | null
+  >(null);
+  const [hoveredSegmentIndex, setHoveredSegmentIndex] = useState<number | null>(
+    null,
+  );
   const segments = parseEditablePath(object);
+  usePortalPathOverlaySync({
+    cameraTransform,
+    frameScale,
+    frameViewportRef,
+    objectBounds: object.bounds,
+    objectId: object.id,
+    portalHost,
+    rootRef,
+  });
+  useEffect(() => {
+    setEditing(false);
+    setSelectedSegmentIndex(null);
+    setHoveredSegmentIndex(null);
+  }, [object.id]);
   if (!segments?.length) return null;
-  const controls = segments.flatMap((segment, index) => [
-    ...(index === 0
-      ? [{ control: "start" as const, point: segment.start, segmentIndex: index }]
+  const handleLines = segments.flatMap((segment, index) => [
+    ...(editing &&
+    selectedSegmentIndex === index &&
+    segment.kind === "curve" &&
+    segment.c1
+      ? [
+          {
+            key: `${object.id}:${index}:c1-line`,
+            from: segment.start,
+            to: segment.c1,
+          },
+        ]
       : []),
-    ...(segment.kind === "curve" && segment.c1
+    ...(editing &&
+    selectedSegmentIndex === index &&
+    segment.kind === "curve" &&
+    segment.c2
+      ? [
+          {
+            key: `${object.id}:${index}:c2-line`,
+            from: segment.end,
+            to: segment.c2,
+          },
+        ]
+      : []),
+  ]);
+  const hoveredSegmentLines =
+    hoveredSegmentIndex === null
+      ? []
+      : getEditableSegmentHitLines(
+          segments[hoveredSegmentIndex],
+          hoveredSegmentIndex,
+        );
+  const controls = segments.flatMap((segment, index) => [
+    ...(editing && index === 0
+      ? [
+          {
+            control: "start" as const,
+            point: segment.start,
+            segmentIndex: index,
+          },
+        ]
+      : []),
+    ...(editing &&
+    selectedSegmentIndex === index &&
+    segment.kind === "curve" &&
+    segment.c1
       ? [{ control: "c1" as const, point: segment.c1, segmentIndex: index }]
       : []),
-    ...(segment.kind === "curve" && segment.c2
+    ...(editing &&
+    selectedSegmentIndex === index &&
+    segment.kind === "curve" &&
+    segment.c2
       ? [{ control: "c2" as const, point: segment.c2, segmentIndex: index }]
       : []),
-    { control: "end" as const, point: segment.end, segmentIndex: index },
+    ...(editing
+      ? [{ control: "end" as const, point: segment.end, segmentIndex: index }]
+      : []),
   ]);
   return (
-    <>
-      {controls.map(({ control, point, segmentIndex }, index) => {
-        const viewport = boundsToViewport(
-          { x: point.x, y: point.y, width: 0, height: 0 },
-          cameraTransform,
-          frameScale,
+    <div
+      ref={rootRef}
+      className="pointer-events-none absolute inset-0"
+      data-frame-path-edit-overlay={object.id}
+      style={{
+        transform:
+          "translate(var(--clipper-drag-x, 0px), var(--clipper-drag-y, 0px))",
+        zIndex: 2147483646,
+      }}
+      onDoubleClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        setEditing(true);
+        setSelectedSegmentIndex(null);
+      }}
+    >
+      {hoveredSegmentLines.map((line) => (
+        <div
+          key={`${object.id}:${line.key}:segment-hover`}
+          data-frame-path-line
+          data-frame-from-x={line.from.x}
+          data-frame-from-y={line.from.y}
+          data-frame-to-x={line.to.x}
+          data-frame-to-y={line.to.y}
+          className="pointer-events-none absolute border-t-2 border-[#159dff]"
+          style={{
+            left: "var(--clipper-path-left, 0px)",
+            top: "var(--clipper-path-top, 0px)",
+            width: "var(--clipper-path-line-width, 0px)",
+            transform: "rotate(var(--clipper-path-line-angle, 0deg))",
+            transformOrigin: "0 0",
+            zIndex: 2147483646,
+          }}
+        />
+      ))}
+      {segments.flatMap(getEditableSegmentHitLines).map((line) => (
+        <button
+          key={`${object.id}:${line.key}:segment-hit`}
+          type="button"
+          aria-label={editing ? "Show Bezier handles" : "Show path points"}
+          data-frame-path-line
+          data-frame-from-x={line.from.x}
+          data-frame-from-y={line.from.y}
+          data-frame-to-x={line.to.x}
+          data-frame-to-y={line.to.y}
+          className="pointer-events-auto absolute cursor-pointer border-0 bg-transparent p-0"
+          style={{
+            left: "var(--clipper-path-left, 0px)",
+            top: "calc(var(--clipper-path-top, 0px) - 16px)",
+            width: "var(--clipper-path-line-width, 0px)",
+            height: 32,
+            transform: "rotate(var(--clipper-path-line-angle, 0deg))",
+            transformOrigin: "0 50%",
+            zIndex: 2147483645,
+          }}
+          onPointerDown={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (!editing) {
+              setEditing(true);
+              setSelectedSegmentIndex(null);
+              return;
+            }
+            setSelectedSegmentIndex(line.segmentIndex);
+          }}
+          onDoubleClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            setEditing(true);
+            setSelectedSegmentIndex(null);
+          }}
+          onPointerEnter={() => setHoveredSegmentIndex(line.segmentIndex)}
+          onPointerLeave={() => setHoveredSegmentIndex(null)}
+        />
+      ))}
+      {handleLines.map((line) => {
+        return (
+          <div
+            key={line.key}
+            data-frame-path-line
+            data-frame-from-x={line.from.x}
+            data-frame-from-y={line.from.y}
+            data-frame-to-x={line.to.x}
+            data-frame-to-y={line.to.y}
+            className="pointer-events-none absolute border-t border-dashed border-[#8fbff7]"
+            style={{
+              left: "var(--clipper-path-left, 0px)",
+              top: "var(--clipper-path-top, 0px)",
+              width: "var(--clipper-path-line-width, 0px)",
+              transform: "rotate(var(--clipper-path-line-angle, 0deg))",
+              transformOrigin: "0 0",
+              zIndex: 2147483646,
+            }}
+          />
         );
+      })}
+      {controls.map(({ control, point, segmentIndex }, index) => {
         const isHandle = control === "c1" || control === "c2";
         return (
           <button
+            type="button"
             key={`${object.id}:${index}:${control}`}
-            className={`absolute z-[95] grid -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border outline-none transition ${
+            data-frame-path-point
+            data-frame-x={point.x}
+            data-frame-y={point.y}
+            className="pointer-events-auto absolute grid -translate-x-1/2 -translate-y-1/2 cursor-pointer rounded-full border-2 border-[#8fbff7] bg-[#159dff] outline-none transition"
+            style={{
+              width: isHandle ? 10 : 12,
+              height: isHandle ? 10 : 12,
+              boxShadow: "inset 0 0 0 2px white",
+              left: "var(--clipper-path-left, 0px)",
+              top: "var(--clipper-path-top, 0px)",
+              zIndex: 2147483647,
+            }}
+            title={
               isHandle
-                ? "h-2.5 w-2.5 border-[#8fbff7] bg-[#11141a]"
-                : "h-3.5 w-3.5 border-white/80 bg-[#159dff]"
-            }`}
-            style={{ left: viewport.x, top: viewport.y }}
-            title={isHandle ? "Drag Bezier handle" : "Drag path joint"}
+                ? "Drag Bezier handle"
+                : "Drag path joint, click to delete"
+            }
             onPointerDown={(event) => {
               event.stopPropagation();
               onPathControlPointerDown(event, object.id, segmentIndex, control);
@@ -1612,7 +2341,89 @@ function PathEditOverlay({
           />
         );
       })}
-    </>
+    </div>
+  );
+}
+
+function ShapeDrawPreviewControlsOverlay({
+  cameraTransform,
+  frameScale,
+  frameViewportRef,
+  preview,
+  portalHost,
+}: {
+  cameraTransform: CameraPreviewTransform;
+  frameScale: number;
+  frameViewportRef: RefObject<HTMLDivElement | null>;
+  preview: ShapeDrawPreview;
+  portalHost: HTMLElement;
+}) {
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  usePortalPathOverlaySync({
+    cameraTransform,
+    frameScale,
+    frameViewportRef,
+    portalHost,
+    rootRef,
+  });
+  const joints = preview.joints ?? [];
+  const handles = preview.handles ?? [];
+  if (joints.length === 0 && handles.length === 0) return null;
+
+  return (
+    <div ref={rootRef} className="pointer-events-none absolute inset-0">
+      {handles.map((item, index) => {
+        return (
+          <Fragment key={`${index}:${item.anchor.x}:${item.anchor.y}`}>
+            <div
+              data-frame-path-line
+              data-frame-from-x={item.anchor.x}
+              data-frame-from-y={item.anchor.y}
+              data-frame-to-x={item.handle.x}
+              data-frame-to-y={item.handle.y}
+              className="pointer-events-none absolute border-t border-dashed border-[#8fbff7]"
+              style={{
+                left: "var(--clipper-path-left, 0px)",
+                top: "var(--clipper-path-top, 0px)",
+                width: "var(--clipper-path-line-width, 0px)",
+                transform: "rotate(var(--clipper-path-line-angle, 0deg))",
+                transformOrigin: "0 0",
+                zIndex: 2147483646,
+              }}
+            />
+            <div
+              data-frame-path-point
+              data-frame-x={item.handle.x}
+              data-frame-y={item.handle.y}
+              className="pointer-events-none absolute h-[7px] w-[7px] -translate-x-1/2 -translate-y-1/2 rotate-45 border border-[#8fbff7] bg-[#11141a]"
+              style={{
+                left: "var(--clipper-path-left, 0px)",
+                top: "var(--clipper-path-top, 0px)",
+                zIndex: 2147483647,
+              }}
+            />
+          </Fragment>
+        );
+      })}
+      {[...joints, ...handles.map((item) => item.anchor)].map(
+        (point, index) => {
+          return (
+            <div
+              key={`${index}:${point.x}:${point.y}`}
+              data-frame-path-point
+              data-frame-x={point.x}
+              data-frame-y={point.y}
+              className="pointer-events-none absolute h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full border-[1.5px] border-white bg-[#159dff]"
+              style={{
+                left: "var(--clipper-path-left, 0px)",
+                top: "var(--clipper-path-top, 0px)",
+                zIndex: 2147483647,
+              }}
+            />
+          );
+        },
+      )}
+    </div>
   );
 }
 
@@ -1640,19 +2451,22 @@ function ShapeDrawPreviewOverlay({
     tool === "pencil" ||
     tool === "textPath"
   ) {
-    const pointToViewBox = (point: Point) => ({
-      x: ((point.x - bounds.x) / Math.max(bounds.width, 1)) * 100,
-      y: ((point.y - bounds.y) / Math.max(bounds.height, 1)) * 100,
+    const pointToLocal = (point: Point) => ({
+      x: point.x - bounds.x,
+      y: point.y - bounds.y,
     });
-    const start = pointToViewBox(preview.start);
-    const end = pointToViewBox(preview.end);
+    const start = pointToLocal(preview.start);
+    const end = pointToLocal(preview.end);
     const path =
       preview.path ??
       (tool === "pencil"
-        ? (preview.points?.length ? preview.points : [preview.start, preview.end])
+        ? (preview.points?.length
+            ? preview.points
+            : [preview.start, preview.end]
+          )
             .map((point, index) => {
-              const normalized = pointToViewBox(point);
-              return `${index === 0 ? "M" : "L"} ${normalized.x.toFixed(2)} ${normalized.y.toFixed(2)}`;
+              const local = pointToLocal(point);
+              return `${index === 0 ? "M" : "L"} ${local.x.toFixed(2)} ${local.y.toFixed(2)}`;
             })
             .join(" ")
         : tool === "pen" || tool === "textPath"
@@ -1662,7 +2476,7 @@ function ShapeDrawPreviewOverlay({
       <svg
         className="pointer-events-none absolute z-50 overflow-visible"
         style={style}
-        viewBox="0 0 100 100"
+        viewBox={`0 0 ${Math.max(1, bounds.width)} ${Math.max(1, bounds.height)}`}
         preserveAspectRatio="none"
       >
         <defs>
@@ -1674,7 +2488,7 @@ function ShapeDrawPreviewOverlay({
             refX="6"
             refY="3.5"
           >
-            <path d="M0,0 L7,3.5 L0,7 Z" fill="#159dff" />
+            <path d="M0,0 L7,3.5 L0,7 Z" fill="#D5D5D5" />
           </marker>
         </defs>
         <path
@@ -1684,18 +2498,12 @@ function ShapeDrawPreviewOverlay({
           markerEnd={
             tool === "arrow" ? "url(#clipper-draw-preview-arrow)" : undefined
           }
-          stroke="#159dff"
+          stroke="#D5D5D5"
           strokeLinecap="round"
           strokeLinejoin="round"
           strokeWidth={tool === "pencil" ? 4 : 3}
           vectorEffect="non-scaling-stroke"
         />
-        {tool === "pen" || tool === "textPath" ? (
-          <>
-            <circle cx={start.x} cy={start.y} fill="#159dff" r="3.4" />
-            <circle cx={end.x} cy={end.y} fill="#159dff" r="3.4" />
-          </>
-        ) : null}
         {tool === "textPath" ? (
           <text
             fill="#ffffff"
@@ -1703,7 +2511,11 @@ function ShapeDrawPreviewOverlay({
             fontSize="12"
             fontWeight="600"
           >
-            <textPath href="#clipper-draw-preview-path" startOffset="50%" textAnchor="middle">
+            <textPath
+              href="#clipper-draw-preview-path"
+              startOffset="50%"
+              textAnchor="middle"
+            >
               Text on path
             </textPath>
           </text>
@@ -1712,9 +2524,23 @@ function ShapeDrawPreviewOverlay({
     );
   }
 
+  if (tool === "null") {
+    return (
+      <div
+        className="pointer-events-none absolute z-50"
+        style={style}
+        aria-hidden
+      >
+        <div className="absolute inset-0 border-2 border-[#ff3b30]" />
+        <div className="absolute left-1/2 top-1/2 h-[52%] w-[2px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#ff3b30]" />
+        <div className="absolute left-1/2 top-1/2 h-[2px] w-[52%] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#ff3b30]" />
+      </div>
+    );
+  }
+
   return (
     <div
-      className="pointer-events-none absolute z-50 border-2 border-[#159dff] bg-[#159dff]/10"
+      className="pointer-events-none absolute z-50 bg-[#D5D5D5]/80"
       style={{
         ...style,
         borderRadius: tool === "ellipse" ? "9999px" : undefined,
@@ -1733,6 +2559,7 @@ export const FrameObjectView = memo(function FrameObjectView({
   animationsEnabled,
   exportTileFrameBounds,
   object,
+  parentTransform,
   canSelect,
   duration,
   editing,
@@ -1744,10 +2571,12 @@ export const FrameObjectView = memo(function FrameObjectView({
   onDoubleClick,
   onPointerDown,
   onTextEditCommit,
+  onTextEditEnd,
 }: {
   animationsEnabled: boolean;
   exportTileFrameBounds?: ExportTileFrameBounds;
   object: FrameObject;
+  parentTransform?: string;
   canSelect: boolean;
   duration: number;
   editing: boolean;
@@ -1763,6 +2592,7 @@ export const FrameObjectView = memo(function FrameObjectView({
     richText?: RichTextSegment[],
     bounds?: Bounds,
   ) => void;
+  onTextEditEnd?: () => void;
 }) {
   const evaluatedObject = useMemo(
     () =>
@@ -1845,8 +2675,8 @@ export const FrameObjectView = memo(function FrameObjectView({
         : `var(--clipper-radius-preview, ${formatStyleLength(object.style.borderRadius)})`,
     transform:
       renderMode === "export"
-        ? (animationTransform ?? objectTransform)
-        : `translate(var(--clipper-drag-x, 0px), var(--clipper-drag-y, 0px)) ${animationTransform ?? objectTransform ?? ""}`.trim(),
+        ? `${parentTransform ?? ""} ${animationTransform ?? objectTransform ?? ""}`.trim()
+        : `${parentTransform ?? ""} translate(var(--clipper-drag-x, 0px), var(--clipper-drag-y, 0px)) ${animationTransform ?? objectTransform ?? ""}`.trim(),
     justifyContent:
       verticalAlign === "top"
         ? "flex-start"
@@ -1867,6 +2697,10 @@ export const FrameObjectView = memo(function FrameObjectView({
           (item) => item.enabled !== false && item.options.split,
         ) ?? [])
       : [];
+  const editableTextPath = isEditableTextPathObject(object);
+  const editableContent = editableTextPath
+    ? getTextPathEditableContent(object.content)
+    : (object.content ?? "");
 
   useLayoutEffect(() => {
     const element = objectRef.current;
@@ -1893,15 +2727,18 @@ export const FrameObjectView = memo(function FrameObjectView({
     }
     if (editingObjectIdRef.current === object.id) return;
     const currentCommittedText = JSON.stringify({
-      content: object.content ?? "",
-      richText: object.richText,
+      content: editableContent,
+      richText: editableTextPath ? undefined : object.richText,
     });
 
     const editable = editableRef.current;
     editable.replaceChildren(
       ...textSegmentsToEditableNodes(
-        getRenderableTextSegments(object.content ?? "", object.richText),
-        Boolean(object.richText),
+        getRenderableTextSegments(
+          editableContent,
+          editableTextPath ? undefined : object.richText,
+        ),
+        !editableTextPath && Boolean(object.richText),
       ),
     );
     lastCommittedTextRef.current = currentCommittedText;
@@ -1913,7 +2750,7 @@ export const FrameObjectView = memo(function FrameObjectView({
     range.collapse(false);
     selection?.removeAllRanges();
     selection?.addRange(range);
-  }, [editing, object.content, object.richText]);
+  }, [editableContent, editableTextPath, editing, object.id, object.richText]);
 
   useEffect(() => {
     if (!editing) return;
@@ -1945,15 +2782,16 @@ export const FrameObjectView = memo(function FrameObjectView({
       object.style,
     );
     const content = richText.map((segment) => segment.text).join("");
-    const nextRichText = shouldPersistRichText(richText, object.style)
-      ? richText
-      : undefined;
+    const nextRichText =
+      !editableTextPath && shouldPersistRichText(richText, object.style)
+        ? richText
+        : undefined;
     const nextCommittedText = JSON.stringify({
       content,
       richText: nextRichText,
     });
     const nextBounds =
-      textBoxLayout === "auto-height"
+      !editableTextPath && textBoxLayout === "auto-height"
         ? getAutoHeightTextBounds(object, editableRef.current)
         : undefined;
     if (nextCommittedText === lastCommittedTextRef.current && !nextBounds)
@@ -1962,7 +2800,18 @@ export const FrameObjectView = memo(function FrameObjectView({
     onTextEditCommit(content, nextRichText, nextBounds);
   }
 
+  function finishTextEdit() {
+    commitTextEdit();
+    onTextEditEnd?.();
+  }
+
   function onTextEditKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      finishTextEdit();
+      editableRef.current?.blur();
+      return;
+    }
     if (event.metaKey || event.ctrlKey) {
       const key = event.key.toLowerCase();
       if (key === "b" || key === "i" || key === "u") {
@@ -1972,9 +2821,10 @@ export const FrameObjectView = memo(function FrameObjectView({
         );
         return;
       }
-      if (event.key === "Enter") editableRef.current?.blur();
     }
     if (event.key === "Escape") {
+      event.preventDefault();
+      finishTextEdit();
       const editable = editableRef.current;
       const selection = window.getSelection();
       if (
@@ -2014,6 +2864,9 @@ export const FrameObjectView = memo(function FrameObjectView({
   }
 
   const isLocked = Boolean(object.locked);
+  const isNullObject = object.type === "null";
+
+  if (isNullObject && renderMode === "export") return null;
 
   return (
     <div
@@ -2029,15 +2882,25 @@ export const FrameObjectView = memo(function FrameObjectView({
         if (!isLocked) onPointerDown(event);
       }}
     >
-      {object.type === "text" && editing ? (
+      {(object.type === "text" || editableTextPath) && editing ? (
         <div
           ref={editableRef}
-          className={`min-h-0 w-full outline-none ${textWrapClass}`}
+          className={`min-h-0 w-full outline-none ${editableTextPath ? "rounded-[6px] bg-[#11141a]/80 px-2 py-1 text-center ring-2 ring-[#159dff]" : textWrapClass}`}
           contentEditable
           suppressContentEditableWarning
-          onBlur={commitTextEdit}
+          onBlur={finishTextEdit}
           onKeyDown={onTextEditKeyDown}
           onPointerDown={(event) => event.stopPropagation()}
+          style={
+            editableTextPath
+              ? {
+                  color: "#ffffff",
+                  fontSize: `calc(48px * var(--clipper-scale-preview, 1))`,
+                  fontWeight: 600,
+                  lineHeight: 1.1,
+                }
+              : undefined
+          }
         />
       ) : null}
       {object.type === "text" && !editing ? (
@@ -2073,12 +2936,20 @@ export const FrameObjectView = memo(function FrameObjectView({
         <HtmlContent content={content} />
       ) : null}
       {object.type !== "text" &&
+      object.type !== "null" &&
       object.type !== "svg" &&
       object.type !== "html" &&
       object.type !== "template" &&
       content
         ? content
         : null}
+      {isNullObject && renderMode !== "export" ? (
+        <div className="pointer-events-auto absolute inset-0 cursor-pointer">
+          <div className="absolute inset-0 border-2 border-[#ff3b30]" />
+          <div className="absolute left-1/2 top-1/2 h-[52%] w-[2px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#ff3b30]" />
+          <div className="absolute left-1/2 top-1/2 h-[2px] w-[52%] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#ff3b30]" />
+        </div>
+      ) : null}
     </div>
   );
 }, areFrameObjectPropsEqual);
@@ -2582,6 +3453,7 @@ function areFrameObjectPropsEqual(
     animationsEnabled: boolean;
     exportTileFrameBounds?: ExportTileFrameBounds;
     object: FrameObject;
+    parentTransform?: string;
     canSelect: boolean;
     duration: number;
     editing: boolean;
@@ -2594,6 +3466,7 @@ function areFrameObjectPropsEqual(
     animationsEnabled: boolean;
     exportTileFrameBounds?: ExportTileFrameBounds;
     object: FrameObject;
+    parentTransform?: string;
     canSelect: boolean;
     duration: number;
     editing: boolean;
@@ -2605,6 +3478,7 @@ function areFrameObjectPropsEqual(
 ) {
   return (
     previous.object === next.object &&
+    previous.parentTransform === next.parentTransform &&
     previous.animationsEnabled === next.animationsEnabled &&
     previous.canSelect === next.canSelect &&
     previous.duration === next.duration &&
@@ -2698,6 +3572,7 @@ export function SelectionOverlayBox({
   portal = false,
   portalHost,
   radius,
+  resizable = true,
   uiScale = 1,
   onCornerRadiusChange,
   onResizePointerDown,
@@ -2715,6 +3590,7 @@ export function SelectionOverlayBox({
   portal?: boolean;
   portalHost?: HTMLElement | null;
   radius?: number;
+  resizable?: boolean;
   uiScale?: number;
   onCornerRadiusChange?: (radius: number) => void;
   onResizePointerDown: (
@@ -2746,9 +3622,10 @@ export function SelectionOverlayBox({
       ? 2
       : 1
     : (highlighted ? 2 : 1) / uiScale;
-  const edgeHitClass = `${interactive ? "pointer-events-auto" : "pointer-events-none"} absolute grid place-items-center`;
-  const horizontalEdgeHitClass = `${edgeHitClass} cursor-ns-resize`;
-  const verticalEdgeHitClass = `${edgeHitClass} cursor-ew-resize`;
+  const resizeInteractive = interactive && resizable;
+  const edgeHitClass = `${resizeInteractive ? "pointer-events-auto" : "pointer-events-none"} absolute grid place-items-center`;
+  const horizontalEdgeHitClass = `${edgeHitClass} ${resizable ? "cursor-ns-resize" : ""}`;
+  const verticalEdgeHitClass = `${edgeHitClass} ${resizable ? "cursor-ew-resize" : ""}`;
   const horizontalEdgeLineClass = "w-full opacity-95";
   const verticalEdgeLineClass = "h-full opacity-95";
   const edgeStyle = { backgroundColor: selectorBlue };
@@ -2764,7 +3641,7 @@ export function SelectionOverlayBox({
   };
   const horizontalEdgeLineStyle = { ...edgeStyle, height: edgeLineThicknessPx };
   const verticalEdgeLineStyle = { ...edgeStyle, width: edgeLineThicknessPx };
-  const handleClass = `${interactive ? "pointer-events-auto" : "pointer-events-none"} absolute bg-white shadow-[0_1px_4px_rgba(0,0,0,0.24)]`;
+  const handleClass = `${resizeInteractive ? "pointer-events-auto" : "pointer-events-none"} absolute bg-white shadow-[0_1px_4px_rgba(0,0,0,0.24)]`;
   const handleStyle = {
     width: portal ? selectorHandleSizePx : handleSizePx,
     height: portal ? selectorHandleSizePx : handleSizePx,
@@ -2779,7 +3656,7 @@ export function SelectionOverlayBox({
   );
   const showRadiusHandles = Boolean(
     !objectResizingActive &&
-    interactive &&
+    resizeInteractive &&
     onCornerRadiusChange &&
     radius !== undefined &&
     (highlighted || radiusHandleHover || dragRadius !== null),
@@ -2891,6 +3768,108 @@ export function SelectionOverlayBox({
     element.style.removeProperty("--clipper-selection-preview-height");
   }, [bounds.height, bounds.width, bounds.x, bounds.y]);
 
+  useEffect(() => {
+    function clearPreviewBounds() {
+      const element = boxRef.current;
+      if (!element) return;
+      element.style.removeProperty("--clipper-selection-preview-left");
+      element.style.removeProperty("--clipper-selection-preview-top");
+      element.style.removeProperty("--clipper-selection-preview-width");
+      element.style.removeProperty("--clipper-selection-preview-height");
+    }
+
+    function updatePreviewBounds(event: Event) {
+      const detail = updateObjectPreviewBoundsCache(event);
+      if (detail?.objectId !== objectId || !detail.bounds) return;
+      const element = boxRef.current;
+      if (!element) return;
+      const nextViewportBounds = insetBounds(
+        boundsToViewport(detail.bounds, cameraTransform, frameScale),
+        -offsetPx,
+      );
+      if (portal && portalHost && frameViewportRef?.current) {
+        const portalBounds = viewportBoundsToPortal(
+          nextViewportBounds,
+          getFramePortalOverlayTransform(
+            frameViewportRef.current.getBoundingClientRect(),
+            portalHost.getBoundingClientRect(),
+            frameScale,
+          ),
+        );
+        element.style.setProperty(
+          "--clipper-selection-preview-left",
+          `${portalBounds.x}px`,
+        );
+        element.style.setProperty(
+          "--clipper-selection-preview-top",
+          `${portalBounds.y}px`,
+        );
+        element.style.setProperty(
+          "--clipper-selection-preview-width",
+          `${portalBounds.width}px`,
+        );
+        element.style.setProperty(
+          "--clipper-selection-preview-height",
+          `${portalBounds.height}px`,
+        );
+        return;
+      }
+      element.style.setProperty(
+        "--clipper-selection-preview-left",
+        `${nextViewportBounds.x + overlayOffset.left}px`,
+      );
+      element.style.setProperty(
+        "--clipper-selection-preview-top",
+        `${nextViewportBounds.y + overlayOffset.top}px`,
+      );
+      element.style.setProperty(
+        "--clipper-selection-preview-width",
+        `${nextViewportBounds.width}px`,
+      );
+      element.style.setProperty(
+        "--clipper-selection-preview-height",
+        `${nextViewportBounds.height}px`,
+      );
+    }
+
+    window.addEventListener(
+      "clipper:object-preview-bounds",
+      updatePreviewBounds,
+    );
+    window.addEventListener(
+      "clipper:number-input-scrub-end",
+      clearObjectPreviewBoundsCache,
+    );
+    window.addEventListener(
+      "clipper:number-input-scrub-end",
+      clearPreviewBounds,
+    );
+    return () => {
+      window.removeEventListener(
+        "clipper:object-preview-bounds",
+        updatePreviewBounds,
+      );
+      window.removeEventListener(
+        "clipper:number-input-scrub-end",
+        clearObjectPreviewBoundsCache,
+      );
+      window.removeEventListener(
+        "clipper:number-input-scrub-end",
+        clearPreviewBounds,
+      );
+    };
+  }, [
+    cameraTransform,
+    frameScale,
+    frameViewportRef,
+    objectId,
+    offsetPx,
+    overlayOffset.left,
+    overlayOffset.top,
+    portal,
+    portalHost,
+  ]);
+
   useLayoutEffect(() => {
     if (!portal || !portalHost || !frameViewportRef) return;
     const host = portalHost;
@@ -2901,24 +3880,29 @@ export function SelectionOverlayBox({
       const element = boxRef.current;
       const frameViewport = viewportRef.current;
       if (element && frameViewport) {
-        const hostRect = host.getBoundingClientRect();
-        const frameRect = frameViewport.getBoundingClientRect();
-        const scale = frameRect.width / (FRAME_WIDTH * frameScale);
+        const portalBounds = viewportBoundsToPortal(
+          viewportBounds,
+          getFramePortalOverlayTransform(
+            frameViewport.getBoundingClientRect(),
+            host.getBoundingClientRect(),
+            frameScale,
+          ),
+        );
         element.style.setProperty(
           "--clipper-selection-base-left",
-          `${frameRect.left - hostRect.left + viewportBounds.x * scale}px`,
+          `${portalBounds.x}px`,
         );
         element.style.setProperty(
           "--clipper-selection-base-top",
-          `${frameRect.top - hostRect.top + viewportBounds.y * scale}px`,
+          `${portalBounds.y}px`,
         );
         element.style.setProperty(
           "--clipper-selection-base-width",
-          `${viewportBounds.width * scale}px`,
+          `${portalBounds.width}px`,
         );
         element.style.setProperty(
           "--clipper-selection-base-height",
-          `${viewportBounds.height * scale}px`,
+          `${portalBounds.height}px`,
         );
       }
       frameId = requestAnimationFrame(syncPortalBox);
@@ -3098,26 +4082,32 @@ export function SelectionOverlayBox({
       >
         <span className={verticalEdgeLineClass} style={verticalEdgeLineStyle} />
       </div>
-      <div
-        className={topLeftHandleClass}
-        style={handleStyleWithColor}
-        onPointerDown={(event) => onResizePointerDown(event, "top-left")}
-      />
-      <div
-        className={topRightHandleClass}
-        style={handleStyleWithColor}
-        onPointerDown={(event) => onResizePointerDown(event, "top-right")}
-      />
-      <div
-        className={bottomRightHandleClass}
-        style={handleStyleWithColor}
-        onPointerDown={(event) => onResizePointerDown(event, "bottom-right")}
-      />
-      <div
-        className={bottomLeftHandleClass}
-        style={handleStyleWithColor}
-        onPointerDown={(event) => onResizePointerDown(event, "bottom-left")}
-      />
+      {resizable ? (
+        <>
+          <div
+            className={topLeftHandleClass}
+            style={handleStyleWithColor}
+            onPointerDown={(event) => onResizePointerDown(event, "top-left")}
+          />
+          <div
+            className={topRightHandleClass}
+            style={handleStyleWithColor}
+            onPointerDown={(event) => onResizePointerDown(event, "top-right")}
+          />
+          <div
+            className={bottomRightHandleClass}
+            style={handleStyleWithColor}
+            onPointerDown={(event) =>
+              onResizePointerDown(event, "bottom-right")
+            }
+          />
+          <div
+            className={bottomLeftHandleClass}
+            style={handleStyleWithColor}
+            onPointerDown={(event) => onResizePointerDown(event, "bottom-left")}
+          />
+        </>
+      ) : null}
       {showRadiusHandles ? (
         <>
           {dragRadius !== null ? (
@@ -3224,6 +4214,7 @@ function setObjectRadiusPreview(objectId: string, radius: number | null) {
 export function DragSelectionBox({
   dragSelectionBoxRef,
   bounds,
+  cameraTransform,
   frameScale,
   frameViewportRef,
   portalHost,
@@ -3232,6 +4223,7 @@ export function DragSelectionBox({
 }: {
   dragSelectionBoxRef: RefObject<HTMLDivElement | null>;
   bounds: Bounds;
+  cameraTransform: CameraPreviewTransform;
   frameScale: number;
   frameViewportRef: RefObject<HTMLDivElement | null>;
   portalHost?: HTMLElement | null;
@@ -3239,24 +4231,40 @@ export function DragSelectionBox({
   visible: boolean;
 }) {
   useLayoutEffect(() => {
-    const element = dragSelectionBoxRef.current;
-    if (!element) return;
-    const frameRect = frameViewportRef.current?.getBoundingClientRect();
-    const hostRect = portalHost?.getBoundingClientRect();
-    const offset =
-      frameRect && hostRect
-        ? { x: frameRect.left - hostRect.left, y: frameRect.top - hostRect.top }
-        : { x: 0, y: 0 };
-    updateDragSelectionBoxElement(
-      element,
-      bounds,
-      frameScale,
-      visible,
-      uiScale,
-      offset,
-    );
+    let frameId = 0;
+    function syncDragSelectionBox() {
+      const element = dragSelectionBoxRef.current;
+      if (!element) return;
+      const frameRect = frameViewportRef.current?.getBoundingClientRect();
+      const hostRect = portalHost?.getBoundingClientRect();
+      const viewportBounds = boundsToViewport(
+        bounds,
+        cameraTransform,
+        frameScale,
+      );
+      const portalBounds =
+        frameRect && hostRect
+          ? viewportBoundsToPortal(
+              viewportBounds,
+              getFramePortalOverlayTransform(frameRect, hostRect, frameScale),
+            )
+          : viewportBounds;
+      updateDragSelectionBoxElement(
+        element,
+        bounds,
+        frameScale,
+        visible,
+        1,
+        { x: 0, y: 0 },
+        portalBounds,
+      );
+      frameId = requestAnimationFrame(syncDragSelectionBox);
+    }
+    syncDragSelectionBox();
+    return () => cancelAnimationFrame(frameId);
   }, [
     bounds,
+    cameraTransform,
     dragSelectionBoxRef,
     frameScale,
     frameViewportRef,

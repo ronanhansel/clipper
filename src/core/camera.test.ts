@@ -7,6 +7,7 @@ import {
   getActivePerspectiveMarkers,
   getLayeredCameraPreviewTransform,
   getMotionBlurConfig,
+  viewportPointToFrame,
 } from "./camera";
 import { motionBlocksToMotionMarkers } from "./motionEffects";
 import type { MotionMarker, Part, TimelineMotionLayerState } from "./types";
@@ -225,6 +226,29 @@ describe("camera", () => {
 
     expect(transform).not.toContain("perspective(");
     expect(transform).toContain("rotateX(8deg)");
+  });
+
+  it("maps viewport points back through zoom camera translation", () => {
+    const transform = {
+      x: -120,
+      y: 60,
+      z: 0,
+      scale: 2,
+      rotation: 0,
+      rotateX: 0,
+      rotateY: 0,
+      perspective: CAMERA_PERSPECTIVE,
+      motionBlur: 0,
+    };
+
+    expect(viewportPointToFrame({ x: 960, y: 540 }, transform, 1)).toEqual({
+      x: 1020,
+      y: 510,
+    });
+    expect(viewportPointToFrame({ x: 1920, y: 1080 }, transform, 1)).toEqual({
+      x: 1500,
+      y: 780,
+    });
   });
 
   it("preserves perspective tilt values when converting motion blocks to markers", () => {

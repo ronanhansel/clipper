@@ -312,7 +312,7 @@ export function ConnectedInspectorContent({
       <ObjectInspector
         object={composeInspectorObject}
         currentTime={currentSceneTime}
-        disableNumberScrub={composeMode}
+        liveScrubClock={composeMode}
         lockBounds={composeInspectorObject.id === part.background.id}
         onChange={stableUpdateSelectedObject}
         onPreview={stablePreviewSelectedObject}

@@ -507,6 +507,7 @@ function ExportFramePreview({
       onFramePointerDown: noopPointerHandler,
       onFramePointerDownCapture: noopPointerHandler,
       onFramePointerMove: noopPointerHandler,
+      onFramePointerLeave: noopPointerHandler,
       onFramePointerUp: noopPointerHandler,
       onObjectPointerDown: noopObjectPointerHandler,
       onObjectResizePointerDown: noopObjectResizeHandler,

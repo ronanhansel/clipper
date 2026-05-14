@@ -91,6 +91,49 @@ export function evaluateFrameObject(
   };
 }
 
+export function buildFrameObjectParentTransformLookup(
+  objects: FrameObject[],
+  time: number,
+  duration: number,
+  animationsEnabled = true,
+) {
+  const byId = new Map(objects.map((object) => [object.id, object]));
+  const transforms = new Map<string, string>();
+  const visiting = new Set<string>();
+
+  function objectTransform(object: FrameObject): string {
+    if (transforms.has(object.id)) return transforms.get(object.id) ?? "";
+    if (visiting.has(object.id)) return "";
+    visiting.add(object.id);
+
+    const evaluated = evaluateFrameObject(object, time, duration, {
+      animations: animationsEnabled,
+    });
+    const animationTransform =
+      typeof evaluated.renderStyle.transform === "string"
+        ? evaluated.renderStyle.transform
+        : "";
+    const staticTransform =
+      typeof object.style.transform === "string" ? object.style.transform : "";
+    const ownTransform = `${animationTransform} ${staticTransform}`.trim();
+    const parent = object.parentId ? byId.get(object.parentId) : null;
+    const parentTransform = parent ? objectTransform(parent) : "";
+    const value = `${parentTransform} ${ownTransform}`.trim();
+    visiting.delete(object.id);
+    transforms.set(object.id, value);
+    return value;
+  }
+
+  for (const object of objects) {
+    if (!object.parentId) continue;
+    const parent = byId.get(object.parentId);
+    if (!parent) continue;
+    transforms.set(object.id, objectTransform(parent));
+  }
+
+  return transforms;
+}
+
 export function evaluateBackgroundLayer(
   background: BackgroundLayer,
   time: number,

@@ -98,7 +98,8 @@ export function deriveFramePreviewSceneContext({
   );
   const timeline = buildLinearTimeline(renderableScene);
   const sceneDurationSeconds = getSceneDuration(renderableScene);
-  const sceneMotionMarkers = getMotionMarkerViews(renderableScene).motionMarkers;
+  const sceneMotionMarkers =
+    getMotionMarkerViews(renderableScene).motionMarkers;
   const motionLayers = timelineLayerState.motionLayers?.length
     ? timelineLayerState.motionLayers
     : defaultTimelineLayerState.motionLayers!;

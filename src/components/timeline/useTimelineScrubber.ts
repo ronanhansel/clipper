@@ -5,6 +5,16 @@ import {
   type PointerEvent,
   type RefObject,
 } from "react";
+import {
+  cancelLatestRaf,
+  cancelThrottledCommit,
+  createLatestRafState,
+  createThrottledCommitState,
+  flushLatestRaf,
+  flushThrottledCommit,
+  scheduleLatestRaf,
+  scheduleThrottledCommit,
+} from "../../app/services/scrubInteractionService";
 import { clamp } from "../../core/math";
 import { snapScrubTimeToBoundary } from "../../core/timeline";
 
@@ -63,34 +73,43 @@ export function useTimelineScrubber({
   const scrubClientXRef = useRef<number | null>(null);
   const scrubSnapRef = useRef(false);
   const scrubAutoScrollFrameRef = useRef(0);
-  const scrubEffectFrameRef = useRef(0);
-  const scrubPreviewFrameRef = useRef(0);
-  const pendingScrubPreviewRef = useRef<{
+  const scrubPreviewQueueRef = useRef(
+    createLatestRafState<{
+      clientX: number;
+      snap: boolean;
+      commit: "throttled" | "immediate";
+    }>(),
+  );
+  const scrubEffectQueueRef = useRef(
+    createLatestRafState<{
+      time: number;
+      commit: "throttled" | "immediate";
+    }>(),
+  );
+  const scrubCommitQueueRef = useRef(createThrottledCommitState<number>());
+  const pendingScrubPreviewRef = scrubPreviewQueueRef.current;
+  const pendingScrubEffectRef = scrubEffectQueueRef.current;
+  const pendingScrubCommitRef = scrubCommitQueueRef.current;
+  type ScrubPreviewValue = {
     clientX: number;
     snap: boolean;
     commit: "throttled" | "immediate";
-  } | null>(null);
-  const pendingScrubEffectRef = useRef<{
+  };
+  type ScrubEffectValue = {
     time: number;
     commit: "throttled" | "immediate";
-  } | null>(null);
-  const pendingScrubCommitRef = useRef<number | null>(null);
+  };
   const latestScrubPreviewTimeRef = useRef<number | null>(null);
-  const scrubCommitTimeoutRef = useRef(0);
-  const lastScrubCommitAtRef = useRef(0);
   const activeScrubRef = useRef<ActiveScrub | null>(null);
   const scrubStartedRef = useRef(false);
 
   useEffect(
     () => () => {
-      if (scrubPreviewFrameRef.current)
-        window.cancelAnimationFrame(scrubPreviewFrameRef.current);
+      cancelLatestRaf(pendingScrubPreviewRef);
       if (scrubAutoScrollFrameRef.current)
         window.cancelAnimationFrame(scrubAutoScrollFrameRef.current);
-      if (scrubEffectFrameRef.current)
-        window.cancelAnimationFrame(scrubEffectFrameRef.current);
-      if (scrubCommitTimeoutRef.current)
-        window.clearTimeout(scrubCommitTimeoutRef.current);
+      cancelLatestRaf(pendingScrubEffectRef);
+      cancelThrottledCommit(pendingScrubCommitRef);
 
       const activeScrub = activeScrubRef.current;
       if (activeScrub?.target.hasPointerCapture(activeScrub.pointerId))
@@ -99,13 +118,7 @@ export function useTimelineScrubber({
       scrubClientXRef.current = null;
       scrubSnapRef.current = false;
       scrubAutoScrollFrameRef.current = 0;
-      scrubEffectFrameRef.current = 0;
-      scrubPreviewFrameRef.current = 0;
-      pendingScrubPreviewRef.current = null;
-      pendingScrubEffectRef.current = null;
-      pendingScrubCommitRef.current = null;
       latestScrubPreviewTimeRef.current = null;
-      scrubCommitTimeoutRef.current = 0;
       activeScrubRef.current = null;
       scrubStartedRef.current = false;
       scrubbingRef.current = false;
@@ -161,37 +174,26 @@ export function useTimelineScrubber({
   });
 
   function commitPendingScrub() {
-    if (scrubCommitTimeoutRef.current) {
-      window.clearTimeout(scrubCommitTimeoutRef.current);
-      scrubCommitTimeoutRef.current = 0;
-    }
-
-    const nextTime = pendingScrubCommitRef.current;
-    pendingScrubCommitRef.current = null;
-    if (nextTime === null) return;
-    lastScrubCommitAtRef.current = performance.now();
-    if (fastSelectEnabled) onSelectTime?.(nextTime);
+    flushThrottledCommit(pendingScrubCommitRef, (time) => {
+      if (fastSelectEnabled) onSelectTime?.(time);
+    });
   }
 
   function scheduleScrubCommit(time: number) {
-    pendingScrubCommitRef.current = time;
-    const elapsed = performance.now() - lastScrubCommitAtRef.current;
-    if (elapsed >= scrubCommitThrottleMs) {
-      commitPendingScrub();
-      return;
-    }
-
-    if (scrubCommitTimeoutRef.current) return;
-    scrubCommitTimeoutRef.current = window.setTimeout(
-      commitPendingScrub,
-      scrubCommitThrottleMs - elapsed,
+    scheduleThrottledCommit(
+      pendingScrubCommitRef,
+      time,
+      scrubCommitThrottleMs,
+      (nextTime) => {
+        if (fastSelectEnabled) onSelectTime?.(nextTime);
+      },
     );
   }
 
   function applyScrubEffect(time: number, commit: "throttled" | "immediate") {
     onScrub(time);
     if (commit === "immediate") {
-      pendingScrubCommitRef.current = time;
+      pendingScrubCommitRef.value = time;
       commitPendingScrub();
       return;
     }
@@ -200,28 +202,20 @@ export function useTimelineScrubber({
   }
 
   function flushPendingScrubEffect() {
-    if (scrubEffectFrameRef.current) {
-      window.cancelAnimationFrame(scrubEffectFrameRef.current);
-      scrubEffectFrameRef.current = 0;
-    }
-
-    const next = pendingScrubEffectRef.current;
-    pendingScrubEffectRef.current = null;
-    if (!next) return;
-    applyScrubEffect(next.time, next.commit);
+    flushLatestRaf(pendingScrubEffectRef, (next) =>
+      applyScrubEffect(next.time, next.commit),
+    );
   }
 
   function scheduleScrubEffect(
     time: number,
     commit: "throttled" | "immediate",
   ) {
-    pendingScrubEffectRef.current = { time, commit };
-    if (scrubEffectFrameRef.current) return;
-
-    scrubEffectFrameRef.current = window.requestAnimationFrame(() => {
-      scrubEffectFrameRef.current = 0;
-      flushPendingScrubEffect();
-    });
+    scheduleLatestRaf(
+      pendingScrubEffectRef,
+      { time, commit },
+      (next: ScrubEffectValue) => applyScrubEffect(next.time, next.commit),
+    );
   }
 
   function updateScrubFromClientX(
@@ -233,10 +227,7 @@ export function useTimelineScrubber({
     const time = timeFromClientX(visibleScrubClientX(clientX), snap);
     previewScrubTime(time);
     if (effect === "sync") {
-      if (scrubEffectFrameRef.current)
-        window.cancelAnimationFrame(scrubEffectFrameRef.current);
-      scrubEffectFrameRef.current = 0;
-      pendingScrubEffectRef.current = null;
+      cancelLatestRaf(pendingScrubEffectRef);
       applyScrubEffect(time, commit);
       return;
     }
@@ -249,16 +240,12 @@ export function useTimelineScrubber({
     snap: boolean,
     commit: "throttled" | "immediate" = "throttled",
   ) {
-    pendingScrubPreviewRef.current = { clientX, snap, commit };
-    if (scrubPreviewFrameRef.current) return;
-
-    scrubPreviewFrameRef.current = window.requestAnimationFrame(() => {
-      scrubPreviewFrameRef.current = 0;
-      const next = pendingScrubPreviewRef.current;
-      pendingScrubPreviewRef.current = null;
-      if (!next) return;
-      updateScrubFromClientX(next.clientX, next.snap, next.commit);
-    });
+    scheduleLatestRaf(
+      pendingScrubPreviewRef,
+      { clientX, snap, commit },
+      (next: ScrubPreviewValue) =>
+        updateScrubFromClientX(next.clientX, next.snap, next.commit),
+    );
   }
 
   function stopScrubAutoScroll() {
@@ -351,11 +338,7 @@ export function useTimelineScrubber({
   }
 
   function endScrub(event: PointerEvent<HTMLDivElement>) {
-    if (scrubPreviewFrameRef.current) {
-      window.cancelAnimationFrame(scrubPreviewFrameRef.current);
-      scrubPreviewFrameRef.current = 0;
-      pendingScrubPreviewRef.current = null;
-    }
+    cancelLatestRaf(pendingScrubPreviewRef);
     if (event.currentTarget.hasPointerCapture(event.pointerId))
       event.currentTarget.releasePointerCapture(event.pointerId);
     const wasDragging = activeScrubRef.current?.dragging === true;

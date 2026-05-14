@@ -199,6 +199,22 @@ export function boundsToViewport(
   };
 }
 
+export function viewportPointToFrame(
+  point: Point,
+  cameraTransform: CameraPreviewTransform,
+  frameScale: number,
+): Point {
+  const scale = Math.max(cameraTransform.scale, 0.0001);
+  return {
+    x:
+      FRAME_WIDTH / 2 +
+      (point.x / frameScale - FRAME_WIDTH / 2 - cameraTransform.x) / scale,
+    y:
+      FRAME_HEIGHT / 2 +
+      (point.y / frameScale - FRAME_HEIGHT / 2 - cameraTransform.y) / scale,
+  };
+}
+
 export function framePointToCameraTranslation(point: Point): Point {
   return {
     x: Math.round(FRAME_WIDTH / 2 - clampFrameX(point.x)),

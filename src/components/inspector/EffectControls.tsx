@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { livePreviewScrubCommitThrottleMs } from "../../app/services/scrubInteractionService";
 import {
   FRAME_HEIGHT,
   FRAME_WIDTH,
@@ -225,7 +226,7 @@ export function EffectControls({
             (control as AdjustmentEffectNumberParamControl).defaultValue
           }
           numberScrubMode="preview"
-          numberScrubCommitThrottleMs={16}
+          numberScrubCommitThrottleMs={livePreviewScrubCommitThrottleMs}
           disabled={Boolean(disabledReason)}
           onChange={(event) => updateParam(control, event.target.value)}
           onNumberScrubEnd={onClearPreview}

@@ -35,6 +35,11 @@ type FrameObjectCommandsParams = {
   updateCompositionForTimelinePart: (
     partId: string,
     updater: (composition: CompositionClip) => CompositionClip,
+    options?: {
+      history?: boolean;
+      syncSources?: boolean;
+      coalesceHistory?: boolean;
+    },
   ) => void;
   updateSceneParts: (updater: (parts: Part[]) => Part[]) => void;
 };
@@ -68,7 +73,7 @@ export function useFrameObjectCommands({
         : { x: 220, y: 140, width: 220, height: 140 },
       content: isText ? "Text" : undefined,
       style: isText
-        ? { color: "#ffffff", fontSize: 56, fontWeight: 400, lineHeight: 1.1 }
+        ? { color: "#ffffff", fontSize: 72, fontWeight: 400, lineHeight: 1.1 }
         : {
             background: "#D5D5D5",
             ...(isEllipse ? { borderRadius: 9999 } : {}),
@@ -83,26 +88,35 @@ export function useFrameObjectCommands({
   function updateObjectById(
     objectId: string,
     updater: (object: FrameObject) => FrameObject,
+    options?: {
+      history?: boolean;
+      syncSources?: boolean;
+      coalesceHistory?: boolean;
+    },
   ) {
-    updateCompositionForTimelinePart(part.id, (composition) => ({
-      ...composition,
-      background:
-        objectId === composition.background.id
-          ? updateBackgroundFromFrameObject(composition.background, updater)
-          : {
-              ...composition.background,
-              elements: composition.background.elements.map((object) =>
-                object.id === objectId
-                  ? syncChartObjectBounds(updater(object))
-                  : object,
-              ),
-            },
-      objects: composition.objects.map((object) =>
-        object.id === objectId
-          ? syncChartObjectBounds(updater(object))
-          : object,
-      ),
-    }));
+    updateCompositionForTimelinePart(
+      part.id,
+      (composition) => ({
+        ...composition,
+        background:
+          objectId === composition.background.id
+            ? updateBackgroundFromFrameObject(composition.background, updater)
+            : {
+                ...composition.background,
+                elements: composition.background.elements.map((object) =>
+                  object.id === objectId
+                    ? syncChartObjectBounds(updater(object))
+                    : object,
+                ),
+              },
+        objects: composition.objects.map((object) =>
+          object.id === objectId
+            ? syncChartObjectBounds(updater(object))
+            : object,
+        ),
+      }),
+      options,
+    );
   }
 
   function updateBackgroundFromFrameObject(
@@ -133,7 +147,12 @@ export function useFrameObjectCommands({
     updateObjectById(objectId, (object) =>
       object.type === "text"
         ? { ...object, content, richText, bounds: bounds ?? object.bounds }
-        : object,
+        : isTextPathObject(object)
+          ? {
+              ...object,
+              content: replaceTextPathContent(object.content ?? "", content),
+            }
+          : object,
     );
   }
 
@@ -246,4 +265,29 @@ export function useFrameObjectCommands({
     updateSelectedPartDuration,
     updateTextObjectContent,
   };
+}
+
+function isTextPathObject(object: FrameObject) {
+  const raw = object.style.clipperPath;
+  if (typeof raw !== "string") return false;
+  try {
+    return (JSON.parse(raw) as { tool?: string }).tool === "textPath";
+  } catch {
+    return false;
+  }
+}
+
+function replaceTextPathContent(svg: string, content: string) {
+  const escaped = escapeXmlText(content || "Text on path");
+  return svg.replace(
+    /(<textPath\b[^>]*>)([\s\S]*?)(<\/textPath>)/,
+    `$1${escaped}$3`,
+  );
+}
+
+function escapeXmlText(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
 }

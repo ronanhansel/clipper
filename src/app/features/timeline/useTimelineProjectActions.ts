@@ -30,6 +30,11 @@ type UpdateEditorState = (
   updater: (state: EditorState) => EditorState,
   options?: { history?: boolean; coalesceHistory?: boolean },
 ) => void;
+type UpdateCompositionOptions = {
+  history?: boolean;
+  syncSources?: boolean;
+  coalesceHistory?: boolean;
+};
 export type SceneMotionMarkerUpdate = { motionMarkers: MotionMarker[] };
 
 type UseTimelineProjectActionsInput = {
@@ -152,18 +157,16 @@ export function useTimelineProjectActions({
   function updateCompositionForTimelinePart(
     partId: string,
     updater: (composition: Part) => Part,
+    options: UpdateCompositionOptions = { history: true },
   ) {
-    updateProject(
-      (current) => {
-        const currentScene = getSceneFromProject(current, scene.id);
-        const timelinePart = currentScene?.compositions.find(
-          (item) => item.id === partId,
-        );
-        const compositionId = timelinePart?.compositionId ?? partId;
-        return replacePartInProject(current, compositionId, updater);
-      },
-      { history: true },
-    );
+    updateProject((current) => {
+      const currentScene = getSceneFromProject(current, scene.id);
+      const timelinePart = currentScene?.compositions.find(
+        (item) => item.id === partId,
+      );
+      const compositionId = timelinePart?.compositionId ?? partId;
+      return replacePartInProject(current, compositionId, updater);
+    }, options);
   }
 
   function updateTimelineViewportState(

@@ -65,6 +65,7 @@ export type ComposeAnimationPreset = {
 export type ComposeAnimationTimelineLayer = {
   id: string;
   name: string;
+  number: number;
   kind: "object" | "background-object" | "background";
   object?: FrameObject;
   animations?: LayerAnimation[];
@@ -121,7 +122,7 @@ export type ComposeAnimationTimingDrag = {
 export function buildComposeAnimationTimelineLayers(
   part: Part,
 ): ComposeAnimationTimelineLayer[] {
-  return [
+  const objects = [
     ...[...part.objects].reverse().map((object) => ({
       id: object.id,
       name: object.name || object.id,
@@ -136,13 +137,34 @@ export function buildComposeAnimationTimelineLayers(
       animations: object.animations,
       object,
     })),
+  ].map((layer, index) => ({ ...layer, number: index + 1 }));
+
+  return [
+    ...objects,
     {
       id: part.background.id,
       name: part.background.name || "Background",
+      number: objects.length + 1,
       kind: "background" as const,
       animations: part.background.animations,
     },
   ];
+}
+
+export function getComposeParentOptions(
+  layers: ComposeAnimationTimelineLayer[],
+  childLayerId: string,
+) {
+  const byId = new Map(layers.map((layer) => [layer.id, layer]));
+  return layers.filter((layer) => {
+    if (!layer.object || layer.id === childLayerId) return false;
+    let parentId = layer.object.parentId;
+    while (parentId) {
+      if (parentId === childLayerId) return false;
+      parentId = byId.get(parentId)?.object?.parentId;
+    }
+    return true;
+  });
 }
 
 const composeAnimationAttributeLabels: Record<
@@ -761,14 +783,15 @@ export function getNearestComposeAnimationKeyframeValue(
   track: ComposeAnimationAttributeTrack,
   currentTime: number,
 ) {
-  return track.keyframes.reduce<number | string | null>((nearest, keyframe) => {
-    if (nearest === null) return keyframe.value;
-    const nearestDistance = Math.abs(
-      currentTime -
-        (track.keyframes.find((item) => item.value === nearest)?.time ??
-          currentTime),
-    );
+  if (!track.keyframes.length) return null;
+  let nearest = track.keyframes[0];
+  let nearestDistance = Math.abs(currentTime - nearest.time);
+  for (const keyframe of track.keyframes) {
     const keyframeDistance = Math.abs(currentTime - keyframe.time);
-    return keyframeDistance < nearestDistance ? keyframe.value : nearest;
-  }, null);
+    if (keyframeDistance < nearestDistance) {
+      nearest = keyframe;
+      nearestDistance = keyframeDistance;
+    }
+  }
+  return nearest.value;
 }

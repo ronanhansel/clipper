@@ -202,6 +202,7 @@ export type TimelinePanelProps = {
   composeAnimationPart?: Part | null;
   selectedObjectIds?: string[];
   onExitCompose?: () => void;
+  onInspectComposeObject?: (object: FrameObject | null) => void;
   onSelectComposeObjects?: (objects: FrameObject[]) => void;
   onPersistComposeSelection?: (objectIds: string[]) => void;
   onRenameComposeAnimationLayer?: (layerId: string, name: string) => void;
@@ -215,6 +216,12 @@ export type TimelinePanelProps = {
     updater: (
       animations: import("../../core/types").LayerAnimation[],
     ) => import("../../core/types").LayerAnimation[],
+  ) => void;
+  onUpdateComposeObject?: (
+    objectId: string,
+    updater: (
+      object: import("../../core/types").FrameObject,
+    ) => import("../../core/types").FrameObject,
   ) => void;
   setAppContextMenu?: (menu: ContextMenuState) => void;
 };

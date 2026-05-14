@@ -1,6 +1,7 @@
 import { Crosshair } from "lucide-react";
 import type { ComponentProps } from "react";
 import { mutedCaps } from "../../app/config";
+import { livePreviewScrubCommitThrottleMs } from "../../app/services/scrubInteractionService";
 import { cn } from "../../lib/utils";
 import { Input } from "../ui/input";
 
@@ -93,7 +94,7 @@ function CoordinateAxisInput({
         disabled={axis.disabled}
         max={axis.max}
         min={axis.min}
-        numberScrubCommitThrottleMs={16}
+        numberScrubCommitThrottleMs={livePreviewScrubCommitThrottleMs}
         numberScrubMode={axis.numberScrubMode}
         resetValue={axis.resetValue}
         step={axis.step}

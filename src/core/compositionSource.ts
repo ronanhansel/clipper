@@ -22,6 +22,7 @@ type SourceObject = {
   style: FrameObject["style"];
   transform?: compositionApi.Transform | string;
   layoutId?: string;
+  parentId?: string;
   hidden?: boolean;
   locked?: boolean;
   animations?: FrameObject["animations"];
@@ -145,6 +146,7 @@ function sourceObjectToFrameObject(object: SourceObject): FrameObject {
     richText: object.richText,
     style: object.style,
     layoutId: object.layoutId,
+    parentId: object.parentId,
     hidden: object.hidden,
     locked: object.locked,
     animations: object.animations,
@@ -200,6 +202,7 @@ function frameObjectToSourceObject(object: FrameObject): SourceObject {
     richText: object.richText,
     style: object.style,
     layoutId: object.layoutId,
+    parentId: object.parentId,
     hidden: object.hidden,
     locked: object.locked,
     animations: object.animations,
@@ -218,6 +221,7 @@ function frameObjectToConstructorSource(object: FrameObject) {
     richText: object.richText,
     style: object.style,
     layoutId: object.layoutId,
+    parentId: object.parentId,
     hidden: object.hidden || undefined,
     locked: object.locked || undefined,
     animations: object.animations,
@@ -231,6 +235,7 @@ function frameObjectConstructorName(object: FrameObject) {
   if (object.type === "svg") return "Svg";
   if (object.type === "html") return "Html";
   if (object.type === "template") return "Template";
+  if (object.type === "null") return "NullObject";
   return "Rect";
 }
 

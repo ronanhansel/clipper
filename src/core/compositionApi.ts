@@ -4,7 +4,8 @@ export type FrameObjectType =
   | "image"
   | "svg"
   | "html"
-  | "template";
+  | "template"
+  | "null";
 
 export type RenderContext = {
   time: number;
@@ -100,6 +101,7 @@ export type RenderableProps = {
   style?: LayerStyle;
   transform?: Transform | string;
   layoutId?: string;
+  parentId?: string;
   hidden?: boolean;
   locked?: boolean;
   animations?: LayerAnimation[];
@@ -188,6 +190,7 @@ export class RenderableObject {
   style: LayerStyle;
   transform?: Transform | string;
   layoutId?: string;
+  parentId?: string;
   hidden?: boolean;
   locked?: boolean;
   animations?: LayerAnimation[];
@@ -203,6 +206,7 @@ export class RenderableObject {
     this.style = props.style ?? {};
     this.transform = props.transform;
     this.layoutId = props.layoutId;
+    this.parentId = props.parentId;
     this.hidden = props.hidden;
     this.locked = props.locked;
     this.animations = props.animations;
@@ -241,6 +245,13 @@ export class Html extends RenderableObject {
   constructor(props: RenderableProps) {
     super(props);
     this.kind = "html";
+  }
+}
+
+export class NullObject extends RenderableObject {
+  constructor(props: RenderableProps) {
+    super(props);
+    this.kind = "null";
   }
 }
 
