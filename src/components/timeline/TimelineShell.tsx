@@ -14,8 +14,6 @@ import { formatTime } from "../../core/timeline";
 import type { PrerenderCacheCoverage } from "../../app/features/preview/usePrerenderCache";
 import { TimelineSlider } from "./TimelineSlider";
 
-const PLAYHEAD_HEAD_HALF_WIDTH_PX = 5; // w-2.5 = 10px wide, half = 5px
-
 export type TimelineShellRefs = {
   playbackPlayheadRef: RefObject<HTMLDivElement | null>;
   timelineRef: RefObject<HTMLDivElement | null>;
@@ -211,13 +209,12 @@ export function TimelineShell({
               className="relative grid"
               style={{
                 gridTemplateColumns: `${contentWidth}px`,
-                width: contentWidth + PLAYHEAD_HEAD_HALF_WIDTH_PX * 2,
-                paddingInline: PLAYHEAD_HEAD_HALF_WIDTH_PX,
+                width: contentWidth,
                 minHeight: 38 + laneContentHeight,
               }}
             >
               <div
-                className="pointer-events-none sticky top-0 z-50 h-0"
+                className="pointer-events-none sticky top-0 z-[70] h-0"
                 style={{ width: contentWidth }}
               >
                 <div
@@ -247,8 +244,8 @@ export function TimelineShell({
                 />
               </div>
               <div
-                className="sticky top-0 z-30 bg-[#141821]"
-                style={{ gridColumn: 1 }}
+                className="sticky top-0 z-[60] bg-[#141821]"
+                style={{ gridColumn: 1, width: contentWidth }}
               >
                 {prerenderCacheCoverage ? (
                   <PrerenderCoverageStrip

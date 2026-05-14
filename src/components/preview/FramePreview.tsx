@@ -350,6 +350,7 @@ export const FramePreview = memo(function FramePreview({
     : editingTextObjectId;
   const liveClockSnapshot = getMasterTimelineClockSnapshot();
   const useLiveClockRenderTime =
+    timelineMode !== "compose" &&
     (liveClockSnapshot.playing || liveClockSnapshot.source === "scrub") &&
     Math.abs(liveClockSnapshot.sceneTime - sceneTime) >= 0.001;
   const displaySceneTime = useLiveClockRenderTime
@@ -524,43 +525,6 @@ export const FramePreview = memo(function FramePreview({
   const stackPreviewParts = previewParts?.length
     ? previewParts
     : [{ part, start: partStart, previewTime }];
-
-  useEffect(() => {
-    if (!cameraRef.current) return;
-    const transitionTransform =
-      typeof transitionCameraStyle?.transform === "string"
-        ? transitionCameraStyle.transform
-        : "";
-    cameraRef.current.style.transform =
-      `${transitionTransform} ${formatCameraPreviewTransform(liveCameraTransform)}`.trim();
-    const transitionFilter =
-      typeof transitionCameraStyle?.filter === "string"
-        ? transitionCameraStyle.filter
-        : "";
-    const cameraFilter = formatCameraPreviewFilter(liveCameraTransform) ?? "";
-    const combinedFilter = [transitionFilter, cameraFilter]
-      .filter(Boolean)
-      .join(" ");
-    cameraRef.current.style.filter = combinedFilter;
-  }, [cameraRef, liveCameraTransform, transitionCameraStyle]);
-
-  useEffect(() => {
-    if (renderMode === "export") return;
-
-    function syncFromPlaybackTime() {
-      const snapshot = getMasterTimelineClockSnapshot();
-      if (!snapshot.playing && snapshot.source !== "scrub") return;
-      const currentPart = livePlaybackPartRef.current;
-      applyLivePartPreviewTime(
-        frameViewportRef.current,
-        currentPart,
-        snapshot.sceneTime - partStart + (currentPart.trimStart ?? 0),
-      );
-    }
-
-    syncFromPlaybackTime();
-    return subscribeMasterTimelineClock(syncFromPlaybackTime);
-  }, [frameViewportRef, partStart, renderMode]);
 
   useLayoutEffect(() => {
     const adjustmentOverlays = useTransitionComposite
@@ -946,29 +910,9 @@ export const FramePreview = memo(function FramePreview({
         : null}
     </div>
   );
-}, areFramePreviewPropsEqual);
+});
 
-function areFramePreviewPropsEqual(
-  prev: FramePreviewProps,
-  next: FramePreviewProps,
-): boolean {
-  // During scrubbing the render clock drives visual updates imperatively.
-  // Skip React re-renders when only time-derived props changed.
-  if (getMasterTimelineClockSnapshot().source === "scrub") {
-    const timeOnlyChange =
-      prev.sceneTime !== next.sceneTime ||
-      prev.previewTime !== next.previewTime;
-    if (timeOnlyChange) {
-      // Check every other prop is unchanged
-      const keys = Object.keys(next) as (keyof typeof next)[];
-      const nonTimeChanged = keys.some(
-        (k) => k !== "sceneTime" && k !== "previewTime" && prev[k] !== next[k],
-      );
-      if (!nonTimeChanged) return true;
-    }
-  }
-  return false;
-}
+const areFramePreviewPropsEqual = () => false;
 
 class FramePreviewRenderBoundary extends ReactComponent<
   { children: ReactNode; filePath: string; resetKey: string },
@@ -1151,7 +1095,7 @@ function applyLivePreviewObjectStyle(
       : undefined;
   applyLivePreviewStyle(target, object.renderStyle);
   target.style.transform =
-    `${parentTransform ?? ""} translate(var(--clipper-drag-x, 0px), var(--clipper-drag-y, 0px)) ${animationTransform ?? objectTransform ?? ""}`.trim();
+    `${parentTransform ?? ""} translate(var(--clipper-drag-x, 0px), var(--clipper-drag-y, 0px)) ${animationTransform ?? ""} ${objectTransform ?? ""}`.trim();
   setLiveStyleValue(
     target,
     "opacity",
@@ -2320,10 +2264,10 @@ function PathEditOverlay({
             data-frame-path-point
             data-frame-x={point.x}
             data-frame-y={point.y}
-            className="pointer-events-auto absolute grid -translate-x-1/2 -translate-y-1/2 cursor-pointer rounded-full border-2 border-[#8fbff7] bg-[#159dff] outline-none transition"
+            className={`pointer-events-auto absolute grid -translate-x-1/2 -translate-y-1/2 cursor-pointer border-2 border-[#8fbff7] bg-[#159dff] outline-none transition ${isHandle ? "rounded-none" : "rounded-full"}`}
             style={{
-              width: isHandle ? 10 : 12,
-              height: isHandle ? 10 : 12,
+              width: isHandle ? 7 : 9,
+              height: isHandle ? 7 : 9,
               boxShadow: "inset 0 0 0 2px white",
               left: "var(--clipper-path-left, 0px)",
               top: "var(--clipper-path-top, 0px)",
@@ -2395,7 +2339,7 @@ function ShapeDrawPreviewControlsOverlay({
               data-frame-path-point
               data-frame-x={item.handle.x}
               data-frame-y={item.handle.y}
-              className="pointer-events-none absolute h-[7px] w-[7px] -translate-x-1/2 -translate-y-1/2 rotate-45 border border-[#8fbff7] bg-[#11141a]"
+              className="pointer-events-none absolute h-[6px] w-[6px] -translate-x-1/2 -translate-y-1/2 border border-[#8fbff7] bg-[#11141a]"
               style={{
                 left: "var(--clipper-path-left, 0px)",
                 top: "var(--clipper-path-top, 0px)",
@@ -2413,7 +2357,7 @@ function ShapeDrawPreviewControlsOverlay({
               data-frame-path-point
               data-frame-x={point.x}
               data-frame-y={point.y}
-              className="pointer-events-none absolute h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full border-[1.5px] border-white bg-[#159dff]"
+              className="pointer-events-none absolute h-[6px] w-[6px] -translate-x-1/2 -translate-y-1/2 rounded-full border border-white bg-[#159dff]"
               style={{
                 left: "var(--clipper-path-left, 0px)",
                 top: "var(--clipper-path-top, 0px)",
@@ -2675,8 +2619,8 @@ export const FrameObjectView = memo(function FrameObjectView({
         : `var(--clipper-radius-preview, ${formatStyleLength(object.style.borderRadius)})`,
     transform:
       renderMode === "export"
-        ? `${parentTransform ?? ""} ${animationTransform ?? objectTransform ?? ""}`.trim()
-        : `${parentTransform ?? ""} translate(var(--clipper-drag-x, 0px), var(--clipper-drag-y, 0px)) ${animationTransform ?? objectTransform ?? ""}`.trim(),
+        ? `${parentTransform ?? ""} ${animationTransform ?? ""} ${objectTransform ?? ""}`.trim()
+        : `${parentTransform ?? ""} translate(var(--clipper-drag-x, 0px), var(--clipper-drag-y, 0px)) ${animationTransform ?? ""} ${objectTransform ?? ""}`.trim(),
     justifyContent:
       verticalAlign === "top"
         ? "flex-start"
@@ -4231,37 +4175,31 @@ export function DragSelectionBox({
   visible: boolean;
 }) {
   useLayoutEffect(() => {
-    let frameId = 0;
-    function syncDragSelectionBox() {
-      const element = dragSelectionBoxRef.current;
-      if (!element) return;
-      const frameRect = frameViewportRef.current?.getBoundingClientRect();
-      const hostRect = portalHost?.getBoundingClientRect();
-      const viewportBounds = boundsToViewport(
-        bounds,
-        cameraTransform,
-        frameScale,
-      );
-      const portalBounds =
-        frameRect && hostRect
-          ? viewportBoundsToPortal(
-              viewportBounds,
-              getFramePortalOverlayTransform(frameRect, hostRect, frameScale),
-            )
-          : viewportBounds;
-      updateDragSelectionBoxElement(
-        element,
-        bounds,
-        frameScale,
-        visible,
-        1,
-        { x: 0, y: 0 },
-        portalBounds,
-      );
-      frameId = requestAnimationFrame(syncDragSelectionBox);
-    }
-    syncDragSelectionBox();
-    return () => cancelAnimationFrame(frameId);
+    const element = dragSelectionBoxRef.current;
+    if (!element) return;
+    const frameRect = frameViewportRef.current?.getBoundingClientRect();
+    const hostRect = portalHost?.getBoundingClientRect();
+    const viewportBounds = boundsToViewport(
+      bounds,
+      cameraTransform,
+      frameScale,
+    );
+    const portalBounds =
+      frameRect && hostRect
+        ? viewportBoundsToPortal(
+            viewportBounds,
+            getFramePortalOverlayTransform(frameRect, hostRect, frameScale),
+          )
+        : viewportBounds;
+    updateDragSelectionBoxElement(
+      element,
+      bounds,
+      frameScale,
+      visible,
+      1,
+      { x: 0, y: 0 },
+      portalBounds,
+    );
   }, [
     bounds,
     cameraTransform,
@@ -4385,8 +4323,8 @@ export const BackgroundElementView = memo(function BackgroundElementView({
     height: element.bounds.height,
     transform:
       renderMode === "export"
-        ? (animationTransform ?? objectTransform)
-        : `translate(var(--clipper-drag-x, 0px), var(--clipper-drag-y, 0px)) ${animationTransform ?? objectTransform ?? ""}`.trim(),
+        ? `${animationTransform ?? ""} ${objectTransform ?? ""}`.trim()
+        : `translate(var(--clipper-drag-x, 0px), var(--clipper-drag-y, 0px)) ${animationTransform ?? ""} ${objectTransform ?? ""}`.trim(),
     willChange: renderMode === "export" ? undefined : "transform",
   } as CSSProperties;
   const content = animation.content ?? element.content;

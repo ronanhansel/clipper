@@ -129,7 +129,7 @@ describe("classifyProjectFileChange", () => {
     ).toBe("reload");
   });
 
-  it("reloads external file-manager changes while app has unsaved changes", () => {
+  it("conflicts on external file-manager changes while app has unsaved changes", () => {
     expect(
       classifyProjectFileChange({
         currentFileContentSnapshots: snapshot("current-content"),
@@ -138,6 +138,18 @@ describe("classifyProjectFileChange", () => {
         hasUnsavedAppChanges: true,
         savedFileContentSnapshots: snapshot("old-content"),
       }),
-    ).toBe("reload");
+    ).toBe("conflict");
+  });
+
+  it("conflicts instead of reloading when external file changes race unsaved app changes", () => {
+    expect(
+      classifyProjectFileChange({
+        currentFileContentSnapshots: snapshot("current-content"),
+        currentSnapshots: snapshot("current-with-unsaved-app-edit"),
+        diskSnapshots: disk("external", "external-content"),
+        hasUnsavedAppChanges: true,
+        savedFileContentSnapshots: snapshot("saved-content"),
+      }),
+    ).toBe("conflict");
   });
 });

@@ -143,9 +143,11 @@ export function Input({
       scrubRef.current = null;
       if (restore) restoreScrubValue(scrub);
       else if (commit) {
-        if (scrub.mode === "preview" && scrub.onCommit)
-          scrub.onCommit(scrub.value);
-        else commitNumberInputValue(scrub.input);
+        // Always commit via the input event so controlled inputs and higher-level
+        // handlers (e.g. keyframed inspector commits) run consistently for typing
+        // and scrubbing. `onCommit` remains as an optional side hook.
+        commitNumberInputValue(scrub.input);
+        scrub.onCommit?.(scrub.value);
       }
       scrub.onEnd?.();
       numberScrubActiveRef.current = false;

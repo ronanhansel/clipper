@@ -48,7 +48,26 @@ describe("getSyncedCompositionSources", () => {
             {
               id: "scale",
               name: "Scale",
-              keyframes: { scale: [1, 2] },
+              tracks: [
+                {
+                  property: "scale" as const,
+                  valueType: "number" as const,
+                  points: [
+                    {
+                      id: "scale:0",
+                      time: 0 / 1,
+                      value: 1,
+                      easingToNext: "linear" as const,
+                    },
+                    {
+                      id: "scale:1",
+                      time: 1 / 1,
+                      value: 2,
+                      easingToNext: "linear" as const,
+                    },
+                  ],
+                },
+              ],
               options: { duration: 1 },
             },
           ],
@@ -69,7 +88,26 @@ describe("getSyncedCompositionSources", () => {
             {
               id: "scale",
               name: "Scale",
-              keyframes: { scale: [1, 0] },
+              tracks: [
+                {
+                  property: "scale" as const,
+                  valueType: "number" as const,
+                  points: [
+                    {
+                      id: "scale:0",
+                      time: 0 / 1,
+                      value: 1,
+                      easingToNext: "linear" as const,
+                    },
+                    {
+                      id: "scale:1",
+                      time: 1 / 1,
+                      value: 0,
+                      easingToNext: "linear" as const,
+                    },
+                  ],
+                },
+              ],
               options: { duration: 1 },
             },
           ],

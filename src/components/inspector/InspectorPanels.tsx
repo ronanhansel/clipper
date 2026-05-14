@@ -126,6 +126,18 @@ function readTransformPixelValue(transform: string | undefined, name: string) {
   return match ? Number(match[1]) : null;
 }
 
+function readTransformUnitValue(
+  transform: string | undefined,
+  name: string,
+  unit: "deg" | "",
+) {
+  const unitPattern = unit === "" ? "(?:\\s|$|\\))" : unit;
+  const match = transform?.match(
+    new RegExp(`${name}\\((-?\\d+(?:\\.\\d+)?)${unitPattern}`),
+  );
+  return match ? Number(match[1]) : null;
+}
+
 let cachedSystemFontOptions: FontOption[] | null = null;
 let systemFontOptionsRequest: Promise<FontOption[]> | null = null;
 
@@ -485,13 +497,9 @@ export const ObjectInspector = memo(function ObjectInspector({
     key: ComposeAnimationAttributeKey,
     fallback: number | string,
   ) {
-    const evaluatedBoundsValue = getEvaluatedBoundsAnimationValue(key);
-    if (
-      evaluatedBoundsValue !== null &&
-      typeof fallback === "number" &&
-      (key === "x" || key === "y" || key === "width" || key === "height")
-    ) {
-      return evaluatedBoundsValue;
+    const evaluatedValue = getEvaluatedAnimationValue(key);
+    if (evaluatedValue !== null) {
+      return evaluatedValue;
     }
     const layer = {
       id: object.id,
@@ -511,18 +519,71 @@ export const ObjectInspector = memo(function ObjectInspector({
     return value;
   }
 
-  function getEvaluatedBoundsAnimationValue(key: ComposeAnimationAttributeKey) {
-    if (key !== "x" && key !== "y" && key !== "width" && key !== "height") {
-      return null;
-    }
+  function getEvaluatedAnimationValue(key: ComposeAnimationAttributeKey) {
     const style = evaluateLayerAnimations(
       object.animations ?? [],
       effectiveTime,
     );
+    if (key === "opacity") {
+      return typeof style.opacity === "number" ? style.opacity : null;
+    }
+    if (key === "blur") {
+      const match =
+        typeof style.filter === "string"
+          ? style.filter.match(/blur\((-?\d+(?:\.\d+)?)px\)/)
+          : null;
+      return match ? Number(match[1]) : null;
+    }
+    if (key === "scale" || key === "scaleX" || key === "scaleY") {
+      const value = readTransformUnitValue(
+        typeof style.transform === "string" ? style.transform : undefined,
+        key,
+        "",
+      );
+      return value ?? null;
+    }
+    if (
+      key === "rotate" ||
+      key === "rotateX" ||
+      key === "rotateY" ||
+      key === "rotateZ" ||
+      key === "skewX" ||
+      key === "skewY"
+    ) {
+      const value = readTransformUnitValue(
+        typeof style.transform === "string" ? style.transform : undefined,
+        key,
+        "deg",
+      );
+      return value ?? null;
+    }
+    if (key === "transformPerspective") {
+      const match =
+        typeof style.transform === "string"
+          ? style.transform.match(/perspective\((-?\d+(?:\.\d+)?)px\)/)
+          : null;
+      return match ? Number(match[1]) : null;
+    }
+    if (key === "z") {
+      const value = readTransformPixelValue(
+        typeof style.transform === "string" ? style.transform : undefined,
+        "translateZ",
+      );
+      return value ?? null;
+    }
+    if (key === "pathOffset" || key === "pathLength" || key === "pathSpacing") {
+      const value = style[key];
+      return typeof value === "number" ? value : null;
+    }
+    if (key === "backgroundColor" || key === "color") {
+      const value = style[key];
+      return typeof value === "string" ? value : null;
+    }
     if (key === "width" || key === "height") {
       const value = style[key];
       return typeof value === "number" ? value : null;
     }
+    if (key !== "x" && key !== "y") return null;
     const offset = readTransformPixelValue(
       typeof style.transform === "string" ? style.transform : undefined,
       key === "x" ? "translateX" : "translateY",
@@ -530,7 +591,7 @@ export const ObjectInspector = memo(function ObjectInspector({
     return offset === null ? null : object.bounds[key] + offset;
   }
 
-  function keyframeAtCurrentTime(key: ComposeAnimationAttributeKey) {
+  function getAttributeTrack(key: ComposeAnimationAttributeKey) {
     const layer = {
       id: object.id,
       name: object.name || object.id,
@@ -539,9 +600,17 @@ export const ObjectInspector = memo(function ObjectInspector({
       object,
       animations: object.animations,
     };
-    const track = getComposeAnimationAttributeTracks(layer).find(
+    return getComposeAnimationAttributeTracks(layer).find(
       (item) => item.key === key,
     );
+  }
+
+  function hasAttributeKeyframes(key: ComposeAnimationAttributeKey) {
+    return Boolean(getAttributeTrack(key)?.keyframes.length);
+  }
+
+  function keyframeAtCurrentTime(key: ComposeAnimationAttributeKey) {
+    const track = getAttributeTrack(key);
     return track
       ? getComposeAnimationAttributeKeyframeAtTime(track, effectiveTime)
       : null;
@@ -572,7 +641,7 @@ export const ObjectInspector = memo(function ObjectInspector({
         : upsertComposeAnimationAttributeKeyframe(
             animations,
             key,
-            value,
+            toStoredKeyframeValue(key, value),
             effectiveTime,
             MAX_PART_DURATION_SECONDS,
           ),
@@ -655,7 +724,10 @@ export const ObjectInspector = memo(function ObjectInspector({
     if (!key) return;
     const nextValue = type === "number" ? Number(value) : value;
     if (type === "number" && !Number.isFinite(nextValue)) return;
-    if (key !== "x" && key !== "y") fallbackCommit(value);
+    if (!hasAttributeKeyframes(key)) {
+      fallbackCommit(value);
+      return;
+    }
     upsertKeyframeValues([{ key, value: nextValue }]);
   }
 
@@ -668,7 +740,13 @@ export const ObjectInspector = memo(function ObjectInspector({
     const nextValue = Number(value);
     if (!Number.isFinite(nextValue)) return;
     const [firstKey, secondKey] = keys;
-    if (firstKey !== "x" && secondKey !== "y") fallbackCommit(value);
+    const firstActive = hasAttributeKeyframes(firstKey);
+    const secondActive = hasAttributeKeyframes(secondKey);
+    const shouldWriteKeyframes = firstActive || secondActive;
+    if (!shouldWriteKeyframes) {
+      fallbackCommit(value);
+      return;
+    }
     const firstValue =
       changedKey === firstKey
         ? nextValue

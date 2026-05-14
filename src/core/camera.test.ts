@@ -38,7 +38,26 @@ describe("camera", () => {
           animations: [
             {
               id: "tracker-x",
-              keyframes: { x: [0, 400] },
+              tracks: [
+                {
+                  property: "x" as const,
+                  valueType: "number" as const,
+                  points: [
+                    {
+                      id: "x:0",
+                      time: 0 / 1,
+                      value: 0,
+                      easingToNext: "linear" as const,
+                    },
+                    {
+                      id: "x:1",
+                      time: 1 / 1,
+                      value: 400,
+                      easingToNext: "linear" as const,
+                    },
+                  ],
+                },
+              ],
               options: { duration: 4 },
             },
           ],
@@ -80,7 +99,26 @@ describe("camera", () => {
           animations: [
             {
               id: "tracker-x",
-              keyframes: { x: [0, 400] },
+              tracks: [
+                {
+                  property: "x" as const,
+                  valueType: "number" as const,
+                  points: [
+                    {
+                      id: "x:0",
+                      time: 0 / 1,
+                      value: 0,
+                      easingToNext: "linear" as const,
+                    },
+                    {
+                      id: "x:1",
+                      time: 1 / 1,
+                      value: 400,
+                      easingToNext: "linear" as const,
+                    },
+                  ],
+                },
+              ],
               options: { duration: 4 },
             },
           ],

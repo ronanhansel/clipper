@@ -1,4 +1,5 @@
 import {
+  Component as ReactComponent,
   memo,
   useEffect,
   useMemo,
@@ -7,6 +8,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type PointerEvent,
+  type ReactNode,
   type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
@@ -122,7 +124,7 @@ type ComposeKeyframeHitTarget = {
   x: number;
   y: number;
   selectionIds: string[];
-  selection?: ComposeAnimationKeyframeSelection;
+  selections: ComposeAnimationKeyframeSelection[];
 };
 
 type ComposeKeyframeMarqueeDrag = {
@@ -147,8 +149,9 @@ function composeKeyframeSelectionId(
   key: ComposeAnimationAttributeKey,
   animationId: string,
   time: number,
+  pointId?: string,
 ) {
-  return `${layerId}:${key}:${animationId}:${Math.round(time * 1000)}`;
+  return `${layerId}:${key}:${animationId}:${pointId ?? Math.round(time * 1000)}`;
 }
 
 function isEditableKeyboardTarget(target: EventTarget | null) {
@@ -163,781 +166,741 @@ function isEditableKeyboardTarget(target: EventTarget | null) {
 }
 
 export const ComposeAnimationTimelinePanel = memo(
-  function ComposeAnimationTimelinePanel({
+  function ComposeAnimationTimelinePanel(
+    props: ComposeAnimationTimelinePanelProps,
+  ) {
+    return (
+      <ComposeAnimationTimelineBoundary
+        partId={props.part?.id ?? "compose-animation"}
+        filePath={props.part?.filePath ?? "Composition"}
+      >
+        <ComposeAnimationTimelinePanelContent {...props} />
+      </ComposeAnimationTimelineBoundary>
+    );
+  },
+  areComposeAnimationTimelinePanelPropsEqual,
+);
+
+function ComposeAnimationTimelinePanelContent({
+  currentTime,
+  isPlaying,
+  part,
+  playbackPlayheadRef,
+  scrubbingRef,
+  scrubSnapEnabled,
+  selectedObjectIds,
+  timelineLayers,
+  timelineViewportState,
+  onExitCompose,
+  onRenameLayer,
+  onScrub,
+  onScrubEnd,
+  onScrubStart,
+  onInspectObject,
+  onSelectObjects,
+  onTimelineLayersChange,
+  onTimelineViewportStateChange,
+  onUpdateBackgroundAnimation,
+  onUpdateObjectAnimation,
+  onUpdateObject,
+  setAppContextMenu,
+}: ComposeAnimationTimelinePanelProps) {
+  const partDuration = part?.duration ?? 0.1;
+  const timelineDuration = Math.max(partDuration, 10);
+  const layers = useMemo(
+    () => (part ? buildComposeAnimationTimelineLayers(part) : []),
+    [part],
+  );
+  const ticks = useMemo(
+    () => getTimelineTicks(timelineDuration),
+    [timelineDuration],
+  );
+  const timingDragRef = useRef<ComposeAnimationTimingDrag | null>(null);
+  const provisionalContentWidth =
+    timelineDuration *
+    defaultTimelinePixelsPerSecond *
+    timelineViewportState.zoom;
+  const {
+    timelineRef,
+    timelineViewportRef,
+    timelineLayerRailRef,
+    timelineSnapGuideRef,
+    timelineZoom,
+    updateTimelineZoom,
+    syncTimelineScrollPosition,
+    saveTimelineDisplacement,
+    updateTimelineSnapGuide,
+    clearTimelineSnapGuide,
+  } = useTimelineViewportController({
+    contentWidth: provisionalContentWidth,
     currentTime,
-    isPlaying,
-    part,
-    playbackPlayheadRef,
-    scrubbingRef,
-    scrubSnapEnabled,
-    selectedObjectIds,
-    timelineLayers,
+    displayDuration: timelineDuration,
     timelineViewportState,
-    onExitCompose,
-    onRenameLayer,
-    onScrub,
-    onScrubEnd,
-    onScrubStart,
-    onInspectObject,
-    onSelectObjects,
-    onTimelineLayersChange,
     onTimelineViewportStateChange,
-    onUpdateBackgroundAnimation,
-    onUpdateObjectAnimation,
-    onUpdateObject,
-    setAppContextMenu,
-  }: ComposeAnimationTimelinePanelProps) {
-    const partDuration = part?.duration ?? 0.1;
-    const timelineDuration = Math.max(partDuration, 10);
-    const layers = useMemo(
-      () => (part ? buildComposeAnimationTimelineLayers(part) : []),
-      [part],
-    );
-    const ticks = useMemo(
-      () => getTimelineTicks(timelineDuration),
-      [timelineDuration],
-    );
-    const timingDragRef = useRef<ComposeAnimationTimingDrag | null>(null);
-    const provisionalContentWidth =
-      timelineDuration *
-      defaultTimelinePixelsPerSecond *
-      timelineViewportState.zoom;
-    const {
-      timelineRef,
-      timelineViewportRef,
-      timelineLayerRailRef,
-      timelineSnapGuideRef,
-      timelineZoom,
-      updateTimelineZoom,
-      syncTimelineScrollPosition,
-      saveTimelineDisplacement,
-      updateTimelineSnapGuide,
-      clearTimelineSnapGuide,
-    } = useTimelineViewportController({
-      contentWidth: provisionalContentWidth,
-      currentTime,
-      displayDuration: timelineDuration,
-      timelineViewportState,
-      onTimelineViewportStateChange,
-    });
-    const [editingLayerId, setEditingLayerId] = useState<string | null>(null);
-    const [layerNameDraft, setLayerNameDraft] = useState("");
-    const [timelineBlockPreviews, setTimelineBlockPreviews] =
-      useState<TimelineBlockPreviewMap | null>(null);
-    const [timelineDragActive, setTimelineDragActive] = useState(false);
-    const [overviewDragPreview, setOverviewDragPreview] = useState<{
-      layerId: string;
-      originalTime: number;
-      time: number;
-    } | null>(null);
-    const [expandedLayerIds, setExpandedLayerIds] = useState<Set<string>>(
-      () => new Set(),
-    );
-    const [expandedEaseTrackIds, setExpandedEaseTrackIds] = useState<
-      Set<string>
-    >(() => new Set());
-    const [easeRowHeights, setEaseRowHeights] = useState<
-      Record<string, number>
-    >(() => ({}));
-    const [selectedKeyframeIds, setSelectedKeyframeIds] = useState<Set<string>>(
-      () => new Set(),
-    );
-    const [keyframeMarquee, setKeyframeMarquee] =
-      useState<ComposeKeyframeMarqueeDrag | null>(null);
-    const keyframeMarqueeRef = useRef<ComposeKeyframeMarqueeDrag | null>(null);
-    const [pickWhipDrag, setPickWhipDrag] =
-      useState<ComposePickWhipDrag | null>(null);
-    const pickWhipDragRef = useRef<ComposePickWhipDrag | null>(null);
-    const [pickWhipDropLayerId, setPickWhipDropLayerId] = useState<
-      string | null
-    >(null);
-    const rows = useMemo(
-      () =>
-        buildComposeAnimationTimelineRows(
-          layers,
-          expandedLayerIds,
-          expandedEaseTrackIds,
-        ),
-      [expandedLayerIds, expandedEaseTrackIds, layers],
-    );
-    const timelineRowStarts = rows.reduce<number[]>(
-      (starts, row, index) => [
-        ...starts,
-        index === 0
-          ? 0
-          : starts[index - 1] +
-            getComposeRowHeight(rows[index - 1], easeRowHeights),
-      ],
-      [],
-    );
-    const laneRowsStyle = {
-      gridTemplateRows:
-        rows
-          .map((row) => `${getComposeRowHeight(row, easeRowHeights)}px`)
-          .join(" ") || `${composeTimelineRowHeight}px`,
-    };
-    const laneContentHeight = Math.max(
-      rows.reduce(
-        (sum, row) => sum + getComposeRowHeight(row, easeRowHeights),
-        0,
+  });
+  const [editingLayerId, setEditingLayerId] = useState<string | null>(null);
+  const [layerNameDraft, setLayerNameDraft] = useState("");
+  const [timelineBlockPreviews, setTimelineBlockPreviews] =
+    useState<TimelineBlockPreviewMap | null>(null);
+  const [timelineDragActive, setTimelineDragActive] = useState(false);
+  const [overviewDragPreview, setOverviewDragPreview] = useState<{
+    layerId: string;
+    originalTime: number;
+    time: number;
+  } | null>(null);
+  const [expandedLayerIds, setExpandedLayerIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [expandedEaseTrackIds, setExpandedEaseTrackIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [easeRowHeights, setEaseRowHeights] = useState<Record<string, number>>(
+    () => ({}),
+  );
+  const [selectedKeyframeIds, setSelectedKeyframeIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [keyframeMarquee, setKeyframeMarquee] =
+    useState<ComposeKeyframeMarqueeDrag | null>(null);
+  const keyframeMarqueeRef = useRef<ComposeKeyframeMarqueeDrag | null>(null);
+  const [pickWhipDrag, setPickWhipDrag] = useState<ComposePickWhipDrag | null>(
+    null,
+  );
+  const pickWhipDragRef = useRef<ComposePickWhipDrag | null>(null);
+  const [pickWhipDropLayerId, setPickWhipDropLayerId] = useState<string | null>(
+    null,
+  );
+  const rows = useMemo(
+    () =>
+      buildComposeAnimationTimelineRows(
+        layers,
+        expandedLayerIds,
+        expandedEaseTrackIds,
       ),
-      composeTimelineRowHeight,
-    );
-    const contentWidth =
-      timelineDuration * defaultTimelinePixelsPerSecond * timelineZoom;
-    const keyframeHitTargets = useMemo(
-      () =>
-        buildComposeKeyframeHitTargets(
-          rows,
-          timelineRowStarts,
-          easeRowHeights,
-          contentWidth,
-          partDuration,
-        ),
-      [contentWidth, easeRowHeights, partDuration, rows, timelineRowStarts],
-    );
-    const layerRailWidth = 430;
-    const composeTimelinePartId = part?.id ?? "compose-animation";
-    const composeMotionTimeline = useMemo<TimelinePartMotionView[]>(
-      () =>
-        part
-          ? [
-              buildComposeAnimationMotionTimelinePart(
-                part,
-                layers,
-                partDuration,
-              ),
-            ]
-          : [],
-      [layers, part, partDuration],
-    );
-    const selectedComposeMotionKeys = useMemo(() => {
-      const keys = new Set<string>();
-      for (const layer of layers) {
-        if (layer.object && selectedObjectIds.includes(layer.object.id)) {
-          keys.add(`${composeTimelinePartId}:${layer.id}`);
-          if (layer.animations) {
-            for (const animation of layer.animations) {
-              keys.add(
-                `${composeTimelinePartId}:${layer.id}/anim/${animation.id}`,
-              );
-            }
+    [expandedLayerIds, expandedEaseTrackIds, layers],
+  );
+  const timelineRowStarts = rows.reduce<number[]>(
+    (starts, row, index) => [
+      ...starts,
+      index === 0
+        ? 0
+        : starts[index - 1] +
+          getComposeRowHeight(rows[index - 1], easeRowHeights),
+    ],
+    [],
+  );
+  const laneRowsStyle = {
+    gridTemplateRows:
+      rows
+        .map((row) => `${getComposeRowHeight(row, easeRowHeights)}px`)
+        .join(" ") || `${composeTimelineRowHeight}px`,
+  };
+  const laneContentHeight = Math.max(
+    rows.reduce(
+      (sum, row) => sum + getComposeRowHeight(row, easeRowHeights),
+      0,
+    ),
+    composeTimelineRowHeight,
+  );
+  const contentWidth =
+    timelineDuration * defaultTimelinePixelsPerSecond * timelineZoom;
+  const keyframeHitTargets = useMemo(
+    () =>
+      buildComposeKeyframeHitTargets(
+        rows,
+        timelineRowStarts,
+        easeRowHeights,
+        contentWidth,
+        partDuration,
+      ),
+    [contentWidth, easeRowHeights, partDuration, rows, timelineRowStarts],
+  );
+  const layerRailWidth = 430;
+  const composeTimelinePartId = part?.id ?? "compose-animation";
+  const composeMotionTimeline = useMemo<TimelinePartMotionView[]>(
+    () =>
+      part
+        ? [buildComposeAnimationMotionTimelinePart(part, layers, partDuration)]
+        : [],
+    [layers, part, partDuration],
+  );
+  const selectedComposeMotionKeys = useMemo(() => {
+    const keys = new Set<string>();
+    for (const layer of layers) {
+      if (layer.object && selectedObjectIds.includes(layer.object.id)) {
+        keys.add(`${composeTimelinePartId}:${layer.id}`);
+        if (layer.animations) {
+          for (const animation of layer.animations) {
+            keys.add(
+              `${composeTimelinePartId}:${layer.id}/anim/${animation.id}`,
+            );
           }
         }
       }
-      return keys;
-    }, [composeTimelinePartId, layers, selectedObjectIds]);
-    const scrubSnapBoundaries = useMemo(
-      () => getComposeAnimationSnapBoundaries(layers, partDuration),
-      [layers, partDuration],
-    );
+    }
+    return keys;
+  }, [composeTimelinePartId, layers, selectedObjectIds]);
+  const scrubSnapBoundaries = useMemo(
+    () => getComposeAnimationSnapBoundaries(layers, partDuration),
+    [layers, partDuration],
+  );
 
-    const { getTimelineEdgeScrollDelta, startScrub, continueScrub, endScrub } =
-      useTimelineScrubber({
-        duration: partDuration,
-        displayDuration: partDuration,
-        playbackPlayheadRef,
-        scrubbingRef,
-        timelineRef,
-        viewportRef: timelineViewportRef,
-        snapEnabled: scrubSnapEnabled,
-        snapBoundaries: scrubSnapBoundaries,
-        onRulerScroll: syncTimelineScrollPosition,
-        onScrub,
-        onScrubStart,
-        onScrubEnd,
-      });
-
-    const {
-      updateTimelineDragAutoScroll: updateTimingDragAutoScroll,
-      stopTimelineDragAutoScroll: stopTimingDragAutoScroll,
-    } = useTimelineDragAutoScroll({
+  const { getTimelineEdgeScrollDelta, startScrub, continueScrub, endScrub } =
+    useTimelineScrubber({
+      duration: partDuration,
+      displayDuration: partDuration,
+      playbackPlayheadRef,
+      scrubbingRef,
+      timelineRef,
       viewportRef: timelineViewportRef,
-      getTimelineEdgeScrollDelta,
+      snapEnabled: scrubSnapEnabled,
+      snapBoundaries: scrubSnapBoundaries,
       onRulerScroll: syncTimelineScrollPosition,
-      onScrollPersist: saveTimelineDisplacement,
+      onScrub,
+      onScrubStart,
+      onScrubEnd,
     });
-    const { startTimelinePointerTransaction: startTimingPointerTransaction } =
-      useTimelinePointerTransaction();
 
-    useEffect(
-      () => () => {
+  const {
+    updateTimelineDragAutoScroll: updateTimingDragAutoScroll,
+    stopTimelineDragAutoScroll: stopTimingDragAutoScroll,
+  } = useTimelineDragAutoScroll({
+    viewportRef: timelineViewportRef,
+    getTimelineEdgeScrollDelta,
+    onRulerScroll: syncTimelineScrollPosition,
+    onScrollPersist: saveTimelineDisplacement,
+  });
+  const { startTimelinePointerTransaction: startTimingPointerTransaction } =
+    useTimelinePointerTransaction();
+
+  useEffect(
+    () => () => {
+      stopTimingDragAutoScroll();
+      clearTimelineSnapGuide();
+      setTimelineDragActive(false);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    setSelectedKeyframeIds((current) => {
+      if (!current.size) return current;
+      const liveIds = new Set(
+        keyframeHitTargets.flatMap((target) => target.selectionIds),
+      );
+      const next = new Set([...current].filter((id) => liveIds.has(id)));
+      return next.size === current.size ? current : next;
+    });
+  }, [keyframeHitTargets]);
+
+  useEffect(() => {
+    function deleteSelectedFromKeyboard(event: KeyboardEvent) {
+      if (event.key !== "Backspace" && event.key !== "Delete") return;
+      if (isEditableKeyboardTarget(event.target)) return;
+      if (!selectedKeyframeIds.size) return;
+      if (!deleteSelectedKeyframes()) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }
+
+    window.addEventListener("keydown", deleteSelectedFromKeyboard, true);
+    return () =>
+      window.removeEventListener("keydown", deleteSelectedFromKeyboard, true);
+  }, [keyframeHitTargets, selectedKeyframeIds]);
+
+  function getTimelineContentRect() {
+    return timelineViewportRef.current
+      ?.querySelector<HTMLElement>("[data-timeline-content]")
+      ?.getBoundingClientRect();
+  }
+
+  function selectKeyframeIds(ids: string[], additive: boolean) {
+    setSelectedKeyframeIds((current) => {
+      const next = additive ? new Set(current) : new Set<string>();
+      for (const id of ids) {
+        if (additive && next.has(id)) next.delete(id);
+        else next.add(id);
+      }
+      return next;
+    });
+  }
+
+  function deleteSelectedKeyframes() {
+    const selectionsByLayerId = new Map<
+      string,
+      ComposeAnimationKeyframeSelection[]
+    >();
+    for (const target of keyframeHitTargets) {
+      if (!target.selectionIds.some((id) => selectedKeyframeIds.has(id))) {
+        continue;
+      }
+      const items = selectionsByLayerId.get(target.layerId) ?? [];
+      items.push(...target.selections);
+      selectionsByLayerId.set(target.layerId, items);
+    }
+    if (!selectionsByLayerId.size) return false;
+
+    for (const layer of layers) {
+      const selections = selectionsByLayerId.get(layer.id);
+      if (!selections?.length) continue;
+      if (layer.kind === "background") {
+        onUpdateBackgroundAnimation?.((animations) =>
+          removeComposeAnimationKeyframeSelections(
+            animations,
+            selections,
+            partDuration,
+          ),
+        );
+      } else if (layer.object) {
+        onUpdateObjectAnimation?.(layer.object.id, (animations) =>
+          removeComposeAnimationKeyframeSelections(
+            animations,
+            selections,
+            partDuration,
+          ),
+        );
+      }
+    }
+    setSelectedKeyframeIds(new Set());
+    return true;
+  }
+
+  function updateMarqueeSelection(drag: ComposeKeyframeMarqueeDrag) {
+    const left = Math.min(drag.startContentX, drag.currentContentX);
+    const right = Math.max(drag.startContentX, drag.currentContentX);
+    const top = Math.min(drag.startContentY, drag.currentContentY);
+    const bottom = Math.max(drag.startContentY, drag.currentContentY);
+    const next = drag.additive
+      ? new Set(drag.initialSelectedIds)
+      : new Set<string>();
+    for (const target of keyframeHitTargets) {
+      const hit =
+        target.x >= left - composeKeyframeHitRadiusPx &&
+        target.x <= right + composeKeyframeHitRadiusPx &&
+        target.y >= top - composeKeyframeHitRadiusPx &&
+        target.y <= bottom + composeKeyframeHitRadiusPx;
+      if (!hit) continue;
+      for (const id of target.selectionIds) next.add(id);
+    }
+    setSelectedKeyframeIds(next);
+  }
+
+  function startKeyframeMarquee(event: PointerEvent<HTMLDivElement>) {
+    if (event.button !== 0) return;
+    const target = event.target as HTMLElement;
+    if (target.closest("[data-timeline-control]")) return;
+    const rect = getTimelineContentRect();
+    if (!rect) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const startContentX = event.clientX - rect.left;
+    const startContentY = event.clientY - rect.top;
+    const next: ComposeKeyframeMarqueeDrag = {
+      startContentX,
+      startContentY,
+      currentContentX: startContentX,
+      currentContentY: startContentY,
+      additive: event.shiftKey || event.metaKey || event.ctrlKey,
+      initialSelectedIds: selectedKeyframeIds,
+    };
+    keyframeMarqueeRef.current = next;
+    setKeyframeMarquee(next);
+
+    function onMove(moveEvent: globalThis.PointerEvent) {
+      const active = keyframeMarqueeRef.current;
+      const activeRect = getTimelineContentRect();
+      if (!active || !activeRect) return;
+      const updated = {
+        ...active,
+        currentContentX: moveEvent.clientX - activeRect.left,
+        currentContentY: moveEvent.clientY - activeRect.top,
+      };
+      keyframeMarqueeRef.current = updated;
+      setKeyframeMarquee(updated);
+      updateMarqueeSelection(updated);
+    }
+
+    function onUp(upEvent: globalThis.PointerEvent) {
+      const active = keyframeMarqueeRef.current;
+      if (active) {
+        const dragDistance = Math.max(
+          Math.abs(active.currentContentX - active.startContentX),
+          Math.abs(active.currentContentY - active.startContentY),
+        );
+        if (dragDistance < 4 && !active.additive)
+          setSelectedKeyframeIds(new Set());
+      }
+      keyframeMarqueeRef.current = null;
+      setKeyframeMarquee(null);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      upEvent.preventDefault();
+    }
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+  }
+
+  function selectLayer(layer: ComposeAnimationTimelineLayer) {
+    onSelectObjects?.(layer.object ? [layer.object] : []);
+  }
+
+  function inspectLayer(layer: ComposeAnimationTimelineLayer) {
+    onInspectObject?.(layer.object ?? null);
+  }
+
+  function setLayerParent(childLayerId: string, parentLayerId: string) {
+    if (!onUpdateObject) return;
+    const child = layers.find((layer) => layer.id === childLayerId);
+    if (!child?.object) return;
+    const nextParentId = parentLayerId || undefined;
+    const parentOptions = getComposeParentOptions(layers, childLayerId);
+    if (
+      nextParentId &&
+      !parentOptions.some((layer) => layer.id === nextParentId)
+    )
+      return;
+    onUpdateObject(childLayerId, (object) => ({
+      ...object,
+      parentId: nextParentId,
+    }));
+  }
+
+  function startPickWhipDrag(
+    event: ReactPointerEvent<HTMLElement>,
+    childLayerId: string,
+  ) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const rect = event.currentTarget.getBoundingClientRect();
+    const startX = rect.left + rect.width / 2;
+    const startY = rect.top + rect.height / 2;
+    const next: ComposePickWhipDrag = {
+      childLayerId,
+      startX,
+      startY,
+      currentX: event.clientX,
+      currentY: event.clientY,
+    };
+    pickWhipDragRef.current = next;
+    setPickWhipDrag(next);
+    event.currentTarget.setPointerCapture(event.pointerId);
+
+    function update(moveEvent: globalThis.PointerEvent) {
+      const active = pickWhipDragRef.current;
+      if (!active) return;
+      const updated = {
+        ...active,
+        currentX: moveEvent.clientX,
+        currentY: moveEvent.clientY,
+      };
+      pickWhipDragRef.current = updated;
+      setPickWhipDrag(updated);
+      setPickWhipDropLayerId(
+        getPickWhipTargetLayerId(
+          moveEvent.clientX,
+          moveEvent.clientY,
+          active.childLayerId,
+        ),
+      );
+    }
+
+    function finish(upEvent: globalThis.PointerEvent) {
+      const active = pickWhipDragRef.current;
+      pickWhipDragRef.current = null;
+      setPickWhipDrag(null);
+      setPickWhipDropLayerId(null);
+      window.removeEventListener("pointermove", update);
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", cancel);
+      if (!active || upEvent.type === "pointercancel") return;
+      const targetLayerId = getPickWhipTargetLayerId(
+        upEvent.clientX,
+        upEvent.clientY,
+        active.childLayerId,
+      );
+      if (!targetLayerId) return;
+      setLayerParent(active.childLayerId, targetLayerId);
+    }
+
+    function cancel(cancelEvent: globalThis.PointerEvent) {
+      finish(cancelEvent);
+    }
+
+    window.addEventListener("pointermove", update);
+    window.addEventListener("pointerup", finish);
+    window.addEventListener("pointercancel", cancel);
+  }
+
+  function getPickWhipTargetLayerId(
+    clientX: number,
+    clientY: number,
+    childLayerId: string,
+  ) {
+    const targetLayerId = document
+      .elementsFromPoint(clientX, clientY)
+      .map((element) =>
+        element instanceof HTMLElement
+          ? element.closest<HTMLElement>("[data-compose-parent-drop-layer-id]")
+          : null,
+      )
+      .find((element) => element?.dataset.composeParentDropLayerId)
+      ?.dataset.composeParentDropLayerId;
+    if (!targetLayerId || targetLayerId === childLayerId) return null;
+    return targetLayerId;
+  }
+
+  function startLayerNameEdit(layerId: string, name: string) {
+    setEditingLayerId(layerId);
+    setLayerNameDraft(name);
+  }
+
+  function commitLayerNameEdit() {
+    if (!editingLayerId) return;
+    const nextName = layerNameDraft.trim();
+    const layer = layers.find((item) => item.id === editingLayerId);
+    if (nextName && layer && nextName !== layer.name)
+      onRenameLayer?.(editingLayerId, nextName);
+    setEditingLayerId(null);
+    setLayerNameDraft("");
+  }
+
+  function cancelLayerNameEdit() {
+    setEditingLayerId(null);
+    setLayerNameDraft("");
+  }
+
+  function toggleLayerExpanded(layerId: string) {
+    setExpandedLayerIds((current) => {
+      const next = new Set(current);
+      if (next.has(layerId)) next.delete(layerId);
+      else next.add(layerId);
+      return next;
+    });
+  }
+
+  function toggleEaseExpanded(attributeRowId: string) {
+    setExpandedEaseTrackIds((current) => {
+      const next = new Set(current);
+      if (next.has(attributeRowId)) next.delete(attributeRowId);
+      else next.add(attributeRowId);
+      return next;
+    });
+  }
+
+  function applyEaseToTrack(
+    layer: ComposeAnimationTimelineLayer,
+    animationId: string,
+    ease: MotionEase | readonly [number, number, number, number],
+  ) {
+    const updater = (animations: LayerAnimation[]) =>
+      updateComposeAnimationEase(animations, animationId, ease);
+    if (layer.kind === "background") {
+      onUpdateBackgroundAnimation?.(updater);
+    } else if (layer.object) {
+      onUpdateObjectAnimation?.(layer.object.id, updater);
+    }
+  }
+
+  function applyPresetToLayer(
+    layer: ComposeAnimationTimelineLayer | null,
+    presetId: string,
+  ) {
+    const preset = composeAnimationPresets.find((item) => item.id === presetId);
+    if (!layer || !preset) return;
+    const animation = createComposeAnimationPresetAnimation(
+      preset,
+      currentTime,
+      timelineDuration,
+    );
+    if (layer.kind === "background") {
+      onUpdateBackgroundAnimation?.((animations) => [...animations, animation]);
+    } else if (layer.object) {
+      onUpdateObjectAnimation?.(layer.object.id, (animations) => [
+        ...animations,
+        animation,
+      ]);
+    }
+  }
+
+  function openComposePresetContextMenu(
+    event: ReactMouseEvent<HTMLElement>,
+    layer: ComposeAnimationTimelineLayer,
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+    selectLayer(layer);
+    setAppContextMenu?.({
+      x: event.clientX,
+      y: event.clientY,
+      items: composeAnimationPresets.map((preset) => ({
+        label: preset.label,
+        action: () => applyPresetToLayer(layer, preset.id),
+      })),
+    });
+  }
+
+  function startTimingDrag(
+    event: PointerEvent<HTMLDivElement>,
+    layer: ComposeAnimationTimelineLayer,
+    action: ComposeAnimationTimingDrag["action"],
+    animation?: LayerAnimation,
+  ) {
+    if (event.button !== 0) return;
+    if (!animation) return;
+    const initialDelay = animation.options.delay ?? 0;
+    const initialDuration = animation.options.duration;
+    const markerId = `${layer.id}/anim/${animation.id}`;
+    event.preventDefault();
+    event.stopPropagation();
+    selectLayer(layer);
+    const pixelsPerSecond =
+      (timelineRef.current?.getBoundingClientRect().width ?? 1) /
+      Math.max(partDuration, 1);
+    const snapThresholdSeconds = Math.max(0.08, 8 / pixelsPerSecond);
+    const movingEdges = new Set([
+      roundTwo(initialDelay),
+      roundTwo(initialDelay + initialDuration),
+    ]);
+    const snapBoundaries = Array.from(
+      new Set([
+        ...scrubSnapBoundaries.filter(
+          (boundary) => !movingEdges.has(roundTwo(boundary)),
+        ),
+        currentTime,
+      ]),
+    ).sort((left, right) => left - right);
+    function clearTimingDragState() {
+      timingDragRef.current = null;
+      stopTimingDragAutoScroll();
+      clearTimelineSnapGuide();
+      setTimelineBlockPreviews(null);
+      setTimelineDragActive(false);
+    }
+
+    startTimingPointerTransaction({
+      event,
+      capturePointer: true,
+      updateAutoScroll: updateTimingDragAutoScroll,
+      stopAutoScroll: stopTimingDragAutoScroll,
+      onDragStart: ({ pointerId }) => {
+        timingDragRef.current = {
+          action,
+          initialClientX: event.clientX,
+          initialScrollLeft: timelineViewportRef.current?.scrollLeft ?? 0,
+          initialDelay,
+          initialDuration,
+          layer,
+          partId: composeTimelinePartId,
+          markerId,
+          animationId: animation.id,
+          pointerId,
+          snapBoundaries,
+          snapThresholdSeconds,
+        };
+        setTimelineDragActive(true);
+      },
+      onPreview: ({ pointerId, clientX, snap }) =>
+        updateTimingDragFromPointer(pointerId, clientX, snap),
+      onCommit: ({ pointerId, clientX, snap }) =>
+        finishTimingDragFromPointer(pointerId, clientX, snap),
+      onCancel: clearTimingDragState,
+      onDragEnd: () => {
         stopTimingDragAutoScroll();
         clearTimelineSnapGuide();
         setTimelineDragActive(false);
       },
-      [],
+    });
+  }
+
+  function updateTimingDragFromPointer(
+    pointerId: number,
+    clientX: number,
+    snap: boolean,
+  ) {
+    const drag = timingDragRef.current;
+    if (!drag || drag.pointerId !== pointerId) return;
+    const deltaSeconds = getComposeAnimationTimingDelta(
+      drag,
+      clientX,
+      timelineViewportRef.current?.scrollLeft ?? 0,
+      contentWidth,
+      partDuration,
     );
+    const next = getNextComposeAnimationTiming(
+      drag,
+      deltaSeconds,
+      partDuration,
+      snap,
+    );
+    updateTimelineSnapGuide(next.guideTime);
+    setTimelineBlockPreviews({
+      [timelineBlockPreviewKey("motion", drag.partId, drag.markerId)]: {
+        start: next.delay,
+        duration: next.duration,
+      },
+    });
+  }
 
-    useEffect(() => {
-      setSelectedKeyframeIds((current) => {
-        if (!current.size) return current;
-        const liveIds = new Set(
-          keyframeHitTargets.flatMap((target) => target.selectionIds),
-        );
-        const next = new Set([...current].filter((id) => liveIds.has(id)));
-        return next.size === current.size ? current : next;
-      });
-    }, [keyframeHitTargets]);
+  function finishTimingDragFromPointer(
+    pointerId: number,
+    clientX: number,
+    snap: boolean,
+  ) {
+    const drag = timingDragRef.current;
+    if (!drag || drag.pointerId !== pointerId) return;
+    const deltaSeconds = getComposeAnimationTimingDelta(
+      drag,
+      clientX,
+      timelineViewportRef.current?.scrollLeft ?? 0,
+      contentWidth,
+      partDuration,
+    );
+    const next = getNextComposeAnimationTiming(
+      drag,
+      deltaSeconds,
+      partDuration,
+      snap,
+    );
+    timingDragRef.current = null;
+    setTimelineDragActive(false);
+    setTimelineBlockPreviews(null);
+    updateComposeAnimationLayerMotionTiming(
+      drag.layer,
+      next,
+      undefined,
+      undefined,
+      onUpdateBackgroundAnimation,
+      onUpdateObjectAnimation,
+      drag.animationId,
+    );
+  }
 
-    useEffect(() => {
-      function deleteSelectedFromKeyboard(event: KeyboardEvent) {
-        if (event.key !== "Backspace" && event.key !== "Delete") return;
-        if (isEditableKeyboardTarget(event.target)) return;
-        if (!selectedKeyframeIds.size) return;
-        if (!deleteSelectedKeyframes()) return;
-        event.preventDefault();
-        event.stopImmediatePropagation();
-      }
-
-      window.addEventListener("keydown", deleteSelectedFromKeyboard, true);
-      return () =>
-        window.removeEventListener("keydown", deleteSelectedFromKeyboard, true);
-    }, [keyframeHitTargets, selectedKeyframeIds]);
-
-    function getTimelineContentRect() {
-      return timelineViewportRef.current
-        ?.querySelector<HTMLElement>("[data-timeline-content]")
-        ?.getBoundingClientRect();
-    }
-
-    function selectKeyframeIds(ids: string[], additive: boolean) {
-      setSelectedKeyframeIds((current) => {
-        const next = additive ? new Set(current) : new Set<string>();
-        for (const id of ids) {
-          if (additive && next.has(id)) next.delete(id);
-          else next.add(id);
-        }
-        return next;
-      });
-    }
-
-    function deleteSelectedKeyframes() {
-      const selectedTargets = keyframeHitTargets
-        .filter(
-          (target) => target.selection && selectedKeyframeIds.has(target.id),
-        )
-        .map((target) => ({
-          layerId: target.layerId,
-          selection: target.selection as ComposeAnimationKeyframeSelection,
-        }));
-      if (!selectedTargets.length) return false;
-
-      for (const layer of layers) {
-        const selections = selectedTargets
-          .filter((target) => target.layerId === layer.id)
-          .map((target) => target.selection);
-        if (!selections.length) continue;
-        if (layer.kind === "background") {
-          onUpdateBackgroundAnimation?.((animations) =>
-            removeComposeAnimationKeyframeSelections(
-              animations,
-              selections,
-              partDuration,
-            ),
-          );
-        } else if (layer.object) {
-          onUpdateObjectAnimation?.(layer.object.id, (animations) =>
-            removeComposeAnimationKeyframeSelections(
-              animations,
-              selections,
-              partDuration,
-            ),
-          );
-        }
-      }
-      setSelectedKeyframeIds(new Set());
-      return true;
-    }
-
-    function updateMarqueeSelection(drag: ComposeKeyframeMarqueeDrag) {
-      const left = Math.min(drag.startContentX, drag.currentContentX);
-      const right = Math.max(drag.startContentX, drag.currentContentX);
-      const top = Math.min(drag.startContentY, drag.currentContentY);
-      const bottom = Math.max(drag.startContentY, drag.currentContentY);
-      const next = drag.additive
-        ? new Set(drag.initialSelectedIds)
-        : new Set<string>();
-      for (const target of keyframeHitTargets) {
-        const hit =
-          target.x >= left - composeKeyframeHitRadiusPx &&
-          target.x <= right + composeKeyframeHitRadiusPx &&
-          target.y >= top - composeKeyframeHitRadiusPx &&
-          target.y <= bottom + composeKeyframeHitRadiusPx;
-        if (!hit) continue;
-        for (const id of target.selectionIds) next.add(id);
-      }
-      setSelectedKeyframeIds(next);
-    }
-
-    function startKeyframeMarquee(event: PointerEvent<HTMLDivElement>) {
-      if (event.button !== 0) return;
-      const target = event.target as HTMLElement;
-      if (target.closest("[data-timeline-control]")) return;
-      const rect = getTimelineContentRect();
-      if (!rect) return;
-      event.preventDefault();
-      event.stopPropagation();
-      const startContentX = event.clientX - rect.left;
-      const startContentY = event.clientY - rect.top;
-      const next: ComposeKeyframeMarqueeDrag = {
-        startContentX,
-        startContentY,
-        currentContentX: startContentX,
-        currentContentY: startContentY,
-        additive: event.shiftKey || event.metaKey || event.ctrlKey,
-        initialSelectedIds: selectedKeyframeIds,
-      };
-      keyframeMarqueeRef.current = next;
-      setKeyframeMarquee(next);
-
-      function onMove(moveEvent: globalThis.PointerEvent) {
-        const active = keyframeMarqueeRef.current;
-        const activeRect = getTimelineContentRect();
-        if (!active || !activeRect) return;
-        const updated = {
-          ...active,
-          currentContentX: moveEvent.clientX - activeRect.left,
-          currentContentY: moveEvent.clientY - activeRect.top,
-        };
-        keyframeMarqueeRef.current = updated;
-        setKeyframeMarquee(updated);
-        updateMarqueeSelection(updated);
-      }
-
-      function onUp(upEvent: globalThis.PointerEvent) {
-        const active = keyframeMarqueeRef.current;
-        if (active) {
-          const dragDistance = Math.max(
-            Math.abs(active.currentContentX - active.startContentX),
-            Math.abs(active.currentContentY - active.startContentY),
-          );
-          if (dragDistance < 4 && !active.additive)
-            setSelectedKeyframeIds(new Set());
-        }
-        keyframeMarqueeRef.current = null;
-        setKeyframeMarquee(null);
-        window.removeEventListener("pointermove", onMove);
-        window.removeEventListener("pointerup", onUp);
-        window.removeEventListener("pointercancel", onUp);
-        upEvent.preventDefault();
-      }
-
-      window.addEventListener("pointermove", onMove);
-      window.addEventListener("pointerup", onUp);
-      window.addEventListener("pointercancel", onUp);
-    }
-
-    function selectLayer(layer: ComposeAnimationTimelineLayer) {
-      onSelectObjects?.(layer.object ? [layer.object] : []);
-    }
-
-    function inspectLayer(layer: ComposeAnimationTimelineLayer) {
-      onInspectObject?.(layer.object ?? null);
-    }
-
-    function setLayerParent(childLayerId: string, parentLayerId: string) {
-      if (!onUpdateObject) return;
-      const child = layers.find((layer) => layer.id === childLayerId);
-      if (!child?.object) return;
-      const nextParentId = parentLayerId || undefined;
-      const parentOptions = getComposeParentOptions(layers, childLayerId);
-      if (
-        nextParentId &&
-        !parentOptions.some((layer) => layer.id === nextParentId)
-      )
-        return;
-      onUpdateObject(childLayerId, (object) => ({
-        ...object,
-        parentId: nextParentId,
-      }));
-    }
-
-    function startPickWhipDrag(
-      event: ReactPointerEvent<HTMLElement>,
-      childLayerId: string,
-    ) {
-      if (event.button !== 0) return;
-      event.preventDefault();
-      event.stopPropagation();
-      const rect = event.currentTarget.getBoundingClientRect();
-      const startX = rect.left + rect.width / 2;
-      const startY = rect.top + rect.height / 2;
-      const next: ComposePickWhipDrag = {
-        childLayerId,
-        startX,
-        startY,
-        currentX: event.clientX,
-        currentY: event.clientY,
-      };
-      pickWhipDragRef.current = next;
-      setPickWhipDrag(next);
-      event.currentTarget.setPointerCapture(event.pointerId);
-
-      function update(moveEvent: globalThis.PointerEvent) {
-        const active = pickWhipDragRef.current;
-        if (!active) return;
-        const updated = {
-          ...active,
-          currentX: moveEvent.clientX,
-          currentY: moveEvent.clientY,
-        };
-        pickWhipDragRef.current = updated;
-        setPickWhipDrag(updated);
-        setPickWhipDropLayerId(
-          getPickWhipTargetLayerId(
-            moveEvent.clientX,
-            moveEvent.clientY,
-            active.childLayerId,
-          ),
-        );
-      }
-
-      function finish(upEvent: globalThis.PointerEvent) {
-        const active = pickWhipDragRef.current;
-        pickWhipDragRef.current = null;
-        setPickWhipDrag(null);
-        setPickWhipDropLayerId(null);
-        window.removeEventListener("pointermove", update);
-        window.removeEventListener("pointerup", finish);
-        window.removeEventListener("pointercancel", cancel);
-        if (!active || upEvent.type === "pointercancel") return;
-        const targetLayerId = getPickWhipTargetLayerId(
-          upEvent.clientX,
-          upEvent.clientY,
-          active.childLayerId,
-        );
-        if (!targetLayerId) return;
-        setLayerParent(active.childLayerId, targetLayerId);
-      }
-
-      function cancel(cancelEvent: globalThis.PointerEvent) {
-        finish(cancelEvent);
-      }
-
-      window.addEventListener("pointermove", update);
-      window.addEventListener("pointerup", finish);
-      window.addEventListener("pointercancel", cancel);
-    }
-
-    function getPickWhipTargetLayerId(
-      clientX: number,
-      clientY: number,
-      childLayerId: string,
-    ) {
-      const targetLayerId = document
-        .elementsFromPoint(clientX, clientY)
-        .map((element) =>
-          element instanceof HTMLElement
-            ? element.closest<HTMLElement>(
-                "[data-compose-parent-drop-layer-id]",
-              )
-            : null,
-        )
-        .find((element) => element?.dataset.composeParentDropLayerId)
-        ?.dataset.composeParentDropLayerId;
-      if (!targetLayerId || targetLayerId === childLayerId) return null;
-      return targetLayerId;
-    }
-
-    function startLayerNameEdit(layerId: string, name: string) {
-      setEditingLayerId(layerId);
-      setLayerNameDraft(name);
-    }
-
-    function commitLayerNameEdit() {
-      if (!editingLayerId) return;
-      const nextName = layerNameDraft.trim();
-      const layer = layers.find((item) => item.id === editingLayerId);
-      if (nextName && layer && nextName !== layer.name)
-        onRenameLayer?.(editingLayerId, nextName);
-      setEditingLayerId(null);
-      setLayerNameDraft("");
-    }
-
-    function cancelLayerNameEdit() {
-      setEditingLayerId(null);
-      setLayerNameDraft("");
-    }
-
-    function toggleLayerExpanded(layerId: string) {
-      setExpandedLayerIds((current) => {
-        const next = new Set(current);
-        if (next.has(layerId)) next.delete(layerId);
-        else next.add(layerId);
-        return next;
-      });
-    }
-
-    function toggleEaseExpanded(attributeRowId: string) {
-      setExpandedEaseTrackIds((current) => {
-        const next = new Set(current);
-        if (next.has(attributeRowId)) next.delete(attributeRowId);
-        else next.add(attributeRowId);
-        return next;
-      });
-    }
-
-    function applyEaseToTrack(
-      layer: ComposeAnimationTimelineLayer,
-      animationId: string,
-      ease: MotionEase | readonly [number, number, number, number],
-    ) {
-      const updater = (animations: LayerAnimation[]) =>
-        updateComposeAnimationEase(animations, animationId, ease);
-      if (layer.kind === "background") {
-        onUpdateBackgroundAnimation?.(updater);
-      } else if (layer.object) {
-        onUpdateObjectAnimation?.(layer.object.id, updater);
-      }
-    }
-
-    function applyPresetToLayer(
-      layer: ComposeAnimationTimelineLayer | null,
-      presetId: string,
-    ) {
-      const preset = composeAnimationPresets.find(
-        (item) => item.id === presetId,
+  function updateComposeMotionFromPointer(
+    event: PointerEvent<HTMLDivElement>,
+    _timelinePart: TimelinePart,
+    marker: MotionMarker,
+    action: "move" | "start" | "end",
+  ) {
+    const animMatch = marker.id.match(/^(.+)\/anim\/(.+)$/);
+    if (animMatch) {
+      const [, layerId, animationId] = animMatch;
+      const layer = layers.find((item) => item.id === layerId);
+      if (!layer) return;
+      const animation = layer.animations?.find(
+        (anim) => anim.id === animationId,
       );
-      if (!layer || !preset) return;
-      const animation = createComposeAnimationPresetAnimation(
-        preset,
-        currentTime,
-        timelineDuration,
-      );
-      if (layer.kind === "background") {
-        onUpdateBackgroundAnimation?.((animations) => [
-          ...animations,
-          animation,
-        ]);
-      } else if (layer.object) {
-        onUpdateObjectAnimation?.(layer.object.id, (animations) => [
-          ...animations,
-          animation,
-        ]);
-      }
+      if (animation) startTimingDrag(event, layer, action, animation);
+      return;
     }
+    const layer = layers.find((item) => item.id === marker.id);
+    if (layer) startTimingDrag(event, layer, action);
+  }
 
-    function openComposePresetContextMenu(
-      event: ReactMouseEvent<HTMLElement>,
-      layer: ComposeAnimationTimelineLayer,
-    ) {
-      event.preventDefault();
-      event.stopPropagation();
-      selectLayer(layer);
-      setAppContextMenu?.({
-        x: event.clientX,
-        y: event.clientY,
-        items: composeAnimationPresets.map((preset) => ({
-          label: preset.label,
-          action: () => applyPresetToLayer(layer, preset.id),
-        })),
-      });
-    }
-
-    function startTimingDrag(
-      event: PointerEvent<HTMLDivElement>,
-      layer: ComposeAnimationTimelineLayer,
-      action: ComposeAnimationTimingDrag["action"],
-      animation?: LayerAnimation,
-    ) {
-      if (event.button !== 0) return;
-      if (!animation) return;
-      const initialDelay = animation.options.delay ?? 0;
-      const initialDuration = animation.options.duration;
-      const markerId = `${layer.id}/anim/${animation.id}`;
-      event.preventDefault();
-      event.stopPropagation();
-      selectLayer(layer);
-      const pixelsPerSecond =
-        (timelineRef.current?.getBoundingClientRect().width ?? 1) /
-        Math.max(partDuration, 1);
-      const snapThresholdSeconds = Math.max(0.08, 8 / pixelsPerSecond);
-      const movingEdges = new Set([
-        roundTwo(initialDelay),
-        roundTwo(initialDelay + initialDuration),
-      ]);
-      const snapBoundaries = Array.from(
-        new Set([
-          ...scrubSnapBoundaries.filter(
-            (boundary) => !movingEdges.has(roundTwo(boundary)),
-          ),
-          currentTime,
-        ]),
-      ).sort((left, right) => left - right);
-      function clearTimingDragState() {
-        timingDragRef.current = null;
-        stopTimingDragAutoScroll();
-        clearTimelineSnapGuide();
-        setTimelineBlockPreviews(null);
-        setTimelineDragActive(false);
-      }
-
-      startTimingPointerTransaction({
-        event,
-        capturePointer: true,
-        updateAutoScroll: updateTimingDragAutoScroll,
-        stopAutoScroll: stopTimingDragAutoScroll,
-        onDragStart: ({ pointerId }) => {
-          timingDragRef.current = {
-            action,
-            initialClientX: event.clientX,
-            initialScrollLeft: timelineViewportRef.current?.scrollLeft ?? 0,
-            initialDelay,
-            initialDuration,
-            layer,
-            partId: composeTimelinePartId,
-            markerId,
-            animationId: animation.id,
-            pointerId,
-            snapBoundaries,
-            snapThresholdSeconds,
-          };
-          setTimelineDragActive(true);
-        },
-        onPreview: ({ pointerId, clientX, snap }) =>
-          updateTimingDragFromPointer(pointerId, clientX, snap),
-        onCommit: ({ pointerId, clientX, snap }) =>
-          finishTimingDragFromPointer(pointerId, clientX, snap),
-        onCancel: clearTimingDragState,
-        onDragEnd: () => {
-          stopTimingDragAutoScroll();
-          clearTimelineSnapGuide();
-          setTimelineDragActive(false);
-        },
-      });
-    }
-
-    function updateTimingDragFromPointer(
-      pointerId: number,
-      clientX: number,
-      snap: boolean,
-    ) {
-      const drag = timingDragRef.current;
-      if (!drag || drag.pointerId !== pointerId) return;
-      const deltaSeconds = getComposeAnimationTimingDelta(
-        drag,
-        clientX,
-        timelineViewportRef.current?.scrollLeft ?? 0,
-        contentWidth,
-        partDuration,
-      );
-      const next = getNextComposeAnimationTiming(
-        drag,
-        deltaSeconds,
-        partDuration,
-        snap,
-      );
-      updateTimelineSnapGuide(next.guideTime);
-      setTimelineBlockPreviews({
-        [timelineBlockPreviewKey("motion", drag.partId, drag.markerId)]: {
-          start: next.delay,
-          duration: next.duration,
-        },
-      });
-    }
-
-    function finishTimingDragFromPointer(
-      pointerId: number,
-      clientX: number,
-      snap: boolean,
-    ) {
-      const drag = timingDragRef.current;
-      if (!drag || drag.pointerId !== pointerId) return;
-      const deltaSeconds = getComposeAnimationTimingDelta(
-        drag,
-        clientX,
-        timelineViewportRef.current?.scrollLeft ?? 0,
-        contentWidth,
-        partDuration,
-      );
-      const next = getNextComposeAnimationTiming(
-        drag,
-        deltaSeconds,
-        partDuration,
-        snap,
-      );
-      timingDragRef.current = null;
-      setTimelineDragActive(false);
-      setTimelineBlockPreviews(null);
-      updateComposeAnimationLayerMotionTiming(
-        drag.layer,
-        next,
-        undefined,
-        undefined,
-        onUpdateBackgroundAnimation,
-        onUpdateObjectAnimation,
-        drag.animationId,
-      );
-    }
-
-    function updateComposeMotionFromPointer(
-      event: PointerEvent<HTMLDivElement>,
-      _timelinePart: TimelinePart,
-      marker: MotionMarker,
-      action: "move" | "start" | "end",
-    ) {
-      const animMatch = marker.id.match(/^(.+)\/anim\/(.+)$/);
-      if (animMatch) {
-        const [, layerId, animationId] = animMatch;
-        const layer = layers.find((item) => item.id === layerId);
-        if (!layer) return;
-        const animation = layer.animations?.find(
-          (anim) => anim.id === animationId,
-        );
-        if (animation) startTimingDrag(event, layer, action, animation);
-        return;
-      }
-      const layer = layers.find((item) => item.id === marker.id);
-      if (layer) startTimingDrag(event, layer, action);
-    }
-
-    if (!part) {
-      return (
-        <TimelineShell
-          activeMode="compose"
-          contentWidth={contentWidth}
-          currentTime={currentTime}
-          disableDeclarativePlayhead={isPlaying}
-          displayDuration={partDuration}
-          emptyContent={
-            <div className="grid h-full place-items-center text-center text-sm font-bold text-[#737884]">
-              Move the playhead over a composition to edit its animations.
-            </div>
-          }
-          laneContentHeight={laneContentHeight}
-          laneRowsStyle={laneRowsStyle}
-          layerRailWidth={layerRailWidth}
-          layerHeaderContent={<ComposeTimelineLayerHeader />}
-          playheadColor="var(--clipper-accent)"
-          refs={{
-            playbackPlayheadRef,
-            timelineRef,
-            timelineViewportRef,
-            timelineLayerRailRef,
-            timelineSnapGuideRef,
-            scrubbingRef,
-          }}
-          timelineName="Compose"
-          timelineZoom={timelineZoom}
-          ticks={ticks}
-          onModeChange={(nextMode) => {
-            if (nextMode === "composition") onExitCompose();
-          }}
-          onTimelineViewportScroll={saveTimelineDisplacement}
-          onTimelineZoomChange={updateTimelineZoom}
-          rulerHandlers={{
-            onPointerDown: startScrub,
-            onPointerMove: continueScrub,
-            onPointerUp: endScrub,
-            onPointerCancel: endScrub,
-          }}
-          renderLayerRail={() => null}
-          renderTimelineViewport={() => null}
-        />
-      );
-    }
-
+  if (!part) {
     return (
       <TimelineShell
         activeMode="compose"
@@ -945,7 +908,11 @@ export const ComposeAnimationTimelinePanel = memo(
         currentTime={currentTime}
         disableDeclarativePlayhead={isPlaying}
         displayDuration={partDuration}
-        dragActive={timelineDragActive}
+        emptyContent={
+          <div className="grid h-full place-items-center text-center text-sm font-bold text-[#737884]">
+            Move the playhead over a composition to edit its animations.
+          </div>
+        }
         laneContentHeight={laneContentHeight}
         laneRowsStyle={laneRowsStyle}
         layerRailWidth={layerRailWidth}
@@ -959,7 +926,7 @@ export const ComposeAnimationTimelinePanel = memo(
           timelineSnapGuideRef,
           scrubbingRef,
         }}
-        timelineName={getDisplayNameFromPath(part.filePath)}
+        timelineName="Compose"
         timelineZoom={timelineZoom}
         ticks={ticks}
         onModeChange={(nextMode) => {
@@ -973,152 +940,191 @@ export const ComposeAnimationTimelinePanel = memo(
           onPointerUp: endScrub,
           onPointerCancel: endScrub,
         }}
-        renderLayerRail={() => (
-          <>
-            <span className="pointer-events-none absolute inset-y-0 right-0 z-30 w-px bg-[#39404d]" />
-            {rows.map((row, index) => (
-              <span
-                className="pointer-events-none absolute right-0 z-40 w-0.5 bg-[#6f7684]"
-                key={`compose-layer-accent-${row.id}`}
-                style={{
-                  top: timelineRowStarts[index],
-                  height: getComposeRowHeight(row, easeRowHeights),
-                }}
-              />
-            ))}
-            {rows.map((row) => (
-              <ComposeTimelineRailRow
-                key={row.id}
-                row={row}
-                compact
-                editingLayerId={editingLayerId}
-                expanded={expandedLayerIds.has(row.layer.id)}
-                easeExpanded={
-                  row.kind === "attribute"
-                    ? expandedEaseTrackIds.has(row.id)
-                    : false
-                }
-                easeRowHeight={getComposeRowHeight(row, easeRowHeights)}
-                layerNameDraft={layerNameDraft}
-                onCancelLayerNameEdit={cancelLayerNameEdit}
-                onCommitLayerNameEdit={commitLayerNameEdit}
-                onDraftChange={setLayerNameDraft}
-                onStartLayerNameEdit={startLayerNameEdit}
-                onOpenPresetContextMenu={openComposePresetContextMenu}
-                onToggleExpanded={toggleLayerExpanded}
-                onToggleEaseExpanded={toggleEaseExpanded}
-                onResizeEaseRow={(rowId, height) =>
-                  setEaseRowHeights((prev) => ({ ...prev, [rowId]: height }))
-                }
-                parentOptions={getComposeParentOptions(layers, row.layer.id)}
-                onSetLayerParent={setLayerParent}
-                onStartPickWhipDrag={startPickWhipDrag}
-                pickWhipDropActive={pickWhipDropLayerId === row.layer.id}
-              />
-            ))}
-            {pickWhipDrag ? (
-              <ComposePickWhipDragLine drag={pickWhipDrag} />
-            ) : null}
-          </>
-        )}
-        renderTimelineViewport={() => (
-          <>
-            {rows.map((row) => (
-              <ComposeTimelineViewportRow
-                key={row.id}
-                row={row}
-                timelineDuration={partDuration}
-                contentWidth={contentWidth}
-                timelineRef={timelineRef}
-                easeRowHeight={
-                  row.kind === "ease"
-                    ? getComposeRowHeight(row, easeRowHeights)
-                    : composeTimelineRowHeight
-                }
-                easeExpanded={
-                  row.kind === "attribute"
-                    ? expandedEaseTrackIds.has(row.id)
-                    : false
-                }
-                overviewDragPreview={
-                  overviewDragPreview?.layerId === row.layer.id
-                    ? overviewDragPreview
-                    : null
-                }
-                onOpenPresetContextMenu={openComposePresetContextMenu}
-                onApplyEase={(layer, animationId, ease) =>
-                  applyEaseToTrack(layer, animationId, ease)
-                }
-                onResizeEaseRow={(rowId, height) =>
-                  setEaseRowHeights((prev) => ({ ...prev, [rowId]: height }))
-                }
-                onMoveKeyframe={(layer, animationId, newTime) => {
-                  if (layer.kind === "background") {
-                    onUpdateBackgroundAnimation?.((animations) =>
-                      moveComposeAnimationAttributeKeyframe(
-                        animations,
-                        animationId,
-                        newTime,
-                        partDuration,
-                      ),
-                    );
-                  } else if (layer.object) {
-                    onUpdateObjectAnimation?.(layer.object.id, (animations) =>
-                      moveComposeAnimationAttributeKeyframe(
-                        animations,
-                        animationId,
-                        newTime,
-                        partDuration,
-                      ),
-                    );
-                  }
-                }}
-                onMoveKeyframesAtTime={(layer, originalTime, newTime) => {
-                  if (layer.kind === "background") {
-                    onUpdateBackgroundAnimation?.((animations) =>
-                      moveComposeAnimationKeyframesAtTime(
-                        animations,
-                        originalTime,
-                        newTime,
-                        partDuration,
-                      ),
-                    );
-                  } else if (layer.object) {
-                    onUpdateObjectAnimation?.(layer.object.id, (animations) =>
-                      moveComposeAnimationKeyframesAtTime(
-                        animations,
-                        originalTime,
-                        newTime,
-                        partDuration,
-                      ),
-                    );
-                  }
-                }}
-                onOverviewDragPreview={(originalTime, time) =>
-                  setOverviewDragPreview({
-                    layerId: row.layer.id,
-                    originalTime,
-                    time,
-                  })
-                }
-                onOverviewDragEnd={() => setOverviewDragPreview(null)}
-                selectedKeyframeIds={selectedKeyframeIds}
-                onSelectKeyframeIds={selectKeyframeIds}
-                onInspectLayer={inspectLayer}
-                onStartKeyframeMarquee={startKeyframeMarquee}
-                setAppContextMenu={setAppContextMenu}
-              />
-            ))}
-            {keyframeMarquee ? (
-              <ComposeKeyframeMarquee marquee={keyframeMarquee} />
-            ) : null}
-          </>
-        )}
+        renderLayerRail={() => null}
+        renderTimelineViewport={() => null}
       />
     );
-  },
-  areComposeAnimationTimelinePanelPropsEqual,
-);
+  }
+
+  return (
+    <TimelineShell
+      activeMode="compose"
+      contentWidth={contentWidth}
+      currentTime={currentTime}
+      disableDeclarativePlayhead={isPlaying}
+      displayDuration={partDuration}
+      dragActive={timelineDragActive}
+      laneContentHeight={laneContentHeight}
+      laneRowsStyle={laneRowsStyle}
+      layerRailWidth={layerRailWidth}
+      layerHeaderContent={<ComposeTimelineLayerHeader />}
+      playheadColor="var(--clipper-accent)"
+      refs={{
+        playbackPlayheadRef,
+        timelineRef,
+        timelineViewportRef,
+        timelineLayerRailRef,
+        timelineSnapGuideRef,
+        scrubbingRef,
+      }}
+      timelineName={getDisplayNameFromPath(part.filePath)}
+      timelineZoom={timelineZoom}
+      ticks={ticks}
+      onModeChange={(nextMode) => {
+        if (nextMode === "composition") onExitCompose();
+      }}
+      onTimelineViewportScroll={saveTimelineDisplacement}
+      onTimelineZoomChange={updateTimelineZoom}
+      rulerHandlers={{
+        onPointerDown: startScrub,
+        onPointerMove: continueScrub,
+        onPointerUp: endScrub,
+        onPointerCancel: endScrub,
+      }}
+      renderLayerRail={() => (
+        <>
+          <span className="pointer-events-none absolute inset-y-0 right-0 z-30 w-px bg-[#39404d]" />
+          {rows.map((row, index) => (
+            <span
+              className="pointer-events-none absolute right-0 z-40 w-0.5 bg-[#6f7684]"
+              key={`compose-layer-accent-${row.id}`}
+              style={{
+                top: timelineRowStarts[index],
+                height: getComposeRowHeight(row, easeRowHeights),
+              }}
+            />
+          ))}
+          {rows.map((row) => (
+            <ComposeTimelineRailRow
+              key={row.id}
+              row={row}
+              compact
+              editingLayerId={editingLayerId}
+              expanded={expandedLayerIds.has(row.layer.id)}
+              easeExpanded={
+                row.kind === "attribute"
+                  ? expandedEaseTrackIds.has(row.id)
+                  : false
+              }
+              easeRowHeight={getComposeRowHeight(row, easeRowHeights)}
+              layerNameDraft={layerNameDraft}
+              onCancelLayerNameEdit={cancelLayerNameEdit}
+              onCommitLayerNameEdit={commitLayerNameEdit}
+              onDraftChange={setLayerNameDraft}
+              onStartLayerNameEdit={startLayerNameEdit}
+              onOpenPresetContextMenu={openComposePresetContextMenu}
+              onToggleExpanded={toggleLayerExpanded}
+              onToggleEaseExpanded={toggleEaseExpanded}
+              onResizeEaseRow={(rowId, height) =>
+                setEaseRowHeights((prev) => ({ ...prev, [rowId]: height }))
+              }
+              parentOptions={getComposeParentOptions(layers, row.layer.id)}
+              onSetLayerParent={setLayerParent}
+              onStartPickWhipDrag={startPickWhipDrag}
+              pickWhipDropActive={pickWhipDropLayerId === row.layer.id}
+            />
+          ))}
+          {pickWhipDrag ? (
+            <ComposePickWhipDragLine drag={pickWhipDrag} />
+          ) : null}
+        </>
+      )}
+      renderTimelineViewport={() => (
+        <>
+          {rows.map((row) => (
+            <ComposeTimelineViewportRow
+              key={row.id}
+              row={row}
+              timelineDuration={partDuration}
+              contentWidth={contentWidth}
+              timelineRef={timelineRef}
+              easeRowHeight={
+                row.kind === "ease"
+                  ? getComposeRowHeight(row, easeRowHeights)
+                  : composeTimelineRowHeight
+              }
+              easeExpanded={
+                row.kind === "attribute"
+                  ? expandedEaseTrackIds.has(row.id)
+                  : false
+              }
+              overviewDragPreview={
+                overviewDragPreview?.layerId === row.layer.id
+                  ? overviewDragPreview
+                  : null
+              }
+              onOpenPresetContextMenu={openComposePresetContextMenu}
+              onApplyEase={(layer, animationId, ease) =>
+                applyEaseToTrack(layer, animationId, ease)
+              }
+              onResizeEaseRow={(rowId, height) =>
+                setEaseRowHeights((prev) => ({ ...prev, [rowId]: height }))
+              }
+              onMoveKeyframe={(layer, animationId, newTime) => {
+                if (layer.kind === "background") {
+                  onUpdateBackgroundAnimation?.((animations) =>
+                    moveComposeAnimationAttributeKeyframe(
+                      animations,
+                      animationId,
+                      newTime,
+                      partDuration,
+                    ),
+                  );
+                } else if (layer.object) {
+                  onUpdateObjectAnimation?.(layer.object.id, (animations) =>
+                    moveComposeAnimationAttributeKeyframe(
+                      animations,
+                      animationId,
+                      newTime,
+                      partDuration,
+                    ),
+                  );
+                }
+              }}
+              onMoveKeyframesAtTime={(layer, originalTime, newTime) => {
+                if (layer.kind === "background") {
+                  onUpdateBackgroundAnimation?.((animations) =>
+                    moveComposeAnimationKeyframesAtTime(
+                      animations,
+                      originalTime,
+                      newTime,
+                      partDuration,
+                    ),
+                  );
+                } else if (layer.object) {
+                  onUpdateObjectAnimation?.(layer.object.id, (animations) =>
+                    moveComposeAnimationKeyframesAtTime(
+                      animations,
+                      originalTime,
+                      newTime,
+                      partDuration,
+                    ),
+                  );
+                }
+              }}
+              onOverviewDragPreview={(originalTime, time) =>
+                setOverviewDragPreview({
+                  layerId: row.layer.id,
+                  originalTime,
+                  time,
+                })
+              }
+              onOverviewDragEnd={() => setOverviewDragPreview(null)}
+              selectedKeyframeIds={selectedKeyframeIds}
+              onSelectKeyframeIds={selectKeyframeIds}
+              onInspectLayer={inspectLayer}
+              onStartKeyframeMarquee={startKeyframeMarquee}
+              setAppContextMenu={setAppContextMenu}
+            />
+          ))}
+          {keyframeMarquee ? (
+            <ComposeKeyframeMarquee marquee={keyframeMarquee} />
+          ) : null}
+        </>
+      )}
+    />
+  );
+}
 
 function buildComposeKeyframeHitTargets(
   rows: ComposeAnimationTimelineRow[],
@@ -1140,6 +1146,7 @@ function buildComposeKeyframeHitTargets(
           row.track.key,
           keyframe.animationId,
           keyframe.time,
+          keyframe.pointId,
         );
         targets.push({
           id,
@@ -1149,34 +1156,53 @@ function buildComposeKeyframeHitTargets(
           x: (keyframe.time / timelineDuration) * contentWidth,
           y: rowY,
           selectionIds: [id],
-          selection: {
-            animationId: keyframe.animationId,
-            key: row.track.key,
-            time: keyframe.time,
-          },
+          selections: [
+            {
+              animationId: keyframe.animationId,
+              pointId: keyframe.pointId,
+              key: row.track.key,
+              time: keyframe.time,
+            },
+          ],
         });
       }
       return;
     }
 
     if (row.kind !== "layer") return;
-    const byTime = new Map<number, string[]>();
+    const byTime = new Map<
+      number,
+      {
+        selectionIds: string[];
+        selections: ComposeAnimationKeyframeSelection[];
+      }
+    >();
     for (const track of getComposeAnimationAttributeTracks(row.layer)) {
       for (const keyframe of track.keyframes) {
         const roundedTime = Math.round(keyframe.time * 1000);
-        const ids = byTime.get(roundedTime) ?? [];
-        ids.push(
+        const group = byTime.get(roundedTime) ?? {
+          selectionIds: [],
+          selections: [],
+        };
+        group.selectionIds.push(
           composeKeyframeSelectionId(
             row.layer.id,
             track.key,
             keyframe.animationId,
             keyframe.time,
+            keyframe.pointId,
           ),
         );
-        byTime.set(roundedTime, ids);
+        group.selections.push({
+          animationId: keyframe.animationId,
+          pointId: keyframe.pointId,
+          key: track.key,
+          time: keyframe.time,
+        });
+        byTime.set(roundedTime, group);
       }
     }
-    for (const [roundedTime, selectionIds] of byTime) {
+    for (const [roundedTime, group] of byTime) {
       const time = roundedTime / 1000;
       targets.push({
         id: `${row.layer.id}:overview:${roundedTime}`,
@@ -1185,7 +1211,8 @@ function buildComposeKeyframeHitTargets(
         time,
         x: (time / timelineDuration) * contentWidth,
         y: rowY,
-        selectionIds,
+        selectionIds: group.selectionIds,
+        selections: group.selections,
       });
     }
   });
@@ -1207,6 +1234,7 @@ function composeLayerTimeSelectionIds(
           track.key,
           keyframe.animationId,
           keyframe.time,
+          keyframe.pointId,
         ),
       ),
   );
@@ -1831,6 +1859,7 @@ function ComposeAttributeKeyframeLane({
           trackKey,
           keyframe.animationId,
           keyframe.time,
+          keyframe.pointId,
         ),
       ],
       event.shiftKey || event.metaKey || event.ctrlKey,
@@ -1890,6 +1919,7 @@ function ComposeAttributeKeyframeLane({
           trackKey,
           keyframe.animationId,
           keyframe.time,
+          keyframe.pointId,
         );
         const selected = selectedKeyframeIds.has(selectionId);
         // Own drag preview takes priority, then overview drag preview for same time
@@ -2077,8 +2107,10 @@ function ComposeEaseLane({
     for (let i = 0; i < sorted.length - 1; i++) {
       const kf = sorted[i];
       const nextKf = sorted[i + 1];
-      const ease = layer.animations?.find((a) => a.id === kf.animationId)
-        ?.options.ease as MotionEase | EaseControlPoints | undefined;
+      const ease = kf.easingToNext as
+        | MotionEase
+        | EaseControlPoints
+        | undefined;
       result.push({
         startAnimationId: kf.animationId,
         endAnimationId: nextKf.animationId,
@@ -2495,6 +2527,61 @@ function ComposeEaseLane({
       })}
     </div>
   );
+}
+
+class ComposeAnimationTimelineBoundary extends ReactComponent<
+  { children: ReactNode; partId: string; filePath: string },
+  { error: string | null }
+> {
+  state: { error: string | null } = { error: null };
+
+  static getDerivedStateFromError(error: unknown) {
+    return { error: timelineErrorMessage(error) };
+  }
+
+  componentDidUpdate(previousProps: { partId: string }) {
+    if (previousProps.partId !== this.props.partId && this.state.error) {
+      this.setState({ error: null });
+    }
+  }
+
+  componentDidCatch(error: unknown) {
+    console.error("Compose animation timeline failed", error);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="grid h-full min-h-[220px] place-items-center bg-[#080b11] p-6 text-[#ffd6d6]">
+          <div className="max-w-[920px] rounded-md border border-[#5a222c] bg-[#1a0f13]/95 p-5 shadow-[0_18px_60px_rgba(0,0,0,0.4)]">
+            <div className="text-sm font-bold text-[#ff8b96]">
+              Composition timeline failed
+            </div>
+            <div className="mt-1 break-all font-mono text-xs text-[#a7adbb]">
+              {this.props.filePath}
+            </div>
+            <pre className="mt-4 max-h-[260px] overflow-auto whitespace-pre-wrap rounded border border-[#3b2a2a] bg-[#090b10] p-3 font-mono text-xs leading-relaxed text-[#ffd6d6]">
+              {this.state.error}
+            </pre>
+            <button
+              className="mt-4 rounded-md border border-[#6a313b] px-3 py-1.5 text-sm font-semibold text-[#ffe2e2] hover:bg-[#2a151a]"
+              type="button"
+              onClick={() => this.setState({ error: null })}
+            >
+              Retry timeline
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function timelineErrorMessage(error: unknown) {
+  return error instanceof Error
+    ? (error.stack ?? error.message)
+    : String(error);
 }
 
 function areComposeAnimationTimelinePanelPropsEqual(

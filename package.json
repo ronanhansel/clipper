@@ -42,7 +42,6 @@
     "motion": "latest",
     "nanoid": "latest",
     "react": "latest",
-    "react-arborist": "^3.5.0",
     "react-dom": "latest",
     "react-hot-toast": "^2.6.0",
     "react-scan": "^0.5.6",

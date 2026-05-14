@@ -146,6 +146,7 @@ import {
 import { liveDomPostProcessStorageKey } from "./core/effects/postprocess/liveDomCapability";
 import {
   frameObjectFromBackgroundLayer,
+  getFrameObjectSnapStops,
   getBoundsUnion,
   getPartFrameObject,
   selectionObjectFromBackgroundLayer,
@@ -204,6 +205,7 @@ import {
   type SelectionPayload,
   type TimelineClip,
   type TimelineLayerState,
+  type TimelineMode,
   type TransitionLayer,
   type TimelineViewportState,
 } from "./core/types";
@@ -3373,6 +3375,99 @@ function AppContent({
     return { x, y, width, height };
   }
 
+  function updateComposeDrawSnapGuides(guides: ObjectSnapGuide[]) {
+    const current = objectSnapGuidesRef.current;
+    if (
+      current.length === guides.length &&
+      current.every(
+        (guide, index) =>
+          guide.axis === guides[index]?.axis &&
+          guide.position === guides[index]?.position,
+      )
+    )
+      return;
+    objectSnapGuidesRef.current = guides;
+    setObjectSnapGuides(guides);
+  }
+
+  function clearComposeDrawSnapGuides() {
+    if (objectSnapGuidesRef.current.length === 0) return;
+    objectSnapGuidesRef.current = [];
+    setObjectSnapGuides([]);
+  }
+
+  function getShapeDrawSnapEnd(
+    start: Point,
+    end: Point,
+    constrain: boolean,
+  ): Point {
+    if (!part) return end;
+    const bounds = computeShapeDrawBox(start, end, constrain);
+    const stops = getFrameObjectSnapStops([
+      ...part.background.elements,
+      ...part.objects,
+    ]);
+    const threshold =
+      8 /
+      Math.max(displayFramePreviewScale * cameraPreviewTransform.scale, 0.001);
+    const xSnap = getDrawAxisSnap(
+      [
+        {
+          position: end.x >= start.x ? bounds.x + bounds.width : bounds.x,
+          influence: 1,
+        },
+        { position: bounds.x + bounds.width / 2, influence: 0.5 },
+      ],
+      stops.x,
+      threshold,
+    );
+    const ySnap = getDrawAxisSnap(
+      [
+        {
+          position: end.y >= start.y ? bounds.y + bounds.height : bounds.y,
+          influence: 1,
+        },
+        { position: bounds.y + bounds.height / 2, influence: 0.5 },
+      ],
+      stops.y,
+      threshold,
+    );
+    const guides: ObjectSnapGuide[] = [];
+    if (xSnap) guides.push({ axis: "x", position: xSnap.position });
+    if (ySnap) guides.push({ axis: "y", position: ySnap.position });
+    updateComposeDrawSnapGuides(guides);
+    return {
+      x: end.x + (xSnap?.endOffset ?? 0),
+      y: end.y + (ySnap?.endOffset ?? 0),
+    };
+  }
+
+  function getDrawAxisSnap(
+    candidates: { position: number; influence: number }[],
+    stops: number[],
+    threshold: number,
+  ) {
+    let closest: {
+      endOffset: number;
+      position: number;
+      distance: number;
+    } | null = null;
+    for (const candidate of candidates) {
+      if (candidate.influence <= 0) continue;
+      for (const stop of stops) {
+        const distance = Math.abs(stop - candidate.position);
+        if (distance > threshold) continue;
+        if (closest && distance >= closest.distance) continue;
+        closest = {
+          endOffset: (stop - candidate.position) / candidate.influence,
+          position: stop,
+          distance,
+        };
+      }
+    }
+    return closest;
+  }
+
   function commitPathDraftObject(draft: PathDraft) {
     if (!part || draft.segments.length === 0) return;
     const { bounds, path } = getPenPathData(draft.segments, draft.closed);
@@ -3847,20 +3942,29 @@ function AppContent({
       return true;
     }
     if (!start || start.pointerId !== event.pointerId) return false;
+    const shouldSnapDraw = event.metaKey || event.ctrlKey;
+    const drawEnd =
+      shouldSnapDraw && !isPathDrawTool(tool)
+        ? getShapeDrawSnapEnd(start, end, event.shiftKey)
+        : end;
+    if (!shouldSnapDraw || isPathDrawTool(tool)) clearComposeDrawSnapGuides();
     if (tool === "pencil") {
       const lastPoint = start.points[start.points.length - 1] ?? start;
-      const distance = Math.hypot(end.x - lastPoint.x, end.y - lastPoint.y);
-      if (distance >= 2) start.points.push(end);
+      const distance = Math.hypot(
+        drawEnd.x - lastPoint.x,
+        drawEnd.y - lastPoint.y,
+      );
+      if (distance >= 2) start.points.push(drawEnd);
     }
     const drawData = isPathDrawTool(tool)
-      ? getPathDrawData(tool, start, end, start.points)
+      ? getPathDrawData(tool, start, drawEnd, start.points)
       : null;
     const bounds =
-      drawData?.bounds ?? computeShapeDrawBox(start, end, event.shiftKey);
+      drawData?.bounds ?? computeShapeDrawBox(start, drawEnd, event.shiftKey);
     shapeDrawPreviewRef.current = {
       bounds,
       start,
-      end,
+      end: drawEnd,
       points: tool === "pencil" ? [...start.points] : undefined,
       path: tool === "pencil" ? drawData?.path : undefined,
     };
@@ -3961,6 +4065,7 @@ function AppContent({
     shapeDrawStartRef.current = null;
     pathDraftRef.current = null;
     shapeDrawPreviewRef.current = null;
+    const shouldSnapDraw = event.metaKey || event.ctrlKey;
     if (shapeDrawPreviewFrameRef.current) {
       cancelAnimationFrame(shapeDrawPreviewFrameRef.current);
       shapeDrawPreviewFrameRef.current = 0;
@@ -3970,7 +4075,12 @@ function AppContent({
       event.currentTarget.releasePointerCapture(event.pointerId);
 
     const el = event.currentTarget;
-    const end = framePointFromClient(event.nativeEvent, el);
+    const rawEnd = framePointFromClient(event.nativeEvent, el);
+    const end =
+      shouldSnapDraw && !isPathDrawTool(tool)
+        ? getShapeDrawSnapEnd(start, rawEnd, event.shiftKey)
+        : rawEnd;
+    clearComposeDrawSnapGuides();
     const minSize = 10;
     if (tool === "pencil") start.points.push(end);
     const points = tool === "pencil" ? start.points : [start, end];
@@ -4683,6 +4793,15 @@ function AppContent({
     setCurrentSceneTime(0);
   }
 
+  function handleTimelineModeChange(nextMode: TimelineMode) {
+    // Switching from Compose -> Direct should not implicitly "select" whatever
+    // timeline clip happened to be used as the compose target.
+    if (timelineMode === "compose" && nextMode === "composition") {
+      clearDirectSelection();
+    }
+    updateTimelineMode(nextMode);
+  }
+
   function handleModeChange(nextMode: typeof mode) {
     if (nextMode === "preview") {
       setPrerenderCacheResetToken((token) => token + 1);
@@ -5121,7 +5240,7 @@ function AppContent({
             timelineLayers,
             adjustmentLayers: scene.adjustmentLayers ?? [],
             transitionLayers: scene.transitionLayers ?? [],
-            onModeChange: updateTimelineMode,
+            onModeChange: handleTimelineModeChange,
             onTimelineViewportStateChange: composeMode
               ? updateComposeTimelineViewportState
               : updateTimelineViewportState,

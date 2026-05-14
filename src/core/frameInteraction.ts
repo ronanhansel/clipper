@@ -30,6 +30,7 @@ export type ObjectResizeMode = "resize" | "scale";
 export type ObjectDrag = {
   origin: Point;
   partId: string;
+  partVersion?: string;
   objects: SelectionPayload["objects"];
 };
 
@@ -37,10 +38,13 @@ export type ObjectSnapGuide = { axis: "x" | "y"; position: number };
 
 export type ObjectDragSnapResult = { delta: Point; guides: ObjectSnapGuide[] };
 
+export type BoundsSnapResult = { delta: Point; guides: ObjectSnapGuide[] };
+
 export type ObjectResize = {
   origin: Point;
   handle: ResizeHandle;
   partId: string;
+  partVersion?: string;
   selectionBox: Bounds;
   displaySelectionBox: Bounds;
   aspectRatio?: number;
@@ -163,35 +167,28 @@ export function getObjectDragSnap(
   const selectionBounds = getBoundsUnion(
     drag.objects.map((object) => object.bounds),
   );
-  const selectedIds = new Set(drag.objects.map((object) => object.id));
-  const targetBounds = [
-    { x: 0, y: 0, width: FRAME_WIDTH, height: FRAME_HEIGHT },
-    ...snapTargets
-      .filter((object) => !object.hidden && !selectedIds.has(object.id))
-      .map((object) => object.bounds),
-  ];
-  const xStops = targetBounds.flatMap((bounds) => [
-    bounds.x,
-    bounds.x + bounds.width / 2,
-    bounds.x + bounds.width,
-  ]);
-  const yStops = targetBounds.flatMap((bounds) => [
-    bounds.y,
-    bounds.y + bounds.height / 2,
-    bounds.y + bounds.height,
-  ]);
-  const xPoints = [
-    selectionBounds.x,
-    selectionBounds.x + selectionBounds.width / 2,
-    selectionBounds.x + selectionBounds.width,
-  ];
-  const yPoints = [
-    selectionBounds.y,
-    selectionBounds.y + selectionBounds.height / 2,
-    selectionBounds.y + selectionBounds.height,
-  ];
-  const xSnap = getClosestSnapOffset(xPoints, xStops, delta.x, threshold);
-  const ySnap = getClosestSnapOffset(yPoints, yStops, delta.y, threshold);
+  const snap = getBoundsSnap(
+    selectionBounds,
+    delta,
+    snapTargets,
+    threshold,
+    new Set(drag.objects.map((object) => object.id)),
+  );
+  return snap;
+}
+
+export function getBoundsSnap(
+  bounds: Bounds,
+  delta: Point,
+  snapTargets: FrameObject[],
+  threshold: number,
+  excludedIds = new Set<string>(),
+): BoundsSnapResult {
+  const stops = getFrameObjectSnapStops(snapTargets, excludedIds);
+  const xPoints = getSnapPoints(bounds, "x");
+  const yPoints = getSnapPoints(bounds, "y");
+  const xSnap = getClosestSnapOffset(xPoints, stops.x, delta.x, threshold);
+  const ySnap = getClosestSnapOffset(yPoints, stops.y, delta.y, threshold);
   const guides: ObjectSnapGuide[] = [];
   if (xSnap) guides.push({ axis: "x", position: xSnap.position });
   if (ySnap) guides.push({ axis: "y", position: ySnap.position });
@@ -202,6 +199,28 @@ export function getObjectDragSnap(
     },
     guides,
   };
+}
+
+export function getFrameObjectSnapStops(
+  snapTargets: FrameObject[],
+  excludedIds = new Set<string>(),
+) {
+  const targetBounds = [
+    { x: 0, y: 0, width: FRAME_WIDTH, height: FRAME_HEIGHT },
+    ...snapTargets
+      .filter((object) => !object.hidden && !excludedIds.has(object.id))
+      .map((object) => object.bounds),
+  ];
+  return {
+    x: targetBounds.flatMap((bounds) => getSnapPoints(bounds, "x")),
+    y: targetBounds.flatMap((bounds) => getSnapPoints(bounds, "y")),
+  };
+}
+
+function getSnapPoints(bounds: Bounds, axis: "x" | "y") {
+  const origin = axis === "x" ? bounds.x : bounds.y;
+  const size = axis === "x" ? bounds.width : bounds.height;
+  return [origin, origin + size / 2, origin + size];
 }
 
 function getClosestSnapOffset(
@@ -546,7 +565,7 @@ export function getFrameObjectPreviewTransform(
     typeof object.style.transform === "string"
       ? object.style.transform
       : undefined;
-  const transform = animationTransform ?? objectTransform ?? "";
+  const transform = `${animationTransform ?? ""} ${objectTransform ?? ""}`;
   let translateX = 0;
   let translateY = 0;
   let translateXPercent = 0;

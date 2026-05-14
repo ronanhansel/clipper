@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   buildComposeLayerTree,
+  getComposeLayerReorderTargetIndex,
   syncComposeSelectedLayerIds,
   type ComposeLayerNode,
-} from "./ComposeLayersPanel";
+} from "./composeLayerTree";
 import type { FrameObject } from "../../core/types";
 
 describe("syncComposeSelectedLayerIds", () => {
@@ -62,6 +63,13 @@ describe("buildComposeLayerTree", () => {
       "bg-element",
       "frame",
     ]);
+  });
+});
+
+describe("getComposeLayerReorderTargetIndex", () => {
+  it("maps visible top-down drop index to object-array insertion index", () => {
+    expect(getComposeLayerReorderTargetIndex(4, 1, 0)).toBe(3);
+    expect(getComposeLayerReorderTargetIndex(4, 1, 3)).toBe(0);
   });
 });
 

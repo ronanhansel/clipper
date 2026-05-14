@@ -29,7 +29,7 @@ export const minPreviewRenderHeight = previewRenderHeightOptions[0];
 export const maxPreviewRenderHeight =
   previewRenderHeightOptions[previewRenderHeightOptions.length - 1];
 export const selectorOffsetPx = 0;
-export const selectorHandleSizePx = 8;
+export const selectorHandleSizePx = 6;
 export const selectorBlue = "#159dff";
 export const defaultTimelinePixelsPerSecond = 126;
 export const defaultTimelineEndPaddingFraction = 0.5;

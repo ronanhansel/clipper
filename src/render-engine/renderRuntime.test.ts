@@ -589,7 +589,44 @@ describe("render runtime", () => {
       animations: [
         {
           id: "move",
-          keyframes: { x: [0, 100] as const, rotate: [0, 90] as const },
+          tracks: [
+            {
+              property: "x" as const,
+              valueType: "number" as const,
+              points: [
+                {
+                  id: "x:0",
+                  time: 0 / 1,
+                  value: 0,
+                  easingToNext: "linear" as const,
+                },
+                {
+                  id: "x:1",
+                  time: 4,
+                  value: 100,
+                  easingToNext: "linear" as const,
+                },
+              ],
+            },
+            {
+              property: "rotate" as const,
+              valueType: "number" as const,
+              points: [
+                {
+                  id: "rotate:0",
+                  time: 0 / 1,
+                  value: 0,
+                  easingToNext: "linear" as const,
+                },
+                {
+                  id: "rotate:1",
+                  time: 4,
+                  value: 90,
+                  easingToNext: "linear" as const,
+                },
+              ],
+            },
+          ],
           options: { duration: 4 },
         },
       ],
@@ -615,7 +652,44 @@ describe("render runtime", () => {
       animations: [
         {
           id: "parent-move",
-          keyframes: { x: [0, 100] as const, rotate: [0, 90] as const },
+          tracks: [
+            {
+              property: "x" as const,
+              valueType: "number" as const,
+              points: [
+                {
+                  id: "x:0",
+                  time: 0 / 1,
+                  value: 0,
+                  easingToNext: "linear" as const,
+                },
+                {
+                  id: "x:1",
+                  time: 4,
+                  value: 100,
+                  easingToNext: "linear" as const,
+                },
+              ],
+            },
+            {
+              property: "rotate" as const,
+              valueType: "number" as const,
+              points: [
+                {
+                  id: "rotate:0",
+                  time: 0 / 1,
+                  value: 0,
+                  easingToNext: "linear" as const,
+                },
+                {
+                  id: "rotate:1",
+                  time: 4,
+                  value: 90,
+                  easingToNext: "linear" as const,
+                },
+              ],
+            },
+          ],
           options: { duration: 4 },
         },
       ],
@@ -628,7 +702,26 @@ describe("render runtime", () => {
       animations: [
         {
           id: "child-move",
-          keyframes: { x: [0, 40] as const },
+          tracks: [
+            {
+              property: "x" as const,
+              valueType: "number" as const,
+              points: [
+                {
+                  id: "x:0",
+                  time: 0 / 1,
+                  value: 0,
+                  easingToNext: "linear" as const,
+                },
+                {
+                  id: "x:1",
+                  time: 4,
+                  value: 40,
+                  easingToNext: "linear" as const,
+                },
+              ],
+            },
+          ],
           options: { duration: 4 },
         },
       ],
@@ -651,7 +744,44 @@ describe("render runtime", () => {
       animations: [
         {
           id: "fade-move",
-          keyframes: { opacity: [0, 1] as const, x: [0, 100] as const },
+          tracks: [
+            {
+              property: "opacity" as const,
+              valueType: "number" as const,
+              points: [
+                {
+                  id: "opacity:0",
+                  time: 0 / 1,
+                  value: 0,
+                  easingToNext: "linear" as const,
+                },
+                {
+                  id: "opacity:1",
+                  time: 4,
+                  value: 1,
+                  easingToNext: "linear" as const,
+                },
+              ],
+            },
+            {
+              property: "x" as const,
+              valueType: "number" as const,
+              points: [
+                {
+                  id: "x:0",
+                  time: 0 / 1,
+                  value: 0,
+                  easingToNext: "linear" as const,
+                },
+                {
+                  id: "x:1",
+                  time: 4,
+                  value: 100,
+                  easingToNext: "linear" as const,
+                },
+              ],
+            },
+          ],
           options: { duration: 4 },
         },
       ],
@@ -662,6 +792,75 @@ describe("render runtime", () => {
     expect(evaluated.renderStyle.opacity).toBeUndefined();
     expect(evaluated.renderStyle.transform).toBeUndefined();
     expect(evaluated.timeSensitive).toBe(false);
+  });
+
+  it("keeps object layout finite when scrubbing a single position keyframe", () => {
+    const object = {
+      ...baseObject,
+      bounds: { x: 320, y: 180, width: 120, height: 80 },
+      animations: [
+        {
+          id: "keyframe:x:start",
+          tracks: [
+            {
+              property: "x" as const,
+              valueType: "number" as const,
+              points: [
+                {
+                  id: "x:0",
+                  time: 0 / 1,
+                  value: 0,
+                  easingToNext: "linear" as const,
+                },
+                {
+                  id: "x:1",
+                  time: 1 / 1,
+                  value: 0,
+                  easingToNext: "linear" as const,
+                },
+              ],
+            },
+          ],
+          options: { duration: 0.1, ease: "linear" as const },
+        },
+        {
+          id: "keyframe:y:start",
+          tracks: [
+            {
+              property: "y" as const,
+              valueType: "number" as const,
+              points: [
+                {
+                  id: "y:0",
+                  time: 0 / 1,
+                  value: 0,
+                  easingToNext: "linear" as const,
+                },
+                {
+                  id: "y:1",
+                  time: 1 / 1,
+                  value: 0,
+                  easingToNext: "linear" as const,
+                },
+              ],
+            },
+          ],
+          options: { duration: 0.1, ease: "linear" as const },
+        },
+      ],
+    };
+
+    const evaluated = evaluateFrameObject(object, 2, 4);
+
+    expect(evaluated.bounds).toEqual({
+      x: 320,
+      y: 180,
+      width: 120,
+      height: 80,
+    });
+    expect(evaluated.renderStyle.transform).toBe(
+      "translateX(0px) translateY(0px)",
+    );
   });
 
   it("preserves rich text when a template only contributes style", () => {
@@ -721,7 +920,26 @@ describe("render runtime", () => {
           animations: [
             {
               id: "fade",
-              keyframes: { opacity: [0, 1] },
+              tracks: [
+                {
+                  property: "opacity" as const,
+                  valueType: "number" as const,
+                  points: [
+                    {
+                      id: "opacity:0",
+                      time: 0 / 1,
+                      value: 0,
+                      easingToNext: "linear" as const,
+                    },
+                    {
+                      id: "opacity:1",
+                      time: 4,
+                      value: 1,
+                      easingToNext: "linear" as const,
+                    },
+                  ],
+                },
+              ],
               options: { duration: 2 },
             },
           ],
@@ -748,7 +966,26 @@ describe("render runtime", () => {
       animations: [
         {
           id: "fade",
-          keyframes: { opacity: [0, 1] },
+          tracks: [
+            {
+              property: "opacity" as const,
+              valueType: "number" as const,
+              points: [
+                {
+                  id: "opacity:0",
+                  time: 0 / 1,
+                  value: 0,
+                  easingToNext: "linear" as const,
+                },
+                {
+                  id: "opacity:1",
+                  time: 4,
+                  value: 1,
+                  easingToNext: "linear" as const,
+                },
+              ],
+            },
+          ],
           options: { duration: 2 },
         },
       ],
@@ -760,7 +997,26 @@ describe("render runtime", () => {
           animations: [
             {
               id: "move",
-              keyframes: { x: [0, 100] },
+              tracks: [
+                {
+                  property: "x" as const,
+                  valueType: "number" as const,
+                  points: [
+                    {
+                      id: "x:0",
+                      time: 0 / 1,
+                      value: 0,
+                      easingToNext: "linear" as const,
+                    },
+                    {
+                      id: "x:1",
+                      time: 4,
+                      value: 100,
+                      easingToNext: "linear" as const,
+                    },
+                  ],
+                },
+              ],
               options: { duration: 2 },
             },
           ],

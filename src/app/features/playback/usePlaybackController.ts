@@ -634,15 +634,13 @@ export function usePlaybackController({
         transitionLayers,
         visibleSceneAdjustmentLayers,
       );
-      const shouldSyncReact =
-        nextPreviewKey !== lastCommittedPreviewKey || nextTime >= playbackEnd;
       requestCachedPreviewAtTime?.(nextTime, "playback");
 
       currentSceneTimeRef.current = nextTime;
       syncPlaybackDom(nextTime, "playback");
+      startTransition(() => setRenderCurrentSceneTime(nextTime));
 
-      if (shouldSyncReact) {
-        startTransition(() => setRenderCurrentSceneTime(nextTime));
+      if (nextPreviewKey !== lastCommittedPreviewKey) {
         lastCommittedPreviewKey = nextPreviewKey;
         startTransition(() => setCurrentSceneTime(nextTime));
       }

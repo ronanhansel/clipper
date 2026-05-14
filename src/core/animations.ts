@@ -1,4 +1,10 @@
-import type { LayerAnimation, Point } from "./types";
+import type {
+  AnimationTrack,
+  AnimationTrackProperty,
+  KeyframePoint,
+  LayerAnimation,
+  Point,
+} from "./types";
 import type { RenderStyle } from "../render-engine/renderRuntime";
 
 function clamp(value: number, min: number, max: number): number {
@@ -9,7 +15,7 @@ function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
 }
 
-const TRANSFORM_MAP: Record<string, string> = {
+const TRANSFORM_MAP: Partial<Record<AnimationTrackProperty, string>> = {
   x: "translateX",
   y: "translateY",
   z: "translateZ",
@@ -24,7 +30,7 @@ const TRANSFORM_MAP: Record<string, string> = {
   skewY: "skewY",
 };
 
-const TRANSFORM_UNITS: Record<string, string> = {
+const TRANSFORM_UNITS: Partial<Record<AnimationTrackProperty, string>> = {
   x: "px",
   y: "px",
   z: "px",
@@ -39,9 +45,7 @@ const TRANSFORM_UNITS: Record<string, string> = {
   skewY: "deg",
 };
 
-const COLOR_KEYFRAME_KEYS = ["color", "backgroundColor"] as const;
-
-const NUMERIC_KEYFRAME_KEYS = [
+const NUMERIC_TRACK_PROPERTIES = [
   "opacity",
   "x",
   "y",
@@ -61,174 +65,93 @@ const NUMERIC_KEYFRAME_KEYS = [
   "pathLength",
   "pathSpacing",
   "blur",
-] as const;
+] as const satisfies readonly AnimationTrackProperty[];
 
-const PERSPECTIVE_KEYFRAME_KEY = "transformPerspective";
-
-type NumericKeyframeKey =
-  | (typeof NUMERIC_KEYFRAME_KEYS)[number]
-  | typeof PERSPECTIVE_KEYFRAME_KEY;
-
-type ColorKeyframeKey = (typeof COLOR_KEYFRAME_KEYS)[number];
-
-type LayerAnimationEase = LayerAnimation["options"]["ease"];
-
-type NumericTrackPoint = {
-  time: number;
-  value: number;
-  ease?: LayerAnimationEase;
-};
-
-type ColorTrackPoint = {
-  time: number;
-  value: string;
-};
+const COLOR_TRACK_PROPERTIES = [
+  "color",
+  "backgroundColor",
+] as const satisfies readonly AnimationTrackProperty[];
 
 export function evaluateLayerAnimations(
   animations: LayerAnimation[],
   time: number,
 ): RenderStyle {
-  return evaluateAuthoritativeLayerAnimationTracks(
-    animations.filter((animation) => animation.enabled !== false),
-    time,
-  );
-}
-
-function evaluateAuthoritativeLayerAnimationTracks(
-  animations: LayerAnimation[],
-  time: number,
-): RenderStyle {
-  const numericTracks = new Map<NumericKeyframeKey, NumericTrackPoint[]>();
-  const colorTracks = new Map<ColorKeyframeKey, ColorTrackPoint[]>();
-
-  for (const animation of animations) {
-    collectNumericTrackPoints(animation, numericTracks);
-    collectColorTrackPoints(animation, colorTracks);
-  }
-
   const style: RenderStyle = {};
   const transforms: string[] = [];
-  const perspectiveTrack = numericTracks.get(PERSPECTIVE_KEYFRAME_KEY);
-  if (perspectiveTrack?.length) {
-    const value = interpolateNumericTrack(perspectiveTrack, time);
+  const tracks = collectEnabledTracks(animations);
+
+  const perspectiveTrack = tracks.get("transformPerspective");
+  if (perspectiveTrack) {
+    const value = evaluateNumericTrack(perspectiveTrack, time);
     transforms.push(`perspective(${Math.round(value)}px)`);
   }
 
-  for (const key of NUMERIC_KEYFRAME_KEYS) {
-    const points = numericTracks.get(key);
-    if (!points?.length) continue;
-    const value = interpolateNumericTrack(points, time);
-    const transformName = TRANSFORM_MAP[key];
+  for (const property of NUMERIC_TRACK_PROPERTIES) {
+    const track = tracks.get(property);
+    if (!track) continue;
+    const value = evaluateNumericTrack(track, time);
+    const transformName = TRANSFORM_MAP[property];
     if (transformName) {
-      const unit = TRANSFORM_UNITS[key];
+      const unit = TRANSFORM_UNITS[property] ?? "";
       const formatted =
-        key === "scale" || key === "scaleX" || key === "scaleY"
+        property === "scale" || property === "scaleX" || property === "scaleY"
           ? value.toFixed(4)
           : Math.round(value);
       transforms.push(`${transformName}(${formatted}${unit})`);
-    } else if (key === "opacity") {
+    } else if (property === "opacity") {
       style.opacity = value;
-    } else if (key === "blur") {
+    } else if (property === "blur") {
       style.filter = `blur(${Math.max(0, value).toFixed(2)}px)`;
-    } else if (key === "width" || key === "height") {
-      style[key] = Math.max(0, value);
+    } else if (property === "width" || property === "height") {
+      style[property] = Math.max(0, value);
     }
   }
 
-  for (const key of COLOR_KEYFRAME_KEYS) {
-    const points = colorTracks.get(key);
-    if (!points?.length) continue;
-    style[key] = evaluateColorTrack(points, time);
+  for (const property of COLOR_TRACK_PROPERTIES) {
+    const track = tracks.get(property);
+    if (!track) continue;
+    style[property] = evaluateColorTrack(track, time);
   }
 
   if (transforms.length > 0) style.transform = transforms.join(" ");
   return style;
 }
 
-function collectNumericTrackPoints(
+export function evaluateLayerAnimation(
   animation: LayerAnimation,
-  tracks: Map<NumericKeyframeKey, NumericTrackPoint[]>,
-) {
-  for (const key of NUMERIC_KEYFRAME_KEYS) {
-    const values = animation.keyframes[key];
-    if (!values || !Array.isArray(values) || values.length < 2) continue;
-    addNumericTrackPoints(tracks, key, animation, values as readonly number[]);
-  }
-  const perspectiveValues = animation.keyframes.transformPerspective;
-  if (
-    perspectiveValues &&
-    Array.isArray(perspectiveValues) &&
-    perspectiveValues.length >= 2
-  ) {
-    addNumericTrackPoints(
-      tracks,
-      PERSPECTIVE_KEYFRAME_KEY,
-      animation,
-      perspectiveValues as readonly number[],
-    );
-  }
+  time: number,
+): RenderStyle {
+  return evaluateLayerAnimations([animation], time);
 }
 
-function addNumericTrackPoints(
-  tracks: Map<NumericKeyframeKey, NumericTrackPoint[]>,
-  key: NumericKeyframeKey,
-  animation: LayerAnimation,
-  values: readonly number[],
-) {
-  const points = tracks.get(key) ?? [];
-  const delay = animation.options.delay ?? 0;
-  const duration = animation.options.duration;
-  const lastIndex = Math.max(values.length - 1, 1);
-  const singleSyntheticKeyframe =
-    values.length === 2 && values[0] === values[1];
-  values.forEach((value, index) => {
-    if (singleSyntheticKeyframe && index > 0) return;
-    points.push({
-      time: delay + (duration * index) / lastIndex,
-      value,
-      ease: animation.options.ease,
-    });
-  });
-  tracks.set(key, points);
-}
-
-function collectColorTrackPoints(
-  animation: LayerAnimation,
-  tracks: Map<ColorKeyframeKey, ColorTrackPoint[]>,
-) {
-  for (const key of COLOR_KEYFRAME_KEYS) {
-    const values = animation.keyframes[key];
-    if (!values || !Array.isArray(values) || values.length < 2) continue;
-    const points = tracks.get(key) ?? [];
-    const delay = animation.options.delay ?? 0;
-    const duration = animation.options.duration;
-    const lastIndex = Math.max(values.length - 1, 1);
-    const singleSyntheticKeyframe =
-      values.length === 2 && values[0] === values[1];
-    values.forEach((value, index) => {
-      if (singleSyntheticKeyframe && index > 0) return;
-      points.push({
-        time: delay + (duration * index) / lastIndex,
-        value,
+function collectEnabledTracks(animations: LayerAnimation[]) {
+  const tracks = new Map<AnimationTrackProperty, AnimationTrack>();
+  for (const animation of animations) {
+    if (animation.enabled === false || !Array.isArray(animation.tracks))
+      continue;
+    for (const track of animation.tracks) {
+      const existing = tracks.get(track.property);
+      if (!existing) {
+        tracks.set(track.property, { ...track, points: [...track.points] });
+        continue;
+      }
+      tracks.set(track.property, {
+        ...existing,
+        points: [...existing.points, ...track.points],
       });
-    });
-    tracks.set(key, points);
+    }
   }
+  return tracks;
 }
 
-function sortedNumericTrack(points: NumericTrackPoint[]) {
-  return [...points].sort((left, right) => left.time - right.time);
-}
-
-function sortedColorTrack(points: ColorTrackPoint[]) {
-  return [...points].sort((left, right) => left.time - right.time);
-}
-
-function interpolateNumericTrack(
-  points: NumericTrackPoint[],
+export function evaluateNumericTrack(
+  track: AnimationTrack,
   time: number,
 ): number {
-  const sorted = sortedNumericTrack(points);
+  const sorted = sortedPoints(track.points).filter(
+    (point): point is KeyframePoint & { value: number } =>
+      typeof point.value === "number",
+  );
   if (sorted.length === 0) return 0;
   if (sorted.length === 1 || time <= sorted[0].time) return sorted[0].value;
   const last = sorted[sorted.length - 1];
@@ -238,11 +161,12 @@ function interpolateNumericTrack(
     const start = sorted[index];
     const end = sorted[index + 1];
     if (time < start.time || time > end.time) continue;
+    if (start.hold) return start.value;
     const duration = end.time - start.time;
     if (duration <= 0) return end.value;
     const progress = easeAnimationProgress(
       (time - start.time) / duration,
-      start.ease,
+      start.easingToNext,
     );
     return lerp(start.value, end.value, progress);
   }
@@ -250,8 +174,14 @@ function interpolateNumericTrack(
   return last.value;
 }
 
-function evaluateColorTrack(points: ColorTrackPoint[], time: number): string {
-  const sorted = sortedColorTrack(points);
+export function evaluateColorTrack(
+  track: AnimationTrack,
+  time: number,
+): string {
+  const sorted = sortedPoints(track.points).filter(
+    (point): point is KeyframePoint & { value: string } =>
+      typeof point.value === "string",
+  );
   if (sorted.length === 0) return "";
   let value = sorted[0].value;
   for (const point of sorted) {
@@ -261,149 +191,27 @@ function evaluateColorTrack(points: ColorTrackPoint[], time: number): string {
   return value;
 }
 
-export function evaluateLayerAnimation(
-  animation: LayerAnimation,
-  time: number,
-): RenderStyle {
-  const progress = getLayerAnimationProgress(animation, time);
-  const { keyframes } = animation;
-  const style: RenderStyle = {};
-  const transforms: string[] = [];
-
-  for (const key of NUMERIC_KEYFRAME_KEYS) {
-    const values = keyframes[key as keyof typeof keyframes];
-    if (!values || !Array.isArray(values) || values.length < 2) continue;
-
-    const value = interpolateKeyframeValues(
-      values as readonly number[],
-      progress,
-    );
-    const transformName = TRANSFORM_MAP[key];
-
-    if (transformName) {
-      const unit = TRANSFORM_UNITS[key];
-      const formatted =
-        key === "scale" || key === "scaleX" || key === "scaleY"
-          ? value.toFixed(4)
-          : Math.round(value);
-      transforms.push(`${transformName}(${formatted}${unit})`);
-    } else if (key === "opacity") {
-      style.opacity = value;
-    } else if (key === "blur") {
-      style.filter = `blur(${Math.max(0, value).toFixed(2)}px)`;
-    } else if (key === "width" || key === "height") {
-      style[key] = Math.max(0, value);
-    }
-  }
-
-  if (
-    keyframes.transformPerspective &&
-    Array.isArray(keyframes.transformPerspective) &&
-    keyframes.transformPerspective.length >= 2
-  ) {
-    const value = interpolateKeyframeValues(
-      keyframes.transformPerspective as readonly number[],
-      progress,
-    );
-    transforms.unshift(`perspective(${Math.round(value)}px)`);
-  }
-
-  for (const key of COLOR_KEYFRAME_KEYS) {
-    const values = keyframes[key as keyof typeof keyframes];
-    if (!values || !Array.isArray(values) || values.length < 2) continue;
-
-    const index = Math.min(
-      Math.floor(progress * (values.length - 1)),
-      values.length - 1,
-    );
-    style[key] = values[index] as string;
-  }
-
-  if (transforms.length > 0) {
-    style.transform = transforms.join(" ");
-  }
-
-  return style;
+function sortedPoints(points: KeyframePoint[]) {
+  return [...points].sort((left, right) => left.time - right.time);
 }
 
 export function getLayerAnimationsTranslation(
   animations: LayerAnimation[] | undefined,
   time: number,
 ): Point {
-  const point = { x: 0, y: 0 };
-  for (const animation of animations ?? []) {
-    if (animation.enabled === false) continue;
-    const progress = getLayerAnimationProgress(animation, time);
-    if (animation.keyframes.x)
-      point.x += interpolateKeyframeValues(
-        animation.keyframes.x as readonly number[],
-        progress,
-      );
-    if (animation.keyframes.y)
-      point.y += interpolateKeyframeValues(
-        animation.keyframes.y as readonly number[],
-        progress,
-      );
-  }
-  return point;
+  const style = evaluateLayerAnimations(animations ?? [], time);
+  const transform = typeof style.transform === "string" ? style.transform : "";
+  return {
+    x: getTranslateValue(transform, "translateX"),
+    y: getTranslateValue(transform, "translateY"),
+  };
 }
 
-export function getLayerAnimationProgress(
-  animation: LayerAnimation,
-  time: number,
-): number {
-  const {
-    delay = 0,
-    duration,
-    repeat,
-    repeatType = "loop",
-    repeatDelay = 0,
-  } = animation.options;
-
-  if (time < delay) return 0;
-
-  const elapsed = time - delay;
-
-  if (duration <= 0) return easeAnimationProgress(1, animation.options.ease);
-
-  if (repeat !== undefined) {
-    const cycleDuration = duration + repeatDelay;
-
-    if (repeat !== Infinity) {
-      const totalDuration = duration + repeat * cycleDuration;
-      if (elapsed >= totalDuration) {
-        return easeAnimationProgress(
-          repeatType === "reverse" || repeatType === "mirror"
-            ? repeat % 2 === 0
-              ? 0
-              : 1
-            : 1,
-          animation.options.ease,
-        );
-      }
-    }
-
-    const cycleElapsed = elapsed % cycleDuration;
-
-    if (cycleElapsed >= duration) {
-      return easeAnimationProgress(1, animation.options.ease);
-    }
-
-    const rawProgress = cycleElapsed / duration;
-    const cycleIndex = Math.floor(elapsed / cycleDuration);
-    let progress: number;
-
-    if (repeatType === "reverse" || repeatType === "mirror") {
-      progress = cycleIndex % 2 === 1 ? 1 - rawProgress : rawProgress;
-    } else {
-      progress = rawProgress;
-    }
-
-    return easeAnimationProgress(clamp(progress, 0, 1), animation.options.ease);
-  }
-
-  const rawProgress = clamp(elapsed / duration, 0, 1);
-  return easeAnimationProgress(rawProgress, animation.options.ease);
+function getTranslateValue(transform: string, functionName: string) {
+  const match = transform.match(
+    new RegExp(`${functionName}\\((-?\\d+(?:\\.\\d+)?)px\\)`),
+  );
+  return match ? Number(match[1]) : 0;
 }
 
 export function interpolateKeyframeValues(

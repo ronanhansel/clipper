@@ -1,3 +1,4 @@
+import type { LayerAnimation, MotionEase } from "./types";
 export type FrameObjectType =
   | "rect"
   | "text"
@@ -44,44 +45,7 @@ export type RichTextSegment = {
   underline: boolean;
 };
 export type FrameTemplate = { kind: "html"; source: string; static?: boolean };
-export type MotionEase =
-  | "linear"
-  | "easeIn"
-  | "easeOut"
-  | "easeInOut"
-  | "inAndOut"
-  | "expoIn"
-  | "expoOut"
-  | "circOut"
-  | "backOut";
-export type LayerAnimation = {
-  id: string;
-  name?: string;
-  target?: "self" | "children";
-  keyframes: Record<string, readonly number[] | readonly string[] | undefined>;
-  options: {
-    duration: number;
-    delay?: number;
-    ease?: MotionEase | readonly [number, number, number, number];
-    repeat?: number;
-    repeatType?: "loop" | "reverse" | "mirror";
-    repeatDelay?: number;
-    type?: "tween" | "spring" | "inertia";
-    bounce?: number;
-    stiffness?: number;
-    damping?: number;
-    mass?: number;
-    velocity?: number;
-    split?: {
-      mode: "word" | "character";
-      stagger?: number;
-      order?: "forward" | "reverse" | "center";
-      repeatScope?: "sequence" | "item";
-      tokenDelays?: Record<number, number>;
-    };
-  };
-  enabled?: boolean;
-};
+export type { LayerAnimation, MotionEase } from "./types";
 export type Renderable =
   | RenderableObject
   | Component

@@ -1,5 +1,6 @@
 import {
   startTransition,
+  useMemo,
   type Dispatch,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
@@ -20,10 +21,12 @@ import {
   getBoundsUnion,
   getBoundsWithPreviewTransform,
   getDraggedObjects,
+  getFrameObjectSnapStops,
   getFrameObjectPreviewTransform,
   getObjectDragSnap,
   getObjectResizeScale,
   getPartFrameObject,
+  getResizedBounds,
   getResizedObjects,
   insetBounds,
   isVisibleMarqueeBounds,
@@ -60,6 +63,10 @@ import {
   type Point,
   type SelectionPayload,
 } from "../../../core/types";
+import {
+  hasComposeAnimationAttributeTrack,
+  upsertComposeAnimationAttributeKeyframe,
+} from "../../../components/timeline/composeAnimationModel";
 
 export type FrameInteractionController = ReturnType<
   typeof useFrameInteractionController
@@ -217,6 +224,12 @@ export function useFrameInteractionController(
     updateTranslationMarker,
     updateZoomMarkerFocusGroup,
   } = params;
+
+  const partVersion = useMemo(() => hashGesturePartVersion(part), [part]);
+
+  function isActiveGestureFromCurrentPart(gesture: { partVersion?: string }) {
+    return !gesture.partVersion || gesture.partVersion === partVersion;
+  }
 
   function updateObjectDragSelection(nextObjects: SelectionPayload["objects"]) {
     setSelectedComposeObjectIds(nextObjects.map((object) => object.id));
@@ -428,6 +441,98 @@ export function useFrameInteractionController(
     setFrameSelectionBoxDragTransform({ x: 0, y: 0 });
   }
 
+  function getObjectResizeSnapDelta(
+    resize: ObjectResize,
+    delta: Point,
+    preserveAspect: boolean,
+  ) {
+    const nextBounds = getResizedBounds(
+      resize.displaySelectionBox,
+      resize.handle,
+      delta,
+      preserveAspect ? resize.aspectRatio : undefined,
+    );
+    const stops = getFrameObjectSnapStops(
+      [...part.background.elements, ...part.objects],
+      new Set(resize.objects.map((object) => object.id)),
+    );
+    const threshold =
+      8 / Math.max(frameDisplayScale * cameraPreviewTransform.scale, 0.001);
+    const xSnap = getResizeAxisSnap(
+      getResizeSnapCandidates(resize.displaySelectionBox, nextBounds, "x"),
+      stops.x,
+      threshold,
+    );
+    const ySnap = getResizeAxisSnap(
+      getResizeSnapCandidates(resize.displaySelectionBox, nextBounds, "y"),
+      stops.y,
+      threshold,
+    );
+    const guides: ObjectSnapGuide[] = [];
+    if (xSnap) guides.push({ axis: "x", position: xSnap.position });
+    if (ySnap) guides.push({ axis: "y", position: ySnap.position });
+    return {
+      delta: {
+        x: delta.x + (xSnap?.deltaOffset ?? 0),
+        y: delta.y + (ySnap?.deltaOffset ?? 0),
+      },
+      guides,
+    };
+  }
+
+  function getResizeSnapCandidates(
+    original: Bounds,
+    resized: Bounds,
+    axis: "x" | "y",
+  ) {
+    const originalStart = axis === "x" ? original.x : original.y;
+    const originalSize = axis === "x" ? original.width : original.height;
+    const resizedStart = axis === "x" ? resized.x : resized.y;
+    const resizedSize = axis === "x" ? resized.width : resized.height;
+    const points = [
+      { original: originalStart, resized: resizedStart },
+      {
+        original: originalStart + originalSize / 2,
+        resized: resizedStart + resizedSize / 2,
+      },
+      {
+        original: originalStart + originalSize,
+        resized: resizedStart + resizedSize,
+      },
+    ];
+    return points
+      .map((point) => ({
+        position: point.resized,
+        influence: point.resized - point.original,
+      }))
+      .filter((point) => Math.abs(point.influence) > 0.001);
+  }
+
+  function getResizeAxisSnap(
+    candidates: { position: number; influence: number }[],
+    stops: number[],
+    threshold: number,
+  ) {
+    let closest: {
+      deltaOffset: number;
+      position: number;
+      distance: number;
+    } | null = null;
+    for (const candidate of candidates) {
+      for (const stop of stops) {
+        const distance = Math.abs(stop - candidate.position);
+        if (distance > threshold) continue;
+        if (closest && distance >= closest.distance) continue;
+        closest = {
+          deltaOffset: (stop - candidate.position) / candidate.influence,
+          position: stop,
+          distance,
+        };
+      }
+    }
+    return closest;
+  }
+
   function scheduleObjectResizePreview(delta: Point, preserveAspect = false) {
     objectResizeDeltaRef.current = delta;
     objectResizePreserveAspectRef.current = preserveAspect;
@@ -474,6 +579,7 @@ export function useFrameInteractionController(
     objectResizeRef.current = null;
     objectResizeDeltaRef.current = { x: 0, y: 0 };
     objectResizePreserveAspectRef.current = false;
+    clearObjectSnapGuides();
     setObjectResizingActive(false);
     window.dispatchEvent(
       new CustomEvent("clipper:object-resize-active", {
@@ -486,6 +592,7 @@ export function useFrameInteractionController(
     objectResizeRef.current = null;
     objectResizeDeltaRef.current = { x: 0, y: 0 };
     objectResizePreserveAspectRef.current = false;
+    clearObjectSnapGuides();
     setObjectResizingActive(false);
     window.dispatchEvent(
       new CustomEvent("clipper:object-resize-active", {
@@ -623,6 +730,11 @@ export function useFrameInteractionController(
       objectDragFrameRef.current = 0;
     }
 
+    if (!isActiveGestureFromCurrentPart(drag)) {
+      clearObjectDrag();
+      return;
+    }
+
     const nextObjects = getDraggedObjects(drag, objectDragDeltaRef.current);
     pinCommittedObjectDragPreview(nextObjects);
     const nextBoundsById = new Map(
@@ -632,6 +744,29 @@ export function useFrameInteractionController(
       ...composition,
       objects: composition.objects.map((object) => {
         const nextBounds = nextBoundsById.get(object.id);
+        const hasPositionKeyframes =
+          hasComposeAnimationAttributeTrack(object.animations, "x") ||
+          hasComposeAnimationAttributeTrack(object.animations, "y");
+        if (nextBounds && hasPositionKeyframes) {
+          const nextX = nextBounds.x - object.bounds.x;
+          const nextY = nextBounds.y - object.bounds.y;
+          return {
+            ...object,
+            animations: upsertComposeAnimationAttributeKeyframe(
+              upsertComposeAnimationAttributeKeyframe(
+                object.animations ?? [],
+                "x",
+                nextX,
+                previewTime,
+                part.duration,
+              ),
+              "y",
+              nextY,
+              previewTime,
+              part.duration,
+            ),
+          };
+        }
         return nextBounds
           ? syncChartObjectBounds({ ...object, bounds: nextBounds })
           : object;
@@ -640,6 +775,29 @@ export function useFrameInteractionController(
         ...composition.background,
         elements: composition.background.elements.map((object) => {
           const nextBounds = nextBoundsById.get(object.id);
+          const hasPositionKeyframes =
+            hasComposeAnimationAttributeTrack(object.animations, "x") ||
+            hasComposeAnimationAttributeTrack(object.animations, "y");
+          if (nextBounds && hasPositionKeyframes) {
+            const nextX = nextBounds.x - object.bounds.x;
+            const nextY = nextBounds.y - object.bounds.y;
+            return {
+              ...object,
+              animations: upsertComposeAnimationAttributeKeyframe(
+                upsertComposeAnimationAttributeKeyframe(
+                  object.animations ?? [],
+                  "x",
+                  nextX,
+                  previewTime,
+                  part.duration,
+                ),
+                "y",
+                nextY,
+                previewTime,
+                part.duration,
+              ),
+            };
+          }
           return nextBounds
             ? syncChartObjectBounds({ ...object, bounds: nextBounds })
             : object;
@@ -830,7 +988,23 @@ export function useFrameInteractionController(
       const dy =
         (event.clientY - activeObjectResize.origin.y) /
         (frameDisplayScale * cameraPreviewTransform.scale);
-      scheduleObjectResizePreview({ x: dx, y: dy }, event.shiftKey);
+      const preserveAspect =
+        event.shiftKey || activeObjectResize.mode === "scale";
+      if (event.metaKey || event.ctrlKey) {
+        const snap = getObjectResizeSnapDelta(
+          activeObjectResize,
+          {
+            x: dx,
+            y: dy,
+          },
+          preserveAspect,
+        );
+        scheduleObjectResizePreview(snap.delta, event.shiftKey);
+        updateObjectSnapGuides(snap.guides);
+      } else {
+        scheduleObjectResizePreview({ x: dx, y: dy }, event.shiftKey);
+        clearObjectSnapGuides();
+      }
       return;
     }
 
@@ -954,6 +1128,7 @@ export function useFrameInteractionController(
     const nextDrag = {
       origin: { x: event.clientX, y: event.clientY },
       partId: part.id,
+      partVersion,
       objects: nextSelectionObjects,
     };
     objectDragRef.current = nextDrag;
@@ -1020,6 +1195,7 @@ export function useFrameInteractionController(
       origin: { x: event.clientX, y: event.clientY },
       handle,
       partId: part.id,
+      partVersion,
       selectionBox,
       displaySelectionBox,
       aspectRatio: displaySelectionBox.width / displaySelectionBox.height,
@@ -1046,6 +1222,11 @@ export function useFrameInteractionController(
       objectResizeFrameRef.current = 0;
     }
 
+    if (!isActiveGestureFromCurrentPart(resize)) {
+      clearObjectResize();
+      return;
+    }
+
     const preserveAspect =
       objectResizePreserveAspectRef.current || resize.mode === "scale";
     const nextObjects = getResizedObjects(
@@ -1065,21 +1246,151 @@ export function useFrameInteractionController(
       ...composition,
       objects: composition.objects.map((object) => {
         const nextBounds = nextBoundsById.get(object.id);
-        return nextBounds
-          ? syncChartObjectBounds(
-              scaleFrameObject({ ...object, bounds: nextBounds }, scale),
-            )
-          : object;
+        if (!nextBounds) return object;
+        const hasWidthKeyframes = hasComposeAnimationAttributeTrack(
+          object.animations,
+          "width",
+        );
+        const hasHeightKeyframes = hasComposeAnimationAttributeTrack(
+          object.animations,
+          "height",
+        );
+        const hasPositionKeyframes =
+          hasComposeAnimationAttributeTrack(object.animations, "x") ||
+          hasComposeAnimationAttributeTrack(object.animations, "y");
+        if (hasWidthKeyframes || hasHeightKeyframes || hasPositionKeyframes) {
+          let nextAnimations = object.animations ?? [];
+          if (hasPositionKeyframes) {
+            nextAnimations = upsertComposeAnimationAttributeKeyframe(
+              upsertComposeAnimationAttributeKeyframe(
+                nextAnimations,
+                "x",
+                nextBounds.x - object.bounds.x,
+                previewTime,
+                part.duration,
+              ),
+              "y",
+              nextBounds.y - object.bounds.y,
+              previewTime,
+              part.duration,
+            );
+          }
+          if (hasWidthKeyframes) {
+            nextAnimations = upsertComposeAnimationAttributeKeyframe(
+              nextAnimations,
+              "width",
+              nextBounds.width,
+              previewTime,
+              part.duration,
+            );
+          }
+          if (hasHeightKeyframes) {
+            nextAnimations = upsertComposeAnimationAttributeKeyframe(
+              nextAnimations,
+              "height",
+              nextBounds.height,
+              previewTime,
+              part.duration,
+            );
+          }
+          const committedBounds = {
+            ...nextBounds,
+            x: hasPositionKeyframes ? object.bounds.x : nextBounds.x,
+            y: hasPositionKeyframes ? object.bounds.y : nextBounds.y,
+            width: hasWidthKeyframes ? object.bounds.width : nextBounds.width,
+            height: hasHeightKeyframes
+              ? object.bounds.height
+              : nextBounds.height,
+          };
+          return syncChartObjectBounds(
+            scaleFrameObject(
+              {
+                ...object,
+                bounds: committedBounds,
+                animations: nextAnimations,
+              },
+              scale,
+            ),
+          );
+        }
+        return syncChartObjectBounds(
+          scaleFrameObject({ ...object, bounds: nextBounds }, scale),
+        );
       }),
       background: {
         ...composition.background,
         elements: composition.background.elements.map((object) => {
           const nextBounds = nextBoundsById.get(object.id);
-          return nextBounds
-            ? syncChartObjectBounds(
-                scaleFrameObject({ ...object, bounds: nextBounds }, scale),
-              )
-            : object;
+          if (!nextBounds) return object;
+          const hasWidthKeyframes = hasComposeAnimationAttributeTrack(
+            object.animations,
+            "width",
+          );
+          const hasHeightKeyframes = hasComposeAnimationAttributeTrack(
+            object.animations,
+            "height",
+          );
+          const hasPositionKeyframes =
+            hasComposeAnimationAttributeTrack(object.animations, "x") ||
+            hasComposeAnimationAttributeTrack(object.animations, "y");
+          if (hasWidthKeyframes || hasHeightKeyframes || hasPositionKeyframes) {
+            let nextAnimations = object.animations ?? [];
+            if (hasPositionKeyframes) {
+              nextAnimations = upsertComposeAnimationAttributeKeyframe(
+                upsertComposeAnimationAttributeKeyframe(
+                  nextAnimations,
+                  "x",
+                  nextBounds.x - object.bounds.x,
+                  previewTime,
+                  part.duration,
+                ),
+                "y",
+                nextBounds.y - object.bounds.y,
+                previewTime,
+                part.duration,
+              );
+            }
+            if (hasWidthKeyframes) {
+              nextAnimations = upsertComposeAnimationAttributeKeyframe(
+                nextAnimations,
+                "width",
+                nextBounds.width,
+                previewTime,
+                part.duration,
+              );
+            }
+            if (hasHeightKeyframes) {
+              nextAnimations = upsertComposeAnimationAttributeKeyframe(
+                nextAnimations,
+                "height",
+                nextBounds.height,
+                previewTime,
+                part.duration,
+              );
+            }
+            const committedBounds = {
+              ...nextBounds,
+              x: hasPositionKeyframes ? object.bounds.x : nextBounds.x,
+              y: hasPositionKeyframes ? object.bounds.y : nextBounds.y,
+              width: hasWidthKeyframes ? object.bounds.width : nextBounds.width,
+              height: hasHeightKeyframes
+                ? object.bounds.height
+                : nextBounds.height,
+            };
+            return syncChartObjectBounds(
+              scaleFrameObject(
+                {
+                  ...object,
+                  bounds: committedBounds,
+                  animations: nextAnimations,
+                },
+                scale,
+              ),
+            );
+          }
+          return syncChartObjectBounds(
+            scaleFrameObject({ ...object, bounds: nextBounds }, scale),
+          );
         }),
       },
     }));
@@ -1153,6 +1464,15 @@ export function useFrameInteractionController(
     startTextObjectEdit,
     syncObjectResizeAspectPreview,
   };
+}
+
+function hashGesturePartVersion(part: Part) {
+  return JSON.stringify({
+    background: part.background,
+    objects: part.objects,
+    duration: part.duration,
+    frame: part.frame,
+  });
 }
 
 function scaleFrameObject(object: FrameObject, scale: number): FrameObject {

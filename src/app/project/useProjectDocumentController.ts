@@ -187,6 +187,7 @@ export function useProjectDocumentController({
     savedCompositionSourcesSnapshot,
   );
   const savedFileContentSnapshotsRef = useRef<SavedSnapshots | null>(null);
+  const pendingAppWriteSnapshotsRef = useRef<DiskSnapshotBundle | null>(null);
   const externalChangeConflictActiveRef = useRef(false);
   const externalChangeToastIdRef = useRef<string | null>(null);
   const projectHistoryRef = useRef<{
@@ -547,6 +548,29 @@ export function useProjectDocumentController({
     savedFileContentSnapshotsRef.current = snapshots;
   }
 
+  function getPendingAppWriteSnapshotBundle({
+    fileContent,
+    full,
+    projectMetadata,
+  }: {
+    fileContent: SavedSnapshots;
+    full: SavedSnapshots;
+    projectMetadata: SavedSnapshots;
+  }): DiskSnapshotBundle {
+    return { fileContent, full, projectMetadata };
+  }
+
+  function isPendingAppWriteDiskSnapshot(
+    diskSnapshots: DiskSnapshotBundle,
+    pendingSnapshots: DiskSnapshotBundle | null,
+  ) {
+    if (!pendingSnapshots) return false;
+    return (
+      snapshotsEqual(diskSnapshots.fileContent, pendingSnapshots.fileContent) ||
+      snapshotsEqual(diskSnapshots.full, pendingSnapshots.full)
+    );
+  }
+
   function markLastHistoryEntryAsImplicitFileOperation() {
     const past = projectHistoryRef.current.past;
     if (past.length === 0) return;
@@ -695,6 +719,21 @@ export function useProjectDocumentController({
         getCurrentProjectFileContentSnapshots();
       const savedFileContentSnapshots = getSavedProjectFileContentSnapshots();
       const diskSnapshots = await getDiskProjectSnapshotBundle();
+      if (
+        isPendingAppWriteDiskSnapshot(
+          diskSnapshots,
+          pendingAppWriteSnapshotsRef.current,
+        )
+      ) {
+        markSnapshotsSaved(pendingAppWriteSnapshotsRef.current!.full);
+        pendingAppWriteSnapshotsRef.current = null;
+        setSourceStatus(
+          changedPath
+            ? `Saved app changes detected at ${changedPath}.`
+            : "Saved app project changes detected.",
+        );
+        return;
+      }
       const decision = classifyProjectFileChange({
         currentFileContentSnapshots,
         currentSnapshots,
@@ -1230,6 +1269,14 @@ export function useProjectDocumentController({
         }
       }
       if (!shouldApplySaveResult()) return;
+      pendingAppWriteSnapshotsRef.current = getPendingAppWriteSnapshotBundle({
+        fileContent: projectFileContentSnapshots,
+        full: {
+          project: projectSnapshot,
+          compositionSources: compositionSourcesSnapshot,
+        },
+        projectMetadata: projectMetadataSnapshots,
+      });
       const result = await projectPersistenceService.saveProject({
         manifestPath: activeProjectManifestPathRef.current,
         project: persistedProject,
@@ -1251,6 +1298,7 @@ export function useProjectDocumentController({
       savedCompositionSourcesSnapshotRef.current =
         nextSavedCompositionSourcesSnapshot;
       savedFileContentSnapshotsRef.current = projectFileContentSnapshots;
+      pendingAppWriteSnapshotsRef.current = null;
       setLastSavedAt(Date.now());
       setSourceStatus(result.sourceStatus);
     };

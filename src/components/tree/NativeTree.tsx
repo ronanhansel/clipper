@@ -76,6 +76,7 @@ export type NativeTreeNodeRendererProps<T> = {
 };
 
 export type NativeTreeDragPreviewProps = {
+  dropTarget: NativeTreeDropTarget | null;
   id: string | null;
   isDragging: boolean;
   mouse: { x: number; y: number } | null;
@@ -717,6 +718,7 @@ export const NativeTree = forwardRef(function NativeTree<T>(
         })}
       </div>
       {renderDragPreview?.({
+        dropTarget,
         id: dragState?.primaryId ?? null,
         isDragging: Boolean(dragState),
         mouse: dragState?.mouse ?? null,

@@ -30,6 +30,7 @@ export function classifyProjectFileChange({
   currentFileContentSnapshots,
   currentSnapshots,
   diskSnapshots,
+  hasUnsavedAppChanges,
   savedFileContentSnapshots,
 }: {
   currentFileContentSnapshots: ProjectSnapshotPair;
@@ -43,6 +44,7 @@ export function classifyProjectFileChange({
   if (snapshotsEqual(diskSnapshots.full, currentSnapshots)) return "mark-saved";
   if (snapshotsEqual(diskSnapshots.fileContent, currentFileContentSnapshots))
     return "mark-file-content-saved";
+  if (hasUnsavedAppChanges) return "conflict";
   return "reload";
 }
 

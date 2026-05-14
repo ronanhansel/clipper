@@ -23,45 +23,34 @@ import {
   RectIcon,
   StarIcon,
 } from "../ShapeIcons";
-import type { MouseEvent, PointerEvent, ReactNode, Ref } from "react";
+import type { PointerEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { memo } from "react";
-import {
-  Tree,
-  type CursorProps,
-  type DragPreviewProps,
-  type MoveHandler,
-  type NodeApi,
-  type NodeRendererProps,
-  type RowRendererProps,
-  type TreeApi,
-} from "react-arborist";
 import type { FrameObject, Part } from "../../core/types";
-import { frameObjectFromBackgroundLayer } from "../../core/frameInteraction";
-import { arboristDndManager } from "../../lib/arboristDndManager";
 import { useDragAutoScroll } from "../../lib/useDragAutoScroll";
 import { MarqueeSelectionBox } from "../timeline/TimelineSelectionBox";
+import {
+  buildComposeLayerTree,
+  countComposeLayerNodes,
+  getComposeLayerDropTarget as getComposeLayerDropTargetForTree,
+  getComposeLayerNodeObjects,
+  getComposeLayerReorderTargetIndex,
+  syncComposeSelectedLayerIds,
+  type ComposeLayerNode,
+} from "./composeLayerTree";
+import {
+  NativeTree,
+  type NativeTreeApi,
+  type NativeTreeDragPreviewProps,
+  type NativeTreeDropTarget,
+  type NativeTreeGetDropTargetArgs,
+  type NativeTreeNodeApi,
+  type NativeTreeNodeRendererProps,
+} from "../tree/NativeTree";
 
 const composeLayerRowHeight = 30;
 const composeLayerIndent = 24;
 const composeLayerMinDropHeight = 360;
-
-type ComposeLayerKind =
-  | "root"
-  | "frame"
-  | "background"
-  | "background-object"
-  | "object";
-
-export type ComposeLayerNode = {
-  id: string;
-  name: string;
-  kind: ComposeLayerKind;
-  animated?: boolean;
-  object?: FrameObject;
-  part?: Part;
-  children?: ComposeLayerNode[];
-};
 
 type ComposeLayersPanelProps = {
   part: Part;
@@ -98,6 +87,7 @@ const MemoizedComposeLayersPanel = memo(function ComposeLayersPanelContent({
     useState<string[]>(selectedObjectIds);
   const [dropCursorVisible, setDropCursorVisible] = useState(false);
   const [dropPointerY, setDropPointerY] = useState<number | null>(null);
+  const [dropTop, setDropTop] = useState<number | null>(null);
   const [marquee, setMarquee] = useState<{
     startX: number;
     startY: number;
@@ -105,7 +95,7 @@ const MemoizedComposeLayersPanel = memo(function ComposeLayersPanelContent({
     currentY: number;
   } | null>(null);
   const treeRef = useRef<HTMLDivElement | null>(null);
-  const arboristTreeRef = useRef<TreeApi<ComposeLayerNode> | undefined>(
+  const nativeTreeRef = useRef<NativeTreeApi<ComposeLayerNode> | undefined>(
     undefined,
   );
   const marqueeSelectionRef = useRef<{
@@ -151,6 +141,7 @@ const MemoizedComposeLayersPanel = memo(function ComposeLayersPanelContent({
       if (!isDragging || !mouse || !rect) {
         setDropCursorVisible(false);
         setDropPointerY(null);
+        setDropTop(null);
         return;
       }
 
@@ -167,43 +158,35 @@ const MemoizedComposeLayersPanel = memo(function ComposeLayersPanelContent({
     [treeHeight],
   );
 
-  const moveObjectLayers: MoveHandler<ComposeLayerNode> = ({
-    dragIds,
-    parentId,
-    index,
-  }) => {
-    if (parentId !== "objects") return;
-    const remainingObjectCount = part.objects.length - dragIds.length;
-    onReorderObjects(
-      dragIds,
-      Math.max(0, Math.min(remainingObjectCount - index, remainingObjectCount)),
-    );
-  };
+  const moveObjectLayers = useCallback(
+    ({ dragIds, parentId, index }: NativeTreeDropTarget) => {
+      if (parentId !== "objects") return;
+      onReorderObjects(
+        dragIds,
+        getComposeLayerReorderTargetIndex(
+          part.objects.length,
+          dragIds.length,
+          index,
+        ),
+      );
+    },
+    [onReorderObjects, part.objects.length],
+  );
 
-  function handleRowClick(
-    event: MouseEvent<HTMLDivElement>,
-    node: NodeApi<ComposeLayerNode>,
-  ) {
-    if (event.metaKey || event.shiftKey) return;
-    if (node.isInternal && !node.data.object) {
-      toggleLayerNode(node);
-    }
-  }
-
-  function toggleLayerNode(node: NodeApi<ComposeLayerNode>) {
+  function toggleLayerNode(node: NativeTreeNodeApi<ComposeLayerNode>) {
     if (!node.isInternal) return;
     const nextOpen = !(openById[node.id] ?? node.isOpen);
     setOpenById((current) => ({ ...current, [node.id]: nextOpen }));
     if (node.isOpen !== nextOpen) node.toggle();
   }
 
-  function selectLayerNodes(nodes: NodeApi<ComposeLayerNode>[]) {
+  function selectLayerNodes(nodes: NativeTreeNodeApi<ComposeLayerNode>[]) {
     const ids = nodes.map((node) => node.id);
     const objectIds = nodes.flatMap((node) =>
-      getNodeObjects(node.data).map((object) => object.id),
+      getComposeLayerNodeObjects(node.data).map((object) => object.id),
     );
     setSelectedLayerIds(ids);
-    arboristTreeRef.current?.setSelection({
+    nativeTreeRef.current?.setSelection({
       ids,
       anchor: ids[0] ?? null,
       mostRecent: ids.at(-1) ?? null,
@@ -212,17 +195,19 @@ const MemoizedComposeLayersPanel = memo(function ComposeLayersPanelContent({
       onSelectFrameSettings();
       return;
     }
-    onSelectObjects(nodes.flatMap((node) => getNodeObjects(node.data)));
+    onSelectObjects(
+      nodes.flatMap((node) => getComposeLayerNodeObjects(node.data)),
+    );
   }
 
   function selectLayerFromPointer(
     event: PointerEvent<HTMLDivElement>,
-    node: NodeApi<ComposeLayerNode>,
+    node: NativeTreeNodeApi<ComposeLayerNode>,
   ) {
     if (event.button !== 0) return;
     event.stopPropagation();
     if (event.shiftKey && selectedLayerIds.length > 0) {
-      const visibleNodes = arboristTreeRef.current?.visibleNodes ?? [];
+      const visibleNodes = nativeTreeRef.current?.visibleNodes ?? [];
       const anchorId = selectedLayerIds.at(-1);
       const anchorIndex = visibleNodes.findIndex(
         (item) => item.id === anchorId,
@@ -240,7 +225,7 @@ const MemoizedComposeLayersPanel = memo(function ComposeLayersPanelContent({
       const selected = new Set(selectedLayerIds);
       if (selected.has(node.id)) selected.delete(node.id);
       else selected.add(node.id);
-      const visibleNodes = arboristTreeRef.current?.visibleNodes ?? [];
+      const visibleNodes = nativeTreeRef.current?.visibleNodes ?? [];
       selectLayerNodes(visibleNodes.filter((item) => selected.has(item.id)));
       return;
     }
@@ -250,7 +235,7 @@ const MemoizedComposeLayersPanel = memo(function ComposeLayersPanelContent({
 
   function updateMarqueeSelection(currentX: number, currentY: number) {
     const start = marqueeSelectionRef.current;
-    const api = arboristTreeRef.current;
+    const api = nativeTreeRef.current;
     if (!start || !api) return;
     const scrollElement = getComposeLayersScrollElement(treeRef.current);
     const scrollTop = scrollElement?.scrollTop ?? 0;
@@ -351,6 +336,70 @@ const MemoizedComposeLayersPanel = memo(function ComposeLayersPanelContent({
     if (!wasActive) selectLayerNodes([]);
   }
 
+  const getComposeLayerDropTarget = useCallback(
+    ({
+      dragIds,
+      localY,
+      tree: api,
+    }: NativeTreeGetDropTargetArgs<ComposeLayerNode>) =>
+      getComposeLayerDropTargetForTree(
+        api,
+        dragIds,
+        localY,
+        composeLayerRowHeight,
+      ),
+    [],
+  );
+
+  const disableComposeLayerDrop = useCallback(
+    ({
+      parentNode,
+      dragNodes,
+    }: {
+      parentNode: NativeTreeNodeApi<ComposeLayerNode> | { isRoot: true };
+      dragNodes: NativeTreeNodeApi<ComposeLayerNode>[];
+      index: number;
+    }) => {
+      if (parentNode.isRoot) return true;
+      if (parentNode.id !== "objects") return true;
+      return dragNodes.some((node) => node.data.kind !== "object");
+    },
+    [],
+  );
+
+  const updateDropCursorFromTarget = useCallback(
+    (
+      isDragging: boolean,
+      target: NativeTreeDropTarget | null,
+      mouse: { x: number; y: number } | null,
+    ) => {
+      if (!isDragging || !mouse || !treeRef.current || !target) {
+        setDropTop(null);
+        return;
+      }
+      if (target.parentId !== "objects") {
+        setDropTop(null);
+        return;
+      }
+      const api = nativeTreeRef.current;
+      if (!api) {
+        setDropTop(null);
+        return;
+      }
+      const objectsIndex = api.visibleNodes.findIndex(
+        (n) => n.id === "objects",
+      );
+      if (objectsIndex < 0) {
+        setDropTop(null);
+        return;
+      }
+      // Drop line positions are between children rows under "objects".
+      const top = (objectsIndex + 1 + target.index) * composeLayerRowHeight;
+      setDropTop(top);
+    },
+    [],
+  );
+
   return (
     <section
       className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[14px] border border-dashed border-[#303646] bg-[#151821] p-3"
@@ -380,42 +429,31 @@ const MemoizedComposeLayersPanel = memo(function ComposeLayersPanelContent({
           onPointerCancel={finishMarquee}
         >
           {marquee ? <ComposeLayerMarquee marquee={marquee} /> : null}
-          <Tree<ComposeLayerNode>
-            ref={arboristTreeRef}
+          {dropCursorVisible && dropPointerY !== null && dropTop !== null ? (
+            <ProjectTreeCursor hidden={false} top={dropTop} />
+          ) : null}
+          <NativeTree<ComposeLayerNode>
+            ref={nativeTreeRef}
             data={treeData}
-            dndManager={arboristDndManager}
-            disableDrag={(node) => node.kind !== "object"}
-            disableDrop={({ parentNode, dragNodes }) =>
-              parentNode.id === "objects"
-                ? dragNodes.some((node) => node.data.kind !== "object")
-                : true
-            }
+            disableDrop={disableComposeLayerDrop}
+            getDropTarget={getComposeLayerDropTarget}
             height={treeHeight}
+            idAccessor="id"
             indent={composeLayerIndent}
             openByDefault
             rowHeight={composeLayerRowHeight}
             width="100%"
             onMove={moveObjectLayers}
-            renderCursor={(cursorProps) => (
-              <ProjectTreeCursor
-                {...cursorProps}
-                hidden={
-                  !dropCursorVisible ||
-                  dropPointerY === null ||
-                  Math.abs(cursorProps.top - dropPointerY) >
-                    composeLayerRowHeight / 2
-                }
-              />
-            )}
             renderDragPreview={(previewProps) => (
               <ComposeLayerDragPreview
                 {...previewProps}
                 onDragPositionChange={updateDragPosition}
+                onDropTargetChange={updateDropCursorFromTarget}
               />
             )}
-            renderRow={(rowProps) => (
-              <ComposeLayerTreeRow {...rowProps} onClick={handleRowClick} />
-            )}
+            isInternal={(node) => Boolean(node.children?.length)}
+            movable
+            onToggle={(node) => toggleLayerNode(node)}
           >
             {(props) => (
               <ComposeLayerRow
@@ -427,54 +465,22 @@ const MemoizedComposeLayersPanel = memo(function ComposeLayersPanelContent({
                 selectedLayerIds={selectedLayerIds}
                 onToggleLayerHidden={onToggleLayerHidden}
                 onToggleLayerLocked={onToggleLayerLocked}
-                selectForDrag={(node: NodeApi<ComposeLayerNode>) => {
-                  arboristTreeRef.current?.setSelection({
-                    ids: [node.id],
-                    anchor: node.id,
-                    mostRecent: node.id,
-                  });
-                }}
               />
             )}
-          </Tree>
+          </NativeTree>
         </div>
       </div>
     </section>
   );
 });
 
-function ProjectTreeCursor({
-  hidden,
-  top,
-  left,
-  indent,
-}: CursorProps & { hidden?: boolean }) {
+function ProjectTreeCursor({ hidden, top }: { hidden?: boolean; top: number }) {
   if (hidden) return null;
   return (
     <div
       className="pointer-events-none absolute z-20 h-0.5 rounded-full bg-[var(--clipper-accent)] shadow-[0_0_0_2px_rgb(var(--clipper-accent-rgb)/0.18)]"
-      style={{ top, left: left + indent, right: 4 }}
+      style={{ top, left: composeLayerIndent, right: 4 }}
     />
-  );
-}
-
-function ComposeLayerTreeRow(
-  props: RowRendererProps<ComposeLayerNode> & {
-    onClick: (
-      event: MouseEvent<HTMLDivElement>,
-      node: NodeApi<ComposeLayerNode>,
-    ) => void;
-  },
-) {
-  return (
-    <div
-      {...props.attrs}
-      ref={props.innerRef as Ref<HTMLDivElement>}
-      onFocus={(event) => event.stopPropagation()}
-      onClick={(event) => props.onClick(event, props.node)}
-    >
-      {props.children as ReactNode}
-    </div>
   );
 }
 
@@ -489,19 +495,17 @@ function ComposeLayerRow({
   onToggleLayer,
   onToggleLayerHidden,
   onToggleLayerLocked,
-  selectForDrag,
-}: NodeRendererProps<ComposeLayerNode> & {
+}: NativeTreeNodeRendererProps<ComposeLayerNode> & {
   openById: Record<string, boolean>;
   selectedLayerIds: string[];
   onHoverObject: (object: FrameObject | null) => void;
   onSelectLayer: (
     event: PointerEvent<HTMLDivElement>,
-    node: NodeApi<ComposeLayerNode>,
+    node: NativeTreeNodeApi<ComposeLayerNode>,
   ) => void;
-  onToggleLayer: (node: NodeApi<ComposeLayerNode>) => void;
+  onToggleLayer: (node: NativeTreeNodeApi<ComposeLayerNode>) => void;
   onToggleLayerHidden?: (layerId: string) => void;
   onToggleLayerLocked?: (layerId: string) => void;
-  selectForDrag?: (node: NodeApi<ComposeLayerNode>) => void;
 }) {
   const data = node.data;
   const selected = selectedLayerIds.includes(data.id);
@@ -517,21 +521,6 @@ function ComposeLayerRow({
       className={`group box-border grid h-full min-w-0 cursor-pointer select-none grid-cols-[16px_18px_minmax(0,1fr)_auto_auto] items-center gap-1.5 border px-1.5 text-[13px] transition ${selected ? "border-transparent bg-[#242733] text-white" : "border-transparent text-[#dfe2ea] hover:bg-[#20232c]"} ${hidden ? "opacity-50" : ""}`}
       style={style}
       onPointerEnter={() => onHoverObject(data.object ?? null)}
-      onPointerDownCapture={
-        data.kind === "object" && selectForDrag
-          ? (event) => {
-              if (
-                !event.shiftKey &&
-                !event.metaKey &&
-                !event.ctrlKey &&
-                !selectedLayerIds.includes(data.id)
-              ) {
-                if (event.button !== 0) return;
-                selectForDrag(node);
-              }
-            }
-          : undefined
-      }
       onPointerDown={(event) => onSelectLayer(event, node)}
     >
       <button
@@ -590,11 +579,18 @@ function ComposeLayerRow({
 
 function ComposeLayerDragPreview({
   isDragging,
+  dropTarget,
   mouse,
   onDragPositionChange,
-}: DragPreviewProps & {
+  onDropTargetChange,
+}: NativeTreeDragPreviewProps & {
   onDragPositionChange: (
     isDragging: boolean,
+    mouse: { x: number; y: number } | null,
+  ) => void;
+  onDropTargetChange: (
+    isDragging: boolean,
+    dropTarget: NativeTreeDropTarget | null,
     mouse: { x: number; y: number } | null,
   ) => void;
 }) {
@@ -602,6 +598,11 @@ function ComposeLayerDragPreview({
     onDragPositionChange(isDragging, isDragging ? mouse : null);
     return () => onDragPositionChange(false, null);
   }, [isDragging, mouse, onDragPositionChange]);
+
+  useEffect(() => {
+    onDropTargetChange(isDragging, isDragging ? dropTarget : null, mouse);
+    return () => onDropTargetChange(false, null, null);
+  }, [dropTarget, isDragging, mouse, onDropTargetChange]);
 
   return null;
 }
@@ -708,153 +709,5 @@ function TemplateLayerIcon({ className }: { className: string }) {
         strokeWidth="2"
       />
     </svg>
-  );
-}
-
-export function buildComposeLayerTree(part: Part): ComposeLayerNode[] {
-  const objectChildren = [...part.objects]
-    .reverse()
-    .map((object) => objectToNode(object, "object", part));
-
-  return [
-    {
-      id: "objects",
-      name: "Objects",
-      kind: "root",
-      children: objectChildren.length > 0 ? objectChildren : undefined,
-    },
-    backgroundToNode(part),
-    {
-      id: "frame",
-      name: `${part.frame.width} x ${part.frame.height} Frame`,
-      kind: "frame",
-    },
-  ];
-}
-
-function getNodeObjects(node: ComposeLayerNode): FrameObject[] {
-  if (node.object) return [node.object];
-  if (node.kind === "background" && node.part)
-    return [frameObjectFromBackgroundLayer(node.part.background)];
-  return node.children?.flatMap(getNodeObjects) ?? [];
-}
-
-export function syncComposeSelectedLayerIds(
-  current: string[],
-  selectedObjectIds: string[],
-  previousSelectedObjectIds: string[],
-  treeData: ComposeLayerNode[],
-) {
-  const preservedAggregateIds = current.filter((id) => {
-    const node = findComposeLayerNode(treeData, id);
-    if (!node || node.object) return false;
-    return haveSameIds(
-      getNodeObjects(node).map((object) => object.id),
-      selectedObjectIds,
-    );
-  });
-  if (preservedAggregateIds.length > 0) return preservedAggregateIds;
-  const preservedObjectPresentationIds = current.filter((id) => {
-    const node = findComposeLayerNode(treeData, id);
-    return node?.object && haveSameIds([node.object.id], selectedObjectIds);
-  });
-  if (preservedObjectPresentationIds.length > 0)
-    return preservedObjectPresentationIds;
-  if (selectedObjectIds.length > 0)
-    return selectedObjectIds.flatMap((id) => {
-      const node = findPreferredObjectLayerNode(treeData, id);
-      return node ? [node.id] : [];
-    });
-  const preserved = current.filter((id) => findComposeLayerNode(treeData, id));
-  if (
-    preserved.some((id) => {
-      const node = findComposeLayerNode(treeData, id);
-      return node?.kind === "frame" || node?.kind === "background";
-    })
-  )
-    return preserved;
-  if (previousSelectedObjectIds.length > 0) return [];
-  return preserved.length > 0 ? preserved : [];
-}
-
-function objectToNode(
-  object: FrameObject,
-  kind: Extract<ComposeLayerKind, "background-object" | "object">,
-  part?: Part,
-): ComposeLayerNode {
-  return {
-    id: object.id,
-    name: object.name || object.id,
-    kind,
-    animated: Boolean(object.animations?.length),
-    object,
-  };
-}
-
-function backgroundToNode(part: Part): ComposeLayerNode {
-  const backgroundChildren = [...part.background.elements]
-    .reverse()
-    .map((object) => objectToNode(object, "background-object", part));
-  return {
-    id: part.background.id,
-    name: part.background.name || "Background",
-    kind: "background",
-    animated: Boolean(part.background.animations?.length),
-    part,
-    children: backgroundChildren.length > 0 ? backgroundChildren : undefined,
-  };
-}
-
-function findComposeLayerNode(
-  nodes: ComposeLayerNode[],
-  id: string,
-): ComposeLayerNode | null {
-  for (const node of nodes) {
-    if (node.id === id) return node;
-    const child = node.children
-      ? findComposeLayerNode(node.children, id)
-      : null;
-    if (child) return child;
-  }
-  return null;
-}
-
-function findPreferredObjectLayerNode(
-  nodes: ComposeLayerNode[],
-  objectId: string,
-): ComposeLayerNode | null {
-  const exact = findComposeLayerNode(nodes, objectId);
-  const objectMatches = findComposeObjectLayerNodes(nodes, objectId);
-  return (
-    objectMatches.find((node) => node.kind === "object") ??
-    exact ??
-    objectMatches[0] ??
-    null
-  );
-}
-
-function findComposeObjectLayerNodes(
-  nodes: ComposeLayerNode[],
-  objectId: string,
-): ComposeLayerNode[] {
-  return nodes.flatMap((node) => [
-    ...(node.object?.id === objectId ? [node] : []),
-    ...(node.children
-      ? findComposeObjectLayerNodes(node.children, objectId)
-      : []),
-  ]);
-}
-
-function haveSameIds(left: string[], right: string[]): boolean {
-  if (left.length !== right.length) return false;
-  const rightIds = new Set(right);
-  return left.every((id) => rightIds.has(id));
-}
-
-function countComposeLayerNodes(nodes: ComposeLayerNode[]): number {
-  return nodes.reduce(
-    (total, node) =>
-      total + 1 + (node.children ? countComposeLayerNodes(node.children) : 0),
-    0,
   );
 }
