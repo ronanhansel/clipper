@@ -1337,6 +1337,24 @@ function AppContent({
     timelineModeRef,
   });
 
+  function withInspectorScrollPreserved(fn: () => void) {
+    const panel = document.querySelector<HTMLElement>("[data-inspector-panel]");
+    const scrollTop = panel?.scrollTop ?? 0;
+    fn();
+    if (panel)
+      requestAnimationFrame(() => {
+        panel.scrollTop = scrollTop;
+      });
+  }
+
+  function undoWithScrollPreserved() {
+    withInspectorScrollPreserved(() => undoProjectChange());
+  }
+
+  function redoWithScrollPreserved() {
+    withInspectorScrollPreserved(() => redoProjectChange());
+  }
+
   // Export resolution is user-selectable via dropdown and threads through the full export backend (wired in v0.2.10).
   const [exportResolution, setExportResolution] = useState<{
     width: number;
@@ -2745,6 +2763,29 @@ function AppContent({
           cssStylePropertyName(key),
           formatPreviewStyleValue(key, value),
         );
+    }
+    if (next.transform && typeof next.transform === "object") {
+      const t = next.transform as Record<string, unknown>;
+      const parts: string[] = [];
+      const pushTransform = (key: string, unit: string) => {
+        const v = t[key];
+        if (typeof v === "number" && Number.isFinite(v))
+          parts.push(`${key}(${v}${unit})`);
+      };
+      pushTransform("perspective", "px");
+      pushTransform("translateX", "px");
+      pushTransform("translateY", "px");
+      pushTransform("translateZ", "px");
+      pushTransform("scale", "");
+      pushTransform("scaleX", "");
+      pushTransform("scaleY", "");
+      pushTransform("rotate", "deg");
+      pushTransform("rotateX", "deg");
+      pushTransform("rotateY", "deg");
+      pushTransform("rotateZ", "deg");
+      pushTransform("skewX", "deg");
+      pushTransform("skewY", "deg");
+      target.style.transform = parts.length ? parts.join(" ") : "";
     }
   }
 
@@ -4279,7 +4320,7 @@ function AppContent({
     pasteTimelineNodesSilently,
     presentationModeRef,
     pausePlaybackAtCurrentTime,
-    redoProjectChange,
+    redoProjectChange: redoWithScrollPreserved,
     restoreClosedEditorTab,
     selectedPartId,
     setFastSelectEnabled,
@@ -4289,7 +4330,7 @@ function AppContent({
     stepSceneTime,
     timelineMode,
     togglePlayback,
-    undoProjectChange,
+    undoProjectChange: undoWithScrollPreserved,
     updateMode,
     updateTimelineMode,
   });

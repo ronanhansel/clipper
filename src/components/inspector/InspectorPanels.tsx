@@ -521,6 +521,28 @@ export const ObjectInspector = memo(function ObjectInspector({
     updateStyleValue(key, Number(value) || 0);
   }
 
+  function updateTransform(key: string, value: string) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return;
+    onChange((current) => ({
+      ...current,
+      transform: {
+        ...(typeof current.transform === "object" ? current.transform : {}),
+        [key]: num,
+      },
+    }));
+  }
+
+  function previewTransform(key: string, value: number) {
+    onPreview?.((current) => ({
+      ...current,
+      transform: {
+        ...(typeof current.transform === "object" ? current.transform : {}),
+        [key]: value,
+      },
+    }));
+  }
+
   function previewStyleNumber(key: string, value: number) {
     onPreview?.((current) => ({
       ...current,
@@ -878,7 +900,8 @@ export const ObjectInspector = memo(function ObjectInspector({
             value: 1,
             min: 0,
             step: 0.01,
-            onCommit: () => undefined,
+            onCommit: (value) => updateTransform("scale", value),
+            onPreviewNumber: (value) => previewTransform("scale", value),
           })}
           {renderKeyframedInput({
             label: "Scale X",
@@ -886,7 +909,8 @@ export const ObjectInspector = memo(function ObjectInspector({
             value: 1,
             min: 0,
             step: 0.01,
-            onCommit: () => undefined,
+            onCommit: (value) => updateTransform("scaleX", value),
+            onPreviewNumber: (value) => previewTransform("scaleX", value),
           })}
           {renderKeyframedInput({
             label: "Scale Y",
@@ -894,49 +918,56 @@ export const ObjectInspector = memo(function ObjectInspector({
             value: 1,
             min: 0,
             step: 0.01,
-            onCommit: () => undefined,
+            onCommit: (value) => updateTransform("scaleY", value),
+            onPreviewNumber: (value) => previewTransform("scaleY", value),
           })}
           {renderKeyframedInput({
             label: "Rotation",
             animationKey: "rotate",
             value: 0,
             step: 1,
-            onCommit: () => undefined,
+            onCommit: (value) => updateTransform("rotate", value),
+            onPreviewNumber: (value) => previewTransform("rotate", value),
           })}
           {renderKeyframedInput({
             label: "Rotate X",
             animationKey: "rotateX",
             value: 0,
             step: 1,
-            onCommit: () => undefined,
+            onCommit: (value) => updateTransform("rotateX", value),
+            onPreviewNumber: (value) => previewTransform("rotateX", value),
           })}
           {renderKeyframedInput({
             label: "Rotate Y",
             animationKey: "rotateY",
             value: 0,
             step: 1,
-            onCommit: () => undefined,
+            onCommit: (value) => updateTransform("rotateY", value),
+            onPreviewNumber: (value) => previewTransform("rotateY", value),
           })}
           {renderKeyframedInput({
             label: "Rotate Z",
             animationKey: "rotateZ",
             value: 0,
             step: 1,
-            onCommit: () => undefined,
+            onCommit: (value) => updateTransform("rotateZ", value),
+            onPreviewNumber: (value) => previewTransform("rotateZ", value),
           })}
           {renderKeyframedInput({
             label: "Skew X",
             animationKey: "skewX",
             value: 0,
             step: 1,
-            onCommit: () => undefined,
+            onCommit: (value) => updateTransform("skewX", value),
+            onPreviewNumber: (value) => previewTransform("skewX", value),
           })}
           {renderKeyframedInput({
             label: "Skew Y",
             animationKey: "skewY",
             value: 0,
             step: 1,
-            onCommit: () => undefined,
+            onCommit: (value) => updateTransform("skewY", value),
+            onPreviewNumber: (value) => previewTransform("skewY", value),
           })}
           {renderKeyframedInput({
             label: "Perspective",
@@ -944,14 +975,16 @@ export const ObjectInspector = memo(function ObjectInspector({
             value: 0,
             min: 0,
             step: 1,
-            onCommit: () => undefined,
+            onCommit: (value) => updateTransform("perspective", value),
+            onPreviewNumber: (value) => previewTransform("perspective", value),
           })}
           {renderKeyframedInput({
             label: "Z",
             animationKey: "z",
             value: 0,
             step: 1,
-            onCommit: () => undefined,
+            onCommit: (value) => updateTransform("translateZ", value),
+            onPreviewNumber: (value) => previewTransform("translateZ", value),
           })}
           {renderKeyframedInput({
             label: "Path Offset",
