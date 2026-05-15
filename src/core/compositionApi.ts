@@ -7,7 +7,8 @@ export type FrameObjectType =
   | "html"
   | "template"
   | "null"
-  | "custom-renderer";
+  | "custom-renderer"
+  | "pattern2d";
 
 export type RenderContext = {
   time: number;

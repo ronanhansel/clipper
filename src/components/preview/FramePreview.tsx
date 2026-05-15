@@ -88,6 +88,7 @@ import {
   type TimelineMotionLayerState,
   type TransitionLayer,
 } from "../../core/types";
+import { buildPattern2dSvg } from "../../core/graphics/pattern2d";
 import type {
   AdjustmentVisualOverlay,
   PostProcessPass,
@@ -215,6 +216,7 @@ type ComposeDrawTool =
   | "pencil"
   | "text"
   | "textPath"
+  | "pattern2d"
   | "null";
 
 function isPenDrawTool(tool: ComposeDrawTool | null | undefined) {
@@ -794,6 +796,7 @@ export const FramePreview = memo(function FramePreview({
                                 interactiveTrackerPicking)
                             }
                             frameScale={frameScale}
+                            hideNullObjects={timelineMode !== "compose"}
                             isPlaying={isPlaying}
                             part={item.part}
                             renderClockSceneTime={displaySceneTime}
@@ -1244,6 +1247,7 @@ function CompositionLayerView({
   exportTileFrameBounds,
   focusPicking,
   frameScale,
+  hideNullObjects,
   isPlaying,
   part,
   renderClockSceneTime,
@@ -1263,6 +1267,7 @@ function CompositionLayerView({
   exportTileFrameBounds?: ExportTileFrameBounds;
   focusPicking: boolean;
   frameScale: number;
+  hideNullObjects?: boolean;
   isPlaying: boolean;
   part: Part;
   renderClockSceneTime: number;
@@ -1338,7 +1343,9 @@ function CompositionLayerView({
       {part.objects
         .filter(
           (obj) =>
-            !obj.hidden && isObjectInExportTile(obj, exportTileFrameBounds),
+            !obj.hidden &&
+            isObjectInExportTile(obj, exportTileFrameBounds) &&
+            !(hideNullObjects && obj.type === "null"),
         )
         .map((object) => (
           <FrameObjectView
@@ -2595,8 +2602,8 @@ function ShapeDrawPreviewOverlay({
           <text
             fill="#ffffff"
             fontFamily="system-ui, sans-serif"
-            fontSize="12"
-            fontWeight="600"
+            fontSize="48"
+            fontWeight="500"
           >
             <textPath
               href="#clipper-draw-preview-path"
@@ -2993,7 +3000,10 @@ export const FrameObjectView = function FrameObjectView({
       className={`absolute flex touch-none select-none flex-col whitespace-pre-line ${textBoxLayout === "fixed" ? "overflow-hidden" : "overflow-visible"} ${focusPicking ? "cursor-crosshair" : (object.type === "text" || editableTextPath) && (activeShapeTool === "text" || activeShapeTool === "textPath") ? "cursor-text" : "cursor-default"} ${editing ? "select-text" : ""} ${!editing && (activeShapeTool === "text" || activeShapeTool === "textPath") && (object.type === "text" || editableTextPath) ? "hover:ring-2 hover:ring-[#159dff]/60 rounded-sm" : ""}`}
       data-clipper-render-object-id={object.id}
       data-object-id={canSelect && !isLocked ? object.id : undefined}
-      style={{ ...style, ...(isLocked ? { opacity: 0.6 } : {}) }}
+      style={{
+        ...style,
+        ...(isLocked ? { pointerEvents: "none" as const } : {}),
+      }}
       onDoubleClick={(event) => {
         if (!isLocked) onDoubleClick(event);
       }}
@@ -3055,6 +3065,9 @@ export const FrameObjectView = function FrameObjectView({
           style={style}
         />
       ) : null}
+      {object.type === "pattern2d" ? (
+        <Pattern2DContent object={object} />
+      ) : null}
       {(object.type === "html" ||
         object.type === "template" ||
         object.type === "custom-renderer") &&
@@ -3070,6 +3083,7 @@ export const FrameObjectView = function FrameObjectView({
       object.type !== "html" &&
       object.type !== "template" &&
       object.type !== "custom-renderer" &&
+      object.type !== "pattern2d" &&
       content
         ? content
         : null}
@@ -4529,7 +4543,10 @@ export const BackgroundElementView = memo(function BackgroundElementView({
       ref={elementRef}
       className="absolute flex select-none flex-col justify-center overflow-hidden whitespace-pre-line"
       data-background-element-id={element.locked ? undefined : element.id}
-      style={{ ...style, ...(element.locked ? { opacity: 0.6 } : {}) }}
+      style={{
+        ...style,
+        ...(element.locked ? { pointerEvents: "none" as const } : {}),
+      }}
     >
       {element.type === "text"
         ? textLines.map((line, index) => (
@@ -4553,6 +4570,9 @@ export const BackgroundElementView = memo(function BackgroundElementView({
           style={style}
         />
       ) : null}
+      {element.type === "pattern2d" ? (
+        <Pattern2DContent object={element} />
+      ) : null}
       {(element.type === "html" ||
         element.type === "template" ||
         element.type === "custom-renderer") &&
@@ -4567,6 +4587,7 @@ export const BackgroundElementView = memo(function BackgroundElementView({
       element.type !== "html" &&
       element.type !== "template" &&
       element.type !== "custom-renderer" &&
+      element.type !== "pattern2d" &&
       content
         ? content
         : null}
@@ -4583,6 +4604,20 @@ function evaluateObjectForPreview(
   return evaluateFrameObject(object, time, duration, {
     animations: animationsEnabled,
   });
+}
+
+export function Pattern2DContent({ object }: { object: FrameObject }) {
+  const patternId = `pattern2d-${object.id}`;
+  const svg = useMemo(
+    () => buildPattern2dSvg(object, patternId),
+    [object, patternId],
+  );
+  return (
+    <div
+      className="absolute inset-0 h-full w-full"
+      dangerouslySetInnerHTML={{ __html: svg }}
+    />
+  );
 }
 
 export function HtmlContent({

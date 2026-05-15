@@ -114,40 +114,56 @@ export function buildFrameObjectParentTransformLookup(
   animationsEnabled = true,
 ) {
   const byId = new Map(objects.map((object) => [object.id, object]));
-  const transforms = new Map<string, string>();
+  // stores the full cumulative transform for an object (parent chain + own)
+  const fullTransforms = new Map<string, string>();
   const visiting = new Set<string>();
 
-  function objectTransform(object: FrameObject): string {
-    if (transforms.has(object.id)) return transforms.get(object.id) ?? "";
+  function fullTransform(object: FrameObject): string {
+    if (fullTransforms.has(object.id))
+      return fullTransforms.get(object.id) ?? "";
     if (visiting.has(object.id)) return "";
     visiting.add(object.id);
 
     const evaluated = evaluateFrameObject(object, time, duration, {
       animations: animationsEnabled,
     });
+    // bounds.x/y animate as left/top on the element itself, so children must
+    // inherit the delta between the animated position and the base position as
+    // a translate — not the absolute position (which would double-apply).
+    const dx = evaluated.bounds.x - object.bounds.x;
+    const dy = evaluated.bounds.y - object.bounds.y;
+    const boundsTranslate =
+      dx !== 0 || dy !== 0 ? `translate(${dx}px, ${dy}px)` : "";
+    // renderStyle.transform includes rotation, scale, translateX/Y from
+    // property tracks and motion animations — all of these propagate to children
     const animationTransform =
       typeof evaluated.renderStyle.transform === "string"
         ? evaluated.renderStyle.transform
         : "";
-    const staticTransform =
-      typeof object.style.transform === "string" ? object.style.transform : "";
-    const ownTransform = `${animationTransform} ${staticTransform}`.trim();
+    const ownTransform = `${boundsTranslate} ${animationTransform}`.trim();
     const parent = object.parentId ? byId.get(object.parentId) : null;
-    const parentTransform = parent ? objectTransform(parent) : "";
-    const value = `${parentTransform} ${ownTransform}`.trim();
+    const parentFull = parent ? fullTransform(parent) : "";
+    const value = `${parentFull} ${ownTransform}`.trim();
     visiting.delete(object.id);
-    transforms.set(object.id, value);
+    fullTransforms.set(object.id, value);
     return value;
   }
 
+  // build full transforms for all objects that have a parent
+  for (const object of objects) {
+    if (object.parentId) fullTransform(object);
+  }
+
+  // return only the parent's cumulative transform for each child
+  const parentTransforms = new Map<string, string>();
   for (const object of objects) {
     if (!object.parentId) continue;
     const parent = byId.get(object.parentId);
     if (!parent) continue;
-    transforms.set(object.id, objectTransform(parent));
+    parentTransforms.set(object.id, fullTransform(parent));
   }
 
-  return transforms;
+  return parentTransforms;
 }
 
 export function evaluateBackgroundLayer(

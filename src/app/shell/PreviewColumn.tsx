@@ -22,6 +22,7 @@ import {
   EllipseIcon,
   LineIcon,
   NullObjectIcon,
+  Pattern2DIcon,
   PolygonIcon,
   RectIcon,
   StarIcon,
@@ -148,6 +149,7 @@ type ComposeDrawTool =
   | "pencil"
   | "text"
   | "textPath"
+  | "pattern2d"
   | "null";
 
 type ToolbarTool = {
@@ -223,6 +225,13 @@ const nullObjectTool: ToolbarTool = {
   label: "Null object",
   shortcut: "N",
   icon: <NullObjectIcon size={18} />,
+};
+
+const pattern2dTool: ToolbarTool = {
+  tool: "pattern2d",
+  label: "2D pattern",
+  shortcut: "G",
+  icon: <Pattern2DIcon size={18} />,
 };
 
 function ShortcutHint({ shortcut }: { shortcut?: string }) {
@@ -676,6 +685,14 @@ function ComposeToolbar({
           </button>
         </div>
         <div className="mx-1 h-6 w-px bg-[#313744]" />
+        <button
+          className={toolButtonClass(activeTool === "pattern2d")}
+          title={pattern2dTool.label}
+          aria-pressed={activeTool === "pattern2d"}
+          onClick={() => selectTool(pattern2dTool)}
+        >
+          {pattern2dTool.icon}
+        </button>
         <button
           className={toolButtonClass(false)}
           title={nullObjectTool.label}

@@ -217,6 +217,7 @@ import {
   type TransitionLayer,
   type TimelineViewportState,
 } from "./core/types";
+import { getPattern2dDefaults } from "./core/graphics/pattern2d";
 import { FindMediaDialog } from "./components/FindMediaDialog";
 import type {
   EditorPaneDocument,
@@ -278,6 +279,7 @@ type ComposeDrawTool =
   | "pencil"
   | "text"
   | "textPath"
+  | "pattern2d"
   | "null";
 
 type ShapeDrawPreview = {
@@ -366,6 +368,8 @@ function getDrawToolName(tool: ComposeDrawTool) {
       return "Text on path";
     case "null":
       return "Null object";
+    case "pattern2d":
+      return "Pattern";
   }
 }
 
@@ -3280,7 +3284,7 @@ function AppContent({
 
   function addNullObjectToFrameCenter() {
     if (!part) return;
-    const size = 30;
+    const size = 80;
     const id = `null-${Date.now().toString(36)}`;
     const object: FrameObject = {
       id,
@@ -4182,11 +4186,20 @@ function AppContent({
     const isText = tool === "text";
     const isNullObject = tool === "null";
     const isSvg = isSvgDrawTool(tool);
+    const isPattern2d = tool === "pattern2d";
     const id = `${tool}-${Date.now().toString(36)}`;
     const object: FrameObject = {
       id,
       name: getDrawToolName(tool),
-      type: isText ? "text" : isNullObject ? "null" : isSvg ? "svg" : "rect",
+      type: isText
+        ? "text"
+        : isNullObject
+          ? "null"
+          : isSvg
+            ? "svg"
+            : isPattern2d
+              ? "pattern2d"
+              : "rect",
       selector: `[data-object-id='${id}']`,
       bounds: {
         x,
@@ -4211,24 +4224,36 @@ function AppContent({
                 backgroundColor: "transparent",
                 overflow: "visible",
               }
-            : {
-                backgroundColor: "#D5D5D5",
-                ...(isEllipse ? { borderRadius: 9999 } : {}),
-                ...(tool === "polygon"
-                  ? {
-                      clipPath:
-                        "polygon(50% 0%, 100% 38%, 82% 100%, 18% 100%, 0% 38%)",
-                    }
-                  : {}),
-                ...(tool === "star"
-                  ? {
-                      clipPath:
-                        "polygon(50% 0%, 61% 35%, 98% 35%, 68% 56%, 79% 91%, 50% 70%, 21% 91%, 32% 56%, 2% 35%, 39% 35%)",
-                    }
-                  : {}),
-              },
+            : isPattern2d
+              ? {
+                  backgroundColor: "transparent",
+                  overflow: "hidden",
+                }
+              : {
+                  backgroundColor: "#D5D5D5",
+                  ...(isEllipse ? { borderRadius: 9999 } : {}),
+                  ...(tool === "polygon"
+                    ? {
+                        clipPath:
+                          "polygon(50% 0%, 100% 38%, 82% 100%, 18% 100%, 0% 38%)",
+                      }
+                    : {}),
+                  ...(tool === "star"
+                    ? {
+                        clipPath:
+                          "polygon(50% 0%, 61% 35%, 98% 35%, 68% 56%, 79% 91%, 50% 70%, 21% 91%, 32% 56%, 2% 35%, 39% 35%)",
+                      }
+                    : {}),
+                },
     };
     if (isSvg) object.content = getSvgDrawContent(tool, start, end, points);
+    if (isPattern2d) {
+      object.props = {
+        preset: "polkaDots",
+        seed: 1,
+        ...getPattern2dDefaults("polkaDots"),
+      };
+    }
     if (part) {
       updateCompositionForTimelinePart(part.id, (composition) => ({
         ...composition,

@@ -8,6 +8,7 @@ import {
   frameObjectFromBackgroundLayer,
   syncChartObjectBounds,
 } from "../../../core/frameInteraction";
+import { getPattern2dDefaults } from "../../../core/graphics/pattern2d";
 import type {
   BackgroundLayer,
   CompositionClip,
@@ -59,25 +60,45 @@ export function useFrameObjectCommands({
   updateCompositionForTimelinePart,
   updateSceneParts,
 }: FrameObjectCommandsParams) {
-  function createComposeObject(type: "rect" | "ellipse" | "text") {
+  function createComposeObject(
+    type: "rect" | "ellipse" | "text" | "pattern2d",
+  ) {
     const id = `${type}-${Date.now().toString(36)}`;
     const isEllipse = type === "ellipse";
     const isText = type === "text";
+    const isPattern2d = type === "pattern2d";
     const object: FrameObject = {
       id,
-      name: isText ? "Text" : isEllipse ? "Ellipse" : "Rectangle",
-      type: isText ? "text" : "rect",
+      name: isText
+        ? "Text"
+        : isEllipse
+          ? "Ellipse"
+          : isPattern2d
+            ? "Pattern"
+            : "Rectangle",
+      type: isText ? "text" : isPattern2d ? "pattern2d" : "rect",
       selector: `[data-object-id='${id}']`,
       bounds: isText
         ? { x: 220, y: 140, width: 320, height: 92 }
-        : { x: 220, y: 140, width: 220, height: 140 },
+        : isPattern2d
+          ? { x: 200, y: 120, width: 480, height: 320 }
+          : { x: 220, y: 140, width: 220, height: 140 },
       content: isText ? "Text" : undefined,
       style: isText
         ? { color: "#ffffff", fontSize: 72, fontWeight: 400, lineHeight: 1.1 }
-        : {
-            backgroundColor: "#D5D5D5",
-            ...(isEllipse ? { borderRadius: 9999 } : {}),
-          },
+        : isPattern2d
+          ? { backgroundColor: "transparent", overflow: "hidden" }
+          : {
+              backgroundColor: "#D5D5D5",
+              ...(isEllipse ? { borderRadius: 9999 } : {}),
+            },
+      props: isPattern2d
+        ? {
+            preset: "polkaDots",
+            seed: 1,
+            ...getPattern2dDefaults("polkaDots"),
+          }
+        : undefined,
     };
     updateCompositionForTimelinePart(part.id, (composition) => ({
       ...composition,
@@ -234,9 +255,15 @@ export function useFrameObjectCommands({
     const selectedIds = new Set(objectIds);
     if (selectedIds.size === 0) return;
     updateCompositionForTimelinePart(part.id, (composition) => {
-      const objects = composition.objects.filter(
-        (object) => !selectedIds.has(object.id),
-      );
+      const objects = composition.objects
+        .filter((object) => !selectedIds.has(object.id))
+        .map((object) => {
+          if (object.parentId && selectedIds.has(object.parentId)) {
+            const { parentId: _, ...rest } = object;
+            return rest;
+          }
+          return object;
+        });
       return {
         ...composition,
         background: {

@@ -71,3 +71,12 @@ export function NullObjectIcon({ size = 18, ...props }: IconProps) {
     </svg>
   );
 }
+
+export function Pattern2DIcon({ size = 18, ...props }: IconProps) {
+  return (
+    <svg {...defaults(size)} {...props}>
+      <rect x="2.5" y="2.5" width="13" height="13" rx="1.5" />
+      <circle cx="9" cy="9" r="3.25" />
+    </svg>
+  );
+}
