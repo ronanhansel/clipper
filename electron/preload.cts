@@ -122,11 +122,6 @@ contextBridge.exposeInMainWorld("clipper", {
       "clipper:watch-text-files",
       relativePaths,
     ) as Promise<void>,
-  watchProjectFiles: (watchPaths: { files: string[]; directories: string[] }) =>
-    ipcRenderer.invoke(
-      "clipper:watch-project-files",
-      watchPaths,
-    ) as Promise<void>,
   openProjectManifest: () =>
     ipcRenderer.invoke("clipper:open-project-manifest") as Promise<
       string | null
@@ -339,20 +334,11 @@ contextBridge.exposeInMainWorld("clipper", {
     return () =>
       ipcRenderer.removeListener("clipper:text-file-changed", listener);
   },
-  onProjectFileChanged: (callback: (relativePath: string) => void) => {
-    const listener = (
-      _event: Electron.IpcRendererEvent,
-      relativePath: string,
-    ) => callback(relativePath);
-    ipcRenderer.on("clipper:project-file-changed", listener);
-    return () =>
-      ipcRenderer.removeListener("clipper:project-file-changed", listener);
-  },
   onModeShortcut: (callback: (key: "1" | "2" | "3" | "4") => void) => {
-    const listener = (
-      _event: Electron.IpcRendererEvent,
-      key: "1" | "2" | "3" | "4",
-    ) => callback(key);
+    const listener = (_event: Electron.IpcRendererEvent, key: string) => {
+      if (key === "1" || key === "2" || key === "3" || key === "4")
+        callback(key);
+    };
     ipcRenderer.on("clipper:mode-shortcut", listener);
     return () => ipcRenderer.removeListener("clipper:mode-shortcut", listener);
   },

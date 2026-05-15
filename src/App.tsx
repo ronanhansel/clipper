@@ -31,6 +31,10 @@ import {
   resolveCanonicalComposition,
 } from "./app/features/file-manager/compositionIdentity";
 import { getDirectoryPath } from "./app/features/file-manager/fileManagerPaths";
+import {
+  findBinItem,
+  normalizeProjectBin,
+} from "./app/features/file-manager/projectBinMutations";
 import { useFileManagerProjectActions } from "./app/features/file-manager/useFileManagerProjectActions";
 import {
   useFrameInteractionController,
@@ -50,6 +54,13 @@ import {
   timelineMoveKey,
   uniqueMarkerSelections,
 } from "./app/features/timeline/timelineMutationHelpers";
+import {
+  commitEditorDocumentSource,
+  getEditorLanguage,
+  isUnsupportedEditorFile,
+  resolveEditorDocument,
+  type EditorDocument,
+} from "./app/features/editor/editorDocuments";
 import { useTimelineLayerCommands } from "./app/features/timeline/useTimelineLayerCommands";
 import { useMotionMarkerCommands } from "./app/features/timeline/useMotionMarkerCommands";
 import { useTimelineClipboardCommands } from "./app/features/timeline/useTimelineClipboardCommands";
@@ -62,7 +73,6 @@ import {
   type BootProject,
 } from "./app/project/useActiveProjectBoot";
 import { useProjectDocumentController } from "./app/project/useProjectDocumentController";
-import { useProjectFileWatcher } from "./app/project/useProjectFileWatcher";
 import { AppDialogs } from "./app/shell/AppDialogs";
 import { AppHeader } from "./app/shell/AppHeader";
 import { CenterPreviewPane } from "./app/shell/CenterPreviewPane";
@@ -119,7 +129,6 @@ import {
   type AdjustmentLayerSelection,
   type AgentProvider,
   type CompositionSelection,
-  type ExportDialogTab,
   type ExportRenderQuality,
   type ExportTileResolutionMapping,
   type ExportWorkerConfigurationMode,
@@ -128,7 +137,6 @@ import {
   type MediaExportFormat,
   type MediaExportRenderMode,
   type PlaybackClock,
-  type ProjectExportFormat,
   type RightPanelTab,
   type SettingsSection,
   type StableSlowGridPreset,
@@ -185,7 +193,6 @@ import {
   getTopTimelinePartAtTime,
 } from "./core/timeline";
 import type { TimelineLayerCategory } from "./core/timelineLayers";
-import { compositionFromSource } from "./core/compositionSource";
 import {
   FRAME_HEIGHT,
   FRAME_WIDTH,
@@ -682,43 +689,6 @@ function isTextPathObject(object: FrameObject) {
   return parseClipperPathStyle(object.style.clipperPath)?.tool === "textPath";
 }
 
-const unsupportedEditorExtensions = new Set([
-  "mp4",
-  "mov",
-  "m4v",
-  "webm",
-  "avi",
-  "mkv",
-  "mp3",
-  "wav",
-  "aiff",
-  "flac",
-  "png",
-  "jpg",
-  "jpeg",
-  "gif",
-  "webp",
-  "ico",
-  "pdf",
-  "zip",
-]);
-
-function getEditorLanguage(filePath: string) {
-  const extension = filePath.split(".").pop()?.toLowerCase() ?? "";
-  if (extension === "ts" || extension === "tsx") return "typescript";
-  if (extension === "js" || extension === "jsx") return "javascript";
-  if (extension === "css") return "css";
-  if (extension === "json") return "json";
-  if (extension === "md") return "markdown";
-  if (extension === "html") return "html";
-  return "plaintext";
-}
-
-function isUnsupportedEditorFile(filePath: string) {
-  const extension = filePath.split(".").pop()?.toLowerCase() ?? "";
-  return unsupportedEditorExtensions.has(extension);
-}
-
 function toPersistedEditorSession(
   editorTabs: EditorTab[],
   activeEditorTabId: string | null,
@@ -973,12 +943,6 @@ function AppContent({
     setProjectNameDraft,
     exportDialogOpen,
     setExportDialogOpen,
-    exportDialogTab,
-    setExportDialogTab,
-    projectExportFormat,
-    setProjectExportFormat,
-    exportIncludeSources,
-    setExportIncludeSources,
     isExporting,
     setIsExporting,
     exportProgress,
@@ -1344,7 +1308,6 @@ function AppContent({
   const {
     activeProjectManifestPath,
     activeProjectManifestPathRef,
-    compositionSources,
     compositionSourcesRef,
     implicitFileOperation,
     isFileSystemBusy,
@@ -1354,19 +1317,12 @@ function AppContent({
     projectRef,
     replaceProject,
     redoProjectChange,
-    reloadProject,
-    reloadProjectFromWatcher,
     saveAllChanges,
     scheduleImplicitFileOperationSave,
     setCompositionSources,
-    syncCompositionSourcesFromProject,
     undoProjectChange,
-    updateCompositionFromSource,
     updateEditorState,
     updateProject,
-    watchedProjectDirectory,
-    writeEditorTextFile,
-    executeFileManagerCommand,
     fileSystemRevision,
   } = useProjectDocumentController({
     applyStoredEditorState,
@@ -1386,12 +1342,6 @@ function AppContent({
     width: number;
     height: number;
   }>(() => project.resolution);
-
-  useProjectFileWatcher({
-    manifestPath: activeProjectManifestPath,
-    reloadProject: reloadProjectFromWatcher,
-    isFileSystemBusy,
-  });
 
   const { updateMode, updateTimelineMode } = useEditorModeCommands({
     modeRef,
@@ -1499,8 +1449,11 @@ function AppContent({
 
   const compositionLibrary = project.compositionLibrary ?? [];
   const timelines = project.timelines ?? [];
-  const activeTimelineName = getDisplayNameFromPath(selectedSceneId ?? "");
-  const hasActiveTimeline = timelines.some((t) => t.id === selectedSceneId);
+  const activeTimeline = timelines.find((t) => t.id === selectedSceneId);
+  const activeTimelineName = getDisplayNameFromPath(
+    activeTimeline?.filePath ?? activeTimeline?.id ?? selectedSceneId ?? "",
+  );
+  const hasActiveTimeline = Boolean(activeTimeline);
   const storedTimelineLayers = getFramePreviewTimelineLayers(
     project,
     selectedSceneId,
@@ -1997,40 +1950,33 @@ function AppContent({
       { history: true },
     );
   }
-  const { exportProject, exportRenderedMedia, stopVideoExport } =
-    useExportCommands({
-      projectRef,
-      manifestPath: activeProjectManifestPath,
-      selectedSceneId,
-      projectExportFormat,
-      exportIncludeSources,
-      exportFrameRate,
-      exportRenderQuality,
-      exportResolution,
-      mediaExportRenderMode,
-      stableSlowGridPreset,
-      stableSlowValidationSamples,
-      exportTileMapping,
-      exportWorkerMapping,
-      mediaExportFormat,
-      reusePrerenderCacheForExport,
-      videoExportTileHeight,
-      compositionSources,
-      saveAllChanges,
-      setExportDialogOpen,
-      setExportProgress,
-      setIsExporting,
-      setVideoExportCancelling,
-      setVideoExportProgress,
-      notifyProjectExported: (path) =>
-        toast.success(<PathToastMessage action="Exported to" path={path} />),
-      notifyProjectDownloaded: () => toast.success("Export downloaded"),
-      notifyRenderedMedia: (path) =>
-        toast.success(
-          <PathToastMessage action="Rendered video to" path={path} />,
-        ),
-      notifyError: (message) => toast.error(message),
-    });
+  const { exportRenderedMedia, stopVideoExport } = useExportCommands({
+    projectRef,
+    manifestPath: activeProjectManifestPath,
+    selectedSceneId,
+    exportFrameRate,
+    exportRenderQuality,
+    exportResolution,
+    mediaExportRenderMode,
+    stableSlowGridPreset,
+    stableSlowValidationSamples,
+    exportTileMapping,
+    exportWorkerMapping,
+    mediaExportFormat,
+    reusePrerenderCacheForExport,
+    videoExportTileHeight,
+    saveAllChanges,
+    setExportDialogOpen,
+    setExportProgress,
+    setIsExporting,
+    setVideoExportCancelling,
+    setVideoExportProgress,
+    notifyRenderedMedia: (path) =>
+      toast.success(
+        <PathToastMessage action="Rendered video to" path={path} />,
+      ),
+    notifyError: (message) => toast.error(message),
+  });
 
   useEffect(() => {
     modeRef.current = mode;
@@ -2914,6 +2860,74 @@ function AppContent({
       ...object,
       locked: !object.locked || undefined,
     }));
+  }
+
+  function openComposeObjectContextMenu(
+    event: React.MouseEvent,
+    object: import("./core/types").FrameObject,
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+    const targetIds = selectedComposeObjectIds.includes(object.id)
+      ? selectedComposeObjectIds
+      : [object.id];
+    const targetObjects = [...part.background.elements, ...part.objects].filter(
+      (o) => targetIds.includes(o.id),
+    );
+    const allHidden = targetObjects.every((o) => o.hidden);
+    const allLocked = targetObjects.every((o) => o.locked);
+    const label =
+      targetIds.length > 1
+        ? `${targetIds.length} objects`
+        : (object.name ?? "Object");
+    setAppContextMenu({
+      x: event.clientX,
+      y: event.clientY,
+      items: [
+        {
+          label: `Duplicate ${label}`,
+          action: () => {
+            const suffix = Date.now().toString(36);
+            const offset = 24;
+            const duplicated = targetObjects.map((o, index) => {
+              const id = `${o.id}:copy:${suffix}:${index}`;
+              return {
+                ...structuredClone(o),
+                id,
+                selector: `[data-object-id='${id}']`,
+                bounds: {
+                  ...o.bounds,
+                  x: o.bounds.x + offset,
+                  y: o.bounds.y + offset,
+                },
+              };
+            });
+            updateCompositionForTimelinePart(part.id, (composition) => ({
+              ...composition,
+              objects: [...composition.objects, ...duplicated],
+            }));
+            setComposeSelectionObjects(duplicated);
+          },
+        },
+        {
+          label: allHidden ? `Show ${label}` : `Hide ${label}`,
+          action: () => {
+            for (const id of targetIds) toggleComposeLayerHidden(id);
+          },
+        },
+        {
+          label: allLocked ? `Unlock ${label}` : `Lock ${label}`,
+          action: () => {
+            for (const id of targetIds) toggleComposeLayerLocked(id);
+          },
+        },
+        {
+          label: `Delete ${label}`,
+          danger: true,
+          action: () => deleteComposeObjects(targetIds),
+        },
+      ],
+    });
   }
 
   function renameComposeAnimationLayer(layerId: string, name: string) {
@@ -4116,15 +4130,15 @@ function AppContent({
           }
         : isNullObject
           ? {
-              background: "transparent",
+              backgroundColor: "transparent",
             }
           : isSvg
             ? {
-                background: "transparent",
+                backgroundColor: "transparent",
                 overflow: "visible",
               }
             : {
-                background: "#D5D5D5",
+                backgroundColor: "#D5D5D5",
                 ...(isEllipse ? { borderRadius: 9999 } : {}),
                 ...(tool === "polygon"
                   ? {
@@ -4297,6 +4311,13 @@ function AppContent({
     updateEditorState,
   });
 
+  const projectDirectory = activeProjectManifestPath.includes("/")
+    ? activeProjectManifestPath.slice(
+        0,
+        activeProjectManifestPath.lastIndexOf("/"),
+      )
+    : undefined;
+
   const fileManagerActions = useFileManagerProjectActions({
     addCompositionFromLibrary,
     assets,
@@ -4308,15 +4329,14 @@ function AppContent({
     project,
     projectRef,
     selectedSceneId,
-    setCompositionSources,
     setCurrentSceneTime,
+    setCompositionSources,
     setSelectedPartId,
     setSelectedSceneId,
     updateTimelineMode,
     updateEditorState,
     updateProject,
-    watchedProjectDirectory,
-    executeFileManagerCommand,
+    projectDirectory: projectDirectory ?? "",
     scheduleImplicitFileOperationSave,
   });
 
@@ -4452,6 +4472,37 @@ function AppContent({
       if (event.altKey || event.shiftKey) return;
       if (isEditableKeyboardTarget(event.target)) return;
       const key = event.key.toLowerCase();
+      if (key === "d") {
+        if (selectedComposeObjectIds.length === 0) return;
+        const selectedIdSet = new Set(selectedComposeObjectIds);
+        const selectedObjects = [
+          ...part.background.elements,
+          ...part.objects,
+        ].filter((object) => selectedIdSet.has(object.id));
+        if (selectedObjects.length === 0) return;
+        event.preventDefault();
+        const suffix = Date.now().toString(36);
+        const offset = 24;
+        const duplicatedObjects = selectedObjects.map((object, index) => {
+          const id = `${object.id}:copy:${suffix}:${index}`;
+          return {
+            ...structuredClone(object),
+            id,
+            selector: `[data-object-id='${id}']`,
+            bounds: {
+              ...object.bounds,
+              x: object.bounds.x + offset,
+              y: object.bounds.y + offset,
+            },
+          };
+        });
+        updateCompositionForTimelinePart(part.id, (composition) => ({
+          ...composition,
+          objects: [...composition.objects, ...duplicatedObjects],
+        }));
+        setComposeSelectionObjects(duplicatedObjects);
+        return;
+      }
       if (key === "c") {
         if (selectedComposeObjectIds.length === 0) return;
         const selectedIdSet = new Set(selectedComposeObjectIds);
@@ -4524,46 +4575,63 @@ function AppContent({
     selectedComposeObjectIds,
     timelineMode,
   ]);
-  const projectDirectory = activeProjectManifestPath.endsWith(".json")
-    ? getDirectoryPath(activeProjectManifestPath)
-    : undefined;
   const activeEditorTab =
     editorTabs.find((tab) => tab.id === activeEditorTabId) ?? null;
-  const activeEditorComposition = activeEditorTab?.isComposition
-    ? (resolveCanonicalComposition(
-        compositionLibrary,
-        scene.compositions,
+  const resolvedEditorDocument = activeEditorTab
+    ? resolveEditorDocument(
+        project,
         activeEditorTab.id,
-      ) ??
-      resolveCanonicalComposition(
-        compositionLibrary,
-        scene.compositions,
-        activeEditorTab.filePath,
-      ))
+        activeEditorTab.isComposition ? "composition" : undefined,
+      )
     : null;
+  const activeEditorProjectDocument =
+    resolvedEditorDocument?.kind === "internal-file" ||
+    resolvedEditorDocument?.kind === "composition"
+      ? resolvedEditorDocument
+      : null;
   const activeEditorDocument: EditorPaneDocument | null = activeEditorTab
-    ? {
-        id: activeEditorTab.id,
-        filePath:
-          activeEditorTab.isComposition && activeEditorComposition
-            ? activeEditorComposition.filePath
-            : activeEditorTab.filePath,
-        source:
-          activeEditorTab.isComposition && activeEditorComposition
-            ? (compositionSources[activeEditorComposition.filePath] ?? "")
-            : activeEditorTab.source,
-        language: activeEditorTab.language,
-        unsupportedReason: activeEditorTab.unsupportedReason,
-        showCompositionApiStatus: Boolean(activeEditorTab.isComposition),
-      }
+    ? resolvedEditorDocument
+      ? {
+          id: resolvedEditorDocument.id,
+          filePath: resolvedEditorDocument.title,
+          title: resolvedEditorDocument.title,
+          source:
+            resolvedEditorDocument.kind === "unsupported"
+              ? ""
+              : resolvedEditorDocument.source,
+          language:
+            resolvedEditorDocument.kind === "unsupported"
+              ? "plaintext"
+              : resolvedEditorDocument.language,
+          unsupportedReason:
+            resolvedEditorDocument.kind === "unsupported"
+              ? resolvedEditorDocument.reason
+              : undefined,
+          fileRemoved: false,
+        }
+      : {
+          id: activeEditorTab.id,
+          filePath: activeEditorTab.filePath,
+          title: activeEditorTab.filePath,
+          source: "",
+          language: "plaintext",
+          fileRemoved: true,
+        }
     : null;
-  const editorPaneTabs: EditorPaneTab[] = editorTabs.map((tab) => ({
-    id: tab.id,
-    filePath: tab.filePath,
-    unsupportedReason: tab.unsupportedReason,
-    isComposition: tab.isComposition,
-    isPinned: tab.isPinned,
-  }));
+  const editorPaneTabs: EditorPaneTab[] = editorTabs.map((tab) => {
+    const resolved = resolveEditorDocument(
+      project,
+      tab.id,
+      tab.isComposition ? "composition" : undefined,
+    );
+    return {
+      id: tab.id,
+      filePath: resolved?.title ?? tab.filePath,
+      isComposition: tab.isComposition,
+      isPinned: tab.isPinned,
+      fileRemoved: resolved === null,
+    };
+  });
   const activeEditorViewportState = activeEditorDocument
     ? (project.editorState?.editor?.[activeEditorDocument.id] ??
       project.editorState?.code?.[activeEditorDocument.id])
@@ -4575,75 +4643,14 @@ function AppContent({
     openCompositionInEditor(activeTimelinePart.id, { temporary: true });
   }, [activeTimelinePart?.id, closeCompositionEditorTabs, composeMode, mode]);
 
-  useEffect(() => {
-    if (
-      !activeEditorTab ||
-      activeEditorTab.isComposition ||
-      activeEditorTab.source !== undefined ||
-      activeEditorTab.unsupportedReason
-    )
-      return;
-    const { id, filePath } = activeEditorTab;
-    if (isUnsupportedEditorFile(filePath)) {
-      updateEditorTab(id, {
-        language: "plaintext",
-        unsupportedReason:
-          "Clipper can only edit text-based project files in the editor. This file cannot be rendered or edited inline.",
-      });
-      return;
-    }
-
-    let cancelled = false;
-    void clipperHost
-      .readTextFile(filePath)
-      .then((source) => {
-        if (!cancelled)
-          updateEditorTab(id, {
-            source,
-            language: getEditorLanguage(filePath),
-          });
-      })
-      .catch((error) => {
-        if (!cancelled)
-          updateEditorTab(id, {
-            language: "plaintext",
-            unsupportedReason:
-              error instanceof Error
-                ? error.message
-                : "Unable to open this file in the editor.",
-          });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [activeEditorTab, updateEditorTab]);
-
   async function handleCloseProject() {
     await saveAllChanges();
     onCloseProject();
   }
 
-  async function handleFileManagerRefreshProject() {
-    await reloadProject();
-  }
-
   function handleSelectComposition(_compositionId: string) {
     // Compositions are only added to the timeline via drag-and-drop.
     // Clicking a composition in the file manager does not insert it.
-  }
-
-  function projectRelativeFilePath(filePath: string) {
-    const editableRoot = filePath.startsWith(
-      `${watchedProjectDirectory}/file-manager/`,
-    )
-      ? `${watchedProjectDirectory}/file-manager`
-      : watchedProjectDirectory;
-    const relativePath = filePath.startsWith(`${editableRoot}/`)
-      ? filePath.slice(editableRoot.length + 1)
-      : filePath;
-    return relativePath.startsWith("file-manager/")
-      ? relativePath.slice("file-manager/".length)
-      : relativePath;
   }
 
   function openCompositionInEditor(
@@ -4659,7 +4666,6 @@ function AppContent({
     const tab = {
       id: composition.id,
       filePath: composition.filePath,
-      source: compositionSources[composition.filePath] ?? "",
       language: getEditorLanguage(composition.filePath),
       isComposition: true,
     };
@@ -4670,21 +4676,24 @@ function AppContent({
 
   async function openProjectFileInEditor(
     filePath: string,
-    options?: { isComposition?: boolean; temporary?: boolean },
+    options?: {
+      isComposition?: boolean;
+      isTimeline?: boolean;
+      temporary?: boolean;
+    },
   ) {
     updateMode("editor");
     if (options?.isComposition) {
-      const relativePath = projectRelativeFilePath(filePath);
       const composition = compositionLibrary.find(
         (item) =>
-          item.filePath === relativePath ||
-          item.filePath.endsWith(`/${relativePath}`),
+          item.id === filePath ||
+          item.filePath === filePath ||
+          item.filePath.endsWith(`/${filePath}`),
       );
       if (composition) {
         const tab = {
           id: composition.id,
           filePath: composition.filePath,
-          source: compositionSources[composition.filePath] ?? "",
           language: getEditorLanguage(composition.filePath),
           isComposition: true,
         };
@@ -4692,41 +4701,31 @@ function AppContent({
         else openEditorTab(tab);
         return;
       }
-      const source = await clipperHost.readTextFile(filePath);
-      const parsedComposition = await compositionFromSource(
-        createEditorCompositionBase(relativePath),
-        source,
-      );
-      updateProject(
-        (current) => ({
-          ...current,
-          compositionLibrary: [
-            ...(current.compositionLibrary ?? []),
-            parsedComposition,
-          ],
-          compositions: current.compositions
-            ? [...current.compositions, parsedComposition]
-            : current.compositions,
-          compositionSources: {
-            ...(current.compositionSources ?? {}),
-            [relativePath]: source,
-          },
-        }),
-        { history: true, syncSources: false },
-      );
-      const tab = {
-        id: parsedComposition.id,
-        filePath: parsedComposition.filePath,
-        source,
-        language: getEditorLanguage(parsedComposition.filePath),
-        isComposition: true,
-      };
-      if (options.temporary) openTemporaryEditorTab(tab);
-      else openEditorTab(tab);
+      toast.error("Composition could not be resolved from project state.");
       return;
     }
 
     const openTab = options?.temporary ? openTemporaryEditorTab : openEditorTab;
+    const binItem = findBinItem(
+      normalizeProjectBin(projectRef.current),
+      filePath,
+    );
+    if (binItem?.kind === "internal-file" || binItem?.kind === "timeline") {
+      openTab({
+        id: binItem.id,
+        filePath: binItem.name,
+        language:
+          binItem.kind === "timeline" ? "json" : (binItem as any).language,
+      });
+      return;
+    }
+
+    if (filePath.startsWith("/")) {
+      toast.error(
+        "External proxy files are not editable in the Clipper editor.",
+      );
+      return;
+    }
 
     if (isUnsupportedEditorFile(filePath)) {
       openTab({
@@ -4738,45 +4737,7 @@ function AppContent({
       });
       return;
     }
-
-    try {
-      const source = await clipperHost.readTextFile(filePath);
-      openTab({
-        id: filePath,
-        filePath,
-        source,
-        language: getEditorLanguage(filePath),
-        isComposition: options?.isComposition,
-      });
-    } catch (error) {
-      openTab({
-        id: filePath,
-        filePath,
-        language: "plaintext",
-        unsupportedReason:
-          error instanceof Error
-            ? error.message
-            : "Unable to open this file in the editor.",
-      });
-    }
-  }
-
-  function createEditorCompositionBase(filePath: string): Part {
-    return {
-      id: filePath,
-      filePath,
-      duration: 5,
-      frame: { width: FRAME_WIDTH, height: FRAME_HEIGHT, style: {} },
-      background: {
-        id: "background",
-        name: "Background",
-        style: {},
-        elements: [],
-      },
-      objects: [],
-      snapshot: [],
-      motionMarkers: [],
-    };
+    toast.error("File could not be resolved from project state.");
   }
 
   function handleSelectTimeline(timelineId: string) {
@@ -4785,7 +4746,6 @@ function AppContent({
     updateEditorState((state) => ({
       ...state,
       selectedSceneId: timelineId,
-      selectedTimelineId: timelineId,
       currentSceneTime: 0,
     }));
     clearDirectSelection();
@@ -4805,13 +4765,6 @@ function AppContent({
   function handleModeChange(nextMode: typeof mode) {
     if (nextMode === "preview") {
       setPrerenderCacheResetToken((token) => token + 1);
-      if (activeEditorComposition && activeEditorDocument) {
-        void updateCompositionFromSource(
-          activeEditorComposition,
-          activeEditorDocument.source ?? "",
-          { history: false, syncSource: false },
-        );
-      }
     }
     updateMode(nextMode);
   }
@@ -4830,7 +4783,7 @@ function AppContent({
           projectName={project.name}
           projectNameDraft={projectNameDraft}
           renamingProject={renamingProject}
-          sceneName={getDisplayNameFromPath(selectedSceneId ?? "")}
+          sceneName={activeTimelineName}
           onCancelProjectRename={cancelProjectRename}
           onCloseProject={handleCloseProject}
           onCommitProjectRename={commitProjectRename}
@@ -4853,20 +4806,22 @@ function AppContent({
             isPlaying={isPlaying}
             leftPanelTab={leftPanelTab}
             osFileManagerProps={{
-              projectDirectory: watchedProjectDirectory,
-              compositionLibrary,
-              selectedTimelineId: selectedSceneId,
-              fileSystemRevision,
-              fileManagerState: project.editorState?.fileManagerState,
-              onReloadProject: handleFileManagerRefreshProject,
-              onCompositionPathMoves:
-                fileManagerActions.updateCompositionFilePaths,
+              bin: normalizeProjectBin(project),
+              compositionLibrary: project.compositionLibrary ?? [],
+              selectedCompositionId: selectedPartId,
+              createComposition: fileManagerActions.createBinComposition,
+              createFile: fileManagerActions.createBinFile,
+              createFolder: fileManagerActions.createBinFolder,
+              createTimeline: fileManagerActions.createBinTimeline,
+              deleteItem: fileManagerActions.deleteBinItem,
+              deleteItems: fileManagerActions.deleteBinItems,
+              dropFiles: fileManagerActions.dropBinFiles,
+              duplicateItem: fileManagerActions.duplicateBinItem,
+              duplicateItems: fileManagerActions.duplicateBinItems,
+              moveItem: fileManagerActions.moveBinItem,
               onOpenFile: openProjectFileInEditor,
-              onSelectComposition: handleSelectComposition,
-              onSelectTimeline: handleSelectTimeline,
-              executeFileManagerCommand,
-              onFileManagerStateChange:
-                fileManagerActions.fileManagerStateChange,
+              renameItem: fileManagerActions.renameBinItem,
+              revealItem: fileManagerActions.revealBinItem,
             }}
             part={leftSidebarPart}
             selectedObjectIds={leftSidebarSelectedObjectIds}
@@ -4889,26 +4844,88 @@ function AppContent({
                     document: activeEditorDocument,
                     tabs: editorPaneTabs,
                     viewportState: activeEditorViewportState,
-                    projectDirectory,
                     onCloseTab: closeEditorTab,
                     onRestoreClosedTab: restoreClosedEditorTab,
                     onSelectTab: selectEditorTab,
                     onPinTab: pinEditorTab,
                     onSourceChange: (source) => {
                       pinEditorTab(activeEditorDocument.id);
-                      updateEditorTab(activeEditorDocument.id, { source });
-                      return activeEditorComposition
-                        ? updateCompositionFromSource(
-                            activeEditorComposition,
-                            source,
-                            { history: false, syncSource: false },
-                          )
-                        : writeEditorTextFile(
-                            activeEditorDocument.filePath,
-                            source,
-                          );
+                      if (!activeEditorProjectDocument)
+                        return Promise.resolve();
+                      const result = commitEditorDocumentSource(
+                        projectRef.current,
+                        activeEditorProjectDocument,
+                        source,
+                      );
+                      if (result.error) {
+                        return Promise.reject(new Error(result.error));
+                      }
+                      updateProject(result.project, { history: false });
+                      return Promise.resolve();
                     },
                     onViewportStateChange: updateEditorViewportState,
+                    onRestoreRemovedFile: (tabId) => {
+                      const tab = editorTabs.find((t) => t.id === tabId);
+                      if (!tab) return;
+
+                      updateProject((current) => {
+                        const bin = normalizeProjectBin(current);
+                        if (findBinItem(bin, tabId)) return current;
+
+                        if (tab.isComposition) {
+                          const compositionId = tabId;
+                          const composition: CompositionClip = {
+                            id: compositionId,
+                            filePath: tab.filePath,
+                            duration: 3,
+                            frame: {
+                              width: FRAME_WIDTH,
+                              height: FRAME_HEIGHT,
+                              style: {},
+                            },
+                            background: {
+                              id: "background",
+                              name: "Background",
+                              style: {},
+                              elements: [],
+                            },
+                            objects: [],
+                            snapshot: [],
+                            motionMarkers: [],
+                          };
+                          const binItem = {
+                            id: `bin_comp_${compositionId}`,
+                            kind: "composition" as const,
+                            name: tab.filePath.replace(
+                              /\.composition\.json$/i,
+                              "",
+                            ),
+                            compositionId,
+                          };
+                          return {
+                            ...current,
+                            bin: [...bin, binItem],
+                            compositionLibrary: [
+                              ...(current.compositionLibrary ?? []),
+                              composition,
+                            ],
+                          };
+                        }
+
+                        // Internal file or timeline: restore as internal file
+                        const newBinItem = {
+                          id: tabId,
+                          kind: "internal-file" as const,
+                          name: tab.filePath,
+                          language: "plaintext",
+                          source: "",
+                        };
+                        return {
+                          ...current,
+                          bin: [...bin, newBinItem],
+                        };
+                      });
+                    },
                   }
                 : null
             }
@@ -4986,6 +5003,7 @@ function AppContent({
               onFramePointerLeave: wrappedOnFramePointerLeave,
               onFramePointerUp: wrappedOnFramePointerUp,
               onObjectPointerDown: startObjectDrag,
+              onObjectContextMenu: openComposeObjectContextMenu,
               onObjectResizePointerDown: startObjectResize,
               onPathControlPointerDown: handlePathControlPointerDown,
               onObjectCornerRadiusChange: (objectId, radius) =>
@@ -5102,7 +5120,7 @@ function AppContent({
             <ConnectedInspectorContent
               rightPanelTab={rightPanelTab}
               part={part}
-              projectDirectory={watchedProjectDirectory}
+              projectDirectory={projectDirectory ?? ""}
               composeMode={composeMode}
               sourceStatus={sourceStatus}
               agentContext={agentContext}
@@ -5197,7 +5215,6 @@ function AppContent({
               onPreviewPartFrame={previewPartFrame}
               onPreviewPartBackground={previewPartBackground}
               onUpdatePartRenderMode={updatePartRenderMode}
-              onReloadProject={reloadProject}
             />
           </RightInspectorPanel>
         </EditorWorkspace>
@@ -5302,9 +5319,6 @@ function AppContent({
             onSelectComposeObjects: selectComposeLayerObjects,
             onPersistComposeSelection: persistComposeSelection,
             onRenameComposeAnimationLayer: renameComposeAnimationLayer,
-            onUpdateComposeBackgroundAnimation:
-              updateComposeBackgroundAnimation,
-            onUpdateComposeObjectAnimation: updateComposeObjectAnimation,
             onUpdateComposeObject: updateComposeObject,
             setAppContextMenu,
           }}
@@ -5319,9 +5333,7 @@ function AppContent({
         debugSettingsEnabled={debugSettingsEnabled}
         defaultNewMarkerDurationSeconds={markerDurationSeconds}
         exportDialogOpen={exportDialogOpen}
-        exportDialogTab={exportDialogTab}
         exportFrameRate={exportFrameRate}
-        exportIncludeSources={exportIncludeSources}
         exportProgress={exportProgress}
         exportRenderQuality={exportRenderQuality}
         exportResolution={exportResolution}
@@ -5342,12 +5354,11 @@ function AppContent({
         prerenderCacheBlackMissDebug={prerenderCacheBlackMissDebug}
         prerenderBlockDurationMs={prerenderBlockDurationMs}
         previewRenderHeight={previewRenderHeight}
-        projectExportFormat={projectExportFormat}
         projectName={project.name}
         resolution={project.resolution}
         reusePrerenderCacheForExport={reusePrerenderCacheForExport}
         sceneDurationSeconds={sceneDurationSeconds}
-        sceneName={getDisplayNameFromPath(selectedSceneId ?? "")}
+        sceneName={activeTimelineName}
         scrubCommitThrottleMs={scrubCommitThrottleMs}
         settingsOpen={settingsOpen}
         settingsSection={settingsSection}
@@ -5369,9 +5380,7 @@ function AppContent({
           setDefaultNewMarkerDurationSeconds
         }
         onExportDialogOpenChange={setExportDialogOpen}
-        onExportDialogTabChange={setExportDialogTab}
         onExportFrameRateChange={setExportFrameRate}
-        onExportIncludeSourcesChange={setExportIncludeSources}
         onExportRenderQualityChange={setExportRenderQuality}
         onExportResolutionChange={setExportResolution}
         onExportTileMappingChange={setExportTileMapping}
@@ -5386,14 +5395,12 @@ function AppContent({
           setLiveDomPostProcessPreviewEnabled
         }
         onLiveDomPostProcessMaxFpsChange={setLiveDomPostProcessMaxFps}
-        onProjectExport={() => void exportProject()}
         onPausePlaybackOnScrubChange={setPausePlaybackOnScrub}
         onPrerenderCacheEnabledChange={setPrerenderCacheEnabled}
         onPrerenderCacheBlackMissDebugChange={setPrerenderCacheBlackMissDebug}
         onPrerenderBlockDurationMsChange={setPrerenderBlockDurationMs}
         onPreviewRenderHeightChange={setPreviewRenderHeight}
         onClearAllPrerenderCaches={() => void clearAllPrerenderCaches()}
-        onProjectExportFormatChange={setProjectExportFormat}
         onReusePrerenderCacheForExportChange={setReusePrerenderCacheForExport}
         onScrubCommitThrottleMsChange={setScrubCommitThrottleMs}
         onSettingsOpenChange={setSettingsOpen}

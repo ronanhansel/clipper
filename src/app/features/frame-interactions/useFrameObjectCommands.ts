@@ -75,7 +75,7 @@ export function useFrameObjectCommands({
       style: isText
         ? { color: "#ffffff", fontSize: 72, fontWeight: 400, lineHeight: 1.1 }
         : {
-            background: "#D5D5D5",
+            backgroundColor: "#D5D5D5",
             ...(isEllipse ? { borderRadius: 9999 } : {}),
           },
     };

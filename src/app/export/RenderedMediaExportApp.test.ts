@@ -24,12 +24,12 @@ import {
 const frame: PartFrame = {
   width: FRAME_WIDTH,
   height: FRAME_HEIGHT,
-  style: { background: "#336699" },
+  style: { backgroundColor: "#336699" },
 };
 const background = {
   id: "background",
   name: "Background",
-  style: { background: "#336699" },
+  style: { backgroundColor: "#336699" },
   elements: [],
 };
 

@@ -124,3 +124,20 @@ export function sortAssetsInProject(
     ),
   };
 }
+
+export function findAssetByNameInProject(
+  project: ProjectManifest,
+  name: string,
+): AssetItem | null {
+  function search(items: AssetItem[]): AssetItem | null {
+    for (const item of items) {
+      if (item.name === name) return item;
+      if (item.children) {
+        const found = search(item.children);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+  return search(project.assets ?? defaultAssets);
+}

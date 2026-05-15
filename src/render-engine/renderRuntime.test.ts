@@ -958,6 +958,61 @@ describe("render runtime", () => {
     expect(evaluated.timeSensitive).toBe(true);
   });
 
+  it("evaluates generic property tracks into render output", () => {
+    const object: FrameObject = {
+      ...baseObject,
+      bounds: { x: 10, y: 20, width: 100, height: 50 },
+      style: { opacity: 0.2, backgroundColor: "#111" },
+      tracks: {
+        "bounds.x": {
+          valueType: "number",
+          points: [
+            { id: "x0", time: 0, value: 10 },
+            { id: "x1", time: 2, value: 210 },
+          ],
+        },
+        "bounds.width": {
+          valueType: "number",
+          points: [
+            { id: "w0", time: 0, value: 100 },
+            { id: "w1", time: 2, value: 300 },
+          ],
+        },
+        "style.opacity": {
+          valueType: "number",
+          points: [
+            { id: "o0", time: 0, value: 0.2 },
+            { id: "o1", time: 2, value: 0.8 },
+          ],
+        },
+        "transform.rotate": {
+          valueType: "number",
+          points: [
+            { id: "r0", time: 0, value: 0 },
+            { id: "r1", time: 2, value: 90 },
+          ],
+        },
+        "filter.blur": {
+          valueType: "number",
+          points: [
+            { id: "b0", time: 0, value: 0 },
+            { id: "b1", time: 2, value: 8 },
+          ],
+        },
+      },
+    };
+
+    const evaluated = evaluateFrameObject(object, 1, 2);
+
+    expect(evaluated.bounds).toMatchObject({ x: 110, width: 200 });
+    expect(evaluated.renderStyle.left).toBe(110);
+    expect(evaluated.renderStyle.width).toBe(200);
+    expect(evaluated.renderStyle.opacity).toBe(0.5);
+    expect(evaluated.renderStyle.transform).toBe("rotate(45deg)");
+    expect(evaluated.renderStyle.filter).toBe("blur(4.00px)");
+    expect(evaluated.timeSensitive).toBe(true);
+  });
+
   it("can evaluate backgrounds with layer and element animations disabled", () => {
     const background: BackgroundLayer = {
       id: "background",

@@ -65,6 +65,16 @@ export const defaultTimelineLayerState: TimelineLayerState = {
   transitionLayers: [{ id: "transition" }],
 };
 
+function hashString(str: string): string {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = (hash << 5) - hash + char;
+    hash = hash & hash;
+  }
+  return Math.abs(hash).toString(36);
+}
+
 export function createDefaultTimelineLayerState(): TimelineLayerState {
   return {
     compositionLayers: defaultTimelineLayerState.compositionLayers?.map(
@@ -574,9 +584,17 @@ function getProjectTimelines(
       ...clipMotion,
     ]);
     const { name: _name, ...rest } = timeline as any;
+    // For legacy timelines without stable IDs, derive from filePath
+    const stableId =
+      rest.id && rest.id.startsWith("timeline-")
+        ? rest.id
+        : rest.id ||
+          `timeline-legacy-${hashString(rest.filePath || "default")}`;
     return {
       ...rest,
-      filePath: rest.filePath ?? `timelines/${rest.id}.timeline.json`,
+      id: stableId,
+      filePath:
+        rest.filePath ?? `timelines/${hashString(stableId)}.timeline.json`,
       clips: rest.clips.map((clip: any) => {
         const { name: _clipName, ...clipRest } = clip;
         const start =

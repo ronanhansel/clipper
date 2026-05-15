@@ -153,8 +153,6 @@ export function TimelinePanel(props: TimelinePanelProps) {
           onSelectObjects={props.onSelectComposeObjects}
           onTimelineLayersChange={props.onTimelineLayersChange}
           onTimelineViewportStateChange={props.onTimelineViewportStateChange}
-          onUpdateBackgroundAnimation={props.onUpdateComposeBackgroundAnimation}
-          onUpdateObjectAnimation={props.onUpdateComposeObjectAnimation}
           onUpdateObject={props.onUpdateComposeObject}
         />
       </div>

@@ -84,7 +84,7 @@ function ContextMenuPanel({
   return (
     <div
       ref={ref}
-      className={`${appNoDragRegion} fixed z-50 min-w-[160px] rounded-lg border border-[#2d313b] bg-[#15171e] p-1 shadow-[0_18px_60px_rgba(0,0,0,0.45)]`}
+      className={`${appNoDragRegion} fixed z-[70] min-w-[160px] rounded-lg border border-[#2d313b] bg-[#15171e] p-1 shadow-[0_18px_60px_rgba(0,0,0,0.45)]`}
       style={{ left: resolvedPosition.x, top: resolvedPosition.y }}
       onClick={(event) => event.stopPropagation()}
     >

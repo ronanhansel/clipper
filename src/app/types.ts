@@ -7,8 +7,6 @@ export type AgentProvider = "opencode" | "codex" | "claude" | "gemini";
 export type ProjectUpdater =
   | ProjectManifest
   | ((current: ProjectManifest) => ProjectManifest);
-export type ExportDialogTab = "media" | "project";
-export type ProjectExportFormat = "project-package" | "scene-json";
 export type MediaExportFormat =
   | "prores-422-hq"
   | "prores-4444"

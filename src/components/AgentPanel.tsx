@@ -36,11 +36,11 @@ const templatePreviewBase = (template: TemplateBundle): Part => ({
   id: template.id,
   filePath: template.entry,
   duration: 1,
-  frame: { width: 1920, height: 1080, style: { background: "#07080b" } },
+  frame: { width: 1920, height: 1080, style: { backgroundColor: "#07080b" } },
   background: {
     id: "background",
     name: template.title,
-    style: { background: "#07080b" },
+    style: { backgroundColor: "#07080b" },
     elements: [],
   },
   objects: [],
@@ -51,13 +51,11 @@ const templatePreviewBase = (template: TemplateBundle): Part => ({
 export function AgentPanel({
   part,
   projectDirectory,
-  onReloadProject,
 }: {
   part: Part;
   projectDirectory?: string;
   sourceStatus: string;
   agentContext: unknown;
-  onReloadProject?: () => Promise<void>;
 }) {
   const [templates, setTemplates] = useState<TemplateBundle[]>([]);
   const [templatesError, setTemplatesError] = useState<string | null>(null);
@@ -165,7 +163,6 @@ export function AgentPanel({
         onSelectTemplate={setSelectedTemplateId}
         currentFilePath={part.filePath}
         projectDirectory={projectDirectory}
-        onReloadProject={onReloadProject}
       />
     </div>
   );
@@ -181,7 +178,6 @@ function TemplateDialog({
   projectDirectory,
   onOpenChange,
   onSelectTemplate,
-  onReloadProject,
 }: {
   loadError: string | null;
   open: boolean;
@@ -192,7 +188,6 @@ function TemplateDialog({
   projectDirectory?: string;
   onOpenChange: (open: boolean) => void;
   onSelectTemplate: (id: string) => void;
-  onReloadProject?: () => Promise<void>;
 }) {
   const [previewPart, setPreviewPart] = useState<Part | undefined>();
   const [previewError, setPreviewError] = useState<string | null>(null);
@@ -267,7 +262,6 @@ function TemplateDialog({
           ),
         ),
       );
-      await onReloadProject?.();
       setSaveError(null);
       onOpenChange(false);
     } catch (error) {

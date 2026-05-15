@@ -3,6 +3,7 @@ import type { Mode } from "../../types";
 import type { TimelineMode } from "../../../core/types";
 
 type Setter<T> = T | ((current: T) => T);
+type Unsubscribe = () => void;
 
 type UseGlobalEditorShortcutsOptions = {
   cancelActiveSelector: () => boolean;
@@ -57,6 +58,19 @@ function isTextEditingEvent(event: KeyboardEvent) {
     isTextEditingTarget(event.target as HTMLElement | null) ||
     isTextEditingTarget(document.activeElement as HTMLElement | null)
   );
+}
+
+export function subscribeHostShortcut<Args extends unknown[]>(
+  handler: unknown,
+  callback: (...args: Args) => void,
+) {
+  if (typeof handler !== "function") return undefined;
+  const unsubscribe = (
+    handler as (callback: (...args: Args) => void) => unknown
+  )(callback);
+  return typeof unsubscribe === "function"
+    ? (unsubscribe as Unsubscribe)
+    : undefined;
 }
 
 export function useGlobalEditorShortcuts({
@@ -349,16 +363,22 @@ export function useGlobalEditorShortcuts({
       if (event.code === "Space") marqueeSpacePanningRef.current = false;
     }
 
-    const unsubscribeModeShortcut =
-      window.clipper?.onModeShortcut(switchModeShortcut);
-    const unsubscribeCloseEditorTabShortcut =
-      window.clipper?.onCloseEditorTabShortcut?.(() => {
+    const unsubscribeModeShortcut = subscribeHostShortcut(
+      window.clipper?.onModeShortcut,
+      switchModeShortcut,
+    );
+    const unsubscribeCloseEditorTabShortcut = subscribeHostShortcut(
+      window.clipper?.onCloseEditorTabShortcut,
+      () => {
         closeActiveEditorTab();
-      });
-    const unsubscribeRestoreEditorTabShortcut =
-      window.clipper?.onRestoreEditorTabShortcut?.(() => {
+      },
+    );
+    const unsubscribeRestoreEditorTabShortcut = subscribeHostShortcut(
+      window.clipper?.onRestoreEditorTabShortcut,
+      () => {
         restoreClosedEditorTab();
-      });
+      },
+    );
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
     return () => {

@@ -1,4 +1,5 @@
 import { compositionToSource } from "../../../core/compositionSource";
+import { createStableCompositionId } from "../../../core/compositionIds";
 import {
   deleteCompositionFromProject,
   replacePartInProject,
@@ -18,19 +19,6 @@ export type CompositionLibraryMutationResult = {
   project: ProjectManifest;
   compositionSources: Record<string, string>;
 };
-
-function createStableCompositionId() {
-  return `composition-${crypto.randomUUID()}`;
-}
-
-function hashCompositionSource(source: string) {
-  let hash = 2166136261;
-  for (let index = 0; index < source.length; index += 1) {
-    hash ^= source.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0).toString(16).padStart(8, "0");
-}
 
 export function getProjectFolderSiblingNames(
   project: ProjectManifest,
@@ -83,7 +71,6 @@ export function createCompositionInLibrary(
     motionMarkers: [],
   };
   const source = compositionToSource(composition);
-  composition.sourceHash = hashCompositionSource(source);
   const nextSources = { ...compositionSources, [composition.filePath]: source };
   return {
     compositionSources: nextSources,
@@ -379,7 +366,7 @@ export function duplicateCompositionInProject(
     composition.filePath.split("/").pop() || "untitled.composition.ts";
   const duplicateName = nextNumberedName(
     `${getDisplayNameFromPath(composition.filePath)} copy`,
-    siblingNames.map((name) => name.replace(/\.composition\.ts$/, "")),
+    siblingNames.map((name) => name.replace(/\.composition\.(?:ts|json)$/, "")),
   );
   const fileName = reconstructFileName(duplicateName, sourceFileName);
   const filePath = directoryPath ? `${directoryPath}/${fileName}` : fileName;
@@ -388,7 +375,6 @@ export function duplicateCompositionInProject(
     ...composition,
     id: createStableCompositionId(),
     filePath,
-    sourceHash: hashCompositionSource(duplicateSource),
     motionMarkers: [],
     snapshot: [],
   };
@@ -451,9 +437,8 @@ export function relinkCompositionInProject(
     ? {
         ...parsedComposition,
         id: composition.id,
-        sourceHash: hashCompositionSource(source),
       }
-    : { ...composition, sourceHash: hashCompositionSource(source) };
+    : { ...composition };
   const nextLibrary = library.map((item) =>
     item.id === compositionId
       ? {

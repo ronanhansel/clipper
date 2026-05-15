@@ -1,4 +1,5 @@
 import { evaluateLayerAnimations } from "../core/animations";
+import { evaluateObjectState } from "../core/propertyRegistry";
 import {
   FRAME_HEIGHT,
   FRAME_WIDTH,
@@ -52,22 +53,30 @@ export function evaluateFrameObject(
   options: RenderEvaluationOptions = {},
 ): EvaluatedFrameObject {
   const animationsEnabled = options.animations ?? true;
+  const trackedObject = animationsEnabled
+    ? evaluateObjectState(object, time)
+    : object;
   const objectAnimations =
-    object.type === "text"
+    trackedObject.type === "text"
       ? object.animations?.filter((animation) => !animation.options.split)
       : object.animations;
   const layerAnimationStyle =
     animationsEnabled && objectAnimations
       ? evaluateLayerAnimations(objectAnimations, time)
       : {};
-  const templateRender = object.template
-    ? renderFrameTemplate(object.template, object, time, duration)
+  const templateRender = trackedObject.template
+    ? renderFrameTemplate(trackedObject.template, trackedObject, time, duration)
     : null;
 
-  const mergedMotionStyle = { ...layerAnimationStyle };
+  const propertyTrackStyle = renderStyleFromPropertyTracks(trackedObject);
+  const mergedMotionStyle = { ...propertyTrackStyle, ...layerAnimationStyle };
   const motionTransform =
-    typeof mergedMotionStyle.transform === "string"
-      ? mergedMotionStyle.transform
+    typeof layerAnimationStyle.transform === "string"
+      ? layerAnimationStyle.transform
+      : "";
+  const propertyTransform =
+    typeof propertyTrackStyle.transform === "string"
+      ? propertyTrackStyle.transform
       : "";
   const templateTransform =
     typeof templateRender?.style?.transform === "string"
@@ -77,17 +86,23 @@ export function evaluateFrameObject(
     ...mergedMotionStyle,
     ...templateRender?.style,
   };
-  if (motionTransform || templateTransform)
-    renderStyle.transform = `${motionTransform} ${templateTransform}`.trim();
-  const renderContent = templateRender?.content ?? object.content;
-  const renderRichText = templateRender?.content ? undefined : object.richText;
+  if (motionTransform || propertyTransform || templateTransform)
+    renderStyle.transform =
+      `${motionTransform} ${propertyTransform} ${templateTransform}`
+        .replace(/\s+/g, " ")
+        .trim();
+  const renderContent = templateRender?.content ?? trackedObject.content;
+  const renderRichText = templateRender?.content
+    ? undefined
+    : trackedObject.richText;
 
   return {
-    ...object,
+    ...trackedObject,
     renderContent,
     renderRichText,
     renderStyle,
-    timeSensitive: animationsEnabled && isTimeSensitiveFrameObject(object),
+    timeSensitive:
+      animationsEnabled && isTimeSensitiveFrameObject(trackedObject),
   };
 }
 
@@ -170,8 +185,74 @@ export function evaluateBackgroundLayer(
 export function isTimeSensitiveFrameObject(object: FrameObject) {
   return (
     Boolean(object.animations?.length) ||
-    Boolean(object.template && !object.template.static)
+    Boolean(object.template && !object.template.static) ||
+    Boolean(object.tracks && Object.keys(object.tracks).length > 0)
   );
+}
+
+function renderStyleFromPropertyTracks(object: FrameObject): RenderStyle {
+  const transform = transformStyleFromRecord(
+    readObjectRecord(object, "transform"),
+  );
+  const filter = filterStyleFromRecord(readObjectRecord(object, "filter"));
+  return {
+    left: object.bounds.x,
+    top: object.bounds.y,
+    width: object.bounds.width,
+    height: object.bounds.height,
+    opacity: styleValue(object.style.opacity),
+    color: styleValue(object.style.color),
+    backgroundColor: styleValue(object.style.backgroundColor),
+    transform,
+    filter,
+  };
+}
+
+function readObjectRecord(object: FrameObject, key: "transform" | "filter") {
+  const value = (object as unknown as Record<string, unknown>)[key];
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function transformStyleFromRecord(record: Record<string, unknown>) {
+  const transforms: string[] = [];
+  appendTransform(transforms, record.perspective, "perspective", "px");
+  appendTransform(transforms, record.translateX, "translateX", "px");
+  appendTransform(transforms, record.translateY, "translateY", "px");
+  appendTransform(transforms, record.translateZ, "translateZ", "px");
+  appendTransform(transforms, record.scale, "scale", "");
+  appendTransform(transforms, record.scaleX, "scaleX", "");
+  appendTransform(transforms, record.scaleY, "scaleY", "");
+  appendTransform(transforms, record.rotate, "rotate", "deg");
+  appendTransform(transforms, record.rotateX, "rotateX", "deg");
+  appendTransform(transforms, record.rotateY, "rotateY", "deg");
+  appendTransform(transforms, record.rotateZ, "rotateZ", "deg");
+  appendTransform(transforms, record.skewX, "skewX", "deg");
+  appendTransform(transforms, record.skewY, "skewY", "deg");
+  return transforms.length ? transforms.join(" ") : undefined;
+}
+
+function appendTransform(
+  transforms: string[],
+  value: unknown,
+  name: string,
+  unit: string,
+) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return;
+  transforms.push(`${name}(${value}${unit})`);
+}
+
+function filterStyleFromRecord(record: Record<string, unknown>) {
+  return typeof record.blur === "number" && Number.isFinite(record.blur)
+    ? `blur(${Math.max(0, record.blur).toFixed(2)}px)`
+    : undefined;
+}
+
+function styleValue(value: unknown) {
+  return typeof value === "string" || typeof value === "number"
+    ? value
+    : undefined;
 }
 
 export function renderFrameTemplate(

@@ -133,7 +133,6 @@ type ConnectedInspectorContentProps = {
     updater: (background: BackgroundLayer) => BackgroundLayer,
   ) => void;
   onUpdatePartRenderMode: (renderMode: CompositionRenderMode) => void;
-  onReloadProject?: () => Promise<void>;
 };
 
 export function ConnectedInspectorContent({
@@ -196,7 +195,6 @@ export function ConnectedInspectorContent({
   onUpdateSelectedPartDuration,
   onUpdatePartBackground,
   onUpdatePartRenderMode,
-  onReloadProject,
 }: ConnectedInspectorContentProps) {
   const stableSelectedObjectRef = useRef<FrameObject | null | undefined>(
     selectedObject,
@@ -230,7 +228,6 @@ export function ConnectedInspectorContent({
         projectDirectory={projectDirectory}
         sourceStatus={sourceStatus}
         agentContext={agentContext}
-        onReloadProject={onReloadProject}
       />
     );
 

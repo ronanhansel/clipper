@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { FRAME_HEIGHT, FRAME_WIDTH } from "../../../core/types";
 import type { Mode } from "../../types";
+import { subscribeHostShortcut } from "../shortcuts/useGlobalEditorShortcuts";
 
 export type PresentationMode = "frame" | "theater" | null;
 
@@ -30,10 +31,13 @@ export function usePresentationController({
   const presentationControlsTimeoutRef = useRef(0);
 
   useEffect(() => {
-    return window.clipper?.onWindowFullscreenChange?.((fullscreen) => {
-      if (!fullscreen && presentationModeRef.current === "frame")
-        setPresentationMode(null);
-    });
+    return subscribeHostShortcut(
+      window.clipper?.onWindowFullscreenChange,
+      (fullscreen: boolean) => {
+        if (!fullscreen && presentationModeRef.current === "frame")
+          setPresentationMode(null);
+      },
+    );
   }, []);
 
   useEffect(() => {

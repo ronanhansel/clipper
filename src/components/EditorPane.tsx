@@ -1,7 +1,5 @@
 import Editor, { type BeforeMount, type OnMount } from "@monaco-editor/react";
 import { useEffect, useRef, useState } from "react";
-import { compositionApiSource } from "../core/compositionApiSource";
-import { clipperHost } from "../app/clipperHost";
 import { getDisplayNameFromPath } from "../core/fileNames";
 import { getMonacoOptionsForDocument } from "../app/config";
 import { configureMonacoTypeScriptLanguageService } from "../app/editor/monacoLanguageService";
@@ -17,7 +15,7 @@ export type EditorPaneDocument = {
   language: string;
   title?: string;
   unsupportedReason?: string;
-  showCompositionApiStatus?: boolean;
+  fileRemoved?: boolean;
 };
 
 export type EditorPaneTab = {
@@ -27,6 +25,7 @@ export type EditorPaneTab = {
   unsupportedReason?: string;
   isComposition?: boolean;
   isPinned: boolean;
+  fileRemoved?: boolean;
 };
 
 const editorViewportStateCache = new Map<string, CodeViewportState>();
@@ -55,29 +54,28 @@ export function EditorPane({
   tabs,
   viewportState,
   active = true,
-  projectDirectory,
   onCloseTab,
   onRestoreClosedTab,
   onSelectTab,
   onPinTab,
   onSourceChange,
+  onRestoreRemovedFile,
   onViewportStateChange,
 }: {
   document: EditorPaneDocument;
   tabs: EditorPaneTab[];
   viewportState?: CodeViewportState;
   active?: boolean;
-  projectDirectory?: string;
   onCloseTab: (tabId: string) => void;
   onRestoreClosedTab: () => boolean;
   onSelectTab: (tabId: string) => void;
   onPinTab: (tabId: string) => void;
   onSourceChange: (source: string) => Promise<void>;
+  onRestoreRemovedFile?: (tabId: string) => void;
   onViewportStateChange: (sourceId: string, state: CodeViewportState) => void;
 }) {
   const [source, setSource] = useState(document.source ?? "");
   const [error, setError] = useState("");
-  const [apiMissing, setApiMissing] = useState(false);
   const sourceRef = useRef(source);
   const editingRef = useRef(false);
   const editingTimeoutRef = useRef(0);
@@ -122,42 +120,6 @@ export function EditorPane({
   useEffect(() => {
     sourceRef.current = source;
   }, [source]);
-
-  useEffect(() => {
-    if (!projectDirectory || !document.showCompositionApiStatus) return;
-    let cancelled = false;
-    async function check() {
-      try {
-        await clipperHost.readTextFile(
-          `${projectDirectory}/composition-api.ts`,
-        );
-        if (!cancelled) setApiMissing(false);
-      } catch {
-        if (!cancelled) setApiMissing(true);
-      }
-    }
-    check();
-    return () => {
-      cancelled = true;
-    };
-  }, [document.showCompositionApiStatus, projectDirectory]);
-
-  async function restoreCompositionApi() {
-    if (!projectDirectory) return;
-    try {
-      await clipperHost.writeTextFile(
-        `${projectDirectory}/composition-api.ts`,
-        compositionApiSource,
-      );
-      setApiMissing(false);
-    } catch (restoreError) {
-      setError(
-        restoreError instanceof Error
-          ? restoreError.message
-          : "Unable to restore composition-api.ts.",
-      );
-    }
-  }
 
   useEffect(
     () => () => {
@@ -326,7 +288,7 @@ export function EditorPane({
     restoreScrollPosition();
   };
 
-  const gridTemplateRows = `auto${apiMissing ? " auto" : ""} minmax(0,1fr)${error ? " auto" : ""}`;
+  const gridTemplateRows = `auto minmax(0,1fr)${error ? " auto" : ""}`;
   const title = document.title ?? getDisplayNameFromPath(document.filePath);
 
   return (
@@ -351,7 +313,7 @@ export function EditorPane({
               onDoubleClick={() => onPinTab(tab.id)}
             >
               <span
-                className={`min-w-0 truncate ${tab.isPinned ? "" : "italic"}`}
+                className={`min-w-0 truncate ${tab.isPinned ? "" : "italic"} ${tab.fileRemoved ? "line-through opacity-60" : ""}`}
               >
                 {tabTitle}
               </span>
@@ -375,23 +337,26 @@ export function EditorPane({
           );
         })}
       </div>
-      {apiMissing ? (
-        <div className="flex items-center justify-between gap-2 border-b border-[#3b2a2a] bg-[#1a0f10] px-3.5 py-2 text-xs text-[#ffb4b4]">
-          <span className="break-words">
-            composition-api.ts is missing from the project. External editors and
-            type-checking will not work.
-          </span>
-          <button
-            className="shrink-0 rounded bg-[#2d313b] px-2 py-1 text-[11px] font-bold text-[#dfe2ea] hover:bg-[#3b4150]"
-            type="button"
-            onClick={() => void restoreCompositionApi()}
-          >
-            Restore
-          </button>
-        </div>
-      ) : null}
       <div className="min-h-0 border-y border-[#20232c] bg-[#12141a] shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
-        {document.unsupportedReason ? (
+        {document.fileRemoved ? (
+          <div className="grid h-full place-items-center p-8 text-center">
+            <div className="max-w-[520px] rounded-[18px] border border-[#3b2a2a] bg-[#1a0f10] p-7 shadow-[0_18px_60px_rgba(0,0,0,0.25)]">
+              <div className="text-sm font-extrabold text-[#ffb4b4]">
+                File has been removed
+              </div>
+              <div className="mt-2 text-sm leading-6 text-[#8c929f]">
+                This file was deleted from the project.
+              </div>
+              <button
+                type="button"
+                className="mt-4 rounded-md bg-[#2d313b] px-4 py-1.5 text-xs font-semibold text-[#dfe2ea] hover:bg-[#3d414b] transition-colors"
+                onClick={() => onRestoreRemovedFile?.(document.id)}
+              >
+                Restore File
+              </button>
+            </div>
+          </div>
+        ) : document.unsupportedReason ? (
           <div className="grid h-full place-items-center p-8 text-center">
             <div className="max-w-[520px] rounded-[18px] border border-[#2d313b] bg-[#171920] p-7 shadow-[0_18px_60px_rgba(0,0,0,0.25)]">
               <div className="text-sm font-extrabold text-[#dfe2ea]">

@@ -27,14 +27,17 @@ import {
   type Bounds,
   type CompositionRenderMode,
   type FrameObject,
-  type LayerAnimation,
   type MotionEase,
   type Part,
   type PartFrame,
   type Point,
   type TransitionLayer,
 } from "../../core/types";
-import { evaluateLayerAnimations } from "../../core/animations";
+import {
+  evaluateObjectState,
+  removePropertyKeyframe,
+  upsertPropertyKeyframe,
+} from "../../core/propertyRegistry";
 import { clamp, roundTenth, roundTwo } from "../../core/math";
 import {
   getAdjustmentEffectPackage,
@@ -81,6 +84,7 @@ import {
   getEditableColorStyleEntries,
   isHexColor,
 } from "../ColorSelector";
+import { KeyframedColorInput } from "./KeyframedColorInput";
 import { clipperHost } from "../../app/clipperHost";
 import { Coordinate2DField, PickButton } from "./Coordinate2DField";
 import { EffectControls } from "./EffectControls";
@@ -94,14 +98,7 @@ import {
   graphicDefaultFontFamily,
   graphicTextDefaults,
 } from "../../core/graphics/inspectorSettings";
-import {
-  getComposeAnimationAttributeKeyframeAtTime,
-  getComposeAnimationAttributeTracks,
-  getNearestComposeAnimationKeyframeValue,
-  removeComposeAnimationAttributeKeyframe,
-  upsertComposeAnimationAttributeKeyframe,
-  type ComposeAnimationAttributeKey,
-} from "../timeline/composeAnimationModel";
+import { type ComposeAnimationAttributeKey } from "../timeline/composeAnimationModel";
 import {
   getMasterTimelineClockSnapshot,
   subscribeMasterTimelineClock,
@@ -111,6 +108,87 @@ import { livePreviewScrubCommitThrottleMs } from "../../app/services/scrubIntera
 const defaultFontFamily = graphicDefaultFontFamily;
 const defaultFontOption = { value: defaultFontFamily, label: "System" };
 type FontOption = { value: string; label: string };
+
+function propertyPathForAttribute(key: ComposeAnimationAttributeKey) {
+  if (key === "x" || key === "y" || key === "width" || key === "height")
+    return `bounds.${key}`;
+  if (key === "opacity" || key === "color" || key === "backgroundColor")
+    return `style.${key}`;
+  if (key === "blur") return "filter.blur";
+  if (key === "z") return "transform.translateZ";
+  if (key === "transformPerspective") return "transform.perspective";
+  if (
+    key === "scale" ||
+    key === "scaleX" ||
+    key === "scaleY" ||
+    key === "rotate" ||
+    key === "rotateX" ||
+    key === "rotateY" ||
+    key === "rotateZ" ||
+    key === "skewX" ||
+    key === "skewY"
+  )
+    return `transform.${key}`;
+  return null;
+}
+
+function coerceInspectorAttributeValue(
+  key: ComposeAnimationAttributeKey,
+  value: number | string,
+) {
+  if (typeof value === "number") return value;
+  if (key === "color" || key === "backgroundColor") return value;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : value;
+}
+
+function hasPropertyTrack(object: FrameObject, path: string | null) {
+  return Boolean(path && object.tracks?.[path]?.points.length);
+}
+
+function getPropertyTrackKeyframeAtTime(
+  object: FrameObject,
+  path: string | null,
+  currentTime: number,
+) {
+  const points = path ? object.tracks?.[path]?.points : undefined;
+  if (!points?.length) return null;
+  const roundedTime = Math.round(currentTime * 1000) / 1000;
+  const exact = points.find(
+    (point) => Math.round(point.time * 1000) / 1000 === roundedTime,
+  );
+  if (exact) return { time: exact.time, value: exact.value };
+  let nearest: { time: number; value: unknown } | null = null;
+  let nearestDist = 0.016;
+  for (const point of points) {
+    const dist = Math.abs(point.time - currentTime);
+    if (dist < nearestDist) {
+      nearestDist = dist;
+      nearest = { time: point.time, value: point.value };
+    }
+  }
+  return nearest;
+}
+
+function getEvaluatedAttributeValue(
+  object: FrameObject,
+  key: ComposeAnimationAttributeKey,
+  time: number,
+) {
+  if (!hasPropertyTrack(object, propertyPathForAttribute(key))) return null;
+  const evaluated = evaluateObjectState(object, time);
+  if (key === "x" || key === "y" || key === "width" || key === "height")
+    return evaluated.bounds[key];
+  if (key === "opacity" || key === "color" || key === "backgroundColor")
+    return evaluated.style[key] ?? null;
+  const transform = evaluated.transform as Record<string, unknown>;
+  const filter = evaluated.filter as Record<string, unknown>;
+  if (key === "blur") return filter.blur ?? null;
+  if (key === "z") return transform.translateZ ?? null;
+  if (key === "transformPerspective") return transform.perspective ?? null;
+  return transform[key] ?? null;
+}
+
 type BoundsAnimationKey = keyof Bounds;
 
 function isBoundsAnimationKey(
@@ -360,18 +438,13 @@ export const ObjectInspector = memo(function ObjectInspector({
   const colorStyleEntries = getEditableColorStyleEntries(object.style).filter(
     ([key]) =>
       !(isText && key === "color") &&
-      !(isRect && (key === "background" || key === "backgroundColor")),
+      !(isRect && key === "backgroundColor") &&
+      !(isRect && key === "color"),
   );
   const rectBackground =
-    typeof object.style.background === "string"
-      ? object.style.background
-      : typeof object.style.backgroundColor === "string"
-        ? object.style.backgroundColor
-        : "#D5D5D5";
-  const rectBackgroundKey =
     typeof object.style.backgroundColor === "string"
-      ? "backgroundColor"
-      : "background";
+      ? object.style.backgroundColor
+      : "#D5D5D5";
   const textColor = isHexColor(String(object.style.color ?? ""))
     ? String(object.style.color)
     : graphicTextDefaults.color;
@@ -497,155 +570,49 @@ export const ObjectInspector = memo(function ObjectInspector({
     key: ComposeAnimationAttributeKey,
     fallback: number | string,
   ) {
-    const evaluatedValue = getEvaluatedAnimationValue(key);
-    if (evaluatedValue !== null) {
-      return evaluatedValue;
-    }
-    const layer = {
-      id: object.id,
-      name: object.name || object.id,
-      number: 1,
-      kind: "object" as const,
+    const propertyValue = getEvaluatedAttributeValue(
       object,
-      animations: object.animations,
-    };
-    const track = getComposeAnimationAttributeTracks(layer).find(
-      (item) => item.key === key,
-    );
-    const value = track
-      ? (getNearestComposeAnimationKeyframeValue(track, effectiveTime) ??
-        fallback)
-      : fallback;
-    return value;
-  }
-
-  function getEvaluatedAnimationValue(key: ComposeAnimationAttributeKey) {
-    const style = evaluateLayerAnimations(
-      object.animations ?? [],
+      key,
       effectiveTime,
     );
-    if (key === "opacity") {
-      return typeof style.opacity === "number" ? style.opacity : null;
-    }
-    if (key === "blur") {
-      const match =
-        typeof style.filter === "string"
-          ? style.filter.match(/blur\((-?\d+(?:\.\d+)?)px\)/)
-          : null;
-      return match ? Number(match[1]) : null;
-    }
-    if (key === "scale" || key === "scaleX" || key === "scaleY") {
-      const value = readTransformUnitValue(
-        typeof style.transform === "string" ? style.transform : undefined,
-        key,
-        "",
-      );
-      return value ?? null;
-    }
-    if (
-      key === "rotate" ||
-      key === "rotateX" ||
-      key === "rotateY" ||
-      key === "rotateZ" ||
-      key === "skewX" ||
-      key === "skewY"
-    ) {
-      const value = readTransformUnitValue(
-        typeof style.transform === "string" ? style.transform : undefined,
-        key,
-        "deg",
-      );
-      return value ?? null;
-    }
-    if (key === "transformPerspective") {
-      const match =
-        typeof style.transform === "string"
-          ? style.transform.match(/perspective\((-?\d+(?:\.\d+)?)px\)/)
-          : null;
-      return match ? Number(match[1]) : null;
-    }
-    if (key === "z") {
-      const value = readTransformPixelValue(
-        typeof style.transform === "string" ? style.transform : undefined,
-        "translateZ",
-      );
-      return value ?? null;
-    }
-    if (key === "pathOffset" || key === "pathLength" || key === "pathSpacing") {
-      const value = style[key];
-      return typeof value === "number" ? value : null;
-    }
-    if (key === "backgroundColor" || key === "color") {
-      const value = style[key];
-      return typeof value === "string" ? value : null;
-    }
-    if (key === "width" || key === "height") {
-      const value = style[key];
-      return typeof value === "number" ? value : null;
-    }
-    if (key !== "x" && key !== "y") return null;
-    const offset = readTransformPixelValue(
-      typeof style.transform === "string" ? style.transform : undefined,
-      key === "x" ? "translateX" : "translateY",
-    );
-    return offset === null ? null : object.bounds[key] + offset;
-  }
-
-  function getAttributeTrack(key: ComposeAnimationAttributeKey) {
-    const layer = {
-      id: object.id,
-      name: object.name || object.id,
-      number: 1,
-      kind: "object" as const,
-      object,
-      animations: object.animations,
-    };
-    return getComposeAnimationAttributeTracks(layer).find(
-      (item) => item.key === key,
-    );
+    return propertyValue !== null
+      ? (propertyValue as number | string)
+      : fallback;
   }
 
   function hasAttributeKeyframes(key: ComposeAnimationAttributeKey) {
-    return Boolean(getAttributeTrack(key)?.keyframes.length);
+    return hasPropertyTrack(object, propertyPathForAttribute(key));
   }
 
   function keyframeAtCurrentTime(key: ComposeAnimationAttributeKey) {
-    const track = getAttributeTrack(key);
-    return track
-      ? getComposeAnimationAttributeKeyframeAtTime(track, effectiveTime)
-      : null;
-  }
-
-  function updateObjectAnimations(
-    updater: (animations: LayerAnimation[]) => LayerAnimation[],
-  ) {
-    onChange((current) => ({
-      ...current,
-      animations: updater(current.animations ?? []),
-    }));
+    return getPropertyTrackKeyframeAtTime(
+      object,
+      propertyPathForAttribute(key),
+      effectiveTime,
+    );
   }
 
   function toggleKeyframe(
     key: ComposeAnimationAttributeKey,
     value: number | string,
   ) {
+    const propertyPath = propertyPathForAttribute(key);
+    if (!propertyPath) return;
     const existing = keyframeAtCurrentTime(key);
-    updateObjectAnimations((animations) =>
-      existing
-        ? removeComposeAnimationAttributeKeyframe(
-            animations,
-            key,
-            existing.time,
-            MAX_PART_DURATION_SECONDS,
-          )
-        : upsertComposeAnimationAttributeKeyframe(
-            animations,
-            key,
-            toStoredKeyframeValue(key, value),
-            effectiveTime,
-            MAX_PART_DURATION_SECONDS,
-          ),
-    );
+    if (existing) {
+      onChange((obj) =>
+        removePropertyKeyframe(obj, propertyPath, existing.time, effectiveTime),
+      );
+    } else {
+      onChange((obj) =>
+        upsertPropertyKeyframe(
+          obj,
+          propertyPath,
+          effectiveTime,
+          coerceInspectorAttributeValue(key, value),
+        ),
+      );
+    }
   }
 
   function upsertKeyframeValues(
@@ -654,49 +621,34 @@ export const ObjectInspector = memo(function ObjectInspector({
       value: number | string;
     }[],
   ) {
-    updateObjectAnimations((animations) =>
-      entries.reduce(
-        (next, entry) =>
-          upsertComposeAnimationAttributeKeyframe(
-            next,
-            entry.key,
-            toStoredKeyframeValue(entry.key, entry.value),
-            effectiveTime,
-            MAX_PART_DURATION_SECONDS,
-          ),
-        animations,
-      ),
+    onChange((current) =>
+      entries.reduce((next, entry) => {
+        const path = propertyPathForAttribute(entry.key);
+        if (!path) return next;
+        return upsertPropertyKeyframe(
+          next,
+          path,
+          effectiveTime,
+          coerceInspectorAttributeValue(entry.key, entry.value),
+        );
+      }, current),
     );
-  }
-
-  function toStoredKeyframeValue(
-    key: ComposeAnimationAttributeKey,
-    value: number | string,
-  ) {
-    if (
-      (key === "x" || key === "y") &&
-      typeof value === "number" &&
-      typeof object.bounds[key] === "number"
-    ) {
-      return value - object.bounds[key];
-    }
-    return value;
   }
 
   function removeKeyframesAtCurrentTime(
     keys: readonly ComposeAnimationAttributeKey[],
   ) {
-    updateObjectAnimations((animations) =>
+    onChange((current) =>
       keys.reduce((next, key) => {
-        const existing = keyframeAtCurrentTime(key);
-        if (!existing) return next;
-        return removeComposeAnimationAttributeKeyframe(
+        const path = propertyPathForAttribute(key);
+        const existing = getPropertyTrackKeyframeAtTime(
           next,
-          key,
-          existing.time,
-          MAX_PART_DURATION_SECONDS,
+          path,
+          effectiveTime,
         );
-      }, animations),
+        if (!existing || !path) return next;
+        return removePropertyKeyframe(next, path, existing.time, effectiveTime);
+      }, current),
     );
   }
 
@@ -1023,43 +975,94 @@ export const ObjectInspector = memo(function ObjectInspector({
             step: 0.01,
             onCommit: () => undefined,
           })}
-          {renderKeyframedInput({
-            label: "Colour",
-            animationKey: "color",
-            value: String(object.style.color ?? textColor),
-            type: "text",
-            onCommit: (value) => updateStyleValue("color", value),
-          })}
-          {renderKeyframedInput({
-            label: "Background",
-            animationKey: "backgroundColor",
-            value: String(
-              object.style.backgroundColor ??
-                object.style.background ??
-                rectBackground,
-            ),
-            type: "text",
-            onCommit: (value) => updateStyleValue("backgroundColor", value),
-          })}
         </div>
       </div>
+      {isText ? null : (
+        <KeyframedColorInput
+          label="Colour"
+          value={String(object.style.color ?? textColor)}
+          allowAlpha
+          hasKeyframe={Boolean(keyframeAtCurrentTime("color"))}
+          onToggleKeyframe={() =>
+            toggleKeyframe(
+              "color",
+              keyframeValue("color", String(object.style.color ?? textColor)),
+            )
+          }
+          onChange={(value) =>
+            commitKeyframedValue(
+              "color",
+              value,
+              (nextValue) => updateStyleValue("color", nextValue),
+              "text",
+            )
+          }
+          onPreview={(value) =>
+            onPreview?.((current) => ({
+              ...current,
+              style: { ...current.style, color: value },
+            }))
+          }
+        />
+      )}
+      {isRect || isText ? null : (
+        <KeyframedColorInput
+          label="Background"
+          value={String(object.style.backgroundColor ?? rectBackground)}
+          allowAlpha
+          hasKeyframe={Boolean(keyframeAtCurrentTime("backgroundColor"))}
+          onToggleKeyframe={() =>
+            toggleKeyframe(
+              "backgroundColor",
+              keyframeValue(
+                "backgroundColor",
+                String(object.style.backgroundColor ?? rectBackground),
+              ),
+            )
+          }
+          onChange={(value) =>
+            commitKeyframedValue(
+              "backgroundColor",
+              value,
+              (nextValue) => updateStyleValue("backgroundColor", nextValue),
+              "text",
+            )
+          }
+          onPreview={(value) =>
+            onPreview?.((current) => ({
+              ...current,
+              style: { ...current.style, backgroundColor: value },
+            }))
+          }
+        />
+      )}
       {isRect ? (
-        <div className={`grid gap-1.5 ${mutedCaps}`}>
-          <span>Background</span>
-          <ColorSelector
-            value={rectBackground}
-            allowAlpha
-            onChange={(nextValue) =>
-              updateStyleColor(rectBackgroundKey, nextValue)
-            }
-            onPreview={(nextValue) =>
-              onPreview?.((current) => ({
-                ...current,
-                style: { ...current.style, [rectBackgroundKey]: nextValue },
-              }))
-            }
-          />
-        </div>
+        <KeyframedColorInput
+          label="Background"
+          value={rectBackground}
+          allowAlpha
+          hasKeyframe={Boolean(keyframeAtCurrentTime("backgroundColor"))}
+          onToggleKeyframe={() =>
+            toggleKeyframe(
+              "backgroundColor",
+              keyframeValue("backgroundColor", rectBackground),
+            )
+          }
+          onChange={(value) =>
+            commitKeyframedValue(
+              "backgroundColor",
+              value,
+              (nextValue) => updateStyleValue("backgroundColor", nextValue),
+              "text",
+            )
+          }
+          onPreview={(value) =>
+            onPreview?.((current) => ({
+              ...current,
+              style: { ...current.style, backgroundColor: value },
+            }))
+          }
+        />
       ) : null}
       {isText ? (
         <>
@@ -1071,19 +1074,58 @@ export const ObjectInspector = memo(function ObjectInspector({
               onChange={(event) => updateTextContent(event.target.value)}
             />
           </label>
-          <div className={`grid gap-1.5 ${mutedCaps}`}>
-            <span>Colour</span>
-            <ColorSelector
-              value={textColor}
-              onChange={(value) => updateStyleValue("color", value)}
-              onPreview={(value) =>
-                onPreview?.((current) => ({
-                  ...current,
-                  style: { ...current.style, color: value },
-                }))
-              }
-            />
-          </div>
+          <KeyframedColorInput
+            label="Colour"
+            value={textColor}
+            allowAlpha
+            hasKeyframe={Boolean(keyframeAtCurrentTime("color"))}
+            onToggleKeyframe={() =>
+              toggleKeyframe("color", keyframeValue("color", textColor))
+            }
+            onChange={(value) =>
+              commitKeyframedValue(
+                "color",
+                value,
+                (nextValue) => updateStyleValue("color", nextValue),
+                "text",
+              )
+            }
+            onPreview={(value) =>
+              onPreview?.((current) => ({
+                ...current,
+                style: { ...current.style, color: value },
+              }))
+            }
+          />
+          <KeyframedColorInput
+            label="Background"
+            value={String(object.style.backgroundColor ?? rectBackground)}
+            allowAlpha
+            hasKeyframe={Boolean(keyframeAtCurrentTime("backgroundColor"))}
+            onToggleKeyframe={() =>
+              toggleKeyframe(
+                "backgroundColor",
+                keyframeValue(
+                  "backgroundColor",
+                  String(object.style.backgroundColor ?? rectBackground),
+                ),
+              )
+            }
+            onChange={(value) =>
+              commitKeyframedValue(
+                "backgroundColor",
+                value,
+                (nextValue) => updateStyleValue("backgroundColor", nextValue),
+                "text",
+              )
+            }
+            onPreview={(value) =>
+              onPreview?.((current) => ({
+                ...current,
+                style: { ...current.style, backgroundColor: value },
+              }))
+            }
+          />
           <FontSelector
             value={fontFamily}
             onChange={(value) => updateStyleValue("fontFamily", value)}
@@ -1313,19 +1355,34 @@ export const ObjectInspector = memo(function ObjectInspector({
           <span className={mutedCaps}>Colours</span>
           <div className="grid gap-2">
             {colorStyleEntries.map(([key, value]) => (
-              <div className={`grid gap-1.5 ${mutedCaps}`} key={key}>
-                <span>{formatStyleLabel(key)}</span>
-                <ColorSelector
-                  value={value}
-                  onChange={(nextValue) => updateStyleColor(key, nextValue)}
-                  onPreview={(nextValue) =>
-                    onPreview?.((current) => ({
-                      ...current,
-                      style: { ...current.style, [key]: nextValue },
-                    }))
-                  }
-                />
-              </div>
+              <KeyframedColorInput
+                key={key}
+                label={formatStyleLabel(key)}
+                value={value}
+                hasKeyframe={Boolean(
+                  keyframeAtCurrentTime(key as ComposeAnimationAttributeKey),
+                )}
+                onToggleKeyframe={() =>
+                  toggleKeyframe(
+                    key as ComposeAnimationAttributeKey,
+                    keyframeValue(key as ComposeAnimationAttributeKey, value),
+                  )
+                }
+                onChange={(nextValue) =>
+                  commitKeyframedValue(
+                    key as ComposeAnimationAttributeKey,
+                    nextValue,
+                    (val) => updateStyleColor(key, val),
+                    "text",
+                  )
+                }
+                onPreview={(nextValue) =>
+                  onPreview?.((current) => ({
+                    ...current,
+                    style: { ...current.style, [key]: nextValue },
+                  }))
+                }
+              />
             ))}
           </div>
         </div>
@@ -1716,17 +1773,13 @@ export function TransitionInspector({
 
     if (control.type === "color") {
       return (
-        <label
-          className={`col-span-2 grid gap-1.5 ${mutedCaps}`}
-          key={control.key}
-        >
-          {control.label}
-          <ColorSelector
+        <div className="col-span-2" key={control.key}>
+          <KeyframedColorInput
+            label={control.label}
             value={String(getParamValue(control))}
             onChange={(value) => updateParam(control, value)}
-            pickerMode="solid"
           />
-        </label>
+        </div>
       );
     }
 

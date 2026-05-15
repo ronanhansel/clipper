@@ -8,6 +8,7 @@ import {
 } from "../../../core/timeline";
 import { roundToPrecision, roundTenth } from "../../../core/math";
 import { getDisplayName } from "../../../core/fileNames";
+import { createCompositionClipId } from "../../../core/compositionIds";
 import type { CompositionSelection } from "../../types";
 import type { Part, TimelineLayerState } from "../../../core/types";
 
@@ -219,7 +220,7 @@ export function useCompositionTimelineCommands({
     const sourceComposition =
       libraryComposition ??
       createDroppedCompositionPlaceholder(fallbackFilePath!);
-    const clipId = `clip_${Date.now().toString(36)}`;
+    const clipId = createCompositionClipId();
     const layerId =
       targetLayerId ??
       (timelineLayers.compositionLayers?.length

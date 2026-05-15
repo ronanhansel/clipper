@@ -123,6 +123,7 @@ export type NativeTreeProps<T> = {
   onRename?: (args: { id: string; name: string }) => void;
   onSelect?: (nodes: NativeTreeNodeApi<T>[]) => void;
   onToggle?: (node: NativeTreeNodeApi<T>) => void;
+  onEmptyAreaClick?: () => void;
   renderDragPreview?: (props: NativeTreeDragPreviewProps) => ReactNode;
   children: (props: NativeTreeNodeRendererProps<T>) => ReactNode;
 };
@@ -690,6 +691,11 @@ export const NativeTree = forwardRef(function NativeTree<T>(
       ref={containerRef}
       className="relative overflow-hidden"
       style={{ height, width, paddingTop, paddingBottom }}
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          props.onEmptyAreaClick?.();
+        }
+      }}
       onDragLeave={handleDragLeave}
       onDragOver={handleDragOver}
       onDrop={handleDrop}

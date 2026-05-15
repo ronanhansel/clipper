@@ -7,11 +7,11 @@ const composition: CompositionClip = {
   id: "cmp_intro",
   filePath: "compositions/cmp_intro.ts",
   duration: 5,
-  frame: { width: 1920, height: 1080, style: { background: "#050505" } },
+  frame: { width: 1920, height: 1080, style: { backgroundColor: "#050505" } },
   background: {
     id: "background",
     name: "Background",
-    style: { background: "#050505" },
+    style: { backgroundColor: "#050505" },
     elements: [],
   },
   objects: [],
@@ -144,7 +144,7 @@ describe("getSyncedCompositionSources", () => {
           type: "rect",
           selector: "[data-object-id='child']",
           bounds: { x: 120, y: 0, width: 100, height: 100 },
-          style: { background: "#fff" },
+          style: { backgroundColor: "#fff" },
           parentId: "parent",
         },
       ],
@@ -169,7 +169,7 @@ describe("getSyncedCompositionSources", () => {
           type: "rect" as const,
           selector: "[data-object-id='deleted-rect']",
           bounds: { x: 0, y: 0, width: 100, height: 100 },
-          style: { background: "#fff" },
+          style: { backgroundColor: "#fff" },
         },
       ],
     };
@@ -186,5 +186,46 @@ describe("getSyncedCompositionSources", () => {
     );
 
     expect(sources[composition.filePath]).not.toContain("deleted-rect");
+  });
+
+  it("syncs JSON-backed compositions without generated TypeScript source", () => {
+    const jsonComposition: CompositionClip = {
+      ...composition,
+      id: "cmp_json",
+      filePath: "compositions/cmp_json.composition.json",
+      background: {
+        id: "background",
+        name: "Background",
+        style: { backgroundColor: "transparent" },
+        elements: [],
+      },
+      objects: [
+        {
+          id: "rect",
+          name: "Rect",
+          type: "rect",
+          selector: "[data-object-id='rect']",
+          bounds: { x: 10, y: 20, width: 100, height: 50 },
+          style: { backgroundColor: "#fff" },
+          tracks: {
+            "bounds.x": {
+              valueType: "number",
+              points: [{ id: "x-0", time: 0, value: 10 }],
+            },
+          },
+        },
+      ],
+    };
+
+    const sources = getSyncedCompositionSources(
+      project(jsonComposition),
+      undefined,
+      {},
+    );
+
+    expect(sources[jsonComposition.filePath]).toContain('"objects"');
+    expect(sources[jsonComposition.filePath]).toContain('"bounds.x"');
+    expect(sources[jsonComposition.filePath]).not.toContain("import");
+    expect(sources[jsonComposition.filePath]).not.toContain("new Composition");
   });
 });

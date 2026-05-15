@@ -1,5 +1,5 @@
-import { Droplet, Minus, Palette, Pipette, Plus } from "lucide-react";
-import { useEffect, useRef, useState, type PointerEvent } from "react";
+import { Minus, Pipette, Plus } from "lucide-react";
+import React, { useEffect, useRef, useState, type PointerEvent } from "react";
 import { createPortal } from "react-dom";
 import toast from "react-hot-toast";
 import { clamp } from "../core/math";
@@ -21,6 +21,7 @@ export function ColorSelector({
   pickerMode = "solid",
   allowAlpha = false,
   allowGradient,
+  leftSlot,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -30,6 +31,7 @@ export function ColorSelector({
   allowAlpha?: boolean;
   /** @deprecated use pickerMode="solid-gradient" */
   allowGradient?: boolean;
+  leftSlot?: React.ReactNode;
 }) {
   const resolvedPickerMode = allowGradient ? "solid-gradient" : pickerMode;
   const showsModeTabs = resolvedPickerMode === "solid-gradient";
@@ -115,12 +117,10 @@ export function ColorSelector({
 
     function closeOnOutsidePointerDown(event: globalThis.PointerEvent) {
       const target = event.target;
-      if (
-        target instanceof Node &&
-        !rootRef.current?.contains(target) &&
-        !popupRef.current?.contains(target)
-      )
-        setOpen(false);
+      if (!(target instanceof Node)) return;
+      if (popupRef.current?.contains(target)) return;
+      if (rootRef.current?.contains(target)) return;
+      setOpen(false);
     }
 
     function updateOnViewportChange() {
@@ -185,23 +185,20 @@ export function ColorSelector({
       hueDotRef.current.style.left = `${(nextHue / 360) * 100}%`;
   }
 
-  function scheduleChange(
-    next: string,
-    nextHue = nextHueRef.current,
-    nextAlpha = nextAlphaRef.current,
-  ) {
+  function scheduleChange(next: string, nextHue = nextHueRef.current) {
     nextColorRef.current = next;
     nextHueRef.current = nextHue;
-    nextAlphaRef.current = nextAlpha;
     moveDots(hexToHsv(next), nextHue);
-    const formatted = formatSolidColor(next, allowAlpha ? nextAlpha : 100);
+    const formatted = formatSolidColor(
+      next,
+      allowAlpha ? nextAlphaRef.current : 100,
+    );
 
     if (!previewFrameRef.current) {
       previewFrameRef.current = requestAnimationFrame(() => {
         previewFrameRef.current = 0;
         setDraft(nextColorRef.current);
         setHue(nextHueRef.current);
-        setAlpha(nextAlphaRef.current);
       });
     }
     if (draggingRef.current) {
@@ -281,6 +278,7 @@ export function ColorSelector({
 
   const isCompact = variant === "compact";
   const displayColor = formatSolidColor(draft, allowAlpha ? alpha : 100);
+  const hexLabel = draft.toUpperCase();
   const compactLabel = allowAlpha
     ? `${draft.toUpperCase()} ${alpha}%`
     : draft.toUpperCase();
@@ -329,7 +327,13 @@ export function ColorSelector({
           allowAlpha={allowAlpha}
           variant={variant}
           onChange={scheduleChange}
+          onAlphaChange={(nextAlpha) => {
+            nextAlphaRef.current = nextAlpha;
+            setAlpha(nextAlpha);
+            onChange(formatSolidColor(nextColorRef.current, nextAlpha));
+          }}
           onCommit={commitDragChange}
+          onPickFromScreen={pickFromScreen}
         />
       ) : null}
       {mode === "gradient" ? (
@@ -339,64 +343,82 @@ export function ColorSelector({
   ) : null;
 
   return (
-    <div ref={rootRef} className="relative">
-      <div
+    <div ref={rootRef} className="relative w-full">
+      <button
         className={
           isCompact
-            ? "grid grid-cols-[1fr_24px] gap-1.5"
-            : "grid grid-cols-[1fr_38px] gap-2"
+            ? "flex h-6 w-full min-w-0 items-center justify-between gap-1.5 rounded border border-[#2d313b] bg-[#0c121b] px-1.5 pr-7 text-[11px] font-bold text-[#dfe2ea] transition hover:border-[var(--clipper-accent)]"
+            : `flex h-[42px] w-full items-center justify-between gap-2 rounded-[10px] border border-[#2d313b] bg-[#171920] text-xs font-bold text-[#dfe2ea] transition hover:border-[var(--clipper-accent)] ${leftSlot ? "pl-2 pr-3" : "px-3"}`
         }
+        onClick={() => {
+          if (!open) togglePicker();
+        }}
       >
-        <button
+        {leftSlot ? (
+          <span className="mr-1 flex shrink-0 items-center">{leftSlot}</span>
+        ) : null}
+        <span
           className={
             isCompact
-              ? "flex h-6 w-full min-w-0 items-center justify-between gap-1.5 rounded border border-[#2d313b] bg-[#0c121b] px-1.5 text-[11px] font-bold text-[#dfe2ea] transition hover:border-[var(--clipper-accent)]"
-              : "flex w-full items-center justify-between gap-2 rounded-[10px] border border-[#2d313b] bg-[#171920] px-3 py-2 text-xs font-bold text-[#dfe2ea] transition hover:border-[var(--clipper-accent)]"
+              ? "flex min-w-0 items-center gap-1.5"
+              : "flex min-w-0 flex-1 items-center gap-2"
           }
-          onClick={togglePicker}
         >
           <span
             className={
               isCompact
-                ? "flex min-w-0 items-center gap-1.5"
-                : "flex items-center gap-2"
+                ? "h-4 w-4 rounded border border-white/20"
+                : "h-5 w-5 shrink-0 rounded-md border border-white/20"
             }
-          >
-            <span
-              className={
-                isCompact
-                  ? "h-4 w-4 rounded border border-white/20"
-                  : "h-5 w-5 rounded-md border border-white/20"
-              }
-              style={{
-                background:
-                  mode === "gradient"
-                    ? formatGradientValue(gradientDraft)
-                    : displayColor,
-              }}
-            />
-            {mode === "gradient" ? (
-              <Droplet size={isCompact ? 11 : 14} />
-            ) : (
-              <Palette size={isCompact ? 11 : 14} />
-            )}
-            <span className={isCompact ? "min-w-0 truncate" : undefined}>
+            style={{
+              background:
+                mode === "gradient"
+                  ? formatGradientValue(gradientDraft)
+                  : displayColor,
+            }}
+          />
+          {!isCompact && allowAlpha && mode === "solid" ? (
+            <span className="flex min-w-0 flex-1 items-center">
+              <span className="min-w-0 truncate">{hexLabel}</span>
+              <span className="ml-auto flex w-16 shrink-0 items-center gap-1 pl-2">
+                <span className="text-[#3a3f4a] select-none">|</span>
+                <input
+                  className="w-8 cursor-ew-resize select-none bg-transparent text-right text-xs font-bold text-[#9aa1ad] outline-none"
+                  value={`${alpha}%`}
+                  readOnly
+                  onClick={(e) => e.stopPropagation()}
+                  onPointerDown={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    const startX = event.clientX;
+                    const startVal = alpha;
+                    const el = event.currentTarget;
+                    el.setPointerCapture(event.pointerId);
+                    function onMove(e: globalThis.PointerEvent) {
+                      const next = clampPercent(
+                        String(Math.round(startVal + (e.clientX - startX))),
+                      );
+                      nextAlphaRef.current = next;
+                      setAlpha(next);
+                      onChange(formatSolidColor(nextColorRef.current, next));
+                    }
+                    function onUp() {
+                      el.removeEventListener("pointermove", onMove);
+                      el.removeEventListener("pointerup", onUp);
+                    }
+                    el.addEventListener("pointermove", onMove);
+                    el.addEventListener("pointerup", onUp);
+                  }}
+                />
+              </span>
+            </span>
+          ) : (
+            <span className="min-w-0 truncate">
               {isCompact ? compactLabel : displayColor}
             </span>
-          </span>
-        </button>
-        <button
-          className={
-            isCompact
-              ? "grid h-6 w-6 place-items-center rounded border border-[#2d313b] bg-[#0c121b] text-[#dfe2ea] transition hover:border-white hover:text-white"
-              : "grid place-items-center rounded-[10px] border border-[#2d313b] bg-[#171920] text-[#dfe2ea] transition hover:border-white hover:text-white"
-          }
-          title="Sample colour from screen"
-          onClick={() => void pickFromScreen()}
-        >
-          <Pipette size={isCompact ? 12 : 15} />
-        </button>
-      </div>
+          )}
+        </span>
+      </button>
       {pickerPanel ? createPortal(pickerPanel, document.body) : null}
     </div>
   );
@@ -473,7 +495,6 @@ export function getEditableColorStyleEntries(
   style: Record<string, string | number>,
 ) {
   const colorKeys = new Set([
-    "background",
     "backgroundColor",
     "color",
     "borderColor",
@@ -509,14 +530,18 @@ function SolidColorPickerPanel({
   allowAlpha = false,
   variant,
   onChange,
+  onAlphaChange,
   onCommit,
+  onPickFromScreen,
 }: {
   value: string;
   alpha?: number;
   allowAlpha?: boolean;
   variant: "default" | "compact";
-  onChange: (value: string, hue?: number, alpha?: number) => void;
+  onChange: (value: string, hue?: number) => void;
+  onAlphaChange?: (alpha: number) => void;
   onCommit?: () => void;
+  onPickFromScreen?: () => void;
 }) {
   const boardRectRef = useRef<DOMRect | null>(null);
   const hueRectRef = useRef<DOMRect | null>(null);
@@ -553,7 +578,7 @@ function SolidColorPickerPanel({
     setHue(nextHue);
     setAlphaDraft(nextAlpha);
     moveDots(hexToHsv(next), nextHue);
-    onChange(next, nextHue, nextAlpha);
+    onChange(next, nextHue);
   }
 
   function pickFromBoard(event: PointerEvent<HTMLDivElement>) {
@@ -619,70 +644,120 @@ function SolidColorPickerPanel({
           style={{ left: `${hsv.s * 100}%`, top: `${(1 - hsv.v) * 100}%` }}
         />
       </div>
-      <div
-        className={
-          isCompact
-            ? "relative h-3 touch-none cursor-ew-resize rounded-full bg-[linear-gradient(to_right,red,yellow,lime,cyan,blue,magenta,red)]"
-            : "relative h-4 touch-none cursor-ew-resize rounded-full bg-[linear-gradient(to_right,red,yellow,lime,cyan,blue,magenta,red)]"
-        }
-        onPointerDown={(event) => {
-          event.preventDefault();
-          event.currentTarget.setPointerCapture(event.pointerId);
-          hueRectRef.current = event.currentTarget.getBoundingClientRect();
-          pickHue(event);
-        }}
-        onPointerMove={(event) => {
-          if (event.currentTarget.hasPointerCapture(event.pointerId))
-            pickHue(event);
-        }}
-        onPointerUp={() => {
-          hueRectRef.current = null;
-          onCommit?.();
-        }}
-        onPointerCancel={() => {
-          hueRectRef.current = null;
-          onCommit?.();
-        }}
-      >
-        <span
-          ref={hueDotRef}
+      <div className="relative py-1.5">
+        <div
           className={
             isCompact
-              ? "pointer-events-none absolute top-1/2 h-5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow-[0_0_0_1px_rgba(0,0,0,0.65)] will-change-[left]"
-              : "pointer-events-none absolute top-1/2 h-6 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow-[0_0_0_1px_rgba(0,0,0,0.65)] will-change-[left]"
+              ? "relative h-3 touch-none rounded-full bg-[linear-gradient(to_right,red,yellow,lime,cyan,blue,magenta,red)]"
+              : "relative h-4 touch-none rounded-full bg-[linear-gradient(to_right,red,yellow,lime,cyan,blue,magenta,red)]"
           }
-          style={{ left: `${(hue / 360) * 100}%` }}
-        />
+          onPointerDown={(event) => {
+            event.preventDefault();
+            event.currentTarget.setPointerCapture(event.pointerId);
+            hueRectRef.current = event.currentTarget.getBoundingClientRect();
+            pickHue(event);
+          }}
+          onPointerMove={(event) => {
+            if (event.currentTarget.hasPointerCapture(event.pointerId))
+              pickHue(event);
+          }}
+          onPointerUp={() => {
+            hueRectRef.current = null;
+            onCommit?.();
+          }}
+          onPointerCancel={() => {
+            hueRectRef.current = null;
+            onCommit?.();
+          }}
+        >
+          <span
+            ref={hueDotRef}
+            className="pointer-events-none absolute top-1/2 h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full border-[3px] border-white shadow-[0_0_0_1px_rgba(0,0,0,0.65)] will-change-[left]"
+            style={{
+              left: `${(hue / 360) * 100}%`,
+              background: `hsl(${hue} 100% 50%)`,
+            }}
+          />
+        </div>
       </div>
-      <Input
-        value={draft}
-        className={isCompact ? "h-7 text-xs" : undefined}
-        onChange={(event) => apply(normalizeHexColor(event.target.value))}
-      />
       {allowAlpha ? (
-        <label className="grid gap-1 text-[11px] font-extrabold text-[#aeb6c4]">
-          Alpha
-          <div className="grid grid-cols-[minmax(0,1fr)_54px] gap-2">
-            <input
-              className="h-7 accent-[var(--clipper-accent)]"
-              type="range"
-              min={0}
-              max={100}
-              value={alphaDraft}
-              onChange={(event) =>
-                apply(draft, hue, clampPercent(event.target.value))
-              }
-            />
-            <Input
-              className="h-7 px-1.5 text-center text-xs"
-              value={alphaDraft}
-              onChange={(event) =>
-                apply(draft, hue, clampPercent(event.target.value))
-              }
+        <div className="relative py-1.5">
+          <div
+            className={
+              isCompact
+                ? "relative h-3 touch-none rounded-full"
+                : "relative h-4 touch-none rounded-full"
+            }
+            style={{
+              backgroundImage: `
+                linear-gradient(to right, transparent, ${draft}),
+                repeating-conic-gradient(#888 0% 25%, #555 0% 50%)
+              `,
+              backgroundSize: `100% 100%, 12px 12px`,
+            }}
+            onPointerDown={(event) => {
+              event.preventDefault();
+              event.currentTarget.setPointerCapture(event.pointerId);
+              const rect = event.currentTarget.getBoundingClientRect();
+              const next = clampPercent(
+                String(
+                  Math.round(
+                    clamp((event.clientX - rect.left) / rect.width, 0, 1) * 100,
+                  ),
+                ),
+              );
+              setAlphaDraft(next);
+              onAlphaChange?.(next);
+            }}
+            onPointerMove={(event) => {
+              if (!event.currentTarget.hasPointerCapture(event.pointerId))
+                return;
+              const rect = event.currentTarget.getBoundingClientRect();
+              const next = clampPercent(
+                String(
+                  Math.round(
+                    clamp((event.clientX - rect.left) / rect.width, 0, 1) * 100,
+                  ),
+                ),
+              );
+              setAlphaDraft(next);
+              onAlphaChange?.(next);
+            }}
+            onPointerUp={() => onCommit?.()}
+            onPointerCancel={() => onCommit?.()}
+          >
+            <span
+              className="pointer-events-none absolute top-1/2 h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full border-[3px] border-white shadow-[0_0_0_1px_rgba(0,0,0,0.65)] will-change-[left]"
+              style={{
+                left: `${alphaDraft}%`,
+                background: `rgba(${parseInt(draft.slice(1, 3), 16)}, ${parseInt(draft.slice(3, 5), 16)}, ${parseInt(draft.slice(5, 7), 16)}, ${alphaDraft / 100})`,
+              }}
             />
           </div>
-        </label>
+        </div>
       ) : null}
+      <div className="flex gap-2">
+        <div
+          className={`flex min-w-0 flex-1 items-center rounded-[8px] border border-[#2d313b] bg-[#171920] px-2 transition focus-within:border-[var(--clipper-accent)] focus-within:ring-2 focus-within:ring-[rgb(var(--clipper-accent-rgb)/0.2)] ${isCompact ? "h-7" : "h-8"}`}
+        >
+          <input
+            className="min-w-0 flex-1 bg-transparent text-xs font-semibold text-white outline-none"
+            value={draft}
+            onChange={(event) => apply(normalizeHexColor(event.target.value))}
+          />
+        </div>
+        <button
+          className={
+            isCompact
+              ? "grid h-7 w-7 shrink-0 place-items-center rounded border border-[#2d313b] bg-[#0c121b] text-[#dfe2ea] transition hover:border-white hover:text-white"
+              : "grid h-8 w-8 shrink-0 place-items-center rounded-md border border-[#2d313b] bg-[#171920] text-[#dfe2ea] transition hover:border-white hover:text-white"
+          }
+          title="Sample colour from screen"
+          onClick={() => onPickFromScreen?.()}
+        >
+          <Pipette size={isCompact ? 12 : 14} />
+        </button>
+      </div>
     </>
   );
 }

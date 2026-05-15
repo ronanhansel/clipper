@@ -13,11 +13,11 @@ const composition: CompositionClip = {
   id: "cmp_intro",
   filePath: "compositions/cmp_intro.ts",
   duration: 5,
-  frame: { width: 1920, height: 1080, style: { background: "#050505" } },
+  frame: { width: 1920, height: 1080, style: { backgroundColor: "#050505" } },
   background: {
     id: "background",
     name: "Background",
-    style: { background: "#050505" },
+    style: { backgroundColor: "#050505" },
     elements: [],
   },
   objects: [],

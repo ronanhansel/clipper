@@ -856,22 +856,26 @@ ipcMain.handle("clipper:open-project-manifest", async () => {
     title: "Open Clipper project",
     defaultPath: path.join(appRoot, "clipper", "projects"),
     properties: ["openFile", "openDirectory"],
-    filters: [{ name: "Clipper Project", extensions: ["json"] }],
+    filters: [{ name: "Clipper Project", extensions: ["clpr"] }],
   });
 
   if (canceled || !filePaths[0]) return null;
   const selectedPath = filePaths[0];
   const stat = await fs.stat(selectedPath);
   if (stat.isDirectory()) {
-    const manifestPath = path.join(selectedPath, "project.json");
+    // Directory selected, look for .clpr file inside
+    const clprPath = path.join(
+      selectedPath,
+      `${path.basename(selectedPath)}.clpr`,
+    );
     try {
-      await fs.access(manifestPath);
-      return getClipperRelativePath(manifestPath);
+      await fs.access(clprPath);
+      return getClipperRelativePath(clprPath);
     } catch {
       return null;
     }
   }
-  return path.basename(selectedPath) === "project.json"
+  return selectedPath.endsWith(".clpr")
     ? getClipperRelativePath(selectedPath)
     : null;
 });
@@ -899,32 +903,34 @@ ipcMain.handle(
     const error = validateProjectFolderName(projectName);
     if (error) throw new Error(error);
 
-    const folderName = projectName;
-    const folderPath = path.join(projectsDir, folderName);
+    const fileName = `${projectName}.clpr`;
+    const filePath = path.join(projectsDir, fileName);
 
     try {
-      await fs.mkdir(folderPath);
-      await fs.mkdir(path.join(folderPath, "file-manager"), {
-        recursive: true,
-      });
-      await fs.mkdir(path.join(folderPath, "file-manager", "assets"), {
-        recursive: true,
-      });
-      await fs.mkdir(path.join(folderPath, "file-manager", "compositions"), {
-        recursive: true,
-      });
-      await fs.mkdir(path.join(folderPath, "file-manager", "timelines"), {
-        recursive: true,
-      });
-    } catch (error) {
-      if ((error as { code?: string }).code === "EEXIST") {
-        throw new Error(`A project named "${folderName}" already exists.`);
-      }
-      throw error;
+      await fs.access(filePath);
+      throw new Error(`A project named "${projectName}" already exists.`);
+    } catch {
+      // File does not exist, proceed
     }
 
-    const manifestPath = path.join(folderPath, "project.json");
-    return getClipperRelativePath(manifestPath);
+    // Write empty project manifest
+    const minimalProject = {
+      id: crypto.randomUUID(),
+      name: projectName,
+      resolution: { width: 1920, height: 1080 },
+      assetsPath: "assets",
+      timelines: [],
+      compositions: [],
+      compositionSources: {},
+      scenes: [],
+      assets: [],
+      editorState: {},
+    };
+    await fs.writeFile(
+      filePath,
+      JSON.stringify(minimalProject, null, 2) + "\n",
+    );
+    return getClipperRelativePath(filePath);
   },
 );
 

@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { clipperHost } from "../clipperHost";
-import { projectPersistenceService } from "../services/projectPersistenceService";
 import { normalizeProject } from "../../core/project";
 import type { ProjectManifest } from "../../core/types";
+import { clipperHost } from "../clipperHost";
+import { projectPersistenceService } from "../services/projectPersistenceService";
 import {
   addRecentProject,
   clearStoredActiveProjectManifestPath,
@@ -13,7 +13,6 @@ import {
   type RecentProject,
 } from "./activeProjectManifest";
 import { getProjectCompositionSources } from "./projectSources";
-import { compositionApiSource } from "../../core/compositionApiSource";
 
 const bootStateReadTimeoutMs = 3000;
 
@@ -32,7 +31,7 @@ async function loadBootProject(): Promise<BootProject> {
   if (!manifestPath) throw new Error("NO_STORED_PROJECT");
 
   const { project } = await projectPersistenceService.loadProject({
-    manifestPath,
+    projectPath: manifestPath,
   });
   const normalizedProject = normalizeProject(project);
 
@@ -79,14 +78,10 @@ async function clearStoredActiveProjectManifestPathBestEffort() {
   }
 }
 
-function projectNameFromPath(manifestPath: string) {
-  if (manifestPath.endsWith("/project.json")) {
-    const segments = manifestPath.split("/");
-    return segments[segments.length - 2] ?? "Untitled";
-  }
-  const segments = manifestPath.split("/");
-  const filename = segments[segments.length - 1];
-  return filename.replace(/\.json$/i, "");
+function projectNameFromPath(projectPath: string) {
+  const segments = projectPath.split("/");
+  const filename = segments[segments.length - 1] ?? "Untitled.clpr";
+  return filename.replace(/\.clpr$/i, "");
 }
 
 function isMissingFileError(error: unknown) {
@@ -100,34 +95,10 @@ function isMissingFileError(error: unknown) {
   );
 }
 
-async function writeProjectTsconfig(projectDir: string) {
-  const tsconfig = {
-    compilerOptions: {
-      target: "ES2022",
-      module: "ESNext",
-      moduleResolution: "Bundler",
-      paths: {
-        "@clipper/composition-api": ["./composition-api.ts"],
-      },
-      strict: true,
-      noEmit: true,
-    },
-    include: ["file-manager/compositions/**/*.ts"],
-  };
-  await clipperHost.writeTextFile(
-    `${projectDir}/tsconfig.json`,
-    `${JSON.stringify(tsconfig, null, 2)}\n`,
-  );
-}
-
 async function createMinimalProject(
-  manifestPath: string,
+  projectPath: string,
   projectName: string,
 ): Promise<BootProject> {
-  const directoryPath = manifestPath.endsWith("/project.json")
-    ? manifestPath.slice(0, -"/project.json".length)
-    : manifestPath.replace(/\.json$/i, "");
-  const manifestOutPath = `${directoryPath}/project.json`;
   const minimalProject: ProjectManifest = {
     id: crypto.randomUUID(),
     name: projectName,
@@ -140,51 +111,17 @@ async function createMinimalProject(
     assets: [],
     editorState: {} as ProjectManifest["editorState"],
   };
-
   const normalized = normalizeProject(minimalProject);
 
-  await clipperHost.createDirectory(directoryPath);
-  await clipperHost.createDirectory(`${directoryPath}/file-manager`);
-  await clipperHost.createDirectory(
-    `${directoryPath}/file-manager/compositions`,
-  );
-  await clipperHost.createDirectory(`${directoryPath}/file-manager/timelines`);
-  await clipperHost.createDirectory(`${directoryPath}/file-manager/assets`);
-
-  const metadataProject = {
-    id: normalized.id,
-    name: normalized.name,
-    resolution: normalized.resolution,
-    assetsPath: normalized.assetsPath,
-    assets: normalized.assets,
-    compositionFolders: normalized.compositionFolders ?? [],
-    timelineOrder: normalized.timelines?.map((t) => t.id) ?? [],
-    compositionOrder: normalized.compositions?.map((c) => c.id) ?? [],
-    editorState: normalized.editorState,
-    scenes: [],
-  };
-  await clipperHost.writeTextFile(
-    manifestOutPath,
-    `${JSON.stringify(metadataProject, null, 2)}\n`,
-  );
-
-  for (const timeline of normalized.timelines ?? []) {
-    await clipperHost.writeTextFile(
-      `${directoryPath}/file-manager/timelines/${timeline.id}.timeline.json`,
-      `${JSON.stringify(timeline, null, 2)}\n`,
-    );
-  }
-
-  await clipperHost.writeTextFile(
-    `${directoryPath}/composition-api.ts`,
-    compositionApiSource,
-  );
-  await writeProjectTsconfig(directoryPath);
+  await projectPersistenceService.saveProject({
+    projectPath,
+    project: normalized,
+  });
 
   return {
-    manifestPath: manifestOutPath,
+    manifestPath: projectPath,
     project: normalized,
-    sourceStatus: `New project created at ${manifestOutPath}.`,
+    sourceStatus: `New project created at ${projectPath}.`,
     compositionSources: {},
   };
 }
@@ -234,7 +171,7 @@ export function useActiveProjectBoot() {
       if (!manifestPath) return;
 
       const { project } = await projectPersistenceService.loadProject({
-        manifestPath,
+        projectPath: manifestPath,
       });
       const normalizedProject = normalizeProject(project);
       await writeStoredActiveProjectManifestPath(manifestPath);
@@ -283,17 +220,10 @@ export function useActiveProjectBoot() {
 
   async function deleteRecentProject(project: RecentProject) {
     try {
-      let pathToRemove = project.path;
-      if (pathToRemove.endsWith("/project.json")) {
-        pathToRemove = pathToRemove.slice(0, -"/project.json".length);
-      }
       try {
-        await clipperHost.trashFile(pathToRemove);
+        await clipperHost.trashFile(project.path);
       } catch (error) {
-        if (!isMissingFileError(error)) {
-          throw error;
-        }
-        // If file is missing, we still want to remove it from recents
+        if (!isMissingFileError(error)) throw error;
       }
       await removeRecentProject(project.path);
       const recents = await readRecentProjects();
@@ -310,7 +240,9 @@ export function useActiveProjectBoot() {
       const manifestPath = project.path;
 
       const { project: loadedProject } =
-        await projectPersistenceService.loadProject({ manifestPath });
+        await projectPersistenceService.loadProject({
+          projectPath: manifestPath,
+        });
       const normalizedProject = normalizeProject(loadedProject);
       await writeStoredActiveProjectManifestPath(manifestPath);
       await addRecentProject(manifestPath, project.name);

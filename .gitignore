@@ -8,6 +8,4 @@ coverage/
 agent-log/
 .opencode/
 graphify-out/
-AGENTS.md
-CLAUDE.md
-GEMINI.md
+.codex/

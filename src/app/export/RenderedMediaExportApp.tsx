@@ -590,7 +590,7 @@ export function getExportPostProcessPasses(
   ].map((pass) =>
     withPostProcessFrameBackground(
       pass,
-      previewModel.part.frame.style.background,
+      previewModel.part.frame.style.backgroundColor,
     ),
   );
 }

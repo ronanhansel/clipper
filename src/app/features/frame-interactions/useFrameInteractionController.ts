@@ -64,9 +64,9 @@ import {
   type SelectionPayload,
 } from "../../../core/types";
 import {
-  hasComposeAnimationAttributeTrack,
-  upsertComposeAnimationAttributeKeyframe,
-} from "../../../components/timeline/composeAnimationModel";
+  evaluateObjectState,
+  upsertPropertyKeyframe,
+} from "../../../core/propertyRegistry";
 
 export type FrameInteractionController = ReturnType<
   typeof useFrameInteractionController
@@ -329,7 +329,16 @@ export function useFrameInteractionController(
     element.style.setProperty("--clipper-drag-y", `${delta.y}px`);
   }
 
+  function dispatchObjectPreviewBounds(objectId: string, bounds: Bounds) {
+    window.dispatchEvent(
+      new CustomEvent("clipper:object-preview-bounds", {
+        detail: { bounds, objectId },
+      }),
+    );
+  }
+
   function setObjectResizePreview(objectId: string, bounds: Bounds) {
+    dispatchObjectPreviewBounds(objectId, bounds);
     const element = getFrameObjectElement(objectId);
     if (!element) return;
     element.style.setProperty("--clipper-resize-left", `${bounds.x}px`);
@@ -346,6 +355,7 @@ export function useFrameInteractionController(
 
   function clearObjectResizePreviews(objects: SelectionPayload["objects"]) {
     for (const object of objects) {
+      dispatchObjectPreviewBounds(object.id, object.bounds);
       const element = getFrameObjectElement(object.id);
       if (!element) continue;
       element.style.removeProperty("--clipper-resize-left");
@@ -744,63 +754,25 @@ export function useFrameInteractionController(
       ...composition,
       objects: composition.objects.map((object) => {
         const nextBounds = nextBoundsById.get(object.id);
-        const hasPositionKeyframes =
-          hasComposeAnimationAttributeTrack(object.animations, "x") ||
-          hasComposeAnimationAttributeTrack(object.animations, "y");
-        if (nextBounds && hasPositionKeyframes) {
-          const nextX = nextBounds.x - object.bounds.x;
-          const nextY = nextBounds.y - object.bounds.y;
-          return {
-            ...object,
-            animations: upsertComposeAnimationAttributeKeyframe(
-              upsertComposeAnimationAttributeKeyframe(
-                object.animations ?? [],
-                "x",
-                nextX,
-                previewTime,
-                part.duration,
-              ),
-              "y",
-              nextY,
-              previewTime,
-              part.duration,
-            ),
-          };
+        if (!nextBounds) return object;
+        if (hasPositionPropertyTracks(object)) {
+          return syncChartObjectBounds(
+            upsertBoundsPropertyKeyframes(object, nextBounds, ["x", "y"]),
+          );
         }
-        return nextBounds
-          ? syncChartObjectBounds({ ...object, bounds: nextBounds })
-          : object;
+        return syncChartObjectBounds({ ...object, bounds: nextBounds });
       }),
       background: {
         ...composition.background,
         elements: composition.background.elements.map((object) => {
           const nextBounds = nextBoundsById.get(object.id);
-          const hasPositionKeyframes =
-            hasComposeAnimationAttributeTrack(object.animations, "x") ||
-            hasComposeAnimationAttributeTrack(object.animations, "y");
-          if (nextBounds && hasPositionKeyframes) {
-            const nextX = nextBounds.x - object.bounds.x;
-            const nextY = nextBounds.y - object.bounds.y;
-            return {
-              ...object,
-              animations: upsertComposeAnimationAttributeKeyframe(
-                upsertComposeAnimationAttributeKeyframe(
-                  object.animations ?? [],
-                  "x",
-                  nextX,
-                  previewTime,
-                  part.duration,
-                ),
-                "y",
-                nextY,
-                previewTime,
-                part.duration,
-              ),
-            };
+          if (!nextBounds) return object;
+          if (hasPositionPropertyTracks(object)) {
+            return syncChartObjectBounds(
+              upsertBoundsPropertyKeyframes(object, nextBounds, ["x", "y"]),
+            );
           }
-          return nextBounds
-            ? syncChartObjectBounds({ ...object, bounds: nextBounds })
-            : object;
+          return syncChartObjectBounds({ ...object, bounds: nextBounds });
         }),
       },
     }));
@@ -1067,6 +1039,7 @@ export function useFrameInteractionController(
         frameDisplayScale,
       )
     ) {
+      if (finalDragBox && canSelectFrameObjects) clearNodeSelection();
       clearDragBox();
       return;
     }
@@ -1093,6 +1066,47 @@ export function useFrameInteractionController(
     clearDragBox();
   }
 
+  function evaluatedSelectionObject(object: FrameObject) {
+    return selectionObjectFromFrameObject(
+      evaluateObjectState(object, previewTime),
+    );
+  }
+
+  function hasPropertyTrack(object: FrameObject, path: string) {
+    return Boolean(object.tracks?.[path]?.points.length);
+  }
+
+  function hasPositionPropertyTracks(object: FrameObject) {
+    return (
+      hasPropertyTrack(object, "bounds.x") ||
+      hasPropertyTrack(object, "bounds.y")
+    );
+  }
+
+  function hasSizePropertyTracks(object: FrameObject) {
+    return (
+      hasPropertyTrack(object, "bounds.width") ||
+      hasPropertyTrack(object, "bounds.height")
+    );
+  }
+
+  function upsertBoundsPropertyKeyframes(
+    object: FrameObject,
+    nextBounds: Bounds,
+    paths: readonly (keyof Bounds)[],
+  ) {
+    return paths.reduce(
+      (nextObject, key) =>
+        upsertPropertyKeyframe(
+          nextObject,
+          `bounds.${key}`,
+          previewTime,
+          nextBounds[key],
+        ),
+      object,
+    );
+  }
+
   function startObjectDrag(
     event: ReactPointerEvent<HTMLDivElement>,
     object: FrameObject,
@@ -1102,7 +1116,7 @@ export function useFrameInteractionController(
     setEditingTextObjectId(null);
     clearDragBox();
     event.stopPropagation();
-    event.currentTarget.setPointerCapture(event.pointerId);
+    frameViewportRef.current?.setPointerCapture(event.pointerId);
     const selectedObjectIds = new Set(
       selectionPayload?.objects.map((item) => item.id) ?? [],
     );
@@ -1110,8 +1124,8 @@ export function useFrameInteractionController(
     const nextSelectionObjects = selectedObjectIds.has(object.id)
       ? selectableObjects
           .filter((item) => selectedObjectIds.has(item.id))
-          .map(selectionObjectFromFrameObject)
-      : [selectionObjectFromFrameObject(object)];
+          .map(evaluatedSelectionObject)
+      : [evaluatedSelectionObject(object)];
     const selectionBox = getBoundsUnion(
       nextSelectionObjects.map((item) => item.bounds),
     );
@@ -1156,7 +1170,7 @@ export function useFrameInteractionController(
     const preservedObjects = selectionPayload.objects
       .map((selected) => getPartFrameObject(part, selected.id))
       .filter((object): object is FrameObject => Boolean(object))
-      .map(selectionObjectFromFrameObject);
+      .map(evaluatedSelectionObject);
     const resizedObjects = objectId
       ? preservedObjects.filter((item) => item.id === objectId)
       : preservedObjects.filter((item) => item.type !== "null");
@@ -1213,6 +1227,46 @@ export function useFrameInteractionController(
     );
   }
 
+  function commitResizedFrameObject(
+    object: FrameObject,
+    nextBounds: Bounds | undefined,
+    scale: number,
+  ) {
+    if (!nextBounds) return object;
+    const usesPropertyBounds =
+      hasPositionPropertyTracks(object) || hasSizePropertyTracks(object);
+    if (!usesPropertyBounds) {
+      return syncChartObjectBounds(
+        scaleFrameObject({ ...object, bounds: nextBounds }, scale),
+      );
+    }
+
+    const propertyKeys: (keyof Bounds)[] = [];
+    if (hasPositionPropertyTracks(object)) propertyKeys.push("x", "y");
+    if (hasPropertyTrack(object, "bounds.width")) propertyKeys.push("width");
+    if (hasPropertyTrack(object, "bounds.height")) propertyKeys.push("height");
+    const committedBounds = {
+      ...nextBounds,
+      x: hasPositionPropertyTracks(object) ? object.bounds.x : nextBounds.x,
+      y: hasPositionPropertyTracks(object) ? object.bounds.y : nextBounds.y,
+      width: hasPropertyTrack(object, "bounds.width")
+        ? object.bounds.width
+        : nextBounds.width,
+      height: hasPropertyTrack(object, "bounds.height")
+        ? object.bounds.height
+        : nextBounds.height,
+    };
+    return syncChartObjectBounds(
+      scaleFrameObject(
+        {
+          ...upsertBoundsPropertyKeyframes(object, nextBounds, propertyKeys),
+          bounds: committedBounds,
+        },
+        scale,
+      ),
+    );
+  }
+
   function commitObjectResize() {
     const resize = objectResizeRef.current;
     if (!resize) return;
@@ -1244,154 +1298,18 @@ export function useFrameInteractionController(
     );
     updateCompositionForTimelinePart(resize.partId, (composition) => ({
       ...composition,
-      objects: composition.objects.map((object) => {
-        const nextBounds = nextBoundsById.get(object.id);
-        if (!nextBounds) return object;
-        const hasWidthKeyframes = hasComposeAnimationAttributeTrack(
-          object.animations,
-          "width",
-        );
-        const hasHeightKeyframes = hasComposeAnimationAttributeTrack(
-          object.animations,
-          "height",
-        );
-        const hasPositionKeyframes =
-          hasComposeAnimationAttributeTrack(object.animations, "x") ||
-          hasComposeAnimationAttributeTrack(object.animations, "y");
-        if (hasWidthKeyframes || hasHeightKeyframes || hasPositionKeyframes) {
-          let nextAnimations = object.animations ?? [];
-          if (hasPositionKeyframes) {
-            nextAnimations = upsertComposeAnimationAttributeKeyframe(
-              upsertComposeAnimationAttributeKeyframe(
-                nextAnimations,
-                "x",
-                nextBounds.x - object.bounds.x,
-                previewTime,
-                part.duration,
-              ),
-              "y",
-              nextBounds.y - object.bounds.y,
-              previewTime,
-              part.duration,
-            );
-          }
-          if (hasWidthKeyframes) {
-            nextAnimations = upsertComposeAnimationAttributeKeyframe(
-              nextAnimations,
-              "width",
-              nextBounds.width,
-              previewTime,
-              part.duration,
-            );
-          }
-          if (hasHeightKeyframes) {
-            nextAnimations = upsertComposeAnimationAttributeKeyframe(
-              nextAnimations,
-              "height",
-              nextBounds.height,
-              previewTime,
-              part.duration,
-            );
-          }
-          const committedBounds = {
-            ...nextBounds,
-            x: hasPositionKeyframes ? object.bounds.x : nextBounds.x,
-            y: hasPositionKeyframes ? object.bounds.y : nextBounds.y,
-            width: hasWidthKeyframes ? object.bounds.width : nextBounds.width,
-            height: hasHeightKeyframes
-              ? object.bounds.height
-              : nextBounds.height,
-          };
-          return syncChartObjectBounds(
-            scaleFrameObject(
-              {
-                ...object,
-                bounds: committedBounds,
-                animations: nextAnimations,
-              },
-              scale,
-            ),
-          );
-        }
-        return syncChartObjectBounds(
-          scaleFrameObject({ ...object, bounds: nextBounds }, scale),
-        );
-      }),
+      objects: composition.objects.map((object) =>
+        commitResizedFrameObject(object, nextBoundsById.get(object.id), scale),
+      ),
       background: {
         ...composition.background,
-        elements: composition.background.elements.map((object) => {
-          const nextBounds = nextBoundsById.get(object.id);
-          if (!nextBounds) return object;
-          const hasWidthKeyframes = hasComposeAnimationAttributeTrack(
-            object.animations,
-            "width",
-          );
-          const hasHeightKeyframes = hasComposeAnimationAttributeTrack(
-            object.animations,
-            "height",
-          );
-          const hasPositionKeyframes =
-            hasComposeAnimationAttributeTrack(object.animations, "x") ||
-            hasComposeAnimationAttributeTrack(object.animations, "y");
-          if (hasWidthKeyframes || hasHeightKeyframes || hasPositionKeyframes) {
-            let nextAnimations = object.animations ?? [];
-            if (hasPositionKeyframes) {
-              nextAnimations = upsertComposeAnimationAttributeKeyframe(
-                upsertComposeAnimationAttributeKeyframe(
-                  nextAnimations,
-                  "x",
-                  nextBounds.x - object.bounds.x,
-                  previewTime,
-                  part.duration,
-                ),
-                "y",
-                nextBounds.y - object.bounds.y,
-                previewTime,
-                part.duration,
-              );
-            }
-            if (hasWidthKeyframes) {
-              nextAnimations = upsertComposeAnimationAttributeKeyframe(
-                nextAnimations,
-                "width",
-                nextBounds.width,
-                previewTime,
-                part.duration,
-              );
-            }
-            if (hasHeightKeyframes) {
-              nextAnimations = upsertComposeAnimationAttributeKeyframe(
-                nextAnimations,
-                "height",
-                nextBounds.height,
-                previewTime,
-                part.duration,
-              );
-            }
-            const committedBounds = {
-              ...nextBounds,
-              x: hasPositionKeyframes ? object.bounds.x : nextBounds.x,
-              y: hasPositionKeyframes ? object.bounds.y : nextBounds.y,
-              width: hasWidthKeyframes ? object.bounds.width : nextBounds.width,
-              height: hasHeightKeyframes
-                ? object.bounds.height
-                : nextBounds.height,
-            };
-            return syncChartObjectBounds(
-              scaleFrameObject(
-                {
-                  ...object,
-                  bounds: committedBounds,
-                  animations: nextAnimations,
-                },
-                scale,
-              ),
-            );
-          }
-          return syncChartObjectBounds(
-            scaleFrameObject({ ...object, bounds: nextBounds }, scale),
-          );
-        }),
+        elements: composition.background.elements.map((object) =>
+          commitResizedFrameObject(
+            object,
+            nextBoundsById.get(object.id),
+            scale,
+          ),
+        ),
       },
     }));
     const nextObjectsById = new Map(
@@ -1420,10 +1338,11 @@ export function useFrameInteractionController(
     setSelectedObjectId(object.id);
     setSelectedComposeObjectIds([object.id]);
     clearMarkerSelection();
+    const selectionObject = evaluatedSelectionObject(object);
     setSelectionPayload({
-      selectionBox: object.bounds,
-      coordinates: boundsToPoints(object.bounds),
-      objects: [selectionObjectFromFrameObject(object)],
+      selectionBox: selectionObject.bounds,
+      coordinates: boundsToPoints(selectionObject.bounds),
+      objects: [selectionObject],
     });
     setRightPanelTab("video");
     setEditingTextObjectId(object.id);
@@ -1476,16 +1395,43 @@ function hashGesturePartVersion(part: Part) {
 }
 
 function scaleFrameObject(object: FrameObject, scale: number): FrameObject {
-  if (scale === 1 || object.type !== "text") return object;
-  const fontSize = toFiniteNumber(object.style.fontSize);
-  if (fontSize === null) return object;
-  return {
-    ...object,
-    style: {
-      ...object.style,
-      fontSize: Math.max(1, Math.round(fontSize * scale * 100) / 100),
-    },
-  };
+  if (scale === 1) return object;
+  const scaledStyle = scaleStyleLengths(object.style, scale, [
+    "borderRadius",
+    "borderWidth",
+    "fontSize",
+    "strokeWidth",
+  ]);
+  if (scaledStyle === object.style) return object;
+  return { ...object, style: scaledStyle };
+}
+
+function scaleStyleLengths(
+  style: FrameObject["style"],
+  scale: number,
+  keys: readonly string[],
+) {
+  let nextStyle: FrameObject["style"] | null = null;
+  for (const key of keys) {
+    const value = style[key];
+    if (value !== undefined) {
+      const scaledValue = scaleStyleLength(value, scale);
+      if (scaledValue !== value) {
+        nextStyle ??= { ...style };
+        nextStyle[key] = scaledValue;
+      }
+    }
+  }
+  return nextStyle ?? style;
+}
+
+function scaleStyleLength(value: string | number, scale: number) {
+  const number = toFiniteNumber(value);
+  if (number === null) return value;
+  const scaled = Math.max(0, Math.round(number * scale * 100) / 100);
+  if (typeof value === "number") return scaled;
+  const unit = (value as string).trim().match(/[a-z%]+$/i)?.[0] ?? "";
+  return `${scaled}${unit}`;
 }
 
 function toFiniteNumber(value: string | number | undefined) {

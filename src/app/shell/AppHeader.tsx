@@ -89,7 +89,7 @@ export function AppHeader({
         ) : null}
         <button
           className={appBarActionButtonBase}
-          title="Open a Clipper project folder or project.json"
+          title="Open a .clpr project file"
           onClick={onOpenProject}
         >
           Open

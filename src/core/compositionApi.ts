@@ -6,7 +6,8 @@ export type FrameObjectType =
   | "svg"
   | "html"
   | "template"
-  | "null";
+  | "null"
+  | "custom-renderer";
 
 export type RenderContext = {
   time: number;

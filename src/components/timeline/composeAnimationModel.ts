@@ -1,19 +1,14 @@
 import {
-  getTimelineDragDeltaSeconds,
-  getTimelineBlockTiming,
-  type TimelineBlockTimingAction,
-} from "../../core/timelineBlockTiming";
+  movePropertyKeyframe,
+  removePropertyKeyframe,
+  type PropertyPath,
+} from "../../core/propertyRegistry";
 import type {
-  AnimationTrack,
   AnimationTrackProperty,
   FrameObject,
-  KeyframePoint,
-  LayerAnimation,
   MotionEase,
-  MotionMarker,
   Part,
 } from "../../core/types";
-import type { TimelinePartMotionView } from "./timelineTypes";
 
 export type ComposeAnimationAttributeKey = AnimationTrackProperty;
 
@@ -23,6 +18,7 @@ export type ComposeAnimationKeyframePoint = {
   time: number;
   value: number | string;
   easingToNext?: MotionEase | readonly [number, number, number, number];
+  propertyPath?: PropertyPath;
 };
 
 export type ComposeAnimationAttributeTrack = {
@@ -37,6 +33,7 @@ export type ComposeAnimationKeyframeSelection = {
   pointId?: string;
   key: ComposeAnimationAttributeKey;
   time: number;
+  propertyPath?: PropertyPath;
 };
 
 type VisibleKeyframePoint = {
@@ -68,7 +65,6 @@ export type ComposeAnimationTimelineRow =
 
 export type ComposeAnimationPresetTrack = {
   property: ComposeAnimationAttributeKey;
-  valueType?: AnimationTrack["valueType"];
   points: readonly {
     time: number;
     value: number | string;
@@ -90,7 +86,6 @@ export type ComposeAnimationTimelineLayer = {
   number: number;
   kind: "object" | "background-object" | "background";
   object?: FrameObject;
-  animations?: LayerAnimation[];
 };
 
 export const composeAnimationPresets = [
@@ -143,28 +138,12 @@ function trackPreset(
   const lastIndex = Math.max(values.length - 1, 1);
   return {
     property,
-    valueType: getAnimationTrackValueType(property),
     points: values.map((value, index) => ({
       time: (duration * index) / lastIndex,
       value,
     })),
   };
 }
-
-export type ComposeAnimationTimingDrag = {
-  action: TimelineBlockTimingAction;
-  initialClientX: number;
-  initialScrollLeft: number;
-  initialDelay: number;
-  initialDuration: number;
-  layer: ComposeAnimationTimelineLayer;
-  partId: string;
-  markerId: string;
-  animationId?: string;
-  pointerId: number;
-  snapBoundaries: number[];
-  snapThresholdSeconds: number;
-};
 
 export function buildComposeAnimationTimelineLayers(
   part: Part,
@@ -174,14 +153,12 @@ export function buildComposeAnimationTimelineLayers(
       id: object.id,
       name: object.name || object.id,
       kind: "object" as const,
-      animations: object.animations,
       object,
     })),
     ...[...part.background.elements].reverse().map((object) => ({
       id: object.id,
       name: object.name || object.id,
       kind: "background-object" as const,
-      animations: object.animations,
       object,
     })),
   ].map((layer, index) => ({ ...layer, number: index + 1 }));
@@ -193,7 +170,6 @@ export function buildComposeAnimationTimelineLayers(
       name: part.background.name || "Background",
       number: objects.length + 1,
       kind: "background" as const,
-      animations: part.background.animations,
     },
   ];
 }
@@ -246,6 +222,61 @@ const composeAnimationAttributeOrder = Object.keys(
   composeAnimationAttributeLabels,
 ) as ComposeAnimationAttributeKey[];
 
+const genericPropertyPathByAttribute: Partial<
+  Record<ComposeAnimationAttributeKey, PropertyPath>
+> = {
+  x: "bounds.x",
+  y: "bounds.y",
+  width: "bounds.width",
+  height: "bounds.height",
+  opacity: "style.opacity",
+  color: "style.color",
+  backgroundColor: "style.backgroundColor",
+  z: "transform.translateZ",
+  scale: "transform.scale",
+  scaleX: "transform.scaleX",
+  scaleY: "transform.scaleY",
+  rotate: "transform.rotate",
+  rotateX: "transform.rotateX",
+  rotateY: "transform.rotateY",
+  rotateZ: "transform.rotateZ",
+  skewX: "transform.skewX",
+  skewY: "transform.skewY",
+  transformPerspective: "transform.perspective",
+  blur: "filter.blur",
+};
+
+const attributeByGenericPropertyPath = new Map<
+  PropertyPath,
+  ComposeAnimationAttributeKey
+>(
+  Object.entries(genericPropertyPathByAttribute).map(([key, path]) => [
+    path as PropertyPath,
+    key as ComposeAnimationAttributeKey,
+  ]),
+);
+
+export function getGenericPropertyPathForComposeAttribute(
+  key: ComposeAnimationAttributeKey,
+) {
+  return genericPropertyPathByAttribute[key];
+}
+
+export function isGenericComposeAnimationId(animationId: string) {
+  return animationId.startsWith("property:");
+}
+
+export function getGenericPropertyPathFromComposeAnimationId(
+  animationId: string,
+): PropertyPath | undefined {
+  if (!isGenericComposeAnimationId(animationId)) return undefined;
+  return animationId.slice("property:".length) as PropertyPath;
+}
+
+function roundTimelineKeyframeTime(time: number) {
+  return Math.round(time * 1000) / 1000;
+}
+
 export function getComposeAnimationAttributeTracks(
   layer: ComposeAnimationTimelineLayer,
 ): ComposeAnimationAttributeTrack[] {
@@ -254,24 +285,28 @@ export function getComposeAnimationAttributeTracks(
     ComposeAnimationKeyframePoint[]
   >();
 
-  for (const animation of layer.animations ?? []) {
-    if (animation.enabled === false) continue;
-    // Runtime guard: projects saved before the canonical `tracks` rewrite may still
-    // contain legacy animation objects. Skip them instead of crashing the timeline.
-    if (!Array.isArray((animation as { tracks?: unknown }).tracks)) continue;
-    for (const track of animation.tracks) {
-      const points = tracks.get(track.property) ?? [];
-      for (const point of track.points) {
-        points.push({
-          animationId: animation.id,
-          pointId: point.id,
-          time: point.time,
-          value: point.value,
-          easingToNext: point.easingToNext,
-        });
-      }
-      tracks.set(track.property, points);
+  for (const [rawPropertyPath, track] of Object.entries(
+    layer.object?.tracks ?? {},
+  )) {
+    const propertyPath = rawPropertyPath as PropertyPath;
+    const key = attributeByGenericPropertyPath.get(propertyPath);
+    if (!key) continue;
+    const points = tracks.get(key) ?? [];
+    for (const point of track.points) {
+      if (typeof point.value !== "number" && typeof point.value !== "string")
+        continue;
+      points.push({
+        animationId: `property:${propertyPath}`,
+        pointId:
+          point.id ??
+          `${propertyPath}:${roundTimelineKeyframeTime(point.time)}`,
+        time: point.time,
+        value: point.value,
+        easingToNext: normalizeComposeEasing(point.easingToNext),
+        propertyPath,
+      });
     }
+    tracks.set(key, points);
   }
 
   return composeAnimationAttributeOrder.flatMap((key) => {
@@ -358,415 +393,63 @@ export function buildComposeAnimationTimelineRows(
   });
 }
 
-export function updateComposeAnimationEase(
-  animations: LayerAnimation[],
-  animationId: string,
-  ease: MotionEase | readonly [number, number, number, number],
-  pointId?: string,
-): LayerAnimation[] {
-  return animations.map((animation) => {
-    if (animation.id !== animationId || !Array.isArray(animation.tracks))
-      return animation;
-    return {
-      ...animation,
-      tracks: animation.tracks.map((track) => ({
-        ...track,
-        points: track.points.map((point, index) => {
-          const isTarget = pointId
-            ? point.id === pointId
-            : index < track.points.length - 1;
-          return isTarget ? { ...point, easingToNext: ease } : point;
-        }),
-      })),
-      options: { ...animation.options, ease },
-    };
-  });
-}
-
-function roundTimelineKeyframeTime(time: number) {
-  return Math.round(time * 1000) / 1000;
-}
-
-export function buildComposeAnimationMotionTimelinePart(
-  part: Part,
-  layers: ComposeAnimationTimelineLayer[],
-  timelineDuration: number,
-): TimelinePartMotionView {
-  const motionMarkers: MotionMarker[] = layers.flatMap((layer) => {
-    return (layer.animations ?? [])
-      .filter((animation) => Array.isArray(animation.tracks))
-      .map(
-        (animation): MotionMarker => ({
-          id: `${layer.id}/anim/${animation.id}`,
-          name: animation.name || "Animation",
-          layerId: layer.id,
-          effectId: "clipper.motion.pan",
-          kind: "pan",
-          start: getAnimationStart(animation),
-          duration: getAnimationDuration(animation),
-          position: { x: 0, y: 0 },
-          scale: 1,
-          focus: { x: 0.5, y: 0.5 },
-        }),
-      );
-  });
-
-  return {
-    ...part,
-    start: 0,
-    end: timelineDuration,
-    duration: timelineDuration,
-    motionMarkers,
-  };
-}
-
-export function getComposeAnimationSnapBoundaries(
-  layers: ComposeAnimationTimelineLayer[],
-  timelineDuration: number,
-) {
-  return Array.from(
-    new Set([
-      0,
-      timelineDuration,
-      ...layers.flatMap((layer) =>
-        (layer.animations ?? [])
-          .filter((animation) => Array.isArray(animation.tracks))
-          .flatMap((animation) => [
-            getAnimationStart(animation),
-            getAnimationEnd(animation),
-          ]),
-      ),
-    ]),
-  ).sort((left, right) => left - right);
-}
-
-export function getComposeAnimationTimingDelta(
-  drag: ComposeAnimationTimingDrag,
-  clientX: number,
-  scrollLeft: number,
-  contentWidth: number,
-  timelineDuration: number,
-) {
-  return getTimelineDragDeltaSeconds({
-    initialClientX: drag.initialClientX,
-    clientX,
-    initialScrollLeft: drag.initialScrollLeft,
-    scrollLeft,
-    pixelsPerSecond:
-      Math.max(contentWidth, 1) / Math.max(timelineDuration, 0.0001),
-  });
-}
-
-export function getNextComposeAnimationTiming(
-  drag: ComposeAnimationTimingDrag,
-  deltaSeconds: number,
-  timelineDuration: number,
-  snap: boolean,
-) {
-  const timing = getTimelineBlockTiming({
-    action: drag.action,
-    initialStart: drag.initialDelay,
-    initialDuration: drag.initialDuration,
-    deltaSeconds,
-    timelineDuration,
-    snap,
-    snapBoundaries: drag.snapBoundaries,
-    snapThresholdSeconds: drag.snapThresholdSeconds,
-  });
-  return {
-    delay: timing.start,
-    duration: timing.duration,
-    guideTime: timing.guideTime,
-  };
-}
-
-export function updateComposeAnimationLayerMotionTiming(
-  layer: ComposeAnimationTimelineLayer,
-  timing: { delay: number; duration: number },
-  _onUpdateBackgroundMotion?: never,
-  _onUpdateObjectMotion?: never,
-  onUpdateBackgroundAnimation?: (
-    updater: (animations: LayerAnimation[]) => LayerAnimation[],
-  ) => void,
-  onUpdateObjectAnimation?: (
-    objectId: string,
-    updater: (animations: LayerAnimation[]) => LayerAnimation[],
-  ) => void,
-  animationId?: string,
-) {
-  if (!animationId) return;
-  const updater = (animations: LayerAnimation[]) =>
-    animations.map((animation) =>
-      animation.id === animationId && Array.isArray(animation.tracks)
-        ? shiftAndScaleAnimation(animation, timing.delay, timing.duration)
-        : animation,
-    );
-  if (layer.kind === "background") {
-    onUpdateBackgroundAnimation?.(updater);
-  } else if (layer.object) {
-    onUpdateObjectAnimation?.(layer.object.id, updater);
-  }
-}
-
-function shiftAndScaleAnimation(
-  animation: LayerAnimation,
-  start: number,
-  duration: number,
-): LayerAnimation {
-  if (!Array.isArray(animation.tracks)) return animation;
-  const currentStart = getAnimationStart(animation);
-  const currentDuration = Math.max(getAnimationDuration(animation), 0.0001);
-  return {
-    ...animation,
-    options: { ...animation.options, delay: start || undefined, duration },
-    tracks: animation.tracks.map((track) => ({
-      ...track,
-      points: track.points.map((point) => ({
-        ...point,
-        time: roundTimelineKeyframeTime(
-          start + ((point.time - currentStart) / currentDuration) * duration,
-        ),
-      })),
-    })),
-  };
-}
-
-export function createComposeAnimationPresetAnimation(
-  preset: ComposeAnimationPreset,
-  currentTime: number,
-  timelineDuration: number,
-): LayerAnimation {
-  const delay = Math.max(0, Math.min(currentTime, timelineDuration));
-  const duration = Math.max(
-    0.1,
-    Math.min(preset.duration, Math.max(timelineDuration - delay, 0.1)),
-  );
-  const suffix = Date.now().toString(36);
-  return {
-    id: `preset:${preset.id}:${suffix}`,
-    name: preset.label,
-    tracks: preset.tracks.map((track) => ({
-      property: track.property,
-      valueType: track.valueType ?? getAnimationTrackValueType(track.property),
-      points: track.points.map((point, index) => ({
-        id: `${track.property}:${suffix}:${index}`,
-        time: roundTimelineKeyframeTime(delay + point.time),
-        value: point.value,
-        easingToNext: point.easingToNext ?? "easeOut",
-        hold: point.hold,
-      })),
-    })),
-    options: {
-      delay: delay || undefined,
-      duration,
-      ease: "easeOut",
-    },
-  };
-}
-
-export function createComposeAnimationAttributeKeyframeAnimation(
-  key: ComposeAnimationAttributeKey,
-  value: number | string,
-  currentTime: number,
-  timelineDuration: number,
-  idSuffix = Date.now().toString(36),
-): LayerAnimation {
-  const time = roundTimelineKeyframeTime(
-    Math.max(0, Math.min(currentTime, timelineDuration)),
-  );
-  return {
-    id: `track:${key}:${idSuffix}`,
-    name: `${composeAnimationAttributeLabels[key]} keyframes`,
-    tracks: [
-      {
-        property: key,
-        valueType: getAnimationTrackValueType(key),
-        points: [createKeyframePoint(key, value, time, idSuffix)],
-      },
-    ],
-    options: {
-      delay: time || undefined,
-      duration: 0.1,
-      ease: "linear",
-    },
-  };
-}
-
-export function upsertComposeAnimationAttributeKeyframe(
-  animations: LayerAnimation[],
-  key: ComposeAnimationAttributeKey,
-  value: number | string,
-  currentTime: number,
-  timelineDuration: number,
-) {
-  const time = roundTimelineKeyframeTime(
-    Math.max(0, Math.min(currentTime, timelineDuration)),
-  );
-  const animationIndex = animations.findIndex(
-    (animation) =>
-      Array.isArray(animation.tracks) &&
-      animation.tracks.some((track) => track.property === key),
-  );
-  if (animationIndex < 0) {
-    return [
-      ...animations,
-      createComposeAnimationAttributeKeyframeAnimation(
-        key,
-        value,
-        time,
-        timelineDuration,
-      ),
-    ];
-  }
-
-  return animations.map((animation, index) => {
-    if (index !== animationIndex) return animation;
-    const nextTracks = animation.tracks.map((track) => {
-      if (track.property !== key) return track;
-      return {
-        ...track,
-        points: normalizeKeyframePoints([
-          ...track.points,
-          createKeyframePoint(key, value, time),
-        ]),
-      };
-    });
-    return {
-      ...animation,
-      tracks: nextTracks,
-      options: {
-        ...animation.options,
-        delay:
-          getAnimationStart({ ...animation, tracks: nextTracks }) || undefined,
-        duration: getAnimationDuration({ ...animation, tracks: nextTracks }),
-      },
-    };
-  });
-}
-
-export function removeComposeAnimationAttributeKeyframe(
-  animations: LayerAnimation[],
-  key: ComposeAnimationAttributeKey,
-  currentTime: number,
-  timelineDuration: number,
-) {
-  const time = roundTimelineKeyframeTime(
-    Math.max(0, Math.min(currentTime, timelineDuration)),
-  );
-  return animations.flatMap((animation) => {
-    if (!Array.isArray(animation.tracks)) return [animation];
-    const nextTracks = animation.tracks.flatMap((track) => {
-      if (track.property !== key) return [track];
-      const nextPoints = track.points.filter(
-        (point) => !isPointAtTime(point, time),
-      );
-      return nextPoints.length ? [{ ...track, points: nextPoints }] : [];
-    });
-    return nextTracks.length ? [{ ...animation, tracks: nextTracks }] : [];
-  });
-}
-
-export function removeComposeAnimationKeyframeSelections(
-  animations: LayerAnimation[],
+export function removeComposeGenericPropertyKeyframeSelections(
+  object: FrameObject,
   selections: ComposeAnimationKeyframeSelection[],
+  currentTime: number,
   timelineDuration: number,
-) {
-  if (!selections.length) return animations;
-  const normalizedSelections = selections.map((selection) => ({
-    ...selection,
-    time: roundTimelineKeyframeTime(
+): FrameObject {
+  let nextObject = object;
+  for (const selection of selections) {
+    const path =
+      selection.propertyPath ??
+      getGenericPropertyPathFromComposeAnimationId(selection.animationId);
+    if (!path) continue;
+    const time = roundTimelineKeyframeTime(
       Math.max(0, Math.min(selection.time, timelineDuration)),
-    ),
-  }));
-  return animations.flatMap((animation) => {
-    if (!Array.isArray(animation.tracks)) return [animation];
-    const nextTracks = animation.tracks.flatMap((track) => {
-      const selected = normalizedSelections.filter(
-        (selection) =>
-          selection.animationId === animation.id &&
-          selection.key === track.property,
-      );
-      if (!selected.length) return [track];
-      const nextPoints = track.points.filter(
-        (point) =>
-          !selected.some((selection) =>
-            selection.pointId
-              ? selection.pointId === point.id
-              : isPointAtTime(point, selection.time),
-          ),
-      );
-      return nextPoints.length ? [{ ...track, points: nextPoints }] : [];
-    });
-    return nextTracks.length ? [{ ...animation, tracks: nextTracks }] : [];
-  });
+    );
+    nextObject = removePropertyKeyframe(nextObject, path, time, currentTime);
+  }
+  return nextObject;
 }
 
-export function moveComposeAnimationAttributeKeyframe(
-  animations: LayerAnimation[],
+export function moveComposeGenericPropertyKeyframe(
+  object: FrameObject,
   animationId: string,
   newTime: number,
   timelineDuration: number,
-): LayerAnimation[] {
-  const clampedTime = roundTimelineKeyframeTime(
+): FrameObject {
+  const path = getGenericPropertyPathFromComposeAnimationId(animationId);
+  if (!path) return object;
+  const track = object.tracks?.[path];
+  const fromTime = track?.points[0]?.time;
+  if (fromTime === undefined) return object;
+  return movePropertyKeyframe(
+    object,
+    path,
+    fromTime,
     Math.max(0, Math.min(newTime, timelineDuration)),
   );
-  return animations.map((animation) => {
-    if (animation.id !== animationId || !Array.isArray(animation.tracks))
-      return animation;
-    return {
-      ...animation,
-      tracks: animation.tracks.map((track) => {
-        if (track.points.length === 1) {
-          return {
-            ...track,
-            points: [{ ...track.points[0], time: clampedTime }],
-          };
-        }
-        const originalTime = track.points[0]?.time ?? clampedTime;
-        const delta = clampedTime - originalTime;
-        return {
-          ...track,
-          points: normalizeKeyframePoints(
-            track.points.map((point) => ({
-              ...point,
-              time: roundTimelineKeyframeTime(
-                Math.max(0, Math.min(point.time + delta, timelineDuration)),
-              ),
-            })),
-          ),
-        };
-      }),
-      options: { ...animation.options, delay: clampedTime || undefined },
-    };
-  });
 }
 
-export function moveComposeAnimationKeyframesAtTime(
-  animations: LayerAnimation[],
+export function moveComposeGenericPropertyKeyframesAtTime(
+  object: FrameObject,
   originalTime: number,
   newTime: number,
   timelineDuration: number,
-): LayerAnimation[] {
-  const roundedOriginal = roundTimelineKeyframeTime(originalTime);
-  const clampedTime = roundTimelineKeyframeTime(
-    Math.max(0, Math.min(newTime, timelineDuration)),
-  );
-  return animations.map((animation) => {
-    if (!Array.isArray(animation.tracks)) return animation;
-    return {
-      ...animation,
-      tracks: animation.tracks.map((track) => ({
-        ...track,
-        points: normalizeKeyframePoints(
-          track.points.map((point) =>
-            isPointAtTime(point, roundedOriginal)
-              ? { ...point, time: clampedTime }
-              : point,
-          ),
-        ),
-      })),
-    };
-  });
+): FrameObject {
+  let nextObject = object;
+  for (const rawPropertyPath of Object.keys(object.tracks ?? {})) {
+    const propertyPath = rawPropertyPath as PropertyPath;
+    if (!attributeByGenericPropertyPath.has(propertyPath)) continue;
+    nextObject = movePropertyKeyframe(
+      nextObject,
+      propertyPath,
+      originalTime,
+      Math.max(0, Math.min(newTime, timelineDuration)),
+    );
+  }
+  return nextObject;
 }
 
 export function getNearestComposeAnimationKeyframeValue(
@@ -786,80 +469,23 @@ export function getNearestComposeAnimationKeyframeValue(
   return nearest.value;
 }
 
-export function hasComposeAnimationAttributeTrack(
-  animations: LayerAnimation[] | undefined,
-  key: ComposeAnimationAttributeKey,
-) {
-  return Boolean(
-    animations?.some(
-      (animation) =>
-        Array.isArray(animation.tracks) &&
-        animation.tracks.some(
-          (track) => track.property === key && track.points.length > 0,
-        ),
-    ),
-  );
-}
-
-function createKeyframePoint(
-  key: ComposeAnimationAttributeKey,
-  value: number | string,
-  time: number,
-  idSuffix = Date.now().toString(36),
-): KeyframePoint {
-  return {
-    id: `${key}:${roundTimelineKeyframeTime(time)}:${idSuffix}`,
-    time,
-    value,
-    easingToNext: "linear",
-  };
-}
-
-function normalizeKeyframePoints(points: KeyframePoint[]) {
-  const byTime = new Map<number, KeyframePoint>();
-  for (const point of points) {
-    byTime.set(roundTimelineKeyframeTime(point.time), {
-      ...point,
-      time: roundTimelineKeyframeTime(point.time),
-    });
+function normalizeComposeEasing(
+  value: unknown,
+): MotionEase | readonly [number, number, number, number] | undefined {
+  if (
+    value === "linear" ||
+    value === "easeIn" ||
+    value === "easeOut" ||
+    value === "easeInOut" ||
+    value === "inAndOut" ||
+    value === "expoIn" ||
+    value === "expoOut" ||
+    value === "circOut" ||
+    value === "backOut"
+  ) {
+    return value;
   }
-  return Array.from(byTime.values()).sort(
-    (left, right) => left.time - right.time,
-  );
-}
-
-function isPointAtTime(point: KeyframePoint, time: number) {
-  return Math.abs(roundTimelineKeyframeTime(point.time) - time) < 0.001;
-}
-
-function getAnimationTrackValueType(
-  key: ComposeAnimationAttributeKey,
-): AnimationTrack["valueType"] {
-  return key === "color" || key === "backgroundColor" ? "color" : "number";
-}
-
-function getAnimationStart(animation: LayerAnimation) {
-  const times = getAnimationPointTimes(animation);
-  return times.length ? Math.min(...times) : (animation.options?.delay ?? 0);
-}
-
-function getAnimationEnd(animation: LayerAnimation) {
-  const times = getAnimationPointTimes(animation);
-  return times.length
-    ? Math.max(...times)
-    : (animation.options?.delay ?? 0) + (animation.options?.duration ?? 0);
-}
-
-function getAnimationPointTimes(animation: LayerAnimation) {
-  if (!Array.isArray(animation.tracks)) return [];
-  return animation.tracks.flatMap((track) =>
-    Array.isArray(track.points) ? track.points.map((point) => point.time) : [],
-  );
-}
-
-function getAnimationDuration(animation: LayerAnimation) {
-  return Math.max(
-    0.1,
-    getAnimationEnd(animation) - getAnimationStart(animation),
-  );
+  return Array.isArray(value) && value.length === 4
+    ? (value as unknown as readonly [number, number, number, number])
+    : undefined;
 }

@@ -170,6 +170,10 @@ type FramePreviewProps = {
     event: PointerEvent<HTMLDivElement>,
     object: FrameObject,
   ) => void;
+  onObjectContextMenu?: (
+    event: ReactMouseEvent<HTMLDivElement>,
+    object: FrameObject,
+  ) => void;
   onObjectResizePointerDown: (
     event: PointerEvent<HTMLDivElement>,
     handle: ResizeHandle,
@@ -260,6 +264,7 @@ export const FramePreview = memo(function FramePreview({
   onFramePointerLeave,
   onFramePointerUp,
   onObjectPointerDown,
+  onObjectContextMenu,
   onObjectResizePointerDown,
   onPathControlPointerDown,
   onObjectCornerRadiusChange,
@@ -457,7 +462,7 @@ export const FramePreview = memo(function FramePreview({
   const liveCameraTransform = useTransitionComposite
     ? identityCameraTransform
     : activeCameraTransform;
-  const frameBackground = part.frame.style.background ?? "#000";
+  const frameBackground = part.frame.style.backgroundColor ?? "#000";
   const frameStyle = useMemo(
     () =>
       ({
@@ -482,6 +487,18 @@ export const FramePreview = memo(function FramePreview({
   const selectableObjects = useMemo(
     () => [...part.background.elements, ...part.objects],
     [part.background.elements, part.objects],
+  );
+  const evaluatedSelectableObjectsById = useMemo(
+    () =>
+      new Map(
+        selectableObjects.map((object) => [
+          object.id,
+          evaluateFrameObject(object, displayPreviewTime, part.duration, {
+            animations: true,
+          }),
+        ]),
+      ),
+    [displayPreviewTime, part.duration, selectableObjects],
   );
   const selectedPreviewObjects = interactiveSelectedObjects;
   const viewportOverlayStyle = useMemo(
@@ -760,6 +777,7 @@ export const FramePreview = memo(function FramePreview({
                             previewTime={item.previewTime}
                             renderMode={renderMode}
                             onObjectPointerDown={onObjectPointerDown}
+                            onObjectContextMenu={onObjectContextMenu}
                             onTextEditCommit={onTextEditCommit}
                             onTextEditEnd={onTextEditEnd}
                             onTextObjectDoubleClick={onTextObjectDoubleClick}
@@ -841,9 +859,7 @@ export const FramePreview = memo(function FramePreview({
       {canSelectObjects && !isUnlinkedPart && previewOverlayHost
         ? createPortal(
             selectedPreviewObjects.map((object) => {
-              const source = selectableObjects.find(
-                (item) => item.id === object.id,
-              );
+              const source = evaluatedSelectableObjectsById.get(object.id);
               const isBackgroundSelection = object.id === part.background.id;
               const liveBounds = source?.bounds ?? object.bounds;
               return (
@@ -879,7 +895,13 @@ export const FramePreview = memo(function FramePreview({
                       onObjectResizePointerDown(event, handle, object.id)
                     }
                   />
-                  {source && onPathControlPointerDown ? (
+                  {source &&
+                  editingTextObjectId !== source.id &&
+                  !(
+                    activeShapeTool === "text" &&
+                    isEditableTextPathObject(source)
+                  ) &&
+                  onPathControlPointerDown ? (
                     <PathEditOverlay
                       cameraTransform={liveCameraTransform}
                       frameScale={frameScale}
@@ -1191,6 +1213,7 @@ function CompositionLayerView({
   previewTime,
   renderMode,
   onObjectPointerDown,
+  onObjectContextMenu,
   onTextEditCommit,
   onTextEditEnd,
   onTextObjectDoubleClick,
@@ -1210,6 +1233,10 @@ function CompositionLayerView({
   renderMode: "preview" | "export";
   onObjectPointerDown: (
     event: PointerEvent<HTMLDivElement>,
+    object: FrameObject,
+  ) => void;
+  onObjectContextMenu?: (
+    event: ReactMouseEvent<HTMLDivElement>,
     object: FrameObject,
   ) => void;
   onTextEditCommit: (
@@ -1304,6 +1331,11 @@ function CompositionLayerView({
               )
                 onTextObjectDoubleClick(event, object);
             }}
+            onContextMenu={
+              active && !isPlaying && onObjectContextMenu
+                ? (event) => onObjectContextMenu(event, object)
+                : undefined
+            }
             onPointerDown={(event) => {
               if (active && !isPlaying && isPenDrawTool(activeShapeTool)) {
                 event.preventDefault();
@@ -1316,6 +1348,8 @@ function CompositionLayerView({
                 activeShapeTool === "text" &&
                 (object.type === "text" || isEditableTextPathObject(object))
               ) {
+                event.preventDefault();
+                event.stopPropagation();
                 onTextObjectDoubleClick(
                   event as unknown as ReactMouseEvent<HTMLDivElement>,
                   object,
@@ -1620,31 +1654,37 @@ function TextPathOffsetHandle({
   const handleRef = useRef<HTMLButtonElement | null>(null);
   const offset = getTextPathOffset(object.content);
 
+  const offsetRef = useRef(offset);
+  offsetRef.current = offset;
+
   useLayoutEffect(() => {
-    const host = portalHost;
     let frameId = 0;
     function sync() {
       const handle = handleRef.current;
       const viewport = frameViewportRef.current;
       if (handle && viewport) {
-        const bounds = boundsToViewport(
-          object.bounds,
+        // Use live bounds from the preview cache (populated during scrubbing/playback)
+        // falling back to the React-state bounds when not animating.
+        const liveBounds =
+          objectPreviewBoundsById.get(object.id) ?? object.bounds;
+        const overlayTransform = getCurrentFramePortalOverlayTransform({
+          frameScale,
+          frameViewportRef,
+          portalHost,
+        });
+        const viewportPoint = boundsToViewport(
+          {
+            x: liveBounds.x + liveBounds.width * (offsetRef.current / 100),
+            y: liveBounds.y + liveBounds.height / 2,
+            width: 0,
+            height: 0,
+          },
           cameraTransform,
           frameScale,
         );
-        const pointBounds = {
-          x: bounds.x + bounds.width * (offset / 100),
-          y: bounds.y + bounds.height / 2,
-          width: 0,
-          height: 0,
-        };
-        const portalPoint = viewportBoundsToPortal(
-          pointBounds,
-          getFramePortalOverlayTransform(
-            viewport.getBoundingClientRect(),
-            host.getBoundingClientRect(),
-            frameScale,
-          ),
+        const portalPoint = viewportPointToPortal(
+          viewportPoint,
+          overlayTransform,
         );
         handle.style.setProperty(
           "--clipper-text-path-offset-x",
@@ -1664,7 +1704,7 @@ function TextPathOffsetHandle({
     frameScale,
     frameViewportRef,
     object.bounds,
-    offset,
+    object.id,
     portalHost,
   ]);
 
@@ -2513,6 +2553,7 @@ export const FrameObjectView = memo(function FrameObjectView({
   previewTime,
   renderMode,
   onDoubleClick,
+  onContextMenu,
   onPointerDown,
   onTextEditCommit,
   onTextEditEnd,
@@ -2530,6 +2571,7 @@ export const FrameObjectView = memo(function FrameObjectView({
   previewTime: number;
   renderMode: "preview" | "export";
   onDoubleClick: (event: ReactMouseEvent<HTMLDivElement>) => void;
+  onContextMenu?: (event: ReactMouseEvent<HTMLDivElement>) => void;
   onPointerDown: (event: PointerEvent<HTMLDivElement>) => void;
   onTextEditCommit: (
     content: string,
@@ -2552,6 +2594,7 @@ export const FrameObjectView = memo(function FrameObjectView({
     style: evaluatedObject.renderStyle,
     content: evaluatedObject.renderContent,
   };
+  const evaluatedBounds = evaluatedObject.bounds;
   const objectRef = useRef<HTMLDivElement | null>(null);
   const editableRef = useRef<HTMLDivElement | null>(null);
   const lastCommittedTextRef = useRef<string | null>(null);
@@ -2589,30 +2632,38 @@ export const FrameObjectView = memo(function FrameObjectView({
     ...animation.style,
     left:
       renderMode === "export"
-        ? object.bounds.x
-        : `var(--clipper-resize-left, ${object.bounds.x}px)`,
+        ? evaluatedBounds.x
+        : `var(--clipper-resize-left, ${evaluatedBounds.x}px)`,
     top:
       renderMode === "export"
-        ? object.bounds.y
-        : `var(--clipper-resize-top, ${object.bounds.y}px)`,
+        ? evaluatedBounds.y
+        : `var(--clipper-resize-top, ${evaluatedBounds.y}px)`,
     width:
       renderMode === "export"
-        ? (animationWidth ?? object.bounds.width)
+        ? (animationWidth ?? evaluatedBounds.width)
         : (animationWidth ??
-          `var(--clipper-resize-width, ${object.bounds.width}px)`),
+          `var(--clipper-resize-width, ${evaluatedBounds.width}px)`),
     height:
       textBoxLayout === "auto-height"
         ? "auto"
         : renderMode === "export"
-          ? (animationHeight ?? object.bounds.height)
+          ? (animationHeight ?? evaluatedBounds.height)
           : (animationHeight ??
-            `var(--clipper-resize-height, ${object.bounds.height}px)`),
+            `var(--clipper-resize-height, ${evaluatedBounds.height}px)`),
     minHeight:
-      textBoxLayout === "auto-height" ? object.bounds.height : undefined,
+      textBoxLayout === "auto-height" ? evaluatedBounds.height : undefined,
     fontSize:
       object.type === "text" && renderMode !== "export"
         ? `calc(${formatStyleLength(object.style.fontSize)} * var(--clipper-scale-preview, 1))`
         : object.style.fontSize,
+    borderWidth:
+      renderMode !== "export" && object.style.borderWidth
+        ? `calc(${formatStyleLength(object.style.borderWidth)} * var(--clipper-scale-preview, 1))`
+        : object.style.borderWidth,
+    strokeWidth:
+      renderMode !== "export" && object.style.strokeWidth
+        ? `calc(${formatStyleLength(object.style.strokeWidth)} * var(--clipper-scale-preview, 1))`
+        : object.style.strokeWidth,
     borderRadius:
       renderMode === "export"
         ? object.style.borderRadius
@@ -2657,10 +2708,10 @@ export const FrameObjectView = memo(function FrameObjectView({
     element.style.removeProperty("--clipper-resize-height");
     element.style.removeProperty("--clipper-scale-preview");
   }, [
-    object.bounds.height,
-    object.bounds.width,
-    object.bounds.x,
-    object.bounds.y,
+    evaluatedBounds.height,
+    evaluatedBounds.width,
+    evaluatedBounds.x,
+    evaluatedBounds.y,
     renderMode,
   ]);
 
@@ -2822,6 +2873,9 @@ export const FrameObjectView = memo(function FrameObjectView({
       onDoubleClick={(event) => {
         if (!isLocked) onDoubleClick(event);
       }}
+      onContextMenu={(event) => {
+        if (!isLocked) onContextMenu?.(event);
+      }}
       onPointerDown={(event) => {
         if (!isLocked) onPointerDown(event);
       }}
@@ -2876,14 +2930,21 @@ export const FrameObjectView = memo(function FrameObjectView({
           style={style}
         />
       ) : null}
-      {(object.type === "html" || object.type === "template") && content ? (
-        <HtmlContent content={content} />
+      {(object.type === "html" ||
+        object.type === "template" ||
+        object.type === "custom-renderer") &&
+      content ? (
+        <HtmlContent
+          content={content}
+          props={object.type === "custom-renderer" ? object.props : undefined}
+        />
       ) : null}
       {object.type !== "text" &&
       object.type !== "null" &&
       object.type !== "svg" &&
       object.type !== "html" &&
       object.type !== "template" &&
+      object.type !== "custom-renderer" &&
       content
         ? content
         : null}
@@ -4366,13 +4427,20 @@ export const BackgroundElementView = memo(function BackgroundElementView({
           style={style}
         />
       ) : null}
-      {(element.type === "html" || element.type === "template") && content ? (
-        <HtmlContent content={content} />
+      {(element.type === "html" ||
+        element.type === "template" ||
+        element.type === "custom-renderer") &&
+      content ? (
+        <HtmlContent
+          content={content}
+          props={element.type === "custom-renderer" ? element.props : undefined}
+        />
       ) : null}
       {element.type !== "text" &&
       element.type !== "svg" &&
       element.type !== "html" &&
       element.type !== "template" &&
+      element.type !== "custom-renderer" &&
       content
         ? content
         : null}
@@ -4391,12 +4459,27 @@ function evaluateObjectForPreview(
   });
 }
 
-export function HtmlContent({ content }: { content: string }) {
+export function HtmlContent({
+  content,
+  props,
+}: {
+  content: string;
+  props?: Record<string, unknown>;
+}) {
   const ref = useRef<HTMLDivElement | null>(null);
+  const serializedProps = useMemo(
+    () => (props === undefined ? undefined : JSON.stringify(props)),
+    [props],
+  );
 
   useLayoutEffect(() => {
     const host = ref.current;
     if (!host) return;
+    if (serializedProps === undefined) {
+      host.removeAttribute("data-clipper-props");
+    } else {
+      host.setAttribute("data-clipper-props", serializedProps);
+    }
     const root = host.shadowRoot ?? host.attachShadow({ mode: "open" });
 
     try {
@@ -4425,7 +4508,7 @@ export function HtmlContent({ content }: { content: string }) {
       }
       root.replaceChildren();
     };
-  }, [content]);
+  }, [content, serializedProps]);
 
   return (
     <div ref={ref} className="h-full w-full" data-clipper-shadow-render-root />

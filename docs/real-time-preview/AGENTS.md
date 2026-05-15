@@ -79,4 +79,4 @@ Number scrub supports unbounded cursor movement. Preserve these constraints:
 - Cleanup restores cursor, pointer lock, opacity, transform, and pending rAF refs.
 - Exactly one preview dot/overlay is visible.
 - Final value commits once and remains visible if the active mode expects it.
-- Run `rtk npm run typecheck`, a targeted test if available, and `graphify update .` after code changes.
+- Run `npm run typecheck`, a targeted test if available, and `graphify update .` after code changes.

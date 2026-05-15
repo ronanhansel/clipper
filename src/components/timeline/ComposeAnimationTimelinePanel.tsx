@@ -18,9 +18,12 @@ import { defaultTimelinePixelsPerSecond } from "../../app/config";
 import { roundTwo } from "../../core/math";
 import { getTimelineTicks } from "../../core/timeline";
 import { getDisplayNameFromPath } from "../../core/fileNames";
+import {
+  upsertPropertyKeyframe,
+  type PropertyPath,
+} from "../../core/propertyRegistry";
 import type {
   FrameObject,
-  LayerAnimation,
   MotionMarker,
   Part,
   TimelineLayerState,
@@ -34,7 +37,6 @@ import { useTimelineViewportController } from "./useTimelineViewportController";
 import { LayerLabel } from "./TimelinePrimitives";
 import { TimelineShell } from "./TimelineShell";
 import { MarqueeSelectionBox } from "./TimelineSelectionBox";
-import { MotionLane } from "./MotionLane";
 import {
   Select,
   SelectContent,
@@ -44,34 +46,24 @@ import {
   SelectValue,
 } from "../ui/select";
 import {
-  timelineBlockPreviewKey,
-  type TimelineBlockPreviewMap,
-} from "./timelineBlockPreview";
-import type { TimelinePartMotionView } from "./timelineTypes";
-import {
-  buildComposeAnimationMotionTimelinePart,
   buildComposeAnimationTimelineRows,
   composeAnimationPresets,
-  createComposeAnimationPresetAnimation,
   getComposeAnimationLayerKeyframes,
   getComposeAnimationAttributeTracks,
   buildComposeAnimationTimelineLayers,
   getComposeParentOptions,
-  getComposeAnimationSnapBoundaries,
-  getComposeAnimationTimingDelta,
-  getNextComposeAnimationTiming,
-  removeComposeAnimationKeyframeSelections,
-  updateComposeAnimationLayerMotionTiming,
-  moveComposeAnimationAttributeKeyframe,
-  moveComposeAnimationKeyframesAtTime,
-  updateComposeAnimationEase,
+  removeComposeGenericPropertyKeyframeSelections,
+  moveComposeGenericPropertyKeyframe,
+  moveComposeGenericPropertyKeyframesAtTime,
+  getGenericPropertyPathForComposeAttribute,
+  getGenericPropertyPathFromComposeAnimationId,
+  isGenericComposeAnimationId,
   type ComposeAnimationAttributeKey,
   type ComposeAnimationKeyframePoint,
   type ComposeAnimationKeyframeSelection,
   type ComposeAnimationAttributeTrack,
   type ComposeAnimationTimelineRow,
   type ComposeAnimationTimelineLayer,
-  type ComposeAnimationTimingDrag,
 } from "./composeAnimationModel";
 import type { MotionEase } from "../../core/types";
 
@@ -98,13 +90,6 @@ type ComposeAnimationTimelinePanelProps = {
   ) => void;
   onTimelineViewportStateChange: (
     updater: (state: TimelineViewportState) => TimelineViewportState,
-  ) => void;
-  onUpdateBackgroundAnimation?: (
-    updater: (animations: LayerAnimation[]) => LayerAnimation[],
-  ) => void;
-  onUpdateObjectAnimation?: (
-    objectId: string,
-    updater: (animations: LayerAnimation[]) => LayerAnimation[],
   ) => void;
   onUpdateObject?: (
     objectId: string,
@@ -200,8 +185,6 @@ function ComposeAnimationTimelinePanelContent({
   onSelectObjects,
   onTimelineLayersChange,
   onTimelineViewportStateChange,
-  onUpdateBackgroundAnimation,
-  onUpdateObjectAnimation,
   onUpdateObject,
   setAppContextMenu,
 }: ComposeAnimationTimelinePanelProps) {
@@ -215,7 +198,6 @@ function ComposeAnimationTimelinePanelContent({
     () => getTimelineTicks(timelineDuration),
     [timelineDuration],
   );
-  const timingDragRef = useRef<ComposeAnimationTimingDrag | null>(null);
   const provisionalContentWidth =
     timelineDuration *
     defaultTimelinePixelsPerSecond *
@@ -240,9 +222,6 @@ function ComposeAnimationTimelinePanelContent({
   });
   const [editingLayerId, setEditingLayerId] = useState<string | null>(null);
   const [layerNameDraft, setLayerNameDraft] = useState("");
-  const [timelineBlockPreviews, setTimelineBlockPreviews] =
-    useState<TimelineBlockPreviewMap | null>(null);
-  const [timelineDragActive, setTimelineDragActive] = useState(false);
   const [overviewDragPreview, setOverviewDragPreview] = useState<{
     layerId: string;
     originalTime: number;
@@ -316,34 +295,14 @@ function ComposeAnimationTimelinePanelContent({
     [contentWidth, easeRowHeights, partDuration, rows, timelineRowStarts],
   );
   const layerRailWidth = 430;
-  const composeTimelinePartId = part?.id ?? "compose-animation";
-  const composeMotionTimeline = useMemo<TimelinePartMotionView[]>(
-    () =>
-      part
-        ? [buildComposeAnimationMotionTimelinePart(part, layers, partDuration)]
-        : [],
-    [layers, part, partDuration],
-  );
-  const selectedComposeMotionKeys = useMemo(() => {
-    const keys = new Set<string>();
-    for (const layer of layers) {
-      if (layer.object && selectedObjectIds.includes(layer.object.id)) {
-        keys.add(`${composeTimelinePartId}:${layer.id}`);
-        if (layer.animations) {
-          for (const animation of layer.animations) {
-            keys.add(
-              `${composeTimelinePartId}:${layer.id}/anim/${animation.id}`,
-            );
-          }
-        }
-      }
+  const scrubSnapBoundaries = useMemo(() => {
+    const times = new Set<number>([0, partDuration]);
+    for (const target of keyframeHitTargets) {
+      const roundedTime = Math.round(target.time * 1000) / 1000;
+      times.add(roundedTime);
     }
-    return keys;
-  }, [composeTimelinePartId, layers, selectedObjectIds]);
-  const scrubSnapBoundaries = useMemo(
-    () => getComposeAnimationSnapBoundaries(layers, partDuration),
-    [layers, partDuration],
-  );
+    return Array.from(times).sort((a, b) => a - b);
+  }, [partDuration, keyframeHitTargets]);
 
   const { getTimelineEdgeScrollDelta, startScrub, continueScrub, endScrub } =
     useTimelineScrubber({
@@ -360,27 +319,6 @@ function ComposeAnimationTimelinePanelContent({
       onScrubStart,
       onScrubEnd,
     });
-
-  const {
-    updateTimelineDragAutoScroll: updateTimingDragAutoScroll,
-    stopTimelineDragAutoScroll: stopTimingDragAutoScroll,
-  } = useTimelineDragAutoScroll({
-    viewportRef: timelineViewportRef,
-    getTimelineEdgeScrollDelta,
-    onRulerScroll: syncTimelineScrollPosition,
-    onScrollPersist: saveTimelineDisplacement,
-  });
-  const { startTimelinePointerTransaction: startTimingPointerTransaction } =
-    useTimelinePointerTransaction();
-
-  useEffect(
-    () => () => {
-      stopTimingDragAutoScroll();
-      clearTimelineSnapGuide();
-      setTimelineDragActive(false);
-    },
-    [],
-  );
 
   useEffect(() => {
     setSelectedKeyframeIds((current) => {
@@ -443,19 +381,14 @@ function ComposeAnimationTimelinePanelContent({
     for (const layer of layers) {
       const selections = selectionsByLayerId.get(layer.id);
       if (!selections?.length) continue;
-      if (layer.kind === "background") {
-        onUpdateBackgroundAnimation?.((animations) =>
-          removeComposeAnimationKeyframeSelections(
-            animations,
-            selections,
-            partDuration,
-          ),
-        );
-      } else if (layer.object) {
-        onUpdateObjectAnimation?.(layer.object.id, (animations) =>
-          removeComposeAnimationKeyframeSelections(
-            animations,
-            selections,
+      if (layer.object) {
+        onUpdateObject?.(layer.object.id, (object) =>
+          removeComposeGenericPropertyKeyframeSelections(
+            object,
+            selections.filter((selection) =>
+              isGenericComposeAnimationId(selection.animationId),
+            ),
+            currentTime,
             partDuration,
           ),
         );
@@ -691,18 +624,60 @@ function ComposeAnimationTimelinePanelContent({
     });
   }
 
+  function applyEaseToKeyframe(
+    layer: ComposeAnimationTimelineLayer,
+    animationId: string,
+    time: number,
+    ease: MotionEase | readonly [number, number, number, number],
+  ) {
+    const path = getGenericPropertyPathFromComposeAnimationId(animationId);
+    if (!layer.object || !path) return;
+    const roundedTime = Math.round(time * 1000) / 1000;
+    onUpdateObject?.(layer.object.id, (object) => {
+      const track = object.tracks?.[path];
+      if (!track) return object;
+      return {
+        ...object,
+        tracks: {
+          ...(object.tracks ?? {}),
+          [path]: {
+            ...track,
+            points: track.points.map((point) =>
+              Math.round(point.time * 1000) / 1000 === roundedTime
+                ? { ...point, easingToNext: ease }
+                : point,
+            ),
+          },
+        },
+      };
+    });
+  }
+
   function applyEaseToTrack(
     layer: ComposeAnimationTimelineLayer,
     animationId: string,
     ease: MotionEase | readonly [number, number, number, number],
   ) {
-    const updater = (animations: LayerAnimation[]) =>
-      updateComposeAnimationEase(animations, animationId, ease);
-    if (layer.kind === "background") {
-      onUpdateBackgroundAnimation?.(updater);
-    } else if (layer.object) {
-      onUpdateObjectAnimation?.(layer.object.id, updater);
-    }
+    const path = getGenericPropertyPathFromComposeAnimationId(animationId);
+    if (!layer.object || !path) return;
+    onUpdateObject?.(layer.object.id, (object) => {
+      const track = object.tracks?.[path];
+      if (!track) return object;
+      return {
+        ...object,
+        tracks: {
+          ...(object.tracks ?? {}),
+          [path]: {
+            ...track,
+            points: track.points.map((point, index) =>
+              index < track.points.length - 1
+                ? { ...point, easingToNext: ease }
+                : point,
+            ),
+          },
+        },
+      };
+    });
   }
 
   function applyPresetToLayer(
@@ -710,20 +685,34 @@ function ComposeAnimationTimelinePanelContent({
     presetId: string,
   ) {
     const preset = composeAnimationPresets.find((item) => item.id === presetId);
-    if (!layer || !preset) return;
-    const animation = createComposeAnimationPresetAnimation(
-      preset,
-      currentTime,
-      timelineDuration,
-    );
-    if (layer.kind === "background") {
-      onUpdateBackgroundAnimation?.((animations) => [...animations, animation]);
-    } else if (layer.object) {
-      onUpdateObjectAnimation?.(layer.object.id, (animations) => [
-        ...animations,
-        animation,
-      ]);
-    }
+    if (!layer?.object || !preset) return;
+    const delay = Math.max(0, Math.min(currentTime, partDuration));
+    onUpdateObject?.(layer.object.id, (object) => {
+      let nextObject = object;
+      for (const track of preset.tracks) {
+        const path = getGenericPropertyPathForComposeAttribute(track.property);
+        if (!path) continue;
+        for (const point of track.points) {
+          const time = Math.round((delay + point.time) * 1000) / 1000;
+          nextObject = upsertPropertyKeyframe(
+            nextObject,
+            path,
+            time,
+            point.value,
+          );
+          if (point.easingToNext || point.hold) {
+            nextObject = setGenericTrackPointTiming(
+              nextObject,
+              path,
+              time,
+              point.easingToNext,
+              point.hold,
+            );
+          }
+        }
+      }
+      return nextObject;
+    });
   }
 
   function openComposePresetContextMenu(
@@ -743,161 +732,32 @@ function ComposeAnimationTimelinePanelContent({
     });
   }
 
-  function startTimingDrag(
-    event: PointerEvent<HTMLDivElement>,
-    layer: ComposeAnimationTimelineLayer,
-    action: ComposeAnimationTimingDrag["action"],
-    animation?: LayerAnimation,
+  function setGenericTrackPointTiming(
+    object: FrameObject,
+    path: PropertyPath,
+    time: number,
+    easingToNext:
+      | MotionEase
+      | readonly [number, number, number, number]
+      | undefined,
+    hold: boolean | undefined,
   ) {
-    if (event.button !== 0) return;
-    if (!animation) return;
-    const initialDelay = animation.options.delay ?? 0;
-    const initialDuration = animation.options.duration;
-    const markerId = `${layer.id}/anim/${animation.id}`;
-    event.preventDefault();
-    event.stopPropagation();
-    selectLayer(layer);
-    const pixelsPerSecond =
-      (timelineRef.current?.getBoundingClientRect().width ?? 1) /
-      Math.max(partDuration, 1);
-    const snapThresholdSeconds = Math.max(0.08, 8 / pixelsPerSecond);
-    const movingEdges = new Set([
-      roundTwo(initialDelay),
-      roundTwo(initialDelay + initialDuration),
-    ]);
-    const snapBoundaries = Array.from(
-      new Set([
-        ...scrubSnapBoundaries.filter(
-          (boundary) => !movingEdges.has(roundTwo(boundary)),
-        ),
-        currentTime,
-      ]),
-    ).sort((left, right) => left - right);
-    function clearTimingDragState() {
-      timingDragRef.current = null;
-      stopTimingDragAutoScroll();
-      clearTimelineSnapGuide();
-      setTimelineBlockPreviews(null);
-      setTimelineDragActive(false);
-    }
-
-    startTimingPointerTransaction({
-      event,
-      capturePointer: true,
-      updateAutoScroll: updateTimingDragAutoScroll,
-      stopAutoScroll: stopTimingDragAutoScroll,
-      onDragStart: ({ pointerId }) => {
-        timingDragRef.current = {
-          action,
-          initialClientX: event.clientX,
-          initialScrollLeft: timelineViewportRef.current?.scrollLeft ?? 0,
-          initialDelay,
-          initialDuration,
-          layer,
-          partId: composeTimelinePartId,
-          markerId,
-          animationId: animation.id,
-          pointerId,
-          snapBoundaries,
-          snapThresholdSeconds,
-        };
-        setTimelineDragActive(true);
+    const track = object.tracks?.[path];
+    if (!track) return object;
+    return {
+      ...object,
+      tracks: {
+        ...(object.tracks ?? {}),
+        [path]: {
+          ...track,
+          points: track.points.map((point) =>
+            Math.round(point.time * 1000) / 1000 === time
+              ? { ...point, easingToNext, hold }
+              : point,
+          ),
+        },
       },
-      onPreview: ({ pointerId, clientX, snap }) =>
-        updateTimingDragFromPointer(pointerId, clientX, snap),
-      onCommit: ({ pointerId, clientX, snap }) =>
-        finishTimingDragFromPointer(pointerId, clientX, snap),
-      onCancel: clearTimingDragState,
-      onDragEnd: () => {
-        stopTimingDragAutoScroll();
-        clearTimelineSnapGuide();
-        setTimelineDragActive(false);
-      },
-    });
-  }
-
-  function updateTimingDragFromPointer(
-    pointerId: number,
-    clientX: number,
-    snap: boolean,
-  ) {
-    const drag = timingDragRef.current;
-    if (!drag || drag.pointerId !== pointerId) return;
-    const deltaSeconds = getComposeAnimationTimingDelta(
-      drag,
-      clientX,
-      timelineViewportRef.current?.scrollLeft ?? 0,
-      contentWidth,
-      partDuration,
-    );
-    const next = getNextComposeAnimationTiming(
-      drag,
-      deltaSeconds,
-      partDuration,
-      snap,
-    );
-    updateTimelineSnapGuide(next.guideTime);
-    setTimelineBlockPreviews({
-      [timelineBlockPreviewKey("motion", drag.partId, drag.markerId)]: {
-        start: next.delay,
-        duration: next.duration,
-      },
-    });
-  }
-
-  function finishTimingDragFromPointer(
-    pointerId: number,
-    clientX: number,
-    snap: boolean,
-  ) {
-    const drag = timingDragRef.current;
-    if (!drag || drag.pointerId !== pointerId) return;
-    const deltaSeconds = getComposeAnimationTimingDelta(
-      drag,
-      clientX,
-      timelineViewportRef.current?.scrollLeft ?? 0,
-      contentWidth,
-      partDuration,
-    );
-    const next = getNextComposeAnimationTiming(
-      drag,
-      deltaSeconds,
-      partDuration,
-      snap,
-    );
-    timingDragRef.current = null;
-    setTimelineDragActive(false);
-    setTimelineBlockPreviews(null);
-    updateComposeAnimationLayerMotionTiming(
-      drag.layer,
-      next,
-      undefined,
-      undefined,
-      onUpdateBackgroundAnimation,
-      onUpdateObjectAnimation,
-      drag.animationId,
-    );
-  }
-
-  function updateComposeMotionFromPointer(
-    event: PointerEvent<HTMLDivElement>,
-    _timelinePart: TimelinePart,
-    marker: MotionMarker,
-    action: "move" | "start" | "end",
-  ) {
-    const animMatch = marker.id.match(/^(.+)\/anim\/(.+)$/);
-    if (animMatch) {
-      const [, layerId, animationId] = animMatch;
-      const layer = layers.find((item) => item.id === layerId);
-      if (!layer) return;
-      const animation = layer.animations?.find(
-        (anim) => anim.id === animationId,
-      );
-      if (animation) startTimingDrag(event, layer, action, animation);
-      return;
-    }
-    const layer = layers.find((item) => item.id === marker.id);
-    if (layer) startTimingDrag(event, layer, action);
+    };
   }
 
   if (!part) {
@@ -953,7 +813,6 @@ function ComposeAnimationTimelinePanelContent({
       currentTime={currentTime}
       disableDeclarativePlayhead={isPlaying}
       displayDuration={partDuration}
-      dragActive={timelineDragActive}
       laneContentHeight={laneContentHeight}
       laneRowsStyle={laneRowsStyle}
       layerRailWidth={layerRailWidth}
@@ -1054,53 +913,34 @@ function ComposeAnimationTimelinePanelContent({
                   : null
               }
               onOpenPresetContextMenu={openComposePresetContextMenu}
-              onApplyEase={(layer, animationId, ease) =>
-                applyEaseToTrack(layer, animationId, ease)
+              onApplyEase={(layer, animationId, time, ease) =>
+                applyEaseToKeyframe(layer, animationId, time, ease)
               }
               onResizeEaseRow={(rowId, height) =>
                 setEaseRowHeights((prev) => ({ ...prev, [rowId]: height }))
               }
               onMoveKeyframe={(layer, animationId, newTime) => {
-                if (layer.kind === "background") {
-                  onUpdateBackgroundAnimation?.((animations) =>
-                    moveComposeAnimationAttributeKeyframe(
-                      animations,
-                      animationId,
-                      newTime,
-                      partDuration,
-                    ),
-                  );
-                } else if (layer.object) {
-                  onUpdateObjectAnimation?.(layer.object.id, (animations) =>
-                    moveComposeAnimationAttributeKeyframe(
-                      animations,
-                      animationId,
-                      newTime,
-                      partDuration,
-                    ),
-                  );
-                }
+                if (!layer.object || !isGenericComposeAnimationId(animationId))
+                  return;
+                onUpdateObject?.(layer.object.id, (object) =>
+                  moveComposeGenericPropertyKeyframe(
+                    object,
+                    animationId,
+                    newTime,
+                    partDuration,
+                  ),
+                );
               }}
               onMoveKeyframesAtTime={(layer, originalTime, newTime) => {
-                if (layer.kind === "background") {
-                  onUpdateBackgroundAnimation?.((animations) =>
-                    moveComposeAnimationKeyframesAtTime(
-                      animations,
-                      originalTime,
-                      newTime,
-                      partDuration,
-                    ),
-                  );
-                } else if (layer.object) {
-                  onUpdateObjectAnimation?.(layer.object.id, (animations) =>
-                    moveComposeAnimationKeyframesAtTime(
-                      animations,
-                      originalTime,
-                      newTime,
-                      partDuration,
-                    ),
-                  );
-                }
+                if (!layer.object) return;
+                onUpdateObject?.(layer.object.id, (object) =>
+                  moveComposeGenericPropertyKeyframesAtTime(
+                    object,
+                    originalTime,
+                    newTime,
+                    partDuration,
+                  ),
+                );
               }}
               onOverviewDragPreview={(originalTime, time) =>
                 setOverviewDragPreview({
@@ -1559,6 +1399,7 @@ function ComposeTimelineViewportRow({
   onApplyEase: (
     layer: ComposeAnimationTimelineLayer,
     animationId: string,
+    time: number,
     ease: MotionEase | readonly [number, number, number, number],
   ) => void;
   onResizeEaseRow: (rowId: string, height: number) => void;
@@ -1590,8 +1431,8 @@ function ComposeTimelineViewportRow({
         contentWidth={contentWidth}
         timelineRef={timelineRef}
         overviewDragPreview={overviewDragPreview}
-        onApplyEase={(animationId, ease) =>
-          onApplyEase(row.layer, animationId, ease)
+        onApplyEase={(animationId, time, ease) =>
+          onApplyEase(row.layer, animationId, time, ease)
         }
         onMoveKeyframesAtTime={(originalTime, newTime) =>
           onMoveKeyframesAtTime(row.layer, originalTime, newTime)
@@ -2054,6 +1895,7 @@ function ComposeEaseLane({
   overviewDragPreview: { originalTime: number; time: number } | null;
   onApplyEase: (
     animationId: string,
+    time: number,
     ease: MotionEase | readonly [number, number, number, number],
   ) => void;
   onMoveKeyframesAtTime: (originalTime: number, newTime: number) => void;
@@ -2067,6 +1909,16 @@ function ComposeEaseLane({
   const { startTimelinePointerTransaction } = useTimelinePointerTransaction();
   const laneRef = useRef<HTMLDivElement | null>(null);
   const [selectedSegIndex, setSelectedSegIndex] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (selectedSegIndex === null) return;
+    function onMouseDown(e: MouseEvent) {
+      if (laneRef.current?.contains(e.target as Node)) return;
+      setSelectedSegIndex(null);
+    }
+    document.addEventListener("mousedown", onMouseDown);
+    return () => document.removeEventListener("mousedown", onMouseDown);
+  }, [selectedSegIndex]);
   const [dragPreview, setDragPreview] = useState<{
     originalTime: number;
     time: number;
@@ -2114,8 +1966,8 @@ function ComposeEaseLane({
       result.push({
         startAnimationId: kf.animationId,
         endAnimationId: nextKf.animationId,
-        ease: ease ?? "easeInOut",
-        controlPoints: getEaseControlPoints(ease ?? "easeInOut"),
+        ease: ease ?? "linear",
+        controlPoints: getEaseControlPoints(ease ?? "linear"),
         x0Time: kf.time,
         x1Time: nextKf.time,
         x0Frac: sorted[i].time / timelineDuration,
@@ -2128,7 +1980,11 @@ function ComposeEaseLane({
     return result;
   }, [track, layer, timelineDuration]);
 
-  function openEaseContextMenu(event: ReactMouseEvent, animationId: string) {
+  function openEaseContextMenu(
+    event: ReactMouseEvent,
+    animationId: string,
+    time: number,
+  ) {
     event.preventDefault();
     event.stopPropagation();
     setAppContextMenu?.({
@@ -2136,7 +1992,7 @@ function ComposeEaseLane({
       y: event.clientY,
       items: easePresets.map((preset) => ({
         label: preset.label,
-        action: () => onApplyEase(animationId, preset.value),
+        action: () => onApplyEase(animationId, time, preset.value),
       })),
     });
   }
@@ -2249,7 +2105,7 @@ function ComposeEaseLane({
       },
       onCommit: () => {
         setHandlePreview(null);
-        onApplyEase(seg.startAnimationId, newCp);
+        onApplyEase(seg.startAnimationId, seg.x0Time, newCp);
       },
       onCancel: () => {
         setHandlePreview(null);
@@ -2265,6 +2121,11 @@ function ComposeEaseLane({
       ref={laneRef}
       className="relative border-b border-[#1a2030] bg-[#0d1018]"
       style={{ height }}
+      onClick={(e) => {
+        if ((e.target as HTMLElement).closest("[data-timeline-control]"))
+          return;
+        setSelectedSegIndex(null);
+      }}
     >
       {/* Grid lines + bezier handle lines */}
       <svg
@@ -2427,7 +2288,7 @@ function ComposeEaseLane({
               strokeWidth="12"
               style={{ cursor: "pointer" }}
               onContextMenu={(e) =>
-                openEaseContextMenu(e, seg.startAnimationId)
+                openEaseContextMenu(e, seg.startAnimationId, seg.x0Time)
               }
             />
           );
@@ -2472,7 +2333,7 @@ function ComposeEaseLane({
               }}
               onPointerDown={(e) => startDotDrag(e, i, true)}
               onContextMenu={(e) =>
-                openEaseContextMenu(e, seg.startAnimationId)
+                openEaseContextMenu(e, seg.startAnimationId, seg.x0Time)
               }
             />
             {/* End dot */}
@@ -2488,7 +2349,7 @@ function ComposeEaseLane({
               }}
               onPointerDown={(e) => startDotDrag(e, i, false)}
               onContextMenu={(e) =>
-                openEaseContextMenu(e, seg.startAnimationId)
+                openEaseContextMenu(e, seg.startAnimationId, seg.x0Time)
               }
             />
             {/* Bezier handle buttons when selected */}

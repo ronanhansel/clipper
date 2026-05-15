@@ -18,9 +18,28 @@ import {
   deleteAssetFromProject,
   duplicateAssetInProject,
   importDroppedAssetsIntoProject,
+  findAssetByNameInProject,
   renameAssetInProject,
+  moveAssetInProject,
   sortAssetsInProject,
 } from "./assetProjectMutations";
+import {
+  addCompositionBinItemInProject,
+  addTimelineBinItemInProject,
+  createBinFolderInProject,
+  createInternalFileInProject,
+  deleteBinItemInProject,
+  deleteBinItemsInProject,
+  duplicateBinItemInProject,
+  duplicateBinItemsInProject,
+  findBinItem,
+  findBinItemByName,
+  importDroppedFilesToBin,
+  moveBinItemInProject,
+  normalizeProjectBin,
+  renameBinItemInProject,
+  updateInternalFileInProject,
+} from "./projectBinMutations";
 import {
   createCompositionFolderInProject,
   createCompositionInLibrary,
@@ -45,10 +64,6 @@ import {
   getDisplayNameFromPath,
   nextNumberedSemanticName,
 } from "../../../core/fileNames";
-import { CreateCommand } from "./operations/CreateCommand";
-import { DeleteCommand } from "./operations/DeleteCommand";
-import { RenameCommand } from "./operations/RenameCommand";
-import type { Command } from "./operations/Command";
 
 type UseFileManagerProjectActionsInput = {
   assets: AssetItem[];
@@ -80,8 +95,7 @@ type UseFileManagerProjectActionsInput = {
       coalesceHistory?: boolean;
     },
   ) => void;
-  watchedProjectDirectory: string;
-  executeFileManagerCommand: (command: Command) => Promise<void>;
+  projectDirectory: string;
   scheduleImplicitFileOperationSave: (
     projectOverride?: ProjectManifest,
     errorMessage?: string,
@@ -93,6 +107,7 @@ type UseFileManagerProjectActionsInput = {
 export function useFileManagerProjectActions({
   addCompositionFromLibrary,
   assets,
+  projectDirectory,
   clearNodeSelection,
   compositionLibrary,
   compositionSourcesRef,
@@ -108,8 +123,6 @@ export function useFileManagerProjectActions({
   updateTimelineMode,
   updateEditorState,
   updateProject,
-  watchedProjectDirectory,
-  executeFileManagerCommand,
   scheduleImplicitFileOperationSave,
 }: UseFileManagerProjectActionsInput) {
   function syncCompositionResult(result: {
@@ -191,7 +204,7 @@ export function useFileManagerProjectActions({
       ? compositionLibrary.find((item) => item.id === compositionId)
       : null;
     void clipperHost
-      .revealFile(composition?.filePath ?? watchedProjectDirectory)
+      .revealFile(composition?.filePath ?? projectDirectory)
       .catch(() => toast.error("Unable to reveal in Finder."));
   }
 
@@ -203,7 +216,7 @@ export function useFileManagerProjectActions({
 
   async function createComposition(folderPath?: string) {
     const safeFolderPath =
-      folderPath && folderPath !== watchedProjectDirectory ? folderPath : "";
+      folderPath && folderPath !== projectDirectory ? folderPath : "";
     const siblingNames = (compositionLibrary ?? [])
       .filter((composition) => {
         const dir = getDirectoryPath(composition.filePath);
@@ -215,7 +228,7 @@ export function useFileManagerProjectActions({
       );
     const fileName = nextNumberedSemanticName(
       "untitled",
-      ".composition.ts",
+      ".composition.json",
       siblingNames,
     );
     const filePath = safeFolderPath
@@ -232,7 +245,7 @@ export function useFileManagerProjectActions({
 
   async function createCompositionFolder(parentFolderPath?: string) {
     const safeParent =
-      parentFolderPath && parentFolderPath !== watchedProjectDirectory
+      parentFolderPath && parentFolderPath !== projectDirectory
         ? parentFolderPath
         : "";
     const { folderPath, project: nextProject } =
@@ -240,78 +253,9 @@ export function useFileManagerProjectActions({
     updateProject(nextProject);
   }
 
-  function createProjectFile(folderPath?: string) {
-    const safeFolderPath =
-      folderPath && folderPath !== watchedProjectDirectory ? folderPath : "";
-    const fileName = nextNumberedName(
-      "untitled.txt",
-      getProjectFileStateSiblingNames(
-        projectRef.current.editorState?.fileManagerState?.tree,
-        safeFolderPath,
-      ),
-    );
-    const filePath = safeFolderPath
-      ? `${safeFolderPath}/${fileName}`
-      : fileName;
-    void executeFileManagerCommand(
-      new CreateCommand(filePath, fileName, false, ""),
-    ).catch((error) => {
-      console.error(error);
-      toast.error("Unable to create file.");
-    });
-    updateFileManagerState(
-      insertProjectFileStateNode(
-        projectRef.current.editorState?.fileManagerState,
-        safeFolderPath,
-        filePath,
-      ),
-    );
-    return filePath;
-  }
-
-  function renameProjectFile(filePath: string, name: string) {
-    const nextName = name.trim();
-    if (!nextName || nextName === filePath.split("/").pop()) return;
-    const nextPath = getDirectoryPath(filePath)
-      ? `${getDirectoryPath(filePath)}/${nextName}`
-      : nextName;
-    void executeFileManagerCommand(new RenameCommand(filePath, nextName)).catch(
-      (error) => {
-        console.error(error);
-        toast.error("Unable to rename file.");
-      },
-    );
-    updateFileManagerState(
-      renameProjectFileStateNode(
-        projectRef.current.editorState?.fileManagerState,
-        filePath,
-        nextPath,
-      ),
-    );
-  }
-
-  function deleteProjectFile(filePath: string) {
-    const fileName = filePath.split("/").pop() || filePath;
-    void executeFileManagerCommand(
-      new DeleteCommand(
-        [{ path: filePath, name: fileName, isDirectory: false }],
-        watchedProjectDirectory,
-      ),
-    ).catch((error) => {
-      console.error(error);
-      toast.error("Unable to delete file.");
-    });
-    updateFileManagerState(
-      deleteProjectFileStateNode(
-        projectRef.current.editorState?.fileManagerState,
-        filePath,
-      ),
-    );
-  }
-
   function createTimeline(folderPath?: string) {
     const safeFolderPath =
-      folderPath && folderPath !== watchedProjectDirectory ? folderPath : "";
+      folderPath && folderPath !== projectDirectory ? folderPath : "";
     const existingNames = (project.timelines ?? []).map((t) =>
       getDisplayNameFromPath(t.filePath || t.id),
     );
@@ -321,13 +265,21 @@ export function useFileManagerProjectActions({
       ? `${safeFolderPath}/${fileName}`
       : fileName;
 
+    const beforeIds = new Set((project.timelines ?? []).map((t) => t.id));
     updateProject((current) => createTimelineInProject(current, filePath));
+
+    // Find the new timeline to get its stable ID
+    const created = (projectRef.current.timelines ?? []).find(
+      (t) => !beforeIds.has(t.id),
+    );
+    const timelineId = created?.id ?? filePath;
+
     updateTimelineMode("composition");
-    setSelectedSceneId(filePath);
+    setSelectedSceneId(timelineId);
     updateEditorState((state) => ({
       ...state,
-      selectedSceneId: filePath,
-      selectedTimelineId: filePath,
+      selectedSceneId: timelineId,
+      selectedTimelineId: timelineId,
       currentSceneTime: 0,
     }));
     clearNodeSelection();
@@ -350,38 +302,19 @@ export function useFileManagerProjectActions({
   function renameTimeline(timelineId: string, name: string) {
     const nextName = name.trim();
     if (!nextName) return;
-    const timeline = project.timelines?.find((t) => t.id === timelineId);
-    const directory = timeline?.filePath
-      ? timeline.filePath.slice(0, timeline.filePath.lastIndexOf("/") + 1)
-      : "";
-    const nextId = `${directory}${nextName}.timeline.json`;
-
     updateProject((current) =>
       renameTimelineInProject(current, timelineId, name),
     );
-    relinkOpenTimeline(timelineId, nextId);
   }
 
   function moveTimeline(timelineId: string, folderPath: string) {
-    const timeline = project.timelines?.find((t) => t.id === timelineId);
-    const fileName =
-      timeline?.filePath?.split("/").pop() || `${timelineId}.timeline.json`;
-    const nextId = folderPath ? `${folderPath}/${fileName}` : fileName;
-
     updateProject((current) =>
       moveTimelineInProject(current, timelineId, folderPath),
     );
-    relinkOpenTimeline(timelineId, nextId);
   }
 
-  function relinkOpenTimeline(oldId: string, nextId: string) {
-    if (oldId !== selectedSceneId) return;
-    setSelectedSceneId(nextId);
-    updateEditorState((state) => ({
-      ...state,
-      selectedSceneId: nextId,
-      selectedTimelineId: nextId,
-    }));
+  function relinkOpenTimeline(_oldId: string, _nextId: string) {
+    // Timeline IDs are now stable; renames/moves only change filePath.
   }
 
   function deleteTimeline(timelineId: string) {
@@ -481,20 +414,18 @@ export function useFileManagerProjectActions({
   async function findCompositionMedia(compositionId: string, fileName: string) {
     const targetName = fileName.trim();
     if (!targetName) return;
-    const searchRoots = Array.from(
-      new Set([
-        `${watchedProjectDirectory}/file-manager`,
-        watchedProjectDirectory,
-        `${watchedProjectDirectory}/compositions`,
-      ]),
-    );
-    let matchedPath: string | null = null;
-    for (const root of searchRoots) {
+
+    // First try to find in project assets registry (proxies)
+    const asset = findAssetByNameInProject(projectRef.current, targetName);
+    let matchedPath: string | null = asset?.path ?? null;
+
+    if (!matchedPath) {
+      // Fallback to disk scan in project directory
       matchedPath = await clipperHost
-        .findProjectFileByName(root, targetName)
+        .findProjectFileByName(projectDirectory, targetName)
         .catch(() => null);
-      if (matchedPath) break;
     }
+
     if (!matchedPath) {
       toast.error(`Could not find ${targetName}.`);
       return;
@@ -536,25 +467,138 @@ export function useFileManagerProjectActions({
     updateProject((current) => deleteAssetFromProject(current, assetId));
   }
 
+  function moveAsset(
+    sourceId: string,
+    targetId: string,
+    action: "before" | "after" | "inside",
+  ) {
+    updateProject((current) =>
+      moveAssetInProject(current, sourceId, { targetId, action }),
+    );
+  }
+
   function sortAssets(parentFolderId: string | null, mode: AssetSortMode) {
     updateProject((current) =>
       sortAssetsInProject(current, parentFolderId, mode),
     );
   }
 
+  function createBinFolder(parentFolderId?: string) {
+    updateProject((current) =>
+      createBinFolderInProject(current, parentFolderId),
+    );
+  }
+
+  function createBinFile(parentFolderId?: string) {
+    updateProject((current) =>
+      createInternalFileInProject(current, parentFolderId),
+    );
+  }
+
+  async function createBinComposition(parentFolderId?: string) {
+    const beforeIds = new Set(
+      (projectRef.current.compositionLibrary ?? []).map((item) => item.id),
+    );
+    await createComposition();
+    const created = (projectRef.current.compositionLibrary ?? []).find(
+      (item) => !beforeIds.has(item.id),
+    );
+    if (created)
+      updateProject((current) =>
+        addCompositionBinItemInProject(current, created, parentFolderId),
+      );
+  }
+
+  function createBinTimeline(parentFolderId?: string) {
+    const beforeIds = new Set(
+      (projectRef.current.timelines ?? []).map((item) => item.id),
+    );
+    createTimeline();
+    const created = (projectRef.current.timelines ?? []).find(
+      (item) => !beforeIds.has(item.id),
+    );
+    if (created)
+      updateProject((current) =>
+        addTimelineBinItemInProject(current, created, parentFolderId),
+      );
+  }
+
+  function dropBinFiles(files: FileList, parentFolderId?: string) {
+    updateProject((current) =>
+      importDroppedFilesToBin(current, files, parentFolderId),
+    );
+  }
+
+  function renameBinItem(itemId: string, name: string) {
+    updateProject((current) => renameBinItemInProject(current, itemId, name));
+  }
+
+  function moveBinItem(
+    sourceId: string,
+    targetId: string,
+    action: "before" | "after" | "inside",
+  ) {
+    updateProject((current) =>
+      moveBinItemInProject(current, sourceId, { targetId, action }),
+    );
+  }
+
+  function deleteBinItem(itemId: string) {
+    updateProject((current) => deleteBinItemInProject(current, itemId));
+  }
+
+  function deleteBinItems(itemIds: string[]) {
+    updateProject((current) => deleteBinItemsInProject(current, itemIds));
+  }
+
+  function duplicateBinItem(itemId: string) {
+    updateProject((current) => duplicateBinItemInProject(current, itemId));
+  }
+
+  function duplicateBinItems(itemIds: string[]) {
+    updateProject((current) => duplicateBinItemsInProject(current, itemIds));
+  }
+
+  function revealBinItem(itemId: string) {
+    const item = findBinItem(normalizeProjectBin(projectRef.current), itemId);
+    if (item?.kind === "external-proxy")
+      void clipperHost.revealAbsolutePath(item.path);
+    else toast.error("Only external proxies can be revealed in Finder.");
+  }
+
+  function updateInternalFileSource(itemId: string, source: string) {
+    updateProject(
+      (current) => updateInternalFileInProject(current, itemId, source),
+      { history: false },
+    );
+  }
+
   return {
     addComposition: addCompositionFromLibrary,
+    createBinComposition,
+    createBinFile,
+    createBinFolder,
+    createBinTimeline,
+    deleteBinItem,
+    deleteBinItems,
+    dropBinFiles,
+    duplicateBinItem,
+    duplicateBinItems,
+    findBinItemByName: (name: string) =>
+      findBinItemByName(normalizeProjectBin(projectRef.current), name),
+    moveBinItem,
+    renameBinItem,
+    revealBinItem,
+    updateInternalFileSource,
     copyAsset: copyAssetPath,
     copyCompositionPath,
     createComposition,
     createCompositionFolder,
-    createProjectFile,
     createFolder: createAssetFolder,
     createTimeline,
     deleteAsset,
     deleteComposition: deleteCompositionFile,
     deleteCompositionFolder,
-    deleteProjectFile,
     deleteTimeline,
     dropFiles: importDroppedAssets,
     duplicateAsset,
@@ -563,13 +607,13 @@ export function useFileManagerProjectActions({
     findCompositionMedia,
     openCompositionFile: () => undefined,
     openProjectFile: () => undefined,
+    moveAsset,
     moveComposition,
     moveTimeline,
     renameAsset,
     renameComposition,
     renameCompositionFolder,
     updateCompositionFilePaths,
-    renameProjectFile,
     renameTimeline,
     revealAssetRoot,
     revealComposition,

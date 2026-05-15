@@ -28,7 +28,8 @@ export type FrameObjectType =
   | "svg"
   | "html"
   | "template"
-  | "null";
+  | "null"
+  | "custom-renderer";
 
 export type MotionEase =
   | "linear"
@@ -94,6 +95,31 @@ export type AnimationTrack = {
   points: KeyframePoint[];
 };
 
+export type PropertyTrackValueType =
+  | "number"
+  | "length"
+  | "color"
+  | "boolean"
+  | "string"
+  | "discrete"
+  | "custom";
+
+export type PropertyKeyframePoint = {
+  id?: string;
+  time: number;
+  value: JsonValue;
+  easingToNext?:
+    | MotionEase
+    | string
+    | readonly [number, number, number, number];
+  hold?: boolean;
+};
+
+export type PropertyTrack = {
+  valueType: PropertyTrackValueType;
+  points: PropertyKeyframePoint[];
+};
+
 export type AnimationPlaybackOptions = {
   delay?: number;
   duration: number;
@@ -143,11 +169,19 @@ export type FrameObject = {
   template?: FrameTemplate;
   richText?: RichTextSegment[];
   style: Record<string, string | number>;
+  transform?: Record<string, JsonValue> | string;
+  filter?: Record<string, JsonValue>;
   layoutId?: string;
   parentId?: string;
   hidden?: boolean;
   locked?: boolean;
   animations?: LayerAnimation[];
+  tracks?: Record<string, PropertyTrack>;
+  props?: Record<string, JsonValue>;
+  source?: {
+    kind: "file";
+    path: string;
+  };
 };
 
 export type PartFrame = {
@@ -409,7 +443,6 @@ export type CompositionClip = TimelineMarkerMetadata & {
   id: string;
   compositionId?: string;
   filePath: string;
-  sourceHash?: string;
   source?: string;
   prerender?: boolean;
   sourceMissing?: boolean;
@@ -603,6 +636,39 @@ export type FileManagerState = {
   openState?: Record<string, boolean>;
 };
 
+export type ProjectBinItem =
+  | {
+      id: string;
+      kind: "folder";
+      name: string;
+      children?: ProjectBinItem[];
+    }
+  | {
+      id: string;
+      kind: "internal-file";
+      name: string;
+      language: string;
+      source: string;
+    }
+  | {
+      id: string;
+      kind: "composition";
+      name: string;
+      compositionId: string;
+    }
+  | {
+      id: string;
+      kind: "timeline";
+      name: string;
+      timelineId: string;
+    }
+  | {
+      id: string;
+      kind: "external-proxy";
+      name: string;
+      path: string;
+    };
+
 export type ProjectManifest = {
   id: string;
   name: string;
@@ -620,6 +686,7 @@ export type ProjectManifest = {
   compositionSources?: Record<string, string>;
   assetsPath: string;
   assets?: AssetItem[];
+  bin?: ProjectBinItem[];
   editorState?: EditorState;
 };
 

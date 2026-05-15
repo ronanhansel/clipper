@@ -18,12 +18,10 @@ import type {
   AdjustmentLayerSelection,
   CompositionSelection,
   ContextMenuState,
-  ExportDialogTab,
   LeftPanelTab,
   Mode,
   MotionMarkerSelection,
   PlaybackClock,
-  ProjectExportFormat,
   RightPanelTab,
   SettingsSection,
   VideoExportProgress,
@@ -99,9 +97,6 @@ export type EditorStoreState = {
   renamingProject: boolean;
   projectNameDraft: string;
   exportDialogOpen: boolean;
-  exportDialogTab: ExportDialogTab;
-  projectExportFormat: ProjectExportFormat;
-  exportIncludeSources: boolean;
   isExporting: boolean;
   exportProgress: string | null;
   videoExportProgress: VideoExportProgress | null;
@@ -193,9 +188,6 @@ export type EditorStoreActions = {
   setRenamingProject: (renaming: Setter<boolean>) => void;
   setProjectNameDraft: (draft: Setter<string>) => void;
   setExportDialogOpen: (open: Setter<boolean>) => void;
-  setExportDialogTab: (tab: Setter<ExportDialogTab>) => void;
-  setProjectExportFormat: (format: Setter<ProjectExportFormat>) => void;
-  setExportIncludeSources: (include: Setter<boolean>) => void;
   setIsExporting: (exporting: Setter<boolean>) => void;
   setExportProgress: (progress: Setter<string | null>) => void;
   setVideoExportProgress: (
@@ -304,9 +296,6 @@ function getInitialState(project: ProjectManifest): EditorStoreState {
     renamingProject: false,
     projectNameDraft: project.name,
     exportDialogOpen: false,
-    exportDialogTab: "media",
-    projectExportFormat: "project-package",
-    exportIncludeSources: true,
     isExporting: false,
     exportProgress: null,
     videoExportProgress: null,
@@ -391,9 +380,6 @@ export function createEditorStore(project: ProjectManifest) {
     setRenamingProject: createFieldSetter(set, "renamingProject"),
     setProjectNameDraft: createFieldSetter(set, "projectNameDraft"),
     setExportDialogOpen: createFieldSetter(set, "exportDialogOpen"),
-    setExportDialogTab: createFieldSetter(set, "exportDialogTab"),
-    setProjectExportFormat: createFieldSetter(set, "projectExportFormat"),
-    setExportIncludeSources: createFieldSetter(set, "exportIncludeSources"),
     setIsExporting: createFieldSetter(set, "isExporting"),
     setExportProgress: createFieldSetter(set, "exportProgress"),
     setVideoExportProgress: createFieldSetter(set, "videoExportProgress"),
@@ -740,12 +726,6 @@ export function useAppEditorState() {
       setProjectNameDraft: state.setProjectNameDraft,
       exportDialogOpen: state.exportDialogOpen,
       setExportDialogOpen: state.setExportDialogOpen,
-      exportDialogTab: state.exportDialogTab,
-      setExportDialogTab: state.setExportDialogTab,
-      projectExportFormat: state.projectExportFormat,
-      setProjectExportFormat: state.setProjectExportFormat,
-      exportIncludeSources: state.exportIncludeSources,
-      setExportIncludeSources: state.setExportIncludeSources,
       isExporting: state.isExporting,
       setIsExporting: state.setIsExporting,
       exportProgress: state.exportProgress,

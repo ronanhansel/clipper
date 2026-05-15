@@ -1,14 +1,7 @@
 import {
-  defaultAssets,
   getSceneFromProject,
   serializeProjectForSave,
 } from "../../core/project";
-import {
-  buildLinearTimeline,
-  getRenderableScene,
-  sceneDuration,
-  validateScene,
-} from "../../core/timeline";
 import {
   FRAME_HEIGHT,
   FRAME_WIDTH,
@@ -21,26 +14,16 @@ import type {
   ExportWorkerResolutionMapping,
   MediaExportFormat,
   MediaExportRenderMode,
-  ProjectExportFormat,
   StableSlowGridPreset,
   StableSlowValidationSamples,
 } from "../types";
 import { videoExportFrameRate } from "../config";
 import { clipperHost } from "../clipperHost";
-import { fileDownloadService } from "./fileDownloadService";
 import { getDisplayNameFromPath } from "../../core/fileNames";
 import {
   deriveFramePreviewRenderModel,
   getFramePreviewTimelineLayers,
 } from "../state/framePreviewRenderModel";
-
-type ExportProjectInput = {
-  project: ProjectManifest;
-  sceneId: string;
-  format: ProjectExportFormat;
-  includeSources: boolean;
-  compositionSources: Record<string, string>;
-};
 
 type PrepareRenderedMediaInput = {
   project: ProjectManifest;
@@ -82,72 +65,6 @@ export function getMediaExportFileExtension(format: MediaExportFormat): string {
 }
 
 class ExportService {
-  async exportProject({
-    project,
-    sceneId,
-    format,
-    includeSources,
-    compositionSources,
-  }: ExportProjectInput) {
-    const exportProject = serializeProjectForSave(project);
-    const scene = getRenderableScene(
-      getScene(exportProject, sceneId),
-      exportProject.editorState?.timelineLayers,
-    );
-    const timeline = buildLinearTimeline(scene);
-    const payload =
-      format === "scene-json"
-        ? scene
-        : {
-            kind: "clipper-project-package",
-            version: project.id,
-            exportedAt: new Date().toISOString(),
-            project: exportProject,
-            scene,
-            media: {
-              resolution: project.resolution,
-              durationSeconds: sceneDuration(scene),
-              compositions: timeline.map((item) => ({
-                id: item.id,
-                name: getDisplayNameFromPath(item.filePath),
-                filePath: item.filePath,
-                start: item.start,
-                end: item.end,
-                duration: item.duration,
-              })),
-              assetsPath: project.assetsPath,
-              assets: project.assets ?? defaultAssets,
-            },
-            validation: validateScene(scene),
-            sources: includeSources
-              ? Object.fromEntries(
-                  scene.compositions.flatMap((item) =>
-                    item.sourceMissing
-                      ? []
-                      : [
-                          [
-                            item.filePath,
-                            getCompositionSource(item, compositionSources),
-                          ],
-                        ],
-                  ),
-                )
-              : undefined,
-          };
-    const content = `${JSON.stringify(payload, null, 2)}\n`;
-    const sceneName = getDisplayNameFromPath(scene.id);
-    const defaultFileName = `${slugifyFileName(project.name)}-${slugifyFileName(sceneName)}.${format === "scene-json" ? "scene" : "project"}.json`;
-    const exportPath = await clipperHost.exportMediaFile(
-      defaultFileName,
-      content,
-    );
-
-    if (exportPath) return { kind: "host" as const, path: exportPath };
-
-    fileDownloadService.downloadTextFile(defaultFileName, content);
-    return { kind: "download" as const, fileName: defaultFileName };
-  }
-
   prepareRenderedMediaExport({
     project,
     sceneId,
@@ -233,16 +150,6 @@ function getScene(project: ProjectManifest, sceneId: string) {
 
 function getRenderedMediaScene(project: ProjectManifest, sceneId: string) {
   return getSceneFromProject(project, sceneId) ?? getScene(project, sceneId);
-}
-
-function getCompositionSource(
-  composition: CompositionClip,
-  compositionSources: Record<string, string>,
-) {
-  const source = compositionSources[composition.filePath];
-  if (source === undefined)
-    throw new Error(`Composition ${composition.filePath} is missing source.`);
-  return source;
 }
 
 function getRenderedMediaSceneDuration(

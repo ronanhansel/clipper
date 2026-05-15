@@ -676,7 +676,7 @@ function LayerIcon({ node }: { node: ComposeLayerNode }) {
   if (objectType === "html") return <Code2 className={className} />;
   if (objectType === "template")
     return <TemplateLayerIcon className={className} />;
-  if (objectType === "chart")
+  if (objectType === "custom-renderer")
     return <ChartNoAxesColumn className={className} />;
   if (node.kind === "root") return <Layers className={className} />;
   if (node.kind === "frame") return <Frame className={className} />;

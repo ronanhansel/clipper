@@ -196,10 +196,6 @@ interface Window {
     setWindowFullscreen: (fullscreen: boolean) => Promise<boolean>;
     toggleWindowFullscreen: () => Promise<boolean>;
     watchTextFiles: (relativePaths: string[]) => Promise<void>;
-    watchProjectFiles: (watchPaths: {
-      files: string[];
-      directories: string[];
-    }) => Promise<void>;
     onVideoExportProgress: (
       callback: (
         exportId: string,
@@ -213,9 +209,6 @@ interface Window {
       ) => void,
     ) => () => void;
     onTextFileChanged: (callback: (relativePath: string) => void) => () => void;
-    onProjectFileChanged: (
-      callback: (relativePath: string) => void,
-    ) => () => void;
     onModeShortcut: (
       callback: (key: "1" | "2" | "3" | "4") => void,
     ) => () => void;

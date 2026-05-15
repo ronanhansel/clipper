@@ -6,19 +6,17 @@ import type {
   ExportWorkerResolutionMapping,
   MediaExportFormat,
   MediaExportRenderMode,
-  ProjectExportFormat,
   StableSlowGridPreset,
   StableSlowValidationSamples,
   VideoExportProgress,
 } from "../../types";
 import type { ProjectManifest } from "../../../core/types";
+import { subscribeHostShortcut } from "../shortcuts/useGlobalEditorShortcuts";
 
 type UseExportCommandsInput = {
   projectRef: MutableRefObject<ProjectManifest>;
   manifestPath: string;
   selectedSceneId: string;
-  projectExportFormat: ProjectExportFormat;
-  exportIncludeSources: boolean;
   exportFrameRate: number;
   exportRenderQuality: ExportRenderQuality;
   exportResolution: { width: number; height: number };
@@ -30,15 +28,12 @@ type UseExportCommandsInput = {
   mediaExportFormat: MediaExportFormat;
   reusePrerenderCacheForExport: boolean;
   videoExportTileHeight: number;
-  compositionSources: Record<string, string>;
   saveAllChanges: () => Promise<void>;
   setExportDialogOpen: (open: boolean) => void;
   setExportProgress: (progress: string | null) => void;
   setIsExporting: (exporting: boolean) => void;
   setVideoExportCancelling: (cancelling: boolean) => void;
   setVideoExportProgress: (progress: VideoExportProgress | null) => void;
-  notifyProjectExported: (path: string) => void;
-  notifyProjectDownloaded: () => void;
   notifyRenderedMedia: (path: string) => void;
   notifyError: (message: string) => void;
 };
@@ -47,8 +42,6 @@ export function useExportCommands({
   projectRef,
   manifestPath,
   selectedSceneId,
-  projectExportFormat,
-  exportIncludeSources,
   exportFrameRate,
   exportRenderQuality,
   exportResolution,
@@ -60,52 +53,26 @@ export function useExportCommands({
   mediaExportFormat,
   reusePrerenderCacheForExport,
   videoExportTileHeight,
-  compositionSources,
   saveAllChanges,
   setExportDialogOpen,
   setExportProgress,
   setIsExporting,
   setVideoExportCancelling,
   setVideoExportProgress,
-  notifyProjectExported,
-  notifyProjectDownloaded,
   notifyRenderedMedia,
   notifyError,
 }: UseExportCommandsInput) {
   const videoExportIdRef = useRef<string | null>(null);
 
   useEffect(() => {
-    return window.clipper?.onVideoExportProgress?.((exportId, progress) => {
-      if (videoExportIdRef.current !== exportId) return;
-      setVideoExportProgress(progress);
-    });
+    return subscribeHostShortcut(
+      window.clipper?.onVideoExportProgress,
+      (exportId: string, progress: VideoExportProgress) => {
+        if (videoExportIdRef.current !== exportId) return;
+        setVideoExportProgress(progress);
+      },
+    );
   }, [setVideoExportProgress]);
-
-  async function exportProject() {
-    setIsExporting(true);
-
-    try {
-      await saveAllChanges();
-      const result = await exportService.exportProject({
-        project: projectRef.current,
-        sceneId: selectedSceneId,
-        format: projectExportFormat,
-        includeSources: exportIncludeSources,
-        compositionSources,
-      });
-
-      if (result.kind === "host") notifyProjectExported(result.path);
-      else notifyProjectDownloaded();
-
-      setExportDialogOpen(false);
-    } catch (error) {
-      notifyError(
-        error instanceof Error ? error.message : "Unable to export project.",
-      );
-    } finally {
-      setIsExporting(false);
-    }
-  }
 
   async function exportRenderedMedia() {
     setIsExporting(true);
@@ -177,5 +144,5 @@ export function useExportCommands({
     await exportService.cancelVideoExport(exportId);
   }
 
-  return { exportProject, exportRenderedMedia, stopVideoExport };
+  return { exportRenderedMedia, stopVideoExport };
 }

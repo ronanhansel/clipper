@@ -10,14 +10,12 @@ import type {
   AgentProvider,
   AppUpdateStatus,
   ContextMenuState,
-  ExportDialogTab,
   ExportRenderQuality,
   ExportTileResolutionMapping,
   ExportWorkerConfigurationMode,
   ExportWorkerResolutionMapping,
   MediaExportFormat,
   MediaExportRenderMode,
-  ProjectExportFormat,
   SettingsSection,
   StableSlowGridPreset,
   StableSlowValidationSamples,
@@ -31,9 +29,7 @@ type AppDialogsProps = {
   debugSettingsEnabled: boolean;
   defaultNewMarkerDurationSeconds: number;
   exportDialogOpen: boolean;
-  exportDialogTab: ExportDialogTab;
   exportFrameRate: number;
-  exportIncludeSources: boolean;
   exportProgress: string | null;
   exportRenderQuality: ExportRenderQuality;
   exportResolution: { width: number; height: number };
@@ -54,7 +50,6 @@ type AppDialogsProps = {
   prerenderCacheBlackMissDebug: boolean;
   prerenderBlockDurationMs: number;
   previewRenderHeight: number;
-  projectExportFormat: ProjectExportFormat;
   projectName: string;
   resolution: ProjectManifest["resolution"];
   reusePrerenderCacheForExport: boolean;
@@ -77,9 +72,7 @@ type AppDialogsProps = {
   onDebugSettingsEnabledChange: (enabled: boolean) => void;
   onDefaultNewMarkerDurationSecondsChange: (value: number) => void;
   onExportDialogOpenChange: (open: boolean) => void;
-  onExportDialogTabChange: (tab: ExportDialogTab) => void;
   onExportFrameRateChange: (fps: number) => void;
-  onExportIncludeSourcesChange: (includeSources: boolean) => void;
   onExportRenderQualityChange: (quality: ExportRenderQuality) => void;
   onExportResolutionChange: (res: { width: number; height: number }) => void;
   onExportTileMappingChange: (mapping: ExportTileResolutionMapping) => void;
@@ -96,14 +89,12 @@ type AppDialogsProps = {
   ) => void;
   onLiveDomPostProcessPreviewEnabledChange: (enabled: boolean) => void;
   onLiveDomPostProcessMaxFpsChange: (value: number) => void;
-  onProjectExport: () => void;
   onPausePlaybackOnScrubChange: (enabled: boolean) => void;
   onPrerenderCacheEnabledChange: (enabled: boolean) => void;
   onPrerenderCacheBlackMissDebugChange: (enabled: boolean) => void;
   onPrerenderBlockDurationMsChange: (value: number) => void;
   onPreviewRenderHeightChange: (value: number) => void;
   onClearAllPrerenderCaches: () => void;
-  onProjectExportFormatChange: (format: ProjectExportFormat) => void;
   onReusePrerenderCacheForExportChange: (reuse: boolean) => void;
   onScrubCommitThrottleMsChange: (value: number) => void;
   onSettingsOpenChange: (open: boolean) => void;
@@ -122,9 +113,7 @@ export function AppDialogs({
   debugSettingsEnabled,
   defaultNewMarkerDurationSeconds,
   exportDialogOpen,
-  exportDialogTab,
   exportFrameRate,
-  exportIncludeSources,
   exportProgress,
   exportRenderQuality,
   exportResolution,
@@ -145,7 +134,6 @@ export function AppDialogs({
   prerenderCacheBlackMissDebug,
   prerenderBlockDurationMs,
   previewRenderHeight,
-  projectExportFormat,
   projectName,
   resolution,
   sceneDurationSeconds,
@@ -167,9 +155,7 @@ export function AppDialogs({
   onDebugSettingsEnabledChange,
   onDefaultNewMarkerDurationSecondsChange,
   onExportDialogOpenChange,
-  onExportDialogTabChange,
   onExportFrameRateChange,
-  onExportIncludeSourcesChange,
   onExportRenderQualityChange,
   onExportResolutionChange,
   onExportTileMappingChange,
@@ -182,14 +168,12 @@ export function AppDialogs({
   onStableSlowValidationSamplesChange,
   onLiveDomPostProcessPreviewEnabledChange,
   onLiveDomPostProcessMaxFpsChange,
-  onProjectExport,
   onPausePlaybackOnScrubChange,
   onPrerenderCacheEnabledChange,
   onPrerenderCacheBlackMissDebugChange,
   onPrerenderBlockDurationMsChange,
   onPreviewRenderHeightChange,
   onClearAllPrerenderCaches,
-  onProjectExportFormatChange,
   onScrubCommitThrottleMsChange,
   onSettingsOpenChange,
   onSettingsSectionChange,
@@ -202,33 +186,20 @@ export function AppDialogs({
   return (
     <>
       <ExportMediaDialog
-        activeTab={exportDialogTab}
-        durationSeconds={sceneDurationSeconds}
-        exportFrameRate={exportFrameRate}
-        exportRenderQuality={exportRenderQuality}
-        exportResolution={exportResolution}
-        includeSources={exportIncludeSources}
-        mediaExportFormat={mediaExportFormat}
-        mediaExportRenderMode={mediaExportRenderMode}
         open={exportDialogOpen}
-        partCount={partCount}
-        progress={exportProgress}
-        projectFormat={projectExportFormat}
-        projectName={projectName}
-        resolution={resolution}
-        sceneName={sceneName}
-        exporting={isExporting}
-        onExportFrameRateChange={onExportFrameRateChange}
-        onExportRenderQualityChange={onExportRenderQualityChange}
-        onExportResolutionChange={onExportResolutionChange}
-        onMediaExportFormatChange={onMediaExportFormatChange}
-        onMediaExportRenderModeChange={onMediaExportRenderModeChange}
-        onProjectExport={onProjectExport}
-        onMediaExport={onMediaExport}
-        onProjectFormatChange={onProjectExportFormatChange}
-        onIncludeSourcesChange={onExportIncludeSourcesChange}
         onOpenChange={onExportDialogOpenChange}
-        onTabChange={onExportDialogTabChange}
+        project={{ resolution }}
+        sceneName={sceneName}
+        frameRate={exportFrameRate}
+        renderQuality={exportRenderQuality}
+        onRenderQualityChange={onExportRenderQualityChange}
+        resolution={exportResolution}
+        onResolutionChange={onExportResolutionChange}
+        mediaFormat={mediaExportFormat}
+        onMediaFormatChange={onMediaExportFormatChange}
+        mediaRenderMode={mediaExportRenderMode}
+        onMediaRenderModeChange={onMediaExportRenderModeChange}
+        onExport={onMediaExport}
       />
       <SettingsDialog
         activeSection={settingsSection}
@@ -294,7 +265,7 @@ export function AppDialogs({
       />
       {videoExportProgress ? (
         <VideoExportOverlay
-          cancelling={videoExportCancelling}
+          isCancelling={videoExportCancelling}
           progress={videoExportProgress}
           onCancel={onVideoExportCancel}
         />

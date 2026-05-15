@@ -867,7 +867,7 @@ function PrerenderVideoPreview({
           passes: webGlPostProcessPasses.map((pass) =>
             withPostProcessFrameBackground(
               pass,
-              framePreviewProps.part.frame.style.background,
+              framePreviewProps.part.frame.style.backgroundColor,
             ),
           ),
           width: block.width,
@@ -1241,7 +1241,7 @@ function LivePostProcessFramePreview({
         passes: livePasses.map((pass) =>
           withPostProcessFrameBackground(
             pass,
-            framePreviewProps.part.frame.style.background,
+            framePreviewProps.part.frame.style.backgroundColor,
           ),
         ),
         width: FRAME_WIDTH,
@@ -1505,7 +1505,7 @@ function LivePostProcessFramePreview({
       >
         <FramePreview {...framePreviewProps} />
       </div>
-      {outputRequiresLiveSource ? (
+      {livePostProcessEnabled ? (
         <canvas
           aria-hidden="true"
           ref={sourceCanvasRef}
@@ -1530,7 +1530,7 @@ function LivePostProcessFramePreview({
           </div>
         </canvas>
       ) : null}
-      {outputRequiresLiveSource || showLiveCanvas ? (
+      {livePostProcessEnabled || showLiveCanvas ? (
         <canvas
           aria-hidden="true"
           ref={renderCanvasRef}

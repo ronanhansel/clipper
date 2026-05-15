@@ -18,12 +18,12 @@ vi.mock("../clipperHost", () => ({
 const frame = {
   width: FRAME_WIDTH,
   height: FRAME_HEIGHT,
-  style: { background: "#000000" },
+  style: { backgroundColor: "#000000" },
 } as const;
 const background = {
   id: "background",
   name: "Background",
-  style: { background: "#000000" },
+  style: { backgroundColor: "#000000" },
   elements: [],
 };
 
@@ -96,7 +96,7 @@ describe("export service", () => {
       "export-id",
       prepared.defaultFileName,
       project,
-      "clipper/projects/export/project.json",
+      "clipper/projects/export/export.clpr",
       prepared.scene,
       prepared.durationSeconds,
       270,
@@ -112,7 +112,7 @@ describe("export service", () => {
       "export-id",
       "export-project-scene.mp4",
       expect.any(Object),
-      "clipper/projects/export/project.json",
+      "clipper/projects/export/export.clpr",
       expect.objectContaining({
         compositions: expect.arrayContaining([
           expect.objectContaining({ id: "hidden-clip" }),
@@ -237,7 +237,7 @@ describe("export service", () => {
       "export-id",
       prepared.defaultFileName,
       project,
-      "clipper/projects/export/project.json",
+      "clipper/projects/export/export.clpr",
       prepared.scene,
       prepared.durationSeconds,
       270,
@@ -250,7 +250,7 @@ describe("export service", () => {
       "export-id",
       expect.stringMatching(/\.webm$/),
       expect.any(Object),
-      "clipper/projects/export/project.json",
+      "clipper/projects/export/export.clpr",
       expect.any(Object),
       30,
       expect.any(Number),

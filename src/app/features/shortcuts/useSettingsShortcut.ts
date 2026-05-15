@@ -21,9 +21,10 @@ export function useSettingsShortcut({
     }
 
     window.addEventListener("keydown", openSettingsShortcut);
-    const unsubscribeSettingsShortcut = window.clipper?.onSettingsShortcut?.(
-      () => setSettingsOpen(true),
-    );
+    const unsubscribeSettingsShortcut =
+      typeof window.clipper?.onSettingsShortcut === "function"
+        ? window.clipper.onSettingsShortcut(() => setSettingsOpen(true))
+        : undefined;
     return () => {
       window.removeEventListener("keydown", openSettingsShortcut);
       unsubscribeSettingsShortcut?.();

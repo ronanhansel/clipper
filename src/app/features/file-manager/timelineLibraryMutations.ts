@@ -1,5 +1,6 @@
 import type { ProjectManifest } from "../../../core/types";
 import { createDefaultTimelineLayerState } from "../../../core/project";
+import { createStableTimelineId } from "../../../core/compositionIds";
 import { reorderByIntent } from "./fileManagerPaths";
 
 export function createTimelineInProject(
@@ -11,7 +12,7 @@ export function createTimelineInProject(
     timelines: [
       ...(project.timelines ?? []),
       {
-        id: filePath,
+        id: createStableTimelineId(),
         filePath,
         clips: [],
         adjustmentLayers: [],
@@ -39,7 +40,7 @@ export function renameTimelineInProject(
         ? timeline.filePath.slice(0, timeline.filePath.lastIndexOf("/") + 1)
         : "";
       const filePath = `${directory}${fileName}`;
-      return { ...timeline, id: filePath, filePath };
+      return { ...timeline, filePath };
     }),
   };
 }
@@ -85,7 +86,7 @@ export function moveTimelineInProject(
       ? Array.from(new Set([...(project.compositionFolders ?? []), folderPath]))
       : project.compositionFolders,
     timelines: (project.timelines ?? []).map((t) =>
-      t.id === timelineId ? { ...t, id: nextPath, filePath: nextPath } : t,
+      t.id === timelineId ? { ...t, filePath: nextPath } : t,
     ),
   };
 }

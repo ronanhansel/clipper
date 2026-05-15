@@ -9,12 +9,12 @@ import {
 const frame = {
   width: 1920,
   height: 1080,
-  style: { background: "#000000" },
+  style: { backgroundColor: "#000000" },
 } as const;
 const background = {
   id: "background",
   name: "Background",
-  style: { background: "#000000" },
+  style: { backgroundColor: "#000000" },
   elements: [],
 };
 const blankPart: CompositionClip = {

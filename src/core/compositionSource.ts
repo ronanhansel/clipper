@@ -1,5 +1,10 @@
 import * as compositionApi from "./compositionApi";
 import {
+  compositionToJsonSource,
+  jsonCompositionToPart,
+  parseCompositionJsonSource,
+} from "./compositionJson";
+import {
   FRAME_HEIGHT,
   FRAME_WIDTH,
   type BackgroundLayer,
@@ -85,6 +90,39 @@ export async function compositionFromSource(
   source: string,
   readFile?: (relativePath: string) => Promise<string>,
 ): Promise<Part> {
+  if (isJsonCompositionPath(baseComposition.filePath)) {
+    const result = parseCompositionJsonSource(source);
+    if (!result.ok) {
+      throw new Error(
+        result.errors
+          .map((error) => `${error.path}: ${error.message}`)
+          .join("\n"),
+      );
+    }
+    const part = {
+      ...jsonCompositionToPart(result.composition, baseComposition),
+      sourceMissing: undefined,
+    };
+    if (!readFile) return part;
+    const [objects, backgroundElements] = await Promise.all([
+      Promise.all(
+        part.objects.map((object) =>
+          resolveCustomRendererObject(object, readFile),
+        ),
+      ),
+      Promise.all(
+        part.background.elements.map((object) =>
+          resolveCustomRendererObject(object, readFile),
+        ),
+      ),
+    ]);
+    return {
+      ...part,
+      objects,
+      background: { ...part.background, elements: backgroundElements },
+    };
+  }
+
   const sourceComposition = await evaluateCompositionSource(
     source,
     0,
@@ -106,13 +144,48 @@ export async function compositionFromSource(
   };
 }
 
+async function resolveCustomRendererObject(
+  object: FrameObject,
+  readFile: (relativePath: string) => Promise<string>,
+) {
+  if (object.type !== "custom-renderer" || object.source?.kind !== "file")
+    return object;
+  try {
+    const content = await readFile(object.source.path);
+    return { ...object, content };
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Unable to load custom renderer source.";
+    return {
+      ...object,
+      content: `<pre style="margin:0;white-space:pre-wrap;">${escapeHtml(message)}</pre>`,
+      style: {
+        ...object.style,
+        color: "#ff6b7a",
+        backgroundColor: "rgba(80,0,18,0.78)",
+        padding: 16,
+      },
+    };
+  }
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 function sourceFrameToCompositionFrame(
   frame: SourceComposition["frame"],
 ): PartFrame {
   return {
     width: FRAME_WIDTH,
     height: FRAME_HEIGHT,
-    style: frame.style ?? { background: "#050505" },
+    style: frame.style ?? { backgroundColor: "#050505" },
   };
 }
 
@@ -122,7 +195,7 @@ function sourceBackgroundToLayer(
   return {
     id: background?.id ?? "background",
     name: background?.name ?? "Background",
-    style: background?.style ?? { background: "transparent" },
+    style: background?.style ?? { backgroundColor: "transparent" },
     stretchToElements: background?.stretchToElements || undefined,
     hidden: background?.hidden,
     locked: background?.locked,
@@ -154,6 +227,9 @@ function sourceObjectToFrameObject(object: SourceObject): FrameObject {
 }
 
 export function compositionToSource(composition: Part) {
+  if (isJsonCompositionPath(composition.filePath))
+    return compositionToJsonSource(composition);
+
   const imports = Array.from(
     new Set([
       "Component",
@@ -189,6 +265,12 @@ ${backgroundElements.map((object) => indent(object, 6)).join(",\n")}
   const objects = composition.objects.map(frameObjectToConstructorSource);
 
   return `import { ${imports.join(", ")} } from "@clipper/composition-api";\n\nclass GeneratedCompositionObjects extends Component {\n  render() {\n    return [\n${objects.map((object) => indent(object, 6)).join(",\n")}\n    ];\n  }\n}\n\nexport const composition = new Composition({\n  duration: ${JSON.stringify(composition.duration)},\n${renderModeSource}  frame: ${tsBlock(composition.frame, 2)},\n  background: ${indent(backgroundSource, 2).trimStart()},\n  render() {\n    return [new GeneratedCompositionObjects()];\n  },\n});\n`;
+}
+
+function isJsonCompositionPath(filePath: string) {
+  return (
+    filePath.endsWith(".composition.json") || filePath.endsWith(".comp.json")
+  );
 }
 
 function frameObjectToSourceObject(object: FrameObject): SourceObject {

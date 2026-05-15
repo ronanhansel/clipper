@@ -47,7 +47,7 @@ export async function readStoredActiveProjectManifestPath(): Promise<
     if (
       typeof path === "string" &&
       path.startsWith("clipper/") &&
-      path.endsWith(".json")
+      path.endsWith(".clpr")
     ) {
       return path;
     }
@@ -60,7 +60,7 @@ export async function readStoredActiveProjectManifestPath(): Promise<
   const localStoragePath = localStorage.getItem(
     activeProjectManifestStorageKey,
   );
-  if (localStoragePath?.endsWith(".json")) return localStoragePath;
+  if (localStoragePath?.endsWith(".clpr")) return localStoragePath;
 
   return null;
 }
@@ -86,7 +86,7 @@ export async function readRecentProjects(): Promise<RecentProject[]> {
           (r) =>
             r &&
             typeof r.path === "string" &&
-            r.path.endsWith(".json") &&
+            r.path.endsWith(".clpr") &&
             typeof r.name === "string",
         )
         .slice(0, 10);

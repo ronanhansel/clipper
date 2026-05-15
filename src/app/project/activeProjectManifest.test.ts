@@ -38,10 +38,8 @@ function mockElectronClipper(
     setWindowFullscreen: vi.fn(),
     toggleWindowFullscreen: vi.fn(),
     watchTextFiles: vi.fn(),
-    watchProjectFiles: vi.fn(),
     onVideoExportProgress: vi.fn(),
     onTextFileChanged: vi.fn(),
-    onProjectFileChanged: vi.fn(),
     onModeShortcut: vi.fn(),
     onSettingsShortcut: vi.fn(),
     onCloseEditorTabShortcut: vi.fn(),
@@ -96,7 +94,7 @@ describe("active project manifest state", () => {
     });
     localStorage.setItem(
       "clipper.activeProjectManifestPath",
-      "clipper/projects/missing/project.json",
+      "clipper/projects/missing/missing.clpr",
     );
 
     const { readStoredActiveProjectManifestPath } =
@@ -109,13 +107,13 @@ describe("active project manifest state", () => {
     const writeAppState = vi.fn(async () => undefined);
     window.clipper = mockElectronClipper({
       readAppState: vi.fn(async () => ({
-        activeProjectManifestPath: "clipper/projects/old/project.json",
+        activeProjectManifestPath: "clipper/projects/old/old.clpr",
       })),
       writeAppState,
     });
     localStorage.setItem(
       "clipper.activeProjectManifestPath",
-      "clipper/projects/old/project.json",
+      "clipper/projects/old/old.clpr",
     );
 
     const { clearStoredActiveProjectManifestPath } =

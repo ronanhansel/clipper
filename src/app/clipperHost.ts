@@ -322,7 +322,8 @@ class ClipperHostService {
   }
 
   onUpdateStatus(callback: (status: AppUpdateStatus) => void) {
-    return window.clipper?.onUpdateStatus?.(callback) ?? (() => {});
+    if (typeof window.clipper?.onUpdateStatus !== "function") return () => {};
+    return window.clipper.onUpdateStatus(callback);
   }
 }
 
