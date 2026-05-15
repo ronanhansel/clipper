@@ -1,4 +1,5 @@
 import { evaluateLayerAnimations } from "../core/animations";
+import { type FillValue, fillValueToCss, isFillValue } from "../core/fillValue";
 import { evaluateObjectState } from "../core/propertyRegistry";
 import {
   FRAME_HEIGHT,
@@ -195,6 +196,7 @@ function renderStyleFromPropertyTracks(object: FrameObject): RenderStyle {
     readObjectRecord(object, "transform"),
   );
   const filter = filterStyleFromRecord(readObjectRecord(object, "filter"));
+  const background = resolveBackgroundStyle(object.style.backgroundColor);
   return {
     left: object.bounds.x,
     top: object.bounds.y,
@@ -202,10 +204,38 @@ function renderStyleFromPropertyTracks(object: FrameObject): RenderStyle {
     height: object.bounds.height,
     opacity: styleValue(object.style.opacity),
     color: styleValue(object.style.color),
-    backgroundColor: styleValue(object.style.backgroundColor),
+    backgroundColor: background.backgroundColor,
+    backgroundImage: background.backgroundImage,
     transform,
     filter,
   };
+}
+
+function resolveBackgroundStyle(raw: unknown): {
+  backgroundColor: string | number | undefined;
+  backgroundImage: string | undefined;
+} {
+  if (isFillValue(raw)) {
+    const fill = raw as unknown as FillValue;
+    if (fill.mode === "gradient") {
+      return {
+        backgroundColor: "transparent",
+        backgroundImage: fillValueToCss(fill),
+      };
+    }
+    return {
+      backgroundColor: fillValueToCss(fill),
+      backgroundImage: "none",
+    };
+  }
+  if (typeof raw === "string" && isCssGradientString(raw)) {
+    return { backgroundColor: "transparent", backgroundImage: raw };
+  }
+  return { backgroundColor: styleValue(raw), backgroundImage: "none" };
+}
+
+function isCssGradientString(value: string) {
+  return /^(repeating-)?(linear|radial|conic)-gradient\(/i.test(value.trim());
 }
 
 function readObjectRecord(object: FrameObject, key: "transform" | "filter") {

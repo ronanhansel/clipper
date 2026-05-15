@@ -9,6 +9,7 @@ import {
   type KeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent,
+  type ReactNode,
 } from "react";
 import {
   cancelThrottledCommit,
@@ -34,6 +35,8 @@ type InputProps = ComponentProps<"input"> & {
   numberScrubMode?: NumberScrubMode;
   numberScrubCommitThrottleMs?: number;
   resetValue?: string | number;
+  unitPrefix?: ReactNode;
+  unitPrefixClassName?: string;
   onNumberScrubCommit?: (value: number) => void;
   onNumberScrubPreview?: (value: number) => void;
   onNumberScrubStart?: () => void;
@@ -85,6 +88,8 @@ export function Input({
   onNumberScrubStart,
   onNumberScrubEnd,
   onPointerDown,
+  unitPrefix,
+  unitPrefixClassName,
   ...props
 }: InputProps) {
   const scrubRef = useRef<NumberScrubState | null>(null);
@@ -415,6 +420,7 @@ export function Input({
         inputMode={type === "number" ? "decimal" : inputProps.inputMode}
         className={cn(
           "flex h-8 w-full rounded-[8px] border border-[#2d313b] bg-[#171920] px-2 py-1.5 text-xs font-semibold text-white outline-none transition placeholder:text-[#69707f] focus:border-[var(--clipper-accent)] focus:ring-2 focus:ring-[rgb(var(--clipper-accent-rgb)/0.2)] disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-[#ff6b6b] aria-invalid:ring-[#ff6b6b]/20",
+          unitPrefix ? "pl-7" : "",
           canReset ? "pr-8" : "",
           className,
         )}
@@ -427,6 +433,17 @@ export function Input({
         onInput={inputInputValue}
         onPointerDown={startNumberScrub}
       />
+      {unitPrefix ? (
+        <span
+          aria-hidden="true"
+          className={cn(
+            "pointer-events-none absolute left-2 top-1/2 z-10 -translate-y-1/2 select-none text-xs font-bold text-[#8f96a6]",
+            unitPrefixClassName,
+          )}
+        >
+          {unitPrefix}
+        </span>
+      ) : null}
       {focused && hasReset ? (
         <button
           aria-label="Reset field"

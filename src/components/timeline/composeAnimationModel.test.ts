@@ -157,6 +157,57 @@ describe("buildComposeAnimationTimelineLayers", () => {
     ]);
   });
 
+  it("shows structured fill property tracks in the timeline", () => {
+    const object = {
+      ...frameObject("shape"),
+      tracks: {
+        "style.fill.linearAngle": {
+          valueType: "number",
+          points: [
+            { id: "angle-0", time: 0, value: 0 },
+            { id: "angle-1", time: 2, value: 180 },
+          ],
+        },
+        "style.fill.stops[stop-a].opacity": {
+          valueType: "number",
+          points: [
+            { id: "opacity-0", time: 0, value: 10 },
+            { id: "opacity-1", time: 2, value: 100 },
+          ],
+        },
+      },
+    } satisfies FrameObject;
+    const [layer] = buildComposeAnimationTimelineLayers(
+      partWithObjects([object]),
+    );
+    const tracks = getComposeAnimationAttributeTracks(layer);
+
+    expect(tracks.map((track) => track.id)).toEqual([
+      "fill:style.fill.linearAngle",
+      "fill:style.fill.stops[stop-a].opacity",
+    ]);
+    expect(tracks.map((track) => track.label)).toEqual([
+      "Fill Angle",
+      "Stop -a Alpha",
+    ]);
+    expect(tracks[0].keyframes).toMatchObject([
+      {
+        animationId: "property:style.fill.linearAngle",
+        pointId: "angle-0",
+        propertyPath: "style.fill.linearAngle",
+        time: 0,
+        value: 0,
+      },
+      {
+        animationId: "property:style.fill.linearAngle",
+        pointId: "angle-1",
+        propertyPath: "style.fill.linearAngle",
+        time: 2,
+        value: 180,
+      },
+    ]);
+  });
+
   it("moves generic property keyframes from timeline interactions", () => {
     const object = {
       ...frameObject("shape"),

@@ -1,4 +1,5 @@
 import { easeAnimationProgress } from "./animations";
+import { type FillValue, isFillValue, parseCssToFillValue } from "./fillValue";
 import type {
   Bounds,
   FrameObject,
@@ -16,6 +17,7 @@ export type PropertyPath =
   | "style.opacity"
   | "style.color"
   | "style.backgroundColor"
+  | `style.fill.${string}`
   | "transform.translateX"
   | "transform.translateY"
   | "transform.translateZ"
@@ -70,7 +72,11 @@ export function createPropertyRegistry(
     entries.set(definition.path, definition);
   return {
     get(path) {
-      return entries.get(path) ?? createDynamicPropsDefinition(path);
+      return (
+        entries.get(path) ??
+        createDynamicFillStopDefinition(path) ??
+        createDynamicPropsDefinition(path)
+      );
     },
     require(path) {
       const definition = this.get(path);
@@ -453,6 +459,190 @@ function createDynamicPropsDefinition(
   );
 }
 
+// --- Fill property definitions ---
+
+export function getFillValue(object: FrameObject): FillValue {
+  const raw = object.style.backgroundColor;
+  if (isFillValue(raw)) return raw as unknown as FillValue;
+  return parseCssToFillValue(typeof raw === "string" ? raw : "");
+}
+
+function setFillField(
+  object: FrameObject,
+  updater: (fill: FillValue) => FillValue,
+): FrameObject {
+  const fill = getFillValue(object);
+  const next = updater(fill);
+  return {
+    ...object,
+    style: {
+      ...object.style,
+      backgroundColor: next as unknown as string,
+    },
+  };
+}
+
+const FILL_NUMBER_FIELDS: Array<{
+  key: keyof FillValue;
+  default: number;
+}> = [
+  { key: "alpha", default: 100 },
+  { key: "linearAngle", default: 135 },
+  { key: "radialCenterX", default: 50 },
+  { key: "radialCenterY", default: 50 },
+  { key: "radialRadiusX", default: 50 },
+  { key: "radialRadiusY", default: 50 },
+  { key: "conicFromAngle", default: 0 },
+  { key: "conicCenterX", default: 50 },
+  { key: "conicCenterY", default: 50 },
+  { key: "diamondCenterX", default: 50 },
+  { key: "diamondCenterY", default: 50 },
+  { key: "diamondRadiusX", default: 50 },
+  { key: "diamondRadiusY", default: 50 },
+  { key: "diamondRotation", default: 0 },
+];
+
+const FILL_DISCRETE_FIELDS: Array<{
+  key: keyof FillValue;
+  default: string | boolean;
+}> = [
+  { key: "mode", default: "solid" },
+  { key: "gradientType", default: "linear" },
+  { key: "repeating", default: false },
+  { key: "colorSpace", default: "srgb" },
+  { key: "radialShape", default: "circle" },
+];
+
+function createFillNumberDefinition(
+  fieldKey: keyof FillValue,
+  defaultValue: number,
+): PropertyDefinition {
+  const path = `style.fill.${fieldKey}` as PropertyPath;
+  return {
+    path,
+    valueType: "number",
+    group: "style",
+    defaultValue,
+    getBaseValue: (object) => {
+      const fill = getFillValue(object);
+      return (fill[fieldKey] as number) ?? defaultValue;
+    },
+    setBaseValue: (object, value) =>
+      setFillField(object, (fill) => ({
+        ...fill,
+        [fieldKey]: typeof value === "number" ? value : fill[fieldKey],
+      })),
+    interpolate: numberInterpolation,
+  };
+}
+
+function createFillDiscreteDefinition(
+  fieldKey: keyof FillValue,
+  defaultValue: JsonValue,
+): PropertyDefinition {
+  const path = `style.fill.${fieldKey}` as PropertyPath;
+  return {
+    path,
+    valueType: "discrete",
+    group: "style",
+    defaultValue,
+    getBaseValue: (object) => {
+      const fill = getFillValue(object);
+      return (fill[fieldKey] as JsonValue) ?? defaultValue;
+    },
+    setBaseValue: (object, value) =>
+      setFillField(object, (fill) => ({
+        ...fill,
+        [fieldKey]: value as never,
+      })),
+  };
+}
+
+function createFillColorDefinition(): PropertyDefinition {
+  const path = "style.fill.color" as PropertyPath;
+  return {
+    path,
+    valueType: "color",
+    group: "style",
+    defaultValue: "#FFFFFF",
+    getBaseValue: (object) => getFillValue(object).color,
+    setBaseValue: (object, value) =>
+      setFillField(object, (fill) => ({
+        ...fill,
+        color: typeof value === "string" ? value : fill.color,
+      })),
+    interpolate: interpolateColor,
+  };
+}
+
+function createDynamicFillStopDefinition(
+  path: string,
+): PropertyDefinition | undefined {
+  const match = path.match(
+    /^style\.fill\.stops\[([^\]]+)\]\.(color|position|opacity)$/,
+  );
+  if (!match) return undefined;
+  const stopId = match[1];
+  const field = match[2] as "color" | "position" | "opacity";
+
+  if (field === "color") {
+    return {
+      path: path as PropertyPath,
+      valueType: "color",
+      group: "style",
+      defaultValue: "#FFFFFF",
+      getBaseValue: (object) => {
+        const fill = getFillValue(object);
+        const stop = fill.stops.find((s) => s.id === stopId);
+        return stop?.color ?? "#FFFFFF";
+      },
+      setBaseValue: (object, value) =>
+        setFillField(object, (fill) => ({
+          ...fill,
+          stops: fill.stops.map((s) =>
+            s.id === stopId
+              ? { ...s, color: typeof value === "string" ? value : s.color }
+              : s,
+          ),
+        })),
+      interpolate: interpolateColor,
+    };
+  }
+
+  const defaultVal = field === "position" ? 0 : 100;
+  return {
+    path: path as PropertyPath,
+    valueType: "number",
+    group: "style",
+    defaultValue: defaultVal,
+    getBaseValue: (object) => {
+      const fill = getFillValue(object);
+      const stop = fill.stops.find((s) => s.id === stopId);
+      return stop?.[field] ?? defaultVal;
+    },
+    setBaseValue: (object, value) =>
+      setFillField(object, (fill) => ({
+        ...fill,
+        stops: fill.stops.map((s) =>
+          s.id === stopId
+            ? { ...s, [field]: typeof value === "number" ? value : s[field] }
+            : s,
+        ),
+      })),
+    interpolate: numberInterpolation,
+  };
+}
+
+export const fillPropertyDefinitions: PropertyDefinition[] = [
+  createFillColorDefinition(),
+  ...FILL_NUMBER_FIELDS.map((f) =>
+    createFillNumberDefinition(f.key, f.default),
+  ),
+  ...FILL_DISCRETE_FIELDS.map((f) =>
+    createFillDiscreteDefinition(f.key, f.default as JsonValue),
+  ),
+];
+
 function readRecord(object: FrameObject, key: "transform" | "filter") {
   const value = (object as unknown as Record<string, unknown>)[key];
   return value && typeof value === "object" && !Array.isArray(value)
@@ -472,6 +662,7 @@ export const defaultPropertyDefinitions: PropertyDefinition[] = [
   createStyleDefinition("opacity"),
   createStyleDefinition("color"),
   createStyleDefinition("backgroundColor"),
+  ...fillPropertyDefinitions,
   createTransformDefinition("translateX", 0),
   createTransformDefinition("translateY", 0),
   createTransformDefinition("translateZ", 0),

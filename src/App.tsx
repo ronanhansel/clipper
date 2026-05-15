@@ -165,6 +165,7 @@ import {
   type ObjectSnapGuide,
 } from "./core/frameInteraction";
 import { boundsToPoints, framePointFromClient } from "./core/geometry";
+import { type FillValue, fillValueToCss, isFillValue } from "./core/fillValue";
 import { clamp, roundToPrecision, roundTenth } from "./core/math";
 import {
   getPathGeometryBounds,
@@ -682,7 +683,11 @@ function getSvgDrawContent(
       ? `<text fill="#ffffff" font-family="system-ui, sans-serif" font-size="48" font-weight="500"><textPath href="#draw-path" startOffset="50%" text-anchor="middle">Text on path</textPath></text>`
       : "";
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 ${Math.max(1, viewBoxBounds.width)} ${Math.max(1, viewBoxBounds.height)}" preserveAspectRatio="none" style="display:block;overflow:visible"><defs><marker id="arrowhead" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth" viewBox="0 0 8 8" preserveAspectRatio="xMidYMid meet"><path d="M0,0 L8,4 L0,8 Z" fill="#D5D5D5"/></marker></defs><path id="draw-path" d="${drawPath}" fill="none" stroke="#D5D5D5" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"${marker}/>${textPath}</svg>`;
+  const strokeAttr =
+    tool === "textPath"
+      ? 'stroke="none"'
+      : `stroke="#D5D5D5" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"${marker}`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 ${Math.max(1, viewBoxBounds.width)} ${Math.max(1, viewBoxBounds.height)}" preserveAspectRatio="none" style="display:block;overflow:visible"><defs><marker id="arrowhead" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth" viewBox="0 0 8 8" preserveAspectRatio="xMidYMid meet"><path d="M0,0 L8,4 L0,8 Z" fill="#D5D5D5"/></marker></defs><path id="draw-path" d="${drawPath}" fill="none" ${strokeAttr}/>${textPath}</svg>`;
 }
 
 function isTextPathObject(object: FrameObject) {
@@ -2758,7 +2763,16 @@ function AppContent({
     for (const [key, value] of Object.entries(next.style)) {
       if (value === undefined)
         target.style.removeProperty(cssStylePropertyName(key));
-      else
+      else if (key === "backgroundColor" && isFillValue(value)) {
+        const fill = value as unknown as FillValue;
+        if (fill.mode === "gradient") {
+          target.style.setProperty("background-color", "transparent");
+          target.style.setProperty("background-image", fillValueToCss(fill));
+        } else {
+          target.style.setProperty("background-color", fillValueToCss(fill));
+          target.style.setProperty("background-image", "none");
+        }
+      } else
         target.style.setProperty(
           cssStylePropertyName(key),
           formatPreviewStyleValue(key, value),
@@ -3822,6 +3836,25 @@ function AppContent({
     const el = event.currentTarget;
     const rawPoint = framePointFromClient(event.nativeEvent, el);
     if (tool === "text") {
+      // If clicking an existing text or text-on-path object, edit it directly
+      const hitElement = (event.target as HTMLElement).closest<HTMLElement>(
+        "[data-object-id]",
+      );
+      const hitObjectId = hitElement?.dataset.objectId;
+      if (hitObjectId && part) {
+        const allObjects = [...part.background.elements, ...part.objects];
+        const hitObject = allObjects.find((o) => o.id === hitObjectId);
+        if (
+          hitObject &&
+          (hitObject.type === "text" || isTextPathObject(hitObject))
+        ) {
+          startTextObjectEdit(
+            event as unknown as React.MouseEvent<HTMLDivElement>,
+            hitObject,
+          );
+          return true;
+        }
+      }
       createTextObjectAtPoint(rawPoint);
       return true;
     }
@@ -4855,7 +4888,8 @@ function AppContent({
     [installUpdate],
   );
 
-  const osFileManagerPropsRef = useRef<typeof fileManagerActions>(fileManagerActions);
+  const osFileManagerPropsRef =
+    useRef<typeof fileManagerActions>(fileManagerActions);
   osFileManagerPropsRef.current = fileManagerActions;
   const openProjectFileInEditorRef = useRef(openProjectFileInEditor);
   openProjectFileInEditorRef.current = openProjectFileInEditor;
@@ -4864,32 +4898,43 @@ function AppContent({
       bin: normalizeProjectBin(project),
       compositionLibrary: project.compositionLibrary ?? [],
       selectedCompositionId: selectedPartId,
-      createComposition: (...args: Parameters<typeof fileManagerActions.createBinComposition>) =>
-        osFileManagerPropsRef.current.createBinComposition(...args),
-      createFile: (...args: Parameters<typeof fileManagerActions.createBinFile>) =>
-        osFileManagerPropsRef.current.createBinFile(...args),
-      createFolder: (...args: Parameters<typeof fileManagerActions.createBinFolder>) =>
-        osFileManagerPropsRef.current.createBinFolder(...args),
-      createTimeline: (...args: Parameters<typeof fileManagerActions.createBinTimeline>) =>
-        osFileManagerPropsRef.current.createBinTimeline(...args),
-      deleteItem: (...args: Parameters<typeof fileManagerActions.deleteBinItem>) =>
-        osFileManagerPropsRef.current.deleteBinItem(...args),
-      deleteItems: (...args: Parameters<typeof fileManagerActions.deleteBinItems>) =>
-        osFileManagerPropsRef.current.deleteBinItems(...args),
-      dropFiles: (...args: Parameters<typeof fileManagerActions.dropBinFiles>) =>
-        osFileManagerPropsRef.current.dropBinFiles(...args),
-      duplicateItem: (...args: Parameters<typeof fileManagerActions.duplicateBinItem>) =>
-        osFileManagerPropsRef.current.duplicateBinItem(...args),
-      duplicateItems: (...args: Parameters<typeof fileManagerActions.duplicateBinItems>) =>
-        osFileManagerPropsRef.current.duplicateBinItems(...args),
+      createComposition: (
+        ...args: Parameters<typeof fileManagerActions.createBinComposition>
+      ) => osFileManagerPropsRef.current.createBinComposition(...args),
+      createFile: (
+        ...args: Parameters<typeof fileManagerActions.createBinFile>
+      ) => osFileManagerPropsRef.current.createBinFile(...args),
+      createFolder: (
+        ...args: Parameters<typeof fileManagerActions.createBinFolder>
+      ) => osFileManagerPropsRef.current.createBinFolder(...args),
+      createTimeline: (
+        ...args: Parameters<typeof fileManagerActions.createBinTimeline>
+      ) => osFileManagerPropsRef.current.createBinTimeline(...args),
+      deleteItem: (
+        ...args: Parameters<typeof fileManagerActions.deleteBinItem>
+      ) => osFileManagerPropsRef.current.deleteBinItem(...args),
+      deleteItems: (
+        ...args: Parameters<typeof fileManagerActions.deleteBinItems>
+      ) => osFileManagerPropsRef.current.deleteBinItems(...args),
+      dropFiles: (
+        ...args: Parameters<typeof fileManagerActions.dropBinFiles>
+      ) => osFileManagerPropsRef.current.dropBinFiles(...args),
+      duplicateItem: (
+        ...args: Parameters<typeof fileManagerActions.duplicateBinItem>
+      ) => osFileManagerPropsRef.current.duplicateBinItem(...args),
+      duplicateItems: (
+        ...args: Parameters<typeof fileManagerActions.duplicateBinItems>
+      ) => osFileManagerPropsRef.current.duplicateBinItems(...args),
       moveItem: (...args: Parameters<typeof fileManagerActions.moveBinItem>) =>
         osFileManagerPropsRef.current.moveBinItem(...args),
       onOpenFile: (...args: Parameters<typeof openProjectFileInEditor>) =>
         openProjectFileInEditorRef.current(...args),
-      renameItem: (...args: Parameters<typeof fileManagerActions.renameBinItem>) =>
-        osFileManagerPropsRef.current.renameBinItem(...args),
-      revealItem: (...args: Parameters<typeof fileManagerActions.revealBinItem>) =>
-        osFileManagerPropsRef.current.revealBinItem(...args),
+      renameItem: (
+        ...args: Parameters<typeof fileManagerActions.renameBinItem>
+      ) => osFileManagerPropsRef.current.renameBinItem(...args),
+      revealItem: (
+        ...args: Parameters<typeof fileManagerActions.revealBinItem>
+      ) => osFileManagerPropsRef.current.revealBinItem(...args),
     }),
     [project, selectedPartId],
   );

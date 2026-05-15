@@ -2,6 +2,18 @@ import { Minus, Pipette, Plus } from "lucide-react";
 import React, { useEffect, useRef, useState, type PointerEvent } from "react";
 import { createPortal } from "react-dom";
 import toast from "react-hot-toast";
+import {
+  type FillValue,
+  type FillStop,
+  type GradientType,
+  type RadialShape,
+  MAX_STOPS,
+  createDefaultFillValue,
+  fillValueToCss,
+  generateStopId,
+  parseCssToFillValue,
+  isFillValue,
+} from "../core/fillValue";
 import { clamp } from "../core/math";
 import { Input } from "./ui/input";
 import {
@@ -524,6 +536,937 @@ type GradientValue = {
   stops: { color: string; position: number; opacity: number }[];
 };
 
+export type FillKeyframeConfig = {
+  path: string;
+  label: string;
+  hasKeyframe: boolean;
+};
+
+export type ColorSelectorFillProps = {
+  fillValue: FillValue;
+  onFillChange: (fill: FillValue) => void;
+  onFillPreview?: (fill: FillValue) => void;
+  variant?: "default" | "compact";
+  leftSlot?: React.ReactNode;
+  keyframeStates?: FillKeyframeConfig[];
+  onToggleKeyframe?: (path: string) => void;
+};
+
+export function FillColorSelector({
+  fillValue,
+  onFillChange,
+  onFillPreview,
+  variant = "default",
+  leftSlot,
+  keyframeStates,
+  onToggleKeyframe,
+}: ColorSelectorFillProps) {
+  const pickerId = useRef(`clr_${Math.random().toString(36).slice(2)}`);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const popupRef = useRef<HTMLDivElement | null>(null);
+  const [open, setOpen] = useState(false);
+  const [portalPosition, setPortalPosition] = useState<{
+    left: number;
+    top: number;
+  } | null>(null);
+  const [draft, setDraft] = useState(fillValue);
+
+  useEffect(() => {
+    setDraft(fillValue);
+  }, [fillValue]);
+
+  useEffect(() => {
+    function closeOtherPicker(event: Event) {
+      const detail = (event as CustomEvent<{ id: string }>).detail;
+      if (detail?.id !== pickerId.current) setOpen(false);
+    }
+    window.addEventListener("clipper:color-picker-open", closeOtherPicker);
+    return () =>
+      window.removeEventListener("clipper:color-picker-open", closeOtherPicker);
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    updatePortalPosition();
+    function closeOnOutsidePointerDown(event: globalThis.PointerEvent) {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (popupRef.current?.contains(target)) return;
+      if (rootRef.current?.contains(target)) return;
+      // Don't close when a Radix portal (Select, etc.) is open anywhere on the page
+      if (document.querySelector("[data-radix-popper-content-wrapper]")) return;
+      if (
+        target instanceof HTMLElement &&
+        target.closest("[data-clipper-color-picker-portal]")
+      )
+        return;
+      setOpen(false);
+    }
+    function updateOnViewportChange() {
+      updatePortalPosition();
+    }
+    document.addEventListener("pointerdown", closeOnOutsidePointerDown, {
+      capture: true,
+    });
+    window.addEventListener("resize", updateOnViewportChange);
+    window.addEventListener("scroll", updateOnViewportChange, true);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePointerDown, {
+        capture: true,
+      });
+      window.removeEventListener("resize", updateOnViewportChange);
+      window.removeEventListener("scroll", updateOnViewportChange, true);
+    };
+  }, [open, draft.mode]);
+
+  function togglePicker() {
+    setOpen((current) => {
+      const next = !current;
+      if (next)
+        window.dispatchEvent(
+          new CustomEvent("clipper:color-picker-open", {
+            detail: { id: pickerId.current },
+          }),
+        );
+      return next;
+    });
+  }
+
+  function updatePortalPosition() {
+    const rect = rootRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const width = 300;
+    const estimatedHeight = 380;
+    const belowTop = rect.bottom + 6;
+    const aboveTop = rect.top - estimatedHeight - 6;
+    setPortalPosition({
+      left: Math.max(
+        8,
+        Math.min(window.innerWidth - width - 8, rect.right - width),
+      ),
+      top:
+        belowTop + estimatedHeight <= window.innerHeight - 8
+          ? belowTop
+          : Math.max(8, aboveTop),
+    });
+  }
+
+  function commitFill(next: FillValue) {
+    setDraft(next);
+    onFillChange(next);
+  }
+
+  function previewFill(next: FillValue) {
+    setDraft(next);
+    onFillPreview?.(next);
+  }
+
+  const isCompact = variant === "compact";
+  const displayCss = fillValueToCss(draft);
+
+  const pickerPanel = open ? (
+    <div
+      ref={popupRef}
+      className={
+        isCompact
+          ? "grid w-[300px] max-h-[calc(100vh-16px)] gap-2 overflow-y-auto rounded-xl border border-[#2d313b] bg-[#101116] p-2 shadow-[0_20px_70px_rgba(0,0,0,0.48)]"
+          : "grid w-[300px] max-h-[calc(100vh-16px)] gap-3 overflow-y-auto rounded-2xl border border-[#2d313b] bg-[#101116] p-3 shadow-[0_20px_70px_rgba(0,0,0,0.48)]"
+      }
+      style={
+        portalPosition
+          ? {
+              position: "fixed",
+              left: portalPosition.left,
+              top: portalPosition.top,
+              zIndex: 7000,
+            }
+          : undefined
+      }
+      onClick={(event) => event.stopPropagation()}
+      onPointerDown={(event) => event.stopPropagation()}
+      onPointerUp={(event) => event.stopPropagation()}
+    >
+      <div className="grid grid-cols-2 gap-1 rounded-lg bg-[#0a0b0f] p-1">
+        <button
+          className={`h-7 rounded-md text-[11px] font-extrabold ${draft.mode === "solid" ? "bg-[#2a2d34] text-white" : "text-[#9aa1ad]"}`}
+          onClick={() => commitFill({ ...draft, mode: "solid" })}
+        >
+          Solid
+        </button>
+        <button
+          className={`h-7 rounded-md text-[11px] font-extrabold ${draft.mode === "gradient" ? "bg-[#2a2d34] text-white" : "text-[#9aa1ad]"}`}
+          onClick={() => commitFill(convertFillToGradient(draft))}
+        >
+          Gradient
+        </button>
+      </div>
+      {draft.mode === "solid" ? (
+        <SolidColorPickerPanel
+          value={draft.color}
+          alpha={draft.alpha}
+          allowAlpha
+          variant={variant}
+          onChange={(color) => {
+            const next = { ...draft, color: normalizeHexColor(color) };
+            previewFill(next);
+          }}
+          onAlphaChange={(alpha) => commitFill({ ...draft, alpha })}
+          onCommit={() => commitFill(draft)}
+          onPickFromScreen={async () => {
+            const EyeDropper = (
+              window as unknown as {
+                EyeDropper?: new () => {
+                  open: () => Promise<{ sRGBHex: string }>;
+                };
+              }
+            ).EyeDropper;
+            if (!EyeDropper) {
+              toast.error("Eyedropper is not supported in this runtime.");
+              return;
+            }
+            try {
+              const result = await new EyeDropper().open();
+              commitFill({
+                ...draft,
+                color: normalizeHexColor(result.sRGBHex),
+              });
+            } catch {
+              // cancelled
+            }
+          }}
+        />
+      ) : (
+        <FillGradientPickerPanel
+          value={draft}
+          keyframeStates={keyframeStates}
+          onToggleKeyframe={onToggleKeyframe}
+          onChange={commitFill}
+        />
+      )}
+    </div>
+  ) : null;
+
+  return (
+    <div ref={rootRef} className="relative w-full">
+      <button
+        className={
+          isCompact
+            ? "flex h-6 w-full min-w-0 items-center justify-between gap-1.5 rounded border border-[#2d313b] bg-[#0c121b] px-1.5 pr-7 text-[11px] font-bold text-[#dfe2ea] transition hover:border-[var(--clipper-accent)]"
+            : `flex h-[42px] w-full items-center justify-between gap-2 rounded-[10px] border border-[#2d313b] bg-[#171920] text-xs font-bold text-[#dfe2ea] transition hover:border-[var(--clipper-accent)] ${leftSlot ? "pl-2 pr-3" : "px-3"}`
+        }
+        onClick={() => {
+          if (!open) togglePicker();
+        }}
+      >
+        {leftSlot ? (
+          <span className="mr-1 flex shrink-0 items-center">{leftSlot}</span>
+        ) : null}
+        <span
+          className={
+            isCompact
+              ? "flex min-w-0 items-center gap-1.5"
+              : "flex min-w-0 flex-1 items-center gap-2"
+          }
+        >
+          <span
+            className={
+              isCompact
+                ? "h-4 w-4 rounded shadow-[inset_0_0_0_1px_rgba(255,255,255,0.14)]"
+                : "h-5 w-5 shrink-0 rounded-md shadow-[inset_0_0_0_1px_rgba(255,255,255,0.14)]"
+            }
+            style={{ background: displayCss }}
+          />
+          <span className="min-w-0 truncate">
+            {draft.mode === "solid"
+              ? `${draft.color.toUpperCase()} ${draft.alpha}%`
+              : `${draft.gradientType} gradient`}
+          </span>
+        </span>
+      </button>
+      {pickerPanel ? createPortal(pickerPanel, document.body) : null}
+    </div>
+  );
+}
+
+function FillGradientPickerPanel({
+  value,
+  keyframeStates,
+  onToggleKeyframe,
+  onChange,
+}: {
+  value: FillValue;
+  keyframeStates?: FillKeyframeConfig[];
+  onToggleKeyframe?: (path: string) => void;
+  onChange: (value: FillValue) => void;
+}) {
+  const railRef = useRef<HTMLDivElement | null>(null);
+  const stopHandleRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const dragFrameRef = useRef(0);
+  const draggingStopRef = useRef(false);
+  const pendingDragRef = useRef<{ index: number; position: number } | null>(
+    null,
+  );
+  const stops =
+    value.stops.length >= 2 ? value.stops : createDefaultFillValue().stops;
+  const preview = fillValueToLinearPreviewCss(value);
+
+  useEffect(
+    () => () => {
+      if (dragFrameRef.current) cancelAnimationFrame(dragFrameRef.current);
+    },
+    [],
+  );
+
+  function updateStop(index: number, patch: Partial<FillStop>) {
+    const nextStops = stops.map((stop, i) =>
+      i === index ? { ...stop, ...patch } : stop,
+    );
+    onChange({ ...value, stops: nextStops });
+  }
+
+  function addStop() {
+    if (stops.length >= MAX_STOPS) return;
+    const newStop: FillStop = {
+      id: generateStopId(),
+      color: "#FFFFFF",
+      position: 50,
+      opacity: 100,
+    };
+    onChange({
+      ...value,
+      stops: [...stops, newStop].sort((a, b) => a.position - b.position),
+    });
+  }
+
+  function removeStop(index: number) {
+    if (stops.length <= 2) return;
+    onChange({
+      ...value,
+      stops: stops.filter((_, i) => i !== index),
+    });
+  }
+
+  function pickStopPosition(event: PointerEvent<HTMLElement>, index: number) {
+    const rect = railRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const position = Math.round(
+      clamp((event.clientX - rect.left) / rect.width, 0, 1) * 100,
+    );
+    draggingStopRef.current = true;
+    const handle = stopHandleRefs.current[index];
+    if (handle) handle.style.left = getStopHandleLeft(position);
+    pendingDragRef.current = { index, position };
+    if (dragFrameRef.current) return;
+    dragFrameRef.current = requestAnimationFrame(() => {
+      dragFrameRef.current = 0;
+      const pending = pendingDragRef.current;
+      pendingDragRef.current = null;
+      if (!pending) return;
+      updateStop(pending.index, { position: pending.position });
+    });
+  }
+
+  function finishStopDrag() {
+    draggingStopRef.current = false;
+  }
+
+  return (
+    <div className="grid gap-2 text-[#dfe2ea]">
+      <div className="flex items-center justify-between gap-2">
+        <Select
+          value={value.gradientType}
+          onValueChange={(next) =>
+            onChange({ ...value, gradientType: next as GradientType })
+          }
+        >
+          <SelectTrigger className="h-7 w-[110px] rounded-[8px] border-[#2d313b] bg-[#171920] px-2 text-xs font-bold">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent className="z-[7100] bg-[#11141a]">
+            <SelectGroup>
+              <SelectItem value="linear">Linear</SelectItem>
+              <SelectItem value="radial">Radial</SelectItem>
+              <SelectItem value="conic">Angular</SelectItem>
+              <SelectItem value="diamond">Diamond</SelectItem>
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+        <label className="flex items-center gap-1.5 text-[11px] font-bold text-[#9aa1ad]">
+          <input
+            type="checkbox"
+            className="accent-[var(--clipper-accent)]"
+            checked={value.repeating}
+            onChange={(e) =>
+              onChange({ ...value, repeating: e.target.checked })
+            }
+          />
+          Repeat
+        </label>
+      </div>
+
+      {/* Geometry controls per gradient type */}
+      <FillGeometryControls
+        value={value}
+        keyframeStates={keyframeStates}
+        onToggleKeyframe={onToggleKeyframe}
+        onChange={onChange}
+      />
+
+      {/* Gradient preview rail */}
+      <div className="relative h-[54px] px-2 pt-5">
+        <div
+          ref={railRef}
+          className="h-7 overflow-hidden rounded-md bg-[#0b0d12] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.1)]"
+          style={{ backgroundColor: "#0b0d12", backgroundImage: preview }}
+        />
+        {stops.map((stop, index) => (
+          <button
+            ref={(element) => {
+              stopHandleRefs.current[index] = element;
+            }}
+            key={stop.id}
+            className="absolute top-[14px] grid h-8 w-5 -translate-x-1/2 place-items-start"
+            style={{ left: getStopHandleLeft(stop.position) }}
+            type="button"
+            onPointerDown={(event) => {
+              event.preventDefault();
+              event.currentTarget.setPointerCapture(event.pointerId);
+              pickStopPosition(event, index);
+            }}
+            onPointerMove={(event) => {
+              if (event.currentTarget.hasPointerCapture(event.pointerId))
+                pickStopPosition(event, index);
+            }}
+            onPointerUp={finishStopDrag}
+            onPointerCancel={finishStopDrag}
+          >
+            <span className="h-6 w-5 rounded bg-[#343944] p-0.5 shadow-[0_6px_16px_rgba(0,0,0,0.35)] after:absolute after:left-1/2 after:top-[22px] after:-translate-x-1/2 after:border-x-[5px] after:border-t-[6px] after:border-x-transparent after:border-t-[#343944]">
+              <span
+                className="block h-full rounded-[3px] border border-white/10"
+                style={{ background: stop.color }}
+              />
+            </span>
+          </button>
+        ))}
+      </div>
+
+      {/* Stops list */}
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-extrabold text-[#aeb6c4]">Stops</span>
+        <button
+          className="grid size-7 place-items-center rounded text-[#dfe2ea] hover:bg-[#171920] disabled:opacity-40"
+          type="button"
+          onClick={addStop}
+          disabled={stops.length >= MAX_STOPS}
+        >
+          <Plus size={18} />
+        </button>
+      </div>
+      <div className="grid gap-1.5">
+        {stops.map((stop, index) => (
+          <div
+            key={stop.id}
+            className="grid grid-cols-[74px_minmax(0,1fr)_72px_24px] items-center gap-1.5 rounded bg-[#0c121b] px-1.5 py-1"
+          >
+            <div className="grid grid-cols-[minmax(0,1fr)_18px] items-center rounded bg-[#171920]">
+              <Input
+                className="h-7 border-0 bg-transparent pl-6 pr-2 text-left text-xs font-bold text-[#dfe2ea]"
+                type="number"
+                min={0}
+                max={100}
+                step={1}
+                unitPrefix="%"
+                value={stop.position}
+                onChange={(event) => {
+                  const next = Number(event.currentTarget.value);
+                  if (!Number.isFinite(next)) return;
+                  updateStop(index, {
+                    position: Math.max(0, Math.min(100, Math.round(next))),
+                  });
+                }}
+              />
+              <FillInlineKeyframeDiamond
+                state={findFillKeyframeState(
+                  keyframeStates,
+                  `style.fill.stops[${stop.id}].position`,
+                )}
+                onToggleKeyframe={onToggleKeyframe}
+              />
+            </div>
+            <div className="grid grid-cols-[20px_minmax(0,1fr)_18px] items-center rounded bg-[#171920]">
+              <StopColorPicker
+                value={stop.color}
+                onChange={(color) => updateStop(index, { color })}
+              />
+              <Input
+                className="h-7 border-0 bg-transparent px-1 text-xs font-bold text-[#dfe2ea]"
+                value={normalizeHexColor(stop.color).slice(1)}
+                onChange={(event) =>
+                  updateStop(index, {
+                    color: normalizeHexColor(`#${event.target.value}`),
+                  })
+                }
+              />
+              <FillInlineKeyframeDiamond
+                state={findFillKeyframeState(
+                  keyframeStates,
+                  `style.fill.stops[${stop.id}].color`,
+                )}
+                onToggleKeyframe={onToggleKeyframe}
+              />
+            </div>
+            <div className="grid grid-cols-[minmax(0,1fr)_18px] items-center rounded bg-[#171920]">
+              <Input
+                className="h-7 border-0 bg-transparent pl-6 pr-2 text-left text-xs font-bold text-[#dfe2ea]"
+                type="number"
+                min={0}
+                max={100}
+                step={1}
+                unitPrefix="%"
+                value={stop.opacity}
+                onChange={(event) => {
+                  const next = Number(event.currentTarget.value);
+                  if (!Number.isFinite(next)) return;
+                  updateStop(index, {
+                    opacity: Math.max(0, Math.min(100, Math.round(next))),
+                  });
+                }}
+              />
+              <FillInlineKeyframeDiamond
+                state={findFillKeyframeState(
+                  keyframeStates,
+                  `style.fill.stops[${stop.id}].opacity`,
+                )}
+                onToggleKeyframe={onToggleKeyframe}
+              />
+            </div>
+            <button
+              className="grid size-6 place-items-center rounded text-[#dfe2ea] hover:bg-[#171920]"
+              type="button"
+              onClick={() => removeStop(index)}
+            >
+              <Minus size={15} />
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function FillGeometryControls({
+  value,
+  keyframeStates,
+  onToggleKeyframe,
+  onChange,
+}: {
+  value: FillValue;
+  keyframeStates?: FillKeyframeConfig[];
+  onToggleKeyframe?: (path: string) => void;
+  onChange: (value: FillValue) => void;
+}) {
+  // Use the shared Input component for all numeric fields so we retain the tuned
+  // number scrub/commit behavior. We only override visuals for compactness.
+  const fieldClass =
+    "h-7 border-0 bg-transparent px-2 text-left text-xs font-bold text-[#dfe2ea] focus:ring-0";
+  const unitFieldClass =
+    "h-7 border-0 bg-transparent pl-7 pr-2 text-left text-xs font-bold text-[#dfe2ea] focus:ring-0";
+  const labelClass = "text-[10px] font-bold text-[#6f7684]";
+  const renderInputField = (
+    label: string,
+    path: string | null,
+    input: React.ReactNode,
+  ) => (
+    <label className={labelClass}>
+      {label}
+      <div className="grid grid-cols-[minmax(0,1fr)_18px] items-center rounded bg-[#171920]">
+        {input}
+        <FillInlineKeyframeDiamond
+          state={path ? findFillKeyframeState(keyframeStates, path) : undefined}
+          onToggleKeyframe={onToggleKeyframe}
+        />
+      </div>
+    </label>
+  );
+
+  if (value.gradientType === "linear") {
+    return (
+      <div className="grid grid-cols-1 gap-1.5">
+        {renderInputField(
+          "Angle",
+          "style.fill.linearAngle",
+          <Input
+            className={unitFieldClass}
+            type="number"
+            min={0}
+            max={360}
+            step={1}
+            unitPrefix="°"
+            numberScrubMode="continuous"
+            value={value.linearAngle}
+            onChange={(e) => {
+              const next = Number(e.currentTarget.value);
+              if (!Number.isFinite(next)) return;
+              onChange({ ...value, linearAngle: Math.round(next) });
+            }}
+          />,
+        )}
+      </div>
+    );
+  }
+
+  if (value.gradientType === "radial") {
+    return (
+      <div className="grid grid-cols-2 gap-1.5">
+        <label className={labelClass}>
+          Shape
+          <Select
+            value={value.radialShape}
+            onValueChange={(next) =>
+              onChange({ ...value, radialShape: next as RadialShape })
+            }
+          >
+            <SelectTrigger className="h-7 w-full rounded-[8px] border-[#2d313b] bg-[#171920] px-2 text-xs font-bold">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="z-[7100] bg-[#11141a]">
+              <SelectGroup>
+                <SelectItem value="circle">Circle</SelectItem>
+                <SelectItem value="ellipse">Ellipse</SelectItem>
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </label>
+        {renderInputField(
+          "Radius X",
+          "style.fill.radialRadiusX",
+          <Input
+            className={unitFieldClass}
+            type="number"
+            min={0}
+            max={200}
+            step={1}
+            unitPrefix="%"
+            numberScrubMode="continuous"
+            value={value.radialRadiusX}
+            onChange={(e) => {
+              const next = Number(e.currentTarget.value);
+              if (!Number.isFinite(next)) return;
+              onChange({ ...value, radialRadiusX: Math.round(next) });
+            }}
+          />,
+        )}
+        {value.radialShape === "ellipse"
+          ? renderInputField(
+              "Radius Y",
+              "style.fill.radialRadiusY",
+              <Input
+                className={unitFieldClass}
+                type="number"
+                min={0}
+                max={200}
+                step={1}
+                unitPrefix="%"
+                numberScrubMode="continuous"
+                value={value.radialRadiusY}
+                onChange={(e) => {
+                  const next = Number(e.currentTarget.value);
+                  if (!Number.isFinite(next)) return;
+                  onChange({ ...value, radialRadiusY: Math.round(next) });
+                }}
+              />,
+            )
+          : null}
+        {renderInputField(
+          "Center X",
+          "style.fill.radialCenterX",
+          <Input
+            className={unitFieldClass}
+            type="number"
+            min={0}
+            max={100}
+            step={1}
+            unitPrefix="%"
+            numberScrubMode="continuous"
+            value={value.radialCenterX}
+            onChange={(e) => {
+              const next = Number(e.currentTarget.value);
+              if (!Number.isFinite(next)) return;
+              onChange({ ...value, radialCenterX: Math.round(next) });
+            }}
+          />,
+        )}
+        {renderInputField(
+          "Center Y",
+          "style.fill.radialCenterY",
+          <Input
+            className={unitFieldClass}
+            type="number"
+            min={0}
+            max={100}
+            step={1}
+            unitPrefix="%"
+            numberScrubMode="continuous"
+            value={value.radialCenterY}
+            onChange={(e) => {
+              const next = Number(e.currentTarget.value);
+              if (!Number.isFinite(next)) return;
+              onChange({ ...value, radialCenterY: Math.round(next) });
+            }}
+          />,
+        )}
+      </div>
+    );
+  }
+
+  if (value.gradientType === "conic") {
+    return (
+      <div className="grid grid-cols-2 gap-1.5">
+        {renderInputField(
+          "From Angle",
+          "style.fill.conicFromAngle",
+          <Input
+            className={unitFieldClass}
+            type="number"
+            min={0}
+            max={360}
+            step={1}
+            unitPrefix="°"
+            numberScrubMode="continuous"
+            value={value.conicFromAngle}
+            onChange={(e) => {
+              const next = Number(e.currentTarget.value);
+              if (!Number.isFinite(next)) return;
+              onChange({ ...value, conicFromAngle: Math.round(next) });
+            }}
+          />,
+        )}
+        {renderInputField(
+          "Center X",
+          "style.fill.conicCenterX",
+          <Input
+            className={unitFieldClass}
+            type="number"
+            min={0}
+            max={100}
+            step={1}
+            unitPrefix="%"
+            numberScrubMode="continuous"
+            value={value.conicCenterX}
+            onChange={(e) => {
+              const next = Number(e.currentTarget.value);
+              if (!Number.isFinite(next)) return;
+              onChange({ ...value, conicCenterX: Math.round(next) });
+            }}
+          />,
+        )}
+        {renderInputField(
+          "Center Y",
+          "style.fill.conicCenterY",
+          <Input
+            className={unitFieldClass}
+            type="number"
+            min={0}
+            max={100}
+            step={1}
+            unitPrefix="%"
+            numberScrubMode="continuous"
+            value={value.conicCenterY}
+            onChange={(e) => {
+              const next = Number(e.currentTarget.value);
+              if (!Number.isFinite(next)) return;
+              onChange({ ...value, conicCenterY: Math.round(next) });
+            }}
+          />,
+        )}
+      </div>
+    );
+  }
+
+  if (value.gradientType === "diamond") {
+    return (
+      <div className="grid grid-cols-2 gap-1.5">
+        {renderInputField(
+          "Rotation",
+          "style.fill.diamondRotation",
+          <Input
+            className={unitFieldClass}
+            type="number"
+            min={0}
+            max={360}
+            step={1}
+            unitPrefix="°"
+            numberScrubMode="continuous"
+            value={value.diamondRotation}
+            onChange={(e) => {
+              const next = Number(e.currentTarget.value);
+              if (!Number.isFinite(next)) return;
+              onChange({ ...value, diamondRotation: Math.round(next) });
+            }}
+          />,
+        )}
+        {renderInputField(
+          "Radius X",
+          "style.fill.diamondRadiusX",
+          <Input
+            className={unitFieldClass}
+            type="number"
+            min={0}
+            max={200}
+            step={1}
+            unitPrefix="%"
+            numberScrubMode="continuous"
+            value={value.diamondRadiusX}
+            onChange={(e) => {
+              const next = Number(e.currentTarget.value);
+              if (!Number.isFinite(next)) return;
+              onChange({ ...value, diamondRadiusX: Math.round(next) });
+            }}
+          />,
+        )}
+        {renderInputField(
+          "Radius Y",
+          "style.fill.diamondRadiusY",
+          <Input
+            className={unitFieldClass}
+            type="number"
+            min={0}
+            max={200}
+            step={1}
+            unitPrefix="%"
+            numberScrubMode="continuous"
+            value={value.diamondRadiusY}
+            onChange={(e) => {
+              const next = Number(e.currentTarget.value);
+              if (!Number.isFinite(next)) return;
+              onChange({ ...value, diamondRadiusY: Math.round(next) });
+            }}
+          />,
+        )}
+        {renderInputField(
+          "Center X",
+          "style.fill.diamondCenterX",
+          <Input
+            className={unitFieldClass}
+            type="number"
+            min={0}
+            max={100}
+            step={1}
+            unitPrefix="%"
+            numberScrubMode="continuous"
+            value={value.diamondCenterX}
+            onChange={(e) => {
+              const next = Number(e.currentTarget.value);
+              if (!Number.isFinite(next)) return;
+              onChange({ ...value, diamondCenterX: Math.round(next) });
+            }}
+          />,
+        )}
+        {renderInputField(
+          "Center Y",
+          "style.fill.diamondCenterY",
+          <Input
+            className={unitFieldClass}
+            type="number"
+            min={0}
+            max={100}
+            step={1}
+            unitPrefix="%"
+            numberScrubMode="continuous"
+            value={value.diamondCenterY}
+            onChange={(e) => {
+              const next = Number(e.currentTarget.value);
+              if (!Number.isFinite(next)) return;
+              onChange({ ...value, diamondCenterY: Math.round(next) });
+            }}
+          />,
+        )}
+      </div>
+    );
+  }
+
+  return null;
+}
+
+function findFillKeyframeState(
+  keyframeStates: FillKeyframeConfig[] | undefined,
+  path: string,
+) {
+  return keyframeStates?.find((state) => state.path === path);
+}
+
+function FillInlineKeyframeDiamond({
+  state,
+  onToggleKeyframe,
+}: {
+  state?: FillKeyframeConfig;
+  onToggleKeyframe?: (path: string) => void;
+}) {
+  if (!state || !onToggleKeyframe)
+    return <span className="block h-[18px] w-[18px]" />;
+  return (
+    <button
+      aria-label={
+        state.hasKeyframe
+          ? `Remove ${state.label} keyframe at playhead`
+          : `Add ${state.label} keyframe at playhead`
+      }
+      aria-pressed={state.hasKeyframe}
+      className="grid h-[18px] w-[18px] place-items-center"
+      type="button"
+      onMouseDown={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      }}
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onToggleKeyframe(state.path);
+      }}
+    >
+      <span
+        className={`inline-block h-[8px] w-[8px] rotate-45 rounded-[1px] border transition ${
+          state.hasKeyframe
+            ? "border-white bg-white shadow-[0_0_0_1px_rgba(255,255,255,0.16)]"
+            : "border-[#6f7684] bg-[#12151d] hover:border-white"
+        }`}
+      />
+    </button>
+  );
+}
+
+function fillValueToLinearPreviewCss(fill: FillValue) {
+  if (fill.mode === "solid") return fillValueToCss(fill);
+  const linearFill: FillValue = {
+    ...fill,
+    gradientType: "linear",
+    linearAngle: 90,
+  };
+  return fillValueToCss(linearFill);
+}
+
+function convertFillToGradient(fill: FillValue): FillValue {
+  if (fill.mode === "gradient") return fill;
+  return {
+    ...fill,
+    mode: "gradient",
+    stops: [
+      {
+        id: generateStopId(),
+        color: normalizeHexColor(fill.color),
+        position: 0,
+        opacity: fill.alpha,
+      },
+      {
+        id: generateStopId(),
+        color: normalizeHexColor(fill.color),
+        position: 100,
+        opacity: fill.alpha,
+      },
+    ],
+  };
+}
+
 function SolidColorPickerPanel({
   value,
   alpha = 100,
@@ -921,12 +1864,18 @@ function GradientPickerPanel({
           >
             <Input
               className="h-7 border-0 bg-[#171920] px-1.5 text-center text-xs font-bold text-[#dfe2ea]"
-              value={`${stop.position}%`}
-              onChange={(event) =>
+              type="number"
+              min={0}
+              max={100}
+              step={1}
+              value={stop.position}
+              onChange={(event) => {
+                const next = Number(event.currentTarget.value);
+                if (!Number.isFinite(next)) return;
                 updateStop(index, {
-                  position: clampPercent(event.target.value),
-                })
-              }
+                  position: Math.max(0, Math.min(100, Math.round(next))),
+                });
+              }}
             />
             <div className="grid grid-cols-[20px_minmax(0,1fr)] items-center rounded bg-[#171920]">
               <StopColorPicker
@@ -945,10 +1894,18 @@ function GradientPickerPanel({
             </div>
             <Input
               className="h-7 border-0 bg-[#171920] px-1.5 text-center text-xs font-bold text-[#dfe2ea]"
-              value={`${stop.opacity}%`}
-              onChange={(event) =>
-                updateStop(index, { opacity: clampPercent(event.target.value) })
-              }
+              type="number"
+              min={0}
+              max={100}
+              step={1}
+              value={stop.opacity}
+              onChange={(event) => {
+                const next = Number(event.currentTarget.value);
+                if (!Number.isFinite(next)) return;
+                updateStop(index, {
+                  opacity: Math.max(0, Math.min(100, Math.round(next))),
+                });
+              }}
             />
             <button
               className="grid size-6 place-items-center rounded text-[#dfe2ea] hover:bg-[#171920]"
@@ -1022,6 +1979,7 @@ function StopColorPicker({
         ? createPortal(
             <div
               ref={popupRef}
+              data-clipper-color-picker-portal
               className="fixed z-[7200] grid w-[210px] gap-2 rounded-xl border border-[#2d313b] bg-[#101116] p-2 shadow-[0_20px_70px_rgba(0,0,0,0.48)]"
               style={{ left: position.left, top: position.top }}
               onPointerDown={(event) => event.stopPropagation()}

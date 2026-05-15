@@ -35,9 +35,11 @@ import {
 } from "../../core/types";
 import {
   evaluateObjectState,
+  getFillValue,
   removePropertyKeyframe,
   upsertPropertyKeyframe,
 } from "../../core/propertyRegistry";
+import { type FillValue } from "../../core/fillValue";
 import { clamp, roundTenth, roundTwo } from "../../core/math";
 import {
   getAdjustmentEffectPackage,
@@ -84,7 +86,11 @@ import {
   getEditableColorStyleEntries,
   isHexColor,
 } from "../ColorSelector";
-import { KeyframedColorInput } from "./KeyframedColorInput";
+import {
+  KeyframedColorInput,
+  KeyframedFillInput,
+  type FillKeyframeState,
+} from "./KeyframedColorInput";
 import { clipperHost } from "../../app/clipperHost";
 import { Coordinate2DField, PickButton } from "./Coordinate2DField";
 import { EffectControls } from "./EffectControls";
@@ -244,6 +250,96 @@ function formatFontValueLabel(value: string) {
   );
 }
 
+function getFillKeyframeStates(
+  object: FrameObject,
+  currentTime: number,
+): FillKeyframeState[] {
+  const fill = getFillValue(object);
+  const states: FillKeyframeState[] = [];
+  const pushState = (path: string, label: string) => {
+    states.push({
+      path,
+      label,
+      hasKeyframe: Boolean(
+        getPropertyTrackKeyframeAtTime(object, path, currentTime),
+      ),
+    });
+  };
+
+  if (fill.mode === "solid") {
+    pushState("style.fill.color", "Color");
+    pushState("style.fill.alpha", "Alpha");
+  } else {
+    if (fill.gradientType === "linear") {
+      pushState("style.fill.linearAngle", "Angle");
+    } else if (fill.gradientType === "radial") {
+      pushState("style.fill.radialCenterX", "CX");
+      pushState("style.fill.radialCenterY", "CY");
+      pushState("style.fill.radialRadiusX", "RX");
+      pushState("style.fill.radialRadiusY", "RY");
+    } else if (fill.gradientType === "conic") {
+      pushState("style.fill.conicFromAngle", "Angle");
+      pushState("style.fill.conicCenterX", "CX");
+      pushState("style.fill.conicCenterY", "CY");
+    } else if (fill.gradientType === "diamond") {
+      pushState("style.fill.diamondRotation", "Rot");
+      pushState("style.fill.diamondCenterX", "CX");
+      pushState("style.fill.diamondCenterY", "CY");
+      pushState("style.fill.diamondRadiusX", "RX");
+      pushState("style.fill.diamondRadiusY", "RY");
+    }
+
+    for (const stop of fill.stops) {
+      pushState(`style.fill.stops[${stop.id}].color`, `S${stop.id.slice(-2)}`);
+      pushState(
+        `style.fill.stops[${stop.id}].position`,
+        `P${stop.id.slice(-2)}`,
+      );
+      pushState(
+        `style.fill.stops[${stop.id}].opacity`,
+        `O${stop.id.slice(-2)}`,
+      );
+    }
+  }
+
+  return states;
+}
+
+function readFillPathValue(
+  fill: FillValue,
+  path: string,
+): string | number | boolean {
+  if (path === "style.fill.color") return fill.color;
+  if (path === "style.fill.alpha") return fill.alpha;
+  if (path === "style.fill.gradientType") return fill.gradientType;
+  if (path === "style.fill.repeating") return fill.repeating;
+  if (path === "style.fill.colorSpace") return fill.colorSpace;
+  if (path === "style.fill.linearAngle") return fill.linearAngle;
+  if (path === "style.fill.radialShape") return fill.radialShape;
+  if (path === "style.fill.radialCenterX") return fill.radialCenterX;
+  if (path === "style.fill.radialCenterY") return fill.radialCenterY;
+  if (path === "style.fill.radialRadiusX") return fill.radialRadiusX;
+  if (path === "style.fill.radialRadiusY") return fill.radialRadiusY;
+  if (path === "style.fill.conicFromAngle") return fill.conicFromAngle;
+  if (path === "style.fill.conicCenterX") return fill.conicCenterX;
+  if (path === "style.fill.conicCenterY") return fill.conicCenterY;
+  if (path === "style.fill.diamondCenterX") return fill.diamondCenterX;
+  if (path === "style.fill.diamondCenterY") return fill.diamondCenterY;
+  if (path === "style.fill.diamondRadiusX") return fill.diamondRadiusX;
+  if (path === "style.fill.diamondRadiusY") return fill.diamondRadiusY;
+  if (path === "style.fill.diamondRotation") return fill.diamondRotation;
+
+  const stopMatch = path.match(
+    /^style\.fill\.stops\[([^\]]+)\]\.(color|position|opacity)$/,
+  );
+  if (stopMatch) {
+    const stop = fill.stops.find((s) => s.id === stopMatch[1]);
+    if (stop) return stop[stopMatch[2] as "color" | "position" | "opacity"];
+  }
+
+  return 0;
+}
+
 export function FrameInspector({
   part,
   canSnapMiddle,
@@ -376,7 +472,7 @@ function FontSelector({
     <label className={`grid gap-1.5 ${mutedCaps}`}>
       Font
       <Select value={value} onValueChange={onChange}>
-        <SelectTrigger>
+        <SelectTrigger className="h-[42px] rounded-[10px] px-3 text-xs font-bold text-[#dfe2ea]">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -1039,60 +1135,87 @@ export const ObjectInspector = memo(function ObjectInspector({
         />
       )}
       {isRect || isText ? null : (
-        <KeyframedColorInput
+        <KeyframedFillInput
           label="Background"
-          value={String(object.style.backgroundColor ?? rectBackground)}
-          allowAlpha
-          hasKeyframe={Boolean(keyframeAtCurrentTime("backgroundColor"))}
-          onToggleKeyframe={() =>
-            toggleKeyframe(
-              "backgroundColor",
-              keyframeValue(
-                "backgroundColor",
-                String(object.style.backgroundColor ?? rectBackground),
-              ),
-            )
+          fillValue={getFillValue(object)}
+          keyframeStates={getFillKeyframeStates(object, effectiveTime)}
+          onToggleKeyframe={(path) => {
+            const existing = getPropertyTrackKeyframeAtTime(
+              object,
+              path,
+              effectiveTime,
+            );
+            if (existing) {
+              onChange((obj) =>
+                removePropertyKeyframe(obj, path, existing.time, effectiveTime),
+              );
+            } else {
+              const fill = getFillValue(object);
+              const value = readFillPathValue(fill, path);
+              onChange((obj) =>
+                upsertPropertyKeyframe(obj, path, effectiveTime, value),
+              );
+            }
+          }}
+          onChange={(fill) =>
+            onChange((current) => ({
+              ...current,
+              style: {
+                ...current.style,
+                backgroundColor: fill as unknown as string,
+              },
+            }))
           }
-          onChange={(value) =>
-            commitKeyframedValue(
-              "backgroundColor",
-              value,
-              (nextValue) => updateStyleValue("backgroundColor", nextValue),
-              "text",
-            )
-          }
-          onPreview={(value) =>
+          onPreview={(fill) =>
             onPreview?.((current) => ({
               ...current,
-              style: { ...current.style, backgroundColor: value },
+              style: {
+                ...current.style,
+                backgroundColor: fill as unknown as string,
+              },
             }))
           }
         />
       )}
       {isRect ? (
-        <KeyframedColorInput
+        <KeyframedFillInput
           label="Background"
-          value={rectBackground}
-          allowAlpha
-          hasKeyframe={Boolean(keyframeAtCurrentTime("backgroundColor"))}
-          onToggleKeyframe={() =>
-            toggleKeyframe(
-              "backgroundColor",
-              keyframeValue("backgroundColor", rectBackground),
-            )
+          fillValue={getFillValue(object)}
+          keyframeStates={getFillKeyframeStates(object, effectiveTime)}
+          onToggleKeyframe={(path) => {
+            const existing = getPropertyTrackKeyframeAtTime(
+              object,
+              path,
+              effectiveTime,
+            );
+            if (existing) {
+              onChange((obj) =>
+                removePropertyKeyframe(obj, path, existing.time, effectiveTime),
+              );
+            } else {
+              const fill = getFillValue(object);
+              const value = readFillPathValue(fill, path);
+              onChange((obj) =>
+                upsertPropertyKeyframe(obj, path, effectiveTime, value),
+              );
+            }
+          }}
+          onChange={(fill) =>
+            onChange((current) => ({
+              ...current,
+              style: {
+                ...current.style,
+                backgroundColor: fill as unknown as string,
+              },
+            }))
           }
-          onChange={(value) =>
-            commitKeyframedValue(
-              "backgroundColor",
-              value,
-              (nextValue) => updateStyleValue("backgroundColor", nextValue),
-              "text",
-            )
-          }
-          onPreview={(value) =>
+          onPreview={(fill) =>
             onPreview?.((current) => ({
               ...current,
-              style: { ...current.style, backgroundColor: value },
+              style: {
+                ...current.style,
+                backgroundColor: fill as unknown as string,
+              },
             }))
           }
         />
@@ -1130,32 +1253,49 @@ export const ObjectInspector = memo(function ObjectInspector({
               }))
             }
           />
-          <KeyframedColorInput
+          <KeyframedFillInput
             label="Background"
-            value={String(object.style.backgroundColor ?? rectBackground)}
-            allowAlpha
-            hasKeyframe={Boolean(keyframeAtCurrentTime("backgroundColor"))}
-            onToggleKeyframe={() =>
-              toggleKeyframe(
-                "backgroundColor",
-                keyframeValue(
-                  "backgroundColor",
-                  String(object.style.backgroundColor ?? rectBackground),
-                ),
-              )
+            fillValue={getFillValue(object)}
+            keyframeStates={getFillKeyframeStates(object, effectiveTime)}
+            onToggleKeyframe={(path) => {
+              const existing = getPropertyTrackKeyframeAtTime(
+                object,
+                path,
+                effectiveTime,
+              );
+              if (existing) {
+                onChange((obj) =>
+                  removePropertyKeyframe(
+                    obj,
+                    path,
+                    existing.time,
+                    effectiveTime,
+                  ),
+                );
+              } else {
+                const fill = getFillValue(object);
+                const value = readFillPathValue(fill, path);
+                onChange((obj) =>
+                  upsertPropertyKeyframe(obj, path, effectiveTime, value),
+                );
+              }
+            }}
+            onChange={(fill) =>
+              onChange((current) => ({
+                ...current,
+                style: {
+                  ...current.style,
+                  backgroundColor: fill as unknown as string,
+                },
+              }))
             }
-            onChange={(value) =>
-              commitKeyframedValue(
-                "backgroundColor",
-                value,
-                (nextValue) => updateStyleValue("backgroundColor", nextValue),
-                "text",
-              )
-            }
-            onPreview={(value) =>
+            onPreview={(fill) =>
               onPreview?.((current) => ({
                 ...current,
-                style: { ...current.style, backgroundColor: value },
+                style: {
+                  ...current.style,
+                  backgroundColor: fill as unknown as string,
+                },
               }))
             }
           />
@@ -1232,47 +1372,51 @@ export const ObjectInspector = memo(function ObjectInspector({
               />
             </label>
           </div>
-          <div className="grid grid-cols-4 gap-2" aria-label="Text style">
-            <button
-              className={textButtonClass(fontWeight >= 700)}
-              aria-label="Bold"
-              aria-pressed={fontWeight >= 700}
-              title="Bold"
-              onClick={toggleBold}
-            >
-              <Bold size={16} />
-            </button>
-            <button
-              className={textButtonClass(fontStyle === "italic")}
-              aria-label="Italic"
-              aria-pressed={fontStyle === "italic"}
-              title="Italic"
-              onClick={toggleItalic}
-            >
-              <Italic size={16} />
-            </button>
-            <button
-              className={textButtonClass(hasTextDecoration("underline"))}
-              aria-label="Underline"
-              aria-pressed={hasTextDecoration("underline")}
-              title="Underline"
-              onClick={toggleUnderline}
-            >
-              <Underline size={16} />
-            </button>
-            <button
-              className={textButtonClass(hasTextDecoration("line-through"))}
-              aria-label="Strikethrough"
-              aria-pressed={hasTextDecoration("line-through")}
-              title="Strikethrough"
-              onClick={toggleStrikethrough}
-            >
-              <Strikethrough size={16} />
-            </button>
-          </div>
-          <div className="grid gap-1.5">
+          <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
+            <span className={mutedCaps}>Formatting</span>
             <span className={mutedCaps}>Alignment</span>
-            <div className="grid grid-cols-4 gap-2" aria-label="Text alignment">
+            <div className="grid grid-cols-4 gap-1.5" aria-label="Text style">
+              <button
+                className={textButtonClass(fontWeight >= 700)}
+                aria-label="Bold"
+                aria-pressed={fontWeight >= 700}
+                title="Bold"
+                onClick={toggleBold}
+              >
+                <Bold size={16} />
+              </button>
+              <button
+                className={textButtonClass(fontStyle === "italic")}
+                aria-label="Italic"
+                aria-pressed={fontStyle === "italic"}
+                title="Italic"
+                onClick={toggleItalic}
+              >
+                <Italic size={16} />
+              </button>
+              <button
+                className={textButtonClass(hasTextDecoration("underline"))}
+                aria-label="Underline"
+                aria-pressed={hasTextDecoration("underline")}
+                title="Underline"
+                onClick={toggleUnderline}
+              >
+                <Underline size={16} />
+              </button>
+              <button
+                className={textButtonClass(hasTextDecoration("line-through"))}
+                aria-label="Strikethrough"
+                aria-pressed={hasTextDecoration("line-through")}
+                title="Strikethrough"
+                onClick={toggleStrikethrough}
+              >
+                <Strikethrough size={16} />
+              </button>
+            </div>
+            <div
+              className="grid grid-cols-4 gap-1.5"
+              aria-label="Text alignment"
+            >
               <button
                 className={textButtonClass(textAlign === "left")}
                 aria-label="Align left"
@@ -1311,10 +1455,11 @@ export const ObjectInspector = memo(function ObjectInspector({
               </button>
             </div>
           </div>
-          <div className="grid gap-1.5">
+          <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
             <span className={mutedCaps}>Vertical Alignment</span>
+            <span className={mutedCaps}>Layout</span>
             <div
-              className="grid grid-cols-3 gap-2"
+              className="grid grid-cols-3 gap-1.5"
               aria-label="Text vertical alignment"
             >
               <button
@@ -1345,11 +1490,8 @@ export const ObjectInspector = memo(function ObjectInspector({
                 <VerticalAlignIcon align="bottom" />
               </button>
             </div>
-          </div>
-          <div className="grid gap-1.5">
-            <span className={mutedCaps}>Layout</span>
             <div
-              className="grid grid-cols-3 gap-2"
+              className="grid grid-cols-3 gap-1.5"
               aria-label="Text box layout"
             >
               <button

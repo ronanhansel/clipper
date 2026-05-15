@@ -616,6 +616,29 @@ export const FramePreview = memo(function FramePreview({
 
   function handleFramePointerDownCapture(event: PointerEvent<HTMLDivElement>) {
     if (isPlaying) return;
+    if (activeShapeTool === "text" || activeShapeTool === "textPath") {
+      const hitElement = (event.target as HTMLElement).closest<HTMLElement>(
+        "[data-object-id]",
+      );
+      if (hitElement) {
+        const hitObjectId = hitElement.dataset.objectId;
+        if (hitObjectId && part) {
+          const hitObject = part.objects.find((o) => o.id === hitObjectId);
+          if (
+            hitObject &&
+            (hitObject.type === "text" || isEditableTextPathObject(hitObject))
+          ) {
+            event.preventDefault();
+            event.stopPropagation();
+            onTextObjectDoubleClick(
+              event as unknown as ReactMouseEvent<HTMLDivElement>,
+              hitObject,
+            );
+            return;
+          }
+        }
+      }
+    }
     if (!interactiveTrackerPicking) {
       onFramePointerDownCapture(event);
       return;
@@ -691,7 +714,7 @@ export const FramePreview = memo(function FramePreview({
       >
         <div
           ref={frameViewportRef}
-          className={`absolute overflow-hidden ${!isPlaying && (interactiveFocusPicking || interactiveTrackerPicking) ? "cursor-crosshair ring-2 ring-[#159dff]" : activeShapeTool === "text" ? "cursor-text" : activeShapeTool ? "cursor-crosshair" : ""}`}
+          className={`absolute overflow-hidden ${!isPlaying && (interactiveFocusPicking || interactiveTrackerPicking) ? "cursor-crosshair ring-2 ring-[#159dff]" : activeShapeTool === "text" || activeShapeTool === "textPath" ? "cursor-text" : activeShapeTool ? "cursor-crosshair" : ""}`}
           data-clipper-frame-preview
           style={clippedViewportStyle}
           onPointerDownCapture={handleFramePointerDownCapture}
@@ -861,40 +884,54 @@ export const FramePreview = memo(function FramePreview({
             selectedPreviewObjects.map((object) => {
               const source = evaluatedSelectableObjectsById.get(object.id);
               const isBackgroundSelection = object.id === part.background.id;
+              const isTextPath = source
+                ? isEditableTextPathObject(source)
+                : false;
               const liveBounds = source?.bounds ?? object.bounds;
               return (
                 <Fragment key={object.id}>
-                  <SelectionOverlayBox
-                    objectId={object.id}
-                    bounds={liveBounds}
-                    cameraTransform={liveCameraTransform}
-                    frameScale={frameScale}
-                    frameViewportRef={frameViewportRef}
-                    handleSizePx={selectionHandleSizePx}
-                    highlighted={hoveredObjectId === object.id}
-                    interactive={!marqueeDragging && !isBackgroundSelection}
-                    offsetPx={selectionOffsetPx}
-                    portal
-                    portalHost={previewOverlayHost}
-                    radius={
-                      !isBackgroundSelection && source?.type === "rect"
-                        ? getNumericStyleValue(source.style.borderRadius)
-                        : undefined
-                    }
-                    resizable={
-                      !isBackgroundSelection && source?.type !== "null"
-                    }
-                    uiScale={selectionOverlayScale}
-                    onCornerRadiusChange={
-                      !isBackgroundSelection && onObjectCornerRadiusChange
-                        ? (radius) =>
-                            onObjectCornerRadiusChange(object.id, radius)
-                        : undefined
-                    }
-                    onResizePointerDown={(event, handle) =>
-                      onObjectResizePointerDown(event, handle, object.id)
-                    }
-                  />
+                  {!isTextPath && (
+                    <SelectionOverlayBox
+                      objectId={object.id}
+                      bounds={liveBounds}
+                      cameraTransform={liveCameraTransform}
+                      frameScale={frameScale}
+                      frameViewportRef={frameViewportRef}
+                      handleSizePx={selectionHandleSizePx}
+                      highlighted={hoveredObjectId === object.id}
+                      interactive={!marqueeDragging && !isBackgroundSelection}
+                      offsetPx={selectionOffsetPx}
+                      portal
+                      portalHost={previewOverlayHost}
+                      radius={
+                        !isBackgroundSelection && source?.type === "rect"
+                          ? getNumericStyleValue(source.style.borderRadius)
+                          : undefined
+                      }
+                      resizable={
+                        !isBackgroundSelection && source?.type !== "null"
+                      }
+                      uiScale={selectionOverlayScale}
+                      onCornerRadiusChange={
+                        !isBackgroundSelection && onObjectCornerRadiusChange
+                          ? (radius) =>
+                              onObjectCornerRadiusChange(object.id, radius)
+                          : undefined
+                      }
+                      onResizePointerDown={(event, handle) =>
+                        onObjectResizePointerDown(event, handle, object.id)
+                      }
+                    />
+                  )}
+                  {isTextPath && source && (
+                    <TextPathDottedOverlay
+                      object={source}
+                      cameraTransform={liveCameraTransform}
+                      frameScale={frameScale}
+                      portalHost={previewOverlayHost}
+                      frameViewportRef={frameViewportRef}
+                    />
+                  )}
                   {source &&
                   editingTextObjectId !== source.id &&
                   !(
@@ -1306,6 +1343,7 @@ function CompositionLayerView({
         .map((object) => (
           <FrameObjectView
             key={object.id}
+            activeShapeTool={active ? activeShapeTool : undefined}
             animationsEnabled={animationsEnabled}
             exportTileFrameBounds={exportTileFrameBounds}
             object={object}
@@ -1340,20 +1378,6 @@ function CompositionLayerView({
               if (active && !isPlaying && isPenDrawTool(activeShapeTool)) {
                 event.preventDefault();
                 event.stopPropagation();
-                return;
-              }
-              if (
-                active &&
-                !isPlaying &&
-                activeShapeTool === "text" &&
-                (object.type === "text" || isEditableTextPathObject(object))
-              ) {
-                event.preventDefault();
-                event.stopPropagation();
-                onTextObjectDoubleClick(
-                  event as unknown as ReactMouseEvent<HTMLDivElement>,
-                  object,
-                );
                 return;
               }
               if (active && !isPlaying) onObjectPointerDown(event, object);
@@ -1758,19 +1782,28 @@ function TextPathOffsetHandle({
   }
 
   return (
-    <button
-      ref={handleRef}
-      className="pointer-events-auto absolute h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[#159dff] bg-white shadow-[0_2px_10px_rgba(0,0,0,0.35)]"
-      data-text-path-offset-handle={object.id}
-      onPointerDown={startDrag}
+    <div
+      className="pointer-events-none absolute inset-0"
+      data-frame-overlay-follow={object.id}
       style={{
-        left: "var(--clipper-text-path-offset-x, -9999px)",
-        top: "var(--clipper-text-path-offset-y, -9999px)",
+        transform:
+          "translate(var(--clipper-drag-x, 0px), var(--clipper-drag-y, 0px))",
         zIndex: 2147483647,
       }}
-      title="Move text along path"
-      type="button"
-    />
+    >
+      <button
+        ref={handleRef}
+        className="pointer-events-auto absolute h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[#159dff] bg-white shadow-[0_2px_10px_rgba(0,0,0,0.35)]"
+        data-text-path-offset-handle={object.id}
+        onPointerDown={startDrag}
+        style={{
+          left: "var(--clipper-text-path-offset-x, -9999px)",
+          top: "var(--clipper-text-path-offset-y, -9999px)",
+        }}
+        title="Move text along path"
+        type="button"
+      />
+    </div>
   );
 }
 
@@ -1893,6 +1926,76 @@ const identityPortalOverlayTransform: FramePortalOverlayTransform = {
 };
 
 const objectPreviewBoundsById = new Map<string, Bounds>();
+
+let pendingTextEditClick: { clientX: number; clientY: number } | null = null;
+
+export function setPendingTextEditClick(
+  point: {
+    clientX: number;
+    clientY: number;
+  } | null,
+) {
+  pendingTextEditClick = point;
+}
+
+function getTextPathDAttribute(content: string | undefined): string | null {
+  if (!content) return null;
+  const match = content.match(/<path[^>]+\bid="draw-path"[^>]+\bd="([^"]+)"/);
+  return match?.[1] ?? null;
+}
+
+function TextPathDottedOverlay({
+  object,
+  cameraTransform,
+  frameScale,
+  portalHost,
+  frameViewportRef,
+}: {
+  object: FrameObject;
+  cameraTransform: CameraPreviewTransform;
+  frameScale: number;
+  portalHost: HTMLElement;
+  frameViewportRef: RefObject<HTMLDivElement | null>;
+}) {
+  const pathD = getTextPathDAttribute(object.content);
+  if (!pathD) return null;
+
+  const { bounds } = object;
+  const vx = bounds.x * frameScale * cameraTransform.scale + cameraTransform.x;
+  const vy = bounds.y * frameScale * cameraTransform.scale + cameraTransform.y;
+  const vw = bounds.width * frameScale * cameraTransform.scale;
+  const vh = bounds.height * frameScale * cameraTransform.scale;
+
+  return createPortal(
+    <div
+      className="pointer-events-none absolute inset-0"
+      data-frame-overlay-follow={object.id}
+      style={{
+        transform:
+          "translate(var(--clipper-drag-x, 0px), var(--clipper-drag-y, 0px))",
+      }}
+    >
+      <svg
+        className="pointer-events-none absolute z-30 overflow-visible"
+        style={{ left: vx, top: vy, width: vw, height: vh }}
+        viewBox={`0 0 ${Math.max(1, bounds.width)} ${Math.max(1, bounds.height)}`}
+        preserveAspectRatio="none"
+      >
+        <path
+          d={pathD}
+          fill="none"
+          stroke="#8fbff7"
+          strokeWidth={2}
+          strokeDasharray="6 4"
+          strokeLinecap="round"
+          vectorEffect="non-scaling-stroke"
+          opacity={0.8}
+        />
+      </svg>
+    </div>,
+    portalHost,
+  );
+}
 
 function updateObjectPreviewBoundsCache(event: Event) {
   const detail = (event as CustomEvent<{ bounds?: Bounds; objectId?: string }>)
@@ -2203,6 +2306,7 @@ function PathEditOverlay({
       ref={rootRef}
       className="pointer-events-none absolute inset-0"
       data-frame-path-edit-overlay={object.id}
+      data-frame-overlay-follow={object.id}
       style={{
         transform:
           "translate(var(--clipper-drag-x, 0px), var(--clipper-drag-y, 0px))",
@@ -2256,7 +2360,6 @@ function PathEditOverlay({
           }}
           onPointerDown={(event) => {
             event.preventDefault();
-            event.stopPropagation();
             if (!editing) {
               setEditing(true);
               setSelectedSegmentIndex(null);
@@ -2539,7 +2642,8 @@ function ShapeDrawPreviewOverlay({
   );
 }
 
-export const FrameObjectView = memo(function FrameObjectView({
+export const FrameObjectView = function FrameObjectView({
+  activeShapeTool,
   animationsEnabled,
   exportTileFrameBounds,
   object,
@@ -2558,6 +2662,7 @@ export const FrameObjectView = memo(function FrameObjectView({
   onTextEditCommit,
   onTextEditEnd,
 }: {
+  activeShapeTool?: ComposeDrawTool | null;
   animationsEnabled: boolean;
   exportTileFrameBounds?: ExportTileFrameBounds;
   object: FrameObject;
@@ -2740,11 +2845,30 @@ export const FrameObjectView = memo(function FrameObjectView({
     editingObjectIdRef.current = object.id;
     editable.focus();
     const selection = window.getSelection();
-    const range = document.createRange();
-    range.selectNodeContents(editable);
-    range.collapse(false);
-    selection?.removeAllRanges();
-    selection?.addRange(range);
+    const clickPoint = pendingTextEditClick;
+    pendingTextEditClick = null;
+    if (clickPoint) {
+      const range = document.caretRangeFromPoint(
+        clickPoint.clientX,
+        clickPoint.clientY,
+      );
+      if (range && editable.contains(range.startContainer)) {
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+      } else {
+        const fallback = document.createRange();
+        fallback.selectNodeContents(editable);
+        fallback.collapse(false);
+        selection?.removeAllRanges();
+        selection?.addRange(fallback);
+      }
+    } else {
+      const range = document.createRange();
+      range.selectNodeContents(editable);
+      range.collapse(false);
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    }
   }, [editableContent, editableTextPath, editing, object.id, object.richText]);
 
   useEffect(() => {
@@ -2866,7 +2990,7 @@ export const FrameObjectView = memo(function FrameObjectView({
   return (
     <div
       ref={objectRef}
-      className={`absolute flex touch-none select-none flex-col whitespace-pre-line ${textBoxLayout === "fixed" ? "overflow-hidden" : "overflow-visible"} ${focusPicking ? "cursor-crosshair" : editing ? "cursor-text" : "cursor-default"} ${editing ? "select-text" : ""}`}
+      className={`absolute flex touch-none select-none flex-col whitespace-pre-line ${textBoxLayout === "fixed" ? "overflow-hidden" : "overflow-visible"} ${focusPicking ? "cursor-crosshair" : (object.type === "text" || editableTextPath) && (activeShapeTool === "text" || activeShapeTool === "textPath") ? "cursor-text" : "cursor-default"} ${editing ? "select-text" : ""} ${!editing && (activeShapeTool === "text" || activeShapeTool === "textPath") && (object.type === "text" || editableTextPath) ? "hover:ring-2 hover:ring-[#159dff]/60 rounded-sm" : ""}`}
       data-clipper-render-object-id={object.id}
       data-object-id={canSelect && !isLocked ? object.id : undefined}
       style={{ ...style, ...(isLocked ? { opacity: 0.6 } : {}) }}
@@ -2887,6 +3011,7 @@ export const FrameObjectView = memo(function FrameObjectView({
           contentEditable
           suppressContentEditableWarning
           onBlur={finishTextEdit}
+          onInput={editableTextPath ? () => commitTextEdit() : undefined}
           onKeyDown={onTextEditKeyDown}
           onPointerDown={(event) => event.stopPropagation()}
           style={
@@ -2913,7 +3038,7 @@ export const FrameObjectView = memo(function FrameObjectView({
             : renderRichTextSegments(textSegments, Boolean(richText))}
         </div>
       ) : null}
-      {object.type === "svg" && content ? (
+      {object.type === "svg" && content && !(editableTextPath && editing) ? (
         <ExportSvgContent
           bounds={object.bounds}
           content={content}
@@ -2957,7 +3082,7 @@ export const FrameObjectView = memo(function FrameObjectView({
       ) : null}
     </div>
   );
-}, areFrameObjectPropsEqual);
+};
 
 type SplitTextToken = {
   key: string;
@@ -4050,6 +4175,7 @@ export function SelectionOverlayBox({
       ref={boxRef}
       data-frame-selection-box={objectId}
       data-frame-selection-box-portal={portal ? "true" : undefined}
+      data-frame-overlay-follow={objectId}
       className={`${portal ? "absolute" : "absolute"} pointer-events-none bg-transparent`}
       style={boxStyle}
     >

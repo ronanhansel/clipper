@@ -67,6 +67,7 @@ import {
   evaluateObjectState,
   upsertPropertyKeyframe,
 } from "../../../core/propertyRegistry";
+import { setPendingTextEditClick } from "../../../components/preview/FramePreview";
 
 export type FrameInteractionController = ReturnType<
   typeof useFrameInteractionController
@@ -226,9 +227,17 @@ export function useFrameInteractionController(
   } = params;
 
   const partVersion = useMemo(() => hashGesturePartVersion(part), [part]);
+  void partVersion;
 
-  function isActiveGestureFromCurrentPart(gesture: { partVersion?: string }) {
-    return !gesture.partVersion || gesture.partVersion === partVersion;
+  function isActiveGestureFromCurrentPart(gesture: {
+    partVersion?: string;
+    objects: SelectionPayload["objects"];
+  }) {
+    if (!gesture.partVersion) return true;
+    // Only invalidate if the gesture's own objects changed — not if unrelated
+    // objects were added to the part (e.g. creating a new object mid-drag).
+    const gestureVersion = hashGestureObjectsVersion(part, gesture.objects);
+    return gesture.partVersion === gestureVersion;
   }
 
   function updateObjectDragSelection(nextObjects: SelectionPayload["objects"]) {
@@ -284,6 +293,12 @@ export function useFrameInteractionController(
     );
   }
 
+  function getFrameOverlayFollowElements() {
+    return Array.from(
+      document.querySelectorAll<HTMLElement>("[data-frame-overlay-follow]"),
+    );
+  }
+
   function setFrameSelectionBoxDragTransform(delta: Point) {
     const frameRect = frameViewportRef.current?.getBoundingClientRect();
     const actualFrameScale = frameRect
@@ -309,6 +324,16 @@ export function useFrameInteractionController(
         `${delta.y * actualFrameScale * cameraPreviewTransform.scale}px`,
       );
     }
+    for (const element of getFrameOverlayFollowElements()) {
+      element.style.setProperty(
+        "--clipper-drag-x",
+        `${delta.x * actualFrameScale * cameraPreviewTransform.scale}px`,
+      );
+      element.style.setProperty(
+        "--clipper-drag-y",
+        `${delta.y * actualFrameScale * cameraPreviewTransform.scale}px`,
+      );
+    }
   }
 
   function clearFrameSelectionBoxDragTransform() {
@@ -317,6 +342,10 @@ export function useFrameInteractionController(
       element.style.removeProperty("--clipper-drag-y");
     }
     for (const element of getFramePathEditOverlayElements()) {
+      element.style.removeProperty("--clipper-drag-x");
+      element.style.removeProperty("--clipper-drag-y");
+    }
+    for (const element of getFrameOverlayFollowElements()) {
       element.style.removeProperty("--clipper-drag-x");
       element.style.removeProperty("--clipper-drag-y");
     }
@@ -1142,7 +1171,7 @@ export function useFrameInteractionController(
     const nextDrag = {
       origin: { x: event.clientX, y: event.clientY },
       partId: part.id,
-      partVersion,
+      partVersion: hashGestureObjectsVersion(part, nextSelectionObjects),
       objects: nextSelectionObjects,
     };
     objectDragRef.current = nextDrag;
@@ -1209,7 +1238,7 @@ export function useFrameInteractionController(
       origin: { x: event.clientX, y: event.clientY },
       handle,
       partId: part.id,
-      partVersion,
+      partVersion: hashGestureObjectsVersion(part, resizedObjects),
       selectionBox,
       displaySelectionBox,
       aspectRatio: displaySelectionBox.width / displaySelectionBox.height,
@@ -1335,6 +1364,10 @@ export function useFrameInteractionController(
       return;
     event.preventDefault();
     event.stopPropagation();
+    setPendingTextEditClick({
+      clientX: event.clientX,
+      clientY: event.clientY,
+    });
     setSelectedObjectId(object.id);
     setSelectedComposeObjectIds([object.id]);
     clearMarkerSelection();
@@ -1391,6 +1424,19 @@ function hashGesturePartVersion(part: Part) {
     objects: part.objects,
     duration: part.duration,
     frame: part.frame,
+  });
+}
+
+function hashGestureObjectsVersion(
+  part: Part,
+  gestureObjects: SelectionPayload["objects"],
+) {
+  const ids = new Set(gestureObjects.map((o) => o.id));
+  const allObjects = [...part.objects, ...part.background.elements];
+  const relevant = allObjects.filter((o) => ids.has(o.id));
+  return JSON.stringify({
+    partId: part.id,
+    objects: relevant,
   });
 }
 

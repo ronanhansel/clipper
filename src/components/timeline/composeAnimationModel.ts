@@ -11,6 +11,12 @@ import type {
 } from "../../core/types";
 
 export type ComposeAnimationAttributeKey = AnimationTrackProperty;
+// Timeline can also show generic property-tracks that don't map to legacy
+// AnimationTrackProperty keys (ex: structured fill / gradients).
+export type ComposeAnimationExtraAttributeKey = `fill:${string}`;
+export type ComposeAnimationTimelineAttributeKey =
+  | AnimationTrackProperty
+  | ComposeAnimationExtraAttributeKey;
 
 export type ComposeAnimationKeyframePoint = {
   animationId: string;
@@ -23,7 +29,7 @@ export type ComposeAnimationKeyframePoint = {
 
 export type ComposeAnimationAttributeTrack = {
   id: string;
-  key: ComposeAnimationAttributeKey;
+  key: ComposeAnimationTimelineAttributeKey;
   label: string;
   keyframes: ComposeAnimationKeyframePoint[];
 };
@@ -31,7 +37,7 @@ export type ComposeAnimationAttributeTrack = {
 export type ComposeAnimationKeyframeSelection = {
   animationId: string;
   pointId?: string;
-  key: ComposeAnimationAttributeKey;
+  key: ComposeAnimationTimelineAttributeKey;
   time: number;
   propertyPath?: PropertyPath;
 };
@@ -190,37 +196,35 @@ export function getComposeParentOptions(
   });
 }
 
-const composeAnimationAttributeLabels: Record<
-  ComposeAnimationAttributeKey,
-  string
-> = {
-  opacity: "Opacity",
-  x: "Position X",
-  y: "Position Y",
-  width: "Width",
-  height: "Height",
-  z: "Position Z",
-  scale: "Scale",
-  scaleX: "Scale X",
-  scaleY: "Scale Y",
-  rotate: "Rotation",
-  rotateX: "Rotation X",
-  rotateY: "Rotation Y",
-  rotateZ: "Rotation Z",
-  skewX: "Skew X",
-  skewY: "Skew Y",
-  transformPerspective: "Perspective",
-  blur: "Blur",
-  backgroundColor: "Background",
-  color: "Color",
-  pathOffset: "Path offset",
-  pathLength: "Path length",
-  pathSpacing: "Path spacing",
-};
+const composeAnimationAttributeLabels: Record<AnimationTrackProperty, string> =
+  {
+    opacity: "Opacity",
+    x: "Position X",
+    y: "Position Y",
+    width: "Width",
+    height: "Height",
+    z: "Position Z",
+    scale: "Scale",
+    scaleX: "Scale X",
+    scaleY: "Scale Y",
+    rotate: "Rotation",
+    rotateX: "Rotation X",
+    rotateY: "Rotation Y",
+    rotateZ: "Rotation Z",
+    skewX: "Skew X",
+    skewY: "Skew Y",
+    transformPerspective: "Perspective",
+    blur: "Blur",
+    backgroundColor: "Background",
+    color: "Color",
+    pathOffset: "Path offset",
+    pathLength: "Path length",
+    pathSpacing: "Path spacing",
+  };
 
 const composeAnimationAttributeOrder = Object.keys(
   composeAnimationAttributeLabels,
-) as ComposeAnimationAttributeKey[];
+) as AnimationTrackProperty[];
 
 const genericPropertyPathByAttribute: Partial<
   Record<ComposeAnimationAttributeKey, PropertyPath>
@@ -248,13 +252,57 @@ const genericPropertyPathByAttribute: Partial<
 
 const attributeByGenericPropertyPath = new Map<
   PropertyPath,
-  ComposeAnimationAttributeKey
+  ComposeAnimationTimelineAttributeKey
 >(
   Object.entries(genericPropertyPathByAttribute).map(([key, path]) => [
     path as PropertyPath,
     key as ComposeAnimationAttributeKey,
   ]),
 );
+
+function isFillPropertyPath(path: string): path is PropertyPath {
+  return path.startsWith("style.fill.");
+}
+
+function buildFillTrackKey(
+  propertyPath: string,
+): ComposeAnimationExtraAttributeKey {
+  return `fill:${propertyPath}`;
+}
+
+function labelForFillPropertyPath(propertyPath: string): string {
+  // Keep short + scan-friendly; timeline row already sits under "Background".
+  if (propertyPath === "style.fill.color") return "Fill Color";
+  if (propertyPath === "style.fill.alpha") return "Fill Alpha";
+  if (propertyPath === "style.fill.linearAngle") return "Fill Angle";
+  if (propertyPath === "style.fill.radialShape") return "Fill Shape";
+  if (propertyPath === "style.fill.radialCenterX") return "Fill CX";
+  if (propertyPath === "style.fill.radialCenterY") return "Fill CY";
+  if (propertyPath === "style.fill.radialRadiusX") return "Fill RX";
+  if (propertyPath === "style.fill.radialRadiusY") return "Fill RY";
+  if (propertyPath === "style.fill.conicFromAngle") return "Fill Angle";
+  if (propertyPath === "style.fill.conicCenterX") return "Fill CX";
+  if (propertyPath === "style.fill.conicCenterY") return "Fill CY";
+  if (propertyPath === "style.fill.diamondRotation") return "Fill Rot";
+  if (propertyPath === "style.fill.diamondCenterX") return "Fill CX";
+  if (propertyPath === "style.fill.diamondCenterY") return "Fill CY";
+  if (propertyPath === "style.fill.diamondRadiusX") return "Fill RX";
+  if (propertyPath === "style.fill.diamondRadiusY") return "Fill RY";
+  if (propertyPath === "style.fill.repeating") return "Fill Repeat";
+  if (propertyPath === "style.fill.colorSpace") return "Fill Space";
+  if (propertyPath === "style.fill.gradientType") return "Fill Type";
+  const stopMatch = propertyPath.match(
+    /^style\.fill\.stops\[([^\]]+)\]\.(color|position|opacity)$/,
+  );
+  if (stopMatch) {
+    const suffix = stopMatch[1].slice(-2);
+    const field = stopMatch[2];
+    const fieldLabel =
+      field === "color" ? "Color" : field === "position" ? "Pos" : "Alpha";
+    return `Stop ${suffix} ${fieldLabel}`;
+  }
+  return propertyPath;
+}
 
 export function getGenericPropertyPathForComposeAttribute(
   key: ComposeAnimationAttributeKey,
@@ -281,16 +329,25 @@ export function getComposeAnimationAttributeTracks(
   layer: ComposeAnimationTimelineLayer,
 ): ComposeAnimationAttributeTrack[] {
   const tracks = new Map<
-    ComposeAnimationAttributeKey,
+    ComposeAnimationTimelineAttributeKey,
     ComposeAnimationKeyframePoint[]
   >();
+  const labels = new Map<ComposeAnimationTimelineAttributeKey, string>();
 
   for (const [rawPropertyPath, track] of Object.entries(
     layer.object?.tracks ?? {},
   )) {
     const propertyPath = rawPropertyPath as PropertyPath;
-    const key = attributeByGenericPropertyPath.get(propertyPath);
+    const mapped = attributeByGenericPropertyPath.get(propertyPath);
+    const key =
+      mapped ??
+      (isFillPropertyPath(propertyPath)
+        ? buildFillTrackKey(propertyPath)
+        : undefined);
     if (!key) continue;
+    if (!mapped && isFillPropertyPath(propertyPath)) {
+      labels.set(key, labelForFillPropertyPath(propertyPath));
+    }
     const points = tracks.get(key) ?? [];
     for (const point of track.points) {
       if (typeof point.value !== "number" && typeof point.value !== "string")
@@ -309,16 +366,30 @@ export function getComposeAnimationAttributeTracks(
     tracks.set(key, points);
   }
 
-  return composeAnimationAttributeOrder.flatMap((key) => {
+  const ordered = composeAnimationAttributeOrder.flatMap((key) => {
     const keyframes = tracks.get(key);
     if (!keyframes?.length) return [];
-    return {
+    return [
+      {
+        id: key,
+        key,
+        label: composeAnimationAttributeLabels[key],
+        keyframes: keyframes.sort((left, right) => left.time - right.time),
+      },
+    ];
+  });
+
+  // Append fill/extra tracks after canonical ones.
+  const extra = Array.from(tracks.entries())
+    .filter(([key]) => typeof key === "string" && key.startsWith("fill:"))
+    .map(([key, keyframes]) => ({
       id: key,
       key,
-      label: composeAnimationAttributeLabels[key],
+      label: labels.get(key) ?? String(key).slice("fill:".length),
       keyframes: keyframes.sort((left, right) => left.time - right.time),
-    };
-  });
+    }));
+
+  return [...ordered, ...extra];
 }
 
 export function getComposeAnimationLayerKeyframes(
@@ -441,7 +512,11 @@ export function moveComposeGenericPropertyKeyframesAtTime(
   let nextObject = object;
   for (const rawPropertyPath of Object.keys(object.tracks ?? {})) {
     const propertyPath = rawPropertyPath as PropertyPath;
-    if (!attributeByGenericPropertyPath.has(propertyPath)) continue;
+    if (
+      !attributeByGenericPropertyPath.has(propertyPath) &&
+      !isFillPropertyPath(propertyPath)
+    )
+      continue;
     nextObject = movePropertyKeyframe(
       nextObject,
       propertyPath,

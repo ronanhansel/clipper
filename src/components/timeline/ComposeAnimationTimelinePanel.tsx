@@ -59,6 +59,7 @@ import {
   getGenericPropertyPathFromComposeAnimationId,
   isGenericComposeAnimationId,
   type ComposeAnimationAttributeKey,
+  type ComposeAnimationTimelineAttributeKey,
   type ComposeAnimationKeyframePoint,
   type ComposeAnimationKeyframeSelection,
   type ComposeAnimationAttributeTrack,
@@ -131,7 +132,7 @@ type ComposePickWhipDrag = {
 
 function composeKeyframeSelectionId(
   layerId: string,
-  key: ComposeAnimationAttributeKey,
+  key: ComposeAnimationTimelineAttributeKey,
   animationId: string,
   time: number,
   pointId?: string,
@@ -1654,7 +1655,7 @@ function ComposeAttributeKeyframeLane({
   easeExpanded,
 }: {
   layerId: string;
-  trackKey: ComposeAnimationAttributeKey;
+  trackKey: ComposeAnimationTimelineAttributeKey;
   keyframes: ComposeAnimationKeyframePoint[];
   timelineDuration: number;
   contentWidth: number;
