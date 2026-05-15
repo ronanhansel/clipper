@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { memo, type ReactNode } from "react";
 import {
   sectionTitle,
   segmentedTabActive,
@@ -21,7 +21,7 @@ const tabLabels: Record<RightPanelTab, string> = {
   agent: "agent",
 };
 
-export function RightInspectorPanel({
+export const RightInspectorPanel = memo(function RightInspectorPanel({
   activeTab,
   children,
   validationErrors,
@@ -56,4 +56,4 @@ export function RightInspectorPanel({
       ) : null}
     </aside>
   );
-}
+});

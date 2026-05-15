@@ -1,4 +1,4 @@
-import { useState, type ComponentProps } from "react";
+import { memo, useState, type ComponentProps } from "react";
 import { PlaybackBar, type PlaybackBarProps } from "./PlaybackBar";
 import { PreviewColumn } from "./PreviewColumn";
 
@@ -9,7 +9,7 @@ type CenterPreviewPaneProps = Omit<
   playbackBarProps: Omit<PlaybackBarProps, "previewColumnHovered">;
 };
 
-export function CenterPreviewPane({
+export const CenterPreviewPane = memo(function CenterPreviewPane({
   playbackBarProps,
   ...previewColumnProps
 }: CenterPreviewPaneProps) {
@@ -27,4 +27,4 @@ export function CenterPreviewPane({
       />
     </PreviewColumn>
   );
-}
+});

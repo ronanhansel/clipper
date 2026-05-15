@@ -4810,6 +4810,90 @@ function AppContent({
     updateMode(nextMode);
   }
 
+  const openExportDialog = useCallback(
+    () => setExportDialogOpen(true),
+    [setExportDialogOpen],
+  );
+  const openSettings = useCallback(
+    () => setSettingsOpen(true),
+    [setSettingsOpen],
+  );
+  const openProjectAction = useCallback(
+    () => void openProjectManifest(),
+    [openProjectManifest],
+  );
+  const closeAppContextMenu = useCallback(
+    () => setAppContextMenu(null),
+    [setAppContextMenu],
+  );
+  const handleAutoDownloadUpdatesChange = useCallback(
+    (enabled: boolean) => void setAutoDownloadUpdates(enabled),
+    [setAutoDownloadUpdates],
+  );
+  const handleCheckForUpdates = useCallback(
+    () => void checkForUpdates(),
+    [checkForUpdates],
+  );
+  const handleDownloadUpdate = useCallback(
+    () => void downloadUpdate(),
+    [downloadUpdate],
+  );
+  const handleMediaExport = useCallback(
+    () => void exportRenderedMedia(),
+    [exportRenderedMedia],
+  );
+  const handleClearAllPrerenderCaches = useCallback(
+    () => void clearAllPrerenderCaches(),
+    [clearAllPrerenderCaches],
+  );
+  const handleVideoExportCancel = useCallback(
+    () => void stopVideoExport(),
+    [stopVideoExport],
+  );
+  const handleInstallUpdate = useCallback(
+    () => void installUpdate(),
+    [installUpdate],
+  );
+
+  const osFileManagerPropsRef = useRef<typeof fileManagerActions>(fileManagerActions);
+  osFileManagerPropsRef.current = fileManagerActions;
+  const openProjectFileInEditorRef = useRef(openProjectFileInEditor);
+  openProjectFileInEditorRef.current = openProjectFileInEditor;
+  const osFileManagerProps = useMemo(
+    () => ({
+      bin: normalizeProjectBin(project),
+      compositionLibrary: project.compositionLibrary ?? [],
+      selectedCompositionId: selectedPartId,
+      createComposition: (...args: Parameters<typeof fileManagerActions.createBinComposition>) =>
+        osFileManagerPropsRef.current.createBinComposition(...args),
+      createFile: (...args: Parameters<typeof fileManagerActions.createBinFile>) =>
+        osFileManagerPropsRef.current.createBinFile(...args),
+      createFolder: (...args: Parameters<typeof fileManagerActions.createBinFolder>) =>
+        osFileManagerPropsRef.current.createBinFolder(...args),
+      createTimeline: (...args: Parameters<typeof fileManagerActions.createBinTimeline>) =>
+        osFileManagerPropsRef.current.createBinTimeline(...args),
+      deleteItem: (...args: Parameters<typeof fileManagerActions.deleteBinItem>) =>
+        osFileManagerPropsRef.current.deleteBinItem(...args),
+      deleteItems: (...args: Parameters<typeof fileManagerActions.deleteBinItems>) =>
+        osFileManagerPropsRef.current.deleteBinItems(...args),
+      dropFiles: (...args: Parameters<typeof fileManagerActions.dropBinFiles>) =>
+        osFileManagerPropsRef.current.dropBinFiles(...args),
+      duplicateItem: (...args: Parameters<typeof fileManagerActions.duplicateBinItem>) =>
+        osFileManagerPropsRef.current.duplicateBinItem(...args),
+      duplicateItems: (...args: Parameters<typeof fileManagerActions.duplicateBinItems>) =>
+        osFileManagerPropsRef.current.duplicateBinItems(...args),
+      moveItem: (...args: Parameters<typeof fileManagerActions.moveBinItem>) =>
+        osFileManagerPropsRef.current.moveBinItem(...args),
+      onOpenFile: (...args: Parameters<typeof openProjectFileInEditor>) =>
+        openProjectFileInEditorRef.current(...args),
+      renameItem: (...args: Parameters<typeof fileManagerActions.renameBinItem>) =>
+        osFileManagerPropsRef.current.renameBinItem(...args),
+      revealItem: (...args: Parameters<typeof fileManagerActions.revealBinItem>) =>
+        osFileManagerPropsRef.current.revealBinItem(...args),
+    }),
+    [project, selectedPartId],
+  );
+
   return (
     <>
       <main
@@ -4828,11 +4912,11 @@ function AppContent({
           onCancelProjectRename={cancelProjectRename}
           onCloseProject={handleCloseProject}
           onCommitProjectRename={commitProjectRename}
-          onExportOpen={() => setExportDialogOpen(true)}
-          onOpenProject={() => void openProjectManifest()}
+          onExportOpen={openExportDialog}
+          onOpenProject={openProjectAction}
           onProjectNameDraftChange={setProjectNameDraft}
           onProjectTitleContextMenu={openProjectTitleMenu}
-          onSettingsOpen={() => setSettingsOpen(true)}
+          onSettingsOpen={openSettings}
         />
 
         <EditorWorkspace
@@ -4846,24 +4930,7 @@ function AppContent({
             hasActiveComposition={hasActiveComposition}
             isPlaying={isPlaying}
             leftPanelTab={leftPanelTab}
-            osFileManagerProps={{
-              bin: normalizeProjectBin(project),
-              compositionLibrary: project.compositionLibrary ?? [],
-              selectedCompositionId: selectedPartId,
-              createComposition: fileManagerActions.createBinComposition,
-              createFile: fileManagerActions.createBinFile,
-              createFolder: fileManagerActions.createBinFolder,
-              createTimeline: fileManagerActions.createBinTimeline,
-              deleteItem: fileManagerActions.deleteBinItem,
-              deleteItems: fileManagerActions.deleteBinItems,
-              dropFiles: fileManagerActions.dropBinFiles,
-              duplicateItem: fileManagerActions.duplicateBinItem,
-              duplicateItems: fileManagerActions.duplicateBinItems,
-              moveItem: fileManagerActions.moveBinItem,
-              onOpenFile: openProjectFileInEditor,
-              renameItem: fileManagerActions.renameBinItem,
-              revealItem: fileManagerActions.revealBinItem,
-            }}
+            osFileManagerProps={osFileManagerProps}
             part={leftSidebarPart}
             selectedObjectIds={leftSidebarSelectedObjectIds}
             timelineMode={timelineMode}
@@ -5409,13 +5476,11 @@ function AppContent({
         videoExportTileHeight={videoExportTileHeight}
         videoExportProgress={videoExportProgress}
         updateStatus={updateStatus}
-        onAppContextMenuClose={() => setAppContextMenu(null)}
+        onAppContextMenuClose={closeAppContextMenu}
         onAgentProviderChange={setAgentProvider}
-        onAutoDownloadUpdatesChange={(enabled) =>
-          void setAutoDownloadUpdates(enabled)
-        }
-        onCheckForUpdates={() => void checkForUpdates()}
-        onDownloadUpdate={() => void downloadUpdate()}
+        onAutoDownloadUpdatesChange={handleAutoDownloadUpdatesChange}
+        onCheckForUpdates={handleCheckForUpdates}
+        onDownloadUpdate={handleDownloadUpdate}
         onDebugSettingsEnabledChange={setDebugSettingsEnabled}
         onDefaultNewMarkerDurationSecondsChange={
           setDefaultNewMarkerDurationSeconds
@@ -5427,7 +5492,7 @@ function AppContent({
         onExportTileMappingChange={setExportTileMapping}
         onExportWorkerConfigurationModeChange={setExportWorkerConfigurationMode}
         onExportWorkerMappingChange={setExportWorkerMapping}
-        onMediaExport={() => void exportRenderedMedia()}
+        onMediaExport={handleMediaExport}
         onMediaExportFormatChange={setMediaExportFormat}
         onMediaExportRenderModeChange={setMediaExportRenderMode}
         onStableSlowGridPresetChange={setStableSlowGridPreset}
@@ -5441,7 +5506,7 @@ function AppContent({
         onPrerenderCacheBlackMissDebugChange={setPrerenderCacheBlackMissDebug}
         onPrerenderBlockDurationMsChange={setPrerenderBlockDurationMs}
         onPreviewRenderHeightChange={setPreviewRenderHeight}
-        onClearAllPrerenderCaches={() => void clearAllPrerenderCaches()}
+        onClearAllPrerenderCaches={handleClearAllPrerenderCaches}
         onReusePrerenderCacheForExportChange={setReusePrerenderCacheForExport}
         onScrubCommitThrottleMsChange={setScrubCommitThrottleMs}
         onSettingsOpenChange={setSettingsOpen}
@@ -5449,8 +5514,8 @@ function AppContent({
         onTimelineEndPaddingFractionChange={setTimelineEndPaddingFraction}
         onTimelinePrecisionChange={setTimelinePrecision}
         onVideoExportTileHeightChange={setVideoExportTileHeight}
-        onVideoExportCancel={() => void stopVideoExport()}
-        onInstallUpdate={() => void installUpdate()}
+        onVideoExportCancel={handleVideoExportCancel}
+        onInstallUpdate={handleInstallUpdate}
       />
       <FindMediaDialog
         findMediaRequest={findMediaRequest}

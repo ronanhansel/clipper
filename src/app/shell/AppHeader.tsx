@@ -1,4 +1,4 @@
-import type { MouseEvent as ReactMouseEvent } from "react";
+import { memo, type MouseEvent as ReactMouseEvent } from "react";
 import { Input } from "../../components/ui/input";
 import {
   appBarActionButtonBase,
@@ -22,7 +22,7 @@ type AppHeaderProps = {
   onSettingsOpen: () => void;
 };
 
-export function AppHeader({
+export const AppHeader = memo(function AppHeader({
   projectName,
   projectNameDraft,
   lastSavedAt,
@@ -114,7 +114,7 @@ export function AppHeader({
       </div>
     </header>
   );
-}
+});
 
 function formatSavedTime(timestamp: number) {
   return new Intl.DateTimeFormat(undefined, {

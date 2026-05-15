@@ -6,7 +6,7 @@ import {
   StepBack,
   StepForward,
 } from "lucide-react";
-import type { CSSProperties } from "react";
+import { memo, type CSSProperties } from "react";
 import { formatTime } from "../../core/timeline";
 import { clamp } from "../../core/math";
 
@@ -25,7 +25,7 @@ type PresentationControlsProps = {
   togglePlayback: () => void;
 };
 
-export function PresentationControls({
+export const PresentationControls = memo(function PresentationControls({
   controlsVisible,
   isPlaying,
   sceneDurationSeconds,
@@ -111,4 +111,4 @@ export function PresentationControls({
       </div>
     </div>
   );
-}
+});

@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Toaster } from "react-hot-toast";
 import { AppContextMenu } from "../../components/AppContextMenu";
 import {
@@ -106,7 +107,7 @@ type AppDialogsProps = {
   onInstallUpdate: () => void;
 };
 
-export function AppDialogs({
+export const AppDialogs = memo(function AppDialogs({
   appContextMenu,
   agentProvider,
   autoDownloadUpdates,
@@ -293,4 +294,4 @@ export function AppDialogs({
       />
     </>
   );
-}
+});
