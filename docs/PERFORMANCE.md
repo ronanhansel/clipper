@@ -4,6 +4,179 @@ Hard-won lessons from inspector-lag and playback-stutter rewrites (memos
 092–098). Read this before adding state, props, or render paths to anything
 that mounts during playback or scrub.
 
+## Quick checklist for future agents
+
+Before you write code, run this against your design:
+
+- [ ] **Does this state belong in React, or in a module-scope store?** If many
+  components read it and it changes more than once a second, put it in a
+  store with `subscribe / getSnapshot` and consume via `useSyncExternalStore`.
+  Don't reach for `useState` or zustand by reflex.
+- [ ] **Will the value be threaded as a prop more than one level deep?** If
+  yes, route it through a store or a focused React context instead. Prop
+  drilling defeats `React.memo` and re-renders the whole subtree.
+- [ ] **Does anything I'm adding update on every playhead tick?** If yes, it
+  must subscribe through `usePlayheadTime` (bucketed at 30 Hz) or write to
+  the DOM imperatively. Per-tick React state setters at any level above the
+  sealed render boundary are forbidden.
+- [ ] **Is there an inline arrow callback on a memoised component?** Wrap
+  with `useCallback` or move the closure inside the child. Inline arrows
+  break shallow equality and re-render every commit.
+- [ ] **Am I editing a 1000+ line file?** Stop. Decompose first. The
+  inspector and timeline panels both went through monolith-to-registry
+  refactors — follow the pattern: per-type sections, registry dispatch,
+  context for shared helpers.
+- [ ] **Did I add a feature flag or backwards-compat shim?** Delete it.
+  Just change the code. No `// kept for X` comments, no dead branches.
+- [ ] **Did I write a comment explaining what the code does?** Delete it.
+  Names should explain what; comments are for non-obvious why.
+- [ ] **Did I update `agent-log/v0.2.18/memory/[id]-*.md`?** Mandatory.
+  Without it, the next agent has to rediscover what you learned.
+
+## Modularity rules
+
+### Decompose by domain, not by file size
+
+When a file passes ~1500 lines, split it. But don't split arbitrarily —
+follow the natural seams:
+
+- **Per-type registries** for things that vary by object type (inspector
+  sections, render handlers, evaluators). One file per type, one registry
+  that maps type → handler.
+- **Per-feature folders** for cross-cutting concerns (`features/playback`,
+  `features/timeline`, `features/inspector`). Each folder owns its store,
+  its hooks, and its UI.
+- **Shared utilities** in a `shared.ts` or named module — never copy-paste.
+
+### React context for helpers, store for state
+
+`ObjectInspectorContext` is the right pattern: ~30 helper functions go
+through context once, sections call `useObjectInspector()` to grab what
+they need. The alternative — props — would have re-rendered the whole
+inspector every time any helper's reference changed.
+
+State (values that mutate) goes in the store. Helpers (functions that act
+on state) go in context. Don't conflate them.
+
+### One default, no exceptions
+
+When designing a registry, include a `defaultDefinition` so unknown types
+fall through gracefully. New object types just register an entry; missing
+ones still render something sensible. This is what
+`getInspectorTypeDefinition` does.
+
+### File naming follows the structure
+
+- `src/components/inspector/sections/TextSection.tsx` — plug into registry
+- `src/components/inspector/inspectorRegistry.ts` — the dispatch table
+- `src/components/inspector/objectInspectorContext.tsx` — shared helpers
+- `src/components/inspector/scrubLive.tsx` — shared live-time wrappers
+- `src/components/inspector/inspectorShared.ts` — shared types/utilities
+
+If you can't figure out where a new file belongs, the structure is wrong.
+Refactor the structure before adding the file.
+
+## External storage / state management
+
+The repo runs three layers of state. Use the right one.
+
+| Layer | Use for | Don't use for |
+|-------|---------|---------------|
+| `playbackTimeStore` (module scope, `useSyncExternalStore`) | Per-tick values: scene time, scrub clock | Anything structural |
+| `editorStore` (zustand) | Project state, selection, mode, structural sceneTime | Anything per-tick |
+| Local `useState` | Component-local UI (open/closed, hover, focus) | Anything shared between components |
+
+### Why three layers?
+
+- `useSyncExternalStore` over a module-scope store is the only option when
+  many components need a high-frequency value. Zustand's `useStore`
+  re-renders the calling component on every change; the external store can
+  bucket and dedupe before the React commit.
+- Zustand is the right tool for structural state — it survives across
+  components, supports selectors, plays well with devtools.
+- `useState` is for ephemeral local state — popover open, input focused,
+  hover-as-cursor, etc. Anything that other components need to read should
+  not be `useState`.
+
+### Adding a new shared value
+
+1. Is it per-tick? Add to `playbackTimeStore` (or a new dedicated store).
+2. Is it structural? Add to `editorStore` with a selector.
+3. Is it derived from existing state? Add to `useEditorDerivedState` —
+   `useMemo` keys it on the underlying store values.
+4. Don't shortcut by adding `useState` to `AppContent`. Every value at the
+   top fans out to every subscriber.
+
+### Reading state without subscribing
+
+Inside event handlers, you often want a one-shot read, not a subscription:
+
+```typescript
+// WRONG — subscribes the handler-owning component to every change
+const time = useEditorStore((s) => s.currentSceneTime);
+
+// RIGHT — one-shot read, no subscription
+const time = useEditorStoreApi.getState().currentSceneTime;
+
+// RIGHT — fresh-as-possible per-tick read
+const time = getMasterTimelineClockSnapshot().displayTime;
+```
+
+## Avoiding re-renders: the playbook
+
+### 1. Find the offender first
+
+Open React DevTools Profiler, hit record, do the slow interaction. The
+component at the top of the flame graph is your suspect. Don't refactor by
+guess — memo 095 broke playback because it gated the wrong commit.
+
+### 2. Check what props it receives
+
+If the component is memoised but still re-rendering, one of its props
+changed reference. Common culprits:
+
+- Inline arrow callbacks: `onChange={() => …}` — wrap with `useCallback`.
+- Object/array literals: `style={{ … }}` — extract to `useMemo` or module
+  constant.
+- Props derived from a tick-driven value at the parent level — move the
+  derivation into the child's own `usePlayheadTime`/`useSyncExternalStore`.
+
+### 3. Custom equality is a last resort
+
+`React.memo(Component, customEqual)` works but is fragile. Prefer:
+1. Stabilise the props (callbacks, objects).
+2. Move tick-driven props out of the prop bag and into a store.
+3. Only then reach for custom equality, and gate it on `isPlaying` or
+   similar so it only kicks in during the hot path.
+
+### 4. Lazy mount expensive subtrees
+
+When a panel has a heavy section (animator controls, font selector,
+gradient picker), don't mount it until needed. The wrong shape:
+
+```typescript
+<Panel>
+  <ExpensiveSection always-mounted />
+</Panel>
+```
+
+The right shape:
+
+```typescript
+<Panel>
+  {showExpensive ? <ExpensiveSection /> : null}
+</Panel>
+```
+
+`React.lazy` for code-splitting; conditional render for cheap unmount.
+
+### 5. Don't fight reconciliation
+
+If you find yourself adding `React.memo` to every component, you're
+solving the wrong problem. Either the parent is re-rendering for no good
+reason (find why), or you're routing per-tick values through React when
+they should be in a store.
+
 ## Core principle: keep per-tick work off React
 
 The visible animation is driven by JS-interpolated values fed to React via
