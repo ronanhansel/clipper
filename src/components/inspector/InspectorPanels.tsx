@@ -645,7 +645,12 @@ export const ObjectInspector = memo(function ObjectInspector({
     <ObjectInspectorProvider value={helpers}>
       <div className="grid gap-3">
         {definition.sections.map((Section, index) => (
-          <Section key={index} />
+          <div key={index} className="grid gap-3">
+            {index > 0 ? (
+              <div className="h-px w-full bg-[#2d313b]" aria-hidden="true" />
+            ) : null}
+            <Section />
+          </div>
         ))}
       </div>
     </ObjectInspectorProvider>

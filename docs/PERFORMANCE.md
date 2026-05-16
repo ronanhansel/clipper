@@ -4,11 +4,11 @@ Read this before touching playback, inspector, or scrub code.
 
 ## State layers
 
-| Layer | Use for |
-|-------|---------|
-| `playbackTimeStore` (`useSyncExternalStore`) | Per-tick values (scene time, scrub clock) |
-| `editorStore` (zustand) | Structural state (project, selection, mode) |
-| `useState` | Component-local UI only |
+| Layer                                        | Use for                                     |
+| -------------------------------------------- | ------------------------------------------- |
+| `playbackTimeStore` (`useSyncExternalStore`) | Per-tick values (scene time, scrub clock)   |
+| `editorStore` (zustand)                      | Structural state (project, selection, mode) |
+| `useState`                                   | Component-local UI only                     |
 
 Don't add `useState` to `AppContent` for shared values — it fans out to every subscriber every tick.
 

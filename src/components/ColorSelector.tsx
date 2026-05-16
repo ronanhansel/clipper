@@ -713,6 +713,8 @@ export function FillColorSelector({
           alpha={draft.alpha}
           allowAlpha
           variant={variant}
+          keyframeStates={keyframeStates}
+          onToggleKeyframe={onToggleKeyframe}
           onChange={(color) => {
             const next = { ...draft, color: normalizeHexColor(color) };
             previewFill(next);
@@ -1482,6 +1484,8 @@ function SolidColorPickerPanel({
   onAlphaChange,
   onCommit,
   onPickFromScreen,
+  keyframeStates,
+  onToggleKeyframe,
 }: {
   value: string;
   alpha?: number;
@@ -1491,6 +1495,8 @@ function SolidColorPickerPanel({
   onAlphaChange?: (alpha: number) => void;
   onCommit?: () => void;
   onPickFromScreen?: () => void;
+  keyframeStates?: FillKeyframeConfig[];
+  onToggleKeyframe?: (path: string) => void;
 }) {
   const boardRectRef = useRef<DOMRect | null>(null);
   const hueRectRef = useRef<DOMRect | null>(null);
@@ -1693,6 +1699,10 @@ function SolidColorPickerPanel({
             className="min-w-0 flex-1 bg-transparent text-xs font-semibold text-white outline-none"
             value={draft}
             onChange={(event) => apply(normalizeHexColor(event.target.value))}
+          />
+          <FillInlineKeyframeDiamond
+            state={findFillKeyframeState(keyframeStates, "style.fill.color")}
+            onToggleKeyframe={onToggleKeyframe}
           />
         </div>
         <button

@@ -4,6 +4,7 @@ import { EffectsSection } from "./sections/EffectsSection";
 import { FillSection } from "./sections/FillSection";
 import { Pattern2dSection } from "./sections/Pattern2dSection";
 import { RectSection } from "./sections/RectSection";
+import { StrokeSection } from "./sections/StrokeSection";
 import { StyleColorEntriesSection } from "./sections/StyleColorEntriesSection";
 import { StyleColorSection } from "./sections/StyleColorSection";
 import { TextSection } from "./sections/TextSection";
@@ -34,6 +35,7 @@ export const inspectorRegistry: Record<string, InspectorTypeDefinition> = {
     sections: [
       BoundsSection,
       EffectsSection,
+      StrokeSection,
       TextSection,
       StyleColorEntriesSection,
     ],
@@ -42,12 +44,13 @@ export const inspectorRegistry: Record<string, InspectorTypeDefinition> = {
     sections: [
       BoundsSection,
       EffectsSection,
+      StrokeSection,
       RectSection,
       StyleColorEntriesSection,
     ],
   },
   pattern2d: {
-    sections: [BoundsSection, EffectsSection, Pattern2dSection],
+    sections: [BoundsSection, EffectsSection, StrokeSection, Pattern2dSection],
   },
 };
 
@@ -59,6 +62,7 @@ export const defaultInspectorTypeDefinition: InspectorTypeDefinition = {
   sections: [
     BoundsSection,
     EffectsSection,
+    StrokeSection,
     StyleColorSection,
     FillSection,
     StyleColorEntriesSection,

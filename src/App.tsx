@@ -234,15 +234,6 @@ import {
   fileManagerFindMediaEvent,
   type FileManagerFindMediaDetail,
 } from "./lib/fileManagerEvents";
-import { scan } from "react-scan";
-
-if (import.meta.env.DEV) {
-  scan({
-    enabled: true,
-    showToolbar: true,
-    log: false,
-  });
-}
 
 const defaultEditorState: EditorState = {
   timeline: defaultTimelineViewportState,
@@ -2793,6 +2784,11 @@ function AppContent({
         detail: { bounds: next.bounds, objectId: next.id },
       }),
     );
+    window.dispatchEvent(
+      new CustomEvent("clipper:object-preview-stroke", {
+        detail: { stroke: next.stroke ?? null, objectId: next.id },
+      }),
+    );
     for (const [key, value] of Object.entries(next.style)) {
       if (value === undefined)
         target.style.removeProperty(cssStylePropertyName(key));
@@ -3445,8 +3441,6 @@ function AppContent({
     pendingComposeSelectionObjectIdsRef.current = [object.id];
     persistComposeSelection([object.id]);
     setEditingTextObjectId(object.id);
-    activeToolRef.current = null;
-    setActiveTool(null);
   }
 
   useEffect(() => {

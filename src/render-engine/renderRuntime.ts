@@ -220,6 +220,10 @@ function renderStyleFromPropertyTracks(object: FrameObject): RenderStyle {
     shadowStyle.filterPart,
   );
   const background = resolveBackgroundStyle(object.style.backgroundColor);
+  const textStrokeStyle = textStrokeRenderStyle(
+    object,
+    readObjectStrokeRecord(object),
+  );
   return {
     left: object.bounds.x,
     top: object.bounds.y,
@@ -233,6 +237,8 @@ function renderStyleFromPropertyTracks(object: FrameObject): RenderStyle {
     filter,
     boxShadow: shadowStyle.boxShadow,
     textShadow: shadowStyle.textShadow,
+    WebkitTextStroke: textStrokeStyle.webkitTextStroke,
+    paintOrder: textStrokeStyle.paintOrder,
   };
 }
 
@@ -275,6 +281,33 @@ function readObjectShadowRecord(object: FrameObject): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
+}
+
+function readObjectStrokeRecord(object: FrameObject): Record<string, unknown> {
+  const value = (object as unknown as Record<string, unknown>).stroke;
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function textStrokeRenderStyle(
+  object: FrameObject,
+  stroke: Record<string, unknown>,
+): { webkitTextStroke?: string; paintOrder?: string } {
+  if (object.type !== "text") return {};
+  if (!stroke || stroke.enabled === false) return {};
+  const widthRaw =
+    typeof stroke.width === "number" && Number.isFinite(stroke.width)
+      ? stroke.width
+      : 0;
+  const width = Math.max(0, widthRaw);
+  if (width <= 0) return {};
+  const rgba = shadowColorToRgba(stroke.color, stroke.alpha);
+  if (!rgba) return {};
+  return {
+    webkitTextStroke: `${width.toFixed(2)}px ${rgba}`,
+    paintOrder: "stroke fill",
+  };
 }
 
 function transformStyleFromRecord(record: Record<string, unknown>) {

@@ -8,6 +8,7 @@ import type {
   PropertyTrack,
   PropertyTrackValueType,
   ShadowEffect,
+  StrokeEffect,
 } from "./types";
 
 export type PropertyPath =
@@ -39,6 +40,12 @@ export type PropertyPath =
   | "shadow.spread"
   | "shadow.color"
   | "shadow.alpha"
+  | "stroke.width"
+  | "stroke.color"
+  | "stroke.alpha"
+  | "stroke.start"
+  | "stroke.end"
+  | "stroke.spacing"
   | `props.${string}`;
 
 export type PropertyDefinition = {
@@ -50,6 +57,7 @@ export type PropertyDefinition = {
     | "transform"
     | "filter"
     | "shadow"
+    | "stroke"
     | "style"
     | "props";
   defaultValue?: JsonValue;
@@ -65,6 +73,7 @@ export type EvaluatedObjectState = FrameObject & {
   transform: Record<string, JsonValue>;
   filter: Record<string, JsonValue>;
   shadow: Record<string, JsonValue>;
+  stroke: Record<string, JsonValue>;
   props: Record<string, JsonValue>;
 };
 
@@ -153,6 +162,18 @@ export const SHADOW_DEFAULTS: Required<ShadowEffect> = {
   alpha: 25,
 };
 
+export const STROKE_DEFAULTS: Required<StrokeEffect> = {
+  enabled: true,
+  width: 1,
+  color: "#000000",
+  alpha: 100,
+  position: "outside",
+  start: 0,
+  end: 1,
+  style: "solid",
+  spacing: 1,
+};
+
 export function readShadowRecord(
   object: FrameObject,
 ): Record<string, JsonValue> {
@@ -168,11 +189,37 @@ export function readShadowRecord(
   };
 }
 
+export function readStrokeRecord(
+  object: FrameObject,
+): Record<string, JsonValue> {
+  const stroke = object.stroke ?? {};
+  return {
+    enabled: stroke.enabled ?? STROKE_DEFAULTS.enabled,
+    width: stroke.width ?? STROKE_DEFAULTS.width,
+    color: stroke.color ?? STROKE_DEFAULTS.color,
+    alpha: stroke.alpha ?? STROKE_DEFAULTS.alpha,
+    position: stroke.position ?? STROKE_DEFAULTS.position,
+    start: stroke.start ?? STROKE_DEFAULTS.start,
+    end: stroke.end ?? STROKE_DEFAULTS.end,
+    style: stroke.style ?? STROKE_DEFAULTS.style,
+    spacing: stroke.spacing ?? STROKE_DEFAULTS.spacing,
+  };
+}
+
 export function hasShadowEffect(object: FrameObject): boolean {
   if (object.shadow) return true;
   if (!object.tracks) return false;
   for (const path of Object.keys(object.tracks)) {
     if (path.startsWith("shadow.")) return true;
+  }
+  return false;
+}
+
+export function hasStrokeEffect(object: FrameObject): boolean {
+  if (object.stroke) return true;
+  if (!object.tracks) return false;
+  for (const path of Object.keys(object.tracks)) {
+    if (path.startsWith("stroke.")) return true;
   }
   return false;
 }
@@ -183,6 +230,7 @@ export function evaluateObjectState(
   registry: PropertyRegistry = defaultPropertyRegistry,
 ): EvaluatedObjectState {
   const includeShadow = hasShadowEffect(object);
+  const includeStroke = hasStrokeEffect(object);
   let evaluated: EvaluatedObjectState = {
     ...object,
     bounds: { ...object.bounds },
@@ -190,6 +238,7 @@ export function evaluateObjectState(
     transform: readRecord(object, "transform"),
     filter: readRecord(object, "filter"),
     shadow: includeShadow ? readShadowRecord(object) : {},
+    stroke: includeStroke ? readStrokeRecord(object) : {},
     props: { ...(object.props ?? {}) },
   };
 
@@ -522,6 +571,35 @@ function createShadowDefinition(
   return definition;
 }
 
+type StrokeField = "width" | "color" | "alpha" | "start" | "end" | "spacing";
+
+function createStrokeDefinition(
+  field: StrokeField,
+  valueType: PropertyTrackValueType,
+): PropertyDefinition {
+  const defaultValue = STROKE_DEFAULTS[field] as JsonValue;
+  const definition = createBaseDefinition(
+    `stroke.${field}` as PropertyPath,
+    valueType,
+    (object) => {
+      const stroke = object.stroke;
+      if (!stroke) return defaultValue;
+      const value = (stroke as Record<string, JsonValue>)[field];
+      return value ?? defaultValue;
+    },
+    (object, value) => ({
+      ...object,
+      stroke: {
+        ...(object.stroke ?? {}),
+        [field]: value,
+      } as StrokeEffect,
+    }),
+    "stroke",
+  );
+  if (valueType === "color") definition.interpolate = interpolateColor;
+  return definition;
+}
+
 function createDynamicPropsDefinition(
   path: string,
 ): PropertyDefinition | undefined {
@@ -763,6 +841,12 @@ export const defaultPropertyDefinitions: PropertyDefinition[] = [
   createShadowDefinition("spread", "number"),
   createShadowDefinition("color", "color"),
   createShadowDefinition("alpha", "number"),
+  createStrokeDefinition("width", "number"),
+  createStrokeDefinition("color", "color"),
+  createStrokeDefinition("alpha", "number"),
+  createStrokeDefinition("start", "number"),
+  createStrokeDefinition("end", "number"),
+  createStrokeDefinition("spacing", "number"),
 ];
 
 export const defaultPropertyRegistry = createPropertyRegistry(

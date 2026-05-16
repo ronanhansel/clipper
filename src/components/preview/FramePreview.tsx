@@ -106,6 +106,7 @@ import {
   shouldPreRasterizeSvgForExport,
   type SvgRasterResult,
 } from "./exportSvgRasterCache";
+import { StrokeOverlay } from "./StrokeOverlay";
 
 const identityCameraTransform: CameraPreviewTransform = {
   x: 0,
@@ -620,9 +621,12 @@ export const FramePreview = memo(function FramePreview({
   function handleFramePointerDownCapture(event: PointerEvent<HTMLDivElement>) {
     if (isPlaying) return;
     if (activeShapeTool === "text" || activeShapeTool === "textPath") {
-      const hitElement = (event.target as HTMLElement).closest<HTMLElement>(
-        "[data-object-id]",
+      const targetEl = event.target as HTMLElement;
+      const insideEditable = targetEl.closest<HTMLElement>(
+        '[contenteditable="true"]',
       );
+      if (insideEditable) return;
+      const hitElement = targetEl.closest<HTMLElement>("[data-object-id]");
       if (hitElement) {
         const hitObjectId = hitElement.dataset.objectId;
         if (hitObjectId && part) {
@@ -3058,6 +3062,11 @@ export const FrameObjectView = function FrameObjectView({
         if (!isLocked) onPointerDown(event);
       }}
     >
+      <StrokeOverlay
+        object={object}
+        liveScrubClock={isPlaying}
+        fallbackTime={previewTime}
+      />
       {(object.type === "text" || editableTextPath) && editing ? (
         <div
           ref={editableRef}

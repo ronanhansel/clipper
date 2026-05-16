@@ -178,6 +178,22 @@ export type ShadowEffect = {
   alpha?: number;
 };
 
+export type StrokePosition = "outside" | "center" | "inside";
+
+export type StrokeStyle = "solid" | "dashed" | "dotted" | "dashDot";
+
+export type StrokeEffect = {
+  enabled?: boolean;
+  width?: number;
+  color?: string;
+  alpha?: number;
+  position?: StrokePosition;
+  start?: number;
+  end?: number;
+  style?: StrokeStyle;
+  spacing?: number;
+};
+
 export type FrameObject = {
   id: string;
   name: string;
@@ -191,6 +207,7 @@ export type FrameObject = {
   transform?: Record<string, JsonValue> | string;
   filter?: Record<string, JsonValue>;
   shadow?: ShadowEffect;
+  stroke?: StrokeEffect;
   layoutId?: string;
   parentId?: string;
   hidden?: boolean;
