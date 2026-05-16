@@ -241,8 +241,10 @@ export const SelectItem = forwardRef<
       variant === "ease" ? (ease ?? selectItemEaseFromValue(value)) : null;
     const label =
       previewLabel ?? (typeof children === "string" ? children : value);
+    // Only build the SVG sample arrays once the popover actually opens. Mounting
+    // a Select with N items previously paid this cost N times up-front.
     const preview = useMemo(() => {
-      if (!previewEase) return null;
+      if (!previewEase || !previewOpen) return null;
       const graphKeyTimes = easePreviewKeyTimes();
       return {
         path: easePreviewPath(previewEase),
@@ -260,7 +262,7 @@ export const SelectItem = forwardRef<
           (_time, progress) => 6 + progress * 142,
         ),
       };
-    }, [previewEase]);
+    }, [previewEase, previewOpen]);
 
     function clearPreviewTimer() {
       if (!previewTimerRef.current) return;
@@ -322,7 +324,7 @@ export const SelectItem = forwardRef<
       </SelectPrimitive.Item>
     );
 
-    if (!preview || variant !== "ease") return item;
+    if (!previewEase || variant !== "ease") return item;
 
     return (
       <Tooltip open={previewOpen}>
@@ -333,91 +335,95 @@ export const SelectItem = forwardRef<
           sideOffset={16}
           className="w-[190px] max-w-none overflow-hidden rounded-[8px] border-[#343946] bg-[#10131a] p-0 shadow-[0_22px_70px_rgba(0,0,0,0.54)] data-[state=instant-open]:animate-[clipper-tooltip-in_160ms_cubic-bezier(0.16,1,0.3,1)_forwards]"
         >
-          <div className="border-b border-[#252a35] bg-[radial-gradient(circle_at_72%_0%,rgb(var(--clipper-accent-rgb)/0.18),transparent_42%),linear-gradient(180deg,#171b24,#10131a)] px-3 py-2">
-            <strong className="block text-[11px] font-extrabold text-white">
-              {label}
-            </strong>
-            <span className="mt-0.5 block text-[10px] font-medium text-[#8d94a3]">
-              Timing preview
-            </span>
-          </div>
-          <div className="grid gap-3 px-3 py-3">
-            <svg
-              viewBox="0 0 132 72"
-              className="h-[82px] w-full overflow-visible"
-              aria-hidden="true"
-            >
-              <path
-                d="M 0 72 L 132 0"
-                stroke="#2d3340"
-                strokeDasharray="3 5"
-                strokeWidth="1.2"
-              />
-              <path
-                d="M 0 72 L 0 0 M 0 72 L 132 72"
-                stroke="#3a404c"
-                strokeWidth="1"
-              />
-              <path
-                d={preview.path}
-                fill="none"
-                stroke="var(--clipper-accent)"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth="3"
-              />
-              <circle
-                r="4.5"
-                fill="#37d6c2"
-                filter="drop-shadow(0 0 8px rgba(55,214,194,0.75))"
-              >
-                <animate
-                  attributeName="cx"
-                  dur={easePreviewDuration}
-                  repeatCount="indefinite"
-                  keyTimes={preview.graphKeyTimes}
-                  values={preview.graphXValues}
-                />
-                <animate
-                  attributeName="cy"
-                  dur={easePreviewDuration}
-                  repeatCount="indefinite"
-                  keyTimes={preview.graphKeyTimes}
-                  values={preview.graphYValues}
-                />
-              </circle>
-            </svg>
-            <svg
-              viewBox="0 0 154 12"
-              className="h-3 w-full overflow-visible"
-              aria-hidden="true"
-            >
-              <line
-                x1="6"
-                y1="6"
-                x2="148"
-                y2="6"
-                stroke="#252a35"
-                strokeLinecap="round"
-                strokeWidth="4"
-              />
-              <circle
-                cx="6"
-                cy="6"
-                r="6"
-                fill="var(--clipper-accent)"
-                filter="drop-shadow(0 0 10px rgb(var(--clipper-accent-rgb)/0.45))"
-              >
-                <animate
-                  attributeName="cx"
-                  dur={easePreviewDuration}
-                  repeatCount="indefinite"
-                  keyTimes={preview.graphKeyTimes}
-                  values={preview.railXValues}
-                />
-              </circle>
-            </svg>
-          </div>
+          {preview ? (
+            <>
+              <div className="border-b border-[#252a35] bg-[radial-gradient(circle_at_72%_0%,rgb(var(--clipper-accent-rgb)/0.18),transparent_42%),linear-gradient(180deg,#171b24,#10131a)] px-3 py-2">
+                <strong className="block text-[11px] font-extrabold text-white">
+                  {label}
+                </strong>
+                <span className="mt-0.5 block text-[10px] font-medium text-[#8d94a3]">
+                  Timing preview
+                </span>
+              </div>
+              <div className="grid gap-3 px-3 py-3">
+                <svg
+                  viewBox="0 0 132 72"
+                  className="h-[82px] w-full overflow-visible"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M 0 72 L 132 0"
+                    stroke="#2d3340"
+                    strokeDasharray="3 5"
+                    strokeWidth="1.2"
+                  />
+                  <path
+                    d="M 0 72 L 0 0 M 0 72 L 132 72"
+                    stroke="#3a404c"
+                    strokeWidth="1"
+                  />
+                  <path
+                    d={preview.path}
+                    fill="none"
+                    stroke="var(--clipper-accent)"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="3"
+                  />
+                  <circle
+                    r="4.5"
+                    fill="#37d6c2"
+                    filter="drop-shadow(0 0 8px rgba(55,214,194,0.75))"
+                  >
+                    <animate
+                      attributeName="cx"
+                      dur={easePreviewDuration}
+                      repeatCount="indefinite"
+                      keyTimes={preview.graphKeyTimes}
+                      values={preview.graphXValues}
+                    />
+                    <animate
+                      attributeName="cy"
+                      dur={easePreviewDuration}
+                      repeatCount="indefinite"
+                      keyTimes={preview.graphKeyTimes}
+                      values={preview.graphYValues}
+                    />
+                  </circle>
+                </svg>
+                <svg
+                  viewBox="0 0 154 12"
+                  className="h-3 w-full overflow-visible"
+                  aria-hidden="true"
+                >
+                  <line
+                    x1="6"
+                    y1="6"
+                    x2="148"
+                    y2="6"
+                    stroke="#252a35"
+                    strokeLinecap="round"
+                    strokeWidth="4"
+                  />
+                  <circle
+                    cx="6"
+                    cy="6"
+                    r="6"
+                    fill="var(--clipper-accent)"
+                    filter="drop-shadow(0 0 10px rgb(var(--clipper-accent-rgb)/0.45))"
+                  >
+                    <animate
+                      attributeName="cx"
+                      dur={easePreviewDuration}
+                      repeatCount="indefinite"
+                      keyTimes={preview.graphKeyTimes}
+                      values={preview.railXValues}
+                    />
+                  </circle>
+                </svg>
+              </div>
+            </>
+          ) : null}
         </TooltipContent>
       </Tooltip>
     );

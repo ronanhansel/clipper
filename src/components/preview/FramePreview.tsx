@@ -68,7 +68,6 @@ import {
   isTimeSensitiveFrameObject,
   type EvaluatedFrameObject,
 } from "../../render-engine/renderRuntime";
-import { generateShadowFilterSvg } from "../../render-engine/shadowFilters";
 import {
   applyTransitionLayersToVisualStyle,
   getTransitionFinishTime,
@@ -800,6 +799,7 @@ export const FramePreview = memo(function FramePreview({
                             frameScale={frameScale}
                             hideNullObjects={timelineMode !== "compose"}
                             isPlaying={isPlaying}
+                            liveScrubEnabled={timelineMode !== "compose"}
                             part={item.part}
                             renderClockSceneTime={displaySceneTime}
                             previewTime={item.previewTime}
@@ -1251,6 +1251,7 @@ function CompositionLayerView({
   frameScale,
   hideNullObjects,
   isPlaying,
+  liveScrubEnabled = false,
   part,
   renderClockSceneTime,
   previewTime,
@@ -1271,6 +1272,7 @@ function CompositionLayerView({
   frameScale: number;
   hideNullObjects?: boolean;
   isPlaying: boolean;
+  liveScrubEnabled?: boolean;
   part: Part;
   renderClockSceneTime: number;
   previewTime: number;
@@ -1309,6 +1311,10 @@ function CompositionLayerView({
     () => getRenderClockStyle(renderClockState) as CSSProperties,
     [renderClockState],
   );
+  const partRef = useRef(part);
+  const previewOffsetRef = useRef(previewTime - renderClockSceneTime);
+  partRef.current = part;
+  previewOffsetRef.current = previewTime - renderClockSceneTime;
 
   useLayoutEffect(() => {
     renderClockStateRef.current = renderClockState;
@@ -1319,6 +1325,31 @@ function CompositionLayerView({
     () => syncRenderClockSubtree(layerRef.current, renderClockStateRef),
     [],
   );
+
+  useEffect(() => {
+    if (!liveScrubEnabled || renderMode === "export") return;
+    let frame = 0;
+    let pendingTime: number | null = null;
+    function flush() {
+      frame = 0;
+      if (pendingTime === null) return;
+      const time = pendingTime;
+      pendingTime = null;
+      applyLivePartPreviewTime(layerRef.current, partRef.current, time);
+    }
+    function onClockChange() {
+      const snapshot = getMasterTimelineClockSnapshot();
+      if (snapshot.source !== "scrub") return;
+      pendingTime = snapshot.sceneTime + previewOffsetRef.current;
+      if (frame) return;
+      frame = requestAnimationFrame(flush);
+    }
+    const unsubscribe = subscribeMasterTimelineClock(onClockChange);
+    return () => {
+      unsubscribe();
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, [liveScrubEnabled, renderMode]);
 
   return (
     <div
@@ -2652,47 +2683,6 @@ function ShapeDrawPreviewOverlay({
   );
 }
 
-function ObjectShadowFilterDef({ object }: { object: FrameObject }) {
-  const shadow = object.shadow;
-  if (!shadow || shadow.enabled === false) return null;
-  const x =
-    typeof shadow.x === "number" && Number.isFinite(shadow.x) ? shadow.x : 0;
-  const y =
-    typeof shadow.y === "number" && Number.isFinite(shadow.y) ? shadow.y : 0;
-  const blur =
-    typeof shadow.blur === "number" && Number.isFinite(shadow.blur)
-      ? Math.max(0, shadow.blur)
-      : 0;
-  const spread =
-    typeof shadow.spread === "number" && Number.isFinite(shadow.spread)
-      ? Math.max(-64, Math.min(64, shadow.spread))
-      : 0;
-  const color = typeof shadow.color === "string" ? shadow.color : "#000000";
-  const alpha =
-    typeof shadow.alpha === "number" && Number.isFinite(shadow.alpha)
-      ? shadow.alpha
-      : 100;
-  const isDefault = x === 0 && y === 0 && blur === 0 && spread === 0;
-  if (isDefault && shadow.enabled !== true) return null;
-  const markup = generateShadowFilterSvg({
-    id: `shadow-${object.id}`,
-    x,
-    y,
-    blur,
-    spread,
-    color,
-    alpha,
-  });
-  return (
-    <svg
-      aria-hidden="true"
-      className="pointer-events-none absolute h-0 w-0 overflow-hidden"
-      data-clipper-shadow-filter-owner={object.id}
-      dangerouslySetInnerHTML={{ __html: `<defs>${markup}</defs>` }}
-    />
-  );
-}
-
 export const FrameObjectView = function FrameObjectView({
   activeShapeTool,
   animationsEnabled,
@@ -3068,7 +3058,6 @@ export const FrameObjectView = function FrameObjectView({
         if (!isLocked) onPointerDown(event);
       }}
     >
-      <ObjectShadowFilterDef object={evaluatedObject} />
       {(object.type === "text" || editableTextPath) && editing ? (
         <div
           ref={editableRef}

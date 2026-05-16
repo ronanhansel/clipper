@@ -63,7 +63,6 @@ type PlaybackControllerOptions = {
   setCurrentSceneTime: (time: number) => void;
   setIsPlaying: (isPlaying: boolean) => void;
   setPlaybackClock: (clock: PlaybackClock) => void;
-  setRenderCurrentSceneTime: (time: number) => void;
   requestCachedPreviewAtTime?: (
     time: number,
     reason: PrerenderCacheInterestReason,
@@ -100,7 +99,6 @@ export function usePlaybackController({
   setCurrentSceneTime,
   setIsPlaying,
   setPlaybackClock,
-  setRenderCurrentSceneTime,
   requestCachedPreviewAtTime,
   timeline,
   timelineLayers,
@@ -325,7 +323,6 @@ export function usePlaybackController({
       if (!timelineScrubbingRef.current) {
         commitPlayheadEditorState(nextTime);
         setCurrentSceneTime(nextTime);
-        setRenderCurrentSceneTime(nextTime);
       }
       return;
     }
@@ -349,7 +346,6 @@ export function usePlaybackController({
     }
 
     if (timelineScrubbingRef.current) {
-      startTransition(() => setRenderCurrentSceneTime(nextTime));
       return;
     }
 
@@ -381,7 +377,6 @@ export function usePlaybackController({
     syncPlaybackDom(settledTime);
     commitPlayheadEditorState(settledTime);
     setCurrentSceneTime(settledTime);
-    setRenderCurrentSceneTime(settledTime);
     isPlayingRef.current = false;
     updatePlaybackClock(null);
     setIsPlaying(false);
@@ -402,7 +397,6 @@ export function usePlaybackController({
       requestCachedPreviewInterest(playbackStart, "playback");
       syncPlaybackDom(playbackStart, "playback");
       setCurrentSceneTime(playbackStart);
-      setRenderCurrentSceneTime(playbackStart);
     }
 
     updatePlaybackClock({
@@ -491,18 +485,6 @@ export function usePlaybackController({
     pausePlaybackAtCurrentTime();
     scrubToSceneTime(playbackEnd);
   }
-
-  useEffect(() => {
-    let previousTime = editorStore.getState().currentSceneTime;
-    return editorStore.subscribe((state) => {
-      const nextTime = state.currentSceneTime;
-      if (Math.abs(nextTime - previousTime) < 0.001) return;
-      previousTime = nextTime;
-      if (timelineScrubbingRef.current) return;
-
-      startTransition(() => setRenderCurrentSceneTime(nextTime));
-    });
-  }, [editorStore, setRenderCurrentSceneTime, timelineScrubbingRef]);
 
   useEffect(() => {
     isPlayingRef.current = isPlaying;
@@ -638,7 +620,6 @@ export function usePlaybackController({
 
       currentSceneTimeRef.current = nextTime;
       syncPlaybackDom(nextTime, "playback");
-      startTransition(() => setRenderCurrentSceneTime(nextTime));
 
       if (nextPreviewKey !== lastCommittedPreviewKey) {
         lastCommittedPreviewKey = nextPreviewKey;

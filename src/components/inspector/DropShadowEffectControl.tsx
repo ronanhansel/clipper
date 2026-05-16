@@ -12,6 +12,10 @@ import type { FrameObject, JsonValue, ShadowEffect } from "../../core/types";
 import { ColorSelector } from "../ColorSelector";
 import { Input } from "../ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
+import {
+  readPlayheadTime,
+  usePlayheadTime,
+} from "../../app/features/playback/usePlayheadTime";
 
 type ShadowField = "x" | "y" | "blur" | "spread" | "color" | "alpha";
 
@@ -136,20 +140,32 @@ function clamp(value: number, min: number, max: number) {
 export function DropShadowEffectControl({
   object,
   currentTime,
+  liveScrubClock = false,
   onChange,
   onPreview,
 }: {
   object: FrameObject;
   currentTime: number;
+  liveScrubClock?: boolean;
   onChange: (updater: (object: FrameObject) => FrameObject) => void;
   onPreview?: (updater: (object: FrameObject) => FrameObject) => void;
 }) {
   const [open, setOpen] = useState(false);
   const hasShadow = Boolean(object.shadow);
+  const supportsSpread = object.type === "rect" || object.type === "pattern2d";
+  // Subscribe to the live playhead (scrub + playback) so shadow keyframe
+  // diamonds and evaluated readouts stay current. When liveScrubClock is off
+  // we short-circuit to avoid paying the per-tick cost.
+  const liveTime = usePlayheadTime(liveScrubClock);
   const evaluated = useMemo(
-    () => getEvaluatedShadow(object, currentTime),
-    [object, currentTime],
+    () => getEvaluatedShadow(object, liveTime),
+    [object, liveTime],
   );
+
+  function readEffectiveTime() {
+    if (!liveScrubClock) return currentTime;
+    return readPlayheadTime(currentTime);
+  }
 
   function ensureShadow(
     updater: (shadow: ShadowEffect) => ShadowEffect,
@@ -201,8 +217,9 @@ export function DropShadowEffectControl({
     const path = SHADOW_PATHS[field];
     const hasTrack = Boolean(object.tracks?.[path]?.points.length);
     if (hasTrack) {
+      const time = readEffectiveTime();
       onChange((current) =>
-        upsertPropertyKeyframe(current, path, currentTime, nextValue),
+        upsertPropertyKeyframe(current, path, time, nextValue),
       );
       return;
     }
@@ -226,20 +243,20 @@ export function DropShadowEffectControl({
 
   function toggleKeyframe(field: ShadowField, value: number | string) {
     const path = SHADOW_PATHS[field];
-    const existing = getKeyframeAtTime(object, path, currentTime);
+    const time = readEffectiveTime();
+    const existing = getKeyframeAtTime(object, path, time);
     if (existing) {
       onChange((current) =>
-        removePropertyKeyframe(current, path, existing.time, currentTime),
+        removePropertyKeyframe(current, path, existing.time, time),
       );
     } else {
-      onChange((current) =>
-        upsertPropertyKeyframe(current, path, currentTime, value),
-      );
+      onChange((current) => upsertPropertyKeyframe(current, path, time, value));
     }
   }
 
   function commitColor(hex: string) {
     const sanitized = hex.startsWith("#") ? hex : `#${hex}`;
+    const time = readEffectiveTime();
     onChange((current) => {
       const tracks = current.tracks ?? {};
       const colorHasTrack = Boolean(tracks[SHADOW_PATHS.color]?.points.length);
@@ -248,7 +265,7 @@ export function DropShadowEffectControl({
         next = upsertPropertyKeyframe(
           next,
           SHADOW_PATHS.color,
-          currentTime,
+          time,
           sanitized,
         );
       } else {
@@ -278,7 +295,7 @@ export function DropShadowEffectControl({
   }
 
   function fieldHasKeyframe(field: ShadowField) {
-    return Boolean(getKeyframeAtTime(object, SHADOW_PATHS[field], currentTime));
+    return Boolean(getKeyframeAtTime(object, SHADOW_PATHS[field], liveTime));
   }
 
   const swatchRgba = partsToRgba(evaluated.color, evaluated.alpha);
@@ -364,7 +381,7 @@ export function DropShadowEffectControl({
                   onCommit={(value) => commitField("x", value)}
                   onPreviewNumber={(value) => previewField("x", value)}
                   onToggleKeyframe={() => toggleKeyframe("x", evaluated.x)}
-                  prefix="X"
+                  unitPrefix="X"
                 />
                 <ShadowNumberInput
                   label="Y"
@@ -373,7 +390,7 @@ export function DropShadowEffectControl({
                   onCommit={(value) => commitField("y", value)}
                   onPreviewNumber={(value) => previewField("y", value)}
                   onToggleKeyframe={() => toggleKeyframe("y", evaluated.y)}
-                  prefix="Y"
+                  unitPrefix="Y"
                 />
               </div>
               <span className={mutedCaps}>Blur</span>
@@ -386,13 +403,23 @@ export function DropShadowEffectControl({
                 onPreviewNumber={(value) => previewField("blur", value)}
                 onToggleKeyframe={() => toggleKeyframe("blur", evaluated.blur)}
               />
-              <span className={mutedCaps}>Spread</span>
+              <span
+                className={`${mutedCaps} ${!supportsSpread ? "opacity-50" : ""}`}
+                title={
+                  !supportsSpread
+                    ? "Spread is only supported on rect and pattern2d shadows"
+                    : undefined
+                }
+              >
+                Spread
+              </span>
               <ShadowNumberInput
                 label="Spread"
-                value={evaluated.spread}
+                value={supportsSpread ? evaluated.spread : 0}
                 min={0}
                 max={64}
-                hasKeyframe={fieldHasKeyframe("spread")}
+                disabled={!supportsSpread}
+                hasKeyframe={supportsSpread && fieldHasKeyframe("spread")}
                 onCommit={(value) => commitField("spread", value)}
                 onPreviewNumber={(value) => previewField("spread", value)}
                 onToggleKeyframe={() =>
@@ -400,12 +427,13 @@ export function DropShadowEffectControl({
                 }
               />
               <span className={mutedCaps}>Color</span>
-              <div className="grid grid-cols-[1fr_72px] items-center gap-2">
+              <div className="grid grid-cols-[minmax(0,1fr)_84px] items-center gap-2">
                 <div className="relative">
                   <ColorSelector
                     value={colorPickerValue}
                     onChange={commitColor}
                     onPreview={previewColor}
+                    variant="dense"
                   />
                   <KeyframeDiamond
                     label="Color"
@@ -419,7 +447,8 @@ export function DropShadowEffectControl({
                     min={0}
                     max={100}
                     step={1}
-                    numberScrubMode="continuous"
+                    unitPrefix="%"
+                    numberScrubMode="preview"
                     numberScrubCommitThrottleMs={
                       livePreviewScrubCommitThrottleMs
                     }
@@ -459,7 +488,8 @@ function ShadowNumberInput({
   onCommit,
   onPreviewNumber,
   onToggleKeyframe,
-  prefix,
+  unitPrefix,
+  disabled,
 }: {
   label: string;
   value: number;
@@ -469,23 +499,21 @@ function ShadowNumberInput({
   onCommit: (value: number) => void;
   onPreviewNumber: (value: number) => void;
   onToggleKeyframe: () => void;
-  prefix?: string;
+  unitPrefix?: string;
+  disabled?: boolean;
 }) {
   return (
     <div className="relative">
-      {prefix ? (
-        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-bold uppercase tracking-[0.16em] text-[#6f7684]">
-          {prefix}
-        </span>
-      ) : null}
       <Input
         type="number"
         min={min}
         max={max}
         step={1}
-        numberScrubMode="continuous"
+        disabled={disabled}
+        unitPrefix={unitPrefix}
+        numberScrubMode="preview"
         numberScrubCommitThrottleMs={livePreviewScrubCommitThrottleMs}
-        className={`${prefix ? "pl-7" : ""} pr-8 ${hasKeyframe ? "border-white" : ""}`}
+        className={`pr-8 ${hasKeyframe ? "border-white" : ""}`}
         value={value}
         onNumberScrubPreview={(next) =>
           onPreviewNumber(applyBounds(next, min, max))
@@ -497,11 +525,13 @@ function ShadowNumberInput({
           onCommit(applyBounds(numeric, min, max));
         }}
       />
-      <KeyframeDiamond
-        label={label}
-        active={hasKeyframe}
-        onClick={onToggleKeyframe}
-      />
+      {disabled ? null : (
+        <KeyframeDiamond
+          label={label}
+          active={hasKeyframe}
+          onClick={onToggleKeyframe}
+        />
+      )}
     </div>
   );
 }

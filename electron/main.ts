@@ -1559,6 +1559,10 @@ app.whenReady().then(async () => {
 
   await createWindow();
   void updateService.checkOnLaunch();
+  // Warm the system font list now so the renderer's first text-inspector
+  // click doesn't freeze waiting on system_profiler. Errors are absorbed by
+  // the function itself.
+  void listSystemFontFamilies();
 });
 
 app.on("window-all-closed", () => {

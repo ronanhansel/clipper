@@ -30,6 +30,10 @@ import {
 import { EditorPane } from "../../components/EditorPane";
 import { FramePreview } from "../../components/preview/FramePreview";
 import {
+  FramePreviewLive,
+  type FramePreviewLiveProps,
+} from "../../components/preview/FramePreviewLive";
+import {
   buildAdjustmentExecutionPlan,
   filterAdjustmentExecutionPlan,
   getVisualStyleForAdjustmentPlan,
@@ -67,6 +71,22 @@ type PreviewStackPart = {
   start: number;
   previewTime: number;
 };
+// FramePreviewLive computes time-derived props internally from the live
+// playhead. To switch the editor preview path to FramePreviewLive, AppContent
+// supplies the live-extras (previewSceneContext, composeFilePart, etc.) on the
+// same prop bag — the time-derived fields below are still present (kept for
+// non-live FramePreview consumers in this file) but FramePreviewLive ignores
+// them via its destructure.
+type FramePreviewLiveExtras = Pick<
+  FramePreviewLiveProps,
+  | "previewSceneContext"
+  | "timelineMode"
+  | "composeMode"
+  | "hasPreviewComposition"
+  | "activeCompositionHidden"
+  | "composeFilePart"
+  | "selectedPart"
+>;
 type FramePreviewProps = ComponentProps<typeof FramePreview> & {
   previewParts?: PreviewStackPart[];
   transitionPreviewParts?: {
@@ -77,7 +97,7 @@ type FramePreviewProps = ComponentProps<typeof FramePreview> & {
     postProcessPasses: PostProcessPass[];
   } | null;
   transitionLayers?: TransitionLayer[];
-};
+} & FramePreviewLiveExtras;
 type CachedPreviewDisplayMode = "dom" | "canvas2d" | "webgl";
 const cachedMissGraceMs = 220;
 const domFallbackReadyToleranceSeconds = 1 / 60;
@@ -104,6 +124,39 @@ function getPreviewPostProcessPasses(
     ...plan.steps.flatMap((step) => step.postProcessPasses ?? []),
     ...(props.transitionPreviewParts?.postProcessPasses ?? []),
   ];
+}
+
+// Strip the time-derived fields FramePreviewLive owns. The remaining bag is
+// the FramePreviewLiveProps shape AppContent supplies via PreviewColumn.
+function toFramePreviewLiveProps(
+  props: FramePreviewProps,
+): FramePreviewLiveProps {
+  const {
+    part: _part,
+    partStart: _partStart,
+    previewParts: _previewParts,
+    transitionPreviewParts: _transitionPreviewParts,
+    previewTime: _previewTime,
+    sceneTime: _sceneTime,
+    motionLayers: _motionLayers,
+    hiddenMotionLayerIds: _hiddenMotionLayerIds,
+    adjustmentLayers: _adjustmentLayers,
+    transitionLayers: _transitionLayers,
+    compHidden: _compHidden,
+    ...rest
+  } = props;
+  void _part;
+  void _partStart;
+  void _previewParts;
+  void _transitionPreviewParts;
+  void _previewTime;
+  void _sceneTime;
+  void _motionLayers;
+  void _hiddenMotionLayerIds;
+  void _adjustmentLayers;
+  void _transitionLayers;
+  void _compHidden;
+  return rest as FramePreviewLiveProps;
 }
 
 type PreviewColumnProps = {
@@ -405,7 +458,9 @@ export function PreviewColumn({
                 style={previewRenderStyle}
               >
                 {renderDirectFramePreview ? (
-                  <FramePreview {...renderFramePreviewProps} />
+                  <FramePreviewLive
+                    {...toFramePreviewLiveProps(renderFramePreviewProps)}
+                  />
                 ) : displayPrerenderPreview ? (
                   <PrerenderVideoPreview
                     blackMissDebug={prerenderCacheBlackMissDebug}
@@ -1520,7 +1575,7 @@ function LivePostProcessFramePreview({
           visibility: showLiveCanvas ? "hidden" : "visible",
         }}
       >
-        <FramePreview {...framePreviewProps} />
+        <FramePreviewLive {...toFramePreviewLiveProps(framePreviewProps)} />
       </div>
       {livePostProcessEnabled ? (
         <canvas
@@ -1540,9 +1595,9 @@ function LivePostProcessFramePreview({
             ref={sourceElementRef}
             style={sourceCanvasStyle}
           >
-            <FramePreview
-              {...sourceFramePreviewProps}
-              adjustmentLayers={sourceAdjustmentLayers}
+            <FramePreviewLive
+              {...toFramePreviewLiveProps(sourceFramePreviewProps)}
+              adjustmentLayersOverride={sourceAdjustmentLayers}
             />
           </div>
         </canvas>

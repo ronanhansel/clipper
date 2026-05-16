@@ -121,9 +121,14 @@ import { getFramePreviewTimelineLayers } from "./app/state/framePreviewRenderMod
 import {
   EditorStoreProvider,
   useAppEditorState,
+  useEditorStore,
   useEditorStoreApi,
   type EditorTab,
 } from "./app/state/editorStore";
+import {
+  getMasterTimelineClockSnapshot,
+  subscribeMasterTimelineClock,
+} from "./app/features/playback/playbackTimeStore";
 import { ProjectStoreProvider } from "./app/state/projectStore";
 import {
   type AdjustmentLayerSelection,
@@ -166,7 +171,6 @@ import {
 } from "./core/frameInteraction";
 import { boundsToPoints, framePointFromClient } from "./core/geometry";
 import { type FillValue, fillValueToCss, isFillValue } from "./core/fillValue";
-import { generateShadowFilterSvg } from "./render-engine/shadowFilters";
 import { clamp, roundToPrecision, roundTenth } from "./core/math";
 import {
   getPathGeometryBounds,
@@ -230,6 +234,15 @@ import {
   fileManagerFindMediaEvent,
   type FileManagerFindMediaDetail,
 } from "./lib/fileManagerEvents";
+import { scan } from "react-scan";
+
+if (import.meta.env.DEV) {
+  scan({
+    enabled: true,
+    showToolbar: true,
+    log: false,
+  });
+}
 
 const defaultEditorState: EditorState = {
   timeline: defaultTimelineViewportState,
@@ -817,9 +830,7 @@ function AppContent({
   onCloseProject: () => void;
 }) {
   const editorStore = useEditorStoreApi();
-  const [currentSceneTime, setRenderCurrentSceneTime] = useState(
-    () => editorStore.getState().currentSceneTime,
-  );
+  const currentSceneTime = useEditorStore((s) => s.currentSceneTime);
   const [trackerPickTranslationMarker, setTrackerPickTranslationMarker] =
     useState<{ partId: string; markerId: string } | null>(null);
   const [pointPickAdjustment, setPointPickAdjustment] = useState<{
@@ -999,6 +1010,22 @@ function AppContent({
   const numberInputScrubPausedPlaybackRef = useRef(false);
   const playbackTimeLabelRef = useRef<HTMLSpanElement | null>(null);
   const playbackPlayheadRef = useRef<HTMLDivElement | null>(null);
+  // Mirror the structural editor-store currentSceneTime into the ref so
+  // event-handler reads stay accurate at preview-key boundaries.
+  useEffect(() => {
+    currentSceneTimeRef.current = currentSceneTime;
+  }, [currentSceneTime]);
+  // Subscribe to the master timeline clock and update the ref imperatively on
+  // every tick (no setState, no React rerender). Event handlers that read
+  // currentSceneTimeRef.current during playback get the live time, while
+  // AppContent itself is unaffected.
+  useEffect(() => {
+    return subscribeMasterTimelineClock(() => {
+      const snap = getMasterTimelineClockSnapshot();
+      if (snap.source !== "playback" && snap.source !== "scrub") return;
+      currentSceneTimeRef.current = snap.sceneTime;
+    });
+  }, []);
   const [videoExportTileHeight, setVideoExportTileHeightState] = useState(
     getInitialVideoExportTileHeight,
   );
@@ -1414,6 +1441,7 @@ function AppContent({
     assets = [],
     cameraPreviewTransform,
     canSelectFrameObjects,
+    composeFilePart,
     framePickPoint,
     hasActiveComposition,
     inspectorAdjustmentMiddleSnap,
@@ -1422,6 +1450,7 @@ function AppContent({
     isPickingTranslationPosition,
     isPickingZoomFocus,
     part,
+    previewSceneContext,
     previewTime,
     previewParts,
     renderableScene,
@@ -1735,7 +1764,6 @@ function AppContent({
     setCurrentSceneTime,
     setIsPlaying,
     setPlaybackClock,
-    setRenderCurrentSceneTime,
     requestCachedPreviewAtTime: prerenderCache.requestCacheAtTime,
     timeline,
     timelineLayers,
@@ -2808,48 +2836,78 @@ function AppContent({
     }
     if (next.shadow) {
       const shadow = next.shadow;
-      const filterOwner = target.querySelector<SVGSVGElement>(
-        `[data-clipper-shadow-filter-owner="${cssEscape(next.id)}"]`,
-      );
       if (shadow.enabled === false) {
-        target.style.filter = "";
-        filterOwner?.remove();
+        target.style.removeProperty("filter");
+        target.style.removeProperty("text-shadow");
+        target.style.removeProperty("box-shadow");
       } else {
-        const x = typeof shadow.x === "number" ? shadow.x : 0;
-        const y = typeof shadow.y === "number" ? shadow.y : 0;
-        const blur =
-          typeof shadow.blur === "number" ? Math.max(0, shadow.blur) : 0;
-        const spread =
-          typeof shadow.spread === "number"
-            ? Math.max(-64, Math.min(64, shadow.spread))
-            : 0;
-        const color =
-          typeof shadow.color === "string" ? shadow.color : "#000000";
-        const alpha = typeof shadow.alpha === "number" ? shadow.alpha : 100;
-        const filterId = `shadow-${next.id}`;
-        const markup = generateShadowFilterSvg({
-          id: filterId,
-          x,
-          y,
-          blur,
-          spread,
-          color,
-          alpha,
-        });
-        const svg =
-          filterOwner ??
-          document.createElementNS("http://www.w3.org/2000/svg", "svg");
-        svg.setAttribute("aria-hidden", "true");
-        svg.setAttribute("data-clipper-shadow-filter-owner", next.id);
-        svg.style.position = "absolute";
-        svg.style.width = "0";
-        svg.style.height = "0";
-        svg.style.overflow = "hidden";
-        svg.innerHTML = `<defs>${markup}</defs>`;
-        if (!filterOwner) target.prepend(svg);
-        target.style.filter = `url(#${filterId})`;
+        applyPreviewShadowStyle(target, next);
       }
     }
+  }
+
+  function applyPreviewShadowStyle(target: HTMLElement, object: FrameObject) {
+    const shadow = object.shadow;
+    if (!shadow || shadow.enabled === false) return;
+    const x =
+      typeof shadow.x === "number" && Number.isFinite(shadow.x) ? shadow.x : 0;
+    const y =
+      typeof shadow.y === "number" && Number.isFinite(shadow.y) ? shadow.y : 0;
+    const blur =
+      typeof shadow.blur === "number" && Number.isFinite(shadow.blur)
+        ? Math.max(0, shadow.blur)
+        : 0;
+    const spread =
+      typeof shadow.spread === "number" && Number.isFinite(shadow.spread)
+        ? Math.max(0, Math.min(64, shadow.spread))
+        : 0;
+    const color = typeof shadow.color === "string" ? shadow.color : "#000000";
+    const alpha = typeof shadow.alpha === "number" ? shadow.alpha : 100;
+    const rgba = previewShadowRgba(color, alpha);
+    if (!rgba) return;
+    target.style.removeProperty("filter");
+    target.style.removeProperty("text-shadow");
+    target.style.removeProperty("box-shadow");
+    if (object.type === "rect" || object.type === "pattern2d") {
+      target.style.boxShadow =
+        x.toFixed(2) +
+        "px " +
+        y.toFixed(2) +
+        "px " +
+        blur.toFixed(2) +
+        "px " +
+        spread.toFixed(2) +
+        "px " +
+        rgba;
+    } else {
+      target.style.filter =
+        "drop-shadow(" +
+        x.toFixed(2) +
+        "px " +
+        y.toFixed(2) +
+        "px " +
+        blur.toFixed(2) +
+        "px " +
+        rgba +
+        ")";
+    }
+  }
+
+  function previewShadowRgba(color: string, alphaPct: number) {
+    const hex = color.startsWith("#") ? color.slice(1) : color;
+    const expanded =
+      hex.length === 3
+        ? hex
+            .split("")
+            .map((channel) => channel + channel)
+            .join("")
+        : hex;
+    if (!/^[0-9a-fA-F]{6}$/.test(expanded)) return null;
+    const r = parseInt(expanded.slice(0, 2), 16);
+    const g = parseInt(expanded.slice(2, 4), 16);
+    const b = parseInt(expanded.slice(4, 6), 16);
+    const a = Math.max(0, Math.min(1, alphaPct / 100));
+    return "rgba(" + r + ", " + g + ", " + b + ", " + a.toFixed(2) + ")";
   }
 
   function formatPreviewStyleValue(key: string, value: string | number) {
@@ -5208,6 +5266,15 @@ function AppContent({
                 hasPreviewComposition && !composeMode
                   ? activeCompositionHidden
                   : false,
+              // FramePreviewLive extras — when this prop bag is consumed by
+              // FramePreviewLive, the time-derived fields above are ignored
+              // and the wrapper re-derives them per playhead tick.
+              previewSceneContext,
+              composeMode,
+              hasPreviewComposition,
+              activeCompositionHidden,
+              composeFilePart,
+              selectedPart,
               selectedObjects: hasPreviewComposition
                 ? previewSelectionObjects
                 : [],

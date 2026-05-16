@@ -211,8 +211,10 @@ function renderStyleFromPropertyTracks(object: FrameObject): RenderStyle {
   const transform = transformStyleFromRecord(
     readObjectRecord(object, "transform"),
   );
-  const shadow = readObjectShadowRecord(object);
-  const shadowStyle = shadowRenderStyle(shadow, object.id);
+  const shadowStyle = shadowRenderStyle(
+    readObjectShadowRecord(object),
+    object.type,
+  );
   const filter = composeFilterStyle(
     readObjectRecord(object, "filter"),
     shadowStyle.filterPart,
@@ -229,6 +231,8 @@ function renderStyleFromPropertyTracks(object: FrameObject): RenderStyle {
     backgroundImage: background.backgroundImage,
     transform,
     filter,
+    boxShadow: shadowStyle.boxShadow,
+    textShadow: shadowStyle.textShadow,
   };
 }
 
@@ -362,20 +366,53 @@ function readShadowGeometry(
 
 type ShadowRenderStyle = {
   filterPart?: string;
+  boxShadow?: string;
+  textShadow?: string;
 };
 
 function shadowRenderStyle(
   shadow: Record<string, unknown>,
-  objectId: string,
+  type: FrameObject["type"],
 ): ShadowRenderStyle {
   const geom = readShadowGeometry(shadow);
   if (!geom) return {};
-  return { filterPart: `url(#shadow-${objectId})` };
+  const { x, y, blur, spread, rgba } = geom;
+  if (type === "rect" || type === "pattern2d") {
+    return {
+      boxShadow:
+        x.toFixed(2) +
+        "px " +
+        y.toFixed(2) +
+        "px " +
+        blur.toFixed(2) +
+        "px " +
+        spread.toFixed(2) +
+        "px " +
+        rgba,
+    };
+  }
+  // Text/image/svg/html/template/etc. use filter: drop-shadow so the browser
+  // promotes a compositor layer and caches the rasterized source. drop-shadow
+  // has no spread parameter, so the spread input is disabled in the inspector
+  // for these types and we render blur only — never silently fold spread into
+  // blur, which would lie about what the field controls.
+  return {
+    filterPart:
+      "drop-shadow(" +
+      x.toFixed(2) +
+      "px " +
+      y.toFixed(2) +
+      "px " +
+      blur.toFixed(2) +
+      "px " +
+      rgba +
+      ")",
+  };
 }
 
 function composeFilterStyle(
   filter: Record<string, unknown>,
-  shadowFilterPart: string | undefined,
+  shadowFilterPart?: string,
 ): string | undefined {
   const parts: string[] = [];
   const blur = filterStyleFromRecord(filter);

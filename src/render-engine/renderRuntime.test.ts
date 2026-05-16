@@ -1088,20 +1088,22 @@ describe("render runtime", () => {
     expect(evaluated.timeSensitive).toBe(false);
   });
 
-  it("emits a Penpot-style SVG filter reference for image-like types", () => {
+  it("emits a single CSS drop-shadow for image-like types and ignores spread", () => {
     const object: FrameObject = {
       ...baseObject,
       id: "image-shadow",
       type: "image",
-      shadow: { x: 0, y: 4, blur: 4, color: "#000000", alpha: 25 },
+      shadow: { x: 0, y: 4, blur: 4, spread: 6, color: "#000000", alpha: 25 },
     };
     const evaluated = evaluateFrameObject(object, 0, 1);
-    expect(evaluated.renderStyle.filter).toBe("url(#shadow-image-shadow)");
+    expect(evaluated.renderStyle.filter).toBe(
+      "drop-shadow(0.00px 4.00px 4.00px rgba(0, 0, 0, 0.25))",
+    );
     expect(evaluated.renderStyle.boxShadow).toBeUndefined();
     expect(evaluated.renderStyle.textShadow).toBeUndefined();
   });
 
-  it("uses the same SVG filter reference for rect layers so spread is handled by feMorphology", () => {
+  it("emits box-shadow with spread for rect layers", () => {
     const object: FrameObject = {
       ...baseObject,
       id: "rect-shadow",
@@ -1109,22 +1111,26 @@ describe("render runtime", () => {
       shadow: { x: 1, y: 2, blur: 6, spread: 4, color: "#000000", alpha: 50 },
     };
     const evaluated = evaluateFrameObject(object, 0, 1);
-    expect(evaluated.renderStyle.filter).toBe("url(#shadow-rect-shadow)");
-    expect(evaluated.renderStyle.boxShadow).toBeUndefined();
+    expect(evaluated.renderStyle.filter).toBeUndefined();
+    expect(evaluated.renderStyle.boxShadow).toBe(
+      "1.00px 2.00px 6.00px 4.00px rgba(0, 0, 0, 0.50)",
+    );
     expect(evaluated.renderStyle.textShadow).toBeUndefined();
   });
 
-  it("uses the same SVG filter reference for text layers so spread follows glyph alpha", () => {
+  it("emits filter drop-shadow and ignores spread for text layers", () => {
     const object: FrameObject = {
       ...baseObject,
       id: "text-shadow",
       type: "text",
-      shadow: { x: 0, y: 2, blur: 3, spread: 4, color: "#000000", alpha: 80 },
+      shadow: { x: 0, y: 2, blur: 3, spread: 40, color: "#000000", alpha: 80 },
     };
     const evaluated = evaluateFrameObject(object, 0, 1);
-    expect(evaluated.renderStyle.filter).toBe("url(#shadow-text-shadow)");
     expect(evaluated.renderStyle.boxShadow).toBeUndefined();
     expect(evaluated.renderStyle.textShadow).toBeUndefined();
+    expect(evaluated.renderStyle.filter).toBe(
+      "drop-shadow(0.00px 2.00px 3.00px rgba(0, 0, 0, 0.80))",
+    );
   });
 
   it("skips shadow when enabled is false", () => {

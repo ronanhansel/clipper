@@ -2,7 +2,13 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { App } from "./App";
 import { RenderedMediaExportApp } from "./app/export/RenderedMediaExportApp";
+import { preloadSystemFontOptions } from "./components/inspector/InspectorPanels";
 import "./styles.css";
+
+// Kick the system-font IPC off in parallel with the first React render so the
+// first text-inspector click doesn't have to wait on system_profiler. Errors
+// are absorbed inside loadSystemFontOptions().
+preloadSystemFontOptions();
 
 type ErrorBoundaryState = { error: Error | null };
 

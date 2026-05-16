@@ -38,7 +38,7 @@ export function ColorSelector({
   value: string;
   onChange: (value: string) => void;
   onPreview?: (value: string) => void;
-  variant?: "default" | "compact";
+  variant?: "default" | "compact" | "dense";
   pickerMode?: "solid" | "gradient" | "solid-gradient";
   allowAlpha?: boolean;
   /** @deprecated use pickerMode="solid-gradient" */
@@ -289,6 +289,7 @@ export function ColorSelector({
   }
 
   const isCompact = variant === "compact";
+  const isDense = variant === "dense";
   const displayColor = formatSolidColor(draft, allowAlpha ? alpha : 100);
   const hexLabel = draft.toUpperCase();
   const compactLabel = allowAlpha
@@ -337,7 +338,7 @@ export function ColorSelector({
           value={draft}
           alpha={alpha}
           allowAlpha={allowAlpha}
-          variant={variant}
+          variant={isDense ? "default" : variant}
           onChange={scheduleChange}
           onAlphaChange={(nextAlpha) => {
             nextAlphaRef.current = nextAlpha;
@@ -360,7 +361,9 @@ export function ColorSelector({
         className={
           isCompact
             ? "flex h-6 w-full min-w-0 items-center justify-between gap-1.5 rounded border border-[#2d313b] bg-[#0c121b] px-1.5 pr-7 text-[11px] font-bold text-[#dfe2ea] transition hover:border-[var(--clipper-accent)]"
-            : `flex h-[42px] w-full items-center justify-between gap-2 rounded-[10px] border border-[#2d313b] bg-[#171920] text-xs font-bold text-[#dfe2ea] transition hover:border-[var(--clipper-accent)] ${leftSlot ? "pl-2 pr-3" : "px-3"}`
+            : isDense
+              ? `flex h-8 w-full items-center justify-between gap-2 rounded-[8px] border border-[#2d313b] bg-[#171920] px-2 text-xs font-bold text-[#dfe2ea] transition hover:border-[var(--clipper-accent)]`
+              : `flex h-[42px] w-full items-center justify-between gap-2 rounded-[10px] border border-[#2d313b] bg-[#171920] text-xs font-bold text-[#dfe2ea] transition hover:border-[var(--clipper-accent)] ${leftSlot ? "pl-2 pr-3" : "px-3"}`
         }
         onClick={() => {
           if (!open) togglePicker();
@@ -373,14 +376,18 @@ export function ColorSelector({
           className={
             isCompact
               ? "flex min-w-0 items-center gap-1.5"
-              : "flex min-w-0 flex-1 items-center gap-2"
+              : isDense
+                ? "flex min-w-0 flex-1 items-center gap-2"
+                : "flex min-w-0 flex-1 items-center gap-2"
           }
         >
           <span
             className={
               isCompact
                 ? "h-4 w-4 rounded border border-white/20"
-                : "h-5 w-5 shrink-0 rounded-md border border-white/20"
+                : isDense
+                  ? "h-4 w-4 shrink-0 rounded-[4px] border border-white/20"
+                  : "h-5 w-5 shrink-0 rounded-md border border-white/20"
             }
             style={{
               background:
@@ -966,16 +973,15 @@ function FillGradientPickerPanel({
         {stops.map((stop, index) => (
           <div
             key={stop.id}
-            className="grid grid-cols-[74px_minmax(0,1fr)_72px_24px] items-center gap-1.5 rounded bg-[#0c121b] px-1.5 py-1"
+            className="grid grid-cols-[56px_minmax(0,1fr)_72px_24px] items-center gap-1.5 rounded bg-[#0c121b] px-1.5 py-1"
           >
             <div className="grid grid-cols-[minmax(0,1fr)_18px] items-center rounded bg-[#171920]">
               <Input
-                className="h-7 border-0 bg-transparent pl-6 pr-2 text-left text-xs font-bold text-[#dfe2ea]"
+                className="h-7 border-0 bg-transparent px-2 text-left text-xs font-bold text-[#dfe2ea]"
                 type="number"
                 min={0}
                 max={100}
                 step={1}
-                unitPrefix="%"
                 value={stop.position}
                 onChange={(event) => {
                   const next = Number(event.currentTarget.value);

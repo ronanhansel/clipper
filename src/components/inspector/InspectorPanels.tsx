@@ -4,20 +4,13 @@ import {
   AlignLeft,
   AlignRight,
   Bold,
+  ChevronDown,
   Italic,
   Strikethrough,
   Trash2,
   Underline,
 } from "lucide-react";
-import {
-  Fragment,
-  memo,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import { memo, useEffect, useMemo, useState, type ReactElement } from "react";
 import {
   MAX_PART_DURATION_SECONDS,
   FRAME_HEIGHT,
@@ -116,14 +109,223 @@ import {
 } from "../../core/graphics/inspectorSettings";
 import { type ComposeAnimationAttributeKey } from "../timeline/composeAnimationModel";
 import {
-  getMasterTimelineClockSnapshot,
-  subscribeMasterTimelineClock,
-} from "../../app/features/playback/playbackTimeStore";
+  readPlayheadTime,
+  usePlayheadTime,
+} from "../../app/features/playback/usePlayheadTime";
 import { livePreviewScrubCommitThrottleMs } from "../../app/services/scrubInteractionService";
 
 const defaultFontFamily = graphicDefaultFontFamily;
 const defaultFontOption = { value: defaultFontFamily, label: "System" };
 type FontOption = { value: string; label: string };
+
+type EffectInputConfig = {
+  label: string;
+  animationKey?: ComposeAnimationAttributeKey;
+  value: number | string;
+  type?: "number" | "text";
+  min?: number;
+  max?: number;
+  step?: number;
+  onCommit: (value: string) => void;
+  onPreviewNumber?: (value: number) => void;
+  linkedKeys?: readonly [BoundsAnimationKey, BoundsAnimationKey];
+};
+
+type EffectInputDescriptorContext = {
+  object: FrameObject;
+  updateStyleNumber: (key: string, value: string) => void;
+  previewStyleNumber: (key: string, value: number) => void;
+  updateTransform: (name: string, value: string) => void;
+  previewTransform: (name: string, value: number) => void;
+};
+
+type EffectInputDescriptor = {
+  key: string;
+  build: (context: EffectInputDescriptorContext) => EffectInputConfig;
+};
+
+const effectInputDescriptors: readonly EffectInputDescriptor[] = [
+  {
+    key: "opacity",
+    build: ({ object, updateStyleNumber, previewStyleNumber }) => ({
+      label: "Opacity",
+      animationKey: "opacity",
+      value: Number(object.style.opacity ?? 1),
+      min: 0,
+      max: 1,
+      step: 0.01,
+      onPreviewNumber: (value) => previewStyleNumber("opacity", value),
+      onCommit: (value) => updateStyleNumber("opacity", value),
+    }),
+  },
+  {
+    key: "blur",
+    build: () => ({
+      label: "Blur",
+      animationKey: "blur",
+      value: 0,
+      min: 0,
+      step: 0.1,
+      onCommit: () => undefined,
+    }),
+  },
+  {
+    key: "scale",
+    build: ({ updateTransform, previewTransform }) => ({
+      label: "Scale",
+      animationKey: "scale",
+      value: 1,
+      min: 0,
+      step: 0.01,
+      onCommit: (value) => updateTransform("scale", value),
+      onPreviewNumber: (value) => previewTransform("scale", value),
+    }),
+  },
+  {
+    key: "scaleX",
+    build: ({ updateTransform, previewTransform }) => ({
+      label: "Scale X",
+      animationKey: "scaleX",
+      value: 1,
+      min: 0,
+      step: 0.01,
+      onCommit: (value) => updateTransform("scaleX", value),
+      onPreviewNumber: (value) => previewTransform("scaleX", value),
+    }),
+  },
+  {
+    key: "scaleY",
+    build: ({ updateTransform, previewTransform }) => ({
+      label: "Scale Y",
+      animationKey: "scaleY",
+      value: 1,
+      min: 0,
+      step: 0.01,
+      onCommit: (value) => updateTransform("scaleY", value),
+      onPreviewNumber: (value) => previewTransform("scaleY", value),
+    }),
+  },
+  {
+    key: "rotate",
+    build: ({ updateTransform, previewTransform }) => ({
+      label: "Rotation",
+      animationKey: "rotate",
+      value: 0,
+      step: 1,
+      onCommit: (value) => updateTransform("rotate", value),
+      onPreviewNumber: (value) => previewTransform("rotate", value),
+    }),
+  },
+  {
+    key: "rotateX",
+    build: ({ updateTransform, previewTransform }) => ({
+      label: "Rotate X",
+      animationKey: "rotateX",
+      value: 0,
+      step: 1,
+      onCommit: (value) => updateTransform("rotateX", value),
+      onPreviewNumber: (value) => previewTransform("rotateX", value),
+    }),
+  },
+  {
+    key: "rotateY",
+    build: ({ updateTransform, previewTransform }) => ({
+      label: "Rotate Y",
+      animationKey: "rotateY",
+      value: 0,
+      step: 1,
+      onCommit: (value) => updateTransform("rotateY", value),
+      onPreviewNumber: (value) => previewTransform("rotateY", value),
+    }),
+  },
+  {
+    key: "rotateZ",
+    build: ({ updateTransform, previewTransform }) => ({
+      label: "Rotate Z",
+      animationKey: "rotateZ",
+      value: 0,
+      step: 1,
+      onCommit: (value) => updateTransform("rotateZ", value),
+      onPreviewNumber: (value) => previewTransform("rotateZ", value),
+    }),
+  },
+  {
+    key: "skewX",
+    build: ({ updateTransform, previewTransform }) => ({
+      label: "Skew X",
+      animationKey: "skewX",
+      value: 0,
+      step: 1,
+      onCommit: (value) => updateTransform("skewX", value),
+      onPreviewNumber: (value) => previewTransform("skewX", value),
+    }),
+  },
+  {
+    key: "skewY",
+    build: ({ updateTransform, previewTransform }) => ({
+      label: "Skew Y",
+      animationKey: "skewY",
+      value: 0,
+      step: 1,
+      onCommit: (value) => updateTransform("skewY", value),
+      onPreviewNumber: (value) => previewTransform("skewY", value),
+    }),
+  },
+  {
+    key: "perspective",
+    build: ({ updateTransform, previewTransform }) => ({
+      label: "Perspective",
+      animationKey: "transformPerspective",
+      value: 0,
+      min: 0,
+      step: 1,
+      onCommit: (value) => updateTransform("perspective", value),
+      onPreviewNumber: (value) => previewTransform("perspective", value),
+    }),
+  },
+  {
+    key: "z",
+    build: ({ updateTransform, previewTransform }) => ({
+      label: "Z",
+      animationKey: "z",
+      value: 0,
+      step: 1,
+      onCommit: (value) => updateTransform("translateZ", value),
+      onPreviewNumber: (value) => previewTransform("translateZ", value),
+    }),
+  },
+  {
+    key: "pathOffset",
+    build: () => ({
+      label: "Path Offset",
+      animationKey: "pathOffset",
+      value: 0,
+      step: 0.01,
+      onCommit: () => undefined,
+    }),
+  },
+  {
+    key: "pathLength",
+    build: () => ({
+      label: "Path Length",
+      animationKey: "pathLength",
+      value: 1,
+      min: 0,
+      step: 0.01,
+      onCommit: () => undefined,
+    }),
+  },
+  {
+    key: "pathSpacing",
+    build: () => ({
+      label: "Path Spacing",
+      animationKey: "pathSpacing",
+      value: 0,
+      step: 0.01,
+      onCommit: () => undefined,
+    }),
+  },
+];
 
 function propertyPathForAttribute(key: ComposeAnimationAttributeKey) {
   if (key === "x" || key === "y" || key === "width" || key === "height")
@@ -235,6 +437,10 @@ function readTransformUnitValue(
 let cachedSystemFontOptions: FontOption[] | null = null;
 let systemFontOptionsRequest: Promise<FontOption[]> | null = null;
 
+export function preloadSystemFontOptions() {
+  void loadSystemFontOptions();
+}
+
 function loadSystemFontOptions() {
   if (cachedSystemFontOptions) return Promise.resolve(cachedSystemFontOptions);
   systemFontOptionsRequest ??= clipperHost
@@ -258,6 +464,17 @@ function formatFontValueLabel(value: string) {
       ?.trim()
       .replace(/^['"]|['"]$/g, "") || value
   );
+}
+
+function hasAnyFillTrack(object: FrameObject): boolean {
+  const tracks = object.tracks;
+  if (!tracks) return false;
+  for (const path of Object.keys(tracks)) {
+    if (path.startsWith("style.fill.") && tracks[path]?.points.length) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function getFillKeyframeStates(
@@ -469,6 +686,9 @@ function FontSelector({
   }, [systemFontOptions, value]);
 
   useEffect(() => {
+    // Already populated from cache -- skip the async round-trip and the extra
+    // setState/render that comes with it on every mount.
+    if (cachedSystemFontOptions) return;
     let active = true;
     void loadSystemFontOptions().then((options) => {
       if (active) setSystemFontOptions(options);
@@ -499,6 +719,74 @@ function FontSelector({
   );
 }
 
+function LiveAttributeKeyframeIndicator({
+  object,
+  attributeKey,
+  liveScrubClock,
+  render,
+}: {
+  object: FrameObject;
+  attributeKey: ComposeAnimationAttributeKey;
+  liveScrubClock: boolean;
+  currentTime: number;
+  render: (active: boolean) => ReactElement;
+}) {
+  const path = propertyPathForAttribute(attributeKey);
+  const hasTrack = hasPropertyTrack(object, path);
+  // No track means the diamond can never light up live -- skip the
+  // subscription so this row stays React-stable during scrub/playback.
+  const time = usePlayheadTime(hasTrack && liveScrubClock);
+  const active = hasTrack
+    ? Boolean(getPropertyTrackKeyframeAtTime(object, path, time))
+    : false;
+  return render(active);
+}
+
+function LiveTimeBoundary({
+  liveScrubClock,
+  enabled = true,
+  children,
+}: {
+  liveScrubClock: boolean;
+  currentTime: number;
+  enabled?: boolean;
+  children: () => ReactElement;
+}) {
+  usePlayheadTime(liveScrubClock && enabled);
+  return children();
+}
+
+// One subscription per row so rows without keyframes never re-render on tick.
+function KeyframedRow({
+  liveScrubClock,
+  hasTrack,
+  render,
+}: {
+  liveScrubClock: boolean;
+  currentTime: number;
+  hasTrack: boolean;
+  render: () => ReactElement;
+}) {
+  usePlayheadTime(liveScrubClock && hasTrack);
+  return render();
+}
+
+function LiveFillKeyframeStates({
+  object,
+  liveScrubClock,
+  children,
+}: {
+  object: FrameObject;
+  liveScrubClock: boolean;
+  currentTime: number;
+  children: (states: FillKeyframeState[]) => ReactElement;
+}) {
+  const hasFillTrack = hasAnyFillTrack(object);
+  const time = usePlayheadTime(liveScrubClock && hasFillTrack);
+  const states = getFillKeyframeStates(object, time);
+  return children(states);
+}
+
 export const ObjectInspector = memo(function ObjectInspector({
   object,
   currentTime = 0,
@@ -514,31 +802,14 @@ export const ObjectInspector = memo(function ObjectInspector({
   onChange: (updater: (object: FrameObject) => FrameObject) => void;
   onPreview?: (updater: (object: FrameObject) => FrameObject) => void;
 }) {
-  // In compose mode, subscribe to the live scrub clock but only re-render
-  // when the time changes at 3-decimal precision (matching keyframe storage).
-  const lastRoundedRef = useRef(Math.round(currentTime * 1000) / 1000);
-  const liveTimeRef = useRef(currentTime);
-  const liveTimeSnapshot = useSyncExternalStore(
-    (onStoreChange) => {
-      if (!liveScrubClock) return () => {};
-      return subscribeMasterTimelineClock(() => {
-        const snap = getMasterTimelineClockSnapshot();
-        if (snap.source !== "scrub") return;
-        const rounded = Math.round(snap.displayTime * 1000) / 1000;
-        if (rounded === lastRoundedRef.current) return;
-        lastRoundedRef.current = rounded;
-        liveTimeRef.current = snap.displayTime;
-        onStoreChange();
-      });
-    },
-    () => lastRoundedRef.current,
-  );
-  const effectiveTime = liveScrubClock
-    ? getMasterTimelineClockSnapshot().source === "scrub"
-      ? liveTimeRef.current
-      : currentTime
-    : currentTime;
-  void liveTimeSnapshot; // consumed via liveTimeRef to avoid stale closure
+  // Don't subscribe to the live playhead clock at the inspector root -- that
+  // would rerender the entire ~3.7k-line tree on every tick. Callbacks read
+  // the live time on demand via readEffectiveTime(); leaf components that
+  // need to react visually subscribe themselves via usePlayheadTime.
+  function readEffectiveTime() {
+    if (!liveScrubClock) return currentTime;
+    return readPlayheadTime(currentTime);
+  }
   const isText = object.type === "text";
   const isRect = object.type === "rect";
   const isPattern2d = object.type === "pattern2d";
@@ -704,7 +975,7 @@ export const ObjectInspector = memo(function ObjectInspector({
     const propertyValue = getEvaluatedAttributeValue(
       object,
       key,
-      effectiveTime,
+      readEffectiveTime(),
     );
     return propertyValue !== null
       ? (propertyValue as number | string)
@@ -719,7 +990,7 @@ export const ObjectInspector = memo(function ObjectInspector({
     return getPropertyTrackKeyframeAtTime(
       object,
       propertyPathForAttribute(key),
-      effectiveTime,
+      readEffectiveTime(),
     );
   }
 
@@ -729,17 +1000,18 @@ export const ObjectInspector = memo(function ObjectInspector({
   ) {
     const propertyPath = propertyPathForAttribute(key);
     if (!propertyPath) return;
-    const existing = keyframeAtCurrentTime(key);
+    const time = readEffectiveTime();
+    const existing = getPropertyTrackKeyframeAtTime(object, propertyPath, time);
     if (existing) {
       onChange((obj) =>
-        removePropertyKeyframe(obj, propertyPath, existing.time, effectiveTime),
+        removePropertyKeyframe(obj, propertyPath, existing.time, time),
       );
     } else {
       onChange((obj) =>
         upsertPropertyKeyframe(
           obj,
           propertyPath,
-          effectiveTime,
+          time,
           coerceInspectorAttributeValue(key, value),
         ),
       );
@@ -752,6 +1024,7 @@ export const ObjectInspector = memo(function ObjectInspector({
       value: number | string;
     }[],
   ) {
+    const time = readEffectiveTime();
     onChange((current) =>
       entries.reduce((next, entry) => {
         const path = propertyPathForAttribute(entry.key);
@@ -759,7 +1032,7 @@ export const ObjectInspector = memo(function ObjectInspector({
         return upsertPropertyKeyframe(
           next,
           path,
-          effectiveTime,
+          time,
           coerceInspectorAttributeValue(entry.key, entry.value),
         );
       }, current),
@@ -769,16 +1042,13 @@ export const ObjectInspector = memo(function ObjectInspector({
   function removeKeyframesAtCurrentTime(
     keys: readonly ComposeAnimationAttributeKey[],
   ) {
+    const time = readEffectiveTime();
     onChange((current) =>
       keys.reduce((next, key) => {
         const path = propertyPathForAttribute(key);
-        const existing = getPropertyTrackKeyframeAtTime(
-          next,
-          path,
-          effectiveTime,
-        );
+        const existing = getPropertyTrackKeyframeAtTime(next, path, time);
         if (!existing || !path) return next;
-        return removePropertyKeyframe(next, path, existing.time, effectiveTime);
+        return removePropertyKeyframe(next, path, existing.time, time);
       }, current),
     );
   }
@@ -963,281 +1233,216 @@ export const ObjectInspector = memo(function ObjectInspector({
     <div className="grid gap-3">
       {lockBounds ? null : (
         <div className="grid grid-cols-2 gap-2">
-          {graphicBoundsKeys.map((key) => (
-            <Fragment key={key}>
-              {renderKeyframedInput({
-                label: key,
-                animationKey: key,
-                linkedKeys:
-                  key === "x" || key === "y"
-                    ? ["x", "y"]
-                    : key === "width" || key === "height"
-                      ? ["width", "height"]
-                      : undefined,
-                value: object.bounds[key],
-                onPreviewNumber: (value) => previewBounds(key, value),
-                onCommit: (value) => updateBounds(key, value),
-              })}
-            </Fragment>
-          ))}
+          {graphicBoundsKeys.map((key) => {
+            const linkedKeys:
+              | readonly [BoundsAnimationKey, BoundsAnimationKey]
+              | undefined =
+              key === "x" || key === "y"
+                ? ["x", "y"]
+                : key === "width" || key === "height"
+                  ? ["width", "height"]
+                  : undefined;
+            // Subscribe per-row so rows without a track stay stable on tick.
+            const hasTrack = linkedKeys
+              ? linkedKeys.some((k) => hasAttributeKeyframes(k))
+              : hasAttributeKeyframes(key);
+            return (
+              <KeyframedRow
+                key={key}
+                liveScrubClock={liveScrubClock}
+                currentTime={currentTime}
+                hasTrack={hasTrack}
+                render={() =>
+                  renderKeyframedInput({
+                    label: key,
+                    animationKey: key,
+                    linkedKeys,
+                    value: object.bounds[key],
+                    onPreviewNumber: (value) => previewBounds(key, value),
+                    onCommit: (value) => updateBounds(key, value),
+                  })
+                }
+              />
+            );
+          })}
         </div>
       )}
       <div className="grid gap-2">
         <span className={mutedCaps}>Effects</span>
         <div className="grid grid-cols-2 gap-2">
-          {renderKeyframedInput({
-            label: "Opacity",
-            animationKey: "opacity",
-            value: Number(object.style.opacity ?? 1),
-            min: 0,
-            max: 1,
-            step: 0.01,
-            onPreviewNumber: (value) => previewStyleNumber("opacity", value),
-            onCommit: (value) => updateStyleNumber("opacity", value),
-          })}
-          {renderKeyframedInput({
-            label: "Blur",
-            animationKey: "blur",
-            value: 0,
-            min: 0,
-            step: 0.1,
-            onCommit: () => undefined,
-          })}
-          {renderKeyframedInput({
-            label: "Scale",
-            animationKey: "scale",
-            value: 1,
-            min: 0,
-            step: 0.01,
-            onCommit: (value) => updateTransform("scale", value),
-            onPreviewNumber: (value) => previewTransform("scale", value),
-          })}
-          {renderKeyframedInput({
-            label: "Scale X",
-            animationKey: "scaleX",
-            value: 1,
-            min: 0,
-            step: 0.01,
-            onCommit: (value) => updateTransform("scaleX", value),
-            onPreviewNumber: (value) => previewTransform("scaleX", value),
-          })}
-          {renderKeyframedInput({
-            label: "Scale Y",
-            animationKey: "scaleY",
-            value: 1,
-            min: 0,
-            step: 0.01,
-            onCommit: (value) => updateTransform("scaleY", value),
-            onPreviewNumber: (value) => previewTransform("scaleY", value),
-          })}
-          {renderKeyframedInput({
-            label: "Rotation",
-            animationKey: "rotate",
-            value: 0,
-            step: 1,
-            onCommit: (value) => updateTransform("rotate", value),
-            onPreviewNumber: (value) => previewTransform("rotate", value),
-          })}
-          {renderKeyframedInput({
-            label: "Rotate X",
-            animationKey: "rotateX",
-            value: 0,
-            step: 1,
-            onCommit: (value) => updateTransform("rotateX", value),
-            onPreviewNumber: (value) => previewTransform("rotateX", value),
-          })}
-          {renderKeyframedInput({
-            label: "Rotate Y",
-            animationKey: "rotateY",
-            value: 0,
-            step: 1,
-            onCommit: (value) => updateTransform("rotateY", value),
-            onPreviewNumber: (value) => previewTransform("rotateY", value),
-          })}
-          {renderKeyframedInput({
-            label: "Rotate Z",
-            animationKey: "rotateZ",
-            value: 0,
-            step: 1,
-            onCommit: (value) => updateTransform("rotateZ", value),
-            onPreviewNumber: (value) => previewTransform("rotateZ", value),
-          })}
-          {renderKeyframedInput({
-            label: "Skew X",
-            animationKey: "skewX",
-            value: 0,
-            step: 1,
-            onCommit: (value) => updateTransform("skewX", value),
-            onPreviewNumber: (value) => previewTransform("skewX", value),
-          })}
-          {renderKeyframedInput({
-            label: "Skew Y",
-            animationKey: "skewY",
-            value: 0,
-            step: 1,
-            onCommit: (value) => updateTransform("skewY", value),
-            onPreviewNumber: (value) => previewTransform("skewY", value),
-          })}
-          {renderKeyframedInput({
-            label: "Perspective",
-            animationKey: "transformPerspective",
-            value: 0,
-            min: 0,
-            step: 1,
-            onCommit: (value) => updateTransform("perspective", value),
-            onPreviewNumber: (value) => previewTransform("perspective", value),
-          })}
-          {renderKeyframedInput({
-            label: "Z",
-            animationKey: "z",
-            value: 0,
-            step: 1,
-            onCommit: (value) => updateTransform("translateZ", value),
-            onPreviewNumber: (value) => previewTransform("translateZ", value),
-          })}
-          {renderKeyframedInput({
-            label: "Path Offset",
-            animationKey: "pathOffset",
-            value: 0,
-            step: 0.01,
-            onCommit: () => undefined,
-          })}
-          {renderKeyframedInput({
-            label: "Path Length",
-            animationKey: "pathLength",
-            value: 1,
-            min: 0,
-            step: 0.01,
-            onCommit: () => undefined,
-          })}
-          {renderKeyframedInput({
-            label: "Path Spacing",
-            animationKey: "pathSpacing",
-            value: 0,
-            step: 0.01,
-            onCommit: () => undefined,
+          {effectInputDescriptors.map((descriptor) => {
+            const config = descriptor.build({
+              object,
+              updateStyleNumber,
+              previewStyleNumber,
+              updateTransform,
+              previewTransform,
+            });
+            return (
+              <KeyframedRow
+                key={descriptor.key}
+                liveScrubClock={liveScrubClock}
+                currentTime={currentTime}
+                hasTrack={
+                  config.animationKey
+                    ? hasAttributeKeyframes(config.animationKey)
+                    : false
+                }
+                render={() => renderKeyframedInput(config)}
+              />
+            );
           })}
         </div>
       </div>
       <DropShadowEffectControl
         object={object}
-        currentTime={effectiveTime}
+        currentTime={currentTime}
+        liveScrubClock={liveScrubClock}
         onChange={onChange}
         onPreview={onPreview}
       />
       {isText || isPattern2d ? null : (
-        <KeyframedColorInput
-          label="Colour"
-          value={String(object.style.color ?? textColor)}
-          allowAlpha
-          hasKeyframe={Boolean(keyframeAtCurrentTime("color"))}
-          onToggleKeyframe={() =>
-            toggleKeyframe(
-              "color",
-              keyframeValue("color", String(object.style.color ?? textColor)),
-            )
-          }
-          onChange={(value) =>
-            commitKeyframedValue(
-              "color",
-              value,
-              (nextValue) => updateStyleValue("color", nextValue),
-              "text",
-            )
-          }
-          onPreview={(value) =>
-            onPreview?.((current) => ({
-              ...current,
-              style: { ...current.style, color: value },
-            }))
-          }
+        <LiveAttributeKeyframeIndicator
+          object={object}
+          attributeKey="color"
+          liveScrubClock={liveScrubClock}
+          currentTime={currentTime}
+          render={(active) => (
+            <KeyframedColorInput
+              label="Colour"
+              value={String(object.style.color ?? textColor)}
+              allowAlpha
+              hasKeyframe={active}
+              onToggleKeyframe={() =>
+                toggleKeyframe(
+                  "color",
+                  keyframeValue(
+                    "color",
+                    String(object.style.color ?? textColor),
+                  ),
+                )
+              }
+              onChange={(value) =>
+                commitKeyframedValue(
+                  "color",
+                  value,
+                  (nextValue) => updateStyleValue("color", nextValue),
+                  "text",
+                )
+              }
+              onPreview={(value) =>
+                onPreview?.((current) => ({
+                  ...current,
+                  style: { ...current.style, color: value },
+                }))
+              }
+            />
+          )}
         />
       )}
       {isRect || isText || isPattern2d ? null : (
-        <KeyframedFillInput
-          label="Background"
-          fillValue={getFillValue(object)}
-          keyframeStates={getFillKeyframeStates(object, effectiveTime)}
-          onToggleKeyframe={(path) => {
-            const existing = getPropertyTrackKeyframeAtTime(
-              object,
-              path,
-              effectiveTime,
-            );
-            if (existing) {
-              onChange((obj) =>
-                removePropertyKeyframe(obj, path, existing.time, effectiveTime),
-              );
-            } else {
-              const fill = getFillValue(object);
-              const value = readFillPathValue(fill, path);
-              onChange((obj) =>
-                upsertPropertyKeyframe(obj, path, effectiveTime, value),
-              );
-            }
-          }}
-          onChange={(fill) =>
-            onChange((current) => ({
-              ...current,
-              style: {
-                ...current.style,
-                backgroundColor: fill as unknown as string,
-              },
-            }))
-          }
-          onPreview={(fill) =>
-            onPreview?.((current) => ({
-              ...current,
-              style: {
-                ...current.style,
-                backgroundColor: fill as unknown as string,
-              },
-            }))
-          }
-        />
+        <LiveFillKeyframeStates
+          object={object}
+          liveScrubClock={liveScrubClock}
+          currentTime={currentTime}
+        >
+          {(states) => (
+            <KeyframedFillInput
+              label="Background"
+              fillValue={getFillValue(object)}
+              keyframeStates={states}
+              onToggleKeyframe={(path) => {
+                const time = readEffectiveTime();
+                const existing = getPropertyTrackKeyframeAtTime(
+                  object,
+                  path,
+                  time,
+                );
+                if (existing) {
+                  onChange((obj) =>
+                    removePropertyKeyframe(obj, path, existing.time, time),
+                  );
+                } else {
+                  const fill = getFillValue(object);
+                  const value = readFillPathValue(fill, path);
+                  onChange((obj) =>
+                    upsertPropertyKeyframe(obj, path, time, value),
+                  );
+                }
+              }}
+              onChange={(fill) =>
+                onChange((current) => ({
+                  ...current,
+                  style: {
+                    ...current.style,
+                    backgroundColor: fill as unknown as string,
+                  },
+                }))
+              }
+              onPreview={(fill) =>
+                onPreview?.((current) => ({
+                  ...current,
+                  style: {
+                    ...current.style,
+                    backgroundColor: fill as unknown as string,
+                  },
+                }))
+              }
+            />
+          )}
+        </LiveFillKeyframeStates>
       )}
       {isRect ? (
-        <KeyframedFillInput
-          label="Background"
-          fillValue={getFillValue(object)}
-          keyframeStates={getFillKeyframeStates(object, effectiveTime)}
-          onToggleKeyframe={(path) => {
-            const existing = getPropertyTrackKeyframeAtTime(
-              object,
-              path,
-              effectiveTime,
-            );
-            if (existing) {
-              onChange((obj) =>
-                removePropertyKeyframe(obj, path, existing.time, effectiveTime),
-              );
-            } else {
-              const fill = getFillValue(object);
-              const value = readFillPathValue(fill, path);
-              onChange((obj) =>
-                upsertPropertyKeyframe(obj, path, effectiveTime, value),
-              );
-            }
-          }}
-          onChange={(fill) =>
-            onChange((current) => ({
-              ...current,
-              style: {
-                ...current.style,
-                backgroundColor: fill as unknown as string,
-              },
-            }))
-          }
-          onPreview={(fill) =>
-            onPreview?.((current) => ({
-              ...current,
-              style: {
-                ...current.style,
-                backgroundColor: fill as unknown as string,
-              },
-            }))
-          }
-        />
+        <LiveFillKeyframeStates
+          object={object}
+          liveScrubClock={liveScrubClock}
+          currentTime={currentTime}
+        >
+          {(states) => (
+            <KeyframedFillInput
+              label="Background"
+              fillValue={getFillValue(object)}
+              keyframeStates={states}
+              onToggleKeyframe={(path) => {
+                const time = readEffectiveTime();
+                const existing = getPropertyTrackKeyframeAtTime(
+                  object,
+                  path,
+                  time,
+                );
+                if (existing) {
+                  onChange((obj) =>
+                    removePropertyKeyframe(obj, path, existing.time, time),
+                  );
+                } else {
+                  const fill = getFillValue(object);
+                  const value = readFillPathValue(fill, path);
+                  onChange((obj) =>
+                    upsertPropertyKeyframe(obj, path, time, value),
+                  );
+                }
+              }}
+              onChange={(fill) =>
+                onChange((current) => ({
+                  ...current,
+                  style: {
+                    ...current.style,
+                    backgroundColor: fill as unknown as string,
+                  },
+                }))
+              }
+              onPreview={(fill) =>
+                onPreview?.((current) => ({
+                  ...current,
+                  style: {
+                    ...current.style,
+                    backgroundColor: fill as unknown as string,
+                  },
+                }))
+              }
+            />
+          )}
+        </LiveFillKeyframeStates>
       ) : null}
       {isText ? (
         <>
@@ -1249,75 +1454,87 @@ export const ObjectInspector = memo(function ObjectInspector({
               onChange={(event) => updateTextContent(event.target.value)}
             />
           </label>
-          <KeyframedColorInput
-            label="Colour"
-            value={textColor}
-            allowAlpha
-            hasKeyframe={Boolean(keyframeAtCurrentTime("color"))}
-            onToggleKeyframe={() =>
-              toggleKeyframe("color", keyframeValue("color", textColor))
-            }
-            onChange={(value) =>
-              commitKeyframedValue(
-                "color",
-                value,
-                (nextValue) => updateStyleValue("color", nextValue),
-                "text",
-              )
-            }
-            onPreview={(value) =>
-              onPreview?.((current) => ({
-                ...current,
-                style: { ...current.style, color: value },
-              }))
-            }
+          <LiveAttributeKeyframeIndicator
+            object={object}
+            attributeKey="color"
+            liveScrubClock={liveScrubClock}
+            currentTime={currentTime}
+            render={(active) => (
+              <KeyframedColorInput
+                label="Colour"
+                value={textColor}
+                allowAlpha
+                hasKeyframe={active}
+                onToggleKeyframe={() =>
+                  toggleKeyframe("color", keyframeValue("color", textColor))
+                }
+                onChange={(value) =>
+                  commitKeyframedValue(
+                    "color",
+                    value,
+                    (nextValue) => updateStyleValue("color", nextValue),
+                    "text",
+                  )
+                }
+                onPreview={(value) =>
+                  onPreview?.((current) => ({
+                    ...current,
+                    style: { ...current.style, color: value },
+                  }))
+                }
+              />
+            )}
           />
-          <KeyframedFillInput
-            label="Background"
-            fillValue={getFillValue(object)}
-            keyframeStates={getFillKeyframeStates(object, effectiveTime)}
-            onToggleKeyframe={(path) => {
-              const existing = getPropertyTrackKeyframeAtTime(
-                object,
-                path,
-                effectiveTime,
-              );
-              if (existing) {
-                onChange((obj) =>
-                  removePropertyKeyframe(
-                    obj,
+          <LiveFillKeyframeStates
+            object={object}
+            liveScrubClock={liveScrubClock}
+            currentTime={currentTime}
+          >
+            {(states) => (
+              <KeyframedFillInput
+                label="Background"
+                fillValue={getFillValue(object)}
+                keyframeStates={states}
+                onToggleKeyframe={(path) => {
+                  const time = readEffectiveTime();
+                  const existing = getPropertyTrackKeyframeAtTime(
+                    object,
                     path,
-                    existing.time,
-                    effectiveTime,
-                  ),
-                );
-              } else {
-                const fill = getFillValue(object);
-                const value = readFillPathValue(fill, path);
-                onChange((obj) =>
-                  upsertPropertyKeyframe(obj, path, effectiveTime, value),
-                );
-              }
-            }}
-            onChange={(fill) =>
-              onChange((current) => ({
-                ...current,
-                style: {
-                  ...current.style,
-                  backgroundColor: fill as unknown as string,
-                },
-              }))
-            }
-            onPreview={(fill) =>
-              onPreview?.((current) => ({
-                ...current,
-                style: {
-                  ...current.style,
-                  backgroundColor: fill as unknown as string,
-                },
-              }))
-            }
-          />
+                    time,
+                  );
+                  if (existing) {
+                    onChange((obj) =>
+                      removePropertyKeyframe(obj, path, existing.time, time),
+                    );
+                  } else {
+                    const fill = getFillValue(object);
+                    const value = readFillPathValue(fill, path);
+                    onChange((obj) =>
+                      upsertPropertyKeyframe(obj, path, time, value),
+                    );
+                  }
+                }}
+                onChange={(fill) =>
+                  onChange((current) => ({
+                    ...current,
+                    style: {
+                      ...current.style,
+                      backgroundColor: fill as unknown as string,
+                    },
+                  }))
+                }
+                onPreview={(fill) =>
+                  onPreview?.((current) => ({
+                    ...current,
+                    style: {
+                      ...current.style,
+                      backgroundColor: fill as unknown as string,
+                    },
+                  }))
+                }
+              />
+            )}
+          </LiveFillKeyframeStates>
           <FontSelector
             value={fontFamily}
             onChange={(value) => updateStyleValue("fontFamily", value)}
@@ -1549,33 +1766,42 @@ export const ObjectInspector = memo(function ObjectInspector({
           <span className={mutedCaps}>Colours</span>
           <div className="grid gap-2">
             {colorStyleEntries.map(([key, value]) => (
-              <KeyframedColorInput
+              <LiveAttributeKeyframeIndicator
                 key={key}
-                label={formatStyleLabel(key)}
-                value={value}
-                hasKeyframe={Boolean(
-                  keyframeAtCurrentTime(key as ComposeAnimationAttributeKey),
+                object={object}
+                attributeKey={key as ComposeAnimationAttributeKey}
+                liveScrubClock={liveScrubClock}
+                currentTime={currentTime}
+                render={(active) => (
+                  <KeyframedColorInput
+                    label={formatStyleLabel(key)}
+                    value={value}
+                    hasKeyframe={active}
+                    onToggleKeyframe={() =>
+                      toggleKeyframe(
+                        key as ComposeAnimationAttributeKey,
+                        keyframeValue(
+                          key as ComposeAnimationAttributeKey,
+                          value,
+                        ),
+                      )
+                    }
+                    onChange={(nextValue) =>
+                      commitKeyframedValue(
+                        key as ComposeAnimationAttributeKey,
+                        nextValue,
+                        (val) => updateStyleColor(key, val),
+                        "text",
+                      )
+                    }
+                    onPreview={(nextValue) =>
+                      onPreview?.((current) => ({
+                        ...current,
+                        style: { ...current.style, [key]: nextValue },
+                      }))
+                    }
+                  />
                 )}
-                onToggleKeyframe={() =>
-                  toggleKeyframe(
-                    key as ComposeAnimationAttributeKey,
-                    keyframeValue(key as ComposeAnimationAttributeKey, value),
-                  )
-                }
-                onChange={(nextValue) =>
-                  commitKeyframedValue(
-                    key as ComposeAnimationAttributeKey,
-                    nextValue,
-                    (val) => updateStyleColor(key, val),
-                    "text",
-                  )
-                }
-                onPreview={(nextValue) =>
-                  onPreview?.((current) => ({
-                    ...current,
-                    style: { ...current.style, [key]: nextValue },
-                  }))
-                }
               />
             ))}
           </div>
@@ -1935,6 +2161,10 @@ function TextAnimatorsSection({
   const animators = (object.animations ?? []).filter(
     (animation) => animation.options.split,
   );
+  // Only mount the (heavy) animator cards on demand. They contain ~25 inputs
+  // and 6 Selects each, so eagerly mounting them at inspector-open time was
+  // the dominant text-object lag source.
+  const [expanded, setExpanded] = useState(animators.length > 0);
 
   function updateAnimators(
     updater: (animators: LayerAnimation[]) => LayerAnimation[],
@@ -1950,6 +2180,7 @@ function TextAnimatorsSection({
   }
 
   function addAnimator() {
+    setExpanded(true);
     updateAnimators((current) => [
       ...current,
       createDefaultTextAnimator(current.length + 1),
@@ -1976,7 +2207,16 @@ function TextAnimatorsSection({
   return (
     <div className="grid gap-2">
       <div className="flex items-center justify-between">
-        <span className={mutedCaps}>Text Animators</span>
+        <button
+          type="button"
+          className={`flex flex-1 items-center gap-1.5 ${mutedCaps}`}
+          onClick={() => setExpanded((value) => !value)}
+        >
+          <ChevronDown
+            className={`h-3 w-3 transition ${expanded ? "" : "-rotate-90"}`}
+          />
+          <span>Text Animators ({animators.length})</span>
+        </button>
         <button
           type="button"
           className="rounded-[8px] border border-[#2d313b] bg-[#171920] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.08em] text-[#dfe2ea] transition hover:border-[var(--clipper-accent-strong)] hover:bg-[#20232c]"
@@ -1985,20 +2225,22 @@ function TextAnimatorsSection({
           Add
         </button>
       </div>
-      {animators.length === 0 ? (
-        <p className="rounded-[10px] border border-dashed border-[#2d313b] bg-[#13151c] px-3 py-2.5 text-[11px] leading-relaxed text-[#a7adbb]">
-          No animators yet. Animate characters, words, or lines.
-        </p>
-      ) : (
-        animators.map((animator) => (
-          <TextAnimatorCard
-            key={animator.id}
-            animator={animator}
-            onChange={(updater) => updateAnimator(animator.id, updater)}
-            onRemove={() => removeAnimator(animator.id)}
-          />
-        ))
-      )}
+      {expanded ? (
+        animators.length === 0 ? (
+          <p className="rounded-[10px] border border-dashed border-[#2d313b] bg-[#13151c] px-3 py-2.5 text-[11px] leading-relaxed text-[#a7adbb]">
+            No animators yet. Animate characters, words, or lines.
+          </p>
+        ) : (
+          animators.map((animator) => (
+            <TextAnimatorCard
+              key={animator.id}
+              animator={animator}
+              onChange={(updater) => updateAnimator(animator.id, updater)}
+              onRemove={() => removeAnimator(animator.id)}
+            />
+          ))
+        )
+      ) : null}
     </div>
   );
 }
