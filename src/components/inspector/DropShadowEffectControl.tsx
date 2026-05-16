@@ -355,7 +355,7 @@ export function DropShadowEffectControl({
                 type="button"
                 aria-label="Remove drop shadow"
                 title="Remove drop shadow"
-                className="grid h-6 w-6 place-items-center rounded-[6px] text-[#ffb4b4] transition hover:bg-[#301b1d]"
+                className="grid h-6 w-6 place-items-center rounded-[6px] text-[#dfe2ea] transition hover:bg-[#20232c]"
                 onClick={(event) => {
                   event.preventDefault();
                   removeShadow();

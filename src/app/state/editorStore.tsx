@@ -589,6 +589,7 @@ export function createEditorStore(project: ProjectManifest) {
     clearDirectSelection: () =>
       set({
         editingTextObjectId: null,
+        selectedObjectId: null,
         selectedPartId: "",
         selectedParts: [],
         selectedMotionMarker: null,

@@ -208,9 +208,11 @@ export const ConnectedInspectorContent = memo(
     const inspectorSelectedObject = isPlaying
       ? stableSelectedObjectRef.current
       : selectedObject;
+    // Direct mode only shows motion/adjustment/transition/composition inspectors.
+    // Object inspector is Compose-only.
     const composeInspectorObject = composeMode
       ? (selectedObject ?? null)
-      : (inspectorSelectedObject ?? null);
+      : null;
     const stableUpdateSelectedObject = useCallback(
       (updater: (object: FrameObject) => FrameObject) =>
         updateSelectedObjectRef.current(updater),
