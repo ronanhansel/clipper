@@ -135,12 +135,20 @@ export type AnimationPlaybackOptions = {
   mass?: number;
   velocity?: number;
   split?: {
-    mode: "word" | "character";
+    mode: "word" | "character" | "line";
     stagger?: number;
-    order?: "forward" | "reverse" | "center";
+    order?: "forward" | "reverse" | "center" | "random";
     repeatScope?: "sequence" | "item";
     tokenDelays?: Record<number, number>;
     tokenIndexes?: number[];
+    seed?: number;
+    shape?: "square" | "rampUp" | "rampDown" | "triangle" | "round" | "smooth";
+    start?: number;
+    end?: number;
+    offset?: number;
+    easeHigh?: number;
+    easeLow?: number;
+    anchor?: "token" | "word" | "line" | "all";
   };
 };
 
@@ -160,6 +168,16 @@ export type LayerAnimationMode =
   | "code-driven-motion"
   | "static";
 
+export type ShadowEffect = {
+  enabled?: boolean;
+  x?: number;
+  y?: number;
+  blur?: number;
+  spread?: number;
+  color?: string;
+  alpha?: number;
+};
+
 export type FrameObject = {
   id: string;
   name: string;
@@ -172,6 +190,7 @@ export type FrameObject = {
   style: Record<string, string | number>;
   transform?: Record<string, JsonValue> | string;
   filter?: Record<string, JsonValue>;
+  shadow?: ShadowEffect;
   layoutId?: string;
   parentId?: string;
   hidden?: boolean;

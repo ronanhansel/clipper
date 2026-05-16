@@ -1087,4 +1087,62 @@ describe("render runtime", () => {
     expect(evaluated.elements[0].renderStyle.transform).toBeUndefined();
     expect(evaluated.timeSensitive).toBe(false);
   });
+
+  it("emits a Penpot-style SVG filter reference for image-like types", () => {
+    const object: FrameObject = {
+      ...baseObject,
+      id: "image-shadow",
+      type: "image",
+      shadow: { x: 0, y: 4, blur: 4, color: "#000000", alpha: 25 },
+    };
+    const evaluated = evaluateFrameObject(object, 0, 1);
+    expect(evaluated.renderStyle.filter).toBe("url(#shadow-image-shadow)");
+    expect(evaluated.renderStyle.boxShadow).toBeUndefined();
+    expect(evaluated.renderStyle.textShadow).toBeUndefined();
+  });
+
+  it("uses the same SVG filter reference for rect layers so spread is handled by feMorphology", () => {
+    const object: FrameObject = {
+      ...baseObject,
+      id: "rect-shadow",
+      type: "rect",
+      shadow: { x: 1, y: 2, blur: 6, spread: 4, color: "#000000", alpha: 50 },
+    };
+    const evaluated = evaluateFrameObject(object, 0, 1);
+    expect(evaluated.renderStyle.filter).toBe("url(#shadow-rect-shadow)");
+    expect(evaluated.renderStyle.boxShadow).toBeUndefined();
+    expect(evaluated.renderStyle.textShadow).toBeUndefined();
+  });
+
+  it("uses the same SVG filter reference for text layers so spread follows glyph alpha", () => {
+    const object: FrameObject = {
+      ...baseObject,
+      id: "text-shadow",
+      type: "text",
+      shadow: { x: 0, y: 2, blur: 3, spread: 4, color: "#000000", alpha: 80 },
+    };
+    const evaluated = evaluateFrameObject(object, 0, 1);
+    expect(evaluated.renderStyle.filter).toBe("url(#shadow-text-shadow)");
+    expect(evaluated.renderStyle.boxShadow).toBeUndefined();
+    expect(evaluated.renderStyle.textShadow).toBeUndefined();
+  });
+
+  it("skips shadow when enabled is false", () => {
+    const object: FrameObject = {
+      ...baseObject,
+      type: "rect",
+      shadow: {
+        enabled: false,
+        x: 0,
+        y: 4,
+        blur: 4,
+        color: "#000000",
+        alpha: 25,
+      },
+    };
+    const evaluated = evaluateFrameObject(object, 0, 1);
+    expect(evaluated.renderStyle.boxShadow).toBeUndefined();
+    expect(evaluated.renderStyle.textShadow).toBeUndefined();
+    expect(evaluated.renderStyle.filter).toBeUndefined();
+  });
 });

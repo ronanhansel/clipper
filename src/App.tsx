@@ -166,6 +166,7 @@ import {
 } from "./core/frameInteraction";
 import { boundsToPoints, framePointFromClient } from "./core/geometry";
 import { type FillValue, fillValueToCss, isFillValue } from "./core/fillValue";
+import { generateShadowFilterSvg } from "./render-engine/shadowFilters";
 import { clamp, roundToPrecision, roundTenth } from "./core/math";
 import {
   getPathGeometryBounds,
@@ -2804,6 +2805,50 @@ function AppContent({
       pushTransform("skewX", "deg");
       pushTransform("skewY", "deg");
       target.style.transform = parts.length ? parts.join(" ") : "";
+    }
+    if (next.shadow) {
+      const shadow = next.shadow;
+      const filterOwner = target.querySelector<SVGSVGElement>(
+        `[data-clipper-shadow-filter-owner="${cssEscape(next.id)}"]`,
+      );
+      if (shadow.enabled === false) {
+        target.style.filter = "";
+        filterOwner?.remove();
+      } else {
+        const x = typeof shadow.x === "number" ? shadow.x : 0;
+        const y = typeof shadow.y === "number" ? shadow.y : 0;
+        const blur =
+          typeof shadow.blur === "number" ? Math.max(0, shadow.blur) : 0;
+        const spread =
+          typeof shadow.spread === "number"
+            ? Math.max(-64, Math.min(64, shadow.spread))
+            : 0;
+        const color =
+          typeof shadow.color === "string" ? shadow.color : "#000000";
+        const alpha = typeof shadow.alpha === "number" ? shadow.alpha : 100;
+        const filterId = `shadow-${next.id}`;
+        const markup = generateShadowFilterSvg({
+          id: filterId,
+          x,
+          y,
+          blur,
+          spread,
+          color,
+          alpha,
+        });
+        const svg =
+          filterOwner ??
+          document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        svg.setAttribute("aria-hidden", "true");
+        svg.setAttribute("data-clipper-shadow-filter-owner", next.id);
+        svg.style.position = "absolute";
+        svg.style.width = "0";
+        svg.style.height = "0";
+        svg.style.overflow = "hidden";
+        svg.innerHTML = `<defs>${markup}</defs>`;
+        if (!filterOwner) target.prepend(svg);
+        target.style.filter = `url(#${filterId})`;
+      }
     }
   }
 

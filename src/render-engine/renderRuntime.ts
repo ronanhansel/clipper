@@ -211,7 +211,12 @@ function renderStyleFromPropertyTracks(object: FrameObject): RenderStyle {
   const transform = transformStyleFromRecord(
     readObjectRecord(object, "transform"),
   );
-  const filter = filterStyleFromRecord(readObjectRecord(object, "filter"));
+  const shadow = readObjectShadowRecord(object);
+  const shadowStyle = shadowRenderStyle(shadow, object.id);
+  const filter = composeFilterStyle(
+    readObjectRecord(object, "filter"),
+    shadowStyle.filterPart,
+  );
   const background = resolveBackgroundStyle(object.style.backgroundColor);
   return {
     left: object.bounds.x,
@@ -261,6 +266,13 @@ function readObjectRecord(object: FrameObject, key: "transform" | "filter") {
     : {};
 }
 
+function readObjectShadowRecord(object: FrameObject): Record<string, unknown> {
+  const value = (object as unknown as Record<string, unknown>).shadow;
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
 function transformStyleFromRecord(record: Record<string, unknown>) {
   const transforms: string[] = [];
   appendTransform(transforms, record.perspective, "perspective", "px");
@@ -293,6 +305,83 @@ function filterStyleFromRecord(record: Record<string, unknown>) {
   return typeof record.blur === "number" && Number.isFinite(record.blur)
     ? `blur(${Math.max(0, record.blur).toFixed(2)}px)`
     : undefined;
+}
+
+function shadowColorToRgba(hex: unknown, alphaPct: unknown): string | null {
+  const sanitizedHex = typeof hex === "string" ? hex.trim() : "";
+  if (!sanitizedHex.startsWith("#")) return null;
+  const raw = sanitizedHex.slice(1);
+  const expanded =
+    raw.length === 3
+      ? raw
+          .split("")
+          .map((channel) => channel + channel)
+          .join("")
+      : raw;
+  if (!/^[0-9a-fA-F]{6}$/.test(expanded)) return null;
+  const r = parseInt(expanded.slice(0, 2), 16);
+  const g = parseInt(expanded.slice(2, 4), 16);
+  const b = parseInt(expanded.slice(4, 6), 16);
+  const pct =
+    typeof alphaPct === "number" && Number.isFinite(alphaPct) ? alphaPct : 100;
+  const a = Math.max(0, Math.min(1, pct / 100));
+  return `rgba(${r}, ${g}, ${b}, ${a.toFixed(2)})`;
+}
+
+type ShadowGeometry = {
+  x: number;
+  y: number;
+  blur: number;
+  spread: number;
+  rgba: string;
+};
+
+function readShadowGeometry(
+  shadow: Record<string, unknown>,
+): ShadowGeometry | null {
+  if (shadow.enabled === false) return null;
+  const x =
+    typeof shadow.x === "number" && Number.isFinite(shadow.x) ? shadow.x : 0;
+  const y =
+    typeof shadow.y === "number" && Number.isFinite(shadow.y) ? shadow.y : 0;
+  const blur =
+    typeof shadow.blur === "number" && Number.isFinite(shadow.blur)
+      ? Math.max(0, shadow.blur)
+      : 0;
+  const spreadRaw =
+    typeof shadow.spread === "number" && Number.isFinite(shadow.spread)
+      ? Math.max(0, shadow.spread)
+      : 0;
+  const spread = Math.min(spreadRaw, 64);
+  const rgba = shadowColorToRgba(shadow.color, shadow.alpha);
+  if (!rgba) return null;
+  const isDefault = x === 0 && y === 0 && blur === 0 && spread === 0;
+  if (isDefault && shadow.enabled !== true) return null;
+  return { x, y, blur, spread, rgba };
+}
+
+type ShadowRenderStyle = {
+  filterPart?: string;
+};
+
+function shadowRenderStyle(
+  shadow: Record<string, unknown>,
+  objectId: string,
+): ShadowRenderStyle {
+  const geom = readShadowGeometry(shadow);
+  if (!geom) return {};
+  return { filterPart: `url(#shadow-${objectId})` };
+}
+
+function composeFilterStyle(
+  filter: Record<string, unknown>,
+  shadowFilterPart: string | undefined,
+): string | undefined {
+  const parts: string[] = [];
+  const blur = filterStyleFromRecord(filter);
+  if (blur) parts.push(blur);
+  if (shadowFilterPart) parts.push(shadowFilterPart);
+  return parts.length ? parts.join(" ") : undefined;
 }
 
 function styleValue(value: unknown) {

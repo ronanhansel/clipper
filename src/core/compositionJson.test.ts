@@ -166,4 +166,49 @@ describe("composition JSON schema", () => {
     expect(source).not.toContain("import");
     expect(source).not.toContain("new Composition");
   });
+
+  it("round-trips drop-shadow effect through JSON", () => {
+    const result = parseCompositionJson({
+      id: "comp-shadow",
+      duration: 5,
+      frame: { width: 1920, height: 1080 },
+      objects: [
+        {
+          id: "rect-shadow",
+          type: "rect",
+          name: "Shadow Rect",
+          bounds: { x: 0, y: 0, width: 100, height: 100 },
+          style: { backgroundColor: "#fff" },
+          shadow: {
+            enabled: true,
+            x: 0,
+            y: 4,
+            blur: 4,
+            spread: 0,
+            color: "#000000",
+            alpha: 25,
+          },
+        },
+      ],
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const part = jsonCompositionToPart(result.composition, {
+      filePath: "compositions/comp-shadow.composition.json",
+    });
+    expect(part.objects[0]?.shadow).toMatchObject({
+      enabled: true,
+      x: 0,
+      y: 4,
+      blur: 4,
+      spread: 0,
+      color: "#000000",
+      alpha: 25,
+    });
+
+    const source = compositionToJsonSource(part);
+    expect(source).toContain('"shadow"');
+    expect(source).toContain('"alpha"');
+  });
 });

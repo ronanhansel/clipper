@@ -5,7 +5,13 @@ export type Pattern2DPresetId =
   | "grid"
   | "paper"
   | "checker"
-  | "stripes";
+  | "stripes"
+  | "noise";
+
+export type Pattern2DSelectOption = {
+  value: string;
+  label: string;
+};
 
 export type Pattern2DParam =
   | {
@@ -18,12 +24,20 @@ export type Pattern2DParam =
       default: number;
     }
   | { kind: "color"; key: string; label: string; default: string }
-  | { kind: "boolean"; key: string; label: string; default: boolean };
+  | { kind: "boolean"; key: string; label: string; default: boolean }
+  | {
+      kind: "select";
+      key: string;
+      label: string;
+      options: readonly Pattern2DSelectOption[];
+      default: string;
+    };
 
 export type Pattern2DTile = {
   tileWidth: number;
   tileHeight: number;
   body: string;
+  defs?: string;
 };
 
 export type Pattern2DPreset = {
@@ -34,6 +48,8 @@ export type Pattern2DPreset = {
   renderTile: (
     params: Record<string, JsonValue>,
     seed: number,
+    baseId: string,
+    bounds: { width: number; height: number },
   ) => Pattern2DTile;
 };
 
@@ -68,6 +84,25 @@ function escapeAttr(value: string) {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
+}
+
+function hexToRgb01(hex: string): { r: number; g: number; b: number } {
+  let value = hex.trim();
+  if (value.startsWith("#")) value = value.slice(1);
+  if (value.length === 3) {
+    value = value
+      .split("")
+      .map((c) => c + c)
+      .join("");
+  }
+  if (value.length !== 6 || !/^[0-9a-fA-F]{6}$/.test(value)) {
+    return { r: 1, g: 1, b: 1 };
+  }
+  return {
+    r: parseInt(value.slice(0, 2), 16) / 255,
+    g: parseInt(value.slice(2, 4), 16) / 255,
+    b: parseInt(value.slice(4, 6), 16) / 255,
+  };
 }
 
 export const PATTERN_2D_PRESETS: Record<Pattern2DPresetId, Pattern2DPreset> = {
@@ -304,6 +339,110 @@ export const PATTERN_2D_PRESETS: Record<Pattern2DPresetId, Pattern2DPreset> = {
       };
     },
   },
+  noise: {
+    id: "noise",
+    label: "Noise",
+    randomized: true,
+    params: [
+      {
+        kind: "select",
+        key: "noiseType",
+        label: "Noise type",
+        options: [
+          { value: "fractalNoise", label: "Fractal" },
+          { value: "turbulence", label: "Turbulence" },
+        ],
+        default: "fractalNoise",
+      },
+      {
+        kind: "number",
+        key: "scale",
+        label: "Scale",
+        min: 1,
+        max: 400,
+        default: 80,
+      },
+      {
+        kind: "number",
+        key: "detail",
+        label: "Detail",
+        min: 1,
+        max: 6,
+        default: 2,
+      },
+      {
+        kind: "number",
+        key: "contrast",
+        label: "Contrast",
+        min: 0.1,
+        max: 8,
+        step: 0.1,
+        default: 1,
+      },
+      {
+        kind: "number",
+        key: "brightness",
+        label: "Brightness",
+        min: -1,
+        max: 1,
+        step: 0.05,
+        default: 0,
+      },
+      {
+        kind: "number",
+        key: "opacity",
+        label: "Opacity",
+        min: 0,
+        max: 1,
+        step: 0.01,
+        default: 1,
+      },
+      { kind: "color", key: "color", label: "Color", default: "#ffffff" },
+      {
+        kind: "boolean",
+        key: "monochrome",
+        label: "Monochrome",
+        default: true,
+      },
+    ],
+    renderTile: (params, seed, baseId, bounds) => {
+      const tileWidth = Math.max(1, Math.round(bounds.width));
+      const tileHeight = Math.max(1, Math.round(bounds.height));
+      const noiseType =
+        str(params.noiseType, "fractalNoise") === "turbulence"
+          ? "turbulence"
+          : "fractalNoise";
+      const scale = Math.max(1, num(params.scale, 80));
+      const baseFrequency = (1 / scale).toFixed(4);
+      const numOctaves = Math.max(
+        1,
+        Math.min(8, Math.round(num(params.detail, 2))),
+      );
+      const contrast = Math.max(0.05, num(params.contrast, 1));
+      const brightness = Math.max(-1, Math.min(1, num(params.brightness, 0)));
+      const opacity = Math.min(1, Math.max(0, num(params.opacity, 1)));
+      const monochrome = bool(params.monochrome, true);
+      const seedAttr = Math.floor(seed) % 1000;
+      const filterId = `${baseId}-noise-filter`;
+
+      const { r, g, b } = monochrome
+        ? hexToRgb01(str(params.color, "#ffffff"))
+        : { r: 1, g: 1, b: 1 };
+      const cr = (r * contrast).toFixed(3);
+      const cg = (g * contrast).toFixed(3);
+      const cb = (b * contrast).toFixed(3);
+      const br = brightness.toFixed(3);
+      const matrix = monochrome
+        ? `${cr} ${cr} ${cr} 0 ${br} ${cg} ${cg} ${cg} 0 ${br} ${cb} ${cb} ${cb} 0 ${br} 0 0 0 ${opacity.toFixed(3)} 0`
+        : `${contrast.toFixed(3)} 0 0 0 ${br} 0 ${contrast.toFixed(3)} 0 0 ${br} 0 0 ${contrast.toFixed(3)} 0 ${br} 0 0 0 ${opacity.toFixed(3)} 0`;
+
+      const defs = `<filter id="${filterId}" x="0" y="0" width="100%" height="100%" filterUnits="userSpaceOnUse" primitiveUnits="userSpaceOnUse"><feTurbulence type="${noiseType}" baseFrequency="${baseFrequency}" numOctaves="${numOctaves}" seed="${seedAttr}" result="noise"/><feColorMatrix in="noise" type="matrix" values="${matrix}"/></filter>`;
+
+      const body = `<rect width="${tileWidth}" height="${tileHeight}" filter="url(#${filterId})"/>`;
+
+      return { tileWidth, tileHeight, body, defs };
+    },
+  },
 };
 
 export function getPattern2dPreset(id: Pattern2DPresetId): Pattern2DPreset {
@@ -345,7 +484,8 @@ export function buildPattern2dSvg(
 ): string {
   const { preset, seed, params } = readPattern2dProps(object);
   const def = getPattern2dPreset(preset);
-  const tile = def.renderTile(params, seed);
   const { width, height } = object.bounds;
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><defs><pattern id="${patternId}" width="${tile.tileWidth}" height="${tile.tileHeight}" patternUnits="userSpaceOnUse">${tile.body}</pattern></defs><rect width="100%" height="100%" fill="url(#${patternId})"/></svg>`;
+  const tile = def.renderTile(params, seed, patternId, { width, height });
+  const extraDefs = tile.defs ?? "";
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><defs>${extraDefs}<pattern id="${patternId}" width="${tile.tileWidth}" height="${tile.tileHeight}" patternUnits="userSpaceOnUse">${tile.body}</pattern></defs><rect width="100%" height="100%" fill="url(#${patternId})"/></svg>`;
 }

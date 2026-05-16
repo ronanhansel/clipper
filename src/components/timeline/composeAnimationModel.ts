@@ -12,8 +12,10 @@ import type {
 
 export type ComposeAnimationAttributeKey = AnimationTrackProperty;
 // Timeline can also show generic property-tracks that don't map to legacy
-// AnimationTrackProperty keys (ex: structured fill / gradients).
-export type ComposeAnimationExtraAttributeKey = `fill:${string}`;
+// AnimationTrackProperty keys (ex: structured fill / gradients, drop shadow).
+export type ComposeAnimationExtraAttributeKey =
+  | `fill:${string}`
+  | `shadow:${string}`;
 export type ComposeAnimationTimelineAttributeKey =
   | AnimationTrackProperty
   | ComposeAnimationExtraAttributeKey;
@@ -264,10 +266,30 @@ function isFillPropertyPath(path: string): path is PropertyPath {
   return path.startsWith("style.fill.");
 }
 
+function isShadowPropertyPath(path: string): path is PropertyPath {
+  return path.startsWith("shadow.");
+}
+
 function buildFillTrackKey(
   propertyPath: string,
 ): ComposeAnimationExtraAttributeKey {
   return `fill:${propertyPath}`;
+}
+
+function buildShadowTrackKey(
+  propertyPath: string,
+): ComposeAnimationExtraAttributeKey {
+  return `shadow:${propertyPath.slice("shadow.".length)}`;
+}
+
+function labelForShadowPropertyPath(propertyPath: string): string {
+  if (propertyPath === "shadow.x") return "Shadow X";
+  if (propertyPath === "shadow.y") return "Shadow Y";
+  if (propertyPath === "shadow.blur") return "Shadow Blur";
+  if (propertyPath === "shadow.spread") return "Shadow Spread";
+  if (propertyPath === "shadow.color") return "Shadow Color";
+  if (propertyPath === "shadow.alpha") return "Shadow Alpha";
+  return propertyPath;
 }
 
 function labelForFillPropertyPath(propertyPath: string): string {
@@ -343,10 +365,15 @@ export function getComposeAnimationAttributeTracks(
       mapped ??
       (isFillPropertyPath(propertyPath)
         ? buildFillTrackKey(propertyPath)
-        : undefined);
+        : isShadowPropertyPath(propertyPath)
+          ? buildShadowTrackKey(propertyPath)
+          : undefined);
     if (!key) continue;
     if (!mapped && isFillPropertyPath(propertyPath)) {
       labels.set(key, labelForFillPropertyPath(propertyPath));
+    }
+    if (!mapped && isShadowPropertyPath(propertyPath)) {
+      labels.set(key, labelForShadowPropertyPath(propertyPath));
     }
     const points = tracks.get(key) ?? [];
     for (const point of track.points) {
@@ -379,15 +406,25 @@ export function getComposeAnimationAttributeTracks(
     ];
   });
 
-  // Append fill/extra tracks after canonical ones.
+  // Append fill/shadow/extra tracks after canonical ones.
   const extra = Array.from(tracks.entries())
-    .filter(([key]) => typeof key === "string" && key.startsWith("fill:"))
-    .map(([key, keyframes]) => ({
-      id: key,
-      key,
-      label: labels.get(key) ?? String(key).slice("fill:".length),
-      keyframes: keyframes.sort((left, right) => left.time - right.time),
-    }));
+    .filter(
+      ([key]) =>
+        typeof key === "string" &&
+        (key.startsWith("fill:") || key.startsWith("shadow:")),
+    )
+    .map(([key, keyframes]) => {
+      const stringKey = String(key);
+      const fallbackLabel = stringKey.startsWith("fill:")
+        ? stringKey.slice("fill:".length)
+        : stringKey.slice("shadow:".length);
+      return {
+        id: key,
+        key,
+        label: labels.get(key) ?? fallbackLabel,
+        keyframes: keyframes.sort((left, right) => left.time - right.time),
+      };
+    });
 
   return [...ordered, ...extra];
 }
@@ -514,7 +551,8 @@ export function moveComposeGenericPropertyKeyframesAtTime(
     const propertyPath = rawPropertyPath as PropertyPath;
     if (
       !attributeByGenericPropertyPath.has(propertyPath) &&
-      !isFillPropertyPath(propertyPath)
+      !isFillPropertyPath(propertyPath) &&
+      !isShadowPropertyPath(propertyPath)
     )
       continue;
     nextObject = movePropertyKeyframe(

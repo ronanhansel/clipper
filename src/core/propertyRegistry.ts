@@ -7,6 +7,7 @@ import type {
   Part,
   PropertyTrack,
   PropertyTrackValueType,
+  ShadowEffect,
 } from "./types";
 
 export type PropertyPath =
@@ -32,12 +33,25 @@ export type PropertyPath =
   | "transform.skewY"
   | "transform.perspective"
   | "filter.blur"
+  | "shadow.x"
+  | "shadow.y"
+  | "shadow.blur"
+  | "shadow.spread"
+  | "shadow.color"
+  | "shadow.alpha"
   | `props.${string}`;
 
 export type PropertyDefinition = {
   path: PropertyPath;
   valueType: PropertyTrackValueType;
-  group?: "position" | "size" | "transform" | "filter" | "style" | "props";
+  group?:
+    | "position"
+    | "size"
+    | "transform"
+    | "filter"
+    | "shadow"
+    | "style"
+    | "props";
   defaultValue?: JsonValue;
   getBaseValue: (object: FrameObject) => JsonValue;
   setBaseValue: (object: FrameObject, value: JsonValue) => FrameObject;
@@ -50,6 +64,7 @@ export type EvaluatedObjectState = FrameObject & {
   style: Record<string, string | number>;
   transform: Record<string, JsonValue>;
   filter: Record<string, JsonValue>;
+  shadow: Record<string, JsonValue>;
   props: Record<string, JsonValue>;
 };
 
@@ -128,17 +143,53 @@ export function evaluateProperty(
   return last.value;
 }
 
+export const SHADOW_DEFAULTS: Required<ShadowEffect> = {
+  enabled: true,
+  x: 0,
+  y: 4,
+  blur: 4,
+  spread: 0,
+  color: "#000000",
+  alpha: 25,
+};
+
+export function readShadowRecord(
+  object: FrameObject,
+): Record<string, JsonValue> {
+  const shadow = object.shadow ?? {};
+  return {
+    enabled: shadow.enabled ?? SHADOW_DEFAULTS.enabled,
+    x: shadow.x ?? SHADOW_DEFAULTS.x,
+    y: shadow.y ?? SHADOW_DEFAULTS.y,
+    blur: shadow.blur ?? SHADOW_DEFAULTS.blur,
+    spread: shadow.spread ?? SHADOW_DEFAULTS.spread,
+    color: shadow.color ?? SHADOW_DEFAULTS.color,
+    alpha: shadow.alpha ?? SHADOW_DEFAULTS.alpha,
+  };
+}
+
+export function hasShadowEffect(object: FrameObject): boolean {
+  if (object.shadow) return true;
+  if (!object.tracks) return false;
+  for (const path of Object.keys(object.tracks)) {
+    if (path.startsWith("shadow.")) return true;
+  }
+  return false;
+}
+
 export function evaluateObjectState(
   object: FrameObject,
   time: number,
   registry: PropertyRegistry = defaultPropertyRegistry,
 ): EvaluatedObjectState {
+  const includeShadow = hasShadowEffect(object);
   let evaluated: EvaluatedObjectState = {
     ...object,
     bounds: { ...object.bounds },
     style: { ...object.style },
     transform: readRecord(object, "transform"),
     filter: readRecord(object, "filter"),
+    shadow: includeShadow ? readShadowRecord(object) : {},
     props: { ...(object.props ?? {}) },
   };
 
@@ -442,6 +493,35 @@ function createFilterDefinition(path: string, defaultValue: JsonValue) {
   );
 }
 
+type ShadowField = "x" | "y" | "blur" | "spread" | "color" | "alpha";
+
+function createShadowDefinition(
+  field: ShadowField,
+  valueType: PropertyTrackValueType,
+): PropertyDefinition {
+  const defaultValue = SHADOW_DEFAULTS[field] as JsonValue;
+  const definition = createBaseDefinition(
+    `shadow.${field}` as PropertyPath,
+    valueType,
+    (object) => {
+      const shadow = object.shadow;
+      if (!shadow) return defaultValue;
+      const value = (shadow as Record<string, JsonValue>)[field];
+      return value ?? defaultValue;
+    },
+    (object, value) => ({
+      ...object,
+      shadow: {
+        ...(object.shadow ?? {}),
+        [field]: value,
+      } as ShadowEffect,
+    }),
+    "shadow",
+  );
+  if (valueType === "color") definition.interpolate = interpolateColor;
+  return definition;
+}
+
 function createDynamicPropsDefinition(
   path: string,
 ): PropertyDefinition | undefined {
@@ -677,6 +757,12 @@ export const defaultPropertyDefinitions: PropertyDefinition[] = [
   createTransformDefinition("skewY", 0),
   createTransformDefinition("perspective", 0),
   createFilterDefinition("blur", 0),
+  createShadowDefinition("x", "number"),
+  createShadowDefinition("y", "number"),
+  createShadowDefinition("blur", "number"),
+  createShadowDefinition("spread", "number"),
+  createShadowDefinition("color", "color"),
+  createShadowDefinition("alpha", "number"),
 ];
 
 export const defaultPropertyRegistry = createPropertyRegistry(

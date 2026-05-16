@@ -7,6 +7,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type CSSProperties,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent,
@@ -67,6 +68,7 @@ import {
   isTimeSensitiveFrameObject,
   type EvaluatedFrameObject,
 } from "../../render-engine/renderRuntime";
+import { generateShadowFilterSvg } from "../../render-engine/shadowFilters";
 import {
   applyTransitionLayersToVisualStyle,
   getTransitionFinishTime,
@@ -1367,6 +1369,7 @@ function CompositionLayerView({
             frameScale={frameScale}
             isPlaying={isPlaying}
             previewTime={previewTime}
+            liveTimeOffset={previewTime - renderClockSceneTime}
             renderMode={renderMode}
             onDoubleClick={(event) => {
               if (
@@ -2649,6 +2652,47 @@ function ShapeDrawPreviewOverlay({
   );
 }
 
+function ObjectShadowFilterDef({ object }: { object: FrameObject }) {
+  const shadow = object.shadow;
+  if (!shadow || shadow.enabled === false) return null;
+  const x =
+    typeof shadow.x === "number" && Number.isFinite(shadow.x) ? shadow.x : 0;
+  const y =
+    typeof shadow.y === "number" && Number.isFinite(shadow.y) ? shadow.y : 0;
+  const blur =
+    typeof shadow.blur === "number" && Number.isFinite(shadow.blur)
+      ? Math.max(0, shadow.blur)
+      : 0;
+  const spread =
+    typeof shadow.spread === "number" && Number.isFinite(shadow.spread)
+      ? Math.max(-64, Math.min(64, shadow.spread))
+      : 0;
+  const color = typeof shadow.color === "string" ? shadow.color : "#000000";
+  const alpha =
+    typeof shadow.alpha === "number" && Number.isFinite(shadow.alpha)
+      ? shadow.alpha
+      : 100;
+  const isDefault = x === 0 && y === 0 && blur === 0 && spread === 0;
+  if (isDefault && shadow.enabled !== true) return null;
+  const markup = generateShadowFilterSvg({
+    id: `shadow-${object.id}`,
+    x,
+    y,
+    blur,
+    spread,
+    color,
+    alpha,
+  });
+  return (
+    <svg
+      aria-hidden="true"
+      className="pointer-events-none absolute h-0 w-0 overflow-hidden"
+      data-clipper-shadow-filter-owner={object.id}
+      dangerouslySetInnerHTML={{ __html: `<defs>${markup}</defs>` }}
+    />
+  );
+}
+
 export const FrameObjectView = function FrameObjectView({
   activeShapeTool,
   animationsEnabled,
@@ -2662,6 +2706,7 @@ export const FrameObjectView = function FrameObjectView({
   frameScale,
   isPlaying,
   previewTime,
+  liveTimeOffset,
   renderMode,
   onDoubleClick,
   onContextMenu,
@@ -2681,6 +2726,7 @@ export const FrameObjectView = function FrameObjectView({
   frameScale: number;
   isPlaying: boolean;
   previewTime: number;
+  liveTimeOffset?: number;
   renderMode: "preview" | "export";
   onDoubleClick: (event: ReactMouseEvent<HTMLDivElement>) => void;
   onContextMenu?: (event: ReactMouseEvent<HTMLDivElement>) => void;
@@ -2804,10 +2850,18 @@ export const FrameObjectView = function FrameObjectView({
           (item) => item.enabled !== false && item.options.split,
         ) ?? [])
       : [];
+  const splitTextTime = useSplitTextLiveTime(
+    previewTime,
+    splitTextAnimations.length > 0 && renderMode !== "export",
+    liveTimeOffset ?? 0,
+  );
   const editableTextPath = isEditableTextPathObject(object);
   const editableContent = editableTextPath
     ? getTextPathEditableContent(object.content)
     : (object.content ?? "");
+  const hasActiveShadow = Boolean(
+    evaluatedObject.shadow && evaluatedObject.shadow.enabled !== false,
+  );
 
   useLayoutEffect(() => {
     const element = objectRef.current;
@@ -2997,7 +3051,7 @@ export const FrameObjectView = function FrameObjectView({
   return (
     <div
       ref={objectRef}
-      className={`absolute flex touch-none select-none flex-col whitespace-pre-line ${textBoxLayout === "fixed" ? "overflow-hidden" : "overflow-visible"} ${focusPicking ? "cursor-crosshair" : (object.type === "text" || editableTextPath) && (activeShapeTool === "text" || activeShapeTool === "textPath") ? "cursor-text" : "cursor-default"} ${editing ? "select-text" : ""} ${!editing && (activeShapeTool === "text" || activeShapeTool === "textPath") && (object.type === "text" || editableTextPath) ? "hover:ring-2 hover:ring-[#159dff]/60 rounded-sm" : ""}`}
+      className={`absolute flex touch-none select-none flex-col whitespace-pre-line ${textBoxLayout === "fixed" && !hasActiveShadow ? "overflow-hidden" : "overflow-visible"} ${focusPicking ? "cursor-crosshair" : (object.type === "text" || editableTextPath) && (activeShapeTool === "text" || activeShapeTool === "textPath") ? "cursor-text" : "cursor-default"} ${editing ? "select-text" : ""} ${!editing && (activeShapeTool === "text" || activeShapeTool === "textPath") && (object.type === "text" || editableTextPath) ? "hover:ring-2 hover:ring-[#159dff]/60 rounded-sm" : ""}`}
       data-clipper-render-object-id={object.id}
       data-object-id={canSelect && !isLocked ? object.id : undefined}
       style={{
@@ -3014,6 +3068,7 @@ export const FrameObjectView = function FrameObjectView({
         if (!isLocked) onPointerDown(event);
       }}
     >
+      <ObjectShadowFilterDef object={evaluatedObject} />
       {(object.type === "text" || editableTextPath) && editing ? (
         <div
           ref={editableRef}
@@ -3043,7 +3098,7 @@ export const FrameObjectView = function FrameObjectView({
                 textSegments,
                 Boolean(richText),
                 splitTextAnimations,
-                previewTime,
+                splitTextTime,
               )
             : renderRichTextSegments(textSegments, Boolean(richText))}
         </div>
@@ -3098,11 +3153,41 @@ export const FrameObjectView = function FrameObjectView({
   );
 };
 
+function useSplitTextLiveTime(
+  fallback: number,
+  active: boolean,
+  liveTimeOffset: number,
+) {
+  const liveRef = useRef(fallback);
+  const liveSnapshot = useSyncExternalStore(
+    (onChange) => {
+      if (!active) return () => {};
+      return subscribeMasterTimelineClock(() => {
+        const snap = getMasterTimelineClockSnapshot();
+        if (snap.source !== "scrub" && !snap.playing) return;
+        const next = snap.sceneTime + liveTimeOffset;
+        if (Math.abs(next - liveRef.current) < 0.001) return;
+        liveRef.current = next;
+        onChange();
+      });
+    },
+    () => liveRef.current,
+    () => fallback,
+  );
+  if (!active) return fallback;
+  const snap = getMasterTimelineClockSnapshot();
+  if (snap.source === "scrub" || snap.playing) return liveSnapshot;
+  return fallback;
+}
+
 type SplitTextToken = {
   key: string;
   text: string;
   animated: boolean;
   style: CSSProperties;
+  segmentIndex: number;
+  lineIndex: number;
+  wordIndex: number;
 };
 
 function renderSplitTextSegments(
@@ -3111,12 +3196,12 @@ function renderSplitTextSegments(
   animations: NonNullable<FrameObject["animations"]>,
   time: number,
 ) {
-  const tokens = tokenizeTextSegments(
-    segments,
-    explicitFormatting,
-    animations[0]?.options.split?.mode ?? "word",
-  );
-  const animatedCount = tokens.filter((token) => token.animated).length;
+  const mode = animations[0]?.options.split?.mode ?? "word";
+  const tokens = tokenizeTextSegments(segments, explicitFormatting, mode);
+  const animatedTokens = tokens.filter((token) => token.animated);
+  const animatedCount = animatedTokens.length;
+  const orderMap = buildOrderMap(animations, animatedCount);
+
   let animatedIndex = 0;
   return tokens.map((token) => {
     if (token.text === "\n") return <br key={token.key} />;
@@ -3131,6 +3216,8 @@ function renderSplitTextSegments(
       time,
       animatedIndex,
       animatedCount,
+      orderMap,
+      token,
     );
     animatedIndex += 1;
     return (
@@ -3152,33 +3239,150 @@ function renderSplitTextSegments(
 function tokenizeTextSegments(
   segments: RichTextSegment[],
   explicitFormatting: boolean,
-  mode: "word" | "character",
+  mode: "word" | "character" | "line",
 ) {
   const tokens: SplitTextToken[] = [];
+  let lineIndex = 0;
+  let wordIndex = 0;
   segments.forEach((segment, segmentIndex) => {
     const style = textSegmentInlineStyle(segment, explicitFormatting);
     if (mode === "character") {
-      Array.from(segment.text).forEach((char, charIndex) =>
+      Array.from(segment.text).forEach((char, charIndex) => {
+        if (char === "\n") {
+          tokens.push({
+            key: `${segmentIndex}:char:${charIndex}`,
+            text: "\n",
+            animated: false,
+            style,
+            segmentIndex,
+            lineIndex,
+            wordIndex,
+          });
+          lineIndex += 1;
+          wordIndex = 0;
+          return;
+        }
+        const isSpace = /\s/.test(char);
+        if (isSpace) wordIndex += 1;
         tokens.push({
           key: `${segmentIndex}:char:${charIndex}`,
           text: char,
-          animated: char !== "\n" && !/\s/.test(char),
+          animated: !isSpace,
           style,
-        }),
-      );
+          segmentIndex,
+          lineIndex,
+          wordIndex,
+        });
+      });
       return;
     }
     const parts = segment.text.match(/\n|\s+|\S+/g) ?? [];
-    parts.forEach((part, partIndex) =>
+    parts.forEach((part, partIndex) => {
+      if (part === "\n") {
+        tokens.push({
+          key: `${segmentIndex}:part:${partIndex}`,
+          text: "\n",
+          animated: false,
+          style,
+          segmentIndex,
+          lineIndex,
+          wordIndex,
+        });
+        lineIndex += 1;
+        wordIndex = 0;
+        return;
+      }
+      const isWhitespace = /^\s+$/.test(part);
+      const animated = mode === "line" ? false : !isWhitespace;
       tokens.push({
-        key: `${segmentIndex}:word:${partIndex}`,
+        key: `${segmentIndex}:part:${partIndex}`,
         text: part,
-        animated: part !== "\n" && !/^\s+$/.test(part),
+        animated,
         style,
-      }),
-    );
+        segmentIndex,
+        lineIndex,
+        wordIndex,
+      });
+      if (!isWhitespace) wordIndex += 1;
+    });
   });
+  if (mode === "line") {
+    return promoteLineTokens(tokens);
+  }
   return tokens;
+}
+
+function promoteLineTokens(tokens: SplitTextToken[]): SplitTextToken[] {
+  const result: SplitTextToken[] = [];
+  let buffer: SplitTextToken[] = [];
+  const flush = () => {
+    if (buffer.length === 0) return;
+    const first = buffer[0];
+    const text = buffer.map((t) => t.text).join("");
+    const animated = text.trim().length > 0;
+    result.push({
+      key: `line:${first.lineIndex}:${first.segmentIndex}`,
+      text,
+      animated,
+      style: first.style,
+      segmentIndex: first.segmentIndex,
+      lineIndex: first.lineIndex,
+      wordIndex: first.wordIndex,
+    });
+    buffer = [];
+  };
+  for (const token of tokens) {
+    if (token.text === "\n") {
+      flush();
+      result.push(token);
+    } else {
+      buffer.push(token);
+    }
+  }
+  flush();
+  return result;
+}
+
+function buildOrderMap(
+  animations: NonNullable<FrameObject["animations"]>,
+  count: number,
+): Map<string, number[]> {
+  const map = new Map<string, number[]>();
+  for (const animation of animations) {
+    const split = animation.options.split;
+    if (!split) continue;
+    const order = split.order ?? "forward";
+    if (order !== "random") continue;
+    const key = `${animation.id}:${split.seed ?? 0}:${count}`;
+    if (map.has(key)) continue;
+    map.set(key, shuffledOrder(count, split.seed ?? 0));
+  }
+  return map;
+}
+
+function shuffledOrder(count: number, seed: number): number[] {
+  const indexes = Array.from({ length: count }, (_, i) => i);
+  const rand = mulberry32(seed >>> 0 || 1);
+  for (let i = count - 1; i > 0; i -= 1) {
+    const j = Math.floor(rand() * (i + 1));
+    [indexes[i], indexes[j]] = [indexes[j], indexes[i]];
+  }
+  const orderIndex = new Array<number>(count);
+  for (let position = 0; position < count; position += 1) {
+    orderIndex[indexes[position]] = position;
+  }
+  return orderIndex;
+}
+
+function mulberry32(seed: number) {
+  let state = seed;
+  return () => {
+    state = (state + 0x6d2b79f5) | 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 }
 
 function textSegmentInlineStyle(
@@ -3205,16 +3409,23 @@ function getSplitTextTokenStyle(
   time: number,
   index: number,
   count: number,
+  orderMap: Map<string, number[]>,
+  token: SplitTextToken,
 ) {
   const combined: CSSProperties = {};
   for (const animation of animations) {
     const split = animation.options.split;
     if (!split) continue;
     if (split.tokenIndexes && !split.tokenIndexes.includes(index)) continue;
+    const orderKey = `${animation.id}:${split.seed ?? 0}:${count}`;
+    const orderIndex = getSplitTokenOrderIndex(
+      index,
+      count,
+      split.order ?? "forward",
+      orderMap.get(orderKey),
+    );
     const tokenOffset =
-      split.tokenDelays?.[index] ??
-      getSplitTokenOrderIndex(index, count, split.order ?? "forward") *
-        (split.stagger ?? 0);
+      split.tokenDelays?.[index] ?? orderIndex * (split.stagger ?? 0);
     const tokenTime =
       split.repeatScope === "item"
         ? time - tokenOffset
@@ -3223,36 +3434,296 @@ function getSplitTextTokenStyle(
     const effectiveTime = beforeStart
       ? (animation.options.delay ?? 0)
       : tokenTime;
-    const style = evaluateLayerAnimation(
-      split.repeatScope === "item"
-        ? animation
-        : {
-            ...animation,
-            options: {
-              ...animation.options,
-              repeat: undefined,
-              repeatDelay: undefined,
-            },
-          },
-      effectiveTime,
-    );
+    const amount = computeSelectorAmount(split, index, count);
+    const style =
+      amount >= 0.999
+        ? evaluateLayerAnimation(
+            split.repeatScope === "item"
+              ? animation
+              : {
+                  ...animation,
+                  options: {
+                    ...animation.options,
+                    repeat: undefined,
+                    repeatDelay: undefined,
+                  },
+                },
+            effectiveTime,
+          )
+        : evaluateLayerAnimationWithAmount(
+            animation,
+            effectiveTime,
+            amount,
+            split.repeatScope !== "item",
+          );
     for (const key in style) {
-      if (key === "transform" && combined.transform && style.transform)
-        combined.transform = `${combined.transform} ${style.transform}`;
-      else if (style[key] !== undefined)
-        combined[key as keyof CSSProperties] = style[key] as never;
+      const styleRecord = style as Record<string, unknown>;
+      const value = styleRecord[key];
+      if (
+        key === "transform" &&
+        combined.transform &&
+        typeof value === "string"
+      )
+        combined.transform = `${combined.transform} ${value}`;
+      else if (value !== undefined)
+        (combined as Record<string, unknown>)[key] = value;
     }
+    const origin = getSplitAnchorOrigin(split.anchor, token);
+    if (origin) combined.transformOrigin = origin;
   }
   return combined;
+}
+
+function evaluateLayerAnimationWithAmount(
+  animation: NonNullable<FrameObject["animations"]>[number],
+  time: number,
+  amount: number,
+  stripRepeat: boolean,
+): CSSProperties {
+  const base = evaluateLayerAnimation(
+    stripRepeat
+      ? {
+          ...animation,
+          options: {
+            ...animation.options,
+            repeat: undefined,
+            repeatDelay: undefined,
+          },
+        }
+      : animation,
+    time,
+  );
+  const settled = evaluateLayerAnimation(
+    stripRepeat
+      ? {
+          ...animation,
+          options: {
+            ...animation.options,
+            repeat: undefined,
+            repeatDelay: undefined,
+          },
+        }
+      : animation,
+    (animation.options.delay ?? 0) + animation.options.duration + 1e9,
+  );
+  return blendRenderStyleByAmount(base, settled, amount);
+}
+
+function blendRenderStyleByAmount(
+  active: CSSProperties,
+  settled: CSSProperties,
+  amount: number,
+): CSSProperties {
+  const out: CSSProperties = {};
+  const keys = new Set<string>([
+    ...Object.keys(active),
+    ...Object.keys(settled),
+  ]);
+  for (const key of keys) {
+    const activeValue = (active as Record<string, unknown>)[key];
+    const settledValue = (settled as Record<string, unknown>)[key];
+    if (key === "transform") {
+      const a = typeof activeValue === "string" ? activeValue : "";
+      const s = typeof settledValue === "string" ? settledValue : "";
+      const blended = blendTransformStrings(a, s, amount);
+      if (blended) (out as Record<string, unknown>)[key] = blended;
+      continue;
+    }
+    if (typeof activeValue === "number" && typeof settledValue === "number") {
+      (out as Record<string, unknown>)[key] =
+        settledValue + (activeValue - settledValue) * amount;
+    } else if (activeValue !== undefined) {
+      (out as Record<string, unknown>)[key] = activeValue;
+    } else if (settledValue !== undefined) {
+      (out as Record<string, unknown>)[key] = settledValue;
+    }
+  }
+  return out;
+}
+
+const TRANSFORM_FN_RE = /(\w+)\(([^)]+)\)/g;
+
+function blendTransformStrings(
+  active: string,
+  settled: string,
+  amount: number,
+) {
+  if (!active && !settled) return "";
+  if (!active) return settled;
+  if (!settled) return active;
+  const activeMap = parseTransformString(active);
+  const settledMap = parseTransformString(settled);
+  const order: string[] = [];
+  for (const fn of activeMap.keys()) order.push(fn);
+  for (const fn of settledMap.keys()) if (!order.includes(fn)) order.push(fn);
+  const parts: string[] = [];
+  for (const fn of order) {
+    const activeArgs = activeMap.get(fn);
+    const settledArgs =
+      settledMap.get(fn) ?? identityTransformArgs(fn, activeArgs?.length ?? 1);
+    const baseArgs =
+      activeArgs ?? identityTransformArgs(fn, settledArgs.length);
+    const blended = baseArgs.map((arg, index) =>
+      blendTransformArg(arg, settledArgs[index] ?? arg, amount),
+    );
+    parts.push(`${fn}(${blended.join(", ")})`);
+  }
+  return parts.join(" ");
+}
+
+function parseTransformString(value: string): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  TRANSFORM_FN_RE.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = TRANSFORM_FN_RE.exec(value)) !== null) {
+    const fn = match[1];
+    const args = match[2].split(",").map((part) => part.trim());
+    out.set(fn, args);
+  }
+  return out;
+}
+
+function identityTransformArgs(fn: string, length: number): string[] {
+  const identity =
+    fn === "scale" || fn === "scaleX" || fn === "scaleY"
+      ? "1"
+      : fn === "perspective"
+        ? "1000px"
+        : fn === "rotate" ||
+            fn === "rotateX" ||
+            fn === "rotateY" ||
+            fn === "rotateZ" ||
+            fn === "skewX" ||
+            fn === "skewY"
+          ? "0deg"
+          : "0px";
+  return Array.from({ length }, () => identity);
+}
+
+function blendTransformArg(active: string, settled: string, amount: number) {
+  const activeNumber = parseFloat(active);
+  const settledNumber = parseFloat(settled);
+  if (Number.isNaN(activeNumber) || Number.isNaN(settledNumber)) return active;
+  const blended = settledNumber + (activeNumber - settledNumber) * amount;
+  const unitMatch = active.match(/[a-z%]+$/i);
+  const unit = unitMatch ? unitMatch[0] : "";
+  const formatted =
+    unit === "" ? blended.toFixed(4) : Math.round(blended).toString();
+  return `${formatted}${unit}`;
+}
+
+function computeSelectorAmount(
+  split: NonNullable<
+    NonNullable<FrameObject["animations"]>[number]["options"]["split"]
+  >,
+  index: number,
+  count: number,
+): number {
+  const start = split.start ?? 0;
+  const end = split.end ?? 1;
+  const offset = split.offset ?? 0;
+  const a = Math.min(start, end) + offset;
+  const b = Math.max(start, end) + offset;
+  if (count <= 0) return 1;
+  const t = count <= 1 ? 0.5 : index / (count - 1);
+  if (a === b) return t === a ? 1 : 0;
+  if (t < a) return shapeFalloff(0, split, false);
+  if (t > b) return shapeFalloff(0, split, true);
+  const inside = b > a ? (t - a) / (b - a) : 0;
+  return shapeAmount(inside, split);
+}
+
+function shapeAmount(
+  value: number,
+  split: NonNullable<
+    NonNullable<FrameObject["animations"]>[number]["options"]["split"]
+  >,
+): number {
+  const shape = split.shape ?? "square";
+  const easeHigh = clamp01(split.easeHigh ?? 0);
+  const easeLow = clamp01(split.easeLow ?? 0);
+  const x = clamp01(value);
+  switch (shape) {
+    case "square":
+      return 1;
+    case "rampUp":
+      return easeRampValue(x, easeHigh, easeLow);
+    case "rampDown":
+      return easeRampValue(1 - x, easeHigh, easeLow);
+    case "triangle":
+      return easeRampValue(1 - Math.abs(x * 2 - 1), easeHigh, easeLow);
+    case "round": {
+      const c = x * 2 - 1;
+      return easeRampValue(
+        Math.sqrt(Math.max(0, 1 - c * c)),
+        easeHigh,
+        easeLow,
+      );
+    }
+    case "smooth": {
+      const smooth = x * x * (3 - 2 * x);
+      const triangle = 1 - Math.abs(smooth * 2 - 1);
+      return easeRampValue(triangle, easeHigh, easeLow);
+    }
+    default:
+      return 1;
+  }
+}
+
+function shapeFalloff(
+  edge: number,
+  split: NonNullable<
+    NonNullable<FrameObject["animations"]>[number]["options"]["split"]
+  >,
+  high: boolean,
+): number {
+  const shape = split.shape ?? "square";
+  if (shape === "square") return 0;
+  return high ? 0 : edge;
+}
+
+function easeRampValue(value: number, easeHigh: number, easeLow: number) {
+  const x = clamp01(value);
+  const blend = (1 - easeHigh) * x + easeHigh * smoothStep(x);
+  return clamp01(blend - easeLow * (1 - x));
+}
+
+function smoothStep(x: number) {
+  return x * x * (3 - 2 * x);
+}
+
+function clamp01(value: number) {
+  if (value < 0) return 0;
+  if (value > 1) return 1;
+  return value;
+}
+
+function getSplitAnchorOrigin(
+  anchor: "token" | "word" | "line" | "all" | undefined,
+  _token: SplitTextToken,
+): string | undefined {
+  switch (anchor) {
+    case "word":
+      return "left center";
+    case "line":
+      return "left center";
+    case "all":
+      return "left top";
+    case "token":
+    default:
+      return undefined;
+  }
 }
 
 function getSplitTokenOrderIndex(
   index: number,
   count: number,
-  order: "forward" | "reverse" | "center",
+  order: "forward" | "reverse" | "center" | "random",
+  randomMap?: number[],
 ) {
   if (order === "reverse") return count - index - 1;
   if (order === "center") return Math.abs(index - (count - 1) / 2);
+  if (order === "random" && randomMap) return randomMap[index] ?? index;
   return index;
 }
 

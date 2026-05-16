@@ -14,6 +14,7 @@ import {
   type PropertyTrack,
   type PropertyTrackValueType,
   type RichTextSegment,
+  type ShadowEffect,
 } from "./types";
 
 export type JsonCompositionTrackValueType = PropertyTrackValueType;
@@ -36,6 +37,7 @@ export type JsonCompositionObject = {
   richText?: RichTextSegment[];
   transform?: Record<string, JsonValue> | string;
   filter?: Record<string, JsonValue>;
+  shadow?: ShadowEffect;
   props?: Record<string, JsonValue>;
   source?: JsonCompositionObjectSource;
   tracks?: Record<string, JsonCompositionPropertyTrack>;
@@ -271,6 +273,7 @@ function readObject(
       errors,
     ),
     filter: readJsonRecord(value.filter, `${path}.filter`, errors),
+    shadow: readShadow(value.shadow, `${path}.shadow`, errors),
     props: readJsonRecord(value.props, `${path}.props`, errors),
     source: readObjectSource(value.source, `${path}.source`, errors),
     tracks: readTracks(value.tracks, `${path}.tracks`, errors),
@@ -525,6 +528,52 @@ function readJsonRecord(
   return value;
 }
 
+function readShadow(
+  value: unknown,
+  path: string,
+  errors: CompositionJsonParseError[],
+): ShadowEffect | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) {
+    errors.push({ path, message: "Shadow must be an object." });
+    return undefined;
+  }
+  const shadow: ShadowEffect = {};
+  if (value.enabled !== undefined) {
+    if (typeof value.enabled !== "boolean") {
+      errors.push({
+        path: `${path}.enabled`,
+        message: "Shadow enabled must be a boolean.",
+      });
+    } else {
+      shadow.enabled = value.enabled;
+    }
+  }
+  for (const field of ["x", "y", "blur", "spread", "alpha"] as const) {
+    const raw = value[field];
+    if (raw === undefined) continue;
+    if (typeof raw !== "number" || !Number.isFinite(raw)) {
+      errors.push({
+        path: `${path}.${field}`,
+        message: `Shadow ${field} must be a finite number.`,
+      });
+      continue;
+    }
+    shadow[field] = raw;
+  }
+  if (value.color !== undefined) {
+    if (typeof value.color !== "string") {
+      errors.push({
+        path: `${path}.color`,
+        message: "Shadow color must be a string.",
+      });
+    } else {
+      shadow.color = value.color;
+    }
+  }
+  return Object.keys(shadow).length === 0 ? undefined : shadow;
+}
+
 function readStringNumberRecord(
   value: unknown,
   path: string,
@@ -649,6 +698,7 @@ function jsonObjectToFrameObject(object: JsonCompositionObject): FrameObject {
     style: object.style ?? {},
     transform: object.transform,
     filter: object.filter,
+    shadow: object.shadow,
     layoutId: object.layoutId,
     parentId: object.parentId,
     hidden: object.hidden,
@@ -671,6 +721,7 @@ function frameObjectToJsonObject(object: FrameObject): JsonCompositionObject {
     richText: object.richText,
     transform: object.transform,
     filter: object.filter,
+    shadow: object.shadow,
     layoutId: object.layoutId,
     parentId: object.parentId,
     hidden: object.hidden,

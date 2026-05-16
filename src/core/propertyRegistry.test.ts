@@ -209,4 +209,50 @@ describe("property registry and evaluated state", () => {
     expect(withoutFinal.bounds.x).toBe(110);
     expect(withoutFinal.tracks?.["bounds.x"]).toBeUndefined();
   });
+
+  it("evaluates shadow record only when shadow is set", () => {
+    expect(evaluateObjectState(object, 0).shadow).toEqual({});
+    const withShadow: FrameObject = {
+      ...object,
+      shadow: { enabled: true },
+    };
+    expect(evaluateObjectState(withShadow, 0).shadow).toMatchObject({
+      enabled: true,
+      x: 0,
+      y: 4,
+      blur: 4,
+      spread: 0,
+      color: "#000000",
+      alpha: 25,
+    });
+  });
+
+  it("upserts and interpolates shadow keyframes", () => {
+    const withShadow: FrameObject = {
+      ...object,
+      shadow: {
+        enabled: true,
+        x: 0,
+        y: 4,
+        blur: 4,
+        color: "#000000",
+        alpha: 25,
+      },
+    };
+    let next = upsertPropertyKeyframe(withShadow, "shadow.x", 0, 0);
+    next = upsertPropertyKeyframe(next, "shadow.x", 1, 20);
+    expect(evaluateObjectState(next, 0.5).shadow.x).toBe(10);
+  });
+
+  it("interpolates shadow color across keyframes", () => {
+    const withShadow: FrameObject = {
+      ...object,
+      shadow: { color: "#000000", alpha: 25 },
+    };
+    let next = upsertPropertyKeyframe(withShadow, "shadow.color", 0, "#000000");
+    next = upsertPropertyKeyframe(next, "shadow.color", 1, "#ffffff");
+    const mid = evaluateObjectState(next, 0.5).shadow.color;
+    expect(typeof mid).toBe("string");
+    expect(String(mid).startsWith("rgba(")).toBe(true);
+  });
 });
