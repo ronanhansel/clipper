@@ -1,5 +1,5 @@
 /**
- * Helpers for handling semantic file names in the File Manager.
+ * Helpers for handling semantic file names in the Bin.
  * Hides suffixes like .composition and .timeline from the user.
  */
 
@@ -59,10 +59,10 @@ export function getFileType(
     if (fileName.endsWith(suffix)) return "timeline";
   }
 
-  // Legacy support for OsFileManager which detects by content or location
+  // Legacy support for Bin which detects by content or location
   if (isCompositionContent) return "composition";
 
-  // Note: OsFileManager has specific logic for timelines in timelines/ folder
+  // Note: Bin has specific logic for timelines in timelines/ folder
   // but here we focus on the filename-based detection requested.
 
   return "file";

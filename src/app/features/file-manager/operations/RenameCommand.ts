@@ -1,6 +1,6 @@
 import { clipperHost } from "../../../clipperHost";
 import type { Command } from "./Command";
-import { getDirectoryPath } from "../fileManagerPaths";
+import { getDirectoryPath } from "../binPaths";
 
 export class RenameCommand implements Command {
   private newPath: string;

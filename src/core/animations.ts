@@ -234,6 +234,7 @@ export function easeAnimationProgress(
   ease?: string | readonly number[],
 ): number {
   if (ease === "linear" || ease === undefined) return progress;
+  if (ease === "snap") return progress >= 1 ? 1 : 0;
   if (ease === "easeIn") return progress * progress * progress;
   if (ease === "easeOut" || ease === "circOut") return easeOutCubic(progress);
   if (ease === "easeInOut") return easeInOutCubic(progress);

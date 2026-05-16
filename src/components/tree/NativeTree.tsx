@@ -540,7 +540,9 @@ export const NativeTree = forwardRef(function NativeTree<T>(
       event.dataTransfer.effectAllowed =
         event.dataTransfer.types.includes(
           "application/x-clipper-composition",
-        ) || event.dataTransfer.types.includes("application/x-clipper-timeline")
+        ) ||
+        event.dataTransfer.types.includes("application/x-clipper-timeline") ||
+        event.dataTransfer.types.includes("application/x-clipper-bin-path")
           ? "copyMove"
           : "move";
     setDragState({

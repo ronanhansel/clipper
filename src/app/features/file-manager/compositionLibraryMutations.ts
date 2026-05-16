@@ -9,7 +9,7 @@ import {
   compositionFilePathWithName,
   getDirectoryPath,
   nextNumberedName,
-} from "./fileManagerPaths";
+} from "./binPaths";
 import {
   getDisplayNameFromPath,
   reconstructFileName,

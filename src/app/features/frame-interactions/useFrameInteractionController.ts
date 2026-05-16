@@ -779,30 +779,31 @@ export function useFrameInteractionController(
     const nextBoundsById = new Map(
       nextObjects.map((object) => [object.id, object.bounds]),
     );
+    function commitDraggedObject(object: FrameObject): FrameObject {
+      const nextBounds = nextBoundsById.get(object.id);
+      if (!nextBounds) return object;
+      const positionKeys: (keyof Bounds)[] = [];
+      if (hasPropertyTrack(object, "bounds.x")) positionKeys.push("x");
+      if (hasPropertyTrack(object, "bounds.y")) positionKeys.push("y");
+      if (positionKeys.length === 0) {
+        return syncChartObjectBounds({ ...object, bounds: nextBounds });
+      }
+      const committedBounds = {
+        ...object.bounds,
+        ...(positionKeys.includes("x") ? {} : { x: nextBounds.x }),
+        ...(positionKeys.includes("y") ? {} : { y: nextBounds.y }),
+      };
+      return syncChartObjectBounds({
+        ...upsertBoundsPropertyKeyframes(object, nextBounds, positionKeys),
+        bounds: committedBounds,
+      });
+    }
     updateCompositionForTimelinePart(drag.partId, (composition) => ({
       ...composition,
-      objects: composition.objects.map((object) => {
-        const nextBounds = nextBoundsById.get(object.id);
-        if (!nextBounds) return object;
-        if (hasPositionPropertyTracks(object)) {
-          return syncChartObjectBounds(
-            upsertBoundsPropertyKeyframes(object, nextBounds, ["x", "y"]),
-          );
-        }
-        return syncChartObjectBounds({ ...object, bounds: nextBounds });
-      }),
+      objects: composition.objects.map(commitDraggedObject),
       background: {
         ...composition.background,
-        elements: composition.background.elements.map((object) => {
-          const nextBounds = nextBoundsById.get(object.id);
-          if (!nextBounds) return object;
-          if (hasPositionPropertyTracks(object)) {
-            return syncChartObjectBounds(
-              upsertBoundsPropertyKeyframes(object, nextBounds, ["x", "y"]),
-            );
-          }
-          return syncChartObjectBounds({ ...object, bounds: nextBounds });
-        }),
+        elements: composition.background.elements.map(commitDraggedObject),
       },
     }));
     updateObjectDragSelection(nextObjects);
@@ -1270,20 +1271,22 @@ export function useFrameInteractionController(
       );
     }
 
+    const hasWidthTrack = hasPropertyTrack(object, "bounds.width");
+    const hasHeightTrack = hasPropertyTrack(object, "bounds.height");
+    const hasSizeTrack = hasWidthTrack || hasHeightTrack;
+    const hasXTrack = hasPropertyTrack(object, "bounds.x");
+    const hasYTrack = hasPropertyTrack(object, "bounds.y");
     const propertyKeys: (keyof Bounds)[] = [];
-    if (hasPositionPropertyTracks(object)) propertyKeys.push("x", "y");
-    if (hasPropertyTrack(object, "bounds.width")) propertyKeys.push("width");
-    if (hasPropertyTrack(object, "bounds.height")) propertyKeys.push("height");
+    if (!hasSizeTrack && hasXTrack) propertyKeys.push("x");
+    if (!hasSizeTrack && hasYTrack) propertyKeys.push("y");
+    if (hasWidthTrack) propertyKeys.push("width");
+    if (hasHeightTrack) propertyKeys.push("height");
     const committedBounds = {
       ...nextBounds,
-      x: hasPositionPropertyTracks(object) ? object.bounds.x : nextBounds.x,
-      y: hasPositionPropertyTracks(object) ? object.bounds.y : nextBounds.y,
-      width: hasPropertyTrack(object, "bounds.width")
-        ? object.bounds.width
-        : nextBounds.width,
-      height: hasPropertyTrack(object, "bounds.height")
-        ? object.bounds.height
-        : nextBounds.height,
+      x: hasXTrack ? object.bounds.x : nextBounds.x,
+      y: hasYTrack ? object.bounds.y : nextBounds.y,
+      width: hasWidthTrack ? object.bounds.width : nextBounds.width,
+      height: hasHeightTrack ? object.bounds.height : nextBounds.height,
     };
     return syncChartObjectBounds(
       scaleFrameObject(

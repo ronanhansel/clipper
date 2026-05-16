@@ -2,7 +2,10 @@ import Editor, { type BeforeMount, type OnMount } from "@monaco-editor/react";
 import { useEffect, useRef, useState } from "react";
 import { getDisplayNameFromPath } from "../core/fileNames";
 import { getMonacoOptionsForDocument } from "../app/config";
-import { configureMonacoTypeScriptLanguageService } from "../app/editor/monacoLanguageService";
+import {
+  attachJsxHighlighter,
+  configureMonacoTypeScriptLanguageService,
+} from "../app/editor/monacoLanguageService";
 import type { CodeViewportState } from "../core/types";
 
 type MonacoEditor = Parameters<OnMount>[0];
@@ -84,6 +87,7 @@ export function EditorPane({
   const restoreClosedTabRef = useRef(onRestoreClosedTab);
   const applySourceChangeRef = useRef(onSourceChange);
   const editorRef = useRef<MonacoEditor | null>(null);
+  const jsxHighlighterRef = useRef<{ dispose: () => void } | null>(null);
   const restoreScrollFrameRef = useRef(0);
   const restoreScrollTimersRef = useRef<number[]>([]);
   const viewportStateChangeRef = useRef(onViewportStateChange);
@@ -124,6 +128,8 @@ export function EditorPane({
   useEffect(
     () => () => {
       persistEditorViewportState();
+      jsxHighlighterRef.current?.dispose();
+      jsxHighlighterRef.current = null;
       window.cancelAnimationFrame(restoreScrollFrameRef.current);
       restoreScrollTimersRef.current.forEach((timer) =>
         window.clearTimeout(timer),
@@ -255,6 +261,7 @@ export function EditorPane({
 
   const onEditorMount: OnMount = (editor, monaco) => {
     editorRef.current = editor;
+    jsxHighlighterRef.current = attachJsxHighlighter(monaco, editor);
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyW, () => {
       closeActiveTabRef.current();
     });

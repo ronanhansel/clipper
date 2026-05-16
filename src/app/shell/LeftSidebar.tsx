@@ -5,11 +5,8 @@ import {
   segmentedTabBase,
   segmentedTabInactive,
 } from "../config";
-import { ComposeLayersPanel } from "../../components/compose/ComposeLayersPanel";
-import {
-  OsFileManager,
-  type OsFileManagerProps,
-} from "../../components/OsFileManager";
+import { ComposeLeftPanel } from "../../components/compose/ComposeLeftPanel";
+import { Bin, type BinProps } from "../../components/Bin";
 import { ToolsPanel } from "../../components/ToolsPanel";
 import type {
   EditorState,
@@ -25,7 +22,7 @@ type LeftSidebarProps = {
   hasActiveComposition: boolean;
   isPlaying: boolean;
   leftPanelTab: LeftPanelTab;
-  osFileManagerProps: OsFileManagerProps;
+  binProps: BinProps;
   part: Part;
   selectedObjectIds: string[];
   timelineMode: TimelineMode;
@@ -52,7 +49,7 @@ const MemoizedLeftSidebar = memo(
     effectsPanelState,
     hasActiveComposition,
     leftPanelTab,
-    osFileManagerProps,
+    binProps,
     part,
     selectedObjectIds,
     timelineMode,
@@ -67,25 +64,21 @@ const MemoizedLeftSidebar = memo(
     return (
       <aside className="flex min-h-0 flex-col overflow-hidden border-r border-[#2d313b] bg-[#171920] p-4">
         <div
-          className={`min-h-0 flex-1 overflow-hidden ${composeMode ? "grid" : "pointer-events-none hidden"}`}
+          className={`min-h-0 flex-1 overflow-hidden ${composeMode ? "flex flex-col" : "pointer-events-none hidden"}`}
           aria-hidden={!composeMode}
         >
-          {hasActiveComposition ? (
-            <ComposeLayersPanel
-              part={part}
-              selectedObjectIds={selectedObjectIds}
-              onSelectObjects={onSelectComposeLayerObjects}
-              onSelectFrameSettings={onSelectComposeFrameSettings}
-              onHoverObject={noopHoverObject}
-              onReorderObjects={onReorderComposeObjects}
-              onToggleLayerHidden={onToggleComposeLayerHidden}
-              onToggleLayerLocked={onToggleComposeLayerLocked}
-            />
-          ) : (
-            <div className="grid h-full place-items-center rounded-[14px] border border-[#2d313b] bg-[#111319]/72 p-5 text-center text-sm font-bold text-[#737884]">
-              Move the playhead over a composition to inspect its layers.
-            </div>
-          )}
+          <ComposeLeftPanel
+            hasActiveComposition={hasActiveComposition}
+            part={part}
+            selectedObjectIds={selectedObjectIds}
+            binProps={binProps}
+            onSelectObjects={onSelectComposeLayerObjects}
+            onSelectFrameSettings={onSelectComposeFrameSettings}
+            onHoverObject={noopHoverObject}
+            onReorderObjects={onReorderComposeObjects}
+            onToggleLayerHidden={onToggleComposeLayerHidden}
+            onToggleLayerLocked={onToggleComposeLayerLocked}
+          />
         </div>
         <div
           className={`min-h-0 flex-1 overflow-hidden ${composeMode ? "pointer-events-none hidden" : "flex flex-col"}`}
@@ -97,7 +90,7 @@ const MemoizedLeftSidebar = memo(
               onClick={() => onLeftPanelTabChange("assets")}
             >
               <Folder size={14} />
-              Assets
+              Files
             </button>
             <button
               className={`${segmentedTabBase} flex items-center justify-center gap-1.5 ${leftPanelTab === "tools" ? segmentedTabActive : segmentedTabInactive}`}
@@ -111,7 +104,7 @@ const MemoizedLeftSidebar = memo(
             className={`min-h-0 flex-1 overflow-hidden ${leftPanelTab === "assets" ? "grid" : "hidden"}`}
             aria-hidden={leftPanelTab !== "assets"}
           >
-            <OsFileManager {...osFileManagerProps} />
+            <Bin {...binProps} />
           </div>
           <div
             className={`min-h-0 flex-1 overflow-hidden ${leftPanelTab === "tools" ? "grid" : "hidden"}`}
@@ -139,11 +132,12 @@ const MemoizedLeftSidebar = memo(
     if (prev.composeMode)
       return (
         prev.part === next.part &&
-        prev.selectedObjectIds === next.selectedObjectIds
+        prev.selectedObjectIds === next.selectedObjectIds &&
+        prev.binProps === next.binProps
       );
     return (
       prev.effectsPanelState === next.effectsPanelState &&
-      prev.osFileManagerProps === next.osFileManagerProps
+      prev.binProps === next.binProps
     );
   },
 );

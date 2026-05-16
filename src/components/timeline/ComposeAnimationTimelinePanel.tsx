@@ -135,9 +135,9 @@ function composeKeyframeSelectionId(
   key: ComposeAnimationTimelineAttributeKey,
   animationId: string,
   time: number,
-  pointId?: string,
+  _pointId?: string,
 ) {
-  return `${layerId}:${key}:${animationId}:${pointId ?? Math.round(time * 1000)}`;
+  return `${layerId}:${key}:${animationId}:${Math.round(time * 1000)}`;
 }
 
 function isEditableKeyboardTarget(target: EventTarget | null) {
@@ -920,13 +920,14 @@ function ComposeAnimationTimelinePanelContent({
               onResizeEaseRow={(rowId, height) =>
                 setEaseRowHeights((prev) => ({ ...prev, [rowId]: height }))
               }
-              onMoveKeyframe={(layer, animationId, newTime) => {
+              onMoveKeyframe={(layer, animationId, fromTime, newTime) => {
                 if (!layer.object || !isGenericComposeAnimationId(animationId))
                   return;
                 onUpdateObject?.(layer.object.id, (object) =>
                   moveComposeGenericPropertyKeyframe(
                     object,
                     animationId,
+                    fromTime,
                     newTime,
                     partDuration,
                   ),
@@ -1407,6 +1408,7 @@ function ComposeTimelineViewportRow({
   onMoveKeyframe: (
     layer: ComposeAnimationTimelineLayer,
     animationId: string,
+    fromTime: number,
     newTime: number,
   ) => void;
   onMoveKeyframesAtTime: (
@@ -1464,8 +1466,8 @@ function ComposeTimelineViewportRow({
           onInspect={() => onInspectLayer(row.layer)}
           onSelectKeyframeIds={onSelectKeyframeIds}
           onStartKeyframeMarquee={onStartKeyframeMarquee}
-          onMoveKeyframe={(animationId, newTime) =>
-            onMoveKeyframe(row.layer, animationId, newTime)
+          onMoveKeyframe={(animationId, fromTime, newTime) =>
+            onMoveKeyframe(row.layer, animationId, fromTime, newTime)
           }
           onDragPreview={onOverviewDragPreview}
           onDragEnd={onOverviewDragEnd}
@@ -1665,7 +1667,11 @@ function ComposeAttributeKeyframeLane({
   onInspect: () => void;
   onSelectKeyframeIds: (ids: string[], additive: boolean) => void;
   onStartKeyframeMarquee: (event: PointerEvent<HTMLDivElement>) => void;
-  onMoveKeyframe: (animationId: string, newTime: number) => void;
+  onMoveKeyframe: (
+    animationId: string,
+    fromTime: number,
+    newTime: number,
+  ) => void;
   onDragPreview: (originalTime: number, time: number) => void;
   onDragEnd: () => void;
   easeExpanded: boolean;
@@ -1677,6 +1683,7 @@ function ComposeAttributeKeyframeLane({
   } | null>(null);
   const [dragPreviewTime, setDragPreviewTime] = useState<{
     animationId: string;
+    originalTime: number;
     time: number;
   } | null>(null);
 
@@ -1719,7 +1726,11 @@ function ComposeAttributeKeyframeLane({
         const drag = dragRef.current;
         if (!drag) return;
         const t = timeFromClientX(clientX);
-        setDragPreviewTime({ animationId: drag.animationId, time: t });
+        setDragPreviewTime({
+          animationId: drag.animationId,
+          originalTime: drag.initialTime,
+          time: t,
+        });
         onDragPreview(drag.initialTime, t);
       },
       onCommit: ({ clientX }) => {
@@ -1729,7 +1740,7 @@ function ComposeAttributeKeyframeLane({
         dragRef.current = null;
         setDragPreviewTime(null);
         onDragEnd();
-        onMoveKeyframe(drag.animationId, newTime);
+        onMoveKeyframe(drag.animationId, drag.initialTime, newTime);
       },
       onCancel: () => {
         dragRef.current = null;
@@ -1766,7 +1777,9 @@ function ComposeAttributeKeyframeLane({
         const selected = selectedKeyframeIds.has(selectionId);
         // Own drag preview takes priority, then overview drag preview for same time
         const displayTime =
-          dragPreviewTime?.animationId === keyframe.animationId
+          dragPreviewTime &&
+          dragPreviewTime.animationId === keyframe.animationId &&
+          Math.abs(dragPreviewTime.originalTime - keyframe.time) < 0.001
             ? dragPreviewTime.time
             : overviewDragPreview &&
                 Math.abs(overviewDragPreview.originalTime - keyframe.time) <
@@ -1800,6 +1813,7 @@ function ComposeAttributeKeyframeLane({
 }
 
 const easePresets: { label: string; value: MotionEase }[] = [
+  { label: "Snap", value: "snap" },
   { label: "Linear", value: "linear" },
   { label: "Ease in", value: "easeIn" },
   { label: "Ease out", value: "easeOut" },
@@ -1813,6 +1827,7 @@ const easePresets: { label: string; value: MotionEase }[] = [
 
 const easeCurvePoints: Record<MotionEase, [number, number, number, number]> = {
   linear: [0, 0, 1, 1],
+  snap: [1, 0, 1, 0],
   easeIn: [0.42, 0, 1, 1],
   easeOut: [0, 0, 0.58, 1],
   easeInOut: [0.42, 0, 0.58, 1],
@@ -1988,13 +2003,24 @@ function ComposeEaseLane({
   ) {
     event.preventDefault();
     event.stopPropagation();
+    const itemFor = (preset: { label: string; value: MotionEase }) => ({
+      label: preset.label,
+      action: () => onApplyEase(animationId, time, preset.value),
+    });
+    const top = ["snap", "linear"] as const;
+    const topItems = top
+      .map((value) => easePresets.find((p) => p.value === value))
+      .filter((preset): preset is { label: string; value: MotionEase } =>
+        Boolean(preset),
+      )
+      .map(itemFor);
+    const restItems = easePresets
+      .filter((preset) => !top.includes(preset.value as (typeof top)[number]))
+      .map(itemFor);
     setAppContextMenu?.({
       x: event.clientX,
       y: event.clientY,
-      items: easePresets.map((preset) => ({
-        label: preset.label,
-        action: () => onApplyEase(animationId, time, preset.value),
-      })),
+      items: [...topItems, { label: "Ease", children: restItems }],
     });
   }
 

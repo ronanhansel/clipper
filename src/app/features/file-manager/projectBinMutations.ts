@@ -1,4 +1,8 @@
 import { getDisplayNameFromPath } from "../../../core/fileNames";
+import {
+  getEditorLanguageFromName,
+  normalizeEditorLanguage,
+} from "../../editor/monacoLanguageService";
 import type {
   AssetItem,
   CompositionClip,
@@ -6,7 +10,7 @@ import type {
   ProjectManifest,
   TimelineDocument,
 } from "../../../core/types";
-import { nextNumberedName } from "./fileManagerPaths";
+import { nextNumberedName } from "./binPaths";
 
 export type BinDropIntent = {
   targetId: string;
@@ -58,7 +62,7 @@ export function createInternalFileInProject(
     id: `bin_file_${Date.now().toString(36)}`,
     kind: "internal-file",
     name,
-    language: languageFromFileName(name),
+    language: getEditorLanguageFromName(name),
     source: "",
   };
   return {
@@ -409,7 +413,9 @@ function normalizeBinItems(items: ProjectBinItem[]): ProjectBinItem[] {
       return [
         {
           ...item,
-          language: item.language || languageFromFileName(item.name),
+          language:
+            normalizeEditorLanguage(item.language) ||
+            getEditorLanguageFromName(item.name),
           source: item.source ?? "",
         },
       ];
@@ -605,13 +611,4 @@ function insertBinItemNear(
     }
   }
   return inserted ? result : [...result, source];
-}
-
-function languageFromFileName(name: string) {
-  if (name.endsWith(".ts") || name.endsWith(".tsx")) return "typescript";
-  if (name.endsWith(".js") || name.endsWith(".jsx")) return "javascript";
-  if (name.endsWith(".json")) return "json";
-  if (name.endsWith(".css")) return "css";
-  if (name.endsWith(".html")) return "html";
-  return "plaintext";
 }

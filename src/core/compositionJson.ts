@@ -450,7 +450,9 @@ function readObjectType(
     value === "html" ||
     value === "template" ||
     value === "null" ||
-    value === "custom-renderer"
+    value === "custom-renderer" ||
+    value === "pattern2d" ||
+    value === "code"
   ) {
     return value;
   }

@@ -91,7 +91,7 @@ describe("fileNames helpers", () => {
     it("should leave misc files alone", () => {
       expect(reconstructFileName("docs", "README.md")).toBe("docs");
       // Note: reconstructFileName returns the new name as is if no semantic suffix found.
-      // The caller (like OsFileManager) handles adding the extension for non-semantic files if needed,
+      // The caller (like Bin) handles adding the extension for non-semantic files if needed,
       // but usually for non-semantic files we display the full name anyway.
     });
   });

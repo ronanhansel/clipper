@@ -2,6 +2,7 @@ import ts from "typescript";
 import { describe, expect, it, vi } from "vitest";
 import {
   configureMonacoTypeScriptLanguageService,
+  reactRuntimeDeclarationSource,
   textImportDeclarationSource,
 } from "./monacoLanguageService";
 
@@ -72,6 +73,10 @@ describe("monaco language service", () => {
     expect(addExtraLib).toHaveBeenCalledWith(
       textImportDeclarationSource,
       "file:///clipper/projects/text-imports.d.ts",
+    );
+    expect(addExtraLib).toHaveBeenCalledWith(
+      reactRuntimeDeclarationSource,
+      "file:///clipper/projects/react-runtime.d.ts",
     );
     expect(setDiagnosticsOptions).toHaveBeenCalledWith({
       noSemanticValidation: false,

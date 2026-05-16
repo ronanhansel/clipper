@@ -1,5 +1,5 @@
 import { createContext, useContext } from "react";
-import type { Bounds, FrameObject } from "../../core/types";
+import type { Bounds, FrameObject, ProjectBinItem } from "../../core/types";
 import type { ComposeAnimationAttributeKey } from "../timeline/composeAnimationModel";
 import type { BoundsAnimationKey, EffectInputConfig } from "./inspectorShared";
 
@@ -13,6 +13,7 @@ export type ObjectInspectorHelpers = {
   currentTime: number;
   liveScrubClock: boolean;
   lockBounds: boolean;
+  projectBin: ProjectBinItem[];
   onChange: (updater: (object: FrameObject) => FrameObject) => void;
   onPreview?: (updater: (object: FrameObject) => FrameObject) => void;
 

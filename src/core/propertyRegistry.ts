@@ -377,7 +377,7 @@ export function movePropertyKeyframe(
             roundTime(point.time) === roundedFrom
               ? {
                   ...point,
-                  id: point.id ?? `${object.id}:${path}:${roundedTo}`,
+                  id: `${object.id}:${path}:${roundedTo}`,
                   time: roundedTo,
                 }
               : point,

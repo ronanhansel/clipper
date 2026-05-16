@@ -61,12 +61,13 @@ export function useFrameObjectCommands({
   updateSceneParts,
 }: FrameObjectCommandsParams) {
   function createComposeObject(
-    type: "rect" | "ellipse" | "text" | "pattern2d",
+    type: "rect" | "ellipse" | "text" | "pattern2d" | "code",
   ) {
     const id = `${type}-${Date.now().toString(36)}`;
     const isEllipse = type === "ellipse";
     const isText = type === "text";
     const isPattern2d = type === "pattern2d";
+    const isCode = type === "code";
     const object: FrameObject = {
       id,
       name: isText
@@ -75,12 +76,20 @@ export function useFrameObjectCommands({
           ? "Ellipse"
           : isPattern2d
             ? "Pattern"
-            : "Rectangle",
-      type: isText ? "text" : isPattern2d ? "pattern2d" : "rect",
+            : isCode
+              ? "Code"
+              : "Rectangle",
+      type: isText
+        ? "text"
+        : isPattern2d
+          ? "pattern2d"
+          : isCode
+            ? "code"
+            : "rect",
       selector: `[data-object-id='${id}']`,
       bounds: isText
         ? { x: 220, y: 140, width: 320, height: 92 }
-        : isPattern2d
+        : isPattern2d || isCode
           ? { x: 200, y: 120, width: 480, height: 320 }
           : { x: 220, y: 140, width: 220, height: 140 },
       content: isText ? "Text" : undefined,
@@ -88,17 +97,21 @@ export function useFrameObjectCommands({
         ? { color: "#ffffff", fontSize: 72, fontWeight: 400, lineHeight: 1.1 }
         : isPattern2d
           ? { backgroundColor: "transparent", overflow: "hidden" }
-          : {
-              backgroundColor: "#D5D5D5",
-              ...(isEllipse ? { borderRadius: 9999 } : {}),
-            },
+          : isCode
+            ? { backgroundColor: "transparent", overflow: "hidden" }
+            : {
+                backgroundColor: "#D5D5D5",
+                ...(isEllipse ? { borderRadius: 9999 } : {}),
+              },
       props: isPattern2d
         ? {
             preset: "polkaDots",
             seed: 1,
             ...getPattern2dDefaults("polkaDots"),
           }
-        : undefined,
+        : isCode
+          ? { source: null }
+          : undefined,
     };
     updateCompositionForTimelinePart(part.id, (composition) => ({
       ...composition,

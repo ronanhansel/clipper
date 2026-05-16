@@ -50,9 +50,8 @@ function normalizeMode(mode: EditorState["mode"] | undefined): Mode {
 }
 
 function normalizeRightPanelTab(
-  tab: EditorState["rightPanelTab"] | undefined,
+  _tab: EditorState["rightPanelTab"] | undefined,
 ): RightPanelTab {
-  if (tab === "agent") return "agent";
   return "video";
 }
 

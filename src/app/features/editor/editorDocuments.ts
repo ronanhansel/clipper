@@ -150,42 +150,10 @@ export function compositionToJsonSource(composition: CompositionClip): string {
   return JSON.stringify(sourceComposition, null, 2);
 }
 
-export function getEditorLanguage(filePath: string): string {
-  const extension = filePath.split(".").pop()?.toLowerCase() ?? "";
-  if (extension === "ts" || extension === "tsx") return "typescript";
-  if (extension === "js" || extension === "jsx") return "javascript";
-  if (extension === "css") return "css";
-  if (extension === "json") return "json";
-  if (extension === "md") return "markdown";
-  if (extension === "html") return "html";
-  return "plaintext";
-}
-
-const unsupportedEditorExtensions = new Set([
-  "mp4",
-  "mov",
-  "m4v",
-  "webm",
-  "avi",
-  "mkv",
-  "mp3",
-  "wav",
-  "aiff",
-  "flac",
-  "png",
-  "jpg",
-  "jpeg",
-  "gif",
-  "webp",
-  "ico",
-  "pdf",
-  "zip",
-]);
-
-export function isUnsupportedEditorFile(filePath: string): boolean {
-  const extension = filePath.split(".").pop()?.toLowerCase() ?? "";
-  return unsupportedEditorExtensions.has(extension);
-}
+export {
+  getEditorLanguageFromName as getEditorLanguage,
+  isUnsupportedEditorFile,
+} from "../../editor/monacoLanguageService";
 
 function updateBinTree(
   items: ProjectBinItem[],

@@ -30,10 +30,12 @@ export type FrameObjectType =
   | "template"
   | "null"
   | "custom-renderer"
-  | "pattern2d";
+  | "pattern2d"
+  | "code";
 
 export type MotionEase =
   | "linear"
+  | "snap"
   | "easeIn"
   | "easeOut"
   | "easeInOut"

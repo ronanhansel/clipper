@@ -201,6 +201,7 @@ export function evaluateBackgroundLayer(
 
 export function isTimeSensitiveFrameObject(object: FrameObject) {
   return (
+    object.type === "code" ||
     Boolean(object.animations?.length) ||
     Boolean(object.template && !object.template.static) ||
     Boolean(object.tracks && Object.keys(object.tracks).length > 0)
@@ -547,6 +548,7 @@ export function interpolate(
 }
 
 export function easeProgress(value: number, ease: MotionEase | undefined) {
+  if (ease === "snap") return value >= 1 ? 1 : 0;
   if (ease === "easeOut" || ease === "circOut") return easeOutCubic(value);
   if (ease === "easeIn") return value * value * value;
   if (ease === "easeInOut") return easeInOutCubic(value);

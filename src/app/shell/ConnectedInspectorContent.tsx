@@ -1,5 +1,4 @@
 import { memo, useCallback, useRef } from "react";
-import { AgentPanel } from "../../components/AgentPanel";
 import {
   AdjustmentInspector,
   EmptyInspector,
@@ -32,10 +31,7 @@ type PointPickAdjustment = {
 type ConnectedInspectorContentProps = {
   rightPanelTab: RightPanelTab;
   part: Part;
-  projectDirectory?: string;
   composeMode: boolean;
-  sourceStatus: string;
-  agentContext: unknown;
   selectedMotion: MotionMarker | null | undefined;
   selectedMotionPart: Part | null | undefined;
   selectedMotionMarkerCount: number;
@@ -137,12 +133,9 @@ type ConnectedInspectorContentProps = {
 
 export const ConnectedInspectorContent = memo(
   function ConnectedInspectorContent({
-    rightPanelTab,
+    rightPanelTab: _rightPanelTab,
     part,
-    projectDirectory,
     composeMode,
-    sourceStatus,
-    agentContext,
     selectedMotion,
     selectedMotionPart,
     selectedMotionMarkerCount,
@@ -223,16 +216,6 @@ export const ConnectedInspectorContent = memo(
         previewSelectedObjectRef.current(updater),
       [],
     );
-
-    if (rightPanelTab === "agent")
-      return (
-        <AgentPanel
-          part={part}
-          projectDirectory={projectDirectory}
-          sourceStatus={sourceStatus}
-          agentContext={agentContext}
-        />
-      );
 
     if (selectedMotion && selectedMotionPart) {
       return (

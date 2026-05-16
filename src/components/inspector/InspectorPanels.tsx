@@ -91,6 +91,7 @@ import {
 import { type ComposeAnimationAttributeKey } from "../timeline/composeAnimationModel";
 import { readPlayheadTime } from "../../app/features/playback/usePlayheadTime";
 import { livePreviewScrubCommitThrottleMs } from "../../app/services/scrubInteractionService";
+import { useProjectStore } from "../../app/state/projectStore";
 import {
   type BoundsAnimationKey,
   coerceInspectorAttributeValue,
@@ -231,6 +232,8 @@ export const ObjectInspector = memo(function ObjectInspector({
   // would rerender the entire ~3.7k-line tree on every tick. Callbacks read
   // the live time on demand via readEffectiveTime(); leaf components that
   // need to react visually subscribe themselves via usePlayheadTime.
+  const projectBin = useProjectStore((state) => state.project.bin ?? []);
+
   function readEffectiveTime() {
     if (!liveScrubClock) return currentTime;
     return readPlayheadTime(currentTime);
@@ -518,11 +521,9 @@ export const ObjectInspector = memo(function ObjectInspector({
     const fieldValue = animationKey
       ? keyframeValue(animationKey, value)
       : value;
-    const active = linkedKeys
-      ? linkedKeys.some((key) => Boolean(keyframeAtCurrentTime(key)))
-      : animationKey
-        ? Boolean(keyframeAtCurrentTime(animationKey))
-        : false;
+    const active = animationKey
+      ? Boolean(keyframeAtCurrentTime(animationKey))
+      : false;
     return (
       <label className={`grid gap-1.5 ${mutedCaps}`}>
         {label}
@@ -541,22 +542,12 @@ export const ObjectInspector = memo(function ObjectInspector({
             }
             onNumberScrubPreview={onPreviewNumber}
             onChange={(event) =>
-              linkedKeys &&
-              animationKey &&
-              type === "number" &&
-              isBoundsAnimationKey(animationKey)
-                ? commitLinkedKeyframedValue(
-                    linkedKeys,
-                    animationKey,
-                    event.target.value,
-                    onCommit,
-                  )
-                : commitKeyframedValue(
-                    animationKey,
-                    event.target.value,
-                    onCommit,
-                    type,
-                  )
+              commitKeyframedValue(
+                animationKey,
+                event.target.value,
+                onCommit,
+                type,
+              )
             }
           />
           {animationKey ? (
@@ -584,19 +575,6 @@ export const ObjectInspector = memo(function ObjectInspector({
               }}
               onClick={(event) => {
                 event.preventDefault();
-                if (linkedKeys && animationKey) {
-                  const [firstKey, secondKey] = linkedKeys;
-                  const firstValue = keyframeValue(
-                    firstKey,
-                    object.bounds[firstKey],
-                  );
-                  const secondValue = keyframeValue(
-                    secondKey,
-                    object.bounds[secondKey],
-                  );
-                  toggleLinkedKeyframes(linkedKeys, [firstValue, secondValue]);
-                  return;
-                }
                 toggleKeyframe(animationKey, fieldValue);
               }}
             />
@@ -611,6 +589,7 @@ export const ObjectInspector = memo(function ObjectInspector({
     currentTime,
     liveScrubClock,
     lockBounds,
+    projectBin,
     onChange,
     onPreview,
     readEffectiveTime,

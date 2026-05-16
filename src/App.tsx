@@ -30,12 +30,12 @@ import {
   compositionMatchesIdentity,
   resolveCanonicalComposition,
 } from "./app/features/file-manager/compositionIdentity";
-import { getDirectoryPath } from "./app/features/file-manager/fileManagerPaths";
+import { getDirectoryPath } from "./app/features/file-manager/binPaths";
 import {
   findBinItem,
   normalizeProjectBin,
 } from "./app/features/file-manager/projectBinMutations";
-import { useFileManagerProjectActions } from "./app/features/file-manager/useFileManagerProjectActions";
+import { useBinProjectActions } from "./app/features/file-manager/useBinProjectActions";
 import {
   useFrameInteractionController,
   type FrameInteractionController,
@@ -130,6 +130,7 @@ import {
   subscribeMasterTimelineClock,
 } from "./app/features/playback/playbackTimeStore";
 import { ProjectStoreProvider } from "./app/state/projectStore";
+import { CodeObjectRuntimeHostBridge } from "./render-engine/codeObjectRuntimeHostBridge";
 import {
   type AdjustmentLayerSelection,
   type AgentProvider,
@@ -230,10 +231,10 @@ import type {
 } from "./components/EditorPane";
 import { WelcomeScreen } from "./components/WelcomeScreen";
 import {
-  consumePendingFileManagerFindMedia,
-  fileManagerFindMediaEvent,
-  type FileManagerFindMediaDetail,
-} from "./lib/fileManagerEvents";
+  consumePendingBinFindMedia,
+  binFindMediaEvent,
+  type BinFindMediaDetail,
+} from "./lib/binEvents";
 
 const defaultEditorState: EditorState = {
   timeline: defaultTimelineViewportState,
@@ -285,7 +286,8 @@ type ComposeDrawTool =
   | "text"
   | "textPath"
   | "pattern2d"
-  | "null";
+  | "null"
+  | "code";
 
 type ShapeDrawPreview = {
   bounds: Bounds;
@@ -375,6 +377,8 @@ function getDrawToolName(tool: ComposeDrawTool) {
       return "Null object";
     case "pattern2d":
       return "Pattern";
+    case "code":
+      return "Code";
   }
 }
 
@@ -801,6 +805,7 @@ function AppProviders({
         key={bootProject.manifestPath}
         project={bootProject.project}
       >
+        <CodeObjectRuntimeHostBridge />
         <AppContent
           initialProjectManifestPath={bootProject.manifestPath}
           initialSourceStatus={bootProject.sourceStatus}
@@ -829,7 +834,7 @@ function AppContent({
     control: AdjustmentEffectPointControl;
   } | null>(null);
   const [findMediaRequest, setFindMediaRequest] =
-    useState<FileManagerFindMediaDetail | null>(null);
+    useState<BinFindMediaDetail | null>(null);
   const [reusePrerenderCacheForExport, setReusePrerenderCacheForExportState] =
     useState(isPrerenderCacheReuseEnabledByDefault);
   const [exportFrameRate, setExportFrameRate] = useState(videoExportFrameRate);
@@ -2031,19 +2036,16 @@ function AppContent({
 
   useEffect(() => {
     function openFindMediaDialog(event: Event) {
-      const detail = (event as CustomEvent<FileManagerFindMediaDetail>).detail;
+      const detail = (event as CustomEvent<BinFindMediaDetail>).detail;
       if (!detail?.compositionId || !detail.fileName) return;
       setFindMediaRequest(detail);
     }
 
-    window.addEventListener(fileManagerFindMediaEvent, openFindMediaDialog);
-    const pending = consumePendingFileManagerFindMedia();
+    window.addEventListener(binFindMediaEvent, openFindMediaDialog);
+    const pending = consumePendingBinFindMedia();
     if (pending) setFindMediaRequest(pending);
     return () =>
-      window.removeEventListener(
-        fileManagerFindMediaEvent,
-        openFindMediaDialog,
-      );
+      window.removeEventListener(binFindMediaEvent, openFindMediaDialog);
   }, []);
 
   useEffect(() => {
@@ -2351,7 +2353,6 @@ function AppContent({
     selectMotionMarkers,
   } = useTimelineSelectionCommands({
     currentSceneTimeRef,
-    rightPanelTab,
     timeline,
     cancelFramePickPreview,
     clearStoredMarkerSelection,
@@ -2360,7 +2361,6 @@ function AppContent({
     scrubToSceneTime,
     setFocusPickZoomMarker,
     setPositionPickTranslationMarker,
-    setRightPanelTab,
     setSelectedAdjustmentLayerId,
     setSelectedAdjustmentLayers,
     setSelectedPartId,
@@ -4514,7 +4514,7 @@ function AppContent({
       )
     : undefined;
 
-  const fileManagerActions = useFileManagerProjectActions({
+  const binActions = useBinProjectActions({
     addCompositionFromLibrary,
     assets,
     clearNodeSelection: clearDirectSelection,
@@ -4833,12 +4833,6 @@ function AppContent({
       project.editorState?.code?.[activeEditorDocument.id])
     : undefined;
 
-  useEffect(() => {
-    if (mode !== "editor" || !composeMode) return;
-    if (!activeTimelinePart) return;
-    openCompositionInEditor(activeTimelinePart.id, { temporary: true });
-  }, [activeTimelinePart?.id, closeCompositionEditorTabs, composeMode, mode]);
-
   async function handleCloseProject() {
     await saveAllChanges();
     onCloseProject();
@@ -4846,7 +4840,7 @@ function AppContent({
 
   function handleSelectComposition(_compositionId: string) {
     // Compositions are only added to the timeline via drag-and-drop.
-    // Clicking a composition in the file manager does not insert it.
+    // Clicking a composition in the bin does not insert it.
   }
 
   function openCompositionInEditor(
@@ -5010,53 +5004,45 @@ function AppContent({
     [installUpdate],
   );
 
-  const osFileManagerPropsRef =
-    useRef<typeof fileManagerActions>(fileManagerActions);
-  osFileManagerPropsRef.current = fileManagerActions;
+  const binPropsRef = useRef<typeof binActions>(binActions);
+  binPropsRef.current = binActions;
   const openProjectFileInEditorRef = useRef(openProjectFileInEditor);
   openProjectFileInEditorRef.current = openProjectFileInEditor;
-  const osFileManagerProps = useMemo(
+  const binProps = useMemo(
     () => ({
       bin: normalizeProjectBin(project),
       compositionLibrary: project.compositionLibrary ?? [],
       selectedCompositionId: selectedPartId,
       createComposition: (
-        ...args: Parameters<typeof fileManagerActions.createBinComposition>
-      ) => osFileManagerPropsRef.current.createBinComposition(...args),
-      createFile: (
-        ...args: Parameters<typeof fileManagerActions.createBinFile>
-      ) => osFileManagerPropsRef.current.createBinFile(...args),
-      createFolder: (
-        ...args: Parameters<typeof fileManagerActions.createBinFolder>
-      ) => osFileManagerPropsRef.current.createBinFolder(...args),
+        ...args: Parameters<typeof binActions.createBinComposition>
+      ) => binPropsRef.current.createBinComposition(...args),
+      createFile: (...args: Parameters<typeof binActions.createBinFile>) =>
+        binPropsRef.current.createBinFile(...args),
+      createFolder: (...args: Parameters<typeof binActions.createBinFolder>) =>
+        binPropsRef.current.createBinFolder(...args),
       createTimeline: (
-        ...args: Parameters<typeof fileManagerActions.createBinTimeline>
-      ) => osFileManagerPropsRef.current.createBinTimeline(...args),
-      deleteItem: (
-        ...args: Parameters<typeof fileManagerActions.deleteBinItem>
-      ) => osFileManagerPropsRef.current.deleteBinItem(...args),
-      deleteItems: (
-        ...args: Parameters<typeof fileManagerActions.deleteBinItems>
-      ) => osFileManagerPropsRef.current.deleteBinItems(...args),
-      dropFiles: (
-        ...args: Parameters<typeof fileManagerActions.dropBinFiles>
-      ) => osFileManagerPropsRef.current.dropBinFiles(...args),
+        ...args: Parameters<typeof binActions.createBinTimeline>
+      ) => binPropsRef.current.createBinTimeline(...args),
+      deleteItem: (...args: Parameters<typeof binActions.deleteBinItem>) =>
+        binPropsRef.current.deleteBinItem(...args),
+      deleteItems: (...args: Parameters<typeof binActions.deleteBinItems>) =>
+        binPropsRef.current.deleteBinItems(...args),
+      dropFiles: (...args: Parameters<typeof binActions.dropBinFiles>) =>
+        binPropsRef.current.dropBinFiles(...args),
       duplicateItem: (
-        ...args: Parameters<typeof fileManagerActions.duplicateBinItem>
-      ) => osFileManagerPropsRef.current.duplicateBinItem(...args),
+        ...args: Parameters<typeof binActions.duplicateBinItem>
+      ) => binPropsRef.current.duplicateBinItem(...args),
       duplicateItems: (
-        ...args: Parameters<typeof fileManagerActions.duplicateBinItems>
-      ) => osFileManagerPropsRef.current.duplicateBinItems(...args),
-      moveItem: (...args: Parameters<typeof fileManagerActions.moveBinItem>) =>
-        osFileManagerPropsRef.current.moveBinItem(...args),
+        ...args: Parameters<typeof binActions.duplicateBinItems>
+      ) => binPropsRef.current.duplicateBinItems(...args),
+      moveItem: (...args: Parameters<typeof binActions.moveBinItem>) =>
+        binPropsRef.current.moveBinItem(...args),
       onOpenFile: (...args: Parameters<typeof openProjectFileInEditor>) =>
         openProjectFileInEditorRef.current(...args),
-      renameItem: (
-        ...args: Parameters<typeof fileManagerActions.renameBinItem>
-      ) => osFileManagerPropsRef.current.renameBinItem(...args),
-      revealItem: (
-        ...args: Parameters<typeof fileManagerActions.revealBinItem>
-      ) => osFileManagerPropsRef.current.revealBinItem(...args),
+      renameItem: (...args: Parameters<typeof binActions.renameBinItem>) =>
+        binPropsRef.current.renameBinItem(...args),
+      revealItem: (...args: Parameters<typeof binActions.revealBinItem>) =>
+        binPropsRef.current.revealBinItem(...args),
     }),
     [project, selectedPartId],
   );
@@ -5097,7 +5083,7 @@ function AppContent({
             hasActiveComposition={hasActiveComposition}
             isPlaying={isPlaying}
             leftPanelTab={leftPanelTab}
-            osFileManagerProps={osFileManagerProps}
+            binProps={binProps}
             part={leftSidebarPart}
             selectedObjectIds={leftSidebarSelectedObjectIds}
             timelineMode={timelineMode}
@@ -5339,6 +5325,7 @@ function AppContent({
                 ? {
                     activeTool,
                     onAddNullObject: addNullObjectToFrameCenter,
+                    onAddCodeObject: () => createComposeObject("code"),
                     onActiveToolChange: setActiveTool,
                     resizeMode: objectResizeMode,
                     onResizeModeChange: setObjectResizeMode,
@@ -5404,10 +5391,7 @@ function AppContent({
             <ConnectedInspectorContent
               rightPanelTab={rightPanelTab}
               part={part}
-              projectDirectory={projectDirectory ?? ""}
               composeMode={composeMode}
-              sourceStatus={sourceStatus}
-              agentContext={agentContext}
               selectedMotion={selectedMotion}
               selectedMotionPart={selectedMotionPart}
               selectedMotionMarkerCount={selectedMotionMarkers.length}
@@ -5695,7 +5679,7 @@ function AppContent({
       />
       <FindMediaDialog
         findMediaRequest={findMediaRequest}
-        onFindCompositionMedia={fileManagerActions.findCompositionMedia}
+        onFindCompositionMedia={binActions.findCompositionMedia}
         onFindMediaRequestChange={setFindMediaRequest}
       />
     </>

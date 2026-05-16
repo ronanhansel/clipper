@@ -11,7 +11,7 @@ import {
 } from "../../../core/assetTree";
 import { defaultAssets } from "../../../core/project";
 import type { AssetItem, ProjectManifest } from "../../../core/types";
-import { nextNumberedName } from "./fileManagerPaths";
+import { nextNumberedName } from "./binPaths";
 
 function getAssetSiblingNames(items: AssetItem[], parentFolderId?: string) {
   const siblings = parentFolderId

@@ -90,6 +90,7 @@ import {
   type TransitionLayer,
 } from "../../core/types";
 import { buildPattern2dSvg } from "../../core/graphics/pattern2d";
+import { CodeObjectFrame } from "./CodeObjectFrame";
 import type {
   AdjustmentVisualOverlay,
   PostProcessPass,
@@ -219,7 +220,8 @@ type ComposeDrawTool =
   | "text"
   | "textPath"
   | "pattern2d"
-  | "null";
+  | "null"
+  | "code";
 
 function isPenDrawTool(tool: ComposeDrawTool | null | undefined) {
   return tool === "pen" || tool === "pencil" || tool === "textPath";
@@ -803,7 +805,6 @@ export const FramePreview = memo(function FramePreview({
                             frameScale={frameScale}
                             hideNullObjects={timelineMode !== "compose"}
                             isPlaying={isPlaying}
-                            liveScrubEnabled={timelineMode !== "compose"}
                             part={item.part}
                             renderClockSceneTime={displaySceneTime}
                             previewTime={item.previewTime}
@@ -1255,7 +1256,6 @@ function CompositionLayerView({
   frameScale,
   hideNullObjects,
   isPlaying,
-  liveScrubEnabled = false,
   part,
   renderClockSceneTime,
   previewTime,
@@ -1276,7 +1276,6 @@ function CompositionLayerView({
   frameScale: number;
   hideNullObjects?: boolean;
   isPlaying: boolean;
-  liveScrubEnabled?: boolean;
   part: Part;
   renderClockSceneTime: number;
   previewTime: number;
@@ -1315,10 +1314,6 @@ function CompositionLayerView({
     () => getRenderClockStyle(renderClockState) as CSSProperties,
     [renderClockState],
   );
-  const partRef = useRef(part);
-  const previewOffsetRef = useRef(previewTime - renderClockSceneTime);
-  partRef.current = part;
-  previewOffsetRef.current = previewTime - renderClockSceneTime;
 
   useLayoutEffect(() => {
     renderClockStateRef.current = renderClockState;
@@ -1329,31 +1324,6 @@ function CompositionLayerView({
     () => syncRenderClockSubtree(layerRef.current, renderClockStateRef),
     [],
   );
-
-  useEffect(() => {
-    if (!liveScrubEnabled || renderMode === "export") return;
-    let frame = 0;
-    let pendingTime: number | null = null;
-    function flush() {
-      frame = 0;
-      if (pendingTime === null) return;
-      const time = pendingTime;
-      pendingTime = null;
-      applyLivePartPreviewTime(layerRef.current, partRef.current, time);
-    }
-    function onClockChange() {
-      const snapshot = getMasterTimelineClockSnapshot();
-      if (snapshot.source !== "scrub") return;
-      pendingTime = snapshot.sceneTime + previewOffsetRef.current;
-      if (frame) return;
-      frame = requestAnimationFrame(flush);
-    }
-    const unsubscribe = subscribeMasterTimelineClock(onClockChange);
-    return () => {
-      unsubscribe();
-      if (frame) cancelAnimationFrame(frame);
-    };
-  }, [liveScrubEnabled, renderMode]);
 
   return (
     <div
@@ -3121,6 +3091,7 @@ export const FrameObjectView = function FrameObjectView({
       {object.type === "pattern2d" ? (
         <Pattern2DContent object={object} />
       ) : null}
+      {object.type === "code" ? <CodeObjectFrame object={object} /> : null}
       {(object.type === "html" ||
         object.type === "template" ||
         object.type === "custom-renderer") &&
@@ -3137,6 +3108,7 @@ export const FrameObjectView = function FrameObjectView({
       object.type !== "template" &&
       object.type !== "custom-renderer" &&
       object.type !== "pattern2d" &&
+      object.type !== "code" &&
       content
         ? content
         : null}
@@ -5042,6 +5014,7 @@ export const BackgroundElementView = memo(function BackgroundElementView({
       {element.type === "pattern2d" ? (
         <Pattern2DContent object={element} />
       ) : null}
+      {element.type === "code" ? <CodeObjectFrame object={element} /> : null}
       {(element.type === "html" ||
         element.type === "template" ||
         element.type === "custom-renderer") &&
@@ -5057,6 +5030,7 @@ export const BackgroundElementView = memo(function BackgroundElementView({
       element.type !== "template" &&
       element.type !== "custom-renderer" &&
       element.type !== "pattern2d" &&
+      element.type !== "code" &&
       content
         ? content
         : null}

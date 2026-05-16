@@ -1,7 +1,7 @@
 import type { ProjectManifest } from "../../../core/types";
 import { createDefaultTimelineLayerState } from "../../../core/project";
 import { createStableTimelineId } from "../../../core/compositionIds";
-import { reorderByIntent } from "./fileManagerPaths";
+import { reorderByIntent } from "./binPaths";
 
 export function createTimelineInProject(
   project: ProjectManifest,

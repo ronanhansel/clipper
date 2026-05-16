@@ -573,6 +573,7 @@ function cameraEaseProgress(value: number, ease: MotionEase | undefined) {
 }
 
 function easeProgress(value: number, ease: MotionEase | undefined) {
+  if (ease === "snap") return value >= 1 ? 1 : 0;
   if (ease === "easeOut" || ease === "circOut") return easeOutCubic(value);
   if (ease === "easeIn") return value * value * value;
   if (ease === "easeInOut") return easeInOutCubic(value);

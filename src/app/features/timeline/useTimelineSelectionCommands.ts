@@ -3,7 +3,6 @@ import {
   type AdjustmentLayerSelection,
   type CompositionSelection,
   type MotionMarkerSelection,
-  type RightPanelTab,
 } from "../../types";
 import type { TimelineMode, TimelinePart } from "../../../core/types";
 
@@ -18,7 +17,6 @@ type TimelineNodeSelection = {
 
 type UseTimelineSelectionCommandsInput = {
   currentSceneTimeRef: { current: number };
-  rightPanelTab: RightPanelTab;
   timeline: TimelinePart[];
   cancelFramePickPreview: () => void;
   clearStoredMarkerSelection: () => void;
@@ -27,7 +25,6 @@ type UseTimelineSelectionCommandsInput = {
   scrubToSceneTime: (time: number) => void;
   setFocusPickZoomMarker: (selection: MarkerSelection) => void;
   setPositionPickTranslationMarker: (selection: MarkerSelection) => void;
-  setRightPanelTab: (tab: RightPanelTab) => void;
   setSelectedAdjustmentLayerId: (id: string | null) => void;
   setSelectedAdjustmentLayers: (selection: AdjustmentLayerSelection[]) => void;
   setSelectedPartId: (id: string) => void;
@@ -42,7 +39,6 @@ type UseTimelineSelectionCommandsInput = {
 
 export function useTimelineSelectionCommands({
   currentSceneTimeRef,
-  rightPanelTab,
   timeline,
   cancelFramePickPreview,
   clearStoredMarkerSelection,
@@ -51,7 +47,6 @@ export function useTimelineSelectionCommands({
   scrubToSceneTime,
   setFocusPickZoomMarker,
   setPositionPickTranslationMarker,
-  setRightPanelTab,
   setSelectedAdjustmentLayerId,
   setSelectedAdjustmentLayers,
   setSelectedPartId,
@@ -138,7 +133,6 @@ export function useTimelineSelectionCommands({
     setSelectedTransitionLayerId(null);
     setSelectedTransitionLayers([]);
     clearMarkerSelection();
-    if (rightPanelTab === "agent") setRightPanelTab("video");
     pausePlaybackAtCurrentTime();
   }
 
@@ -150,7 +144,6 @@ export function useTimelineSelectionCommands({
     setSelectedTransitionLayerId(null);
     setSelectedTransitionLayers([]);
     clearMarkerSelection();
-    if (rightPanelTab === "agent") setRightPanelTab("video");
     pausePlaybackAtCurrentTime();
   }
 
@@ -169,7 +162,6 @@ export function useTimelineSelectionCommands({
     setFocusPickZoomMarker(null);
     setPositionPickTranslationMarker(null);
     setTrackerPickTranslationMarker(null);
-    if (rightPanelTab === "agent") setRightPanelTab("video");
     pausePlaybackAtCurrentTime();
   }
 

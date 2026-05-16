@@ -1,5 +1,6 @@
 import type { ComponentType } from "react";
 import { BoundsSection } from "./sections/BoundsSection";
+import { CodeSection } from "./sections/CodeSection";
 import { EffectsSection } from "./sections/EffectsSection";
 import { FillSection } from "./sections/FillSection";
 import { Pattern2dSection } from "./sections/Pattern2dSection";
@@ -51,6 +52,9 @@ export const inspectorRegistry: Record<string, InspectorTypeDefinition> = {
   },
   pattern2d: {
     sections: [BoundsSection, EffectsSection, StrokeSection, Pattern2dSection],
+  },
+  code: {
+    sections: [BoundsSection, CodeSection],
   },
 };
 

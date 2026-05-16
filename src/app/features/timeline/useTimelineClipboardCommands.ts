@@ -17,7 +17,7 @@ import type {
   Part,
   TransitionLayer,
 } from "../../../core/types";
-import { requestFileManagerFindMedia } from "../../../lib/fileManagerEvents";
+import { requestBinFindMedia } from "../../../lib/binEvents";
 import {
   applyAdjustmentLayerOverwrite,
   applyMotionMarkerOverwrite,
@@ -1585,7 +1585,7 @@ export function useTimelineClipboardCommands({
           label: "Find media in project",
           action: () => {
             if (targetCompositionId && targetFileName)
-              requestFileManagerFindMedia({
+              requestBinFindMedia({
                 compositionId: targetCompositionId,
                 fileName: targetFileName,
               });

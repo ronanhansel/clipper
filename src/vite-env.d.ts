@@ -3,6 +3,18 @@
 declare module "three/webgpu";
 declare module "three/tsl";
 
+declare module "monaco-jsx-highlighter" {
+  const MonacoJSXHighlighter: new (
+    monaco: unknown,
+    parse: (code: string) => unknown,
+    traverse: unknown,
+    editor: unknown,
+  ) => {
+    highlightOnDidChangeModelContent: (debounceTime?: number) => () => void;
+  };
+  export default MonacoJSXHighlighter;
+}
+
 declare module "*.yml?raw" {
   const source: string;
   export default source;

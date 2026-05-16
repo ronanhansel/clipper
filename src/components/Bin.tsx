@@ -20,6 +20,7 @@ import {
 import toast from "react-hot-toast";
 import type { ContextMenuState } from "../app/types";
 import type { CompositionClip, ProjectBinItem } from "../core/types";
+import { getBinItemPath } from "../core/binPathResolver";
 import { AppContextMenu } from "./AppContextMenu";
 import {
   NativeTree,
@@ -61,7 +62,7 @@ export type RegistryNode = {
   children?: RegistryNode[];
 };
 
-export type OsFileManagerProps = {
+export type BinProps = {
   bin: ProjectBinItem[];
   compositionLibrary: CompositionClip[];
   selectedCompositionId?: string;
@@ -91,7 +92,7 @@ export type OsFileManagerProps = {
   revealItem: (itemId: string) => void;
 };
 
-export function OsFileManager({
+export function Bin({
   bin,
   compositionLibrary,
   selectedCompositionId,
@@ -108,7 +109,7 @@ export function OsFileManager({
   moveItem,
   renameItem,
   revealItem,
-}: OsFileManagerProps) {
+}: BinProps) {
   const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
   const treeRef = useRef<NativeTreeApi<RegistryNode> | undefined>(undefined);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -289,6 +290,7 @@ export function OsFileManager({
             { label: "New Timeline", action: () => createTimeline(data.id) },
             { label: "New File", action: () => createFile(data.id) },
             { label: "New Folder", action: () => createFolder(data.id) },
+            { label: "Rename", action: () => node.edit() },
             {
               label: "Copy",
               action: () => {
@@ -314,6 +316,7 @@ export function OsFileManager({
           );
         } else if (data.kind === "composition") {
           items.push(
+            { label: "Rename", action: () => node.edit() },
             {
               label: "Copy",
               action: () => {
@@ -341,6 +344,7 @@ export function OsFileManager({
           );
         } else {
           items.push(
+            { label: "Rename", action: () => node.edit() },
             {
               label: "Copy",
               action: () => {
@@ -563,7 +567,7 @@ export function OsFileManager({
 
     function cleanupOnDrop(event: globalThis.DragEvent) {
       // Do not pre-empt NativeTree's onDrop handler. We only need this global
-      // cleanup when a drag ends outside of the file manager surface.
+      // cleanup when a drag ends outside of the bin surface.
       const target = event.target;
       if (target instanceof Node && containerRef.current?.contains(target))
         return;
@@ -601,7 +605,7 @@ export function OsFileManager({
   return (
     <section
       ref={containerRef}
-      data-file-manager-panel
+      data-bin-panel
       className="group/filetree min-h-0 min-w-0 overflow-auto rounded-[14px] border border-dashed border-[#303646] bg-[#151821] p-3"
       onContextMenu={(e) => openContextMenu(e)}
       onMouseDown={(event) => {
@@ -627,7 +631,7 @@ export function OsFileManager({
       }}
     >
       <div className="mb-2 flex items-center justify-between px-0.5">
-        <h3 className="text-[13px] text-[#aeb3c1]">File Manager</h3>
+        <h3 className="text-[13px] text-[#aeb3c1]">Bin</h3>
       </div>
       <div
         ref={treeContainerRef}
@@ -669,6 +673,7 @@ export function OsFileManager({
           {(props) => (
             <RegistryTreeNode
               {...props}
+              bin={bin}
               selectedCompositionId={selectedCompositionId}
               onContextMenu={openContextMenu}
               onCompositionDragStart={(node, mouse, shiftKey) => {
@@ -747,12 +752,14 @@ function RegistryTreeNode({
   node,
   dragHandle,
   style,
+  bin,
   selectedCompositionId,
   onContextMenu,
   onCompositionDragStart,
   onDragStateChange,
   onDropFiles,
 }: NativeTreeNodeRendererProps<RegistryNode> & {
+  bin: ProjectBinItem[];
   selectedCompositionId?: string;
   onContextMenu: (
     event: ReactMouseEvent,
@@ -831,13 +838,18 @@ function RegistryTreeNode({
         event.shiftKey,
       );
     }
+    if (data.kind === "internal-file" || data.kind === "external-proxy") {
+      const path = getBinItemPath(bin, data.id);
+      if (path)
+        event.dataTransfer.setData("application/x-clipper-bin-path", path);
+    }
     event.dataTransfer.setDragImage(getTransparentNativeDragImage(), 0, 0);
   }
 
   return (
     <div
       ref={dragHandle}
-      data-file-manager-row="true"
+      data-bin-row="true"
       style={style}
       className={`relative box-border grid h-full min-w-0 cursor-pointer select-none grid-cols-[16px_18px_minmax(0,1fr)_auto] items-center gap-1.5 border px-1.5 text-[13px] ${
         node.isDragging

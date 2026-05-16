@@ -232,6 +232,7 @@ describe("buildComposeAnimationTimelineLayers", () => {
     const movedTrack = moveComposeGenericPropertyKeyframe(
       object,
       "property:bounds.x",
+      0,
       1,
       6,
     );

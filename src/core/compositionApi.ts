@@ -8,7 +8,8 @@ export type FrameObjectType =
   | "template"
   | "null"
   | "custom-renderer"
-  | "pattern2d";
+  | "pattern2d"
+  | "code";
 
 export type RenderContext = {
   time: number;

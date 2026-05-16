@@ -46,7 +46,7 @@ export type ProjectDocumentController = {
   activeProjectManifestPathRef: MutableRefObject<string>;
   compositionSources: Record<string, string>;
   compositionSourcesRef: MutableRefObject<Record<string, string>>;
-  executeFileManagerCommand: (command: Command) => Promise<void>;
+  executeBinCommand: (command: Command) => Promise<void>;
   fileSystemRevision: number;
   implicitFileOperation: <T extends unknown[]>(
     operation: (...args: T) => Promise<void> | void,
@@ -462,7 +462,7 @@ export function useProjectDocumentController({
     [enqueueHistoryOperation, notifyError],
   );
 
-  const executeFileManagerCommand = useCallback(
+  const executeBinCommand = useCallback(
     (command: Command) => {
       return enqueueFileSystemOperation(async () => {
         const previousProject = projectRef.current;
@@ -840,7 +840,7 @@ export function useProjectDocumentController({
     activeProjectManifestPathRef,
     compositionSources,
     compositionSourcesRef,
-    executeFileManagerCommand,
+    executeBinCommand,
     fileSystemRevision,
     implicitFileOperation,
     isFileSystemBusy,

@@ -156,6 +156,13 @@ function clipperBrowserFilesystemBridge(): Plugin {
 export default defineConfig({
   base: "./",
   plugins: [react(), tailwindcss(), clipperBrowserFilesystemBridge()],
+  define: {
+    "process.env.NODE_ENV": JSON.stringify(
+      process.env.NODE_ENV ?? "production",
+    ),
+    "process.env.BABEL_TYPES_8_BREAKING": JSON.stringify(""),
+    "process.env": "{}",
+  },
   resolve: {
     alias: {
       "@clipper": path.resolve(__dirname, "clipper/projects"),

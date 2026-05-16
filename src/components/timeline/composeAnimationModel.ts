@@ -524,14 +524,12 @@ export function removeComposeGenericPropertyKeyframeSelections(
 export function moveComposeGenericPropertyKeyframe(
   object: FrameObject,
   animationId: string,
+  fromTime: number,
   newTime: number,
   timelineDuration: number,
 ): FrameObject {
   const path = getGenericPropertyPathFromComposeAnimationId(animationId);
   if (!path) return object;
-  const track = object.tracks?.[path];
-  const fromTime = track?.points[0]?.time;
-  if (fromTime === undefined) return object;
   return movePropertyKeyframe(
     object,
     path,
@@ -587,6 +585,7 @@ function normalizeComposeEasing(
 ): MotionEase | readonly [number, number, number, number] | undefined {
   if (
     value === "linear" ||
+    value === "snap" ||
     value === "easeIn" ||
     value === "easeOut" ||
     value === "easeInOut" ||

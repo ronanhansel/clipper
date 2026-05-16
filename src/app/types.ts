@@ -2,7 +2,7 @@ import type { ProjectManifest } from "../core/types";
 
 export type Mode = "preview" | "editor";
 export type LeftPanelTab = "assets" | "tools";
-export type RightPanelTab = "video" | "agent";
+export type RightPanelTab = "video";
 export type AgentProvider = "opencode" | "codex" | "claude" | "gemini";
 export type ProjectUpdater =
   | ProjectManifest

@@ -1,10 +1,5 @@
 import { memo, type ReactNode } from "react";
-import {
-  sectionTitle,
-  segmentedTabActive,
-  segmentedTabBase,
-  segmentedTabInactive,
-} from "../config";
+import { sectionTitle } from "../config";
 import type { RightPanelTab } from "../types";
 
 type RightInspectorPanelProps = {
@@ -14,37 +9,15 @@ type RightInspectorPanelProps = {
   onTabChange: (tab: RightPanelTab) => void;
 };
 
-const tabs: RightPanelTab[] = ["video", "agent"];
-
-const tabLabels: Record<RightPanelTab, string> = {
-  video: "inspect",
-  agent: "agent",
-};
-
 export const RightInspectorPanel = memo(function RightInspectorPanel({
-  activeTab,
   children,
   validationErrors,
-  onTabChange,
 }: RightInspectorPanelProps) {
   return (
     <aside
       className="min-h-0 overflow-auto border-l border-[#2d313b] bg-[#171920] p-4"
       data-inspector-panel
     >
-      <section className="mb-3 grid gap-2.5">
-        <div className="grid grid-cols-2 gap-1">
-          {tabs.map((tab) => (
-            <button
-              className={`${segmentedTabBase} capitalize ${activeTab === tab ? segmentedTabActive : segmentedTabInactive}`}
-              key={tab}
-              onClick={() => onTabChange(tab)}
-            >
-              {tabLabels[tab]}
-            </button>
-          ))}
-        </div>
-      </section>
       <section className="mb-5 grid gap-2.5">{children}</section>
       {validationErrors.length > 0 ? (
         <section className="mb-5 grid gap-2.5 text-[#ffbf66]">

@@ -2,6 +2,7 @@ import {
   Braces,
   ChartNoAxesColumn,
   ChevronRight,
+  Code,
   Code2,
   Eye,
   EyeOff,
@@ -674,6 +675,7 @@ function LayerIcon({ node }: { node: ComposeLayerNode }) {
   }
   if (objectType === "null") return <NullObjectIcon className={className} />;
   if (objectType === "html") return <Code2 className={className} />;
+  if (objectType === "code") return <Code className={className} />;
   if (objectType === "template")
     return <TemplateLayerIcon className={className} />;
   if (objectType === "custom-renderer")

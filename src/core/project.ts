@@ -112,8 +112,7 @@ const timelineLayerKeys = Object.keys(defaultTimelineLayerState).filter(
     Array.isArray(defaultTimelineLayerState[key as keyof TimelineLayerState]),
 );
 
-function normalizeRightPanelTab(tab: unknown) {
-  if (tab === "agent") return tab;
+function normalizeRightPanelTab(_tab: unknown) {
   return "video";
 }
 

@@ -1,5 +1,5 @@
 import type { Part, ProjectManifest } from "../../../core/types";
-import { getDirectoryPath, reorderByIntent } from "./fileManagerPaths";
+import { getDirectoryPath, reorderByIntent } from "./binPaths";
 
 export type CompositionSourceMutationResult = {
   compositionSources: Record<string, string>;

@@ -12,7 +12,7 @@ import type {
 } from "../../../core/types";
 import type { ProjectUpdater } from "../../types";
 import { clipperHost } from "../../clipperHost";
-import { getDirectoryPath, nextNumberedName } from "./fileManagerPaths";
+import { getDirectoryPath, nextNumberedName } from "./binPaths";
 import {
   createAssetFolderInProject,
   deleteAssetFromProject,
@@ -104,7 +104,7 @@ type UseFileManagerProjectActionsInput = {
   addCompositionFromLibrary: (compositionId: string) => void;
 };
 
-export function useFileManagerProjectActions({
+export function useBinProjectActions({
   addCompositionFromLibrary,
   assets,
   projectDirectory,
