@@ -1,14 +1,49 @@
 # AGENTS.md
 
+## Workflow
+
 - Run `npm run typecheck` before committing (also formats).
 - Don't run `git diff` unless asked.
 - Don't fix errors not from your edits — they may be another agent's work.
-- Read `docs/PERFORMANCE.md` before touching playback / inspector / scrub code.
-
-## Memory
-
-- Current version: `v0.2.18`.
-- Document every change in `agent-log/v0.2.18/memory/[id]-feature-name.md` —
-  update an existing file or create the next sequential ID.
-- Write incrementally on long tasks, not just at the end.
+- Document every change in `agent-log/v0.2.18/memory/[id]-feature-name.md` (next sequential ID, or update existing). Write incrementally on long tasks.
 - `PLAN.md` only on request; if it exists, keep it current.
+
+## Code rules
+
+- No comments explaining what code does. Names should make that obvious.
+- No backwards-compat shims, no feature flags, no `// kept for X` markers.
+- Solve the problem asked. No drive-by refactors, no extra abstractions.
+- File >1500 lines? Decompose before adding to it.
+
+## State
+
+- **Per-tick values** (scene time, scrub clock): module store + `useSyncExternalStore`. Subscribe via `usePlayheadTime`.
+- **Structural state** (project, selection, mode): zustand `editorStore`.
+- **UI-local** (popover open, hover): `useState`.
+- Never add `useState` to `AppContent` for shared values — it fans out to every subscriber.
+
+## React performance
+
+- `currentSceneTime` is never a prop more than one level deep. Subscribe through the store.
+- In event handlers, use `readPlayheadTime(currentTime)` — don't close over the rendered time.
+- Wrap callbacks passed to memoised components with `useCallback`. Inline arrows defeat memo.
+- Extract inline object/array literals to `useMemo` or module constants.
+- Lazy-mount expensive sections (animator controls, font selectors).
+- For hot scrub paths, write DOM imperatively — bypass React.
+
+## Modularity
+
+- Type-varying UI uses per-type registries (see `inspectorRegistry.ts`). New type → new section file + registry entry.
+- React context for shared helpers, store for shared state. Don't conflate.
+- Always provide a default registry entry for unknown types.
+
+## Compose vs Direct
+
+- Modes share only the playhead clock.
+- Object inspector is Compose-only. Direct shows motion / adjustment / transition / composition inspectors.
+- On mode switch, mode-state must be cleared (`clearDirectSelection` / `clearComposeSelection`).
+
+## Reference
+
+- `docs/PERFORMANCE.md` — performance playbook (one page).
+- Memos `agent-log/v0.2.18/memory/092-098` — context on past inspector / playback rewrites.
