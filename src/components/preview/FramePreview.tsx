@@ -94,7 +94,6 @@ import { buildPattern2dSvg } from "../../core/graphics/pattern2d";
 import { CodeObjectFrame } from "./CodeObjectFrame";
 import type {
   AdjustmentVisualOverlay,
-  PostProcessPass,
   TransitionSequenceStyle,
   TransitionVisualOverlay,
 } from "../../core/effects/types";
@@ -216,7 +215,6 @@ type FramePreviewProps = {
     to: TimelinePreviewStackPart[];
     fromSceneTime: number;
     toSceneTime: number;
-    postProcessPasses: PostProcessPass[];
   } | null;
   transitionLayers?: TransitionLayer[];
   renderMode?: "preview" | "export";
@@ -340,7 +338,6 @@ export const FramePreview = memo(function FramePreview({
         to: Array<{ part: Part; start: number; previewTime: number }>;
         fromSceneTime: number;
         toSceneTime: number;
-        postProcessPasses: PostProcessPass[];
       } | null;
     }
   ).transitionPreviewParts;

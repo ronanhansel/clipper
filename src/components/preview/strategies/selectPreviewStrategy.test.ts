@@ -106,7 +106,6 @@ describe("selectPreviewStrategy", () => {
       framePreviewProps: makeProps({ timelineMode: "compose" }),
       hasActiveLivePasses: true,
       hasLivePassCapableLayers: true,
-      prerenderEnabled: true,
       authoringActive: true,
     });
     expect(result).toEqual({ kind: "live-dom", reason: "compose-mode" });
@@ -117,7 +116,6 @@ describe("selectPreviewStrategy", () => {
       framePreviewProps: makeProps(),
       hasActiveLivePasses: true,
       hasLivePassCapableLayers: true,
-      prerenderEnabled: true,
       authoringActive: true,
     });
     expect(result).toEqual({
@@ -131,7 +129,6 @@ describe("selectPreviewStrategy", () => {
       framePreviewProps: makeProps(),
       hasActiveLivePasses: true,
       hasLivePassCapableLayers: true,
-      prerenderEnabled: false,
       authoringActive: false,
     });
     expect(result).toEqual({
@@ -145,7 +142,6 @@ describe("selectPreviewStrategy", () => {
       framePreviewProps: makeProps(),
       hasActiveLivePasses: false,
       hasLivePassCapableLayers: true,
-      prerenderEnabled: true,
       authoringActive: false,
     });
     expect(result).toEqual({
@@ -154,12 +150,11 @@ describe("selectPreviewStrategy", () => {
     });
   });
 
-  it("structural live-webgl beats prerender even during authoring", () => {
+  it("structural live-webgl wins even during authoring", () => {
     const result = selectPreviewStrategy({
       framePreviewProps: makeProps(),
       hasActiveLivePasses: false,
       hasLivePassCapableLayers: true,
-      prerenderEnabled: true,
       authoringActive: true,
     });
     expect(result).toEqual({
@@ -173,43 +168,16 @@ describe("selectPreviewStrategy", () => {
       framePreviewProps: makeProps({ timelineMode: "compose" }),
       hasActiveLivePasses: false,
       hasLivePassCapableLayers: false,
-      prerenderEnabled: false,
       authoringActive: false,
     });
     expect(result).toEqual({ kind: "live-dom", reason: "compose-mode" });
   });
 
-  it("returns prerender when prerender enabled in direct mode", () => {
+  it("returns live-dom dom-overlay-required when authoring without live passes", () => {
     const result = selectPreviewStrategy({
       framePreviewProps: makeProps({ timelineMode: "composition" }),
       hasActiveLivePasses: false,
       hasLivePassCapableLayers: false,
-      prerenderEnabled: true,
-      authoringActive: false,
-    });
-    expect(result).toEqual({
-      kind: "prerender",
-      reason: "prerender-frames-available",
-    });
-  });
-
-  it("falls back to live-dom when no other signals match", () => {
-    const result = selectPreviewStrategy({
-      framePreviewProps: makeProps({ timelineMode: "composition" }),
-      hasActiveLivePasses: false,
-      hasLivePassCapableLayers: false,
-      prerenderEnabled: false,
-      authoringActive: false,
-    });
-    expect(result).toEqual({ kind: "live-dom", reason: "no-live-passes" });
-  });
-
-  it("authoring suppresses prerender", () => {
-    const result = selectPreviewStrategy({
-      framePreviewProps: makeProps({ timelineMode: "composition" }),
-      hasActiveLivePasses: false,
-      hasLivePassCapableLayers: false,
-      prerenderEnabled: true,
       authoringActive: true,
     });
     expect(result).toEqual({
@@ -218,15 +186,14 @@ describe("selectPreviewStrategy", () => {
     });
   });
 
-  it("compose mode strategy is not blocked by prerender", () => {
+  it("falls back to live-dom when no other signals match", () => {
     const result = selectPreviewStrategy({
-      framePreviewProps: makeProps({ timelineMode: "compose" }),
+      framePreviewProps: makeProps({ timelineMode: "composition" }),
       hasActiveLivePasses: false,
       hasLivePassCapableLayers: false,
-      prerenderEnabled: true,
       authoringActive: false,
     });
-    expect(result).toEqual({ kind: "live-dom", reason: "compose-mode" });
+    expect(result).toEqual({ kind: "live-dom", reason: "no-live-passes" });
   });
 });
 

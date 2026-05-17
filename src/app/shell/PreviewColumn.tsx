@@ -1,5 +1,4 @@
 import {
-  useEffect,
   useRef,
   useState,
   type ComponentProps,
@@ -21,7 +20,6 @@ import {
 import type { StrategyFramePreviewProps } from "../../components/preview/strategies/preview";
 import { FRAME_HEIGHT, FRAME_WIDTH } from "../../core/types";
 import type { PreviewFps } from "../../core/previewFps";
-import type { PrerenderBlock } from "../features/preview/usePrerenderCache";
 import type { Mode } from "../types";
 
 type FramePreviewProps = StrategyFramePreviewProps;
@@ -52,10 +50,6 @@ type PreviewColumnProps = {
   onModeChange: (mode: Mode) => void;
   onPointerEnter: () => void;
   onPointerLeave: () => void;
-  prerenderCacheEnabled: boolean;
-  prerenderCacheBlackMissDebug: boolean;
-  getPrerenderCacheBlockAtTime: (time: number) => PrerenderBlock | null;
-  onPrerenderDisplayReadyChange: (ready: boolean) => void;
   currentSceneTimeRef: RefObject<number>;
   onScroll: (event: UIEvent<HTMLDivElement>) => void;
   previewFps: PreviewFps;
@@ -72,16 +66,12 @@ export function PreviewColumn({
   currentSceneTimeRef,
   editorPaneProps,
   framePreviewProps,
-  getPrerenderCacheBlockAtTime,
   hasActiveComposition,
   liveDomPostProcessMaxFps,
   mode,
   onModeChange,
   onPointerEnter,
   onPointerLeave,
-  onPrerenderDisplayReadyChange,
-  prerenderCacheBlackMissDebug,
-  prerenderCacheEnabled,
   onScroll,
   previewFps,
   previewKey,
@@ -97,14 +87,6 @@ export function PreviewColumn({
   });
   const [previewOverlayHost, setPreviewOverlayHost] =
     useState<HTMLDivElement | null>(null);
-  const [displayPrerenderPreview, setDisplayPrerenderPreview] = useState(
-    prerenderCacheEnabled,
-  );
-  useEffect(() => {
-    if (mode === "preview") {
-      setDisplayPrerenderPreview(prerenderCacheEnabled);
-    }
-  }, [mode, prerenderCacheEnabled]);
 
   if (framePreviewProps && hasActiveComposition)
     lastActiveFramePreviewPropsRef.current = framePreviewProps;
@@ -149,7 +131,6 @@ export function PreviewColumn({
         framePreviewProps: renderFramePreviewProps,
         hasActiveLivePasses,
         hasLivePassCapableLayers,
-        prerenderEnabled: displayPrerenderPreview,
         authoringActive,
       })
     : null;
@@ -236,9 +217,6 @@ export function PreviewColumn({
                   currentSceneTimeRef={currentSceneTimeRef}
                   scheduler={scheduler}
                   liveDomPostProcessMaxFps={liveDomPostProcessMaxFps}
-                  prerenderBlackMissDebug={prerenderCacheBlackMissDebug}
-                  getPrerenderCacheBlockAtTime={getPrerenderCacheBlockAtTime}
-                  onPrerenderDisplayReadyChange={onPrerenderDisplayReadyChange}
                 />
                 {!hasActiveComposition &&
                 !(mode === "editor" && !editorPaneProps) ? (

@@ -22,7 +22,6 @@ export interface PostProcessPlanFrameSize {
 }
 
 export interface PostProcessPlanTransitionInput {
-  postProcessPasses?: PostProcessPass[];
   transitionLayers?: TransitionLayer[];
 }
 
@@ -41,35 +40,32 @@ export interface PostProcessPlan {
 const emptyPlan: AdjustmentExecutionPlan = { activeLayers: [], steps: [] };
 const emptyVisualStyle: AdjustmentVisualStyle = { overlays: [] };
 
-function resolveTransitionPasses(
+function deriveTransitionPasses(
   sceneTime: number,
   transitionInput: PostProcessPlanTransitionInput | null | undefined,
   frameSize: PostProcessPlanFrameSize,
 ): PostProcessPass[] {
-  if (!transitionInput) return [];
-  if (transitionInput.transitionLayers?.length) {
-    const activeLayers = getActiveTransitionLayers(
-      transitionInput.transitionLayers,
-      sceneTime,
+  if (!transitionInput?.transitionLayers?.length) return [];
+  const activeLayers = getActiveTransitionLayers(
+    transitionInput.transitionLayers,
+    sceneTime,
+  );
+  const passes: PostProcessPass[] = [];
+  for (const layer of activeLayers) {
+    passes.push(
+      ...getTransitionPostProcessPasses(sceneTime, layer, undefined, {
+        width: frameSize.width,
+        height: frameSize.height,
+      }),
     );
-    const passes: PostProcessPass[] = [];
-    for (const layer of activeLayers) {
-      passes.push(
-        ...getTransitionPostProcessPasses(sceneTime, layer, undefined, {
-          width: frameSize.width,
-          height: frameSize.height,
-        }),
-      );
-    }
-    return passes;
   }
-  return transitionInput.postProcessPasses ?? [];
+  return passes;
 }
 
 export function computePostProcessPlan(
   sceneTime: number,
   adjustmentLayers: AdjustmentLayer[] | undefined,
-  transitionPreviewParts: PostProcessPlanTransitionInput | null | undefined,
+  transitionInput: PostProcessPlanTransitionInput | null | undefined,
   frameSize: PostProcessPlanFrameSize,
 ): PostProcessPlan {
   const plan = buildAdjustmentExecutionPlan(
@@ -80,7 +76,7 @@ export function computePostProcessPlan(
   );
   const passes: PostProcessPass[] = [
     ...plan.steps.flatMap((step) => step.postProcessPasses ?? []),
-    ...resolveTransitionPasses(sceneTime, transitionPreviewParts, frameSize),
+    ...deriveTransitionPasses(sceneTime, transitionInput, frameSize),
   ];
   const livePasses = selectLiveDomPostProcessPasses(passes);
   const lastLive = livePasses.at(-1);
@@ -114,7 +110,7 @@ export function computePostProcessPlan(
 export function usePostProcessPlan(
   sceneTime: number,
   adjustmentLayers: AdjustmentLayer[] | undefined,
-  transitionPreviewParts: PostProcessPlanTransitionInput | null | undefined,
+  transitionInput: PostProcessPlanTransitionInput | null | undefined,
   frameSize: PostProcessPlanFrameSize,
 ): PostProcessPlan {
   return useMemo(
@@ -122,13 +118,13 @@ export function usePostProcessPlan(
       computePostProcessPlan(
         sceneTime,
         adjustmentLayers,
-        transitionPreviewParts,
+        transitionInput,
         frameSize,
       ),
     [
       sceneTime,
       adjustmentLayers,
-      transitionPreviewParts,
+      transitionInput,
       frameSize.width,
       frameSize.height,
     ],

@@ -26,7 +26,6 @@ import type {
   TimelinePart,
   TransitionLayer,
 } from "../../core/types";
-import type { PostProcessPass } from "../../core/effects/types";
 
 export type FramePreviewSceneContext = {
   blankPart: CompositionClip;
@@ -61,7 +60,6 @@ export type FramePreviewRenderModel = {
     to: TimelinePreviewStackPart[];
     fromSceneTime: number;
     toSceneTime: number;
-    postProcessPasses: PostProcessPass[];
   } | null;
   visibleAdjustmentLayers: NonNullable<Scene["adjustmentLayers"]>;
 };
@@ -190,8 +188,6 @@ export function deriveFramePreviewRenderModelFromContext(
         to: previewState.transitionPreviewParts.to,
         fromSceneTime: previewState.transitionPreviewParts.fromSceneTime,
         toSceneTime: previewState.transitionPreviewParts.toSceneTime,
-        postProcessPasses:
-          previewState.transitionPreviewParts.postProcessPasses,
       }
     : null;
   const basePart = previewState.activeComposition ?? blankPart;

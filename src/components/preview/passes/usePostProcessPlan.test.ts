@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { computePostProcessPlan } from "./usePostProcessPlan";
 import type { AdjustmentLayer, TransitionLayer } from "../../../core/types";
-import type { PostProcessPass } from "../../../core/effects/types";
 
 const frameSize = { width: 1920, height: 1080 };
 
@@ -66,20 +65,26 @@ describe("computePostProcessPlan", () => {
     expect(result.livePasses.every((p) => p.requiresLiveDomSource)).toBe(true);
   });
 
-  it("merges transition postProcessPasses into the bundle", () => {
-    const transitionPass: PostProcessPass = {
-      id: "transition:test",
-      kind: "transition",
-      target: "final",
-      requiresLiveDomSource: false,
+  it("merges transition postProcessPasses derived from live transitionLayers", () => {
+    const layer: TransitionLayer = {
+      id: "transition-merge",
+      name: "Film burn",
+      start: 0,
+      duration: 1,
+      midPoint: 0.5,
+      effect: { effectId: "clipper.transition.filmBurn" },
     };
     const result = computePostProcessPlan(
-      1,
+      0.5,
       undefined,
-      { postProcessPasses: [transitionPass] },
+      { transitionLayers: [layer] },
       frameSize,
     );
-    expect(result.passes).toContain(transitionPass);
+    expect(
+      result.passes.some(
+        (pass) => pass.kind === "clipper.postprocess.transition.filmBurn",
+      ),
+    ).toBe(true);
   });
 
   it("returns same output for same input (referential stability of pure compute)", () => {

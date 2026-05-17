@@ -4706,16 +4706,8 @@ function AppContent({
             }
             framePreviewProps={framePreviewProps}
             hasActiveComposition={hasPreviewComposition}
-            getPrerenderCacheBlockAtTime={prerenderCache.getBlockAtTime}
             liveDomPostProcessMaxFps={liveDomPostProcessMaxFps}
             mode={mode}
-            onPrerenderDisplayReadyChange={(ready) => {
-              prerenderDisplayReadyRef.current = ready;
-            }}
-            prerenderCacheBlackMissDebug={prerenderCacheBlackMissDebug}
-            prerenderCacheEnabled={
-              prerenderPlaybackEnabled && !presentationMode
-            }
             previewFps={previewFps}
             previewKey={part.id}
             previewRenderScale={previewRenderScale}

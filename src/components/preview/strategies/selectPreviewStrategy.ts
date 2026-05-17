@@ -16,14 +16,12 @@ export type PreviewStrategy =
   | {
       kind: "live-dom";
       reason: "compose-mode" | "no-live-passes" | "dom-overlay-required";
-    }
-  | { kind: "prerender"; reason: "prerender-frames-available" };
+    };
 
 export type SelectPreviewStrategyInput = {
   framePreviewProps: StrategyFramePreviewProps;
   hasActiveLivePasses: boolean;
   hasLivePassCapableLayers: boolean;
-  prerenderEnabled: boolean;
   authoringActive: boolean;
 };
 
@@ -67,11 +65,7 @@ export function computeHasActiveLivePasses(
   return computePostProcessPlan(
     sceneTime,
     framePreviewProps.adjustmentLayers,
-    {
-      postProcessPasses:
-        framePreviewProps.transitionPreviewParts?.postProcessPasses,
-      transitionLayers: framePreviewProps.transitionLayers,
-    },
+    { transitionLayers: framePreviewProps.transitionLayers },
     { width: FRAME_WIDTH, height: FRAME_HEIGHT },
   ).hasLivePasses;
 }
@@ -96,7 +90,6 @@ export function selectPreviewStrategy(
     framePreviewProps,
     hasActiveLivePasses,
     hasLivePassCapableLayers,
-    prerenderEnabled,
     authoringActive,
   } = input;
 
@@ -114,10 +107,6 @@ export function selectPreviewStrategy(
 
   if (authoringActive) {
     return { kind: "live-dom", reason: "dom-overlay-required" };
-  }
-
-  if (prerenderEnabled) {
-    return { kind: "prerender", reason: "prerender-frames-available" };
   }
 
   return { kind: "live-dom", reason: "no-live-passes" };

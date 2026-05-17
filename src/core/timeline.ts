@@ -31,10 +31,8 @@ import { applyAdjustmentLayersToSceneTime } from "./adjustments";
 import {
   getTransitionFinishTime,
   getTransitionMarkerTime,
-  getTransitionPostProcessPasses,
   getTransitionProgress,
 } from "./transitions";
-import type { PostProcessPass } from "./effects/types";
 
 export function buildLinearTimeline(scene: Scene): TimelineComposition[] {
   let cursor = 0;
@@ -354,7 +352,6 @@ export type TimelinePreviewState = {
     to: TimelinePreviewStackPart[];
     fromSceneTime: number;
     toSceneTime: number;
-    postProcessPasses: PostProcessPass[];
   } | null;
 };
 type MiddleSnapMarker = TimelineMendMarker;
@@ -520,12 +517,6 @@ export function getTimelinePreviewState({
         ),
         fromSceneTime: transitionFromSceneTime,
         toSceneTime: transitionToSceneTime,
-        postProcessPasses: getTransitionPostProcessPasses(
-          sceneTime,
-          transitionLayer,
-          undefined,
-          { width: 1920, height: 1080 },
-        ),
       }
     : null;
 
