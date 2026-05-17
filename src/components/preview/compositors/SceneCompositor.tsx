@@ -16,7 +16,6 @@ import type {
   RichTextSegment,
 } from "../../../core/types";
 import type { TransitionSequenceStyle } from "../../../core/effects/types";
-import { applyCameraPreviewToElement } from "../../../app/features/timeline/motionCameraPreview";
 import {
   FramePreviewRenderBoundary,
   TransitionCompositeView,
@@ -24,6 +23,7 @@ import {
   type ExportTileFrameBounds,
 } from "../FramePreview";
 import { CompositionCompositor } from "./CompositionCompositor";
+import { renderScenePreview } from "../render/sceneRender";
 
 type SceneCompositorProps = {
   cameraRef: RefObject<HTMLDivElement | null>;
@@ -110,7 +110,17 @@ export const SceneCompositor = memo(function SceneCompositor({
   useLayoutEffect(() => {
     const element = cameraRef.current;
     if (!element) return;
-    applyCameraPreviewToElement(element, sceneCamera);
+    const result = renderScenePreview({
+      sceneCamera,
+      visualAdjustmentFilter: undefined,
+      transitionVisual: undefined,
+      visualOverlays: undefined,
+      useTransitionComposite: false,
+      viewport: { width: 0, height: 0 },
+      frameScale: 1,
+    });
+    element.style.transform = result.cameraTransform;
+    element.style.filter = result.cameraFilter ?? "";
     const extra = transitionCameraStyle?.transform;
     if (typeof extra === "string" && extra.length > 0) {
       element.style.transform = `${element.style.transform} ${extra}`.trim();

@@ -9,13 +9,12 @@ import {
 import { memo, type CSSProperties } from "react";
 import { formatTime } from "../../core/timeline";
 import { clamp } from "../../core/math";
+import { usePlayheadTime } from "../features/playback/usePlayheadTime";
 
 type PresentationControlsProps = {
   controlsVisible: boolean;
   isPlaying: boolean;
   sceneDurationSeconds: number;
-  scrubberStyle: CSSProperties;
-  time: number;
   jumpToEnd: () => void;
   jumpToStart: () => void;
   pausePlaybackForPresentationScrub: () => void;
@@ -29,8 +28,6 @@ export const PresentationControls = memo(function PresentationControls({
   controlsVisible,
   isPlaying,
   sceneDurationSeconds,
-  scrubberStyle,
-  time,
   jumpToEnd,
   jumpToStart,
   pausePlaybackForPresentationScrub,
@@ -39,6 +36,14 @@ export const PresentationControls = memo(function PresentationControls({
   stepSceneTime,
   togglePlayback,
 }: PresentationControlsProps) {
+  const time = usePlayheadTime();
+  const presentationProgress =
+    sceneDurationSeconds > 0
+      ? `${clamp(time / sceneDurationSeconds, 0, 1) * 100}%`
+      : "0%";
+  const scrubberStyle = {
+    "--clipper-presentation-progress": presentationProgress,
+  } as CSSProperties;
   return (
     <div
       className={`pointer-events-none fixed inset-x-0 bottom-8 z-[2147483647] flex justify-center px-6 transition-opacity duration-200 ${controlsVisible ? "opacity-100" : "opacity-0"}`}

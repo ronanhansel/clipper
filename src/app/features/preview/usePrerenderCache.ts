@@ -46,7 +46,7 @@ type ManualPrerenderJob = {
   resolve: (result: PrerenderCompositionResult) => void;
 };
 
-export type PrerenderCacheBlock = {
+export type PrerenderBlock = {
   width: number;
   height: number;
   startTime: number;
@@ -117,7 +117,7 @@ export function usePrerenderCache({
   timelineLayers?: TimelineLayerState;
   scheduleRanges?: PrerenderManualCompositionRange[];
 }) {
-  const cacheRef = useRef(new Map<number, PrerenderCacheBlock>());
+  const cacheRef = useRef(new Map<number, PrerenderBlock>());
   const queuedRef = useRef<PrerenderQueueItem[]>([]);
   const renderingBlockStartsRef = useRef(new Set<number>());
   const cachedBlockStartsRef = useRef(new Set<number>());
@@ -193,7 +193,7 @@ export function usePrerenderCache({
     generationRef.current += 1;
     playbackInterestBlockStartRef.current = null;
     if (!previousSignature || fullReset) {
-      closePrerenderCacheBlocks(cacheRef.current);
+      closePrerenderBlocks(cacheRef.current);
       queuedRef.current = [];
       renderingBlockStartsRef.current.clear();
       cachedBlockStartsRef.current.clear();
@@ -407,7 +407,7 @@ export function usePrerenderCache({
       if (idleTimerRef.current !== null)
         window.clearTimeout(idleTimerRef.current);
       resolveManualJobs(manualJobsRef.current, "Prerender was interrupted.");
-      closePrerenderCacheBlocks(cacheRef.current);
+      closePrerenderBlocks(cacheRef.current);
       decoderRef.current?.destroy();
       decoderRef.current = null;
     },
@@ -746,7 +746,7 @@ function getBlockStartTime(
 }
 
 function getCachedBlockAtTime(
-  cache: Map<number, PrerenderCacheBlock>,
+  cache: Map<number, PrerenderBlock>,
   sceneTime: number,
   sceneDuration: number,
   frameRate: number,
@@ -771,10 +771,7 @@ function getCachedBlockAtTime(
   return null;
 }
 
-function getBlockFrameIndex(
-  block: PrerenderCacheBlock,
-  sceneFrameIndex: number,
-) {
+function getBlockFrameIndex(block: PrerenderBlock, sceneFrameIndex: number) {
   const blockStartFrameIndex = Math.round(block.startTime * block.frameRate);
   const localFrameIndex = sceneFrameIndex - blockStartFrameIndex;
   return localFrameIndex >= 0 && localFrameIndex < block.frames.length
@@ -842,7 +839,7 @@ function getFrameRangeForTimeRange(
 }
 
 function isExactFrameRangeCached(
-  cache: Map<number, PrerenderCacheBlock>,
+  cache: Map<number, PrerenderBlock>,
   frameRange: { startFrame: number; endFrame: number },
 ) {
   for (
@@ -1022,7 +1019,7 @@ function mergeInvalidationRanges(
 }
 
 function evictChangedRanges(
-  cache: Map<number, PrerenderCacheBlock>,
+  cache: Map<number, PrerenderBlock>,
   cachedBlocks: Set<number>,
   invalidRanges: PrerenderInvalidationRange[],
 ) {
@@ -1070,7 +1067,7 @@ function quantizeFrameTime(
 }
 
 function evictMemoryBlocks(
-  cache: Map<number, PrerenderCacheBlock>,
+  cache: Map<number, PrerenderBlock>,
   sceneTime: number,
 ) {
   if (cache.size <= maxMemoryBlocks) return;
@@ -1112,12 +1109,12 @@ async function createPrerenderFrameBitmaps(
   );
 }
 
-function closePrerenderCacheBlocks(cache: Map<number, PrerenderCacheBlock>) {
+function closePrerenderBlocks(cache: Map<number, PrerenderBlock>) {
   for (const block of cache.values()) closePrerenderBlock(block);
   cache.clear();
 }
 
-function closePrerenderBlock(block: PrerenderCacheBlock) {
+function closePrerenderBlock(block: PrerenderBlock) {
   closePrerenderFrames(block.frames);
 }
 

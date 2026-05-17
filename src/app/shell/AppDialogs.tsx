@@ -7,6 +7,7 @@ import {
 } from "../../components/export/ExportMediaDialog";
 import { SettingsDialog } from "../../components/SettingsDialog";
 import type { ProjectManifest } from "../../core/types";
+import type { PlaybackFpsOption } from "../state/storedAppSettings";
 import type {
   AgentProvider,
   AppUpdateStatus,
@@ -40,6 +41,7 @@ type AppDialogsProps = {
   isExporting: boolean;
   liveDomPostProcessPreviewEnabled: boolean;
   liveDomPostProcessRuntimeEnabled: boolean;
+  liveDomPostProcessPersistError: string | null;
   liveDomPostProcessMaxFps: number;
   mediaExportFormat: MediaExportFormat;
   mediaExportRenderMode: MediaExportRenderMode;
@@ -51,6 +53,7 @@ type AppDialogsProps = {
   prerenderCacheBlackMissDebug: boolean;
   prerenderBlockDurationMs: number;
   previewRenderHeight: number;
+  playbackFpsOption: PlaybackFpsOption;
   projectName: string;
   resolution: ProjectManifest["resolution"];
   reusePrerenderCacheForExport: boolean;
@@ -95,6 +98,7 @@ type AppDialogsProps = {
   onPrerenderCacheBlackMissDebugChange: (enabled: boolean) => void;
   onPrerenderBlockDurationMsChange: (value: number) => void;
   onPreviewRenderHeightChange: (value: number) => void;
+  onPlaybackFpsOptionChange: (value: PlaybackFpsOption) => void;
   onClearAllPrerenderCaches: () => void;
   onReusePrerenderCacheForExportChange: (reuse: boolean) => void;
   onScrubCommitThrottleMsChange: (value: number) => void;
@@ -124,6 +128,7 @@ export const AppDialogs = memo(function AppDialogs({
   isExporting,
   liveDomPostProcessPreviewEnabled,
   liveDomPostProcessRuntimeEnabled,
+  liveDomPostProcessPersistError,
   liveDomPostProcessMaxFps,
   mediaExportFormat,
   mediaExportRenderMode,
@@ -135,6 +140,7 @@ export const AppDialogs = memo(function AppDialogs({
   prerenderCacheBlackMissDebug,
   prerenderBlockDurationMs,
   previewRenderHeight,
+  playbackFpsOption,
   projectName,
   resolution,
   sceneDurationSeconds,
@@ -174,6 +180,7 @@ export const AppDialogs = memo(function AppDialogs({
   onPrerenderCacheBlackMissDebugChange,
   onPrerenderBlockDurationMsChange,
   onPreviewRenderHeightChange,
+  onPlaybackFpsOptionChange,
   onClearAllPrerenderCaches,
   onScrubCommitThrottleMsChange,
   onSettingsOpenChange,
@@ -209,6 +216,7 @@ export const AppDialogs = memo(function AppDialogs({
         debugSettingsEnabled={debugSettingsEnabled}
         liveDomPostProcessPreviewEnabled={liveDomPostProcessPreviewEnabled}
         liveDomPostProcessRuntimeEnabled={liveDomPostProcessRuntimeEnabled}
+        liveDomPostProcessPersistError={liveDomPostProcessPersistError}
         liveDomPostProcessMaxFps={liveDomPostProcessMaxFps}
         open={settingsOpen}
         pausePlaybackOnScrub={pausePlaybackOnScrub}
@@ -216,6 +224,7 @@ export const AppDialogs = memo(function AppDialogs({
         prerenderCacheEnabled={prerenderCacheEnabled}
         prerenderBlockDurationMs={prerenderBlockDurationMs}
         previewRenderHeight={previewRenderHeight}
+        playbackFpsOption={playbackFpsOption}
         scrubCommitThrottleMs={scrubCommitThrottleMs}
         defaultNewMarkerDurationSeconds={defaultNewMarkerDurationSeconds}
         timelineEndPaddingFraction={timelineEndPaddingFraction}
@@ -245,6 +254,7 @@ export const AppDialogs = memo(function AppDialogs({
         onPrerenderCacheEnabledChange={onPrerenderCacheEnabledChange}
         onPrerenderBlockDurationMsChange={onPrerenderBlockDurationMsChange}
         onPreviewRenderHeightChange={onPreviewRenderHeightChange}
+        onPlaybackFpsOptionChange={onPlaybackFpsOptionChange}
         onClearAllPrerenderCaches={onClearAllPrerenderCaches}
         onScrubCommitThrottleMsChange={onScrubCommitThrottleMsChange}
         onDefaultNewMarkerDurationSecondsChange={

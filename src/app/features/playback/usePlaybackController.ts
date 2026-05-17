@@ -40,7 +40,7 @@ import type {
 import type { PlaybackClock } from "../../types";
 import type { EditorStore } from "../../state/editorStore";
 import type { PrerenderCacheInterestReason } from "../preview/usePrerenderCache";
-import { publishPlaybackTime } from "./playbackTimeStore";
+import { publishMasterTimelineClock } from "./playbackTimeStore";
 
 type PlaybackControllerOptions = {
   compositions: CompositionClip[];
@@ -62,8 +62,7 @@ type PlaybackControllerOptions = {
   scrubFrameRef: RefObject<number>;
   setCurrentSceneTime: (time: number) => void;
   setIsPlaying: (isPlaying: boolean) => void;
-  setPlaybackClock: (clock: PlaybackClock) => void;
-  requestCachedPreviewAtTime?: (
+  requestPrerenderAtTime?: (
     time: number,
     reason: PrerenderCacheInterestReason,
   ) => void;
@@ -98,8 +97,7 @@ export function usePlaybackController({
   scrubFrameRef,
   setCurrentSceneTime,
   setIsPlaying,
-  setPlaybackClock,
-  requestCachedPreviewAtTime,
+  requestPrerenderAtTime,
   timeline,
   timelineLayers,
   timelineEndPaddingFraction,
@@ -167,7 +165,7 @@ export function usePlaybackController({
       : "idle",
   ) {
     const displayTime = toPlaybackDisplayTime(time);
-    publishPlaybackTime({
+    publishMasterTimelineClock({
       sceneTime: time,
       displayTime,
       playing: isPlayingRef.current,
@@ -281,7 +279,6 @@ export function usePlaybackController({
 
   function updatePlaybackClock(nextClock: PlaybackClock) {
     playbackClockRef.current = nextClock;
-    setPlaybackClock(nextClock);
   }
 
   function commitPlayheadEditorState(time: number) {
@@ -293,12 +290,12 @@ export function usePlaybackController({
     );
   }
 
-  function requestCachedPreviewInterest(
+  function requestPrerenderInterest(
     time: number,
     reason: PrerenderCacheInterestReason,
   ) {
     if (reason !== "scrub") {
-      requestCachedPreviewAtTime?.(time, reason);
+      requestPrerenderAtTime?.(time, reason);
       return;
     }
 
@@ -307,10 +304,10 @@ export function usePlaybackController({
 
     scrubCacheFrameRef.current = requestAnimationFrame(() => {
       scrubCacheFrameRef.current = 0;
-      const cachedTime = pendingScrubCacheTimeRef.current;
+      const prerenderTime = pendingScrubCacheTimeRef.current;
       pendingScrubCacheTimeRef.current = null;
-      if (cachedTime !== null)
-        requestCachedPreviewAtTime?.(cachedTime, "scrub");
+      if (prerenderTime !== null)
+        requestPrerenderAtTime?.(prerenderTime, "scrub");
     });
   }
 
@@ -318,7 +315,7 @@ export function usePlaybackController({
     const nextTime = clampPlaybackTime(time);
     if (timelineScrubbingRef.current)
       lastTimelineScrubTimeRef.current = nextTime;
-    requestCachedPreviewInterest(nextTime, "scrub");
+    requestPrerenderInterest(nextTime, "scrub");
     if (Math.abs(nextTime - currentSceneTimeRef.current) < 0.001) {
       if (!timelineScrubbingRef.current) {
         commitPlayheadEditorState(nextTime);
@@ -335,7 +332,7 @@ export function usePlaybackController({
       });
     if (!timelineScrubbingRef.current) syncPlaybackDom(nextTime, "scrub");
     else {
-      publishPlaybackTime({
+      publishMasterTimelineClock({
         sceneTime: nextTime,
         displayTime: toPlaybackDisplayTime(nextTime),
         playing: isPlayingRef.current,
@@ -380,7 +377,7 @@ export function usePlaybackController({
     isPlayingRef.current = false;
     updatePlaybackClock(null);
     setIsPlaying(false);
-    publishPlaybackTime({
+    publishMasterTimelineClock({
       sceneTime: settledTime,
       displayTime: toPlaybackDisplayTime(settledTime),
       playing: false,
@@ -394,7 +391,7 @@ export function usePlaybackController({
       currentSceneTimeRef.current < playbackStart
     ) {
       currentSceneTimeRef.current = playbackStart;
-      requestCachedPreviewInterest(playbackStart, "playback");
+      requestPrerenderInterest(playbackStart, "playback");
       syncPlaybackDom(playbackStart, "playback");
       setCurrentSceneTime(playbackStart);
     }
@@ -404,7 +401,7 @@ export function usePlaybackController({
       startedFrom: currentSceneTimeRef.current,
     });
     isPlayingRef.current = true;
-    publishPlaybackTime({
+    publishMasterTimelineClock({
       sceneTime: currentSceneTimeRef.current,
       displayTime: toPlaybackDisplayTime(currentSceneTimeRef.current),
       playing: true,
@@ -616,7 +613,7 @@ export function usePlaybackController({
         transitionLayers,
         visibleSceneAdjustmentLayers,
       );
-      requestCachedPreviewAtTime?.(nextTime, "playback");
+      requestPrerenderAtTime?.(nextTime, "playback");
 
       currentSceneTimeRef.current = nextTime;
       syncPlaybackDom(nextTime, "playback");
@@ -641,7 +638,7 @@ export function usePlaybackController({
     isPlaying,
     playbackEnd,
     playbackStart,
-    requestCachedPreviewAtTime,
+    requestPrerenderAtTime,
     sceneDurationSeconds,
     timeline,
     timelineLayers,
@@ -681,6 +678,7 @@ export function usePlaybackController({
     stepSceneTime,
     syncFrameVisualAdjustmentDom,
     syncPlaybackDom,
+    toPlaybackDisplayTime,
     togglePlayback,
     updatePlaybackClock,
   };

@@ -488,10 +488,6 @@ function ExportFramePreview({
       transitionPreviewParts: previewModel.transitionPreviewParts,
       adjustmentLayers: previewModel.visibleAdjustmentLayers,
       transitionLayers: previewModel.transitionLayers,
-      playbackClock: {
-        startedAt: 0,
-        startedFrom: previewModel.adjustedSceneTime - partStart,
-      },
       previewTime: previewModel.previewTime,
       sceneTime,
       timelineMode: "composition" as const,

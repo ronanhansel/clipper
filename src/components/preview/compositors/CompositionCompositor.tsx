@@ -11,6 +11,9 @@ import type {
   RichTextSegment,
 } from "../../../core/types";
 import { DomBackend } from "../backends/DomBackend";
+import { useCompositionCache } from "../cache/useCompositionCache";
+import { renderCompositionPreview } from "../render/sceneRender";
+import { FRAME_HEIGHT, FRAME_WIDTH } from "../../../core/types";
 import type { ComposeDrawTool, ExportTileFrameBounds } from "../FramePreview";
 
 type CompositionCompositorProps = {
@@ -54,13 +57,23 @@ export const CompositionCompositor = memo(function CompositionCompositor(
   props: CompositionCompositorProps,
 ) {
   const compositionRef = useRef<HTMLDivElement | null>(null);
+  const cache = useCompositionCache();
+  const compositionId = props.part.compositionId ?? props.part.id;
+  cache.getCacheKey(compositionId);
+  const composition = renderCompositionPreview({
+    composition: props.part,
+    localTime: props.localTime,
+    duration: props.duration,
+    viewport: { width: FRAME_WIDTH, height: FRAME_HEIGHT },
+    frameScale: props.frameScale,
+  });
   return (
     <DomBackend
       active={props.active}
       activeShapeTool={props.activeShapeTool}
       animationsEnabled={props.animationsEnabled}
       canSelect={props.canSelect}
-      duration={props.duration}
+      duration={composition.duration}
       editingTextObjectId={props.editingTextObjectId}
       exportTileFrameBounds={props.exportTileFrameBounds}
       focusPicking={props.focusPicking}
@@ -68,7 +81,7 @@ export const CompositionCompositor = memo(function CompositionCompositor(
       hideNullObjects={props.hideNullObjects ?? false}
       hostRef={compositionRef}
       isPlaying={props.isPlaying}
-      localTime={props.localTime}
+      localTime={composition.localTime}
       part={props.part}
       renderClockSceneTime={props.renderClockSceneTime}
       renderMode={props.renderMode}

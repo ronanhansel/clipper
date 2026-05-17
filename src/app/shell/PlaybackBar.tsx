@@ -14,9 +14,10 @@ import {
 import type { CSSProperties, Dispatch, RefObject, SetStateAction } from "react";
 import { FrameZoomBar } from "../../components/FrameZoomBar";
 import { QuickAccessTooltip } from "../../components/QuickAccessTooltip";
+import { clamp } from "../../core/math";
+import { usePlayheadTime } from "../features/playback/usePlayheadTime";
 
 export type PlaybackBarProps = {
-  currentSceneTime: number;
   fastSelectEnabled: boolean;
   framePreviewScale: number;
   frameZoomBarOpen: boolean;
@@ -24,12 +25,11 @@ export type PlaybackBarProps = {
   isPlaying: boolean;
   playbackBorderScrubberRef: RefObject<HTMLInputElement | null>;
   playbackDisplayDuration: number;
-  playbackDisplayTime: number;
-  playbackScrubberStyle: CSSProperties;
   playbackTimeLabelRef: RefObject<HTMLSpanElement | null>;
   previewColumnHovered: boolean;
   scrubSnapEnabled: boolean;
   formatPlaybackTimeLabel: (time: number) => string;
+  toPlaybackDisplayTime: (time: number) => number;
   jumpToEnd: () => void;
   jumpToNextPart: () => void;
   jumpToStart: () => void;
@@ -46,7 +46,6 @@ export type PlaybackBarProps = {
 };
 
 export function PlaybackBar({
-  currentSceneTime,
   fastSelectEnabled,
   framePreviewScale,
   frameZoomBarOpen,
@@ -54,12 +53,11 @@ export function PlaybackBar({
   isPlaying,
   playbackBorderScrubberRef,
   playbackDisplayDuration,
-  playbackDisplayTime,
-  playbackScrubberStyle,
   playbackTimeLabelRef,
   previewColumnHovered,
   scrubSnapEnabled,
   formatPlaybackTimeLabel,
+  toPlaybackDisplayTime,
   jumpToEnd,
   jumpToNextPart,
   jumpToStart,
@@ -74,6 +72,19 @@ export function PlaybackBar({
   togglePlayback,
   updateFramePreviewScale,
 }: PlaybackBarProps) {
+  const sceneTime = usePlayheadTime();
+  const playbackDisplayTime = clamp(
+    toPlaybackDisplayTime(sceneTime),
+    0,
+    playbackDisplayDuration,
+  );
+  const playbackProgress =
+    playbackDisplayDuration > 0
+      ? `${clamp(playbackDisplayTime / playbackDisplayDuration, 0, 1) * 100}%`
+      : "0%";
+  const playbackScrubberStyle = {
+    "--clipper-playback-progress": playbackProgress,
+  } as CSSProperties;
   return (
     <div
       className="relative grid h-full grid-cols-[1fr_auto_1fr] items-center border-t border-[#2d313b] bg-[#171920] px-7"
@@ -108,7 +119,7 @@ export function PlaybackBar({
         ref={playbackTimeLabelRef}
         className="justify-self-start text-[#9b9da7] tabular-nums"
       >
-        {formatPlaybackTimeLabel(currentSceneTime)}
+        {formatPlaybackTimeLabel(sceneTime)}
       </span>
       <div className="flex items-center justify-center gap-3">
         <QuickAccessTooltip

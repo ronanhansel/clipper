@@ -524,6 +524,7 @@ export type TimelineClip = {
 
 export type TimelineSettings = {
   frameRate?: number;
+  previewFps?: 24 | 30 | 60;
 };
 
 export type TimelineDocument = {

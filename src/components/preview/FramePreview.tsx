@@ -55,6 +55,7 @@ import {
   type FramePortalOverlayTransform,
 } from "../../core/overlayGeometry";
 import { transformPathGeometrySegmentsToBounds } from "../../core/pathGeometry";
+import type { TimelinePreviewStackPart } from "../../core/timeline";
 import {
   getRenderClockAttributes,
   getRenderClockStyle,
@@ -97,7 +98,6 @@ import type {
   TransitionSequenceStyle,
   TransitionVisualOverlay,
 } from "../../core/effects/types";
-import type { PlaybackClock } from "../../app/types";
 import {
   getMasterTimelineClockSnapshot,
   subscribeMasterTimelineClock,
@@ -110,6 +110,7 @@ import {
 import { StrokeOverlay } from "./StrokeOverlay";
 import { SceneCompositor } from "./compositors/SceneCompositor";
 import { DomBackend } from "./backends/DomBackend";
+import { PreviewRenderProvider } from "./previewRenderStore";
 
 const identityCameraTransform: CameraPreviewTransform = {
   x: 0,
@@ -151,7 +152,6 @@ type FramePreviewProps = {
   part: Part;
   partStart: number;
   adjustmentLayers?: AdjustmentLayer[];
-  playbackClock: PlaybackClock;
   previewTime: number;
   sceneTime: number;
   timelineMode: TimelineMode;
@@ -208,6 +208,19 @@ type FramePreviewProps = {
     object: FrameObject,
   ) => void;
   onTrackerTargetPick: (objectId: string) => void;
+  exportTileViewport?: ExportTileViewport;
+  selectionOverlayScale?: number;
+  previewParts?: TimelinePreviewStackPart[];
+  transitionPreviewParts?: {
+    from: TimelinePreviewStackPart[];
+    to: TimelinePreviewStackPart[];
+    fromSceneTime: number;
+    toSceneTime: number;
+    postProcessPasses: PostProcessPass[];
+  } | null;
+  transitionLayers?: TransitionLayer[];
+  renderMode?: "preview" | "export";
+  previewOverlayHost?: HTMLElement | null;
 };
 
 export type ComposeDrawTool =
@@ -749,45 +762,58 @@ export const FramePreview = memo(function FramePreview({
                   ) : null}
                 </div>
               ) : (
-                <SceneCompositor
-                  cameraRef={cameraRef}
-                  filePath={part.filePath}
-                  resetKey={`${part.id}:${part.filePath}:${compositionError ?? ""}`}
-                  sceneCamera={liveCameraTransform}
-                  visualAdjustmentStyle={visualAdjustmentStyle}
-                  transitionCameraStyle={transitionCameraStyle}
-                  frameVisualAdjustmentOverlaysRef={
-                    frameVisualAdjustmentOverlaysRef
-                  }
-                  transitionPreviewParts={transitionPreviewParts ?? null}
-                  transitionProgress={transitionProgress}
-                  transitionSequenceStyle={transitionSequenceStyle}
-                  stackPreviewParts={stackPreviewParts}
-                  activePartId={part.id}
-                  renderMode={renderMode}
-                  isPlaying={isPlaying}
-                  animationsEnabled={animationsEnabled}
-                  frameScale={frameScale}
-                  exportTileFrameBounds={exportTileFrameBounds}
-                  adjustmentLayers={adjustmentLayers}
-                  displaySceneTime={displaySceneTime}
-                  canSelect={
-                    !isPlaying &&
-                    (canSelectObjects || interactiveTrackerPicking)
-                  }
-                  activeShapeTool={activeShapeTool}
-                  editingTextObjectId={interactiveEditingTextObjectId}
-                  hideNullObjects={timelineMode !== "compose"}
-                  focusPicking={
-                    !isPlaying &&
-                    (interactiveFocusPicking || interactiveTrackerPicking)
-                  }
-                  onObjectPointerDown={onObjectPointerDown}
-                  onObjectContextMenu={onObjectContextMenu}
-                  onTextEditCommit={onTextEditCommit}
-                  onTextEditEnd={onTextEditEnd}
-                  onTextObjectDoubleClick={onTextObjectDoubleClick}
-                />
+                <PreviewRenderProvider
+                  initial={{
+                    timelineMode,
+                    renderMode,
+                    isPlaying,
+                    canSelect:
+                      !isPlaying &&
+                      (canSelectObjects || interactiveTrackerPicking),
+                    frameScale,
+                    animationsEnabled,
+                  }}
+                >
+                  <SceneCompositor
+                    cameraRef={cameraRef}
+                    filePath={part.filePath}
+                    resetKey={`${part.id}:${part.filePath}:${compositionError ?? ""}`}
+                    sceneCamera={liveCameraTransform}
+                    visualAdjustmentStyle={visualAdjustmentStyle}
+                    transitionCameraStyle={transitionCameraStyle}
+                    frameVisualAdjustmentOverlaysRef={
+                      frameVisualAdjustmentOverlaysRef
+                    }
+                    transitionPreviewParts={transitionPreviewParts ?? null}
+                    transitionProgress={transitionProgress}
+                    transitionSequenceStyle={transitionSequenceStyle}
+                    stackPreviewParts={stackPreviewParts}
+                    activePartId={part.id}
+                    renderMode={renderMode}
+                    isPlaying={isPlaying}
+                    animationsEnabled={animationsEnabled}
+                    frameScale={frameScale}
+                    exportTileFrameBounds={exportTileFrameBounds}
+                    adjustmentLayers={adjustmentLayers}
+                    displaySceneTime={displaySceneTime}
+                    canSelect={
+                      !isPlaying &&
+                      (canSelectObjects || interactiveTrackerPicking)
+                    }
+                    activeShapeTool={activeShapeTool}
+                    editingTextObjectId={interactiveEditingTextObjectId}
+                    hideNullObjects={timelineMode !== "compose"}
+                    focusPicking={
+                      !isPlaying &&
+                      (interactiveFocusPicking || interactiveTrackerPicking)
+                    }
+                    onObjectPointerDown={onObjectPointerDown}
+                    onObjectContextMenu={onObjectContextMenu}
+                    onTextEditCommit={onTextEditCommit}
+                    onTextEditEnd={onTextEditEnd}
+                    onTextObjectDoubleClick={onTextObjectDoubleClick}
+                  />
+                </PreviewRenderProvider>
               )}
             </div>
             <div

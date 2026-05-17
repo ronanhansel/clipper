@@ -21,7 +21,6 @@ import type {
   LeftPanelTab,
   Mode,
   MotionMarkerSelection,
-  PlaybackClock,
   RightPanelTab,
   SettingsSection,
   VideoExportProgress,
@@ -79,7 +78,6 @@ export type EditorStoreState = {
   marqueeDragging: boolean;
   currentSceneTime: number;
   isPlaying: boolean;
-  playbackClock: PlaybackClock;
   frameZoomBarOpen: boolean;
   framePreviewScale: number;
   scrubSnapEnabled: boolean;
@@ -170,7 +168,6 @@ export type EditorStoreActions = {
   setMarqueeDragging: (dragging: Setter<boolean>) => void;
   setCurrentSceneTime: (time: Setter<number>) => void;
   setIsPlaying: (playing: Setter<boolean>) => void;
-  setPlaybackClock: (clock: Setter<PlaybackClock>) => void;
   setFrameZoomBarOpen: (open: Setter<boolean>) => void;
   setFramePreviewScale: (scale: Setter<number>) => void;
   setScrubSnapEnabled: (enabled: Setter<boolean>) => void;
@@ -270,7 +267,6 @@ function getInitialState(project: ProjectManifest): EditorStoreState {
     marqueeDragging: false,
     currentSceneTime: editorState?.currentSceneTime ?? 2.6,
     isPlaying: false,
-    playbackClock: null,
     frameZoomBarOpen:
       editorState?.preview?.zoomBarOpen ??
       defaultPreviewViewportState.zoomBarOpen,
@@ -356,7 +352,6 @@ export function createEditorStore(project: ProjectManifest) {
     setMarqueeDragging: createFieldSetter(set, "marqueeDragging"),
     setCurrentSceneTime: createFieldSetter(set, "currentSceneTime"),
     setIsPlaying: createFieldSetter(set, "isPlaying"),
-    setPlaybackClock: createFieldSetter(set, "playbackClock"),
     setFrameZoomBarOpen: createFieldSetter(set, "frameZoomBarOpen"),
     setFramePreviewScale: createFieldSetter(set, "framePreviewScale"),
     setScrubSnapEnabled: createFieldSetter(set, "scrubSnapEnabled"),
@@ -644,117 +639,154 @@ export function useEditorStoreApi() {
   return store;
 }
 
-export function useAppEditorState() {
+export function usePlaybackEditorState() {
   return useEditorStore(
-    useShallow((state) => ({
-      mode: state.mode,
-      setMode: state.setMode,
-      timelineMode: state.timelineMode,
-      setTimelineMode: state.setTimelineMode,
-      selectedSceneId: state.selectedSceneId,
-      setSelectedSceneId: state.setSelectedSceneId,
-      selectedPartId: state.selectedPartId,
-      setSelectedPartId: state.setSelectedPartId,
-      selectedParts: state.selectedParts,
-      setSelectedParts: state.setSelectedParts,
-      selectedObjectId: state.selectedObjectId,
-      setSelectedObjectId: state.setSelectedObjectId,
-      selectedComposeObjectIds: state.selectedComposeObjectIds,
-      setSelectedComposeObjectIds: state.setSelectedComposeObjectIds,
-      editingTextObjectId: state.editingTextObjectId,
-      setEditingTextObjectId: state.setEditingTextObjectId,
-      selectedMotionMarker: state.selectedMotionMarker,
-      setSelectedMotionMarker: state.setSelectedMotionMarker,
-      selectedMotionMarkers: state.selectedMotionMarkers,
-      setSelectedMotionMarkers: state.setSelectedMotionMarkers,
-      focusPickZoomMarker: state.focusPickZoomMarker,
-      setFocusPickZoomMarker: state.setFocusPickZoomMarker,
-      positionPickTranslationMarker: state.positionPickTranslationMarker,
-      setPositionPickTranslationMarker: state.setPositionPickTranslationMarker,
-      selectedAdjustmentLayerId: state.selectedAdjustmentLayerId,
-      setSelectedAdjustmentLayerId: state.setSelectedAdjustmentLayerId,
-      selectedAdjustmentLayers: state.selectedAdjustmentLayers,
-      setSelectedAdjustmentLayers: state.setSelectedAdjustmentLayers,
-      selectedTransitionLayerId: state.selectedTransitionLayerId,
-      setSelectedTransitionLayerId: state.setSelectedTransitionLayerId,
-      selectedTransitionLayers: state.selectedTransitionLayers,
-      setSelectedTransitionLayers: state.setSelectedTransitionLayers,
-      selectionPayload: state.selectionPayload,
-      setSelectionPayload: state.setSelectionPayload,
-      framePickPreviewPoint: state.framePickPreviewPoint,
-      setFramePickPreviewPoint: state.setFramePickPreviewPoint,
-      dragStart: state.dragStart,
-      setDragStart: state.setDragStart,
-      dragBox: state.dragBox,
-      setDragBox: state.setDragBox,
-      marqueeDragging: state.marqueeDragging,
-      setMarqueeDragging: state.setMarqueeDragging,
-      isPlaying: state.isPlaying,
-      setIsPlaying: state.setIsPlaying,
-      playbackClock: state.playbackClock,
-      setPlaybackClock: state.setPlaybackClock,
-      frameZoomBarOpen: state.frameZoomBarOpen,
-      setFrameZoomBarOpen: state.setFrameZoomBarOpen,
-      framePreviewScale: state.framePreviewScale,
-      setFramePreviewScale: state.setFramePreviewScale,
-      scrubSnapEnabled: state.scrubSnapEnabled,
-      setScrubSnapEnabled: state.setScrubSnapEnabled,
-      scrubCommitThrottleMs: state.scrubCommitThrottleMs,
-      setScrubCommitThrottleMs: state.setScrubCommitThrottleMs,
-      defaultNewMarkerDurationSeconds: state.defaultNewMarkerDurationSeconds,
-      setDefaultNewMarkerDurationSeconds:
-        state.setDefaultNewMarkerDurationSeconds,
-      timelineEndPaddingFraction: state.timelineEndPaddingFraction,
-      setTimelineEndPaddingFraction: state.setTimelineEndPaddingFraction,
-      timelinePrecision: state.timelinePrecision,
-      setTimelinePrecision: state.setTimelinePrecision,
-      pausePlaybackOnScrub: state.pausePlaybackOnScrub,
-      setPausePlaybackOnScrub: state.setPausePlaybackOnScrub,
-      fastSelectEnabled: state.fastSelectEnabled,
-      setFastSelectEnabled: state.setFastSelectEnabled,
-      leftPanelTab: state.leftPanelTab,
-      setLeftPanelTab: state.setLeftPanelTab,
-      rightPanelTab: state.rightPanelTab,
-      setRightPanelTab: state.setRightPanelTab,
-      sourceStatus: state.sourceStatus,
-      setSourceStatus: state.setSourceStatus,
-      appContextMenu: state.appContextMenu,
-      setAppContextMenu: state.setAppContextMenu,
-      renamingProject: state.renamingProject,
-      setRenamingProject: state.setRenamingProject,
-      projectNameDraft: state.projectNameDraft,
-      setProjectNameDraft: state.setProjectNameDraft,
-      exportDialogOpen: state.exportDialogOpen,
-      setExportDialogOpen: state.setExportDialogOpen,
-      isExporting: state.isExporting,
-      setIsExporting: state.setIsExporting,
-      exportProgress: state.exportProgress,
-      setExportProgress: state.setExportProgress,
-      videoExportProgress: state.videoExportProgress,
-      setVideoExportProgress: state.setVideoExportProgress,
-      videoExportCancelling: state.videoExportCancelling,
-      setVideoExportCancelling: state.setVideoExportCancelling,
-      settingsOpen: state.settingsOpen,
-      setSettingsOpen: state.setSettingsOpen,
-      settingsSection: state.settingsSection,
-      setSettingsSection: state.setSettingsSection,
-      editorTabs: state.editorTabs,
-      closedEditorTabs: state.closedEditorTabs,
-      activeEditorTabId: state.activeEditorTabId,
-      openEditorTab: state.openEditorTab,
-      updateEditorTab: state.updateEditorTab,
-      selectEditorTab: state.selectEditorTab,
-      closeEditorTab: state.closeEditorTab,
-      closeCompositionEditorTabs: state.closeCompositionEditorTabs,
-      restoreClosedEditorTab: state.restoreClosedEditorTab,
-      openTemporaryEditorTab: state.openTemporaryEditorTab,
-      pinEditorTab: state.pinEditorTab,
-      setCurrentSceneTime: state.setCurrentSceneTime,
-      applyEditorState: state.applyEditorState,
-      clearMarkerSelection: state.clearMarkerSelection,
-      clearDirectSelection: state.clearDirectSelection,
-      clearComposeSelection: state.clearComposeSelection,
-      clearNodeSelection: state.clearNodeSelection,
+    useShallow((s) => ({
+      isPlaying: s.isPlaying,
+      setIsPlaying: s.setIsPlaying,
+      currentSceneTime: s.currentSceneTime,
+      setCurrentSceneTime: s.setCurrentSceneTime,
+      scrubSnapEnabled: s.scrubSnapEnabled,
+      setScrubSnapEnabled: s.setScrubSnapEnabled,
+      scrubCommitThrottleMs: s.scrubCommitThrottleMs,
+      setScrubCommitThrottleMs: s.setScrubCommitThrottleMs,
+      pausePlaybackOnScrub: s.pausePlaybackOnScrub,
+      setPausePlaybackOnScrub: s.setPausePlaybackOnScrub,
+      fastSelectEnabled: s.fastSelectEnabled,
+      setFastSelectEnabled: s.setFastSelectEnabled,
     })),
   );
+}
+
+export function useSelectionEditorState() {
+  return useEditorStore(
+    useShallow((s) => ({
+      selectedSceneId: s.selectedSceneId,
+      setSelectedSceneId: s.setSelectedSceneId,
+      selectedPartId: s.selectedPartId,
+      setSelectedPartId: s.setSelectedPartId,
+      selectedParts: s.selectedParts,
+      setSelectedParts: s.setSelectedParts,
+      selectedObjectId: s.selectedObjectId,
+      setSelectedObjectId: s.setSelectedObjectId,
+      selectedComposeObjectIds: s.selectedComposeObjectIds,
+      setSelectedComposeObjectIds: s.setSelectedComposeObjectIds,
+      editingTextObjectId: s.editingTextObjectId,
+      setEditingTextObjectId: s.setEditingTextObjectId,
+      selectedMotionMarker: s.selectedMotionMarker,
+      setSelectedMotionMarker: s.setSelectedMotionMarker,
+      selectedMotionMarkers: s.selectedMotionMarkers,
+      setSelectedMotionMarkers: s.setSelectedMotionMarkers,
+      focusPickZoomMarker: s.focusPickZoomMarker,
+      setFocusPickZoomMarker: s.setFocusPickZoomMarker,
+      positionPickTranslationMarker: s.positionPickTranslationMarker,
+      setPositionPickTranslationMarker: s.setPositionPickTranslationMarker,
+      selectedAdjustmentLayerId: s.selectedAdjustmentLayerId,
+      setSelectedAdjustmentLayerId: s.setSelectedAdjustmentLayerId,
+      selectedAdjustmentLayers: s.selectedAdjustmentLayers,
+      setSelectedAdjustmentLayers: s.setSelectedAdjustmentLayers,
+      selectedTransitionLayerId: s.selectedTransitionLayerId,
+      setSelectedTransitionLayerId: s.setSelectedTransitionLayerId,
+      selectedTransitionLayers: s.selectedTransitionLayers,
+      setSelectedTransitionLayers: s.setSelectedTransitionLayers,
+      selectionPayload: s.selectionPayload,
+      setSelectionPayload: s.setSelectionPayload,
+      framePickPreviewPoint: s.framePickPreviewPoint,
+      setFramePickPreviewPoint: s.setFramePickPreviewPoint,
+      dragStart: s.dragStart,
+      setDragStart: s.setDragStart,
+      dragBox: s.dragBox,
+      setDragBox: s.setDragBox,
+      marqueeDragging: s.marqueeDragging,
+      setMarqueeDragging: s.setMarqueeDragging,
+      clearMarkerSelection: s.clearMarkerSelection,
+      clearDirectSelection: s.clearDirectSelection,
+      clearComposeSelection: s.clearComposeSelection,
+      clearNodeSelection: s.clearNodeSelection,
+    })),
+  );
+}
+
+export function useEditorTabsState() {
+  return useEditorStore(
+    useShallow((s) => ({
+      editorTabs: s.editorTabs,
+      closedEditorTabs: s.closedEditorTabs,
+      activeEditorTabId: s.activeEditorTabId,
+      openEditorTab: s.openEditorTab,
+      openTemporaryEditorTab: s.openTemporaryEditorTab,
+      pinEditorTab: s.pinEditorTab,
+      updateEditorTab: s.updateEditorTab,
+      selectEditorTab: s.selectEditorTab,
+      closeEditorTab: s.closeEditorTab,
+      closeCompositionEditorTabs: s.closeCompositionEditorTabs,
+      restoreClosedEditorTab: s.restoreClosedEditorTab,
+    })),
+  );
+}
+
+export function useExportEditorState() {
+  return useEditorStore(
+    useShallow((s) => ({
+      exportDialogOpen: s.exportDialogOpen,
+      setExportDialogOpen: s.setExportDialogOpen,
+      isExporting: s.isExporting,
+      setIsExporting: s.setIsExporting,
+      exportProgress: s.exportProgress,
+      setExportProgress: s.setExportProgress,
+      videoExportProgress: s.videoExportProgress,
+      setVideoExportProgress: s.setVideoExportProgress,
+      videoExportCancelling: s.videoExportCancelling,
+      setVideoExportCancelling: s.setVideoExportCancelling,
+    })),
+  );
+}
+
+export function useViewportEditorState() {
+  return useEditorStore(
+    useShallow((s) => ({
+      framePreviewScale: s.framePreviewScale,
+      setFramePreviewScale: s.setFramePreviewScale,
+      frameZoomBarOpen: s.frameZoomBarOpen,
+      setFrameZoomBarOpen: s.setFrameZoomBarOpen,
+      timelineEndPaddingFraction: s.timelineEndPaddingFraction,
+      setTimelineEndPaddingFraction: s.setTimelineEndPaddingFraction,
+      timelinePrecision: s.timelinePrecision,
+      setTimelinePrecision: s.setTimelinePrecision,
+      defaultNewMarkerDurationSeconds: s.defaultNewMarkerDurationSeconds,
+      setDefaultNewMarkerDurationSeconds: s.setDefaultNewMarkerDurationSeconds,
+    })),
+  );
+}
+
+export function useShellEditorState() {
+  return useEditorStore(
+    useShallow((s) => ({
+      mode: s.mode,
+      setMode: s.setMode,
+      timelineMode: s.timelineMode,
+      setTimelineMode: s.setTimelineMode,
+      leftPanelTab: s.leftPanelTab,
+      setLeftPanelTab: s.setLeftPanelTab,
+      rightPanelTab: s.rightPanelTab,
+      setRightPanelTab: s.setRightPanelTab,
+      sourceStatus: s.sourceStatus,
+      setSourceStatus: s.setSourceStatus,
+      appContextMenu: s.appContextMenu,
+      setAppContextMenu: s.setAppContextMenu,
+      renamingProject: s.renamingProject,
+      setRenamingProject: s.setRenamingProject,
+      projectNameDraft: s.projectNameDraft,
+      setProjectNameDraft: s.setProjectNameDraft,
+      settingsOpen: s.settingsOpen,
+      setSettingsOpen: s.setSettingsOpen,
+      settingsSection: s.settingsSection,
+      setSettingsSection: s.setSettingsSection,
+      applyEditorState: s.applyEditorState,
+    })),
+  );
+}
+
+export function useIsPlaying() {
+  return useEditorStore((s) => s.isPlaying);
 }

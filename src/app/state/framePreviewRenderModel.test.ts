@@ -236,7 +236,7 @@ describe("frame preview render model", () => {
     ).toEqual([["a", 0.5]]);
   });
 
-  it("isolates compose preview from scene adjustment layers", () => {
+  it("keeps scene adjustment layers available in compose preview", () => {
     const scene: Scene = {
       id: "scene",
       compositions: [
@@ -290,7 +290,7 @@ describe("frame preview render model", () => {
       timelineMode: "compose",
     });
 
-    expect(model.visibleAdjustmentLayers).toEqual([]);
+    expect(model.visibleAdjustmentLayers).toHaveLength(2);
     expect(model.adjustedSceneTime).toBe(3);
     expect(model.activeTimelinePart?.id).toBe("b");
     expect(model.previewTime).toBe(1);
@@ -435,5 +435,97 @@ describe("frame preview render model", () => {
     expect(
       model.previewParts.map((item) => [item.part.id, item.previewTime]),
     ).toEqual([["a", 2]]);
+  });
+
+  it("preserves inner composition motion markers without scene clobber", () => {
+    const innerMarkers = motionBlocksToMotionMarkers([
+      {
+        id: "inner-pan",
+        effectId: "clipper.motion.pan",
+        start: 0.5,
+        duration: 0.5,
+        position: { x: 100, y: 0 },
+      },
+    ]);
+    const scene: Scene = {
+      id: "scene",
+      compositions: [
+        {
+          id: "a",
+          filePath: "a.ts",
+          start: 0,
+          duration: 4,
+          frame,
+          background,
+          objects: [],
+          snapshot: [],
+          motionMarkers: innerMarkers,
+        },
+      ],
+      motionMarkers: [
+        {
+          id: "scene-zoom",
+          effectId: "clipper.motion.zoom",
+          start: 1,
+          duration: 1,
+          scale: 1.5,
+          focus: { x: 960, y: 540 },
+        } as never,
+      ],
+    };
+
+    const model = deriveFramePreviewRenderModel({
+      blankPart,
+      scene,
+      sceneTime: 1,
+      timelineMode: "composition",
+    });
+
+    expect(model.previewParts[0].part.id).toBe("a");
+    expect(
+      model.previewParts[0].part.motionMarkers.map((marker) => marker.id),
+    ).toEqual(["inner-pan"]);
+  });
+
+  it("exposes scene adjustments and transition layers without composition concerns", () => {
+    const scene: Scene = {
+      id: "scene",
+      compositions: [
+        {
+          id: "a",
+          filePath: "a.ts",
+          start: 0,
+          duration: 2,
+          frame,
+          background,
+          objects: [],
+          snapshot: [],
+          motionMarkers: [],
+        },
+      ],
+      adjustmentLayers: [
+        {
+          id: "film",
+          layerId: "adjust",
+          name: "Film",
+          start: 0,
+          duration: 2,
+          effect: { effectId: "clipper.adjustment.filmEmulation", params: {} },
+        },
+      ],
+    };
+
+    const model = deriveFramePreviewRenderModel({
+      blankPart,
+      scene,
+      sceneTime: 1,
+      timelineMode: "composition",
+    });
+
+    expect(model.visibleAdjustmentLayers.map((layer) => layer.id)).toEqual([
+      "film",
+    ]);
+    expect(model.activeComposition?.id).toBe("a");
+    expect(model.previewTime).toBe(1);
   });
 });

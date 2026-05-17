@@ -54,10 +54,6 @@ export function publishMasterTimelineClock(
   for (const listener of listeners) listener();
 }
 
-export const getPlaybackTimeSnapshot = getMasterTimelineClockSnapshot;
-export const subscribePlaybackTime = subscribeMasterTimelineClock;
-export const publishPlaybackTime = publishMasterTimelineClock;
-
 function readClockNow() {
   return typeof performance === "undefined" ? Date.now() : performance.now();
 }

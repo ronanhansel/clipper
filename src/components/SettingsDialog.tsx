@@ -26,8 +26,10 @@ import {
   minPrerenderBlockDurationMs,
   minStableSlowValidationSamples,
   minVideoExportTileHeight,
+  playbackFpsOptions,
   previewRenderHeightOptions,
 } from "../app/config";
+import type { PlaybackFpsOption } from "../app/state/storedAppSettings";
 import type {
   AgentProvider,
   AppUpdateStatus,
@@ -78,6 +80,7 @@ type SettingsDialogProps = {
   stableSlowValidationSamples: StableSlowValidationSamples;
   liveDomPostProcessPreviewEnabled: boolean;
   liveDomPostProcessRuntimeEnabled: boolean;
+  liveDomPostProcessPersistError: string | null;
   liveDomPostProcessMaxFps: number;
   open: boolean;
   pausePlaybackOnScrub: boolean;
@@ -85,6 +88,7 @@ type SettingsDialogProps = {
   prerenderCacheEnabled: boolean;
   prerenderBlockDurationMs: number;
   previewRenderHeight: number;
+  playbackFpsOption: PlaybackFpsOption;
   scrubCommitThrottleMs: number;
   defaultNewMarkerDurationSeconds: number;
   timelineEndPaddingFraction: number;
@@ -115,6 +119,7 @@ type SettingsDialogProps = {
   onPrerenderCacheEnabledChange: (enabled: boolean) => void;
   onPrerenderBlockDurationMsChange: (value: number) => void;
   onPreviewRenderHeightChange: (value: number) => void;
+  onPlaybackFpsOptionChange: (value: PlaybackFpsOption) => void;
   onClearAllPrerenderCaches: () => void;
   onScrubCommitThrottleMsChange: (value: number) => void;
   onDefaultNewMarkerDurationSecondsChange: (value: number) => void;
@@ -135,6 +140,7 @@ export function SettingsDialog({
   stableSlowValidationSamples,
   liveDomPostProcessPreviewEnabled,
   liveDomPostProcessRuntimeEnabled,
+  liveDomPostProcessPersistError,
   liveDomPostProcessMaxFps,
   open,
   pausePlaybackOnScrub,
@@ -142,6 +148,7 @@ export function SettingsDialog({
   prerenderCacheEnabled,
   prerenderBlockDurationMs,
   previewRenderHeight,
+  playbackFpsOption,
   scrubCommitThrottleMs,
   defaultNewMarkerDurationSeconds: markerDurationSeconds,
   timelineEndPaddingFraction,
@@ -168,6 +175,7 @@ export function SettingsDialog({
   onPrerenderCacheEnabledChange,
   onPrerenderBlockDurationMsChange,
   onPreviewRenderHeightChange,
+  onPlaybackFpsOptionChange,
   onClearAllPrerenderCaches,
   onScrubCommitThrottleMsChange,
   onDefaultNewMarkerDurationSecondsChange,
@@ -586,6 +594,54 @@ export function SettingsDialog({
                             defaultPreviewRenderHeight,
                           )
                         }
+                      >
+                        <RotateCcw size={14} />
+                      </button>
+                    </span>
+                  </label>
+                  <div className="h-px bg-[#363b47]" />
+                  <div className="grid gap-1.5">
+                    <strong className="text-sm text-white">
+                      Playback framerate
+                    </strong>
+                    <p className="text-xs leading-5 text-[#8f939d]">
+                      Overrides the playback framerate for previewing scenes.
+                      Follow project uses the value defined per timeline.
+                    </p>
+                  </div>
+                  <label
+                    className="grid max-w-[260px] gap-1.5 text-xs font-bold text-[#dfe2ea]"
+                    htmlFor="playback-framerate"
+                  >
+                    Framerate
+                    <span className="flex items-center gap-2">
+                      <Select
+                        value={String(playbackFpsOption)}
+                        onValueChange={(value) =>
+                          onPlaybackFpsOptionChange(
+                            value === "follow"
+                              ? "follow"
+                              : (Number(value) as PlaybackFpsOption),
+                          )
+                        }
+                      >
+                        <SelectTrigger id="playback-framerate" className="h-9">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="follow">Follow project</SelectItem>
+                          {playbackFpsOptions.map((fps) => (
+                            <SelectItem key={fps} value={String(fps)}>
+                              {fps} fps
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <button
+                        aria-label="Reset playback framerate to follow project"
+                        className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-[#2d313b] text-[#8f939d] transition hover:bg-[#252a34] hover:text-white"
+                        type="button"
+                        onClick={() => onPlaybackFpsOptionChange("follow")}
                       >
                         <RotateCcw size={14} />
                       </button>
@@ -1179,8 +1235,12 @@ export function SettingsDialog({
                       onCheckedChange={onLiveDomPostProcessPreviewEnabledChange}
                     />
                   </label>
-                  {liveDomPostProcessPreviewEnabled !==
-                  liveDomPostProcessRuntimeEnabled ? (
+                  {liveDomPostProcessPersistError ? (
+                    <p className="rounded-lg border border-[#5a2b2b] bg-[#231314] px-3 py-2 text-xs leading-5 text-[#f1a4a4]">
+                      {liveDomPostProcessPersistError}
+                    </p>
+                  ) : liveDomPostProcessPreviewEnabled !==
+                    liveDomPostProcessRuntimeEnabled ? (
                     <p className="rounded-lg border border-[#594531] bg-[#211a13] px-3 py-2 text-xs leading-5 text-[#dec39e]">
                       Restart to apply optional preview setting. Required
                       effects still auto-activate when supported.
