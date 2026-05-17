@@ -32,10 +32,8 @@ export class LiveDomPostProcessRenderer {
     passes: readonly PostProcessPass[];
     width: number;
     height: number;
-    optIn: boolean;
   }): LiveDomPostProcessRenderResult {
     const capabilityInput = {
-      optIn: input.optIn,
       sourceElement: input.sourceElement,
       canvas: input.sourceCanvas ?? input.canvas,
     };

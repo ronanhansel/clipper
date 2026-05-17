@@ -38,9 +38,9 @@ export const defaultPausePlaybackOnScrub = true;
 export const defaultNewMarkerDurationSeconds = 3;
 export const defaultTimelinePrecision = 3;
 export const playbackFpsOptions = [24, 30, 60] as const;
-export const defaultLiveDomPostProcessMaxFps = 5;
+export const defaultLiveDomPostProcessMaxFps = 30;
 export const minLiveDomPostProcessMaxFps = 1;
-export const maxLiveDomPostProcessMaxFps = 30;
+export const maxLiveDomPostProcessMaxFps = 60;
 export const maxProjectHistoryActions = 1000;
 export const projectHistoryCoalesceMs = 700;
 

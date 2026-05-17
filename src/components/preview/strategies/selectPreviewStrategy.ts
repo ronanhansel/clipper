@@ -74,16 +74,16 @@ export function selectPreviewStrategy(
     authoringActive,
   } = input;
 
+  if (framePreviewProps.timelineMode === "compose") {
+    return { kind: "live-dom", reason: "compose-mode" };
+  }
+
   if (hasActiveLivePasses) {
     return { kind: "live-webgl", reason: "active-live-passes" };
   }
 
   if (authoringActive) {
     return { kind: "live-dom", reason: "dom-overlay-required" };
-  }
-
-  if (framePreviewProps.timelineMode === "compose") {
-    return { kind: "live-dom", reason: "compose-mode" };
   }
 
   if (prerenderEnabled) {

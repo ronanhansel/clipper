@@ -104,11 +104,9 @@ import {
   getInitialLiveDomPostProcessMaxFps,
   getInitialPrerenderBlockDurationMs,
   isDebugSettingsEnabledByDefault,
-  isLiveDomPostProcessPreviewEnabledByDefault,
   isPrerenderCacheBlackMissDebugEnabledByDefault,
   isPrerenderCacheEnabledByDefault,
   isPrerenderCacheReuseEnabledByDefault,
-  persistLiveDomPostProcessPreviewEnabled,
   readStoredAppSettings,
   readStoredBooleanSetting,
   readStoredStringSetting,
@@ -187,6 +185,7 @@ import {
   getExecutableAdjustmentLayers,
   getExecutableTransitionLayers,
   getTopTimelinePartAtTime,
+  type TimelinePreviewStackPart,
 } from "./core/timeline";
 import type { TimelineLayerCategory } from "./core/timelineLayers";
 import {
@@ -208,6 +207,7 @@ import {
   type TimelineClip,
   type TimelineLayerState,
   type TimelineMode,
+  type TimelineMotionLayerState,
   type TransitionLayer,
   type TimelineViewportState,
 } from "./core/types";
@@ -238,6 +238,10 @@ const wheelLineDeltaPx = 16;
 const wheelPageDeltaPx = 600;
 const frameWheelZoomSensitivity = 0.008;
 const EMPTY_HIDDEN_MOTION_LAYER_IDS: Set<string> = new Set();
+const EMPTY_PREVIEW_PARTS: TimelinePreviewStackPart[] = [];
+const EMPTY_ADJUSTMENT_LAYERS: AdjustmentLayer[] = [];
+const EMPTY_TRANSITION_LAYERS: TransitionLayer[] = [];
+const EMPTY_MOTION_LAYERS: TimelineMotionLayerState[] = [];
 
 type ComposeDrawTool =
   | "rect"
@@ -774,17 +778,13 @@ function AppContent({
     prerenderCacheEnabled,
     debugSettingsEnabled,
     prerenderCacheBlackMissDebug,
-    liveDomPostProcessPreviewEnabled,
     liveDomPostProcessMaxFps,
     motionEffectPreviewScrubActive,
-    liveDomPostProcessRuntimeEnabled,
-    liveDomPostProcessPersistError,
     prerenderDisplayReadyRef,
     setReusePrerenderCacheForExport,
     setPrerenderCacheEnabled,
     setDebugSettingsEnabled,
     setPrerenderCacheBlackMissDebug,
-    setLiveDomPostProcessPreviewEnabled,
     setLiveDomPostProcessMaxFps,
     setMotionEffectPreviewScrubActive,
   } = usePreviewLifecycle();
@@ -4500,8 +4500,28 @@ function AppContent({
     [project, selectedPartId],
   );
 
-  const framePreviewProps = useMemo(
-    () => ({
+  const framePreviewProps = useMemo(() => {
+    const directTimelineProps =
+      hasPreviewComposition && !composeMode
+        ? {
+            previewParts,
+            transitionPreviewParts,
+            adjustmentLayers: visibleSceneAdjustmentLayers,
+            transitionLayers: visibleSceneTransitionLayers,
+            motionLayers,
+            hiddenMotionLayerIds,
+            compHidden: activeCompositionHidden,
+          }
+        : {
+            previewParts: EMPTY_PREVIEW_PARTS,
+            transitionPreviewParts: null,
+            adjustmentLayers: EMPTY_ADJUSTMENT_LAYERS,
+            transitionLayers: EMPTY_TRANSITION_LAYERS,
+            motionLayers: EMPTY_MOTION_LAYERS,
+            hiddenMotionLayerIds: EMPTY_HIDDEN_MOTION_LAYER_IDS,
+            compHidden: false,
+          };
+    return {
       cameraRef,
       dragBox: hasPreviewComposition ? dragBox : null,
       dragSelectionBoxRef,
@@ -4521,32 +4541,16 @@ function AppContent({
       isPlaying,
       part,
       partStart: composeMode ? 0 : (activeTimelinePart?.start ?? 0),
-      previewParts: hasPreviewComposition && !composeMode ? previewParts : [],
-      transitionPreviewParts:
-        hasPreviewComposition && !composeMode ? transitionPreviewParts : null,
-      adjustmentLayers: hasPreviewComposition
-        ? visibleSceneAdjustmentLayers
-        : [],
-      transitionLayers:
-        hasPreviewComposition && !composeMode
-          ? visibleSceneTransitionLayers
-          : [],
+      ...directTimelineProps,
       previewTime,
       sceneTime: adjustedSceneTime,
       timelineMode,
-      motionLayers: hasPreviewComposition && !composeMode ? motionLayers : [],
-      hiddenMotionLayerIds:
-        hasPreviewComposition && !composeMode
-          ? hiddenMotionLayerIds
-          : EMPTY_HIDDEN_MOTION_LAYER_IDS,
       pickingTranslationPosition:
         hasPreviewComposition &&
         (isPickingTranslationPosition || Boolean(pointPickAdjustment)),
       pickingZoomFocus:
         hasPreviewComposition &&
         (isPickingZoomFocus || Boolean(pointPickAdjustment)),
-      compHidden:
-        hasPreviewComposition && !composeMode ? activeCompositionHidden : false,
       previewSceneContext,
       composeMode,
       hasPreviewComposition,
@@ -4576,62 +4580,61 @@ function AppContent({
       onTextPathOffsetChange: updateTextPathOffset,
       onTextObjectDoubleClick: startTextObjectEdit,
       onTrackerTargetPick: commitTranslationTrackerPick,
-    }),
-    [
-      cameraRef,
-      hasPreviewComposition,
-      dragBox,
-      dragSelectionBoxRef,
-      activeFramePickPoint,
-      isPickingZoomFocus,
-      isPickingTranslationPosition,
-      pointPickAdjustment,
-      trackerPickTranslationMarker,
-      canSelectFrameObjects,
-      isPlaying,
-      cameraPreviewTransform,
-      frameViewportRef,
-      displayFramePreviewScale,
-      part,
-      composeMode,
-      activeTimelinePart,
-      previewParts,
-      transitionPreviewParts,
-      visibleSceneAdjustmentLayers,
-      visibleSceneTransitionLayers,
-      previewTime,
-      adjustedSceneTime,
-      timelineMode,
-      motionLayers,
-      hiddenMotionLayerIds,
-      activeCompositionHidden,
-      previewSceneContext,
-      composeFilePart,
-      selectedPart,
-      previewSelectionObjects,
-      objectSnapGuides,
-      marqueeDragging,
-      editingTextObjectId,
-      activeTool,
-      shapeDrawPreview,
-      wrappedOnFramePointerCancel,
-      wrappedOnFramePointerDown,
-      onFramePointerDownCapture,
-      wrappedOnFramePointerMove,
-      wrappedOnFramePointerLeave,
-      wrappedOnFramePointerUp,
-      startObjectDrag,
-      openComposeObjectContextMenu,
-      startObjectResize,
-      handlePathControlPointerDown,
-      handleObjectCornerRadiusChange,
-      updateTextObjectContent,
-      handleTextEditEnd,
-      updateTextPathOffset,
-      startTextObjectEdit,
-      commitTranslationTrackerPick,
-    ],
-  );
+    };
+  }, [
+    cameraRef,
+    hasPreviewComposition,
+    dragBox,
+    dragSelectionBoxRef,
+    activeFramePickPoint,
+    isPickingZoomFocus,
+    isPickingTranslationPosition,
+    pointPickAdjustment,
+    trackerPickTranslationMarker,
+    canSelectFrameObjects,
+    isPlaying,
+    cameraPreviewTransform,
+    frameViewportRef,
+    displayFramePreviewScale,
+    part,
+    composeMode,
+    activeTimelinePart,
+    previewParts,
+    transitionPreviewParts,
+    visibleSceneAdjustmentLayers,
+    visibleSceneTransitionLayers,
+    previewTime,
+    adjustedSceneTime,
+    timelineMode,
+    motionLayers,
+    hiddenMotionLayerIds,
+    activeCompositionHidden,
+    previewSceneContext,
+    composeFilePart,
+    selectedPart,
+    previewSelectionObjects,
+    objectSnapGuides,
+    marqueeDragging,
+    editingTextObjectId,
+    activeTool,
+    shapeDrawPreview,
+    wrappedOnFramePointerCancel,
+    wrappedOnFramePointerDown,
+    onFramePointerDownCapture,
+    wrappedOnFramePointerMove,
+    wrappedOnFramePointerLeave,
+    wrappedOnFramePointerUp,
+    startObjectDrag,
+    openComposeObjectContextMenu,
+    startObjectResize,
+    handlePathControlPointerDown,
+    handleObjectCornerRadiusChange,
+    updateTextObjectContent,
+    handleTextEditEnd,
+    updateTextPathOffset,
+    startTextObjectEdit,
+    commitTranslationTrackerPick,
+  ]);
 
   return (
     <>
@@ -4705,10 +4708,6 @@ function AppContent({
             hasActiveComposition={hasPreviewComposition}
             getPrerenderCacheBlockAtTime={prerenderCache.getBlockAtTime}
             liveDomPostProcessMaxFps={liveDomPostProcessMaxFps}
-            livePostProcessPreviewEnabled={
-              liveDomPostProcessPreviewEnabled &&
-              !motionEffectPreviewScrubActive
-            }
             mode={mode}
             onPrerenderDisplayReadyChange={(ready) => {
               prerenderDisplayReadyRef.current = ready;
@@ -5008,9 +5007,6 @@ function AppContent({
         exportWorkerConfigurationMode={exportWorkerConfigurationMode}
         exportWorkerMapping={exportWorkerMapping}
         isExporting={isExporting}
-        liveDomPostProcessPreviewEnabled={liveDomPostProcessPreviewEnabled}
-        liveDomPostProcessRuntimeEnabled={liveDomPostProcessRuntimeEnabled}
-        liveDomPostProcessPersistError={liveDomPostProcessPersistError}
         liveDomPostProcessMaxFps={liveDomPostProcessMaxFps}
         mediaExportFormat={mediaExportFormat}
         mediaExportRenderMode={mediaExportRenderMode}
@@ -5058,9 +5054,6 @@ function AppContent({
         onMediaExportRenderModeChange={setMediaExportRenderMode}
         onStableSlowGridPresetChange={setStableSlowGridPreset}
         onStableSlowValidationSamplesChange={setStableSlowValidationSamples}
-        onLiveDomPostProcessPreviewEnabledChange={
-          setLiveDomPostProcessPreviewEnabled
-        }
         onLiveDomPostProcessMaxFpsChange={setLiveDomPostProcessMaxFps}
         onPausePlaybackOnScrubChange={setPausePlaybackOnScrub}
         onPrerenderCacheEnabledChange={setPrerenderCacheEnabled}

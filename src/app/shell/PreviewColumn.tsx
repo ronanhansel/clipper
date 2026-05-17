@@ -47,7 +47,6 @@ type PreviewColumnProps = {
   framePreviewProps: FramePreviewProps | null;
   hasActiveComposition: boolean;
   liveDomPostProcessMaxFps: number;
-  livePostProcessPreviewEnabled: boolean;
   mode: Mode;
   onModeChange: (mode: Mode) => void;
   onPointerEnter: () => void;
@@ -75,7 +74,6 @@ export function PreviewColumn({
   getPrerenderCacheBlockAtTime,
   hasActiveComposition,
   liveDomPostProcessMaxFps,
-  livePostProcessPreviewEnabled,
   mode,
   onModeChange,
   onPointerEnter,
@@ -150,8 +148,6 @@ export function PreviewColumn({
         authoringActive,
       })
     : null;
-  const livePostProcessEnabled =
-    livePostProcessPreviewEnabled || hasActiveLivePasses;
   const previewDisplayStyle = stableFramePreviewProps
     ? ({
         width: FRAME_WIDTH * stableFramePreviewProps.frameScale,
@@ -235,7 +231,6 @@ export function PreviewColumn({
                   currentSceneTimeRef={currentSceneTimeRef}
                   scheduler={scheduler}
                   liveDomPostProcessMaxFps={liveDomPostProcessMaxFps}
-                  livePostProcessEnabled={livePostProcessEnabled}
                   prerenderBlackMissDebug={prerenderCacheBlackMissDebug}
                   getPrerenderCacheBlockAtTime={getPrerenderCacheBlockAtTime}
                   onPrerenderDisplayReadyChange={onPrerenderDisplayReadyChange}

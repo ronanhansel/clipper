@@ -51,7 +51,6 @@ export interface EffectRenderInput {
   passes: readonly PostProcessPass[];
   width: number;
   height: number;
-  optIn: boolean;
 }
 
 export interface EffectRenderResult {

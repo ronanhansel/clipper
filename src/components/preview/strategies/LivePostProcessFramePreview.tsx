@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -47,7 +48,6 @@ export type LivePostProcessFramePreviewProps = {
   currentSceneTimeRef: RefObject<number>;
   framePreviewProps: StrategyFramePreviewProps;
   liveDomPostProcessMaxFps: number;
-  livePostProcessEnabled: boolean;
   scheduler: PreviewRenderScheduler;
 };
 
@@ -55,7 +55,6 @@ export function LivePostProcessFramePreview({
   currentSceneTimeRef,
   framePreviewProps,
   liveDomPostProcessMaxFps,
-  livePostProcessEnabled,
   scheduler,
 }: LivePostProcessFramePreviewProps) {
   const wrapperRef = useRef<HTMLDivElement | null>(null);
@@ -73,7 +72,6 @@ export function LivePostProcessFramePreview({
     LiveDomPostProcessCapability["reason"] | null
   >(null);
   const showLiveCanvasRef = useRef(false);
-  const activeLiveSourceRequiredRef = useRef(false);
   const activeLivePostProcessPassRef = useRef(false);
   const lastLiveRenderAtRef = useRef(0);
   const hasValidLiveFrameRef = useRef(false);
@@ -81,8 +79,6 @@ export function LivePostProcessFramePreview({
   const liveRenderDirtyRef = useRef(true);
   const lastStoppedSceneTimeRef = useRef<number | null>(null);
   const [showLiveCanvas, setShowLiveCanvas] = useState(false);
-  const [activeLiveSourceRequired, setActiveLiveSourceRequired] =
-    useState(false);
   const [liveVisualStyle, setLiveVisualStyle] =
     useChangedSetState<AdjustmentVisualStyle>({});
   const [diagnosticReason, setDiagnosticReason] = useState<
@@ -183,16 +179,9 @@ export function LivePostProcessFramePreview({
 
   function renderLiveFrame(planBundle: PostProcessPlan) {
     const canvas = renderCanvasRef.current;
-    const passes = planBundle.passes;
     const livePasses = planBundle.livePasses;
-    const optIn = livePostProcessEnabled;
-    if (!canvas || !livePasses.length || !livePostProcessEnabled || !optIn) {
-      updateActiveLiveSourceRequired(
-        passes.some((pass) => pass.requiresLiveDomSource),
-      );
-      clearInactiveLivePreview(
-        !livePostProcessEnabled || !optIn ? "not-opted-in" : null,
-      );
+    if (!canvas || !livePasses.length) {
+      clearInactiveLivePreview(null);
       return false;
     }
     const source =
@@ -208,7 +197,6 @@ export function LivePostProcessFramePreview({
     }
     const preflight = measurePreviewPerf("live.preflight", () =>
       getLiveDomPostProcessPreflight({
-        optIn,
         sourceElement: source,
         canvas: sourceCanvasRef.current ?? canvas,
       }),
@@ -240,7 +228,6 @@ export function LivePostProcessFramePreview({
         ),
         width: FRAME_WIDTH,
         height: FRAME_HEIGHT,
-        optIn,
       }),
     );
     if (result.rendered) {
@@ -262,10 +249,19 @@ export function LivePostProcessFramePreview({
     return true;
   }
 
-  function updateActiveLiveSourceRequired(value: boolean) {
-    if (activeLiveSourceRequiredRef.current === value) return;
-    activeLiveSourceRequiredRef.current = value;
-    setActiveLiveSourceRequired(value);
+  function collectPlan(
+    sceneTime: number,
+    layers: AdjustmentLayer[] | undefined,
+    label: "live.event" | "live.effect" | "live.raf",
+  ) {
+    return measurePreviewPerf(`${label}.collectRequirement`, () =>
+      computePostProcessPlan(
+        sceneTime,
+        layers ?? framePreviewProps.adjustmentLayers,
+        framePreviewProps.transitionPreviewParts ?? null,
+        getPreviewPlanFrameSize(),
+      ),
+    );
   }
 
   useEffect(() => {
@@ -275,19 +271,10 @@ export function LivePostProcessFramePreview({
           ?.layers ?? null;
       previewLayersRef.current = layers;
       liveRenderDirtyRef.current = true;
-      if (!livePostProcessEnabled) {
-        clearInactiveLivePreview("not-opted-in");
-        return;
-      }
-      const planBundle = measurePreviewPerf(
-        "live.event.collectRequirement",
-        () =>
-          computePostProcessPlan(
-            currentSceneTimeRef.current,
-            layers ?? framePreviewProps.adjustmentLayers,
-            framePreviewProps.transitionPreviewParts ?? null,
-            getPreviewPlanFrameSize(),
-          ),
+      const planBundle = collectPlan(
+        currentSceneTimeRef.current,
+        layers ?? undefined,
+        "live.event",
       );
       if (!planBundle.hasLivePasses) clearInactiveLivePreview(null);
       scheduler.requestRender("edit");
@@ -301,36 +288,19 @@ export function LivePostProcessFramePreview({
         "clipper:preview-postprocess-adjustment",
         handlePreview,
       );
-  }, [
-    scheduler,
-    currentSceneTimeRef,
-    framePreviewProps.adjustmentLayers,
-    livePostProcessEnabled,
-  ]);
+  }, [scheduler, currentSceneTimeRef, framePreviewProps.adjustmentLayers]);
 
   useEffect(() => {
     previewLayersRef.current = null;
     liveRenderDirtyRef.current = true;
-    const planBundle = measurePreviewPerf(
-      "live.effect.collectRequirement",
-      () =>
-        computePostProcessPlan(
-          currentSceneTimeRef.current,
-          framePreviewProps.adjustmentLayers,
-          framePreviewProps.transitionPreviewParts ?? null,
-          getPreviewPlanFrameSize(),
-        ),
+    const planBundle = collectPlan(
+      currentSceneTimeRef.current,
+      undefined,
+      "live.effect",
     );
-    if (!livePostProcessEnabled || !planBundle.hasLivePasses)
-      clearInactiveLivePreview(!livePostProcessEnabled ? "not-opted-in" : null);
+    if (!planBundle.hasLivePasses) clearInactiveLivePreview(null);
     scheduler.requestRender("edit");
   }, [framePreviewProps.adjustmentLayers]);
-
-  useEffect(() => {
-    liveRenderDirtyRef.current = true;
-    if (!livePostProcessEnabled) clearInactiveLivePreview("not-opted-in");
-    scheduler.requestRender("edit");
-  }, [livePostProcessEnabled]);
 
   useEffect(() => {
     liveRenderDirtyRef.current = true;
@@ -355,7 +325,7 @@ export function LivePostProcessFramePreview({
     const canvas = sourceCanvasRef.current;
     if (!canvas || canvas.hasAttribute("layoutsubtree")) return;
     canvas.setAttribute("layoutsubtree", "");
-  }, [activeLiveSourceRequired, showLiveCanvas]);
+  }, []);
 
   useEffect(() => {
     const sync = (_cause: unknown, now: number) => {
@@ -363,32 +333,15 @@ export function LivePostProcessFramePreview({
       const layers =
         previewLayersRef.current ?? framePreviewProps.adjustmentLayers;
       const sceneTime = readPreviewSceneTime(currentSceneTimeRef);
-      const planBundle = measurePreviewPerf("live.raf.collectRequirement", () =>
-        computePostProcessPlan(
-          sceneTime,
-          layers,
-          framePreviewProps.transitionPreviewParts ?? null,
-          getPreviewPlanFrameSize(),
-        ),
-      );
-      const passes = planBundle.passes;
+      const planBundle = collectPlan(sceneTime, layers, "live.raf");
       const livePasses = planBundle.livePasses;
-      const optIn = livePostProcessEnabled;
-      if (!canvas || !livePasses.length || !livePostProcessEnabled || !optIn) {
-        updateActiveLiveSourceRequired(
-          passes.some((pass) => pass.requiresLiveDomSource),
-        );
-        clearInactiveLivePreview(
-          !livePostProcessEnabled || !optIn ? "not-opted-in" : null,
-        );
+      if (!canvas || !livePasses.length) {
+        clearInactiveLivePreview(null);
         return;
       }
       const enteringLivePostProcess = !activeLivePostProcessPassRef.current;
       activeLivePostProcessPassRef.current = true;
       if (enteringLivePostProcess) liveRenderDirtyRef.current = true;
-      updateActiveLiveSourceRequired(
-        passes.some((pass) => pass.requiresLiveDomSource),
-      );
       const visualStyle = measurePreviewPerf(
         "live.applyAdjustmentLayersToVisualStyle",
         () => planBundle.visualStyleAfterLastLive,
@@ -402,9 +355,6 @@ export function LivePostProcessFramePreview({
         liveRenderDirtyRef.current = true;
         lastStoppedSceneTimeRef.current = sceneTime;
       }
-      const minFrameIntervalMs = framePreviewProps.isPlaying
-        ? livePostProcessMinFrameIntervalMs
-        : 1000 / 30;
       const elapsedSinceRender = now - lastLiveRenderAtRef.current;
       const shouldRender =
         framePreviewProps.isPlaying || liveRenderDirtyRef.current;
@@ -412,7 +362,7 @@ export function LivePostProcessFramePreview({
       if (
         framePreviewProps.isPlaying &&
         !enteringLivePostProcess &&
-        elapsedSinceRender < minFrameIntervalMs
+        elapsedSinceRender < livePostProcessMinFrameIntervalMs
       )
         return;
       lastLiveRenderAtRef.current = now;
@@ -440,31 +390,28 @@ export function LivePostProcessFramePreview({
         normalPreviewRef.current.style.pointerEvents = "";
       }
     };
-  }, [
-    scheduler,
-    currentSceneTimeRef,
-    framePreviewProps.adjustmentLayers,
-    livePostProcessEnabled,
-  ]);
+  }, [scheduler, currentSceneTimeRef, framePreviewProps.adjustmentLayers]);
 
-  const outputRequiresLiveSource =
-    livePostProcessEnabled && activeLiveSourceRequired;
-  void outputRequiresLiveSource;
   const liveCanvasFilterStyle = liveVisualStyle.filter
     ? ({ filter: liveVisualStyle.filter } as CSSProperties)
     : undefined;
-  const sourcePlanBundle = livePostProcessEnabled
-    ? computePostProcessPlan(
-        currentSceneTimeRef.current,
-        previewLayersRef.current ?? framePreviewProps.adjustmentLayers,
-        framePreviewProps.transitionPreviewParts ?? null,
-        getPreviewPlanFrameSize(),
-      )
-    : null;
-  const sourceAdjustmentLayers =
-    sourcePlanBundle && sourcePlanBundle.livePasses[0]
+  const sourceAdjustmentLayers = useMemo(() => {
+    const layers =
+      previewLayersRef.current ?? framePreviewProps.adjustmentLayers;
+    const sourcePlanBundle = computePostProcessPlan(
+      currentSceneTimeRef.current,
+      layers,
+      framePreviewProps.transitionPreviewParts ?? null,
+      getPreviewPlanFrameSize(),
+    );
+    return sourcePlanBundle.livePasses[0]
       ? sourcePlanBundle.planBeforeFirstLive.activeLayers
-      : framePreviewProps.adjustmentLayers;
+      : layers;
+  }, [
+    currentSceneTimeRef,
+    framePreviewProps.adjustmentLayers,
+    framePreviewProps.transitionPreviewParts,
+  ]);
 
   return (
     <div
@@ -484,49 +431,48 @@ export function LivePostProcessFramePreview({
           visibility: showLiveCanvas ? "hidden" : "visible",
         }}
       >
-        <FramePreviewLive {...toFramePreviewLiveProps(framePreviewProps)} />
-      </div>
-      {livePostProcessEnabled ? (
-        <canvas
-          aria-hidden="true"
-          ref={sourceCanvasRef}
-          className="pointer-events-none absolute left-0 top-0 -z-10 block opacity-0"
-          data-clipper-live-postprocess-source-canvas="draw-element-image-alpha"
-          height={FRAME_HEIGHT}
-          style={sourceCanvasStyle}
-          width={FRAME_WIDTH}
-        >
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute"
-            data-clipper-live-postprocess-source
-            inert={true}
-            ref={sourceElementRef}
-            style={sourceCanvasStyle}
-          >
-            <FramePreviewLive
-              {...toFramePreviewLiveProps(sourceFramePreviewProps)}
-              adjustmentLayersOverride={sourceAdjustmentLayers}
-            />
-          </div>
-        </canvas>
-      ) : null}
-      {livePostProcessEnabled || showLiveCanvas ? (
-        <canvas
-          aria-hidden="true"
-          ref={renderCanvasRef}
-          className="pointer-events-none absolute left-0 top-0 z-0 block bg-black"
-          data-clipper-live-postprocess-canvas="webgl-output"
-          height={FRAME_HEIGHT}
-          style={{
-            ...liveCanvasStyle,
-            ...liveCanvasFilterStyle,
-            opacity: 1,
-            visibility: "visible",
-          }}
-          width={FRAME_WIDTH}
+        <FramePreviewLive
+          {...toFramePreviewLiveProps(framePreviewProps)}
+          paused={showLiveCanvas}
         />
-      ) : null}
+      </div>
+      <canvas
+        aria-hidden="true"
+        ref={sourceCanvasRef}
+        className="pointer-events-none absolute left-0 top-0 -z-10 block opacity-0"
+        data-clipper-live-postprocess-source-canvas="draw-element-image-alpha"
+        height={FRAME_HEIGHT}
+        style={sourceCanvasStyle}
+        width={FRAME_WIDTH}
+      >
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute"
+          data-clipper-live-postprocess-source
+          inert={true}
+          ref={sourceElementRef}
+          style={sourceCanvasStyle}
+        >
+          <FramePreviewLive
+            {...toFramePreviewLiveProps(sourceFramePreviewProps)}
+            adjustmentLayersOverride={sourceAdjustmentLayers}
+          />
+        </div>
+      </canvas>
+      <canvas
+        aria-hidden="true"
+        ref={renderCanvasRef}
+        className="pointer-events-none absolute left-0 top-0 z-0 block bg-black"
+        data-clipper-live-postprocess-canvas="webgl-output"
+        height={FRAME_HEIGHT}
+        style={{
+          ...liveCanvasStyle,
+          ...liveCanvasFilterStyle,
+          opacity: 1,
+          visibility: "visible",
+        }}
+        width={FRAME_WIDTH}
+      />
       {showLiveCanvas ? (
         <LiveVisualOverlays overlays={liveVisualStyle.overlays} />
       ) : null}

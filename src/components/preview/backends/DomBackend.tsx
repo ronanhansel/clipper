@@ -44,15 +44,18 @@ export const DomBackend: CompositionBackend = function DomBackend({
     [isPlaying, localTime, renderMode],
   );
   const renderClockStateRef = useRef(renderClockState);
+  renderClockStateRef.current = renderClockState;
   const renderClockStyle = useMemo(
     () => getRenderClockStyle(renderClockState) as CSSProperties,
     [renderClockState],
   );
 
   useLayoutEffect(() => {
-    renderClockStateRef.current = renderClockState;
-    applyRenderClockStateToElement(hostRef.current, renderClockState);
-  }, [hostRef, renderClockState]);
+    syncDomAnimationsToRenderClock(
+      hostRef.current,
+      renderClockStateRef.current,
+    );
+  }, [hostRef, renderClockState.playing, renderClockState.mode]);
 
   useLayoutEffect(
     () => syncRenderClockSubtree(hostRef.current, renderClockStateRef),
@@ -140,20 +143,6 @@ export const DomBackend: CompositionBackend = function DomBackend({
     </div>
   );
 };
-
-function applyRenderClockStateToElement(
-  element: HTMLElement | null,
-  state: { playing: boolean; time: number; mode: "preview" | "export" },
-  attrs = getRenderClockAttributes(state),
-  style = getRenderClockStyle(state),
-) {
-  if (!element) return;
-  for (const [key, value] of Object.entries(attrs))
-    element.setAttribute(key, value);
-  for (const [key, value] of Object.entries(style))
-    element.style.setProperty(key, String(value));
-  syncDomAnimationsToRenderClock(element, state);
-}
 
 function syncRenderClockSubtree(
   root: HTMLDivElement | null,

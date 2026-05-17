@@ -1,4 +1,3 @@
-import { clipperHost } from "../clipperHost";
 import {
   defaultExportTileMapping,
   defaultExportWorkerMapping,
@@ -25,7 +24,6 @@ import {
   playbackFpsOptions,
   previewRenderHeightOptions,
 } from "../config";
-import { liveDomPostProcessStorageKey } from "../../core/effects/postprocess/liveDomCapability";
 import type {
   AgentProvider,
   ExportTileResolutionMapping,
@@ -40,7 +38,6 @@ export const appSettingKeys = {
   prerenderCache: "clipper:prerender-cache",
   debugSettings: "clipper:debug-settings",
   prerenderCacheBlackMissDebug: "clipper:prerender-cache-black-miss-debug",
-  liveDomPostProcess: liveDomPostProcessStorageKey,
   liveDomPostProcessMaxFps: "clipper:live-dom-postprocess-max-fps",
   videoExportTileHeight: "clipper:video-export-tile-height",
   exportWorkerMapping: "clipper:export-worker-mapping",
@@ -93,12 +90,6 @@ export function isPrerenderCacheBlackMissDebugEnabledByDefault() {
   );
 }
 
-export function isLiveDomPostProcessPreviewEnabledByDefault() {
-  if (typeof window === "undefined") return false;
-  if (window.clipper?.experimentalHtmlCanvasPostProcess) return true;
-  return window.localStorage.getItem(appSettingKeys.liveDomPostProcess) === "1";
-}
-
 export function getInitialLiveDomPostProcessMaxFps() {
   if (typeof window === "undefined") return defaultLiveDomPostProcessMaxFps;
   const storedValue = Number.parseInt(
@@ -106,45 +97,6 @@ export function getInitialLiveDomPostProcessMaxFps() {
     10,
   );
   return clampLiveDomPostProcessMaxFps(storedValue);
-}
-
-export async function persistLiveDomPostProcessPreviewEnabled(
-  enabled: boolean,
-): Promise<boolean> {
-  if (window.clipper?.writeAppState && window.clipper.readAppState) {
-    try {
-      await window.clipper.writeAppState({
-        experimentalHtmlCanvasPostProcess: enabled,
-      });
-      const verify = await window.clipper.readAppState();
-      return verify?.experimentalHtmlCanvasPostProcess === enabled;
-    } catch {
-      return false;
-    }
-  }
-
-  const appStatePath = "clipper/app-state.json";
-  let state: Record<string, unknown> = {};
-  try {
-    state = JSON.parse(await clipperHost.readTextFile(appStatePath)) as Record<
-      string,
-      unknown
-    >;
-  } catch {
-    state = {};
-  }
-  try {
-    await clipperHost.writeTextFile(
-      appStatePath,
-      `${JSON.stringify({ ...state, experimentalHtmlCanvasPostProcess: enabled }, null, 2)}\n`,
-    );
-    const verifyState = JSON.parse(
-      await clipperHost.readTextFile(appStatePath),
-    ) as Record<string, unknown>;
-    return verifyState.experimentalHtmlCanvasPostProcess === enabled;
-  } catch {
-    return false;
-  }
 }
 
 export async function readStoredAppSettings(): Promise<

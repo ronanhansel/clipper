@@ -42,6 +42,30 @@ export type CodePropField =
 
 export type CodePropsSchema = Record<string, CodePropField>;
 
+export type CodeDefaultSettings = {
+  width: number;
+  height: number;
+};
+
+export function parseCodeDefaultSettings(
+  value: unknown,
+): CodeDefaultSettings | null {
+  if (!isPlainObject(value)) return null;
+  const width = value.width;
+  const height = value.height;
+  if (
+    typeof width !== "number" ||
+    typeof height !== "number" ||
+    !Number.isFinite(width) ||
+    !Number.isFinite(height) ||
+    width <= 0 ||
+    height <= 0
+  ) {
+    return null;
+  }
+  return { width, height };
+}
+
 const allowedTypes: ReadonlySet<CodePropFieldType> = new Set([
   "string",
   "number",

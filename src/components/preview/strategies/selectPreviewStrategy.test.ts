@@ -99,6 +99,16 @@ describe("deriveAuthoringActive", () => {
 });
 
 describe("selectPreviewStrategy", () => {
+  it("compose mode forces live-dom even when live passes and authoring are active", () => {
+    const result = selectPreviewStrategy({
+      framePreviewProps: makeProps({ timelineMode: "compose" }),
+      hasActiveLivePasses: true,
+      prerenderEnabled: true,
+      authoringActive: true,
+    });
+    expect(result).toEqual({ kind: "live-dom", reason: "compose-mode" });
+  });
+
   it("live passes win over authoring so effects render under the authoring overlay", () => {
     const result = selectPreviewStrategy({
       framePreviewProps: makeProps(),

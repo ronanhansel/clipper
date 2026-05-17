@@ -75,7 +75,6 @@ describe("WebGLBackend", () => {
         passes: input.passes,
         width: input.width,
         height: input.height,
-        optIn: input.optIn,
       });
       return passingResult();
     });
@@ -212,6 +211,5 @@ function stubEffectInput(): EffectRenderInput {
     passes: [] as unknown as EffectRenderInput["passes"],
     width: 8,
     height: 8,
-    optIn: true,
   };
 }

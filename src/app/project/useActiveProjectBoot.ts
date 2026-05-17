@@ -37,6 +37,7 @@ async function loadBootProject(): Promise<BootProject> {
 
   try {
     await writeStoredActiveProjectManifestPath(manifestPath);
+    await addRecentProject(manifestPath, projectNameFromPath(manifestPath));
   } catch {
     // Browser/dev can still rely on localStorage when host state is unavailable.
   }

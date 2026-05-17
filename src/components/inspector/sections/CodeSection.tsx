@@ -1,8 +1,9 @@
-import { useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { mutedCaps } from "../../../app/config";
 import {
   getCodeObjectComponentTick,
   getCodeObjectError,
+  loadCodeDefaultSettings,
   loadCodePropsSchema,
   subscribeCodeObjectComponents,
   subscribeCodeObjectErrors,
@@ -33,6 +34,8 @@ const sourceKey = "source";
 const codeExtensions = [".tsx", ".ts", ".jsx", ".js"];
 const binPathDataType = "application/x-clipper-bin-path";
 
+const pendingDefaultsApply = new Set<string>();
+
 export function CodeSection() {
   const { object, projectBin, onChange } = useObjectInspector();
 
@@ -44,6 +47,8 @@ export function CodeSection() {
       props: updater(current.props ?? {}),
     }));
   }
+
+  useApplyDefaultSettingsOnFirstAttach(object, onChange);
 
   return (
     <div className="grid gap-3">
@@ -92,9 +97,14 @@ function SourceSubsection({
 
   function commitDraft(value: string) {
     const trimmed = value.trim();
+    const next = trimmed.length === 0 ? null : trimmed;
+    const previous = sourcePath;
+    if (next && next !== previous) {
+      pendingDefaultsApply.add(object.id);
+    }
     setProps((current) => ({
       ...current,
-      [sourceKey]: trimmed.length === 0 ? null : trimmed,
+      [sourceKey]: next,
     }));
   }
 
@@ -727,4 +737,36 @@ function preserveSource(
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function useApplyDefaultSettingsOnFirstAttach(
+  object: FrameObject,
+  onChange: (updater: (object: FrameObject) => FrameObject) => void,
+) {
+  const sourcePath =
+    typeof object.props?.[sourceKey] === "string"
+      ? (object.props[sourceKey] as string)
+      : null;
+
+  const componentTick = useSyncExternalStore(
+    subscribeCodeObjectComponents,
+    getCodeObjectComponentTick,
+    getCodeObjectComponentTick,
+  );
+
+  useEffect(() => {
+    if (!sourcePath) return;
+    if (!pendingDefaultsApply.has(object.id)) return;
+    const defaults = loadCodeDefaultSettings(sourcePath);
+    if (!defaults) return;
+    pendingDefaultsApply.delete(object.id);
+    onChange((current) => ({
+      ...current,
+      bounds: {
+        ...current.bounds,
+        width: defaults.width,
+        height: defaults.height,
+      },
+    }));
+  }, [object.id, sourcePath, componentTick, onChange]);
 }

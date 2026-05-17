@@ -283,22 +283,6 @@ describe("lens WebGL renderer", () => {
 });
 
 describe("live DOM post-process capability", () => {
-  it("keeps live post-process disabled until explicitly opted in", () => {
-    const source = fakeSource({ layoutSubtree: true, requestPaint: () => {} });
-    const canvas = fakeCanvas({
-      layoutSubtree: true,
-      context2d: fakeDrawElementContext({}),
-    });
-
-    expect(
-      getLiveDomPostProcessCapability({
-        optIn: false,
-        sourceElement: source,
-        canvas,
-      }),
-    ).toMatchObject({ supported: false, reason: "not-opted-in" });
-  });
-
   it("requires layout subtree and drawElementImage support", () => {
     const canvas = fakeCanvas({
       layoutSubtree: true,
@@ -307,21 +291,18 @@ describe("live DOM post-process capability", () => {
 
     expect(
       getLiveDomPostProcessCapability({
-        optIn: true,
         sourceElement: fakeSource({ requestPaint: () => {} }),
         canvas,
       }),
     ).toMatchObject({ supported: true, reason: "available" });
     expect(
       getLiveDomPostProcessCapability({
-        optIn: true,
         sourceElement: fakeSource({}),
         canvas: fakeCanvas({ context2d: fakeDrawElementContext({}) }),
       }),
     ).toMatchObject({ supported: false, reason: "missing-layout-subtree" });
     expect(
       getLiveDomPostProcessCapability({
-        optIn: true,
         sourceElement: fakeSource({
           layoutSubtree: true,
           requestPaint: () => {},
@@ -342,7 +323,6 @@ describe("live DOM post-process capability", () => {
 
     expect(
       getLiveDomPostProcessCapability({
-        optIn: true,
         sourceElement: source,
         canvas: sourceCanvas,
       }),
@@ -376,7 +356,6 @@ describe("live DOM post-process capability", () => {
 
     expect(
       getLiveDomPostProcessPreflight({
-        optIn: true,
         sourceElement: fakeSource({ requestPaint: () => {} }),
       }),
     ).toMatchObject({ supported: false, reason: "missing-layout-subtree" });
@@ -384,11 +363,10 @@ describe("live DOM post-process capability", () => {
 
     const source = fakeSource({ layoutSubtree: true, requestPaint: () => {} });
     expect(
-      getLiveDomPostProcessPreflight({ optIn: true, sourceElement: source }),
+      getLiveDomPostProcessPreflight({ sourceElement: source }),
     ).toMatchObject({ supported: true, reason: "available" });
     expect(
       getLiveDomPostProcessCapability({
-        optIn: true,
         sourceElement: source,
         canvas,
       }),
@@ -415,7 +393,6 @@ describe("live DOM post-process capability", () => {
 
     expect(
       getLiveDomPostProcessCapability({
-        optIn: true,
         sourceElement: source,
         canvas,
       }),
@@ -427,7 +404,6 @@ describe("live DOM post-process capability", () => {
     const canvasOnlySource = fakeSource({ layoutSubtree: true });
     expect(
       getLiveDomPostProcessCapability({
-        optIn: true,
         sourceElement: canvasOnlySource,
         canvas,
       }),
@@ -446,7 +422,6 @@ describe("live DOM post-process capability", () => {
 
     expect(
       getLiveDomPostProcessCapability({
-        optIn: true,
         sourceElement: source,
         canvas,
       }),
@@ -466,7 +441,6 @@ describe("live DOM post-process capability", () => {
 
     expect(
       getLiveDomPostProcessCapability({
-        optIn: true,
         sourceElement: source,
         canvas,
       }),
@@ -494,10 +468,10 @@ describe("live DOM post-process capability", () => {
     const probe = new LiveDomCapabilityProbe();
 
     expect(
-      probe.getCapability({ optIn: true, sourceElement: source, canvas }),
+      probe.getCapability({ sourceElement: source, canvas }),
     ).toMatchObject({ supported: true, drawElementImage: "context" });
     expect(
-      probe.getCapability({ optIn: true, sourceElement: source, canvas }),
+      probe.getCapability({ sourceElement: source, canvas }),
     ).toMatchObject({ supported: true, drawElementImage: "context" });
     expect(contextChecks).toBe(1);
   });
@@ -522,7 +496,6 @@ describe("live DOM post-process capability", () => {
       passes: [testLensPass()],
       width: 1920,
       height: 1080,
-      optIn: true,
     });
 
     expect(result.rendered).toBe(true);
@@ -550,7 +523,6 @@ describe("live DOM post-process capability", () => {
       passes: [testLensPass(), { ...testLensPass(), id: "test:lens-2" }],
       width: 1920,
       height: 1080,
-      optIn: true,
     });
 
     expect(result.rendered).toBe(true);
@@ -581,7 +553,6 @@ describe("live DOM post-process capability", () => {
         passes: [testLensPass()],
         width: 1920,
         height: 1080,
-        optIn: true,
       }),
     ).toMatchObject({
       rendered: false,
@@ -596,7 +567,6 @@ describe("live DOM post-process capability", () => {
         passes: [testLensPass()],
         width: 1920,
         height: 1080,
-        optIn: true,
       }),
     ).toMatchObject({
       rendered: false,

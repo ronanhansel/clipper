@@ -18,10 +18,6 @@ type UpdateStatus = {
 
 contextBridge.exposeInMainWorld("clipper", {
   platform: process.platform,
-  experimentalHtmlCanvasPostProcess:
-    process.env.CLIPPER_EXPERIMENTAL_HTML_CANVAS_POSTPROCESS === "1" ||
-    process.argv.includes("--clipper-experimental-html-canvas-postprocess") ||
-    process.argv.includes("clipperExperimentalHtmlCanvasPostProcess=1"),
   readTextFile: (relativePath: string) =>
     ipcRenderer.invoke(
       "clipper:read-text-file",

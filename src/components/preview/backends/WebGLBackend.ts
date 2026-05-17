@@ -26,7 +26,6 @@ export interface WebGLEffectRenderer {
     passes: readonly EffectRenderInput["passes"][number][];
     width: number;
     height: number;
-    optIn: boolean;
   }): EffectRenderResult;
   destroy(): void;
 }
@@ -49,7 +48,6 @@ export function createWebGLBackend(
         passes: input.passes,
         width: input.width,
         height: input.height,
-        optIn: input.optIn,
       });
     },
     destroy() {

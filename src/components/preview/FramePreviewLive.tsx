@@ -42,6 +42,7 @@ export type FramePreviewLiveProps = Omit<
   composeFilePart: CompositionClip | null;
   selectedPart: CompositionClip | null;
   adjustmentLayersOverride?: AdjustmentLayer[];
+  paused?: boolean;
 };
 
 const EMPTY_HIDDEN_MOTION_LAYER_IDS: ReadonlySet<string> = new Set();
@@ -70,10 +71,11 @@ export const FramePreviewLive = memo(function FramePreviewLive(
     composeFilePart,
     selectedPart,
     adjustmentLayersOverride,
+    paused,
     ...passthrough
   } = props;
 
-  const liveTime = usePlayheadTime();
+  const liveTime = usePlayheadTime(!paused);
 
   const renderModel = useMemo(
     () =>

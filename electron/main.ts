@@ -42,23 +42,17 @@ const agentProviderCommands: Record<string, string> = {
   gemini: "gemini",
 };
 app.commandLine.appendSwitch("force-color-profile", "srgb");
-const experimentalHtmlCanvasPostProcessEnabled =
-  process.env.CLIPPER_EXPERIMENTAL_HTML_CANVAS_POSTPROCESS === "1" ||
-  readStartupAppStateBoolean("experimentalHtmlCanvasPostProcess");
+app.commandLine.appendSwitch(
+  "enable-blink-features",
+  "HTMLCanvasElementDrawElement",
+);
+app.commandLine.appendSwitch("enable-features", "CanvasDrawElement");
 const automaticUpdateDownloadsEnabled = readStartupAppStateBoolean(
   "automaticUpdateDownloads",
   true,
 );
 const defaultWindowBounds = { width: 1440, height: 960 };
 const minWindowBounds = { width: 1200, height: 760 };
-if (experimentalHtmlCanvasPostProcessEnabled) {
-  // Alpha live DOM post-process path: enables canvas[layoutsubtree] + ctx.drawElementImage() capture.
-  app.commandLine.appendSwitch(
-    "enable-blink-features",
-    "HTMLCanvasElementDrawElement",
-  );
-  app.commandLine.appendSwitch("enable-features", "CanvasDrawElement");
-}
 if (isRenderVideoChildProcess && process.platform === "darwin")
   app.setActivationPolicy("accessory");
 
@@ -1351,9 +1345,6 @@ async function createWindow() {
     titleBarStyle: "hiddenInset",
     transparent: false,
     webPreferences: {
-      additionalArguments: experimentalHtmlCanvasPostProcessEnabled
-        ? ["clipperExperimentalHtmlCanvasPostProcess=1"]
-        : [],
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,

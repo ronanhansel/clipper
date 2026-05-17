@@ -42,7 +42,6 @@ export type PrerenderVideoPreviewProps = {
   framePreviewProps: StrategyFramePreviewProps;
   getBlockAtTime: (time: number) => PrerenderBlock | null;
   liveDomPostProcessMaxFps: number;
-  livePostProcessPreviewEnabled: boolean;
   onPrerenderDisplayReadyChange: (ready: boolean) => void;
   scheduler: PreviewRenderScheduler;
 };
@@ -53,7 +52,6 @@ export function PrerenderVideoPreview({
   framePreviewProps,
   getBlockAtTime,
   liveDomPostProcessMaxFps,
-  livePostProcessPreviewEnabled,
   onPrerenderDisplayReadyChange,
   scheduler,
 }: PrerenderVideoPreviewProps) {
@@ -352,9 +350,6 @@ export function PrerenderVideoPreview({
             currentSceneTimeRef={currentSceneTimeRef}
             framePreviewProps={framePreviewProps}
             liveDomPostProcessMaxFps={liveDomPostProcessMaxFps}
-            livePostProcessEnabled={
-              livePostProcessPreviewEnabled && displayMode === "dom"
-            }
             scheduler={scheduler}
           />
         </div>

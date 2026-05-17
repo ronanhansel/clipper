@@ -33,6 +33,7 @@ export class WebGlPostProcessRenderer<TPass> {
   private liveDomCaptureCanvas: HTMLCanvasElement | null = null;
   private buffers: WebGLBuffer[] = [];
   private uniforms: Record<string, WebGLUniformLocation | null> = {};
+  private visiblePixelsConfirmed = false;
 
   constructor(private readonly config: WebGlPostProcessConfig<TPass>) {}
 
@@ -122,6 +123,7 @@ export class WebGlPostProcessRenderer<TPass> {
   }
 
   hasVisiblePixels(canvas: HTMLCanvasElement) {
+    if (this.visiblePixelsConfirmed) return true;
     const gl = this.gl;
     if (!gl || gl.isContextLost() || canvas.width <= 0 || canvas.height <= 0)
       return false;
@@ -152,8 +154,10 @@ export class WebGlPostProcessRenderer<TPass> {
         pixels[index + 1] > 4 ||
         pixels[index + 2] > 4 ||
         pixels[index + 3] > 4
-      )
+      ) {
+        this.visiblePixelsConfirmed = true;
         return true;
+      }
     }
     return false;
   }
@@ -242,6 +246,7 @@ export class WebGlPostProcessRenderer<TPass> {
     this.texture = null;
     this.buffers = [];
     this.uniforms = {};
+    this.visiblePixelsConfirmed = false;
   }
 }
 

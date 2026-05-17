@@ -16,7 +16,6 @@ export type PreviewStrategyHostProps = {
   currentSceneTimeRef: RefObject<number>;
   scheduler: PreviewRenderScheduler;
   liveDomPostProcessMaxFps: number;
-  livePostProcessEnabled: boolean;
   prerenderBlackMissDebug: boolean;
   getPrerenderCacheBlockAtTime: (time: number) => PrerenderBlock | null;
   onPrerenderDisplayReadyChange: (ready: boolean) => void;
@@ -28,7 +27,6 @@ export function PreviewStrategyHost({
   currentSceneTimeRef,
   scheduler,
   liveDomPostProcessMaxFps,
-  livePostProcessEnabled,
   prerenderBlackMissDebug,
   getPrerenderCacheBlockAtTime,
   onPrerenderDisplayReadyChange,
@@ -39,7 +37,6 @@ export function PreviewStrategyHost({
         currentSceneTimeRef={currentSceneTimeRef}
         framePreviewProps={framePreviewProps}
         liveDomPostProcessMaxFps={liveDomPostProcessMaxFps}
-        livePostProcessEnabled={livePostProcessEnabled}
         scheduler={scheduler}
       />
     );
@@ -52,7 +49,6 @@ export function PreviewStrategyHost({
         framePreviewProps={framePreviewProps}
         getBlockAtTime={getPrerenderCacheBlockAtTime}
         liveDomPostProcessMaxFps={liveDomPostProcessMaxFps}
-        livePostProcessPreviewEnabled={livePostProcessEnabled}
         onPrerenderDisplayReadyChange={onPrerenderDisplayReadyChange}
         scheduler={scheduler}
       />

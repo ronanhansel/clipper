@@ -7,11 +7,17 @@ import {
   getSourceState,
   getCachedEntryByHash,
   getCachedComponentFor,
+  getCachedDefaultSettingsFor,
   getCachedSchemaFor,
   setSourceState,
   storeCachedComponent,
 } from "./codeBundlerCache";
-import { parseCodePropsSchema, type CodePropsSchema } from "./codePropsSchema";
+import {
+  parseCodeDefaultSettings,
+  parseCodePropsSchema,
+  type CodeDefaultSettings,
+  type CodePropsSchema,
+} from "./codePropsSchema";
 
 export type CodeComponentArgs = {
   time: number;
@@ -94,6 +100,13 @@ export function loadCodePropsSchema(
 ): CodePropsSchema | null {
   if (!sourcePath) return null;
   return getCachedSchemaFor(sourcePath);
+}
+
+export function loadCodeDefaultSettings(
+  sourcePath: string | null,
+): CodeDefaultSettings | null {
+  if (!sourcePath) return null;
+  return getCachedDefaultSettingsFor(sourcePath);
 }
 
 export function retainCodeSource(sourcePath: string): void {
@@ -259,6 +272,7 @@ async function runBundleForSource(sourcePath: string): Promise<void> {
       result.hash,
       cachedEntry.component,
       cachedEntry.schema,
+      cachedEntry.defaultSettings,
     );
     setSourceWatchedPathsFor(sourcePath, [...visitedPaths]);
     clearCodeObjectError(codeBundlerErrorKey(sourcePath));
@@ -267,7 +281,11 @@ async function runBundleForSource(sourcePath: string): Promise<void> {
     return;
   }
 
-  let module: { default?: unknown; propsSchema?: unknown };
+  let module: {
+    default?: unknown;
+    propsSchema?: unknown;
+    defaultSettings?: unknown;
+  };
   try {
     module = await importBundleAsModule(result.code);
   } catch (error) {
@@ -306,11 +324,13 @@ async function runBundleForSource(sourcePath: string): Promise<void> {
   }
 
   const schema = parseCodePropsSchema(module.propsSchema);
+  const defaultSettings = parseCodeDefaultSettings(module.defaultSettings);
   storeCachedComponent(
     sourcePath,
     result.hash,
     candidate as CodeComponent,
     schema,
+    defaultSettings,
   );
   setSourceWatchedPathsFor(sourcePath, [...visitedPaths]);
   clearCodeObjectError(codeBundlerErrorKey(sourcePath));

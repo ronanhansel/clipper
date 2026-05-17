@@ -1,11 +1,7 @@
-export const liveDomPostProcessStorageKey =
-  "clipper:experimental-live-dom-postprocess";
-
 export type LiveDomPostProcessCapability = {
   supported: boolean;
   reason:
     | "available"
-    | "not-opted-in"
     | "missing-source"
     | "missing-layout-subtree"
     | "missing-paint"
@@ -54,21 +50,7 @@ type LiveDomCanvasRenderingContext2D = CanvasRenderingContext2D & {
   drawElementImage?: unknown;
 };
 
-export function isLiveDomPostProcessPreviewOptedIn(
-  target: Pick<Window, "localStorage"> & {
-    clipper?: { experimentalHtmlCanvasPostProcess?: boolean };
-  } = window,
-) {
-  if (target.clipper?.experimentalHtmlCanvasPostProcess) return true;
-  try {
-    return target.localStorage.getItem(liveDomPostProcessStorageKey) === "1";
-  } catch {
-    return false;
-  }
-}
-
 export function getLiveDomPostProcessCapability(input: {
-  optIn: boolean;
   sourceElement: Element | null | undefined;
   canvas?: HTMLCanvasElement | null;
 }): LiveDomPostProcessCapability {
@@ -88,11 +70,9 @@ export function getLiveDomPostProcessCapability(input: {
 }
 
 export function getLiveDomPostProcessPreflight(input: {
-  optIn: boolean;
   sourceElement: Element | null | undefined;
   canvas?: HTMLCanvasElement | null;
 }): LiveDomPostProcessPreflight {
-  if (!input.optIn) return preflight(false, "not-opted-in");
   if (!input.sourceElement) return preflight(false, "missing-source");
 
   const source = input.sourceElement as LiveDomSourceElement;
@@ -188,7 +168,6 @@ export class LiveDomCapabilityProbe {
     | undefined;
 
   getCapability(input: {
-    optIn: boolean;
     sourceElement: Element | null | undefined;
     canvas?: HTMLCanvasElement | null;
   }): LiveDomPostProcessCapability {

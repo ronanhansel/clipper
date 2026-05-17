@@ -1,5 +1,5 @@
 import type { CodeComponent } from "./codeObjectRuntime";
-import type { CodePropsSchema } from "./codePropsSchema";
+import type { CodeDefaultSettings, CodePropsSchema } from "./codePropsSchema";
 
 const cacheCapacity = 32;
 
@@ -7,6 +7,7 @@ type CacheEntry = {
   hash: string;
   component: CodeComponent;
   schema: CodePropsSchema | null;
+  defaultSettings: CodeDefaultSettings | null;
 };
 
 type SourceState = {
@@ -38,6 +39,15 @@ export function getCachedSchemaFor(sourcePath: string): CodePropsSchema | null {
   return entry?.schema ?? null;
 }
 
+export function getCachedDefaultSettingsFor(
+  sourcePath: string,
+): CodeDefaultSettings | null {
+  const state = sourceStates.get(sourcePath);
+  if (!state || state.status !== "loaded" || !state.hash) return null;
+  const entry = componentCache.get(state.hash);
+  return entry?.defaultSettings ?? null;
+}
+
 export function getCachedComponentByHash(hash: string): CodeComponent | null {
   const entry = componentCache.get(hash);
   if (!entry) return null;
@@ -59,8 +69,9 @@ export function storeCachedComponent(
   hash: string,
   component: CodeComponent,
   schema: CodePropsSchema | null,
+  defaultSettings: CodeDefaultSettings | null,
 ): void {
-  componentCache.set(hash, { hash, component, schema });
+  componentCache.set(hash, { hash, component, schema, defaultSettings });
   while (componentCache.size > cacheCapacity) {
     const oldestKey = componentCache.keys().next().value;
     if (oldestKey === undefined) break;

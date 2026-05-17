@@ -39,9 +39,6 @@ type AppDialogsProps = {
   exportWorkerConfigurationMode: ExportWorkerConfigurationMode;
   exportWorkerMapping: ExportWorkerResolutionMapping;
   isExporting: boolean;
-  liveDomPostProcessPreviewEnabled: boolean;
-  liveDomPostProcessRuntimeEnabled: boolean;
-  liveDomPostProcessPersistError: string | null;
   liveDomPostProcessMaxFps: number;
   mediaExportFormat: MediaExportFormat;
   mediaExportRenderMode: MediaExportRenderMode;
@@ -91,7 +88,6 @@ type AppDialogsProps = {
   onStableSlowValidationSamplesChange: (
     samples: StableSlowValidationSamples,
   ) => void;
-  onLiveDomPostProcessPreviewEnabledChange: (enabled: boolean) => void;
   onLiveDomPostProcessMaxFpsChange: (value: number) => void;
   onPausePlaybackOnScrubChange: (enabled: boolean) => void;
   onPrerenderCacheEnabledChange: (enabled: boolean) => void;
@@ -126,9 +122,6 @@ export const AppDialogs = memo(function AppDialogs({
   exportWorkerConfigurationMode,
   exportWorkerMapping,
   isExporting,
-  liveDomPostProcessPreviewEnabled,
-  liveDomPostProcessRuntimeEnabled,
-  liveDomPostProcessPersistError,
   liveDomPostProcessMaxFps,
   mediaExportFormat,
   mediaExportRenderMode,
@@ -173,7 +166,6 @@ export const AppDialogs = memo(function AppDialogs({
   onMediaExportRenderModeChange,
   onStableSlowGridPresetChange,
   onStableSlowValidationSamplesChange,
-  onLiveDomPostProcessPreviewEnabledChange,
   onLiveDomPostProcessMaxFpsChange,
   onPausePlaybackOnScrubChange,
   onPrerenderCacheEnabledChange,
@@ -196,17 +188,22 @@ export const AppDialogs = memo(function AppDialogs({
       <ExportMediaDialog
         open={exportDialogOpen}
         onOpenChange={onExportDialogOpenChange}
-        project={{ resolution }}
+        projectName={projectName}
         sceneName={sceneName}
-        frameRate={exportFrameRate}
-        renderQuality={exportRenderQuality}
-        onRenderQualityChange={onExportRenderQualityChange}
-        resolution={exportResolution}
-        onResolutionChange={onExportResolutionChange}
-        mediaFormat={mediaExportFormat}
-        onMediaFormatChange={onMediaExportFormatChange}
-        mediaRenderMode={mediaExportRenderMode}
-        onMediaRenderModeChange={onMediaExportRenderModeChange}
+        durationSeconds={sceneDurationSeconds}
+        resolution={resolution}
+        exportResolution={exportResolution}
+        onExportResolutionChange={onExportResolutionChange}
+        exportFrameRate={exportFrameRate}
+        onExportFrameRateChange={onExportFrameRateChange}
+        exportRenderQuality={exportRenderQuality}
+        onExportRenderQualityChange={onExportRenderQualityChange}
+        mediaExportFormat={mediaExportFormat}
+        onMediaExportFormatChange={onMediaExportFormatChange}
+        mediaExportRenderMode={mediaExportRenderMode}
+        onMediaExportRenderModeChange={onMediaExportRenderModeChange}
+        exporting={isExporting}
+        progress={exportProgress}
         onExport={onMediaExport}
       />
       <SettingsDialog
@@ -214,9 +211,6 @@ export const AppDialogs = memo(function AppDialogs({
         agentProvider={agentProvider}
         autoDownloadUpdates={autoDownloadUpdates}
         debugSettingsEnabled={debugSettingsEnabled}
-        liveDomPostProcessPreviewEnabled={liveDomPostProcessPreviewEnabled}
-        liveDomPostProcessRuntimeEnabled={liveDomPostProcessRuntimeEnabled}
-        liveDomPostProcessPersistError={liveDomPostProcessPersistError}
         liveDomPostProcessMaxFps={liveDomPostProcessMaxFps}
         open={settingsOpen}
         pausePlaybackOnScrub={pausePlaybackOnScrub}
@@ -242,9 +236,6 @@ export const AppDialogs = memo(function AppDialogs({
         onCheckForUpdates={onCheckForUpdates}
         onDownloadUpdate={onDownloadUpdate}
         onDebugSettingsEnabledChange={onDebugSettingsEnabledChange}
-        onLiveDomPostProcessPreviewEnabledChange={
-          onLiveDomPostProcessPreviewEnabledChange
-        }
         onLiveDomPostProcessMaxFpsChange={onLiveDomPostProcessMaxFpsChange}
         onOpenChange={onSettingsOpenChange}
         onPausePlaybackOnScrubChange={onPausePlaybackOnScrubChange}

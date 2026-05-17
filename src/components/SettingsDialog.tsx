@@ -78,9 +78,6 @@ type SettingsDialogProps = {
   exportWorkerMapping: ExportWorkerResolutionMapping;
   stableSlowGridPreset: StableSlowGridPreset;
   stableSlowValidationSamples: StableSlowValidationSamples;
-  liveDomPostProcessPreviewEnabled: boolean;
-  liveDomPostProcessRuntimeEnabled: boolean;
-  liveDomPostProcessPersistError: string | null;
   liveDomPostProcessMaxFps: number;
   open: boolean;
   pausePlaybackOnScrub: boolean;
@@ -111,7 +108,6 @@ type SettingsDialogProps = {
     samples: StableSlowValidationSamples,
   ) => void;
   onInstallUpdate: () => void;
-  onLiveDomPostProcessPreviewEnabledChange: (enabled: boolean) => void;
   onLiveDomPostProcessMaxFpsChange: (value: number) => void;
   onOpenChange: (open: boolean) => void;
   onPausePlaybackOnScrubChange: (enabled: boolean) => void;
@@ -138,9 +134,6 @@ export function SettingsDialog({
   exportWorkerMapping,
   stableSlowGridPreset,
   stableSlowValidationSamples,
-  liveDomPostProcessPreviewEnabled,
-  liveDomPostProcessRuntimeEnabled,
-  liveDomPostProcessPersistError,
   liveDomPostProcessMaxFps,
   open,
   pausePlaybackOnScrub,
@@ -167,7 +160,6 @@ export function SettingsDialog({
   onStableSlowGridPresetChange,
   onStableSlowValidationSamplesChange,
   onInstallUpdate,
-  onLiveDomPostProcessPreviewEnabledChange,
   onLiveDomPostProcessMaxFpsChange,
   onOpenChange,
   onPausePlaybackOnScrubChange,
@@ -602,10 +594,10 @@ export function SettingsDialog({
                   <div className="h-px bg-[#363b47]" />
                   <div className="grid gap-1.5">
                     <strong className="text-sm text-white">
-                      Playback framerate
+                      Playback frame rate
                     </strong>
                     <p className="text-xs leading-5 text-[#8f939d]">
-                      Overrides the playback framerate for previewing scenes.
+                      Overrides the playback frame rate for previewing scenes.
                       Follow project uses the value defined per timeline.
                     </p>
                   </div>
@@ -613,7 +605,7 @@ export function SettingsDialog({
                     className="grid max-w-[260px] gap-1.5 text-xs font-bold text-[#dfe2ea]"
                     htmlFor="playback-framerate"
                   >
-                    Framerate
+                    Frame rate
                     <span className="flex items-center gap-2">
                       <Select
                         value={String(playbackFpsOption)}
@@ -638,7 +630,7 @@ export function SettingsDialog({
                         </SelectContent>
                       </Select>
                       <button
-                        aria-label="Reset playback framerate to follow project"
+                        aria-label="Reset playback frame rate to follow project"
                         className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-[#2d313b] text-[#8f939d] transition hover:bg-[#252a34] hover:text-white"
                         type="button"
                         onClick={() => onPlaybackFpsOptionChange("follow")}
@@ -823,53 +815,49 @@ export function SettingsDialog({
                       </button>
                     </span>
                   </label>
-                  {liveDomPostProcessPreviewEnabled ? (
-                    <>
-                      <div className="h-px bg-[#363b47]" />
-                      <div className="grid gap-1.5">
-                        <strong className="text-sm text-white">
-                          Live DOM render throttle
-                        </strong>
-                        <p className="text-xs leading-5 text-[#8f939d]">
-                          Because HTML-in-Canvas is unstable and still in
-                          Canary, throttle live rendering so the app stays
-                          usable and other features do not stall.
-                        </p>
-                      </div>
-                      <label
-                        className="grid max-w-[260px] gap-1.5 text-xs font-bold text-[#dfe2ea]"
-                        htmlFor="live-dom-postprocess-max-fps"
+                  <div className="h-px bg-[#363b47]" />
+                  <div className="grid gap-1.5">
+                    <strong className="text-sm text-white">
+                      Live DOM render throttle
+                    </strong>
+                    <p className="text-xs leading-5 text-[#8f939d]">
+                      Because HTML-in-Canvas is unstable and still in Canary,
+                      throttle live rendering so the app stays usable and other
+                      features do not stall.
+                    </p>
+                  </div>
+                  <label
+                    className="grid max-w-[260px] gap-1.5 text-xs font-bold text-[#dfe2ea]"
+                    htmlFor="live-dom-postprocess-max-fps"
+                  >
+                    Max rendered FPS
+                    <span className="relative">
+                      <Input
+                        id="live-dom-postprocess-max-fps"
+                        className="pr-10"
+                        min={minLiveDomPostProcessMaxFps}
+                        max={maxLiveDomPostProcessMaxFps}
+                        step={1}
+                        type="number"
+                        value={liveDomPostProcessMaxFps}
+                        onChange={(event) =>
+                          updateLiveDomPostProcessMaxFps(event.target.value)
+                        }
+                      />
+                      <button
+                        aria-label={`Reset live DOM render throttle to ${defaultLiveDomPostProcessMaxFps}fps`}
+                        className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-md text-[#8f939d] transition hover:bg-[#252a34] hover:text-white"
+                        type="button"
+                        onClick={() =>
+                          onLiveDomPostProcessMaxFpsChange(
+                            defaultLiveDomPostProcessMaxFps,
+                          )
+                        }
                       >
-                        Max rendered FPS
-                        <span className="relative">
-                          <Input
-                            id="live-dom-postprocess-max-fps"
-                            className="pr-10"
-                            min={minLiveDomPostProcessMaxFps}
-                            max={maxLiveDomPostProcessMaxFps}
-                            step={1}
-                            type="number"
-                            value={liveDomPostProcessMaxFps}
-                            onChange={(event) =>
-                              updateLiveDomPostProcessMaxFps(event.target.value)
-                            }
-                          />
-                          <button
-                            aria-label={`Reset live DOM render throttle to ${defaultLiveDomPostProcessMaxFps}fps`}
-                            className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-md text-[#8f939d] transition hover:bg-[#252a34] hover:text-white"
-                            type="button"
-                            onClick={() =>
-                              onLiveDomPostProcessMaxFpsChange(
-                                defaultLiveDomPostProcessMaxFps,
-                              )
-                            }
-                          >
-                            <RotateCcw size={14} />
-                          </button>
-                        </span>
-                      </label>
-                    </>
-                  ) : null}
+                        <RotateCcw size={14} />
+                      </button>
+                    </span>
+                  </label>
                   <div className="h-px bg-[#363b47]" />
                   <div className="grid gap-1.5">
                     <strong className="text-sm text-white">
@@ -1204,49 +1192,6 @@ export function SettingsDialog({
                 </div>
               ) : (
                 <div className="grid gap-4 rounded-xl border border-[#363b47] bg-[#1b1e26] p-4">
-                  <div className="grid gap-1.5">
-                    <strong className="text-sm text-white">
-                      Experimental preview
-                    </strong>
-                    <p className="text-xs leading-5 text-[#8f939d]">
-                      Controls draft browser features used for live complex
-                      WebGL adjustment previews.
-                    </p>
-                  </div>
-                  <label
-                    className="flex w-full items-start justify-between gap-5 text-xs font-bold text-[#dfe2ea]"
-                    htmlFor="live-dom-postprocess-toggle"
-                  >
-                    <span className="grid gap-1">
-                      <span>
-                        Use HTML-in-Canvas live post-process preview when
-                        optional
-                      </span>
-                      <span className="font-medium leading-5 text-[#8f939d]">
-                        Required adjustment effects such as Lens activate this
-                        path automatically. This toggle only opts into the same
-                        experimental path for optional supported previews.
-                      </span>
-                    </span>
-                    <Switch
-                      id="live-dom-postprocess-toggle"
-                      className="mt-0.5"
-                      checked={liveDomPostProcessPreviewEnabled}
-                      onCheckedChange={onLiveDomPostProcessPreviewEnabledChange}
-                    />
-                  </label>
-                  {liveDomPostProcessPersistError ? (
-                    <p className="rounded-lg border border-[#5a2b2b] bg-[#231314] px-3 py-2 text-xs leading-5 text-[#f1a4a4]">
-                      {liveDomPostProcessPersistError}
-                    </p>
-                  ) : liveDomPostProcessPreviewEnabled !==
-                    liveDomPostProcessRuntimeEnabled ? (
-                    <p className="rounded-lg border border-[#594531] bg-[#211a13] px-3 py-2 text-xs leading-5 text-[#dec39e]">
-                      Restart to apply optional preview setting. Required
-                      effects still auto-activate when supported.
-                    </p>
-                  ) : null}
-                  <div className="h-px bg-[#363b47]" />
                   <div className="grid gap-4">
                     <div className="grid gap-1.5">
                       <strong className="text-sm text-white">
