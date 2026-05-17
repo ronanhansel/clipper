@@ -2,8 +2,11 @@ import {
   applyAdjustmentLayersToPostProcessPasses,
   defaultAdjustmentFrameRate,
 } from "../../adjustments";
-import type { AdjustmentLayer } from "../../types";
-import { getAdjustmentEffectPackage } from "../registry";
+import type { AdjustmentLayer, TransitionLayer } from "../../types";
+import {
+  getAdjustmentEffectPackage,
+  getTransitionEffectPackage,
+} from "../registry";
 import type { PostProcessPass } from "../types";
 
 export function adjustmentLayersRequireLiveDomPostProcessSource(
@@ -12,6 +15,17 @@ export function adjustmentLayersRequireLiveDomPostProcessSource(
   return (layers ?? []).some((layer) =>
     Boolean(
       getAdjustmentEffectPackage(layer.effect.effectId)
+        ?.requiresLiveDomPostProcessSource,
+    ),
+  );
+}
+
+export function transitionLayersRequireLiveDomPostProcessSource(
+  layers: TransitionLayer[] | undefined,
+) {
+  return (layers ?? []).some((layer) =>
+    Boolean(
+      getTransitionEffectPackage(layer.effect.effectId)
         ?.requiresLiveDomPostProcessSource,
     ),
   );

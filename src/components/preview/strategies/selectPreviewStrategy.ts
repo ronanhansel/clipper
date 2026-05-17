@@ -1,11 +1,18 @@
 import { computePostProcessPlan } from "../passes/usePostProcessPlan";
 import { FRAME_HEIGHT, FRAME_WIDTH } from "../../../core/types";
+import {
+  adjustmentLayersRequireLiveDomPostProcessSource,
+  transitionLayersRequireLiveDomPostProcessSource,
+} from "../../../core/effects/postprocess/liveDomRequirement";
 import type { StrategyFramePreviewProps } from "./preview";
 
 export type { StrategyFramePreviewProps };
 
 export type PreviewStrategy =
-  | { kind: "live-webgl"; reason: "active-live-passes" }
+  | {
+      kind: "live-webgl";
+      reason: "active-live-passes" | "live-pass-capable-layers";
+    }
   | {
       kind: "live-dom";
       reason: "compose-mode" | "no-live-passes" | "dom-overlay-required";
@@ -15,6 +22,7 @@ export type PreviewStrategy =
 export type SelectPreviewStrategyInput = {
   framePreviewProps: StrategyFramePreviewProps;
   hasActiveLivePasses: boolean;
+  hasLivePassCapableLayers: boolean;
   prerenderEnabled: boolean;
   authoringActive: boolean;
 };
@@ -59,9 +67,26 @@ export function computeHasActiveLivePasses(
   return computePostProcessPlan(
     sceneTime,
     framePreviewProps.adjustmentLayers,
-    framePreviewProps.transitionPreviewParts ?? null,
+    {
+      postProcessPasses:
+        framePreviewProps.transitionPreviewParts?.postProcessPasses,
+      transitionLayers: framePreviewProps.transitionLayers,
+    },
     { width: FRAME_WIDTH, height: FRAME_HEIGHT },
   ).hasLivePasses;
+}
+
+export function computeHasLivePassCapableLayers(
+  framePreviewProps: StrategyFramePreviewProps,
+): boolean {
+  return (
+    adjustmentLayersRequireLiveDomPostProcessSource(
+      framePreviewProps.adjustmentLayers,
+    ) ||
+    transitionLayersRequireLiveDomPostProcessSource(
+      framePreviewProps.transitionLayers,
+    )
+  );
 }
 
 export function selectPreviewStrategy(
@@ -70,6 +95,7 @@ export function selectPreviewStrategy(
   const {
     framePreviewProps,
     hasActiveLivePasses,
+    hasLivePassCapableLayers,
     prerenderEnabled,
     authoringActive,
   } = input;
@@ -80,6 +106,10 @@ export function selectPreviewStrategy(
 
   if (hasActiveLivePasses) {
     return { kind: "live-webgl", reason: "active-live-passes" };
+  }
+
+  if (hasLivePassCapableLayers) {
+    return { kind: "live-webgl", reason: "live-pass-capable-layers" };
   }
 
   if (authoringActive) {

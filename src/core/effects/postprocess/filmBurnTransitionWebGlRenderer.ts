@@ -38,18 +38,24 @@ void main() {
   vec2 uv = v_texCoord;
   vec3 source = texture2D(u_image, uv).rgb;
   float p = clamp(u_progress, 0.0, 1.0);
-  float edge = smoothstep(0.0, 1.0, p) * 1.45 - 0.2;
   float flameNoise = noise(vec2(uv.x * 2.2 + p * 3.1, uv.y * 4.8 - p * 1.7));
   float verticalBias = uv.x + (flameNoise - 0.5) * u_softness;
-  float burn = smoothstep(edge - u_softness, edge + u_softness, verticalBias);
-  float hot = smoothstep(edge - u_softness * 0.18, edge + u_softness * 0.22, verticalBias) * (1.0 - burn);
+  float bandWidth = 0.5;
+  float leadEdge = mix(-u_softness * 1.5, 1.0 + bandWidth + u_softness * 1.5, p);
+  float trailEdge = leadEdge - bandWidth;
+  float burn = clamp(
+    smoothstep(trailEdge - u_softness, trailEdge + u_softness, verticalBias) -
+    smoothstep(leadEdge - u_softness, leadEdge + u_softness, verticalBias),
+    0.0, 1.0
+  );
+  float hot = 1.0 - smoothstep(0.0, u_softness * 0.5, abs(verticalBias - leadEdge));
   float flicker = noise(uv * u_resolution / 96.0 + vec2(p * 8.0, u_seed));
   float grain = (hash(uv * u_resolution + p * 97.0) - 0.5) * u_grain;
   vec3 amber = vec3(1.0, 0.47, 0.08);
   vec3 yellow = vec3(1.0, 0.86, 0.33);
   vec3 color = mix(source, amber, burn * u_intensity * 0.68);
   color = mix(color, yellow, hot * u_intensity);
-  color += vec3(grain + flicker * 0.08 * u_intensity);
+  color += vec3(grain + flicker * 0.08 * u_intensity) * burn;
   color *= 1.0 + hot * 0.75 * u_intensity;
   gl_FragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
 }

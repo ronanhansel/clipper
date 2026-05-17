@@ -10,7 +10,11 @@ import type {
   AdjustmentVisualStyle,
   PostProcessPass,
 } from "../../../core/effects/types";
-import type { AdjustmentLayer } from "../../../core/types";
+import {
+  getActiveTransitionLayers,
+  getTransitionPostProcessPasses,
+} from "../../../core/transitions";
+import type { AdjustmentLayer, TransitionLayer } from "../../../core/types";
 
 export interface PostProcessPlanFrameSize {
   width: number;
@@ -19,6 +23,7 @@ export interface PostProcessPlanFrameSize {
 
 export interface PostProcessPlanTransitionInput {
   postProcessPasses?: PostProcessPass[];
+  transitionLayers?: TransitionLayer[];
 }
 
 export interface PostProcessPlan {
@@ -36,6 +41,31 @@ export interface PostProcessPlan {
 const emptyPlan: AdjustmentExecutionPlan = { activeLayers: [], steps: [] };
 const emptyVisualStyle: AdjustmentVisualStyle = { overlays: [] };
 
+function resolveTransitionPasses(
+  sceneTime: number,
+  transitionInput: PostProcessPlanTransitionInput | null | undefined,
+  frameSize: PostProcessPlanFrameSize,
+): PostProcessPass[] {
+  if (!transitionInput) return [];
+  if (transitionInput.transitionLayers?.length) {
+    const activeLayers = getActiveTransitionLayers(
+      transitionInput.transitionLayers,
+      sceneTime,
+    );
+    const passes: PostProcessPass[] = [];
+    for (const layer of activeLayers) {
+      passes.push(
+        ...getTransitionPostProcessPasses(sceneTime, layer, undefined, {
+          width: frameSize.width,
+          height: frameSize.height,
+        }),
+      );
+    }
+    return passes;
+  }
+  return transitionInput.postProcessPasses ?? [];
+}
+
 export function computePostProcessPlan(
   sceneTime: number,
   adjustmentLayers: AdjustmentLayer[] | undefined,
@@ -50,7 +80,7 @@ export function computePostProcessPlan(
   );
   const passes: PostProcessPass[] = [
     ...plan.steps.flatMap((step) => step.postProcessPasses ?? []),
-    ...(transitionPreviewParts?.postProcessPasses ?? []),
+    ...resolveTransitionPasses(sceneTime, transitionPreviewParts, frameSize),
   ];
   const livePasses = selectLiveDomPostProcessPasses(passes);
   const lastLive = livePasses.at(-1);

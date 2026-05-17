@@ -307,6 +307,7 @@ export type AdjustmentEffectPackage = AdjustmentEffectDefinition & {
 
 export type TransitionEffectPackage = TransitionEffectDefinition & {
   paramControls?: readonly TransitionEffectParamControl[];
+  requiresLiveDomPostProcessSource?: boolean;
   createDefaultLayer(input: {
     id: string;
     layerId?: string;

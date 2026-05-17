@@ -258,7 +258,11 @@ export function LivePostProcessFramePreview({
       computePostProcessPlan(
         sceneTime,
         layers ?? framePreviewProps.adjustmentLayers,
-        framePreviewProps.transitionPreviewParts ?? null,
+        {
+          postProcessPasses:
+            framePreviewProps.transitionPreviewParts?.postProcessPasses,
+          transitionLayers: framePreviewProps.transitionLayers,
+        },
         getPreviewPlanFrameSize(),
       ),
     );
@@ -401,7 +405,11 @@ export function LivePostProcessFramePreview({
     const sourcePlanBundle = computePostProcessPlan(
       currentSceneTimeRef.current,
       layers,
-      framePreviewProps.transitionPreviewParts ?? null,
+      {
+        postProcessPasses:
+          framePreviewProps.transitionPreviewParts?.postProcessPasses,
+        transitionLayers: framePreviewProps.transitionLayers,
+      },
       getPreviewPlanFrameSize(),
     );
     return sourcePlanBundle.livePasses[0]
@@ -410,6 +418,7 @@ export function LivePostProcessFramePreview({
   }, [
     currentSceneTimeRef,
     framePreviewProps.adjustmentLayers,
+    framePreviewProps.transitionLayers,
     framePreviewProps.transitionPreviewParts,
   ]);
 

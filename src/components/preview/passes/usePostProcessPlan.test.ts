@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { computePostProcessPlan } from "./usePostProcessPlan";
-import type { AdjustmentLayer } from "../../../core/types";
+import type { AdjustmentLayer, TransitionLayer } from "../../../core/types";
 import type { PostProcessPass } from "../../../core/effects/types";
 
 const frameSize = { width: 1920, height: 1080 };
@@ -126,5 +126,64 @@ describe("computePostProcessPlan", () => {
     expect(result.planAfterLastLive.activeLayers.map((l) => l.id)).toEqual([
       "a",
     ]);
+  });
+
+  it("recomputes transition passes per call from transitionLayers using sceneTime", () => {
+    const layer: TransitionLayer = {
+      id: "transition-1",
+      name: "Film burn",
+      start: 1,
+      duration: 1,
+      midPoint: 1.5,
+      effect: { effectId: "clipper.transition.filmBurn" },
+    };
+    const earlyResult = computePostProcessPlan(
+      1.1,
+      undefined,
+      { transitionLayers: [layer] },
+      frameSize,
+    );
+    const lateResult = computePostProcessPlan(
+      1.9,
+      undefined,
+      { transitionLayers: [layer] },
+      frameSize,
+    );
+    const earlyPass = earlyResult.livePasses.find(
+      (pass) => pass.kind === "clipper.postprocess.transition.filmBurn",
+    ) as { uniforms: { progress: number } } | undefined;
+    const latePass = lateResult.livePasses.find(
+      (pass) => pass.kind === "clipper.postprocess.transition.filmBurn",
+    ) as { uniforms: { progress: number } } | undefined;
+    expect(earlyPass).toBeDefined();
+    expect(latePass).toBeDefined();
+    expect(latePass!.uniforms.progress).toBeGreaterThan(
+      earlyPass!.uniforms.progress,
+    );
+  });
+
+  it("returns no transition passes outside the transition window", () => {
+    const layer: TransitionLayer = {
+      id: "transition-1",
+      name: "Film burn",
+      start: 5,
+      duration: 1,
+      midPoint: 5.5,
+      effect: { effectId: "clipper.transition.filmBurn" },
+    };
+    const before = computePostProcessPlan(
+      0,
+      undefined,
+      { transitionLayers: [layer] },
+      frameSize,
+    );
+    const after = computePostProcessPlan(
+      10,
+      undefined,
+      { transitionLayers: [layer] },
+      frameSize,
+    );
+    expect(before.livePasses).toEqual([]);
+    expect(after.livePasses).toEqual([]);
   });
 });

@@ -3,8 +3,9 @@ import type { TransitionEffectPackage } from "../../../types";
 
 export const filmBurnTransitionLogic: Pick<
   TransitionEffectPackage,
-  "renderSequence"
+  "renderSequence" | "requiresLiveDomPostProcessSource"
 > = {
+  requiresLiveDomPostProcessSource: true,
   renderSequence: ({ layer, progress }) => {
     const t = Math.max(0, Math.min(1, progress));
     return {

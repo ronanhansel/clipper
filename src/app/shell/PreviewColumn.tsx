@@ -14,6 +14,7 @@ import { usePreviewRenderScheduler } from "../../components/preview/scheduler/us
 import { PreviewStrategyHost } from "../../components/preview/strategies/PreviewStrategyHost";
 import {
   computeHasActiveLivePasses,
+  computeHasLivePassCapableLayers,
   deriveAuthoringActive,
   selectPreviewStrategy,
 } from "../../components/preview/strategies/selectPreviewStrategy";
@@ -137,6 +138,9 @@ export function PreviewColumn({
         currentSceneTimeRef.current,
       )
     : false;
+  const hasLivePassCapableLayers = renderFramePreviewProps
+    ? computeHasLivePassCapableLayers(renderFramePreviewProps)
+    : false;
   const authoringActive = renderFramePreviewProps
     ? deriveAuthoringActive(renderFramePreviewProps)
     : false;
@@ -144,6 +148,7 @@ export function PreviewColumn({
     ? selectPreviewStrategy({
         framePreviewProps: renderFramePreviewProps,
         hasActiveLivePasses,
+        hasLivePassCapableLayers,
         prerenderEnabled: displayPrerenderPreview,
         authoringActive,
       })

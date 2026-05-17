@@ -41,7 +41,10 @@ export type AdjustmentEffectLogic = Partial<
 >;
 
 export type TransitionEffectLogic = Partial<
-  Pick<TransitionEffectPackage, "applyVisualStyle" | "renderSequence">
+  Pick<
+    TransitionEffectPackage,
+    "applyVisualStyle" | "renderSequence" | "requiresLiveDomPostProcessSource"
+  >
 >;
 
 export function createMotionEffectPackage(

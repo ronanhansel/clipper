@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   computeHasActiveLivePasses,
+  computeHasLivePassCapableLayers,
   deriveAuthoringActive,
   selectPreviewStrategy,
   type AuthoringSignalInput,
   type StrategyFramePreviewProps,
 } from "./selectPreviewStrategy";
-import type { AdjustmentLayer } from "../../../core/types";
+import type { AdjustmentLayer, TransitionLayer } from "../../../core/types";
 
 function emptyAuthoring(): AuthoringSignalInput {
   return {
@@ -32,6 +33,7 @@ function makeProps(
     ...emptyAuthoring(),
     timelineMode: "composition",
     adjustmentLayers: [],
+    transitionLayers: [],
     transitionPreviewParts: null,
   };
   return { ...base, ...overrides } as unknown as StrategyFramePreviewProps;
@@ -103,6 +105,7 @@ describe("selectPreviewStrategy", () => {
     const result = selectPreviewStrategy({
       framePreviewProps: makeProps({ timelineMode: "compose" }),
       hasActiveLivePasses: true,
+      hasLivePassCapableLayers: true,
       prerenderEnabled: true,
       authoringActive: true,
     });
@@ -113,6 +116,7 @@ describe("selectPreviewStrategy", () => {
     const result = selectPreviewStrategy({
       framePreviewProps: makeProps(),
       hasActiveLivePasses: true,
+      hasLivePassCapableLayers: true,
       prerenderEnabled: true,
       authoringActive: true,
     });
@@ -126,6 +130,7 @@ describe("selectPreviewStrategy", () => {
     const result = selectPreviewStrategy({
       framePreviewProps: makeProps(),
       hasActiveLivePasses: true,
+      hasLivePassCapableLayers: true,
       prerenderEnabled: false,
       authoringActive: false,
     });
@@ -135,10 +140,39 @@ describe("selectPreviewStrategy", () => {
     });
   });
 
+  it("returns live-webgl when capable transition layers are in scope but no live pass is yet active", () => {
+    const result = selectPreviewStrategy({
+      framePreviewProps: makeProps(),
+      hasActiveLivePasses: false,
+      hasLivePassCapableLayers: true,
+      prerenderEnabled: true,
+      authoringActive: false,
+    });
+    expect(result).toEqual({
+      kind: "live-webgl",
+      reason: "live-pass-capable-layers",
+    });
+  });
+
+  it("structural live-webgl beats prerender even during authoring", () => {
+    const result = selectPreviewStrategy({
+      framePreviewProps: makeProps(),
+      hasActiveLivePasses: false,
+      hasLivePassCapableLayers: true,
+      prerenderEnabled: true,
+      authoringActive: true,
+    });
+    expect(result).toEqual({
+      kind: "live-webgl",
+      reason: "live-pass-capable-layers",
+    });
+  });
+
   it("returns live-dom for compose mode without live passes", () => {
     const result = selectPreviewStrategy({
       framePreviewProps: makeProps({ timelineMode: "compose" }),
       hasActiveLivePasses: false,
+      hasLivePassCapableLayers: false,
       prerenderEnabled: false,
       authoringActive: false,
     });
@@ -149,6 +183,7 @@ describe("selectPreviewStrategy", () => {
     const result = selectPreviewStrategy({
       framePreviewProps: makeProps({ timelineMode: "composition" }),
       hasActiveLivePasses: false,
+      hasLivePassCapableLayers: false,
       prerenderEnabled: true,
       authoringActive: false,
     });
@@ -162,6 +197,7 @@ describe("selectPreviewStrategy", () => {
     const result = selectPreviewStrategy({
       framePreviewProps: makeProps({ timelineMode: "composition" }),
       hasActiveLivePasses: false,
+      hasLivePassCapableLayers: false,
       prerenderEnabled: false,
       authoringActive: false,
     });
@@ -172,6 +208,7 @@ describe("selectPreviewStrategy", () => {
     const result = selectPreviewStrategy({
       framePreviewProps: makeProps({ timelineMode: "composition" }),
       hasActiveLivePasses: false,
+      hasLivePassCapableLayers: false,
       prerenderEnabled: true,
       authoringActive: true,
     });
@@ -185,6 +222,7 @@ describe("selectPreviewStrategy", () => {
     const result = selectPreviewStrategy({
       framePreviewProps: makeProps({ timelineMode: "compose" }),
       hasActiveLivePasses: false,
+      hasLivePassCapableLayers: false,
       prerenderEnabled: true,
       authoringActive: false,
     });
@@ -210,5 +248,55 @@ describe("computeHasActiveLivePasses", () => {
     };
     const props = makeProps({ adjustmentLayers: [layer] });
     expect(computeHasActiveLivePasses(props, 1)).toBe(true);
+  });
+});
+
+describe("computeHasLivePassCapableLayers", () => {
+  it("returns false with no layers", () => {
+    expect(computeHasLivePassCapableLayers(makeProps())).toBe(false);
+  });
+
+  it("returns true when a lens adjustment is in scope, regardless of sceneTime", () => {
+    const layer: AdjustmentLayer = {
+      id: "lens",
+      name: "lens",
+      start: 0,
+      duration: 10,
+      effect: {
+        effectId: "clipper.adjustment.lens",
+        params: { target: "frame", focusX: 50, focusY: 50 },
+      },
+    };
+    expect(
+      computeHasLivePassCapableLayers(makeProps({ adjustmentLayers: [layer] })),
+    ).toBe(true);
+  });
+
+  it("returns true when a film-burn transition layer is in scope before its window starts", () => {
+    const layer: TransitionLayer = {
+      id: "transition-1",
+      name: "Film burn",
+      start: 5,
+      duration: 1,
+      midPoint: 5.5,
+      effect: { effectId: "clipper.transition.filmBurn" },
+    };
+    expect(
+      computeHasLivePassCapableLayers(makeProps({ transitionLayers: [layer] })),
+    ).toBe(true);
+  });
+
+  it("returns false for a non-GL transition layer", () => {
+    const layer: TransitionLayer = {
+      id: "transition-2",
+      name: "Scale fade",
+      start: 0,
+      duration: 1,
+      midPoint: 0.5,
+      effect: { effectId: "clipper.transition.scaleFade" },
+    };
+    expect(
+      computeHasLivePassCapableLayers(makeProps({ transitionLayers: [layer] })),
+    ).toBe(false);
   });
 });
