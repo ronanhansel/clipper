@@ -1868,7 +1868,11 @@ function buildEaseSvgPath(
   y0: number,
   x1: number,
   y1: number,
+  ease?: MotionEase | EaseControlPoints,
 ): string {
+  if (ease === "snap") {
+    return `M ${x0} ${y0} H ${x1} V ${y1}`;
+  }
   // CSS cubic-bezier(p1x, p1y, p2x, p2y) describes value progress over time.
   // x0,y0 = SVG position of start keyframe; x1,y1 = SVG position of end keyframe.
   // SVG Y is inverted: smaller Y = higher on screen = higher value.
@@ -2185,6 +2189,7 @@ function ComposeEaseLane({
         />
         {segments.map((seg, i) => {
           if (selectedSegIndex !== i) return null;
+          if (seg.ease === "snap") return null;
           const svgY0 = pad + (1 - seg.normY0) * drawH;
           const svgY1 = pad + (1 - seg.normY1) * drawH;
           const controlPoints =
@@ -2275,7 +2280,14 @@ function ComposeEaseLane({
             handlePreview?.segIndex === i
               ? handlePreview.controlPoints
               : seg.controlPoints;
-          const path = buildEaseSvgPath(controlPoints, x0, svgY0, x1, svgY1);
+          const path = buildEaseSvgPath(
+            controlPoints,
+            x0,
+            svgY0,
+            x1,
+            svgY1,
+            seg.ease,
+          );
           return (
             <path
               key={`curve-${i}`}
@@ -2305,7 +2317,14 @@ function ComposeEaseLane({
             handlePreview?.segIndex === i
               ? handlePreview.controlPoints
               : seg.controlPoints;
-          const path = buildEaseSvgPath(controlPoints, x0, svgY0, x1, svgY1);
+          const path = buildEaseSvgPath(
+            controlPoints,
+            x0,
+            svgY0,
+            x1,
+            svgY1,
+            seg.ease,
+          );
           return (
             <path
               key={`hit-${i}`}
@@ -2380,7 +2399,7 @@ function ComposeEaseLane({
               }
             />
             {/* Bezier handle buttons when selected */}
-            {isSelected && (
+            {isSelected && seg.ease !== "snap" && (
               <>
                 <button
                   data-timeline-control

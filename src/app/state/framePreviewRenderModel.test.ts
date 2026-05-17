@@ -82,11 +82,7 @@ describe("frame preview render model", () => {
       layerId: "clipper.motion.zoom",
       start: 1,
     });
-    expect(model.previewParts[0].part.motionMarkers[0]).toMatchObject({
-      id: "raw-zoom",
-      kind: "zoom",
-      start: 1,
-    });
+    expect(model.previewParts[0].part.motionMarkers).toEqual([]);
   });
 
   it("filters hidden motion rows before rebasing and exposes hidden motion layer ids", () => {

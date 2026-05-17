@@ -5,7 +5,7 @@
 - Run `npm run typecheck` before committing (also formats).
 - Don't run `git diff` unless asked.
 - Don't fix errors not from your edits — they may be another agent's work.
-- Document every change in `agent-log/v0.2.18/memory/[id]-feature-name.md` (next sequential ID, or update existing). Write incrementally on long tasks.
+- Document every change in `agent-log/v0.2.19/memory/[id]-feature-name.md` (next sequential ID, or update existing). Write incrementally on long tasks.
 - `PLAN.md` only on request; if it exists, keep it current.
 - When performing major tasks with multisteps, break down and use subagents to save on tokens.
 
@@ -47,4 +47,4 @@
 ## Reference
 
 - `docs/PERFORMANCE.md` — performance playbook (one page).
-- Memos `agent-log/v0.2.18/memory/092-098` — context on past inspector / playback rewrites.
+- Memos `agent-log/v0.2.18/memory/092-098, 117` — context on past inspector / playback rewrites and the Compose/Direct boundary leaks that the v0.2.19 split addresses.

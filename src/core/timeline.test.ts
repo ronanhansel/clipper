@@ -449,6 +449,59 @@ describe("timeline model", () => {
     ).toEqual(["lens", "vhs"]);
   });
 
+  it("falls back to the default adjust row when timelineLayers is missing", () => {
+    const layers = [
+      {
+        id: "lens",
+        name: "Lens",
+        layerId: "adjust",
+        start: 0,
+        duration: 3,
+        effect: { effectId: "clipper.adjustment.lens" as const },
+      },
+    ];
+
+    expect(
+      getExecutableAdjustmentLayers(layers, undefined).map((layer) => layer.id),
+    ).toEqual(["lens"]);
+  });
+
+  it("falls back to the default adjust row when adjustmentLayers row is empty", () => {
+    const layers = [
+      {
+        id: "lens",
+        name: "Lens",
+        layerId: "adjust",
+        start: 0,
+        duration: 3,
+        effect: { effectId: "clipper.adjustment.lens" as const },
+      },
+    ];
+
+    expect(
+      getExecutableAdjustmentLayers(layers, { adjustmentLayers: [] }).map(
+        (layer) => layer.id,
+      ),
+    ).toEqual(["lens"]);
+  });
+
+  it("filters out layers whose row is not in the fallback default", () => {
+    const layers = [
+      {
+        id: "lens",
+        name: "Lens",
+        layerId: "custom_adjust_row",
+        start: 0,
+        duration: 3,
+        effect: { effectId: "clipper.adjustment.lens" as const },
+      },
+    ];
+
+    expect(
+      getExecutableAdjustmentLayers(layers, undefined).map((layer) => layer.id),
+    ).toEqual([]);
+  });
+
   it("filters transition layers by visible row state", () => {
     const transitions = [
       {

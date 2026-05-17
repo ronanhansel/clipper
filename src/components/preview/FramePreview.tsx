@@ -108,6 +108,8 @@ import {
   type SvgRasterResult,
 } from "./exportSvgRasterCache";
 import { StrokeOverlay } from "./StrokeOverlay";
+import { SceneCompositor } from "./compositors/SceneCompositor";
+import { DomBackend } from "./backends/DomBackend";
 
 const identityCameraTransform: CameraPreviewTransform = {
   x: 0,
@@ -127,7 +129,7 @@ type ExportTileViewport = {
   width: number;
   height: number;
 };
-type ExportTileFrameBounds = {
+export type ExportTileFrameBounds = {
   x: number;
   y: number;
   width: number;
@@ -208,7 +210,7 @@ type FramePreviewProps = {
   onTrackerTargetPick: (objectId: string) => void;
 };
 
-type ComposeDrawTool =
+export type ComposeDrawTool =
   | "rect"
   | "line"
   | "arrow"
@@ -223,7 +225,7 @@ type ComposeDrawTool =
   | "null"
   | "code";
 
-function isPenDrawTool(tool: ComposeDrawTool | null | undefined) {
+export function isPenDrawTool(tool: ComposeDrawTool | null | undefined) {
   return tool === "pen" || tool === "pencil" || tool === "textPath";
 }
 
@@ -359,17 +361,8 @@ export const FramePreview = memo(function FramePreview({
   const interactiveEditingTextObjectId = composePlaybackActive
     ? null
     : editingTextObjectId;
-  const liveClockSnapshot = getMasterTimelineClockSnapshot();
-  const useLiveClockRenderTime =
-    timelineMode !== "compose" &&
-    (liveClockSnapshot.playing || liveClockSnapshot.source === "scrub") &&
-    Math.abs(liveClockSnapshot.sceneTime - sceneTime) >= 0.001;
-  const displaySceneTime = useLiveClockRenderTime
-    ? liveClockSnapshot.sceneTime
-    : sceneTime;
-  const displayPreviewTime = useLiveClockRenderTime
-    ? displaySceneTime - partStart + (part.trimStart ?? 0)
-    : previewTime;
+  const displaySceneTime = sceneTime;
+  const displayPreviewTime = previewTime;
   const visualAdjustment = useMemo(
     () =>
       applyAdjustmentLayersToVisualStyle(displaySceneTime, adjustmentLayers),
@@ -756,76 +749,45 @@ export const FramePreview = memo(function FramePreview({
                   ) : null}
                 </div>
               ) : (
-                <div
-                  className="absolute inset-0 origin-center"
-                  ref={cameraRef}
-                  style={{
-                    transformStyle: "preserve-3d",
-                    ...transitionCameraStyle,
-                  }}
-                >
-                  <div
-                    className="absolute inset-0"
-                    data-clipper-visual-adjustments
-                    style={visualAdjustmentStyle}
-                  >
-                    <FramePreviewRenderBoundary
-                      filePath={part.filePath}
-                      resetKey={`${part.id}:${part.filePath}:${compositionError ?? ""}`}
-                    >
-                      {transitionPreviewParts && transitionProgress !== null ? (
-                        <TransitionCompositeView
-                          adjustmentLayers={adjustmentLayers}
-                          animationsEnabled={animationsEnabled}
-                          exportTileFrameBounds={exportTileFrameBounds}
-                          frameScale={frameScale}
-                          isPlaying={isPlaying}
-                          renderMode={renderMode}
-                          sequenceStyle={transitionSequenceStyle}
-                          transitionPreviewParts={transitionPreviewParts}
-                        />
-                      ) : (
-                        stackPreviewParts.map((item) => (
-                          <CompositionLayerView
-                            key={`${item.part.id}:${item.start}`}
-                            active={item.part.id === part.id}
-                            animationsEnabled={animationsEnabled}
-                            activeShapeTool={activeShapeTool}
-                            canSelect={
-                              !isPlaying &&
-                              (canSelectObjects || interactiveTrackerPicking)
-                            }
-                            editingTextObjectId={interactiveEditingTextObjectId}
-                            exportTileFrameBounds={exportTileFrameBounds}
-                            focusPicking={
-                              !isPlaying &&
-                              (interactiveFocusPicking ||
-                                interactiveTrackerPicking)
-                            }
-                            frameScale={frameScale}
-                            hideNullObjects={timelineMode !== "compose"}
-                            isPlaying={isPlaying}
-                            part={item.part}
-                            renderClockSceneTime={displaySceneTime}
-                            previewTime={item.previewTime}
-                            renderMode={renderMode}
-                            onObjectPointerDown={onObjectPointerDown}
-                            onObjectContextMenu={onObjectContextMenu}
-                            onTextEditCommit={onTextEditCommit}
-                            onTextEditEnd={onTextEditEnd}
-                            onTextObjectDoubleClick={onTextObjectDoubleClick}
-                          />
-                        ))
-                      )}
-                    </FramePreviewRenderBoundary>
-                    <div
-                      ref={frameVisualAdjustmentOverlaysRef}
-                      className="pointer-events-none absolute inset-0"
-                      data-clipper-visual-adjustment-overlays="frame"
-                      style={{ zIndex: 2147483647 }}
-                    />
-                  </div>
-                </div>
+                <SceneCompositor
+                  cameraRef={cameraRef}
+                  filePath={part.filePath}
+                  resetKey={`${part.id}:${part.filePath}:${compositionError ?? ""}`}
+                  sceneCamera={liveCameraTransform}
+                  visualAdjustmentStyle={visualAdjustmentStyle}
+                  transitionCameraStyle={transitionCameraStyle}
+                  frameVisualAdjustmentOverlaysRef={
+                    frameVisualAdjustmentOverlaysRef
+                  }
+                  transitionPreviewParts={transitionPreviewParts ?? null}
+                  transitionProgress={transitionProgress}
+                  transitionSequenceStyle={transitionSequenceStyle}
+                  stackPreviewParts={stackPreviewParts}
+                  activePartId={part.id}
+                  renderMode={renderMode}
+                  isPlaying={isPlaying}
+                  animationsEnabled={animationsEnabled}
+                  frameScale={frameScale}
+                  exportTileFrameBounds={exportTileFrameBounds}
+                  adjustmentLayers={adjustmentLayers}
+                  displaySceneTime={displaySceneTime}
+                  canSelect={
+                    !isPlaying &&
+                    (canSelectObjects || interactiveTrackerPicking)
+                  }
+                  activeShapeTool={activeShapeTool}
+                  editingTextObjectId={interactiveEditingTextObjectId}
+                  hideNullObjects={timelineMode !== "compose"}
+                  focusPicking={
+                    !isPlaying &&
+                    (interactiveFocusPicking || interactiveTrackerPicking)
+                  }
+                  onObjectPointerDown={onObjectPointerDown}
+                  onObjectContextMenu={onObjectContextMenu}
+                  onTextEditCommit={onTextEditCommit}
+                  onTextEditEnd={onTextEditEnd}
+                  onTextObjectDoubleClick={onTextObjectDoubleClick}
+                />
               )}
             </div>
             <div
@@ -983,7 +945,7 @@ export const FramePreview = memo(function FramePreview({
 
 const areFramePreviewPropsEqual = () => false;
 
-class FramePreviewRenderBoundary extends ReactComponent<
+export class FramePreviewRenderBoundary extends ReactComponent<
   { children: ReactNode; filePath: string; resetKey: string },
   { error: string | null }
 > {
@@ -1121,20 +1083,6 @@ function applyLivePartPreviewTime(
   }
 }
 
-function applyRenderClockStateToElement(
-  element: HTMLElement | null,
-  state: { playing: boolean; time: number; mode: "preview" | "export" },
-  attrs = getRenderClockAttributes(state),
-  style = getRenderClockStyle(state),
-) {
-  if (!element) return;
-  for (const [key, value] of Object.entries(attrs))
-    element.setAttribute(key, value);
-  for (const [key, value] of Object.entries(style))
-    element.style.setProperty(key, String(value));
-  syncDomAnimationsToRenderClock(element, state);
-}
-
 function applyLivePreviewObject(
   target: HTMLElement,
   object: EvaluatedFrameObject,
@@ -1245,169 +1193,7 @@ function TrackerTargetOverlay({
   );
 }
 
-function CompositionLayerView({
-  active,
-  activeShapeTool,
-  animationsEnabled,
-  canSelect,
-  editingTextObjectId,
-  exportTileFrameBounds,
-  focusPicking,
-  frameScale,
-  hideNullObjects,
-  isPlaying,
-  part,
-  renderClockSceneTime,
-  previewTime,
-  renderMode,
-  onObjectPointerDown,
-  onObjectContextMenu,
-  onTextEditCommit,
-  onTextEditEnd,
-  onTextObjectDoubleClick,
-}: {
-  active: boolean;
-  activeShapeTool?: ComposeDrawTool | null;
-  animationsEnabled: boolean;
-  canSelect: boolean;
-  editingTextObjectId: string | null;
-  exportTileFrameBounds?: ExportTileFrameBounds;
-  focusPicking: boolean;
-  frameScale: number;
-  hideNullObjects?: boolean;
-  isPlaying: boolean;
-  part: Part;
-  renderClockSceneTime: number;
-  previewTime: number;
-  renderMode: "preview" | "export";
-  onObjectPointerDown: (
-    event: PointerEvent<HTMLDivElement>,
-    object: FrameObject,
-  ) => void;
-  onObjectContextMenu?: (
-    event: ReactMouseEvent<HTMLDivElement>,
-    object: FrameObject,
-  ) => void;
-  onTextEditCommit: (
-    objectId: string,
-    content: string,
-    richText?: RichTextSegment[],
-    bounds?: Bounds,
-  ) => void;
-  onTextEditEnd?: () => void;
-  onTextObjectDoubleClick: (
-    event: ReactMouseEvent<HTMLDivElement>,
-    object: FrameObject,
-  ) => void;
-}) {
-  const layerRef = useRef<HTMLDivElement | null>(null);
-  const renderClockState = useMemo(
-    () => ({
-      playing: renderMode !== "export" && isPlaying,
-      time: previewTime,
-      mode: renderMode,
-    }),
-    [isPlaying, previewTime, renderMode],
-  );
-  const renderClockStateRef = useRef(renderClockState);
-  const renderClockStyle = useMemo(
-    () => getRenderClockStyle(renderClockState) as CSSProperties,
-    [renderClockState],
-  );
-
-  useLayoutEffect(() => {
-    renderClockStateRef.current = renderClockState;
-    applyRenderClockStateToElement(layerRef.current, renderClockState);
-  }, [renderClockState]);
-
-  useLayoutEffect(
-    () => syncRenderClockSubtree(layerRef.current, renderClockStateRef),
-    [],
-  );
-
-  return (
-    <div
-      ref={layerRef}
-      className="absolute inset-0 overflow-hidden"
-      data-clipper-render-clock-layer
-      data-clipper-render-clock-offset={previewTime - renderClockSceneTime}
-      {...getRenderClockAttributes(renderClockState)}
-      style={{ ...(part.frame.style as CSSProperties), ...renderClockStyle }}
-    >
-      {!part.background.hidden && (
-        <BackgroundLayerView
-          animationsEnabled={animationsEnabled}
-          background={part.background}
-          canSelect={active && canSelect}
-          duration={part.duration}
-          exportTileFrameBounds={exportTileFrameBounds}
-          frameScale={frameScale}
-          previewTime={previewTime}
-          renderMode={renderMode}
-          onPointerDown={undefined}
-        />
-      )}
-      {part.objects
-        .filter(
-          (obj) =>
-            !obj.hidden &&
-            isObjectInExportTile(obj, exportTileFrameBounds) &&
-            !(hideNullObjects && obj.type === "null"),
-        )
-        .map((object) => (
-          <FrameObjectView
-            key={object.id}
-            activeShapeTool={active ? activeShapeTool : undefined}
-            animationsEnabled={animationsEnabled}
-            exportTileFrameBounds={exportTileFrameBounds}
-            object={object}
-            parentTransform={buildFrameObjectParentTransformLookup(
-              part.objects,
-              previewTime,
-              part.duration,
-              animationsEnabled,
-            ).get(object.id)}
-            canSelect={active && canSelect}
-            duration={part.duration}
-            editing={active && !isPlaying && editingTextObjectId === object.id}
-            focusPicking={active && focusPicking}
-            frameScale={frameScale}
-            isPlaying={isPlaying}
-            previewTime={previewTime}
-            liveTimeOffset={previewTime - renderClockSceneTime}
-            renderMode={renderMode}
-            onDoubleClick={(event) => {
-              if (
-                active &&
-                !isPlaying &&
-                (activeShapeTool === "text" || activeShapeTool === null)
-              )
-                onTextObjectDoubleClick(event, object);
-            }}
-            onContextMenu={
-              active && !isPlaying && onObjectContextMenu
-                ? (event) => onObjectContextMenu(event, object)
-                : undefined
-            }
-            onPointerDown={(event) => {
-              if (active && !isPlaying && isPenDrawTool(activeShapeTool)) {
-                event.preventDefault();
-                event.stopPropagation();
-                return;
-              }
-              if (active && !isPlaying) onObjectPointerDown(event, object);
-            }}
-            onTextEditCommit={(content, richText, bounds) =>
-              onTextEditCommit(object.id, content, richText, bounds)
-            }
-            onTextEditEnd={onTextEditEnd}
-          />
-        ))}
-    </div>
-  );
-}
-
-function TransitionCompositeView({
+export function TransitionCompositeView({
   adjustmentLayers,
   animationsEnabled,
   exportTileFrameBounds,
@@ -1520,23 +1306,16 @@ function TimelineSequenceView({
   return (
     <div className="absolute inset-0" style={visualStyle}>
       {parts.map((item) => (
-        <CompositionLayerView
+        <TimelineSequenceCompositionItem
           key={`${sequenceKey}:${item.part.id}:${item.start}`}
-          active={false}
           animationsEnabled={animationsEnabled}
-          canSelect={false}
-          editingTextObjectId={null}
           exportTileFrameBounds={exportTileFrameBounds}
-          focusPicking={false}
           frameScale={frameScale}
           isPlaying={isPlaying}
           part={item.part}
-          renderClockSceneTime={sceneTime}
           previewTime={item.previewTime}
+          renderClockSceneTime={sceneTime}
           renderMode={renderMode}
-          onObjectPointerDown={noopObjectPointerDown}
-          onTextEditCommit={noopTextEditCommit}
-          onTextObjectDoubleClick={noopTextDoubleClick}
         />
       ))}
       {adjustment.overlays?.map((overlay) => (
@@ -1554,7 +1333,7 @@ function TimelineSequenceView({
   );
 }
 
-function getActiveTransitionLayer(
+export function getActiveTransitionLayer(
   sceneTime: number,
   layers: TransitionLayer[] | undefined,
 ) {
@@ -1571,28 +1350,48 @@ function noopObjectPointerDown() {}
 function noopTextEditCommit() {}
 function noopTextDoubleClick() {}
 
-function syncRenderClockSubtree(
-  root: HTMLDivElement | null,
-  stateRef: {
-    current: { playing: boolean; time: number; mode: "preview" | "export" };
-  },
-) {
-  syncDomAnimationsToRenderClock(root, stateRef.current);
-  const frame = requestAnimationFrame(() =>
-    syncDomAnimationsToRenderClock(root, stateRef.current),
+function TimelineSequenceCompositionItem({
+  animationsEnabled,
+  exportTileFrameBounds,
+  frameScale,
+  isPlaying,
+  part,
+  previewTime,
+  renderClockSceneTime,
+  renderMode,
+}: {
+  animationsEnabled: boolean;
+  exportTileFrameBounds?: ExportTileFrameBounds;
+  frameScale: number;
+  isPlaying: boolean;
+  part: Part;
+  previewTime: number;
+  renderClockSceneTime: number;
+  renderMode: "preview" | "export";
+}) {
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  return (
+    <DomBackend
+      active={false}
+      animationsEnabled={animationsEnabled}
+      canSelect={false}
+      duration={part.duration}
+      editingTextObjectId={null}
+      exportTileFrameBounds={exportTileFrameBounds}
+      focusPicking={false}
+      frameScale={frameScale}
+      hideNullObjects={false}
+      hostRef={hostRef}
+      isPlaying={isPlaying}
+      localTime={previewTime}
+      part={part}
+      renderClockSceneTime={renderClockSceneTime}
+      renderMode={renderMode}
+      onObjectPointerDown={noopObjectPointerDown}
+      onTextEditCommit={noopTextEditCommit}
+      onTextObjectDoubleClick={noopTextDoubleClick}
+    />
   );
-  const observer =
-    typeof MutationObserver !== "undefined" && root
-      ? new MutationObserver(() =>
-          syncDomAnimationsToRenderClock(root, stateRef.current),
-        )
-      : null;
-  if (observer && root)
-    observer.observe(root, { childList: true, subtree: true });
-  return () => {
-    cancelAnimationFrame(frame);
-    observer?.disconnect();
-  };
 }
 
 export function FramePickPointOverlay({
@@ -3729,7 +3528,7 @@ function getSequenceRepeatTokenTime(
   return delay + cycleElapsed - tokenOffset;
 }
 
-function isObjectInExportTile(
+export function isObjectInExportTile(
   object: FrameObject,
   tile: ExportTileFrameBounds | undefined,
 ): boolean {

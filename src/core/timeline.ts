@@ -182,6 +182,8 @@ export function validateScene(scene: Scene): string[] {
   return errors;
 }
 
+const fallbackAdjustmentRowIds: ReadonlyArray<string> = ["adjust"];
+
 export function getExecutableAdjustmentLayers(
   layers: AdjustmentLayer[] | undefined,
   timelineLayers: TimelineLayerState | undefined,
@@ -194,7 +196,13 @@ export function getExecutableAdjustmentLayers(
   const rowOrder = new Map(
     visibleRows.map((layer, index) => [layer.id, index]),
   );
-  if (rowIds.size === 0) return [];
+  if (rowIds.size === 0) {
+    const fallbackIds = new Set(fallbackAdjustmentRowIds);
+    if (fallbackIds.size === 0) return [];
+    return (layers ?? []).filter((layer) =>
+      fallbackIds.has(getAdjustmentLayerRowId(layer)),
+    );
+  }
   return (layers ?? [])
     .filter((layer) => rowIds.has(getAdjustmentLayerRowId(layer)))
     .sort((left, right) => {
