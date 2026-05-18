@@ -1,34 +1,6 @@
-import { useEffect, useState } from "react";
-import { videoExportFrameRate } from "../../config";
-import {
-  appSettingKeys,
-  clampAgentProvider,
-  clampExportTileMapping,
-  clampExportWorkerMapping,
-  clampPlaybackFpsOption,
-  clampPreviewRenderHeight,
-  clampStableSlowGridPreset,
-  clampStableSlowValidationSamples,
-  clampVideoExportTileHeight,
-  getInitialAgentProvider,
-  getInitialExportTileMapping,
-  getInitialExportWorkerConfigurationMode,
-  getInitialExportWorkerMapping,
-  getInitialPlaybackFpsOption,
-  getInitialPreviewRenderHeight,
-  getInitialStableSlowGridPreset,
-  getInitialStableSlowValidationSamples,
-  getInitialVideoExportTileHeight,
-  readStoredAppSettings,
-  readStoredJsonSetting,
-  readStoredStringSetting,
-  writeStoredAppSetting,
-  type PlaybackFpsOption,
-} from "../../state/storedAppSettings";
-import {
-  defaultExportTileMapping,
-  defaultExportWorkerMapping,
-} from "../../config";
+import { useEffect, useMemo } from "react";
+import { useAppSettingsStore } from "../../state/appSettingsStore";
+import type { PlaybackFpsOption } from "../../state/storedAppSettings";
 import type {
   AgentProvider,
   ExportRenderQuality,
@@ -43,17 +15,13 @@ import type {
 
 export type ExportSettingsState = {
   exportFrameRate: number;
-  setExportFrameRate: React.Dispatch<React.SetStateAction<number>>;
+  setExportFrameRate: (value: number) => void;
   mediaExportFormat: MediaExportFormat;
-  setMediaExportFormat: React.Dispatch<React.SetStateAction<MediaExportFormat>>;
+  setMediaExportFormat: (value: MediaExportFormat) => void;
   mediaExportRenderMode: MediaExportRenderMode;
-  setMediaExportRenderMode: React.Dispatch<
-    React.SetStateAction<MediaExportRenderMode>
-  >;
+  setMediaExportRenderMode: (value: MediaExportRenderMode) => void;
   exportRenderQuality: ExportRenderQuality;
-  setExportRenderQuality: React.Dispatch<
-    React.SetStateAction<ExportRenderQuality>
-  >;
+  setExportRenderQuality: (value: ExportRenderQuality) => void;
   videoExportTileHeight: number;
   setVideoExportTileHeight: (value: number) => void;
   exportWorkerMapping: ExportWorkerResolutionMapping;
@@ -79,189 +47,100 @@ export type ExportSettingsState = {
 };
 
 export function useExportSettings(): ExportSettingsState {
-  const [exportFrameRate, setExportFrameRate] = useState(videoExportFrameRate);
-  const [mediaExportFormat, setMediaExportFormat] =
-    useState<MediaExportFormat>("mp4");
-  const [mediaExportRenderMode, setMediaExportRenderMode] =
-    useState<MediaExportRenderMode>("renderer");
-  const [exportRenderQuality, setExportRenderQuality] =
-    useState<ExportRenderQuality>("high");
-  const [videoExportTileHeight, setVideoExportTileHeightState] = useState(
-    getInitialVideoExportTileHeight,
+  const exportFrameRate = useAppSettingsStore((s) => s.exportFrameRate);
+  const mediaExportFormat = useAppSettingsStore((s) => s.mediaExportFormat);
+  const mediaExportRenderMode = useAppSettingsStore(
+    (s) => s.mediaExportRenderMode,
   );
-  const [exportWorkerMapping, setExportWorkerMappingState] = useState(
-    getInitialExportWorkerMapping,
+  const exportRenderQuality = useAppSettingsStore((s) => s.exportRenderQuality);
+  const videoExportTileHeight = useAppSettingsStore(
+    (s) => s.videoExportTileHeight,
   );
-  const [exportWorkerConfigurationMode, setExportWorkerConfigurationModeState] =
-    useState<ExportWorkerConfigurationMode>(
-      getInitialExportWorkerConfigurationMode,
-    );
-  const [exportTileMapping, setExportTileMappingState] = useState(
-    getInitialExportTileMapping,
+  const exportWorkerMapping = useAppSettingsStore((s) => s.exportWorkerMapping);
+  const exportWorkerConfigurationMode = useAppSettingsStore(
+    (s) => s.exportWorkerConfigurationMode,
   );
-  const [stableSlowGridPreset, setStableSlowGridPresetState] =
-    useState<StableSlowGridPreset>(getInitialStableSlowGridPreset);
-  const [stableSlowValidationSamples, setStableSlowValidationSamplesState] =
-    useState<StableSlowValidationSamples>(
-      getInitialStableSlowValidationSamples,
-    );
-  const [previewRenderHeight, setPreviewRenderHeightState] = useState(
-    getInitialPreviewRenderHeight,
+  const exportTileMapping = useAppSettingsStore((s) => s.exportTileMapping);
+  const stableSlowGridPreset = useAppSettingsStore(
+    (s) => s.stableSlowGridPreset,
   );
-  const [playbackFpsOption, setPlaybackFpsOptionState] =
-    useState<PlaybackFpsOption>(getInitialPlaybackFpsOption);
-  const [agentProvider, setAgentProviderState] = useState<AgentProvider>(
-    getInitialAgentProvider,
+  const stableSlowValidationSamples = useAppSettingsStore(
+    (s) => s.stableSlowValidationSamples,
   );
+  const previewRenderHeight = useAppSettingsStore((s) => s.previewRenderHeight);
+  const playbackFpsOption = useAppSettingsStore((s) => s.playbackFpsOption);
+  const agentProvider = useAppSettingsStore((s) => s.agentProvider);
+  const hydrateFromStorage = useAppSettingsStore((s) => s.hydrateFromStorage);
+  const initialized = useAppSettingsStore((s) => s.initialized);
+  const storeSetExportFrameRate = useAppSettingsStore(
+    (s) => s.setExportFrameRate,
+  );
+  const storeSetMediaExportFormat = useAppSettingsStore(
+    (s) => s.setMediaExportFormat,
+  );
+  const storeSetMediaExportRenderMode = useAppSettingsStore(
+    (s) => s.setMediaExportRenderMode,
+  );
+  const storeSetExportRenderQuality = useAppSettingsStore(
+    (s) => s.setExportRenderQuality,
+  );
+  const storeSetVideoExportTileHeight = useAppSettingsStore(
+    (s) => s.setVideoExportTileHeight,
+  );
+  const storeSetExportWorkerMapping = useAppSettingsStore(
+    (s) => s.setExportWorkerMapping,
+  );
+  const storeSetExportWorkerConfigurationMode = useAppSettingsStore(
+    (s) => s.setExportWorkerConfigurationMode,
+  );
+  const storeSetExportTileMapping = useAppSettingsStore(
+    (s) => s.setExportTileMapping,
+  );
+  const storeSetStableSlowGridPreset = useAppSettingsStore(
+    (s) => s.setStableSlowGridPreset,
+  );
+  const storeSetStableSlowValidationSamples = useAppSettingsStore(
+    (s) => s.setStableSlowValidationSamples,
+  );
+  const storeSetPreviewRenderHeight = useAppSettingsStore(
+    (s) => s.setPreviewRenderHeight,
+  );
+  const storeSetPlaybackFpsOption = useAppSettingsStore(
+    (s) => s.setPlaybackFpsOption,
+  );
+  const storeSetAgentProvider = useAppSettingsStore((s) => s.setAgentProvider);
+
+  const setExportFrameRate = (value: number) => storeSetExportFrameRate(value);
+  const setMediaExportFormat = (value: MediaExportFormat) =>
+    storeSetMediaExportFormat(value);
+  const setMediaExportRenderMode = (value: MediaExportRenderMode) =>
+    storeSetMediaExportRenderMode(value);
+  const setExportRenderQuality = (value: ExportRenderQuality) =>
+    storeSetExportRenderQuality(value);
+  const setVideoExportTileHeight = (value: number) =>
+    storeSetVideoExportTileHeight(value);
+  const setExportWorkerMapping = (mapping: ExportWorkerResolutionMapping) =>
+    storeSetExportWorkerMapping(mapping);
+  const setExportWorkerConfigurationMode = (
+    mode: ExportWorkerConfigurationMode,
+  ) => storeSetExportWorkerConfigurationMode(mode);
+  const setExportTileMapping = (mapping: ExportTileResolutionMapping) =>
+    storeSetExportTileMapping(mapping);
+  const setStableSlowGridPreset = (preset: StableSlowGridPreset) =>
+    storeSetStableSlowGridPreset(preset);
+  const setStableSlowValidationSamples = (
+    samples: StableSlowValidationSamples,
+  ) => storeSetStableSlowValidationSamples(samples);
+  const setPreviewRenderHeight = (value: number) =>
+    storeSetPreviewRenderHeight(value);
+  const setPlaybackFpsOption = (value: PlaybackFpsOption) =>
+    storeSetPlaybackFpsOption(value);
+  const setAgentProvider = (provider: AgentProvider) =>
+    storeSetAgentProvider(provider);
 
   useEffect(() => {
-    let cancelled = false;
-    void readStoredAppSettings().then((settings) => {
-      if (cancelled) return;
-      setVideoExportTileHeightState(
-        clampVideoExportTileHeight(
-          Number.parseInt(
-            readStoredStringSetting(
-              settings,
-              appSettingKeys.videoExportTileHeight,
-            ) ?? "",
-            10,
-          ),
-        ),
-      );
-      setExportWorkerMappingState(
-        readStoredJsonSetting(
-          settings,
-          appSettingKeys.exportWorkerMapping,
-          clampExportWorkerMapping,
-          defaultExportWorkerMapping,
-        ),
-      );
-      setExportWorkerConfigurationModeState(
-        readStoredStringSetting(
-          settings,
-          appSettingKeys.exportWorkerConfigurationMode,
-        ) === "unified"
-          ? "unified"
-          : "separate",
-      );
-      setExportTileMappingState(
-        readStoredJsonSetting(
-          settings,
-          appSettingKeys.exportTileMapping,
-          clampExportTileMapping,
-          defaultExportTileMapping,
-        ),
-      );
-      setStableSlowGridPresetState(
-        clampStableSlowGridPreset(
-          readStoredStringSetting(
-            settings,
-            appSettingKeys.stableSlowGridPreset,
-          ),
-        ),
-      );
-      setStableSlowValidationSamplesState(
-        clampStableSlowValidationSamples(
-          Number.parseInt(
-            readStoredStringSetting(
-              settings,
-              appSettingKeys.stableSlowValidationSamples,
-            ) ?? "",
-            10,
-          ),
-        ),
-      );
-      setPreviewRenderHeightState(
-        clampPreviewRenderHeight(
-          Number.parseInt(
-            readStoredStringSetting(
-              settings,
-              appSettingKeys.previewRenderHeight,
-            ) ?? "",
-            10,
-          ),
-        ),
-      );
-      setPlaybackFpsOptionState(
-        clampPlaybackFpsOption(
-          readStoredStringSetting(settings, appSettingKeys.playbackFps),
-        ),
-      );
-      setAgentProviderState(
-        clampAgentProvider(
-          readStoredStringSetting(settings, appSettingKeys.agentProvider),
-        ),
-      );
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  function setVideoExportTileHeight(value: number) {
-    const nextValue = clampVideoExportTileHeight(value);
-    setVideoExportTileHeightState(nextValue);
-    writeStoredAppSetting(
-      appSettingKeys.videoExportTileHeight,
-      String(nextValue),
-    );
-  }
-  function setExportWorkerMapping(mapping: ExportWorkerResolutionMapping) {
-    const nextMapping = clampExportWorkerMapping(mapping);
-    setExportWorkerMappingState(nextMapping);
-    writeStoredAppSetting(
-      appSettingKeys.exportWorkerMapping,
-      JSON.stringify(nextMapping),
-    );
-  }
-  function setExportWorkerConfigurationMode(
-    mode: ExportWorkerConfigurationMode,
-  ) {
-    setExportWorkerConfigurationModeState(mode);
-    writeStoredAppSetting(appSettingKeys.exportWorkerConfigurationMode, mode);
-  }
-  function setExportTileMapping(mapping: ExportTileResolutionMapping) {
-    const nextMapping = clampExportTileMapping(mapping);
-    setExportTileMappingState(nextMapping);
-    writeStoredAppSetting(
-      appSettingKeys.exportTileMapping,
-      JSON.stringify(nextMapping),
-    );
-  }
-  function setStableSlowGridPreset(preset: StableSlowGridPreset) {
-    const nextPreset = clampStableSlowGridPreset(preset);
-    setStableSlowGridPresetState(nextPreset);
-    writeStoredAppSetting(appSettingKeys.stableSlowGridPreset, nextPreset);
-  }
-  function setStableSlowValidationSamples(
-    samples: StableSlowValidationSamples,
-  ) {
-    const nextSamples = clampStableSlowValidationSamples(samples);
-    setStableSlowValidationSamplesState(nextSamples);
-    writeStoredAppSetting(
-      appSettingKeys.stableSlowValidationSamples,
-      String(nextSamples),
-    );
-  }
-  function setPreviewRenderHeight(value: number) {
-    const nextValue = clampPreviewRenderHeight(value);
-    setPreviewRenderHeightState(nextValue);
-    writeStoredAppSetting(
-      appSettingKeys.previewRenderHeight,
-      String(nextValue),
-    );
-  }
-  function setPlaybackFpsOption(value: PlaybackFpsOption) {
-    const nextValue = clampPlaybackFpsOption(value);
-    setPlaybackFpsOptionState(nextValue);
-    writeStoredAppSetting(appSettingKeys.playbackFps, String(nextValue));
-  }
-  function setAgentProvider(provider: AgentProvider) {
-    const nextProvider = clampAgentProvider(provider);
-    setAgentProviderState(nextProvider);
-    writeStoredAppSetting(appSettingKeys.agentProvider, nextProvider);
-  }
+    if (!initialized) void hydrateFromStorage();
+  }, [hydrateFromStorage, initialized]);
 
   return {
     exportFrameRate,

@@ -219,6 +219,11 @@ const composeAnimationAttributeLabels: Record<AnimationTrackProperty, string> =
     blur: "Blur",
     backgroundColor: "Background",
     color: "Color",
+    fontSize: "Size",
+    fontWeight: "Weight",
+    lineHeight: "Line Height",
+    letterSpacing: "Char Spacing",
+    fontFamily: "Font",
     pathOffset: "Path offset",
     pathLength: "Path length",
     pathSpacing: "Path spacing",
@@ -250,6 +255,11 @@ const genericPropertyPathByAttribute: Partial<
   skewY: "transform.skewY",
   transformPerspective: "transform.perspective",
   blur: "filter.blur",
+  fontSize: "style.fontSize",
+  fontWeight: "style.fontWeight",
+  lineHeight: "style.lineHeight",
+  letterSpacing: "style.letterSpacing",
+  fontFamily: "style.fontFamily",
 };
 
 const attributeByGenericPropertyPath = new Map<

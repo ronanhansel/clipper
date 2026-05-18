@@ -220,6 +220,14 @@ export function propertyPathForAttribute(key: ComposeAnimationAttributeKey) {
     return `bounds.${key}`;
   if (key === "opacity" || key === "color" || key === "backgroundColor")
     return `style.${key}`;
+  if (
+    key === "fontSize" ||
+    key === "fontWeight" ||
+    key === "lineHeight" ||
+    key === "letterSpacing" ||
+    key === "fontFamily"
+  )
+    return `style.${key}`;
   if (key === "blur") return "filter.blur";
   if (key === "z") return "transform.translateZ";
   if (key === "transformPerspective") return "transform.perspective";
@@ -243,7 +251,8 @@ export function coerceInspectorAttributeValue(
   value: number | string,
 ) {
   if (typeof value === "number") return value;
-  if (key === "color" || key === "backgroundColor") return value;
+  if (key === "color" || key === "backgroundColor" || key === "fontFamily")
+    return value;
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : value;
 }
@@ -286,6 +295,14 @@ export function getEvaluatedAttributeValue(
   if (key === "x" || key === "y" || key === "width" || key === "height")
     return evaluated.bounds[key];
   if (key === "opacity" || key === "color" || key === "backgroundColor")
+    return evaluated.style[key] ?? null;
+  if (
+    key === "fontSize" ||
+    key === "fontWeight" ||
+    key === "lineHeight" ||
+    key === "letterSpacing" ||
+    key === "fontFamily"
+  )
     return evaluated.style[key] ?? null;
   const transform = evaluated.transform as Record<string, unknown>;
   const filter = evaluated.filter as Record<string, unknown>;

@@ -9,9 +9,7 @@ import {
   Underline,
 } from "lucide-react";
 import { mutedCaps } from "../../../app/config";
-import { livePreviewScrubCommitThrottleMs } from "../../../app/services/scrubInteractionService";
 import { graphicTextDefaults } from "../../../core/graphics/inspectorSettings";
-import { Input } from "../../ui/input";
 import { Textarea } from "../../ui/textarea";
 import { useObjectInspector } from "../objectInspectorContext";
 import { FontSelector } from "./FontSelector";
@@ -42,25 +40,45 @@ export function TextSection() {
     hasTextDecoration,
     textButtonClass,
     onChange,
+    keyframeValue,
+    keyframeAtCurrentTime,
+    toggleKeyframe,
+    commitKeyframedValue,
+    renderKeyframedInput,
   } = useObjectInspector();
 
   const fontFamily = String(
-    object.style.fontFamily ?? graphicTextDefaults.fontFamily,
+    keyframeValue(
+      "fontFamily",
+      String(object.style.fontFamily ?? graphicTextDefaults.fontFamily),
+    ),
   );
   const fontSize = Number(
-    object.style.fontSize ?? graphicTextDefaults.fontSize,
+    keyframeValue(
+      "fontSize",
+      Number(object.style.fontSize ?? graphicTextDefaults.fontSize),
+    ),
   );
   const fontWeight = Number(
-    object.style.fontWeight ?? graphicTextDefaults.fontWeight,
+    keyframeValue(
+      "fontWeight",
+      Number(object.style.fontWeight ?? graphicTextDefaults.fontWeight),
+    ),
   );
   const fontStyle = String(
     object.style.fontStyle ?? graphicTextDefaults.fontStyle,
   );
   const lineHeight = Number(
-    object.style.lineHeight ?? graphicTextDefaults.lineHeight,
+    keyframeValue(
+      "lineHeight",
+      Number(object.style.lineHeight ?? graphicTextDefaults.lineHeight),
+    ),
   );
   const letterSpacing = Number(
-    object.style.letterSpacing ?? graphicTextDefaults.letterSpacing,
+    keyframeValue(
+      "letterSpacing",
+      Number(object.style.letterSpacing ?? graphicTextDefaults.letterSpacing),
+    ),
   );
   const textAlign = String(
     object.style.textAlign ?? graphicTextDefaults.textAlign,
@@ -71,6 +89,17 @@ export function TextSection() {
   const textBoxLayout = String(
     object.style.textBoxLayout ?? graphicTextDefaults.textBoxLayout,
   );
+
+  const fontFamilyHasKeyframe = Boolean(keyframeAtCurrentTime("fontFamily"));
+
+  function commitFontFamily(value: string) {
+    commitKeyframedValue(
+      "fontFamily",
+      value,
+      (next) => updateStyleValue("fontFamily", next),
+      "text",
+    );
+  }
 
   return (
     <>
@@ -86,76 +115,51 @@ export function TextSection() {
       <FillSection />
       <FontSelector
         value={fontFamily}
-        onChange={(value) => updateStyleValue("fontFamily", value)}
+        hasKeyframe={fontFamilyHasKeyframe}
+        onToggleKeyframe={() => toggleKeyframe("fontFamily", fontFamily)}
+        onChange={commitFontFamily}
       />
       <div className="grid grid-cols-2 gap-2">
-        <label className={`grid gap-1.5 ${mutedCaps}`}>
-          Size
-          <Input
-            type="number"
-            min={1}
-            numberScrubMode="preview"
-            numberScrubCommitThrottleMs={livePreviewScrubCommitThrottleMs}
-            value={fontSize}
-            onNumberScrubPreview={(value) =>
-              previewStyleNumber("fontSize", value)
-            }
-            onChange={(event) =>
-              updateStyleNumber("fontSize", event.target.value)
-            }
-          />
-        </label>
-        <label className={`grid gap-1.5 ${mutedCaps}`}>
-          Weight
-          <Input
-            type="number"
-            min={100}
-            max={1000}
-            step={10}
-            numberScrubMode="preview"
-            numberScrubCommitThrottleMs={livePreviewScrubCommitThrottleMs}
-            value={fontWeight}
-            onNumberScrubPreview={(value) =>
-              previewStyleNumber("fontWeight", value)
-            }
-            onChange={(event) =>
-              updateStyleNumber("fontWeight", event.target.value)
-            }
-          />
-        </label>
-        <label className={`grid gap-1.5 ${mutedCaps}`}>
-          Line Height
-          <Input
-            type="number"
-            min={0.1}
-            step={0.05}
-            numberScrubMode="preview"
-            numberScrubCommitThrottleMs={livePreviewScrubCommitThrottleMs}
-            value={lineHeight}
-            onNumberScrubPreview={(value) =>
-              previewStyleNumber("lineHeight", value)
-            }
-            onChange={(event) =>
-              updateStyleNumber("lineHeight", event.target.value)
-            }
-          />
-        </label>
-        <label className={`grid gap-1.5 ${mutedCaps}`}>
-          Char Spacing
-          <Input
-            type="number"
-            step={0.1}
-            numberScrubMode="preview"
-            numberScrubCommitThrottleMs={livePreviewScrubCommitThrottleMs}
-            value={letterSpacing}
-            onNumberScrubPreview={(value) =>
-              previewStyleNumber("letterSpacing", value)
-            }
-            onChange={(event) =>
-              updateStyleNumber("letterSpacing", event.target.value)
-            }
-          />
-        </label>
+        {renderKeyframedInput({
+          label: "Size",
+          animationKey: "fontSize",
+          value: fontSize,
+          type: "number",
+          min: 1,
+          onCommit: (value) => updateStyleNumber("fontSize", value),
+          onPreviewNumber: (value) => previewStyleNumber("fontSize", value),
+        })}
+        {renderKeyframedInput({
+          label: "Weight",
+          animationKey: "fontWeight",
+          value: fontWeight,
+          type: "number",
+          min: 100,
+          max: 1000,
+          step: 10,
+          onCommit: (value) => updateStyleNumber("fontWeight", value),
+          onPreviewNumber: (value) => previewStyleNumber("fontWeight", value),
+        })}
+        {renderKeyframedInput({
+          label: "Line Height",
+          animationKey: "lineHeight",
+          value: lineHeight,
+          type: "number",
+          min: 0.1,
+          step: 0.05,
+          onCommit: (value) => updateStyleNumber("lineHeight", value),
+          onPreviewNumber: (value) => previewStyleNumber("lineHeight", value),
+        })}
+        {renderKeyframedInput({
+          label: "Char Spacing",
+          animationKey: "letterSpacing",
+          value: letterSpacing,
+          type: "number",
+          step: 0.1,
+          onCommit: (value) => updateStyleNumber("letterSpacing", value),
+          onPreviewNumber: (value) =>
+            previewStyleNumber("letterSpacing", value),
+        })}
       </div>
       <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
         <span className={mutedCaps}>Formatting</span>

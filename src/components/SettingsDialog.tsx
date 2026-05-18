@@ -30,6 +30,11 @@ import {
   previewRenderHeightOptions,
 } from "../app/config";
 import type { PlaybackFpsOption } from "../app/state/storedAppSettings";
+import { useAppSettingsStore } from "../app/state/appSettingsStore";
+import {
+  useViewportEditorState,
+  usePlaybackEditorState,
+} from "../app/state/editorStore";
 import type {
   AgentProvider,
   AppUpdateStatus,
@@ -70,111 +75,79 @@ const stableSlowGridPresetDescriptions: Record<StableSlowGridPreset, string> = {
 
 type SettingsDialogProps = {
   activeSection: SettingsSection;
-  agentProvider: AgentProvider;
-  autoDownloadUpdates: boolean;
-  debugSettingsEnabled: boolean;
-  exportTileMapping: ExportTileResolutionMapping;
-  exportWorkerConfigurationMode: ExportWorkerConfigurationMode;
-  exportWorkerMapping: ExportWorkerResolutionMapping;
-  stableSlowGridPreset: StableSlowGridPreset;
-  stableSlowValidationSamples: StableSlowValidationSamples;
-  liveDomPostProcessMaxFps: number;
   open: boolean;
-  pausePlaybackOnScrub: boolean;
-  prerenderCacheBlackMissDebug: boolean;
-  prerenderCacheEnabled: boolean;
-  prerenderBlockDurationMs: number;
-  previewRenderHeight: number;
-  playbackFpsOption: PlaybackFpsOption;
-  scrubCommitThrottleMs: number;
-  defaultNewMarkerDurationSeconds: number;
-  timelineEndPaddingFraction: number;
-  timelinePrecision: number;
   updateStatus: AppUpdateStatus;
-  videoExportTileHeight: number;
+  autoDownloadUpdates: boolean;
   onActiveSectionChange: (section: SettingsSection) => void;
-  onAgentProviderChange: (provider: AgentProvider) => void;
   onAutoDownloadUpdatesChange: (enabled: boolean) => void;
   onCheckForUpdates: () => void;
   onDownloadUpdate: () => void;
-  onDebugSettingsEnabledChange: (enabled: boolean) => void;
-  onExportTileMappingChange: (mapping: ExportTileResolutionMapping) => void;
-  onExportWorkerConfigurationModeChange: (
-    mode: ExportWorkerConfigurationMode,
-  ) => void;
-  onExportWorkerMappingChange: (mapping: ExportWorkerResolutionMapping) => void;
-  onStableSlowGridPresetChange: (preset: StableSlowGridPreset) => void;
-  onStableSlowValidationSamplesChange: (
-    samples: StableSlowValidationSamples,
-  ) => void;
   onInstallUpdate: () => void;
-  onLiveDomPostProcessMaxFpsChange: (value: number) => void;
   onOpenChange: (open: boolean) => void;
-  onPausePlaybackOnScrubChange: (enabled: boolean) => void;
-  onPrerenderCacheBlackMissDebugChange: (enabled: boolean) => void;
-  onPrerenderCacheEnabledChange: (enabled: boolean) => void;
-  onPrerenderBlockDurationMsChange: (value: number) => void;
-  onPreviewRenderHeightChange: (value: number) => void;
-  onPlaybackFpsOptionChange: (value: PlaybackFpsOption) => void;
   onClearAllPrerenderCaches: () => void;
-  onScrubCommitThrottleMsChange: (value: number) => void;
-  onDefaultNewMarkerDurationSecondsChange: (value: number) => void;
-  onTimelineEndPaddingFractionChange: (value: number) => void;
-  onTimelinePrecisionChange: (value: number) => void;
-  onVideoExportTileHeightChange: (value: number) => void;
 };
 
 export function SettingsDialog({
   activeSection,
-  agentProvider,
-  autoDownloadUpdates,
-  debugSettingsEnabled,
-  exportTileMapping,
-  exportWorkerConfigurationMode,
-  exportWorkerMapping,
-  stableSlowGridPreset,
-  stableSlowValidationSamples,
-  liveDomPostProcessMaxFps,
   open,
-  pausePlaybackOnScrub,
-  prerenderCacheBlackMissDebug,
-  prerenderCacheEnabled,
-  prerenderBlockDurationMs,
-  previewRenderHeight,
-  playbackFpsOption,
-  scrubCommitThrottleMs,
-  defaultNewMarkerDurationSeconds: markerDurationSeconds,
-  timelineEndPaddingFraction,
-  timelinePrecision,
   updateStatus,
-  videoExportTileHeight,
+  autoDownloadUpdates,
   onActiveSectionChange,
-  onAgentProviderChange,
   onAutoDownloadUpdatesChange,
   onCheckForUpdates,
   onDownloadUpdate,
-  onDebugSettingsEnabledChange,
-  onExportTileMappingChange,
-  onExportWorkerConfigurationModeChange,
-  onExportWorkerMappingChange,
-  onStableSlowGridPresetChange,
-  onStableSlowValidationSamplesChange,
   onInstallUpdate,
-  onLiveDomPostProcessMaxFpsChange,
   onOpenChange,
-  onPausePlaybackOnScrubChange,
-  onPrerenderCacheBlackMissDebugChange,
-  onPrerenderCacheEnabledChange,
-  onPrerenderBlockDurationMsChange,
-  onPreviewRenderHeightChange,
-  onPlaybackFpsOptionChange,
   onClearAllPrerenderCaches,
-  onScrubCommitThrottleMsChange,
-  onDefaultNewMarkerDurationSecondsChange,
-  onTimelineEndPaddingFractionChange,
-  onTimelinePrecisionChange,
-  onVideoExportTileHeightChange,
 }: SettingsDialogProps) {
+  const {
+    agentProvider,
+    debugSettingsEnabled,
+    exportTileMapping,
+    exportWorkerConfigurationMode,
+    exportWorkerMapping,
+    stableSlowGridPreset,
+    stableSlowValidationSamples,
+    liveDomPostProcessMaxFps,
+    prerenderCacheBlackMissDebug,
+    prerenderCacheEnabled,
+    prerenderBlockDurationMs,
+    previewRenderHeight,
+    playbackFpsOption,
+    videoExportTileHeight,
+    setAgentProvider,
+    setDebugSettingsEnabled,
+    setExportTileMapping,
+    setExportWorkerConfigurationMode,
+    setExportWorkerMapping,
+    setStableSlowGridPreset,
+    setStableSlowValidationSamples,
+    setLiveDomPostProcessMaxFps,
+    setPrerenderCacheBlackMissDebug,
+    setPrerenderCacheEnabled,
+    setPrerenderBlockDurationMs,
+    setPreviewRenderHeight,
+    setPlaybackFpsOption,
+    setVideoExportTileHeight,
+  } = useAppSettingsStore();
+
+  const {
+    framePreviewScale: _skip,
+    timelineEndPaddingFraction,
+    timelinePrecision,
+    defaultNewMarkerDurationSeconds: markerDurationSeconds,
+    setTimelineEndPaddingFraction,
+    setTimelinePrecision,
+    setDefaultNewMarkerDurationSeconds,
+  } = useViewportEditorState();
+
+  const {
+    scrubCommitThrottleMs,
+    pausePlaybackOnScrub,
+    setScrubCommitThrottleMs,
+    setPausePlaybackOnScrub,
+  } = usePlaybackEditorState();
+
   const navItems: Array<{ id: SettingsSection; label: string }> = [
     { id: "general", label: "General" },
     { id: "playback", label: "Playback" },
@@ -186,13 +159,13 @@ export function SettingsDialog({
   function updateScrubCommitThrottle(value: string) {
     const parsed = Number(value);
     if (!Number.isFinite(parsed)) return;
-    onScrubCommitThrottleMsChange(Math.round(clamp(parsed, 16, 500)));
+    setScrubCommitThrottleMs(Math.round(clamp(parsed, 16, 500)));
   }
 
   function updateMarkerDuration(value: string) {
     const parsed = Number(value);
     if (!Number.isFinite(parsed)) return;
-    onDefaultNewMarkerDurationSecondsChange(
+    setDefaultNewMarkerDurationSeconds(
       Math.round(clamp(parsed, 0.1, 60) * 10) / 10,
     );
   }
@@ -200,21 +173,19 @@ export function SettingsDialog({
   function updateTimelineEndPaddingFraction(value: string) {
     const parsed = Number(value);
     if (!Number.isFinite(parsed)) return;
-    onTimelineEndPaddingFractionChange(
-      Math.round(clamp(parsed, 0, 2) * 100) / 100,
-    );
+    setTimelineEndPaddingFraction(Math.round(clamp(parsed, 0, 2) * 100) / 100);
   }
 
   function updateTimelinePrecision(value: string) {
     const parsed = Number(value);
     if (!Number.isFinite(parsed)) return;
-    onTimelinePrecisionChange(Math.round(clamp(parsed, 1, 6)));
+    setTimelinePrecision(Math.round(clamp(parsed, 1, 6)));
   }
 
   function updateLiveDomPostProcessMaxFps(value: string) {
     const parsed = Number(value);
     if (!Number.isFinite(parsed)) return;
-    onLiveDomPostProcessMaxFpsChange(
+    setLiveDomPostProcessMaxFps(
       Math.round(
         clamp(parsed, minLiveDomPostProcessMaxFps, maxLiveDomPostProcessMaxFps),
       ),
@@ -224,7 +195,7 @@ export function SettingsDialog({
   function updateVideoExportTileHeight(value: string) {
     const parsed = Number(value);
     if (!Number.isFinite(parsed)) return;
-    onVideoExportTileHeightChange(
+    setVideoExportTileHeight(
       Math.round(
         clamp(parsed, minVideoExportTileHeight, maxVideoExportTileHeight),
       ),
@@ -234,7 +205,7 @@ export function SettingsDialog({
   function updateStableSlowValidationSamples(value: string) {
     const parsed = Number(value);
     if (!Number.isFinite(parsed)) return;
-    onStableSlowValidationSamplesChange(
+    setStableSlowValidationSamples(
       Math.round(
         clamp(
           parsed,
@@ -251,7 +222,7 @@ export function SettingsDialog({
   ) {
     const parsed = Number(value);
     if (!Number.isFinite(parsed)) return;
-    onExportWorkerMappingChange({
+    setExportWorkerMapping({
       ...exportWorkerMapping,
       [key]: Math.round(
         clamp(parsed, minExportWorkerCount, maxExportWorkerCount),
@@ -265,7 +236,7 @@ export function SettingsDialog({
     const workerCount = Math.round(
       clamp(parsed, minExportWorkerCount, maxExportWorkerCount),
     );
-    onExportWorkerMappingChange({
+    setExportWorkerMapping({
       hd: workerCount,
       qhd: workerCount,
       uhd: workerCount,
@@ -278,7 +249,7 @@ export function SettingsDialog({
   ) {
     const parsed = Number(value);
     if (!Number.isFinite(parsed)) return;
-    onExportTileMappingChange({
+    setExportTileMapping({
       ...exportTileMapping,
       [key]: Math.round(clamp(parsed, minExportTileCount, maxExportTileCount)),
     });
@@ -287,7 +258,7 @@ export function SettingsDialog({
   function updatePrerenderBlockDuration(value: string) {
     const parsed = Number(value);
     if (!Number.isFinite(parsed)) return;
-    onPrerenderBlockDurationMsChange(
+    setPrerenderBlockDurationMs(
       Math.round(
         clamp(parsed, minPrerenderBlockDurationMs, maxPrerenderBlockDurationMs),
       ),
@@ -367,7 +338,7 @@ export function SettingsDialog({
                     <Select
                       value={agentProvider}
                       onValueChange={(value) =>
-                        onAgentProviderChange(value as AgentProvider)
+                        setAgentProvider(value as AgentProvider)
                       }
                     >
                       <SelectTrigger id="agent-provider" className="h-9">
@@ -469,7 +440,7 @@ export function SettingsDialog({
                       id="prerender-cache-toggle"
                       className="mt-0.5"
                       checked={prerenderCacheEnabled}
-                      onCheckedChange={onPrerenderCacheEnabledChange}
+                      onCheckedChange={setPrerenderCacheEnabled}
                     />
                   </label>
                   {debugSettingsEnabled ? (
@@ -494,7 +465,7 @@ export function SettingsDialog({
                         id="prerender-cache-black-miss-debug-toggle"
                         className="mt-0.5"
                         checked={prerenderCacheBlackMissDebug}
-                        onCheckedChange={onPrerenderCacheBlackMissDebugChange}
+                        onCheckedChange={setPrerenderCacheBlackMissDebug}
                       />
                     </label>
                   ) : null}
@@ -531,7 +502,7 @@ export function SettingsDialog({
                         className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-md text-[#8f939d] transition hover:bg-[#252a34] hover:text-white"
                         type="button"
                         onClick={() =>
-                          onPrerenderBlockDurationMsChange(
+                          setPrerenderBlockDurationMs(
                             defaultPrerenderBlockDurationMs,
                           )
                         }
@@ -560,7 +531,7 @@ export function SettingsDialog({
                       <Select
                         value={String(previewRenderHeight)}
                         onValueChange={(value) =>
-                          onPreviewRenderHeightChange(Number(value))
+                          setPreviewRenderHeight(Number(value))
                         }
                       >
                         <SelectTrigger
@@ -582,9 +553,7 @@ export function SettingsDialog({
                         className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-[#2d313b] text-[#8f939d] transition hover:bg-[#252a34] hover:text-white"
                         type="button"
                         onClick={() =>
-                          onPreviewRenderHeightChange(
-                            defaultPreviewRenderHeight,
-                          )
+                          setPreviewRenderHeight(defaultPreviewRenderHeight)
                         }
                       >
                         <RotateCcw size={14} />
@@ -610,7 +579,7 @@ export function SettingsDialog({
                       <Select
                         value={String(playbackFpsOption)}
                         onValueChange={(value) =>
-                          onPlaybackFpsOptionChange(
+                          setPlaybackFpsOption(
                             value === "follow"
                               ? "follow"
                               : (Number(value) as PlaybackFpsOption),
@@ -633,7 +602,7 @@ export function SettingsDialog({
                         aria-label="Reset playback frame rate to follow project"
                         className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-[#2d313b] text-[#8f939d] transition hover:bg-[#252a34] hover:text-white"
                         type="button"
-                        onClick={() => onPlaybackFpsOptionChange("follow")}
+                        onClick={() => setPlaybackFpsOption("follow")}
                       >
                         <RotateCcw size={14} />
                       </button>
@@ -663,51 +632,91 @@ export function SettingsDialog({
                 <div className="grid gap-4 rounded-xl border border-[#363b47] bg-[#1b1e26] p-4">
                   <div className="grid gap-1.5">
                     <strong className="text-sm text-white">
-                      Scrub playback behavior
+                      Scrub commit throttle
                     </strong>
                     <p className="text-xs leading-5 text-[#8f939d]">
-                      Controls whether dragging the timeline scrubber stops
-                      playback when released. Timeline clicks keep playback
-                      running.
+                      Controls rendering frequency while scrubbing the timeline.
+                      Lower values are more responsive but require faster
+                      machines.
+                    </p>
+                  </div>
+                  <label
+                    className="grid max-w-[260px] gap-1.5 text-xs font-bold text-[#dfe2ea]"
+                    htmlFor="scrub-throttle"
+                  >
+                    Commit throttle (ms)
+                    <span className="relative">
+                      <Input
+                        id="scrub-throttle"
+                        className="pr-10"
+                        min={16}
+                        max={500}
+                        step={1}
+                        type="number"
+                        value={scrubCommitThrottleMs}
+                        onChange={(event) =>
+                          updateScrubCommitThrottle(event.target.value)
+                        }
+                      />
+                      <button
+                        aria-label={`Reset scrub commit throttle to ${defaultScrubCommitThrottleMs}ms`}
+                        className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-md text-[#8f939d] transition hover:bg-[#252a34] hover:text-white"
+                        type="button"
+                        onClick={() =>
+                          setScrubCommitThrottleMs(defaultScrubCommitThrottleMs)
+                        }
+                      >
+                        <RotateCcw size={14} />
+                      </button>
+                    </span>
+                  </label>
+                  <div className="h-px bg-[#363b47]" />
+                  <div className="grid gap-1.5">
+                    <strong className="text-sm text-white">
+                      Timeline playhead scrub pause
+                    </strong>
+                    <p className="text-xs leading-5 text-[#8f939d]">
+                      Controls whether timeline scrubbing automatically pauses
+                      active video playback.
                     </p>
                   </div>
                   <label
                     className="flex w-full items-start justify-between gap-5 text-xs font-bold text-[#dfe2ea]"
-                    htmlFor="pause-playback-on-scrub-toggle"
+                    htmlFor="pause-playback-scrub-toggle"
                   >
                     <span className="grid gap-1">
-                      <span>Pause playback after scrubbing</span>
+                      <span>Pause active playback on playhead scrub</span>
                       <span className="font-medium leading-5 text-[#8f939d]">
-                        When enabled, drag-scrubbing stops playback at the
-                        release time. Default:{" "}
-                        {defaultPausePlaybackOnScrub ? "on" : "off"}.
+                        When enabled, clicking or dragging the scrubber pause
+                        playback. Playback resumes automatically on mouse up if
+                        it was active.
                       </span>
                     </span>
                     <Switch
-                      id="pause-playback-on-scrub-toggle"
+                      id="pause-playback-scrub-toggle"
                       className="mt-0.5"
                       checked={pausePlaybackOnScrub}
-                      onCheckedChange={onPausePlaybackOnScrubChange}
+                      onCheckedChange={setPausePlaybackOnScrub}
                     />
                   </label>
                   <div className="h-px bg-[#363b47]" />
                   <div className="grid gap-1.5">
                     <strong className="text-sm text-white">
-                      New marker duration
+                      Default marker duration
                     </strong>
                     <p className="text-xs leading-5 text-[#8f939d]">
-                      Sets the default length for new motion markers dragged
-                      onto the timeline.
+                      Controls default length when inserting a new transition or
+                      adjustment layer.
                     </p>
                   </div>
                   <label
                     className="grid max-w-[260px] gap-1.5 text-xs font-bold text-[#dfe2ea]"
-                    htmlFor="new-marker-duration"
+                    htmlFor="default-marker-duration"
                   >
                     Duration (seconds)
                     <span className="relative">
                       <Input
-                        id="new-marker-duration"
+                        id="default-marker-duration"
                         className="pr-10"
                         min={0.1}
                         max={60}
@@ -719,11 +728,11 @@ export function SettingsDialog({
                         }
                       />
                       <button
-                        aria-label={`Reset new marker duration to ${defaultNewMarkerDurationSeconds}s`}
+                        aria-label={`Reset default new marker duration to ${defaultNewMarkerDurationSeconds} seconds`}
                         className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-md text-[#8f939d] transition hover:bg-[#252a34] hover:text-white"
                         type="button"
                         onClick={() =>
-                          onDefaultNewMarkerDurationSecondsChange(
+                          setDefaultNewMarkerDurationSeconds(
                             defaultNewMarkerDurationSeconds,
                           )
                         }
@@ -734,17 +743,19 @@ export function SettingsDialog({
                   </label>
                   <div className="h-px bg-[#363b47]" />
                   <div className="grid gap-1.5">
-                    <strong className="text-sm text-white">End padding</strong>
+                    <strong className="text-sm text-white">
+                      Timeline end padding
+                    </strong>
                     <p className="text-xs leading-5 text-[#8f939d]">
-                      Controls how much blank timeline space appears after the
-                      scene. A value of 0.5 keeps the current 50% extra space.
+                      Controls empty space visible beyond the final clip in the
+                      timeline panel.
                     </p>
                   </div>
                   <label
                     className="grid max-w-[260px] gap-1.5 text-xs font-bold text-[#dfe2ea]"
                     htmlFor="timeline-end-padding"
                   >
-                    Padding fraction
+                    Padding fraction (of scene duration)
                     <span className="relative">
                       <Input
                         id="timeline-end-padding"
@@ -763,7 +774,7 @@ export function SettingsDialog({
                         className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-md text-[#8f939d] transition hover:bg-[#252a34] hover:text-white"
                         type="button"
                         onClick={() =>
-                          onTimelineEndPaddingFractionChange(
+                          setTimelineEndPaddingFraction(
                             defaultTimelineEndPaddingFraction,
                           )
                         }
@@ -775,98 +786,11 @@ export function SettingsDialog({
                   <div className="h-px bg-[#363b47]" />
                   <div className="grid gap-1.5">
                     <strong className="text-sm text-white">
-                      Scrub commit throttle
+                      Timeline precision
                     </strong>
                     <p className="text-xs leading-5 text-[#8f939d]">
-                      Controls how often timeline scrubbing commits editor state
-                      while dragging. The playhead still follows the cursor
-                      immediately.
-                    </p>
-                  </div>
-                  <label
-                    className="grid max-w-[260px] gap-1.5 text-xs font-bold text-[#dfe2ea]"
-                    htmlFor="scrub-commit-throttle"
-                  >
-                    Commit interval (ms)
-                    <span className="relative">
-                      <Input
-                        id="scrub-commit-throttle"
-                        className="pr-10"
-                        min={16}
-                        max={500}
-                        step={10}
-                        type="number"
-                        value={scrubCommitThrottleMs}
-                        onChange={(event) =>
-                          updateScrubCommitThrottle(event.target.value)
-                        }
-                      />
-                      <button
-                        aria-label={`Reset scrub commit throttle to ${defaultScrubCommitThrottleMs}ms`}
-                        className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-md text-[#8f939d] transition hover:bg-[#252a34] hover:text-white"
-                        type="button"
-                        onClick={() =>
-                          onScrubCommitThrottleMsChange(
-                            defaultScrubCommitThrottleMs,
-                          )
-                        }
-                      >
-                        <RotateCcw size={14} />
-                      </button>
-                    </span>
-                  </label>
-                  <div className="h-px bg-[#363b47]" />
-                  <div className="grid gap-1.5">
-                    <strong className="text-sm text-white">
-                      Live DOM render throttle
-                    </strong>
-                    <p className="text-xs leading-5 text-[#8f939d]">
-                      Because HTML-in-Canvas is unstable and still in Canary,
-                      throttle live rendering so the app stays usable and other
-                      features do not stall.
-                    </p>
-                  </div>
-                  <label
-                    className="grid max-w-[260px] gap-1.5 text-xs font-bold text-[#dfe2ea]"
-                    htmlFor="live-dom-postprocess-max-fps"
-                  >
-                    Max rendered FPS
-                    <span className="relative">
-                      <Input
-                        id="live-dom-postprocess-max-fps"
-                        className="pr-10"
-                        min={minLiveDomPostProcessMaxFps}
-                        max={maxLiveDomPostProcessMaxFps}
-                        step={1}
-                        type="number"
-                        value={liveDomPostProcessMaxFps}
-                        onChange={(event) =>
-                          updateLiveDomPostProcessMaxFps(event.target.value)
-                        }
-                      />
-                      <button
-                        aria-label={`Reset live DOM render throttle to ${defaultLiveDomPostProcessMaxFps}fps`}
-                        className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-md text-[#8f939d] transition hover:bg-[#252a34] hover:text-white"
-                        type="button"
-                        onClick={() =>
-                          onLiveDomPostProcessMaxFpsChange(
-                            defaultLiveDomPostProcessMaxFps,
-                          )
-                        }
-                      >
-                        <RotateCcw size={14} />
-                      </button>
-                    </span>
-                  </label>
-                  <div className="h-px bg-[#363b47]" />
-                  <div className="grid gap-1.5">
-                    <strong className="text-sm text-white">
-                      Position precision
-                    </strong>
-                    <p className="text-xs leading-5 text-[#8f939d]">
-                      Sets the number of decimal places used when rounding
-                      marker and block positions. Higher values give finer
-                      control.
+                      Controls decimal place rounding inside transitions. Higher
+                      values give finer control.
                     </p>
                   </div>
                   <label
@@ -892,7 +816,7 @@ export function SettingsDialog({
                         className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-md text-[#8f939d] transition hover:bg-[#252a34] hover:text-white"
                         type="button"
                         onClick={() =>
-                          onTimelinePrecisionChange(defaultTimelinePrecision)
+                          setTimelinePrecision(defaultTimelinePrecision)
                         }
                       >
                         <RotateCcw size={14} />
@@ -920,7 +844,7 @@ export function SettingsDialog({
                     <Select
                       value={exportWorkerConfigurationMode}
                       onValueChange={(value) =>
-                        onExportWorkerConfigurationModeChange(
+                        setExportWorkerConfigurationMode(
                           value as ExportWorkerConfigurationMode,
                         )
                       }
@@ -946,7 +870,7 @@ export function SettingsDialog({
                         defaultValue={defaultExportWorkerMapping.hd}
                         onChange={updateUnifiedExportWorkerCount}
                         onReset={() =>
-                          onExportWorkerMappingChange({
+                          setExportWorkerMapping({
                             hd: defaultExportWorkerMapping.hd,
                             qhd: defaultExportWorkerMapping.hd,
                             uhd: defaultExportWorkerMapping.hd,
@@ -965,7 +889,7 @@ export function SettingsDialog({
                           updateExportWorkerCount("hd", value)
                         }
                         onReset={() =>
-                          onExportWorkerMappingChange({
+                          setExportWorkerMapping({
                             ...exportWorkerMapping,
                             hd: defaultExportWorkerMapping.hd,
                           })
@@ -980,7 +904,7 @@ export function SettingsDialog({
                           updateExportWorkerCount("qhd", value)
                         }
                         onReset={() =>
-                          onExportWorkerMappingChange({
+                          setExportWorkerMapping({
                             ...exportWorkerMapping,
                             qhd: defaultExportWorkerMapping.qhd,
                           })
@@ -995,7 +919,7 @@ export function SettingsDialog({
                           updateExportWorkerCount("uhd", value)
                         }
                         onReset={() =>
-                          onExportWorkerMappingChange({
+                          setExportWorkerMapping({
                             ...exportWorkerMapping,
                             uhd: defaultExportWorkerMapping.uhd,
                           })
@@ -1037,9 +961,7 @@ export function SettingsDialog({
                         className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-md text-[#8f939d] transition hover:bg-[#252a34] hover:text-white"
                         type="button"
                         onClick={() =>
-                          onVideoExportTileHeightChange(
-                            defaultVideoExportTileHeight,
-                          )
+                          setVideoExportTileHeight(defaultVideoExportTileHeight)
                         }
                       >
                         <RotateCcw size={14} />
@@ -1065,7 +987,7 @@ export function SettingsDialog({
                       defaultValue={defaultExportTileMapping.hd}
                       onChange={(value) => updateExportTileCount("hd", value)}
                       onReset={() =>
-                        onExportTileMappingChange({
+                        setExportTileMapping({
                           ...exportTileMapping,
                           hd: defaultExportTileMapping.hd,
                         })
@@ -1078,7 +1000,7 @@ export function SettingsDialog({
                       defaultValue={defaultExportTileMapping.qhd}
                       onChange={(value) => updateExportTileCount("qhd", value)}
                       onReset={() =>
-                        onExportTileMappingChange({
+                        setExportTileMapping({
                           ...exportTileMapping,
                           qhd: defaultExportTileMapping.qhd,
                         })
@@ -1091,7 +1013,7 @@ export function SettingsDialog({
                       defaultValue={defaultExportTileMapping.uhd}
                       onChange={(value) => updateExportTileCount("uhd", value)}
                       onReset={() =>
-                        onExportTileMappingChange({
+                        setExportTileMapping({
                           ...exportTileMapping,
                           uhd: defaultExportTileMapping.uhd,
                         })
@@ -1117,9 +1039,7 @@ export function SettingsDialog({
                       <Select
                         value={stableSlowGridPreset}
                         onValueChange={(value) =>
-                          onStableSlowGridPresetChange(
-                            value as StableSlowGridPreset,
-                          )
+                          setStableSlowGridPreset(value as StableSlowGridPreset)
                         }
                       >
                         <SelectTrigger
@@ -1140,9 +1060,7 @@ export function SettingsDialog({
                         className="grid h-9 w-9 place-items-center rounded-md border border-[#2d313b] text-[#8f939d] transition hover:bg-[#252a34] hover:text-white"
                         type="button"
                         onClick={() =>
-                          onStableSlowGridPresetChange(
-                            defaultStableSlowGridPreset,
-                          )
+                          setStableSlowGridPreset(defaultStableSlowGridPreset)
                         }
                       >
                         <RotateCcw size={14} />
@@ -1175,7 +1093,7 @@ export function SettingsDialog({
                         className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-md text-[#8f939d] transition hover:bg-[#252a34] hover:text-white"
                         type="button"
                         onClick={() =>
-                          onStableSlowValidationSamplesChange(
+                          setStableSlowValidationSamples(
                             defaultStableSlowValidationSamples,
                           )
                         }
@@ -1217,7 +1135,7 @@ export function SettingsDialog({
                         id="debug-settings-toggle"
                         className="mt-0.5"
                         checked={debugSettingsEnabled}
-                        onCheckedChange={onDebugSettingsEnabledChange}
+                        onCheckedChange={setDebugSettingsEnabled}
                       />
                     </label>
                   </div>

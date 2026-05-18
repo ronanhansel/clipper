@@ -1,17 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import {
-  appSettingKeys,
-  clampLiveDomPostProcessMaxFps,
-  getInitialLiveDomPostProcessMaxFps,
-  isDebugSettingsEnabledByDefault,
-  isPrerenderCacheBlackMissDebugEnabledByDefault,
-  isPrerenderCacheEnabledByDefault,
-  isPrerenderCacheReuseEnabledByDefault,
-  readStoredAppSettings,
-  readStoredBooleanSetting,
-  readStoredStringSetting,
-  writeStoredAppSetting,
-} from "../../state/storedAppSettings";
+import { useEffect, useRef } from "react";
+import { useAppSettingsStore } from "../../state/appSettingsStore";
 
 export type PreviewLifecycleState = {
   reusePrerenderCacheForExport: boolean;
@@ -26,113 +14,55 @@ export type PreviewLifecycleState = {
   setDebugSettingsEnabled: (enabled: boolean) => void;
   setPrerenderCacheBlackMissDebug: (enabled: boolean) => void;
   setLiveDomPostProcessMaxFps: (value: number) => void;
-  setMotionEffectPreviewScrubActive: React.Dispatch<
-    React.SetStateAction<boolean>
-  >;
+  setMotionEffectPreviewScrubActive: (value: boolean) => void;
 };
 
 export function usePreviewLifecycle(): PreviewLifecycleState {
-  const [reusePrerenderCacheForExport, setReusePrerenderCacheForExportState] =
-    useState(isPrerenderCacheReuseEnabledByDefault);
-  const [prerenderCacheEnabled, setPrerenderCacheEnabledState] = useState(
-    isPrerenderCacheEnabledByDefault,
+  const reusePrerenderCacheForExport = useAppSettingsStore(
+    (state) => state.reusePrerenderCacheForExport,
   );
-  const [debugSettingsEnabled, setDebugSettingsEnabledState] = useState(
-    isDebugSettingsEnabledByDefault,
+  const prerenderCacheEnabled = useAppSettingsStore(
+    (state) => state.prerenderCacheEnabled,
   );
-  const [prerenderCacheBlackMissDebug, setPrerenderCacheBlackMissDebugState] =
-    useState(isPrerenderCacheBlackMissDebugEnabledByDefault);
-  const [motionEffectPreviewScrubActive, setMotionEffectPreviewScrubActive] =
-    useState(false);
-  const [liveDomPostProcessMaxFps, setLiveDomPostProcessMaxFpsState] = useState(
-    getInitialLiveDomPostProcessMaxFps,
+  const debugSettingsEnabled = useAppSettingsStore(
+    (state) => state.debugSettingsEnabled,
+  );
+  const prerenderCacheBlackMissDebug = useAppSettingsStore(
+    (state) => state.prerenderCacheBlackMissDebug,
+  );
+  const liveDomPostProcessMaxFps = useAppSettingsStore(
+    (state) => state.liveDomPostProcessMaxFps,
+  );
+  const motionEffectPreviewScrubActive = useAppSettingsStore(
+    (state) => state.motionEffectPreviewScrubActive,
+  );
+  const initialized = useAppSettingsStore((state) => state.initialized);
+  const hydrateFromStorage = useAppSettingsStore(
+    (state) => state.hydrateFromStorage,
+  );
+  const setReusePrerenderCacheForExport = useAppSettingsStore(
+    (state) => state.setReusePrerenderCacheForExport,
+  );
+  const setPrerenderCacheEnabled = useAppSettingsStore(
+    (state) => state.setPrerenderCacheEnabled,
+  );
+  const setDebugSettingsEnabled = useAppSettingsStore(
+    (state) => state.setDebugSettingsEnabled,
+  );
+  const setPrerenderCacheBlackMissDebug = useAppSettingsStore(
+    (state) => state.setPrerenderCacheBlackMissDebug,
+  );
+  const setLiveDomPostProcessMaxFps = useAppSettingsStore(
+    (state) => state.setLiveDomPostProcessMaxFps,
+  );
+  const setMotionEffectPreviewScrubActive = useAppSettingsStore(
+    (state) => state.setMotionEffectPreviewScrubActive,
   );
   const prerenderDisplayReadyRef = useRef(false);
 
   useEffect(() => {
-    let cancelled = false;
-    void readStoredAppSettings().then((settings) => {
-      if (cancelled) return;
-      setReusePrerenderCacheForExportState(
-        readStoredBooleanSetting(
-          settings,
-          appSettingKeys.reusePrerenderCacheForExport,
-          true,
-        ),
-      );
-      setPrerenderCacheEnabledState(
-        readStoredBooleanSetting(
-          settings,
-          appSettingKeys.prerenderCache,
-          false,
-        ),
-      );
-      const debugEnabled = readStoredBooleanSetting(
-        settings,
-        appSettingKeys.debugSettings,
-        false,
-      );
-      setDebugSettingsEnabledState(debugEnabled);
-      setPrerenderCacheBlackMissDebugState(
-        debugEnabled &&
-          readStoredBooleanSetting(
-            settings,
-            appSettingKeys.prerenderCacheBlackMissDebug,
-            false,
-          ),
-      );
-      setLiveDomPostProcessMaxFpsState(
-        clampLiveDomPostProcessMaxFps(
-          Number.parseInt(
-            readStoredStringSetting(
-              settings,
-              appSettingKeys.liveDomPostProcessMaxFps,
-            ) ?? "",
-            10,
-          ),
-        ),
-      );
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  function setReusePrerenderCacheForExport(reuse: boolean) {
-    setReusePrerenderCacheForExportState(reuse);
-    writeStoredAppSetting(
-      appSettingKeys.reusePrerenderCacheForExport,
-      reuse ? "1" : "0",
-    );
-  }
-
-  function setPrerenderCacheEnabled(enabled: boolean) {
-    setPrerenderCacheEnabledState(enabled);
-    writeStoredAppSetting(appSettingKeys.prerenderCache, enabled ? "1" : "0");
-  }
-
-  function setPrerenderCacheBlackMissDebug(enabled: boolean) {
-    setPrerenderCacheBlackMissDebugState(enabled);
-    writeStoredAppSetting(
-      appSettingKeys.prerenderCacheBlackMissDebug,
-      enabled ? "1" : "0",
-    );
-  }
-
-  function setDebugSettingsEnabled(enabled: boolean) {
-    setDebugSettingsEnabledState(enabled);
-    writeStoredAppSetting(appSettingKeys.debugSettings, enabled ? "1" : "0");
-    if (!enabled) setPrerenderCacheBlackMissDebug(false);
-  }
-
-  function setLiveDomPostProcessMaxFps(value: number) {
-    const nextValue = clampLiveDomPostProcessMaxFps(value);
-    setLiveDomPostProcessMaxFpsState(nextValue);
-    writeStoredAppSetting(
-      appSettingKeys.liveDomPostProcessMaxFps,
-      String(nextValue),
-    );
-  }
+    if (!initialized) void hydrateFromStorage();
+  }, [hydrateFromStorage, initialized]);
 
   return {
     reusePrerenderCacheForExport,

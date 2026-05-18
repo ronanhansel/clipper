@@ -142,15 +142,6 @@ import {
   usePrerenderSettings,
 } from "./app/features/preview/usePrerenderSettings";
 import { useExportSettings } from "./app/features/export/useExportSettings";
-import {
-  clampLiveDomPostProcessMaxFps,
-  getInitialLiveDomPostProcessMaxFps,
-  isDebugSettingsEnabledByDefault,
-  isPrerenderCacheBlackMissDebugEnabledByDefault,
-  isPrerenderCacheEnabledByDefault,
-  isPrerenderCacheReuseEnabledByDefault,
-  readStoredBooleanSetting,
-} from "./app/state/storedAppSettings";
 import { getFramePreviewTimelineLayers } from "./app/state/framePreviewRenderModel";
 import {
   EditorStoreProvider,
@@ -357,45 +348,20 @@ function AppContent({
   const {
     reusePrerenderCacheForExport,
     prerenderCacheEnabled,
-    debugSettingsEnabled,
-    prerenderCacheBlackMissDebug,
-    liveDomPostProcessMaxFps,
-    motionEffectPreviewScrubActive,
-    prerenderDisplayReadyRef,
-    setReusePrerenderCacheForExport,
-    setPrerenderCacheEnabled,
-    setDebugSettingsEnabled,
-    setPrerenderCacheBlackMissDebug,
-    setLiveDomPostProcessMaxFps,
     setMotionEffectPreviewScrubActive,
   } = usePreviewLifecycle();
   const {
     exportFrameRate,
-    setExportFrameRate,
-    mediaExportFormat,
-    setMediaExportFormat,
-    mediaExportRenderMode,
-    setMediaExportRenderMode,
     exportRenderQuality,
-    setExportRenderQuality,
-    videoExportTileHeight,
-    setVideoExportTileHeight,
-    exportWorkerMapping,
-    setExportWorkerMapping,
-    exportWorkerConfigurationMode,
-    setExportWorkerConfigurationMode,
-    exportTileMapping,
-    setExportTileMapping,
+    mediaExportRenderMode,
     stableSlowGridPreset,
-    setStableSlowGridPreset,
     stableSlowValidationSamples,
-    setStableSlowValidationSamples,
-    previewRenderHeight,
-    setPreviewRenderHeight,
+    exportTileMapping,
+    exportWorkerMapping,
+    mediaExportFormat,
+    videoExportTileHeight,
     playbackFpsOption,
-    setPlaybackFpsOption,
-    agentProvider,
-    setAgentProvider,
+    previewRenderHeight,
   } = useExportSettings();
   const [objectResizeMode, setObjectResizeMode] = useState<"resize" | "scale">(
     "resize",
@@ -2344,7 +2310,6 @@ function AppContent({
             }
             framePreviewProps={framePreviewProps}
             hasActiveComposition={hasPreviewComposition}
-            liveDomPostProcessMaxFps={liveDomPostProcessMaxFps}
             mode={mode}
             previewFps={previewFps}
             previewKey={part.id}
@@ -2624,81 +2589,20 @@ function AppContent({
       </main>
       <AppDialogs
         appContextMenu={appContextMenu}
-        agentProvider={agentProvider}
         autoDownloadUpdates={autoDownloadUpdates}
-        debugSettingsEnabled={debugSettingsEnabled}
-        defaultNewMarkerDurationSeconds={markerDurationSeconds}
-        exportDialogOpen={exportDialogOpen}
-        exportFrameRate={exportFrameRate}
-        exportProgress={exportProgress}
-        exportRenderQuality={exportRenderQuality}
         exportResolution={exportResolution}
-        exportTileMapping={exportTileMapping}
-        exportWorkerConfigurationMode={exportWorkerConfigurationMode}
-        exportWorkerMapping={exportWorkerMapping}
-        isExporting={isExporting}
-        liveDomPostProcessMaxFps={liveDomPostProcessMaxFps}
-        mediaExportFormat={mediaExportFormat}
-        mediaExportRenderMode={mediaExportRenderMode}
-        stableSlowGridPreset={stableSlowGridPreset}
-        stableSlowValidationSamples={stableSlowValidationSamples}
-        pausePlaybackOnScrub={pausePlaybackOnScrub}
-        partCount={scene.compositions.length}
-        prerenderCacheEnabled={prerenderCacheEnabled}
-        prerenderCacheBlackMissDebug={prerenderCacheBlackMissDebug}
-        prerenderBlockDurationMs={prerenderBlockDurationMs}
-        previewRenderHeight={previewRenderHeight}
-        playbackFpsOption={playbackFpsOption}
         projectName={project.name}
-        resolution={project.resolution}
-        reusePrerenderCacheForExport={reusePrerenderCacheForExport}
-        sceneDurationSeconds={sceneDurationSeconds}
         sceneName={activeTimelineName}
-        scrubCommitThrottleMs={scrubCommitThrottleMs}
-        settingsOpen={settingsOpen}
-        settingsSection={settingsSection}
-        timelineEndPaddingFraction={timelineEndPaddingFraction}
-        timelinePrecision={timelinePrecision}
-        videoExportCancelling={videoExportCancelling}
-        videoExportTileHeight={videoExportTileHeight}
-        videoExportProgress={videoExportProgress}
+        sceneDurationSeconds={sceneDurationSeconds}
+        resolution={project.resolution}
         updateStatus={updateStatus}
         onAppContextMenuClose={closeAppContextMenu}
-        onAgentProviderChange={setAgentProvider}
         onAutoDownloadUpdatesChange={handleAutoDownloadUpdatesChange}
         onCheckForUpdates={handleCheckForUpdates}
         onDownloadUpdate={handleDownloadUpdate}
-        onDebugSettingsEnabledChange={setDebugSettingsEnabled}
-        onDefaultNewMarkerDurationSecondsChange={
-          setDefaultNewMarkerDurationSeconds
-        }
-        onExportDialogOpenChange={setExportDialogOpen}
-        onExportFrameRateChange={setExportFrameRate}
-        onExportRenderQualityChange={setExportRenderQuality}
         onExportResolutionChange={setExportResolution}
-        onExportTileMappingChange={setExportTileMapping}
-        onExportWorkerConfigurationModeChange={setExportWorkerConfigurationMode}
-        onExportWorkerMappingChange={setExportWorkerMapping}
         onMediaExport={handleMediaExport}
-        onMediaExportFormatChange={setMediaExportFormat}
-        onMediaExportRenderModeChange={setMediaExportRenderMode}
-        onStableSlowGridPresetChange={setStableSlowGridPreset}
-        onStableSlowValidationSamplesChange={setStableSlowValidationSamples}
-        onLiveDomPostProcessMaxFpsChange={setLiveDomPostProcessMaxFps}
-        onPausePlaybackOnScrubChange={setPausePlaybackOnScrub}
-        onPrerenderCacheEnabledChange={setPrerenderCacheEnabled}
-        onPrerenderCacheBlackMissDebugChange={setPrerenderCacheBlackMissDebug}
-        onPrerenderBlockDurationMsChange={setPrerenderBlockDurationMs}
-        onPreviewRenderHeightChange={setPreviewRenderHeight}
-        onPlaybackFpsOptionChange={setPlaybackFpsOption}
         onClearAllPrerenderCaches={handleClearAllPrerenderCaches}
-        onReusePrerenderCacheForExportChange={setReusePrerenderCacheForExport}
-        onScrubCommitThrottleMsChange={setScrubCommitThrottleMs}
-        onSettingsOpenChange={setSettingsOpen}
-        onSettingsSectionChange={setSettingsSection}
-        onTimelineEndPaddingFractionChange={setTimelineEndPaddingFraction}
-        onTimelinePrecisionChange={setTimelinePrecision}
-        onVideoExportTileHeightChange={setVideoExportTileHeight}
         onVideoExportCancel={handleVideoExportCancel}
         onInstallUpdate={handleInstallUpdate}
       />

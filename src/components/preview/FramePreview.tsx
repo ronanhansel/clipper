@@ -647,6 +647,9 @@ export const FramePreview = memo(function FramePreview({
       activeShapeTool === "pencil" ||
       activeShapeTool === "textPath"
     ) {
+      event.preventDefault();
+      event.stopPropagation();
+      onFramePointerDown(event);
       return;
     }
     if (activeShapeTool === "text") {
@@ -2619,8 +2622,8 @@ export const FrameObjectView = memo(function FrameObjectView({
       textBoxLayout === "auto-height" ? evaluatedBounds.height : undefined,
     fontSize:
       object.type === "text" && renderMode !== "export"
-        ? `calc(${formatStyleLength(object.style.fontSize)} * var(--clipper-scale-preview, 1))`
-        : object.style.fontSize,
+        ? `calc(${formatStyleLength(evaluatedObject.style.fontSize)} * var(--clipper-scale-preview, 1))`
+        : evaluatedObject.style.fontSize,
     borderWidth:
       renderMode !== "export" && object.style.borderWidth
         ? `calc(${formatStyleLength(object.style.borderWidth)} * var(--clipper-scale-preview, 1))`
@@ -4320,7 +4323,6 @@ export function SelectionOverlayBox({
     const element = boxRef.current;
     const frameViewport = frameViewportRef?.current;
     if (!element || !frameViewport || !portal || !portalHost) return;
-    clearSelectionPreviewBounds(element);
     syncViewportBoundsToPortalElement(element, viewportBounds, {
       cameraTransform,
       frameScale,

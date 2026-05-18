@@ -20,6 +20,7 @@ import {
 import type { StrategyFramePreviewProps } from "../../components/preview/strategies/preview";
 import { FRAME_HEIGHT, FRAME_WIDTH } from "../../core/types";
 import type { PreviewFps } from "../../core/previewFps";
+import { useAppSettingsStore } from "../state/appSettingsStore";
 import type { Mode } from "../types";
 
 type FramePreviewProps = StrategyFramePreviewProps;
@@ -45,7 +46,6 @@ type PreviewColumnProps = {
   editorPaneProps: ComponentProps<typeof EditorPane> | null;
   framePreviewProps: FramePreviewProps | null;
   hasActiveComposition: boolean;
-  liveDomPostProcessMaxFps: number;
   mode: Mode;
   onModeChange: (mode: Mode) => void;
   onPointerEnter: () => void;
@@ -67,7 +67,6 @@ export function PreviewColumn({
   editorPaneProps,
   framePreviewProps,
   hasActiveComposition,
-  liveDomPostProcessMaxFps,
   mode,
   onModeChange,
   onPointerEnter,
@@ -87,6 +86,9 @@ export function PreviewColumn({
   });
   const [previewOverlayHost, setPreviewOverlayHost] =
     useState<HTMLDivElement | null>(null);
+  const liveDomPostProcessMaxFps = useAppSettingsStore(
+    (state) => state.liveDomPostProcessMaxFps,
+  );
 
   if (framePreviewProps && hasActiveComposition)
     lastActiveFramePreviewPropsRef.current = framePreviewProps;

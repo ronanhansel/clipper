@@ -351,16 +351,12 @@ export function useProjectDocumentController({
     lastProjectHistoryAtRef.current = 0;
   }
 
-  function preserveCurrentPageMode(historyProject: ProjectManifest) {
+  function preserveCurrentEditorState(historyProject: ProjectManifest) {
     const currentEditorState =
       projectRef.current.editorState ?? defaultEditorState;
     return normalizeProject({
       ...historyProject,
-      editorState: {
-        ...(historyProject.editorState ?? currentEditorState),
-        mode: modeRef.current,
-        timelineMode: timelineModeRef.current,
-      },
+      editorState: currentEditorState,
     });
   }
 
@@ -505,7 +501,7 @@ export function useProjectDocumentController({
       const previousEntry = projectHistoryRef.current.past.at(-1);
       if (!previousEntry) return;
       if (previousEntry.fileCommand) await previousEntry.fileCommand.undo();
-      const restoredProject = preserveCurrentPageMode(previousEntry.project);
+      const restoredProject = preserveCurrentEditorState(previousEntry.project);
       projectHistoryRef.current = {
         past: projectHistoryRef.current.past.slice(0, -1),
         future: [
@@ -520,10 +516,6 @@ export function useProjectDocumentController({
       };
       lastProjectHistoryAtRef.current = 0;
       commitProjectDocument(restoredProject, previousEntry.compositionSources);
-      setTimelineMode(timelineModeRef.current);
-      applyEditorState(restoredProject.editorState ?? defaultEditorState, {
-        preserveMarkerSelection: true,
-      });
       scheduleAutosave(restoredProject);
     });
   }
@@ -533,7 +525,7 @@ export function useProjectDocumentController({
       const nextEntry = projectHistoryRef.current.future[0];
       if (!nextEntry) return;
       if (nextEntry.fileCommand) await nextEntry.fileCommand.redo();
-      const restoredProject = preserveCurrentPageMode(nextEntry.project);
+      const restoredProject = preserveCurrentEditorState(nextEntry.project);
       projectHistoryRef.current = {
         past: [
           ...projectHistoryRef.current.past,
@@ -548,10 +540,6 @@ export function useProjectDocumentController({
       };
       lastProjectHistoryAtRef.current = 0;
       commitProjectDocument(restoredProject, nextEntry.compositionSources);
-      setTimelineMode(timelineModeRef.current);
-      applyEditorState(restoredProject.editorState ?? defaultEditorState, {
-        preserveMarkerSelection: true,
-      });
       scheduleAutosave(restoredProject);
     });
   }

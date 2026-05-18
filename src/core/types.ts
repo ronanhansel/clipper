@@ -78,6 +78,11 @@ export type AnimationTrackProperty =
   | "blur"
   | "backgroundColor"
   | "color"
+  | "fontSize"
+  | "fontWeight"
+  | "lineHeight"
+  | "letterSpacing"
+  | "fontFamily"
   | "pathOffset"
   | "pathLength"
   | "pathSpacing";

@@ -19,6 +19,11 @@ export type PropertyPath =
   | "style.opacity"
   | "style.color"
   | "style.backgroundColor"
+  | "style.fontSize"
+  | "style.fontWeight"
+  | "style.lineHeight"
+  | "style.letterSpacing"
+  | "style.fontFamily"
   | `style.fill.${string}`
   | "transform.translateX"
   | "transform.translateY"
@@ -516,6 +521,50 @@ function createStyleDefinition(path: "opacity" | "color" | "backgroundColor") {
   return definition;
 }
 
+function createTextStyleNumberDefinition(
+  field: "fontSize" | "fontWeight" | "lineHeight" | "letterSpacing",
+  defaultValue: number,
+): PropertyDefinition {
+  return {
+    path: `style.${field}` as PropertyPath,
+    valueType: "number",
+    group: "style",
+    defaultValue,
+    getBaseValue: (object) => {
+      const value = object.style[field];
+      return typeof value === "number" ? value : defaultValue;
+    },
+    setBaseValue: (object, value) => ({
+      ...object,
+      style: {
+        ...object.style,
+        [field]:
+          typeof value === "number"
+            ? value
+            : (object.style[field] ?? defaultValue),
+      },
+    }),
+    interpolate: numberInterpolation,
+  };
+}
+
+function createFontFamilyDefinition(): PropertyDefinition {
+  return {
+    path: "style.fontFamily",
+    valueType: "discrete",
+    group: "style",
+    getBaseValue: (object) => object.style.fontFamily ?? "",
+    setBaseValue: (object, value) => ({
+      ...object,
+      style: {
+        ...object.style,
+        fontFamily:
+          typeof value === "string" ? value : (object.style.fontFamily ?? ""),
+      },
+    }),
+  };
+}
+
 function createTransformDefinition(path: string, defaultValue: JsonValue) {
   return createBaseDefinition(
     `transform.${path}` as PropertyPath,
@@ -820,6 +869,11 @@ export const defaultPropertyDefinitions: PropertyDefinition[] = [
   createStyleDefinition("opacity"),
   createStyleDefinition("color"),
   createStyleDefinition("backgroundColor"),
+  createTextStyleNumberDefinition("fontSize", 48),
+  createTextStyleNumberDefinition("fontWeight", 400),
+  createTextStyleNumberDefinition("lineHeight", 1.1),
+  createTextStyleNumberDefinition("letterSpacing", 0),
+  createFontFamilyDefinition(),
   ...fillPropertyDefinitions,
   createTransformDefinition("translateX", 0),
   createTransformDefinition("translateY", 0),

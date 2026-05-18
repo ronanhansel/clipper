@@ -6,6 +6,7 @@
 - Don't run `git diff` unless asked.
 - Don't fix errors not from your edits — they may be another agent's work.
 - Don't touch other files that aren't directly related to your changes - they may be another agent's work.
+- Don't reset/stash your files. Since multiple agents may be working on the same file. Do not disturb them.
 - Document every change in `agent-log/v0.2.19/memory/[id]-feature-name.md` (next sequential ID, or update existing). Write incrementally on long tasks.
 - `PLAN.md` only on request; if it exists, keep it current.
 - When performing major tasks with multisteps, break down and use subagents to save on tokens.

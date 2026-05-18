@@ -53,9 +53,13 @@ export function formatFontValueLabel(value: string) {
 
 export function FontSelector({
   value,
+  hasKeyframe = false,
+  onToggleKeyframe,
   onChange,
 }: {
   value: string;
+  hasKeyframe?: boolean;
+  onToggleKeyframe?: () => void;
   onChange: (value: string) => void;
 }) {
   const [systemFontOptions, setSystemFontOptions] = useState<FontOption[]>(
@@ -85,20 +89,54 @@ export function FontSelector({
   return (
     <label className={`grid gap-1.5 ${mutedCaps}`}>
       Font
-      <Select value={value} onValueChange={onChange}>
-        <SelectTrigger className="h-[42px] rounded-[10px] px-3 text-xs font-bold text-[#dfe2ea]">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectGroup>
-            {fontOptions.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
-              </SelectItem>
-            ))}
-          </SelectGroup>
-        </SelectContent>
-      </Select>
+      <span className="relative block">
+        <Select value={value} onValueChange={onChange}>
+          <SelectTrigger
+            className={`h-[42px] rounded-[10px] px-3 text-xs font-bold text-[#dfe2ea] ${onToggleKeyframe ? "pl-8" : ""} ${hasKeyframe ? "border-white" : ""}`}
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              {fontOptions.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+        {onToggleKeyframe ? (
+          <button
+            aria-label={
+              hasKeyframe
+                ? "Remove Font keyframe at playhead"
+                : "Add Font keyframe at playhead"
+            }
+            aria-pressed={hasKeyframe}
+            className={`absolute left-3 top-1/2 h-2 w-2 -translate-y-1/2 rotate-45 rounded-[1px] border transition hover:scale-125 ${
+              hasKeyframe
+                ? "border-white bg-white shadow-[0_0_0_1px_rgba(255,255,255,0.16)]"
+                : "border-[#6f7684] bg-[#12151d] hover:border-white"
+            }`}
+            title={
+              hasKeyframe
+                ? "Remove Font keyframe at playhead"
+                : "Add Font keyframe at playhead"
+            }
+            type="button"
+            onMouseDown={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onToggleKeyframe();
+            }}
+          />
+        ) : null}
+      </span>
     </label>
   );
 }

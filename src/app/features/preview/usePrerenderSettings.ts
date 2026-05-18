@@ -1,14 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import toast from "react-hot-toast";
+import { useAppSettingsStore } from "../../state/appSettingsStore";
 import { clipperHost } from "../../clipperHost";
-import {
-  appSettingKeys,
-  clampPrerenderBlockDurationMs,
-  getInitialPrerenderBlockDurationMs,
-  readStoredAppSettings,
-  readStoredStringSetting,
-  writeStoredAppSetting,
-} from "../../state/storedAppSettings";
 import {
   compositionMatchesIdentity,
   resolveCanonicalComposition,
@@ -47,62 +40,36 @@ type UsePrerenderCompositionActionsParams = {
 export function usePrerenderSettings({
   activeProjectManifestPath,
 }: UsePrerenderSettingsParams) {
-  const [prerenderBlockDurationMs, setPrerenderBlockDurationMsState] = useState(
-    getInitialPrerenderBlockDurationMs,
+  const prerenderBlockDurationMs = useAppSettingsStore(
+    (state) => state.prerenderBlockDurationMs,
   );
-  const [prerenderCacheResetToken, setPrerenderCacheResetToken] = useState(0);
+  const prerenderCacheResetToken = useAppSettingsStore(
+    (state) => state.prerenderCacheResetToken,
+  );
+  const setPrerenderBlockDurationMs = useAppSettingsStore(
+    (state) => state.setPrerenderBlockDurationMs,
+  );
+  const resetPrerenderCache = useAppSettingsStore(
+    (state) => state.resetPrerenderCache,
+  );
 
-  useEffect(() => {
-    let cancelled = false;
-    void readStoredAppSettings().then((settings) => {
-      if (cancelled) return;
-      setPrerenderBlockDurationMsState(
-        clampPrerenderBlockDurationMs(
-          Number.parseInt(
-            readStoredStringSetting(
-              settings,
-              appSettingKeys.prerenderBlockDurationMs,
-            ) ?? "",
-            10,
-          ),
-        ),
-      );
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  function resetPrerenderCache() {
-    setPrerenderCacheResetToken((token) => token + 1);
-  }
-
-  function setPrerenderBlockDurationMs(value: number) {
-    const nextValue = clampPrerenderBlockDurationMs(value);
-    setPrerenderBlockDurationMsState(nextValue);
-    writeStoredAppSetting(
-      appSettingKeys.prerenderBlockDurationMs,
-      String(nextValue),
-    );
-    resetPrerenderCache();
-    void clipperHost.clearPrerenderCache(activeProjectManifestPath);
-  }
-
-  async function clearAllPrerenderCaches() {
-    try {
-      const result = await clipperHost.clearAllPrerenderCaches();
-      await clipperHost.clearPrerenderCache(activeProjectManifestPath);
-      resetPrerenderCache();
-      toast.success(
-        `Cleared prerender caches for ${result.clearedCount} project${result.clearedCount === 1 ? "" : "s"}.`,
-      );
-    } catch (error) {
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : "Failed to clear prerender caches.",
-      );
-    }
+  function clearAllPrerenderCaches() {
+    void (async () => {
+      try {
+        const result = await clipperHost.clearAllPrerenderCaches();
+        await clipperHost.clearPrerenderCache(activeProjectManifestPath);
+        resetPrerenderCache();
+        toast.success(
+          `Cleared prerender caches for ${result.clearedCount} project${result.clearedCount === 1 ? "" : "s"}.`,
+        );
+      } catch (error) {
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : "Failed to clear prerender caches.",
+        );
+      }
+    })();
   }
 
   return {
