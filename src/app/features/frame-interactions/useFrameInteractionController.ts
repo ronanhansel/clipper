@@ -296,15 +296,11 @@ export function useFrameInteractionController(
     );
   }
 
-  function getFramePathEditOverlayElements() {
+  function getPortalOverlayElements() {
     return Array.from(
-      document.querySelectorAll<HTMLElement>("[data-frame-path-edit-overlay]"),
-    );
-  }
-
-  function getFrameOverlayFollowElements() {
-    return Array.from(
-      document.querySelectorAll<HTMLElement>("[data-frame-overlay-follow]"),
+      document.querySelectorAll<HTMLElement>(
+        "[data-frame-selection-box],[data-frame-path-edit-overlay],[data-frame-overlay-follow]",
+      ),
     );
   }
 
@@ -313,48 +309,16 @@ export function useFrameInteractionController(
     const actualFrameScale = frameRect
       ? frameRect.width / FRAME_WIDTH
       : framePreviewScale;
-    for (const element of getFrameSelectionBoxElements()) {
-      element.style.setProperty(
-        "--clipper-drag-x",
-        `${delta.x * actualFrameScale * cameraPreviewTransform.scale}px`,
-      );
-      element.style.setProperty(
-        "--clipper-drag-y",
-        `${delta.y * actualFrameScale * cameraPreviewTransform.scale}px`,
-      );
-    }
-    for (const element of getFramePathEditOverlayElements()) {
-      element.style.setProperty(
-        "--clipper-drag-x",
-        `${delta.x * actualFrameScale * cameraPreviewTransform.scale}px`,
-      );
-      element.style.setProperty(
-        "--clipper-drag-y",
-        `${delta.y * actualFrameScale * cameraPreviewTransform.scale}px`,
-      );
-    }
-    for (const element of getFrameOverlayFollowElements()) {
-      element.style.setProperty(
-        "--clipper-drag-x",
-        `${delta.x * actualFrameScale * cameraPreviewTransform.scale}px`,
-      );
-      element.style.setProperty(
-        "--clipper-drag-y",
-        `${delta.y * actualFrameScale * cameraPreviewTransform.scale}px`,
-      );
+    const dx = `${delta.x * actualFrameScale * cameraPreviewTransform.scale}px`;
+    const dy = `${delta.y * actualFrameScale * cameraPreviewTransform.scale}px`;
+    for (const element of getPortalOverlayElements()) {
+      element.style.setProperty("--clipper-drag-x", dx);
+      element.style.setProperty("--clipper-drag-y", dy);
     }
   }
 
   function clearFrameSelectionBoxDragTransform() {
-    for (const element of getFrameSelectionBoxElements()) {
-      element.style.removeProperty("--clipper-drag-x");
-      element.style.removeProperty("--clipper-drag-y");
-    }
-    for (const element of getFramePathEditOverlayElements()) {
-      element.style.removeProperty("--clipper-drag-x");
-      element.style.removeProperty("--clipper-drag-y");
-    }
-    for (const element of getFrameOverlayFollowElements()) {
+    for (const element of getPortalOverlayElements()) {
       element.style.removeProperty("--clipper-drag-x");
       element.style.removeProperty("--clipper-drag-y");
     }

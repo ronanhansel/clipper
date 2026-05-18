@@ -2,6 +2,7 @@ import {
   Component as ReactComponent,
   Fragment,
   memo,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -54,6 +55,11 @@ import {
   viewportPointToPortal,
   type FramePortalOverlayTransform,
 } from "../../core/overlayGeometry";
+import {
+  readOverlayTransform,
+  startPortalSyncLoop,
+  syncViewportBoundsToPortalElement,
+} from "../../core/portalOverlaySync";
 import { transformPathGeometrySegmentsToBounds } from "../../core/pathGeometry";
 import type { TimelinePreviewStackPart } from "../../core/timeline";
 import type { SceneWrapConfig } from "../../app/state/framePreviewRenderModel";
@@ -111,6 +117,8 @@ import { StrokeOverlay } from "./StrokeOverlay";
 import { SceneCompositor } from "./compositors/SceneCompositor";
 import { DomBackend } from "./backends/DomBackend";
 import { PreviewRenderProvider } from "./previewRenderStore";
+
+const noop = () => {};
 
 const identityCameraTransform: CameraPreviewTransform = {
   x: 0,
@@ -634,7 +642,14 @@ export const FramePreview = memo(function FramePreview({
 
   function handleFramePointerDownCapture(event: PointerEvent<HTMLDivElement>) {
     if (isPlaying) return;
-    if (activeShapeTool === "text" || activeShapeTool === "textPath") {
+    if (
+      activeShapeTool === "pen" ||
+      activeShapeTool === "pencil" ||
+      activeShapeTool === "textPath"
+    ) {
+      return;
+    }
+    if (activeShapeTool === "text") {
       const targetEl = event.target as HTMLElement;
       const insideEditable = targetEl.closest<HTMLElement>(
         '[contenteditable="true"]',
@@ -894,45 +909,40 @@ export const FramePreview = memo(function FramePreview({
               const liveBounds = source?.bounds ?? object.bounds;
               return (
                 <Fragment key={object.id}>
-                  {!isTextPath && (
-                    <SelectionOverlayBox
-                      objectId={object.id}
-                      bounds={liveBounds}
-                      cameraTransform={liveCameraTransform}
-                      frameScale={frameScale}
-                      frameViewportRef={frameViewportRef}
-                      handleSizePx={selectionHandleSizePx}
-                      highlighted={hoveredObjectId === object.id}
-                      interactive={!marqueeDragging && !isBackgroundSelection}
-                      offsetPx={selectionOffsetPx}
-                      portal
-                      portalHost={previewOverlayHost}
-                      radius={
-                        !isBackgroundSelection && source?.type === "rect"
-                          ? getNumericStyleValue(source.style.borderRadius)
-                          : undefined
-                      }
-                      resizable={
-                        !isBackgroundSelection && source?.type !== "null"
-                      }
-                      uiScale={selectionOverlayScale}
-                      onCornerRadiusChange={
-                        !isBackgroundSelection && onObjectCornerRadiusChange
-                          ? (radius) =>
-                              onObjectCornerRadiusChange(object.id, radius)
-                          : undefined
-                      }
-                      onResizePointerDown={(event, handle) =>
-                        onObjectResizePointerDown(event, handle, object.id)
-                      }
-                    />
-                  )}
+                  <SelectionOverlayBox
+                    objectId={object.id}
+                    bounds={liveBounds}
+                    cameraTransform={liveCameraTransform}
+                    frameScale={frameScale}
+                    frameViewportRef={frameViewportRef}
+                    handleSizePx={selectionHandleSizePx}
+                    highlighted={hoveredObjectId === object.id}
+                    interactive={!marqueeDragging && !isBackgroundSelection}
+                    offsetPx={selectionOffsetPx}
+                    portal
+                    portalHost={previewOverlayHost}
+                    radius={
+                      !isBackgroundSelection && source?.type === "rect"
+                        ? getNumericStyleValue(source.style.borderRadius)
+                        : undefined
+                    }
+                    resizable={
+                      !isBackgroundSelection && source?.type !== "null"
+                    }
+                    uiScale={selectionOverlayScale}
+                    onCornerRadiusChange={
+                      !isBackgroundSelection && onObjectCornerRadiusChange
+                        ? (radius) =>
+                            onObjectCornerRadiusChange(object.id, radius)
+                        : undefined
+                    }
+                    onResizePointerDown={(event, handle) =>
+                      onObjectResizePointerDown(event, handle, object.id)
+                    }
+                  />
                   {isTextPath && source && (
-                    <TextPathDottedOverlay
+                    <TextPathTraceOverlay
                       object={source}
-                      cameraTransform={liveCameraTransform}
-                      frameScale={frameScale}
-                      portalHost={previewOverlayHost}
                       frameViewportRef={frameViewportRef}
                     />
                   )}
@@ -1527,48 +1537,43 @@ function TextPathOffsetHandle({
   const offsetRef = useRef(offset);
   offsetRef.current = offset;
 
-  useLayoutEffect(() => {
-    let frameId = 0;
-    function sync() {
-      const handle = handleRef.current;
-      const viewport = frameViewportRef.current;
-      if (handle && viewport) {
-        // Use live bounds from the preview cache (populated during scrubbing/playback)
-        // falling back to the React-state bounds when not animating.
-        const liveBounds =
-          objectPreviewBoundsById.get(object.id) ?? object.bounds;
-        const overlayTransform = getCurrentFramePortalOverlayTransform({
-          frameScale,
-          frameViewportRef,
-          portalHost,
-        });
-        const viewportPoint = boundsToViewport(
-          {
-            x: liveBounds.x + liveBounds.width * (offsetRef.current / 100),
-            y: liveBounds.y + liveBounds.height / 2,
-            width: 0,
-            height: 0,
-          },
-          cameraTransform,
-          frameScale,
-        );
-        const portalPoint = viewportPointToPortal(
-          viewportPoint,
-          overlayTransform,
-        );
-        handle.style.setProperty(
-          "--clipper-text-path-offset-x",
-          `${portalPoint.x}px`,
-        );
-        handle.style.setProperty(
-          "--clipper-text-path-offset-y",
-          `${portalPoint.y}px`,
-        );
-      }
-      frameId = requestAnimationFrame(sync);
+  const syncOffsetHandle = useCallback(() => {
+    const handle = handleRef.current;
+    const viewport = frameViewportRef.current;
+    if (handle && viewport) {
+      // Use live bounds from the preview cache (populated during scrubbing/playback)
+      // falling back to the React-state bounds when not animating.
+      const liveBounds =
+        objectPreviewBoundsById.get(object.id) ?? object.bounds;
+      const overlayTransform = getCurrentFramePortalOverlayTransform({
+        cameraTransform,
+        frameScale,
+        frameViewportRef,
+        portalHost,
+      });
+      const viewportPoint = boundsToViewport(
+        {
+          x: liveBounds.x + liveBounds.width * (offsetRef.current / 100),
+          y: liveBounds.y + liveBounds.height / 2,
+          width: 0,
+          height: 0,
+        },
+        cameraTransform,
+        frameScale,
+      );
+      const portalPoint = viewportPointToPortal(
+        viewportPoint,
+        overlayTransform,
+      );
+      handle.style.setProperty(
+        "--clipper-text-path-offset-x",
+        `${portalPoint.x}px`,
+      );
+      handle.style.setProperty(
+        "--clipper-text-path-offset-y",
+        `${portalPoint.y}px`,
+      );
     }
-    sync();
-    return () => cancelAnimationFrame(frameId);
   }, [
     cameraTransform,
     frameScale,
@@ -1577,6 +1582,7 @@ function TextPathOffsetHandle({
     object.id,
     portalHost,
   ]);
+  usePortalOverlayFrameSync(syncOffsetHandle);
 
   function startDrag(event: PointerEvent<HTMLButtonElement>) {
     event.preventDefault();
@@ -1765,12 +1771,6 @@ function decodeXmlText(value: string) {
     .replaceAll("&amp;", "&");
 }
 
-const identityPortalOverlayTransform: FramePortalOverlayTransform = {
-  left: 0,
-  top: 0,
-  scale: 1,
-};
-
 const objectPreviewBoundsById = new Map<string, Bounds>();
 
 let pendingTextEditClick: { clientX: number; clientY: number } | null = null;
@@ -1784,63 +1784,73 @@ export function setPendingTextEditClick(
   pendingTextEditClick = point;
 }
 
-function getTextPathDAttribute(content: string | undefined): string | null {
-  if (!content) return null;
-  const match = content.match(/<path[^>]+\bid="draw-path"[^>]+\bd="([^"]+)"/);
-  return match?.[1] ?? null;
-}
-
-function TextPathDottedOverlay({
+function TextPathTraceOverlay({
   object,
-  cameraTransform,
-  frameScale,
-  portalHost,
   frameViewportRef,
 }: {
   object: FrameObject;
-  cameraTransform: CameraPreviewTransform;
-  frameScale: number;
-  portalHost: HTMLElement;
   frameViewportRef: RefObject<HTMLDivElement | null>;
 }) {
-  const pathD = getTextPathDAttribute(object.content);
-  if (!pathD) return null;
+  useLayoutEffect(() => {
+    let frameId = 0;
+    let tracedPath: SVGPathElement | null = null;
+    let previousAttributes: Record<string, string | null> | null = null;
+    const traceAttributes = {
+      fill: "none",
+      opacity: "0.8",
+      stroke: "#8fbff7",
+      "stroke-dasharray": "6 4",
+      "stroke-linecap": "round",
+      "stroke-width": "2",
+      "vector-effect": "non-scaling-stroke",
+    };
 
-  const { bounds } = object;
-  const vx = bounds.x * frameScale * cameraTransform.scale + cameraTransform.x;
-  const vy = bounds.y * frameScale * cameraTransform.scale + cameraTransform.y;
-  const vw = bounds.width * frameScale * cameraTransform.scale;
-  const vh = bounds.height * frameScale * cameraTransform.scale;
+    function restorePath() {
+      if (!tracedPath || !previousAttributes) return;
+      for (const [name, value] of Object.entries(previousAttributes)) {
+        if (value === null) tracedPath.removeAttribute(name);
+        else tracedPath.setAttribute(name, value);
+      }
+      tracedPath = null;
+      previousAttributes = null;
+    }
 
-  return createPortal(
-    <div
-      className="pointer-events-none absolute inset-0"
-      data-frame-overlay-follow={object.id}
-      style={{
-        transform:
-          "translate(var(--clipper-drag-x, 0px), var(--clipper-drag-y, 0px))",
-      }}
-    >
-      <svg
-        className="pointer-events-none absolute z-30 overflow-visible"
-        style={{ left: vx, top: vy, width: vw, height: vh }}
-        viewBox={`0 0 ${Math.max(1, bounds.width)} ${Math.max(1, bounds.height)}`}
-        preserveAspectRatio="none"
-      >
-        <path
-          d={pathD}
-          fill="none"
-          stroke="#8fbff7"
-          strokeWidth={2}
-          strokeDasharray="6 4"
-          strokeLinecap="round"
-          vectorEffect="non-scaling-stroke"
-          opacity={0.8}
-        />
-      </svg>
-    </div>,
-    portalHost,
-  );
+    function syncTrace() {
+      const host = frameViewportRef.current?.querySelector<HTMLElement>(
+        `[data-clipper-render-object-id="${cssEscape(object.id)}"]`,
+      );
+      const path =
+        host
+          ?.querySelector<HTMLElement>("[data-clipper-shadow-render-root]")
+          ?.shadowRoot?.querySelector<SVGPathElement>("#draw-path") ?? null;
+      if (path !== tracedPath) {
+        restorePath();
+        tracedPath = path;
+        previousAttributes = path
+          ? Object.fromEntries(
+              Object.keys(traceAttributes).map((name) => [
+                name,
+                path.getAttribute(name),
+              ]),
+            )
+          : null;
+      }
+      if (path) {
+        for (const [name, value] of Object.entries(traceAttributes)) {
+          path.setAttribute(name, value);
+        }
+      }
+      frameId = requestAnimationFrame(syncTrace);
+    }
+
+    syncTrace();
+    return () => {
+      cancelAnimationFrame(frameId);
+      restorePath();
+    };
+  }, [frameViewportRef, object.id]);
+
+  return null;
 }
 
 function updateObjectPreviewBoundsCache(event: Event) {
@@ -1876,21 +1886,28 @@ function getPreviewAdjustedPathPoint(
 }
 
 function getCurrentFramePortalOverlayTransform({
+  cameraTransform,
   frameScale,
   frameViewportRef,
   portalHost,
 }: {
+  cameraTransform: CameraPreviewTransform;
   frameScale: number;
   frameViewportRef: RefObject<HTMLDivElement | null>;
   portalHost: HTMLElement;
 }) {
-  const frameElement = frameViewportRef.current;
-  if (!frameElement) return identityPortalOverlayTransform;
-  return getFramePortalOverlayTransform(
-    frameElement.getBoundingClientRect(),
-    portalHost.getBoundingClientRect(),
+  return readOverlayTransform({
+    cameraTransform,
     frameScale,
-  );
+    frameViewportRef,
+    portalHost,
+  });
+}
+
+function usePortalOverlayFrameSync(sync: () => void) {
+  useLayoutEffect(() => {
+    return startPortalSyncLoop(sync);
+  }, [sync]);
 }
 
 function setPathPortalPointVars(
@@ -1940,77 +1957,72 @@ function usePortalPathOverlaySync({
   portalHost: HTMLElement;
   rootRef: RefObject<HTMLElement | null>;
 }) {
-  useLayoutEffect(() => {
-    let frameId = 0;
-    function syncPathOverlay() {
-      const root = rootRef.current;
-      if (root) {
-        const overlayTransform = getCurrentFramePortalOverlayTransform({
-          frameScale,
-          frameViewportRef,
-          portalHost,
-        });
-        for (const element of root.querySelectorAll<HTMLElement>(
-          "[data-frame-path-point]",
-        )) {
-          const point = readPathPortalPoint(element, "");
-          if (point) {
-            setPathPortalPointVars(
-              element,
-              getPreviewAdjustedPathPoint(point, objectId, objectBounds),
-              cameraTransform,
-              frameScale,
-              overlayTransform,
-            );
-          }
-        }
-        for (const element of root.querySelectorAll<HTMLElement>(
-          "[data-frame-path-line]",
-        )) {
-          const from = readPathPortalPoint(element, "from");
-          const to = readPathPortalPoint(element, "to");
-          if (!from || !to) continue;
-          const adjustedFrom = getPreviewAdjustedPathPoint(
-            from,
-            objectId,
-            objectBounds,
-          );
-          const adjustedTo = getPreviewAdjustedPathPoint(
-            to,
-            objectId,
-            objectBounds,
-          );
-          const portalFrom = setPathPortalPointVars(
+  const syncPathOverlay = useCallback(() => {
+    const root = rootRef.current;
+    if (root) {
+      const overlayTransform = getCurrentFramePortalOverlayTransform({
+        cameraTransform,
+        frameScale,
+        frameViewportRef,
+        portalHost,
+      });
+      for (const element of root.querySelectorAll<HTMLElement>(
+        "[data-frame-path-point]",
+      )) {
+        const point = readPathPortalPoint(element, "");
+        if (point) {
+          setPathPortalPointVars(
             element,
-            adjustedFrom,
+            getPreviewAdjustedPathPoint(point, objectId, objectBounds),
             cameraTransform,
             frameScale,
             overlayTransform,
           );
-          const portalTo = viewportPointToPortal(
-            boundsToViewport(
-              { x: adjustedTo.x, y: adjustedTo.y, width: 0, height: 0 },
-              cameraTransform,
-              frameScale,
-            ),
-            overlayTransform,
-          );
-          const dx = portalTo.x - portalFrom.x;
-          const dy = portalTo.y - portalFrom.y;
-          element.style.setProperty(
-            "--clipper-path-line-width",
-            `${Math.hypot(dx, dy)}px`,
-          );
-          element.style.setProperty(
-            "--clipper-path-line-angle",
-            `${(Math.atan2(dy, dx) * 180) / Math.PI}deg`,
-          );
         }
       }
-      frameId = requestAnimationFrame(syncPathOverlay);
+      for (const element of root.querySelectorAll<HTMLElement>(
+        "[data-frame-path-line]",
+      )) {
+        const from = readPathPortalPoint(element, "from");
+        const to = readPathPortalPoint(element, "to");
+        if (!from || !to) continue;
+        const adjustedFrom = getPreviewAdjustedPathPoint(
+          from,
+          objectId,
+          objectBounds,
+        );
+        const adjustedTo = getPreviewAdjustedPathPoint(
+          to,
+          objectId,
+          objectBounds,
+        );
+        const portalFrom = setPathPortalPointVars(
+          element,
+          adjustedFrom,
+          cameraTransform,
+          frameScale,
+          overlayTransform,
+        );
+        const portalTo = viewportPointToPortal(
+          boundsToViewport(
+            { x: adjustedTo.x, y: adjustedTo.y, width: 0, height: 0 },
+            cameraTransform,
+            frameScale,
+          ),
+          overlayTransform,
+        );
+        const dx = portalTo.x - portalFrom.x;
+        const dy = portalTo.y - portalFrom.y;
+        element.style.setProperty(
+          "--clipper-path-line-width",
+          `${Math.hypot(dx, dy)}px`,
+        );
+        element.style.setProperty(
+          "--clipper-path-line-angle",
+          `${(Math.atan2(dy, dx) * 180) / Math.PI}deg`,
+        );
+      }
     }
-    syncPathOverlay();
-    return () => cancelAnimationFrame(frameId);
   }, [
     cameraTransform,
     frameScale,
@@ -2020,6 +2032,7 @@ function usePortalPathOverlaySync({
     portalHost,
     rootRef,
   ]);
+  usePortalOverlayFrameSync(syncPathOverlay);
 
   useEffect(() => {
     if (!objectId) return;
@@ -2152,7 +2165,6 @@ function PathEditOverlay({
       ref={rootRef}
       className="pointer-events-none absolute inset-0"
       data-frame-path-edit-overlay={object.id}
-      data-frame-overlay-follow={object.id}
       style={{
         transform:
           "translate(var(--clipper-drag-x, 0px), var(--clipper-drag-y, 0px))",
@@ -2860,14 +2872,22 @@ export const FrameObjectView = memo(function FrameObjectView({
         if (!isLocked) onContextMenu?.(event);
       }}
       onPointerDown={(event) => {
-        if (!isLocked) onPointerDown(event);
+        if (
+          !isLocked &&
+          activeShapeTool !== "pen" &&
+          activeShapeTool !== "pencil" &&
+          activeShapeTool !== "textPath"
+        )
+          onPointerDown(event);
       }}
     >
-      <StrokeOverlay
-        object={object}
-        liveScrubClock={isPlaying}
-        fallbackTime={previewTime}
-      />
+      {!parseEditablePath(object) ? (
+        <StrokeOverlay
+          object={object}
+          liveScrubClock={isPlaying}
+          fallbackTime={previewTime}
+        />
+      ) : null}
       {(object.type === "text" || editableTextPath) && editing ? (
         <div
           ref={editableRef}
@@ -4296,164 +4316,26 @@ export function SelectionOverlayBox({
     portalHost,
   ]);
 
-  useLayoutEffect(() => {
-    if (!portal || !portalHost || !frameViewportRef) return;
-    const host = portalHost;
-    const viewportRef = frameViewportRef;
-
-    function syncPortalBox() {
-      const element = boxRef.current;
-      const frameViewport = viewportRef.current;
-      if (!element || !frameViewport) return;
-      clearSelectionPreviewBounds(element);
-      const target = frameViewport.querySelector<HTMLElement>(
-        `[data-clipper-render-object-id="${cssEscape(objectId)}"]`,
-      );
-      if (target) {
-        const targetRect = target.getBoundingClientRect();
-        const hostRect = host.getBoundingClientRect();
-        const insetX = offsetPx;
-        const insetY = offsetPx;
-        element.style.setProperty(
-          "--clipper-selection-base-left",
-          `${targetRect.left - hostRect.left - insetX}px`,
-        );
-        element.style.setProperty(
-          "--clipper-selection-base-top",
-          `${targetRect.top - hostRect.top - insetY}px`,
-        );
-        element.style.setProperty(
-          "--clipper-selection-base-width",
-          `${targetRect.width + insetX * 2}px`,
-        );
-        element.style.setProperty(
-          "--clipper-selection-base-height",
-          `${targetRect.height + insetY * 2}px`,
-        );
-        return;
-      }
-      const portalBounds = viewportBoundsToPortal(
-        viewportBounds,
-        getFramePortalOverlayTransform(
-          frameViewport.getBoundingClientRect(),
-          host.getBoundingClientRect(),
-          frameScale,
-        ),
-      );
-      element.style.setProperty(
-        "--clipper-selection-base-left",
-        `${portalBounds.x}px`,
-      );
-      element.style.setProperty(
-        "--clipper-selection-base-top",
-        `${portalBounds.y}px`,
-      );
-      element.style.setProperty(
-        "--clipper-selection-base-width",
-        `${portalBounds.width}px`,
-      );
-      element.style.setProperty(
-        "--clipper-selection-base-height",
-        `${portalBounds.height}px`,
-      );
-    }
-
-    function snapToObjectRect() {
-      const element = boxRef.current;
-      const frameViewport = viewportRef.current;
-      if (!element || !frameViewport) return;
-      clearSelectionPreviewBounds(element);
-      const target = frameViewport.querySelector<HTMLElement>(
-        `[data-clipper-render-object-id="${cssEscape(objectId)}"]`,
-      );
-      if (!target) {
-        syncPortalBox();
-        return;
-      }
-      const targetRect = target.getBoundingClientRect();
-      const hostRect = host.getBoundingClientRect();
-      const insetX = offsetPx;
-      const insetY = offsetPx;
-      element.style.setProperty(
-        "--clipper-selection-base-left",
-        `${targetRect.left - hostRect.left - insetX}px`,
-      );
-      element.style.setProperty(
-        "--clipper-selection-base-top",
-        `${targetRect.top - hostRect.top - insetY}px`,
-      );
-      element.style.setProperty(
-        "--clipper-selection-base-width",
-        `${targetRect.width + insetX * 2}px`,
-      );
-      element.style.setProperty(
-        "--clipper-selection-base-height",
-        `${targetRect.height + insetY * 2}px`,
-      );
-    }
-
-    syncPortalBox();
-
-    let scheduled = 0;
-    let zoomActive = false;
-    function scheduleSync() {
-      if (zoomActive) return;
-      if (scheduled) return;
-      scheduled = requestAnimationFrame(() => {
-        scheduled = 0;
-        snapToObjectRect();
-      });
-    }
-
-    function handleZoomActive(event: Event) {
-      const active = Boolean(
-        (event as CustomEvent<{ active?: boolean }>).detail?.active,
-      );
-      const element = boxRef.current;
-      if (!element) return;
-      zoomActive = active;
-      if (active) {
-        element.style.visibility = "hidden";
-        return;
-      }
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          snapToObjectRect();
-          element.style.visibility = "";
-        });
-      });
-    }
-
-    const frameViewport = viewportRef.current;
-    const resizeObserver =
-      typeof ResizeObserver !== "undefined"
-        ? new ResizeObserver(scheduleSync)
-        : null;
-    if (resizeObserver && frameViewport) resizeObserver.observe(frameViewport);
-    if (resizeObserver) resizeObserver.observe(host);
-    window.addEventListener("resize", scheduleSync);
-    window.addEventListener("scroll", scheduleSync, true);
-    window.addEventListener("clipper:frame-zoom-active", handleZoomActive);
-
-    return () => {
-      if (scheduled) cancelAnimationFrame(scheduled);
-      resizeObserver?.disconnect();
-      window.removeEventListener("resize", scheduleSync);
-      window.removeEventListener("scroll", scheduleSync, true);
-      window.removeEventListener("clipper:frame-zoom-active", handleZoomActive);
-    };
+  const syncPortalBox = useCallback(() => {
+    const element = boxRef.current;
+    const frameViewport = frameViewportRef?.current;
+    if (!element || !frameViewport || !portal || !portalHost) return;
+    clearSelectionPreviewBounds(element);
+    syncViewportBoundsToPortalElement(element, viewportBounds, {
+      cameraTransform,
+      frameScale,
+      frameViewportRef,
+      portalHost,
+    });
   }, [
+    cameraTransform,
     frameScale,
     frameViewportRef,
-    offsetPx,
     portal,
     portalHost,
-    objectId,
-    viewportBounds.height,
-    viewportBounds.width,
-    viewportBounds.x,
-    viewportBounds.y,
+    viewportBounds,
   ]);
+  usePortalOverlayFrameSync(portal ? syncPortalBox : noop);
 
   useEffect(() => {
     function updateObjectResizingActive(event: Event) {
@@ -4578,7 +4460,6 @@ export function SelectionOverlayBox({
       ref={boxRef}
       data-frame-selection-box={objectId}
       data-frame-selection-box-portal={portal ? "true" : undefined}
-      data-frame-overlay-follow={objectId}
       className={`${portal ? "absolute" : "absolute"} pointer-events-none bg-transparent`}
       style={boxStyle}
     >

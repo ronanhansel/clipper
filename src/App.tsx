@@ -13,13 +13,13 @@ import { useFramePreviewZoomCommands } from "./app/features/editor-layout/useFra
 import { usePreviewScrollPersistence } from "./app/features/editor-layout/usePreviewScrollPersistence";
 import { useExportCommands } from "./app/features/export/useExportCommands";
 import { usePlaybackController } from "./app/features/playback/usePlaybackController";
+import { useLiveSceneTimeRef } from "./app/features/playback/useLiveSceneTimeRef";
 import {
   usePrerenderCache,
   type PrerenderManualCompositionRange,
 } from "./app/features/preview/usePrerenderCache";
 import { usePresentationController } from "./app/features/presentation/usePresentationController";
 import {
-  isEditorTarget,
   isTextEditingTarget,
   useGlobalEditorShortcuts,
 } from "./app/features/shortcuts/useGlobalEditorShortcuts";
@@ -31,10 +31,7 @@ import {
   type UpdateMotionMarkerFn,
 } from "./app/features/picking/usePickingOrchestration";
 import { getProjectFolderSiblingNames } from "./app/features/file-manager/compositionLibraryMutations";
-import {
-  compositionMatchesIdentity,
-  resolveCanonicalComposition,
-} from "./app/features/file-manager/compositionIdentity";
+import { compositionMatchesIdentity } from "./app/features/file-manager/compositionIdentity";
 import { getDirectoryPath } from "./app/features/file-manager/binPaths";
 import {
   findBinItem,
@@ -45,8 +42,12 @@ import {
   useFrameInteractionController,
   type FrameInteractionController,
 } from "./app/features/frame-interactions/useFrameInteractionController";
+import { useFrameInteractionEffects } from "./app/features/frame-interactions/useFrameInteractionEffects";
 import { useFrameObjectCommands } from "./app/features/frame-interactions/useFrameObjectCommands";
+import { useComposeObjectPreview } from "./app/features/frame-interactions/useComposeObjectPreview";
 import { useAdjustmentLayerCommands } from "./app/features/timeline/useAdjustmentLayerCommands";
+import { useTransitionLayerCommands } from "./app/features/timeline/useTransitionLayerCommands";
+import { useTimelineGapCommands } from "./app/features/timeline/useTimelineGapCommands";
 import { useCompositionTimelineCommands } from "./app/features/timeline/useCompositionTimelineCommands";
 import {
   ConnectedTimelinePanel,
@@ -92,6 +93,7 @@ import { useActiveToolCleanup } from "./app/features/compose/useActiveToolCleanu
 import { useComposeToolShortcuts } from "./app/features/compose/useComposeToolShortcuts";
 import { useComposeClipboard } from "./app/features/compose/useComposeClipboard";
 import { useComposeSelectionPersistence } from "./app/features/compose/useComposeSelectionPersistence";
+import { useComposeSelectionHydration } from "./app/features/compose/useComposeSelectionHydration";
 import { usePenDraftShortcuts } from "./app/features/compose/usePenDraftShortcuts";
 import { useTimelineLayerCommands } from "./app/features/timeline/useTimelineLayerCommands";
 import { useMotionMarkerCommands } from "./app/features/timeline/useMotionMarkerCommands";
@@ -119,6 +121,7 @@ import { PresentationControls } from "./app/shell/PresentationControls";
 import { RightInspectorPanel } from "./app/shell/RightInspectorPanel";
 import { useEditorViewportState } from "./app/shell/useEditorViewportState";
 import { useEditorModeCommands } from "./app/shell/useEditorModeCommands";
+import { usePointerFocusCleanup } from "./app/shell/usePointerFocusCleanup";
 import { useProjectTitleRename } from "./app/shell/useProjectTitleRename";
 import {
   defaultPrerenderBlockDurationMs,
@@ -130,21 +133,20 @@ import {
 } from "./app/config";
 import { useEditorDerivedState } from "./app/state/editorDerivedState";
 import { usePreviewLifecycle } from "./app/features/preview/usePreviewLifecycle";
+import { usePostProcessLayerPreview } from "./app/features/preview/usePostProcessLayerPreview";
+import {
+  usePrerenderCompositionActions,
+  usePrerenderSettings,
+} from "./app/features/preview/usePrerenderSettings";
 import { useExportSettings } from "./app/features/export/useExportSettings";
 import {
-  appSettingKeys,
   clampLiveDomPostProcessMaxFps,
-  clampPrerenderBlockDurationMs,
   getInitialLiveDomPostProcessMaxFps,
-  getInitialPrerenderBlockDurationMs,
   isDebugSettingsEnabledByDefault,
   isPrerenderCacheBlackMissDebugEnabledByDefault,
   isPrerenderCacheEnabledByDefault,
   isPrerenderCacheReuseEnabledByDefault,
-  readStoredAppSettings,
   readStoredBooleanSetting,
-  readStoredStringSetting,
-  writeStoredAppSetting,
 } from "./app/state/storedAppSettings";
 import { getFramePreviewTimelineLayers } from "./app/state/framePreviewRenderModel";
 import {
@@ -157,10 +159,6 @@ import {
   useViewportEditorState,
   useExportEditorState,
 } from "./app/state/editorStore";
-import {
-  getMasterTimelineClockSnapshot,
-  subscribeMasterTimelineClock,
-} from "./app/features/playback/playbackTimeStore";
 import { ProjectStoreProvider } from "./app/state/projectStore";
 import { CodeObjectRuntimeHostBridge } from "./render-engine/codeObjectRuntimeHostBridge";
 import {
@@ -171,10 +169,7 @@ import {
   type RightPanelTab,
   type SettingsSection,
 } from "./app/types";
-import {
-  applyAdjustmentLayersToVisualStyle,
-  getTimeSensitiveDisplayDuration,
-} from "./core/adjustments";
+import { getTimeSensitiveDisplayDuration } from "./core/adjustments";
 import {
   isMarkerOnMotionLayer,
   type CameraPreviewTransform,
@@ -192,14 +187,8 @@ import {
   type ObjectSnapGuide,
 } from "./core/frameInteraction";
 import { boundsToPoints, framePointFromClient } from "./core/geometry";
-import { type FillValue, fillValueToCss, isFillValue } from "./core/fillValue";
 import { clamp, roundToPrecision, roundTenth } from "./core/math";
-import type {
-  AdjustmentEffectPointControl,
-  AdjustmentVisualOverlay,
-} from "./core/effects/types";
-import { getTransitionEffectPackage } from "./core/effects/registry";
-import { normalizeSymmetricTransitionLayer } from "./core/transitions";
+import type { AdjustmentEffectPointControl } from "./core/effects/types";
 import {
   defaultComposeLayoutState,
   defaultEditorLayoutState,
@@ -221,7 +210,6 @@ import {
   FRAME_HEIGHT,
   FRAME_WIDTH,
   type AdjustmentLayer,
-  type BackgroundLayer,
   type Bounds,
   type CompositionClip,
   type EditorState,
@@ -229,7 +217,6 @@ import {
   type LayerAnimation,
   type MotionEffectKind,
   type Part,
-  type PartFrame,
   type Point,
   type ProjectManifest,
   type SelectionPayload,
@@ -532,7 +519,7 @@ function AppContent({
   uiPersistRef.current.selectedComposeObjectIds = selectedComposeObjectIds;
   const modeRef = useRef(mode);
   const activePartFilePathRef = useRef("");
-  const currentSceneTimeRef = useRef(currentSceneTime);
+  const currentSceneTimeRef = useLiveSceneTimeRef(currentSceneTime);
   const isPlayingRef = useRef(isPlaying);
   const playbackClockRef = useRef<PlaybackClock>(null);
   const wasPlayingRef = useRef(false);
@@ -569,53 +556,7 @@ function AppContent({
     frameViewportRef,
     framePreviewScale,
   });
-  // Mirror the structural editor-store currentSceneTime into the ref so
-  // event-handler reads stay accurate at preview-key boundaries.
-  useEffect(() => {
-    currentSceneTimeRef.current = currentSceneTime;
-  }, [currentSceneTime]);
-  // Subscribe to the master timeline clock and update the ref imperatively on
-  // every tick (no setState, no React rerender). Event handlers that read
-  // currentSceneTimeRef.current during playback get the live time, while
-  // AppContent itself is unaffected.
-  useEffect(() => {
-    return subscribeMasterTimelineClock(() => {
-      const snap = getMasterTimelineClockSnapshot();
-      if (snap.source !== "playback" && snap.source !== "scrub") return;
-      currentSceneTimeRef.current = snap.sceneTime;
-    });
-  }, []);
-
-  useEffect(() => {
-    function blurPointerFocusedControl(event: PointerEvent) {
-      if (event.pointerType === "keyboard") return;
-      const target = event.target as HTMLElement | null;
-      const control = target?.closest(
-        "button, [role='button'], [role='switch'], [role='checkbox'], [role='combobox'], [data-radix-select-trigger]",
-      ) as HTMLElement | null;
-      if (!control || isTextEditingTarget(control)) return;
-      requestAnimationFrame(() => {
-        const active = document.activeElement as HTMLElement | null;
-        if (active && (active === control || control.contains(active)))
-          active.blur();
-      });
-    }
-
-    document.addEventListener("pointerup", blurPointerFocusedControl, true);
-    document.addEventListener("click", blurPointerFocusedControl, true);
-    return () => {
-      document.removeEventListener(
-        "pointerup",
-        blurPointerFocusedControl,
-        true,
-      );
-      document.removeEventListener("click", blurPointerFocusedControl, true);
-    };
-  }, []);
-  const [prerenderBlockDurationMs, setPrerenderBlockDurationMsState] = useState(
-    getInitialPrerenderBlockDurationMs,
-  );
-  const [prerenderCacheResetToken, setPrerenderCacheResetToken] = useState(0);
+  usePointerFocusCleanup();
   const {
     autoDownloadUpdates,
     updateStatus,
@@ -624,27 +565,6 @@ function AppContent({
     downloadUpdate,
     installUpdate,
   } = useAppUpdates();
-
-  useEffect(() => {
-    let cancelled = false;
-    void readStoredAppSettings().then((settings) => {
-      if (cancelled) return;
-      setPrerenderBlockDurationMsState(
-        clampPrerenderBlockDurationMs(
-          Number.parseInt(
-            readStoredStringSetting(
-              settings,
-              appSettingKeys.prerenderBlockDurationMs,
-            ) ?? "",
-            10,
-          ),
-        ),
-      );
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const playbackBorderScrubberRef = useRef<HTMLInputElement | null>(null);
   const pendingScrubTimeRef = useRef<number | null>(null);
@@ -673,16 +593,12 @@ function AppContent({
   const centerPreviewScrollRef = useRef<HTMLDivElement | null>(null);
   const pendingCameraPreviewRef = useRef<CameraPreviewTransform | null>(null);
   const cameraPreviewFrameRef = useRef(0);
-  const pendingAdjustmentPreviewRef = useRef<AdjustmentLayer[] | null>(null);
-  const adjustmentPreviewFrameRef = useRef(0);
-  const pendingTransitionPreviewRef = useRef<TransitionLayer[] | null>(null);
-  const transitionPreviewFrameRef = useRef(0);
-  const [previewTransitionLayers, setPreviewTransitionLayers] = useState<
-    TransitionLayer[] | null
-  >(null);
   const timelineModeRef = useRef(timelineMode);
   const frameInteractionControllerRef =
     useRef<FrameInteractionController | null>(null);
+  const [previewTransitionLayers, setPreviewTransitionLayers] = useState<
+    TransitionLayer[] | null
+  >(null);
 
   function cancelFramePickPreview() {
     frameInteractionControllerRef.current?.cancelFramePickPreview();
@@ -741,6 +657,14 @@ function AppContent({
     timelineModeRef,
     uiPersistRef,
   });
+
+  const {
+    prerenderBlockDurationMs,
+    prerenderCacheResetToken,
+    setPrerenderBlockDurationMs,
+    clearAllPrerenderCaches,
+    resetPrerenderCache,
+  } = usePrerenderSettings({ activeProjectManifestPath });
 
   function withInspectorScrollPreserved(fn: () => void) {
     const panel = document.querySelector<HTMLElement>("[data-inspector-panel]");
@@ -955,6 +879,18 @@ function AppContent({
     activeTimelinePart &&
     hiddenCompositionLayerIds.has(activeTimelinePart.layerId ?? "comp"),
   );
+  const {
+    previewAdjustmentLayer,
+    clearAdjustmentPreview,
+    previewTransitionLayer,
+    clearTransitionPreview,
+  } = usePostProcessLayerPreview({
+    currentSceneTimeRef,
+    frameViewportRef,
+    visibleSceneAdjustmentLayers,
+    visibleSceneTransitionLayers,
+    setPreviewTransitionLayers,
+  });
   const hasPreviewComposition = hasActiveComposition;
   const manualPrerenderRanges = useMemo(
     () =>
@@ -977,120 +913,6 @@ function AppContent({
       ),
     [currentSceneTime, manualPrerenderRanges],
   );
-
-  function previewAdjustmentLayer(
-    layerId: string,
-    updater: (layer: AdjustmentLayer) => AdjustmentLayer,
-  ) {
-    const nextLayers = visibleSceneAdjustmentLayers.map((layer) =>
-      layer.id === layerId ? updater(layer) : layer,
-    );
-    pendingAdjustmentPreviewRef.current = nextLayers;
-    if (adjustmentPreviewFrameRef.current) return;
-    adjustmentPreviewFrameRef.current = requestAnimationFrame(() => {
-      adjustmentPreviewFrameRef.current = 0;
-      const layers = pendingAdjustmentPreviewRef.current;
-      if (!layers) return;
-      window.dispatchEvent(
-        new CustomEvent("clipper:preview-postprocess-adjustment", {
-          detail: { layers },
-        }),
-      );
-      applyAdjustmentPreviewDom(
-        applyAdjustmentLayersToVisualStyle(currentSceneTimeRef.current, layers),
-      );
-    });
-  }
-
-  function clearAdjustmentPreview() {
-    pendingAdjustmentPreviewRef.current = null;
-    window.dispatchEvent(
-      new CustomEvent("clipper:preview-postprocess-adjustment", {
-        detail: { layers: null },
-      }),
-    );
-    if (adjustmentPreviewFrameRef.current) {
-      cancelAnimationFrame(adjustmentPreviewFrameRef.current);
-      adjustmentPreviewFrameRef.current = 0;
-    }
-  }
-
-  function previewTransitionLayer(
-    layerId: string,
-    updater: (layer: TransitionLayer) => TransitionLayer,
-  ) {
-    const nextLayers = visibleSceneTransitionLayers.map((layer) =>
-      layer.id === layerId ? updater(layer) : layer,
-    );
-    pendingTransitionPreviewRef.current = nextLayers;
-    if (transitionPreviewFrameRef.current) return;
-    transitionPreviewFrameRef.current = requestAnimationFrame(() => {
-      transitionPreviewFrameRef.current = 0;
-      const layers = pendingTransitionPreviewRef.current;
-      if (!layers) return;
-      setPreviewTransitionLayers(layers);
-    });
-  }
-
-  function clearTransitionPreview() {
-    pendingTransitionPreviewRef.current = null;
-    setPreviewTransitionLayers(null);
-    if (transitionPreviewFrameRef.current) {
-      cancelAnimationFrame(transitionPreviewFrameRef.current);
-      transitionPreviewFrameRef.current = 0;
-    }
-  }
-
-  function applyAdjustmentPreviewDom(
-    style: ReturnType<typeof applyAdjustmentLayersToVisualStyle>,
-  ) {
-    const visualElement = frameViewportRef.current?.querySelector<HTMLElement>(
-      "[data-clipper-visual-adjustments]",
-    );
-    if (visualElement) {
-      if (style.filter) visualElement.style.filter = style.filter;
-      else visualElement.style.removeProperty("filter");
-    }
-    syncAdjustmentPreviewOverlays(
-      "frame",
-      style.overlays?.filter((overlay) => overlay.target === "frame"),
-    );
-    syncAdjustmentPreviewOverlays(
-      "camera",
-      style.overlays?.filter(
-        (overlay) => (overlay.target ?? "camera") === "camera",
-      ),
-    );
-  }
-
-  function syncAdjustmentPreviewOverlays(
-    target: "frame" | "camera",
-    overlays: AdjustmentVisualOverlay[] | undefined,
-  ) {
-    const container = frameViewportRef.current?.querySelector<HTMLElement>(
-      `[data-clipper-visual-adjustment-overlays="${target}"]`,
-    );
-    if (!container) return;
-    container.replaceChildren(
-      ...(overlays ?? []).map((overlay) => {
-        const element = document.createElement("div");
-        element.className = "pointer-events-none absolute inset-0";
-        element.style.zIndex = "2147483647";
-        Object.assign(element.style, overlay.style);
-        return element;
-      }),
-    );
-  }
-
-  function cssStylePropertyName(key: string) {
-    return key.replace(/[A-Z]/g, (match) => `-${match.toLowerCase()}`);
-  }
-
-  function cssEscape(value: string) {
-    return typeof CSS !== "undefined" && typeof CSS.escape === "function"
-      ? CSS.escape(value)
-      : value.replace(/"/g, '\\"');
-  }
 
   const prerenderPlaybackEnabled =
     (prerenderCacheEnabled || manualPrerenderActiveAtCurrentTime) &&
@@ -1118,6 +940,15 @@ function AppContent({
     timelineLayers,
     scheduleRanges: prerenderScheduleRanges,
   });
+  const { togglePrerenderCompositionFromLibrary } =
+    usePrerenderCompositionActions({
+      compositionLibrary,
+      scene,
+      manualPrerenderCompositionIds,
+      prerenderCache,
+      implicitFileOperation,
+      updateProject,
+    });
   const visiblePrerenderCoverage = useMemo(() => {
     if (prerenderCacheEnabled) return prerenderCache.coverage;
     if (manualPrerenderRanges.length === 0) return null;
@@ -1210,101 +1041,6 @@ function AppContent({
     updateMode,
   });
   const previewSelectionObjects = selectionPayload?.objects ?? [];
-  function setPrerenderBlockDurationMs(value: number) {
-    const nextValue = clampPrerenderBlockDurationMs(value);
-    setPrerenderBlockDurationMsState(nextValue);
-    writeStoredAppSetting(
-      appSettingKeys.prerenderBlockDurationMs,
-      String(nextValue),
-    );
-    setPrerenderCacheResetToken((token) => token + 1);
-    void clipperHost.clearPrerenderCache(activeProjectManifestPath);
-  }
-  async function clearAllPrerenderCaches() {
-    try {
-      const result = await clipperHost.clearAllPrerenderCaches();
-      await clipperHost.clearPrerenderCache(activeProjectManifestPath);
-      setPrerenderCacheResetToken((token) => token + 1);
-      toast.success(
-        `Cleared prerender caches for ${result.clearedCount} project${result.clearedCount === 1 ? "" : "s"}.`,
-      );
-    } catch (error) {
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : "Failed to clear prerender caches.",
-      );
-    }
-  }
-  async function togglePrerenderCompositionFromLibrary(compositionId: string) {
-    const isTimelineClipTarget = scene.compositions.some(
-      (composition) => composition.id === compositionId,
-    );
-    const sourceComposition = resolveCanonicalComposition(
-      compositionLibrary,
-      scene.compositions,
-      compositionId,
-    );
-    const sourceId =
-      sourceComposition?.compositionId ??
-      sourceComposition?.id ??
-      compositionId;
-    const matchingTimelineClips = scene.compositions.filter((composition) =>
-      compositionMatchesManualPrerenderId(composition, compositionId),
-    );
-    const currentlyMarked =
-      matchingTimelineClips.length > 0
-        ? matchingTimelineClips.every((composition) => composition.prerender)
-        : manualPrerenderCompositionIds.has(sourceId);
-    if (currentlyMarked) {
-      implicitFileOperation(setCompositionPrerenderMark)(
-        compositionId,
-        false,
-        isTimelineClipTarget ? compositionId : undefined,
-      );
-      return;
-    }
-    implicitFileOperation(setCompositionPrerenderMark)(
-      compositionId,
-      true,
-      isTimelineClipTarget ? compositionId : undefined,
-    );
-    const result = await prerenderCache.prerenderComposition(compositionId);
-    if (
-      result.visibleRanges === 0 ||
-      result.queuedBlocks === 0 ||
-      !result.completed
-    )
-      return;
-  }
-  function setCompositionPrerenderMark(
-    compositionId: string,
-    marked: boolean,
-    timelineClipId?: string,
-  ) {
-    updateProject(
-      (current) => ({
-        ...current,
-        timelines: (current.timelines ?? []).map((timeline) =>
-          timeline.id === scene.id
-            ? {
-                ...timeline,
-                clips: timeline.clips.map((clip) => {
-                  const matchesClip = timelineClipId
-                    ? clip.id === timelineClipId
-                    : clip.compositionId === compositionId ||
-                      clip.id === compositionId;
-                  return matchesClip
-                    ? { ...clip, prerender: marked || undefined }
-                    : clip;
-                }),
-              }
-            : timeline,
-        ),
-      }),
-      { history: true },
-    );
-  }
   const { exportRenderedMedia, stopVideoExport } = useExportCommands({
     projectRef,
     manifestPath: activeProjectManifestPath,
@@ -1406,20 +1142,6 @@ function AppContent({
 
   useSettingsShortcut({ setSettingsOpen });
 
-  useEffect(
-    () => () => {
-      if (framePickFrameRef.current)
-        cancelAnimationFrame(framePickFrameRef.current);
-      if (dragBoxFrameRef.current)
-        cancelAnimationFrame(dragBoxFrameRef.current);
-      if (objectDragFrameRef.current)
-        cancelAnimationFrame(objectDragFrameRef.current);
-      if (cameraPreviewFrameRef.current)
-        cancelAnimationFrame(cameraPreviewFrameRef.current);
-    },
-    [],
-  );
-
   useEffect(() => {
     setSourceStatus(initialSourceStatus);
   }, [initialSourceStatus]);
@@ -1435,12 +1157,6 @@ function AppContent({
       setSelectionPayload(null);
     }
   }, [activeTimelinePart, selectedMotionMarker, selectedPartId, timelineMode]);
-
-  useEffect(() => {
-    if (timelineMode === "compose") return;
-    clearObjectDrag();
-    clearDragBox();
-  }, [timelineMode]);
 
   useEffect(() => {
     let selectedObjectMissing = false;
@@ -1491,130 +1207,33 @@ function AppContent({
     if (selectedObjectMissing) setSelectedObjectId(null);
   }, [part.background.elements, part.objects, timelineMode]);
 
-  useEffect(() => {
-    const pendingIds = pendingComposeSelectionObjectIdsRef.current;
-    if (pendingIds.length === 0) return;
-    const pendingObjects = pendingIds
-      .map((id) =>
-        id === part.background.id
-          ? frameObjectFromBackgroundLayer(part.background)
-          : (part.background.elements.find((object) => object.id === id) ??
-            part.objects.find((object) => object.id === id)),
-      )
-      .filter((object): object is FrameObject => Boolean(object));
-    if (pendingObjects.length !== pendingIds.length) return;
-    pendingComposeSelectionObjectIdsRef.current = [];
-    setComposeSelectionObjects(pendingObjects);
-  }, [part.background, part.background.elements, part.objects]);
-
-  const hydratedComposeSelectionFromProjectRef = useRef(false);
-  useEffect(() => {
-    hydratedComposeSelectionFromProjectRef.current = false;
-  }, [part.id]);
-  useEffect(() => {
-    if (
-      hydratedComposeSelectionFromProjectRef.current ||
-      timelineMode !== "compose" ||
-      selectionPayload?.objects.length ||
-      selectedObjectId ||
-      selectedComposeObjectIds.length > 0
-    )
-      return;
-    const persistedIds = project.editorState?.selectedComposeObjectIds ?? [];
-    if (persistedIds.length === 0) {
-      hydratedComposeSelectionFromProjectRef.current = true;
-      return;
-    }
-    const selectedIds = persistedIds.filter(
-      (id) =>
-        id === part.background.id ||
-        part.background.elements.some((object) => object.id === id) ||
-        part.objects.some((object) => object.id === id),
-    );
-    if (selectedIds.length === 0) return;
-    const selectedObjects = selectedIds
-      .map((id) =>
-        id === part.background.id
-          ? frameObjectFromBackgroundLayer(part.background)
-          : (part.background.elements.find((object) => object.id === id) ??
-            part.objects.find((object) => object.id === id)),
-      )
-      .filter((object): object is FrameObject => Boolean(object));
-    if (selectedObjects.length === 0) return;
-    hydratedComposeSelectionFromProjectRef.current = true;
-    setComposeSelectionObjects(selectedObjects);
-  }, [
-    part.objects,
-    project.editorState?.selectedComposeObjectIds,
+  useComposeSelectionHydration({
+    part,
+    timelineMode,
+    project,
     selectedObjectId,
     selectedComposeObjectIds,
     selectionPayload,
+    pendingComposeSelectionObjectIdsRef,
+    setComposeSelectionObjects,
+  });
+
+  useFrameInteractionEffects({
+    cameraPreviewFrameRef,
+    dragBoxFrameRef,
+    frameInteractionControllerRef,
+    framePickFrameRef,
+    frameViewportRef,
+    marqueeDragging,
+    objectDragFrameRef,
+    objectDragRef,
+    objectResizeRef,
     timelineMode,
-  ]);
-
-  useEffect(() => {
-    function clearFrameSelectionOnOutsidePointer(
-      event: globalThis.PointerEvent,
-    ) {
-      const target = event.target as HTMLElement | null;
-      if (
-        isEditorTarget(target) ||
-        isInspectorTarget(target) ||
-        isSelectPopoverTarget(target) ||
-        isComposeLayersTarget(target) ||
-        isTimelineTarget(target)
-      )
-        return;
-      if (frameViewportRef.current?.contains(event.target as Node)) return;
-      if (timelineMode === "compose" && isPreviewStageTarget(target))
-        setComposeSelectionObjects([]);
-      setEditingTextObjectId(null);
-      clearObjectDrag();
-      clearDragBox();
-    }
-
-    window.addEventListener("pointerdown", clearFrameSelectionOnOutsidePointer);
-    return () =>
-      window.removeEventListener(
-        "pointerdown",
-        clearFrameSelectionOnOutsidePointer,
-      );
-  }, [timelineMode, updateEditorState]);
-
-  useEffect(() => {
-    if (!marqueeDragging) return;
-
-    function clearMarqueeAfterPointerRelease() {
-      if (objectDragRef.current) return;
-      requestAnimationFrame(() => clearDragBox());
-    }
-
-    window.addEventListener("pointerup", clearMarqueeAfterPointerRelease);
-    window.addEventListener("pointercancel", clearMarqueeAfterPointerRelease);
-    return () => {
-      window.removeEventListener("pointerup", clearMarqueeAfterPointerRelease);
-      window.removeEventListener(
-        "pointercancel",
-        clearMarqueeAfterPointerRelease,
-      );
-    };
-  }, [marqueeDragging]);
-
-  useEffect(() => {
-    function syncObjectResizeAspectPreview(event: KeyboardEvent) {
-      if (event.key !== "Shift" || !objectResizeRef.current) return;
-      frameInteractionControllerRef.current?.syncObjectResizeAspectPreview(
-        event.type === "keydown",
-      );
-    }
-
-    window.addEventListener("keydown", syncObjectResizeAspectPreview);
-    window.addEventListener("keyup", syncObjectResizeAspectPreview);
-    return () => {
-      window.removeEventListener("keydown", syncObjectResizeAspectPreview);
-      window.removeEventListener("keyup", syncObjectResizeAspectPreview);
-    };
-  }, []);
+    clearDragBox,
+    clearObjectDrag,
+    setComposeSelectionObjects,
+    setEditingTextObjectId,
+  });
 
   const {
     updateCompositionForTimelinePart,
@@ -1721,258 +1340,38 @@ function AppContent({
     updateSceneAdjustmentLayers,
   });
 
-  function selectTransitionLayer(layerId: string) {
-    setSelectedTransitionLayerId(layerId);
-    setSelectedTransitionLayers([{ layerId }]);
-    setSelectedAdjustmentLayerId(null);
-    setSelectedAdjustmentLayers([]);
-    setSelectedPartId("");
-    setSelectedParts([]);
-    setSelectedMotionMarker(null);
-    setSelectedMotionMarkers([]);
-    clearMarkerSelection();
-  }
+  const {
+    selectTransitionLayer,
+    selectTransitionLayers,
+    moveTransitionLayer,
+    moveTransitionLayers,
+    updateTransitionLayer,
+    addTransitionLayerAt,
+  } = useTransitionLayerCommands({
+    scene,
+    timelinePrecision,
+    updateProject,
+    setSelectedTransitionLayerId,
+    setSelectedTransitionLayers,
+    setSelectedAdjustmentLayerId,
+    setSelectedAdjustmentLayers,
+    setSelectedPartId,
+    setSelectedParts,
+    setSelectedMotionMarker,
+    setSelectedMotionMarkers,
+    clearMarkerSelection,
+  });
 
-  function selectTransitionLayers(selection: Array<{ layerId: string }>) {
-    setSelectedTransitionLayerId(null);
-    setSelectedTransitionLayers(selection);
-  }
-
-  function moveTransitionLayer(
-    layerId: string,
-    start: number,
-    targetLayerId?: string,
-  ) {
-    updateProject(
-      (current) => ({
-        ...current,
-        timelines: (current.timelines ?? []).map((timeline) =>
-          timeline.id === scene.id
-            ? {
-                ...timeline,
-                transitionLayers: (timeline.transitionLayers ?? []).map(
-                  (layer) =>
-                    layer.id === layerId
-                      ? {
-                          ...layer,
-                          start: roundToPrecision(start, timelinePrecision),
-                          layerId: targetLayerId ?? layer.layerId,
-                        }
-                      : layer,
-                ),
-              }
-            : timeline,
-        ),
-      }),
-      { history: true },
-    );
-  }
-
-  function moveTransitionLayers(
-    moves: Array<{ layerId: string; start: number; targetLayerId?: string }>,
-  ) {
-    const moveById = new Map(moves.map((move) => [move.layerId, move]));
-    updateProject(
-      (current) => ({
-        ...current,
-        timelines: (current.timelines ?? []).map((timeline) =>
-          timeline.id === scene.id
-            ? {
-                ...timeline,
-                transitionLayers: (timeline.transitionLayers ?? []).map(
-                  (layer) => {
-                    const move = moveById.get(layer.id);
-                    return move
-                      ? {
-                          ...layer,
-                          start: roundToPrecision(
-                            move.start,
-                            timelinePrecision,
-                          ),
-                          layerId: move.targetLayerId ?? layer.layerId,
-                        }
-                      : layer;
-                  },
-                ),
-              }
-            : timeline,
-        ),
-      }),
-      { history: true },
-    );
-  }
-
-  function moveAdjustmentLayers(
-    moves: Array<{ layerId: string; start: number; targetLayerId?: string }>,
-  ) {
-    const moveById = new Map(moves.map((move) => [move.layerId, move]));
-    updateSceneAdjustmentLayers((layers) =>
-      layers.map((layer) => {
-        const move = moveById.get(layer.id);
-        return move
-          ? {
-              ...layer,
-              start: roundToPrecision(move.start, timelinePrecision),
-              layerId: move.targetLayerId ?? layer.layerId,
-            }
-          : layer;
-      }),
-    );
-  }
-
-  function updateTransitionLayer(
-    layerId: string,
-    updater: (
-      layer: import("./core/types").TransitionLayer,
-    ) => import("./core/types").TransitionLayer,
-  ) {
-    updateProject(
-      (current) => ({
-        ...current,
-        timelines: (current.timelines ?? []).map((timeline) =>
-          timeline.id === scene.id
-            ? {
-                ...timeline,
-                transitionLayers: (timeline.transitionLayers ?? []).map(
-                  (layer) =>
-                    layer.id === layerId
-                      ? normalizeSymmetricTransitionLayer(updater(layer))
-                      : layer,
-                ),
-              }
-            : timeline,
-        ),
-      }),
-      { history: true },
-    );
-  }
-
-  function shiftTimelineGapMarkers(moves: {
-    gapStart: number;
-    gapEnd: number;
-    delta: number;
-    compositions: Array<{ compositionId: string; start: number }>;
-    adjustmentLayers: Array<{ layerId: string; start: number }>;
-    motionMarkers: Array<{ markerId: string; start: number }>;
-    transitionLayers: Array<{ layerId: string; start: number }>;
-  }) {
-    const compositionStarts = new Map(
-      moves.compositions.map((move) => [move.compositionId, move.start]),
-    );
-    const adjustmentStarts = new Map(
-      moves.adjustmentLayers.map((move) => [move.layerId, move.start]),
-    );
-    const motionStarts = new Map(
-      moves.motionMarkers.map((move) => [move.markerId, move.start]),
-    );
-    const transitionStarts = new Map(
-      moves.transitionLayers.map((move) => [move.layerId, move.start]),
-    );
-    const playheadTime = currentSceneTimeRef.current;
-    const nextPlayheadTime =
-      playheadTime >= moves.gapEnd - 0.000001
-        ? roundToPrecision(
-            Math.max(0, playheadTime + moves.delta),
-            timelinePrecision,
-          )
-        : playheadTime > moves.gapStart && playheadTime < moves.gapEnd
-          ? roundToPrecision(moves.gapStart, timelinePrecision)
-          : playheadTime;
-    updateProject(
-      (current) => ({
-        ...current,
-        editorState: {
-          ...(current.editorState ?? defaultEditorState),
-          currentSceneTime: nextPlayheadTime,
-        },
-        timelines: (current.timelines ?? []).map((timeline) => {
-          if (timeline.id !== scene.id) return timeline;
-          return {
-            ...timeline,
-            clips: timeline.clips.map((clip) => {
-              const start = compositionStarts.get(clip.id);
-              if (start === undefined) return clip;
-              const previousStart = clip.start ?? 0;
-              const delta = roundToPrecision(
-                previousStart - start,
-                timelinePrecision,
-              );
-              return {
-                ...clip,
-                start,
-                motionMarkers: clip.motionMarkers?.map((marker) => ({
-                  ...marker,
-                  start: roundToPrecision(
-                    marker.start + delta,
-                    timelinePrecision,
-                  ),
-                })),
-              };
-            }),
-            adjustmentLayers: (timeline.adjustmentLayers ?? []).map((layer) =>
-              adjustmentStarts.has(layer.id)
-                ? { ...layer, start: adjustmentStarts.get(layer.id)! }
-                : layer,
-            ),
-            motionMarkers: (timeline.motionMarkers ?? []).map((marker) =>
-              motionStarts.has(marker.id)
-                ? { ...marker, start: motionStarts.get(marker.id)! }
-                : marker,
-            ),
-            transitionLayers: (timeline.transitionLayers ?? []).map((layer) =>
-              transitionStarts.has(layer.id)
-                ? normalizeSymmetricTransitionLayer({
-                    ...layer,
-                    start: transitionStarts.get(layer.id)!,
-                  })
-                : layer,
-            ),
-          };
-        }),
-      }),
-      { history: true },
-    );
-    if (Math.abs(nextPlayheadTime - playheadTime) >= 0.001)
-      scrubToSceneTime(nextPlayheadTime);
-  }
-
-  function addTransitionLayerAt(
-    effectId: string,
-    sceneTime: number,
-    layerId?: string,
-  ) {
-    const effect = getTransitionEffectPackage(effectId);
-    if (!effect) return;
-    const newLayerId = `transition-${Date.now().toString(36)}`;
-    const duration = effect.defaultDuration;
-    const midPoint = duration / 2;
-    const start = roundToPrecision(Math.max(sceneTime, 0), timelinePrecision);
-    const newLayer = effect.createDefaultLayer({
-      id: newLayerId,
-      layerId,
-      start,
-      duration,
-      midPoint,
+  const { moveAdjustmentLayers, shiftTimelineGapMarkers } =
+    useTimelineGapCommands({
+      currentSceneTimeRef,
+      defaultEditorState,
+      scene,
+      timelinePrecision,
+      scrubToSceneTime,
+      updateProject,
+      updateSceneAdjustmentLayers,
     });
-    updateProject(
-      (current) => ({
-        ...current,
-        timelines: (current.timelines ?? []).map((timeline) =>
-          timeline.id === scene.id
-            ? {
-                ...timeline,
-                transitionLayers: [
-                  ...(timeline.transitionLayers ?? []),
-                  newLayer,
-                ],
-              }
-            : timeline,
-        ),
-      }),
-      { history: true },
-    );
-    selectTransitionLayer(newLayerId);
-  }
 
   function persistComposeSelection(objectIds: string[]) {
     setSelectedComposeObjectIds(objectIds);
@@ -2048,190 +1447,12 @@ function AppContent({
     updateCompositionForTimelinePart,
     updateSceneParts,
   });
-
-  function previewSelectedObject(
-    updater: (object: FrameObject) => FrameObject,
-  ) {
-    const source = selectedObject;
-    if (!source) return;
-    const next = updater(source);
-    const selector =
-      next.id === part.background.id
-        ? `[data-layer-id="${cssEscape(next.id)}"]`
-        : `[data-clipper-render-object-id="${cssEscape(next.id)}"]`;
-    const target =
-      frameViewportRef.current?.querySelector<HTMLElement>(selector);
-    if (!target) return;
-    target.style.left = `${next.bounds.x}px`;
-    target.style.top = `${next.bounds.y}px`;
-    target.style.width = `${next.bounds.width}px`;
-    target.style.height = `${next.bounds.height}px`;
-    window.dispatchEvent(
-      new CustomEvent("clipper:object-preview-bounds", {
-        detail: { bounds: next.bounds, objectId: next.id },
-      }),
-    );
-    window.dispatchEvent(
-      new CustomEvent("clipper:object-preview-stroke", {
-        detail: { stroke: next.stroke ?? null, objectId: next.id },
-      }),
-    );
-    for (const [key, value] of Object.entries(next.style)) {
-      if (value === undefined)
-        target.style.removeProperty(cssStylePropertyName(key));
-      else if (key === "backgroundColor" && isFillValue(value)) {
-        const fill = value as unknown as FillValue;
-        if (fill.mode === "gradient") {
-          target.style.setProperty("background-color", "transparent");
-          target.style.setProperty("background-image", fillValueToCss(fill));
-        } else {
-          target.style.setProperty("background-color", fillValueToCss(fill));
-          target.style.setProperty("background-image", "none");
-        }
-      } else
-        target.style.setProperty(
-          cssStylePropertyName(key),
-          formatPreviewStyleValue(key, value),
-        );
-    }
-    if (next.transform && typeof next.transform === "object") {
-      const t = next.transform as Record<string, unknown>;
-      const parts: string[] = [];
-      const pushTransform = (key: string, unit: string) => {
-        const v = t[key];
-        if (typeof v === "number" && Number.isFinite(v))
-          parts.push(`${key}(${v}${unit})`);
-      };
-      pushTransform("perspective", "px");
-      pushTransform("translateX", "px");
-      pushTransform("translateY", "px");
-      pushTransform("translateZ", "px");
-      pushTransform("scale", "");
-      pushTransform("scaleX", "");
-      pushTransform("scaleY", "");
-      pushTransform("rotate", "deg");
-      pushTransform("rotateX", "deg");
-      pushTransform("rotateY", "deg");
-      pushTransform("rotateZ", "deg");
-      pushTransform("skewX", "deg");
-      pushTransform("skewY", "deg");
-      target.style.transform = parts.length ? parts.join(" ") : "";
-    }
-    if (next.shadow) {
-      const shadow = next.shadow;
-      if (shadow.enabled === false) {
-        target.style.removeProperty("filter");
-        target.style.removeProperty("text-shadow");
-        target.style.removeProperty("box-shadow");
-      } else {
-        applyPreviewShadowStyle(target, next);
-      }
-    }
-  }
-
-  function applyPreviewShadowStyle(target: HTMLElement, object: FrameObject) {
-    const shadow = object.shadow;
-    if (!shadow || shadow.enabled === false) return;
-    const x =
-      typeof shadow.x === "number" && Number.isFinite(shadow.x) ? shadow.x : 0;
-    const y =
-      typeof shadow.y === "number" && Number.isFinite(shadow.y) ? shadow.y : 0;
-    const blur =
-      typeof shadow.blur === "number" && Number.isFinite(shadow.blur)
-        ? Math.max(0, shadow.blur)
-        : 0;
-    const spread =
-      typeof shadow.spread === "number" && Number.isFinite(shadow.spread)
-        ? Math.max(0, Math.min(64, shadow.spread))
-        : 0;
-    const color = typeof shadow.color === "string" ? shadow.color : "#000000";
-    const alpha = typeof shadow.alpha === "number" ? shadow.alpha : 100;
-    const rgba = previewShadowRgba(color, alpha);
-    if (!rgba) return;
-    target.style.removeProperty("filter");
-    target.style.removeProperty("text-shadow");
-    target.style.removeProperty("box-shadow");
-    if (object.type === "rect" || object.type === "pattern2d") {
-      target.style.boxShadow =
-        x.toFixed(2) +
-        "px " +
-        y.toFixed(2) +
-        "px " +
-        blur.toFixed(2) +
-        "px " +
-        spread.toFixed(2) +
-        "px " +
-        rgba;
-    } else {
-      target.style.filter =
-        "drop-shadow(" +
-        x.toFixed(2) +
-        "px " +
-        y.toFixed(2) +
-        "px " +
-        blur.toFixed(2) +
-        "px " +
-        rgba +
-        ")";
-    }
-  }
-
-  function previewShadowRgba(color: string, alphaPct: number) {
-    const hex = color.startsWith("#") ? color.slice(1) : color;
-    const expanded =
-      hex.length === 3
-        ? hex
-            .split("")
-            .map((channel) => channel + channel)
-            .join("")
-        : hex;
-    if (!/^[0-9a-fA-F]{6}$/.test(expanded)) return null;
-    const r = parseInt(expanded.slice(0, 2), 16);
-    const g = parseInt(expanded.slice(2, 4), 16);
-    const b = parseInt(expanded.slice(4, 6), 16);
-    const a = Math.max(0, Math.min(1, alphaPct / 100));
-    return "rgba(" + r + ", " + g + ", " + b + ", " + a.toFixed(2) + ")";
-  }
-
-  function formatPreviewStyleValue(key: string, value: string | number) {
-    if (typeof value !== "number" || !Number.isFinite(value))
-      return String(value);
-    if (key === "fontSize")
-      return `calc(${value}px * var(--clipper-scale-preview, 1))`;
-    return lengthPreviewStyleKeys.has(key) ? `${value}px` : String(value);
-  }
-
-  const lengthPreviewStyleKeys = new Set([
-    "borderRadius",
-    "borderTopLeftRadius",
-    "borderTopRightRadius",
-    "borderBottomRightRadius",
-    "borderBottomLeftRadius",
-    "fontSize",
-    "letterSpacing",
-  ]);
-
-  function previewPartFrame(updater: (frame: PartFrame) => PartFrame) {
-    const next = updater(part.frame);
-    const target = frameViewportRef.current?.querySelector<HTMLElement>(
-      "[data-clipper-frame-content]",
-    );
-    const background = next.style.background;
-    if (target && background !== undefined)
-      target.style.background = String(background);
-  }
-
-  function previewPartBackground(
-    updater: (background: BackgroundLayer) => BackgroundLayer,
-  ) {
-    const next = updater(part.background);
-    const target = frameViewportRef.current?.querySelector<HTMLElement>(
-      `[data-layer-id="${cssEscape(next.id)}"] > div`,
-    );
-    const background = next.style.background;
-    if (target && background !== undefined)
-      target.style.background = String(background);
-  }
+  const { previewSelectedObject, previewPartFrame, previewPartBackground } =
+    useComposeObjectPreview({
+      frameViewportRef,
+      selectedObject,
+      part,
+    });
 
   function updateComposeObjectAnimation(
     objectId: string,
@@ -3706,9 +2927,7 @@ function AppContent({
   }
 
   function handleModeChange(nextMode: typeof mode) {
-    if (nextMode === "preview") {
-      setPrerenderCacheResetToken((token) => token + 1);
-    }
+    if (nextMode === "preview") resetPrerenderCache();
     updateMode(nextMode);
   }
 
@@ -4486,28 +3705,4 @@ function mergeManualPrerenderRanges(ranges: PrerenderManualCompositionRange[]) {
     last.end = Math.max(last.end, range.end);
   }
   return merged;
-}
-
-function isInspectorTarget(target: HTMLElement | null) {
-  return Boolean(target?.closest("[data-inspector-panel]"));
-}
-
-function isSelectPopoverTarget(target: HTMLElement | null) {
-  return Boolean(
-    target?.closest(
-      "[data-radix-select-content], [data-radix-popper-content-wrapper]",
-    ),
-  );
-}
-
-function isComposeLayersTarget(target: HTMLElement | null) {
-  return Boolean(target?.closest("[data-compose-layers-panel]"));
-}
-
-function isTimelineTarget(target: HTMLElement | null) {
-  return Boolean(target?.closest("[data-timeline-panel]"));
-}
-
-function isPreviewStageTarget(target: HTMLElement | null) {
-  return Boolean(target?.closest("[data-clipper-preview-stage]"));
 }
