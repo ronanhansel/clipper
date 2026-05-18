@@ -16,13 +16,7 @@ import type { PrerenderBlock } from "../../../app/features/preview/usePrerenderC
 
 type FramePreviewLiveExtras = Pick<
   FramePreviewLiveProps,
-  | "previewSceneContext"
-  | "timelineMode"
-  | "composeMode"
-  | "hasPreviewComposition"
-  | "activeCompositionHidden"
-  | "composeFilePart"
-  | "selectedPart"
+  "previewSceneContext" | "timelineMode" | "activeCompositionHidden"
 >;
 
 export type StrategyFramePreviewProps = ComponentProps<typeof FramePreview> &
@@ -79,6 +73,8 @@ export function toFramePreviewLiveProps(
 ): FramePreviewLiveProps {
   const {
     part: _part,
+    sceneMotionPart: _sceneMotionPart,
+    sceneWrap: _sceneWrap,
     partStart: _partStart,
     previewParts: _previewParts,
     transitionPreviewParts: _transitionPreviewParts,
@@ -92,6 +88,8 @@ export function toFramePreviewLiveProps(
     ...rest
   } = props;
   void _part;
+  void _sceneMotionPart;
+  void _sceneWrap;
   void _partStart;
   void _previewParts;
   void _transitionPreviewParts;

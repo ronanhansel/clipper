@@ -5,6 +5,7 @@
 - Run `npm run typecheck` before committing (also formats).
 - Don't run `git diff` unless asked.
 - Don't fix errors not from your edits — they may be another agent's work.
+- Don't touch other files that aren't directly related to your changes - they may be another agent's work.
 - Document every change in `agent-log/v0.2.19/memory/[id]-feature-name.md` (next sequential ID, or update existing). Write incrementally on long tasks.
 - `PLAN.md` only on request; if it exists, keep it current.
 - When performing major tasks with multisteps, break down and use subagents to save on tokens.
@@ -15,6 +16,8 @@
 - No backwards-compat shims, no feature flags, no `// kept for X` markers.
 - Solve the problem asked. No drive-by refactors, no extra abstractions.
 - File >1500 lines? Decompose before adding to it.
+- No fallback code, all code paths should be handled exactly to ensure strict, logical use. Instead of a catch-all fallback, handle each case explicitly. MUST INFORM USER BEFORE CREATING OTHER UNINTENDED CASES.
+- Do not allow for silent fails, throw errors instead.
 
 ## State
 

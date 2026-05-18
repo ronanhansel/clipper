@@ -56,6 +56,7 @@ import {
 } from "../../core/overlayGeometry";
 import { transformPathGeometrySegmentsToBounds } from "../../core/pathGeometry";
 import type { TimelinePreviewStackPart } from "../../core/timeline";
+import type { SceneWrapConfig } from "../../app/state/framePreviewRenderModel";
 import {
   getRenderClockAttributes,
   getRenderClockStyle,
@@ -149,6 +150,14 @@ type FramePreviewProps = {
   frameScale: number;
   isPlaying: boolean;
   part: Part;
+  /**
+   * Composition that carries scene-level motion markers rebased into the
+   * active part's local time. Used only by the camera transform — never
+   * mounted as a renderable. Distinct from `part` so the composition's own
+   * motion markers are not clobbered.
+   */
+  sceneMotionPart: Part;
+  sceneWrap: SceneWrapConfig;
   partStart: number;
   adjustmentLayers?: AdjustmentLayer[];
   previewTime: number;
@@ -209,7 +218,7 @@ type FramePreviewProps = {
   onTrackerTargetPick: (objectId: string) => void;
   exportTileViewport?: ExportTileViewport;
   selectionOverlayScale?: number;
-  previewParts?: TimelinePreviewStackPart[];
+  previewParts: TimelinePreviewStackPart[];
   transitionPreviewParts?: {
     from: TimelinePreviewStackPart[];
     to: TimelinePreviewStackPart[];
@@ -263,6 +272,8 @@ export const FramePreview = memo(function FramePreview({
   frameScale,
   isPlaying,
   part,
+  sceneMotionPart,
+  sceneWrap,
   partStart,
   adjustmentLayers,
   previewTime,
@@ -328,7 +339,7 @@ export const FramePreview = memo(function FramePreview({
   const animationsEnabled = true;
   const previewParts = (
     arguments[0] as {
-      previewParts?: Array<{ part: Part; start: number; previewTime: number }>;
+      previewParts: Array<{ part: Part; start: number; previewTime: number }>;
     }
   ).previewParts;
   const transitionPreviewParts = (
@@ -437,9 +448,9 @@ export const FramePreview = memo(function FramePreview({
   const frameVisualAdjustmentOverlaysRef = useRef<HTMLDivElement | null>(null);
   const cameraVisualAdjustmentOverlaysRef = useRef<HTMLDivElement | null>(null);
   const activeCameraTransform = useMemo(() => {
-    if (timelineMode !== "composition") return cameraTransform;
+    if (!sceneWrap.cameraEnabled) return cameraTransform;
     return getLayeredCameraPreviewTransform(
-      part,
+      sceneMotionPart,
       motionLayers,
       displayPreviewTime,
       {
@@ -463,10 +474,10 @@ export const FramePreview = memo(function FramePreview({
     interactiveFocusPicking,
     interactiveTrackerPicking,
     motionLayers,
-    part,
+    sceneMotionPart,
+    sceneWrap.cameraEnabled,
     pickingTranslationPosition,
     pickingZoomFocus,
-    timelineMode,
   ]);
   const liveCameraTransform = useTransitionComposite
     ? identityCameraTransform
@@ -548,9 +559,7 @@ export const FramePreview = memo(function FramePreview({
   const compositionError = part.compositionError;
   const livePlaybackPartRef = useRef(part);
   livePlaybackPartRef.current = part;
-  const stackPreviewParts = previewParts?.length
-    ? previewParts
-    : [{ part, start: partStart, previewTime }];
+  const stackPreviewParts = previewParts;
 
   useLayoutEffect(() => {
     const adjustmentOverlays = useTransitionComposite
@@ -799,7 +808,7 @@ export const FramePreview = memo(function FramePreview({
                     }
                     activeShapeTool={activeShapeTool}
                     editingTextObjectId={interactiveEditingTextObjectId}
-                    hideNullObjects={timelineMode !== "compose"}
+                    hideNullObjects={sceneWrap.hideNullObjects}
                     focusPicking={
                       !isPlaying &&
                       (interactiveFocusPicking || interactiveTrackerPicking)

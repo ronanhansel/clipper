@@ -543,12 +543,19 @@ function getPreviewStackParts(
     lookupTime,
     timelineLayers,
     "bottom-to-top",
-  ).map((timelinePart) => ({
-    part:
-      compositions.find((item) => item.id === timelinePart.id) ?? timelinePart,
-    start: timelinePart.start,
-    previewTime: getCompositionPreviewTime(timelinePart, previewSceneTime),
-  }));
+  ).map((timelinePart) => {
+    const part = compositions.find((item) => item.id === timelinePart.id);
+    if (!part) {
+      throw new Error(
+        `getPreviewStackParts: timeline part "${timelinePart.id}" has no matching composition in renderableScene.compositions`,
+      );
+    }
+    return {
+      part,
+      start: timelinePart.start,
+      previewTime: getCompositionPreviewTime(timelinePart, previewSceneTime),
+    };
+  });
 }
 
 export function getTopTimelineItemAtTime(

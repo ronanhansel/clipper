@@ -24,14 +24,14 @@ export const SelectTrigger = forwardRef<
     ref={ref}
     data-radix-select-trigger=""
     className={cn(
-      "flex h-8 w-full cursor-pointer items-center justify-between gap-2 rounded-[8px] border border-[#2d313b] bg-[#171920] px-2 py-1.5 text-xs font-semibold text-white outline-none transition placeholder:text-[#69707f] focus:border-[var(--clipper-accent)] focus:ring-2 focus:ring-[rgb(var(--clipper-accent-rgb)/0.2)] disabled:cursor-not-allowed disabled:opacity-50 [&>span]:truncate",
+      "flex h-8 w-full min-w-0 cursor-pointer items-center justify-between gap-2 rounded-[8px] border border-[#2d313b] bg-[#171920] px-2 py-1.5 text-xs font-semibold text-white outline-none transition placeholder:text-[#69707f] focus:border-[var(--clipper-accent)] focus:ring-2 focus:ring-[rgb(var(--clipper-accent-rgb)/0.2)] disabled:cursor-not-allowed disabled:opacity-50 [&>span]:min-w-0 [&>span]:flex-1 [&>span]:truncate [&>span]:text-left",
       className,
     )}
     {...props}
   >
     {children}
     <SelectPrimitive.Icon asChild>
-      <ChevronDown className="size-3.5 text-[#9b9da7]" />
+      <ChevronDown className="size-3.5 shrink-0 text-[#9b9da7]" />
     </SelectPrimitive.Icon>
   </SelectPrimitive.Trigger>
 ));

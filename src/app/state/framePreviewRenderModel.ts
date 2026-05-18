@@ -41,6 +41,31 @@ export type FramePreviewSceneContext = {
   visibleAdjustmentLayers: NonNullable<Scene["adjustmentLayers"]>;
 };
 
+/**
+ * Single switch that controls which scene-level wrappers apply on top of the
+ * composition. Compose mode disables every wrapper (the composition is the
+ * unit being edited); Direct mode enables them all (the composition is being
+ * placed in a scene).
+ */
+export type SceneWrapConfig = {
+  cameraEnabled: boolean;
+  adjustmentsEnabled: boolean;
+  transitionsEnabled: boolean;
+  motionEnabled: boolean;
+  hideNullObjects: boolean;
+};
+
+export function sceneWrapConfigForMode(mode: TimelineMode): SceneWrapConfig {
+  const direct = mode === "composition";
+  return {
+    cameraEnabled: direct,
+    adjustmentsEnabled: direct,
+    transitionsEnabled: direct,
+    motionEnabled: direct,
+    hideNullObjects: direct,
+  };
+}
+
 export type FramePreviewRenderModel = {
   activeComposition: CompositionClip | null;
   activeTimelinePart: TimelinePart | null;
@@ -48,6 +73,14 @@ export type FramePreviewRenderModel = {
   hiddenMotionLayerIds: Set<string>;
   motionLayers: TimelineMotionLayerState[];
   part: CompositionClip;
+  sceneWrap: SceneWrapConfig;
+  /**
+   * The composition that wraps scene-level motion markers, rebased into the
+   * active part's local time. Read by the camera transform — never used to
+   * mount the composition itself. The composition's own motion markers stay
+   * on `part`.
+   */
+  sceneMotionPart: CompositionClip;
   previewParts: TimelinePreviewStackPart[];
   previewTime: number;
   renderableScene: Scene;
@@ -164,14 +197,14 @@ export function deriveFramePreviewRenderModelFromContext(
     transitionLayers,
     visibleAdjustmentLayers,
   } = ctx;
-  const adjustedSceneTime =
-    timelineMode === "compose"
-      ? sceneTime
-      : applyAdjustmentLayersToSceneTime(
-          sceneTime,
-          visibleAdjustmentLayers,
-          frameRate,
-        );
+  const sceneWrap = sceneWrapConfigForMode(timelineMode);
+  const adjustedSceneTime = sceneWrap.adjustmentsEnabled
+    ? applyAdjustmentLayersToSceneTime(
+        sceneTime,
+        visibleAdjustmentLayers,
+        frameRate,
+      )
+    : sceneTime;
   const previewState = getTimelinePreviewState({
     adjustmentLayers: [],
     compositions: renderableScene.compositions,
@@ -182,38 +215,52 @@ export function deriveFramePreviewRenderModelFromContext(
     timelineMode,
     transitionLayers: renderableScene.transitionLayers,
   });
-  const transitionPreviewParts = previewState.transitionPreviewParts
-    ? {
-        from: previewState.transitionPreviewParts.from,
-        to: previewState.transitionPreviewParts.to,
-        fromSceneTime: previewState.transitionPreviewParts.fromSceneTime,
-        toSceneTime: previewState.transitionPreviewParts.toSceneTime,
-      }
-    : null;
-  const basePart = previewState.activeComposition ?? blankPart;
+  const transitionPreviewParts =
+    sceneWrap.transitionsEnabled && previewState.transitionPreviewParts
+      ? {
+          from: previewState.transitionPreviewParts.from,
+          to: previewState.transitionPreviewParts.to,
+          fromSceneTime: previewState.transitionPreviewParts.fromSceneTime,
+          toSceneTime: previewState.transitionPreviewParts.toSceneTime,
+        }
+      : null;
+  // Gap render: when the playhead sits in dead space between or beyond
+  // compositions, there is no part to mount. `blankPart` is the explicit
+  // black/empty stand-in — not a fallback for missing data.
+  const gapPart = blankPart;
+  const part = previewState.activeComposition ?? gapPart;
   const partStart = previewState.activeTimelinePart?.start ?? 0;
-  const shiftedMotionMarkers = motionBlocksToMotionMarkers(
-    sceneMotionMarkers.map((marker) => ({
-      ...marker,
-      start: marker.start - partStart,
-    })),
-  );
+  const sceneMotionPart: CompositionClip = {
+    ...blankPart,
+    motionMarkers: sceneWrap.motionEnabled
+      ? motionBlocksToMotionMarkers(
+          sceneMotionMarkers.map((marker) => ({
+            ...marker,
+            start: marker.start - partStart,
+          })),
+        )
+      : [],
+  };
   return {
     activeComposition: previewState.activeComposition,
     activeTimelinePart: previewState.activeTimelinePart,
     adjustedSceneTime,
     hiddenMotionLayerIds,
-    motionLayers,
-    part: { ...basePart, motionMarkers: shiftedMotionMarkers },
+    motionLayers: sceneWrap.motionEnabled ? motionLayers : [],
+    part,
+    sceneWrap,
+    sceneMotionPart,
     previewParts: previewState.previewParts,
     previewTime: previewState.previewTime,
     renderableScene,
     sceneDurationSeconds,
     timeline,
     timelineLayerState,
-    transitionLayers,
+    transitionLayers: sceneWrap.transitionsEnabled ? transitionLayers : [],
     transitionPreviewParts,
-    visibleAdjustmentLayers,
+    visibleAdjustmentLayers: sceneWrap.adjustmentsEnabled
+      ? visibleAdjustmentLayers
+      : [],
   };
 }
 
@@ -235,43 +282,19 @@ export type DisplayTimeAndPart = {
 
 /**
  * Resolves the part + previewTime + partStart that should drive the on-screen
- * frame. Single source of truth for the compose-vs-direct projection — called
- * from both editorDerivedState (idle path, structural rerenders) and
- * FramePreviewLive (per-tick subscription).
+ * frame. Single source of truth for both compose and direct — the model is
+ * already mode-aware (it reads `timelineMode` when it derives the preview
+ * state), so this function does no per-mode branching of its own.
  */
-export function resolveDisplayTimeAndPart({
-  composeFilePart,
-  model,
-  selectedPart,
-  sceneTime,
-  timelineMode,
-}: {
-  composeFilePart: CompositionClip | null;
+export function resolveDisplayTimeAndPart(
   model: Pick<
     FramePreviewRenderModel,
-    "activeComposition" | "activeTimelinePart" | "part" | "previewTime"
-  >;
-  selectedPart: CompositionClip | null;
-  sceneTime: number;
-  timelineMode: TimelineMode;
-}): DisplayTimeAndPart {
-  const composeMode = timelineMode === "compose";
-  const composePreviewTime = composeMode
-    ? Math.min(
-        Math.max(
-          model.activeTimelinePart
-            ? sceneTime -
-                (model.activeTimelinePart.start ?? 0) +
-                (model.activeTimelinePart.trimStart ?? 0)
-            : sceneTime,
-          0,
-        ),
-        (model.activeComposition ?? selectedPart)?.duration ?? 0,
-      )
-    : model.previewTime;
-  const displayPart = composeFilePart ?? model.part;
-  const displayPreviewTime =
-    composeFilePart && composeMode ? composePreviewTime : model.previewTime;
-  const partStart = composeMode ? 0 : (model.activeTimelinePart?.start ?? 0);
-  return { displayPart, displayPreviewTime, partStart };
+    "activeTimelinePart" | "part" | "previewTime"
+  >,
+): DisplayTimeAndPart {
+  return {
+    displayPart: model.part,
+    displayPreviewTime: model.previewTime,
+    partStart: model.activeTimelinePart?.start ?? 0,
+  };
 }

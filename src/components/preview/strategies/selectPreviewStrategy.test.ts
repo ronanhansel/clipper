@@ -32,6 +32,13 @@ function makeProps(
   const base = {
     ...emptyAuthoring(),
     timelineMode: "composition",
+    sceneWrap: {
+      cameraEnabled: true,
+      adjustmentsEnabled: true,
+      transitionsEnabled: true,
+      motionEnabled: true,
+      hideNullObjects: true,
+    },
     adjustmentLayers: [],
     transitionLayers: [],
     transitionPreviewParts: null,
@@ -103,7 +110,16 @@ describe("deriveAuthoringActive", () => {
 describe("selectPreviewStrategy", () => {
   it("compose mode forces live-dom even when live passes and authoring are active", () => {
     const result = selectPreviewStrategy({
-      framePreviewProps: makeProps({ timelineMode: "compose" }),
+      framePreviewProps: makeProps({
+        timelineMode: "compose",
+        sceneWrap: {
+          cameraEnabled: false,
+          adjustmentsEnabled: false,
+          transitionsEnabled: false,
+          motionEnabled: false,
+          hideNullObjects: false,
+        },
+      }),
       hasActiveLivePasses: true,
       hasLivePassCapableLayers: true,
       authoringActive: true,
@@ -165,7 +181,16 @@ describe("selectPreviewStrategy", () => {
 
   it("returns live-dom for compose mode without live passes", () => {
     const result = selectPreviewStrategy({
-      framePreviewProps: makeProps({ timelineMode: "compose" }),
+      framePreviewProps: makeProps({
+        timelineMode: "compose",
+        sceneWrap: {
+          cameraEnabled: false,
+          adjustmentsEnabled: false,
+          transitionsEnabled: false,
+          motionEnabled: false,
+          hideNullObjects: false,
+        },
+      }),
       hasActiveLivePasses: false,
       hasLivePassCapableLayers: false,
       authoringActive: false,

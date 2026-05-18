@@ -91,10 +91,16 @@ export function useEditorDerivedState({
   timelineMode: TimelineMode;
   timelineLayers?: TimelineLayerState;
 }) {
-  const scene = useMemo(
-    () => getSceneFromProject(project, selectedSceneId) ?? blankScene,
-    [project, selectedSceneId],
-  );
+  const scene = useMemo(() => {
+    if (!selectedSceneId) return blankScene;
+    const resolved = getSceneFromProject(project, selectedSceneId);
+    if (!resolved) {
+      throw new Error(
+        `editorDerivedState: selectedSceneId "${selectedSceneId}" did not resolve to a scene in the project`,
+      );
+    }
+    return resolved;
+  }, [project, selectedSceneId]);
   const assets = project.assets ?? defaultAssets;
   const timelineLayerState = useMemo(
     () =>
@@ -330,32 +336,13 @@ export function useEditorDerivedState({
   const previewParts = previewRenderModel.previewParts;
   const transitionPreviewParts = previewRenderModel.transitionPreviewParts;
 
-  const composeFilePart = useMemo(
-    () =>
-      timelineMode === "compose"
-        ? getComposeFilePart(project, activeComposition ?? selectedPart)
-        : null,
-    [activeComposition, project, selectedPart, timelineMode],
-  );
   const displayResolution = useMemo(
-    () =>
-      resolveDisplayTimeAndPart({
-        composeFilePart,
-        model: previewRenderModel,
-        selectedPart,
-        sceneTime: currentSceneTime,
-        timelineMode,
-      }),
-    [
-      composeFilePart,
-      currentSceneTime,
-      previewRenderModel,
-      selectedPart,
-      timelineMode,
-    ],
+    () => resolveDisplayTimeAndPart(previewRenderModel),
+    [previewRenderModel],
   );
   const displayPart = displayResolution.displayPart;
   const displayPreviewTime = displayResolution.displayPreviewTime;
+  const displayPartStart = displayResolution.partStart;
 
   const selectedObject = useMemo(
     () =>
@@ -371,11 +358,13 @@ export function useEditorDerivedState({
     [project, scene, displayPart, selectionPayload],
   );
 
+  const sceneMotionPart = previewRenderModel.sceneMotionPart;
+  const sceneWrap = previewRenderModel.sceneWrap;
   const cameraPreviewTransform = useMemo(
     () =>
-      timelineMode === "composition"
+      sceneWrap.cameraEnabled
         ? getLayeredCameraPreviewTransform(
-            displayPart,
+            sceneMotionPart,
             motionLayers,
             displayPreviewTime,
             {
@@ -386,13 +375,13 @@ export function useEditorDerivedState({
           )
         : IDENTITY_CAMERA_PREVIEW,
     [
-      displayPart,
+      sceneMotionPart,
+      sceneWrap.cameraEnabled,
       displayPreviewTime,
       hiddenMotionLayerIds,
       isPickingTranslationPosition,
       isPickingZoomFocus,
       motionLayers,
-      timelineMode,
     ],
   );
   const zoomScale = cameraPreviewTransform.scale;
@@ -459,8 +448,10 @@ export function useEditorDerivedState({
     inspectorMotionMiddleSnap,
     isPickingTranslationPosition,
     isPickingZoomFocus,
-    composeFilePart,
     part: displayPart,
+    partStart: displayPartStart,
+    sceneMotionPart,
+    sceneWrap,
     previewSceneContext,
     previewTime: displayPreviewTime,
     previewParts,
@@ -505,31 +496,6 @@ export function useEditorDerivedState({
     validationErrors,
     zoomScale,
   };
-}
-
-function getComposeFilePart(
-  project: ProjectManifest,
-  timelinePart: CompositionClip | null,
-) {
-  if (!timelinePart) return null;
-  const composition = [
-    ...(project.compositionLibrary ?? []),
-    ...(project.compositions ?? []),
-  ].find(
-    (item) =>
-      item.id === timelinePart.compositionId ||
-      item.id === timelinePart.id ||
-      item.filePath === timelinePart.filePath,
-  );
-  if (!composition) return null;
-  return {
-    ...composition,
-    start: undefined,
-    trimStart: undefined,
-    layerId: undefined,
-    prerender: undefined,
-    compositionId: composition.id,
-  } satisfies CompositionClip;
 }
 
 const blankPreviewComposition: CompositionClip = {

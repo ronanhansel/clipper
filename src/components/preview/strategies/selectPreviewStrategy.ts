@@ -93,7 +93,7 @@ export function selectPreviewStrategy(
     authoringActive,
   } = input;
 
-  if (framePreviewProps.timelineMode === "compose") {
+  if (!framePreviewProps.sceneWrap.cameraEnabled) {
     return { kind: "live-dom", reason: "compose-mode" };
   }
 

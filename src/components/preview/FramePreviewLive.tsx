@@ -5,20 +5,15 @@ import {
   type FramePreviewSceneContext,
 } from "../../app/state/framePreviewRenderModel";
 import { usePlayheadTime } from "../../app/features/playback/usePlayheadTime";
-import type {
-  AdjustmentLayer,
-  CompositionClip,
-  TimelineMode,
-} from "../../core/types";
+import type { AdjustmentLayer, TimelineMode } from "../../core/types";
 import { FramePreview } from "./FramePreview";
 
 type FramePreviewBaseProps = ComponentProps<typeof FramePreview>;
 
-// Fields the wrapper derives internally from the live playhead and scene
-// context — callers must NOT supply these. Mirrors the conditional logic in
-// AppContent (App.tsx:5193-5293).
 type LiveDerivedKeys =
   | "part"
+  | "sceneMotionPart"
+  | "sceneWrap"
   | "partStart"
   | "previewParts"
   | "transitionPreviewParts"
@@ -36,28 +31,20 @@ export type FramePreviewLiveProps = Omit<
 > & {
   previewSceneContext: FramePreviewSceneContext;
   timelineMode: TimelineMode;
-  composeMode: boolean;
-  hasPreviewComposition: boolean;
   activeCompositionHidden: boolean;
-  composeFilePart: CompositionClip | null;
-  selectedPart: CompositionClip | null;
   adjustmentLayersOverride?: AdjustmentLayer[];
   paused?: boolean;
 };
 
-const EMPTY_HIDDEN_MOTION_LAYER_IDS: ReadonlySet<string> = new Set();
-
 /**
  * Thin wrapper around `FramePreview` that subscribes to the live playhead
- * clock and derives the time-dependent FramePreview props internally. Move
+ * clock and derives the time-dependent FramePreview props internally. Moves
  * the per-frame React commit out of `AppContent` and into this component, so
  * AppContent only re-renders at structural (preview-key) boundaries.
  *
- * Pure passthrough for all non-time-dependent props.
- *
- * The conditional logic for gating preview parts / motion layers / etc. on
- * `hasPreviewComposition && !composeMode` mirrors AppContent's
- * `framePreviewProps={...}` block at App.tsx:5193-5293 exactly.
+ * The render model already zeroes scene-aux fields (adjustment / transition /
+ * motion / hide-null-objects) in compose mode via `sceneWrap`, so this
+ * wrapper just hands the live values straight through.
  */
 export const FramePreviewLive = memo(function FramePreviewLive(
   props: FramePreviewLiveProps,
@@ -65,11 +52,7 @@ export const FramePreviewLive = memo(function FramePreviewLive(
   const {
     previewSceneContext,
     timelineMode,
-    composeMode,
-    hasPreviewComposition,
     activeCompositionHidden,
-    composeFilePart,
-    selectedPart,
     adjustmentLayersOverride,
     paused,
     ...passthrough
@@ -98,42 +81,28 @@ export const FramePreviewLive = memo(function FramePreviewLive(
   } = renderModel;
 
   const { displayPart, displayPreviewTime, partStart } =
-    resolveDisplayTimeAndPart({
-      composeFilePart,
-      model: renderModel,
-      selectedPart,
-      sceneTime: liveTime,
-      timelineMode,
-    });
+    resolveDisplayTimeAndPart(renderModel);
 
-  const showSceneAux = hasPreviewComposition && !composeMode;
-  const previewParts = showSceneAux ? livePreviewParts : [];
-  const transitionPreviewParts = showSceneAux
-    ? liveTransitionPreviewParts
-    : null;
-  const adjustmentLayers =
-    adjustmentLayersOverride ?? (showSceneAux ? ctxAdjustmentLayers : []);
-  const transitionLayers = showSceneAux ? ctxTransitionLayers : [];
-  const motionLayers = showSceneAux ? ctxMotionLayers : [];
-  const hiddenMotionLayerIds = showSceneAux
-    ? ctxHiddenMotionLayerIds
-    : (EMPTY_HIDDEN_MOTION_LAYER_IDS as Set<string>);
-  const compHidden = showSceneAux ? activeCompositionHidden : false;
+  const adjustmentLayers = adjustmentLayersOverride ?? ctxAdjustmentLayers;
+  const compHidden =
+    activeCompositionHidden && renderModel.sceneWrap.hideNullObjects;
 
   return (
     <FramePreview
       {...(passthrough as ComponentProps<typeof FramePreview>)}
-      previewParts={previewParts}
-      transitionPreviewParts={transitionPreviewParts}
-      transitionLayers={transitionLayers}
+      previewParts={livePreviewParts}
+      transitionPreviewParts={liveTransitionPreviewParts}
+      transitionLayers={ctxTransitionLayers}
       part={displayPart}
+      sceneMotionPart={renderModel.sceneMotionPart}
+      sceneWrap={renderModel.sceneWrap}
       partStart={partStart}
       previewTime={displayPreviewTime}
       sceneTime={adjustedSceneTime}
       timelineMode={timelineMode}
       adjustmentLayers={adjustmentLayers}
-      motionLayers={motionLayers}
-      hiddenMotionLayerIds={hiddenMotionLayerIds}
+      motionLayers={ctxMotionLayers}
+      hiddenMotionLayerIds={ctxHiddenMotionLayerIds}
       compHidden={compHidden}
     />
   );

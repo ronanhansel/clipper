@@ -483,6 +483,8 @@ function ExportFramePreview({
       isPlaying: false,
       renderMode: request.renderMode ?? ("export" as const),
       part: previewModel.part,
+      sceneMotionPart: previewModel.sceneMotionPart,
+      sceneWrap: previewModel.sceneWrap,
       partStart,
       previewParts: previewModel.previewParts,
       transitionPreviewParts: previewModel.transitionPreviewParts,

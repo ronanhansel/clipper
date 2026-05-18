@@ -237,11 +237,6 @@ const defaultEditorState: EditorState = {
 const wheelLineDeltaPx = 16;
 const wheelPageDeltaPx = 600;
 const frameWheelZoomSensitivity = 0.008;
-const EMPTY_HIDDEN_MOTION_LAYER_IDS: Set<string> = new Set();
-const EMPTY_PREVIEW_PARTS: TimelinePreviewStackPart[] = [];
-const EMPTY_ADJUSTMENT_LAYERS: AdjustmentLayer[] = [];
-const EMPTY_TRANSITION_LAYERS: TransitionLayer[] = [];
-const EMPTY_MOTION_LAYERS: TimelineMotionLayerState[] = [];
 
 type ComposeDrawTool =
   | "rect"
@@ -1213,13 +1208,15 @@ function AppContent({
     assets = [],
     cameraPreviewTransform,
     canSelectFrameObjects,
-    composeFilePart,
     framePickPoint,
     hasActiveComposition,
     inspectorAdjustmentMiddleSnap,
     inspectorCompositionMiddleSnap,
     inspectorMotionMiddleSnap,
     part,
+    partStart: displayPartStart,
+    sceneMotionPart,
+    sceneWrap,
     previewSceneContext,
     previewTime,
     previewParts,
@@ -4501,31 +4498,12 @@ function AppContent({
   );
 
   const framePreviewProps = useMemo(() => {
-    const directTimelineProps =
-      hasPreviewComposition && !composeMode
-        ? {
-            previewParts,
-            transitionPreviewParts,
-            adjustmentLayers: visibleSceneAdjustmentLayers,
-            transitionLayers: visibleSceneTransitionLayers,
-            motionLayers,
-            hiddenMotionLayerIds,
-            compHidden: activeCompositionHidden,
-          }
-        : {
-            previewParts: EMPTY_PREVIEW_PARTS,
-            transitionPreviewParts: null,
-            adjustmentLayers: EMPTY_ADJUSTMENT_LAYERS,
-            transitionLayers: EMPTY_TRANSITION_LAYERS,
-            motionLayers: EMPTY_MOTION_LAYERS,
-            hiddenMotionLayerIds: EMPTY_HIDDEN_MOTION_LAYER_IDS,
-            compHidden: false,
-          };
     return {
       cameraRef,
-      dragBox: hasPreviewComposition ? dragBox : null,
+      dragBox: hasPreviewComposition && composeMode ? dragBox : null,
       dragSelectionBoxRef,
-      framePickPoint: hasPreviewComposition ? activeFramePickPoint : null,
+      framePickPoint:
+        hasPreviewComposition && composeMode ? activeFramePickPoint : null,
       focusPicking:
         hasPreviewComposition &&
         (isPickingZoomFocus ||
@@ -4540,8 +4518,16 @@ function AppContent({
       frameScale: displayFramePreviewScale,
       isPlaying,
       part,
-      partStart: composeMode ? 0 : (activeTimelinePart?.start ?? 0),
-      ...directTimelineProps,
+      sceneMotionPart,
+      sceneWrap,
+      partStart: displayPartStart,
+      previewParts,
+      transitionPreviewParts,
+      adjustmentLayers: visibleSceneAdjustmentLayers,
+      transitionLayers: visibleSceneTransitionLayers,
+      motionLayers,
+      hiddenMotionLayerIds,
+      compHidden: activeCompositionHidden,
       previewTime,
       sceneTime: adjustedSceneTime,
       timelineMode,
@@ -4552,18 +4538,18 @@ function AppContent({
         hasPreviewComposition &&
         (isPickingZoomFocus || Boolean(pointPickAdjustment)),
       previewSceneContext,
-      composeMode,
-      hasPreviewComposition,
       activeCompositionHidden,
-      composeFilePart,
-      selectedPart,
-      selectedObjects: hasPreviewComposition ? previewSelectionObjects : [],
-      objectSnapGuides: hasPreviewComposition ? objectSnapGuides : [],
-      marqueeDragging: hasPreviewComposition && marqueeDragging,
+      selectedObjects:
+        hasPreviewComposition && composeMode ? previewSelectionObjects : [],
+      objectSnapGuides:
+        hasPreviewComposition && composeMode ? objectSnapGuides : [],
+      marqueeDragging: hasPreviewComposition && composeMode && marqueeDragging,
       editingTextObjectId:
-        hasPreviewComposition && !isPlaying ? editingTextObjectId : null,
-      activeShapeTool: activeTool,
-      shapeDrawPreview,
+        hasPreviewComposition && composeMode && !isPlaying
+          ? editingTextObjectId
+          : null,
+      activeShapeTool: composeMode ? activeTool : null,
+      shapeDrawPreview: composeMode ? shapeDrawPreview : null,
       onFramePointerCancel: wrappedOnFramePointerCancel,
       onFramePointerDown: wrappedOnFramePointerDown,
       onFramePointerDownCapture,
@@ -4597,8 +4583,10 @@ function AppContent({
     frameViewportRef,
     displayFramePreviewScale,
     part,
+    sceneMotionPart,
+    sceneWrap,
     composeMode,
-    activeTimelinePart,
+    displayPartStart,
     previewParts,
     transitionPreviewParts,
     visibleSceneAdjustmentLayers,
@@ -4610,8 +4598,6 @@ function AppContent({
     hiddenMotionLayerIds,
     activeCompositionHidden,
     previewSceneContext,
-    composeFilePart,
-    selectedPart,
     previewSelectionObjects,
     objectSnapGuides,
     marqueeDragging,

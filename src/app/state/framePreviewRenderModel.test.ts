@@ -76,12 +76,13 @@ describe("frame preview render model", () => {
     });
 
     expect(model.activeTimelinePart?.id).toBe("b");
-    expect(model.part.motionMarkers[0]).toMatchObject({
+    expect(model.sceneMotionPart.motionMarkers[0]).toMatchObject({
       id: "raw-zoom",
       kind: "zoom",
       layerId: "clipper.motion.zoom",
       start: 1,
     });
+    expect(model.part.motionMarkers).toEqual([]);
     expect(model.previewParts[0].part.motionMarkers).toEqual([]);
   });
 
@@ -137,8 +138,12 @@ describe("frame preview render model", () => {
 
     expect(model.hiddenMotionLayerIds.has("hidden")).toBe(true);
     expect(
-      model.part.motionMarkers.map((marker) => [marker.id, marker.start]),
+      model.sceneMotionPart.motionMarkers.map((marker) => [
+        marker.id,
+        marker.start,
+      ]),
     ).toEqual([["kept", 1]]);
+    expect(model.part.motionMarkers).toEqual([]);
   });
 
   it("uses per-timeline layers before legacy editor layers for export parity", () => {
@@ -236,7 +241,7 @@ describe("frame preview render model", () => {
     ).toEqual([["a", 0.5]]);
   });
 
-  it("keeps scene adjustment layers available in compose preview", () => {
+  it("zeros scene adjustment / transition / motion in compose preview", () => {
     const scene: Scene = {
       id: "scene",
       compositions: [
@@ -290,7 +295,18 @@ describe("frame preview render model", () => {
       timelineMode: "compose",
     });
 
-    expect(model.visibleAdjustmentLayers).toHaveLength(2);
+    expect(model.visibleAdjustmentLayers).toHaveLength(0);
+    expect(model.transitionLayers).toHaveLength(0);
+    expect(model.motionLayers).toHaveLength(0);
+    expect(model.transitionPreviewParts).toBeNull();
+    expect(model.sceneWrap).toEqual({
+      cameraEnabled: false,
+      adjustmentsEnabled: false,
+      transitionsEnabled: false,
+      motionEnabled: false,
+      hideNullObjects: false,
+    });
+    // adjustments are disabled in compose, so sceneTime is not warped
     expect(model.adjustedSceneTime).toBe(3);
     expect(model.activeTimelinePart?.id).toBe("b");
     expect(model.previewTime).toBe(1);

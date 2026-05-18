@@ -1,4 +1,4 @@
-import { ChevronDown, Trash2 } from "lucide-react";
+import { ChevronDown, Minus, Plus } from "lucide-react";
 import { useState } from "react";
 import { mutedCaps } from "../../../app/config";
 import type {
@@ -262,10 +262,11 @@ export function TextAnimatorsSection({
         </button>
         <button
           type="button"
-          className="rounded-[8px] border border-[#2d313b] bg-[#171920] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.08em] text-[#dfe2ea] transition hover:border-[var(--clipper-accent-strong)] hover:bg-[#20232c]"
+          aria-label="Add animator"
+          className="grid h-[26px] w-[26px] place-items-center rounded-[8px] border border-[#2d313b] bg-[#171920] text-[#dfe2ea] transition hover:border-[var(--clipper-accent-strong)] hover:bg-[#20232c]"
           onClick={addAnimator}
         >
-          Add
+          <Plus className="h-3.5 w-3.5" />
         </button>
       </div>
       {expanded ? (
@@ -299,6 +300,8 @@ function TextAnimatorCard({
 }) {
   const split = animator.options.split ?? { mode: "character" };
   const enabled = animator.enabled !== false;
+  const [rangeOpen, setRangeOpen] = useState(true);
+  const [propsOpen, setPropsOpen] = useState(true);
   const enabledProperties = new Set<TextAnimatorPropertyKey>(
     animator.tracks
       .map((track) => track.property)
@@ -416,15 +419,15 @@ function TextAnimatorCard({
         <button
           type="button"
           aria-label="Remove animator"
-          className="grid h-[30px] w-[30px] place-items-center rounded-[8px] border border-[#3b2a2a] bg-[#231516] text-[#ffb4b4] transition hover:border-[#6b3838] hover:bg-[#301b1d]"
+          className="grid h-[30px] w-[30px] place-items-center rounded-[8px] border border-[#2d313b] bg-[#171920] text-[#dfe2ea] transition hover:border-[var(--clipper-accent-strong)] hover:bg-[#20232c]"
           onClick={onRemove}
         >
-          <Trash2 className="h-3.5 w-3.5" />
+          <Minus className="h-3.5 w-3.5" />
         </button>
       </div>
 
       <div className="grid grid-cols-2 gap-2">
-        <label className={`grid gap-1 ${mutedCaps}`}>
+        <label className={`grid min-w-0 gap-1 ${mutedCaps}`}>
           Split
           <Select
             value={split.mode}
@@ -449,7 +452,7 @@ function TextAnimatorCard({
             </SelectContent>
           </Select>
         </label>
-        <label className={`grid gap-1 ${mutedCaps}`}>
+        <label className={`grid min-w-0 gap-1 ${mutedCaps}`}>
           Order
           <Select
             value={split.order ?? "forward"}
@@ -477,7 +480,7 @@ function TextAnimatorCard({
       </div>
 
       {split.order === "random" ? (
-        <label className={`grid gap-1 ${mutedCaps}`}>
+        <label className={`grid min-w-0 gap-1 ${mutedCaps}`}>
           Seed
           <Input
             className="h-[34px] rounded-[8px] px-2 text-[11px] font-bold"
@@ -497,7 +500,7 @@ function TextAnimatorCard({
       ) : null}
 
       <div className="grid grid-cols-3 gap-2">
-        <label className={`grid gap-1 ${mutedCaps}`}>
+        <label className={`grid min-w-0 gap-1 ${mutedCaps}`}>
           Delay
           <Input
             className="h-[34px] rounded-[8px] px-2 text-[11px] font-bold"
@@ -513,7 +516,7 @@ function TextAnimatorCard({
             }}
           />
         </label>
-        <label className={`grid gap-1 ${mutedCaps}`}>
+        <label className={`grid min-w-0 gap-1 ${mutedCaps}`}>
           Duration
           <Input
             className="h-[34px] rounded-[8px] px-2 text-[11px] font-bold"
@@ -530,7 +533,7 @@ function TextAnimatorCard({
             }}
           />
         </label>
-        <label className={`grid gap-1 ${mutedCaps}`}>
+        <label className={`grid min-w-0 gap-1 ${mutedCaps}`}>
           Stagger
           <Input
             className="h-[34px] rounded-[8px] px-2 text-[11px] font-bold"
@@ -549,7 +552,7 @@ function TextAnimatorCard({
         </label>
       </div>
 
-      <label className={`grid gap-1 ${mutedCaps}`}>
+      <label className={`grid min-w-0 gap-1 ${mutedCaps}`}>
         Ease
         <Select
           value={motionEaseSelectValue(
@@ -575,253 +578,279 @@ function TextAnimatorCard({
         </Select>
       </label>
 
-      <div className="grid gap-2 rounded-[8px] border border-[#23262d] bg-[#0f1116] p-2">
-        <span className={mutedCaps}>Range Selector</span>
-        <div className="grid grid-cols-3 gap-2">
-          <label className={`grid gap-1 ${mutedCaps}`}>
-            Start
-            <Input
-              className="h-[30px] rounded-[8px] px-2 text-[11px] font-bold"
-              type="number"
-              step={0.05}
-              min={0}
-              max={1}
-              value={split.start ?? 0}
-              onChange={(event) => {
-                const value = Number(event.target.value);
-                if (!Number.isFinite(value)) return;
-                setSplit((current) => ({
-                  ...current,
-                  start: Math.min(1, Math.max(0, value)),
-                }));
-              }}
-            />
-          </label>
-          <label className={`grid gap-1 ${mutedCaps}`}>
-            End
-            <Input
-              className="h-[30px] rounded-[8px] px-2 text-[11px] font-bold"
-              type="number"
-              step={0.05}
-              min={0}
-              max={1}
-              value={split.end ?? 1}
-              onChange={(event) => {
-                const value = Number(event.target.value);
-                if (!Number.isFinite(value)) return;
-                setSplit((current) => ({
-                  ...current,
-                  end: Math.min(1, Math.max(0, value)),
-                }));
-              }}
-            />
-          </label>
-          <label className={`grid gap-1 ${mutedCaps}`}>
-            Offset
-            <Input
-              className="h-[30px] rounded-[8px] px-2 text-[11px] font-bold"
-              type="number"
-              step={0.05}
-              value={split.offset ?? 0}
-              onChange={(event) => {
-                const value = Number(event.target.value);
-                if (!Number.isFinite(value)) return;
-                setSplit((current) => ({ ...current, offset: value }));
-              }}
-            />
-          </label>
-        </div>
-        <div className="grid grid-cols-3 gap-2">
-          <label className={`grid gap-1 ${mutedCaps}`}>
-            Shape
-            <Select
-              value={split.shape ?? "square"}
-              onValueChange={(value) =>
-                setSplit((current) => ({
-                  ...current,
-                  shape: value as
-                    | "square"
-                    | "rampUp"
-                    | "rampDown"
-                    | "triangle"
-                    | "round"
-                    | "smooth",
-                }))
-              }
-            >
-              <SelectTrigger className="h-[30px] rounded-[8px] px-2 text-[11px] font-bold text-[#dfe2ea]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  {TEXT_ANIMATOR_SHAPES.map((entry) => (
-                    <SelectItem key={entry.value} value={entry.value}>
-                      {entry.label}
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-          </label>
-          <label className={`grid gap-1 ${mutedCaps}`}>
-            Ease High
-            <Input
-              className="h-[30px] rounded-[8px] px-2 text-[11px] font-bold"
-              type="number"
-              step={0.05}
-              min={0}
-              max={1}
-              value={split.easeHigh ?? 0}
-              onChange={(event) => {
-                const value = Number(event.target.value);
-                if (!Number.isFinite(value)) return;
-                setSplit((current) => ({
-                  ...current,
-                  easeHigh: Math.min(1, Math.max(0, value)),
-                }));
-              }}
-            />
-          </label>
-          <label className={`grid gap-1 ${mutedCaps}`}>
-            Ease Low
-            <Input
-              className="h-[30px] rounded-[8px] px-2 text-[11px] font-bold"
-              type="number"
-              step={0.05}
-              min={0}
-              max={1}
-              value={split.easeLow ?? 0}
-              onChange={(event) => {
-                const value = Number(event.target.value);
-                if (!Number.isFinite(value)) return;
-                setSplit((current) => ({
-                  ...current,
-                  easeLow: Math.min(1, Math.max(0, value)),
-                }));
-              }}
-            />
-          </label>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <label className={`grid gap-1 ${mutedCaps}`}>
-            Anchor
-            <Select
-              value={split.anchor ?? "token"}
-              onValueChange={(value) =>
-                setSplit((current) => ({
-                  ...current,
-                  anchor: value as "token" | "word" | "line" | "all",
-                }))
-              }
-            >
-              <SelectTrigger className="h-[30px] rounded-[8px] px-2 text-[11px] font-bold text-[#dfe2ea]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  {TEXT_ANIMATOR_ANCHORS.map((entry) => (
-                    <SelectItem key={entry.value} value={entry.value}>
-                      {entry.label}
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-          </label>
-          <label className={`grid gap-1 ${mutedCaps}`}>
-            Repeat scope
-            <Select
-              value={split.repeatScope ?? "sequence"}
-              onValueChange={(value) =>
-                setSplit((current) => ({
-                  ...current,
-                  repeatScope: value as "sequence" | "item",
-                }))
-              }
-            >
-              <SelectTrigger className="h-[30px] rounded-[8px] px-2 text-[11px] font-bold text-[#dfe2ea]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  <SelectItem value="sequence">Sequence</SelectItem>
-                  <SelectItem value="item">Item</SelectItem>
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-          </label>
-        </div>
+      <div className="grid gap-2 border-t border-[#23262d] pt-2">
+        <button
+          type="button"
+          className={`flex items-center gap-1.5 ${mutedCaps}`}
+          onClick={() => setRangeOpen((value) => !value)}
+        >
+          <ChevronDown
+            className={`h-3 w-3 transition ${rangeOpen ? "" : "-rotate-90"}`}
+          />
+          <span>Range Selector</span>
+        </button>
+        {rangeOpen ? (
+          <div className="grid gap-2">
+            <div className="grid grid-cols-3 gap-2">
+              <label className={`grid min-w-0 gap-1 ${mutedCaps}`}>
+                Start
+                <Input
+                  className="h-[30px] rounded-[8px] px-2 text-[11px] font-bold"
+                  type="number"
+                  step={0.05}
+                  min={0}
+                  max={1}
+                  value={split.start ?? 0}
+                  onChange={(event) => {
+                    const value = Number(event.target.value);
+                    if (!Number.isFinite(value)) return;
+                    setSplit((current) => ({
+                      ...current,
+                      start: Math.min(1, Math.max(0, value)),
+                    }));
+                  }}
+                />
+              </label>
+              <label className={`grid min-w-0 gap-1 ${mutedCaps}`}>
+                End
+                <Input
+                  className="h-[30px] rounded-[8px] px-2 text-[11px] font-bold"
+                  type="number"
+                  step={0.05}
+                  min={0}
+                  max={1}
+                  value={split.end ?? 1}
+                  onChange={(event) => {
+                    const value = Number(event.target.value);
+                    if (!Number.isFinite(value)) return;
+                    setSplit((current) => ({
+                      ...current,
+                      end: Math.min(1, Math.max(0, value)),
+                    }));
+                  }}
+                />
+              </label>
+              <label className={`grid min-w-0 gap-1 ${mutedCaps}`}>
+                Offset
+                <Input
+                  className="h-[30px] rounded-[8px] px-2 text-[11px] font-bold"
+                  type="number"
+                  step={0.05}
+                  value={split.offset ?? 0}
+                  onChange={(event) => {
+                    const value = Number(event.target.value);
+                    if (!Number.isFinite(value)) return;
+                    setSplit((current) => ({ ...current, offset: value }));
+                  }}
+                />
+              </label>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <label className={`grid min-w-0 gap-1 ${mutedCaps}`}>
+                Shape
+                <Select
+                  value={split.shape ?? "square"}
+                  onValueChange={(value) =>
+                    setSplit((current) => ({
+                      ...current,
+                      shape: value as
+                        | "square"
+                        | "rampUp"
+                        | "rampDown"
+                        | "triangle"
+                        | "round"
+                        | "smooth",
+                    }))
+                  }
+                >
+                  <SelectTrigger className="h-[30px] rounded-[8px] px-2 text-[11px] font-bold text-[#dfe2ea]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      {TEXT_ANIMATOR_SHAPES.map((entry) => (
+                        <SelectItem key={entry.value} value={entry.value}>
+                          {entry.label}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </label>
+              <label className={`grid min-w-0 gap-1 ${mutedCaps}`}>
+                Ease High
+                <Input
+                  className="h-[30px] rounded-[8px] px-2 text-[11px] font-bold"
+                  type="number"
+                  step={0.05}
+                  min={0}
+                  max={1}
+                  value={split.easeHigh ?? 0}
+                  onChange={(event) => {
+                    const value = Number(event.target.value);
+                    if (!Number.isFinite(value)) return;
+                    setSplit((current) => ({
+                      ...current,
+                      easeHigh: Math.min(1, Math.max(0, value)),
+                    }));
+                  }}
+                />
+              </label>
+              <label className={`grid min-w-0 gap-1 ${mutedCaps}`}>
+                Ease Low
+                <Input
+                  className="h-[30px] rounded-[8px] px-2 text-[11px] font-bold"
+                  type="number"
+                  step={0.05}
+                  min={0}
+                  max={1}
+                  value={split.easeLow ?? 0}
+                  onChange={(event) => {
+                    const value = Number(event.target.value);
+                    if (!Number.isFinite(value)) return;
+                    setSplit((current) => ({
+                      ...current,
+                      easeLow: Math.min(1, Math.max(0, value)),
+                    }));
+                  }}
+                />
+              </label>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <label className={`grid min-w-0 gap-1 ${mutedCaps}`}>
+                Anchor
+                <Select
+                  value={split.anchor ?? "token"}
+                  onValueChange={(value) =>
+                    setSplit((current) => ({
+                      ...current,
+                      anchor: value as "token" | "word" | "line" | "all",
+                    }))
+                  }
+                >
+                  <SelectTrigger className="h-[30px] rounded-[8px] px-2 text-[11px] font-bold text-[#dfe2ea]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      {TEXT_ANIMATOR_ANCHORS.map((entry) => (
+                        <SelectItem key={entry.value} value={entry.value}>
+                          {entry.label}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </label>
+              <label className={`grid min-w-0 gap-1 ${mutedCaps}`}>
+                Repeat scope
+                <Select
+                  value={split.repeatScope ?? "sequence"}
+                  onValueChange={(value) =>
+                    setSplit((current) => ({
+                      ...current,
+                      repeatScope: value as "sequence" | "item",
+                    }))
+                  }
+                >
+                  <SelectTrigger className="h-[30px] rounded-[8px] px-2 text-[11px] font-bold text-[#dfe2ea]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectItem value="sequence">Sequence</SelectItem>
+                      <SelectItem value="item">Item</SelectItem>
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </label>
+            </div>
+          </div>
+        ) : null}
       </div>
 
-      <div className="grid gap-2 rounded-[8px] border border-[#23262d] bg-[#0f1116] p-2">
-        <span className={mutedCaps}>Properties</span>
-        {TEXT_ANIMATOR_PROPERTIES.map((property) => {
-          const active = enabledProperties.has(property.key);
-          const track = animator.tracks.find(
-            (track) => track.property === property.key,
-          );
-          const sortedPoints = track
-            ? [...track.points].sort((a, b) => a.time - b.time)
-            : [];
-          const fromValue =
-            typeof sortedPoints[0]?.value === "number"
-              ? (sortedPoints[0].value as number)
-              : TEXT_ANIMATOR_DEFAULT_FROM[property.key];
-          const toValue =
-            typeof sortedPoints[sortedPoints.length - 1]?.value === "number"
-              ? (sortedPoints[sortedPoints.length - 1].value as number)
-              : TEXT_ANIMATOR_DEFAULT_TO[property.key];
-          return (
-            <div
-              key={property.key}
-              className="grid grid-cols-[auto_1fr_1fr] items-center gap-2"
-            >
-              <label className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.08em] text-[#a7adbb]">
-                <Checkbox
-                  checked={active}
-                  onCheckedChange={(checked) =>
-                    toggleProperty(property.key, Boolean(checked))
-                  }
-                />
-                <span>{property.label}</span>
-              </label>
-              <Input
-                className="h-[30px] rounded-[8px] px-2 text-[11px] font-bold disabled:opacity-40"
-                type="number"
-                step={
-                  property.key === "scale" || property.key === "opacity"
-                    ? 0.05
-                    : 1
-                }
-                disabled={!active}
-                value={fromValue}
-                onChange={(event) => {
-                  const value = Number(event.target.value);
-                  if (!Number.isFinite(value)) return;
-                  setPropertyValue(property.key, "from", value);
-                }}
-                placeholder="From"
-              />
-              <Input
-                className="h-[30px] rounded-[8px] px-2 text-[11px] font-bold disabled:opacity-40"
-                type="number"
-                step={
-                  property.key === "scale" || property.key === "opacity"
-                    ? 0.05
-                    : 1
-                }
-                disabled={!active}
-                value={toValue}
-                onChange={(event) => {
-                  const value = Number(event.target.value);
-                  if (!Number.isFinite(value)) return;
-                  setPropertyValue(property.key, "to", value);
-                }}
-                placeholder="To"
-              />
-            </div>
-          );
-        })}
+      <div className="grid gap-2 border-t border-[#23262d] pt-2">
+        <button
+          type="button"
+          className={`flex items-center gap-1.5 ${mutedCaps}`}
+          onClick={() => setPropsOpen((value) => !value)}
+        >
+          <ChevronDown
+            className={`h-3 w-3 transition ${propsOpen ? "" : "-rotate-90"}`}
+          />
+          <span>Properties</span>
+        </button>
+        {propsOpen ? (
+          <div className="grid gap-1.5">
+            {TEXT_ANIMATOR_PROPERTIES.map((property) => {
+              const active = enabledProperties.has(property.key);
+              const track = animator.tracks.find(
+                (track) => track.property === property.key,
+              );
+              const sortedPoints = track
+                ? [...track.points].sort((a, b) => a.time - b.time)
+                : [];
+              const fromValue =
+                typeof sortedPoints[0]?.value === "number"
+                  ? (sortedPoints[0].value as number)
+                  : TEXT_ANIMATOR_DEFAULT_FROM[property.key];
+              const toValue =
+                typeof sortedPoints[sortedPoints.length - 1]?.value === "number"
+                  ? (sortedPoints[sortedPoints.length - 1].value as number)
+                  : TEXT_ANIMATOR_DEFAULT_TO[property.key];
+              return (
+                <div
+                  key={property.key}
+                  className="grid grid-cols-[110px_1fr_1fr] items-center gap-2"
+                >
+                  <label className="flex min-w-0 items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.08em] text-[#a7adbb]">
+                    <Checkbox
+                      checked={active}
+                      onCheckedChange={(checked) =>
+                        toggleProperty(property.key, Boolean(checked))
+                      }
+                    />
+                    <span className="truncate">{property.label}</span>
+                  </label>
+                  <Input
+                    className="h-[30px] w-full rounded-[8px] px-2 text-[11px] font-bold disabled:opacity-40"
+                    type="number"
+                    step={
+                      property.key === "scale" || property.key === "opacity"
+                        ? 0.05
+                        : 1
+                    }
+                    disabled={!active}
+                    value={fromValue}
+                    onChange={(event) => {
+                      const value = Number(event.target.value);
+                      if (!Number.isFinite(value)) return;
+                      setPropertyValue(property.key, "from", value);
+                    }}
+                    placeholder="From"
+                  />
+                  <Input
+                    className="h-[30px] w-full rounded-[8px] px-2 text-[11px] font-bold disabled:opacity-40"
+                    type="number"
+                    step={
+                      property.key === "scale" || property.key === "opacity"
+                        ? 0.05
+                        : 1
+                    }
+                    disabled={!active}
+                    value={toValue}
+                    onChange={(event) => {
+                      const value = Number(event.target.value);
+                      if (!Number.isFinite(value)) return;
+                      setPropertyValue(property.key, "to", value);
+                    }}
+                    placeholder="To"
+                  />
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
       </div>
     </div>
   );
