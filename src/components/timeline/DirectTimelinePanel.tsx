@@ -381,7 +381,7 @@ export const DirectTimelinePanel = memo(function DirectTimelinePanel({
     adjustmentRows,
     compositionRows,
     transitionRows,
-    isCompositionMode,
+    isDirectMode,
     laneContentHeight,
     laneRowsStyle,
     layerLayout,
@@ -449,7 +449,7 @@ export const DirectTimelinePanel = memo(function DirectTimelinePanel({
   currentSceneTimeRef.current = currentSceneTime;
 
   function selectTimelineItemAtTime(time: number) {
-    if (!isCompositionMode) {
+    if (!isDirectMode) {
       const part = getTimelinePartAtTime(
         timeline,
         time > 0 ? time - 0.000001 : time,
@@ -4737,7 +4737,7 @@ export const DirectTimelinePanel = memo(function DirectTimelinePanel({
   useEffect(() => {
     function handleEffectPointerDrag(event: Event) {
       const detail = (event as CustomEvent<EffectPointerDragDetail>).detail;
-      if (!isCompositionMode) return;
+      if (!isDirectMode) return;
 
       handleSharedPointerDrag(
         detail,
@@ -5013,7 +5013,7 @@ export const DirectTimelinePanel = memo(function DirectTimelinePanel({
               }
             />
           ))}
-          {isCompositionMode
+          {isDirectMode
             ? transitionRows.map((row, index) => (
                 <LayerLabel
                   key={row.key}
@@ -5044,7 +5044,7 @@ export const DirectTimelinePanel = memo(function DirectTimelinePanel({
                 />
               ))
             : null}
-          {isCompositionMode
+          {isDirectMode
             ? adjustmentRows.map((row, index) => (
                 <LayerLabel
                   key={row.key}
@@ -5090,7 +5090,7 @@ export const DirectTimelinePanel = memo(function DirectTimelinePanel({
                 />
               ))
             : null}
-          {isCompositionMode
+          {isDirectMode
             ? motionLayers.map((layer, index) => (
                 <LayerLabel
                   key={layer.id}
@@ -5148,7 +5148,7 @@ export const DirectTimelinePanel = memo(function DirectTimelinePanel({
               locked={Boolean(layer.locked)}
               compactControls={
                 layerRowHeights[
-                  (isCompositionMode
+                  (isDirectMode
                     ? transitionRows.length +
                       adjustmentRows.length +
                       motionLayers.length
@@ -5157,7 +5157,7 @@ export const DirectTimelinePanel = memo(function DirectTimelinePanel({
               }
               hideLockControl={
                 layerRowHeights[
-                  (isCompositionMode
+                  (isDirectMode
                     ? transitionRows.length +
                       adjustmentRows.length +
                       motionLayers.length
@@ -5213,7 +5213,7 @@ export const DirectTimelinePanel = memo(function DirectTimelinePanel({
               timelineDisplayDuration={timelineDisplayDuration}
             />
           ) : null}
-          {isCompositionMode
+          {isDirectMode
             ? transitionRows.map((row, index) => (
                 <TimelineLayerLane
                   key={row.key}
@@ -5384,7 +5384,7 @@ export const DirectTimelinePanel = memo(function DirectTimelinePanel({
                 </TimelineLayerLane>
               ))
             : null}
-          {isCompositionMode
+          {isDirectMode
             ? adjustmentRows.map((row) => (
                 <TimelineLayerLane
                   key={row.key}
@@ -5460,7 +5460,7 @@ export const DirectTimelinePanel = memo(function DirectTimelinePanel({
                 </TimelineLayerLane>
               ))
             : null}
-          {isCompositionMode
+          {isDirectMode
             ? motionLayers.map((layer) => (
                 <MotionLane
                   key={layer.id}

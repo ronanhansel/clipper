@@ -3,6 +3,7 @@ import {
   removePropertyKeyframe,
   type PropertyPath,
 } from "../../core/propertyRegistry";
+import { MOTION_EASES } from "../../core/easing";
 import type {
   AnimationTrackProperty,
   FrameObject,
@@ -594,18 +595,10 @@ function normalizeComposeEasing(
   value: unknown,
 ): MotionEase | readonly [number, number, number, number] | undefined {
   if (
-    value === "linear" ||
-    value === "snap" ||
-    value === "easeIn" ||
-    value === "easeOut" ||
-    value === "easeInOut" ||
-    value === "inAndOut" ||
-    value === "expoIn" ||
-    value === "expoOut" ||
-    value === "circOut" ||
-    value === "backOut"
+    typeof value === "string" &&
+    (MOTION_EASES as readonly string[]).includes(value)
   ) {
-    return value;
+    return value as MotionEase;
   }
   return Array.isArray(value) && value.length === 4
     ? (value as unknown as readonly [number, number, number, number])

@@ -15,7 +15,7 @@ import type { CSSProperties, Dispatch, RefObject, SetStateAction } from "react";
 import { FrameZoomBar } from "../../components/FrameZoomBar";
 import { QuickAccessTooltip } from "../../components/QuickAccessTooltip";
 import { clamp } from "../../core/math";
-import { usePlayheadTime } from "../features/playback/usePlayheadTime";
+import { usePlayheadSceneTime } from "../features/playback/usePlayheadTime";
 
 export type PlaybackBarProps = {
   fastSelectEnabled: boolean;
@@ -72,7 +72,7 @@ export function PlaybackBar({
   togglePlayback,
   updateFramePreviewScale,
 }: PlaybackBarProps) {
-  const sceneTime = usePlayheadTime();
+  const sceneTime = usePlayheadSceneTime();
   const playbackDisplayTime = clamp(
     toPlaybackDisplayTime(sceneTime),
     0,

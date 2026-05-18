@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { type EaseValue, easeProgress } from "../../core/easing";
 import { cn } from "../../lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./tooltip";
 
@@ -117,16 +118,7 @@ export const SelectContent = forwardRef<
 );
 SelectContent.displayName = SelectPrimitive.Content.displayName;
 
-type SelectItemEase =
-  | "linear"
-  | "easeIn"
-  | "easeOut"
-  | "easeInOut"
-  | "inAndOut"
-  | "expoIn"
-  | "expoOut"
-  | "circOut"
-  | "backOut";
+type SelectItemEase = EaseValue;
 
 type SelectItemProps = ComponentPropsWithoutRef<typeof SelectPrimitive.Item> & {
   variant?: "default" | "ease";
@@ -148,41 +140,10 @@ function selectItemEaseFromValue(value: string | undefined): SelectItemEase {
     value === "expoIn" ||
     value === "expoOut" ||
     value === "circOut" ||
-    value === "backOut"
+    value === "backOut" ||
+    value === "snap"
     ? value
     : "linear";
-}
-
-function easePreviewProgress(value: number, ease: SelectItemEase) {
-  if (ease === "easeOut" || ease === "circOut")
-    return 1 - Math.pow(1 - value, 3);
-  if (ease === "easeIn") return value * value * value;
-  if (ease === "easeInOut")
-    return value < 0.5
-      ? 4 * value * value * value
-      : 1 - Math.pow(-2 * value + 2, 3) / 2;
-  if (ease === "inAndOut") return inAndOutEase(value);
-  if (ease === "expoIn") {
-    if (value <= 0) return 0;
-    return Math.pow(2, 10 * value - 10);
-  }
-  if (ease === "expoOut") {
-    if (value >= 1) return 1;
-    return 1 - Math.pow(2, -10 * value);
-  }
-  if (ease === "backOut")
-    return (
-      1 + 2.70158 * Math.pow(value - 1, 3) + 1.70158 * Math.pow(value - 1, 2)
-    );
-  return value;
-}
-
-function inAndOutEase(value: number) {
-  if (value <= 0) return 0;
-  if (value >= 1) return 1;
-  return value < 0.5
-    ? Math.pow(2, 20 * value - 10) / 2
-    : (2 - Math.pow(2, -20 * value + 10)) / 2;
 }
 
 function easePreviewPath(ease: SelectItemEase) {
@@ -191,7 +152,7 @@ function easePreviewPath(ease: SelectItemEase) {
   const segments = 96;
   return Array.from({ length: segments + 1 }, (_, index) => {
     const x = index / segments;
-    const y = 1 - easePreviewProgress(x, ease);
+    const y = 1 - easeProgress(x, ease);
     return `${index === 0 ? "M" : "L"} ${(x * width).toFixed(2)} ${(y * height).toFixed(2)}`;
   }).join(" ");
 }
@@ -203,7 +164,7 @@ function easePreviewSampleValues(
   const segments = 80;
   const values = Array.from({ length: segments + 1 }, (_, index) => {
     const time = index / segments;
-    return map(time, easePreviewProgress(time, ease)).toFixed(2);
+    return map(time, easeProgress(time, ease)).toFixed(2);
   });
   return [...values, values[values.length - 1]].join(";");
 }

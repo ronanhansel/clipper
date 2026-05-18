@@ -288,7 +288,7 @@ export function useTimelinePanelProps(
       onUpdateTransitionLayer: updateTransitionLayer,
       composeAnimationPart: hasActiveComposition ? part : null,
       selectedObjectIds: selectedComposeObjectIds,
-      onExitCompose: () => updateTimelineMode("composition"),
+      onExitCompose: () => updateTimelineMode("direct"),
       onInspectComposeObject: inspectComposeObject,
       onSelectComposeObjects: selectComposeLayerObjects,
       onPersistComposeSelection: persistComposeSelection,

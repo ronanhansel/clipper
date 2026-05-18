@@ -7,7 +7,7 @@ import {
   serializeProjectForSave,
   withRequiredTimelineLayerTypes,
 } from "./project";
-import type { CompositionClip, ProjectManifest } from "./types";
+import type { CompositionClip, ProjectManifest, TimelineMode } from "./types";
 
 const composition: CompositionClip = {
   id: "cmp_intro",
@@ -194,7 +194,7 @@ describe("project timeline normalization", () => {
       ...projectWithComposition(),
       editorState: {
         timeline: { displacement: 0, zoom: 1 },
-        timelineMode: "composition",
+        timelineMode: "composition" as unknown as TimelineMode,
         timelineLayers: {
           compositionLayers: [{ id: "legacy", name: "Legacy" }],
         },

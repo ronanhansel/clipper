@@ -110,7 +110,7 @@ export function ToolsPanel({
     state: NonNullable<EditorState["effectsPanelState"]>,
   ) => void;
 }) {
-  const isCompositionMode = timelineMode === "composition";
+  const isDirectMode = timelineMode === "direct";
   const effectLibrarySections = getEffectLibrarySections();
   const defaultOpenEffectGroups = new Set(
     effectLibrarySections.flatMap((section) =>
@@ -190,7 +190,7 @@ export function ToolsPanel({
 
   return (
     <section className="grid min-h-0 flex-1 overflow-hidden">
-      {isCompositionMode ? (
+      {isDirectMode ? (
         <div
           className="grid min-h-0 gap-2 overflow-hidden"
           style={{
@@ -207,7 +207,7 @@ export function ToolsPanel({
           ))}
         </div>
       ) : null}
-      {!isCompositionMode ? (
+      {!isDirectMode ? (
         <div className={panelCard}>
           <span>Compose mode</span>
           <small className="text-[#9b9da7]">

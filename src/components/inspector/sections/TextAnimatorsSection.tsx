@@ -884,7 +884,7 @@ export function createDefaultTextAnimator(index: number): LayerAnimation {
     options: {
       duration: 0.6,
       delay: 0,
-      ease: "easeOut",
+      ease: "easeInOut",
       split: {
         mode: "character",
         stagger: 0.05,

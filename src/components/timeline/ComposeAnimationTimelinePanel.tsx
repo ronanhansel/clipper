@@ -66,6 +66,12 @@ import {
   type ComposeAnimationTimelineRow,
   type ComposeAnimationTimelineLayer,
 } from "./composeAnimationModel";
+import {
+  type EaseValue,
+  easeProgress,
+  getEaseControlPoints,
+  motionEasePresets,
+} from "../../core/easing";
 import type { MotionEase } from "../../core/types";
 
 type ComposeAnimationTimelinePanelProps = {
@@ -791,7 +797,7 @@ function ComposeAnimationTimelinePanelContent({
         timelineZoom={timelineZoom}
         ticks={ticks}
         onModeChange={(nextMode) => {
-          if (nextMode === "composition") onExitCompose();
+          if (nextMode === "direct") onExitCompose();
         }}
         onTimelineViewportScroll={saveTimelineDisplacement}
         onTimelineZoomChange={updateTimelineZoom}
@@ -831,7 +837,7 @@ function ComposeAnimationTimelinePanelContent({
       timelineZoom={timelineZoom}
       ticks={ticks}
       onModeChange={(nextMode) => {
-        if (nextMode === "composition") onExitCompose();
+        if (nextMode === "direct") onExitCompose();
       }}
       onTimelineViewportScroll={saveTimelineDisplacement}
       onTimelineZoomChange={updateTimelineZoom}
@@ -1812,40 +1818,9 @@ function ComposeAttributeKeyframeLane({
   );
 }
 
-const easePresets: { label: string; value: MotionEase }[] = [
-  { label: "Snap", value: "snap" },
-  { label: "Linear", value: "linear" },
-  { label: "Ease in", value: "easeIn" },
-  { label: "Ease out", value: "easeOut" },
-  { label: "Ease in-out", value: "easeInOut" },
-  { label: "In and out", value: "inAndOut" },
-  { label: "Expo in", value: "expoIn" },
-  { label: "Expo out", value: "expoOut" },
-  { label: "Circ out", value: "circOut" },
-  { label: "Back out", value: "backOut" },
-];
-
-const easeCurvePoints: Record<MotionEase, [number, number, number, number]> = {
-  linear: [0, 0, 1, 1],
-  snap: [1, 0, 1, 0],
-  easeIn: [0.42, 0, 1, 1],
-  easeOut: [0, 0, 0.58, 1],
-  easeInOut: [0.42, 0, 0.58, 1],
-  inAndOut: [0.76, 0, 0.24, 1],
-  expoIn: [0.95, 0.05, 0.795, 0.035],
-  expoOut: [0.19, 1, 0.22, 1],
-  circOut: [0.075, 0.82, 0.165, 1],
-  backOut: [0.34, 1.56, 0.64, 1],
-};
+const easePresets = motionEasePresets;
 
 type EaseControlPoints = readonly [number, number, number, number];
-
-function getEaseControlPoints(
-  ease: MotionEase | EaseControlPoints | undefined,
-): EaseControlPoints {
-  if (ease && typeof ease !== "string" && ease.length === 4) return ease;
-  return easeCurvePoints[ease ?? "linear"] ?? easeCurvePoints.linear;
-}
 
 const defaultEaseRowHeight = 72;
 const minEaseRowHeight = 48;
@@ -1863,32 +1838,27 @@ function getComposeRowHeight(
 }
 
 function buildEaseSvgPath(
-  controlPoints: EaseControlPoints,
+  ease: EaseValue | undefined,
   x0: number,
   y0: number,
   x1: number,
   y1: number,
-  ease?: MotionEase | EaseControlPoints,
 ): string {
   if (ease === "snap") {
     return `M ${x0} ${y0} H ${x1} V ${y1}`;
   }
-  // CSS cubic-bezier(p1x, p1y, p2x, p2y) describes value progress over time.
-  // x0,y0 = SVG position of start keyframe; x1,y1 = SVG position of end keyframe.
-  // SVG Y is inverted: smaller Y = higher on screen = higher value.
-  // The bezier handles in CSS space: p1x/p2x are time fractions (0→1),
-  // p1y/p2y are value fractions (0→1, where 0=start value, 1=end value).
-  // In SVG space: time maps to x (x0→x1), value maps to y (y0→y1, already inverted).
-  const [p1x, p1y, p2x, p2y] = controlPoints;
-  const w = x1 - x0; // width in SVG units
-  const h = y1 - y0; // height in SVG units (negative when value increases, since SVG Y inverted)
-  // Control point 1: at time=p1x, value=p1y
-  const cp1x = x0 + p1x * w;
-  const cp1y = y0 + p1y * h;
-  // Control point 2: at time=p2x, value=p2y
-  const cp2x = x0 + p2x * w;
-  const cp2y = y0 + p2y * h;
-  return `M ${x0} ${y0} C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${x1} ${y1}`;
+  const samples = 32;
+  const w = x1 - x0;
+  const h = y1 - y0;
+  let path = `M ${x0} ${y0}`;
+  for (let i = 1; i <= samples; i++) {
+    const t = i / samples;
+    const v = easeProgress(t, ease);
+    const px = x0 + t * w;
+    const py = y0 + v * h;
+    path += ` L ${px} ${py}`;
+  }
+  return path;
 }
 
 function ComposeEaseLane({
@@ -2276,18 +2246,11 @@ function ComposeEaseLane({
           const x1 = displayX1Frac * 1000;
           const svgY0 = pad + (1 - seg.normY0) * drawH;
           const svgY1 = pad + (1 - seg.normY1) * drawH;
-          const controlPoints =
+          const easeForRender: EaseValue =
             handlePreview?.segIndex === i
               ? handlePreview.controlPoints
-              : seg.controlPoints;
-          const path = buildEaseSvgPath(
-            controlPoints,
-            x0,
-            svgY0,
-            x1,
-            svgY1,
-            seg.ease,
-          );
+              : seg.ease;
+          const path = buildEaseSvgPath(easeForRender, x0, svgY0, x1, svgY1);
           return (
             <path
               key={`curve-${i}`}
@@ -2313,18 +2276,11 @@ function ComposeEaseLane({
           const x1 = getDisplayXFrac(seg.x1Time, seg.x1Frac) * 1000;
           const svgY0 = pad + (1 - seg.normY0) * drawH;
           const svgY1 = pad + (1 - seg.normY1) * drawH;
-          const controlPoints =
+          const easeForRender: EaseValue =
             handlePreview?.segIndex === i
               ? handlePreview.controlPoints
-              : seg.controlPoints;
-          const path = buildEaseSvgPath(
-            controlPoints,
-            x0,
-            svgY0,
-            x1,
-            svgY1,
-            seg.ease,
-          );
+              : seg.ease;
+          const path = buildEaseSvgPath(easeForRender, x0, svgY0, x1, svgY1);
           return (
             <path
               key={`hit-${i}`}

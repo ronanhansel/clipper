@@ -455,7 +455,7 @@ function ExportFramePreview({
       scene,
       sceneTime,
       timelineLayers: getFramePreviewTimelineLayers(project, scene.id),
-      timelineMode: "composition",
+      timelineMode: "direct",
     });
     const activeTimelinePart = previewModel.activeTimelinePart;
     const partStart =
@@ -492,7 +492,7 @@ function ExportFramePreview({
       transitionLayers: previewModel.transitionLayers,
       previewTime: previewModel.previewTime,
       sceneTime,
-      timelineMode: "composition" as const,
+      timelineMode: "direct" as const,
       motionLayers: previewModel.motionLayers,
       hiddenMotionLayerIds: previewModel.hiddenMotionLayerIds,
       pickingTranslationPosition: false,
@@ -566,7 +566,7 @@ export function getExportPostProcessPasses(
       request.project,
       request.scene.id,
     ),
-    timelineMode: "composition",
+    timelineMode: "direct",
   });
   const transitionPasses = getTransitionPostProcessPasses(
     request.sceneTime,

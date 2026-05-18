@@ -31,7 +31,7 @@ export function buildDirectTimelineModel({
   rowHeights: Record<string, number>;
   timelineLayers: TimelineLayerState;
 }) {
-  const isCompositionMode = mode === "composition";
+  const isDirectMode = mode === "direct";
   const motionLayers = (
     timelineLayers.motionLayers !== undefined
       ? timelineLayers.motionLayers
@@ -100,7 +100,7 @@ export function buildDirectTimelineModel({
       accent: compositionTimelineAccent,
     })),
   ];
-  const layerRows: DirectTimelineLayerRow[] = isCompositionMode
+  const layerRows: DirectTimelineLayerRow[] = isDirectMode
     ? directLayerRows
     : compositionRows.map((layer) => ({
         key: layer.id,
@@ -116,7 +116,7 @@ export function buildDirectTimelineModel({
       directBaseLayerRowHeights[index],
     ]),
   );
-  const layerRowHeights = isCompositionMode
+  const layerRowHeights = isDirectMode
     ? directBaseLayerRowHeights
     : layerRows.map(
         (row) =>
@@ -147,7 +147,7 @@ export function buildDirectTimelineModel({
     adjustmentRows,
     compositionRows,
     transitionRows,
-    isCompositionMode,
+    isDirectMode,
     laneContentHeight,
     laneRowsStyle,
     layerLayout,
@@ -155,6 +155,6 @@ export function buildDirectTimelineModel({
     layerRowHeights,
     layerRowStarts,
     motionLayers,
-    timelineMarkersEditable: isCompositionMode,
+    timelineMarkersEditable: isDirectMode,
   };
 }

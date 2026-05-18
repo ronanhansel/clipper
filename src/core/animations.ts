@@ -6,6 +6,14 @@ import type {
   Point,
 } from "./types";
 import type { RenderStyle } from "../render-engine/renderRuntime";
+import { type EaseValue, easeProgress } from "./easing";
+
+export function easeAnimationProgress(
+  progress: number,
+  ease?: string | readonly number[],
+): number {
+  return easeProgress(progress, ease as EaseValue | undefined);
+}
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
@@ -170,7 +178,7 @@ export function evaluateNumericTrack(
     if (start.hold) return start.value;
     const duration = end.time - start.time;
     if (duration <= 0) return end.value;
-    const progress = easeAnimationProgress(
+    const progress = easeProgress(
       (time - start.time) / duration,
       start.easingToNext,
     );
@@ -233,87 +241,4 @@ export function interpolateKeyframeValues(
   const t = scaled - index;
 
   return lerp(keyframes[index], keyframes[index + 1], t);
-}
-
-export function easeAnimationProgress(
-  progress: number,
-  ease?: string | readonly number[],
-): number {
-  if (ease === "linear" || ease === undefined) return progress;
-  if (ease === "snap") return progress >= 1 ? 1 : 0;
-  if (ease === "easeIn") return progress * progress * progress;
-  if (ease === "easeOut" || ease === "circOut") return easeOutCubic(progress);
-  if (ease === "easeInOut") return easeInOutCubic(progress);
-  if (ease === "inAndOut") return inAndOutEase(progress);
-  if (ease === "expoIn") return expoIn(progress);
-  if (ease === "expoOut") return expoOut(progress);
-  if (ease === "backOut") return backOut(progress);
-  if (Array.isArray(ease) && ease.length === 4) {
-    return cubicBezierEase(progress, ease[0], ease[1], ease[2], ease[3]);
-  }
-  return progress;
-}
-
-function easeOutCubic(value: number): number {
-  return 1 - Math.pow(1 - value, 3);
-}
-
-function easeInOutCubic(value: number): number {
-  return value < 0.5
-    ? 4 * value * value * value
-    : 1 - Math.pow(-2 * value + 2, 3) / 2;
-}
-
-function expoIn(value: number): number {
-  if (value <= 0) return 0;
-  return Math.pow(2, 10 * value - 10);
-}
-
-function inAndOutEase(value: number): number {
-  if (value <= 0) return 0;
-  if (value >= 1) return 1;
-  return value < 0.5
-    ? Math.pow(2, 20 * value - 10) / 2
-    : (2 - Math.pow(2, -20 * value + 10)) / 2;
-}
-
-function expoOut(value: number): number {
-  if (value >= 1) return 1;
-  return 1 - Math.pow(2, -10 * value);
-}
-
-function backOut(value: number): number {
-  return (
-    1 + 2.70158 * Math.pow(value - 1, 3) + 1.70158 * Math.pow(value - 1, 2)
-  );
-}
-
-function cubicBezierEase(
-  progress: number,
-  x1: number,
-  y1: number,
-  x2: number,
-  y2: number,
-): number {
-  if (progress <= 0) return 0;
-  if (progress >= 1) return 1;
-
-  const sampleX = (t: number) =>
-    3 * (1 - t) * (1 - t) * t * x1 + 3 * (1 - t) * t * t * x2 + t * t * t;
-  const sampleY = (t: number) =>
-    3 * (1 - t) * (1 - t) * t * y1 + 3 * (1 - t) * t * t * y2 + t * t * t;
-
-  let low = 0;
-  let high = 1;
-  let t = progress;
-
-  for (let i = 0; i < 20; i++) {
-    const x = sampleX(t);
-    if (Math.abs(x - progress) < 1e-6) break;
-    if (x < progress) low = t;
-    else high = t;
-    t = (low + high) / 2;
-  }
-
-  return sampleY(t);
 }

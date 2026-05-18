@@ -13,6 +13,7 @@ import {
   getSceneFromProject,
   withRequiredTimelineLayerTypes,
 } from "../../core/project";
+import { sceneWrapConfigForMode } from "../../core/sceneWrap";
 import {
   getMiddleTransitionMode,
   getSelectedActiveMiddleMend,
@@ -311,7 +312,8 @@ export function useEditorDerivedState({
 
   const isPickingZoomFocus = Boolean(focusPickZoomMarker);
   const isPickingTranslationPosition = Boolean(positionPickTranslationMarker);
-  const canSelectFrameObjects = timelineMode === "compose";
+  const canSelectFrameObjects =
+    !sceneWrapConfigForMode(timelineMode).flattenComposition;
   const persistedFramePickPoint =
     isPickingZoomFocus && selectedMotion
       ? selectedMotion.focus

@@ -207,7 +207,7 @@ function normalizeTimelineViewportState(
 }
 
 function normalizeTimelineMode(mode: unknown): TimelineMode {
-  return mode === "composition" ? "composition" : "compose";
+  return mode === "direct" || mode === "composition" ? "direct" : "compose";
 }
 
 function normalizeCompositionRenderMode(mode: unknown): CompositionRenderMode {

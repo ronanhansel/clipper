@@ -1,4 +1,5 @@
 import type { TransitionEffectPackage } from "../../../types";
+import { easeProgress } from "../../../../easing";
 
 export const zoomInTransitionLogic: Pick<
   TransitionEffectPackage,
@@ -84,34 +85,6 @@ function clamp(value: number, min: number, max: number) {
 function getLinearProgress(sceneTime: number, start: number, duration: number) {
   const finishTime = Math.max(duration, 0.0001);
   return clamp((sceneTime - start) / finishTime, 0, 1);
-}
-
-function easeProgress(value: number, ease: unknown) {
-  if (ease === "easeOut" || ease === "circOut")
-    return 1 - Math.pow(1 - value, 3);
-  if (ease === "easeIn") return value * value * value;
-  if (ease === "easeInOut") {
-    return value < 0.5
-      ? 4 * value * value * value
-      : 1 - Math.pow(-2 * value + 2, 3) / 2;
-  }
-  if (ease === "inAndOut") return inAndOutEase(value);
-  if (ease === "expoIn") return value <= 0 ? 0 : Math.pow(2, 10 * value - 10);
-  if (ease === "expoOut") return value >= 1 ? 1 : 1 - Math.pow(2, -10 * value);
-  if (ease === "backOut") {
-    return (
-      1 + 2.70158 * Math.pow(value - 1, 3) + 1.70158 * Math.pow(value - 1, 2)
-    );
-  }
-  return value;
-}
-
-function inAndOutEase(value: number) {
-  if (value <= 0) return 0;
-  if (value >= 1) return 1;
-  return value < 0.5
-    ? Math.pow(2, 20 * value - 10) / 2
-    : (2 - Math.pow(2, -20 * value + 10)) / 2;
 }
 
 function smoothstep(edge0: number, edge1: number, value: number) {

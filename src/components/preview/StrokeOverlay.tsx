@@ -55,12 +55,25 @@ export const StrokeOverlay = memo(function StrokeOverlay({
   object,
   liveScrubClock = false,
   fallbackTime = 0,
+  liveTimeOffset = 0,
 }: {
   object: FrameObject;
   liveScrubClock?: boolean;
   fallbackTime?: number;
+  /**
+   * Part-local conversion offset. `evaluateObjectState` reads keyframes whose
+   * `point.time` is in the part-local axis, but the master clock publishes
+   * scene-axis time. `liveTimeOffset = localTime − renderClockSceneTime` is
+   * added to the live value only; the idle fallback (`fallbackTime`) is
+   * already part-local.
+   */
+  liveTimeOffset?: number;
 }) {
-  const liveTime = useAdjustedSceneTime(liveScrubClock, fallbackTime);
+  const liveTime = useAdjustedSceneTime(
+    liveScrubClock,
+    fallbackTime,
+    liveTimeOffset,
+  );
   const [previewStroke, setPreviewStroke] = useState<StrokeEffect | null>(null);
   const [previewBounds, setPreviewBounds] = useState<Bounds | null>(null);
 

@@ -1,4 +1,5 @@
 import { evaluateLayerAnimations } from "../core/animations";
+import { easeProgress as easeProgressFromCore } from "../core/easing";
 import { type FillValue, fillValueToCss, isFillValue } from "../core/fillValue";
 import { evaluateObjectState } from "../core/propertyRegistry";
 import {
@@ -7,8 +8,9 @@ import {
   type BackgroundLayer,
   type FrameObject,
   type FrameTemplate,
-  type MotionEase,
 } from "../core/types";
+
+export { easeProgressFromCore as easeProgress };
 
 export type RenderStyle = Record<string, string | number | undefined>;
 
@@ -518,51 +520,6 @@ export function interpolate(
   progress: number,
 ) {
   return range[0] + (range[1] - range[0]) * progress;
-}
-
-export function easeProgress(value: number, ease: MotionEase | undefined) {
-  if (ease === "easeOut" || ease === "circOut") return easeOutCubic(value);
-  if (ease === "easeIn") return value * value * value;
-  if (ease === "easeInOut") return easeInOutCubic(value);
-  if (ease === "inAndOut") return inAndOutEase(value);
-  if (ease === "expoIn") return expoIn(value);
-  if (ease === "expoOut") return expoOut(value);
-  if (ease === "backOut") return backOut(value);
-  return value;
-}
-
-export function easeOutCubic(value: number) {
-  return 1 - Math.pow(1 - value, 3);
-}
-
-function easeInOutCubic(value: number) {
-  return value < 0.5
-    ? 4 * value * value * value
-    : 1 - Math.pow(-2 * value + 2, 3) / 2;
-}
-
-function expoIn(value: number) {
-  if (value <= 0) return 0;
-  return Math.pow(2, 10 * value - 10);
-}
-
-function inAndOutEase(value: number) {
-  if (value <= 0) return 0;
-  if (value >= 1) return 1;
-  return value < 0.5
-    ? Math.pow(2, 20 * value - 10) / 2
-    : (2 - Math.pow(2, -20 * value + 10)) / 2;
-}
-
-function expoOut(value: number) {
-  if (value >= 1) return 1;
-  return 1 - Math.pow(2, -10 * value);
-}
-
-function backOut(value: number) {
-  return (
-    1 + 2.70158 * Math.pow(value - 1, 3) + 1.70158 * Math.pow(value - 1, 2)
-  );
 }
 
 function clamp(value: number, min: number, max: number) {

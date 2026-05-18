@@ -4,6 +4,7 @@ import {
   getMotionMarkerViews,
 } from "./motionEffects";
 import { getLayerAnimationsTranslation } from "./animations";
+import { easeProgress } from "./easing";
 import { isExplicitTimelineMarkerMend } from "./timeline";
 import {
   FRAME_HEIGHT,
@@ -570,52 +571,6 @@ function interpolate(range: readonly [number, number], progress: number) {
 
 function cameraEaseProgress(value: number, ease: MotionEase | undefined) {
   return easeProgress(value, ease ?? "easeInOut");
-}
-
-function easeProgress(value: number, ease: MotionEase | undefined) {
-  if (ease === "snap") return value >= 1 ? 1 : 0;
-  if (ease === "easeOut" || ease === "circOut") return easeOutCubic(value);
-  if (ease === "easeIn") return value * value * value;
-  if (ease === "easeInOut") return easeInOutCubic(value);
-  if (ease === "inAndOut") return inAndOutEase(value);
-  if (ease === "expoIn") return expoIn(value);
-  if (ease === "expoOut") return expoOut(value);
-  if (ease === "backOut") return backOut(value);
-  return value;
-}
-
-function easeOutCubic(value: number) {
-  return 1 - Math.pow(1 - value, 3);
-}
-
-function easeInOutCubic(value: number) {
-  return value < 0.5
-    ? 4 * value * value * value
-    : 1 - Math.pow(-2 * value + 2, 3) / 2;
-}
-
-function expoIn(value: number) {
-  if (value <= 0) return 0;
-  return Math.pow(2, 10 * value - 10);
-}
-
-function inAndOutEase(value: number) {
-  if (value <= 0) return 0;
-  if (value >= 1) return 1;
-  return value < 0.5
-    ? Math.pow(2, 20 * value - 10) / 2
-    : (2 - Math.pow(2, -20 * value + 10)) / 2;
-}
-
-function expoOut(value: number) {
-  if (value >= 1) return 1;
-  return 1 - Math.pow(2, -10 * value);
-}
-
-function backOut(value: number) {
-  return (
-    1 + 2.70158 * Math.pow(value - 1, 3) + 1.70158 * Math.pow(value - 1, 2)
-  );
 }
 
 function clamp(value: number, min: number, max: number) {

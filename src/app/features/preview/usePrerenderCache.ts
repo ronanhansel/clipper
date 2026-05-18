@@ -6,7 +6,7 @@ import {
   videoExportFrameRate,
 } from "../../config";
 import { clipperHost } from "../../clipperHost";
-import { getMasterTimelineClockSnapshot } from "../playback/playbackTimeStore";
+import { readClockSequence } from "../playback/playbackTimeStore";
 import { getAdjustmentEffectPackage } from "../../../core/effects/registry";
 import { getTopTimelinePartAtTime } from "../../../core/timeline";
 import type {
@@ -245,7 +245,7 @@ export function usePrerenderCache({
       )
         return;
       const generation = generationRef.current;
-      const clockSequence = getMasterTimelineClockSnapshot().sequence;
+      const clockSequence = readClockSequence();
       const currentBlockStart = getBlockStartTime(
         time,
         request.sceneDuration,
@@ -364,7 +364,7 @@ export function usePrerenderCache({
             1000,
           frameRange,
           manualJobId,
-          clockSequence: getMasterTimelineClockSnapshot().sequence,
+          clockSequence: readClockSequence(),
         });
         queuedRanges += 1;
       }
@@ -466,7 +466,7 @@ export function usePrerenderCache({
         if (
           nextItem.reason === "scrub" &&
           nextItem.clockSequence !== undefined &&
-          getMasterTimelineClockSnapshot().sequence > nextItem.clockSequence
+          readClockSequence() > nextItem.clockSequence
         ) {
           closePrerenderFrames(bitmapFrames);
           continue;
@@ -567,7 +567,7 @@ export function usePrerenderCache({
         queuedRef.current.push({
           start: blockStart,
           durationMs: request.blockDurationMs,
-          clockSequence: getMasterTimelineClockSnapshot().sequence,
+          clockSequence: readClockSequence(),
           reason: "idle",
         });
         changed = true;

@@ -6,7 +6,7 @@ import { usePreviewScrollPersistence } from "./app/features/editor-layout/usePre
 import { useExportCommands } from "./app/features/export/useExportCommands";
 import { usePlaybackBarProps } from "./app/features/playback/usePlaybackBarProps";
 import { usePlaybackController } from "./app/features/playback/usePlaybackController";
-import { useLiveSceneTimeRef } from "./app/features/playback/useLiveSceneTimeRef";
+import { useRawSceneTimeRef } from "./app/features/playback/playbackTimeStore";
 import { usePrerenderCache } from "./app/features/preview/usePrerenderCache";
 import {
   getManualPrerenderRangesForMarkedCompositions,
@@ -367,7 +367,7 @@ function AppContent({
   uiPersistRef.current.selectedComposeObjectIds = selectedComposeObjectIds;
   const modeRef = useRef(mode);
   const activePartFilePathRef = useRef("");
-  const currentSceneTimeRef = useLiveSceneTimeRef(currentSceneTime);
+  const currentSceneTimeRef = useRawSceneTimeRef(currentSceneTime);
   const isPlayingRef = useRef(isPlaying);
   const playbackClockRef = useRef<PlaybackClock>(null);
   const wasPlayingRef = useRef(false);

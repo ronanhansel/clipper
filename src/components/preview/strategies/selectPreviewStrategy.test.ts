@@ -31,7 +31,7 @@ function makeProps(
 ): StrategyFramePreviewProps {
   const base = {
     ...emptyAuthoring(),
-    timelineMode: "composition",
+    timelineMode: "direct",
     sceneWrap: {
       cameraEnabled: true,
       adjustmentsEnabled: true,
@@ -120,6 +120,7 @@ describe("selectPreviewStrategy", () => {
           motionEnabled: false,
           hideNullObjects: false,
           flattenComposition: false,
+          interactionsLockedDuringPlayback: true,
         },
       }),
       hasActiveLivePasses: true,
@@ -192,6 +193,7 @@ describe("selectPreviewStrategy", () => {
           motionEnabled: false,
           hideNullObjects: false,
           flattenComposition: false,
+          interactionsLockedDuringPlayback: true,
         },
       }),
       hasActiveLivePasses: false,
@@ -203,7 +205,7 @@ describe("selectPreviewStrategy", () => {
 
   it("returns live-dom dom-overlay-required when authoring without live passes", () => {
     const result = selectPreviewStrategy({
-      framePreviewProps: makeProps({ timelineMode: "composition" }),
+      framePreviewProps: makeProps({ timelineMode: "direct" }),
       hasActiveLivePasses: false,
       hasLivePassCapableLayers: false,
       authoringActive: true,
@@ -216,7 +218,7 @@ describe("selectPreviewStrategy", () => {
 
   it("falls back to live-dom when no other signals match", () => {
     const result = selectPreviewStrategy({
-      framePreviewProps: makeProps({ timelineMode: "composition" }),
+      framePreviewProps: makeProps({ timelineMode: "direct" }),
       hasActiveLivePasses: false,
       hasLivePassCapableLayers: false,
       authoringActive: false,

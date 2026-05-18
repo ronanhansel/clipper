@@ -5,6 +5,7 @@ import {
   motionBlocksToMotionMarkers,
 } from "./motionEffects";
 import { effectBlocksMending } from "./effects/registry";
+import { sceneWrapConfigForMode } from "./sceneWrap";
 import {
   buildLinearTimeline,
   canMendTimelineMarkers,
@@ -218,7 +219,7 @@ describe("timeline model", () => {
       sceneTime: 2.5,
       timeline,
       timelineLayers: { compositionLayers: [{ id: "upper" }, { id: "lower" }] },
-      timelineMode: "composition",
+      sceneWrap: sceneWrapConfigForMode("direct"),
       transitionLayers: layeredScene.transitionLayers,
     });
 
@@ -276,7 +277,7 @@ describe("timeline model", () => {
       sceneDurationSeconds: sceneDuration(adjustedScene),
       sceneTime: 5,
       timeline: buildLinearTimeline(adjustedScene),
-      timelineMode: "composition",
+      sceneWrap: sceneWrapConfigForMode("direct"),
       transitionLayers: adjustedScene.transitionLayers,
     });
 
@@ -301,7 +302,7 @@ describe("timeline model", () => {
       sceneDurationSeconds: sceneDuration(trimmedScene),
       sceneTime: 2.5,
       timeline: buildLinearTimeline(trimmedScene),
-      timelineMode: "composition",
+      sceneWrap: sceneWrapConfigForMode("direct"),
     });
 
     expect(previewState.previewTime).toBe(1.75);
@@ -322,7 +323,7 @@ describe("timeline model", () => {
       sceneDurationSeconds: sceneDuration(trimmedScene),
       sceneTime: 4.5,
       timeline: buildLinearTimeline(trimmedScene),
-      timelineMode: "composition",
+      sceneWrap: sceneWrapConfigForMode("direct"),
     });
 
     expect(previewState.previewTime).toBe(4.5);

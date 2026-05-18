@@ -590,7 +590,7 @@ export type TimelineLayerState = {
   rowHeights?: Record<string, number>;
 };
 
-export type TimelineMode = "compose" | "composition";
+export type TimelineMode = "compose" | "direct";
 
 export type PreviewViewportState = {
   scale: number;

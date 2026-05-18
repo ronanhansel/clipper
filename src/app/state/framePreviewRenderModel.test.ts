@@ -72,7 +72,7 @@ describe("frame preview render model", () => {
       blankPart,
       scene,
       sceneTime: 5,
-      timelineMode: "composition",
+      timelineMode: "direct",
     });
 
     expect(model.activeTimelinePart?.id).toBe("b");
@@ -133,7 +133,7 @@ describe("frame preview render model", () => {
           { id: "hidden", kind: "motion", hidden: true },
         ],
       },
-      timelineMode: "composition",
+      timelineMode: "direct",
     });
 
     expect(model.hiddenMotionLayerIds.has("hidden")).toBe(true);
@@ -167,7 +167,7 @@ describe("frame preview render model", () => {
       ],
       editorState: {
         timeline: { displacement: 0, zoom: 1 },
-        timelineMode: "composition",
+        timelineMode: "direct",
         timelineLayers: {
           compositionLayers: [
             { id: "visible", hidden: true },
@@ -230,7 +230,7 @@ describe("frame preview render model", () => {
       blankPart,
       scene,
       sceneTime: 3,
-      timelineMode: "composition",
+      timelineMode: "direct",
     });
 
     expect(model.adjustedSceneTime).toBe(0.5);
@@ -306,6 +306,7 @@ describe("frame preview render model", () => {
       motionEnabled: false,
       hideNullObjects: false,
       flattenComposition: false,
+      interactionsLockedDuringPlayback: true,
     });
     // adjustments are disabled in compose, so sceneTime is not warped
     expect(model.adjustedSceneTime).toBe(3);
@@ -336,7 +337,7 @@ describe("frame preview render model", () => {
       blankPart,
       scene,
       sceneTime: 2,
-      timelineMode: "composition",
+      timelineMode: "direct",
     });
 
     expect(model.previewTime).toBe(1.75);
@@ -368,7 +369,7 @@ describe("frame preview render model", () => {
       blankPart,
       scene,
       sceneTime: 4.5,
-      timelineMode: "composition",
+      timelineMode: "direct",
     });
 
     expect(model.previewTime).toBe(4.5);
@@ -410,7 +411,7 @@ describe("frame preview render model", () => {
       blankPart,
       scene,
       sceneTime: 2,
-      timelineMode: "composition",
+      timelineMode: "direct",
     });
 
     expect(model.sceneDurationSeconds).toBe(4);
@@ -442,7 +443,7 @@ describe("frame preview render model", () => {
       blankPart,
       scene,
       sceneTime: 2,
-      timelineMode: "composition",
+      timelineMode: "direct",
     });
 
     expect(model.activeTimelinePart?.id).toBe("a");
@@ -495,7 +496,7 @@ describe("frame preview render model", () => {
       blankPart,
       scene,
       sceneTime: 1,
-      timelineMode: "composition",
+      timelineMode: "direct",
     });
 
     expect(model.previewParts[0].part.id).toBe("a");
@@ -536,7 +537,7 @@ describe("frame preview render model", () => {
       blankPart,
       scene,
       sceneTime: 1,
-      timelineMode: "composition",
+      timelineMode: "direct",
     });
 
     expect(model.visibleAdjustmentLayers.map((layer) => layer.id)).toEqual([

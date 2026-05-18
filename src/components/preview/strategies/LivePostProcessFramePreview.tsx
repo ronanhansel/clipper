@@ -314,6 +314,9 @@ export function LivePostProcessFramePreview({
   }, [scheduler, framePreviewProps.sceneTime]);
 
   useEffect(() => {
+    // Tick-only listener: bumps the dirty flag and requests a render.
+    // Scene time is read out-of-band in the rAF body via readPreviewSceneTime.
+    // This is the one legitimate raw subscription — does not read snap fields.
     const unsubscribe = subscribeMasterTimelineClock(() => {
       liveRenderDirtyRef.current = true;
       scheduler.requestRender("scrub");

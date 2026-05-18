@@ -1,6 +1,6 @@
 import type { ComponentProps, CSSProperties, ReactNode } from "react";
 import { computePostProcessPlan } from "../passes/usePostProcessPlan";
-import { getMasterTimelineClockSnapshot } from "../../../app/features/playback/playbackTimeStore";
+import { readRawSceneTime } from "../../../app/features/playback/playbackTimeStore";
 import { FRAME_HEIGHT, FRAME_WIDTH } from "../../../core/types";
 import type {
   AdjustmentVisualOverlay,
@@ -30,10 +30,7 @@ export const DOM_FALLBACK_READY_TOLERANCE_SECONDS = 1 / 60;
 export function readPreviewSceneTime(
   currentSceneTimeRef: RefObject<number>,
 ): number {
-  const snap = getMasterTimelineClockSnapshot();
-  return snap.source === "playback" || snap.source === "scrub"
-    ? snap.sceneTime
-    : currentSceneTimeRef.current;
+  return readRawSceneTime(currentSceneTimeRef.current);
 }
 
 export function requiresDomOverlayPreview(

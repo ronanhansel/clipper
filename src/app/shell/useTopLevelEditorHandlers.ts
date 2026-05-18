@@ -69,7 +69,7 @@ export function useTopLevelEditorHandlers({
 
   const handleSelectTimeline = useCallback(
     (timelineId: string) => {
-      updateTimelineMode("composition");
+      updateTimelineMode("direct");
       setSelectedSceneId(timelineId);
       updateEditorState((state) => ({
         ...state,
@@ -92,7 +92,7 @@ export function useTopLevelEditorHandlers({
 
   const handleTimelineModeChange = useCallback(
     (nextMode: TimelineMode) => {
-      if (timelineMode === "compose" && nextMode === "composition") {
+      if (timelineMode === "compose" && nextMode === "direct") {
         clearDirectSelection();
       }
       updateTimelineMode(nextMode);

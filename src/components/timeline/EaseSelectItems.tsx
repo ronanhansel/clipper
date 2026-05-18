@@ -1,24 +1,27 @@
+import { motionEasePresets } from "../../core/easing";
 import type { MotionEase } from "../../core/types";
 import { SelectItem } from "../ui/select";
 
 export const defaultMotionEaseSelectValue = "default";
-const easePreviewItems = [
-  {
-    value: defaultMotionEaseSelectValue,
-    label: "Ease in-out",
-    ease: "easeInOut" as const,
-  },
-  { value: "linear", label: "Linear", ease: "linear" as const },
-  { value: "easeIn", label: "Ease in", ease: "easeIn" as const },
-  { value: "easeOut", label: "Ease out", ease: "easeOut" as const },
-  { value: "inAndOut", label: "In and out", ease: "inAndOut" as const },
-  { value: "expoIn", label: "Expo in", ease: "expoIn" as const },
-  { value: "expoOut", label: "Expo out", ease: "expoOut" as const },
-  { value: "circOut", label: "Circ out", ease: "circOut" as const },
-  { value: "backOut", label: "Back out", ease: "backOut" as const },
-];
-const explicitEasePreviewItems = easePreviewItems.map((item) =>
-  item.ease === "easeInOut" ? { ...item, value: "easeInOut" } : item,
+
+const explicitEasePreviewItems: {
+  value: string;
+  label: string;
+  ease: MotionEase;
+}[] = motionEasePresets.map((preset) => ({
+  value: preset.value,
+  label: preset.label,
+  ease: preset.value,
+}));
+
+const defaultEasePreviewItems: {
+  value: string;
+  label: string;
+  ease: MotionEase;
+}[] = explicitEasePreviewItems.map((item) =>
+  item.ease === "easeInOut"
+    ? { ...item, value: defaultMotionEaseSelectValue }
+    : item,
 );
 
 export function motionEaseSelectValue(
@@ -36,7 +39,9 @@ export function EaseSelectItems({
   includeLinear?: boolean;
   defaultInOut?: boolean;
 }) {
-  const items = defaultInOut ? easePreviewItems : explicitEasePreviewItems;
+  const items = defaultInOut
+    ? defaultEasePreviewItems
+    : explicitEasePreviewItems;
   return (
     <>
       {items

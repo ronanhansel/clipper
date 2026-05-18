@@ -17,7 +17,7 @@ import {
   type CodeComponent,
 } from "../../render-engine/codeObjectRuntime";
 import { applySchemaDefaults } from "../../render-engine/codePropsSchema";
-import { usePlayheadTime } from "../../app/features/playback/usePlayheadTime";
+import { usePlayheadSceneTime } from "../../app/features/playback/usePlayheadTime";
 import type { FrameObject } from "../../core/types";
 
 type CodeObjectFrameProps = {
@@ -55,7 +55,7 @@ export function CodeObjectFrame({ object }: CodeObjectFrameProps) {
     () => applySchemaDefaults(rawProps, schema),
     [rawProps, schema],
   );
-  const time = usePlayheadTime(true);
+  const time = usePlayheadSceneTime(true);
   const size = {
     width: object.bounds.width,
     height: object.bounds.height,

@@ -76,7 +76,7 @@ describe("export service", () => {
       ],
       editorState: {
         timeline: { displacement: 0, zoom: 1 },
-        timelineMode: "composition",
+        timelineMode: "direct",
         timelineLayers: {
           compositionLayers: [
             { id: "visible", hidden: true },
@@ -170,7 +170,7 @@ describe("export service", () => {
       ],
       editorState: {
         timeline: { displacement: 0, zoom: 1 },
-        timelineMode: "composition",
+        timelineMode: "direct",
         timelineLayers: { compositionLayers: [{ id: "l1" }] },
       },
     };
@@ -220,7 +220,7 @@ describe("export service", () => {
       ],
       editorState: {
         timeline: { displacement: 0, zoom: 1 },
-        timelineMode: "composition",
+        timelineMode: "direct",
         timelineLayers: { compositionLayers: [{ id: "l1" }] },
       },
     };

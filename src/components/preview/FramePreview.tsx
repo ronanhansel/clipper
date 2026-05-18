@@ -8,7 +8,6 @@ import {
   useMemo,
   useRef,
   useState,
-  useSyncExternalStore,
   type CSSProperties,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent,
@@ -104,11 +103,7 @@ import type {
   TransitionSequenceStyle,
   TransitionVisualOverlay,
 } from "../../core/effects/types";
-import {
-  getMasterTimelineClockSnapshot,
-  isMasterClockLive,
-  subscribeMasterTimelineClock,
-} from "../../app/features/playback/playbackTimeStore";
+import { useAdjustedSceneTime } from "../../app/features/playback/playbackTimeStore";
 import {
   rasterizeSvgForExport,
   shouldPreRasterizeSvgForExport,
@@ -373,7 +368,8 @@ export const FramePreview = memo(function FramePreview({
   const objectSnapGuides =
     (arguments[0] as { objectSnapGuides?: ObjectSnapGuide[] })
       .objectSnapGuides ?? [];
-  const composePlaybackActive = timelineMode === "compose" && isPlaying;
+  const composePlaybackActive =
+    sceneWrap.interactionsLockedDuringPlayback && isPlaying;
   const interactiveDragBox = composePlaybackActive ? null : dragBox;
   const interactiveFramePickPoint = composePlaybackActive
     ? null
@@ -2662,9 +2658,9 @@ export const FrameObjectView = memo(function FrameObjectView({
           (item) => item.enabled !== false && item.options.split,
         ) ?? [])
       : [];
-  const splitTextTime = useSplitTextLiveTime(
-    previewTime,
+  const splitTextTime = useAdjustedSceneTime(
     splitTextAnimations.length > 0 && renderMode !== "export",
+    previewTime,
     liveTimeOffset ?? 0,
   );
   const editableTextPath = isEditableTextPathObject(object);
@@ -2891,6 +2887,7 @@ export const FrameObjectView = memo(function FrameObjectView({
           object={object}
           liveScrubClock={isPlaying}
           fallbackTime={previewTime}
+          liveTimeOffset={liveTimeOffset ?? 0}
         />
       ) : null}
       {(object.type === "text" || editableTextPath) && editing ? (
@@ -2929,7 +2926,7 @@ export const FrameObjectView = memo(function FrameObjectView({
       ) : null}
       {object.type === "svg" && content && !(editableTextPath && editing) ? (
         <ExportSvgContent
-          bounds={object.bounds}
+          bounds={evaluatedBounds}
           content={content}
           exportTileFrameBounds={exportTileFrameBounds}
           frameScale={frameScale}
@@ -2945,16 +2942,22 @@ export const FrameObjectView = memo(function FrameObjectView({
         />
       ) : null}
       {object.type === "pattern2d" ? (
-        <Pattern2DContent object={object} />
+        <Pattern2DContent object={evaluatedObject} />
       ) : null}
-      {object.type === "code" ? <CodeObjectFrame object={object} /> : null}
+      {object.type === "code" ? (
+        <CodeObjectFrame object={evaluatedObject} />
+      ) : null}
       {(object.type === "html" ||
         object.type === "template" ||
         object.type === "custom-renderer") &&
       content ? (
         <HtmlContent
           content={content}
-          props={object.type === "custom-renderer" ? object.props : undefined}
+          props={
+            object.type === "custom-renderer"
+              ? evaluatedObject.props
+              : undefined
+          }
         />
       ) : null}
       {object.type !== "text" &&
@@ -2978,32 +2981,6 @@ export const FrameObjectView = memo(function FrameObjectView({
     </div>
   );
 }, areFrameObjectPropsEqual);
-
-function useSplitTextLiveTime(
-  fallback: number,
-  active: boolean,
-  liveTimeOffset: number,
-) {
-  const liveRef = useRef(fallback);
-  const liveSnapshot = useSyncExternalStore(
-    (onChange) => {
-      if (!active) return () => {};
-      return subscribeMasterTimelineClock(() => {
-        const snap = getMasterTimelineClockSnapshot();
-        if (!isMasterClockLive(snap)) return;
-        const next = snap.adjustedSceneTime + liveTimeOffset;
-        if (Math.abs(next - liveRef.current) < 0.001) return;
-        liveRef.current = next;
-        onChange();
-      });
-    },
-    () => liveRef.current,
-    () => fallback,
-  );
-  if (!active) return fallback;
-  const snap = getMasterTimelineClockSnapshot();
-  return isMasterClockLive(snap) ? liveSnapshot : fallback;
-}
 
 type SplitTextToken = {
   key: string;

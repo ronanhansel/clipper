@@ -1,4 +1,4 @@
-import { useRef, useSyncExternalStore } from "react";
+import { useEffect, useRef, useSyncExternalStore, type RefObject } from "react";
 
 export type MasterTimelineClockSource = "idle" | "playback" | "scrub";
 
@@ -84,12 +84,20 @@ export function isMasterClockLive(snap: MasterTimelineClockSnapshot) {
 
 /**
  * Imperative read for adjustment-aware scene time. Returns
- * `snap.adjustedSceneTime` while the clock is live, otherwise returns the
- * caller's idle fallback (typically the editor-store time).
+ * `snap.adjustedSceneTime + liveOffset` while the clock is live, otherwise
+ * returns the caller's idle fallback (typically the editor-store time). The
+ * optional `liveOffset` lets a caller convert the master scene-axis time into
+ * its local axis (e.g. part-local) only on the live branch; the idle fallback
+ * is assumed to already be in the caller's axis.
  */
-export function readAdjustedSceneTime(fallback: number) {
+export function readAdjustedSceneTime(
+  fallback: number,
+  liveOffset: number = 0,
+) {
   const snap = getMasterTimelineClockSnapshot();
-  return isMasterClockLive(snap) ? snap.adjustedSceneTime : fallback;
+  return isMasterClockLive(snap)
+    ? snap.adjustedSceneTime + liveOffset
+    : fallback;
 }
 
 /**
@@ -97,9 +105,14 @@ export function readAdjustedSceneTime(fallback: number) {
  * de-duplicates non-live emissions so idle commits don't churn React. This is
  * the single subscription primitive every comp-internal "live time" consumer
  * should use; bespoke `subscribeMasterTimelineClock` wrappers should not be
- * recreated.
+ * recreated. The optional `liveOffset` is added to the live value only — the
+ * idle fallback is returned unchanged.
  */
-export function useAdjustedSceneTime(enabled: boolean, fallback: number) {
+export function useAdjustedSceneTime(
+  enabled: boolean,
+  fallback: number,
+  liveOffset: number = 0,
+) {
   const liveRef = useRef(fallback);
   useSyncExternalStore(
     (onChange) => {
@@ -107,7 +120,7 @@ export function useAdjustedSceneTime(enabled: boolean, fallback: number) {
       return subscribeMasterTimelineClock(() => {
         const snap = getMasterTimelineClockSnapshot();
         if (!isMasterClockLive(snap)) return;
-        const next = snap.adjustedSceneTime;
+        const next = snap.adjustedSceneTime + liveOffset;
         if (Math.abs(next - liveRef.current) < 0.0001) return;
         liveRef.current = next;
         onChange();
@@ -118,5 +131,146 @@ export function useAdjustedSceneTime(enabled: boolean, fallback: number) {
   );
   if (!enabled) return fallback;
   const snap = getMasterTimelineClockSnapshot();
-  return isMasterClockLive(snap) ? snap.adjustedSceneTime : fallback;
+  return isMasterClockLive(snap)
+    ? snap.adjustedSceneTime + liveOffset
+    : fallback;
+}
+
+/**
+ * Imperative read for raw scene time. Returns `snap.sceneTime + liveOffset`
+ * while the clock is live, otherwise the caller's idle fallback. This is the
+ * untouched master playhead — use it for caller cache identity, code-object
+ * components, and any consumer that needs the rendered frame's exact scene
+ * axis (no adjustment-layer warp, no playback-display warp).
+ */
+export function readRawSceneTime(fallback: number, liveOffset: number = 0) {
+  const snap = getMasterTimelineClockSnapshot();
+  return isMasterClockLive(snap) ? snap.sceneTime + liveOffset : fallback;
+}
+
+/**
+ * Hook variant of `readRawSceneTime`. Mirrors `useAdjustedSceneTime` exactly
+ * but reads the raw scene channel. Subscribes only when `enabled`,
+ * de-duplicates sub-frame drift so idle commits don't churn React.
+ */
+export function useRawSceneTime(
+  enabled: boolean,
+  fallback: number,
+  liveOffset: number = 0,
+) {
+  const liveRef = useRef(fallback);
+  useSyncExternalStore(
+    (onChange) => {
+      if (!enabled) return () => {};
+      return subscribeMasterTimelineClock(() => {
+        const snap = getMasterTimelineClockSnapshot();
+        if (!isMasterClockLive(snap)) return;
+        const next = snap.sceneTime + liveOffset;
+        if (Math.abs(next - liveRef.current) < 0.0001) return;
+        liveRef.current = next;
+        onChange();
+      });
+    },
+    () => liveRef.current,
+    () => fallback,
+  );
+  if (!enabled) return fallback;
+  const snap = getMasterTimelineClockSnapshot();
+  return isMasterClockLive(snap) ? snap.sceneTime + liveOffset : fallback;
+}
+
+/**
+ * Imperative read for playback display time (the axis used by the playback
+ * bar / presentation labels). Returns `snap.displayTime` while the clock is
+ * live, otherwise the caller's idle fallback. The fallback is assumed to
+ * already be on the display axis at the call site (or the caller is OK with
+ * the editor-store axis collapsing into display while idle).
+ */
+export function readDisplayTime(fallback: number) {
+  const snap = getMasterTimelineClockSnapshot();
+  return isMasterClockLive(snap) ? snap.displayTime : fallback;
+}
+
+/**
+ * Hook variant of `readDisplayTime`. Bucketed dedup at `bucketSec` cadence
+ * (default 30 Hz) keeps inspector hot paths off the rAF cadence: high enough
+ * for diamonds and evaluated readouts to look continuous, low enough to keep
+ * React reconciliation cheap.
+ *
+ * Does NOT depend on the editor store — the caller passes `fallback`.
+ */
+export function useDisplayTime(
+  enabled: boolean,
+  fallback: number,
+  bucketSec: number = 1 / 30,
+) {
+  const lastBucketRef = useRef<number>(Math.round(fallback / bucketSec));
+  const liveTimeRef = useRef<number>(fallback);
+
+  useSyncExternalStore(
+    (onChange) => {
+      if (!enabled) return () => {};
+      return subscribeMasterTimelineClock(() => {
+        const snap = getMasterTimelineClockSnapshot();
+        if (!isMasterClockLive(snap)) {
+          // Idle source — only emit when we cross out of a previously-live
+          // bucket so we don't churn between live and idle reads.
+          const idleBucket = Math.round(fallback / bucketSec);
+          if (lastBucketRef.current !== idleBucket) {
+            lastBucketRef.current = idleBucket;
+            liveTimeRef.current = fallback;
+            onChange();
+          }
+          return;
+        }
+        const next = Math.round(snap.displayTime / bucketSec);
+        if (next === lastBucketRef.current) return;
+        lastBucketRef.current = next;
+        liveTimeRef.current = snap.displayTime;
+        onChange();
+      });
+    },
+    () => lastBucketRef.current,
+    () => Math.round(fallback / bucketSec),
+  );
+
+  if (!enabled) return fallback;
+  const snap = getMasterTimelineClockSnapshot();
+  return isMasterClockLive(snap) ? snap.displayTime : fallback;
+}
+
+/**
+ * Imperative read of the master clock's monotonic sequence number. Used by
+ * cache-identity / staleness checks that need to compare emissions without
+ * subscribing or interpreting the clock state.
+ */
+export function readClockSequence() {
+  return getMasterTimelineClockSnapshot().sequence;
+}
+
+/**
+ * Hook that maintains a ref tracking the raw scene time. The ref is
+ * initialised to `currentSceneTime`, refreshed whenever that prop changes,
+ * and continuously updated to `snap.sceneTime` while the master clock is
+ * live (playback or scrub). Use it to read the latest playhead inside event
+ * handlers / rAF bodies without re-rendering on every tick.
+ */
+export function useRawSceneTimeRef(
+  currentSceneTime: number,
+): RefObject<number> {
+  const currentSceneTimeRef = useRef(currentSceneTime);
+
+  useEffect(() => {
+    currentSceneTimeRef.current = currentSceneTime;
+  }, [currentSceneTime]);
+
+  useEffect(() => {
+    return subscribeMasterTimelineClock(() => {
+      const snap = getMasterTimelineClockSnapshot();
+      if (!isMasterClockLive(snap)) return;
+      currentSceneTimeRef.current = snap.sceneTime;
+    });
+  }, []);
+
+  return currentSceneTimeRef;
 }

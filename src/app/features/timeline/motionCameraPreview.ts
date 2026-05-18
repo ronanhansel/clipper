@@ -49,7 +49,7 @@ export function buildMotionMarkerCameraPreviewTransform(
     updater,
   } = input;
 
-  if (timelineMode !== "composition" || isPickingZoomFocus) return null;
+  if (timelineMode !== "direct" || isPickingZoomFocus) return null;
 
   if (partId === TIMELINE_MOTION_PART_ID) {
     const activeStart = activeTimelinePart?.start ?? 0;

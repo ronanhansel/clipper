@@ -130,8 +130,8 @@ export function TimelineShell({
             Compose
           </button>
           <button
-            className={`rounded-full px-3 py-1 text-xs font-extrabold transition ${activeMode === "composition" ? "bg-[var(--clipper-accent)] text-[var(--clipper-accent-foreground)]" : "text-[#9b9da7] hover:text-white"}`}
-            onClick={() => onModeChange("composition")}
+            className={`rounded-full px-3 py-1 text-xs font-extrabold transition ${activeMode === "direct" ? "bg-[var(--clipper-accent)] text-[var(--clipper-accent-foreground)]" : "text-[#9b9da7] hover:text-white"}`}
+            onClick={() => onModeChange("direct")}
           >
             Direct
           </button>

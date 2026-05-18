@@ -1,8 +1,9 @@
-import { useRef, useSyncExternalStore } from "react";
 import { useEditorStore } from "../../state/editorStore";
 import {
-  getMasterTimelineClockSnapshot,
-  subscribeMasterTimelineClock,
+  readDisplayTime,
+  readRawSceneTime,
+  useDisplayTime,
+  useRawSceneTime,
 } from "./playbackTimeStore";
 
 // 30 Hz bucket for live-time consumers — same cadence used by the inspector
@@ -33,63 +34,46 @@ export function resolvePlayheadTime(
 }
 
 /**
- * Subscribe a leaf component to the live timeline clock. Fires on both
- * `playback` and `scrub` sources; returns the structural editor-store value
- * when the clock is idle.
+ * Subscribe a leaf component to the live timeline clock on the DISPLAY axis
+ * (the playback-bar / inspector readout axis). Fires on both `playback` and
+ * `scrub` sources; returns the structural editor-store value when the clock
+ * is idle.
  *
  * `enabled = false` short-circuits the subscription entirely so callers can
  * gate per-row (e.g. only animated rows pay the rerender cost).
+ *
+ * For the raw scene axis (frame preview, code-object components), use
+ * `usePlayheadSceneTime` instead — its return value is the untouched
+ * playhead with no playback-display warp applied.
  */
 export function usePlayheadTime(enabled: boolean = true) {
   const idleSceneTime = useEditorStore((s) => s.currentSceneTime);
-  const lastBucketRef = useRef<number>(bucketizePlayheadTime(idleSceneTime));
-  const liveTimeRef = useRef<number>(idleSceneTime);
-
-  const bucket = useSyncExternalStore(
-    (onStoreChange) => {
-      if (!enabled) return () => {};
-      return subscribeMasterTimelineClock(() => {
-        const snap = getMasterTimelineClockSnapshot();
-        if (snap.source !== "playback" && snap.source !== "scrub") {
-          // Idle source — let the editor-store selector drive value below.
-          // Only emit when we cross out of a previously-live bucket so we
-          // don't churn between live and idle reads.
-          const idleBucket = bucketizePlayheadTime(idleSceneTime);
-          if (lastBucketRef.current !== idleBucket) {
-            lastBucketRef.current = idleBucket;
-            liveTimeRef.current = idleSceneTime;
-            onStoreChange();
-          }
-          return;
-        }
-        const next = bucketizePlayheadTime(snap.displayTime);
-        if (next === lastBucketRef.current) return;
-        lastBucketRef.current = next;
-        liveTimeRef.current = snap.displayTime;
-        onStoreChange();
-      });
-    },
-    () => lastBucketRef.current,
-  );
-  void bucket;
-
-  const snap = getMasterTimelineClockSnapshot();
-  return resolvePlayheadTime(
-    snap.source,
-    liveTimeRef.current,
-    idleSceneTime,
-    enabled,
-  );
+  return useDisplayTime(enabled, idleSceneTime, playheadLiveBucketSec);
 }
 
 /**
- * Imperative read. Use inside event handlers / callbacks where you want the
- * freshest live time at invocation, not a stale closure.
+ * Subscribe a leaf component to the live timeline clock on the RAW SCENE
+ * axis (no adjustment-layer warp, no playback-display warp). Use for
+ * frame-preview consumers and user-authored code components that need the
+ * exact same axis as the rendered frame.
+ */
+export function usePlayheadSceneTime(enabled: boolean = true) {
+  const idleSceneTime = useEditorStore((s) => s.currentSceneTime);
+  return useRawSceneTime(enabled, idleSceneTime);
+}
+
+/**
+ * Imperative read on the display axis. Use inside event handlers / callbacks
+ * where you want the freshest live time at invocation, not a stale closure.
  */
 export function readPlayheadTime(idleSceneTime: number) {
-  const snap = getMasterTimelineClockSnapshot();
-  if (snap.source === "playback" || snap.source === "scrub") {
-    return snap.displayTime;
-  }
-  return idleSceneTime;
+  return readDisplayTime(idleSceneTime);
+}
+
+/**
+ * Imperative read on the raw scene axis. Mirrors `readPlayheadTime` but
+ * returns the untouched master playhead.
+ */
+export function readPlayheadSceneTime(idleSceneTime: number) {
+  return readRawSceneTime(idleSceneTime);
 }

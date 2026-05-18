@@ -107,7 +107,7 @@ export function TimelinePanel(props: TimelinePanelProps) {
         getTimelineDropTime(event),
       );
       setActiveCompositionPointerDrag(null);
-      props.onModeChange("composition");
+      props.onModeChange("direct");
     }
 
     window.addEventListener("dragover", handleDragOver, true);
@@ -142,7 +142,7 @@ export function TimelinePanel(props: TimelinePanelProps) {
           timelineLayers={props.timelineLayers}
           timelineViewportState={props.timelineViewportState}
           onExitCompose={
-            props.onExitCompose ?? (() => props.onModeChange("composition"))
+            props.onExitCompose ?? (() => props.onModeChange("direct"))
           }
           onRenameLayer={props.onRenameComposeAnimationLayer}
           setAppContextMenu={props.setAppContextMenu}

@@ -28,6 +28,7 @@ import {
 import { clamp, roundTenth, roundToPrecision, roundTwo } from "./math";
 import { getDisplayNameFromPath } from "./fileNames";
 import { applyAdjustmentLayersToSceneTime } from "./adjustments";
+import type { SceneWrapConfig } from "./sceneWrap";
 import {
   getTransitionFinishTime,
   getTransitionMarkerTime,
@@ -417,26 +418,32 @@ export function getTimelinePreviewState({
   compositions,
   sceneDurationSeconds,
   sceneTime,
+  sceneWrap,
   timeline,
   timelineLayers,
-  timelineMode,
   transitionLayers,
 }: {
   adjustmentLayers?: AdjustmentLayer[];
   compositions: CompositionClip[];
   sceneDurationSeconds: number;
   sceneTime: number;
+  /**
+   * Mode boundary owned by `sceneWrapConfigForMode`. `adjustmentsEnabled` is
+   * false when the composition is being edited as a sealed unit (Compose mode):
+   * scene-time is not warped by adjustment layers, and the active-part lookup
+   * uses the endpoint epsilon throughout so the comp keeps "owning" the frame
+   * at its boundaries instead of falling into the surrounding gap.
+   */
+  sceneWrap: SceneWrapConfig;
   timeline: TimelinePart[];
   timelineLayers?: TimelineLayerState;
-  timelineMode: "compose" | "composition";
   transitionLayers?: TransitionLayer[];
 }): TimelinePreviewState {
-  const compositionLookupTime =
-    timelineMode === "compose"
-      ? sceneTime
-      : applyAdjustmentLayersToSceneTime(sceneTime, adjustmentLayers);
+  const compositionLookupTime = sceneWrap.adjustmentsEnabled
+    ? applyAdjustmentLayersToSceneTime(sceneTime, adjustmentLayers)
+    : sceneTime;
   const timelinePartLookupTime =
-    (timelineMode === "compose" ||
+    (!sceneWrap.adjustmentsEnabled ||
       compositionLookupTime >= sceneDurationSeconds) &&
     compositionLookupTime > 0
       ? compositionLookupTime - 0.000001

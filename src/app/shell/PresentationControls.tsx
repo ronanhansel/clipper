@@ -9,7 +9,7 @@ import {
 import { memo, type CSSProperties } from "react";
 import { formatTime } from "../../core/timeline";
 import { clamp } from "../../core/math";
-import { usePlayheadTime } from "../features/playback/usePlayheadTime";
+import { usePlayheadSceneTime } from "../features/playback/usePlayheadTime";
 
 type PresentationControlsProps = {
   controlsVisible: boolean;
@@ -36,7 +36,7 @@ export const PresentationControls = memo(function PresentationControls({
   stepSceneTime,
   togglePlayback,
 }: PresentationControlsProps) {
-  const time = usePlayheadTime();
+  const time = usePlayheadSceneTime();
   const presentationProgress =
     sceneDurationSeconds > 0
       ? `${clamp(time / sceneDurationSeconds, 0, 1) * 100}%`

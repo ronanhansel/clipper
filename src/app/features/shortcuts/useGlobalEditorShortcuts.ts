@@ -117,7 +117,7 @@ export function useGlobalEditorShortcuts({
       if (key === "1") updateMode("preview");
       if (key === "2") updateMode("editor");
       if (key === "3") updateTimelineMode("compose");
-      if (key === "4") updateTimelineMode("composition");
+      if (key === "4") updateTimelineMode("direct");
     }
 
     function onKeyDown(event: KeyboardEvent) {

@@ -99,7 +99,19 @@ export function FontSelector({
           <SelectContent>
             <SelectGroup>
               {fontOptions.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
+                <SelectItem
+                  key={option.value}
+                  value={option.value}
+                  style={
+                    option.value === defaultFontFamily
+                      ? undefined
+                      : {
+                          fontFamily: `"${option.value}", ${defaultFontFamily}`,
+                          contentVisibility: "auto",
+                          containIntrinsicSize: "26px",
+                        }
+                  }
+                >
                   {option.label}
                 </SelectItem>
               ))}

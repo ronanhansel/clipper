@@ -1,5 +1,9 @@
 import { applyAdjustmentLayersToSceneTime } from "../../core/adjustments";
 import {
+  type SceneWrapConfig,
+  sceneWrapConfigForMode,
+} from "../../core/sceneWrap";
+import {
   getMotionMarkerViews,
   motionBlocksToMotionMarkers,
 } from "../../core/motionEffects";
@@ -42,38 +46,13 @@ export type FramePreviewSceneContext = {
 };
 
 /**
- * Single switch that controls which scene-level wrappers apply on top of the
- * composition. Compose mode disables every wrapper (the composition is the
- * unit being edited); Direct mode enables them all (the composition is being
- * placed in a scene).
- *
- * `flattenComposition` decouples "treat composition as a flat sealed frame"
- * from `cameraEnabled` ("apply scene camera transform"). Direct sets both
- * true today, but a future Direct mode could keep flatten on while disabling
- * the scene camera. Consumers MUST use the field that matches their intent:
- *   - `cameraEnabled`        → "should I apply the scene camera transform?"
- *   - `flattenComposition`   → "is the composition a sealed/flat output?"
+ * Re-exported from `core/sceneWrap` so existing call sites keep their import
+ * path. The canonical definition lives in core because the timeline preview
+ * lookup, render model, and master clock all consult it — having it in core
+ * removes the cycle between core/timeline.ts and app/state.
  */
-export type SceneWrapConfig = {
-  cameraEnabled: boolean;
-  adjustmentsEnabled: boolean;
-  transitionsEnabled: boolean;
-  motionEnabled: boolean;
-  hideNullObjects: boolean;
-  flattenComposition: boolean;
-};
-
-export function sceneWrapConfigForMode(mode: TimelineMode): SceneWrapConfig {
-  const direct = mode === "composition";
-  return {
-    cameraEnabled: direct,
-    adjustmentsEnabled: direct,
-    transitionsEnabled: direct,
-    motionEnabled: direct,
-    hideNullObjects: direct,
-    flattenComposition: direct,
-  };
-}
+export type { SceneWrapConfig };
+export { sceneWrapConfigForMode };
 
 export type FramePreviewRenderModel = {
   activeComposition: CompositionClip | null;
@@ -219,9 +198,9 @@ export function deriveFramePreviewRenderModelFromContext(
     compositions: renderableScene.compositions,
     sceneDurationSeconds,
     sceneTime: adjustedSceneTime,
+    sceneWrap,
     timeline,
     timelineLayers: timelineLayerState,
-    timelineMode,
     transitionLayers: renderableScene.transitionLayers,
   });
   const transitionPreviewParts =

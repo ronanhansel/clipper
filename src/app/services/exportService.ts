@@ -163,7 +163,7 @@ function getRenderedMediaSceneDuration(
     scene,
     sceneTime: 0,
     timelineLayers: getFramePreviewTimelineLayers(project, scene.id),
-    timelineMode: "composition",
+    timelineMode: "direct",
   }).sceneDurationSeconds;
 }
 

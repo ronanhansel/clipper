@@ -4,7 +4,7 @@ import {
   resolveDisplayTimeAndPart,
   type FramePreviewSceneContext,
 } from "../../app/state/framePreviewRenderModel";
-import { usePlayheadTime } from "../../app/features/playback/usePlayheadTime";
+import { usePlayheadSceneTime } from "../../app/features/playback/usePlayheadTime";
 import type { AdjustmentLayer, TimelineMode } from "../../core/types";
 import { FramePreview } from "./FramePreview";
 
@@ -58,7 +58,7 @@ export const FramePreviewLive = memo(function FramePreviewLive(
     ...passthrough
   } = props;
 
-  const liveTime = usePlayheadTime(!paused);
+  const liveTime = usePlayheadSceneTime(!paused);
 
   const renderModel = useMemo(
     () =>

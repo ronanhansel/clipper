@@ -274,7 +274,7 @@ export function useBinProjectActions({
     );
     const timelineId = created?.id ?? filePath;
 
-    updateTimelineMode("composition");
+    updateTimelineMode("direct");
     setSelectedSceneId(timelineId);
     updateEditorState((state) => ({
       ...state,
@@ -286,7 +286,7 @@ export function useBinProjectActions({
   }
 
   function selectTimeline(timelineId: string) {
-    updateTimelineMode("composition");
+    updateTimelineMode("direct");
     setSelectedSceneId(timelineId);
     updateEditorState((state) => ({
       ...state,

@@ -43,7 +43,7 @@ import type { PlaybackClock } from "../../types";
 import type { EditorStore } from "../../state/editorStore";
 import type { PrerenderCacheInterestReason } from "../preview/usePrerenderCache";
 import { publishMasterTimelineClock } from "./playbackTimeStore";
-import { sceneWrapConfigForMode } from "../../state/framePreviewRenderModel";
+import { sceneWrapConfigForMode } from "../../../core/sceneWrap";
 
 type PlaybackControllerOptions = {
   compositions: CompositionClip[];
@@ -783,9 +783,9 @@ function getPlaybackPreviewKey(
     compositions,
     sceneDurationSeconds,
     sceneTime,
+    sceneWrap: sceneWrapConfigForMode("direct"),
     timeline,
     timelineLayers,
-    timelineMode: "composition",
     transitionLayers,
   });
   const stackKey = state.previewParts
