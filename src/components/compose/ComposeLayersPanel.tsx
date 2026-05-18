@@ -519,7 +519,7 @@ function ComposeLayerRow({
     <div
       ref={data.kind === "object" ? dragHandle : undefined}
       data-compose-layer-row="true"
-      className={`group box-border grid h-full min-w-0 cursor-pointer select-none grid-cols-[16px_18px_minmax(0,1fr)_auto_auto] items-center gap-1.5 border px-1.5 text-[13px] transition ${selected ? "border-transparent bg-[#242733] text-white" : "border-transparent text-[#dfe2ea] hover:bg-[#20232c]"} ${hidden ? "opacity-50" : ""}`}
+      className={`group box-border grid h-full min-w-0 cursor-pointer select-none grid-cols-[16px_18px_minmax(0,1fr)_auto_auto] items-center gap-1.5 border px-1.5 text-[13px] ${selected ? "border-transparent bg-[#242733] text-white" : "border-transparent text-[#dfe2ea] hover:bg-[#20232c]"} ${hidden ? "opacity-50" : ""}`}
       style={style}
       onPointerEnter={() => onHoverObject(data.object ?? null)}
       onPointerDown={(event) => onSelectLayer(event, node)}

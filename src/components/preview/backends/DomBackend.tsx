@@ -78,68 +78,74 @@ export const DomBackend: CompositionBackend = function DomBackend({
           canSelect={active && canSelect}
           duration={part.duration}
           exportTileFrameBounds={exportTileFrameBounds}
-          frameScale={frameScale}
+          frameScale={renderMode === "export" ? frameScale : 1}
           previewTime={localTime}
           renderMode={renderMode}
           onPointerDown={undefined}
         />
       )}
-      {part.objects
-        .filter(
-          (obj) =>
-            !obj.hidden &&
-            isObjectInExportTile(obj, exportTileFrameBounds) &&
-            !(hideNullObjects && obj.type === "null"),
-        )
-        .map((object) => (
-          <FrameObjectView
-            key={object.id}
-            activeShapeTool={active ? activeShapeTool : undefined}
-            animationsEnabled={animationsEnabled}
-            exportTileFrameBounds={exportTileFrameBounds}
-            object={object}
-            parentTransform={buildFrameObjectParentTransformLookup(
-              part.objects,
-              localTime,
-              part.duration,
-              animationsEnabled,
-            ).get(object.id)}
-            canSelect={active && canSelect}
-            duration={part.duration}
-            editing={active && !isPlaying && editingTextObjectId === object.id}
-            focusPicking={active && focusPicking}
-            frameScale={frameScale}
-            isPlaying={isPlaying}
-            previewTime={localTime}
-            liveTimeOffset={localTime - renderClockSceneTime}
-            renderMode={renderMode}
-            onDoubleClick={(event) => {
-              if (
-                active &&
-                !isPlaying &&
-                (activeShapeTool === "text" || activeShapeTool === null)
-              )
-                onTextObjectDoubleClick(event, object);
-            }}
-            onContextMenu={
-              active && !isPlaying && onObjectContextMenu
-                ? (event) => onObjectContextMenu(event, object)
-                : undefined
-            }
-            onPointerDown={(event) => {
-              if (active && !isPlaying && isPenDrawTool(activeShapeTool)) {
-                event.preventDefault();
-                event.stopPropagation();
-                return;
+      {(() => {
+        const parentTransforms = buildFrameObjectParentTransformLookup(
+          part.objects,
+          localTime,
+          part.duration,
+          animationsEnabled,
+        );
+        const childFrameScale = renderMode === "export" ? frameScale : 1;
+        return part.objects
+          .filter(
+            (obj) =>
+              !obj.hidden &&
+              isObjectInExportTile(obj, exportTileFrameBounds) &&
+              !(hideNullObjects && obj.type === "null"),
+          )
+          .map((object) => (
+            <FrameObjectView
+              key={object.id}
+              activeShapeTool={active ? activeShapeTool : undefined}
+              animationsEnabled={animationsEnabled}
+              exportTileFrameBounds={exportTileFrameBounds}
+              object={object}
+              parentTransform={parentTransforms.get(object.id)}
+              canSelect={active && canSelect}
+              duration={part.duration}
+              editing={
+                active && !isPlaying && editingTextObjectId === object.id
               }
-              if (active && !isPlaying) onObjectPointerDown(event, object);
-            }}
-            onTextEditCommit={(content, richText, bounds) =>
-              onTextEditCommit(object.id, content, richText, bounds)
-            }
-            onTextEditEnd={onTextEditEnd}
-          />
-        ))}
+              focusPicking={active && focusPicking}
+              frameScale={childFrameScale}
+              isPlaying={isPlaying}
+              previewTime={localTime}
+              liveTimeOffset={localTime - renderClockSceneTime}
+              renderMode={renderMode}
+              onDoubleClick={(event) => {
+                if (
+                  active &&
+                  !isPlaying &&
+                  (activeShapeTool === "text" || activeShapeTool === null)
+                )
+                  onTextObjectDoubleClick(event, object);
+              }}
+              onContextMenu={
+                active && !isPlaying && onObjectContextMenu
+                  ? (event) => onObjectContextMenu(event, object)
+                  : undefined
+              }
+              onPointerDown={(event) => {
+                if (active && !isPlaying && isPenDrawTool(activeShapeTool)) {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  return;
+                }
+                if (active && !isPlaying) onObjectPointerDown(event, object);
+              }}
+              onTextEditCommit={(content, richText, bounds) =>
+                onTextEditCommit(object.id, content, richText, bounds)
+              }
+              onTextEditEnd={onTextEditEnd}
+            />
+          ));
+      })()}
     </div>
   );
 };

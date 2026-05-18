@@ -66,6 +66,7 @@ export type ProjectDocumentController = {
     },
   ) => void;
   redoProjectChange: () => Promise<void> | void;
+  requestUiPersist: () => void;
   saveAllChanges: () => Promise<void>;
   savedCompositionSourcesSnapshot: string;
   savedProjectSnapshot: string;
@@ -121,6 +122,9 @@ export type UseProjectDocumentControllerInput = {
   setSourceStatus: (status: string) => void;
   setTimelineMode: (mode: TimelineMode) => void;
   timelineModeRef: MutableRefObject<TimelineMode>;
+  uiPersistRef: MutableRefObject<{
+    selectedComposeObjectIds: string[];
+  }>;
 };
 
 export function useProjectDocumentController({
@@ -134,6 +138,7 @@ export function useProjectDocumentController({
   setSourceStatus,
   setTimelineMode,
   timelineModeRef,
+  uiPersistRef,
 }: UseProjectDocumentControllerInput): ProjectDocumentController {
   const {
     project,
@@ -634,6 +639,21 @@ export function useProjectDocumentController({
     };
   }
 
+  function withUiPersistedFields(project: ProjectManifest): ProjectManifest {
+    const ids = uiPersistRef.current.selectedComposeObjectIds;
+    return {
+      ...project,
+      editorState: {
+        ...(project.editorState ?? defaultEditorState),
+        selectedComposeObjectIds: ids.length ? ids : undefined,
+      },
+    };
+  }
+
+  function requestUiPersist() {
+    scheduleAutosave(projectRef.current);
+  }
+
   async function saveProject(
     projectToSave = projectRef.current,
     options: {
@@ -642,12 +662,13 @@ export function useProjectDocumentController({
       throwOnError?: boolean;
     } = {},
   ) {
+    const projectWithUi = withUiPersistedFields(projectToSave);
     const syncedSources =
       projectToSave === projectRef.current
         ? compositionSourcesRef.current
-        : getProjectCompositionSources(projectToSave);
+        : getProjectCompositionSources(projectWithUi);
     const embeddedProject = normalizeProject({
-      ...projectToSave,
+      ...projectWithUi,
       compositionSources: syncedSources,
     });
     const persistedProject = serializeProjectForSave(embeddedProject);
@@ -708,12 +729,13 @@ export function useProjectDocumentController({
     projectOverride = projectRef.current,
     errorMessage = "Unable to autosave project.",
   ) {
+    const projectWithUi = withUiPersistedFields(projectOverride);
     const projectSources =
       projectOverride === projectRef.current
         ? compositionSourcesRef.current
-        : getProjectCompositionSources(projectOverride);
+        : getProjectCompositionSources(projectWithUi);
     const projectToSave = normalizeProject({
-      ...projectOverride,
+      ...projectWithUi,
       compositionSources: projectSources,
     });
     const saveVersion = ++latestAutosaveVersionRef.current;
@@ -740,12 +762,13 @@ export function useProjectDocumentController({
     projectOverride = projectRef.current,
     errorMessage = "Unable to save file operation.",
   ) {
+    const projectWithUi = withUiPersistedFields(projectOverride);
     const projectSources =
       projectOverride === projectRef.current
         ? compositionSourcesRef.current
-        : getProjectCompositionSources(projectOverride);
+        : getProjectCompositionSources(projectWithUi);
     const projectToSave = normalizeProject({
-      ...projectOverride,
+      ...projectWithUi,
       compositionSources: projectSources,
     });
     const saveVersion = ++latestAutosaveVersionRef.current;
@@ -850,6 +873,7 @@ export function useProjectDocumentController({
     projectRef,
     replaceProject,
     redoProjectChange,
+    requestUiPersist,
     saveAllChanges,
     savedCompositionSourcesSnapshot,
     savedProjectSnapshot,

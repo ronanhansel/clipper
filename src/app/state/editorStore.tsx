@@ -213,6 +213,17 @@ export type EditorStoreActions = {
   clearDirectSelection: () => void;
   clearComposeSelection: () => void;
   clearNodeSelection: () => void;
+  setComposeSelection: (selection: {
+    selectedObjectId: string | null;
+    selectedComposeObjectIds: string[];
+    selectionPayload: SelectionPayload | null;
+  }) => void;
+  applyComposeLayerSelection: (selection: {
+    selectedObjectId: string | null;
+    selectedComposeObjectIds: string[];
+    selectionPayload: SelectionPayload | null;
+    rightPanelTab: RightPanelTab;
+  }) => void;
 };
 
 export type EditorStore = EditorStoreState & EditorStoreActions;
@@ -605,6 +616,64 @@ export function createEditorStore(project: ProjectManifest) {
         framePickPreviewPoint: null,
       }),
     clearNodeSelection: () => get().clearDirectSelection(),
+    setComposeSelection: ({
+      selectedObjectId,
+      selectedComposeObjectIds,
+      selectionPayload,
+    }) =>
+      set((state) => {
+        const idsChanged =
+          state.selectedComposeObjectIds.length !==
+            selectedComposeObjectIds.length ||
+          state.selectedComposeObjectIds.some(
+            (id, index) => id !== selectedComposeObjectIds[index],
+          );
+        if (
+          state.selectedObjectId === selectedObjectId &&
+          state.selectionPayload === selectionPayload &&
+          !idsChanged
+        )
+          return state;
+        return {
+          selectedObjectId,
+          selectedComposeObjectIds: idsChanged
+            ? selectedComposeObjectIds
+            : state.selectedComposeObjectIds,
+          selectionPayload,
+        };
+      }),
+    applyComposeLayerSelection: ({
+      selectedObjectId,
+      selectedComposeObjectIds,
+      selectionPayload,
+      rightPanelTab,
+    }) =>
+      set((state) => {
+        const idsChanged =
+          state.selectedComposeObjectIds.length !==
+            selectedComposeObjectIds.length ||
+          state.selectedComposeObjectIds.some(
+            (id, index) => id !== selectedComposeObjectIds[index],
+          );
+        return {
+          rightPanelTab,
+          editingTextObjectId: null,
+          selectedPartId: "",
+          selectedParts: [],
+          selectedMotionMarker: null,
+          selectedMotionMarkers: [],
+          focusPickZoomMarker: null,
+          positionPickTranslationMarker: null,
+          framePickPreviewPoint: null,
+          selectedAdjustmentLayerId: null,
+          selectedAdjustmentLayers: [],
+          selectedObjectId,
+          selectedComposeObjectIds: idsChanged
+            ? selectedComposeObjectIds
+            : state.selectedComposeObjectIds,
+          selectionPayload,
+        };
+      }),
   }));
 }
 
@@ -703,6 +772,8 @@ export function useSelectionEditorState() {
       clearDirectSelection: s.clearDirectSelection,
       clearComposeSelection: s.clearComposeSelection,
       clearNodeSelection: s.clearNodeSelection,
+      setComposeSelection: s.setComposeSelection,
+      applyComposeLayerSelection: s.applyComposeLayerSelection,
     })),
   );
 }

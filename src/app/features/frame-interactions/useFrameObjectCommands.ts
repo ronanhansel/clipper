@@ -1,11 +1,9 @@
 import type { Dispatch, SetStateAction } from "react";
-import type {
-  AdjustmentLayerSelection,
-  CompositionSelection,
-  RightPanelTab,
-} from "../../types";
+import type { RightPanelTab } from "../../types";
 import {
   frameObjectFromBackgroundLayer,
+  selectionObjectFromFrameObject,
+  selectionPayloadFromObjects,
   syncChartObjectBounds,
 } from "../../../core/frameInteraction";
 import { getPattern2dDefaults } from "../../../core/graphics/pattern2d";
@@ -23,16 +21,14 @@ type FrameObjectCommandsParams = {
   part: Part;
   selectedObjectId: string | null;
   selectedPart: Part | null;
-  clearMarkerSelection: () => void;
   setEditingTextObjectId: Dispatch<SetStateAction<string | null>>;
-  setRightPanelTab: Dispatch<SetStateAction<RightPanelTab>>;
-  setSelectedAdjustmentLayerId: Dispatch<SetStateAction<string | null>>;
-  setSelectedAdjustmentLayers: Dispatch<
-    SetStateAction<AdjustmentLayerSelection[]>
-  >;
-  setSelectedPartId: Dispatch<SetStateAction<string>>;
-  setSelectedParts: Dispatch<SetStateAction<CompositionSelection[]>>;
   setComposeSelectionObjects: (objects: FrameObject[]) => void;
+  applyComposeLayerSelection: (selection: {
+    selectedObjectId: string | null;
+    selectedComposeObjectIds: string[];
+    selectionPayload: import("../../../core/types").SelectionPayload | null;
+    rightPanelTab: RightPanelTab;
+  }) => void;
   updateCompositionForTimelinePart: (
     partId: string,
     updater: (composition: CompositionClip) => CompositionClip,
@@ -49,14 +45,9 @@ export function useFrameObjectCommands({
   part,
   selectedObjectId,
   selectedPart,
-  clearMarkerSelection,
   setEditingTextObjectId,
-  setRightPanelTab,
-  setSelectedAdjustmentLayerId,
-  setSelectedAdjustmentLayers,
-  setSelectedPartId,
-  setSelectedParts,
   setComposeSelectionObjects,
+  applyComposeLayerSelection,
   updateCompositionForTimelinePart,
   updateSceneParts,
 }: FrameObjectCommandsParams) {
@@ -191,19 +182,25 @@ export function useFrameObjectCommands({
   }
 
   function selectComposeLayerObjects(objects: FrameObject[]) {
-    setRightPanelTab("video");
-    setEditingTextObjectId(null);
-    setSelectedPartId("");
-    setSelectedParts([]);
-    clearMarkerSelection();
-    setSelectedAdjustmentLayerId(null);
-    setSelectedAdjustmentLayers([]);
     if (objects.length === 0) {
-      setComposeSelectionObjects([]);
+      applyComposeLayerSelection({
+        selectedObjectId: null,
+        selectedComposeObjectIds: [],
+        selectionPayload: null,
+        rightPanelTab: "video",
+      });
       return;
     }
 
-    setComposeSelectionObjects(objects);
+    const selectionObjects = objects.map((object) =>
+      selectionObjectFromFrameObject(object),
+    );
+    applyComposeLayerSelection({
+      selectedObjectId: objects[0].id,
+      selectedComposeObjectIds: objects.map((object) => object.id),
+      selectionPayload: selectionPayloadFromObjects(selectionObjects),
+      rightPanelTab: "video",
+    });
   }
 
   function reorderComposeObjects(objectIds: string[], targetIndex: number) {

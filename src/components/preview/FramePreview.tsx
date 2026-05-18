@@ -2488,7 +2488,7 @@ function ShapeDrawPreviewOverlay({
   );
 }
 
-export const FrameObjectView = function FrameObjectView({
+export const FrameObjectView = memo(function FrameObjectView({
   activeShapeTool,
   animationsEnabled,
   exportTileFrameBounds,
@@ -2952,7 +2952,7 @@ export const FrameObjectView = function FrameObjectView({
       ) : null}
     </div>
   );
-};
+}, areFrameObjectPropsEqual);
 
 function useSplitTextLiveTime(
   fallback: number,
@@ -4290,45 +4290,116 @@ export function SelectionOverlayBox({
     if (!portal || !portalHost || !frameViewportRef) return;
     const host = portalHost;
     const viewportRef = frameViewportRef;
-    let frameId = 0;
 
     function syncPortalBox() {
       const element = boxRef.current;
       const frameViewport = viewportRef.current;
-      if (element && frameViewport) {
-        const portalBounds = viewportBoundsToPortal(
-          viewportBounds,
-          getFramePortalOverlayTransform(
-            frameViewport.getBoundingClientRect(),
-            host.getBoundingClientRect(),
-            frameScale,
-          ),
-        );
-        element.style.setProperty(
-          "--clipper-selection-base-left",
-          `${portalBounds.x}px`,
-        );
-        element.style.setProperty(
-          "--clipper-selection-base-top",
-          `${portalBounds.y}px`,
-        );
-        element.style.setProperty(
-          "--clipper-selection-base-width",
-          `${portalBounds.width}px`,
-        );
-        element.style.setProperty(
-          "--clipper-selection-base-height",
-          `${portalBounds.height}px`,
-        );
+      if (!element || !frameViewport) return;
+      const portalBounds = viewportBoundsToPortal(
+        viewportBounds,
+        getFramePortalOverlayTransform(
+          frameViewport.getBoundingClientRect(),
+          host.getBoundingClientRect(),
+          frameScale,
+        ),
+      );
+      element.style.setProperty(
+        "--clipper-selection-base-left",
+        `${portalBounds.x}px`,
+      );
+      element.style.setProperty(
+        "--clipper-selection-base-top",
+        `${portalBounds.y}px`,
+      );
+      element.style.setProperty(
+        "--clipper-selection-base-width",
+        `${portalBounds.width}px`,
+      );
+      element.style.setProperty(
+        "--clipper-selection-base-height",
+        `${portalBounds.height}px`,
+      );
+    }
+
+    function snapToObjectRect() {
+      const element = boxRef.current;
+      if (!element) return;
+      const target = document.querySelector<HTMLElement>(
+        `[data-clipper-render-object-id="${cssEscape(objectId)}"]`,
+      );
+      if (!target) {
+        syncPortalBox();
+        return;
       }
-      frameId = requestAnimationFrame(syncPortalBox);
+      const targetRect = target.getBoundingClientRect();
+      const hostRect = host.getBoundingClientRect();
+      const insetX = offsetPx;
+      const insetY = offsetPx;
+      element.style.setProperty(
+        "--clipper-selection-base-left",
+        `${targetRect.left - hostRect.left - insetX}px`,
+      );
+      element.style.setProperty(
+        "--clipper-selection-base-top",
+        `${targetRect.top - hostRect.top - insetY}px`,
+      );
+      element.style.setProperty(
+        "--clipper-selection-base-width",
+        `${targetRect.width + insetX * 2}px`,
+      );
+      element.style.setProperty(
+        "--clipper-selection-base-height",
+        `${targetRect.height + insetY * 2}px`,
+      );
     }
 
     syncPortalBox();
-    return () => cancelAnimationFrame(frameId);
+
+    let scheduled = 0;
+    function scheduleSync() {
+      if (scheduled) return;
+      scheduled = requestAnimationFrame(() => {
+        scheduled = 0;
+        syncPortalBox();
+      });
+    }
+
+    function handleZoomActive(event: Event) {
+      const active = Boolean(
+        (event as CustomEvent<{ active?: boolean }>).detail?.active,
+      );
+      const element = boxRef.current;
+      if (!element) return;
+      if (active) {
+        element.style.visibility = "hidden";
+        return;
+      }
+      snapToObjectRect();
+      element.style.visibility = "";
+    }
+
+    const frameViewport = viewportRef.current;
+    const resizeObserver =
+      typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(scheduleSync)
+        : null;
+    if (resizeObserver && frameViewport) resizeObserver.observe(frameViewport);
+    if (resizeObserver) resizeObserver.observe(host);
+    window.addEventListener("resize", scheduleSync);
+    window.addEventListener("scroll", scheduleSync, true);
+    window.addEventListener("clipper:frame-zoom-active", handleZoomActive);
+
+    return () => {
+      if (scheduled) cancelAnimationFrame(scheduled);
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", scheduleSync);
+      window.removeEventListener("scroll", scheduleSync, true);
+      window.removeEventListener("clipper:frame-zoom-active", handleZoomActive);
+    };
   }, [
     frameScale,
     frameViewportRef,
+    offsetPx,
     portal,
     portalHost,
     objectId,

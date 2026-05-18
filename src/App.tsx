@@ -887,6 +887,8 @@ function AppContent({
     clearMarkerSelection: clearStoredMarkerSelection,
     clearDirectSelection,
     clearComposeSelection,
+    setComposeSelection,
+    applyComposeLayerSelection,
   } = useSelectionEditorState();
   const {
     isPlaying,
@@ -930,6 +932,8 @@ function AppContent({
   const frameViewportRef = useRef<HTMLDivElement | null>(null);
   const dragSelectionBoxRef = useRef<HTMLDivElement | null>(null);
   const frameZoomControlRef = useRef<HTMLDivElement | null>(null);
+  const uiPersistRef = useRef({ selectedComposeObjectIds: [] as string[] });
+  uiPersistRef.current.selectedComposeObjectIds = selectedComposeObjectIds;
   const modeRef = useRef(mode);
   const activePartFilePathRef = useRef("");
   const currentSceneTimeRef = useRef(currentSceneTime);
@@ -1121,6 +1125,7 @@ function AppContent({
     projectRef,
     replaceProject,
     redoProjectChange,
+    requestUiPersist,
     saveAllChanges,
     scheduleImplicitFileOperationSave,
     setCompositionSources,
@@ -1139,6 +1144,7 @@ function AppContent({
     setSourceStatus,
     setTimelineMode,
     timelineModeRef,
+    uiPersistRef,
   });
 
   function withInspectorScrollPreserved(fn: () => void) {
@@ -1906,23 +1912,30 @@ function AppContent({
     setComposeSelectionObjects(pendingObjects);
   }, [part.background, part.background.elements, part.objects]);
 
+  const hydratedComposeSelectionFromProjectRef = useRef(false);
+  useEffect(() => {
+    hydratedComposeSelectionFromProjectRef.current = false;
+  }, [part.id]);
   useEffect(() => {
     if (
+      hydratedComposeSelectionFromProjectRef.current ||
       timelineMode !== "compose" ||
       selectionPayload?.objects.length ||
-      selectedObjectId
+      selectedObjectId ||
+      selectedComposeObjectIds.length > 0
     )
       return;
-    const selectedIds =
-      (selectedComposeObjectIds.length > 0
-        ? selectedComposeObjectIds
-        : project.editorState?.selectedComposeObjectIds
-      )?.filter(
-        (id) =>
-          id === part.background.id ||
-          part.background.elements.some((object) => object.id === id) ||
-          part.objects.some((object) => object.id === id),
-      ) ?? [];
+    const persistedIds = project.editorState?.selectedComposeObjectIds ?? [];
+    if (persistedIds.length === 0) {
+      hydratedComposeSelectionFromProjectRef.current = true;
+      return;
+    }
+    const selectedIds = persistedIds.filter(
+      (id) =>
+        id === part.background.id ||
+        part.background.elements.some((object) => object.id === id) ||
+        part.objects.some((object) => object.id === id),
+    );
     if (selectedIds.length === 0) return;
     const selectedObjects = selectedIds
       .map((id) =>
@@ -1933,6 +1946,7 @@ function AppContent({
       )
       .filter((object): object is FrameObject => Boolean(object));
     if (selectedObjects.length === 0) return;
+    hydratedComposeSelectionFromProjectRef.current = true;
     setComposeSelectionObjects(selectedObjects);
   }, [
     part.objects,
@@ -2367,25 +2381,26 @@ function AppContent({
 
   function persistComposeSelection(objectIds: string[]) {
     setSelectedComposeObjectIds(objectIds);
-    implicitFileOperation(updateEditorState)((state) => ({
-      ...state,
-      selectedComposeObjectIds: objectIds.length ? objectIds : undefined,
-    }));
   }
 
   function setComposeSelectionObjects(objects: FrameObject[]) {
     if (objects.length === 0) {
-      setSelectedObjectId(null);
-      setSelectionPayload(null);
-      persistComposeSelection([]);
+      setComposeSelection({
+        selectedObjectId: null,
+        selectedComposeObjectIds: [],
+        selectionPayload: null,
+      });
       return;
     }
 
-    setSelectedObjectId(objects[0].id);
-    setSelectionPayload(
-      selectionPayloadFromObjects(objects.map(selectionObjectFromFrameObject)),
-    );
-    persistComposeSelection(objects.map((object) => object.id));
+    const objectIds = objects.map((object) => object.id);
+    setComposeSelection({
+      selectedObjectId: objects[0].id,
+      selectedComposeObjectIds: objectIds,
+      selectionPayload: selectionPayloadFromObjects(
+        objects.map(selectionObjectFromFrameObject),
+      ),
+    });
   }
 
   function inspectComposeObject(object: FrameObject | null) {
@@ -2432,14 +2447,9 @@ function AppContent({
     part,
     selectedObjectId,
     selectedPart,
-    clearMarkerSelection,
     setEditingTextObjectId,
-    setRightPanelTab,
-    setSelectedAdjustmentLayerId,
-    setSelectedAdjustmentLayers,
-    setSelectedPartId,
-    setSelectedParts,
     setComposeSelectionObjects,
+    applyComposeLayerSelection,
     updateCompositionForTimelinePart,
     updateSceneParts,
   });
@@ -2959,6 +2969,7 @@ function AppContent({
     setSelectedComposeObjectIds,
     setSelectedObjectId,
     setSelectionPayload,
+    setComposeSelection,
     updateAdjustmentLayer,
     updateCompositionForTimelinePart,
     updateTranslationMarker: updateMotionMarker,
@@ -4359,18 +4370,20 @@ function AppContent({
     updateCompositionForTimelinePart,
   ]);
   useEffect(() => {
-    const selectedIds: string[] | null =
-      timelineMode === "compose" ? selectedComposeObjectIds : null;
-    if (!selectedIds) return;
+    if (timelineMode !== "compose") return;
     const persistedIds = project.editorState?.selectedComposeObjectIds ?? [];
     if (
-      selectedIds.length === persistedIds.length &&
-      selectedIds.every((id, index) => id === persistedIds[index])
+      selectedComposeObjectIds.length === persistedIds.length &&
+      selectedComposeObjectIds.every((id, index) => id === persistedIds[index])
     )
       return;
-    persistComposeSelection(selectedIds);
+    const handle = window.setTimeout(() => {
+      requestUiPersist();
+    }, 750);
+    return () => window.clearTimeout(handle);
   }, [
     project.editorState?.selectedComposeObjectIds,
+    requestUiPersist,
     selectedComposeObjectIds,
     timelineMode,
   ]);

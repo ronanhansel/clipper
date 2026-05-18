@@ -22,22 +22,46 @@ export function useFramePreviewZoomCommands({
   setFrameZoomBarOpen,
 }: FramePreviewZoomCommandsOptions) {
   const framePreviewScaleRef = useRef(framePreviewScale);
-  const wheelZoomFrameRef = useRef(0);
-  const pendingWheelZoomRef = useRef<{
-    anchorX: number;
-    anchorY: number;
-    clientX: number;
-    clientY: number;
-    contentX: number;
-    contentY: number;
-    previousScale: number;
-    scale: number;
-    viewport: HTMLDivElement;
-  } | null>(null);
+  const zoomActiveSettleRef = useRef<number>(0);
+  const zoomActiveStateRef = useRef(false);
 
   useEffect(() => {
     framePreviewScaleRef.current = framePreviewScale;
   }, [framePreviewScale]);
+
+  const markFrameZoomActive = useCallback(() => {
+    if (!zoomActiveStateRef.current) {
+      zoomActiveStateRef.current = true;
+      window.dispatchEvent(
+        new CustomEvent("clipper:frame-zoom-active", {
+          detail: { active: true },
+        }),
+      );
+    }
+    if (zoomActiveSettleRef.current)
+      window.clearTimeout(zoomActiveSettleRef.current);
+    zoomActiveSettleRef.current = window.setTimeout(() => {
+      zoomActiveSettleRef.current = 0;
+      zoomActiveStateRef.current = false;
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          window.dispatchEvent(
+            new CustomEvent("clipper:frame-zoom-active", {
+              detail: { active: false },
+            }),
+          );
+        });
+      });
+    }, 160);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (zoomActiveSettleRef.current)
+        window.clearTimeout(zoomActiveSettleRef.current);
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!frameZoomBarOpen) return;
@@ -52,21 +76,14 @@ export function useFramePreviewZoomCommands({
       document.removeEventListener("pointerdown", dismissFrameZoomBar, true);
   }, [frameZoomBarOpen, frameZoomControlRef, setFrameZoomBarOpen]);
 
-  useEffect(
-    () => () => {
-      if (wheelZoomFrameRef.current)
-        cancelAnimationFrame(wheelZoomFrameRef.current);
-    },
-    [],
-  );
-
   const updateFramePreviewScale = useCallback(
     (nextScale: number) => {
       const clampedScale = roundTwo(clamp(nextScale, 0.25, 5));
       framePreviewScaleRef.current = clampedScale;
+      markFrameZoomActive();
       setFramePreviewScale(clampedScale);
     },
-    [setFramePreviewScale],
+    [markFrameZoomActive, setFramePreviewScale],
   );
 
   const zoomFramePreviewAtPoint = useCallback(
@@ -76,6 +93,7 @@ export function useFramePreviewZoomCommands({
       const clampedScale = clamp(previousScale * scaleMultiplier, 0.25, 5);
       if (!viewport) {
         framePreviewScaleRef.current = clampedScale;
+        markFrameZoomActive();
         setFramePreviewScale(clampedScale);
         return;
       }
@@ -93,42 +111,17 @@ export function useFramePreviewZoomCommands({
       const ratio = clampedScale / previousScale;
 
       framePreviewScaleRef.current = clampedScale;
+      markFrameZoomActive();
       flushSync(() => setFramePreviewScale(clampedScale));
       viewport.scrollLeft = Math.max(contentX * ratio - anchorX, 0);
       viewport.scrollTop = Math.max(contentY * ratio - anchorY, 0);
-      pendingWheelZoomRef.current = {
-        anchorX,
-        anchorY,
-        clientX,
-        clientY,
-        contentX,
-        contentY,
-        previousScale,
-        scale: clampedScale,
-        viewport,
-      };
-      if (wheelZoomFrameRef.current) return;
-
-      wheelZoomFrameRef.current = requestAnimationFrame(() => {
-        wheelZoomFrameRef.current = 0;
-        const pending = pendingWheelZoomRef.current;
-        pendingWheelZoomRef.current = null;
-        if (!pending) return;
-        const latestViewport = centerPreviewScrollRef.current;
-        if (latestViewport !== pending.viewport) return;
-        flushSync(() => setFramePreviewScale(pending.scale));
-        const ratio = pending.scale / pending.previousScale;
-        latestViewport.scrollLeft = Math.max(
-          pending.contentX * ratio - pending.anchorX,
-          0,
-        );
-        latestViewport.scrollTop = Math.max(
-          pending.contentY * ratio - pending.anchorY,
-          0,
-        );
-      });
     },
-    [centerPreviewScrollRef, setFramePreviewScale],
+    [
+      centerPreviewScrollRef,
+      markFrameZoomActive,
+      setFramePreviewScale,
+      updateFramePreviewScale,
+    ],
   );
 
   const toggleFrameZoomBar = useCallback(() => {

@@ -141,6 +141,11 @@ type FrameInteractionControllerParams = {
   setSelectedComposeObjectIds: Dispatch<SetStateAction<string[]>>;
   setSelectedObjectId: Dispatch<SetStateAction<string | null>>;
   setSelectionPayload: Dispatch<SetStateAction<SelectionPayload | null>>;
+  setComposeSelection: (selection: {
+    selectedObjectId: string | null;
+    selectedComposeObjectIds: string[];
+    selectionPayload: SelectionPayload | null;
+  }) => void;
   setObjectSnapGuides: Dispatch<SetStateAction<ObjectSnapGuide[]>>;
   updateAdjustmentLayer: (
     layerId: string,
@@ -220,6 +225,7 @@ export function useFrameInteractionController(
     setSelectedComposeObjectIds,
     setSelectedObjectId,
     setSelectionPayload,
+    setComposeSelection,
     updateAdjustmentLayer,
     updateCompositionForTimelinePart,
     updateTranslationMarker,
@@ -241,8 +247,11 @@ export function useFrameInteractionController(
   }
 
   function updateObjectDragSelection(nextObjects: SelectionPayload["objects"]) {
-    setSelectedComposeObjectIds(nextObjects.map((object) => object.id));
-    setSelectionPayload(selectionPayloadFromObjects(nextObjects));
+    setComposeSelection({
+      selectedObjectId: nextObjects[0]?.id ?? null,
+      selectedComposeObjectIds: nextObjects.map((object) => object.id),
+      selectionPayload: selectionPayloadFromObjects(nextObjects),
+    });
   }
 
   function updateObjectSnapGuides(guides: ObjectSnapGuide[]) {
@@ -734,10 +743,13 @@ export function useFrameInteractionController(
         .join("|");
       if (nextSelectionIds === liveDragSelectionIdsRef.current) return;
       liveDragSelectionIdsRef.current = nextSelectionIds;
+      const objectIds = payload.objects.map((object) => object.id);
       startTransition(() => {
-        setSelectionPayload(payload.objects.length > 0 ? payload : null);
-        setSelectedComposeObjectIds(payload.objects.map((object) => object.id));
-        setSelectedObjectId(payload.objects[0]?.id ?? null);
+        setComposeSelection({
+          selectionPayload: payload.objects.length > 0 ? payload : null,
+          selectedComposeObjectIds: objectIds,
+          selectedObjectId: payload.objects[0]?.id ?? null,
+        });
       });
     });
   }
@@ -1079,9 +1091,11 @@ export function useFrameInteractionController(
     ]);
     if (payload.objects.length === 0) clearNodeSelection();
     else {
-      setSelectionPayload(payload);
-      setSelectedComposeObjectIds(payload.objects.map((object) => object.id));
-      setSelectedObjectId(payload.objects[0]?.id ?? null);
+      setComposeSelection({
+        selectionPayload: payload,
+        selectedComposeObjectIds: payload.objects.map((object) => object.id),
+        selectedObjectId: payload.objects[0]?.id ?? null,
+      });
     }
     clearMarkerSelection();
     clearDragBox();
@@ -1160,14 +1174,16 @@ export function useFrameInteractionController(
       nextSelectionObjects.map((item) => item.bounds),
     );
 
-    setSelectedObjectId(object.id);
-    setSelectedComposeObjectIds(nextSelectionObjects.map((item) => item.id));
-    clearMarkerSelection();
-    setSelectionPayload({
-      selectionBox,
-      coordinates: boundsToPoints(selectionBox),
-      objects: nextSelectionObjects,
+    setComposeSelection({
+      selectedObjectId: object.id,
+      selectedComposeObjectIds: nextSelectionObjects.map((item) => item.id),
+      selectionPayload: {
+        selectionBox,
+        coordinates: boundsToPoints(selectionBox),
+        objects: nextSelectionObjects,
+      },
     });
+    clearMarkerSelection();
     if (object.id === part.background.id) return;
     const nextDrag = {
       origin: { x: event.clientX, y: event.clientY },
@@ -1371,15 +1387,17 @@ export function useFrameInteractionController(
       clientX: event.clientX,
       clientY: event.clientY,
     });
-    setSelectedObjectId(object.id);
-    setSelectedComposeObjectIds([object.id]);
-    clearMarkerSelection();
     const selectionObject = evaluatedSelectionObject(object);
-    setSelectionPayload({
-      selectionBox: selectionObject.bounds,
-      coordinates: boundsToPoints(selectionObject.bounds),
-      objects: [selectionObject],
+    setComposeSelection({
+      selectedObjectId: object.id,
+      selectedComposeObjectIds: [object.id],
+      selectionPayload: {
+        selectionBox: selectionObject.bounds,
+        coordinates: boundsToPoints(selectionObject.bounds),
+        objects: [selectionObject],
+      },
     });
+    clearMarkerSelection();
     setRightPanelTab("video");
     setEditingTextObjectId(object.id);
   }
