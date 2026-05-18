@@ -59,6 +59,40 @@ import {
   timelineMoveKey,
   uniqueMarkerSelections,
 } from "./app/features/timeline/timelineMutationHelpers";
+import {
+  createPathSegment,
+  computeShapeDrawBox,
+  buildPathObjectUpdate,
+  denormalizePathSegments,
+  getDirectedDrawBounds,
+  getDrawAxisSnap,
+  getDraftJoints,
+  getDraftPreviewSegments,
+  getDrawToolName,
+  getLastPathPoint,
+  getMirroredPoint,
+  getPathDraftSnapPoint,
+  getPathDrawData,
+  getPenPathData,
+  getPenPreviewData,
+  getPointDistance,
+  getSvgDrawContent,
+  isBezierDrawTool,
+  isPathDrawTool,
+  isSvgDrawTool,
+  isTextPathObject,
+  parseClipperPathStyle,
+  removePathJoint,
+  updateTextPathOffsetInContent,
+  type ComposeDrawTool,
+  type PathDraft,
+  type ShapeDrawPreview,
+} from "./app/features/compose/composeDrawing";
+import { useActiveToolCleanup } from "./app/features/compose/useActiveToolCleanup";
+import { useComposeToolShortcuts } from "./app/features/compose/useComposeToolShortcuts";
+import { useComposeClipboard } from "./app/features/compose/useComposeClipboard";
+import { useComposeSelectionPersistence } from "./app/features/compose/useComposeSelectionPersistence";
+import { usePenDraftShortcuts } from "./app/features/compose/usePenDraftShortcuts";
 import { useTimelineLayerCommands } from "./app/features/timeline/useTimelineLayerCommands";
 import { useMotionMarkerCommands } from "./app/features/timeline/useMotionMarkerCommands";
 import { useTimelineClipboardCommands } from "./app/features/timeline/useTimelineClipboardCommands";
@@ -160,11 +194,6 @@ import {
 import { boundsToPoints, framePointFromClient } from "./core/geometry";
 import { type FillValue, fillValueToCss, isFillValue } from "./core/fillValue";
 import { clamp, roundToPrecision, roundTenth } from "./core/math";
-import {
-  getPathGeometryBounds,
-  getPathGeometryRenderPoints,
-  transformPathGeometrySegmentsToBounds,
-} from "./core/pathGeometry";
 import type {
   AdjustmentEffectPointControl,
   AdjustmentVisualOverlay,
@@ -237,439 +266,6 @@ const defaultEditorState: EditorState = {
 const wheelLineDeltaPx = 16;
 const wheelPageDeltaPx = 600;
 const frameWheelZoomSensitivity = 0.008;
-
-type ComposeDrawTool =
-  | "rect"
-  | "line"
-  | "arrow"
-  | "ellipse"
-  | "polygon"
-  | "star"
-  | "pen"
-  | "pencil"
-  | "text"
-  | "textPath"
-  | "pattern2d"
-  | "null"
-  | "code";
-
-type ShapeDrawPreview = {
-  bounds: Bounds;
-  start: Point;
-  end: Point;
-  points?: Point[];
-  path?: string;
-  joints?: Point[];
-  handles?: Array<{ anchor: Point; handle: Point }>;
-};
-
-type PathSegment = {
-  kind: "line" | "curve";
-  start: Point;
-  end: Point;
-  c1?: Point;
-  c2?: Point;
-};
-
-type PathDraft = {
-  tool: "pen" | "textPath";
-  start: Point;
-  segments: PathSegment[];
-  pointerId: number | null;
-  downPoint: Point | null;
-  current: PathSegment | null;
-  outHandle: Point | null;
-  previewPoint: Point | null;
-  anchor: Point | null;
-  closed: boolean;
-  disconnected: boolean;
-};
-
-type ClipperPathStyle = {
-  tool: "pen" | "textPath";
-  segments: PathSegment[];
-  closed?: boolean;
-};
-
-function isSvgDrawTool(tool: ComposeDrawTool) {
-  return (
-    tool === "line" ||
-    tool === "arrow" ||
-    tool === "pen" ||
-    tool === "pencil" ||
-    tool === "textPath"
-  );
-}
-
-function isPathDrawTool(tool: ComposeDrawTool) {
-  return (
-    tool === "line" ||
-    tool === "arrow" ||
-    tool === "pen" ||
-    tool === "pencil" ||
-    tool === "textPath"
-  );
-}
-
-function isBezierDrawTool(tool: ComposeDrawTool): tool is "pen" | "textPath" {
-  return tool === "pen" || tool === "textPath";
-}
-
-function getDrawToolName(tool: ComposeDrawTool) {
-  switch (tool) {
-    case "rect":
-      return "Rectangle";
-    case "line":
-      return "Line";
-    case "arrow":
-      return "Arrow";
-    case "ellipse":
-      return "Ellipse";
-    case "polygon":
-      return "Polygon";
-    case "star":
-      return "Star";
-    case "pen":
-      return "Pen";
-    case "pencil":
-      return "Pencil";
-    case "text":
-      return "Text";
-    case "textPath":
-      return "Text on path";
-    case "null":
-      return "Null object";
-    case "pattern2d":
-      return "Pattern";
-    case "code":
-      return "Code";
-  }
-}
-
-function getDirectedDrawBounds(points: Point[], minSize = 10) {
-  const xs = points.map((point) => point.x);
-  const ys = points.map((point) => point.y);
-  let x = Math.floor(Math.min(...xs));
-  let y = Math.floor(Math.min(...ys));
-  let maxX = Math.ceil(Math.max(...xs));
-  let maxY = Math.ceil(Math.max(...ys));
-  if (maxX - x < minSize) {
-    const centerX = (x + maxX) / 2;
-    x = Math.floor(centerX - minSize / 2);
-    maxX = Math.ceil(centerX + minSize / 2);
-  }
-  if (maxY - y < minSize) {
-    const centerY = (y + maxY) / 2;
-    y = Math.floor(centerY - minSize / 2);
-    maxY = Math.ceil(centerY + minSize / 2);
-  }
-  return {
-    x,
-    y,
-    width: Math.max(1, maxX - x),
-    height: Math.max(1, maxY - y),
-  };
-}
-
-function localDrawPoint(point: Point, bounds: Bounds) {
-  return {
-    x: point.x - bounds.x,
-    y: point.y - bounds.y,
-  };
-}
-
-function getCubicPoint(
-  start: Point,
-  c1: Point,
-  c2: Point,
-  end: Point,
-  t: number,
-) {
-  const mt = 1 - t;
-  const mt2 = mt * mt;
-  const t2 = t * t;
-  return {
-    x:
-      mt2 * mt * start.x +
-      3 * mt2 * t * c1.x +
-      3 * mt * t2 * c2.x +
-      t2 * t * end.x,
-    y:
-      mt2 * mt * start.y +
-      3 * mt2 * t * c1.y +
-      3 * mt * t2 * c2.y +
-      t2 * t * end.y,
-  };
-}
-
-function getPathSegmentRenderPoints(segments: PathSegment[]) {
-  return segments.flatMap((segment) => {
-    if (segment.kind !== "curve" || !segment.c1 || !segment.c2) {
-      return [segment.start, segment.end];
-    }
-    return Array.from({ length: 25 }, (_, index) =>
-      getCubicPoint(
-        segment.start,
-        segment.c1!,
-        segment.c2!,
-        segment.end,
-        index / 24,
-      ),
-    );
-  });
-}
-
-function buildNormalizedPathFromSegments(
-  segments: PathSegment[],
-  bounds: Bounds,
-  closed = false,
-) {
-  const path = segments
-    .map((segment, index) => {
-      const start = localDrawPoint(segment.start, bounds);
-      const end = localDrawPoint(segment.end, bounds);
-      const previous = segments[index - 1];
-      const startsSubpath =
-        index === 0 ||
-        !previous ||
-        getPointDistance(previous.end, segment.start) >= 0.5;
-      const move = startsSubpath
-        ? `M ${start.x.toFixed(2)} ${start.y.toFixed(2)} `
-        : "";
-      if (segment.kind === "curve" && segment.c1 && segment.c2) {
-        const c1 = localDrawPoint(segment.c1, bounds);
-        const c2 = localDrawPoint(segment.c2, bounds);
-        return `${move}C ${c1.x.toFixed(2)} ${c1.y.toFixed(2)}, ${c2.x.toFixed(2)} ${c2.y.toFixed(2)}, ${end.x.toFixed(2)} ${end.y.toFixed(2)}`;
-      }
-      return `${move}L ${end.x.toFixed(2)} ${end.y.toFixed(2)}`;
-    })
-    .join(" ");
-  return closed ? `${path} Z` : path;
-}
-
-function getPenPathData(segments: PathSegment[], closed = false) {
-  const bounds = getPathGeometryBounds(segments);
-  return {
-    bounds,
-    path: buildNormalizedPathFromSegments(segments, bounds, closed),
-  };
-}
-
-function getPenPreviewData(
-  segments: PathSegment[],
-  handles: Array<{ anchor: Point; handle: Point }> = [],
-  joints: Point[] = [],
-  closed = false,
-) {
-  const points = [
-    ...getPathGeometryRenderPoints(segments),
-    ...handles.flatMap(({ anchor, handle }) => [anchor, handle]),
-    ...joints,
-  ];
-  const bounds = getDirectedDrawBounds(points);
-  return {
-    bounds,
-    path:
-      segments.length > 0
-        ? buildNormalizedPathFromSegments(segments, bounds, closed)
-        : "",
-  };
-}
-
-function parseClipperPathStyle(value: string | number | undefined) {
-  if (typeof value !== "string") return null;
-  try {
-    const parsed = JSON.parse(value) as Partial<ClipperPathStyle>;
-    if (
-      (parsed.tool !== "pen" && parsed.tool !== "textPath") ||
-      !Array.isArray(parsed.segments)
-    )
-      return null;
-    return parsed as ClipperPathStyle;
-  } catch {
-    return null;
-  }
-}
-
-function getLastPathPoint(draft: PathDraft) {
-  return (
-    draft.anchor ??
-    draft.segments[draft.segments.length - 1]?.end ??
-    draft.start
-  );
-}
-
-function createPathSegment(
-  start: Point,
-  end: Point,
-  c1?: Point | null,
-  c2?: Point | null,
-): PathSegment {
-  const hasC1 = c1 && Math.hypot(c1.x - start.x, c1.y - start.y) >= 0.5;
-  const hasC2 = c2 && Math.hypot(c2.x - end.x, c2.y - end.y) >= 0.5;
-  if (!hasC1 && !hasC2) return { kind: "line", start, end };
-  return {
-    kind: "curve",
-    start,
-    end,
-    c1: c1 ?? start,
-    c2: c2 ?? end,
-  };
-}
-
-function getMirroredPoint(anchor: Point, handle: Point) {
-  return { x: anchor.x * 2 - handle.x, y: anchor.y * 2 - handle.y };
-}
-
-function getPointDistance(left: Point, right: Point) {
-  return Math.hypot(left.x - right.x, left.y - right.y);
-}
-
-function getDraftPreviewSegments(draft: PathDraft) {
-  const last = getLastPathPoint(draft);
-  const previewPoint = draft.previewPoint;
-  if (
-    !previewPoint ||
-    draft.closed ||
-    draft.disconnected ||
-    getPointDistance(last, previewPoint) < 0.5
-  )
-    return draft.segments;
-  return [
-    ...draft.segments,
-    createPathSegment(last, previewPoint, draft.outHandle, null),
-  ];
-}
-
-function getPathSegmentJoints(segments: PathSegment[]) {
-  if (segments.length === 0) return [];
-  return [segments[0].start, ...segments.map((segment) => segment.end)];
-}
-
-function getDraftJoints(draft: PathDraft, segments = draft.segments) {
-  const joints = getPathSegmentJoints(segments);
-  const anchor = draft.anchor;
-  if (
-    anchor &&
-    !joints.some((point) => getPointDistance(point, anchor) < 0.5)
-  ) {
-    joints.push(anchor);
-  }
-  return joints;
-}
-
-function getPathDraftSnapPoint(draft: PathDraft, point: Point) {
-  const snapTargets = getDraftJoints(draft);
-  return (
-    snapTargets.find((target) => getPointDistance(target, point) <= 8) ?? point
-  );
-}
-
-function smoothPencilPoints(points: Point[]) {
-  if (points.length < 4) return points;
-  let smoothed = points;
-  for (let pass = 0; pass < 2; pass += 1) {
-    const next: Point[] = [smoothed[0]];
-    for (let index = 0; index < smoothed.length - 1; index += 1) {
-      const current = smoothed[index];
-      const following = smoothed[index + 1];
-      next.push(
-        {
-          x: current.x * 0.75 + following.x * 0.25,
-          y: current.y * 0.75 + following.y * 0.25,
-        },
-        {
-          x: current.x * 0.25 + following.x * 0.75,
-          y: current.y * 0.25 + following.y * 0.75,
-        },
-      );
-    }
-    next.push(smoothed[smoothed.length - 1]);
-    smoothed = next;
-  }
-  return smoothed;
-}
-
-function buildSmoothPencilPath(points: Point[], bounds: Bounds) {
-  if (points.length === 0) return "";
-  if (points.length < 3) {
-    return points
-      .map((point, index) => {
-        const local = localDrawPoint(point, bounds);
-        return `${index === 0 ? "M" : "L"} ${local.x.toFixed(2)} ${local.y.toFixed(2)}`;
-      })
-      .join(" ");
-  }
-  const [first, ...rest] = points;
-  const firstLocal = localDrawPoint(first, bounds);
-  const commands = [`M ${firstLocal.x.toFixed(2)} ${firstLocal.y.toFixed(2)}`];
-  for (let index = 0; index < rest.length - 1; index += 1) {
-    const control = localDrawPoint(rest[index], bounds);
-    const next = rest[index + 1];
-    const midpoint = localDrawPoint(
-      {
-        x: (rest[index].x + next.x) / 2,
-        y: (rest[index].y + next.y) / 2,
-      },
-      bounds,
-    );
-    commands.push(
-      `Q ${control.x.toFixed(2)} ${control.y.toFixed(2)}, ${midpoint.x.toFixed(2)} ${midpoint.y.toFixed(2)}`,
-    );
-  }
-  const last = localDrawPoint(points[points.length - 1], bounds);
-  commands.push(`L ${last.x.toFixed(2)} ${last.y.toFixed(2)}`);
-  return commands.join(" ");
-}
-
-function getPathDrawData(
-  tool: ComposeDrawTool,
-  start: Point,
-  end: Point,
-  points: Point[] = [start, end],
-) {
-  const pencilPoints = tool === "pencil" ? smoothPencilPoints(points) : points;
-  const sourcePoints = tool === "pencil" ? pencilPoints : [start, end];
-  const bounds = getDirectedDrawBounds(sourcePoints);
-  const localStart = localDrawPoint(start, bounds);
-  const localEnd = localDrawPoint(end, bounds);
-  const path =
-    tool === "pencil"
-      ? buildSmoothPencilPath(pencilPoints, bounds)
-      : tool === "pen" || tool === "textPath"
-        ? `M ${localStart.x.toFixed(2)} ${localStart.y.toFixed(2)} C ${((localStart.x + localEnd.x) / 2).toFixed(2)} ${localStart.y.toFixed(2)}, ${((localStart.x + localEnd.x) / 2).toFixed(2)} ${localEnd.y.toFixed(2)}, ${localEnd.x.toFixed(2)} ${localEnd.y.toFixed(2)}`
-        : `M ${localStart.x.toFixed(2)} ${localStart.y.toFixed(2)} L ${localEnd.x.toFixed(2)} ${localEnd.y.toFixed(2)}`;
-  return { bounds, path };
-}
-
-function getSvgDrawContent(
-  tool: ComposeDrawTool,
-  start: Point,
-  end: Point,
-  points?: Point[],
-  pathOverride?: string,
-  boundsOverride?: Bounds,
-) {
-  const { bounds, path } = getPathDrawData(tool, start, end, points);
-  const viewBoxBounds = boundsOverride ?? bounds;
-  const drawPath = pathOverride ?? path;
-  const strokeWidth = tool === "pencil" ? 5 : 4;
-  const marker = tool === "arrow" ? ' marker-end="url(#arrowhead)"' : "";
-  const textPath =
-    tool === "textPath"
-      ? `<text fill="#ffffff" font-family="system-ui, sans-serif" font-size="48" font-weight="500"><textPath href="#draw-path" startOffset="50%" text-anchor="middle">Text on path</textPath></text>`
-      : "";
-
-  const strokeAttr =
-    tool === "textPath"
-      ? 'stroke="none"'
-      : `stroke="#D5D5D5" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"${marker}`;
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 ${Math.max(1, viewBoxBounds.width)} ${Math.max(1, viewBoxBounds.height)}" preserveAspectRatio="none" style="display:block;overflow:visible"><defs><marker id="arrowhead" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth" viewBox="0 0 8 8" preserveAspectRatio="xMidYMid meet"><path d="M0,0 L8,4 L0,8 Z" fill="#D5D5D5"/></marker></defs><path id="draw-path" d="${drawPath}" fill="none" ${strokeAttr}/>${textPath}</svg>`;
-}
-
-function isTextPathObject(object: FrameObject) {
-  return parseClipperPathStyle(object.style.clipperPath)?.tool === "textPath";
-}
 
 function PathToastMessage({ action, path }: { action: string; path: string }) {
   const suffixLength = Math.min(32, Math.max(12, Math.floor(path.length / 3)));
@@ -1069,7 +665,6 @@ function AppContent({
     [],
   );
   const objectSnapGuidesRef = useRef<ObjectSnapGuide[]>([]);
-  const composeClipboardRef = useRef<FrameObject[] | null>(null);
   const objectResizeRef = useRef<ObjectResize | null>(null);
   const objectResizeFrameRef = useRef(0);
   const objectResizeDeltaRef = useRef<Point>({ x: 0, y: 0 });
@@ -2987,15 +2582,23 @@ function AppContent({
     startTextObjectEdit,
   } = frameInteractionController;
 
-  // Keep activeToolRef in sync for use inside pointer handlers
-  activeToolRef.current = activeTool;
+  useComposeToolShortcuts({
+    activeTool,
+    activeToolRef,
+    composeMode,
+    hasPreviewComposition,
+    mode,
+    addNullObjectToFrameCenter,
+    setActiveTool,
+    setObjectResizeMode,
+  });
 
-  useEffect(() => {
-    if (activeTool === "pen" || activeTool === "textPath") return;
-    pathDraftRef.current = null;
-    shapeDrawPreviewRef.current = null;
-    setShapeDrawPreview(null);
-  }, [activeTool]);
+  useActiveToolCleanup({
+    activeTool,
+    pathDraftRef,
+    shapeDrawPreviewRef,
+    setShapeDrawPreview,
+  });
 
   function addNullObjectToFrameCenter() {
     if (!part) return;
@@ -3059,107 +2662,30 @@ function AppContent({
     setEditingTextObjectId(object.id);
   }
 
-  useEffect(() => {
-    function handleComposeToolShortcut(event: KeyboardEvent) {
-      if (!composeMode || mode !== "preview" || !hasPreviewComposition) return;
-      if (
-        event.defaultPrevented ||
-        event.ctrlKey ||
-        event.metaKey ||
-        event.altKey
-      )
-        return;
-      if (isTextEditingTarget(event.target as HTMLElement | null)) return;
-
-      const key = event.key.toLowerCase();
-      let nextTool: ComposeDrawTool | null | undefined;
-      let nextResizeMode: "resize" | "scale" | undefined;
-
-      if (key === "v" && !event.shiftKey) {
-        nextTool = null;
-        nextResizeMode = "resize";
-      } else if (key === "k" && !event.shiftKey) {
-        nextTool = null;
-        nextResizeMode = "scale";
-      } else if (key === "r" && !event.shiftKey) {
-        nextTool = "rect";
-      } else if (key === "l") {
-        nextTool = event.shiftKey ? "arrow" : "line";
-      } else if (key === "o" && !event.shiftKey) {
-        nextTool = "ellipse";
-      } else if (key === "p") {
-        nextTool = event.shiftKey ? "pencil" : "pen";
-      } else if (key === "t" && !event.shiftKey) {
-        nextTool = "text";
-      } else if (key === "n" && !event.shiftKey) {
-        addNullObjectToFrameCenter();
-        nextTool = null;
-      }
-
-      if (nextTool === undefined && nextResizeMode === undefined) return;
-
-      event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation();
-      if (nextResizeMode) setObjectResizeMode(nextResizeMode);
-      activeToolRef.current = nextTool ?? null;
-      setActiveTool(nextTool ?? null);
-    }
-
-    window.addEventListener("keydown", handleComposeToolShortcut, true);
-    return () =>
-      window.removeEventListener("keydown", handleComposeToolShortcut, true);
-  }, [composeMode, hasPreviewComposition, mode]);
-
-  useEffect(() => {
-    function handlePenDraftKeyDown(event: KeyboardEvent) {
-      const draft = pathDraftRef.current;
-      if (!draft || (draft.tool !== "pen" && draft.tool !== "textPath")) return;
-      if (isTextEditingTarget(event.target as HTMLElement | null)) return;
-      if (event.key === "Escape") {
-        event.preventDefault();
-        if (draft.tool === "textPath" && draft.segments.length > 0) {
-          commitPathDraftObject(draft);
-          pathDraftRef.current = null;
-          shapeDrawPreviewRef.current = null;
-          setShapeDrawPreview(null);
-          return;
-        }
-        draft.disconnected = true;
-        draft.previewPoint = null;
-        draft.outHandle = null;
-        shapeDrawPreviewRef.current = null;
-        setShapeDrawPreview(null);
-      } else if (event.key === "Enter" && draft.segments.length > 0) {
-        event.preventDefault();
-        commitPathDraftObject(draft);
-        pathDraftRef.current = null;
-        shapeDrawPreviewRef.current = null;
-        setShapeDrawPreview(null);
-      }
-    }
-    window.addEventListener("keydown", handlePenDraftKeyDown);
-    return () => window.removeEventListener("keydown", handlePenDraftKeyDown);
+  usePenDraftShortcuts({
+    pathDraftRef,
+    shapeDrawPreviewRef,
+    commitPathDraftObject,
+    setShapeDrawPreview,
   });
 
-  function computeShapeDrawBox(
-    start: { x: number; y: number },
-    end: { x: number; y: number },
-    constrain: boolean,
-  ) {
-    let rawW = end.x - start.x;
-    let rawH = end.y - start.y;
-    if (constrain) {
-      const size = Math.max(Math.abs(rawW), Math.abs(rawH));
-      rawW = rawW < 0 ? -size : size;
-      rawH = rawH < 0 ? -size : size;
-    }
-    const x = Math.round(Math.min(start.x, start.x + rawW));
-    const y = Math.round(Math.min(start.y, start.y + rawH));
-    const width = Math.round(Math.abs(rawW));
-    const height = Math.round(Math.abs(rawH));
-    return { x, y, width, height };
-  }
+  useComposeClipboard({
+    composeMode,
+    editingTextObjectId,
+    mode,
+    part,
+    selectedComposeObjectIds,
+    deleteComposeObjects,
+    setComposeSelectionObjects,
+    updateCompositionForTimelinePart,
+  });
+
+  useComposeSelectionPersistence({
+    project,
+    requestUiPersist,
+    selectedComposeObjectIds,
+    timelineMode,
+  });
 
   function updateComposeDrawSnapGuides(guides: ObjectSnapGuide[]) {
     const current = objectSnapGuidesRef.current;
@@ -3228,32 +2754,6 @@ function AppContent({
     };
   }
 
-  function getDrawAxisSnap(
-    candidates: { position: number; influence: number }[],
-    stops: number[],
-    threshold: number,
-  ) {
-    let closest: {
-      endOffset: number;
-      position: number;
-      distance: number;
-    } | null = null;
-    for (const candidate of candidates) {
-      if (candidate.influence <= 0) continue;
-      for (const stop of stops) {
-        const distance = Math.abs(stop - candidate.position);
-        if (distance > threshold) continue;
-        if (closest && distance >= closest.distance) continue;
-        closest = {
-          endOffset: (stop - candidate.position) / candidate.influence,
-          position: stop,
-          distance,
-        };
-      }
-    }
-    return closest;
-  }
-
   function commitPathDraftObject(draft: PathDraft) {
     if (!part || draft.segments.length === 0) return;
     const { bounds, path } = getPenPathData(draft.segments, draft.closed);
@@ -3310,16 +2810,7 @@ function AppContent({
       (object) => {
         const pathStyle = parseClipperPathStyle(object.style.clipperPath);
         if (!pathStyle) return object;
-        const segments = transformPathGeometrySegmentsToBounds(
-          pathStyle.segments.map((segment) => ({
-            ...segment,
-            start: { ...segment.start },
-            end: { ...segment.end },
-            c1: segment.c1 ? { ...segment.c1 } : undefined,
-            c2: segment.c2 ? { ...segment.c2 } : undefined,
-          })),
-          object.bounds,
-        );
+        const segments = denormalizePathSegments(pathStyle, object.bounds);
         const segment = segments[segmentIndex];
         if (!segment) return object;
         if (control === "start" && segmentIndex === 0) {
@@ -3366,48 +2857,6 @@ function AppContent({
     );
   }
 
-  function mergePathSegments(left: PathSegment, right: PathSegment) {
-    if (left.kind === "line" && right.kind === "line") {
-      return createPathSegment(left.start, right.end);
-    }
-    return createPathSegment(
-      left.start,
-      right.end,
-      left.kind === "curve" ? left.c1 : left.start,
-      right.kind === "curve" ? right.c2 : right.end,
-    );
-  }
-
-  function removePathJoint(
-    segments: PathSegment[],
-    segmentIndex: number,
-    control: "start" | "end" | "c1" | "c2",
-    closed: boolean,
-  ) {
-    if (control !== "start" && control !== "end") return segments;
-    if (segments.length <= 1) return segments;
-    if (control === "start" && segmentIndex === 0) {
-      if (!closed) return segments.slice(1);
-      const first = segments[0];
-      const last = segments[segments.length - 1];
-      return [...segments.slice(1, -1), mergePathSegments(last, first)];
-    }
-    if (control !== "end") return segments;
-    if (closed && segmentIndex === segments.length - 1) {
-      const first = segments[0];
-      const last = segments[segments.length - 1];
-      return [...segments.slice(1, -1), mergePathSegments(last, first)];
-    }
-    if (segmentIndex === segments.length - 1) return segments.slice(0, -1);
-    const current = segments[segmentIndex];
-    const next = segments[segmentIndex + 1];
-    return [
-      ...segments.slice(0, segmentIndex),
-      mergePathSegments(current, next),
-      ...segments.slice(segmentIndex + 2),
-    ];
-  }
-
   function deletePathObjectJoint(
     objectId: string,
     segmentIndex: number,
@@ -3416,16 +2865,7 @@ function AppContent({
     updateObjectById(objectId, (object) => {
       const pathStyle = parseClipperPathStyle(object.style.clipperPath);
       if (!pathStyle) return object;
-      const segments = transformPathGeometrySegmentsToBounds(
-        pathStyle.segments.map((segment) => ({
-          ...segment,
-          start: { ...segment.start },
-          end: { ...segment.end },
-          c1: segment.c1 ? { ...segment.c1 } : undefined,
-          c2: segment.c2 ? { ...segment.c2 } : undefined,
-        })),
-        object.bounds,
-      );
+      const segments = denormalizePathSegments(pathStyle, object.bounds);
       const nextSegments = removePathJoint(
         segments,
         segmentIndex,
@@ -3439,26 +2879,18 @@ function AppContent({
         return object;
       }
       const closed = Boolean(pathStyle.closed) && nextSegments.length > 1;
-      const { bounds, path } = getPenPathData(nextSegments, closed);
-      const end = nextSegments[nextSegments.length - 1]?.end ?? bounds;
+      const pathObjectUpdate = buildPathObjectUpdate(
+        nextSegments,
+        pathStyle.tool,
+        closed,
+      );
       return {
         ...object,
-        bounds,
-        content: getSvgDrawContent(
-          pathStyle.tool,
-          nextSegments[0]?.start ?? bounds,
-          end,
-          undefined,
-          path,
-          bounds,
-        ),
+        bounds: pathObjectUpdate.bounds,
+        content: pathObjectUpdate.content,
         style: {
           ...object.style,
-          clipperPath: JSON.stringify({
-            ...pathStyle,
-            segments: nextSegments,
-            closed,
-          }),
+          clipperPath: pathObjectUpdate.clipperPath,
         },
       };
     });
@@ -3473,13 +2905,9 @@ function AppContent({
       objectId,
       (object) => {
         if (!isTextPathObject(object) || !object.content) return object;
-        const nextOffset = `${Math.max(0, Math.min(100, offset)).toFixed(2)}%`;
         return {
           ...object,
-          content: object.content.replace(
-            /(<textPath\b[^>]*\sstartOffset=")([^"]+)(")/,
-            `$1${nextOffset}$3`,
-          ),
+          content: updateTextPathOffsetInContent(object.content, offset),
         };
       },
       options,
@@ -4249,144 +3677,6 @@ function AppContent({
   const leftSidebarSelectedObjectIds = isPlaying
     ? leftSidebarPlaybackInputRef.current.selectedComposeObjectIds
     : selectedComposeObjectIds;
-  useEffect(() => {
-    function deleteSelectedComposeLayers(event: KeyboardEvent) {
-      if (event.key !== "Backspace" && event.key !== "Delete") return;
-      if (event.defaultPrevented) return;
-      if (
-        !composeMode ||
-        mode !== "preview" ||
-        editingTextObjectId ||
-        selectedComposeObjectIds.length === 0
-      )
-        return;
-      if (isEditableKeyboardTarget(event.target)) return;
-      event.preventDefault();
-      deleteComposeObjects(selectedComposeObjectIds);
-    }
-
-    window.addEventListener("keydown", deleteSelectedComposeLayers);
-    return () =>
-      window.removeEventListener("keydown", deleteSelectedComposeLayers);
-  }, [
-    composeMode,
-    deleteComposeObjects,
-    editingTextObjectId,
-    mode,
-    selectedComposeObjectIds,
-  ]);
-  useEffect(() => {
-    function copyPasteComposeObjects(event: KeyboardEvent) {
-      if (!composeMode || mode !== "preview" || editingTextObjectId) return;
-      if (!event.metaKey && !event.ctrlKey) return;
-      if (event.altKey || event.shiftKey) return;
-      if (isEditableKeyboardTarget(event.target)) return;
-      const key = event.key.toLowerCase();
-      if (key === "d") {
-        if (selectedComposeObjectIds.length === 0) return;
-        const selectedIdSet = new Set(selectedComposeObjectIds);
-        const selectedObjects = [
-          ...part.background.elements,
-          ...part.objects,
-        ].filter((object) => selectedIdSet.has(object.id));
-        if (selectedObjects.length === 0) return;
-        event.preventDefault();
-        const suffix = Date.now().toString(36);
-        const offset = 24;
-        const duplicatedObjects = selectedObjects.map((object, index) => {
-          const id = `${object.id}:copy:${suffix}:${index}`;
-          return {
-            ...structuredClone(object),
-            id,
-            selector: `[data-object-id='${id}']`,
-            bounds: {
-              ...object.bounds,
-              x: object.bounds.x + offset,
-              y: object.bounds.y + offset,
-            },
-          };
-        });
-        updateCompositionForTimelinePart(part.id, (composition) => ({
-          ...composition,
-          objects: [...composition.objects, ...duplicatedObjects],
-        }));
-        setComposeSelectionObjects(duplicatedObjects);
-        return;
-      }
-      if (key === "c") {
-        if (selectedComposeObjectIds.length === 0) return;
-        const selectedIdSet = new Set(selectedComposeObjectIds);
-        const selectedObjects = [
-          ...part.background.elements,
-          ...part.objects,
-        ].filter((object) => selectedIdSet.has(object.id));
-        if (selectedObjects.length === 0) return;
-        composeClipboardRef.current = selectedObjects.map((object) =>
-          structuredClone(object),
-        );
-        event.preventDefault();
-        return;
-      }
-      if (key !== "v") return;
-      const clipboard = composeClipboardRef.current;
-      if (!clipboard || clipboard.length === 0) return;
-      event.preventDefault();
-      const suffix = Date.now().toString(36);
-      const pastedObjects = clipboard.map((object, index) => {
-        const id = `${object.id}:copy:${suffix}:${index}`;
-        const offset = 24;
-        return {
-          ...structuredClone(object),
-          id,
-          selector: `[data-object-id='${id}']`,
-          bounds: {
-            ...object.bounds,
-            x: object.bounds.x + offset,
-            y: object.bounds.y + offset,
-          },
-        };
-      });
-      updateCompositionForTimelinePart(part.id, (composition) => ({
-        ...composition,
-        objects: [...composition.objects, ...pastedObjects],
-      }));
-      setComposeSelectionObjects(pastedObjects);
-      composeClipboardRef.current = pastedObjects.map((object) =>
-        structuredClone(object),
-      );
-    }
-
-    window.addEventListener("keydown", copyPasteComposeObjects);
-    return () => window.removeEventListener("keydown", copyPasteComposeObjects);
-  }, [
-    composeMode,
-    editingTextObjectId,
-    mode,
-    part.background.elements,
-    part.id,
-    part.objects,
-    selectedComposeObjectIds,
-    setComposeSelectionObjects,
-    updateCompositionForTimelinePart,
-  ]);
-  useEffect(() => {
-    if (timelineMode !== "compose") return;
-    const persistedIds = project.editorState?.selectedComposeObjectIds ?? [];
-    if (
-      selectedComposeObjectIds.length === persistedIds.length &&
-      selectedComposeObjectIds.every((id, index) => id === persistedIds[index])
-    )
-      return;
-    const handle = window.setTimeout(() => {
-      requestUiPersist();
-    }, 750);
-    return () => window.clearTimeout(handle);
-  }, [
-    project.editorState?.selectedComposeObjectIds,
-    requestUiPersist,
-    selectedComposeObjectIds,
-    timelineMode,
-  ]);
 
   async function handleCloseProject() {
     await saveAllChanges();
@@ -5220,16 +4510,4 @@ function isTimelineTarget(target: HTMLElement | null) {
 
 function isPreviewStageTarget(target: HTMLElement | null) {
   return Boolean(target?.closest("[data-clipper-preview-stage]"));
-}
-
-function isEditableKeyboardTarget(target: EventTarget | null) {
-  if (!(target instanceof HTMLElement)) return false;
-  const tagName = target.tagName.toLowerCase();
-  return (
-    target.isContentEditable ||
-    tagName === "input" ||
-    tagName === "textarea" ||
-    tagName === "select" ||
-    Boolean(target.closest("[contenteditable='true']"))
-  );
 }

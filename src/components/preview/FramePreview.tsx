@@ -3974,6 +3974,13 @@ function isPreviewTimeSensitiveObject(object: FrameObject) {
   return isTimeSensitiveFrameObject(object);
 }
 
+function clearSelectionPreviewBounds(element: HTMLElement) {
+  element.style.removeProperty("--clipper-selection-preview-left");
+  element.style.removeProperty("--clipper-selection-preview-top");
+  element.style.removeProperty("--clipper-selection-preview-width");
+  element.style.removeProperty("--clipper-selection-preview-height");
+}
+
 export function SelectionOverlayBox({
   objectId,
   bounds,
@@ -4178,20 +4185,23 @@ export function SelectionOverlayBox({
     if (!element) return;
     element.style.removeProperty("--clipper-drag-x");
     element.style.removeProperty("--clipper-drag-y");
-    element.style.removeProperty("--clipper-selection-preview-left");
-    element.style.removeProperty("--clipper-selection-preview-top");
-    element.style.removeProperty("--clipper-selection-preview-width");
-    element.style.removeProperty("--clipper-selection-preview-height");
-  }, [bounds.height, bounds.width, bounds.x, bounds.y]);
+    clearSelectionPreviewBounds(element);
+  }, [
+    bounds.height,
+    bounds.width,
+    bounds.x,
+    bounds.y,
+    cameraTransform.scale,
+    cameraTransform.x,
+    cameraTransform.y,
+    frameScale,
+  ]);
 
   useEffect(() => {
     function clearPreviewBounds() {
       const element = boxRef.current;
       if (!element) return;
-      element.style.removeProperty("--clipper-selection-preview-left");
-      element.style.removeProperty("--clipper-selection-preview-top");
-      element.style.removeProperty("--clipper-selection-preview-width");
-      element.style.removeProperty("--clipper-selection-preview-height");
+      clearSelectionPreviewBounds(element);
     }
 
     function updatePreviewBounds(event: Event) {
@@ -4295,6 +4305,33 @@ export function SelectionOverlayBox({
       const element = boxRef.current;
       const frameViewport = viewportRef.current;
       if (!element || !frameViewport) return;
+      clearSelectionPreviewBounds(element);
+      const target = frameViewport.querySelector<HTMLElement>(
+        `[data-clipper-render-object-id="${cssEscape(objectId)}"]`,
+      );
+      if (target) {
+        const targetRect = target.getBoundingClientRect();
+        const hostRect = host.getBoundingClientRect();
+        const insetX = offsetPx;
+        const insetY = offsetPx;
+        element.style.setProperty(
+          "--clipper-selection-base-left",
+          `${targetRect.left - hostRect.left - insetX}px`,
+        );
+        element.style.setProperty(
+          "--clipper-selection-base-top",
+          `${targetRect.top - hostRect.top - insetY}px`,
+        );
+        element.style.setProperty(
+          "--clipper-selection-base-width",
+          `${targetRect.width + insetX * 2}px`,
+        );
+        element.style.setProperty(
+          "--clipper-selection-base-height",
+          `${targetRect.height + insetY * 2}px`,
+        );
+        return;
+      }
       const portalBounds = viewportBoundsToPortal(
         viewportBounds,
         getFramePortalOverlayTransform(
@@ -4323,8 +4360,10 @@ export function SelectionOverlayBox({
 
     function snapToObjectRect() {
       const element = boxRef.current;
-      if (!element) return;
-      const target = document.querySelector<HTMLElement>(
+      const frameViewport = viewportRef.current;
+      if (!element || !frameViewport) return;
+      clearSelectionPreviewBounds(element);
+      const target = frameViewport.querySelector<HTMLElement>(
         `[data-clipper-render-object-id="${cssEscape(objectId)}"]`,
       );
       if (!target) {
@@ -4356,11 +4395,13 @@ export function SelectionOverlayBox({
     syncPortalBox();
 
     let scheduled = 0;
+    let zoomActive = false;
     function scheduleSync() {
+      if (zoomActive) return;
       if (scheduled) return;
       scheduled = requestAnimationFrame(() => {
         scheduled = 0;
-        syncPortalBox();
+        snapToObjectRect();
       });
     }
 
@@ -4370,12 +4411,17 @@ export function SelectionOverlayBox({
       );
       const element = boxRef.current;
       if (!element) return;
+      zoomActive = active;
       if (active) {
         element.style.visibility = "hidden";
         return;
       }
-      snapToObjectRect();
-      element.style.visibility = "";
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          snapToObjectRect();
+          element.style.visibility = "";
+        });
+      });
     }
 
     const frameViewport = viewportRef.current;
