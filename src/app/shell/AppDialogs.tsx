@@ -15,7 +15,6 @@ import type { ProjectManifest } from "../../core/types";
 import type { AppUpdateStatus } from "../types";
 
 type AppDialogsProps = {
-  appContextMenu: import("../../app/types").ContextMenuState | null;
   autoDownloadUpdates: boolean;
   exportResolution: { width: number; height: number };
   projectName: string;
@@ -23,7 +22,6 @@ type AppDialogsProps = {
   sceneDurationSeconds: number;
   resolution: ProjectManifest["resolution"];
   updateStatus: AppUpdateStatus;
-  onAppContextMenuClose: () => void;
   onAutoDownloadUpdatesChange: (enabled: boolean) => void;
   onCheckForUpdates: () => void;
   onDownloadUpdate: () => void;
@@ -35,7 +33,6 @@ type AppDialogsProps = {
 };
 
 export const AppDialogs = memo(function AppDialogs({
-  appContextMenu,
   autoDownloadUpdates,
   exportResolution,
   projectName,
@@ -43,7 +40,6 @@ export const AppDialogs = memo(function AppDialogs({
   sceneDurationSeconds,
   resolution,
   updateStatus,
-  onAppContextMenuClose,
   onAutoDownloadUpdatesChange,
   onCheckForUpdates,
   onDownloadUpdate,
@@ -53,8 +49,14 @@ export const AppDialogs = memo(function AppDialogs({
   onVideoExportCancel,
   onInstallUpdate,
 }: AppDialogsProps) {
-  const { settingsOpen, settingsSection, setSettingsOpen, setSettingsSection } =
-    useShellEditorState();
+  const {
+    appContextMenu,
+    setAppContextMenu,
+    settingsOpen,
+    settingsSection,
+    setSettingsOpen,
+    setSettingsSection,
+  } = useShellEditorState();
 
   const {
     exportDialogOpen,
@@ -119,7 +121,10 @@ export const AppDialogs = memo(function AppDialogs({
           onCancel={onVideoExportCancel}
         />
       ) : null}
-      <AppContextMenu menu={appContextMenu} onClose={onAppContextMenuClose} />
+      <AppContextMenu
+        menu={appContextMenu}
+        onClose={() => setAppContextMenu(null)}
+      />
       <Toaster
         position="bottom-left"
         toastOptions={{

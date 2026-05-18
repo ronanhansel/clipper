@@ -827,6 +827,7 @@ export const FramePreview = memo(function FramePreview({
                     activeShapeTool={activeShapeTool}
                     editingTextObjectId={interactiveEditingTextObjectId}
                     hideNullObjects={sceneWrap.hideNullObjects}
+                    flattenComposition={sceneWrap.flattenComposition}
                     focusPicking={
                       !isPlaying &&
                       (interactiveFocusPicking || interactiveTrackerPicking)

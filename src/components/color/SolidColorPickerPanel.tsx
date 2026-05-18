@@ -179,26 +179,29 @@ export function SolidColorPickerPanel({
   return (
     <>
       <div
-        ref={boardRef}
         className={
           isCompact
-            ? "relative h-[132px] touch-none cursor-crosshair overflow-hidden rounded-lg"
-            : "relative h-[146px] touch-none cursor-crosshair overflow-hidden rounded-xl"
+            ? "relative h-[132px] touch-none cursor-crosshair"
+            : "relative h-[146px] touch-none cursor-crosshair"
         }
-        style={{
-          background: `linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, transparent), hsl(${snapshot.hue} 100% 50%)`,
-        }}
         onPointerDown={startBoardDrag}
         onPointerMove={moveBoardDrag}
         onPointerUp={endBoardDrag}
         onPointerCancel={endBoardDrag}
       >
+        <div
+          ref={boardRef}
+          className="absolute inset-0 overflow-hidden rounded-md"
+          style={{
+            background: `linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, transparent), hsl(${snapshot.hue} 100% 50%)`,
+          }}
+        />
         <span
           ref={boardDotRef}
           className={
             isCompact
-              ? "pointer-events-none absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow-[0_0_0_1px_rgba(0,0,0,0.65)] will-change-[left,top]"
-              : "pointer-events-none absolute h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow-[0_0_0_1px_rgba(0,0,0,0.65)] will-change-[left,top]"
+              ? "pointer-events-none absolute h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow-[0_0_0_1px_rgba(0,0,0,0.65)] will-change-[left,top]"
+              : "pointer-events-none absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full border-[3px] border-white shadow-[0_0_0_1px_rgba(0,0,0,0.65)] will-change-[left,top]"
           }
           style={{
             left: `${hexToHsv(snapshot.color).s * 100}%`,

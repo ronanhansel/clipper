@@ -11,6 +11,8 @@ import type {
   RichTextSegment,
 } from "../../../core/types";
 import { DomBackend } from "../backends/DomBackend";
+import { RasterBackend } from "../backends/RasterBackend";
+import type { CompositionBackend } from "../backends/CompositionBackend";
 import { useCompositionCache } from "../cache/useCompositionCache";
 import { renderCompositionPreview } from "../render/sceneRender";
 import { FRAME_HEIGHT, FRAME_WIDTH } from "../../../core/types";
@@ -23,6 +25,13 @@ type CompositionCompositorProps = {
   canSelect: boolean;
   editingTextObjectId: string | null;
   exportTileFrameBounds?: ExportTileFrameBounds;
+  /**
+   * When true the composition is rendered as a sealed flat output via
+   * `RasterBackend`. When false the composition exposes its live React
+   * tree via `DomBackend` for in-place editing. Direct mode passes true,
+   * Compose mode passes false.
+   */
+  flatten: boolean;
   focusPicking: boolean;
   frameScale: number;
   hideNullObjects?: boolean;
@@ -67,8 +76,11 @@ export const CompositionCompositor = memo(function CompositionCompositor(
     viewport: { width: FRAME_WIDTH, height: FRAME_HEIGHT },
     frameScale: props.frameScale,
   });
+  const Backend: CompositionBackend = props.flatten
+    ? RasterBackend
+    : DomBackend;
   return (
-    <DomBackend
+    <Backend
       active={props.active}
       activeShapeTool={props.activeShapeTool}
       animationsEnabled={props.animationsEnabled}

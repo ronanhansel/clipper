@@ -46,6 +46,13 @@ export type FramePreviewSceneContext = {
  * composition. Compose mode disables every wrapper (the composition is the
  * unit being edited); Direct mode enables them all (the composition is being
  * placed in a scene).
+ *
+ * `flattenComposition` decouples "treat composition as a flat sealed frame"
+ * from `cameraEnabled` ("apply scene camera transform"). Direct sets both
+ * true today, but a future Direct mode could keep flatten on while disabling
+ * the scene camera. Consumers MUST use the field that matches their intent:
+ *   - `cameraEnabled`        → "should I apply the scene camera transform?"
+ *   - `flattenComposition`   → "is the composition a sealed/flat output?"
  */
 export type SceneWrapConfig = {
   cameraEnabled: boolean;
@@ -53,6 +60,7 @@ export type SceneWrapConfig = {
   transitionsEnabled: boolean;
   motionEnabled: boolean;
   hideNullObjects: boolean;
+  flattenComposition: boolean;
 };
 
 export function sceneWrapConfigForMode(mode: TimelineMode): SceneWrapConfig {
@@ -63,6 +71,7 @@ export function sceneWrapConfigForMode(mode: TimelineMode): SceneWrapConfig {
     transitionsEnabled: direct,
     motionEnabled: direct,
     hideNullObjects: direct,
+    flattenComposition: direct,
   };
 }
 

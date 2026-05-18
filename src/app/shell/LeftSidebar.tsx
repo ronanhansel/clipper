@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useRef } from "react";
 import { Folder, Sparkles } from "lucide-react";
 import {
   segmentedTabActive,
@@ -8,28 +8,21 @@ import {
 import { ComposeLeftPanel } from "../../components/compose/ComposeLeftPanel";
 import { Bin, type BinProps } from "../../components/Bin";
 import { ToolsPanel } from "../../components/ToolsPanel";
-import type {
-  EditorState,
-  FrameObject,
-  Part,
-  TimelineMode,
-} from "../../core/types";
-import type { LeftPanelTab } from "../types";
+import type { EditorState, FrameObject, Part } from "../../core/types";
+import {
+  useEditorStore,
+  useSelectionEditorState,
+  useShellEditorState,
+} from "../state/editorStore";
 
 type LeftSidebarProps = {
-  composeMode: boolean;
   effectsPanelState: EditorState["effectsPanelState"];
   hasActiveComposition: boolean;
-  isPlaying: boolean;
-  leftPanelTab: LeftPanelTab;
   binProps: BinProps;
   part: Part;
-  selectedObjectIds: string[];
-  timelineMode: TimelineMode;
   onEffectsPanelStateChange: (
     state: NonNullable<EditorState["effectsPanelState"]>,
   ) => void;
-  onLeftPanelTabChange: (tab: LeftPanelTab) => void;
   onReorderComposeObjects: (objectIds: string[], targetIndex: number) => void;
   onSelectComposeLayerObjects: (objects: FrameObject[]) => void;
   onSelectComposeFrameSettings: () => void;
@@ -40,8 +33,50 @@ type LeftSidebarProps = {
 const noopHoverObject = () => undefined;
 
 export function LeftSidebar(props: LeftSidebarProps) {
-  return <MemoizedLeftSidebar {...props} />;
+  const { leftPanelTab, setLeftPanelTab } = useShellEditorState();
+  const timelineMode = useEditorStore((s) => s.timelineMode);
+  const isPlaying = useEditorStore((s) => s.isPlaying);
+  const { selectedComposeObjectIds } = useSelectionEditorState();
+  const composeMode = timelineMode === "compose";
+
+  const playbackFreezeRef = useRef({
+    part: props.part,
+    selectedComposeObjectIds,
+  });
+  if (!isPlaying)
+    playbackFreezeRef.current = {
+      part: props.part,
+      selectedComposeObjectIds,
+    };
+  const part = isPlaying ? playbackFreezeRef.current.part : props.part;
+  const selectedObjectIds = isPlaying
+    ? playbackFreezeRef.current.selectedComposeObjectIds
+    : selectedComposeObjectIds;
+
+  return (
+    <MemoizedLeftSidebar
+      {...props}
+      composeMode={composeMode}
+      isPlaying={isPlaying}
+      leftPanelTab={leftPanelTab}
+      onLeftPanelTabChange={setLeftPanelTab}
+      part={part}
+      selectedObjectIds={selectedObjectIds}
+      timelineMode={timelineMode}
+    />
+  );
 }
+
+type MemoizedLeftSidebarProps = LeftSidebarProps & {
+  composeMode: boolean;
+  isPlaying: boolean;
+  leftPanelTab: ReturnType<typeof useShellEditorState>["leftPanelTab"];
+  onLeftPanelTabChange: ReturnType<
+    typeof useShellEditorState
+  >["setLeftPanelTab"];
+  selectedObjectIds: string[];
+  timelineMode: ReturnType<typeof useShellEditorState>["timelineMode"];
+};
 
 const MemoizedLeftSidebar = memo(
   function LeftSidebarContent({
@@ -60,7 +95,7 @@ const MemoizedLeftSidebar = memo(
     onSelectComposeFrameSettings,
     onToggleComposeLayerHidden,
     onToggleComposeLayerLocked,
-  }: LeftSidebarProps) {
+  }: MemoizedLeftSidebarProps) {
     return (
       <aside className="flex min-h-0 flex-col overflow-hidden border-r border-[#2d313b] bg-[#171920] p-4">
         <div

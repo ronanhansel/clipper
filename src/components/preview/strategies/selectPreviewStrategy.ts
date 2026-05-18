@@ -93,7 +93,7 @@ export function selectPreviewStrategy(
     authoringActive,
   } = input;
 
-  if (!framePreviewProps.sceneWrap.cameraEnabled) {
+  if (framePreviewProps.sceneWrap.flattenComposition === false) {
     return { kind: "live-dom", reason: "compose-mode" };
   }
 

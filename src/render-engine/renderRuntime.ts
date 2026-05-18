@@ -140,7 +140,14 @@ export function buildFrameObjectParentTransformLookup(
       typeof evaluated.renderStyle.transform === "string"
         ? evaluated.renderStyle.transform
         : "";
-    const ownTransform = `${boundsTranslate} ${animationTransform}`.trim();
+    // a static style.transform on the parent (e.g. base scale) is rendered
+    // on the parent element and must compose into the child's inherited chain
+    const staticTransform =
+      typeof object.style.transform === "string" ? object.style.transform : "";
+    const ownTransform =
+      `${boundsTranslate} ${animationTransform} ${staticTransform}`
+        .replace(/\s+/g, " ")
+        .trim();
     const parent = object.parentId ? byId.get(object.parentId) : null;
     const parentFull = parent ? fullTransform(parent) : "";
     const value = `${parentFull} ${ownTransform}`.trim();
@@ -201,7 +208,6 @@ export function evaluateBackgroundLayer(
 
 export function isTimeSensitiveFrameObject(object: FrameObject) {
   return (
-    object.type === "code" ||
     Boolean(object.animations?.length) ||
     Boolean(object.template && !object.template.static) ||
     Boolean(object.tracks && Object.keys(object.tracks).length > 0)
@@ -221,10 +227,6 @@ function renderStyleFromPropertyTracks(object: FrameObject): RenderStyle {
     shadowStyle.filterPart,
   );
   const background = resolveBackgroundStyle(object.style.backgroundColor);
-  const textStrokeStyle = textStrokeRenderStyle(
-    object,
-    readObjectStrokeRecord(object),
-  );
   return {
     left: object.bounds.x,
     top: object.bounds.y,
@@ -234,17 +236,10 @@ function renderStyleFromPropertyTracks(object: FrameObject): RenderStyle {
     color: styleValue(object.style.color),
     backgroundColor: background.backgroundColor,
     backgroundImage: background.backgroundImage,
-    fontSize: styleValue(object.style.fontSize),
-    fontWeight: styleValue(object.style.fontWeight),
-    lineHeight: styleValue(object.style.lineHeight),
-    letterSpacing: styleValue(object.style.letterSpacing),
-    fontFamily: styleValue(object.style.fontFamily),
     transform,
     filter,
     boxShadow: shadowStyle.boxShadow,
     textShadow: shadowStyle.textShadow,
-    WebkitTextStroke: textStrokeStyle.webkitTextStroke,
-    paintOrder: textStrokeStyle.paintOrder,
   };
 }
 
@@ -287,33 +282,6 @@ function readObjectShadowRecord(object: FrameObject): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
-}
-
-function readObjectStrokeRecord(object: FrameObject): Record<string, unknown> {
-  const value = (object as unknown as Record<string, unknown>).stroke;
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-}
-
-function textStrokeRenderStyle(
-  object: FrameObject,
-  stroke: Record<string, unknown>,
-): { webkitTextStroke?: string; paintOrder?: string } {
-  if (object.type !== "text") return {};
-  if (!stroke || stroke.enabled === false) return {};
-  const widthRaw =
-    typeof stroke.width === "number" && Number.isFinite(stroke.width)
-      ? stroke.width
-      : 0;
-  const width = Math.max(0, widthRaw);
-  if (width <= 0) return {};
-  const rgba = shadowColorToRgba(stroke.color, stroke.alpha);
-  if (!rgba) return {};
-  return {
-    webkitTextStroke: `${width.toFixed(2)}px ${rgba}`,
-    paintOrder: "stroke fill",
-  };
 }
 
 function transformStyleFromRecord(record: Record<string, unknown>) {
@@ -553,7 +521,6 @@ export function interpolate(
 }
 
 export function easeProgress(value: number, ease: MotionEase | undefined) {
-  if (ease === "snap") return value >= 1 ? 1 : 0;
   if (ease === "easeOut" || ease === "circOut") return easeOutCubic(value);
   if (ease === "easeIn") return value * value * value;
   if (ease === "easeInOut") return easeInOutCubic(value);

@@ -54,6 +54,7 @@ type SceneCompositorProps = {
   activeShapeTool: ComposeDrawTool | null | undefined;
   editingTextObjectId: string | null;
   hideNullObjects: boolean;
+  flattenComposition: boolean;
   focusPicking: boolean;
   onObjectPointerDown: (
     event: PointerEvent<HTMLDivElement>,
@@ -100,6 +101,7 @@ export const SceneCompositor = memo(function SceneCompositor({
   activeShapeTool,
   editingTextObjectId,
   hideNullObjects,
+  flattenComposition,
   focusPicking,
   onObjectPointerDown,
   onObjectContextMenu,
@@ -168,6 +170,7 @@ export const SceneCompositor = memo(function SceneCompositor({
                 canSelect={canSelect}
                 editingTextObjectId={editingTextObjectId}
                 exportTileFrameBounds={exportTileFrameBounds}
+                flatten={flattenComposition}
                 focusPicking={focusPicking}
                 frameScale={frameScale}
                 hideNullObjects={hideNullObjects}

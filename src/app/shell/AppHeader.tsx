@@ -5,38 +5,35 @@ import {
   appDragRegion,
   appNoDragRegion,
 } from "../config";
+import { useShellEditorState } from "../state/editorStore";
 
 type AppHeaderProps = {
   projectName: string;
-  projectNameDraft: string;
   lastSavedAt: number | null;
-  renamingProject: boolean;
   sceneName: string;
   onCancelProjectRename: () => void;
   onCloseProject: () => void;
   onCommitProjectRename: () => void;
   onExportOpen: () => void;
   onOpenProject: () => void;
-  onProjectNameDraftChange: (name: string) => void;
   onProjectTitleContextMenu: (event: ReactMouseEvent<HTMLDivElement>) => void;
   onSettingsOpen: () => void;
 };
 
 export const AppHeader = memo(function AppHeader({
   projectName,
-  projectNameDraft,
   lastSavedAt,
-  renamingProject,
   sceneName,
   onCancelProjectRename,
   onCloseProject,
   onCommitProjectRename,
   onExportOpen,
   onOpenProject,
-  onProjectNameDraftChange,
   onProjectTitleContextMenu,
   onSettingsOpen,
 }: AppHeaderProps) {
+  const { renamingProject, projectNameDraft, setProjectNameDraft } =
+    useShellEditorState();
   const savedTimeLabel = lastSavedAt
     ? `Saved ${formatSavedTime(lastSavedAt)}`
     : null;
@@ -60,7 +57,7 @@ export const AppHeader = memo(function AppHeader({
             className="h-7 w-[240px] border-[var(--clipper-accent)] bg-[#171920] px-2 py-0 text-center text-[14px] font-bold"
             value={projectNameDraft}
             onBlur={onCommitProjectRename}
-            onChange={(event) => onProjectNameDraftChange(event.target.value)}
+            onChange={(event) => setProjectNameDraft(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === "Enter") onCommitProjectRename();
               if (event.key === "Escape") onCancelProjectRename();

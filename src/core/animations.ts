@@ -129,15 +129,21 @@ function collectEnabledTracks(animations: LayerAnimation[]) {
   for (const animation of animations) {
     if (animation.enabled === false || !Array.isArray(animation.tracks))
       continue;
+    const fallbackEase = animation.options.ease;
     for (const track of animation.tracks) {
+      const points = track.points.map((point) =>
+        point.easingToNext === undefined && fallbackEase !== undefined
+          ? { ...point, easingToNext: fallbackEase }
+          : point,
+      );
       const existing = tracks.get(track.property);
       if (!existing) {
-        tracks.set(track.property, { ...track, points: [...track.points] });
+        tracks.set(track.property, { ...track, points });
         continue;
       }
       tracks.set(track.property, {
         ...existing,
-        points: [...existing.points, ...track.points],
+        points: [...existing.points, ...points],
       });
     }
   }

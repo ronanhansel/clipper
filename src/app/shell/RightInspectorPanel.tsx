@@ -1,12 +1,9 @@
 import { memo, type ReactNode } from "react";
 import { sectionTitle } from "../config";
-import type { RightPanelTab } from "../types";
 
 type RightInspectorPanelProps = {
-  activeTab: RightPanelTab;
   children: ReactNode;
   validationErrors: string[];
-  onTabChange: (tab: RightPanelTab) => void;
 };
 
 export const RightInspectorPanel = memo(function RightInspectorPanel({

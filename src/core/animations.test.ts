@@ -165,6 +165,66 @@ describe("evaluateLayerAnimations with canonical tracks", () => {
     expect(result.transform).toContain("rotate(45deg)");
   });
 
+  it("falls back to options.ease when keyframe easingToNext is unset", () => {
+    const linearAnimations: LayerAnimation[] = [
+      {
+        id: "fade-linear",
+        tracks: [
+          {
+            property: "opacity",
+            valueType: "number",
+            points: [
+              { id: "opacity:0", time: 0, value: 0 },
+              { id: "opacity:1", time: 1, value: 1 },
+            ],
+          },
+        ],
+        options: { duration: 1 },
+      },
+    ];
+    const easedAnimations: LayerAnimation[] = [
+      {
+        id: "fade-eased",
+        tracks: [
+          {
+            property: "opacity",
+            valueType: "number",
+            points: [
+              { id: "opacity:0", time: 0, value: 0 },
+              { id: "opacity:1", time: 1, value: 1 },
+            ],
+          },
+        ],
+        options: { duration: 1, ease: "easeOut" },
+      },
+    ];
+
+    const linear = evaluateLayerAnimations(linearAnimations, 0.5).opacity;
+    const eased = evaluateLayerAnimations(easedAnimations, 0.5).opacity;
+    expect(linear).toBeCloseTo(0.5);
+    expect(eased).toBeGreaterThan(0.5);
+  });
+
+  it("prefers per-point easingToNext over options.ease", () => {
+    const animations: LayerAnimation[] = [
+      {
+        id: "fade",
+        tracks: [
+          {
+            property: "opacity",
+            valueType: "number",
+            points: [
+              { id: "opacity:0", time: 0, value: 0, easingToNext: "linear" },
+              { id: "opacity:1", time: 1, value: 1, easingToNext: "linear" },
+            ],
+          },
+        ],
+        options: { duration: 1, ease: "easeOut" },
+      },
+    ];
+    expect(evaluateLayerAnimations(animations, 0.5).opacity).toBeCloseTo(0.5);
+  });
+
   it("evaluates discrete color tracks via hold", () => {
     const animations: LayerAnimation[] = [
       {

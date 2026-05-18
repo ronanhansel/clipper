@@ -305,6 +305,7 @@ describe("frame preview render model", () => {
       transitionsEnabled: false,
       motionEnabled: false,
       hideNullObjects: false,
+      flattenComposition: false,
     });
     // adjustments are disabled in compose, so sceneTime is not warped
     expect(model.adjustedSceneTime).toBe(3);
