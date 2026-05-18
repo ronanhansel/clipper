@@ -106,6 +106,7 @@ import type {
 } from "../../core/effects/types";
 import {
   getMasterTimelineClockSnapshot,
+  isMasterClockLive,
   subscribeMasterTimelineClock,
 } from "../../app/features/playback/playbackTimeStore";
 import {
@@ -2597,7 +2598,7 @@ export const FrameObjectView = memo(function FrameObjectView({
   const textWrapClass =
     textBoxLayout === "overflow" ? "whitespace-pre" : "whitespace-pre-wrap";
   const style = {
-    ...object.style,
+    ...evaluatedObject.style,
     ...animation.style,
     left:
       renderMode === "export"
@@ -2989,8 +2990,8 @@ function useSplitTextLiveTime(
       if (!active) return () => {};
       return subscribeMasterTimelineClock(() => {
         const snap = getMasterTimelineClockSnapshot();
-        if (snap.source !== "scrub" && !snap.playing) return;
-        const next = snap.sceneTime + liveTimeOffset;
+        if (!isMasterClockLive(snap)) return;
+        const next = snap.adjustedSceneTime + liveTimeOffset;
         if (Math.abs(next - liveRef.current) < 0.001) return;
         liveRef.current = next;
         onChange();
@@ -3001,8 +3002,7 @@ function useSplitTextLiveTime(
   );
   if (!active) return fallback;
   const snap = getMasterTimelineClockSnapshot();
-  if (snap.source === "scrub" || snap.playing) return liveSnapshot;
-  return fallback;
+  return isMasterClockLive(snap) ? liveSnapshot : fallback;
 }
 
 type SplitTextToken = {

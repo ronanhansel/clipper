@@ -12,6 +12,7 @@ import {
 } from "../../../components/ui/input";
 import {
   advanceTimeSensitiveSceneTime,
+  applyAdjustmentLayersToSceneTime,
   applyAdjustmentLayersToVisualStyle,
   getSceneTimeForTimeSensitiveDisplayTime,
   getTimeSensitiveDisplayDuration,
@@ -34,6 +35,7 @@ import type {
   CompositionClip,
   EditorState,
   TimelineLayerState,
+  TimelineMode,
   TimelinePart,
   TransitionLayer,
 } from "../../../core/types";
@@ -41,6 +43,7 @@ import type { PlaybackClock } from "../../types";
 import type { EditorStore } from "../../state/editorStore";
 import type { PrerenderCacheInterestReason } from "../preview/usePrerenderCache";
 import { publishMasterTimelineClock } from "./playbackTimeStore";
+import { sceneWrapConfigForMode } from "../../state/framePreviewRenderModel";
 
 type PlaybackControllerOptions = {
   compositions: CompositionClip[];
@@ -69,6 +72,7 @@ type PlaybackControllerOptions = {
   timeline: TimelinePart[];
   timelineLayers?: TimelineLayerState;
   timelineEndPaddingFraction: number;
+  timelineMode: TimelineMode;
   transitionLayers?: TransitionLayer[];
   timelineScrubPausedPlaybackRef: RefObject<boolean>;
   timelineScrubbingRef: RefObject<boolean>;
@@ -101,6 +105,7 @@ export function usePlaybackController({
   timeline,
   timelineLayers,
   timelineEndPaddingFraction,
+  timelineMode,
   transitionLayers,
   timelineScrubPausedPlaybackRef,
   timelineScrubbingRef,
@@ -139,6 +144,25 @@ export function usePlaybackController({
       : getTimeSensitiveDisplayTime(time, visibleSceneAdjustmentLayers);
   }
 
+  /**
+   * Run the active scene-level adjustment layers to produce the
+   * adjustment-aware scene time. Published on the master clock alongside the
+   * raw scene time so every comp-internal live consumer (text animators,
+   * stroke overlays, live post-process) sees a single, pre-determined time
+   * axis. Mirrors `framePreviewRenderModel`'s call exactly so the live
+   * channel and the React-rendered frame stay in lockstep.
+   *
+   * Adjustments are a Direct-mode wrapper around the composition (see
+   * `sceneWrapConfigForMode`). In Compose mode the composition IS the unit
+   * being edited, so adjustments are off and the adjusted channel collapses
+   * to the raw scene time. This matches `framePreviewRenderModel` exactly —
+   * the rendered frame and the live channel honor the same boundary.
+   */
+  function toAdjustedSceneTime(time: number) {
+    if (!sceneWrapConfigForMode(timelineMode).adjustmentsEnabled) return time;
+    return applyAdjustmentLayersToSceneTime(time, visibleSceneAdjustmentLayers);
+  }
+
   function toSceneTimeFromPlaybackDisplay(displayTime: number) {
     return useLocalPlaybackLabels
       ? playbackStart + clamp(displayTime, 0, playbackDuration)
@@ -167,6 +191,7 @@ export function usePlaybackController({
     const displayTime = toPlaybackDisplayTime(time);
     publishMasterTimelineClock({
       sceneTime: time,
+      adjustedSceneTime: toAdjustedSceneTime(time),
       displayTime,
       playing: isPlayingRef.current,
       source,
@@ -334,6 +359,7 @@ export function usePlaybackController({
     else {
       publishMasterTimelineClock({
         sceneTime: nextTime,
+        adjustedSceneTime: toAdjustedSceneTime(nextTime),
         displayTime: toPlaybackDisplayTime(nextTime),
         playing: isPlayingRef.current,
         source: "scrub",
@@ -379,6 +405,7 @@ export function usePlaybackController({
     setIsPlaying(false);
     publishMasterTimelineClock({
       sceneTime: settledTime,
+      adjustedSceneTime: toAdjustedSceneTime(settledTime),
       displayTime: toPlaybackDisplayTime(settledTime),
       playing: false,
       source: "idle",
@@ -403,6 +430,7 @@ export function usePlaybackController({
     isPlayingRef.current = true;
     publishMasterTimelineClock({
       sceneTime: currentSceneTimeRef.current,
+      adjustedSceneTime: toAdjustedSceneTime(currentSceneTimeRef.current),
       displayTime: toPlaybackDisplayTime(currentSceneTimeRef.current),
       playing: true,
       source: "playback",

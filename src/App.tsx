@@ -850,6 +850,7 @@ function AppContent({
     timeline,
     timelineLayers,
     timelineEndPaddingFraction,
+    timelineMode,
     transitionLayers: visibleSceneTransitionLayers,
     timelineScrubPausedPlaybackRef,
     timelineScrubbingRef,

@@ -1,19 +1,10 @@
-import {
-  memo,
-  useEffect,
-  useMemo,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import type { Bounds, FrameObject, StrokeEffect } from "../../core/types";
 import {
   STROKE_DEFAULTS,
   evaluateObjectState,
 } from "../../core/propertyRegistry";
-import {
-  getMasterTimelineClockSnapshot,
-  subscribeMasterTimelineClock,
-} from "../../app/features/playback/playbackTimeStore";
+import { useAdjustedSceneTime } from "../../app/features/playback/playbackTimeStore";
 
 const cornerRadiusStyleKeys = [
   "borderRadius",
@@ -69,7 +60,7 @@ export const StrokeOverlay = memo(function StrokeOverlay({
   liveScrubClock?: boolean;
   fallbackTime?: number;
 }) {
-  const liveTime = useStrokeOverlayClock(liveScrubClock, fallbackTime);
+  const liveTime = useAdjustedSceneTime(liveScrubClock, fallbackTime);
   const [previewStroke, setPreviewStroke] = useState<StrokeEffect | null>(null);
   const [previewBounds, setPreviewBounds] = useState<Bounds | null>(null);
 
@@ -225,28 +216,6 @@ function pathPerimeter(width: number, height: number, radius: number) {
   const straight = 2 * (width - 2 * r) + 2 * (height - 2 * r);
   const corners = 2 * Math.PI * r;
   return straight + corners;
-}
-
-function useStrokeOverlayClock(enabled: boolean, fallback: number) {
-  return useSyncExternalStore(
-    (onChange) => {
-      if (!enabled) return () => {};
-      return subscribeMasterTimelineClock(() => {
-        const snap = getMasterTimelineClockSnapshot();
-        if (snap.source !== "playback" && snap.source !== "scrub") return;
-        onChange();
-      });
-    },
-    () => {
-      if (!enabled) return fallback;
-      const snap = getMasterTimelineClockSnapshot();
-      if (snap.source === "playback" || snap.source === "scrub") {
-        return snap.displayTime;
-      }
-      return fallback;
-    },
-    () => fallback,
-  );
 }
 
 function patternForStyle(
