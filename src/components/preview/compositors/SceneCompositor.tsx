@@ -81,6 +81,14 @@ type SceneCompositorProps = {
     cameraObjectId: string,
     next: CameraObjectProps,
   ) => void;
+  onCameraPathEaseChange?: (
+    cameraObjectId: string,
+    trackPath: string,
+    pointIndex: number,
+    side: "in" | "out",
+    nextCpX: number,
+  ) => void;
+  onSelectObject?: (objectId: string | null) => void;
 };
 
 export const SceneCompositor = memo(function SceneCompositor({
@@ -116,6 +124,8 @@ export const SceneCompositor = memo(function SceneCompositor({
   onTextObjectDoubleClick,
   selectedObjectId,
   onCameraPropsChange,
+  onCameraPathEaseChange,
+  onSelectObject,
 }: SceneCompositorProps) {
   useLayoutEffect(() => {
     const element = cameraRef.current;
@@ -195,6 +205,8 @@ export const SceneCompositor = memo(function SceneCompositor({
                 onTextObjectDoubleClick={onTextObjectDoubleClick}
                 selectedObjectId={selectedObjectId}
                 onCameraPropsChange={onCameraPropsChange}
+                onCameraPathEaseChange={onCameraPathEaseChange}
+                onSelectObject={onSelectObject}
               />
             ))
           )}

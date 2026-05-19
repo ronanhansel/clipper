@@ -106,16 +106,17 @@ describe("cameraObjectPropsToPreviewTransform", () => {
   it("inverts position", () => {
     const t = cameraObjectPropsToPreviewTransform({
       ...DEFAULT_CAMERA_OBJECT_PROPS,
-      position: { x: 200, y: -100, z: 1000 },
+      position: { x: 200, y: -100, z: DEFAULT_CAMERA_OBJECT_PROPS.position.z },
     });
     expect(t.x).toBe(-200);
     expect(t.y).toBe(100);
     expect(t.z).toBe(0);
   });
   it("camera moving closer produces positive translateZ", () => {
+    const closer = DEFAULT_CAMERA_OBJECT_PROPS.position.z - 400;
     const t = cameraObjectPropsToPreviewTransform({
       ...DEFAULT_CAMERA_OBJECT_PROPS,
-      position: { x: 0, y: 0, z: 600 },
+      position: { x: 0, y: 0, z: closer },
     });
     expect(t.z).toBe(400);
   });

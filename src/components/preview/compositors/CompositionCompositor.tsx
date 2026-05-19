@@ -68,12 +68,21 @@ type CompositionCompositorProps = {
     cameraObjectId: string,
     next: CameraObjectProps,
   ) => void;
+  onCameraPathEaseChange?: (
+    cameraObjectId: string,
+    trackPath: string,
+    pointIndex: number,
+    side: "in" | "out",
+    nextCpX: number,
+  ) => void;
+  onSelectObject?: (objectId: string | null) => void;
 };
 
 export const CompositionCompositor = memo(function CompositionCompositor(
   props: CompositionCompositorProps,
 ) {
   const compositionRef = useRef<HTMLDivElement | null>(null);
+  const pipBackendRef = useRef<HTMLDivElement | null>(null);
   const cache = useCompositionCache();
   const compositionId = props.part.compositionId ?? props.part.id;
   cache.getCacheKey(compositionId);
@@ -92,29 +101,17 @@ export const CompositionCompositor = memo(function CompositionCompositor(
     Boolean(props.onCameraPropsChange) &&
     compositionHasCameraLayer(props.part);
 
-  if (showAuthorView && props.onCameraPropsChange) {
-    return (
-      <div className="absolute inset-0">
-        <ComposeAuthorView
-          part={props.part}
-          selectedObjectId={props.selectedObjectId ?? null}
-          onCameraPropsChange={props.onCameraPropsChange}
-          localTime={props.localTime}
-        />
-      </div>
-    );
-  }
-
-  return (
+  const backendNode = (
     <Backend
       active={props.active}
-      activeShapeTool={props.activeShapeTool}
+      activeShapeTool={showAuthorView ? null : props.activeShapeTool}
       animationsEnabled={props.animationsEnabled}
-      canSelect={props.canSelect}
+      cameraHandledExternally={showAuthorView}
+      canSelect={showAuthorView ? false : props.canSelect}
       duration={composition.duration}
-      editingTextObjectId={props.editingTextObjectId}
+      editingTextObjectId={showAuthorView ? null : props.editingTextObjectId}
       exportTileFrameBounds={props.exportTileFrameBounds}
-      focusPicking={props.focusPicking}
+      focusPicking={showAuthorView ? false : props.focusPicking}
       frameScale={props.frameScale}
       hideNullObjects={props.hideNullObjects ?? false}
       hostRef={compositionRef}
@@ -130,4 +127,59 @@ export const CompositionCompositor = memo(function CompositionCompositor(
       onTextObjectDoubleClick={props.onTextObjectDoubleClick}
     />
   );
+
+  // PIP renders a second, fully-sealed DomBackend instance so the same
+  // React subtree isn't portaled into two CSS3D targets at once. All
+  // interactions are forced off; the PIP is preview-only.
+  const pipBackendNode = (
+    <DomBackend
+      active={false}
+      activeShapeTool={null}
+      animationsEnabled={props.animationsEnabled}
+      canSelect={false}
+      duration={composition.duration}
+      editingTextObjectId={null}
+      exportTileFrameBounds={props.exportTileFrameBounds}
+      focusPicking={false}
+      frameScale={props.frameScale}
+      hideNullObjects={props.hideNullObjects ?? false}
+      hostRef={pipBackendRef}
+      isPlaying={props.isPlaying}
+      localTime={composition.localTime}
+      part={props.part}
+      renderClockSceneTime={props.renderClockSceneTime}
+      renderMode={props.renderMode}
+      onObjectPointerDown={NOOP_OBJECT_POINTER}
+      onObjectContextMenu={undefined}
+      onTextEditCommit={NOOP_TEXT_COMMIT}
+      onTextEditEnd={undefined}
+      onTextObjectDoubleClick={NOOP_OBJECT_DOUBLE_CLICK}
+    />
+  );
+
+  if (showAuthorView && props.onCameraPropsChange) {
+    return (
+      <div className="absolute inset-0">
+        <ComposeAuthorView
+          part={props.part}
+          selectedObjectId={props.selectedObjectId ?? null}
+          onCameraPropsChange={props.onCameraPropsChange}
+          onCameraPathEaseChange={props.onCameraPathEaseChange}
+          onSelectObject={props.onSelectObject}
+          localTime={props.localTime}
+          renderComposition={() => backendNode}
+          renderPipComposition={() => pipBackendNode}
+        />
+      </div>
+    );
+  }
+
+  return backendNode;
 });
+
+const NOOP_OBJECT_POINTER: CompositionCompositorProps["onObjectPointerDown"] =
+  () => {};
+const NOOP_TEXT_COMMIT: CompositionCompositorProps["onTextEditCommit"] =
+  () => {};
+const NOOP_OBJECT_DOUBLE_CLICK: CompositionCompositorProps["onTextObjectDoubleClick"] =
+  () => {};

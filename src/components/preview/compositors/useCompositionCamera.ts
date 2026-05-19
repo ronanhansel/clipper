@@ -14,6 +14,7 @@ import {
   CAMERA_PERSPECTIVE,
   type CameraPreviewTransform,
 } from "../../../core/camera";
+import { evaluateObjectState } from "../../../core/propertyRegistry";
 import {
   DEFAULT_CAMERA_OBJECT_PROPS,
   type CameraObjectProps,
@@ -29,7 +30,7 @@ export type CompositionCameraInput = {
 export function useCompositionCamera(
   input: CompositionCameraInput,
 ): CameraPreviewTransform | null {
-  const props = getActiveCameraObjectProps(input.part);
+  const props = getActiveCameraObjectProps(input.part, input.localTime);
   if (!props) return null;
   return cameraObjectPropsToPreviewTransform(props);
 }
@@ -40,10 +41,15 @@ export function useCompositionCamera(
  */
 export function getActiveCameraObjectProps(
   part: CompositionClip,
+  localTime?: number,
 ): CameraObjectProps | null {
   const cameraObject = findActiveCameraObject(part);
   if (!cameraObject) return null;
-  return readCameraObjectProps(cameraObject);
+  const evaluated =
+    localTime !== undefined && cameraObject.tracks
+      ? evaluateObjectState(cameraObject, localTime)
+      : cameraObject;
+  return readCameraObjectProps(evaluated);
 }
 
 export function findActiveCameraObject(

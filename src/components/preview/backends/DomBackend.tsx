@@ -23,6 +23,7 @@ export const DomBackend: CompositionBackend = function DomBackend({
   activeShapeTool,
   animationsEnabled,
   canSelect,
+  cameraHandledExternally,
   editingTextObjectId,
   exportTileFrameBounds,
   focusPicking,
@@ -59,14 +60,15 @@ export const DomBackend: CompositionBackend = function DomBackend({
     part,
     localTime,
   });
-  const innerCameraStyle = innerCamera
-    ? {
-        transform: formatCameraPreviewTransform(innerCamera),
-        filter: formatCameraPreviewFilter(innerCamera),
-        transformOrigin: "center center" as const,
-        transformStyle: "preserve-3d" as const,
-      }
-    : undefined;
+  const innerCameraStyle =
+    innerCamera && !cameraHandledExternally
+      ? {
+          transform: formatCameraPreviewTransform(innerCamera),
+          filter: formatCameraPreviewFilter(innerCamera),
+          transformOrigin: "center center" as const,
+          transformStyle: "preserve-3d" as const,
+        }
+      : undefined;
 
   useLayoutEffect(() => {
     syncDomAnimationsToRenderClock(

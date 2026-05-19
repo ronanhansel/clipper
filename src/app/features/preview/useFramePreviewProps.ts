@@ -87,6 +87,14 @@ export type UseFramePreviewPropsParams = {
     cameraObjectId: string,
     next: CameraObjectProps,
   ) => void;
+  onCameraPathEaseChange?: (
+    cameraObjectId: string,
+    trackPath: string,
+    pointIndex: number,
+    side: "in" | "out",
+    nextCpX: number,
+  ) => void;
+  onSelectObject?: (objectId: string | null) => void;
 };
 
 export function useFramePreviewProps({
@@ -136,6 +144,8 @@ export function useFramePreviewProps({
   commitTranslationTrackerPick,
   selectedObjectId,
   onCameraPropsChange,
+  onCameraPathEaseChange,
+  onSelectObject,
 }: UseFramePreviewPropsParams): StrategyFramePreviewProps {
   return useMemo((): StrategyFramePreviewProps => {
     return {
@@ -208,6 +218,8 @@ export function useFramePreviewProps({
       onTrackerTargetPick: commitTranslationTrackerPick,
       selectedObjectId: composeMode ? selectedObjectId : null,
       onCameraPropsChange,
+      onCameraPathEaseChange,
+      onSelectObject,
     };
   }, [
     cameraRef,
@@ -264,5 +276,6 @@ export function useFramePreviewProps({
     commitTranslationTrackerPick,
     selectedObjectId,
     onCameraPropsChange,
+    onSelectObject,
   ]);
 }

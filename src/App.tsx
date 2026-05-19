@@ -124,10 +124,13 @@ import {
   getExecutableAdjustmentLayers,
   getExecutableTransitionLayers,
 } from "./core/timeline";
+import { upsertPropertyKeyframe } from "./core/propertyRegistry";
+import { type EaseValue, getEaseControlPoints } from "./core/easing";
 import {
   FRAME_HEIGHT,
   type CameraObjectProps,
   type EditorState,
+  type FrameObject,
   type TimelineViewportState,
 } from "./core/types";
 import { FindMediaDialog } from "./components/FindMediaDialog";
@@ -147,6 +150,42 @@ const defaultEditorState: EditorState = {
   preview: defaultPreviewViewportState,
   editor: {},
 };
+
+const CAMERA_TRACK_PATHS = [
+  "props.position.x",
+  "props.position.y",
+  "props.position.z",
+  "props.rotation.x",
+  "props.rotation.y",
+  "props.rotation.z",
+  "props.fov",
+] as const;
+
+function readCameraPropAtPath(
+  next: CameraObjectProps,
+  path: (typeof CAMERA_TRACK_PATHS)[number],
+): number {
+  if (path === "props.fov") return next.fov;
+  if (path === "props.position.x") return next.position.x;
+  if (path === "props.position.y") return next.position.y;
+  if (path === "props.position.z") return next.position.z;
+  if (path === "props.rotation.x") return next.rotation.x;
+  if (path === "props.rotation.y") return next.rotation.y;
+  return next.rotation.z;
+}
+
+/**
+ * `PropertyKeyframePoint.easingToNext` admits arbitrary CSS-shaped
+ * strings on top of the named MotionEase set + tuple. `getEaseControlPoints`
+ * only knows the named/tuple cases; anything else falls back to linear.
+ */
+function normaliseEaseValue(
+  ease: import("./core/types").PropertyKeyframePoint["easingToNext"],
+): EaseValue | undefined {
+  if (ease == null) return undefined;
+  if (typeof ease === "string") return ease as EaseValue;
+  return ease;
+}
 
 function PathToastMessage({ action, path }: { action: string; path: string }) {
   const suffixLength = Math.min(32, Math.max(12, Math.floor(path.length / 3)));
@@ -1476,10 +1515,88 @@ function AppContent({
 
   const handleCameraPropsChange = useCallback(
     (cameraObjectId: string, next: CameraObjectProps) => {
-      updateObjectById(cameraObjectId, (object) => ({
-        ...object,
-        props: { ...(object.props ?? {}), ...next },
-      }));
+      updateObjectById(
+        cameraObjectId,
+        (object) => {
+          // For each per-axis path that already has a track, upsert a
+          // keyframe at the current playhead. Then write the full props
+          // bag onto the object so non-animated axes get their base value.
+          let mutated: FrameObject = {
+            ...object,
+            props: { ...(object.props ?? {}), ...next },
+          };
+          for (const path of CAMERA_TRACK_PATHS) {
+            if (!mutated.tracks?.[path]?.points.length) continue;
+            mutated = upsertPropertyKeyframe(
+              mutated,
+              path,
+              previewTime,
+              readCameraPropAtPath(next, path),
+            );
+          }
+          return mutated;
+        },
+        // Coalesce every drag-tick into one history entry. Without a
+        // historyGroup the coalescer in useProjectDocumentController
+        // can't match consecutive entries and each rAF push registers
+        // as a separate undo step.
+        { historyGroup: `camera-drag:${cameraObjectId}` },
+      );
+    },
+    [updateObjectById, previewTime],
+  );
+
+  /**
+   * Update one bezier control-point x coordinate on a camera-path
+   * keyframe's `easingToNext`. Routed from the 3D author view's path
+   * overlay.
+   *
+   * - `side === "out"`: edits cp1.x on `tracks[trackPath].points[pointIndex].easingToNext`.
+   * - `side === "in"`:  edits cp2.x on the same point (the segment
+   *   that ends at the visually-anchored keyframe).
+   *
+   * cp.y is preserved (use the timeline ease editor for vertical
+   * tweaks). Drag ticks coalesce into one undo entry per gesture via
+   * `historyGroup`.
+   */
+  const handleCameraPathEaseChange = useCallback(
+    (
+      cameraObjectId: string,
+      trackPath: string,
+      pointIndex: number,
+      side: "in" | "out",
+      nextCpX: number,
+    ) => {
+      updateObjectById(
+        cameraObjectId,
+        (object) => {
+          const tracks = object.tracks;
+          const track = tracks?.[trackPath];
+          if (!track) return object;
+          const point = track.points[pointIndex];
+          if (!point) return object;
+          const current = getEaseControlPoints(
+            normaliseEaseValue(point.easingToNext),
+          );
+          const nextCp: readonly [number, number, number, number] =
+            side === "out"
+              ? [nextCpX, current[1], current[2], current[3]]
+              : [current[0], current[1], nextCpX, current[3]];
+          const nextPoints = track.points.map((p, i) =>
+            i === pointIndex ? { ...p, easingToNext: nextCp } : p,
+          );
+          return {
+            ...object,
+            tracks: {
+              ...tracks,
+              [trackPath]: { ...track, points: nextPoints },
+            },
+          };
+        },
+        {
+          historyGroup: `camera-path-ease:${cameraObjectId}:${trackPath}:${pointIndex}:${side}`,
+        },
+      );
     },
     [updateObjectById],
   );
@@ -1811,6 +1928,8 @@ function AppContent({
     commitTranslationTrackerPick,
     selectedObjectId,
     onCameraPropsChange: handleCameraPropsChange,
+    onCameraPathEaseChange: handleCameraPathEaseChange,
+    onSelectObject: setSelectedObjectId,
   });
 
   const timelinePanelProps = useTimelinePanelProps({

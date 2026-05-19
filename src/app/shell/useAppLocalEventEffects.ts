@@ -35,9 +35,14 @@ export function useAppLocalEventEffects({
   useEffect(() => {
     const stage = centerPreviewScrollRef.current;
     if (!stage || mode !== "preview") return;
-    stage.addEventListener("wheel", zoomFramePreviewFromWheel, {
-      passive: false,
-    });
-    return () => stage.removeEventListener("wheel", zoomFramePreviewFromWheel);
+    function handleWheel(event: globalThis.WheelEvent) {
+      // Skip frame-zoom when the wheel originates inside the compose 3D
+      // author view — OrbitControls owns the wheel there for camera dolly.
+      const target = event.target as Element | null;
+      if (target?.closest?.("[data-clipper-compose-author-view]")) return;
+      zoomFramePreviewFromWheel(event);
+    }
+    stage.addEventListener("wheel", handleWheel, { passive: false });
+    return () => stage.removeEventListener("wheel", handleWheel);
   }, [centerPreviewScrollRef, mode, zoomFramePreviewFromWheel]);
 }

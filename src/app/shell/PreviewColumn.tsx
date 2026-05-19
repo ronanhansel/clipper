@@ -40,6 +40,15 @@ function requiresDomOverlayPreview(props: FramePreviewProps): boolean {
   );
 }
 
+function isComposeAuthorActive(props: FramePreviewProps): boolean {
+  return (
+    props.sceneWrap?.flattenComposition === false &&
+    Boolean(props.onCameraPropsChange) &&
+    props.part?.objects?.some((obj) => obj.type === "camera" && !obj.hidden) ===
+      true
+  );
+}
+
 type PreviewColumnProps = {
   blankFrameViewportStyle: CSSProperties;
   children: ReactNode;
@@ -136,31 +145,42 @@ export function PreviewColumn({
         authoringActive,
       })
     : null;
+  const composeAuthorActive = stableFramePreviewProps
+    ? isComposeAuthorActive(stableFramePreviewProps)
+    : false;
   const previewDisplayStyle = stableFramePreviewProps
-    ? ({
-        width: FRAME_WIDTH * stableFramePreviewProps.frameScale,
-        height: FRAME_HEIGHT * stableFramePreviewProps.frameScale,
-      } as CSSProperties)
+    ? composeAuthorActive
+      ? ({ position: "absolute", inset: 0 } as CSSProperties)
+      : ({
+          width: FRAME_WIDTH * stableFramePreviewProps.frameScale,
+          height: FRAME_HEIGHT * stableFramePreviewProps.frameScale,
+        } as CSSProperties)
     : undefined;
   const allowsDomOverlayOverflow = stableFramePreviewProps
     ? requiresDomOverlayPreview(stableFramePreviewProps)
     : false;
   const previewRenderStyle = stableFramePreviewProps
-    ? ({
-        backfaceVisibility: "hidden",
-        contain: allowsDomOverlayOverflow ? undefined : "paint",
-        filter: displayScale === 1 ? undefined : "blur(0)",
-        left: 0,
-        top: 0,
-        width: FRAME_WIDTH * previewRenderScale,
-        height: FRAME_HEIGHT * previewRenderScale,
-        transform:
-          displayScale === 1
-            ? undefined
-            : `translateZ(0) scale(${displayScale})`,
-        transformOrigin: "top left",
-        willChange: displayScale === 1 ? undefined : "transform",
-      } as CSSProperties)
+    ? composeAuthorActive
+      ? ({
+          position: "absolute",
+          inset: 0,
+          backfaceVisibility: "hidden",
+        } as CSSProperties)
+      : ({
+          backfaceVisibility: "hidden",
+          contain: allowsDomOverlayOverflow ? undefined : "paint",
+          filter: displayScale === 1 ? undefined : "blur(0)",
+          left: 0,
+          top: 0,
+          width: FRAME_WIDTH * previewRenderScale,
+          height: FRAME_HEIGHT * previewRenderScale,
+          transform:
+            displayScale === 1
+              ? undefined
+              : `translateZ(0) scale(${displayScale})`,
+          transformOrigin: "top left",
+          willChange: displayScale === 1 ? undefined : "transform",
+        } as CSSProperties)
     : undefined;
 
   return (
@@ -196,12 +216,20 @@ export function PreviewColumn({
       <div className="relative min-h-0 min-w-0 overflow-hidden">
         <div
           ref={stageRef}
-          className={`timeline-scrollbar absolute inset-0 grid place-items-center p-[22px] ${mode === "preview" ? "overflow-auto [scrollbar-gutter:stable]" : "invisible pointer-events-none overflow-hidden"}`}
+          className={`timeline-scrollbar absolute inset-0 ${
+            composeAuthorActive
+              ? "overflow-hidden"
+              : `grid place-items-center p-[22px] ${
+                  mode === "preview"
+                    ? "overflow-auto [scrollbar-gutter:stable]"
+                    : "invisible pointer-events-none overflow-hidden"
+                }`
+          }`}
           data-clipper-preview-stage
           onScroll={onScroll}
         >
           <div
-            className="relative"
+            className={composeAuthorActive ? "absolute inset-0" : "relative"}
             data-clipper-fixed-preview-display
             style={previewDisplayStyle}
           >

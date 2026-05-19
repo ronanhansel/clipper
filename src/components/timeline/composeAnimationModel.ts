@@ -16,7 +16,8 @@ export type ComposeAnimationAttributeKey = AnimationTrackProperty;
 // AnimationTrackProperty keys (ex: structured fill / gradients, drop shadow).
 export type ComposeAnimationExtraAttributeKey =
   | `fill:${string}`
-  | `shadow:${string}`;
+  | `shadow:${string}`
+  | `prop:${string}`;
 export type ComposeAnimationTimelineAttributeKey =
   | AnimationTrackProperty
   | ComposeAnimationExtraAttributeKey;
@@ -303,6 +304,27 @@ function labelForShadowPropertyPath(propertyPath: string): string {
   return propertyPath;
 }
 
+function isPropsPropertyPath(path: string): path is PropertyPath {
+  return path.startsWith("props.");
+}
+
+function buildPropsTrackKey(
+  propertyPath: string,
+): ComposeAnimationExtraAttributeKey {
+  return `prop:${propertyPath.slice("props.".length)}`;
+}
+
+function labelForPropsPropertyPath(propertyPath: string): string {
+  if (propertyPath === "props.position.x") return "Camera Pos X";
+  if (propertyPath === "props.position.y") return "Camera Pos Y";
+  if (propertyPath === "props.position.z") return "Camera Pos Z";
+  if (propertyPath === "props.rotation.x") return "Camera Rot X";
+  if (propertyPath === "props.rotation.y") return "Camera Rot Y";
+  if (propertyPath === "props.rotation.z") return "Camera Rot Z";
+  if (propertyPath === "props.fov") return "Camera FOV";
+  return propertyPath;
+}
+
 function labelForFillPropertyPath(propertyPath: string): string {
   // Keep short + scan-friendly; timeline row already sits under "Background".
   if (propertyPath === "style.fill.color") return "Fill Color";
@@ -378,13 +400,18 @@ export function getComposeAnimationAttributeTracks(
         ? buildFillTrackKey(propertyPath)
         : isShadowPropertyPath(propertyPath)
           ? buildShadowTrackKey(propertyPath)
-          : undefined);
+          : isPropsPropertyPath(propertyPath)
+            ? buildPropsTrackKey(propertyPath)
+            : undefined);
     if (!key) continue;
     if (!mapped && isFillPropertyPath(propertyPath)) {
       labels.set(key, labelForFillPropertyPath(propertyPath));
     }
     if (!mapped && isShadowPropertyPath(propertyPath)) {
       labels.set(key, labelForShadowPropertyPath(propertyPath));
+    }
+    if (!mapped && isPropsPropertyPath(propertyPath)) {
+      labels.set(key, labelForPropsPropertyPath(propertyPath));
     }
     const points = tracks.get(key) ?? [];
     for (const point of track.points) {
@@ -422,13 +449,17 @@ export function getComposeAnimationAttributeTracks(
     .filter(
       ([key]) =>
         typeof key === "string" &&
-        (key.startsWith("fill:") || key.startsWith("shadow:")),
+        (key.startsWith("fill:") ||
+          key.startsWith("shadow:") ||
+          key.startsWith("prop:")),
     )
     .map(([key, keyframes]) => {
       const stringKey = String(key);
       const fallbackLabel = stringKey.startsWith("fill:")
         ? stringKey.slice("fill:".length)
-        : stringKey.slice("shadow:".length);
+        : stringKey.startsWith("shadow:")
+          ? stringKey.slice("shadow:".length)
+          : stringKey.slice("prop:".length);
       return {
         id: key,
         key,

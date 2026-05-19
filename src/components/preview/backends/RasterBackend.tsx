@@ -80,7 +80,17 @@ export const RasterBackend: CompositionBackend = function RasterBackend(props) {
         data-clipper-raster-mode="webgl"
         style={{ pointerEvents: "none" }}
       >
-        <CompositionWebGLHost part={props.part} localTime={props.localTime} />
+        <CompositionWebGLHost
+          part={props.part}
+          localTime={props.localTime}
+          renderComposition={() => (
+            <DomBackend
+              {...props}
+              {...SEALED_INTERACTIONS}
+              hostRef={props.hostRef}
+            />
+          )}
+        />
       </div>
     );
   }

@@ -271,11 +271,11 @@ export type CameraObjectProps = {
 };
 
 export const DEFAULT_CAMERA_OBJECT_PROPS: CameraObjectProps = {
-  position: { x: 0, y: 0, z: 1000 },
+  position: { x: 0, y: 0, z: 1158 },
   rotation: { x: 0, y: 0, z: 0 },
   fov: 50,
   near: 1,
-  far: 10000,
+  far: 1158,
 };
 
 export type JsonValue =

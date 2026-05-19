@@ -653,17 +653,45 @@ function createDynamicPropsDefinition(
   path: string,
 ): PropertyDefinition | undefined {
   if (!path.startsWith("props.")) return undefined;
-  const propName = path.slice("props.".length);
-  return createBaseDefinition(
-    path as PropertyPath,
-    "custom",
-    (object) => object.props?.[propName] ?? null,
-    (object, value) => ({
-      ...object,
-      props: { ...(object.props ?? {}), [propName]: value },
-    }),
-    "props",
-  );
+  const segments = path.slice("props.".length).split(".");
+  const readNested = (object: FrameObject): JsonValue => {
+    let current: unknown = object.props ?? {};
+    for (const segment of segments) {
+      if (!current || typeof current !== "object") return null;
+      current = (current as Record<string, unknown>)[segment];
+    }
+    return (current ?? null) as JsonValue;
+  };
+  const writeNested = (object: FrameObject, value: JsonValue): FrameObject => {
+    const root: Record<string, unknown> = { ...(object.props ?? {}) };
+    let cursor: Record<string, unknown> = root;
+    for (let i = 0; i < segments.length - 1; i += 1) {
+      const segment = segments[i];
+      const existing = cursor[segment];
+      const next =
+        existing && typeof existing === "object" && !Array.isArray(existing)
+          ? { ...(existing as Record<string, unknown>) }
+          : {};
+      cursor[segment] = next;
+      cursor = next;
+    }
+    cursor[segments[segments.length - 1]] = value as unknown;
+    return { ...object, props: root as FrameObject["props"] };
+  };
+  // Treat `props.*` leaves as number tracks so numeric interpolation works.
+  // Non-numeric props (rare) still keyframe but won't tween — that matches
+  // the previous "custom" behavior.
+  return {
+    path: path as PropertyPath,
+    valueType: "number",
+    group: "props",
+    getBaseValue: readNested,
+    setBaseValue: writeNested,
+    interpolate: (from, to, progress) =>
+      typeof from === "number" && typeof to === "number"
+        ? from + (to - from) * progress
+        : from,
+  };
 }
 
 // --- Fill property definitions ---
