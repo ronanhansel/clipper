@@ -25,6 +25,13 @@ export type CompositionRenderBackendProps = {
   hideNullObjects: boolean;
   renderClockSceneTime: number;
   active: boolean;
+  /**
+   * When true, the backend's caller already projects the composition's
+   * camera externally (e.g. via CSS3DRenderer). The backend must NOT
+   * apply its own CSS camera transform — doing so double-projects and
+   * makes the contents shift relative to the plane.
+   */
+  cameraHandledExternally?: boolean;
 };
 
 export type CompositionInteractionBackendProps = {

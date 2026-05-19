@@ -238,6 +238,14 @@ type FramePreviewProps = {
     cameraObjectId: string,
     next: CameraObjectProps,
   ) => void;
+  onCameraPathEaseChange?: (
+    cameraObjectId: string,
+    trackPath: string,
+    pointIndex: number,
+    side: "in" | "out",
+    nextCpX: number,
+  ) => void;
+  onSelectObject?: (objectId: string | null) => void;
 };
 
 export type ComposeDrawTool =
@@ -317,6 +325,8 @@ export const FramePreview = memo(function FramePreview({
   shapeDrawPreview,
   selectedObjectId,
   onCameraPropsChange,
+  onCameraPathEaseChange,
+  onSelectObject,
 }: FramePreviewProps) {
   const exportTileViewport = (
     arguments[0] as { exportTileViewport?: ExportTileViewport }
@@ -667,6 +677,7 @@ export const FramePreview = memo(function FramePreview({
 
   function handleFramePointerMove(event: PointerEvent<HTMLDivElement>) {
     if (isPlaying) return;
+    if (composeAuthorViewActive) return;
     if (interactiveTrackerPicking) updateTrackerHover(event);
     updateObjectHover(event);
     onFramePointerMove(event);
@@ -674,6 +685,7 @@ export const FramePreview = memo(function FramePreview({
 
   function handleFramePointerDownCapture(event: PointerEvent<HTMLDivElement>) {
     if (isPlaying) return;
+    if (composeAuthorViewActive) return;
     if (
       activeShapeTool === "pen" ||
       activeShapeTool === "pencil" ||
@@ -777,7 +789,12 @@ export const FramePreview = memo(function FramePreview({
   }
 
   return (
-    <div data-clipper-frame-preview-wrapper>
+    <div
+      data-clipper-frame-preview-wrapper
+      style={
+        composeAuthorViewActive ? { position: "absolute", inset: 0 } : undefined
+      }
+    >
       <div
         className="relative overflow-visible"
         data-clipper-frame-preview-shell
@@ -789,10 +806,20 @@ export const FramePreview = memo(function FramePreview({
           data-clipper-frame-preview
           style={clippedViewportStyle}
           onPointerDownCapture={handleFramePointerDownCapture}
-          onPointerDown={isPlaying ? undefined : onFramePointerDown}
+          onPointerDown={
+            isPlaying || composeAuthorViewActive
+              ? undefined
+              : onFramePointerDown
+          }
           onPointerMove={handleFramePointerMove}
-          onPointerUp={isPlaying ? undefined : onFramePointerUp}
-          onPointerCancel={isPlaying ? undefined : onFramePointerCancel}
+          onPointerUp={
+            isPlaying || composeAuthorViewActive ? undefined : onFramePointerUp
+          }
+          onPointerCancel={
+            isPlaying || composeAuthorViewActive
+              ? undefined
+              : onFramePointerCancel
+          }
           onPointerLeave={(event) => {
             clearSelectorHover(event);
             onFramePointerLeave(event);
@@ -871,6 +898,8 @@ export const FramePreview = memo(function FramePreview({
                     onTextObjectDoubleClick={onTextObjectDoubleClick}
                     selectedObjectId={selectedObjectId}
                     onCameraPropsChange={onCameraPropsChange}
+                    onCameraPathEaseChange={onCameraPathEaseChange}
+                    onSelectObject={onSelectObject}
                   />
                 </PreviewRenderProvider>
               )}

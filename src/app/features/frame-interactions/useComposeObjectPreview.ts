@@ -1,7 +1,9 @@
-import type {
-  FrameObject,
-  PartFrame,
-  BackgroundLayer,
+import {
+  DEFAULT_CAMERA_OBJECT_PROPS,
+  type BackgroundLayer,
+  type CameraObjectProps,
+  type FrameObject,
+  type PartFrame,
 } from "../../../core/types";
 import {
   type FillValue,
@@ -118,6 +120,39 @@ export function useComposeObjectPreview({
     const source = selectedObject;
     if (!source) return;
     const next = updater(source);
+    if (next.type === "camera") {
+      const def = DEFAULT_CAMERA_OBJECT_PROPS;
+      const raw = (next.props ?? {}) as Record<string, unknown>;
+      const readVec3 = (
+        v: unknown,
+        fallback: { x: number; y: number; z: number },
+      ) => {
+        if (!v || typeof v !== "object") return { ...fallback };
+        const o = v as Record<string, unknown>;
+        const num = (k: "x" | "y" | "z") => {
+          const n = o[k];
+          return typeof n === "number" && Number.isFinite(n) ? n : fallback[k];
+        };
+        return { x: num("x"), y: num("y"), z: num("z") };
+      };
+      const num = (key: "fov" | "near" | "far") => {
+        const n = raw[key];
+        return typeof n === "number" && Number.isFinite(n) ? n : def[key];
+      };
+      const cameraProps: CameraObjectProps = {
+        position: readVec3(raw.position, def.position),
+        rotation: readVec3(raw.rotation, def.rotation),
+        fov: num("fov"),
+        near: num("near"),
+        far: num("far"),
+      };
+      window.dispatchEvent(
+        new CustomEvent("clipper:camera-preview", {
+          detail: { objectId: next.id, props: cameraProps },
+        }),
+      );
+      return;
+    }
     const selector =
       next.id === part.background.id
         ? `[data-layer-id="${cssEscape(next.id)}"]`

@@ -273,6 +273,45 @@ export function evaluateCompositionState(
   };
 }
 
+/**
+ * Proximity tolerance (seconds) used by every UI hit-test and every
+ * keyframe writer to decide whether two times "land on the same
+ * keyframe". 16 ms ≈ one 60 fps frame; well below the user's ability to
+ * place two intentional keyframes one frame apart, well above the
+ * sub-ms playhead jitter that would otherwise cause stacked-keyframe
+ * artefacts on rapid commits.
+ *
+ * The hit-test (`findPropertyKeyframeIndexAtTime`) and the writer
+ * (`upsertPropertyKeyframe`) MUST share this constant. Drift between
+ * them produces UX where the diamond indicator says "keyframe at
+ * playhead" but a commit creates a new keyframe next to the existing
+ * one — the source of the original duplicate-keyframe stacks.
+ */
+export const propertyKeyframeTimeEpsilonSec = 0.016;
+
+/**
+ * Single source of truth for "is there a keyframe at this time?".
+ * Returns the index of the nearest point within
+ * `propertyKeyframeTimeEpsilonSec`, or -1 when none. Inspector
+ * indicators, commit paths, removal, and toggle all route through this
+ * so their notion of "same time" is identical.
+ */
+export function findPropertyKeyframeIndexAtTime(
+  points: ReadonlyArray<{ time: number }>,
+  time: number,
+): number {
+  let bestIndex = -1;
+  let bestDist = propertyKeyframeTimeEpsilonSec;
+  for (let i = 0; i < points.length; i += 1) {
+    const dist = Math.abs(points[i].time - time);
+    if (dist <= bestDist) {
+      bestDist = dist;
+      bestIndex = i;
+    }
+  }
+  return bestIndex;
+}
+
 export function upsertPropertyKeyframe(
   object: FrameObject,
   path: string,
@@ -287,20 +326,21 @@ export function upsertPropertyKeyframe(
     points: [],
   };
   const roundedTime = roundTime(time);
-  const pointId = `${object.id}:${path}:${roundedTime}`;
   const points = [...existingTrack.points];
-  const existingIndex = points.findIndex(
-    (point) => roundTime(point.time) === roundedTime,
-  );
+  // Match within the same proximity tolerance the inspector hit-tester
+  // uses (`findPropertyKeyframeIndexAtTime`). Without this, a commit at
+  // a playhead within ±16 ms of an existing keyframe creates a new
+  // keyframe right next to the existing one — the diamond indicator
+  // says "keyframe at playhead" but the writer says "new keyframe",
+  // and rapid commits stack a column of duplicates on the same time.
+  // When matched, preserve the existing keyframe's time so it doesn't
+  // drift on every commit.
+  const existingIndex = findPropertyKeyframeIndexAtTime(points, time);
   if (existingIndex >= 0) {
-    points[existingIndex] = {
-      ...points[existingIndex],
-      time: roundedTime,
-      value,
-    };
+    points[existingIndex] = { ...points[existingIndex], value };
   } else {
     points.push({
-      id: pointId,
+      id: `${object.id}:${path}:${roundedTime}`,
       time: roundedTime,
       value,
       easingToNext: "linear",
@@ -653,17 +693,45 @@ function createDynamicPropsDefinition(
   path: string,
 ): PropertyDefinition | undefined {
   if (!path.startsWith("props.")) return undefined;
-  const propName = path.slice("props.".length);
-  return createBaseDefinition(
-    path as PropertyPath,
-    "custom",
-    (object) => object.props?.[propName] ?? null,
-    (object, value) => ({
-      ...object,
-      props: { ...(object.props ?? {}), [propName]: value },
-    }),
-    "props",
-  );
+  const segments = path.slice("props.".length).split(".");
+  const readNested = (object: FrameObject): JsonValue => {
+    let current: unknown = object.props ?? {};
+    for (const segment of segments) {
+      if (!current || typeof current !== "object") return null;
+      current = (current as Record<string, unknown>)[segment];
+    }
+    return (current ?? null) as JsonValue;
+  };
+  const writeNested = (object: FrameObject, value: JsonValue): FrameObject => {
+    const root: Record<string, unknown> = { ...(object.props ?? {}) };
+    let cursor: Record<string, unknown> = root;
+    for (let i = 0; i < segments.length - 1; i += 1) {
+      const segment = segments[i];
+      const existing = cursor[segment];
+      const next =
+        existing && typeof existing === "object" && !Array.isArray(existing)
+          ? { ...(existing as Record<string, unknown>) }
+          : {};
+      cursor[segment] = next;
+      cursor = next;
+    }
+    cursor[segments[segments.length - 1]] = value as unknown;
+    return { ...object, props: root as FrameObject["props"] };
+  };
+  // Treat `props.*` leaves as number tracks so numeric interpolation works.
+  // Non-numeric props (rare) still keyframe but won't tween — that matches
+  // the previous "custom" behavior.
+  return {
+    path: path as PropertyPath,
+    valueType: "number",
+    group: "props",
+    getBaseValue: readNested,
+    setBaseValue: writeNested,
+    interpolate: (from, to, progress) =>
+      typeof from === "number" && typeof to === "number"
+        ? from + (to - from) * progress
+        : from,
+  };
 }
 
 // --- Fill property definitions ---

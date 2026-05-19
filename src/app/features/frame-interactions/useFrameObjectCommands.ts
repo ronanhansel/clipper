@@ -37,6 +37,7 @@ type FrameObjectCommandsParams = {
       history?: boolean;
       syncSources?: boolean;
       coalesceHistory?: boolean;
+      historyGroup?: string;
     },
   ) => void;
   updateSceneParts: (updater: (parts: Part[]) => Part[]) => void;
@@ -118,6 +119,7 @@ export function useFrameObjectCommands({
       history?: boolean;
       syncSources?: boolean;
       coalesceHistory?: boolean;
+      historyGroup?: string;
     },
   ) {
     updateCompositionForTimelinePart(

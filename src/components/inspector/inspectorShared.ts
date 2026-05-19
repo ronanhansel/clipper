@@ -1,4 +1,8 @@
-import { evaluateObjectState, getFillValue } from "../../core/propertyRegistry";
+import {
+  evaluateObjectState,
+  findPropertyKeyframeIndexAtTime,
+  getFillValue,
+} from "../../core/propertyRegistry";
 import type { Bounds, FrameObject } from "../../core/types";
 import type { FillValue } from "../../core/fillValue";
 import type { ComposeAnimationAttributeKey } from "../timeline/composeAnimationModel";
@@ -268,21 +272,10 @@ export function getPropertyTrackKeyframeAtTime(
 ) {
   const points = path ? object.tracks?.[path]?.points : undefined;
   if (!points?.length) return null;
-  const roundedTime = Math.round(currentTime * 1000) / 1000;
-  const exact = points.find(
-    (point) => Math.round(point.time * 1000) / 1000 === roundedTime,
-  );
-  if (exact) return { time: exact.time, value: exact.value };
-  let nearest: { time: number; value: unknown } | null = null;
-  let nearestDist = 0.016;
-  for (const point of points) {
-    const dist = Math.abs(point.time - currentTime);
-    if (dist < nearestDist) {
-      nearestDist = dist;
-      nearest = { time: point.time, value: point.value };
-    }
-  }
-  return nearest;
+  const index = findPropertyKeyframeIndexAtTime(points, currentTime);
+  if (index < 0) return null;
+  const point = points[index];
+  return { time: point.time, value: point.value };
 }
 
 export function getEvaluatedAttributeValue(

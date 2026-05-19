@@ -34,6 +34,7 @@ type UpdateCompositionOptions = {
   history?: boolean;
   syncSources?: boolean;
   coalesceHistory?: boolean;
+  historyGroup?: string;
 };
 export type SceneMotionMarkerUpdate = { motionMarkers: MotionMarker[] };
 
