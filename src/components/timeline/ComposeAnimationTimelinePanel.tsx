@@ -888,6 +888,7 @@ function ComposeAnimationTimelinePanelContent({
               onSetLayerParent={setLayerParent}
               onStartPickWhipDrag={startPickWhipDrag}
               pickWhipDropActive={pickWhipDropLayerId === row.layer.id}
+              onUpdateObject={onUpdateObject}
             />
           ))}
           {pickWhipDrag ? (
@@ -1110,10 +1111,11 @@ function ComposeKeyframeMarquee({
 
 function ComposeTimelineLayerHeader() {
   return (
-    <div className="grid h-full min-w-0 flex-1 grid-cols-[32px_36px_minmax(0,1fr)_170px] items-center border-b border-[#2d313b] text-[10px] font-extrabold uppercase text-[#7f8796]">
+    <div className="grid h-full min-w-0 flex-1 grid-cols-[32px_36px_minmax(0,1fr)_24px_170px] items-center border-b border-[#2d313b] text-[10px] font-extrabold uppercase text-[#7f8796]">
       <span />
       <span className="text-center">#</span>
       <span className="truncate px-1">Layer Name</span>
+      <span />
       <span className="truncate px-2">Parent & Link</span>
     </div>
   );
@@ -1161,6 +1163,7 @@ function ComposeTimelineRailRow({
   onSetLayerParent,
   onStartPickWhipDrag,
   pickWhipDropActive,
+  onUpdateObject,
 }: {
   row: ComposeAnimationTimelineRow;
   compact: boolean;
@@ -1187,6 +1190,10 @@ function ComposeTimelineRailRow({
     childLayerId: string,
   ) => void;
   pickWhipDropActive: boolean;
+  onUpdateObject?: (
+    objectId: string,
+    updater: (object: FrameObject) => FrameObject,
+  ) => void;
 }) {
   if (row.kind === "ease") {
     const resizeDragRef = { startY: 0, startHeight: 0 };
@@ -1258,7 +1265,7 @@ function ComposeTimelineRailRow({
 
   return (
     <div
-      className={`grid h-full grid-cols-[32px_36px_minmax(0,1fr)_170px] items-center border border-transparent border-b-[#202633] transition ${row.layer.object?.hidden ? "opacity-40" : ""} ${pickWhipDropActive ? "border-[#159dff] bg-[#159dff]/10 shadow-[inset_0_0_0_1px_rgba(21,157,255,0.45)]" : ""}`}
+      className={`grid h-full grid-cols-[32px_36px_minmax(0,1fr)_24px_170px] items-center border border-transparent border-b-[#202633] transition ${row.layer.object?.hidden ? "opacity-40" : ""} ${pickWhipDropActive ? "border-[#159dff] bg-[#159dff]/10 shadow-[inset_0_0_0_1px_rgba(21,157,255,0.45)]" : ""}`}
       data-compose-parent-drop-layer-id={
         row.layer.object ? row.layer.id : undefined
       }
@@ -1301,6 +1308,10 @@ function ComposeTimelineRailRow({
         onToggleHidden={() => undefined}
         onToggleLocked={() => undefined}
       />
+      <ThreeDToggleCell
+        layer={row.layer}
+        onUpdateObject={onUpdateObject}
+      />
       <ComposeParentLinkControl
         layer={row.layer}
         parentOptions={parentOptions}
@@ -1308,6 +1319,61 @@ function ComposeTimelineRailRow({
         onStartPickWhipDrag={onStartPickWhipDrag}
       />
     </div>
+  );
+}
+
+function ThreeDToggleCell({
+  layer,
+  onUpdateObject,
+}: {
+  layer: ComposeAnimationTimelineLayer;
+  onUpdateObject?: (
+    objectId: string,
+    updater: (object: FrameObject) => FrameObject,
+  ) => void;
+}) {
+  const object = layer.object;
+  if (!object) return <span />;
+  if (object.type === "camera" || object.type === "null") return <span />;
+  const enabled = object.threeD === true;
+  return (
+    <button
+      data-timeline-control
+      aria-pressed={enabled}
+      title={enabled ? "Disable 3D layer" : "Enable 3D layer"}
+      className={`grid h-5 w-5 place-items-center justify-self-center rounded-[4px] transition ${
+        enabled
+          ? "bg-[#202633] text-[#5599ff]"
+          : "text-[#737884] hover:bg-[#202633] hover:text-[#dfe2ea]"
+      }`}
+      onPointerDown={(event) => event.stopPropagation()}
+      onClick={(event) => {
+        event.stopPropagation();
+        onUpdateObject?.(object.id, (obj) => ({ ...obj, threeD: !obj.threeD }));
+      }}
+    >
+      <ThreeDCubeIcon />
+    </button>
+  );
+}
+
+function ThreeDCubeIcon() {
+  return (
+    <svg
+      viewBox="0 0 12 12"
+      width="11"
+      height="11"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M6 1.2 L10.6 3.4 L10.6 8.6 L6 10.8 L1.4 8.6 L1.4 3.4 Z" />
+      <path d="M1.4 3.4 L6 5.6 L10.6 3.4" />
+      <path d="M6 5.6 L6 10.8" />
+    </svg>
   );
 }
 

@@ -30,6 +30,7 @@ function makeFakeCamera() {
       aspect: 0,
       near: 0,
       far: 0,
+      filmGauge: 0,
       updateProjectionMatrix,
     },
     updateProjectionMatrix,
@@ -95,5 +96,18 @@ describe("applyCompositionCameraToThree", () => {
     expect(fake.near).toBe(5);
     expect(fake.far).toBe(5000);
     expect(fake.aspect).toBe(2.0);
+  });
+
+  it("forwards sensor.width as filmGauge", () => {
+    const { fake } = makeFakeCamera();
+    applyCompositionCameraToThree(
+      fake,
+      {
+        ...DEFAULT_CAMERA_OBJECT_PROPS,
+        sensor: { width: 24.89, height: 18.66 }, // APS-C width
+      },
+      1,
+    );
+    expect(fake.filmGauge).toBe(24.89);
   });
 });

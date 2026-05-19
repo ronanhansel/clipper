@@ -164,7 +164,14 @@ export const SceneCompositor = memo(function SceneCompositor({
       <div
         className="absolute inset-0"
         data-clipper-visual-adjustments
-        style={visualAdjustmentStyle}
+        style={{
+          ...(visualAdjustmentStyle ?? {}),
+          // Propagate the perspective stage's 3D context through this
+          // adjustments wrapper so descendant `translateZ` / `rotateX/Y/Z`
+          // keep their depth. Without this, CSS flattens the subtree at
+          // this level even when the parent declares preserve-3d.
+          transformStyle: "preserve-3d",
+        }}
       >
         <FramePreviewRenderBoundary filePath={filePath} resetKey={resetKey}>
           {transitionPreviewParts && transitionProgress !== null ? (

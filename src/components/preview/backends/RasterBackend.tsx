@@ -87,6 +87,7 @@ export const RasterBackend: CompositionBackend = function RasterBackend(props) {
             <DomBackend
               {...props}
               {...SEALED_INTERACTIONS}
+              cameraHandledExternally={true}
               hostRef={props.hostRef}
             />
           )}

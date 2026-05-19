@@ -1,12 +1,17 @@
 import { describe, it, expect } from "vitest";
 import {
+  applyAutoOrientAlongPath,
   cameraObjectPropsToPreviewTransform,
   compositionHasCameraLayer,
+  evaluateCameraObjectPropsAt,
   findActiveCameraObject,
   readCameraObjectProps,
 } from "./useCompositionCamera";
 import {
+  DEFAULT_CAMERA_DOF,
   DEFAULT_CAMERA_OBJECT_PROPS,
+  DEFAULT_CAMERA_SENSOR,
+  type CameraObjectProps,
   type CompositionClip,
   type FrameObject,
 } from "../../../core/types";
@@ -91,7 +96,109 @@ describe("readCameraObjectProps", () => {
       fov: 45,
       near: 2,
       far: 8000,
+      sensor: { ...DEFAULT_CAMERA_SENSOR },
+      dof: { ...DEFAULT_CAMERA_DOF },
+      autoOrient: "off",
     });
+  });
+  it("fills defaults for sensor / dof / autoOrient when missing", () => {
+    const obj = makeCameraObject({
+      props: {
+        position: { x: 0, y: 0, z: 1158 },
+      },
+    });
+    const props = readCameraObjectProps(obj);
+    expect(props.sensor).toEqual(DEFAULT_CAMERA_SENSOR);
+    expect(props.dof).toEqual(DEFAULT_CAMERA_DOF);
+    expect(props.autoOrient).toBe("off");
+  });
+  it("reads sensor / dof / autoOrient when provided", () => {
+    const obj = makeCameraObject({
+      props: {
+        sensor: { width: 24, height: 16 },
+        dof: {
+          enabled: true,
+          focusDistance: 800,
+          fNumber: 1.8,
+          blurLevel: 1.5,
+          maxBlurPx: 32,
+        },
+        autoOrient: "along-path",
+      },
+    });
+    const props = readCameraObjectProps(obj);
+    expect(props.sensor).toEqual({ width: 24, height: 16 });
+    expect(props.dof).toEqual({
+      enabled: true,
+      focusDistance: 800,
+      fNumber: 1.8,
+      blurLevel: 1.5,
+      maxBlurPx: 32,
+    });
+    expect(props.autoOrient).toBe("along-path");
+  });
+});
+
+describe("evaluateCameraObjectPropsAt", () => {
+  it("returns defaults for an object with no tracks", () => {
+    expect(evaluateCameraObjectPropsAt(makeCameraObject(), 0)).toEqual(
+      DEFAULT_CAMERA_OBJECT_PROPS,
+    );
+  });
+});
+
+describe("applyAutoOrientAlongPath", () => {
+  function trackedXCameraObject(
+    props: Partial<CameraObjectProps>,
+    points: { time: number; value: number }[],
+  ): FrameObject {
+    return makeCameraObject({
+      props: { ...DEFAULT_CAMERA_OBJECT_PROPS, ...props },
+      tracks: {
+        "props.position.x": {
+          valueType: "number",
+          points,
+        },
+      },
+    });
+  }
+
+  it("returns rotation unchanged when autoOrient is 'off'", () => {
+    const cam = makeCameraObject({
+      props: {
+        ...DEFAULT_CAMERA_OBJECT_PROPS,
+        rotation: { x: 5, y: 10, z: 15 },
+        autoOrient: "off",
+      },
+    });
+    const resolved = readCameraObjectProps(cam);
+    const out = applyAutoOrientAlongPath(cam, 0, resolved);
+    expect(out).toBe(resolved);
+  });
+
+  it("orients yaw correctly for a horizontal +X tangent", () => {
+    const cam = trackedXCameraObject({ autoOrient: "along-path" }, [
+      { time: 0, value: 0 },
+      { time: 1000, value: 1000 },
+    ]);
+    const resolved = evaluateCameraObjectPropsAt(cam, 0);
+    const out = applyAutoOrientAlongPath(cam, 0, resolved);
+    expect(out.rotation.y).toBeCloseTo(90, 3);
+    expect(out.rotation.x).toBeCloseTo(0, 3);
+    expect(out.rotation.z).toBe(0);
+  });
+
+  it("preserves user rotation when the camera is stationary", () => {
+    const cam = makeCameraObject({
+      props: {
+        ...DEFAULT_CAMERA_OBJECT_PROPS,
+        rotation: { x: 5, y: 10, z: 15 },
+        autoOrient: "along-path",
+      },
+    });
+    const resolved = readCameraObjectProps(cam);
+    const out = applyAutoOrientAlongPath(cam, 0, resolved);
+    expect(out.rotation).toEqual({ x: 5, y: 10, z: 15 });
   });
 });
 

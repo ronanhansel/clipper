@@ -11,11 +11,20 @@ import {
   isObjectInExportTile,
   isPenDrawTool,
 } from "../FramePreview";
-import { useCompositionCamera } from "../compositors/useCompositionCamera";
+import {
+  getActiveCameraObjectProps,
+  useCompositionCamera,
+} from "../compositors/useCompositionCamera";
 import {
   formatCameraPreviewFilter,
   formatCameraPreviewTransform,
 } from "../../../core/camera";
+import {
+  computeCircleOfConfusionPx,
+  computeLayerSubjectDistance,
+} from "../../../core/cameraOptics";
+import { evaluateObjectState } from "../../../core/propertyRegistry";
+import { FRAME_HEIGHT } from "../../../core/types";
 import type { CompositionBackend } from "./CompositionBackend";
 
 export const DomBackend: CompositionBackend = function DomBackend({
@@ -70,6 +79,56 @@ export const DomBackend: CompositionBackend = function DomBackend({
         }
       : undefined;
 
+  // Always preserve the 3D context through the composition root so per-
+  // FrameObject `translateZ` / `rotate{X,Y,Z}` survive even when no inner
+  // camera is active. Without this the host flattens children and Z
+  // motion has no visible effect.
+  const hostTransformStyle: CSSProperties = innerCameraStyle
+    ? {}
+    : { transformStyle: "preserve-3d" };
+
+  const activeCamera = useMemo(
+    () => getActiveCameraObjectProps(part, localTime),
+    [part, localTime],
+  );
+
+  // DoF applies only to layers with `threeD === true`. 2D layers always
+  // render sharp on the composition plane (matches AE).
+  // TODO: hoist evaluatedObject up so DoF and FrameObjectView share one
+  // evaluation. For v1 we accept a duplicate `evaluateObjectState` call
+  // per object — DoF only needs the translateZ scalar and the bounds.
+  // TODO: enable DoF in export mode once the export path is determinised.
+  const dofPxByObjectId = useMemo(() => {
+    const map = new Map<string, number>();
+    if (!activeCamera || !activeCamera.dof.enabled) return map;
+    if (renderMode === "export") return map;
+    for (const obj of part.objects) {
+      if (obj.hidden) continue;
+      if (obj.type === "camera") continue;
+      if (!obj.threeD) continue;
+      const evaluated = obj.tracks ? evaluateObjectState(obj, localTime) : obj;
+      const transform = (evaluated.transform ?? {}) as Record<string, unknown>;
+      const tz =
+        typeof transform.translateZ === "number" ? transform.translateZ : 0;
+      const subject = computeLayerSubjectDistance(
+        activeCamera.position,
+        activeCamera.rotation,
+        {
+          x: evaluated.bounds.x + evaluated.bounds.width / 2,
+          y: evaluated.bounds.y + evaluated.bounds.height / 2,
+          z: tz,
+        },
+      );
+      const coc = computeCircleOfConfusionPx(
+        activeCamera,
+        subject,
+        FRAME_HEIGHT,
+      );
+      if (coc > 0) map.set(obj.id, coc);
+    }
+    return map;
+  }, [activeCamera, localTime, part.objects, renderMode]);
+
   useLayoutEffect(() => {
     syncDomAnimationsToRenderClock(
       hostRef.current,
@@ -85,14 +144,22 @@ export const DomBackend: CompositionBackend = function DomBackend({
   return (
     <div
       ref={hostRef}
-      className="absolute inset-0 overflow-hidden"
+      className="absolute inset-0"
       data-clipper-render-clock-layer
       data-clipper-render-clock-offset={localTime - renderClockSceneTime}
       {...getRenderClockAttributes(renderClockState)}
       style={{
         ...(part.frame.style as CSSProperties),
         ...renderClockStyle,
+        ...hostTransformStyle,
         ...innerCameraStyle,
+        // `overflow: hidden` forces transform-style back to flat (per the
+        // CSS Transforms 2 spec), which kills 3D context propagation
+        // through the composition root. Use clip on a sibling overlay
+        // instead, or rely on `data-clipper-frame-content` (the parent)
+        // for clipping. Keep the host's overflow visible so per-layer
+        // translateZ / rotate{X,Y,Z} survive.
+        overflow: "visible",
       }}
     >
       {!part.background.hidden && (
@@ -128,6 +195,7 @@ export const DomBackend: CompositionBackend = function DomBackend({
               key={object.id}
               activeShapeTool={active ? activeShapeTool : undefined}
               animationsEnabled={animationsEnabled}
+              cameraDofPx={dofPxByObjectId.get(object.id)}
               exportTileFrameBounds={exportTileFrameBounds}
               object={object}
               parentTransform={parentTransforms.get(object.id)}

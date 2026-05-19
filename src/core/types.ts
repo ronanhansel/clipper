@@ -220,6 +220,15 @@ export type FrameObject = {
   parentId?: string;
   hidden?: boolean;
   locked?: boolean;
+  /**
+   * AE-style "3D Layer" toggle. When true, the object opts into 3D
+   * positioning (translateZ, rotateX/Y/Z keyframable transforms) and
+   * the inspector renders a 3D position/rotation layout. Geometry is
+   * unchanged — a rect remains flat; threeD only controls authoring
+   * affordances and how the camera sees it (translateZ contributes to
+   * camera DoF distance via the existing `cameraOptics` path).
+   */
+  threeD?: boolean;
   animations?: LayerAnimation[];
   tracks?: Record<string, PropertyTrack>;
   props?: Record<string, JsonValue>;
@@ -253,6 +262,27 @@ export type PartSnapshotLine = {
 
 export type CompositionRenderMode = "dom" | "webgl";
 
+export type CameraSensor = {
+  /** mm, default 36 (full-frame width) */
+  width: number;
+  /** mm, default 24 (full-frame height) */
+  height: number;
+};
+
+export type CameraDepthOfField = {
+  enabled: boolean;
+  /** Scene units (matches camera position.z). */
+  focusDistance: number;
+  /** f-number (e.g. 2.8). 0 disables DoF. */
+  fNumber: number;
+  /** Multiplier; 1 = physically accurate. AE exposes this as 0–200%. */
+  blurLevel: number;
+  /** Upper clamp for CSS blur, in source pixels. Default 64. */
+  maxBlurPx: number;
+};
+
+export type CameraAutoOrient = "off" | "along-path";
+
 /**
  * Props stored on a `FrameObject` whose `type === "camera"`. The composition
  * may contain zero or more camera objects in `part.objects`. The first
@@ -261,6 +291,12 @@ export type CompositionRenderMode = "dom" | "webgl";
  *
  * Position uses Clipper's frame coordinate space (y-down). Rotations are
  * degrees applied in XYZ Euler order.
+ *
+ * `sensor` describes the physical sensor size (mm) used to convert focal
+ * length to FOV. `dof` carries the optional depth-of-field block (focus
+ * distance, f-number, blur level, max blur clamp). `autoOrient` lets the
+ * camera follow its position track tangent ("along-path"), matching AE's
+ * Auto-Orient → Orient Along Path.
  */
 export type CameraObjectProps = {
   position: { x: number; y: number; z: number };
@@ -268,6 +304,19 @@ export type CameraObjectProps = {
   fov: number;
   near: number;
   far: number;
+  sensor: CameraSensor;
+  dof: CameraDepthOfField;
+  autoOrient: CameraAutoOrient;
+};
+
+export const DEFAULT_CAMERA_SENSOR: CameraSensor = { width: 36, height: 24 };
+
+export const DEFAULT_CAMERA_DOF: CameraDepthOfField = {
+  enabled: false,
+  focusDistance: 1158,
+  fNumber: 2.8,
+  blurLevel: 1,
+  maxBlurPx: 64,
 };
 
 export const DEFAULT_CAMERA_OBJECT_PROPS: CameraObjectProps = {
@@ -276,6 +325,9 @@ export const DEFAULT_CAMERA_OBJECT_PROPS: CameraObjectProps = {
   fov: 50,
   near: 1,
   far: 1158,
+  sensor: { ...DEFAULT_CAMERA_SENSOR },
+  dof: { ...DEFAULT_CAMERA_DOF },
+  autoOrient: "off",
 };
 
 export type JsonValue =

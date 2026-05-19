@@ -109,9 +109,12 @@ export class ThreeAuthorScene {
   readonly hostRoot: HTMLDivElement;
   readonly css3dRoot: HTMLDivElement;
   readonly canvas: HTMLCanvasElement;
+  readonly bgCanvas: HTMLCanvasElement;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private renderer: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private bgRenderer: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private cssRenderer: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -230,8 +233,33 @@ export class ThreeAuthorScene {
     this.cameraBodyGroup = cameraBodyGroup;
     this.cameraGizmoTarget.add(cameraBodyGroup);
 
-    // WebGL renderer (grid + helper + gizmo). Transparent background so
-    // the CSS3D layer behind it shows through.
+    // WebGL renderer split into two passes:
+    //   - bgRenderer: paints layer 1 only (the grid). Its canvas sits
+    //     BELOW the CSS3D layer in DOM order so the grid never bleeds
+    //     over composition content.
+    //   - renderer (foreground): paints layer 0 (default) — frustum
+    //     helper, camera body, gizmos, camera path. Its canvas sits
+    //     ABOVE the CSS3D layer so overlays remain visible and
+    //     interactive.
+    // Both renderers share the same scene and camera; only the camera
+    // layer mask differs per pass.
+    this.bgRenderer = new THREE.WebGLRenderer({
+      alpha: true,
+      antialias: true,
+      premultipliedAlpha: true,
+    });
+    this.bgRenderer.setPixelRatio(
+      typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1,
+    );
+    this.bgRenderer.setSize(this.width, this.height, false);
+    this.bgRenderer.setClearColor(0x000000, 0);
+    this.bgCanvas = this.bgRenderer.domElement as HTMLCanvasElement;
+    this.bgCanvas.style.position = "absolute";
+    this.bgCanvas.style.inset = "0";
+    this.bgCanvas.style.width = "100%";
+    this.bgCanvas.style.height = "100%";
+    this.bgCanvas.style.pointerEvents = "none";
+
     this.renderer = new THREE.WebGLRenderer({
       alpha: true,
       antialias: true,
@@ -262,12 +290,14 @@ export class ThreeAuthorScene {
     // intercepting pan/orbit).
     this.css3dRoot.style.pointerEvents = "none";
 
-    // Stack: CSS3D layer behind, WebGL canvas on top.
+    // Stack from back to front:
+    //   bgCanvas (grid) → CSS3D layer (composition) → canvas (overlays + gizmos)
     this.hostRoot = document.createElement("div");
     this.hostRoot.style.position = "absolute";
     this.hostRoot.style.inset = "0";
     this.hostRoot.style.overflow = "hidden";
     this.hostRoot.style.background = "#0e1117";
+    this.hostRoot.appendChild(this.bgCanvas);
     this.hostRoot.appendChild(this.css3dRoot);
     this.hostRoot.appendChild(this.canvas);
 
@@ -442,9 +472,12 @@ export class ThreeAuthorScene {
     this.scene.add(this.rotateTransform.getHelper());
 
     // Light haze + grid for orientation. Grid lies flat on the z=0 plane
-    // (after the rotation) so it matches the composition plane.
+    // (after the rotation) so it matches the composition plane. The grid
+    // is placed on layer 1 so the background renderer paints it behind
+    // the CSS3D composition while the overlay renderer skips it.
     const grid = new THREE.GridHelper(4000, 20, 0x33384a, 0x222632);
     grid.rotation.x = Math.PI / 2;
+    grid.layers.set(1);
     this.scene.add(grid);
 
     // Camera-path overlay (dashed polyline + keyframe markers + bezier
@@ -496,6 +529,7 @@ export class ThreeAuthorScene {
     this.width = w;
     this.height = h;
     this.renderer.setSize(w, h, false);
+    this.bgRenderer.setSize(w, h, false);
     this.cssRenderer.setSize(w, h);
     this.orbitCamera.aspect = w / h;
     this.orbitCamera.updateProjectionMatrix();
@@ -522,6 +556,12 @@ export class ThreeAuthorScene {
       element.style.width = `${FRAME_WIDTH}px`;
       element.style.height = `${FRAME_HEIGHT}px`;
       element.style.transformOrigin = "center center";
+      // CSS3DRenderer rewrites this element's `transform` every frame
+      // but never sets `transform-style`. The default `flat` collapses
+      // every descendant's translateZ / rotate{X,Y,Z}, so per-layer 3D
+      // motion would die at the CSS3DObject boundary. Mark the plane
+      // preserve-3d so children pop out as authored.
+      element.style.transformStyle = "preserve-3d";
       const obj = new CSS3DObject(element);
       // Composition origin is top-left; CSS3DObject pivots around the
       // element's center. We translate by the half-extents flipped in y
@@ -626,7 +666,17 @@ export class ThreeAuthorScene {
   render() {
     const camera =
       this.viewMode === "through" ? this.throughCamera : this.orbitCamera;
+    // Background pass: layer 1 only (grid). Painted into bgCanvas which
+    // sits behind the CSS3D layer in the DOM stack.
+    camera.layers.set(1);
+    this.bgRenderer.render(this.scene, camera);
+    // Foreground pass: layer 0 only (frustum, camera body, gizmos,
+    // camera path). Painted into the overlay canvas above the CSS3D
+    // layer so overlays remain visible and interactive.
+    camera.layers.set(0);
     this.renderer.render(this.scene, camera);
+    // Restore default mask so anything that consults `camera.layers`
+    // outside this method (raycasts, future passes) sees layer 0.
     this.cssRenderer.render(this.scene, camera);
   }
 
@@ -653,8 +703,11 @@ export class ThreeAuthorScene {
       this.cameraPathOverlay = null;
     }
     this.renderer.dispose();
+    this.bgRenderer.dispose();
     if (this.canvas.parentNode === this.hostRoot)
       this.hostRoot.removeChild(this.canvas);
+    if (this.bgCanvas.parentNode === this.hostRoot)
+      this.hostRoot.removeChild(this.bgCanvas);
     if (this.css3dRoot.parentNode === this.hostRoot)
       this.hostRoot.removeChild(this.css3dRoot);
   }

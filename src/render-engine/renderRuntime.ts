@@ -219,6 +219,7 @@ export function isTimeSensitiveFrameObject(object: FrameObject) {
 function renderStyleFromPropertyTracks(object: FrameObject): RenderStyle {
   const transform = transformStyleFromRecord(
     readObjectRecord(object, "transform"),
+    object.threeD === true,
   );
   const shadowStyle = shadowRenderStyle(
     readObjectShadowRecord(object),
@@ -286,19 +287,30 @@ function readObjectShadowRecord(object: FrameObject): Record<string, unknown> {
     : {};
 }
 
-function transformStyleFromRecord(record: Record<string, unknown>) {
+function transformStyleFromRecord(
+  record: Record<string, unknown>,
+  threeD = false,
+) {
   const transforms: string[] = [];
   appendTransform(transforms, record.perspective, "perspective", "px");
   appendTransform(transforms, record.translateX, "translateX", "px");
   appendTransform(transforms, record.translateY, "translateY", "px");
-  appendTransform(transforms, record.translateZ, "translateZ", "px");
+  // 3D-only axes are emitted only when the object is in 3D mode.
+  // Disabling 3D snaps the layer back to the composition plane while
+  // preserving the authored Z / X / Y rotation values, so re-enabling
+  // 3D restores them without re-entry.
+  if (threeD) {
+    appendTransform(transforms, record.translateZ, "translateZ", "px");
+  }
   appendTransform(transforms, record.scale, "scale", "");
   appendTransform(transforms, record.scaleX, "scaleX", "");
   appendTransform(transforms, record.scaleY, "scaleY", "");
   appendTransform(transforms, record.rotate, "rotate", "deg");
-  appendTransform(transforms, record.rotateX, "rotateX", "deg");
-  appendTransform(transforms, record.rotateY, "rotateY", "deg");
-  appendTransform(transforms, record.rotateZ, "rotateZ", "deg");
+  if (threeD) {
+    appendTransform(transforms, record.rotateX, "rotateX", "deg");
+    appendTransform(transforms, record.rotateY, "rotateY", "deg");
+    appendTransform(transforms, record.rotateZ, "rotateZ", "deg");
+  }
   appendTransform(transforms, record.skewX, "skewX", "deg");
   appendTransform(transforms, record.skewY, "skewY", "deg");
   return transforms.length ? transforms.join(" ") : undefined;

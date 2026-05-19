@@ -2581,6 +2581,7 @@ function ShapeDrawPreviewOverlay({
 export const FrameObjectView = memo(function FrameObjectView({
   activeShapeTool,
   animationsEnabled,
+  cameraDofPx,
   exportTileFrameBounds,
   object,
   parentTransform,
@@ -2601,6 +2602,7 @@ export const FrameObjectView = memo(function FrameObjectView({
 }: {
   activeShapeTool?: ComposeDrawTool | null;
   animationsEnabled: boolean;
+  cameraDofPx?: number;
   exportTileFrameBounds?: ExportTileFrameBounds;
   object: FrameObject;
   parentTransform?: string;
@@ -2723,6 +2725,14 @@ export const FrameObjectView = memo(function FrameObjectView({
           : "center",
     willChange: renderMode === "export" ? undefined : "transform",
   } as CSSProperties;
+  if (cameraDofPx && cameraDofPx > 0) {
+    const existingFilter =
+      typeof style.filter === "string" ? style.filter : "";
+    const blurFilter = `blur(${cameraDofPx.toFixed(2)}px)`;
+    style.filter = existingFilter
+      ? `${existingFilter} ${blurFilter}`
+      : blurFilter;
+  }
   const content = animation.content ?? object.content;
   const richText = evaluatedObject.renderRichText;
   const textSegments = useMemo(

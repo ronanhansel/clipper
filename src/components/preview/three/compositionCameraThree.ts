@@ -19,6 +19,7 @@ export interface ThreePerspectiveCameraLike {
   aspect: number;
   near: number;
   far: number;
+  filmGauge: number;
   updateProjectionMatrix(): void;
 }
 
@@ -54,5 +55,6 @@ export function applyCompositionCameraToThree(
   target.aspect = aspect;
   target.near = c.near;
   target.far = c.far;
+  target.filmGauge = c.sensor.width;
   target.updateProjectionMatrix();
 }

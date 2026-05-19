@@ -102,8 +102,11 @@ export class CompositionRenderer {
     this.hostRoot.style.position = "absolute";
     this.hostRoot.style.inset = "0";
     this.hostRoot.style.overflow = "hidden";
-    this.hostRoot.appendChild(this.css3dRoot);
+    // Order matters: the WebGL canvas paints below the CSS3D layer so
+    // any grid / helper overlays render behind the composition plane,
+    // not on top of FrameObject content.
     this.hostRoot.appendChild(this.canvas);
+    this.hostRoot.appendChild(this.css3dRoot);
   }
 
   setCamera(camera: CameraObjectProps | null) {
@@ -133,6 +136,13 @@ export class CompositionRenderer {
       element.style.width = `${FRAME_WIDTH}px`;
       element.style.height = `${FRAME_HEIGHT}px`;
       element.style.transformOrigin = "center center";
+      // CSS3DRenderer applies a `matrix3d(...)` to this element each
+      // frame, but never sets `transform-style`. The default `flat`
+      // collapses every descendant 3D transform — so per-layer
+      // `translateZ` / `rotate{X,Y,Z}` from `threeD` FrameObjects would
+      // be lost the moment they cross the CSS3DObject boundary. Mark
+      // the plane preserve-3d so children pop out as authored.
+      element.style.transformStyle = "preserve-3d";
       const obj = new CSS3DObject(element);
       obj.position.set(0, 0, 0);
       this.compositionPlane = obj;

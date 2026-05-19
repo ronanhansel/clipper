@@ -130,12 +130,15 @@ export const CompositionCompositor = memo(function CompositionCompositor(
 
   // PIP renders a second, fully-sealed DomBackend instance so the same
   // React subtree isn't portaled into two CSS3D targets at once. All
-  // interactions are forced off; the PIP is preview-only.
+  // interactions are forced off; the PIP is preview-only. Camera is
+  // handled by the through-camera Three.js renderer that hosts this
+  // backend, so the DOM tree must NOT apply its own CSS camera transform.
   const pipBackendNode = (
     <DomBackend
       active={false}
       activeShapeTool={null}
       animationsEnabled={props.animationsEnabled}
+      cameraHandledExternally={true}
       canSelect={false}
       duration={composition.duration}
       editingTextObjectId={null}
