@@ -7,6 +7,7 @@ export type FrameObjectType =
   | "html"
   | "template"
   | "null"
+  | "camera"
   | "custom-renderer"
   | "pattern2d"
   | "code";

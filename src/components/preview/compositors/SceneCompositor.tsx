@@ -12,6 +12,7 @@ import type { TimelinePreviewStackPart } from "../../../core/timeline";
 import type {
   AdjustmentLayer,
   Bounds,
+  CameraObjectProps,
   FrameObject,
   RichTextSegment,
 } from "../../../core/types";
@@ -75,6 +76,11 @@ type SceneCompositorProps = {
     event: ReactMouseEvent<HTMLDivElement>,
     object: FrameObject,
   ) => void;
+  selectedObjectId?: string | null;
+  onCameraPropsChange?: (
+    cameraObjectId: string,
+    next: CameraObjectProps,
+  ) => void;
 };
 
 export const SceneCompositor = memo(function SceneCompositor({
@@ -108,6 +114,8 @@ export const SceneCompositor = memo(function SceneCompositor({
   onTextEditCommit,
   onTextEditEnd,
   onTextObjectDoubleClick,
+  selectedObjectId,
+  onCameraPropsChange,
 }: SceneCompositorProps) {
   useLayoutEffect(() => {
     const element = cameraRef.current;
@@ -185,6 +193,8 @@ export const SceneCompositor = memo(function SceneCompositor({
                 onTextEditCommit={onTextEditCommit}
                 onTextEditEnd={onTextEditEnd}
                 onTextObjectDoubleClick={onTextObjectDoubleClick}
+                selectedObjectId={selectedObjectId}
+                onCameraPropsChange={onCameraPropsChange}
               />
             ))
           )}

@@ -4,11 +4,11 @@ How Clipper layers state. Read this before adding a `useState`, a store field, o
 
 ## Three layers
 
-| Layer | Mechanism | Holds | Update cadence |
-|-------|-----------|-------|----------------|
-| Per-tick | `playbackTimeStore` + `useSyncExternalStore` | Scene time, scrub clock | Every rAF |
-| Structural | `editorStore` (zustand) + `projectStore` | Project, selection, mode, panels | Per edit / mode change |
-| UI-local | `useState` | Popover open, hover, transient input | Per interaction |
+| Layer      | Mechanism                                    | Holds                                | Update cadence         |
+| ---------- | -------------------------------------------- | ------------------------------------ | ---------------------- |
+| Per-tick   | `playbackTimeStore` + `useSyncExternalStore` | Scene time, scrub clock              | Every rAF              |
+| Structural | `editorStore` (zustand) + `projectStore`     | Project, selection, mode, panels     | Per edit / mode change |
+| UI-local   | `useState`                                   | Popover open, hover, transient input | Per interaction        |
 
 Pick the lowest layer that fits. A per-tick value in the structural store fans out on every rAF; a structural value in `useState` on the root shell fans out to every subscriber on every change.
 

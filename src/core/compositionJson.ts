@@ -450,6 +450,7 @@ function readObjectType(
     value === "html" ||
     value === "template" ||
     value === "null" ||
+    value === "camera" ||
     value === "custom-renderer" ||
     value === "pattern2d" ||
     value === "code"

@@ -1,30 +1,25 @@
 /**
  * `useCompositionCamera` resolves a composition's *internal* camera
- * transform — the AE-style camera that lives inside a composition and bakes
- * into the composition's flat output before any scene-level wrapper applies.
+ * transform. Today the camera lives as a `FrameObject` of type `"camera"`
+ * in `part.objects`; the first non-hidden camera in array order is the
+ * active viewpoint. This hook reads that object's props and returns a
+ * CSS-friendly `CameraPreviewTransform` so compose mode can show the
+ * live camera position. Direct mode (Phase 5) reads the same camera via
+ * `getActiveCameraObjectProps` to drive its WebGL renderer.
  *
- * v0.2.19 returns `null` for every composition. The seam exists so the
- * inner-camera authoring feature (AGENTS-camera-feature, brainstorm 2026-05)
- * can land without touching the backend selector or scene compositor.
- *
- * Contract:
- *   - Inputs: the composition's own `motionMarkers` plus `localTime`.
- *   - Output: a `CameraPreviewTransform` to apply on the composition host
- *     (inside `CompositionCompositor`, before the backend renders), or
- *     `null` when the composition has no inner camera authored.
- *   - The scene camera (`SceneCompositor`) MUST stay independent — inner
- *     and outer transforms compose multiplicatively, never replace each
- *     other.
- *
- * When the inner-camera feature lands, this hook will:
- *   1. Filter `part.motionMarkers` to inner-camera-tagged markers.
- *   2. Reuse `getLayeredCameraPreviewTransform` from `core/camera.ts` with
- *      a per-composition `motionLayers` definition (currently scene-only).
- *   3. Return the resolved transform.
+ * Returns `null` when the composition has no camera layer.
  */
 
-import type { CameraPreviewTransform } from "../../../core/camera";
-import type { CompositionClip } from "../../../core/types";
+import {
+  CAMERA_PERSPECTIVE,
+  type CameraPreviewTransform,
+} from "../../../core/camera";
+import {
+  DEFAULT_CAMERA_OBJECT_PROPS,
+  type CameraObjectProps,
+  type CompositionClip,
+  type FrameObject,
+} from "../../../core/types";
 
 export type CompositionCameraInput = {
   part: CompositionClip;
@@ -32,7 +27,91 @@ export type CompositionCameraInput = {
 };
 
 export function useCompositionCamera(
-  _input: CompositionCameraInput,
+  input: CompositionCameraInput,
 ): CameraPreviewTransform | null {
+  const props = getActiveCameraObjectProps(input.part);
+  if (!props) return null;
+  return cameraObjectPropsToPreviewTransform(props);
+}
+
+/**
+ * Find the active camera FrameObject's props (or null if none).
+ * "Active" = first non-hidden object with `type === "camera"`.
+ */
+export function getActiveCameraObjectProps(
+  part: CompositionClip,
+): CameraObjectProps | null {
+  const cameraObject = findActiveCameraObject(part);
+  if (!cameraObject) return null;
+  return readCameraObjectProps(cameraObject);
+}
+
+export function findActiveCameraObject(
+  part: CompositionClip,
+): FrameObject | null {
+  for (const obj of part.objects) {
+    if (obj.type === "camera" && !obj.hidden) return obj;
+  }
   return null;
+}
+
+export function compositionHasCameraLayer(part: CompositionClip): boolean {
+  return part.objects.some((obj) => obj.type === "camera" && !obj.hidden);
+}
+
+/**
+ * Coerce a camera object's `props` JSON into a typed `CameraObjectProps`,
+ * falling back to defaults for any missing/invalid field. Robust against
+ * partial / malformed data.
+ */
+export function readCameraObjectProps(object: FrameObject): CameraObjectProps {
+  const def = DEFAULT_CAMERA_OBJECT_PROPS;
+  const raw = object.props ?? {};
+  const readVec3 = (
+    v: unknown,
+    fallback: { x: number; y: number; z: number },
+  ) => {
+    if (!v || typeof v !== "object") return { ...fallback };
+    const r = v as Record<string, unknown>;
+    const num = (k: "x" | "y" | "z") => {
+      const n = r[k];
+      return typeof n === "number" && Number.isFinite(n) ? n : fallback[k];
+    };
+    return { x: num("x"), y: num("y"), z: num("z") };
+  };
+  const num = (key: "fov" | "near" | "far") => {
+    const n = (raw as Record<string, unknown>)[key];
+    return typeof n === "number" && Number.isFinite(n) ? n : def[key];
+  };
+  return {
+    position: readVec3((raw as Record<string, unknown>).position, def.position),
+    rotation: readVec3((raw as Record<string, unknown>).rotation, def.rotation),
+    fov: num("fov"),
+    near: num("near"),
+    far: num("far"),
+  };
+}
+
+/**
+ * Map `CameraObjectProps` to a CSS `CameraPreviewTransform` for compose-mode
+ * preview. Same convention as the prior `compositionCameraToPreviewTransform`:
+ *   - position is inverted (transform applies to scene, not camera)
+ *   - rotation is inverted on X and Z; Y rotation passes through
+ *   - z = neutralZ - position.z so default z=1000 is identity
+ */
+export function cameraObjectPropsToPreviewTransform(
+  camera: CameraObjectProps,
+): CameraPreviewTransform {
+  const neutralZ = DEFAULT_CAMERA_OBJECT_PROPS.position.z;
+  return {
+    x: 0 - camera.position.x,
+    y: 0 - camera.position.y,
+    z: neutralZ - camera.position.z,
+    scale: 1,
+    rotation: 0 - camera.rotation.z,
+    rotateX: 0 - camera.rotation.x,
+    rotateY: 0 - camera.rotation.y,
+    perspective: CAMERA_PERSPECTIVE,
+    motionBlur: 0,
+  };
 }

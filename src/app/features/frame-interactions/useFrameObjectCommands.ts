@@ -16,6 +16,7 @@ import type {
   PartFrame,
   RichTextSegment,
 } from "../../../core/types";
+import { DEFAULT_CAMERA_OBJECT_PROPS } from "../../../core/types";
 
 type FrameObjectCommandsParams = {
   part: Part;
@@ -261,6 +262,32 @@ export function useFrameObjectCommands({
     }));
   }
 
+  function createCameraObject() {
+    const id = `camera-${Date.now().toString(36)}`;
+    const cameraIndex =
+      part.objects.filter((o) => o.type === "camera").length + 1;
+    const object: FrameObject = {
+      id,
+      name: `Camera ${cameraIndex}`,
+      type: "camera",
+      selector: `[data-object-id='${id}']`,
+      bounds: { x: 0, y: 0, width: 0, height: 0 },
+      style: {},
+      props: {
+        position: { ...DEFAULT_CAMERA_OBJECT_PROPS.position },
+        rotation: { ...DEFAULT_CAMERA_OBJECT_PROPS.rotation },
+        fov: DEFAULT_CAMERA_OBJECT_PROPS.fov,
+        near: DEFAULT_CAMERA_OBJECT_PROPS.near,
+        far: DEFAULT_CAMERA_OBJECT_PROPS.far,
+      },
+    };
+    updateCompositionForTimelinePart(part.id, (composition) => ({
+      ...composition,
+      objects: [...composition.objects, object],
+    }));
+    return object.id;
+  }
+
   function deleteComposeObjects(objectIds: string[]) {
     const selectedIds = new Set(objectIds);
     if (selectedIds.size === 0) return;
@@ -293,6 +320,7 @@ export function useFrameObjectCommands({
     reorderComposeObjects,
     selectComposeLayerObjects,
     createComposeObject,
+    createCameraObject,
     deleteComposeObjects,
     updateObjectById,
     updatePartBackground,

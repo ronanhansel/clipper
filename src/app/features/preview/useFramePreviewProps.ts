@@ -2,6 +2,7 @@ import { useMemo, type RefObject } from "react";
 import type {
   AdjustmentLayer,
   Bounds,
+  CameraObjectProps,
   Part,
   Point,
   SelectionPayload,
@@ -81,6 +82,11 @@ export type UseFramePreviewPropsParams = {
   >;
   updateTextObjectContent: StrategyFramePreviewProps["onTextEditCommit"];
   commitTranslationTrackerPick: StrategyFramePreviewProps["onTrackerTargetPick"];
+  selectedObjectId: string | null;
+  onCameraPropsChange: (
+    cameraObjectId: string,
+    next: CameraObjectProps,
+  ) => void;
 };
 
 export function useFramePreviewProps({
@@ -128,6 +134,8 @@ export function useFramePreviewProps({
   openComposeObjectContextMenu,
   updateTextObjectContent,
   commitTranslationTrackerPick,
+  selectedObjectId,
+  onCameraPropsChange,
 }: UseFramePreviewPropsParams): StrategyFramePreviewProps {
   return useMemo((): StrategyFramePreviewProps => {
     return {
@@ -198,6 +206,8 @@ export function useFramePreviewProps({
       onTextPathOffsetChange: composeDrawing.updateTextPathOffset,
       onTextObjectDoubleClick: startTextObjectEdit,
       onTrackerTargetPick: commitTranslationTrackerPick,
+      selectedObjectId: composeMode ? selectedObjectId : null,
+      onCameraPropsChange,
     };
   }, [
     cameraRef,
@@ -252,5 +262,7 @@ export function useFramePreviewProps({
     composeDrawing.updateTextPathOffset,
     startTextObjectEdit,
     commitTranslationTrackerPick,
+    selectedObjectId,
+    onCameraPropsChange,
   ]);
 }

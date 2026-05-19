@@ -4,10 +4,10 @@ How Clipper isolates the two editor sub-modes. Read this before touching `frameP
 
 ## Modes
 
-| Mode | Edits | Inspector | Layering |
-|------|-------|-----------|----------|
-| Compose | One composition's internals | Object inspector | All scene wrappers (camera, motion, adjustments, transitions, hide-null) disabled |
-| Direct | The master timeline | Motion / adjustment / transition / composition inspectors | All scene wrappers enabled |
+| Mode    | Edits                       | Inspector                                                 | Layering                                                                          |
+| ------- | --------------------------- | --------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| Compose | One composition's internals | Object inspector                                          | All scene wrappers (camera, motion, adjustments, transitions, hide-null) disabled |
+| Direct  | The master timeline         | Motion / adjustment / transition / composition inspectors | All scene wrappers enabled                                                        |
 
 Modes share **only** the playhead clock. Everything else (selection, picks, zoom, post-process layers, motion markers, adjustment layers) is mode-scoped.
 
@@ -24,20 +24,20 @@ export interface SceneWrapConfig {
   hideNullObjects: boolean;
 }
 
-export function sceneWrapConfigForMode(mode: TimelineMode): SceneWrapConfig
+export function sceneWrapConfigForMode(mode: TimelineMode): SceneWrapConfig;
 ```
 
 `deriveFramePreviewRenderModelFromContext` zeros `visibleAdjustmentLayers`, `transitionLayers`, `motionLayers`, `transitionPreviewParts` when their flags are false. The model exposes `sceneWrap` so consumers read one switch instead of inferring mode at every call site.
 
 ## One source of truth per consumer
 
-| Consumer | Reads from |
-|----------|------------|
-| `FramePreview` (camera transform) | `sceneWrap.cameraEnabled` |
-| `FramePreview` (compositor) | `sceneWrap.hideNullObjects` |
-| `selectPreviewStrategy` | `sceneWrap.cameraEnabled === false` (compose signal) |
-| `editorDerivedState` (camera gate) | `sceneWrap` |
-| `RenderedMediaExportApp` | `sceneWrap` |
+| Consumer                           | Reads from                                           |
+| ---------------------------------- | ---------------------------------------------------- |
+| `FramePreview` (camera transform)  | `sceneWrap.cameraEnabled`                            |
+| `FramePreview` (compositor)        | `sceneWrap.hideNullObjects`                          |
+| `selectPreviewStrategy`            | `sceneWrap.cameraEnabled === false` (compose signal) |
+| `editorDerivedState` (camera gate) | `sceneWrap`                                          |
+| `RenderedMediaExportApp`           | `sceneWrap`                                          |
 
 `timelineMode === "composition"` checks scattered across consumers are forbidden. Read `sceneWrap` instead.
 

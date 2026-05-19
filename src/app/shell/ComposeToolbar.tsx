@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import {
   ChevronDown,
+  Camera as CameraIcon,
   Code as CodeIcon,
   MoveDiagonal2,
   MousePointer2 as PointerIcon,
@@ -38,6 +39,7 @@ export type ComposeDrawTool =
 export type ComposeToolbarProps = {
   activeTool: ComposeDrawTool | null;
   onAddNullObject: () => void;
+  onAddCamera: () => void;
   onAddCodeObject: () => void;
   onActiveToolChange: (tool: ComposeDrawTool | null) => void;
   resizeMode: "resize" | "scale";
@@ -112,25 +114,51 @@ const textTools: ToolbarTool[] = [
   { tool: "textPath", label: "Text on path", icon: <Waypoints size={18} /> },
 ];
 
-const nullObjectTool: ToolbarTool = {
-  tool: "null",
-  label: "Null object",
-  shortcut: "N",
-  icon: <NullObjectIcon size={18} />,
+type ObjectAddToolKey = "null" | "camera";
+
+type ObjectAddTool = {
+  key: ObjectAddToolKey;
+  label: string;
+  shortcut?: string;
+  icon: ReactNode;
 };
 
-const pattern2dTool: ToolbarTool = {
-  tool: "pattern2d",
-  label: "2D pattern",
-  shortcut: "G",
-  icon: <Pattern2DIcon size={18} />,
+const objectAddTools: ObjectAddTool[] = [
+  {
+    key: "null",
+    label: "Null object",
+    shortcut: "N",
+    icon: <NullObjectIcon size={18} />,
+  },
+  {
+    key: "camera",
+    label: "Camera",
+    icon: <CameraIcon size={17} />,
+  },
+];
+
+type GeneratorToolKey = "pattern2d" | "code";
+
+type GeneratorTool = {
+  key: GeneratorToolKey;
+  label: string;
+  shortcut?: string;
+  icon: ReactNode;
 };
 
-const codeTool: ToolbarTool = {
-  tool: "code",
-  label: "Code",
-  icon: <CodeIcon size={17} />,
-};
+const generatorTools: GeneratorTool[] = [
+  {
+    key: "pattern2d",
+    label: "2D pattern",
+    shortcut: "G",
+    icon: <Pattern2DIcon size={18} />,
+  },
+  {
+    key: "code",
+    label: "Code",
+    icon: <CodeIcon size={17} />,
+  },
+];
 
 function ShortcutHint({ shortcut }: { shortcut?: string }) {
   if (!shortcut) return <span />;
@@ -151,17 +179,22 @@ function ShortcutHint({ shortcut }: { shortcut?: string }) {
 export function ComposeToolbar({
   activeTool,
   onAddNullObject,
+  onAddCamera,
   onAddCodeObject,
   onActiveToolChange,
   resizeMode,
   onResizeModeChange,
 }: ComposeToolbarProps) {
   const [openMenu, setOpenMenu] = useState<
-    "cursor" | "shapes" | "pen" | "text" | null
+    "cursor" | "shapes" | "pen" | "text" | "object" | "generator" | null
   >(null);
   const [lastShapeTool, setLastShapeTool] = useState<ComposeDrawTool>("rect");
   const [lastPenTool, setLastPenTool] = useState<ComposeDrawTool>("pen");
   const [lastTextTool, setLastTextTool] = useState<ComposeDrawTool>("text");
+  const [lastObjectAddTool, setLastObjectAddTool] =
+    useState<ObjectAddToolKey>("null");
+  const [lastGeneratorTool, setLastGeneratorTool] =
+    useState<GeneratorToolKey>("pattern2d");
   const activeShapeTool = shapeTools.find((item) => item.tool === activeTool);
   const activePenTool = penTools.find((item) => item.tool === activeTool);
   const activeTextTool = textTools.find((item) => item.tool === activeTool);
@@ -171,6 +204,15 @@ export function ComposeToolbar({
     activePenTool ?? penTools.find((item) => item.tool === lastPenTool)!;
   const currentTextTool =
     activeTextTool ?? textTools.find((item) => item.tool === lastTextTool)!;
+  const currentObjectAddTool =
+    objectAddTools.find((item) => item.key === lastObjectAddTool) ??
+    objectAddTools[0];
+  const generatorActive = activeTool === "pattern2d";
+  const currentGeneratorTool =
+    (generatorActive
+      ? generatorTools.find((item) => item.key === "pattern2d")
+      : generatorTools.find((item) => item.key === lastGeneratorTool)) ??
+    generatorTools[0];
   const currentCursorTool =
     cursorTools.find((item) => item.mode === resizeMode) ?? cursorTools[0];
   const cursorActive = activeTool === null;
@@ -195,6 +237,28 @@ export function ComposeToolbar({
     onActiveToolChange(null);
     onResizeModeChange(mode);
     setOpenMenu(null);
+  }
+
+  function invokeObjectAddTool(tool: ObjectAddTool) {
+    setLastObjectAddTool(tool.key);
+    if (tool.key === "null") onAddNullObject();
+    else if (tool.key === "camera") onAddCamera();
+    setOpenMenu(null);
+  }
+
+  function invokeGeneratorTool(tool: GeneratorTool) {
+    setLastGeneratorTool(tool.key);
+    if (tool.key === "pattern2d") {
+      selectTool({
+        tool: "pattern2d",
+        label: "2D pattern",
+        shortcut: "G",
+        icon: <Pattern2DIcon size={18} />,
+      });
+    } else if (tool.key === "code") {
+      onAddCodeObject();
+      setOpenMenu(null);
+    }
   }
 
   function renderCursorMenu() {
@@ -250,6 +314,64 @@ export function ComposeToolbar({
               <ShortcutHint shortcut={item.shortcut} />
             </button>
           ))}
+        </div>
+      </div>
+    );
+  }
+
+  function renderObjectAddMenu() {
+    if (openMenu !== "object") return null;
+    return (
+      <div className="absolute bottom-full left-0 mb-2 w-[196px] rounded-[10px] border border-[#2d313b] bg-[#11141a] p-1.5 text-[#f7f7f8] shadow-[0_18px_60px_rgba(0,0,0,0.42)]">
+        <div className="grid gap-0.5">
+          {objectAddTools.map((item) => (
+            <button
+              key={item.key}
+              className="grid h-7 grid-cols-[14px_22px_minmax(0,1fr)_auto] items-center gap-1.5 rounded-[6px] px-1.5 text-left text-[11px] font-semibold leading-none text-[#dfe2ea] outline-none transition hover:bg-[#20232c] hover:text-white focus-visible:bg-[#20232c] focus-visible:text-white"
+              onClick={() => invokeObjectAddTool(item)}
+            >
+              <span className="grid place-items-center text-[11px] text-[var(--clipper-accent)]">
+                {currentObjectAddTool.key === item.key ? "✓" : null}
+              </span>
+              <span className="grid place-items-center [&_svg]:size-4">
+                {item.icon}
+              </span>
+              <span className="min-w-0 truncate">{item.label}</span>
+              <ShortcutHint shortcut={item.shortcut} />
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  function renderGeneratorMenu() {
+    if (openMenu !== "generator") return null;
+    return (
+      <div className="absolute bottom-full left-0 mb-2 w-[196px] rounded-[10px] border border-[#2d313b] bg-[#11141a] p-1.5 text-[#f7f7f8] shadow-[0_18px_60px_rgba(0,0,0,0.42)]">
+        <div className="grid gap-0.5">
+          {generatorTools.map((item) => {
+            const checked =
+              item.key === "pattern2d"
+                ? generatorActive
+                : currentGeneratorTool.key === item.key && !generatorActive;
+            return (
+              <button
+                key={item.key}
+                className="grid h-7 grid-cols-[14px_22px_minmax(0,1fr)_auto] items-center gap-1.5 rounded-[6px] px-1.5 text-left text-[11px] font-semibold leading-none text-[#dfe2ea] outline-none transition hover:bg-[#20232c] hover:text-white focus-visible:bg-[#20232c] focus-visible:text-white"
+                onClick={() => invokeGeneratorTool(item)}
+              >
+                <span className="grid place-items-center text-[11px] text-[var(--clipper-accent)]">
+                  {checked ? "✓" : null}
+                </span>
+                <span className="grid place-items-center [&_svg]:size-4">
+                  {item.icon}
+                </span>
+                <span className="min-w-0 truncate">{item.label}</span>
+                <ShortcutHint shortcut={item.shortcut} />
+              </button>
+            );
+          })}
         </div>
       </div>
     );
@@ -332,37 +454,44 @@ export function ComposeToolbar({
           </button>
         </div>
         <div className="mx-1 h-6 w-px bg-[#313744]" />
-        <button
-          className={toolButtonClass(activeTool === "pattern2d")}
-          title={pattern2dTool.label}
-          aria-pressed={activeTool === "pattern2d"}
-          onClick={() => selectTool(pattern2dTool)}
-        >
-          {pattern2dTool.icon}
-        </button>
-        <button
-          className={toolButtonClass(false)}
-          title={codeTool.label}
-          aria-label={codeTool.label}
-          aria-pressed={false}
-          onClick={() => {
-            onAddCodeObject();
-            setOpenMenu(null);
-          }}
-        >
-          {codeTool.icon}
-        </button>
-        <button
-          className={toolButtonClass(false)}
-          title={nullObjectTool.label}
-          aria-pressed={false}
-          onClick={() => {
-            onAddNullObject();
-            setOpenMenu(null);
-          }}
-        >
-          {nullObjectTool.icon}
-        </button>
+        <div className="relative flex items-center gap-1">
+          {renderGeneratorMenu()}
+          <button
+            className={toolButtonClass(generatorActive)}
+            title={currentGeneratorTool.label}
+            aria-pressed={generatorActive}
+            onClick={() => invokeGeneratorTool(currentGeneratorTool)}
+          >
+            {currentGeneratorTool.icon}
+          </button>
+          <button
+            className={menuButtonClass(openMenu === "generator")}
+            title="Generator tools"
+            onClick={() =>
+              setOpenMenu(openMenu === "generator" ? null : "generator")
+            }
+          >
+            <ChevronDown size={15} />
+          </button>
+        </div>
+        <div className="relative flex items-center gap-1">
+          {renderObjectAddMenu()}
+          <button
+            className={toolButtonClass(false)}
+            title={currentObjectAddTool.label}
+            aria-pressed={false}
+            onClick={() => invokeObjectAddTool(currentObjectAddTool)}
+          >
+            {currentObjectAddTool.icon}
+          </button>
+          <button
+            className={menuButtonClass(openMenu === "object")}
+            title="Object tools"
+            onClick={() => setOpenMenu(openMenu === "object" ? null : "object")}
+          >
+            <ChevronDown size={15} />
+          </button>
+        </div>
       </div>
     </div>
   );

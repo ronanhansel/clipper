@@ -11,6 +11,11 @@ import {
   isObjectInExportTile,
   isPenDrawTool,
 } from "../FramePreview";
+import { useCompositionCamera } from "../compositors/useCompositionCamera";
+import {
+  formatCameraPreviewFilter,
+  formatCameraPreviewTransform,
+} from "../../../core/camera";
 import type { CompositionBackend } from "./CompositionBackend";
 
 export const DomBackend: CompositionBackend = function DomBackend({
@@ -50,6 +55,19 @@ export const DomBackend: CompositionBackend = function DomBackend({
     [renderClockState],
   );
 
+  const innerCamera = useCompositionCamera({
+    part,
+    localTime,
+  });
+  const innerCameraStyle = innerCamera
+    ? {
+        transform: formatCameraPreviewTransform(innerCamera),
+        filter: formatCameraPreviewFilter(innerCamera),
+        transformOrigin: "center center" as const,
+        transformStyle: "preserve-3d" as const,
+      }
+    : undefined;
+
   useLayoutEffect(() => {
     syncDomAnimationsToRenderClock(
       hostRef.current,
@@ -69,7 +87,11 @@ export const DomBackend: CompositionBackend = function DomBackend({
       data-clipper-render-clock-layer
       data-clipper-render-clock-offset={localTime - renderClockSceneTime}
       {...getRenderClockAttributes(renderClockState)}
-      style={{ ...(part.frame.style as CSSProperties), ...renderClockStyle }}
+      style={{
+        ...(part.frame.style as CSSProperties),
+        ...renderClockStyle,
+        ...innerCameraStyle,
+      }}
     >
       {!part.background.hidden && (
         <BackgroundLayerView

@@ -1,5 +1,6 @@
 import type { ComponentType } from "react";
 import { BoundsSection } from "./sections/BoundsSection";
+import { CameraObjectSection } from "./sections/CameraObjectSection";
 import { CodeSection } from "./sections/CodeSection";
 import { EffectsSection } from "./sections/EffectsSection";
 import { FillSection } from "./sections/FillSection";
@@ -55,6 +56,9 @@ export const inspectorRegistry: Record<string, InspectorTypeDefinition> = {
   },
   code: {
     sections: [BoundsSection, CodeSection],
+  },
+  camera: {
+    sections: [CameraObjectSection],
   },
 };
 

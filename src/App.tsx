@@ -126,6 +126,7 @@ import {
 } from "./core/timeline";
 import {
   FRAME_HEIGHT,
+  type CameraObjectProps,
   type EditorState,
   type TimelineViewportState,
 } from "./core/types";
@@ -1231,6 +1232,7 @@ function AppContent({
 
   const {
     createComposeObject,
+    createCameraObject,
     deleteComposeObjects,
     reorderComposeObjects,
     selectComposeLayerObjects,
@@ -1465,6 +1467,22 @@ function AppContent({
     shapeDrawPreviewRef,
     setShapeDrawPreview,
   });
+
+  const addCameraToActivePart = useCallback(() => {
+    if (!part) return;
+    createCameraObject();
+    selectPart(part.id);
+  }, [part, createCameraObject, selectPart]);
+
+  const handleCameraPropsChange = useCallback(
+    (cameraObjectId: string, next: CameraObjectProps) => {
+      updateObjectById(cameraObjectId, (object) => ({
+        ...object,
+        props: { ...(object.props ?? {}), ...next },
+      }));
+    },
+    [updateObjectById],
+  );
 
   useComposeToolShortcuts({
     activeTool,
@@ -1791,6 +1809,8 @@ function AppContent({
     openComposeObjectContextMenu,
     updateTextObjectContent,
     commitTranslationTrackerPick,
+    selectedObjectId,
+    onCameraPropsChange: handleCameraPropsChange,
   });
 
   const timelinePanelProps = useTimelinePanelProps({
@@ -1986,6 +2006,7 @@ function AppContent({
                 ? {
                     activeTool,
                     onAddNullObject: composeDrawing.addNullObjectToFrameCenter,
+                    onAddCamera: addCameraToActivePart,
                     onAddCodeObject: () => createComposeObject("code"),
                     onActiveToolChange: setActiveTool,
                     resizeMode: objectResizeMode,

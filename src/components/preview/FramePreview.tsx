@@ -87,6 +87,7 @@ import {
   type AdjustmentLayer,
   type BackgroundLayer,
   type Bounds,
+  type CameraObjectProps,
   type FrameObject,
   type Part,
   type Point,
@@ -232,6 +233,11 @@ type FramePreviewProps = {
   transitionLayers?: TransitionLayer[];
   renderMode?: "preview" | "export";
   previewOverlayHost?: HTMLElement | null;
+  selectedObjectId?: string | null;
+  onCameraPropsChange?: (
+    cameraObjectId: string,
+    next: CameraObjectProps,
+  ) => void;
 };
 
 export type ComposeDrawTool =
@@ -309,6 +315,8 @@ export const FramePreview = memo(function FramePreview({
   onTrackerTargetPick,
   activeShapeTool,
   shapeDrawPreview,
+  selectedObjectId,
+  onCameraPropsChange,
 }: FramePreviewProps) {
   const exportTileViewport = (
     arguments[0] as { exportTileViewport?: ExportTileViewport }
@@ -370,6 +378,10 @@ export const FramePreview = memo(function FramePreview({
       .objectSnapGuides ?? [];
   const composePlaybackActive =
     sceneWrap.interactionsLockedDuringPlayback && isPlaying;
+  const composeAuthorViewActive =
+    !sceneWrap.flattenComposition &&
+    Boolean(onCameraPropsChange) &&
+    part.objects.some((obj) => obj.type === "camera" && !obj.hidden);
   const interactiveDragBox = composePlaybackActive ? null : dragBox;
   const interactiveFramePickPoint = composePlaybackActive
     ? null
@@ -488,18 +500,30 @@ export const FramePreview = memo(function FramePreview({
     ? identityCameraTransform
     : activeCameraTransform;
   const frameBackground = part.frame.style.backgroundColor ?? "#000";
-  const frameStyle = useMemo(
-    () =>
-      ({
-        width: FRAME_WIDTH,
-        height: FRAME_HEIGHT,
-        background: frameBackground,
-        left: exportTileViewport ? -exportTileViewport.x : 0,
-        top: exportTileViewport ? -exportTileViewport.y : 0,
-        transform: frameScale === 1 ? undefined : `scale(${frameScale})`,
-      }) as CSSProperties,
-    [exportTileViewport, frameBackground, frameScale],
-  );
+  const frameStyle = useMemo(() => {
+    const base = {
+      width: FRAME_WIDTH,
+      height: FRAME_HEIGHT,
+      background: frameBackground,
+      left: exportTileViewport ? -exportTileViewport.x : 0,
+      top: exportTileViewport ? -exportTileViewport.y : 0,
+      transform: frameScale === 1 ? undefined : `scale(${frameScale})`,
+    } as CSSProperties;
+    if (composeAuthorViewActive) {
+      return {
+        ...base,
+        width: "100%",
+        height: "100%",
+        transform: undefined,
+      } as CSSProperties;
+    }
+    return base;
+  }, [
+    composeAuthorViewActive,
+    exportTileViewport,
+    frameBackground,
+    frameScale,
+  ]);
   const perspectiveStageStyle = useMemo(
     () =>
       ({
@@ -528,20 +552,31 @@ export const FramePreview = memo(function FramePreview({
   const selectedPreviewObjects = interactiveSelectedObjects;
   const viewportOverlayStyle = useMemo(
     () =>
-      exportTileViewport
+      composeAuthorViewActive
         ? ({
-            width: exportTileViewport.width,
-            height: exportTileViewport.height,
+            width: "100%",
+            height: "100%",
           } as CSSProperties)
-        : ({
-            width: FRAME_WIDTH * frameScale,
-            height: FRAME_HEIGHT * frameScale,
-          } as CSSProperties),
-    [exportTileViewport, frameScale],
+        : exportTileViewport
+          ? ({
+              width: exportTileViewport.width,
+              height: exportTileViewport.height,
+            } as CSSProperties)
+          : ({
+              width: FRAME_WIDTH * frameScale,
+              height: FRAME_HEIGHT * frameScale,
+            } as CSSProperties),
+    [composeAuthorViewActive, exportTileViewport, frameScale],
   );
   const clippedViewportStyle = useMemo(
-    () => ({ ...viewportStyle, left: 0, top: 0 }) as CSSProperties,
-    [viewportStyle],
+    () =>
+      ({
+        ...viewportStyle,
+        left: 0,
+        top: 0,
+        ...(composeAuthorViewActive ? { width: "100%", height: "100%" } : null),
+      }) as CSSProperties,
+    [viewportStyle, composeAuthorViewActive],
   );
   const [trackerHoverTarget, setTrackerHoverTarget] = useState<{
     id: string;
@@ -834,6 +869,8 @@ export const FramePreview = memo(function FramePreview({
                     onTextEditCommit={onTextEditCommit}
                     onTextEditEnd={onTextEditEnd}
                     onTextObjectDoubleClick={onTextObjectDoubleClick}
+                    selectedObjectId={selectedObjectId}
+                    onCameraPropsChange={onCameraPropsChange}
                   />
                 </PreviewRenderProvider>
               )}
@@ -845,10 +882,12 @@ export const FramePreview = memo(function FramePreview({
               style={{ zIndex: 2147483647 }}
             />
           </div>
-          {interactiveTrackerPicking && trackerHoverTarget ? (
+          {!composeAuthorViewActive &&
+          interactiveTrackerPicking &&
+          trackerHoverTarget ? (
             <TrackerTargetOverlay target={trackerHoverTarget} />
           ) : null}
-          {interactiveDragBox ? (
+          {!composeAuthorViewActive && interactiveDragBox ? (
             <DragSelectionBox
               dragSelectionBoxRef={dragSelectionBoxRef}
               bounds={interactiveDragBox}
@@ -860,22 +899,28 @@ export const FramePreview = memo(function FramePreview({
               visible={Boolean(showDragBox)}
             />
           ) : null}
-          {interactiveObjectSnapGuides.map((guide, index) => (
-            <SnapGuideOverlay
-              key={`${guide.axis}:${guide.position}:${index}`}
-              cameraTransform={liveCameraTransform}
-              guide={guide}
-              frameScale={frameScale}
-            />
-          ))}
-          {interactiveFramePickPoint ? (
+          {!composeAuthorViewActive &&
+            interactiveObjectSnapGuides.map((guide, index) => (
+              <SnapGuideOverlay
+                key={`${guide.axis}:${guide.position}:${index}`}
+                cameraTransform={liveCameraTransform}
+                guide={guide}
+                frameScale={frameScale}
+              />
+            ))}
+          {!composeAuthorViewActive && interactiveFramePickPoint ? (
             <FramePickPointOverlay
               point={interactiveFramePickPoint}
               frameScale={frameScale}
             />
           ) : null}
-          <FramePickPointImperativeOverlay />
-          {showShapeDrawPreview && shapeDrawPreview && activeShapeTool ? (
+          {!composeAuthorViewActive ? (
+            <FramePickPointImperativeOverlay />
+          ) : null}
+          {!composeAuthorViewActive &&
+          showShapeDrawPreview &&
+          shapeDrawPreview &&
+          activeShapeTool ? (
             <ShapeDrawPreviewOverlay
               preview={shapeDrawPreview}
               frameScale={frameScale}
@@ -899,7 +944,10 @@ export const FramePreview = memo(function FramePreview({
             previewOverlayHost,
           )
         : null}
-      {canSelectObjects && !isUnlinkedPart && previewOverlayHost
+      {!composeAuthorViewActive &&
+      canSelectObjects &&
+      !isUnlinkedPart &&
+      previewOverlayHost
         ? createPortal(
             selectedPreviewObjects.map((object) => {
               const source = evaluatedSelectableObjectsById.get(object.id);

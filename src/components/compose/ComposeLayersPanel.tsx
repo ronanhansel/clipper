@@ -1,5 +1,6 @@
 import {
   Braces,
+  Camera,
   ChartNoAxesColumn,
   ChevronRight,
   Code,
@@ -674,6 +675,7 @@ function LayerIcon({ node }: { node: ComposeLayerNode }) {
     return <PenTool className={className} />;
   }
   if (objectType === "null") return <NullObjectIcon className={className} />;
+  if (objectType === "camera") return <Camera className={className} />;
   if (objectType === "html") return <Code2 className={className} />;
   if (objectType === "code") return <Code className={className} />;
   if (objectType === "template")

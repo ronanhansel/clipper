@@ -29,6 +29,7 @@ export type FrameObjectType =
   | "html"
   | "template"
   | "null"
+  | "camera"
   | "custom-renderer"
   | "pattern2d"
   | "code";
@@ -251,6 +252,31 @@ export type PartSnapshotLine = {
 };
 
 export type CompositionRenderMode = "dom" | "webgl";
+
+/**
+ * Props stored on a `FrameObject` whose `type === "camera"`. The composition
+ * may contain zero or more camera objects in `part.objects`. The first
+ * non-hidden camera (in array order) is the active viewpoint; additional
+ * cameras are inactive but persisted (matching After Effects layer model).
+ *
+ * Position uses Clipper's frame coordinate space (y-down). Rotations are
+ * degrees applied in XYZ Euler order.
+ */
+export type CameraObjectProps = {
+  position: { x: number; y: number; z: number };
+  rotation: { x: number; y: number; z: number };
+  fov: number;
+  near: number;
+  far: number;
+};
+
+export const DEFAULT_CAMERA_OBJECT_PROPS: CameraObjectProps = {
+  position: { x: 0, y: 0, z: 1000 },
+  rotation: { x: 0, y: 0, z: 0 },
+  fov: 50,
+  near: 1,
+  far: 10000,
+};
 
 export type JsonValue =
   | null

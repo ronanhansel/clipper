@@ -67,10 +67,10 @@ Always include a default entry for unknown types — the registry must never thr
 
 ## Context vs store
 
-| Mechanism | Use for |
-|-----------|---------|
-| React context | Shared helpers (~30 callbacks, formatters, dispatchers) injected into deeply nested children. Stable across renders. |
-| External store | Shared state (data the UI reads and writes). Changes per tick or per edit. |
+| Mechanism      | Use for                                                                                                              |
+| -------------- | -------------------------------------------------------------------------------------------------------------------- |
+| React context  | Shared helpers (~30 callbacks, formatters, dispatchers) injected into deeply nested children. Stable across renders. |
+| External store | Shared state (data the UI reads and writes). Changes per tick or per edit.                                           |
 
 Don't conflate. Helpers live in context; data lives in the store. A "context" carrying mutable data invalidates every consumer on every change.
 
@@ -79,7 +79,9 @@ Don't conflate. Helpers live in context; data lives in the store. A "context" ca
 Decision logic (which renderer to mount, which strategy applies, which path to take) is a pure tested function:
 
 ```ts
-export function selectPreviewStrategy(input: PreviewStrategyInput): PreviewStrategy
+export function selectPreviewStrategy(
+  input: PreviewStrategyInput,
+): PreviewStrategy;
 ```
 
 Inputs flow in; the result is exhaustive (TypeScript discriminated union). Single decision point.
@@ -95,9 +97,9 @@ Rules:
 Render entry points are pure functions:
 
 ```ts
-renderScenePreview(input)       // → camera transform, filters, frame style
-renderCompositionPreview(input) // → composition descriptor
-renderEffectPreview(input)      // → per-pass invocation contract
+renderScenePreview(input); // → camera transform, filters, frame style
+renderCompositionPreview(input); // → composition descriptor
+renderEffectPreview(input); // → per-pass invocation contract
 ```
 
 No React, no DOM, no refs. They are the seam for backend swaps (Canvas2d, WebGL, future Wgpu/native). A backend implements `RenderBackend.renderComposition` / `renderEffect` and consumes these pure inputs.

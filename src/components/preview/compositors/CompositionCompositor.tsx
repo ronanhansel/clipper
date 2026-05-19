@@ -6,6 +6,7 @@ import {
 } from "react";
 import type {
   Bounds,
+  CameraObjectProps,
   CompositionClip,
   FrameObject,
   RichTextSegment,
@@ -17,6 +18,8 @@ import { useCompositionCache } from "../cache/useCompositionCache";
 import { renderCompositionPreview } from "../render/sceneRender";
 import { FRAME_HEIGHT, FRAME_WIDTH } from "../../../core/types";
 import type { ComposeDrawTool, ExportTileFrameBounds } from "../FramePreview";
+import { ComposeAuthorView } from "../three/ComposeAuthorView";
+import { compositionHasCameraLayer } from "./useCompositionCamera";
 
 type CompositionCompositorProps = {
   active: boolean;
@@ -60,6 +63,11 @@ type CompositionCompositorProps = {
     event: ReactMouseEvent<HTMLDivElement>,
     object: FrameObject,
   ) => void;
+  selectedObjectId?: string | null;
+  onCameraPropsChange?: (
+    cameraObjectId: string,
+    next: CameraObjectProps,
+  ) => void;
 };
 
 export const CompositionCompositor = memo(function CompositionCompositor(
@@ -79,6 +87,24 @@ export const CompositionCompositor = memo(function CompositionCompositor(
   const Backend: CompositionBackend = props.flatten
     ? RasterBackend
     : DomBackend;
+  const showAuthorView =
+    !props.flatten &&
+    Boolean(props.onCameraPropsChange) &&
+    compositionHasCameraLayer(props.part);
+
+  if (showAuthorView && props.onCameraPropsChange) {
+    return (
+      <div className="absolute inset-0">
+        <ComposeAuthorView
+          part={props.part}
+          selectedObjectId={props.selectedObjectId ?? null}
+          onCameraPropsChange={props.onCameraPropsChange}
+          localTime={props.localTime}
+        />
+      </div>
+    );
+  }
+
   return (
     <Backend
       active={props.active}
