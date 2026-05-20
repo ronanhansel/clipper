@@ -1308,10 +1308,7 @@ function ComposeTimelineRailRow({
         onToggleHidden={() => undefined}
         onToggleLocked={() => undefined}
       />
-      <ThreeDToggleCell
-        layer={row.layer}
-        onUpdateObject={onUpdateObject}
-      />
+      <ThreeDToggleCell layer={row.layer} onUpdateObject={onUpdateObject} />
       <ComposeParentLinkControl
         layer={row.layer}
         parentOptions={parentOptions}

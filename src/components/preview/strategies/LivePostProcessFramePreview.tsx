@@ -24,6 +24,7 @@ import type {
 } from "../../../core/effects/types";
 import { createWebGLBackend } from "../backends/WebGLBackend";
 import type { RenderBackend } from "../backends/types";
+import { getActiveCameraObjectProps } from "../compositors/useCompositionCamera";
 import { FramePreviewLive } from "../FramePreviewLive";
 import type { PostProcessPlan } from "../passes/usePostProcessPlan";
 import { useChangedSetState } from "../passes/useChangedSetState";
@@ -254,12 +255,17 @@ export function LivePostProcessFramePreview({
     layers: AdjustmentLayer[] | undefined,
     label: "live.event" | "live.effect" | "live.raf",
   ) {
+    const cameraProps = getActiveCameraObjectProps(
+      framePreviewProps.part,
+      framePreviewProps.previewTime,
+    );
     return measurePreviewPerf(`${label}.collectRequirement`, () =>
       computePostProcessPlan(
         sceneTime,
         layers ?? framePreviewProps.adjustmentLayers,
         { transitionLayers: framePreviewProps.transitionLayers },
         getPreviewPlanFrameSize(),
+        cameraProps,
       ),
     );
   }
@@ -401,11 +407,16 @@ export function LivePostProcessFramePreview({
   const sourceAdjustmentLayers = useMemo(() => {
     const layers =
       previewLayersRef.current ?? framePreviewProps.adjustmentLayers;
+    const cameraProps = getActiveCameraObjectProps(
+      framePreviewProps.part,
+      framePreviewProps.previewTime,
+    );
     const sourcePlanBundle = computePostProcessPlan(
       currentSceneTimeRef.current,
       layers,
       { transitionLayers: framePreviewProps.transitionLayers },
       getPreviewPlanFrameSize(),
+      cameraProps,
     );
     return sourcePlanBundle.livePasses[0]
       ? sourcePlanBundle.planBeforeFirstLive.activeLayers
@@ -414,6 +425,8 @@ export function LivePostProcessFramePreview({
     currentSceneTimeRef,
     framePreviewProps.adjustmentLayers,
     framePreviewProps.transitionLayers,
+    framePreviewProps.part,
+    framePreviewProps.previewTime,
   ]);
 
   return (

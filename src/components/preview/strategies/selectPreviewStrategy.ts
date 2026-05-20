@@ -1,5 +1,6 @@
 import { computePostProcessPlan } from "../passes/usePostProcessPlan";
 import { FRAME_HEIGHT, FRAME_WIDTH } from "../../../core/types";
+import type { CameraObjectProps } from "../../../core/types";
 import {
   adjustmentLayersRequireLiveDomPostProcessSource,
   transitionLayersRequireLiveDomPostProcessSource,
@@ -61,12 +62,14 @@ export function deriveAuthoringActive(props: AuthoringSignalInput): boolean {
 export function computeHasActiveLivePasses(
   framePreviewProps: StrategyFramePreviewProps,
   sceneTime: number,
+  cameraProps: CameraObjectProps | null = null,
 ): boolean {
   return computePostProcessPlan(
     sceneTime,
     framePreviewProps.adjustmentLayers,
     { transitionLayers: framePreviewProps.transitionLayers },
     { width: FRAME_WIDTH, height: FRAME_HEIGHT },
+    cameraProps,
   ).hasLivePasses;
 }
 

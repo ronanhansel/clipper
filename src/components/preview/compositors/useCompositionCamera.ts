@@ -17,12 +17,24 @@ import {
 import { evaluateObjectState } from "../../../core/propertyRegistry";
 import {
   DEFAULT_CAMERA_DOF,
+  DEFAULT_CAMERA_LENS,
   DEFAULT_CAMERA_OBJECT_PROPS,
+  DEFAULT_CAMERA_POST,
   DEFAULT_CAMERA_SENSOR,
   type CameraAutoOrient,
   type CameraDepthOfField,
+  type CameraLens,
+  type CameraLensChromaticAberration,
+  type CameraLensDistortion,
+  type CameraLensVignette,
   type CameraObjectProps,
+  type CameraPost,
+  type CameraPostExposure,
+  type CameraPostGrade,
+  type CameraPostGrain,
+  type CameraPostTonemap,
   type CameraSensor,
+  type CameraTonemapMode,
   type CompositionClip,
   type FrameObject,
 } from "../../../core/types";
@@ -164,6 +176,8 @@ export function readCameraObjectProps(object: FrameObject): CameraObjectProps {
     sensor: readSensor(raw.sensor),
     dof: readDof(raw.dof),
     autoOrient: readAutoOrient(raw.autoOrient),
+    lens: readLens(raw.lens),
+    post: readPost(raw.post),
   };
 }
 
@@ -200,6 +214,141 @@ function readDof(v: unknown): CameraDepthOfField {
 
 function readAutoOrient(v: unknown): CameraAutoOrient {
   return v === "along-path" ? "along-path" : "off";
+}
+
+function readLens(v: unknown): CameraLens {
+  const def = DEFAULT_CAMERA_LENS;
+  if (!v || typeof v !== "object") {
+    return {
+      distortion: { ...def.distortion },
+      chromaticAberration: { ...def.chromaticAberration },
+      vignette: { ...def.vignette },
+    };
+  }
+  const r = v as Record<string, unknown>;
+  return {
+    distortion: readLensDistortion(r.distortion),
+    chromaticAberration: readLensChromaticAberration(r.chromaticAberration),
+    vignette: readLensVignette(r.vignette),
+  };
+}
+
+function readLensDistortion(v: unknown): CameraLensDistortion {
+  const def = DEFAULT_CAMERA_LENS.distortion;
+  if (!v || typeof v !== "object") return { ...def };
+  const r = v as Record<string, unknown>;
+  const enabled = typeof r.enabled === "boolean" ? r.enabled : def.enabled;
+  const amount =
+    typeof r.amount === "number" && Number.isFinite(r.amount)
+      ? r.amount
+      : def.amount;
+  return { enabled, amount };
+}
+
+function readLensChromaticAberration(
+  v: unknown,
+): CameraLensChromaticAberration {
+  const def = DEFAULT_CAMERA_LENS.chromaticAberration;
+  if (!v || typeof v !== "object") return { ...def };
+  const r = v as Record<string, unknown>;
+  const enabled = typeof r.enabled === "boolean" ? r.enabled : def.enabled;
+  const amountPx =
+    typeof r.amountPx === "number" && Number.isFinite(r.amountPx)
+      ? r.amountPx
+      : def.amountPx;
+  return { enabled, amountPx };
+}
+
+function readLensVignette(v: unknown): CameraLensVignette {
+  const def = DEFAULT_CAMERA_LENS.vignette;
+  if (!v || typeof v !== "object") return { ...def };
+  const r = v as Record<string, unknown>;
+  const enabled = typeof r.enabled === "boolean" ? r.enabled : def.enabled;
+  const amount =
+    typeof r.amount === "number" && Number.isFinite(r.amount)
+      ? r.amount
+      : def.amount;
+  const feather =
+    typeof r.feather === "number" && Number.isFinite(r.feather)
+      ? r.feather
+      : def.feather;
+  return { enabled, amount, feather };
+}
+
+function readPost(v: unknown): CameraPost {
+  const def = DEFAULT_CAMERA_POST;
+  if (!v || typeof v !== "object") {
+    return {
+      exposure: { ...def.exposure },
+      tonemap: { ...def.tonemap },
+      grade: { ...def.grade },
+      grain: { ...def.grain },
+    };
+  }
+  const r = v as Record<string, unknown>;
+  return {
+    exposure: readPostExposure(r.exposure),
+    tonemap: readPostTonemap(r.tonemap),
+    grade: readPostGrade(r.grade),
+    grain: readPostGrain(r.grain),
+  };
+}
+
+function readPostExposure(v: unknown): CameraPostExposure {
+  const def = DEFAULT_CAMERA_POST.exposure;
+  if (!v || typeof v !== "object") return { ...def };
+  const r = v as Record<string, unknown>;
+  const enabled = typeof r.enabled === "boolean" ? r.enabled : def.enabled;
+  const ev = typeof r.ev === "number" && Number.isFinite(r.ev) ? r.ev : def.ev;
+  return { enabled, ev };
+}
+
+const TONEMAP_MODES: readonly CameraTonemapMode[] = [
+  "reinhard",
+  "aces",
+  "filmic",
+];
+
+function readPostTonemap(v: unknown): CameraPostTonemap {
+  const def = DEFAULT_CAMERA_POST.tonemap;
+  if (!v || typeof v !== "object") return { ...def };
+  const r = v as Record<string, unknown>;
+  const enabled = typeof r.enabled === "boolean" ? r.enabled : def.enabled;
+  const mode =
+    typeof r.mode === "string" &&
+    (TONEMAP_MODES as readonly string[]).includes(r.mode)
+      ? (r.mode as CameraTonemapMode)
+      : def.mode;
+  return { enabled, mode };
+}
+
+function readPostGrade(v: unknown): CameraPostGrade {
+  const def = DEFAULT_CAMERA_POST.grade;
+  if (!v || typeof v !== "object") return { ...def };
+  const r = v as Record<string, unknown>;
+  const enabled = typeof r.enabled === "boolean" ? r.enabled : def.enabled;
+  const num = (k: "lift" | "gamma" | "gain"): number => {
+    const n = r[k];
+    return typeof n === "number" && Number.isFinite(n) ? n : def[k];
+  };
+  return {
+    enabled,
+    lift: num("lift"),
+    gamma: num("gamma"),
+    gain: num("gain"),
+  };
+}
+
+function readPostGrain(v: unknown): CameraPostGrain {
+  const def = DEFAULT_CAMERA_POST.grain;
+  if (!v || typeof v !== "object") return { ...def };
+  const r = v as Record<string, unknown>;
+  const enabled = typeof r.enabled === "boolean" ? r.enabled : def.enabled;
+  const num = (k: "amount" | "size"): number => {
+    const n = r[k];
+    return typeof n === "number" && Number.isFinite(n) ? n : def[k];
+  };
+  return { enabled, amount: num("amount"), size: num("size") };
 }
 
 /**

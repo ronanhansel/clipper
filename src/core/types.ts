@@ -281,6 +281,70 @@ export type CameraDepthOfField = {
   maxBlurPx: number;
 };
 
+export type CameraLensDistortion = {
+  enabled: boolean;
+  /** -1..1. Positive = barrel, negative = pincushion. 0 = no distortion. */
+  amount: number;
+};
+
+export type CameraLensChromaticAberration = {
+  enabled: boolean;
+  /** Per-channel offset in source pixels. Typical 0..10. */
+  amountPx: number;
+};
+
+export type CameraLensVignette = {
+  enabled: boolean;
+  /** Darkening strength at edges. 0..1. */
+  amount: number;
+  /** Edge softness. 0..1, larger = softer falloff. */
+  feather: number;
+};
+
+export type CameraLens = {
+  distortion: CameraLensDistortion;
+  chromaticAberration: CameraLensChromaticAberration;
+  vignette: CameraLensVignette;
+};
+
+export type CameraPostExposure = {
+  enabled: boolean;
+  /** EV stops. -3..+3 typical. */
+  ev: number;
+};
+
+export type CameraTonemapMode = "reinhard" | "aces" | "filmic";
+
+export type CameraPostTonemap = {
+  enabled: boolean;
+  mode: CameraTonemapMode;
+};
+
+export type CameraPostGrade = {
+  enabled: boolean;
+  /** Lift: shadows. -1..1. 0 = neutral. */
+  lift: number;
+  /** Gamma: midtones. 0.1..3. 1 = neutral. */
+  gamma: number;
+  /** Gain: highlights. 0..3. 1 = neutral. */
+  gain: number;
+};
+
+export type CameraPostGrain = {
+  enabled: boolean;
+  /** Strength. 0..1. */
+  amount: number;
+  /** Grain cell size in source pixels. 0.5..3. */
+  size: number;
+};
+
+export type CameraPost = {
+  exposure: CameraPostExposure;
+  tonemap: CameraPostTonemap;
+  grade: CameraPostGrade;
+  grain: CameraPostGrain;
+};
+
 export type CameraAutoOrient = "off" | "along-path";
 
 /**
@@ -296,7 +360,10 @@ export type CameraAutoOrient = "off" | "along-path";
  * length to FOV. `dof` carries the optional depth-of-field block (focus
  * distance, f-number, blur level, max blur clamp). `autoOrient` lets the
  * camera follow its position track tangent ("along-path"), matching AE's
- * Auto-Orient → Orient Along Path.
+ * Auto-Orient → Orient Along Path. `lens` carries optical artefacts
+ * (distortion, chromatic aberration, vignette). `post` carries
+ * tone/colour post stages (exposure, tonemap, lift/gamma/gain grade,
+ * grain).
  */
 export type CameraObjectProps = {
   position: { x: number; y: number; z: number };
@@ -307,6 +374,8 @@ export type CameraObjectProps = {
   sensor: CameraSensor;
   dof: CameraDepthOfField;
   autoOrient: CameraAutoOrient;
+  lens: CameraLens;
+  post: CameraPost;
 };
 
 export const DEFAULT_CAMERA_SENSOR: CameraSensor = { width: 36, height: 24 };
@@ -319,6 +388,19 @@ export const DEFAULT_CAMERA_DOF: CameraDepthOfField = {
   maxBlurPx: 64,
 };
 
+export const DEFAULT_CAMERA_LENS: CameraLens = {
+  distortion: { enabled: false, amount: 0 },
+  chromaticAberration: { enabled: false, amountPx: 1.5 },
+  vignette: { enabled: false, amount: 0.4, feather: 0.5 },
+};
+
+export const DEFAULT_CAMERA_POST: CameraPost = {
+  exposure: { enabled: false, ev: 0 },
+  tonemap: { enabled: false, mode: "aces" },
+  grade: { enabled: false, lift: 0, gamma: 1, gain: 1 },
+  grain: { enabled: false, amount: 0.1, size: 1 },
+};
+
 export const DEFAULT_CAMERA_OBJECT_PROPS: CameraObjectProps = {
   position: { x: 0, y: 0, z: 1158 },
   rotation: { x: 0, y: 0, z: 0 },
@@ -328,6 +410,19 @@ export const DEFAULT_CAMERA_OBJECT_PROPS: CameraObjectProps = {
   sensor: { ...DEFAULT_CAMERA_SENSOR },
   dof: { ...DEFAULT_CAMERA_DOF },
   autoOrient: "off",
+  lens: {
+    ...DEFAULT_CAMERA_LENS,
+    distortion: { ...DEFAULT_CAMERA_LENS.distortion },
+    chromaticAberration: { ...DEFAULT_CAMERA_LENS.chromaticAberration },
+    vignette: { ...DEFAULT_CAMERA_LENS.vignette },
+  },
+  post: {
+    ...DEFAULT_CAMERA_POST,
+    exposure: { ...DEFAULT_CAMERA_POST.exposure },
+    tonemap: { ...DEFAULT_CAMERA_POST.tonemap },
+    grade: { ...DEFAULT_CAMERA_POST.grade },
+    grain: { ...DEFAULT_CAMERA_POST.grain },
+  },
 };
 
 export type JsonValue =

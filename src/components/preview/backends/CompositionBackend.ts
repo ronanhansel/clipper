@@ -32,6 +32,16 @@ export type CompositionRenderBackendProps = {
    * makes the contents shift relative to the plane.
    */
   cameraHandledExternally?: boolean;
+  /**
+   * When false, the backend skips per-layer camera DoF and the
+   * composition-plane backdrop blur. The backdrop div still renders
+   * (just without a filter). Defaults to true when undefined.
+   *
+   * Used by `ComposeAuthorView`: the 3D author view shows the scene
+   * via its own camera and would otherwise apply DoF twice (once on
+   * the CSS subtree, once via the inspector preview).
+   */
+  applyCameraDof?: boolean;
 };
 
 export type CompositionInteractionBackendProps = {

@@ -1,7 +1,4 @@
-import {
-  type CameraObjectProps,
-  type FrameObject,
-} from "../../../core/types";
+import { type CameraObjectProps, type FrameObject } from "../../../core/types";
 import {
   removePropertyKeyframe,
   upsertPropertyKeyframe,
@@ -139,7 +136,8 @@ export function CameraObjectSection() {
     if (path === "props.dof.focusDistance") return clampPositive(value, 0);
     if (path === "props.dof.fNumber") return Math.max(0.5, Math.min(64, value));
     if (path === "props.dof.blurLevel") return Math.max(0, Math.min(4, value));
-    if (path === "props.dof.maxBlurPx") return Math.max(0, Math.min(256, value));
+    if (path === "props.dof.maxBlurPx")
+      return Math.max(0, Math.min(256, value));
     return value;
   }
 
@@ -525,9 +523,7 @@ function fovFromFocalLength(
 ): number {
   if (!Number.isFinite(focalLengthMm) || focalLengthMm <= 0) return 50;
   if (!Number.isFinite(sensorHeightMm) || sensorHeightMm <= 0) return 50;
-  return (
-    (2 * Math.atan(sensorHeightMm / (2 * focalLengthMm)) * 180) / Math.PI
-  );
+  return (2 * Math.atan(sensorHeightMm / (2 * focalLengthMm)) * 180) / Math.PI;
 }
 
 function writeNestedNumber(

@@ -2726,8 +2726,7 @@ export const FrameObjectView = memo(function FrameObjectView({
     willChange: renderMode === "export" ? undefined : "transform",
   } as CSSProperties;
   if (cameraDofPx && cameraDofPx > 0) {
-    const existingFilter =
-      typeof style.filter === "string" ? style.filter : "";
+    const existingFilter = typeof style.filter === "string" ? style.filter : "";
     const blurFilter = `blur(${cameraDofPx.toFixed(2)}px)`;
     style.filter = existingFilter
       ? `${existingFilter} ${blurFilter}`

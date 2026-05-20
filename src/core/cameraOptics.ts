@@ -89,9 +89,7 @@ export function computeLayerSubjectDistance(
 ): number {
   if (
     !cameraRotation ||
-    (cameraRotation.x === 0 &&
-      cameraRotation.y === 0 &&
-      cameraRotation.z === 0)
+    (cameraRotation.x === 0 && cameraRotation.y === 0 && cameraRotation.z === 0)
   ) {
     return Math.abs(cameraPos.z - layerWorld.z);
   }

@@ -106,6 +106,7 @@ export const CompositionCompositor = memo(function CompositionCompositor(
       active={props.active}
       activeShapeTool={showAuthorView ? null : props.activeShapeTool}
       animationsEnabled={props.animationsEnabled}
+      applyCameraDof={!showAuthorView}
       cameraHandledExternally={showAuthorView}
       canSelect={showAuthorView ? false : props.canSelect}
       duration={composition.duration}

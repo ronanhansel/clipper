@@ -7,7 +7,12 @@ import {
   type AuthoringSignalInput,
   type StrategyFramePreviewProps,
 } from "./selectPreviewStrategy";
-import type { AdjustmentLayer, TransitionLayer } from "../../../core/types";
+import {
+  DEFAULT_CAMERA_OBJECT_PROPS,
+  type AdjustmentLayer,
+  type CameraObjectProps,
+  type TransitionLayer,
+} from "../../../core/types";
 
 function emptyAuthoring(): AuthoringSignalInput {
   return {
@@ -245,6 +250,31 @@ describe("computeHasActiveLivePasses", () => {
     };
     const props = makeProps({ adjustmentLayers: [layer] });
     expect(computeHasActiveLivePasses(props, 1)).toBe(true);
+  });
+
+  it("returns true when camera lens distortion is enabled even with no adjustment layers", () => {
+    const cameraProps: CameraObjectProps = {
+      ...DEFAULT_CAMERA_OBJECT_PROPS,
+      position: { ...DEFAULT_CAMERA_OBJECT_PROPS.position },
+      rotation: { ...DEFAULT_CAMERA_OBJECT_PROPS.rotation },
+      sensor: { ...DEFAULT_CAMERA_OBJECT_PROPS.sensor },
+      dof: { ...DEFAULT_CAMERA_OBJECT_PROPS.dof },
+      lens: {
+        distortion: { enabled: true, amount: 0.2 },
+        chromaticAberration: {
+          ...DEFAULT_CAMERA_OBJECT_PROPS.lens.chromaticAberration,
+        },
+        vignette: { ...DEFAULT_CAMERA_OBJECT_PROPS.lens.vignette },
+      },
+      post: {
+        exposure: { ...DEFAULT_CAMERA_OBJECT_PROPS.post.exposure },
+        tonemap: { ...DEFAULT_CAMERA_OBJECT_PROPS.post.tonemap },
+        grade: { ...DEFAULT_CAMERA_OBJECT_PROPS.post.grade },
+        grain: { ...DEFAULT_CAMERA_OBJECT_PROPS.post.grain },
+      },
+    };
+    expect(computeHasActiveLivePasses(makeProps(), 0, cameraProps)).toBe(true);
+    expect(computeHasActiveLivePasses(makeProps(), 0, null)).toBe(false);
   });
 });
 

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { computePostProcessPlan } from "./usePostProcessPlan";
-import type { AdjustmentLayer, TransitionLayer } from "../../../core/types";
+import {
+  DEFAULT_CAMERA_OBJECT_PROPS,
+  type AdjustmentLayer,
+  type CameraObjectProps,
+  type TransitionLayer,
+} from "../../../core/types";
 
 const frameSize = { width: 1920, height: 1080 };
 
@@ -31,6 +36,33 @@ function brightnessLayer(id: string): AdjustmentLayer {
       params: { brightness: 1.2 },
     },
   };
+}
+
+function makeCamera(
+  override: (base: CameraObjectProps) => void = () => {},
+): CameraObjectProps {
+  const base: CameraObjectProps = {
+    ...DEFAULT_CAMERA_OBJECT_PROPS,
+    position: { ...DEFAULT_CAMERA_OBJECT_PROPS.position },
+    rotation: { ...DEFAULT_CAMERA_OBJECT_PROPS.rotation },
+    sensor: { ...DEFAULT_CAMERA_OBJECT_PROPS.sensor },
+    dof: { ...DEFAULT_CAMERA_OBJECT_PROPS.dof },
+    lens: {
+      distortion: { ...DEFAULT_CAMERA_OBJECT_PROPS.lens.distortion },
+      chromaticAberration: {
+        ...DEFAULT_CAMERA_OBJECT_PROPS.lens.chromaticAberration,
+      },
+      vignette: { ...DEFAULT_CAMERA_OBJECT_PROPS.lens.vignette },
+    },
+    post: {
+      exposure: { ...DEFAULT_CAMERA_OBJECT_PROPS.post.exposure },
+      tonemap: { ...DEFAULT_CAMERA_OBJECT_PROPS.post.tonemap },
+      grade: { ...DEFAULT_CAMERA_OBJECT_PROPS.post.grade },
+      grain: { ...DEFAULT_CAMERA_OBJECT_PROPS.post.grain },
+    },
+  };
+  override(base);
+  return base;
 }
 
 describe("computePostProcessPlan", () => {
@@ -190,5 +222,40 @@ describe("computePostProcessPlan", () => {
     );
     expect(before.livePasses).toEqual([]);
     expect(after.livePasses).toEqual([]);
+  });
+
+  it("includes a camera lens pass when camera distortion is enabled", () => {
+    const camera = makeCamera((c) => {
+      c.lens.distortion.enabled = true;
+      c.lens.distortion.amount = 0.2;
+    });
+    const result = computePostProcessPlan(0, [], null, frameSize, camera);
+    expect(result.passes.length).toBe(1);
+    expect(result.livePasses.length).toBe(1);
+    expect(result.hasLivePasses).toBe(true);
+  });
+
+  it("ignores camera when no lens feature is enabled", () => {
+    const camera = makeCamera();
+    const result = computePostProcessPlan(0, [], null, frameSize, camera);
+    expect(result.passes.length).toBe(0);
+    expect(result.hasLivePasses).toBe(false);
+  });
+
+  it("camera lens pass runs before adjustment passes", () => {
+    const camera = makeCamera((c) => {
+      c.lens.distortion.enabled = true;
+      c.lens.distortion.amount = 0.2;
+    });
+    const result = computePostProcessPlan(
+      1,
+      [lensLayer("a")],
+      null,
+      frameSize,
+      camera,
+    );
+    expect(result.livePasses.length).toBeGreaterThanOrEqual(2);
+    expect(result.livePasses[0].sourceLayerId).toBe("camera");
+    expect(result.livePasses[1].sourceLayerId).toBe("a");
   });
 });

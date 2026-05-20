@@ -9,7 +9,9 @@ import {
 } from "./useCompositionCamera";
 import {
   DEFAULT_CAMERA_DOF,
+  DEFAULT_CAMERA_LENS,
   DEFAULT_CAMERA_OBJECT_PROPS,
+  DEFAULT_CAMERA_POST,
   DEFAULT_CAMERA_SENSOR,
   type CameraObjectProps,
   type CompositionClip,
@@ -99,6 +101,8 @@ describe("readCameraObjectProps", () => {
       sensor: { ...DEFAULT_CAMERA_SENSOR },
       dof: { ...DEFAULT_CAMERA_DOF },
       autoOrient: "off",
+      lens: DEFAULT_CAMERA_LENS,
+      post: DEFAULT_CAMERA_POST,
     });
   });
   it("fills defaults for sensor / dof / autoOrient when missing", () => {
@@ -136,6 +140,69 @@ describe("readCameraObjectProps", () => {
       maxBlurPx: 32,
     });
     expect(props.autoOrient).toBe("along-path");
+  });
+  it("fills defaults for lens and post when both are missing", () => {
+    const obj = makeCameraObject({ props: {} });
+    const props = readCameraObjectProps(obj);
+    expect(props.lens).toEqual(DEFAULT_CAMERA_LENS);
+    expect(props.post).toEqual(DEFAULT_CAMERA_POST);
+  });
+  it("reads provided lens values", () => {
+    const obj = makeCameraObject({
+      props: {
+        lens: {
+          distortion: { enabled: true, amount: 0.25 },
+          chromaticAberration: { enabled: true, amountPx: 4 },
+          vignette: { enabled: true, amount: 0.7, feather: 0.2 },
+        },
+      },
+    });
+    const props = readCameraObjectProps(obj);
+    expect(props.lens.distortion.amount).toBe(0.25);
+    expect(props.lens.chromaticAberration.amountPx).toBe(4);
+    expect(props.lens.vignette.amount).toBe(0.7);
+  });
+  it("reads provided post values", () => {
+    const obj = makeCameraObject({
+      props: {
+        post: {
+          exposure: { enabled: true, ev: -1.5 },
+          tonemap: { enabled: true, mode: "filmic" },
+          grade: { enabled: true, lift: 0.1, gamma: 1.2, gain: 1.4 },
+          grain: { enabled: true, amount: 0.35, size: 2 },
+        },
+      },
+    });
+    const props = readCameraObjectProps(obj);
+    expect(props.post.exposure.ev).toBe(-1.5);
+    expect(props.post.grade.gain).toBe(1.4);
+    expect(props.post.grain.amount).toBe(0.35);
+  });
+  it("falls back to default tonemap mode when input is invalid", () => {
+    const obj = makeCameraObject({
+      props: {
+        post: {
+          tonemap: { enabled: true, mode: "bogus" },
+        },
+      },
+    });
+    const props = readCameraObjectProps(obj);
+    expect(props.post.tonemap.mode).toBe(DEFAULT_CAMERA_POST.tonemap.mode);
+    expect(props.post.tonemap.enabled).toBe(true);
+  });
+  it("falls back to default lens vignette feather when input is non-finite", () => {
+    const obj = makeCameraObject({
+      props: {
+        lens: {
+          vignette: { enabled: true, amount: 0.5, feather: Number.NaN },
+        },
+      },
+    });
+    const props = readCameraObjectProps(obj);
+    expect(props.lens.vignette.feather).toBe(
+      DEFAULT_CAMERA_LENS.vignette.feather,
+    );
+    expect(props.lens.vignette.amount).toBe(0.5);
   });
 });
 

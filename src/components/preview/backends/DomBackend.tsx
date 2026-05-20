@@ -1,4 +1,11 @@
-import { useLayoutEffect, useMemo, useRef, type CSSProperties } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import {
   getRenderClockAttributes,
   getRenderClockStyle,
@@ -12,8 +19,9 @@ import {
   isPenDrawTool,
 } from "../FramePreview";
 import {
+  cameraObjectPropsToPreviewTransform,
+  findActiveCameraObject,
   getActiveCameraObjectProps,
-  useCompositionCamera,
 } from "../compositors/useCompositionCamera";
 import {
   formatCameraPreviewFilter,
@@ -24,13 +32,18 @@ import {
   computeLayerSubjectDistance,
 } from "../../../core/cameraOptics";
 import { evaluateObjectState } from "../../../core/propertyRegistry";
-import { FRAME_HEIGHT } from "../../../core/types";
+import {
+  FRAME_HEIGHT,
+  FRAME_WIDTH,
+  type CameraObjectProps,
+} from "../../../core/types";
 import type { CompositionBackend } from "./CompositionBackend";
 
 export const DomBackend: CompositionBackend = function DomBackend({
   active,
   activeShapeTool,
   animationsEnabled,
+  applyCameraDof = true,
   canSelect,
   cameraHandledExternally,
   editingTextObjectId,
@@ -65,10 +78,58 @@ export const DomBackend: CompositionBackend = function DomBackend({
     [renderClockState],
   );
 
-  const innerCamera = useCompositionCamera({
-    part,
-    localTime,
-  });
+  const activeCameraId = useMemo(
+    () => findActiveCameraObject(part)?.id ?? null,
+    [part],
+  );
+
+  // Live scrub from the inspector dispatches `clipper:camera-preview`
+  // with the next CameraObjectProps. Mirror the imperative pattern from
+  // `CompositionWebGLHost` / `ComposeAuthorView`: rAF-coalesce so we
+  // commit at most once per frame, and clear on commit (`part` identity
+  // changes when the document state updates).
+  const [previewCameraOverride, setPreviewCameraOverride] =
+    useState<CameraObjectProps | null>(null);
+
+  useEffect(() => {
+    if (!activeCameraId) return;
+    let pending: CameraObjectProps | null = null;
+    let frame = 0;
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent).detail as
+        | { objectId: string; props: CameraObjectProps }
+        | undefined;
+      if (!detail || detail.objectId !== activeCameraId) return;
+      pending = detail.props;
+      if (!frame) {
+        frame = requestAnimationFrame(() => {
+          frame = 0;
+          if (pending) setPreviewCameraOverride(pending);
+          pending = null;
+        });
+      }
+    };
+    window.addEventListener("clipper:camera-preview", handler);
+    return () => {
+      window.removeEventListener("clipper:camera-preview", handler);
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, [activeCameraId]);
+
+  // Clear preview on commit (part identity changes when state updates).
+  useEffect(() => {
+    setPreviewCameraOverride(null);
+  }, [part]);
+
+  const activeCameraBase = useMemo(
+    () => getActiveCameraObjectProps(part, localTime),
+    [part, localTime],
+  );
+  const activeCamera = previewCameraOverride ?? activeCameraBase;
+
+  const innerCamera = activeCamera
+    ? cameraObjectPropsToPreviewTransform(activeCamera)
+    : null;
   const innerCameraStyle =
     innerCamera && !cameraHandledExternally
       ? {
@@ -87,11 +148,6 @@ export const DomBackend: CompositionBackend = function DomBackend({
     ? {}
     : { transformStyle: "preserve-3d" };
 
-  const activeCamera = useMemo(
-    () => getActiveCameraObjectProps(part, localTime),
-    [part, localTime],
-  );
-
   // DoF applies only to layers with `threeD === true`. 2D layers always
   // render sharp on the composition plane (matches AE).
   // TODO: hoist evaluatedObject up so DoF and FrameObjectView share one
@@ -100,6 +156,7 @@ export const DomBackend: CompositionBackend = function DomBackend({
   // TODO: enable DoF in export mode once the export path is determinised.
   const dofPxByObjectId = useMemo(() => {
     const map = new Map<string, number>();
+    if (!applyCameraDof) return map;
     if (!activeCamera || !activeCamera.dof.enabled) return map;
     if (renderMode === "export") return map;
     for (const obj of part.objects) {
@@ -127,7 +184,22 @@ export const DomBackend: CompositionBackend = function DomBackend({
       if (coc > 0) map.set(obj.id, coc);
     }
     return map;
-  }, [activeCamera, localTime, part.objects, renderMode]);
+  }, [activeCamera, applyCameraDof, localTime, part.objects, renderMode]);
+
+  // Per-composition backdrop CoC: same optics applied to the
+  // composition plane (z=0, frame centroid). Painted on a dedicated
+  // underlay so the host's children (focused objects) stay sharp.
+  const bgCameraDofPx = useMemo(() => {
+    if (!applyCameraDof) return 0;
+    if (!activeCamera || !activeCamera.dof.enabled) return 0;
+    if (renderMode === "export") return 0;
+    const subject = computeLayerSubjectDistance(
+      activeCamera.position,
+      activeCamera.rotation,
+      { x: FRAME_WIDTH / 2, y: FRAME_HEIGHT / 2, z: 0 },
+    );
+    return computeCircleOfConfusionPx(activeCamera, subject, FRAME_HEIGHT);
+  }, [activeCamera, applyCameraDof, renderMode]);
 
   useLayoutEffect(() => {
     syncDomAnimationsToRenderClock(
@@ -141,6 +213,13 @@ export const DomBackend: CompositionBackend = function DomBackend({
     [hostRef],
   );
 
+  // Extract `backgroundColor` from the frame style so it paints on a
+  // dedicated underlay div instead of the host. The host's filter would
+  // otherwise apply to the entire subtree (including focused objects);
+  // the underlay lets only the composition-plane backdrop blur.
+  const frameStyleRecord = part.frame.style as Record<string, string | number>;
+  const { backgroundColor: frameBgColor, ...frameStyleRest } = frameStyleRecord;
+
   return (
     <div
       ref={hostRef}
@@ -149,7 +228,7 @@ export const DomBackend: CompositionBackend = function DomBackend({
       data-clipper-render-clock-offset={localTime - renderClockSceneTime}
       {...getRenderClockAttributes(renderClockState)}
       style={{
-        ...(part.frame.style as CSSProperties),
+        ...frameStyleRest,
         ...renderClockStyle,
         ...hostTransformStyle,
         ...innerCameraStyle,
@@ -162,19 +241,56 @@ export const DomBackend: CompositionBackend = function DomBackend({
         overflow: "visible",
       }}
     >
-      {!part.background.hidden && (
-        <BackgroundLayerView
-          animationsEnabled={animationsEnabled}
-          background={part.background}
-          canSelect={active && canSelect}
-          duration={part.duration}
-          exportTileFrameBounds={exportTileFrameBounds}
-          frameScale={renderMode === "export" ? frameScale : 1}
-          previewTime={localTime}
-          renderMode={renderMode}
-          onPointerDown={undefined}
+      {frameBgColor !== undefined && (
+        <div
+          aria-hidden
+          data-clipper-frame-backdrop
+          className="absolute inset-0"
+          style={{
+            backgroundColor: frameBgColor as string,
+            filter:
+              bgCameraDofPx > 0
+                ? `blur(${bgCameraDofPx.toFixed(2)}px)`
+                : undefined,
+            pointerEvents: "none",
+            zIndex: 0,
+          }}
         />
       )}
+      {!part.background.hidden &&
+        (bgCameraDofPx > 0 ? (
+          <div
+            className="absolute inset-0"
+            style={{
+              filter: `blur(${bgCameraDofPx.toFixed(2)}px)`,
+              pointerEvents: "none",
+            }}
+          >
+            <BackgroundLayerView
+              animationsEnabled={animationsEnabled}
+              background={part.background}
+              canSelect={active && canSelect}
+              duration={part.duration}
+              exportTileFrameBounds={exportTileFrameBounds}
+              frameScale={renderMode === "export" ? frameScale : 1}
+              previewTime={localTime}
+              renderMode={renderMode}
+              onPointerDown={undefined}
+            />
+          </div>
+        ) : (
+          <BackgroundLayerView
+            animationsEnabled={animationsEnabled}
+            background={part.background}
+            canSelect={active && canSelect}
+            duration={part.duration}
+            exportTileFrameBounds={exportTileFrameBounds}
+            frameScale={renderMode === "export" ? frameScale : 1}
+            previewTime={localTime}
+            renderMode={renderMode}
+            onPointerDown={undefined}
+          />
+        ))}
       {(() => {
         const parentTransforms = buildFrameObjectParentTransformLookup(
           part.objects,

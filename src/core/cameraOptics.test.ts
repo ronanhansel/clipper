@@ -46,7 +46,11 @@ describe("computeCircleOfConfusionPx", () => {
     expect(computeCircleOfConfusionPx(camera, -10, RENDER_HEIGHT)).toBe(0);
     expect(computeCircleOfConfusionPx(camera, NaN, RENDER_HEIGHT)).toBe(0);
     expect(
-      computeCircleOfConfusionPx(camera, Number.POSITIVE_INFINITY, RENDER_HEIGHT),
+      computeCircleOfConfusionPx(
+        camera,
+        Number.POSITIVE_INFINITY,
+        RENDER_HEIGHT,
+      ),
     ).toBe(0);
   });
 
@@ -124,11 +128,11 @@ describe("computeCircleOfConfusionPx", () => {
 
 describe("computeLayerSubjectDistance", () => {
   it("uses |camZ - layerZ| with no rotation", () => {
-    const dist = computeLayerSubjectDistance(
-      { x: 0, y: 0, z: 1158 },
-      null,
-      { x: 0, y: 0, z: 0 },
-    );
+    const dist = computeLayerSubjectDistance({ x: 0, y: 0, z: 1158 }, null, {
+      x: 0,
+      y: 0,
+      z: 0,
+    });
     expect(dist).toBe(1158);
   });
 
@@ -174,11 +178,11 @@ describe("computeLayerSubjectDistance", () => {
   });
 
   it("returns absolute (non-negative) distance behind the camera", () => {
-    const dist = computeLayerSubjectDistance(
-      { x: 0, y: 0, z: 0 },
-      null,
-      { x: 0, y: 0, z: 500 },
-    );
+    const dist = computeLayerSubjectDistance({ x: 0, y: 0, z: 0 }, null, {
+      x: 0,
+      y: 0,
+      z: 500,
+    });
     expect(dist).toBe(500);
   });
 
