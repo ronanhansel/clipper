@@ -1,10 +1,8 @@
 /**
- * Depth-of-field postprocess pass. Physically-based CoC + bokeh blur
- * with circular kernel sampling. Generates its own depth texture internally
- * using a depth-only quad scene, then runs a combined CoC+bokeh shader.
+ * Camera DoF pass definition. Depth texture is provided by the caller
+ * (CompositionRenderer's depth buffer in preview/export).
  */
-import { evaluateObjectState } from "../../propertyRegistry";
-import type { CameraObjectProps, CompositionClip } from "../../types";
+import type { CameraObjectProps } from "../../types";
 
 export const cameraDofPostProcessKind =
   "clipper.postprocess.cameraDof" as const;
@@ -31,20 +29,6 @@ export type CameraDofUniforms = {
   far: number;
 };
 
-export type CameraDofDepthQuad = {
-  id: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  translateZ: number;
-  rotateX: number;
-  rotateY: number;
-  rotateZ: number;
-  scaleX: number;
-  scaleY: number;
-};
-
 export type CameraDofPass = {
   id: string;
   sourceLayerId?: string;
@@ -52,17 +36,15 @@ export type CameraDofPass = {
   target: "final";
   requiresLiveDomSource: true;
   uniforms: CameraDofUniforms;
-  depthQuads: CameraDofDepthQuad[];
 };
 
 /**
  * Create a DoF pass from camera props. Returns null when DoF is disabled
- * or the camera props are invalid.
+ * or the camera props are invalid. Depth is provided by the renderer.
  */
 export function createCameraDofPass(
   camera: CameraObjectProps,
   idScope: string,
-  depthQuads: CameraDofDepthQuad[] = [],
 ): CameraDofPass | null {
   if (!camera.dof.enabled) return null;
   if (camera.dof.fNumber <= 0) return null;
@@ -90,50 +72,5 @@ export function createCameraDofPass(
       near: camera.near,
       far: camera.far,
     },
-    depthQuads,
   };
-}
-
-export function buildCameraDofDepthQuads(
-  part: CompositionClip | null | undefined,
-  localTime: number,
-): CameraDofDepthQuad[] {
-  if (!part) return [];
-  const quads: CameraDofDepthQuad[] = [];
-  for (const object of part.objects) {
-    if (object.hidden || object.type === "camera") continue;
-    const evaluated = evaluateObjectState(object, localTime);
-    const transform = evaluated.transform;
-    quads.push({
-      id: object.id,
-      x: evaluated.bounds.x,
-      y: evaluated.bounds.y,
-      width: evaluated.bounds.width,
-      height: evaluated.bounds.height,
-      translateZ: readNumber(transform, "translateZ", 0),
-      rotateX: readNumber(transform, "rotateX", 0),
-      rotateY: readNumber(transform, "rotateY", 0),
-      rotateZ: readNumber(transform, "rotateZ", 0),
-      scaleX: readNumber(
-        transform,
-        "scaleX",
-        readNumber(transform, "scale", 1),
-      ),
-      scaleY: readNumber(
-        transform,
-        "scaleY",
-        readNumber(transform, "scale", 1),
-      ),
-    });
-  }
-  return quads;
-}
-
-function readNumber(
-  record: Record<string, unknown>,
-  key: string,
-  fallback: number,
-) {
-  const value = record[key];
-  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }

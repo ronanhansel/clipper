@@ -10,7 +10,6 @@ import {
   FRAME_HEIGHT,
   FRAME_WIDTH,
   type AdjustmentLayer,
-  type CameraObjectProps,
 } from "../../../core/types";
 import {
   getLiveDomPostProcessPreflight,
@@ -25,10 +24,6 @@ import type {
 } from "../../../core/effects/types";
 import { createWebGLBackend } from "../backends/WebGLBackend";
 import type { RenderBackend } from "../backends/types";
-import {
-  findActiveCameraObject,
-  getActiveCameraObjectProps,
-} from "../compositors/useCompositionCamera";
 import { FramePreviewLive } from "../FramePreviewLive";
 import type { PostProcessPlan } from "../passes/usePostProcessPlan";
 import { useChangedSetState } from "../passes/useChangedSetState";
@@ -72,7 +67,6 @@ export function LivePostProcessFramePreview({
   const sourceDragSelectionBoxRef = useRef<HTMLDivElement | null>(null);
   const webglBackendRef = useRef<RenderBackend | null>(null);
   const previewLayersRef = useRef<AdjustmentLayer[] | null>(null);
-  const cameraPreviewOverrideRef = useRef<CameraObjectProps | null>(null);
   const missingTextureUploadRef = useRef(false);
   const diagnosticReasonRef = useRef<
     LiveDomPostProcessCapability["reason"] | null
@@ -261,23 +255,12 @@ export function LivePostProcessFramePreview({
     layers: AdjustmentLayer[] | undefined,
     label: "live.event" | "live.effect" | "live.raf",
   ) {
-    const cameraProps =
-      cameraPreviewOverrideRef.current ??
-      getActiveCameraObjectProps(
-        framePreviewProps.part,
-        framePreviewProps.previewTime,
-      );
     return measurePreviewPerf(`${label}.collectRequirement`, () =>
       computePostProcessPlan(
         sceneTime,
         layers ?? framePreviewProps.adjustmentLayers,
         { transitionLayers: framePreviewProps.transitionLayers },
         getPreviewPlanFrameSize(),
-        cameraProps,
-        {
-          part: framePreviewProps.part,
-          localTime: framePreviewProps.previewTime,
-        },
       ),
     );
   }
@@ -309,22 +292,6 @@ export function LivePostProcessFramePreview({
   }, [scheduler, currentSceneTimeRef, framePreviewProps.adjustmentLayers]);
 
   useEffect(() => {
-    function handleCameraPreview(event: Event) {
-      const detail = (event as CustomEvent).detail as
-        | { objectId: string; props: CameraObjectProps }
-        | undefined;
-      const camera = findActiveCameraObject(framePreviewProps.part);
-      if (!detail || !camera || camera.id !== detail.objectId) return;
-      cameraPreviewOverrideRef.current = detail.props;
-      liveRenderDirtyRef.current = true;
-      scheduler.requestRender("edit");
-    }
-    window.addEventListener("clipper:camera-preview", handleCameraPreview);
-    return () =>
-      window.removeEventListener("clipper:camera-preview", handleCameraPreview);
-  }, [scheduler, framePreviewProps.part, framePreviewProps.previewTime]);
-
-  useEffect(() => {
     previewLayersRef.current = null;
     liveRenderDirtyRef.current = true;
     const planBundle = collectPlan(
@@ -337,7 +304,6 @@ export function LivePostProcessFramePreview({
   }, [framePreviewProps.adjustmentLayers]);
 
   useEffect(() => {
-    cameraPreviewOverrideRef.current = null;
     liveRenderDirtyRef.current = true;
     hideLiveCanvas();
     scheduler.requestRender("edit");
@@ -436,20 +402,11 @@ export function LivePostProcessFramePreview({
   const sourceAdjustmentLayers = useMemo(() => {
     const layers =
       previewLayersRef.current ?? framePreviewProps.adjustmentLayers;
-    const cameraProps = getActiveCameraObjectProps(
-      framePreviewProps.part,
-      framePreviewProps.previewTime,
-    );
     const sourcePlanBundle = computePostProcessPlan(
       currentSceneTimeRef.current,
       layers,
       { transitionLayers: framePreviewProps.transitionLayers },
       getPreviewPlanFrameSize(),
-      cameraProps,
-      {
-        part: framePreviewProps.part,
-        localTime: framePreviewProps.previewTime,
-      },
     );
     return sourcePlanBundle.livePasses[0]
       ? sourcePlanBundle.planBeforeFirstLive.activeLayers

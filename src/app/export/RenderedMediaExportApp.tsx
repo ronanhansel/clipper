@@ -587,10 +587,6 @@ export function getExportPostProcessPasses(
     ? getCameraPostProcessPasses(cameraProps, {
         idScope: "export-camera",
         frameSize: { width: exportWidth, height: exportHeight },
-        dofScene: {
-          part: previewModel.part,
-          localTime: request.sceneTime,
-        },
       })
     : [];
   return [

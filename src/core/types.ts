@@ -405,7 +405,7 @@ export const DEFAULT_CAMERA_OBJECT_PROPS: CameraObjectProps = {
   rotation: { x: 0, y: 0, z: 0 },
   fov: 50,
   near: 1,
-  far: 1158,
+  far: 5000,
   sensor: { ...DEFAULT_CAMERA_SENSOR },
   dof: { ...DEFAULT_CAMERA_DOF },
   autoOrient: "off",

@@ -1,9 +1,3 @@
-import { cameraDofPostProcessKind } from "./cameraDof";
-import {
-  createCameraDofExportPostProcessRenderer,
-  createCameraDofPostProcessRenderer,
-  type CameraDofPostProcessRenderer,
-} from "./cameraDofWebGlRenderer";
 import { filmBurnTransitionPostProcessKind } from "./filmBurnTransition";
 import {
   createFilmBurnTransitionExportPostProcessRenderer,
@@ -38,15 +32,6 @@ import type { PostProcessPass } from "../types";
 import type { PostProcessPackage } from "./registry";
 
 export const builtInPostProcessPackages = [
-  {
-    kind: cameraDofPostProcessKind,
-    createRenderer: () =>
-      createCameraDofPostProcessRenderer() as PostProcessRenderer,
-    createExportRenderer: (renderer) =>
-      createCameraDofExportPostProcessRenderer(
-        renderer as CameraDofPostProcessRenderer,
-      ) as ExportPostProcessRenderer,
-  },
   {
     kind: filmBurnTransitionPostProcessKind,
     createRenderer: () =>

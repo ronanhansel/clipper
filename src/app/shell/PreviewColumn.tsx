@@ -17,7 +17,6 @@ import {
   deriveAuthoringActive,
   selectPreviewStrategy,
 } from "../../components/preview/strategies/selectPreviewStrategy";
-import { getActiveCameraObjectProps } from "../../components/preview/compositors/useCompositionCamera";
 import type { StrategyFramePreviewProps } from "../../components/preview/strategies/preview";
 import { FRAME_HEIGHT, FRAME_WIDTH } from "../../core/types";
 import type { PreviewFps } from "../../core/previewFps";
@@ -130,10 +129,6 @@ export function PreviewColumn({
     ? computeHasActiveLivePasses(
         renderFramePreviewProps,
         currentSceneTimeRef.current,
-        getActiveCameraObjectProps(
-          renderFramePreviewProps.part,
-          currentSceneTimeRef.current - renderFramePreviewProps.partStart,
-        ),
       )
     : false;
   const hasLivePassCapableLayers = renderFramePreviewProps

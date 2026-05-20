@@ -1,7 +1,5 @@
 import {
-  buildCameraDofDepthQuads,
   createCameraDofPass,
-  type CameraDofDepthQuad,
   type CameraDofPass,
 } from "./effects/postprocess/cameraDof";
 import {
@@ -11,20 +9,13 @@ import {
 } from "./effects/postprocess/lens";
 import type { ShapeMaskUniforms } from "./effects/shapeMask";
 import type { PostProcessPass } from "./effects/types";
-import type { CameraObjectProps, CompositionClip } from "./types";
+import type { CameraObjectProps } from "./types";
 
 export interface CameraEffectsPassOptions {
   /** Stable id namespace, e.g. the camera FrameObject id. */
   idScope: string;
   /** Output frame size in source pixels (typically FRAME_WIDTH/HEIGHT). */
   frameSize: { width: number; height: number };
-  /** Evaluated depth quads for per-pixel camera DoF, when available. */
-  depthQuads?: CameraDofDepthQuad[];
-  /** Composition scene used to synthesize depth quads for camera DoF. */
-  dofScene?: {
-    part: CompositionClip;
-    localTime: number;
-  };
 }
 
 const disabledChromaticAberrationMask: ShapeMaskUniforms = {
@@ -87,25 +78,21 @@ export function getCameraLensPostProcessPass(
 
 /**
  * Collect every PostProcessPass implied by the camera's effect blocks.
- * Currently delegates to `getCameraLensPostProcessPass`; future grain /
- * exposure / tonemap / grade passes will be added here.
+ * DoF is NOT included here — it runs inside the Three.js composer
+ * pipeline (`CameraDofComposerPass`) which has direct access to the
+ * scene's depth buffer. Only lens effects (distortion + chromatic
+ * aberration) remain as DOM post-process passes.
  */
 export function getCameraPostProcessPasses(
   camera: CameraObjectProps | null | undefined,
   options: CameraEffectsPassOptions,
 ): PostProcessPass[] {
   if (!camera) return [];
-  const depthQuads =
-    options.depthQuads ??
-    (options.dofScene
-      ? buildCameraDofDepthQuads(
-          options.dofScene.part,
-          options.dofScene.localTime,
-        )
-      : []);
   const lensPass = getCameraLensPostProcessPass(camera, options);
-  const dofPass = createCameraDofPass(camera, options.idScope, depthQuads);
-  return [dofPass, lensPass].filter(
-    (pass): pass is CameraDofPass | LensPostProcessPass => Boolean(pass),
+  return [lensPass].filter((pass): pass is LensPostProcessPass =>
+    Boolean(pass),
   );
 }
+
+export { createCameraDofPass };
+export type { CameraDofPass };

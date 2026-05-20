@@ -1,15 +1,15 @@
 import * as THREE from "three";
 import {
-  CSS3DRenderer,
-  CSS3DObject,
-} from "three/examples/jsm/renderers/CSS3DRenderer.js";
-import {
   DEFAULT_CAMERA_OBJECT_PROPS,
   FRAME_HEIGHT,
   FRAME_WIDTH,
   type CameraObjectProps,
+  type CompositionClip,
 } from "../../../core/types";
 import { applyCompositionCameraToThree } from "./compositionCameraThree";
+import { SceneComposer, type ComposerPass } from "./sceneComposer";
+import { LayerNodeSync } from "./layers/LayerNodeSync";
+import { CapturePlaneTexture } from "./CapturePlaneTexture";
 
 export interface CompositionRendererOptions {
   width: number;
@@ -22,21 +22,19 @@ export interface CompositionRendererOptions {
  * active `CameraObjectProps`. Used by Direct mode (sealed output) and
  * the compose-mode camera PIP.
  *
- * Like `ThreeAuthorScene`, it stacks a CSS3D layer (the live composition
- * DOM as a flat plane at z=0) under a transparent WebGL canvas. The
- * WebGL canvas is reserved for any future genuinely-3D scene contents
- * (extruded text, mesh imports). For v1 the WebGL canvas only clears.
- *
- * The composition DOM itself is supplied externally via
- * `setCompositionElement` so the React owner can mount its own
- * `DomBackend` and hand the host element in. That's how every
- * FrameObject type renders for free — text, path, code, svg, pattern2d,
- * etc. — without per-type adapters.
+ * The scene is now a per-FrameObject native Three node graph owned by
+ * `LayerNodeSync`. Native types (rect, null) render with their own
+ * geometry + shaders; everything else still goes through a UV-crop
+ * fallback into a single captured composite (phases 2/3/4 swap those
+ * out for native text, image, and per-element capture). The previous
+ * "shared composite + depth-only cards + flat background plane" hybrid
+ * is gone — every layer now writes its own pixels at its own depth, so
+ * the DoF composer pass sees real 3D colour + depth instead of a
+ * 2D-flattened wall.
  */
 export class CompositionRenderer {
   readonly hostRoot: HTMLDivElement;
   readonly canvas: HTMLCanvasElement;
-  readonly css3dRoot: HTMLDivElement;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   readonly scene: any;
@@ -44,19 +42,26 @@ export class CompositionRenderer {
   readonly camera: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   readonly renderer: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private cssRenderer: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private compositionPlane: any | null = null;
-  private compositionElement: HTMLElement | null = null;
+  private composer: SceneComposer;
+
+  private captureTexture: CapturePlaneTexture;
+  private layerSync: LayerNodeSync;
 
   private width: number;
   private height: number;
   private compositionCamera: CameraObjectProps | null = null;
+  private sourceElement: Element | null = null;
 
   constructor(opts: CompositionRendererOptions) {
-    this.width = Math.max(1, Math.floor(opts.width));
-    this.height = Math.max(1, Math.floor(opts.height));
+    // Internal scene/RT/composer always run at the canonical frame
+    // resolution so Direct and the camera PIP produce identical pixels
+    // regardless of host container size. The canvas's backing store is
+    // FRAME_WIDTH × FRAME_HEIGHT; CSS scales the canvas to fit each host.
+    // Without this the PIP (small host) ran the DoF pipeline at ~200×113
+    // and looked chunky next to Direct's larger backing store.
+    void opts;
+    this.width = FRAME_WIDTH;
+    this.height = FRAME_HEIGHT;
 
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(
@@ -77,9 +82,17 @@ export class CompositionRenderer {
       premultipliedAlpha: true,
       preserveDrawingBuffer: false,
     });
-    this.renderer.setPixelRatio(
-      typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1,
-    );
+    // Linear-light pipeline: scene + composer RTs are RGBA16F linear;
+    // Three encodes to sRGB on the final write to the default
+    // framebuffer (the on-screen canvas). Matches AW/Frostbite/UE5 DoF
+    // — bokeh maths must happen in linear space or highlights look
+    // muddy and the disc loses shape.
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    // Pixel ratio fixed at 1 — the canonical frame resolution is already
+    // the export target. Letting DPR multiply backing-store size would
+    // make the canvas larger than the export and pay a cost (≥2x texel
+    // fetches in the DoF pass) for no visual gain.
+    this.renderer.setPixelRatio(1);
     this.renderer.setSize(this.width, this.height, false);
     this.renderer.setClearColor(0x000000, 0);
     this.canvas = this.renderer.domElement as HTMLCanvasElement;
@@ -89,65 +102,75 @@ export class CompositionRenderer {
     this.canvas.style.height = "100%";
     this.canvas.style.pointerEvents = "none";
 
-    this.cssRenderer = new CSS3DRenderer();
-    this.cssRenderer.setSize(this.width, this.height);
-    this.css3dRoot = this.cssRenderer.domElement as HTMLDivElement;
-    this.css3dRoot.style.position = "absolute";
-    this.css3dRoot.style.inset = "0";
-    this.css3dRoot.style.width = "100%";
-    this.css3dRoot.style.height = "100%";
-    this.css3dRoot.style.pointerEvents = "none";
+    this.composer = new SceneComposer({
+      width: this.width,
+      height: this.height,
+    });
+
+    // Capture canvas is shared infrastructure for the per-element
+    // fallback nodes (text, image, svg, etc. until phases 2/3 land
+    // native versions). The browser requires `drawElementImage`'s
+    // source element to be a descendant of THIS canvas, so all per-
+    // layer captures route through it; each fallback node then blits
+    // pixels into its own private canvas. Native rect/null nodes
+    // ignore it.
+    this.captureTexture = new CapturePlaneTexture(FRAME_WIDTH, FRAME_HEIGHT);
+    this.layerSync = new LayerNodeSync({
+      compositeTexture: this.captureTexture.texture,
+      sharedCaptureCanvas: this.captureTexture.canvas,
+      sourceRoot: () => this.sourceElement,
+    });
+    this.scene.add(this.layerSync.group);
 
     this.hostRoot = document.createElement("div");
     this.hostRoot.style.position = "absolute";
     this.hostRoot.style.inset = "0";
     this.hostRoot.style.overflow = "hidden";
-    // Order matters: the WebGL canvas paints below the CSS3D layer so
-    // any grid / helper overlays render behind the composition plane,
-    // not on top of FrameObject content.
     this.hostRoot.appendChild(this.canvas);
-    this.hostRoot.appendChild(this.css3dRoot);
   }
 
   setCamera(camera: CameraObjectProps | null) {
     this.compositionCamera = camera;
   }
 
-  setViewport(width: number, height: number) {
-    const w = Math.max(1, Math.floor(width));
-    const h = Math.max(1, Math.floor(height));
-    if (w === this.width && h === this.height) return;
-    this.width = w;
-    this.height = h;
-    this.renderer.setSize(w, h, false);
-    this.cssRenderer.setSize(w, h);
-    this.camera.aspect = w / h;
-    this.camera.updateProjectionMatrix();
+  /**
+   * The 2D canvas that backs the through-camera composite capture
+   * texture. `drawElementImage` requires the captured source element to
+   * be an immediate child of this canvas, so the React owner must mount
+   * this canvas into the DOM and nest the source subtree inside it.
+   */
+  get captureCanvas(): HTMLCanvasElement {
+    return this.captureTexture.canvas;
   }
 
-  setCompositionElement(element: HTMLElement | null) {
-    if (this.compositionElement === element) return;
-    this.compositionElement = element;
-    if (this.compositionPlane) {
-      this.scene.remove(this.compositionPlane);
-      this.compositionPlane = null;
-    }
-    if (element) {
-      element.style.width = `${FRAME_WIDTH}px`;
-      element.style.height = `${FRAME_HEIGHT}px`;
-      element.style.transformOrigin = "center center";
-      // CSS3DRenderer applies a `matrix3d(...)` to this element each
-      // frame, but never sets `transform-style`. The default `flat`
-      // collapses every descendant 3D transform — so per-layer
-      // `translateZ` / `rotate{X,Y,Z}` from `threeD` FrameObjects would
-      // be lost the moment they cross the CSS3DObject boundary. Mark
-      // the plane preserve-3d so children pop out as authored.
-      element.style.transformStyle = "preserve-3d";
-      const obj = new CSS3DObject(element);
-      obj.position.set(0, 0, 0);
-      this.compositionPlane = obj;
-      this.scene.add(obj);
-    }
+  setViewport(_width: number, _height: number) {
+    // No-op. Internal resolution is fixed at FRAME_WIDTH × FRAME_HEIGHT;
+    // the canvas's CSS size is driven by the host container. Kept on the
+    // API surface so existing call sites (mount + ResizeObserver) don't
+    // need to change.
+  }
+
+  /**
+   * Reconcile the per-layer cards against the current `(part, localTime)`
+   * and capture the source element's DOM into the composite texture.
+   * Does not render — the caller drives `render()` separately.
+   */
+  setComposition(
+    part: CompositionClip | null,
+    localTime: number,
+    sourceElement: Element | null,
+  ) {
+    this.sourceElement = sourceElement;
+    this.captureTexture.capture(sourceElement, FRAME_WIDTH, FRAME_HEIGHT);
+    this.layerSync.sync(part, localTime);
+  }
+
+  /**
+   * Replace the composer pass list (e.g. DoF, lens, adjustment layers).
+   * Phase 2 uses this to feed the multi-pass DoF pipeline.
+   */
+  setComposerPasses(passes: ComposerPass[]) {
+    this.composer.setPasses(passes);
   }
 
   render() {
@@ -156,16 +179,14 @@ export class CompositionRenderer {
       this.compositionCamera,
       this.width / this.height,
     );
-    this.renderer.render(this.scene, this.camera);
-    this.cssRenderer.render(this.scene, this.camera);
+    this.composer.render(this.renderer, this.scene, this.camera);
   }
 
   dispose() {
-    if (this.compositionPlane) {
-      this.scene.remove(this.compositionPlane);
-      this.compositionPlane = null;
-    }
-    this.compositionElement = null;
+    this.scene.remove(this.layerSync.group);
+    this.layerSync.dispose();
+    this.captureTexture.dispose();
+    this.composer.dispose();
     this.renderer.dispose();
   }
 }

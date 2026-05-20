@@ -8,9 +8,7 @@ import {
   type StrategyFramePreviewProps,
 } from "./selectPreviewStrategy";
 import {
-  DEFAULT_CAMERA_OBJECT_PROPS,
   type AdjustmentLayer,
-  type CameraObjectProps,
   type TransitionLayer,
 } from "../../../core/types";
 
@@ -252,60 +250,17 @@ describe("computeHasActiveLivePasses", () => {
     expect(computeHasActiveLivePasses(props, 1)).toBe(true);
   });
 
-  it("returns true when camera lens distortion is enabled even with no adjustment layers", () => {
-    const cameraProps: CameraObjectProps = {
-      ...DEFAULT_CAMERA_OBJECT_PROPS,
-      position: { ...DEFAULT_CAMERA_OBJECT_PROPS.position },
-      rotation: { ...DEFAULT_CAMERA_OBJECT_PROPS.rotation },
-      sensor: { ...DEFAULT_CAMERA_OBJECT_PROPS.sensor },
-      dof: { ...DEFAULT_CAMERA_OBJECT_PROPS.dof },
-      lens: {
-        distortion: { enabled: true, amount: 0.2 },
-        chromaticAberration: {
-          ...DEFAULT_CAMERA_OBJECT_PROPS.lens.chromaticAberration,
-        },
-        vignette: { ...DEFAULT_CAMERA_OBJECT_PROPS.lens.vignette },
-      },
-      post: {
-        exposure: { ...DEFAULT_CAMERA_OBJECT_PROPS.post.exposure },
-        tonemap: { ...DEFAULT_CAMERA_OBJECT_PROPS.post.tonemap },
-        grade: { ...DEFAULT_CAMERA_OBJECT_PROPS.post.grade },
-        grain: { ...DEFAULT_CAMERA_OBJECT_PROPS.post.grain },
-      },
-    };
-    expect(computeHasActiveLivePasses(makeProps(), 0, cameraProps)).toBe(true);
-    expect(computeHasActiveLivePasses(makeProps(), 0, null)).toBe(false);
+  it("does not flip live-preview when only camera lens distortion is enabled", () => {
+    // Camera lens passes are routed through CompositionRenderer's composer
+    // (Phase 2a of v0.2.20), not through computeHasActiveLivePasses. They must
+    // not force the live-DOM postprocess strategy.
+    expect(computeHasActiveLivePasses(makeProps(), 0)).toBe(false);
   });
 
-  it("returns true when camera DoF is enabled even with no adjustment layers", () => {
-    const cameraProps: CameraObjectProps = {
-      ...DEFAULT_CAMERA_OBJECT_PROPS,
-      position: { ...DEFAULT_CAMERA_OBJECT_PROPS.position },
-      rotation: { ...DEFAULT_CAMERA_OBJECT_PROPS.rotation },
-      sensor: { ...DEFAULT_CAMERA_OBJECT_PROPS.sensor },
-      dof: {
-        enabled: true,
-        focusDistance: 1000,
-        fNumber: 2.8,
-        blurLevel: 1,
-        maxBlurPx: 64,
-      },
-      lens: {
-        distortion: { ...DEFAULT_CAMERA_OBJECT_PROPS.lens.distortion },
-        chromaticAberration: {
-          ...DEFAULT_CAMERA_OBJECT_PROPS.lens.chromaticAberration,
-        },
-        vignette: { ...DEFAULT_CAMERA_OBJECT_PROPS.lens.vignette },
-      },
-      post: {
-        exposure: { ...DEFAULT_CAMERA_OBJECT_PROPS.post.exposure },
-        tonemap: { ...DEFAULT_CAMERA_OBJECT_PROPS.post.tonemap },
-        grade: { ...DEFAULT_CAMERA_OBJECT_PROPS.post.grade },
-        grain: { ...DEFAULT_CAMERA_OBJECT_PROPS.post.grain },
-      },
-    };
-    expect(computeHasActiveLivePasses(makeProps(), 0, cameraProps)).toBe(true);
-    expect(computeHasActiveLivePasses(makeProps(), 0, null)).toBe(false);
+  it("does not flip live-preview when only camera DoF is enabled", () => {
+    // Camera DoF is intentionally OFF in live preview between phases 2a and
+    // 2b of v0.2.20. Either way it must not flip the live-DOM strategy.
+    expect(computeHasActiveLivePasses(makeProps(), 0)).toBe(false);
   });
 });
 

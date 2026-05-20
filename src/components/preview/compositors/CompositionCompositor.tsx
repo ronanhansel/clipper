@@ -14,7 +14,6 @@ import type {
 import { DomBackend } from "../backends/DomBackend";
 import { RasterBackend } from "../backends/RasterBackend";
 import type { CompositionBackend } from "../backends/CompositionBackend";
-import { CAMERA_PERSPECTIVE } from "../../../core/camera";
 import { useCompositionCache } from "../cache/useCompositionCache";
 import { renderCompositionPreview } from "../render/sceneRender";
 import { FRAME_HEIGHT, FRAME_WIDTH } from "../../../core/types";
@@ -85,8 +84,6 @@ export const CompositionCompositor = memo(function CompositionCompositor(
   props: CompositionCompositorProps,
 ) {
   const compositionRef = useRef<HTMLDivElement | null>(null);
-  const pipBackendRef = useRef<HTMLDivElement | null>(null);
-  const pipPostProcessSourceRef = useRef<HTMLDivElement | null>(null);
   const cache = useCompositionCache();
   const compositionId = props.part.compositionId ?? props.part.id;
   cache.getCacheKey(compositionId);
@@ -134,87 +131,6 @@ export const CompositionCompositor = memo(function CompositionCompositor(
     />
   );
 
-  // PIP renders a second, fully-sealed DomBackend instance so the same
-  // React subtree isn't portaled into two CSS3D targets at once. All
-  // interactions are forced off; the PIP is preview-only. Camera is
-  // handled by the through-camera Three.js renderer that hosts this
-  // backend, so the DOM tree must NOT apply its own CSS camera transform.
-  const pipBackendNode = (
-    <DomBackend
-      active={false}
-      activeShapeTool={null}
-      animationsEnabled={props.animationsEnabled}
-      cameraPreviewOverride={props.cameraPreviewOverride}
-      cameraHandledExternally={true}
-      canSelect={false}
-      duration={composition.duration}
-      editingTextObjectId={null}
-      exportTileFrameBounds={props.exportTileFrameBounds}
-      focusPicking={false}
-      frameScale={props.frameScale}
-      hideNullObjects={props.hideNullObjects ?? false}
-      hostRef={pipBackendRef}
-      isPlaying={props.isPlaying}
-      localTime={composition.localTime}
-      part={props.part}
-      renderClockSceneTime={props.renderClockSceneTime}
-      renderMode={props.renderMode}
-      onObjectPointerDown={NOOP_OBJECT_POINTER}
-      onObjectContextMenu={undefined}
-      onTextEditCommit={NOOP_TEXT_COMMIT}
-      onTextEditEnd={undefined}
-      onTextObjectDoubleClick={NOOP_OBJECT_DOUBLE_CLICK}
-    />
-  );
-
-  const pipPostProcessSourceNode = (
-    <div
-      className="absolute left-0 top-0 overflow-hidden"
-      data-clipper-frame-content
-      style={{
-        width: FRAME_WIDTH,
-        height: FRAME_HEIGHT,
-        background: props.part.frame.style.backgroundColor ?? "#000",
-      }}
-    >
-      <div
-        className="absolute inset-0"
-        data-clipper-perspective-stage
-        style={{
-          perspective: `${CAMERA_PERSPECTIVE}px`,
-          perspectiveOrigin: "center",
-          transformStyle: "preserve-3d",
-        }}
-      >
-        <DomBackend
-          active={false}
-          activeShapeTool={null}
-          animationsEnabled={props.animationsEnabled}
-          cameraPreviewOverride={props.cameraPreviewOverride}
-          cameraHandledExternally={false}
-          canSelect={false}
-          duration={composition.duration}
-          editingTextObjectId={null}
-          exportTileFrameBounds={props.exportTileFrameBounds}
-          focusPicking={false}
-          frameScale={1}
-          hideNullObjects={props.hideNullObjects ?? false}
-          hostRef={pipPostProcessSourceRef}
-          isPlaying={props.isPlaying}
-          localTime={composition.localTime}
-          part={props.part}
-          renderClockSceneTime={props.renderClockSceneTime}
-          renderMode={props.renderMode}
-          onObjectPointerDown={NOOP_OBJECT_POINTER}
-          onObjectContextMenu={undefined}
-          onTextEditCommit={NOOP_TEXT_COMMIT}
-          onTextEditEnd={undefined}
-          onTextObjectDoubleClick={NOOP_OBJECT_DOUBLE_CLICK}
-        />
-      </div>
-    </div>
-  );
-
   if (showAuthorView && props.onCameraPropsChange) {
     return (
       <div className="absolute inset-0">
@@ -226,8 +142,16 @@ export const CompositionCompositor = memo(function CompositionCompositor(
           onSelectObject={props.onSelectObject}
           localTime={props.localTime}
           renderComposition={() => backendNode}
-          renderPipComposition={() => pipBackendNode}
-          renderPipPostProcessSource={() => pipPostProcessSourceNode}
+          pipBackendProps={{
+            animationsEnabled: props.animationsEnabled,
+            frameScale: props.frameScale,
+            hideNullObjects: props.hideNullObjects ?? false,
+            isPlaying: props.isPlaying,
+            duration: composition.duration,
+            renderClockSceneTime: props.renderClockSceneTime,
+            renderMode: props.renderMode,
+            exportTileFrameBounds: props.exportTileFrameBounds,
+          }}
         />
       </div>
     );
@@ -235,10 +159,3 @@ export const CompositionCompositor = memo(function CompositionCompositor(
 
   return backendNode;
 });
-
-const NOOP_OBJECT_POINTER: CompositionCompositorProps["onObjectPointerDown"] =
-  () => {};
-const NOOP_TEXT_COMMIT: CompositionCompositorProps["onTextEditCommit"] =
-  () => {};
-const NOOP_OBJECT_DOUBLE_CLICK: CompositionCompositorProps["onTextObjectDoubleClick"] =
-  () => {};

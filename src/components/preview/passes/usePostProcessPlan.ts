@@ -4,7 +4,6 @@ import {
   filterAdjustmentExecutionPlan,
   getVisualStyleForAdjustmentPlan,
 } from "../../../core/adjustments";
-import { getCameraPostProcessPasses } from "../../../core/cameraEffectsPasses";
 import { selectLiveDomPostProcessPasses } from "../../../core/effects/postprocess/passes";
 import type {
   AdjustmentExecutionPlan,
@@ -15,12 +14,7 @@ import {
   getActiveTransitionLayers,
   getTransitionPostProcessPasses,
 } from "../../../core/transitions";
-import type {
-  AdjustmentLayer,
-  CameraObjectProps,
-  CompositionClip,
-  TransitionLayer,
-} from "../../../core/types";
+import type { AdjustmentLayer, TransitionLayer } from "../../../core/types";
 
 export interface PostProcessPlanFrameSize {
   width: number;
@@ -29,11 +23,6 @@ export interface PostProcessPlanFrameSize {
 
 export interface PostProcessPlanTransitionInput {
   transitionLayers?: TransitionLayer[];
-}
-
-export interface CameraPostProcessSceneInput {
-  part: CompositionClip;
-  localTime: number;
 }
 
 export interface PostProcessPlan {
@@ -78,8 +67,6 @@ export function computePostProcessPlan(
   adjustmentLayers: AdjustmentLayer[] | undefined,
   transitionInput: PostProcessPlanTransitionInput | null | undefined,
   frameSize: PostProcessPlanFrameSize,
-  cameraProps: CameraObjectProps | null = null,
-  dofScene?: CameraPostProcessSceneInput,
 ): PostProcessPlan {
   const plan = buildAdjustmentExecutionPlan(
     sceneTime,
@@ -87,15 +74,7 @@ export function computePostProcessPlan(
     undefined,
     frameSize,
   );
-  const cameraPasses = cameraProps
-    ? getCameraPostProcessPasses(cameraProps, {
-        idScope: "camera",
-        frameSize,
-        dofScene,
-      })
-    : [];
   const passes: PostProcessPass[] = [
-    ...cameraPasses,
     ...plan.steps.flatMap((step) => step.postProcessPasses ?? []),
     ...deriveTransitionPasses(sceneTime, transitionInput, frameSize),
   ];
@@ -133,8 +112,6 @@ export function usePostProcessPlan(
   adjustmentLayers: AdjustmentLayer[] | undefined,
   transitionInput: PostProcessPlanTransitionInput | null | undefined,
   frameSize: PostProcessPlanFrameSize,
-  cameraProps: CameraObjectProps | null = null,
-  dofScene?: CameraPostProcessSceneInput,
 ): PostProcessPlan {
   return useMemo(
     () =>
@@ -143,8 +120,6 @@ export function usePostProcessPlan(
         adjustmentLayers,
         transitionInput,
         frameSize,
-        cameraProps,
-        dofScene,
       ),
     [
       sceneTime,
@@ -152,8 +127,6 @@ export function usePostProcessPlan(
       transitionInput,
       frameSize.width,
       frameSize.height,
-      cameraProps,
-      dofScene,
     ],
   );
 }
