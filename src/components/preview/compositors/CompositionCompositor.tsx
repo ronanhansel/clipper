@@ -14,6 +14,7 @@ import type {
 import { DomBackend } from "../backends/DomBackend";
 import { RasterBackend } from "../backends/RasterBackend";
 import type { CompositionBackend } from "../backends/CompositionBackend";
+import { CAMERA_PERSPECTIVE } from "../../../core/camera";
 import { useCompositionCache } from "../cache/useCompositionCache";
 import { renderCompositionPreview } from "../render/sceneRender";
 import { FRAME_HEIGHT, FRAME_WIDTH } from "../../../core/types";
@@ -76,6 +77,8 @@ type CompositionCompositorProps = {
     nextCpX: number,
   ) => void;
   onSelectObject?: (objectId: string | null) => void;
+  cameraPreviewOverride?: CameraObjectProps | null;
+  isPostProcessSource?: boolean;
 };
 
 export const CompositionCompositor = memo(function CompositionCompositor(
@@ -83,6 +86,7 @@ export const CompositionCompositor = memo(function CompositionCompositor(
 ) {
   const compositionRef = useRef<HTMLDivElement | null>(null);
   const pipBackendRef = useRef<HTMLDivElement | null>(null);
+  const pipPostProcessSourceRef = useRef<HTMLDivElement | null>(null);
   const cache = useCompositionCache();
   const compositionId = props.part.compositionId ?? props.part.id;
   cache.getCacheKey(compositionId);
@@ -104,6 +108,8 @@ export const CompositionCompositor = memo(function CompositionCompositor(
   const backendNode = (
     <Backend
       active={props.active}
+      isPostProcessSource={props.isPostProcessSource}
+      cameraPreviewOverride={props.cameraPreviewOverride}
       activeShapeTool={showAuthorView ? null : props.activeShapeTool}
       animationsEnabled={props.animationsEnabled}
       cameraHandledExternally={showAuthorView}
@@ -138,6 +144,7 @@ export const CompositionCompositor = memo(function CompositionCompositor(
       active={false}
       activeShapeTool={null}
       animationsEnabled={props.animationsEnabled}
+      cameraPreviewOverride={props.cameraPreviewOverride}
       cameraHandledExternally={true}
       canSelect={false}
       duration={composition.duration}
@@ -160,6 +167,54 @@ export const CompositionCompositor = memo(function CompositionCompositor(
     />
   );
 
+  const pipPostProcessSourceNode = (
+    <div
+      className="absolute left-0 top-0 overflow-hidden"
+      data-clipper-frame-content
+      style={{
+        width: FRAME_WIDTH,
+        height: FRAME_HEIGHT,
+        background: props.part.frame.style.backgroundColor ?? "#000",
+      }}
+    >
+      <div
+        className="absolute inset-0"
+        data-clipper-perspective-stage
+        style={{
+          perspective: `${CAMERA_PERSPECTIVE}px`,
+          perspectiveOrigin: "center",
+          transformStyle: "preserve-3d",
+        }}
+      >
+        <DomBackend
+          active={false}
+          activeShapeTool={null}
+          animationsEnabled={props.animationsEnabled}
+          cameraPreviewOverride={props.cameraPreviewOverride}
+          cameraHandledExternally={false}
+          canSelect={false}
+          duration={composition.duration}
+          editingTextObjectId={null}
+          exportTileFrameBounds={props.exportTileFrameBounds}
+          focusPicking={false}
+          frameScale={1}
+          hideNullObjects={props.hideNullObjects ?? false}
+          hostRef={pipPostProcessSourceRef}
+          isPlaying={props.isPlaying}
+          localTime={composition.localTime}
+          part={props.part}
+          renderClockSceneTime={props.renderClockSceneTime}
+          renderMode={props.renderMode}
+          onObjectPointerDown={NOOP_OBJECT_POINTER}
+          onObjectContextMenu={undefined}
+          onTextEditCommit={NOOP_TEXT_COMMIT}
+          onTextEditEnd={undefined}
+          onTextObjectDoubleClick={NOOP_OBJECT_DOUBLE_CLICK}
+        />
+      </div>
+    </div>
+  );
+
   if (showAuthorView && props.onCameraPropsChange) {
     return (
       <div className="absolute inset-0">
@@ -172,6 +227,7 @@ export const CompositionCompositor = memo(function CompositionCompositor(
           localTime={props.localTime}
           renderComposition={() => backendNode}
           renderPipComposition={() => pipBackendNode}
+          renderPipPostProcessSource={() => pipPostProcessSourceNode}
         />
       </div>
     );

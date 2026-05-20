@@ -29,6 +29,7 @@ export type FramePreviewLiveProps = Omit<
   FramePreviewBaseProps,
   LiveDerivedKeys
 > & {
+  isPostProcessSource?: boolean;
   previewSceneContext: FramePreviewSceneContext;
   timelineMode: TimelineMode;
   activeCompositionHidden: boolean;
@@ -89,6 +90,7 @@ export const FramePreviewLive = memo(function FramePreviewLive(
 
   return (
     <FramePreview
+      isPostProcessSource={props.isPostProcessSource}
       {...(passthrough as ComponentProps<typeof FramePreview>)}
       previewParts={livePreviewParts}
       transitionPreviewParts={liveTransitionPreviewParts}

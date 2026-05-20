@@ -10,6 +10,7 @@ import {
   FRAME_HEIGHT,
   FRAME_WIDTH,
   type AdjustmentLayer,
+  type CameraObjectProps,
 } from "../../../core/types";
 import {
   getLiveDomPostProcessPreflight,
@@ -24,7 +25,10 @@ import type {
 } from "../../../core/effects/types";
 import { createWebGLBackend } from "../backends/WebGLBackend";
 import type { RenderBackend } from "../backends/types";
-import { getActiveCameraObjectProps } from "../compositors/useCompositionCamera";
+import {
+  findActiveCameraObject,
+  getActiveCameraObjectProps,
+} from "../compositors/useCompositionCamera";
 import { FramePreviewLive } from "../FramePreviewLive";
 import type { PostProcessPlan } from "../passes/usePostProcessPlan";
 import { useChangedSetState } from "../passes/useChangedSetState";
@@ -68,6 +72,7 @@ export function LivePostProcessFramePreview({
   const sourceDragSelectionBoxRef = useRef<HTMLDivElement | null>(null);
   const webglBackendRef = useRef<RenderBackend | null>(null);
   const previewLayersRef = useRef<AdjustmentLayer[] | null>(null);
+  const cameraPreviewOverrideRef = useRef<CameraObjectProps | null>(null);
   const missingTextureUploadRef = useRef(false);
   const diagnosticReasonRef = useRef<
     LiveDomPostProcessCapability["reason"] | null
@@ -143,6 +148,7 @@ export function LivePostProcessFramePreview({
       renderCanvasRef.current.style.opacity = "1";
       renderCanvasRef.current.style.visibility = "visible";
       renderCanvasRef.current.style.pointerEvents = "none";
+      renderCanvasRef.current.style.backgroundColor = "transparent";
     }
     if (normalPreviewRef.current) {
       normalPreviewRef.current.style.opacity = value ? "0" : "1";
@@ -255,10 +261,12 @@ export function LivePostProcessFramePreview({
     layers: AdjustmentLayer[] | undefined,
     label: "live.event" | "live.effect" | "live.raf",
   ) {
-    const cameraProps = getActiveCameraObjectProps(
-      framePreviewProps.part,
-      framePreviewProps.previewTime,
-    );
+    const cameraProps =
+      cameraPreviewOverrideRef.current ??
+      getActiveCameraObjectProps(
+        framePreviewProps.part,
+        framePreviewProps.previewTime,
+      );
     return measurePreviewPerf(`${label}.collectRequirement`, () =>
       computePostProcessPlan(
         sceneTime,
@@ -301,6 +309,22 @@ export function LivePostProcessFramePreview({
   }, [scheduler, currentSceneTimeRef, framePreviewProps.adjustmentLayers]);
 
   useEffect(() => {
+    function handleCameraPreview(event: Event) {
+      const detail = (event as CustomEvent).detail as
+        | { objectId: string; props: CameraObjectProps }
+        | undefined;
+      const camera = findActiveCameraObject(framePreviewProps.part);
+      if (!detail || !camera || camera.id !== detail.objectId) return;
+      cameraPreviewOverrideRef.current = detail.props;
+      liveRenderDirtyRef.current = true;
+      scheduler.requestRender("edit");
+    }
+    window.addEventListener("clipper:camera-preview", handleCameraPreview);
+    return () =>
+      window.removeEventListener("clipper:camera-preview", handleCameraPreview);
+  }, [scheduler, framePreviewProps.part, framePreviewProps.previewTime]);
+
+  useEffect(() => {
     previewLayersRef.current = null;
     liveRenderDirtyRef.current = true;
     const planBundle = collectPlan(
@@ -313,6 +337,7 @@ export function LivePostProcessFramePreview({
   }, [framePreviewProps.adjustmentLayers]);
 
   useEffect(() => {
+    cameraPreviewOverrideRef.current = null;
     liveRenderDirtyRef.current = true;
     hideLiveCanvas();
     scheduler.requestRender("edit");
@@ -442,6 +467,7 @@ export function LivePostProcessFramePreview({
       className="relative overflow-hidden bg-black"
       data-clipper-live-postprocess-preview-wrapper
       data-clipper-live-postprocess-status={diagnosticReason ?? "ready"}
+      data-clipper-diagnostic-reason={diagnosticReason}
       ref={wrapperRef}
       style={previewStyle}
     >
@@ -480,6 +506,7 @@ export function LivePostProcessFramePreview({
           <FramePreviewLive
             {...toFramePreviewLiveProps(sourceFramePreviewProps)}
             adjustmentLayersOverride={sourceAdjustmentLayers}
+            isPostProcessSource={true}
           />
         </div>
       </canvas>

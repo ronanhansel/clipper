@@ -27,6 +27,7 @@ import { CompositionCompositor } from "./CompositionCompositor";
 import { renderScenePreview } from "../render/sceneRender";
 
 type SceneCompositorProps = {
+  isPostProcessSource?: boolean;
   cameraRef: RefObject<HTMLDivElement | null>;
   filePath: string;
   resetKey: string;
@@ -126,6 +127,7 @@ export const SceneCompositor = memo(function SceneCompositor({
   onCameraPropsChange,
   onCameraPathEaseChange,
   onSelectObject,
+  isPostProcessSource,
 }: SceneCompositorProps) {
   useLayoutEffect(() => {
     const element = cameraRef.current;
@@ -189,6 +191,7 @@ export const SceneCompositor = memo(function SceneCompositor({
             stackPreviewParts.map((item) => (
               <CompositionCompositor
                 key={`${item.part.id}:${item.start}`}
+                isPostProcessSource={isPostProcessSource}
                 active={item.part.id === activePartId}
                 activeShapeTool={activeShapeTool}
                 animationsEnabled={animationsEnabled}

@@ -1,7 +1,19 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import { createPortal } from "react-dom";
 import { ThreeAuthorScene } from "./ThreeAuthorScene";
 import { CompositionWebGLHost } from "./CompositionWebGLHost";
+import { LiveDomPostProcessRenderer } from "../../../core/effects/postprocess/liveDomRenderer";
+import { withPostProcessFrameBackground } from "../../../core/effects/postprocess/passes";
+import {
+  buildCameraDofDepthQuads,
+  createCameraDofPass,
+} from "../../../core/effects/postprocess/cameraDof";
 import {
   findActiveCameraObject,
   getActiveCameraObjectProps,
@@ -37,6 +49,7 @@ export interface ComposeAuthorViewProps {
    * just clears.
    */
   renderPipComposition?: () => ReactNode;
+  renderPipPostProcessSource?: () => ReactNode;
   /**
    * Forwarded from the React owner so 3D picks (camera body click) can
    * drive selection state. `null` clears the selection.
@@ -71,10 +84,17 @@ export interface ComposeAuthorViewProps {
 export function ComposeAuthorView(props: ComposeAuthorViewProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const sceneRef = useRef<ThreeAuthorScene | null>(null);
+  const pipCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const pipSourceCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const pipSourceElementRef = useRef<HTMLDivElement | null>(null);
+  const pipRendererRef = useRef<LiveDomPostProcessRenderer | null>(null);
   const draggingRef = useRef(false);
   const pendingDragRef = useRef<CameraObjectProps | null>(null);
   const flushHandleRef = useRef<number>(0);
   const [planeTarget, setPlaneTarget] = useState<HTMLElement | null>(null);
+  const [pipDofStatus, setPipDofStatus] = useState<
+    "disabled" | "active" | "missing-source" | "render-failed"
+  >("disabled");
   // Which camera-path keyframe is selected, surfacing its bezier
   // handles. Cleared when the user clicks empty space or selects a
   // different camera.
@@ -295,6 +315,110 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
     scene.render();
   }, [planeTarget]);
 
+  useEffect(() => {
+    const canvas = pipSourceCanvasRef.current;
+    if (!canvas || canvas.hasAttribute("layoutsubtree")) return;
+    canvas.setAttribute("layoutsubtree", "");
+  }, []);
+
+  function renderPipDofFrame(cameraOverride?: CameraObjectProps | null) {
+    const canvas = pipCanvasRef.current;
+    const sourceCanvas = pipSourceCanvasRef.current;
+    const sourceElement = pipSourceElementRef.current;
+    const camera =
+      cameraOverride ?? getActiveCameraObjectProps(props.part, props.localTime);
+    if (!camera?.dof.enabled) {
+      setPipDofStatus("disabled");
+      return false;
+    }
+    if (!canvas || !sourceCanvas || !sourceElement) {
+      setPipDofStatus("missing-source");
+      return false;
+    }
+    const pass = createCameraDofPass(
+      camera,
+      "pip-camera",
+      buildCameraDofDepthQuads(props.part, props.localTime),
+    );
+    if (!pass) {
+      setPipDofStatus("disabled");
+      return false;
+    }
+    pipRendererRef.current ??= new LiveDomPostProcessRenderer();
+    const result = pipRendererRef.current.render({
+      canvas,
+      sourceCanvas,
+      sourceElement,
+      passes: [
+        withPostProcessFrameBackground(
+          pass,
+          props.part.frame.style.backgroundColor,
+        ),
+      ],
+      width: FRAME_WIDTH,
+      height: FRAME_HEIGHT,
+    });
+    setPipDofStatus(result.rendered ? "active" : "render-failed");
+    return result.rendered;
+  }
+
+  const pipCamera = getActiveCameraObjectProps(props.part, props.localTime);
+  const pipDofEnabled = Boolean(
+    pipCamera?.dof.enabled && props.renderPipPostProcessSource,
+  );
+
+  useEffect(() => {
+    if (!pipDofEnabled) {
+      setPipDofStatus("disabled");
+      pipRendererRef.current?.destroy();
+      pipRendererRef.current = null;
+      return;
+    }
+    let cancelled = false;
+    const first = requestAnimationFrame(() => {
+      if (cancelled) return;
+      renderPipDofFrame();
+      requestAnimationFrame(() => {
+        if (!cancelled) renderPipDofFrame();
+      });
+    });
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(first);
+    };
+  }, [pipDofEnabled, props.part, props.localTime]);
+
+  useEffect(() => {
+    if (!pipDofEnabled) return;
+    function handleCameraPreview(event: Event) {
+      const detail = (event as CustomEvent).detail as
+        | { objectId: string; props: CameraObjectProps }
+        | undefined;
+      if (!detail) return;
+      const camera = findActiveCameraObject(props.part);
+      if (!camera || camera.id !== detail.objectId) return;
+      requestAnimationFrame(() => renderPipDofFrame(detail.props));
+    }
+    window.addEventListener("clipper:camera-preview", handleCameraPreview);
+    return () =>
+      window.removeEventListener("clipper:camera-preview", handleCameraPreview);
+  }, [pipDofEnabled, props.part, props.localTime]);
+
+  useEffect(() => {
+    return () => {
+      pipRendererRef.current?.destroy();
+      pipRendererRef.current = null;
+    };
+  }, []);
+
+  const pipSourceStyle = {
+    width: FRAME_WIDTH,
+    height: FRAME_HEIGHT,
+    left: 0,
+    top: 0,
+    overflow: "hidden",
+  } as CSSProperties;
+
   return (
     <div
       ref={hostRef}
@@ -309,13 +433,47 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
         className="pointer-events-auto absolute right-3 top-3 w-[28%] max-w-[360px] overflow-hidden rounded-[4px] border border-[#2d313b] bg-[#0a0c10] shadow-[0_18px_40px_rgba(0,0,0,0.45)]"
         style={{ aspectRatio: `${FRAME_WIDTH} / ${FRAME_HEIGHT}`, zIndex: 10 }}
         data-clipper-camera-pip
+        data-clipper-camera-pip-dof={pipDofStatus}
       >
-        <CompositionWebGLHost
-          part={props.part}
-          localTime={props.localTime}
-          hostClassName="h-full w-full"
-          renderComposition={props.renderPipComposition}
-        />
+        {pipDofEnabled ? (
+          <>
+            <canvas
+              aria-hidden="true"
+              ref={pipSourceCanvasRef}
+              className="pointer-events-none absolute left-0 top-0 -z-10 block opacity-0"
+              data-clipper-camera-pip-source-canvas
+              height={FRAME_HEIGHT}
+              style={pipSourceStyle}
+              width={FRAME_WIDTH}
+            >
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute"
+                data-clipper-camera-pip-source
+                inert={true}
+                ref={pipSourceElementRef}
+                style={pipSourceStyle}
+              >
+                {props.renderPipPostProcessSource?.()}
+              </div>
+            </canvas>
+            <canvas
+              aria-hidden="true"
+              ref={pipCanvasRef}
+              className="block h-full w-full"
+              data-clipper-camera-pip-dof-canvas
+              height={FRAME_HEIGHT}
+              width={FRAME_WIDTH}
+            />
+          </>
+        ) : (
+          <CompositionWebGLHost
+            part={props.part}
+            localTime={props.localTime}
+            hostClassName="h-full w-full"
+            renderComposition={props.renderPipComposition}
+          />
+        )}
       </div>
     </div>
   );

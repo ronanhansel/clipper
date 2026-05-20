@@ -276,6 +276,37 @@ describe("computeHasActiveLivePasses", () => {
     expect(computeHasActiveLivePasses(makeProps(), 0, cameraProps)).toBe(true);
     expect(computeHasActiveLivePasses(makeProps(), 0, null)).toBe(false);
   });
+
+  it("returns true when camera DoF is enabled even with no adjustment layers", () => {
+    const cameraProps: CameraObjectProps = {
+      ...DEFAULT_CAMERA_OBJECT_PROPS,
+      position: { ...DEFAULT_CAMERA_OBJECT_PROPS.position },
+      rotation: { ...DEFAULT_CAMERA_OBJECT_PROPS.rotation },
+      sensor: { ...DEFAULT_CAMERA_OBJECT_PROPS.sensor },
+      dof: {
+        enabled: true,
+        focusDistance: 1000,
+        fNumber: 2.8,
+        blurLevel: 1,
+        maxBlurPx: 64,
+      },
+      lens: {
+        distortion: { ...DEFAULT_CAMERA_OBJECT_PROPS.lens.distortion },
+        chromaticAberration: {
+          ...DEFAULT_CAMERA_OBJECT_PROPS.lens.chromaticAberration,
+        },
+        vignette: { ...DEFAULT_CAMERA_OBJECT_PROPS.lens.vignette },
+      },
+      post: {
+        exposure: { ...DEFAULT_CAMERA_OBJECT_PROPS.post.exposure },
+        tonemap: { ...DEFAULT_CAMERA_OBJECT_PROPS.post.tonemap },
+        grade: { ...DEFAULT_CAMERA_OBJECT_PROPS.post.grade },
+        grain: { ...DEFAULT_CAMERA_OBJECT_PROPS.post.grain },
+      },
+    };
+    expect(computeHasActiveLivePasses(makeProps(), 0, cameraProps)).toBe(true);
+    expect(computeHasActiveLivePasses(makeProps(), 0, null)).toBe(false);
+  });
 });
 
 describe("computeHasLivePassCapableLayers", () => {

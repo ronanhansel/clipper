@@ -234,6 +234,8 @@ type FramePreviewProps = {
   renderMode?: "preview" | "export";
   previewOverlayHost?: HTMLElement | null;
   selectedObjectId?: string | null;
+  isPostProcessSource?: boolean;
+  cameraPreviewOverride?: CameraObjectProps | null;
   onCameraPropsChange?: (
     cameraObjectId: string,
     next: CameraObjectProps,
@@ -324,6 +326,7 @@ export const FramePreview = memo(function FramePreview({
   activeShapeTool,
   shapeDrawPreview,
   selectedObjectId,
+  isPostProcessSource,
   onCameraPropsChange,
   onCameraPathEaseChange,
   onSelectObject,
@@ -859,6 +862,7 @@ export const FramePreview = memo(function FramePreview({
                 >
                   <SceneCompositor
                     cameraRef={cameraRef}
+                    isPostProcessSource={isPostProcessSource}
                     filePath={part.filePath}
                     resetKey={`${part.id}:${part.filePath}:${compositionError ?? ""}`}
                     sceneCamera={liveCameraTransform}

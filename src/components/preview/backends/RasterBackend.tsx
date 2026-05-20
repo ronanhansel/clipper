@@ -69,7 +69,8 @@ export const RasterBackend: CompositionBackend = function RasterBackend(props) {
   // This guarantees zero regression for existing compositions; the
   // unfinished adapter set (Phase 7) can't break content that doesn't
   // ask for the new pipeline.
-  const useWebGL = compositionHasCameraLayer(props.part);
+  const useWebGL =
+    compositionHasCameraLayer(props.part) && !props.isPostProcessSource;
 
   if (useWebGL) {
     return (

@@ -68,7 +68,7 @@ export function createCameraDofPass(
   if (camera.dof.fNumber <= 0) return null;
   if (
     !Number.isFinite(camera.dof.focusDistance) ||
-    camera.dof.focusDistance <= 0
+    camera.dof.focusDistance < 0
   )
     return null;
 

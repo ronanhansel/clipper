@@ -5,6 +5,7 @@ import {
   type CameraDofPass,
 } from "./cameraDof";
 import type { ExportPostProcessRenderer } from "./exportFrameBridge";
+import { FRAME_HEIGHT, FRAME_WIDTH } from "../../types";
 import {
   WebGlPostProcessRenderer,
   type WebGlPostProcessDrawInput,
@@ -28,16 +29,17 @@ varying vec2 v_texCoord;
 float depthToCocPx(float encodedDepth) {
   if (encodedDepth <= 0.0) return 0.0;
   if (u_fNumber <= 0.0) return 0.0;
-  if (u_focusDistance <= 0.0) return 0.0;
+  if (u_focusDistance < 0.0) return 0.0;
+  float focus = max(u_focusDistance, 0.0001);
   float subject = max(encodedDepth * u_depthFar, 0.0001);
   float fovRad = radians(u_fov);
   float focalLengthMm = u_sensorHeight / (2.0 * tan(fovRad * 0.5));
   if (focalLengthMm <= 0.0) return 0.0;
-  if (abs(subject - u_focusDistance) < 1e-6) return 0.0;
+  if (abs(subject - focus) < 1e-6) return 0.0;
   float apertureDiameter = focalLengthMm / u_fNumber;
-  float denom = u_focusDistance * (subject - focalLengthMm);
+  float denom = focus * (subject - focalLengthMm);
   if (abs(denom) < 1e-6) return 0.0;
-  float cocMm = apertureDiameter * abs(focalLengthMm * (subject - u_focusDistance)) / denom;
+  float cocMm = apertureDiameter * abs(focalLengthMm * (subject - focus)) / denom;
   float cocPx = abs(cocMm) * (u_resolution.y / u_sensorHeight) * u_blurLevel;
   return clamp(cocPx, 0.0, u_maxBlurPx);
 }
@@ -129,7 +131,9 @@ class CameraDofDepthTextureRenderer {
     height,
     uniforms,
   }: WebGlPostProcessPrepareInput<CameraDofPass>) {
-    if (!this.ensureThree(width, height)) return false;
+    const cam = pass.uniforms;
+    if (!this.ensureThree(width, height, cam.fov, cam.near, cam.far))
+      return false;
     if (!this.depthTexture) {
       this.depthTexture = gl.createTexture();
       if (!this.depthTexture) return false;
@@ -165,7 +169,13 @@ class CameraDofDepthTextureRenderer {
     return true;
   }
 
-  private ensureThree(width: number, height: number) {
+  private ensureThree(
+    width: number,
+    height: number,
+    fov = 50,
+    near = 1,
+    far = 5000,
+  ) {
     if (!this.renderer) {
       this.renderer = new THREE.WebGLRenderer({
         alpha: false,
@@ -174,9 +184,9 @@ class CameraDofDepthTextureRenderer {
         preserveDrawingBuffer: true,
       });
       this.scene = new THREE.Scene();
-      this.camera = new THREE.PerspectiveCamera(50, 1, 1, 5000);
+      this.camera = new THREE.PerspectiveCamera(fov, 1, near, far);
       this.material = new THREE.ShaderMaterial({
-        uniforms: { depthFar: { value: 5000 } },
+        uniforms: { depthFar: { value: far } },
         side: THREE.DoubleSide,
         vertexShader: `
           uniform float depthFar;
@@ -247,8 +257,8 @@ class CameraDofDepthTextureRenderer {
         }
       }
       mesh.position.set(
-        quad.x + width / 2,
-        -(quad.y + height / 2),
+        quad.x - FRAME_WIDTH / 2 + width / 2,
+        -(quad.y - FRAME_HEIGHT / 2 + height / 2),
         quad.translateZ,
       );
       mesh.rotation.set(

@@ -6,6 +6,7 @@ import type {
 } from "react";
 import type {
   Bounds,
+  CameraObjectProps,
   CompositionClip,
   FrameObject,
   RichTextSegment,
@@ -25,6 +26,7 @@ export type CompositionRenderBackendProps = {
   hideNullObjects: boolean;
   renderClockSceneTime: number;
   active: boolean;
+  cameraPreviewOverride?: CameraObjectProps | null;
   /**
    * When true, the backend's caller already projects the composition's
    * camera externally (e.g. via CSS3DRenderer). The backend must NOT
@@ -32,6 +34,7 @@ export type CompositionRenderBackendProps = {
    * makes the contents shift relative to the plane.
    */
   cameraHandledExternally?: boolean;
+  isPostProcessSource?: boolean;
 };
 
 export type CompositionInteractionBackendProps = {

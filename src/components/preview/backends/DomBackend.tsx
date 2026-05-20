@@ -35,6 +35,7 @@ export const DomBackend: CompositionBackend = function DomBackend({
   activeShapeTool,
   animationsEnabled,
   canSelect,
+  cameraPreviewOverride,
   cameraHandledExternally,
   editingTextObjectId,
   exportTileFrameBounds,
@@ -115,7 +116,8 @@ export const DomBackend: CompositionBackend = function DomBackend({
     () => getActiveCameraObjectProps(part, localTime),
     [part, localTime],
   );
-  const activeCamera = previewCameraOverride ?? activeCameraBase;
+  const activeCamera =
+    cameraPreviewOverride ?? previewCameraOverride ?? activeCameraBase;
 
   const innerCamera = activeCamera
     ? cameraObjectPropsToPreviewTransform(activeCamera)
