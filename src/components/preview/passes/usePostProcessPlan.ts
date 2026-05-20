@@ -18,6 +18,7 @@ import {
 import type {
   AdjustmentLayer,
   CameraObjectProps,
+  CompositionClip,
   TransitionLayer,
 } from "../../../core/types";
 
@@ -28,6 +29,11 @@ export interface PostProcessPlanFrameSize {
 
 export interface PostProcessPlanTransitionInput {
   transitionLayers?: TransitionLayer[];
+}
+
+export interface CameraPostProcessSceneInput {
+  part: CompositionClip;
+  localTime: number;
 }
 
 export interface PostProcessPlan {
@@ -73,6 +79,7 @@ export function computePostProcessPlan(
   transitionInput: PostProcessPlanTransitionInput | null | undefined,
   frameSize: PostProcessPlanFrameSize,
   cameraProps: CameraObjectProps | null = null,
+  dofScene?: CameraPostProcessSceneInput,
 ): PostProcessPlan {
   const plan = buildAdjustmentExecutionPlan(
     sceneTime,
@@ -84,6 +91,7 @@ export function computePostProcessPlan(
     ? getCameraPostProcessPasses(cameraProps, {
         idScope: "camera",
         frameSize,
+        dofScene,
       })
     : [];
   const passes: PostProcessPass[] = [
@@ -126,6 +134,7 @@ export function usePostProcessPlan(
   transitionInput: PostProcessPlanTransitionInput | null | undefined,
   frameSize: PostProcessPlanFrameSize,
   cameraProps: CameraObjectProps | null = null,
+  dofScene?: CameraPostProcessSceneInput,
 ): PostProcessPlan {
   return useMemo(
     () =>
@@ -135,6 +144,7 @@ export function usePostProcessPlan(
         transitionInput,
         frameSize,
         cameraProps,
+        dofScene,
       ),
     [
       sceneTime,
@@ -143,6 +153,7 @@ export function usePostProcessPlan(
       frameSize.width,
       frameSize.height,
       cameraProps,
+      dofScene,
     ],
   );
 }

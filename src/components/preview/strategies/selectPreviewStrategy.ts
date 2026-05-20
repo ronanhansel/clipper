@@ -70,6 +70,10 @@ export function computeHasActiveLivePasses(
     { transitionLayers: framePreviewProps.transitionLayers },
     { width: FRAME_WIDTH, height: FRAME_HEIGHT },
     cameraProps,
+    {
+      part: framePreviewProps.part,
+      localTime: framePreviewProps.previewTime,
+    },
   ).hasLivePasses;
 }
 

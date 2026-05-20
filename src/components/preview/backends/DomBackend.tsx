@@ -27,23 +27,13 @@ import {
   formatCameraPreviewFilter,
   formatCameraPreviewTransform,
 } from "../../../core/camera";
-import {
-  computeCircleOfConfusionPx,
-  computeLayerSubjectDistance,
-} from "../../../core/cameraOptics";
-import { evaluateObjectState } from "../../../core/propertyRegistry";
-import {
-  FRAME_HEIGHT,
-  FRAME_WIDTH,
-  type CameraObjectProps,
-} from "../../../core/types";
+import { FRAME_WIDTH, type CameraObjectProps } from "../../../core/types";
 import type { CompositionBackend } from "./CompositionBackend";
 
 export const DomBackend: CompositionBackend = function DomBackend({
   active,
   activeShapeTool,
   animationsEnabled,
-  applyCameraDof = true,
   canSelect,
   cameraHandledExternally,
   editingTextObjectId,
@@ -148,59 +138,6 @@ export const DomBackend: CompositionBackend = function DomBackend({
     ? {}
     : { transformStyle: "preserve-3d" };
 
-  // DoF applies only to layers with `threeD === true`. 2D layers always
-  // render sharp on the composition plane (matches AE).
-  // TODO: hoist evaluatedObject up so DoF and FrameObjectView share one
-  // evaluation. For v1 we accept a duplicate `evaluateObjectState` call
-  // per object — DoF only needs the translateZ scalar and the bounds.
-  // TODO: enable DoF in export mode once the export path is determinised.
-  const dofPxByObjectId = useMemo(() => {
-    const map = new Map<string, number>();
-    if (!applyCameraDof) return map;
-    if (!activeCamera || !activeCamera.dof.enabled) return map;
-    if (renderMode === "export") return map;
-    for (const obj of part.objects) {
-      if (obj.hidden) continue;
-      if (obj.type === "camera") continue;
-      if (!obj.threeD) continue;
-      const evaluated = obj.tracks ? evaluateObjectState(obj, localTime) : obj;
-      const transform = (evaluated.transform ?? {}) as Record<string, unknown>;
-      const tz =
-        typeof transform.translateZ === "number" ? transform.translateZ : 0;
-      const subject = computeLayerSubjectDistance(
-        activeCamera.position,
-        activeCamera.rotation,
-        {
-          x: evaluated.bounds.x + evaluated.bounds.width / 2,
-          y: evaluated.bounds.y + evaluated.bounds.height / 2,
-          z: tz,
-        },
-      );
-      const coc = computeCircleOfConfusionPx(
-        activeCamera,
-        subject,
-        FRAME_HEIGHT,
-      );
-      if (coc > 0) map.set(obj.id, coc);
-    }
-    return map;
-  }, [activeCamera, applyCameraDof, localTime, part.objects, renderMode]);
-
-  // Per-composition backdrop CoC: same optics applied to the
-  // composition plane (z=0, frame centroid). Painted on a dedicated
-  // underlay so the host's children (focused objects) stay sharp.
-  const bgCameraDofPx = useMemo(() => {
-    if (!applyCameraDof) return 0;
-    if (!activeCamera || !activeCamera.dof.enabled) return 0;
-    if (renderMode === "export") return 0;
-    const subject = computeLayerSubjectDistance(
-      activeCamera.position,
-      activeCamera.rotation,
-      { x: FRAME_WIDTH / 2, y: FRAME_HEIGHT / 2, z: 0 },
-    );
-    return computeCircleOfConfusionPx(activeCamera, subject, FRAME_HEIGHT);
-  }, [activeCamera, applyCameraDof, renderMode]);
-
   useLayoutEffect(() => {
     syncDomAnimationsToRenderClock(
       hostRef.current,
@@ -213,10 +150,6 @@ export const DomBackend: CompositionBackend = function DomBackend({
     [hostRef],
   );
 
-  // Extract `backgroundColor` from the frame style so it paints on a
-  // dedicated underlay div instead of the host. The host's filter would
-  // otherwise apply to the entire subtree (including focused objects);
-  // the underlay lets only the composition-plane backdrop blur.
   const frameStyleRecord = part.frame.style as Record<string, string | number>;
   const { backgroundColor: frameBgColor, ...frameStyleRest } = frameStyleRecord;
 
@@ -248,49 +181,24 @@ export const DomBackend: CompositionBackend = function DomBackend({
           className="absolute inset-0"
           style={{
             backgroundColor: frameBgColor as string,
-            filter:
-              bgCameraDofPx > 0
-                ? `blur(${bgCameraDofPx.toFixed(2)}px)`
-                : undefined,
             pointerEvents: "none",
             zIndex: 0,
           }}
         />
       )}
-      {!part.background.hidden &&
-        (bgCameraDofPx > 0 ? (
-          <div
-            className="absolute inset-0"
-            style={{
-              filter: `blur(${bgCameraDofPx.toFixed(2)}px)`,
-              pointerEvents: "none",
-            }}
-          >
-            <BackgroundLayerView
-              animationsEnabled={animationsEnabled}
-              background={part.background}
-              canSelect={active && canSelect}
-              duration={part.duration}
-              exportTileFrameBounds={exportTileFrameBounds}
-              frameScale={renderMode === "export" ? frameScale : 1}
-              previewTime={localTime}
-              renderMode={renderMode}
-              onPointerDown={undefined}
-            />
-          </div>
-        ) : (
-          <BackgroundLayerView
-            animationsEnabled={animationsEnabled}
-            background={part.background}
-            canSelect={active && canSelect}
-            duration={part.duration}
-            exportTileFrameBounds={exportTileFrameBounds}
-            frameScale={renderMode === "export" ? frameScale : 1}
-            previewTime={localTime}
-            renderMode={renderMode}
-            onPointerDown={undefined}
-          />
-        ))}
+      {!part.background.hidden && (
+        <BackgroundLayerView
+          animationsEnabled={animationsEnabled}
+          background={part.background}
+          canSelect={active && canSelect}
+          duration={part.duration}
+          exportTileFrameBounds={exportTileFrameBounds}
+          frameScale={renderMode === "export" ? frameScale : 1}
+          previewTime={localTime}
+          renderMode={renderMode}
+          onPointerDown={undefined}
+        />
+      )}
       {(() => {
         const parentTransforms = buildFrameObjectParentTransformLookup(
           part.objects,
@@ -311,7 +219,6 @@ export const DomBackend: CompositionBackend = function DomBackend({
               key={object.id}
               activeShapeTool={active ? activeShapeTool : undefined}
               animationsEnabled={animationsEnabled}
-              cameraDofPx={dofPxByObjectId.get(object.id)}
               exportTileFrameBounds={exportTileFrameBounds}
               object={object}
               parentTransform={parentTransforms.get(object.id)}

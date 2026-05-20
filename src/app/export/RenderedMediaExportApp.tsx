@@ -11,6 +11,7 @@ import {
 import { FramePreview } from "../../components/preview/FramePreview";
 import { buildAdjustmentExecutionPlan } from "../../core/adjustments";
 import { CAMERA_PERSPECTIVE } from "../../core/camera";
+import { getCameraPostProcessPasses } from "../../core/cameraEffectsPasses";
 import {
   applyExportPostProcessFrame,
   applyExportRawPostProcessFrame,
@@ -43,6 +44,7 @@ import {
   deriveFramePreviewRenderModel,
   getFramePreviewTimelineLayers,
 } from "../state/framePreviewRenderModel";
+import { getActiveCameraObjectProps } from "../../components/preview/compositors/useCompositionCamera";
 import {
   getActiveTransitionLayers,
   getTransitionPostProcessPasses,
@@ -577,7 +579,22 @@ export function getExportPostProcessPasses(
     request.frameRate,
     { width: exportWidth, height: exportHeight },
   );
+  const cameraProps = getActiveCameraObjectProps(
+    previewModel.part,
+    request.sceneTime,
+  );
+  const cameraPasses = cameraProps
+    ? getCameraPostProcessPasses(cameraProps, {
+        idScope: "export-camera",
+        frameSize: { width: exportWidth, height: exportHeight },
+        dofScene: {
+          part: previewModel.part,
+          localTime: request.sceneTime,
+        },
+      })
+    : [];
   return [
+    ...cameraPasses,
     ...buildAdjustmentExecutionPlan(
       request.sceneTime,
       previewModel.visibleAdjustmentLayers,

@@ -19,9 +19,15 @@ export type WebGlPostProcessDrawInput<TPass> = {
   uniforms: Record<string, WebGLUniformLocation | null>;
 };
 
+export type WebGlPostProcessPrepareInput<TPass> =
+  WebGlPostProcessDrawInput<TPass> & {
+    sourceTexture: WebGLTexture;
+  };
+
 export type WebGlPostProcessConfig<TPass> = {
   fragmentShaderSource: string;
   uniformNames: readonly string[];
+  prepare?: (input: WebGlPostProcessPrepareInput<TPass>) => boolean;
   draw: (input: WebGlPostProcessDrawInput<TPass>) => void;
 };
 
@@ -67,6 +73,16 @@ export class WebGlPostProcessRenderer<TPass> {
         source,
       ),
     );
+    const prepared =
+      this.config.prepare?.({
+        gl,
+        pass,
+        width,
+        height,
+        uniforms: this.uniforms,
+        sourceTexture: this.texture,
+      }) ?? true;
+    if (!prepared) return false;
     measurePreviewPerf("webgl.draw", () =>
       this.config.draw({ gl, pass, width, height, uniforms: this.uniforms }),
     );
@@ -115,6 +131,16 @@ export class WebGlPostProcessRenderer<TPass> {
         captureCanvas,
       ),
     );
+    const prepared =
+      this.config.prepare?.({
+        gl,
+        pass,
+        width,
+        height,
+        uniforms: this.uniforms,
+        sourceTexture: this.texture,
+      }) ?? true;
+    if (!prepared) return false;
 
     measurePreviewPerf("webgl.element.draw", () =>
       this.config.draw({ gl, pass, width, height, uniforms: this.uniforms }),

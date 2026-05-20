@@ -266,6 +266,10 @@ export function LivePostProcessFramePreview({
         { transitionLayers: framePreviewProps.transitionLayers },
         getPreviewPlanFrameSize(),
         cameraProps,
+        {
+          part: framePreviewProps.part,
+          localTime: framePreviewProps.previewTime,
+        },
       ),
     );
   }
@@ -417,6 +421,10 @@ export function LivePostProcessFramePreview({
       { transitionLayers: framePreviewProps.transitionLayers },
       getPreviewPlanFrameSize(),
       cameraProps,
+      {
+        part: framePreviewProps.part,
+        localTime: framePreviewProps.previewTime,
+      },
     );
     return sourcePlanBundle.livePasses[0]
       ? sourcePlanBundle.planBeforeFirstLive.activeLayers

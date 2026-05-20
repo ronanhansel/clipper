@@ -225,8 +225,7 @@ export type FrameObject = {
    * positioning (translateZ, rotateX/Y/Z keyframable transforms) and
    * the inspector renders a 3D position/rotation layout. Geometry is
    * unchanged — a rect remains flat; threeD only controls authoring
-   * affordances and how the camera sees it (translateZ contributes to
-   * camera DoF distance via the existing `cameraOptics` path).
+   * affordances and how the camera sees it.
    */
   threeD?: boolean;
   animations?: LayerAnimation[];
