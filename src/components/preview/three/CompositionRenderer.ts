@@ -1,4 +1,6 @@
 import * as THREE from "three";
+import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import {
   DEFAULT_CAMERA_OBJECT_PROPS,
   FRAME_HEIGHT,
@@ -7,7 +9,6 @@ import {
   type CompositionClip,
 } from "../../../core/types";
 import { applyCompositionCameraToThree } from "./compositionCameraThree";
-import { SceneComposer, type ComposerPass } from "./sceneComposer";
 import { LayerNodeSync } from "./layers/LayerNodeSync";
 import { CapturePlaneTexture } from "./CapturePlaneTexture";
 
@@ -22,15 +23,17 @@ export interface CompositionRendererOptions {
  * active `CameraObjectProps`. Used by Direct mode (sealed output) and
  * the compose-mode camera PIP.
  *
- * The scene is now a per-FrameObject native Three node graph owned by
+ * The scene is a per-FrameObject native Three node graph owned by
  * `LayerNodeSync`. Native types (rect, null) render with their own
  * geometry + shaders; everything else still goes through a UV-crop
  * fallback into a single captured composite (phases 2/3/4 swap those
- * out for native text, image, and per-element capture). The previous
- * "shared composite + depth-only cards + flat background plane" hybrid
- * is gone — every layer now writes its own pixels at its own depth, so
- * the DoF composer pass sees real 3D colour + depth instead of a
- * 2D-flattened wall.
+ * out for native text, image, and per-element capture).
+ *
+ * Post-processing runs through Three's `EffectComposer` chain. The
+ * composer's read RT carries a `DepthTexture` so the camera DoF pass
+ * can sample scene depth without re-rendering the scene as
+ * MeshDepthMaterial. Phases beyond DoF (lens distortion, CA) chain on
+ * after as additional `Pass`es.
  */
 export class CompositionRenderer {
   readonly hostRoot: HTMLDivElement;
@@ -42,7 +45,12 @@ export class CompositionRenderer {
   readonly camera: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   readonly renderer: any;
-  private composer: SceneComposer;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private composer: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private renderPass: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private extraPasses: any[] = [];
 
   private captureTexture: CapturePlaneTexture;
   private layerSync: LayerNodeSync;
@@ -57,8 +65,6 @@ export class CompositionRenderer {
     // resolution so Direct and the camera PIP produce identical pixels
     // regardless of host container size. The canvas's backing store is
     // FRAME_WIDTH × FRAME_HEIGHT; CSS scales the canvas to fit each host.
-    // Without this the PIP (small host) ran the DoF pipeline at ~200×113
-    // and looked chunky next to Direct's larger backing store.
     void opts;
     this.width = FRAME_WIDTH;
     this.height = FRAME_HEIGHT;
@@ -102,10 +108,38 @@ export class CompositionRenderer {
     this.canvas.style.height = "100%";
     this.canvas.style.pointerEvents = "none";
 
-    this.composer = new SceneComposer({
-      width: this.width,
-      height: this.height,
+    // Build EffectComposer with a custom read RT that carries a
+    // DepthTexture. RenderPass writes the beauty into this RT (and its
+    // depth attachment); the camera DoF pass reads `readBuffer.depthTexture`
+    // to compute its CoC. The clone for ping-pong gets a depth attachment
+    // too so the depth survives a swap (EffectComposer.clone() preserves
+    // the `depthBuffer` flag and the `DepthTexture`).
+    const depthTexture = new THREE.DepthTexture(
+      this.width,
+      this.height,
+      THREE.UnsignedShortType,
+    );
+    const composerRT = new THREE.WebGLRenderTarget(this.width, this.height, {
+      depthBuffer: true,
+      depthTexture,
+      type: THREE.HalfFloatType,
+      format: THREE.RGBAFormat,
+      colorSpace: THREE.LinearSRGBColorSpace,
+      // Mipmap chain on the colour attachment so the DoF pass can
+      // sample area-averaged colour at LOD = log2(σ_tap) per tap. This
+      // is what lets a 60-tap Vogel gather look like a high-quality
+      // bokeh: each tap's read is an integral over an area matched to
+      // its CoC, instead of one random texel that produces ghost-letter
+      // and grain artefacts on text content (Pixelmischief, "Bokeh
+      // Depth-of-Field"). Three's WebGLRenderer regenerates these
+      // mipmaps automatically on `setRenderTarget` transitions.
+      generateMipmaps: true,
+      minFilter: THREE.LinearMipmapLinearFilter,
+      magFilter: THREE.LinearFilter,
     });
+    this.composer = new EffectComposer(this.renderer, composerRT);
+    this.renderPass = new RenderPass(this.scene, this.camera);
+    this.composer.addPass(this.renderPass);
 
     // Capture canvas is shared infrastructure for the per-element
     // fallback nodes (text, image, svg, etc. until phases 2/3 land
@@ -166,11 +200,24 @@ export class CompositionRenderer {
   }
 
   /**
-   * Replace the composer pass list (e.g. DoF, lens, adjustment layers).
-   * Phase 2 uses this to feed the multi-pass DoF pipeline.
+   * Replace the composer pass list (DoF, lens, etc). Pass instances are
+   * Three.js `Pass` subclasses. Always preserves the leading
+   * `RenderPass` and rebuilds the chain after it. Phase 2 uses this to
+   * feed the camera DoF + lens chain.
    */
-  setComposerPasses(passes: ComposerPass[]) {
-    this.composer.setPasses(passes);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  setComposerPasses(passes: any[]) {
+    // Remove previously appended passes (Three's EffectComposer doesn't
+    // expose a clear-from-index, so do it explicitly). Disposal of the
+    // pass instances themselves is the caller's job — the composer
+    // doesn't own them.
+    for (const p of this.extraPasses) {
+      this.composer.removePass(p);
+    }
+    this.extraPasses = passes.slice();
+    for (const p of this.extraPasses) {
+      this.composer.addPass(p);
+    }
   }
 
   render() {
@@ -179,13 +226,17 @@ export class CompositionRenderer {
       this.compositionCamera,
       this.width / this.height,
     );
-    this.composer.render(this.renderer, this.scene, this.camera);
+    this.composer.render();
   }
 
   dispose() {
     this.scene.remove(this.layerSync.group);
     this.layerSync.dispose();
     this.captureTexture.dispose();
+    // Drop refs to extra passes (caller owns disposal) before disposing
+    // the composer so its `dispose()` only releases its own RTs +
+    // copyPass.
+    this.extraPasses.length = 0;
     this.composer.dispose();
     this.renderer.dispose();
   }

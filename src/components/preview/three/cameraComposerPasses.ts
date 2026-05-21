@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { Pass } from "three/examples/jsm/postprocessing/Pass.js";
 import {
   getCameraLensPostProcessPass,
   type CameraEffectsPassOptions,
@@ -13,7 +14,6 @@ import {
   shapeMaskPreviewRgb,
 } from "../../../core/effects/shapeMask";
 import type { CameraObjectProps } from "../../../core/types";
-import type { ComposerPass, ComposerPassRenderInput } from "./sceneComposer";
 
 /**
  * Composer-side adapter for the existing lens fragment shader. Phase 2a
@@ -101,13 +101,29 @@ void main() {
 const FULLSCREEN_GEOMETRY = new THREE.PlaneGeometry(2, 2);
 const FULLSCREEN_CAMERA = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 
+// GLSL ES 3.00 vertex shader for the DoF blur pass. Three's
+// ShaderMaterial with `glslVersion: THREE.GLSL3` requires `out`
+// declarations for varyings instead of `varying`. Three's prologue
+// already declares `in vec3 position` and `in vec2 uv` from the
+// geometry attributes, so we don't redeclare them.
+const DOF_BLUR_VERTEX = `
+out vec2 v_uv;
+void main() {
+  v_uv = uv;
+  gl_Position = vec4(position.xy, 0.0, 1.0);
+}
+`;
+
 /**
- * `LensComposerPass` wraps the existing camera lens shader as a single
- * `ComposerPass`. It samples its `inputColor` and writes the lensed
- * result to `output`. Self-contained: owns its own ShaderMaterial,
- * Mesh, and Scene.
+ * `LensComposerPass` wraps the existing camera lens shader as a Three.js
+ * postprocessing `Pass`. Uses Three's standard `(renderer, writeBuffer,
+ * readBuffer)` contract: reads `readBuffer.texture` for input colour and
+ * writes the lensed result to either `writeBuffer` or the screen
+ * (`renderToScreen`). Self-contained: owns its own ShaderMaterial, Mesh,
+ * and Scene.
  */
-export class LensComposerPass implements ComposerPass {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export class LensComposerPass extends (Pass as any) {
   readonly id: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private readonly material: any;
@@ -117,6 +133,7 @@ export class LensComposerPass implements ComposerPass {
   private readonly scene: any;
 
   constructor(id: string, pass: LensPostProcessPass) {
+    super();
     this.id = id;
     const u = pass.uniforms;
     const mask = u.chromaticAberrationMask;
@@ -166,11 +183,14 @@ export class LensComposerPass implements ComposerPass {
     this.material.uniforms.u_resolution.value.set(width, height);
   }
 
-  render(input: ComposerPassRenderInput): void {
-    this.material.uniforms.u_image.value = input.inputColor;
-    this.material.uniforms.u_resolution.value.set(input.width, input.height);
-    input.renderer.setRenderTarget(input.output);
-    input.renderer.render(this.scene, FULLSCREEN_CAMERA);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  render(renderer: any, writeBuffer: any, readBuffer: any): void {
+    this.material.uniforms.u_image.value = readBuffer.texture;
+    const w = readBuffer?.width ?? 1;
+    const h = readBuffer?.height ?? 1;
+    this.material.uniforms.u_resolution.value.set(w, h);
+    renderer.setRenderTarget(this.renderToScreen ? null : writeBuffer);
+    renderer.render(this.scene, FULLSCREEN_CAMERA);
   }
 
   dispose(): void {
@@ -188,10 +208,12 @@ export function buildCameraComposerPasses(
   camera: CameraObjectProps | null | undefined,
   frameSize: { width: number; height: number },
   idScope: string = "camera",
-): ComposerPass[] {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+): any[] {
   if (!camera) return [];
   const options: CameraEffectsPassOptions = { idScope, frameSize };
-  const passes: ComposerPass[] = [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const passes: any[] = [];
   const dofPass = buildCameraDofComposerPass(camera, frameSize, idScope);
   if (dofPass) passes.push(dofPass);
   const lensPass = getCameraLensPostProcessPass(camera, options);
@@ -203,15 +225,15 @@ export function buildCameraComposerPasses(
 
 /**
  * Build the camera DoF composer pass for the given camera, or null when
- * DoF is disabled. The returned `ComposerPass` owns the four sub-passes
- * (CoC → downsample → bokeh → composite) and their internal half-res
- * render targets.
+ * DoF is disabled. The returned pass is a Three.js `Pass` and owns its
+ * CoC + blur sub-passes plus the half-float CoC render target.
  */
 export function buildCameraDofComposerPass(
   camera: CameraObjectProps | null | undefined,
   _frameSize: { width: number; height: number },
   idScope: string = "camera",
-): ComposerPass | null {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+): any | null {
   if (!camera) return null;
   const dofPass = createCameraDofPass(camera, idScope);
   if (!dofPass) return null;
@@ -347,110 +369,156 @@ void main() {
 
 const DOF_BLUR_FRAGMENT = `
 precision highp float;
-varying vec2 v_uv;
-uniform sampler2D u_image;     // full-res linear RGB
-uniform sampler2D u_coc;       // full-res signed CoC in .r
+in vec2 v_uv;
+uniform sampler2D u_image;
+uniform sampler2D u_coc;
 uniform vec2 u_resolution;
 uniform float u_maxBlurPx;
+uniform float u_bias;
 
-const int TAPS = 64;
-const float GOLDEN_ANGLE = 2.39996323;
+out vec4 outColor;
 
-float interleavedGradientNoise(vec2 p) {
-  vec3 magic = vec3(0.06711056, 0.00583715, 52.9829189);
-  return fract(magic.z * fract(dot(p, magic.xy)));
+#define GOLDEN_ANGLE 2.39996323
+#define TAPS 64
+
+vec3 colourAtLod(vec2 coords, float lod) {
+  return textureLod(u_image, coords, lod).rgb;
 }
 
 void main() {
-  // Disc gather at the centre's own CoC radius. Same model as
-  // three.js's BokehShader and most production DoF passes. The output
-  // pixel reads a uniformly-weighted disc whose radius is the centre's
-  // blur amount; an in-focus pixel reads only its own colour
-  // (radius ≈ 0); a defocused pixel averages a disc.
-  //
-  // Two design choices that matter for the look:
-  //
-  //  1. A small (~2 px) Gaussian "soft kernel" is added on top of the
-  //     centre's CoC radius so even sharp pixels sample slightly from
-  //     neighbours. Without this, a sharp pixel adjacent to a heavily
-  //     defocused pixel keeps a hard edge — the previous behaviour the
-  //     user saw as "filter glow, not lens blur".
-  //
-  //  2. CoC similarity is wide (sigma = 12 px) and applied as a soft
-  //     Gaussian rather than a hard accept/reject. Adjacent pixels at
-  //     similar (but not identical) depths share most of their tap set,
-  //     so silhouettes grade smoothly from sharp to blurred without
-  //     visible stepping.
-  float cocCentre = texture2D(u_coc, v_uv).r;
-  float radiusPx = max(abs(cocCentre), 0.0);
+  float cocCentre = texture(u_coc, v_uv).r;
+  float cocAbs = abs(cocCentre);
+  vec3 sharp = colourAtLod(v_uv, 0.0);
 
-  vec2 invRes = 1.0 / u_resolution;
-  float rotation = interleavedGradientNoise(v_uv * u_resolution) * 6.28318530718;
-
-  vec3 accum = vec3(0.0);
-  float wSum = 0.0;
-  float twoCocSigmaSq = 288.0; // sigma_coc = 12 px
-
-  for (int i = 0; i < TAPS; i++) {
-    float t = (float(i) + 0.5) / float(TAPS);
-    float r = sqrt(t) * radiusPx;
-    float angle = float(i) * GOLDEN_ANGLE + rotation;
-    vec2 offset = vec2(cos(angle), sin(angle)) * r * invRes;
-    vec2 uv = clamp(v_uv + offset, vec2(0.0), vec2(1.0));
-    vec3 sCol = texture2D(u_image, uv).rgb;
-    float sCoc = texture2D(u_coc, uv).r;
-
-    float dCoc = sCoc - cocCentre;
-    float wDepth = exp(-(dCoc * dCoc) / twoCocSigmaSq);
-
-    accum += sCol * wDepth;
-    wSum += wDepth;
+  if (cocAbs < 0.5) {
+    outColor = vec4(sharp, 1.0);
+    return;
   }
 
-  vec3 result = wSum > 1e-3 ? accum / wSum : texture2D(u_image, v_uv).rgb;
-  gl_FragColor = vec4(result, 1.0);
+  float signCentre = cocCentre < 0.0 ? -1.0 : 1.0;
+  float radiusPx = min(cocAbs, u_maxBlurPx);
+  float lod = log2(max(radiusPx, 1.0) * 0.5);
+  vec3 acc = sharp;
+  float weightSum = 1.0;
+
+  for (int i = 0; i < TAPS; i++) {
+    float idx = float(i) + 0.5;
+    float r = sqrt(idx / float(TAPS));
+    float a = idx * GOLDEN_ANGLE;
+    vec2 disc = vec2(cos(a), sin(a)) * r;
+    vec2 tapUv = v_uv + disc * radiusPx / u_resolution;
+
+    float cocTap = texture(u_coc, tapUv).r;
+    float sameField = signCentre < 0.0 ? step(cocTap, -0.25) : step(0.25, cocTap);
+    float tapRadius = abs(cocTap);
+    float coverage = smoothstep(0.0, radiusPx, tapRadius) * sameField;
+    float rimBias = mix(1.0, r, u_bias);
+    float weight = max(coverage * rimBias, 0.0);
+
+    acc += colourAtLod(tapUv, lod) * weight;
+    weightSum += weight;
+  }
+
+  vec3 blurred = acc / weightSum;
+  float blend = smoothstep(0.5, 3.0, cocAbs);
+  outColor = vec4(mix(sharp, blurred, blend), 1.0);
+}
+`;
+
+const DOF_COC_BLUR_FRAGMENT = `
+precision highp float;
+varying vec2 v_uv;
+uniform sampler2D u_coc;
+uniform vec2 u_resolution;
+uniform vec2 u_axis;          // (1,0) for horizontal, (0,1) for vertical
+
+// 5-tap symmetric Gaussian (sigma ~= 1.5 step) in single-channel CoC
+// space. Step = 2 px so the effective spatial reach is 4 px each
+// side. Two passes (H + V) produce a roughly circular ~8 px
+// transition zone in the CoC field, enough to soften depth
+// discontinuities at silhouettes (Pixelmischief blog, "Bokeh
+// Depth-of-Field"). Without this prefilter, a hard step in the CoC
+// texture (page edge -> void) becomes a hard step in the blurred
+// output (image #38 — page silhouette still visible as a rectangular
+// outline through the blur).
+//
+// Weights from a normalised Gaussian, sigma = 1.5, samples at -2..+2:
+//   w(0) = 0.382925
+//   w(1) = 0.241730  (x2)
+//   w(2) = 0.060598  (x2)
+const float W0 = 0.382925;
+const float W1 = 0.241730;
+const float W2 = 0.060598;
+const float STEP_PX = 2.0;
+
+void main() {
+  vec2 step = u_axis * (STEP_PX / u_resolution);
+  float c = texture2D(u_coc, v_uv).r * W0;
+  c += texture2D(u_coc, v_uv + step).r * W1;
+  c += texture2D(u_coc, v_uv - step).r * W1;
+  c += texture2D(u_coc, v_uv + 2.0 * step).r * W2;
+  c += texture2D(u_coc, v_uv - 2.0 * step).r * W2;
+  gl_FragColor = vec4(c, 0.0, 0.0, 1.0);
 }
 `;
 
 /**
- * `CameraDofComposerPass` is the composer-side adapter for the camera
- * DoF effect. Two passes:
+ * `CameraDofComposerPass` is the camera DoF effect as a Three.js
+ * postprocessing `Pass`. Two internal sub-passes:
  *
- *   inputColor + inputDepth
+ *   readBuffer.texture (linear RGB) + readBuffer.depthTexture
  *     → 1. coc   (full-res, signed CoC in .r, RGBA16F)
- *     → 2. blur  (full-res Gaussian gather, depth-aware: spatial Gaussian
- *                 × CoC similarity, plus near scatter-as-gather so a
- *                 defocused foreground occludes the focused subject)
+ *     → 2. blur  (full-res BokehShader2-style ring gather + per-pixel
+ *                 dithering, anchored on the centre's CoC, writes to
+ *                 writeBuffer or to screen if `renderToScreen`)
  *
- * Replaces the earlier six-pass half-res pipeline (setup → near
- * tile-max → far gather → near gather → bilateral upsample +
- * composite) which produced visible half-res grid stepping along
- * tilted silhouettes. Stepping was a half-res quantisation artefact,
- * not a kernel-shape one. Doing the gather at full-res with depth-aware
- * weights eliminates the grid entirely.
+ * The depth input comes from `readBuffer.depthTexture` — Three's
+ * EffectComposer attaches a `DepthTexture` to its read RT when the
+ * RenderPass is configured to populate it (we configure that in
+ * `CompositionRenderer`). The blur shader is a port of BokehShader2
+ * (replacing the previous fixed 41-tap shader from Three's simple
+ * BokehShader) so visible stripe banding on tilted silhouettes
+ * (regression image #27) is broken up by per-pixel dithering.
  */
 
-export class CameraDofComposerPass implements ComposerPass {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export class CameraDofComposerPass extends (Pass as any) {
   readonly id: string;
   readonly pass: CameraDofPass;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private readonly cocMaterial: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private readonly cocBlurMaterial: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private readonly blurMaterial: any;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private readonly cocScene: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private readonly cocBlurScene: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private readonly blurScene: any;
 
+  // CoC pipeline RTs (full-res, RGBA16F, signed CoC in .r):
+  //   cocTargetRaw — raw analytic CoC from depth.
+  //   cocTargetH   — after horizontal Gaussian on cocTargetRaw.
+  //   cocTargetV   — after vertical Gaussian on cocTargetH (final).
+  // The gather reads cocTargetV. The two-pass prefilter softens the
+  // hard step in the CoC field at silhouettes (image #38) so the
+  // gather's per-tap σ_tap rolls smoothly across object boundaries.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private cocTarget: any;
+  private cocTargetRaw: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private cocTargetH: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private cocTargetV: any;
 
   private fullWidth = 1;
   private fullHeight = 1;
 
   constructor(id: string, pass: CameraDofPass) {
+    super();
     this.id = id;
     this.pass = pass;
     const u = pass.uniforms;
@@ -474,14 +542,35 @@ export class CameraDofComposerPass implements ComposerPass {
       depthWrite: false,
       transparent: false,
     });
-    this.blurMaterial = new THREE.ShaderMaterial({
+    this.cocBlurMaterial = new THREE.ShaderMaterial({
       vertexShader: CAMERA_LENS_VERTEX,
+      fragmentShader: DOF_COC_BLUR_FRAGMENT,
+      uniforms: {
+        u_coc: { value: null },
+        u_resolution: { value: new THREE.Vector2(1, 1) },
+        u_axis: { value: new THREE.Vector2(1, 0) },
+      },
+      depthTest: false,
+      depthWrite: false,
+      transparent: false,
+    });
+    this.blurMaterial = new THREE.ShaderMaterial({
+      // GLSL ES 3.00 — needed for `textureLod()` as a core builtin.
+      // Three's WebGL2 backend already runs all shaders in ESSL3, so
+      // this opt-in only changes the syntax our source uses (in/out
+      // instead of varying, texture() instead of texture2D, an explicit
+      // out vec4 instead of gl_FragColor).
+      glslVersion: THREE.GLSL3,
+      vertexShader: DOF_BLUR_VERTEX,
       fragmentShader: DOF_BLUR_FRAGMENT,
       uniforms: {
         u_image: { value: null },
         u_coc: { value: null },
         u_resolution: { value: new THREE.Vector2(1, 1) },
         u_maxBlurPx: { value: Math.max(u.maxBlurPx, 1) },
+        // 0.5 bias balances centre weight against the ring weights so
+        // the disc fills evenly. Same default BokehShader2 ships with.
+        u_bias: { value: 0.5 },
       },
       depthTest: false,
       depthWrite: false,
@@ -489,16 +578,22 @@ export class CameraDofComposerPass implements ComposerPass {
     });
 
     this.cocScene = makeFullscreenScene(this.cocMaterial);
+    this.cocBlurScene = makeFullscreenScene(this.cocBlurMaterial);
     this.blurScene = makeFullscreenScene(this.blurMaterial);
 
-    // CoC at full-res in RGBA16F (signed CoC straight to .r — no
+    // CoC RTs at full-res in RGBA16F (signed CoC straight to .r — no
     // 8-bit encode/decode, no bilinear-across-sign-discontinuity bug).
-    this.cocTarget = new THREE.WebGLRenderTarget(1, 1, {
+    // NearestFilter so the prefilter Gaussian reads exact texel values
+    // and doesn't leak across CoC discontinuities via interpolation.
+    const cocRtOpts = {
       type: THREE.HalfFloatType,
       format: THREE.RGBAFormat,
       minFilter: THREE.NearestFilter,
       magFilter: THREE.NearestFilter,
-    });
+    };
+    this.cocTargetRaw = new THREE.WebGLRenderTarget(1, 1, cocRtOpts);
+    this.cocTargetH = new THREE.WebGLRenderTarget(1, 1, cocRtOpts);
+    this.cocTargetV = new THREE.WebGLRenderTarget(1, 1, cocRtOpts);
   }
 
   setSize(width: number, height: number): void {
@@ -507,47 +602,72 @@ export class CameraDofComposerPass implements ComposerPass {
     if (w === this.fullWidth && h === this.fullHeight) return;
     this.fullWidth = w;
     this.fullHeight = h;
-    this.cocTarget.setSize(w, h);
+    this.cocTargetRaw.setSize(w, h);
+    this.cocTargetH.setSize(w, h);
+    this.cocTargetV.setSize(w, h);
     this.cocMaterial.uniforms.u_resolution.value.set(w, h);
+    this.cocBlurMaterial.uniforms.u_resolution.value.set(w, h);
     this.blurMaterial.uniforms.u_resolution.value.set(w, h);
   }
 
-  render(input: ComposerPassRenderInput): void {
-    if (!input.inputDepth) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  render(renderer: any, writeBuffer: any, readBuffer: any): void {
+    const depthTexture = readBuffer?.depthTexture ?? null;
+    if (!depthTexture) {
       // No depth attachment available — passthrough so a downstream
-      // lens pass still sees the full-frame colour.
-      input.renderer.setRenderTarget(input.output);
-      input.renderer.clear();
+      // lens pass still sees the full-frame colour. Copy readBuffer →
+      // writeBuffer (or screen) instead of leaving writeBuffer stale.
+      this.blurMaterial.uniforms.u_image.value = readBuffer.texture;
+      this.blurMaterial.uniforms.u_coc.value = null;
+      renderer.setRenderTarget(this.renderToScreen ? null : writeBuffer);
+      renderer.clear();
       return;
     }
-    if (input.width !== this.fullWidth || input.height !== this.fullHeight) {
-      this.setSize(input.width, input.height);
+    const w = readBuffer?.width ?? 1;
+    const h = readBuffer?.height ?? 1;
+    if (w !== this.fullWidth || h !== this.fullHeight) {
+      this.setSize(w, h);
     }
 
     // 1. CoC at full-res (signed CoC straight to .r, half-float).
-    this.cocMaterial.uniforms.u_depth.value = input.inputDepth;
-    this.cocMaterial.uniforms.u_resolution.value.set(input.width, input.height);
-    input.renderer.setRenderTarget(this.cocTarget);
-    input.renderer.clear();
-    input.renderer.render(this.cocScene, FULLSCREEN_CAMERA);
+    this.cocMaterial.uniforms.u_depth.value = depthTexture;
+    this.cocMaterial.uniforms.u_resolution.value.set(w, h);
+    renderer.setRenderTarget(this.cocTargetRaw);
+    renderer.clear();
+    renderer.render(this.cocScene, FULLSCREEN_CAMERA);
 
-    // 2. Depth-aware Gaussian gather + near scatter at full-res →
-    // direct write to the composer's output target.
-    this.blurMaterial.uniforms.u_image.value = input.inputColor;
-    this.blurMaterial.uniforms.u_coc.value = this.cocTarget.texture;
-    this.blurMaterial.uniforms.u_resolution.value.set(
-      input.width,
-      input.height,
-    );
-    input.renderer.setRenderTarget(input.output);
-    input.renderer.clear();
-    input.renderer.render(this.blurScene, FULLSCREEN_CAMERA);
+    // 2a. Horizontal Gaussian on the CoC RT.
+    this.cocBlurMaterial.uniforms.u_coc.value = this.cocTargetRaw.texture;
+    this.cocBlurMaterial.uniforms.u_axis.value.set(1, 0);
+    this.cocBlurMaterial.uniforms.u_resolution.value.set(w, h);
+    renderer.setRenderTarget(this.cocTargetH);
+    renderer.clear();
+    renderer.render(this.cocBlurScene, FULLSCREEN_CAMERA);
+
+    // 2b. Vertical Gaussian on the H-blurred CoC RT.
+    this.cocBlurMaterial.uniforms.u_coc.value = this.cocTargetH.texture;
+    this.cocBlurMaterial.uniforms.u_axis.value.set(0, 1);
+    renderer.setRenderTarget(this.cocTargetV);
+    renderer.clear();
+    renderer.render(this.cocBlurScene, FULLSCREEN_CAMERA);
+
+    // 3. Vogel disc gather at full-res, reading the smoothed CoC →
+    // write to the composer's write buffer (or screen if last pass).
+    this.blurMaterial.uniforms.u_image.value = readBuffer.texture;
+    this.blurMaterial.uniforms.u_coc.value = this.cocTargetV.texture;
+    this.blurMaterial.uniforms.u_resolution.value.set(w, h);
+    renderer.setRenderTarget(this.renderToScreen ? null : writeBuffer);
+    renderer.clear();
+    renderer.render(this.blurScene, FULLSCREEN_CAMERA);
   }
 
   dispose(): void {
     this.cocMaterial.dispose();
+    this.cocBlurMaterial.dispose();
     this.blurMaterial.dispose();
-    this.cocTarget.dispose();
+    this.cocTargetRaw.dispose();
+    this.cocTargetH.dispose();
+    this.cocTargetV.dispose();
     // Geometry is module-shared; do not dispose here.
   }
 }
