@@ -1,9 +1,5 @@
 import * as THREE from "three";
 import { Pass } from "three/examples/jsm/postprocessing/Pass.js";
-// @ts-ignore - Three BokehShader2 has no .d.ts
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-import { BokehShader } from "three/examples/jsm/shaders/BokehShader2.js";
-const ThreeBokehShader2: any = BokehShader;
 import {
   getCameraLensPostProcessPass,
   type CameraEffectsPassOptions,
@@ -269,38 +265,40 @@ export function computeSignedCocPx(
 }
 
 /**
- * DoF pipeline (full-res Gaussian, post phase 2g).
+ * DoF gather (Vogel disk + IGN rotation + per-tap CoC weighting).
  *
- *   inputColor (RGBA16F linear) + inputDepth
- *     → 1. coc       (full-res, signed CoC in .r)
- *     → 2. blur      (full-res, depth-aware Gaussian gather:
- *                     out = sum(tap * gaussian(r) * coc-similarity) /
- *                           sum(weights), kernel radius scales with
- *                     |centre CoC|)
+ *   inputColor (RGBA16F linear) + inputDepth → blurred RGBA16F
  *
- * Why this shape:
- *   - The previous half-res setup → near tile-max → far gather → near
- *     gather → bilateral upsample → composite was correct in principle
- *     (UE5 / Frostbite layout) but produced visible half-res grid
- *     stepping along tilted silhouettes. Stepping comes from the
- *     half-res grid, not from kernel shape — bilateral upsample only
- *     hides it where the CoC similarity test rejects neighbours.
- *   - For SDR editor content (no real specular highlights, no HDR
- *     headroom) a depth-aware single-pass Gaussian is visually
- *     indistinguishable from the disc model and has no half-res grid
- *     to leak through. The CoC-similarity weighting inside the gather
- *     subsumes what the near/far split was doing — sharp foreground
- *     pixels can't pollute a defocused background pixel because their
- *     CoC differs by enough sigmas to push their weight to ~0.
- *   - Single full-res pass is cheaper than the six-pass half-res path
- *     once you account for the bilateral upsample's 8 extra full-res
- *     texture reads per pixel. 48 taps × full-res ≈ 100M reads at
- *     1080p; the old path was 48 × half + 8 × full ≈ 41M, so we trade
- *     ~2.4× reads for zero stepping and one less RT.
+ * Per pixel:
+ *   1. Linearise depth, compute signed CoC in pixels.
+ *   2. If |CoC| < 0.5 px, output sharp colour and exit early.
+ *   3. Otherwise gather along a Vogel disk (golden-angle spiral) of N taps.
+ *      Each tap is rotated by an Interleaved Gradient Noise (IGN) angle so
+ *      adjacent pixels see *similar but rotated* tap sets — this scatters
+ *      residual structure as low-frequency noise instead of bars or speckle.
+ *      Each tap is weighted by:
+ *        - a tile-style "spread" check (the tap can only contribute if its
+ *          own CoC reaches back to the centre) — this prevents sharp
+ *          foreground from smearing into the blurred background;
+ *        - a centre-CoC mask so far-blur taps don't pull near-blur into
+ *          themselves either.
+ *   4. Cross-fade to sharp on small CoC so the transition is smooth.
+ *
+ * Why not BokehShader2:
+ *   The ring/sample formulation places taps at fixed angles per ring across
+ *   the whole frame, producing visible polar bars in flat blurred regions.
+ *   Per-pixel decorrelated rotation removes the bars but adds high-variance
+ *   speckle. Vogel + IGN is the standard production fix (Frostbite, UE5):
+ *   the Vogel pattern is a near-uniform disc sample, and IGN rotation is a
+ *   spatially low-discrepancy hash so neighbours integrate over similar
+ *   energy and the output is smooth.
  */
-const DOF_COC_FRAGMENT = `
+const DOF_NUM_TAPS = 48;
+
+const DOF_BOKEH_FRAGMENT = `
 precision highp float;
 varying vec2 v_uv;
+uniform sampler2D u_color;
 uniform sampler2D u_depth;
 uniform vec2 u_resolution;
 uniform float u_sensorHeight;
@@ -312,14 +310,12 @@ uniform float u_maxBlurPx;
 uniform float u_depthNear;
 uniform float u_depthFar;
 
-float sampleSceneDepth(vec2 uv) {
-  // Three's depth attachment is non-linear NDC z in [0,1]. Linearise so
-  // the CoC math below matches the analytic export-path formula. With the
-  // fullscreen background plane in CompositionRenderer, every pixel has
-  // real geometry; the >=1.0 path here is purely defensive (a depth hole
-  // → treat as far plane so it joins the far-blur layer cleanly rather
-  // than the previous "in-focus sentinel" that produced hard boundaries).
-  float z01 = texture2D(u_depth, uv).r;
+// Vogel disk constants
+const float GOLDEN_ANGLE = 2.39996323; // PI * (3 - sqrt(5))
+const int   NUM_TAPS = ${DOF_NUM_TAPS};
+const float NUM_TAPS_F = float(NUM_TAPS);
+
+float linearizeDepth(float z01) {
   if (z01 >= 1.0) return u_depthFar;
   float ndc = z01 * 2.0 - 1.0;
   float denom = u_depthFar + u_depthNear - ndc * (u_depthFar - u_depthNear);
@@ -349,31 +345,102 @@ float signedCocPx(float sceneDepth) {
   return clamp(cocPx, -u_maxBlurPx, u_maxBlurPx);
 }
 
+// Interleaved Gradient Noise (Jorge Jimenez). Returns [0,1]. Spatially
+// low-discrepancy: the gradient between neighbour pixels is small, so
+// rotating a Vogel disk by IGN gives smooth output instead of speckle.
+float ign(vec2 px) {
+  return fract(52.9829189 * fract(dot(px, vec2(0.06711056, 0.00583715))));
+}
+
 void main() {
-  float sceneDepth = sampleSceneDepth(v_uv);
-  float coc = signedCocPx(sceneDepth);
-  // RGBA16F: write signed CoC straight to .r. Other channels unused
-  // (kept for possible future temporal stability / variance signal).
-  gl_FragColor = vec4(coc, 0.0, 0.0, 1.0);
+  vec2 sharpUv = v_uv;
+  vec3 sharpColor = texture2D(u_color, sharpUv).rgb;
+
+  float centerDepth = linearizeDepth(texture2D(u_depth, sharpUv).r);
+  float centerCoc = signedCocPx(centerDepth);
+  float centerAbs = abs(centerCoc);
+
+  if (centerAbs < 0.5) {
+    gl_FragColor = vec4(sharpColor, 1.0);
+    return;
+  }
+
+  vec2 invRes = 1.0 / u_resolution;
+  float radiusPx = centerAbs;
+
+  // Per-pixel rotation. IGN gives a smooth low-frequency hash; multiplying
+  // by 2π spreads it across the full circle. Adjacent pixels rotate by
+  // similar angles so the integration is consistent locally.
+  float angle = ign(gl_FragCoord.xy) * 6.2831853;
+  float ca = cos(angle);
+  float sa = sin(angle);
+
+  vec3 colorAccum = sharpColor;
+  // Centre weight matches what a tap of CoC=centerCoc would contribute
+  // (spread test passes by construction).
+  float weightAccum = 1.0;
+
+  for (int i = 0; i < NUM_TAPS; i++) {
+    float fi = float(i) + 0.5;
+    // Vogel disk: r = sqrt(i/N), θ = i * golden_angle. Square-root keeps
+    // the tap density uniform across the disc.
+    float r = sqrt(fi / NUM_TAPS_F);
+    float theta = fi * GOLDEN_ANGLE;
+    vec2 unit = vec2(cos(theta), sin(theta));
+    // Rotate the whole disc by the per-pixel angle.
+    vec2 rotated = vec2(unit.x * ca - unit.y * sa, unit.x * sa + unit.y * ca);
+    vec2 offsetPx = rotated * r * radiusPx;
+    vec2 sampleUv = sharpUv + offsetPx * invRes;
+
+    vec3 tapColor = texture2D(u_color, sampleUv).rgb;
+    float tapDepth = linearizeDepth(texture2D(u_depth, sampleUv).r);
+    float tapCoc = signedCocPx(tapDepth);
+    float tapAbs = abs(tapCoc);
+
+    // Distance from centre to tap, in pixels. The tap can contribute only
+    // if its own CoC is large enough to reach back to the centre — this
+    // is the "spread" rule that prevents sharp foreground from smearing
+    // into the blurred background. We allow a 0.5 px slop to avoid
+    // hard edges near the threshold.
+    float tapDistPx = r * radiusPx;
+    float spread = smoothstep(tapDistPx - 0.5, tapDistPx + 0.5, tapAbs);
+
+    // Foreground (negative CoC) is allowed to bleed forward over
+    // background. Background tap can only contribute to a background
+    // centre — i.e. tap is in front of centre, OR tap is also background
+    // with a CoC at least as large.
+    float sameSide = step(0.0, tapCoc * centerCoc);
+    float foregroundBleed = (1.0 - step(0.0, tapCoc));
+    float sideMask = max(sameSide, foregroundBleed);
+
+    float w = spread * sideMask;
+    colorAccum += tapColor * w;
+    weightAccum += w;
+  }
+
+  vec3 blurred = colorAccum / max(weightAccum, 1e-4);
+  // Cross-fade to sharp on small CoC so the in-focus → out-of-focus
+  // transition is smooth and there's no visible "blur kicks in" line.
+  float fade = smoothstep(0.5, 1.5, centerAbs);
+  gl_FragColor = vec4(mix(sharpColor, blurred, fade), 1.0);
 }
 `;
 
 /**
  * `CameraDofComposerPass` is the camera DoF effect as a Three.js
- * postprocessing `Pass`, backed by Three's native `BokehShader2`.
+ * postprocessing `Pass`. The fragment shader gathers along a Vogel disk
+ * with per-pixel IGN rotation; see `DOF_BOKEH_FRAGMENT` for the rationale.
  *
  * The depth input comes from `readBuffer.depthTexture` — Three's
  * EffectComposer attaches a `DepthTexture` to its read RT when the
  * RenderPass is configured to populate it (we configure that in
  * `CompositionRenderer`).
  */
-
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export class CameraDofComposerPass extends (Pass as any) {
   readonly id: string;
   readonly pass: CameraDofPass;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private readonly blurMaterial: any;
 
@@ -388,100 +455,28 @@ export class CameraDofComposerPass extends (Pass as any) {
     this.id = id;
     this.pass = pass;
     const u = pass.uniforms;
-
-    const bokehUniforms = THREE.UniformsUtils.clone(ThreeBokehShader2.uniforms);
-    const focalLengthMm =
-      u.sensorHeight / (2 * Math.tan((u.fov * Math.PI) / 360));
     const maxBlurPx = Math.max(u.maxBlurPx * u.blurLevel, 1);
-    const maxBlurRingScale = maxBlurPx / 4;
-    const fragmentShader = ThreeBokehShader2.fragmentShader
-      .replace(
-        `			if(blur < 0.05) {
-				//some optimization thingy
-				col = texture2D(tColor, vUv.xy).rgb;
-			} else {
-				col = texture2D(tColor, vUv.xy).rgb;
-				float s = 1.0;
-				int ringsamples;
 
-				for (int i = 1; i <= rings; i++) {
-					/*unboxstart*/
-					ringsamples = i * samples;
-
-					for (int j = 0 ; j < maxringsamples ; j++) {
-						if (j >= ringsamples) break;
-						s += gather(float(i), float(j), ringsamples, col, w, h, blur);
-					}
-					/*unboxend*/
-				}
-
-				col /= s; //divide by sample count
-			}`,
-        `			vec3 sharp = texture2D(tColor, vUv.xy).rgb;
-			col = sharp;
-			float s = 1.0;
-			int ringsamples;
-
-			for (int i = 1; i <= rings; i++) {
-				/*unboxstart*/
-				ringsamples = i * samples;
-
-				for (int j = 0 ; j < maxringsamples ; j++) {
-					if (j >= ringsamples) break;
-					s += gather(float(i), float(j), ringsamples, col, w, h, blur);
-				}
-				/*unboxend*/
-			}
-
-			col /= s; //divide by sample count
-			col = mix(sharp, col, smoothstep(0.0, 0.12, blur));`,
-      )
-      .replace(
-        `			float step = PI*2.0 / float(ringsamples);
-			float pw = cos(j*step)*i;
-			float ph = sin(j*step)*i;`,
-        `			float step = PI*2.0 / float(ringsamples);
-			float jitter = rand(vUv.xy) * PI * 2.0;
-			float pw = cos(j*step + jitter)*i;
-			float ph = sin(j*step + jitter)*i;`,
-      )
-      .replace("#include <tonemapping_fragment>", "")
-      .replace("#include <colorspace_fragment>", "");
     this.blurMaterial = new THREE.ShaderMaterial({
-      defines: {
-        ...ThreeBokehShader2.defines,
-        RINGS: 5,
-        SAMPLES: 5,
+      vertexShader: CAMERA_LENS_VERTEX,
+      fragmentShader: DOF_BOKEH_FRAGMENT,
+      uniforms: {
+        u_color: { value: null },
+        u_depth: { value: null },
+        u_resolution: { value: new THREE.Vector2(1, 1) },
+        u_sensorHeight: { value: u.sensorHeight },
+        u_fov: { value: u.fov },
+        u_focusDistance: { value: Math.max(u.focusDistance, 0.001) },
+        u_fNumber: { value: Math.max(u.fNumber, 0.1) },
+        u_blurLevel: { value: u.blurLevel },
+        u_maxBlurPx: { value: maxBlurPx },
+        u_depthNear: { value: u.near },
+        u_depthFar: { value: u.far },
       },
-      uniforms: bokehUniforms,
-      vertexShader: ThreeBokehShader2.vertexShader,
-      fragmentShader,
       depthTest: false,
       depthWrite: false,
       transparent: false,
     });
-    bokehUniforms.tColor.value = null;
-    bokehUniforms.tDepth.value = null;
-    bokehUniforms.textureWidth.value = 1;
-    bokehUniforms.textureHeight.value = 1;
-    bokehUniforms.focalDepth.value = Math.max(u.focusDistance, 0.001);
-    bokehUniforms.focalLength.value = focalLengthMm;
-    bokehUniforms.fstop.value = Math.max(u.fNumber, 0.1);
-    bokehUniforms.maxblur.value = maxBlurRingScale;
-    bokehUniforms.znear.value = u.near;
-    bokehUniforms.zfar.value = u.far;
-    bokehUniforms.shaderFocus.value = false;
-    bokehUniforms.manualdof.value = false;
-    bokehUniforms.showFocus.value = false;
-    bokehUniforms.vignetting.value = false;
-    bokehUniforms.depthblur.value = false;
-    bokehUniforms.noise.value = true;
-    bokehUniforms.dithering.value = 0.0001;
-    bokehUniforms.threshold.value = 1.0;
-    bokehUniforms.gain.value = 0.0;
-    bokehUniforms.bias.value = 0.5;
-    bokehUniforms.fringe.value = 0.0;
-    bokehUniforms.pentagon.value = false;
 
     this.blurScene = makeFullscreenScene(this.blurMaterial);
   }
@@ -492,8 +487,7 @@ export class CameraDofComposerPass extends (Pass as any) {
     if (w === this.fullWidth && h === this.fullHeight) return;
     this.fullWidth = w;
     this.fullHeight = h;
-    this.blurMaterial.uniforms.textureWidth.value = w;
-    this.blurMaterial.uniforms.textureHeight.value = h;
+    this.blurMaterial.uniforms.u_resolution.value.set(w, h);
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -502,7 +496,7 @@ export class CameraDofComposerPass extends (Pass as any) {
     if (!depthTexture) {
       renderer.setRenderTarget(this.renderToScreen ? null : writeBuffer);
       renderer.clear();
-      this.blurMaterial.uniforms.tColor.value = readBuffer.texture;
+      this.blurMaterial.uniforms.u_color.value = readBuffer.texture;
       return;
     }
     const w = readBuffer?.width ?? 1;
@@ -511,10 +505,9 @@ export class CameraDofComposerPass extends (Pass as any) {
       this.setSize(w, h);
     }
 
-    this.blurMaterial.uniforms.tColor.value = readBuffer.texture;
-    this.blurMaterial.uniforms.tDepth.value = depthTexture;
-    this.blurMaterial.uniforms.textureWidth.value = w;
-    this.blurMaterial.uniforms.textureHeight.value = h;
+    this.blurMaterial.uniforms.u_color.value = readBuffer.texture;
+    this.blurMaterial.uniforms.u_depth.value = depthTexture;
+    this.blurMaterial.uniforms.u_resolution.value.set(w, h);
     renderer.setRenderTarget(this.renderToScreen ? null : writeBuffer);
     renderer.clear();
     renderer.render(this.blurScene, FULLSCREEN_CAMERA);
