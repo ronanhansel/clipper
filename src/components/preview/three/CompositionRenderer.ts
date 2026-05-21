@@ -1,6 +1,5 @@
 import * as THREE from "three";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
-import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import {
   DEFAULT_CAMERA_OBJECT_PROPS,
   FRAME_HEIGHT,
@@ -11,6 +10,7 @@ import {
 import { applyCompositionCameraToThree } from "./compositionCameraThree";
 import { LayerNodeSync } from "./layers/LayerNodeSync";
 import { SharedCaptureCanvas } from "./SharedCaptureCanvas";
+import { ThinLensRenderPass } from "./ThinLensRenderPass";
 
 export interface CompositionRendererOptions {
   width: number;
@@ -149,7 +149,11 @@ export class CompositionRenderer {
       magFilter: THREE.LinearFilter,
     });
     this.composer = new EffectComposer(this.renderer, composerRT);
-    this.renderPass = new RenderPass(this.scene, this.camera);
+    this.renderPass = new ThinLensRenderPass(this.scene, this.camera, {
+      width: this.width,
+      height: this.height,
+      getCamera: () => this.compositionCamera,
+    });
     this.composer.addPass(this.renderPass);
 
     // The shared capture canvas is the DOM mount the host portals the

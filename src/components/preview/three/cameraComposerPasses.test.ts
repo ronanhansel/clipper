@@ -12,6 +12,10 @@ import {
   DEFAULT_CAMERA_OBJECT_PROPS,
   type CameraObjectProps,
 } from "../../../core/types";
+import {
+  getThinLensApertureRadiusWorld,
+  sampleThinLensDiskPair,
+} from "./ThinLensRenderPass";
 
 const frameSize = { width: 1920, height: 1080 };
 
@@ -120,32 +124,26 @@ describe("buildCameraDofComposerPass", () => {
     expect(buildCameraDofComposerPass(camera, frameSize)).toBeNull();
   });
 
-  it("emits a DoF composer pass when DoF is enabled with valid props", () => {
+  it("does not emit a DoF composer pass when DoF is enabled with valid props", () => {
     const camera = makeCamera((c) => {
       c.dof.enabled = true;
       c.dof.fNumber = 2.8;
       c.dof.focusDistance = 1500;
     });
-    const pass = buildCameraDofComposerPass(camera, frameSize);
-    expect(pass).not.toBeNull();
-    expect(pass?.id).toBe("camera:camera-dof-pass");
-    expect(pass).toBeInstanceOf(CameraDofComposerPass);
-    pass?.dispose();
+    expect(buildCameraDofComposerPass(camera, frameSize)).toBeNull();
   });
 
-  it("respects the idScope argument", () => {
+  it("ignores the idScope argument because thin-lens DoF is render-pass owned", () => {
     const camera = makeCamera((c) => {
       c.dof.enabled = true;
       c.dof.fNumber = 2.8;
     });
-    const pass = buildCameraDofComposerPass(camera, frameSize, "host-2");
-    expect(pass?.id).toBe("host-2:camera-dof-pass");
-    pass?.dispose();
+    expect(buildCameraDofComposerPass(camera, frameSize, "host-2")).toBeNull();
   });
 });
 
 describe("buildCameraComposerPasses with DoF", () => {
-  it("emits the DoF pass before the lens pass when both are enabled", () => {
+  it("emits only lens passes when DoF and lens are both enabled", () => {
     const camera = makeCamera((c) => {
       c.dof.enabled = true;
       c.dof.fNumber = 2.8;
@@ -153,21 +151,18 @@ describe("buildCameraComposerPasses with DoF", () => {
       c.lens.distortion.amount = 0.2;
     });
     const passes = buildCameraComposerPasses(camera, frameSize);
-    expect(passes.length).toBe(2);
-    expect(passes[0]).toBeInstanceOf(CameraDofComposerPass);
-    expect(passes[1]).toBeInstanceOf(LensComposerPass);
+    expect(passes.length).toBe(1);
+    expect(passes[0]).toBeInstanceOf(LensComposerPass);
     for (const p of passes) p.dispose();
   });
 
-  it("emits only the DoF pass when only DoF is enabled", () => {
+  it("emits no post-process pass when only DoF is enabled", () => {
     const camera = makeCamera((c) => {
       c.dof.enabled = true;
       c.dof.fNumber = 2.8;
     });
     const passes = buildCameraComposerPasses(camera, frameSize);
-    expect(passes.length).toBe(1);
-    expect(passes[0]).toBeInstanceOf(CameraDofComposerPass);
-    passes[0].dispose();
+    expect(passes).toEqual([]);
   });
 });
 
@@ -182,6 +177,62 @@ describe("CameraDofComposerPass", () => {
     const pass = new CameraDofComposerPass("camera:camera-dof-pass", dofPass!);
     expect(pass.id).toBe("camera:camera-dof-pass");
     pass.setSize(frameSize.width, frameSize.height);
+    pass.dispose();
+  });
+
+  it("uses a staged half-resolution near/far bokeh pipeline", () => {
+    const camera = makeCamera((c) => {
+      c.dof.enabled = true;
+      c.dof.fNumber = 0.5;
+      c.dof.focusDistance = 1500;
+    });
+    const dofPass = createCameraDofPass(camera, "camera");
+    expect(dofPass).not.toBeNull();
+    const pass = new CameraDofComposerPass("camera:camera-dof-pass", dofPass!);
+    const materials = pass as unknown as {
+      splitMaterial: { fragmentShader: string };
+      blurMaterial: { fragmentShader: string };
+      fillMaterial: { fragmentShader: string };
+      compositeMaterial: { fragmentShader: string };
+    };
+
+    expect(materials.splitMaterial.fragmentShader).toContain("u_fieldSign");
+    expect(materials.splitMaterial.fragmentShader).toContain("signedCocPx");
+    expect(materials.blurMaterial.fragmentShader).toContain("TAP_COUNT = 96");
+    expect(materials.blurMaterial.fragmentShader).toContain("u_color");
+    expect(materials.blurMaterial.fragmentShader).toContain("u_coc");
+    expect(materials.fillMaterial.fragmentShader).toContain("TAP_COUNT = 32");
+    expect(materials.fillMaterial.fragmentShader).toContain("tapWeight");
+    expect(materials.fillMaterial.fragmentShader).not.toContain("maxColor");
+    expect(materials.compositeMaterial.fragmentShader).toContain("u_near");
+    expect(materials.compositeMaterial.fragmentShader).toContain("u_far");
+    expect(materials.compositeMaterial.fragmentShader).toContain(
+      "blendFromCoc",
+    );
+    expect(materials.splitMaterial.fragmentShader).not.toContain("u_color");
+
+    pass.dispose();
+  });
+
+  it("does not multiply the max blur clamp by blur level", () => {
+    const camera = makeCamera((c) => {
+      c.dof.enabled = true;
+      c.dof.fNumber = 1.4;
+      c.dof.focusDistance = 1500;
+      c.dof.blurLevel = 3;
+      c.dof.maxBlurPx = 24;
+    });
+    const dofPass = createCameraDofPass(camera, "camera");
+    expect(dofPass).not.toBeNull();
+    const pass = new CameraDofComposerPass("camera:camera-dof-pass", dofPass!);
+    const material = pass as unknown as {
+      splitMaterial: { uniforms: { u_maxBlurPx: { value: number } } };
+      compositeMaterial: { uniforms: { u_maxBlurPx: { value: number } } };
+    };
+
+    expect(material.splitMaterial.uniforms.u_maxBlurPx.value).toBe(24);
+    expect(material.compositeMaterial.uniforms.u_maxBlurPx.value).toBe(24);
+
     pass.dispose();
   });
 });
@@ -246,5 +297,40 @@ describe("computeSignedCocPx", () => {
     const u = uniformsFor(camera);
     const huge = computeSignedCocPx(u, 30000, 1080);
     expect(Math.abs(huge)).toBeLessThanOrEqual(u.maxBlurPx + 1e-6);
+  });
+});
+
+describe("getThinLensApertureRadiusWorld", () => {
+  it("returns 0 when DoF is disabled", () => {
+    expect(getThinLensApertureRadiusWorld(makeCamera())).toBe(0);
+  });
+
+  it("produces a larger aperture radius for wider apertures", () => {
+    const narrow = makeCamera((c) => {
+      c.dof.enabled = true;
+      c.dof.fNumber = 8;
+      c.dof.focusDistance = 1158;
+    });
+    const wide = makeCamera((c) => {
+      c.dof.enabled = true;
+      c.dof.fNumber = 1;
+      c.dof.focusDistance = 1158;
+    });
+
+    expect(getThinLensApertureRadiusWorld(narrow)).toBeGreaterThan(0);
+    expect(getThinLensApertureRadiusWorld(wide)).toBeGreaterThan(
+      getThinLensApertureRadiusWorld(narrow),
+    );
+  });
+});
+
+describe("sampleThinLensDiskPair", () => {
+  it("emits opposite pairs so early progressive accumulation stays centered", () => {
+    for (let i = 0; i < 8; i += 2) {
+      const a = sampleThinLensDiskPair(i, 128);
+      const b = sampleThinLensDiskPair(i + 1, 128);
+      expect(Math.abs(a.x + b.x)).toBeLessThan(1e-6);
+      expect(Math.abs(a.y + b.y)).toBeLessThan(1e-6);
+    }
   });
 });
