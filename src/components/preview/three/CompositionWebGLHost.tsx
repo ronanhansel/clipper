@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { CompositionRenderer } from "./CompositionRenderer";
 import { buildCameraComposerPasses } from "./cameraComposerPasses";
@@ -7,6 +7,10 @@ import {
   findActiveCameraObject,
   getActiveCameraObjectProps,
 } from "../compositors/useCompositionCamera";
+import {
+  getCodeObjectComponentTick,
+  subscribeCodeObjectComponents,
+} from "../../../render-engine/codeObjectRuntime";
 import {
   FRAME_HEIGHT,
   FRAME_WIDTH,
@@ -75,6 +79,18 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
   const [portalTarget, setPortalTarget] = useState<HTMLDivElement | null>(null);
   const [captureCanvas, setCaptureCanvas] = useState<HTMLCanvasElement | null>(
     null,
+  );
+  // Code-object bundles compile asynchronously. While the bundle is
+  // still building, the sealed source DOM renders a "code: compiling…"
+  // placeholder; once compilation finishes the runtime bumps a tick
+  // that drives `CodeObjectFrame` to swap in the real component. The
+  // composition host needs to recapture + render at that point or the
+  // through-camera output stays frozen on the placeholder until the
+  // user scrubs or moves the camera.
+  const codeComponentTick = useSyncExternalStore(
+    subscribeCodeObjectComponents,
+    getCodeObjectComponentTick,
+    getCodeObjectComponentTick,
   );
 
   // The capture canvas + source subtree live in a fresh `<div>` mounted
@@ -230,7 +246,7 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
       r.render();
     });
     return () => cancelAnimationFrame(handle);
-  }, [part, localTime, captureCanvas]);
+  }, [part, localTime, captureCanvas, codeComponentTick]);
 
   // Live scrub from the inspector dispatches `clipper:camera-preview`
   // with the next CameraObjectProps. Apply imperatively so the
