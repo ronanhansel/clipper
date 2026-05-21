@@ -3,6 +3,7 @@ import * as THREE from "three";
 import { rectNodeFactory } from "./rectNode";
 import type { EvaluatedObjectState } from "../../../../../core/propertyRegistry";
 import type { FrameObject } from "../../../../../core/types";
+import { createDefaultFillValue } from "../../../../../core/fillValue";
 
 function makeState(
   overrides: Partial<EvaluatedObjectState> = {},
@@ -79,6 +80,69 @@ describe("rectNodeFactory", () => {
     const u = node.object3D.material.uniforms;
     expect(u.u_color.value.y).toBeCloseTo(1);
     expect(u.u_color.value.w).toBe(1);
+    node.dispose();
+  });
+
+  it("resolves a FillValue solid fill stored on backgroundColor", () => {
+    const node = rectNodeFactory.create({ id: "rect-1" } as FrameObject, {
+      compositeTexture: null,
+    });
+    const fill = {
+      ...createDefaultFillValue(),
+      mode: "solid" as const,
+      color: "#0000FF",
+      alpha: 100,
+    };
+    node.update(
+      makeState({
+        // The inspector stores FillValue objects on this field; the
+        // shared `FrameObject.style` record types it as string so the
+        // cast mirrors `propertyRegistry.setFillField`.
+        style: { backgroundColor: fill as unknown as string, opacity: 1 },
+      }),
+    );
+    const u = node.object3D.material.uniforms;
+    expect(u.u_color.value.x).toBeCloseTo(0);
+    expect(u.u_color.value.z).toBeCloseTo(1);
+    expect(u.u_color.value.w).toBe(1);
+    node.dispose();
+  });
+
+  it("multiplies FillValue.alpha into the channel alpha", () => {
+    const node = rectNodeFactory.create({ id: "rect-1" } as FrameObject, {
+      compositeTexture: null,
+    });
+    const fill = {
+      ...createDefaultFillValue(),
+      mode: "solid" as const,
+      color: "#FF0000",
+      alpha: 50,
+    };
+    node.update(
+      makeState({
+        style: { backgroundColor: fill as unknown as string, opacity: 1 },
+      }),
+    );
+    const u = node.object3D.material.uniforms;
+    expect(u.u_color.value.w).toBeCloseTo(0.5);
+    node.dispose();
+  });
+
+  it("renders gradient FillValues transparent (until phase 1.5)", () => {
+    const node = rectNodeFactory.create({ id: "rect-1" } as FrameObject, {
+      compositeTexture: null,
+    });
+    const fill = {
+      ...createDefaultFillValue(),
+      mode: "gradient" as const,
+    };
+    node.update(
+      makeState({
+        style: { backgroundColor: fill as unknown as string, opacity: 1 },
+      }),
+    );
+    const u = node.object3D.material.uniforms;
+    expect(u.u_color.value.w).toBe(0);
     node.dispose();
   });
 

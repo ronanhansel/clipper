@@ -1,9 +1,13 @@
 import * as THREE from "three";
 import type { EvaluatedObjectState } from "../../../../../core/propertyRegistry";
 import type { FrameObject } from "../../../../../core/types";
+import { isFillValue, type FillValue } from "../../../../../core/fillValue";
 import type { LayerNode, LayerNodeFactory } from "../layerNodeRegistry";
 import { resolveLayerTransform } from "../layerTransform";
-import { parseCssColorToLinearRgba } from "../color/parseCssColor";
+import {
+  parseCssColorToLinearRgba,
+  type LinearRgba,
+} from "../color/parseCssColor";
 
 const RECT_VERTEX = `
   varying vec2 vUv;
@@ -31,9 +35,9 @@ const RECT_FRAGMENT = `
 
   void main() {
     vec2 px = (vUv - 0.5) * u_size;          // pixel coords centred at 0
-    vec2 half = u_size * 0.5;
-    float r = clamp(u_radius, 0.0, min(half.x, half.y));
-    float d = roundedBoxSdf(px, half, r);
+    vec2 halfSize = u_size * 0.5;
+    float r = clamp(u_radius, 0.0, min(halfSize.x, halfSize.y));
+    float d = roundedBoxSdf(px, halfSize, r);
     // 1 px AA along the edge.
     float coverage = clamp(0.5 - d, 0.0, 1.0);
     float a = u_color.a * u_opacity * coverage;
@@ -95,11 +99,14 @@ class RectNode implements LayerNode {
     const u = this.material.uniforms;
     u.u_size.value.set(t.width, t.height);
 
-    // Background colour. v1 supports CSS colour strings only; gradient
-    // FillValues are flattened to a transparent shader output (the
-    // background appears empty) until phase 1.5 lands gradient sampling.
-    const bg = state.style?.backgroundColor ?? state.style?.color;
-    const rgba = typeof bg === "string" ? parseCssColorToLinearRgba(bg) : null;
+    // Background colour. The inspector stores fills as a `FillValue`
+    // object on `style.backgroundColor` (cast to string in the shared
+    // `FrameObject.style` map — see `propertyRegistry.getFillValue`).
+    // We must accept both forms: a real CSS string (legacy fixtures /
+    // raw inputs) and a FillValue object (everything authored through
+    // the inspector). Solid fills resolve to linear RGBA; gradients
+    // render transparent for now (phase 1.5 lands gradient sampling).
+    const rgba = resolveBackgroundLinearRgba(state);
     if (rgba) {
       u.u_color.value.set(rgba.r, rgba.g, rgba.b, rgba.a);
     } else {
@@ -128,6 +135,56 @@ function clamp01(v: number): number {
   if (v < 0) return 0;
   if (v > 1) return 1;
   return v;
+}
+
+/**
+ * Resolve a layer's evaluated style into a linear-light RGBA colour for
+ * the rect shader. Handles three cases in order of priority:
+ *
+ *   1. `style.backgroundColor` is a `FillValue` object (the inspector
+ *      stores fills this way; it's cast to `string` to fit the shared
+ *      `style` record). Solid mode → parse the hex + alpha; gradient
+ *      mode → return null so the shader renders transparent.
+ *   2. `style.backgroundColor` is a plain CSS string (legacy fixtures,
+ *      raw JSON imports). Parse via the shared CSS colour parser.
+ *   3. Fall back to `style.color` (also a CSS string) when there's no
+ *      backgroundColor at all — matches the existing v0.2.20 behaviour
+ *      that lets a `color` value act as a plain rect tint.
+ *
+ * Returns null when the colour is unresolvable, an unsupported gradient,
+ * or fully transparent — caller writes alpha 0 and the alpha-cutoff
+ * fragment discards.
+ */
+function resolveBackgroundLinearRgba(
+  state: EvaluatedObjectState,
+): LinearRgba | null {
+  const bg = state.style?.backgroundColor;
+  if (isFillValue(bg as unknown)) {
+    return resolveFillValueLinearRgba(bg as unknown as FillValue);
+  }
+  if (typeof bg === "string") {
+    const parsed = parseCssColorToLinearRgba(bg);
+    if (parsed) return parsed;
+  }
+  const color = state.style?.color;
+  if (typeof color === "string") {
+    const parsed = parseCssColorToLinearRgba(color);
+    if (parsed) return parsed;
+  }
+  return null;
+}
+
+function resolveFillValueLinearRgba(fill: FillValue): LinearRgba | null {
+  // v1: only solid fills produce a colour. Gradients return null and the
+  // rect renders transparent until the gradient shader lands.
+  if (fill.mode !== "solid") return null;
+  const parsed = parseCssColorToLinearRgba(fill.color);
+  if (!parsed) return null;
+  // FillValue.alpha is 0–100 (per-channel multiplier on top of any hex
+  // alpha). Combine with the parsed alpha so e.g. an `#FF000080` hex
+  // with `alpha: 50` renders at 0.5 × 0.5 = 0.25.
+  const alpha = clamp01(fill.alpha / 100) * parsed.a;
+  return { r: parsed.r, g: parsed.g, b: parsed.b, a: alpha };
 }
 
 export const rectNodeFactory: LayerNodeFactory = {

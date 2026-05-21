@@ -17,6 +17,7 @@ import {
   type CameraPathData,
   type CameraPathHandle,
 } from "./cameraPathOverlay";
+import { FrustumOutline } from "./FrustumOutline";
 
 const DEG_TO_RAD = Math.PI / 180;
 const RAD_TO_DEG = 180 / Math.PI;
@@ -188,8 +189,12 @@ export class ThreeAuthorScene {
     );
     this.scene.add(this.throughCamera);
 
-    // Wireframe frustum mirroring throughCamera.
-    this.cameraHelper = new THREE.CameraHelper(this.throughCamera);
+    // Wireframe frustum mirroring throughCamera. Custom outline that
+    // draws only the near + far rectangles and the 4 edges connecting
+    // their corners — no cone lines from origin (which would cross
+    // through any layer that sits inside the frustum), no cross + on
+    // each plane, no up triangle.
+    this.cameraHelper = new FrustumOutline(this.throughCamera);
     this.cameraHelper.visible = false;
     this.scene.add(this.cameraHelper);
 
