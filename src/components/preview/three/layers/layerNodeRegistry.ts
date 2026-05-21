@@ -1,5 +1,6 @@
 import type { EvaluatedObjectState } from "../../../../core/propertyRegistry";
 import type { FrameObject, FrameObjectType } from "../../../../core/types";
+import type { SharedCaptureCanvas } from "../SharedCaptureCanvas";
 
 /**
  * One native Three.js node per visible FrameObject.
@@ -38,19 +39,15 @@ export interface LayerNode {
  *   capture nodes use this to grab just their own pixels rather than
  *   sampling a shared 2D-flattened composite — the fix that ends the
  *   v0.2.20 cross-layer ghosting.
- * - `sharedCaptureCanvas`: the `drawElementImage`-prepared canvas owned
- *   by `CompositionRenderer`. Browsers require the captured element to
- *   be a descendant of THIS canvas, so all per-element captures route
- *   their `drawElementImage()` call through it, then `drawImage` the
- *   pixels into the node's own offscreen canvas.
- * - `compositeTexture`: legacy field kept until the last shared-
- *   composite consumer is gone. New nodes should ignore it.
+ * - `sharedCapture`: the renderer-owned `SharedCaptureCanvas`. Browsers
+ *   require the captured element to be a descendant of its `canvas`, so
+ *   per-element capture nodes route `drawElementImage` through
+ *   `sharedCapture.context` and then blit pixels out of `sharedCapture
+ *   .canvas` into their own private canvas.
  */
 export interface LayerNodeContext {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  compositeTexture: any;
-  sourceRoot?: () => Element | null;
-  sharedCaptureCanvas?: HTMLCanvasElement | null;
+  sourceRoot: () => Element | null;
+  sharedCapture: SharedCaptureCanvas;
 }
 
 /**

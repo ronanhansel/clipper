@@ -5,6 +5,7 @@ import {
   clearLayerNodeRegistry,
   registerLayerNodeFactory,
   type LayerNode,
+  type LayerNodeContext,
   type LayerNodeFactory,
 } from "./layerNodeRegistry";
 import {
@@ -74,6 +75,13 @@ function makeTrackingFactory(
   };
 }
 
+function makeContext(): LayerNodeContext {
+  return {
+    sharedCapture: undefined as unknown as LayerNodeContext["sharedCapture"],
+    sourceRoot: () => null,
+  };
+}
+
 describe("LayerNodeSync", () => {
   beforeEach(() => {
     clearLayerNodeRegistry();
@@ -81,14 +89,14 @@ describe("LayerNodeSync", () => {
   });
 
   it("constructs with an empty Group", () => {
-    const sync = new LayerNodeSync({ compositeTexture: null });
+    const sync = new LayerNodeSync(makeContext());
     expect(sync.group).toBeInstanceOf(THREE.Group);
     expect(sync.group.children).toHaveLength(0);
     sync.dispose();
   });
 
   it("creates a node per visible non-camera FrameObject", () => {
-    const sync = new LayerNodeSync({ compositeTexture: null });
+    const sync = new LayerNodeSync(makeContext());
     const part = makePart([
       makeObject("a", "rect"),
       makeObject("b", "text"),
@@ -113,7 +121,7 @@ describe("LayerNodeSync", () => {
   });
 
   it("calls update on each node every sync", () => {
-    const sync = new LayerNodeSync({ compositeTexture: null });
+    const sync = new LayerNodeSync(makeContext());
     const part = makePart([makeObject("a", "rect")]);
     sync.sync(part, 0);
     sync.sync(part, 0.5);
@@ -127,7 +135,7 @@ describe("LayerNodeSync", () => {
   });
 
   it("removes nodes for objects no longer present", () => {
-    const sync = new LayerNodeSync({ compositeTexture: null });
+    const sync = new LayerNodeSync(makeContext());
     sync.sync(makePart([makeObject("a", "rect"), makeObject("b", "rect")]), 0);
     expect(sync.group.children).toHaveLength(2);
     sync.sync(makePart([makeObject("a", "rect")]), 0);
@@ -137,7 +145,7 @@ describe("LayerNodeSync", () => {
   });
 
   it("rebuilds a node when its FrameObject type changes", () => {
-    const sync = new LayerNodeSync({ compositeTexture: null });
+    const sync = new LayerNodeSync(makeContext());
     sync.sync(makePart([makeObject("a", "rect")]), 0);
     const firstObject3D = sync.group.children[0];
     sync.sync(makePart([makeObject("a", "text")]), 0);
@@ -148,7 +156,7 @@ describe("LayerNodeSync", () => {
   });
 
   it("dispose clears the group", () => {
-    const sync = new LayerNodeSync({ compositeTexture: null });
+    const sync = new LayerNodeSync(makeContext());
     sync.sync(makePart([makeObject("a", "rect")]), 0);
     expect(sync.group.children).toHaveLength(1);
     sync.dispose();

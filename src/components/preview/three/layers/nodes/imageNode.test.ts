@@ -1,0 +1,283 @@
+import { describe, expect, it, beforeEach, beforeAll, afterAll } from "vitest";
+import * as THREE from "three";
+import {
+  acquireImageTexture,
+  clearImageTextureCacheForTests,
+  imageNodeFactory,
+  releaseImageTexture,
+} from "./imageNode";
+import type { EvaluatedObjectState } from "../../../../../core/propertyRegistry";
+import type { FrameObject } from "../../../../../core/types";
+import type { LayerNodeContext } from "../layerNodeRegistry";
+
+// The image cache uses `new Image()` and sets `texture.image.naturalWidth`.
+// Vitest runs without jsdom in this project, so we install a minimal
+// `Image` shim that the cache can construct and the `ImageNode` can
+// inspect for intrinsic size during object-fit math.
+
+class FakeImage {
+  src = "";
+  crossOrigin: string | null = null;
+  naturalWidth = 0;
+  naturalHeight = 0;
+  onload: (() => void) | null = null;
+}
+
+let originalImage: unknown;
+beforeAll(() => {
+  originalImage = (globalThis as { Image?: unknown }).Image;
+  (globalThis as { Image?: unknown }).Image = FakeImage;
+});
+afterAll(() => {
+  (globalThis as { Image?: unknown }).Image = originalImage;
+});
+
+beforeEach(() => {
+  clearImageTextureCacheForTests();
+});
+
+function makeState(
+  overrides: Partial<EvaluatedObjectState> = {},
+): EvaluatedObjectState {
+  return {
+    id: "image-1",
+    name: "image-1",
+    type: "image",
+    selector: "[data-id='image-1']",
+    bounds: { x: 0, y: 0, width: 200, height: 100 },
+    style: { src: "https://example.test/a.png", opacity: 1 },
+    transform: {},
+    filter: {},
+    shadow: {},
+    stroke: {},
+    props: {},
+    ...overrides,
+  } as unknown as EvaluatedObjectState;
+}
+
+function makeContext(): LayerNodeContext {
+  return {
+    sharedCapture: undefined as unknown as LayerNodeContext["sharedCapture"],
+    sourceRoot: () => null,
+  };
+}
+
+describe("imageNodeFactory", () => {
+  it("registers under kind 'image'", () => {
+    expect(imageNodeFactory.kind).toBe("image");
+  });
+
+  it("creates a Mesh with PlaneGeometry + ShaderMaterial", () => {
+    const node = imageNodeFactory.create(
+      { id: "image-1" } as FrameObject,
+      makeContext(),
+    );
+    expect(node.object3D).toBeInstanceOf(THREE.Mesh);
+    expect(node.object3D.geometry).toBeInstanceOf(THREE.PlaneGeometry);
+    expect(node.object3D.material).toBeInstanceOf(THREE.ShaderMaterial);
+    node.dispose();
+  });
+
+  it("dispose releases geometry, material, and the placeholder texture", () => {
+    const node = imageNodeFactory.create(
+      { id: "image-1" } as FrameObject,
+      makeContext(),
+    );
+    expect(() => node.dispose()).not.toThrow();
+  });
+
+  it("update resizes the geometry on bounds change", () => {
+    const node = imageNodeFactory.create(
+      { id: "image-1" } as FrameObject,
+      makeContext(),
+    );
+    node.update(makeState({ bounds: { x: 0, y: 0, width: 80, height: 40 } }));
+    expect(node.object3D.geometry.parameters.width).toBe(80);
+    expect(node.object3D.geometry.parameters.height).toBe(40);
+    node.update(makeState({ bounds: { x: 0, y: 0, width: 320, height: 160 } }));
+    expect(node.object3D.geometry.parameters.width).toBe(320);
+    expect(node.object3D.geometry.parameters.height).toBe(160);
+    node.dispose();
+  });
+
+  it("acquires a cached texture on first src and swaps when src changes", () => {
+    const node = imageNodeFactory.create(
+      { id: "image-1" } as FrameObject,
+      makeContext(),
+    );
+    node.update(makeState({ style: { src: "a.png", opacity: 1 } }));
+    const firstTexture = node.object3D.material.uniforms.u_image.value;
+    expect(firstTexture).toBeInstanceOf(THREE.Texture);
+
+    node.update(makeState({ style: { src: "b.png", opacity: 1 } }));
+    const secondTexture = node.object3D.material.uniforms.u_image.value;
+    expect(secondTexture).toBeInstanceOf(THREE.Texture);
+    expect(secondTexture).not.toBe(firstTexture);
+    node.dispose();
+  });
+
+  it("two nodes sharing src reuse one texture; refcount keeps it alive until last release", () => {
+    const a = imageNodeFactory.create(
+      { id: "image-a" } as FrameObject,
+      makeContext(),
+    );
+    const b = imageNodeFactory.create(
+      { id: "image-b" } as FrameObject,
+      makeContext(),
+    );
+    a.update(makeState({ style: { src: "shared.png", opacity: 1 } }));
+    b.update(makeState({ style: { src: "shared.png", opacity: 1 } }));
+    const aTex = a.object3D.material.uniforms.u_image.value;
+    const bTex = b.object3D.material.uniforms.u_image.value;
+    expect(aTex).toBe(bTex);
+
+    const sharedTexture = aTex;
+    let disposed = false;
+    const originalDispose = sharedTexture.dispose.bind(sharedTexture);
+    sharedTexture.dispose = () => {
+      disposed = true;
+      originalDispose();
+    };
+
+    a.dispose();
+    expect(disposed).toBe(false);
+    b.dispose();
+    expect(disposed).toBe(true);
+  });
+
+  it("acquireImageTexture / releaseImageTexture refcount behaves as expected", () => {
+    const t1 = acquireImageTexture("ref.png");
+    const t2 = acquireImageTexture("ref.png");
+    expect(t1).toBe(t2);
+    let disposed = false;
+    const originalDispose = t1.dispose.bind(t1);
+    t1.dispose = () => {
+      disposed = true;
+      originalDispose();
+    };
+    releaseImageTexture("ref.png");
+    expect(disposed).toBe(false);
+    releaseImageTexture("ref.png");
+    expect(disposed).toBe(true);
+  });
+
+  it("style.borderRadius lands in u_radius and style.opacity in u_opacity", () => {
+    const node = imageNodeFactory.create(
+      { id: "image-1" } as FrameObject,
+      makeContext(),
+    );
+    node.update(
+      makeState({
+        style: { src: "a.png", opacity: 0.4, borderRadius: 16 },
+      }),
+    );
+    const u = node.object3D.material.uniforms;
+    expect(u.u_radius.value).toBe(16);
+    expect(u.u_opacity.value).toBeCloseTo(0.4);
+    node.dispose();
+  });
+
+  it("object-fit cover crops UVs to fill a square plane with a wide image", () => {
+    const node = imageNodeFactory.create(
+      { id: "image-1" } as FrameObject,
+      makeContext(),
+    );
+    node.update(
+      makeState({
+        bounds: { x: 0, y: 0, width: 100, height: 100 },
+        style: { src: "wide.png", objectFit: "cover" },
+      }),
+    );
+    const tex = node.object3D.material.uniforms.u_image.value as {
+      image: FakeImage;
+    };
+    tex.image.naturalWidth = 200;
+    tex.image.naturalHeight = 100;
+    node.update(
+      makeState({
+        bounds: { x: 0, y: 0, width: 100, height: 100 },
+        style: { src: "wide.png", objectFit: "cover" },
+      }),
+    );
+    const u = node.object3D.material.uniforms;
+    // image AR (2) > plane AR (1) — cover crops X, full Y.
+    expect(u.u_uvSize.value.x).toBeCloseTo(0.5);
+    expect(u.u_uvSize.value.y).toBeCloseTo(1);
+    expect(u.u_uvOrigin.value.x).toBeCloseTo(0.25);
+    expect(u.u_uvOrigin.value.y).toBeCloseTo(0);
+    node.dispose();
+  });
+
+  it("object-fit contain letterboxes UVs for a wide image on a square plane", () => {
+    const node = imageNodeFactory.create(
+      { id: "image-1" } as FrameObject,
+      makeContext(),
+    );
+    node.update(
+      makeState({
+        bounds: { x: 0, y: 0, width: 100, height: 100 },
+        style: { src: "wide.png", objectFit: "contain" },
+      }),
+    );
+    const tex = node.object3D.material.uniforms.u_image.value as {
+      image: FakeImage;
+    };
+    tex.image.naturalWidth = 200;
+    tex.image.naturalHeight = 100;
+    node.update(
+      makeState({
+        bounds: { x: 0, y: 0, width: 100, height: 100 },
+        style: { src: "wide.png", objectFit: "contain" },
+      }),
+    );
+    const u = node.object3D.material.uniforms;
+    // image AR (2) > plane AR (1) — contain stretches Y past [0,1] so the
+    // shader's inside test discards the empty bands.
+    expect(u.u_uvSize.value.x).toBeCloseTo(1);
+    expect(u.u_uvSize.value.y).toBeCloseTo(2);
+    expect(u.u_uvOrigin.value.x).toBeCloseTo(0);
+    expect(u.u_uvOrigin.value.y).toBeCloseTo(-0.5);
+    node.dispose();
+  });
+
+  it("object-fit fill uses full UVs regardless of image aspect", () => {
+    const node = imageNodeFactory.create(
+      { id: "image-1" } as FrameObject,
+      makeContext(),
+    );
+    node.update(
+      makeState({
+        bounds: { x: 0, y: 0, width: 100, height: 100 },
+        style: { src: "any.png", objectFit: "fill" },
+      }),
+    );
+    const tex = node.object3D.material.uniforms.u_image.value as {
+      image: FakeImage;
+    };
+    tex.image.naturalWidth = 400;
+    tex.image.naturalHeight = 50;
+    node.update(
+      makeState({
+        bounds: { x: 0, y: 0, width: 100, height: 100 },
+        style: { src: "any.png", objectFit: "fill" },
+      }),
+    );
+    const u = node.object3D.material.uniforms;
+    expect(u.u_uvSize.value.x).toBeCloseTo(1);
+    expect(u.u_uvSize.value.y).toBeCloseTo(1);
+    expect(u.u_uvOrigin.value.x).toBeCloseTo(0);
+    expect(u.u_uvOrigin.value.y).toBeCloseTo(0);
+    node.dispose();
+  });
+
+  it("uses the placeholder texture when src is missing", () => {
+    const node = imageNodeFactory.create(
+      { id: "image-1" } as FrameObject,
+      makeContext(),
+    );
+    node.update(makeState({ style: { opacity: 1 } }));
+    const u = node.object3D.material.uniforms;
+    expect(u.u_image.value).toBeInstanceOf(THREE.DataTexture);
+    node.dispose();
+  });
+});

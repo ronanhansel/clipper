@@ -9,16 +9,20 @@ import {
 } from "./layerNodeRegistry";
 import { rectNodeFactory } from "./nodes/rectNode";
 import { nullNodeFactory } from "./nodes/nullNode";
-import { createCaptureFallbackFactory } from "./nodes/captureFallbackNode";
+import { imageNodeFactory } from "./nodes/imageNode";
+import { textNodeFactory } from "./nodes/textNode";
+import { svgNodeFactory } from "./nodes/svgNode";
+import { createPerElementCaptureFactory } from "./nodes/perElementCaptureNode";
 
 /**
  * Register the default per-type Three node factories. Idempotent —
  * calling more than once replaces existing entries with the same kind.
  *
- * Phase 1: rect + null are native; everything else (text, image, svg,
- * html, template, code, pattern2d, custom-renderer) uses the shared-
- * composite UV-crop fallback. Phases 2/3/4 swap individual entries for
- * native implementations.
+ * Native: rect, null, image, text, svg.
+ * Per-element DOM capture: html, template, code, pattern2d,
+ * custom-renderer (and any unknown future type via the default slot).
+ * Each per-element capture node owns its own private canvas + texture
+ * so overlapping 3D layers no longer share a 2D-flattened composite.
  */
 let installed = false;
 export function installDefaultLayerNodeFactories(): void {
@@ -26,17 +30,16 @@ export function installDefaultLayerNodeFactories(): void {
   installed = true;
   registerLayerNodeFactory(rectNodeFactory);
   registerLayerNodeFactory(nullNodeFactory);
+  registerLayerNodeFactory(imageNodeFactory);
+  registerLayerNodeFactory(textNodeFactory);
+  registerLayerNodeFactory(svgNodeFactory);
   for (const kind of CAPTURE_FALLBACK_KINDS) {
-    registerLayerNodeFactory(createCaptureFallbackFactory(kind));
+    registerLayerNodeFactory(createPerElementCaptureFactory(kind));
   }
-  // Default fallback for any unknown future type — also UV-crop.
-  registerLayerNodeFactory(createCaptureFallbackFactory("default"));
+  registerLayerNodeFactory(createPerElementCaptureFactory("default"));
 }
 
 const CAPTURE_FALLBACK_KINDS: FrameObjectType[] = [
-  "text",
-  "image",
-  "svg",
   "html",
   "template",
   "custom-renderer",
@@ -52,8 +55,7 @@ type Entry = {
 
 /**
  * Reconciles the composition's evaluated objects against a Three.js
- * scene `Group` of native per-type nodes. Replaces the v0.2.20
- * `LayerCardSync` shared-composite UV-crop pattern.
+ * scene `Group` of native per-type nodes.
  */
 export class LayerNodeSync {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

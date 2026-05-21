@@ -265,27 +265,41 @@ export function computeSignedCocPx(
 }
 
 /**
- * DoF gather (Vogel disk + IGN rotation + per-tap CoC weighting).
+ * DoF gather (Vogel disk + IGN rotation, pure disc convolution).
  *
- *   inputColor (RGBA16F linear) + inputDepth → blurred RGBA16F
+ *   inputColor (RGBA16F linear, mipmapped) + inputDepth → blurred RGBA16F
  *
  * Per pixel:
  *   1. Linearise depth, compute signed CoC in pixels.
  *   2. If |CoC| < 0.5 px, output sharp colour and exit early.
- *   3. Otherwise gather along a Vogel disk (golden-angle spiral) of N taps.
- *      Each tap is rotated by an Interleaved Gradient Noise (IGN) angle so
- *      adjacent pixels see *similar but rotated* tap sets — this scatters
- *      residual structure as low-frequency noise instead of bars or speckle.
- *      Each tap is weighted by:
- *        - a tile-style "spread" check (the tap can only contribute if its
- *          own CoC reaches back to the centre) — this prevents sharp
- *          foreground from smearing into the blurred background;
- *        - a centre-CoC mask so far-blur taps don't pull near-blur into
- *          themselves either.
- *   4. Cross-fade to sharp on small CoC so the transition is smooth.
+ *   3. Otherwise gather along a Vogel disk (golden-angle spiral) of N taps
+ *      uniformly weighted. Each tap is rotated by an Interleaved Gradient
+ *      Noise (IGN) angle so adjacent pixels see *similar but rotated* tap
+ *      sets — this scatters residual structure as low-frequency noise
+ *      instead of bars or speckle. Each tap reads at LOD =
+ *      log2(radiusPx / sqrt(N)) so its sample is an area integral over
+ *      its kernel cell (the cells tile the disc); without this 64 point
+ *      samples on a smoothly-shaded interior produce per-pixel speckle,
+ *      not blur.
+ *   4. Cross-fade to sharp on small CoC so the in-focus → out-of-focus
+ *      transition is smooth.
  *
- * Why not BokehShader2:
- *   The ring/sample formulation places taps at fixed angles per ring across
+ * Why pure uniform weights:
+ *   Earlier iterations weighted each tap by per-tap CoC ('spread' rule)
+ *   and a side-mask (foreground/background separation). For coplanar
+ *   2D-style compositions (text on a rect at the same z) the conditional
+ *   weights collapse into edge-detect artefacts: bright glyph bodies
+ *   stay legible because in-stroke taps weight differently from off-
+ *   stroke taps and the disc's symmetric integral is broken. A pure
+ *   uniform disc convolution matches what a real lens does on flat
+ *   subjects — every point on the disc contributes equally — and
+ *   reproduces the reference look ("strokes fully dissolve into smooth
+ *   grey"). Depth-aware foreground bleed handling can return as a
+ *   second pass when real 3D scenes need it; today's compositions are
+ *   coplanar enough that the simpler gather wins.
+ *
+ * Why Vogel + IGN over BokehShader2:
+ *   Ring/sample formulations place taps at fixed angles per ring across
  *   the whole frame, producing visible polar bars in flat blurred regions.
  *   Per-pixel decorrelated rotation removes the bars but adds high-variance
  *   speckle. Vogel + IGN is the standard production fix (Frostbite, UE5):
@@ -293,11 +307,20 @@ export function computeSignedCocPx(
  *   spatially low-discrepancy hash so neighbours integrate over similar
  *   energy and the output is smooth.
  */
-const DOF_NUM_TAPS = 48;
+const DOF_NUM_TAPS = 64;
+
+const DOF_BOKEH_VERTEX = `
+out vec2 v_uv;
+void main() {
+  v_uv = uv;
+  gl_Position = vec4(position.xy, 0.0, 1.0);
+}
+`;
 
 const DOF_BOKEH_FRAGMENT = `
 precision highp float;
-varying vec2 v_uv;
+in vec2 v_uv;
+out vec4 fragColor;
 uniform sampler2D u_color;
 uniform sampler2D u_depth;
 uniform vec2 u_resolution;
@@ -354,14 +377,17 @@ float ign(vec2 px) {
 
 void main() {
   vec2 sharpUv = v_uv;
-  vec3 sharpColor = texture2D(u_color, sharpUv).rgb;
+  // Composer RT is premultiplied; integrate premultiplied colour and
+  // alpha together so void taps (a=0) don't dim glyph edges into the
+  // background. Sharp centre uses LOD 0 so in-focus pixels stay crisp.
+  vec4 sharp = textureLod(u_color, sharpUv, 0.0);
 
-  float centerDepth = linearizeDepth(texture2D(u_depth, sharpUv).r);
+  float centerDepth = linearizeDepth(texture(u_depth, sharpUv).r);
   float centerCoc = signedCocPx(centerDepth);
   float centerAbs = abs(centerCoc);
 
   if (centerAbs < 0.5) {
-    gl_FragColor = vec4(sharpColor, 1.0);
+    fragColor = sharp;
     return;
   }
 
@@ -375,10 +401,20 @@ void main() {
   float ca = cos(angle);
   float sa = sin(angle);
 
-  vec3 colorAccum = sharpColor;
-  // Centre weight matches what a tap of CoC=centerCoc would contribute
-  // (spread test passes by construction).
-  float weightAccum = 1.0;
+  // Per-tap mip LOD. With NUM_TAPS over a disc of radius 'radiusPx', the
+  // average centre-to-centre tap spacing is roughly 'radiusPx /
+  // sqrt(NUM_TAPS)' pixels. Sampling at 'LOD = log2(spacing)' makes each
+  // tap an area integral exactly tiling its kernel cell, which is the
+  // analytic answer for a uniformly-sampled disc convolution. Three's
+  // composer RT is mipmapped (CompositionRenderer's RT uses
+  // LinearMipmapLinearFilter); the chain is regenerated on each
+  // setRenderTarget transition so by the time this pass runs the LODs
+  // are valid.
+  float tapSpacingPx = max(radiusPx / sqrt(NUM_TAPS_F), 1.0);
+  float tapLod = log2(tapSpacingPx);
+
+  vec4 colorAccum = vec4(0.0);
+  float weightAccum = 0.0;
 
   for (int i = 0; i < NUM_TAPS; i++) {
     float fi = float(i) + 0.5;
@@ -392,37 +428,16 @@ void main() {
     vec2 offsetPx = rotated * r * radiusPx;
     vec2 sampleUv = sharpUv + offsetPx * invRes;
 
-    vec3 tapColor = texture2D(u_color, sampleUv).rgb;
-    float tapDepth = linearizeDepth(texture2D(u_depth, sampleUv).r);
-    float tapCoc = signedCocPx(tapDepth);
-    float tapAbs = abs(tapCoc);
-
-    // Distance from centre to tap, in pixels. The tap can contribute only
-    // if its own CoC is large enough to reach back to the centre — this
-    // is the "spread" rule that prevents sharp foreground from smearing
-    // into the blurred background. We allow a 0.5 px slop to avoid
-    // hard edges near the threshold.
-    float tapDistPx = r * radiusPx;
-    float spread = smoothstep(tapDistPx - 0.5, tapDistPx + 0.5, tapAbs);
-
-    // Foreground (negative CoC) is allowed to bleed forward over
-    // background. Background tap can only contribute to a background
-    // centre — i.e. tap is in front of centre, OR tap is also background
-    // with a CoC at least as large.
-    float sameSide = step(0.0, tapCoc * centerCoc);
-    float foregroundBleed = (1.0 - step(0.0, tapCoc));
-    float sideMask = max(sameSide, foregroundBleed);
-
-    float w = spread * sideMask;
-    colorAccum += tapColor * w;
-    weightAccum += w;
+    vec4 tap = textureLod(u_color, sampleUv, tapLod);
+    colorAccum += tap;
+    weightAccum += 1.0;
   }
 
-  vec3 blurred = colorAccum / max(weightAccum, 1e-4);
+  vec4 blurred = colorAccum / max(weightAccum, 1e-4);
   // Cross-fade to sharp on small CoC so the in-focus → out-of-focus
   // transition is smooth and there's no visible "blur kicks in" line.
   float fade = smoothstep(0.5, 1.5, centerAbs);
-  gl_FragColor = vec4(mix(sharpColor, blurred, fade), 1.0);
+  fragColor = mix(sharp, blurred, fade);
 }
 `;
 
@@ -458,7 +473,8 @@ export class CameraDofComposerPass extends (Pass as any) {
     const maxBlurPx = Math.max(u.maxBlurPx * u.blurLevel, 1);
 
     this.blurMaterial = new THREE.ShaderMaterial({
-      vertexShader: CAMERA_LENS_VERTEX,
+      glslVersion: THREE.GLSL3,
+      vertexShader: DOF_BOKEH_VERTEX,
       fragmentShader: DOF_BOKEH_FRAGMENT,
       uniforms: {
         u_color: { value: null },

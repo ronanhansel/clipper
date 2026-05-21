@@ -3,6 +3,7 @@ import * as THREE from "three";
 import { rectNodeFactory } from "./rectNode";
 import type { EvaluatedObjectState } from "../../../../../core/propertyRegistry";
 import type { FrameObject } from "../../../../../core/types";
+import type { LayerNodeContext } from "../layerNodeRegistry";
 import { createDefaultFillValue } from "../../../../../core/fillValue";
 
 function makeState(
@@ -24,15 +25,25 @@ function makeState(
   } as unknown as EvaluatedObjectState;
 }
 
+// rectNode does not read the LayerNodeContext, so a stub keeps these
+// tests free of jsdom + canvas allocation.
+function makeContext(): LayerNodeContext {
+  return {
+    sharedCapture: undefined as unknown as LayerNodeContext["sharedCapture"],
+    sourceRoot: () => null,
+  };
+}
+
 describe("rectNodeFactory", () => {
   it("registers under kind 'rect'", () => {
     expect(rectNodeFactory.kind).toBe("rect");
   });
 
   it("creates a Mesh with PlaneGeometry + ShaderMaterial", () => {
-    const node = rectNodeFactory.create({ id: "rect-1" } as FrameObject, {
-      compositeTexture: null,
-    });
+    const node = rectNodeFactory.create(
+      { id: "rect-1" } as FrameObject,
+      makeContext(),
+    );
     expect(node.object3D).toBeInstanceOf(THREE.Mesh);
     expect(node.object3D.geometry).toBeInstanceOf(THREE.PlaneGeometry);
     expect(node.object3D.material).toBeInstanceOf(THREE.ShaderMaterial);
@@ -40,9 +51,10 @@ describe("rectNodeFactory", () => {
   });
 
   it("update sets size, colour, radius, opacity uniforms", () => {
-    const node = rectNodeFactory.create({ id: "rect-1" } as FrameObject, {
-      compositeTexture: null,
-    });
+    const node = rectNodeFactory.create(
+      { id: "rect-1" } as FrameObject,
+      makeContext(),
+    );
     node.update(makeState());
     const u = node.object3D.material.uniforms;
     expect(u.u_size.value.x).toBe(200);
@@ -55,9 +67,10 @@ describe("rectNodeFactory", () => {
   });
 
   it("falls back to transparent colour when backgroundColor is unparseable", () => {
-    const node = rectNodeFactory.create({ id: "rect-1" } as FrameObject, {
-      compositeTexture: null,
-    });
+    const node = rectNodeFactory.create(
+      { id: "rect-1" } as FrameObject,
+      makeContext(),
+    );
     node.update(
       makeState({
         style: { backgroundColor: "linear-gradient(red, blue)" },
@@ -69,9 +82,10 @@ describe("rectNodeFactory", () => {
   });
 
   it("uses color when backgroundColor is absent", () => {
-    const node = rectNodeFactory.create({ id: "rect-1" } as FrameObject, {
-      compositeTexture: null,
-    });
+    const node = rectNodeFactory.create(
+      { id: "rect-1" } as FrameObject,
+      makeContext(),
+    );
     node.update(
       makeState({
         style: { color: "#00ff00", opacity: 1 },
@@ -84,9 +98,10 @@ describe("rectNodeFactory", () => {
   });
 
   it("resolves a FillValue solid fill stored on backgroundColor", () => {
-    const node = rectNodeFactory.create({ id: "rect-1" } as FrameObject, {
-      compositeTexture: null,
-    });
+    const node = rectNodeFactory.create(
+      { id: "rect-1" } as FrameObject,
+      makeContext(),
+    );
     const fill = {
       ...createDefaultFillValue(),
       mode: "solid" as const,
@@ -109,9 +124,10 @@ describe("rectNodeFactory", () => {
   });
 
   it("multiplies FillValue.alpha into the channel alpha", () => {
-    const node = rectNodeFactory.create({ id: "rect-1" } as FrameObject, {
-      compositeTexture: null,
-    });
+    const node = rectNodeFactory.create(
+      { id: "rect-1" } as FrameObject,
+      makeContext(),
+    );
     const fill = {
       ...createDefaultFillValue(),
       mode: "solid" as const,
@@ -129,9 +145,10 @@ describe("rectNodeFactory", () => {
   });
 
   it("renders gradient FillValues transparent (until phase 1.5)", () => {
-    const node = rectNodeFactory.create({ id: "rect-1" } as FrameObject, {
-      compositeTexture: null,
-    });
+    const node = rectNodeFactory.create(
+      { id: "rect-1" } as FrameObject,
+      makeContext(),
+    );
     const fill = {
       ...createDefaultFillValue(),
       mode: "gradient" as const,
@@ -147,9 +164,10 @@ describe("rectNodeFactory", () => {
   });
 
   it("resizes geometry when bounds change", () => {
-    const node = rectNodeFactory.create({ id: "rect-1" } as FrameObject, {
-      compositeTexture: null,
-    });
+    const node = rectNodeFactory.create(
+      { id: "rect-1" } as FrameObject,
+      makeContext(),
+    );
     node.update(makeState({ bounds: { x: 0, y: 0, width: 50, height: 50 } }));
     expect(node.object3D.geometry.parameters.width).toBe(50);
     node.update(makeState({ bounds: { x: 0, y: 0, width: 300, height: 80 } }));

@@ -276,7 +276,7 @@ export type CameraDepthOfField = {
   fNumber: number;
   /** Multiplier; 1 = physically accurate. AE exposes this as 0–200%. */
   blurLevel: number;
-  /** Upper clamp for CSS blur, in source pixels. Default 64. */
+  /** Upper clamp for CSS blur, in source pixels. Default 512. */
   maxBlurPx: number;
 };
 
@@ -384,7 +384,7 @@ export const DEFAULT_CAMERA_DOF: CameraDepthOfField = {
   focusDistance: 1158,
   fNumber: 2.8,
   blurLevel: 1,
-  maxBlurPx: 64,
+  maxBlurPx: 512,
 };
 
 export const DEFAULT_CAMERA_LENS: CameraLens = {

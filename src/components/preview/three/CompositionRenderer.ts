@@ -10,7 +10,7 @@ import {
 } from "../../../core/types";
 import { applyCompositionCameraToThree } from "./compositionCameraThree";
 import { LayerNodeSync } from "./layers/LayerNodeSync";
-import { CapturePlaneTexture } from "./CapturePlaneTexture";
+import { SharedCaptureCanvas } from "./SharedCaptureCanvas";
 
 export interface CompositionRendererOptions {
   width: number;
@@ -25,9 +25,10 @@ export interface CompositionRendererOptions {
  *
  * The scene is a per-FrameObject native Three node graph owned by
  * `LayerNodeSync`. Native types (rect, null) render with their own
- * geometry + shaders; everything else still goes through a UV-crop
- * fallback into a single captured composite (phases 2/3/4 swap those
- * out for native text, image, and per-element capture).
+ * geometry + shaders; everything else uses `PerElementCaptureNode`,
+ * which captures just that layer's DOM subtree into its own private
+ * canvas + texture (no shared composite, no UV crop). Phase B replaces
+ * image/text/svg with native primitives.
  *
  * Post-processing runs through Three's `EffectComposer` chain. The
  * composer's read RT carries a `DepthTexture` so the camera DoF pass
@@ -52,8 +53,11 @@ export class CompositionRenderer {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private extraPasses: any[] = [];
 
-  private captureTexture: CapturePlaneTexture;
+  private sharedCapture: SharedCaptureCanvas;
   private layerSync: LayerNodeSync;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private backgroundMesh: any;
 
   private width: number;
   private height: number;
@@ -100,7 +104,14 @@ export class CompositionRenderer {
     // fetches in the DoF pass) for no visual gain.
     this.renderer.setPixelRatio(1);
     this.renderer.setSize(this.width, this.height, false);
-    this.renderer.setClearColor(0x000000, 0);
+    // Opaque black clear. Real-physics DoF integrates against actual
+    // surfaces; transparent void in the back of the frame would let the
+    // bokeh gather sum bright glyph edges with `(0,0,0,0)` taps and
+    // produce a soft halo around every silhouette. The far-plane
+    // background mesh added below gives the camera a real "wall" at the
+    // far clip so every pixel has geometry, real depth, and a defined
+    // colour to integrate over.
+    this.renderer.setClearColor(0x000000, 1);
     this.canvas = this.renderer.domElement as HTMLCanvasElement;
     this.canvas.style.position = "absolute";
     this.canvas.style.inset = "0";
@@ -141,20 +152,48 @@ export class CompositionRenderer {
     this.renderPass = new RenderPass(this.scene, this.camera);
     this.composer.addPass(this.renderPass);
 
-    // Capture canvas is shared infrastructure for the per-element
-    // fallback nodes (text, image, svg, etc. until phases 2/3 land
-    // native versions). The browser requires `drawElementImage`'s
-    // source element to be a descendant of THIS canvas, so all per-
-    // layer captures route through it; each fallback node then blits
-    // pixels into its own private canvas. Native rect/null nodes
+    // The shared capture canvas is the DOM mount the host portals the
+    // source subtree into. Per-element capture nodes call
+    // `drawElementImage` on its 2D context (browsers require the
+    // captured element to be a descendant of THIS canvas), then blit
+    // pixels into their own private canvases. Native rect/null nodes
     // ignore it.
-    this.captureTexture = new CapturePlaneTexture(FRAME_WIDTH, FRAME_HEIGHT);
+    this.sharedCapture = new SharedCaptureCanvas(FRAME_WIDTH, FRAME_HEIGHT);
     this.layerSync = new LayerNodeSync({
-      compositeTexture: this.captureTexture.texture,
-      sharedCaptureCanvas: this.captureTexture.canvas,
+      sharedCapture: this.sharedCapture,
       sourceRoot: () => this.sourceElement,
     });
     this.scene.add(this.layerSync.group);
+
+    // Far-plane background. Without a real surface in the back of the
+    // frame the depth attachment reads `1.0` (cleared) on void pixels,
+    // which the DoF CoC math turns into a large blur with no colour to
+    // integrate against — a soft halo bleeds out of every layer
+    // silhouette. A single fullscreen mesh at world `z = -far + ε`
+    // gives every pixel real geometry, real depth, and a defined
+    // colour. Larger than the scene's far clip would clip; we sit just
+    // inside it. Geometry is enormous so any plausible camera FOV /
+    // composition framing keeps the plane fully covering the frustum.
+    const backgroundDistance =
+      DEFAULT_CAMERA_OBJECT_PROPS.far - DEFAULT_CAMERA_OBJECT_PROPS.near;
+    this.backgroundMesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(backgroundDistance * 4, backgroundDistance * 4),
+      new THREE.MeshBasicMaterial({
+        color: 0x000000,
+        depthWrite: true,
+        depthTest: true,
+        side: THREE.DoubleSide,
+        transparent: false,
+      }),
+    );
+    this.backgroundMesh.name = "CompositionFarPlane";
+    this.backgroundMesh.position.set(
+      0,
+      0,
+      -(DEFAULT_CAMERA_OBJECT_PROPS.far - 1),
+    );
+    this.backgroundMesh.renderOrder = -1000;
+    this.scene.add(this.backgroundMesh);
 
     this.hostRoot = document.createElement("div");
     this.hostRoot.style.position = "absolute";
@@ -168,13 +207,14 @@ export class CompositionRenderer {
   }
 
   /**
-   * The 2D canvas that backs the through-camera composite capture
-   * texture. `drawElementImage` requires the captured source element to
-   * be an immediate child of this canvas, so the React owner must mount
-   * this canvas into the DOM and nest the source subtree inside it.
+   * The 2D canvas that backs the shared DOM-capture root. Per-element
+   * capture nodes call `drawElementImage` on this canvas's context,
+   * which requires the captured element to be one of its descendants.
+   * The React owner must mount this canvas into the DOM and nest the
+   * source subtree inside it.
    */
   get captureCanvas(): HTMLCanvasElement {
-    return this.captureTexture.canvas;
+    return this.sharedCapture.canvas;
   }
 
   setViewport(_width: number, _height: number) {
@@ -185,17 +225,23 @@ export class CompositionRenderer {
   }
 
   /**
-   * Reconcile the per-layer cards against the current `(part, localTime)`
-   * and capture the source element's DOM into the composite texture.
-   * Does not render — the caller drives `render()` separately.
+   * Reconcile the per-layer nodes against the current `(part, localTime)`.
+   * The shared capture canvas is `prepare()`d only when the source
+   * element transitions — `prepare` flips the experimental
+   * `layoutSubtree` flag and invokes the paint hook, both of which are
+   * idempotent but not free. Each per-element capture node performs its
+   * own `drawElementImage` call inside `update()`. Does not render —
+   * the caller drives `render()` separately.
    */
   setComposition(
     part: CompositionClip | null,
     localTime: number,
     sourceElement: Element | null,
   ) {
-    this.sourceElement = sourceElement;
-    this.captureTexture.capture(sourceElement, FRAME_WIDTH, FRAME_HEIGHT);
+    if (sourceElement !== this.sourceElement) {
+      this.sourceElement = sourceElement;
+      this.sharedCapture.prepare(sourceElement);
+    }
     this.layerSync.sync(part, localTime);
   }
 
@@ -232,7 +278,10 @@ export class CompositionRenderer {
   dispose() {
     this.scene.remove(this.layerSync.group);
     this.layerSync.dispose();
-    this.captureTexture.dispose();
+    this.scene.remove(this.backgroundMesh);
+    this.backgroundMesh.geometry.dispose();
+    this.backgroundMesh.material.dispose();
+    this.sharedCapture.dispose();
     // Drop refs to extra passes (caller owns disposal) before disposing
     // the composer so its `dispose()` only releases its own RTs +
     // copyPass.
