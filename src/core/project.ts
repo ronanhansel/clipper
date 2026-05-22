@@ -21,6 +21,7 @@ import type {
   EditorLayoutState,
   EditorSessionState,
   EditorState,
+  EditorThreeAuthorViewState,
   EffectsPanelState,
   FileManagerState,
   FrameObject,
@@ -57,6 +58,18 @@ export const defaultEditorLayoutState: EditorLayoutState = {
 };
 export const defaultComposeLayoutState: ComposeLayoutState = {
   leftPanelWidth: 286,
+};
+export const defaultThreeAuthorViewState: EditorThreeAuthorViewState = {
+  previewMode: "pip",
+  sideBySideSplit: 0.5,
+  orbit: {
+    cameraX: 0,
+    cameraY: 0,
+    cameraZ: 2400,
+    targetX: 0,
+    targetY: 0,
+    targetZ: 0,
+  },
 };
 export const defaultTimelineLayerState: TimelineLayerState = {
   compositionLayers: [{ id: "comp", name: "Composition" }],
@@ -184,6 +197,58 @@ function normalizeComposeLayoutState(
         560,
       ),
     ),
+  };
+}
+
+function normalizeThreeAuthorNumber(value: unknown, fallback: number) {
+  return typeof value === "number" && Number.isFinite(value)
+    ? roundTwo(value)
+    : fallback;
+}
+
+function normalizeThreeAuthorViewState(
+  state: EditorThreeAuthorViewState | undefined,
+): EditorThreeAuthorViewState {
+  return {
+    previewMode:
+      state?.previewMode === "side-by-side" || state?.previewMode === "2d"
+        ? state.previewMode
+        : "pip",
+    sideBySideSplit: roundTwo(
+      Math.min(
+        Math.max(
+          state?.sideBySideSplit ?? defaultThreeAuthorViewState.sideBySideSplit,
+          0.25,
+        ),
+        0.75,
+      ),
+    ),
+    orbit: {
+      cameraX: normalizeThreeAuthorNumber(
+        state?.orbit?.cameraX,
+        defaultThreeAuthorViewState.orbit.cameraX,
+      ),
+      cameraY: normalizeThreeAuthorNumber(
+        state?.orbit?.cameraY,
+        defaultThreeAuthorViewState.orbit.cameraY,
+      ),
+      cameraZ: normalizeThreeAuthorNumber(
+        state?.orbit?.cameraZ,
+        defaultThreeAuthorViewState.orbit.cameraZ,
+      ),
+      targetX: normalizeThreeAuthorNumber(
+        state?.orbit?.targetX,
+        defaultThreeAuthorViewState.orbit.targetX,
+      ),
+      targetY: normalizeThreeAuthorNumber(
+        state?.orbit?.targetY,
+        defaultThreeAuthorViewState.orbit.targetY,
+      ),
+      targetZ: normalizeThreeAuthorNumber(
+        state?.orbit?.targetZ,
+        defaultThreeAuthorViewState.orbit.targetZ,
+      ),
+    },
   };
 }
 
@@ -924,6 +989,9 @@ function normalizeProjectEditorState(
     layout: normalizeEditorLayoutState(project.editorState?.layout),
     composeLayout: normalizeComposeLayoutState(
       project.editorState?.composeLayout,
+    ),
+    threeAuthorView: normalizeThreeAuthorViewState(
+      project.editorState?.threeAuthorView,
     ),
     preview: {
       scale: roundTwo(Math.min(Math.max(previewState.scale, 0.25), 1)),

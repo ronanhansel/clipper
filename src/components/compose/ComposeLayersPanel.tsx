@@ -668,7 +668,8 @@ function LayerIcon({ node }: { node: ComposeLayerNode }) {
     return <RectIcon className={className} />;
   }
   if (objectType === "text") return <Type className={className} />;
-  if (objectType === "image") return <Image className={className} />;
+  if (objectType === "image" || objectType === "media")
+    return <Image className={className} />;
   if (objectType === "svg") {
     if (objectName === "Arrow") return <ArrowIcon className={className} />;
     if (objectName === "Line") return <LineIcon className={className} />;

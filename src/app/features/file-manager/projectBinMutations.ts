@@ -17,6 +17,11 @@ export type BinDropIntent = {
   action: "before" | "after" | "inside";
 };
 
+export type BinProxyImportFile = {
+  name: string;
+  path?: string;
+};
+
 export function normalizeProjectBin(
   project: ProjectManifest,
 ): ProjectBinItem[] {
@@ -125,16 +130,18 @@ export function addTimelineBinItemInProject(
 
 export function importDroppedFilesToBin(
   project: ProjectManifest,
-  files: FileList,
+  files: Iterable<BinProxyImportFile>,
   parentFolderId?: string,
 ): ProjectManifest {
   const bin = normalizeProjectBin(project);
-  const items = Array.from(files).map((file) => ({
-    id: `bin_proxy_${Date.now().toString(36)}_${file.name}`,
-    kind: "external-proxy" as const,
-    name: file.name,
-    path: (file as File & { path?: string }).path || file.name,
-  }));
+  const items = Array.from(files)
+    .filter((file) => file.name.trim().length > 0)
+    .map((file) => ({
+      id: `bin_proxy_${Date.now().toString(36)}_${file.name}`,
+      kind: "external-proxy" as const,
+      name: file.name,
+      path: file.path || file.name,
+    }));
   if (!items.length) return { ...project, bin };
   return {
     ...project,

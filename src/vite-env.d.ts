@@ -86,6 +86,7 @@ interface Window {
 interface Window {
   clipper?: {
     platform: string;
+    getDroppedFilePath?: (file: File) => string;
     readTextFile: (relativePath: string) => Promise<string>;
     readAppState?: () => Promise<Record<string, unknown>>;
     writeAppState?: (updates: Record<string, unknown>) => Promise<void>;

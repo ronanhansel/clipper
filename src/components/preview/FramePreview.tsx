@@ -48,6 +48,8 @@ import {
   type ResizeHandle,
 } from "../../core/frameInteraction";
 import { clamp } from "../../core/math";
+import { MEDIA_PLACEHOLDER_DATA_URL } from "../../core/mediaPlaceholder";
+import { normalizeClipperMediaUrl } from "../../core/mediaSource";
 import {
   getFramePortalOverlayTransform,
   viewportBoundsToPortal,
@@ -57,6 +59,7 @@ import {
 import {
   readOverlayTransform,
   startPortalSyncLoop,
+  syncTargetRectToPortalElement,
   syncViewportBoundsToPortalElement,
 } from "../../core/portalOverlaySync";
 import { transformPathGeometrySegmentsToBounds } from "../../core/pathGeometry";
@@ -114,6 +117,10 @@ import { StrokeOverlay } from "./StrokeOverlay";
 import { SceneCompositor } from "./compositors/SceneCompositor";
 import { DomBackend } from "./backends/DomBackend";
 import { PreviewRenderProvider } from "./previewRenderStore";
+import type {
+  CameraPreviewMode,
+  ComposeAuthorViewState,
+} from "./three/ComposeAuthorView";
 
 const noop = () => {};
 
@@ -248,6 +255,18 @@ type FramePreviewProps = {
     nextCpX: number,
   ) => void;
   onSelectObject?: (objectId: string | null) => void;
+  authorViewState?: ComposeAuthorViewState;
+  onAuthorViewStateChange?: (state: Partial<ComposeAuthorViewState>) => void;
+  onObjectTransformChange?: (
+    objectId: string,
+    transform: {
+      bounds?: { x: number; y: number };
+      translateZ?: number;
+      rotateX?: number;
+      rotateY?: number;
+      rotateZ?: number;
+    },
+  ) => void;
 };
 
 export type ComposeDrawTool =
@@ -330,6 +349,9 @@ export const FramePreview = memo(function FramePreview({
   onCameraPropsChange,
   onCameraPathEaseChange,
   onSelectObject,
+  authorViewState,
+  onAuthorViewStateChange,
+  onObjectTransformChange,
 }: FramePreviewProps) {
   const exportTileViewport = (
     arguments[0] as { exportTileViewport?: ExportTileViewport }
@@ -395,6 +417,14 @@ export const FramePreview = memo(function FramePreview({
     !sceneWrap.flattenComposition &&
     Boolean(onCameraPropsChange) &&
     part.objects.some((obj) => obj.type === "camera" && !obj.hidden);
+  const [composeAuthorPreviewMode, setComposeAuthorPreviewMode] =
+    useState<CameraPreviewMode>(authorViewState?.previewMode ?? "pip");
+  useEffect(() => {
+    if (!authorViewState) return;
+    setComposeAuthorPreviewMode(authorViewState.previewMode);
+  }, [authorViewState]);
+  const composeAuthor3dActive =
+    composeAuthorViewActive && composeAuthorPreviewMode !== "2d";
   const interactiveDragBox = composePlaybackActive ? null : dragBox;
   const interactiveFramePickPoint = composePlaybackActive
     ? null
@@ -680,7 +710,7 @@ export const FramePreview = memo(function FramePreview({
 
   function handleFramePointerMove(event: PointerEvent<HTMLDivElement>) {
     if (isPlaying) return;
-    if (composeAuthorViewActive) return;
+    if (composeAuthor3dActive) return;
     if (interactiveTrackerPicking) updateTrackerHover(event);
     updateObjectHover(event);
     onFramePointerMove(event);
@@ -688,7 +718,7 @@ export const FramePreview = memo(function FramePreview({
 
   function handleFramePointerDownCapture(event: PointerEvent<HTMLDivElement>) {
     if (isPlaying) return;
-    if (composeAuthorViewActive) return;
+    if (composeAuthor3dActive) return;
     if (
       activeShapeTool === "pen" ||
       activeShapeTool === "pencil" ||
@@ -810,16 +840,14 @@ export const FramePreview = memo(function FramePreview({
           style={clippedViewportStyle}
           onPointerDownCapture={handleFramePointerDownCapture}
           onPointerDown={
-            isPlaying || composeAuthorViewActive
-              ? undefined
-              : onFramePointerDown
+            isPlaying || composeAuthor3dActive ? undefined : onFramePointerDown
           }
           onPointerMove={handleFramePointerMove}
           onPointerUp={
-            isPlaying || composeAuthorViewActive ? undefined : onFramePointerUp
+            isPlaying || composeAuthor3dActive ? undefined : onFramePointerUp
           }
           onPointerCancel={
-            isPlaying || composeAuthorViewActive
+            isPlaying || composeAuthor3dActive
               ? undefined
               : onFramePointerCancel
           }
@@ -904,6 +932,10 @@ export const FramePreview = memo(function FramePreview({
                     onCameraPropsChange={onCameraPropsChange}
                     onCameraPathEaseChange={onCameraPathEaseChange}
                     onSelectObject={onSelectObject}
+                    onAuthorPreviewModeChange={setComposeAuthorPreviewMode}
+                    authorViewState={authorViewState}
+                    onAuthorViewStateChange={onAuthorViewStateChange}
+                    onObjectTransformChange={onObjectTransformChange}
                   />
                 </PreviewRenderProvider>
               )}
@@ -915,12 +947,12 @@ export const FramePreview = memo(function FramePreview({
               style={{ zIndex: 2147483647 }}
             />
           </div>
-          {!composeAuthorViewActive &&
+          {!composeAuthor3dActive &&
           interactiveTrackerPicking &&
           trackerHoverTarget ? (
             <TrackerTargetOverlay target={trackerHoverTarget} />
           ) : null}
-          {!composeAuthorViewActive && interactiveDragBox ? (
+          {!composeAuthor3dActive && interactiveDragBox ? (
             <DragSelectionBox
               dragSelectionBoxRef={dragSelectionBoxRef}
               bounds={interactiveDragBox}
@@ -932,7 +964,7 @@ export const FramePreview = memo(function FramePreview({
               visible={Boolean(showDragBox)}
             />
           ) : null}
-          {!composeAuthorViewActive &&
+          {!composeAuthor3dActive &&
             interactiveObjectSnapGuides.map((guide, index) => (
               <SnapGuideOverlay
                 key={`${guide.axis}:${guide.position}:${index}`}
@@ -941,16 +973,14 @@ export const FramePreview = memo(function FramePreview({
                 frameScale={frameScale}
               />
             ))}
-          {!composeAuthorViewActive && interactiveFramePickPoint ? (
+          {!composeAuthor3dActive && interactiveFramePickPoint ? (
             <FramePickPointOverlay
               point={interactiveFramePickPoint}
               frameScale={frameScale}
             />
           ) : null}
-          {!composeAuthorViewActive ? (
-            <FramePickPointImperativeOverlay />
-          ) : null}
-          {!composeAuthorViewActive &&
+          {!composeAuthor3dActive ? <FramePickPointImperativeOverlay /> : null}
+          {!composeAuthor3dActive &&
           showShapeDrawPreview &&
           shapeDrawPreview &&
           activeShapeTool ? (
@@ -977,7 +1007,7 @@ export const FramePreview = memo(function FramePreview({
             previewOverlayHost,
           )
         : null}
-      {!composeAuthorViewActive &&
+      {!composeAuthor3dActive &&
       canSelectObjects &&
       !isUnlinkedPart &&
       previewOverlayHost
@@ -3022,6 +3052,9 @@ export const FrameObjectView = memo(function FrameObjectView({
           style={style}
         />
       ) : null}
+      {object.type === "image" || object.type === "media" ? (
+        <MediaContent object={evaluatedObject} />
+      ) : null}
       {object.type === "pattern2d" ? (
         <Pattern2DContent object={evaluatedObject} />
       ) : null}
@@ -3045,6 +3078,8 @@ export const FrameObjectView = memo(function FrameObjectView({
       object.type !== "null" &&
       object.type !== "svg" &&
       object.type !== "html" &&
+      object.type !== "image" &&
+      object.type !== "media" &&
       object.type !== "template" &&
       object.type !== "custom-renderer" &&
       object.type !== "pattern2d" &&
@@ -4382,6 +4417,34 @@ export function SelectionOverlayBox({
     const element = boxRef.current;
     const frameViewport = frameViewportRef?.current;
     if (!element || !frameViewport || !portal || !portalHost) return;
+    const objectRoot =
+      frameViewport.querySelector<HTMLElement>("[data-clipper-flat-frame]") ??
+      frameViewport;
+    const objectCandidates = Array.from(
+      objectRoot.querySelectorAll<HTMLElement>(
+        `[data-clipper-render-object-id="${cssEscape(objectId)}"],[data-background-element-id="${cssEscape(objectId)}"]`,
+      ),
+    );
+    const rootRect = objectRoot.getBoundingClientRect();
+    const objectElement =
+      objectCandidates.find((candidate) => {
+        const rect = candidate.getBoundingClientRect();
+        return (
+          rect.right >= rootRect.left &&
+          rect.left <= rootRect.right &&
+          rect.bottom >= rootRect.top &&
+          rect.top <= rootRect.bottom
+        );
+      }) ?? objectCandidates[0];
+    if (objectElement) {
+      syncTargetRectToPortalElement(
+        element,
+        objectElement.getBoundingClientRect(),
+        portalHost.getBoundingClientRect(),
+        offsetPx,
+      );
+      return;
+    }
     syncViewportBoundsToPortalElement(element, viewportBounds, {
       cameraTransform,
       frameScale,
@@ -4392,6 +4455,8 @@ export function SelectionOverlayBox({
     cameraTransform,
     frameScale,
     frameViewportRef,
+    objectId,
+    offsetPx,
     portal,
     portalHost,
     viewportBounds,
@@ -4951,6 +5016,49 @@ export function Pattern2DContent({ object }: { object: FrameObject }) {
       dangerouslySetInnerHTML={{ __html: svg }}
     />
   );
+}
+
+function MediaContent({ object }: { object: FrameObject }) {
+  const src =
+    typeof object.style.src === "string" && object.style.src.length > 0
+      ? normalizeClipperMediaUrl(object.style.src)
+      : null;
+  const objectFit = readMediaObjectFit(
+    typeof object.style.objectFit === "string" ? object.style.objectFit : null,
+  );
+
+  if (src)
+    return (
+      <img
+        alt=""
+        className="block h-full w-full select-none"
+        draggable={false}
+        src={src}
+        style={{ objectFit }}
+      />
+    );
+
+  return (
+    <img
+      alt=""
+      className="block h-full w-full select-none"
+      draggable={false}
+      src={MEDIA_PLACEHOLDER_DATA_URL}
+      style={{ objectFit: "fill" }}
+    />
+  );
+}
+
+function readMediaObjectFit(value: string | null): CSSProperties["objectFit"] {
+  if (
+    value === "cover" ||
+    value === "contain" ||
+    value === "fill" ||
+    value === "none" ||
+    value === "scale-down"
+  )
+    return value;
+  return "cover";
 }
 
 export function HtmlContent({

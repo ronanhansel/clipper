@@ -194,18 +194,9 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
     };
     refresh();
 
-    const resizeObserver = new ResizeObserver(() => {
-      const w = host.clientWidth || FRAME_WIDTH;
-      const h = host.clientHeight || FRAME_HEIGHT;
-      renderer.setViewport(w, h);
-      refresh();
-    });
-    resizeObserver.observe(host);
-
     return () => {
       rendererRef.current = null;
       setCaptureCanvas(null);
-      resizeObserver.disconnect();
       if (captureCanvasEl.parentNode === portalTarget)
         portalTarget.removeChild(captureCanvasEl);
       if (renderer.hostRoot.parentNode === host)

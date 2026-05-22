@@ -592,7 +592,8 @@ export function moveComposeGenericPropertyKeyframesAtTime(
     if (
       !attributeByGenericPropertyPath.has(propertyPath) &&
       !isFillPropertyPath(propertyPath) &&
-      !isShadowPropertyPath(propertyPath)
+      !isShadowPropertyPath(propertyPath) &&
+      !isPropsPropertyPath(propertyPath)
     )
       continue;
     nextObject = movePropertyKeyframe(

@@ -3,6 +3,7 @@ import {
   ChevronDown,
   Camera as CameraIcon,
   Code as CodeIcon,
+  Image as ImageIcon,
   MoveDiagonal2,
   MousePointer2 as PointerIcon,
   PenTool,
@@ -40,6 +41,7 @@ export type ComposeToolbarProps = {
   activeTool: ComposeDrawTool | null;
   onAddNullObject: () => void;
   onAddCamera: () => void;
+  onAddMediaObject: () => void;
   onAddCodeObject: () => void;
   onActiveToolChange: (tool: ComposeDrawTool | null) => void;
   resizeMode: "resize" | "scale";
@@ -137,7 +139,7 @@ const objectAddTools: ObjectAddTool[] = [
   },
 ];
 
-type GeneratorToolKey = "pattern2d" | "code";
+type GeneratorToolKey = "pattern2d" | "media" | "code";
 
 type GeneratorTool = {
   key: GeneratorToolKey;
@@ -152,6 +154,11 @@ const generatorTools: GeneratorTool[] = [
     label: "2D pattern",
     shortcut: "G",
     icon: <Pattern2DIcon size={18} />,
+  },
+  {
+    key: "media",
+    label: "Media",
+    icon: <ImageIcon size={17} />,
   },
   {
     key: "code",
@@ -180,6 +187,7 @@ export function ComposeToolbar({
   activeTool,
   onAddNullObject,
   onAddCamera,
+  onAddMediaObject,
   onAddCodeObject,
   onActiveToolChange,
   resizeMode,
@@ -257,6 +265,9 @@ export function ComposeToolbar({
       });
     } else if (tool.key === "code") {
       onAddCodeObject();
+      setOpenMenu(null);
+    } else if (tool.key === "media") {
+      onAddMediaObject();
       setOpenMenu(null);
     }
   }

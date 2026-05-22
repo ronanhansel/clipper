@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 
 type UpdateStatusKind =
   | "idle"
@@ -18,6 +18,7 @@ type UpdateStatus = {
 
 contextBridge.exposeInMainWorld("clipper", {
   platform: process.platform,
+  getDroppedFilePath: (file: File) => webUtils.getPathForFile(file),
   readTextFile: (relativePath: string) =>
     ipcRenderer.invoke(
       "clipper:read-text-file",

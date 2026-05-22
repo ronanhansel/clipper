@@ -88,15 +88,9 @@ describe("project bin", () => {
   });
 
   it("stores dropped files as external proxy bin items", () => {
-    const file = new File(["image"], "image.png") as File & { path?: string };
-    file.path = "/tmp/image.png";
-    const fileList = {
-      0: file,
-      length: 1,
-      item: (index: number) => (index === 0 ? file : null),
-    } as unknown as FileList;
-
-    const result = importDroppedFilesToBin(project(), fileList);
+    const result = importDroppedFilesToBin(project(), [
+      { name: "image.png", path: "/tmp/image.png" },
+    ]);
 
     expect(result.bin).toHaveLength(1);
     expect(result.bin?.[0]).toMatchObject({

@@ -3,6 +3,7 @@ export type FrameObjectType =
   | "rect"
   | "text"
   | "image"
+  | "media"
   | "svg"
   | "html"
   | "template"
@@ -73,6 +74,11 @@ export type RenderableProps = {
   hidden?: boolean;
   locked?: boolean;
   animations?: LayerAnimation[];
+  props?: Record<string, JsonValue>;
+  source?: {
+    kind: "file";
+    path: string;
+  };
 };
 export type TextProps = Omit<RenderableProps, "content"> & {
   text?: string;
@@ -157,6 +163,11 @@ export class RenderableObject {
   richText?: RichTextSegment[];
   style: LayerStyle;
   transform?: Transform | string;
+  props?: Record<string, JsonValue>;
+  source?: {
+    kind: "file";
+    path: string;
+  };
   layoutId?: string;
   parentId?: string;
   hidden?: boolean;
@@ -173,6 +184,8 @@ export class RenderableObject {
     this.richText = props.richText;
     this.style = props.style ?? {};
     this.transform = props.transform;
+    this.props = props.props;
+    this.source = props.source;
     this.layoutId = props.layoutId;
     this.parentId = props.parentId;
     this.hidden = props.hidden;
@@ -199,6 +212,13 @@ export class Image extends RenderableObject {
   constructor(props: RenderableProps) {
     super(props);
     this.kind = "image";
+  }
+}
+
+export class Media extends RenderableObject {
+  constructor(props: RenderableProps) {
+    super(props);
+    this.kind = "media";
   }
 }
 

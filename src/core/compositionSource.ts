@@ -26,6 +26,8 @@ type SourceObject = {
   richText?: FrameObject["richText"];
   style: FrameObject["style"];
   transform?: compositionApi.Transform | string;
+  props?: FrameObject["props"];
+  source?: FrameObject["source"];
   layoutId?: string;
   parentId?: string;
   hidden?: boolean;
@@ -218,6 +220,8 @@ function sourceObjectToFrameObject(object: SourceObject): FrameObject {
     template: object.template,
     richText: object.richText,
     style: object.style,
+    props: object.props,
+    source: object.source,
     layoutId: object.layoutId,
     parentId: object.parentId,
     hidden: object.hidden,
@@ -283,6 +287,8 @@ function frameObjectToSourceObject(object: FrameObject): SourceObject {
     template: object.template,
     richText: object.richText,
     style: object.style,
+    props: object.props,
+    source: object.source,
     layoutId: object.layoutId,
     parentId: object.parentId,
     hidden: object.hidden,
@@ -302,6 +308,8 @@ function frameObjectToConstructorSource(object: FrameObject) {
     template: object.template,
     richText: object.richText,
     style: object.style,
+    props: object.props,
+    source: object.source,
     layoutId: object.layoutId,
     parentId: object.parentId,
     hidden: object.hidden || undefined,
@@ -314,6 +322,7 @@ function frameObjectToConstructorSource(object: FrameObject) {
 function frameObjectConstructorName(object: FrameObject) {
   if (object.type === "text") return "Text";
   if (object.type === "image") return "Image";
+  if (object.type === "media") return "Media";
   if (object.type === "svg") return "Svg";
   if (object.type === "html") return "Html";
   if (object.type === "template") return "Template";

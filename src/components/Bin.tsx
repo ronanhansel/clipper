@@ -18,6 +18,7 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from "react";
 import toast from "react-hot-toast";
+import type { BinProxyImportFile } from "../app/features/file-manager/projectBinMutations";
 import type { ContextMenuState } from "../app/types";
 import type { CompositionClip, ProjectBinItem } from "../core/types";
 import { getBinItemPath } from "../core/binPathResolver";
@@ -79,7 +80,7 @@ export type BinProps = {
   createFolder: (folderId?: string) => void;
   createTimeline: (folderId?: string) => void;
   deleteItem: (itemId: string) => void;
-  dropFiles: (files: FileList, folderId?: string) => void;
+  dropFiles: (files: BinProxyImportFile[], folderId?: string) => void;
   duplicateItem: (itemId: string) => void;
   deleteItems?: (itemIds: string[]) => void;
   duplicateItems?: (itemIds: string[]) => void;
@@ -436,10 +437,10 @@ export function Bin({
 
   const handleExternalDrop = useCallback(
     (event: React.DragEvent<HTMLDivElement>) => {
+      if (event.dataTransfer.files.length === 0) return;
       event.preventDefault();
       setRootDropVisible(false);
-      if (event.dataTransfer.files.length > 0)
-        dropFiles(event.dataTransfer.files);
+      dropFiles(toBinProxyImportFiles(event.dataTransfer.files));
     },
     [dropFiles],
   );
@@ -614,7 +615,7 @@ export function Bin({
       }}
       onDrop={handleExternalDrop}
       onDragOver={(e) => {
-        if (e.dataTransfer.files.length > 0) {
+        if (hasExternalFiles(e.dataTransfer)) {
           e.preventDefault();
           e.dataTransfer.dropEffect = "copy";
           setRootDropVisible(true);
@@ -771,7 +772,7 @@ function RegistryTreeNode({
     shiftKey: boolean,
   ) => void;
   onDragStateChange: (node: RegistryNode | null) => void;
-  onDropFiles: (files: FileList, folderId?: string) => void;
+  onDropFiles: (files: BinProxyImportFile[], folderId?: string) => void;
 }) {
   const data = node.data;
   const [editDraft, setEditDraft] = useState(data.name);
@@ -868,7 +869,7 @@ function RegistryTreeNode({
       }}
       onDragStartCapture={handleDragStart}
       onDragOver={(event) => {
-        if (event.dataTransfer.files.length > 0 && data.kind === "folder") {
+        if (hasExternalFiles(event.dataTransfer) && data.kind === "folder") {
           event.preventDefault();
           event.dataTransfer.dropEffect = "copy";
         }
@@ -878,7 +879,7 @@ function RegistryTreeNode({
           return;
         event.preventDefault();
         event.stopPropagation();
-        onDropFiles(event.dataTransfer.files, data.id);
+        onDropFiles(toBinProxyImportFiles(event.dataTransfer.files), data.id);
       }}
     >
       {data.kind === "folder" ? (
@@ -1068,3 +1069,20 @@ function getTopLevelSelection(nodes: NativeTreeNodeApi<RegistryNode>[]) {
 }
 
 export type OsFileNode = RegistryNode;
+
+function toBinProxyImportFiles(files: FileList): BinProxyImportFile[] {
+  return Array.from(files).map((file) => ({
+    name: file.name,
+    path:
+      window.clipper?.getDroppedFilePath?.(file) ||
+      (file as File & { path?: string }).path ||
+      file.name,
+  }));
+}
+
+function hasExternalFiles(dataTransfer: DataTransfer) {
+  return (
+    dataTransfer.files.length > 0 ||
+    Array.from(dataTransfer.types).includes("Files")
+  );
+}

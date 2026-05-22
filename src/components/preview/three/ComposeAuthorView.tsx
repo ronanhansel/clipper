@@ -1,11 +1,23 @@
-import { useEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+} from "react";
 import { createPortal } from "react-dom";
-import { ThreeAuthorScene } from "./ThreeAuthorScene";
+import { PictureInPicture2, SquareSplitHorizontal } from "lucide-react";
+import {
+  ThreeAuthorScene,
+  type ThreeAuthorObjectTransformUpdate,
+  type ThreeOrbitState,
+} from "./ThreeAuthorScene";
 import { CompositionWebGLHost } from "./CompositionWebGLHost";
 import {
   findActiveCameraObject,
   getActiveCameraObjectProps,
 } from "../compositors/useCompositionCamera";
+import { evaluateObjectState } from "../../../core/propertyRegistry";
 import {
   FRAME_HEIGHT,
   FRAME_WIDTH,
@@ -16,6 +28,195 @@ import { buildCameraPathData } from "./buildCameraPathData";
 import type { CameraPathHandle } from "./cameraPathOverlay";
 import type { CompositionBackendProps } from "../backends/CompositionBackend";
 
+export type CameraPreviewMode = "pip" | "side-by-side" | "2d";
+export type ComposeAuthorViewState = {
+  previewMode: CameraPreviewMode;
+  sideBySideSplit: number;
+  orbit: ThreeOrbitState;
+};
+type CameraPreviewHostProps = {
+  part: CompositionClip;
+  localTime: number;
+  backendProps: ComposeAuthorViewProps["pipBackendProps"];
+};
+
+function cssEscape(value: string) {
+  return typeof CSS !== "undefined" && typeof CSS.escape === "function"
+    ? CSS.escape(value)
+    : value.replace(/"/g, '\\"');
+}
+
+function formatObjectTransform(transform: Record<string, unknown>) {
+  const parts: string[] = [];
+  const pushTransform = (key: string, unit: string) => {
+    const value = transform[key];
+    if (typeof value === "number" && Number.isFinite(value))
+      parts.push(`${key}(${value}${unit})`);
+  };
+  pushTransform("perspective", "px");
+  pushTransform("translateX", "px");
+  pushTransform("translateY", "px");
+  pushTransform("translateZ", "px");
+  pushTransform("scale", "");
+  pushTransform("scaleX", "");
+  pushTransform("scaleY", "");
+  pushTransform("rotate", "deg");
+  pushTransform("rotateX", "deg");
+  pushTransform("rotateY", "deg");
+  pushTransform("rotateZ", "deg");
+  pushTransform("skewX", "deg");
+  pushTransform("skewY", "deg");
+  return parts.join(" ");
+}
+
+function useFitFrameSize() {
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const [hostSize, setHostSize] = useState({
+    width: FRAME_WIDTH,
+    height: FRAME_HEIGHT,
+  });
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    const readSize = () =>
+      setHostSize({
+        width: Math.max(1, host.clientWidth),
+        height: Math.max(1, host.clientHeight),
+      });
+    readSize();
+    const observer = new ResizeObserver(readSize);
+    observer.observe(host);
+    return () => observer.disconnect();
+  }, []);
+
+  const aspect = FRAME_WIDTH / FRAME_HEIGHT;
+  const hostAspect = hostSize.width / hostSize.height;
+  const frameSize =
+    hostAspect > aspect
+      ? {
+          width: hostSize.height * aspect,
+          height: hostSize.height,
+        }
+      : {
+          width: hostSize.width,
+          height: hostSize.width / aspect,
+        };
+
+  return { hostRef, frameSize };
+}
+
+function applyContainedFrameSize(host: HTMLElement, frame: HTMLElement) {
+  const width = Math.max(1, host.clientWidth);
+  const height = Math.max(1, host.clientHeight);
+  const aspect = FRAME_WIDTH / FRAME_HEIGHT;
+  const hostAspect = width / height;
+  const frameSize =
+    hostAspect > aspect
+      ? {
+          width: height * aspect,
+          height,
+        }
+      : {
+          width,
+          height: width / aspect,
+        };
+  frame.style.width = `${frameSize.width}px`;
+  frame.style.height = `${frameSize.height}px`;
+}
+
+function useFitFrameElementRefs() {
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const frameRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const host = hostRef.current;
+    const frame = frameRef.current;
+    if (!host || !frame) return;
+    let frameHandle = 0;
+    const readSize = () => {
+      if (frameHandle) return;
+      frameHandle = requestAnimationFrame(() => {
+        frameHandle = 0;
+        applyContainedFrameSize(host, frame);
+      });
+    };
+    applyContainedFrameSize(host, frame);
+    const observer = new ResizeObserver(readSize);
+    observer.observe(host);
+    return () => {
+      if (frameHandle) cancelAnimationFrame(frameHandle);
+      observer.disconnect();
+    };
+  }, []);
+
+  return { hostRef, frameRef };
+}
+
+function FitCameraPreview({
+  part,
+  localTime,
+  backendProps,
+}: CameraPreviewHostProps) {
+  const { hostRef, frameRef } = useFitFrameElementRefs();
+
+  return (
+    <div
+      ref={hostRef}
+      className="grid h-full w-full place-items-center overflow-hidden bg-[#0a0c10]"
+    >
+      <div
+        ref={frameRef}
+        className="relative overflow-hidden bg-black"
+        style={{
+          width: FRAME_WIDTH,
+          height: FRAME_HEIGHT,
+        }}
+      >
+        <CompositionWebGLHost
+          part={part}
+          localTime={localTime}
+          hostClassName="h-full w-full"
+          backendProps={backendProps}
+        />
+      </div>
+    </div>
+  );
+}
+
+function FitFlatComposition({ children }: { children: ReactNode }) {
+  const { hostRef, frameSize } = useFitFrameSize();
+  const scale = frameSize.width / FRAME_WIDTH;
+
+  return (
+    <div
+      ref={hostRef}
+      className="grid h-full w-full place-items-center overflow-hidden bg-[#0e1117]"
+    >
+      <div
+        className="relative overflow-hidden bg-black"
+        data-clipper-flat-frame
+        style={{
+          width: frameSize.width,
+          height: frameSize.height,
+        }}
+      >
+        <div
+          className="absolute left-0 top-0"
+          style={{
+            width: FRAME_WIDTH,
+            height: FRAME_HEIGHT,
+            transform: `scale(${scale})`,
+            transformOrigin: "top left",
+          }}
+        >
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export interface ComposeAuthorViewProps {
   part: CompositionClip;
   selectedObjectId: string | null;
@@ -24,6 +225,7 @@ export interface ComposeAuthorViewProps {
     cameraObjectId: string,
     next: CameraObjectProps,
   ) => void;
+  onPreviewModeChange?: (mode: CameraPreviewMode) => void;
   /**
    * Render-prop returning the sealed DOM composition tree. The author
    * view portals it into the CSS3D plane element so it appears as a flat
@@ -52,6 +254,10 @@ export interface ComposeAuthorViewProps {
    * drive selection state. `null` clears the selection.
    */
   onSelectObject?: (objectId: string | null) => void;
+  onObjectTransformChange?: (
+    objectId: string,
+    transform: ThreeAuthorObjectTransformUpdate,
+  ) => void;
   /**
    * Fired when the user drags a per-axis bezier handle on the camera
    * path overlay. The owner persists the new cp.x onto the matching
@@ -64,6 +270,8 @@ export interface ComposeAuthorViewProps {
     side: "in" | "out",
     nextCpX: number,
   ) => void;
+  authorViewState?: ComposeAuthorViewState;
+  onAuthorViewStateChange?: (state: Partial<ComposeAuthorViewState>) => void;
 }
 
 /**
@@ -83,12 +291,35 @@ export interface ComposeAuthorViewProps {
  * composer so Direct + PIP share the same post-process path.
  */
 export function ComposeAuthorView(props: ComposeAuthorViewProps) {
-  const hostRef = useRef<HTMLDivElement | null>(null);
+  const sceneHostRef = useRef<HTMLDivElement | null>(null);
+  const sideBySidePreviewRef = useRef<HTMLDivElement | null>(null);
+  const sideBySideDividerRef = useRef<HTMLDivElement | null>(null);
   const sceneRef = useRef<ThreeAuthorScene | null>(null);
   const draggingRef = useRef(false);
   const pendingDragRef = useRef<CameraObjectProps | null>(null);
+  const pendingObjectDragRef = useRef<{
+    objectId: string;
+    transform: ThreeAuthorObjectTransformUpdate;
+  } | null>(null);
   const flushHandleRef = useRef<number>(0);
+  const objectFlushHandleRef = useRef<number>(0);
+  const orbitPersistTimeoutRef = useRef<number>(0);
+  const sideBySideResizeFrameRef = useRef<number>(0);
   const [planeTarget, setPlaneTarget] = useState<HTMLElement | null>(null);
+  const [previewMode, setPreviewMode] = useState<CameraPreviewMode>(
+    props.authorViewState?.previewMode ?? "pip",
+  );
+  const [sideBySideSplit, setSideBySideSplit] = useState(
+    props.authorViewState?.sideBySideSplit ?? 0.5,
+  );
+  useEffect(() => {
+    if (!props.authorViewState) return;
+    setPreviewMode(props.authorViewState.previewMode);
+    setSideBySideSplit(props.authorViewState.sideBySideSplit);
+  }, [props.authorViewState]);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const activeCamera = findActiveCameraObject(props.part);
+  const showCameraPreviewControls = activeCamera != null;
   // Which camera-path keyframe is selected, surfacing its bezier
   // handles. Cleared when the user clicks empty space or selects a
   // different camera.
@@ -101,11 +332,41 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
   const selectedKeyframeIndexRef = useRef<number | null>(null);
   selectedKeyframeIndexRef.current = selectedKeyframeIndex;
 
+  const applySideBySideSplitPreview = (split: number) => {
+    const host = sceneHostRef.current;
+    const preview = sideBySidePreviewRef.current;
+    const divider = sideBySideDividerRef.current;
+    if (!host || !preview || !divider) return;
+    host.style.width = `${split * 100}%`;
+    preview.style.width = `${(1 - split) * 100}%`;
+    divider.style.left = `${split * 100}%`;
+    const scene = sceneRef.current;
+    if (!scene) return;
+    scene.setViewport(
+      host.clientWidth || FRAME_WIDTH,
+      host.clientHeight || FRAME_HEIGHT,
+    );
+  };
+
+  useEffect(() => {
+    props.onPreviewModeChange?.(previewMode);
+    return () => props.onPreviewModeChange?.("pip");
+  }, [previewMode, props.onPreviewModeChange]);
+
+  useEffect(() => {
+    return () => {
+      if (sideBySideResizeFrameRef.current) {
+        cancelAnimationFrame(sideBySideResizeFrameRef.current);
+        sideBySideResizeFrameRef.current = 0;
+      }
+    };
+  }, []);
+
   // Mount/unmount the scene once. The scene owns its own root element
   // (CSS3D layer + WebGL canvas, stacked) and we just parent it into our
   // host div.
   useEffect(() => {
-    const host = hostRef.current;
+    const host = sceneHostRef.current;
     if (!host) return;
     const initialWidth = host.clientWidth || FRAME_WIDTH;
     const initialHeight = host.clientHeight || FRAME_HEIGHT;
@@ -113,6 +374,9 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
       width: initialWidth,
       height: initialHeight,
     });
+    if (props.authorViewState?.orbit) {
+      scene.setOrbitState(props.authorViewState.orbit);
+    }
     sceneRef.current = scene;
     host.appendChild(scene.hostRoot);
 
@@ -124,14 +388,20 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
     scene.setCompositionElement(planeEl);
     setPlaneTarget(planeEl);
 
+    let resizeFrame = 0;
     const resizeObserver = new ResizeObserver(() => {
-      const w = host.clientWidth || FRAME_WIDTH;
-      const h = host.clientHeight || FRAME_HEIGHT;
-      scene.setViewport(w, h);
+      if (resizeFrame) cancelAnimationFrame(resizeFrame);
+      resizeFrame = requestAnimationFrame(() => {
+        resizeFrame = 0;
+        const w = host.clientWidth || FRAME_WIDTH;
+        const h = host.clientHeight || FRAME_HEIGHT;
+        scene.setViewport(w, h);
+      });
     });
     resizeObserver.observe(host);
 
     return () => {
+      if (resizeFrame) cancelAnimationFrame(resizeFrame);
       sceneRef.current = null;
       setPlaneTarget(null);
       resizeObserver.disconnect();
@@ -139,6 +409,26 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
       scene.dispose();
     };
   }, []);
+
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+    scene.onViewStateChange((orbit) => {
+      if (orbitPersistTimeoutRef.current) {
+        window.clearTimeout(orbitPersistTimeoutRef.current);
+      }
+      orbitPersistTimeoutRef.current = window.setTimeout(() => {
+        orbitPersistTimeoutRef.current = 0;
+        props.onAuthorViewStateChange?.({ orbit });
+      }, 250);
+    });
+    return () => {
+      if (orbitPersistTimeoutRef.current) {
+        window.clearTimeout(orbitPersistTimeoutRef.current);
+        orbitPersistTimeoutRef.current = 0;
+      }
+    };
+  }, [props.onAuthorViewStateChange]);
 
   // Wire the drag callback whenever the part / callback changes. Mid-drag
   // updates are rAF-throttled to one React commit per frame; the final
@@ -167,6 +457,10 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
         cancelAnimationFrame(flushHandleRef.current);
         flushHandleRef.current = 0;
       }
+      if (objectFlushHandleRef.current) {
+        cancelAnimationFrame(objectFlushHandleRef.current);
+        objectFlushHandleRef.current = 0;
+      }
     };
   }, [props.part, props.onCameraPropsChange]);
 
@@ -181,11 +475,16 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
         const camera = findActiveCameraObject(props.part);
         if (camera) props.onCameraPropsChange(camera.id, last);
       }
+      if (!active && pendingObjectDragRef.current) {
+        const last = pendingObjectDragRef.current;
+        pendingObjectDragRef.current = null;
+        props.onObjectTransformChange?.(last.objectId, last.transform);
+      }
     });
-  }, [props.part, props.onCameraPropsChange]);
+  }, [props.part, props.onCameraPropsChange, props.onObjectTransformChange]);
 
-  // Forward 3D pick events to React so clicking the camera body selects the
-  // camera object (and clicking empty space deselects).
+  // Forward 3D pick events to React so clicking the camera body or elements selects
+  // them in the scene (and clicking empty space deselects).
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene) return;
@@ -193,6 +492,8 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
       if (picked === "camera") {
         const camera = findActiveCameraObject(props.part);
         if (camera) props.onSelectObject?.(camera.id);
+      } else if (picked) {
+        props.onSelectObject?.(picked);
       } else {
         props.onSelectObject?.(null);
       }
@@ -231,11 +532,31 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
       getActiveCameraObjectProps(props.part, props.localTime),
     );
     const activeCamera = findActiveCameraObject(props.part);
-    const gizmoTargetId =
-      activeCamera && props.selectedObjectId === activeCamera.id
-        ? activeCamera.id
-        : null;
-    scene.setSelectedCameraObjectId(gizmoTargetId);
+    const cameraSelected =
+      activeCamera != null && props.selectedObjectId === activeCamera.id;
+    if (cameraSelected) {
+      scene.setSelectedObject(null, null, null);
+      scene.setSelectedCameraObjectId(activeCamera.id);
+    } else {
+      scene.setSelectedCameraObjectId(null);
+      const selectedObject = props.part.objects.find(
+        (object) =>
+          object.id === props.selectedObjectId &&
+          object.type !== "camera" &&
+          !object.hidden &&
+          object.threeD === true,
+      );
+      if (selectedObject) {
+        const evaluated = evaluateObjectState(selectedObject, props.localTime);
+        scene.setSelectedObject(
+          selectedObject.id,
+          evaluated.bounds,
+          typeof evaluated.transform === "object" ? evaluated.transform : {},
+        );
+      } else {
+        scene.setSelectedObject(null, null, null);
+      }
+    }
     scene.render();
   }, [props.part, props.selectedObjectId, props.localTime]);
 
@@ -301,6 +622,82 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
     });
   }, [props.part, props.onCameraPathEaseChange]);
 
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+    const applyObjectDragPreview = (
+      objectId: string,
+      nextTransform: ThreeAuthorObjectTransformUpdate,
+    ) => {
+      const target = planeTarget?.querySelector<HTMLElement>(
+        `[data-clipper-render-object-id="${cssEscape(objectId)}"]`,
+      );
+      if (!target) return;
+      const object = props.part.objects.find((item) => item.id === objectId);
+      if (!object) return;
+      const evaluated = evaluateObjectState(object, props.localTime);
+      const transform =
+        evaluated.transform && typeof evaluated.transform === "object"
+          ? { ...evaluated.transform }
+          : {};
+      for (const key of [
+        "translateZ",
+        "rotateX",
+        "rotateY",
+        "rotateZ",
+      ] as const) {
+        const value = nextTransform[key];
+        if (value !== undefined) transform[key] = value;
+      }
+      if (nextTransform.bounds) {
+        target.style.left = `${nextTransform.bounds.x}px`;
+        target.style.top = `${nextTransform.bounds.y}px`;
+        window.dispatchEvent(
+          new CustomEvent("clipper:object-preview-bounds", {
+            detail: {
+              bounds: {
+                ...evaluated.bounds,
+                ...nextTransform.bounds,
+              },
+              objectId,
+            },
+          }),
+        );
+      }
+      target.style.transform = formatObjectTransform(transform);
+    };
+    scene.onObjectDrag((objectId, nextTransform) => {
+      pendingObjectDragRef.current = { objectId, transform: nextTransform };
+      if (objectFlushHandleRef.current) return;
+      objectFlushHandleRef.current = requestAnimationFrame(() => {
+        objectFlushHandleRef.current = 0;
+        const pending = pendingObjectDragRef.current;
+        if (!pending) return;
+        applyObjectDragPreview(pending.objectId, pending.transform);
+      });
+    });
+  }, [planeTarget, props.localTime, props.part]);
+
+  // Synchronize pickable 3D elements in the WebGL hit-testing scene.
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+    if (draggingRef.current) return;
+    const elements3d = props.part.objects
+      .filter(
+        (obj) => obj.type !== "camera" && !obj.hidden && obj.threeD === true,
+      )
+      .map((obj) => {
+        const state = evaluateObjectState(obj, props.localTime);
+        return {
+          id: obj.id,
+          bounds: state.bounds,
+          transform: typeof state.transform === "object" ? state.transform : {},
+        };
+      });
+    scene.setPickableObjects(elements3d);
+  }, [props.part, props.localTime]);
+
   // Once the CSS3D plane target portal is ready, force one render so the
   // composition is visible on initial mount, not after the next input change.
   useEffect(() => {
@@ -309,29 +706,178 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
     scene.render();
   }, [planeTarget]);
 
+  useEffect(() => {
+    const host = sceneHostRef.current;
+    const preview = sideBySidePreviewRef.current;
+    const divider = sideBySideDividerRef.current;
+    if (!host) return;
+    if (previewMode !== "side-by-side") {
+      host.style.width = "";
+      if (preview) preview.style.width = "";
+      if (divider) divider.style.left = "";
+      return;
+    }
+    if (!preview || !divider) return;
+    applySideBySideSplitPreview(sideBySideSplit);
+  }, [previewMode, sideBySideSplit]);
+
+  const startSideBySideResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const root = rootRef.current;
+    if (!root) return;
+    event.preventDefault();
+    const rect = root.getBoundingClientRect();
+    let committedSplit = sideBySideSplit;
+    const update = (clientX: number) => {
+      const next = (clientX - rect.left) / Math.max(1, rect.width);
+      const split = Math.min(0.75, Math.max(0.25, next));
+      committedSplit = split;
+      if (sideBySideResizeFrameRef.current) return;
+      sideBySideResizeFrameRef.current = requestAnimationFrame(() => {
+        sideBySideResizeFrameRef.current = 0;
+        applySideBySideSplitPreview(committedSplit);
+      });
+    };
+    update(event.clientX);
+    const handleMove = (moveEvent: PointerEvent) => update(moveEvent.clientX);
+    const handleUp = () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+      if (sideBySideResizeFrameRef.current) {
+        cancelAnimationFrame(sideBySideResizeFrameRef.current);
+        sideBySideResizeFrameRef.current = 0;
+      }
+      applySideBySideSplitPreview(committedSplit);
+      setSideBySideSplit(committedSplit);
+      props.onAuthorViewStateChange?.({ sideBySideSplit: committedSplit });
+    };
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+  };
+
+  const renderCameraPreview = () => (
+    <FitCameraPreview
+      part={props.part}
+      localTime={props.localTime}
+      backendProps={props.pipBackendProps}
+    />
+  );
+
+  const previewButtonClass = (mode: CameraPreviewMode) =>
+    `grid h-7 w-7 place-items-center rounded-[6px] text-[11px] font-bold leading-none outline-none transition focus-visible:ring-2 focus-visible:ring-[rgb(var(--clipper-accent-rgb)/0.32)] ${
+      previewMode === mode
+        ? "bg-[var(--clipper-accent)] text-[var(--clipper-accent-foreground)]"
+        : "text-[#c8cedc] hover:bg-[#242936] hover:text-white"
+    }`;
+
+  const changePreviewMode = (mode: CameraPreviewMode) => {
+    setPreviewMode(mode);
+    props.onPreviewModeChange?.(mode);
+    props.onAuthorViewStateChange?.({ previewMode: mode });
+  };
+
   return (
     <div
-      ref={hostRef}
+      ref={rootRef}
       className="absolute inset-0"
       data-clipper-compose-author-view
     >
-      {planeTarget
+      <div
+        ref={sceneHostRef}
+        className={`${
+          previewMode === "side-by-side"
+            ? "absolute inset-y-0 left-0"
+            : previewMode === "2d"
+              ? "pointer-events-none absolute inset-0 opacity-0"
+              : "absolute inset-0"
+        }`}
+        data-clipper-compose-author-scene
+      />
+      {planeTarget && previewMode !== "2d"
         ? createPortal(props.renderComposition(), planeTarget)
         : null}
 
-      <div
-        className="pointer-events-auto absolute right-3 top-3 w-[28%] max-w-[360px] overflow-hidden rounded-[4px] border border-[#2d313b] bg-[#0a0c10] shadow-[0_18px_40px_rgba(0,0,0,0.45)]"
-        style={{ aspectRatio: `${FRAME_WIDTH} / ${FRAME_HEIGHT}`, zIndex: 10 }}
-        data-clipper-camera-pip
-        data-clipper-camera-pip-dof="deferred"
-      >
-        <CompositionWebGLHost
-          part={props.part}
-          localTime={props.localTime}
-          hostClassName="h-full w-full"
-          backendProps={props.pipBackendProps}
-        />
-      </div>
+      {previewMode === "pip" ? (
+        <div
+          className="pointer-events-auto absolute right-3 top-3 w-[28%] max-w-[360px] overflow-hidden rounded-[4px] border border-[#2d313b] bg-[#0a0c10] shadow-[0_18px_40px_rgba(0,0,0,0.45)]"
+          style={{
+            aspectRatio: `${FRAME_WIDTH} / ${FRAME_HEIGHT}`,
+            zIndex: 10,
+          }}
+          data-clipper-camera-pip
+          data-clipper-camera-pip-dof="deferred"
+        >
+          <CompositionWebGLHost
+            part={props.part}
+            localTime={props.localTime}
+            hostClassName="h-full w-full"
+            backendProps={props.pipBackendProps}
+          />
+        </div>
+      ) : null}
+
+      {previewMode === "side-by-side" ? (
+        <div
+          ref={sideBySidePreviewRef}
+          className="pointer-events-auto absolute inset-y-0 right-0 overflow-hidden border-l border-[#2d313b] bg-[#0a0c10]"
+          data-clipper-camera-side-by-side
+        >
+          {renderCameraPreview()}
+        </div>
+      ) : null}
+
+      {previewMode === "side-by-side" ? (
+        <div
+          ref={sideBySideDividerRef}
+          className="pointer-events-auto absolute inset-y-0 z-20 w-2 -translate-x-1/2 cursor-col-resize"
+          onPointerDown={startSideBySideResize}
+          data-clipper-camera-side-by-side-resize
+        >
+          <div className="mx-auto h-full w-px bg-[#3a4050]" />
+        </div>
+      ) : null}
+
+      {previewMode === "2d" ? (
+        <div
+          className="pointer-events-auto absolute inset-0 overflow-hidden bg-[#0e1117]"
+          data-clipper-camera-2d-preview
+        >
+          <FitFlatComposition>{props.renderComposition()}</FitFlatComposition>
+        </div>
+      ) : null}
+
+      {showCameraPreviewControls ? (
+        <div
+          className="pointer-events-auto absolute bottom-3 right-3 rounded-[9px] border border-[#2d313b] bg-[#151820]/95 p-1 shadow-[0_14px_38px_rgba(0,0,0,0.36),inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur"
+          style={{ zIndex: 2147483647 }}
+          onClick={(event) => event.stopPropagation()}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <div className="flex items-center gap-1">
+            <button
+              className={previewButtonClass("side-by-side")}
+              onClick={() => changePreviewMode("side-by-side")}
+              title="Side by side"
+              aria-label="Side by side"
+            >
+              <SquareSplitHorizontal size={14} />
+            </button>
+            <button
+              className={previewButtonClass("pip")}
+              onClick={() => changePreviewMode("pip")}
+              title="Picture in picture"
+              aria-label="Picture in picture"
+            >
+              <PictureInPicture2 size={14} />
+            </button>
+            <button
+              className={previewButtonClass("2d")}
+              onClick={() => changePreviewMode("2d")}
+            >
+              2D
+            </button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

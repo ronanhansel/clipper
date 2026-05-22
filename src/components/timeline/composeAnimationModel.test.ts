@@ -254,6 +254,48 @@ describe("buildComposeAnimationTimelineLayers", () => {
     ).toEqual([0, 3]);
   });
 
+  it("moves camera props keyframes from layer-row timeline interactions", () => {
+    const object = {
+      ...frameObject("camera"),
+      type: "camera",
+      props: { position: { x: 0, y: 0, z: 1158 } },
+      tracks: {
+        "props.position.x": {
+          valueType: "number",
+          points: [
+            { id: "x-0", time: 0, value: 0 },
+            { id: "x-1", time: 2, value: 100 },
+          ],
+        },
+        "props.position.y": {
+          valueType: "number",
+          points: [
+            { id: "y-0", time: 0, value: 0 },
+            { id: "y-1", time: 2, value: 50 },
+          ],
+        },
+      },
+    } satisfies FrameObject;
+
+    const movedGroup = moveComposeGenericPropertyKeyframesAtTime(
+      object,
+      2,
+      3,
+      6,
+    );
+
+    expect(
+      movedGroup.tracks?.["props.position.x"]?.points.map(
+        (point) => point.time,
+      ),
+    ).toEqual([0, 3]);
+    expect(
+      movedGroup.tracks?.["props.position.y"]?.points.map(
+        (point) => point.time,
+      ),
+    ).toEqual([0, 3]);
+  });
+
   it("removes generic property keyframes while preserving final evaluated value", () => {
     const object = {
       ...frameObject("shape"),

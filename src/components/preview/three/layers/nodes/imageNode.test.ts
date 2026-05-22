@@ -1,5 +1,6 @@
 import { describe, expect, it, beforeEach, beforeAll, afterAll } from "vitest";
 import * as THREE from "three";
+import { MEDIA_PLACEHOLDER_DATA_URL } from "../../../../../core/mediaPlaceholder";
 import {
   acquireImageTexture,
   clearImageTextureCacheForTests,
@@ -277,7 +278,9 @@ describe("imageNodeFactory", () => {
     );
     node.update(makeState({ style: { opacity: 1 } }));
     const u = node.object3D.material.uniforms;
-    expect(u.u_image.value).toBeInstanceOf(THREE.DataTexture);
+    expect(u.u_image.value).toBeInstanceOf(THREE.Texture);
+    expect(u.u_image.value.image).toBeInstanceOf(FakeImage);
+    expect(u.u_image.value.image.src).toBe(MEDIA_PLACEHOLDER_DATA_URL);
     node.dispose();
   });
 });

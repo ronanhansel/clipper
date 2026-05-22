@@ -7,6 +7,7 @@ import {
   screen,
   shell,
   clipboard,
+  protocol,
 } from "electron";
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -47,6 +48,18 @@ app.commandLine.appendSwitch(
   "HTMLCanvasElementDrawElement",
 );
 app.commandLine.appendSwitch("enable-features", "CanvasDrawElement");
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: "clipper-media",
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+      stream: true,
+    },
+  },
+]);
 const automaticUpdateDownloadsEnabled = readStartupAppStateBoolean(
   "automaticUpdateDownloads",
   true,
@@ -373,6 +386,38 @@ function getClipperRelativePath(filePath: string) {
   }
 
   return path.relative(appRoot, resolved).split(path.sep).join("/");
+}
+
+function installMediaProtocol() {
+  protocol.handle("clipper-media", async (request) => {
+    try {
+      const url = new URL(request.url);
+      if (url.hostname !== "file") return new Response(null, { status: 404 });
+      const filePath = decodeURIComponent(url.pathname.slice(1));
+      if (!path.isAbsolute(filePath))
+        return new Response(null, { status: 404 });
+      const data = await fs.readFile(filePath);
+      return new Response(new Uint8Array(data), {
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Cache-Control": "no-store",
+          "Content-Type": getMediaContentType(filePath),
+        },
+      });
+    } catch {
+      return new Response(null, { status: 404 });
+    }
+  });
+}
+
+function getMediaContentType(filePath: string) {
+  const extension = path.extname(filePath).toLowerCase();
+  if (extension === ".png") return "image/png";
+  if (extension === ".jpg" || extension === ".jpeg") return "image/jpeg";
+  if (extension === ".webp") return "image/webp";
+  if (extension === ".gif") return "image/gif";
+  if (extension === ".svg") return "image/svg+xml";
+  return "application/octet-stream";
 }
 
 function getAgentProviderCommand(provider: string) {
@@ -1536,6 +1581,8 @@ function installShutdownHandlers() {
 installShutdownHandlers();
 
 app.whenReady().then(async () => {
+  installMediaProtocol();
+
   if (isRenderVideoChildProcess) {
     const payloadPath = process.argv[renderVideoChildArgIndex + 1];
     if (!payloadPath)

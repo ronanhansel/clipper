@@ -25,6 +25,7 @@ export type FrameObjectType =
   | "rect"
   | "text"
   | "image"
+  | "media"
   | "svg"
   | "html"
   | "template"
@@ -787,6 +788,19 @@ export type ComposeLayoutState = {
   leftPanelWidth: number;
 };
 
+export type EditorThreeAuthorViewState = {
+  previewMode: "pip" | "side-by-side" | "2d";
+  sideBySideSplit: number;
+  orbit: {
+    cameraX: number;
+    cameraY: number;
+    cameraZ: number;
+    targetX: number;
+    targetY: number;
+    targetZ: number;
+  };
+};
+
 export type EffectsPanelState = {
   openGroups?: Record<string, boolean>;
 };
@@ -826,6 +840,7 @@ export type EditorState = {
   pausePlaybackOnScrub?: boolean;
   layout?: EditorLayoutState;
   composeLayout?: ComposeLayoutState;
+  threeAuthorView?: EditorThreeAuthorViewState;
   preview?: PreviewViewportState;
   editor?: Record<string, CodeViewportState>;
   /** Legacy editor viewport state key. New projects should use editor. */

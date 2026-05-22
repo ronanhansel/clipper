@@ -26,6 +26,7 @@ import {
 import {
   addCompositionBinItemInProject,
   addTimelineBinItemInProject,
+  type BinProxyImportFile,
   createBinFolderInProject,
   createInternalFileInProject,
   deleteBinItemInProject,
@@ -523,7 +524,10 @@ export function useBinProjectActions({
       );
   }
 
-  function dropBinFiles(files: FileList, parentFolderId?: string) {
+  function dropBinFiles(
+    files: Iterable<BinProxyImportFile>,
+    parentFolderId?: string,
+  ) {
     updateProject((current) =>
       importDroppedFilesToBin(current, files, parentFolderId),
     );

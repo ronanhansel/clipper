@@ -28,6 +28,7 @@ function makeObject(
     selector: `[data-id='${id}']`,
     bounds,
     style: {},
+    transform: {},
   };
 }
 
@@ -64,6 +65,26 @@ class TrackingNode implements LayerNode {
   }
 }
 
+class MaterialTrackingNode implements LayerNode {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  readonly object3D: any;
+
+  constructor(id: string) {
+    this.object3D = new THREE.Mesh(
+      new THREE.PlaneGeometry(1, 1),
+      new THREE.MeshBasicMaterial({ depthTest: true, depthWrite: true }),
+    );
+    this.object3D.name = `material:${id}`;
+  }
+
+  update() {}
+
+  dispose() {
+    this.object3D.geometry.dispose();
+    this.object3D.material.dispose();
+  }
+}
+
 function makeTrackingFactory(
   kind: FrameObjectType | "default",
 ): LayerNodeFactory {
@@ -71,6 +92,17 @@ function makeTrackingFactory(
     kind,
     create(object) {
       return new TrackingNode(object.id, object.type);
+    },
+  };
+}
+
+function makeMaterialTrackingFactory(
+  kind: FrameObjectType | "default",
+): LayerNodeFactory {
+  return {
+    kind,
+    create(object) {
+      return new MaterialTrackingNode(object.id);
     },
   };
 }
@@ -152,6 +184,53 @@ describe("LayerNodeSync", () => {
     expect(sync.group.children).toHaveLength(1);
     expect(sync.group.children[0]).not.toBe(firstObject3D);
     expect(sync.describeForTests()[0]).toEqual({ id: "a", type: "text" });
+    sync.dispose();
+  });
+
+  it("assigns increasing renderOrder to visible non-camera layers", () => {
+    clearLayerNodeRegistry();
+    registerLayerNodeFactory(makeMaterialTrackingFactory("default"));
+    const sync = new LayerNodeSync(makeContext());
+    sync.sync(makePart([makeObject("a", "rect"), makeObject("b", "image")]), 0);
+    expect(sync.group.children[0].renderOrder).toBe(100);
+    expect(sync.group.children[1].renderOrder).toBe(101);
+    sync.dispose();
+  });
+
+  it("biases flat layers with polygon offset and restores defaults for 3D layers", () => {
+    clearLayerNodeRegistry();
+    registerLayerNodeFactory(makeMaterialTrackingFactory("default"));
+    const sync = new LayerNodeSync(makeContext());
+    const object = makeObject("a", "rect");
+    sync.sync(makePart([makeObject("below", "rect"), object]), 0);
+    const mesh = sync.group.children[1] as {
+      material: {
+        depthTest: boolean;
+        depthWrite: boolean;
+        polygonOffset: boolean;
+        polygonOffsetFactor: number;
+        polygonOffsetUnits: number;
+      };
+    };
+    const material = mesh.material;
+    expect(material.depthTest).toBe(true);
+    expect(material.depthWrite).toBe(true);
+    expect(material.polygonOffset).toBe(true);
+    expect(material.polygonOffsetFactor).toBe(0);
+    expect(material.polygonOffsetUnits).toBe(-1);
+
+    sync.sync(
+      makePart([
+        makeObject("below", "rect"),
+        { ...object, transform: { translateZ: 12 } },
+      ]),
+      0,
+    );
+    expect(material.depthTest).toBe(true);
+    expect(material.depthWrite).toBe(true);
+    expect(material.polygonOffset).toBe(false);
+    expect(material.polygonOffsetFactor).toBe(0);
+    expect(material.polygonOffsetUnits).toBe(0);
     sync.dispose();
   });
 

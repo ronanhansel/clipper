@@ -124,7 +124,11 @@ import {
   getExecutableAdjustmentLayers,
   getExecutableTransitionLayers,
 } from "./core/timeline";
-import { upsertPropertyKeyframe } from "./core/propertyRegistry";
+import {
+  evaluateObjectState,
+  setPropertyBaseValue,
+  upsertPropertyKeyframe,
+} from "./core/propertyRegistry";
 import { type EaseValue, getEaseControlPoints } from "./core/easing";
 import {
   FRAME_HEIGHT,
@@ -135,6 +139,7 @@ import {
 } from "./core/types";
 import { FindMediaDialog } from "./components/FindMediaDialog";
 import { WelcomeScreen } from "./components/WelcomeScreen";
+import { evaluateCameraObjectPropsAt } from "./components/preview/compositors/useCompositionCamera";
 import { type BinFindMediaDetail } from "./lib/binEvents";
 
 const defaultEditorState: EditorState = {
@@ -172,6 +177,30 @@ function readCameraPropAtPath(
   if (path === "props.rotation.x") return next.rotation.x;
   if (path === "props.rotation.y") return next.rotation.y;
   return next.rotation.z;
+}
+
+const DRAG_KEYFRAME_EPSILON = 1e-5;
+
+function dragValueChanged(before: number, after: number): boolean {
+  return (
+    Number.isFinite(before) &&
+    Number.isFinite(after) &&
+    Math.abs(before - after) > DRAG_KEYFRAME_EPSILON
+  );
+}
+
+function writeChangedNumericProperty(
+  object: FrameObject,
+  path: string,
+  time: number,
+  before: number,
+  after: number,
+): FrameObject {
+  if (!dragValueChanged(before, after)) return object;
+  if (object.tracks?.[path]?.points.length) {
+    return upsertPropertyKeyframe(object, path, time, after);
+  }
+  return setPropertyBaseValue(object, path, after);
 }
 
 /**
@@ -1518,19 +1547,14 @@ function AppContent({
       updateObjectById(
         cameraObjectId,
         (object) => {
-          // For each per-axis path that already has a track, upsert a
-          // keyframe at the current playhead. Then write the full props
-          // bag onto the object so non-animated axes get their base value.
-          let mutated: FrameObject = {
-            ...object,
-            props: { ...(object.props ?? {}), ...next },
-          };
+          const before = evaluateCameraObjectPropsAt(object, previewTime);
+          let mutated: FrameObject = object;
           for (const path of CAMERA_TRACK_PATHS) {
-            if (!mutated.tracks?.[path]?.points.length) continue;
-            mutated = upsertPropertyKeyframe(
+            mutated = writeChangedNumericProperty(
               mutated,
               path,
               previewTime,
+              readCameraPropAtPath(before, path),
               readCameraPropAtPath(next, path),
             );
           }
@@ -1599,6 +1623,97 @@ function AppContent({
       );
     },
     [updateObjectById],
+  );
+
+  const handleObjectTransformChange = useCallback(
+    (
+      objectId: string,
+      nextTransform: {
+        bounds?: { x: number; y: number };
+        translateZ?: number;
+        rotateX?: number;
+        rotateY?: number;
+        rotateZ?: number;
+      },
+    ) => {
+      updateObjectById(
+        objectId,
+        (object) => {
+          const evaluated = evaluateObjectState(object, previewTime);
+          const nextBounds = nextTransform.bounds;
+          let mutated: FrameObject = object;
+          if (nextBounds) {
+            for (const key of ["x", "y"] as const) {
+              const path = `bounds.${key}`;
+              mutated = writeChangedNumericProperty(
+                mutated,
+                path,
+                previewTime,
+                evaluated.bounds[key],
+                nextBounds[key],
+              );
+            }
+          }
+          for (const key of [
+            "translateZ",
+            "rotateX",
+            "rotateY",
+            "rotateZ",
+          ] as const) {
+            const val = nextTransform[key];
+            if (val === undefined) continue;
+            const path = `transform.${key}`;
+            const before =
+              typeof evaluated.transform[key] === "number"
+                ? evaluated.transform[key]
+                : 0;
+            mutated = writeChangedNumericProperty(
+              mutated,
+              path,
+              previewTime,
+              before,
+              val,
+            );
+          }
+          return mutated;
+        },
+        { historyGroup: `object-transform-drag:${objectId}` },
+      );
+    },
+    [updateObjectById, previewTime],
+  );
+
+  const handleAuthorViewStateChange = useCallback(
+    (
+      next:
+        | NonNullable<EditorState["threeAuthorView"]>
+        | Partial<NonNullable<EditorState["threeAuthorView"]>>,
+    ) => {
+      updateEditorState((state) => ({
+        ...state,
+        threeAuthorView: {
+          ...state.threeAuthorView,
+          previewMode:
+            next.previewMode ?? state.threeAuthorView?.previewMode ?? "pip",
+          sideBySideSplit:
+            next.sideBySideSplit ??
+            state.threeAuthorView?.sideBySideSplit ??
+            0.5,
+          orbit: {
+            ...(state.threeAuthorView?.orbit ?? {
+              cameraX: 0,
+              cameraY: 0,
+              cameraZ: 2400,
+              targetX: 0,
+              targetY: 0,
+              targetZ: 0,
+            }),
+            ...next.orbit,
+          },
+        },
+      }));
+    },
+    [updateEditorState],
   );
 
   useComposeToolShortcuts({
@@ -1930,6 +2045,9 @@ function AppContent({
     onCameraPropsChange: handleCameraPropsChange,
     onCameraPathEaseChange: handleCameraPathEaseChange,
     onSelectObject: setSelectedObjectId,
+    authorViewState: project.editorState?.threeAuthorView,
+    onAuthorViewStateChange: handleAuthorViewStateChange,
+    onObjectTransformChange: handleObjectTransformChange,
   });
 
   const timelinePanelProps = useTimelinePanelProps({
@@ -2126,6 +2244,7 @@ function AppContent({
                     activeTool,
                     onAddNullObject: composeDrawing.addNullObjectToFrameCenter,
                     onAddCamera: addCameraToActivePart,
+                    onAddMediaObject: () => createComposeObject("media"),
                     onAddCodeObject: () => createComposeObject("code"),
                     onActiveToolChange: setActiveTool,
                     resizeMode: objectResizeMode,

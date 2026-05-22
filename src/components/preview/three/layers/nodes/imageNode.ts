@@ -1,4 +1,6 @@
 import * as THREE from "three";
+import { MEDIA_PLACEHOLDER_DATA_URL } from "../../../../../core/mediaPlaceholder";
+import { normalizeClipperMediaUrl } from "../../../../../core/mediaSource";
 import type { EvaluatedObjectState } from "../../../../../core/propertyRegistry";
 import type { FrameObject } from "../../../../../core/types";
 import type { LayerNode, LayerNodeFactory } from "../layerNodeRegistry";
@@ -93,14 +95,6 @@ export function clearImageTextureCacheForTests(): void {
   textureCache.clear();
 }
 
-function makePlaceholderTexture(): // eslint-disable-next-line @typescript-eslint/no-explicit-any
-any {
-  const data = new Uint8Array([0, 0, 0, 0]);
-  const texture = new THREE.DataTexture(data, 1, 1, THREE.RGBAFormat);
-  texture.needsUpdate = true;
-  return texture;
-}
-
 type UvCrop = {
   originX: number;
   originY: number;
@@ -145,7 +139,8 @@ function readObjectFit(state: EvaluatedObjectState): string {
 
 function readImageSrc(state: EvaluatedObjectState): string | null {
   const src = state.style?.src;
-  if (typeof src === "string" && src.length > 0) return src;
+  if (typeof src === "string" && src.length > 0)
+    return normalizeClipperMediaUrl(src);
   return null;
 }
 
@@ -172,7 +167,7 @@ class ImageNode implements LayerNode {
   private height = 1;
 
   constructor(id: string) {
-    this.placeholder = makePlaceholderTexture();
+    this.placeholder = acquireImageTexture(MEDIA_PLACEHOLDER_DATA_URL);
     this.material = new THREE.ShaderMaterial({
       vertexShader: IMAGE_VERTEX,
       fragmentShader: IMAGE_FRAGMENT,
@@ -254,12 +249,19 @@ class ImageNode implements LayerNode {
     this.currentTexture = null;
     this.mesh.geometry.dispose();
     this.material.dispose();
-    this.placeholder.dispose();
+    releaseImageTexture(MEDIA_PLACEHOLDER_DATA_URL);
   }
 }
 
 export const imageNodeFactory: LayerNodeFactory = {
   kind: "image",
+  create(object: FrameObject) {
+    return new ImageNode(object.id);
+  },
+};
+
+export const mediaNodeFactory: LayerNodeFactory = {
+  kind: "media",
   create(object: FrameObject) {
     return new ImageNode(object.id);
   },

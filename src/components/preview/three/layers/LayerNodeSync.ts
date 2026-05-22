@@ -9,7 +9,7 @@ import {
 } from "./layerNodeRegistry";
 import { rectNodeFactory } from "./nodes/rectNode";
 import { nullNodeFactory } from "./nodes/nullNode";
-import { imageNodeFactory } from "./nodes/imageNode";
+import { imageNodeFactory, mediaNodeFactory } from "./nodes/imageNode";
 import { textNodeFactory } from "./nodes/textNode";
 import { svgNodeFactory } from "./nodes/svgNode";
 import { createPerElementCaptureFactory } from "./nodes/perElementCaptureNode";
@@ -31,6 +31,7 @@ export function installDefaultLayerNodeFactories(): void {
   registerLayerNodeFactory(rectNodeFactory);
   registerLayerNodeFactory(nullNodeFactory);
   registerLayerNodeFactory(imageNodeFactory);
+  registerLayerNodeFactory(mediaNodeFactory);
   registerLayerNodeFactory(textNodeFactory);
   registerLayerNodeFactory(svgNodeFactory);
   for (const kind of CAPTURE_FALLBACK_KINDS) {
@@ -53,6 +54,128 @@ type Entry = {
   node: LayerNode;
 };
 
+const FLAT_LAYER_RENDER_ORDER_BASE = 100;
+
+type MaterialDepthDefaults = {
+  depthTest: boolean;
+  depthWrite: boolean;
+  polygonOffset: boolean;
+  polygonOffsetFactor: number;
+  polygonOffsetUnits: number;
+};
+
+function isFlatLayer(state: ReturnType<typeof evaluateObjectState>): boolean {
+  const transform = state.transform ?? {};
+  return (
+    readTransformNumber(transform.translateZ) === 0 &&
+    readTransformNumber(transform.rotateX) === 0 &&
+    readTransformNumber(transform.rotateY) === 0
+  );
+}
+
+function readTransformNumber(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function applyLayerRenderSemantics(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  root: any,
+  stackIndex: number,
+  flat: boolean,
+): void {
+  const renderOrder = FLAT_LAYER_RENDER_ORDER_BASE + stackIndex;
+  root.renderOrder = renderOrder;
+  if ("depthOffset" in root) {
+    root.depthOffset = flat ? -stackIndex : 0;
+  }
+  if (typeof root.traverse === "function") {
+    root.traverse((child: { renderOrder: number; material?: unknown }) => {
+      child.renderOrder = renderOrder;
+      if ("depthOffset" in child) {
+        child.depthOffset = flat ? -stackIndex : 0;
+      }
+      applyMaterialDepthMode(child.material, stackIndex, flat);
+    });
+    return;
+  }
+  applyMaterialDepthMode(root.material, stackIndex, flat);
+}
+
+function applyMaterialDepthMode(
+  material: unknown,
+  stackIndex: number,
+  flat: boolean,
+): void {
+  if (Array.isArray(material)) {
+    for (const item of material)
+      applySingleMaterialDepthMode(item, stackIndex, flat);
+    return;
+  }
+  applySingleMaterialDepthMode(material, stackIndex, flat);
+}
+
+function applySingleMaterialDepthMode(
+  material: unknown,
+  stackIndex: number,
+  flat: boolean,
+): void {
+  if (!isDepthMaterial(material)) return;
+  const userData = (material.userData ??= {});
+  const defaults =
+    (userData.layerDepthDefaults as MaterialDepthDefaults | undefined) ??
+    ({
+      depthTest: material.depthTest,
+      depthWrite: material.depthWrite,
+      polygonOffset: material.polygonOffset,
+      polygonOffsetFactor: material.polygonOffsetFactor,
+      polygonOffsetUnits: material.polygonOffsetUnits,
+    } satisfies MaterialDepthDefaults);
+  userData.layerDepthDefaults = defaults;
+
+  const nextDepthTest = defaults.depthTest;
+  const nextDepthWrite = defaults.depthWrite;
+  const nextPolygonOffset = flat ? true : defaults.polygonOffset;
+  const nextPolygonOffsetFactor = flat ? 0 : defaults.polygonOffsetFactor;
+  const nextPolygonOffsetUnits = flat
+    ? -stackIndex
+    : defaults.polygonOffsetUnits;
+  if (
+    material.depthTest === nextDepthTest &&
+    material.depthWrite === nextDepthWrite &&
+    material.polygonOffset === nextPolygonOffset &&
+    material.polygonOffsetFactor === nextPolygonOffsetFactor &&
+    material.polygonOffsetUnits === nextPolygonOffsetUnits
+  ) {
+    return;
+  }
+  material.depthTest = nextDepthTest;
+  material.depthWrite = nextDepthWrite;
+  material.polygonOffset = nextPolygonOffset;
+  material.polygonOffsetFactor = nextPolygonOffsetFactor;
+  material.polygonOffsetUnits = nextPolygonOffsetUnits;
+  material.needsUpdate = true;
+}
+
+function isDepthMaterial(material: unknown): material is {
+  depthTest: boolean;
+  depthWrite: boolean;
+  polygonOffset: boolean;
+  polygonOffsetFactor: number;
+  polygonOffsetUnits: number;
+  needsUpdate: boolean;
+  userData?: Record<string, unknown>;
+} {
+  return (
+    typeof material === "object" &&
+    material !== null &&
+    "depthTest" in material &&
+    "depthWrite" in material &&
+    "polygonOffset" in material &&
+    "polygonOffsetFactor" in material &&
+    "polygonOffsetUnits" in material
+  );
+}
+
 /**
  * Reconciles the composition's evaluated objects against a Three.js
  * scene `Group` of native per-type nodes.
@@ -74,6 +197,7 @@ export class LayerNodeSync {
   sync(part: CompositionClip | null, localTime: number): void {
     const seen = new Set<string>();
     if (part) {
+      let stackIndex = 0;
       for (const object of part.objects) {
         if (object.hidden) continue;
         if (object.type === "camera") continue;
@@ -100,6 +224,12 @@ export class LayerNodeSync {
 
         const state = evaluateObjectState(object, localTime);
         entry.node.update(state);
+        applyLayerRenderSemantics(
+          entry.node.object3D,
+          stackIndex,
+          isFlatLayer(state),
+        );
+        stackIndex += 1;
       }
     }
 

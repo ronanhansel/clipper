@@ -446,6 +446,7 @@ function readObjectType(
     value === "rect" ||
     value === "text" ||
     value === "image" ||
+    value === "media" ||
     value === "svg" ||
     value === "html" ||
     value === "template" ||

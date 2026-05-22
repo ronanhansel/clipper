@@ -24,6 +24,10 @@ import {
   type ExportTileFrameBounds,
 } from "../FramePreview";
 import { CompositionCompositor } from "./CompositionCompositor";
+import type {
+  CameraPreviewMode,
+  ComposeAuthorViewState,
+} from "../three/ComposeAuthorView";
 import { renderScenePreview } from "../render/sceneRender";
 
 type SceneCompositorProps = {
@@ -90,6 +94,19 @@ type SceneCompositorProps = {
     nextCpX: number,
   ) => void;
   onSelectObject?: (objectId: string | null) => void;
+  onAuthorPreviewModeChange?: (mode: CameraPreviewMode) => void;
+  authorViewState?: ComposeAuthorViewState;
+  onAuthorViewStateChange?: (state: Partial<ComposeAuthorViewState>) => void;
+  onObjectTransformChange?: (
+    objectId: string,
+    transform: {
+      bounds?: { x: number; y: number };
+      translateZ?: number;
+      rotateX?: number;
+      rotateY?: number;
+      rotateZ?: number;
+    },
+  ) => void;
 };
 
 export const SceneCompositor = memo(function SceneCompositor({
@@ -127,6 +144,10 @@ export const SceneCompositor = memo(function SceneCompositor({
   onCameraPropsChange,
   onCameraPathEaseChange,
   onSelectObject,
+  onAuthorPreviewModeChange,
+  authorViewState,
+  onAuthorViewStateChange,
+  onObjectTransformChange,
   isPostProcessSource,
 }: SceneCompositorProps) {
   useLayoutEffect(() => {
@@ -217,6 +238,10 @@ export const SceneCompositor = memo(function SceneCompositor({
                 onCameraPropsChange={onCameraPropsChange}
                 onCameraPathEaseChange={onCameraPathEaseChange}
                 onSelectObject={onSelectObject}
+                onAuthorPreviewModeChange={onAuthorPreviewModeChange}
+                authorViewState={authorViewState}
+                onAuthorViewStateChange={onAuthorViewStateChange}
+                onObjectTransformChange={onObjectTransformChange}
               />
             ))
           )}

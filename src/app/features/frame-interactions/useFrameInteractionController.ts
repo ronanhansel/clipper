@@ -12,7 +12,6 @@ import type { RightPanelTab } from "../../types";
 import {
   boundsToViewport,
   framePointToCameraTranslation,
-  viewportPointToFrame,
   type CameraPreviewTransform,
 } from "../../../core/camera";
 import type { AdjustmentEffectPointControl } from "../../../core/effects/types";
@@ -275,13 +274,131 @@ export function useFrameInteractionController(
     setObjectSnapGuides([]);
   }
 
-  function getFrameObjectElement(objectId: string) {
-    const escapedId = CSS.escape(objectId);
+  function getFlatFrameElement() {
     return (
       frameViewportRef.current?.querySelector<HTMLElement>(
-        `[data-object-id="${escapedId}"],[data-background-element-id="${escapedId}"]`,
+        "[data-clipper-flat-frame]",
       ) ?? null
     );
+  }
+
+  function getFrameObjectElement(objectId: string) {
+    const escapedId = CSS.escape(objectId);
+    const root = getFlatFrameElement() ?? frameViewportRef.current;
+    const candidates = Array.from(
+      root?.querySelectorAll<HTMLElement>(
+        `[data-object-id="${escapedId}"],[data-background-element-id="${escapedId}"]`,
+      ) ?? [],
+    );
+    const flatFrameRect = getFlatFrameRect();
+    return (
+      candidates.find((candidate) => {
+        if (!flatFrameRect) return true;
+        const rect = candidate.getBoundingClientRect();
+        return (
+          rect.right >= flatFrameRect.left &&
+          rect.left <= flatFrameRect.right &&
+          rect.bottom >= flatFrameRect.top &&
+          rect.top <= flatFrameRect.bottom
+        );
+      }) ??
+      candidates[0] ??
+      null
+    );
+  }
+
+  function getFlatFrameRect() {
+    return (
+      getFlatFrameElement()?.getBoundingClientRect() ??
+      frameViewportRef.current?.getBoundingClientRect() ??
+      null
+    );
+  }
+
+  function getFrameUnitsPerScreenPx() {
+    const rect = getFlatFrameRect();
+    if (rect && rect.width > 0) return FRAME_WIDTH / rect.width;
+    return (
+      1 / Math.max(frameDisplayScale * cameraPreviewTransform.scale, 0.001)
+    );
+  }
+
+  function getScreenPxPerFrameUnit() {
+    return 1 / getFrameUnitsPerScreenPx();
+  }
+
+  function getObjectFromPointerEvent(event: ReactPointerEvent<HTMLDivElement>) {
+    const flatFrame = getFlatFrameElement();
+    const candidates = [
+      event.target,
+      ...document.elementsFromPoint(event.clientX, event.clientY),
+    ];
+    const objectElement =
+      candidates
+        .map((candidate) =>
+          candidate instanceof HTMLElement
+            ? candidate.closest<HTMLElement>(
+                "[data-object-id],[data-background-element-id]",
+              )
+            : null,
+        )
+        .find((candidate) =>
+          candidate && flatFrame ? flatFrame.contains(candidate) : candidate,
+        ) ?? null;
+    const objectId =
+      objectElement?.dataset.objectId ??
+      objectElement?.dataset.backgroundElementId;
+    return objectId ? getPartFrameObject(part, objectId) : null;
+  }
+
+  function getRenderedFlatBounds(objectId: string): Bounds | null {
+    const frameRect = getFlatFrameRect();
+    const elementRect =
+      getFrameObjectElement(objectId)?.getBoundingClientRect();
+    if (!frameRect || !elementRect || frameRect.width === 0) return null;
+    const scale = FRAME_WIDTH / frameRect.width;
+    return {
+      x: (elementRect.left - frameRect.left) * scale,
+      y: (elementRect.top - frameRect.top) * scale,
+      width: elementRect.width * scale,
+      height: elementRect.height * scale,
+    };
+  }
+
+  function createRenderedSelectionPayload(
+    selectionBox: Bounds,
+    objects: FrameObject[],
+  ): SelectionPayload {
+    const selectedObjects = objects.flatMap((object) => {
+      if (object.hidden || object.locked) return [];
+      const renderedBounds = getRenderedFlatBounds(object.id);
+      if (!renderedBounds) return [];
+      if (
+        selectionBox.x > renderedBounds.x + renderedBounds.width ||
+        selectionBox.x + selectionBox.width < renderedBounds.x ||
+        selectionBox.y > renderedBounds.y + renderedBounds.height ||
+        selectionBox.y + selectionBox.height < renderedBounds.y
+      )
+        return [];
+      return [
+        selectionObjectFromFrameObject(
+          evaluateObjectState(object, previewTime),
+        ),
+      ];
+    });
+    const visibleSelectionBox =
+      selectedObjects.length > 0
+        ? getBoundsUnion(
+            selectedObjects.map(
+              (object) => getRenderedFlatBounds(object.id) ?? object.bounds,
+            ),
+          )
+        : selectionBox;
+    return {
+      selectionBox: visibleSelectionBox,
+      coordinates: boundsToPoints(visibleSelectionBox),
+      objects: selectedObjects,
+    };
   }
 
   function getFrameSelectionBoxElements() {
@@ -299,18 +416,15 @@ export function useFrameInteractionController(
   function getPortalOverlayElements() {
     return Array.from(
       document.querySelectorAll<HTMLElement>(
-        "[data-frame-selection-box],[data-frame-path-edit-overlay],[data-frame-overlay-follow]",
+        "[data-frame-path-edit-overlay],[data-frame-overlay-follow]",
       ),
     );
   }
 
   function setFrameSelectionBoxDragTransform(delta: Point) {
-    const frameRect = frameViewportRef.current?.getBoundingClientRect();
-    const actualFrameScale = frameRect
-      ? frameRect.width / FRAME_WIDTH
-      : framePreviewScale;
-    const dx = `${delta.x * actualFrameScale * cameraPreviewTransform.scale}px`;
-    const dy = `${delta.y * actualFrameScale * cameraPreviewTransform.scale}px`;
+    const screenPxPerFrameUnit = getScreenPxPerFrameUnit();
+    const dx = `${delta.x * screenPxPerFrameUnit}px`;
+    const dy = `${delta.y * screenPxPerFrameUnit}px`;
     for (const element of getPortalOverlayElements()) {
       element.style.setProperty("--clipper-drag-x", dx);
       element.style.setProperty("--clipper-drag-y", dy);
@@ -380,16 +494,19 @@ export function useFrameInteractionController(
     const element = getFrameSelectionBoxElement(objectId);
     if (!element) return;
     if (element.dataset.frameSelectionBoxPortal) {
-      const rect = frameViewportRef.current?.getBoundingClientRect();
+      const targetRect =
+        getFrameObjectElement(objectId)?.getBoundingClientRect();
       const hostRect = element
         .closest<HTMLElement>("[data-clipper-preview-overlay-host]")
         ?.getBoundingClientRect();
-      if (!rect) return;
+      if (!targetRect) return;
       if (!hostRect) return;
-      const portalBounds = viewportBoundsToPortal(
-        viewportBounds,
-        getFramePortalOverlayTransform(rect, hostRect, framePreviewScale),
-      );
+      const portalBounds = {
+        x: targetRect.left - hostRect.left - selectorOffset,
+        y: targetRect.top - hostRect.top - selectorOffset,
+        width: targetRect.width + selectorOffset * 2,
+        height: targetRect.height + selectorOffset * 2,
+      };
       element.style.setProperty(
         "--clipper-selection-preview-left",
         `${portalBounds.x}px`,
@@ -666,39 +783,45 @@ export function useFrameInteractionController(
         const overlayHost = dragSelectionBoxRef.current.closest<HTMLElement>(
           "[data-clipper-preview-overlay-host]",
         );
-        const frameRect = frameViewportRef.current?.getBoundingClientRect();
+        const frameRect = getFlatFrameRect();
         const hostRect = overlayHost?.getBoundingClientRect();
-        const offset =
+        const screenPxPerFrameUnit = getScreenPxPerFrameUnit();
+        const portalBounds =
           frameRect && hostRect
             ? {
-                x: frameRect.left - hostRect.left,
-                y: frameRect.top - hostRect.top,
+                x:
+                  frameRect.left -
+                  hostRect.left +
+                  nextDragBox.x * screenPxPerFrameUnit,
+                y:
+                  frameRect.top -
+                  hostRect.top +
+                  nextDragBox.y * screenPxPerFrameUnit,
+                width: nextDragBox.width * screenPxPerFrameUnit,
+                height: nextDragBox.height * screenPxPerFrameUnit,
               }
-            : { x: 0, y: 0 };
-        const displayBounds = boundsToViewport(
-          nextDragBox,
-          cameraPreviewTransform,
-          framePreviewScale,
-        );
+            : {
+                x: nextDragBox.x * screenPxPerFrameUnit,
+                y: nextDragBox.y * screenPxPerFrameUnit,
+                width: nextDragBox.width * screenPxPerFrameUnit,
+                height: nextDragBox.height * screenPxPerFrameUnit,
+              };
         updateDragSelectionBoxElement(
           dragSelectionBoxRef.current,
           nextDragBox,
           framePreviewScale,
-          isVisibleMarqueeBounds(displayBounds, 1),
-          selectionOverlayScale,
-          offset,
-          displayBounds,
+          isVisibleMarqueeBounds(portalBounds, 1),
+          1,
+          { x: 0, y: 0 },
+          portalBounds,
         );
       }
       if (
         !nextDragBox ||
-        !isVisibleMarqueeBounds(
-          boundsToViewport(nextDragBox, cameraPreviewTransform, 1),
-          frameDisplayScale,
-        )
+        !isVisibleMarqueeBounds(nextDragBox, frameDisplayScale)
       )
         return;
-      const payload = createSelectionPayload(nextDragBox, [
+      const payload = createRenderedSelectionPayload(nextDragBox, [
         ...part.background.elements,
         ...part.objects,
       ]);
@@ -804,9 +927,13 @@ export function useFrameInteractionController(
       return;
     }
     if (!canSelectFrameObjects) return;
-    if ((event.target as HTMLElement).dataset.objectId) return;
+    const targetObject = getObjectFromPointerEvent(event);
+    if (targetObject) {
+      startObjectDrag(event, targetObject);
+      return;
+    }
     event.currentTarget.setPointerCapture(event.pointerId);
-    const point = cameraFramePointFromClient(
+    const point = flatFramePointFromClient(
       event.nativeEvent,
       event.currentTarget,
     );
@@ -932,12 +1059,11 @@ export function useFrameInteractionController(
 
     const activeObjectDrag = objectDragRef.current;
     if (activeObjectDrag && canSelectFrameObjects) {
+      const frameUnitsPerScreenPx = getFrameUnitsPerScreenPx();
       const dx =
-        (event.clientX - activeObjectDrag.origin.x) /
-        (frameDisplayScale * cameraPreviewTransform.scale);
+        (event.clientX - activeObjectDrag.origin.x) * frameUnitsPerScreenPx;
       const dy =
-        (event.clientY - activeObjectDrag.origin.y) /
-        (frameDisplayScale * cameraPreviewTransform.scale);
+        (event.clientY - activeObjectDrag.origin.y) * frameUnitsPerScreenPx;
       const constrainedDelta = constrainDragDeltaToDominantAxis(
         { x: dx, y: dy },
         event.shiftKey,
@@ -960,12 +1086,11 @@ export function useFrameInteractionController(
 
     const activeObjectResize = objectResizeRef.current;
     if (activeObjectResize && canSelectFrameObjects) {
+      const frameUnitsPerScreenPx = getFrameUnitsPerScreenPx();
       const dx =
-        (event.clientX - activeObjectResize.origin.x) /
-        (frameDisplayScale * cameraPreviewTransform.scale);
+        (event.clientX - activeObjectResize.origin.x) * frameUnitsPerScreenPx;
       const dy =
-        (event.clientY - activeObjectResize.origin.y) /
-        (frameDisplayScale * cameraPreviewTransform.scale);
+        (event.clientY - activeObjectResize.origin.y) * frameUnitsPerScreenPx;
       const preserveAspect =
         event.shiftKey || activeObjectResize.mode === "scale";
       if (event.metaKey || event.ctrlKey) {
@@ -988,7 +1113,7 @@ export function useFrameInteractionController(
 
     const currentDragStart = dragStartRef.current ?? dragStart;
     if (!currentDragStart || !canSelectFrameObjects) return;
-    const point = cameraFramePointFromClient(
+    const point = flatFramePointFromClient(
       event.nativeEvent,
       event.currentTarget,
     );
@@ -1040,16 +1165,13 @@ export function useFrameInteractionController(
     if (
       !finalDragBox ||
       !canSelectFrameObjects ||
-      !isVisibleMarqueeBounds(
-        boundsToViewport(finalDragBox, cameraPreviewTransform, 1),
-        frameDisplayScale,
-      )
+      !isVisibleMarqueeBounds(finalDragBox, frameDisplayScale)
     ) {
       if (finalDragBox && canSelectFrameObjects) clearNodeSelection();
       clearDragBox();
       return;
     }
-    const payload = createSelectionPayload(finalDragBox, [
+    const payload = createRenderedSelectionPayload(finalDragBox, [
       ...part.background.elements,
       ...part.objects,
     ]);
@@ -1366,23 +1488,14 @@ export function useFrameInteractionController(
     setEditingTextObjectId(object.id);
   }
 
-  function cameraFramePointFromClient(
+  function flatFramePointFromClient(
     event: Pick<MouseEvent, "clientX" | "clientY">,
     element: HTMLElement,
   ) {
-    const rect = element.getBoundingClientRect();
-    const viewportPoint = {
-      x: ((event.clientX - rect.left) / rect.width) * FRAME_WIDTH,
-      y: ((event.clientY - rect.top) / rect.height) * FRAME_HEIGHT,
-    };
-    const point = viewportPointToFrame(
-      viewportPoint,
-      cameraPreviewTransform,
-      1,
-    );
+    const rect = getFlatFrameRect() ?? element.getBoundingClientRect();
     return {
-      x: Math.round(point.x),
-      y: Math.round(point.y),
+      x: Math.round(((event.clientX - rect.left) / rect.width) * FRAME_WIDTH),
+      y: Math.round(((event.clientY - rect.top) / rect.height) * FRAME_HEIGHT),
     };
   }
 

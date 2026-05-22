@@ -54,11 +54,12 @@ export function useFrameObjectCommands({
   updateSceneParts,
 }: FrameObjectCommandsParams) {
   function createComposeObject(
-    type: "rect" | "ellipse" | "text" | "pattern2d" | "code",
+    type: "rect" | "ellipse" | "text" | "media" | "pattern2d" | "code",
   ) {
     const id = `${type}-${Date.now().toString(36)}`;
     const isEllipse = type === "ellipse";
     const isText = type === "text";
+    const isMedia = type === "media";
     const isPattern2d = type === "pattern2d";
     const isCode = type === "code";
     const object: FrameObject = {
@@ -67,35 +68,45 @@ export function useFrameObjectCommands({
         ? "Text"
         : isEllipse
           ? "Ellipse"
-          : isPattern2d
-            ? "Pattern"
-            : isCode
-              ? "Code"
-              : "Rectangle",
+          : isMedia
+            ? "Media"
+            : isPattern2d
+              ? "Pattern"
+              : isCode
+                ? "Code"
+                : "Rectangle",
       type: isText
         ? "text"
-        : isPattern2d
-          ? "pattern2d"
-          : isCode
-            ? "code"
-            : "rect",
+        : isMedia
+          ? "media"
+          : isPattern2d
+            ? "pattern2d"
+            : isCode
+              ? "code"
+              : "rect",
       selector: `[data-object-id='${id}']`,
       bounds: isText
         ? { x: 220, y: 140, width: 320, height: 92 }
-        : isPattern2d || isCode
+        : isMedia || isPattern2d || isCode
           ? { x: 200, y: 120, width: 480, height: 320 }
           : { x: 220, y: 140, width: 220, height: 140 },
       content: isText ? "Text" : undefined,
       style: isText
         ? { color: "#ffffff", fontSize: 72, fontWeight: 400, lineHeight: 1.1 }
-        : isPattern2d
-          ? { backgroundColor: "transparent", overflow: "hidden" }
-          : isCode
+        : isMedia
+          ? {
+              backgroundColor: "transparent",
+              objectFit: "cover",
+              overflow: "hidden",
+            }
+          : isPattern2d
             ? { backgroundColor: "transparent", overflow: "hidden" }
-            : {
-                backgroundColor: "#D5D5D5",
-                ...(isEllipse ? { borderRadius: 9999 } : {}),
-              },
+            : isCode
+              ? { backgroundColor: "transparent", overflow: "hidden" }
+              : {
+                  backgroundColor: "#D5D5D5",
+                  ...(isEllipse ? { borderRadius: 9999 } : {}),
+                },
       props: isPattern2d
         ? {
             preset: "polkaDots",

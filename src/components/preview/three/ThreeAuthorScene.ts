@@ -27,6 +27,29 @@ export interface ThreeAuthorSceneOptions {
   height: number;
 }
 
+export type ThreeAuthorPickableObject = {
+  id: string;
+  bounds: { x: number; y: number; width: number; height: number };
+  transform: Record<string, unknown>;
+};
+
+export type ThreeAuthorObjectTransformUpdate = {
+  bounds?: { x: number; y: number };
+  translateZ?: number;
+  rotateX?: number;
+  rotateY?: number;
+  rotateZ?: number;
+};
+
+export type ThreeOrbitState = {
+  cameraX: number;
+  cameraY: number;
+  cameraZ: number;
+  targetX: number;
+  targetY: number;
+  targetZ: number;
+};
+
 /**
  * Remove named handles from a `TransformControls` gizmo so the user
  * only sees the three axis bounds. Targets both the visible gizmo and
@@ -129,6 +152,16 @@ export class ThreeAuthorScene {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private cameraGizmoTarget: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private objectGizmoTarget: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private objectPickGroup: any;
+  private gizmoMode: "camera" | "object" = "camera";
+  private selectedObjectGizmoId: string | null = null;
+  private selectedObjectGizmoBounds: {
+    width: number;
+    height: number;
+  } | null = null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private cameraBodyGroup: any | null = null;
   private cameraPathOverlay: CameraPathOverlay | null = null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -146,7 +179,15 @@ export class ThreeAuthorScene {
   private height: number;
   private dragCallback: ((p: CameraObjectProps) => void) | null = null;
   private dragStateCallback: ((active: boolean) => void) | null = null;
-  private selectCallback: ((picked: "camera" | null) => void) | null = null;
+  private selectCallback: ((picked: "camera" | string | null) => void) | null =
+    null;
+  private viewStateCallback: ((state: ThreeOrbitState) => void) | null = null;
+  private objectDragCallback:
+    | ((
+        objectId: string,
+        nextTransform: ThreeAuthorObjectTransformUpdate,
+      ) => void)
+    | null = null;
   private cameraPathSelectCallback: ((index: number | null) => void) | null =
     null;
   private cameraPathHandleDragCallback:
@@ -201,6 +242,16 @@ export class ThreeAuthorScene {
     // Invisible gizmo target at the camera's transform.
     this.cameraGizmoTarget = new THREE.Object3D();
     this.scene.add(this.cameraGizmoTarget);
+
+    // Invisible gizmo target for non-camera objects. Positioned at the
+    // selected object's 3D transform so translate/rotate gizmos attach here.
+    this.objectGizmoTarget = new THREE.Object3D();
+    this.scene.add(this.objectGizmoTarget);
+
+    // Group to hold invisible, raycastable pick planes for 3D elements
+    this.objectPickGroup = new THREE.Group();
+    this.objectPickGroup.name = "ObjectPickGroup";
+    this.scene.add(this.objectPickGroup);
 
     // Visible camera body so the user can click to select the camera in 3D.
     // The mesh is a child of cameraGizmoTarget — it inherits the camera's
@@ -313,7 +364,10 @@ export class ThreeAuthorScene {
     this.orbit.minDistance = 200;
     this.orbit.maxDistance = 12000;
     this.orbit.zoomSpeed = 0.7;
-    this.orbit.addEventListener("change", () => this.requestRender());
+    this.orbit.addEventListener("change", () => {
+      this.requestRender();
+      if (this.viewStateCallback) this.viewStateCallback(this.getOrbitState());
+    });
 
     // Two transform controls so the user gets translate arrows AND rotate
     // rings at the same time. Only one can drag at once; the listeners
@@ -419,6 +473,7 @@ export class ThreeAuthorScene {
     // tiny pointermove threshold distinguishes click from orbit drag.
     let downPoint: { x: number; y: number } | null = null;
     let downHitCamera = false;
+    let downHitObject = false;
     let downHitPath: "marker" | "handle" | null = null;
     this.canvas.addEventListener("pointerdown", (event: PointerEvent) => {
       if (this.viewMode !== "orbit") return;
@@ -441,8 +496,17 @@ export class ThreeAuthorScene {
         pathPick == null && this.cameraBodyGroup
           ? this.raycaster.intersectObject(this.cameraBodyGroup, true)
           : [];
+      const objectHits =
+        pathPick == null && hits.length === 0
+          ? this.raycaster.intersectObject(this.objectPickGroup, true)
+          : [];
+      const pickedObjectId =
+        typeof objectHits[0]?.object?.userData?.clipperObjectId === "string"
+          ? objectHits[0].object.userData.clipperObjectId
+          : null;
       downPoint = { x: event.clientX, y: event.clientY };
       downHitCamera = hits.length > 0;
+      downHitObject = pickedObjectId != null;
       downHitPath = pathPick;
       if (downHitCamera) {
         // Prevent OrbitControls from starting an orbit on the camera body.
@@ -452,6 +516,9 @@ export class ThreeAuthorScene {
         // Suppress OrbitControls on path picks too — clicking a marker
         // or starting a handle drag must not also orbit the scene.
         event.stopPropagation();
+      } else if (pickedObjectId) {
+        event.stopPropagation();
+        this.selectCallback?.(pickedObjectId);
       }
     });
     this.canvas.addEventListener("pointerup", (event: PointerEvent) => {
@@ -462,11 +529,19 @@ export class ThreeAuthorScene {
       );
       const wasClick = moved < 4;
       const hitCamera = downHitCamera;
+      const hitObject = downHitObject;
       const hitPath = downHitPath;
       downPoint = null;
       downHitCamera = false;
+      downHitObject = false;
       downHitPath = null;
-      if (wasClick && !hitCamera && !hitPath && this.viewMode === "orbit") {
+      if (
+        wasClick &&
+        !hitCamera &&
+        !hitObject &&
+        !hitPath &&
+        this.viewMode === "orbit"
+      ) {
         // Click on empty space deselects camera AND clears any path
         // keyframe selection.
         this.selectCallback?.(null);
@@ -527,6 +602,28 @@ export class ThreeAuthorScene {
     this.requestRender();
   }
 
+  getOrbitState(): ThreeOrbitState {
+    return {
+      cameraX: this.orbitCamera.position.x,
+      cameraY: this.orbitCamera.position.y,
+      cameraZ: this.orbitCamera.position.z,
+      targetX: this.orbit.target.x,
+      targetY: this.orbit.target.y,
+      targetZ: this.orbit.target.z,
+    };
+  }
+
+  setOrbitState(state: ThreeOrbitState) {
+    this.orbitCamera.position.set(state.cameraX, state.cameraY, state.cameraZ);
+    this.orbit.target.set(state.targetX, state.targetY, state.targetZ);
+    this.orbit.update();
+    this.requestRender();
+  }
+
+  onViewStateChange(callback: (state: ThreeOrbitState) => void) {
+    this.viewStateCallback = callback;
+  }
+
   setViewport(width: number, height: number) {
     const w = Math.max(1, Math.floor(width));
     const h = Math.max(1, Math.floor(height));
@@ -540,7 +637,8 @@ export class ThreeAuthorScene {
     this.orbitCamera.updateProjectionMatrix();
     // Through camera aspect is locked to FRAME aspect; do not change it
     // on viewport resize.
-    this.requestRender();
+    this.orbit.update();
+    this.render();
   }
 
   /**
@@ -615,20 +713,138 @@ export class ThreeAuthorScene {
   setSelectedCameraObjectId(id: string | null) {
     if (this.viewMode !== "orbit") return;
     if (id == null) {
-      if (this.isAttached) {
+      if (this.isAttached && this.gizmoMode === "camera") {
         this.translateTransform.detach();
         this.rotateTransform.detach();
         this.isAttached = false;
+        this.gizmoMode = "camera";
+        this.selectedObjectGizmoId = null;
+        this.selectedObjectGizmoBounds = null;
         this.requestRender();
       }
       return;
     }
-    if (!this.isAttached) {
+    const shouldAttach = !this.isAttached || this.gizmoMode !== "camera";
+    if (shouldAttach) {
+      this.translateTransform.detach();
+      this.rotateTransform.detach();
+    }
+    this.gizmoMode = "camera";
+    this.selectedObjectGizmoId = null;
+    if (shouldAttach) {
       this.translateTransform.attach(this.cameraGizmoTarget);
       this.rotateTransform.attach(this.cameraGizmoTarget);
       this.isAttached = true;
       this.requestRender();
     }
+  }
+
+  /**
+   * Select a non-camera object in the 3D scene for gizmo editing.
+   * The gizmo attaches to `objectGizmoTarget` positioned at the object's
+   * evaluated 3D transform. Drags update translateZ/rotateX/Y/Z.
+   */
+  private applyObjectTransform(
+    mesh: any,
+    bounds: { x: number; y: number; width: number; height: number },
+    transform: Record<string, unknown>,
+  ) {
+    const w = bounds.width ?? 0;
+    const h = bounds.height ?? 0;
+    const centerX = bounds.x - FRAME_WIDTH / 2 + w / 2;
+    const centerY = -(bounds.y - FRAME_HEIGHT / 2 + h / 2);
+    const tz =
+      typeof transform.translateZ === "number" ? transform.translateZ : 0;
+    const rx = typeof transform.rotateX === "number" ? transform.rotateX : 0;
+    const ry = typeof transform.rotateY === "number" ? transform.rotateY : 0;
+    const rz = typeof transform.rotateZ === "number" ? transform.rotateZ : 0;
+
+    mesh.position.set(centerX, centerY, tz);
+    mesh.rotation.order = "XYZ";
+    mesh.rotation.x = -rx * DEG_TO_RAD;
+    mesh.rotation.y = ry * DEG_TO_RAD;
+    mesh.rotation.z = -rz * DEG_TO_RAD;
+  }
+
+  setPickableObjects(objects: ThreeAuthorPickableObject[]) {
+    // Clean up existing meshes
+    for (const child of this.objectPickGroup.children) {
+      child.geometry?.dispose?.();
+      child.material?.dispose?.();
+    }
+    this.objectPickGroup.clear();
+
+    // Rebuild pick planes
+    for (const obj of objects) {
+      const geom = new THREE.PlaneGeometry(
+        Math.max(1, obj.bounds.width),
+        Math.max(1, obj.bounds.height),
+      );
+      const mat = new THREE.MeshBasicMaterial({
+        transparent: true,
+        opacity: 0.0,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+      const mesh = new THREE.Mesh(geom, mat);
+      this.applyObjectTransform(mesh, obj.bounds, obj.transform);
+      mesh.userData.clipperObjectId = obj.id;
+      this.objectPickGroup.add(mesh);
+    }
+    this.requestRender();
+  }
+
+  setSelectedObject(
+    objectId: string | null,
+    bounds: { x: number; y: number; width: number; height: number } | null,
+    transform: Record<string, unknown> | null,
+  ) {
+    if (this.viewMode !== "orbit") return;
+
+    if (objectId == null || bounds == null || transform == null) {
+      this.selectedObjectGizmoBounds = null;
+      if (this.isAttached && this.gizmoMode === "object") {
+        this.translateTransform.detach();
+        this.rotateTransform.detach();
+        this.isAttached = false;
+        this.gizmoMode = "camera";
+        this.selectedObjectGizmoId = null;
+        this.requestRender();
+      }
+      return;
+    }
+
+    // Position the proxy gizmo target at the object's 3D transform.
+    const w = bounds.width ?? 0;
+    const h = bounds.height ?? 0;
+    const centerX = bounds.x - FRAME_WIDTH / 2 + w / 2;
+    const centerY = -(bounds.y - FRAME_HEIGHT / 2 + h / 2);
+    const tz =
+      typeof transform.translateZ === "number" ? transform.translateZ : 0;
+    const rx = typeof transform.rotateX === "number" ? transform.rotateX : 0;
+    const ry = typeof transform.rotateY === "number" ? transform.rotateY : 0;
+    const rz = typeof transform.rotateZ === "number" ? transform.rotateZ : 0;
+
+    this.objectGizmoTarget.position.set(centerX, centerY, tz);
+    this.objectGizmoTarget.rotation.order = "XYZ";
+    this.objectGizmoTarget.rotation.x = -rx * DEG_TO_RAD;
+    this.objectGizmoTarget.rotation.y = ry * DEG_TO_RAD;
+    this.objectGizmoTarget.rotation.z = -rz * DEG_TO_RAD;
+
+    this.selectedObjectGizmoId = objectId;
+    this.selectedObjectGizmoBounds = { width: w, height: h };
+    const shouldAttach = !this.isAttached || this.gizmoMode !== "object";
+    if (shouldAttach) {
+      this.translateTransform.detach();
+      this.rotateTransform.detach();
+    }
+    this.gizmoMode = "object";
+    if (shouldAttach) {
+      this.translateTransform.attach(this.objectGizmoTarget);
+      this.rotateTransform.attach(this.objectGizmoTarget);
+      this.isAttached = true;
+    }
+    this.requestRender();
   }
 
   /**
@@ -651,7 +867,7 @@ export class ThreeAuthorScene {
     this.dragStateCallback = callback;
   }
 
-  onSelect(callback: (picked: "camera" | null) => void) {
+  onSelect(callback: (picked: "camera" | string | null) => void) {
     this.selectCallback = callback;
   }
 
@@ -665,6 +881,16 @@ export class ThreeAuthorScene {
     callback: (handle: CameraPathHandle, nextCp: number) => void,
   ) {
     this.cameraPathHandleDragCallback = callback;
+  }
+
+  /** Fired when a non-camera object gizmo is dragged with new transform values. */
+  onObjectDrag(
+    callback: (
+      objectId: string,
+      nextTransform: ThreeAuthorObjectTransformUpdate,
+    ) => void,
+  ) {
+    this.objectDragCallback = callback;
   }
 
   /** Force a render of both layers. */
@@ -718,6 +944,32 @@ export class ThreeAuthorScene {
   }
 
   private commitGizmoTransformToProps() {
+    // Object gizmo mode: emit translateZ/rotateX/Y/Z changes
+    if (this.gizmoMode === "object") {
+      if (!this.selectedObjectGizmoId) return;
+      if (!this.selectedObjectGizmoBounds) return;
+      const t = this.objectGizmoTarget;
+      const nextTransform: ThreeAuthorObjectTransformUpdate = {
+        bounds: {
+          x:
+            t.position.x +
+            FRAME_WIDTH / 2 -
+            this.selectedObjectGizmoBounds.width / 2,
+          y:
+            -t.position.y +
+            FRAME_HEIGHT / 2 -
+            this.selectedObjectGizmoBounds.height / 2,
+        },
+        translateZ: t.position.z,
+        rotateX: -t.rotation.x * RAD_TO_DEG,
+        rotateY: t.rotation.y * RAD_TO_DEG,
+        rotateZ: -t.rotation.z * RAD_TO_DEG,
+      };
+      this.objectDragCallback?.(this.selectedObjectGizmoId, nextTransform);
+      return;
+    }
+
+    // Camera gizmo mode (original behavior)
     const t = this.cameraGizmoTarget;
     const pos = {
       x: t.position.x,

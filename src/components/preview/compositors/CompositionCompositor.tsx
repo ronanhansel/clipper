@@ -1,6 +1,8 @@
 import {
+  useEffect,
   memo,
   useRef,
+  useState,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent,
 } from "react";
@@ -18,7 +20,11 @@ import { useCompositionCache } from "../cache/useCompositionCache";
 import { renderCompositionPreview } from "../render/sceneRender";
 import { FRAME_HEIGHT, FRAME_WIDTH } from "../../../core/types";
 import type { ComposeDrawTool, ExportTileFrameBounds } from "../FramePreview";
-import { ComposeAuthorView } from "../three/ComposeAuthorView";
+import {
+  ComposeAuthorView,
+  type CameraPreviewMode,
+  type ComposeAuthorViewState,
+} from "../three/ComposeAuthorView";
 import { compositionHasCameraLayer } from "./useCompositionCamera";
 
 type CompositionCompositorProps = {
@@ -76,6 +82,19 @@ type CompositionCompositorProps = {
     nextCpX: number,
   ) => void;
   onSelectObject?: (objectId: string | null) => void;
+  onAuthorPreviewModeChange?: (mode: CameraPreviewMode) => void;
+  authorViewState?: ComposeAuthorViewState;
+  onAuthorViewStateChange?: (state: Partial<ComposeAuthorViewState>) => void;
+  onObjectTransformChange?: (
+    objectId: string,
+    transform: {
+      bounds?: { x: number; y: number };
+      translateZ?: number;
+      rotateX?: number;
+      rotateY?: number;
+      rotateZ?: number;
+    },
+  ) => void;
   cameraPreviewOverride?: CameraObjectProps | null;
   isPostProcessSource?: boolean;
 };
@@ -101,20 +120,37 @@ export const CompositionCompositor = memo(function CompositionCompositor(
     !props.flatten &&
     Boolean(props.onCameraPropsChange) &&
     compositionHasCameraLayer(props.part);
+  const [previewMode, setPreviewMode] = useState<CameraPreviewMode>(
+    props.authorViewState?.previewMode ?? "pip",
+  );
+  const cameraHandledExternally = showAuthorView && previewMode !== "2d";
+  useEffect(() => {
+    if (!props.authorViewState) return;
+    setPreviewMode(props.authorViewState.previewMode);
+  }, [props.authorViewState]);
+  const handlePreviewModeChange = (mode: CameraPreviewMode) => {
+    setPreviewMode(mode);
+    props.onAuthorPreviewModeChange?.(mode);
+  };
+  const authoringInteractionsEnabled = !showAuthorView || previewMode === "2d";
 
   const backendNode = (
     <Backend
       active={props.active}
       isPostProcessSource={props.isPostProcessSource}
       cameraPreviewOverride={props.cameraPreviewOverride}
-      activeShapeTool={showAuthorView ? null : props.activeShapeTool}
+      activeShapeTool={
+        authoringInteractionsEnabled ? props.activeShapeTool : null
+      }
       animationsEnabled={props.animationsEnabled}
-      cameraHandledExternally={showAuthorView}
-      canSelect={showAuthorView ? false : props.canSelect}
+      cameraHandledExternally={cameraHandledExternally}
+      canSelect={authoringInteractionsEnabled ? props.canSelect : false}
       duration={composition.duration}
-      editingTextObjectId={showAuthorView ? null : props.editingTextObjectId}
+      editingTextObjectId={
+        authoringInteractionsEnabled ? props.editingTextObjectId : null
+      }
       exportTileFrameBounds={props.exportTileFrameBounds}
-      focusPicking={showAuthorView ? false : props.focusPicking}
+      focusPicking={authoringInteractionsEnabled ? props.focusPicking : false}
       frameScale={props.frameScale}
       hideNullObjects={props.hideNullObjects ?? false}
       hostRef={compositionRef}
@@ -138,8 +174,12 @@ export const CompositionCompositor = memo(function CompositionCompositor(
           part={props.part}
           selectedObjectId={props.selectedObjectId ?? null}
           onCameraPropsChange={props.onCameraPropsChange}
+          onPreviewModeChange={handlePreviewModeChange}
+          authorViewState={props.authorViewState}
+          onAuthorViewStateChange={props.onAuthorViewStateChange}
           onCameraPathEaseChange={props.onCameraPathEaseChange}
           onSelectObject={props.onSelectObject}
+          onObjectTransformChange={props.onObjectTransformChange}
           localTime={props.localTime}
           renderComposition={() => backendNode}
           pipBackendProps={{
