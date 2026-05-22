@@ -33,6 +33,13 @@ export type ThreeAuthorPickableObject = {
   transform: Record<string, unknown>;
 };
 
+export type ThreeAuthorCameraObject = {
+  id: string;
+  props: CameraObjectProps;
+  active: boolean;
+  selected: boolean;
+};
+
 export type ThreeAuthorObjectTransformUpdate = {
   bounds?: { x: number; y: number };
   translateZ?: number;
@@ -77,6 +84,50 @@ function pruneGizmoHandles(controls: any, mode: string, names: string[]) {
       (child as { geometry?: { dispose?: () => void } }).geometry?.dispose?.();
     }
   }
+}
+
+function createCameraBodyGroup(color: number, opacity: number) {
+  const cameraBodyGroup = new THREE.Group();
+  cameraBodyGroup.userData.clipperCameraBody = true;
+  const body = new THREE.Mesh(
+    new THREE.BoxGeometry(60, 45, 80),
+    new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity,
+    }),
+  );
+  body.userData.clipperCameraBody = true;
+  cameraBodyGroup.add(body);
+  const lens = new THREE.Mesh(
+    new THREE.ConeGeometry(22, 45, 24),
+    new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: Math.min(1, opacity + 0.05),
+    }),
+  );
+  lens.rotation.x = Math.PI / 2;
+  lens.position.set(0, 0, -55);
+  lens.userData.clipperCameraBody = true;
+  cameraBodyGroup.add(lens);
+  return cameraBodyGroup;
+}
+
+function applyCameraObjectTransform(target: any, camera: CameraObjectProps) {
+  target.position.set(camera.position.x, -camera.position.y, camera.position.z);
+  target.rotation.order = "XYZ";
+  target.rotation.x = -camera.rotation.x * DEG_TO_RAD;
+  target.rotation.y = camera.rotation.y * DEG_TO_RAD;
+  target.rotation.z = -camera.rotation.z * DEG_TO_RAD;
+}
+
+function findCameraVisualGroup(root: any, objectId: string) {
+  return (
+    root.children.find(
+      (child: any) => child.userData?.clipperCameraObjectId === objectId,
+    ) ?? null
+  );
 }
 
 /**
@@ -155,8 +206,11 @@ export class ThreeAuthorScene {
   private objectGizmoTarget: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private objectPickGroup: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private cameraVisualGroup: any;
   private gizmoMode: "camera" | "object" = "camera";
   private selectedObjectGizmoId: string | null = null;
+  private selectedCameraObjectId: string | null = null;
   private selectedObjectGizmoBounds: {
     width: number;
     height: number;
@@ -177,10 +231,11 @@ export class ThreeAuthorScene {
   private viewMode: "orbit" | "through" = "orbit";
   private width: number;
   private height: number;
-  private dragCallback: ((p: CameraObjectProps) => void) | null = null;
+  private dragCallback:
+    | ((objectId: string, p: CameraObjectProps) => void)
+    | null = null;
   private dragStateCallback: ((active: boolean) => void) | null = null;
-  private selectCallback: ((picked: "camera" | string | null) => void) | null =
-    null;
+  private selectCallback: ((picked: string | null) => void) | null = null;
   private viewStateCallback: ((state: ThreeOrbitState) => void) | null = null;
   private objectDragCallback:
     | ((
@@ -196,6 +251,11 @@ export class ThreeAuthorScene {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private raycaster: any = new THREE.Raycaster();
   private activeProps: CameraObjectProps = { ...DEFAULT_CAMERA_OBJECT_PROPS };
+  private selectedCameraProps: CameraObjectProps = {
+    ...DEFAULT_CAMERA_OBJECT_PROPS,
+  };
+  private activeCameraObjectId: string | null = null;
+  private cameraObjectPropsById = new Map<string, CameraObjectProps>();
   private isAttached = false;
   private rafHandle = 0;
 
@@ -253,36 +313,15 @@ export class ThreeAuthorScene {
     this.objectPickGroup.name = "ObjectPickGroup";
     this.scene.add(this.objectPickGroup);
 
+    this.cameraVisualGroup = new THREE.Group();
+    this.cameraVisualGroup.name = "CameraVisualGroup";
+    this.scene.add(this.cameraVisualGroup);
+
     // Visible camera body so the user can click to select the camera in 3D.
     // The mesh is a child of cameraGizmoTarget — it inherits the camera's
     // position/rotation so it always sits exactly where the through-camera
     // is. Lens cone points down -Z (the camera's forward in three).
-    const cameraBodyGroup = new THREE.Group();
-    cameraBodyGroup.userData.clipperCameraBody = true;
-    const bodyMaterial = new THREE.MeshBasicMaterial({
-      color: 0x9aa3b6,
-      transparent: true,
-      opacity: 0.85,
-    });
-    const body = new THREE.Mesh(
-      new THREE.BoxGeometry(60, 45, 80),
-      bodyMaterial,
-    );
-    body.userData.clipperCameraBody = true;
-    cameraBodyGroup.add(body);
-    const lens = new THREE.Mesh(
-      new THREE.ConeGeometry(22, 45, 24),
-      new THREE.MeshBasicMaterial({
-        color: 0x6c7388,
-        transparent: true,
-        opacity: 0.9,
-      }),
-    );
-    // Cone default points +Y; rotate so its tip points -Z (camera forward).
-    lens.rotation.x = Math.PI / 2;
-    lens.position.set(0, 0, -55);
-    lens.userData.clipperCameraBody = true;
-    cameraBodyGroup.add(lens);
+    const cameraBodyGroup = createCameraBodyGroup(0x9aa3b6, 0.85);
     // Body is hidden in through-camera mode (we don't want it occluding the
     // PIP / Direct view) and when there is no camera at all.
     cameraBodyGroup.visible = false;
@@ -472,7 +511,7 @@ export class ThreeAuthorScene {
     // Pick the camera body or a camera-path keyframe/handle on click. A
     // tiny pointermove threshold distinguishes click from orbit drag.
     let downPoint: { x: number; y: number } | null = null;
-    let downHitCamera = false;
+    let downHitCamera: string | null = null;
     let downHitObject = false;
     let downHitPath: "marker" | "handle" | null = null;
     this.canvas.addEventListener("pointerdown", (event: PointerEvent) => {
@@ -493,9 +532,13 @@ export class ThreeAuthorScene {
       };
       this.raycaster.setFromCamera(ndc, this.orbitCamera);
       const hits =
-        pathPick == null && this.cameraBodyGroup
-          ? this.raycaster.intersectObject(this.cameraBodyGroup, true)
+        pathPick == null
+          ? this.raycaster.intersectObject(this.cameraVisualGroup, true)
           : [];
+      const pickedCameraId =
+        typeof hits[0]?.object?.userData?.clipperCameraObjectId === "string"
+          ? hits[0].object.userData.clipperCameraObjectId
+          : null;
       const objectHits =
         pathPick == null && hits.length === 0
           ? this.raycaster.intersectObject(this.objectPickGroup, true)
@@ -505,13 +548,13 @@ export class ThreeAuthorScene {
           ? objectHits[0].object.userData.clipperObjectId
           : null;
       downPoint = { x: event.clientX, y: event.clientY };
-      downHitCamera = hits.length > 0;
+      downHitCamera = pickedCameraId;
       downHitObject = pickedObjectId != null;
       downHitPath = pathPick;
-      if (downHitCamera) {
+      if (pickedCameraId) {
         // Prevent OrbitControls from starting an orbit on the camera body.
         event.stopPropagation();
-        this.selectCallback?.("camera");
+        this.selectCallback?.(pickedCameraId);
       } else if (pathPick) {
         // Suppress OrbitControls on path picks too — clicking a marker
         // or starting a handle drag must not also orbit the scene.
@@ -528,11 +571,11 @@ export class ThreeAuthorScene {
         event.clientY - downPoint.y,
       );
       const wasClick = moved < 4;
-      const hitCamera = downHitCamera;
+      const hitCamera = downHitCamera != null;
       const hitObject = downHitObject;
       const hitPath = downHitPath;
       downPoint = null;
-      downHitCamera = false;
+      downHitCamera = null;
       downHitObject = false;
       downHitPath = null;
       if (
@@ -593,7 +636,8 @@ export class ThreeAuthorScene {
     this.viewMode = mode;
     this.orbit.enabled = mode === "orbit";
     this.cameraHelper.visible = mode === "orbit";
-    if (this.cameraBodyGroup) this.cameraBodyGroup.visible = mode === "orbit";
+    this.cameraVisualGroup.visible = mode === "orbit";
+    if (this.cameraBodyGroup) this.cameraBodyGroup.visible = false;
     if (mode === "through" && this.isAttached) {
       this.translateTransform.detach();
       this.rotateTransform.detach();
@@ -681,10 +725,11 @@ export class ThreeAuthorScene {
     this.requestRender();
   }
 
-  setActiveCamera(camera: CameraObjectProps | null) {
+  setActiveCamera(camera: CameraObjectProps | null, objectId?: string | null) {
     const visibleHelper = camera != null && this.viewMode === "orbit";
     this.cameraHelper.visible = visibleHelper;
-    if (this.cameraBodyGroup) this.cameraBodyGroup.visible = visibleHelper;
+    if (this.cameraBodyGroup) this.cameraBodyGroup.visible = false;
+    this.activeCameraObjectId = objectId ?? null;
     if (camera) {
       this.activeProps = { ...camera };
       applyCompositionCameraToThree(
@@ -692,15 +737,10 @@ export class ThreeAuthorScene {
         camera,
         FRAME_WIDTH / FRAME_HEIGHT,
       );
-      this.cameraGizmoTarget.position.set(
-        camera.position.x,
-        -camera.position.y,
-        camera.position.z,
-      );
-      this.cameraGizmoTarget.rotation.order = "XYZ";
-      this.cameraGizmoTarget.rotation.x = -camera.rotation.x * DEG_TO_RAD;
-      this.cameraGizmoTarget.rotation.y = camera.rotation.y * DEG_TO_RAD;
-      this.cameraGizmoTarget.rotation.z = -camera.rotation.z * DEG_TO_RAD;
+      if (this.selectedCameraObjectId === this.activeCameraObjectId) {
+        this.selectedCameraProps = { ...camera };
+        applyCameraObjectTransform(this.cameraGizmoTarget, camera);
+      }
       this.cameraHelper.update();
     } else if (this.isAttached) {
       this.translateTransform.detach();
@@ -710,9 +750,52 @@ export class ThreeAuthorScene {
     this.requestRender();
   }
 
+  setCameraObjects(cameras: ThreeAuthorCameraObject[]) {
+    this.cameraVisualGroup.visible = this.viewMode === "orbit";
+    for (const child of this.cameraVisualGroup.children) {
+      child.traverse?.((node: any) => {
+        node.geometry?.dispose?.();
+        if (Array.isArray(node.material)) {
+          for (const material of node.material) material.dispose?.();
+        } else {
+          node.material?.dispose?.();
+        }
+      });
+    }
+    this.cameraVisualGroup.clear();
+    this.cameraObjectPropsById = new Map();
+    for (const camera of cameras) {
+      this.cameraObjectPropsById.set(camera.id, camera.props);
+      const color = camera.selected
+        ? 0xffffff
+        : camera.active
+          ? 0x6ee7f9
+          : 0x9aa3b6;
+      const opacity = camera.selected || camera.active ? 0.95 : 0.65;
+      const group = createCameraBodyGroup(color, opacity);
+      group.userData.clipperCameraObjectId = camera.id;
+      group.traverse((node: any) => {
+        node.userData.clipperCameraObjectId = camera.id;
+      });
+      applyCameraObjectTransform(group, camera.props);
+      this.cameraVisualGroup.add(group);
+    }
+    if (this.selectedCameraObjectId) {
+      const selected = this.cameraObjectPropsById.get(
+        this.selectedCameraObjectId,
+      );
+      if (selected) {
+        this.selectedCameraProps = { ...selected };
+        applyCameraObjectTransform(this.cameraGizmoTarget, selected);
+      }
+    }
+    this.requestRender();
+  }
+
   setSelectedCameraObjectId(id: string | null) {
     if (this.viewMode !== "orbit") return;
     if (id == null) {
+      this.selectedCameraObjectId = null;
       if (this.isAttached && this.gizmoMode === "camera") {
         this.translateTransform.detach();
         this.rotateTransform.detach();
@@ -731,6 +814,10 @@ export class ThreeAuthorScene {
     }
     this.gizmoMode = "camera";
     this.selectedObjectGizmoId = null;
+    this.selectedCameraObjectId = id;
+    const selected = this.cameraObjectPropsById.get(id) ?? this.activeProps;
+    this.selectedCameraProps = { ...selected };
+    applyCameraObjectTransform(this.cameraGizmoTarget, selected);
     if (shouldAttach) {
       this.translateTransform.attach(this.cameraGizmoTarget);
       this.rotateTransform.attach(this.cameraGizmoTarget);
@@ -833,6 +920,7 @@ export class ThreeAuthorScene {
 
     this.selectedObjectGizmoId = objectId;
     this.selectedObjectGizmoBounds = { width: w, height: h };
+    this.selectedCameraObjectId = null;
     const shouldAttach = !this.isAttached || this.gizmoMode !== "object";
     if (shouldAttach) {
       this.translateTransform.detach();
@@ -859,7 +947,7 @@ export class ThreeAuthorScene {
     this.cameraPathOverlay?.setData(data, visible);
   }
 
-  onCameraDrag(callback: (props: CameraObjectProps) => void) {
+  onCameraDrag(callback: (objectId: string, props: CameraObjectProps) => void) {
     this.dragCallback = callback;
   }
 
@@ -867,7 +955,7 @@ export class ThreeAuthorScene {
     this.dragStateCallback = callback;
   }
 
-  onSelect(callback: (picked: "camera" | string | null) => void) {
+  onSelect(callback: (picked: string | null) => void) {
     this.selectCallback = callback;
   }
 
@@ -970,6 +1058,7 @@ export class ThreeAuthorScene {
     }
 
     // Camera gizmo mode (original behavior)
+    if (!this.selectedCameraObjectId) return;
     const t = this.cameraGizmoTarget;
     const pos = {
       x: t.position.x,
@@ -982,18 +1071,27 @@ export class ThreeAuthorScene {
       z: -t.rotation.z * RAD_TO_DEG,
     };
     const next: CameraObjectProps = {
-      ...this.activeProps,
+      ...this.selectedCameraProps,
       position: pos,
       rotation: rot,
     };
-    this.activeProps = next;
-    applyCompositionCameraToThree(
-      this.throughCamera,
-      next,
-      FRAME_WIDTH / FRAME_HEIGHT,
+    this.selectedCameraProps = next;
+    this.cameraObjectPropsById.set(this.selectedCameraObjectId, next);
+    const visual = findCameraVisualGroup(
+      this.cameraVisualGroup,
+      this.selectedCameraObjectId,
     );
-    this.cameraHelper.update();
-    if (this.dragCallback) this.dragCallback(next);
+    if (visual) applyCameraObjectTransform(visual, next);
+    if (this.selectedCameraObjectId === this.activeCameraObjectId) {
+      this.activeProps = next;
+      applyCompositionCameraToThree(
+        this.throughCamera,
+        next,
+        FRAME_WIDTH / FRAME_HEIGHT,
+      );
+      this.cameraHelper.update();
+    }
+    if (this.dragCallback) this.dragCallback(this.selectedCameraObjectId, next);
   }
 
   private requestRender() {

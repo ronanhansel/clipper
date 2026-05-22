@@ -12,6 +12,7 @@ import type {
   RichTextSegment,
 } from "../../../core/types";
 import type { ComposeDrawTool, ExportTileFrameBounds } from "../FramePreview";
+import type { PreviewFps } from "../../../core/previewFps";
 
 export type CompositionRenderBackendProps = {
   hostRef: RefObject<HTMLDivElement | null>;
@@ -22,6 +23,7 @@ export type CompositionRenderBackendProps = {
   renderMode: "preview" | "export";
   animationsEnabled: boolean;
   frameScale: number;
+  previewFps?: PreviewFps;
   exportTileFrameBounds?: ExportTileFrameBounds;
   hideNullObjects: boolean;
   renderClockSceneTime: number;

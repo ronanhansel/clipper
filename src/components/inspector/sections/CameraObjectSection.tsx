@@ -45,6 +45,7 @@ type CameraTrackPath =
   | "props.dof.focusDistance"
   | "props.dof.fNumber"
   | "props.dof.maxBlurPx";
+type CameraBooleanTrackPath = "props.live";
 
 const POSITION_FIELDS: ReadonlyArray<{
   axis: "x" | "y" | "z";
@@ -95,8 +96,18 @@ export function CameraObjectSection() {
     return readCameraPropAtPath(evaluated, path);
   }
 
+  function liveBooleanValue(path: CameraBooleanTrackPath): boolean {
+    if (!hasPropertyTrack(object, path)) return props.live;
+    const evaluated = evaluateCameraObjectPropsAt(object, readEffectiveTime());
+    return evaluated.live;
+  }
+
   function writeBase(path: CameraTrackPath, value: number) {
     onChange((current) => writeNestedNumber(current, path, value));
+  }
+
+  function writeBooleanBase(path: CameraBooleanTrackPath, value: boolean) {
+    onChange((current) => writeNestedValue(current, path, value));
   }
 
   function previewBase(path: CameraTrackPath, value: number) {
@@ -163,7 +174,29 @@ export function CameraObjectSection() {
     }
   }
 
-  function isKeyframedNow(path: CameraTrackPath) {
+  function commitBoolean(path: CameraBooleanTrackPath, value: boolean) {
+    if (hasPropertyTrack(object, path)) {
+      const time = readEffectiveTime();
+      onChange((current) => upsertPropertyKeyframe(current, path, time, value));
+    } else {
+      writeBooleanBase(path, value);
+    }
+  }
+
+  function toggleBooleanKeyframe(path: CameraBooleanTrackPath) {
+    const time = readEffectiveTime();
+    const existing = getPropertyTrackKeyframeAtTime(object, path, time);
+    if (existing) {
+      onChange((current) =>
+        removePropertyKeyframe(current, path, existing.time, time),
+      );
+    } else {
+      const value = liveBooleanValue(path);
+      onChange((current) => upsertPropertyKeyframe(current, path, time, value));
+    }
+  }
+
+  function isKeyframedNow(path: CameraTrackPath | CameraBooleanTrackPath) {
     const time = readEffectiveTime();
     return Boolean(getPropertyTrackKeyframeAtTime(object, path, time));
   }
@@ -215,6 +248,36 @@ export function CameraObjectSection() {
 
   return (
     <div className="grid gap-3">
+      <label className="flex items-center justify-between gap-3 text-xs font-semibold text-[#dfe2ea]">
+        <span>Live</span>
+        <span className="flex items-center gap-3">
+          <button
+            aria-label={
+              isKeyframedNow("props.live")
+                ? "Remove Camera Live keyframe at playhead"
+                : "Add Camera Live keyframe at playhead"
+            }
+            aria-pressed={isKeyframedNow("props.live")}
+            className={`h-2 w-2 rotate-45 rounded-[1px] border transition hover:scale-125 ${
+              isKeyframedNow("props.live")
+                ? "border-white bg-white shadow-[0_0_0_1px_rgba(255,255,255,0.16)]"
+                : "border-[#6f7684] bg-[#12151d] hover:border-white"
+            }`}
+            type="button"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={(event) => {
+              event.preventDefault();
+              toggleBooleanKeyframe("props.live");
+            }}
+          />
+          <Switch
+            aria-label="Toggle camera live output"
+            checked={liveBooleanValue("props.live")}
+            onCheckedChange={(checked) => commitBoolean("props.live", checked)}
+          />
+        </span>
+      </label>
+
       <FieldRow label="Position">
         {POSITION_FIELDS.map((field) => (
           <KeyframableNumberInput
@@ -282,21 +345,6 @@ export function CameraObjectSection() {
           onCommit={(value) => commitFocalLength(value)}
           onToggleKeyframe={() => toggleKeyframe("props.fov")}
         />
-        <div className="grid gap-1.5">
-          <span className={mutedCaps}>FOV</span>
-          <KeyframableNumberInput
-            ariaLabel="Camera FOV"
-            unitPrefix="°"
-            step={1}
-            min={1}
-            max={179}
-            value={liveValue("props.fov")}
-            active={isKeyframedNow("props.fov")}
-            onPreview={(value) => previewBase("props.fov", clampFov(value))}
-            onCommit={(value) => commit("props.fov", clampFov(value))}
-            onToggleKeyframe={() => toggleKeyframe("props.fov")}
-          />
-        </div>
       </div>
 
       <div className="grid gap-1.5">
@@ -439,6 +487,14 @@ function writeNestedNumber(
   object: FrameObject,
   path: string,
   value: number,
+): FrameObject {
+  return writeNestedValue(object, path, value);
+}
+
+function writeNestedValue(
+  object: FrameObject,
+  path: string,
+  value: number | boolean,
 ): FrameObject {
   const segments = path.slice("props.".length).split(".");
   const root: Record<string, unknown> = { ...(object.props ?? {}) };

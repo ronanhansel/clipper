@@ -1,5 +1,6 @@
 import type { RefObject } from "react";
 import { FramePreviewLive } from "../FramePreviewLive";
+import { PreviewRenderSchedulerProvider } from "../scheduler/PreviewRenderSchedulerContext";
 import type { PreviewRenderScheduler } from "../scheduler/usePreviewRenderScheduler";
 import { LivePostProcessFramePreview } from "./LivePostProcessFramePreview";
 import { toFramePreviewLiveProps } from "./preview";
@@ -25,13 +26,19 @@ export function PreviewStrategyHost({
 }: PreviewStrategyHostProps) {
   if (strategy.kind === "live-webgl") {
     return (
-      <LivePostProcessFramePreview
-        currentSceneTimeRef={currentSceneTimeRef}
-        framePreviewProps={framePreviewProps}
-        liveDomPostProcessMaxFps={liveDomPostProcessMaxFps}
-        scheduler={scheduler}
-      />
+      <PreviewRenderSchedulerProvider scheduler={scheduler}>
+        <LivePostProcessFramePreview
+          currentSceneTimeRef={currentSceneTimeRef}
+          framePreviewProps={framePreviewProps}
+          liveDomPostProcessMaxFps={liveDomPostProcessMaxFps}
+          scheduler={scheduler}
+        />
+      </PreviewRenderSchedulerProvider>
     );
   }
-  return <FramePreviewLive {...toFramePreviewLiveProps(framePreviewProps)} />;
+  return (
+    <PreviewRenderSchedulerProvider scheduler={scheduler}>
+      <FramePreviewLive {...toFramePreviewLiveProps(framePreviewProps)} />
+    </PreviewRenderSchedulerProvider>
+  );
 }

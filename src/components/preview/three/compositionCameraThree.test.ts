@@ -7,6 +7,7 @@ function makeFakeCamera() {
     py = 0,
     pz = 0;
   const updateProjectionMatrix = vi.fn();
+  const updateMatrixWorld = vi.fn();
   return {
     fake: {
       position: {
@@ -32,8 +33,10 @@ function makeFakeCamera() {
       far: 0,
       filmGauge: 0,
       updateProjectionMatrix,
+      updateMatrixWorld,
     },
     updateProjectionMatrix,
+    updateMatrixWorld,
   };
 }
 
@@ -47,6 +50,20 @@ describe("applyCompositionCameraToThree", () => {
     expect(fake.aspect).toBeCloseTo(16 / 9);
     expect(fake.position.z).toBe(DEFAULT_CAMERA_OBJECT_PROPS.position.z);
     expect(updateProjectionMatrix).toHaveBeenCalledTimes(1);
+  });
+
+  it("flushes camera world matrix after rotation changes", () => {
+    const { fake, updateMatrixWorld } = makeFakeCamera();
+    applyCompositionCameraToThree(
+      fake,
+      {
+        ...DEFAULT_CAMERA_OBJECT_PROPS,
+        rotation: { x: 0, y: 0, z: 45 },
+      },
+      1,
+    );
+    expect(fake.rotation.z).toBeCloseTo(-Math.PI / 4);
+    expect(updateMatrixWorld).toHaveBeenCalledWith(true);
   });
 
   it("negates y position to match Clipper y-down frame coords", () => {

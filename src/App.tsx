@@ -2012,6 +2012,7 @@ function AppContent({
     isPlaying,
     cameraPreviewTransform,
     displayFramePreviewScale,
+    previewFps,
     part,
     sceneMotionPart,
     sceneWrap,

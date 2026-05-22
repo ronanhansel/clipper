@@ -12,6 +12,7 @@ import {
 } from "./ThreeAuthorScene";
 import { CompositionWebGLHost } from "./CompositionWebGLHost";
 import {
+  evaluateCameraObjectPropsAt,
   findActiveCameraObject,
   getActiveCameraObjectProps,
 } from "../compositors/useCompositionCamera";
@@ -209,6 +210,7 @@ export interface ComposeAuthorViewProps {
     CompositionBackendProps,
     | "animationsEnabled"
     | "frameScale"
+    | "previewFps"
     | "hideNullObjects"
     | "isPlaying"
     | "duration"
@@ -263,7 +265,10 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
   const sideBySideDividerRef = useRef<HTMLDivElement | null>(null);
   const sceneRef = useRef<ThreeAuthorScene | null>(null);
   const draggingRef = useRef(false);
-  const pendingDragRef = useRef<CameraObjectProps | null>(null);
+  const pendingDragRef = useRef<{
+    objectId: string;
+    props: CameraObjectProps;
+  } | null>(null);
   const pendingObjectDragRef = useRef<{
     objectId: string;
     transform: ThreeAuthorObjectTransformUpdate;
@@ -391,23 +396,45 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
   }, [props.onAuthorViewStateChange]);
 
   // Wire the drag callback whenever the part / callback changes. Mid-drag
-  // updates are rAF-throttled to one React commit per frame; the final
-  // value is flushed on drag end.
+  // updates stay imperative so camera gizmos match object gizmo performance;
+  // the document state is committed once on drag end.
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene) return;
-    scene.onCameraDrag((next) => {
-      pendingDragRef.current = next;
+    scene.onCameraDrag((objectId, next) => {
+      pendingDragRef.current = { objectId, props: next };
       if (!flushHandleRef.current) {
         flushHandleRef.current = requestAnimationFrame(() => {
           flushHandleRef.current = 0;
           const pending = pendingDragRef.current;
           if (!pending) return;
-          const camera = findActiveCameraObject(props.part);
-          if (!camera) return;
           if (draggingRef.current) {
-            props.onCameraPropsChange(camera.id, pending);
-            pendingDragRef.current = null;
+            const camera = props.part.objects.find(
+              (object) =>
+                object.id === pending.objectId &&
+                object.type === "camera" &&
+                !object.hidden,
+            );
+            if (camera) {
+              const pathData = buildCameraPathData({
+                camera,
+                selectedKeyframeIndex: selectedKeyframeIndexRef.current,
+                previewPositionAtTime: {
+                  time: props.localTime,
+                  position: pending.props.position,
+                },
+              });
+              if (pathData) scene.setCameraPath(pathData, true);
+            }
+            window.dispatchEvent(
+              new CustomEvent("clipper:camera-preview", {
+                detail: {
+                  objectId: pending.objectId,
+                  props: pending.props,
+                  source: "author-gizmo",
+                },
+              }),
+            );
           }
         });
       }
@@ -422,7 +449,7 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
         objectFlushHandleRef.current = 0;
       }
     };
-  }, [props.part, props.onCameraPropsChange]);
+  }, [props.localTime, props.part, props.onCameraPropsChange]);
 
   useEffect(() => {
     const scene = sceneRef.current;
@@ -432,8 +459,7 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
       if (!active && pendingDragRef.current) {
         const last = pendingDragRef.current;
         pendingDragRef.current = null;
-        const camera = findActiveCameraObject(props.part);
-        if (camera) props.onCameraPropsChange(camera.id, last);
+        props.onCameraPropsChange(last.objectId, last.props);
       }
       if (!active && pendingObjectDragRef.current) {
         const last = pendingObjectDragRef.current;
@@ -449,10 +475,7 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
     const scene = sceneRef.current;
     if (!scene) return;
     scene.onSelect((picked) => {
-      if (picked === "camera") {
-        const camera = findActiveCameraObject(props.part);
-        if (camera) props.onSelectObject?.(camera.id);
-      } else if (picked) {
+      if (picked) {
         props.onSelectObject?.(picked);
       } else {
         props.onSelectObject?.(null);
@@ -467,20 +490,42 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
   useEffect(() => {
     function handleCameraPreview(event: Event) {
       const detail = (event as CustomEvent).detail as
-        | { objectId: string; props: CameraObjectProps }
+        | { objectId: string; props: CameraObjectProps; source?: string }
         | undefined;
       if (!detail) return;
-      const camera = findActiveCameraObject(props.part);
-      if (!camera || camera.id !== detail.objectId) return;
+      if (detail.source === "author-gizmo") return;
+      const camera = props.part.objects.find(
+        (object) =>
+          object.id === detail.objectId &&
+          object.type === "camera" &&
+          !object.hidden,
+      );
+      if (!camera) return;
       const scene = sceneRef.current;
       if (!scene) return;
-      scene.setActiveCamera(detail.props);
+      const activeCamera = findActiveCameraObject(props.part, props.localTime);
+      if (activeCamera?.id === detail.objectId) {
+        scene.setActiveCamera(detail.props, detail.objectId);
+      }
+      scene.setCameraObjects(
+        props.part.objects
+          .filter((object) => object.type === "camera" && !object.hidden)
+          .map((object) => ({
+            id: object.id,
+            props:
+              object.id === detail.objectId
+                ? detail.props
+                : evaluateCameraObjectPropsAt(object, props.localTime),
+            active: object.id === activeCamera?.id,
+            selected: object.id === props.selectedObjectId,
+          })),
+      );
       scene.render();
     }
     window.addEventListener("clipper:camera-preview", handleCameraPreview);
     return () =>
       window.removeEventListener("clipper:camera-preview", handleCameraPreview);
-  }, [props.part]);
+  }, [props.localTime, props.part, props.selectedObjectId]);
 
   // Sync active camera + gizmo selection. Skip during gizmo drag — the
   // scene drives its own visual feedback then.
@@ -488,15 +533,32 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
     const scene = sceneRef.current;
     if (!scene) return;
     if (draggingRef.current) return;
+    const activeCamera = findActiveCameraObject(props.part, props.localTime);
     scene.setActiveCamera(
       getActiveCameraObjectProps(props.part, props.localTime),
+      activeCamera?.id ?? null,
     );
-    const activeCamera = findActiveCameraObject(props.part);
+    scene.setCameraObjects(
+      props.part.objects
+        .filter((object) => object.type === "camera" && !object.hidden)
+        .map((object) => ({
+          id: object.id,
+          props: evaluateCameraObjectPropsAt(object, props.localTime),
+          active: object.id === activeCamera?.id,
+          selected: object.id === props.selectedObjectId,
+        })),
+    );
+    const selectedCamera = props.part.objects.find(
+      (object) =>
+        object.id === props.selectedObjectId &&
+        object.type === "camera" &&
+        !object.hidden,
+    );
     const cameraSelected =
-      activeCamera != null && props.selectedObjectId === activeCamera.id;
+      selectedCamera != null && props.selectedObjectId === selectedCamera.id;
     if (cameraSelected) {
       scene.setSelectedObject(null, null, null);
-      scene.setSelectedCameraObjectId(activeCamera.id);
+      scene.setSelectedCameraObjectId(selectedCamera.id);
     } else {
       scene.setSelectedCameraObjectId(null);
       const selectedObject = props.part.objects.find(
@@ -526,7 +588,12 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene) return;
-    const camera = findActiveCameraObject(props.part);
+    const camera = props.part.objects.find(
+      (object) =>
+        object.id === props.selectedObjectId &&
+        object.type === "camera" &&
+        !object.hidden,
+    );
     const isCameraSelected =
       camera != null && props.selectedObjectId === camera.id;
     if (!isCameraSelected || !camera) {
@@ -570,7 +637,12 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
       setSelectedKeyframeIndex(index);
     });
     scene.onCameraPathHandleDrag((handle: CameraPathHandle, nextCp: number) => {
-      const camera = findActiveCameraObject(props.part);
+      const camera = props.part.objects.find(
+        (object) =>
+          object.id === props.selectedObjectId &&
+          object.type === "camera" &&
+          !object.hidden,
+      );
       if (!camera) return;
       props.onCameraPathEaseChange?.(
         camera.id,

@@ -57,7 +57,7 @@ export function useCompositionCamera(
 
 /**
  * Find the active camera FrameObject's props (or null if none).
- * "Active" = first non-hidden object with `type === "camera"`.
+ * "Active" = topmost non-hidden camera whose `props.live` evaluates true.
  *
  * If `localTime` is provided, animated tracks are evaluated and (when
  * applicable) auto-orient along-path is applied so the returned rotation
@@ -67,7 +67,7 @@ export function getActiveCameraObjectProps(
   part: CompositionClip,
   localTime?: number,
 ): CameraObjectProps | null {
-  const cameraObject = findActiveCameraObject(part);
+  const cameraObject = findActiveCameraObject(part, localTime);
   if (!cameraObject) return null;
   if (localTime === undefined) {
     return readCameraObjectProps(cameraObject);
@@ -135,9 +135,16 @@ export function applyAutoOrientAlongPath(
 
 export function findActiveCameraObject(
   part: CompositionClip,
+  localTime?: number,
 ): FrameObject | null {
-  for (const obj of part.objects) {
-    if (obj.type === "camera" && !obj.hidden) return obj;
+  for (let index = part.objects.length - 1; index >= 0; index -= 1) {
+    const obj = part.objects[index];
+    if (obj.type !== "camera" || obj.hidden) continue;
+    const camera =
+      localTime === undefined
+        ? readCameraObjectProps(obj)
+        : evaluateCameraObjectPropsAt(obj, localTime);
+    if (camera.live) return obj;
   }
   return null;
 }
@@ -171,6 +178,7 @@ export function readCameraObjectProps(object: FrameObject): CameraObjectProps {
     return typeof n === "number" && Number.isFinite(n) ? n : def[key];
   };
   return {
+    live: typeof raw.live === "boolean" ? raw.live : def.live,
     position: readVec3(raw.position, def.position),
     rotation: readVec3(raw.rotation, def.rotation),
     fov: num("fov"),

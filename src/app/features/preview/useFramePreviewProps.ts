@@ -19,6 +19,7 @@ import type {
 } from "../compose/composeDrawing";
 import type { TimelinePreviewStackPart } from "../../../core/timeline";
 import type { StrategyFramePreviewProps } from "../../../components/preview/strategies/preview";
+import type { PreviewFps } from "../../../core/previewFps";
 
 type AdjustmentPointPick = unknown;
 type MarkerSelection = { partId: string; markerId: string } | null;
@@ -51,6 +52,7 @@ export type UseFramePreviewPropsParams = {
   isPlaying: boolean;
   cameraPreviewTransform: CameraPreviewTransform;
   displayFramePreviewScale: number;
+  previewFps: PreviewFps;
   part: Part;
   sceneMotionPart: Part;
   sceneWrap: SceneWrapConfig;
@@ -125,6 +127,7 @@ export function useFramePreviewProps({
   isPlaying,
   cameraPreviewTransform,
   displayFramePreviewScale,
+  previewFps,
   part,
   sceneMotionPart,
   sceneWrap,
@@ -181,6 +184,7 @@ export function useFramePreviewProps({
       cameraTransform: cameraPreviewTransform,
       frameViewportRef,
       frameScale: displayFramePreviewScale,
+      previewFps,
       isPlaying,
       part,
       sceneMotionPart,
@@ -254,6 +258,7 @@ export function useFramePreviewProps({
     cameraPreviewTransform,
     frameViewportRef,
     displayFramePreviewScale,
+    previewFps,
     part,
     sceneMotionPart,
     sceneWrap,

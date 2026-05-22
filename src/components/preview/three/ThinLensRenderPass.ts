@@ -514,8 +514,32 @@ function applyThinLensSample(
   const up = new THREE.Vector3(0, 1, 0).applyQuaternion(baseQuaternion);
   camera.position.addScaledVector(right, sample.x * apertureRadiusWorld);
   camera.position.addScaledVector(up, sample.y * apertureRadiusWorld);
-  camera.lookAt(focusPoint);
+  orientThinLensSampleCamera(camera, baseQuaternion, focusPoint);
   camera.updateMatrixWorld(true);
+}
+
+export function orientThinLensSampleCamera(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  camera: any,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  baseQuaternion: any,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  focusPoint: any,
+): void {
+  const baseForward = new THREE.Vector3(0, 0, -1)
+    .applyQuaternion(baseQuaternion)
+    .normalize();
+  const nextForward = focusPoint.clone().sub(camera.position);
+  if (nextForward.lengthSq() <= 1e-9) {
+    camera.quaternion.copy(baseQuaternion);
+    return;
+  }
+  nextForward.normalize();
+  const swing = new THREE.Quaternion().setFromUnitVectors(
+    baseForward,
+    nextForward,
+  );
+  camera.quaternion.copy(swing.multiply(baseQuaternion));
 }
 
 function makeThinLensTarget(

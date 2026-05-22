@@ -718,12 +718,12 @@ function createDynamicPropsDefinition(
     cursor[segments[segments.length - 1]] = value as unknown;
     return { ...object, props: root as FrameObject["props"] };
   };
-  // Treat `props.*` leaves as number tracks so numeric interpolation works.
-  // Non-numeric props (rare) still keyframe but won't tween — that matches
-  // the previous "custom" behavior.
+  const valueType = path === "props.live" ? "boolean" : "number";
+  // Treat numeric `props.*` leaves as number tracks so interpolation works.
+  // Boolean props hold their previous value until the next keyframe.
   return {
     path: path as PropertyPath,
-    valueType: "number",
+    valueType,
     group: "props",
     getBaseValue: readNested,
     setBaseValue: writeNested,

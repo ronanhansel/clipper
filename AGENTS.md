@@ -16,6 +16,7 @@ Project-agnostic engineering rules. For domain specifics, see `docs/`.
 ## Investigate before changing
 
 - Profile before refactoring for performance. Don't optimise by guess; measure with a CPU trace, a test run, or a benchmark.
+- For any lag, stutter, playback, scrub, preview, renderer, inspector, or hot-path performance query, read `docs/PERFORMANCE.md` before diagnosing or editing.
 - Read the code path before claiming a cause. Symptoms in module A can be triggered by IPC, async I/O, or main-thread work that doesn't appear in A's source.
 - Before extracting a wrapper, weigh saved lines vs added options-bag lines. If the wrapper only relocates an input bag, leave it.
 - Before extracting a hook that depends on N helpers, lift the helpers into a shared module first. Hooks must not import their own consumer's internals.
@@ -98,6 +99,7 @@ For project-specific patterns, see:
 ## Memory
 
 - `agent-log/[version]/memory/` — sequential change memos. Use as evidence when proposing rules or revisiting decisions.
+- Promote new knowledge into docs only when the user has confirmed the fix worked, the pattern is repeatable, and the knowledge is genuinely not covered already. Keep docs pristine: do not add case-specific notes, agent self-memory, or unconfirmed theories.
 
 ## graphify
 

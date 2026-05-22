@@ -376,6 +376,29 @@ describe("buildComposeAnimationTimelineLayers", () => {
     });
     expect(getComposeAnimationAttributeKeyframeAtTime(track, 2.8)).toBeNull();
   });
+
+  it("shows boolean camera live tracks", () => {
+    const object = {
+      ...frameObject("camera"),
+      type: "camera",
+      tracks: {
+        "props.live": {
+          valueType: "boolean",
+          points: [
+            { time: 0, value: true },
+            { time: 1, value: false },
+          ],
+        },
+      },
+    } satisfies FrameObject;
+    const [layer] = buildComposeAnimationTimelineLayers(
+      partWithObjects([object]),
+    );
+    const [track] = getComposeAnimationAttributeTracks(layer);
+
+    expect(track.label).toBe("Camera Live");
+    expect(track.keyframes.map((point) => point.value)).toEqual([true, false]);
+  });
 });
 
 function frameObject(id: string): FrameObject {

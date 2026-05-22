@@ -23,6 +23,7 @@ import {
   selectorOffsetPx,
   videoExportFrameRate,
 } from "../../app/config";
+import { defaultPreviewFps, type PreviewFps } from "../../core/previewFps";
 import {
   getRenderableTextSegments,
   getSelectionFormatState,
@@ -161,6 +162,7 @@ type FramePreviewProps = {
   cameraTransform: CameraPreviewTransform;
   frameViewportRef: RefObject<HTMLDivElement | null>;
   frameScale: number;
+  previewFps?: PreviewFps;
   isPlaying: boolean;
   part: Part;
   /**
@@ -310,6 +312,7 @@ export const FramePreview = memo(function FramePreview({
   cameraTransform,
   frameViewportRef,
   frameScale,
+  previewFps = defaultPreviewFps,
   isPlaying,
   part,
   sceneMotionPart,
@@ -954,6 +957,7 @@ export const FramePreview = memo(function FramePreview({
                     isPlaying={isPlaying}
                     animationsEnabled={animationsEnabled}
                     frameScale={frameScale}
+                    previewFps={previewFps}
                     exportTileFrameBounds={exportTileFrameBounds}
                     adjustmentLayers={adjustmentLayers}
                     displaySceneTime={displaySceneTime}

@@ -73,6 +73,19 @@ React reconciles on the next tick; the user sees the imperative update immediate
 
 Subscribe with `scheduler.subscribe(handler)`; trigger with `scheduler.requestRender(cause)`. Causes coalesce by priority: `play-tick > scrub > edit > resize > mount`.
 
+Preview-event handlers (`clipper:*preview`, live inspector previews, gizmo
+previews) must not render directly from the event callback. Store the latest
+payload, then ask `PreviewRenderScheduler` for an `edit` render. If the
+component is outside a scheduler provider, use one local rAF fallback that
+coalesces to the latest payload. This keeps preview work under one rAF owner and
+prevents high-frequency events from bypassing scheduler throttling.
+
+During pointer drags, keep the visible feedback imperative and commit document
+state once on gesture end. Per-frame project writes make drag feel heavier than
+direct DOM/WebGL updates and fan out through React/store subscribers. The drag
+path may still emit a preview event, but that event must follow the coalescing
+rule above.
+
 ## Strategy decisions
 
 Strategy / decision logic (e.g. `selectPreviewStrategy`) is a pure tested function with a single decision point. Never re-decide inside the consuming component — a duplicate guard inside a strategy component will drift from the router and silently break the path it was meant to gate.

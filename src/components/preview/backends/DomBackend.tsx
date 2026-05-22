@@ -70,8 +70,8 @@ export const DomBackend: CompositionBackend = function DomBackend({
   );
 
   const activeCameraId = useMemo(
-    () => findActiveCameraObject(part)?.id ?? null,
-    [part],
+    () => findActiveCameraObject(part, localTime)?.id ?? null,
+    [part, localTime],
   );
 
   // Live scrub from the inspector dispatches `clipper:camera-preview`

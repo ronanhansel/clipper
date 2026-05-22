@@ -351,9 +351,8 @@ export type CameraAutoOrient = "off" | "along-path";
 
 /**
  * Props stored on a `FrameObject` whose `type === "camera"`. The composition
- * may contain zero or more camera objects in `part.objects`. The first
- * non-hidden camera (in array order) is the active viewpoint; additional
- * cameras are inactive but persisted (matching After Effects layer model).
+ * may contain zero or more camera objects in `part.objects`. The topmost
+ * non-hidden camera whose `live` prop evaluates true is the active viewpoint.
  *
  * Position uses Clipper's frame coordinate space (y-down). Rotations are
  * degrees applied in XYZ Euler order.
@@ -368,6 +367,7 @@ export type CameraAutoOrient = "off" | "along-path";
  * grain).
  */
 export type CameraObjectProps = {
+  live: boolean;
   position: { x: number; y: number; z: number };
   rotation: { x: number; y: number; z: number };
   fov: number;
@@ -403,6 +403,7 @@ export const DEFAULT_CAMERA_POST: CameraPost = {
 };
 
 export const DEFAULT_CAMERA_OBJECT_PROPS: CameraObjectProps = {
+  live: true,
   position: { x: 0, y: 0, z: 1158 },
   rotation: { x: 0, y: 0, z: 0 },
   fov: 50,

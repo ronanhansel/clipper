@@ -26,7 +26,7 @@ export type ComposeAnimationKeyframePoint = {
   animationId: string;
   pointId: string;
   time: number;
-  value: number | string;
+  value: number | string | boolean;
   easingToNext?: MotionEase | readonly [number, number, number, number];
   propertyPath?: PropertyPath;
 };
@@ -49,7 +49,7 @@ export type ComposeAnimationKeyframeSelection = {
 type VisibleKeyframePoint = {
   pointId?: string;
   time: number;
-  value: number | string;
+  value: number | string | boolean;
   easingToNext?: MotionEase | readonly [number, number, number, number];
   hold?: boolean;
 };
@@ -321,7 +321,8 @@ function labelForPropsPropertyPath(propertyPath: string): string {
   if (propertyPath === "props.rotation.x") return "Camera Rot X";
   if (propertyPath === "props.rotation.y") return "Camera Rot Y";
   if (propertyPath === "props.rotation.z") return "Camera Rot Z";
-  if (propertyPath === "props.fov") return "Camera FOV";
+  if (propertyPath === "props.fov") return "Camera Focal Length";
+  if (propertyPath === "props.live") return "Camera Live";
   return propertyPath;
 }
 
@@ -415,7 +416,11 @@ export function getComposeAnimationAttributeTracks(
     }
     const points = tracks.get(key) ?? [];
     for (const point of track.points) {
-      if (typeof point.value !== "number" && typeof point.value !== "string")
+      if (
+        typeof point.value !== "number" &&
+        typeof point.value !== "string" &&
+        typeof point.value !== "boolean"
+      )
         continue;
       points.push({
         animationId: `property:${propertyPath}`,

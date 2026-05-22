@@ -287,6 +287,7 @@ export function useFrameObjectCommands({
       bounds: { x: 0, y: 0, width: 0, height: 0 },
       style: {},
       props: {
+        live: DEFAULT_CAMERA_OBJECT_PROPS.live,
         position: { ...DEFAULT_CAMERA_OBJECT_PROPS.position },
         rotation: { ...DEFAULT_CAMERA_OBJECT_PROPS.rotation },
         fov: DEFAULT_CAMERA_OBJECT_PROPS.fov,

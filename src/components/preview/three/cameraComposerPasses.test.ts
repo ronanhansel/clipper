@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import * as THREE from "three";
 import {
   CameraDofComposerPass,
   LensComposerPass,
@@ -16,6 +17,7 @@ import {
 import {
   getThinLensApertureRadiusWorld,
   getThinLensMaxBlurRadiusWorld,
+  orientThinLensSampleCamera,
   sampleThinLensDiskPair,
 } from "./ThinLensRenderPass";
 
@@ -375,5 +377,36 @@ describe("sampleThinLensDiskPair", () => {
       expect(Math.abs(a.x + b.x)).toBeLessThan(1e-6);
       expect(Math.abs(a.y + b.y)).toBeLessThan(1e-6);
     }
+  });
+});
+
+describe("orientThinLensSampleCamera", () => {
+  it("keeps camera roll while aiming shifted aperture samples at focus", () => {
+    const camera = new THREE.PerspectiveCamera();
+    camera.rotation.z = Math.PI / 4;
+    camera.updateMatrixWorld(true);
+    const baseQuaternion = camera.quaternion.clone();
+    const baseForward = new THREE.Vector3(0, 0, -1).applyQuaternion(
+      baseQuaternion,
+    );
+    const baseUp = new THREE.Vector3(0, 1, 0).applyQuaternion(baseQuaternion);
+    const focusPoint = camera.position
+      .clone()
+      .addScaledVector(baseForward, 1000);
+    camera.position.x += 25;
+
+    orientThinLensSampleCamera(camera, baseQuaternion, focusPoint);
+
+    const nextForward = focusPoint.clone().sub(camera.position).normalize();
+    const swing = new THREE.Quaternion().setFromUnitVectors(
+      baseForward,
+      nextForward,
+    );
+    const expectedUp = baseUp.clone().applyQuaternion(swing);
+    const actualUp = new THREE.Vector3(0, 1, 0).applyQuaternion(
+      camera.quaternion,
+    );
+    expect(actualUp.angleTo(expectedUp)).toBeLessThan(1e-6);
+    expect(actualUp.angleTo(new THREE.Vector3(0, 1, 0))).toBeGreaterThan(0.5);
   });
 });

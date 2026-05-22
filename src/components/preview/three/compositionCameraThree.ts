@@ -21,6 +21,7 @@ export interface ThreePerspectiveCameraLike {
   far: number;
   filmGauge: number;
   updateProjectionMatrix(): void;
+  updateMatrixWorld?(force?: boolean): void;
 }
 
 const DEG_TO_RAD = Math.PI / 180;
@@ -57,4 +58,5 @@ export function applyCompositionCameraToThree(
   target.far = c.far;
   target.filmGauge = c.sensor.width;
   target.updateProjectionMatrix();
+  target.updateMatrixWorld?.(true);
 }

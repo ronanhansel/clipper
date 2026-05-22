@@ -28,6 +28,7 @@ import type {
   CameraPreviewMode,
   ComposeAuthorViewState,
 } from "../three/ComposeAuthorView";
+import type { PreviewFps } from "../../../core/previewFps";
 import { renderScenePreview } from "../render/sceneRender";
 
 type SceneCompositorProps = {
@@ -53,6 +54,7 @@ type SceneCompositorProps = {
   isPlaying: boolean;
   animationsEnabled: boolean;
   frameScale: number;
+  previewFps: PreviewFps;
   exportTileFrameBounds?: ExportTileFrameBounds;
   adjustmentLayers: AdjustmentLayer[] | undefined;
   displaySceneTime: number;
@@ -126,6 +128,7 @@ export const SceneCompositor = memo(function SceneCompositor({
   isPlaying,
   animationsEnabled,
   frameScale,
+  previewFps,
   exportTileFrameBounds,
   adjustmentLayers,
   displaySceneTime,
@@ -222,6 +225,7 @@ export const SceneCompositor = memo(function SceneCompositor({
                 flatten={flattenComposition}
                 focusPicking={focusPicking}
                 frameScale={frameScale}
+                previewFps={previewFps}
                 hideNullObjects={hideNullObjects}
                 isPlaying={isPlaying}
                 part={item.part}

@@ -12,12 +12,18 @@ import {
   subscribeCodeObjectComponents,
 } from "../../../render-engine/codeObjectRuntime";
 import {
+  getMasterTimelineClockSnapshot,
+  isMasterClockLive,
+} from "../../../app/features/playback/playbackTimeStore";
+import {
   FRAME_HEIGHT,
   FRAME_WIDTH,
   type CameraObjectProps,
   type CompositionClip,
 } from "../../../core/types";
+import { defaultPreviewFps } from "../../../core/previewFps";
 import type { CompositionBackendProps } from "../backends/CompositionBackend";
+import { useOptionalPreviewRenderScheduler } from "../scheduler/PreviewRenderSchedulerContext";
 
 export interface CompositionWebGLHostProps {
   part: CompositionClip;
@@ -31,6 +37,7 @@ export interface CompositionWebGLHostProps {
     CompositionBackendProps,
     | "animationsEnabled"
     | "frameScale"
+    | "previewFps"
     | "hideNullObjects"
     | "isPlaying"
     | "duration"
@@ -76,6 +83,9 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const sourceContainerRef = useRef<HTMLDivElement | null>(null);
   const rendererRef = useRef<CompositionRenderer | null>(null);
+  const pendingCameraPreviewRef = useRef<CameraObjectProps | null>(null);
+  const cameraPreviewFrameRef = useRef<number>(0);
+  const scheduler = useOptionalPreviewRenderScheduler();
   const [portalTarget, setPortalTarget] = useState<HTMLDivElement | null>(null);
   const [captureCanvas, setCaptureCanvas] = useState<HTMLCanvasElement | null>(
     null,
@@ -92,6 +102,26 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
     getCodeObjectComponentTick,
     getCodeObjectComponentTick,
   );
+  const liveLocalTimeOffset = localTime - backendProps.renderClockSceneTime;
+  const renderPreviewFps = backendProps.previewFps ?? defaultPreviewFps;
+
+  function renderAtTime(
+    renderer: CompositionRenderer,
+    time: number,
+    cameraOverride?: CameraObjectProps | null,
+  ) {
+    const cameraProps =
+      cameraOverride ?? getActiveCameraObjectProps(part, time);
+    renderer.setCamera(cameraProps);
+    renderer.setComposerPasses(
+      buildCameraComposerPasses(cameraProps, {
+        width: FRAME_WIDTH,
+        height: FRAME_HEIGHT,
+      }),
+    );
+    renderer.setComposition(part, time, sourceContainerRef.current);
+    renderer.render();
+  }
 
   // The capture canvas + source subtree live in a fresh `<div>` mounted
   // straight on `document.body`. Two reasons:
@@ -179,20 +209,7 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
       /* alt casing */
     }
 
-    const refresh = (cameraOverride?: CameraObjectProps) => {
-      const cameraProps =
-        cameraOverride ?? getActiveCameraObjectProps(part, localTime);
-      renderer.setCamera(cameraProps);
-      renderer.setComposerPasses(
-        buildCameraComposerPasses(cameraProps, {
-          width: FRAME_WIDTH,
-          height: FRAME_HEIGHT,
-        }),
-      );
-      renderer.setComposition(part, localTime, sourceContainerRef.current);
-      renderer.render();
-    };
-    refresh();
+    renderAtTime(renderer, localTime);
 
     return () => {
       rendererRef.current = null;
@@ -224,19 +241,64 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
     const handle = requestAnimationFrame(() => {
       const r = rendererRef.current;
       if (!r) return;
-      const cameraProps = getActiveCameraObjectProps(part, localTime);
-      r.setCamera(cameraProps);
-      r.setComposerPasses(
-        buildCameraComposerPasses(cameraProps, {
-          width: FRAME_WIDTH,
-          height: FRAME_HEIGHT,
-        }),
-      );
-      r.setComposition(part, localTime, sourceContainerRef.current);
-      r.render();
+      renderAtTime(r, localTime);
     });
     return () => cancelAnimationFrame(handle);
+    // renderAtTime closes over current part/localTime inputs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [part, localTime, captureCanvas, codeComponentTick]);
+
+  useEffect(() => {
+    if (!backendProps.isPlaying) return;
+    if (!captureCanvas) return;
+    let lastRenderAt = 0;
+    const frameIntervalMs = 1000 / renderPreviewFps;
+    const renderLiveFrame = (_cause: unknown, now: number) => {
+      if (now - lastRenderAt < frameIntervalMs) return;
+      lastRenderAt = now;
+      const renderer = rendererRef.current;
+      if (!renderer) return;
+      const snap = getMasterTimelineClockSnapshot();
+      const rawLocalTime = isMasterClockLive(snap)
+        ? snap.adjustedSceneTime + liveLocalTimeOffset
+        : localTime;
+      const nextLocalTime =
+        Math.round(rawLocalTime * renderPreviewFps) / renderPreviewFps;
+      const cameraOverride = pendingCameraPreviewRef.current;
+      pendingCameraPreviewRef.current = null;
+      renderAtTime(renderer, nextLocalTime, cameraOverride);
+    };
+    const unsubscribe = scheduler?.subscribe(renderLiveFrame);
+    return () => unsubscribe?.();
+    // renderAtTime closes over current part/localTime inputs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    backendProps.isPlaying,
+    captureCanvas,
+    liveLocalTimeOffset,
+    localTime,
+    part,
+    renderPreviewFps,
+    scheduler,
+  ]);
+
+  useEffect(() => {
+    if (!captureCanvas) return;
+    const renderPendingCameraPreview = () => {
+      const renderer = rendererRef.current;
+      const cameraOverride = pendingCameraPreviewRef.current;
+      if (!renderer || !cameraOverride) return;
+      pendingCameraPreviewRef.current = null;
+      renderAtTime(renderer, localTime, cameraOverride);
+    };
+    const unsubscribe = scheduler?.subscribe((cause) => {
+      if (cause !== "edit") return;
+      renderPendingCameraPreview();
+    });
+    return () => unsubscribe?.();
+    // renderAtTime closes over current part/localTime inputs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [captureCanvas, localTime, part, scheduler]);
 
   // Live scrub from the inspector dispatches `clipper:camera-preview`
   // with the next CameraObjectProps. Apply imperatively so the
@@ -249,23 +311,34 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
         | { objectId: string; props: CameraObjectProps }
         | undefined;
       if (!detail) return;
-      const camera = findActiveCameraObject(part);
+      const camera = findActiveCameraObject(part, localTime);
       if (!camera || camera.id !== detail.objectId) return;
-      const renderer = rendererRef.current;
-      if (!renderer) return;
-      renderer.setCamera(detail.props);
-      renderer.setComposerPasses(
-        buildCameraComposerPasses(detail.props, {
-          width: FRAME_WIDTH,
-          height: FRAME_HEIGHT,
-        }),
-      );
-      renderer.render();
+      pendingCameraPreviewRef.current = detail.props;
+      if (scheduler) {
+        scheduler.requestRender("edit");
+        return;
+      }
+      if (cameraPreviewFrameRef.current) return;
+      cameraPreviewFrameRef.current = requestAnimationFrame(() => {
+        cameraPreviewFrameRef.current = 0;
+        const renderer = rendererRef.current;
+        const cameraOverride = pendingCameraPreviewRef.current;
+        if (!renderer || !cameraOverride) return;
+        pendingCameraPreviewRef.current = null;
+        renderAtTime(renderer, localTime, cameraOverride);
+      });
     }
     window.addEventListener("clipper:camera-preview", handleCameraPreview);
-    return () =>
+    return () => {
       window.removeEventListener("clipper:camera-preview", handleCameraPreview);
-  }, [part]);
+      if (cameraPreviewFrameRef.current) {
+        cancelAnimationFrame(cameraPreviewFrameRef.current);
+        cameraPreviewFrameRef.current = 0;
+      }
+    };
+    // renderAtTime closes over current part/localTime inputs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [localTime, part, scheduler]);
 
   return (
     <>
@@ -300,6 +373,7 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
                 exportTileFrameBounds={backendProps.exportTileFrameBounds}
                 focusPicking={false}
                 frameScale={1}
+                previewFps={backendProps.previewFps}
                 hideNullObjects={backendProps.hideNullObjects ?? false}
                 hostRef={sourceContainerRef}
                 isPlaying={backendProps.isPlaying}

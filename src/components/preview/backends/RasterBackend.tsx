@@ -38,6 +38,7 @@ export const RasterBackend: CompositionBackend = function RasterBackend(props) {
         backendProps={{
           animationsEnabled: props.animationsEnabled,
           frameScale: props.frameScale,
+          previewFps: props.previewFps,
           hideNullObjects: props.hideNullObjects,
           isPlaying: props.isPlaying,
           duration: props.duration,

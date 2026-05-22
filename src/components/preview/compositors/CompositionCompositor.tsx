@@ -26,6 +26,7 @@ import {
   type ComposeAuthorViewState,
 } from "../three/ComposeAuthorView";
 import { compositionHasCameraLayer } from "./useCompositionCamera";
+import type { PreviewFps } from "../../../core/previewFps";
 
 type CompositionCompositorProps = {
   active: boolean;
@@ -43,6 +44,7 @@ type CompositionCompositorProps = {
   flatten: boolean;
   focusPicking: boolean;
   frameScale: number;
+  previewFps: PreviewFps;
   hideNullObjects?: boolean;
   isPlaying: boolean;
   part: CompositionClip;
@@ -158,6 +160,7 @@ export const CompositionCompositor = memo(function CompositionCompositor(
       exportTileFrameBounds={props.exportTileFrameBounds}
       focusPicking={authoringInteractionsEnabled ? props.focusPicking : false}
       frameScale={props.frameScale}
+      previewFps={props.previewFps}
       hideNullObjects={props.hideNullObjects ?? false}
       hostRef={compositionRef}
       isPlaying={props.isPlaying}
@@ -192,6 +195,7 @@ export const CompositionCompositor = memo(function CompositionCompositor(
           pipBackendProps={{
             animationsEnabled: props.animationsEnabled,
             frameScale: props.frameScale,
+            previewFps: props.previewFps,
             hideNullObjects: props.hideNullObjects ?? false,
             isPlaying: props.isPlaying,
             duration: composition.duration,

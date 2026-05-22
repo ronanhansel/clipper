@@ -47,12 +47,25 @@ type AxisKey = keyof typeof AXIS_PATHS;
 export function buildCameraPathData(input: {
   camera: FrameObject;
   selectedKeyframeIndex: number | null;
+  previewPositionAtTime?: { time: number; position: CameraPathSample };
 }): CameraPathData | null {
   const { camera } = input;
   const tracks = camera.tracks ?? {};
-  const xTrack = tracks[AXIS_PATHS.x];
-  const yTrack = tracks[AXIS_PATHS.y];
-  const zTrack = tracks[AXIS_PATHS.z];
+  const xTrack = previewTrack(
+    tracks[AXIS_PATHS.x],
+    input.previewPositionAtTime,
+    "x",
+  );
+  const yTrack = previewTrack(
+    tracks[AXIS_PATHS.y],
+    input.previewPositionAtTime,
+    "y",
+  );
+  const zTrack = previewTrack(
+    tracks[AXIS_PATHS.z],
+    input.previewPositionAtTime,
+    "z",
+  );
 
   if (
     !xTrack?.points.length &&
@@ -62,7 +75,8 @@ export function buildCameraPathData(input: {
     return null;
   }
 
-  const baseProps = readBaseCameraPosition(camera);
+  const baseProps =
+    input.previewPositionAtTime?.position ?? readBaseCameraPosition(camera);
   const sampleAt = (time: number): CameraPathSample => ({
     x: numberAt(xTrack, time, baseProps.x),
     y: numberAt(yTrack, time, baseProps.y),
@@ -232,6 +246,26 @@ function readBaseCameraPosition(object: { props?: unknown }): {
     return typeof n === "number" && Number.isFinite(n) ? n : 0;
   };
   return { x: num("x"), y: num("y"), z: num("z") };
+}
+
+function previewTrack(
+  track: PropertyTrack | undefined,
+  preview: { time: number; position: CameraPathSample } | undefined,
+  axis: AxisKey,
+): PropertyTrack | undefined {
+  if (!track?.points.length || !preview) return track;
+  const points = [...track.points];
+  const index = points.findIndex(
+    (point) => Math.abs(point.time - preview.time) < 1e-6,
+  );
+  const value = preview.position[axis];
+  if (index >= 0) {
+    points[index] = { ...points[index], value };
+  } else {
+    points.push({ time: preview.time, value });
+    points.sort((a, b) => a.time - b.time);
+  }
+  return { ...track, points };
 }
 
 function numberAt(

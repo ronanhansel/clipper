@@ -69,11 +69,29 @@ describe("findActiveCameraObject", () => {
   it("returns null when no camera exists", () => {
     expect(findActiveCameraObject(makePart([]))).toBeNull();
   });
-  it("returns the first non-hidden camera", () => {
+  it("returns the topmost non-hidden live camera", () => {
     const a = makeCameraObject({ id: "a", hidden: true });
     const b = makeCameraObject({ id: "b" });
     const c = makeCameraObject({ id: "c" });
-    expect(findActiveCameraObject(makePart([a, b, c]))?.id).toBe("b");
+    expect(findActiveCameraObject(makePart([a, b, c]))?.id).toBe("c");
+  });
+  it("skips cameras whose live track is false at the current time", () => {
+    const bottom = makeCameraObject({ id: "bottom" });
+    const top = makeCameraObject({
+      id: "top",
+      tracks: {
+        "props.live": {
+          valueType: "boolean",
+          points: [
+            { time: 0, value: true },
+            { time: 1000, value: false },
+          ],
+        },
+      },
+    });
+    const part = makePart([bottom, top]);
+    expect(findActiveCameraObject(part, 500)?.id).toBe("top");
+    expect(findActiveCameraObject(part, 1000)?.id).toBe("bottom");
   });
 });
 
@@ -94,6 +112,7 @@ describe("readCameraObjectProps", () => {
       },
     });
     expect(readCameraObjectProps(obj)).toEqual({
+      live: true,
       position: { x: 100, y: -50, z: 800 },
       rotation: { x: 10, y: 20, z: 30 },
       fov: 45,
