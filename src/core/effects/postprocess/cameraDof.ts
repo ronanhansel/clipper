@@ -2,7 +2,11 @@
  * Camera DoF pass definition. Depth texture is provided by the caller
  * (CompositionRenderer's depth buffer in preview/export).
  */
-import type { CameraObjectProps } from "../../types";
+import {
+  CAMERA_DOF_MAX_BLUR_PX,
+  CAMERA_DOF_MIN_F_NUMBER,
+  type CameraObjectProps,
+} from "../../types";
 
 export const cameraDofPostProcessKind =
   "clipper.postprocess.cameraDof" as const;
@@ -16,8 +20,6 @@ export type CameraDofUniforms = {
   focusDistance: number;
   /** f-number. */
   fNumber: number;
-  /** Blur level multiplier. */
-  blurLevel: number;
   /** Max blur radius (px). */
   maxBlurPx: number;
   /** Camera position (scene units). */
@@ -64,9 +66,11 @@ export function createCameraDofPass(
       sensorHeight: camera.sensor.height,
       fov: camera.fov,
       focusDistance: camera.dof.focusDistance,
-      fNumber: camera.dof.fNumber,
-      blurLevel: camera.dof.blurLevel,
-      maxBlurPx: Math.max(0, camera.dof.maxBlurPx),
+      fNumber: Math.max(CAMERA_DOF_MIN_F_NUMBER, camera.dof.fNumber),
+      maxBlurPx: Math.max(
+        0,
+        Math.min(CAMERA_DOF_MAX_BLUR_PX, camera.dof.maxBlurPx),
+      ),
       cameraPos: { ...camera.position },
       cameraRotation: { ...camera.rotation },
       near: camera.near,

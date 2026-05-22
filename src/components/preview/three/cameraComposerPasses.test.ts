@@ -9,11 +9,13 @@ import {
 import { getCameraLensPostProcessPass } from "../../../core/cameraEffectsPasses";
 import { createCameraDofPass } from "../../../core/effects/postprocess/cameraDof";
 import {
+  CAMERA_DOF_MAX_BLUR_PX,
   DEFAULT_CAMERA_OBJECT_PROPS,
   type CameraObjectProps,
 } from "../../../core/types";
 import {
   getThinLensApertureRadiusWorld,
+  getThinLensMaxBlurRadiusWorld,
   sampleThinLensDiskPair,
 } from "./ThinLensRenderPass";
 
@@ -214,12 +216,11 @@ describe("CameraDofComposerPass", () => {
     pass.dispose();
   });
 
-  it("does not multiply the max blur clamp by blur level", () => {
+  it("uses the authored max blur clamp directly", () => {
     const camera = makeCamera((c) => {
       c.dof.enabled = true;
       c.dof.fNumber = 1.4;
       c.dof.focusDistance = 1500;
-      c.dof.blurLevel = 3;
       c.dof.maxBlurPx = 24;
     });
     const dofPass = createCameraDofPass(camera, "camera");
@@ -234,6 +235,20 @@ describe("CameraDofComposerPass", () => {
     expect(material.compositeMaterial.uniforms.u_maxBlurPx.value).toBe(24);
 
     pass.dispose();
+  });
+});
+
+describe("createCameraDofPass", () => {
+  it("clamps f-number and max blur uniforms to camera DoF limits", () => {
+    const camera = makeCamera((c) => {
+      c.dof.enabled = true;
+      c.dof.fNumber = 0.7;
+      c.dof.maxBlurPx = CAMERA_DOF_MAX_BLUR_PX + 1;
+    });
+    const dofPass = createCameraDofPass(camera, "camera");
+    expect(dofPass).not.toBeNull();
+    expect(dofPass!.uniforms.fNumber).toBe(1.5);
+    expect(dofPass!.uniforms.maxBlurPx).toBe(CAMERA_DOF_MAX_BLUR_PX);
   });
 });
 
@@ -292,7 +307,6 @@ describe("computeSignedCocPx", () => {
       c.dof.fNumber = 1.4;
       c.dof.focusDistance = 1500;
       c.dof.maxBlurPx = 12;
-      c.dof.blurLevel = 100;
     });
     const u = uniformsFor(camera);
     const huge = computeSignedCocPx(u, 30000, 1080);
@@ -303,6 +317,17 @@ describe("computeSignedCocPx", () => {
 describe("getThinLensApertureRadiusWorld", () => {
   it("returns 0 when DoF is disabled", () => {
     expect(getThinLensApertureRadiusWorld(makeCamera())).toBe(0);
+  });
+
+  it("stays active when focus distance is zero", () => {
+    const camera = makeCamera((c) => {
+      c.dof.enabled = true;
+      c.dof.fNumber = 1.5;
+      c.dof.focusDistance = 0;
+      c.dof.maxBlurPx = CAMERA_DOF_MAX_BLUR_PX;
+    });
+
+    expect(getThinLensApertureRadiusWorld(camera)).toBeGreaterThan(0);
   });
 
   it("produces a larger aperture radius for wider apertures", () => {
@@ -321,6 +346,24 @@ describe("getThinLensApertureRadiusWorld", () => {
     expect(getThinLensApertureRadiusWorld(wide)).toBeGreaterThan(
       getThinLensApertureRadiusWorld(narrow),
     );
+  });
+
+  it("caps focus-at-infinity aperture from max blur in pixels", () => {
+    const camera = makeCamera((c) => {
+      c.dof.enabled = true;
+      c.dof.fNumber = 1.5;
+      c.dof.focusDistance = 1_000_000;
+      c.dof.maxBlurPx = 48;
+      c.near = 10;
+    });
+    const radius = getThinLensApertureRadiusWorld(camera, 1080);
+    const maxRadius = getThinLensMaxBlurRadiusWorld(
+      camera,
+      undefined,
+      undefined,
+      1080,
+    );
+    expect(radius).toBeCloseTo(maxRadius, 6);
   });
 });
 

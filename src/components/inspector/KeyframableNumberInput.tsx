@@ -12,6 +12,7 @@ import { livePreviewScrubCommitThrottleMs } from "../../app/services/scrubIntera
 export function KeyframableNumberInput({
   ariaLabel,
   unitPrefix,
+  unitPrefixClassName,
   step,
   min,
   max,
@@ -23,6 +24,7 @@ export function KeyframableNumberInput({
 }: {
   ariaLabel: string;
   unitPrefix: string;
+  unitPrefixClassName?: string;
   step: number;
   min?: number;
   max?: number;
@@ -42,6 +44,7 @@ export function KeyframableNumberInput({
         max={max}
         step={step}
         unitPrefix={unitPrefix}
+        unitPrefixClassName={unitPrefixClassName}
         numberScrubMode="preview"
         numberScrubCommitThrottleMs={livePreviewScrubCommitThrottleMs}
         value={value}

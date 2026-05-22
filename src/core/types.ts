@@ -274,11 +274,13 @@ export type CameraDepthOfField = {
   focusDistance: number;
   /** f-number (e.g. 2.8). 0 disables DoF. */
   fNumber: number;
-  /** Multiplier; 1 = physically accurate. AE exposes this as 0–200%. */
-  blurLevel: number;
-  /** Upper clamp for CSS blur, in source pixels. Default 512. */
+  /** Upper clamp for DoF blur, in source pixels. */
   maxBlurPx: number;
 };
+
+export const CAMERA_DOF_MIN_F_NUMBER = 1.5;
+export const CAMERA_DOF_MAX_F_NUMBER = 64;
+export const CAMERA_DOF_MAX_BLUR_PX = 300;
 
 export type CameraLensDistortion = {
   enabled: boolean;
@@ -383,8 +385,7 @@ export const DEFAULT_CAMERA_DOF: CameraDepthOfField = {
   enabled: false,
   focusDistance: 1158,
   fNumber: 2.8,
-  blurLevel: 1,
-  maxBlurPx: 512,
+  maxBlurPx: CAMERA_DOF_MAX_BLUR_PX,
 };
 
 export const DEFAULT_CAMERA_LENS: CameraLens = {

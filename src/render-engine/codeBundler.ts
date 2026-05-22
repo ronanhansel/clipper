@@ -32,33 +32,63 @@ export type AssetResolver = (
   importer: string | null,
 ) => Promise<ResolvedAsset | null>;
 
-let esbuildModulePromise: Promise<typeof esbuildModule> | null = null;
-let esbuildInitializePromise: Promise<void> | null = null;
+type EsbuildRuntimeState = {
+  modulePromise: Promise<typeof esbuildModule> | null;
+  initializePromise: Promise<void> | null;
+};
+
+const ESBUILD_RUNTIME_STATE_KEY = "__clipperEsbuildRuntimeState";
+
+type EsbuildRuntimeGlobal = typeof globalThis & {
+  [ESBUILD_RUNTIME_STATE_KEY]?: EsbuildRuntimeState;
+};
+
+function getEsbuildRuntimeState(): EsbuildRuntimeState {
+  const runtimeGlobal = globalThis as EsbuildRuntimeGlobal;
+  if (!runtimeGlobal[ESBUILD_RUNTIME_STATE_KEY]) {
+    runtimeGlobal[ESBUILD_RUNTIME_STATE_KEY] = {
+      modulePromise: null,
+      initializePromise: null,
+    };
+  }
+  return runtimeGlobal[ESBUILD_RUNTIME_STATE_KEY];
+}
+
+function isDuplicateInitializeError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    error.message.includes('Cannot call "initialize" more than once')
+  );
+}
 
 async function loadEsbuild(): Promise<typeof esbuildModule> {
-  if (!esbuildModulePromise)
-    esbuildModulePromise =
+  const state = getEsbuildRuntimeState();
+  if (!state.modulePromise)
+    state.modulePromise =
       import("esbuild-wasm/esm/browser.js") as unknown as Promise<
         typeof esbuildModule
       >;
-  return esbuildModulePromise;
+  return state.modulePromise;
 }
 
 async function ensureEsbuildInitialized(): Promise<void> {
-  if (esbuildInitializePromise) return esbuildInitializePromise;
-  const esbuild = await loadEsbuild();
-  esbuildInitializePromise = esbuild
-    .initialize({
+  const state = getEsbuildRuntimeState();
+  if (state.initializePromise) return state.initializePromise;
+
+  state.initializePromise = loadEsbuild().then((esbuild) =>
+    esbuild.initialize({
       wasmURL: new URL(
         "../../node_modules/esbuild-wasm/esbuild.wasm",
         import.meta.url,
       ).toString(),
-    })
-    .catch((error) => {
-      esbuildInitializePromise = null;
-      throw error;
-    });
-  return esbuildInitializePromise;
+    }),
+  );
+  state.initializePromise = state.initializePromise.catch((error) => {
+    if (isDuplicateInitializeError(error)) return;
+    state.initializePromise = null;
+    throw error;
+  });
+  return state.initializePromise;
 }
 
 const reactShimNamespace = "clipper-react-shim";

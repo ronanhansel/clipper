@@ -1,12 +1,17 @@
 import * as THREE from "three";
 import { Pass } from "three/examples/jsm/postprocessing/Pass.js";
-import type { CameraObjectProps } from "../../../core/types";
+import {
+  CAMERA_DOF_MAX_BLUR_PX,
+  CAMERA_DOF_MIN_F_NUMBER,
+  type CameraObjectProps,
+} from "../../../core/types";
 
 const FULLSCREEN_GEOMETRY = new THREE.PlaneGeometry(2, 2);
 const FULLSCREEN_CAMERA = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 const GOLDEN_ANGLE = 2.39996323;
-const THIN_LENS_SAMPLES = 52;
+const THIN_LENS_SAMPLES = 64;
 const APERTURE_WORLD_SCALE = 0.02;
+const MIN_BLUR_CAP_DEPTH = 100;
 const RESOLVE_SCALE = 0.5;
 const RESOLVE_BOKEH_TAPS = 24;
 const RESOLVE_BOKEH_RADIUS_HALF_PX = 1.8;
@@ -278,7 +283,10 @@ export class ThinLensRenderPass extends (Pass as any) {
       return;
     }
 
-    const apertureRadiusWorld = getThinLensApertureRadiusWorld(camera);
+    const apertureRadiusWorld = getThinLensApertureRadiusWorld(
+      camera,
+      readBuffer?.height,
+    );
     if (apertureRadiusWorld <= 0) {
       this.renderSingle(renderer, readBuffer);
       return;
@@ -286,7 +294,8 @@ export class ThinLensRenderPass extends (Pass as any) {
 
     const basePosition = this.camera.position.clone();
     const baseQuaternion = this.camera.quaternion.clone();
-    const focusPoint = getFocusPoint(this.camera, camera.dof.focusDistance);
+    const focusDistance = getThinLensFocusDistance(camera);
+    const focusPoint = getFocusPoint(this.camera, focusDistance);
 
     for (let i = 0; i < THIN_LENS_SAMPLES; i++) {
       const sample = sampleDisk(i, THIN_LENS_SAMPLES);
@@ -372,23 +381,65 @@ export class ThinLensRenderPass extends (Pass as any) {
 
 export function getThinLensApertureRadiusWorld(
   camera: CameraObjectProps,
+  resolutionHeight = 1080,
 ): number {
   if (!hasActiveThinLensDof(camera)) return 0;
-  const focusDistance = Math.max(camera.dof.focusDistance, 1);
+  const focusDistance = getThinLensFocusDistance(camera);
   const fovRad = (camera.fov * Math.PI) / 180;
-  const focalLengthMm = camera.sensor.height / (2 * Math.tan(fovRad * 0.5));
+  const focalLengthMm = getThinLensFocalLengthMm(camera, fovRad);
   if (!Number.isFinite(focalLengthMm) || focalLengthMm <= 0) return 0;
   const apertureRadiusMm =
-    focalLengthMm / Math.max(camera.dof.fNumber, 0.1) / 2;
+    focalLengthMm / Math.max(camera.dof.fNumber, CAMERA_DOF_MIN_F_NUMBER) / 2;
   const sceneHeightAtFocus = 2 * focusDistance * Math.tan(fovRad * 0.5);
   const sceneUnitsPerMm = sceneHeightAtFocus / camera.sensor.height;
-  const radius =
-    apertureRadiusMm *
-    sceneUnitsPerMm *
-    Math.max(camera.dof.blurLevel, 0) *
-    APERTURE_WORLD_SCALE;
-  const maxRadius = Math.max(1, camera.dof.maxBlurPx * 0.25);
+  const radius = apertureRadiusMm * sceneUnitsPerMm * APERTURE_WORLD_SCALE;
+  const maxRadius = getThinLensMaxBlurRadiusWorld(
+    camera,
+    focusDistance,
+    fovRad,
+    resolutionHeight,
+  );
   return Math.max(0, Math.min(maxRadius, radius));
+}
+
+function getThinLensFocusDistance(camera: CameraObjectProps): number {
+  const fovRad = (camera.fov * Math.PI) / 180;
+  const focalLengthMm = getThinLensFocalLengthMm(camera, fovRad);
+  const minDistance =
+    Number.isFinite(focalLengthMm) && focalLengthMm > 0
+      ? focalLengthMm * 1.01
+      : 1;
+  return Math.max(camera.dof.focusDistance, minDistance);
+}
+
+function getThinLensFocalLengthMm(
+  camera: CameraObjectProps,
+  fovRad = (camera.fov * Math.PI) / 180,
+): number {
+  return camera.sensor.height / (2 * Math.tan(fovRad * 0.5));
+}
+
+export function getThinLensMaxBlurRadiusWorld(
+  camera: CameraObjectProps,
+  focusDistance = Math.max(camera.dof.focusDistance, 1),
+  fovRad = (camera.fov * Math.PI) / 180,
+  resolutionHeight = 1080,
+): number {
+  const maxBlurPx = Math.max(
+    0,
+    Math.min(CAMERA_DOF_MAX_BLUR_PX, camera.dof.maxBlurPx),
+  );
+  if (maxBlurPx <= 0) return 0;
+  const height = Math.max(1, resolutionHeight);
+  const tanHalfFov = Math.tan(fovRad * 0.5);
+  if (!Number.isFinite(tanHalfFov) || tanHalfFov <= 0) return 0;
+  const nearestDepth = Math.max(MIN_BLUR_CAP_DEPTH, camera.near);
+  const defocusPerWorldUnit =
+    (height / (2 * tanHalfFov)) *
+    Math.abs(1 / focusDistance - 1 / nearestDepth);
+  if (!Number.isFinite(defocusPerWorldUnit) || defocusPerWorldUnit <= 1e-6)
+    return Number.POSITIVE_INFINITY;
+  return maxBlurPx / defocusPerWorldUnit;
 }
 
 function getResolveSize(
@@ -415,10 +466,9 @@ function hasActiveThinLensDof(
   return Boolean(
     camera?.dof.enabled &&
     camera.dof.fNumber > 0 &&
-    camera.dof.blurLevel > 0 &&
     camera.dof.maxBlurPx > 0 &&
     Number.isFinite(camera.dof.focusDistance) &&
-    camera.dof.focusDistance > 0,
+    camera.dof.focusDistance >= 0,
   );
 }
 

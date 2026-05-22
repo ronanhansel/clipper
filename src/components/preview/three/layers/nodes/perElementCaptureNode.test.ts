@@ -22,7 +22,11 @@ class FakeContext2D {
 class FakeCanvas {
   width = 0;
   height = 0;
+  readonly children: FakeElement[] = [];
   private ctx: FakeContext2D | null = null;
+  appendChild(child: FakeElement): void {
+    this.children.push(child);
+  }
   getContext(kind: string) {
     if (kind !== "2d") return null;
     if (!this.ctx) this.ctx = new FakeContext2D();
@@ -33,6 +37,7 @@ class FakeCanvas {
 class FakeElement {
   private readonly attributes = new Map<string, string>();
   private readonly children: FakeElement[] = [];
+  readonly style: Record<string, string> = {};
   setAttribute(name: string, value: string): void {
     this.attributes.set(name, value);
   }
@@ -42,12 +47,22 @@ class FakeElement {
   appendChild(child: FakeElement): void {
     this.children.push(child);
   }
+  removeAttribute(name: string): void {
+    this.attributes.delete(name);
+  }
+  remove(): void {}
+  cloneNode(_deep?: boolean): FakeElement {
+    const clone = new FakeElement();
+    for (const [key, value] of this.attributes) clone.setAttribute(key, value);
+    return clone;
+  }
   querySelector(selector: string): FakeElement | null {
-    const match = /\[data-object-id="([^"]+)"\]/.exec(selector);
+    const match = /\[data-clipper-render-object-id="([^"]+)"\]/.exec(selector);
     if (!match) return null;
     const id = match[1];
     for (const child of this.children) {
-      if (child.getAttribute("data-object-id") === id) return child;
+      if (child.getAttribute("data-clipper-render-object-id") === id)
+        return child;
     }
     return null;
   }
@@ -200,7 +215,7 @@ describe("perElementCaptureNode", () => {
     sharedCapture.context.drawElementImage = drawElementImage;
     const root = new FakeElement();
     const layer = new FakeElement();
-    layer.setAttribute("data-object-id", "layer-1");
+    layer.setAttribute("data-clipper-render-object-id", "layer-1");
     root.appendChild(layer);
     const factory = createPerElementCaptureFactory("text");
     const node = factory.create({ id: "layer-1" } as FrameObject, {
@@ -209,7 +224,8 @@ describe("perElementCaptureNode", () => {
       sourceRoot: () => root as unknown as Element,
     });
     node.update(makeState({ bounds: { x: 0, y: 0, width: 50, height: 25 } }));
-    expect(drawElementImage).toHaveBeenCalledWith(layer, 0, 0, 50, 25);
+    expect(drawElementImage).toHaveBeenCalledTimes(1);
+    expect(drawElementImage.mock.calls[0]?.slice(1)).toEqual([0, 0, 50, 25]);
     node.dispose();
   });
 
@@ -231,7 +247,7 @@ describe("perElementCaptureNode", () => {
     });
     const root = new FakeElement();
     const layer = new FakeElement();
-    layer.setAttribute("data-object-id", "layer-1");
+    layer.setAttribute("data-clipper-render-object-id", "layer-1");
     root.appendChild(layer);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const factory = createPerElementCaptureFactory("text");

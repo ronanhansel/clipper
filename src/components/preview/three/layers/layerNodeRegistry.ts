@@ -35,7 +35,7 @@ export interface LayerNode {
  * Context made available to factories at node-construction time.
  *
  * - `sourceRoot`: a getter the node calls to find its layer's DOM
- *   subtree (`querySelector('[data-object-id="..."]')`). Per-element
+ *   subtree (`querySelector('[data-clipper-render-object-id="..."]')`). Per-element
  *   capture nodes use this to grab just their own pixels rather than
  *   sampling a shared 2D-flattened composite — the fix that ends the
  *   v0.2.20 cross-layer ghosting.

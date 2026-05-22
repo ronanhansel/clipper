@@ -16,16 +16,17 @@ import { resolveLayerTransform } from "../layerTransform";
  * `THREE.CanvasTexture` sized to the layer's bounds, and a quad with
  * full `[0,1]` UVs (no crop). On every `update`:
  *   1. Resolve the layer's DOM subtree via
- *      `sourceRoot().querySelector('[data-object-id="<id>"]')`.
- *   2. Call `drawElementImage(layerEl, 0, 0, w, h)` on the renderer-
- *      owned shared 2D context (browsers require the captured element
- *      to be a descendant of THAT canvas, so this single hop is
- *      mandatory).
+ *      `sourceRoot().querySelector('[data-clipper-render-object-id="<id>"]')`.
+ *   2. Clone that subtree into the renderer-owned shared capture canvas
+ *      as a direct child, then call `drawElementImage(clone, 0, 0, w, h)`.
+ *      Chromium requires an immediate canvas child, and the clone lets
+ *      us strip the authoring wrapper transform because Three applies
+ *      the 3D transform.
  *   3. Blit the pixels from the shared canvas into the private canvas.
  *   4. Mark the texture as needing upload.
  *
  * Contract with the inspector backend: visible layer roots emit
- * `data-object-id="<frameObject.id>"`. If the lookup misses (first
+ * `data-clipper-render-object-id="<frameObject.id>"`. If the lookup misses (first
  * commit before the backend has rendered, layer fully clipped, etc.)
  * we leave the texture untouched — the previous frame keeps showing —
  * rather than crashing the whole render.
@@ -151,7 +152,7 @@ class PerElementCaptureNode implements LayerNode {
     const sourceRoot = this.context.sourceRoot();
     if (!sourceRoot) return;
     const layerEl = sourceRoot.querySelector(
-      `[data-object-id="${cssEscape(this.id)}"]`,
+      `[data-clipper-render-object-id="${cssEscape(this.id)}"]`,
     );
     if (!layerEl) return;
 
@@ -161,9 +162,18 @@ class PerElementCaptureNode implements LayerNode {
     if (typeof drawElementImage !== "function") return;
 
     const sharedCanvas = this.context.sharedCapture.canvas;
+    const captureEl = createCaptureClone(layerEl, this.width, this.height);
     try {
+      sharedCanvas.appendChild(captureEl);
       sharedCtx.clearRect(0, 0, this.width, this.height);
-      drawElementImage.call(sharedCtx, layerEl, 0, 0, this.width, this.height);
+      drawElementImage.call(
+        sharedCtx,
+        captureEl,
+        0,
+        0,
+        this.width,
+        this.height,
+      );
       this.ctx.clearRect(0, 0, this.width, this.height);
       this.ctx.drawImage(
         sharedCanvas,
@@ -185,6 +195,8 @@ class PerElementCaptureNode implements LayerNode {
           error,
         );
       }
+    } finally {
+      captureEl.remove();
     }
   }
 
@@ -214,6 +226,29 @@ function cssEscape(value: string): string {
   if (cssGlobal && typeof cssGlobal.escape === "function")
     return cssGlobal.escape(value);
   return value.replace(/["\\]/g, "\\$&");
+}
+
+function createCaptureClone(
+  source: Element,
+  width: number,
+  height: number,
+): HTMLElement {
+  const clone = source.cloneNode(true) as HTMLElement;
+  if (!clone.style)
+    throw new Error("PerElementCaptureNode: capture source is not HTMLElement");
+  Object.assign(clone.style, {
+    position: "absolute",
+    left: "0px",
+    top: "0px",
+    width: `${width}px`,
+    height: `${height}px`,
+    transform: "none",
+    transformOrigin: "top left",
+    pointerEvents: "none",
+    margin: "0",
+  } as Partial<CSSStyleDeclaration>);
+  clone.removeAttribute("data-object-id");
+  return clone;
 }
 
 export function createPerElementCaptureFactory(

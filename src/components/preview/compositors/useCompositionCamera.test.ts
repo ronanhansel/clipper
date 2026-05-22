@@ -8,6 +8,7 @@ import {
   readCameraObjectProps,
 } from "./useCompositionCamera";
 import {
+  CAMERA_DOF_MAX_BLUR_PX,
   DEFAULT_CAMERA_DOF,
   DEFAULT_CAMERA_LENS,
   DEFAULT_CAMERA_OBJECT_PROPS,
@@ -124,7 +125,6 @@ describe("readCameraObjectProps", () => {
           enabled: true,
           focusDistance: 800,
           fNumber: 1.8,
-          blurLevel: 1.5,
           maxBlurPx: 32,
         },
         autoOrient: "along-path",
@@ -136,10 +136,24 @@ describe("readCameraObjectProps", () => {
       enabled: true,
       focusDistance: 800,
       fNumber: 1.8,
-      blurLevel: 1.5,
       maxBlurPx: 32,
     });
     expect(props.autoOrient).toBe("along-path");
+  });
+  it("clamps DoF f-number and max blur from saved props", () => {
+    const obj = makeCameraObject({
+      props: {
+        dof: {
+          enabled: true,
+          focusDistance: 800,
+          fNumber: 0.7,
+          maxBlurPx: CAMERA_DOF_MAX_BLUR_PX + 1,
+        },
+      },
+    });
+    const props = readCameraObjectProps(obj);
+    expect(props.dof.fNumber).toBe(1.5);
+    expect(props.dof.maxBlurPx).toBe(CAMERA_DOF_MAX_BLUR_PX);
   });
   it("fills defaults for lens and post when both are missing", () => {
     const obj = makeCameraObject({ props: {} });

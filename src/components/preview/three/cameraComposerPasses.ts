@@ -251,8 +251,7 @@ export function computeSignedCocPx(
   const denom = focus * (subject - focalLengthMm);
   if (Math.abs(denom) < 1e-6) return 0;
   const cocMm = (apertureDiameter * focalLengthMm * (subject - focus)) / denom;
-  const cocPx =
-    cocMm * (resolutionHeight / uniforms.sensorHeight) * uniforms.blurLevel;
+  const cocPx = cocMm * (resolutionHeight / uniforms.sensorHeight);
   const clamped = Math.max(
     -uniforms.maxBlurPx,
     Math.min(uniforms.maxBlurPx, cocPx),
@@ -294,7 +293,6 @@ uniform float u_sensorHeight;
 uniform float u_fov;
 uniform float u_focusDistance;
 uniform float u_fNumber;
-uniform float u_blurLevel;
 uniform float u_maxBlurPx;
 uniform float u_depthNear;
 uniform float u_depthFar;
@@ -325,7 +323,7 @@ float signedCocPx(float sceneDepth) {
   float denom = focus * (subject - focalLengthMm);
   if (abs(denom) < 1e-6) return 0.0;
   float cocMm = apertureDiameter * focalLengthMm * (subject - focus) / denom;
-  float cocPx = cocMm * (u_sourceResolution.y / u_sensorHeight) * u_blurLevel;
+  float cocPx = cocMm * (u_sourceResolution.y / u_sensorHeight);
   return clamp(cocPx, -u_maxBlurPx, u_maxBlurPx);
 }
 
@@ -514,7 +512,6 @@ export class CameraDofComposerPass extends (Pass as any) {
       u_fov: { value: u.fov },
       u_focusDistance: { value: Math.max(u.focusDistance, 0.001) },
       u_fNumber: { value: Math.max(u.fNumber, 0.1) },
-      u_blurLevel: { value: u.blurLevel },
       u_maxBlurPx: { value: maxBlurPx },
       u_depthNear: { value: u.near },
       u_depthFar: { value: u.far },

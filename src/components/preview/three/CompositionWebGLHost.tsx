@@ -110,11 +110,10 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
     Object.assign(target.style, {
       position: "fixed",
       top: "0px",
-      left: "0px",
+      left: "-10000px",
       width: `${FRAME_WIDTH}px`,
       height: `${FRAME_HEIGHT}px`,
       pointerEvents: "none",
-      opacity: "0",
       zIndex: "-1",
       overflow: "hidden",
     } as Partial<CSSStyleDeclaration>);

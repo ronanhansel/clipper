@@ -16,6 +16,9 @@ import {
 } from "../../../core/camera";
 import { evaluateObjectState } from "../../../core/propertyRegistry";
 import {
+  CAMERA_DOF_MAX_BLUR_PX,
+  CAMERA_DOF_MAX_F_NUMBER,
+  CAMERA_DOF_MIN_F_NUMBER,
   DEFAULT_CAMERA_DOF,
   DEFAULT_CAMERA_LENS,
   DEFAULT_CAMERA_OBJECT_PROPS,
@@ -196,9 +199,7 @@ function readDof(v: unknown): CameraDepthOfField {
   const def = DEFAULT_CAMERA_DOF;
   if (!v || typeof v !== "object") return { ...def };
   const r = v as Record<string, unknown>;
-  const num = (
-    k: "focusDistance" | "fNumber" | "blurLevel" | "maxBlurPx",
-  ): number => {
+  const num = (k: "focusDistance" | "fNumber" | "maxBlurPx"): number => {
     const n = r[k];
     return typeof n === "number" && Number.isFinite(n) ? n : def[k];
   };
@@ -206,9 +207,11 @@ function readDof(v: unknown): CameraDepthOfField {
   return {
     enabled,
     focusDistance: num("focusDistance"),
-    fNumber: num("fNumber"),
-    blurLevel: num("blurLevel"),
-    maxBlurPx: num("maxBlurPx"),
+    fNumber: Math.max(
+      CAMERA_DOF_MIN_F_NUMBER,
+      Math.min(CAMERA_DOF_MAX_F_NUMBER, num("fNumber")),
+    ),
+    maxBlurPx: Math.max(0, Math.min(CAMERA_DOF_MAX_BLUR_PX, num("maxBlurPx"))),
   };
 }
 

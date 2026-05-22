@@ -1,4 +1,10 @@
-import { type CameraObjectProps, type FrameObject } from "../../../core/types";
+import {
+  CAMERA_DOF_MAX_BLUR_PX,
+  CAMERA_DOF_MAX_F_NUMBER,
+  CAMERA_DOF_MIN_F_NUMBER,
+  type CameraObjectProps,
+  type FrameObject,
+} from "../../../core/types";
 import {
   removePropertyKeyframe,
   upsertPropertyKeyframe,
@@ -38,7 +44,6 @@ type CameraTrackPath =
   | "props.sensor.height"
   | "props.dof.focusDistance"
   | "props.dof.fNumber"
-  | "props.dof.blurLevel"
   | "props.dof.maxBlurPx";
 
 const POSITION_FIELDS: ReadonlyArray<{
@@ -61,23 +66,10 @@ const ROTATION_FIELDS: ReadonlyArray<{
   { axis: "z", path: "props.rotation.z", ariaLabel: "Camera rotation Z" },
 ];
 
-const FOCAL_LENGTH_PRESETS_MM = [15, 24, 35, 50, 80, 135, 200] as const;
-
-const SENSOR_PRESETS: ReadonlyArray<{
-  label: string;
-  width: number;
-  height: number;
-}> = [
-  { label: "Full Frame", width: 36, height: 24 },
-  { label: "APS-C", width: 24.89, height: 18.66 },
-  { label: "Super 35", width: 24.89, height: 18.66 },
-  { label: "Micro 4/3", width: 17.3, height: 13 },
-];
-
 /**
  * Inspector section for a `type: "camera"` FrameObject.
  *
- * Each leaf field (position.x, rotation.y, fov, sensor.width, dof.fNumber, …)
+ * Each leaf field (position.x, rotation.y, fov, dof.fNumber, ...)
  * is a keyframable `props.*` track via the property registry's nested
  * dynamic-props support. Number-scrub previews land on `onPreview` for
  * instant 3D updates; commit/typing writes either a keyframe (when a track
@@ -134,10 +126,13 @@ export function CameraObjectSection() {
     if (path === "props.sensor.width" || path === "props.sensor.height")
       return Math.max(1, Math.min(200, value));
     if (path === "props.dof.focusDistance") return clampPositive(value, 0);
-    if (path === "props.dof.fNumber") return Math.max(0.5, Math.min(64, value));
-    if (path === "props.dof.blurLevel") return Math.max(0, Math.min(4, value));
+    if (path === "props.dof.fNumber")
+      return Math.max(
+        CAMERA_DOF_MIN_F_NUMBER,
+        Math.min(CAMERA_DOF_MAX_F_NUMBER, value),
+      );
     if (path === "props.dof.maxBlurPx")
-      return Math.max(0, Math.min(256, value));
+      return Math.max(0, Math.min(CAMERA_DOF_MAX_BLUR_PX, value));
     return value;
   }
 
@@ -189,19 +184,6 @@ export function CameraObjectSection() {
     if (!Number.isFinite(focalLengthMm) || focalLengthMm <= 0) return;
     const fov = clampFov(fovFromFocalLength(focalLengthMm, sensorHeightLive));
     previewBase("props.fov", fov);
-  }
-
-  function applySensorPreset(width: number, height: number) {
-    onChange((current) => {
-      const currentProps = (current.props ?? {}) as Record<string, unknown>;
-      return {
-        ...current,
-        props: {
-          ...currentProps,
-          sensor: { width, height },
-        },
-      };
-    });
   }
 
   function setAutoOrient(value: "off" | "along-path") {
@@ -285,36 +267,21 @@ export function CameraObjectSection() {
         </Select>
       </div>
 
-      <div className="grid gap-2">
-        <span className={mutedCaps}>Lens</span>
-        <div className="flex flex-wrap gap-1">
-          {FOCAL_LENGTH_PRESETS_MM.map((mm) => (
-            <button
-              key={mm}
-              type="button"
-              aria-label={`Set focal length to ${mm}mm`}
-              className="rounded-[6px] border border-[#2d313b] bg-[#171920] px-2 py-1 text-[10px] font-bold text-[#dfe2ea] transition hover:border-[var(--clipper-accent)] hover:text-white"
-              onClick={() => commitFocalLength(mm)}
-            >
-              {mm}
-            </button>
-          ))}
-        </div>
-        <div className="grid gap-1.5">
-          <span className={mutedCaps}>Focal Length (mm)</span>
-          <KeyframableNumberInput
-            ariaLabel="Camera focal length"
-            unitPrefix="mm"
-            step={1}
-            min={1}
-            max={1000}
-            value={focalLengthLive}
-            active={isKeyframedNow("props.fov")}
-            onPreview={(value) => previewFocalLength(value)}
-            onCommit={(value) => commitFocalLength(value)}
-            onToggleKeyframe={() => toggleKeyframe("props.fov")}
-          />
-        </div>
+      <div className="grid gap-1.5">
+        <span className={mutedCaps}>Focal Length</span>
+        <KeyframableNumberInput
+          ariaLabel="Camera focal length"
+          unitPrefix="mm"
+          unitPrefixClassName="text-[10px] font-semibold"
+          step={1}
+          min={1}
+          max={1000}
+          value={focalLengthLive}
+          active={isKeyframedNow("props.fov")}
+          onPreview={(value) => previewFocalLength(value)}
+          onCommit={(value) => commitFocalLength(value)}
+          onToggleKeyframe={() => toggleKeyframe("props.fov")}
+        />
         <div className="grid gap-1.5">
           <span className={mutedCaps}>FOV</span>
           <KeyframableNumberInput
@@ -329,49 +296,6 @@ export function CameraObjectSection() {
             onCommit={(value) => commit("props.fov", clampFov(value))}
             onToggleKeyframe={() => toggleKeyframe("props.fov")}
           />
-        </div>
-      </div>
-
-      <div className="grid gap-2">
-        <span className={mutedCaps}>Sensor (mm)</span>
-        <div className="grid grid-cols-2 gap-2">
-          <KeyframableNumberInput
-            ariaLabel="Camera sensor width"
-            unitPrefix="X"
-            step={0.1}
-            min={1}
-            max={200}
-            value={liveValue("props.sensor.width")}
-            active={isKeyframedNow("props.sensor.width")}
-            onPreview={(value) => previewBase("props.sensor.width", value)}
-            onCommit={(value) => commit("props.sensor.width", value)}
-            onToggleKeyframe={() => toggleKeyframe("props.sensor.width")}
-          />
-          <KeyframableNumberInput
-            ariaLabel="Camera sensor height"
-            unitPrefix="Y"
-            step={0.1}
-            min={1}
-            max={200}
-            value={liveValue("props.sensor.height")}
-            active={isKeyframedNow("props.sensor.height")}
-            onPreview={(value) => previewBase("props.sensor.height", value)}
-            onCommit={(value) => commit("props.sensor.height", value)}
-            onToggleKeyframe={() => toggleKeyframe("props.sensor.height")}
-          />
-        </div>
-        <div className="flex flex-wrap gap-1">
-          {SENSOR_PRESETS.map((preset) => (
-            <button
-              key={preset.label}
-              type="button"
-              aria-label={`Set sensor to ${preset.label}`}
-              className="rounded-[6px] border border-[#2d313b] bg-[#171920] px-2 py-1 text-[10px] font-bold text-[#dfe2ea] transition hover:border-[var(--clipper-accent)] hover:text-white"
-              onClick={() => applySensorPreset(preset.width, preset.height)}
-            >
-              {preset.label}
-            </button>
-          ))}
         </div>
       </div>
 
@@ -439,28 +363,13 @@ export function CameraObjectSection() {
                 ariaLabel="Camera f-number"
                 unitPrefix="f/"
                 step={0.1}
-                min={0.5}
-                max={64}
+                min={CAMERA_DOF_MIN_F_NUMBER}
+                max={CAMERA_DOF_MAX_F_NUMBER}
                 value={liveValue("props.dof.fNumber")}
                 active={isKeyframedNow("props.dof.fNumber")}
                 onPreview={(value) => previewBase("props.dof.fNumber", value)}
                 onCommit={(value) => commit("props.dof.fNumber", value)}
                 onToggleKeyframe={() => toggleKeyframe("props.dof.fNumber")}
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <span className={mutedCaps}>Blur Level</span>
-              <KeyframableNumberInput
-                ariaLabel="Camera depth-of-field blur level"
-                unitPrefix=""
-                step={0.05}
-                min={0}
-                max={4}
-                value={liveValue("props.dof.blurLevel")}
-                active={isKeyframedNow("props.dof.blurLevel")}
-                onPreview={(value) => previewBase("props.dof.blurLevel", value)}
-                onCommit={(value) => commit("props.dof.blurLevel", value)}
-                onToggleKeyframe={() => toggleKeyframe("props.dof.blurLevel")}
               />
             </div>
             <div className="grid gap-1.5">
@@ -470,7 +379,7 @@ export function CameraObjectSection() {
                 unitPrefix="px"
                 step={1}
                 min={0}
-                max={256}
+                max={CAMERA_DOF_MAX_BLUR_PX}
                 value={liveValue("props.dof.maxBlurPx")}
                 active={isKeyframedNow("props.dof.maxBlurPx")}
                 onPreview={(value) => previewBase("props.dof.maxBlurPx", value)}
@@ -579,8 +488,6 @@ function readCameraPropAtPath(
       return props.dof.focusDistance;
     case "props.dof.fNumber":
       return props.dof.fNumber;
-    case "props.dof.blurLevel":
-      return props.dof.blurLevel;
     case "props.dof.maxBlurPx":
       return props.dof.maxBlurPx;
   }
@@ -618,8 +525,6 @@ function writeCameraPropAtPath(
       return { ...props, dof: { ...props.dof, focusDistance: value } };
     case "props.dof.fNumber":
       return { ...props, dof: { ...props.dof, fNumber: value } };
-    case "props.dof.blurLevel":
-      return { ...props, dof: { ...props.dof, blurLevel: value } };
     case "props.dof.maxBlurPx":
       return { ...props, dof: { ...props.dof, maxBlurPx: value } };
   }
