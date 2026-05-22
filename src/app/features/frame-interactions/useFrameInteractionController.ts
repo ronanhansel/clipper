@@ -416,7 +416,7 @@ export function useFrameInteractionController(
   function getPortalOverlayElements() {
     return Array.from(
       document.querySelectorAll<HTMLElement>(
-        "[data-frame-path-edit-overlay],[data-frame-overlay-follow]",
+        "[data-frame-path-edit-overlay],[data-frame-overlay-follow],[data-frame-selection-box]",
       ),
     );
   }

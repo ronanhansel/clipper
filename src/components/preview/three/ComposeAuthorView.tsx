@@ -3,10 +3,8 @@ import {
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
-  type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { PictureInPicture2, SquareSplitHorizontal } from "lucide-react";
 import {
   ThreeAuthorScene,
   type ThreeAuthorObjectTransformUpdate,
@@ -34,6 +32,9 @@ export type ComposeAuthorViewState = {
   sideBySideSplit: number;
   orbit: ThreeOrbitState;
 };
+function coerceAuthorSceneMode(mode: CameraPreviewMode | undefined) {
+  return mode === "side-by-side" ? "side-by-side" : "pip";
+}
 type CameraPreviewHostProps = {
   part: CompositionClip;
   localTime: number;
@@ -184,39 +185,6 @@ function FitCameraPreview({
   );
 }
 
-function FitFlatComposition({ children }: { children: ReactNode }) {
-  const { hostRef, frameSize } = useFitFrameSize();
-  const scale = frameSize.width / FRAME_WIDTH;
-
-  return (
-    <div
-      ref={hostRef}
-      className="grid h-full w-full place-items-center overflow-hidden bg-[#0e1117]"
-    >
-      <div
-        className="relative overflow-hidden bg-black"
-        data-clipper-flat-frame
-        style={{
-          width: frameSize.width,
-          height: frameSize.height,
-        }}
-      >
-        <div
-          className="absolute left-0 top-0"
-          style={{
-            width: FRAME_WIDTH,
-            height: FRAME_HEIGHT,
-            transform: `scale(${scale})`,
-            transformOrigin: "top left",
-          }}
-        >
-          {children}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export interface ComposeAuthorViewProps {
   part: CompositionClip;
   selectedObjectId: string | null;
@@ -225,7 +193,6 @@ export interface ComposeAuthorViewProps {
     cameraObjectId: string,
     next: CameraObjectProps,
   ) => void;
-  onPreviewModeChange?: (mode: CameraPreviewMode) => void;
   /**
    * Render-prop returning the sealed DOM composition tree. The author
    * view portals it into the CSS3D plane element so it appears as a flat
@@ -307,19 +274,17 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
   const sideBySideResizeFrameRef = useRef<number>(0);
   const [planeTarget, setPlaneTarget] = useState<HTMLElement | null>(null);
   const [previewMode, setPreviewMode] = useState<CameraPreviewMode>(
-    props.authorViewState?.previewMode ?? "pip",
+    coerceAuthorSceneMode(props.authorViewState?.previewMode),
   );
   const [sideBySideSplit, setSideBySideSplit] = useState(
     props.authorViewState?.sideBySideSplit ?? 0.5,
   );
   useEffect(() => {
     if (!props.authorViewState) return;
-    setPreviewMode(props.authorViewState.previewMode);
+    setPreviewMode(coerceAuthorSceneMode(props.authorViewState.previewMode));
     setSideBySideSplit(props.authorViewState.sideBySideSplit);
   }, [props.authorViewState]);
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const activeCamera = findActiveCameraObject(props.part);
-  const showCameraPreviewControls = activeCamera != null;
   // Which camera-path keyframe is selected, surfacing its bezier
   // handles. Cleared when the user clicks empty space or selects a
   // different camera.
@@ -347,11 +312,6 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
       host.clientHeight || FRAME_HEIGHT,
     );
   };
-
-  useEffect(() => {
-    props.onPreviewModeChange?.(previewMode);
-    return () => props.onPreviewModeChange?.("pip");
-  }, [previewMode, props.onPreviewModeChange]);
 
   useEffect(() => {
     return () => {
@@ -762,19 +722,6 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
     />
   );
 
-  const previewButtonClass = (mode: CameraPreviewMode) =>
-    `grid h-7 w-7 place-items-center rounded-[6px] text-[11px] font-bold leading-none outline-none transition focus-visible:ring-2 focus-visible:ring-[rgb(var(--clipper-accent-rgb)/0.32)] ${
-      previewMode === mode
-        ? "bg-[var(--clipper-accent)] text-[var(--clipper-accent-foreground)]"
-        : "text-[#c8cedc] hover:bg-[#242936] hover:text-white"
-    }`;
-
-  const changePreviewMode = (mode: CameraPreviewMode) => {
-    setPreviewMode(mode);
-    props.onPreviewModeChange?.(mode);
-    props.onAuthorViewStateChange?.({ previewMode: mode });
-  };
-
   return (
     <div
       ref={rootRef}
@@ -786,13 +733,11 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
         className={`${
           previewMode === "side-by-side"
             ? "absolute inset-y-0 left-0"
-            : previewMode === "2d"
-              ? "pointer-events-none absolute inset-0 opacity-0"
-              : "absolute inset-0"
+            : "absolute inset-0"
         }`}
         data-clipper-compose-author-scene
       />
-      {planeTarget && previewMode !== "2d"
+      {planeTarget
         ? createPortal(props.renderComposition(), planeTarget)
         : null}
 
@@ -833,49 +778,6 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
           data-clipper-camera-side-by-side-resize
         >
           <div className="mx-auto h-full w-px bg-[#3a4050]" />
-        </div>
-      ) : null}
-
-      {previewMode === "2d" ? (
-        <div
-          className="pointer-events-auto absolute inset-0 overflow-hidden bg-[#0e1117]"
-          data-clipper-camera-2d-preview
-        >
-          <FitFlatComposition>{props.renderComposition()}</FitFlatComposition>
-        </div>
-      ) : null}
-
-      {showCameraPreviewControls ? (
-        <div
-          className="pointer-events-auto absolute bottom-3 right-3 rounded-[9px] border border-[#2d313b] bg-[#151820]/95 p-1 shadow-[0_14px_38px_rgba(0,0,0,0.36),inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur"
-          style={{ zIndex: 2147483647 }}
-          onClick={(event) => event.stopPropagation()}
-          onPointerDown={(event) => event.stopPropagation()}
-        >
-          <div className="flex items-center gap-1">
-            <button
-              className={previewButtonClass("side-by-side")}
-              onClick={() => changePreviewMode("side-by-side")}
-              title="Side by side"
-              aria-label="Side by side"
-            >
-              <SquareSplitHorizontal size={14} />
-            </button>
-            <button
-              className={previewButtonClass("pip")}
-              onClick={() => changePreviewMode("pip")}
-              title="Picture in picture"
-              aria-label="Picture in picture"
-            >
-              <PictureInPicture2 size={14} />
-            </button>
-            <button
-              className={previewButtonClass("2d")}
-              onClick={() => changePreviewMode("2d")}
-            >
-              2D
-            </button>
-          </div>
         </div>
       ) : null}
     </div>

@@ -44,6 +44,7 @@ function isComposeAuthorActive(props: FramePreviewProps): boolean {
   return (
     props.sceneWrap?.flattenComposition === false &&
     Boolean(props.onCameraPropsChange) &&
+    props.authorViewState?.previewMode !== "2d" &&
     props.part?.objects?.some((obj) => obj.type === "camera" && !obj.hidden) ===
       true
   );

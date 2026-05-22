@@ -16,6 +16,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { createPortal } from "react-dom";
+import { PictureInPicture2, SquareSplitHorizontal } from "lucide-react";
 import {
   selectorBlue,
   selectorHandleSizePx,
@@ -425,6 +426,37 @@ export const FramePreview = memo(function FramePreview({
   }, [authorViewState]);
   const composeAuthor3dActive =
     composeAuthorViewActive && composeAuthorPreviewMode !== "2d";
+  const composeAuthor2dActive =
+    composeAuthorViewActive && composeAuthorPreviewMode === "2d";
+  const displayPart = useMemo(
+    () =>
+      composeAuthor2dActive
+        ? {
+            ...part,
+            objects: part.objects.filter((object) => object.type !== "camera"),
+          }
+        : part,
+    [composeAuthor2dActive, part],
+  );
+  const displaySceneMotionPart = useMemo(
+    () =>
+      composeAuthor2dActive
+        ? {
+            ...sceneMotionPart,
+            objects: sceneMotionPart.objects.filter(
+              (object) => object.type !== "camera",
+            ),
+          }
+        : sceneMotionPart,
+    [composeAuthor2dActive, sceneMotionPart],
+  );
+  const effectiveAuthorViewState = useMemo(
+    () =>
+      authorViewState
+        ? { ...authorViewState, previewMode: composeAuthorPreviewMode }
+        : undefined,
+    [authorViewState, composeAuthorPreviewMode],
+  );
   const interactiveDragBox = composePlaybackActive ? null : dragBox;
   const interactiveFramePickPoint = composePlaybackActive
     ? null
@@ -435,7 +467,9 @@ export const FramePreview = memo(function FramePreview({
     : trackerPicking;
   const interactiveSelectedObjects = composePlaybackActive
     ? []
-    : selectedObjects;
+    : composeAuthor2dActive
+      ? selectedObjects.filter((object) => object.type !== "camera")
+      : selectedObjects;
   const interactiveObjectSnapGuides = composePlaybackActive
     ? []
     : objectSnapGuides;
@@ -508,9 +542,10 @@ export const FramePreview = memo(function FramePreview({
   const frameVisualAdjustmentOverlaysRef = useRef<HTMLDivElement | null>(null);
   const cameraVisualAdjustmentOverlaysRef = useRef<HTMLDivElement | null>(null);
   const activeCameraTransform = useMemo(() => {
-    if (!sceneWrap.cameraEnabled) return cameraTransform;
+    if (!sceneWrap.cameraEnabled || composeAuthor2dActive)
+      return cameraTransform;
     return getLayeredCameraPreviewTransform(
-      sceneMotionPart,
+      displaySceneMotionPart,
       motionLayers,
       displayPreviewTime,
       {
@@ -534,7 +569,8 @@ export const FramePreview = memo(function FramePreview({
     interactiveFocusPicking,
     interactiveTrackerPicking,
     motionLayers,
-    sceneMotionPart,
+    displaySceneMotionPart,
+    composeAuthor2dActive,
     sceneWrap.cameraEnabled,
     pickingTranslationPosition,
     pickingZoomFocus,
@@ -542,7 +578,7 @@ export const FramePreview = memo(function FramePreview({
   const liveCameraTransform = useTransitionComposite
     ? identityCameraTransform
     : activeCameraTransform;
-  const frameBackground = part.frame.style.backgroundColor ?? "#000";
+  const frameBackground = displayPart.frame.style.backgroundColor ?? "#000";
   const frameStyle = useMemo(() => {
     const base = {
       width: FRAME_WIDTH,
@@ -552,7 +588,7 @@ export const FramePreview = memo(function FramePreview({
       top: exportTileViewport ? -exportTileViewport.y : 0,
       transform: frameScale === 1 ? undefined : `scale(${frameScale})`,
     } as CSSProperties;
-    if (composeAuthorViewActive) {
+    if (composeAuthor3dActive) {
       return {
         ...base,
         width: "100%",
@@ -561,12 +597,7 @@ export const FramePreview = memo(function FramePreview({
       } as CSSProperties;
     }
     return base;
-  }, [
-    composeAuthorViewActive,
-    exportTileViewport,
-    frameBackground,
-    frameScale,
-  ]);
+  }, [composeAuthor3dActive, exportTileViewport, frameBackground, frameScale]);
   const perspectiveStageStyle = useMemo(
     () =>
       ({
@@ -577,25 +608,30 @@ export const FramePreview = memo(function FramePreview({
     [liveCameraTransform.perspective],
   );
   const selectableObjects = useMemo(
-    () => [...part.background.elements, ...part.objects],
-    [part.background.elements, part.objects],
+    () => [...displayPart.background.elements, ...displayPart.objects],
+    [displayPart.background.elements, displayPart.objects],
   );
   const evaluatedSelectableObjectsById = useMemo(
     () =>
       new Map(
         selectableObjects.map((object) => [
           object.id,
-          evaluateFrameObject(object, displayPreviewTime, part.duration, {
-            animations: true,
-          }),
+          evaluateFrameObject(
+            object,
+            displayPreviewTime,
+            displayPart.duration,
+            {
+              animations: true,
+            },
+          ),
         ]),
       ),
-    [displayPreviewTime, part.duration, selectableObjects],
+    [displayPart.duration, displayPreviewTime, selectableObjects],
   );
   const selectedPreviewObjects = interactiveSelectedObjects;
   const viewportOverlayStyle = useMemo(
     () =>
-      composeAuthorViewActive
+      composeAuthor3dActive
         ? ({
             width: "100%",
             height: "100%",
@@ -609,7 +645,7 @@ export const FramePreview = memo(function FramePreview({
               width: FRAME_WIDTH * frameScale,
               height: FRAME_HEIGHT * frameScale,
             } as CSSProperties),
-    [composeAuthorViewActive, exportTileViewport, frameScale],
+    [composeAuthor3dActive, exportTileViewport, frameScale],
   );
   const clippedViewportStyle = useMemo(
     () =>
@@ -617,9 +653,9 @@ export const FramePreview = memo(function FramePreview({
         ...viewportStyle,
         left: 0,
         top: 0,
-        ...(composeAuthorViewActive ? { width: "100%", height: "100%" } : null),
+        ...(composeAuthor3dActive ? { width: "100%", height: "100%" } : null),
       }) as CSSProperties,
-    [viewportStyle, composeAuthorViewActive],
+    [viewportStyle, composeAuthor3dActive],
   );
   const [trackerHoverTarget, setTrackerHoverTarget] = useState<{
     id: string;
@@ -638,11 +674,19 @@ export const FramePreview = memo(function FramePreview({
       (shapeDrawPreview.joints?.length ?? 0) > 0 ||
       (shapeDrawPreview.handles?.length ?? 0) > 0),
   );
-  const isUnlinkedPart = Boolean(part.sourceMissing);
-  const compositionError = part.compositionError;
-  const livePlaybackPartRef = useRef(part);
-  livePlaybackPartRef.current = part;
-  const stackPreviewParts = previewParts;
+  const isUnlinkedPart = Boolean(displayPart.sourceMissing);
+  const compositionError = displayPart.compositionError;
+  const livePlaybackPartRef = useRef(displayPart);
+  livePlaybackPartRef.current = displayPart;
+  const stackPreviewParts = useMemo(
+    () =>
+      composeAuthor2dActive
+        ? previewParts.map((item) =>
+            item.part.id === part.id ? { ...item, part: displayPart } : item,
+          )
+        : previewParts,
+    [composeAuthor2dActive, displayPart, part.id, previewParts],
+  );
 
   useLayoutEffect(() => {
     const adjustmentOverlays = useTransitionComposite
@@ -738,8 +782,10 @@ export const FramePreview = memo(function FramePreview({
       const hitElement = targetEl.closest<HTMLElement>("[data-object-id]");
       if (hitElement) {
         const hitObjectId = hitElement.dataset.objectId;
-        if (hitObjectId && part) {
-          const hitObject = part.objects.find((o) => o.id === hitObjectId);
+        if (hitObjectId) {
+          const hitObject = displayPart.objects.find(
+            (o) => o.id === hitObjectId,
+          );
           if (
             hitObject &&
             (hitObject.type === "text" || isEditableTextPathObject(hitObject))
@@ -825,7 +871,7 @@ export const FramePreview = memo(function FramePreview({
     <div
       data-clipper-frame-preview-wrapper
       style={
-        composeAuthorViewActive ? { position: "absolute", inset: 0 } : undefined
+        composeAuthor3dActive ? { position: "absolute", inset: 0 } : undefined
       }
     >
       <div
@@ -870,7 +916,7 @@ export const FramePreview = memo(function FramePreview({
                 <div className="absolute inset-0 bg-black" ref={cameraRef}>
                   {compositionError ? (
                     <CompositionErrorOverlay
-                      filePath={part.filePath}
+                      filePath={displayPart.filePath}
                       message={compositionError}
                     />
                   ) : null}
@@ -891,8 +937,8 @@ export const FramePreview = memo(function FramePreview({
                   <SceneCompositor
                     cameraRef={cameraRef}
                     isPostProcessSource={isPostProcessSource}
-                    filePath={part.filePath}
-                    resetKey={`${part.id}:${part.filePath}:${compositionError ?? ""}`}
+                    filePath={displayPart.filePath}
+                    resetKey={`${displayPart.id}:${displayPart.filePath}:${compositionError ?? ""}`}
                     sceneCamera={liveCameraTransform}
                     visualAdjustmentStyle={visualAdjustmentStyle}
                     transitionCameraStyle={transitionCameraStyle}
@@ -903,7 +949,7 @@ export const FramePreview = memo(function FramePreview({
                     transitionProgress={transitionProgress}
                     transitionSequenceStyle={transitionSequenceStyle}
                     stackPreviewParts={stackPreviewParts}
-                    activePartId={part.id}
+                    activePartId={displayPart.id}
                     renderMode={renderMode}
                     isPlaying={isPlaying}
                     animationsEnabled={animationsEnabled}
@@ -933,7 +979,7 @@ export const FramePreview = memo(function FramePreview({
                     onCameraPathEaseChange={onCameraPathEaseChange}
                     onSelectObject={onSelectObject}
                     onAuthorPreviewModeChange={setComposeAuthorPreviewMode}
-                    authorViewState={authorViewState}
+                    authorViewState={effectiveAuthorViewState}
                     onAuthorViewStateChange={onAuthorViewStateChange}
                     onObjectTransformChange={onObjectTransformChange}
                   />
@@ -1007,6 +1053,18 @@ export const FramePreview = memo(function FramePreview({
             previewOverlayHost,
           )
         : null}
+      {composeAuthorViewActive && previewOverlayHost
+        ? createPortal(
+            <AuthorPreviewModeControls
+              previewMode={composeAuthorPreviewMode}
+              onChange={(mode) => {
+                setComposeAuthorPreviewMode(mode);
+                onAuthorViewStateChange?.({ previewMode: mode });
+              }}
+            />,
+            previewOverlayHost,
+          )
+        : null}
       {!composeAuthor3dActive &&
       canSelectObjects &&
       !isUnlinkedPart &&
@@ -1014,7 +1072,8 @@ export const FramePreview = memo(function FramePreview({
         ? createPortal(
             selectedPreviewObjects.map((object) => {
               const source = evaluatedSelectableObjectsById.get(object.id);
-              const isBackgroundSelection = object.id === part.background.id;
+              const isBackgroundSelection =
+                object.id === displayPart.background.id;
               const isTextPath = source
                 ? isEditableTextPathObject(source)
                 : false;
@@ -1096,6 +1155,55 @@ export const FramePreview = memo(function FramePreview({
     </div>
   );
 });
+
+function AuthorPreviewModeControls({
+  previewMode,
+  onChange,
+}: {
+  previewMode: CameraPreviewMode;
+  onChange: (mode: CameraPreviewMode) => void;
+}) {
+  const previewButtonClass = (mode: CameraPreviewMode) =>
+    `grid h-7 w-7 place-items-center rounded-[6px] text-[11px] font-bold leading-none outline-none transition focus-visible:ring-2 focus-visible:ring-[rgb(var(--clipper-accent-rgb)/0.32)] ${
+      previewMode === mode
+        ? "bg-[var(--clipper-accent)] text-[var(--clipper-accent-foreground)]"
+        : "text-[#c8cedc] hover:bg-[#242936] hover:text-white"
+    }`;
+
+  return (
+    <div
+      className="pointer-events-auto absolute bottom-3 right-3 rounded-[9px] border border-[#2d313b] bg-[#151820]/95 p-1 shadow-[0_14px_38px_rgba(0,0,0,0.36),inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur"
+      style={{ zIndex: 2147483647 }}
+      onClick={(event) => event.stopPropagation()}
+      onPointerDown={(event) => event.stopPropagation()}
+    >
+      <div className="flex items-center gap-1">
+        <button
+          className={previewButtonClass("side-by-side")}
+          onClick={() => onChange("side-by-side")}
+          title="Side by side"
+          aria-label="Side by side"
+        >
+          <SquareSplitHorizontal size={14} />
+        </button>
+        <button
+          className={previewButtonClass("pip")}
+          onClick={() => onChange("pip")}
+          title="Picture in picture"
+          aria-label="Picture in picture"
+        >
+          <PictureInPicture2 size={14} />
+        </button>
+        <button
+          className={previewButtonClass("2d")}
+          onClick={() => onChange("2d")}
+        >
+          2D
+        </button>
+      </div>
+    </div>
+  );
+}
 
 const areFramePreviewPropsEqual = () => false;
 
@@ -2718,15 +2826,17 @@ export const FrameObjectView = memo(function FrameObjectView({
     width:
       renderMode === "export"
         ? (animationWidth ?? evaluatedBounds.width)
-        : (animationWidth ??
-          `var(--clipper-resize-width, ${evaluatedBounds.width}px)`),
+        : `var(--clipper-resize-width, ${formatStyleLength(
+            animationWidth ?? evaluatedBounds.width,
+          )})`,
     height:
       textBoxLayout === "auto-height"
         ? "auto"
         : renderMode === "export"
           ? (animationHeight ?? evaluatedBounds.height)
-          : (animationHeight ??
-            `var(--clipper-resize-height, ${evaluatedBounds.height}px)`),
+          : `var(--clipper-resize-height, ${formatStyleLength(
+              animationHeight ?? evaluatedBounds.height,
+            )})`,
     minHeight:
       textBoxLayout === "auto-height" ? evaluatedBounds.height : undefined,
     fontSize:

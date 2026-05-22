@@ -106,8 +106,28 @@ export const CompositionCompositor = memo(function CompositionCompositor(
   const cache = useCompositionCache();
   const compositionId = props.part.compositionId ?? props.part.id;
   cache.getCacheKey(compositionId);
+  const sourceHasCameraLayer =
+    !props.flatten &&
+    Boolean(props.onCameraPropsChange) &&
+    compositionHasCameraLayer(props.part);
+  const [previewMode, setPreviewMode] = useState<CameraPreviewMode>(
+    props.authorViewState?.previewMode ?? "pip",
+  );
+  useEffect(() => {
+    if (!props.authorViewState) return;
+    setPreviewMode(props.authorViewState.previewMode);
+  }, [props.authorViewState]);
+  const renderPart =
+    sourceHasCameraLayer && previewMode === "2d"
+      ? {
+          ...props.part,
+          objects: props.part.objects.filter(
+            (object) => object.type !== "camera",
+          ),
+        }
+      : props.part;
   const composition = renderCompositionPreview({
-    composition: props.part,
+    composition: renderPart,
     localTime: props.localTime,
     duration: props.duration,
     viewport: { width: FRAME_WIDTH, height: FRAME_HEIGHT },
@@ -116,22 +136,8 @@ export const CompositionCompositor = memo(function CompositionCompositor(
   const Backend: CompositionBackend = props.flatten
     ? RasterBackend
     : DomBackend;
-  const showAuthorView =
-    !props.flatten &&
-    Boolean(props.onCameraPropsChange) &&
-    compositionHasCameraLayer(props.part);
-  const [previewMode, setPreviewMode] = useState<CameraPreviewMode>(
-    props.authorViewState?.previewMode ?? "pip",
-  );
+  const showAuthorView = sourceHasCameraLayer;
   const cameraHandledExternally = showAuthorView && previewMode !== "2d";
-  useEffect(() => {
-    if (!props.authorViewState) return;
-    setPreviewMode(props.authorViewState.previewMode);
-  }, [props.authorViewState]);
-  const handlePreviewModeChange = (mode: CameraPreviewMode) => {
-    setPreviewMode(mode);
-    props.onAuthorPreviewModeChange?.(mode);
-  };
   const authoringInteractionsEnabled = !showAuthorView || previewMode === "2d";
 
   const backendNode = (
@@ -156,7 +162,7 @@ export const CompositionCompositor = memo(function CompositionCompositor(
       hostRef={compositionRef}
       isPlaying={props.isPlaying}
       localTime={composition.localTime}
-      part={props.part}
+      part={renderPart}
       renderClockSceneTime={props.renderClockSceneTime}
       renderMode={props.renderMode}
       onObjectPointerDown={props.onObjectPointerDown}
@@ -168,13 +174,14 @@ export const CompositionCompositor = memo(function CompositionCompositor(
   );
 
   if (showAuthorView && props.onCameraPropsChange) {
+    if (previewMode === "2d") return backendNode;
+
     return (
       <div className="absolute inset-0">
         <ComposeAuthorView
           part={props.part}
           selectedObjectId={props.selectedObjectId ?? null}
           onCameraPropsChange={props.onCameraPropsChange}
-          onPreviewModeChange={handlePreviewModeChange}
           authorViewState={props.authorViewState}
           onAuthorViewStateChange={props.onAuthorViewStateChange}
           onCameraPathEaseChange={props.onCameraPathEaseChange}
