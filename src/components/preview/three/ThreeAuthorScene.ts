@@ -21,6 +21,7 @@ import { FrustumOutline } from "./FrustumOutline";
 
 const DEG_TO_RAD = Math.PI / 180;
 const RAD_TO_DEG = 180 / Math.PI;
+const DEFAULT_ORBIT_DISTANCE = 2400;
 
 export interface ThreeAuthorSceneOptions {
   width: number;
@@ -277,7 +278,7 @@ export class ThreeAuthorScene {
       10,
       40000,
     );
-    this.orbitCamera.position.set(0, 0, 2400);
+    this.orbitCamera.position.set(0, 0, DEFAULT_ORBIT_DISTANCE);
 
     // Through camera mirrors the comp's authored CameraObjectProps. Its
     // aspect is locked to FRAME_WIDTH / FRAME_HEIGHT so the wireframe
@@ -405,7 +406,9 @@ export class ThreeAuthorScene {
     this.orbit.maxDistance = 12000;
     this.orbit.zoomSpeed = 0.7;
     this.orbit.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
+    this.syncOrbitPanSpeed();
     this.orbit.addEventListener("change", () => {
+      this.syncOrbitPanSpeed();
       this.requestRender();
       if (this.viewStateCallback) this.viewStateCallback(this.getOrbitState());
     });
@@ -676,8 +679,14 @@ export class ThreeAuthorScene {
   setOrbitState(state: ThreeOrbitState) {
     this.orbitCamera.position.set(state.cameraX, state.cameraY, state.cameraZ);
     this.orbit.target.set(state.targetX, state.targetY, state.targetZ);
+    this.syncOrbitPanSpeed();
     this.orbit.update();
     this.requestRender();
+  }
+
+  private syncOrbitPanSpeed() {
+    const distance = this.orbitCamera.position.distanceTo(this.orbit.target);
+    this.orbit.panSpeed = DEFAULT_ORBIT_DISTANCE / Math.max(1, distance);
   }
 
   onViewStateChange(callback: (state: ThreeOrbitState) => void) {
