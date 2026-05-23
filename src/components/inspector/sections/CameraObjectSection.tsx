@@ -2,6 +2,9 @@ import {
   CAMERA_DOF_MAX_BLUR_PX,
   CAMERA_DOF_MAX_F_NUMBER,
   CAMERA_DOF_MIN_F_NUMBER,
+  CAMERA_BOKEH_PRESETS,
+  type CameraAutoOrient,
+  type CameraBokehPreset,
   type CameraObjectProps,
   type FrameObject,
 } from "../../../core/types";
@@ -26,6 +29,7 @@ import {
   hasPropertyTrack,
 } from "../inspectorShared";
 import {
+  applyCameraTargetAutomation,
   evaluateCameraObjectPropsAt,
   readCameraObjectProps,
 } from "../../preview/compositors/useCompositionCamera";
@@ -44,7 +48,11 @@ type CameraTrackPath =
   | "props.sensor.height"
   | "props.dof.focusDistance"
   | "props.dof.fNumber"
-  | "props.dof.maxBlurPx";
+  | "props.dof.maxBlurPx"
+  | "props.autoFocus.zOffset"
+  | "props.lockTarget.offset.x"
+  | "props.lockTarget.offset.y"
+  | "props.lockTarget.offset.z";
 type CameraBooleanTrackPath = "props.live";
 
 const POSITION_FIELDS: ReadonlyArray<{
@@ -67,6 +75,25 @@ const ROTATION_FIELDS: ReadonlyArray<{
   { axis: "z", path: "props.rotation.z", ariaLabel: "Camera rotation Z" },
 ];
 
+const BOKEH_PRESET_LABELS: Record<CameraBokehPreset, string> = {
+  spherical: "Spherical",
+  anamorphic: "Anamorphic",
+  hex: "Hex",
+  octagon: "Octagon",
+  star: "Star",
+};
+
+const AUTO_ORIENT_LABELS: Record<CameraAutoOrient, string> = {
+  off: "Off",
+  "along-path": "Along Path",
+  lock: "Lock",
+};
+
+type CameraTargetOption = {
+  object: FrameObject;
+  number: number;
+};
+
 /**
  * Inspector section for a `type: "camera"` FrameObject.
  *
@@ -82,9 +109,21 @@ const ROTATION_FIELDS: ReadonlyArray<{
  * scalar props written directly through `onChange`.
  */
 export function CameraObjectSection() {
-  const { object, onChange, onPreview, readEffectiveTime } =
-    useObjectInspector();
+  const {
+    object,
+    compositionObjects,
+    compositionFrame,
+    onChange,
+    onPreview,
+    readEffectiveTime,
+  } = useObjectInspector();
   const props = readCameraObjectProps(object);
+  const targetOptions = compositionObjects
+    .map((item, index) => ({
+      object: item,
+      number: compositionObjects.length - index,
+    }))
+    .filter((item) => item.object.id !== object.id);
 
   function readBase(path: CameraTrackPath): number {
     return readCameraPropAtPath(props, path);
@@ -119,14 +158,30 @@ export function CameraObjectSection() {
     // those instead of staying at the interpolated playhead values.
     // Resolve the full evaluated camera state at the current time and
     // overlay just the changing axis so the dispatched preview keeps
-    // the other axes at the playhead's interpolated values.
+    // the other axes at the playhead's interpolated values. Then re-run
+    // camera automation so Auto-Orient/Lock does not flash back to raw
+    // authored rotation while lens/DoF fields scrub.
     onPreview?.((current) => {
-      const evaluated = evaluateCameraObjectPropsAt(
-        current,
-        readEffectiveTime(),
-      );
+      const time = readEffectiveTime();
+      const evaluated = evaluateCameraObjectPropsAt(current, time);
       const next = writeCameraPropAtPath(evaluated, path, value);
-      return { ...current, props: { ...(current.props ?? {}), ...next } };
+      const previewObject = {
+        ...current,
+        props: { ...(current.props ?? {}), ...next },
+      };
+      const previewObjects = compositionObjects.map((item) =>
+        item.id === current.id ? previewObject : item,
+      );
+      const automated = applyCameraTargetAutomation(
+        { frame: compositionFrame, objects: previewObjects },
+        previewObject,
+        time,
+        next,
+      );
+      return {
+        ...previewObject,
+        props: { ...previewObject.props, ...automated },
+      };
     });
   }
 
@@ -219,12 +274,63 @@ export function CameraObjectSection() {
     previewBase("props.fov", fov);
   }
 
-  function setAutoOrient(value: "off" | "along-path") {
+  function setAutoOrient(value: CameraAutoOrient) {
     onChange((current) => {
       const currentProps = (current.props ?? {}) as Record<string, unknown>;
       return {
         ...current,
         props: { ...currentProps, autoOrient: value },
+      };
+    });
+  }
+
+  function setLockTargetId(targetId: string | null) {
+    onChange((current) => {
+      const evaluated = evaluateCameraObjectPropsAt(
+        current,
+        readEffectiveTime(),
+      );
+      const currentProps = (current.props ?? {}) as Record<string, unknown>;
+      return {
+        ...current,
+        props: {
+          ...currentProps,
+          lockTarget: { ...evaluated.lockTarget, targetId },
+        },
+      };
+    });
+  }
+
+  function setAutoFocusEnabled(enabled: boolean) {
+    onChange((current) => {
+      const evaluated = evaluateCameraObjectPropsAt(
+        current,
+        readEffectiveTime(),
+      );
+      const currentProps = (current.props ?? {}) as Record<string, unknown>;
+      return {
+        ...current,
+        props: {
+          ...currentProps,
+          autoFocus: { ...evaluated.autoFocus, enabled },
+        },
+      };
+    });
+  }
+
+  function setAutoFocusTargetId(targetId: string | null) {
+    onChange((current) => {
+      const evaluated = evaluateCameraObjectPropsAt(
+        current,
+        readEffectiveTime(),
+      );
+      const currentProps = (current.props ?? {}) as Record<string, unknown>;
+      return {
+        ...current,
+        props: {
+          ...currentProps,
+          autoFocus: { ...evaluated.autoFocus, targetId },
+        },
       };
     });
   }
@@ -241,6 +347,23 @@ export function CameraObjectSection() {
         props: {
           ...currentProps,
           dof: { ...evaluated.dof, enabled },
+        },
+      };
+    });
+  }
+
+  function setDofBokehPreset(preset: CameraBokehPreset) {
+    onChange((current) => {
+      const evaluated = evaluateCameraObjectPropsAt(
+        current,
+        readEffectiveTime(),
+      );
+      const currentProps = (current.props ?? {}) as Record<string, unknown>;
+      return {
+        ...current,
+        props: {
+          ...currentProps,
+          dof: { ...evaluated.dof, bokeh: { preset } },
         },
       };
     });
@@ -315,19 +438,74 @@ export function CameraObjectSection() {
         <Select
           value={props.autoOrient}
           onValueChange={(value) =>
-            setAutoOrient(value === "along-path" ? "along-path" : "off")
+            setAutoOrient(isCameraAutoOrient(value) ? value : "off")
           }
         >
           <SelectTrigger className="h-8 rounded-[8px] px-2 text-xs">
-            <SelectValue aria-label={props.autoOrient} />
+            <SelectValue aria-label={AUTO_ORIENT_LABELS[props.autoOrient]} />
           </SelectTrigger>
           <SelectContent>
             <SelectGroup>
               <SelectItem value="off">Off</SelectItem>
               <SelectItem value="along-path">Along Path</SelectItem>
+              <SelectItem value="lock">Lock</SelectItem>
             </SelectGroup>
           </SelectContent>
         </Select>
+        {props.autoOrient === "lock" ? (
+          <div className="grid gap-2">
+            <TargetSelect
+              ariaLabel="Camera lock target"
+              value={props.lockTarget.targetId}
+              options={targetOptions}
+              onChange={setLockTargetId}
+            />
+            <FieldRow label="Lock Offset">
+              <KeyframableNumberInput
+                ariaLabel="Camera lock screen offset X"
+                unitPrefix="X"
+                step={1}
+                value={liveValue("props.lockTarget.offset.x")}
+                active={isKeyframedNow("props.lockTarget.offset.x")}
+                onPreview={(value) =>
+                  previewBase("props.lockTarget.offset.x", value)
+                }
+                onCommit={(value) => commit("props.lockTarget.offset.x", value)}
+                onToggleKeyframe={() =>
+                  toggleKeyframe("props.lockTarget.offset.x")
+                }
+              />
+              <KeyframableNumberInput
+                ariaLabel="Camera lock screen offset Y"
+                unitPrefix="Y"
+                step={1}
+                value={liveValue("props.lockTarget.offset.y")}
+                active={isKeyframedNow("props.lockTarget.offset.y")}
+                onPreview={(value) =>
+                  previewBase("props.lockTarget.offset.y", value)
+                }
+                onCommit={(value) => commit("props.lockTarget.offset.y", value)}
+                onToggleKeyframe={() =>
+                  toggleKeyframe("props.lockTarget.offset.y")
+                }
+              />
+              <KeyframableNumberInput
+                ariaLabel="Camera lock depth offset Z"
+                unitPrefix="Z"
+                step={1}
+                value={liveValue("props.lockTarget.offset.z")}
+                active={isKeyframedNow("props.lockTarget.offset.z")}
+                onPreview={(value) =>
+                  previewBase("props.lockTarget.offset.z", value)
+                }
+                onCommit={(value) => commit("props.lockTarget.offset.z", value)}
+                onToggleKeyframe={() =>
+                  toggleKeyframe("props.lockTarget.offset.z")
+                }
+              />
+            </FieldRow>
+          </div>
+        ) : null}
       </div>
 
       <div className="grid gap-1.5">
@@ -388,6 +566,30 @@ export function CameraObjectSection() {
         {props.dof.enabled ? (
           <>
             <div className="grid gap-1.5">
+              <span className={mutedCaps}>Bokeh</span>
+              <Select
+                value={props.dof.bokeh.preset}
+                onValueChange={(value) =>
+                  setDofBokehPreset(
+                    isCameraBokehPreset(value) ? value : "spherical",
+                  )
+                }
+              >
+                <SelectTrigger className="h-8 rounded-[8px] px-2 text-xs">
+                  <SelectValue aria-label={props.dof.bokeh.preset} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    {CAMERA_BOKEH_PRESETS.map((preset) => (
+                      <SelectItem key={preset} value={preset}>
+                        {BOKEH_PRESET_LABELS[preset]}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-1.5">
               <span className={mutedCaps}>Focus Distance</span>
               <KeyframableNumberInput
                 ariaLabel="Camera focus distance"
@@ -404,6 +606,39 @@ export function CameraObjectSection() {
                   toggleKeyframe("props.dof.focusDistance")
                 }
               />
+            </div>
+            <div className="grid gap-2">
+              <span className={mutedCaps}>Auto Focus</span>
+              <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
+                <TargetSelect
+                  ariaLabel="Camera auto focus target"
+                  value={props.autoFocus.targetId}
+                  options={targetOptions}
+                  disabled={!props.autoFocus.enabled}
+                  onChange={setAutoFocusTargetId}
+                />
+                <Switch
+                  aria-label="Toggle camera auto focus"
+                  checked={props.autoFocus.enabled}
+                  onCheckedChange={(checked) => setAutoFocusEnabled(checked)}
+                />
+              </div>
+              {props.autoFocus.enabled ? (
+                <KeyframableNumberInput
+                  ariaLabel="Camera auto focus Z offset"
+                  unitPrefix="Z"
+                  step={1}
+                  value={liveValue("props.autoFocus.zOffset")}
+                  active={isKeyframedNow("props.autoFocus.zOffset")}
+                  onPreview={(value) =>
+                    previewBase("props.autoFocus.zOffset", value)
+                  }
+                  onCommit={(value) => commit("props.autoFocus.zOffset", value)}
+                  onToggleKeyframe={() =>
+                    toggleKeyframe("props.autoFocus.zOffset")
+                  }
+                />
+              ) : null}
             </div>
             <div className="grid gap-1.5">
               <span className={mutedCaps}>F-number</span>
@@ -457,6 +692,69 @@ function FieldRow({
   );
 }
 
+function TargetSelect({
+  ariaLabel,
+  value,
+  options,
+  disabled = false,
+  onChange,
+}: {
+  ariaLabel: string;
+  value: string | null;
+  options: readonly CameraTargetOption[];
+  disabled?: boolean;
+  onChange: (targetId: string | null) => void;
+}) {
+  function commitDroppedTarget(event: React.DragEvent) {
+    const targetId =
+      event.dataTransfer.getData("application/x-clipper-object-id") ||
+      event.dataTransfer.getData("text/plain");
+    if (!targetId || !options.some((option) => option.object.id === targetId))
+      return;
+    event.preventDefault();
+    onChange(targetId);
+  }
+
+  return (
+    <span
+      className="block min-w-0"
+      onDragOver={(event) => {
+        if (disabled) return;
+        const types = Array.from(event.dataTransfer.types);
+        if (!types.includes("application/x-clipper-object-id")) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "copy";
+      }}
+      onDrop={(event) => {
+        if (!disabled) commitDroppedTarget(event);
+      }}
+    >
+      <Select
+        value={value ?? "none"}
+        disabled={disabled}
+        onValueChange={(next) => onChange(next === "none" ? null : next)}
+      >
+        <SelectTrigger
+          className="h-8 min-w-0 rounded-[8px] px-2 text-xs"
+          aria-label={ariaLabel}
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectGroup>
+            <SelectItem value="none">None</SelectItem>
+            {options.map((option) => (
+              <SelectItem key={option.object.id} value={option.object.id}>
+                {option.number}. {option.object.name || option.object.id}
+              </SelectItem>
+            ))}
+          </SelectGroup>
+        </SelectContent>
+      </Select>
+    </span>
+  );
+}
+
 function clampFov(value: number) {
   return Math.max(1, Math.min(179, value));
 }
@@ -481,6 +779,14 @@ function fovFromFocalLength(
   if (!Number.isFinite(focalLengthMm) || focalLengthMm <= 0) return 50;
   if (!Number.isFinite(sensorHeightMm) || sensorHeightMm <= 0) return 50;
   return (2 * Math.atan(sensorHeightMm / (2 * focalLengthMm)) * 180) / Math.PI;
+}
+
+function isCameraBokehPreset(value: string): value is CameraBokehPreset {
+  return (CAMERA_BOKEH_PRESETS as readonly string[]).includes(value);
+}
+
+function isCameraAutoOrient(value: string): value is CameraAutoOrient {
+  return value === "off" || value === "along-path" || value === "lock";
 }
 
 function writeNestedNumber(
@@ -546,6 +852,14 @@ function readCameraPropAtPath(
       return props.dof.fNumber;
     case "props.dof.maxBlurPx":
       return props.dof.maxBlurPx;
+    case "props.autoFocus.zOffset":
+      return props.autoFocus.zOffset;
+    case "props.lockTarget.offset.x":
+      return props.lockTarget.offset.x;
+    case "props.lockTarget.offset.y":
+      return props.lockTarget.offset.y;
+    case "props.lockTarget.offset.z":
+      return props.lockTarget.offset.z;
   }
 }
 
@@ -583,5 +897,34 @@ function writeCameraPropAtPath(
       return { ...props, dof: { ...props.dof, fNumber: value } };
     case "props.dof.maxBlurPx":
       return { ...props, dof: { ...props.dof, maxBlurPx: value } };
+    case "props.autoFocus.zOffset":
+      return {
+        ...props,
+        autoFocus: { ...props.autoFocus, zOffset: value },
+      };
+    case "props.lockTarget.offset.x":
+      return {
+        ...props,
+        lockTarget: {
+          ...props.lockTarget,
+          offset: { ...props.lockTarget.offset, x: value },
+        },
+      };
+    case "props.lockTarget.offset.y":
+      return {
+        ...props,
+        lockTarget: {
+          ...props.lockTarget,
+          offset: { ...props.lockTarget.offset, y: value },
+        },
+      };
+    case "props.lockTarget.offset.z":
+      return {
+        ...props,
+        lockTarget: {
+          ...props.lockTarget,
+          offset: { ...props.lockTarget.offset, z: value },
+        },
+      };
   }
 }

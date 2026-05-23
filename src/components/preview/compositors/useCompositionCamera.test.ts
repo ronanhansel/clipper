@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   applyAutoOrientAlongPath,
+  applyCameraTargetAutomation,
   cameraObjectPropsToPreviewTransform,
   compositionHasCameraLayer,
   evaluateCameraObjectPropsAt,
@@ -9,8 +10,10 @@ import {
 } from "./useCompositionCamera";
 import {
   CAMERA_DOF_MAX_BLUR_PX,
+  DEFAULT_CAMERA_AUTO_FOCUS,
   DEFAULT_CAMERA_DOF,
   DEFAULT_CAMERA_LENS,
+  DEFAULT_CAMERA_LOCK_TARGET,
   DEFAULT_CAMERA_OBJECT_PROPS,
   DEFAULT_CAMERA_POST,
   DEFAULT_CAMERA_SENSOR,
@@ -120,12 +123,14 @@ describe("readCameraObjectProps", () => {
       far: 8000,
       sensor: { ...DEFAULT_CAMERA_SENSOR },
       dof: { ...DEFAULT_CAMERA_DOF },
+      autoFocus: DEFAULT_CAMERA_AUTO_FOCUS,
       autoOrient: "off",
+      lockTarget: DEFAULT_CAMERA_LOCK_TARGET,
       lens: DEFAULT_CAMERA_LENS,
       post: DEFAULT_CAMERA_POST,
     });
   });
-  it("fills defaults for sensor / dof / autoOrient when missing", () => {
+  it("fills defaults for sensor / dof / autoFocus / autoOrient when missing", () => {
     const obj = makeCameraObject({
       props: {
         position: { x: 0, y: 0, z: 1158 },
@@ -134,9 +139,11 @@ describe("readCameraObjectProps", () => {
     const props = readCameraObjectProps(obj);
     expect(props.sensor).toEqual(DEFAULT_CAMERA_SENSOR);
     expect(props.dof).toEqual(DEFAULT_CAMERA_DOF);
+    expect(props.autoFocus).toEqual(DEFAULT_CAMERA_AUTO_FOCUS);
     expect(props.autoOrient).toBe("off");
+    expect(props.lockTarget).toEqual(DEFAULT_CAMERA_LOCK_TARGET);
   });
-  it("reads sensor / dof / autoOrient when provided", () => {
+  it("reads sensor / dof / autoFocus / autoOrient when provided", () => {
     const obj = makeCameraObject({
       props: {
         sensor: { width: 24, height: 16 },
@@ -145,8 +152,14 @@ describe("readCameraObjectProps", () => {
           focusDistance: 800,
           fNumber: 1.8,
           maxBlurPx: 32,
+          bokeh: { preset: "hex" },
         },
+        autoFocus: { enabled: true, targetId: "subject", zOffset: 12 },
         autoOrient: "along-path",
+        lockTarget: {
+          targetId: "subject",
+          offset: { x: 20, y: -10, z: 4 },
+        },
       },
     });
     const props = readCameraObjectProps(obj);
@@ -156,8 +169,49 @@ describe("readCameraObjectProps", () => {
       focusDistance: 800,
       fNumber: 1.8,
       maxBlurPx: 32,
+      bokeh: { preset: "hex" },
+    });
+    expect(props.autoFocus).toEqual({
+      enabled: true,
+      targetId: "subject",
+      zOffset: 12,
     });
     expect(props.autoOrient).toBe("along-path");
+    expect(props.lockTarget).toEqual({
+      targetId: "subject",
+      offset: { x: 20, y: -10, z: 4 },
+    });
+  });
+  it("defaults missing DoF bokeh to spherical", () => {
+    const obj = makeCameraObject({
+      props: {
+        dof: {
+          enabled: true,
+          focusDistance: 800,
+          fNumber: 1.8,
+          maxBlurPx: 32,
+        },
+      },
+    });
+    expect(readCameraObjectProps(obj).dof.bokeh).toEqual({
+      preset: "spherical",
+    });
+  });
+  it("falls back to spherical for invalid DoF bokeh presets", () => {
+    const obj = makeCameraObject({
+      props: {
+        dof: {
+          enabled: true,
+          focusDistance: 800,
+          fNumber: 1.8,
+          maxBlurPx: 32,
+          bokeh: { preset: "triangle" },
+        },
+      },
+    });
+    expect(readCameraObjectProps(obj).dof.bokeh).toEqual({
+      preset: "spherical",
+    });
   });
   it("clamps DoF f-number and max blur from saved props", () => {
     const obj = makeCameraObject({
@@ -236,6 +290,88 @@ describe("readCameraObjectProps", () => {
       DEFAULT_CAMERA_LENS.vignette.feather,
     );
     expect(props.lens.vignette.amount).toBe(0.5);
+  });
+});
+
+describe("applyCameraTargetAutomation", () => {
+  function makeRectObject(overrides: Partial<FrameObject> = {}): FrameObject {
+    return {
+      id: "subject",
+      name: "Subject",
+      type: "rect",
+      selector: "[data-object-id='subject']",
+      bounds: { x: 910, y: 490, width: 100, height: 100 },
+      style: {},
+      ...overrides,
+    };
+  }
+
+  it("locks camera rotation toward a target object", () => {
+    const camera = makeCameraObject({
+      props: {
+        ...DEFAULT_CAMERA_OBJECT_PROPS,
+        position: { x: 0, y: 0, z: 1158 },
+        autoOrient: "lock",
+        lockTarget: {
+          targetId: "subject",
+          offset: { x: 0, y: 0, z: 0 },
+        },
+      },
+    });
+    const part = makePart([
+      makeRectObject({ bounds: { x: 1010, y: 490, width: 100, height: 100 } }),
+      camera,
+    ]);
+    const out = applyCameraTargetAutomation(
+      part,
+      camera,
+      0,
+      readCameraObjectProps(camera),
+    );
+    expect(out.rotation.y).toBeLessThan(0);
+    expect(out.rotation.x).toBeCloseTo(0, 3);
+  });
+
+  it("keeps zero rotation when lock target is straight ahead", () => {
+    const camera = makeCameraObject({
+      props: {
+        ...DEFAULT_CAMERA_OBJECT_PROPS,
+        position: { x: 0, y: 0, z: 1158 },
+        autoOrient: "lock",
+        lockTarget: {
+          targetId: "subject",
+          offset: { x: 0, y: 0, z: 0 },
+        },
+      },
+    });
+    const part = makePart([makeRectObject(), camera]);
+    const out = applyCameraTargetAutomation(
+      part,
+      camera,
+      0,
+      readCameraObjectProps(camera),
+    );
+    expect(out.rotation.x).toBeCloseTo(0, 3);
+    expect(out.rotation.y).toBeCloseTo(0, 3);
+    expect(out.rotation.z).toBe(0);
+  });
+
+  it("updates focus distance from the linked focus target", () => {
+    const camera = makeCameraObject({
+      props: {
+        ...DEFAULT_CAMERA_OBJECT_PROPS,
+        dof: { ...DEFAULT_CAMERA_DOF, enabled: true },
+        autoFocus: { enabled: true, targetId: "subject", zOffset: 10 },
+      },
+    });
+    const part = makePart([makeRectObject(), camera]);
+    const out = applyCameraTargetAutomation(
+      part,
+      camera,
+      0,
+      readCameraObjectProps(camera),
+    );
+    expect(out.dof.focusDistance).toBeCloseTo(1148, 3);
   });
 });
 

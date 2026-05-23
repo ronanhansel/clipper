@@ -376,11 +376,12 @@ function ComposeAnimationTimelinePanelContent({
       ComposeAnimationKeyframeSelection[]
     >();
     for (const target of keyframeHitTargets) {
-      if (!target.selectionIds.some((id) => selectedKeyframeIds.has(id))) {
-        continue;
-      }
+      const matchedSelections = target.selections.filter((_, index) =>
+        selectedKeyframeIds.has(target.selectionIds[index] ?? ""),
+      );
+      if (!matchedSelections.length) continue;
       const items = selectionsByLayerId.get(target.layerId) ?? [];
-      items.push(...target.selections);
+      items.push(...matchedSelections);
       selectionsByLayerId.set(target.layerId, items);
     }
     if (!selectionsByLayerId.size) return false;
@@ -1269,7 +1270,17 @@ function ComposeTimelineRailRow({
       data-compose-parent-drop-layer-id={
         row.layer.object ? row.layer.id : undefined
       }
+      draggable={Boolean(row.layer.object)}
       onContextMenu={(event) => onOpenPresetContextMenu(event, row.layer)}
+      onDragStart={(event) => {
+        if (!row.layer.object) return;
+        event.dataTransfer.effectAllowed = "copy";
+        event.dataTransfer.setData(
+          "application/x-clipper-object-id",
+          row.layer.object.id,
+        );
+        event.dataTransfer.setData("text/plain", row.layer.object.id);
+      }}
     >
       <button
         data-timeline-control

@@ -19,12 +19,17 @@ import {
   CAMERA_DOF_MAX_BLUR_PX,
   CAMERA_DOF_MAX_F_NUMBER,
   CAMERA_DOF_MIN_F_NUMBER,
+  CAMERA_BOKEH_PRESETS,
   DEFAULT_CAMERA_DOF,
+  DEFAULT_CAMERA_AUTO_FOCUS,
   DEFAULT_CAMERA_LENS,
+  DEFAULT_CAMERA_LOCK_TARGET,
   DEFAULT_CAMERA_OBJECT_PROPS,
   DEFAULT_CAMERA_POST,
   DEFAULT_CAMERA_SENSOR,
+  type CameraBokehPreset,
   type CameraAutoOrient,
+  type CameraAutoFocus,
   type CameraDepthOfField,
   type CameraLens,
   type CameraLensChromaticAberration,
@@ -46,6 +51,11 @@ export type CompositionCameraInput = {
   part: CompositionClip;
   localTime: number;
 };
+
+export type CameraAutomationContext = Pick<
+  CompositionClip,
+  "frame" | "objects"
+>;
 
 export function useCompositionCamera(
   input: CompositionCameraInput,
@@ -73,7 +83,7 @@ export function getActiveCameraObjectProps(
     return readCameraObjectProps(cameraObject);
   }
   const props = evaluateCameraObjectPropsAt(cameraObject, localTime);
-  return applyAutoOrientAlongPath(cameraObject, localTime, props);
+  return applyCameraTargetAutomation(part, cameraObject, localTime, props);
 }
 
 /**
@@ -133,6 +143,112 @@ export function applyAutoOrientAlongPath(
   };
 }
 
+export function applyCameraTargetAutomation(
+  part: CameraAutomationContext,
+  cameraObject: FrameObject,
+  localTime: number,
+  resolved: CameraObjectProps,
+): CameraObjectProps {
+  const withFocus = applyAutoFocus(part, localTime, resolved);
+  if (withFocus.autoOrient === "lock") {
+    return applyCameraLockTarget(part, localTime, withFocus);
+  }
+  return applyAutoOrientAlongPath(cameraObject, localTime, withFocus);
+}
+
+function applyAutoFocus(
+  part: CameraAutomationContext,
+  localTime: number,
+  resolved: CameraObjectProps,
+): CameraObjectProps {
+  if (!resolved.autoFocus.enabled || !resolved.autoFocus.targetId)
+    return resolved;
+  const target = resolveCameraTargetPoint(
+    part,
+    localTime,
+    resolved.autoFocus.targetId,
+    { x: 0, y: 0, z: resolved.autoFocus.zOffset },
+  );
+  if (!target) return resolved;
+  const dx = target.x - resolved.position.x;
+  const dy = target.y - resolved.position.y;
+  const dz = target.z - resolved.position.z;
+  const focusDistance = Math.max(0, Math.sqrt(dx * dx + dy * dy + dz * dz));
+  return {
+    ...resolved,
+    dof: { ...resolved.dof, focusDistance },
+  };
+}
+
+function applyCameraLockTarget(
+  part: CameraAutomationContext,
+  localTime: number,
+  resolved: CameraObjectProps,
+): CameraObjectProps {
+  if (!resolved.lockTarget.targetId) return resolved;
+  const target = resolveCameraTargetPoint(
+    part,
+    localTime,
+    resolved.lockTarget.targetId,
+    resolved.lockTarget.offset,
+  );
+  if (!target) return resolved;
+  const rotation = cameraRotationTowardTarget(resolved.position, target);
+  if (!rotation) return resolved;
+  return { ...resolved, rotation };
+}
+
+function resolveCameraTargetPoint(
+  part: CameraAutomationContext,
+  localTime: number,
+  targetId: string,
+  offset: { x: number; y: number; z: number },
+): { x: number; y: number; z: number } | null {
+  const targetObject = part.objects.find((item) => item.id === targetId);
+  if (!targetObject || targetObject.hidden) return null;
+  const evaluated = evaluateObjectState(targetObject, localTime);
+  const transform =
+    evaluated.transform && typeof evaluated.transform === "object"
+      ? evaluated.transform
+      : {};
+  const z =
+    typeof transform.translateZ === "number" &&
+    Number.isFinite(transform.translateZ)
+      ? transform.translateZ
+      : 0;
+  return {
+    x:
+      evaluated.bounds.x +
+      evaluated.bounds.width / 2 -
+      part.frame.width / 2 -
+      offset.x,
+    y:
+      evaluated.bounds.y +
+      evaluated.bounds.height / 2 -
+      part.frame.height / 2 -
+      offset.y,
+    z: z + offset.z,
+  };
+}
+
+function cameraRotationTowardTarget(
+  cameraPosition: { x: number; y: number; z: number },
+  target: { x: number; y: number; z: number },
+): { x: number; y: number; z: number } | null {
+  const tx = target.x - cameraPosition.x;
+  const ty = target.y - cameraPosition.y;
+  const tz = target.z - cameraPosition.z;
+  const mag = Math.sqrt(tx * tx + ty * ty + tz * tz);
+  if (mag < 1e-3) return null;
+  const fx = tx / mag;
+  const fy = -ty / mag;
+  const fz = tz / mag;
+  const yawY = Math.atan2(-fx, -fz);
+  const pitchX = Math.asin(fy);
+  const RAD_TO_DEG = 180 / Math.PI;
+  return { x: -(pitchX * RAD_TO_DEG), y: yawY * RAD_TO_DEG, z: 0 };
+}
+
 export function findActiveCameraObject(
   part: CompositionClip,
   localTime?: number,
@@ -186,7 +302,9 @@ export function readCameraObjectProps(object: FrameObject): CameraObjectProps {
     far: num("far"),
     sensor: readSensor(raw.sensor),
     dof: readDof(raw.dof),
+    autoFocus: readAutoFocus(raw.autoFocus),
     autoOrient: readAutoOrient(raw.autoOrient),
+    lockTarget: readCameraTargetLink(raw.lockTarget),
     lens: readLens(raw.lens),
     post: readPost(raw.post),
   };
@@ -205,7 +323,7 @@ function readSensor(v: unknown): CameraSensor {
 
 function readDof(v: unknown): CameraDepthOfField {
   const def = DEFAULT_CAMERA_DOF;
-  if (!v || typeof v !== "object") return { ...def };
+  if (!v || typeof v !== "object") return { ...def, bokeh: { ...def.bokeh } };
   const r = v as Record<string, unknown>;
   const num = (k: "focusDistance" | "fNumber" | "maxBlurPx"): number => {
     const n = r[k];
@@ -220,11 +338,64 @@ function readDof(v: unknown): CameraDepthOfField {
       Math.min(CAMERA_DOF_MAX_F_NUMBER, num("fNumber")),
     ),
     maxBlurPx: Math.max(0, Math.min(CAMERA_DOF_MAX_BLUR_PX, num("maxBlurPx"))),
+    bokeh: readBokeh(r.bokeh),
   };
 }
 
+function readAutoFocus(v: unknown): CameraAutoFocus {
+  const def = DEFAULT_CAMERA_AUTO_FOCUS;
+  if (!v || typeof v !== "object") return { ...def };
+  const r = v as Record<string, unknown>;
+  const zOffset =
+    typeof r.zOffset === "number" && Number.isFinite(r.zOffset)
+      ? r.zOffset
+      : def.zOffset;
+  return {
+    enabled: typeof r.enabled === "boolean" ? r.enabled : def.enabled,
+    targetId: typeof r.targetId === "string" ? r.targetId : def.targetId,
+    zOffset,
+  };
+}
+
+function readBokeh(v: unknown): CameraDepthOfField["bokeh"] {
+  const def = DEFAULT_CAMERA_DOF.bokeh;
+  if (!v || typeof v !== "object") return { ...def };
+  const preset = (v as Record<string, unknown>).preset;
+  return {
+    preset: isCameraBokehPreset(preset) ? preset : def.preset,
+  };
+}
+
+function isCameraBokehPreset(v: unknown): v is CameraBokehPreset {
+  return (
+    typeof v === "string" &&
+    (CAMERA_BOKEH_PRESETS as readonly string[]).includes(v)
+  );
+}
+
 function readAutoOrient(v: unknown): CameraAutoOrient {
-  return v === "along-path" ? "along-path" : "off";
+  if (v === "along-path" || v === "lock") return v;
+  return "off";
+}
+
+function readCameraTargetLink(v: unknown): CameraObjectProps["lockTarget"] {
+  const def = DEFAULT_CAMERA_LOCK_TARGET;
+  if (!v || typeof v !== "object") {
+    return { targetId: def.targetId, offset: { ...def.offset } };
+  }
+  const r = v as Record<string, unknown>;
+  const rawOffset =
+    r.offset && typeof r.offset === "object"
+      ? (r.offset as Record<string, unknown>)
+      : {};
+  const num = (key: "x" | "y" | "z") =>
+    typeof rawOffset[key] === "number" && Number.isFinite(rawOffset[key])
+      ? rawOffset[key]
+      : def.offset[key];
+  return {
+    targetId: typeof r.targetId === "string" ? r.targetId : def.targetId,
+    offset: { x: num("x"), y: num("y"), z: num("z") },
+  };
 }
 
 function readLens(v: unknown): CameraLens {

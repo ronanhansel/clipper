@@ -277,11 +277,20 @@ export type CameraDepthOfField = {
   fNumber: number;
   /** Upper clamp for DoF blur, in source pixels. */
   maxBlurPx: number;
+  bokeh: { preset: CameraBokehPreset };
 };
 
 export const CAMERA_DOF_MIN_F_NUMBER = 1.5;
 export const CAMERA_DOF_MAX_F_NUMBER = 64;
 export const CAMERA_DOF_MAX_BLUR_PX = 300;
+export const CAMERA_BOKEH_PRESETS = [
+  "spherical",
+  "anamorphic",
+  "hex",
+  "octagon",
+  "star",
+] as const;
+export type CameraBokehPreset = (typeof CAMERA_BOKEH_PRESETS)[number];
 
 export type CameraLensDistortion = {
   enabled: boolean;
@@ -347,7 +356,18 @@ export type CameraPost = {
   grain: CameraPostGrain;
 };
 
-export type CameraAutoOrient = "off" | "along-path";
+export type CameraAutoOrient = "off" | "along-path" | "lock";
+
+export type CameraTargetLink = {
+  targetId: string | null;
+  offset: { x: number; y: number; z: number };
+};
+
+export type CameraAutoFocus = {
+  enabled: boolean;
+  targetId: string | null;
+  zOffset: number;
+};
 
 /**
  * Props stored on a `FrameObject` whose `type === "camera"`. The composition
@@ -375,7 +395,9 @@ export type CameraObjectProps = {
   far: number;
   sensor: CameraSensor;
   dof: CameraDepthOfField;
+  autoFocus: CameraAutoFocus;
   autoOrient: CameraAutoOrient;
+  lockTarget: CameraTargetLink;
   lens: CameraLens;
   post: CameraPost;
 };
@@ -387,6 +409,18 @@ export const DEFAULT_CAMERA_DOF: CameraDepthOfField = {
   focusDistance: 1158,
   fNumber: 2.8,
   maxBlurPx: CAMERA_DOF_MAX_BLUR_PX,
+  bokeh: { preset: "spherical" },
+};
+
+export const DEFAULT_CAMERA_AUTO_FOCUS: CameraAutoFocus = {
+  enabled: false,
+  targetId: null,
+  zOffset: 0,
+};
+
+export const DEFAULT_CAMERA_LOCK_TARGET: CameraTargetLink = {
+  targetId: null,
+  offset: { x: 0, y: 0, z: 0 },
 };
 
 export const DEFAULT_CAMERA_LENS: CameraLens = {
@@ -410,8 +444,13 @@ export const DEFAULT_CAMERA_OBJECT_PROPS: CameraObjectProps = {
   near: 1,
   far: 5000,
   sensor: { ...DEFAULT_CAMERA_SENSOR },
-  dof: { ...DEFAULT_CAMERA_DOF },
+  dof: { ...DEFAULT_CAMERA_DOF, bokeh: { ...DEFAULT_CAMERA_DOF.bokeh } },
+  autoFocus: { ...DEFAULT_CAMERA_AUTO_FOCUS },
   autoOrient: "off",
+  lockTarget: {
+    targetId: DEFAULT_CAMERA_LOCK_TARGET.targetId,
+    offset: { ...DEFAULT_CAMERA_LOCK_TARGET.offset },
+  },
   lens: {
     ...DEFAULT_CAMERA_LENS,
     distortion: { ...DEFAULT_CAMERA_LENS.distortion },

@@ -11,6 +11,7 @@ import { getCameraLensPostProcessPass } from "../../../core/cameraEffectsPasses"
 import { createCameraDofPass } from "../../../core/effects/postprocess/cameraDof";
 import {
   CAMERA_DOF_MAX_BLUR_PX,
+  CAMERA_BOKEH_PRESETS,
   DEFAULT_CAMERA_OBJECT_PROPS,
   type CameraObjectProps,
 } from "../../../core/types";
@@ -18,6 +19,7 @@ import {
   getThinLensApertureRadiusWorld,
   getThinLensMaxBlurRadiusWorld,
   orientThinLensSampleCamera,
+  sampleThinLensAperture,
   sampleThinLensDiskPair,
 } from "./ThinLensRenderPass";
 
@@ -31,7 +33,10 @@ function makeCamera(
     position: { ...DEFAULT_CAMERA_OBJECT_PROPS.position },
     rotation: { ...DEFAULT_CAMERA_OBJECT_PROPS.rotation },
     sensor: { ...DEFAULT_CAMERA_OBJECT_PROPS.sensor },
-    dof: { ...DEFAULT_CAMERA_OBJECT_PROPS.dof },
+    dof: {
+      ...DEFAULT_CAMERA_OBJECT_PROPS.dof,
+      bokeh: { ...DEFAULT_CAMERA_OBJECT_PROPS.dof.bokeh },
+    },
     lens: {
       distortion: { ...DEFAULT_CAMERA_OBJECT_PROPS.lens.distortion },
       chromaticAberration: {
@@ -377,6 +382,33 @@ describe("sampleThinLensDiskPair", () => {
       expect(Math.abs(a.x + b.x)).toBeLessThan(1e-6);
       expect(Math.abs(a.y + b.y)).toBeLessThan(1e-6);
     }
+  });
+});
+
+describe("sampleThinLensAperture", () => {
+  it("keeps every bokeh preset inside its aperture bounds", () => {
+    for (const preset of CAMERA_BOKEH_PRESETS) {
+      for (let i = 0; i < 256; i += 1) {
+        const sample = sampleThinLensAperture(i, 256, preset);
+        expect(Number.isFinite(sample.x)).toBe(true);
+        expect(Number.isFinite(sample.y)).toBe(true);
+
+        if (preset === "anamorphic") {
+          expect(Math.abs(sample.x)).toBeLessThanOrEqual(1.55 + 1e-6);
+          expect(Math.abs(sample.y)).toBeLessThanOrEqual(0.62 + 1e-6);
+          continue;
+        }
+
+        expect(sample.length()).toBeLessThanOrEqual(1 + 1e-6);
+      }
+    }
+  });
+
+  it("stretches anamorphic samples horizontally", () => {
+    const spherical = sampleThinLensAperture(1, 64, "spherical");
+    const anamorphic = sampleThinLensAperture(1, 64, "anamorphic");
+    expect(Math.abs(anamorphic.x)).toBeGreaterThan(Math.abs(spherical.x));
+    expect(Math.abs(anamorphic.y)).toBeLessThan(Math.abs(spherical.y));
   });
 });
 

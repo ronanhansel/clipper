@@ -294,6 +294,8 @@ export const ConnectedInspectorContent = memo(
       return (
         <ObjectInspector
           object={composeInspectorObject}
+          compositionObjects={part.objects}
+          compositionFrame={part.frame}
           currentTime={currentSceneTime}
           liveScrubClock={composeMode}
           lockBounds={composeInspectorObject.id === part.background.id}

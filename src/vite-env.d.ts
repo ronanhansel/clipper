@@ -51,6 +51,12 @@ type LocalFontData = {
   fullName: string;
   postscriptName: string;
   style: string;
+  blob?: () => Promise<Blob>;
+};
+
+type ClipperSystemFontInfo = {
+  family: string;
+  source?: string;
 };
 
 type ClipperUpdateStatusKind =
@@ -114,7 +120,7 @@ interface Window {
       fileName: string,
     ) => Promise<string | null>;
     openCompositionFile: (directoryPath: string) => Promise<string | null>;
-    listSystemFonts: () => Promise<string[]>;
+    listSystemFonts: () => Promise<Array<string | ClipperSystemFontInfo>>;
     openProjectManifest: () => Promise<string | null>;
     createProject: (projectName: string) => Promise<string | null>;
     exportMediaFile: (

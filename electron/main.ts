@@ -282,6 +282,7 @@ type TemplateBundle = {
 
 type MacFontProfile = {
   SPFontsDataType?: Array<{
+    path?: string;
     enabled?: string;
     valid?: string;
     typefaces?: Array<{
@@ -290,6 +291,14 @@ type MacFontProfile = {
     }>;
   }>;
 };
+
+type SystemFontInfo = {
+  family: string;
+  source?: string;
+};
+
+const troikaFontSupportCache = new Map<string, boolean>();
+const TROIKA_FONT_SOURCE_EXTENSION_PATTERN = /\.(?:ttf|otf|woff2?)$/i;
 
 async function findFileByName(
   directoryPath: string,
@@ -320,17 +329,25 @@ async function listSystemFontFamilies() {
 
   try {
     const profile = JSON.parse(output) as MacFontProfile;
-    const families = new Set<string>();
+    const families = new Map<string, SystemFontInfo>();
     for (const font of profile.SPFontsDataType ?? []) {
       if (font.enabled === "no" || font.valid === "no") continue;
+      const fontPath = font.path?.trim();
+      const source =
+        fontPath && (await isTroikaSupportedFontFile(fontPath))
+          ? `clipper-media://file/${encodeURIComponent(fontPath)}`
+          : undefined;
       for (const typeface of font.typefaces ?? []) {
         if (typeface.enabled === "no") continue;
         const family = typeface.family?.trim();
-        if (family) families.add(family);
+        if (!family) continue;
+        const existing = families.get(family);
+        if (!existing) families.set(family, { family, source });
+        else if (!existing.source && source) existing.source = source;
       }
     }
-    systemFontFamilies = [...families].sort((a, b) =>
-      a.localeCompare(b, undefined, { sensitivity: "base" }),
+    systemFontFamilies = [...families.values()].sort((a, b) =>
+      a.family.localeCompare(b.family, undefined, { sensitivity: "base" }),
     );
     return systemFontFamilies;
   } catch {
@@ -338,7 +355,92 @@ async function listSystemFontFamilies() {
   }
 }
 
-let systemFontFamilies: string[] | null = null;
+let systemFontFamilies: SystemFontInfo[] | null = null;
+
+async function isTroikaSupportedFontFile(filePath: string) {
+  const cached = troikaFontSupportCache.get(filePath);
+  if (cached !== undefined) return cached;
+  try {
+    if (!TROIKA_FONT_SOURCE_EXTENSION_PATTERN.test(filePath)) {
+      troikaFontSupportCache.set(filePath, false);
+      return false;
+    }
+    const data = await fs.readFile(filePath);
+    const formats = readFontCmapFormats(data);
+    const supported =
+      formats.size === 0 ||
+      (!formats.has(6) &&
+        (formats.has(4) || formats.has(12)) &&
+        hasOnlySupportedKernTables(data));
+    troikaFontSupportCache.set(filePath, supported);
+    return supported;
+  } catch {
+    troikaFontSupportCache.set(filePath, false);
+    return false;
+  }
+}
+
+function hasOnlySupportedKernTables(data: Buffer) {
+  const tableOffset = readFontTableOffset(data);
+  if (tableOffset === null) return false;
+  const kernOffset = readSfntTableOffset(data, tableOffset, "kern");
+  if (kernOffset === null) return true;
+  if (kernOffset + 4 > data.byteLength) return false;
+
+  const version = data.readUInt16BE(kernOffset);
+  if (version !== 0) return false;
+
+  const tableCount = data.readUInt16BE(kernOffset + 2);
+  let subtableOffset = kernOffset + 4;
+  for (let i = 0; i < tableCount; i += 1) {
+    if (subtableOffset + 6 > data.byteLength) return false;
+    const length = data.readUInt16BE(subtableOffset + 2);
+    const coverage = data.readUInt16BE(subtableOffset + 4);
+    const format = coverage >> 8;
+    if (format !== 0) return false;
+    if (length <= 0) return false;
+    subtableOffset += length;
+  }
+  return true;
+}
+
+function readFontCmapFormats(data: Buffer) {
+  const tableOffset = readFontTableOffset(data);
+  if (tableOffset === null) return new Set<number>();
+  const cmapOffset = readSfntTableOffset(data, tableOffset, "cmap");
+  if (cmapOffset === null || cmapOffset + 4 > data.byteLength)
+    return new Set<number>();
+
+  const formats = new Set<number>();
+  const tableCount = data.readUInt16BE(cmapOffset + 2);
+  for (let i = 0; i < tableCount; i += 1) {
+    const recordOffset = cmapOffset + 4 + i * 8;
+    if (recordOffset + 8 > data.byteLength) break;
+    const subtableOffset = cmapOffset + data.readUInt32BE(recordOffset + 4);
+    if (subtableOffset + 2 > data.byteLength) continue;
+    formats.add(data.readUInt16BE(subtableOffset));
+  }
+  return formats;
+}
+
+function readFontTableOffset(data: Buffer) {
+  if (data.byteLength < 12) return null;
+  if (data.subarray(0, 4).toString("ascii") !== "ttcf") return 0;
+  if (data.byteLength < 16) return null;
+  return data.readUInt32BE(12);
+}
+
+function readSfntTableOffset(data: Buffer, tableOffset: number, tag: string) {
+  if (tableOffset + 12 > data.byteLength) return null;
+  const tableCount = data.readUInt16BE(tableOffset + 4);
+  for (let i = 0; i < tableCount; i += 1) {
+    const recordOffset = tableOffset + 12 + i * 16;
+    if (recordOffset + 16 > data.byteLength) break;
+    if (data.subarray(recordOffset, recordOffset + 4).toString("ascii") === tag)
+      return data.readUInt32BE(recordOffset + 8);
+  }
+  return null;
+}
 
 function readCommandOutput(command: string, args: string[]) {
   return new Promise<string>((resolve) => {
@@ -417,6 +519,10 @@ function getMediaContentType(filePath: string) {
   if (extension === ".webp") return "image/webp";
   if (extension === ".gif") return "image/gif";
   if (extension === ".svg") return "image/svg+xml";
+  if (extension === ".ttf") return "font/ttf";
+  if (extension === ".otf") return "font/otf";
+  if (extension === ".woff") return "font/woff";
+  if (extension === ".woff2") return "font/woff2";
   return "application/octet-stream";
 }
 

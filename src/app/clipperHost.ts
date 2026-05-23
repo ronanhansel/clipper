@@ -23,6 +23,17 @@ export type TemplateBundle = {
   files: Record<string, string>;
 };
 
+export type SystemFontInfo = {
+  family: string;
+  source?: string;
+};
+
+function normalizeSystemFontInfo(
+  value: string | SystemFontInfo,
+): SystemFontInfo {
+  return typeof value === "string" ? { family: value } : value;
+}
+
 class ClipperHostService {
   private mutationQueue: Promise<void> = Promise.resolve();
 
@@ -136,23 +147,30 @@ class ClipperHostService {
     return findFileByNameWithListDirectory(this, directoryPath, fileName);
   }
 
-  async listSystemFonts() {
-    const browserFonts = await this.listBrowserLocalFonts();
-    if (browserFonts.length > 0) return browserFonts;
-    return window.clipper?.listSystemFonts?.() ?? [];
+  async listSystemFonts(): Promise<SystemFontInfo[]> {
+    const hostFonts = await window.clipper?.listSystemFonts?.();
+    if (hostFonts?.length) return hostFonts.map(normalizeSystemFontInfo);
+
+    return this.listBrowserLocalFonts();
   }
 
-  private async listBrowserLocalFonts() {
+  private async listBrowserLocalFonts(): Promise<SystemFontInfo[]> {
     if (!window.queryLocalFonts) return [];
     try {
       const fonts = await window.queryLocalFonts();
-      const families = new Set<string>();
+      const families = new Map<string, SystemFontInfo>();
       for (const font of fonts) {
         const family = font.family.trim();
-        if (family) families.add(family);
+        if (!family) continue;
+        const source = font.blob
+          ? URL.createObjectURL(await font.blob())
+          : undefined;
+        const existing = families.get(family);
+        if (!existing) families.set(family, { family, source });
+        else if (!existing.source && source) existing.source = source;
       }
-      return [...families].sort((a, b) =>
-        a.localeCompare(b, undefined, { sensitivity: "base" }),
+      return [...families.values()].sort((a, b) =>
+        a.family.localeCompare(b.family, undefined, { sensitivity: "base" }),
       );
     } catch {
       return [];

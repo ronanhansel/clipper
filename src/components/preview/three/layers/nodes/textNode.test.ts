@@ -134,7 +134,7 @@ describe("textNodeFactory", () => {
     node.dispose();
   });
 
-  it("update copies content and style props onto the Text instance", () => {
+  it("update copies content and style props onto the Text instance without treating family names as font urls", () => {
     const node = textNodeFactory.create(
       { id: "text-1" } as FrameObject,
       NULL_CONTEXT,
@@ -163,10 +163,28 @@ describe("textNodeFactory", () => {
     expect(inner.letterSpacing).toBe(2);
     expect(inner.lineHeight).toBe(1.2);
     expect(inner.textAlign).toBe("center");
-    expect(inner.font).toBe("Inter");
+    expect(inner.font).toBeNull();
     expect(inner.color.g).toBeCloseTo(1);
     expect(inner.fillOpacity).toBeCloseTo(0.5);
     expect(inner.maxWidth).toBe(200);
+    node.dispose();
+  });
+
+  it("passes real font file sources to troika", () => {
+    const node = textNodeFactory.create(
+      { id: "text-1" } as FrameObject,
+      NULL_CONTEXT,
+    );
+    node.update(
+      makeState({
+        style: {
+          fontFamily: "/fonts/CustomFont.woff2?v=1",
+          fontSource: "clipper-media://file/%2Ffonts%2FCustomFont.woff2",
+        },
+      }),
+    );
+    const inner = node.object3D.children[0] as unknown as FakeTextShape;
+    expect(inner.font).toBe("clipper-media://file/%2Ffonts%2FCustomFont.woff2");
     node.dispose();
   });
 

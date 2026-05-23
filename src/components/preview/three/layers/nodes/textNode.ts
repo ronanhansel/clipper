@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { Text } from "troika-three-text";
 import type { EvaluatedObjectState } from "../../../../../core/propertyRegistry";
 import type { FrameObject } from "../../../../../core/types";
+import { filePathToClipperMediaUrl } from "../../../../../core/mediaSource";
 import type { LayerNode, LayerNodeFactory } from "../layerNodeRegistry";
 import { resolveLayerTransform } from "../layerTransform";
 import {
@@ -15,6 +16,7 @@ const DEFAULT_LETTER_SPACING = 0;
 const DEFAULT_LINE_HEIGHT = "normal";
 const DEFAULT_TEXT_ALIGN = "left";
 const DEFAULT_FONT_STYLE = "normal";
+const FONT_SOURCE_EXTENSION_PATTERN = /\.(?:ttf|otf|woff2?)(?:[?#].*)?$/i;
 
 class TextNode implements LayerNode {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -79,8 +81,9 @@ class TextNode implements LayerNode {
         : DEFAULT_TEXT_ALIGN;
     this.text.maxWidth = t.width;
 
-    const fontFamily = state.style?.fontFamily;
-    this.text.font = typeof fontFamily === "string" ? fontFamily : null;
+    this.text.font = resolveTroikaFontSource(
+      state.style?.fontSource ?? state.style?.fontFamily,
+    );
 
     const opacity = clamp01(readNumber(state.style?.opacity, 1));
     const colour = resolveTextLinearRgba(state);
@@ -138,6 +141,21 @@ function resolveTextLinearRgba(state: EvaluatedObjectState): LinearRgba | null {
     const parsed = parseCssColorToLinearRgba(colour);
     if (parsed) return parsed;
   }
+  return null;
+}
+
+function resolveTroikaFontSource(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const source = value.trim();
+  if (!source) return null;
+  if (source.startsWith("data:font/") || source.startsWith("blob:")) {
+    return source;
+  }
+  if (source.startsWith("clipper-media:"))
+    return FONT_SOURCE_EXTENSION_PATTERN.test(source) ? source : null;
+  if (source.startsWith("file:")) return filePathToClipperMediaUrl(source);
+  if (FONT_SOURCE_EXTENSION_PATTERN.test(source))
+    return filePathToClipperMediaUrl(source);
   return null;
 }
 

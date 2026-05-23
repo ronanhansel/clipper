@@ -12,6 +12,7 @@ import {
 } from "./ThreeAuthorScene";
 import { CompositionWebGLHost } from "./CompositionWebGLHost";
 import {
+  applyCameraTargetAutomation,
   evaluateCameraObjectPropsAt,
   findActiveCameraObject,
   getActiveCameraObjectProps,
@@ -69,6 +70,25 @@ function formatObjectTransform(transform: Record<string, unknown>) {
   pushTransform("skewX", "deg");
   pushTransform("skewY", "deg");
   return parts.join(" ");
+}
+
+function resolveAuthorCameraProps(
+  part: CompositionClip,
+  cameraObject: CompositionClip["objects"][number],
+  localTime: number,
+  override?: CameraObjectProps,
+) {
+  const sourceObject = override
+    ? {
+        ...cameraObject,
+        props:
+          override as unknown as CompositionClip["objects"][number]["props"],
+      }
+    : cameraObject;
+  const evaluated = override
+    ? override
+    : evaluateCameraObjectPropsAt(cameraObject, localTime);
+  return applyCameraTargetAutomation(part, sourceObject, localTime, evaluated);
 }
 
 function useFitFrameSize() {
@@ -402,7 +422,18 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
     const scene = sceneRef.current;
     if (!scene) return;
     scene.onCameraDrag((objectId, next) => {
-      pendingDragRef.current = { objectId, props: next };
+      const camera = props.part.objects.find(
+        (object) =>
+          object.id === objectId && object.type === "camera" && !object.hidden,
+      );
+      const automatedNext = camera
+        ? resolveAuthorCameraProps(props.part, camera, props.localTime, next)
+        : next;
+      const activeCamera = findActiveCameraObject(props.part, props.localTime);
+      if (camera && activeCamera?.id === objectId) {
+        scene.setActiveCamera(automatedNext, objectId);
+      }
+      pendingDragRef.current = { objectId, props: automatedNext };
       if (!flushHandleRef.current) {
         flushHandleRef.current = requestAnimationFrame(() => {
           flushHandleRef.current = 0;
@@ -505,7 +536,15 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
       if (!scene) return;
       const activeCamera = findActiveCameraObject(props.part, props.localTime);
       if (activeCamera?.id === detail.objectId) {
-        scene.setActiveCamera(detail.props, detail.objectId);
+        scene.setActiveCamera(
+          resolveAuthorCameraProps(
+            props.part,
+            camera,
+            props.localTime,
+            detail.props,
+          ),
+          detail.objectId,
+        );
       }
       scene.setCameraObjects(
         props.part.objects
@@ -514,8 +553,13 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
             id: object.id,
             props:
               object.id === detail.objectId
-                ? detail.props
-                : evaluateCameraObjectPropsAt(object, props.localTime),
+                ? resolveAuthorCameraProps(
+                    props.part,
+                    object,
+                    props.localTime,
+                    detail.props,
+                  )
+                : resolveAuthorCameraProps(props.part, object, props.localTime),
             active: object.id === activeCamera?.id,
             selected: object.id === props.selectedObjectId,
           })),
@@ -543,7 +587,7 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
         .filter((object) => object.type === "camera" && !object.hidden)
         .map((object) => ({
           id: object.id,
-          props: evaluateCameraObjectPropsAt(object, props.localTime),
+          props: resolveAuthorCameraProps(props.part, object, props.localTime),
           active: object.id === activeCamera?.id,
           selected: object.id === props.selectedObjectId,
         })),

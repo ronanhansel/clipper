@@ -11,7 +11,7 @@ import {
   SelectValue,
 } from "../../ui/select";
 
-export type FontOption = { value: string; label: string };
+export type FontOption = { value: string; label: string; source?: string };
 
 export const defaultFontFamily = graphicDefaultFontFamily;
 export const defaultFontOption: FontOption = {
@@ -30,7 +30,13 @@ export function loadSystemFontOptions() {
   if (cachedSystemFontOptions) return Promise.resolve(cachedSystemFontOptions);
   systemFontOptionsRequest ??= clipperHost
     .listSystemFonts()
-    .then((fonts) => fonts.map((font) => ({ value: font, label: font })))
+    .then((fonts) =>
+      fonts.map((font) => ({
+        value: font.family,
+        label: font.family,
+        source: font.source,
+      })),
+    )
     .catch((error) => {
       console.warn("Unable to load system fonts.", error);
       return [];
@@ -53,14 +59,18 @@ export function formatFontValueLabel(value: string) {
 
 export function FontSelector({
   value,
+  fontSource,
   hasKeyframe = false,
   onToggleKeyframe,
   onChange,
+  onResolveFontSource,
 }: {
   value: string;
+  fontSource?: string;
   hasKeyframe?: boolean;
   onToggleKeyframe?: () => void;
-  onChange: (value: string) => void;
+  onChange: (value: string, option?: FontOption) => void;
+  onResolveFontSource?: (option: FontOption) => void;
 }) {
   const [systemFontOptions, setSystemFontOptions] = useState<FontOption[]>(
     cachedSystemFontOptions ?? [],
@@ -76,7 +86,10 @@ export function FontSelector({
   useEffect(() => {
     // Already populated from cache -- skip the async round-trip and the extra
     // setState/render that comes with it on every mount.
-    if (cachedSystemFontOptions) return;
+    if (cachedSystemFontOptions) {
+      setSystemFontOptions(cachedSystemFontOptions);
+      return;
+    }
     let active = true;
     void loadSystemFontOptions().then((options) => {
       if (active) setSystemFontOptions(options);
@@ -86,11 +99,28 @@ export function FontSelector({
     };
   }, []);
 
+  useEffect(() => {
+    const option = fontOptions.find(
+      (option) => option.value === value && option.source,
+    );
+    if (option?.source && option.source !== fontSource) {
+      onResolveFontSource?.(option);
+    }
+  }, [fontOptions, fontSource, onResolveFontSource, value]);
+
   return (
     <label className={`grid gap-1.5 ${mutedCaps}`}>
       Font
       <span className="relative block">
-        <Select value={value} onValueChange={onChange}>
+        <Select
+          value={value}
+          onValueChange={(nextValue) =>
+            onChange(
+              nextValue,
+              fontOptions.find((option) => option.value === nextValue),
+            )
+          }
+        >
           <SelectTrigger
             className={`h-[42px] rounded-[10px] px-3 text-xs font-bold text-[#dfe2ea] ${onToggleKeyframe ? "pl-8" : ""} ${hasKeyframe ? "border-white" : ""}`}
           >

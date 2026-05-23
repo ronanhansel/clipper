@@ -106,7 +106,9 @@ contextBridge.exposeInMainWorld("clipper", {
       directoryPath,
     ) as Promise<string | null>,
   listSystemFonts: () =>
-    ipcRenderer.invoke("clipper:list-system-fonts") as Promise<string[]>,
+    ipcRenderer.invoke("clipper:list-system-fonts") as Promise<
+      Array<{ family: string; source?: string }>
+    >,
   setWindowFullscreen: (fullscreen: boolean) =>
     ipcRenderer.invoke(
       "clipper:set-window-fullscreen",

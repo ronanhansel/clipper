@@ -399,6 +399,37 @@ describe("buildComposeAnimationTimelineLayers", () => {
     expect(track.label).toBe("Camera Live");
     expect(track.keyframes.map((point) => point.value)).toEqual([true, false]);
   });
+
+  it("labels camera depth of field property tracks", () => {
+    const object = {
+      ...frameObject("camera"),
+      type: "camera",
+      tracks: {
+        "props.dof.focusDistance": {
+          valueType: "number",
+          points: [{ time: 0, value: 1158 }],
+        },
+        "props.dof.fNumber": {
+          valueType: "number",
+          points: [{ time: 0, value: 1.8 }],
+        },
+        "props.dof.maxBlurPx": {
+          valueType: "number",
+          points: [{ time: 0, value: 48 }],
+        },
+      },
+    } satisfies FrameObject;
+    const [layer] = buildComposeAnimationTimelineLayers(
+      partWithObjects([object]),
+    );
+    const tracks = getComposeAnimationAttributeTracks(layer);
+
+    expect(tracks.map((track) => track.label)).toEqual([
+      "Focus Distance",
+      "F-number",
+      "Max Blur (px)",
+    ]);
+  });
 });
 
 function frameObject(id: string): FrameObject {

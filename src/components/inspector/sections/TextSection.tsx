@@ -1,3 +1,4 @@
+import { useCallback } from "react";
 import {
   AlignCenter,
   AlignJustify,
@@ -12,7 +13,7 @@ import { mutedCaps } from "../../../app/config";
 import { graphicTextDefaults } from "../../../core/graphics/inspectorSettings";
 import { Textarea } from "../../ui/textarea";
 import { useObjectInspector } from "../objectInspectorContext";
-import { FontSelector } from "./FontSelector";
+import { FontSelector, type FontOption } from "./FontSelector";
 import {
   TextAnimatorsSection,
   TextBoxLayoutIcon,
@@ -53,6 +54,8 @@ export function TextSection() {
       String(object.style.fontFamily ?? graphicTextDefaults.fontFamily),
     ),
   );
+  const fontSource =
+    typeof object.style.fontSource === "string" ? object.style.fontSource : "";
   const fontSize = Number(
     keyframeValue(
       "fontSize",
@@ -92,7 +95,14 @@ export function TextSection() {
 
   const fontFamilyHasKeyframe = Boolean(keyframeAtCurrentTime("fontFamily"));
 
-  function commitFontFamily(value: string) {
+  function commitFontFamily(value: string, option?: FontOption) {
+    onChange((current) => ({
+      ...current,
+      style: {
+        ...current.style,
+        fontSource: option?.source ?? "",
+      },
+    }));
     commitKeyframedValue(
       "fontFamily",
       value,
@@ -100,6 +110,22 @@ export function TextSection() {
       "text",
     );
   }
+
+  const resolveFontSource = useCallback(
+    (option: FontOption) => {
+      onChange((current) => {
+        if (current.style.fontSource === option.source) return current;
+        return {
+          ...current,
+          style: {
+            ...current.style,
+            fontSource: option.source ?? "",
+          },
+        };
+      });
+    },
+    [onChange],
+  );
 
   return (
     <>
@@ -115,9 +141,11 @@ export function TextSection() {
       <FillSection />
       <FontSelector
         value={fontFamily}
+        fontSource={fontSource}
         hasKeyframe={fontFamilyHasKeyframe}
         onToggleKeyframe={() => toggleKeyframe("fontFamily", fontFamily)}
         onChange={commitFontFamily}
+        onResolveFontSource={resolveFontSource}
       />
       <div className="grid grid-cols-2 gap-2">
         {renderKeyframedInput({

@@ -3,6 +3,7 @@ import { Pass } from "three/examples/jsm/postprocessing/Pass.js";
 import {
   CAMERA_DOF_MAX_BLUR_PX,
   CAMERA_DOF_MIN_F_NUMBER,
+  type CameraBokehPreset,
   type CameraObjectProps,
 } from "../../../core/types";
 
@@ -296,9 +297,10 @@ export class ThinLensRenderPass extends (Pass as any) {
     const baseQuaternion = this.camera.quaternion.clone();
     const focusDistance = getThinLensFocusDistance(camera);
     const focusPoint = getFocusPoint(this.camera, focusDistance);
+    const aperturePreset = camera.dof.bokeh.preset;
 
     for (let i = 0; i < THIN_LENS_SAMPLES; i++) {
-      const sample = sampleDisk(i, THIN_LENS_SAMPLES);
+      const sample = sampleAperture(i, THIN_LENS_SAMPLES, aperturePreset);
       applyThinLensSample(
         this.camera,
         basePosition,
@@ -478,6 +480,14 @@ function sampleDisk(i: number, n: number): InstanceType<typeof THREE.Vector2> {
   return new THREE.Vector2(Math.cos(theta) * r, Math.sin(theta) * r);
 }
 
+export function sampleThinLensAperture(
+  i: number,
+  n: number,
+  preset: CameraBokehPreset,
+): InstanceType<typeof THREE.Vector2> {
+  return sampleAperture(i, n, preset);
+}
+
 export function sampleThinLensDiskPair(
   i: number,
   n: number,
@@ -485,6 +495,44 @@ export function sampleThinLensDiskPair(
   const pairIndex = Math.floor(i / 2);
   const sample = sampleDisk(pairIndex, Math.max(1, Math.ceil(n / 2)));
   return i % 2 === 0 ? sample : sample.multiplyScalar(-1);
+}
+
+function sampleAperture(
+  i: number,
+  n: number,
+  preset: CameraBokehPreset,
+): InstanceType<typeof THREE.Vector2> {
+  const r = Math.sqrt((i + 0.5) / n);
+  const theta = i * GOLDEN_ANGLE;
+  const unit = new THREE.Vector2(Math.cos(theta), Math.sin(theta));
+  if (preset === "anamorphic") {
+    return unit.multiplyScalar(r).multiply(new THREE.Vector2(1.55, 0.62));
+  }
+  if (preset === "hex") {
+    return unit.multiplyScalar(r * polygonRadiusAt(theta, 6));
+  }
+  if (preset === "octagon") {
+    return unit.multiplyScalar(r * polygonRadiusAt(theta, 8));
+  }
+  if (preset === "star") {
+    return unit.multiplyScalar(r * starRadiusAt(theta));
+  }
+  return unit.multiplyScalar(r);
+}
+
+function polygonRadiusAt(theta: number, sides: number): number {
+  const sector = (Math.PI * 2) / sides;
+  const local = positiveModulo(theta + sector / 2, sector) - sector / 2;
+  return Math.cos(Math.PI / sides) / Math.cos(local);
+}
+
+function starRadiusAt(theta: number): number {
+  const lobe = Math.abs(Math.cos(theta * 5));
+  return 0.42 + Math.pow(lobe, 1.7) * 0.58;
+}
+
+function positiveModulo(value: number, divisor: number): number {
+  return ((value % divisor) + divisor) % divisor;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

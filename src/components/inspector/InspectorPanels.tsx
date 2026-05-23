@@ -215,6 +215,8 @@ export function FrameInspector({
 
 export const ObjectInspector = memo(function ObjectInspector({
   object,
+  compositionObjects = [object],
+  compositionFrame,
   currentTime = 0,
   liveScrubClock = false,
   lockBounds = false,
@@ -222,6 +224,8 @@ export const ObjectInspector = memo(function ObjectInspector({
   onPreview,
 }: {
   object: FrameObject;
+  compositionObjects?: readonly FrameObject[];
+  compositionFrame?: PartFrame;
   currentTime?: number;
   liveScrubClock?: boolean;
   lockBounds?: boolean;
@@ -586,6 +590,12 @@ export const ObjectInspector = memo(function ObjectInspector({
 
   const helpers: ObjectInspectorHelpers = {
     object,
+    compositionObjects,
+    compositionFrame: compositionFrame ?? {
+      width: FRAME_WIDTH,
+      height: FRAME_HEIGHT,
+      style: {},
+    },
     currentTime,
     liveScrubClock,
     lockBounds,

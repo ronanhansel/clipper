@@ -16,7 +16,10 @@ function makeCamera(
     position: { ...DEFAULT_CAMERA_OBJECT_PROPS.position },
     rotation: { ...DEFAULT_CAMERA_OBJECT_PROPS.rotation },
     sensor: { ...DEFAULT_CAMERA_OBJECT_PROPS.sensor },
-    dof: { ...DEFAULT_CAMERA_OBJECT_PROPS.dof },
+    dof: {
+      ...DEFAULT_CAMERA_OBJECT_PROPS.dof,
+      bokeh: { ...DEFAULT_CAMERA_OBJECT_PROPS.dof.bokeh },
+    },
     lens: {
       distortion: { ...DEFAULT_CAMERA_OBJECT_PROPS.lens.distortion },
       chromaticAberration: {

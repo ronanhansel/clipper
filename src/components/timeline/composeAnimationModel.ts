@@ -322,6 +322,9 @@ function labelForPropsPropertyPath(propertyPath: string): string {
   if (propertyPath === "props.rotation.y") return "Camera Rot Y";
   if (propertyPath === "props.rotation.z") return "Camera Rot Z";
   if (propertyPath === "props.fov") return "Camera Focal Length";
+  if (propertyPath === "props.dof.focusDistance") return "Focus Distance";
+  if (propertyPath === "props.dof.fNumber") return "F-number";
+  if (propertyPath === "props.dof.maxBlurPx") return "Max Blur (px)";
   if (propertyPath === "props.live") return "Camera Live";
   return propertyPath;
 }
