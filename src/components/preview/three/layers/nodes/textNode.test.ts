@@ -62,6 +62,7 @@ const NULL_CONTEXT = {
   sourceRoot: () => null,
   // unused by TextNode; cast keeps the test free of real shared canvas
   sharedCapture: undefined as unknown as ReturnType<typeof Object> as never,
+  requestRender: () => {},
 } as const;
 
 function makeState(

@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
+import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import {
   DEFAULT_CAMERA_OBJECT_PROPS,
   FRAME_HEIGHT,
@@ -50,6 +51,8 @@ export class CompositionRenderer {
   private composer: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private renderPass: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private outputPass: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private extraPasses: any[] = [];
 
@@ -154,7 +157,9 @@ export class CompositionRenderer {
       height: this.height,
       getCamera: () => this.compositionCamera,
     });
+    this.outputPass = new OutputPass();
     this.composer.addPass(this.renderPass);
+    this.composer.addPass(this.outputPass);
 
     // The shared capture canvas is the DOM mount the host portals the
     // source subtree into. Per-element capture nodes call
@@ -166,6 +171,7 @@ export class CompositionRenderer {
     this.layerSync = new LayerNodeSync({
       sharedCapture: this.sharedCapture,
       sourceRoot: () => this.sourceElement,
+      requestRender: () => this.render(),
     });
     this.scene.add(this.layerSync.group);
 
@@ -264,10 +270,12 @@ export class CompositionRenderer {
     for (const p of this.extraPasses) {
       this.composer.removePass(p);
     }
+    this.composer.removePass(this.outputPass);
     this.extraPasses = passes.slice();
     for (const p of this.extraPasses) {
       this.composer.addPass(p);
     }
+    this.composer.addPass(this.outputPass);
   }
 
   render() {
@@ -291,6 +299,8 @@ export class CompositionRenderer {
     // copyPass.
     this.extraPasses.length = 0;
     this.composer.dispose();
+    this.renderPass.dispose();
+    this.outputPass.dispose();
     this.renderer.dispose();
   }
 }

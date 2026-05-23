@@ -31,6 +31,7 @@ function makeContext(): LayerNodeContext {
   return {
     sharedCapture: undefined as unknown as LayerNodeContext["sharedCapture"],
     sourceRoot: () => null,
+    requestRender: () => {},
   };
 }
 

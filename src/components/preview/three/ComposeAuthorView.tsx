@@ -209,6 +209,7 @@ function FitCameraPreview({
 export interface ComposeAuthorViewProps {
   part: CompositionClip;
   selectedObjectId: string | null;
+  handToolActive: boolean;
   localTime: number;
   onCameraPropsChange: (
     cameraObjectId: string,
@@ -414,6 +415,12 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
       }
     };
   }, [props.onAuthorViewStateChange]);
+
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+    scene.setHandToolActive(props.handToolActive);
+  }, [props.handToolActive]);
 
   // Wire the drag callback whenever the part / callback changes. Mid-drag
   // updates stay imperative so camera gizmos match object gizmo performance;
@@ -851,6 +858,7 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
             ? "absolute inset-y-0 left-0"
             : "absolute inset-0"
         }`}
+        style={{ cursor: props.handToolActive ? "grab" : undefined }}
         data-clipper-compose-author-scene
       />
       {planeTarget

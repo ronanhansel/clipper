@@ -149,6 +149,8 @@ describe("readCameraObjectProps", () => {
         sensor: { width: 24, height: 16 },
         dof: {
           enabled: true,
+          debug: true,
+          blurMode: "near",
           focusDistance: 800,
           fNumber: 1.8,
           maxBlurPx: 32,
@@ -166,6 +168,8 @@ describe("readCameraObjectProps", () => {
     expect(props.sensor).toEqual({ width: 24, height: 16 });
     expect(props.dof).toEqual({
       enabled: true,
+      debug: true,
+      blurMode: "near",
       focusDistance: 800,
       fNumber: 1.8,
       maxBlurPx: 32,

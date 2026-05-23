@@ -119,6 +119,7 @@ function makeContext(
     sharedCapture:
       makeFakeSharedCapture() as unknown as LayerNodeContext["sharedCapture"],
     sourceRoot: () => null,
+    requestRender: () => {},
     ...overrides,
   };
 }
@@ -187,6 +188,7 @@ describe("perElementCaptureNode", () => {
       sharedCapture:
         sharedCapture as unknown as LayerNodeContext["sharedCapture"],
       sourceRoot: () => null,
+      requestRender: () => {},
     });
     expect(() => node.update(makeState())).not.toThrow();
     expect(drawElementImage).not.toHaveBeenCalled();
@@ -203,6 +205,7 @@ describe("perElementCaptureNode", () => {
       sharedCapture:
         sharedCapture as unknown as LayerNodeContext["sharedCapture"],
       sourceRoot: () => root as unknown as Element,
+      requestRender: () => {},
     });
     expect(() => node.update(makeState())).not.toThrow();
     expect(drawElementImage).not.toHaveBeenCalled();
@@ -222,6 +225,7 @@ describe("perElementCaptureNode", () => {
       sharedCapture:
         sharedCapture as unknown as LayerNodeContext["sharedCapture"],
       sourceRoot: () => root as unknown as Element,
+      requestRender: () => {},
     });
     node.update(makeState({ bounds: { x: 0, y: 0, width: 50, height: 25 } }));
     expect(drawElementImage).toHaveBeenCalledTimes(1);
@@ -255,6 +259,7 @@ describe("perElementCaptureNode", () => {
       sharedCapture:
         sharedCapture as unknown as LayerNodeContext["sharedCapture"],
       sourceRoot: () => root as unknown as Element,
+      requestRender: () => {},
     });
     expect(() => node.update(makeState())).not.toThrow();
     expect(() => node.update(makeState())).not.toThrow();

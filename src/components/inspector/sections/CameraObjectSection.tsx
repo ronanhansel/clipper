@@ -2,9 +2,11 @@ import {
   CAMERA_DOF_MAX_BLUR_PX,
   CAMERA_DOF_MAX_F_NUMBER,
   CAMERA_DOF_MIN_F_NUMBER,
+  CAMERA_DOF_BLUR_MODES,
   CAMERA_BOKEH_PRESETS,
   type CameraAutoOrient,
   type CameraBokehPreset,
+  type CameraDofBlurMode,
   type CameraObjectProps,
   type FrameObject,
 } from "../../../core/types";
@@ -49,6 +51,8 @@ type CameraTrackPath =
   | "props.dof.focusDistance"
   | "props.dof.fNumber"
   | "props.dof.maxBlurPx"
+  | "props.lens.distortion.amount"
+  | "props.lens.chromaticAberration.amountPx"
   | "props.autoFocus.zOffset"
   | "props.lockTarget.offset.x"
   | "props.lockTarget.offset.y"
@@ -81,6 +85,12 @@ const BOKEH_PRESET_LABELS: Record<CameraBokehPreset, string> = {
   hex: "Hex",
   octagon: "Octagon",
   star: "Star",
+};
+
+const DOF_BLUR_MODE_LABELS: Record<CameraDofBlurMode, string> = {
+  all: "All",
+  near: "Near Only",
+  far: "Far Only",
 };
 
 const AUTO_ORIENT_LABELS: Record<CameraAutoOrient, string> = {
@@ -199,6 +209,10 @@ export function CameraObjectSection() {
       );
     if (path === "props.dof.maxBlurPx")
       return Math.max(0, Math.min(CAMERA_DOF_MAX_BLUR_PX, value));
+    if (path === "props.lens.distortion.amount")
+      return Math.max(-1, Math.min(1, value));
+    if (path === "props.lens.chromaticAberration.amountPx")
+      return Math.max(0, Math.min(96, value));
     return value;
   }
 
@@ -352,6 +366,40 @@ export function CameraObjectSection() {
     });
   }
 
+  function setDofDebug(debug: boolean) {
+    onChange((current) => {
+      const evaluated = evaluateCameraObjectPropsAt(
+        current,
+        readEffectiveTime(),
+      );
+      const currentProps = (current.props ?? {}) as Record<string, unknown>;
+      return {
+        ...current,
+        props: {
+          ...currentProps,
+          dof: { ...evaluated.dof, debug },
+        },
+      };
+    });
+  }
+
+  function setDofBlurMode(blurMode: CameraDofBlurMode) {
+    onChange((current) => {
+      const evaluated = evaluateCameraObjectPropsAt(
+        current,
+        readEffectiveTime(),
+      );
+      const currentProps = (current.props ?? {}) as Record<string, unknown>;
+      return {
+        ...current,
+        props: {
+          ...currentProps,
+          dof: { ...evaluated.dof, blurMode },
+        },
+      };
+    });
+  }
+
   function setDofBokehPreset(preset: CameraBokehPreset) {
     onChange((current) => {
       const evaluated = evaluateCameraObjectPropsAt(
@@ -364,6 +412,49 @@ export function CameraObjectSection() {
         props: {
           ...currentProps,
           dof: { ...evaluated.dof, bokeh: { preset } },
+        },
+      };
+    });
+  }
+
+  function setLensDistortionEnabled(enabled: boolean) {
+    onChange((current) => {
+      const evaluated = evaluateCameraObjectPropsAt(
+        current,
+        readEffectiveTime(),
+      );
+      const currentProps = (current.props ?? {}) as Record<string, unknown>;
+      return {
+        ...current,
+        props: {
+          ...currentProps,
+          lens: {
+            ...evaluated.lens,
+            distortion: { ...evaluated.lens.distortion, enabled },
+          },
+        },
+      };
+    });
+  }
+
+  function setLensChromaticAberrationEnabled(enabled: boolean) {
+    onChange((current) => {
+      const evaluated = evaluateCameraObjectPropsAt(
+        current,
+        readEffectiveTime(),
+      );
+      const currentProps = (current.props ?? {}) as Record<string, unknown>;
+      return {
+        ...current,
+        props: {
+          ...currentProps,
+          lens: {
+            ...evaluated.lens,
+            chromaticAberration: {
+              ...evaluated.lens.chromaticAberration,
+              enabled,
+            },
+          },
         },
       };
     });
@@ -566,6 +657,36 @@ export function CameraObjectSection() {
         {props.dof.enabled ? (
           <>
             <div className="grid gap-1.5">
+              <span className={mutedCaps}>Blur Regions</span>
+              <Select
+                value={props.dof.blurMode}
+                onValueChange={(value) =>
+                  setDofBlurMode(isCameraDofBlurMode(value) ? value : "all")
+                }
+              >
+                <SelectTrigger className="h-8 rounded-[8px] px-2 text-xs">
+                  <SelectValue aria-label={props.dof.blurMode} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    {CAMERA_DOF_BLUR_MODES.map((mode) => (
+                      <SelectItem key={mode} value={mode}>
+                        {DOF_BLUR_MODE_LABELS[mode]}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </div>
+            <label className="flex items-center justify-between gap-3 text-xs font-semibold text-[#dfe2ea]">
+              <span>Debugging</span>
+              <Switch
+                aria-label="Toggle depth of field debugging"
+                checked={props.dof.debug}
+                onCheckedChange={(checked) => setDofDebug(checked)}
+              />
+            </label>
+            <div className="grid gap-1.5">
               <span className={mutedCaps}>Bokeh</span>
               <Select
                 value={props.dof.bokeh.preset}
@@ -671,6 +792,74 @@ export function CameraObjectSection() {
               />
             </div>
           </>
+        ) : null}
+      </div>
+
+      <div className="grid gap-2">
+        <span className={mutedCaps}>Lens Effects</span>
+        <label className="flex items-center justify-between gap-3 text-xs font-semibold text-[#dfe2ea]">
+          <span>Distortion</span>
+          <Switch
+            aria-label="Toggle camera lens distortion"
+            checked={props.lens.distortion.enabled}
+            onCheckedChange={(checked) => setLensDistortionEnabled(checked)}
+          />
+        </label>
+        {props.lens.distortion.enabled ? (
+          <div className="grid gap-1.5">
+            <span className={mutedCaps}>Amount</span>
+            <KeyframableNumberInput
+              ariaLabel="Camera lens distortion amount"
+              unitPrefix=""
+              step={0.01}
+              min={-1}
+              max={1}
+              value={liveValue("props.lens.distortion.amount")}
+              active={isKeyframedNow("props.lens.distortion.amount")}
+              onPreview={(value) =>
+                previewBase("props.lens.distortion.amount", value)
+              }
+              onCommit={(value) =>
+                commit("props.lens.distortion.amount", value)
+              }
+              onToggleKeyframe={() =>
+                toggleKeyframe("props.lens.distortion.amount")
+              }
+            />
+          </div>
+        ) : null}
+        <label className="flex items-center justify-between gap-3 text-xs font-semibold text-[#dfe2ea]">
+          <span>Chromatic Aberration</span>
+          <Switch
+            aria-label="Toggle camera chromatic aberration"
+            checked={props.lens.chromaticAberration.enabled}
+            onCheckedChange={(checked) =>
+              setLensChromaticAberrationEnabled(checked)
+            }
+          />
+        </label>
+        {props.lens.chromaticAberration.enabled ? (
+          <div className="grid gap-1.5">
+            <span className={mutedCaps}>Offset (px)</span>
+            <KeyframableNumberInput
+              ariaLabel="Camera chromatic aberration offset"
+              unitPrefix="px"
+              step={0.5}
+              min={0}
+              max={96}
+              value={liveValue("props.lens.chromaticAberration.amountPx")}
+              active={isKeyframedNow("props.lens.chromaticAberration.amountPx")}
+              onPreview={(value) =>
+                previewBase("props.lens.chromaticAberration.amountPx", value)
+              }
+              onCommit={(value) =>
+                commit("props.lens.chromaticAberration.amountPx", value)
+              }
+              onToggleKeyframe={() =>
+                toggleKeyframe("props.lens.chromaticAberration.amountPx")
+              }
+            />
+          </div>
         ) : null}
       </div>
     </div>
@@ -785,6 +974,10 @@ function isCameraBokehPreset(value: string): value is CameraBokehPreset {
   return (CAMERA_BOKEH_PRESETS as readonly string[]).includes(value);
 }
 
+function isCameraDofBlurMode(value: string): value is CameraDofBlurMode {
+  return (CAMERA_DOF_BLUR_MODES as readonly string[]).includes(value);
+}
+
 function isCameraAutoOrient(value: string): value is CameraAutoOrient {
   return value === "off" || value === "along-path" || value === "lock";
 }
@@ -800,7 +993,7 @@ function writeNestedNumber(
 function writeNestedValue(
   object: FrameObject,
   path: string,
-  value: number | boolean,
+  value: number | boolean | string,
 ): FrameObject {
   const segments = path.slice("props.".length).split(".");
   const root: Record<string, unknown> = { ...(object.props ?? {}) };
@@ -852,6 +1045,10 @@ function readCameraPropAtPath(
       return props.dof.fNumber;
     case "props.dof.maxBlurPx":
       return props.dof.maxBlurPx;
+    case "props.lens.distortion.amount":
+      return props.lens.distortion.amount;
+    case "props.lens.chromaticAberration.amountPx":
+      return props.lens.chromaticAberration.amountPx;
     case "props.autoFocus.zOffset":
       return props.autoFocus.zOffset;
     case "props.lockTarget.offset.x":
@@ -897,6 +1094,25 @@ function writeCameraPropAtPath(
       return { ...props, dof: { ...props.dof, fNumber: value } };
     case "props.dof.maxBlurPx":
       return { ...props, dof: { ...props.dof, maxBlurPx: value } };
+    case "props.lens.distortion.amount":
+      return {
+        ...props,
+        lens: {
+          ...props.lens,
+          distortion: { ...props.lens.distortion, amount: value },
+        },
+      };
+    case "props.lens.chromaticAberration.amountPx":
+      return {
+        ...props,
+        lens: {
+          ...props.lens,
+          chromaticAberration: {
+            ...props.lens.chromaticAberration,
+            amountPx: value,
+          },
+        },
+      };
     case "props.autoFocus.zOffset":
       return {
         ...props,

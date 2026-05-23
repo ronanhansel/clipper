@@ -3,6 +3,7 @@ declare module "three/examples/jsm/controls/OrbitControls.js";
 declare module "three/examples/jsm/controls/TransformControls.js";
 declare module "three/examples/jsm/renderers/CSS3DRenderer.js";
 declare module "three/examples/jsm/postprocessing/EffectComposer.js";
+declare module "three/examples/jsm/postprocessing/OutputPass.js";
 declare module "three/examples/jsm/postprocessing/RenderPass.js";
 declare module "three/examples/jsm/postprocessing/Pass.js";
 declare module "troika-three-text";

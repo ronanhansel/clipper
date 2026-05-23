@@ -229,6 +229,7 @@ export class ThreeAuthorScene {
   private compositionElement: HTMLElement | null = null;
 
   private viewMode: "orbit" | "through" = "orbit";
+  private handToolActive = false;
   private width: number;
   private height: number;
   private dragCallback:
@@ -403,6 +404,7 @@ export class ThreeAuthorScene {
     this.orbit.minDistance = 200;
     this.orbit.maxDistance = 12000;
     this.orbit.zoomSpeed = 0.7;
+    this.orbit.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
     this.orbit.addEventListener("change", () => {
       this.requestRender();
       if (this.viewStateCallback) this.viewStateCallback(this.getOrbitState());
@@ -468,13 +470,14 @@ export class ThreeAuthorScene {
     // early-returns on `pointerDown` when `enabled` is false. Re-enable
     // both gizmos on pointerup / pointercancel.
     const restoreGizmos = () => {
-      this.translateTransform.enabled = true;
-      this.rotateTransform.enabled = true;
+      this.translateTransform.enabled = !this.handToolActive;
+      this.rotateTransform.enabled = !this.handToolActive;
     };
     this.canvas.addEventListener(
       "pointerdown",
       (event: PointerEvent) => {
         if (this.viewMode !== "orbit") return;
+        if (this.handToolActive) return;
         if (event.button !== 0) return;
         if (!this.isAttached) return;
         const rect = this.canvas.getBoundingClientRect();
@@ -516,6 +519,7 @@ export class ThreeAuthorScene {
     let downHitPath: "marker" | "handle" | null = null;
     this.canvas.addEventListener("pointerdown", (event: PointerEvent) => {
       if (this.viewMode !== "orbit") return;
+      if (this.handToolActive) return;
       if (this.translateTransform.dragging) return;
       if (this.rotateTransform.dragging) return;
       if (this.translateTransform.axis) return;
@@ -643,6 +647,18 @@ export class ThreeAuthorScene {
       this.rotateTransform.detach();
       this.isAttached = false;
     }
+    this.requestRender();
+  }
+
+  setHandToolActive(active: boolean) {
+    if (this.handToolActive === active) return;
+    this.handToolActive = active;
+    this.orbit.mouseButtons.LEFT = active
+      ? THREE.MOUSE.PAN
+      : THREE.MOUSE.ROTATE;
+    this.translateTransform.enabled = !active;
+    this.rotateTransform.enabled = !active;
+    this.canvas.style.cursor = active ? "grab" : "";
     this.requestRender();
   }
 

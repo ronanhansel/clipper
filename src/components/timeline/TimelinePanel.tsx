@@ -151,6 +151,7 @@ export function TimelinePanel(props: TimelinePanelProps) {
           onScrubEnd={props.onScrubEnd}
           onInspectObject={props.onInspectComposeObject}
           onSelectObjects={props.onSelectComposeObjects}
+          onReorderComposeObjects={props.onReorderComposeObjects}
           onTimelineLayersChange={props.onTimelineLayersChange}
           onTimelineViewportStateChange={props.onTimelineViewportStateChange}
           onUpdateObject={props.onUpdateComposeObject}

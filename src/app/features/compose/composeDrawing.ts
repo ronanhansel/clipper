@@ -20,6 +20,8 @@ export type ComposeDrawTool =
   | "null"
   | "code";
 
+export type ComposeCursorTool = "select" | "scale" | "hand";
+
 export type ShapeDrawPreview = {
   bounds: Bounds;
   start: Point;

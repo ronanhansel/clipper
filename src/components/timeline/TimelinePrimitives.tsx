@@ -277,6 +277,7 @@ export function LayerLabel({
   hideHiddenControl = false,
   hideLockControl,
   centered = false,
+  hoverHighlight = true,
   menuOpen,
   canMoveDown = true,
   canMoveUp = true,
@@ -307,6 +308,7 @@ export function LayerLabel({
   hideHiddenControl?: boolean;
   hideLockControl: boolean;
   centered?: boolean;
+  hoverHighlight?: boolean;
   menuOpen?: boolean;
   canMoveDown?: boolean;
   canMoveUp?: boolean;
@@ -428,7 +430,13 @@ export function LayerLabel({
         />
       ) : (
         <button
-          className={`relative min-w-0 overflow-hidden text-ellipsis whitespace-nowrap rounded-md py-1 pl-0 pr-1 text-left text-[13px] transition before:absolute before:left-0 before:top-1/2 before:h-4 before:w-px before:-translate-y-1/2 before:bg-[var(--clipper-accent)] before:opacity-0 before:transition-opacity ${locked ? "cursor-default text-[#ff8b8b]" : "cursor-text text-[#aeb3c1] hover:bg-[#20232c]/70 hover:text-[#dfe2ea] hover:before:opacity-100 focus-visible:bg-[#20232c]/70 focus-visible:outline-none focus-visible:before:opacity-100"}`}
+          className={`relative min-w-0 overflow-hidden text-ellipsis whitespace-nowrap rounded-md py-1 pl-0 pr-1 text-left text-[13px] transition before:absolute before:left-0 before:top-1/2 before:h-4 before:w-px before:-translate-y-1/2 before:bg-[var(--clipper-accent)] before:opacity-0 before:transition-opacity ${
+            locked
+              ? "cursor-default text-[#ff8b8b]"
+              : hoverHighlight
+                ? "cursor-default text-[#aeb3c1] hover:bg-[#20232c]/70 hover:text-[#dfe2ea] hover:before:opacity-100 focus-visible:bg-[#20232c]/70 focus-visible:outline-none focus-visible:before:opacity-100"
+                : "cursor-default text-[#aeb3c1] focus-visible:outline-none"
+          }`}
           title={locked ? "Unlock layer to rename" : "Double-click to rename"}
           onDoubleClick={locked ? undefined : onEdit}
         >

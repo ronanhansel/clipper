@@ -19,6 +19,7 @@ import {
   CAMERA_DOF_MAX_BLUR_PX,
   CAMERA_DOF_MAX_F_NUMBER,
   CAMERA_DOF_MIN_F_NUMBER,
+  CAMERA_DOF_BLUR_MODES,
   CAMERA_BOKEH_PRESETS,
   DEFAULT_CAMERA_DOF,
   DEFAULT_CAMERA_AUTO_FOCUS,
@@ -28,6 +29,7 @@ import {
   DEFAULT_CAMERA_POST,
   DEFAULT_CAMERA_SENSOR,
   type CameraBokehPreset,
+  type CameraDofBlurMode,
   type CameraAutoOrient,
   type CameraAutoFocus,
   type CameraDepthOfField,
@@ -330,8 +332,11 @@ function readDof(v: unknown): CameraDepthOfField {
     return typeof n === "number" && Number.isFinite(n) ? n : def[k];
   };
   const enabled = typeof r.enabled === "boolean" ? r.enabled : def.enabled;
+  const debug = typeof r.debug === "boolean" ? r.debug : def.debug;
   return {
     enabled,
+    debug,
+    blurMode: readDofBlurMode(r.blurMode),
     focusDistance: num("focusDistance"),
     fNumber: Math.max(
       CAMERA_DOF_MIN_F_NUMBER,
@@ -355,6 +360,17 @@ function readAutoFocus(v: unknown): CameraAutoFocus {
     targetId: typeof r.targetId === "string" ? r.targetId : def.targetId,
     zOffset,
   };
+}
+
+function readDofBlurMode(v: unknown): CameraDofBlurMode {
+  return isCameraDofBlurMode(v) ? v : DEFAULT_CAMERA_DOF.blurMode;
+}
+
+function isCameraDofBlurMode(v: unknown): v is CameraDofBlurMode {
+  return (
+    typeof v === "string" &&
+    (CAMERA_DOF_BLUR_MODES as readonly string[]).includes(v)
+  );
 }
 
 function readBokeh(v: unknown): CameraDepthOfField["bokeh"] {

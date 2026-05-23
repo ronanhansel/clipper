@@ -3,6 +3,7 @@ import {
   ChevronDown,
   Camera as CameraIcon,
   Code as CodeIcon,
+  Hand,
   Image as ImageIcon,
   MoveDiagonal2,
   MousePointer2 as PointerIcon,
@@ -21,6 +22,7 @@ import {
   RectIcon,
   StarIcon,
 } from "../../components/ShapeIcons";
+import type { ComposeCursorTool } from "../features/compose/composeDrawing";
 
 export type ComposeDrawTool =
   | "rect"
@@ -44,6 +46,8 @@ export type ComposeToolbarProps = {
   onAddMediaObject: () => void;
   onAddCodeObject: () => void;
   onActiveToolChange: (tool: ComposeDrawTool | null) => void;
+  activeCursorTool: ComposeCursorTool;
+  onCursorToolChange: (tool: ComposeCursorTool) => void;
   resizeMode: "resize" | "scale";
   onResizeModeChange: (mode: "resize" | "scale") => void;
 };
@@ -56,7 +60,7 @@ type ToolbarTool = {
 };
 
 type CursorToolbarTool = {
-  mode: "resize" | "scale";
+  tool: ComposeCursorTool;
   label: string;
   shortcut: string;
   icon: ReactNode;
@@ -64,16 +68,22 @@ type CursorToolbarTool = {
 
 const cursorTools: CursorToolbarTool[] = [
   {
-    mode: "resize",
+    tool: "select",
     label: "Select",
     shortcut: "V",
     icon: <PointerIcon size={17} />,
   },
   {
-    mode: "scale",
+    tool: "scale",
     label: "Scale",
     shortcut: "K",
     icon: <MoveDiagonal2 size={15} />,
+  },
+  {
+    tool: "hand",
+    label: "Hand",
+    shortcut: "H",
+    icon: <Hand size={17} />,
   },
 ];
 
@@ -190,11 +200,12 @@ export function ComposeToolbar({
   onAddMediaObject,
   onAddCodeObject,
   onActiveToolChange,
-  resizeMode,
+  activeCursorTool,
+  onCursorToolChange,
   onResizeModeChange,
 }: ComposeToolbarProps) {
   const [openMenu, setOpenMenu] = useState<
-    "cursor" | "shapes" | "pen" | "text" | "object" | "generator" | null
+    "shapes" | "pen" | "text" | "object" | "generator" | null
   >(null);
   const [lastShapeTool, setLastShapeTool] = useState<ComposeDrawTool>("rect");
   const [lastPenTool, setLastPenTool] = useState<ComposeDrawTool>("pen");
@@ -221,8 +232,6 @@ export function ComposeToolbar({
       ? generatorTools.find((item) => item.key === "pattern2d")
       : generatorTools.find((item) => item.key === lastGeneratorTool)) ??
     generatorTools[0];
-  const currentCursorTool =
-    cursorTools.find((item) => item.mode === resizeMode) ?? cursorTools[0];
   const cursorActive = activeTool === null;
 
   const toolButtonClass = (active: boolean) =>
@@ -241,9 +250,11 @@ export function ComposeToolbar({
     setOpenMenu(null);
   }
 
-  function selectCursorMode(mode: "resize" | "scale") {
+  function selectCursorTool(tool: ComposeCursorTool) {
     onActiveToolChange(null);
-    onResizeModeChange(mode);
+    onCursorToolChange(tool);
+    if (tool === "select") onResizeModeChange("resize");
+    else if (tool === "scale") onResizeModeChange("scale");
     setOpenMenu(null);
   }
 
@@ -270,32 +281,6 @@ export function ComposeToolbar({
       onAddMediaObject();
       setOpenMenu(null);
     }
-  }
-
-  function renderCursorMenu() {
-    if (openMenu !== "cursor") return null;
-    return (
-      <div className="absolute bottom-full left-0 mb-2 w-[168px] rounded-[10px] border border-[#2d313b] bg-[#11141a] p-1.5 text-[#f7f7f8] shadow-[0_18px_60px_rgba(0,0,0,0.42)]">
-        <div className="grid gap-0.5">
-          {cursorTools.map((item) => (
-            <button
-              key={item.mode}
-              className="grid h-7 grid-cols-[14px_22px_minmax(0,1fr)_auto] items-center gap-1.5 rounded-[6px] px-1.5 text-left text-[11px] font-semibold leading-none text-[#dfe2ea] outline-none transition hover:bg-[#20232c] hover:text-white focus-visible:bg-[#20232c] focus-visible:text-white"
-              onClick={() => selectCursorMode(item.mode)}
-            >
-              <span className="grid place-items-center text-[11px] text-[var(--clipper-accent)]">
-                {cursorActive && resizeMode === item.mode ? "✓" : null}
-              </span>
-              <span className="grid place-items-center [&_svg]:size-4">
-                {item.icon}
-              </span>
-              <span className="min-w-0 truncate">{item.label}</span>
-              <ShortcutHint shortcut={item.shortcut} />
-            </button>
-          ))}
-        </div>
-      </div>
-    );
   }
 
   function renderMenu(
@@ -392,22 +377,19 @@ export function ComposeToolbar({
     <div className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-3 -translate-x-1/2">
       <div className="pointer-events-auto flex items-center gap-0.5 rounded-[10px] border border-[#2d313b] bg-[#151820]/95 p-1 shadow-[0_14px_38px_rgba(0,0,0,0.36),inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur">
         <div className="relative flex items-center gap-1">
-          {renderCursorMenu()}
-          <button
-            className={toolButtonClass(cursorActive)}
-            title={currentCursorTool.label}
-            aria-pressed={cursorActive}
-            onClick={() => selectCursorMode(resizeMode)}
-          >
-            {currentCursorTool.icon}
-          </button>
-          <button
-            className={menuButtonClass(openMenu === "cursor")}
-            title="Cursor tools"
-            onClick={() => setOpenMenu(openMenu === "cursor" ? null : "cursor")}
-          >
-            <ChevronDown size={15} />
-          </button>
+          {cursorTools.map((item) => (
+            <button
+              key={item.tool}
+              className={toolButtonClass(
+                cursorActive && activeCursorTool === item.tool,
+              )}
+              title={`${item.label} (${item.shortcut})`}
+              aria-pressed={cursorActive && activeCursorTool === item.tool}
+              onClick={() => selectCursorTool(item.tool)}
+            >
+              {item.icon}
+            </button>
+          ))}
         </div>
         <div className="mx-1 h-6 w-px bg-[#313744]" />
         <div className="relative flex items-center gap-1">

@@ -1,10 +1,19 @@
-import { describe, expect, it, beforeEach, beforeAll, afterAll } from "vitest";
+import {
+  describe,
+  expect,
+  it,
+  beforeEach,
+  beforeAll,
+  afterAll,
+  vi,
+} from "vitest";
 import * as THREE from "three";
 import { MEDIA_PLACEHOLDER_DATA_URL } from "../../../../../core/mediaPlaceholder";
 import {
   acquireImageTexture,
   clearImageTextureCacheForTests,
   imageNodeFactory,
+  isSvgMediaSource,
   releaseImageTexture,
 } from "./imageNode";
 import type { EvaluatedObjectState } from "../../../../../core/propertyRegistry";
@@ -17,11 +26,21 @@ import type { LayerNodeContext } from "../layerNodeRegistry";
 // inspect for intrinsic size during object-fit math.
 
 class FakeImage {
-  src = "";
+  private srcValue = "";
   crossOrigin: string | null = null;
   naturalWidth = 0;
   naturalHeight = 0;
   onload: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+
+  get src() {
+    return this.srcValue;
+  }
+
+  set src(value: string) {
+    this.srcValue = value;
+    if (value.startsWith("blob:")) queueMicrotask(() => this.onload?.());
+  }
 }
 
 let originalImage: unknown;
@@ -60,6 +79,15 @@ function makeContext(): LayerNodeContext {
   return {
     sharedCapture: undefined as unknown as LayerNodeContext["sharedCapture"],
     sourceRoot: () => null,
+    requestRender: () => {},
+  };
+}
+
+function makeContextWithRender(callback: () => void): LayerNodeContext {
+  return {
+    sharedCapture: undefined as unknown as LayerNodeContext["sharedCapture"],
+    sourceRoot: () => null,
+    requestRender: callback,
   };
 }
 
@@ -76,7 +104,24 @@ describe("imageNodeFactory", () => {
     expect(node.object3D).toBeInstanceOf(THREE.Mesh);
     expect(node.object3D.geometry).toBeInstanceOf(THREE.PlaneGeometry);
     expect(node.object3D.material).toBeInstanceOf(THREE.ShaderMaterial);
+    expect(node.object3D.material.transparent).toBe(true);
+    expect(node.object3D.material.premultipliedAlpha).toBe(true);
     node.dispose();
+  });
+
+  it("premultiplies image textures so filtered SVG alpha edges blend cleanly", () => {
+    const texture = acquireImageTexture("transparent.svg");
+    expect(texture.premultiplyAlpha).toBe(true);
+    releaseImageTexture("transparent.svg");
+  });
+
+  it("detects SVG media sources that need layer-sized rasterization", () => {
+    expect(isSvgMediaSource("asset.svg")).toBe(true);
+    expect(isSvgMediaSource("clipper-media://file/%2Ftmp%2Ftree.svg")).toBe(
+      true,
+    );
+    expect(isSvgMediaSource("data:image/svg+xml,%3Csvg%2F%3E")).toBe(true);
+    expect(isSvgMediaSource("asset.png")).toBe(false);
   });
 
   it("dispose releases geometry, material, and the placeholder texture", () => {
@@ -115,6 +160,68 @@ describe("imageNodeFactory", () => {
     expect(secondTexture).toBeInstanceOf(THREE.Texture);
     expect(secondTexture).not.toBe(firstTexture);
     node.dispose();
+  });
+
+  it("requests a render when an image texture finishes decoding", () => {
+    const requestRender = vi.fn();
+    const node = imageNodeFactory.create(
+      { id: "image-1" } as FrameObject,
+      makeContextWithRender(requestRender),
+    );
+    node.update(makeState({ style: { src: "late.png", opacity: 1 } }));
+    const texture = node.object3D.material.uniforms.u_image.value as {
+      image: FakeImage;
+    };
+
+    texture.image.onload?.();
+
+    expect(requestRender).toHaveBeenCalledTimes(1);
+    node.dispose();
+  });
+
+  it("requests a render when a layer-sized SVG media texture finishes rasterizing", async () => {
+    const globals = globalThis as unknown as {
+      document?: unknown;
+      fetch?: unknown;
+      URL: typeof URL;
+    };
+    const originalDocument = globals.document;
+    const originalFetch = globals.fetch;
+    const originalCreateObjectURL = globals.URL.createObjectURL;
+    const originalRevokeObjectURL = globals.URL.revokeObjectURL;
+    const requestRender = vi.fn();
+    const context = {
+      clearRect: vi.fn(),
+      drawImage: vi.fn(),
+    };
+    globals.document = {
+      createElement: () => ({
+        width: 0,
+        height: 0,
+        getContext: () => context,
+      }),
+    };
+    globals.fetch = vi.fn(async () => ({
+      text: async () => '<svg viewBox="0 0 10 10"></svg>',
+    }));
+    globals.URL.createObjectURL = vi.fn(() => "blob:test-svg");
+    globals.URL.revokeObjectURL = vi.fn();
+
+    try {
+      const node = imageNodeFactory.create(
+        { id: "image-1" } as FrameObject,
+        makeContextWithRender(requestRender),
+      );
+      node.update(makeState({ style: { src: "asset.svg", opacity: 1 } }));
+      await vi.waitFor(() => expect(requestRender).toHaveBeenCalledTimes(1));
+      expect(context.drawImage).toHaveBeenCalledTimes(1);
+      node.dispose();
+    } finally {
+      globals.document = originalDocument;
+      globals.fetch = originalFetch;
+      globals.URL.createObjectURL = originalCreateObjectURL;
+      globals.URL.revokeObjectURL = originalRevokeObjectURL;
+    }
   });
 
   it("two nodes sharing src reuse one texture; refcount keeps it alive until last release", () => {

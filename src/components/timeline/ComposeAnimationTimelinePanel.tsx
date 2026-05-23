@@ -91,6 +91,7 @@ type ComposeAnimationTimelinePanelProps = {
   onScrubEnd: () => void;
   onInspectObject?: (object: FrameObject | null) => void;
   onSelectObjects?: (objects: FrameObject[]) => void;
+  onReorderComposeObjects?: (objectIds: string[], targetIndex: number) => void;
   onTimelineLayersChange: (
     updater: (state: TimelineLayerState) => TimelineLayerState,
     options?: { history?: boolean },
@@ -190,6 +191,7 @@ function ComposeAnimationTimelinePanelContent({
   onScrubStart,
   onInspectObject,
   onSelectObjects,
+  onReorderComposeObjects,
   onTimelineLayersChange,
   onTimelineViewportStateChange,
   onUpdateObject,
@@ -488,6 +490,21 @@ function ComposeAnimationTimelinePanelContent({
     onSelectObjects?.(layer.object ? [layer.object] : []);
   }
 
+  function moveComposeLayer(
+    layer: ComposeAnimationTimelineLayer,
+    direction: "up" | "down",
+  ) {
+    if (!part || !layer.object || layer.kind !== "object") return;
+    const currentIndex = part.objects.findIndex(
+      (object) => object.id === layer.object?.id,
+    );
+    if (currentIndex < 0) return;
+    const targetIndex =
+      direction === "up" ? currentIndex + 1 : currentIndex - 1;
+    if (targetIndex < 0 || targetIndex >= part.objects.length) return;
+    onReorderComposeObjects?.([layer.object.id], targetIndex);
+  }
+
   function inspectLayer(layer: ComposeAnimationTimelineLayer) {
     onInspectObject?.(layer.object ?? null);
   }
@@ -740,6 +757,49 @@ function ComposeAnimationTimelinePanelContent({
     });
   }
 
+  function openComposeLayerContextMenu(
+    event: ReactMouseEvent<HTMLElement>,
+    layer: ComposeAnimationTimelineLayer,
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+    selectLayer(layer);
+    const objects = part?.objects ?? [];
+    setAppContextMenu?.({
+      x: event.clientX,
+      y: event.clientY,
+      items: [
+        {
+          label: "Rename",
+          action: () => startLayerNameEdit(layer.id, layer.name),
+        },
+        {
+          label: "Move up",
+          action: () => moveComposeLayer(layer, "up"),
+          disabled:
+            !layer.object ||
+            layer.kind !== "object" ||
+            objects.at(-1)?.id === layer.object.id,
+        },
+        {
+          label: "Move down",
+          action: () => moveComposeLayer(layer, "down"),
+          disabled:
+            !layer.object ||
+            layer.kind !== "object" ||
+            objects[0]?.id === layer.object.id,
+        },
+        {
+          label: "Apply animation preset",
+          children: composeAnimationPresets.map((preset) => ({
+            label: preset.label,
+            action: () => applyPresetToLayer(layer, preset.id),
+          })),
+        },
+      ],
+    });
+  }
+
   function setGenericTrackPointTiming(
     object: FrameObject,
     path: PropertyPath,
@@ -879,7 +939,8 @@ function ComposeAnimationTimelinePanelContent({
               onCommitLayerNameEdit={commitLayerNameEdit}
               onDraftChange={setLayerNameDraft}
               onStartLayerNameEdit={startLayerNameEdit}
-              onOpenPresetContextMenu={openComposePresetContextMenu}
+              onOpenLayerContextMenu={openComposeLayerContextMenu}
+              onSelectLayer={selectLayer}
               onToggleExpanded={toggleLayerExpanded}
               onToggleEaseExpanded={toggleEaseExpanded}
               onResizeEaseRow={(rowId, height) =>
@@ -889,6 +950,10 @@ function ComposeAnimationTimelinePanelContent({
               onSetLayerParent={setLayerParent}
               onStartPickWhipDrag={startPickWhipDrag}
               pickWhipDropActive={pickWhipDropLayerId === row.layer.id}
+              selected={Boolean(
+                row.layer.object &&
+                selectedObjectIds.includes(row.layer.object.id),
+              )}
               onUpdateObject={onUpdateObject}
             />
           ))}
@@ -903,6 +968,10 @@ function ComposeAnimationTimelinePanelContent({
             <ComposeTimelineViewportRow
               key={row.id}
               row={row}
+              selected={Boolean(
+                row.layer.object &&
+                selectedObjectIds.includes(row.layer.object.id),
+              )}
               timelineDuration={partDuration}
               contentWidth={contentWidth}
               timelineRef={timelineRef}
@@ -1156,7 +1225,8 @@ function ComposeTimelineRailRow({
   onCommitLayerNameEdit,
   onDraftChange,
   onStartLayerNameEdit,
-  onOpenPresetContextMenu,
+  onOpenLayerContextMenu,
+  onSelectLayer,
   onToggleExpanded,
   onToggleEaseExpanded,
   onResizeEaseRow,
@@ -1164,6 +1234,7 @@ function ComposeTimelineRailRow({
   onSetLayerParent,
   onStartPickWhipDrag,
   pickWhipDropActive,
+  selected,
   onUpdateObject,
 }: {
   row: ComposeAnimationTimelineRow;
@@ -1177,10 +1248,11 @@ function ComposeTimelineRailRow({
   onCommitLayerNameEdit: () => void;
   onDraftChange: (value: string) => void;
   onStartLayerNameEdit: (layerId: string, name: string) => void;
-  onOpenPresetContextMenu: (
+  onOpenLayerContextMenu: (
     event: ReactMouseEvent<HTMLElement>,
     layer: ComposeAnimationTimelineLayer,
   ) => void;
+  onSelectLayer: (layer: ComposeAnimationTimelineLayer) => void;
   onToggleExpanded: (layerId: string) => void;
   onToggleEaseExpanded: (attributeRowId: string) => void;
   onResizeEaseRow: (rowId: string, height: number) => void;
@@ -1191,6 +1263,7 @@ function ComposeTimelineRailRow({
     childLayerId: string,
   ) => void;
   pickWhipDropActive: boolean;
+  selected: boolean;
   onUpdateObject?: (
     objectId: string,
     updater: (object: FrameObject) => FrameObject,
@@ -1235,7 +1308,7 @@ function ComposeTimelineRailRow({
     return (
       <div
         className={`flex h-full items-center gap-2 border-t border-[#202633] pl-8 pr-3 text-[11px] font-bold text-[#8f98a8]${easeExpanded ? "" : " border-b"} ${row.layer.object?.hidden ? "opacity-35" : ""}`}
-        onContextMenu={(event) => onOpenPresetContextMenu(event, row.layer)}
+        onContextMenu={(event) => onOpenLayerContextMenu(event, row.layer)}
       >
         <span className="h-px w-3 bg-[#3a4352]" />
         <span className="truncate" title={row.track.label}>
@@ -1266,20 +1339,18 @@ function ComposeTimelineRailRow({
 
   return (
     <div
-      className={`grid h-full grid-cols-[32px_36px_minmax(0,1fr)_24px_170px] items-center border border-transparent border-b-[#202633] transition ${row.layer.object?.hidden ? "opacity-40" : ""} ${pickWhipDropActive ? "border-[#159dff] bg-[#159dff]/10 shadow-[inset_0_0_0_1px_rgba(21,157,255,0.45)]" : ""}`}
+      className={`grid h-full grid-cols-[32px_36px_minmax(0,1fr)_24px_170px] items-center border border-transparent border-b-[#202633] ${row.layer.object?.hidden ? "opacity-40" : ""} ${
+        selected ? "bg-[#202633]" : "hover:bg-[#181c25]"
+      } ${pickWhipDropActive ? "border-[#159dff] bg-[#159dff]/10 shadow-[inset_0_0_0_1px_rgba(21,157,255,0.45)]" : ""}`}
       data-compose-parent-drop-layer-id={
         row.layer.object ? row.layer.id : undefined
       }
-      draggable={Boolean(row.layer.object)}
-      onContextMenu={(event) => onOpenPresetContextMenu(event, row.layer)}
-      onDragStart={(event) => {
-        if (!row.layer.object) return;
-        event.dataTransfer.effectAllowed = "copy";
-        event.dataTransfer.setData(
-          "application/x-clipper-object-id",
-          row.layer.object.id,
-        );
-        event.dataTransfer.setData("text/plain", row.layer.object.id);
+      onContextMenu={(event) => onOpenLayerContextMenu(event, row.layer)}
+      onPointerDown={(event) => {
+        if (event.button !== 0) return;
+        const target = event.target as HTMLElement;
+        if (target.closest("[data-timeline-control]")) return;
+        onSelectLayer(row.layer);
       }}
     >
       <button
@@ -1308,6 +1379,7 @@ function ComposeTimelineRailRow({
         compactControls={compact}
         hideLockControl
         centered
+        hoverHighlight={false}
         name={row.layer.name}
         draft={layerNameDraft}
         canMoveDown={false}
@@ -1466,8 +1538,10 @@ function ComposeTimelineViewportRow({
   onInspectLayer,
   onStartKeyframeMarquee,
   setAppContextMenu,
+  selected,
 }: {
   row: ComposeAnimationTimelineRow;
+  selected: boolean;
   timelineDuration: number;
   contentWidth: number;
   timelineRef: RefObject<HTMLDivElement | null>;
@@ -1524,6 +1598,7 @@ function ComposeTimelineViewportRow({
         onDragEnd={onOverviewDragEnd}
         onResize={(height) => onResizeEaseRow(row.id, height)}
         setAppContextMenu={setAppContextMenu}
+        selected={selected}
       />
     );
   }
@@ -1531,7 +1606,7 @@ function ComposeTimelineViewportRow({
   if (row.kind === "attribute") {
     return (
       <div
-        className={row.layer.object?.hidden ? "opacity-35" : undefined}
+        className={`${selected ? "bg-[#202633]/55" : ""} ${row.layer.object?.hidden ? "opacity-35" : ""}`}
         onContextMenu={(event) => onOpenPresetContextMenu(event, row.layer)}
       >
         <ComposeAttributeKeyframeLane
@@ -1559,7 +1634,9 @@ function ComposeTimelineViewportRow({
 
   return (
     <div
-      className={`relative h-full border-t border-b border-[#202633] ${row.layer.object?.hidden ? "opacity-35" : ""}`}
+      className={`relative h-full border-t border-b border-[#202633] ${
+        selected ? "bg-[#202633]/55" : ""
+      } ${row.layer.object?.hidden ? "opacity-35" : ""}`}
       onContextMenu={(event) => onOpenPresetContextMenu(event, row.layer)}
       onPointerDown={(event) => {
         const target = event.target as HTMLElement;
@@ -1949,6 +2026,7 @@ function ComposeEaseLane({
   onDragEnd,
   onResize,
   setAppContextMenu,
+  selected,
 }: {
   track: ComposeAnimationAttributeTrack;
   layer: ComposeAnimationTimelineLayer;
@@ -1969,6 +2047,7 @@ function ComposeEaseLane({
   setAppContextMenu:
     | ((menu: import("../../app/types").ContextMenuState) => void)
     | undefined;
+  selected: boolean;
 }) {
   const { startTimelinePointerTransaction } = useTimelinePointerTransaction();
   const laneRef = useRef<HTMLDivElement | null>(null);
@@ -2194,7 +2273,9 @@ function ComposeEaseLane({
   return (
     <div
       ref={laneRef}
-      className="relative border-b border-[#1a2030] bg-[#0d1018]"
+      className={`relative border-b border-[#1a2030] ${
+        selected ? "bg-[#202633]/55" : "bg-[#0d1018]"
+      }`}
       style={{ height }}
       onClick={(e) => {
         if ((e.target as HTMLElement).closest("[data-timeline-control]"))

@@ -271,6 +271,8 @@ export type CameraSensor = {
 
 export type CameraDepthOfField = {
   enabled: boolean;
+  debug: boolean;
+  blurMode: CameraDofBlurMode;
   /** Scene units (matches camera position.z). */
   focusDistance: number;
   /** f-number (e.g. 2.8). 0 disables DoF. */
@@ -283,6 +285,8 @@ export type CameraDepthOfField = {
 export const CAMERA_DOF_MIN_F_NUMBER = 1.5;
 export const CAMERA_DOF_MAX_F_NUMBER = 64;
 export const CAMERA_DOF_MAX_BLUR_PX = 300;
+export const CAMERA_DOF_BLUR_MODES = ["all", "near", "far"] as const;
+export type CameraDofBlurMode = (typeof CAMERA_DOF_BLUR_MODES)[number];
 export const CAMERA_BOKEH_PRESETS = [
   "spherical",
   "anamorphic",
@@ -406,6 +410,8 @@ export const DEFAULT_CAMERA_SENSOR: CameraSensor = { width: 36, height: 24 };
 
 export const DEFAULT_CAMERA_DOF: CameraDepthOfField = {
   enabled: false,
+  debug: false,
+  blurMode: "all",
   focusDistance: 1158,
   fNumber: 2.8,
   maxBlurPx: CAMERA_DOF_MAX_BLUR_PX,

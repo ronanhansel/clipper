@@ -3,6 +3,7 @@ import {
   useState,
   type ComponentProps,
   type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
   type RefObject,
   type UIEvent,
@@ -149,6 +150,10 @@ export function PreviewColumn({
   const composeAuthorActive = stableFramePreviewProps
     ? isComposeAuthorActive(stableFramePreviewProps)
     : false;
+  const handToolActive =
+    mode === "preview" &&
+    Boolean(stableFramePreviewProps?.handToolActive) &&
+    !composeAuthorActive;
   const previewDisplayStyle = stableFramePreviewProps
     ? composeAuthorActive
       ? ({ position: "absolute", inset: 0 } as CSSProperties)
@@ -183,6 +188,39 @@ export function PreviewColumn({
           willChange: displayScale === 1 ? undefined : "transform",
         } as CSSProperties)
     : undefined;
+
+  function startHandPan(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!handToolActive || event.button !== 0) return;
+    const target = event.target as Element | null;
+    if (
+      target?.closest?.(
+        "[data-clipper-author-preview-mode-controls],button,input,textarea,select,a",
+      )
+    )
+      return;
+    const viewport = event.currentTarget;
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const startLeft = viewport.scrollLeft;
+    const startTop = viewport.scrollTop;
+    event.preventDefault();
+    event.stopPropagation();
+    viewport.setPointerCapture(event.pointerId);
+    viewport.style.cursor = "grabbing";
+    const move = (moveEvent: PointerEvent) => {
+      viewport.scrollLeft = startLeft - (moveEvent.clientX - startX);
+      viewport.scrollTop = startTop - (moveEvent.clientY - startY);
+    };
+    const finish = () => {
+      viewport.style.cursor = "";
+      viewport.removeEventListener("pointermove", move);
+      viewport.removeEventListener("pointerup", finish);
+      viewport.removeEventListener("pointercancel", finish);
+    };
+    viewport.addEventListener("pointermove", move);
+    viewport.addEventListener("pointerup", finish);
+    viewport.addEventListener("pointercancel", finish);
+  }
 
   return (
     <section
@@ -224,9 +262,10 @@ export function PreviewColumn({
                   mode === "preview"
                     ? "overflow-auto [scrollbar-gutter:stable]"
                     : "invisible pointer-events-none overflow-hidden"
-                }`
+                } ${handToolActive ? "cursor-grab" : ""}`
           }`}
           data-clipper-preview-stage
+          onPointerDownCapture={startHandPan}
           onScroll={onScroll}
         >
           <div

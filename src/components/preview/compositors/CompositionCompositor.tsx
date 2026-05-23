@@ -31,6 +31,7 @@ import type { PreviewFps } from "../../../core/previewFps";
 type CompositionCompositorProps = {
   active: boolean;
   activeShapeTool?: ComposeDrawTool | null;
+  handToolActive?: boolean;
   animationsEnabled: boolean;
   canSelect: boolean;
   editingTextObjectId: string | null;
@@ -184,6 +185,7 @@ export const CompositionCompositor = memo(function CompositionCompositor(
         <ComposeAuthorView
           part={props.part}
           selectedObjectId={props.selectedObjectId ?? null}
+          handToolActive={props.handToolActive ?? false}
           onCameraPropsChange={props.onCameraPropsChange}
           authorViewState={props.authorViewState}
           onAuthorViewStateChange={props.onAuthorViewStateChange}

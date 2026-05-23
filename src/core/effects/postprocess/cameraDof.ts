@@ -5,6 +5,7 @@
 import {
   CAMERA_DOF_MAX_BLUR_PX,
   CAMERA_DOF_MIN_F_NUMBER,
+  type CameraDofBlurMode,
   type CameraObjectProps,
 } from "../../types";
 
@@ -22,6 +23,10 @@ export type CameraDofUniforms = {
   fNumber: number;
   /** Max blur radius (px). */
   maxBlurPx: number;
+  /** Visualize near/far CoC buffers instead of final blur. */
+  debug: boolean;
+  /** Which signed CoC side contributes to blur. */
+  blurMode: CameraDofBlurMode;
   /** Camera position (scene units). */
   cameraPos: { x: number; y: number; z: number };
   /** Camera rotation (degrees, XYZ Euler). */
@@ -71,6 +76,8 @@ export function createCameraDofPass(
         0,
         Math.min(CAMERA_DOF_MAX_BLUR_PX, camera.dof.maxBlurPx),
       ),
+      debug: camera.dof.debug,
+      blurMode: camera.dof.blurMode,
       cameraPos: { ...camera.position },
       cameraRotation: { ...camera.rotation },
       near: camera.near,

@@ -334,6 +334,8 @@ function AppContent({
   const {
     objectResizeMode,
     setObjectResizeMode,
+    activeCursorTool,
+    setActiveCursorTool,
     activeTool,
     setActiveTool,
     activeToolRef,
@@ -1722,8 +1724,12 @@ function AppContent({
     composeMode,
     hasPreviewComposition,
     mode,
+    part,
+    selectedComposeObjectIds,
     addNullObjectToFrameCenter: composeDrawing.addNullObjectToFrameCenter,
+    reorderComposeObjects,
     setActiveTool,
+    setActiveCursorTool,
     setObjectResizeMode,
   });
 
@@ -2033,6 +2039,7 @@ function AppContent({
     marqueeDragging,
     editingTextObjectId,
     activeTool,
+    handToolActive: activeCursorTool === "hand",
     shapeDrawPreview,
     composeDrawing,
     onFramePointerDownCapture,
@@ -2140,6 +2147,7 @@ function AppContent({
     selectComposeLayerObjects,
     persistComposeSelection,
     renameComposeAnimationLayer,
+    reorderComposeObjects,
     updateComposeObject,
     setAppContextMenu,
   });
@@ -2200,15 +2208,8 @@ function AppContent({
         >
           <LeftSidebar
             effectsPanelState={project.editorState?.effectsPanelState}
-            hasActiveComposition={hasActiveComposition}
             binProps={binProps}
-            part={part}
             onEffectsPanelStateChange={updateEffectsPanelState}
-            onReorderComposeObjects={reorderComposeObjects}
-            onSelectComposeLayerObjects={selectComposeLayerObjects}
-            onSelectComposeFrameSettings={selectComposeFrameSettings}
-            onToggleComposeLayerHidden={toggleComposeLayerHidden}
-            onToggleComposeLayerLocked={toggleComposeLayerLocked}
           />
 
           <CenterPreviewPane
@@ -2248,6 +2249,8 @@ function AppContent({
                     onAddMediaObject: () => createComposeObject("media"),
                     onAddCodeObject: () => createComposeObject("code"),
                     onActiveToolChange: setActiveTool,
+                    activeCursorTool,
+                    onCursorToolChange: setActiveCursorTool,
                     resizeMode: objectResizeMode,
                     onResizeModeChange: setObjectResizeMode,
                   }

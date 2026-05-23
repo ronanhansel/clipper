@@ -41,6 +41,7 @@ const VIEWBOX_RE = /viewBox\s*=\s*"([^"]+)"/i;
 const WIDTH_RE = /\bwidth\s*=\s*"([\d.]+)/i;
 const HEIGHT_RE = /\bheight\s*=\s*"([\d.]+)/i;
 const SVG_TAG_RE = /<svg[\s>]/i;
+const SVG_PATH_Z_STEP = 0.01;
 
 function looksLikeInlineMarkup(input: string): boolean {
   return SVG_TAG_RE.test(input);
@@ -136,6 +137,7 @@ type MaterialEntry = {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   material: any;
   baseOpacity: number;
+  baseDepthWrite: boolean;
 };
 
 class SvgNode implements LayerNode {
@@ -205,6 +207,7 @@ class SvgNode implements LayerNode {
 
   private rebuildMeshes(parsed: ParsedSvg): void {
     this.disposePathChildren();
+    let drawIndex = 0;
     for (const path of parsed.paths) {
       const style = (path.userData && path.userData.style) || {};
       const fillOpacity =
@@ -212,17 +215,24 @@ class SvgNode implements LayerNode {
       if (style.fill && style.fill !== "none") {
         const shapes = path.toShapes(true);
         if (shapes && shapes.length > 0) {
+          const depthWrite = fillOpacity >= 1;
           const geometry = new THREE.ShapeGeometry(shapes);
           const material = new THREE.MeshBasicMaterial({
             color: new THREE.Color(style.fill),
             transparent: fillOpacity < 1,
             opacity: fillOpacity,
-            depthWrite: fillOpacity >= 1,
+            depthWrite,
             side: THREE.DoubleSide,
           });
           const mesh = new THREE.Mesh(geometry, material);
+          mesh.position.z = drawIndex * SVG_PATH_Z_STEP;
           this.pathsContainer.add(mesh);
-          this.materialEntries.push({ material, baseOpacity: fillOpacity });
+          this.materialEntries.push({
+            material,
+            baseOpacity: fillOpacity,
+            baseDepthWrite: depthWrite,
+          });
+          drawIndex += 1;
         }
       }
 
@@ -235,16 +245,23 @@ class SvgNode implements LayerNode {
           const points = subPath.getPoints();
           const geometry = SVGLoader.pointsToStroke(points, style);
           if (!geometry) continue;
+          const depthWrite = strokeOpacity >= 1;
           const material = new THREE.MeshBasicMaterial({
             color: new THREE.Color(style.stroke),
             transparent: strokeOpacity < 1,
             opacity: strokeOpacity,
-            depthWrite: strokeOpacity >= 1,
+            depthWrite,
             side: THREE.DoubleSide,
           });
           const mesh = new THREE.Mesh(geometry, material);
+          mesh.position.z = drawIndex * SVG_PATH_Z_STEP;
           this.pathsContainer.add(mesh);
-          this.materialEntries.push({ material, baseOpacity: strokeOpacity });
+          this.materialEntries.push({
+            material,
+            baseOpacity: strokeOpacity,
+            baseDepthWrite: depthWrite,
+          });
+          drawIndex += 1;
         }
       }
     }
@@ -271,9 +288,16 @@ class SvgNode implements LayerNode {
   private applyOpacity(): void {
     const o = this.currentOpacity;
     for (const entry of this.materialEntries) {
-      entry.material.opacity = entry.baseOpacity * o;
-      entry.material.transparent =
-        entry.material.opacity < 1 || entry.baseOpacity < 1;
+      const opacity = entry.baseOpacity * o;
+      const transparent = opacity < 1;
+      const depthWrite = entry.baseDepthWrite && !transparent;
+      const needsUpdate =
+        entry.material.transparent !== transparent ||
+        entry.material.depthWrite !== depthWrite;
+      entry.material.opacity = opacity;
+      entry.material.transparent = transparent;
+      entry.material.depthWrite = depthWrite;
+      if (needsUpdate) entry.material.needsUpdate = true;
     }
   }
 

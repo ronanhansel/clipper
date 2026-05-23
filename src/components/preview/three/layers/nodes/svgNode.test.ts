@@ -185,6 +185,34 @@ describe("svgNodeFactory", () => {
     node.dispose();
   });
 
+  it("offsets SVG child meshes by document order to avoid coplanar depth fighting", async () => {
+    parseFn.mockImplementationOnce(() => ({
+      paths: [
+        makeFakeShapePath({ fill: "#ff0000" }),
+        makeFakeShapePath({ fill: "#00ff00" }),
+        makeFakeShapePath({ fill: "#0000ff" }),
+      ],
+      xml: {},
+    }));
+    const node = svgNodeFactoryRef.create(
+      { id: "svg-1" } as FrameObject,
+      undefined as never,
+    );
+    node.update(makeState());
+    await flushAsync();
+
+    const pathsContainer = node.object3D.children[0];
+    expect(pathsContainer.children).toHaveLength(3);
+    expect(pathsContainer.children[0].position.z).toBeCloseTo(0);
+    expect(pathsContainer.children[1].position.z).toBeGreaterThan(
+      pathsContainer.children[0].position.z,
+    );
+    expect(pathsContainer.children[2].position.z).toBeGreaterThan(
+      pathsContainer.children[1].position.z,
+    );
+    node.dispose();
+  });
+
   it("opacity propagates to all child materials", async () => {
     parseFn.mockImplementationOnce(() => ({
       paths: [
@@ -209,7 +237,54 @@ describe("svgNodeFactory", () => {
     for (const child of pathsContainer.children) {
       expect(child.material.opacity).toBeCloseTo(0.4);
       expect(child.material.transparent).toBe(true);
+      expect(child.material.depthWrite).toBe(false);
     }
+    node.dispose();
+  });
+
+  it("restores depth writes when layer opacity returns to opaque", async () => {
+    parseFn.mockImplementationOnce(() => ({
+      paths: [makeFakeShapePath({ fill: "#ff0000" })],
+      xml: {},
+    }));
+    const node = svgNodeFactoryRef.create(
+      { id: "svg-1" } as FrameObject,
+      undefined as never,
+    );
+    node.update(makeState());
+    await flushAsync();
+
+    const pathsContainer = node.object3D.children[0];
+    const mesh = pathsContainer.children[0];
+    expect(mesh.material.depthWrite).toBe(true);
+
+    node.update(makeState({ style: { opacity: 0.4 } }));
+    expect(mesh.material.transparent).toBe(true);
+    expect(mesh.material.depthWrite).toBe(false);
+
+    node.update(makeState({ style: { opacity: 1 } }));
+    expect(mesh.material.transparent).toBe(false);
+    expect(mesh.material.depthWrite).toBe(true);
+    node.dispose();
+  });
+
+  it("keeps intrinsic translucent paths from writing depth", async () => {
+    parseFn.mockImplementationOnce(() => ({
+      paths: [makeFakeShapePath({ fill: "#ff0000", fillOpacity: 0.5 })],
+      xml: {},
+    }));
+    const node = svgNodeFactoryRef.create(
+      { id: "svg-1" } as FrameObject,
+      undefined as never,
+    );
+    node.update(makeState());
+    await flushAsync();
+
+    const pathsContainer = node.object3D.children[0];
+    const mesh = pathsContainer.children[0];
+    expect(mesh.material.opacity).toBeCloseTo(0.5);
+    expect(mesh.material.transparent).toBe(true);
+    expect(mesh.material.depthWrite).toBe(false);
     node.dispose();
   });
 

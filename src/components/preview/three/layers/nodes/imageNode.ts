@@ -3,7 +3,12 @@ import { MEDIA_PLACEHOLDER_DATA_URL } from "../../../../../core/mediaPlaceholder
 import { normalizeClipperMediaUrl } from "../../../../../core/mediaSource";
 import type { EvaluatedObjectState } from "../../../../../core/propertyRegistry";
 import type { FrameObject } from "../../../../../core/types";
-import type { LayerNode, LayerNodeFactory } from "../layerNodeRegistry";
+import { serializeSvgForRaster } from "../../../exportSvgRasterCache";
+import type {
+  LayerNode,
+  LayerNodeContext,
+  LayerNodeFactory,
+} from "../layerNodeRegistry";
 import { resolveLayerTransform } from "../layerTransform";
 
 const IMAGE_VERTEX = `
@@ -42,14 +47,18 @@ const IMAGE_FRAGMENT = `
     float coverage = clamp(0.5 - d, 0.0, 1.0);
     float a = c.a * u_opacity * coverage * inside;
     if (a < u_alphaCutoff) discard;
-    gl_FragColor = vec4(c.rgb * a, a);
+    gl_FragColor = vec4(c.rgb * u_opacity * coverage * inside, a);
   }
 `;
 
 const ALPHA_CUTOFF = 0.01;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-type CacheEntry = { texture: any; refCount: number };
+type CacheEntry = {
+  texture: any;
+  refCount: number;
+  callbacks: Set<() => void>;
+};
 
 /**
  * Single source of truth for image textures keyed by `src`. Multiple
@@ -59,34 +68,145 @@ type CacheEntry = { texture: any; refCount: number };
 const textureCache = new Map<string, CacheEntry>();
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function acquireImageTexture(src: string): any {
+export function acquireImageTexture(
+  src: string,
+  onTextureReady?: () => void,
+): any {
   const existing = textureCache.get(src);
   if (existing) {
     existing.refCount += 1;
+    if (onTextureReady) existing.callbacks.add(onTextureReady);
     return existing.texture;
   }
   const image = new Image();
   image.crossOrigin = "anonymous";
   const texture = new THREE.Texture(image);
   texture.colorSpace = THREE.SRGBColorSpace;
+  texture.premultiplyAlpha = true;
   texture.minFilter = THREE.LinearMipmapLinearFilter;
   texture.magFilter = THREE.LinearFilter;
   texture.generateMipmaps = true;
   image.onload = () => {
     texture.needsUpdate = true;
+    notifyTextureReady(src, texture);
   };
   image.src = src;
-  textureCache.set(src, { texture, refCount: 1 });
+  textureCache.set(src, {
+    texture,
+    refCount: 1,
+    callbacks: new Set(onTextureReady ? [onTextureReady] : []),
+  });
   return texture;
 }
 
-export function releaseImageTexture(src: string): void {
+export function releaseImageTexture(
+  src: string,
+  onTextureReady?: () => void,
+): void {
   const entry = textureCache.get(src);
   if (!entry) return;
+  if (onTextureReady) entry.callbacks.delete(onTextureReady);
   entry.refCount -= 1;
   if (entry.refCount > 0) return;
   entry.texture.dispose();
   textureCache.delete(src);
+}
+
+function acquireLayerSizedSvgTexture(
+  src: string,
+  width: number,
+  height: number,
+  onTextureReady?: () => void,
+): { key: string; texture: any } {
+  if (typeof document === "undefined") {
+    return { key: src, texture: acquireImageTexture(src, onTextureReady) };
+  }
+  const w = Math.max(1, Math.ceil(width));
+  const h = Math.max(1, Math.ceil(height));
+  const key = `svg:${w}x${h}:${src}`;
+  const existing = textureCache.get(key);
+  if (existing) {
+    existing.refCount += 1;
+    if (onTextureReady) existing.callbacks.add(onTextureReady);
+    return { key, texture: existing.texture };
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.premultiplyAlpha = true;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.generateMipmaps = true;
+  texture.needsUpdate = true;
+  textureCache.set(key, {
+    texture,
+    refCount: 1,
+    callbacks: new Set(onTextureReady ? [onTextureReady] : []),
+  });
+  void rasterizeSvgTexture(src, canvas, texture, w, h, key);
+  return { key, texture };
+}
+
+async function rasterizeSvgTexture(
+  src: string,
+  canvas: HTMLCanvasElement,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  texture: any,
+  width: number,
+  height: number,
+  key: string,
+): Promise<void> {
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("ImageNode: 2D canvas unavailable");
+  const markup = await loadSvgMarkup(src);
+  const sizedSvg = serializeSvgForRaster(markup, width, height, undefined);
+  const objectUrl = URL.createObjectURL(
+    new Blob([sizedSvg], { type: "image/svg+xml;charset=utf-8" }),
+  );
+  try {
+    const image = await loadImage(objectUrl);
+    context.clearRect(0, 0, width, height);
+    context.drawImage(image, 0, 0, width, height);
+    texture.needsUpdate = true;
+    notifyTextureReady(key, texture);
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function notifyTextureReady(key: string, texture: any): void {
+  const entry = textureCache.get(key);
+  if (!entry || entry.texture !== texture) return;
+  for (const callback of entry.callbacks) callback();
+}
+
+async function loadSvgMarkup(src: string): Promise<string> {
+  if (src.startsWith("data:image/svg+xml")) return decodeSvgDataUrl(src);
+  const response = await fetch(src);
+  return response.text();
+}
+
+function decodeSvgDataUrl(src: string): string {
+  const comma = src.indexOf(",");
+  if (comma < 0) return src;
+  const header = src.slice(0, comma).toLowerCase();
+  const body = src.slice(comma + 1);
+  if (header.includes(";base64")) return atob(body);
+  return decodeURIComponent(body);
+}
+
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.decoding = "async";
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("ImageNode: SVG decode failed"));
+    image.src = src;
+  });
 }
 
 /** Visible-for-tests reset hook; production never calls this. */
@@ -144,6 +264,16 @@ function readImageSrc(state: EvaluatedObjectState): string | null {
   return null;
 }
 
+export function isSvgMediaSource(src: string): boolean {
+  const normalized = src.trim().toLowerCase();
+  if (normalized.startsWith("data:image/svg+xml")) return true;
+  try {
+    return decodeURIComponent(normalized).includes(".svg");
+  } catch {
+    return normalized.includes(".svg");
+  }
+}
+
 function clamp01(v: number): number {
   if (!Number.isFinite(v)) return 1;
   if (v < 0) return 0;
@@ -161,12 +291,17 @@ class ImageNode implements LayerNode {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private readonly placeholder: any;
   private currentSrc: string | null = null;
+  private currentTextureKey: string | null = null;
+  private currentTextureLayerSized = false;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private currentTexture: any | null = null;
   private width = 1;
   private height = 1;
 
-  constructor(id: string) {
+  private readonly requestRender: () => void;
+
+  constructor(id: string, context: LayerNodeContext) {
+    this.requestRender = context.requestRender;
     this.placeholder = acquireImageTexture(MEDIA_PLACEHOLDER_DATA_URL);
     this.material = new THREE.ShaderMaterial({
       vertexShader: IMAGE_VERTEX,
@@ -180,7 +315,8 @@ class ImageNode implements LayerNode {
         u_opacity: { value: 1 },
         u_alphaCutoff: { value: ALPHA_CUTOFF },
       },
-      transparent: false,
+      transparent: true,
+      premultipliedAlpha: true,
       depthTest: true,
       depthWrite: true,
       side: THREE.DoubleSide,
@@ -210,13 +346,34 @@ class ImageNode implements LayerNode {
     u.u_size.value.set(t.width, t.height);
 
     const src = readImageSrc(state);
-    if (src !== this.currentSrc) {
-      if (this.currentSrc) releaseImageTexture(this.currentSrc);
+    const textureKey =
+      src && isSvgMediaSource(src)
+        ? `svg:${Math.max(1, Math.ceil(t.width))}x${Math.max(1, Math.ceil(t.height))}:${src}`
+        : src;
+    if (src !== this.currentSrc || textureKey !== this.currentTextureKey) {
+      if (this.currentTextureKey)
+        releaseImageTexture(this.currentTextureKey, this.requestRender);
       if (src) {
-        this.currentTexture = acquireImageTexture(src);
+        if (isSvgMediaSource(src)) {
+          const lease = acquireLayerSizedSvgTexture(
+            src,
+            t.width,
+            t.height,
+            this.requestRender,
+          );
+          this.currentTextureKey = lease.key;
+          this.currentTexture = lease.texture;
+          this.currentTextureLayerSized = true;
+        } else {
+          this.currentTextureKey = src;
+          this.currentTexture = acquireImageTexture(src, this.requestRender);
+          this.currentTextureLayerSized = false;
+        }
         u.u_image.value = this.currentTexture;
       } else {
+        this.currentTextureKey = null;
         this.currentTexture = null;
+        this.currentTextureLayerSized = false;
         u.u_image.value = this.placeholder;
       }
       this.currentSrc = src;
@@ -228,7 +385,9 @@ class ImageNode implements LayerNode {
     const imgW = image?.naturalWidth ?? 0;
     const imgH = image?.naturalHeight ?? 0;
     const fit = readObjectFit(state);
-    const crop = computeUvCrop(fit, imgW, imgH, t.width, t.height);
+    const crop = this.currentTextureLayerSized
+      ? FULL_UVS
+      : computeUvCrop(fit, imgW, imgH, t.width, t.height);
     u.u_uvOrigin.value.set(crop.originX, crop.originY);
     u.u_uvSize.value.set(crop.sizeX, crop.sizeY);
 
@@ -244,8 +403,10 @@ class ImageNode implements LayerNode {
   }
 
   dispose(): void {
-    if (this.currentSrc) releaseImageTexture(this.currentSrc);
+    if (this.currentTextureKey)
+      releaseImageTexture(this.currentTextureKey, this.requestRender);
     this.currentSrc = null;
+    this.currentTextureKey = null;
     this.currentTexture = null;
     this.mesh.geometry.dispose();
     this.material.dispose();
@@ -255,14 +416,14 @@ class ImageNode implements LayerNode {
 
 export const imageNodeFactory: LayerNodeFactory = {
   kind: "image",
-  create(object: FrameObject) {
-    return new ImageNode(object.id);
+  create(object: FrameObject, context: LayerNodeContext) {
+    return new ImageNode(object.id, context);
   },
 };
 
 export const mediaNodeFactory: LayerNodeFactory = {
   kind: "media",
-  create(object: FrameObject) {
-    return new ImageNode(object.id);
+  create(object: FrameObject, context: LayerNodeContext) {
+    return new ImageNode(object.id, context);
   },
 };

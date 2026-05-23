@@ -202,6 +202,14 @@ export function buildCameraComposerPasses(
   const options: CameraEffectsPassOptions = { idScope, frameSize };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const passes: any[] = [];
+  if (camera.dof.debug || camera.dof.blurMode !== "all") {
+    const dofPass = createCameraDofPass(camera, idScope);
+    if (dofPass) {
+      passes.push(
+        new CameraDofComposerPass(`${idScope}:camera-dof-pass`, dofPass),
+      );
+    }
+  }
   const lensPass = getCameraLensPostProcessPass(camera, options);
   if (lensPass) {
     passes.push(new LensComposerPass(`${idScope}:camera-lens-pass`, lensPass));
@@ -435,6 +443,8 @@ uniform sampler2D u_color;
 uniform sampler2D u_near;
 uniform sampler2D u_far;
 uniform float u_maxBlurPx;
+uniform float u_debug;
+uniform int u_blurMode;
 
 float blendFromCoc(float cocPx) {
   return smoothstep(0.25, max(2.0, min(12.0, u_maxBlurPx * 0.12)), cocPx);
@@ -446,6 +456,22 @@ void main() {
   vec4 nearField = textureLod(u_near, v_uv, 0.0);
   float farBlend = blendFromCoc(farField.a);
   float nearBlend = blendFromCoc(nearField.a);
+  if (u_blurMode == 1) {
+    farBlend = 0.0;
+  } else if (u_blurMode == 2) {
+    nearBlend = 0.0;
+  }
+  if (u_debug > 0.5) {
+    float nearSignal = clamp(nearField.a / max(u_maxBlurPx, 1.0), 0.0, 1.0);
+    float farSignal = clamp(farField.a / max(u_maxBlurPx, 1.0), 0.0, 1.0);
+    if (u_blurMode == 1) {
+      farSignal = 0.0;
+    } else if (u_blurMode == 2) {
+      nearSignal = 0.0;
+    }
+    fragColor = vec4(nearSignal, farSignal * 0.85, farSignal, 1.0);
+    return;
+  }
   vec4 result = mix(sharp, vec4(farField.rgb, sharp.a), farBlend);
   fragColor = mix(result, vec4(nearField.rgb, sharp.a), nearBlend);
 }
@@ -566,6 +592,8 @@ export class CameraDofComposerPass extends (Pass as any) {
         u_near: { value: null },
         u_far: { value: null },
         u_maxBlurPx: { value: maxBlurPx },
+        u_debug: { value: u.debug ? 1 : 0 },
+        u_blurMode: { value: dofBlurModeToUniform(u.blurMode) },
       },
       depthTest: false,
       depthWrite: false,
@@ -714,6 +742,12 @@ function makeDofRenderTarget(width: number, height: number, name: string) {
   });
   target.texture.name = name;
   return target;
+}
+
+function dofBlurModeToUniform(mode: CameraObjectProps["dof"]["blurMode"]) {
+  if (mode === "near") return 1;
+  if (mode === "far") return 2;
+  return 0;
 }
 
 function cloneUniformMap<T extends Record<string, { value: unknown }>>(

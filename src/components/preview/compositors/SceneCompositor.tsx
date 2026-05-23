@@ -60,6 +60,7 @@ type SceneCompositorProps = {
   displaySceneTime: number;
   canSelect: boolean;
   activeShapeTool: ComposeDrawTool | null | undefined;
+  handToolActive?: boolean;
   editingTextObjectId: string | null;
   hideNullObjects: boolean;
   flattenComposition: boolean;
@@ -134,6 +135,7 @@ export const SceneCompositor = memo(function SceneCompositor({
   displaySceneTime,
   canSelect,
   activeShapeTool,
+  handToolActive = false,
   editingTextObjectId,
   hideNullObjects,
   flattenComposition,
@@ -218,6 +220,7 @@ export const SceneCompositor = memo(function SceneCompositor({
                 isPostProcessSource={isPostProcessSource}
                 active={item.part.id === activePartId}
                 activeShapeTool={activeShapeTool}
+                handToolActive={handToolActive}
                 animationsEnabled={animationsEnabled}
                 canSelect={canSelect}
                 editingTextObjectId={editingTextObjectId}

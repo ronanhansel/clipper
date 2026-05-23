@@ -44,10 +44,14 @@ export interface LayerNode {
  *   per-element capture nodes route `drawElementImage` through
  *   `sharedCapture.context` and then blit pixels out of `sharedCapture
  *   .canvas` into their own private canvas.
+ * - `requestRender`: schedules a fresh WebGL render when async layer
+ *   resources (image decode, SVG rasterization, font atlas updates)
+ *   become ready after the current frame has already rendered.
  */
 export interface LayerNodeContext {
   sourceRoot: () => Element | null;
   sharedCapture: SharedCaptureCanvas;
+  requestRender: () => void;
 }
 
 /**

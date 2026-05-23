@@ -467,6 +467,8 @@ function hasActiveThinLensDof(
 ): camera is CameraObjectProps {
   return Boolean(
     camera?.dof.enabled &&
+    !camera.dof.debug &&
+    camera.dof.blurMode === "all" &&
     camera.dof.fNumber > 0 &&
     camera.dof.maxBlurPx > 0 &&
     Number.isFinite(camera.dof.focusDistance) &&

@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import type {
+  ComposeCursorTool,
   ComposeDrawTool,
   PathDraft,
   ShapeDrawPreview,
@@ -12,6 +13,8 @@ export function useComposeToolLocalState() {
   const [objectResizeMode, setObjectResizeMode] = useState<"resize" | "scale">(
     "resize",
   );
+  const [activeCursorTool, setActiveCursorTool] =
+    useState<ComposeCursorTool>("select");
   const [activeTool, setActiveTool] = useState<ComposeDrawTool | null>(null);
   const activeToolRef = useRef<ComposeDrawTool | null>(null);
   const shapeDrawStartRef = useRef<{
@@ -29,7 +32,12 @@ export function useComposeToolLocalState() {
 
   return {
     objectResizeMode,
-    setObjectResizeMode,
+    setObjectResizeMode: (mode: "resize" | "scale") => {
+      setObjectResizeMode(mode);
+      setActiveCursorTool(mode === "resize" ? "select" : "scale");
+    },
+    activeCursorTool,
+    setActiveCursorTool,
     activeTool,
     setActiveTool,
     activeToolRef,

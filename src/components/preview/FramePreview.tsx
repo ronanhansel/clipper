@@ -194,6 +194,7 @@ type FramePreviewProps = {
   onFramePointerLeave: (event: PointerEvent<HTMLDivElement>) => void;
   onFramePointerUp: (event: PointerEvent<HTMLDivElement>) => void;
   activeShapeTool?: ComposeDrawTool | null;
+  handToolActive?: boolean;
   shapeDrawPreview?: ShapeDrawPreview | null;
   onObjectPointerDown: (
     event: PointerEvent<HTMLDivElement>,
@@ -347,6 +348,7 @@ export const FramePreview = memo(function FramePreview({
   onTextObjectDoubleClick,
   onTrackerTargetPick,
   activeShapeTool,
+  handToolActive = false,
   shapeDrawPreview,
   selectedObjectId,
   isPostProcessSource,
@@ -966,6 +968,7 @@ export const FramePreview = memo(function FramePreview({
                       (canSelectObjects || interactiveTrackerPicking)
                     }
                     activeShapeTool={activeShapeTool}
+                    handToolActive={handToolActive}
                     editingTextObjectId={interactiveEditingTextObjectId}
                     hideNullObjects={sceneWrap.hideNullObjects}
                     flattenComposition={sceneWrap.flattenComposition}
@@ -1178,6 +1181,7 @@ function AuthorPreviewModeControls({
     <div
       className="pointer-events-auto absolute bottom-3 right-3 rounded-[9px] border border-[#2d313b] bg-[#151820]/95 p-1 shadow-[0_14px_38px_rgba(0,0,0,0.36),inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur"
       style={{ zIndex: 2147483647 }}
+      data-clipper-author-preview-mode-controls
       onClick={(event) => event.stopPropagation()}
       onPointerDown={(event) => event.stopPropagation()}
     >

@@ -73,6 +73,7 @@ export type UseFramePreviewPropsParams = {
   marqueeDragging: boolean;
   editingTextObjectId: string | null;
   activeTool: ComposeDrawTool | null;
+  handToolActive: boolean;
   shapeDrawPreview: ShapeDrawPreview | null;
   composeDrawing: ComposeDrawingFns;
   onFramePointerDownCapture: StrategyFramePreviewProps["onFramePointerDownCapture"];
@@ -148,6 +149,7 @@ export function useFramePreviewProps({
   marqueeDragging,
   editingTextObjectId,
   activeTool,
+  handToolActive,
   shapeDrawPreview,
   composeDrawing,
   onFramePointerDownCapture,
@@ -218,6 +220,7 @@ export function useFramePreviewProps({
           ? editingTextObjectId
           : null,
       activeShapeTool: composeMode ? activeTool : null,
+      handToolActive: composeMode && handToolActive,
       shapeDrawPreview: composeMode ? shapeDrawPreview : null,
       onFramePointerCancel: composeDrawing.wrappedOnFramePointerCancel,
       onFramePointerDown: composeDrawing.wrappedOnFramePointerDown,
@@ -280,6 +283,7 @@ export function useFramePreviewProps({
     marqueeDragging,
     editingTextObjectId,
     activeTool,
+    handToolActive,
     shapeDrawPreview,
     composeDrawing.wrappedOnFramePointerCancel,
     composeDrawing.wrappedOnFramePointerDown,

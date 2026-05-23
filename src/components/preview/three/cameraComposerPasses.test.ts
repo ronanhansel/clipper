@@ -152,7 +152,7 @@ describe("buildCameraDofComposerPass", () => {
 });
 
 describe("buildCameraComposerPasses with DoF", () => {
-  it("emits only lens passes when DoF and lens are both enabled", () => {
+  it("emits only lens passes when normal DoF and lens are both enabled", () => {
     const camera = makeCamera((c) => {
       c.dof.enabled = true;
       c.dof.fNumber = 2.8;
@@ -172,6 +172,30 @@ describe("buildCameraComposerPasses with DoF", () => {
     });
     const passes = buildCameraComposerPasses(camera, frameSize);
     expect(passes).toEqual([]);
+  });
+
+  it("emits a DoF composer pass for DoF debugging", () => {
+    const camera = makeCamera((c) => {
+      c.dof.enabled = true;
+      c.dof.debug = true;
+      c.dof.fNumber = 2.8;
+    });
+    const passes = buildCameraComposerPasses(camera, frameSize);
+    expect(passes.length).toBe(1);
+    expect(passes[0]).toBeInstanceOf(CameraDofComposerPass);
+    for (const p of passes) p.dispose();
+  });
+
+  it("emits a DoF composer pass for near-only blur", () => {
+    const camera = makeCamera((c) => {
+      c.dof.enabled = true;
+      c.dof.blurMode = "near";
+      c.dof.fNumber = 2.8;
+    });
+    const passes = buildCameraComposerPasses(camera, frameSize);
+    expect(passes.length).toBe(1);
+    expect(passes[0]).toBeInstanceOf(CameraDofComposerPass);
+    for (const p of passes) p.dispose();
   });
 });
 
@@ -215,6 +239,8 @@ describe("CameraDofComposerPass", () => {
     expect(materials.fillMaterial.fragmentShader).not.toContain("maxColor");
     expect(materials.compositeMaterial.fragmentShader).toContain("u_near");
     expect(materials.compositeMaterial.fragmentShader).toContain("u_far");
+    expect(materials.compositeMaterial.fragmentShader).toContain("u_debug");
+    expect(materials.compositeMaterial.fragmentShader).toContain("u_blurMode");
     expect(materials.compositeMaterial.fragmentShader).toContain(
       "blendFromCoc",
     );
@@ -235,11 +261,44 @@ describe("CameraDofComposerPass", () => {
     const pass = new CameraDofComposerPass("camera:camera-dof-pass", dofPass!);
     const material = pass as unknown as {
       splitMaterial: { uniforms: { u_maxBlurPx: { value: number } } };
-      compositeMaterial: { uniforms: { u_maxBlurPx: { value: number } } };
+      compositeMaterial: {
+        uniforms: {
+          u_maxBlurPx: { value: number };
+          u_debug: { value: number };
+          u_blurMode: { value: number };
+        };
+      };
     };
 
     expect(material.splitMaterial.uniforms.u_maxBlurPx.value).toBe(24);
     expect(material.compositeMaterial.uniforms.u_maxBlurPx.value).toBe(24);
+    expect(material.compositeMaterial.uniforms.u_debug.value).toBe(0);
+    expect(material.compositeMaterial.uniforms.u_blurMode.value).toBe(0);
+
+    pass.dispose();
+  });
+
+  it("maps debug and far-only mode into composite uniforms", () => {
+    const camera = makeCamera((c) => {
+      c.dof.enabled = true;
+      c.dof.debug = true;
+      c.dof.blurMode = "far";
+      c.dof.fNumber = 2.8;
+    });
+    const dofPass = createCameraDofPass(camera, "camera");
+    expect(dofPass).not.toBeNull();
+    const pass = new CameraDofComposerPass("camera:camera-dof-pass", dofPass!);
+    const material = pass as unknown as {
+      compositeMaterial: {
+        uniforms: {
+          u_debug: { value: number };
+          u_blurMode: { value: number };
+        };
+      };
+    };
+
+    expect(material.compositeMaterial.uniforms.u_debug.value).toBe(1);
+    expect(material.compositeMaterial.uniforms.u_blurMode.value).toBe(2);
 
     pass.dispose();
   });
@@ -256,6 +315,18 @@ describe("createCameraDofPass", () => {
     expect(dofPass).not.toBeNull();
     expect(dofPass!.uniforms.fNumber).toBe(1.5);
     expect(dofPass!.uniforms.maxBlurPx).toBe(CAMERA_DOF_MAX_BLUR_PX);
+  });
+
+  it("copies debug and blur mode uniforms", () => {
+    const camera = makeCamera((c) => {
+      c.dof.enabled = true;
+      c.dof.debug = true;
+      c.dof.blurMode = "near";
+    });
+    const dofPass = createCameraDofPass(camera, "camera");
+    expect(dofPass).not.toBeNull();
+    expect(dofPass!.uniforms.debug).toBe(true);
+    expect(dofPass!.uniforms.blurMode).toBe("near");
   });
 });
 
