@@ -3,6 +3,8 @@ import type { FrameObject, FrameObjectType } from "../../../../core/types";
 import type { SharedCaptureCanvas } from "../SharedCaptureCanvas";
 import type { LayerLightingState } from "./layerLighting";
 
+export type LayerMaterialBackend = "webgl-shader" | "webgpu-node";
+
 /**
  * One native Three.js node per visible FrameObject.
  *
@@ -52,6 +54,7 @@ export interface LayerNode {
 export interface LayerNodeContext {
   sourceRoot: () => Element | null;
   getLighting?: () => LayerLightingState;
+  materialBackend?: LayerMaterialBackend;
   sharedCapture: SharedCaptureCanvas;
   requestRender: () => void;
 }

@@ -2,6 +2,10 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { CompositionRenderer } from "./CompositionRenderer";
 import {
+  readCompositionRendererBackendRequest,
+  selectCompositionRendererBackend,
+} from "./compositionRendererBackend";
+import {
   buildCameraComposerPasses,
   getCameraComposerPassSignature,
 } from "./cameraComposerPasses";
@@ -113,7 +117,9 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
     renderer: CompositionRenderer,
     time: number,
     cameraOverride?: CameraObjectProps | null,
+    options: { interactive?: boolean } = {},
   ) {
+    renderer.setInteractivePreview(Boolean(options.interactive));
     const cameraProps =
       cameraOverride ?? getActiveCameraObjectProps(part, time);
     renderer.setCamera(cameraProps);
@@ -176,9 +182,14 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
     if (!host) return;
     const initialWidth = host.clientWidth || FRAME_WIDTH;
     const initialHeight = host.clientHeight || FRAME_HEIGHT;
+    const backendSelection = selectCompositionRendererBackend({
+      requested: readCompositionRendererBackendRequest(),
+      webGpuMaterialsReady: true,
+    });
     const renderer = new CompositionRenderer({
       width: initialWidth,
       height: initialHeight,
+      backendSelection,
     });
     rendererRef.current = renderer;
     host.appendChild(renderer.hostRoot);
@@ -262,11 +273,7 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
   useEffect(() => {
     if (!backendProps.isPlaying) return;
     if (!captureCanvas) return;
-    let lastRenderAt = 0;
-    const frameIntervalMs = 1000 / renderPreviewFps;
     const renderLiveFrame = (_cause: unknown, now: number) => {
-      if (now - lastRenderAt < frameIntervalMs) return;
-      lastRenderAt = now;
       const renderer = rendererRef.current;
       if (!renderer) return;
       const snap = getMasterTimelineClockSnapshot();
@@ -277,7 +284,9 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
         Math.round(rawLocalTime * renderPreviewFps) / renderPreviewFps;
       const cameraOverride = pendingCameraPreviewRef.current;
       pendingCameraPreviewRef.current = null;
-      renderAtTime(renderer, nextLocalTime, cameraOverride);
+      renderAtTime(renderer, nextLocalTime, cameraOverride, {
+        interactive: true,
+      });
     };
     const unsubscribe = scheduler?.subscribe(renderLiveFrame);
     return () => unsubscribe?.();
@@ -300,7 +309,7 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
       const cameraOverride = pendingCameraPreviewRef.current;
       if (!renderer || !cameraOverride) return;
       pendingCameraPreviewRef.current = null;
-      renderAtTime(renderer, localTime, cameraOverride);
+      renderAtTime(renderer, localTime, cameraOverride, { interactive: true });
     };
     const unsubscribe = scheduler?.subscribe((cause) => {
       if (cause !== "edit") return;
@@ -336,7 +345,9 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
         const cameraOverride = pendingCameraPreviewRef.current;
         if (!renderer || !cameraOverride) return;
         pendingCameraPreviewRef.current = null;
-        renderAtTime(renderer, localTime, cameraOverride);
+        renderAtTime(renderer, localTime, cameraOverride, {
+          interactive: true,
+        });
       });
     }
     window.addEventListener("clipper:camera-preview", handleCameraPreview);

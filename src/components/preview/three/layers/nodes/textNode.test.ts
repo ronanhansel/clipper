@@ -65,6 +65,38 @@ const NULL_CONTEXT = {
   requestRender: () => {},
 } as const;
 
+class FakeContext2D {
+  clearRect = vi.fn();
+  drawImage = vi.fn();
+}
+
+class FakeCanvas {
+  width = 0;
+  height = 0;
+  private ctx: FakeContext2D | null = null;
+  getContext(kind: string) {
+    if (kind !== "2d") return null;
+    if (!this.ctx) this.ctx = new FakeContext2D();
+    return this.ctx;
+  }
+}
+
+function withFakeDocument<T>(fn: () => T): T {
+  const global = globalThis as { document?: unknown };
+  const originalDocument = global.document;
+  global.document = {
+    createElement(kind: string) {
+      if (kind === "canvas") return new FakeCanvas();
+      return {};
+    },
+  };
+  try {
+    return fn();
+  } finally {
+    global.document = originalDocument;
+  }
+}
+
 function makeState(
   overrides: Partial<EvaluatedObjectState> = {},
 ): EvaluatedObjectState {
@@ -105,6 +137,42 @@ describe("textNodeFactory", () => {
     expect(inner.anchorX).toBe("left");
     expect(inner.anchorY).toBe("top");
     node.dispose();
+  });
+
+  it("keeps text from writing depth into DoF samples", () => {
+    const node = textNodeFactory.create(
+      { id: "text-1" } as FrameObject,
+      NULL_CONTEXT,
+    );
+    const inner = node.object3D.children[0] as unknown as {
+      material: InstanceType<typeof THREE.MeshBasicMaterial>;
+    };
+    expect(inner.material.transparent).toBe(true);
+    expect(inner.material.premultipliedAlpha).toBe(false);
+    expect(inner.material.alphaTest).toBe(0);
+    expect(inner.material.depthWrite).toBe(false);
+    node.dispose();
+  });
+
+  it("uses the capture fallback for WebGPU-node text layers", () => {
+    withFakeDocument(() => {
+      const sharedCanvas = new FakeCanvas();
+      const node = textNodeFactory.create({ id: "text-1" } as FrameObject, {
+        sourceRoot: () => null,
+        sharedCapture: {
+          canvas: sharedCanvas,
+          context: sharedCanvas.getContext("2d"),
+        } as never,
+        requestRender: () => {},
+        materialBackend: "webgpu-node",
+      });
+      expect(node.object3D).toBeInstanceOf(THREE.Mesh);
+      expect(node.object3D.material.isNodeMaterial).toBe(true);
+      expect(node.object3D.material.userData.webgpuLayerMaterialPort).toBe(
+        "capture-fill",
+      );
+      node.dispose();
+    });
   });
 
   it("update positions the wrapper from resolveLayerTransform", () => {

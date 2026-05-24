@@ -211,6 +211,24 @@ function writeChangedNumericProperty(
   return setPropertyBaseValue(object, path, after);
 }
 
+function readObjectPoint(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  return {
+    x: readFiniteNumber(record.x, 0),
+    y: readFiniteNumber(record.y, 0),
+    z: readFiniteNumber(record.z, 0),
+  };
+}
+
+function readTransformNumber(value: unknown) {
+  return readFiniteNumber(value, 0);
+}
+
+function readFiniteNumber(value: unknown, fallback: number) {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
 /**
  * `PropertyKeyframePoint.easingToNext` admits arbitrary CSS-shaped
  * strings on top of the named MotionEase set + tuple. `getEaseControlPoints`
@@ -1692,6 +1710,28 @@ function AppContent({
                 evaluated.bounds[key],
                 nextBounds[key],
               );
+            }
+          }
+          if (
+            object.type === "light" &&
+            (nextBounds || nextTransform.translateZ !== undefined)
+          ) {
+            const props = object.props ?? {};
+            const target = readObjectPoint(props.target);
+            if (target) {
+              const oldZ = readTransformNumber(evaluated.transform.translateZ);
+              const nextProps = { ...props };
+              nextProps.target = {
+                x:
+                  target.x +
+                  (nextBounds?.x ?? evaluated.bounds.x) -
+                  evaluated.bounds.x,
+                y:
+                  target.y -
+                  ((nextBounds?.y ?? evaluated.bounds.y) - evaluated.bounds.y),
+                z: target.z + (nextTransform.translateZ ?? oldZ) - oldZ,
+              };
+              mutated = { ...mutated, props: nextProps };
             }
           }
           for (const key of [

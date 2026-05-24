@@ -324,7 +324,8 @@ export function useFrameObjectCommands({
       props: {
         ...DEFAULT_LIGHT_OBJECT_PROPS,
         kind,
-        castShadow: kind === "directional",
+        castShadow:
+          kind === "directional" || kind === "spot" || kind === "point",
         intensity: kind === "ambient" ? 0.35 : 1,
       },
     };
@@ -384,6 +385,7 @@ export function useFrameObjectCommands({
 function lightName(kind: LightObjectKind) {
   if (kind === "ambient") return "Ambient Light";
   if (kind === "point") return "Point Light";
+  if (kind === "spot") return "Spot Light";
   return "Directional Light";
 }
 

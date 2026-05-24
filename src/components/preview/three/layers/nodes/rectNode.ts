@@ -1,4 +1,18 @@
 import * as THREE from "three";
+import { MeshBasicNodeMaterial } from "three/webgpu";
+import {
+  abs,
+  clamp,
+  float,
+  Fn,
+  length,
+  max,
+  min,
+  uniform,
+  uv,
+  vec2,
+  vec4,
+} from "three/tsl";
 import type { EvaluatedObjectState } from "../../../../../core/propertyRegistry";
 import type { FrameObject } from "../../../../../core/types";
 import { isFillValue, type FillValue } from "../../../../../core/fillValue";
@@ -14,12 +28,16 @@ import {
 } from "../color/parseCssColor";
 import {
   applyLayerLightingUniforms,
+  createLayerLightingNodes,
+  createLayerLightMultiplierNode,
   createLayerLightingUniforms,
   EMPTY_LAYER_LIGHTING,
   LAYER_LIGHTING_FRAGMENT,
   LAYER_LIGHTING_VERTEX_BODY,
   LAYER_LIGHTING_VERTEX_VARYINGS,
 } from "../layerLighting";
+
+type RectMaterialUniforms = ReturnType<typeof createRectUniforms>;
 
 const RECT_VERTEX = `
   ${LAYER_LIGHTING_VERTEX_VARYINGS}
@@ -78,22 +96,10 @@ class RectNode implements LayerNode {
 
   constructor(id: string, context: LayerNodeContext) {
     this.context = context;
-    this.material = new THREE.ShaderMaterial({
-      vertexShader: RECT_VERTEX,
-      fragmentShader: RECT_FRAGMENT,
-      uniforms: {
-        u_color: { value: new THREE.Vector4(0, 0, 0, 1) },
-        u_size: { value: new THREE.Vector2(1, 1) },
-        u_radius: { value: 0 },
-        u_opacity: { value: 1 },
-        u_alphaCutoff: { value: ALPHA_CUTOFF },
-        ...createLayerLightingUniforms(),
-      },
-      transparent: false,
-      depthTest: true,
-      depthWrite: true,
-      side: THREE.DoubleSide,
-    });
+    this.material =
+      context.materialBackend === "webgpu-node"
+        ? createRectNodeMaterial()
+        : createRectShaderMaterial();
     this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), this.material);
     this.mesh.name = `RectNode:${id}`;
     this.object3D = this.mesh;
@@ -114,7 +120,7 @@ class RectNode implements LayerNode {
     this.mesh.rotation.z = t.rotationZ;
     this.mesh.scale.set(t.scaleX, t.scaleY, 1);
 
-    const u = this.material.uniforms;
+    const u = getRectMaterialUniforms(this.material);
     u.u_size.value.set(t.width, t.height);
 
     // Background colour. The inspector stores fills as a `FillValue`
@@ -140,6 +146,7 @@ class RectNode implements LayerNode {
         ? state.style.borderRadius
         : 0;
     u.u_radius.value = Math.max(0, radius);
+    syncRectNodeUniforms(this.material, u);
     applyLayerLightingUniforms(
       this.material,
       this.context.getLighting?.() ?? EMPTY_LAYER_LIGHTING,
@@ -150,6 +157,92 @@ class RectNode implements LayerNode {
     this.mesh.geometry.dispose();
     this.material.dispose();
   }
+}
+
+function createRectUniforms() {
+  return {
+    u_color: { value: new THREE.Vector4(0, 0, 0, 1) },
+    u_size: { value: new THREE.Vector2(1, 1) },
+    u_radius: { value: 0 },
+    u_opacity: { value: 1 },
+    u_alphaCutoff: { value: ALPHA_CUTOFF },
+    ...createLayerLightingUniforms(),
+  };
+}
+
+function createRectShaderMaterial() {
+  return new THREE.ShaderMaterial({
+    vertexShader: RECT_VERTEX,
+    fragmentShader: RECT_FRAGMENT,
+    uniforms: createRectUniforms(),
+    transparent: false,
+    depthTest: true,
+    depthWrite: true,
+    side: THREE.DoubleSide,
+  });
+}
+
+function createRectNodeMaterial() {
+  const uniforms = createRectUniforms();
+  const lightingNodes = createLayerLightingNodes(uniforms);
+  const lightMultiplierNode = createLayerLightMultiplierNode(lightingNodes);
+  const colorNode = uniform(uniforms.u_color.value);
+  const sizeNode = uniform(uniforms.u_size.value);
+  const radiusNode = uniform(uniforms.u_radius.value);
+  const opacityNode = uniform(uniforms.u_opacity.value);
+  const alphaCutoffNode = uniform(uniforms.u_alphaCutoff.value);
+  const material = new MeshBasicNodeMaterial({
+    transparent: true,
+    premultipliedAlpha: true,
+    depthTest: true,
+    depthWrite: true,
+    side: THREE.DoubleSide,
+  });
+  material.fragmentNode = Fn(() => {
+    const px = uv().sub(0.5).mul(sizeNode);
+    const halfSize = sizeNode.mul(0.5);
+    const r = clamp(radiusNode, 0.0, min(halfSize.x, halfSize.y));
+    const q = abs(px).sub(halfSize).add(vec2(r));
+    const d = length(max(q, vec2(0.0)))
+      .add(min(max(q.x, q.y), 0.0))
+      .sub(r);
+    const coverage = clamp(float(0.5).sub(d), 0.0, 1.0);
+    const alpha = colorNode.a.mul(opacityNode).mul(coverage);
+    alpha.lessThan(alphaCutoffNode).discard();
+    return vec4(colorNode.rgb.mul(lightMultiplierNode).mul(alpha), alpha);
+  })();
+  material.userData.layerLightingUniforms = uniforms;
+  material.userData.layerLightingNodes = lightingNodes;
+  material.userData.layerShadowUniforms = uniforms;
+  material.userData.layerUniformNodes = {
+    u_radius: radiusNode,
+    u_opacity: opacityNode,
+    u_alphaCutoff: alphaCutoffNode,
+  };
+  material.userData.webgpuLayerMaterialPort = "rect-fill";
+  return material;
+}
+
+function getRectMaterialUniforms(material: {
+  uniforms?: RectMaterialUniforms;
+  userData?: { layerLightingUniforms?: unknown };
+}): RectMaterialUniforms {
+  const uniforms =
+    material.uniforms ?? material.userData?.layerLightingUniforms;
+  return uniforms as RectMaterialUniforms;
+}
+
+function syncRectNodeUniforms(
+  material: {
+    userData?: { layerUniformNodes?: Record<string, { value: unknown }> };
+  },
+  uniforms: RectMaterialUniforms,
+): void {
+  const nodes = material.userData?.layerUniformNodes;
+  if (!nodes) return;
+  nodes.u_radius.value = uniforms.u_radius.value;
+  nodes.u_opacity.value = uniforms.u_opacity.value;
+  nodes.u_alphaCutoff.value = uniforms.u_alphaCutoff.value;
 }
 
 function clamp01(v: number): number {

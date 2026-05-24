@@ -139,9 +139,55 @@ describe("perElementCaptureNode", () => {
     expect(node.object3D).toBeInstanceOf(THREE.Mesh);
     expect(node.object3D.geometry).toBeInstanceOf(THREE.PlaneGeometry);
     expect(node.object3D.material).toBeInstanceOf(THREE.ShaderMaterial);
+    expect(node.object3D.material.transparent).toBe(true);
+    expect(node.object3D.material.premultipliedAlpha).toBe(true);
+    expect(node.object3D.material.depthWrite).toBe(true);
     const u = node.object3D.material.uniforms;
     expect(u.u_image.value).toBeInstanceOf(THREE.CanvasTexture);
     expect(u.u_opacity.value).toBe(1);
+    expect(u.u_alphaCutoff.value).toBeCloseTo(0.18);
+    node.dispose();
+  });
+
+  it("can create a WebGPU-compatible node material for capture quads", () => {
+    const factory = createPerElementCaptureFactory("text");
+    const node = factory.create({ id: "layer-1" } as FrameObject, {
+      ...makeContext(),
+      materialBackend: "webgpu-node",
+    });
+    expect(node.object3D).toBeInstanceOf(THREE.Mesh);
+    expect(node.object3D.geometry).toBeInstanceOf(THREE.PlaneGeometry);
+    expect(node.object3D.material.isNodeMaterial).toBe(true);
+    expect(node.object3D.material.transparent).toBe(true);
+    expect(node.object3D.material.premultipliedAlpha).toBe(true);
+    expect(node.object3D.material.depthWrite).toBe(true);
+    expect(node.object3D.material.userData.webgpuLayerMaterialPort).toBe(
+      "capture-fill",
+    );
+    expect(
+      node.object3D.material.userData.layerLightingUniforms.u_alphaCutoff.value,
+    ).toBeCloseTo(0.18);
+    expect(node.object3D.material.userData.layerTextureNode.value).toBe(
+      node.object3D.material.userData.layerLightingUniforms.u_image.value,
+    );
+    expect(node.object3D.material.userData.layerLightingNodes).toBeDefined();
+    expect(node.object3D.material.fragmentNode).toBeDefined();
+    node.dispose();
+  });
+
+  it("updates the WebGPU capture opacity uniform", () => {
+    const factory = createPerElementCaptureFactory("text");
+    const node = factory.create({ id: "layer-1" } as FrameObject, {
+      ...makeContext(),
+      materialBackend: "webgpu-node",
+    });
+    node.update(makeState({ style: { opacity: 0.35 } }));
+    expect(
+      node.object3D.material.userData.layerLightingUniforms.u_opacity.value,
+    ).toBeCloseTo(0.35);
+    expect(
+      node.object3D.material.userData.layerUniformNodes.u_opacity.value,
+    ).toBeCloseTo(0.35);
     node.dispose();
   });
 
@@ -164,7 +210,7 @@ describe("perElementCaptureNode", () => {
   });
 
   it("update resizes the private canvas + geometry on bounds change", () => {
-    const factory = createPerElementCaptureFactory("text");
+    const factory = createPerElementCaptureFactory("default");
     const node = factory.create(
       { id: "layer-1" } as FrameObject,
       makeContext(),
@@ -176,6 +222,23 @@ describe("perElementCaptureNode", () => {
     node.update(makeState({ bounds: { x: 0, y: 0, width: 300, height: 120 } }));
     expect(node.object3D.geometry.parameters.width).toBe(300);
     expect(node.object3D.geometry.parameters.height).toBe(120);
+    node.dispose();
+  });
+
+  it("pads WebGPU text capture so glyphs can overflow text bounds", () => {
+    const factory = createPerElementCaptureFactory("text");
+    const node = factory.create(
+      { id: "layer-1" } as FrameObject,
+      makeContext(),
+    );
+    node.update(
+      makeState({
+        bounds: { x: 0, y: 0, width: 200, height: 100 },
+        style: { fontSize: 100 },
+      }),
+    );
+    expect(node.object3D.geometry.parameters.width).toBe(370);
+    expect(node.object3D.geometry.parameters.height).toBe(270);
     node.dispose();
   });
 
@@ -229,7 +292,50 @@ describe("perElementCaptureNode", () => {
     });
     node.update(makeState({ bounds: { x: 0, y: 0, width: 50, height: 25 } }));
     expect(drawElementImage).toHaveBeenCalledTimes(1);
-    expect(drawElementImage.mock.calls[0]?.slice(1)).toEqual([0, 0, 50, 25]);
+    expect(drawElementImage.mock.calls[0]?.slice(1)).toEqual([0, 0, 78, 53]);
+    node.dispose();
+  });
+
+  it("does not recapture unchanged text pixels every update", () => {
+    const sharedCapture = makeFakeSharedCapture();
+    const drawElementImage = vi.fn();
+    sharedCapture.context.drawElementImage = drawElementImage;
+    const root = new FakeElement();
+    const layer = new FakeElement();
+    layer.setAttribute("data-clipper-render-object-id", "layer-1");
+    root.appendChild(layer);
+    const factory = createPerElementCaptureFactory("text");
+    const node = factory.create({ id: "layer-1" } as FrameObject, {
+      sharedCapture:
+        sharedCapture as unknown as LayerNodeContext["sharedCapture"],
+      sourceRoot: () => root as unknown as Element,
+      requestRender: () => {},
+    });
+    node.update(makeState());
+    node.update(makeState());
+    expect(drawElementImage).toHaveBeenCalledTimes(1);
+    node.dispose();
+  });
+
+  it("does not recapture text pixels for opacity-only changes", () => {
+    const sharedCapture = makeFakeSharedCapture();
+    const drawElementImage = vi.fn();
+    sharedCapture.context.drawElementImage = drawElementImage;
+    const root = new FakeElement();
+    const layer = new FakeElement();
+    layer.setAttribute("data-clipper-render-object-id", "layer-1");
+    root.appendChild(layer);
+    const factory = createPerElementCaptureFactory("text");
+    const node = factory.create({ id: "layer-1" } as FrameObject, {
+      sharedCapture:
+        sharedCapture as unknown as LayerNodeContext["sharedCapture"],
+      sourceRoot: () => root as unknown as Element,
+      requestRender: () => {},
+    });
+    node.update(makeState({ style: { opacity: 1 } }));
+    node.update(makeState({ style: { opacity: 0.4 } }));
+    expect(drawElementImage).toHaveBeenCalledTimes(1);
+    expect(node.object3D.material.uniforms.u_opacity.value).toBeCloseTo(0.4);
     node.dispose();
   });
 

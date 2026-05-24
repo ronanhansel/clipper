@@ -1,4 +1,20 @@
 import * as THREE from "three";
+import { MeshBasicNodeMaterial } from "three/webgpu";
+import {
+  abs,
+  clamp,
+  float,
+  Fn,
+  length,
+  max,
+  min,
+  step,
+  texture as textureNode,
+  uniform,
+  uv,
+  vec2,
+  vec4,
+} from "three/tsl";
 import { MEDIA_PLACEHOLDER_DATA_URL } from "../../../../../core/mediaPlaceholder";
 import { normalizeClipperMediaUrl } from "../../../../../core/mediaSource";
 import type { EvaluatedObjectState } from "../../../../../core/propertyRegistry";
@@ -12,12 +28,16 @@ import type {
 import { resolveLayerTransform } from "../layerTransform";
 import {
   applyLayerLightingUniforms,
+  createLayerLightingNodes,
+  createLayerLightMultiplierNode,
   createLayerLightingUniforms,
   EMPTY_LAYER_LIGHTING,
   LAYER_LIGHTING_FRAGMENT,
   LAYER_LIGHTING_VERTEX_BODY,
   LAYER_LIGHTING_VERTEX_VARYINGS,
 } from "../layerLighting";
+
+type ImageMaterialUniforms = ReturnType<typeof createImageUniforms>;
 
 const IMAGE_VERTEX = `
   ${LAYER_LIGHTING_VERTEX_VARYINGS}
@@ -325,6 +345,126 @@ function clamp01(v: number): number {
   return v;
 }
 
+function createImageUniforms(image: unknown) {
+  return {
+    u_image: { value: image },
+    u_size: { value: new THREE.Vector2(1, 1) },
+    u_uvOrigin: { value: new THREE.Vector2(0, 0) },
+    u_uvSize: { value: new THREE.Vector2(1, 1) },
+    u_radius: { value: 0 },
+    u_opacity: { value: 1 },
+    u_alphaCutoff: { value: ALPHA_CUTOFF },
+    ...createLayerLightingUniforms(),
+  };
+}
+
+function createImageShaderMaterial(image: unknown) {
+  return new THREE.ShaderMaterial({
+    vertexShader: IMAGE_VERTEX,
+    fragmentShader: IMAGE_FRAGMENT,
+    uniforms: createImageUniforms(image),
+    transparent: true,
+    premultipliedAlpha: true,
+    depthTest: true,
+    depthWrite: true,
+    side: THREE.DoubleSide,
+  });
+}
+
+function createImageNodeMaterial(image: unknown) {
+  const uniforms = createImageUniforms(image);
+  const lightingNodes = createLayerLightingNodes(uniforms);
+  const lightMultiplierNode = createLayerLightMultiplierNode(lightingNodes);
+  const imageTextureNode = textureNode(image);
+  const sizeNode = uniform(uniforms.u_size.value);
+  const uvOriginNode = uniform(uniforms.u_uvOrigin.value);
+  const uvSizeNode = uniform(uniforms.u_uvSize.value);
+  const radiusNode = uniform(uniforms.u_radius.value);
+  const opacityNode = uniform(uniforms.u_opacity.value);
+  const alphaCutoffNode = uniform(uniforms.u_alphaCutoff.value);
+  const material = new MeshBasicNodeMaterial({
+    transparent: true,
+    premultipliedAlpha: true,
+    depthTest: true,
+    depthWrite: true,
+    side: THREE.DoubleSide,
+  });
+  material.fragmentNode = Fn(() => {
+    const imageUv = uv().mul(uvSizeNode).add(uvOriginNode);
+    const inside = step(0.0, imageUv.x)
+      .mul(step(imageUv.x, 1.0))
+      .mul(step(0.0, imageUv.y))
+      .mul(step(imageUv.y, 1.0));
+    const sample = imageTextureNode.sample(clamp(imageUv, 0.0, 1.0));
+    const px = uv().sub(0.5).mul(sizeNode);
+    const halfSize = sizeNode.mul(0.5);
+    const r = clamp(radiusNode, 0.0, min(halfSize.x, halfSize.y));
+    const q = abs(px).sub(halfSize).add(vec2(r));
+    const d = length(max(q, vec2(0.0)))
+      .add(min(max(q.x, q.y), 0.0))
+      .sub(r);
+    const coverage = clamp(float(0.5).sub(d), 0.0, 1.0);
+    const alpha = sample.a.mul(opacityNode).mul(coverage).mul(inside);
+    alpha.lessThan(alphaCutoffNode).discard();
+    return vec4(
+      sample.rgb
+        .mul(lightMultiplierNode)
+        .mul(opacityNode)
+        .mul(coverage)
+        .mul(inside),
+      alpha,
+    );
+  })();
+  material.userData.layerLightingUniforms = uniforms;
+  material.userData.layerLightingNodes = lightingNodes;
+  material.userData.layerShadowUniforms = uniforms;
+  material.userData.layerTextureNode = imageTextureNode;
+  material.userData.layerUniformNodes = {
+    u_radius: radiusNode,
+    u_opacity: opacityNode,
+    u_alphaCutoff: alphaCutoffNode,
+  };
+  material.userData.webgpuLayerMaterialPort = "image-fill";
+  return material;
+}
+
+function getImageMaterialUniforms(material: {
+  uniforms?: ImageMaterialUniforms;
+  userData?: { layerLightingUniforms?: unknown };
+}): ImageMaterialUniforms {
+  const uniforms =
+    material.uniforms ?? material.userData?.layerLightingUniforms;
+  return uniforms as ImageMaterialUniforms;
+}
+
+function syncImageNodeUniforms(
+  material: {
+    userData?: { layerUniformNodes?: Record<string, { value: unknown }> };
+  },
+  uniforms: ImageMaterialUniforms,
+): void {
+  const nodes = material.userData?.layerUniformNodes;
+  if (!nodes) return;
+  nodes.u_radius.value = uniforms.u_radius.value;
+  nodes.u_opacity.value = uniforms.u_opacity.value;
+  nodes.u_alphaCutoff.value = uniforms.u_alphaCutoff.value;
+}
+
+function setImageMaterialTexture(
+  material: {
+    uniforms?: ImageMaterialUniforms;
+    userData?: Record<string, any>;
+  },
+  texture: unknown,
+): void {
+  const uniforms = getImageMaterialUniforms(material);
+  uniforms.u_image.value = texture;
+  const node = material.userData?.layerTextureNode;
+  if (node && typeof node === "object" && "value" in node) {
+    node.value = texture;
+  }
+}
+
 class ImageNode implements LayerNode {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   readonly object3D: any;
@@ -349,25 +489,10 @@ class ImageNode implements LayerNode {
     this.requestRender = context.requestRender;
     this.context = context;
     this.placeholder = acquireImageTexture(MEDIA_PLACEHOLDER_DATA_URL);
-    this.material = new THREE.ShaderMaterial({
-      vertexShader: IMAGE_VERTEX,
-      fragmentShader: IMAGE_FRAGMENT,
-      uniforms: {
-        u_image: { value: this.placeholder },
-        u_size: { value: new THREE.Vector2(1, 1) },
-        u_uvOrigin: { value: new THREE.Vector2(0, 0) },
-        u_uvSize: { value: new THREE.Vector2(1, 1) },
-        u_radius: { value: 0 },
-        u_opacity: { value: 1 },
-        u_alphaCutoff: { value: ALPHA_CUTOFF },
-        ...createLayerLightingUniforms(),
-      },
-      transparent: true,
-      premultipliedAlpha: true,
-      depthTest: true,
-      depthWrite: true,
-      side: THREE.DoubleSide,
-    });
+    this.material =
+      context.materialBackend === "webgpu-node"
+        ? createImageNodeMaterial(this.placeholder)
+        : createImageShaderMaterial(this.placeholder);
     this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), this.material);
     this.mesh.name = `ImageNode:${id}`;
     this.object3D = this.mesh;
@@ -389,7 +514,7 @@ class ImageNode implements LayerNode {
     this.mesh.rotation.z = t.rotationZ;
     this.mesh.scale.set(t.scaleX, t.scaleY, 1);
 
-    const u = this.material.uniforms;
+    const u = getImageMaterialUniforms(this.material);
     u.u_size.value.set(t.width, t.height);
 
     const src = readImageSrc(state);
@@ -416,12 +541,12 @@ class ImageNode implements LayerNode {
           this.currentTexture = acquireImageTexture(src, this.requestRender);
           this.currentTextureLayerSized = false;
         }
-        u.u_image.value = this.currentTexture;
+        setImageMaterialTexture(this.material, this.currentTexture);
       } else {
         this.currentTextureKey = null;
         this.currentTexture = null;
         this.currentTextureLayerSized = false;
-        u.u_image.value = this.placeholder;
+        setImageMaterialTexture(this.material, this.placeholder);
       }
       this.currentSrc = src;
     }
@@ -447,6 +572,7 @@ class ImageNode implements LayerNode {
         ? state.style.borderRadius
         : 0;
     u.u_radius.value = Math.max(0, radius);
+    syncImageNodeUniforms(this.material, u);
     applyLayerLightingUniforms(
       this.material,
       this.context.getLighting?.() ?? EMPTY_LAYER_LIGHTING,

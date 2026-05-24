@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import * as THREE from "three";
+import { vec4 } from "three/tsl";
 import {
   CameraDofComposerPass,
   LensComposerPass,
   buildCameraComposerPasses,
   buildCameraDofComposerPass,
+  createCameraDofModeNode,
+  createCameraLensNode,
   computeSignedCocPx,
 } from "./cameraComposerPasses";
 import { getCameraLensPostProcessPass } from "../../../core/cameraEffectsPasses";
@@ -110,6 +113,21 @@ describe("LensComposerPass", () => {
     expect(pass.id).toBe("camera:camera-lens-pass");
     pass.setSize(frameSize.width, frameSize.height);
     pass.dispose();
+  });
+
+  it("builds a WebGPU-compatible TSL lens node", () => {
+    const camera = makeCamera((c) => {
+      c.lens.distortion.enabled = true;
+      c.lens.distortion.amount = 0.2;
+    });
+    const lensPass = getCameraLensPostProcessPass(camera, {
+      idScope: "camera",
+      frameSize,
+    });
+    expect(lensPass).not.toBeNull();
+    const node = createCameraLensNode(vec4(1, 1, 1, 1), lensPass!, frameSize);
+    expect(node).toBeDefined();
+    expect(node.isNode).toBe(true);
   });
 });
 
@@ -301,6 +319,25 @@ describe("CameraDofComposerPass", () => {
     expect(material.compositeMaterial.uniforms.u_blurMode.value).toBe(2);
 
     pass.dispose();
+  });
+
+  it("builds a WebGPU-compatible TSL DoF mode node", () => {
+    const camera = makeCamera((c) => {
+      c.dof.enabled = true;
+      c.dof.debug = true;
+      c.dof.blurMode = "near";
+      c.dof.fNumber = 2.8;
+    });
+    const dofPass = createCameraDofPass(camera, "camera");
+    expect(dofPass).not.toBeNull();
+    const node = createCameraDofModeNode(
+      vec4(1, 1, 1, 1),
+      vec4(0, 0, -100, 1).z,
+      dofPass!,
+      frameSize,
+    );
+    expect(node).toBeDefined();
+    expect(node.isNode).toBe(true);
   });
 });
 

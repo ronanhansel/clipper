@@ -764,32 +764,34 @@ export function CameraObjectSection() {
               </Select>
             </div>
             <div className="grid gap-1.5">
-              <span className={mutedCaps}>Focus Distance</span>
-              <KeyframableNumberInput
-                ariaLabel="Camera focus distance"
-                unitPrefix=""
-                step={1}
-                min={0}
-                value={liveValue("props.dof.focusDistance")}
-                active={isKeyframedNow("props.dof.focusDistance")}
-                onPreview={(value) =>
-                  previewBase("props.dof.focusDistance", value)
-                }
-                onCommit={(value) => commit("props.dof.focusDistance", value)}
-                onToggleKeyframe={() =>
-                  toggleKeyframe("props.dof.focusDistance")
-                }
-              />
+              <span className={mutedCaps}>Focus Mode</span>
+              <Select
+                value={props.autoFocus.enabled ? "auto" : "manual"}
+                onValueChange={(value) => setAutoFocusEnabled(value === "auto")}
+              >
+                <SelectTrigger className="h-8 rounded-[8px] px-2 text-xs">
+                  <SelectValue
+                    aria-label={
+                      props.autoFocus.enabled ? "Auto focus" : "Manual focus"
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem value="manual">Manual</SelectItem>
+                    <SelectItem value="auto">Auto</SelectItem>
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
             </div>
-            <div className="grid gap-2">
-              <span className={mutedCaps}>Auto Focus</span>
-              <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
-                <span className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
+            {props.autoFocus.enabled ? (
+              <div className="grid gap-2">
+                <span className={mutedCaps}>Auto Focus</span>
+                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
                   <TargetSelect
                     ariaLabel="Camera auto focus target"
                     value={liveStringValue("props.autoFocus.targetId")}
                     options={targetOptions}
-                    disabled={!props.autoFocus.enabled}
                     onChange={(targetId) =>
                       commitString("props.autoFocus.targetId", targetId)
                     }
@@ -797,127 +799,134 @@ export function CameraObjectSection() {
                   <KeyframeDiamond
                     ariaLabel="Camera auto focus target"
                     active={isKeyframedNow("props.autoFocus.targetId")}
-                    disabled={!props.autoFocus.enabled}
                     onToggle={() =>
                       toggleStringKeyframe("props.autoFocus.targetId")
                     }
                   />
-                </span>
-                <Switch
-                  aria-label="Toggle camera auto focus"
-                  checked={props.autoFocus.enabled}
-                  onCheckedChange={(checked) => setAutoFocusEnabled(checked)}
+                </div>
+                <KeyframableNumberInput
+                  ariaLabel="Camera auto focus Z offset"
+                  unitPrefix="Z"
+                  step={1}
+                  value={liveValue("props.autoFocus.zOffset")}
+                  active={isKeyframedNow("props.autoFocus.zOffset")}
+                  onPreview={(value) =>
+                    previewBase("props.autoFocus.zOffset", value)
+                  }
+                  onCommit={(value) => commit("props.autoFocus.zOffset", value)}
+                  onToggleKeyframe={() =>
+                    toggleKeyframe("props.autoFocus.zOffset")
+                  }
                 />
-              </div>
-              {props.autoFocus.enabled ? (
-                <>
-                  <KeyframableNumberInput
-                    ariaLabel="Camera auto focus Z offset"
-                    unitPrefix="Z"
-                    step={1}
-                    value={liveValue("props.autoFocus.zOffset")}
-                    active={isKeyframedNow("props.autoFocus.zOffset")}
-                    onPreview={(value) =>
-                      previewBase("props.autoFocus.zOffset", value)
-                    }
-                    onCommit={(value) =>
-                      commit("props.autoFocus.zOffset", value)
-                    }
-                    onToggleKeyframe={() =>
-                      toggleKeyframe("props.autoFocus.zOffset")
-                    }
-                  />
-                  <label className="flex items-center justify-between gap-3 text-xs font-semibold text-[#dfe2ea]">
-                    <span>Rack Focus</span>
-                    <span className="flex items-center gap-3">
-                      <KeyframeDiamond
-                        ariaLabel="Camera rack focus"
-                        active={isKeyframedNow("props.autoFocus.rackFocus")}
-                        onToggle={() =>
-                          toggleBooleanKeyframe("props.autoFocus.rackFocus")
+                <label className="flex items-center justify-between gap-3 text-xs font-semibold text-[#dfe2ea]">
+                  <span>Rack Focus</span>
+                  <span className="flex items-center gap-3">
+                    <KeyframeDiamond
+                      ariaLabel="Camera rack focus"
+                      active={isKeyframedNow("props.autoFocus.rackFocus")}
+                      onToggle={() =>
+                        toggleBooleanKeyframe("props.autoFocus.rackFocus")
+                      }
+                    />
+                    <Switch
+                      aria-label="Toggle rack focus"
+                      checked={liveBooleanValue("props.autoFocus.rackFocus")}
+                      onCheckedChange={(checked) =>
+                        commitBoolean("props.autoFocus.rackFocus", checked)
+                      }
+                    />
+                  </span>
+                </label>
+                {liveBooleanValue("props.autoFocus.rackFocus") ? (
+                  <>
+                    <div className="grid gap-1.5">
+                      <span className={mutedCaps}>Duration</span>
+                      <KeyframableNumberInput
+                        ariaLabel="Rack focus duration"
+                        unitPrefix="s"
+                        step={0.05}
+                        min={0}
+                        value={liveValue("props.autoFocus.duration")}
+                        active={isKeyframedNow("props.autoFocus.duration")}
+                        onPreview={(value) =>
+                          previewBase("props.autoFocus.duration", value)
+                        }
+                        onCommit={(value) =>
+                          commit("props.autoFocus.duration", value)
+                        }
+                        onToggleKeyframe={() =>
+                          toggleKeyframe("props.autoFocus.duration")
                         }
                       />
-                      <Switch
-                        aria-label="Toggle rack focus"
-                        checked={liveBooleanValue("props.autoFocus.rackFocus")}
-                        onCheckedChange={(checked) =>
-                          commitBoolean("props.autoFocus.rackFocus", checked)
-                        }
-                      />
-                    </span>
-                  </label>
-                  {liveBooleanValue("props.autoFocus.rackFocus") ? (
-                    <>
-                      <div className="grid gap-1.5">
-                        <span className={mutedCaps}>Duration</span>
-                        <KeyframableNumberInput
-                          ariaLabel="Rack focus duration"
-                          unitPrefix="s"
-                          step={0.05}
-                          min={0}
-                          value={liveValue("props.autoFocus.duration")}
-                          active={isKeyframedNow("props.autoFocus.duration")}
-                          onPreview={(value) =>
-                            previewBase("props.autoFocus.duration", value)
+                    </div>
+                    <div className="grid gap-1.5">
+                      <span className={mutedCaps}>Ease</span>
+                      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
+                        <Select
+                          value={
+                            liveStringValue("props.autoFocus.ease") ??
+                            props.autoFocus.ease
                           }
-                          onCommit={(value) =>
-                            commit("props.autoFocus.duration", value)
-                          }
-                          onToggleKeyframe={() =>
-                            toggleKeyframe("props.autoFocus.duration")
+                          onValueChange={(value) => {
+                            if (
+                              (MOTION_EASES as readonly string[]).includes(
+                                value,
+                              )
+                            )
+                              commitString("props.autoFocus.ease", value);
+                          }}
+                        >
+                          <SelectTrigger className="h-8 rounded-[8px] px-2 text-xs">
+                            <SelectValue
+                              aria-label={
+                                liveStringValue("props.autoFocus.ease") ??
+                                props.autoFocus.ease
+                              }
+                            />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <TooltipProvider
+                              delayDuration={1000}
+                              skipDelayDuration={0}
+                            >
+                              <SelectGroup>
+                                <EaseSelectItems />
+                              </SelectGroup>
+                            </TooltipProvider>
+                          </SelectContent>
+                        </Select>
+                        <KeyframeDiamond
+                          ariaLabel="Camera rack focus ease"
+                          active={isKeyframedNow("props.autoFocus.ease")}
+                          onToggle={() =>
+                            toggleStringKeyframe("props.autoFocus.ease")
                           }
                         />
                       </div>
-                      <div className="grid gap-1.5">
-                        <span className={mutedCaps}>Ease</span>
-                        <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
-                          <Select
-                            value={
-                              liveStringValue("props.autoFocus.ease") ??
-                              props.autoFocus.ease
-                            }
-                            onValueChange={(value) => {
-                              if (
-                                (MOTION_EASES as readonly string[]).includes(
-                                  value,
-                                )
-                              )
-                                commitString("props.autoFocus.ease", value);
-                            }}
-                          >
-                            <SelectTrigger className="h-8 rounded-[8px] px-2 text-xs">
-                              <SelectValue
-                                aria-label={
-                                  liveStringValue("props.autoFocus.ease") ??
-                                  props.autoFocus.ease
-                                }
-                              />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <TooltipProvider
-                                delayDuration={1000}
-                                skipDelayDuration={0}
-                              >
-                                <SelectGroup>
-                                  <EaseSelectItems />
-                                </SelectGroup>
-                              </TooltipProvider>
-                            </SelectContent>
-                          </Select>
-                          <KeyframeDiamond
-                            ariaLabel="Camera rack focus ease"
-                            active={isKeyframedNow("props.autoFocus.ease")}
-                            onToggle={() =>
-                              toggleStringKeyframe("props.autoFocus.ease")
-                            }
-                          />
-                        </div>
-                      </div>
-                    </>
-                  ) : null}
-                </>
-              ) : null}
-            </div>
+                    </div>
+                  </>
+                ) : null}
+              </div>
+            ) : (
+              <div className="grid gap-1.5">
+                <span className={mutedCaps}>Focus Distance</span>
+                <KeyframableNumberInput
+                  ariaLabel="Camera focus distance"
+                  unitPrefix="Z"
+                  step={1}
+                  min={0}
+                  value={liveValue("props.dof.focusDistance")}
+                  active={isKeyframedNow("props.dof.focusDistance")}
+                  onPreview={(value) =>
+                    previewBase("props.dof.focusDistance", value)
+                  }
+                  onCommit={(value) => commit("props.dof.focusDistance", value)}
+                  onToggleKeyframe={() =>
+                    toggleKeyframe("props.dof.focusDistance")
+                  }
+                />
+              </div>
+            )}
             <div className="grid gap-1.5">
               <span className={mutedCaps}>F-number</span>
               <KeyframableNumberInput

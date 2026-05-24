@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import * as THREE from "three";
 import type { EvaluatedObjectState } from "../../../../../core/propertyRegistry";
 import type { FrameObject } from "../../../../../core/types";
+import type { LayerNodeContext } from "../layerNodeRegistry";
 
 // SVGLoader internally calls `new DOMParser()`, which isn't present in
 // the vitest Node environment. Mocking the module gives us deterministic
@@ -111,6 +112,14 @@ function makeState(
   } as unknown as EvaluatedObjectState;
 }
 
+function makeContext(): LayerNodeContext {
+  return {
+    sharedCapture: undefined as unknown as LayerNodeContext["sharedCapture"],
+    sourceRoot: () => null,
+    requestRender: () => {},
+  };
+}
+
 async function flushAsync() {
   await Promise.resolve();
   await Promise.resolve();
@@ -182,6 +191,53 @@ describe("svgNodeFactory", () => {
     const mesh = pathsContainer.children[0];
     expect(mesh).toBeInstanceOf(THREE.Mesh);
     expect(mesh.material.color.getHexString()).toBe("00ff00");
+    node.dispose();
+  });
+
+  it("can create WebGPU-compatible node materials for SVG fill paths", async () => {
+    parseFn.mockImplementationOnce(() => ({
+      paths: [makeFakeShapePath({ fill: "#00ff00" })],
+      xml: {},
+    }));
+    const node = svgNodeFactoryRef.create({ id: "svg-1" } as FrameObject, {
+      ...makeContext(),
+      materialBackend: "webgpu-node",
+    });
+    node.update(makeState());
+    await flushAsync();
+
+    const mesh = node.object3D.children[0].children[0];
+    expect(mesh.material.isNodeMaterial).toBe(true);
+    expect(mesh.material.color.getHexString()).toBe("00ff00");
+    expect(mesh.material.userData.webgpuLayerMaterialPort).toBe("svg-fill");
+    expect(mesh.material.userData.layerLightingUniforms).toBeDefined();
+    expect(mesh.material.userData.layerLightingNodes).toBeDefined();
+    expect(mesh.material.fragmentNode).toBeDefined();
+    node.dispose();
+  });
+
+  it("can create WebGPU-compatible node materials for SVG stroke paths", async () => {
+    parseFn.mockImplementationOnce(() => ({
+      paths: [
+        makeFakeShapePath({
+          fill: "none",
+          stroke: "#0000ff",
+          strokeWidth: 2,
+        }),
+      ],
+      xml: {},
+    }));
+    const node = svgNodeFactoryRef.create({ id: "svg-1" } as FrameObject, {
+      ...makeContext(),
+      materialBackend: "webgpu-node",
+    });
+    node.update(makeState());
+    await flushAsync();
+
+    const mesh = node.object3D.children[0].children[0];
+    expect(mesh.material.isNodeMaterial).toBe(true);
+    expect(mesh.material.color.getHexString()).toBe("0000ff");
+    expect(mesh.material.userData.webgpuLayerMaterialPort).toBe("svg-stroke");
     node.dispose();
   });
 

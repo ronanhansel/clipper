@@ -8,6 +8,7 @@ import type {
   LayerNodeContext,
   LayerNodeFactory,
 } from "../layerNodeRegistry";
+import { createPerElementCaptureFactory } from "./perElementCaptureNode";
 import { resolveLayerTransform } from "../layerTransform";
 import {
   applyLayerLightingUniforms,
@@ -58,7 +59,7 @@ class TextNode implements LayerNode {
     this.material = new THREE.MeshBasicMaterial({
       transparent: true,
       depthTest: true,
-      depthWrite: true,
+      depthWrite: false,
       side: THREE.DoubleSide,
     });
     this.installLightingShaderPatch(this.material);
@@ -228,6 +229,9 @@ function resolveTroikaFontSource(value: unknown): string | null {
 export const textNodeFactory: LayerNodeFactory = {
   kind: "text",
   create(object: FrameObject, context: LayerNodeContext) {
+    if (context.materialBackend === "webgpu-node") {
+      return createPerElementCaptureFactory("text").create(object, context);
+    }
     return new TextNode(object.id, context);
   },
 };

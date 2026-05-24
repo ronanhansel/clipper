@@ -51,6 +51,47 @@ describe("rectNodeFactory", () => {
     node.dispose();
   });
 
+  it("can create a WebGPU-compatible node material for rects", () => {
+    const node = rectNodeFactory.create({ id: "rect-1" } as FrameObject, {
+      ...makeContext(),
+      materialBackend: "webgpu-node",
+    });
+    expect(node.object3D).toBeInstanceOf(THREE.Mesh);
+    expect(node.object3D.geometry).toBeInstanceOf(THREE.PlaneGeometry);
+    expect(node.object3D.material.isNodeMaterial).toBe(true);
+    expect(node.object3D.material.userData.webgpuLayerMaterialPort).toBe(
+      "rect-fill",
+    );
+    expect(node.object3D.material.userData.layerLightingUniforms).toBe(
+      node.object3D.material.userData.layerShadowUniforms,
+    );
+    expect(node.object3D.material.userData.layerLightingNodes).toBeDefined();
+    expect(node.object3D.material.fragmentNode).toBeDefined();
+    node.dispose();
+  });
+
+  it("updates the WebGPU node material's shared layer uniforms", () => {
+    const node = rectNodeFactory.create({ id: "rect-1" } as FrameObject, {
+      ...makeContext(),
+      materialBackend: "webgpu-node",
+    });
+    node.update(makeState());
+    const u = node.object3D.material.userData.layerLightingUniforms;
+    expect(u.u_size.value.x).toBe(200);
+    expect(u.u_size.value.y).toBe(100);
+    expect(u.u_color.value.x).toBeCloseTo(1);
+    expect(u.u_color.value.w).toBe(1);
+    expect(u.u_radius.value).toBe(12);
+    expect(u.u_opacity.value).toBe(1);
+    expect(
+      node.object3D.material.userData.layerUniformNodes.u_radius.value,
+    ).toBe(12);
+    expect(
+      node.object3D.material.userData.layerUniformNodes.u_opacity.value,
+    ).toBe(1);
+    node.dispose();
+  });
+
   it("update sets size, colour, radius, opacity uniforms", () => {
     const node = rectNodeFactory.create(
       { id: "rect-1" } as FrameObject,

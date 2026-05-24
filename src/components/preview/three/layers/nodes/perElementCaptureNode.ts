@@ -1,4 +1,6 @@
 import * as THREE from "three";
+import { MeshBasicNodeMaterial } from "three/webgpu";
+import { Fn, texture as textureNode, uniform, uv, vec4 } from "three/tsl";
 import type { EvaluatedObjectState } from "../../../../../core/propertyRegistry";
 import type { FrameObject, FrameObjectType } from "../../../../../core/types";
 import type {
@@ -9,6 +11,8 @@ import type {
 import { resolveLayerTransform } from "../layerTransform";
 import {
   applyLayerLightingUniforms,
+  createLayerLightingNodes,
+  createLayerLightMultiplierNode,
   createLayerLightingUniforms,
   EMPTY_LAYER_LIGHTING,
   LAYER_LIGHTING_FRAGMENT,
@@ -66,7 +70,12 @@ const PERELEMENT_FRAGMENT = `
   }
 `;
 
-const ALPHA_CUTOFF = 0.01;
+const DEFAULT_ALPHA_CUTOFF = 0.01;
+const TEXT_ALPHA_CUTOFF = 0.18;
+
+type PerElementCaptureUniforms = ReturnType<
+  typeof createPerElementCaptureUniforms
+>;
 
 type DrawElementImageContext = CanvasRenderingContext2D & {
   drawElementImage?: (
@@ -77,6 +86,87 @@ type DrawElementImageContext = CanvasRenderingContext2D & {
     height: number,
   ) => unknown;
 };
+
+function createPerElementCaptureUniforms(image: unknown, alphaCutoff: number) {
+  return {
+    u_image: { value: image },
+    u_alphaCutoff: { value: alphaCutoff },
+    u_opacity: { value: 1 },
+    ...createLayerLightingUniforms(),
+  };
+}
+
+function createPerElementCaptureShaderMaterial(
+  image: unknown,
+  alphaCutoff: number,
+) {
+  return new THREE.ShaderMaterial({
+    vertexShader: PERELEMENT_VERTEX,
+    fragmentShader: PERELEMENT_FRAGMENT,
+    uniforms: createPerElementCaptureUniforms(image, alphaCutoff),
+    transparent: true,
+    premultipliedAlpha: true,
+    depthTest: true,
+    depthWrite: true,
+    side: THREE.DoubleSide,
+  });
+}
+
+function createPerElementCaptureNodeMaterial(
+  image: unknown,
+  alphaCutoff: number,
+) {
+  const uniforms = createPerElementCaptureUniforms(image, alphaCutoff);
+  const lightingNodes = createLayerLightingNodes(uniforms);
+  const lightMultiplierNode = createLayerLightMultiplierNode(lightingNodes);
+  const imageTextureNode = textureNode(image);
+  const opacityNode = uniform(uniforms.u_opacity.value);
+  const alphaCutoffNode = uniform(uniforms.u_alphaCutoff.value);
+  const material = new MeshBasicNodeMaterial({
+    transparent: true,
+    premultipliedAlpha: true,
+    depthTest: true,
+    depthWrite: true,
+    side: THREE.DoubleSide,
+  });
+  material.fragmentNode = Fn(() => {
+    const sample = imageTextureNode.sample(uv());
+    const alpha = sample.a.mul(opacityNode);
+    alpha.lessThan(alphaCutoffNode).discard();
+    return vec4(sample.rgb.mul(lightMultiplierNode).mul(alpha), alpha);
+  })();
+  material.userData.layerLightingUniforms = uniforms;
+  material.userData.layerLightingNodes = lightingNodes;
+  material.userData.layerShadowUniforms = uniforms;
+  material.userData.layerTextureNode = imageTextureNode;
+  material.userData.layerUniformNodes = {
+    u_opacity: opacityNode,
+    u_alphaCutoff: alphaCutoffNode,
+  };
+  material.userData.webgpuLayerMaterialPort = "capture-fill";
+  return material;
+}
+
+function getPerElementCaptureUniforms(material: {
+  uniforms?: PerElementCaptureUniforms;
+  userData?: { layerLightingUniforms?: unknown };
+}): PerElementCaptureUniforms {
+  const uniforms =
+    material.uniforms ?? material.userData?.layerLightingUniforms;
+  return uniforms as PerElementCaptureUniforms;
+}
+
+function syncPerElementCaptureNodeUniforms(
+  material: {
+    userData?: { layerUniformNodes?: Record<string, { value: unknown }> };
+  },
+  uniforms: PerElementCaptureUniforms,
+): void {
+  const nodes = material.userData?.layerUniformNodes;
+  if (!nodes) return;
+  nodes.u_opacity.value = uniforms.u_opacity.value;
+  nodes.u_alphaCutoff.value = uniforms.u_alphaCutoff.value;
+}
 
 class PerElementCaptureNode implements LayerNode {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -90,13 +180,23 @@ class PerElementCaptureNode implements LayerNode {
   private readonly canvas: HTMLCanvasElement;
   private readonly ctx: CanvasRenderingContext2D;
   private readonly id: string;
+  private readonly kind: FrameObjectType | "default";
   private readonly context: LayerNodeContext;
   private width = 1;
   private height = 1;
+  private capturePadding = 0;
+  private captureWidth = 1;
+  private captureHeight = 1;
+  private lastCaptureKey = "";
   private warnedMissing = false;
 
-  constructor(id: string, context: LayerNodeContext) {
+  constructor(
+    id: string,
+    kind: FrameObjectType | "default",
+    context: LayerNodeContext,
+  ) {
     this.id = id;
+    this.kind = kind;
     this.context = context;
     this.canvas = document.createElement("canvas");
     this.canvas.width = 1;
@@ -116,20 +216,12 @@ class PerElementCaptureNode implements LayerNode {
     this.texture.colorSpace = THREE.SRGBColorSpace;
     this.texture.needsUpdate = true;
 
-    this.material = new THREE.ShaderMaterial({
-      vertexShader: PERELEMENT_VERTEX,
-      fragmentShader: PERELEMENT_FRAGMENT,
-      uniforms: {
-        u_image: { value: this.texture },
-        u_alphaCutoff: { value: ALPHA_CUTOFF },
-        u_opacity: { value: 1 },
-        ...createLayerLightingUniforms(),
-      },
-      transparent: false,
-      depthTest: true,
-      depthWrite: true,
-      side: THREE.DoubleSide,
-    });
+    const alphaCutoff =
+      kind === "text" ? TEXT_ALPHA_CUTOFF : DEFAULT_ALPHA_CUTOFF;
+    this.material =
+      context.materialBackend === "webgpu-node"
+        ? createPerElementCaptureNodeMaterial(this.texture, alphaCutoff)
+        : createPerElementCaptureShaderMaterial(this.texture, alphaCutoff);
     this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), this.material);
     this.mesh.name = `PerElementCaptureNode:${id}`;
     this.object3D = this.mesh;
@@ -140,10 +232,22 @@ class PerElementCaptureNode implements LayerNode {
     if (t.width !== this.width || t.height !== this.height) {
       this.width = t.width;
       this.height = t.height;
-      this.canvas.width = t.width;
-      this.canvas.height = t.height;
+    }
+    const capturePadding = estimateCapturePadding(this.kind, state);
+    const captureWidth = Math.max(1, Math.ceil(t.width + capturePadding * 2));
+    const captureHeight = Math.max(1, Math.ceil(t.height + capturePadding * 2));
+    if (
+      capturePadding !== this.capturePadding ||
+      captureWidth !== this.captureWidth ||
+      captureHeight !== this.captureHeight
+    ) {
+      this.capturePadding = capturePadding;
+      this.captureWidth = captureWidth;
+      this.captureHeight = captureHeight;
+      this.canvas.width = captureWidth;
+      this.canvas.height = captureHeight;
       this.mesh.geometry.dispose();
-      this.mesh.geometry = new THREE.PlaneGeometry(t.width, t.height);
+      this.mesh.geometry = new THREE.PlaneGeometry(captureWidth, captureHeight);
     }
 
     this.mesh.position.set(t.positionX, t.positionY, t.positionZ);
@@ -155,16 +259,19 @@ class PerElementCaptureNode implements LayerNode {
 
     const opacity =
       typeof state.style?.opacity === "number" ? state.style.opacity : 1;
-    this.material.uniforms.u_opacity.value = clamp01(opacity);
+    const uniforms = getPerElementCaptureUniforms(this.material);
+    uniforms.u_opacity.value = clamp01(opacity);
+    syncPerElementCaptureNodeUniforms(this.material, uniforms);
     applyLayerLightingUniforms(
       this.material,
       this.context.getLighting?.() ?? EMPTY_LAYER_LIGHTING,
     );
 
-    this.captureLayerPixels();
+    this.captureLayerPixels(createCaptureKey(this.kind, state));
   }
 
-  private captureLayerPixels(): void {
+  private captureLayerPixels(captureKey: string): void {
+    if (this.kind === "text" && captureKey === this.lastCaptureKey) return;
     const sourceRoot = this.context.sourceRoot();
     if (!sourceRoot) return;
     const layerEl = sourceRoot.querySelector(
@@ -178,31 +285,43 @@ class PerElementCaptureNode implements LayerNode {
     if (typeof drawElementImage !== "function") return;
 
     const sharedCanvas = this.context.sharedCapture.canvas;
-    const captureEl = createCaptureClone(layerEl, this.width, this.height);
+    if (sharedCanvas.width !== this.captureWidth)
+      sharedCanvas.width = this.captureWidth;
+    if (sharedCanvas.height !== this.captureHeight)
+      sharedCanvas.height = this.captureHeight;
+    const captureEl = createCaptureClone(
+      layerEl,
+      this.width,
+      this.height,
+      this.capturePadding,
+      this.captureWidth,
+      this.captureHeight,
+    );
     try {
       sharedCanvas.appendChild(captureEl);
-      sharedCtx.clearRect(0, 0, this.width, this.height);
+      sharedCtx.clearRect(0, 0, this.captureWidth, this.captureHeight);
       drawElementImage.call(
         sharedCtx,
         captureEl,
         0,
         0,
-        this.width,
-        this.height,
+        this.captureWidth,
+        this.captureHeight,
       );
-      this.ctx.clearRect(0, 0, this.width, this.height);
+      this.ctx.clearRect(0, 0, this.captureWidth, this.captureHeight);
       this.ctx.drawImage(
         sharedCanvas,
         0,
         0,
-        this.width,
-        this.height,
+        this.captureWidth,
+        this.captureHeight,
         0,
         0,
-        this.width,
-        this.height,
+        this.captureWidth,
+        this.captureHeight,
       );
       this.texture.needsUpdate = true;
+      this.lastCaptureKey = captureKey;
     } catch (error) {
       if (!this.warnedMissing) {
         this.warnedMissing = true;
@@ -248,14 +367,17 @@ function createCaptureClone(
   source: Element,
   width: number,
   height: number,
+  padding: number,
+  captureWidth: number,
+  captureHeight: number,
 ): HTMLElement {
   const clone = source.cloneNode(true) as HTMLElement;
   if (!clone.style)
     throw new Error("PerElementCaptureNode: capture source is not HTMLElement");
   Object.assign(clone.style, {
     position: "absolute",
-    left: "0px",
-    top: "0px",
+    left: `${padding}px`,
+    top: `${padding}px`,
     width: `${width}px`,
     height: `${height}px`,
     transform: "none",
@@ -264,7 +386,54 @@ function createCaptureClone(
     margin: "0",
   } as Partial<CSSStyleDeclaration>);
   clone.removeAttribute("data-object-id");
-  return clone;
+  if (padding <= 0) return clone;
+
+  const wrapper = document.createElement("div");
+  Object.assign(wrapper.style, {
+    position: "absolute",
+    left: "0px",
+    top: "0px",
+    width: `${captureWidth}px`,
+    height: `${captureHeight}px`,
+    overflow: "visible",
+    pointerEvents: "none",
+    margin: "0",
+  } as Partial<CSSStyleDeclaration>);
+  wrapper.appendChild(clone);
+  return wrapper;
+}
+
+function estimateCapturePadding(
+  kind: FrameObjectType | "default",
+  state: EvaluatedObjectState,
+): number {
+  if (kind !== "text") return 0;
+  const fontSize =
+    typeof state.style?.fontSize === "number" ? state.style.fontSize : 16;
+  return Math.ceil(Math.max(8, fontSize * 0.85));
+}
+
+function createCaptureKey(
+  kind: FrameObjectType | "default",
+  state: EvaluatedObjectState,
+): string {
+  if (kind !== "text") return `${Date.now()}:${Math.random()}`;
+  return JSON.stringify({
+    width: state.bounds?.width,
+    height: state.bounds?.height,
+    content: state.content,
+    style: {
+      color: state.style?.color,
+      fontFamily: state.style?.fontFamily,
+      fontSize: state.style?.fontSize,
+      fontSource: state.style?.fontSource,
+      fontStyle: state.style?.fontStyle,
+      fontWeight: state.style?.fontWeight,
+      letterSpacing: state.style?.letterSpacing,
+      lineHeight: state.style?.lineHeight,
+      textAlign: state.style?.textAlign,
+    },
+  });
 }
 
 export function createPerElementCaptureFactory(
@@ -273,7 +442,7 @@ export function createPerElementCaptureFactory(
   return {
     kind,
     create(object: FrameObject, context: LayerNodeContext) {
-      return new PerElementCaptureNode(object.id, context);
+      return new PerElementCaptureNode(object.id, kind, context);
     },
   };
 }

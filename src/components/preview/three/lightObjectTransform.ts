@@ -8,18 +8,11 @@ export type LightWorldPoint = { x: number; y: number; z: number };
 export function resolveLightTargetFromTransform(
   position: LightWorldPoint,
   transform: Record<string, unknown>,
-  fallbackTarget: LightWorldPoint,
+  _fallbackTarget?: LightWorldPoint,
 ): LightWorldPoint {
   const rotateX = readNumber(transform.rotateX, 0);
   const rotateY = readNumber(transform.rotateY, 0);
   const rotateZ = readNumber(transform.rotateZ, 0);
-  if (
-    Math.abs(rotateX) < 0.0001 &&
-    Math.abs(rotateY) < 0.0001 &&
-    Math.abs(rotateZ) < 0.0001
-  ) {
-    return fallbackTarget;
-  }
   const direction = new THREE.Vector3(0, 0, -1);
   const quaternion = new THREE.Quaternion().setFromEuler(
     new THREE.Euler(

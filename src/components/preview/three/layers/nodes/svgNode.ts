@@ -1,4 +1,6 @@
 import * as THREE from "three";
+import { MeshBasicNodeMaterial } from "three/webgpu";
+import { color as colorNode, float, vec4 } from "three/tsl";
 // SVGLoader ships no bundled type declarations on three@0.184; the
 // project's `src/types/three.d.ts` already declares `module "three"` as
 // any, but the addons path needs its own ambient.
@@ -15,6 +17,8 @@ import type {
 import { resolveLayerTransform } from "../layerTransform";
 import {
   applyLayerLightingUniforms,
+  createLayerLightingNodes,
+  createLayerLightMultiplierNode,
   createLayerLightingUniforms,
   EMPTY_LAYER_LIGHTING,
   LAYER_LIGHTING_FRAGMENT,
@@ -234,14 +238,13 @@ class SvgNode implements LayerNode {
         if (shapes && shapes.length > 0) {
           const depthWrite = fillOpacity >= 1;
           const geometry = new THREE.ShapeGeometry(shapes);
-          const material = new THREE.MeshBasicMaterial({
-            color: new THREE.Color(style.fill),
-            transparent: fillOpacity < 1,
-            opacity: fillOpacity,
+          const material = createSvgMaterial(
+            style.fill,
+            fillOpacity,
             depthWrite,
-            side: THREE.DoubleSide,
-          });
-          installLightingShaderPatch(material);
+            this.context,
+            "svg-fill",
+          );
           const mesh = new THREE.Mesh(geometry, material);
           mesh.position.z = drawIndex * SVG_PATH_Z_STEP;
           this.pathsContainer.add(mesh);
@@ -264,14 +267,13 @@ class SvgNode implements LayerNode {
           const geometry = SVGLoader.pointsToStroke(points, style);
           if (!geometry) continue;
           const depthWrite = strokeOpacity >= 1;
-          const material = new THREE.MeshBasicMaterial({
-            color: new THREE.Color(style.stroke),
-            transparent: strokeOpacity < 1,
-            opacity: strokeOpacity,
+          const material = createSvgMaterial(
+            style.stroke,
+            strokeOpacity,
             depthWrite,
-            side: THREE.DoubleSide,
-          });
-          installLightingShaderPatch(material);
+            this.context,
+            "svg-stroke",
+          );
           const mesh = new THREE.Mesh(geometry, material);
           mesh.position.z = drawIndex * SVG_PATH_Z_STEP;
           this.pathsContainer.add(mesh);
@@ -323,10 +325,7 @@ class SvgNode implements LayerNode {
   private applyLighting(): void {
     const lighting = this.context?.getLighting?.() ?? EMPTY_LAYER_LIGHTING;
     for (const entry of this.materialEntries) {
-      applyLayerLightingUniforms(
-        { uniforms: entry.material.userData.layerLightingUniforms },
-        lighting,
-      );
+      applyLayerLightingUniforms(entry.material, lighting);
     }
   }
 
@@ -368,6 +367,41 @@ export const svgNodeFactory: LayerNodeFactory = {
     return new SvgNode(object.id, context);
   },
 };
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function createSvgMaterial(
+  color: string,
+  opacity: number,
+  depthWrite: boolean,
+  context: LayerNodeContext | undefined,
+  portName: "svg-fill" | "svg-stroke",
+): any {
+  const params = {
+    color: new THREE.Color(color),
+    transparent: opacity < 1,
+    opacity,
+    depthWrite,
+    side: THREE.DoubleSide,
+  };
+  if (context?.materialBackend === "webgpu-node") {
+    const material = new MeshBasicNodeMaterial(params);
+    const uniforms = createLayerLightingUniforms();
+    const lightingNodes = createLayerLightingNodes(uniforms);
+    material.fragmentNode = vec4(
+      colorNode(params.color).mul(
+        createLayerLightMultiplierNode(lightingNodes),
+      ),
+      float(opacity),
+    );
+    material.userData.layerLightingUniforms = uniforms;
+    material.userData.layerLightingNodes = lightingNodes;
+    material.userData.webgpuLayerMaterialPort = portName;
+    return material;
+  }
+  const material = new THREE.MeshBasicMaterial(params);
+  installLightingShaderPatch(material);
+  return material;
+}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function installLightingShaderPatch(material: any): void {

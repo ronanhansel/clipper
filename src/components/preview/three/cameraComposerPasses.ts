@@ -1,6 +1,25 @@
 import * as THREE from "three";
 import { Pass } from "three/examples/jsm/postprocessing/Pass.js";
 import {
+  clamp,
+  convertToTexture,
+  float,
+  Fn,
+  length,
+  Loop,
+  max,
+  min,
+  mix,
+  radians,
+  smoothstep,
+  step,
+  tan,
+  uv,
+  vec2,
+  vec3,
+  vec4,
+} from "three/tsl";
+import {
   getCameraLensPostProcessPass,
   type CameraEffectsPassOptions,
 } from "../../../core/cameraEffectsPasses";
@@ -186,6 +205,189 @@ export class LensComposerPass extends (Pass as any) {
     this.material.dispose();
     // Geometry is module-shared; do not dispose here.
   }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function createCameraLensNode(
+  sourceNode: any,
+  pass: LensPostProcessPass,
+  frameSize: { width: number; height: number },
+) {
+  const sourceTexture = convertToTexture(sourceNode);
+  const u = pass.uniforms;
+  const mask = u.chromaticAberrationMask;
+  const resolution = vec2(frameSize.width, frameSize.height);
+  const focus = vec2(u.focus.x, u.focus.y);
+  const radiusPixels = float(u.radiusPixels);
+  const softness = float(u.softness);
+  const magnification = float(u.magnification);
+  const distortion = float(u.distortion);
+  const chromaticAberrationPixels = float(u.chromaticAberrationPixels);
+  const rimWidth = float(u.rimWidth);
+  const rimOpacity = float(u.rimOpacity);
+  const dimAmount = float(u.dimAmount);
+  const frameBackground = vec3(
+    u.frameBackground.r,
+    u.frameBackground.g,
+    u.frameBackground.b,
+  );
+  const chromaMaskEnabled = float(mask.enabled ? 1 : 0);
+  const chromaMaskPreview = float(mask.preview ? 1 : 0);
+  const chromaMaskApplyInside = float(mask.applyInside ? 1 : 0);
+  const chromaMaskFocus = vec2(mask.focus.x, mask.focus.y);
+  const chromaMaskRadius = vec2(mask.radiusX, mask.radiusY);
+  const chromaMaskFeather = float(mask.feather);
+  const previewRgb = vec3(
+    shapeMaskPreviewRgb.r,
+    shapeMaskPreviewRgb.g,
+    shapeMaskPreviewRgb.b,
+  );
+
+  return Fn(() => {
+    const lensUv = uv();
+    const pixel = lensUv.mul(resolution);
+    const center = focus.mul(resolution);
+    const delta = pixel.sub(center);
+    const deltaLength = length(delta);
+    const distanceRatio = deltaLength.div(max(radiusPixels, 1.0));
+    const inner = clamp(
+      float(1.0).sub(max(softness, 0.0).mul(0.42)),
+      0.0,
+      0.98,
+    );
+    const falloff = float(1.0).sub(smoothstep(inner, 1.0, distanceRatio));
+    const coverage = float(1.0).sub(smoothstep(0.995, 1.0, distanceRatio));
+    const rimInner = clamp(float(1.0).sub(rimWidth), 0.0, 0.98);
+    const rim = smoothstep(rimInner, 1.0, distanceRatio).mul(coverage);
+    const zoom = mix(
+      float(1.0),
+      float(1.0).div(max(magnification, 0.01)),
+      falloff,
+    );
+    const barrel = float(1.0).add(
+      distortion
+        .mul(distanceRatio)
+        .mul(distanceRatio)
+        .mul(max(falloff, rim))
+        .mul(0.5),
+    );
+    const distortedUv = center.add(delta.mul(zoom).mul(barrel)).div(resolution);
+    const direction = delta.div(max(deltaLength, 0.001));
+    const maskCenter = chromaMaskFocus.mul(resolution);
+    const maskDelta = pixel.sub(maskCenter);
+    const maskRadius = max(chromaMaskRadius, vec2(1.0));
+    const maskNorm = maskDelta.div(maskRadius);
+    const maskDistRatio = length(maskNorm);
+    const maskSoftEdge = chromaMaskFeather.div(
+      max(min(maskRadius.x, maskRadius.y), 1.0),
+    );
+    const shapeMaskCoverage = float(1.0).sub(
+      smoothstep(1.0, float(1.0).add(maskSoftEdge), maskDistRatio),
+    );
+    const maskFactor = mix(
+      float(1.0).sub(shapeMaskCoverage),
+      shapeMaskCoverage,
+      step(0.5, chromaMaskApplyInside),
+    );
+    const chromaMask = max(rim, falloff.mul(0.35)).mul(
+      mix(float(1.0), maskFactor, step(0.5, chromaMaskEnabled)),
+    );
+    const aberration = direction
+      .mul(chromaticAberrationPixels)
+      .mul(chromaMask)
+      .div(resolution);
+    const red = sourceTexture.sample(distortedUv.add(aberration)).r;
+    const green = sourceTexture.sample(distortedUv).g;
+    const blue = sourceTexture.sample(distortedUv.sub(aberration)).b;
+    const lensColor = vec3(red, green, blue);
+    const color = mix(frameBackground, lensColor, coverage)
+      .mul(float(1.0).sub(dimAmount.mul(float(1.0).sub(coverage))))
+      .add(vec3(0.22).mul(rim).mul(rimOpacity));
+    const previewAmount = step(0.5, chromaMaskPreview)
+      .mul(step(0.5, chromaMaskEnabled))
+      .mul(maskFactor)
+      .mul(shapeMaskPreviewOpacity);
+    return vec4(mix(color, previewRgb, previewAmount), 1.0);
+  })();
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function createCameraDofModeNode(
+  sourceNode: any,
+  viewZNode: any,
+  pass: CameraDofPass,
+  frameSize: { width: number; height: number },
+) {
+  const sourceTexture = convertToTexture(sourceNode);
+  const u = pass.uniforms;
+  const resolution = vec2(frameSize.width, frameSize.height);
+  const sensorHeight = float(u.sensorHeight);
+  const fov = float(u.fov);
+  const focusDistance = float(Math.max(u.focusDistance, 0.001));
+  const fNumber = float(Math.max(u.fNumber, 0.1));
+  const maxBlurPx = float(Math.max(u.maxBlurPx, 1));
+  const blurMode = dofBlurModeToUniform(u.blurMode);
+  const debug = u.debug ? 1 : 0;
+  const goldenAngle = float(2.39996323);
+  const tapCount = 64;
+
+  return Fn(() => {
+    const lensUv = uv();
+    const sceneDepth = viewZNode.negate();
+    const fovRad = radians(fov);
+    const focalLengthMm = sensorHeight.div(tan(fovRad.mul(0.5)).mul(2.0));
+    const minDistance = focalLengthMm.mul(1.01);
+    const focus = max(focusDistance, minDistance);
+    const subject = max(sceneDepth, minDistance);
+    const apertureDiameter = focalLengthMm.div(fNumber);
+    const denom = max(focus.mul(subject.sub(focalLengthMm)), 0.000001);
+    const cocMm = apertureDiameter
+      .mul(focalLengthMm)
+      .mul(subject.sub(focus))
+      .div(denom);
+    const cocPx = clamp(
+      cocMm.mul(resolution.y.div(sensorHeight)),
+      maxBlurPx.negate(),
+      maxBlurPx,
+    );
+    const nearAmount = cocPx.negate();
+    const farAmount = cocPx;
+    const activeCoc =
+      blurMode === 1
+        ? nearAmount
+        : blurMode === 2
+          ? farAmount
+          : max(nearAmount, farAmount);
+    const blurPx = max(activeCoc, 0.0);
+    const blend = smoothstep(
+      0.25,
+      max(2.0, min(12.0, maxBlurPx.mul(0.12))),
+      blurPx,
+    );
+    const sharp = sourceTexture.sample(lensUv);
+
+    if (debug) {
+      const nearSignal =
+        blurMode === 2 ? float(0) : clamp(nearAmount.div(maxBlurPx), 0.0, 1.0);
+      const farSignal =
+        blurMode === 1 ? float(0) : clamp(farAmount.div(maxBlurPx), 0.0, 1.0);
+      return vec4(nearSignal, farSignal.mul(0.85), farSignal, 1.0);
+    }
+
+    const acc = vec3(0, 0, 0).toVar();
+    Loop(tapCount, ({ i }: { i: any }) => {
+      const fi = float(i).add(0.5);
+      const r = fi.div(float(tapCount)).sqrt();
+      const theta = fi.mul(goldenAngle);
+      const offset = vec2(theta.cos(), theta.sin())
+        .mul(r)
+        .mul(blurPx)
+        .div(resolution);
+      acc.addAssign(sourceTexture.sample(lensUv.add(offset)).rgb);
+    });
+    const blurred = vec4(acc.div(float(tapCount)), sharp.a);
+    return mix(sharp, blurred, blend);
+  })();
 }
 
 /**

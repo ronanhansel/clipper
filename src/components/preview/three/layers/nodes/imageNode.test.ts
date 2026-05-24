@@ -109,6 +109,75 @@ describe("imageNodeFactory", () => {
     node.dispose();
   });
 
+  it("can create a WebGPU-compatible node material for images", () => {
+    const node = imageNodeFactory.create({ id: "image-1" } as FrameObject, {
+      ...makeContext(),
+      materialBackend: "webgpu-node",
+    });
+    expect(node.object3D).toBeInstanceOf(THREE.Mesh);
+    expect(node.object3D.geometry).toBeInstanceOf(THREE.PlaneGeometry);
+    expect(node.object3D.material.isNodeMaterial).toBe(true);
+    expect(node.object3D.material.transparent).toBe(true);
+    expect(node.object3D.material.premultipliedAlpha).toBe(true);
+    expect(node.object3D.material.userData.webgpuLayerMaterialPort).toBe(
+      "image-fill",
+    );
+    expect(node.object3D.material.userData.layerLightingUniforms).toBe(
+      node.object3D.material.userData.layerShadowUniforms,
+    );
+    expect(node.object3D.material.userData.layerLightingNodes).toBeDefined();
+    expect(node.object3D.material.fragmentNode).toBeDefined();
+    node.dispose();
+  });
+
+  it("updates the WebGPU node material texture and crop uniforms", () => {
+    const node = imageNodeFactory.create({ id: "image-1" } as FrameObject, {
+      ...makeContext(),
+      materialBackend: "webgpu-node",
+    });
+    node.update(
+      makeState({
+        bounds: { x: 0, y: 0, width: 100, height: 100 },
+        style: { src: "wide-node.png", objectFit: "cover", opacity: 0.75 },
+      }),
+    );
+    const material = node.object3D.material;
+    const uniforms = material.userData.layerLightingUniforms;
+    const tex = uniforms.u_image.value as { image: FakeImage };
+    tex.image.naturalWidth = 200;
+    tex.image.naturalHeight = 100;
+    node.update(
+      makeState({
+        bounds: { x: 0, y: 0, width: 100, height: 100 },
+        style: { src: "wide-node.png", objectFit: "cover", opacity: 0.75 },
+      }),
+    );
+    expect(material.userData.layerTextureNode.value).toBe(tex);
+    expect(uniforms.u_uvSize.value.x).toBeCloseTo(0.5);
+    expect(uniforms.u_uvOrigin.value.x).toBeCloseTo(0.25);
+    expect(uniforms.u_opacity.value).toBeCloseTo(0.75);
+    expect(material.userData.layerUniformNodes.u_opacity.value).toBeCloseTo(
+      0.75,
+    );
+    expect(material.userData.layerUniformNodes.u_radius.value).toBe(0);
+    node.dispose();
+  });
+
+  it("swaps the WebGPU texture node value when image src changes", () => {
+    const node = imageNodeFactory.create({ id: "image-1" } as FrameObject, {
+      ...makeContext(),
+      materialBackend: "webgpu-node",
+    });
+    node.update(makeState({ style: { src: "node-a.png", opacity: 1 } }));
+    const firstTexture = node.object3D.material.userData.layerTextureNode.value;
+    node.update(makeState({ style: { src: "node-b.png", opacity: 1 } }));
+    const secondTexture =
+      node.object3D.material.userData.layerTextureNode.value;
+    expect(secondTexture).toBeInstanceOf(THREE.Texture);
+    expect(secondTexture).not.toBe(firstTexture);
+    node.dispose();
+  });
+
   it("premultiplies image textures so filtered SVG alpha edges blend cleanly", () => {
     const texture = acquireImageTexture("transparent.svg");
     expect(texture.premultiplyAlpha).toBe(true);

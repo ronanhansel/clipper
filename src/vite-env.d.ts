@@ -115,6 +115,7 @@ interface Window {
       relativePath: string,
     ) => Promise<{ name: string; isDirectory: boolean }[]>;
     listTemplates?: () => Promise<ClipperTemplateBundle[]>;
+    compositionRendererBackend?: "auto" | "webgl" | "webgpu";
     findProjectFileByName: (
       directoryPath: string,
       fileName: string,

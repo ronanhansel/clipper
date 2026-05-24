@@ -1,5 +1,24 @@
 import * as THREE from "three";
+import { MeshBasicNodeMaterial } from "three/webgpu";
+import {
+  abs,
+  clamp,
+  float,
+  Fn,
+  length,
+  max,
+  min,
+  modelViewMatrix,
+  positionLocal,
+  step,
+  texture as textureNode,
+  uniform,
+  uv,
+  vec2,
+  vec4,
+} from "three/tsl";
 import { evaluateObjectState } from "../../../../core/propertyRegistry";
+import { FRAME_HEIGHT, FRAME_WIDTH } from "../../../../core/types";
 import type {
   CompositionClip,
   FrameObject,
@@ -63,8 +82,20 @@ export type LayerShadowDebugImage = {
 };
 
 const SHADOW_MAP_SIZE = 2048;
+const SHADOW_DEBUG_SIZE = 64;
 const SHADOW_BIAS = 0.004;
 const SHADOW_DARKNESS = 0.72;
+const DIRECTIONAL_SHADOW_EXTENT = Math.hypot(FRAME_WIDTH, FRAME_HEIGHT);
+const DIRECTIONAL_SHADOW_FAR = 6000;
+
+type LayerShadowBackend = "webgl-shader" | "webgpu-node";
+
+type ShadowDepthUniforms = ReturnType<typeof createShadowDepthUniforms>;
+
+type ShadowDepthNodeUniforms = {
+  u_shadowNear: ReturnType<typeof uniform>;
+  u_shadowFar: ReturnType<typeof uniform>;
+};
 
 const SHADOW_VERTEX = `
   varying vec2 vUv;
@@ -133,9 +164,16 @@ const SHADOW_ROUNDED_RECT_FRAGMENT = `
 
 export class LayerShadowSync {
   readonly group = new THREE.Group();
-  private readonly renderTarget: InstanceType<typeof THREE.WebGLRenderTarget>;
+  private readonly backend: LayerShadowBackend;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private readonly renderTarget: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private readonly debugRenderTarget: any;
   private readonly shadowMatrix = new THREE.Matrix4();
-  private readonly camera = new THREE.PerspectiveCamera();
+  private camera:
+    | InstanceType<typeof THREE.OrthographicCamera>
+    | InstanceType<typeof THREE.PerspectiveCamera> =
+    new THREE.OrthographicCamera();
   private readonly solidMaterial = new THREE.ShaderMaterial({
     vertexShader: SHADOW_VERTEX,
     fragmentShader: SHADOW_SOLID_FRAGMENT,
@@ -144,6 +182,7 @@ export class LayerShadowSync {
     depthWrite: true,
     side: THREE.DoubleSide,
   });
+  private readonly solidNodeMaterial = createSolidShadowDepthNodeMaterial();
   private readonly textureMaterial = new THREE.ShaderMaterial({
     vertexShader: SHADOW_VERTEX,
     fragmentShader: SHADOW_TEXTURE_FRAGMENT,
@@ -181,6 +220,7 @@ export class LayerShadowSync {
     far: 1200,
     bias: SHADOW_BIAS,
     darkness: SHADOW_DARKNESS,
+    mapFlipY: false,
   };
   private diagnostics: LayerShadowDiagnostics = {
     active: false,
@@ -190,21 +230,33 @@ export class LayerShadowSync {
     render: { visibleCasters: 0, casterOwners: [] },
     objects: [],
   };
+  private shadowInputSignature = "";
+  private cachedDebugImage: LayerShadowDebugImage | null = null;
+  private pendingAsyncReadback = false;
 
-  constructor() {
+  constructor(options: { backend?: LayerShadowBackend } = {}) {
+    this.backend = options.backend ?? "webgl-shader";
     this.group.name = "LayerShadowSync";
-    this.renderTarget = new THREE.WebGLRenderTarget(
-      SHADOW_MAP_SIZE,
-      SHADOW_MAP_SIZE,
-      {
-        depthBuffer: true,
-        type: THREE.HalfFloatType,
-        format: THREE.RGBAFormat,
-        colorSpace: THREE.NoColorSpace,
-        minFilter: THREE.LinearFilter,
-        magFilter: THREE.LinearFilter,
-      },
-    );
+    const Target =
+      this.backend === "webgpu-node"
+        ? THREE.RenderTarget
+        : THREE.WebGLRenderTarget;
+    this.renderTarget = new Target(SHADOW_MAP_SIZE, SHADOW_MAP_SIZE, {
+      depthBuffer: true,
+      type: THREE.HalfFloatType,
+      format: THREE.RGBAFormat,
+      colorSpace: THREE.NoColorSpace,
+      minFilter: THREE.LinearFilter,
+      magFilter: THREE.LinearFilter,
+    });
+    this.debugRenderTarget = new Target(SHADOW_DEBUG_SIZE, SHADOW_DEBUG_SIZE, {
+      depthBuffer: true,
+      type: THREE.UnsignedByteType,
+      format: THREE.RGBAFormat,
+      colorSpace: THREE.NoColorSpace,
+      minFilter: THREE.NearestFilter,
+      magFilter: THREE.NearestFilter,
+    });
   }
 
   sync(
@@ -228,11 +280,19 @@ export class LayerShadowSync {
     }
 
     this.configureCamera(light);
-    const renderDiagnostics = this.renderShadowMap(
-      renderer,
-      layerRoot,
+    const shadowInputSignature = buildShadowInputSignature(
+      part,
+      localTime,
+      light,
       casterIds,
+      layerRoot,
     );
+    const canReuseShadowMap =
+      this.state.active && shadowInputSignature === this.shadowInputSignature;
+    const renderDiagnostics = canReuseShadowMap
+      ? this.diagnostics.render
+      : this.renderShadowMap(renderer, layerRoot, casterIds);
+    this.shadowInputSignature = shadowInputSignature;
     this.shadowMatrix
       .identity()
       .multiply(this.camera.projectionMatrix)
@@ -246,6 +306,7 @@ export class LayerShadowSync {
       far: this.camera.far,
       bias: SHADOW_BIAS,
       darkness: SHADOW_DARKNESS,
+      mapFlipY: this.backend === "webgpu-node",
     };
     this.diagnostics = {
       active: true,
@@ -277,6 +338,10 @@ export class LayerShadowSync {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   readDebugImageData(renderer: any, size = 64): LayerShadowDebugImage | null {
     if (!this.state.active) return null;
+    // First try the dedicated RGBA8 debug target — universally readable.
+    const fromDebugTarget = this.readFromDebugTarget(renderer, size);
+    if (fromDebugTarget) return fromDebugTarget;
+    // Fall back to reading the main HalfFloat target.
     try {
       const source = new Uint16Array(SHADOW_MAP_SIZE * SHADOW_MAP_SIZE * 4);
       renderer.readRenderTargetPixels(
@@ -287,20 +352,61 @@ export class LayerShadowSync {
         SHADOW_MAP_SIZE,
         source,
       );
+      return buildDebugImageFromHalfFloat(
+        source,
+        size,
+        SHADOW_MAP_SIZE,
+        this.diagnostics.objects,
+      );
+    } catch {
+      // Synchronous readback failed — try async for WebGPU.
+      this.tryAsyncReadback(renderer, size);
+      return this.cachedDebugImage;
+    }
+  }
+
+  getCachedDebugImage(): LayerShadowDebugImage | null {
+    return this.cachedDebugImage;
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private readFromDebugTarget(
+    renderer: any,
+    size: number,
+  ): LayerShadowDebugImage | null {
+    try {
+      const pixels = new Uint8Array(SHADOW_DEBUG_SIZE * SHADOW_DEBUG_SIZE * 4);
+      renderer.readRenderTargetPixels(
+        this.debugRenderTarget,
+        0,
+        0,
+        SHADOW_DEBUG_SIZE,
+        SHADOW_DEBUG_SIZE,
+        pixels,
+      );
+      // Verify we got non-trivial data (not all zeros)
+      let hasData = false;
+      for (let i = 0; i < pixels.length; i += 4) {
+        if (pixels[i] !== 0) {
+          hasData = true;
+          break;
+        }
+      }
+      if (!hasData) return null;
       const image = new ImageData(size, size);
       let minDepth = 1;
       let maxDepth = 0;
       let nonClearSamples = 0;
       for (let y = 0; y < size; y += 1) {
         for (let x = 0; x < size; x += 1) {
-          const sx = Math.floor((x / size) * SHADOW_MAP_SIZE);
-          const sy = Math.floor((y / size) * SHADOW_MAP_SIZE);
-          const sourceIndex = (sy * SHADOW_MAP_SIZE + sx) * 4;
-          const depth = halfFloatToNumber(source[sourceIndex]);
+          const sx = Math.floor((x / size) * SHADOW_DEBUG_SIZE);
+          const sy = Math.floor((y / size) * SHADOW_DEBUG_SIZE);
+          const sourceIndex = (sy * SHADOW_DEBUG_SIZE + sx) * 4;
+          const depth = pixels[sourceIndex] / 255;
           minDepth = Math.min(minDepth, depth);
           maxDepth = Math.max(maxDepth, depth);
-          if (depth < 0.999) nonClearSamples += 1;
-          const value = Math.round(depth * 255);
+          if (depth < 0.99) nonClearSamples += 1;
+          const value = pixels[sourceIndex];
           const targetIndex = (y * size + x) * 4;
           image.data[targetIndex] = value;
           image.data[targetIndex + 1] = value;
@@ -308,32 +414,64 @@ export class LayerShadowSync {
           image.data[targetIndex + 3] = 255;
         }
       }
-      return {
+      const result: LayerShadowDebugImage = {
         image,
-        map: {
-          minDepth,
-          maxDepth,
-          nonClearSamples,
-          totalSamples: size * size,
-        },
-        objects: withShadowSamples(this.diagnostics.objects, source),
+        map: { minDepth, maxDepth, nonClearSamples, totalSamples: size * size },
+        objects: withShadowSamplesFromRgba8(
+          this.diagnostics.objects,
+          pixels,
+          SHADOW_DEBUG_SIZE,
+        ),
       };
+      this.cachedDebugImage = result;
+      return result;
     } catch {
       return null;
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private tryAsyncReadback(renderer: any, size: number): void {
+    if (this.pendingAsyncReadback) return;
+    if (typeof renderer.readRenderTargetPixelsAsync !== "function") return;
+    this.pendingAsyncReadback = true;
+    renderer
+      .readRenderTargetPixelsAsync(
+        this.renderTarget,
+        0,
+        0,
+        SHADOW_MAP_SIZE,
+        SHADOW_MAP_SIZE,
+      )
+      .then((buffer: ArrayBuffer) => {
+        const source = new Uint16Array(buffer);
+        this.cachedDebugImage = buildDebugImageFromHalfFloat(
+          source,
+          size,
+          SHADOW_MAP_SIZE,
+          this.diagnostics.objects,
+        );
+      })
+      .catch(() => {})
+      .finally(() => {
+        this.pendingAsyncReadback = false;
+      });
+  }
+
   dispose(): void {
     this.renderTarget.dispose();
+    this.debugRenderTarget.dispose();
     this.solidMaterial.dispose();
     this.textureMaterial.dispose();
     this.roundedRectMaterial.dispose();
+    this.solidNodeMaterial.dispose();
   }
 
   private deactivate(
     reason: string,
     light: ShadowLight | null = null,
   ): LayerShadowState {
+    this.shadowInputSignature = "";
     this.state = {
       active: false,
       texture: null,
@@ -343,6 +481,7 @@ export class LayerShadowSync {
       far: this.camera.far,
       bias: SHADOW_BIAS,
       darkness: SHADOW_DARKNESS,
+      mapFlipY: false,
     };
     this.diagnostics = {
       active: false,
@@ -368,17 +507,43 @@ export class LayerShadowSync {
     );
     if (position.distanceToSquared(target) < 1) target.set(0, 0, 0);
 
-    const perspective = new THREE.PerspectiveCamera(
-      Math.min(175, Math.max(1, light.angle)),
+    if (light.kind === "spot" || light.kind === "point") {
+      const far = Math.max(10, light.range);
+      const perspective = new THREE.PerspectiveCamera(
+        light.kind === "point" ? 90 : Math.min(175, Math.max(1, light.angle)),
+        1,
+        1,
+        far,
+      );
+      perspective.position.copy(position);
+      perspective.lookAt(target);
+      perspective.updateMatrixWorld();
+      perspective.updateProjectionMatrix();
+      this.copyCamera(perspective);
+      return;
+    }
+
+    const extent = DIRECTIONAL_SHADOW_EXTENT;
+    const sceneCenter = new THREE.Vector3(0, 0, 0);
+    const lightDirection = target.clone().sub(position);
+    if (lightDirection.lengthSq() < 1) lightDirection.set(0, 0, -1);
+    lightDirection.normalize();
+    const shadowCameraPosition = sceneCenter
+      .clone()
+      .sub(lightDirection.multiplyScalar(DIRECTIONAL_SHADOW_FAR * 0.5));
+    const orthographic = new THREE.OrthographicCamera(
+      -extent,
+      extent,
+      extent,
+      -extent,
       1,
-      1,
-      Math.max(10, light.range),
+      DIRECTIONAL_SHADOW_FAR,
     );
-    perspective.position.copy(position);
-    perspective.lookAt(target);
-    perspective.updateMatrixWorld();
-    perspective.updateProjectionMatrix();
-    this.copyCamera(perspective);
+    orthographic.position.copy(shadowCameraPosition);
+    orthographic.lookAt(sceneCenter);
+    orthographic.updateMatrixWorld();
+    orthographic.updateProjectionMatrix();
+    this.copyCamera(orthographic);
   }
 
   private copyCamera(
@@ -386,10 +551,35 @@ export class LayerShadowSync {
       | InstanceType<typeof THREE.PerspectiveCamera>
       | InstanceType<typeof THREE.OrthographicCamera>,
   ): void {
+    this.camera =
+      camera instanceof THREE.PerspectiveCamera
+        ? new THREE.PerspectiveCamera()
+        : new THREE.OrthographicCamera();
     this.camera.position.copy(camera.position);
     this.camera.quaternion.copy(camera.quaternion);
     this.camera.near = camera.near;
     this.camera.far = camera.far;
+    if (
+      camera instanceof THREE.OrthographicCamera &&
+      this.camera instanceof THREE.OrthographicCamera
+    ) {
+      this.camera.left = camera.left;
+      this.camera.right = camera.right;
+      this.camera.top = camera.top;
+      this.camera.bottom = camera.bottom;
+      this.camera.zoom = camera.zoom;
+    }
+    if (
+      camera instanceof THREE.PerspectiveCamera &&
+      this.camera instanceof THREE.PerspectiveCamera
+    ) {
+      this.camera.fov = camera.fov;
+      this.camera.aspect = camera.aspect;
+      this.camera.zoom = camera.zoom;
+      this.camera.focus = camera.focus;
+      this.camera.filmGauge = camera.filmGauge;
+      this.camera.filmOffset = camera.filmOffset;
+    }
     this.camera.projectionMatrix.copy(camera.projectionMatrix);
     this.camera.projectionMatrixInverse.copy(camera.projectionMatrixInverse);
     this.camera.updateMatrixWorld();
@@ -446,6 +636,10 @@ export class LayerShadowSync {
     renderer.setClearColor(0xffffff, 1);
     renderer.clear(true, true, true);
     renderer.render(layerRoot, this.camera);
+    // Render the same scene into a small RGBA8 target for reliable debug readback.
+    renderer.setRenderTarget(this.debugRenderTarget);
+    renderer.clear(true, true, true);
+    renderer.render(layerRoot, this.camera);
     renderer.setRenderTarget(previousTarget);
     renderer.setClearColor(previousClearColor, previousClearAlpha);
 
@@ -460,7 +654,17 @@ export class LayerShadowSync {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private materialFor(source: any) {
     const material = Array.isArray(source) ? source[0] : source;
-    const uniforms = material?.uniforms;
+    const uniforms =
+      material?.userData?.layerShadowUniforms ?? material?.uniforms;
+    if (this.backend === "webgpu-node" || material?.isNodeMaterial === true) {
+      if (uniforms?.u_image) {
+        return createTextureShadowDepthNodeMaterial(uniforms, material);
+      }
+      if (uniforms?.u_color && uniforms?.u_size && uniforms?.u_radius) {
+        return createRoundedRectShadowDepthNodeMaterial(uniforms, material);
+      }
+      return this.solidNodeMaterial;
+    }
     if (uniforms?.u_image) {
       const shadowMaterial = this.textureMaterial.clone();
       shadowMaterial.userData.layerShadowSyncDisposable = true;
@@ -508,10 +712,142 @@ function applyShadowDepthUniforms(
   near: number,
   far: number,
 ): void {
+  const nodes = material?.userData?.layerShadowDepthNodes as
+    | ShadowDepthNodeUniforms
+    | undefined;
+  if (nodes) {
+    nodes.u_shadowNear.value = near;
+    nodes.u_shadowFar.value = far;
+  }
   if (!material?.uniforms) return;
-  if (material.uniforms.u_shadowNear)
+  if (material.uniforms.u_shadowNear) {
     material.uniforms.u_shadowNear.value = near;
-  if (material.uniforms.u_shadowFar) material.uniforms.u_shadowFar.value = far;
+  }
+  if (material.uniforms.u_shadowFar) {
+    material.uniforms.u_shadowFar.value = far;
+  }
+}
+
+function createSolidShadowDepthNodeMaterial() {
+  const uniforms = createShadowDepthUniforms();
+  const nodes = createShadowDepthNodes(uniforms);
+  const material = new MeshBasicNodeMaterial({
+    depthTest: true,
+    depthWrite: true,
+    side: THREE.DoubleSide,
+  });
+  material.fragmentNode = Fn(() =>
+    vec4(createShadowDepthNode(nodes), 0, 0, 1),
+  )();
+  material.userData.layerShadowDepthNodes = nodes;
+  material.userData.webgpuLayerShadowMaterialPort = "solid-depth";
+  return material;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function createTextureShadowDepthNodeMaterial(uniforms: any, source: any) {
+  const depthUniforms = createShadowDepthUniforms();
+  const nodes = createShadowDepthNodes(depthUniforms);
+  const imageTextureNode = textureNode(
+    uniforms.u_image.value ?? createOpaqueShadowDepthTexture(),
+  );
+  const uvOriginNode = uniform(
+    uniforms.u_uvOrigin?.value ?? new THREE.Vector2(0, 0),
+  );
+  const uvSizeNode = uniform(
+    uniforms.u_uvSize?.value ?? new THREE.Vector2(1, 1),
+  );
+  const opacityNode = uniform(uniforms.u_opacity?.value ?? source.opacity ?? 1);
+  const material = new MeshBasicNodeMaterial({
+    depthTest: true,
+    depthWrite: true,
+    side: THREE.DoubleSide,
+  });
+  material.fragmentNode = Fn(() => {
+    const imageUv = uv().mul(uvSizeNode).add(uvOriginNode);
+    const inside = step(0.0, imageUv.x)
+      .mul(step(imageUv.x, 1.0))
+      .mul(step(0.0, imageUv.y))
+      .mul(step(imageUv.y, 1.0));
+    const sample = imageTextureNode.sample(clamp(imageUv, 0.0, 1.0));
+    const alpha = sample.a.mul(opacityNode).mul(inside);
+    alpha.lessThan(0.02).discard();
+    return vec4(createShadowDepthNode(nodes), 0, 0, 1);
+  })();
+  material.userData.layerShadowDepthNodes = nodes;
+  material.userData.layerShadowSyncDisposable = true;
+  material.userData.webgpuLayerShadowMaterialPort = "texture-depth";
+  return material;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function createRoundedRectShadowDepthNodeMaterial(uniforms: any, source: any) {
+  const depthUniforms = createShadowDepthUniforms();
+  const nodes = createShadowDepthNodes(depthUniforms);
+  const colorNode = uniform(uniforms.u_color.value);
+  const sizeNode = uniform(uniforms.u_size.value);
+  const radiusNode = uniform(uniforms.u_radius.value);
+  const opacityNode = uniform(uniforms.u_opacity?.value ?? source.opacity ?? 1);
+  const material = new MeshBasicNodeMaterial({
+    depthTest: true,
+    depthWrite: true,
+    side: THREE.DoubleSide,
+  });
+  material.fragmentNode = Fn(() => {
+    const px = uv().sub(0.5).mul(sizeNode);
+    const halfSize = sizeNode.mul(0.5);
+    const r = clamp(radiusNode, 0.0, min(halfSize.x, halfSize.y));
+    const q = abs(px).sub(halfSize).add(vec2(r));
+    const d = length(max(q, vec2(0.0)))
+      .add(min(max(q.x, q.y), 0.0))
+      .sub(r);
+    const coverage = clamp(float(0.5).sub(d), 0.0, 1.0);
+    const alpha = colorNode.a.mul(opacityNode).mul(coverage);
+    alpha.lessThan(0.02).discard();
+    return vec4(createShadowDepthNode(nodes), 0, 0, 1);
+  })();
+  material.userData.layerShadowDepthNodes = nodes;
+  material.userData.layerShadowSyncDisposable = true;
+  material.userData.webgpuLayerShadowMaterialPort = "rounded-rect-depth";
+  return material;
+}
+
+function createShadowDepthNodes(
+  uniforms: ShadowDepthUniforms,
+): ShadowDepthNodeUniforms {
+  return {
+    u_shadowNear: uniform(uniforms.u_shadowNear.value),
+    u_shadowFar: uniform(uniforms.u_shadowFar.value),
+  };
+}
+
+function createShadowDepthNode(nodes: ShadowDepthNodeUniforms) {
+  const viewPosition = modelViewMatrix.mul(vec4(positionLocal, 1.0));
+  return clamp(
+    viewPosition.z
+      .negate()
+      .sub(nodes.u_shadowNear)
+      .div(max(0.0001, nodes.u_shadowFar.sub(nodes.u_shadowNear))),
+    0.0,
+    1.0,
+  );
+}
+
+let opaqueShadowDepthTexture: InstanceType<typeof THREE.DataTexture> | null =
+  null;
+
+function createOpaqueShadowDepthTexture(): InstanceType<
+  typeof THREE.DataTexture
+> {
+  if (opaqueShadowDepthTexture) return opaqueShadowDepthTexture;
+  opaqueShadowDepthTexture = new THREE.DataTexture(
+    new Uint8Array([255, 255, 255, 255]),
+    1,
+    1,
+    THREE.RGBAFormat,
+  );
+  opaqueShadowDepthTexture.needsUpdate = true;
+  return opaqueShadowDepthTexture;
 }
 
 function findShadowLight(
@@ -523,7 +859,7 @@ function findShadowLight(
     const props = object.props ?? {};
     if (props.castShadow === false) continue;
     const kind = readLightKind(props.kind);
-    if (kind !== "directional") continue;
+    if (kind !== "directional" && kind !== "spot" && kind !== "point") continue;
     const state = evaluateObjectState(object, localTime);
     const t = resolveLayerTransform(state);
     const transform =
@@ -551,8 +887,11 @@ function findShadowLight(
         transform,
         fallbackTarget,
       ),
-      range: readNumber(props.range, 1200),
-      angle: readNumber(props.angle, 45),
+      range:
+        kind === "spot" || kind === "point"
+          ? Math.max(10, readNumber(props.range, 1200))
+          : DIRECTIONAL_SHADOW_EXTENT,
+      angle: kind === "point" ? 90 : readNumber(props.angle, 45),
     };
   }
   return null;
@@ -565,6 +904,45 @@ function canCastShadow(object: FrameObject): boolean {
     object.type !== "light" &&
     object.props?.castShadow !== false
   );
+}
+
+function buildShadowInputSignature(
+  part: CompositionClip,
+  localTime: number,
+  light: ShadowLight,
+  casterIds: Set<string>,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  layerRoot: any,
+): string {
+  const casterState = part.objects
+    .filter((object) => casterIds.has(object.id))
+    .map((object) => {
+      const state = evaluateObjectState(object, localTime);
+      const transform = resolveLayerTransform(state);
+      return {
+        id: object.id,
+        bounds: state.bounds,
+        props: state.props,
+        style: state.style,
+        transform,
+        type: state.type,
+      };
+    });
+  const materialState: string[] = [];
+  layerRoot.traverse((node: { isMesh?: boolean }) => {
+    if (!node.isMesh) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const mesh = node as any;
+    const owner = findFrameObjectOwner(mesh);
+    if (!owner || !casterIds.has(owner)) return;
+    materialState.push(`${owner}:${readMaterialSignature(mesh.material)}`);
+  });
+  materialState.sort();
+  return JSON.stringify({
+    light,
+    casters: casterState,
+    materials: materialState,
+  });
 }
 
 function diagnoseObjects(
@@ -641,7 +1019,12 @@ function withShadowSamples(
       SHADOW_MAP_SIZE - 1,
       Math.max(0, Math.floor(object.shadow.v * SHADOW_MAP_SIZE)),
     );
-    const closestDepth = sampleClosestDepth(source, x, y);
+    const closestDepth = sampleClosestDepthHalfFloat(
+      source,
+      x,
+      y,
+      SHADOW_MAP_SIZE,
+    );
     const depthDelta = object.shadow.depth - closestDepth;
     return {
       ...object,
@@ -655,17 +1038,103 @@ function withShadowSamples(
   });
 }
 
-function sampleClosestDepth(source: Uint16Array, x: number, y: number): number {
+function withShadowSamplesFromRgba8(
+  objects: LayerShadowObjectDiagnostics[],
+  pixels: Uint8Array,
+  mapSize: number,
+): LayerShadowObjectDiagnostics[] {
+  return objects.map((object) => {
+    if (!object.shadow.inside) return object;
+    const x = Math.min(
+      mapSize - 1,
+      Math.max(0, Math.floor(object.shadow.u * mapSize)),
+    );
+    const y = Math.min(
+      mapSize - 1,
+      Math.max(0, Math.floor(object.shadow.v * mapSize)),
+    );
+    const closestDepth = sampleClosestDepthRgba8(pixels, x, y, mapSize);
+    const depthDelta = object.shadow.depth - closestDepth;
+    return {
+      ...object,
+      shadow: {
+        ...object.shadow,
+        closestDepth,
+        depthDelta,
+        blockedAfterBias: depthDelta > SHADOW_BIAS,
+      },
+    };
+  });
+}
+
+function sampleClosestDepthHalfFloat(
+  source: Uint16Array,
+  x: number,
+  y: number,
+  mapSize: number,
+): number {
   let closest = 1;
   for (let dx = -1; dx <= 1; dx += 1) {
     for (let dy = -1; dy <= 1; dy += 1) {
-      const sx = Math.min(SHADOW_MAP_SIZE - 1, Math.max(0, x + dx));
-      const sy = Math.min(SHADOW_MAP_SIZE - 1, Math.max(0, y + dy));
-      const depth = halfFloatToNumber(source[(sy * SHADOW_MAP_SIZE + sx) * 4]);
+      const sx = Math.min(mapSize - 1, Math.max(0, x + dx));
+      const sy = Math.min(mapSize - 1, Math.max(0, y + dy));
+      const depth = halfFloatToNumber(source[(sy * mapSize + sx) * 4]);
       closest = Math.min(closest, depth);
     }
   }
   return closest;
+}
+
+function sampleClosestDepthRgba8(
+  pixels: Uint8Array,
+  x: number,
+  y: number,
+  mapSize: number,
+): number {
+  let closest = 1;
+  for (let dx = -1; dx <= 1; dx += 1) {
+    for (let dy = -1; dy <= 1; dy += 1) {
+      const sx = Math.min(mapSize - 1, Math.max(0, x + dx));
+      const sy = Math.min(mapSize - 1, Math.max(0, y + dy));
+      const depth = pixels[(sy * mapSize + sx) * 4] / 255;
+      closest = Math.min(closest, depth);
+    }
+  }
+  return closest;
+}
+
+function buildDebugImageFromHalfFloat(
+  source: Uint16Array,
+  size: number,
+  mapSize: number,
+  objects: LayerShadowObjectDiagnostics[],
+): LayerShadowDebugImage {
+  const image = new ImageData(size, size);
+  let minDepth = 1;
+  let maxDepth = 0;
+  let nonClearSamples = 0;
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const sx = Math.floor((x / size) * mapSize);
+      const sy = Math.floor((y / size) * mapSize);
+      const sourceIndex = (sy * mapSize + sx) * 4;
+      const depth = halfFloatToNumber(source[sourceIndex]);
+      minDepth = Math.min(minDepth, depth);
+      maxDepth = Math.max(maxDepth, depth);
+      if (depth < 0.999) nonClearSamples += 1;
+      const value = Math.round(depth * 255);
+      const targetIndex = (y * size + x) * 4;
+      image.data[targetIndex] = value;
+      image.data[targetIndex + 1] = value;
+      image.data[targetIndex + 2] = value;
+      image.data[targetIndex + 3] = 255;
+    }
+  }
+  return {
+    image,
+    map: { minDepth, maxDepth, nonClearSamples, totalSamples: size * size },
+    objects: withShadowSamples(objects, source),
+  };
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -679,8 +1148,32 @@ function findFrameObjectOwner(object: any): string | null {
   return null;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function readMaterialSignature(source: any): string {
+  const materials = Array.isArray(source) ? source : [source];
+  return materials
+    .map((material) => {
+      const uniforms =
+        material?.userData?.layerShadowUniforms ?? material?.uniforms;
+      const image = uniforms?.u_image?.value;
+      return [
+        material?.uuid ?? "",
+        material?.version ?? 0,
+        material?.opacity ?? "",
+        image?.uuid ?? "",
+        image?.version ?? "",
+      ].join("/");
+    })
+    .join("|");
+}
+
 function readLightKind(value: unknown): LightObjectKind {
-  if (value === "ambient" || value === "directional" || value === "point") {
+  if (
+    value === "ambient" ||
+    value === "directional" ||
+    value === "point" ||
+    value === "spot"
+  ) {
     return value;
   }
   return "directional";

@@ -373,6 +373,7 @@ export type LightObjectProps = {
   angle: number;
   softness: number;
   debug: boolean;
+  showRange: boolean;
 };
 
 export const DEFAULT_LIGHT_OBJECT_PROPS: LightObjectProps = {
@@ -385,6 +386,7 @@ export const DEFAULT_LIGHT_OBJECT_PROPS: LightObjectProps = {
   angle: 45,
   softness: 0.25,
   debug: true,
+  showRange: true,
 };
 
 export type CameraAutoOrient = "off" | "along-path" | "lock";

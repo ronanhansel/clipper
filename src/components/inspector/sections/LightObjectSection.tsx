@@ -15,6 +15,7 @@ import { useObjectInspector } from "../objectInspectorContext";
 
 const LIGHT_KIND_OPTIONS: Array<{ value: LightObjectKind; label: string }> = [
   { value: "directional", label: "Directional" },
+  { value: "spot", label: "Spot" },
   { value: "point", label: "Point" },
   { value: "ambient", label: "Ambient" },
 ];
@@ -63,7 +64,10 @@ export function LightObjectSection() {
           onValueChange={(value) =>
             updateProps((next) => {
               next.kind = readLightKind(value);
-              next.castShadow = value === "directional";
+              next.castShadow =
+                value === "directional" ||
+                value === "spot" ||
+                value === "point";
             })
           }
         >
@@ -90,16 +94,18 @@ export function LightObjectSection() {
           onCommit={setNumber("intensity")}
           onPreview={setNumber("intensity")}
         />
-        <LightInput
-          label="Range"
-          type="number"
-          value={readNumber(props.range, 1200)}
-          min={1}
-          step={10}
-          onCommit={setNumber("range")}
-          onPreview={setNumber("range")}
-        />
-        {kind === "directional" ? (
+        {kind === "point" || kind === "spot" ? (
+          <LightInput
+            label="Range"
+            type="number"
+            value={readNumber(props.range, 1200)}
+            min={1}
+            step={10}
+            onCommit={setNumber("range")}
+            onPreview={setNumber("range")}
+          />
+        ) : null}
+        {kind === "spot" ? (
           <>
             <LightInput
               label="Angle"
@@ -125,20 +131,37 @@ export function LightObjectSection() {
         ) : null}
       </div>
 
-      <div className="grid grid-cols-[1fr_auto] items-center gap-3">
-        <label className="text-[11px] font-medium text-[#9aa3b6]">
-          Cast Shadows
-        </label>
-        <Switch
-          checked={Boolean(props.castShadow) && kind === "directional"}
-          disabled={kind !== "directional"}
-          onCheckedChange={(checked) =>
-            updateProps((next) => {
-              next.castShadow = checked;
-            })
-          }
-        />
-      </div>
+      {kind === "directional" || kind === "spot" || kind === "point" ? (
+        <div className="grid grid-cols-[1fr_auto] items-center gap-3">
+          <label className="text-[11px] font-medium text-[#9aa3b6]">
+            Cast Shadows
+          </label>
+          <Switch
+            checked={Boolean(props.castShadow)}
+            onCheckedChange={(checked) =>
+              updateProps((next) => {
+                next.castShadow = checked;
+              })
+            }
+          />
+        </div>
+      ) : null}
+
+      {kind === "point" || kind === "spot" ? (
+        <div className="grid grid-cols-[1fr_auto] items-center gap-3">
+          <label className="text-[11px] font-medium text-[#9aa3b6]">
+            Show Range
+          </label>
+          <Switch
+            checked={props.showRange !== false}
+            onCheckedChange={(checked) =>
+              updateProps((next) => {
+                next.showRange = checked;
+              })
+            }
+          />
+        </div>
+      ) : null}
 
       <div className="grid grid-cols-[1fr_auto] items-center gap-3">
         <label className="text-[11px] font-medium text-[#9aa3b6]">Debug</label>
@@ -152,24 +175,28 @@ export function LightObjectSection() {
         />
       </div>
 
-      <div className="grid gap-1.5">
-        <label className="text-[11px] font-medium text-[#9aa3b6]">Color</label>
-        <ColorSelector
-          value={typeof props.color === "string" ? props.color : "#fff4d6"}
-          onChange={(value) =>
-            updateProps((next) => {
-              next.color = value;
-            })
-          }
-          onPreview={(value) =>
-            updateProps((next) => {
-              next.color = value;
-            }, true)
-          }
-          variant="default"
-          pickerMode="solid"
-        />
-      </div>
+      {kind !== "ambient" ? (
+        <div className="grid gap-1.5">
+          <label className="text-[11px] font-medium text-[#9aa3b6]">
+            Color
+          </label>
+          <ColorSelector
+            value={typeof props.color === "string" ? props.color : "#fff4d6"}
+            onChange={(value) =>
+              updateProps((next) => {
+                next.color = value;
+              })
+            }
+            onPreview={(value) =>
+              updateProps((next) => {
+                next.color = value;
+              }, true)
+            }
+            variant="default"
+            pickerMode="solid"
+          />
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -202,7 +229,12 @@ function LightInput({
 }
 
 function readLightKind(value: unknown): LightObjectKind {
-  if (value === "ambient" || value === "directional" || value === "point") {
+  if (
+    value === "ambient" ||
+    value === "directional" ||
+    value === "point" ||
+    value === "spot"
+  ) {
     return value;
   }
   return "directional";

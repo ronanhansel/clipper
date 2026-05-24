@@ -51,6 +51,7 @@ export type ThreeAuthorLightObject = {
   angle: number;
   softness: number;
   debug: boolean;
+  showRange: boolean;
   selected: boolean;
   bounds: { x: number; y: number; width: number; height: number };
   transform: Record<string, unknown>;
@@ -1136,21 +1137,18 @@ export class ThreeAuthorScene {
       (child: any) => child.name === "lightPointRay",
     );
 
-    const directional = light.kind === "directional";
-    if (directionLine) directionLine.visible = directional;
-    if (arrowHead) arrowHead.visible = directional;
-    if (beamCone) beamCone.visible = directional && light.debug;
+    const directed = light.kind === "directional" || light.kind === "spot";
+    if (directionLine) directionLine.visible = directed;
+    if (arrowHead) arrowHead.visible = directed;
+    if (beamCone) beamCone.visible = light.kind === "spot" && light.showRange;
     if (pointRange) {
-      pointRange.visible = light.kind === "point" && light.debug;
+      pointRange.visible = light.kind === "point" && light.showRange;
       pointRange.scale.setScalar(Math.max(1, light.range));
     }
-    if (ambientField) {
-      ambientField.visible = light.kind === "ambient" && light.debug;
-      ambientField.scale.setScalar(320 + Math.max(0, light.intensity) * 120);
-    }
+    if (ambientField) ambientField.visible = false;
     for (const ray of pointRays)
       ray.visible = light.kind === "point" && light.debug;
-    if (!directional) return;
+    if (!directed) return;
 
     const targetPoint = new THREE.Vector3(
       light.target.x,
@@ -1159,7 +1157,10 @@ export class ThreeAuthorScene {
     );
     const delta = targetPoint.sub(position);
     if (delta.lengthSq() < 1) delta.set(0, 0, -360);
-    const length = Math.max(160, Math.min(light.range, delta.length()));
+    const length =
+      light.kind === "spot"
+        ? Math.max(160, Math.min(light.range, delta.length()))
+        : Math.max(160, delta.length());
     const direction = delta.normalize();
     const end = direction.clone().multiplyScalar(length);
 
@@ -1215,6 +1216,7 @@ export class ThreeAuthorScene {
       light.angle,
       light.softness,
       light.debug ? 1 : 0,
+      light.showRange ? 1 : 0,
       light.target.x,
       light.target.y,
       light.target.z,

@@ -2,6 +2,10 @@ import { describe, expect, it, beforeEach } from "vitest";
 import * as THREE from "three";
 import { LayerNodeSync } from "./LayerNodeSync";
 import {
+  createLayerLightingNodes,
+  createLayerLightingUniforms,
+} from "./layerLighting";
+import {
   clearLayerNodeRegistry,
   registerLayerNodeFactory,
   type LayerNode,
@@ -85,6 +89,28 @@ class MaterialTrackingNode implements LayerNode {
   }
 }
 
+class WebGpuLightingTrackingNode implements LayerNode {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  readonly object3D: any;
+
+  constructor(id: string) {
+    const uniforms = createLayerLightingUniforms();
+    const nodes = createLayerLightingNodes(uniforms);
+    const material = new THREE.MeshBasicMaterial();
+    material.userData.layerLightingUniforms = uniforms;
+    material.userData.layerLightingNodes = nodes;
+    this.object3D = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
+    this.object3D.name = `webgpu-lighting:${id}`;
+  }
+
+  update() {}
+
+  dispose() {
+    this.object3D.geometry.dispose();
+    this.object3D.material.dispose();
+  }
+}
+
 function makeTrackingFactory(
   kind: FrameObjectType | "default",
 ): LayerNodeFactory {
@@ -103,6 +129,17 @@ function makeMaterialTrackingFactory(
     kind,
     create(object) {
       return new MaterialTrackingNode(object.id);
+    },
+  };
+}
+
+function makeWebGpuLightingTrackingFactory(
+  kind: FrameObjectType | "default",
+): LayerNodeFactory {
+  return {
+    kind,
+    create(object) {
+      return new WebGpuLightingTrackingNode(object.id);
     },
   };
 }
@@ -232,6 +269,49 @@ describe("LayerNodeSync", () => {
     expect(material.polygonOffset).toBe(false);
     expect(material.polygonOffsetFactor).toBe(0);
     expect(material.polygonOffsetUnits).toBe(0);
+    sync.dispose();
+  });
+
+  it("syncs lighting state into WebGPU node uniforms", () => {
+    clearLayerNodeRegistry();
+    registerLayerNodeFactory(makeWebGpuLightingTrackingFactory("default"));
+    const sync = new LayerNodeSync(makeContext());
+    sync.sync(
+      makePart([
+        {
+          ...makeObject("light", "light"),
+          props: {
+            kind: "directional",
+            color: "#ff3300",
+            intensity: 2,
+            range: 900,
+            angle: 60,
+          },
+        },
+        makeObject("rect", "rect"),
+      ]),
+      0,
+    );
+    sync.applyShadow({
+      active: false,
+      texture: null,
+      matrix: new THREE.Matrix4(),
+      viewMatrix: new THREE.Matrix4(),
+      near: 1,
+      far: 1200,
+      bias: 0.004,
+      darkness: 0.72,
+      mapFlipY: false,
+    });
+    const mesh = sync.group.children[0] as any;
+    const nodes = mesh.material.userData.layerLightingNodes;
+    expect(nodes.u_lightingActive.value).toBe(1);
+    expect(nodes.u_lightCount.value).toBe(1);
+    expect(nodes.u_lightIntensity.array[0]).toBe(2);
+    expect(nodes.u_lightRange.array[0]).toBe(900);
+    expect(nodes.u_lightAngle.array[0]).toBe(60);
+    expect(nodes.u_lightKind.array[0]).toBe(1);
+    expect(nodes.u_shadowMapFlipY.value).toBe(0);
     sync.dispose();
   });
 

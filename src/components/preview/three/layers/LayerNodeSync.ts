@@ -351,7 +351,10 @@ function applyLightingToMaterial(
   }
   const uniforms = getLayerLightingUniforms(material);
   if (!uniforms) return;
-  applyLayerLightingUniforms({ uniforms }, lighting);
+  applyLayerLightingUniforms(
+    material as Parameters<typeof applyLayerLightingUniforms>[0],
+    lighting,
+  );
 }
 
 function getLayerLightingUniforms(
@@ -437,7 +440,12 @@ function lightStateFromObject(object: FrameObject, localTime: number) {
 }
 
 function readLightKind(value: unknown): LightObjectKind {
-  if (value === "ambient" || value === "directional" || value === "point") {
+  if (
+    value === "ambient" ||
+    value === "directional" ||
+    value === "point" ||
+    value === "spot"
+  ) {
     return value;
   }
   return "directional";

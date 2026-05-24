@@ -69,6 +69,23 @@ function resolveAuthorLightTarget(
   );
 }
 
+function shiftLightTargetForMove(
+  previousBounds: { x: number; y: number; width: number; height: number },
+  nextBounds: { x: number; y: number; width: number; height: number },
+  previousTransform: Record<string, unknown>,
+  nextTransform: Record<string, unknown>,
+  value: unknown,
+) {
+  const target = readLightTarget(value);
+  const previousZ = readNumber(previousTransform.translateZ, 0);
+  const nextZ = readNumber(nextTransform.translateZ, previousZ);
+  return {
+    x: target.x + nextBounds.x - previousBounds.x,
+    y: target.y - (nextBounds.y - previousBounds.y),
+    z: target.z + nextZ - previousZ,
+  };
+}
+
 function readNumber(value: unknown, fallback: number) {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
@@ -782,6 +799,20 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
               }
               const value =
                 item.props && typeof item.props === "object" ? item.props : {};
+              const targetValue =
+                item.id === objectId &&
+                (nextTransform.bounds || nextTransform.translateZ !== undefined)
+                  ? shiftLightTargetForMove(
+                      evaluated.bounds,
+                      bounds,
+                      evaluated.transform &&
+                        typeof evaluated.transform === "object"
+                        ? evaluated.transform
+                        : {},
+                      transform,
+                      value.target,
+                    )
+                  : value.target;
               return {
                 id: item.id,
                 bounds,
@@ -789,7 +820,8 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
                 kind:
                   value.kind === "ambient" ||
                   value.kind === "directional" ||
-                  value.kind === "point"
+                  value.kind === "point" ||
+                  value.kind === "spot"
                     ? value.kind
                     : "directional",
                 color:
@@ -800,11 +832,12 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
                 angle: readNumber(value.angle, 45),
                 softness: readNumber(value.softness, 0.25),
                 debug: value.debug !== false,
+                showRange: value.showRange !== false,
                 selected: item.id === props.selectedObjectId,
                 target: resolveAuthorLightTarget(
                   bounds,
                   transform,
-                  value.target,
+                  targetValue,
                 ),
               };
             }),
@@ -901,7 +934,8 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
             kind:
               value.kind === "ambient" ||
               value.kind === "directional" ||
-              value.kind === "point"
+              value.kind === "point" ||
+              value.kind === "spot"
                 ? value.kind
                 : "directional",
             color: typeof value.color === "string" ? value.color : "#fff4d6",
@@ -911,6 +945,7 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
             angle: readNumber(value.angle, 45),
             softness: readNumber(value.softness, 0.25),
             debug: value.debug !== false,
+            showRange: value.showRange !== false,
             selected: object.id === props.selectedObjectId,
             target: resolveAuthorLightTarget(
               evaluated.bounds,
