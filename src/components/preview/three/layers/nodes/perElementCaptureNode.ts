@@ -189,6 +189,7 @@ class PerElementCaptureNode implements LayerNode {
   private captureHeight = 1;
   private lastCaptureKey = "";
   private warnedMissing = false;
+  private readonly videoFrameCache = new Map<number, HTMLCanvasElement>();
 
   constructor(
     id: string,
@@ -296,6 +297,7 @@ class PerElementCaptureNode implements LayerNode {
       this.capturePadding,
       this.captureWidth,
       this.captureHeight,
+      this.videoFrameCache,
     );
     try {
       sharedCanvas.appendChild(captureEl);
@@ -321,6 +323,8 @@ class PerElementCaptureNode implements LayerNode {
         this.captureHeight,
       );
       this.texture.needsUpdate = true;
+      this.material.userData.layerVideoFrameSignature =
+        this.kind === "media" ? captureKey : undefined;
       this.lastCaptureKey = captureKey;
     } catch (error) {
       if (!this.warnedMissing) {
@@ -339,6 +343,7 @@ class PerElementCaptureNode implements LayerNode {
     this.mesh.geometry.dispose();
     this.material.dispose();
     this.texture.dispose();
+    this.videoFrameCache.clear();
     this.canvas.width = 0;
     this.canvas.height = 0;
   }
@@ -370,10 +375,12 @@ function createCaptureClone(
   padding: number,
   captureWidth: number,
   captureHeight: number,
+  videoFrameCache: Map<number, HTMLCanvasElement>,
 ): HTMLElement {
   const clone = source.cloneNode(true) as HTMLElement;
   if (!clone.style)
     throw new Error("PerElementCaptureNode: capture source is not HTMLElement");
+  copyVideoFramesIntoClone(source, clone, videoFrameCache);
   Object.assign(clone.style, {
     position: "absolute",
     left: `${padding}px`,
@@ -401,6 +408,62 @@ function createCaptureClone(
   } as Partial<CSSStyleDeclaration>);
   wrapper.appendChild(clone);
   return wrapper;
+}
+
+function copyVideoFramesIntoClone(
+  source: Element,
+  clone: HTMLElement,
+  videoFrameCache: Map<number, HTMLCanvasElement>,
+): void {
+  if (typeof source.querySelectorAll !== "function") return;
+  const sourceVideos = Array.from(source.querySelectorAll("video"));
+  if (!sourceVideos.length) return;
+  const cloneVideos = Array.from(clone.querySelectorAll("video"));
+  for (let index = 0; index < sourceVideos.length; index += 1) {
+    const sourceVideo = sourceVideos[index];
+    const cloneVideo = cloneVideos[index];
+    if (!cloneVideo) continue;
+    const frameCanvas = readVideoFrameCanvas(
+      sourceVideo,
+      index,
+      videoFrameCache,
+    );
+    if (!frameCanvas) continue;
+    const replacement = document.createElement("canvas");
+    replacement.width = frameCanvas.width;
+    replacement.height = frameCanvas.height;
+    replacement.className = cloneVideo.className;
+    replacement.style.cssText = cloneVideo.style.cssText;
+    replacement.draggable = false;
+    const replacementContext = replacement.getContext("2d");
+    if (!replacementContext) continue;
+    replacementContext.drawImage(frameCanvas, 0, 0);
+    cloneVideo.replaceWith(replacement);
+  }
+}
+
+function readVideoFrameCanvas(
+  video: HTMLVideoElement,
+  index: number,
+  videoFrameCache: Map<number, HTMLCanvasElement>,
+): HTMLCanvasElement | null {
+  const hasFrame =
+    video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA &&
+    video.videoWidth > 0 &&
+    video.videoHeight > 0;
+  if (!hasFrame) return videoFrameCache.get(index) ?? null;
+  const canvas = videoFrameCache.get(index) ?? document.createElement("canvas");
+  if (canvas.width !== video.videoWidth) canvas.width = video.videoWidth;
+  if (canvas.height !== video.videoHeight) canvas.height = video.videoHeight;
+  const context = canvas.getContext("2d");
+  if (!context) return videoFrameCache.get(index) ?? null;
+  try {
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    videoFrameCache.set(index, canvas);
+    return canvas;
+  } catch {
+    return videoFrameCache.get(index) ?? null;
+  }
 }
 
 function estimateCapturePadding(

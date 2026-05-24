@@ -99,6 +99,7 @@ export class CompositionRenderer {
     part: CompositionClip | null;
     localTime: number;
     sourceElement: Element | null;
+    options: { syncShadows?: boolean; isPlaying?: boolean };
   } | null = null;
 
   constructor(opts: CompositionRendererOptions) {
@@ -186,6 +187,7 @@ export class CompositionRenderer {
               this.lastComposition.part,
               this.lastComposition.localTime,
               this.lastComposition.sourceElement,
+              this.lastComposition.options,
             );
           }
           this.render();
@@ -249,7 +251,7 @@ export class CompositionRenderer {
           : "webgl-shader",
       sharedCapture: this.sharedCapture,
       sourceRoot: () => this.sourceElement,
-      requestRender: () => this.render(),
+      requestRender: () => this.requestCompositionRender(),
     });
     this.scene.add(this.layerSync.group);
     this.shadowSync = new LayerShadowSync({
@@ -374,14 +376,14 @@ export class CompositionRenderer {
     part: CompositionClip | null,
     localTime: number,
     sourceElement: Element | null,
-    options: { syncShadows?: boolean } = {},
+    options: { syncShadows?: boolean; isPlaying?: boolean } = {},
   ) {
-    this.lastComposition = { part, localTime, sourceElement };
+    this.lastComposition = { part, localTime, sourceElement, options };
     if (sourceElement !== this.sourceElement) {
       this.sourceElement = sourceElement;
       this.sharedCapture.prepare(sourceElement);
     }
-    this.layerSync.sync(part, localTime);
+    this.layerSync.sync(part, localTime, { isPlaying: options.isPlaying });
     if (
       this.backendSelection.kind === "webgpu" &&
       this.renderer.initialized !== true
@@ -442,6 +444,20 @@ export class CompositionRenderer {
       return;
     }
     this.composer.render();
+  }
+
+  private requestCompositionRender() {
+    if (!this.lastComposition) {
+      this.render();
+      return;
+    }
+    this.setComposition(
+      this.lastComposition.part,
+      this.lastComposition.localTime,
+      this.lastComposition.sourceElement,
+      this.lastComposition.options,
+    );
+    this.render();
   }
 
   private updateShadowDebugPane() {

@@ -719,7 +719,9 @@ function createDynamicPropsDefinition(
     return { ...object, props: root as FrameObject["props"] };
   };
   const valueType =
-    path === "props.live" || path === "props.autoFocus.rackFocus"
+    path === "props.live" ||
+    path === "props.autoFocus.rackFocus" ||
+    path === "props.video.playing"
       ? "boolean"
       : path === "props.autoFocus.targetId" || path === "props.autoFocus.ease"
         ? "discrete"

@@ -6,6 +6,7 @@ import {
   File,
   FileCode,
   FileJson,
+  FileVideo,
   Folder,
   FolderOpen,
 } from "lucide-react";
@@ -815,7 +816,9 @@ function RegistryTreeNode({
           ? FileCode
           : data.name.endsWith(".json")
             ? FileJson
-            : File;
+            : data.name.toLowerCase().endsWith(".mp4")
+              ? FileVideo
+              : File;
 
   const isSelected =
     data.kind === "composition" && data.compositionId === selectedCompositionId;

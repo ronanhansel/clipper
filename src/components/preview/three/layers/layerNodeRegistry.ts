@@ -25,7 +25,7 @@ export interface LayerNode {
    * `(part, localTime)`. Implementations update bounds, transform,
    * type-specific style, and any internal materials/uniforms.
    */
-  update(state: EvaluatedObjectState): void;
+  update(state: EvaluatedObjectState, options?: LayerNodeUpdateOptions): void;
   /**
    * Release Three resources owned by this node (geometry, material,
    * textures it allocated, etc.). The caller removes `object3D` from
@@ -33,6 +33,11 @@ export interface LayerNode {
    */
   dispose(): void;
 }
+
+export type LayerNodeUpdateOptions = {
+  localTime: number;
+  isPlaying: boolean;
+};
 
 /**
  * Context made available to factories at node-construction time.

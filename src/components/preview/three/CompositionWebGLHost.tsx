@@ -28,6 +28,7 @@ import {
   type CameraObjectProps,
   type CompositionClip,
 } from "../../../core/types";
+import { getMediaAssetType } from "../../../core/mediaTypes";
 import { defaultPreviewFps } from "../../../core/previewFps";
 import type { CompositionBackendProps } from "../backends/CompositionBackend";
 import { useOptionalPreviewRenderScheduler } from "../scheduler/PreviewRenderSchedulerContext";
@@ -117,7 +118,7 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
     renderer: CompositionRenderer,
     time: number,
     cameraOverride?: CameraObjectProps | null,
-    options: { syncShadows?: boolean } = {},
+    options: { syncShadows?: boolean; isPlaying?: boolean } = {},
   ) {
     const cameraProps =
       cameraOverride ?? getActiveCameraObjectProps(part, time);
@@ -135,6 +136,7 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
       disposeComposerPasses(composerPasses);
     }
     renderer.setComposition(part, time, sourceContainerRef.current, {
+      isPlaying: options.isPlaying === true,
       syncShadows: options.syncShadows,
     });
     renderer.render();
@@ -183,8 +185,11 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
     if (!host) return;
     const initialWidth = host.clientWidth || FRAME_WIDTH;
     const initialHeight = host.clientHeight || FRAME_HEIGHT;
+    const requestedBackend = hasVideoMedia(part)
+      ? "webgl"
+      : readCompositionRendererBackendRequest();
     const backendSelection = selectCompositionRendererBackend({
-      requested: readCompositionRendererBackendRequest(),
+      requested: requestedBackend,
       webGpuMaterialsReady: true,
     });
     const renderer = new CompositionRenderer({
@@ -285,7 +290,9 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
         Math.round(rawLocalTime * renderPreviewFps) / renderPreviewFps;
       const cameraOverride = pendingCameraPreviewRef.current;
       pendingCameraPreviewRef.current = null;
-      renderAtTime(renderer, nextLocalTime, cameraOverride);
+      renderAtTime(renderer, nextLocalTime, cameraOverride, {
+        isPlaying: true,
+      });
     };
     const unsubscribe = scheduler?.subscribe(renderLiveFrame);
     return () => unsubscribe?.();
@@ -415,6 +422,17 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
           )
         : null}
     </>
+  );
+}
+
+function hasVideoMedia(part: CompositionClip | null): boolean {
+  return Boolean(
+    part?.objects.some(
+      (object) =>
+        object.type === "media" &&
+        typeof object.style.src === "string" &&
+        getMediaAssetType(object.style.src) === "video",
+    ),
   );
 }
 

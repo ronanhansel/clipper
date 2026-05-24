@@ -519,6 +519,7 @@ function getMediaContentType(filePath: string) {
   if (extension === ".webp") return "image/webp";
   if (extension === ".gif") return "image/gif";
   if (extension === ".svg") return "image/svg+xml";
+  if (extension === ".mp4") return "video/mp4";
   if (extension === ".ttf") return "font/ttf";
   if (extension === ".otf") return "font/otf";
   if (extension === ".woff") return "font/woff";

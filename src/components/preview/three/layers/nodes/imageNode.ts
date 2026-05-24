@@ -17,6 +17,11 @@ import {
 } from "three/tsl";
 import { MEDIA_PLACEHOLDER_DATA_URL } from "../../../../../core/mediaPlaceholder";
 import { normalizeClipperMediaUrl } from "../../../../../core/mediaSource";
+import { getMediaAssetType } from "../../../../../core/mediaTypes";
+import {
+  getMediaVideoTime,
+  readMediaVideoPlaybackProps,
+} from "../../../../../core/mediaVideoPlayback";
 import type { EvaluatedObjectState } from "../../../../../core/propertyRegistry";
 import type { FrameObject } from "../../../../../core/types";
 import { serializeSvgForRaster } from "../../../exportSvgRasterCache";
@@ -38,7 +43,7 @@ import {
 } from "../layerLighting";
 
 type ImageMaterialUniforms = ReturnType<typeof createImageUniforms>;
-
+type TextureKind = "image" | "video";
 const IMAGE_VERTEX = `
   ${LAYER_LIGHTING_VERTEX_VARYINGS}
   varying vec2 vUv;
@@ -327,6 +332,61 @@ function readImageSrc(state: EvaluatedObjectState): string | null {
   return null;
 }
 
+function isVideoMediaSource(src: string): boolean {
+  return getMediaAssetType(src) === "video";
+}
+
+function createPausedVideoElement(
+  src: string,
+  requestRender: () => void,
+): HTMLVideoElement {
+  const video = document.createElement("video");
+  video.crossOrigin = "anonymous";
+  video.muted = true;
+  video.playsInline = true;
+  video.preload = "auto";
+  video.src = src;
+  video.pause();
+  video.addEventListener("loadeddata", requestRender);
+  video.addEventListener("loadedmetadata", requestRender);
+  video.addEventListener("seeked", requestRender);
+  video.addEventListener("playing", requestRender);
+  video.load();
+  return video;
+}
+
+function createVideoTexture(video: HTMLVideoElement): any {
+  const texture = new THREE.VideoTexture(video);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.generateMipmaps = false;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function syncVideoElementToLocalTime(
+  video: HTMLVideoElement,
+  state: EvaluatedObjectState,
+  localTime: number,
+  isPlaying: boolean,
+): void {
+  const videoProps = readMediaVideoPlaybackProps(state);
+  const nextTime = getMediaVideoTime(state, localTime);
+  if (!Number.isFinite(nextTime)) return;
+  const drift = Math.abs(video.currentTime - nextTime);
+  if (drift > (isPlaying ? 0.25 : 0.04)) video.currentTime = nextTime;
+  video.playbackRate = videoProps.speed;
+  const reachedCropEnd =
+    videoProps.cropEnd > videoProps.cropStart &&
+    nextTime >= videoProps.cropEnd - 0.001;
+  if (!isPlaying || !videoProps.playing || reachedCropEnd) {
+    video.pause();
+    return;
+  }
+  if (video.paused) void video.play().catch(() => undefined);
+}
+
 export function isSvgMediaSource(src: string): boolean {
   const normalized = src.trim().toLowerCase();
   if (SVG_TAG_RE.test(decodeMaybeSvgMarkup(normalized))) return true;
@@ -471,14 +531,16 @@ class ImageNode implements LayerNode {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private readonly mesh: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private readonly material: any;
+  private material: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private readonly placeholder: any;
   private currentSrc: string | null = null;
   private currentTextureKey: string | null = null;
+  private currentTextureKind: TextureKind | null = null;
   private currentTextureLayerSized = false;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private currentTexture: any | null = null;
+  private currentVideo: HTMLVideoElement | null = null;
   private width = 1;
   private height = 1;
 
@@ -498,7 +560,13 @@ class ImageNode implements LayerNode {
     this.object3D = this.mesh;
   }
 
-  update(state: EvaluatedObjectState): void {
+  update(
+    state: EvaluatedObjectState,
+    options: { localTime: number; isPlaying: boolean } = {
+      localTime: 0,
+      isPlaying: false,
+    },
+  ): void {
     const t = resolveLayerTransform(state);
     if (t.width !== this.width || t.height !== this.height) {
       this.width = t.width;
@@ -514,19 +582,21 @@ class ImageNode implements LayerNode {
     this.mesh.rotation.z = t.rotationZ;
     this.mesh.scale.set(t.scaleX, t.scaleY, 1);
 
-    const u = getImageMaterialUniforms(this.material);
-    u.u_size.value.set(t.width, t.height);
-
     const src = readImageSrc(state);
     const textureKey =
-      src && isSvgMediaSource(src)
+      src && !isVideoMediaSource(src) && isSvgMediaSource(src)
         ? `svg:${Math.max(1, Math.ceil(t.width))}x${Math.max(1, Math.ceil(t.height))}:${src}`
         : src;
     if (src !== this.currentSrc || textureKey !== this.currentTextureKey) {
-      if (this.currentTextureKey)
-        releaseImageTexture(this.currentTextureKey, this.requestRender);
+      this.releaseCurrentTexture();
       if (src) {
-        if (isSvgMediaSource(src)) {
+        if (isVideoMediaSource(src)) {
+          this.currentVideo = createPausedVideoElement(src, this.requestRender);
+          this.currentTexture = createVideoTexture(this.currentVideo);
+          this.currentTextureKey = src;
+          this.currentTextureKind = "video";
+          this.currentTextureLayerSized = false;
+        } else if (isSvgMediaSource(src)) {
           const lease = acquireLayerSizedSvgTexture(
             src,
             t.width,
@@ -535,27 +605,49 @@ class ImageNode implements LayerNode {
           );
           this.currentTextureKey = lease.key;
           this.currentTexture = lease.texture;
+          this.currentTextureKind = "image";
           this.currentTextureLayerSized = true;
         } else {
           this.currentTextureKey = src;
           this.currentTexture = acquireImageTexture(src, this.requestRender);
+          this.currentTextureKind = "image";
           this.currentTextureLayerSized = false;
         }
-        setImageMaterialTexture(this.material, this.currentTexture);
+        this.setCurrentMaterialTexture(this.currentTexture);
       } else {
         this.currentTextureKey = null;
+        this.currentTextureKind = null;
         this.currentTexture = null;
+        this.currentVideo = null;
         this.currentTextureLayerSized = false;
-        setImageMaterialTexture(this.material, this.placeholder);
+        this.setCurrentMaterialTexture(this.placeholder);
       }
       this.currentSrc = src;
     }
 
+    const u = getImageMaterialUniforms(this.material);
+    u.u_size.value.set(t.width, t.height);
+
+    if (this.currentVideo && this.currentTextureKind === "video") {
+      syncVideoElementToLocalTime(
+        this.currentVideo,
+        state,
+        options.localTime,
+        options.isPlaying,
+      );
+      if (this.currentTexture) this.currentTexture.needsUpdate = true;
+    }
+
     const image = this.currentTexture?.image as
-      | { naturalWidth?: number; naturalHeight?: number }
+      | {
+          naturalWidth?: number;
+          naturalHeight?: number;
+          videoWidth?: number;
+          videoHeight?: number;
+        }
       | undefined;
-    const imgW = image?.naturalWidth ?? 0;
-    const imgH = image?.naturalHeight ?? 0;
+    const imgW = image?.naturalWidth ?? image?.videoWidth ?? 0;
+    const imgH = image?.naturalHeight ?? image?.videoHeight ?? 0;
     const fit = readObjectFit(state);
     const crop = this.currentTextureLayerSized
       ? FULL_UVS
@@ -580,14 +672,42 @@ class ImageNode implements LayerNode {
   }
 
   dispose(): void {
-    if (this.currentTextureKey)
-      releaseImageTexture(this.currentTextureKey, this.requestRender);
+    this.releaseCurrentTexture();
     this.currentSrc = null;
     this.currentTextureKey = null;
+    this.currentTextureKind = null;
     this.currentTexture = null;
+    this.currentVideo = null;
     this.mesh.geometry.dispose();
     this.material.dispose();
     releaseImageTexture(MEDIA_PLACEHOLDER_DATA_URL);
+  }
+
+  private releaseCurrentTexture(): void {
+    if (!this.currentTextureKey) return;
+    if (this.currentTextureKind === "video") {
+      this.currentVideo?.pause();
+      this.currentVideo?.removeAttribute("src");
+      this.currentVideo?.load();
+      this.currentTexture?.dispose?.();
+    } else {
+      releaseImageTexture(this.currentTextureKey, this.requestRender);
+    }
+    this.currentTextureKey = null;
+    this.currentTextureKind = null;
+    this.currentTexture = null;
+    this.currentVideo = null;
+  }
+
+  private setCurrentMaterialTexture(texture: unknown): void {
+    if (this.context.materialBackend !== "webgpu-node") {
+      setImageMaterialTexture(this.material, texture);
+      return;
+    }
+    const previous = this.material;
+    this.material = createImageNodeMaterial(texture);
+    this.mesh.material = this.material;
+    previous.dispose();
   }
 }
 

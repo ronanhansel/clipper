@@ -16,7 +16,7 @@ import {
 } from "./layerNodeRegistry";
 import { rectNodeFactory } from "./nodes/rectNode";
 import { nullNodeFactory } from "./nodes/nullNode";
-import { imageNodeFactory, mediaNodeFactory } from "./nodes/imageNode";
+import { imageNodeFactory } from "./nodes/imageNode";
 import { textNodeFactory } from "./nodes/textNode";
 import { svgNodeFactory } from "./nodes/svgNode";
 import { createPerElementCaptureFactory } from "./nodes/perElementCaptureNode";
@@ -46,7 +46,10 @@ export function installDefaultLayerNodeFactories(): void {
   registerLayerNodeFactory(rectNodeFactory);
   registerLayerNodeFactory(nullNodeFactory);
   registerLayerNodeFactory(imageNodeFactory);
-  registerLayerNodeFactory(mediaNodeFactory);
+  registerLayerNodeFactory({
+    kind: "media",
+    create: imageNodeFactory.create,
+  });
   registerLayerNodeFactory(textNodeFactory);
   registerLayerNodeFactory(svgNodeFactory);
   for (const kind of CAPTURE_FALLBACK_KINDS) {
@@ -213,7 +216,11 @@ export class LayerNodeSync {
     this.group.name = "LayerNodeSync";
   }
 
-  sync(part: CompositionClip | null, localTime: number): void {
+  sync(
+    part: CompositionClip | null,
+    localTime: number,
+    options: { isPlaying?: boolean } = {},
+  ): void {
     const seen = new Set<string>();
     if (part) {
       this.lighting = buildLayerLightingState(part, localTime);
@@ -243,7 +250,10 @@ export class LayerNodeSync {
         }
 
         const state = evaluateObjectState(object, localTime);
-        entry.node.update(state);
+        entry.node.update(state, {
+          localTime,
+          isPlaying: options.isPlaying === true,
+        });
         tagLayerObject(entry.node.object3D, object);
         applyLayerRenderSemantics(
           entry.node.object3D,

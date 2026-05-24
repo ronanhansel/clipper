@@ -189,6 +189,39 @@ describe("property registry and evaluated state", () => {
     expect(staticEdit.bounds.x).toBe(42);
   });
 
+  it("evaluates media video playback props as keyframable values", () => {
+    const media: FrameObject = {
+      ...object,
+      type: "media",
+      props: { video: { cropStart: 0, speed: 1, playing: false } },
+      tracks: {
+        "props.video.cropStart": {
+          valueType: "number",
+          points: [
+            { time: 0, value: 0 },
+            { time: 2, value: 1 },
+          ],
+        },
+        "props.video.playing": {
+          valueType: "boolean",
+          points: [
+            { time: 0, value: false },
+            { time: 1, value: true },
+          ],
+        },
+      },
+    };
+
+    const evaluated = evaluateObjectState(media, 1);
+
+    expect(evaluated.props.video).toMatchObject({
+      cropStart: 0.5,
+      speed: 1,
+      playing: true,
+    });
+    expect(media.tracks?.["props.video.playing"].valueType).toBe("boolean");
+  });
+
   it("preserves current evaluated value as base when deleting the final keyframe", () => {
     const animated: FrameObject = {
       ...object,

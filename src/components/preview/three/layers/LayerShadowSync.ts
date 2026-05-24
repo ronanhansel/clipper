@@ -1159,6 +1159,7 @@ function readMaterialSignature(source: any): string {
       return [
         material?.uuid ?? "",
         material?.version ?? 0,
+        material?.userData?.layerVideoFrameSignature ?? "",
         material?.opacity ?? "",
         image?.uuid ?? "",
         image?.version ?? "",

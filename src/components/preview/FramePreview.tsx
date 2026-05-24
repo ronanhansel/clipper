@@ -52,6 +52,11 @@ import {
 import { clamp } from "../../core/math";
 import { MEDIA_PLACEHOLDER_DATA_URL } from "../../core/mediaPlaceholder";
 import { normalizeClipperMediaUrl } from "../../core/mediaSource";
+import { getMediaAssetType } from "../../core/mediaTypes";
+import {
+  getMediaVideoTime,
+  readMediaVideoPlaybackProps,
+} from "../../core/mediaVideoPlayback";
 import {
   getFramePortalOverlayTransform,
   viewportBoundsToPortal,
@@ -3174,7 +3179,11 @@ export const FrameObjectView = memo(function FrameObjectView({
         />
       ) : null}
       {object.type === "image" || object.type === "media" ? (
-        <MediaContent object={evaluatedObject} />
+        <MediaContent
+          isPlaying={isPlaying}
+          object={evaluatedObject}
+          previewTime={previewTime}
+        />
       ) : null}
       {object.type === "pattern2d" ? (
         <Pattern2DContent object={evaluatedObject} />
@@ -5139,7 +5148,16 @@ export function Pattern2DContent({ object }: { object: FrameObject }) {
   );
 }
 
-function MediaContent({ object }: { object: FrameObject }) {
+function MediaContent({
+  isPlaying,
+  object,
+  previewTime,
+}: {
+  isPlaying: boolean;
+  object: FrameObject;
+  previewTime: number;
+}) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
   const src =
     typeof object.style.src === "string" && object.style.src.length > 0
       ? normalizeClipperMediaUrl(object.style.src)
@@ -5147,6 +5165,51 @@ function MediaContent({ object }: { object: FrameObject }) {
   const objectFit = readMediaObjectFit(
     typeof object.style.objectFit === "string" ? object.style.objectFit : null,
   );
+  const mediaAssetType = src ? getMediaAssetType(src) : null;
+  const videoProps = readMediaVideoPlaybackProps(object);
+  const boundedVideoTime = getMediaVideoTime(object, previewTime);
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || mediaAssetType !== "video") return;
+    video.playbackRate = videoProps.speed;
+    const drift = Math.abs(video.currentTime - boundedVideoTime);
+    if (drift > (isPlaying ? 0.2 : 0.04)) {
+      video.currentTime = boundedVideoTime;
+    }
+    const reachedCropEnd =
+      videoProps.cropEnd > videoProps.cropStart &&
+      boundedVideoTime >= videoProps.cropEnd - 0.001;
+    if (!isPlaying || !videoProps.playing || reachedCropEnd) {
+      video.pause();
+      return;
+    }
+    if (video.paused) void video.play().catch(() => undefined);
+  }, [
+    boundedVideoTime,
+    isPlaying,
+    mediaAssetType,
+    videoProps.cropEnd,
+    videoProps.cropStart,
+    videoProps.playing,
+    videoProps.speed,
+    src,
+  ]);
+
+  if (src && mediaAssetType === "video")
+    return (
+      <video
+        ref={videoRef}
+        className="block h-full w-full select-none"
+        controls={false}
+        crossOrigin="anonymous"
+        draggable={false}
+        muted
+        playsInline
+        preload="auto"
+        src={src}
+        style={{ objectFit }}
+      />
+    );
 
   if (src)
     return (
