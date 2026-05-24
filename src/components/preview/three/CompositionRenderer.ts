@@ -94,7 +94,6 @@ export class CompositionRenderer {
   private width: number;
   private height: number;
   private compositionCamera: CameraObjectProps | null = null;
-  private interactivePreview = false;
   private sourceElement: Element | null = null;
   private lastComposition: {
     part: CompositionClip | null;
@@ -344,12 +343,6 @@ export class CompositionRenderer {
     this.syncWebGpuOutputNode(camera);
   }
 
-  setInteractivePreview(active: boolean) {
-    if (this.interactivePreview === active) return;
-    this.interactivePreview = active;
-    this.syncWebGpuOutputNode(this.compositionCamera);
-  }
-
   /**
    * The 2D canvas that backs the shared DOM-capture root. Per-element
    * capture nodes call `drawElementImage` on this canvas's context,
@@ -396,17 +389,13 @@ export class CompositionRenderer {
       this.updateShadowDebugPane();
       return;
     }
-    if (this.interactivePreview) {
-      this.layerSync.applyShadow(this.shadowSync.getState());
-    } else {
-      const shadow = this.shadowSync.sync(
-        part,
-        localTime,
-        this.renderer,
-        this.layerSync.group,
-      );
-      this.layerSync.applyShadow(shadow);
-    }
+    const shadow = this.shadowSync.sync(
+      part,
+      localTime,
+      this.renderer,
+      this.layerSync.group,
+    );
+    this.layerSync.applyShadow(shadow);
     this.updateShadowDebugPane();
   }
 

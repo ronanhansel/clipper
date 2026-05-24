@@ -117,9 +117,7 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
     renderer: CompositionRenderer,
     time: number,
     cameraOverride?: CameraObjectProps | null,
-    options: { interactive?: boolean } = {},
   ) {
-    renderer.setInteractivePreview(Boolean(options.interactive));
     const cameraProps =
       cameraOverride ?? getActiveCameraObjectProps(part, time);
     renderer.setCamera(cameraProps);
@@ -284,9 +282,7 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
         Math.round(rawLocalTime * renderPreviewFps) / renderPreviewFps;
       const cameraOverride = pendingCameraPreviewRef.current;
       pendingCameraPreviewRef.current = null;
-      renderAtTime(renderer, nextLocalTime, cameraOverride, {
-        interactive: true,
-      });
+      renderAtTime(renderer, nextLocalTime, cameraOverride);
     };
     const unsubscribe = scheduler?.subscribe(renderLiveFrame);
     return () => unsubscribe?.();
@@ -309,7 +305,7 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
       const cameraOverride = pendingCameraPreviewRef.current;
       if (!renderer || !cameraOverride) return;
       pendingCameraPreviewRef.current = null;
-      renderAtTime(renderer, localTime, cameraOverride, { interactive: true });
+      renderAtTime(renderer, localTime, cameraOverride);
     };
     const unsubscribe = scheduler?.subscribe((cause) => {
       if (cause !== "edit") return;
@@ -345,9 +341,7 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
         const cameraOverride = pendingCameraPreviewRef.current;
         if (!renderer || !cameraOverride) return;
         pendingCameraPreviewRef.current = null;
-        renderAtTime(renderer, localTime, cameraOverride, {
-          interactive: true,
-        });
+        renderAtTime(renderer, localTime, cameraOverride);
       });
     }
     window.addEventListener("clipper:camera-preview", handleCameraPreview);
