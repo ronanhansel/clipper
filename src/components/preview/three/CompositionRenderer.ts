@@ -374,6 +374,7 @@ export class CompositionRenderer {
     part: CompositionClip | null,
     localTime: number,
     sourceElement: Element | null,
+    options: { syncShadows?: boolean } = {},
   ) {
     this.lastComposition = { part, localTime, sourceElement };
     if (sourceElement !== this.sourceElement) {
@@ -389,13 +390,17 @@ export class CompositionRenderer {
       this.updateShadowDebugPane();
       return;
     }
-    const shadow = this.shadowSync.sync(
-      part,
-      localTime,
-      this.renderer,
-      this.layerSync.group,
-    );
-    this.layerSync.applyShadow(shadow);
+    if (options.syncShadows === false) {
+      this.layerSync.applyShadow(this.shadowSync.getState());
+    } else {
+      const shadow = this.shadowSync.sync(
+        part,
+        localTime,
+        this.renderer,
+        this.layerSync.group,
+      );
+      this.layerSync.applyShadow(shadow);
+    }
     this.updateShadowDebugPane();
   }
 

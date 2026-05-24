@@ -117,6 +117,7 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
     renderer: CompositionRenderer,
     time: number,
     cameraOverride?: CameraObjectProps | null,
+    options: { syncShadows?: boolean } = {},
   ) {
     const cameraProps =
       cameraOverride ?? getActiveCameraObjectProps(part, time);
@@ -133,7 +134,9 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
     } else {
       disposeComposerPasses(composerPasses);
     }
-    renderer.setComposition(part, time, sourceContainerRef.current);
+    renderer.setComposition(part, time, sourceContainerRef.current, {
+      syncShadows: options.syncShadows,
+    });
     renderer.render();
   }
 
@@ -305,7 +308,9 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
       const cameraOverride = pendingCameraPreviewRef.current;
       if (!renderer || !cameraOverride) return;
       pendingCameraPreviewRef.current = null;
-      renderAtTime(renderer, localTime, cameraOverride);
+      renderAtTime(renderer, localTime, cameraOverride, {
+        syncShadows: false,
+      });
     };
     const unsubscribe = scheduler?.subscribe((cause) => {
       if (cause !== "edit") return;
@@ -341,7 +346,9 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
         const cameraOverride = pendingCameraPreviewRef.current;
         if (!renderer || !cameraOverride) return;
         pendingCameraPreviewRef.current = null;
-        renderAtTime(renderer, localTime, cameraOverride);
+        renderAtTime(renderer, localTime, cameraOverride, {
+          syncShadows: false,
+        });
       });
     }
     window.addEventListener("clipper:camera-preview", handleCameraPreview);
