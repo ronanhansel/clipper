@@ -54,4 +54,36 @@ describe("syncRenderClockLayersToSceneTime", () => {
     expect(layer.getAnimations).toHaveBeenCalledOnce();
     expect(animation.play).toHaveBeenCalledOnce();
   });
+
+  it("can skip animation pinning while still updating render-clock DOM", () => {
+    const animation = { currentTime: 0, play: vi.fn(), pause: vi.fn() };
+    const layer = {
+      dataset: { clipperRenderClockOffset: "0" },
+      setAttribute: vi.fn(),
+      style: { setProperty: vi.fn() },
+      getAnimations: vi.fn(() => [animation]),
+      querySelectorAll: vi.fn(() => []),
+    };
+    const root = {
+      querySelectorAll: vi.fn((selector: string) =>
+        selector === "[data-clipper-render-clock-layer]" ? [layer] : [],
+      ),
+    } as unknown as ParentNode;
+
+    const count = syncRenderClockLayersToSceneTime(root, 3, false, {
+      syncAnimations: false,
+    });
+
+    expect(count).toBe(1);
+    expect(layer.setAttribute).toHaveBeenCalledWith(
+      "data-clipper-render-time",
+      "3.000000",
+    );
+    expect(layer.style.setProperty).toHaveBeenCalledWith(
+      "--clipper-render-time-ms",
+      "3000ms",
+    );
+    expect(layer.getAnimations).not.toHaveBeenCalled();
+    expect(animation.currentTime).toBe(0);
+  });
 });

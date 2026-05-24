@@ -9,6 +9,7 @@ import {
 import {
   getRenderClockAttributes,
   getRenderClockStyle,
+  invalidateRenderClockAnimationCache,
   syncDomAnimationsToRenderClock,
 } from "../../../render-engine/renderClock";
 import { buildFrameObjectParentTransformLookup } from "../../../render-engine/renderRuntime";
@@ -213,6 +214,7 @@ export const DomBackend: CompositionBackend = function DomBackend({
           .filter(
             (obj) =>
               !obj.hidden &&
+              obj.type !== "light" &&
               isObjectInExportTile(obj, exportTileFrameBounds) &&
               !(hideNullObjects && obj.type === "null"),
           )
@@ -273,15 +275,17 @@ function syncRenderClockSubtree(
     current: { playing: boolean; time: number; mode: "preview" | "export" };
   },
 ) {
+  invalidateRenderClockAnimationCache(root);
   syncDomAnimationsToRenderClock(root, stateRef.current);
   const frame = requestAnimationFrame(() =>
     syncDomAnimationsToRenderClock(root, stateRef.current),
   );
   const observer =
     typeof MutationObserver !== "undefined" && root
-      ? new MutationObserver(() =>
-          syncDomAnimationsToRenderClock(root, stateRef.current),
-        )
+      ? new MutationObserver(() => {
+          invalidateRenderClockAnimationCache(root);
+          syncDomAnimationsToRenderClock(root, stateRef.current);
+        })
       : null;
   if (observer && root)
     observer.observe(root, { childList: true, subtree: true });

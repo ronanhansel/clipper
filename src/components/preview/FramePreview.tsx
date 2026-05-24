@@ -271,6 +271,7 @@ type FramePreviewProps = {
       rotateZ?: number;
     },
   ) => void;
+  onAuthorPreviewContextMenu?: (event: ReactMouseEvent<HTMLDivElement>) => void;
 };
 
 export type ComposeDrawTool =
@@ -358,6 +359,7 @@ export const FramePreview = memo(function FramePreview({
   authorViewState,
   onAuthorViewStateChange,
   onObjectTransformChange,
+  onAuthorPreviewContextMenu,
 }: FramePreviewProps) {
   const exportTileViewport = (
     arguments[0] as { exportTileViewport?: ExportTileViewport }
@@ -434,25 +436,25 @@ export const FramePreview = memo(function FramePreview({
   const composeAuthor2dActive =
     composeAuthorViewActive && composeAuthorPreviewMode === "2d";
   const displayPart = useMemo(
-    () =>
-      composeAuthor2dActive
-        ? {
-            ...part,
-            objects: part.objects.filter((object) => object.type !== "camera"),
-          }
-        : part,
+    () => ({
+      ...part,
+      objects: part.objects.filter(
+        (object) =>
+          object.type !== "light" &&
+          (!composeAuthor2dActive || object.type !== "camera"),
+      ),
+    }),
     [composeAuthor2dActive, part],
   );
   const displaySceneMotionPart = useMemo(
-    () =>
-      composeAuthor2dActive
-        ? {
-            ...sceneMotionPart,
-            objects: sceneMotionPart.objects.filter(
-              (object) => object.type !== "camera",
-            ),
-          }
-        : sceneMotionPart,
+    () => ({
+      ...sceneMotionPart,
+      objects: sceneMotionPart.objects.filter(
+        (object) =>
+          object.type !== "light" &&
+          (!composeAuthor2dActive || object.type !== "camera"),
+      ),
+    }),
     [composeAuthor2dActive, sceneMotionPart],
   );
   const effectiveAuthorViewState = useMemo(
@@ -989,6 +991,7 @@ export const FramePreview = memo(function FramePreview({
                     authorViewState={effectiveAuthorViewState}
                     onAuthorViewStateChange={onAuthorViewStateChange}
                     onObjectTransformChange={onObjectTransformChange}
+                    onAuthorPreviewContextMenu={onAuthorPreviewContextMenu}
                   />
                 </PreviewRenderProvider>
               )}

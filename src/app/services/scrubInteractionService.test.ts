@@ -1,12 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  cancelLatestPostPaint,
   cancelLatestRaf,
   cancelThrottledCommit,
+  createLatestPostPaintState,
   createLatestRafState,
   createThrottledCommitState,
+  flushLatestPostPaint,
   flushLatestRaf,
   flushThrottledCommit,
   requestNumberScrubPointerLock,
+  scheduleLatestPostPaint,
   scheduleLatestRaf,
   scheduleThrottledCommit,
   createNumberScrubVirtualCursor,
@@ -65,6 +69,67 @@ describe("scrub interaction service", () => {
 
     expect(scheduler.cancelAnimationFrame).toHaveBeenCalledWith(11);
     expect(flush).not.toHaveBeenCalled();
+    expect(state.value).toBeNull();
+  });
+
+  it("coalesces latest post-paint value after an animation frame", () => {
+    let frameCallback: FrameRequestCallback = () => {};
+    let timeoutCallback = () => {};
+    const scheduler = {
+      cancelAnimationFrame: vi.fn(),
+      clearTimeout: vi.fn(),
+      requestAnimationFrame: vi.fn((next: FrameRequestCallback) => {
+        frameCallback = next;
+        return 19;
+      }),
+      setTimeout: vi.fn((next: () => void) => {
+        timeoutCallback = next;
+        return 23;
+      }),
+    };
+    const state = createLatestPostPaintState<number>();
+    const flush = vi.fn();
+
+    scheduleLatestPostPaint(state, 1, flush, scheduler);
+    scheduleLatestPostPaint(state, 2, flush, scheduler);
+
+    expect(scheduler.requestAnimationFrame).toHaveBeenCalledOnce();
+    expect(scheduler.setTimeout).not.toHaveBeenCalled();
+
+    frameCallback(0);
+
+    expect(scheduler.setTimeout).toHaveBeenCalledOnce();
+    expect(flush).not.toHaveBeenCalled();
+
+    timeoutCallback();
+
+    expect(flush).toHaveBeenCalledWith(2);
+    expect(state.frame).toBe(0);
+    expect(state.timeout).toBe(0);
+    expect(state.value).toBeNull();
+  });
+
+  it("flushes or cancels pending post-paint values", () => {
+    const scheduler = {
+      cancelAnimationFrame: vi.fn(),
+      clearTimeout: vi.fn(),
+      requestAnimationFrame: vi.fn(() => 29),
+      setTimeout: vi.fn(() => 31),
+    };
+    const state = createLatestPostPaintState<number>();
+    const flush = vi.fn();
+
+    scheduleLatestPostPaint(state, 3, flush, scheduler);
+    flushLatestPostPaint(state, flush, scheduler);
+
+    expect(scheduler.cancelAnimationFrame).toHaveBeenCalledWith(29);
+    expect(flush).toHaveBeenCalledWith(3);
+    expect(state.frame).toBe(0);
+
+    scheduleLatestPostPaint(state, 4, flush, scheduler);
+    cancelLatestPostPaint(state, scheduler);
+
+    expect(scheduler.cancelAnimationFrame).toHaveBeenLastCalledWith(29);
     expect(state.value).toBeNull();
   });
 

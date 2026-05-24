@@ -3,8 +3,20 @@ import { Text } from "troika-three-text";
 import type { EvaluatedObjectState } from "../../../../../core/propertyRegistry";
 import type { FrameObject } from "../../../../../core/types";
 import { filePathToClipperMediaUrl } from "../../../../../core/mediaSource";
-import type { LayerNode, LayerNodeFactory } from "../layerNodeRegistry";
+import type {
+  LayerNode,
+  LayerNodeContext,
+  LayerNodeFactory,
+} from "../layerNodeRegistry";
 import { resolveLayerTransform } from "../layerTransform";
+import {
+  applyLayerLightingUniforms,
+  createLayerLightingUniforms,
+  EMPTY_LAYER_LIGHTING,
+  LAYER_LIGHTING_FRAGMENT,
+  LAYER_LIGHTING_VERTEX_BODY,
+  LAYER_LIGHTING_VERTEX_VARYINGS,
+} from "../layerLighting";
 import {
   parseCssColorToLinearRgba,
   type LinearRgba,
@@ -23,10 +35,14 @@ class TextNode implements LayerNode {
   readonly object3D: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private readonly text: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private readonly material: any;
+  private readonly context: LayerNodeContext;
   private width = 0;
   private height = 0;
 
-  constructor(id: string) {
+  constructor(id: string, context: LayerNodeContext) {
+    this.context = context;
     const wrapper = new THREE.Group();
     wrapper.name = `TextNode:${id}`;
     this.object3D = wrapper;
@@ -39,6 +55,14 @@ class TextNode implements LayerNode {
     // space. resolveLayerTransform places the wrapper at the layer's
     // centre (rectNode parity).
     this.text = new Text();
+    this.material = new THREE.MeshBasicMaterial({
+      transparent: true,
+      depthTest: true,
+      depthWrite: true,
+      side: THREE.DoubleSide,
+    });
+    this.installLightingShaderPatch(this.material);
+    this.text.material = this.material;
     this.text.anchorX = "left";
     this.text.anchorY = "top";
     wrapper.add(this.text);
@@ -100,15 +124,57 @@ class TextNode implements LayerNode {
       this.text.color = new THREE.Color(1, 1, 1);
     }
 
-    this.text.material = this.text.material ?? null;
+    this.text.material = this.material;
     this.text.fillOpacity = opacity * (colour?.a ?? 1);
+    applyLayerLightingUniforms(
+      { uniforms: this.material.userData.layerLightingUniforms },
+      this.context.getLighting?.() ?? EMPTY_LAYER_LIGHTING,
+    );
 
     this.text.sync();
   }
 
   dispose(): void {
     this.text.dispose();
+    this.material.dispose();
     this.object3D.remove(this.text);
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private installLightingShaderPatch(material: any): void {
+    material.userData.layerLightingUniforms = createLayerLightingUniforms();
+    material.onBeforeCompile = (shader: {
+      vertexShader: string;
+      fragmentShader: string;
+      uniforms: Record<string, unknown>;
+    }) => {
+      Object.assign(shader.uniforms, material.userData.layerLightingUniforms);
+      material.userData.layerLightingUniforms = shader.uniforms;
+      shader.vertexShader = shader.vertexShader
+        .replace(
+          "void main() {",
+          `${LAYER_LIGHTING_VERTEX_VARYINGS}\nvoid main() {`,
+        )
+        .replace(
+          "void main() {",
+          `void main() {\n${LAYER_LIGHTING_VERTEX_BODY}`,
+        );
+      shader.fragmentShader = shader.fragmentShader.replace(
+        "void main() {",
+        `${LAYER_LIGHTING_FRAGMENT}\nvoid main() {`,
+      );
+      if (shader.fragmentShader.includes("#include <dithering_fragment>")) {
+        shader.fragmentShader = shader.fragmentShader.replace(
+          "#include <dithering_fragment>",
+          "gl_FragColor.rgb *= layerLightMultiplier();\n#include <dithering_fragment>",
+        );
+      } else {
+        shader.fragmentShader = shader.fragmentShader.replace(
+          /}\s*$/,
+          "  gl_FragColor.rgb *= layerLightMultiplier();\n}",
+        );
+      }
+    };
   }
 }
 
@@ -161,7 +227,7 @@ function resolveTroikaFontSource(value: unknown): string | null {
 
 export const textNodeFactory: LayerNodeFactory = {
   kind: "text",
-  create(object: FrameObject) {
-    return new TextNode(object.id);
+  create(object: FrameObject, context: LayerNodeContext) {
+    return new TextNode(object.id, context);
   },
 };

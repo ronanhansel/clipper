@@ -430,6 +430,47 @@ describe("buildComposeAnimationTimelineLayers", () => {
       "Max Blur (px)",
     ]);
   });
+
+  it("labels camera auto focus property tracks", () => {
+    const object = {
+      ...frameObject("camera"),
+      type: "camera",
+      tracks: {
+        "props.autoFocus.targetId": {
+          valueType: "discrete",
+          points: [{ time: 0, value: "subject" }],
+        },
+        "props.autoFocus.zOffset": {
+          valueType: "number",
+          points: [{ time: 0, value: 8 }],
+        },
+        "props.autoFocus.rackFocus": {
+          valueType: "boolean",
+          points: [{ time: 0, value: true }],
+        },
+        "props.autoFocus.duration": {
+          valueType: "number",
+          points: [{ time: 0, value: 0.8 }],
+        },
+        "props.autoFocus.ease": {
+          valueType: "discrete",
+          points: [{ time: 0, value: "easeInOut" }],
+        },
+      },
+    } satisfies FrameObject;
+    const [layer] = buildComposeAnimationTimelineLayers(
+      partWithObjects([object]),
+    );
+    const tracks = getComposeAnimationAttributeTracks(layer);
+
+    expect(tracks.map((track) => track.label)).toEqual([
+      "Auto Focus Target",
+      "Auto Focus Z Offset",
+      "Rack Focus",
+      "Rack Focus Duration",
+      "Rack Focus Ease",
+    ]);
+  });
 });
 
 function frameObject(id: string): FrameObject {

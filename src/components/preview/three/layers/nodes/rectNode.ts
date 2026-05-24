@@ -2,23 +2,38 @@ import * as THREE from "three";
 import type { EvaluatedObjectState } from "../../../../../core/propertyRegistry";
 import type { FrameObject } from "../../../../../core/types";
 import { isFillValue, type FillValue } from "../../../../../core/fillValue";
-import type { LayerNode, LayerNodeFactory } from "../layerNodeRegistry";
+import type {
+  LayerNode,
+  LayerNodeContext,
+  LayerNodeFactory,
+} from "../layerNodeRegistry";
 import { resolveLayerTransform } from "../layerTransform";
 import {
   parseCssColorToLinearRgba,
   type LinearRgba,
 } from "../color/parseCssColor";
+import {
+  applyLayerLightingUniforms,
+  createLayerLightingUniforms,
+  EMPTY_LAYER_LIGHTING,
+  LAYER_LIGHTING_FRAGMENT,
+  LAYER_LIGHTING_VERTEX_BODY,
+  LAYER_LIGHTING_VERTEX_VARYINGS,
+} from "../layerLighting";
 
 const RECT_VERTEX = `
+  ${LAYER_LIGHTING_VERTEX_VARYINGS}
   varying vec2 vUv;
   void main() {
     vUv = uv;
+    ${LAYER_LIGHTING_VERTEX_BODY}
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   }
 `;
 
 const RECT_FRAGMENT = `
   precision highp float;
+  ${LAYER_LIGHTING_FRAGMENT}
   varying vec2 vUv;
   uniform vec4 u_color;            // linear RGBA premultiplied alpha
   uniform vec2 u_size;             // px
@@ -44,7 +59,7 @@ const RECT_FRAGMENT = `
     if (a < u_alphaCutoff) discard;
     // Premultiplied output. The rect body is a flat colour for now;
     // gradient/stroke/shadow are phase 1.5.
-    gl_FragColor = vec4(u_color.rgb * a, a);
+    gl_FragColor = vec4(u_color.rgb * layerLightMultiplier() * a, a);
   }
 `;
 
@@ -57,10 +72,12 @@ class RectNode implements LayerNode {
   private readonly mesh: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private readonly material: any;
+  private readonly context: LayerNodeContext;
   private width = 1;
   private height = 1;
 
-  constructor(id: string) {
+  constructor(id: string, context: LayerNodeContext) {
+    this.context = context;
     this.material = new THREE.ShaderMaterial({
       vertexShader: RECT_VERTEX,
       fragmentShader: RECT_FRAGMENT,
@@ -70,6 +87,7 @@ class RectNode implements LayerNode {
         u_radius: { value: 0 },
         u_opacity: { value: 1 },
         u_alphaCutoff: { value: ALPHA_CUTOFF },
+        ...createLayerLightingUniforms(),
       },
       transparent: false,
       depthTest: true,
@@ -122,6 +140,10 @@ class RectNode implements LayerNode {
         ? state.style.borderRadius
         : 0;
     u.u_radius.value = Math.max(0, radius);
+    applyLayerLightingUniforms(
+      this.material,
+      this.context.getLighting?.() ?? EMPTY_LAYER_LIGHTING,
+    );
   }
 
   dispose(): void {
@@ -189,7 +211,7 @@ function resolveFillValueLinearRgba(fill: FillValue): LinearRgba | null {
 
 export const rectNodeFactory: LayerNodeFactory = {
   kind: "rect",
-  create(object: FrameObject) {
-    return new RectNode(object.id);
+  create(object: FrameObject, context: LayerNodeContext) {
+    return new RectNode(object.id, context);
   },
 };

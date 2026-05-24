@@ -113,7 +113,13 @@ const renderClockPlayState = new WeakMap<
   DomAnimationLike,
   { playing: boolean }
 >();
+const renderClockAnimationCache = new WeakMap<Element, DomAnimationLike[]>();
 const renderClockResyncThresholdMs = 24;
+
+export function invalidateRenderClockAnimationCache(root: Element | null) {
+  if (!root) return;
+  renderClockAnimationCache.delete(root);
+}
 
 function getAnimationPhaseOffset(animation: DomAnimationLike) {
   const cached = renderClockPhaseOffset.get(animation);
@@ -203,6 +209,8 @@ function getRenderClockLayers(root: ParentNode | null) {
 }
 
 function getRenderClockAnimations(root: Element) {
+  const cached = renderClockAnimationCache.get(root);
+  if (cached) return cached;
   const animations = new Set<DomAnimationLike>();
   if (typeof root.getAnimations === "function") {
     for (const animation of getAnimationsForRenderClock(root) as
@@ -217,7 +225,9 @@ function getRenderClockAnimations(root: Element) {
       | Animation[])
       animations.add(animation);
   }
-  return [...animations];
+  const result = [...animations];
+  renderClockAnimationCache.set(root, result);
+  return result;
 }
 
 function getAnimationsForRenderClock(root: Element | ShadowRoot): Animation[] {

@@ -132,7 +132,14 @@ export function usePlaybackController({
   const useLocalPlaybackLabels = Boolean(playbackRange?.localLabels);
   const pendingScrubCacheTimeRef = useRef<number | null>(null);
   const lastTimelineScrubTimeRef = useRef<number | null>(null);
+  const lastTimelineScrubAnimationSyncAtRef = useRef(-Infinity);
   const scrubCacheFrameRef = useRef(0);
+  const pendingScrubRenderClockRef = useRef<{
+    time: number;
+    syncAnimations: boolean;
+  } | null>(null);
+  const scrubRenderClockFrameRef = useRef(0);
+  const pendingPlaybackTickRef = useRef(0);
 
   function clampPlaybackTime(time: number) {
     return clamp(time, playbackStart, playbackEnd);
@@ -187,8 +194,10 @@ export function usePlaybackController({
     source: "idle" | "playback" | "scrub" = isPlayingRef.current
       ? "playback"
       : "idle",
+    options: { syncRenderClock?: boolean; syncAnimations?: boolean } = {},
   ) {
     const displayTime = toPlaybackDisplayTime(time);
+    syncPlayheadDomOnly(time);
     publishMasterTimelineClock({
       sceneTime: time,
       adjustedSceneTime: toAdjustedSceneTime(time),
@@ -196,10 +205,21 @@ export function usePlaybackController({
       playing: isPlayingRef.current,
       source,
     });
-    syncPlaybackRenderClockDom(time);
+    if (options.syncRenderClock === false) return;
+    syncPlaybackRenderClockDom(time, {
+      syncAnimations: options.syncAnimations,
+    });
     if (!useLocalPlaybackLabels) syncFrameVisualAdjustmentDom(time);
-    if (playbackTimeLabelRef.current)
-      playbackTimeLabelRef.current.textContent = formatPlaybackTimeLabel(time);
+  }
+
+  /**
+   * Lightweight playhead-only DOM sync. Writes the playhead CSS var,
+   * border scrubber, and time label without touching render-clock layers
+   * or visual-adjustment overlays. Used on the timeline-scrub hot path
+   * so the playhead visually follows the cursor immediately, while the
+   * heavier render-clock DOM sync is deferred to a rAF.
+   */
+  function syncPlayheadDomOnly(time: number) {
     const displayDuration = useLocalPlaybackLabels
       ? playbackDuration
       : timelineDisplayDuration(
@@ -214,7 +234,10 @@ export function usePlaybackController({
       );
     if (playbackPlayheadRef.current)
       playbackPlayheadRef.current.style.removeProperty("--clipper-playhead-x");
+    if (playbackTimeLabelRef.current)
+      playbackTimeLabelRef.current.textContent = formatPlaybackTimeLabel(time);
     if (playbackBorderScrubberRef.current) {
+      const displayTime = toPlaybackDisplayTime(time);
       const displayPlaybackDuration = getPlaybackDisplayDuration();
       const progress =
         displayPlaybackDuration > 0
@@ -237,11 +260,15 @@ export function usePlaybackController({
     }
   }
 
-  function syncPlaybackRenderClockDom(sceneTime: number) {
+  function syncPlaybackRenderClockDom(
+    sceneTime: number,
+    options: { syncAnimations?: boolean } = {},
+  ) {
     syncRenderClockLayersToSceneTime(
       frameViewportRef.current,
       sceneTime,
       isPlayingRef.current,
+      options,
     );
   }
 
@@ -336,6 +363,35 @@ export function usePlaybackController({
     });
   }
 
+  function scheduleImmediatePlaybackTick() {
+    if (pendingPlaybackTickRef.current) return;
+    pendingPlaybackTickRef.current = requestAnimationFrame((now) => {
+      pendingPlaybackTickRef.current = 0;
+      if (!isPlayingRef.current || timelineScrubbingRef.current) return;
+      const clock = playbackClockRef.current ?? {
+        startedAt: now,
+        startedFrom: currentSceneTimeRef.current,
+      };
+      playbackClockRef.current = clock;
+      const nextTime = useLocalPlaybackLabels
+        ? clamp(
+            clock.startedFrom + (now - clock.startedAt) / 1000,
+            playbackStart,
+            playbackEnd,
+          )
+        : advanceTimeSensitiveSceneTime(
+            clock.startedFrom,
+            (now - clock.startedAt) / 1000,
+            sceneDurationSeconds,
+            visibleSceneAdjustmentLayers,
+          );
+      requestPrerenderAtTime?.(nextTime, "playback");
+      currentSceneTimeRef.current = nextTime;
+      syncPlaybackDom(nextTime, "playback", { syncRenderClock: false });
+      startTransition(() => setCurrentSceneTime(nextTime));
+    });
+  }
+
   function scrubToSceneTime(time: number) {
     const nextTime = clampPlaybackTime(time);
     if (timelineScrubbingRef.current)
@@ -355,8 +411,9 @@ export function usePlaybackController({
         startedAt: performance.now(),
         startedFrom: nextTime,
       });
-    if (!timelineScrubbingRef.current) syncPlaybackDom(nextTime, "scrub");
-    else {
+    if (!timelineScrubbingRef.current) {
+      syncPlaybackDom(nextTime, "scrub");
+    } else {
       publishMasterTimelineClock({
         sceneTime: nextTime,
         adjustedSceneTime: toAdjustedSceneTime(nextTime),
@@ -364,8 +421,26 @@ export function usePlaybackController({
         playing: isPlayingRef.current,
         source: "scrub",
       });
-      syncPlaybackRenderClockDom(nextTime);
-      if (!useLocalPlaybackLabels) syncFrameVisualAdjustmentDom(nextTime);
+      syncPlayheadDomOnly(nextTime);
+      const now = performance.now();
+      const syncAnimations =
+        now - lastTimelineScrubAnimationSyncAtRef.current >=
+        timelineScrubAnimationSyncIntervalMs;
+      if (syncAnimations) lastTimelineScrubAnimationSyncAtRef.current = now;
+      pendingScrubRenderClockRef.current = { time: nextTime, syncAnimations };
+      if (!scrubRenderClockFrameRef.current) {
+        scrubRenderClockFrameRef.current = requestAnimationFrame(() => {
+          scrubRenderClockFrameRef.current = 0;
+          const pending = pendingScrubRenderClockRef.current;
+          pendingScrubRenderClockRef.current = null;
+          if (!pending) return;
+          syncPlaybackRenderClockDom(pending.time, {
+            syncAnimations: pending.syncAnimations,
+          });
+          if (!useLocalPlaybackLabels)
+            syncFrameVisualAdjustmentDom(pending.time);
+        });
+      }
     }
 
     if (timelineScrubbingRef.current) {
@@ -435,7 +510,9 @@ export function usePlaybackController({
       playing: true,
       source: "playback",
     });
+    syncPlayheadDomOnly(currentSceneTimeRef.current);
     setIsPlaying(true);
+    scheduleImmediatePlaybackTick();
   }
 
   function pausePlaybackForTimelineScrub() {
@@ -596,6 +673,10 @@ export function usePlaybackController({
     () => () => {
       if (scrubCacheFrameRef.current)
         cancelAnimationFrame(scrubCacheFrameRef.current);
+      if (scrubRenderClockFrameRef.current)
+        cancelAnimationFrame(scrubRenderClockFrameRef.current);
+      if (pendingPlaybackTickRef.current)
+        cancelAnimationFrame(pendingPlaybackTickRef.current);
     },
     [],
   );
@@ -716,8 +797,10 @@ export function syncRenderClockLayersToSceneTime(
   root: ParentNode | null,
   sceneTime: number,
   playing: boolean,
+  options: { syncAnimations?: boolean } = {},
 ) {
   if (!root) return 0;
+  const syncAnimations = options.syncAnimations ?? true;
   let synced = 0;
   for (const layer of root.querySelectorAll<HTMLElement>(
     "[data-clipper-render-clock-layer]",
@@ -734,7 +817,7 @@ export function syncRenderClockLayersToSceneTime(
     const style = getRenderClockStyle(state);
     for (const [key, value] of Object.entries(style))
       layer.style.setProperty(key, String(value));
-    if (shouldSyncRenderClockAnimations(layer, state))
+    if (syncAnimations && shouldSyncRenderClockAnimations(layer, state))
       syncDomAnimationsToRenderClock(layer, state);
     synced += 1;
   }
@@ -746,6 +829,7 @@ const renderClockLayerState = new WeakMap<
   { playing: boolean; time: number; sampledAt: number }
 >();
 const renderClockPlaybackJumpToleranceMs = 40;
+const timelineScrubAnimationSyncIntervalMs = 1000 / 30;
 
 function shouldSyncRenderClockAnimations(
   layer: HTMLElement,

@@ -10,17 +10,28 @@ import type {
   LayerNodeFactory,
 } from "../layerNodeRegistry";
 import { resolveLayerTransform } from "../layerTransform";
+import {
+  applyLayerLightingUniforms,
+  createLayerLightingUniforms,
+  EMPTY_LAYER_LIGHTING,
+  LAYER_LIGHTING_FRAGMENT,
+  LAYER_LIGHTING_VERTEX_BODY,
+  LAYER_LIGHTING_VERTEX_VARYINGS,
+} from "../layerLighting";
 
 const IMAGE_VERTEX = `
+  ${LAYER_LIGHTING_VERTEX_VARYINGS}
   varying vec2 vUv;
   void main() {
     vUv = uv;
+    ${LAYER_LIGHTING_VERTEX_BODY}
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   }
 `;
 
 const IMAGE_FRAGMENT = `
   precision highp float;
+  ${LAYER_LIGHTING_FRAGMENT}
   varying vec2 vUv;
   uniform sampler2D u_image;
   uniform vec2 u_size;
@@ -47,11 +58,12 @@ const IMAGE_FRAGMENT = `
     float coverage = clamp(0.5 - d, 0.0, 1.0);
     float a = c.a * u_opacity * coverage * inside;
     if (a < u_alphaCutoff) discard;
-    gl_FragColor = vec4(c.rgb * u_opacity * coverage * inside, a);
+    gl_FragColor = vec4(c.rgb * layerLightMultiplier() * u_opacity * coverage * inside, a);
   }
 `;
 
 const ALPHA_CUTOFF = 0.01;
+const SVG_TAG_RE = /<svg[\s>]/i;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type CacheEntry = {
@@ -112,7 +124,7 @@ export function releaseImageTexture(
   textureCache.delete(src);
 }
 
-function acquireLayerSizedSvgTexture(
+export function acquireLayerSizedSvgTexture(
   src: string,
   width: number,
   height: number,
@@ -161,19 +173,33 @@ async function rasterizeSvgTexture(
 ): Promise<void> {
   const context = canvas.getContext("2d");
   if (!context) throw new Error("ImageNode: 2D canvas unavailable");
-  const markup = await loadSvgMarkup(src);
-  const sizedSvg = serializeSvgForRaster(markup, width, height, undefined);
-  const objectUrl = URL.createObjectURL(
-    new Blob([sizedSvg], { type: "image/svg+xml;charset=utf-8" }),
-  );
   try {
-    const image = await loadImage(objectUrl);
-    context.clearRect(0, 0, width, height);
-    context.drawImage(image, 0, 0, width, height);
-    texture.needsUpdate = true;
-    notifyTextureReady(key, texture);
-  } finally {
-    URL.revokeObjectURL(objectUrl);
+    const markup = await loadSvgMarkup(src);
+    const sizedSvg = serializeSvgForRaster(markup, width, height, undefined);
+    const objectUrl = URL.createObjectURL(
+      new Blob([sizedSvg], { type: "image/svg+xml;charset=utf-8" }),
+    );
+    try {
+      const image = await loadImage(objectUrl);
+      context.clearRect(0, 0, width, height);
+      context.drawImage(image, 0, 0, width, height);
+      texture.needsUpdate = true;
+      notifyTextureReady(key, texture);
+    } finally {
+      URL.revokeObjectURL(objectUrl);
+    }
+  } catch (error) {
+    console.warn("ImageNode: SVG rasterization failed", error);
+    try {
+      const image = await loadImage(src);
+      context.clearRect(0, 0, width, height);
+      context.drawImage(image, 0, 0, width, height);
+      texture.needsUpdate = true;
+      notifyTextureReady(key, texture);
+    } catch (fallbackError) {
+      console.warn("ImageNode: direct SVG decode failed", fallbackError);
+      notifyTextureReady(key, texture);
+    }
   }
 }
 
@@ -185,9 +211,21 @@ function notifyTextureReady(key: string, texture: any): void {
 }
 
 async function loadSvgMarkup(src: string): Promise<string> {
+  const inlineMarkup = decodeMaybeSvgMarkup(src);
+  if (SVG_TAG_RE.test(inlineMarkup)) return inlineMarkup;
   if (src.startsWith("data:image/svg+xml")) return decodeSvgDataUrl(src);
   const response = await fetch(src);
   return response.text();
+}
+
+function decodeMaybeSvgMarkup(input: string): string {
+  if (SVG_TAG_RE.test(input)) return input;
+  try {
+    const decoded = decodeURIComponent(input);
+    return SVG_TAG_RE.test(decoded) ? decoded : input;
+  } catch {
+    return input;
+  }
 }
 
 function decodeSvgDataUrl(src: string): string {
@@ -222,9 +260,14 @@ type UvCrop = {
   sizeY: number;
 };
 
-const FULL_UVS: UvCrop = { originX: 0, originY: 0, sizeX: 1, sizeY: 1 };
+export const FULL_UVS: UvCrop = {
+  originX: 0,
+  originY: 0,
+  sizeX: 1,
+  sizeY: 1,
+};
 
-function computeUvCrop(
+export function computeUvCrop(
   objectFit: string,
   imgW: number,
   imgH: number,
@@ -266,6 +309,7 @@ function readImageSrc(state: EvaluatedObjectState): string | null {
 
 export function isSvgMediaSource(src: string): boolean {
   const normalized = src.trim().toLowerCase();
+  if (SVG_TAG_RE.test(decodeMaybeSvgMarkup(normalized))) return true;
   if (normalized.startsWith("data:image/svg+xml")) return true;
   try {
     return decodeURIComponent(normalized).includes(".svg");
@@ -299,9 +343,11 @@ class ImageNode implements LayerNode {
   private height = 1;
 
   private readonly requestRender: () => void;
+  private readonly context: LayerNodeContext;
 
   constructor(id: string, context: LayerNodeContext) {
     this.requestRender = context.requestRender;
+    this.context = context;
     this.placeholder = acquireImageTexture(MEDIA_PLACEHOLDER_DATA_URL);
     this.material = new THREE.ShaderMaterial({
       vertexShader: IMAGE_VERTEX,
@@ -314,6 +360,7 @@ class ImageNode implements LayerNode {
         u_radius: { value: 0 },
         u_opacity: { value: 1 },
         u_alphaCutoff: { value: ALPHA_CUTOFF },
+        ...createLayerLightingUniforms(),
       },
       transparent: true,
       premultipliedAlpha: true,
@@ -400,6 +447,10 @@ class ImageNode implements LayerNode {
         ? state.style.borderRadius
         : 0;
     u.u_radius.value = Math.max(0, radius);
+    applyLayerLightingUniforms(
+      this.material,
+      this.context.getLighting?.() ?? EMPTY_LAYER_LIGHTING,
+    );
   }
 
   dispose(): void {

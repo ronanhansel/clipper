@@ -7,8 +7,20 @@ import * as THREE from "three";
 import { SVGLoader } from "three/examples/jsm/loaders/SVGLoader.js";
 import type { EvaluatedObjectState } from "../../../../../core/propertyRegistry";
 import type { FrameObject } from "../../../../../core/types";
-import type { LayerNode, LayerNodeFactory } from "../layerNodeRegistry";
+import type {
+  LayerNode,
+  LayerNodeContext,
+  LayerNodeFactory,
+} from "../layerNodeRegistry";
 import { resolveLayerTransform } from "../layerTransform";
+import {
+  applyLayerLightingUniforms,
+  createLayerLightingUniforms,
+  EMPTY_LAYER_LIGHTING,
+  LAYER_LIGHTING_FRAGMENT,
+  LAYER_LIGHTING_VERTEX_BODY,
+  LAYER_LIGHTING_VERTEX_VARYINGS,
+} from "../layerLighting";
 
 /**
  * Native SVG layer node. Replaces the per-element DOM-capture fallback
@@ -148,14 +160,16 @@ class SvgNode implements LayerNode {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private readonly pathsContainer: any;
   private readonly id: string;
+  private readonly context: LayerNodeContext | undefined;
   private readonly materialEntries: MaterialEntry[] = [];
   private currentSrc: string | null = null;
   private parsed: ParsedSvg | null = null;
   private currentOpacity = 1;
   private warnedFailure = false;
 
-  constructor(id: string) {
+  constructor(id: string, context: LayerNodeContext | undefined) {
     this.id = id;
+    this.context = context;
     this.wrapper = new THREE.Group();
     this.wrapper.name = `SvgNode:${id}`;
     this.pathsContainer = new THREE.Group();
@@ -188,6 +202,7 @@ class SvgNode implements LayerNode {
     }
 
     if (this.parsed) this.applyFitTransform(t.width, t.height);
+    this.applyLighting();
   }
 
   private requestLoad(src: string): void {
@@ -197,6 +212,8 @@ class SvgNode implements LayerNode {
         this.parsed = parsed;
         this.rebuildMeshes(parsed);
         this.applyOpacity();
+        this.applyLighting();
+        this.context?.requestRender?.();
       })
       .catch((error) => {
         if (this.warnedFailure) return;
@@ -224,6 +241,7 @@ class SvgNode implements LayerNode {
             depthWrite,
             side: THREE.DoubleSide,
           });
+          installLightingShaderPatch(material);
           const mesh = new THREE.Mesh(geometry, material);
           mesh.position.z = drawIndex * SVG_PATH_Z_STEP;
           this.pathsContainer.add(mesh);
@@ -253,6 +271,7 @@ class SvgNode implements LayerNode {
             depthWrite,
             side: THREE.DoubleSide,
           });
+          installLightingShaderPatch(material);
           const mesh = new THREE.Mesh(geometry, material);
           mesh.position.z = drawIndex * SVG_PATH_Z_STEP;
           this.pathsContainer.add(mesh);
@@ -301,6 +320,16 @@ class SvgNode implements LayerNode {
     }
   }
 
+  private applyLighting(): void {
+    const lighting = this.context?.getLighting?.() ?? EMPTY_LAYER_LIGHTING;
+    for (const entry of this.materialEntries) {
+      applyLayerLightingUniforms(
+        { uniforms: entry.material.userData.layerLightingUniforms },
+        lighting,
+      );
+    }
+  }
+
   private disposePathChildren(): void {
     for (const child of this.pathsContainer.children.slice()) {
       this.pathsContainer.remove(child);
@@ -335,7 +364,41 @@ function clamp01(v: number): number {
 
 export const svgNodeFactory: LayerNodeFactory = {
   kind: "svg",
-  create(object: FrameObject) {
-    return new SvgNode(object.id);
+  create(object: FrameObject, context: LayerNodeContext) {
+    return new SvgNode(object.id, context);
   },
 };
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function installLightingShaderPatch(material: any): void {
+  material.userData.layerLightingUniforms = createLayerLightingUniforms();
+  material.onBeforeCompile = (shader: {
+    vertexShader: string;
+    fragmentShader: string;
+    uniforms: Record<string, unknown>;
+  }) => {
+    Object.assign(shader.uniforms, material.userData.layerLightingUniforms);
+    material.userData.layerLightingUniforms = shader.uniforms;
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        "void main() {",
+        `${LAYER_LIGHTING_VERTEX_VARYINGS}\nvoid main() {`,
+      )
+      .replace("void main() {", `void main() {\n${LAYER_LIGHTING_VERTEX_BODY}`);
+    shader.fragmentShader = shader.fragmentShader.replace(
+      "void main() {",
+      `${LAYER_LIGHTING_FRAGMENT}\nvoid main() {`,
+    );
+    if (shader.fragmentShader.includes("#include <dithering_fragment>")) {
+      shader.fragmentShader = shader.fragmentShader.replace(
+        "#include <dithering_fragment>",
+        "gl_FragColor.rgb *= layerLightMultiplier();\n#include <dithering_fragment>",
+      );
+      return;
+    }
+    shader.fragmentShader = shader.fragmentShader.replace(
+      /}\s*$/,
+      "  gl_FragColor.rgb *= layerLightMultiplier();\n}",
+    );
+  };
+}

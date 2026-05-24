@@ -152,7 +152,8 @@ export function serializeSvgForRaster(
       sourceOffset,
       frameScale,
     );
-  return trimmed.replace(/<svg\b([^>]*)>/i, (match, attrs: string) => {
+  const normalized = ensureSvgNamespace(trimmed);
+  return normalized.replace(/<svg\b([^>]*)>/i, (match, attrs: string) => {
     const withoutSize = attrs.replace(
       /\s(width|height)=("[^"]*"|'[^']*'|[^\s>]*)/gi,
       "",

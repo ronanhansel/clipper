@@ -5,6 +5,7 @@ import { CodeSection } from "./sections/CodeSection";
 import { EffectsSection } from "./sections/EffectsSection";
 import { FillSection } from "./sections/FillSection";
 import { ImageSection } from "./sections/ImageSection";
+import { LightObjectSection } from "./sections/LightObjectSection";
 import { Pattern2dSection } from "./sections/Pattern2dSection";
 import { RectSection } from "./sections/RectSection";
 import { StrokeSection } from "./sections/StrokeSection";
@@ -66,6 +67,9 @@ export const inspectorRegistry: Record<string, InspectorTypeDefinition> = {
   },
   camera: {
     sections: [CameraObjectSection],
+  },
+  light: {
+    sections: [BoundsSection, LightObjectSection],
   },
 };
 

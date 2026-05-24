@@ -10,6 +10,11 @@ import {
 } from "../../../core/types";
 import { applyCompositionCameraToThree } from "./compositionCameraThree";
 import { LayerNodeSync } from "./layers/LayerNodeSync";
+import {
+  LayerShadowSync,
+  type LayerShadowDebugImage,
+  type LayerShadowDiagnostics,
+} from "./layers/LayerShadowSync";
 import { SharedCaptureCanvas } from "./SharedCaptureCanvas";
 import { ThinLensRenderPass } from "./ThinLensRenderPass";
 
@@ -58,6 +63,10 @@ export class CompositionRenderer {
 
   private sharedCapture: SharedCaptureCanvas;
   private layerSync: LayerNodeSync;
+  private shadowSync: LayerShadowSync;
+  private readonly shadowDebugPane: HTMLDivElement;
+  private readonly shadowDebugCanvas: HTMLCanvasElement;
+  private readonly shadowDebugText: HTMLPreElement;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private backgroundMesh: any;
@@ -174,6 +183,43 @@ export class CompositionRenderer {
       requestRender: () => this.render(),
     });
     this.scene.add(this.layerSync.group);
+    this.shadowSync = new LayerShadowSync();
+    this.shadowDebugPane = document.createElement("div");
+    this.shadowDebugPane.style.position = "fixed";
+    this.shadowDebugPane.style.left = "12px";
+    this.shadowDebugPane.style.top = "12px";
+    this.shadowDebugPane.style.zIndex = "2147483647";
+    this.shadowDebugPane.style.display = "none";
+    this.shadowDebugPane.style.gridTemplateColumns = "64px minmax(0, 1fr)";
+    this.shadowDebugPane.style.alignItems = "start";
+    this.shadowDebugPane.style.gap = "8px";
+    this.shadowDebugPane.style.maxWidth = "min(620px, calc(100vw - 24px))";
+    this.shadowDebugPane.style.maxHeight = "min(72vh, calc(100vh - 24px))";
+    this.shadowDebugPane.style.overflow = "auto";
+    this.shadowDebugPane.style.overscrollBehavior = "contain";
+    this.shadowDebugPane.style.boxSizing = "border-box";
+    this.shadowDebugPane.style.padding = "8px";
+    this.shadowDebugPane.style.border = "1px solid rgba(255,255,255,0.18)";
+    this.shadowDebugPane.style.borderRadius = "6px";
+    this.shadowDebugPane.style.background = "rgba(8,10,12,0.84)";
+    this.shadowDebugPane.style.color = "#f4f7fb";
+    this.shadowDebugPane.style.font =
+      "11px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace";
+    this.shadowDebugPane.style.pointerEvents = "auto";
+    this.shadowDebugCanvas = document.createElement("canvas");
+    this.shadowDebugCanvas.width = 64;
+    this.shadowDebugCanvas.height = 64;
+    this.shadowDebugCanvas.style.width = "64px";
+    this.shadowDebugCanvas.style.height = "64px";
+    this.shadowDebugCanvas.style.flex = "0 0 auto";
+    this.shadowDebugCanvas.style.imageRendering = "pixelated";
+    this.shadowDebugCanvas.style.border = "1px solid rgba(255,255,255,0.2)";
+    this.shadowDebugText = document.createElement("pre");
+    this.shadowDebugText.style.margin = "0";
+    this.shadowDebugText.style.whiteSpace = "pre-wrap";
+    this.shadowDebugText.style.overflowWrap = "anywhere";
+    this.shadowDebugText.style.minWidth = "0";
+    this.shadowDebugPane.append(this.shadowDebugCanvas, this.shadowDebugText);
 
     // Far-plane background. Without a real surface in the back of the
     // frame the depth attachment reads `1.0` (cleared) on void pixels,
@@ -253,6 +299,14 @@ export class CompositionRenderer {
       this.sharedCapture.prepare(sourceElement);
     }
     this.layerSync.sync(part, localTime);
+    const shadow = this.shadowSync.sync(
+      part,
+      localTime,
+      this.renderer,
+      this.layerSync.group,
+    );
+    this.layerSync.applyShadow(shadow);
+    this.updateShadowDebugPane();
   }
 
   /**
@@ -264,11 +318,10 @@ export class CompositionRenderer {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   setComposerPasses(passes: any[]) {
     // Remove previously appended passes (Three's EffectComposer doesn't
-    // expose a clear-from-index, so do it explicitly). Disposal of the
-    // pass instances themselves is the caller's job — the composer
-    // doesn't own them.
+    // expose a clear-from-index, so do it explicitly).
     for (const p of this.extraPasses) {
       this.composer.removePass(p);
+      if (typeof p.dispose === "function") p.dispose();
     }
     this.composer.removePass(this.outputPass);
     this.extraPasses = passes.slice();
@@ -287,20 +340,77 @@ export class CompositionRenderer {
     this.composer.render();
   }
 
+  private updateShadowDebugPane() {
+    const diagnostics = this.shadowSync.getDiagnostics();
+    if (!diagnostics.active || diagnostics.light?.debug !== true) {
+      this.shadowDebugPane.style.display = "none";
+      return;
+    }
+    if (this.shadowDebugPane.parentElement !== document.body) {
+      document.body.appendChild(this.shadowDebugPane);
+    }
+    const debug = this.shadowSync.readDebugImageData(this.renderer, 64);
+    if (debug) {
+      this.shadowDebugCanvas.getContext("2d")?.putImageData(debug.image, 0, 0);
+    }
+    this.shadowDebugText.textContent = formatShadowDebugText(
+      diagnostics,
+      debug,
+    );
+    this.shadowDebugPane.style.display = "grid";
+  }
+
   dispose() {
     this.scene.remove(this.layerSync.group);
     this.layerSync.dispose();
+    this.shadowSync.dispose();
     this.scene.remove(this.backgroundMesh);
     this.backgroundMesh.geometry.dispose();
     this.backgroundMesh.material.dispose();
     this.sharedCapture.dispose();
-    // Drop refs to extra passes (caller owns disposal) before disposing
-    // the composer so its `dispose()` only releases its own RTs +
-    // copyPass.
+    for (const p of this.extraPasses) {
+      if (typeof p.dispose === "function") p.dispose();
+    }
     this.extraPasses.length = 0;
     this.composer.dispose();
     this.renderPass.dispose();
     this.outputPass.dispose();
     this.renderer.dispose();
+    this.shadowDebugPane.remove();
   }
+}
+
+function formatShadowDebugText(
+  diagnostics: LayerShadowDiagnostics,
+  debug: LayerShadowDebugImage | null,
+) {
+  const light = diagnostics.light;
+  const lines = [
+    `shadow ${diagnostics.reason}`,
+    light
+      ? `light ${light.id} ${light.kind} range=${round(light.range)} angle=${round(light.angle)}`
+      : "light none",
+    `casters ${diagnostics.casterIds.length} rendered=${diagnostics.render.visibleCasters}`,
+  ];
+  if (debug) {
+    lines.push(
+      `map depth=${round(debug.map.minDepth)}..${round(debug.map.maxDepth)} samples=${debug.map.nonClearSamples}/${debug.map.totalSamples}`,
+    );
+  }
+  const objects = debug?.objects ?? diagnostics.objects;
+  for (const object of objects) {
+    const shadow = object.shadow;
+    lines.push(
+      `${object.id} ${object.type} cast=${object.casts} uv=${round(shadow.u)},${round(shadow.v)} depth=${round(shadow.depth)} closest=${formatNullableNumber(shadow.closestDepth)} delta=${formatNullableNumber(shadow.depthDelta)} blocked=${shadow.blockedAfterBias}`,
+    );
+  }
+  return lines.join("\n");
+}
+
+function round(value: number) {
+  return Number.isFinite(value) ? value.toFixed(3) : String(value);
+}
+
+function formatNullableNumber(value: number | null) {
+  return value == null ? "n/a" : round(value);
 }

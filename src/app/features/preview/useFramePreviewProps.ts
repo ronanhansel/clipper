@@ -1,4 +1,8 @@
-import { useMemo, type RefObject } from "react";
+import {
+  useMemo,
+  type MouseEvent as ReactMouseEvent,
+  type RefObject,
+} from "react";
 import type {
   AdjustmentLayer,
   Bounds,
@@ -110,6 +114,7 @@ export type UseFramePreviewPropsParams = {
       rotateZ?: number;
     },
   ) => void;
+  onAuthorPreviewContextMenu?: (event: ReactMouseEvent<HTMLDivElement>) => void;
 };
 
 export function useFramePreviewProps({
@@ -166,6 +171,7 @@ export function useFramePreviewProps({
   authorViewState,
   onAuthorViewStateChange,
   onObjectTransformChange,
+  onAuthorPreviewContextMenu,
 }: UseFramePreviewPropsParams): StrategyFramePreviewProps {
   return useMemo((): StrategyFramePreviewProps => {
     return {
@@ -245,6 +251,7 @@ export function useFramePreviewProps({
       authorViewState,
       onAuthorViewStateChange,
       onObjectTransformChange,
+      onAuthorPreviewContextMenu,
     };
   }, [
     cameraRef,
@@ -308,5 +315,6 @@ export function useFramePreviewProps({
     authorViewState,
     onAuthorViewStateChange,
     onObjectTransformChange,
+    onAuthorPreviewContextMenu,
   ]);
 }

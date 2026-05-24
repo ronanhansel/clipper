@@ -10,6 +10,7 @@ import {
   FRAME_HEIGHT,
   FRAME_WIDTH,
   type CameraObjectProps,
+  type LightObjectKind,
 } from "../../../core/types";
 import { applyCompositionCameraToThree } from "./compositionCameraThree";
 import {
@@ -39,6 +40,21 @@ export type ThreeAuthorCameraObject = {
   props: CameraObjectProps;
   active: boolean;
   selected: boolean;
+};
+
+export type ThreeAuthorLightObject = {
+  id: string;
+  kind: LightObjectKind;
+  color: string;
+  intensity: number;
+  range: number;
+  angle: number;
+  softness: number;
+  debug: boolean;
+  selected: boolean;
+  bounds: { x: number; y: number; width: number; height: number };
+  transform: Record<string, unknown>;
+  target: { x: number; y: number; z: number };
 };
 
 export type ThreeAuthorObjectTransformUpdate = {
@@ -113,6 +129,126 @@ function createCameraBodyGroup(color: number, opacity: number) {
   lens.userData.clipperCameraBody = true;
   cameraBodyGroup.add(lens);
   return cameraBodyGroup;
+}
+
+function createLightVisualGroup(color: number, opacity: number) {
+  const group = new THREE.Group();
+  group.userData.clipperLightVisual = true;
+  const bodyGroup = new THREE.Group();
+  bodyGroup.name = "lightBody";
+  group.add(bodyGroup);
+  const core = new THREE.Mesh(
+    new THREE.SphereGeometry(26, 24, 12),
+    new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity,
+    }),
+  );
+  core.userData.clipperLightVisual = true;
+  core.userData.clipperLightPickable = true;
+  bodyGroup.add(core);
+  const ring = new THREE.Mesh(
+    new THREE.TorusGeometry(38, 2, 8, 36),
+    new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: Math.min(1, opacity + 0.1),
+    }),
+  );
+  ring.rotation.x = Math.PI / 2;
+  ring.userData.clipperLightVisual = true;
+  ring.userData.clipperLightPickable = true;
+  bodyGroup.add(ring);
+
+  const directionLine = new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Vector3(0, 0, -1),
+    ]),
+    new THREE.LineBasicMaterial({
+      color,
+      transparent: true,
+      opacity: Math.min(1, opacity + 0.12),
+    }),
+  );
+  directionLine.name = "lightDirectionLine";
+  directionLine.userData.clipperLightVisual = true;
+  group.add(directionLine);
+
+  const arrowHead = new THREE.Mesh(
+    new THREE.ConeGeometry(14, 38, 24),
+    new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: Math.min(1, opacity + 0.16),
+    }),
+  );
+  arrowHead.name = "lightDirectionArrow";
+  arrowHead.userData.clipperLightVisual = true;
+  group.add(arrowHead);
+
+  const beamCone = new THREE.Mesh(
+    new THREE.ConeGeometry(110, 260, 32, 1, true),
+    new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: Math.min(0.22, opacity * 0.22),
+      wireframe: true,
+      depthWrite: false,
+    }),
+  );
+  beamCone.name = "lightBeamCone";
+  beamCone.userData.clipperLightVisual = true;
+  group.add(beamCone);
+
+  const pointRange = new THREE.Mesh(
+    new THREE.SphereGeometry(1, 32, 16),
+    new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: Math.min(0.2, opacity * 0.2),
+      wireframe: true,
+      depthWrite: false,
+    }),
+  );
+  pointRange.name = "lightPointRange";
+  pointRange.userData.clipperLightVisual = true;
+  group.add(pointRange);
+
+  const ambientField = new THREE.Mesh(
+    new THREE.SphereGeometry(1, 32, 16),
+    new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: Math.min(0.16, opacity * 0.16),
+      wireframe: true,
+      depthWrite: false,
+    }),
+  );
+  ambientField.name = "lightAmbientField";
+  ambientField.userData.clipperLightVisual = true;
+  group.add(ambientField);
+
+  const rayMaterial = new THREE.LineBasicMaterial({
+    color,
+    transparent: true,
+    opacity: Math.min(0.72, opacity),
+  });
+  for (const points of [
+    [new THREE.Vector3(-70, 0, 0), new THREE.Vector3(70, 0, 0)],
+    [new THREE.Vector3(0, -70, 0), new THREE.Vector3(0, 70, 0)],
+    [new THREE.Vector3(0, 0, -70), new THREE.Vector3(0, 0, 70)],
+  ]) {
+    const ray = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints(points),
+      rayMaterial,
+    );
+    ray.name = "lightPointRay";
+    ray.userData.clipperLightVisual = true;
+    group.add(ray);
+  }
+  return group;
 }
 
 function applyCameraObjectTransform(target: any, camera: CameraObjectProps) {
@@ -209,6 +345,38 @@ export class ThreeAuthorScene {
   private objectPickGroup: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private cameraVisualGroup: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private lightVisualGroup: any;
+  private objectPickMeshesById = new Map<
+    string,
+    {
+      height: number;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      mesh: any;
+      signature: string;
+      width: number;
+    }
+  >();
+  private cameraVisualMeshesById = new Map<
+    string,
+    {
+      color: number;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      group: any;
+      opacity: number;
+      signature: string;
+    }
+  >();
+  private lightVisualMeshesById = new Map<
+    string,
+    {
+      color: number;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      group: any;
+      opacity: number;
+      signature: string;
+    }
+  >();
   private gizmoMode: "camera" | "object" = "camera";
   private selectedObjectGizmoId: string | null = null;
   private selectedCameraObjectId: string | null = null;
@@ -318,6 +486,10 @@ export class ThreeAuthorScene {
     this.cameraVisualGroup = new THREE.Group();
     this.cameraVisualGroup.name = "CameraVisualGroup";
     this.scene.add(this.cameraVisualGroup);
+
+    this.lightVisualGroup = new THREE.Group();
+    this.lightVisualGroup.name = "LightVisualGroup";
+    this.scene.add(this.lightVisualGroup);
 
     // Visible camera body so the user can click to select the camera in 3D.
     // The mesh is a child of cameraGizmoTarget — it inherits the camera's
@@ -546,8 +718,19 @@ export class ThreeAuthorScene {
         typeof hits[0]?.object?.userData?.clipperCameraObjectId === "string"
           ? hits[0].object.userData.clipperCameraObjectId
           : null;
-      const objectHits =
+      const lightHits =
         pathPick == null && hits.length === 0
+          ? this.raycaster.intersectObject(this.lightVisualGroup, true)
+          : [];
+      const pickedLightHit = lightHits.find(
+        (hit: any) =>
+          hit.object?.userData?.clipperLightPickable === true &&
+          typeof hit.object.userData.clipperLightObjectId === "string",
+      );
+      const pickedLightId =
+        pickedLightHit?.object.userData.clipperLightObjectId ?? null;
+      const objectHits =
+        pathPick == null && hits.length === 0 && pickedLightId == null
           ? this.raycaster.intersectObject(this.objectPickGroup, true)
           : [];
       const pickedObjectId =
@@ -556,7 +739,7 @@ export class ThreeAuthorScene {
           : null;
       downPoint = { x: event.clientX, y: event.clientY };
       downHitCamera = pickedCameraId;
-      downHitObject = pickedObjectId != null;
+      downHitObject = pickedObjectId != null || pickedLightId != null;
       downHitPath = pathPick;
       if (pickedCameraId) {
         // Prevent OrbitControls from starting an orbit on the camera body.
@@ -569,6 +752,9 @@ export class ThreeAuthorScene {
       } else if (pickedObjectId) {
         event.stopPropagation();
         this.selectCallback?.(pickedObjectId);
+      } else if (pickedLightId) {
+        event.stopPropagation();
+        this.selectCallback?.(pickedLightId);
       }
     });
     this.canvas.addEventListener("pointerup", (event: PointerEvent) => {
@@ -775,21 +961,89 @@ export class ThreeAuthorScene {
     this.requestRender();
   }
 
+  private getCameraObjectSignature(camera: CameraObjectProps) {
+    return [
+      camera.position.x,
+      camera.position.y,
+      camera.position.z,
+      camera.rotation.x,
+      camera.rotation.y,
+      camera.rotation.z,
+    ].join(":");
+  }
+
+  private updateCameraVisualMaterial(
+    group: any,
+    color: number,
+    opacity: number,
+  ) {
+    group.traverse?.((node: any) => {
+      const materials = Array.isArray(node.material)
+        ? node.material
+        : node.material
+          ? [node.material]
+          : [];
+      for (const material of materials) {
+        material.color?.setHex?.(color);
+        material.opacity = opacity;
+        material.transparent = opacity < 1;
+        material.needsUpdate = true;
+      }
+    });
+  }
+
+  private updateLightVisualMaterial(
+    group: any,
+    color: number,
+    opacity: number,
+  ) {
+    group.traverse?.((node: any) => {
+      const materials = Array.isArray(node.material)
+        ? node.material
+        : node.material
+          ? [node.material]
+          : [];
+      const visualOpacity =
+        node.name === "lightBeamCone"
+          ? Math.min(0.22, opacity * 0.22)
+          : node.name === "lightPointRange"
+            ? Math.min(0.2, opacity * 0.2)
+            : node.name === "lightAmbientField"
+              ? Math.min(0.16, opacity * 0.16)
+              : node.name === "lightPointRay"
+                ? Math.min(0.72, opacity)
+                : node.name === "lightDirectionLine"
+                  ? Math.min(1, opacity + 0.12)
+                  : node.name === "lightDirectionArrow"
+                    ? Math.min(1, opacity + 0.16)
+                    : opacity;
+      for (const material of materials) {
+        material.color?.setHex?.(color);
+        material.opacity = visualOpacity;
+        material.transparent = visualOpacity < 1;
+        material.needsUpdate = true;
+      }
+    });
+  }
+
+  private disposeObject3d(object: any) {
+    object.traverse?.((node: any) => {
+      node.geometry?.dispose?.();
+      if (Array.isArray(node.material)) {
+        for (const material of node.material) material.dispose?.();
+      } else {
+        node.material?.dispose?.();
+      }
+    });
+  }
+
   setCameraObjects(cameras: ThreeAuthorCameraObject[]) {
     this.cameraVisualGroup.visible = this.viewMode === "orbit";
-    for (const child of this.cameraVisualGroup.children) {
-      child.traverse?.((node: any) => {
-        node.geometry?.dispose?.();
-        if (Array.isArray(node.material)) {
-          for (const material of node.material) material.dispose?.();
-        } else {
-          node.material?.dispose?.();
-        }
-      });
-    }
-    this.cameraVisualGroup.clear();
+    let changed = false;
+    const nextIds = new Set<string>();
     this.cameraObjectPropsById = new Map();
     for (const camera of cameras) {
+      nextIds.add(camera.id);
       this.cameraObjectPropsById.set(camera.id, camera.props);
       const color = camera.selected
         ? 0xffffff
@@ -797,13 +1051,37 @@ export class ThreeAuthorScene {
           ? 0x6ee7f9
           : 0x9aa3b6;
       const opacity = camera.selected || camera.active ? 0.95 : 0.65;
-      const group = createCameraBodyGroup(color, opacity);
-      group.userData.clipperCameraObjectId = camera.id;
-      group.traverse((node: any) => {
-        node.userData.clipperCameraObjectId = camera.id;
-      });
-      applyCameraObjectTransform(group, camera.props);
-      this.cameraVisualGroup.add(group);
+      const signature = this.getCameraObjectSignature(camera.props);
+      let entry = this.cameraVisualMeshesById.get(camera.id);
+      if (!entry) {
+        const group = createCameraBodyGroup(color, opacity);
+        group.userData.clipperCameraObjectId = camera.id;
+        group.traverse((node: any) => {
+          node.userData.clipperCameraObjectId = camera.id;
+        });
+        this.cameraVisualGroup.add(group);
+        entry = { color, group, opacity, signature: "" };
+        this.cameraVisualMeshesById.set(camera.id, entry);
+        changed = true;
+      }
+      if (entry.color !== color || entry.opacity !== opacity) {
+        this.updateCameraVisualMaterial(entry.group, color, opacity);
+        entry.color = color;
+        entry.opacity = opacity;
+        changed = true;
+      }
+      if (entry.signature !== signature) {
+        applyCameraObjectTransform(entry.group, camera.props);
+        entry.signature = signature;
+        changed = true;
+      }
+    }
+    for (const [id, entry] of this.cameraVisualMeshesById) {
+      if (nextIds.has(id)) continue;
+      this.cameraVisualGroup.remove(entry.group);
+      this.disposeObject3d(entry.group);
+      this.cameraVisualMeshesById.delete(id);
+      changed = true;
     }
     if (this.selectedCameraObjectId) {
       const selected = this.cameraObjectPropsById.get(
@@ -814,7 +1092,177 @@ export class ThreeAuthorScene {
         applyCameraObjectTransform(this.cameraGizmoTarget, selected);
       }
     }
-    this.requestRender();
+    if (changed) this.requestRender();
+  }
+
+  private applyLightObjectTransform(
+    target: any,
+    light: ThreeAuthorLightObject,
+  ) {
+    const w = light.bounds.width ?? 0;
+    const h = light.bounds.height ?? 0;
+    const positionX = light.bounds.x - FRAME_WIDTH / 2 + w / 2;
+    const positionY = -(light.bounds.y - FRAME_HEIGHT / 2 + h / 2);
+    const positionZ =
+      typeof light.transform.translateZ === "number"
+        ? light.transform.translateZ
+        : 0;
+    target.position.set(positionX, positionY, positionZ);
+    const bodyScale =
+      (light.kind === "ambient" ? 0.8 : 1) +
+      Math.max(0, light.intensity) * 0.08;
+    const body = target.getObjectByName("lightBody");
+    if (body) body.scale.setScalar(bodyScale);
+    this.updateLightDirectionVisual(
+      target,
+      light,
+      new THREE.Vector3(positionX, positionY, positionZ),
+    );
+  }
+
+  private updateLightDirectionVisual(
+    target: any,
+    light: ThreeAuthorLightObject,
+    position: InstanceType<typeof THREE.Vector3>,
+  ) {
+    const directionLine = target.getObjectByName("lightDirectionLine") as
+      | InstanceType<typeof THREE.Line>
+      | undefined;
+    const arrowHead = target.getObjectByName("lightDirectionArrow");
+    const beamCone = target.getObjectByName("lightBeamCone");
+    const pointRange = target.getObjectByName("lightPointRange");
+    const ambientField = target.getObjectByName("lightAmbientField");
+    const pointRays = target.children.filter(
+      (child: any) => child.name === "lightPointRay",
+    );
+
+    const directional = light.kind === "directional";
+    if (directionLine) directionLine.visible = directional;
+    if (arrowHead) arrowHead.visible = directional;
+    if (beamCone) beamCone.visible = directional && light.debug;
+    if (pointRange) {
+      pointRange.visible = light.kind === "point" && light.debug;
+      pointRange.scale.setScalar(Math.max(1, light.range));
+    }
+    if (ambientField) {
+      ambientField.visible = light.kind === "ambient" && light.debug;
+      ambientField.scale.setScalar(320 + Math.max(0, light.intensity) * 120);
+    }
+    for (const ray of pointRays)
+      ray.visible = light.kind === "point" && light.debug;
+    if (!directional) return;
+
+    const targetPoint = new THREE.Vector3(
+      light.target.x,
+      light.target.y,
+      light.target.z,
+    );
+    const delta = targetPoint.sub(position);
+    if (delta.lengthSq() < 1) delta.set(0, 0, -360);
+    const length = Math.max(160, Math.min(light.range, delta.length()));
+    const direction = delta.normalize();
+    const end = direction.clone().multiplyScalar(length);
+
+    if (directionLine) {
+      const geometry = directionLine.geometry as InstanceType<
+        typeof THREE.BufferGeometry
+      >;
+      geometry.setFromPoints([new THREE.Vector3(0, 0, 0), end]);
+      geometry.computeBoundingSphere();
+    }
+
+    if (arrowHead) {
+      arrowHead.position.copy(direction.clone().multiplyScalar(length));
+      arrowHead.quaternion.setFromUnitVectors(
+        new THREE.Vector3(0, 1, 0),
+        direction,
+      );
+    }
+
+    if (beamCone) {
+      const coneLength = Math.max(160, light.range);
+      const coneRadius =
+        Math.tan((Math.min(175, Math.max(1, light.angle)) * DEG_TO_RAD) / 2) *
+        coneLength;
+      beamCone.geometry.dispose();
+      beamCone.geometry = new THREE.ConeGeometry(
+        coneRadius,
+        coneLength,
+        40,
+        1,
+        true,
+      );
+      beamCone.position.copy(direction.clone().multiplyScalar(coneLength / 2));
+      beamCone.quaternion.setFromUnitVectors(
+        new THREE.Vector3(0, -1, 0),
+        direction,
+      );
+    }
+  }
+
+  private getLightObjectSignature(light: ThreeAuthorLightObject) {
+    return [
+      light.kind,
+      light.bounds.x,
+      light.bounds.y,
+      light.bounds.width,
+      light.bounds.height,
+      typeof light.transform.translateZ === "number"
+        ? light.transform.translateZ
+        : 0,
+      light.intensity,
+      light.range,
+      light.angle,
+      light.softness,
+      light.debug ? 1 : 0,
+      light.target.x,
+      light.target.y,
+      light.target.z,
+    ].join(":");
+  }
+
+  setLightObjects(lights: ThreeAuthorLightObject[]) {
+    this.lightVisualGroup.visible = this.viewMode === "orbit";
+    let changed = false;
+    const nextIds = new Set<string>();
+    for (const light of lights) {
+      nextIds.add(light.id);
+      const color = new THREE.Color(light.color).getHex();
+      const opacity = light.selected ? 1 : 0.68;
+      const signature = this.getLightObjectSignature(light);
+      let entry = this.lightVisualMeshesById.get(light.id);
+      if (!entry) {
+        const group = createLightVisualGroup(color, opacity);
+        group.traverse((node: any) => {
+          if (node.userData.clipperLightPickable === true) {
+            node.userData.clipperLightObjectId = light.id;
+          }
+        });
+        this.lightVisualGroup.add(group);
+        entry = { color, group, opacity, signature: "" };
+        this.lightVisualMeshesById.set(light.id, entry);
+        changed = true;
+      }
+      if (entry.color !== color || entry.opacity !== opacity) {
+        this.updateLightVisualMaterial(entry.group, color, opacity);
+        entry.color = color;
+        entry.opacity = opacity;
+        changed = true;
+      }
+      if (entry.signature !== signature) {
+        this.applyLightObjectTransform(entry.group, light);
+        entry.signature = signature;
+        changed = true;
+      }
+    }
+    for (const [id, entry] of this.lightVisualMeshesById) {
+      if (nextIds.has(id)) continue;
+      this.lightVisualGroup.remove(entry.group);
+      this.disposeObject3d(entry.group);
+      this.lightVisualMeshesById.delete(id);
+      changed = true;
+    }
+    if (changed) this.requestRender();
   }
 
   setSelectedCameraObjectId(id: string | null) {
@@ -878,32 +1326,73 @@ export class ThreeAuthorScene {
     mesh.rotation.z = -rz * DEG_TO_RAD;
   }
 
-  setPickableObjects(objects: ThreeAuthorPickableObject[]) {
-    // Clean up existing meshes
-    for (const child of this.objectPickGroup.children) {
-      child.geometry?.dispose?.();
-      child.material?.dispose?.();
-    }
-    this.objectPickGroup.clear();
+  private getPickableObjectSignature(obj: ThreeAuthorPickableObject) {
+    const transform = obj.transform;
+    return [
+      obj.bounds.x,
+      obj.bounds.y,
+      obj.bounds.width,
+      obj.bounds.height,
+      typeof transform.translateZ === "number" ? transform.translateZ : 0,
+      typeof transform.rotateX === "number" ? transform.rotateX : 0,
+      typeof transform.rotateY === "number" ? transform.rotateY : 0,
+      typeof transform.rotateZ === "number" ? transform.rotateZ : 0,
+    ].join(":");
+  }
 
-    // Rebuild pick planes
-    for (const obj of objects) {
-      const geom = new THREE.PlaneGeometry(
-        Math.max(1, obj.bounds.width),
-        Math.max(1, obj.bounds.height),
-      );
-      const mat = new THREE.MeshBasicMaterial({
-        transparent: true,
-        opacity: 0.0,
-        depthWrite: false,
-        side: THREE.DoubleSide,
-      });
-      const mesh = new THREE.Mesh(geom, mat);
-      this.applyObjectTransform(mesh, obj.bounds, obj.transform);
-      mesh.userData.clipperObjectId = obj.id;
-      this.objectPickGroup.add(mesh);
+  private disposeMesh(mesh: any) {
+    mesh.geometry?.dispose?.();
+    if (Array.isArray(mesh.material)) {
+      for (const material of mesh.material) material.dispose?.();
+    } else {
+      mesh.material?.dispose?.();
     }
-    this.requestRender();
+  }
+
+  setPickableObjects(objects: ThreeAuthorPickableObject[]) {
+    let changed = false;
+    const nextIds = new Set<string>();
+    for (const obj of objects) {
+      nextIds.add(obj.id);
+      const width = Math.max(1, obj.bounds.width);
+      const height = Math.max(1, obj.bounds.height);
+      const signature = this.getPickableObjectSignature(obj);
+      let entry = this.objectPickMeshesById.get(obj.id);
+      if (!entry) {
+        const geom = new THREE.PlaneGeometry(width, height);
+        const mat = new THREE.MeshBasicMaterial({
+          transparent: true,
+          opacity: 0.0,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+        });
+        const mesh = new THREE.Mesh(geom, mat);
+        mesh.userData.clipperObjectId = obj.id;
+        this.objectPickGroup.add(mesh);
+        entry = { height, mesh, signature: "", width };
+        this.objectPickMeshesById.set(obj.id, entry);
+        changed = true;
+      } else if (entry.width !== width || entry.height !== height) {
+        entry.mesh.geometry?.dispose?.();
+        entry.mesh.geometry = new THREE.PlaneGeometry(width, height);
+        entry.width = width;
+        entry.height = height;
+        changed = true;
+      }
+      if (entry.signature !== signature) {
+        this.applyObjectTransform(entry.mesh, obj.bounds, obj.transform);
+        entry.signature = signature;
+        changed = true;
+      }
+    }
+    for (const [id, entry] of this.objectPickMeshesById) {
+      if (nextIds.has(id)) continue;
+      this.objectPickGroup.remove(entry.mesh);
+      this.disposeMesh(entry.mesh);
+      this.objectPickMeshesById.delete(id);
+      changed = true;
+    }
+    if (changed) this.requestRender();
   }
 
   setSelectedObject(
@@ -1046,6 +1535,15 @@ export class ThreeAuthorScene {
       this.cameraPathOverlay.dispose();
       this.cameraPathOverlay = null;
     }
+    for (const entry of this.objectPickMeshesById.values())
+      this.disposeMesh(entry.mesh);
+    this.objectPickMeshesById.clear();
+    for (const entry of this.cameraVisualMeshesById.values())
+      this.disposeObject3d(entry.group);
+    this.cameraVisualMeshesById.clear();
+    for (const entry of this.lightVisualMeshesById.values())
+      this.disposeObject3d(entry.group);
+    this.lightVisualMeshesById.clear();
     this.renderer.dispose();
     this.bgRenderer.dispose();
     if (this.canvas.parentNode === this.hostRoot)

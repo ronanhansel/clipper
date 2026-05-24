@@ -98,6 +98,7 @@ type CompositionCompositorProps = {
       rotateZ?: number;
     },
   ) => void;
+  onAuthorPreviewContextMenu?: (event: ReactMouseEvent<HTMLDivElement>) => void;
   cameraPreviewOverride?: CameraObjectProps | null;
   isPostProcessSource?: boolean;
 };
@@ -192,6 +193,7 @@ export const CompositionCompositor = memo(function CompositionCompositor(
           onCameraPathEaseChange={props.onCameraPathEaseChange}
           onSelectObject={props.onSelectObject}
           onObjectTransformChange={props.onObjectTransformChange}
+          onContextMenu={props.onAuthorPreviewContextMenu}
           localTime={props.localTime}
           renderComposition={() => backendNode}
           pipBackendProps={{

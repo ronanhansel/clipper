@@ -95,6 +95,7 @@ export type ComposeAnimationTimelineLayer = {
   name: string;
   number: number;
   kind: "object" | "background-object" | "background";
+  hidden: boolean;
   object?: FrameObject;
 };
 
@@ -163,12 +164,14 @@ export function buildComposeAnimationTimelineLayers(
       id: object.id,
       name: object.name || object.id,
       kind: "object" as const,
+      hidden: Boolean(object.hidden),
       object,
     })),
     ...[...part.background.elements].reverse().map((object) => ({
       id: object.id,
       name: object.name || object.id,
       kind: "background-object" as const,
+      hidden: Boolean(object.hidden),
       object,
     })),
   ].map((layer, index) => ({ ...layer, number: index + 1 }));
@@ -180,6 +183,7 @@ export function buildComposeAnimationTimelineLayers(
       name: part.background.name || "Background",
       number: objects.length + 1,
       kind: "background" as const,
+      hidden: Boolean(part.background.hidden),
     },
   ];
 }
@@ -326,6 +330,11 @@ function labelForPropsPropertyPath(propertyPath: string): string {
   if (propertyPath === "props.dof.fNumber") return "F-number";
   if (propertyPath === "props.dof.maxBlurPx") return "Max Blur (px)";
   if (propertyPath === "props.live") return "Camera Live";
+  if (propertyPath === "props.autoFocus.targetId") return "Auto Focus Target";
+  if (propertyPath === "props.autoFocus.zOffset") return "Auto Focus Z Offset";
+  if (propertyPath === "props.autoFocus.rackFocus") return "Rack Focus";
+  if (propertyPath === "props.autoFocus.duration") return "Rack Focus Duration";
+  if (propertyPath === "props.autoFocus.ease") return "Rack Focus Ease";
   return propertyPath;
 }
 

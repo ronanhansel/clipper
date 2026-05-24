@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useMemo,
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
@@ -27,6 +28,7 @@ import {
 import { buildCameraPathData } from "./buildCameraPathData";
 import type { CameraPathHandle } from "./cameraPathOverlay";
 import type { CompositionBackendProps } from "../backends/CompositionBackend";
+import { resolveLightTargetFromTransform } from "./lightObjectTransform";
 
 export type CameraPreviewMode = "pip" | "side-by-side" | "2d";
 export type ComposeAuthorViewState = {
@@ -36,6 +38,39 @@ export type ComposeAuthorViewState = {
 };
 function coerceAuthorSceneMode(mode: CameraPreviewMode | undefined) {
   return mode === "side-by-side" ? "side-by-side" : "pip";
+}
+
+function readLightTarget(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { x: 0, y: 0, z: 0 };
+  }
+  const record = value as Record<string, unknown>;
+  return {
+    x: readNumber(record.x, 0),
+    y: readNumber(record.y, 0),
+    z: readNumber(record.z, 0),
+  };
+}
+
+function resolveAuthorLightTarget(
+  bounds: { x: number; y: number; width: number; height: number },
+  transform: Record<string, unknown>,
+  value: unknown,
+) {
+  const position = {
+    x: bounds.x - FRAME_WIDTH / 2 + bounds.width / 2,
+    y: -(bounds.y - FRAME_HEIGHT / 2 + bounds.height / 2),
+    z: readNumber(transform.translateZ, 0),
+  };
+  return resolveLightTargetFromTransform(
+    position,
+    transform,
+    readLightTarget(value),
+  );
+}
+
+function readNumber(value: unknown, fallback: number) {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 type CameraPreviewHostProps = {
   part: CompositionClip;
@@ -248,6 +283,7 @@ export interface ComposeAuthorViewProps {
     objectId: string,
     transform: ThreeAuthorObjectTransformUpdate,
   ) => void;
+  onContextMenu?: (event: React.MouseEvent<HTMLDivElement>) => void;
   /**
    * Fired when the user drags a per-axis bezier handle on the camera
    * path overlay. The owner persists the new cp.x onto the matching
@@ -310,6 +346,11 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
     setPreviewMode(coerceAuthorSceneMode(props.authorViewState.previewMode));
     setSideBySideSplit(props.authorViewState.sideBySideSplit);
   }, [props.authorViewState]);
+
+  const activeCameraName = useMemo(() => {
+    const camera = findActiveCameraObject(props.part, props.localTime);
+    return camera?.name ?? null;
+  }, [props.part, props.localTime]);
   const rootRef = useRef<HTMLDivElement | null>(null);
   // Which camera-path keyframe is selected, surfacing its bezier
   // handles. Cleared when the user clicks empty space or selects a
@@ -712,12 +753,68 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
       objectId: string,
       nextTransform: ThreeAuthorObjectTransformUpdate,
     ) => {
+      const object = props.part.objects.find((item) => item.id === objectId);
+      if (!object) return;
+      if (object.type === "light") {
+        scene.setLightObjects(
+          props.part.objects
+            .filter((item) => item.type === "light" && !item.hidden)
+            .map((item) => {
+              const evaluated = evaluateObjectState(item, props.localTime);
+              const transform =
+                evaluated.transform && typeof evaluated.transform === "object"
+                  ? { ...evaluated.transform }
+                  : {};
+              const bounds =
+                item.id === objectId && nextTransform.bounds
+                  ? { ...evaluated.bounds, ...nextTransform.bounds }
+                  : evaluated.bounds;
+              if (item.id === objectId) {
+                for (const key of [
+                  "translateZ",
+                  "rotateX",
+                  "rotateY",
+                  "rotateZ",
+                ] as const) {
+                  const value = nextTransform[key];
+                  if (value !== undefined) transform[key] = value;
+                }
+              }
+              const value =
+                item.props && typeof item.props === "object" ? item.props : {};
+              return {
+                id: item.id,
+                bounds,
+                transform,
+                kind:
+                  value.kind === "ambient" ||
+                  value.kind === "directional" ||
+                  value.kind === "point"
+                    ? value.kind
+                    : "directional",
+                color:
+                  typeof value.color === "string" ? value.color : "#fff4d6",
+                intensity:
+                  typeof value.intensity === "number" ? value.intensity : 1,
+                range: readNumber(value.range, 1200),
+                angle: readNumber(value.angle, 45),
+                softness: readNumber(value.softness, 0.25),
+                debug: value.debug !== false,
+                selected: item.id === props.selectedObjectId,
+                target: resolveAuthorLightTarget(
+                  bounds,
+                  transform,
+                  value.target,
+                ),
+              };
+            }),
+        );
+        return;
+      }
       const target = planeTarget?.querySelector<HTMLElement>(
         `[data-clipper-render-object-id="${cssEscape(objectId)}"]`,
       );
       if (!target) return;
-      const object = props.part.objects.find((item) => item.id === objectId);
-      if (!object) return;
       const evaluated = evaluateObjectState(object, props.localTime);
       const transform =
         evaluated.transform && typeof evaluated.transform === "object"
@@ -780,6 +877,50 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
       });
     scene.setPickableObjects(elements3d);
   }, [props.part, props.localTime]);
+
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+    scene.setLightObjects(
+      props.part.objects
+        .filter((object) => object.type === "light" && !object.hidden)
+        .map((object) => {
+          const evaluated = evaluateObjectState(object, props.localTime);
+          const transform =
+            evaluated.transform && typeof evaluated.transform === "object"
+              ? evaluated.transform
+              : {};
+          const value =
+            object.props && typeof object.props === "object"
+              ? object.props
+              : {};
+          return {
+            id: object.id,
+            bounds: evaluated.bounds,
+            transform,
+            kind:
+              value.kind === "ambient" ||
+              value.kind === "directional" ||
+              value.kind === "point"
+                ? value.kind
+                : "directional",
+            color: typeof value.color === "string" ? value.color : "#fff4d6",
+            intensity:
+              typeof value.intensity === "number" ? value.intensity : 1,
+            range: readNumber(value.range, 1200),
+            angle: readNumber(value.angle, 45),
+            softness: readNumber(value.softness, 0.25),
+            debug: value.debug !== false,
+            selected: object.id === props.selectedObjectId,
+            target: resolveAuthorLightTarget(
+              evaluated.bounds,
+              transform,
+              value.target,
+            ),
+          };
+        }),
+    );
+  }, [props.part, props.localTime, props.selectedObjectId]);
 
   // Once the CSS3D plane target portal is ready, force one render so the
   // composition is visible on initial mount, not after the next input change.
@@ -850,6 +991,7 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
       ref={rootRef}
       className="absolute inset-0"
       data-clipper-compose-author-view
+      onContextMenu={props.onContextMenu}
     >
       <div
         ref={sceneHostRef}
@@ -891,6 +1033,14 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
           data-clipper-camera-side-by-side
         >
           {renderCameraPreview()}
+          {activeCameraName ? (
+            <div className="pointer-events-none absolute right-3 top-3 z-30 flex items-center gap-1.5 rounded-[6px] border border-[#2d313b]/60 bg-black/65 px-2.5 py-1 backdrop-blur-sm">
+              <span className="block h-[7px] w-[7px] rounded-full bg-[#ef4444] shadow-[0_0_6px_rgba(239,68,68,0.6)]" />
+              <span className="whitespace-nowrap text-[11px] font-semibold leading-none tracking-wide text-white/90">
+                {activeCameraName}
+              </span>
+            </div>
+          ) : null}
         </div>
       ) : null}
 

@@ -12,7 +12,7 @@ import {
   type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
-import { ChevronDown, ChevronRight, Goal } from "lucide-react";
+import { ChevronDown, ChevronRight, Eye, EyeOff, Goal } from "lucide-react";
 import type { ContextMenuState } from "../../app/types";
 import { defaultTimelinePixelsPerSecond } from "../../app/config";
 import { roundTwo } from "../../core/math";
@@ -86,6 +86,7 @@ type ComposeAnimationTimelinePanelProps = {
   timelineViewportState: TimelineViewportState;
   onExitCompose: () => void;
   onRenameLayer?: (layerId: string, name: string) => void;
+  onToggleLayerHidden?: (layerId: string) => void;
   onScrub: (time: number) => void;
   onScrubStart: () => void;
   onScrubEnd: () => void;
@@ -186,6 +187,7 @@ function ComposeAnimationTimelinePanelContent({
   timelineViewportState,
   onExitCompose,
   onRenameLayer,
+  onToggleLayerHidden,
   onScrub,
   onScrubEnd,
   onScrubStart,
@@ -949,6 +951,7 @@ function ComposeAnimationTimelinePanelContent({
               parentOptions={getComposeParentOptions(layers, row.layer.id)}
               onSetLayerParent={setLayerParent}
               onStartPickWhipDrag={startPickWhipDrag}
+              onToggleLayerHidden={onToggleLayerHidden}
               pickWhipDropActive={pickWhipDropLayerId === row.layer.id}
               selected={Boolean(
                 row.layer.object &&
@@ -1181,11 +1184,10 @@ function ComposeKeyframeMarquee({
 
 function ComposeTimelineLayerHeader() {
   return (
-    <div className="grid h-full min-w-0 flex-1 grid-cols-[32px_36px_minmax(0,1fr)_24px_170px] items-center border-b border-[#2d313b] text-[10px] font-extrabold uppercase text-[#7f8796]">
+    <div className="grid h-full min-w-0 flex-1 grid-cols-[32px_36px_minmax(0,1fr)_220px] items-center border-b border-[#2d313b] text-[10px] font-extrabold uppercase text-[#7f8796]">
       <span />
       <span className="text-center">#</span>
       <span className="truncate px-1">Layer Name</span>
-      <span />
       <span className="truncate px-2">Parent & Link</span>
     </div>
   );
@@ -1233,6 +1235,7 @@ function ComposeTimelineRailRow({
   parentOptions,
   onSetLayerParent,
   onStartPickWhipDrag,
+  onToggleLayerHidden,
   pickWhipDropActive,
   selected,
   onUpdateObject,
@@ -1262,6 +1265,7 @@ function ComposeTimelineRailRow({
     event: ReactPointerEvent<HTMLElement>,
     childLayerId: string,
   ) => void;
+  onToggleLayerHidden?: (layerId: string) => void;
   pickWhipDropActive: boolean;
   selected: boolean;
   onUpdateObject?: (
@@ -1307,7 +1311,7 @@ function ComposeTimelineRailRow({
   if (row.kind === "attribute") {
     return (
       <div
-        className={`flex h-full items-center gap-2 border-t border-[#202633] pl-8 pr-3 text-[11px] font-bold text-[#8f98a8]${easeExpanded ? "" : " border-b"} ${row.layer.object?.hidden ? "opacity-35" : ""}`}
+        className={`flex h-full items-center gap-2 border-t border-[#202633] pl-8 pr-3 text-[11px] font-bold text-[#8f98a8]${easeExpanded ? "" : " border-b"} ${row.layer.hidden ? "opacity-35" : ""}`}
         onContextMenu={(event) => onOpenLayerContextMenu(event, row.layer)}
       >
         <span className="h-px w-3 bg-[#3a4352]" />
@@ -1339,7 +1343,7 @@ function ComposeTimelineRailRow({
 
   return (
     <div
-      className={`grid h-full grid-cols-[32px_36px_minmax(0,1fr)_24px_170px] items-center border border-transparent border-b-[#202633] ${row.layer.object?.hidden ? "opacity-40" : ""} ${
+      className={`grid h-full grid-cols-[32px_36px_minmax(0,1fr)_220px] items-center border border-transparent border-b-[#202633] ${row.layer.hidden ? "opacity-40" : ""} ${
         selected ? "bg-[#202633]" : "hover:bg-[#181c25]"
       } ${pickWhipDropActive ? "border-[#159dff] bg-[#159dff]/10 shadow-[inset_0_0_0_1px_rgba(21,157,255,0.45)]" : ""}`}
       data-compose-parent-drop-layer-id={
@@ -1374,7 +1378,7 @@ function ComposeTimelineRailRow({
       </span>
       <LayerLabel
         editing={editingLayerId === row.layer.id}
-        hidden={Boolean(row.layer.object?.hidden)}
+        hidden={row.layer.hidden}
         locked={false}
         compactControls={compact}
         hideLockControl
@@ -1391,14 +1395,54 @@ function ComposeTimelineRailRow({
         onToggleHidden={() => undefined}
         onToggleLocked={() => undefined}
       />
-      <ThreeDToggleCell layer={row.layer} onUpdateObject={onUpdateObject} />
-      <ComposeParentLinkControl
-        layer={row.layer}
-        parentOptions={parentOptions}
-        onSetLayerParent={onSetLayerParent}
-        onStartPickWhipDrag={onStartPickWhipDrag}
-      />
+      <div className="grid min-w-0 grid-cols-[24px_24px_minmax(0,1fr)] items-center gap-1 pr-2">
+        <ComposeLayerVisibilityButton
+          hidden={row.layer.hidden}
+          layerId={row.layer.id}
+          onToggleLayerHidden={onToggleLayerHidden}
+        />
+        <ThreeDToggleCell layer={row.layer} onUpdateObject={onUpdateObject} />
+        <ComposeParentLinkControl
+          layer={row.layer}
+          parentOptions={parentOptions}
+          onSetLayerParent={onSetLayerParent}
+          onStartPickWhipDrag={onStartPickWhipDrag}
+        />
+      </div>
     </div>
+  );
+}
+
+function ComposeLayerVisibilityButton({
+  hidden,
+  layerId,
+  onToggleLayerHidden,
+}: {
+  hidden: boolean;
+  layerId: string;
+  onToggleLayerHidden?: (layerId: string) => void;
+}) {
+  return (
+    <button
+      data-timeline-control
+      className={`grid h-5 w-5 place-items-center justify-self-center rounded-[4px] transition ${
+        hidden
+          ? "bg-[#202633] text-[#dfe2ea]"
+          : "text-[#8f98a8] hover:bg-[#202633] hover:text-[#dfe2ea]"
+      }`}
+      title={hidden ? "Show layer" : "Hide layer"}
+      onPointerDown={(event) => event.stopPropagation()}
+      onClick={(event) => {
+        event.stopPropagation();
+        onToggleLayerHidden?.(layerId);
+      }}
+    >
+      {hidden ? (
+        <EyeOff size={13} strokeWidth={2.4} />
+      ) : (
+        <Eye size={13} strokeWidth={2.4} />
+      )}
+    </button>
   );
 }
 
@@ -1476,7 +1520,7 @@ function ComposeParentLinkControl({
   }
 
   return (
-    <div className="grid min-w-0 grid-cols-[24px_minmax(0,1fr)] items-center gap-1 pr-2">
+    <div className="grid min-w-0 grid-cols-[24px_minmax(0,1fr)] items-center gap-1">
       <span
         data-timeline-control
         className="grid h-5 w-5 touch-none place-items-center rounded-[4px] text-[#9aa3b4] transition hover:bg-[#202633] hover:text-[#dfe2ea] active:text-white"
@@ -1606,7 +1650,7 @@ function ComposeTimelineViewportRow({
   if (row.kind === "attribute") {
     return (
       <div
-        className={`${selected ? "bg-[#202633]/55" : ""} ${row.layer.object?.hidden ? "opacity-35" : ""}`}
+        className={`${selected ? "bg-[#202633]/55" : ""} ${row.layer.hidden ? "opacity-35" : ""}`}
         onContextMenu={(event) => onOpenPresetContextMenu(event, row.layer)}
       >
         <ComposeAttributeKeyframeLane
@@ -1636,7 +1680,7 @@ function ComposeTimelineViewportRow({
     <div
       className={`relative h-full border-t border-b border-[#202633] ${
         selected ? "bg-[#202633]/55" : ""
-      } ${row.layer.object?.hidden ? "opacity-35" : ""}`}
+      } ${row.layer.hidden ? "opacity-35" : ""}`}
       onContextMenu={(event) => onOpenPresetContextMenu(event, row.layer)}
       onPointerDown={(event) => {
         const target = event.target as HTMLElement;

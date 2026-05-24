@@ -96,6 +96,7 @@ export type UseTimelinePanelPropsParams = {
   selectComposeLayerObjects: TimelinePanelProps["onSelectComposeObjects"];
   persistComposeSelection: TimelinePanelProps["onPersistComposeSelection"];
   renameComposeAnimationLayer: TimelinePanelProps["onRenameComposeAnimationLayer"];
+  toggleComposeLayerHidden: TimelinePanelProps["onToggleComposeLayerHidden"];
   reorderComposeObjects: TimelinePanelProps["onReorderComposeObjects"];
   updateComposeObject: TimelinePanelProps["onUpdateComposeObject"];
   setAppContextMenu: TimelinePanelProps["setAppContextMenu"];
@@ -193,6 +194,7 @@ export function useTimelinePanelProps(
     selectComposeLayerObjects,
     persistComposeSelection,
     renameComposeAnimationLayer,
+    toggleComposeLayerHidden,
     reorderComposeObjects,
     updateComposeObject,
     setAppContextMenu,
@@ -295,6 +297,7 @@ export function useTimelinePanelProps(
       onSelectComposeObjects: selectComposeLayerObjects,
       onPersistComposeSelection: persistComposeSelection,
       onRenameComposeAnimationLayer: renameComposeAnimationLayer,
+      onToggleComposeLayerHidden: toggleComposeLayerHidden,
       onReorderComposeObjects: reorderComposeObjects,
       onUpdateComposeObject: updateComposeObject,
       setAppContextMenu,
@@ -387,6 +390,7 @@ export function useTimelinePanelProps(
       selectComposeLayerObjects,
       persistComposeSelection,
       renameComposeAnimationLayer,
+      toggleComposeLayerHidden,
       reorderComposeObjects,
       updateComposeObject,
       setAppContextMenu,

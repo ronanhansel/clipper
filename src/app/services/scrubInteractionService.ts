@@ -27,8 +27,16 @@ type TimeoutScheduler = {
   setTimeout: (callback: () => void, timeout: number) => number;
 };
 
+type PostPaintScheduler = FrameScheduler & TimeoutScheduler;
+
 export type LatestRafState<T> = {
   frame: number;
+  value: T | null;
+};
+
+export type LatestPostPaintState<T> = {
+  frame: number;
+  timeout: number;
   value: T | null;
 };
 
@@ -50,6 +58,10 @@ export type NumberScrubVirtualCursor = {
 
 export function createLatestRafState<T>(): LatestRafState<T> {
   return { frame: 0, value: null };
+}
+
+export function createLatestPostPaintState<T>(): LatestPostPaintState<T> {
+  return { frame: 0, timeout: 0, value: null };
 }
 
 export function createThrottledCommitState<T>(): ThrottledCommitState<T> {
@@ -90,6 +102,50 @@ export function scheduleLatestRaf<T>(
     const nextValue = state.value;
     state.value = null;
     if (nextValue !== null) flush(nextValue);
+  });
+}
+
+export function cancelLatestPostPaint<T>(
+  state: LatestPostPaintState<T>,
+  scheduler: PostPaintScheduler = window,
+) {
+  if (state.frame) scheduler.cancelAnimationFrame(state.frame);
+  if (state.timeout) scheduler.clearTimeout(state.timeout);
+  state.frame = 0;
+  state.timeout = 0;
+  state.value = null;
+}
+
+export function flushLatestPostPaint<T>(
+  state: LatestPostPaintState<T>,
+  flush: (value: T) => void,
+  scheduler: PostPaintScheduler = window,
+) {
+  if (state.frame) scheduler.cancelAnimationFrame(state.frame);
+  if (state.timeout) scheduler.clearTimeout(state.timeout);
+  state.frame = 0;
+  state.timeout = 0;
+  const value = state.value;
+  state.value = null;
+  if (value !== null) flush(value);
+}
+
+export function scheduleLatestPostPaint<T>(
+  state: LatestPostPaintState<T>,
+  value: T,
+  flush: (value: T) => void,
+  scheduler: PostPaintScheduler = window,
+) {
+  state.value = value;
+  if (state.frame || state.timeout) return;
+  state.frame = scheduler.requestAnimationFrame(() => {
+    state.frame = 0;
+    state.timeout = scheduler.setTimeout(() => {
+      state.timeout = 0;
+      const nextValue = state.value;
+      state.value = null;
+      if (nextValue !== null) flush(nextValue);
+    }, 0);
   });
 }
 

@@ -21,6 +21,7 @@ Project-agnostic engineering rules. For domain specifics, see `docs/`.
 - Before extracting a wrapper, weigh saved lines vs added options-bag lines. If the wrapper only relocates an input bag, leave it.
 - Before extracting a hook that depends on N helpers, lift the helpers into a shared module first. Hooks must not import their own consumer's internals.
 - When extraction is blocked, document the prereq in a memo and stop. Don't ship a half-extraction with a shim.
+- If a query or a task that still doesn't work after repeated fix, make sure to stop guess work and patching but ask the user to work with you to debug.
 
 ## Reuse before reinventing
 

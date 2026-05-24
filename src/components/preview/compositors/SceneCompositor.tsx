@@ -110,6 +110,7 @@ type SceneCompositorProps = {
       rotateZ?: number;
     },
   ) => void;
+  onAuthorPreviewContextMenu?: (event: ReactMouseEvent<HTMLDivElement>) => void;
 };
 
 export const SceneCompositor = memo(function SceneCompositor({
@@ -153,6 +154,7 @@ export const SceneCompositor = memo(function SceneCompositor({
   authorViewState,
   onAuthorViewStateChange,
   onObjectTransformChange,
+  onAuthorPreviewContextMenu,
   isPostProcessSource,
 }: SceneCompositorProps) {
   useLayoutEffect(() => {
@@ -249,6 +251,7 @@ export const SceneCompositor = memo(function SceneCompositor({
                 authorViewState={authorViewState}
                 onAuthorViewStateChange={onAuthorViewStateChange}
                 onObjectTransformChange={onObjectTransformChange}
+                onAuthorPreviewContextMenu={onAuthorPreviewContextMenu}
               />
             ))
           )}

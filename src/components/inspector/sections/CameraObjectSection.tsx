@@ -10,6 +10,7 @@ import {
   type CameraObjectProps,
   type FrameObject,
 } from "../../../core/types";
+import { MOTION_EASES } from "../../../core/easing";
 import {
   removePropertyKeyframe,
   upsertPropertyKeyframe,
@@ -24,6 +25,8 @@ import {
   SelectValue,
 } from "../../ui/select";
 import { Switch } from "../../ui/switch";
+import { TooltipProvider } from "../../ui/tooltip";
+import { EaseSelectItems } from "../../timeline/EaseSelectItems";
 import { useObjectInspector } from "../objectInspectorContext";
 import { KeyframableNumberInput } from "../KeyframableNumberInput";
 import {
@@ -54,10 +57,14 @@ type CameraTrackPath =
   | "props.lens.distortion.amount"
   | "props.lens.chromaticAberration.amountPx"
   | "props.autoFocus.zOffset"
+  | "props.autoFocus.duration"
   | "props.lockTarget.offset.x"
   | "props.lockTarget.offset.y"
   | "props.lockTarget.offset.z";
-type CameraBooleanTrackPath = "props.live";
+type CameraBooleanTrackPath = "props.live" | "props.autoFocus.rackFocus";
+type CameraStringTrackPath =
+  | "props.autoFocus.targetId"
+  | "props.autoFocus.ease";
 
 const POSITION_FIELDS: ReadonlyArray<{
   axis: "x" | "y" | "z";
@@ -139,6 +146,34 @@ export function CameraObjectSection() {
     return readCameraPropAtPath(props, path);
   }
 
+  function readBooleanBase(path: CameraBooleanTrackPath): boolean {
+    if (path === "props.autoFocus.rackFocus") return props.autoFocus.rackFocus;
+    return props.live;
+  }
+
+  function readBooleanCameraPropAtPath(
+    props: CameraObjectProps,
+    path: CameraBooleanTrackPath,
+  ): boolean {
+    if (path === "props.autoFocus.rackFocus") return props.autoFocus.rackFocus;
+    return props.live;
+  }
+
+  function readStringBase(path: CameraStringTrackPath): string | null {
+    if (path === "props.autoFocus.targetId") return props.autoFocus.targetId;
+    if (path === "props.autoFocus.ease") return props.autoFocus.ease;
+    return null;
+  }
+
+  function readStringCameraPropAtPath(
+    props: CameraObjectProps,
+    path: CameraStringTrackPath,
+  ): string | null {
+    if (path === "props.autoFocus.targetId") return props.autoFocus.targetId;
+    if (path === "props.autoFocus.ease") return props.autoFocus.ease;
+    return null;
+  }
+
   function liveValue(path: CameraTrackPath): number {
     if (!hasPropertyTrack(object, path)) return readBase(path);
     const evaluated = evaluateCameraObjectPropsAt(object, readEffectiveTime());
@@ -146,9 +181,15 @@ export function CameraObjectSection() {
   }
 
   function liveBooleanValue(path: CameraBooleanTrackPath): boolean {
-    if (!hasPropertyTrack(object, path)) return props.live;
+    if (!hasPropertyTrack(object, path)) return readBooleanBase(path);
     const evaluated = evaluateCameraObjectPropsAt(object, readEffectiveTime());
-    return evaluated.live;
+    return readBooleanCameraPropAtPath(evaluated, path);
+  }
+
+  function liveStringValue(path: CameraStringTrackPath): string | null {
+    if (!hasPropertyTrack(object, path)) return readStringBase(path);
+    const evaluated = evaluateCameraObjectPropsAt(object, readEffectiveTime());
+    return readStringCameraPropAtPath(evaluated, path);
   }
 
   function writeBase(path: CameraTrackPath, value: number) {
@@ -156,6 +197,10 @@ export function CameraObjectSection() {
   }
 
   function writeBooleanBase(path: CameraBooleanTrackPath, value: boolean) {
+    onChange((current) => writeNestedValue(current, path, value));
+  }
+
+  function writeStringBase(path: CameraStringTrackPath, value: string | null) {
     onChange((current) => writeNestedValue(current, path, value));
   }
 
@@ -209,6 +254,7 @@ export function CameraObjectSection() {
       );
     if (path === "props.dof.maxBlurPx")
       return Math.max(0, Math.min(CAMERA_DOF_MAX_BLUR_PX, value));
+    if (path === "props.autoFocus.duration") return Math.max(0, value);
     if (path === "props.lens.distortion.amount")
       return Math.max(-1, Math.min(1, value));
     if (path === "props.lens.chromaticAberration.amountPx")
@@ -252,6 +298,15 @@ export function CameraObjectSection() {
     }
   }
 
+  function commitString(path: CameraStringTrackPath, value: string | null) {
+    if (hasPropertyTrack(object, path)) {
+      const time = readEffectiveTime();
+      onChange((current) => upsertPropertyKeyframe(current, path, time, value));
+    } else {
+      writeStringBase(path, value);
+    }
+  }
+
   function toggleBooleanKeyframe(path: CameraBooleanTrackPath) {
     const time = readEffectiveTime();
     const existing = getPropertyTrackKeyframeAtTime(object, path, time);
@@ -265,7 +320,22 @@ export function CameraObjectSection() {
     }
   }
 
-  function isKeyframedNow(path: CameraTrackPath | CameraBooleanTrackPath) {
+  function toggleStringKeyframe(path: CameraStringTrackPath) {
+    const time = readEffectiveTime();
+    const existing = getPropertyTrackKeyframeAtTime(object, path, time);
+    if (existing) {
+      onChange((current) =>
+        removePropertyKeyframe(current, path, existing.time, time),
+      );
+    } else {
+      const value = liveStringValue(path);
+      onChange((current) => upsertPropertyKeyframe(current, path, time, value));
+    }
+  }
+
+  function isKeyframedNow(
+    path: CameraTrackPath | CameraBooleanTrackPath | CameraStringTrackPath,
+  ) {
     const time = readEffectiveTime();
     return Boolean(getPropertyTrackKeyframeAtTime(object, path, time));
   }
@@ -327,23 +397,6 @@ export function CameraObjectSection() {
         props: {
           ...currentProps,
           autoFocus: { ...evaluated.autoFocus, enabled },
-        },
-      };
-    });
-  }
-
-  function setAutoFocusTargetId(targetId: string | null) {
-    onChange((current) => {
-      const evaluated = evaluateCameraObjectPropsAt(
-        current,
-        readEffectiveTime(),
-      );
-      const currentProps = (current.props ?? {}) as Record<string, unknown>;
-      return {
-        ...current,
-        props: {
-          ...currentProps,
-          autoFocus: { ...evaluated.autoFocus, targetId },
         },
       };
     });
@@ -731,13 +784,25 @@ export function CameraObjectSection() {
             <div className="grid gap-2">
               <span className={mutedCaps}>Auto Focus</span>
               <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
-                <TargetSelect
-                  ariaLabel="Camera auto focus target"
-                  value={props.autoFocus.targetId}
-                  options={targetOptions}
-                  disabled={!props.autoFocus.enabled}
-                  onChange={setAutoFocusTargetId}
-                />
+                <span className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
+                  <TargetSelect
+                    ariaLabel="Camera auto focus target"
+                    value={liveStringValue("props.autoFocus.targetId")}
+                    options={targetOptions}
+                    disabled={!props.autoFocus.enabled}
+                    onChange={(targetId) =>
+                      commitString("props.autoFocus.targetId", targetId)
+                    }
+                  />
+                  <KeyframeDiamond
+                    ariaLabel="Camera auto focus target"
+                    active={isKeyframedNow("props.autoFocus.targetId")}
+                    disabled={!props.autoFocus.enabled}
+                    onToggle={() =>
+                      toggleStringKeyframe("props.autoFocus.targetId")
+                    }
+                  />
+                </span>
                 <Switch
                   aria-label="Toggle camera auto focus"
                   checked={props.autoFocus.enabled}
@@ -745,20 +810,112 @@ export function CameraObjectSection() {
                 />
               </div>
               {props.autoFocus.enabled ? (
-                <KeyframableNumberInput
-                  ariaLabel="Camera auto focus Z offset"
-                  unitPrefix="Z"
-                  step={1}
-                  value={liveValue("props.autoFocus.zOffset")}
-                  active={isKeyframedNow("props.autoFocus.zOffset")}
-                  onPreview={(value) =>
-                    previewBase("props.autoFocus.zOffset", value)
-                  }
-                  onCommit={(value) => commit("props.autoFocus.zOffset", value)}
-                  onToggleKeyframe={() =>
-                    toggleKeyframe("props.autoFocus.zOffset")
-                  }
-                />
+                <>
+                  <KeyframableNumberInput
+                    ariaLabel="Camera auto focus Z offset"
+                    unitPrefix="Z"
+                    step={1}
+                    value={liveValue("props.autoFocus.zOffset")}
+                    active={isKeyframedNow("props.autoFocus.zOffset")}
+                    onPreview={(value) =>
+                      previewBase("props.autoFocus.zOffset", value)
+                    }
+                    onCommit={(value) =>
+                      commit("props.autoFocus.zOffset", value)
+                    }
+                    onToggleKeyframe={() =>
+                      toggleKeyframe("props.autoFocus.zOffset")
+                    }
+                  />
+                  <label className="flex items-center justify-between gap-3 text-xs font-semibold text-[#dfe2ea]">
+                    <span>Rack Focus</span>
+                    <span className="flex items-center gap-3">
+                      <KeyframeDiamond
+                        ariaLabel="Camera rack focus"
+                        active={isKeyframedNow("props.autoFocus.rackFocus")}
+                        onToggle={() =>
+                          toggleBooleanKeyframe("props.autoFocus.rackFocus")
+                        }
+                      />
+                      <Switch
+                        aria-label="Toggle rack focus"
+                        checked={liveBooleanValue("props.autoFocus.rackFocus")}
+                        onCheckedChange={(checked) =>
+                          commitBoolean("props.autoFocus.rackFocus", checked)
+                        }
+                      />
+                    </span>
+                  </label>
+                  {liveBooleanValue("props.autoFocus.rackFocus") ? (
+                    <>
+                      <div className="grid gap-1.5">
+                        <span className={mutedCaps}>Duration</span>
+                        <KeyframableNumberInput
+                          ariaLabel="Rack focus duration"
+                          unitPrefix="s"
+                          step={0.05}
+                          min={0}
+                          value={liveValue("props.autoFocus.duration")}
+                          active={isKeyframedNow("props.autoFocus.duration")}
+                          onPreview={(value) =>
+                            previewBase("props.autoFocus.duration", value)
+                          }
+                          onCommit={(value) =>
+                            commit("props.autoFocus.duration", value)
+                          }
+                          onToggleKeyframe={() =>
+                            toggleKeyframe("props.autoFocus.duration")
+                          }
+                        />
+                      </div>
+                      <div className="grid gap-1.5">
+                        <span className={mutedCaps}>Ease</span>
+                        <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
+                          <Select
+                            value={
+                              liveStringValue("props.autoFocus.ease") ??
+                              props.autoFocus.ease
+                            }
+                            onValueChange={(value) => {
+                              if (
+                                (MOTION_EASES as readonly string[]).includes(
+                                  value,
+                                )
+                              )
+                                commitString("props.autoFocus.ease", value);
+                            }}
+                          >
+                            <SelectTrigger className="h-8 rounded-[8px] px-2 text-xs">
+                              <SelectValue
+                                aria-label={
+                                  liveStringValue("props.autoFocus.ease") ??
+                                  props.autoFocus.ease
+                                }
+                              />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <TooltipProvider
+                                delayDuration={1000}
+                                skipDelayDuration={0}
+                              >
+                                <SelectGroup>
+                                  <EaseSelectItems />
+                                </SelectGroup>
+                              </TooltipProvider>
+                            </SelectContent>
+                          </Select>
+                          <KeyframeDiamond
+                            ariaLabel="Camera rack focus ease"
+                            active={isKeyframedNow("props.autoFocus.ease")}
+                            onToggle={() =>
+                              toggleStringKeyframe("props.autoFocus.ease")
+                            }
+                          />
+                        </div>
+                      </div>
+                    </>
+                  ) : null}
+                </>
               ) : null}
             </div>
             <div className="grid gap-1.5">
@@ -881,6 +1038,41 @@ function FieldRow({
   );
 }
 
+function KeyframeDiamond({
+  ariaLabel,
+  active,
+  disabled = false,
+  onToggle,
+}: {
+  ariaLabel: string;
+  active: boolean;
+  disabled?: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      aria-label={
+        active
+          ? `Remove ${ariaLabel} keyframe at playhead`
+          : `Add ${ariaLabel} keyframe at playhead`
+      }
+      aria-pressed={active}
+      className={`h-2 w-2 rotate-45 rounded-[1px] border transition hover:scale-125 disabled:cursor-not-allowed disabled:opacity-40 ${
+        active
+          ? "border-white bg-white shadow-[0_0_0_1px_rgba(255,255,255,0.16)]"
+          : "border-[#6f7684] bg-[#12151d] hover:border-white"
+      }`}
+      disabled={disabled}
+      type="button"
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={(event) => {
+        event.preventDefault();
+        onToggle();
+      }}
+    />
+  );
+}
+
 function TargetSelect({
   ariaLabel,
   value,
@@ -993,7 +1185,7 @@ function writeNestedNumber(
 function writeNestedValue(
   object: FrameObject,
   path: string,
-  value: number | boolean | string,
+  value: number | boolean | string | null,
 ): FrameObject {
   const segments = path.slice("props.".length).split(".");
   const root: Record<string, unknown> = { ...(object.props ?? {}) };
@@ -1051,6 +1243,8 @@ function readCameraPropAtPath(
       return props.lens.chromaticAberration.amountPx;
     case "props.autoFocus.zOffset":
       return props.autoFocus.zOffset;
+    case "props.autoFocus.duration":
+      return props.autoFocus.duration;
     case "props.lockTarget.offset.x":
       return props.lockTarget.offset.x;
     case "props.lockTarget.offset.y":
@@ -1117,6 +1311,11 @@ function writeCameraPropAtPath(
       return {
         ...props,
         autoFocus: { ...props.autoFocus, zOffset: value },
+      };
+    case "props.autoFocus.duration":
+      return {
+        ...props,
+        autoFocus: { ...props.autoFocus, duration: value },
       };
     case "props.lockTarget.offset.x":
       return {

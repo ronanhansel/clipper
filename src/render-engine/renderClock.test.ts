@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   getRenderClockAttributes,
   getRenderClockStyle,
+  invalidateRenderClockAnimationCache,
   syncDomAnimationsToRenderClock,
   syncDomAnimationListToRenderClock,
   waitForRenderClockAnimationsReady,
@@ -130,6 +131,26 @@ describe("render clock", () => {
     expect(shadowAnimation.currentTime).toBe(1500);
     expect(hostAnimation.pause).toHaveBeenCalledOnce();
     expect(shadowAnimation.pause).toHaveBeenCalledOnce();
+  });
+
+  it("caches discovered DOM animations until invalidated", () => {
+    const animation = { currentTime: 0, play: vi.fn(), pause: vi.fn() };
+    const root = {
+      getAnimations: vi.fn(() => [animation as unknown as Animation]),
+      querySelectorAll: vi.fn(() => []),
+    } as unknown as Element;
+
+    syncDomAnimationsToRenderClock(root, { playing: false, time: 1 });
+    syncDomAnimationsToRenderClock(root, { playing: false, time: 2 });
+
+    expect(root.getAnimations).toHaveBeenCalledOnce();
+    expect(animation.currentTime).toBe(2000);
+
+    invalidateRenderClockAnimationCache(root);
+    syncDomAnimationsToRenderClock(root, { playing: false, time: 3 });
+
+    expect(root.getAnimations).toHaveBeenCalledTimes(2);
+    expect(animation.currentTime).toBe(3000);
   });
 
   it("clamps negative render time before pinning DOM animations", () => {

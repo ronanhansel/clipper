@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import toast from "react-hot-toast";
 import { useEditorPanelResize } from "./app/features/editor-layout/useEditorPanelResize";
 import { useFramePreviewZoomCommands } from "./app/features/editor-layout/useFramePreviewZoomCommands";
@@ -135,6 +142,7 @@ import {
   type CameraObjectProps,
   type EditorState,
   type FrameObject,
+  type LightObjectKind,
   type TimelineViewportState,
 } from "./core/types";
 import { FindMediaDialog } from "./components/FindMediaDialog";
@@ -1303,6 +1311,7 @@ function AppContent({
   const {
     createComposeObject,
     createCameraObject,
+    createLightObject,
     deleteComposeObjects,
     reorderComposeObjects,
     selectComposeLayerObjects,
@@ -1346,6 +1355,35 @@ function AppContent({
     updateObjectById,
     updateCompositionForTimelinePart,
   });
+
+  const openComposeAuthorPreviewContextMenu = useCallback(
+    (event: ReactMouseEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const addLight = (kind: LightObjectKind) => {
+        createLightObject(kind);
+      };
+      setAppContextMenu({
+        x: event.clientX,
+        y: event.clientY,
+        items: [
+          {
+            label: "Light",
+            children: [
+              {
+                label: "Directional Light",
+                action: () => addLight("directional"),
+              },
+              { label: "Point Light", action: () => addLight("point") },
+              { label: "Spot Light", action: () => addLight("spot") },
+              { label: "Ambient Light", action: () => addLight("ambient") },
+            ],
+          },
+        ],
+      });
+    },
+    [createLightObject, setAppContextMenu],
+  );
 
   function updateComposeTimelineViewportState(
     updater: (state: TimelineViewportState) => TimelineViewportState,
@@ -2056,6 +2094,7 @@ function AppContent({
     authorViewState: project.editorState?.threeAuthorView,
     onAuthorViewStateChange: handleAuthorViewStateChange,
     onObjectTransformChange: handleObjectTransformChange,
+    onAuthorPreviewContextMenu: openComposeAuthorPreviewContextMenu,
   });
 
   const timelinePanelProps = useTimelinePanelProps({
@@ -2147,6 +2186,7 @@ function AppContent({
     selectComposeLayerObjects,
     persistComposeSelection,
     renameComposeAnimationLayer,
+    toggleComposeLayerHidden,
     reorderComposeObjects,
     updateComposeObject,
     setAppContextMenu,

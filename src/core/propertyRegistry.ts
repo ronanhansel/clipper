@@ -718,7 +718,12 @@ function createDynamicPropsDefinition(
     cursor[segments[segments.length - 1]] = value as unknown;
     return { ...object, props: root as FrameObject["props"] };
   };
-  const valueType = path === "props.live" ? "boolean" : "number";
+  const valueType =
+    path === "props.live" || path === "props.autoFocus.rackFocus"
+      ? "boolean"
+      : path === "props.autoFocus.targetId" || path === "props.autoFocus.ease"
+        ? "discrete"
+        : "number";
   // Treat numeric `props.*` leaves as number tracks so interpolation works.
   // Boolean props hold their previous value until the next keyframe.
   return {
@@ -730,7 +735,9 @@ function createDynamicPropsDefinition(
     interpolate: (from, to, progress) =>
       typeof from === "number" && typeof to === "number"
         ? from + (to - from) * progress
-        : from,
+        : progress >= 1
+          ? to
+          : from,
   };
 }
 

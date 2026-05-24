@@ -59,7 +59,7 @@ export const FramePreviewLive = memo(function FramePreviewLive(
     ...passthrough
   } = props;
 
-  const liveTime = usePlayheadSceneTime(!paused);
+  const liveTime = usePlayheadSceneTime(!paused && !passthrough.isPlaying);
 
   const renderModel = useMemo(
     () =>

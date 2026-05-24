@@ -156,7 +156,14 @@ describe("readCameraObjectProps", () => {
           maxBlurPx: 32,
           bokeh: { preset: "hex" },
         },
-        autoFocus: { enabled: true, targetId: "subject", zOffset: 12 },
+        autoFocus: {
+          enabled: true,
+          targetId: "subject",
+          zOffset: 12,
+          rackFocus: true,
+          duration: 0.5,
+          ease: "linear",
+        },
         autoOrient: "along-path",
         lockTarget: {
           targetId: "subject",
@@ -179,6 +186,9 @@ describe("readCameraObjectProps", () => {
       enabled: true,
       targetId: "subject",
       zOffset: 12,
+      rackFocus: true,
+      duration: 0.5,
+      ease: "linear",
     });
     expect(props.autoOrient).toBe("along-path");
     expect(props.lockTarget).toEqual({
@@ -376,6 +386,41 @@ describe("applyCameraTargetAutomation", () => {
       readCameraObjectProps(camera),
     );
     expect(out.dof.focusDistance).toBeCloseTo(1148, 3);
+  });
+
+  it("racks focus across a keyframed auto focus target change", () => {
+    const camera = makeCameraObject({
+      props: {
+        ...DEFAULT_CAMERA_OBJECT_PROPS,
+        dof: { ...DEFAULT_CAMERA_DOF, enabled: true, focusDistance: 900 },
+        autoFocus: {
+          ...DEFAULT_CAMERA_AUTO_FOCUS,
+          enabled: true,
+          targetId: "near",
+          rackFocus: true,
+          duration: 1,
+          ease: "linear",
+        },
+      },
+      tracks: {
+        "props.autoFocus.targetId": {
+          valueType: "discrete",
+          points: [
+            { time: 0, value: "subject" },
+            { time: 1, value: "near" },
+          ],
+        },
+      },
+    });
+    const near = makeRectObject({
+      id: "near",
+      selector: "[data-object-id='near']",
+      transform: { translateZ: 1000 },
+    });
+    const part = makePart([makeRectObject(), near, camera]);
+    const resolved = evaluateCameraObjectPropsAt(camera, 1.5);
+    const out = applyCameraTargetAutomation(part, camera, 1.5, resolved);
+    expect(out.dof.focusDistance).toBeCloseTo(658, 3);
   });
 });
 

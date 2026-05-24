@@ -6,12 +6,15 @@ import {
   type RefObject,
 } from "react";
 import {
+  cancelLatestPostPaint,
   cancelLatestRaf,
   cancelThrottledCommit,
+  createLatestPostPaintState,
   createLatestRafState,
   createThrottledCommitState,
-  flushLatestRaf,
+  flushLatestPostPaint,
   flushThrottledCommit,
+  scheduleLatestPostPaint,
   scheduleLatestRaf,
   scheduleThrottledCommit,
 } from "../../app/services/scrubInteractionService";
@@ -81,7 +84,7 @@ export function useTimelineScrubber({
     }>(),
   );
   const scrubEffectQueueRef = useRef(
-    createLatestRafState<{
+    createLatestPostPaintState<{
       time: number;
       commit: "throttled" | "immediate";
     }>(),
@@ -108,7 +111,7 @@ export function useTimelineScrubber({
       cancelLatestRaf(pendingScrubPreviewRef);
       if (scrubAutoScrollFrameRef.current)
         window.cancelAnimationFrame(scrubAutoScrollFrameRef.current);
-      cancelLatestRaf(pendingScrubEffectRef);
+      cancelLatestPostPaint(pendingScrubEffectRef);
       cancelThrottledCommit(pendingScrubCommitRef);
 
       const activeScrub = activeScrubRef.current;
@@ -202,7 +205,7 @@ export function useTimelineScrubber({
   }
 
   function flushPendingScrubEffect() {
-    flushLatestRaf(pendingScrubEffectRef, (next) =>
+    flushLatestPostPaint(pendingScrubEffectRef, (next) =>
       applyScrubEffect(next.time, next.commit),
     );
   }
@@ -211,7 +214,7 @@ export function useTimelineScrubber({
     time: number,
     commit: "throttled" | "immediate",
   ) {
-    scheduleLatestRaf(
+    scheduleLatestPostPaint(
       pendingScrubEffectRef,
       { time, commit },
       (next: ScrubEffectValue) => applyScrubEffect(next.time, next.commit),
@@ -227,7 +230,7 @@ export function useTimelineScrubber({
     const time = timeFromClientX(visibleScrubClientX(clientX), snap);
     previewScrubTime(time);
     if (effect === "sync") {
-      cancelLatestRaf(pendingScrubEffectRef);
+      cancelLatestPostPaint(pendingScrubEffectRef);
       applyScrubEffect(time, commit);
       return;
     }
@@ -248,11 +251,15 @@ export function useTimelineScrubber({
     );
   }
 
-  function stopScrubAutoScroll() {
-    scrubClientXRef.current = null;
+  function cancelScrubAutoScrollFrame() {
     if (scrubAutoScrollFrameRef.current)
       window.cancelAnimationFrame(scrubAutoScrollFrameRef.current);
     scrubAutoScrollFrameRef.current = 0;
+  }
+
+  function stopScrubAutoScroll() {
+    scrubClientXRef.current = null;
+    cancelScrubAutoScrollFrame();
   }
 
   function getTimelineEdgeScrollDelta(clientX: number, viewport: HTMLElement) {
@@ -267,6 +274,14 @@ export function useTimelineScrubber({
 
   function scheduleScrubAutoScroll() {
     if (!autoScroll || scrubAutoScrollFrameRef.current) return;
+    const clientX = scrubClientXRef.current;
+    const viewport = viewportRef.current;
+    if (
+      clientX === null ||
+      !viewport ||
+      getTimelineEdgeScrollDelta(clientX, viewport) === 0
+    )
+      return;
 
     const tick = () => {
       scrubAutoScrollFrameRef.current = 0;
@@ -297,7 +312,14 @@ export function useTimelineScrubber({
     scrubSnapRef.current = snap;
     onShiftSnapActiveChange?.(snap);
     updateScrubFromClientX(event.clientX, snap);
-    scheduleScrubAutoScroll();
+    const viewport = viewportRef.current;
+    if (
+      autoScroll &&
+      viewport &&
+      getTimelineEdgeScrollDelta(event.clientX, viewport) !== 0
+    )
+      scheduleScrubAutoScroll();
+    else cancelScrubAutoScrollFrame();
   }
 
   function startScrub(event: PointerEvent<HTMLDivElement>) {

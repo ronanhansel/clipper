@@ -112,6 +112,7 @@ const FULLSCREEN_CAMERA = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export class LensComposerPass extends (Pass as any) {
   readonly id: string;
+  readonly pass: LensPostProcessPass;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private readonly material: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -122,6 +123,7 @@ export class LensComposerPass extends (Pass as any) {
   constructor(id: string, pass: LensPostProcessPass) {
     super();
     this.id = id;
+    this.pass = pass;
     const u = pass.uniforms;
     const mask = u.chromaticAberrationMask;
     this.material = new THREE.ShaderMaterial({
@@ -215,6 +217,16 @@ export function buildCameraComposerPasses(
     passes.push(new LensComposerPass(`${idScope}:camera-lens-pass`, lensPass));
   }
   return passes;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function getCameraComposerPassSignature(passes: readonly any[]) {
+  return JSON.stringify(
+    passes.map((pass) => ({
+      id: pass.id ?? "",
+      uniforms: pass.pass?.uniforms ?? null,
+    })),
+  );
 }
 
 /**

@@ -9,6 +9,7 @@ export type FrameObjectType =
   | "template"
   | "null"
   | "camera"
+  | "light"
   | "custom-renderer"
   | "pattern2d"
   | "code";
@@ -240,6 +241,13 @@ export class NullObject extends RenderableObject {
   constructor(props: RenderableProps) {
     super(props);
     this.kind = "null";
+  }
+}
+
+export class Light extends RenderableObject {
+  constructor(props: RenderableProps) {
+    super(props);
+    this.kind = "light";
   }
 }
 

@@ -327,6 +327,7 @@ function frameObjectConstructorName(object: FrameObject) {
   if (object.type === "html") return "Html";
   if (object.type === "template") return "Template";
   if (object.type === "null") return "NullObject";
+  if (object.type === "light") return "Light";
   return "Rect";
 }
 

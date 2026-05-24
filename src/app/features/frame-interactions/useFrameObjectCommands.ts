@@ -12,11 +12,17 @@ import type {
   CompositionClip,
   CompositionRenderMode,
   FrameObject,
+  LightObjectKind,
   Part,
   PartFrame,
   RichTextSegment,
 } from "../../../core/types";
-import { DEFAULT_CAMERA_OBJECT_PROPS } from "../../../core/types";
+import {
+  DEFAULT_CAMERA_OBJECT_PROPS,
+  DEFAULT_LIGHT_OBJECT_PROPS,
+  FRAME_HEIGHT,
+  FRAME_WIDTH,
+} from "../../../core/types";
 
 type FrameObjectCommandsParams = {
   part: Part;
@@ -302,6 +308,34 @@ export function useFrameObjectCommands({
     return object.id;
   }
 
+  function createLightObject(kind: LightObjectKind = "directional") {
+    const id = `light-${Date.now().toString(36)}`;
+    const lightIndex =
+      part.objects.filter((object) => object.type === "light").length + 1;
+    const object: FrameObject = {
+      id,
+      name: `${lightName(kind)} ${lightIndex}`,
+      type: "light",
+      selector: `[data-object-id='${id}']`,
+      bounds: { x: FRAME_WIDTH / 2, y: FRAME_HEIGHT / 2, width: 0, height: 0 },
+      style: {},
+      threeD: true,
+      transform: { translateZ: kind === "ambient" ? 0 : 600 },
+      props: {
+        ...DEFAULT_LIGHT_OBJECT_PROPS,
+        kind,
+        castShadow: kind === "directional",
+        intensity: kind === "ambient" ? 0.35 : 1,
+      },
+    };
+    updateCompositionForTimelinePart(part.id, (composition) => ({
+      ...composition,
+      objects: [...composition.objects, object],
+    }));
+    selectComposeLayerObjects([object]);
+    return object.id;
+  }
+
   function deleteComposeObjects(objectIds: string[]) {
     const selectedIds = new Set(objectIds);
     if (selectedIds.size === 0) return;
@@ -335,6 +369,7 @@ export function useFrameObjectCommands({
     selectComposeLayerObjects,
     createComposeObject,
     createCameraObject,
+    createLightObject,
     deleteComposeObjects,
     updateObjectById,
     updatePartBackground,
@@ -344,6 +379,12 @@ export function useFrameObjectCommands({
     updateSelectedPartDuration,
     updateTextObjectContent,
   };
+}
+
+function lightName(kind: LightObjectKind) {
+  if (kind === "ambient") return "Ambient Light";
+  if (kind === "point") return "Point Light";
+  return "Directional Light";
 }
 
 function isTextPathObject(object: FrameObject) {

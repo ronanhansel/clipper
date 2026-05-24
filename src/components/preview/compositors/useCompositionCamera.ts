@@ -14,6 +14,7 @@ import {
   CAMERA_PERSPECTIVE,
   type CameraPreviewTransform,
 } from "../../../core/camera";
+import { MOTION_EASES, easeProgress } from "../../../core/easing";
 import { evaluateObjectState } from "../../../core/propertyRegistry";
 import {
   CAMERA_DOF_MAX_BLUR_PX,
@@ -47,6 +48,7 @@ import {
   type CameraTonemapMode,
   type CompositionClip,
   type FrameObject,
+  type MotionEase,
 } from "../../../core/types";
 
 export type CompositionCameraInput = {
@@ -151,7 +153,7 @@ export function applyCameraTargetAutomation(
   localTime: number,
   resolved: CameraObjectProps,
 ): CameraObjectProps {
-  const withFocus = applyAutoFocus(part, localTime, resolved);
+  const withFocus = applyAutoFocus(part, cameraObject, localTime, resolved);
   if (withFocus.autoOrient === "lock") {
     return applyCameraLockTarget(part, localTime, withFocus);
   }
@@ -160,26 +162,124 @@ export function applyCameraTargetAutomation(
 
 function applyAutoFocus(
   part: CameraAutomationContext,
+  cameraObject: FrameObject,
   localTime: number,
   resolved: CameraObjectProps,
 ): CameraObjectProps {
   if (!resolved.autoFocus.enabled || !resolved.autoFocus.targetId)
     return resolved;
-  const target = resolveCameraTargetPoint(
+  const targetFocusDistance = resolveAutoFocusDistance(
     part,
     localTime,
+    resolved.position,
     resolved.autoFocus.targetId,
-    { x: 0, y: 0, z: resolved.autoFocus.zOffset },
+    resolved.autoFocus.zOffset,
   );
-  if (!target) return resolved;
-  const dx = target.x - resolved.position.x;
-  const dy = target.y - resolved.position.y;
-  const dz = target.z - resolved.position.z;
-  const focusDistance = Math.max(0, Math.sqrt(dx * dx + dy * dy + dz * dz));
+  if (targetFocusDistance === null) return resolved;
+  const focusDistance = resolveRackFocusDistance(
+    part,
+    cameraObject,
+    localTime,
+    resolved,
+    targetFocusDistance,
+  );
   return {
     ...resolved,
     dof: { ...resolved.dof, focusDistance },
   };
+}
+
+function resolveAutoFocusDistance(
+  part: CameraAutomationContext,
+  localTime: number,
+  cameraPosition: CameraObjectProps["position"],
+  targetId: string,
+  zOffset: number,
+): number | null {
+  const target = resolveCameraTargetPoint(part, localTime, targetId, {
+    x: 0,
+    y: 0,
+    z: zOffset,
+  });
+  if (!target) return null;
+  const dx = target.x - cameraPosition.x;
+  const dy = target.y - cameraPosition.y;
+  const dz = target.z - cameraPosition.z;
+  return Math.max(0, Math.sqrt(dx * dx + dy * dy + dz * dz));
+}
+
+function resolveRackFocusDistance(
+  part: CameraAutomationContext,
+  cameraObject: FrameObject,
+  localTime: number,
+  resolved: CameraObjectProps,
+  targetFocusDistance: number,
+): number {
+  if (!resolved.autoFocus.rackFocus) return targetFocusDistance;
+  const transition = findAutoFocusTargetTransition(
+    cameraObject,
+    localTime,
+    resolved.autoFocus.targetId,
+  );
+  if (!transition) return targetFocusDistance;
+  const transitionAutoFocus = evaluateCameraObjectPropsAt(
+    cameraObject,
+    transition.time,
+  ).autoFocus;
+  if (!transitionAutoFocus.rackFocus) return targetFocusDistance;
+  const duration = Math.max(0, transitionAutoFocus.duration);
+  if (duration <= 0 || localTime >= transition.time + duration)
+    return targetFocusDistance;
+  const fromId = transition.fromTargetId;
+  const startFocusDistance =
+    fromId === null
+      ? resolved.dof.focusDistance
+      : resolveAutoFocusDistance(
+          part,
+          localTime,
+          resolved.position,
+          fromId,
+          resolved.autoFocus.zOffset,
+        );
+  if (startFocusDistance === null) return targetFocusDistance;
+  const progress = Math.max(
+    0,
+    Math.min(1, (localTime - transition.time) / duration),
+  );
+  const eased = easeProgress(progress, transitionAutoFocus.ease);
+  return (
+    startFocusDistance + (targetFocusDistance - startFocusDistance) * eased
+  );
+}
+
+function findAutoFocusTargetTransition(
+  cameraObject: FrameObject,
+  localTime: number,
+  targetId: string | null,
+): { time: number; fromTargetId: string | null } | null {
+  if (!targetId) return null;
+  const track = cameraObject.tracks?.["props.autoFocus.targetId"];
+  if (!track || track.points.length < 2) return null;
+  const points = [...track.points].sort(
+    (left, right) => left.time - right.time,
+  );
+  let latestIndex = -1;
+  for (let index = 0; index < points.length; index += 1) {
+    if (points[index].time > localTime) break;
+    latestIndex = index;
+  }
+  if (latestIndex <= 0) return null;
+  const currentTargetId = readAutoFocusTargetId(points[latestIndex].value);
+  if (currentTargetId !== targetId) return null;
+  const fromTargetId = readAutoFocusTargetId(points[latestIndex - 1].value);
+  if (fromTargetId === undefined || fromTargetId === currentTargetId)
+    return null;
+  return { time: points[latestIndex].time, fromTargetId };
+}
+
+function readAutoFocusTargetId(value: unknown): string | null | undefined {
+  if (value === null) return null;
+  return typeof value === "string" ? value : undefined;
 }
 
 function applyCameraLockTarget(
@@ -355,11 +455,25 @@ function readAutoFocus(v: unknown): CameraAutoFocus {
     typeof r.zOffset === "number" && Number.isFinite(r.zOffset)
       ? r.zOffset
       : def.zOffset;
+  const duration =
+    typeof r.duration === "number" && Number.isFinite(r.duration)
+      ? Math.max(0, r.duration)
+      : def.duration;
   return {
     enabled: typeof r.enabled === "boolean" ? r.enabled : def.enabled,
     targetId: typeof r.targetId === "string" ? r.targetId : def.targetId,
     zOffset,
+    rackFocus: typeof r.rackFocus === "boolean" ? r.rackFocus : def.rackFocus,
+    duration,
+    ease: readMotionEase(r.ease, def.ease),
   };
+}
+
+function readMotionEase(v: unknown, fallback: MotionEase): MotionEase {
+  return typeof v === "string" &&
+    (MOTION_EASES as readonly string[]).includes(v)
+    ? (v as MotionEase)
+    : fallback;
 }
 
 function readDofBlurMode(v: unknown): CameraDofBlurMode {

@@ -7,6 +7,14 @@ import type {
   LayerNodeFactory,
 } from "../layerNodeRegistry";
 import { resolveLayerTransform } from "../layerTransform";
+import {
+  applyLayerLightingUniforms,
+  createLayerLightingUniforms,
+  EMPTY_LAYER_LIGHTING,
+  LAYER_LIGHTING_FRAGMENT,
+  LAYER_LIGHTING_VERTEX_BODY,
+  LAYER_LIGHTING_VERTEX_VARYINGS,
+} from "../layerLighting";
 
 /**
  * Per-FrameObject DOM-capture node. Replaces the shared-composite UV-
@@ -32,15 +40,18 @@ import { resolveLayerTransform } from "../layerTransform";
  * rather than crashing the whole render.
  */
 const PERELEMENT_VERTEX = `
+  ${LAYER_LIGHTING_VERTEX_VARYINGS}
   varying vec2 vUv;
   void main() {
     vUv = uv;
+    ${LAYER_LIGHTING_VERTEX_BODY}
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   }
 `;
 
 const PERELEMENT_FRAGMENT = `
   precision highp float;
+  ${LAYER_LIGHTING_FRAGMENT}
   varying vec2 vUv;
   uniform sampler2D u_image;
   uniform float u_alphaCutoff;
@@ -51,7 +62,7 @@ const PERELEMENT_FRAGMENT = `
     if (a < u_alphaCutoff) discard;
     // Premultiplied output for clean OVER-blend math when the bokeh
     // gather samples this RT with linear filtering across edges.
-    gl_FragColor = vec4(c.rgb * a, a);
+    gl_FragColor = vec4(c.rgb * layerLightMultiplier() * a, a);
   }
 `;
 
@@ -112,6 +123,7 @@ class PerElementCaptureNode implements LayerNode {
         u_image: { value: this.texture },
         u_alphaCutoff: { value: ALPHA_CUTOFF },
         u_opacity: { value: 1 },
+        ...createLayerLightingUniforms(),
       },
       transparent: false,
       depthTest: true,
@@ -144,6 +156,10 @@ class PerElementCaptureNode implements LayerNode {
     const opacity =
       typeof state.style?.opacity === "number" ? state.style.opacity : 1;
     this.material.uniforms.u_opacity.value = clamp01(opacity);
+    applyLayerLightingUniforms(
+      this.material,
+      this.context.getLighting?.() ?? EMPTY_LAYER_LIGHTING,
+    );
 
     this.captureLayerPixels();
   }

@@ -1,5 +1,12 @@
 import * as THREE from "three";
-import type { CompositionClip, FrameObjectType } from "../../../../core/types";
+import {
+  FRAME_HEIGHT,
+  FRAME_WIDTH,
+  type CompositionClip,
+  type FrameObject,
+  type FrameObjectType,
+  type LightObjectKind,
+} from "../../../../core/types";
 import { evaluateObjectState } from "../../../../core/propertyRegistry";
 import {
   getLayerNodeFactory,
@@ -13,6 +20,14 @@ import { imageNodeFactory, mediaNodeFactory } from "./nodes/imageNode";
 import { textNodeFactory } from "./nodes/textNode";
 import { svgNodeFactory } from "./nodes/svgNode";
 import { createPerElementCaptureFactory } from "./nodes/perElementCaptureNode";
+import { resolveLightTargetFromTransform } from "../lightObjectTransform";
+import {
+  applyLayerLightingUniforms,
+  createLayerLightingUniforms,
+  EMPTY_LAYER_LIGHTING,
+  type LayerLightingState,
+  type LayerShadowState,
+} from "./layerLighting";
 
 /**
  * Register the default per-type Three node factories. Idempotent —
@@ -186,10 +201,14 @@ export class LayerNodeSync {
 
   private readonly entries = new Map<string, Entry>();
   private readonly context: LayerNodeContext;
+  private lighting: LayerLightingState = EMPTY_LAYER_LIGHTING;
 
-  constructor(context: LayerNodeContext) {
+  constructor(context: Omit<LayerNodeContext, "getLighting">) {
     installDefaultLayerNodeFactories();
-    this.context = context;
+    this.context = {
+      ...context,
+      getLighting: () => this.lighting,
+    };
     this.group = new THREE.Group();
     this.group.name = "LayerNodeSync";
   }
@@ -197,10 +216,11 @@ export class LayerNodeSync {
   sync(part: CompositionClip | null, localTime: number): void {
     const seen = new Set<string>();
     if (part) {
+      this.lighting = buildLayerLightingState(part, localTime);
       let stackIndex = 0;
       for (const object of part.objects) {
         if (object.hidden) continue;
-        if (object.type === "camera") continue;
+        if (object.type === "camera" || object.type === "light") continue;
         seen.add(object.id);
 
         let entry = this.entries.get(object.id);
@@ -224,6 +244,7 @@ export class LayerNodeSync {
 
         const state = evaluateObjectState(object, localTime);
         entry.node.update(state);
+        tagLayerObject(entry.node.object3D, object);
         applyLayerRenderSemantics(
           entry.node.object3D,
           stackIndex,
@@ -231,6 +252,8 @@ export class LayerNodeSync {
         );
         stackIndex += 1;
       }
+    } else {
+      this.lighting = EMPTY_LAYER_LIGHTING;
     }
 
     for (const [id, entry] of this.entries) {
@@ -248,6 +271,16 @@ export class LayerNodeSync {
     }));
   }
 
+  applyShadow(shadow: LayerShadowState): void {
+    this.lighting = {
+      ...this.lighting,
+      shadow,
+    };
+    for (const entry of this.entries.values()) {
+      applyLightingToObject(entry.node.object3D, this.lighting);
+    }
+  }
+
   clear(): void {
     for (const entry of this.entries.values()) {
       this.group.remove(entry.node.object3D);
@@ -259,4 +292,157 @@ export class LayerNodeSync {
   dispose(): void {
     this.clear();
   }
+}
+
+function tagLayerObject(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  root: any,
+  object: FrameObject,
+): void {
+  root.userData.frameObjectId = object.id;
+  root.userData.frameObjectType = object.type;
+  if (typeof root.traverse !== "function") return;
+  root.traverse(
+    (child: { userData?: Record<string, unknown> }) =>
+      (child.userData = {
+        ...(child.userData ?? {}),
+        frameObjectId: object.id,
+        frameObjectType: object.type,
+      }),
+  );
+}
+
+function buildLayerLightingState(
+  part: CompositionClip,
+  localTime: number,
+): LayerLightingState {
+  const lights = part.objects
+    .filter((object) => object.type === "light" && !object.hidden)
+    .map((object) => lightStateFromObject(object, localTime))
+    .filter((light) => light.intensity > 0);
+  return {
+    active: lights.length > 0,
+    lights,
+    shadow: EMPTY_LAYER_LIGHTING.shadow,
+  };
+}
+
+function applyLightingToObject(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  root: any,
+  lighting: LayerLightingState,
+): void {
+  if (typeof root.traverse === "function") {
+    root.traverse((child: { material?: unknown }) => {
+      applyLightingToMaterial(child.material, lighting);
+    });
+    return;
+  }
+  applyLightingToMaterial(root.material, lighting);
+}
+
+function applyLightingToMaterial(
+  material: unknown,
+  lighting: LayerLightingState,
+): void {
+  if (Array.isArray(material)) {
+    for (const item of material) applyLightingToMaterial(item, lighting);
+    return;
+  }
+  const uniforms = getLayerLightingUniforms(material);
+  if (!uniforms) return;
+  applyLayerLightingUniforms({ uniforms }, lighting);
+}
+
+function getLayerLightingUniforms(
+  material: unknown,
+): ReturnType<typeof createLayerLightingUniforms> | null {
+  if (
+    typeof material === "object" &&
+    material !== null &&
+    typeof (material as { uniforms?: unknown }).uniforms === "object"
+  ) {
+    const uniforms = (material as { uniforms?: Record<string, unknown> })
+      .uniforms;
+    if (isLayerLightingUniforms(uniforms))
+      return uniforms as ReturnType<typeof createLayerLightingUniforms>;
+  }
+  if (
+    typeof material === "object" &&
+    material !== null &&
+    typeof (material as { userData?: unknown }).userData === "object"
+  ) {
+    const uniforms = (
+      material as { userData?: { layerLightingUniforms?: unknown } }
+    ).userData?.layerLightingUniforms;
+    if (isLayerLightingUniforms(uniforms as Record<string, unknown>))
+      return uniforms as ReturnType<typeof createLayerLightingUniforms>;
+  }
+  return null;
+}
+
+function isLayerLightingUniforms(
+  uniforms: Record<string, unknown> | undefined,
+) {
+  return (
+    uniforms?.u_lightingActive !== undefined &&
+    uniforms?.u_shadowActive !== undefined
+  );
+}
+
+function lightStateFromObject(object: FrameObject, localTime: number) {
+  const evaluated = evaluateObjectState(object, localTime);
+  const transform =
+    evaluated.transform && typeof evaluated.transform === "object"
+      ? evaluated.transform
+      : {};
+  const props = object.props ?? {};
+  const kind = readLightKind(props.kind);
+  const position = {
+    x: evaluated.bounds.x - FRAME_WIDTH / 2 + evaluated.bounds.width / 2,
+    y: -(evaluated.bounds.y - FRAME_HEIGHT / 2 + evaluated.bounds.height / 2),
+    z:
+      typeof transform.translateZ === "number" &&
+      Number.isFinite(transform.translateZ)
+        ? transform.translateZ
+        : 0,
+  };
+  const fallbackTarget =
+    props.target &&
+    typeof props.target === "object" &&
+    !Array.isArray(props.target)
+      ? {
+          x: readTargetNumber(props.target.x, 0),
+          y: readTargetNumber(props.target.y, 0),
+          z: readTargetNumber(props.target.z, 0),
+        }
+      : { x: 0, y: 0, z: 0 };
+  return {
+    kind,
+    color: typeof props.color === "string" ? props.color : "#fff4d6",
+    intensity:
+      typeof props.intensity === "number" && Number.isFinite(props.intensity)
+        ? props.intensity
+        : 1,
+    position,
+    target: resolveLightTargetFromTransform(
+      position,
+      transform,
+      fallbackTarget,
+    ),
+    range: readTargetNumber(props.range, 1200),
+    angle: readTargetNumber(props.angle, 45),
+    softness: readTargetNumber(props.softness, 0.25),
+  };
+}
+
+function readLightKind(value: unknown): LightObjectKind {
+  if (value === "ambient" || value === "directional" || value === "point") {
+    return value;
+  }
+  return "directional";
+}
+
+function readTargetNumber(value: unknown, fallback: number) {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }

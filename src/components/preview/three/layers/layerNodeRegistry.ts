@@ -1,6 +1,7 @@
 import type { EvaluatedObjectState } from "../../../../core/propertyRegistry";
 import type { FrameObject, FrameObjectType } from "../../../../core/types";
 import type { SharedCaptureCanvas } from "../SharedCaptureCanvas";
+import type { LayerLightingState } from "./layerLighting";
 
 /**
  * One native Three.js node per visible FrameObject.
@@ -50,6 +51,7 @@ export interface LayerNode {
  */
 export interface LayerNodeContext {
   sourceRoot: () => Element | null;
+  getLighting?: () => LayerLightingState;
   sharedCapture: SharedCaptureCanvas;
   requestRender: () => void;
 }

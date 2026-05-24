@@ -108,32 +108,44 @@ export function readAdjustedSceneTime(
  * recreated. The optional `liveOffset` is added to the live value only — the
  * idle fallback is returned unchanged.
  */
+const adjustedSceneTimeBucketSec = 1 / 30;
+
 export function useAdjustedSceneTime(
   enabled: boolean,
   fallback: number,
   liveOffset: number = 0,
 ) {
+  const lastBucketRef = useRef(
+    Math.round(fallback / adjustedSceneTimeBucketSec),
+  );
   const liveRef = useRef(fallback);
   useSyncExternalStore(
     (onChange) => {
       if (!enabled) return () => {};
       return subscribeMasterTimelineClock(() => {
         const snap = getMasterTimelineClockSnapshot();
-        if (!isMasterClockLive(snap)) return;
+        if (!isMasterClockLive(snap)) {
+          const idleBucket = Math.round(fallback / adjustedSceneTimeBucketSec);
+          if (lastBucketRef.current === idleBucket) return;
+          lastBucketRef.current = idleBucket;
+          liveRef.current = fallback;
+          onChange();
+          return;
+        }
         const next = snap.adjustedSceneTime + liveOffset;
-        if (Math.abs(next - liveRef.current) < 0.0001) return;
+        const nextBucket = Math.round(next / adjustedSceneTimeBucketSec);
+        if (nextBucket === lastBucketRef.current) return;
+        lastBucketRef.current = nextBucket;
         liveRef.current = next;
         onChange();
       });
     },
-    () => liveRef.current,
-    () => fallback,
+    () => lastBucketRef.current,
+    () => Math.round(fallback / adjustedSceneTimeBucketSec),
   );
   if (!enabled) return fallback;
   const snap = getMasterTimelineClockSnapshot();
-  return isMasterClockLive(snap)
-    ? snap.adjustedSceneTime + liveOffset
-    : fallback;
+  return isMasterClockLive(snap) ? liveRef.current : fallback;
 }
 
 /**
@@ -157,26 +169,37 @@ export function useRawSceneTime(
   enabled: boolean,
   fallback: number,
   liveOffset: number = 0,
+  bucketSec: number = 1 / 30,
 ) {
+  const lastBucketRef = useRef(Math.round(fallback / bucketSec));
   const liveRef = useRef(fallback);
   useSyncExternalStore(
     (onChange) => {
       if (!enabled) return () => {};
       return subscribeMasterTimelineClock(() => {
         const snap = getMasterTimelineClockSnapshot();
-        if (!isMasterClockLive(snap)) return;
+        if (!isMasterClockLive(snap)) {
+          const idleBucket = Math.round(fallback / bucketSec);
+          if (lastBucketRef.current === idleBucket) return;
+          lastBucketRef.current = idleBucket;
+          liveRef.current = fallback;
+          onChange();
+          return;
+        }
         const next = snap.sceneTime + liveOffset;
-        if (Math.abs(next - liveRef.current) < 0.0001) return;
+        const nextBucket = Math.round(next / bucketSec);
+        if (nextBucket === lastBucketRef.current) return;
+        lastBucketRef.current = nextBucket;
         liveRef.current = next;
         onChange();
       });
     },
-    () => liveRef.current,
-    () => fallback,
+    () => lastBucketRef.current,
+    () => Math.round(fallback / bucketSec),
   );
   if (!enabled) return fallback;
   const snap = getMasterTimelineClockSnapshot();
-  return isMasterClockLive(snap) ? snap.sceneTime + liveOffset : fallback;
+  return isMasterClockLive(snap) ? liveRef.current : fallback;
 }
 
 /**

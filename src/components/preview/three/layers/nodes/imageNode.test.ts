@@ -120,6 +120,9 @@ describe("imageNodeFactory", () => {
     expect(isSvgMediaSource("clipper-media://file/%2Ftmp%2Ftree.svg")).toBe(
       true,
     );
+    expect(
+      isSvgMediaSource(encodeURIComponent('<svg viewBox="0 0 10 10"></svg>')),
+    ).toBe(true);
     expect(isSvgMediaSource("data:image/svg+xml,%3Csvg%2F%3E")).toBe(true);
     expect(isSvgMediaSource("asset.png")).toBe(false);
   });
@@ -214,6 +217,61 @@ describe("imageNodeFactory", () => {
       );
       node.update(makeState({ style: { src: "asset.svg", opacity: 1 } }));
       await vi.waitFor(() => expect(requestRender).toHaveBeenCalledTimes(1));
+      expect(context.drawImage).toHaveBeenCalledTimes(1);
+      node.dispose();
+    } finally {
+      globals.document = originalDocument;
+      globals.fetch = originalFetch;
+      globals.URL.createObjectURL = originalCreateObjectURL;
+      globals.URL.revokeObjectURL = originalRevokeObjectURL;
+    }
+  });
+
+  it("rasterizes percent-encoded inline SVG sources without fetching them as URLs", async () => {
+    const globals = globalThis as unknown as {
+      document?: unknown;
+      fetch?: unknown;
+      URL: typeof URL;
+    };
+    const originalDocument = globals.document;
+    const originalFetch = globals.fetch;
+    const originalCreateObjectURL = globals.URL.createObjectURL;
+    const originalRevokeObjectURL = globals.URL.revokeObjectURL;
+    const requestRender = vi.fn();
+    const context = {
+      clearRect: vi.fn(),
+      drawImage: vi.fn(),
+    };
+    globals.document = {
+      createElement: () => ({
+        width: 0,
+        height: 0,
+        getContext: () => context,
+      }),
+    };
+    globals.fetch = vi.fn(async () => ({
+      text: async () => {
+        throw new Error("encoded inline SVG should not fetch");
+      },
+    }));
+    globals.URL.createObjectURL = vi.fn(() => "blob:test-svg");
+    globals.URL.revokeObjectURL = vi.fn();
+
+    try {
+      const node = imageNodeFactory.create(
+        { id: "image-1" } as FrameObject,
+        makeContextWithRender(requestRender),
+      );
+      node.update(
+        makeState({
+          style: {
+            src: encodeURIComponent('<svg viewBox="0 0 10 10"></svg>'),
+            opacity: 1,
+          },
+        }),
+      );
+      await vi.waitFor(() => expect(requestRender).toHaveBeenCalledTimes(1));
+      expect(globals.fetch).not.toHaveBeenCalled();
       expect(context.drawImage).toHaveBeenCalledTimes(1);
       node.dispose();
     } finally {

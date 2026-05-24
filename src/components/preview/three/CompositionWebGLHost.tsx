@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { CompositionRenderer } from "./CompositionRenderer";
-import { buildCameraComposerPasses } from "./cameraComposerPasses";
+import {
+  buildCameraComposerPasses,
+  getCameraComposerPassSignature,
+} from "./cameraComposerPasses";
 import { DomBackend } from "../backends/DomBackend";
 import {
   findActiveCameraObject,
@@ -83,6 +86,7 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const sourceContainerRef = useRef<HTMLDivElement | null>(null);
   const rendererRef = useRef<CompositionRenderer | null>(null);
+  const composerPassSignatureRef = useRef("");
   const pendingCameraPreviewRef = useRef<CameraObjectProps | null>(null);
   const cameraPreviewFrameRef = useRef<number>(0);
   const scheduler = useOptionalPreviewRenderScheduler();
@@ -113,12 +117,18 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
     const cameraProps =
       cameraOverride ?? getActiveCameraObjectProps(part, time);
     renderer.setCamera(cameraProps);
-    renderer.setComposerPasses(
-      buildCameraComposerPasses(cameraProps, {
-        width: FRAME_WIDTH,
-        height: FRAME_HEIGHT,
-      }),
-    );
+    const composerPasses = buildCameraComposerPasses(cameraProps, {
+      width: FRAME_WIDTH,
+      height: FRAME_HEIGHT,
+    });
+    const nextComposerPassSignature =
+      getCameraComposerPassSignature(composerPasses);
+    if (nextComposerPassSignature !== composerPassSignatureRef.current) {
+      renderer.setComposerPasses(composerPasses);
+      composerPassSignatureRef.current = nextComposerPassSignature;
+    } else {
+      disposeComposerPasses(composerPasses);
+    }
     renderer.setComposition(part, time, sourceContainerRef.current);
     renderer.render();
   }
@@ -213,6 +223,7 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
 
     return () => {
       rendererRef.current = null;
+      composerPassSignatureRef.current = "";
       setCaptureCanvas(null);
       if (captureCanvasEl.parentNode === portalTarget)
         portalTarget.removeChild(captureCanvasEl);
@@ -393,4 +404,11 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
         : null}
     </>
   );
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function disposeComposerPasses(passes: readonly any[]) {
+  for (const pass of passes) {
+    if (typeof pass.dispose === "function") pass.dispose();
+  }
 }

@@ -31,6 +31,7 @@ export type FrameObjectType =
   | "template"
   | "null"
   | "camera"
+  | "light"
   | "custom-renderer"
   | "pattern2d"
   | "code";
@@ -360,6 +361,32 @@ export type CameraPost = {
   grain: CameraPostGrain;
 };
 
+export type LightObjectKind = "ambient" | "directional" | "point" | "spot";
+
+export type LightObjectProps = {
+  kind: LightObjectKind;
+  color: string;
+  intensity: number;
+  castShadow: boolean;
+  target: { x: number; y: number; z: number };
+  range: number;
+  angle: number;
+  softness: number;
+  debug: boolean;
+};
+
+export const DEFAULT_LIGHT_OBJECT_PROPS: LightObjectProps = {
+  kind: "directional",
+  color: "#fff4d6",
+  intensity: 1,
+  castShadow: true,
+  target: { x: 0, y: 0, z: 0 },
+  range: 1200,
+  angle: 45,
+  softness: 0.25,
+  debug: true,
+};
+
 export type CameraAutoOrient = "off" | "along-path" | "lock";
 
 export type CameraTargetLink = {
@@ -371,6 +398,9 @@ export type CameraAutoFocus = {
   enabled: boolean;
   targetId: string | null;
   zOffset: number;
+  rackFocus: boolean;
+  duration: number;
+  ease: MotionEase;
 };
 
 /**
@@ -422,6 +452,9 @@ export const DEFAULT_CAMERA_AUTO_FOCUS: CameraAutoFocus = {
   enabled: false,
   targetId: null,
   zOffset: 0,
+  rackFocus: false,
+  duration: 0.35,
+  ease: "easeInOut",
 };
 
 export const DEFAULT_CAMERA_LOCK_TARGET: CameraTargetLink = {

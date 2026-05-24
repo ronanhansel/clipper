@@ -206,6 +206,7 @@ export type TimelinePanelProps = {
   onSelectComposeObjects?: (objects: FrameObject[]) => void;
   onPersistComposeSelection?: (objectIds: string[]) => void;
   onRenameComposeAnimationLayer?: (layerId: string, name: string) => void;
+  onToggleComposeLayerHidden?: (layerId: string) => void;
   onReorderComposeObjects?: (objectIds: string[], targetIndex: number) => void;
   onUpdateComposeObject?: (
     objectId: string,
