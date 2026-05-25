@@ -28,7 +28,6 @@ import {
   type CameraObjectProps,
   type CompositionClip,
 } from "../../../core/types";
-import { getMediaAssetType } from "../../../core/mediaTypes";
 import { defaultPreviewFps } from "../../../core/previewFps";
 import type { CompositionBackendProps } from "../backends/CompositionBackend";
 import { useOptionalPreviewRenderScheduler } from "../scheduler/PreviewRenderSchedulerContext";
@@ -74,7 +73,7 @@ const SOURCE_INNER_STYLE: React.CSSProperties = {
 
 /**
  * `CompositionWebGLHost` mounts a `CompositionRenderer` (through-camera
- * WebGL with depth-only meshes + a captured-DOM colour quad) and keeps
+ * GPU rendering with depth-only meshes + a captured-DOM colour quad) and keeps
  * it driven by the composition's active camera + localTime. Used by:
  *   - the compose-mode camera PIP
  *   - Direct mode's sealed flat output (via `RasterBackend`)
@@ -185,13 +184,20 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
     if (!host) return;
     const initialWidth = host.clientWidth || FRAME_WIDTH;
     const initialHeight = host.clientHeight || FRAME_HEIGHT;
-    const requestedBackend = hasVideoMedia(part)
-      ? "webgl"
-      : readCompositionRendererBackendRequest();
     const backendSelection = selectCompositionRendererBackend({
-      requested: requestedBackend,
+      requested: readCompositionRendererBackendRequest(),
       webGpuMaterialsReady: true,
     });
+    if (backendSelection.kind === "disabled") {
+      host.dataset.clipperCompositionRendererBackend = backendSelection.kind;
+      host.dataset.clipperCompositionRendererBackendRequested =
+        backendSelection.requested;
+      host.dataset.clipperCompositionRendererBackendReason =
+        backendSelection.reason;
+      rendererRef.current = null;
+      setCaptureCanvas(null);
+      return;
+    }
     const renderer = new CompositionRenderer({
       width: initialWidth,
       height: initialHeight,
@@ -384,12 +390,7 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
               ref={sourceContainerRef}
               data-clipper-composition-webgl-source
               aria-hidden="true"
-              // React 18 typings don't include the `inert` attribute; the
-              // surrounding tree is hidden + pointer-events:none anyway, and
-              // the source subtree mirrors that. The `inert` attribute is a
-              // belt-and-braces guard for any future rogue focus.
-              // @ts-expect-error react 18 lacks `inert`
-              inert=""
+              inert={true}
               style={SOURCE_INNER_STYLE}
             >
               <DomBackend
@@ -422,17 +423,6 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
           )
         : null}
     </>
-  );
-}
-
-function hasVideoMedia(part: CompositionClip | null): boolean {
-  return Boolean(
-    part?.objects.some(
-      (object) =>
-        object.type === "media" &&
-        typeof object.style.src === "string" &&
-        getMediaAssetType(object.style.src) === "video",
-    ),
   );
 }
 

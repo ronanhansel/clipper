@@ -1,8 +1,6 @@
-export type CompositionRendererBackendKind = "webgl" | "webgpu";
+export type CompositionRendererBackendKind = "webgpu" | "disabled";
 
-export type CompositionRendererBackendRequest =
-  | CompositionRendererBackendKind
-  | "auto";
+export type CompositionRendererBackendRequest = "webgpu" | "auto";
 
 export type CompositionRendererBackendSelection = {
   kind: CompositionRendererBackendKind;
@@ -21,7 +19,7 @@ export function readCompositionRendererBackendRequest(
   const override = getWindowBackendOverride();
   if (override) return override;
   const stored = storage?.getItem(compositionRendererBackendStorageKey);
-  if (stored === "webgpu" || stored === "webgl" || stored === "auto") {
+  if (stored === "webgpu" || stored === "auto") {
     return stored;
   }
   return "auto";
@@ -36,15 +34,12 @@ export function selectCompositionRendererBackend(input: {
   const hasWebGpu = input.hasWebGpu ?? hasBrowserWebGpu();
   const webGpuMaterialsReady = input.webGpuMaterialsReady ?? false;
 
-  if (requested === "webgl") {
-    return { kind: "webgl", requested, reason: "requested-webgl" };
-  }
   if (!hasWebGpu) {
-    return { kind: "webgl", requested, reason: "webgpu-unavailable" };
+    return { kind: "disabled", requested, reason: "webgpu-unavailable" };
   }
   if (!webGpuMaterialsReady) {
     return {
-      kind: "webgl",
+      kind: "disabled",
       requested,
       reason: "webgpu-materials-not-ported",
     };
@@ -69,7 +64,7 @@ function getWindowBackendOverride(): CompositionRendererBackendRequest | null {
       })
     | undefined;
   const value = clipper?.compositionRendererBackend;
-  if (value === "webgpu" || value === "webgl" || value === "auto") {
+  if (value === "webgpu" || value === "auto") {
     return value;
   }
   return null;

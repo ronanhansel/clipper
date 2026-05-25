@@ -8,15 +8,14 @@ import type { StrategyFramePreviewProps } from "./preview";
 
 export type { StrategyFramePreviewProps };
 
-export type PreviewStrategy =
-  | {
-      kind: "live-webgl";
-      reason: "active-live-passes" | "live-pass-capable-layers";
-    }
-  | {
-      kind: "live-dom";
-      reason: "compose-mode" | "no-live-passes" | "dom-overlay-required";
-    };
+export type PreviewStrategy = {
+  kind: "live-dom";
+  reason:
+    | "compose-mode"
+    | "no-live-passes"
+    | "dom-overlay-required"
+    | "webgpu-postprocess-unavailable";
+};
 
 export type SelectPreviewStrategyInput = {
   framePreviewProps: StrategyFramePreviewProps;
@@ -97,12 +96,8 @@ export function selectPreviewStrategy(
     return { kind: "live-dom", reason: "compose-mode" };
   }
 
-  if (hasActiveLivePasses) {
-    return { kind: "live-webgl", reason: "active-live-passes" };
-  }
-
-  if (hasLivePassCapableLayers) {
-    return { kind: "live-webgl", reason: "live-pass-capable-layers" };
+  if (hasActiveLivePasses || hasLivePassCapableLayers) {
+    return { kind: "live-dom", reason: "webgpu-postprocess-unavailable" };
   }
 
   if (authoringActive) {

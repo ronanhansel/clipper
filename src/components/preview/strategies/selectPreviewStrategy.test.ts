@@ -133,7 +133,7 @@ describe("selectPreviewStrategy", () => {
     expect(result).toEqual({ kind: "live-dom", reason: "compose-mode" });
   });
 
-  it("live passes win over authoring so effects render under the authoring overlay", () => {
+  it("disables legacy WebGL live passes instead of mounting the old effects path", () => {
     const result = selectPreviewStrategy({
       framePreviewProps: makeProps(),
       hasActiveLivePasses: true,
@@ -141,12 +141,12 @@ describe("selectPreviewStrategy", () => {
       authoringActive: true,
     });
     expect(result).toEqual({
-      kind: "live-webgl",
-      reason: "active-live-passes",
+      kind: "live-dom",
+      reason: "webgpu-postprocess-unavailable",
     });
   });
 
-  it("returns live-webgl when active live passes and not authoring", () => {
+  it("returns live-dom with effects disabled when active live passes are present", () => {
     const result = selectPreviewStrategy({
       framePreviewProps: makeProps(),
       hasActiveLivePasses: true,
@@ -154,12 +154,12 @@ describe("selectPreviewStrategy", () => {
       authoringActive: false,
     });
     expect(result).toEqual({
-      kind: "live-webgl",
-      reason: "active-live-passes",
+      kind: "live-dom",
+      reason: "webgpu-postprocess-unavailable",
     });
   });
 
-  it("returns live-webgl when capable transition layers are in scope but no live pass is yet active", () => {
+  it("returns live-dom with effects disabled when only capable transition layers are in scope", () => {
     const result = selectPreviewStrategy({
       framePreviewProps: makeProps(),
       hasActiveLivePasses: false,
@@ -167,12 +167,12 @@ describe("selectPreviewStrategy", () => {
       authoringActive: false,
     });
     expect(result).toEqual({
-      kind: "live-webgl",
-      reason: "live-pass-capable-layers",
+      kind: "live-dom",
+      reason: "webgpu-postprocess-unavailable",
     });
   });
 
-  it("structural live-webgl wins even during authoring", () => {
+  it("does not mount legacy WebGL effects during authoring", () => {
     const result = selectPreviewStrategy({
       framePreviewProps: makeProps(),
       hasActiveLivePasses: false,
@@ -180,8 +180,8 @@ describe("selectPreviewStrategy", () => {
       authoringActive: true,
     });
     expect(result).toEqual({
-      kind: "live-webgl",
-      reason: "live-pass-capable-layers",
+      kind: "live-dom",
+      reason: "webgpu-postprocess-unavailable",
     });
   });
 

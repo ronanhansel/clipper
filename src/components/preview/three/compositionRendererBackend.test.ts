@@ -11,29 +11,24 @@ describe("composition renderer backend selection", () => {
     vi.unstubAllGlobals();
   });
 
-  it("defaults to WebGL when WebGPU is unavailable", () => {
+  it("disables rendering when WebGPU is unavailable", () => {
     expect(selectCompositionRendererBackend({ hasWebGpu: false })).toEqual({
-      kind: "webgl",
+      kind: "disabled",
       requested: "auto",
       reason: "webgpu-unavailable",
     });
   });
 
-  it("keeps explicit WebGL requests on the WebGL path", () => {
+  it("ignores explicit WebGL requests from older persisted settings", () => {
     expect(
-      selectCompositionRendererBackend({
-        requested: "webgl",
-        hasWebGpu: true,
-        webGpuMaterialsReady: true,
+      readCompositionRendererBackendRequest({
+        getItem: (key) =>
+          key === compositionRendererBackendStorageKey ? "webgl" : null,
       }),
-    ).toEqual({
-      kind: "webgl",
-      requested: "webgl",
-      reason: "requested-webgl",
-    });
+    ).toBe("auto");
   });
 
-  it("rejects explicit WebGPU while material and postprocess ports are missing", () => {
+  it("disables explicit WebGPU while material and postprocess ports are missing", () => {
     expect(
       selectCompositionRendererBackend({
         requested: "webgpu",
@@ -41,7 +36,7 @@ describe("composition renderer backend selection", () => {
         webGpuMaterialsReady: false,
       }),
     ).toEqual({
-      kind: "webgl",
+      kind: "disabled",
       requested: "webgpu",
       reason: "webgpu-materials-not-ported",
     });
@@ -74,13 +69,13 @@ describe("composition renderer backend selection", () => {
     ).toBe("webgpu");
   });
 
-  it("reads valid backend requests from storage", () => {
+  it("reads valid WebGPU backend requests from storage", () => {
     expect(
       readCompositionRendererBackendRequest({
         getItem: (key) =>
-          key === compositionRendererBackendStorageKey ? "webgl" : null,
+          key === compositionRendererBackendStorageKey ? "webgpu" : null,
       }),
-    ).toBe("webgl");
+    ).toBe("webgpu");
   });
 
   it("ignores invalid stored backend requests", () => {

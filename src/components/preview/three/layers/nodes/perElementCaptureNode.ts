@@ -188,6 +188,8 @@ class PerElementCaptureNode implements LayerNode {
   private captureWidth = 1;
   private captureHeight = 1;
   private lastCaptureKey = "";
+  private pendingCaptureKey = "";
+  private pendingCaptureEl: HTMLElement | null = null;
   private warnedMissing = false;
   private readonly videoFrameCache = new Map<number, HTMLCanvasElement>();
 
@@ -249,6 +251,7 @@ class PerElementCaptureNode implements LayerNode {
       this.canvas.height = captureHeight;
       this.mesh.geometry.dispose();
       this.mesh.geometry = new THREE.PlaneGeometry(captureWidth, captureHeight);
+      this.clearPendingCapture();
     }
 
     this.mesh.position.set(t.positionX, t.positionY, t.positionZ);
@@ -272,6 +275,12 @@ class PerElementCaptureNode implements LayerNode {
   }
 
   private captureLayerPixels(captureKey: string): void {
+    if (this.pendingCaptureEl) {
+      if (!this.drawPendingCapture()) {
+        this.context.requestRender();
+        return;
+      }
+    }
     if (this.kind === "text" && captureKey === this.lastCaptureKey) return;
     const sourceRoot = this.context.sourceRoot();
     if (!sourceRoot) return;
@@ -290,7 +299,8 @@ class PerElementCaptureNode implements LayerNode {
       sharedCanvas.width = this.captureWidth;
     if (sharedCanvas.height !== this.captureHeight)
       sharedCanvas.height = this.captureHeight;
-    const captureEl = createCaptureClone(
+    this.clearPendingCapture();
+    this.pendingCaptureEl = createCaptureClone(
       layerEl,
       this.width,
       this.height,
@@ -299,12 +309,23 @@ class PerElementCaptureNode implements LayerNode {
       this.captureHeight,
       this.videoFrameCache,
     );
+    this.pendingCaptureKey = captureKey;
+    sharedCanvas.appendChild(this.pendingCaptureEl);
+    this.context.requestRender();
+  }
+
+  private drawPendingCapture(): boolean {
+    if (!this.pendingCaptureEl) return true;
+    const sharedCtx = this.context.sharedCapture
+      .context as DrawElementImageContext;
+    const drawElementImage = sharedCtx.drawElementImage;
+    if (typeof drawElementImage !== "function") return true;
+    const sharedCanvas = this.context.sharedCapture.canvas;
     try {
-      sharedCanvas.appendChild(captureEl);
       sharedCtx.clearRect(0, 0, this.captureWidth, this.captureHeight);
       drawElementImage.call(
         sharedCtx,
-        captureEl,
+        this.pendingCaptureEl,
         0,
         0,
         this.captureWidth,
@@ -324,9 +345,12 @@ class PerElementCaptureNode implements LayerNode {
       );
       this.texture.needsUpdate = true;
       this.material.userData.layerVideoFrameSignature =
-        this.kind === "media" ? captureKey : undefined;
-      this.lastCaptureKey = captureKey;
+        this.kind === "media" ? this.pendingCaptureKey : undefined;
+      this.lastCaptureKey = this.pendingCaptureKey;
+      this.clearPendingCapture();
+      return true;
     } catch (error) {
+      if (isPaintRecordPending(error)) return false;
       if (!this.warnedMissing) {
         this.warnedMissing = true;
         console.warn(
@@ -334,12 +358,18 @@ class PerElementCaptureNode implements LayerNode {
           error,
         );
       }
-    } finally {
-      captureEl.remove();
+      return false;
     }
   }
 
+  private clearPendingCapture(): void {
+    this.pendingCaptureEl?.remove();
+    this.pendingCaptureEl = null;
+    this.pendingCaptureKey = "";
+  }
+
   dispose(): void {
+    this.clearPendingCapture();
     this.mesh.geometry.dispose();
     this.material.dispose();
     this.texture.dispose();
@@ -347,6 +377,14 @@ class PerElementCaptureNode implements LayerNode {
     this.canvas.width = 0;
     this.canvas.height = 0;
   }
+}
+
+function isPaintRecordPending(error: unknown): boolean {
+  return (
+    error instanceof DOMException &&
+    error.name === "InvalidStateError" &&
+    error.message.includes("No cached paint record")
+  );
 }
 
 function clamp01(v: number): number {

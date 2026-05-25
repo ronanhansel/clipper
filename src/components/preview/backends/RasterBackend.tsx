@@ -3,7 +3,7 @@
  * sealed flat output rather than a live React tree of editable objects.
  *
  * Direct mode always routes through `CompositionWebGLHost` — the
- * through-camera WebGL renderer with depth-only meshes + a captured-DOM
+ * through-camera GPU renderer with depth-only meshes + a captured-DOM
  * colour quad. The host owns its own internal sealed `DomBackend` source
  * subtree (parked off-screen) and feeds it into the renderer. From the
  * outside, this backend is a single sealed flat output with no per-object

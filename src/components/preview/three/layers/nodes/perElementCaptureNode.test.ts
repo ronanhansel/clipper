@@ -278,6 +278,7 @@ describe("perElementCaptureNode", () => {
   it("calls drawElementImage on the shared context when the layer subtree is found", () => {
     const sharedCapture = makeFakeSharedCapture();
     const drawElementImage = vi.fn();
+    const requestRender = vi.fn();
     sharedCapture.context.drawElementImage = drawElementImage;
     const root = new FakeElement();
     const layer = new FakeElement();
@@ -288,8 +289,11 @@ describe("perElementCaptureNode", () => {
       sharedCapture:
         sharedCapture as unknown as LayerNodeContext["sharedCapture"],
       sourceRoot: () => root as unknown as Element,
-      requestRender: () => {},
+      requestRender,
     });
+    node.update(makeState({ bounds: { x: 0, y: 0, width: 50, height: 25 } }));
+    expect(drawElementImage).not.toHaveBeenCalled();
+    expect(requestRender).toHaveBeenCalledTimes(1);
     node.update(makeState({ bounds: { x: 0, y: 0, width: 50, height: 25 } }));
     expect(drawElementImage).toHaveBeenCalledTimes(1);
     expect(drawElementImage.mock.calls[0]?.slice(1)).toEqual([0, 0, 78, 53]);
@@ -313,6 +317,7 @@ describe("perElementCaptureNode", () => {
     });
     node.update(makeState());
     node.update(makeState());
+    node.update(makeState());
     expect(drawElementImage).toHaveBeenCalledTimes(1);
     node.dispose();
   });
@@ -333,6 +338,7 @@ describe("perElementCaptureNode", () => {
       requestRender: () => {},
     });
     node.update(makeState({ style: { opacity: 1 } }));
+    node.update(makeState({ style: { opacity: 0.4 } }));
     node.update(makeState({ style: { opacity: 0.4 } }));
     expect(drawElementImage).toHaveBeenCalledTimes(1);
     expect(node.object3D.material.uniforms.u_opacity.value).toBeCloseTo(0.4);

@@ -81,6 +81,7 @@ export class CompositionRenderer {
   private webGpuOutputSignature = "";
   private webGpuInitPromise: Promise<unknown> | null = null;
   private webGpuInitFailed = false;
+  private pendingRenderFrame = 0;
   private sharedCapture: SharedCaptureCanvas;
   private layerSync: LayerNodeSync;
   private shadowSync: LayerShadowSync;
@@ -112,10 +113,13 @@ export class CompositionRenderer {
     this.backendSelection =
       opts.backendSelection ??
       ({
-        kind: "webgl",
+        kind: "webgpu",
         requested: "auto",
-        reason: "legacy-default",
+        reason: "webgpu-ready",
       } satisfies CompositionRendererBackendSelection);
+    if (this.backendSelection.kind === "disabled") {
+      throw new Error("CompositionRenderer requires WebGPU.");
+    }
 
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(
@@ -447,6 +451,14 @@ export class CompositionRenderer {
   }
 
   private requestCompositionRender() {
+    if (this.pendingRenderFrame) return;
+    this.pendingRenderFrame = requestAnimationFrame(() => {
+      this.pendingRenderFrame = 0;
+      this.renderCompositionSnapshot();
+    });
+  }
+
+  private renderCompositionSnapshot() {
     if (!this.lastComposition) {
       this.render();
       return;
@@ -486,6 +498,10 @@ export class CompositionRenderer {
   }
 
   dispose() {
+    if (this.pendingRenderFrame) {
+      cancelAnimationFrame(this.pendingRenderFrame);
+      this.pendingRenderFrame = 0;
+    }
     this.scene.remove(this.layerSync.group);
     this.layerSync.dispose();
     this.shadowSync.dispose();
