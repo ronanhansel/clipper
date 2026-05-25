@@ -18,10 +18,11 @@ import {
 import { MEDIA_PLACEHOLDER_DATA_URL } from "../../../../../core/mediaPlaceholder";
 import { normalizeClipperMediaUrl } from "../../../../../core/mediaSource";
 import { getMediaAssetType } from "../../../../../core/mediaTypes";
+import { getMediaVideoTime } from "../../../../../core/mediaVideoPlayback";
 import {
-  getMediaVideoTime,
-  readMediaVideoPlaybackProps,
-} from "../../../../../core/mediaVideoPlayback";
+  getWebCodecsVideoFrameProvider,
+  type WebCodecsVideoFrameProvider,
+} from "../../../../../core/webCodecsVideoFrameProvider";
 import type { EvaluatedObjectState } from "../../../../../core/propertyRegistry";
 import type { FrameObject } from "../../../../../core/types";
 import { serializeSvgForRaster } from "../../../exportSvgRasterCache";
@@ -336,55 +337,13 @@ function isVideoMediaSource(src: string): boolean {
   return getMediaAssetType(src) === "video";
 }
 
-function createPausedVideoElement(
-  src: string,
-  requestRender: () => void,
-): HTMLVideoElement {
-  const video = document.createElement("video");
-  video.crossOrigin = "anonymous";
-  video.muted = true;
-  video.playsInline = true;
-  video.preload = "auto";
-  video.src = src;
-  video.pause();
-  video.addEventListener("loadeddata", requestRender);
-  video.addEventListener("loadedmetadata", requestRender);
-  video.addEventListener("seeked", requestRender);
-  video.addEventListener("playing", requestRender);
-  video.load();
-  return video;
-}
-
-function createVideoTexture(video: HTMLVideoElement): any {
-  const texture = new THREE.VideoTexture(video);
+function createVideoFrameTexture(): any {
+  const texture = new THREE.VideoFrameTexture();
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.minFilter = THREE.LinearFilter;
   texture.magFilter = THREE.LinearFilter;
   texture.generateMipmaps = false;
-  texture.needsUpdate = true;
   return texture;
-}
-
-function syncVideoElementToLocalTime(
-  video: HTMLVideoElement,
-  state: EvaluatedObjectState,
-  localTime: number,
-  isPlaying: boolean,
-): void {
-  const videoProps = readMediaVideoPlaybackProps(state);
-  const nextTime = getMediaVideoTime(state, localTime);
-  if (!Number.isFinite(nextTime)) return;
-  const drift = Math.abs(video.currentTime - nextTime);
-  if (drift > (isPlaying ? 0.25 : 0.04)) video.currentTime = nextTime;
-  video.playbackRate = videoProps.speed;
-  const reachedCropEnd =
-    videoProps.cropEnd > videoProps.cropStart &&
-    nextTime >= videoProps.cropEnd - 0.001;
-  if (!isPlaying || !videoProps.playing || reachedCropEnd) {
-    video.pause();
-    return;
-  }
-  if (video.paused) void video.play().catch(() => undefined);
 }
 
 export function isSvgMediaSource(src: string): boolean {
@@ -540,7 +499,9 @@ class ImageNode implements LayerNode {
   private currentTextureLayerSized = false;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private currentTexture: any | null = null;
-  private currentVideo: HTMLVideoElement | null = null;
+  private currentVideoProvider: WebCodecsVideoFrameProvider | null = null;
+  private currentVideoProviderVersion = 0;
+  private currentVideoFrameTime: number | null = null;
   private width = 1;
   private height = 1;
 
@@ -591,11 +552,11 @@ class ImageNode implements LayerNode {
       this.releaseCurrentTexture();
       if (src) {
         if (isVideoMediaSource(src)) {
-          this.currentVideo = createPausedVideoElement(src, this.requestRender);
-          this.currentTexture = createVideoTexture(this.currentVideo);
+          this.currentTexture = createVideoFrameTexture();
           this.currentTextureKey = src;
           this.currentTextureKind = "video";
           this.currentTextureLayerSized = false;
+          void this.loadVideoFrameProvider(src);
         } else if (isSvgMediaSource(src)) {
           const lease = acquireLayerSizedSvgTexture(
             src,
@@ -618,7 +579,8 @@ class ImageNode implements LayerNode {
         this.currentTextureKey = null;
         this.currentTextureKind = null;
         this.currentTexture = null;
-        this.currentVideo = null;
+        this.currentVideoProvider = null;
+        this.currentVideoFrameTime = null;
         this.currentTextureLayerSized = false;
         this.setCurrentMaterialTexture(this.placeholder);
       }
@@ -628,26 +590,34 @@ class ImageNode implements LayerNode {
     const u = getImageMaterialUniforms(this.material);
     u.u_size.value.set(t.width, t.height);
 
-    if (this.currentVideo && this.currentTextureKind === "video") {
-      syncVideoElementToLocalTime(
-        this.currentVideo,
-        state,
-        options.localTime,
-        options.isPlaying,
-      );
-      if (this.currentTexture) this.currentTexture.needsUpdate = true;
+    if (this.currentTextureKind === "video") {
+      this.drawVideoFrame(state, options.localTime);
     }
 
     const image = this.currentTexture?.image as
       | {
           naturalWidth?: number;
           naturalHeight?: number;
+          displayWidth?: number;
+          displayHeight?: number;
           videoWidth?: number;
           videoHeight?: number;
+          width?: number;
+          height?: number;
         }
       | undefined;
-    const imgW = image?.naturalWidth ?? image?.videoWidth ?? 0;
-    const imgH = image?.naturalHeight ?? image?.videoHeight ?? 0;
+    const imgW =
+      image?.naturalWidth ??
+      image?.displayWidth ??
+      image?.videoWidth ??
+      image?.width ??
+      0;
+    const imgH =
+      image?.naturalHeight ??
+      image?.displayHeight ??
+      image?.videoHeight ??
+      image?.height ??
+      0;
     const fit = readObjectFit(state);
     const crop = this.currentTextureLayerSized
       ? FULL_UVS
@@ -677,7 +647,8 @@ class ImageNode implements LayerNode {
     this.currentTextureKey = null;
     this.currentTextureKind = null;
     this.currentTexture = null;
-    this.currentVideo = null;
+    this.currentVideoProvider = null;
+    this.currentVideoFrameTime = null;
     this.mesh.geometry.dispose();
     this.material.dispose();
     releaseImageTexture(MEDIA_PLACEHOLDER_DATA_URL);
@@ -686,17 +657,47 @@ class ImageNode implements LayerNode {
   private releaseCurrentTexture(): void {
     if (!this.currentTextureKey) return;
     if (this.currentTextureKind === "video") {
-      this.currentVideo?.pause();
-      this.currentVideo?.removeAttribute("src");
-      this.currentVideo?.load();
       this.currentTexture?.dispose?.();
+      this.currentVideoProvider = null;
+      this.currentVideoFrameTime = null;
+      this.currentVideoProviderVersion += 1;
     } else {
       releaseImageTexture(this.currentTextureKey, this.requestRender);
     }
     this.currentTextureKey = null;
     this.currentTextureKind = null;
     this.currentTexture = null;
-    this.currentVideo = null;
+    this.currentVideoProvider = null;
+    this.currentVideoFrameTime = null;
+  }
+
+  private async loadVideoFrameProvider(src: string): Promise<void> {
+    const version = ++this.currentVideoProviderVersion;
+    try {
+      const provider = await getWebCodecsVideoFrameProvider(src);
+      if (
+        version !== this.currentVideoProviderVersion ||
+        this.currentTextureKind !== "video" ||
+        this.currentTextureKey !== src
+      ) {
+        return;
+      }
+      this.currentVideoProvider = provider;
+      this.requestRender();
+    } catch (error) {
+      console.warn("ImageNode: WebCodecs video decode failed", error);
+    }
+  }
+
+  private drawVideoFrame(state: EvaluatedObjectState, localTime: number): void {
+    const provider = this.currentVideoProvider;
+    const texture = this.currentTexture;
+    if (!provider || !texture) return;
+    const frame = provider.getFrameAt(getMediaVideoTime(state, localTime));
+    if (!frame) return;
+    if (this.currentVideoFrameTime === frame.time) return;
+    texture.setFrame(frame.frame);
+    this.currentVideoFrameTime = frame.time;
   }
 
   private setCurrentMaterialTexture(texture: unknown): void {

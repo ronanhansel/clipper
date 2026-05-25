@@ -23,35 +23,60 @@ export function readMediaVideoPlaybackProps(
   };
 }
 
-export function getMediaVideoPlayStartTime(
-  object: Pick<FrameObject, "tracks">,
-  localTime: number,
-): number {
-  const points = object.tracks?.["props.video.playing"]?.points;
-  if (!points?.length) return 0;
-  const sorted = [...points].sort((left, right) => left.time - right.time);
-  let playStartTime = 0;
-  let playing = false;
-  for (const point of sorted) {
-    if (point.time > localTime) break;
-    if (point.value === true && !playing) playStartTime = point.time;
-    playing = point.value === true;
-  }
-  return playing ? playStartTime : localTime;
-}
-
 export function getMediaVideoTime(
   object: Pick<FrameObject, "props" | "tracks">,
   localTime: number,
 ): number {
   const video = readMediaVideoPlaybackProps(object);
-  if (!video.playing) return video.cropStart;
-  const playStartTime = getMediaVideoPlayStartTime(object, localTime);
-  const videoTime = (localTime - playStartTime) * video.speed + video.cropStart;
+  const videoTime =
+    getMediaVideoPlayElapsedTime(object, localTime, video) + video.cropStart;
   if (video.cropEnd > video.cropStart) {
     return Math.min(Math.max(video.cropStart, videoTime), video.cropEnd);
   }
   return Math.max(video.cropStart, videoTime);
+}
+
+function getMediaVideoPlayElapsedTime(
+  object: Pick<FrameObject, "tracks">,
+  localTime: number,
+  video: MediaVideoPlaybackProps,
+): number {
+  if (localTime <= 0) return 0;
+  const points = object.tracks?.["props.video.playing"]?.points;
+  if (!points?.length) return video.playing ? localTime * video.speed : 0;
+  const sorted = points
+    .filter(
+      (point) =>
+        Number.isFinite(point.time) && typeof point.value === "boolean",
+    )
+    .sort((left, right) => left.time - right.time);
+  if (!sorted.length) return video.playing ? localTime * video.speed : 0;
+
+  let elapsed = 0;
+  let playing = sorted[0].value === true;
+  let previousTime = 0;
+
+  for (const point of sorted) {
+    if (point.time <= 0) {
+      playing = point.value === true;
+      previousTime = 0;
+      continue;
+    }
+
+    const boundary = Math.min(point.time, localTime);
+    if (playing && boundary > previousTime) {
+      elapsed += (boundary - previousTime) * video.speed;
+    }
+    if (point.time > localTime) return elapsed;
+
+    playing = point.value === true;
+    previousTime = point.time;
+  }
+
+  if (playing && localTime > previousTime) {
+    elapsed += (localTime - previousTime) * video.speed;
+  }
+  return elapsed;
 }
 
 function readFiniteNumber(value: unknown, fallback: number): number {

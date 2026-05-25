@@ -53,10 +53,11 @@ import { clamp } from "../../core/math";
 import { MEDIA_PLACEHOLDER_DATA_URL } from "../../core/mediaPlaceholder";
 import { normalizeClipperMediaUrl } from "../../core/mediaSource";
 import { getMediaAssetType } from "../../core/mediaTypes";
+import { getMediaVideoTime } from "../../core/mediaVideoPlayback";
 import {
-  getMediaVideoTime,
-  readMediaVideoPlaybackProps,
-} from "../../core/mediaVideoPlayback";
+  getWebCodecsVideoFrameProvider,
+  type WebCodecsVideoFrameProvider,
+} from "../../core/webCodecsVideoFrameProvider";
 import {
   getFramePortalOverlayTransform,
   viewportBoundsToPortal,
@@ -5157,7 +5158,9 @@ function MediaContent({
   object: FrameObject;
   previewTime: number;
 }) {
-  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [videoFrameProvider, setVideoFrameProvider] =
+    useState<WebCodecsVideoFrameProvider | null>(null);
   const src =
     typeof object.style.src === "string" && object.style.src.length > 0
       ? normalizeClipperMediaUrl(object.style.src)
@@ -5166,47 +5169,50 @@ function MediaContent({
     typeof object.style.objectFit === "string" ? object.style.objectFit : null,
   );
   const mediaAssetType = src ? getMediaAssetType(src) : null;
-  const videoProps = readMediaVideoPlaybackProps(object);
-  const boundedVideoTime = getMediaVideoTime(object, previewTime);
+
   useEffect(() => {
-    const video = videoRef.current;
-    if (!video || mediaAssetType !== "video") return;
-    video.playbackRate = videoProps.speed;
-    const drift = Math.abs(video.currentTime - boundedVideoTime);
-    if (drift > (isPlaying ? 0.2 : 0.04)) {
-      video.currentTime = boundedVideoTime;
+    let cancelled = false;
+    setVideoFrameProvider(null);
+    if (!src || mediaAssetType !== "video") return;
+    void getWebCodecsVideoFrameProvider(src)
+      .then((provider) => {
+        if (!cancelled) setVideoFrameProvider(provider);
+      })
+      .catch((error) => {
+        console.warn("MediaContent: WebCodecs video decode failed", error);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [mediaAssetType, src]);
+
+  useEffect(() => {
+    if (mediaAssetType !== "video" || !videoFrameProvider) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    if (
+      canvas.width !== videoFrameProvider.width ||
+      canvas.height !== videoFrameProvider.height
+    ) {
+      canvas.width = videoFrameProvider.width;
+      canvas.height = videoFrameProvider.height;
     }
-    const reachedCropEnd =
-      videoProps.cropEnd > videoProps.cropStart &&
-      boundedVideoTime >= videoProps.cropEnd - 0.001;
-    if (!isPlaying || !videoProps.playing || reachedCropEnd) {
-      video.pause();
-      return;
-    }
-    if (video.paused) void video.play().catch(() => undefined);
-  }, [
-    boundedVideoTime,
-    isPlaying,
-    mediaAssetType,
-    videoProps.cropEnd,
-    videoProps.cropStart,
-    videoProps.playing,
-    videoProps.speed,
-    src,
-  ]);
+    const frame = videoFrameProvider.getFrameAt(
+      getMediaVideoTime(object, previewTime),
+    );
+    if (!frame) return;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("MediaContent: 2D canvas unavailable");
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(frame.frame, 0, 0, canvas.width, canvas.height);
+  }, [mediaAssetType, object, previewTime, videoFrameProvider]);
 
   if (src && mediaAssetType === "video")
     return (
-      <video
-        ref={videoRef}
+      <canvas
+        ref={canvasRef}
         className="block h-full w-full select-none"
-        controls={false}
-        crossOrigin="anonymous"
         draggable={false}
-        muted
-        playsInline
-        preload="auto"
-        src={src}
         style={{ objectFit }}
       />
     );
