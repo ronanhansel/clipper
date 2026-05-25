@@ -3,7 +3,7 @@ category: adjustment
 name: VHS Tracking
 label: VHS Tracking
 group: Practical
-timelineTags: [{ "kind": "text", "label": "GL", "title": "WebGL post-process" }]
+timelineTags: [{ "kind": "text", "label": "GPU", "title": "GPU post-process" }]
 defaultDuration: 3
 defaultParams: { "intensity": 0.72, "speed": 1, "horizontalTear": 0.72, "verticalRoll": 0.22, "jitter": 0.42, "bandSize": 0.18, "chromaShift": 2.4, "scanlines": 0.28, "noise": 0.16, "dropout": 0.16, "tapeStretch": 0.2, "seed": 23 }
 paramControls:

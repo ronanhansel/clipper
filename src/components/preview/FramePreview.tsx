@@ -970,6 +970,7 @@ export const FramePreview = memo(function FramePreview({
                     previewFps={previewFps}
                     exportTileFrameBounds={exportTileFrameBounds}
                     adjustmentLayers={adjustmentLayers}
+                    transitionLayers={transitionLayers}
                     displaySceneTime={displaySceneTime}
                     canSelect={
                       !isPlaying &&

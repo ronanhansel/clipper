@@ -66,6 +66,7 @@ export type VideoExportProgress = {
 };
 export type SettingsSection =
   | "general"
+  | "about"
   | "playback"
   | "timeline"
   | "export"
@@ -84,6 +85,12 @@ export type AppUpdateStatus = {
   message: string;
   version?: string;
   downloaded?: boolean;
+};
+export type AppRuntimeInfo = {
+  appVersion: string;
+  chromiumVersion: string;
+  electronVersion: string;
+  threeVersion: string;
 };
 export type MotionMarkerSelection = { partId: string; markerId: string };
 export type AdjustmentLayerSelection = { layerId: string };

@@ -25,8 +25,14 @@ import {
   createCameraDofModeNode,
   createCameraLensNode,
 } from "./cameraComposerPasses";
+import {
+  applyGpuPostProcessUniforms,
+  createGpuPostProcessNode,
+  getGpuPostProcessPassSignature,
+} from "./gpuPostProcessNodes";
 import { ThinLensRenderPass } from "./ThinLensRenderPass";
 import type { CompositionRendererBackendSelection } from "./compositionRendererBackend";
+import type { PostProcessPass } from "../../../core/effects/types";
 
 export interface CompositionRendererOptions {
   width: number;
@@ -79,6 +85,8 @@ export class CompositionRenderer {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private webGpuScenePass: any = null;
   private webGpuOutputSignature = "";
+  private webGpuPostProcessSignature = "";
+  private webGpuPostProcessPasses: PostProcessPass[] = [];
   private webGpuInitPromise: Promise<unknown> | null = null;
   private webGpuInitFailed = false;
   private pendingRenderFrame = 0;
@@ -436,6 +444,17 @@ export class CompositionRenderer {
     this.composer.addPass(this.outputPass);
   }
 
+  setGpuPostProcessPasses(passes: readonly PostProcessPass[]) {
+    const signature = getGpuPostProcessPassSignature(passes);
+    if (signature === this.webGpuPostProcessSignature) {
+      applyGpuPostProcessUniforms(this.webGpuPostProcessPasses, passes);
+      return;
+    }
+    this.webGpuPostProcessSignature = signature;
+    this.webGpuPostProcessPasses = passes.slice();
+    this.syncWebGpuOutputNode(this.compositionCamera);
+  }
+
   render() {
     applyCompositionCameraToThree(
       this.camera,
@@ -535,9 +554,13 @@ export class CompositionRenderer {
         ? createCameraDofPass(camera, "camera")
         : null;
     const signature = getWebGpuCameraEffectsSignature(dofPass, lensPass);
-    if (signature === this.webGpuOutputSignature) return;
-    this.webGpuOutputSignature = signature;
-    const dofNode = dofPass
+    const outputSignature = JSON.stringify({
+      camera: signature,
+      postProcess: this.webGpuPostProcessSignature,
+    });
+    if (outputSignature === this.webGpuOutputSignature) return;
+    this.webGpuOutputSignature = outputSignature;
+    let outputNode = dofPass
       ? createCameraDofModeNode(
           this.webGpuScenePass,
           this.webGpuScenePass.getViewZNode(),
@@ -548,12 +571,19 @@ export class CompositionRenderer {
           },
         )
       : this.webGpuDofNode;
-    this.webGpuPipeline.outputNode = lensPass
-      ? createCameraLensNode(dofNode, lensPass, {
+    outputNode = lensPass
+      ? createCameraLensNode(outputNode, lensPass, {
           width: this.width,
           height: this.height,
         })
-      : dofNode;
+      : outputNode;
+    for (const postProcessPass of this.webGpuPostProcessPasses) {
+      outputNode = createGpuPostProcessNode(outputNode, postProcessPass, {
+        width: this.width,
+        height: this.height,
+      });
+    }
+    this.webGpuPipeline.outputNode = outputNode;
     this.webGpuPipeline.needsUpdate = true;
   }
 }

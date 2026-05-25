@@ -1,5 +1,6 @@
 import type {
   AgentProvider,
+  AppRuntimeInfo,
   AppUpdateStatus,
   ExportRenderQuality,
   ExportTileResolutionMapping,
@@ -310,6 +311,17 @@ class ClipperHostService {
 
   async cancelRenderVideoExport(exportId: string) {
     await window.clipper?.cancelRenderVideoExport?.(exportId);
+  }
+
+  async getAppRuntimeInfo(): Promise<AppRuntimeInfo> {
+    return (
+      window.clipper?.getAppRuntimeInfo?.() ?? {
+        appVersion: "dev",
+        chromiumVersion: "browser",
+        electronVersion: "not available",
+        threeVersion: "not available",
+      }
+    );
   }
 
   async getUpdateStatus(): Promise<AppUpdateStatus> {

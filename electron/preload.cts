@@ -15,6 +15,12 @@ type UpdateStatus = {
   version?: string;
   downloaded?: boolean;
 };
+type AppRuntimeInfo = {
+  appVersion: string;
+  chromiumVersion: string;
+  electronVersion: string;
+  threeVersion: string;
+};
 
 contextBridge.exposeInMainWorld("clipper", {
   platform: process.platform,
@@ -286,6 +292,10 @@ contextBridge.exposeInMainWorld("clipper", {
       "clipper:cancel-render-video-export",
       exportId,
     ) as Promise<void>,
+  getAppRuntimeInfo: () =>
+    ipcRenderer.invoke(
+      "clipper:get-app-runtime-info",
+    ) as Promise<AppRuntimeInfo>,
   getUpdateStatus: () =>
     ipcRenderer.invoke("clipper:get-update-status") as Promise<UpdateStatus>,
   setAutoDownloadUpdates: (enabled: boolean) =>

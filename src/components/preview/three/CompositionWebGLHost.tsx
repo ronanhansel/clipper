@@ -10,6 +10,7 @@ import {
   getCameraComposerPassSignature,
 } from "./cameraComposerPasses";
 import { DomBackend } from "../backends/DomBackend";
+import { computePostProcessPlan } from "../passes/usePostProcessPlan";
 import {
   findActiveCameraObject,
   getActiveCameraObjectProps,
@@ -25,8 +26,10 @@ import {
 import {
   FRAME_HEIGHT,
   FRAME_WIDTH,
+  type AdjustmentLayer,
   type CameraObjectProps,
   type CompositionClip,
+  type TransitionLayer,
 } from "../../../core/types";
 import { defaultPreviewFps } from "../../../core/previewFps";
 import type { CompositionBackendProps } from "../backends/CompositionBackend";
@@ -52,6 +55,8 @@ export interface CompositionWebGLHostProps {
     | "renderMode"
     | "exportTileFrameBounds"
   >;
+  adjustmentLayers?: AdjustmentLayer[];
+  transitionLayers?: TransitionLayer[];
   hostClassName?: string;
 }
 
@@ -134,6 +139,14 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
     } else {
       disposeComposerPasses(composerPasses);
     }
+    const sceneTime = time - liveLocalTimeOffset;
+    const postProcessPasses = computePostProcessPlan(
+      sceneTime,
+      props.adjustmentLayers,
+      { transitionLayers: props.transitionLayers },
+      { width: FRAME_WIDTH, height: FRAME_HEIGHT },
+    ).livePasses;
+    renderer.setGpuPostProcessPasses(postProcessPasses);
     renderer.setComposition(part, time, sourceContainerRef.current, {
       isPlaying: options.isPlaying === true,
       syncShadows: options.syncShadows,
@@ -283,7 +296,6 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
   }, [part, localTime, captureCanvas, codeComponentTick]);
 
   useEffect(() => {
-    if (!backendProps.isPlaying) return;
     if (!captureCanvas) return;
     const renderLiveFrame = (_cause: unknown, now: number) => {
       const renderer = rendererRef.current;
@@ -305,7 +317,6 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
     // renderAtTime closes over current part/localTime inputs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
-    backendProps.isPlaying,
     captureCanvas,
     liveLocalTimeOffset,
     localTime,

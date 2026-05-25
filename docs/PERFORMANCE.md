@@ -86,6 +86,27 @@ direct DOM/WebGL updates and fan out through React/store subscribers. The drag
 path may still emit a preview event, but that event must follow the coalescing
 rule above.
 
+## Direct GPU post-process
+
+Direct GPU effects run through `CompositionRenderer` and must stay on the
+scheduler/live-clock path. Scrub and space-bar playback are different execution
+paths: scrub usually arrives through React props, while playback advances
+imperatively through `PreviewRenderScheduler` ticks. Anything time-dependent in
+the GPU post-process plan must derive from the tick's rendered time, not from a
+stale React prop captured when playback started.
+
+- Compute Direct post-process scene time from the rendered local time
+  (`localTime - liveLocalTimeOffset`) before calling `computePostProcessPlan`.
+- Do not put per-frame values such as VHS `time` into a WebGPU node signature.
+  Use TSL uniforms and update the existing uniform node when only time changes.
+- Treat output-node signature changes as structural. Rebuilding the WebGPU
+  output pipeline per frame makes scrub/playback CPU-bound and can make GPU
+  usage look low even though the effect is GPU-authored.
+- Keep the scheduler subscription active once the capture canvas is ready. The
+  scheduler emits `play-tick` only while playing, so the subscription itself
+  should not be gated on an `isPlaying` prop that may update after playback
+  starts.
+
 ## Strategy decisions
 
 Strategy / decision logic (e.g. `selectPreviewStrategy`) is a pure tested function with a single decision point. Never re-decide inside the consuming component — a duplicate guard inside a strategy component will drift from the router and silently break the path it was meant to gate.
@@ -122,5 +143,7 @@ CPU profile spike with concentrated self time in `node:events` and no JS parent 
 - `src/components/preview/scheduler/usePreviewRenderScheduler.ts` — preview rAF owner
 - `src/components/preview/strategies/selectPreviewStrategy.ts` — pure strategy decision
 - `src/components/preview/passes/usePostProcessPlan.ts` — single-shot plan compute
+- `src/components/preview/three/CompositionWebGLHost.tsx` — Direct GPU scheduler bridge
+- `src/components/preview/three/gpuPostProcessNodes.ts` — Direct GPU post-process node signatures/uniforms
 - `src/components/inspector/inspectorRegistry.ts` — per-type dispatch
 - `src/render-engine/renderClock.ts` — CSS / Web Animations playhead sync

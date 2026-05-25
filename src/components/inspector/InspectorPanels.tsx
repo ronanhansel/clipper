@@ -180,7 +180,7 @@ export function FrameInspector({
           <SelectContent>
             <SelectGroup>
               <SelectItem value="dom">DOM</SelectItem>
-              <SelectItem value="webgl">WebGL</SelectItem>
+              <SelectItem value="webgl">GPU</SelectItem>
             </SelectGroup>
           </SelectContent>
         </Select>

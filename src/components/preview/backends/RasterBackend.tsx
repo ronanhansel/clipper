@@ -29,7 +29,7 @@ export const RasterBackend: CompositionBackend = function RasterBackend(props) {
       ref={sealRef}
       className="absolute inset-0"
       data-clipper-raster-backend
-      data-clipper-raster-mode="webgl"
+      data-clipper-raster-mode="gpu"
       style={{ pointerEvents: "none" }}
     >
       <CompositionWebGLHost
@@ -46,6 +46,8 @@ export const RasterBackend: CompositionBackend = function RasterBackend(props) {
           renderMode: props.renderMode,
           exportTileFrameBounds: props.exportTileFrameBounds,
         }}
+        adjustmentLayers={props.adjustmentLayers}
+        transitionLayers={props.transitionLayers}
       />
     </div>
   );

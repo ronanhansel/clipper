@@ -6,10 +6,12 @@ import type {
 } from "react";
 import type {
   Bounds,
+  AdjustmentLayer,
   CameraObjectProps,
   CompositionClip,
   FrameObject,
   RichTextSegment,
+  TransitionLayer,
 } from "../../../core/types";
 import type { ComposeDrawTool, ExportTileFrameBounds } from "../FramePreview";
 import type { PreviewFps } from "../../../core/previewFps";
@@ -28,6 +30,8 @@ export type CompositionRenderBackendProps = {
   hideNullObjects: boolean;
   renderClockSceneTime: number;
   active: boolean;
+  adjustmentLayers?: AdjustmentLayer[];
+  transitionLayers?: TransitionLayer[];
   cameraPreviewOverride?: CameraObjectProps | null;
   /**
    * When true, the backend's caller already projects the composition's

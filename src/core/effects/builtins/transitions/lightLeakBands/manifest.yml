@@ -4,7 +4,7 @@ name: Light Leak Bands
 label: Light Leak Bands
 group: Practical
 tags: ["blocksOverlap"]
-timelineTags: [{ "kind": "text", "label": "GL", "title": "WebGL post-process" }]
+timelineTags: [{ "kind": "text", "label": "GPU", "title": "GPU post-process" }]
 defaultDuration: 1.5
 defaultParams: { "ease": "linear", "transitionTime": 1.5, "intensity": 0.78, "softness": 0.34, "bandCount": 4, "drift": 0.62, "warmth": 0.74, "flicker": 0.22, "seed": 53 }
 paramControls:

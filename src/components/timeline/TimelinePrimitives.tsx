@@ -262,7 +262,7 @@ function TimelineMarkerTagPill({ tag }: { tag: TimelineMarkerTag }) {
 }
 
 function renderTimelineTagIcon(icon: string) {
-  if (icon === "gl" || icon === "webgl")
+  if (icon === "gpu" || icon === "gl" || icon === "webgl")
     return <Cpu size={9} strokeWidth={2.8} aria-hidden="true" />;
   return <span aria-hidden="true">{icon.slice(0, 2).toUpperCase()}</span>;
 }

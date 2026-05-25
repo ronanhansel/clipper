@@ -161,12 +161,8 @@ export function SettingsDialog({
     { id: "timeline", label: "Timeline" },
     { id: "export", label: "Export" },
     { id: "advanced", label: "Advanced" },
+    { id: "about", label: "About" },
   ];
-  const aboutNavItem = { id: "about" as const, label: "About" };
-  const activeNavLabel =
-    activeSection === aboutNavItem.id
-      ? aboutNavItem.label
-      : navItems.find((item) => item.id === activeSection)?.label;
   const [runtimeInfo, setRuntimeInfo] = useState<AppRuntimeInfo | null>(null);
 
   useEffect(() => {
@@ -321,23 +317,17 @@ export function SettingsDialog({
         showCloseButton={false}
       >
         <div className="grid h-full min-h-0 grid-cols-[210px_minmax(0,1fr)] bg-[#101116]">
-          <aside className="flex min-h-0 flex-col justify-between border-r border-[#2d313b] bg-[#15171e] p-3">
+          <aside className="border-r border-[#2d313b] bg-[#15171e] p-3">
             <nav className="grid gap-1" aria-label="Settings sections">
               {navItems.map((item) => (
-                <SettingsNavButton
+                <button
                   key={item.id}
-                  active={activeSection === item.id}
-                  item={item}
-                  onSelect={onActiveSectionChange}
-                />
+                  className={`rounded-[9px] px-3 py-2.5 text-left text-xs font-extrabold transition ${activeSection === item.id ? "bg-[#0f1117] text-white" : "text-[#9297a3] hover:bg-[#1e222c] hover:text-[#dfe2ea]"}`}
+                  onClick={() => onActiveSectionChange(item.id)}
+                >
+                  <span className="text-xs font-extrabold">{item.label}</span>
+                </button>
               ))}
-            </nav>
-            <nav className="grid gap-1" aria-label="About">
-              <SettingsNavButton
-                active={activeSection === aboutNavItem.id}
-                item={aboutNavItem}
-                onSelect={onActiveSectionChange}
-              />
             </nav>
           </aside>
 
@@ -345,7 +335,7 @@ export function SettingsDialog({
             <header className="flex items-center justify-between border-b border-[#14161c] px-5">
               <div>
                 <h2 className="text-sm font-extrabold text-white">
-                  {activeNavLabel}
+                  {navItems.find((item) => item.id === activeSection)?.label}
                 </h2>
                 <p className="mt-1 text-xs text-[#8f939d]">
                   {activeSection === "general"
@@ -1230,25 +1220,6 @@ export function SettingsDialog({
         </div>
       </DialogContent>
     </Dialog>
-  );
-}
-
-function SettingsNavButton({
-  active,
-  item,
-  onSelect,
-}: {
-  active: boolean;
-  item: { id: SettingsSection; label: string };
-  onSelect: (section: SettingsSection) => void;
-}) {
-  return (
-    <button
-      className={`rounded-[9px] px-3 py-2.5 text-left text-xs font-extrabold transition ${active ? "bg-[#0f1117] text-white" : "text-[#9297a3] hover:bg-[#1e222c] hover:text-[#dfe2ea]"}`}
-      onClick={() => onSelect(item.id)}
-    >
-      <span className="text-xs font-extrabold">{item.label}</span>
-    </button>
   );
 }
 

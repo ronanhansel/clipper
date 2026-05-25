@@ -14,7 +14,7 @@ export type PreviewStrategy = {
     | "compose-mode"
     | "no-live-passes"
     | "dom-overlay-required"
-    | "webgpu-postprocess-unavailable";
+    | "gpu-postprocess";
 };
 
 export type SelectPreviewStrategyInput = {
@@ -97,7 +97,7 @@ export function selectPreviewStrategy(
   }
 
   if (hasActiveLivePasses || hasLivePassCapableLayers) {
-    return { kind: "live-dom", reason: "webgpu-postprocess-unavailable" };
+    return { kind: "live-dom", reason: "gpu-postprocess" };
   }
 
   if (authoringActive) {

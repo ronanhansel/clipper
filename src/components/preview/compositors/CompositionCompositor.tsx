@@ -7,11 +7,13 @@ import {
   type PointerEvent,
 } from "react";
 import type {
+  AdjustmentLayer,
   Bounds,
   CameraObjectProps,
   CompositionClip,
   FrameObject,
   RichTextSegment,
+  TransitionLayer,
 } from "../../../core/types";
 import { DomBackend } from "../backends/DomBackend";
 import { RasterBackend } from "../backends/RasterBackend";
@@ -53,6 +55,8 @@ type CompositionCompositorProps = {
   duration: number;
   renderClockSceneTime: number;
   renderMode: "preview" | "export";
+  adjustmentLayers?: AdjustmentLayer[];
+  transitionLayers?: TransitionLayer[];
   onObjectPointerDown: (
     event: PointerEvent<HTMLDivElement>,
     object: FrameObject,
@@ -170,6 +174,8 @@ export const CompositionCompositor = memo(function CompositionCompositor(
       part={renderPart}
       renderClockSceneTime={props.renderClockSceneTime}
       renderMode={props.renderMode}
+      adjustmentLayers={props.adjustmentLayers}
+      transitionLayers={props.transitionLayers}
       onObjectPointerDown={props.onObjectPointerDown}
       onObjectContextMenu={props.onObjectContextMenu}
       onTextEditCommit={props.onTextEditCommit}

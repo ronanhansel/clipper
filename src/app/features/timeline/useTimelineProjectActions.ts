@@ -62,9 +62,14 @@ export function useTimelineProjectActions({
       (current) => {
         const currentScene = getSceneFromProject(current, scene.id) ?? scene;
         const nextParts = updater(currentScene.compositions);
+        const nextProject = syncSourceDurationsFromTimelineResize(
+          current,
+          currentScene.compositions,
+          nextParts,
+        );
         return {
-          ...current,
-          timelines: (current.timelines ?? []).map((timeline) =>
+          ...nextProject,
+          timelines: (nextProject.timelines ?? []).map((timeline) =>
             timeline.id === scene.id
               ? { ...timeline, clips: nextParts.map(timelineClipFromPart) }
               : timeline,
@@ -211,5 +216,39 @@ export function useTimelineProjectActions({
     updateSceneTransitionLayers,
     updateTimelineLayers,
     updateTimelineViewportState,
+  };
+}
+
+export function syncSourceDurationsFromTimelineResize(
+  project: ProjectManifest,
+  currentParts: Part[],
+  nextParts: Part[],
+) {
+  const currentPartsById = new Map(currentParts.map((part) => [part.id, part]));
+  const durationByCompositionId = new Map<string, number>();
+
+  for (const nextPart of nextParts) {
+    const currentPart = currentPartsById.get(nextPart.id);
+    if (!currentPart) continue;
+    if (currentPart.duration === nextPart.duration) continue;
+    if ((currentPart.trimStart ?? 0) !== (nextPart.trimStart ?? 0)) continue;
+    durationByCompositionId.set(
+      nextPart.compositionId ?? nextPart.id,
+      nextPart.duration,
+    );
+  }
+
+  if (durationByCompositionId.size === 0) return project;
+
+  const updateDuration = <T extends Part>(part: T): T => {
+    const duration = durationByCompositionId.get(part.id);
+    if (duration === undefined || part.duration === duration) return part;
+    return { ...part, duration };
+  };
+
+  return {
+    ...project,
+    compositions: project.compositions?.map(updateDuration),
+    compositionLibrary: project.compositionLibrary?.map(updateDuration),
   };
 }

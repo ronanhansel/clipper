@@ -133,7 +133,7 @@ describe("selectPreviewStrategy", () => {
     expect(result).toEqual({ kind: "live-dom", reason: "compose-mode" });
   });
 
-  it("disables legacy WebGL live passes instead of mounting the old effects path", () => {
+  it("routes GPU post-process effects through Direct instead of mounting the old effects path", () => {
     const result = selectPreviewStrategy({
       framePreviewProps: makeProps(),
       hasActiveLivePasses: true,
@@ -142,11 +142,11 @@ describe("selectPreviewStrategy", () => {
     });
     expect(result).toEqual({
       kind: "live-dom",
-      reason: "webgpu-postprocess-unavailable",
+      reason: "gpu-postprocess",
     });
   });
 
-  it("returns live-dom with effects disabled when active live passes are present", () => {
+  it("returns live-dom with GPU post-process when active live passes are present", () => {
     const result = selectPreviewStrategy({
       framePreviewProps: makeProps(),
       hasActiveLivePasses: true,
@@ -155,11 +155,11 @@ describe("selectPreviewStrategy", () => {
     });
     expect(result).toEqual({
       kind: "live-dom",
-      reason: "webgpu-postprocess-unavailable",
+      reason: "gpu-postprocess",
     });
   });
 
-  it("returns live-dom with effects disabled when only capable transition layers are in scope", () => {
+  it("returns live-dom with GPU post-process when only capable transition layers are in scope", () => {
     const result = selectPreviewStrategy({
       framePreviewProps: makeProps(),
       hasActiveLivePasses: false,
@@ -168,11 +168,11 @@ describe("selectPreviewStrategy", () => {
     });
     expect(result).toEqual({
       kind: "live-dom",
-      reason: "webgpu-postprocess-unavailable",
+      reason: "gpu-postprocess",
     });
   });
 
-  it("does not mount legacy WebGL effects during authoring", () => {
+  it("reports GPU post-process while authoring overlays are active", () => {
     const result = selectPreviewStrategy({
       framePreviewProps: makeProps(),
       hasActiveLivePasses: false,
@@ -181,7 +181,7 @@ describe("selectPreviewStrategy", () => {
     });
     expect(result).toEqual({
       kind: "live-dom",
-      reason: "webgpu-postprocess-unavailable",
+      reason: "gpu-postprocess",
     });
   });
 
@@ -299,7 +299,7 @@ describe("computeHasLivePassCapableLayers", () => {
     ).toBe(true);
   });
 
-  it("returns false for a non-GL transition layer", () => {
+  it("returns false for a non-GPU transition layer", () => {
     const layer: TransitionLayer = {
       id: "transition-2",
       name: "Scale fade",

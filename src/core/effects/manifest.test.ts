@@ -189,14 +189,14 @@ category: adjustment
 name: Timeline Tags
 label: Timeline Tags
 group: Practical
-timelineTags: [{ "kind": "text", "label": "GL", "title": "WebGL post-process" }, { "kind": "icon", "icon": "webgl", "label": "GPU" }]
+timelineTags: [{ "kind": "text", "label": "GPU", "title": "GPU post-process" }, { "kind": "icon", "icon": "gpu", "label": "GPU" }]
 defaultDuration: 2
 defaultParams: {}
 `);
 
     expect(effect.timelineTags).toEqual([
-      { kind: "text", label: "GL", title: "WebGL post-process" },
-      { kind: "icon", icon: "webgl", label: "GPU" },
+      { kind: "text", label: "GPU", title: "GPU post-process" },
+      { kind: "icon", icon: "gpu", label: "GPU" },
     ]);
   });
 });

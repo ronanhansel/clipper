@@ -3,7 +3,7 @@ category: adjustment
 name: Lens
 label: Lens
 group: Practical
-timelineTags: [{ "kind": "text", "label": "GL", "title": "WebGL post-process" }]
+timelineTags: [{ "kind": "text", "label": "GPU", "title": "GPU post-process" }]
 defaultDuration: 3
 defaultParams: { "focusX": 50, "focusY": 50, "radius": 34, "softness": 0.62, "magnification": 1.12, "distortion": 0.32, "chromaticAberration": 0.55, "rimWidth": 0.18, "rimOpacity": 0.48, "dimAmount": 0.28, "chromaticAberrationUseMask": false, "chromaticAberrationMaskPreview": false, "chromaticAberrationMaskInvert": false, "chromaticAberrationMaskShape": "circular", "chromaticAberrationMaskFocusX": 50, "chromaticAberrationMaskFocusY": 50, "chromaticAberrationMaskRadius": 200, "chromaticAberrationMaskRadiusX": 200, "chromaticAberrationMaskRadiusY": 200, "chromaticAberrationMaskFeather": 20 }
 paramControls:

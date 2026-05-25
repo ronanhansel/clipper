@@ -15,6 +15,7 @@ import type {
   CameraObjectProps,
   FrameObject,
   RichTextSegment,
+  TransitionLayer,
 } from "../../../core/types";
 import type { TransitionSequenceStyle } from "../../../core/effects/types";
 import {
@@ -57,6 +58,7 @@ type SceneCompositorProps = {
   previewFps: PreviewFps;
   exportTileFrameBounds?: ExportTileFrameBounds;
   adjustmentLayers: AdjustmentLayer[] | undefined;
+  transitionLayers: TransitionLayer[] | undefined;
   displaySceneTime: number;
   canSelect: boolean;
   activeShapeTool: ComposeDrawTool | null | undefined;
@@ -133,6 +135,7 @@ export const SceneCompositor = memo(function SceneCompositor({
   previewFps,
   exportTileFrameBounds,
   adjustmentLayers,
+  transitionLayers,
   displaySceneTime,
   canSelect,
   activeShapeTool,
@@ -238,6 +241,8 @@ export const SceneCompositor = memo(function SceneCompositor({
                 duration={item.part.duration}
                 renderClockSceneTime={displaySceneTime}
                 renderMode={renderMode}
+                adjustmentLayers={adjustmentLayers}
+                transitionLayers={transitionLayers}
                 onObjectPointerDown={onObjectPointerDown}
                 onObjectContextMenu={onObjectContextMenu}
                 onTextEditCommit={onTextEditCommit}

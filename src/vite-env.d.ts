@@ -74,6 +74,12 @@ type ClipperUpdateStatus = {
   version?: string;
   downloaded?: boolean;
 };
+type ClipperAppRuntimeInfo = {
+  appVersion: string;
+  chromiumVersion: string;
+  electronVersion: string;
+  threeVersion: string;
+};
 
 type ClipperTemplateBundle = {
   id: string;
@@ -207,6 +213,7 @@ interface Window {
     clearPrerenderCache: (manifestPath: string) => Promise<void>;
     clearAllPrerenderCaches: () => Promise<{ clearedCount: number }>;
     cancelRenderVideoExport: (exportId: string) => Promise<void>;
+    getAppRuntimeInfo?: () => Promise<ClipperAppRuntimeInfo>;
     getUpdateStatus?: () => Promise<ClipperUpdateStatus>;
     setAutoDownloadUpdates?: (enabled: boolean) => Promise<ClipperUpdateStatus>;
     checkForUpdates?: () => Promise<ClipperUpdateStatus>;

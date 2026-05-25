@@ -33,6 +33,9 @@ const appRoot = app.isPackaged
 const appStatePath = "clipper/app-state.json";
 const require = createRequire(import.meta.url);
 const ffmpegPath = require("ffmpeg-static") as string | null;
+const packageJson = require("../package.json") as {
+  dependencies?: Record<string, string>;
+};
 const isDev = process.env.VITE_DEV_SERVER_URL || !app.isPackaged;
 const renderVideoChildArgIndex = process.argv.indexOf("--render-video-child");
 const isRenderVideoChildProcess = renderVideoChildArgIndex >= 0;
@@ -735,6 +738,13 @@ ipcMain.handle(
     await writeAppState(updates);
   },
 );
+
+ipcMain.handle("clipper:get-app-runtime-info", async () => ({
+  appVersion: app.getVersion(),
+  chromiumVersion: process.versions.chrome ?? "unknown",
+  electronVersion: process.versions.electron ?? "unknown",
+  threeVersion: packageJson.dependencies?.three ?? "unknown",
+}));
 
 ipcMain.handle("clipper:get-update-status", async () =>
   updateService.getStatus(),
