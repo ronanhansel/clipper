@@ -10,6 +10,7 @@ import type { TransitionLayer } from "./types";
 export const defaultTransitionFrameRate = 30;
 export const minTransitionTimeSeconds = 0.1;
 export const maxTransitionTimeSeconds = 10;
+export const transitionEndpointEpsilonSeconds = 0.000001;
 
 export function getActiveTransitionLayers(
   layers: TransitionLayer[] | undefined,
@@ -18,7 +19,10 @@ export function getActiveTransitionLayers(
   return (layers ?? []).filter(
     (layer) =>
       sceneTime >= layer.start &&
-      sceneTime < layer.start + getTransitionFinishTime(layer),
+      sceneTime <=
+        layer.start +
+          getTransitionFinishTime(layer) +
+          transitionEndpointEpsilonSeconds,
   );
 }
 

@@ -33,6 +33,7 @@ import {
   getTransitionFinishTime,
   getTransitionMarkerTime,
   getTransitionProgress,
+  transitionEndpointEpsilonSeconds,
 } from "./transitions";
 
 export function buildLinearTimeline(scene: Scene): TimelineComposition[] {
@@ -466,7 +467,10 @@ export function getTimelinePreviewState({
   const transitionLayer = transitionLayers?.find(
     (layer) =>
       compositionLookupTime >= layer.start &&
-      compositionLookupTime < layer.start + getTransitionFinishTime(layer),
+      compositionLookupTime <=
+        layer.start +
+          getTransitionFinishTime(layer) +
+          transitionEndpointEpsilonSeconds,
   );
   const transitionMidTime = transitionLayer
     ? clamp(getTransitionMarkerTime(transitionLayer), 0, sceneDurationSeconds)

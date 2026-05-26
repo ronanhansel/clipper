@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { TransitionEffectId, TransitionLayer } from "../../../core/types";
-import { canUseGpuTransitionComposite } from "./gpuTransitionCompositeNodes";
+import {
+  canUseGpuTransitionComposite,
+  sanitizeGpuTransitionProgress,
+} from "./gpuTransitionCompositeNodes";
 
 function transitionLayer(effectId: TransitionEffectId): TransitionLayer {
   return {
@@ -34,4 +37,15 @@ describe("gpuTransitionCompositeNodes", () => {
       );
     },
   );
+
+  it.each([
+    [Number.NaN, 0],
+    [Number.NEGATIVE_INFINITY, 0],
+    [Number.POSITIVE_INFINITY, 0],
+    [-0.5, 0],
+    [0.4, 0.4],
+    [1.5, 1],
+  ])("sanitizes transition progress %s", (input, expected) => {
+    expect(sanitizeGpuTransitionProgress(input)).toBe(expected);
+  });
 });

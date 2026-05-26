@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import type { TransitionLayer } from "../../../core/types";
+import { getActiveTransitionLayer } from "../FramePreview";
 import {
   shouldUseDomTransitionComposite,
   shouldUseDirectGpuTransitionComposite,
@@ -6,14 +8,14 @@ import {
 } from "./SceneCompositor";
 
 describe("SceneCompositor", () => {
-  it("keeps flattened Direct transitions off the DOM transition composite", () => {
+  it("uses the DOM transition composite for flattened Direct transitions", () => {
     expect(
       shouldUseDomTransitionComposite({
         flattenComposition: true,
         hasTransitionPreviewParts: true,
         transitionProgress: 0.5,
       }),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it("keeps non-flattened Compose transitions on the DOM transition composite", () => {
@@ -26,7 +28,7 @@ describe("SceneCompositor", () => {
     ).toBe(true);
   });
 
-  it("uses rendered GPU layers for flattened CSS-only Direct transitions", () => {
+  it("keeps flattened transitions off the Direct GPU transition host", () => {
     expect(
       shouldUseDirectGpuTransitionComposite({
         flattenComposition: true,
@@ -37,7 +39,7 @@ describe("SceneCompositor", () => {
         fromPartCount: 1,
         toPartCount: 1,
       }),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("keeps multi-part flattened transitions off the single Direct GPU transition host", () => {
@@ -76,5 +78,18 @@ describe("SceneCompositor", () => {
         transitionProgress: 0.5,
       }),
     ).toBe(false);
+  });
+
+  it("keeps transition ownership through the endpoint frame", () => {
+    const layer: TransitionLayer = {
+      id: "film-burn",
+      name: "Film Burn",
+      start: 10,
+      duration: 1,
+      midPoint: 0.5,
+      effect: { effectId: "clipper.transition.film-burn" },
+    };
+
+    expect(getActiveTransitionLayer(11, [layer])?.id).toBe("film-burn");
   });
 });

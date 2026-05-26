@@ -8,6 +8,7 @@ import {
   shell,
   clipboard,
   protocol,
+  type WebContents,
 } from "electron";
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -73,6 +74,7 @@ if (isRenderVideoChildProcess && process.platform === "darwin")
   app.setActivationPolicy("accessory");
 
 const textFileWatchers = new Map<number, FSWatcher[]>();
+const textFileWatcherDestroyedListeners = new Set<number>();
 let appShuttingDown = false;
 const appShuttingDownRef = { current: appShuttingDown };
 Object.defineProperty(appShuttingDownRef, "current", {
@@ -81,6 +83,17 @@ Object.defineProperty(appShuttingDownRef, "current", {
     appShuttingDown = v;
   },
 });
+
+function registerTextFileWatcherDestroyedCleanup(sender: WebContents) {
+  const senderId = sender.id;
+  if (textFileWatcherDestroyedListeners.has(senderId)) return;
+  textFileWatcherDestroyedListeners.add(senderId);
+  sender.once("destroyed", () => {
+    textFileWatchers.get(senderId)?.forEach((watcher) => watcher.close());
+    textFileWatchers.delete(senderId);
+    textFileWatcherDestroyedListeners.delete(senderId);
+  });
+}
 const appIconPath = path.resolve(__dirname, "../build/electron/icon.png");
 
 function readStartupAppStateBoolean(key: string, fallback = false) {
@@ -940,10 +953,7 @@ ipcMain.handle("clipper:watch-text-files", (event, relativePaths: string[]) => {
   });
 
   textFileWatchers.set(senderId, watchers);
-  event.sender.once("destroyed", () => {
-    textFileWatchers.get(senderId)?.forEach((watcher) => watcher.close());
-    textFileWatchers.delete(senderId);
-  });
+  registerTextFileWatcherDestroyedCleanup(event.sender);
 });
 
 ipcMain.handle(
@@ -998,10 +1008,7 @@ ipcMain.handle(
     });
 
     textFileWatchers.set(senderId, [...fileWatchers, ...directoryWatchers]);
-    event.sender.once("destroyed", () => {
-      textFileWatchers.get(senderId)?.forEach((watcher) => watcher.close());
-      textFileWatchers.delete(senderId);
-    });
+    registerTextFileWatcherDestroyedCleanup(event.sender);
   },
 );
 

@@ -373,6 +373,14 @@ function getLayerLightingUniforms(
   if (
     typeof material === "object" &&
     material !== null &&
+    (material as { userData?: { layerLightingDisabled?: unknown } }).userData
+      ?.layerLightingDisabled === true
+  ) {
+    return null;
+  }
+  if (
+    typeof material === "object" &&
+    material !== null &&
     typeof (material as { uniforms?: unknown }).uniforms === "object"
   ) {
     const uniforms = (material as { uniforms?: Record<string, unknown> })

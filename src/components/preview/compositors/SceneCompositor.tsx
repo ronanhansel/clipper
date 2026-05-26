@@ -13,6 +13,7 @@ import type {
   AdjustmentLayer,
   Bounds,
   CameraObjectProps,
+  CompositionClip,
   FrameObject,
   RichTextSegment,
   TransitionLayer,
@@ -30,10 +31,15 @@ import type {
   ComposeAuthorViewState,
 } from "../three/ComposeAuthorView";
 import type { PreviewFps } from "../../../core/previewFps";
-import { getActiveTransitionLayers } from "../../../core/transitions";
 import { renderScenePreview } from "../render/sceneRender";
-import { canUseGpuTransitionComposite } from "../three/gpuTransitionCompositeNodes";
-import { DirectCompositionGpuHost } from "../three/DirectCompositionGpuHost";
+import {
+  DirectCompositionGpuHost,
+  type DirectGpuTransitionComposite,
+} from "../three/DirectCompositionGpuHost";
+
+const hiddenKeepMountedDirectHostStyle: CSSProperties = {
+  display: "none",
+};
 
 type SceneCompositorProps = {
   isPostProcessSource?: boolean;
@@ -118,6 +124,24 @@ type SceneCompositorProps = {
   onAuthorPreviewContextMenu?: (event: ReactMouseEvent<HTMLDivElement>) => void;
 };
 
+type DirectGpuHostInput = {
+  part: CompositionClip;
+  localTime: number;
+  sourceSlots: TimelinePreviewStackPart[];
+  backendProps: {
+    animationsEnabled: boolean;
+    frameScale: number;
+    previewFps: PreviewFps;
+    hideNullObjects: boolean;
+    isPlaying: boolean;
+    duration: number;
+    renderClockSceneTime: number;
+    renderMode: "preview" | "export";
+    exportTileFrameBounds?: ExportTileFrameBounds;
+  };
+  transitionComposite: DirectGpuTransitionComposite | null;
+};
+
 export const SceneCompositor = memo(function SceneCompositor({
   cameraRef,
   filePath,
@@ -163,6 +187,7 @@ export const SceneCompositor = memo(function SceneCompositor({
   onAuthorPreviewContextMenu,
   isPostProcessSource,
 }: SceneCompositorProps) {
+  const lastDirectGpuHostInputRef = useRef<DirectGpuHostInput | null>(null);
   useLayoutEffect(() => {
     const element = cameraRef.current;
     if (!element) return;
@@ -191,60 +216,41 @@ export const SceneCompositor = memo(function SceneCompositor({
     }
   }
 
-  const activeTransitionLayers = getActiveTransitionLayers(
-    transitionLayers,
-    displaySceneTime,
-  );
-  const directGpuTransitionLayer =
-    activeTransitionLayers.find(canUseGpuTransitionComposite) ?? null;
   const useDomTransitionComposite = shouldUseDomTransitionComposite({
     flattenComposition,
     hasTransitionPreviewParts: Boolean(transitionPreviewParts),
     transitionProgress,
   });
-  const useDirectGpuTransitionComposite = shouldUseDirectGpuTransitionComposite(
-    {
-      flattenComposition,
-      hasTransitionPreviewParts: Boolean(transitionPreviewParts),
-      hasGpuTransitionComposite: Boolean(directGpuTransitionLayer),
-      hasTransitionPostProcessPasses: Boolean(
-        transitionSequenceStyle?.postProcessPasses?.length,
-      ),
-      transitionProgress,
-      fromPartCount: transitionPreviewParts?.from.length ?? 0,
-      toPartCount: transitionPreviewParts?.to.length ?? 0,
-    },
-  );
-  const directGpuStackPart =
-    flattenComposition && stackPreviewParts.length === 1
-      ? stackPreviewParts[0]
-      : null;
-  const directGpuHostPart =
-    useDirectGpuTransitionComposite &&
-    transitionPreviewParts &&
-    directGpuTransitionLayer
-      ? transitionPreviewParts.from[0]
-      : directGpuStackPart;
-  const directGpuTransitionComposite =
-    useDirectGpuTransitionComposite &&
-    transitionPreviewParts &&
-    directGpuTransitionLayer
+  const currentDirectGpuHostInput =
+    flattenComposition &&
+    !transitionPreviewParts &&
+    stackPreviewParts.length === 1
       ? {
-          layer: directGpuTransitionLayer,
-          progress: transitionProgress ?? 0,
-          sceneTime: displaySceneTime,
-          from: {
-            part: transitionPreviewParts.from[0].part,
-            localTime: transitionPreviewParts.from[0].previewTime,
-            sceneTime: transitionPreviewParts.fromSceneTime,
+          part: stackPreviewParts[0].part,
+          localTime: stackPreviewParts[0].previewTime,
+          sourceSlots: stackPreviewParts,
+          backendProps: {
+            animationsEnabled,
+            frameScale,
+            previewFps,
+            hideNullObjects,
+            isPlaying,
+            duration: stackPreviewParts[0].part.duration,
+            renderClockSceneTime: displaySceneTime,
+            renderMode,
+            exportTileFrameBounds,
           },
-          to: {
-            part: transitionPreviewParts.to[0].part,
-            localTime: transitionPreviewParts.to[0].previewTime,
-            sceneTime: transitionPreviewParts.toSceneTime,
-          },
+          transitionComposite: null,
         }
       : null;
+  if (currentDirectGpuHostInput) {
+    lastDirectGpuHostInputRef.current = currentDirectGpuHostInput;
+  }
+  const directGpuHostInput =
+    currentDirectGpuHostInput ??
+    (flattenComposition && !useDomTransitionComposite
+      ? lastDirectGpuHostInputRef.current
+      : null);
 
   return (
     <div
@@ -265,27 +271,27 @@ export const SceneCompositor = memo(function SceneCompositor({
         }}
       >
         <FramePreviewRenderBoundary filePath={filePath} resetKey={resetKey}>
-          {directGpuHostPart ? (
-            <DirectCompositionGpuHost
-              part={directGpuHostPart.part}
-              localTime={directGpuHostPart.previewTime}
-              backendProps={{
-                animationsEnabled,
-                frameScale,
-                previewFps,
-                hideNullObjects,
-                isPlaying,
-                duration: directGpuHostPart.part.duration,
-                renderClockSceneTime:
-                  directGpuTransitionComposite?.from.sceneTime ??
-                  displaySceneTime,
-                renderMode,
-                exportTileFrameBounds,
-              }}
-              adjustmentLayers={adjustmentLayers}
-              transitionLayers={transitionLayers}
-              transitionComposite={directGpuTransitionComposite}
-            />
+          {directGpuHostInput ? (
+            <div
+              className="absolute inset-0"
+              style={
+                currentDirectGpuHostInput
+                  ? undefined
+                  : hiddenKeepMountedDirectHostStyle
+              }
+              aria-hidden={currentDirectGpuHostInput ? undefined : true}
+            >
+              <DirectCompositionGpuHost
+                part={directGpuHostInput.part}
+                localTime={directGpuHostInput.localTime}
+                sourceSlots={directGpuHostInput.sourceSlots}
+                backendProps={directGpuHostInput.backendProps}
+                adjustmentLayers={adjustmentLayers}
+                transitionLayers={transitionLayers}
+                transitionComposite={directGpuHostInput.transitionComposite}
+                hostClassName="pointer-events-none absolute inset-0"
+              />
+            </div>
           ) : useDomTransitionComposite ? (
             <TransitionCompositeView
               adjustmentLayers={adjustmentLayers}
@@ -358,11 +364,7 @@ export function shouldUseDomTransitionComposite(input: {
   hasTransitionPreviewParts: boolean;
   transitionProgress: number | null;
 }) {
-  return (
-    !input.flattenComposition &&
-    input.hasTransitionPreviewParts &&
-    input.transitionProgress !== null
-  );
+  return input.hasTransitionPreviewParts && input.transitionProgress !== null;
 }
 
 export function shouldUseRenderedLayerTransitionComposite(input: {
@@ -390,13 +392,6 @@ export function shouldUseDirectGpuTransitionComposite(input: {
   fromPartCount: number;
   toPartCount: number;
 }) {
-  return (
-    input.flattenComposition &&
-    input.hasTransitionPreviewParts &&
-    input.transitionProgress !== null &&
-    input.hasGpuTransitionComposite &&
-    !input.hasTransitionPostProcessPasses &&
-    input.fromPartCount === 1 &&
-    input.toPartCount === 1
-  );
+  void input;
+  return false;
 }

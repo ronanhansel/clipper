@@ -17,6 +17,8 @@ class FakeContext2D {
     | undefined = vi.fn();
   clearRect = vi.fn();
   drawImage = vi.fn();
+  font = "";
+  measureText = vi.fn((text: string) => ({ width: text.length * 10 }));
 }
 
 class FakeCanvas {
@@ -190,6 +192,7 @@ describe("perElementCaptureNode", () => {
     expect(node.object3D.material).toBeInstanceOf(THREE.ShaderMaterial);
     expect(node.object3D.material.transparent).toBe(true);
     expect(node.object3D.material.premultipliedAlpha).toBe(true);
+    expect(node.object3D.material.depthTest).toBe(true);
     expect(node.object3D.material.depthWrite).toBe(true);
     const u = node.object3D.material.uniforms;
     expect(u.u_image.value).toBeInstanceOf(THREE.CanvasTexture);
@@ -209,7 +212,11 @@ describe("perElementCaptureNode", () => {
     expect(node.object3D.material.isNodeMaterial).toBe(true);
     expect(node.object3D.material.transparent).toBe(true);
     expect(node.object3D.material.premultipliedAlpha).toBe(true);
+    expect(node.object3D.material.depthTest).toBe(true);
     expect(node.object3D.material.depthWrite).toBe(true);
+    expect(
+      node.object3D.material.userData.layerLightingDisabled,
+    ).toBeUndefined();
     expect(node.object3D.material.userData.webgpuLayerMaterialPort).toBe(
       "capture-fill",
     );
@@ -340,6 +347,24 @@ describe("perElementCaptureNode", () => {
     );
     expect(node.object3D.geometry.parameters.width).toBe(370);
     expect(node.object3D.geometry.parameters.height).toBe(270);
+    node.dispose();
+  });
+
+  it("expands text capture for text that overflows its layer width", () => {
+    const factory = createPerElementCaptureFactory("text");
+    const node = factory.create(
+      { id: "layer-1" } as FrameObject,
+      makeContext(),
+    );
+    node.update(
+      makeState({
+        bounds: { x: 0, y: 0, width: 100, height: 50 },
+        content: "This is a pink text",
+        style: { fontSize: 24 },
+      }),
+    );
+    expect(node.object3D.geometry.parameters.width).toBe(280);
+    expect(node.object3D.geometry.parameters.height).toBe(230);
     node.dispose();
   });
 

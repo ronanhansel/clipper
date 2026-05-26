@@ -1,6 +1,7 @@
 import {
   clamp,
   convertToTexture,
+  float,
   Fn,
   mix,
   uniform,
@@ -66,7 +67,8 @@ export function applyGpuTransitionCompositeUniforms(
     targetLayer as (TransitionLayer & { gpuUniformNodes?: unknown }) | null
   )?.gpuUniformNodes;
   if (!nodes || typeof nodes !== "object" || !("progress" in nodes)) return;
-  (nodes as GpuTransitionUniformNodes).progress.value = source.progress;
+  (nodes as GpuTransitionUniformNodes).progress.value =
+    sanitizeGpuTransitionProgress(source.progress);
 }
 
 function createFadeTransitionNode(input: GpuTransitionCompositeInput) {
@@ -89,10 +91,11 @@ function createSwipeTransitionNode(input: GpuTransitionCompositeInput) {
 
   return Fn(() => {
     const sourceUv = uv();
+    const inverseProgress = float(1.0).sub(progress);
     const fromUv = sourceUv.add(vec2(progress, 0.0));
-    const toUv = sourceUv.sub(vec2(1.0 - progress, 0.0));
-    const fromInside = sourceUv.x.lessThan(1.0 - progress);
-    const toInside = sourceUv.x.greaterThanEqual(1.0 - progress);
+    const toUv = sourceUv.sub(vec2(inverseProgress, 0.0));
+    const fromInside = sourceUv.x.lessThan(inverseProgress);
+    const toInside = sourceUv.x.greaterThanEqual(inverseProgress);
     return fromInside.select(
       fromTexture.sample(fromUv),
       toInside.select(toTexture.sample(toUv), vec4(0.0, 0.0, 0.0, 1.0)),
@@ -121,7 +124,9 @@ function createScaleFadeTransitionNode(input: GpuTransitionCompositeInput) {
     const sourceUv = uv();
     const fromUv = scaleUv(sourceUv, progress.mul(scaleOut - 1).add(1));
     const toUv = scaleUv(sourceUv, progress.mul(1 - scaleIn).add(scaleIn));
-    const fromColor = sampleClamped(fromTexture, fromUv).mul(1.0 - progress);
+    const fromColor = sampleClamped(fromTexture, fromUv).mul(
+      float(1.0).sub(progress),
+    );
     const toColor = sampleClamped(toTexture, toUv).mul(progress);
     return vec4(fromColor.rgb.add(toColor.rgb), 1.0);
   })();
@@ -181,24 +186,26 @@ function createZoomTransitionNode(input: GpuTransitionCompositeInput) {
               .add(3),
           )
       : t.lessThan(cutPoint).select(0, 1);
-  const exitScale = direction === "in" ? totalScale : 1 / totalScale;
-  const enterScale = direction === "in" ? totalScale / zoom : zoom / totalScale;
+  const exitScale =
+    direction === "in" ? totalScale : float(1.0).div(totalScale);
+  const enterScale =
+    direction === "in" ? totalScale.div(zoom) : float(zoom).div(totalScale);
 
   return Fn(() => {
     const sourceUv = uv();
     const fromColor = sampleClamped(fromTexture, scaleUv(sourceUv, exitScale));
     const toColor = sampleClamped(toTexture, scaleUv(sourceUv, enterScale));
     const color = vec3(background.r, background.g, background.b)
-      .mul(1.0 - exitOpacity)
+      .mul(float(1.0).sub(exitOpacity))
       .add(fromColor.rgb.mul(exitOpacity))
-      .mul(1.0 - enterOpacity)
+      .mul(float(1.0).sub(enterOpacity))
       .add(toColor.rgb.mul(enterOpacity));
     return vec4(color, 1.0);
   })();
 }
 
 function createProgressUniform(input: GpuTransitionCompositeInput) {
-  const progress = uniform(input.progress);
+  const progress = uniform(sanitizeGpuTransitionProgress(input.progress));
   (
     input.layer as TransitionLayer & {
       gpuUniformNodes?: GpuTransitionUniformNodes;
@@ -207,6 +214,10 @@ function createProgressUniform(input: GpuTransitionCompositeInput) {
     progress,
   };
   return clamp(progress, 0.0, 1.0);
+}
+
+export function sanitizeGpuTransitionProgress(progress: number) {
+  return Number.isFinite(progress) ? Math.min(Math.max(progress, 0), 1) : 0;
 }
 
 function scaleUv(sourceUv: ReturnType<typeof uv>, scale: unknown) {

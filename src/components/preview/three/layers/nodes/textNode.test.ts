@@ -73,12 +73,14 @@ class FakeContext2D {
 class FakeCanvas {
   width = 0;
   height = 0;
+  readonly style: Record<string, string> = {};
   private ctx: FakeContext2D | null = null;
   getContext(kind: string) {
     if (kind !== "2d") return null;
     if (!this.ctx) this.ctx = new FakeContext2D();
     return this.ctx;
   }
+  remove(): void {}
 }
 
 function withFakeDocument<T>(fn: () => T): T {

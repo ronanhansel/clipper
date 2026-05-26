@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type MutableRefObject,
+} from "react";
 import { createPortal } from "react-dom";
 import { CompositionRenderer } from "./CompositionRenderer";
 import {
@@ -22,6 +28,7 @@ import {
 import {
   getMasterTimelineClockSnapshot,
   isMasterClockLive,
+  subscribeMasterTimelineClock,
 } from "../../../app/features/playback/playbackTimeStore";
 import {
   getTransitionFinishTime,
@@ -39,6 +46,7 @@ import {
 import { defaultPreviewFps } from "../../../core/previewFps";
 import type { CompositionBackendProps } from "../backends/CompositionBackend";
 import { useOptionalPreviewRenderScheduler } from "../scheduler/PreviewRenderSchedulerContext";
+import type { TimelinePreviewStackPart } from "../../../core/timeline";
 
 export type DirectGpuTransitionComposite = {
   layer: TransitionLayer;
@@ -59,6 +67,7 @@ export type DirectGpuTransitionComposite = {
 export interface DirectCompositionGpuHostProps {
   part: CompositionClip;
   localTime: number;
+  sourceSlots?: TimelinePreviewStackPart[];
   /**
    * Backend props the internal sealed `DomBackend` needs to render the
    * source tree. The host fills in all sealed/non-interactive values
@@ -98,6 +107,9 @@ const SOURCE_INNER_STYLE: React.CSSProperties = {
   overflow: "hidden",
 };
 
+const maxRecentDirectSourceStacks = 2;
+const maxDirectSourceSlots = 12;
+
 /**
  * `DirectCompositionGpuHost` mounts a `CompositionRenderer` (through-camera
  * GPU rendering with depth-only meshes + a captured-DOM colour quad) and keeps
@@ -115,8 +127,10 @@ const SOURCE_INNER_STYLE: React.CSSProperties = {
 export function DirectCompositionGpuHost(props: DirectCompositionGpuHostProps) {
   const { part, localTime, backendProps } = props;
   const hostRef = useRef<HTMLDivElement | null>(null);
-  const sourceContainerRef = useRef<HTMLDivElement | null>(null);
-  const transitionSourceContainerRef = useRef<HTMLDivElement | null>(null);
+  const sourceContainerRefs = useRef(new Map<string, HTMLDivElement | null>());
+  const transitionSourceContainerRefs = useRef(
+    new Map<string, HTMLDivElement | null>(),
+  );
   const rendererRef = useRef<CompositionRenderer | null>(null);
   const composerPassSignatureRef = useRef("");
   const pendingCameraPreviewRef = useRef<CameraObjectProps | null>(null);
@@ -140,6 +154,15 @@ export function DirectCompositionGpuHost(props: DirectCompositionGpuHostProps) {
     getCodeObjectComponentTick,
     getCodeObjectComponentTick,
   );
+  useSyncExternalStore(
+    subscribeMasterTimelineClock,
+    () => getMasterTimelineClockSnapshot().sequence,
+    () => getMasterTimelineClockSnapshot().sequence,
+  );
+  const masterClockSnapshot = getMasterTimelineClockSnapshot();
+  const liveSceneTime = isMasterClockLive(masterClockSnapshot)
+    ? masterClockSnapshot.adjustedSceneTime
+    : backendProps.renderClockSceneTime;
   const liveLocalTimeOffset = localTime - backendProps.renderClockSceneTime;
   const transitionFromLocalTimeOffset =
     props.transitionComposite == null
@@ -152,6 +175,71 @@ export function DirectCompositionGpuHost(props: DirectCompositionGpuHostProps) {
       : props.transitionComposite.to.localTime -
         props.transitionComposite.to.sceneTime;
   const renderPreviewFps = backendProps.previewFps ?? defaultPreviewFps;
+  const sourceSlotCacheRef = useRef<DirectSourceSlotCache>({ stacks: [] });
+  const liveLocalTime = isMasterClockLive(masterClockSnapshot)
+    ? Math.round((liveSceneTime + liveLocalTimeOffset) * renderPreviewFps) /
+      renderPreviewFps
+    : localTime;
+  const liveTransitionTimes = props.transitionComposite
+    ? getDirectTransitionLocalTimes(
+        props.transitionComposite,
+        liveSceneTime,
+        transitionFromLocalTimeOffset,
+        transitionToLocalTimeOffset,
+        renderPreviewFps,
+      )
+    : null;
+  const fallbackActiveSourceSlot = {
+    part,
+    previewTime: liveTransitionTimes?.fromLocalTime ?? liveLocalTime,
+    start: backendProps.renderClockSceneTime - localTime,
+  } satisfies TimelinePreviewStackPart;
+  const transitionToSourceSlot = props.transitionComposite
+    ? {
+        part: props.transitionComposite.to.part,
+        previewTime:
+          liveTransitionTimes?.toLocalTime ??
+          props.transitionComposite.to.localTime,
+        start:
+          props.transitionComposite.to.sceneTime -
+          props.transitionComposite.to.localTime,
+      }
+    : null;
+  const currentSourceSlots = updateDirectSourceSlotsForLiveSceneTime(
+    props.sourceSlots && props.sourceSlots.length > 0
+      ? props.sourceSlots
+      : [fallbackActiveSourceSlot],
+    liveSceneTime,
+    props.transitionComposite
+      ? {
+          partId: props.transitionComposite.from.part.id,
+          localTime: liveTransitionTimes?.fromLocalTime,
+        }
+      : null,
+  );
+  const activeSourceSlot =
+    currentSourceSlots.find((slot) => slot.part.id === part.id) ??
+    fallbackActiveSourceSlot;
+  const directSourceSlotCache = mergeDirectSourceSlotCache(
+    sourceSlotCacheRef.current,
+    currentSourceSlots,
+    transitionToSourceSlot ? [transitionToSourceSlot] : [],
+  );
+  sourceSlotCacheRef.current = directSourceSlotCache;
+  const directSourceSlots = getDirectSourceSlotCacheSlots(
+    directSourceSlotCache,
+  );
+  const activeSourceSlotKey = getDirectSourceSlotKey(activeSourceSlot);
+  const transitionToSourceSlotKey = transitionToSourceSlot
+    ? getDirectSourceSlotKey(transitionToSourceSlot)
+    : null;
+  const activeSourceContainer = () =>
+    sourceContainerRefs.current.get(activeSourceSlotKey) ?? null;
+  const transitionSourceContainer = () =>
+    transitionToSourceSlotKey
+      ? (transitionSourceContainerRefs.current.get(transitionToSourceSlotKey) ??
+        null)
+      : null;
 
   function renderAtTime(
     renderer: CompositionRenderer,
@@ -182,7 +270,7 @@ export function DirectCompositionGpuHost(props: DirectCompositionGpuHostProps) {
       { width: FRAME_WIDTH, height: FRAME_HEIGHT },
     ).livePasses;
     renderer.setGpuPostProcessPasses(postProcessPasses);
-    renderer.setComposition(part, time, sourceContainerRef.current, {
+    renderer.setComposition(part, time, activeSourceContainer(), {
       isPlaying: options.isPlaying === true,
       syncShadows: options.syncShadows,
     });
@@ -199,29 +287,14 @@ export function DirectCompositionGpuHost(props: DirectCompositionGpuHostProps) {
       renderAtTime(renderer, localTime, undefined, options);
       return;
     }
-    const progress = getTransitionProgress(sceneTime, composite.layer);
-    const transitionMidTime = getTransitionMarkerTime(composite.layer);
-    const transitionEndTime =
-      composite.layer.start + getTransitionFinishTime(composite.layer);
-    const fromSceneTime = clampNumber(
-      composite.layer.start +
-        (transitionMidTime - composite.layer.start) * progress,
-      composite.layer.start,
-      Math.max(transitionMidTime - 0.000001, composite.layer.start),
-    );
-    const toSceneTime = clampNumber(
-      transitionMidTime + (transitionEndTime - transitionMidTime) * progress,
-      transitionMidTime,
-      transitionEndTime,
-    );
-    const fromLocalTime =
-      Math.round(
-        (fromSceneTime + transitionFromLocalTimeOffset) * renderPreviewFps,
-      ) / renderPreviewFps;
-    const toLocalTime =
-      Math.round(
-        (toSceneTime + transitionToLocalTimeOffset) * renderPreviewFps,
-      ) / renderPreviewFps;
+    const { progress, fromLocalTime, toLocalTime } =
+      getDirectTransitionLocalTimes(
+        composite,
+        sceneTime,
+        transitionFromLocalTimeOffset,
+        transitionToLocalTimeOffset,
+        renderPreviewFps,
+      );
     const fromCamera = getActiveCameraObjectProps(
       composite.from.part,
       fromLocalTime,
@@ -238,13 +311,13 @@ export function DirectCompositionGpuHost(props: DirectCompositionGpuHostProps) {
       from: {
         part: composite.from.part,
         localTime: fromLocalTime,
-        sourceElement: sourceContainerRef.current,
+        sourceElement: activeSourceContainer(),
         camera: fromCamera,
       },
       to: {
         part: composite.to.part,
         localTime: toLocalTime,
-        sourceElement: transitionSourceContainerRef.current,
+        sourceElement: transitionSourceContainer(),
         camera: toCamera,
       },
       layer: composite.layer,
@@ -274,7 +347,7 @@ export function DirectCompositionGpuHost(props: DirectCompositionGpuHostProps) {
     Object.assign(target.style, {
       position: "fixed",
       top: "0px",
-      left: "-10000px",
+      left: "0px",
       width: `${FRAME_WIDTH}px`,
       height: `${FRAME_HEIGHT}px`,
       pointerEvents: "none",
@@ -470,6 +543,15 @@ export function DirectCompositionGpuHost(props: DirectCompositionGpuHostProps) {
   ]);
 
   useEffect(() => {
+    if (!captureCanvas || !scheduler) return;
+    return subscribeMasterTimelineClock(() => {
+      const snap = getMasterTimelineClockSnapshot();
+      if (!isMasterClockLive(snap)) return;
+      scheduler.requestRender("scrub");
+    });
+  }, [captureCanvas, scheduler]);
+
+  useEffect(() => {
     if (!captureCanvas) return;
     const renderPendingCameraPreview = () => {
       const renderer = rendererRef.current;
@@ -541,83 +623,39 @@ export function DirectCompositionGpuHost(props: DirectCompositionGpuHostProps) {
       />
       {captureCanvas
         ? createPortal(
-            <div
-              ref={sourceContainerRef}
-              data-clipper-composition-gpu-source
-              aria-hidden="true"
-              inert={true}
-              style={SOURCE_INNER_STYLE}
-            >
-              <DomBackend
-                active={false}
-                activeShapeTool={null}
-                animationsEnabled={backendProps.animationsEnabled}
-                canSelect={false}
-                cameraHandledExternally={true}
-                duration={backendProps.duration}
-                editingTextObjectId={null}
-                exportTileFrameBounds={backendProps.exportTileFrameBounds}
-                focusPicking={false}
-                frameScale={1}
-                previewFps={backendProps.previewFps}
-                hideNullObjects={backendProps.hideNullObjects ?? false}
-                hostRef={sourceContainerRef}
-                isPlaying={backendProps.isPlaying}
-                localTime={localTime}
-                part={part}
-                renderClockSceneTime={backendProps.renderClockSceneTime}
-                renderMode={backendProps.renderMode}
-                onObjectPointerDown={NOOP_OBJECT_POINTER}
-                onObjectContextMenu={undefined}
-                onTextEditCommit={NOOP_TEXT_COMMIT}
-                onTextEditEnd={undefined}
-                onTextObjectDoubleClick={NOOP_OBJECT_DOUBLE_CLICK}
-              />
-            </div>,
+            <>
+              {directSourceSlots.map((slot) => (
+                <DirectCompositionGpuSourceSlot
+                  key={getDirectSourceSlotKey(slot)}
+                  slotKey={getDirectSourceSlotKey(slot)}
+                  slot={slot}
+                  active={getDirectSourceSlotKey(slot) === activeSourceSlotKey}
+                  backendProps={backendProps}
+                  sourceContainerRefs={sourceContainerRefs}
+                />
+              ))}
+            </>,
             captureCanvas,
           )
         : null}
       {transitionCaptureCanvas
         ? createPortal(
-            <div
-              ref={transitionSourceContainerRef}
-              data-clipper-composition-gpu-source="transition-to"
-              aria-hidden="true"
-              inert={true}
-              style={SOURCE_INNER_STYLE}
-            >
-              <DomBackend
-                active={false}
-                activeShapeTool={null}
-                animationsEnabled={backendProps.animationsEnabled}
-                canSelect={false}
-                cameraHandledExternally={true}
-                duration={
-                  props.transitionComposite?.to.part.duration ??
-                  backendProps.duration
-                }
-                editingTextObjectId={null}
-                exportTileFrameBounds={backendProps.exportTileFrameBounds}
-                focusPicking={false}
-                frameScale={1}
-                previewFps={backendProps.previewFps}
-                hideNullObjects={backendProps.hideNullObjects ?? false}
-                hostRef={transitionSourceContainerRef}
-                isPlaying={backendProps.isPlaying}
-                localTime={props.transitionComposite?.to.localTime ?? localTime}
-                part={props.transitionComposite?.to.part ?? part}
-                renderClockSceneTime={
-                  props.transitionComposite?.to.sceneTime ??
-                  backendProps.renderClockSceneTime
-                }
-                renderMode={backendProps.renderMode}
-                onObjectPointerDown={NOOP_OBJECT_POINTER}
-                onObjectContextMenu={undefined}
-                onTextEditCommit={NOOP_TEXT_COMMIT}
-                onTextEditEnd={undefined}
-                onTextObjectDoubleClick={NOOP_OBJECT_DOUBLE_CLICK}
+            transitionToSourceSlot ? (
+              <DirectCompositionGpuSourceSlot
+                slotKey={transitionToSourceSlotKey!}
+                slot={transitionToSourceSlot}
+                active={true}
+                backendProps={{
+                  ...backendProps,
+                  duration: transitionToSourceSlot.part.duration,
+                  renderClockSceneTime:
+                    props.transitionComposite?.to.sceneTime ??
+                    backendProps.renderClockSceneTime,
+                }}
+                sourceContainerRefs={transitionSourceContainerRefs}
+                sourceKind="transition-to"
               />
-            </div>,
+            ) : null,
             transitionCaptureCanvas,
           )
         : null}
@@ -634,4 +672,186 @@ function disposeComposerPasses(passes: readonly any[]) {
 
 function clampNumber(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
+}
+
+function getDirectTransitionLocalTimes(
+  composite: DirectGpuTransitionComposite,
+  sceneTime: number,
+  fromLocalTimeOffset: number,
+  toLocalTimeOffset: number,
+  previewFps: number,
+) {
+  const progress = getTransitionProgress(sceneTime, composite.layer);
+  const transitionMidTime = getTransitionMarkerTime(composite.layer);
+  const transitionEndTime =
+    composite.layer.start + getTransitionFinishTime(composite.layer);
+  const fromSceneTime = clampNumber(
+    composite.layer.start +
+      (transitionMidTime - composite.layer.start) * progress,
+    composite.layer.start,
+    Math.max(transitionMidTime - 0.000001, composite.layer.start),
+  );
+  const toSceneTime = clampNumber(
+    transitionMidTime + (transitionEndTime - transitionMidTime) * progress,
+    transitionMidTime,
+    transitionEndTime,
+  );
+  return {
+    progress,
+    fromLocalTime:
+      Math.round((fromSceneTime + fromLocalTimeOffset) * previewFps) /
+      previewFps,
+    toLocalTime:
+      Math.round((toSceneTime + toLocalTimeOffset) * previewFps) / previewFps,
+  };
+}
+
+function updateDirectSourceSlotsForLiveSceneTime(
+  slots: TimelinePreviewStackPart[],
+  sceneTime: number,
+  transitionFrom: { partId: string; localTime?: number } | null,
+): TimelinePreviewStackPart[] {
+  return slots.map((slot) => {
+    const previewTime =
+      transitionFrom?.partId === slot.part.id &&
+      transitionFrom.localTime != null
+        ? transitionFrom.localTime
+        : sceneTime - slot.start;
+    if (slot.previewTime === previewTime) return slot;
+    return { ...slot, previewTime };
+  });
+}
+
+type DirectSourceSlotCache = {
+  stacks: DirectSourceSlotSnapshot[];
+};
+
+type DirectSourceSlotSnapshot = {
+  key: string;
+  items: TimelinePreviewStackPart[];
+};
+
+export function getDirectSourceSlotKey(item: TimelinePreviewStackPart): string {
+  return `${item.part.compositionId ?? item.part.id}:${item.start}:${item.part.layerId ?? "comp"}`;
+}
+
+function getDirectSourceStackKey(items: TimelinePreviewStackPart[]): string {
+  return items.map(getDirectSourceSlotKey).join("|");
+}
+
+export function mergeDirectSourceSlotCache(
+  previous: DirectSourceSlotCache,
+  current: TimelinePreviewStackPart[],
+  pinned: TimelinePreviewStackPart[] = [],
+  options: {
+    recentStackLimit?: number;
+    slotLimit?: number;
+  } = {},
+): DirectSourceSlotCache {
+  if (current.length === 0 && pinned.length === 0) return previous;
+  const recentStackLimit =
+    options.recentStackLimit ?? maxRecentDirectSourceStacks;
+  const slotLimit = options.slotLimit ?? maxDirectSourceSlots;
+  const currentSnapshot: DirectSourceSlotSnapshot = {
+    key: getDirectSourceStackKey([...current, ...pinned]),
+    items: [...current, ...pinned],
+  };
+  const previousNonCurrent = previous.stacks.filter(
+    (snapshot) => snapshot.key !== currentSnapshot.key,
+  );
+  const stackLimit = Math.max(1, recentStackLimit + 1);
+  const candidates = [currentSnapshot, ...previousNonCurrent].slice(
+    0,
+    stackLimit,
+  );
+  const nextStacks: DirectSourceSlotSnapshot[] = [];
+  let retainedSlotCount = 0;
+  for (const snapshot of candidates) {
+    const isCurrent = snapshot.key === currentSnapshot.key;
+    if (!isCurrent && retainedSlotCount + snapshot.items.length > slotLimit) {
+      continue;
+    }
+    nextStacks.push(snapshot);
+    retainedSlotCount += snapshot.items.length;
+  }
+  return { stacks: nextStacks };
+}
+
+export function getDirectSourceSlotCacheSlots(
+  cache: DirectSourceSlotCache,
+): TimelinePreviewStackPart[] {
+  const slots: TimelinePreviewStackPart[] = [];
+  const seen = new Set<string>();
+  for (const stack of cache.stacks) {
+    for (const item of stack.items) {
+      const key = getDirectSourceSlotKey(item);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      slots.push(item);
+    }
+  }
+  return slots;
+}
+
+function DirectCompositionGpuSourceSlot({
+  slotKey,
+  slot,
+  active,
+  backendProps,
+  sourceContainerRefs,
+  sourceKind,
+}: {
+  slotKey: string;
+  slot: TimelinePreviewStackPart;
+  active: boolean;
+  backendProps: DirectCompositionGpuHostProps["backendProps"];
+  sourceContainerRefs: MutableRefObject<Map<string, HTMLDivElement | null>>;
+  sourceKind?: string;
+}) {
+  const sourceContainerRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    sourceContainerRefs.current.set(slotKey, sourceContainerRef.current);
+    return () => {
+      sourceContainerRefs.current.delete(slotKey);
+    };
+  }, [slotKey, sourceContainerRefs]);
+  return (
+    <div
+      ref={sourceContainerRef}
+      data-clipper-composition-gpu-source={sourceKind ?? ""}
+      aria-hidden="true"
+      inert={true}
+      style={SOURCE_INNER_STYLE}
+    >
+      <DomBackend
+        active={false}
+        activeShapeTool={null}
+        animationsEnabled={active ? backendProps.animationsEnabled : false}
+        canSelect={false}
+        cameraHandledExternally={true}
+        duration={slot.part.duration}
+        editingTextObjectId={null}
+        exportTileFrameBounds={backendProps.exportTileFrameBounds}
+        focusPicking={false}
+        frameScale={1}
+        previewFps={backendProps.previewFps}
+        hideNullObjects={backendProps.hideNullObjects ?? false}
+        hostRef={sourceContainerRef}
+        isPlaying={active ? backendProps.isPlaying : false}
+        localTime={slot.previewTime}
+        part={slot.part}
+        renderClockSceneTime={
+          active
+            ? backendProps.renderClockSceneTime
+            : slot.start + slot.previewTime
+        }
+        renderMode={backendProps.renderMode}
+        onObjectPointerDown={NOOP_OBJECT_POINTER}
+        onObjectContextMenu={undefined}
+        onTextEditCommit={NOOP_TEXT_COMMIT}
+        onTextEditEnd={undefined}
+        onTextObjectDoubleClick={NOOP_OBJECT_DOUBLE_CLICK}
+      />
+    </div>
+  );
 }

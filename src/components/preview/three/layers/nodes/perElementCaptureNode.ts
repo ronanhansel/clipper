@@ -105,10 +105,17 @@ function createPerElementCaptureUniforms(image: unknown, alphaCutoff: number) {
 function createPerElementCaptureShaderMaterial(
   image: unknown,
   alphaCutoff: number,
+  lightingEnabled: boolean,
 ) {
+  const colorExpression = lightingEnabled
+    ? "c.rgb * layerLightMultiplier() * a"
+    : "c.rgb * a";
   return new THREE.ShaderMaterial({
     vertexShader: PERELEMENT_VERTEX,
-    fragmentShader: PERELEMENT_FRAGMENT,
+    fragmentShader: PERELEMENT_FRAGMENT.replace(
+      "c.rgb * layerLightMultiplier() * a",
+      colorExpression,
+    ),
     uniforms: createPerElementCaptureUniforms(image, alphaCutoff),
     transparent: true,
     premultipliedAlpha: true,
@@ -121,10 +128,13 @@ function createPerElementCaptureShaderMaterial(
 function createPerElementCaptureNodeMaterial(
   image: unknown,
   alphaCutoff: number,
+  lightingEnabled: boolean,
 ) {
   const uniforms = createPerElementCaptureUniforms(image, alphaCutoff);
   const lightingNodes = createLayerLightingNodes(uniforms);
-  const lightMultiplierNode = createLayerLightMultiplierNode(lightingNodes);
+  const lightMultiplierNode = lightingEnabled
+    ? createLayerLightMultiplierNode(lightingNodes)
+    : null;
   const imageTextureNode = textureNode(image);
   const opacityNode = uniform(uniforms.u_opacity.value);
   const alphaCutoffNode = uniform(uniforms.u_alphaCutoff.value);
@@ -139,7 +149,10 @@ function createPerElementCaptureNodeMaterial(
     const sample = imageTextureNode.sample(uv());
     const alpha = sample.a.mul(opacityNode);
     alpha.lessThan(alphaCutoffNode).discard();
-    return vec4(sample.rgb.mul(lightMultiplierNode).mul(alpha), alpha);
+    const rgb = lightMultiplierNode
+      ? sample.rgb.mul(lightMultiplierNode).mul(alpha)
+      : sample.rgb.mul(alpha);
+    return vec4(rgb, alpha);
   })();
   material.userData.layerLightingUniforms = uniforms;
   material.userData.layerLightingNodes = lightingNodes;
@@ -240,8 +253,12 @@ class PerElementCaptureNode implements LayerNode {
       kind === "text" ? TEXT_ALPHA_CUTOFF : DEFAULT_ALPHA_CUTOFF;
     this.material =
       context.materialBackend === "webgpu-node"
-        ? createPerElementCaptureNodeMaterial(this.texture, alphaCutoff)
-        : createPerElementCaptureShaderMaterial(this.texture, alphaCutoff);
+        ? createPerElementCaptureNodeMaterial(this.texture, alphaCutoff, true)
+        : createPerElementCaptureShaderMaterial(
+            this.texture,
+            alphaCutoff,
+            true,
+          );
     this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), this.material);
     this.mesh.name = `PerElementCaptureNode:${id}`;
     this.object3D = this.mesh;
@@ -253,7 +270,7 @@ class PerElementCaptureNode implements LayerNode {
       this.width = t.width;
       this.height = t.height;
     }
-    const capturePadding = estimateCapturePadding(this.kind, state);
+    const capturePadding = estimateCapturePadding(this.kind, state, this.ctx);
     const captureWidth = Math.max(1, Math.ceil(t.width + capturePadding * 2));
     const captureHeight = Math.max(1, Math.ceil(t.height + capturePadding * 2));
     if (
@@ -306,7 +323,11 @@ class PerElementCaptureNode implements LayerNode {
     const alphaCutoff =
       this.kind === "text" ? TEXT_ALPHA_CUTOFF : DEFAULT_ALPHA_CUTOFF;
     const previous = this.material;
-    this.material = createPerElementCaptureNodeMaterial(texture, alphaCutoff);
+    this.material = createPerElementCaptureNodeMaterial(
+      texture,
+      alphaCutoff,
+      true,
+    );
     this.mesh.material = this.material;
     previous.dispose();
   }
@@ -686,11 +707,62 @@ function createForeignObjectDataUrl(
 function estimateCapturePadding(
   kind: FrameObjectType | "default",
   state: EvaluatedObjectState,
+  context: CanvasRenderingContext2D,
 ): number {
   if (kind !== "text") return 0;
   const fontSize =
     typeof state.style?.fontSize === "number" ? state.style.fontSize : 16;
-  return Math.ceil(Math.max(8, fontSize * 0.85));
+  const strokeWidth =
+    state.stroke?.enabled === true && typeof state.stroke.width === "number"
+      ? Math.max(0, state.stroke.width)
+      : 0;
+  return Math.ceil(
+    Math.max(
+      8,
+      fontSize * 0.85,
+      strokeWidth + 2,
+      estimateTextOverflowPadding(state, context),
+    ),
+  );
+}
+
+function estimateTextOverflowPadding(
+  state: EvaluatedObjectState,
+  context: CanvasRenderingContext2D,
+): number {
+  if (typeof context.measureText !== "function") return 0;
+  const text = typeof state.content === "string" ? state.content : "";
+  if (!text) return 0;
+  const width =
+    typeof state.bounds?.width === "number" &&
+    Number.isFinite(state.bounds.width)
+      ? Math.max(1, state.bounds.width)
+      : 1;
+  const fontSize =
+    typeof state.style?.fontSize === "number" ? state.style.fontSize : 16;
+  const fontWeight = state.style?.fontWeight ?? 400;
+  const fontStyle =
+    typeof state.style?.fontStyle === "string" ? state.style.fontStyle : "";
+  const fontFamily =
+    typeof state.style?.fontFamily === "string" && state.style.fontFamily.trim()
+      ? state.style.fontFamily
+      : "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+  context.font = `${fontStyle ? `${fontStyle} ` : ""}${fontWeight} ${fontSize}px ${fontFamily}`;
+  const letterSpacing =
+    typeof state.style?.letterSpacing === "number"
+      ? Math.max(0, state.style.letterSpacing)
+      : 0;
+  const longestLineWidth = text
+    .split(/\r\n|\r|\n/)
+    .reduce(
+      (maxWidth, line) =>
+        Math.max(
+          maxWidth,
+          context.measureText(line).width + letterSpacing * line.length,
+        ),
+      0,
+    );
+  return Math.max(0, longestLineWidth - width);
 }
 
 function createCaptureKey(

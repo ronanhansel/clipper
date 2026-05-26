@@ -91,6 +91,7 @@ import {
   getTransitionFinishTime,
   getTransitionProgress,
   renderTransitionSequence,
+  transitionEndpointEpsilonSeconds,
 } from "../../core/transitions";
 import {
   FRAME_HEIGHT,
@@ -1636,7 +1637,10 @@ export function getActiveTransitionLayer(
     layers?.find(
       (item) =>
         sceneTime >= item.start &&
-        sceneTime < item.start + getTransitionFinishTime(item),
+        sceneTime <=
+          item.start +
+            getTransitionFinishTime(item) +
+            transitionEndpointEpsilonSeconds,
     ) ?? null
   );
 }
